@@ -39,11 +39,18 @@ The autoscaling evaluator and controller enforce bounds, stability windows, and 
 record every decision. No production fleet scaler is enabled yet.
 
 Queued work uses PostgreSQL leases and `SKIP LOCKED` so concurrent replicas cannot own the same
-operation. Workers heartbeat leases, recover expired work, cap retry attempts, and delay retries
-exponentially. Existing-target apply can be queued through the API and is executed by a leased
-worker. Direct CLI apply remains available for administrative recovery. Cloud provisioning and
-deletion still execute synchronously and must move to handlers before all mutations are
-crash-recoverable.
+operation. The durable state model distinguishes pending, leased, running, waiting, cancelling,
+cancelled, failed, and succeeded work. Every claim increments a lease generation; heartbeat,
+checkpoint, failure, cancellation, and completion writes require the matching owner and generation
+while the lease is unexpired. This fencing prevents a stale worker from publishing progress or a
+terminal result after ownership changes.
+
+Retryable work enters `waiting` with bounded exponential backoff and jitter. Resumable handlers can
+persist named JSON checkpoints; each checkpoint emits an ordered structured operation event.
+Cancellation is cooperative, and a cancelling operation whose worker dies is reclaimed only to
+finish cancellation safely. Existing-target apply is executed by this leased worker. Direct CLI
+apply remains available for administrative recovery. Cloud provisioning and deletion still execute
+synchronously and must move to checkpointed handlers before all mutations are crash-recoverable.
 
 Scoped credentials are stored as hashes, can be rotated or revoked, and carry viewer, operator, or
 admin role. Replicas refresh an in-memory credential snapshot every second, so authentication never

@@ -44,19 +44,21 @@ func (s *Store) StartOperation(ctx context.Context, operation domain.Operation) 
 	return operation, err == nil, err
 }
 
+const operationColumns = `id,tenant_id,kind,resource_type,resource_name,COALESCE(idempotency_key,''),status,progress,message,request_json::text,result_json::text,COALESCE(error_code,''),retryable,cancel_requested,attempt,max_attempts,COALESCE(lease_owner,''),lease_generation,created_at,updated_at,completed_at,lease_expires_at,next_attempt_at`
+
 func (s *Store) operationByKey(ctx context.Context, tenant, kind, key string) (domain.Operation, error) {
-	return s.scanOperation(s.QueryRowContext(ctx, `SELECT id,tenant_id,kind,resource_type,resource_name,COALESCE(idempotency_key,''),status,progress,message,request_json::text,result_json::text,COALESCE(error_code,''),retryable,cancel_requested,attempt,max_attempts,COALESCE(lease_owner,''),created_at,updated_at,completed_at,lease_expires_at,next_attempt_at FROM operations WHERE tenant_id=? AND kind=? AND idempotency_key=?`, tenant, kind, key))
+	return s.scanOperation(s.QueryRowContext(ctx, `SELECT `+operationColumns+` FROM operations WHERE tenant_id=? AND kind=? AND idempotency_key=?`, tenant, kind, key))
 }
 
 func (s *Store) Operation(ctx context.Context, id string) (domain.Operation, error) {
-	return s.scanOperation(s.QueryRowContext(ctx, `SELECT id,tenant_id,kind,resource_type,resource_name,COALESCE(idempotency_key,''),status,progress,message,request_json::text,result_json::text,COALESCE(error_code,''),retryable,cancel_requested,attempt,max_attempts,COALESCE(lease_owner,''),created_at,updated_at,completed_at,lease_expires_at,next_attempt_at FROM operations WHERE id=?`, id))
+	return s.scanOperation(s.QueryRowContext(ctx, `SELECT `+operationColumns+` FROM operations WHERE id=?`, id))
 }
 
 func (s *Store) scanOperation(row *sql.Row) (domain.Operation, error) {
 	var out domain.Operation
 	var created, updated string
 	var completed, leaseExpires, nextAttempt sql.NullTime
-	err := row.Scan(&out.ID, &out.TenantID, &out.Kind, &out.ResourceType, &out.ResourceName, &out.IdempotencyKey, &out.Status, &out.Progress, &out.Message, &out.RequestJSON, &out.ResultJSON, &out.ErrorCode, &out.Retryable, &out.CancelRequested, &out.Attempt, &out.MaxAttempts, &out.LeaseOwner, &created, &updated, &completed, &leaseExpires, &nextAttempt)
+	err := row.Scan(&out.ID, &out.TenantID, &out.Kind, &out.ResourceType, &out.ResourceName, &out.IdempotencyKey, &out.Status, &out.Progress, &out.Message, &out.RequestJSON, &out.ResultJSON, &out.ErrorCode, &out.Retryable, &out.CancelRequested, &out.Attempt, &out.MaxAttempts, &out.LeaseOwner, &out.LeaseGeneration, &created, &updated, &completed, &leaseExpires, &nextAttempt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return out, ErrNotFound
 	}
@@ -123,7 +125,7 @@ func (s *Store) FailOperation(ctx context.Context, id, code, message string, ret
 
 func (s *Store) RequestOperationCancel(ctx context.Context, id string) error {
 	stamp := now()
-	result, err := s.ExecContext(ctx, `UPDATE operations SET cancel_requested=TRUE,status=CASE WHEN status='pending' THEN 'cancelled' ELSE status END,message=CASE WHEN status='pending' THEN 'cancelled before execution' ELSE message END,completed_at=CASE WHEN status='pending' THEN ? ELSE completed_at END,updated_at=? WHERE id=? AND status IN ('pending','running')`, stamp, stamp, id)
+	result, err := s.ExecContext(ctx, `UPDATE operations SET cancel_requested=TRUE,status=CASE WHEN status IN ('pending','waiting') THEN 'cancelled' ELSE 'cancelling' END,message=CASE WHEN status IN ('pending','waiting') THEN 'cancelled before execution' ELSE 'cancellation requested' END,completed_at=CASE WHEN status IN ('pending','waiting') THEN ? ELSE completed_at END,updated_at=? WHERE id=? AND status IN ('pending','leased','running','waiting','cancelling')`, stamp, stamp, id)
 	if err != nil {
 		return err
 	}

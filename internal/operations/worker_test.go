@@ -22,21 +22,22 @@ func (f *fakeRepo) ClaimOperation(context.Context, string, time.Duration) (domai
 	}
 	return f.op, nil
 }
-func (f *fakeRepo) HeartbeatOperation(context.Context, string, string, time.Duration) error {
+func (f *fakeRepo) StartClaimedOperation(context.Context, string, string, int64) error { return nil }
+func (f *fakeRepo) HeartbeatOperation(context.Context, string, string, int64, time.Duration) error {
 	return nil
 }
 func (f *fakeRepo) Operation(context.Context, string) (domain.Operation, error) { return f.op, nil }
-func (f *fakeRepo) CompleteClaimedOperation(context.Context, string, string, string) error {
+func (f *fakeRepo) CompleteClaimedOperation(context.Context, string, string, int64, string) error {
 	f.completed = true
 	return nil
 }
-func (f *fakeRepo) FailClaimedOperation(_ context.Context, _, _, _, _ string, retryable bool, next time.Time) error {
+func (f *fakeRepo) FailClaimedOperation(_ context.Context, _, _ string, _ int64, _, _ string, retryable bool, next time.Time) error {
 	f.failed = true
 	f.retryable = retryable
 	f.next = next
 	return nil
 }
-func (f *fakeRepo) CancelClaimedOperation(context.Context, string, string, string) error {
+func (f *fakeRepo) CancelClaimedOperation(context.Context, string, string, int64, string) error {
 	f.cancelled = true
 	return nil
 }
@@ -51,11 +52,22 @@ func TestWorkerCompletesClaimedOperation(t *testing.T) {
 func TestWorkerSchedulesBoundedRetry(t *testing.T) {
 	now := time.Unix(100, 0)
 	repo := &fakeRepo{op: domain.Operation{ID: "1", Kind: "apply", Attempt: 2, MaxAttempts: 3}}
-	_, err := (Worker{Repository: repo, Owner: "worker", Now: func() time.Time { return now }, BaseBackoff: time.Second, Handlers: map[string]Handler{"apply": func(context.Context, domain.Operation) (string, error) {
+	_, err := (Worker{Repository: repo, Owner: "worker", Now: func() time.Time { return now }, BaseBackoff: time.Second, Jitter: func(delay time.Duration) time.Duration { return delay }, Handlers: map[string]Handler{"apply": func(context.Context, domain.Operation) (string, error) {
 		return "", Retryable("busy", errors.New("busy"))
 	}}}).Once(context.Background())
 	if err != nil || !repo.failed || !repo.retryable || !repo.next.Equal(now.Add(2*time.Second)) {
 		t.Fatalf("repo=%#v err=%v", repo, err)
+	}
+}
+
+func TestWorkerAppliesConfiguredJitter(t *testing.T) {
+	now := time.Unix(100, 0)
+	repo := &fakeRepo{op: domain.Operation{ID: "1", Kind: "apply", Attempt: 2, MaxAttempts: 3}}
+	_, err := (Worker{Repository: repo, Owner: "worker", Now: func() time.Time { return now }, BaseBackoff: time.Second, Jitter: func(delay time.Duration) time.Duration { return delay + 250*time.Millisecond }, Handlers: map[string]Handler{"apply": func(context.Context, domain.Operation) (string, error) {
+		return "", Retryable("busy", errors.New("busy"))
+	}}}).Once(context.Background())
+	if err != nil || !repo.next.Equal(now.Add(2250*time.Millisecond)) {
+		t.Fatalf("next=%s err=%v", repo.next, err)
 	}
 }
 func TestWorkerStopsRetryAtMaxAttempts(t *testing.T) {
@@ -65,5 +77,17 @@ func TestWorkerStopsRetryAtMaxAttempts(t *testing.T) {
 	}}}).Once(context.Background())
 	if err != nil || repo.retryable {
 		t.Fatalf("retryable=%t err=%v", repo.retryable, err)
+	}
+}
+
+func TestWorkerCancelsRecoveredClaimBeforeHandler(t *testing.T) {
+	repo := &fakeRepo{op: domain.Operation{ID: "1", Kind: "apply", Attempt: 2, MaxAttempts: 3, CancelRequested: true}}
+	called := false
+	worked, err := (Worker{Repository: repo, Owner: "worker", Handlers: map[string]Handler{"apply": func(context.Context, domain.Operation) (string, error) {
+		called = true
+		return `{}`, nil
+	}}}).Once(context.Background())
+	if err != nil || !worked || !repo.cancelled || called {
+		t.Fatalf("worked=%t cancelled=%t handler_called=%t err=%v", worked, repo.cancelled, called, err)
 	}
 }

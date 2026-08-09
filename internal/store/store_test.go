@@ -206,8 +206,53 @@ func TestOperationQueueLeasesAndRecoversExpiredWork(t *testing.T) {
 	if err != nil || recovered.Attempt != 2 || recovered.LeaseOwner != "worker-b" {
 		t.Fatalf("recovered=%#v err=%v", recovered, err)
 	}
-	if err = s.CompleteClaimedOperation(ctx, recovered.ID, "worker-b", `{"ok":true}`); err != nil {
+	if err = s.StartClaimedOperation(ctx, recovered.ID, "worker-b", recovered.LeaseGeneration); err != nil {
 		t.Fatal(err)
+	}
+	if err = s.CompleteClaimedOperation(ctx, recovered.ID, "worker-b", recovered.LeaseGeneration, `{"ok":true}`); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStaleLeaseCannotCheckpointOrFinish(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	queued, _, err := s.EnqueueOperation(ctx, domain.Operation{Kind: "apply", ResourceType: "deployment", ResourceName: "fenced"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.ClaimOperation(ctx, "worker-a", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.ExecContext(ctx, `UPDATE operations SET lease_expires_at=NOW()-INTERVAL '1 second' WHERE id=?`, queued.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.CheckpointClaimedOperation(ctx, first.ID, "worker-a", first.LeaseGeneration, "provision", "running", `{}`, 25, "expired"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expired checkpoint error=%v, want ErrNotFound", err)
+	}
+	second, err := s.ClaimOperation(ctx, "worker-b", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.LeaseGeneration <= first.LeaseGeneration {
+		t.Fatalf("lease generation did not advance: first=%d second=%d", first.LeaseGeneration, second.LeaseGeneration)
+	}
+	if err = s.CheckpointClaimedOperation(ctx, first.ID, "worker-a", first.LeaseGeneration, "provision", "running", `{}`, 50, "stale"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("stale checkpoint error=%v, want ErrNotFound", err)
+	}
+	if err = s.CompleteClaimedOperation(ctx, first.ID, "worker-a", first.LeaseGeneration, `{}`); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("stale completion error=%v, want ErrNotFound", err)
+	}
+	if err = s.StartClaimedOperation(ctx, second.ID, "worker-b", second.LeaseGeneration); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.CheckpointClaimedOperation(ctx, second.ID, "worker-b", second.LeaseGeneration, "provision", "succeeded", `{"resource_id":"gpu-1"}`, 50, "GPU provisioned"); err != nil {
+		t.Fatal(err)
+	}
+	events, err := s.OperationEvents(ctx, second.ID, 10)
+	if err != nil || len(events) != 1 || events[0].Type != "step.succeeded" || events[0].Message != "GPU provisioned" {
+		t.Fatalf("events=%#v err=%v", events, err)
 	}
 }
 

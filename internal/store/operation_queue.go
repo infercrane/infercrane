@@ -59,7 +59,7 @@ func (s *Store) ClaimOperation(ctx context.Context, owner string, lease time.Dur
 	}
 	defer func() { _ = tx.Rollback() }()
 	var id string
-	err = tx.QueryRowContext(ctx, `SELECT id FROM operations WHERE ((status='pending' AND next_attempt_at<=NOW()) OR (status='running' AND lease_expires_at<NOW())) AND cancel_requested=FALSE AND attempt<max_attempts ORDER BY next_attempt_at,created_at FOR UPDATE SKIP LOCKED LIMIT 1`).Scan(&id)
+	err = tx.QueryRowContext(ctx, `SELECT id FROM operations WHERE ((((status IN ('pending','waiting') AND next_attempt_at<=NOW()) OR (status IN ('leased','running') AND lease_expires_at<NOW())) AND cancel_requested=FALSE) OR (status='cancelling' AND lease_expires_at<NOW())) AND attempt<max_attempts ORDER BY next_attempt_at,created_at FOR UPDATE SKIP LOCKED LIMIT 1`).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Operation{}, ErrNotFound
 	}
@@ -67,7 +67,7 @@ func (s *Store) ClaimOperation(ctx context.Context, owner string, lease time.Dur
 		return domain.Operation{}, err
 	}
 	expires := time.Now().UTC().Add(lease)
-	if _, err = tx.ExecContext(ctx, `UPDATE operations SET status='running',attempt=attempt+1,lease_owner=?,lease_expires_at=?,message='running',updated_at=? WHERE id=?`, owner, expires, now(), id); err != nil {
+	if _, err = tx.ExecContext(ctx, `UPDATE operations SET status='leased',attempt=attempt+1,lease_owner=?,lease_generation=lease_generation+1,lease_expires_at=?,last_heartbeat_at=?,message='leased',updated_at=? WHERE id=?`, owner, expires, now(), now(), id); err != nil {
 		return domain.Operation{}, err
 	}
 	if err = tx.Commit(); err != nil {
@@ -76,8 +76,12 @@ func (s *Store) ClaimOperation(ctx context.Context, owner string, lease time.Dur
 	return s.Operation(ctx, id)
 }
 
-func (s *Store) HeartbeatOperation(ctx context.Context, id, owner string, lease time.Duration) error {
-	result, err := s.ExecContext(ctx, `UPDATE operations SET lease_expires_at=?,updated_at=? WHERE id=? AND status='running' AND lease_owner=?`, time.Now().UTC().Add(lease), now(), id, owner)
+func (s *Store) StartClaimedOperation(ctx context.Context, id, owner string, generation int64) error {
+	return s.updateClaim(ctx, `UPDATE operations SET status='running',message='running',updated_at=? WHERE id=? AND status='leased' AND lease_owner=? AND lease_generation=? AND lease_expires_at>NOW()`, id, owner, generation)
+}
+
+func (s *Store) HeartbeatOperation(ctx context.Context, id, owner string, generation int64, lease time.Duration) error {
+	result, err := s.ExecContext(ctx, `UPDATE operations SET lease_expires_at=?,last_heartbeat_at=?,updated_at=? WHERE id=? AND status IN ('leased','running','cancelling') AND lease_owner=? AND lease_generation=? AND lease_expires_at>NOW()`, time.Now().UTC().Add(lease), now(), now(), id, owner, generation)
 	if err != nil {
 		return err
 	}
@@ -88,11 +92,11 @@ func (s *Store) HeartbeatOperation(ctx context.Context, id, owner string, lease 
 	return nil
 }
 
-func (s *Store) CompleteClaimedOperation(ctx context.Context, id, owner, resultJSON string) error {
+func (s *Store) CompleteClaimedOperation(ctx context.Context, id, owner string, generation int64, resultJSON string) error {
 	if resultJSON == "" {
 		resultJSON = "{}"
 	}
-	result, err := s.ExecContext(ctx, `UPDATE operations SET status='succeeded',progress=100,result_json=?::jsonb,message='completed',lease_owner=NULL,lease_expires_at=NULL,updated_at=?,completed_at=? WHERE id=? AND status='running' AND lease_owner=?`, resultJSON, now(), now(), id, owner)
+	result, err := s.ExecContext(ctx, `UPDATE operations SET status='succeeded',progress=100,result_json=?::jsonb,message='completed',lease_owner=NULL,lease_expires_at=NULL,updated_at=?,completed_at=? WHERE id=? AND status='running' AND lease_owner=? AND lease_generation=? AND lease_expires_at>NOW()`, resultJSON, now(), now(), id, owner, generation)
 	if err != nil {
 		return err
 	}
@@ -103,14 +107,14 @@ func (s *Store) CompleteClaimedOperation(ctx context.Context, id, owner, resultJ
 	return nil
 }
 
-func (s *Store) FailClaimedOperation(ctx context.Context, id, owner, code, message string, retryable bool, next time.Time) error {
+func (s *Store) FailClaimedOperation(ctx context.Context, id, owner string, generation int64, code, message string, retryable bool, next time.Time) error {
 	status := "failed"
 	var completed any = now()
 	if retryable {
-		status = "pending"
+		status = "waiting"
 		completed = nil
 	}
-	result, err := s.ExecContext(ctx, `UPDATE operations SET status=?,error_code=?,message=?,retryable=?,next_attempt_at=?,lease_owner=NULL,lease_expires_at=NULL,updated_at=?,completed_at=? WHERE id=? AND status='running' AND lease_owner=?`, status, code, message, retryable, next.UTC(), now(), completed, id, owner)
+	result, err := s.ExecContext(ctx, `UPDATE operations SET status=?,error_code=?,message=?,retryable=?,waiting_reason=?,next_attempt_at=?,lease_owner=NULL,lease_expires_at=NULL,updated_at=?,completed_at=? WHERE id=? AND status IN ('running','cancelling') AND lease_owner=? AND lease_generation=? AND lease_expires_at>NOW()`, status, code, message, retryable, nullIf(!retryable, message), next.UTC(), now(), completed, id, owner, generation)
 	if err != nil {
 		return err
 	}
@@ -121,8 +125,8 @@ func (s *Store) FailClaimedOperation(ctx context.Context, id, owner, code, messa
 	return nil
 }
 
-func (s *Store) CancelClaimedOperation(ctx context.Context, id, owner, message string) error {
-	result, err := s.ExecContext(ctx, `UPDATE operations SET status='cancelled',message=?,lease_owner=NULL,lease_expires_at=NULL,updated_at=?,completed_at=? WHERE id=? AND status='running' AND lease_owner=?`, message, now(), now(), id, owner)
+func (s *Store) CancelClaimedOperation(ctx context.Context, id, owner string, generation int64, message string) error {
+	result, err := s.ExecContext(ctx, `UPDATE operations SET status='cancelled',message=?,lease_owner=NULL,lease_expires_at=NULL,updated_at=?,completed_at=? WHERE id=? AND status IN ('running','cancelling') AND lease_owner=? AND lease_generation=? AND lease_expires_at>NOW()`, message, now(), now(), id, owner, generation)
 	if err != nil {
 		return err
 	}
@@ -131,4 +135,82 @@ func (s *Store) CancelClaimedOperation(ctx context.Context, id, owner, message s
 		return ErrNotFound
 	}
 	return nil
+}
+
+func (s *Store) CheckpointClaimedOperation(ctx context.Context, id, owner string, generation int64, step, status, checkpoint string, progress int, message string) error {
+	if step == "" || progress < 0 || progress > 99 {
+		return errors.New("step and progress between 0 and 99 are required")
+	}
+	if checkpoint == "" {
+		checkpoint = "{}"
+	}
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.ExecContext(ctx, `UPDATE operations SET progress=?,message=?,updated_at=? WHERE id=? AND status IN ('running','cancelling') AND lease_owner=? AND lease_generation=? AND lease_expires_at>NOW()`, progress, message, now(), id, owner, generation)
+	if err != nil {
+		return err
+	}
+	if n, _ := result.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	stamp := now()
+	var completed any
+	if status == "succeeded" || status == "failed" || status == "cancelled" {
+		completed = stamp
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO operation_steps(operation_id,step_name,status,attempt,checkpoint_json,started_at,updated_at,completed_at) VALUES(?,?,?,?,?::jsonb,?,?,?) ON CONFLICT(operation_id,step_name) DO UPDATE SET status=EXCLUDED.status,attempt=operation_steps.attempt+1,checkpoint_json=EXCLUDED.checkpoint_json,updated_at=EXCLUDED.updated_at,completed_at=EXCLUDED.completed_at`, id, step, status, 1, checkpoint, stamp, stamp, completed)
+	if err != nil {
+		return err
+	}
+	var sequence int64
+	if err = tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(sequence),0)+1 FROM operation_events WHERE operation_id=?`, id).Scan(&sequence); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO operation_events(operation_id,sequence,level,event_type,message,payload_json,created_at) VALUES(?,?,?,?,?,?::jsonb,?)`, id, sequence, "info", "step."+status, message, checkpoint, stamp); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) OperationEvents(ctx context.Context, id string, limit int) ([]domain.OperationEvent, error) {
+	if limit < 1 || limit > 1000 {
+		limit = 100
+	}
+	rows, err := s.QueryContext(ctx, `SELECT operation_id,sequence,level,event_type,message,payload_json::text,created_at FROM operation_events WHERE operation_id=? ORDER BY sequence DESC LIMIT ?`, id, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var events []domain.OperationEvent
+	for rows.Next() {
+		var event domain.OperationEvent
+		var stamp string
+		if err := rows.Scan(&event.OperationID, &event.Sequence, &event.Level, &event.Type, &event.Message, &event.Payload, &stamp); err != nil {
+			return nil, err
+		}
+		event.CreatedAt = parseTime(stamp)
+		events = append(events, event)
+	}
+	return events, rows.Err()
+}
+
+func (s *Store) updateClaim(ctx context.Context, query, id, owner string, generation int64) error {
+	result, err := s.ExecContext(ctx, query, now(), id, owner, generation)
+	if err != nil {
+		return err
+	}
+	if n, _ := result.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func nullIf(condition bool, value string) any {
+	if condition {
+		return nil
+	}
+	return value
 }

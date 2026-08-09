@@ -79,8 +79,22 @@ type Operation struct {
 	Progress, Attempt, MaxAttempts                                 int
 	Retryable, CancelRequested                                     bool
 	LeaseOwner                                                     string
+	LeaseGeneration                                                int64
 	CreatedAt, UpdatedAt                                           time.Time
 	CompletedAt, LeaseExpiresAt, NextAttemptAt                     *time.Time
+}
+
+type OperationStep struct {
+	OperationID, Name, Status, CheckpointJSON, ErrorCode string
+	Attempt                                              int
+	StartedAt, UpdatedAt                                 time.Time
+	CompletedAt                                          *time.Time
+}
+
+type OperationEvent struct {
+	OperationID, Level, Type, Message, Payload string
+	Sequence                                   int64
+	CreatedAt                                  time.Time
 }
 
 type Orphan struct {
