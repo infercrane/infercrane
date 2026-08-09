@@ -96,6 +96,37 @@ type InferenceRecord struct {
 	Streaming                                     bool
 }
 
+type ReleaseGuardPolicy struct {
+	DeploymentID                   string  `json:"deployment_id"`
+	Enabled                        bool    `json:"enabled"`
+	MinimumRequests                int     `json:"minimum_requests"`
+	MaxTTFTRegressionPercent       float64 `json:"max_ttft_regression_percent"`
+	MaxLatencyRegressionPercent    float64 `json:"max_latency_regression_percent"`
+	MaxErrorRateIncrease           float64 `json:"max_error_rate_increase"`
+	MaxOutputThroughputDropPercent float64 `json:"max_output_throughput_drop_percent"`
+}
+
+type RevisionMetrics struct {
+	Requests              int      `json:"requests"`
+	ReadyReplicas         int      `json:"ready_replicas"`
+	ErrorRate             float64  `json:"error_rate"`
+	P95TTFTMS             *float64 `json:"p95_ttft_ms"`
+	P95LatencyMS          *float64 `json:"p95_latency_ms"`
+	OutputTokensPerSecond *float64 `json:"output_tokens_per_second"`
+}
+
+type ReleaseGuardEvaluation struct {
+	ID                  string    `json:"id"`
+	DeploymentID        string    `json:"deployment_id"`
+	ActiveRevisionID    string    `json:"active_revision_id"`
+	CandidateRevisionID string    `json:"candidate_revision_id"`
+	Decision            string    `json:"decision"`
+	ReasonCodesJSON     string    `json:"-"`
+	MetricsJSON         string    `json:"-"`
+	PolicyJSON          string    `json:"-"`
+	CreatedAt           time.Time `json:"created_at"`
+}
+
 type RouterGeneration struct {
 	ID, DeploymentID, OwnerID, Strategy, WorkerSetHash, InternalEndpoint, Status string
 	Generation                                                                   int

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -649,6 +650,37 @@ func TestRevisionTransitionsAreReplaySafeForDurableOperation(t *testing.T) {
 	}
 	if transitionEvents != 3 {
 		t.Fatalf("transition events=%d, want exactly 3 after replays", transitionEvents)
+	}
+}
+
+func TestReleaseGuardPersistsDeterministicCandidateDecision(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	if _, err := s.AddTarget(ctx, domain.Target{Name: "guard-target", URL: "http://guard-target", Provider: "existing", Runtime: "vllm", UpstreamModel: "model-v1"}); err != nil {
+		t.Fatal(err)
+	}
+	deployment, err := s.ApplyDeployment(ctx, domain.Deployment{Name: "guard-prod", Model: "model-v1"}, []string{"guard-target"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate, err := s.CreateCandidateRevision(ctx, "global", deployment.Name, `{"model":"model-v2"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, err := s.SetReleaseGuardPolicy(ctx, "global", deployment.Name, domain.ReleaseGuardPolicy{Enabled: true, MinimumRequests: 5, MaxTTFTRegressionPercent: 10, MaxLatencyRegressionPercent: 12, MaxErrorRateIncrease: .005, MaxOutputThroughputDropPercent: 15})
+	if err != nil || policy.MinimumRequests != 5 || policy.MaxTTFTRegressionPercent != 10 {
+		t.Fatalf("policy=%+v err=%v", policy, err)
+	}
+	evaluation, err := s.EvaluateReleaseGuard(ctx, "global", deployment.Name, 5*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evaluation.Decision != "REJECT" || evaluation.CandidateRevisionID != candidate.ID || !strings.Contains(evaluation.ReasonCodesJSON, "candidate_not_ready") || !strings.Contains(evaluation.PolicyJSON, `"minimum_requests":5`) {
+		t.Fatalf("evaluation=%+v", evaluation)
+	}
+	rows, err := s.ReleaseGuardEvaluations(ctx, "global", deployment.Name, 10)
+	if err != nil || len(rows) != 1 || rows[0].ID != evaluation.ID || rows[0].PolicyJSON == "" || rows[0].MetricsJSON == "" {
+		t.Fatalf("evaluations=%+v err=%v", rows, err)
 	}
 }
 

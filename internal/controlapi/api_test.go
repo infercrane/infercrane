@@ -79,6 +79,15 @@ func (f *fakeStore) ScalingDecisionsForTenant(context.Context, string, string, i
 func (f *fakeStore) ModelArtifactForRevision(context.Context, string, string) (domain.ModelArtifact, error) {
 	return domain.ModelArtifact{}, domain.ErrNotFound
 }
+func (f *fakeStore) ReleaseGuardEvaluations(context.Context, string, string, int) ([]domain.ReleaseGuardEvaluation, error) {
+	return nil, f.err
+}
+func (f *fakeStore) ReleaseGuardPolicy(context.Context, string, string) (domain.ReleaseGuardPolicy, error) {
+	return domain.ReleaseGuardPolicy{Enabled: true, MinimumRequests: 20}, f.err
+}
+func (f *fakeStore) SetReleaseGuardPolicy(_ context.Context, _, _ string, policy domain.ReleaseGuardPolicy) (domain.ReleaseGuardPolicy, error) {
+	return policy, f.err
+}
 func (f *fakeStore) AddTargetForTenant(_ context.Context, _ string, target domain.Target) (domain.Target, error) {
 	target.ID = "target"
 	return target, f.err
@@ -196,6 +205,7 @@ func TestRolloutTransitionsQueueDurableOperations(t *testing.T) {
 		path, body, kind string
 	}{
 		{"/api/v1/deployments/prod/rollouts", `{"spec":{"model":"Qwen/Qwen3-8B"}}`, "rollout.create-candidate"},
+		{"/api/v1/deployments/prod/rollouts/guard/evaluate", ``, "release-guard.evaluate"},
 		{"/api/v1/deployments/prod/rollouts/rev-2/promote", ``, "rollout.promote"},
 		{"/api/v1/deployments/prod/rollouts/rev-2/reject", `{"reason":"readiness failed"}`, "rollout.reject"},
 		{"/api/v1/deployments/prod/rollback", `{"revision_id":"rev-1","reason":"operator rollback"}`, "rollout.rollback"},

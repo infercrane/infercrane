@@ -27,14 +27,15 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 | `internal/pricing` | 1 | 1 | `TestCatalogAndStaleness` |
 | `internal/provision` | 1 | 1 | `TestDeleteReplicaIsIdempotent`, `TestEnsureDoesNotLaunchWhenDiscoveryFails`, `TestEnsureDoesNotRelaunchActiveRequest`, `TestEnsureRelaunchesMissingOrFailedRequest`, `TestEnsureReplicaDiscoversExistingResource`, `TestEnsureTreatsExplicitMissingClusterAsAbsent`, `TestEnsureTreatsSuccessfulMissingClusterMessageAsAbsent`, `TestInventoryFiltersOwnedResources`, `TestObserveParsesSkyPilotNoticeBeforeJSON`, `TestRunCommandPinsImmutableModelRevision` |
 | `internal/reconcile` | 1 | 1 | `TestRouterCandidateFailureLeavesOldGenerationServing`, `TestRouterCandidatePublishesBeforeOldRetires` |
+| `internal/releaseguard` | 1 | 1 | `TestEvaluateIsDeterministicAndConservative` |
 | `internal/router` | 2 | 1 | `TestCommandUsesUpstreamPolicyAndSingleAttempt` |
 | `internal/routes` | 1 | 1 | `TestDirectoryIsolatesSameAliasByTenant`, `TestDirectoryOrdersAndRemovesSnapshots` |
 | `internal/runtime` | 1 | 0 | — |
 | `internal/spec` | 1 | 0 | — |
-| `internal/store` | 12 | 2 | `TestApplyDeploymentConvergesTargetMembership`, `TestCancellingQueuedOperationPreventsClaim`, `TestCancellingWaitingOperationRequiresCleanupClaim`, `TestCreateDeploymentRejectsIncompatibleTargets`, `TestDeploymentLifecycleMutationsAreSerialized`, `TestDeploymentRevisionsAreImmutableAndPromoteExplicitly`, `TestDurableAutoscalingAcceptanceOneToTwoToOne`, `TestModelArtifactIsImmutablePerRevision`, `TestOperationQueueLeasesAndRecoversExpiredWork`, `TestOrphanedTargetsOnlyReturnsProvisionedUnusedTargets`, `TestPrincipalCredentialRotationAndRevocation`, `TestReplicaIntentAndProviderIdentityAreIdempotent`, `TestRequestTelemetryPersistsMeasurementsAndDimensions`, `TestRevisionTransitionsAreReplaySafeForDurableOperation`, `TestScaleToQueuesExactlyOneDurableOperation`, `TestStaleLeaseCannotCheckpointOrFinish`, `TestSubmitCloudDeploymentIsAtomicAndIdempotent`, `TestSubmitDeploymentDeleteWithdrawsDesiredStateAndQueuesCleanup`, `TestTargetAndDeploymentLifecycle`, `TestTargetConflict`, `TestTenantQuotaRejectsDeploymentBeyondReplicaLimit`, `TestTenantResourcesCanReuseNamesWithoutCrossTenantVisibility` |
+| `internal/store` | 13 | 2 | `TestApplyDeploymentConvergesTargetMembership`, `TestCancellingQueuedOperationPreventsClaim`, `TestCancellingWaitingOperationRequiresCleanupClaim`, `TestCreateDeploymentRejectsIncompatibleTargets`, `TestDeploymentLifecycleMutationsAreSerialized`, `TestDeploymentRevisionsAreImmutableAndPromoteExplicitly`, `TestDurableAutoscalingAcceptanceOneToTwoToOne`, `TestModelArtifactIsImmutablePerRevision`, `TestOperationQueueLeasesAndRecoversExpiredWork`, `TestOrphanedTargetsOnlyReturnsProvisionedUnusedTargets`, `TestPrincipalCredentialRotationAndRevocation`, `TestReleaseGuardPersistsDeterministicCandidateDecision`, `TestReplicaIntentAndProviderIdentityAreIdempotent`, `TestRequestTelemetryPersistsMeasurementsAndDimensions`, `TestRevisionTransitionsAreReplaySafeForDurableOperation`, `TestScaleToQueuesExactlyOneDurableOperation`, `TestStaleLeaseCannotCheckpointOrFinish`, `TestSubmitCloudDeploymentIsAtomicAndIdempotent`, `TestSubmitDeploymentDeleteWithdrawsDesiredStateAndQueuesCleanup`, `TestTargetAndDeploymentLifecycle`, `TestTargetConflict`, `TestTenantQuotaRejectsDeploymentBeyondReplicaLimit`, `TestTenantResourcesCanReuseNamesWithoutCrossTenantVisibility` |
 | `internal/testtools/fake-router` | 1 | 0 | — |
 | `internal/testtools/fake-vllm` | 1 | 0 | — |
-| `internal/workflows` | 3 | 3 | `TestApplyExistingHandlerIsDeterministic`, `TestApplyExistingHandlerRejectsInvalidPayload`, `TestConvergeCancellationDeletesProviderResource`, `TestConvergeCreatesExactlyOneResourcePerMinimumReplica`, `TestConvergeResumesAfterProviderCheckpoint`, `TestRolloutHandlersPersistExplicitTransitions`, `TestScaleDownWithdrawsRouterBeforeDeletingReplica` |
+| `internal/workflows` | 4 | 3 | `TestApplyExistingHandlerIsDeterministic`, `TestApplyExistingHandlerRejectsInvalidPayload`, `TestConvergeCancellationDeletesProviderResource`, `TestConvergeCreatesExactlyOneResourcePerMinimumReplica`, `TestConvergeResumesAfterProviderCheckpoint`, `TestRolloutHandlersPersistExplicitTransitions`, `TestScaleDownWithdrawsRouterBeforeDeletingReplica` |
 | `tools/repo-context` | 1 | 0 | — |
 
 ## CLI commands
@@ -46,6 +47,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 - `deploy`
 - `deployments`
 - `doctor`
+- `evaluate`
 - `events`
 - `explain`
 - `failed`
@@ -79,6 +81,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 - `GET /api/v1/deployments`
 - `GET /api/v1/deployments/{name}`
 - `GET /api/v1/deployments/{name}/events`
+- `GET /api/v1/deployments/{name}/release-guard/policy`
 - `GET /api/v1/deployments/{name}/revisions`
 - `GET /api/v1/deployments/{name}/scaling-decisions`
 - `GET /api/v1/operations/{id}`
@@ -94,6 +97,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 - `POST /api/v1/deployments/apply`
 - `POST /api/v1/deployments/{name}/rollback`
 - `POST /api/v1/deployments/{name}/rollouts`
+- `POST /api/v1/deployments/{name}/rollouts/guard/evaluate`
 - `POST /api/v1/deployments/{name}/rollouts/{revision}/promote`
 - `POST /api/v1/deployments/{name}/rollouts/{revision}/reject`
 - `POST /api/v1/operations/{id}/cancel`
@@ -103,6 +107,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 - `POST /api/v1/tenants`
 - `POST /test/metrics`
 - `POST /v1/chat/completions`
+- `PUT /api/v1/deployments/{name}/release-guard/policy`
 - `PUT /api/v1/deployments/{name}/route`
 - `PUT /api/v1/tenant/quota`
 
@@ -140,6 +145,8 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 - `operation_steps`
 - `operations`
 - `principals`
+- `release_guard_evaluations`
+- `release_guard_policies`
 - `replicas`
 - `request_records`
 - `router_generations`
@@ -165,6 +172,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 - `internal/store/migrations/011_model_artifacts.sql`
 - `internal/store/migrations/012_request_telemetry.sql`
 - `internal/store/migrations/013_revision_operation_identity.sql`
+- `internal/store/migrations/014_release_guard.sql`
 
 ## Architecture decisions
 

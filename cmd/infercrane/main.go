@@ -524,12 +524,25 @@ type artifactView struct {
 	ResolvedAt           time.Time       `json:"resolved_at"`
 }
 type deploymentView struct {
-	Deployment     deploymentSummary   `json:"deployment"`
-	Targets        []targetView        `json:"targets"`
-	Replicas       []replicaView       `json:"replicas"`
-	Revisions      []revisionView      `json:"revisions"`
-	ModelArtifacts []artifactView      `json:"model_artifacts"`
-	RequestStats   domain.RequestStats `json:"request_stats"`
+	Deployment              deploymentSummary         `json:"deployment"`
+	Targets                 []targetView              `json:"targets"`
+	Replicas                []replicaView             `json:"replicas"`
+	Revisions               []revisionView            `json:"revisions"`
+	ModelArtifacts          []artifactView            `json:"model_artifacts"`
+	RequestStats            domain.RequestStats       `json:"request_stats"`
+	ReleaseGuardPolicy      domain.ReleaseGuardPolicy `json:"release_guard_policy"`
+	ReleaseGuardEvaluations []releaseGuardView        `json:"release_guard_evaluations"`
+}
+
+type releaseGuardView struct {
+	ID                  string          `json:"id"`
+	ActiveRevisionID    string          `json:"active_revision_id"`
+	CandidateRevisionID string          `json:"candidate_revision_id"`
+	Decision            string          `json:"decision"`
+	Reasons             json.RawMessage `json:"reasons"`
+	Metrics             json.RawMessage `json:"metrics"`
+	Policy              json.RawMessage `json:"policy"`
+	CreatedAt           time.Time       `json:"created_at"`
 }
 
 func listDeployments(ctx context.Context, cfg config.Config, args []string) error {
@@ -1054,10 +1067,10 @@ func emptyAs(value, fallback string) string {
 
 func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error {
 	if len(args) < 2 {
-		return errors.New("usage: infercrane rollout inspect|create|promote|reject|rollback DEPLOYMENT [REVISION] [flags]")
+		return errors.New("usage: infercrane rollout inspect|policy|create|evaluate|promote|reject|rollback DEPLOYMENT [REVISION] [flags]")
 	}
 	action, name := args[0], args[1]
-	if action == "inspect" {
+	if action == "inspect" || action == "policy" {
 		fs := flag.NewFlagSet("rollout inspect", flag.ContinueOnError)
 		output := fs.String("output", "human", "human or json")
 		if err := fs.Parse(args[2:]); err != nil {
@@ -1068,12 +1081,22 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 			return err
 		}
 		if *output == "json" {
-			encoded, _ := json.MarshalIndent(map[string]any{"deployment": view.Deployment.Name, "active_revision_id": view.Deployment.ActiveRevisionID, "candidate_revision_id": view.Deployment.CandidateRevisionID, "revisions": view.Revisions, "request_stats": view.RequestStats}, "", "  ")
+			if action == "policy" {
+				encoded, _ := json.MarshalIndent(view.ReleaseGuardPolicy, "", "  ")
+				fmt.Println(string(encoded))
+				return nil
+			}
+			encoded, _ := json.MarshalIndent(map[string]any{"deployment": view.Deployment.Name, "active_revision_id": view.Deployment.ActiveRevisionID, "candidate_revision_id": view.Deployment.CandidateRevisionID, "revisions": view.Revisions, "request_stats": view.RequestStats, "release_guard_policy": view.ReleaseGuardPolicy, "release_guard_evaluations": view.ReleaseGuardEvaluations}, "", "  ")
 			fmt.Println(string(encoded))
 			return nil
 		}
 		if *output != "human" {
 			return errors.New("--output must be human or json")
+		}
+		if action == "policy" {
+			policy := view.ReleaseGuardPolicy
+			fmt.Printf("%s Release Guard policy\nEnabled                %t\nMinimum requests       %d\nMax TTFT regression    %.1f%%\nMax latency regression %.1f%%\nMax error increase     %.2f%%\nMax throughput drop    %.1f%%\n", name, policy.Enabled, policy.MinimumRequests, policy.MaxTTFTRegressionPercent, policy.MaxLatencyRegressionPercent, policy.MaxErrorRateIncrease*100, policy.MaxOutputThroughputDropPercent)
+			return nil
 		}
 		fmt.Printf("%s rollout\nACTIVE       %s\nCANDIDATE    %s\n\n", name, emptyAs(view.Deployment.ActiveRevisionID, "none"), emptyAs(view.Deployment.CandidateRevisionID, "none"))
 		for _, revision := range view.Revisions {
@@ -1082,6 +1105,10 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 				fmt.Printf("  %s", revision.Reason)
 			}
 			fmt.Println()
+		}
+		if len(view.ReleaseGuardEvaluations) > 0 {
+			guard := view.ReleaseGuardEvaluations[0]
+			fmt.Printf("\nGuard: %s\nReasons: %s\n", guard.Decision, guard.Reasons)
 		}
 		return nil
 	}
@@ -1098,7 +1125,7 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 	maxReplicas := fs.Int("max", 1, "candidate maximum replicas")
 	rest := args[2:]
 	revisionID := ""
-	if action != "create" {
+	if action != "create" && action != "evaluate" {
 		if len(rest) == 0 || strings.HasPrefix(rest[0], "-") {
 			return errors.New("revision ID is required")
 		}
@@ -1122,6 +1149,8 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 		}
 		path = "/api/v1/deployments/" + url.PathEscape(name) + "/rollouts"
 		request = map[string]any{"spec": map[string]any{"model": *model, "runtime": *runtimeName, "routing_strategy": *routing, "min_replicas": *minReplicas, "max_replicas": *maxReplicas, "autoscaling_enabled": *maxReplicas > *minReplicas}}
+	case "evaluate":
+		path = "/api/v1/deployments/" + url.PathEscape(name) + "/rollouts/guard/evaluate"
 	case "promote":
 		path = "/api/v1/deployments/" + url.PathEscape(name) + "/rollouts/" + url.PathEscape(revisionID) + "/promote"
 	case "reject":
@@ -1188,6 +1217,9 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	operationTelemetry := &operations.Telemetry{}
 	handlers := workflows.DeploymentHandlers(s)
 	for kind, handler := range workflows.RolloutHandlers(s) {
+		handlers[kind] = handler
+	}
+	for kind, handler := range workflows.ReleaseGuardHandlers(s) {
 		handlers[kind] = handler
 	}
 	for kind, handler := range workflows.CloudHandlers(s, provision.SkyPilot{APIKey: cfg.APIKey}, runtime, artifact.HuggingFace{}) {

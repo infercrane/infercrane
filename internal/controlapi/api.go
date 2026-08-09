@@ -32,6 +32,9 @@ type Store interface {
 	OperationEvents(context.Context, string, int) ([]domain.OperationEvent, error)
 	ScalingDecisionsForTenant(context.Context, string, string, int) ([]domain.ScalingDecision, error)
 	ModelArtifactForRevision(context.Context, string, string) (domain.ModelArtifact, error)
+	ReleaseGuardEvaluations(context.Context, string, string, int) ([]domain.ReleaseGuardEvaluation, error)
+	ReleaseGuardPolicy(context.Context, string, string) (domain.ReleaseGuardPolicy, error)
+	SetReleaseGuardPolicy(context.Context, string, string, domain.ReleaseGuardPolicy) (domain.ReleaseGuardPolicy, error)
 	AddTargetForTenant(context.Context, string, domain.Target) (domain.Target, error)
 	TargetsForTenant(context.Context, string) ([]domain.Target, error)
 	DeploymentsForTenant(context.Context, string) ([]domain.Deployment, error)
@@ -67,6 +70,9 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/deployments/{name}/events", a.auth(authz.Read, a.deploymentEvents))
 	mux.HandleFunc("GET /api/v1/deployments/{name}/revisions", a.auth(authz.Read, a.revisions))
 	mux.HandleFunc("POST /api/v1/deployments/{name}/rollouts", a.auth(authz.Deploy, a.createRollout))
+	mux.HandleFunc("POST /api/v1/deployments/{name}/rollouts/guard/evaluate", a.auth(authz.Deploy, a.evaluateReleaseGuard))
+	mux.HandleFunc("GET /api/v1/deployments/{name}/release-guard/policy", a.auth(authz.Read, a.releaseGuardPolicy))
+	mux.HandleFunc("PUT /api/v1/deployments/{name}/release-guard/policy", a.auth(authz.Deploy, a.setReleaseGuardPolicy))
 	mux.HandleFunc("POST /api/v1/deployments/{name}/rollouts/{revision}/promote", a.auth(authz.Deploy, a.promoteRollout))
 	mux.HandleFunc("POST /api/v1/deployments/{name}/rollouts/{revision}/reject", a.auth(authz.Deploy, a.rejectRollout))
 	mux.HandleFunc("POST /api/v1/deployments/{name}/rollback", a.auth(authz.Deploy, a.rollbackDeployment))
@@ -327,6 +333,16 @@ func (a API) deployment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "internal", "request statistics lookup failed")
 		return
 	}
+	guardEvaluations, err := a.Store.ReleaseGuardEvaluations(r.Context(), principal.TenantID, resolved.Deployment.Name, 20)
+	if err != nil {
+		writeError(w, 500, "internal", "Release Guard evaluation lookup failed")
+		return
+	}
+	guardPolicy, err := a.Store.ReleaseGuardPolicy(r.Context(), principal.TenantID, resolved.Deployment.Name)
+	if err != nil {
+		writeError(w, 500, "internal", "Release Guard policy lookup failed")
+		return
+	}
 	targets := make([]map[string]any, 0, len(resolved.Targets))
 	for _, target := range resolved.Targets {
 		targets = append(targets, targetResponse(target))
@@ -347,7 +363,11 @@ func (a API) deployment(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	writeJSON(w, 200, map[string]any{"deployment": deploymentResponse(resolved.Deployment), "targets": targets, "replicas": replicaData, "revisions": revisionData, "model_artifacts": artifactData, "request_stats": stats})
+	guardData := make([]map[string]any, 0, len(guardEvaluations))
+	for _, evaluation := range guardEvaluations {
+		guardData = append(guardData, releaseGuardResponse(evaluation))
+	}
+	writeJSON(w, 200, map[string]any{"deployment": deploymentResponse(resolved.Deployment), "targets": targets, "replicas": replicaData, "revisions": revisionData, "model_artifacts": artifactData, "request_stats": stats, "release_guard_policy": guardPolicy, "release_guard_evaluations": guardData})
 }
 func (a API) deploymentEvents(w http.ResponseWriter, r *http.Request) {
 	principal := r.Context().Value(identityKey{}).(domain.Principal)
@@ -391,6 +411,43 @@ func (a API) createRollout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.enqueueRollout(w, r, workflows.RolloutCreateKind, workflows.RolloutRequest{Name: r.PathValue("name"), Spec: body.Spec})
+}
+
+func (a API) evaluateReleaseGuard(w http.ResponseWriter, r *http.Request) {
+	a.enqueueRollout(w, r, workflows.ReleaseGuardEvaluateKind, workflows.RolloutRequest{Name: r.PathValue("name")})
+}
+
+func (a API) releaseGuardPolicy(w http.ResponseWriter, r *http.Request) {
+	principal := r.Context().Value(identityKey{}).(domain.Principal)
+	policy, err := a.Store.ReleaseGuardPolicy(r.Context(), principal.TenantID, r.PathValue("name"))
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "deployment was not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "Release Guard policy lookup failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, policy)
+}
+
+func (a API) setReleaseGuardPolicy(w http.ResponseWriter, r *http.Request) {
+	var policy domain.ReleaseGuardPolicy
+	if !decodeMutationBody(w, r, &policy) {
+		return
+	}
+	principal := r.Context().Value(identityKey{}).(domain.Principal)
+	updated, err := a.Store.SetReleaseGuardPolicy(r.Context(), principal.TenantID, r.PathValue("name"), policy)
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "deployment was not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
+		return
+	}
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: principal.TenantID, Actor: principal.Name, Action: "release_guard.policy.update", ResourceType: "deployment", ResourceName: r.PathValue("name"), Outcome: "succeeded"})
+	writeJSON(w, http.StatusOK, updated)
 }
 
 func (a API) promoteRollout(w http.ResponseWriter, r *http.Request) {
@@ -569,6 +626,10 @@ func revisionResponse(row domain.DeploymentRevision) map[string]any {
 }
 func artifactResponse(revisionID string, row domain.ModelArtifact) map[string]any {
 	return map[string]any{"id": row.ID, "revision_id": revisionID, "source": row.Source, "repository": row.Repository, "requested_revision": row.RequestedRevision, "immutable_revision": row.ImmutableRevision, "model_identity": row.ModelIdentity, "approximate_size_bytes": row.ApproximateSizeBytes, "cache_state": row.CacheState, "runtime_compatibility": json.RawMessage(row.RuntimeCompatibilityJSON), "resolved_at": row.ResolvedAt}
+}
+
+func releaseGuardResponse(row domain.ReleaseGuardEvaluation) map[string]any {
+	return map[string]any{"id": row.ID, "active_revision_id": row.ActiveRevisionID, "candidate_revision_id": row.CandidateRevisionID, "decision": row.Decision, "reasons": json.RawMessage(row.ReasonCodesJSON), "metrics": json.RawMessage(row.MetricsJSON), "policy": json.RawMessage(row.PolicyJSON), "created_at": row.CreatedAt}
 }
 
 func (a API) applyDeployment(w http.ResponseWriter, r *http.Request) {
