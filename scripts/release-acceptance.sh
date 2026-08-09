@@ -265,6 +265,9 @@ run_serverless() {
   run_preflight
   record serverless-deploy ic deploy "$MODEL" --name "$SERVERLESS_NAME" --compute serverless \
     --cloud runpod --gpu "$GPU" --max 2 --wait --idempotency-key "$SERVERLESS_NAME-create" --output json
+  # Provider endpoint persistence completes before the reconciler publishes the
+  # logical alias. Do not race the first request against route publication.
+  wait_ready "$SERVERLESS_NAME"
   ic request "$SERVERLESS_NAME" --message "cold acceptance probe" --output json >/dev/null
   ic request "$SERVERLESS_NAME" --message "warm acceptance probe" --output json >/dev/null
   ic request "$SERVERLESS_NAME" --message "stream acceptance probe" --stream >/dev/null
