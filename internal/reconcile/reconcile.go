@@ -3,12 +3,10 @@ package reconcile
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"log/slog"
 	"sort"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -129,7 +127,11 @@ func (r *Reconciler) Once(ctx context.Context) error {
 			_ = r.Store.SetDeploymentState(ctx, d.ID, "unhealthy")
 			continue
 		}
-		hash := workerHash(d.RoutingStrategy, healthy)
+		workerURLs := make([]string, len(healthy))
+		for i, target := range healthy {
+			workerURLs[i] = target.URL
+		}
+		hash := router.WorkerSetHash(d.RoutingStrategy, workerURLs)
 		generation, gerr := r.Store.ActiveGeneration(ctx, d.ID, r.InstanceID)
 		if gerr != nil && !errors.Is(gerr, domain.ErrNotFound) {
 			return gerr
@@ -193,13 +195,4 @@ func routerGenerationPort(start int, deploymentID string, generation int) int {
 }
 func routerProcessID(deploymentID string, generation int) string {
 	return deploymentID + "-g" + strconv.Itoa(generation)
-}
-func workerHash(strategy string, targets []domain.Target) string {
-	urls := make([]string, len(targets))
-	for i, t := range targets {
-		urls[i] = t.URL
-	}
-	sort.Strings(urls)
-	sum := sha256.Sum256([]byte(strategy + "\x00" + strings.Join(urls, "\x00")))
-	return hex.EncodeToString(sum[:])
 }

@@ -9,6 +9,7 @@ import (
 
 	"github.com/infercrane/infercrane/internal/authz"
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/workflows"
 )
 
 func TestTargetAndDeploymentLifecycle(t *testing.T) {
@@ -416,6 +417,36 @@ func TestPrincipalCredentialRotationAndRevocation(t *testing.T) {
 	}
 	if _, err = s.AuthenticatePrincipal(ctx, rotated); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("revoked credential remained valid: %v", err)
+	}
+}
+
+func TestScaleToQueuesExactlyOneDurableOperation(t *testing.T) {
+	s := openStore(t, context.Background())
+	ctx := context.Background()
+	name := "autoscale-operation"
+	deployment, converge, _, err := s.SubmitCloudDeployment(ctx,
+		domain.Deployment{Name: name, Model: "Qwen/Qwen3-8B", MinReplicas: 1, MaxReplicas: 3, AutoscalingEnabled: true},
+		domain.Operation{Kind: workflows.ConvergeKind, IdempotencyKey: "converge-autoscale", RequestJSON: `{"name":"` + name + `","model":"Qwen/Qwen3-8B","cloud":"runpod","gpu":"L40S","tenant_id":"global","min_replicas":1,"max_replicas":3}`},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.db.ExecContext(ctx, `UPDATE operations SET status='succeeded',completed_at=NOW() WHERE id=$1`, converge.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.ScaleTo(ctx, deployment.ID, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.ScaleTo(ctx, deployment.ID, 2); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	var desired int
+	if err = s.db.QueryRowContext(ctx, `SELECT COUNT(*),MAX((request_json->>'desired_replicas')::integer) FROM operations WHERE tenant_id='global' AND resource_name=$1 AND kind=$2`, name, workflows.ScaleKind).Scan(&count, &desired); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 || desired != 2 {
+		t.Fatalf("count=%d desired=%d", count, desired)
 	}
 }
 

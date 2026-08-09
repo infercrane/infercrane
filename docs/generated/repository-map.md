@@ -12,11 +12,11 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 | `internal/accounting` | 1 | 0 | — |
 | `internal/authn` | 1 | 1 | `TestCacheAuthenticatesWithoutSourceOnRequestPath` |
 | `internal/authz` | 1 | 1 | `TestPolicy` |
-| `internal/autoscale` | 2 | 2 | `TestControllerExecutesAndRecordsDecision`, `TestEvaluateHonorsCooldown`, `TestEvaluateUsesStabilityAndBounds` |
+| `internal/autoscale` | 3 | 3 | `TestControllerExecutesAndRecordsDecision`, `TestEvaluateHonorsCooldown`, `TestEvaluateUsesStabilityAndBounds`, `TestVLLMSignalsAggregatesRuntimeQueueGauges`, `TestVLLMSignalsRejectsUnavailableEvidence` |
 | `internal/benchmark` | 1 | 1 | `TestRunMeasuresSuccessfulRequests` |
 | `internal/capacity` | 1 | 1 | `TestChoosePrefersWarmThenCost`, `TestChooseRejectsInsufficientCapacity` |
 | `internal/config` | 1 | 1 | `TestInitializeClientWritesPrivateConfigAndLoadClientUsesIt`, `TestLoadForDiagnosticsAllowsMissingAPIKey`, `TestLoadRejectsInvalidInteger`, `TestLoadRequiresAPIKey`, `TestProductionRequiresStrongSecretAndDatabaseTLS`, `TestRejectsUnsafeControlPlaneURL` |
-| `internal/controlapi` | 1 | 1 | `TestApplyQueuesIdempotentOperation`, `TestCancelHidesMissingOperation`, `TestCloudDeployPersistsAndQueuesConverge`, `TestDeleteQueuesDurableCleanup`, `TestDeploymentAndOperationEventsAreTenantScoped`, `TestDeploymentReadAPIReturnsDurableState`, `TestOperationAPIAuthenticationAndResponse`, `TestRouteAndTenantMutationsUseAuthenticatedAPI`, `TestTargetRegistrationRejectsEmbeddedCredentials`, `TestViewerCannotApply` |
+| `internal/controlapi` | 1 | 1 | `TestApplyQueuesIdempotentOperation`, `TestCancelHidesMissingOperation`, `TestCloudDeployPersistsAndQueuesConverge`, `TestDeleteQueuesDurableCleanup`, `TestDeploymentAndOperationEventsAreTenantScoped`, `TestDeploymentReadAPIReturnsDurableState`, `TestOperationAPIAuthenticationAndResponse`, `TestRouteAndTenantMutationsUseAuthenticatedAPI`, `TestScalingDecisionsAreReadThroughTenantAPI`, `TestTargetRegistrationRejectsEmbeddedCredentials`, `TestViewerCannotApply` |
 | `internal/doctor` | 1 | 1 | `TestCloudCredentialCheckIsRequiredWhenRequested`, `TestRunReadyWithoutSkyPilot`, `TestRunReportsRequiredAndOptionalChecks` |
 | `internal/domain` | 1 | 0 | — |
 | `internal/gateway` | 2 | 2 | `TestActiveStreamKeepsSelectedRouterAcrossGenerationPublish`, `TestAuthentication`, `TestCompletionRewritesAlias`, `TestModelsAreTenantScoped`, `TestTelemetryExportsPrometheusHistogram` |
@@ -26,14 +26,14 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 | `internal/pricing` | 1 | 1 | `TestCatalogAndStaleness` |
 | `internal/provision` | 1 | 1 | `TestDeleteReplicaIsIdempotent`, `TestEnsureDoesNotLaunchWhenDiscoveryFails`, `TestEnsureDoesNotRelaunchActiveRequest`, `TestEnsureRelaunchesMissingOrFailedRequest`, `TestEnsureReplicaDiscoversExistingResource`, `TestEnsureTreatsExplicitMissingClusterAsAbsent`, `TestEnsureTreatsSuccessfulMissingClusterMessageAsAbsent`, `TestInventoryFiltersOwnedResources`, `TestObserveParsesSkyPilotNoticeBeforeJSON` |
 | `internal/reconcile` | 1 | 1 | `TestRouterCandidateFailureLeavesOldGenerationServing`, `TestRouterCandidatePublishesBeforeOldRetires` |
-| `internal/router` | 1 | 1 | `TestCommandUsesUpstreamPolicyAndSingleAttempt` |
+| `internal/router` | 2 | 1 | `TestCommandUsesUpstreamPolicyAndSingleAttempt` |
 | `internal/routes` | 1 | 1 | `TestDirectoryIsolatesSameAliasByTenant`, `TestDirectoryOrdersAndRemovesSnapshots` |
 | `internal/runtime` | 1 | 0 | — |
 | `internal/spec` | 1 | 0 | — |
-| `internal/store` | 11 | 1 | `TestApplyDeploymentConvergesTargetMembership`, `TestCancellingQueuedOperationPreventsClaim`, `TestCancellingWaitingOperationRequiresCleanupClaim`, `TestCreateDeploymentRejectsIncompatibleTargets`, `TestDeploymentLifecycleMutationsAreSerialized`, `TestDeploymentRevisionsAreImmutableAndPromoteExplicitly`, `TestOperationQueueLeasesAndRecoversExpiredWork`, `TestOrphanedTargetsOnlyReturnsProvisionedUnusedTargets`, `TestPrincipalCredentialRotationAndRevocation`, `TestReplicaIntentAndProviderIdentityAreIdempotent`, `TestStaleLeaseCannotCheckpointOrFinish`, `TestSubmitCloudDeploymentIsAtomicAndIdempotent`, `TestSubmitDeploymentDeleteWithdrawsDesiredStateAndQueuesCleanup`, `TestTargetAndDeploymentLifecycle`, `TestTargetConflict`, `TestTenantQuotaRejectsDeploymentBeyondReplicaLimit`, `TestTenantResourcesCanReuseNamesWithoutCrossTenantVisibility` |
+| `internal/store` | 11 | 1 | `TestApplyDeploymentConvergesTargetMembership`, `TestCancellingQueuedOperationPreventsClaim`, `TestCancellingWaitingOperationRequiresCleanupClaim`, `TestCreateDeploymentRejectsIncompatibleTargets`, `TestDeploymentLifecycleMutationsAreSerialized`, `TestDeploymentRevisionsAreImmutableAndPromoteExplicitly`, `TestOperationQueueLeasesAndRecoversExpiredWork`, `TestOrphanedTargetsOnlyReturnsProvisionedUnusedTargets`, `TestPrincipalCredentialRotationAndRevocation`, `TestReplicaIntentAndProviderIdentityAreIdempotent`, `TestScaleToQueuesExactlyOneDurableOperation`, `TestStaleLeaseCannotCheckpointOrFinish`, `TestSubmitCloudDeploymentIsAtomicAndIdempotent`, `TestSubmitDeploymentDeleteWithdrawsDesiredStateAndQueuesCleanup`, `TestTargetAndDeploymentLifecycle`, `TestTargetConflict`, `TestTenantQuotaRejectsDeploymentBeyondReplicaLimit`, `TestTenantResourcesCanReuseNamesWithoutCrossTenantVisibility` |
 | `internal/testtools/fake-router` | 1 | 0 | — |
 | `internal/testtools/fake-vllm` | 1 | 0 | — |
-| `internal/workflows` | 2 | 2 | `TestApplyExistingHandlerIsDeterministic`, `TestApplyExistingHandlerRejectsInvalidPayload`, `TestConvergeCancellationDeletesProviderResource`, `TestConvergeCreatesExactlyOneResourcePerMinimumReplica`, `TestConvergeResumesAfterProviderCheckpoint` |
+| `internal/workflows` | 2 | 2 | `TestApplyExistingHandlerIsDeterministic`, `TestApplyExistingHandlerRejectsInvalidPayload`, `TestConvergeCancellationDeletesProviderResource`, `TestConvergeCreatesExactlyOneResourcePerMinimumReplica`, `TestConvergeResumesAfterProviderCheckpoint`, `TestScaleDownWithdrawsRouterBeforeDeletingReplica` |
 | `tools/repo-context` | 1 | 0 | — |
 
 ## CLI commands
@@ -75,6 +75,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 - `GET /api/v1/deployments/{name}`
 - `GET /api/v1/deployments/{name}/events`
 - `GET /api/v1/deployments/{name}/revisions`
+- `GET /api/v1/deployments/{name}/scaling-decisions`
 - `GET /api/v1/operations/{id}`
 - `GET /api/v1/operations/{id}/events`
 - `GET /api/v1/orphans`
@@ -91,6 +92,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 - `POST /api/v1/principals/{id}/rotate`
 - `POST /api/v1/targets`
 - `POST /api/v1/tenants`
+- `POST /test/metrics`
 - `POST /v1/chat/completions`
 - `PUT /api/v1/deployments/{name}/route`
 - `PUT /api/v1/tenant/quota`
@@ -148,6 +150,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 - `internal/store/migrations/007_deployment_transition_serialization.sql`
 - `internal/store/migrations/008_replicas.sql`
 - `internal/store/migrations/009_deployment_revisions.sql`
+- `internal/store/migrations/010_autoscaling_operations.sql`
 
 ## Architecture decisions
 

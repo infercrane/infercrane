@@ -20,6 +20,7 @@ Errors are stable JSON objects:
 | `GET /deployments/{name}` | viewer | Inspect deployment, targets, replicas, revisions, and persisted request statistics. |
 | `GET /deployments/{name}/events` | viewer | List durable deployment events. |
 | `GET /deployments/{name}/revisions` | viewer | List immutable revision history. |
+| `GET /deployments/{name}/scaling-decisions` | viewer | List deterministic scaling evaluations and their persisted signals. |
 | `PUT /deployments/{name}/route` | operator | Change the persisted routing strategy. |
 | `DELETE /deployments/{name}` | admin | Withdraw routing and queue verified provider cleanup; requires `Idempotency-Key`. |
 | `GET /operations/{id}` | viewer | Inspect durable progress and result. |

@@ -145,7 +145,7 @@ func Build(in Input) (Plan, error) {
 		add("route", fmt.Sprintf("Reconcile the %s routing generation", in.Routing))
 	}
 	if in.MaxReplicas > in.MinReplicas {
-		p.Warnings = append(p.Warnings, "autoscaling policy is recorded but automatic scaling is not implemented")
+		add("autoscale", fmt.Sprintf("Enable bounded vLLM queue scaling from %d to %d replicas", in.MinReplicas, in.MaxReplicas))
 	}
 	return p, nil
 }

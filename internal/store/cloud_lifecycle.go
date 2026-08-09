@@ -73,6 +73,12 @@ func (s *Store) SubmitCloudDeployment(ctx context.Context, deployment domain.Dep
 		}
 		return domain.Deployment{}, domain.Operation{}, false, err
 	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO scaling_policies(deployment_id,enabled,min_replicas,max_replicas,queue_threshold,low_load_threshold,scale_up_intervals,scale_down_intervals,cooldown_seconds,updated_at) VALUES(?,?,?,?,1,0,2,6,60,?)`, deployment.ID, deployment.AutoscalingEnabled, deployment.MinReplicas, deployment.MaxReplicas, stamp); err != nil {
+		return domain.Deployment{}, domain.Operation{}, false, err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO autoscaling_state(deployment_id,consecutive_high,consecutive_low,desired_replicas,updated_at) VALUES(?,0,0,?,?)`, deployment.ID, deployment.MinReplicas, stamp); err != nil {
+		return domain.Deployment{}, domain.Operation{}, false, err
+	}
 	eventID, err := newID()
 	if err != nil {
 		return domain.Deployment{}, domain.Operation{}, false, err

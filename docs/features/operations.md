@@ -39,8 +39,10 @@ cooperative and checked at safe provider boundaries. Deletion requires `--yes`, 
 side-effect-free `--plan`, and provisioned targets without an active deployment appear in
 `infercrane orphans`.
 
-The autoscaling evaluator and controller enforce bounds, stability windows, and cooldowns and
-record every decision. No production fleet scaler is enabled yet.
+The autoscaling evaluator and controller scrape vLLM running/waiting gauges, enforce bounds,
+stability windows, and cooldowns, and persist every evaluation. Capacity changes are fenced by a
+durable scale operation. Scale-down first withdraws the worker set and waits for a matching router
+generation before provider deletion. Real RunPod scale acceptance remains a release gate.
 
 Queued work uses PostgreSQL leases and `SKIP LOCKED` so concurrent replicas cannot own the same
 operation. The durable state model distinguishes pending, leased, running, waiting, cancelling,

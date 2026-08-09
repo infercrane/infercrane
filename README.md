@@ -29,9 +29,9 @@ while workers are replaced, recovered, or reconfigured.
 ## Project status
 
 InferCrane is under active development. The core gateway, PostgreSQL control plane, existing-worker
-workflow, reconciliation, and router supervision are implemented and tested. SkyPilot and the
-Kubernetes deployment and bounded autoscaling controller are experimental until they complete
-environment-specific acceptance and soak testing. No production fleet scaler is enabled yet.
+workflow, reconciliation, router supervision, and durable bounded autoscaling are implemented and
+tested locally. SkyPilot provisioning and autoscaling remain experimental until real RunPod
+acceptance and soak testing complete.
 
 See the authoritative [capability status](docs/project-status.md) before relying on a feature.
 The [product vision and roadmap](docs/product-vision.md) defines the developer experience and the

@@ -43,12 +43,19 @@ func (f *fakeCloudStore) EnsureReplicaIntent(_ context.Context, replica domain.R
 	return replica, true, nil
 }
 func (f *fakeCloudStore) ReplicasForDeployment(context.Context, string, string) ([]domain.Replica, error) {
-	if f.replica.ID == "" {
-		return nil, nil
+	if len(f.replicas) > 0 {
+		out := make([]domain.Replica, 0, len(f.replicas))
+		for _, replica := range f.replicas {
+			out = append(out, replica)
+		}
+		return out, nil
 	}
-	return []domain.Replica{f.replica}, nil
+	if f.replica.ID != "" {
+		return []domain.Replica{f.replica}, nil
+	}
+	return nil, nil
 }
-func (f *fakeCloudStore) SetReplicaProviderIdentity(_ context.Context, _, requestID, resourceID string) error {
+func (f *fakeCloudStore) SetReplicaProviderIdentity(_ context.Context, id, requestID, resourceID string) error {
 	if f.replica.ProviderResourceID != "" && f.replica.ProviderResourceID != resourceID {
 		return domain.ErrConflict
 	}
@@ -56,15 +63,30 @@ func (f *fakeCloudStore) SetReplicaProviderIdentity(_ context.Context, _, reques
 		f.replica.ProviderRequestID = requestID
 	}
 	f.replica.ProviderResourceID = resourceID
+	if f.replicas != nil {
+		f.replicas[id] = f.replica
+	}
 	return nil
 }
-func (f *fakeCloudStore) ObserveReplica(_ context.Context, _, lifecycle, endpoint, health, details string, observed time.Time) error {
+func (f *fakeCloudStore) ObserveReplica(_ context.Context, id, lifecycle, endpoint, health, details string, observed time.Time) error {
+	if replica, ok := f.replicas[id]; ok {
+		f.replica = replica
+	}
 	f.replica.LifecycleState, f.replica.Endpoint, f.replica.Health, f.replica.ProviderDetails = lifecycle, endpoint, health, details
 	f.replica.LastObservedAt = &observed
+	if f.replicas != nil {
+		f.replicas[id] = f.replica
+	}
 	return nil
 }
-func (f *fakeCloudStore) MarkReplicaDeleted(context.Context, string) error {
+func (f *fakeCloudStore) MarkReplicaDeleted(_ context.Context, id string) error {
+	if replica, ok := f.replicas[id]; ok {
+		f.replica = replica
+	}
 	f.replica.LifecycleState = "deleted"
+	if f.replicas != nil {
+		f.replicas[id] = f.replica
+	}
 	return nil
 }
 func (f *fakeCloudStore) CheckpointClaimedOperation(_ context.Context, _, _ string, _ int64, step, _, _ string, _ int, _ string) error {
@@ -98,11 +120,29 @@ func TestConvergeCreatesExactlyOneResourcePerMinimumReplica(t *testing.T) {
 		t.Fatalf("ensure_calls=%d replicas=%d targets=%v err=%v", provider.ensureCalls, len(store.replicas), store.targetNames, err)
 	}
 }
+
+func TestScaleDownWithdrawsRouterBeforeDeletingReplica(t *testing.T) {
+	replicas := map[string]domain.Replica{
+		"replica-1": {ID: "replica-1", DeploymentID: "deployment-1", ExternalKey: "deployment-1-r0", Ordinal: 0, LifecycleState: "active", ProviderResourceID: "infercrane-deployment-1-r0"},
+		"replica-2": {ID: "replica-2", DeploymentID: "deployment-1", ExternalKey: "deployment-1-r1", Ordinal: 1, LifecycleState: "active", ProviderResourceID: "infercrane-deployment-1-r1"},
+	}
+	store := &fakeCloudStore{deployment: domain.Deployment{ID: "deployment-1", Name: "qwen", Model: "Qwen/Qwen3-8B", RoutingStrategy: "round-robin", MinReplicas: 1, MaxReplicas: 2}, replicas: replicas}
+	provider := &fakeReplicaProvider{observation: provision.Observation{Exists: true, State: "ready", Endpoint: "http://gpu:8000", Details: `{}`}}
+	operation := domain.Operation{ID: "operation-1", LeaseOwner: "worker", LeaseGeneration: 1, RequestJSON: `{"deployment_id":"deployment-1","name":"qwen","model":"Qwen/Qwen3-8B","cloud":"runpod","gpu":"L40S","tenant_id":"global","desired_replicas":1}`}
+	_, err := CloudHandlers(store, provider, fakeInspector{ready: true})[ReplicaDeleteKind](context.Background(), operation)
+	if err != nil || provider.deleteCalls != 1 || store.replicas["replica-2"].LifecycleState != "deleted" {
+		t.Fatalf("delete_calls=%d replica=%#v err=%v", provider.deleteCalls, store.replicas["replica-2"], err)
+	}
+}
 func (f *fakeCloudStore) DeleteDeploymentForTenant(context.Context, string, string) error {
 	f.deleted = true
 	return nil
 }
-func (f *fakeCloudStore) Audit(context.Context, domain.AuditEvent) error { return nil }
+func (f *fakeCloudStore) RoutingGenerationMatches(context.Context, string, string) (bool, error) {
+	return true, nil
+}
+func (f *fakeCloudStore) DeleteProvisionedTarget(context.Context, string, string) error { return nil }
+func (f *fakeCloudStore) Audit(context.Context, domain.AuditEvent) error                { return nil }
 
 type fakeReplicaProvider struct {
 	observation provision.Observation

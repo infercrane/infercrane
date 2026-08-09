@@ -73,6 +73,9 @@ func (f *fakeStore) Revisions(context.Context, string, string) ([]domain.Deploym
 func (f *fakeStore) OperationEvents(context.Context, string, int) ([]domain.OperationEvent, error) {
 	return nil, f.err
 }
+func (f *fakeStore) ScalingDecisionsForTenant(context.Context, string, string, int) ([]domain.ScalingDecision, error) {
+	return nil, f.err
+}
 func (f *fakeStore) AddTargetForTenant(_ context.Context, _ string, target domain.Target) (domain.Target, error) {
 	target.ID = "target"
 	return target, f.err
@@ -138,6 +141,16 @@ func TestDeploymentAndOperationEventsAreTenantScoped(t *testing.T) {
 		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"data"`) {
 			t.Fatalf("endpoint=%s response=%d %s", endpoint, response.Code, response.Body.String())
 		}
+	}
+}
+
+func TestScalingDecisionsAreReadThroughTenantAPI(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/deployments/qwen/scaling-decisions", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	(API{Store: &fakeStore{}, APIKey: "secret"}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"data"`) {
+		t.Fatalf("response=%d %s", response.Code, response.Body.String())
 	}
 }
 

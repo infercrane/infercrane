@@ -400,3 +400,18 @@ func (s *Store) RecordGeneration(ctx context.Context, generation domain.RouterGe
 	}
 	return generation, tx.Commit()
 }
+
+func (s *Store) RoutingGenerationMatches(ctx context.Context, deploymentID, workerSetHash string) (bool, error) {
+	var matched bool
+	err := s.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM router_generations WHERE deployment_id=? AND status='active' AND worker_set_hash=?)`, deploymentID, workerSetHash).Scan(&matched)
+	return matched, err
+}
+
+func (s *Store) DeleteProvisionedTarget(ctx context.Context, tenant, name string) error {
+	result, err := s.ExecContext(ctx, `DELETE FROM targets t WHERE t.tenant_id=? AND t.name=? AND t.provider='skypilot' AND NOT EXISTS(SELECT 1 FROM deployment_targets dt WHERE dt.target_id=t.id)`, tenant, name)
+	if err != nil {
+		return err
+	}
+	_, err = result.RowsAffected()
+	return err
+}

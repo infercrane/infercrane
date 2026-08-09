@@ -30,6 +30,7 @@ type Store interface {
 	ReplicasForDeployment(context.Context, string, string) ([]domain.Replica, error)
 	Revisions(context.Context, string, string) ([]domain.DeploymentRevision, error)
 	OperationEvents(context.Context, string, int) ([]domain.OperationEvent, error)
+	ScalingDecisionsForTenant(context.Context, string, string, int) ([]domain.ScalingDecision, error)
 	AddTargetForTenant(context.Context, string, domain.Target) (domain.Target, error)
 	TargetsForTenant(context.Context, string) ([]domain.Target, error)
 	DeploymentsForTenant(context.Context, string) ([]domain.Deployment, error)
@@ -64,6 +65,7 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/deployments/{name}", a.auth(authz.Read, a.deployment))
 	mux.HandleFunc("GET /api/v1/deployments/{name}/events", a.auth(authz.Read, a.deploymentEvents))
 	mux.HandleFunc("GET /api/v1/deployments/{name}/revisions", a.auth(authz.Read, a.revisions))
+	mux.HandleFunc("GET /api/v1/deployments/{name}/scaling-decisions", a.auth(authz.Read, a.scalingDecisions))
 	mux.HandleFunc("PUT /api/v1/deployments/{name}/route", a.auth(authz.Deploy, a.setRoute))
 	mux.HandleFunc("GET /api/v1/targets", a.auth(authz.Read, a.targets))
 	mux.HandleFunc("POST /api/v1/targets", a.auth(authz.Deploy, a.addTarget))
@@ -364,6 +366,23 @@ func (a API) revisions(w http.ResponseWriter, r *http.Request) {
 	data := make([]map[string]any, 0, len(rows))
 	for _, revision := range rows {
 		data = append(data, revisionResponse(revision))
+	}
+	writeJSON(w, 200, map[string]any{"data": data})
+}
+func (a API) scalingDecisions(w http.ResponseWriter, r *http.Request) {
+	principal := r.Context().Value(identityKey{}).(domain.Principal)
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	rows, err := a.Store.ScalingDecisionsForTenant(r.Context(), principal.TenantID, r.PathValue("name"), limit)
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, 404, "not_found", "deployment was not found")
+		return
+	} else if err != nil {
+		writeError(w, 500, "internal", "scaling decision lookup failed")
+		return
+	}
+	data := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		data = append(data, map[string]any{"id": row.ID, "action": row.Action, "old_replicas": row.OldReplicas, "new_replicas": row.NewReplicas, "reason": row.Reason, "signals": json.RawMessage(row.SignalsJSON), "created_at": row.CreatedAt})
 	}
 	writeJSON(w, 200, map[string]any{"data": data})
 }

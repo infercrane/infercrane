@@ -22,6 +22,7 @@ import (
 
 	"github.com/infercrane/infercrane/internal/accounting"
 	"github.com/infercrane/infercrane/internal/authn"
+	"github.com/infercrane/infercrane/internal/autoscale"
 	"github.com/infercrane/infercrane/internal/benchmark"
 	"github.com/infercrane/infercrane/internal/config"
 	"github.com/infercrane/infercrane/internal/controlapi"
@@ -941,7 +942,10 @@ func explainCommand(ctx context.Context, cfg config.Config, args []string) error
 	if len(args) == 0 {
 		return errors.New("usage: infercrane explain DEPLOYMENT [--output human|json]")
 	}
-	if args[0] == "scaling" || args[0] == "rollout" || args[0] == "cold-start" {
+	if args[0] == "scaling" {
+		return explainScalingCommand(ctx, cfg, args[1:])
+	}
+	if args[0] == "rollout" || args[0] == "cold-start" {
 		return fmt.Errorf("explain %s is not available until its persisted evidence schema is enabled", args[0])
 	}
 	fs := flag.NewFlagSet("explain", flag.ContinueOnError)
@@ -975,6 +979,46 @@ func explainCommand(ctx context.Context, cfg config.Config, args []string) error
 	for _, reason := range reasons {
 		fmt.Printf("- %s\n", reason)
 	}
+	return nil
+}
+
+func explainScalingCommand(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: infercrane explain scaling DEPLOYMENT [--output human|json]")
+	}
+	fs := flag.NewFlagSet("explain scaling", flag.ContinueOnError)
+	output := fs.String("output", "human", "human or json")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	var response struct {
+		Data []struct {
+			ID          string          `json:"id"`
+			Action      string          `json:"action"`
+			OldReplicas int             `json:"old_replicas"`
+			NewReplicas int             `json:"new_replicas"`
+			Reason      string          `json:"reason"`
+			Signals     json.RawMessage `json:"signals"`
+			CreatedAt   time.Time       `json:"created_at"`
+		} `json:"data"`
+	}
+	if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/deployments/"+url.PathEscape(args[0])+"/scaling-decisions?limit=20", "", nil, &response); err != nil {
+		return err
+	}
+	if *output == "json" {
+		encoded, _ := json.MarshalIndent(response, "", "  ")
+		fmt.Println(string(encoded))
+		return nil
+	}
+	if *output != "human" {
+		return errors.New("--output must be human or json")
+	}
+	if len(response.Data) == 0 {
+		fmt.Printf("%s has no persisted scaling evaluation yet\n", args[0])
+		return nil
+	}
+	latest := response.Data[0]
+	fmt.Printf("%s scaling: %s\nReplicas    %d -> %d\nReason      %s\nSignals     %s\nEvaluated   %s\n", args[0], latest.Action, latest.OldReplicas, latest.NewReplicas, latest.Reason, latest.Signals, latest.CreatedAt.Format(time.RFC3339))
 	return nil
 }
 
@@ -1021,6 +1065,8 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 			logger.Error("operation worker stopped", "error", err)
 		}
 	}()
+	autoscaler := autoscale.Controller{Repository: s, Signals: autoscale.VLLMSignals{Targets: s, Client: client, APIKey: cfg.APIKey}, Fleet: s}
+	go runAutoscaler(ctx, autoscaler, cfg.HealthInterval, logger)
 	gatewayTelemetry := &gateway.Telemetry{Extra: operationTelemetry.WritePrometheus}
 	server := &http.Server{Addr: fmt.Sprintf("%s:%d", cfg.Host, cfg.Port), Handler: (&gateway.Gateway{Routes: directory, APIKey: cfg.APIKey, Authenticator: credentialCache, Recorder: recorder, Logger: logger, Client: client, Ready: s.Ping, Control: control, Telemetry: gatewayTelemetry}).Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 1 << 20}
 	go func() {
@@ -1035,6 +1081,20 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		return nil
 	}
 	return err
+}
+func runAutoscaler(ctx context.Context, controller autoscale.Controller, interval time.Duration, logger *slog.Logger) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		if err := controller.Once(ctx); err != nil && ctx.Err() == nil {
+			logger.Error("autoscaling reconciliation failed", "error", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 func purgeRequests(ctx context.Context, s *store.Store, retention time.Duration, logger *slog.Logger) {
 	ticker := time.NewTicker(time.Hour)
