@@ -1,14 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -76,6 +79,14 @@ func run(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	switch args[0] {
+	case "deploy":
+		return deployAPICommand(ctx, cfg, "deploy", args[1:])
+	case "apply":
+		return deployAPICommand(ctx, cfg, "apply", args[1:])
+	case "delete":
+		return deleteAPICommand(ctx, cfg, args[1:])
+	}
 	s, err := store.Open(ctx, cfg.DatabaseURL, store.Options{MaxOpenConns: cfg.DatabaseMaxOpen, MaxIdleConns: cfg.DatabaseMaxIdle})
 	if err != nil {
 		return err
@@ -84,18 +95,12 @@ func run(ctx context.Context, args []string) error {
 	switch args[0] {
 	case "target":
 		return targetCommand(ctx, s, args[1:])
-	case "deploy":
-		return deployCommand(ctx, cfg, s, "deploy", args[1:])
-	case "apply":
-		return deployCommand(ctx, cfg, s, "apply", args[1:])
 	case "deployments":
 		return listDeployments(ctx, s)
 	case "route":
 		return routeCommand(ctx, s, args[1:])
 	case "status":
 		return statusCommand(ctx, cfg, s, args[1:])
-	case "delete":
-		return deleteCommand(ctx, cfg, s, args[1:])
 	case "inspect":
 		return inspectCommand(ctx, s, args[1:])
 	case "operation":
@@ -298,9 +303,9 @@ func targetCommand(ctx context.Context, s *store.Store, args []string) error {
 	}
 	return err
 }
-func deployCommand(ctx context.Context, cfg config.Config, s *store.Store, operationKind string, args []string) error {
+func deployAPICommand(ctx context.Context, cfg config.Config, operationKind string, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: infercrane deploy MODEL --name NAME --targets TARGETS")
+		return errors.New("usage: infercrane deploy MODEL [--cloud CLOUD --gpu GPU | --targets TARGETS]")
 	}
 	model := args[0]
 	fs := flag.NewFlagSet("deploy", flag.ContinueOnError)
@@ -309,6 +314,9 @@ func deployCommand(ctx context.Context, cfg config.Config, s *store.Store, opera
 	cloud := fs.String("cloud", "", "SkyPilot cloud")
 	gpu := fs.String("gpu", "", "GPU")
 	region := fs.String("region", "", "region")
+	minReplicas := fs.Int("min", 1, "minimum replicas")
+	maxReplicas := fs.Int("max", 1, "maximum replicas")
+	wait := fs.Bool("wait", false, "wait for the operation to finish")
 	idempotencyKey := fs.String("idempotency-key", "", "safe retry key")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
@@ -330,77 +338,42 @@ func deployCommand(ctx context.Context, cfg config.Config, s *store.Store, opera
 		*region = file.Provider.Region
 		strategy = file.Routing.Strategy
 		runtimeArgs = file.Runtime.Args
+		*minReplicas, *maxReplicas = file.Scaling.MinReplicas, file.Scaling.MaxReplicas
 	}
 	if *name == "" {
 		*name = planning.DefaultName(model)
 	}
-	request, _ := json.Marshal(map[string]any{"name": *name, "model": model, "targets": *targets, "cloud": *cloud, "gpu": *gpu, "region": *region})
-	op, created, err := s.StartOperation(ctx, domain.Operation{Kind: operationKind, ResourceType: "deployment", ResourceName: *name, IdempotencyKey: *idempotencyKey, RequestJSON: string(request)})
-	if err != nil {
-		return err
+	if *minReplicas < 1 || *maxReplicas < *minReplicas {
+		return errors.New("replica bounds must satisfy 1 <= min <= max")
 	}
-	if !created {
-		if op.Status == "succeeded" {
-			fmt.Printf("deployment %s already applied (operation %s)\n", *name, op.ID)
-			return nil
-		}
-		return fmt.Errorf("operation %s already exists with status %s", op.ID, op.Status)
+	if *idempotencyKey == "" {
+		*idempotencyKey = fmt.Sprintf("cli-%s-%d", *name, time.Now().UnixNano())
 	}
-	failOperation := func(code string, cause error, retryable bool) error {
-		_ = s.FailOperation(context.WithoutCancel(ctx), op.ID, code, cause.Error(), retryable)
-		return fmt.Errorf("operation %s: %w", op.ID, cause)
-	}
-	_ = s.UpdateOperation(ctx, op.ID, 10, "validated deployment request")
-	var targetNames []string
+	path := "/api/v1/deployments"
+	var request any
 	if *targets != "" {
 		if *cloud != "" || *gpu != "" {
-			return failOperation("invalid_request", errors.New("use either --targets or --cloud/--gpu"), false)
+			return errors.New("use either --targets or --cloud/--gpu")
 		}
-		targetNames = splitTargets(*targets)
+		path = "/api/v1/deployments/apply"
+		request = workflows.ApplyExistingRequest{Name: *name, Model: model, Targets: splitTargets(*targets), RoutingStrategy: strategy, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas, AutoscalingEnabled: *maxReplicas > *minReplicas}
 	} else if *cloud != "" && *gpu != "" {
-		p := provision.SkyPilot{APIKey: cfg.APIKey}
-		created, err := p.Deploy(ctx, provision.DeploymentSpec{Name: *name, Model: model, Cloud: *cloud, GPU: *gpu, Region: *region, RuntimeArgs: runtimeArgs})
-		if err != nil {
-			return failOperation("provision_failed", err, true)
-		}
-		_ = s.UpdateOperation(ctx, op.ID, 65, "capacity provisioned and runtime ready")
-		current, checkErr := s.Operation(ctx, op.ID)
-		if checkErr != nil {
-			return checkErr
-		}
-		if current.CancelRequested {
-			if destroyErr := p.Destroy(context.WithoutCancel(ctx), created.ProviderResourceID); destroyErr != nil {
-				return failOperation("cancel_cleanup_failed", destroyErr, true)
-			}
-			if cancelErr := s.CancelOperation(context.WithoutCancel(ctx), op.ID, "cancelled after provisioning boundary"); cancelErr != nil {
-				return cancelErr
-			}
-			return fmt.Errorf("operation %s cancelled", op.ID)
-		}
-		row, err := s.AddTarget(ctx, domain.Target{Name: created.Name, URL: created.URL, Provider: "skypilot", Runtime: "vllm", UpstreamModel: created.UpstreamModel})
-		if err != nil {
-			return failOperation("target_registration_failed", err, false)
-		}
-		if err = s.UpdateProvisionedTarget(ctx, row.ID, created.ProviderResourceID, created.Details); err != nil {
-			return failOperation("target_metadata_failed", err, false)
-		}
-		targetNames = []string{row.Name}
+		request = workflows.CloudRequest{Name: *name, Model: model, Cloud: *cloud, GPU: *gpu, Region: *region, RuntimeArgs: runtimeArgs, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas}
 	} else {
-		return failOperation("invalid_request", errors.New("provide --targets or both --cloud and --gpu"), false)
+		return errors.New("provide --targets or both --cloud and --gpu")
 	}
-	_ = s.UpdateOperation(ctx, op.ID, 80, "persisting logical deployment")
-	row, err := s.ApplyDeployment(ctx, domain.Deployment{Name: *name, Model: model, RoutingStrategy: strategy}, targetNames)
-	if err == nil {
-		result, _ := json.Marshal(map[string]string{"deployment": row.Name})
-		if finishErr := s.FinishOperation(ctx, op.ID, string(result)); finishErr != nil {
-			return finishErr
-		}
-		_ = s.Audit(ctx, domain.AuditEvent{Action: "deployment.deploy", ResourceType: "deployment", ResourceName: row.Name, Outcome: "succeeded", Payload: string(request)})
-		fmt.Printf("deployment %s applied\n", row.Name)
-		fmt.Printf("operation %s succeeded\n", op.ID)
-		return nil
+	var response struct {
+		Operation domain.Operation `json:"operation"`
 	}
-	return failOperation("persistence_failed", err, false)
+	if err := controlJSON(ctx, cfg, http.MethodPost, path, *idempotencyKey, request, &response); err != nil {
+		return err
+	}
+	fmt.Printf("Deployment  %s\nOperation   %s\nStatus      %s\n", *name, response.Operation.ID, response.Operation.Status)
+	if *wait {
+		return waitForOperation(ctx, cfg, response.Operation.ID)
+	}
+	_ = operationKind // deploy/apply share API semantics; retained for command UX.
+	return nil
 }
 func listDeployments(ctx context.Context, s *store.Store) error {
 	rows, err := s.Deployments(ctx)
@@ -464,53 +437,104 @@ func statusCommand(ctx context.Context, cfg config.Config, s *store.Store, args 
 	fmt.Printf("Requests/s  %.2f\nError rate  %.1f%%\n", stats.RequestsPerSecond, stats.ErrorRate*100)
 	return nil
 }
-func deleteCommand(ctx context.Context, cfg config.Config, s *store.Store, args []string) error {
+func deleteAPICommand(ctx context.Context, cfg config.Config, args []string) error {
 	if len(args) == 0 {
 		return errors.New("usage: infercrane delete DEPLOYMENT [--keep-resources]")
 	}
 	fs := flag.NewFlagSet("delete", flag.ContinueOnError)
-	keep := fs.Bool("keep-resources", false, "keep cloud resources")
 	planOnly := fs.Bool("plan", false, "show deletion actions without mutating")
 	yes := fs.Bool("yes", false, "confirm destructive deletion")
+	wait := fs.Bool("wait", false, "wait for provider cleanup")
+	idempotencyKey := fs.String("idempotency-key", "", "safe retry key")
 	if err := fs.Parse(args[1:]); err != nil {
-		return err
-	}
-	resolved, err := s.Resolve(ctx, args[0])
-	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return err
 	}
 	if *planOnly {
 		fmt.Printf("Deletion plan: %s\n", args[0])
-		if errors.Is(err, store.ErrNotFound) {
-			fmt.Println("1. No deployment exists; no action required")
-			return nil
-		}
-		for _, target := range resolved.Targets {
-			if target.ProviderResourceID != "" && !*keep {
-				fmt.Printf("- destroy %s resource %s\n", target.Provider, target.ProviderResourceID)
-			}
-		}
-		fmt.Println("- mark deployment deleted and remove it from routing")
+		fmt.Println("- withdraw deployment from new routing")
+		fmt.Println("- delete every provider resource and verify inventory absence")
 		return nil
 	}
 	if !*yes {
 		return errors.New("deletion requires --yes; run with --plan first")
 	}
-	if err == nil && !*keep {
-		p := provision.SkyPilot{APIKey: cfg.APIKey}
-		for _, target := range resolved.Targets {
-			if target.Provider == "skypilot" && target.ProviderResourceID != "" {
-				if err := p.Destroy(ctx, target.ProviderResourceID); err != nil {
-					return fmt.Errorf("resource cleanup failed; retry or use --keep-resources: %w", err)
-				}
-			}
-		}
+	if *idempotencyKey == "" {
+		*idempotencyKey = fmt.Sprintf("cli-delete-%s-%d", args[0], time.Now().UnixNano())
 	}
-	if err := s.DeleteDeployment(ctx, args[0]); err != nil {
+	var response struct {
+		Operation domain.Operation `json:"operation"`
+	}
+	if err := controlJSON(ctx, cfg, http.MethodDelete, "/api/v1/deployments/"+url.PathEscape(args[0]), *idempotencyKey, nil, &response); err != nil {
 		return err
 	}
-	fmt.Printf("deployment %s deleted\n", args[0])
+	fmt.Printf("Deployment  %s\nOperation   %s\nStatus      %s\n", args[0], response.Operation.ID, response.Operation.Status)
+	if *wait {
+		return waitForOperation(ctx, cfg, response.Operation.ID)
+	}
 	return nil
+}
+
+func controlJSON(ctx context.Context, cfg config.Config, method, path, idempotencyKey string, requestBody, responseBody any) error {
+	var body io.Reader
+	if requestBody != nil {
+		encoded, err := json.Marshal(requestBody)
+		if err != nil {
+			return fmt.Errorf("encode control-plane request: %w", err)
+		}
+		body = bytes.NewReader(encoded)
+	}
+	request, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(cfg.ControlURL, "/")+path, body)
+	if err != nil {
+		return fmt.Errorf("create control-plane request: %w", err)
+	}
+	request.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+	if requestBody != nil {
+		request.Header.Set("Content-Type", "application/json")
+	}
+	if idempotencyKey != "" {
+		request.Header.Set("Idempotency-Key", idempotencyKey)
+	}
+	client := &http.Client{Timeout: 30 * time.Second}
+	response, err := client.Do(request)
+	if err != nil {
+		return fmt.Errorf("control plane %s is unreachable: %w", cfg.ControlURL, err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		data, _ := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+		return fmt.Errorf("control plane returned %s: %s", response.Status, strings.TrimSpace(string(data)))
+	}
+	if responseBody == nil || response.StatusCode == http.StatusNoContent {
+		_, _ = io.Copy(io.Discard, response.Body)
+		return nil
+	}
+	if err = json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(responseBody); err != nil {
+		return fmt.Errorf("decode control-plane response: %w", err)
+	}
+	return nil
+}
+
+func waitForOperation(ctx context.Context, cfg config.Config, id string) error {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		var operation domain.Operation
+		if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/operations/"+url.PathEscape(id), "", nil, &operation); err != nil {
+			return err
+		}
+		fmt.Printf("Progress    %d%%  %s\n", operation.Progress, operation.Message)
+		switch operation.Status {
+		case "succeeded":
+			return nil
+		case "failed", "cancelled":
+			return fmt.Errorf("operation %s %s: %s", id, operation.Status, operation.Message)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 func operationCommand(ctx context.Context, s *store.Store, args []string) error {

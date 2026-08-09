@@ -106,6 +106,63 @@ func (s *Store) SubmitCloudDeployment(ctx context.Context, deployment domain.Dep
 	return deployment, operation, true, nil
 }
 
+// SubmitDeploymentDelete atomically withdraws desired routing state and queues
+// provider cleanup. A failed enqueue rolls back the state change.
+func (s *Store) SubmitDeploymentDelete(ctx context.Context, tenant, name, deploymentID string, operation domain.Operation) (domain.Operation, bool, error) {
+	if tenant == "" || name == "" || deploymentID == "" || operation.Kind == "" || operation.IdempotencyKey == "" {
+		return domain.Operation{}, false, errors.New("tenant, deployment identity, operation kind, and idempotency key are required")
+	}
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return domain.Operation{}, false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if existing, lookupErr := operationByKeyQuery(ctx, tx, tenant, operation.Kind, operation.IdempotencyKey); lookupErr == nil {
+		return existing, false, nil
+	} else if !errors.Is(lookupErr, ErrNotFound) {
+		return domain.Operation{}, false, lookupErr
+	}
+	var currentID, desired string
+	if err = tx.QueryRowContext(ctx, `SELECT id,desired_state FROM deployments WHERE tenant_id=? AND name=? FOR UPDATE`, tenant, name).Scan(&currentID, &desired); errors.Is(err, sql.ErrNoRows) {
+		return domain.Operation{}, false, ErrNotFound
+	} else if err != nil {
+		return domain.Operation{}, false, err
+	}
+	if currentID != deploymentID {
+		return domain.Operation{}, false, fmt.Errorf("%w: deployment identity changed", ErrConflict)
+	}
+	if desired == "deleted" {
+		return domain.Operation{}, false, fmt.Errorf("%w: deployment deletion is already in progress", ErrConflict)
+	}
+	stamp := now()
+	if _, err = tx.ExecContext(ctx, `UPDATE deployments SET desired_state='deleted',observed_state='deleting',updated_at=? WHERE id=?`, stamp, deploymentID); err != nil {
+		return domain.Operation{}, false, err
+	}
+	operation.ID, err = newID()
+	if err != nil {
+		return domain.Operation{}, false, err
+	}
+	operation.TenantID, operation.ResourceType, operation.ResourceName = tenant, "deployment", name
+	operation.Status = "pending"
+	if operation.MaxAttempts == 0 {
+		operation.MaxAttempts = 120
+	}
+	if operation.RequestJSON == "" {
+		operation.RequestJSON = "{}"
+	}
+	operation.CreatedAt, operation.UpdatedAt = parseTime(stamp), parseTime(stamp)
+	if _, err = tx.ExecContext(ctx, `INSERT INTO operations(id,tenant_id,kind,resource_type,resource_name,idempotency_key,status,progress,message,request_json,result_json,attempt,max_attempts,next_attempt_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?::jsonb,'{}'::jsonb,?,?,?,?,?)`, operation.ID, tenant, operation.Kind, operation.ResourceType, operation.ResourceName, operation.IdempotencyKey, operation.Status, 0, "queued", operation.RequestJSON, 0, operation.MaxAttempts, stamp, stamp, stamp); err != nil {
+		if isUniqueViolation(err) {
+			return domain.Operation{}, false, fmt.Errorf("%w: deployment already has an unresolved lifecycle operation", ErrConflict)
+		}
+		return domain.Operation{}, false, err
+	}
+	if err = tx.Commit(); err != nil {
+		return domain.Operation{}, false, err
+	}
+	return operation, true, nil
+}
+
 func operationByKeyQuery(ctx context.Context, tx *tx, tenant, kind, key string) (domain.Operation, error) {
 	var out domain.Operation
 	var created, updated string

@@ -41,3 +41,11 @@ func TestProductionRequiresStrongSecretAndDatabaseTLS(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestRejectsUnsafeControlPlaneURL(t *testing.T) {
+	t.Setenv("INFERCRANE_API_KEY", "secret")
+	t.Setenv("INFERCRANE_URL", "https://user:password@control.example/api?token=secret")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected embedded control-plane credentials and query to be rejected")
+	}
+}

@@ -47,6 +47,17 @@ func (f *fakeStore) SubmitCloudDeployment(_ context.Context, deployment domain.D
 	f.operation = operation
 	return deployment, operation, f.created, f.err
 }
+func (f *fakeStore) SubmitDeploymentDelete(_ context.Context, _, name, _ string, operation domain.Operation) (domain.Operation, bool, error) {
+	operation.ID, operation.Status, operation.ResourceName = "queued", "pending", name
+	f.operation = operation
+	return operation, f.created, f.err
+}
+func (f *fakeStore) ResolveForTenant(context.Context, string, string) (domain.ResolvedDeployment, error) {
+	if f.err != nil {
+		return domain.ResolvedDeployment{}, f.err
+	}
+	return domain.ResolvedDeployment{Deployment: domain.Deployment{ID: "deployment", Name: "qwen"}}, nil
+}
 func (f *fakeStore) AddTargetForTenant(_ context.Context, _ string, target domain.Target) (domain.Target, error) {
 	target.ID = "target"
 	return target, f.err
@@ -113,6 +124,18 @@ func TestCloudDeployPersistsAndQueuesConverge(t *testing.T) {
 	}
 	if !strings.Contains(store.operation.RequestJSON, `"tenant_id":"global"`) {
 		t.Fatalf("request=%s", store.operation.RequestJSON)
+	}
+}
+
+func TestDeleteQueuesDurableCleanup(t *testing.T) {
+	store := &fakeStore{created: true}
+	request := httptest.NewRequest(http.MethodDelete, "/api/v1/deployments/qwen", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Idempotency-Key", "delete-qwen")
+	response := httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret"}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted || store.operation.Kind != "deployment.delete" || !strings.Contains(store.operation.RequestJSON, `"deployment_id":"deployment"`) {
+		t.Fatalf("response=%d %s operation=%#v", response.Code, response.Body.String(), store.operation)
 	}
 }
 

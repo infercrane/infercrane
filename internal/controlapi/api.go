@@ -23,6 +23,8 @@ type Store interface {
 	RequestOperationCancel(context.Context, string) error
 	EnqueueOperation(context.Context, domain.Operation) (domain.Operation, bool, error)
 	SubmitCloudDeployment(context.Context, domain.Deployment, domain.Operation) (domain.Deployment, domain.Operation, bool, error)
+	SubmitDeploymentDelete(context.Context, string, string, string, domain.Operation) (domain.Operation, bool, error)
+	ResolveForTenant(context.Context, string, string) (domain.ResolvedDeployment, error)
 	AddTargetForTenant(context.Context, string, domain.Target) (domain.Target, error)
 	TargetsForTenant(context.Context, string) ([]domain.Target, error)
 	DeploymentsForTenant(context.Context, string) ([]domain.Deployment, error)
@@ -49,6 +51,7 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/operations/{id}/cancel", a.auth(authz.Deploy, a.cancel))
 	mux.HandleFunc("POST /api/v1/deployments/apply", a.auth(authz.Deploy, a.applyDeployment))
 	mux.HandleFunc("POST /api/v1/deployments", a.auth(authz.Deploy, a.createCloudDeployment))
+	mux.HandleFunc("DELETE /api/v1/deployments/{name}", a.auth(authz.Delete, a.deleteDeployment))
 	mux.HandleFunc("GET /api/v1/deployments", a.auth(authz.Read, a.deployments))
 	mux.HandleFunc("GET /api/v1/targets", a.auth(authz.Read, a.targets))
 	mux.HandleFunc("POST /api/v1/targets", a.auth(authz.Deploy, a.addTarget))
@@ -59,6 +62,37 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/principals/{id}/rotate", a.auth(authz.ManageTenant, a.rotatePrincipal))
 	mux.HandleFunc("DELETE /api/v1/principals/{id}", a.auth(authz.ManageTenant, a.revokePrincipal))
 	return mux
+}
+
+func (a API) deleteDeployment(w http.ResponseWriter, r *http.Request) {
+	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if key == "" || len(key) > 128 {
+		writeError(w, http.StatusBadRequest, "invalid_idempotency_key", "Idempotency-Key is required and must not exceed 128 characters")
+		return
+	}
+	principal := r.Context().Value(identityKey{}).(domain.Principal)
+	resolved, err := a.Store.ResolveForTenant(r.Context(), principal.TenantID, r.PathValue("name"))
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "deployment was not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "deployment lookup failed")
+		return
+	}
+	request := workflows.DeleteRequest{DeploymentID: resolved.Deployment.ID, Name: resolved.Deployment.Name, Actor: principal.Name, TenantID: principal.TenantID}
+	encoded, _ := json.Marshal(request)
+	operation, created, err := a.Store.SubmitDeploymentDelete(r.Context(), principal.TenantID, resolved.Deployment.Name, resolved.Deployment.ID, domain.Operation{Kind: workflows.DeleteKind, IdempotencyKey: key, RequestJSON: string(encoded)})
+	if errors.Is(err, domain.ErrConflict) {
+		writeError(w, http.StatusConflict, "conflict", err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "deletion could not be submitted")
+		return
+	}
+	w.Header().Set("Location", "/api/v1/operations/"+operation.ID)
+	writeJSON(w, http.StatusAccepted, map[string]any{"operation": operationResponse(operation), "created": created})
 }
 
 func (a API) createCloudDeployment(w http.ResponseWriter, r *http.Request) {

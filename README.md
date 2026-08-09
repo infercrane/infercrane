@@ -110,11 +110,12 @@ Configure PostgreSQL and a strong API key, then register workers and create a lo
 export INFERCRANE_DATABASE_URL='postgres://USER:PASSWORD@HOST:5432/infercrane?sslmode=require'
 export INFERCRANE_API_KEY='REPLACE_WITH_A_STRONG_SECRET'
 export INFERCRANE_INSTANCE_ID="$(hostname)"
+export INFERCRANE_URL='https://infercrane.example.com'
 
 infercrane target add gpu-a --url http://gpu-a:8000 --runtime vllm
 infercrane target add gpu-b --url http://gpu-b:8000 --runtime vllm
 infercrane plan Qwen/Qwen3-8B --name qwen-prod --targets gpu-a,gpu-b
-infercrane apply Qwen/Qwen3-8B --name qwen-prod --targets gpu-a,gpu-b --idempotency-key release-001
+infercrane apply Qwen/Qwen3-8B --name qwen-prod --targets gpu-a,gpu-b --idempotency-key release-001 --wait
 infercrane route qwen-prod --strategy cache-aware
 infercrane serve
 ```
@@ -127,6 +128,10 @@ infercrane orphans
 infercrane delete qwen-prod --plan
 infercrane delete qwen-prod --yes
 ```
+
+`deploy`, `apply`, and `delete` submit durable operations to `INFERCRANE_URL`; they never execute
+cloud mutations or open PostgreSQL from the CLI process. Omitting `--wait` returns after submission,
+so closing the terminal cannot interrupt provisioning or cleanup.
 
 Create tenant-scoped credentials; the token is shown only once:
 

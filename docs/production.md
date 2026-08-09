@@ -10,6 +10,7 @@ Required configuration:
 - `INFERCRANE_ENV=production`: enables production security validation.
 - `INFERCRANE_DATABASE_URL`: PostgreSQL URL with TLS enabled outside a trusted private network.
 - `INFERCRANE_API_KEY`: at least 32 characters, supplied by the workload secret manager; no production default exists.
+- `INFERCRANE_URL`: absolute HTTP(S) control-plane base URL used by lifecycle CLI commands.
 - `INFERCRANE_INSTANCE_ID`: stable and unique per replica, normally the Kubernetes pod name.
 - `INFERCRANE_DATABASE_MAX_OPEN` and `INFERCRANE_DATABASE_MAX_IDLE`: size these with the total
   replica count below PostgreSQL's connection budget or place PgBouncer in transaction mode.
@@ -49,6 +50,8 @@ The control-plane API accepts the bootstrap bearer secret or hashed tenant-scope
 - `GET /api/v1/operations/{id}`
 - `POST /api/v1/operations/{id}/cancel`
 - `POST /api/v1/deployments/apply`
+- `POST /api/v1/deployments`
+- `DELETE /api/v1/deployments/{name}`
 - `GET /api/v1/deployments`
 - `GET|POST /api/v1/targets`
 - `GET /api/v1/orphans`

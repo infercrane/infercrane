@@ -9,9 +9,9 @@ import (
 )
 
 type Config struct {
-	DatabaseURL, Host, APIKey, RouterBinary, InstanceID, Environment   string
-	Port, RouterStartPort, DatabaseMaxOpen, DatabaseMaxIdle            int
-	HealthInterval, UpstreamTimeout, ShutdownTimeout, RequestRetention time.Duration
+	DatabaseURL, ControlURL, Host, APIKey, RouterBinary, InstanceID, Environment string
+	Port, RouterStartPort, DatabaseMaxOpen, DatabaseMaxIdle                      int
+	HealthInterval, UpstreamTimeout, ShutdownTimeout, RequestRetention           time.Duration
 }
 
 func Load() (Config, error) {
@@ -60,6 +60,7 @@ func load(requireAPIKey bool) (Config, error) {
 	}
 	config := Config{
 		DatabaseURL:  env("INFERCRANE_DATABASE_URL", "postgres://infercrane:infercrane@127.0.0.1:5432/infercrane?sslmode=disable"),
+		ControlURL:   env("INFERCRANE_URL", "http://127.0.0.1:8080"),
 		Host:         env("INFERCRANE_HOST", "127.0.0.1"),
 		APIKey:       env("INFERCRANE_API_KEY", ""),
 		RouterBinary: env("INFERCRANE_ROUTER_BINARY", "vllm-router"),
@@ -77,6 +78,10 @@ func load(requireAPIKey bool) (Config, error) {
 	}
 	if config.DatabaseURL == "" || config.InstanceID == "" {
 		return Config{}, fmt.Errorf("database URL and instance ID are required")
+	}
+	controlURL, controlErr := url.Parse(config.ControlURL)
+	if controlErr != nil || (controlURL.Scheme != "http" && controlURL.Scheme != "https") || controlURL.Host == "" || controlURL.User != nil || controlURL.RawQuery != "" || controlURL.Fragment != "" {
+		return Config{}, fmt.Errorf("INFERCRANE_URL must be an absolute HTTP(S) URL without credentials, query, or fragment")
 	}
 	if requireAPIKey && config.APIKey == "" {
 		return Config{}, fmt.Errorf("INFERCRANE_API_KEY is required")

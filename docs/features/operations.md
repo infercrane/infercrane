@@ -48,9 +48,9 @@ terminal result after ownership changes.
 Retryable work enters `waiting` with bounded exponential backoff and jitter. Resumable handlers can
 persist named JSON checkpoints; each checkpoint emits an ordered structured operation event.
 Cancellation is cooperative, and a cancelling operation whose worker dies is reclaimed only to
-finish cancellation safely. Existing-target apply is executed by this leased worker. Direct CLI
-apply remains available for administrative recovery. Cloud provisioning and deletion still execute
-synchronously and must move to checkpointed handlers before all mutations are crash-recoverable.
+finish cancellation safely. Existing-target apply, cloud convergence, and cloud deletion are
+executed by this leased worker. The deploy/apply/delete CLI commands submit through the control API;
+terminating the CLI does not terminate lifecycle execution.
 
 Cloud submission has an atomic storage primitive that creates the targetless desired deployment
 and its queued converge operation in one PostgreSQL transaction. Its required idempotency key makes

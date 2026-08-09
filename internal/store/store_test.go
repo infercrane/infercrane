@@ -93,6 +93,36 @@ func TestSubmitCloudDeploymentIsAtomicAndIdempotent(t *testing.T) {
 	}
 }
 
+func TestSubmitDeploymentDeleteWithdrawsDesiredStateAndQueuesCleanup(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	name := "delete-cloud-" + time.Now().UTC().Format("150405.000000000")
+	deployment, _, _, err := s.SubmitCloudDeployment(ctx,
+		domain.Deployment{Name: name, Model: "Qwen/Qwen3-8B", MinReplicas: 1, MaxReplicas: 1},
+		domain.Operation{Kind: "deployment.converge", IdempotencyKey: "create-" + name},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Finish the create transition so serialization permits delete.
+	if _, err = s.ExecContext(ctx, `UPDATE operations SET status='succeeded',completed_at=NOW() WHERE resource_name=?`, name); err != nil {
+		t.Fatal(err)
+	}
+	request := `{"deployment_id":"` + deployment.ID + `","name":"` + name + `","tenant_id":"global"}`
+	operation, created, err := s.SubmitDeploymentDelete(ctx, "global", name, deployment.ID, domain.Operation{Kind: "deployment.delete", IdempotencyKey: "delete-" + name, RequestJSON: request})
+	if err != nil || !created || operation.Status != "pending" {
+		t.Fatalf("delete submission=(%#v,%t,%v)", operation, created, err)
+	}
+	var desired, observed string
+	if err = s.QueryRowContext(ctx, `SELECT desired_state,observed_state FROM deployments WHERE id=?`, deployment.ID).Scan(&desired, &observed); err != nil || desired != "deleted" || observed != "deleting" {
+		t.Fatalf("state=(%s,%s,%v)", desired, observed, err)
+	}
+	again, againCreated, err := s.SubmitDeploymentDelete(ctx, "global", name, deployment.ID, domain.Operation{Kind: "deployment.delete", IdempotencyKey: "delete-" + name, RequestJSON: request})
+	if err != nil || againCreated || again.ID != operation.ID {
+		t.Fatalf("idempotent delete=(%#v,%t,%v)", again, againCreated, err)
+	}
+}
+
 func TestCreateDeploymentRejectsIncompatibleTargets(t *testing.T) {
 	ctx := context.Background()
 	s := openStore(t, ctx)
