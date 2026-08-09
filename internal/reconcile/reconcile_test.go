@@ -52,6 +52,7 @@ type fakeRouter struct {
 	startErr error
 	started  string
 	stopped  []string
+	running  []string
 	routes   *routes.Directory
 }
 
@@ -72,7 +73,10 @@ func (f *fakeRouter) Stop(id string) error {
 	f.stopped = append(f.stopped, id)
 	return nil
 }
-func (f *fakeRouter) Running(string) bool { return true }
+func (f *fakeRouter) Running(id string) bool {
+	f.running = append(f.running, id)
+	return true
+}
 
 func reconcilerFixture() (*fakeStore, *routes.Directory) {
 	store := &fakeStore{
@@ -83,6 +87,19 @@ func reconcilerFixture() (*fakeStore, *routes.Directory) {
 	directory := routes.New()
 	directory.Put(routes.Snapshot{DeploymentID: "deployment", Alias: "prod", UpstreamModel: "model", RouterURL: "http://old-router", RouterProcessID: "deployment-g1"})
 	return store, directory
+}
+
+func TestUnchangedGenerationUsesGenerationProcessIdentity(t *testing.T) {
+	store, directory := reconcilerFixture()
+	store.generation.WorkerSetHash = router.WorkerSetHash("round-robin", []string{"http://gpu"})
+	backend := &fakeRouter{routes: directory}
+	reconciler := Reconciler{Store: store, Routes: directory, Router: backend, Runtimes: map[string]Runtime{"vllm": healthyRuntime{}}, RouterStartPort: 18080, InstanceID: "instance"}
+	if err := reconciler.Once(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if backend.started != "" || len(backend.stopped) != 0 || len(backend.running) != 1 || backend.running[0] != "deployment-g1" {
+		t.Fatalf("started=%q stopped=%v running=%v", backend.started, backend.stopped, backend.running)
+	}
 }
 
 func TestRouterCandidateFailureLeavesOldGenerationServing(t *testing.T) {

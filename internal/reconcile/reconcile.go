@@ -205,7 +205,11 @@ func (r *Reconciler) Once(ctx context.Context) error {
 		if gerr != nil && !errors.Is(gerr, domain.ErrNotFound) {
 			return gerr
 		}
-		restart := errors.Is(gerr, domain.ErrNotFound) || generation.WorkerSetHash != hash || !r.Router.Running(d.ID)
+		running := false
+		if gerr == nil {
+			running = r.Router.Running(routerProcessID(d.ID, generation.Generation))
+		}
+		restart := errors.Is(gerr, domain.ErrNotFound) || generation.WorkerSetHash != hash || !running
 		if restart {
 			next := 1
 			if gerr == nil {
