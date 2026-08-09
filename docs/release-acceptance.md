@@ -1,5 +1,23 @@
 # v0.1 release acceptance record
 
+The resumable operator harness reduces the normal workflow to a few guarded commands:
+
+```bash
+./scripts/release-acceptance.sh local
+./scripts/release-acceptance.sh preflight
+./scripts/release-acceptance.sh elastic --approve-paid-resources
+./scripts/release-acceptance.sh serverless --approve-paid-resources
+./scripts/release-acceptance.sh cleanup
+./scripts/release-acceptance.sh report
+```
+
+`preflight` is read-only. Paid workflows require the explicit approval flag, generate stable names
+and idempotency keys, and retain sanitized evidence under the ignored
+`.infercrane/acceptance/` directory. `cleanup` resumes those same run-owned deployments instead of
+guessing resource names. The harness automates smoke coverage; the controlled disruption and timed
+provider observations below remain release gates and may not be inferred from a successful smoke
+run.
+
 This document is the evidence index for the first public release. A checkbox is not evidence:
 record the command, UTC time, final commit, sanitized log path, and provider resource identifiers
 for every manual run. Never mark a real-infrastructure gate from a fake worker or mocked provider

@@ -1,4 +1,4 @@
-.PHONY: build context context-check docs-dev docs-check test test-container test-stack test-failure test-store verify audit deadcode snapshot dev-up dev-down
+.PHONY: build context context-check docs-dev docs-check test test-container test-stack test-failure test-store verify audit deadcode snapshot acceptance-local acceptance-preflight acceptance-cleanup dev-up dev-down
 
 build:
 	go build ./cmd/infercrane
@@ -43,6 +43,15 @@ deadcode:
 
 snapshot:
 	goreleaser release --snapshot --clean
+
+acceptance-local:
+	./scripts/release-acceptance.sh local
+
+acceptance-preflight:
+	./scripts/release-acceptance.sh preflight
+
+acceptance-cleanup:
+	./scripts/release-acceptance.sh cleanup
 
 dev-up:
 	docker compose up --build -d
