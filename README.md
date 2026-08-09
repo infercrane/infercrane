@@ -14,7 +14,7 @@ infercrane deploy Qwen/Qwen3-8B
 - Explainable durable operations
 - Elastic and provider-native serverless compute
 
-Read the [InferCrane documentation](https://infercrane.mintlify.site) for the five-minute local quickstart, product concepts, operations, integrations, and references. The Mintlify source lives in [`docs/`](docs/index.mdx); run `npm install && npm run dev` there to preview documentation changes locally.
+Read the [InferCrane documentation](https://infercrane.mintlify.app) for the five-minute local quickstart, product concepts, operations, integrations, and references. The Mintlify source lives in [`docs/`](docs/index.mdx); run `npm install && npm run dev` there to preview documentation changes locally.
 
 ## Why InferCrane?
 
