@@ -58,7 +58,7 @@ The complete list is in [docs/architecture/invariants.md](docs/architecture/inva
 make context          # regenerate factual repository inventory
 make test             # race-enabled tests; store tests skip without test PostgreSQL
 make verify           # format check, generated-doc check, tests, vet, and build
-make deadcode         # reject unreachable functions (requires pinned deadcode tool)
+make deadcode         # reject unreachable functions with the pinned deadcode tool
 make dev-up           # development PostgreSQL, fake workers, and fake router
 make dev-down         # stop development services without deleting data
 ```

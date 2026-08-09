@@ -30,7 +30,7 @@ verify:
 	./scripts/verify-repository.sh
 
 audit:
-	govulncheck ./...
+	go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
 
 deadcode:
 	./scripts/check-dead-code.sh

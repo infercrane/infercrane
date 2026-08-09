@@ -8,12 +8,32 @@ model=${INFERCRANE_SMOKE_MODEL:-qwen-prod}
 docker compose up --build -d
 docker compose ps
 
+attempt=0
+until curl -fsS "$base_url/readyz" >/dev/null 2>&1; do
+  attempt=$((attempt + 1))
+  if [ "$attempt" -ge 60 ]; then
+    echo "InferCrane did not become ready within 60 seconds" >&2
+    docker compose logs --tail 100 infercrane >&2
+    exit 1
+  fi
+  sleep 1
+done
+
 curl -fsS "$base_url/livez" >/dev/null
 curl -fsS "$base_url/readyz" >/dev/null
 curl -fsS -H "Authorization: Bearer $api_key" "$base_url/v1/models" >/dev/null
-curl -fsS -H "Authorization: Bearer $api_key" -H 'Content-Type: application/json' \
+attempt=0
+until curl -fsS -H "Authorization: Bearer $api_key" -H 'Content-Type: application/json' \
   -d "{\"model\":\"$model\",\"messages\":[{\"role\":\"user\",\"content\":\"smoke test\"}]}" \
-  "$base_url/v1/chat/completions" >/dev/null
+  "$base_url/v1/chat/completions" >/dev/null 2>&1; do
+  attempt=$((attempt + 1))
+  if [ "$attempt" -ge 30 ]; then
+    echo "Smoke deployment did not become routable within 30 seconds" >&2
+    docker compose logs --tail 100 infercrane >&2
+    exit 1
+  fi
+  sleep 1
+done
 curl -fsS "$base_url/metrics" | grep -q 'infercrane_gateway_request_duration_seconds_bucket'
 
 docker compose exec -T infercrane infercrane plan Qwen/Qwen3-8B --targets gpu-a,gpu-b --output json >/dev/null

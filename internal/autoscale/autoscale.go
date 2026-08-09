@@ -80,15 +80,3 @@ func Evaluate(policy Policy, state State, signals Signals) (Decision, error) {
 	d.Reason = "signals are within policy thresholds"
 	return d, nil
 }
-
-type Scaler interface{ ScaleTo(replicas int) error }
-
-func Apply(decision Decision, scaler Scaler) error {
-	if decision.Action == "hold" {
-		return nil
-	}
-	if scaler == nil {
-		return errors.New("scaler is required for a scaling action")
-	}
-	return scaler.ScaleTo(decision.NewReplicas)
-}
