@@ -196,7 +196,7 @@ wait_serverless_zero() {
   while [ "$elapsed" -lt "$limit" ]; do
     endpoint_json=$(curl -fsS -H "Authorization: Bearer $api_key" \
       'https://rest.runpod.io/v1/endpoints?includeWorkers=true' | \
-      jq -c --arg id "$endpoint" '.[] | select(.id == $id) | {id,name,workersMin,workersMax,workers_observed:(.workers | length)}')
+      jq -c --arg id "$endpoint" '.[] | select(.id == $id) | {id,name,workersMin,workersMax,workers_observed:([.workers[]? | select(.desiredStatus != "EXITED")] | length)}')
     workers=$(printf '%s' "$endpoint_json" | jq -r '.workers_observed // -1')
     if [ "$workers" -eq 0 ]; then
       printf '%s\n' "$endpoint_json" >"$evidence/$deployment-scale-to-zero.json"
