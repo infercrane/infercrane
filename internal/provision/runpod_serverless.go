@@ -267,7 +267,14 @@ func (r RunPodServerless) doAbsolute(ctx context.Context, method, endpoint strin
 	return nil
 }
 
-func serverlessName(externalKey string) string { return clusterName(externalKey) + "-serverless" }
+// ServerlessEndpointName derives the provider-visible name from a persisted
+// replica external key. Keeping this deterministic lets cleanup recover an
+// endpoint even when RunPod accepted create but its response was lost.
+func ServerlessEndpointName(externalKey string) string {
+	return clusterName(externalKey) + "-serverless"
+}
+
+func serverlessName(externalKey string) string { return ServerlessEndpointName(externalKey) }
 
 func runPodGPUType(gpu string) string {
 	switch strings.ToUpper(strings.TrimSpace(gpu)) {

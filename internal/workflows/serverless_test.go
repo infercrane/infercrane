@@ -9,10 +9,12 @@ import (
 )
 
 type fakeServerlessProvider struct {
-	endpoint    provision.ServerlessEndpoint
-	ensureCalls int
-	deleteCalls int
-	deleted     bool
+	endpoint      provision.ServerlessEndpoint
+	ensureCalls   int
+	deleteCalls   int
+	deletedIDs    []string
+	deletePending bool
+	deleted       bool
 }
 
 func (f *fakeServerlessProvider) EnsureEndpoint(context.Context, provision.ServerlessEndpointSpec) (provision.ServerlessEndpoint, error) {
@@ -25,9 +27,12 @@ func (f *fakeServerlessProvider) ListEndpoints(context.Context) ([]provision.Ser
 	}
 	return []provision.ServerlessEndpoint{f.endpoint}, nil
 }
-func (f *fakeServerlessProvider) DeleteEndpoint(context.Context, string) error {
+func (f *fakeServerlessProvider) DeleteEndpoint(_ context.Context, id string) error {
 	f.deleteCalls++
-	f.deleted = true
+	f.deletedIDs = append(f.deletedIDs, id)
+	if !f.deletePending {
+		f.deleted = true
+	}
 	return nil
 }
 func (f *fakeServerlessProvider) EndpointURL(id string) string {
@@ -51,6 +56,26 @@ func TestServerlessDeleteConfirmsEndpointAbsentBeforeDeletingDeployment(t *testi
 	result, err := ServerlessHandlers(store, provider, fakeArtifactResolver{})[ServerlessDeleteKind](context.Background(), operation)
 	if err != nil || result == "" || provider.deleteCalls != 1 || store.replica.LifecycleState != "deleted" || !store.deleted {
 		t.Fatalf("result=%s delete_calls=%d replica=%+v deployment_deleted=%t err=%v", result, provider.deleteCalls, store.replica, store.deleted, err)
+	}
+}
+
+func TestServerlessDeleteRecoversEndpointByDurableNameWhenCreateResponseWasLost(t *testing.T) {
+	store := &fakeCloudStore{deployment: domain.Deployment{ID: "deployment-1", Name: "qwen"}, replica: domain.Replica{ID: "replica-1", DeploymentID: "deployment-1", RevisionID: "rev-1", ExternalKey: "deployment-1-rev-1", Provider: "runpod-serverless", LifecycleState: "provisioning"}}
+	provider := &fakeServerlessProvider{endpoint: provision.ServerlessEndpoint{ID: "endpoint-recovered", Name: provision.ServerlessEndpointName("deployment-1-rev-1")}}
+	operation := domain.Operation{ID: "cancel-1", RequestJSON: `{"deployment_id":"deployment-1","name":"qwen","tenant_id":"global"}`}
+	result, err := ServerlessHandlers(store, provider, fakeArtifactResolver{})[ServerlessConvergeKind+".cancel"](context.Background(), operation)
+	if err != nil || result == "" || provider.deleteCalls != 1 || len(provider.deletedIDs) != 1 || provider.deletedIDs[0] != "endpoint-recovered" || store.replica.LifecycleState != "deleted" || !store.deleted {
+		t.Fatalf("result=%s deleted_ids=%v replica=%+v deployment_deleted=%t err=%v", result, provider.deletedIDs, store.replica, store.deleted, err)
+	}
+}
+
+func TestServerlessDeleteDoesNotPersistDeletionWhileRecoveredEndpointRemains(t *testing.T) {
+	store := &fakeCloudStore{deployment: domain.Deployment{ID: "deployment-1", Name: "qwen"}, replica: domain.Replica{ID: "replica-1", DeploymentID: "deployment-1", ExternalKey: "deployment-1-rev-1", Provider: "runpod-serverless", LifecycleState: "provisioning"}}
+	provider := &fakeServerlessProvider{endpoint: provision.ServerlessEndpoint{ID: "endpoint-pending", Name: provision.ServerlessEndpointName("deployment-1-rev-1")}, deletePending: true}
+	operation := domain.Operation{ID: "delete-pending", RequestJSON: `{"deployment_id":"deployment-1","name":"qwen","tenant_id":"global"}`}
+	_, err := ServerlessHandlers(store, provider, fakeArtifactResolver{})[ServerlessDeleteKind](context.Background(), operation)
+	if err == nil || provider.deleteCalls != 1 || store.replica.LifecycleState == "deleted" || store.deleted {
+		t.Fatalf("delete_calls=%d replica=%+v deployment_deleted=%t err=%v", provider.deleteCalls, store.replica, store.deleted, err)
 	}
 }
 

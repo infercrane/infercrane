@@ -110,6 +110,12 @@ accounting, deletion, orphan reconciliation, and final zero-resource inventory. 
 not expose capacity/container/artifact/model-load boundaries; record them as unavailable rather than
 inferring timestamps.
 
+For orphan reconciliation, exercise the create-response-loss boundary (or an equivalent controlled
+interruption after provider acceptance but before identity persistence). The cancellation/delete
+operation must recover the endpoint by the deterministic replica external-key name, persist no
+false deletion while the endpoint remains visible, and finish only after RunPod inventory confirms
+absence. Do not create an extra endpoint to simulate this case.
+
 ## Benchmark evidence
 
 Run `infercrane benchmark DEPLOYMENT` only against the real immutable deployment. Attach the

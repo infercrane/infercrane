@@ -102,15 +102,32 @@ func ServerlessHandlers(store CloudStore, provider ServerlessProvider, artifactR
 			if replica.Provider != "runpod-serverless" || replica.LifecycleState == "deleted" {
 				continue
 			}
-			if err = provider.DeleteEndpoint(ctx, replica.ProviderResourceID); err != nil {
-				return "", operations.Retryable("serverless_endpoint_delete_failed", err)
-			}
 			endpoints, listErr := provider.ListEndpoints(ctx)
+			if listErr != nil {
+				return "", operations.Retryable("serverless_endpoint_inventory_failed", listErr)
+			}
+			ownedIDs := map[string]struct{}{}
+			if replica.ProviderResourceID != "" {
+				ownedIDs[replica.ProviderResourceID] = struct{}{}
+			}
+			expectedName := provision.ServerlessEndpointName(replica.ExternalKey)
+			for _, endpoint := range endpoints {
+				if endpoint.Name == expectedName {
+					ownedIDs[endpoint.ID] = struct{}{}
+				}
+			}
+			for endpointID := range ownedIDs {
+				if err = provider.DeleteEndpoint(ctx, endpointID); err != nil {
+					return "", operations.Retryable("serverless_endpoint_delete_failed", err)
+				}
+			}
+			endpoints, listErr = provider.ListEndpoints(ctx)
 			if listErr != nil {
 				return "", operations.Retryable("serverless_endpoint_observe_failed", listErr)
 			}
 			for _, endpoint := range endpoints {
-				if endpoint.ID == replica.ProviderResourceID {
+				_, identified := ownedIDs[endpoint.ID]
+				if identified || endpoint.Name == expectedName {
 					return "", operations.Retryable("serverless_endpoint_delete_pending", errors.New("RunPod Serverless endpoint deletion is pending"))
 				}
 			}

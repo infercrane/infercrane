@@ -69,6 +69,11 @@ Queued operations with no side effects may be cancelled immediately. Once work h
 retry/wait cycle, cancellation is itself leased work: the worker runs the operation-specific
 `.cancel` cleanup handler before publishing `cancelled`. Provider cleanup failures remain in
 `cancelling` and are retried, so cancellation cannot silently orphan a billable resource.
+RunPod Serverless cleanup inventories endpoints before deletion and reconciles them against both
+the persisted provider resource ID and the deterministic name derived from the replica external
+key. This closes the create-response-loss window: an endpoint accepted by RunPod before a lost
+response is still found, deleted, and confirmed absent before its replica or deployment is marked
+deleted. Final account inventory remains a required real-provider acceptance check.
 
 A PostgreSQL partial unique index serializes lifecycle mutations by tenant and deployment name.
 Only one pending, leased, running, waiting, or cancelling deployment operation may exist at a time;
