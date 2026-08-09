@@ -1070,7 +1070,7 @@ func explainCommand(ctx context.Context, cfg config.Config, args []string) error
 		return nil
 	}
 	if args[0] == "rollout" {
-		return fmt.Errorf("explain %s is not available until its persisted evidence schema is enabled", args[0])
+		return explainRolloutCommand(ctx, cfg, args[1:])
 	}
 	fs := flag.NewFlagSet("explain", flag.ContinueOnError)
 	output := fs.String("output", "human", "human or json")
@@ -1102,6 +1102,70 @@ func explainCommand(ctx context.Context, cfg config.Config, args []string) error
 	fmt.Printf("%s is %s\n", view.Deployment.Name, view.Deployment.ObservedState)
 	for _, reason := range reasons {
 		fmt.Printf("- %s\n", reason)
+	}
+	return nil
+}
+
+func explainRolloutCommand(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: infercrane explain rollout DEPLOYMENT [--output human|json]")
+	}
+	fs := flag.NewFlagSet("explain rollout", flag.ContinueOnError)
+	output := fs.String("output", "human", "human or json")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	view, err := fetchDeployment(ctx, cfg, args[0])
+	if err != nil {
+		return err
+	}
+	result := map[string]any{"deployment": view.Deployment.Name, "active_revision_id": view.Deployment.ActiveRevisionID, "candidate_revision_id": view.Deployment.CandidateRevisionID, "explanation_code": "no_candidate", "reasons": []any{}}
+	if view.Deployment.CandidateRevisionID != "" {
+		result["explanation_code"] = "candidate_pending_evaluation"
+		for _, revision := range view.Revisions {
+			if revision.ID == view.Deployment.CandidateRevisionID && revision.Reason != "" {
+				result["candidate_status"] = revision.Status
+				result["reasons"] = []any{map[string]any{"code": "revision_reason", "message": revision.Reason}}
+			}
+		}
+	}
+	if len(view.ReleaseGuardEvaluations) > 0 {
+		latest := view.ReleaseGuardEvaluations[0]
+		result["evaluation_id"], result["decision"], result["evaluated_at"] = latest.ID, latest.Decision, latest.CreatedAt
+		result["active_revision_id"], result["candidate_revision_id"] = latest.ActiveRevisionID, latest.CandidateRevisionID
+		var reasons any = []any{}
+		if len(latest.Reasons) > 0 {
+			_ = json.Unmarshal(latest.Reasons, &reasons)
+		}
+		result["reasons"] = reasons
+		var metrics any = map[string]any{}
+		if len(latest.Metrics) > 0 {
+			_ = json.Unmarshal(latest.Metrics, &metrics)
+		}
+		result["metrics"] = metrics
+		var policy any = map[string]any{}
+		if len(latest.Policy) > 0 {
+			_ = json.Unmarshal(latest.Policy, &policy)
+		}
+		result["policy"] = policy
+		result["explanation_code"] = "release_guard_" + strings.ToLower(latest.Decision)
+	}
+	if *output == "json" {
+		encoded, _ := json.MarshalIndent(result, "", "  ")
+		fmt.Println(string(encoded))
+		return nil
+	}
+	if *output != "human" {
+		return errors.New("--output must be human or json")
+	}
+	fmt.Printf("%s rollout\nActive       %s\nCandidate    %s\nExplanation  %s\n", view.Deployment.Name, emptyAs(result["active_revision_id"].(string), "none"), emptyAs(result["candidate_revision_id"].(string), "none"), result["explanation_code"])
+	if decision, ok := result["decision"].(string); ok {
+		fmt.Printf("Guard        %s\n", decision)
+	}
+	encoded, _ := json.Marshal(result["reasons"])
+	fmt.Printf("Reasons      %s\n", encoded)
+	if evaluated, ok := result["evaluated_at"].(time.Time); ok {
+		fmt.Printf("Evaluated    %s\n", evaluated.Format(time.RFC3339))
 	}
 	return nil
 }

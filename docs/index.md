@@ -31,6 +31,7 @@ than loading the entire repository into one context window.
 - [RunPod Serverless](features/serverless.md)
 - [Cold-start intelligence](features/cold-starts.md)
 - [Reproducible benchmarking](features/benchmarking.md)
+- [Deterministic explanations](features/explanations.md)
 
 ## Operations
 
