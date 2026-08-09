@@ -170,6 +170,22 @@ wait_replica_count() {
   return 1
 }
 
+wait_lifecycle_idle() {
+  deployment=$1
+  limit=${2:-600}
+  elapsed=0
+  while [ "$elapsed" -lt "$limit" ]; do
+    status=$(ic status "$deployment" --output json 2>/dev/null || true)
+    if [ -n "$status" ] && printf '%s' "$status" | jq -e '.active_operation == null' >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 10
+    elapsed=$((elapsed + 10))
+  done
+  echo "deployment lifecycle did not become idle within ${limit}s: $deployment" >&2
+  return 1
+}
+
 wait_serverless_zero() {
   deployment=$1
   limit=${2:-900}
@@ -197,6 +213,7 @@ delete_if_present() {
   deployment=$1
   key=$2
   if ic status "$deployment" --output json >/dev/null 2>&1; then
+    wait_lifecycle_idle "$deployment" 600
     record "delete-plan-$deployment" ic delete "$deployment" --plan --output json
     record "delete-$deployment" ic delete "$deployment" --yes --wait \
       --idempotency-key "$key" --output json
@@ -269,9 +286,12 @@ run_qualify() {
 
   # The benchmark supplies bounded real queue pressure. Autoscaling must prove
   # both provider convergence to two replicas and the idle return to one.
+  record elastic-autoscale-queue-load ic benchmark "$ELASTIC_NAME" --revision active \
+    --requests 2000 --concurrency 400 --random-seed 29 --output json
   record elastic-explain-scale-up ic explain scaling "$ELASTIC_NAME" --output json
   wait_replica_count "$ELASTIC_NAME" 2 900
   wait_replica_count "$ELASTIC_NAME" 1 600
+  wait_lifecycle_idle "$ELASTIC_NAME" 600
   record elastic-explain-scale-down ic explain scaling "$ELASTIC_NAME" --output json
 
   # A candidate with no provisioned capacity is a deterministic bad update:
