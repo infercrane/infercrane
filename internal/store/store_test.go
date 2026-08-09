@@ -70,7 +70,7 @@ func TestSubmitCloudDeploymentIsAtomicAndIdempotent(t *testing.T) {
 	ctx := context.Background()
 	s := openStore(t, ctx)
 	name := "cloud-" + time.Now().UTC().Format("150405.000000000")
-	request := `{"name":"` + name + `","model":"Qwen/Qwen3-8B"}`
+	request := `{"name":"` + name + `","model":"Qwen/Qwen3-8B","cloud":"runpod","gpu":"L40S","runtime_version":"0.10.2"}`
 	deployment, operation, created, err := s.SubmitCloudDeployment(ctx,
 		domain.Deployment{Name: name, Model: "Qwen/Qwen3-8B", MinReplicas: 1, MaxReplicas: 4, AutoscalingEnabled: true},
 		domain.Operation{Kind: "deployment.converge", IdempotencyKey: "submit-" + name, RequestJSON: request},
@@ -84,6 +84,10 @@ func TestSubmitCloudDeploymentIsAtomicAndIdempotent(t *testing.T) {
 	resolved, err := s.Resolve(ctx, name)
 	if err != nil || len(resolved.Targets) != 0 {
 		t.Fatalf("resolve targetless desired deployment = (%#v, %v)", resolved, err)
+	}
+	revision, err := s.Revision(ctx, "global", name, resolved.Deployment.ActiveRevisionID)
+	if err != nil || !strings.Contains(revision.SpecJSON, `"compute_mode": "elastic"`) || !strings.Contains(revision.SpecJSON, `"cloud": "runpod"`) || !strings.Contains(revision.SpecJSON, `"gpu": "L40S"`) {
+		t.Fatalf("active revision spec=%s err=%v", revision.SpecJSON, err)
 	}
 
 	againDeployment, againOperation, againCreated, err := s.SubmitCloudDeployment(ctx,

@@ -11,10 +11,11 @@ import (
 )
 
 const (
-	RolloutCreateKind   = "rollout.create-candidate"
-	RolloutPromoteKind  = "rollout.promote"
-	RolloutRejectKind   = "rollout.reject"
-	RolloutRollbackKind = "rollout.rollback"
+	RolloutCreateKind    = "rollout.create-candidate"
+	RolloutPromoteKind   = "rollout.promote"
+	RolloutRejectKind    = "rollout.reject"
+	RolloutRollbackKind  = "rollout.rollback"
+	RolloutProvisionKind = "rollout.provision-candidate"
 )
 
 type RolloutRequest struct {
@@ -32,6 +33,7 @@ type RolloutStore interface {
 	PromoteCandidateRevision(context.Context, string, string, string) error
 	RejectCandidateRevision(context.Context, string, string, string, string) error
 	RollbackRevision(context.Context, string, string, string, string) error
+	ReleaseGuardAccepted(context.Context, string, string, string) (bool, error)
 	Audit(context.Context, domain.AuditEvent) error
 }
 
@@ -46,6 +48,13 @@ func RolloutHandlers(store RolloutStore) map[string]operations.Handler {
 			case "promote":
 				if request.CandidateID == "" {
 					return "", operations.Permanent("invalid_request", errors.New("candidate_id is required"))
+				}
+				accepted, guardErr := store.ReleaseGuardAccepted(ctx, request.TenantID, request.Name, request.CandidateID)
+				if guardErr != nil {
+					return "", operations.Retryable("release_guard_lookup_failed", guardErr)
+				}
+				if !accepted {
+					return "", operations.Permanent("release_guard_not_accepted", errors.New("latest Release Guard evaluation has not accepted this candidate against the current active revision"))
 				}
 				err = store.PromoteCandidateRevision(ctx, request.TenantID, request.Name, request.CandidateID)
 			case "reject":

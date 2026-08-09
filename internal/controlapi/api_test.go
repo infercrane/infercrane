@@ -207,6 +207,7 @@ func TestRolloutTransitionsQueueDurableOperations(t *testing.T) {
 		{"/api/v1/deployments/prod/rollouts", `{"spec":{"model":"Qwen/Qwen3-8B"}}`, "rollout.create-candidate"},
 		{"/api/v1/deployments/prod/rollouts/guard/evaluate", ``, "release-guard.evaluate"},
 		{"/api/v1/deployments/prod/rollouts/rev-2/promote", ``, "rollout.promote"},
+		{"/api/v1/deployments/prod/rollouts/rev-2/provision", ``, "rollout.provision-candidate"},
 		{"/api/v1/deployments/prod/rollouts/rev-2/reject", `{"reason":"readiness failed"}`, "rollout.reject"},
 		{"/api/v1/deployments/prod/rollback", `{"revision_id":"rev-1","reason":"operator rollback"}`, "rollout.rollback"},
 	}

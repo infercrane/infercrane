@@ -38,6 +38,7 @@ type CloudRequest struct {
 	MaxReplicas            int      `json:"max_replicas,omitempty"`
 	DesiredReplicas        int      `json:"desired_replicas,omitempty"`
 	PreviousReplicas       int      `json:"previous_replicas,omitempty"`
+	Candidate              bool     `json:"candidate,omitempty"`
 	Actor                  string   `json:"actor,omitempty"`
 	TenantID               string   `json:"tenant_id,omitempty"`
 }
@@ -75,6 +76,8 @@ type CloudStore interface {
 	DeleteProvisionedTarget(context.Context, string, string) error
 	ModelArtifactForRevision(context.Context, string, string) (domain.ModelArtifact, error)
 	AttachModelArtifact(context.Context, string, string, domain.ModelArtifact) (domain.ModelArtifact, error)
+	Revision(context.Context, string, string, string) (domain.DeploymentRevision, error)
+	RejectCandidateRevision(context.Context, string, string, string, string) error
 	Audit(context.Context, domain.AuditEvent) error
 }
 
@@ -252,12 +255,126 @@ func CloudHandlers(store CloudStore, provider ReplicaProvider, runtime RuntimeIn
 		operation.RequestJSON = mustJSON(request)
 		return converge(ctx, operation)
 	}
+	candidate := func(ctx context.Context, operation domain.Operation) (string, error) {
+		var rollout RolloutRequest
+		if err := json.Unmarshal([]byte(operation.RequestJSON), &rollout); err != nil || rollout.Name == "" || rollout.TenantID == "" || rollout.CandidateID == "" {
+			return "", operations.Permanent("invalid_request", errors.New("deployment and candidate revision are required"))
+		}
+		revision, err := store.Revision(ctx, rollout.TenantID, rollout.Name, rollout.CandidateID)
+		if err != nil {
+			return "", operations.Permanent("candidate_not_found", fmt.Errorf("candidate revision lookup: %w", err))
+		}
+		if revision.Status != "candidate" {
+			return "", operations.Permanent("candidate_not_found", errors.New("revision is not the current candidate"))
+		}
+		var spec domain.DeploymentRevisionSpec
+		if err = json.Unmarshal([]byte(revision.SpecJSON), &spec); err != nil {
+			return "", operations.Permanent("invalid_candidate_spec", err)
+		}
+		if spec.ComputeMode != "elastic" {
+			return "", operations.Permanent("unsupported_compute_mode", errors.New("candidate provisioning currently requires elastic compute"))
+		}
+		resolved, err := store.ResolveForTenant(ctx, rollout.TenantID, rollout.Name)
+		if err != nil {
+			return "", operations.Permanent("deployment_missing", err)
+		}
+		request := CloudRequest{DeploymentID: resolved.Deployment.ID, Name: rollout.Name, Model: spec.Model, ModelRevision: spec.ModelRevision, RevisionID: revision.ID, Cloud: spec.Cloud, GPU: spec.GPU, Region: spec.Region, RuntimeVersion: spec.RuntimeVersion, RuntimeArgs: spec.RuntimeArgs, Port: spec.Port, MinReplicas: spec.MinReplicas, MaxReplicas: spec.MaxReplicas, DesiredReplicas: spec.MinReplicas, TenantID: rollout.TenantID, Actor: rollout.Actor, Candidate: true}
+		modelArtifact, artifactErr := store.ModelArtifactForRevision(ctx, request.TenantID, request.RevisionID)
+		if errors.Is(artifactErr, domain.ErrNotFound) {
+			if artifactResolver == nil {
+				return "", operations.Permanent("artifact_resolver_unavailable", errors.New("Hugging Face artifact resolver is required"))
+			}
+			modelArtifact, artifactErr = artifactResolver.Resolve(ctx, request.Model, request.ModelRevision)
+			if artifactErr == nil {
+				modelArtifact, artifactErr = store.AttachModelArtifact(ctx, request.TenantID, request.RevisionID, modelArtifact)
+			}
+		}
+		if artifactErr != nil {
+			return "", operations.Retryable("artifact_resolution_failed", artifactErr)
+		}
+		request.ImmutableModelRevision = modelArtifact.ImmutableRevision
+		var endpoints []string
+		var resourceIDs []string
+		for ordinal := 0; ordinal < request.DesiredReplicas; ordinal++ {
+			_, endpoint, resourceID, ensureErr := ensureCloudReplica(ctx, store, provider, runtime, operation, request, ordinal)
+			if ensureErr != nil {
+				return "", ensureErr
+			}
+			endpoints = append(endpoints, endpoint)
+			resourceIDs = append(resourceIDs, resourceID)
+		}
+		_ = checkpoint(ctx, store, operation, "candidate.ready", "succeeded", map[string]any{"revision_id": revision.ID, "endpoints": endpoints}, 95, "Candidate capacity is ready and isolated from active routing")
+		result, _ := json.Marshal(map[string]any{"candidate_id": revision.ID, "endpoints": endpoints, "resource_ids": resourceIDs, "replicas": len(endpoints)})
+		return string(result), nil
+	}
+	candidateCleanup := func(ctx context.Context, operation domain.Operation) (string, error) {
+		var rollout RolloutRequest
+		if err := json.Unmarshal([]byte(operation.RequestJSON), &rollout); err != nil || rollout.Name == "" || rollout.TenantID == "" || rollout.CandidateID == "" {
+			return "", operations.Permanent("invalid_request", errors.New("deployment and candidate revision are required"))
+		}
+		resolved, err := store.ResolveForTenant(ctx, rollout.TenantID, rollout.Name)
+		if err != nil {
+			return "", operations.Permanent("deployment_missing", err)
+		}
+		replicas, err := store.ReplicasForDeployment(ctx, rollout.TenantID, resolved.Deployment.ID)
+		if err != nil {
+			return "", operations.Retryable("replica_lookup_failed", err)
+		}
+		deleted := 0
+		for _, replica := range replicas {
+			if replica.RevisionID != rollout.CandidateID || replica.LifecycleState == "deleted" {
+				continue
+			}
+			handle := provider.Handle(replica.ExternalKey)
+			handle.RequestID, handle.ResourceID = replica.ProviderRequestID, replica.ProviderResourceID
+			if err = provider.DeleteReplica(ctx, handle); err != nil {
+				return "", operations.Retryable("provider_delete_failed", err)
+			}
+			observation, observeErr := provider.ObserveReplica(ctx, handle, 0)
+			if observeErr != nil {
+				return "", operations.Retryable("provider_delete_observe_failed", observeErr)
+			}
+			if observation.Exists {
+				return "", operations.Retryable("provider_delete_pending", errors.New("candidate resource deletion is pending"))
+			}
+			if err = store.MarkReplicaDeleted(ctx, replica.ID); err != nil {
+				return "", classify("replica_delete_persist_failed", err)
+			}
+			targetName := fmt.Sprintf("%s-%s-r%d", rollout.Name, rollout.CandidateID[:min(8, len(rollout.CandidateID))], replica.Ordinal)
+			if err = store.DeleteProvisionedTarget(ctx, rollout.TenantID, targetName); err != nil && !errors.Is(err, domain.ErrNotFound) {
+				return "", classify("target_delete_failed", err)
+			}
+			deleted++
+		}
+		result, _ := json.Marshal(map[string]any{"candidate_id": rollout.CandidateID, "deleted_replicas": deleted})
+		return string(result), nil
+	}
+	candidateReject := func(ctx context.Context, operation domain.Operation) (string, error) {
+		if _, err := candidateCleanup(ctx, operation); err != nil {
+			return "", err
+		}
+		var rollout RolloutRequest
+		if err := json.Unmarshal([]byte(operation.RequestJSON), &rollout); err != nil {
+			return "", operations.Permanent("invalid_request", err)
+		}
+		if rollout.Reason == "" {
+			return "", operations.Permanent("invalid_request", errors.New("rejection reason is required"))
+		}
+		if err := store.RejectCandidateRevision(ctx, rollout.TenantID, rollout.Name, rollout.CandidateID, rollout.Reason); err != nil {
+			return "", classify("candidate_reject_failed", err)
+		}
+		result, _ := json.Marshal(map[string]any{"candidate_id": rollout.CandidateID, "rejected": true, "reason": rollout.Reason})
+		return string(result), nil
+	}
 
 	return map[string]operations.Handler{
 		ConvergeKind: converge, ReplicaProvisionKind: converge, ReplicaDeleteKind: converge, ScaleKind: converge,
 		DeleteKind:               cleanup,
 		ConvergeKind + ".cancel": cleanup, ReplicaProvisionKind + ".cancel": cleanup,
-		ScaleKind + ".cancel": cancelScale,
+		ScaleKind + ".cancel":            cancelScale,
+		RolloutProvisionKind:             candidate,
+		RolloutProvisionKind + ".cancel": candidateCleanup,
+		RolloutRejectKind:                candidateReject,
 	}
 }
 
@@ -268,7 +385,10 @@ func mustJSON(value any) string {
 
 func ensureCloudReplica(ctx context.Context, store CloudStore, provider ReplicaProvider, runtime RuntimeInspector, operation domain.Operation, request CloudRequest, ordinal int) (string, string, string, error) {
 	externalKey := fmt.Sprintf("%s-r%d", request.DeploymentID, ordinal)
-	replica, _, err := store.EnsureReplicaIntent(ctx, domain.Replica{TenantID: request.TenantID, DeploymentID: request.DeploymentID, Ordinal: ordinal, ExternalKey: externalKey, Provider: "skypilot"})
+	if request.Candidate {
+		externalKey = fmt.Sprintf("%s-%s-r%d", request.DeploymentID, request.RevisionID, ordinal)
+	}
+	replica, _, err := store.EnsureReplicaIntent(ctx, domain.Replica{TenantID: request.TenantID, DeploymentID: request.DeploymentID, RevisionID: request.RevisionID, Ordinal: ordinal, ExternalKey: externalKey, Provider: "skypilot"})
 	if err != nil {
 		return "", "", "", classify("replica_intent_failed", err)
 	}
@@ -312,6 +432,9 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, provider ReplicaP
 		return "", "", "", classify("observation_failed", err)
 	}
 	targetName := fmt.Sprintf("%s-r%d", request.Name, ordinal)
+	if request.Candidate {
+		targetName = fmt.Sprintf("%s-%s-r%d", request.Name, request.RevisionID[:min(8, len(request.RevisionID))], ordinal)
+	}
 	target, err := store.AddTargetForTenant(ctx, request.TenantID, domain.Target{Name: targetName, URL: observation.Endpoint, Provider: "skypilot", Runtime: "vllm", UpstreamModel: request.Model})
 	if err != nil {
 		return "", "", "", classify("target_registration_failed", err)
@@ -319,7 +442,11 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, provider ReplicaP
 	if err = store.UpdateProvisionedTarget(ctx, target.ID, ensured.ResourceID, observation.Details); err != nil {
 		return "", "", "", classify("target_metadata_failed", err)
 	}
-	if err = store.ObserveReplica(ctx, replica.ID, "active", observation.Endpoint, "healthy", observation.Details, time.Now()); err != nil {
+	lifecycle := "active"
+	if request.Candidate {
+		lifecycle = "ready"
+	}
+	if err = store.ObserveReplica(ctx, replica.ID, lifecycle, observation.Endpoint, "healthy", observation.Details, time.Now()); err != nil {
 		return "", "", "", classify("activation_failed", err)
 	}
 	return targetName, observation.Endpoint, ensured.ResourceID, nil

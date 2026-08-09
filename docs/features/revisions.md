@@ -4,6 +4,8 @@ Every deployment starts with an immutable active revision. A rollout creates a s
 
 ```console
 infercrane rollout create qwen-prod --model Qwen/Qwen3-8B --min 1 --max 4 --wait
+infercrane rollout create qwen-prod --model Qwen/Qwen3-8B --cloud runpod --gpu H100 --wait
+infercrane rollout provision qwen-prod REVISION_ID --wait
 infercrane rollout inspect qwen-prod
 infercrane rollout promote qwen-prod REVISION_ID --wait
 infercrane rollout reject qwen-prod REVISION_ID --reason "readiness failed" --wait
@@ -12,4 +14,6 @@ infercrane rollout rollback qwen-prod REVISION_ID --reason "operator rollback" -
 
 Only one candidate may exist for a deployment. Rejections and rollbacks require a persisted reason. Replaying the operation that created a candidate returns the same candidate, and replaying an already committed transition is a no-op.
 
-Manual promotion is an explicit operator action. Release Guard will provide the deterministic policy decision and evidence required by the guarded rollout path; candidate creation alone never routes traffic.
+Elastic candidates persist their RunPod cloud, GPU, region, vLLM version and arguments, model revision, and replica bounds in the immutable revision spec. Candidate provisioning uses revision-scoped provider identities and does not publish those workers into active routing. Cancelling provisioning or rejecting the candidate removes only candidate capacity; the active revision is never part of that cleanup set.
+
+Promotion is an explicit operator action and is refused unless the latest persisted Release Guard evaluation accepted that candidate against the still-current active revision. Candidate creation and provisioning alone never route traffic.

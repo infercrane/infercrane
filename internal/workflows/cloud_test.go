@@ -2,6 +2,7 @@ package workflows
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"testing"
@@ -19,6 +20,8 @@ type fakeCloudStore struct {
 	target      domain.Target
 	targetNames []string
 	deleted     bool
+	revision    domain.DeploymentRevision
+	applied     bool
 }
 
 func (f *fakeCloudStore) ResolveForTenant(context.Context, string, string) (domain.ResolvedDeployment, error) {
@@ -108,6 +111,7 @@ func (f *fakeCloudStore) ApplyDeploymentForTenant(_ context.Context, _ string, d
 		return domain.Deployment{}, errors.New("target was not registered")
 	}
 	deployment.ID = f.deployment.ID
+	f.applied = true
 	return deployment, nil
 }
 
@@ -118,6 +122,35 @@ func TestConvergeCreatesExactlyOneResourcePerMinimumReplica(t *testing.T) {
 	_, err := CloudHandlers(store, provider, fakeInspector{ready: true})[ConvergeKind](context.Background(), operation)
 	if err != nil || provider.ensureCalls != 2 || len(store.replicas) != 2 || len(store.targetNames) != 2 {
 		t.Fatalf("ensure_calls=%d replicas=%d targets=%v err=%v", provider.ensureCalls, len(store.replicas), store.targetNames, err)
+	}
+}
+
+func TestCandidateProvisioningCreatesIsolatedRevisionCapacity(t *testing.T) {
+	spec := domain.DeploymentRevisionSpec{Model: "Qwen/Qwen3-8B", Runtime: "vllm", RoutingStrategy: "round-robin", MinReplicas: 1, MaxReplicas: 1, ComputeMode: "elastic", Cloud: "runpod", GPU: "L40S"}
+	encoded, _ := json.Marshal(spec)
+	store := &fakeCloudStore{deployment: domain.Deployment{ID: "deployment-1", Name: "qwen", ActiveRevisionID: "rev-1"}, revision: domain.DeploymentRevision{ID: "rev-2", Status: "candidate", SpecJSON: string(encoded)}}
+	provider := &fakeReplicaProvider{observation: provision.Observation{Exists: true, State: "ready", Endpoint: "http://candidate:8000", Details: `{}`}}
+	operation := domain.Operation{ID: "operation-candidate", LeaseOwner: "worker", LeaseGeneration: 1, RequestJSON: `{"name":"qwen","candidate_id":"rev-2","tenant_id":"global"}`}
+	result, err := CloudHandlers(store, provider, fakeInspector{ready: true})[RolloutProvisionKind](context.Background(), operation)
+	if err != nil || result == "" || provider.ensureCalls != 1 || store.replica.RevisionID != "rev-2" || store.replica.LifecycleState != "ready" || store.applied {
+		t.Fatalf("result=%s replica=%#v applied=%t ensure_calls=%d err=%v", result, store.replica, store.applied, provider.ensureCalls, err)
+	}
+	if store.replica.ExternalKey != "deployment-1-rev-2-r0" || store.target.Name != "qwen-rev-2-r0" {
+		t.Fatalf("replica=%#v target=%#v", store.replica, store.target)
+	}
+}
+
+func TestCandidateCancellationDeletesOnlyCandidateCapacity(t *testing.T) {
+	replicas := map[string]domain.Replica{
+		"active":    {ID: "active", DeploymentID: "deployment-1", RevisionID: "rev-1", ExternalKey: "deployment-1-r0", LifecycleState: "active", ProviderResourceID: "active-resource"},
+		"candidate": {ID: "candidate", DeploymentID: "deployment-1", RevisionID: "rev-2", ExternalKey: "deployment-1-rev-2-r0", LifecycleState: "ready", ProviderResourceID: "candidate-resource"},
+	}
+	store := &fakeCloudStore{deployment: domain.Deployment{ID: "deployment-1", Name: "qwen", ActiveRevisionID: "rev-1", CandidateRevisionID: "rev-2"}, replicas: replicas}
+	provider := &fakeReplicaProvider{observation: provision.Observation{Exists: true, State: "ready"}}
+	operation := domain.Operation{RequestJSON: `{"name":"qwen","candidate_id":"rev-2","tenant_id":"global"}`}
+	_, err := CloudHandlers(store, provider, fakeInspector{})[RolloutProvisionKind+".cancel"](context.Background(), operation)
+	if err != nil || provider.deleteCalls != 1 || store.replicas["candidate"].LifecycleState != "deleted" || store.replicas["active"].LifecycleState != "active" || store.deleted {
+		t.Fatalf("replicas=%#v delete_calls=%d deployment_deleted=%t err=%v", store.replicas, provider.deleteCalls, store.deleted, err)
 	}
 }
 
@@ -144,6 +177,15 @@ func (f *fakeCloudStore) RoutingGenerationMatches(context.Context, string, strin
 func (f *fakeCloudStore) DeleteProvisionedTarget(context.Context, string, string) error { return nil }
 func (f *fakeCloudStore) ModelArtifactForRevision(context.Context, string, string) (domain.ModelArtifact, error) {
 	return domain.ModelArtifact{Repository: "Qwen/Qwen3-8B", ImmutableRevision: "0123456789abcdef0123456789abcdef01234567", ModelIdentity: "Qwen/Qwen3-8B@0123456789abcdef0123456789abcdef01234567", CacheState: "unknown"}, nil
+}
+func (f *fakeCloudStore) Revision(context.Context, string, string, string) (domain.DeploymentRevision, error) {
+	if f.revision.ID == "" {
+		return domain.DeploymentRevision{}, domain.ErrNotFound
+	}
+	return f.revision, nil
+}
+func (f *fakeCloudStore) RejectCandidateRevision(context.Context, string, string, string, string) error {
+	return nil
 }
 func (f *fakeCloudStore) AttachModelArtifact(_ context.Context, _, _ string, artifact domain.ModelArtifact) (domain.ModelArtifact, error) {
 	return artifact, nil

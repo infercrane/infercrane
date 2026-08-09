@@ -35,7 +35,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 | `internal/store` | 13 | 2 | `TestApplyDeploymentConvergesTargetMembership`, `TestCancellingQueuedOperationPreventsClaim`, `TestCancellingWaitingOperationRequiresCleanupClaim`, `TestCreateDeploymentRejectsIncompatibleTargets`, `TestDeploymentLifecycleMutationsAreSerialized`, `TestDeploymentRevisionsAreImmutableAndPromoteExplicitly`, `TestDurableAutoscalingAcceptanceOneToTwoToOne`, `TestModelArtifactIsImmutablePerRevision`, `TestOperationQueueLeasesAndRecoversExpiredWork`, `TestOrphanedTargetsOnlyReturnsProvisionedUnusedTargets`, `TestPrincipalCredentialRotationAndRevocation`, `TestReleaseGuardPersistsDeterministicCandidateDecision`, `TestReplicaIntentAndProviderIdentityAreIdempotent`, `TestRequestTelemetryPersistsMeasurementsAndDimensions`, `TestRevisionTransitionsAreReplaySafeForDurableOperation`, `TestScaleToQueuesExactlyOneDurableOperation`, `TestStaleLeaseCannotCheckpointOrFinish`, `TestSubmitCloudDeploymentIsAtomicAndIdempotent`, `TestSubmitDeploymentDeleteWithdrawsDesiredStateAndQueuesCleanup`, `TestTargetAndDeploymentLifecycle`, `TestTargetConflict`, `TestTenantQuotaRejectsDeploymentBeyondReplicaLimit`, `TestTenantResourcesCanReuseNamesWithoutCrossTenantVisibility` |
 | `internal/testtools/fake-router` | 1 | 0 | — |
 | `internal/testtools/fake-vllm` | 1 | 0 | — |
-| `internal/workflows` | 4 | 3 | `TestApplyExistingHandlerIsDeterministic`, `TestApplyExistingHandlerRejectsInvalidPayload`, `TestConvergeCancellationDeletesProviderResource`, `TestConvergeCreatesExactlyOneResourcePerMinimumReplica`, `TestConvergeResumesAfterProviderCheckpoint`, `TestRolloutHandlersPersistExplicitTransitions`, `TestScaleDownWithdrawsRouterBeforeDeletingReplica` |
+| `internal/workflows` | 4 | 3 | `TestApplyExistingHandlerIsDeterministic`, `TestApplyExistingHandlerRejectsInvalidPayload`, `TestCandidateCancellationDeletesOnlyCandidateCapacity`, `TestCandidateProvisioningCreatesIsolatedRevisionCapacity`, `TestConvergeCancellationDeletesProviderResource`, `TestConvergeCreatesExactlyOneResourcePerMinimumReplica`, `TestConvergeResumesAfterProviderCheckpoint`, `TestRolloutHandlersPersistExplicitTransitions`, `TestScaleDownWithdrawsRouterBeforeDeletingReplica` |
 | `tools/repo-context` | 1 | 0 | — |
 
 ## CLI commands
@@ -61,6 +61,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 - `plan`
 - `principal`
 - `promote`
+- `provision`
 - `reject`
 - `revoke`
 - `rollback`
@@ -99,6 +100,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 - `POST /api/v1/deployments/{name}/rollouts`
 - `POST /api/v1/deployments/{name}/rollouts/guard/evaluate`
 - `POST /api/v1/deployments/{name}/rollouts/{revision}/promote`
+- `POST /api/v1/deployments/{name}/rollouts/{revision}/provision`
 - `POST /api/v1/deployments/{name}/rollouts/{revision}/reject`
 - `POST /api/v1/operations/{id}/cancel`
 - `POST /api/v1/principals`
@@ -173,6 +175,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 - `internal/store/migrations/012_request_telemetry.sql`
 - `internal/store/migrations/013_revision_operation_identity.sql`
 - `internal/store/migrations/014_release_guard.sql`
+- `internal/store/migrations/015_revision_compute_spec.sql`
 
 ## Architecture decisions
 

@@ -74,6 +74,7 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/deployments/{name}/release-guard/policy", a.auth(authz.Read, a.releaseGuardPolicy))
 	mux.HandleFunc("PUT /api/v1/deployments/{name}/release-guard/policy", a.auth(authz.Deploy, a.setReleaseGuardPolicy))
 	mux.HandleFunc("POST /api/v1/deployments/{name}/rollouts/{revision}/promote", a.auth(authz.Deploy, a.promoteRollout))
+	mux.HandleFunc("POST /api/v1/deployments/{name}/rollouts/{revision}/provision", a.auth(authz.Deploy, a.provisionRollout))
 	mux.HandleFunc("POST /api/v1/deployments/{name}/rollouts/{revision}/reject", a.auth(authz.Deploy, a.rejectRollout))
 	mux.HandleFunc("POST /api/v1/deployments/{name}/rollback", a.auth(authz.Deploy, a.rollbackDeployment))
 	mux.HandleFunc("GET /api/v1/deployments/{name}/scaling-decisions", a.auth(authz.Read, a.scalingDecisions))
@@ -452,6 +453,10 @@ func (a API) setReleaseGuardPolicy(w http.ResponseWriter, r *http.Request) {
 
 func (a API) promoteRollout(w http.ResponseWriter, r *http.Request) {
 	a.enqueueRollout(w, r, workflows.RolloutPromoteKind, workflows.RolloutRequest{Name: r.PathValue("name"), CandidateID: r.PathValue("revision")})
+}
+
+func (a API) provisionRollout(w http.ResponseWriter, r *http.Request) {
+	a.enqueueRollout(w, r, workflows.RolloutProvisionKind, workflows.RolloutRequest{Name: r.PathValue("name"), CandidateID: r.PathValue("revision")})
 }
 
 func (a API) rejectRollout(w http.ResponseWriter, r *http.Request) {

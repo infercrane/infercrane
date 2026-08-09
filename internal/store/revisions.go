@@ -25,15 +25,7 @@ func (s *Store) EnsureCandidateRevision(ctx context.Context, tenant, deploymentN
 	if tenant == "" {
 		tenant = "global"
 	}
-	type revisionSpec struct {
-		Model              string `json:"model"`
-		Runtime            string `json:"runtime"`
-		RoutingStrategy    string `json:"routing_strategy"`
-		MinReplicas        int    `json:"min_replicas"`
-		MaxReplicas        int    `json:"max_replicas"`
-		AutoscalingEnabled bool   `json:"autoscaling_enabled"`
-	}
-	var normalized revisionSpec
+	var normalized domain.DeploymentRevisionSpec
 	decoder := json.NewDecoder(bytes.NewReader([]byte(specJSON)))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&normalized); err != nil || normalized.Model == "" {
@@ -47,6 +39,22 @@ func (s *Store) EnsureCandidateRevision(ctx context.Context, tenant, deploymentN
 	}
 	if normalized.Runtime != "vllm" {
 		return domain.DeploymentRevision{}, errors.New("v0.1 revision runtime must be vllm")
+	}
+	if normalized.ComputeMode == "" {
+		if normalized.Cloud != "" || normalized.GPU != "" {
+			normalized.ComputeMode = "elastic"
+		} else {
+			normalized.ComputeMode = "existing"
+		}
+	}
+	if normalized.ComputeMode != "existing" && normalized.ComputeMode != "elastic" && normalized.ComputeMode != "serverless" {
+		return domain.DeploymentRevision{}, errors.New("revision compute mode is unsupported")
+	}
+	if normalized.ComputeMode == "elastic" && (normalized.Cloud == "" || normalized.GPU == "") {
+		return domain.DeploymentRevision{}, errors.New("elastic revision requires cloud and gpu")
+	}
+	if normalized.Cloud != "" && normalized.Cloud != "runpod" {
+		return domain.DeploymentRevision{}, errors.New("v0.1 revision cloud must be runpod")
 	}
 	if normalized.RoutingStrategy == "" {
 		normalized.RoutingStrategy = "round-robin"
@@ -143,6 +151,17 @@ func (s *Store) Revisions(ctx context.Context, tenant, deploymentName string) ([
 		revisions = append(revisions, revision)
 	}
 	return revisions, rows.Err()
+}
+
+func (s *Store) Revision(ctx context.Context, tenant, deploymentName, revisionID string) (domain.DeploymentRevision, error) {
+	if tenant == "" {
+		tenant = "global"
+	}
+	revision, err := scanRevision(s.QueryRowContext(ctx, `SELECT `+revisionColumns+` FROM deployment_revisions r JOIN deployments d ON d.id=r.deployment_id WHERE d.tenant_id=? AND d.name=? AND r.id=?`, tenant, deploymentName, revisionID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return revision, ErrNotFound
+	}
+	return revision, err
 }
 
 func (s *Store) PromoteCandidateRevision(ctx context.Context, tenant, deploymentName, candidateID string) error {

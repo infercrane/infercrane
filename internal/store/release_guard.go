@@ -118,3 +118,15 @@ func (s *Store) ReleaseGuardEvaluations(ctx context.Context, tenant, deploymentN
 	}
 	return evaluations, rows.Err()
 }
+
+func (s *Store) ReleaseGuardAccepted(ctx context.Context, tenant, deploymentName, candidateID string) (bool, error) {
+	var decision, currentCandidate, activeID, evaluatedActive string
+	err := s.QueryRowContext(ctx, `SELECT e.decision,COALESCE(d.candidate_revision_id,''),d.active_revision_id,e.active_revision_id FROM deployments d JOIN release_guard_evaluations e ON e.deployment_id=d.id AND e.candidate_revision_id=? WHERE d.tenant_id=? AND d.name=? ORDER BY e.created_at DESC LIMIT 1`, candidateID, tenant, deploymentName).Scan(&decision, &currentCandidate, &activeID, &evaluatedActive)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return decision == "ACCEPT" && currentCandidate == candidateID && activeID == evaluatedActive, nil
+}

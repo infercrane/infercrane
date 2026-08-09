@@ -1067,7 +1067,7 @@ func emptyAs(value, fallback string) string {
 
 func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error {
 	if len(args) < 2 {
-		return errors.New("usage: infercrane rollout inspect|policy|create|evaluate|promote|reject|rollback DEPLOYMENT [REVISION] [flags]")
+		return errors.New("usage: infercrane rollout inspect|policy|create|provision|evaluate|promote|reject|rollback DEPLOYMENT [REVISION] [flags]")
 	}
 	action, name := args[0], args[1]
 	if action == "inspect" || action == "policy" {
@@ -1123,6 +1123,12 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 	routing := fs.String("routing", "round-robin", "candidate routing strategy")
 	minReplicas := fs.Int("min", 1, "candidate minimum replicas")
 	maxReplicas := fs.Int("max", 1, "candidate maximum replicas")
+	cloud := fs.String("cloud", "", "candidate cloud (runpod)")
+	gpu := fs.String("gpu", "", "candidate GPU")
+	region := fs.String("region", "", "candidate region")
+	modelRevision := fs.String("model-revision", "", "candidate model revision")
+	runtimeVersion := fs.String("runtime-version", "", "candidate vLLM version")
+	runtimeArgs := fs.String("runtime-args", "", "comma-separated candidate vLLM arguments")
 	rest := args[2:]
 	revisionID := ""
 	if action != "create" && action != "evaluate" {
@@ -1147,8 +1153,21 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 		if *minReplicas < 1 || *maxReplicas < *minReplicas {
 			return errors.New("replica bounds must satisfy 1 <= min <= max")
 		}
+		if (*cloud == "") != (*gpu == "") {
+			return errors.New("--cloud and --gpu must be provided together")
+		}
 		path = "/api/v1/deployments/" + url.PathEscape(name) + "/rollouts"
-		request = map[string]any{"spec": map[string]any{"model": *model, "runtime": *runtimeName, "routing_strategy": *routing, "min_replicas": *minReplicas, "max_replicas": *maxReplicas, "autoscaling_enabled": *maxReplicas > *minReplicas}}
+		computeMode := "existing"
+		if *cloud != "" {
+			computeMode = "elastic"
+		}
+		spec := domain.DeploymentRevisionSpec{Model: *model, ModelRevision: *modelRevision, Runtime: *runtimeName, RuntimeVersion: *runtimeVersion, RoutingStrategy: *routing, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas, AutoscalingEnabled: *maxReplicas > *minReplicas, ComputeMode: computeMode, Cloud: *cloud, GPU: *gpu, Region: *region}
+		if *runtimeArgs != "" {
+			spec.RuntimeArgs = splitTargets(*runtimeArgs)
+		}
+		request = map[string]any{"spec": spec}
+	case "provision":
+		path = "/api/v1/deployments/" + url.PathEscape(name) + "/rollouts/" + url.PathEscape(revisionID) + "/provision"
 	case "evaluate":
 		path = "/api/v1/deployments/" + url.PathEscape(name) + "/rollouts/guard/evaluate"
 	case "promote":

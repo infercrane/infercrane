@@ -12,6 +12,10 @@ type fakeRolloutStore struct {
 	audit                                   domain.AuditEvent
 }
 
+func (f *fakeRolloutStore) ReleaseGuardAccepted(context.Context, string, string, string) (bool, error) {
+	return true, nil
+}
+
 func (f *fakeRolloutStore) EnsureCandidateRevision(context.Context, string, string, string, string) (domain.DeploymentRevision, error) {
 	f.created++
 	return domain.DeploymentRevision{ID: "rev-2", Number: 2}, nil
