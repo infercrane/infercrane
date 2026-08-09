@@ -38,6 +38,17 @@ curl -fsS "$base_url/metrics" | grep -q 'infercrane_gateway_request_duration_sec
 
 docker compose exec -T infercrane infercrane plan Qwen/Qwen3-8B --targets gpu-a,gpu-b --output json >/dev/null
 docker compose exec -T infercrane infercrane doctor
-docker compose exec -T infercrane infercrane benchmark --endpoint http://127.0.0.1:8080 --model "$model" --api-key "$api_key" --requests 20 --concurrency 4
+
+# Existing-target fixtures have no immutable Hugging Face artifact and are not
+# presented as reproducible performance benchmarks. Exercise concurrent logical
+# requests here; real deployment acceptance uses `infercrane benchmark NAME`.
+sequence=1
+while [ "$sequence" -le 20 ]; do
+  curl -fsS -H "Authorization: Bearer $api_key" -H 'Content-Type: application/json' \
+    -d "{\"model\":\"$model\",\"messages\":[{\"role\":\"user\",\"content\":\"smoke $sequence\"}]}" \
+    "$base_url/v1/chat/completions" >/dev/null &
+  sequence=$((sequence + 1))
+done
+wait
 
 echo "InferCrane stack smoke test passed"
