@@ -7,7 +7,7 @@ Public workflows use the authenticated control-plane API and support `--output j
 - `deploy`, `apply`, `plan`: create, converge, or preview a DeploymentSpec.
 - `status [--watch]`, `events`, `inspect`: view health, durable events, or raw infrastructure details.
 - `rollout`: create, provision, evaluate, promote, reject, rollback, or inspect revisions.
-- `benchmark`: run AIPerf and persist reproduction metadata.
+- `benchmark`: run AIPerf and persist reproduction metadata; `--revision candidate` performs explicit isolated candidate validation.
 - `explain`, `explain scaling|rollout|cold-start`: reproduce operational decisions.
 - `delete`: withdraw routing and durably clean provider resources.
 - `operation`: inspect or request cancellation of a durable operation.

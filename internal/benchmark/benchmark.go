@@ -17,10 +17,10 @@ import (
 )
 
 type Config struct {
-	Binary, Endpoint, APIKey, Model string
-	Requests, Concurrency           int
-	RandomSeed                      int64
-	Timeout                         time.Duration
+	Binary, Endpoint, APIKey, APIKeyEnv, Model string
+	Requests, Concurrency                      int
+	RandomSeed                                 int64
+	Timeout                                    time.Duration
 }
 
 type Result struct {
@@ -73,7 +73,10 @@ func run(ctx context.Context, cfg Config, commands commandRunner) (Result, error
 	if cfg.APIKey != "" {
 		args = append(args, "--api-key", cfg.APIKey)
 	}
-	command := shellCommand(cfg.Binary, args, cfg.APIKey)
+	if cfg.APIKeyEnv == "" {
+		cfg.APIKeyEnv = "INFERCRANE_API_KEY"
+	}
+	command := shellCommand(cfg.Binary, args, cfg.APIKey, cfg.APIKeyEnv)
 	versionOutput, versionErr := commands.Run(ctx, cfg.Binary, "--version")
 	if versionErr != nil {
 		return Result{}, fmt.Errorf("AIPerf is unavailable (install with pipx install aiperf): %w", versionErr)
@@ -92,11 +95,11 @@ func run(ctx context.Context, cfg Config, commands commandRunner) (Result, error
 	return result, nil
 }
 
-func shellCommand(binary string, args []string, secret string) string {
+func shellCommand(binary string, args []string, secret, secretEnv string) string {
 	parts := []string{binary}
 	for i, arg := range args {
 		if i > 0 && args[i-1] == "--api-key" {
-			arg = "${INFERCRANE_API_KEY}"
+			arg = "${" + secretEnv + "}"
 		}
 		parts = append(parts, quote(arg))
 	}

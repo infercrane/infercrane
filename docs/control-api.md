@@ -20,6 +20,8 @@ Errors are stable JSON objects:
 | `GET /deployments` | viewer | List tenant deployments. |
 | `GET /deployments/{name}` | viewer | Inspect deployment, targets, replicas, revisions, immutable model artifacts, active durable operation, and persisted request statistics. |
 | `GET /deployments/{name}/events` | viewer | List durable deployment events. |
+| `POST /deployments/{name}/benchmarks` | operator | Run and persist AIPerf evidence for `active`, `candidate`, or an explicit revision. |
+| `GET /deployments/{name}/benchmarks` | viewer | List persisted benchmark history and reproduction metadata. |
 | `GET /deployments/{name}/revisions` | viewer | List immutable revision history. |
 | `GET /deployments/{name}/scaling-decisions` | viewer | List deterministic scaling evaluations and their persisted signals. |
 | `PUT /deployments/{name}/route` | operator | Change the persisted routing strategy. |

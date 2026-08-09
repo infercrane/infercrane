@@ -30,7 +30,7 @@ func TestParseRecordsMeasuresAIPerfMetrics(t *testing.T) {
 }
 
 func TestReproductionCommandRedactsCredential(t *testing.T) {
-	command := shellCommand("aiperf", []string{"profile", "--model", "Qwen/Qwen3-8B", "--api-key", "top-secret"}, "top-secret")
+	command := shellCommand("aiperf", []string{"profile", "--model", "Qwen/Qwen3-8B", "--api-key", "top-secret"}, "top-secret", "INFERCRANE_API_KEY")
 	if strings.Contains(command, "top-secret") || !strings.Contains(command, "${INFERCRANE_API_KEY}") {
 		t.Fatalf("command=%s", command)
 	}

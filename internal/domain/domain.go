@@ -157,6 +157,8 @@ type ReleaseGuardPolicy struct {
 }
 
 type RevisionMetrics struct {
+	EvidenceSource        string   `json:"evidence_source,omitempty"`
+	EvidenceID            string   `json:"evidence_id,omitempty"`
 	Requests              int      `json:"requests"`
 	ReadyReplicas         int      `json:"ready_replicas"`
 	ErrorRate             float64  `json:"error_rate"`

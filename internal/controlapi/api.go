@@ -64,6 +64,7 @@ type API struct {
 		Run(context.Context, benchmark.Config) (benchmark.Result, error)
 	}
 	Diagnostics              func(context.Context, bool, bool) doctor.Report
+	BenchmarkAPIKeys         map[string]string
 	GatewayURL, AIPerfBinary string
 }
 type identityKey struct{}
@@ -136,9 +137,10 @@ func (a API) runBenchmark(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var request struct {
-		Requests    int   `json:"requests"`
-		Concurrency int   `json:"concurrency"`
-		RandomSeed  int64 `json:"random_seed"`
+		Requests    int    `json:"requests"`
+		Concurrency int    `json:"concurrency"`
+		RandomSeed  int64  `json:"random_seed"`
+		Revision    string `json:"revision"`
 	}
 	if !decodeMutationBody(w, r, &request) {
 		return
@@ -170,46 +172,88 @@ func (a API) runBenchmark(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "internal", "revision lookup failed")
 		return
 	}
+	selectedRevisionID := deployment.ActiveRevisionID
+	selector := strings.TrimSpace(request.Revision)
+	if selector == "" || selector == "active" {
+		selector = "active"
+	} else if selector == "candidate" {
+		if deployment.CandidateRevisionID == "" {
+			writeError(w, http.StatusConflict, "candidate_unavailable", "deployment has no candidate revision")
+			return
+		}
+		selectedRevisionID = deployment.CandidateRevisionID
+	} else {
+		selectedRevisionID = selector
+	}
 	var revision domain.DeploymentRevision
 	for _, candidate := range revisions {
-		if candidate.ID == deployment.ActiveRevisionID {
+		if candidate.ID == selectedRevisionID {
 			revision = candidate
 			break
 		}
 	}
 	if revision.ID == "" {
-		writeError(w, 409, "deployment_not_ready", "active revision metadata is unavailable")
+		writeError(w, 404, "revision_not_found", "selected revision metadata is unavailable")
 		return
 	}
 	var revisionSpec domain.DeploymentRevisionSpec
 	if err = json.Unmarshal([]byte(revision.SpecJSON), &revisionSpec); err != nil {
-		writeError(w, 500, "internal", "active revision specification is invalid")
+		writeError(w, 500, "internal", "selected revision specification is invalid")
 		return
-	}
-	credential := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
-	measured, err := a.BenchmarkRunner.Run(r.Context(), benchmark.Config{Binary: a.AIPerfBinary, Endpoint: a.GatewayURL, APIKey: credential, Model: deployment.Name, Requests: request.Requests, Concurrency: request.Concurrency, RandomSeed: request.RandomSeed})
-	if err != nil {
-		writeError(w, 502, "benchmark_failed", err.Error())
-		return
-	}
-	provider := ""
-	if len(resolved.Targets) > 0 {
-		provider = resolved.Targets[0].Provider
 	}
 	artifact, artifactErr := a.Store.ModelArtifactForRevision(r.Context(), principal.TenantID, revision.ID)
 	if errors.Is(artifactErr, domain.ErrNotFound) {
-		writeError(w, 409, "artifact_unresolved", "active revision has no immutable ModelArtifact identity")
+		writeError(w, 409, "artifact_unresolved", "selected revision has no immutable ModelArtifact identity")
 		return
 	}
 	if artifactErr != nil {
 		writeError(w, 500, "internal", "model artifact lookup failed")
 		return
 	}
+	endpoint, model, apiKeyEnv := a.GatewayURL, deployment.Name, "INFERCRANE_API_KEY"
+	credential := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+	provider := ""
+	if selectedRevisionID != deployment.ActiveRevisionID {
+		replicas, replicaErr := a.Store.ReplicasForDeployment(r.Context(), principal.TenantID, deployment.ID)
+		if replicaErr != nil {
+			writeError(w, 500, "internal", "selected revision replica lookup failed")
+			return
+		}
+		selectedOrdinal := int(^uint(0) >> 1)
+		for _, replica := range replicas {
+			if replica.RevisionID == selectedRevisionID && replica.Health == "healthy" && (replica.LifecycleState == "ready" || replica.LifecycleState == "active") && replica.Endpoint != "" && replica.Ordinal < selectedOrdinal {
+				endpoint, provider, selectedOrdinal = replica.Endpoint, replica.Provider, replica.Ordinal
+			}
+		}
+		if provider == "" {
+			writeError(w, 409, "candidate_not_ready", "selected revision has no healthy ready endpoint")
+			return
+		}
+		credential = a.BenchmarkAPIKeys[provider]
+		if credential == "" {
+			writeError(w, 503, "benchmark_unavailable", "candidate benchmark credential is not configured for provider "+provider)
+			return
+		}
+		model = revisionSpec.Model
+		if provider == "runpod-serverless" {
+			apiKeyEnv = "RUNPOD_API_KEY"
+		} else {
+			apiKeyEnv = "INFERCRANE_WORKER_API_KEY"
+		}
+	}
+	measured, err := a.BenchmarkRunner.Run(r.Context(), benchmark.Config{Binary: a.AIPerfBinary, Endpoint: endpoint, APIKey: credential, APIKeyEnv: apiKeyEnv, Model: model, Requests: request.Requests, Concurrency: request.Concurrency, RandomSeed: request.RandomSeed})
+	if err != nil {
+		writeError(w, 502, "benchmark_failed", err.Error())
+		return
+	}
+	if provider == "" && len(resolved.Targets) > 0 {
+		provider = resolved.Targets[0].Provider
+	}
 	modelIdentity, artifactID := artifact.ModelIdentity, artifact.ID
 	if revisionSpec.ComputeMode == "" {
 		revisionSpec.ComputeMode = "elastic"
 	}
-	workload, _ := json.Marshal(map[string]any{"endpoint_type": "chat", "streaming": true, "request_count": request.Requests, "concurrency": request.Concurrency, "random_seed": request.RandomSeed, "server_token_count": true})
+	workload, _ := json.Marshal(map[string]any{"endpoint_type": "chat", "streaming": true, "request_count": request.Requests, "concurrency": request.Concurrency, "random_seed": request.RandomSeed, "server_token_count": true, "revision_selector": selector, "direct_revision_validation": selectedRevisionID != deployment.ActiveRevisionID})
 	runtimeConfig, _ := json.Marshal(map[string]any{"args": revisionSpec.RuntimeArgs})
 	persisted, err := a.Store.RecordBenchmark(r.Context(), domain.BenchmarkResult{TenantID: principal.TenantID, DeploymentID: deployment.ID, DeploymentName: deployment.Name, RevisionID: revision.ID, ModelArtifactID: artifactID, ModelIdentity: modelIdentity, Runtime: revisionSpec.Runtime, RuntimeVersion: revisionSpec.RuntimeVersion, RuntimeConfigJSON: string(runtimeConfig), Provider: provider, Region: revisionSpec.Region, GPU: revisionSpec.GPU, ComputeMode: revisionSpec.ComputeMode, Tool: measured.Tool, ToolVersion: measured.ToolVersion, WorkloadJSON: string(workload), ReproductionCommand: measured.Command, RequestCount: measured.Requests, Succeeded: measured.Succeeded, Failed: measured.Failed, DurationSeconds: measured.DurationSeconds, RequestThroughput: measured.RequestThroughput, OutputTokenThroughput: measured.OutputTokenThroughput, TTFTP50MS: measured.TTFTP50MS, TTFTP95MS: measured.TTFTP95MS, TPOTP50MS: measured.TPOTP50MS, TPOTP95MS: measured.TPOTP95MS, LatencyP50MS: measured.LatencyP50MS, LatencyP95MS: measured.LatencyP95MS, CostMetadataJSON: "{}"})
 	if err != nil {

@@ -25,6 +25,7 @@ type fakeStore struct {
 	revisions       []domain.DeploymentRevision
 	artifact        domain.ModelArtifact
 	benchmarks      []domain.BenchmarkResult
+	replicas        []domain.Replica
 	activeOperation domain.Operation
 }
 
@@ -86,7 +87,7 @@ func (f *fakeStore) ColdStartStats(context.Context, string, time.Duration) (doma
 	return domain.ColdStartStats{}, f.err
 }
 func (f *fakeStore) ReplicasForDeployment(context.Context, string, string) ([]domain.Replica, error) {
-	return nil, f.err
+	return f.replicas, f.err
 }
 func (f *fakeStore) Revisions(context.Context, string, string) ([]domain.DeploymentRevision, error) {
 	return f.revisions, f.err
@@ -219,6 +220,24 @@ func TestBenchmarkRunsThroughControlPlaneAndPersistsIdentity(t *testing.T) {
 	}
 	if runner.config.APIKey != "secret" || runner.config.RandomSeed != 42 || len(store.benchmarks) != 1 || store.benchmarks[0].GPU != "L40S" {
 		t.Fatalf("config=%#v benchmarks=%#v", runner.config, store.benchmarks)
+	}
+}
+
+func TestCandidateBenchmarkUsesExplicitHealthyRevisionEndpoint(t *testing.T) {
+	spec := `{"model":"Qwen/Qwen3-8B","runtime":"vllm","compute_mode":"elastic","gpu":"L40S"}`
+	store := &fakeStore{
+		resolved:  domain.ResolvedDeployment{Deployment: domain.Deployment{ID: "dep", Name: "qwen", ActiveRevisionID: "rev-active", CandidateRevisionID: "rev-candidate"}},
+		revisions: []domain.DeploymentRevision{{ID: "rev-active", SpecJSON: spec}, {ID: "rev-candidate", SpecJSON: spec}},
+		replicas:  []domain.Replica{{RevisionID: "rev-candidate", Ordinal: 0, Provider: "skypilot", LifecycleState: "ready", Health: "healthy", Endpoint: "https://candidate.invalid"}},
+		artifact:  domain.ModelArtifact{ID: "artifact", ModelIdentity: "Qwen/Qwen3-8B@commit"},
+	}
+	runner := &fakeBenchmarkRunner{}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments/qwen/benchmarks", strings.NewReader(`{"requests":10,"concurrency":2,"random_seed":42,"revision":"candidate"}`))
+	request.Header.Set("Authorization", "Bearer bootstrap")
+	response := httptest.NewRecorder()
+	(API{Store: store, APIKey: "bootstrap", BenchmarkRunner: runner, BenchmarkAPIKeys: map[string]string{"skypilot": "worker-secret"}, GatewayURL: "http://gateway", AIPerfBinary: "aiperf"}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || runner.config.Endpoint != "https://candidate.invalid" || runner.config.Model != "Qwen/Qwen3-8B" || runner.config.APIKey != "worker-secret" || runner.config.APIKeyEnv != "INFERCRANE_WORKER_API_KEY" || len(store.benchmarks) != 1 || store.benchmarks[0].RevisionID != "rev-candidate" || !strings.Contains(store.benchmarks[0].WorkloadJSON, `"direct_revision_validation":true`) {
+		t.Fatalf("response=%d %s config=%#v benchmarks=%#v", response.Code, response.Body.String(), runner.config, store.benchmarks)
 	}
 }
 

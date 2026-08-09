@@ -61,7 +61,45 @@ func (s *Store) RevisionMetrics(ctx context.Context, revisionID string, window t
 	if err = s.QueryRowContext(ctx, `SELECT COUNT(*) FROM replicas WHERE revision_id=? AND lifecycle_state='ready' AND health='healthy'`, revisionID).Scan(&metrics.ReadyReplicas); err != nil {
 		return domain.RevisionMetrics{}, err
 	}
+	metrics.EvidenceSource = "request_telemetry"
 	return metrics, nil
+}
+
+type guardBenchmarkWorkload struct {
+	EndpointType     string `json:"endpoint_type"`
+	Streaming        bool   `json:"streaming"`
+	RequestCount     int    `json:"request_count"`
+	Concurrency      int    `json:"concurrency"`
+	RandomSeed       int64  `json:"random_seed"`
+	ServerTokenCount bool   `json:"server_token_count"`
+}
+
+func benchmarkGuardMetrics(activeReady, candidateReady int, rows []domain.BenchmarkResult, activeRevisionID, candidateRevisionID string) (domain.RevisionMetrics, domain.RevisionMetrics, bool) {
+	var active, candidate *domain.BenchmarkResult
+	for i := range rows {
+		row := &rows[i]
+		if active == nil && row.RevisionID == activeRevisionID {
+			active = row
+		}
+		if candidate == nil && row.RevisionID == candidateRevisionID {
+			candidate = row
+		}
+	}
+	if active == nil || candidate == nil || active.Tool != candidate.Tool || active.ToolVersion != candidate.ToolVersion {
+		return domain.RevisionMetrics{}, domain.RevisionMetrics{}, false
+	}
+	var activeWorkload, candidateWorkload guardBenchmarkWorkload
+	if json.Unmarshal([]byte(active.WorkloadJSON), &activeWorkload) != nil || json.Unmarshal([]byte(candidate.WorkloadJSON), &candidateWorkload) != nil || activeWorkload != candidateWorkload {
+		return domain.RevisionMetrics{}, domain.RevisionMetrics{}, false
+	}
+	convert := func(row *domain.BenchmarkResult, ready int) domain.RevisionMetrics {
+		errorRate := 0.0
+		if row.RequestCount > 0 {
+			errorRate = float64(row.Failed) / float64(row.RequestCount)
+		}
+		return domain.RevisionMetrics{EvidenceSource: "aiperf_benchmark", EvidenceID: row.ID, Requests: row.RequestCount, ReadyReplicas: ready, ErrorRate: errorRate, P95TTFTMS: row.TTFTP95MS, P95LatencyMS: row.LatencyP95MS, OutputTokensPerSecond: row.OutputTokenThroughput}
+	}
+	return convert(active, activeReady), convert(candidate, candidateReady), true
 }
 
 func (s *Store) EvaluateReleaseGuard(ctx context.Context, tenant, deploymentName string, window time.Duration) (domain.ReleaseGuardEvaluation, error) {
@@ -83,6 +121,15 @@ func (s *Store) EvaluateReleaseGuard(ctx context.Context, tenant, deploymentName
 	candidate, err := s.RevisionMetrics(ctx, resolved.Deployment.CandidateRevisionID, window)
 	if err != nil {
 		return domain.ReleaseGuardEvaluation{}, err
+	}
+	if candidate.Requests < policy.MinimumRequests {
+		benchmarks, benchmarkErr := s.BenchmarksForDeployment(ctx, tenant, deploymentName, 100)
+		if benchmarkErr != nil {
+			return domain.ReleaseGuardEvaluation{}, benchmarkErr
+		}
+		if benchmarkActive, benchmarkCandidate, ok := benchmarkGuardMetrics(active.ReadyReplicas, candidate.ReadyReplicas, benchmarks, resolved.Deployment.ActiveRevisionID, resolved.Deployment.CandidateRevisionID); ok {
+			active, candidate = benchmarkActive, benchmarkCandidate
+		}
 	}
 	result := releaseguard.Evaluate(releaseguard.Input{Policy: policy, Active: active, Candidate: candidate})
 	reasons, _ := json.Marshal(result.Reasons)

@@ -350,6 +350,7 @@ func benchmarkCommand(ctx context.Context, cfg config.Config, args []string) err
 	requests := fs.Int("requests", 100, "request count")
 	concurrency := fs.Int("concurrency", 10, "concurrent clients")
 	randomSeed := fs.Int64("random-seed", 17, "deterministic AIPerf dataset seed")
+	revision := fs.String("revision", "active", "revision to benchmark: active, candidate, or revision ID")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -360,7 +361,10 @@ func benchmarkCommand(ctx context.Context, cfg config.Config, args []string) err
 	var response struct {
 		Benchmark map[string]any `json:"benchmark"`
 	}
-	request := map[string]any{"requests": *requests, "concurrency": *concurrency, "random_seed": *randomSeed}
+	request := map[string]any{"requests": *requests, "concurrency": *concurrency, "random_seed": *randomSeed, "revision": *revision}
+	if *revision != "active" {
+		fmt.Fprintln(os.Stderr, "Notice: selected-revision validation sends an explicit AIPerf workload directly to revision capacity and may incur provider inference cost; it does not duplicate user traffic.")
+	}
 	// AIPerf runs can legitimately exceed the ordinary control request timeout.
 	if err := controlJSONWithTimeout(ctx, cfg, http.MethodPost, "/api/v1/deployments/"+url.PathEscape(fs.Arg(0))+"/benchmarks", "", request, &response, 35*time.Minute); err != nil {
 		return err
@@ -373,7 +377,7 @@ func benchmarkCommand(ctx context.Context, cfg config.Config, args []string) err
 	if *output != "human" {
 		return errors.New("--output must be human or json")
 	}
-	fmt.Printf("Benchmark     %v\nModel         %v\nRuntime       %v %v\nGPU           %v\nProvider      %v\nTTFT p50      %v ms\nTTFT p95      %v ms\nTPOT p95      %v ms\nOutput tok/s  %v\nErrors        %v\n\nReproduce:\n  %v\n", response.Benchmark["id"], response.Benchmark["model_identity"], response.Benchmark["runtime"], response.Benchmark["runtime_version"], response.Benchmark["gpu"], response.Benchmark["provider"], response.Benchmark["ttft_p50_ms"], response.Benchmark["ttft_p95_ms"], response.Benchmark["tpot_p95_ms"], response.Benchmark["output_token_throughput"], response.Benchmark["failed"], response.Benchmark["reproduction_command"])
+	fmt.Printf("Benchmark     %v\nRevision      %v\nModel         %v\nRuntime       %v %v\nGPU           %v\nProvider      %v\nTTFT p50      %v ms\nTTFT p95      %v ms\nTPOT p95      %v ms\nOutput tok/s  %v\nErrors        %v\n\nReproduce:\n  %v\n", response.Benchmark["id"], response.Benchmark["revision_id"], response.Benchmark["model_identity"], response.Benchmark["runtime"], response.Benchmark["runtime_version"], response.Benchmark["gpu"], response.Benchmark["provider"], response.Benchmark["ttft_p50_ms"], response.Benchmark["ttft_p95_ms"], response.Benchmark["tpot_p95_ms"], response.Benchmark["output_token_throughput"], response.Benchmark["failed"], response.Benchmark["reproduction_command"])
 	return nil
 }
 func targetAPICommand(ctx context.Context, cfg config.Config, args []string) error {
@@ -1311,6 +1315,7 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 			}
 			w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 			fmt.Fprintln(w, "\nMetric\tActive\tCandidate")
+			fmt.Fprintf(w, "Evidence\t%s\t%s\n", formatGuardEvidence(metrics.Active), formatGuardEvidence(metrics.Candidate))
 			fmt.Fprintf(w, "Ready replicas\t%d\t%d\n", metrics.Active.ReadyReplicas, metrics.Candidate.ReadyReplicas)
 			fmt.Fprintf(w, "Requests\t%d\t%d\n", metrics.Active.Requests, metrics.Candidate.Requests)
 			fmt.Fprintf(w, "TTFT p95\t%s\t%s\n", formatGuardMetric(metrics.Active.P95TTFTMS, "ms"), formatGuardMetric(metrics.Candidate.P95TTFTMS, "ms"))
@@ -1442,6 +1447,16 @@ func formatGuardMetric(value *float64, suffix string) string {
 	return fmt.Sprintf("%.1f%s", *value, suffix)
 }
 
+func formatGuardEvidence(metrics domain.RevisionMetrics) string {
+	if metrics.EvidenceSource == "" {
+		return "unavailable"
+	}
+	if metrics.EvidenceID == "" {
+		return metrics.EvidenceSource
+	}
+	return metrics.EvidenceSource + ":" + metrics.EvidenceID
+}
+
 func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -1478,7 +1493,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		}
 		return report
 	}
-	control := (controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: credentialCache, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary}).Handler()
+	control := (controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: credentialCache, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, BenchmarkAPIKeys: map[string]string{"skypilot": cfg.APIKey, "runpod-serverless": cfg.RunPodAPIKey}, GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary}).Handler()
 	operationTelemetry := &operations.Telemetry{}
 	handlers := workflows.DeploymentHandlers(s)
 	for kind, handler := range workflows.RolloutHandlers(s) {
