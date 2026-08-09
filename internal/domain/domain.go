@@ -68,11 +68,6 @@ type RouterGeneration struct {
 	CreatedAt                                                                    time.Time
 }
 
-type ProvisionedTarget struct {
-	Name, URL, ProviderResourceID, UpstreamModel string
-	Details                                      string
-}
-
 type Replica struct {
 	ID, TenantID, DeploymentID, ExternalKey, LifecycleState string
 	Provider, ProviderRequestID, ProviderResourceID         string

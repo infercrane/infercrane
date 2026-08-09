@@ -180,37 +180,6 @@ func TestTargetConflict(t *testing.T) {
 	}
 }
 
-func TestOperationLifecycleIsIdempotentAndRetryable(t *testing.T) {
-	ctx := context.Background()
-	s := openStore(t, ctx)
-	request := domain.Operation{Kind: "apply", ResourceType: "deployment", ResourceName: "qwen", IdempotencyKey: "request-1", RequestJSON: `{"model":"qwen"}`}
-	first, created, err := s.StartOperation(ctx, request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !created {
-		t.Fatal("first operation should be created")
-	}
-	again, created, err := s.StartOperation(ctx, request)
-	if err != nil || created || again.ID != first.ID {
-		t.Fatalf("idempotent operation = %#v, %v", again, err)
-	}
-	if err := s.FailOperation(ctx, first.ID, "provider_busy", "retry later", true); err != nil {
-		t.Fatal(err)
-	}
-	retried, err := s.RetryOperation(ctx, first.ID)
-	if err != nil || retried.Attempt != 2 || retried.Status != "running" {
-		t.Fatalf("retry = %#v, %v", retried, err)
-	}
-	if err := s.FinishOperation(ctx, first.ID, `{"deployment":"qwen"}`); err != nil {
-		t.Fatal(err)
-	}
-	finished, err := s.Operation(ctx, first.ID)
-	if err != nil || finished.Status != "succeeded" || finished.Progress != 100 {
-		t.Fatalf("finished = %#v, %v", finished, err)
-	}
-}
-
 func TestOrphanedTargetsOnlyReturnsProvisionedUnusedTargets(t *testing.T) {
 	ctx := context.Background()
 	s := openStore(t, ctx)

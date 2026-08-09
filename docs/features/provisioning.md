@@ -21,7 +21,7 @@ The SkyPilot replica lifecycle is discovery-first and keyed by a stable external
 checks JSON cluster inventory before an asynchronous named launch, `Observe` refreshes cluster state
 and resolves the exposed endpoint, `Delete` treats an absent cluster as success, and `Inventory`
 returns owned clusters for leak reconciliation. Repeating ensure or delete does not create or
-destroy a second resource. The durable workflow must persist the external key and deterministic
+destroy a second resource. The durable workflow persists the external key and deterministic
 cluster identity before calling these methods.
 
 The `deployment.converge`/`replica.provision` workflow persists replica intent and that deterministic
@@ -29,6 +29,9 @@ cluster identity before calling `sky launch`. Every retry re-runs discovery, pro
 and vLLM readiness checks before registering a route. Its delete path re-observes asynchronous
 deletion and does not mark a replica deleted while it remains in provider inventory. These handlers
 are locally qualified with fault-injected providers; real RunPod qualification is still required.
+
+The superseded synchronous `Deploy`/`Destroy` adapter and direct-running operation store APIs have
+been removed. Provider mutation is reachable only through leased workflow handlers.
 
 Runtime inspection requires both a healthy endpoint and the expected served model. Metrics parsing
 normalizes supported vLLM metric aliases and ignores malformed or non-finite samples.

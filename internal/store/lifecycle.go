@@ -4,54 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
 )
-
-func (s *Store) StartOperation(ctx context.Context, operation domain.Operation) (domain.Operation, bool, error) {
-	if operation.Kind == "" || operation.ResourceType == "" || operation.ResourceName == "" {
-		return domain.Operation{}, false, errors.New("operation kind and resource are required")
-	}
-	if operation.TenantID == "" {
-		operation.TenantID = "global"
-	}
-	if operation.RequestJSON == "" {
-		operation.RequestJSON = "{}"
-	}
-	if operation.IdempotencyKey != "" {
-		existing, err := s.operationByKey(ctx, operation.TenantID, operation.Kind, operation.IdempotencyKey)
-		if err == nil {
-			return existing, false, nil
-		}
-		if !errors.Is(err, ErrNotFound) {
-			return domain.Operation{}, false, err
-		}
-	}
-	id, err := newID()
-	if err != nil {
-		return domain.Operation{}, false, err
-	}
-	stamp := now()
-	operation.ID, operation.Status, operation.Progress, operation.Attempt = id, "running", 0, 1
-	operation.CreatedAt, operation.UpdatedAt = parseTime(stamp), parseTime(stamp)
-	_, err = s.ExecContext(ctx, `INSERT INTO operations(id,tenant_id,kind,resource_type,resource_name,idempotency_key,status,progress,message,request_json,result_json,attempt,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?::jsonb,'{}'::jsonb,?,?,?)`, operation.ID, operation.TenantID, operation.Kind, operation.ResourceType, operation.ResourceName, null(operation.IdempotencyKey), operation.Status, operation.Progress, operation.Message, operation.RequestJSON, operation.Attempt, stamp, stamp)
-	if isUniqueViolation(err) && operation.IdempotencyKey != "" {
-		existing, lookupErr := s.operationByKey(ctx, operation.TenantID, operation.Kind, operation.IdempotencyKey)
-		if lookupErr == nil {
-			return existing, false, nil
-		}
-		if !errors.Is(lookupErr, ErrNotFound) {
-			return domain.Operation{}, false, lookupErr
-		}
-		return domain.Operation{}, false, fmt.Errorf("%w: deployment already has an unresolved lifecycle operation", ErrConflict)
-	}
-	if isUniqueViolation(err) {
-		return domain.Operation{}, false, fmt.Errorf("%w: deployment already has an unresolved lifecycle operation", ErrConflict)
-	}
-	return operation, err == nil, err
-}
 
 const operationColumns = `id,tenant_id,kind,resource_type,resource_name,COALESCE(idempotency_key,''),status,progress,message,request_json::text,result_json::text,COALESCE(error_code,''),retryable,cancel_requested,attempt,max_attempts,COALESCE(lease_owner,''),lease_generation,created_at,updated_at,completed_at,lease_expires_at,next_attempt_at`
 
@@ -90,63 +46,9 @@ func (s *Store) scanOperation(row *sql.Row) (domain.Operation, error) {
 	return out, nil
 }
 
-func (s *Store) UpdateOperation(ctx context.Context, id string, progress int, message string) error {
-	if progress < 0 || progress > 99 {
-		return errors.New("running operation progress must be between 0 and 99")
-	}
-	result, err := s.ExecContext(ctx, `UPDATE operations SET progress=?,message=?,updated_at=? WHERE id=? AND status='running'`, progress, message, now(), id)
-	if err != nil {
-		return err
-	}
-	n, _ := result.RowsAffected()
-	if n == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
-
-func (s *Store) FinishOperation(ctx context.Context, id, resultJSON string) error {
-	if resultJSON == "" {
-		resultJSON = "{}"
-	}
-	result, err := s.ExecContext(ctx, `UPDATE operations SET status='succeeded',progress=100,result_json=?::jsonb,message='completed',updated_at=?,completed_at=? WHERE id=? AND status='running'`, resultJSON, now(), now(), id)
-	if err != nil {
-		return err
-	}
-	n, _ := result.RowsAffected()
-	if n == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
-
-func (s *Store) FailOperation(ctx context.Context, id, code, message string, retryable bool) error {
-	result, err := s.ExecContext(ctx, `UPDATE operations SET status='failed',error_code=?,message=?,retryable=?,updated_at=?,completed_at=? WHERE id=? AND status='running'`, code, message, retryable, now(), now(), id)
-	if err != nil {
-		return err
-	}
-	n, _ := result.RowsAffected()
-	if n == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
-
 func (s *Store) RequestOperationCancel(ctx context.Context, id string) error {
 	stamp := now()
 	result, err := s.ExecContext(ctx, `UPDATE operations SET cancel_requested=TRUE,status=CASE WHEN status='pending' THEN 'cancelled' ELSE 'cancelling' END,message=CASE WHEN status='pending' THEN 'cancelled before execution' ELSE 'cancellation requested' END,completed_at=CASE WHEN status='pending' THEN ? ELSE completed_at END,lease_expires_at=CASE WHEN status='waiting' THEN ? ELSE lease_expires_at END,updated_at=? WHERE id=? AND status IN ('pending','leased','running','waiting','cancelling')`, stamp, stamp, stamp, id)
-	if err != nil {
-		return err
-	}
-	n, _ := result.RowsAffected()
-	if n == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
-
-func (s *Store) CancelOperation(ctx context.Context, id, message string) error {
-	result, err := s.ExecContext(ctx, `UPDATE operations SET status='cancelled',message=?,updated_at=?,completed_at=? WHERE id=? AND status IN ('pending','running')`, message, now(), now(), id)
 	if err != nil {
 		return err
 	}
@@ -225,25 +127,4 @@ func (s *Store) AuditEventsForTenant(ctx context.Context, tenant string, before 
 		out = append(out, event)
 	}
 	return out, rows.Err()
-}
-
-func (s *Store) RetryOperation(ctx context.Context, id string) (domain.Operation, error) {
-	operation, err := s.Operation(ctx, id)
-	if err != nil {
-		return operation, err
-	}
-	if operation.Status != "failed" || !operation.Retryable {
-		return operation, fmt.Errorf("operation is not retryable")
-	}
-	stamp := now()
-	_, err = s.ExecContext(ctx, `UPDATE operations SET status='running',progress=0,message='retrying',error_code=NULL,retryable=FALSE,cancel_requested=FALSE,attempt=attempt+1,updated_at=?,completed_at=NULL WHERE id=?`, stamp, id)
-	if err != nil {
-		return operation, err
-	}
-	operation.Status = "running"
-	operation.Progress = 0
-	operation.Attempt++
-	operation.UpdatedAt = parseTime(stamp)
-	operation.CompletedAt = nil
-	return operation, nil
 }
