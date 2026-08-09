@@ -503,7 +503,11 @@ func (a API) enqueueRollout(w http.ResponseWriter, r *http.Request, kind string,
 	principal := r.Context().Value(identityKey{}).(domain.Principal)
 	request.Actor, request.TenantID = principal.Name, principal.TenantID
 	encoded, _ := json.Marshal(request)
-	operation, created, err := a.Store.EnqueueOperation(r.Context(), domain.Operation{TenantID: principal.TenantID, Kind: kind, ResourceType: "deployment", ResourceName: request.Name, IdempotencyKey: key, RequestJSON: string(encoded)})
+	maxAttempts := 5
+	if kind == workflows.RolloutProvisionKind || kind == workflows.RolloutPromoteKind || kind == workflows.RolloutRejectKind {
+		maxAttempts = 120
+	}
+	operation, created, err := a.Store.EnqueueOperation(r.Context(), domain.Operation{TenantID: principal.TenantID, Kind: kind, ResourceType: "deployment", ResourceName: request.Name, IdempotencyKey: key, RequestJSON: string(encoded), MaxAttempts: maxAttempts})
 	if errors.Is(err, domain.ErrConflict) {
 		writeError(w, http.StatusConflict, "conflict", err.Error())
 		return

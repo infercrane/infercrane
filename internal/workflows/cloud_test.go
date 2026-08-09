@@ -154,6 +154,22 @@ func TestCandidateCancellationDeletesOnlyCandidateCapacity(t *testing.T) {
 	}
 }
 
+func TestGuardedPromotionCutsOverBeforeDeletingOldCapacity(t *testing.T) {
+	spec := domain.DeploymentRevisionSpec{Model: "Qwen/Qwen3-8B", Runtime: "vllm", RoutingStrategy: "round-robin", MinReplicas: 1, MaxReplicas: 1, ComputeMode: "elastic", Cloud: "runpod", GPU: "H100"}
+	encoded, _ := json.Marshal(spec)
+	replicas := map[string]domain.Replica{
+		"old": {ID: "old", DeploymentID: "deployment-1", RevisionID: "rev-1", ExternalKey: "deployment-1-r0", LifecycleState: "active", ProviderResourceID: "old-resource", Endpoint: "http://old:8000", Health: "healthy"},
+		"new": {ID: "new", DeploymentID: "deployment-1", RevisionID: "rev-2", ExternalKey: "deployment-1-rev-2-r0", LifecycleState: "ready", ProviderResourceID: "new-resource", Endpoint: "http://new:8000", Health: "healthy"},
+	}
+	store := &fakeCloudStore{deployment: domain.Deployment{ID: "deployment-1", Name: "qwen", ActiveRevisionID: "rev-1", CandidateRevisionID: "rev-2"}, revision: domain.DeploymentRevision{ID: "rev-2", Status: "candidate", SpecJSON: string(encoded)}, replicas: replicas}
+	provider := &fakeReplicaProvider{observation: provision.Observation{Exists: true, State: "ready"}}
+	operation := domain.Operation{ID: "promote", LeaseOwner: "worker", LeaseGeneration: 1, RequestJSON: `{"name":"qwen","candidate_id":"rev-2","tenant_id":"global"}`}
+	result, err := CloudHandlers(store, provider, fakeInspector{})[RolloutPromoteKind](context.Background(), operation)
+	if err != nil || result == "" || store.deployment.ActiveRevisionID != "rev-2" || store.replicas["new"].LifecycleState != "active" || store.replicas["old"].LifecycleState != "deleted" || provider.deleteCalls != 1 {
+		t.Fatalf("result=%s deployment=%#v replicas=%#v delete_calls=%d err=%v", result, store.deployment, store.replicas, provider.deleteCalls, err)
+	}
+}
+
 func TestScaleDownWithdrawsRouterBeforeDeletingReplica(t *testing.T) {
 	replicas := map[string]domain.Replica{
 		"replica-1": {ID: "replica-1", DeploymentID: "deployment-1", ExternalKey: "deployment-1-r0", Ordinal: 0, LifecycleState: "active", ProviderResourceID: "infercrane-deployment-1-r0"},
@@ -175,6 +191,9 @@ func (f *fakeCloudStore) RoutingGenerationMatches(context.Context, string, strin
 	return true, nil
 }
 func (f *fakeCloudStore) DeleteProvisionedTarget(context.Context, string, string) error { return nil }
+func (f *fakeCloudStore) DeleteProvisionedTargetByURL(context.Context, string, string) error {
+	return nil
+}
 func (f *fakeCloudStore) ModelArtifactForRevision(context.Context, string, string) (domain.ModelArtifact, error) {
 	return domain.ModelArtifact{Repository: "Qwen/Qwen3-8B", ImmutableRevision: "0123456789abcdef0123456789abcdef01234567", ModelIdentity: "Qwen/Qwen3-8B@0123456789abcdef0123456789abcdef01234567", CacheState: "unknown"}, nil
 }
@@ -185,6 +204,18 @@ func (f *fakeCloudStore) Revision(context.Context, string, string, string) (doma
 	return f.revision, nil
 }
 func (f *fakeCloudStore) RejectCandidateRevision(context.Context, string, string, string, string) error {
+	return nil
+}
+func (f *fakeCloudStore) PromoteGuardedCandidate(_ context.Context, _, _ string, candidateID string, _ []string) error {
+	f.deployment.ActiveRevisionID, f.deployment.CandidateRevisionID = candidateID, ""
+	for id, replica := range f.replicas {
+		if replica.RevisionID == candidateID {
+			replica.LifecycleState = "active"
+		} else if replica.LifecycleState == "active" {
+			replica.LifecycleState = "draining"
+		}
+		f.replicas[id] = replica
+	}
 	return nil
 }
 func (f *fakeCloudStore) AttachModelArtifact(_ context.Context, _, _ string, artifact domain.ModelArtifact) (domain.ModelArtifact, error) {

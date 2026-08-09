@@ -168,6 +168,103 @@ func (s *Store) PromoteCandidateRevision(ctx context.Context, tenant, deployment
 	return s.transitionRevision(ctx, tenant, deploymentName, candidateID, "active", "")
 }
 
+// PromoteGuardedCandidate atomically commits a guard-accepted candidate and
+// its isolated healthy target set. Provider cleanup happens only after the
+// reconciler publishes the resulting router generation.
+func (s *Store) PromoteGuardedCandidate(ctx context.Context, tenant, deploymentName, candidateID string, targetNames []string) error {
+	if tenant == "" {
+		tenant = "global"
+	}
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var deploymentID, activeID string
+	var currentCandidate sql.NullString
+	if err = tx.QueryRowContext(ctx, `SELECT id,active_revision_id,candidate_revision_id FROM deployments WHERE tenant_id=? AND name=? AND desired_state!='deleted' FOR UPDATE`, tenant, deploymentName).Scan(&deploymentID, &activeID, &currentCandidate); errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	if activeID == candidateID && !currentCandidate.Valid {
+		return nil
+	}
+	if !currentCandidate.Valid || currentCandidate.String != candidateID {
+		return fmt.Errorf("%w: revision is not the current candidate", ErrConflict)
+	}
+	var decision, evaluatedActive string
+	if err = tx.QueryRowContext(ctx, `SELECT decision,active_revision_id FROM release_guard_evaluations WHERE deployment_id=? AND candidate_revision_id=? ORDER BY created_at DESC LIMIT 1`, deploymentID, candidateID).Scan(&decision, &evaluatedActive); errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("%w: candidate has no Release Guard evaluation", ErrConflict)
+	} else if err != nil {
+		return err
+	}
+	if decision != "ACCEPT" || evaluatedActive != activeID {
+		return fmt.Errorf("%w: Release Guard has not accepted candidate against current active revision", ErrConflict)
+	}
+	var specJSON string
+	if err = tx.QueryRowContext(ctx, `SELECT spec_json::text FROM deployment_revisions WHERE id=? AND deployment_id=? AND status='candidate' FOR UPDATE`, candidateID, deploymentID).Scan(&specJSON); errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("%w: candidate revision is unavailable", ErrConflict)
+	} else if err != nil {
+		return err
+	}
+	var spec domain.DeploymentRevisionSpec
+	if err = json.Unmarshal([]byte(specJSON), &spec); err != nil {
+		return err
+	}
+	deployment := domain.Deployment{Name: deploymentName, Model: spec.Model, Runtime: spec.Runtime, RoutingStrategy: spec.RoutingStrategy, MinReplicas: spec.MinReplicas, MaxReplicas: spec.MaxReplicas, AutoscalingEnabled: spec.AutoscalingEnabled}
+	targetIDs, err := validateTargetSet(ctx, tx, tenant, deployment, targetNames)
+	if err != nil {
+		return err
+	}
+	if len(targetIDs) < spec.MinReplicas {
+		return fmt.Errorf("%w: candidate has fewer targets than minimum replicas", ErrConflict)
+	}
+	for _, targetID := range targetIDs {
+		var ready bool
+		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM targets t JOIN replicas r ON r.tenant_id=t.tenant_id AND r.endpoint=t.url WHERE t.id=? AND r.deployment_id=? AND r.revision_id=? AND r.lifecycle_state='ready' AND r.health='healthy')`, targetID, deploymentID, candidateID).Scan(&ready); err != nil {
+			return err
+		}
+		if !ready {
+			return fmt.Errorf("%w: candidate target is not backed by a healthy ready replica", ErrConflict)
+		}
+	}
+	stamp := now()
+	if _, err = tx.ExecContext(ctx, `UPDATE deployment_revisions SET status='superseded',completed_at=? WHERE id=?`, stamp, activeID); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE deployment_revisions SET status='active',activated_at=?,completed_at=NULL WHERE id=? AND status='candidate'`, stamp, candidateID); err != nil {
+		return err
+	}
+	if err = updateDeploymentFromRevision(ctx, tx, deploymentID, candidateID, stamp); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE deployments SET observed_state='pending' WHERE id=?`, deploymentID); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `DELETE FROM deployment_targets WHERE deployment_id=?`, deploymentID); err != nil {
+		return err
+	}
+	for _, targetID := range targetIDs {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO deployment_targets(deployment_id,target_id) VALUES(?,?)`, deploymentID, targetID); err != nil {
+			return err
+		}
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE replicas SET lifecycle_state=CASE WHEN revision_id=? THEN 'active' WHEN lifecycle_state='active' THEN 'draining' ELSE lifecycle_state END,updated_at=? WHERE deployment_id=? AND lifecycle_state!='deleted'`, candidateID, stamp, deploymentID); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE scaling_policies SET enabled=?,min_replicas=?,max_replicas=?,updated_at=? WHERE deployment_id=?`, spec.AutoscalingEnabled, spec.MinReplicas, spec.MaxReplicas, stamp, deploymentID); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE autoscaling_state SET desired_replicas=?,consecutive_high=0,consecutive_low=0,updated_at=? WHERE deployment_id=?`, spec.MinReplicas, stamp, deploymentID); err != nil {
+		return err
+	}
+	if err = insertRevisionEvent(ctx, tx, deploymentID, "revision_promoted", "Guard-accepted candidate revision committed", map[string]any{"revision_id": candidateID, "previous_revision_id": activeID, "targets": targetNames}, stamp); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *Store) RejectCandidateRevision(ctx context.Context, tenant, deploymentName, candidateID, reason string) error {
 	return s.transitionRevision(ctx, tenant, deploymentName, candidateID, "rejected", reason)
 }

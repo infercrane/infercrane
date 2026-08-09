@@ -16,4 +16,6 @@ Only one candidate may exist for a deployment. Rejections and rollbacks require 
 
 Elastic candidates persist their RunPod cloud, GPU, region, vLLM version and arguments, model revision, and replica bounds in the immutable revision spec. Candidate provisioning uses revision-scoped provider identities and does not publish those workers into active routing. Cancelling provisioning or rejecting the candidate removes only candidate capacity; the active revision is never part of that cleanup set.
 
-Promotion is an explicit operator action and is refused unless the latest persisted Release Guard evaluation accepted that candidate against the still-current active revision. Candidate creation and provisioning alone never route traffic.
+Promotion is an explicit operator action and is refused unless the latest persisted Release Guard evaluation accepted that candidate against the still-current active revision. The revision and candidate target set are committed atomically. InferCrane then waits for the newest router generation to publish exactly that worker set before it drains and deletes the old revision. Candidate creation and provisioning alone never route traffic.
+
+If the control plane restarts after the database cutover but before provider cleanup, the durable promotion resumes at router-generation verification. Cancellation before cutover removes candidate capacity; cancellation after cutover finishes safe draining because abandoning old billable capacity would leak resources.

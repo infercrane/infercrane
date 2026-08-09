@@ -688,6 +688,62 @@ func TestReleaseGuardPersistsDeterministicCandidateDecision(t *testing.T) {
 	}
 }
 
+func TestGuardedPromotionAtomicallySwitchesRevisionAndTargets(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	if _, err := s.AddTarget(ctx, domain.Target{Name: "guarded-old", URL: "http://guarded-old", Provider: "existing", Runtime: "vllm", UpstreamModel: "model-v1"}); err != nil {
+		t.Fatal(err)
+	}
+	deployment, err := s.ApplyDeployment(ctx, domain.Deployment{Name: "guarded-prod", Model: "model-v1"}, []string{"guarded-old"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := s.Resolve(ctx, deployment.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	activeRevisionID := resolved.Deployment.ActiveRevisionID
+	candidate, err := s.CreateCandidateRevision(ctx, "global", deployment.Name, `{"model":"model-v2","runtime":"vllm","routing_strategy":"round-robin","min_replicas":1,"max_replicas":1,"compute_mode":"elastic","cloud":"runpod","gpu":"L40S"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := s.AddTarget(ctx, domain.Target{Name: "guarded-prod-" + candidate.ID[:8] + "-r0", URL: "http://guarded-new", Provider: "skypilot", Runtime: "vllm", UpstreamModel: "model-v2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replica, _, err := s.EnsureReplicaIntent(ctx, domain.Replica{TenantID: "global", DeploymentID: deployment.ID, RevisionID: candidate.ID, Ordinal: 0, ExternalKey: deployment.ID + "-" + candidate.ID + "-r0", Provider: "skypilot"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.ObserveReplica(ctx, replica.ID, "ready", target.URL, "healthy", `{}`, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.SetReleaseGuardPolicy(ctx, "global", deployment.Name, domain.ReleaseGuardPolicy{Enabled: true, MinimumRequests: 1, MaxTTFTRegressionPercent: 15, MaxLatencyRegressionPercent: 15, MaxErrorRateIncrease: .01, MaxOutputThroughputDropPercent: 20}); err != nil {
+		t.Fatal(err)
+	}
+	activeTTFT, candidateTTFT := 100.0, 105.0
+	if err = s.RecordRequest(ctx, domain.InferenceRecord{RequestID: "guarded-active", DeploymentID: deployment.ID, RevisionID: activeRevisionID, OperationName: "chat", StartedAt: time.Now(), StatusCode: 200, LatencyMS: 200, TTFTMS: &activeTTFT}); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.RecordRequest(ctx, domain.InferenceRecord{RequestID: "guarded-candidate", DeploymentID: deployment.ID, RevisionID: candidate.ID, OperationName: "chat", StartedAt: time.Now(), StatusCode: 200, LatencyMS: 205, TTFTMS: &candidateTTFT}); err != nil {
+		t.Fatal(err)
+	}
+	evaluation, err := s.EvaluateReleaseGuard(ctx, "global", deployment.Name, 5*time.Minute)
+	if err != nil || evaluation.Decision != "ACCEPT" {
+		t.Fatalf("evaluation=%+v err=%v", evaluation, err)
+	}
+	if err = s.PromoteGuardedCandidate(ctx, "global", deployment.Name, candidate.ID, []string{target.Name}); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.PromoteGuardedCandidate(ctx, "global", deployment.Name, candidate.ID, []string{target.Name}); err != nil {
+		t.Fatalf("replayed promotion: %v", err)
+	}
+	resolved, err = s.Resolve(ctx, deployment.Name)
+	if err != nil || resolved.Deployment.ActiveRevisionID != candidate.ID || resolved.Deployment.CandidateRevisionID != "" || resolved.Deployment.Model != "model-v2" || len(resolved.Targets) != 1 || resolved.Targets[0].ID != target.ID {
+		t.Fatalf("resolved=%+v err=%v", resolved, err)
+	}
+}
+
 func TestTenantResourcesCanReuseNamesWithoutCrossTenantVisibility(t *testing.T) {
 	ctx := context.Background()
 	s := openStore(t, ctx)

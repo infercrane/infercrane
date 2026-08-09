@@ -409,7 +409,7 @@ func (s *Store) RecordGeneration(ctx context.Context, generation domain.RouterGe
 
 func (s *Store) RoutingGenerationMatches(ctx context.Context, deploymentID, workerSetHash string) (bool, error) {
 	var matched bool
-	err := s.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM router_generations WHERE deployment_id=? AND status='active' AND worker_set_hash=?)`, deploymentID, workerSetHash).Scan(&matched)
+	err := s.QueryRowContext(ctx, `SELECT COALESCE((SELECT worker_set_hash=? FROM router_generations WHERE deployment_id=? AND status='active' ORDER BY created_at DESC,generation DESC LIMIT 1),FALSE)`, workerSetHash, deploymentID).Scan(&matched)
 	return matched, err
 }
 
@@ -419,5 +419,10 @@ func (s *Store) DeleteProvisionedTarget(ctx context.Context, tenant, name string
 		return err
 	}
 	_, err = result.RowsAffected()
+	return err
+}
+
+func (s *Store) DeleteProvisionedTargetByURL(ctx context.Context, tenant, endpoint string) error {
+	_, err := s.ExecContext(ctx, `DELETE FROM targets t WHERE t.tenant_id=? AND t.url=? AND t.provider='skypilot' AND NOT EXISTS(SELECT 1 FROM deployment_targets dt WHERE dt.target_id=t.id)`, tenant, NormalizeURL(endpoint))
 	return err
 }

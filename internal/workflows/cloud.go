@@ -74,10 +74,12 @@ type CloudStore interface {
 	DeleteDeploymentForTenant(context.Context, string, string) error
 	RoutingGenerationMatches(context.Context, string, string) (bool, error)
 	DeleteProvisionedTarget(context.Context, string, string) error
+	DeleteProvisionedTargetByURL(context.Context, string, string) error
 	ModelArtifactForRevision(context.Context, string, string) (domain.ModelArtifact, error)
 	AttachModelArtifact(context.Context, string, string, domain.ModelArtifact) (domain.ModelArtifact, error)
 	Revision(context.Context, string, string, string) (domain.DeploymentRevision, error)
 	RejectCandidateRevision(context.Context, string, string, string, string) error
+	PromoteGuardedCandidate(context.Context, string, string, string, []string) error
 	Audit(context.Context, domain.AuditEvent) error
 }
 
@@ -366,6 +368,98 @@ func CloudHandlers(store CloudStore, provider ReplicaProvider, runtime RuntimeIn
 		result, _ := json.Marshal(map[string]any{"candidate_id": rollout.CandidateID, "rejected": true, "reason": rollout.Reason})
 		return string(result), nil
 	}
+	candidatePromote := func(ctx context.Context, operation domain.Operation) (string, error) {
+		var rollout RolloutRequest
+		if err := json.Unmarshal([]byte(operation.RequestJSON), &rollout); err != nil || rollout.Name == "" || rollout.TenantID == "" || rollout.CandidateID == "" {
+			return "", operations.Permanent("invalid_request", errors.New("deployment and candidate revision are required"))
+		}
+		resolved, err := store.ResolveForTenant(ctx, rollout.TenantID, rollout.Name)
+		if err != nil {
+			return "", operations.Permanent("deployment_missing", err)
+		}
+		revision, err := store.Revision(ctx, rollout.TenantID, rollout.Name, rollout.CandidateID)
+		if err != nil {
+			return "", operations.Permanent("candidate_not_found", err)
+		}
+		if revision.Status != "candidate" && resolved.Deployment.ActiveRevisionID != rollout.CandidateID {
+			return "", operations.Permanent("candidate_not_found", errors.New("revision is neither current candidate nor active cutover"))
+		}
+		var spec domain.DeploymentRevisionSpec
+		if err = json.Unmarshal([]byte(revision.SpecJSON), &spec); err != nil {
+			return "", operations.Permanent("invalid_candidate_spec", err)
+		}
+		replicas, err := store.ReplicasForDeployment(ctx, rollout.TenantID, resolved.Deployment.ID)
+		if err != nil {
+			return "", operations.Retryable("replica_lookup_failed", err)
+		}
+		var targetNames, targetURLs []string
+		for _, replica := range replicas {
+			if replica.RevisionID != rollout.CandidateID || (replica.LifecycleState != "ready" && replica.LifecycleState != "active") || replica.Health != "healthy" || replica.Endpoint == "" {
+				continue
+			}
+			targetNames = append(targetNames, fmt.Sprintf("%s-%s-r%d", rollout.Name, rollout.CandidateID[:min(8, len(rollout.CandidateID))], replica.Ordinal))
+			targetURLs = append(targetURLs, replica.Endpoint)
+		}
+		if len(targetNames) < spec.MinReplicas {
+			return "", operations.Permanent("candidate_not_ready", errors.New("candidate does not have its minimum healthy replica count"))
+		}
+		if err = store.PromoteGuardedCandidate(ctx, rollout.TenantID, rollout.Name, rollout.CandidateID, targetNames); err != nil {
+			return "", classify("guarded_promotion_failed", err)
+		}
+		expectedHash := router.WorkerSetHash(spec.RoutingStrategy, targetURLs)
+		matched, err := store.RoutingGenerationMatches(ctx, resolved.Deployment.ID, expectedHash)
+		if err != nil {
+			return "", operations.Retryable("router_generation_lookup_failed", err)
+		}
+		if !matched {
+			_ = checkpoint(ctx, store, operation, "candidate.route", "waiting", map[string]any{"worker_set_hash": expectedHash}, 80, "Waiting for guarded router generation")
+			return "", operations.Retryable("router_cutover_pending", errors.New("candidate router generation is not active yet"))
+		}
+		deleted := 0
+		for _, replica := range replicas {
+			if replica.RevisionID == rollout.CandidateID || replica.LifecycleState == "deleted" {
+				continue
+			}
+			handle := provider.Handle(replica.ExternalKey)
+			handle.RequestID, handle.ResourceID = replica.ProviderRequestID, replica.ProviderResourceID
+			if err = provider.DeleteReplica(ctx, handle); err != nil {
+				return "", operations.Retryable("provider_delete_failed", err)
+			}
+			observation, observeErr := provider.ObserveReplica(ctx, handle, 0)
+			if observeErr != nil {
+				return "", operations.Retryable("provider_delete_observe_failed", observeErr)
+			}
+			if observation.Exists {
+				return "", operations.Retryable("provider_delete_pending", errors.New("old revision resource deletion is pending"))
+			}
+			if err = store.MarkReplicaDeleted(ctx, replica.ID); err != nil {
+				return "", classify("replica_delete_persist_failed", err)
+			}
+			if replica.Endpoint != "" {
+				if err = store.DeleteProvisionedTargetByURL(ctx, rollout.TenantID, replica.Endpoint); err != nil {
+					return "", classify("target_delete_failed", err)
+				}
+			}
+			deleted++
+		}
+		_ = checkpoint(ctx, store, operation, "candidate.drain", "succeeded", map[string]int{"deleted_replicas": deleted}, 95, "Old revision capacity drained and deleted")
+		result, _ := json.Marshal(map[string]any{"candidate_id": rollout.CandidateID, "promoted": true, "deleted_old_replicas": deleted})
+		return string(result), nil
+	}
+	candidatePromoteCancel := func(ctx context.Context, operation domain.Operation) (string, error) {
+		var rollout RolloutRequest
+		if err := json.Unmarshal([]byte(operation.RequestJSON), &rollout); err != nil {
+			return "", operations.Permanent("invalid_request", err)
+		}
+		resolved, err := store.ResolveForTenant(ctx, rollout.TenantID, rollout.Name)
+		if err != nil {
+			return "", operations.Permanent("deployment_missing", err)
+		}
+		if resolved.Deployment.ActiveRevisionID == rollout.CandidateID {
+			return candidatePromote(ctx, operation)
+		}
+		return candidateCleanup(ctx, operation)
+	}
 
 	return map[string]operations.Handler{
 		ConvergeKind: converge, ReplicaProvisionKind: converge, ReplicaDeleteKind: converge, ScaleKind: converge,
@@ -375,6 +469,8 @@ func CloudHandlers(store CloudStore, provider ReplicaProvider, runtime RuntimeIn
 		RolloutProvisionKind:             candidate,
 		RolloutProvisionKind + ".cancel": candidateCleanup,
 		RolloutRejectKind:                candidateReject,
+		RolloutPromoteKind:               candidatePromote,
+		RolloutPromoteKind + ".cancel":   candidatePromoteCancel,
 	}
 }
 
