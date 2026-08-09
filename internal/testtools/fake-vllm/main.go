@@ -38,6 +38,15 @@ func main() {
 	mux.HandleFunc("POST /v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
+		if streaming, _ := body["stream"].(bool); streaming {
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprintf(w, "data: {\"id\":\"chatcmpl-fake\",\"object\":\"chat.completion.chunk\",\"model\":%q,\"choices\":[{\"index\":0,\"delta\":{\"content\":%q}}]}\n\n", body["model"], "response from "+*worker)
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+			fmt.Fprint(w, "data: [DONE]\n\n")
+			return
+		}
 		write(w, map[string]any{"id": "chatcmpl-fake", "object": "chat.completion", "model": body["model"], "choices": []any{map[string]any{"index": 0, "message": map[string]string{"role": "assistant", "content": "response from " + *worker}, "finish_reason": "stop"}}})
 	})
 	if err := http.ListenAndServe(fmt.Sprintf(":%d", *port), mux); err != nil {

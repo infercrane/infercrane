@@ -14,3 +14,8 @@ Public workflows use the authenticated control-plane API and support `--output j
 - `version`: print the build version.
 
 Mutations accept idempotency keys. Ctrl-C only disconnects the client or requests subprocess cancellation; it does not rewrite persisted lifecycle state.
+With `--wait --output json`, mutation commands print one final JSON document after polling durable
+operation state. Human output may print intermediate durable progress. `delete --plan` is
+side-effect-free and supports both output formats.
+`status --watch --output json` emits one complete JSON document per line for each durable-state
+refresh until the client disconnects.

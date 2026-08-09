@@ -1,6 +1,8 @@
 # v0.1 release checklist
 
 Do not create the release tag until every evidence field is linked to a durable log or artifact.
+Use the [release acceptance record](release-acceptance.md) for the requirement-by-requirement manual
+run. It is intentionally left pending until real evidence is attached.
 
 - [ ] `make verify`, `make deadcode`, `make audit`, and `make test-container` pass from a clean checkout.
 - [ ] Gate 0 elastic RunPod lifecycle acceptance passes, including restart/disconnect/failure recovery.

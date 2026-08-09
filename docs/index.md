@@ -40,6 +40,7 @@ than loading the entire repository into one context window.
 - [Autoscaling](features/autoscaling.md)
 - [Release Guard](features/release-guard.md)
 - [Durable Sessions](features/durable-sessions.md)
+- [v0.1 release acceptance record](release-acceptance.md)
 
 ## Operations
 

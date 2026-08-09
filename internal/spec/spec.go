@@ -10,12 +10,17 @@ import (
 type Deployment struct {
 	Name  string `yaml:"name"`
 	Model struct {
-		ID string `yaml:"id"`
+		ID       string `yaml:"id"`
+		Revision string `yaml:"revision"`
 	} `yaml:"model"`
 	Runtime struct {
-		Engine string   `yaml:"engine"`
-		Args   []string `yaml:"args"`
+		Engine  string   `yaml:"engine"`
+		Version string   `yaml:"version"`
+		Args    []string `yaml:"args"`
 	} `yaml:"runtime"`
+	Compute struct {
+		Mode string `yaml:"mode"`
+	} `yaml:"compute"`
 	Resources struct {
 		GPU string `yaml:"gpu"`
 	} `yaml:"resources"`
@@ -44,7 +49,13 @@ func Load(path string) (Deployment, error) {
 	if out.Runtime.Engine == "" {
 		out.Runtime.Engine = "vllm"
 	}
-	if out.Scaling.MinReplicas == 0 {
+	if out.Compute.Mode == "" {
+		out.Compute.Mode = "elastic"
+	}
+	if out.Compute.Mode != "elastic" && out.Compute.Mode != "serverless" {
+		return out, fmt.Errorf("compute.mode must be elastic or serverless")
+	}
+	if out.Compute.Mode == "elastic" && out.Scaling.MinReplicas == 0 {
 		out.Scaling.MinReplicas = 1
 	}
 	if out.Scaling.MaxReplicas == 0 {
@@ -56,8 +67,17 @@ func Load(path string) (Deployment, error) {
 	if out.Name == "" || out.Model.ID == "" || out.Resources.GPU == "" || out.Provider.Cloud == "" {
 		return out, fmt.Errorf("name, model.id, resources.gpu, and provider.cloud are required")
 	}
+	if out.Runtime.Engine != "vllm" {
+		return out, fmt.Errorf("v0.1 supports runtime.engine vllm only")
+	}
+	if out.Provider.Cloud != "runpod" {
+		return out, fmt.Errorf("v0.1 supports provider.cloud runpod only")
+	}
 	if out.Scaling.MaxReplicas < out.Scaling.MinReplicas {
 		return out, fmt.Errorf("scaling.max_replicas must be >= scaling.min_replicas")
+	}
+	if out.Compute.Mode == "serverless" && out.Scaling.MinReplicas != 0 {
+		return out, fmt.Errorf("RunPod Serverless requires scaling.min_replicas 0")
 	}
 	return out, nil
 }

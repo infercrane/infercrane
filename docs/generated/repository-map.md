@@ -8,7 +8,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 
 | Package path | Source files | Test files | Test functions |
 |---|---:|---:|---|
-| `cmd/infercrane` | 1 | 1 | `TestDeleteCLIOnlySubmitsControlPlaneRequest`, `TestDeployCLIOnlySubmitsControlPlaneRequest`, `TestPrimaryDeployPathDefaultsToRunPodL40S`, `TestServerlessDeployDefaultsToZeroMinimumWorkers` |
+| `cmd/infercrane` | 1 | 1 | `TestDeleteCLIOnlySubmitsControlPlaneRequest`, `TestDeletePlanHonorsJSONWithoutControlPlaneMutation`, `TestDeployCLIOnlySubmitsControlPlaneRequest`, `TestDeployDisconnectLeavesDurableOperationRunning`, `TestDeployWaitJSONReturnsOneFinalDocument`, `TestDeployYAMLPreservesArtifactRuntimeAndServerlessFields`, `TestPrimaryDeployPathDefaultsToRunPodL40S`, `TestServerlessDeployDefaultsToZeroMinimumWorkers` |
 | `internal/accounting` | 1 | 0 | — |
 | `internal/artifact` | 1 | 1 | `TestHuggingFaceResolveRejectsMutableResponse`, `TestHuggingFaceResolveReturnsImmutableIdentity` |
 | `internal/authn` | 1 | 1 | `TestCacheAuthenticatesWithoutSourceOnRequestPath` |
@@ -31,7 +31,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 | `internal/router` | 2 | 1 | `TestCommandUsesUpstreamPolicyAndSingleAttempt` |
 | `internal/routes` | 1 | 1 | `TestDirectoryIsolatesSameAliasByTenant`, `TestDirectoryOrdersAndRemovesSnapshots` |
 | `internal/runtime` | 1 | 0 | — |
-| `internal/spec` | 1 | 0 | — |
+| `internal/spec` | 1 | 1 | `TestLoadElasticDefaults`, `TestLoadRejectsExcludedRuntimeAndCloud`, `TestLoadRejectsNonzeroServerlessMinimum`, `TestLoadServerlessArtifactAndRuntimeIdentity` |
 | `internal/store` | 13 | 2 | `TestApplyDeploymentConvergesTargetMembership`, `TestBadCandidateAcceptanceRejectsRevisionAndDeletesCapacity`, `TestBenchmarkHistoryPersistsReproductionMetadata`, `TestCancellingQueuedOperationPreventsClaim`, `TestCancellingWaitingOperationRequiresCleanupClaim`, `TestCreateDeploymentRejectsIncompatibleTargets`, `TestDeploymentLifecycleMutationsAreSerialized`, `TestDeploymentRevisionsAreImmutableAndPromoteExplicitly`, `TestDurableAutoscalingAcceptanceOneToTwoToOne`, `TestGuardedPromotionAtomicallySwitchesRevisionAndTargets`, `TestGuardedRolloutAcceptanceResumesAfterCutoverRestart`, `TestModelArtifactIsImmutablePerRevision`, `TestOperationQueueLeasesAndRecoversExpiredWork`, `TestOrphanedTargetsOnlyReturnsProvisionedUnusedTargets`, `TestPrincipalCredentialRotationAndRevocation`, `TestReleaseGuardPersistsDeterministicCandidateDecision`, `TestReplicaIntentAndProviderIdentityAreIdempotent`, `TestRequestTelemetryPersistsMeasurementsAndDimensions`, `TestRevisionTransitionsAreReplaySafeForDurableOperation`, `TestRunPodServerlessAcceptanceConvergesAtZeroAndDeletesEndpoint`, `TestScaleToQueuesExactlyOneDurableOperation`, `TestStaleLeaseCannotCheckpointOrFinish`, `TestSubmitCloudDeploymentIsAtomicAndIdempotent`, `TestSubmitDeploymentDeleteWithdrawsDesiredStateAndQueuesCleanup`, `TestTargetAndDeploymentLifecycle`, `TestTargetConflict`, `TestTenantQuotaRejectsDeploymentBeyondReplicaLimit`, `TestTenantResourcesCanReuseNamesWithoutCrossTenantVisibility` |
 | `internal/testtools/fake-router` | 1 | 0 | — |
 | `internal/testtools/fake-vllm` | 1 | 0 | — |

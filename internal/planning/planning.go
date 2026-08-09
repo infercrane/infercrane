@@ -34,9 +34,9 @@ type Change struct {
 }
 
 type Current struct {
-	Model, Runtime, Routing, ActiveRevision string
-	MinReplicas, MaxReplicas                int
-	ActiveRevisionNumber                    int
+	Model, Runtime, Routing, ActiveRevision        string
+	ComputeMode, Cloud, GPU, Region                string
+	MinReplicas, MaxReplicas, ActiveRevisionNumber int
 }
 
 type Plan struct {
@@ -60,6 +60,12 @@ type Plan struct {
 
 // Compare turns a creation plan into a deterministic revision rollout plan.
 func Compare(p Plan, current Current) Plan {
+	if current.ComputeMode == "" {
+		current.ComputeMode = "existing"
+		if current.Cloud != "" || current.GPU != "" {
+			current.ComputeMode = "elastic"
+		}
+	}
 	addChange := func(field, before, after string) {
 		if before != after {
 			p.Changes = append(p.Changes, Change{Field: field, Before: before, After: after})
@@ -67,6 +73,10 @@ func Compare(p Plan, current Current) Plan {
 	}
 	addChange("model", current.Model, p.Model)
 	addChange("runtime", current.Runtime, p.Runtime)
+	addChange("compute", current.ComputeMode, computeModeForPlan(p))
+	addChange("cloud", current.Cloud, p.Cloud)
+	addChange("GPU", current.GPU, p.GPU)
+	addChange("region", current.Region, p.Region)
 	addChange("routing", current.Routing, p.Routing)
 	addChange("replicas", fmt.Sprintf("%d..%d", current.MinReplicas, current.MaxReplicas), fmt.Sprintf("%d..%d", p.MinReplicas, p.MaxReplicas))
 	if len(p.Changes) == 0 {
@@ -74,7 +84,11 @@ func Compare(p Plan, current Current) Plan {
 		return p
 	}
 	next := current.ActiveRevisionNumber + 1
-	p.Changes = append(p.Changes, Change{Field: "revision", Before: current.ActiveRevision, After: fmt.Sprintf("candidate rev-%d", next)})
+	active := current.ActiveRevision
+	if current.ActiveRevisionNumber > 0 {
+		active = fmt.Sprintf("rev-%d", current.ActiveRevisionNumber)
+	}
+	p.Changes = append(p.Changes, Change{Field: "revision", Before: active, After: fmt.Sprintf("candidate rev-%d", next)})
 	summaries := []struct{ kind, text string }{
 		{"provision", "Provision candidate capacity"},
 		{"health-check", "Wait for candidate readiness"},
@@ -88,6 +102,16 @@ func Compare(p Plan, current Current) Plan {
 		p.Actions = append(p.Actions, Action{Order: i + 1, Kind: action.kind, Summary: action.text})
 	}
 	return p
+}
+
+func computeModeForPlan(p Plan) string {
+	if p.Mode == "serverless" {
+		return "serverless"
+	}
+	if p.Mode == "provisioned" {
+		return "elastic"
+	}
+	return "existing"
 }
 
 func Build(in Input) (Plan, error) {

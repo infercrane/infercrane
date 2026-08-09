@@ -170,6 +170,9 @@ func initCommand(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if *output != "human" && *output != "json" {
+		return errors.New("--output must be human or json")
+	}
 	path, generated, err := config.InitializeClient(*controlURL, *apiKey)
 	if err != nil {
 		return err
@@ -184,10 +187,6 @@ func initCommand(args []string) error {
 		if generated {
 			fmt.Println("API key       generated and stored with mode 0600")
 		}
-	case "":
-		return errors.New("--output must be human or json")
-	default:
-		return errors.New("--output must be human or json")
 	}
 	return nil
 }
@@ -228,7 +227,7 @@ func planCommand(ctx context.Context, cfg config.Config, args []string) error {
 		if *name != "" || *targets != "" || *cloud != "" || *gpu != "" || *region != "" {
 			return errors.New("deployment YAML cannot be combined with deployment flags")
 		}
-		in = planning.Input{Name: file.Name, Model: file.Model.ID, Cloud: file.Provider.Cloud,
+		in = planning.Input{Name: file.Name, Model: file.Model.ID, ComputeMode: file.Compute.Mode, Cloud: file.Provider.Cloud,
 			GPU: file.Resources.GPU, Region: file.Provider.Region, Runtime: file.Runtime.Engine,
 			RuntimeArgs: file.Runtime.Args, Routing: file.Routing.Strategy,
 			MinReplicas: file.Scaling.MinReplicas, MaxReplicas: file.Scaling.MaxReplicas}
@@ -248,13 +247,19 @@ func planCommand(ctx context.Context, cfg config.Config, args []string) error {
 	current, lookupErr := fetchDeployment(ctx, cfg, p.Name)
 	if lookupErr == nil {
 		activeNumber := 0
+		activeSpec := domain.DeploymentRevisionSpec{}
 		for _, revision := range current.Revisions {
 			if revision.ID == current.Deployment.ActiveRevisionID {
 				activeNumber = revision.Number
+				if len(revision.Spec) > 0 {
+					if err := json.Unmarshal(revision.Spec, &activeSpec); err != nil {
+						return fmt.Errorf("decode active revision for plan: %w", err)
+					}
+				}
 				break
 			}
 		}
-		p = planning.Compare(p, planning.Current{Model: current.Deployment.Model, Runtime: current.Deployment.Runtime, Routing: current.Deployment.RoutingStrategy, MinReplicas: current.Deployment.MinReplicas, MaxReplicas: current.Deployment.MaxReplicas, ActiveRevision: current.Deployment.ActiveRevisionID, ActiveRevisionNumber: activeNumber})
+		p = planning.Compare(p, planning.Current{Model: current.Deployment.Model, Runtime: current.Deployment.Runtime, Routing: current.Deployment.RoutingStrategy, ComputeMode: activeSpec.ComputeMode, Cloud: activeSpec.Cloud, GPU: activeSpec.GPU, Region: activeSpec.Region, MinReplicas: current.Deployment.MinReplicas, MaxReplicas: current.Deployment.MaxReplicas, ActiveRevision: current.Deployment.ActiveRevisionID, ActiveRevisionNumber: activeNumber})
 	} else {
 		var controlErr *ControlError
 		if !errors.As(lookupErr, &controlErr) || controlErr.Code != "not_found" {
@@ -277,7 +282,13 @@ func planCommand(ctx context.Context, cfg config.Config, args []string) error {
 			fmt.Println()
 		}
 		for _, action := range p.Actions {
-			fmt.Printf("%d. %-10s %s\n", action.Order, action.Kind, action.Summary)
+			symbol := "+"
+			if action.Kind == "drain" || action.Kind == "terminate" {
+				symbol = "-"
+			} else if action.Kind == "noop" {
+				symbol = "="
+			}
+			fmt.Printf("%s %s\n", symbol, action.Summary)
 		}
 		for _, warning := range p.Warnings {
 			fmt.Printf("\nWarning: %s\n", warning)
@@ -427,6 +438,9 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
+	if *output != "human" && *output != "json" {
+		return errors.New("--output must be human or json")
+	}
 	minExplicit := false
 	fs.Visit(func(item *flag.Flag) {
 		if item.Name == "min" {
@@ -435,6 +449,8 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 	})
 	strategy := "round-robin"
 	runtimeArgs := []string{}
+	modelRevision := ""
+	runtimeVersion := ""
 	if ext := filepath.Ext(model); ext == ".yaml" || ext == ".yml" {
 		file, err := spec.Load(model)
 		if err != nil {
@@ -445,6 +461,9 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 		}
 		*name = file.Name
 		model = file.Model.ID
+		modelRevision = file.Model.Revision
+		runtimeVersion = file.Runtime.Version
+		*computeMode = file.Compute.Mode
 		*cloud = file.Provider.Cloud
 		*gpu = file.Resources.GPU
 		*region = file.Provider.Region
@@ -482,7 +501,7 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 		path = "/api/v1/deployments/apply"
 		request = workflows.ApplyExistingRequest{Name: *name, Model: model, Targets: splitTargets(*targets), RoutingStrategy: strategy, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas, AutoscalingEnabled: *maxReplicas > *minReplicas}
 	} else if *cloud != "" && *gpu != "" {
-		request = workflows.CloudRequest{Name: *name, Model: model, ComputeMode: *computeMode, Cloud: *cloud, GPU: *gpu, Region: *region, RuntimeArgs: runtimeArgs, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas}
+		request = workflows.CloudRequest{Name: *name, Model: model, ModelRevision: modelRevision, RuntimeVersion: runtimeVersion, ComputeMode: *computeMode, Cloud: *cloud, GPU: *gpu, Region: *region, RuntimeArgs: runtimeArgs, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas}
 	} else {
 		return errors.New("provide --targets or both --cloud and --gpu")
 	}
@@ -492,16 +511,18 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 	if err := controlJSON(ctx, cfg, http.MethodPost, path, *idempotencyKey, request, &response); err != nil {
 		return err
 	}
+	if *wait {
+		operation, err := waitForOperation(ctx, cfg, response.Operation.ID, *output == "human")
+		if err != nil {
+			return err
+		}
+		response.Operation = operation
+	}
 	if *output == "json" {
 		encoded, _ := json.MarshalIndent(map[string]any{"deployment": *name, "operation": response.Operation}, "", "  ")
 		fmt.Println(string(encoded))
 	} else if *output == "human" {
 		fmt.Printf("Deployment  %s\nOperation   %s\nStatus      %s\n", *name, response.Operation.ID, response.Operation.Status)
-	} else {
-		return errors.New("--output must be human or json")
-	}
-	if *wait {
-		return waitForOperation(ctx, cfg, response.Operation.ID)
 	}
 	_ = operationKind // deploy/apply share API semantics; retained for command UX.
 	return nil
@@ -704,10 +725,20 @@ func deleteAPICommand(ctx context.Context, cfg config.Config, args []string) err
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
+	if *output != "human" && *output != "json" {
+		return errors.New("--output must be human or json")
+	}
 	if *planOnly {
-		fmt.Printf("Deletion plan: %s\n", args[0])
-		fmt.Println("- withdraw deployment from new routing")
-		fmt.Println("- delete every provider resource and verify inventory absence")
+		actions := []string{"withdraw deployment from new routing", "delete every provider resource and verify inventory absence"}
+		if *output == "json" {
+			encoded, _ := json.MarshalIndent(map[string]any{"deployment": args[0], "actions": actions}, "", "  ")
+			fmt.Println(string(encoded))
+		} else {
+			fmt.Printf("Deletion plan: %s\n", args[0])
+			for _, action := range actions {
+				fmt.Printf("- %s\n", action)
+			}
+		}
 		return nil
 	}
 	if !*yes {
@@ -722,16 +753,18 @@ func deleteAPICommand(ctx context.Context, cfg config.Config, args []string) err
 	if err := controlJSON(ctx, cfg, http.MethodDelete, "/api/v1/deployments/"+url.PathEscape(args[0]), *idempotencyKey, nil, &response); err != nil {
 		return err
 	}
+	if *wait {
+		operation, err := waitForOperation(ctx, cfg, response.Operation.ID, *output == "human")
+		if err != nil {
+			return err
+		}
+		response.Operation = operation
+	}
 	if *output == "json" {
 		encoded, _ := json.MarshalIndent(map[string]any{"deployment": args[0], "operation": response.Operation}, "", "  ")
 		fmt.Println(string(encoded))
 	} else if *output == "human" {
 		fmt.Printf("Deployment  %s\nOperation   %s\nStatus      %s\n", args[0], response.Operation.ID, response.Operation.Status)
-	} else {
-		return errors.New("--output must be human or json")
-	}
-	if *wait {
-		return waitForOperation(ctx, cfg, response.Operation.ID)
 	}
 	return nil
 }
@@ -800,24 +833,26 @@ func (e *ControlError) Error() string {
 	return fmt.Sprintf("control plane %s: %s", e.Code, e.Message)
 }
 
-func waitForOperation(ctx context.Context, cfg config.Config, id string) error {
+func waitForOperation(ctx context.Context, cfg config.Config, id string, printProgress bool) (domain.Operation, error) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
 		var operation domain.Operation
 		if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/operations/"+url.PathEscape(id), "", nil, &operation); err != nil {
-			return err
+			return domain.Operation{}, err
 		}
-		fmt.Printf("Progress    %d%%  %s\n", operation.Progress, operation.Message)
+		if printProgress {
+			fmt.Printf("Progress    %d%%  %s\n", operation.Progress, operation.Message)
+		}
 		switch operation.Status {
 		case "succeeded":
-			return nil
+			return operation, nil
 		case "failed", "cancelled":
-			return fmt.Errorf("operation %s %s: %s", id, operation.Status, operation.Message)
+			return operation, fmt.Errorf("operation %s %s: %s", id, operation.Status, operation.Message)
 		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return operation, ctx.Err()
 		case <-ticker.C:
 		}
 	}
@@ -1292,6 +1327,9 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 	if err := fs.Parse(rest); err != nil {
 		return err
 	}
+	if *output != "human" && *output != "json" {
+		return errors.New("--output must be human or json")
+	}
 	if *key == "" {
 		*key = fmt.Sprintf("cli-rollout-%s-%s-%d", action, name, time.Now().UnixNano())
 	}
@@ -1345,16 +1383,18 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 	if err := controlJSON(ctx, cfg, http.MethodPost, path, *key, request, &response); err != nil {
 		return err
 	}
+	if *wait {
+		operation, err := waitForOperation(ctx, cfg, response.Operation.ID, *output == "human")
+		if err != nil {
+			return err
+		}
+		response.Operation = operation
+	}
 	if *output == "json" {
 		encoded, _ := json.MarshalIndent(response, "", "  ")
 		fmt.Println(string(encoded))
 	} else if *output == "human" {
 		fmt.Printf("Deployment  %s\nAction      %s\nOperation   %s\nStatus      %s\n", name, action, response.Operation.ID, response.Operation.Status)
-	} else {
-		return errors.New("--output must be human or json")
-	}
-	if *wait {
-		return waitForOperation(ctx, cfg, response.Operation.ID)
 	}
 	return nil
 }

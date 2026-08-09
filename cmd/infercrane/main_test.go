@@ -3,12 +3,40 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/infercrane/infercrane/internal/config"
 )
+
+func captureStdout(t *testing.T, run func() error) (string, error) {
+	t.Helper()
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := os.Stdout
+	os.Stdout = writer
+	runErr := run()
+	os.Stdout = original
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	output, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return string(output), runErr
+}
 
 func TestDeployCLIOnlySubmitsControlPlaneRequest(t *testing.T) {
 	var path, key string
@@ -65,6 +93,43 @@ func TestServerlessDeployDefaultsToZeroMinimumWorkers(t *testing.T) {
 	}
 }
 
+func TestDeployYAMLPreservesArtifactRuntimeAndServerlessFields(t *testing.T) {
+	filename := filepath.Join(t.TempDir(), "deployment.yaml")
+	if err := os.WriteFile(filename, []byte(`
+name: qwen-serverless
+model:
+  id: Qwen/Qwen3-8B
+  revision: 0123456789abcdef0123456789abcdef01234567
+runtime:
+  engine: vllm
+  version: 0.10.2
+  args: [--enable-prefix-caching]
+compute: {mode: serverless}
+resources: {gpu: L40S}
+provider: {cloud: runpod, region: EU-RO-1}
+scaling: {min_replicas: 0, max_replicas: 4}
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte(`{"operation":{"id":"op-1","status":"pending"}}`))
+	}))
+	defer server.Close()
+
+	err := deployAPICommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, "deploy", []string{filename, "--idempotency-key", "yaml-1"})
+	if err != nil || body["compute_mode"] != "serverless" || body["min_replicas"] != nil || body["max_replicas"] != float64(4) || body["model_revision"] == nil || body["runtime_version"] != "0.10.2" || body["region"] != "EU-RO-1" {
+		t.Fatalf("body=%#v err=%v", body, err)
+	}
+	args, _ := body["runtime_args"].([]any)
+	if len(args) != 1 || args[0] != "--enable-prefix-caching" {
+		t.Fatalf("runtime_args=%#v", body["runtime_args"])
+	}
+}
+
 func TestDeleteCLIOnlySubmitsControlPlaneRequest(t *testing.T) {
 	var method, path string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -76,5 +141,88 @@ func TestDeleteCLIOnlySubmitsControlPlaneRequest(t *testing.T) {
 	err := deleteAPICommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, []string{"qwen prod", "--yes", "--idempotency-key", "delete-1"})
 	if err != nil || method != http.MethodDelete || path != "/api/v1/deployments/qwen prod" {
 		t.Fatalf("method=%s path=%s err=%v", method, path, err)
+	}
+}
+
+func TestDeletePlanHonorsJSONWithoutControlPlaneMutation(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		requests++
+	}))
+	defer server.Close()
+
+	output, err := captureStdout(t, func() error {
+		return deleteAPICommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, []string{"qwen-prod", "--plan", "--output", "json"})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plan struct {
+		Deployment string   `json:"deployment"`
+		Actions    []string `json:"actions"`
+	}
+	if err := json.Unmarshal([]byte(output), &plan); err != nil {
+		t.Fatalf("output is not one JSON document: %q: %v", output, err)
+	}
+	if requests != 0 || plan.Deployment != "qwen-prod" || len(plan.Actions) != 2 {
+		t.Fatalf("requests=%d plan=%#v", requests, plan)
+	}
+}
+
+func TestDeployWaitJSONReturnsOneFinalDocument(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodPost {
+			_, _ = w.Write([]byte(`{"operation":{"id":"op-1","status":"pending","progress":0}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"id":"op-1","status":"succeeded","progress":100,"message":"ready"}`))
+	}))
+	defer server.Close()
+
+	output, err := captureStdout(t, func() error {
+		return deployAPICommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, "deploy", []string{"Qwen/Qwen3-8B", "--wait", "--output", "json", "--idempotency-key", "release-1"})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result struct {
+		Operation struct {
+			Status   string `json:"status"`
+			Progress int    `json:"progress"`
+		} `json:"operation"`
+	}
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("output is not one JSON document: %q: %v", output, err)
+	}
+	if result.Operation.Status != "succeeded" || result.Operation.Progress != 100 || strings.Count(output, "\n{") != 0 {
+		t.Fatalf("unexpected waited result: %s", output)
+	}
+}
+
+func TestDeployDisconnectLeavesDurableOperationRunning(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var methods []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		methods = append(methods, r.Method)
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodPost {
+			_, _ = w.Write([]byte(`{"operation":{"id":"op-durable","status":"pending"}}`))
+			return
+		}
+		cancel()
+		_, _ = w.Write([]byte(`{"id":"op-durable","status":"running","progress":25}`))
+	}))
+	defer server.Close()
+
+	_, err := captureStdout(t, func() error {
+		return deployAPICommand(ctx, config.Config{ControlURL: server.URL, APIKey: "secret"}, "deploy", []string{"Qwen/Qwen3-8B", "--wait", "--idempotency-key", "disconnect-1"})
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected disconnect cancellation, got %v", err)
+	}
+	if strings.Join(methods, ",") != "POST,GET" {
+		t.Fatalf("disconnect must not submit a cancellation mutation: methods=%v", methods)
 	}
 }

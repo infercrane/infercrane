@@ -6,19 +6,36 @@ The primary path uses defaults:
 infercrane deploy Qwen/Qwen3-8B
 ```
 
-Equivalent advanced fields include `model`, `model_revision`, `runtime: vllm`, `runtime_version`, `runtime_args`, `compute_mode: elastic|serverless`, `cloud: runpod`, `gpu`, `region`, `min_replicas`, `max_replicas`, and `routing_strategy`.
+The YAML form groups model, runtime, compute, provider, resources, scaling, and routing concerns.
+Mutable model revisions such as `main` are resolved and persisted as immutable Hugging Face commits
+before provisioning.
 
 ```yaml
 name: qwen-prod
-model: Qwen/Qwen3-8B
-model_revision: main
-runtime: vllm
-compute_mode: elastic
-cloud: runpod
-gpu: L40S
-min_replicas: 1
-max_replicas: 4
-routing_strategy: round-robin
+model:
+  id: Qwen/Qwen3-8B
+  revision: main
+runtime:
+  engine: vllm
+  version: 0.10.2
+  args:
+    - --enable-prefix-caching
+compute:
+  mode: elastic
+provider:
+  cloud: runpod
+  region: EU-RO-1
+resources:
+  gpu: L40S
+scaling:
+  min_replicas: 1
+  max_replicas: 4
+routing:
+  strategy: round-robin
 ```
 
-InferCrane resolves `main` to a Hugging Face commit before provisioning. Revisions are immutable; changing a field creates a candidate. v0.1 rejects non-vLLM runtimes, clouds other than RunPod, and serverless minimums other than zero. Cost is omitted unless a trustworthy provider measurement exists.
+`compute.mode` defaults to `elastic`; elastic replica bounds default to `1..1`. Serverless requires
+`min_replicas: 0` and defaults `max_replicas` to one when omitted. Revisions are immutable; changing
+a field creates a candidate. v0.1 rejects non-vLLM runtimes, clouds other than RunPod, and
+serverless minimums other than zero. Cost is omitted unless a trustworthy provider measurement
+exists.

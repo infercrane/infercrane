@@ -2,11 +2,16 @@ name: qwen-prod
 
 model:
   id: Qwen/Qwen3-8B
+  revision: main
 
 runtime:
   engine: vllm
+  version: 0.10.2
   args:
     - --enable-prefix-caching
+
+compute:
+  mode: elastic
 
 resources:
   gpu: A40
@@ -20,4 +25,3 @@ scaling:
 
 routing:
   strategy: cache-aware
-

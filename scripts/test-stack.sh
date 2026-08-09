@@ -36,6 +36,17 @@ until curl -fsS -H "Authorization: Bearer $api_key" -H 'Content-Type: applicatio
 done
 curl -fsS "$base_url/metrics" | grep -q 'infercrane_gateway_request_duration_seconds_bucket'
 
+stream_body=$(mktemp)
+stream_headers=$(mktemp)
+trap 'rm -f "$stream_body" "$stream_headers"' EXIT HUP INT TERM
+curl -fsS -N -D "$stream_headers" -o "$stream_body" \
+  -H "Authorization: Bearer $api_key" -H 'Content-Type: application/json' \
+  -d "{\"model\":\"$model\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"stream smoke\"}]}" \
+  "$base_url/v1/chat/completions"
+grep -qi '^Content-Type: text/event-stream' "$stream_headers"
+grep -q '^data: {' "$stream_body"
+grep -q '^data: \[DONE\]' "$stream_body"
+
 docker compose exec -T infercrane infercrane plan Qwen/Qwen3-8B --targets gpu-a,gpu-b --output json >/dev/null
 docker compose exec -T infercrane infercrane doctor
 
