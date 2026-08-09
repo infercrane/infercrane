@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 
 import httpx
@@ -24,6 +25,16 @@ class DisconnectingStream(httpx.AsyncByteStream):
     async def __aiter__(self):
         yield b'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'
         raise httpx.ReadError("upstream disconnected")
+
+
+class HangingStream(httpx.AsyncByteStream):
+    def __init__(self, started: asyncio.Event):
+        self.started = started
+
+    async def __aiter__(self):
+        self.started.set()
+        yield b'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'
+        await asyncio.Event().wait()
 
 
 @pytest.fixture
@@ -233,3 +244,47 @@ async def test_upstream_disconnect_is_not_recorded_as_success(settings, database
         assert record is not None
         assert record.error_type == "upstream_disconnect"
         assert record.retry_count == 0
+
+
+@pytest.mark.asyncio
+async def test_client_cancellation_is_accounted(settings, database, control):
+    control.add_target(TargetCreate(name="gpu-a", url="http://127.0.0.1:8101"))
+    deployment = control.create_deployment(
+        DeploymentCreate(name="qwen-prod", model="Qwen/Qwen3-8B", targets=["gpu-a"])
+    )
+    routes = RouteDirectory()
+    routes.put(
+        RouteSnapshot(
+            deployment_id=deployment.id,
+            alias="qwen-prod",
+            upstream_model="Qwen/Qwen3-8B",
+            router_url="http://router.internal",
+        )
+    )
+    started = asyncio.Event()
+
+    async def hanging(_request: httpx.Request):
+        return httpx.Response(200, stream=HangingStream(started))
+
+    upstream = httpx.AsyncClient(transport=httpx.MockTransport(hanging))
+    app = create_gateway_app(settings, routes, upstream, database=database)
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client,
+    ):
+        request_task = asyncio.create_task(
+            client.post(
+                "/v1/chat/completions",
+                headers={"authorization": "Bearer infercrane", "x-request-id": "req_cancel"},
+                json={"model": "qwen-prod", "messages": [], "stream": True},
+            )
+        )
+        await started.wait()
+        request_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await request_task
+    await upstream.aclose()
+    with database.session() as session:
+        record = session.get(RequestRecordRow, "req_cancel")
+        assert record is not None
+        assert record.error_type == "client_cancelled"
