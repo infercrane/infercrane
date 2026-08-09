@@ -64,6 +64,35 @@ func TestTargetAndDeploymentLifecycle(t *testing.T) {
 	}
 }
 
+func TestSubmitCloudDeploymentIsAtomicAndIdempotent(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	name := "cloud-" + time.Now().UTC().Format("150405.000000000")
+	request := `{"name":"` + name + `","model":"Qwen/Qwen3-8B"}`
+	deployment, operation, created, err := s.SubmitCloudDeployment(ctx,
+		domain.Deployment{Name: name, Model: "Qwen/Qwen3-8B", MinReplicas: 1, MaxReplicas: 4, AutoscalingEnabled: true},
+		domain.Operation{Kind: "deployment.converge", IdempotencyKey: "submit-" + name, RequestJSON: request},
+	)
+	if err != nil || !created {
+		t.Fatalf("submit cloud deployment = (%t, %v)", created, err)
+	}
+	if deployment.ID == "" || operation.ID == "" || operation.Status != "pending" || operation.MaxAttempts != 120 {
+		t.Fatalf("submission = %#v %#v", deployment, operation)
+	}
+	resolved, err := s.Resolve(ctx, name)
+	if err != nil || len(resolved.Targets) != 0 {
+		t.Fatalf("resolve targetless desired deployment = (%#v, %v)", resolved, err)
+	}
+
+	againDeployment, againOperation, againCreated, err := s.SubmitCloudDeployment(ctx,
+		domain.Deployment{Name: name, Model: "Qwen/Qwen3-8B", MinReplicas: 1, MaxReplicas: 4, AutoscalingEnabled: true},
+		domain.Operation{Kind: "deployment.converge", IdempotencyKey: "submit-" + name, RequestJSON: request},
+	)
+	if err != nil || againCreated || againDeployment.ID != deployment.ID || againOperation.ID != operation.ID {
+		t.Fatalf("idempotent submission = (%#v, %#v, %t, %v)", againDeployment, againOperation, againCreated, err)
+	}
+}
+
 func TestCreateDeploymentRejectsIncompatibleTargets(t *testing.T) {
 	ctx := context.Background()
 	s := openStore(t, ctx)

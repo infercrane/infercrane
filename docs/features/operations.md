@@ -52,6 +52,11 @@ finish cancellation safely. Existing-target apply is executed by this leased wor
 apply remains available for administrative recovery. Cloud provisioning and deletion still execute
 synchronously and must move to checkpointed handlers before all mutations are crash-recoverable.
 
+Cloud submission has an atomic storage primitive that creates the targetless desired deployment
+and its queued converge operation in one PostgreSQL transaction. Its required idempotency key makes
+submission retries return the original deployment and operation. The CLI and control API do not use
+this primitive yet; that wiring is the next lifecycle increment.
+
 A PostgreSQL partial unique index serializes lifecycle mutations by tenant and deployment name.
 Only one pending, leased, running, waiting, or cancelling deployment operation may exist at a time;
 competing requests receive a conflict and can retry after the active transition becomes terminal.
