@@ -31,6 +31,8 @@ a cloud deployment is submitted.
 
 The production image includes the local `git`, OpenSSH, and `rsync` executables required by
 SkyPilot's task packaging and remote synchronization paths.
+When running `infercrane serve`, its entrypoint also supervises SkyPilot's foreground API server;
+the container exits if that required subprocess stops.
 - `INFERCRANE_INSTANCE_ID`: stable and unique per replica, normally the Kubernetes pod name.
 - `INFERCRANE_DATABASE_MAX_OPEN` and `INFERCRANE_DATABASE_MAX_IDLE`: size these with the total
   replica count below PostgreSQL's connection budget or place PgBouncer in transaction mode.
