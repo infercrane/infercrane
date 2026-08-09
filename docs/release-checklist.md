@@ -18,4 +18,7 @@ run. It is intentionally left pending until real evidence is attached.
 - [ ] Image and archive vulnerability scans are reviewed.
 - [ ] Documentation links, security reporting, examples, issue templates, and <=60 second demo are checked.
 - [ ] Release notes list measured evidence and known limitations without unsupported performance claims.
+- [ ] Replace every `pending` qualification field in
+      [`release-notes-v0.1.0-rc.1.md`](release-notes-v0.1.0-rc.1.md) from sanitized evidence; do not
+      publish the template's pending status.
 - [ ] Tag points at the audited final commit and the GitHub release remains a draft until sign-off.
