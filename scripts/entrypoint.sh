@@ -7,6 +7,7 @@ if [ -z "$runpod_key" ] && [ -n "${RUNPOD_API_KEY_FILE:-}" ]; then
 fi
 if [ -n "$runpod_key" ]; then
   umask 077
+  rm -f "${HOME:?}/.runpod/config.toml"
   runpod config "$runpod_key" >/dev/null
   export RUNPOD_API_KEY="$runpod_key"
 fi

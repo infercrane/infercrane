@@ -10,6 +10,7 @@ services:
     command:
       - |
         umask 077
+        rm -f /home/app/.runpod/config.toml
         runpod config "$$(cat /runpod-key)" >/dev/null
         mkdir -p /home/app/.sky
         chown -R 10001:10001 /home/app/.runpod /home/app/.sky
