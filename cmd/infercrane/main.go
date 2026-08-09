@@ -508,6 +508,7 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 	})
 	strategy := "round-robin"
 	runtimeArgs := []string{}
+	runtimeEngine := "vllm"
 	modelRevision := ""
 	runtimeVersion := ""
 	if ext := filepath.Ext(model); ext == ".yaml" || ext == ".yml" {
@@ -522,6 +523,7 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 		model = file.Model.ID
 		modelRevision = file.Model.Revision
 		runtimeVersion = file.Runtime.Version
+		runtimeEngine = file.Runtime.Engine
 		*computeMode = file.Compute.Mode
 		*cloud = file.Provider.Cloud
 		*gpu = file.Resources.GPU
@@ -560,7 +562,7 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 		path = "/api/v1/deployments/apply"
 		request = workflows.ApplyExistingRequest{Name: *name, Model: model, Targets: splitTargets(*targets), RoutingStrategy: strategy, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas, AutoscalingEnabled: *maxReplicas > *minReplicas}
 	} else if *cloud != "" && *gpu != "" {
-		request = workflows.CloudRequest{Name: *name, Model: model, ModelRevision: modelRevision, RuntimeVersion: runtimeVersion, ComputeMode: *computeMode, Cloud: *cloud, GPU: *gpu, Region: *region, RuntimeArgs: runtimeArgs, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas}
+		request = workflows.CloudRequest{Name: *name, Model: model, ModelRevision: modelRevision, Runtime: runtimeEngine, RuntimeVersion: runtimeVersion, ComputeMode: *computeMode, Cloud: *cloud, GPU: *gpu, Region: *region, RuntimeArgs: runtimeArgs, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas}
 	} else {
 		return errors.New("provide --targets or both --cloud and --gpu")
 	}
@@ -1591,7 +1593,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		defer cancel()
 		_ = recorder.Close(closeCtx)
 	}()
-	rec := &reconcile.Reconciler{Store: s, Routes: directory, Router: backend, Runtime: runtime, Interval: cfg.HealthInterval, RouterStartPort: cfg.RouterStartPort, InstanceID: cfg.InstanceID, Logger: logger, ProviderAPIKeys: map[string]string{"runpod-serverless": cfg.RunPodAPIKey}, Serverless: serverless}
+	rec := &reconcile.Reconciler{Store: s, Routes: directory, Router: backend, Runtime: runtime, Interval: cfg.HealthInterval, RouterStartPort: cfg.RouterStartPort, InstanceID: cfg.InstanceID, Logger: logger, DirectTargets: map[string]reconcile.DirectTargetBackend{"runpod-serverless": {Provider: "runpod", APIKey: cfg.RunPodAPIKey, Status: serverless}}}
 	go purgeRequests(ctx, s, cfg.RequestRetention, logger)
 	go func() {
 		_ = rec.Run(ctx)
@@ -1622,10 +1624,15 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	for kind, handler := range workflows.ReleaseGuardHandlers(s) {
 		handlers[kind] = handler
 	}
-	for kind, handler := range workflows.CloudHandlers(s, provision.SkyPilot{APIKey: cfg.APIKey}, runtime, artifact.HuggingFace{}) {
+	replicaBackends, err := workflows.NewReplicaBackends(workflows.ReplicaBackend{Name: "skypilot", Cloud: "runpod", Runtime: "vllm", Provider: provision.SkyPilot{APIKey: cfg.APIKey}})
+	if err != nil {
+		return fmt.Errorf("configure replica backends: %w", err)
+	}
+	for kind, handler := range workflows.CloudHandlersWithBackends(s, replicaBackends, runtime, artifact.HuggingFace{}) {
 		handlers[kind] = handler
 	}
-	for kind, handler := range workflows.ServerlessHandlers(s, serverless, artifact.HuggingFace{}) {
+	serverlessBackend := workflows.ServerlessBackend{Name: "runpod-serverless", Cloud: "runpod", Runtime: "vllm", Provider: serverless}
+	for kind, handler := range workflows.ServerlessHandlers(s, serverlessBackend, artifact.HuggingFace{}) {
 		handlers[kind] = handler
 	}
 	operationWorker := operations.Worker{Repository: s, Handlers: handlers, Owner: cfg.InstanceID, Lease: 30 * time.Second, PollInterval: time.Second, BaseBackoff: 2 * time.Second, MaxBackoff: time.Minute, Telemetry: operationTelemetry}
@@ -1648,7 +1655,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		_ = server.Shutdown(shutdown)
 	}()
 	fmt.Printf("InferCrane gateway listening on http://%s/v1\n", server.Addr)
-	err := server.ListenAndServe()
+	err = server.ListenAndServe()
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
 	}

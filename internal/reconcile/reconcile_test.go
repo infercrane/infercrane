@@ -131,7 +131,7 @@ func TestServerlessRouteDoesNotWarmWorkersOrStartRouter(t *testing.T) {
 	store.target.URL = "https://api.runpod.invalid/v2/endpoint/openai"
 	backend := &fakeRouter{routes: directory}
 	runtime := &countingRuntime{}
-	reconciler := Reconciler{Store: store, Routes: directory, Router: backend, Runtime: runtime, ProviderAPIKeys: map[string]string{"runpod-serverless": "runpod-secret"}, Serverless: zeroWorkerStatus{}, RouterStartPort: 18080, InstanceID: "instance"}
+	reconciler := Reconciler{Store: store, Routes: directory, Router: backend, Runtime: runtime, DirectTargets: map[string]DirectTargetBackend{"runpod-serverless": {Provider: "runpod", APIKey: "runpod-secret", Status: zeroWorkerStatus{}}}, RouterStartPort: 18080, InstanceID: "instance"}
 	if err := reconciler.Once(context.Background()); err != nil {
 		t.Fatal(err)
 	}

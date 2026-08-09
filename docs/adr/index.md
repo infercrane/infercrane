@@ -18,6 +18,7 @@ or link corrections. A changed decision gets a new ADR whose status supersedes t
 | [0006](/adr/0006-leased-operation-execution) | Accepted | Lease durable work through PostgreSQL for crash-safe execution. |
 | [0007](/adr/0007-tenant-scoped-identity) | Accepted | Hash scoped credentials and qualify all resource access by tenant. |
 | [0008](/adr/0008-immutable-deployment-revisions) | Accepted | Persist immutable deployment revisions for safe update and rollback. |
+| [0009](/adr/0009-qualified-support-and-backend-registration) | Accepted | Separate release qualification from registered provider and runtime backends. |
 
 Use the next sequential number. Include context, decision, consequences, alternatives, and
 verification. Link affected feature documents.

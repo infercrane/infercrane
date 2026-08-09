@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/infercrane/infercrane/internal/support"
 	"gopkg.in/yaml.v3"
 )
 
@@ -67,11 +68,8 @@ func Load(path string) (Deployment, error) {
 	if out.Name == "" || out.Model.ID == "" || out.Resources.GPU == "" || out.Provider.Cloud == "" {
 		return out, fmt.Errorf("name, model.id, resources.gpu, and provider.cloud are required")
 	}
-	if out.Runtime.Engine != "vllm" {
-		return out, fmt.Errorf("v0.1 supports runtime.engine vllm only")
-	}
-	if out.Provider.Cloud != "runpod" {
-		return out, fmt.Errorf("v0.1 supports provider.cloud runpod only")
+	if err := support.V01().Validate(out.Runtime.Engine, out.Provider.Cloud, out.Compute.Mode); err != nil {
+		return out, fmt.Errorf("v0.1 support policy: %w", err)
 	}
 	if out.Scaling.MaxReplicas < out.Scaling.MinReplicas {
 		return out, fmt.Errorf("scaling.max_replicas must be >= scaling.min_replicas")

@@ -13,6 +13,13 @@ Status: Existing targets implemented; SkyPilot experimental
 
 ## Contract
 
+The v0.1 support matrix and the backend registry are deliberately separate. The matrix qualifies
+vLLM with RunPod for public use. At process composition, an elastic backend binds a stable adapter
+name, cloud, runtime, and provider implementation; durable workflows select it without provider
+conditionals. Serverless and direct-target reconciliation follow the same pattern. Registering an
+adapter does not make it supported until its configuration, documentation, and real lifecycle
+acceptance are complete. See [ADR 0009](/adr/0009-qualified-support-and-backend-registration).
+
 Provisioners return ordinary targets so routing and reconciliation remain provider-neutral.
 Provider resource IDs and non-secret details may be stored for inspection and cleanup. Worker API
 keys are injected as SkyPilot secrets and are never stored in provider detail JSON.

@@ -32,6 +32,17 @@ type Runtime interface {
 type ServerlessStatus interface {
 	EndpointHealth(context.Context, string) (provision.ServerlessHealth, error)
 }
+
+// DirectTargetBackend describes a provider-native endpoint that bypasses the
+// standalone replica router. The reconciler depends on this metadata rather
+// than a RunPod-specific branch, so another serverless adapter can register the
+// same lifecycle contract without changing reconciliation.
+type DirectTargetBackend struct {
+	Provider string
+	APIKey   string
+	Status   ServerlessStatus
+}
+
 type Reconciler struct {
 	Store           Store
 	Routes          *routes.Directory
@@ -41,8 +52,7 @@ type Reconciler struct {
 	RouterStartPort int
 	InstanceID      string
 	Logger          *slog.Logger
-	ProviderAPIKeys map[string]string
-	Serverless      ServerlessStatus
+	DirectTargets   map[string]DirectTargetBackend
 }
 
 func (r *Reconciler) Run(ctx context.Context) error {
@@ -99,8 +109,9 @@ func (r *Reconciler) Once(ctx context.Context) error {
 		var wg sync.WaitGroup
 		semaphore := make(chan struct{}, 16)
 		for i, target := range resolved.Targets {
-			if target.Provider == "runpod-serverless" {
-				if r.ProviderAPIKeys["runpod-serverless"] == "" {
+			direct, isDirect := r.DirectTargets[target.Provider]
+			if isDirect {
+				if direct.APIKey == "" || direct.Provider == "" {
 					inspections[i] = inspection{target: target}
 					continue
 				}
@@ -109,8 +120,8 @@ func (r *Reconciler) Once(ctx context.Context) error {
 					expected = d.Model
 				}
 				result := inspection{target: target, ok: true, models: map[string]struct{}{expected: {}}}
-				if r.Serverless != nil && target.ProviderResourceID != "" {
-					if health, healthErr := r.Serverless.EndpointHealth(ctx, target.ProviderResourceID); healthErr == nil {
+				if direct.Status != nil && target.ProviderResourceID != "" {
+					if health, healthErr := direct.Status.EndpointHealth(ctx, target.ProviderResourceID); healthErr == nil {
 						workers := health.WorkersIdle + health.WorkersRunning
 						result.workers, result.observedAt = &workers, time.Now()
 					}
@@ -154,7 +165,8 @@ func (r *Reconciler) Once(ctx context.Context) error {
 			_ = r.Store.SetDeploymentState(ctx, d.ID, "unhealthy")
 			continue
 		}
-		if len(healthy) == 1 && healthy[0].Provider == "runpod-serverless" {
+		direct, isDirect := r.DirectTargets[healthy[0].Provider]
+		if len(healthy) == 1 && isDirect {
 			oldRoute, hadOldRoute := r.Routes.GetForTenant(d.TenantID, d.Name)
 			if hadOldRoute && oldRoute.RouterProcessID != "" {
 				_ = r.Router.Stop(oldRoute.RouterProcessID)
@@ -171,7 +183,7 @@ func (r *Reconciler) Once(ctx context.Context) error {
 					break
 				}
 			}
-			r.Routes.Put(routes.Snapshot{DeploymentID: d.ID, RevisionID: d.ActiveRevisionID, TenantID: d.TenantID, Alias: d.Name, UpstreamModel: upstream, RouterURL: healthy[0].URL, Provider: "runpod", Runtime: d.Runtime, ComputeMode: "serverless", UpstreamAPIKey: r.ProviderAPIKeys["runpod-serverless"], ProviderWorkers: workers, ProviderObservedAt: observedAt})
+			r.Routes.Put(routes.Snapshot{DeploymentID: d.ID, RevisionID: d.ActiveRevisionID, TenantID: d.TenantID, Alias: d.Name, UpstreamModel: upstream, RouterURL: healthy[0].URL, Provider: direct.Provider, Runtime: d.Runtime, ComputeMode: "serverless", UpstreamAPIKey: direct.APIKey, ProviderWorkers: workers, ProviderObservedAt: observedAt})
 			_ = r.Store.SetDeploymentState(ctx, d.ID, "healthy")
 			continue
 		}
@@ -248,8 +260,6 @@ func routeSnapshot(deployment domain.Deployment, targets []domain.Target, upstre
 		computeMode = "elastic"
 		if provider == "existing" {
 			computeMode = "existing"
-		} else if provider == "runpod-serverless" {
-			provider, computeMode = "runpod", "serverless"
 		}
 	}
 	return routes.Snapshot{DeploymentID: deployment.ID, RevisionID: deployment.ActiveRevisionID, TenantID: deployment.TenantID, Alias: deployment.Name, UpstreamModel: upstream, RouterURL: endpoint, RouterProcessID: processID, Provider: provider, Runtime: deployment.Runtime, ComputeMode: computeMode}

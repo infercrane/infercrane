@@ -19,14 +19,33 @@ type ServerlessProvider interface {
 	EndpointURL(string) string
 }
 
-func ServerlessHandlers(store CloudStore, provider ServerlessProvider, artifactResolver ArtifactResolver) map[string]operations.Handler {
+// ServerlessBackend binds provider-neutral endpoint lifecycle operations to
+// persisted identity. A new provider supplies another backend; workflow logic
+// does not need provider-specific conditionals.
+type ServerlessBackend struct {
+	Name, Cloud, Runtime string
+	Provider             ServerlessProvider
+}
+
+func (b ServerlessBackend) validate() error {
+	if b.Name == "" || b.Cloud == "" || b.Runtime == "" || b.Provider == nil {
+		return errors.New("serverless backend name, cloud, runtime, and provider are required")
+	}
+	return nil
+}
+
+func ServerlessHandlers(store CloudStore, backend ServerlessBackend, artifactResolver ArtifactResolver) map[string]operations.Handler {
+	provider := backend.Provider
 	converge := func(ctx context.Context, operation domain.Operation) (string, error) {
+		if err := backend.validate(); err != nil {
+			return "", operations.Permanent("serverless_backend_invalid", err)
+		}
 		request, err := decodeCloudRequest(operation)
 		if err != nil {
 			return "", err
 		}
-		if request.ComputeMode != "serverless" || request.Cloud != "runpod" || request.MinReplicas != 0 || request.MaxReplicas < 1 {
-			return "", operations.Permanent("invalid_serverless_spec", errors.New("RunPod Serverless requires compute_mode=serverless, min=0, and max>=1"))
+		if request.ComputeMode != "serverless" || request.Cloud != backend.Cloud || request.MinReplicas != 0 || request.MaxReplicas < 1 {
+			return "", operations.Permanent("invalid_serverless_spec", fmt.Errorf("%s requires cloud=%s, compute_mode=serverless, min=0, and max>=1", backend.Name, backend.Cloud))
 		}
 		resolved, err := store.ResolveForTenant(ctx, request.TenantID, request.Name)
 		if err != nil || (request.DeploymentID != "" && resolved.Deployment.ID != request.DeploymentID) {
@@ -52,7 +71,7 @@ func ServerlessHandlers(store CloudStore, provider ServerlessProvider, artifactR
 		_ = checkpoint(ctx, store, operation, "model.artifact", "succeeded", map[string]any{"identity": modelArtifact.ModelIdentity, "cache_state": modelArtifact.CacheState}, 15, "Immutable model artifact resolved")
 
 		externalKey := request.DeploymentID + "-" + request.RevisionID
-		replica, _, err := store.EnsureReplicaIntent(ctx, domain.Replica{TenantID: request.TenantID, DeploymentID: request.DeploymentID, RevisionID: request.RevisionID, Ordinal: 0, ExternalKey: externalKey, Provider: "runpod-serverless"})
+		replica, _, err := store.EnsureReplicaIntent(ctx, domain.Replica{TenantID: request.TenantID, DeploymentID: request.DeploymentID, RevisionID: request.RevisionID, Ordinal: 0, ExternalKey: externalKey, Provider: backend.Name})
 		if err != nil {
 			return "", classify("serverless_intent_failed", err)
 		}
@@ -69,19 +88,22 @@ func ServerlessHandlers(store CloudStore, provider ServerlessProvider, artifactR
 			return "", classify("serverless_observation_failed", err)
 		}
 		targetName := request.Name + "-serverless"
-		target, err := store.AddTargetForTenant(ctx, request.TenantID, domain.Target{Name: targetName, URL: endpointURL, Provider: "runpod-serverless", Runtime: "vllm", Health: "healthy", UpstreamModel: request.Model, ProviderResourceID: endpoint.ID, ProviderDetails: string(details)})
+		target, err := store.AddTargetForTenant(ctx, request.TenantID, domain.Target{Name: targetName, URL: endpointURL, Provider: backend.Name, Runtime: backend.Runtime, Health: "healthy", UpstreamModel: request.Model, ProviderResourceID: endpoint.ID, ProviderDetails: string(details)})
 		if err != nil {
 			return "", classify("serverless_target_failed", err)
 		}
 		if _, err = store.ApplyDeploymentForTenant(ctx, request.TenantID, domain.Deployment{Name: request.Name, Model: request.Model, ComputeMode: "serverless", RoutingStrategy: resolved.Deployment.RoutingStrategy, MinReplicas: 0, MaxReplicas: request.MaxReplicas, AutoscalingEnabled: false}, []string{target.Name}); err != nil {
 			return "", classify("serverless_routing_failed", err)
 		}
-		_ = checkpoint(ctx, store, operation, "serverless.endpoint", "succeeded", map[string]any{"endpoint_id": endpoint.ID, "workers_min": 0, "workers_max": request.MaxReplicas}, 100, "RunPod Serverless endpoint registered; workers scale from zero on demand")
+		_ = checkpoint(ctx, store, operation, "serverless.endpoint", "succeeded", map[string]any{"backend": backend.Name, "endpoint_id": endpoint.ID, "workers_min": 0, "workers_max": request.MaxReplicas}, 100, "Serverless endpoint registered; workers scale from zero on demand")
 		result, _ := json.Marshal(map[string]any{"deployment_id": request.DeploymentID, "endpoint_id": endpoint.ID, "endpoint": endpointURL, "workers_min": 0, "workers_max": request.MaxReplicas})
 		return string(result), nil
 	}
 
 	remove := func(ctx context.Context, operation domain.Operation) (string, error) {
+		if err := backend.validate(); err != nil {
+			return "", operations.Permanent("serverless_backend_invalid", err)
+		}
 		var request DeleteRequest
 		if err := json.Unmarshal([]byte(operation.RequestJSON), &request); err != nil || request.Name == "" || request.TenantID == "" {
 			return "", operations.Permanent("invalid_request", errors.New("deployment name and tenant are required"))
@@ -99,7 +121,7 @@ func ServerlessHandlers(store CloudStore, provider ServerlessProvider, artifactR
 		}
 		var targetURLs []string
 		for _, replica := range replicas {
-			if replica.Provider != "runpod-serverless" || replica.LifecycleState == "deleted" {
+			if replica.Provider != backend.Name || replica.LifecycleState == "deleted" {
 				continue
 			}
 			endpoints, listErr := provider.ListEndpoints(ctx)
@@ -128,7 +150,7 @@ func ServerlessHandlers(store CloudStore, provider ServerlessProvider, artifactR
 			for _, endpoint := range endpoints {
 				_, identified := ownedIDs[endpoint.ID]
 				if identified || endpoint.Name == expectedName {
-					return "", operations.Retryable("serverless_endpoint_delete_pending", errors.New("RunPod Serverless endpoint deletion is pending"))
+					return "", operations.Retryable("serverless_endpoint_delete_pending", fmt.Errorf("%s endpoint deletion is pending", backend.Name))
 				}
 			}
 			if err = store.MarkReplicaDeleted(ctx, replica.ID); err != nil {
@@ -142,7 +164,7 @@ func ServerlessHandlers(store CloudStore, provider ServerlessProvider, artifactR
 			return "", classify("deployment_delete_failed", err)
 		}
 		for _, targetURL := range targetURLs {
-			if err = store.DeleteProvisionedTargetByURL(ctx, request.TenantID, targetURL); err != nil && !errors.Is(err, domain.ErrNotFound) {
+			if err = store.DeleteProvisionedTargetByURL(ctx, request.TenantID, targetURL, backend.Name); err != nil && !errors.Is(err, domain.ErrNotFound) {
 				return "", classify("target_delete_failed", err)
 			}
 		}

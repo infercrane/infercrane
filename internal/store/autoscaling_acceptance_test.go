@@ -312,7 +312,7 @@ func TestRunPodServerlessAcceptanceConvergesAtZeroAndDeletesEndpoint(t *testing.
 		t.Fatal(err)
 	}
 	provider := &acceptanceServerlessProvider{endpoints: map[string]provision.ServerlessEndpoint{}}
-	handlers := workflows.ServerlessHandlers(s, provider, acceptanceArtifactResolver{})
+	handlers := workflows.ServerlessHandlers(s, workflows.ServerlessBackend{Name: "runpod-serverless", Cloud: "runpod", Runtime: "vllm", Provider: provider}, acceptanceArtifactResolver{})
 	worker := operations.Worker{Repository: s, Handlers: handlers, Owner: "serverless-worker", Lease: time.Second, BaseBackoff: time.Millisecond, MaxBackoff: time.Millisecond, Jitter: func(d time.Duration) time.Duration { return d }}
 	if worked, workerErr := worker.Once(ctx); workerErr != nil || !worked {
 		t.Fatalf("serverless converge worked=%t err=%v", worked, workerErr)

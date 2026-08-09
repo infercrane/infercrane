@@ -101,7 +101,9 @@ func (s *Store) CreateDeploymentForTenant(ctx context.Context, tenant string, de
 	}
 	deployment.ID = id
 	deployment.TenantID = tenant
-	deployment.Runtime = "vllm"
+	if deployment.Runtime == "" {
+		deployment.Runtime = "vllm"
+	}
 	deployment.DesiredState = "running"
 	deployment.ObservedState = "pending"
 	if deployment.RoutingStrategy == "" {
@@ -489,8 +491,8 @@ func (s *Store) RoutingGenerationMatches(ctx context.Context, deploymentID, work
 	return matched, err
 }
 
-func (s *Store) DeleteProvisionedTarget(ctx context.Context, tenant, name string) error {
-	result, err := s.ExecContext(ctx, `DELETE FROM targets t WHERE t.tenant_id=? AND t.name=? AND t.provider IN ('skypilot','runpod-serverless') AND NOT EXISTS(SELECT 1 FROM deployment_targets dt WHERE dt.target_id=t.id)`, tenant, name)
+func (s *Store) DeleteProvisionedTarget(ctx context.Context, tenant, name, provider string) error {
+	result, err := s.ExecContext(ctx, `DELETE FROM targets t WHERE t.tenant_id=? AND t.name=? AND t.provider=? AND NOT EXISTS(SELECT 1 FROM deployment_targets dt WHERE dt.target_id=t.id)`, tenant, name, provider)
 	if err != nil {
 		return err
 	}
@@ -498,7 +500,7 @@ func (s *Store) DeleteProvisionedTarget(ctx context.Context, tenant, name string
 	return err
 }
 
-func (s *Store) DeleteProvisionedTargetByURL(ctx context.Context, tenant, endpoint string) error {
-	_, err := s.ExecContext(ctx, `DELETE FROM targets t WHERE t.tenant_id=? AND t.url=? AND t.provider IN ('skypilot','runpod-serverless') AND NOT EXISTS(SELECT 1 FROM deployment_targets dt WHERE dt.target_id=t.id)`, tenant, NormalizeURL(endpoint))
+func (s *Store) DeleteProvisionedTargetByURL(ctx context.Context, tenant, endpoint, provider string) error {
+	_, err := s.ExecContext(ctx, `DELETE FROM targets t WHERE t.tenant_id=? AND t.url=? AND t.provider=? AND NOT EXISTS(SELECT 1 FROM deployment_targets dt WHERE dt.target_id=t.id)`, tenant, NormalizeURL(endpoint), provider)
 	return err
 }

@@ -61,7 +61,9 @@ func (s *Store) SubmitCloudDeployment(ctx context.Context, deployment domain.Dep
 	if err != nil {
 		return domain.Deployment{}, domain.Operation{}, false, err
 	}
-	deployment.Runtime = "vllm"
+	if deployment.Runtime == "" {
+		deployment.Runtime = "vllm"
+	}
 	if deployment.RoutingStrategy == "" {
 		deployment.RoutingStrategy = "round-robin"
 	}

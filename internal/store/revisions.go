@@ -11,6 +11,7 @@ import (
 	"reflect"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/support"
 )
 
 const revisionColumns = `r.id,r.deployment_id,r.revision_number,r.status,r.spec_json::text,COALESCE(r.source_revision_id,''),r.reason,r.created_at,r.activated_at,r.completed_at`
@@ -37,9 +38,6 @@ func (s *Store) EnsureCandidateRevision(ctx context.Context, tenant, deploymentN
 	if normalized.Runtime == "" {
 		normalized.Runtime = "vllm"
 	}
-	if normalized.Runtime != "vllm" {
-		return domain.DeploymentRevision{}, errors.New("v0.1 revision runtime must be vllm")
-	}
 	if normalized.ComputeMode == "" {
 		if normalized.Cloud != "" || normalized.GPU != "" {
 			normalized.ComputeMode = "elastic"
@@ -53,8 +51,10 @@ func (s *Store) EnsureCandidateRevision(ctx context.Context, tenant, deploymentN
 	if normalized.ComputeMode == "elastic" && (normalized.Cloud == "" || normalized.GPU == "") {
 		return domain.DeploymentRevision{}, errors.New("elastic revision requires cloud and gpu")
 	}
-	if normalized.Cloud != "" && normalized.Cloud != "runpod" {
-		return domain.DeploymentRevision{}, errors.New("v0.1 revision cloud must be runpod")
+	if normalized.ComputeMode != "existing" {
+		if err := support.V01().Validate(normalized.Runtime, normalized.Cloud, normalized.ComputeMode); err != nil {
+			return domain.DeploymentRevision{}, fmt.Errorf("v0.1 support policy: %w", err)
+		}
 	}
 	if normalized.RoutingStrategy == "" {
 		normalized.RoutingStrategy = "round-robin"

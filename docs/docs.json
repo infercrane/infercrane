@@ -137,7 +137,8 @@
               "adr/0005-durable-operations-and-policy-boundaries",
               "adr/0006-leased-operation-execution",
               "adr/0007-tenant-scoped-identity",
-              "adr/0008-immutable-deployment-revisions"
+              "adr/0008-immutable-deployment-revisions",
+              "adr/0009-qualified-support-and-backend-registration"
             ]
           },
           "release-acceptance"

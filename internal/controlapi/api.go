@@ -366,7 +366,7 @@ func (a API) createCloudDeployment(w http.ResponseWriter, r *http.Request) {
 	}
 	encoded, _ := json.Marshal(request)
 	autoscalingEnabled := request.ComputeMode != "serverless" && maxReplicas > minReplicas
-	deployment, operation, created, err := a.Store.SubmitCloudDeployment(r.Context(), domain.Deployment{TenantID: principal.TenantID, Name: request.Name, Model: request.Model, MinReplicas: minReplicas, MaxReplicas: maxReplicas, AutoscalingEnabled: autoscalingEnabled}, domain.Operation{TenantID: principal.TenantID, Kind: operationKind, IdempotencyKey: key, RequestJSON: string(encoded)})
+	deployment, operation, created, err := a.Store.SubmitCloudDeployment(r.Context(), domain.Deployment{TenantID: principal.TenantID, Name: request.Name, Model: request.Model, Runtime: request.Runtime, MinReplicas: minReplicas, MaxReplicas: maxReplicas, AutoscalingEnabled: autoscalingEnabled}, domain.Operation{TenantID: principal.TenantID, Kind: operationKind, IdempotencyKey: key, RequestJSON: string(encoded)})
 	if errors.Is(err, domain.ErrConflict) {
 		writeError(w, http.StatusConflict, "conflict", err.Error())
 		return

@@ -11,6 +11,7 @@ import (
 	"github.com/infercrane/infercrane/internal/operations"
 	"github.com/infercrane/infercrane/internal/provision"
 	"github.com/infercrane/infercrane/internal/router"
+	"github.com/infercrane/infercrane/internal/support"
 )
 
 const (
@@ -27,6 +28,7 @@ type CloudRequest struct {
 	DeploymentID           string   `json:"deployment_id"`
 	Name                   string   `json:"name"`
 	Model                  string   `json:"model"`
+	Runtime                string   `json:"runtime,omitempty"`
 	Cloud                  string   `json:"cloud"`
 	ComputeMode            string   `json:"compute_mode,omitempty"`
 	GPU                    string   `json:"gpu"`
@@ -50,9 +52,6 @@ func (r CloudRequest) Validate() error {
 	if r.Name == "" || r.Model == "" || r.Cloud == "" || r.GPU == "" {
 		return errors.New("name, model, cloud, and gpu are required")
 	}
-	if r.Cloud != "runpod" {
-		return errors.New("v0.1 managed compute requires cloud runpod")
-	}
 	if r.ComputeMode == "" {
 		r.ComputeMode = "elastic"
 	}
@@ -63,7 +62,10 @@ func (r CloudRequest) Validate() error {
 		return errors.New("replica bounds must satisfy 0 <= min <= max")
 	}
 	if r.ComputeMode == "serverless" && r.MinReplicas != 0 {
-		return errors.New("RunPod Serverless requires min replicas 0")
+		return errors.New("serverless compute requires min replicas 0")
+	}
+	if err := support.V01().Validate(r.Runtime, r.Cloud, r.ComputeMode); err != nil {
+		return err
 	}
 	return nil
 }
@@ -88,8 +90,8 @@ type CloudStore interface {
 	ApplyDeploymentForTenant(context.Context, string, domain.Deployment, []string) (domain.Deployment, error)
 	DeleteDeploymentForTenant(context.Context, string, string) error
 	RoutingGenerationMatches(context.Context, string, string) (bool, error)
-	DeleteProvisionedTarget(context.Context, string, string) error
-	DeleteProvisionedTargetByURL(context.Context, string, string) error
+	DeleteProvisionedTarget(context.Context, string, string, string) error
+	DeleteProvisionedTargetByURL(context.Context, string, string, string) error
 	ModelArtifactForRevision(context.Context, string, string) (domain.ModelArtifact, error)
 	AttachModelArtifact(context.Context, string, string, domain.ModelArtifact) (domain.ModelArtifact, error)
 	Revision(context.Context, string, string, string) (domain.DeploymentRevision, error)
@@ -105,6 +107,65 @@ type ReplicaProvider interface {
 	DeleteReplica(context.Context, provision.ProviderHandle) error
 }
 
+// ReplicaBackend binds a provider adapter to durable identity and the runtime
+// it launches. Provider support is registered at composition time rather than
+// selected by conditionals inside lifecycle code.
+type ReplicaBackend struct {
+	Name, Cloud, Runtime string
+	Provider             ReplicaProvider
+}
+
+type ReplicaBackends struct {
+	byCloudRuntime map[string]ReplicaBackend
+	byProvider     map[string]ReplicaBackend
+}
+
+func cloudRuntimeKey(cloud, runtime string) string { return cloud + "\x00" + runtime }
+
+func NewReplicaBackends(backends ...ReplicaBackend) (ReplicaBackends, error) {
+	registry := ReplicaBackends{byCloudRuntime: make(map[string]ReplicaBackend, len(backends)), byProvider: make(map[string]ReplicaBackend, len(backends))}
+	for _, backend := range backends {
+		if backend.Name == "" || backend.Cloud == "" || backend.Runtime == "" || backend.Provider == nil {
+			return ReplicaBackends{}, errors.New("replica backend name, cloud, runtime, and provider are required")
+		}
+		key := cloudRuntimeKey(backend.Cloud, backend.Runtime)
+		if _, exists := registry.byCloudRuntime[key]; exists {
+			return ReplicaBackends{}, fmt.Errorf("replica backend for cloud %q and runtime %q is already registered", backend.Cloud, backend.Runtime)
+		}
+		if _, exists := registry.byProvider[backend.Name]; exists {
+			return ReplicaBackends{}, fmt.Errorf("replica backend %q is already registered", backend.Name)
+		}
+		registry.byCloudRuntime[key], registry.byProvider[backend.Name] = backend, backend
+	}
+	return registry, nil
+}
+
+func (r ReplicaBackends) ForCloud(cloud, runtime string) (ReplicaBackend, error) {
+	if runtime == "" {
+		runtime = support.DefaultRuntime
+	}
+	backend, ok := r.byCloudRuntime[cloudRuntimeKey(cloud, runtime)]
+	if !ok {
+		return ReplicaBackend{}, fmt.Errorf("no replica backend is registered for cloud %q and runtime %q", cloud, runtime)
+	}
+	return backend, nil
+}
+
+func (r ReplicaBackends) ForProvider(name string) (ReplicaBackend, error) {
+	// Replicas created before provider identity was persisted have an empty
+	// adapter name. They are safe to replay only when composition is unambiguous.
+	if name == "" && len(r.byProvider) == 1 {
+		for _, backend := range r.byProvider {
+			return backend, nil
+		}
+	}
+	backend, ok := r.byProvider[name]
+	if !ok {
+		return ReplicaBackend{}, fmt.Errorf("no replica backend is registered for provider %q", name)
+	}
+	return backend, nil
+}
+
 type RuntimeInspector interface {
 	Inspect(context.Context, string) (bool, map[string]struct{})
 }
@@ -114,6 +175,14 @@ type ArtifactResolver interface {
 }
 
 func CloudHandlers(store CloudStore, provider ReplicaProvider, runtime RuntimeInspector, artifactResolvers ...ArtifactResolver) map[string]operations.Handler {
+	backends, err := NewReplicaBackends(ReplicaBackend{Name: "skypilot", Cloud: "runpod", Runtime: support.DefaultRuntime, Provider: provider})
+	if err != nil {
+		panic(err)
+	}
+	return CloudHandlersWithBackends(store, backends, runtime, artifactResolvers...)
+}
+
+func CloudHandlersWithBackends(store CloudStore, backends ReplicaBackends, runtime RuntimeInspector, artifactResolvers ...ArtifactResolver) map[string]operations.Handler {
 	var artifactResolver ArtifactResolver
 	if len(artifactResolvers) > 0 {
 		artifactResolver = artifactResolvers[0]
@@ -128,6 +197,10 @@ func CloudHandlers(store CloudStore, provider ReplicaProvider, runtime RuntimeIn
 			return "", operations.Permanent("deployment_missing", fmt.Errorf("resolve desired deployment: %w", err))
 		}
 		request.DeploymentID = resolved.Deployment.ID
+		backend, err := backends.ForCloud(request.Cloud, request.Runtime)
+		if err != nil {
+			return "", operations.Permanent("provider_backend_unavailable", err)
+		}
 		if request.RevisionID == "" {
 			request.RevisionID = resolved.Deployment.ActiveRevisionID
 		}
@@ -157,7 +230,7 @@ func CloudHandlers(store CloudStore, provider ReplicaProvider, runtime RuntimeIn
 		targetURLs := make([]string, 0, desired)
 		resourceIDs := make([]string, 0, desired)
 		for ordinal := 0; ordinal < desired; ordinal++ {
-			targetName, targetURL, resourceID, ensureErr := ensureCloudReplica(ctx, store, provider, runtime, operation, request, ordinal)
+			targetName, targetURL, resourceID, ensureErr := ensureCloudReplica(ctx, store, backend, runtime, operation, request, ordinal)
 			if ensureErr != nil {
 				return "", ensureErr
 			}
@@ -190,6 +263,11 @@ func CloudHandlers(store CloudStore, provider ReplicaProvider, runtime RuntimeIn
 				return "", operations.Retryable("router_drain_pending", errors.New("router has not published the reduced worker set"))
 			}
 			for _, replica := range draining {
+				replicaBackend, backendErr := backends.ForProvider(replica.Provider)
+				if backendErr != nil {
+					return "", operations.Permanent("provider_backend_unavailable", backendErr)
+				}
+				provider := replicaBackend.Provider
 				handle := provider.Handle(replica.ExternalKey)
 				handle.RequestID, handle.ResourceID = replica.ProviderRequestID, replica.ProviderResourceID
 				if err = provider.DeleteReplica(ctx, handle); err != nil {
@@ -205,7 +283,7 @@ func CloudHandlers(store CloudStore, provider ReplicaProvider, runtime RuntimeIn
 				if err = store.MarkReplicaDeleted(ctx, replica.ID); err != nil {
 					return "", classify("replica_delete_persist_failed", err)
 				}
-				if err = store.DeleteProvisionedTarget(ctx, request.TenantID, fmt.Sprintf("%s-r%d", request.Name, replica.Ordinal)); err != nil {
+				if err = store.DeleteProvisionedTarget(ctx, request.TenantID, fmt.Sprintf("%s-r%d", request.Name, replica.Ordinal), replicaBackend.Name); err != nil {
 					return "", classify("target_delete_failed", err)
 				}
 			}
@@ -235,6 +313,11 @@ func CloudHandlers(store CloudStore, provider ReplicaProvider, runtime RuntimeIn
 			if replica.LifecycleState == "deleted" {
 				continue
 			}
+			replicaBackend, backendErr := backends.ForProvider(replica.Provider)
+			if backendErr != nil {
+				return "", operations.Permanent("provider_backend_unavailable", backendErr)
+			}
+			provider := replicaBackend.Provider
 			handle := provider.Handle(replica.ExternalKey)
 			if replica.ProviderResourceID != "" {
 				handle.ResourceID = replica.ProviderResourceID
@@ -259,7 +342,11 @@ func CloudHandlers(store CloudStore, provider ReplicaProvider, runtime RuntimeIn
 		}
 		for _, replica := range replicas {
 			if replica.Endpoint != "" {
-				if err = store.DeleteProvisionedTargetByURL(ctx, request.TenantID, replica.Endpoint); err != nil && !errors.Is(err, domain.ErrNotFound) {
+				replicaBackend, backendErr := backends.ForProvider(replica.Provider)
+				if backendErr != nil {
+					return "", operations.Permanent("provider_backend_unavailable", backendErr)
+				}
+				if err = store.DeleteProvisionedTargetByURL(ctx, request.TenantID, replica.Endpoint, replicaBackend.Name); err != nil && !errors.Is(err, domain.ErrNotFound) {
 					return "", classify("target_delete_failed", err)
 				}
 			}
@@ -310,6 +397,11 @@ func CloudHandlers(store CloudStore, provider ReplicaProvider, runtime RuntimeIn
 			return "", operations.Permanent("deployment_missing", err)
 		}
 		request := CloudRequest{DeploymentID: resolved.Deployment.ID, Name: rollout.Name, Model: spec.Model, ModelRevision: spec.ModelRevision, RevisionID: revision.ID, Cloud: spec.Cloud, GPU: spec.GPU, Region: spec.Region, RuntimeVersion: spec.RuntimeVersion, RuntimeArgs: spec.RuntimeArgs, Port: spec.Port, MinReplicas: spec.MinReplicas, MaxReplicas: spec.MaxReplicas, DesiredReplicas: spec.MinReplicas, TenantID: rollout.TenantID, Actor: rollout.Actor, Candidate: true}
+		request.Runtime = spec.Runtime
+		backend, backendErr := backends.ForCloud(request.Cloud, request.Runtime)
+		if backendErr != nil {
+			return "", operations.Permanent("provider_backend_unavailable", backendErr)
+		}
 		modelArtifact, artifactErr := store.ModelArtifactForRevision(ctx, request.TenantID, request.RevisionID)
 		if errors.Is(artifactErr, domain.ErrNotFound) {
 			if artifactResolver == nil {
@@ -327,7 +419,7 @@ func CloudHandlers(store CloudStore, provider ReplicaProvider, runtime RuntimeIn
 		var endpoints []string
 		var resourceIDs []string
 		for ordinal := 0; ordinal < request.DesiredReplicas; ordinal++ {
-			_, endpoint, resourceID, ensureErr := ensureCloudReplica(ctx, store, provider, runtime, operation, request, ordinal)
+			_, endpoint, resourceID, ensureErr := ensureCloudReplica(ctx, store, backend, runtime, operation, request, ordinal)
 			if ensureErr != nil {
 				var failure operations.Failure
 				if errors.As(ensureErr, &failure) && !failure.Retryable {
@@ -366,6 +458,11 @@ func CloudHandlers(store CloudStore, provider ReplicaProvider, runtime RuntimeIn
 			if replica.RevisionID != rollout.CandidateID || replica.LifecycleState == "deleted" {
 				continue
 			}
+			replicaBackend, backendErr := backends.ForProvider(replica.Provider)
+			if backendErr != nil {
+				return "", operations.Permanent("provider_backend_unavailable", backendErr)
+			}
+			provider := replicaBackend.Provider
 			handle := provider.Handle(replica.ExternalKey)
 			handle.RequestID, handle.ResourceID = replica.ProviderRequestID, replica.ProviderResourceID
 			if err = provider.DeleteReplica(ctx, handle); err != nil {
@@ -382,7 +479,7 @@ func CloudHandlers(store CloudStore, provider ReplicaProvider, runtime RuntimeIn
 				return "", classify("replica_delete_persist_failed", err)
 			}
 			targetName := fmt.Sprintf("%s-%s-r%d", rollout.Name, rollout.CandidateID[:min(8, len(rollout.CandidateID))], replica.Ordinal)
-			if err = store.DeleteProvisionedTarget(ctx, rollout.TenantID, targetName); err != nil && !errors.Is(err, domain.ErrNotFound) {
+			if err = store.DeleteProvisionedTarget(ctx, rollout.TenantID, targetName, replicaBackend.Name); err != nil && !errors.Is(err, domain.ErrNotFound) {
 				return "", classify("target_delete_failed", err)
 			}
 			deleted++
@@ -459,6 +556,11 @@ func CloudHandlers(store CloudStore, provider ReplicaProvider, runtime RuntimeIn
 			if replica.RevisionID == rollout.CandidateID || replica.LifecycleState == "deleted" {
 				continue
 			}
+			replicaBackend, backendErr := backends.ForProvider(replica.Provider)
+			if backendErr != nil {
+				return "", operations.Permanent("provider_backend_unavailable", backendErr)
+			}
+			provider := replicaBackend.Provider
 			handle := provider.Handle(replica.ExternalKey)
 			handle.RequestID, handle.ResourceID = replica.ProviderRequestID, replica.ProviderResourceID
 			if err = provider.DeleteReplica(ctx, handle); err != nil {
@@ -475,7 +577,7 @@ func CloudHandlers(store CloudStore, provider ReplicaProvider, runtime RuntimeIn
 				return "", classify("replica_delete_persist_failed", err)
 			}
 			if replica.Endpoint != "" {
-				if err = store.DeleteProvisionedTargetByURL(ctx, rollout.TenantID, replica.Endpoint); err != nil {
+				if err = store.DeleteProvisionedTargetByURL(ctx, rollout.TenantID, replica.Endpoint, replicaBackend.Name); err != nil {
 					return "", classify("target_delete_failed", err)
 				}
 			}
@@ -518,12 +620,13 @@ func mustJSON(value any) string {
 	return string(encoded)
 }
 
-func ensureCloudReplica(ctx context.Context, store CloudStore, provider ReplicaProvider, runtime RuntimeInspector, operation domain.Operation, request CloudRequest, ordinal int) (string, string, string, error) {
+func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBackend, runtime RuntimeInspector, operation domain.Operation, request CloudRequest, ordinal int) (string, string, string, error) {
+	provider := backend.Provider
 	externalKey := fmt.Sprintf("%s-r%d", request.DeploymentID, ordinal)
 	if request.Candidate {
 		externalKey = fmt.Sprintf("%s-%s-r%d", request.DeploymentID, request.RevisionID, ordinal)
 	}
-	replica, _, err := store.EnsureReplicaIntent(ctx, domain.Replica{TenantID: request.TenantID, DeploymentID: request.DeploymentID, RevisionID: request.RevisionID, Ordinal: ordinal, ExternalKey: externalKey, Provider: "skypilot"})
+	replica, _, err := store.EnsureReplicaIntent(ctx, domain.Replica{TenantID: request.TenantID, DeploymentID: request.DeploymentID, RevisionID: request.RevisionID, Ordinal: ordinal, ExternalKey: externalKey, Provider: backend.Name})
 	if err != nil {
 		return "", "", "", classify("replica_intent_failed", err)
 	}
@@ -561,12 +664,12 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, provider ReplicaP
 	_, present := models[request.Model]
 	if ready && !present {
 		_ = store.ObserveReplica(ctx, replica.ID, "failed", observation.Endpoint, "unhealthy", observation.Details, time.Now())
-		return "", "", "", operations.Permanent("runtime_model_mismatch", errors.New("healthy vLLM runtime does not serve candidate model"))
+		return "", "", "", operations.Permanent("runtime_model_mismatch", fmt.Errorf("healthy %s runtime does not serve candidate model", backend.Runtime))
 	}
 	if !ready {
 		_ = store.ObserveReplica(ctx, replica.ID, "starting", observation.Endpoint, "starting", observation.Details, time.Now())
-		_ = checkpoint(ctx, store, operation, step+".runtime", "waiting", observation, 70, "Waiting for vLLM model readiness")
-		return "", "", "", operations.Retryable("runtime_starting", errors.New("vLLM model is not ready"))
+		_ = checkpoint(ctx, store, operation, step+".runtime", "waiting", observation, 70, "Waiting for runtime model readiness")
+		return "", "", "", operations.Retryable("runtime_starting", fmt.Errorf("%s model is not ready", backend.Runtime))
 	}
 	if err = store.ObserveReplica(ctx, replica.ID, "ready", observation.Endpoint, "healthy", observation.Details, time.Now()); err != nil {
 		return "", "", "", classify("observation_failed", err)
@@ -575,7 +678,7 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, provider ReplicaP
 	if request.Candidate {
 		targetName = fmt.Sprintf("%s-%s-r%d", request.Name, request.RevisionID[:min(8, len(request.RevisionID))], ordinal)
 	}
-	target, err := store.AddTargetForTenant(ctx, request.TenantID, domain.Target{Name: targetName, URL: observation.Endpoint, Provider: "skypilot", Runtime: "vllm", UpstreamModel: request.Model})
+	target, err := store.AddTargetForTenant(ctx, request.TenantID, domain.Target{Name: targetName, URL: observation.Endpoint, Provider: backend.Name, Runtime: backend.Runtime, UpstreamModel: request.Model})
 	if err != nil {
 		return "", "", "", classify("target_registration_failed", err)
 	}

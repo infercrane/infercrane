@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/infercrane/infercrane/internal/support"
 )
 
 var nonNameCharacter = regexp.MustCompile(`[^a-z0-9]+`)
@@ -124,17 +126,14 @@ func Build(in Input) (Plan, error) {
 	if (in.Cloud == "") != (in.GPU == "") {
 		return Plan{}, errors.New("cloud and GPU must be provided together")
 	}
-	if in.Cloud != "" && in.Cloud != "runpod" {
-		return Plan{}, errors.New("v0.1 cloud provisioning supports RunPod only")
-	}
 	if in.Name == "" {
 		in.Name = DefaultName(in.Model)
 	}
 	if in.Runtime == "" {
-		in.Runtime = "vllm"
+		in.Runtime = support.DefaultRuntime
 	}
-	if in.Runtime != "vllm" {
-		return Plan{}, errors.New("v0.1 runtime must be vllm")
+	if err := support.V01().ValidateRuntime(in.Runtime); err != nil {
+		return Plan{}, fmt.Errorf("v0.1 support policy: %w", err)
 	}
 	if in.Routing == "" {
 		in.Routing = "round-robin"
@@ -154,8 +153,10 @@ func Build(in Input) (Plan, error) {
 	if (in.ComputeMode == "elastic" && in.MinReplicas < 1) || (in.ComputeMode == "serverless" && in.MinReplicas != 0) || in.MaxReplicas < 1 || in.MaxReplicas < in.MinReplicas {
 		return Plan{}, errors.New("replicas must be positive and max replicas must be >= min replicas")
 	}
-	if in.ComputeMode == "serverless" && in.Cloud != "runpod" {
-		return Plan{}, errors.New("v0.1 serverless compute requires RunPod")
+	if in.Cloud != "" {
+		if err := support.V01().Validate(in.Runtime, in.Cloud, in.ComputeMode); err != nil {
+			return Plan{}, fmt.Errorf("v0.1 support policy: %w", err)
+		}
 	}
 
 	p := Plan{Version: 1, Name: in.Name, Model: in.Model, Cloud: in.Cloud, GPU: in.GPU,

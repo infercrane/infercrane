@@ -222,8 +222,10 @@ func (f *fakeCloudStore) DeleteDeploymentForTenant(context.Context, string, stri
 func (f *fakeCloudStore) RoutingGenerationMatches(context.Context, string, string) (bool, error) {
 	return true, nil
 }
-func (f *fakeCloudStore) DeleteProvisionedTarget(context.Context, string, string) error { return nil }
-func (f *fakeCloudStore) DeleteProvisionedTargetByURL(context.Context, string, string) error {
+func (f *fakeCloudStore) DeleteProvisionedTarget(context.Context, string, string, string) error {
+	return nil
+}
+func (f *fakeCloudStore) DeleteProvisionedTargetByURL(context.Context, string, string, string) error {
 	return nil
 }
 func (f *fakeCloudStore) ModelArtifactForRevision(context.Context, string, string) (domain.ModelArtifact, error) {
@@ -264,6 +266,43 @@ type fakeReplicaProvider struct {
 	observation provision.Observation
 	ensureCalls int
 	deleteCalls int
+}
+
+func TestReplicaBackendsResolveByCloudRuntimeAndDurableName(t *testing.T) {
+	first, second := &fakeReplicaProvider{}, &fakeReplicaProvider{}
+	registry, err := NewReplicaBackends(
+		ReplicaBackend{Name: "adapter-a", Cloud: "cloud-a", Runtime: "runtime-a", Provider: first},
+		ReplicaBackend{Name: "adapter-b", Cloud: "cloud-a", Runtime: "runtime-b", Provider: second},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byCloud, err := registry.ForCloud("cloud-a", "runtime-b")
+	if err != nil || byCloud.Provider != second {
+		t.Fatalf("by cloud=%#v err=%v", byCloud, err)
+	}
+	byName, err := registry.ForProvider("adapter-a")
+	if err != nil || byName.Provider != first {
+		t.Fatalf("by name=%#v err=%v", byName, err)
+	}
+}
+
+func TestReplicaBackendsRejectAmbiguousRegistrations(t *testing.T) {
+	provider := &fakeReplicaProvider{}
+	_, err := NewReplicaBackends(
+		ReplicaBackend{Name: "adapter-a", Cloud: "cloud-a", Runtime: "runtime-a", Provider: provider},
+		ReplicaBackend{Name: "adapter-b", Cloud: "cloud-a", Runtime: "runtime-a", Provider: provider},
+	)
+	if err == nil {
+		t.Fatal("expected duplicate cloud/runtime registration to fail")
+	}
+	_, err = NewReplicaBackends(
+		ReplicaBackend{Name: "adapter-a", Cloud: "cloud-a", Runtime: "runtime-a", Provider: provider},
+		ReplicaBackend{Name: "adapter-a", Cloud: "cloud-b", Runtime: "runtime-a", Provider: provider},
+	)
+	if err == nil {
+		t.Fatal("expected duplicate durable adapter name to fail")
+	}
 }
 
 func (f *fakeReplicaProvider) Handle(key string) provision.ProviderHandle {
