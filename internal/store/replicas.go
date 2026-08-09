@@ -98,6 +98,17 @@ func (s *Store) ObserveReplica(ctx context.Context, id, lifecycle, endpoint, hea
 	return nil
 }
 
+func (s *Store) MarkReplicaDeleted(ctx context.Context, id string) error {
+	result, err := s.ExecContext(ctx, `UPDATE replicas SET lifecycle_state='deleted',endpoint=NULL,health='unknown',last_observed_at=?,updated_at=? WHERE id=?`, time.Now().UTC(), now(), id)
+	if err != nil {
+		return err
+	}
+	if n, _ := result.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 type replicaScanner interface{ Scan(...any) error }
 
 func scanReplica(row *sql.Row) (domain.Replica, error) {

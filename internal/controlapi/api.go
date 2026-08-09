@@ -22,6 +22,7 @@ type Store interface {
 	Operation(context.Context, string) (domain.Operation, error)
 	RequestOperationCancel(context.Context, string) error
 	EnqueueOperation(context.Context, domain.Operation) (domain.Operation, bool, error)
+	SubmitCloudDeployment(context.Context, domain.Deployment, domain.Operation) (domain.Deployment, domain.Operation, bool, error)
 	AddTargetForTenant(context.Context, string, domain.Target) (domain.Target, error)
 	TargetsForTenant(context.Context, string) ([]domain.Target, error)
 	DeploymentsForTenant(context.Context, string) ([]domain.Deployment, error)
@@ -47,6 +48,7 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/operations/{id}", a.auth(authz.Read, a.operation))
 	mux.HandleFunc("POST /api/v1/operations/{id}/cancel", a.auth(authz.Deploy, a.cancel))
 	mux.HandleFunc("POST /api/v1/deployments/apply", a.auth(authz.Deploy, a.applyDeployment))
+	mux.HandleFunc("POST /api/v1/deployments", a.auth(authz.Deploy, a.createCloudDeployment))
 	mux.HandleFunc("GET /api/v1/deployments", a.auth(authz.Read, a.deployments))
 	mux.HandleFunc("GET /api/v1/targets", a.auth(authz.Read, a.targets))
 	mux.HandleFunc("POST /api/v1/targets", a.auth(authz.Deploy, a.addTarget))
@@ -57,6 +59,56 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/principals/{id}/rotate", a.auth(authz.ManageTenant, a.rotatePrincipal))
 	mux.HandleFunc("DELETE /api/v1/principals/{id}", a.auth(authz.ManageTenant, a.revokePrincipal))
 	return mux
+}
+
+func (a API) createCloudDeployment(w http.ResponseWriter, r *http.Request) {
+	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if key == "" || len(key) > 128 {
+		writeError(w, http.StatusBadRequest, "invalid_idempotency_key", "Idempotency-Key is required and must not exceed 128 characters")
+		return
+	}
+	var request workflows.CloudRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid: "+err.Error())
+		return
+	}
+	if err := request.Validate(); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		writeError(w, http.StatusBadRequest, "invalid_request", "request body must contain one JSON object")
+		return
+	}
+	principal := r.Context().Value(identityKey{}).(domain.Principal)
+	request.Actor, request.TenantID = principal.Name, principal.TenantID
+	minReplicas, maxReplicas := 1, 1
+	if request.MinReplicas > 0 {
+		minReplicas = request.MinReplicas
+	}
+	if request.MaxReplicas > 0 {
+		maxReplicas = request.MaxReplicas
+	} else {
+		maxReplicas = minReplicas
+	}
+	encoded, _ := json.Marshal(request)
+	deployment, operation, created, err := a.Store.SubmitCloudDeployment(r.Context(), domain.Deployment{TenantID: principal.TenantID, Name: request.Name, Model: request.Model, MinReplicas: minReplicas, MaxReplicas: maxReplicas, AutoscalingEnabled: maxReplicas > minReplicas}, domain.Operation{TenantID: principal.TenantID, Kind: workflows.ConvergeKind, IdempotencyKey: key, RequestJSON: string(encoded)})
+	if errors.Is(err, domain.ErrConflict) {
+		writeError(w, http.StatusConflict, "conflict", err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "cloud deployment could not be submitted")
+		return
+	}
+	w.Header().Set("Location", "/api/v1/operations/"+operation.ID)
+	status := http.StatusAccepted
+	if !created && operation.Status == "succeeded" {
+		status = http.StatusOK
+	}
+	writeJSON(w, status, map[string]any{"deployment": deploymentResponse(deployment), "operation": operationResponse(operation), "created": created})
 }
 
 func (a API) auditEvents(w http.ResponseWriter, r *http.Request) {

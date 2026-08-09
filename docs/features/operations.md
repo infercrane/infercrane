@@ -54,8 +54,9 @@ synchronously and must move to checkpointed handlers before all mutations are cr
 
 Cloud submission has an atomic storage primitive that creates the targetless desired deployment
 and its queued converge operation in one PostgreSQL transaction. Its required idempotency key makes
-submission retries return the original deployment and operation. The CLI and control API do not use
-this primitive yet; that wiring is the next lifecycle increment.
+submission retries return the original deployment and operation. `POST /api/v1/deployments` uses
+this primitive and returns the durable operation immediately; the leased worker, not the request
+handler, owns cloud execution. CLI migration and durable deletion remain in progress.
 
 Queued operations with no side effects may be cancelled immediately. Once work has entered a
 retry/wait cycle, cancellation is itself leased work: the worker runs the operation-specific

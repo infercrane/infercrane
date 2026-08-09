@@ -657,7 +657,11 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	go func() { _ = credentialCache.Run(ctx) }()
 	control := (controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: credentialCache}).Handler()
 	operationTelemetry := &operations.Telemetry{}
-	operationWorker := operations.Worker{Repository: s, Handlers: workflows.DeploymentHandlers(s), Owner: cfg.InstanceID, Lease: 30 * time.Second, PollInterval: time.Second, BaseBackoff: 2 * time.Second, MaxBackoff: time.Minute, Telemetry: operationTelemetry}
+	handlers := workflows.DeploymentHandlers(s)
+	for kind, handler := range workflows.CloudHandlers(s, provision.SkyPilot{APIKey: cfg.APIKey}, runtime) {
+		handlers[kind] = handler
+	}
+	operationWorker := operations.Worker{Repository: s, Handlers: handlers, Owner: cfg.InstanceID, Lease: 30 * time.Second, PollInterval: time.Second, BaseBackoff: 2 * time.Second, MaxBackoff: time.Minute, Telemetry: operationTelemetry}
 	go func() {
 		if err := operationWorker.Run(ctx); err != nil && ctx.Err() == nil {
 			logger.Error("operation worker stopped", "error", err)

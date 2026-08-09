@@ -235,13 +235,16 @@ func (s *Store) SetRoute(ctx context.Context, name, strategy string) error {
 	return tx.Commit()
 }
 func (s *Store) DeleteDeployment(ctx context.Context, name string) error {
+	return s.DeleteDeploymentForTenant(ctx, "global", name)
+}
+func (s *Store) DeleteDeploymentForTenant(ctx context.Context, tenant, name string) error {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
 	var id, state string
-	if err := tx.QueryRowContext(ctx, `SELECT id,desired_state FROM deployments WHERE name=?`, name).Scan(&id, &state); errors.Is(err, sql.ErrNoRows) {
+	if err := tx.QueryRowContext(ctx, `SELECT id,desired_state FROM deployments WHERE tenant_id=? AND name=?`, tenant, name).Scan(&id, &state); errors.Is(err, sql.ErrNoRows) {
 		return nil
 	} else if err != nil {
 		return err

@@ -40,6 +40,13 @@ func (f *fakeStore) EnqueueOperation(_ context.Context, operation domain.Operati
 	f.operation = operation
 	return operation, f.created, f.err
 }
+func (f *fakeStore) SubmitCloudDeployment(_ context.Context, deployment domain.Deployment, operation domain.Operation) (domain.Deployment, domain.Operation, bool, error) {
+	deployment.ID = "deployment"
+	operation.ID, operation.Status = "queued", "pending"
+	operation.ResourceType, operation.ResourceName = "deployment", deployment.Name
+	f.operation = operation
+	return deployment, operation, f.created, f.err
+}
 func (f *fakeStore) AddTargetForTenant(_ context.Context, _ string, target domain.Target) (domain.Target, error) {
 	target.ID = "target"
 	return target, f.err
@@ -91,6 +98,21 @@ func TestApplyQueuesIdempotentOperation(t *testing.T) {
 	(API{Store: store, APIKey: "secret"}).Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusAccepted || response.Header().Get("Location") != "/api/v1/operations/queued" || store.operation.Kind != "deployment.apply-existing" {
 		t.Fatalf("response=%d %s operation=%#v", response.Code, response.Body.String(), store.operation)
+	}
+}
+
+func TestCloudDeployPersistsAndQueuesConverge(t *testing.T) {
+	store := &fakeStore{created: true}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments", strings.NewReader(`{"name":"qwen","model":"Qwen/Qwen3-8B","cloud":"runpod","gpu":"L40S","min_replicas":1,"max_replicas":4}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Idempotency-Key", "deploy-qwen")
+	response := httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret"}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted || response.Header().Get("Location") != "/api/v1/operations/queued" || store.operation.Kind != "deployment.converge" || store.operation.ResourceName != "qwen" {
+		t.Fatalf("response=%d %s operation=%#v", response.Code, response.Body.String(), store.operation)
+	}
+	if !strings.Contains(store.operation.RequestJSON, `"tenant_id":"global"`) {
+		t.Fatalf("request=%s", store.operation.RequestJSON)
 	}
 }
 

@@ -24,6 +24,12 @@ returns owned clusters for leak reconciliation. Repeating ensure or delete does 
 destroy a second resource. The durable workflow must persist the external key and deterministic
 cluster identity before calling these methods.
 
+The `deployment.converge`/`replica.provision` workflow persists replica intent and that deterministic
+cluster identity before calling `sky launch`. Every retry re-runs discovery, provider observation,
+and vLLM readiness checks before registering a route. Its delete path re-observes asynchronous
+deletion and does not mark a replica deleted while it remains in provider inventory. These handlers
+are locally qualified with fault-injected providers; real RunPod qualification is still required.
+
 Runtime inspection requires both a healthy endpoint and the expected served model. Metrics parsing
 normalizes supported vLLM metric aliases and ignores malformed or non-finite samples.
 

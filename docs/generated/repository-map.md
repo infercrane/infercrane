@@ -16,7 +16,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 | `internal/benchmark` | 1 | 1 | `TestRunMeasuresSuccessfulRequests` |
 | `internal/capacity` | 1 | 1 | `TestChoosePrefersWarmThenCost`, `TestChooseRejectsInsufficientCapacity` |
 | `internal/config` | 1 | 1 | `TestLoadForDiagnosticsAllowsMissingAPIKey`, `TestLoadRejectsInvalidInteger`, `TestLoadRequiresAPIKey`, `TestProductionRequiresStrongSecretAndDatabaseTLS` |
-| `internal/controlapi` | 1 | 1 | `TestApplyQueuesIdempotentOperation`, `TestCancelHidesMissingOperation`, `TestOperationAPIAuthenticationAndResponse`, `TestTargetRegistrationRejectsEmbeddedCredentials`, `TestViewerCannotApply` |
+| `internal/controlapi` | 1 | 1 | `TestApplyQueuesIdempotentOperation`, `TestCancelHidesMissingOperation`, `TestCloudDeployPersistsAndQueuesConverge`, `TestOperationAPIAuthenticationAndResponse`, `TestTargetRegistrationRejectsEmbeddedCredentials`, `TestViewerCannotApply` |
 | `internal/doctor` | 1 | 1 | `TestCloudCredentialCheckIsRequiredWhenRequested`, `TestRunReadyWithoutSkyPilot`, `TestRunReportsRequiredAndOptionalChecks` |
 | `internal/domain` | 1 | 0 | — |
 | `internal/gateway` | 2 | 2 | `TestAuthentication`, `TestCompletionRewritesAlias`, `TestModelsAreTenantScoped`, `TestTelemetryExportsPrometheusHistogram` |
@@ -33,7 +33,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 | `internal/store` | 10 | 1 | `TestApplyDeploymentConvergesTargetMembership`, `TestCancellingQueuedOperationPreventsClaim`, `TestCancellingWaitingOperationRequiresCleanupClaim`, `TestCreateDeploymentRejectsIncompatibleTargets`, `TestDeploymentLifecycleMutationsAreSerialized`, `TestOperationLifecycleIsIdempotentAndRetryable`, `TestOperationQueueLeasesAndRecoversExpiredWork`, `TestOrphanedTargetsOnlyReturnsProvisionedUnusedTargets`, `TestPrincipalCredentialRotationAndRevocation`, `TestReplicaIntentAndProviderIdentityAreIdempotent`, `TestStaleLeaseCannotCheckpointOrFinish`, `TestSubmitCloudDeploymentIsAtomicAndIdempotent`, `TestTargetAndDeploymentLifecycle`, `TestTargetConflict`, `TestTenantQuotaRejectsDeploymentBeyondReplicaLimit`, `TestTenantResourcesCanReuseNamesWithoutCrossTenantVisibility` |
 | `internal/testtools/fake-router` | 1 | 0 | — |
 | `internal/testtools/fake-vllm` | 1 | 0 | — |
-| `internal/workflows` | 1 | 1 | `TestApplyExistingHandlerIsDeterministic`, `TestApplyExistingHandlerRejectsInvalidPayload` |
+| `internal/workflows` | 2 | 2 | `TestApplyExistingHandlerIsDeterministic`, `TestApplyExistingHandlerRejectsInvalidPayload`, `TestConvergeCancellationDeletesProviderResource`, `TestConvergeResumesAfterProviderCheckpoint` |
 | `tools/repo-context` | 1 | 0 | — |
 
 ## CLI commands
@@ -75,6 +75,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 - `GET /metrics`
 - `GET /readyz`
 - `GET /v1/models`
+- `POST /api/v1/deployments`
 - `POST /api/v1/deployments/apply`
 - `POST /api/v1/operations/{id}/cancel`
 - `POST /api/v1/principals`

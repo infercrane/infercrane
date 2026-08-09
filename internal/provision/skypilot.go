@@ -57,6 +57,12 @@ type SkyPilot struct {
 	Runner         CommandRunner
 }
 
+// Handle returns the deterministic provider identity for a durable external
+// key without contacting SkyPilot. Callers can persist it before mutation.
+func (s SkyPilot) Handle(externalKey string) ProviderHandle {
+	return ProviderHandle{ResourceID: clusterName(externalKey), ExternalKey: externalKey}
+}
+
 func (s SkyPilot) EnsureReplica(ctx context.Context, spec ReplicaSpec) (ProviderHandle, error) {
 	if spec.ExternalKey == "" || spec.Model == "" || spec.Cloud == "" || spec.GPU == "" {
 		return ProviderHandle{}, errors.New("external key, model, cloud, and GPU are required")
@@ -67,7 +73,7 @@ func (s SkyPilot) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provider
 	if spec.RuntimeVersion == "" {
 		spec.RuntimeVersion = "0.23.0"
 	}
-	resourceID := clusterName(spec.ExternalKey)
+	resourceID := s.Handle(spec.ExternalKey).ResourceID
 	observation, err := s.observe(ctx, resourceID, spec.Port, false)
 	if err != nil {
 		return ProviderHandle{}, err
