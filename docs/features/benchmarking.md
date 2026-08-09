@@ -22,7 +22,13 @@ user request or conversation content. It creates additional inference work and m
 cost. Active and candidate results are eligible for Release Guard comparison only when AIPerf tool
 version and workload parameters match exactly.
 
-Each result records the immutable ModelArtifact, runtime and configuration, revision, provider, region, GPU, compute mode, workload parameters, TTFT, TPOT, request latency, throughput, errors, timestamp, and exact reproduction command. Goodput, GPU telemetry, and cost remain unavailable rather than being fabricated when AIPerf or the provider did not measure them.
+Each result records the immutable ModelArtifact, runtime and configuration, revision, provider,
+region, GPU type and grounded GPU count, compute mode, workload parameters, TTFT, TPOT, request
+latency, throughput, errors, timestamp, and exact reproduction command. The persisted command uses
+a portable local export prefix rather than the deleted temporary execution directory, and replaces
+the credential with its environment-variable reference. Goodput and GPU telemetry remain explicit
+`null` values, while cost metadata contains `available: false` and a reason when AIPerf or the
+provider did not measure them; none are fabricated.
 
 InferCrane asks AIPerf for the `records` export level. This contains per-request measurements but not the raw request/response export, so prompt and generated content are not persisted. Results remain in the InferCrane PostgreSQL database and are never uploaded by default.
 

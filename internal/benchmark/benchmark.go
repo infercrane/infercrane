@@ -76,7 +76,7 @@ func run(ctx context.Context, cfg Config, commands commandRunner) (Result, error
 	if cfg.APIKeyEnv == "" {
 		cfg.APIKeyEnv = "INFERCRANE_API_KEY"
 	}
-	command := shellCommand(cfg.Binary, args, cfg.APIKey, cfg.APIKeyEnv)
+	command := portableReproductionCommand(shellCommand(cfg.Binary, args, cfg.APIKey, cfg.APIKeyEnv), prefix)
 	versionOutput, versionErr := commands.Run(ctx, cfg.Binary, "--version")
 	if versionErr != nil {
 		return Result{}, fmt.Errorf("AIPerf is unavailable (install with pipx install aiperf): %w", versionErr)
@@ -93,6 +93,10 @@ func run(ctx context.Context, cfg Config, commands commandRunner) (Result, error
 	}
 	result.Tool, result.ToolVersion, result.Command = "aiperf", strings.TrimSpace(string(versionOutput)), command
 	return result, nil
+}
+
+func portableReproductionCommand(command, temporaryPrefix string) string {
+	return strings.Replace(command, quote(temporaryPrefix), "./infercrane-benchmark", 1)
 }
 
 func shellCommand(binary string, args []string, secret, secretEnv string) string {

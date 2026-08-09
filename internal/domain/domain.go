@@ -122,6 +122,7 @@ type BenchmarkResult struct {
 	ID, TenantID, DeploymentID, DeploymentName, RevisionID  string
 	ModelArtifactID, ModelIdentity, Runtime, RuntimeVersion string
 	RuntimeConfigJSON, Provider, Region, GPU, ComputeMode   string
+	GPUCount                                                *int
 	Tool, ToolVersion, WorkloadJSON, ReproductionCommand    string
 	RequestCount, Succeeded, Failed                         int
 	DurationSeconds                                         float64

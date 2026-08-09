@@ -36,6 +36,14 @@ func TestReproductionCommandRedactsCredential(t *testing.T) {
 	}
 }
 
+func TestReproductionCommandDoesNotPersistDeletedTemporaryPath(t *testing.T) {
+	temporary := "/tmp/infercrane-aiperf-123/infercrane"
+	command := portableReproductionCommand(shellCommand("aiperf", []string{"profile", "--profile-export-prefix", temporary}, "", "INFERCRANE_API_KEY"), temporary)
+	if strings.Contains(command, temporary) || !strings.Contains(command, "--profile-export-prefix ./infercrane-benchmark") {
+		t.Fatalf("command=%s", command)
+	}
+}
+
 type missingRunner struct{}
 
 func (missingRunner) Run(context.Context, string, ...string) ([]byte, error) {

@@ -113,12 +113,13 @@ func TestBenchmarkHistoryPersistsReproductionMetadata(t *testing.T) {
 	}
 	deployment = resolved.Deployment
 	value := 12.5
-	created, err := s.RecordBenchmark(ctx, domain.BenchmarkResult{TenantID: "global", DeploymentID: deployment.ID, DeploymentName: name, RevisionID: deployment.ActiveRevisionID, ModelIdentity: "Qwen/Qwen3-8B@commit", Runtime: "vllm", RuntimeVersion: "0.10", RuntimeConfigJSON: `{"args":[]}`, Provider: "runpod", GPU: "L40S", ComputeMode: "elastic", Tool: "aiperf", ToolVersion: "0.9.0", WorkloadJSON: `{"request_count":10,"random_seed":17}`, ReproductionCommand: "aiperf profile --model qwen", RequestCount: 10, Succeeded: 10, DurationSeconds: 2, TTFTP95MS: &value, CostMetadataJSON: `{}`})
+	gpuCount := 1
+	created, err := s.RecordBenchmark(ctx, domain.BenchmarkResult{TenantID: "global", DeploymentID: deployment.ID, DeploymentName: name, RevisionID: deployment.ActiveRevisionID, ModelIdentity: "Qwen/Qwen3-8B@commit", Runtime: "vllm", RuntimeVersion: "0.10", RuntimeConfigJSON: `{"args":[]}`, Provider: "runpod", GPU: "L40S", GPUCount: &gpuCount, ComputeMode: "elastic", Tool: "aiperf", ToolVersion: "0.9.0", WorkloadJSON: `{"request_count":10,"random_seed":17}`, ReproductionCommand: "aiperf profile --model qwen", RequestCount: 10, Succeeded: 10, DurationSeconds: 2, TTFTP95MS: &value, CostMetadataJSON: `{"available":false}`})
 	if err != nil || created.ID == "" {
 		t.Fatalf("record=%#v err=%v", created, err)
 	}
 	rows, err := s.BenchmarksForDeployment(ctx, "global", name, 10)
-	if err != nil || len(rows) != 1 || rows[0].Tool != "aiperf" || rows[0].TTFTP95MS == nil || *rows[0].TTFTP95MS != value || !strings.Contains(rows[0].WorkloadJSON, "random_seed") {
+	if err != nil || len(rows) != 1 || rows[0].Tool != "aiperf" || rows[0].GPUCount == nil || *rows[0].GPUCount != 1 || rows[0].TTFTP95MS == nil || *rows[0].TTFTP95MS != value || !strings.Contains(rows[0].WorkloadJSON, "random_seed") || !strings.Contains(rows[0].CostMetadataJSON, `"available"`) {
 		t.Fatalf("rows=%#v err=%v", rows, err)
 	}
 }

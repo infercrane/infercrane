@@ -216,10 +216,10 @@ func TestBenchmarkRunsThroughControlPlaneAndPersistsIdentity(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer secret")
 	response := httptest.NewRecorder()
 	(API{Store: store, APIKey: "secret", BenchmarkRunner: runner, GatewayURL: "http://gateway", AIPerfBinary: "aiperf"}).Handler().ServeHTTP(response, request)
-	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"model_identity":"Qwen/Qwen3-8B@commit"`) {
+	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"model_identity":"Qwen/Qwen3-8B@commit"`) || !strings.Contains(response.Body.String(), `"gpu_count":1`) {
 		t.Fatalf("response=%d %s", response.Code, response.Body.String())
 	}
-	if runner.config.APIKey != "secret" || runner.config.RandomSeed != 42 || len(store.benchmarks) != 1 || store.benchmarks[0].GPU != "L40S" {
+	if runner.config.APIKey != "secret" || runner.config.RandomSeed != 42 || len(store.benchmarks) != 1 || store.benchmarks[0].GPU != "L40S" || store.benchmarks[0].GPUCount == nil || *store.benchmarks[0].GPUCount != 1 || !strings.Contains(store.benchmarks[0].CostMetadataJSON, `"available":false`) {
 		t.Fatalf("config=%#v benchmarks=%#v", runner.config, store.benchmarks)
 	}
 }

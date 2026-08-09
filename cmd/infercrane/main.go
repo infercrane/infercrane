@@ -398,8 +398,26 @@ func benchmarkCommand(ctx context.Context, cfg config.Config, args []string) err
 	if *output != "human" {
 		return errors.New("--output must be human or json")
 	}
-	fmt.Printf("Benchmark     %v\nRevision      %v\nModel         %v\nRuntime       %v %v\nGPU           %v\nProvider      %v\nTTFT p50      %v ms\nTTFT p95      %v ms\nTPOT p95      %v ms\nOutput tok/s  %v\nErrors        %v\n\nReproduce:\n  %v\n", response.Benchmark["id"], response.Benchmark["revision_id"], response.Benchmark["model_identity"], response.Benchmark["runtime"], response.Benchmark["runtime_version"], response.Benchmark["gpu"], response.Benchmark["provider"], response.Benchmark["ttft_p50_ms"], response.Benchmark["ttft_p95_ms"], response.Benchmark["tpot_p95_ms"], response.Benchmark["output_token_throughput"], response.Benchmark["failed"], response.Benchmark["reproduction_command"])
+	fmt.Printf("Benchmark     %s\nRevision      %s\nModel         %s\nRuntime       %s %s\nRuntime args  %s\nGPU           %s x %s\nProvider      %s\nRegion        %s\nCompute mode  %s\nWorkload      %s\nTTFT p50      %s ms\nTTFT p95      %s ms\nTPOT p95      %s ms\nOutput tok/s  %s\nGoodput       %s\nGPU util      %s\nErrors        %s\nCost          %s\n\nReproduce:\n  %s\n", benchmarkValue(response.Benchmark["id"]), benchmarkValue(response.Benchmark["revision_id"]), benchmarkValue(response.Benchmark["model_identity"]), benchmarkValue(response.Benchmark["runtime"]), benchmarkValue(response.Benchmark["runtime_version"]), benchmarkValue(response.Benchmark["runtime_configuration"]), benchmarkValue(response.Benchmark["gpu"]), benchmarkValue(response.Benchmark["gpu_count"]), benchmarkValue(response.Benchmark["provider"]), benchmarkValue(response.Benchmark["region"]), benchmarkValue(response.Benchmark["compute_mode"]), benchmarkValue(response.Benchmark["workload"]), benchmarkValue(response.Benchmark["ttft_p50_ms"]), benchmarkValue(response.Benchmark["ttft_p95_ms"]), benchmarkValue(response.Benchmark["tpot_p95_ms"]), benchmarkValue(response.Benchmark["output_token_throughput"]), benchmarkValue(response.Benchmark["goodput"]), benchmarkValue(response.Benchmark["gpu_utilization"]), benchmarkValue(response.Benchmark["failed"]), benchmarkValue(response.Benchmark["cost_metadata"]), benchmarkValue(response.Benchmark["reproduction_command"]))
 	return nil
+}
+
+func benchmarkValue(value any) string {
+	if value == nil {
+		return "unavailable"
+	}
+	if text, ok := value.(string); ok && text == "" {
+		return "unavailable"
+	}
+	if encoded, err := json.Marshal(value); err == nil {
+		if _, structured := value.(map[string]any); structured {
+			return string(encoded)
+		}
+		if _, structured := value.([]any); structured {
+			return string(encoded)
+		}
+	}
+	return fmt.Sprint(value)
 }
 func targetAPICommand(ctx context.Context, cfg config.Config, args []string) error {
 	if len(args) == 0 {
