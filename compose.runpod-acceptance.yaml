@@ -42,9 +42,12 @@ services:
       INFERCRANE_ENV: test
       INFERCRANE_INSTANCE_ID: runpod-acceptance
       INFERCRANE_ROUTER_BINARY: vllm-router
+      RUNPOD_API_KEY_FILE: /runpod-key
+      INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID: ${INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID:-}
     ports:
       - "${INFERCRANE_ACCEPTANCE_PORT:-18001}:8080"
     volumes:
+      - ${RUNPOD_KEY_FILE:?set RUNPOD_KEY_FILE}:/runpod-key:ro
       - runpod-config:/home/app/.runpod
       - skypilot-state:/home/app/.sky
     depends_on:

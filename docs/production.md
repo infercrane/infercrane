@@ -23,11 +23,15 @@ PostgreSQL, RunPod configuration, and SkyPilot state across control-plane restar
 
 ```sh
 export RUNPOD_KEY_FILE=/absolute/path/to/runpod-key
+# Required only for the Serverless acceptance demo:
+export INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID=immutable-vllm-template-id
 docker compose -p infercrane-runpod -f compose.runpod-acceptance.yaml up --build -d
 ```
 
-This command starts the control plane but does not provision a GPU. GPU creation only begins after
-a cloud deployment is submitted.
+This command starts the control plane but does not provision a GPU or create a Serverless endpoint.
+Provider mutation begins only after a deployment is submitted. The key file is mounted read-only;
+the entrypoint configures SkyPilot/RunPod and passes the key only to its runtime child processes so
+Serverless API calls work without declaring the secret value in Compose environment metadata.
 
 The production image includes the local `git`, OpenSSH, and `rsync` executables required by
 SkyPilot's task packaging and remote synchronization paths.

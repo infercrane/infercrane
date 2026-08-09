@@ -8,6 +8,7 @@ fi
 if [ -n "$runpod_key" ]; then
   umask 077
   runpod config "$runpod_key" >/dev/null
+  export RUNPOD_API_KEY="$runpod_key"
 fi
 unset runpod_key
 
