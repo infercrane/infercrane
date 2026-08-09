@@ -22,14 +22,12 @@ import (
 
 	"github.com/infercrane/infercrane/internal/accounting"
 	"github.com/infercrane/infercrane/internal/authn"
-	"github.com/infercrane/infercrane/internal/authz"
 	"github.com/infercrane/infercrane/internal/benchmark"
 	"github.com/infercrane/infercrane/internal/config"
 	"github.com/infercrane/infercrane/internal/controlapi"
 	"github.com/infercrane/infercrane/internal/doctor"
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/gateway"
-	"github.com/infercrane/infercrane/internal/metrics"
 	"github.com/infercrane/infercrane/internal/operations"
 	"github.com/infercrane/infercrane/internal/planning"
 	"github.com/infercrane/infercrane/internal/provision"
@@ -45,7 +43,9 @@ import (
 const version = "0.1.0"
 
 func main() {
-	if err := run(context.Background(), os.Args[1:]); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := run(ctx, os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)
 		os.Exit(2)
 	}
@@ -62,6 +62,8 @@ func run(ctx context.Context, args []string) error {
 	case "version", "--version":
 		fmt.Println(version)
 		return nil
+	case "init":
+		return initCommand(args[1:])
 	case "plan":
 		return planCommand(args[1:])
 	case "doctor":
@@ -70,12 +72,24 @@ func run(ctx context.Context, args []string) error {
 		return benchmarkCommand(ctx, args[1:])
 	}
 	switch args[0] {
-	case "target", "deploy", "apply", "deployments", "route", "status", "delete", "inspect", "operation", "orphans", "tenant", "principal", "serve":
+	case "target", "deploy", "apply", "deployments", "route", "status", "events", "explain", "delete", "inspect", "operation", "orphans", "tenant", "principal", "serve":
 	default:
 		usage(os.Stderr)
 		return fmt.Errorf("unknown command %q", args[0])
 	}
-	cfg, err := config.Load()
+	if args[0] == "serve" {
+		cfg, err := config.Load()
+		if err != nil {
+			return err
+		}
+		s, err := store.Open(ctx, cfg.DatabaseURL, store.Options{MaxOpenConns: cfg.DatabaseMaxOpen, MaxIdleConns: cfg.DatabaseMaxIdle})
+		if err != nil {
+			return err
+		}
+		defer s.Close()
+		return serve(ctx, cfg, s)
+	}
+	cfg, err := config.LoadClient()
 	if err != nil {
 		return err
 	}
@@ -86,35 +100,30 @@ func run(ctx context.Context, args []string) error {
 		return deployAPICommand(ctx, cfg, "apply", args[1:])
 	case "delete":
 		return deleteAPICommand(ctx, cfg, args[1:])
-	}
-	s, err := store.Open(ctx, cfg.DatabaseURL, store.Options{MaxOpenConns: cfg.DatabaseMaxOpen, MaxIdleConns: cfg.DatabaseMaxIdle})
-	if err != nil {
-		return err
-	}
-	defer s.Close()
-	switch args[0] {
-	case "target":
-		return targetCommand(ctx, s, args[1:])
 	case "deployments":
-		return listDeployments(ctx, s)
-	case "route":
-		return routeCommand(ctx, s, args[1:])
+		return listDeployments(ctx, cfg, args[1:])
 	case "status":
-		return statusCommand(ctx, cfg, s, args[1:])
+		return statusCommand(ctx, cfg, args[1:])
+	case "events":
+		return eventsCommand(ctx, cfg, args[1:])
 	case "inspect":
-		return inspectCommand(ctx, s, args[1:])
+		return inspectCommand(ctx, cfg, args[1:])
+	case "explain":
+		return explainCommand(ctx, cfg, args[1:])
 	case "operation":
-		return operationCommand(ctx, s, args[1:])
+		return operationCommand(ctx, cfg, args[1:])
+	case "target":
+		return targetAPICommand(ctx, cfg, args[1:])
 	case "orphans":
-		return orphanCommand(ctx, s)
+		return orphanAPICommand(ctx, cfg, args[1:])
+	case "route":
+		return routeAPICommand(ctx, cfg, args[1:])
 	case "tenant":
-		return tenantCommand(ctx, s, args[1:])
+		return tenantAPICommand(ctx, cfg, args[1:])
 	case "principal":
-		return principalCommand(ctx, s, args[1:])
-	case "serve":
-		return serve(ctx, cfg, s)
+		return principalAPICommand(ctx, cfg, args[1:])
 	}
-	return nil
+	return fmt.Errorf("%s has not yet been migrated to the control-plane API", args[0])
 }
 func usage(w *os.File) {
 	fmt.Fprintln(w, `InferCrane — operate production LLM inference without hiding the infrastructure.
@@ -123,6 +132,7 @@ Usage:
   infercrane <command> [arguments]
 
 Trust and discovery:
+  init             Create private local control-plane configuration
   plan MODEL       Preview deployment actions without side effects
   doctor           Validate the local runtime environment
   benchmark        Run a reproducible OpenAI-compatible load check
@@ -136,13 +146,45 @@ Operations:
   deployments      List deployments
   route            Change a deployment routing strategy
   status           Inspect deployment health and traffic
+  events           Show durable deployment events
   inspect          Inspect deployment details
+  explain          Explain persisted operational state
   operation        Inspect or request cancellation of a lifecycle operation
   orphans          List unmanaged provisioned resources
   tenant           Create an isolated tenant
   principal        Create, rotate, or revoke scoped credentials
   delete           Plan or confirm deletion of a deployment
   serve            Run the control plane and gateway`)
+}
+
+func initCommand(args []string) error {
+	fs := flag.NewFlagSet("init", flag.ContinueOnError)
+	controlURL := fs.String("url", "http://127.0.0.1:8080", "control-plane URL")
+	apiKey := fs.String("api-key", "", "existing API key; generated when omitted")
+	output := fs.String("output", "human", "human or json")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	path, generated, err := config.InitializeClient(*controlURL, *apiKey)
+	if err != nil {
+		return err
+	}
+	result := map[string]any{"config_path": path, "control_url": *controlURL, "api_key_generated": generated}
+	switch *output {
+	case "json":
+		encoded, _ := json.MarshalIndent(result, "", "  ")
+		fmt.Println(string(encoded))
+	case "human":
+		fmt.Printf("InferCrane configured\nControl plane  %s\nConfig         %s\n", *controlURL, path)
+		if generated {
+			fmt.Println("API key       generated and stored with mode 0600")
+		}
+	case "":
+		return errors.New("--output must be human or json")
+	default:
+		return errors.New("--output must be human or json")
+	}
+	return nil
 }
 
 func planCommand(args []string) error {
@@ -268,19 +310,21 @@ func benchmarkCommand(ctx context.Context, args []string) error {
 	}
 	return nil
 }
-func targetCommand(ctx context.Context, s *store.Store, args []string) error {
+func targetAPICommand(ctx context.Context, cfg config.Config, args []string) error {
 	if len(args) == 0 {
 		return errors.New("target requires add or list")
 	}
 	if args[0] == "list" {
-		rows, err := s.Targets(ctx)
-		if err != nil {
+		var response struct {
+			Data []targetView `json:"data"`
+		}
+		if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/targets", "", nil, &response); err != nil {
 			return err
 		}
 		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 		fmt.Fprintln(w, "NAME\tURL\tRUNTIME\tHEALTH")
-		for _, r := range rows {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", r.Name, r.URL, r.Runtime, r.Health)
+		for _, target := range response.Data {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", target.Name, target.URL, target.Runtime, target.Health)
 		}
 		return w.Flush()
 	}
@@ -288,20 +332,21 @@ func targetCommand(ctx context.Context, s *store.Store, args []string) error {
 		return errors.New("usage: infercrane target add NAME --url URL")
 	}
 	fs := flag.NewFlagSet("target add", flag.ContinueOnError)
-	url := fs.String("url", "", "target URL")
-	runtime := fs.String("runtime", "vllm", "runtime")
+	targetURL := fs.String("url", "", "target URL")
+	runtimeName := fs.String("runtime", "vllm", "runtime")
 	upstream := fs.String("upstream-model", "", "upstream model")
 	if err := fs.Parse(args[2:]); err != nil {
 		return err
 	}
-	if *url == "" {
+	if *targetURL == "" {
 		return errors.New("--url is required")
 	}
-	row, err := s.AddTarget(ctx, domain.Target{Name: args[1], URL: *url, Provider: "existing", Runtime: *runtime, UpstreamModel: *upstream})
-	if err == nil {
-		fmt.Printf("target %s registered\n", row.Name)
+	request := map[string]string{"name": args[1], "url": *targetURL, "runtime": *runtimeName, "upstream_model": *upstream}
+	if err := controlJSON(ctx, cfg, http.MethodPost, "/api/v1/targets", "", request, nil); err != nil {
+		return err
 	}
-	return err
+	fmt.Printf("target %s registered\n", args[1])
+	return nil
 }
 func deployAPICommand(ctx context.Context, cfg config.Config, operationKind string, args []string) error {
 	if len(args) == 0 {
@@ -318,6 +363,7 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 	maxReplicas := fs.Int("max", 1, "maximum replicas")
 	wait := fs.Bool("wait", false, "wait for the operation to finish")
 	idempotencyKey := fs.String("idempotency-key", "", "safe retry key")
+	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -368,74 +414,176 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 	if err := controlJSON(ctx, cfg, http.MethodPost, path, *idempotencyKey, request, &response); err != nil {
 		return err
 	}
-	fmt.Printf("Deployment  %s\nOperation   %s\nStatus      %s\n", *name, response.Operation.ID, response.Operation.Status)
+	if *output == "json" {
+		encoded, _ := json.MarshalIndent(map[string]any{"deployment": *name, "operation": response.Operation}, "", "  ")
+		fmt.Println(string(encoded))
+	} else if *output == "human" {
+		fmt.Printf("Deployment  %s\nOperation   %s\nStatus      %s\n", *name, response.Operation.ID, response.Operation.Status)
+	} else {
+		return errors.New("--output must be human or json")
+	}
 	if *wait {
 		return waitForOperation(ctx, cfg, response.Operation.ID)
 	}
 	_ = operationKind // deploy/apply share API semantics; retained for command UX.
 	return nil
 }
-func listDeployments(ctx context.Context, s *store.Store) error {
-	rows, err := s.Deployments(ctx)
-	if err != nil {
+
+type deploymentSummary struct {
+	ID                  string `json:"id"`
+	Name                string `json:"name"`
+	Model               string `json:"model"`
+	Runtime             string `json:"runtime"`
+	RoutingStrategy     string `json:"routing_strategy"`
+	DesiredState        string `json:"desired_state"`
+	ObservedState       string `json:"observed_state"`
+	ActiveRevisionID    string `json:"active_revision_id"`
+	CandidateRevisionID string `json:"candidate_revision_id"`
+	MinReplicas         int    `json:"min_replicas"`
+	MaxReplicas         int    `json:"max_replicas"`
+	AutoscalingEnabled  bool   `json:"autoscaling_enabled"`
+}
+type targetView struct {
+	ID                 string          `json:"id"`
+	Name               string          `json:"name"`
+	URL                string          `json:"url"`
+	Provider           string          `json:"provider"`
+	Runtime            string          `json:"runtime"`
+	UpstreamModel      string          `json:"upstream_model"`
+	Health             string          `json:"health"`
+	ProviderResourceID string          `json:"provider_resource_id"`
+	ProviderDetails    json.RawMessage `json:"provider_details"`
+}
+type replicaView struct {
+	ID                 string          `json:"id"`
+	RevisionID         string          `json:"revision_id"`
+	ExternalKey        string          `json:"external_key"`
+	LifecycleState     string          `json:"lifecycle_state"`
+	Provider           string          `json:"provider"`
+	ProviderRequestID  string          `json:"provider_request_id"`
+	ProviderResourceID string          `json:"provider_resource_id"`
+	Endpoint           string          `json:"endpoint"`
+	Health             string          `json:"health"`
+	Ordinal            int             `json:"ordinal"`
+	ProviderDetails    json.RawMessage `json:"provider_details"`
+}
+type revisionView struct {
+	ID               string          `json:"id"`
+	Status           string          `json:"status"`
+	SourceRevisionID string          `json:"source_revision_id"`
+	Reason           string          `json:"reason"`
+	Number           int             `json:"number"`
+	Spec             json.RawMessage `json:"spec"`
+}
+type deploymentView struct {
+	Deployment   deploymentSummary   `json:"deployment"`
+	Targets      []targetView        `json:"targets"`
+	Replicas     []replicaView       `json:"replicas"`
+	Revisions    []revisionView      `json:"revisions"`
+	RequestStats domain.RequestStats `json:"request_stats"`
+}
+
+func listDeployments(ctx context.Context, cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("deployments", flag.ContinueOnError)
+	output := fs.String("output", "human", "human or json")
+	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	var response struct {
+		Data []deploymentSummary `json:"data"`
+	}
+	if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/deployments", "", nil, &response); err != nil {
+		return err
+	}
+	if *output == "json" {
+		encoded, _ := json.MarshalIndent(response, "", "  ")
+		fmt.Println(string(encoded))
+		return nil
+	}
+	if *output != "human" {
+		return errors.New("--output must be human or json")
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(w, "NAME\tMODEL\tRUNTIME\tROUTING\tSTATUS")
-	for _, r := range rows {
+	for _, r := range response.Data {
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", r.Name, r.Model, r.Runtime, r.RoutingStrategy, r.ObservedState)
 	}
 	return w.Flush()
 }
-func routeCommand(ctx context.Context, s *store.Store, args []string) error {
+func routeAPICommand(ctx context.Context, cfg config.Config, args []string) error {
 	if len(args) == 0 {
 		return errors.New("usage: infercrane route DEPLOYMENT --strategy STRATEGY")
 	}
 	fs := flag.NewFlagSet("route", flag.ContinueOnError)
-	strategy := fs.String("strategy", "", "strategy")
+	strategy := fs.String("strategy", "", "routing strategy")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
 	if *strategy == "" {
 		return errors.New("--strategy is required")
 	}
-	if err := s.SetRoute(ctx, args[0], *strategy); err != nil {
+	if err := controlJSON(ctx, cfg, http.MethodPut, "/api/v1/deployments/"+url.PathEscape(args[0])+"/route", "", map[string]string{"strategy": *strategy}, nil); err != nil {
 		return err
 	}
 	fmt.Printf("%s routing set to %s\n", args[0], *strategy)
 	return nil
 }
-func statusCommand(ctx context.Context, cfg config.Config, s *store.Store, args []string) error {
-	if len(args) != 1 {
-		return errors.New("usage: infercrane status DEPLOYMENT")
+func statusCommand(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: infercrane status DEPLOYMENT [--watch] [--output human|json]")
 	}
-	resolved, err := s.Resolve(ctx, args[0])
-	if err != nil {
+	name := args[0]
+	fs := flag.NewFlagSet("status", flag.ContinueOnError)
+	watch := fs.Bool("watch", false, "refresh until interrupted")
+	output := fs.String("output", "human", "human or json")
+	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
-	healthy := 0
-	for _, t := range resolved.Targets {
-		if t.Health == "healthy" {
-			healthy++
+	for {
+		view, err := fetchDeployment(ctx, cfg, name)
+		if err != nil {
+			return err
 		}
-	}
-	d := resolved.Deployment
-	fmt.Printf("%s  %s\nModel       %s\nRuntime     %s\nReplicas    %d\nHealthy     %d\nRouting     %s\n", d.Name, strings.ToUpper(d.ObservedState), d.Model, d.Runtime, len(resolved.Targets), healthy, d.RoutingStrategy)
-	collector := metrics.Collector{APIKey: cfg.APIKey}
-	for _, target := range resolved.Targets {
-		m, e := collector.Collect(ctx, target.URL)
-		if e != nil {
-			fmt.Printf("%s metrics N/A\n", target.Name)
+		if *output == "json" {
+			encoded, _ := json.Marshal(view)
+			fmt.Println(string(encoded))
+		} else if *output == "human" {
+			healthy := 0
+			capacity := len(view.Replicas)
+			if capacity > 0 {
+				for _, replica := range view.Replicas {
+					if replica.Health == "healthy" {
+						healthy++
+					}
+				}
+			} else {
+				capacity = len(view.Targets)
+				for _, target := range view.Targets {
+					if target.Health == "healthy" {
+						healthy++
+					}
+				}
+			}
+			d := view.Deployment
+			fmt.Printf("%s  %s\nModel       %s\nRuntime     %s\nReplicas    %d\nHealthy     %d\nRouting     %s\nRevision    %s\nRequests/s  %.2f\nError rate  %.1f%%\n", d.Name, strings.ToUpper(d.ObservedState), d.Model, d.Runtime, capacity, healthy, d.RoutingStrategy, d.ActiveRevisionID, view.RequestStats.RequestsPerSecond, view.RequestStats.ErrorRate*100)
 		} else {
-			fmt.Printf("%s running=%s waiting=%s kv=%s\n", target.Name, floatValue(m.RequestsRunning), floatValue(m.RequestsWaiting), floatValue(m.KVCacheUsage))
+			return errors.New("--output must be human or json")
+		}
+		if !*watch {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(2 * time.Second):
 		}
 	}
-	stats, err := s.RequestStats(ctx, d.ID, 5*time.Minute)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("Requests/s  %.2f\nError rate  %.1f%%\n", stats.RequestsPerSecond, stats.ErrorRate*100)
-	return nil
+}
+
+func fetchDeployment(ctx context.Context, cfg config.Config, name string) (deploymentView, error) {
+	var view deploymentView
+	err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/deployments/"+url.PathEscape(name), "", nil, &view)
+	return view, err
 }
 func deleteAPICommand(ctx context.Context, cfg config.Config, args []string) error {
 	if len(args) == 0 {
@@ -446,6 +594,7 @@ func deleteAPICommand(ctx context.Context, cfg config.Config, args []string) err
 	yes := fs.Bool("yes", false, "confirm destructive deletion")
 	wait := fs.Bool("wait", false, "wait for provider cleanup")
 	idempotencyKey := fs.String("idempotency-key", "", "safe retry key")
+	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -467,7 +616,14 @@ func deleteAPICommand(ctx context.Context, cfg config.Config, args []string) err
 	if err := controlJSON(ctx, cfg, http.MethodDelete, "/api/v1/deployments/"+url.PathEscape(args[0]), *idempotencyKey, nil, &response); err != nil {
 		return err
 	}
-	fmt.Printf("Deployment  %s\nOperation   %s\nStatus      %s\n", args[0], response.Operation.ID, response.Operation.Status)
+	if *output == "json" {
+		encoded, _ := json.MarshalIndent(map[string]any{"deployment": args[0], "operation": response.Operation}, "", "  ")
+		fmt.Println(string(encoded))
+	} else if *output == "human" {
+		fmt.Printf("Deployment  %s\nOperation   %s\nStatus      %s\n", args[0], response.Operation.ID, response.Operation.Status)
+	} else {
+		return errors.New("--output must be human or json")
+	}
 	if *wait {
 		return waitForOperation(ctx, cfg, response.Operation.ID)
 	}
@@ -537,7 +693,7 @@ func waitForOperation(ctx context.Context, cfg config.Config, id string) error {
 	}
 }
 
-func operationCommand(ctx context.Context, s *store.Store, args []string) error {
+func operationCommand(ctx context.Context, cfg config.Config, args []string) error {
 	if len(args) == 0 {
 		return errors.New("usage: infercrane operation ID | operation cancel ID")
 	}
@@ -545,7 +701,7 @@ func operationCommand(ctx context.Context, s *store.Store, args []string) error 
 		if len(args) != 2 {
 			return errors.New("usage: infercrane operation cancel ID")
 		}
-		if err := s.RequestOperationCancel(ctx, args[1]); err != nil {
+		if err := controlJSON(ctx, cfg, http.MethodPost, "/api/v1/operations/"+url.PathEscape(args[1])+"/cancel", "", nil, nil); err != nil {
 			return err
 		}
 		fmt.Printf("cancellation requested for operation %s\n", args[1])
@@ -554,105 +710,229 @@ func operationCommand(ctx context.Context, s *store.Store, args []string) error 
 	if len(args) != 1 {
 		return errors.New("usage: infercrane operation ID")
 	}
-	op, err := s.Operation(ctx, args[0])
-	if err != nil {
+	var op domain.Operation
+	if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/operations/"+url.PathEscape(args[0]), "", nil, &op); err != nil {
 		return err
 	}
 	fmt.Printf("%s  %s\nKind       %s\nResource   %s/%s\nProgress   %d%%\nAttempt    %d\nMessage    %s\nRetryable  %t\nCancel     %t\n", op.ID, strings.ToUpper(op.Status), op.Kind, op.ResourceType, op.ResourceName, op.Progress, op.Attempt, op.Message, op.Retryable, op.CancelRequested)
 	return nil
 }
 
-func orphanCommand(ctx context.Context, s *store.Store) error {
-	rows, err := s.OrphanedTargets(ctx)
-	if err != nil {
+func orphanAPICommand(ctx context.Context, cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("orphans", flag.ContinueOnError)
+	output := fs.String("output", "human", "human or json")
+	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	var response struct {
+		Data []struct {
+			Name               string    `json:"name"`
+			Provider           string    `json:"provider"`
+			ProviderResourceID string    `json:"provider_resource_id"`
+			CreatedAt          time.Time `json:"created_at"`
+		} `json:"data"`
+	}
+	if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/orphans", "", nil, &response); err != nil {
+		return err
+	}
+	if *output == "json" {
+		encoded, _ := json.MarshalIndent(response, "", "  ")
+		fmt.Println(string(encoded))
+		return nil
+	}
+	if *output != "human" {
+		return errors.New("--output must be human or json")
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(w, "NAME\tPROVIDER\tRESOURCE\tCREATED")
-	for _, item := range rows {
+	for _, item := range response.Data {
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", item.Name, item.Provider, item.ProviderResourceID, item.CreatedAt.Format(time.RFC3339))
 	}
 	return w.Flush()
 }
 
-func tenantCommand(ctx context.Context, s *store.Store, args []string) error {
+func tenantAPICommand(ctx context.Context, cfg config.Config, args []string) error {
 	if len(args) < 2 || args[0] != "create" {
 		return errors.New("usage: infercrane tenant create ID [--name NAME]")
 	}
 	fs := flag.NewFlagSet("tenant create", flag.ContinueOnError)
-	name := fs.String("name", args[1], "display name")
+	name := fs.String("name", args[1], "tenant display name")
 	if err := fs.Parse(args[2:]); err != nil {
 		return err
 	}
-	if err := s.CreateTenant(ctx, args[1], *name); err != nil {
+	var response map[string]any
+	if err := controlJSON(ctx, cfg, http.MethodPost, "/api/v1/tenants", "", map[string]string{"id": args[1], "name": *name}, &response); err != nil {
 		return err
 	}
 	fmt.Printf("tenant %s created\n", args[1])
 	return nil
 }
-func principalCommand(ctx context.Context, s *store.Store, args []string) error {
+
+func principalAPICommand(ctx context.Context, cfg config.Config, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: infercrane principal <create|rotate|revoke>")
+		return errors.New("usage: infercrane principal create NAME --role ROLE | principal rotate ID | principal revoke ID")
 	}
 	switch args[0] {
 	case "create":
-		if len(args) < 3 {
-			return errors.New("usage: infercrane principal create TENANT NAME --role ROLE")
+		if len(args) < 2 {
+			return errors.New("usage: infercrane principal create NAME --role ROLE")
 		}
 		fs := flag.NewFlagSet("principal create", flag.ContinueOnError)
-		role := fs.String("role", "viewer", "viewer, operator, or admin")
-		if err := fs.Parse(args[3:]); err != nil {
+		role := fs.String("role", "", "principal role")
+		if err := fs.Parse(args[2:]); err != nil {
 			return err
 		}
-		principal, token, err := s.CreatePrincipal(ctx, args[1], args[2], authz.Role(*role))
-		if err != nil {
+		if *role == "" {
+			return errors.New("--role is required")
+		}
+		var response struct {
+			Principal struct {
+				ID, Name, Role, TenantID string
+			} `json:"principal"`
+			Credential string `json:"credential"`
+		}
+		if err := controlJSON(ctx, cfg, http.MethodPost, "/api/v1/principals", "", map[string]string{"name": args[1], "role": *role}, &response); err != nil {
 			return err
 		}
-		fmt.Printf("principal %s created (%s)\ncredential %s\nStore this credential now; it will not be shown again.\n", principal.ID, principal.Role, token)
+		fmt.Printf("principal %s created with role %s\nCredential  %s\n", response.Principal.ID, response.Principal.Role, response.Credential)
 		return nil
 	case "rotate":
 		if len(args) != 2 {
 			return errors.New("usage: infercrane principal rotate ID")
 		}
-		token, err := s.RotatePrincipal(ctx, args[1])
-		if err != nil {
+		var response struct {
+			Credential string `json:"credential"`
+		}
+		if err := controlJSON(ctx, cfg, http.MethodPost, "/api/v1/principals/"+url.PathEscape(args[1])+"/rotate", "", nil, &response); err != nil {
 			return err
 		}
-		fmt.Printf("credential %s\nPrevious credential is now invalid.\n", token)
+		fmt.Printf("principal %s credential rotated\nCredential  %s\n", args[1], response.Credential)
 		return nil
 	case "revoke":
 		if len(args) != 2 {
 			return errors.New("usage: infercrane principal revoke ID")
 		}
-		if err := s.RevokePrincipal(ctx, args[1]); err != nil {
+		if err := controlJSON(ctx, cfg, http.MethodDelete, "/api/v1/principals/"+url.PathEscape(args[1]), "", nil, nil); err != nil {
 			return err
 		}
 		fmt.Printf("principal %s revoked\n", args[1])
 		return nil
 	default:
-		return errors.New("usage: infercrane principal <create|rotate|revoke>")
+		return errors.New("usage: infercrane principal create NAME --role ROLE | principal rotate ID | principal revoke ID")
 	}
 }
-func inspectCommand(ctx context.Context, s *store.Store, args []string) error {
-	if len(args) != 1 {
-		return errors.New("usage: infercrane inspect DEPLOYMENT")
+
+func inspectCommand(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: infercrane inspect DEPLOYMENT [--output human|json]")
 	}
-	r, err := s.Resolve(ctx, args[0])
+	fs := flag.NewFlagSet("inspect", flag.ContinueOnError)
+	output := fs.String("output", "human", "human or json")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	view, err := fetchDeployment(ctx, cfg, args[0])
 	if err != nil {
 		return err
 	}
-	fmt.Printf("%s\nModel      %s\nRuntime    %s\n", r.Deployment.Name, r.Deployment.Model, r.Deployment.Runtime)
-	for _, t := range r.Targets {
-		resource := t.ProviderResourceID
-		if resource == "" {
-			resource = "external"
-		}
-		fmt.Printf("\n%s\nProvider   %s\nResource   %s\nEndpoint   %s\n", t.Name, t.Provider, resource, t.URL)
-		if t.ProviderDetails != "" {
-			fmt.Println(t.ProviderDetails)
+	if *output == "json" {
+		encoded, _ := json.MarshalIndent(view, "", "  ")
+		fmt.Println(string(encoded))
+		return nil
+	}
+	if *output != "human" {
+		return errors.New("--output must be human or json")
+	}
+	fmt.Printf("%s\nModel      %s\nRuntime    %s\nActive     %s\nCandidate  %s\n", view.Deployment.Name, view.Deployment.Model, view.Deployment.Runtime, view.Deployment.ActiveRevisionID, emptyAs(view.Deployment.CandidateRevisionID, "none"))
+	for _, replica := range view.Replicas {
+		fmt.Printf("\nReplica    %s\nProvider   %s\nRequest    %s\nResource   %s\nEndpoint   %s\nState      %s/%s\n", replica.ID, replica.Provider, emptyAs(replica.ProviderRequestID, "none"), emptyAs(replica.ProviderResourceID, "none"), emptyAs(replica.Endpoint, "pending"), replica.LifecycleState, replica.Health)
+		if len(replica.ProviderDetails) > 0 && string(replica.ProviderDetails) != "{}" {
+			fmt.Printf("Details    %s\n", replica.ProviderDetails)
 		}
 	}
 	return nil
+}
+
+func eventsCommand(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: infercrane events DEPLOYMENT [--output human|json]")
+	}
+	fs := flag.NewFlagSet("events", flag.ContinueOnError)
+	output := fs.String("output", "human", "human or json")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	var response struct {
+		Data []struct {
+			Type      string          `json:"type"`
+			Summary   string          `json:"summary"`
+			Payload   json.RawMessage `json:"payload"`
+			CreatedAt time.Time       `json:"created_at"`
+		} `json:"data"`
+	}
+	if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/deployments/"+url.PathEscape(args[0])+"/events", "", nil, &response); err != nil {
+		return err
+	}
+	if *output == "json" {
+		encoded, _ := json.MarshalIndent(response, "", "  ")
+		fmt.Println(string(encoded))
+		return nil
+	}
+	if *output != "human" {
+		return errors.New("--output must be human or json")
+	}
+	for _, event := range response.Data {
+		fmt.Printf("%s  %-24s %s\n", event.CreatedAt.Format(time.RFC3339), event.Type, event.Summary)
+	}
+	return nil
+}
+
+func explainCommand(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: infercrane explain DEPLOYMENT [--output human|json]")
+	}
+	if args[0] == "scaling" || args[0] == "rollout" || args[0] == "cold-start" {
+		return fmt.Errorf("explain %s is not available until its persisted evidence schema is enabled", args[0])
+	}
+	fs := flag.NewFlagSet("explain", flag.ContinueOnError)
+	output := fs.String("output", "human", "human or json")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	view, err := fetchDeployment(ctx, cfg, args[0])
+	if err != nil {
+		return err
+	}
+	reasons := []string{}
+	for _, replica := range view.Replicas {
+		if replica.Health != "healthy" {
+			reasons = append(reasons, fmt.Sprintf("replica %s is %s (%s)", replica.ID, replica.LifecycleState, replica.Health))
+		}
+	}
+	if len(reasons) == 0 {
+		reasons = append(reasons, "all persisted replicas are healthy")
+	}
+	result := map[string]any{"deployment": view.Deployment.Name, "state": view.Deployment.ObservedState, "reasons": reasons, "active_revision_id": view.Deployment.ActiveRevisionID, "candidate_revision_id": view.Deployment.CandidateRevisionID}
+	if *output == "json" {
+		encoded, _ := json.MarshalIndent(result, "", "  ")
+		fmt.Println(string(encoded))
+		return nil
+	}
+	if *output != "human" {
+		return errors.New("--output must be human or json")
+	}
+	fmt.Printf("%s is %s\n", view.Deployment.Name, view.Deployment.ObservedState)
+	for _, reason := range reasons {
+		fmt.Printf("- %s\n", reason)
+	}
+	return nil
+}
+
+func emptyAs(value, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
 }
 func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
@@ -706,13 +986,6 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	}
 	return err
 }
-func floatValue(value *float64) string {
-	if value == nil {
-		return "N/A"
-	}
-	return fmt.Sprintf("%g", *value)
-}
-
 func purgeRequests(ctx context.Context, s *store.Store, retention time.Duration, logger *slog.Logger) {
 	ticker := time.NewTicker(time.Hour)
 	defer ticker.Stop()

@@ -1,9 +1,14 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 )
@@ -14,8 +19,103 @@ type Config struct {
 	HealthInterval, UpstreamTimeout, ShutdownTimeout, RequestRetention           time.Duration
 }
 
+type clientFile struct {
+	URL    string `json:"url"`
+	APIKey string `json:"api_key"`
+}
+
 func Load() (Config, error) {
 	return load(true)
+}
+
+func LoadClient() (Config, error) {
+	stored, err := readClientFile()
+	if err != nil {
+		return Config{}, err
+	}
+	controlURL := stored.URL
+	if value := os.Getenv("INFERCRANE_URL"); value != "" {
+		controlURL = value
+	}
+	if controlURL == "" {
+		controlURL = "http://127.0.0.1:8080"
+	}
+	apiKey := stored.APIKey
+	if value := os.Getenv("INFERCRANE_API_KEY"); value != "" {
+		apiKey = value
+	}
+	if apiKey == "" {
+		return Config{}, fmt.Errorf("INFERCRANE_API_KEY is required; run infercrane init or set the environment variable")
+	}
+	parsed, parseErr := url.Parse(controlURL)
+	if parseErr != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return Config{}, fmt.Errorf("InferCrane URL must be absolute HTTP(S) without credentials, query, or fragment")
+	}
+	return Config{ControlURL: controlURL, APIKey: apiKey}, nil
+}
+
+func InitializeClient(controlURL, apiKey string) (string, bool, error) {
+	if controlURL == "" {
+		controlURL = "http://127.0.0.1:8080"
+	}
+	parsed, err := url.Parse(controlURL)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", false, fmt.Errorf("InferCrane URL must be absolute HTTP(S) without credentials, query, or fragment")
+	}
+	generated := false
+	if apiKey == "" {
+		buffer := make([]byte, 32)
+		if _, err = rand.Read(buffer); err != nil {
+			return "", false, fmt.Errorf("generate API key: %w", err)
+		}
+		apiKey, generated = hex.EncodeToString(buffer), true
+	}
+	path, err := clientConfigPath()
+	if err != nil {
+		return "", false, err
+	}
+	if err = os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return "", false, fmt.Errorf("create config directory: %w", err)
+	}
+	encoded, _ := json.MarshalIndent(clientFile{URL: controlURL, APIKey: apiKey}, "", "  ")
+	encoded = append(encoded, '\n')
+	if err = os.WriteFile(path, encoded, 0o600); err != nil {
+		return "", false, fmt.Errorf("write client config: %w", err)
+	}
+	if err = os.Chmod(path, 0o600); err != nil {
+		return "", false, fmt.Errorf("secure client config: %w", err)
+	}
+	return path, generated, nil
+}
+
+func clientConfigPath() (string, error) {
+	if root := os.Getenv("XDG_CONFIG_HOME"); root != "" {
+		return filepath.Join(root, "infercrane", "config.json"), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve home directory: %w", err)
+	}
+	return filepath.Join(home, ".config", "infercrane", "config.json"), nil
+}
+
+func readClientFile() (clientFile, error) {
+	path, err := clientConfigPath()
+	if err != nil {
+		return clientFile{}, err
+	}
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return clientFile{}, nil
+	}
+	if err != nil {
+		return clientFile{}, fmt.Errorf("read client config: %w", err)
+	}
+	var stored clientFile
+	if err = json.Unmarshal(data, &stored); err != nil {
+		return clientFile{}, fmt.Errorf("parse client config: %w", err)
+	}
+	return stored, nil
 }
 
 // LoadForDiagnostics loads and validates non-secret configuration. It allows

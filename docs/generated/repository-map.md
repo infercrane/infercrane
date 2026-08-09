@@ -15,8 +15,8 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 | `internal/autoscale` | 2 | 2 | `TestControllerExecutesAndRecordsDecision`, `TestEvaluateHonorsCooldown`, `TestEvaluateUsesStabilityAndBounds` |
 | `internal/benchmark` | 1 | 1 | `TestRunMeasuresSuccessfulRequests` |
 | `internal/capacity` | 1 | 1 | `TestChoosePrefersWarmThenCost`, `TestChooseRejectsInsufficientCapacity` |
-| `internal/config` | 1 | 1 | `TestLoadForDiagnosticsAllowsMissingAPIKey`, `TestLoadRejectsInvalidInteger`, `TestLoadRequiresAPIKey`, `TestProductionRequiresStrongSecretAndDatabaseTLS`, `TestRejectsUnsafeControlPlaneURL` |
-| `internal/controlapi` | 1 | 1 | `TestApplyQueuesIdempotentOperation`, `TestCancelHidesMissingOperation`, `TestCloudDeployPersistsAndQueuesConverge`, `TestDeleteQueuesDurableCleanup`, `TestOperationAPIAuthenticationAndResponse`, `TestTargetRegistrationRejectsEmbeddedCredentials`, `TestViewerCannotApply` |
+| `internal/config` | 1 | 1 | `TestInitializeClientWritesPrivateConfigAndLoadClientUsesIt`, `TestLoadForDiagnosticsAllowsMissingAPIKey`, `TestLoadRejectsInvalidInteger`, `TestLoadRequiresAPIKey`, `TestProductionRequiresStrongSecretAndDatabaseTLS`, `TestRejectsUnsafeControlPlaneURL` |
+| `internal/controlapi` | 1 | 1 | `TestApplyQueuesIdempotentOperation`, `TestCancelHidesMissingOperation`, `TestCloudDeployPersistsAndQueuesConverge`, `TestDeleteQueuesDurableCleanup`, `TestDeploymentAndOperationEventsAreTenantScoped`, `TestDeploymentReadAPIReturnsDurableState`, `TestOperationAPIAuthenticationAndResponse`, `TestRouteAndTenantMutationsUseAuthenticatedAPI`, `TestTargetRegistrationRejectsEmbeddedCredentials`, `TestViewerCannotApply` |
 | `internal/doctor` | 1 | 1 | `TestCloudCredentialCheckIsRequiredWhenRequested`, `TestRunReadyWithoutSkyPilot`, `TestRunReportsRequiredAndOptionalChecks` |
 | `internal/domain` | 1 | 0 | — |
 | `internal/gateway` | 2 | 2 | `TestActiveStreamKeepsSelectedRouterAcrossGenerationPublish`, `TestAuthentication`, `TestCompletionRewritesAlias`, `TestModelsAreTenantScoped`, `TestTelemetryExportsPrometheusHistogram` |
@@ -45,9 +45,12 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 - `deploy`
 - `deployments`
 - `doctor`
+- `events`
+- `explain`
 - `failed`
 - `help`
 - `human`
+- `init`
 - `inspect`
 - `json`
 - `operation`
@@ -57,7 +60,6 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 - `revoke`
 - `rotate`
 - `route`
-- `serve`
 - `status`
 - `succeeded`
 - `target`
@@ -70,7 +72,11 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 - `DELETE /api/v1/principals/{id}`
 - `GET /api/v1/audit-events`
 - `GET /api/v1/deployments`
+- `GET /api/v1/deployments/{name}`
+- `GET /api/v1/deployments/{name}/events`
+- `GET /api/v1/deployments/{name}/revisions`
 - `GET /api/v1/operations/{id}`
+- `GET /api/v1/operations/{id}/events`
 - `GET /api/v1/orphans`
 - `GET /api/v1/targets`
 - `GET /health`
@@ -84,7 +90,9 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 - `POST /api/v1/principals`
 - `POST /api/v1/principals/{id}/rotate`
 - `POST /api/v1/targets`
+- `POST /api/v1/tenants`
 - `POST /v1/chat/completions`
+- `PUT /api/v1/deployments/{name}/route`
 - `PUT /api/v1/tenant/quota`
 
 ## Configuration variables

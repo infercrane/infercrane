@@ -58,6 +58,21 @@ func (f *fakeStore) ResolveForTenant(context.Context, string, string) (domain.Re
 	}
 	return domain.ResolvedDeployment{Deployment: domain.Deployment{ID: "deployment", Name: "qwen"}}, nil
 }
+func (f *fakeStore) EventsForTenant(context.Context, string, string) ([]domain.Event, error) {
+	return nil, f.err
+}
+func (f *fakeStore) RequestStats(context.Context, string, time.Duration) (domain.RequestStats, error) {
+	return domain.RequestStats{}, f.err
+}
+func (f *fakeStore) ReplicasForDeployment(context.Context, string, string) ([]domain.Replica, error) {
+	return nil, f.err
+}
+func (f *fakeStore) Revisions(context.Context, string, string) ([]domain.DeploymentRevision, error) {
+	return nil, f.err
+}
+func (f *fakeStore) OperationEvents(context.Context, string, int) ([]domain.OperationEvent, error) {
+	return nil, f.err
+}
 func (f *fakeStore) AddTargetForTenant(_ context.Context, _ string, target domain.Target) (domain.Target, error) {
 	target.ID = "target"
 	return target, f.err
@@ -82,7 +97,9 @@ func (f *fakeStore) CreatePrincipal(_ context.Context, tenant, name string, role
 func (f *fakeStore) RotatePrincipalForTenant(context.Context, string, string) (string, error) {
 	return "ic_rotated", f.err
 }
-func (f *fakeStore) RevokePrincipalForTenant(context.Context, string, string) error { return f.err }
+func (f *fakeStore) RevokePrincipalForTenant(context.Context, string, string) error  { return f.err }
+func (f *fakeStore) CreateTenant(context.Context, string, string) error              { return f.err }
+func (f *fakeStore) SetRouteForTenant(context.Context, string, string, string) error { return f.err }
 func TestOperationAPIAuthenticationAndResponse(t *testing.T) {
 	store := &fakeStore{operation: domain.Operation{ID: "op", TenantID: "global", Status: "running", MaxAttempts: 5}}
 	handler := (API{Store: store, APIKey: "secret"}).Handler()
@@ -97,6 +114,50 @@ func TestOperationAPIAuthenticationAndResponse(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"max_attempts":5`) {
 		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestDeploymentReadAPIReturnsDurableState(t *testing.T) {
+	store := &fakeStore{}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/deployments/qwen", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret"}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"deployment"`) || !strings.Contains(response.Body.String(), `"revisions"`) {
+		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestDeploymentAndOperationEventsAreTenantScoped(t *testing.T) {
+	store := &fakeStore{operation: domain.Operation{ID: "op", TenantID: "global"}}
+	for _, endpoint := range []string{"/api/v1/deployments/qwen/events", "/api/v1/operations/op/events"} {
+		request := httptest.NewRequest(http.MethodGet, endpoint, nil)
+		request.Header.Set("Authorization", "Bearer secret")
+		response := httptest.NewRecorder()
+		(API{Store: store, APIKey: "secret"}).Handler().ServeHTTP(response, request)
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"data"`) {
+			t.Fatalf("endpoint=%s response=%d %s", endpoint, response.Code, response.Body.String())
+		}
+	}
+}
+
+func TestRouteAndTenantMutationsUseAuthenticatedAPI(t *testing.T) {
+	store := &fakeStore{}
+	handler := (API{Store: store, APIKey: "secret"}).Handler()
+	for _, test := range []struct {
+		method, path, body string
+		want               int
+	}{
+		{http.MethodPut, "/api/v1/deployments/qwen/route", `{"strategy":"round-robin"}`, http.StatusOK},
+		{http.MethodPost, "/api/v1/tenants", `{"id":"tenant-a","name":"Tenant A"}`, http.StatusCreated},
+	} {
+		request := httptest.NewRequest(test.method, test.path, strings.NewReader(test.body))
+		request.Header.Set("Authorization", "Bearer secret")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != test.want {
+			t.Fatalf("%s %s response=%d %s", test.method, test.path, response.Code, response.Body.String())
+		}
 	}
 }
 

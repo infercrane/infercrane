@@ -15,14 +15,22 @@ Errors are stable JSON objects:
 | Method and path | Minimum role | Purpose |
 |---|---|---|
 | `POST /deployments/apply` | operator | Queue existing-target convergence; requires `Idempotency-Key`. |
+| `POST /deployments` | operator | Atomically create desired cloud deployment and queue convergence; requires `Idempotency-Key`. |
 | `GET /deployments` | viewer | List tenant deployments. |
+| `GET /deployments/{name}` | viewer | Inspect deployment, targets, replicas, revisions, and persisted request statistics. |
+| `GET /deployments/{name}/events` | viewer | List durable deployment events. |
+| `GET /deployments/{name}/revisions` | viewer | List immutable revision history. |
+| `PUT /deployments/{name}/route` | operator | Change the persisted routing strategy. |
+| `DELETE /deployments/{name}` | admin | Withdraw routing and queue verified provider cleanup; requires `Idempotency-Key`. |
 | `GET /operations/{id}` | viewer | Inspect durable progress and result. |
+| `GET /operations/{id}/events` | viewer | List ordered durable operation progress events. |
 | `POST /operations/{id}/cancel` | operator | Request cooperative cancellation. |
 | `GET /targets` | viewer | List registered tenant targets. |
 | `POST /targets` | operator | Register an existing HTTP(S) inference target. |
 | `GET /orphans` | viewer | List unowned provisioned resources. |
 | `GET /audit-events` | admin | List up to 500 events; `before` accepts RFC3339. |
 | `PUT /tenant/quota` | admin | Set deployment, replica, and request policy limits. |
+| `POST /tenants` | bootstrap admin | Create a tenant. |
 | `POST /principals` | admin | Create a credential; secret is returned once. |
 | `POST /principals/{id}/rotate` | admin | Replace a credential immediately. |
 | `DELETE /principals/{id}` | admin | Revoke a credential immediately. |

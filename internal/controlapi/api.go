@@ -25,6 +25,11 @@ type Store interface {
 	SubmitCloudDeployment(context.Context, domain.Deployment, domain.Operation) (domain.Deployment, domain.Operation, bool, error)
 	SubmitDeploymentDelete(context.Context, string, string, string, domain.Operation) (domain.Operation, bool, error)
 	ResolveForTenant(context.Context, string, string) (domain.ResolvedDeployment, error)
+	EventsForTenant(context.Context, string, string) ([]domain.Event, error)
+	RequestStats(context.Context, string, time.Duration) (domain.RequestStats, error)
+	ReplicasForDeployment(context.Context, string, string) ([]domain.Replica, error)
+	Revisions(context.Context, string, string) ([]domain.DeploymentRevision, error)
+	OperationEvents(context.Context, string, int) ([]domain.OperationEvent, error)
 	AddTargetForTenant(context.Context, string, domain.Target) (domain.Target, error)
 	TargetsForTenant(context.Context, string) ([]domain.Target, error)
 	DeploymentsForTenant(context.Context, string) ([]domain.Deployment, error)
@@ -35,6 +40,8 @@ type Store interface {
 	CreatePrincipal(context.Context, string, string, authz.Role) (domain.Principal, string, error)
 	RotatePrincipalForTenant(context.Context, string, string) (string, error)
 	RevokePrincipalForTenant(context.Context, string, string) error
+	CreateTenant(context.Context, string, string) error
+	SetRouteForTenant(context.Context, string, string, string) error
 }
 type API struct {
 	Store         Store
@@ -48,16 +55,22 @@ type identityKey struct{}
 func (a API) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/operations/{id}", a.auth(authz.Read, a.operation))
+	mux.HandleFunc("GET /api/v1/operations/{id}/events", a.auth(authz.Read, a.operationEvents))
 	mux.HandleFunc("POST /api/v1/operations/{id}/cancel", a.auth(authz.Deploy, a.cancel))
 	mux.HandleFunc("POST /api/v1/deployments/apply", a.auth(authz.Deploy, a.applyDeployment))
 	mux.HandleFunc("POST /api/v1/deployments", a.auth(authz.Deploy, a.createCloudDeployment))
 	mux.HandleFunc("DELETE /api/v1/deployments/{name}", a.auth(authz.Delete, a.deleteDeployment))
 	mux.HandleFunc("GET /api/v1/deployments", a.auth(authz.Read, a.deployments))
+	mux.HandleFunc("GET /api/v1/deployments/{name}", a.auth(authz.Read, a.deployment))
+	mux.HandleFunc("GET /api/v1/deployments/{name}/events", a.auth(authz.Read, a.deploymentEvents))
+	mux.HandleFunc("GET /api/v1/deployments/{name}/revisions", a.auth(authz.Read, a.revisions))
+	mux.HandleFunc("PUT /api/v1/deployments/{name}/route", a.auth(authz.Deploy, a.setRoute))
 	mux.HandleFunc("GET /api/v1/targets", a.auth(authz.Read, a.targets))
 	mux.HandleFunc("POST /api/v1/targets", a.auth(authz.Deploy, a.addTarget))
 	mux.HandleFunc("GET /api/v1/orphans", a.auth(authz.Read, a.orphans))
 	mux.HandleFunc("GET /api/v1/audit-events", a.auth(authz.ManageTenant, a.auditEvents))
 	mux.HandleFunc("PUT /api/v1/tenant/quota", a.auth(authz.ManageTenant, a.setQuota))
+	mux.HandleFunc("POST /api/v1/tenants", a.auth(authz.ManageTenant, a.createTenant))
 	mux.HandleFunc("POST /api/v1/principals", a.auth(authz.ManageTenant, a.createPrincipal))
 	mux.HandleFunc("POST /api/v1/principals/{id}/rotate", a.auth(authz.ManageTenant, a.rotatePrincipal))
 	mux.HandleFunc("DELETE /api/v1/principals/{id}", a.auth(authz.ManageTenant, a.revokePrincipal))
@@ -189,6 +202,34 @@ func (a API) setQuota(w http.ResponseWriter, r *http.Request) {
 	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: principal.TenantID, Actor: principal.Name, Action: "quota.update", ResourceType: "tenant", ResourceName: principal.TenantID, Outcome: "succeeded"})
 	w.WriteHeader(http.StatusNoContent)
 }
+func (a API) createTenant(w http.ResponseWriter, r *http.Request) {
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	if actor.ID != "bootstrap" {
+		writeError(w, http.StatusForbidden, "forbidden", "only the bootstrap administrator can create tenants")
+		return
+	}
+	var request struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil || request.ID == "" {
+		writeError(w, 400, "invalid_request", "tenant id is required")
+		return
+	}
+	if request.Name == "" {
+		request.Name = request.ID
+	}
+	if err := a.Store.CreateTenant(r.Context(), request.ID, request.Name); errors.Is(err, domain.ErrConflict) {
+		writeError(w, 409, "conflict", err.Error())
+		return
+	} else if err != nil {
+		writeError(w, 500, "internal", "tenant could not be created")
+		return
+	}
+	writeJSON(w, 201, map[string]any{"tenant": request})
+}
 func (a API) createPrincipal(w http.ResponseWriter, r *http.Request) {
 	actor := r.Context().Value(identityKey{}).(domain.Principal)
 	var request struct {
@@ -253,6 +294,99 @@ func (a API) deployments(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]any{"data": data})
 }
+func (a API) deployment(w http.ResponseWriter, r *http.Request) {
+	principal := r.Context().Value(identityKey{}).(domain.Principal)
+	resolved, err := a.Store.ResolveForTenant(r.Context(), principal.TenantID, r.PathValue("name"))
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, 404, "not_found", "deployment was not found")
+		return
+	}
+	if err != nil {
+		writeError(w, 500, "internal", "deployment lookup failed")
+		return
+	}
+	replicas, err := a.Store.ReplicasForDeployment(r.Context(), principal.TenantID, resolved.Deployment.ID)
+	if err != nil {
+		writeError(w, 500, "internal", "replica lookup failed")
+		return
+	}
+	revisions, err := a.Store.Revisions(r.Context(), principal.TenantID, resolved.Deployment.Name)
+	if err != nil {
+		writeError(w, 500, "internal", "revision lookup failed")
+		return
+	}
+	stats, err := a.Store.RequestStats(r.Context(), resolved.Deployment.ID, 5*time.Minute)
+	if err != nil {
+		writeError(w, 500, "internal", "request statistics lookup failed")
+		return
+	}
+	targets := make([]map[string]any, 0, len(resolved.Targets))
+	for _, target := range resolved.Targets {
+		targets = append(targets, targetResponse(target))
+	}
+	replicaData := make([]map[string]any, 0, len(replicas))
+	for _, replica := range replicas {
+		replicaData = append(replicaData, replicaResponse(replica))
+	}
+	revisionData := make([]map[string]any, 0, len(revisions))
+	for _, revision := range revisions {
+		revisionData = append(revisionData, revisionResponse(revision))
+	}
+	writeJSON(w, 200, map[string]any{"deployment": deploymentResponse(resolved.Deployment), "targets": targets, "replicas": replicaData, "revisions": revisionData, "request_stats": stats})
+}
+func (a API) deploymentEvents(w http.ResponseWriter, r *http.Request) {
+	principal := r.Context().Value(identityKey{}).(domain.Principal)
+	rows, err := a.Store.EventsForTenant(r.Context(), principal.TenantID, r.PathValue("name"))
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, 404, "not_found", "deployment was not found")
+		return
+	}
+	if err != nil {
+		writeError(w, 500, "internal", "deployment event lookup failed")
+		return
+	}
+	data := make([]map[string]any, 0, len(rows))
+	for _, event := range rows {
+		data = append(data, map[string]any{"id": event.ID, "type": event.Type, "summary": event.Summary, "payload": json.RawMessage(event.Payload), "target_id": event.TargetID, "created_at": event.CreatedAt})
+	}
+	writeJSON(w, 200, map[string]any{"data": data})
+}
+func (a API) revisions(w http.ResponseWriter, r *http.Request) {
+	principal := r.Context().Value(identityKey{}).(domain.Principal)
+	rows, err := a.Store.Revisions(r.Context(), principal.TenantID, r.PathValue("name"))
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, 404, "not_found", "deployment was not found")
+		return
+	} else if err != nil {
+		writeError(w, 500, "internal", "revision lookup failed")
+		return
+	}
+	data := make([]map[string]any, 0, len(rows))
+	for _, revision := range rows {
+		data = append(data, revisionResponse(revision))
+	}
+	writeJSON(w, 200, map[string]any{"data": data})
+}
+func (a API) setRoute(w http.ResponseWriter, r *http.Request) {
+	principal := r.Context().Value(identityKey{}).(domain.Principal)
+	var request struct {
+		Strategy string `json:"strategy"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil || request.Strategy == "" {
+		writeError(w, 400, "invalid_request", "routing strategy is required")
+		return
+	}
+	if err := a.Store.SetRouteForTenant(r.Context(), principal.TenantID, r.PathValue("name"), request.Strategy); errors.Is(err, domain.ErrNotFound) {
+		writeError(w, 404, "not_found", "deployment was not found")
+		return
+	} else if err != nil {
+		writeError(w, 422, "validation_failed", err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]string{"deployment": r.PathValue("name"), "routing_strategy": request.Strategy})
+}
 func (a API) targets(w http.ResponseWriter, r *http.Request) {
 	principal := r.Context().Value(identityKey{}).(domain.Principal)
 	rows, err := a.Store.TargetsForTenant(r.Context(), principal.TenantID)
@@ -315,10 +449,16 @@ func (a API) addTarget(w http.ResponseWriter, r *http.Request) {
 }
 
 func deploymentResponse(row domain.Deployment) map[string]any {
-	return map[string]any{"id": row.ID, "tenant_id": row.TenantID, "name": row.Name, "model": row.Model, "runtime": row.Runtime, "routing_strategy": row.RoutingStrategy, "desired_state": row.DesiredState, "observed_state": row.ObservedState, "min_replicas": row.MinReplicas, "max_replicas": row.MaxReplicas, "autoscaling_enabled": row.AutoscalingEnabled, "created_at": row.CreatedAt, "updated_at": row.UpdatedAt}
+	return map[string]any{"id": row.ID, "tenant_id": row.TenantID, "name": row.Name, "model": row.Model, "runtime": row.Runtime, "routing_strategy": row.RoutingStrategy, "desired_state": row.DesiredState, "observed_state": row.ObservedState, "min_replicas": row.MinReplicas, "max_replicas": row.MaxReplicas, "autoscaling_enabled": row.AutoscalingEnabled, "active_revision_id": row.ActiveRevisionID, "candidate_revision_id": row.CandidateRevisionID, "created_at": row.CreatedAt, "updated_at": row.UpdatedAt}
 }
 func targetResponse(row domain.Target) map[string]any {
 	return map[string]any{"id": row.ID, "name": row.Name, "url": row.URL, "provider": row.Provider, "runtime": row.Runtime, "upstream_model": row.UpstreamModel, "health": row.Health, "provider_resource_id": row.ProviderResourceID, "created_at": row.CreatedAt, "updated_at": row.UpdatedAt}
+}
+func replicaResponse(row domain.Replica) map[string]any {
+	return map[string]any{"id": row.ID, "revision_id": row.RevisionID, "ordinal": row.Ordinal, "external_key": row.ExternalKey, "lifecycle_state": row.LifecycleState, "provider": row.Provider, "provider_request_id": row.ProviderRequestID, "provider_resource_id": row.ProviderResourceID, "endpoint": row.Endpoint, "health": row.Health, "provider_details": json.RawMessage(row.ProviderDetails), "last_observed_at": row.LastObservedAt, "created_at": row.CreatedAt, "updated_at": row.UpdatedAt}
+}
+func revisionResponse(row domain.DeploymentRevision) map[string]any {
+	return map[string]any{"id": row.ID, "number": row.Number, "status": row.Status, "spec": json.RawMessage(row.SpecJSON), "source_revision_id": row.SourceRevisionID, "reason": row.Reason, "created_at": row.CreatedAt, "activated_at": row.ActivatedAt, "completed_at": row.CompletedAt}
 }
 
 func (a API) applyDeployment(w http.ResponseWriter, r *http.Request) {
@@ -399,6 +539,25 @@ func (a API) operation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, operationResponse(op))
+}
+func (a API) operationEvents(w http.ResponseWriter, r *http.Request) {
+	op, err := a.Store.Operation(r.Context(), r.PathValue("id"))
+	principal := r.Context().Value(identityKey{}).(domain.Principal)
+	if err != nil || op.TenantID != principal.TenantID {
+		writeError(w, http.StatusNotFound, "not_found", "operation was not found")
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	rows, err := a.Store.OperationEvents(r.Context(), op.ID, limit)
+	if err != nil {
+		writeError(w, 500, "internal", "operation event lookup failed")
+		return
+	}
+	data := make([]map[string]any, 0, len(rows))
+	for _, event := range rows {
+		data = append(data, map[string]any{"sequence": event.Sequence, "level": event.Level, "type": event.Type, "message": event.Message, "payload": json.RawMessage(event.Payload), "created_at": event.CreatedAt})
+	}
+	writeJSON(w, 200, map[string]any{"data": data})
 }
 func (a API) cancel(w http.ResponseWriter, r *http.Request) {
 	op, lookupErr := a.Store.Operation(r.Context(), r.PathValue("id"))

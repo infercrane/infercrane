@@ -64,10 +64,10 @@ type Metrics struct {
 }
 
 type RequestStats struct {
-	RequestsPerSecond float64
-	ErrorRate         float64
-	P50LatencyMS      *float64
-	P95LatencyMS      *float64
+	RequestsPerSecond float64  `json:"requests_per_second"`
+	ErrorRate         float64  `json:"error_rate"`
+	P50LatencyMS      *float64 `json:"p50_latency_ms"`
+	P95LatencyMS      *float64 `json:"p95_latency_ms"`
 }
 
 type RouterGeneration struct {

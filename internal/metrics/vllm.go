@@ -2,14 +2,9 @@ package metrics
 
 import (
 	"bufio"
-	"context"
-	"fmt"
-	"io"
 	"math"
-	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
 )
@@ -67,36 +62,4 @@ func resolve(values map[string][]float64, names []string, gauge bool) *float64 {
 		return &value
 	}
 	return nil
-}
-
-type Collector struct {
-	Client *http.Client
-	APIKey string
-}
-
-func (c Collector) Collect(ctx context.Context, baseURL string) (domain.Metrics, error) {
-	client := c.Client
-	if client == nil {
-		client = &http.Client{Timeout: 5 * time.Second}
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+"/metrics", nil)
-	if err != nil {
-		return domain.Metrics{}, err
-	}
-	if c.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+c.APIKey)
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return domain.Metrics{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return domain.Metrics{}, fmt.Errorf("metrics returned %s", resp.Status)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-	if err != nil {
-		return domain.Metrics{}, err
-	}
-	return Parse(string(body)), nil
 }

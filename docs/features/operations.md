@@ -18,7 +18,11 @@ Status: Implemented baseline; environment qualification required
 - Authorization policy: `internal/authz`
 - Provider pricing contract: `internal/pricing`
 
-Configuration is environment-driven, validated at startup, and has no production API-key default.
+Server configuration is environment-driven, validated at startup, and has no production API-key
+default. `infercrane init` writes client URL/auth configuration to
+`$XDG_CONFIG_HOME/infercrane/config.json` (or `~/.config/infercrane/config.json`) with mode `0600`;
+environment variables override that file. Public lifecycle, status, event, inspection, and
+explanation commands use only the authenticated control-plane API and never open PostgreSQL.
 The production image contains InferCrane and the pinned real vLLM Router. The `development` target
 adds fake workers/router and bootstrap script.
 
@@ -56,7 +60,7 @@ Cloud submission has an atomic storage primitive that creates the targetless des
 and its queued converge operation in one PostgreSQL transaction. Its required idempotency key makes
 submission retries return the original deployment and operation. `POST /api/v1/deployments` uses
 this primitive and returns the durable operation immediately; the leased worker, not the request
-handler, owns cloud execution. CLI migration and durable deletion remain in progress.
+handler, owns cloud execution.
 
 Queued operations with no side effects may be cancelled immediately. Once work has entered a
 retry/wait cycle, cancellation is itself leased work: the worker runs the operation-specific

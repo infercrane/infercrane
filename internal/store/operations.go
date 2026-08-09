@@ -143,7 +143,7 @@ func (s *Store) Deployments(ctx context.Context) ([]domain.Deployment, error) {
 	return s.DeploymentsForTenant(ctx, "")
 }
 func (s *Store) DeploymentsForTenant(ctx context.Context, tenant string) ([]domain.Deployment, error) {
-	query := `SELECT id,tenant_id,name,model,runtime,routing_strategy,desired_state,observed_state,min_replicas,max_replicas,autoscaling_enabled,created_at,updated_at FROM deployments WHERE desired_state!='deleted'`
+	query := `SELECT id,tenant_id,name,model,runtime,routing_strategy,desired_state,observed_state,min_replicas,max_replicas,autoscaling_enabled,COALESCE(active_revision_id,''),COALESCE(candidate_revision_id,''),created_at,updated_at FROM deployments WHERE desired_state!='deleted'`
 	var args []any
 	if tenant != "" {
 		query += ` AND tenant_id=?`
@@ -159,7 +159,7 @@ func (s *Store) DeploymentsForTenant(ctx context.Context, tenant string) ([]doma
 	for rows.Next() {
 		var d domain.Deployment
 		var created, updated string
-		if err := rows.Scan(&d.ID, &d.TenantID, &d.Name, &d.Model, &d.Runtime, &d.RoutingStrategy, &d.DesiredState, &d.ObservedState, &d.MinReplicas, &d.MaxReplicas, &d.AutoscalingEnabled, &created, &updated); err != nil {
+		if err := rows.Scan(&d.ID, &d.TenantID, &d.Name, &d.Model, &d.Runtime, &d.RoutingStrategy, &d.DesiredState, &d.ObservedState, &d.MinReplicas, &d.MaxReplicas, &d.AutoscalingEnabled, &d.ActiveRevisionID, &d.CandidateRevisionID, &created, &updated); err != nil {
 			return nil, err
 		}
 		d.CreatedAt, d.UpdatedAt = parseTime(created), parseTime(updated)
@@ -174,7 +174,7 @@ func (s *Store) Resolve(ctx context.Context, name string) (domain.ResolvedDeploy
 func (s *Store) ResolveForTenant(ctx context.Context, tenant, name string) (domain.ResolvedDeployment, error) {
 	var out domain.ResolvedDeployment
 	var created, updated string
-	err := s.QueryRowContext(ctx, `SELECT id,tenant_id,name,model,runtime,routing_strategy,desired_state,observed_state,min_replicas,max_replicas,autoscaling_enabled,created_at,updated_at FROM deployments WHERE tenant_id=? AND name=? AND desired_state='running'`, tenant, name).Scan(&out.Deployment.ID, &out.Deployment.TenantID, &out.Deployment.Name, &out.Deployment.Model, &out.Deployment.Runtime, &out.Deployment.RoutingStrategy, &out.Deployment.DesiredState, &out.Deployment.ObservedState, &out.Deployment.MinReplicas, &out.Deployment.MaxReplicas, &out.Deployment.AutoscalingEnabled, &created, &updated)
+	err := s.QueryRowContext(ctx, `SELECT id,tenant_id,name,model,runtime,routing_strategy,desired_state,observed_state,min_replicas,max_replicas,autoscaling_enabled,COALESCE(active_revision_id,''),COALESCE(candidate_revision_id,''),created_at,updated_at FROM deployments WHERE tenant_id=? AND name=? AND desired_state='running'`, tenant, name).Scan(&out.Deployment.ID, &out.Deployment.TenantID, &out.Deployment.Name, &out.Deployment.Model, &out.Deployment.Runtime, &out.Deployment.RoutingStrategy, &out.Deployment.DesiredState, &out.Deployment.ObservedState, &out.Deployment.MinReplicas, &out.Deployment.MaxReplicas, &out.Deployment.AutoscalingEnabled, &out.Deployment.ActiveRevisionID, &out.Deployment.CandidateRevisionID, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return out, fmt.Errorf("%w: deployment %s", ErrNotFound, name)
 	}
@@ -200,6 +200,9 @@ func (s *Store) ResolveForTenant(ctx context.Context, tenant, name string) (doma
 }
 
 func (s *Store) SetRoute(ctx context.Context, name, strategy string) error {
+	return s.SetRouteForTenant(ctx, "global", name, strategy)
+}
+func (s *Store) SetRouteForTenant(ctx context.Context, tenant, name, strategy string) error {
 	if _, ok := domain.RoutingStrategies[strategy]; !ok {
 		return fmt.Errorf("unsupported routing strategy %q", strategy)
 	}
@@ -209,7 +212,7 @@ func (s *Store) SetRoute(ctx context.Context, name, strategy string) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 	var deploymentID, current string
-	if err := tx.QueryRowContext(ctx, `SELECT id,routing_strategy FROM deployments WHERE name=? AND desired_state='running'`, name).Scan(&deploymentID, &current); errors.Is(err, sql.ErrNoRows) {
+	if err := tx.QueryRowContext(ctx, `SELECT id,routing_strategy FROM deployments WHERE tenant_id=? AND name=? AND desired_state='running'`, tenant, name).Scan(&deploymentID, &current); errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	} else if err != nil {
 		return err
@@ -284,7 +287,10 @@ func (s *Store) Event(ctx context.Context, deploymentID, targetID, eventType, su
 	return err
 }
 func (s *Store) Events(ctx context.Context, name string) ([]domain.Event, error) {
-	resolved, err := s.Resolve(ctx, name)
+	return s.EventsForTenant(ctx, "global", name)
+}
+func (s *Store) EventsForTenant(ctx context.Context, tenant, name string) ([]domain.Event, error) {
+	resolved, err := s.ResolveForTenant(ctx, tenant, name)
 	if err != nil {
 		return nil, err
 	}
