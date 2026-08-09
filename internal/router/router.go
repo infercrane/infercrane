@@ -47,10 +47,14 @@ func NewVLLM(binary, apiKey string) *VLLM {
 func (v *VLLM) Command(binary string, s Spec) []string {
 	args := []string{binary, "--host", s.Host, "--port", strconv.Itoa(s.Port), "--policy", domain.RoutingStrategies[s.Strategy], "--worker-urls"}
 	args = append(args, s.Workers...)
-	// InferCrane does not consume the router's standalone Prometheus listener.
-	// Port zero asks the OS for an ephemeral listener and prevents every router
-	// generation from contending for vLLM Router's default port 29000.
-	return append(args, "--api-key", v.APIKey, "--retry-max-retries", "1", "--prometheus-port", "0")
+	// vLLM Router otherwise binds every process to metrics port 29000. Give each
+	// generation a deterministic companion port so the candidate and retiring
+	// generations can overlap safely during publication.
+	metricsPort := s.Port + 30000
+	if metricsPort > 65535 {
+		metricsPort = s.Port - 10000
+	}
+	return append(args, "--api-key", v.APIKey, "--retry-max-retries", "1", "--prometheus-port", strconv.Itoa(metricsPort))
 }
 func (v *VLLM) Start(ctx context.Context, s Spec) (string, error) {
 	processID := s.ProcessID

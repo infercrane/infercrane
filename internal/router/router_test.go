@@ -11,7 +11,7 @@ func TestCommandUsesUpstreamPolicyAndSingleAttempt(t *testing.T) {
 	if !slices.Contains(command, "cache_aware") {
 		t.Fatalf("command does not contain upstream policy: %v", command)
 	}
-	if !slices.Contains(command, "--prometheus-port") || command[len(command)-1] != "0" {
+	if !slices.Contains(command, "--prometheus-port") || command[len(command)-1] != "49001" {
 		t.Fatalf("command metrics isolation contract = %v", command)
 	}
 	if !slices.Contains(command, "--retry-max-retries") {
