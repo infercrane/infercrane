@@ -15,7 +15,10 @@ RUN --mount=type=cache,target=/go/pkg/mod go test -race -count=1 ./... \
 FROM python:3.12-slim-bookworm AS runtime
 ARG VLLM_ROUTER_VERSION=0.1.15
 ARG SKYPILOT_VERSION=0.13.0
-RUN python -m pip install --no-cache-dir "vllm-router==${VLLM_ROUTER_VERSION}" "skypilot[runpod]==${SKYPILOT_VERSION}" \
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y git openssh-client rsync \
+    && rm -rf /var/lib/apt/lists/* \
+    && python -m pip install --no-cache-dir "vllm-router==${VLLM_ROUTER_VERSION}" "skypilot[runpod]==${SKYPILOT_VERSION}" \
     && useradd --create-home --uid 10001 app
 COPY --from=builder /out/infercrane /usr/local/bin/infercrane
 COPY scripts/entrypoint.sh /usr/local/bin/infercrane-entrypoint

@@ -28,6 +28,9 @@ docker compose -p infercrane-runpod -f compose.runpod-acceptance.yaml up --build
 
 This command starts the control plane but does not provision a GPU. GPU creation only begins after
 a cloud deployment is submitted.
+
+The production image includes the local `git`, OpenSSH, and `rsync` executables required by
+SkyPilot's task packaging and remote synchronization paths.
 - `INFERCRANE_INSTANCE_ID`: stable and unique per replica, normally the Kubernetes pod name.
 - `INFERCRANE_DATABASE_MAX_OPEN` and `INFERCRANE_DATABASE_MAX_IDLE`: size these with the total
   replica count below PostgreSQL's connection budget or place PgBouncer in transaction mode.
