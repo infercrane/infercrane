@@ -265,7 +265,7 @@ func (a API) runBenchmark(w http.ResponseWriter, r *http.Request) {
 	if revisionSpec.ComputeMode == "" {
 		revisionSpec.ComputeMode = "elastic"
 	}
-	workload, _ := json.Marshal(map[string]any{"endpoint_type": "chat", "streaming": true, "request_count": request.Requests, "concurrency": request.Concurrency, "random_seed": request.RandomSeed, "server_token_count": true, "revision_selector": selector, "direct_revision_validation": selectedRevisionID != deployment.ActiveRevisionID})
+	workload, _ := json.Marshal(map[string]any{"endpoint_type": "chat", "streaming": true, "request_count": request.Requests, "concurrency": request.Concurrency, "random_seed": request.RandomSeed, "output_tokens": 32, "server_token_count": true, "revision_selector": selector, "direct_revision_validation": selectedRevisionID != deployment.ActiveRevisionID})
 	runtimeConfig, _ := json.Marshal(map[string]any{"args": revisionSpec.RuntimeArgs})
 	var gpuCount *int
 	if revisionSpec.GPU != "" {

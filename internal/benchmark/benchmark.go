@@ -18,7 +18,7 @@ import (
 
 type Config struct {
 	Binary, Endpoint, APIKey, APIKeyEnv, Model, Tokenizer string
-	Requests, Concurrency                                 int
+	Requests, Concurrency, OutputTokens                   int
 	RandomSeed                                            int64
 	Timeout                                               time.Duration
 }
@@ -60,6 +60,9 @@ func run(ctx context.Context, cfg Config, commands commandRunner) (Result, error
 	if cfg.RandomSeed == 0 {
 		cfg.RandomSeed = 17
 	}
+	if cfg.OutputTokens <= 0 {
+		cfg.OutputTokens = 32
+	}
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = 30 * time.Minute
 	}
@@ -69,7 +72,7 @@ func run(ctx context.Context, cfg Config, commands commandRunner) (Result, error
 	}
 	defer os.RemoveAll(dir)
 	prefix := "infercrane"
-	args := []string{"profile", "--model", cfg.Model, "--url", strings.TrimRight(cfg.Endpoint, "/"), "--endpoint-type", "chat", "--streaming", "--use-server-token-count", "--request-count", strconv.Itoa(cfg.Requests), "--concurrency", strconv.Itoa(cfg.Concurrency), "--random-seed", strconv.FormatInt(cfg.RandomSeed, 10), "--ui", "none", "--export-level", "records", "--output-artifact-dir", dir, "--profile-export-prefix", prefix, "--no-auto-plot", "--no-gpu-telemetry", "--no-server-metrics"}
+	args := []string{"profile", "--model", cfg.Model, "--url", strings.TrimRight(cfg.Endpoint, "/"), "--endpoint-type", "chat", "--streaming", "--use-server-token-count", "--request-count", strconv.Itoa(cfg.Requests), "--concurrency", strconv.Itoa(cfg.Concurrency), "--random-seed", strconv.FormatInt(cfg.RandomSeed, 10), "--prompt-output-tokens-mean", strconv.Itoa(cfg.OutputTokens), "--prompt-output-tokens-stddev", "0", "--ui", "none", "--export-level", "records", "--output-artifact-dir", dir, "--profile-export-prefix", prefix, "--no-auto-plot", "--no-gpu-telemetry", "--no-server-metrics"}
 	if cfg.Tokenizer != "" {
 		args = append(args, "--tokenizer", cfg.Tokenizer)
 	}
@@ -126,8 +129,8 @@ type record struct {
 		RequestEndNS   int64  `json:"request_end_ns"`
 	} `json:"metadata"`
 	Metrics map[string]struct {
-		Value *float64 `json:"value"`
-		Unit  string   `json:"unit"`
+		Value json.RawMessage `json:"value"`
+		Unit  string          `json:"unit"`
 	} `json:"metrics"`
 	Error any `json:"error"`
 }
@@ -158,8 +161,11 @@ func parseRecords(path string) (Result, error) {
 		}
 		result.Succeeded++
 		appendMetric := func(name string, destination *[]float64) {
-			if metric, ok := row.Metrics[name]; ok && metric.Value != nil {
-				*destination = append(*destination, *metric.Value)
+			if metric, ok := row.Metrics[name]; ok {
+				var value float64
+				if len(metric.Value) > 0 && json.Unmarshal(metric.Value, &value) == nil {
+					*destination = append(*destination, value)
+				}
 			}
 		}
 		appendMetric("time_to_first_token", &ttft)

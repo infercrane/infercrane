@@ -29,6 +29,18 @@ func TestParseRecordsMeasuresAIPerfMetrics(t *testing.T) {
 	}
 }
 
+func TestParseRecordsIgnoresStructuredMetricsItDoesNotConsume(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "records.jsonl")
+	data := `{"metadata":{"benchmark_phase":"profiling","request_start_ns":1,"request_end_ns":1000000001},"metrics":{"time_to_first_token":{"value":10},"output_sequence":{"value":[1,2,3]}}}` + "\n"
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := parseRecords(path)
+	if err != nil || result.Requests != 1 || result.TTFTP50MS == nil || *result.TTFTP50MS != 10 {
+		t.Fatalf("result=%#v err=%v", result, err)
+	}
+}
+
 func TestReproductionCommandRedactsCredential(t *testing.T) {
 	command := shellCommand("aiperf", []string{"profile", "--model", "Qwen/Qwen3-8B", "--api-key", "top-secret"}, "top-secret", "INFERCRANE_API_KEY")
 	if strings.Contains(command, "top-secret") || !strings.Contains(command, "${INFERCRANE_API_KEY}") {
@@ -40,7 +52,7 @@ func TestRunUsesIndependentServingModelAndTokenizer(t *testing.T) {
 	runner := &capturingRunner{}
 	_, _ = run(context.Background(), Config{Endpoint: "http://example", Model: "logical-deployment", Tokenizer: "Qwen/Qwen3-8B", Requests: 1, Concurrency: 1}, runner)
 	command := strings.Join(runner.profileArgs, " ")
-	if !strings.Contains(command, "--model logical-deployment") || !strings.Contains(command, "--tokenizer Qwen/Qwen3-8B") {
+	if !strings.Contains(command, "--model logical-deployment") || !strings.Contains(command, "--tokenizer Qwen/Qwen3-8B") || !strings.Contains(command, "--prompt-output-tokens-mean 32") {
 		t.Fatalf("args=%v", runner.profileArgs)
 	}
 }
