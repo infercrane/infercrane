@@ -1,11 +1,14 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"reflect"
 
 	"github.com/infercrane/infercrane/internal/domain"
 )
@@ -13,18 +16,76 @@ import (
 const revisionColumns = `r.id,r.deployment_id,r.revision_number,r.status,r.spec_json::text,COALESCE(r.source_revision_id,''),r.reason,r.created_at,r.activated_at,r.completed_at`
 
 func (s *Store) CreateCandidateRevision(ctx context.Context, tenant, deploymentName, specJSON string) (domain.DeploymentRevision, error) {
+	return s.EnsureCandidateRevision(ctx, tenant, deploymentName, specJSON, "")
+}
+
+// EnsureCandidateRevision makes candidate creation replay-safe for a durable
+// operation. Replaying the same operation returns the revision it created.
+func (s *Store) EnsureCandidateRevision(ctx context.Context, tenant, deploymentName, specJSON, operationID string) (domain.DeploymentRevision, error) {
 	if tenant == "" {
 		tenant = "global"
 	}
-	var normalized map[string]any
-	if err := json.Unmarshal([]byte(specJSON), &normalized); err != nil || normalized == nil {
-		return domain.DeploymentRevision{}, errors.New("revision spec must be a JSON object")
+	type revisionSpec struct {
+		Model              string `json:"model"`
+		Runtime            string `json:"runtime"`
+		RoutingStrategy    string `json:"routing_strategy"`
+		MinReplicas        int    `json:"min_replicas"`
+		MaxReplicas        int    `json:"max_replicas"`
+		AutoscalingEnabled bool   `json:"autoscaling_enabled"`
 	}
+	var normalized revisionSpec
+	decoder := json.NewDecoder(bytes.NewReader([]byte(specJSON)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&normalized); err != nil || normalized.Model == "" {
+		return domain.DeploymentRevision{}, errors.New("revision spec must be a valid deployment spec")
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return domain.DeploymentRevision{}, errors.New("revision spec must contain one JSON object")
+	}
+	if normalized.Runtime == "" {
+		normalized.Runtime = "vllm"
+	}
+	if normalized.Runtime != "vllm" {
+		return domain.DeploymentRevision{}, errors.New("v0.1 revision runtime must be vllm")
+	}
+	if normalized.RoutingStrategy == "" {
+		normalized.RoutingStrategy = "round-robin"
+	}
+	if _, ok := domain.RoutingStrategies[normalized.RoutingStrategy]; !ok {
+		return domain.DeploymentRevision{}, errors.New("revision routing strategy is unsupported")
+	}
+	if normalized.MinReplicas == 0 {
+		normalized.MinReplicas = 1
+	}
+	if normalized.MaxReplicas == 0 {
+		normalized.MaxReplicas = normalized.MinReplicas
+	}
+	if normalized.MinReplicas < 1 || normalized.MaxReplicas < normalized.MinReplicas {
+		return domain.DeploymentRevision{}, errors.New("revision replica bounds are invalid")
+	}
+	canonical, err := json.Marshal(normalized)
+	if err != nil {
+		return domain.DeploymentRevision{}, err
+	}
+	specJSON = string(canonical)
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return domain.DeploymentRevision{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if operationID != "" {
+		row := tx.QueryRowContext(ctx, `SELECT `+revisionColumns+` FROM deployment_revisions r JOIN deployments d ON d.id=r.deployment_id WHERE d.tenant_id=? AND d.name=? AND r.created_by_operation_id=?`, tenant, deploymentName, operationID)
+		existing, lookupErr := scanRevision(row)
+		if lookupErr == nil {
+			if !sameJSON(existing.SpecJSON, specJSON) {
+				return domain.DeploymentRevision{}, fmt.Errorf("%w: operation already created a different revision", ErrConflict)
+			}
+			return existing, nil
+		}
+		if !errors.Is(lookupErr, sql.ErrNoRows) {
+			return domain.DeploymentRevision{}, lookupErr
+		}
+	}
 	var deploymentID, activeID string
 	var candidate sql.NullString
 	if err = tx.QueryRowContext(ctx, `SELECT id,active_revision_id,candidate_revision_id FROM deployments WHERE tenant_id=? AND name=? AND desired_state!='deleted' FOR UPDATE`, tenant, deploymentName).Scan(&deploymentID, &activeID, &candidate); errors.Is(err, sql.ErrNoRows) {
@@ -44,16 +105,24 @@ func (s *Store) CreateCandidateRevision(ctx context.Context, tenant, deploymentN
 		return domain.DeploymentRevision{}, err
 	}
 	stamp := now()
-	if _, err = tx.ExecContext(ctx, `INSERT INTO deployment_revisions(id,deployment_id,revision_number,status,spec_json,source_revision_id,created_at) VALUES(?,?,?,'candidate',?::jsonb,?,?)`, id, deploymentID, number, specJSON, activeID, stamp); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO deployment_revisions(id,deployment_id,revision_number,status,spec_json,source_revision_id,created_at,created_by_operation_id) VALUES(?,?,?,'candidate',?::jsonb,?,?,?)`, id, deploymentID, number, specJSON, activeID, stamp, null(operationID)); err != nil {
 		return domain.DeploymentRevision{}, err
 	}
 	if _, err = tx.ExecContext(ctx, `UPDATE deployments SET candidate_revision_id=?,updated_at=? WHERE id=?`, id, stamp, deploymentID); err != nil {
+		return domain.DeploymentRevision{}, err
+	}
+	if err = insertRevisionEvent(ctx, tx, deploymentID, "revision_candidate_created", "Candidate revision created", map[string]any{"revision_id": id, "revision_number": number}, stamp); err != nil {
 		return domain.DeploymentRevision{}, err
 	}
 	if err = tx.Commit(); err != nil {
 		return domain.DeploymentRevision{}, err
 	}
 	return domain.DeploymentRevision{ID: id, DeploymentID: deploymentID, Number: number, Status: "candidate", SpecJSON: specJSON, SourceRevisionID: activeID, CreatedAt: parseTime(stamp)}, nil
+}
+
+func sameJSON(left, right string) bool {
+	var a, b any
+	return json.Unmarshal([]byte(left), &a) == nil && json.Unmarshal([]byte(right), &b) == nil && reflect.DeepEqual(a, b)
 }
 
 func (s *Store) Revisions(ctx context.Context, tenant, deploymentName string) ([]domain.DeploymentRevision, error) {
@@ -104,7 +173,10 @@ func (s *Store) RollbackRevision(ctx context.Context, tenant, deploymentName, re
 	} else if err != nil {
 		return err
 	}
-	if revisionID == activeID || status == "candidate" {
+	if revisionID == activeID {
+		return nil
+	}
+	if status == "candidate" {
 		return fmt.Errorf("%w: rollback target must be a non-candidate historical revision", ErrConflict)
 	}
 	stamp := now()
@@ -115,6 +187,9 @@ func (s *Store) RollbackRevision(ctx context.Context, tenant, deploymentName, re
 		return err
 	}
 	if err = updateDeploymentFromRevision(ctx, tx, deploymentID, revisionID, stamp); err != nil {
+		return err
+	}
+	if err = insertRevisionEvent(ctx, tx, deploymentID, "revision_rolled_back", "Deployment rolled back to revision", map[string]any{"revision_id": revisionID, "previous_revision_id": activeID, "reason": reason}, stamp); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -137,6 +212,14 @@ func (s *Store) transitionRevision(ctx context.Context, tenant, deploymentName, 
 		return err
 	}
 	if !candidate.Valid || candidate.String != candidateID {
+		var status string
+		if err = tx.QueryRowContext(ctx, `SELECT status FROM deployment_revisions WHERE id=? AND deployment_id=?`, candidateID, deploymentID).Scan(&status); err == nil {
+			if (nextStatus == "active" && activeID == candidateID && status == "active") || (nextStatus == "rejected" && status == "rejected") {
+				return nil
+			}
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
 		return fmt.Errorf("%w: revision is not the current candidate", ErrConflict)
 	}
 	stamp := now()
@@ -145,6 +228,9 @@ func (s *Store) transitionRevision(ctx context.Context, tenant, deploymentName, 
 			return err
 		}
 		if _, err = tx.ExecContext(ctx, `UPDATE deployments SET candidate_revision_id=NULL,updated_at=? WHERE id=?`, stamp, deploymentID); err != nil {
+			return err
+		}
+		if err = insertRevisionEvent(ctx, tx, deploymentID, "revision_rejected", "Candidate revision rejected", map[string]any{"revision_id": candidateID, "reason": reason}, stamp); err != nil {
 			return err
 		}
 		return tx.Commit()
@@ -158,7 +244,23 @@ func (s *Store) transitionRevision(ctx context.Context, tenant, deploymentName, 
 	if err = updateDeploymentFromRevision(ctx, tx, deploymentID, candidateID, stamp); err != nil {
 		return err
 	}
+	if err = insertRevisionEvent(ctx, tx, deploymentID, "revision_promoted", "Candidate revision promoted", map[string]any{"revision_id": candidateID, "previous_revision_id": activeID}, stamp); err != nil {
+		return err
+	}
 	return tx.Commit()
+}
+
+func insertRevisionEvent(ctx context.Context, tx *tx, deploymentID, eventType, summary string, payload any, stamp string) error {
+	id, err := newID()
+	if err != nil {
+		return err
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO deployment_events(id,deployment_id,event_type,summary,payload_json,created_at) VALUES(?,?,?,?,?::jsonb,?)`, id, deploymentID, eventType, summary, string(encoded), stamp)
+	return err
 }
 
 func updateDeploymentFromRevision(ctx context.Context, tx *tx, deploymentID, revisionID, stamp string) error {

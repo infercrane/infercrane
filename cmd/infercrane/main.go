@@ -72,7 +72,7 @@ func run(ctx context.Context, args []string) error {
 		return benchmarkCommand(ctx, args[1:])
 	}
 	switch args[0] {
-	case "target", "deploy", "apply", "plan", "deployments", "route", "status", "events", "explain", "delete", "inspect", "operation", "orphans", "tenant", "principal", "serve":
+	case "target", "deploy", "apply", "plan", "deployments", "route", "status", "events", "explain", "rollout", "delete", "inspect", "operation", "orphans", "tenant", "principal", "serve":
 	default:
 		usage(os.Stderr)
 		return fmt.Errorf("unknown command %q", args[0])
@@ -112,6 +112,8 @@ func run(ctx context.Context, args []string) error {
 		return inspectCommand(ctx, cfg, args[1:])
 	case "explain":
 		return explainCommand(ctx, cfg, args[1:])
+	case "rollout":
+		return rolloutCommand(ctx, cfg, args[1:])
 	case "operation":
 		return operationCommand(ctx, cfg, args[1:])
 	case "target":
@@ -151,6 +153,7 @@ Operations:
   events           Show durable deployment events
   inspect          Inspect deployment details
   explain          Explain persisted operational state
+  rollout          Inspect and control immutable revision rollouts
   operation        Inspect or request cancellation of a lifecycle operation
   orphans          List unmanaged provisioned resources
   tenant           Create an isolated tenant
@@ -1048,6 +1051,114 @@ func emptyAs(value, fallback string) string {
 	}
 	return value
 }
+
+func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) < 2 {
+		return errors.New("usage: infercrane rollout inspect|create|promote|reject|rollback DEPLOYMENT [REVISION] [flags]")
+	}
+	action, name := args[0], args[1]
+	if action == "inspect" {
+		fs := flag.NewFlagSet("rollout inspect", flag.ContinueOnError)
+		output := fs.String("output", "human", "human or json")
+		if err := fs.Parse(args[2:]); err != nil {
+			return err
+		}
+		var view deploymentView
+		if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/deployments/"+url.PathEscape(name), "", nil, &view); err != nil {
+			return err
+		}
+		if *output == "json" {
+			encoded, _ := json.MarshalIndent(map[string]any{"deployment": view.Deployment.Name, "active_revision_id": view.Deployment.ActiveRevisionID, "candidate_revision_id": view.Deployment.CandidateRevisionID, "revisions": view.Revisions, "request_stats": view.RequestStats}, "", "  ")
+			fmt.Println(string(encoded))
+			return nil
+		}
+		if *output != "human" {
+			return errors.New("--output must be human or json")
+		}
+		fmt.Printf("%s rollout\nACTIVE       %s\nCANDIDATE    %s\n\n", name, emptyAs(view.Deployment.ActiveRevisionID, "none"), emptyAs(view.Deployment.CandidateRevisionID, "none"))
+		for _, revision := range view.Revisions {
+			fmt.Printf("rev-%d  %-10s %s", revision.Number, strings.ToUpper(revision.Status), revision.ID)
+			if revision.Reason != "" {
+				fmt.Printf("  %s", revision.Reason)
+			}
+			fmt.Println()
+		}
+		return nil
+	}
+
+	fs := flag.NewFlagSet("rollout "+action, flag.ContinueOnError)
+	output := fs.String("output", "human", "human or json")
+	wait := fs.Bool("wait", false, "wait for the operation to finish")
+	key := fs.String("idempotency-key", "", "safe retry key")
+	reason := fs.String("reason", "", "persisted reason for the transition")
+	model := fs.String("model", "", "candidate model")
+	runtimeName := fs.String("runtime", "vllm", "candidate runtime")
+	routing := fs.String("routing", "round-robin", "candidate routing strategy")
+	minReplicas := fs.Int("min", 1, "candidate minimum replicas")
+	maxReplicas := fs.Int("max", 1, "candidate maximum replicas")
+	rest := args[2:]
+	revisionID := ""
+	if action != "create" {
+		if len(rest) == 0 || strings.HasPrefix(rest[0], "-") {
+			return errors.New("revision ID is required")
+		}
+		revisionID, rest = rest[0], rest[1:]
+	}
+	if err := fs.Parse(rest); err != nil {
+		return err
+	}
+	if *key == "" {
+		*key = fmt.Sprintf("cli-rollout-%s-%s-%d", action, name, time.Now().UnixNano())
+	}
+	path := ""
+	var request any = struct{}{}
+	switch action {
+	case "create":
+		if *model == "" {
+			return errors.New("--model is required")
+		}
+		if *minReplicas < 1 || *maxReplicas < *minReplicas {
+			return errors.New("replica bounds must satisfy 1 <= min <= max")
+		}
+		path = "/api/v1/deployments/" + url.PathEscape(name) + "/rollouts"
+		request = map[string]any{"spec": map[string]any{"model": *model, "runtime": *runtimeName, "routing_strategy": *routing, "min_replicas": *minReplicas, "max_replicas": *maxReplicas, "autoscaling_enabled": *maxReplicas > *minReplicas}}
+	case "promote":
+		path = "/api/v1/deployments/" + url.PathEscape(name) + "/rollouts/" + url.PathEscape(revisionID) + "/promote"
+	case "reject":
+		if *reason == "" {
+			return errors.New("--reason is required")
+		}
+		path = "/api/v1/deployments/" + url.PathEscape(name) + "/rollouts/" + url.PathEscape(revisionID) + "/reject"
+		request = map[string]string{"reason": *reason}
+	case "rollback":
+		if *reason == "" {
+			return errors.New("--reason is required")
+		}
+		path = "/api/v1/deployments/" + url.PathEscape(name) + "/rollback"
+		request = map[string]string{"revision_id": revisionID, "reason": *reason}
+	default:
+		return fmt.Errorf("unknown rollout action %q", action)
+	}
+	var response struct {
+		Operation domain.Operation `json:"operation"`
+	}
+	if err := controlJSON(ctx, cfg, http.MethodPost, path, *key, request, &response); err != nil {
+		return err
+	}
+	if *output == "json" {
+		encoded, _ := json.MarshalIndent(response, "", "  ")
+		fmt.Println(string(encoded))
+	} else if *output == "human" {
+		fmt.Printf("Deployment  %s\nAction      %s\nOperation   %s\nStatus      %s\n", name, action, response.Operation.ID, response.Operation.Status)
+	} else {
+		return errors.New("--output must be human or json")
+	}
+	if *wait {
+		return waitForOperation(ctx, cfg, response.Operation.ID)
+	}
+	return nil
+}
+
 func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -1076,6 +1187,9 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	control := (controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: credentialCache}).Handler()
 	operationTelemetry := &operations.Telemetry{}
 	handlers := workflows.DeploymentHandlers(s)
+	for kind, handler := range workflows.RolloutHandlers(s) {
+		handlers[kind] = handler
+	}
 	for kind, handler := range workflows.CloudHandlers(s, provision.SkyPilot{APIKey: cfg.APIKey}, runtime, artifact.HuggingFace{}) {
 		handlers[kind] = handler
 	}

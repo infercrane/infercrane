@@ -66,6 +66,10 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/deployments/{name}", a.auth(authz.Read, a.deployment))
 	mux.HandleFunc("GET /api/v1/deployments/{name}/events", a.auth(authz.Read, a.deploymentEvents))
 	mux.HandleFunc("GET /api/v1/deployments/{name}/revisions", a.auth(authz.Read, a.revisions))
+	mux.HandleFunc("POST /api/v1/deployments/{name}/rollouts", a.auth(authz.Deploy, a.createRollout))
+	mux.HandleFunc("POST /api/v1/deployments/{name}/rollouts/{revision}/promote", a.auth(authz.Deploy, a.promoteRollout))
+	mux.HandleFunc("POST /api/v1/deployments/{name}/rollouts/{revision}/reject", a.auth(authz.Deploy, a.rejectRollout))
+	mux.HandleFunc("POST /api/v1/deployments/{name}/rollback", a.auth(authz.Deploy, a.rollbackDeployment))
 	mux.HandleFunc("GET /api/v1/deployments/{name}/scaling-decisions", a.auth(authz.Read, a.scalingDecisions))
 	mux.HandleFunc("PUT /api/v1/deployments/{name}/route", a.auth(authz.Deploy, a.setRoute))
 	mux.HandleFunc("GET /api/v1/targets", a.auth(authz.Read, a.targets))
@@ -377,6 +381,81 @@ func (a API) revisions(w http.ResponseWriter, r *http.Request) {
 		data = append(data, revisionResponse(revision))
 	}
 	writeJSON(w, 200, map[string]any{"data": data})
+}
+
+func (a API) createRollout(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Spec json.RawMessage `json:"spec"`
+	}
+	if !decodeMutationBody(w, r, &body) {
+		return
+	}
+	a.enqueueRollout(w, r, workflows.RolloutCreateKind, workflows.RolloutRequest{Name: r.PathValue("name"), Spec: body.Spec})
+}
+
+func (a API) promoteRollout(w http.ResponseWriter, r *http.Request) {
+	a.enqueueRollout(w, r, workflows.RolloutPromoteKind, workflows.RolloutRequest{Name: r.PathValue("name"), CandidateID: r.PathValue("revision")})
+}
+
+func (a API) rejectRollout(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Reason string `json:"reason"`
+	}
+	if !decodeMutationBody(w, r, &body) {
+		return
+	}
+	a.enqueueRollout(w, r, workflows.RolloutRejectKind, workflows.RolloutRequest{Name: r.PathValue("name"), CandidateID: r.PathValue("revision"), Reason: body.Reason})
+}
+
+func (a API) rollbackDeployment(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		RevisionID string `json:"revision_id"`
+		Reason     string `json:"reason"`
+	}
+	if !decodeMutationBody(w, r, &body) {
+		return
+	}
+	a.enqueueRollout(w, r, workflows.RolloutRollbackKind, workflows.RolloutRequest{Name: r.PathValue("name"), RevisionID: body.RevisionID, Reason: body.Reason})
+}
+
+func decodeMutationBody(w http.ResponseWriter, r *http.Request, destination any) bool {
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(destination); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid: "+err.Error())
+		return false
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		writeError(w, http.StatusBadRequest, "invalid_request", "request body must contain one JSON object")
+		return false
+	}
+	return true
+}
+
+func (a API) enqueueRollout(w http.ResponseWriter, r *http.Request, kind string, request workflows.RolloutRequest) {
+	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if key == "" || len(key) > 128 {
+		writeError(w, http.StatusBadRequest, "invalid_idempotency_key", "Idempotency-Key is required and must not exceed 128 characters")
+		return
+	}
+	principal := r.Context().Value(identityKey{}).(domain.Principal)
+	request.Actor, request.TenantID = principal.Name, principal.TenantID
+	encoded, _ := json.Marshal(request)
+	operation, created, err := a.Store.EnqueueOperation(r.Context(), domain.Operation{TenantID: principal.TenantID, Kind: kind, ResourceType: "deployment", ResourceName: request.Name, IdempotencyKey: key, RequestJSON: string(encoded)})
+	if errors.Is(err, domain.ErrConflict) {
+		writeError(w, http.StatusConflict, "conflict", err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "rollout operation could not be queued")
+		return
+	}
+	w.Header().Set("Location", "/api/v1/operations/"+operation.ID)
+	status := http.StatusAccepted
+	if !created && operation.Status == "succeeded" {
+		status = http.StatusOK
+	}
+	writeJSON(w, status, map[string]any{"operation": operationResponse(operation), "created": created})
 }
 func (a API) scalingDecisions(w http.ResponseWriter, r *http.Request) {
 	principal := r.Context().Value(identityKey{}).(domain.Principal)

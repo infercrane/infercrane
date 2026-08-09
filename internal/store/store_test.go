@@ -603,6 +603,55 @@ func TestDeploymentRevisionsAreImmutableAndPromoteExplicitly(t *testing.T) {
 	}
 }
 
+func TestRevisionTransitionsAreReplaySafeForDurableOperation(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	if _, err := s.AddTarget(ctx, domain.Target{Name: "replay-target", URL: "http://replay-target", Provider: "existing", Runtime: "vllm", UpstreamModel: "model-v1"}); err != nil {
+		t.Fatal(err)
+	}
+	deployment, err := s.ApplyDeployment(ctx, domain.Deployment{Name: "replay-rollout", Model: "model-v1"}, []string{"replay-target"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := s.Resolve(ctx, deployment.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialRevisionID := resolved.Deployment.ActiveRevisionID
+	operation, _, err := s.EnqueueOperation(ctx, domain.Operation{TenantID: "global", Kind: workflows.RolloutCreateKind, ResourceType: "deployment", ResourceName: deployment.Name, IdempotencyKey: "replay-candidate"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := `{"model":"model-v2","runtime":"vllm","routing_strategy":"round-robin","min_replicas":1,"max_replicas":1,"autoscaling_enabled":false}`
+	first, err := s.EnsureCandidateRevision(ctx, "global", deployment.Name, spec, operation.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := s.EnsureCandidateRevision(ctx, "global", deployment.Name, spec, operation.ID)
+	if err != nil || again.ID != first.ID {
+		t.Fatalf("replayed candidate=%#v first=%#v err=%v", again, first, err)
+	}
+	if err = s.PromoteCandidateRevision(ctx, "global", deployment.Name, first.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.PromoteCandidateRevision(ctx, "global", deployment.Name, first.ID); err != nil {
+		t.Fatalf("replayed promotion: %v", err)
+	}
+	if err = s.RollbackRevision(ctx, "global", deployment.Name, initialRevisionID, "acceptance rollback"); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.RollbackRevision(ctx, "global", deployment.Name, initialRevisionID, "acceptance rollback"); err != nil {
+		t.Fatalf("replayed rollback: %v", err)
+	}
+	var transitionEvents int
+	if err = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM deployment_events WHERE deployment_id=$1 AND event_type IN ('revision_candidate_created','revision_promoted','revision_rolled_back')`, deployment.ID).Scan(&transitionEvents); err != nil {
+		t.Fatal(err)
+	}
+	if transitionEvents != 3 {
+		t.Fatalf("transition events=%d, want exactly 3 after replays", transitionEvents)
+	}
+}
+
 func TestTenantResourcesCanReuseNamesWithoutCrossTenantVisibility(t *testing.T) {
 	ctx := context.Background()
 	s := openStore(t, ctx)

@@ -189,6 +189,29 @@ func TestApplyQueuesIdempotentOperation(t *testing.T) {
 	}
 }
 
+func TestRolloutTransitionsQueueDurableOperations(t *testing.T) {
+	store := &fakeStore{created: true}
+	handler := (API{Store: store, APIKey: "secret"}).Handler()
+	tests := []struct {
+		path, body, kind string
+	}{
+		{"/api/v1/deployments/prod/rollouts", `{"spec":{"model":"Qwen/Qwen3-8B"}}`, "rollout.create-candidate"},
+		{"/api/v1/deployments/prod/rollouts/rev-2/promote", ``, "rollout.promote"},
+		{"/api/v1/deployments/prod/rollouts/rev-2/reject", `{"reason":"readiness failed"}`, "rollout.reject"},
+		{"/api/v1/deployments/prod/rollback", `{"revision_id":"rev-1","reason":"operator rollback"}`, "rollout.rollback"},
+	}
+	for i, test := range tests {
+		request := httptest.NewRequest(http.MethodPost, test.path, strings.NewReader(test.body))
+		request.Header.Set("Authorization", "Bearer secret")
+		request.Header.Set("Idempotency-Key", "rollout-"+test.kind)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusAccepted || store.operation.Kind != test.kind || store.operation.ResourceName != "prod" {
+			t.Fatalf("case %d response=%d %s operation=%#v", i, response.Code, response.Body.String(), store.operation)
+		}
+	}
+}
+
 func TestCloudDeployPersistsAndQueuesConverge(t *testing.T) {
 	store := &fakeStore{created: true}
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments", strings.NewReader(`{"name":"qwen","model":"Qwen/Qwen3-8B","cloud":"runpod","gpu":"L40S","min_replicas":1,"max_replicas":4}`))
