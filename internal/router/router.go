@@ -104,11 +104,17 @@ func (v *VLLM) Start(ctx context.Context, s Spec) (string, error) {
 				return "", fmt.Errorf("%w: exited during startup: %s", ErrUnavailable, stderr.String())
 			default:
 			}
-			req, _ := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"/health", nil)
+			// Process health becomes available before vLLM Router has admitted a
+			// worker. Require its model-facing endpoint so a published generation
+			// cannot return a transient 503 on the deployment's first request.
+			req, _ := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"/v1/models", nil)
+			if v.APIKey != "" {
+				req.Header.Set("Authorization", "Bearer "+v.APIKey)
+			}
 			resp, e := client.Do(req)
 			if e == nil {
 				resp.Body.Close()
-				if resp.StatusCode < 500 {
+				if resp.StatusCode == http.StatusOK {
 					return endpoint, nil
 				}
 			}
