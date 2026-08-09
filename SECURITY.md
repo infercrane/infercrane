@@ -1,11 +1,13 @@
 # Security policy
 
-Do not report suspected vulnerabilities in public issues. Until a public security contact is
-published, repository owners must configure GitHub private vulnerability reporting before the
-first public release and document the response address here.
+Do not report suspected vulnerabilities in public issues. Use the repository's **Security** tab
+and choose **Report a vulnerability** to open a private GitHub security advisory. Include the
+affected version, impact, reproduction, and any suggested mitigation. Do not include live
+credentials or customer prompt/output content.
 
-Supported versions will be listed after the first release. The main branch receives security
-fixes but is not itself a release support commitment.
+The latest v0.1 release candidate receives security fixes. The main branch is not itself a release
+support commitment. Maintainers will acknowledge a private report within five business days and
+coordinate disclosure after a fix is available.
 
 Security-sensitive changes require explicit review of authentication, secret handling, external
 process arguments, request/header forwarding, database permissions, migration behavior, container

@@ -1,0 +1,11 @@
+name: Feature request
+description: Propose a scoped InferCrane capability
+body:
+  - type: textarea
+    id: outcome
+    attributes: {label: Operator outcome, description: What production inference outcome should become easier?}
+    validations: {required: true}
+  - type: textarea
+    id: ownership
+    attributes: {label: Ownership boundary, description: Why should InferCrane own this instead of vLLM, SkyPilot, RunPod, or AIPerf?}
+    validations: {required: true}

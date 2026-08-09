@@ -1,4 +1,4 @@
-.PHONY: build context context-check test test-container test-stack test-failure test-store verify audit deadcode dev-up dev-down
+.PHONY: build context context-check test test-container test-stack test-failure test-store verify audit deadcode snapshot dev-up dev-down
 
 build:
 	go build ./cmd/infercrane
@@ -34,6 +34,9 @@ audit:
 
 deadcode:
 	./scripts/check-dead-code.sh
+
+snapshot:
+	goreleaser release --snapshot --clean
 
 dev-up:
 	docker compose up --build -d
