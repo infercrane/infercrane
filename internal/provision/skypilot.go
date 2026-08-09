@@ -195,7 +195,10 @@ func runCommand(model, revision string, port int, runtimeArgs []string) string {
 	if revision != "" {
 		args = append([]string{"--revision", shellQuote(revision)}, args...)
 	}
-	return fmt.Sprintf(`vllm serve %s --host 0.0.0.0 --port %d --served-model-name %s --api-key "$INFERCRANE_WORKER_API_KEY" %s`, shellQuote(model), port, shellQuote(model), strings.Join(args, " "))
+	// Some RunPod base images still export the retired hf_transfer feature flag
+	// without installing that package. Disable it so huggingface_hub uses its
+	// supported hf_xet/HTTP transfer path instead of failing before model load.
+	return fmt.Sprintf(`unset HF_HUB_ENABLE_HF_TRANSFER; vllm serve %s --host 0.0.0.0 --port %d --served-model-name %s --api-key "$INFERCRANE_WORKER_API_KEY" %s`, shellQuote(model), port, shellQuote(model), strings.Join(args, " "))
 }
 func shellQuote(value string) string { return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'" }
 func defaultString(value, fallback string) string {
