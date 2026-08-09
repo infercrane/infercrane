@@ -439,7 +439,9 @@ func (s *Store) ColdStartStats(ctx context.Context, deploymentID string, window 
 	if out.ColdStarts > 0 {
 		out.BottleneckCode = "provider_capacity_or_worker_initialization"
 	}
-	out.Evidence = "Classification uses a fresh RunPod zero-worker observation at request arrival; provider sub-stage timings are unavailable and are not inferred."
+	out.AvailableBoundaries = []string{"request_arrival", "gateway_first_response_byte"}
+	out.UnavailableBoundaries = []string{"capacity_allocation", "container_startup", "artifact_availability_or_download", "model_load", "runtime_initialization", "readiness", "time_to_ready", "first_token"}
+	out.Evidence = "Classification uses a fresh RunPod zero-worker observation at request arrival. TTFT is gateway time to first response byte; provider sub-stage, readiness, and true first-token timings are unavailable and are not inferred."
 	return out, nil
 }
 

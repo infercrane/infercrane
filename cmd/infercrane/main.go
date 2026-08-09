@@ -1156,8 +1156,21 @@ func explainCommand(ctx context.Context, cfg config.Config, args []string) error
 		if stats.WarmTTFTP50MS != nil {
 			fmt.Printf("Warm TTFT p50        %.1fms\n", *stats.WarmTTFTP50MS)
 		}
+		if stats.WarmTTFTP95MS != nil {
+			fmt.Printf("Warm TTFT p95        %.1fms\n", *stats.WarmTTFTP95MS)
+		} else if stats.WarmRequests > 0 {
+			fmt.Println("Warm TTFT p95        unavailable (requires at least 20 classified warm requests)")
+		}
+		if stats.TimeToReadyP50MS != nil {
+			fmt.Printf("Time-to-ready p50    %.1fms\n", *stats.TimeToReadyP50MS)
+		} else {
+			fmt.Println("Time-to-ready        unavailable (provider does not expose a trustworthy readiness boundary)")
+		}
 		if stats.BottleneckCode != "" {
 			fmt.Printf("Bottleneck           %s\n", stats.BottleneckCode)
+		}
+		if len(stats.UnavailableBoundaries) > 0 {
+			fmt.Printf("Unavailable          %s\n", strings.Join(stats.UnavailableBoundaries, ", "))
 		}
 		fmt.Printf("Evidence             %s\n", stats.Evidence)
 		return nil

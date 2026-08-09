@@ -385,3 +385,21 @@ func TestControlErrorPreservesTaxonomyAndRemediation(t *testing.T) {
 		t.Fatalf("error=%#v rendered=%v", controlErr, err)
 	}
 }
+
+func TestExplainColdStartMakesUnavailableBoundariesExplicit(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+  "deployment":{"name":"qwen","active_revision_id":"rev-1"},
+  "targets":[],"replicas":[],"revisions":[],"model_artifacts":[],
+  "cold_start_stats":{"classified_requests":1,"cold_starts":1,"warm_requests":0,"cold_ttft_p50_ms":72100,"cold_ttft_p95_ms":null,"warm_ttft_p50_ms":null,"warm_ttft_p95_ms":null,"time_to_ready_p50_ms":null,"time_to_ready_p95_ms":null,"available_boundaries":["request_arrival","gateway_first_response_byte"],"unavailable_boundaries":["capacity_allocation","time_to_ready","first_token"],"bottleneck_code":"provider_capacity_or_worker_initialization","evidence":"grounded provider evidence"}
+}`))
+	}))
+	defer server.Close()
+	output, err := captureStdout(t, func() error {
+		return explainCommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, []string{"cold-start", "qwen"})
+	})
+	if err != nil || !strings.Contains(output, "Time-to-ready        unavailable") || !strings.Contains(output, "capacity_allocation, time_to_ready, first_token") || !strings.Contains(output, "provider_capacity_or_worker_initialization") {
+		t.Fatalf("output=%s err=%v", output, err)
+	}
+}

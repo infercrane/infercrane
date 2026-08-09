@@ -101,15 +101,19 @@ type RequestStats struct {
 }
 
 type ColdStartStats struct {
-	ClassifiedRequests int      `json:"classified_requests"`
-	ColdStarts         int      `json:"cold_starts"`
-	WarmRequests       int      `json:"warm_requests"`
-	ColdTTFTP50MS      *float64 `json:"cold_ttft_p50_ms,omitempty"`
-	ColdTTFTP95MS      *float64 `json:"cold_ttft_p95_ms,omitempty"`
-	WarmTTFTP50MS      *float64 `json:"warm_ttft_p50_ms,omitempty"`
-	WarmTTFTP95MS      *float64 `json:"warm_ttft_p95_ms,omitempty"`
-	BottleneckCode     string   `json:"bottleneck_code,omitempty"`
-	Evidence           string   `json:"evidence"`
+	ClassifiedRequests    int      `json:"classified_requests"`
+	ColdStarts            int      `json:"cold_starts"`
+	WarmRequests          int      `json:"warm_requests"`
+	ColdTTFTP50MS         *float64 `json:"cold_ttft_p50_ms"`
+	ColdTTFTP95MS         *float64 `json:"cold_ttft_p95_ms"`
+	WarmTTFTP50MS         *float64 `json:"warm_ttft_p50_ms"`
+	WarmTTFTP95MS         *float64 `json:"warm_ttft_p95_ms"`
+	TimeToReadyP50MS      *float64 `json:"time_to_ready_p50_ms"`
+	TimeToReadyP95MS      *float64 `json:"time_to_ready_p95_ms"`
+	AvailableBoundaries   []string `json:"available_boundaries"`
+	UnavailableBoundaries []string `json:"unavailable_boundaries"`
+	BottleneckCode        string   `json:"bottleneck_code,omitempty"`
+	Evidence              string   `json:"evidence"`
 }
 
 // BenchmarkResult is the persisted, reproducible summary of one AIPerf run.
