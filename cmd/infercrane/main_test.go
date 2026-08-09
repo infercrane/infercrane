@@ -60,6 +60,33 @@ func TestDeployCLIOnlySubmitsControlPlaneRequest(t *testing.T) {
 	}
 }
 
+func TestDoctorCLIOnlyReadsAuthenticatedControlPlaneDiagnostics(t *testing.T) {
+	var requested string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requested = r.URL.RequestURI()
+		if r.Method != http.MethodGet || r.Header.Get("Authorization") != "Bearer secret" {
+			t.Fatalf("method=%s authorization=%q", r.Method, r.Header.Get("Authorization"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ready":true,"checks":[{"name":"PostgreSQL","status":"pass","message":"Database connection succeeded"}]}`))
+	}))
+	defer server.Close()
+
+	output, err := captureStdout(t, func() error {
+		return doctorCommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, []string{"--cloud", "--serverless", "--output", "json"})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var report map[string]any
+	if err := json.Unmarshal([]byte(output), &report); err != nil || report["ready"] != true {
+		t.Fatalf("output=%q report=%#v err=%v", output, report, err)
+	}
+	if requested != "/api/v1/doctor?cloud=true&serverless=true" {
+		t.Fatalf("request=%q", requested)
+	}
+}
+
 func TestPrimaryDeployPathDefaultsToRunPodL40S(t *testing.T) {
 	var body map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -224,5 +251,33 @@ func TestDeployDisconnectLeavesDurableOperationRunning(t *testing.T) {
 	}
 	if strings.Join(methods, ",") != "POST,GET" {
 		t.Fatalf("disconnect must not submit a cancellation mutation: methods=%v", methods)
+	}
+}
+
+func TestExplainReportsPersistedBlockingOperation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+  "deployment":{"name":"qwen","observed_state":"degraded","active_revision_id":"rev-1"},
+  "replicas":[],"targets":[],"revisions":[],"model_artifacts":[],"release_guard_evaluations":[],
+  "active_operation":{"id":"op-7","kind":"deployment.converge","status":"waiting","progress":35,"message":"provider capacity pending","error_code":"provider_pending"}
+}`))
+	}))
+	defer server.Close()
+
+	output, err := captureStdout(t, func() error {
+		return explainCommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, []string{"qwen", "--output", "json"})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var explanation struct {
+		BlockingOperation *struct {
+			ID string `json:"id"`
+		} `json:"blocking_operation"`
+		Reasons []string `json:"reasons"`
+	}
+	if err := json.Unmarshal([]byte(output), &explanation); err != nil || explanation.BlockingOperation == nil || explanation.BlockingOperation.ID != "op-7" || len(explanation.Reasons) != 1 || !strings.Contains(explanation.Reasons[0], "provider_pending") {
+		t.Fatalf("output=%s explanation=%#v err=%v", output, explanation, err)
 	}
 }

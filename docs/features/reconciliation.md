@@ -29,7 +29,9 @@ degraded deployment with only healthy members.
 ## Scaling model
 
 Each gateway replica supervises its own router processes because endpoints use loopback. Instance
-IDs must be unique and stable for the life of a replica. Autoscaling worker count is planned, not
-implemented.
+IDs must be unique and stable for the life of a replica. The bounded autoscaling controller records
+each scale/no-scale decision, creates durable replica operations for scale-up, and requires a
+matching published router generation before scale-down deletes capacity. Real RunPod `1 → N → 1`
+qualification remains a release acceptance gate.
 
 Related: [ADR 0003](../adr/0003-instance-owned-router-generations.md).

@@ -9,6 +9,12 @@ infercrane explain rollout qwen-prod
 infercrane explain cold-start qwen-prod
 ```
 
-The general explanation reports observed deployment state and unhealthy replica evidence. Scaling explanations reproduce the latest persisted autoscaling action, reason, signal snapshot, and evaluation timestamp. Rollout explanations reproduce the Release Guard evaluation ID, active and candidate revisions, decision, reason codes, metric snapshot, policy snapshot, and timestamp. Cold-start explanations use the provider-worker observation and TTFT evidence described in [Cold-start intelligence](cold-starts.md).
+The general explanation reports observed deployment state, unhealthy replica evidence, and the
+active durable operation that is blocking convergence, including its persisted kind, status,
+progress, message, and error code. Scaling explanations reproduce the latest persisted autoscaling
+action, reason, signal snapshot, and evaluation timestamp. Rollout explanations reproduce the
+Release Guard evaluation ID, active and candidate revisions, decision, reason codes, metric
+snapshot, policy snapshot, and timestamp. Cold-start explanations use the provider-worker
+observation and TTFT evidence described in [Cold-start intelligence](cold-starts.md).
 
 Every form supports `--output json`. Repeating an explanation against unchanged persisted state produces the same explanation code and evidence. If no evaluation exists, InferCrane says so instead of inventing a cause.

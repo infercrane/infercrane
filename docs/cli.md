@@ -3,7 +3,7 @@
 Public workflows use the authenticated control-plane API and support `--output json` where output is returned.
 
 - `init`: create a private client configuration.
-- `doctor`: validate dependencies; add `--cloud` or `--serverless` for provider checks.
+- `doctor`: ask the control plane to validate its dependencies; add `--cloud` or `--serverless` for provider checks.
 - `deploy`, `apply`, `plan`: create, converge, or preview a DeploymentSpec.
 - `status [--watch]`, `events`, `inspect`: view health, durable events, or raw infrastructure details.
 - `rollout`: create, provision, evaluate, promote, reject, rollback, or inspect revisions.

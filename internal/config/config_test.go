@@ -21,17 +21,6 @@ func TestLoadRequiresAPIKey(t *testing.T) {
 	}
 }
 
-func TestLoadForDiagnosticsAllowsMissingAPIKey(t *testing.T) {
-	t.Setenv("INFERCRANE_API_KEY", "")
-	config, err := LoadForDiagnostics()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if config.APIKey != "" {
-		t.Fatal("diagnostic config must not invent an API key")
-	}
-}
-
 func TestProductionRequiresStrongSecretAndDatabaseTLS(t *testing.T) {
 	t.Setenv("INFERCRANE_ENV", "production")
 	t.Setenv("INFERCRANE_API_KEY", "short")

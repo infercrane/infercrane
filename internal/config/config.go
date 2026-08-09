@@ -119,12 +119,6 @@ func readClientFile() (clientFile, error) {
 	return stored, nil
 }
 
-// LoadForDiagnostics loads and validates non-secret configuration. It allows
-// doctor to report a missing API key alongside the rest of the environment.
-func LoadForDiagnostics() (Config, error) {
-	return load(false)
-}
-
 func load(requireAPIKey bool) (Config, error) {
 	hostname, _ := os.Hostname()
 	port, err := envInt("INFERCRANE_PORT", 8080)

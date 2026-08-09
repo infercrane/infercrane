@@ -14,10 +14,11 @@ Errors are stable JSON objects:
 
 | Method and path | Minimum role | Purpose |
 |---|---|---|
+| `GET /doctor` | viewer | Run control-plane dependency diagnostics; optional `cloud` and `serverless` booleans add provider checks. |
 | `POST /deployments/apply` | operator | Queue existing-target convergence; requires `Idempotency-Key`. |
 | `POST /deployments` | operator | Atomically create desired cloud deployment and queue convergence; requires `Idempotency-Key`. |
 | `GET /deployments` | viewer | List tenant deployments. |
-| `GET /deployments/{name}` | viewer | Inspect deployment, targets, replicas, revisions, immutable model artifacts, and persisted request statistics. |
+| `GET /deployments/{name}` | viewer | Inspect deployment, targets, replicas, revisions, immutable model artifacts, active durable operation, and persisted request statistics. |
 | `GET /deployments/{name}/events` | viewer | List durable deployment events. |
 | `GET /deployments/{name}/revisions` | viewer | List immutable revision history. |
 | `GET /deployments/{name}/scaling-decisions` | viewer | List deterministic scaling evaluations and their persisted signals. |
@@ -49,3 +50,6 @@ Existing-target apply request:
 
 An accepted mutation returns `202`, an operation object, and a `Location` header. Repeating the
 same tenant, operation kind, and idempotency key returns the original operation.
+
+Diagnostics execute inside the control-plane process. The public CLI receives only check status,
+messages, and remediation; it never receives or opens the PostgreSQL URL or provider credentials.

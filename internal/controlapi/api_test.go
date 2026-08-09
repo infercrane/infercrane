@@ -10,20 +10,22 @@ import (
 
 	"github.com/infercrane/infercrane/internal/authz"
 	"github.com/infercrane/infercrane/internal/benchmark"
+	"github.com/infercrane/infercrane/internal/doctor"
 	"github.com/infercrane/infercrane/internal/domain"
 )
 
 type fakeStore struct {
-	operation  domain.Operation
-	cancelled  bool
-	err        error
-	created    bool
-	principal  domain.Principal
-	targets    []domain.Target
-	resolved   domain.ResolvedDeployment
-	revisions  []domain.DeploymentRevision
-	artifact   domain.ModelArtifact
-	benchmarks []domain.BenchmarkResult
+	operation       domain.Operation
+	cancelled       bool
+	err             error
+	created         bool
+	principal       domain.Principal
+	targets         []domain.Target
+	resolved        domain.ResolvedDeployment
+	revisions       []domain.DeploymentRevision
+	artifact        domain.ModelArtifact
+	benchmarks      []domain.BenchmarkResult
+	activeOperation domain.Operation
 }
 
 func (f *fakeStore) AuthenticatePrincipal(context.Context, string) (domain.Principal, error) {
@@ -31,6 +33,13 @@ func (f *fakeStore) AuthenticatePrincipal(context.Context, string) (domain.Princ
 		return domain.Principal{}, domain.ErrNotFound
 	}
 	return f.principal, nil
+}
+
+func (f *fakeStore) ActiveOperationForResource(context.Context, string, string, string) (domain.Operation, error) {
+	if f.activeOperation.ID == "" {
+		return domain.Operation{}, domain.ErrNotFound
+	}
+	return f.activeOperation, nil
 }
 
 func (f *fakeStore) Operation(context.Context, string) (domain.Operation, error) {
@@ -353,5 +362,20 @@ func TestCancelHidesMissingOperation(t *testing.T) {
 	(API{Store: store, APIKey: "secret"}).Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusNotFound || !strings.Contains(response.Body.String(), "not_found") {
 		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestDoctorDiagnosticsRunInsideAuthenticatedControlPlane(t *testing.T) {
+	called := false
+	handler := (API{Store: &fakeStore{}, APIKey: "secret", Diagnostics: func(_ context.Context, cloud, serverless bool) doctor.Report {
+		called = cloud && serverless
+		return doctor.Report{Ready: true, Checks: []doctor.Check{{Name: "PostgreSQL", Status: doctor.Pass, Message: "connected"}}}
+	}}).Handler()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/doctor?cloud=true&serverless=true", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !called || !strings.Contains(response.Body.String(), `"ready":true`) {
+		t.Fatalf("response=%d %s called=%t", response.Code, response.Body.String(), called)
 	}
 }

@@ -136,7 +136,7 @@ infercrane delete qwen-prod --yes
 cloud mutations or open PostgreSQL from the CLI process. Omitting `--wait` returns after submission,
 so closing the terminal cannot interrupt provisioning or cleanup.
 
-Provider-native serverless uses a RunPod-maintained vLLM worker template pinned to the requested
+Provider-native serverless uses an operator-configured RunPod vLLM worker template validated against the requested
 immutable model artifact:
 
 ```bash
@@ -152,7 +152,7 @@ Create tenant-scoped credentials; the token is shown only once:
 
 ```bash
 infercrane tenant create team-a --name "Team A"
-infercrane principal create team-a automation --role operator
+infercrane principal create automation --role operator
 infercrane principal rotate PRINCIPAL_ID
 infercrane principal revoke PRINCIPAL_ID
 ```

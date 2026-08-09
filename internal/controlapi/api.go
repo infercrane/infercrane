@@ -15,12 +15,14 @@ import (
 
 	"github.com/infercrane/infercrane/internal/authz"
 	"github.com/infercrane/infercrane/internal/benchmark"
+	"github.com/infercrane/infercrane/internal/doctor"
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/workflows"
 )
 
 type Store interface {
 	Operation(context.Context, string) (domain.Operation, error)
+	ActiveOperationForResource(context.Context, string, string, string) (domain.Operation, error)
 	RequestOperationCancel(context.Context, string) error
 	EnqueueOperation(context.Context, domain.Operation) (domain.Operation, bool, error)
 	SubmitCloudDeployment(context.Context, domain.Deployment, domain.Operation) (domain.Deployment, domain.Operation, bool, error)
@@ -61,6 +63,7 @@ type API struct {
 	BenchmarkRunner interface {
 		Run(context.Context, benchmark.Config) (benchmark.Result, error)
 	}
+	Diagnostics              func(context.Context, bool, bool) doctor.Report
 	GatewayURL, AIPerfBinary string
 }
 type identityKey struct{}
@@ -68,6 +71,7 @@ type identityKey struct{}
 func (a API) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/operations/{id}", a.auth(authz.Read, a.operation))
+	mux.HandleFunc("GET /api/v1/doctor", a.auth(authz.Read, a.diagnostics))
 	mux.HandleFunc("GET /api/v1/operations/{id}/events", a.auth(authz.Read, a.operationEvents))
 	mux.HandleFunc("POST /api/v1/operations/{id}/cancel", a.auth(authz.Deploy, a.cancel))
 	mux.HandleFunc("POST /api/v1/deployments/apply", a.auth(authz.Deploy, a.applyDeployment))
@@ -99,6 +103,31 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/principals/{id}/rotate", a.auth(authz.ManageTenant, a.rotatePrincipal))
 	mux.HandleFunc("DELETE /api/v1/principals/{id}", a.auth(authz.ManageTenant, a.revokePrincipal))
 	return mux
+}
+
+func (a API) diagnostics(w http.ResponseWriter, r *http.Request) {
+	if a.Diagnostics == nil {
+		writeError(w, http.StatusServiceUnavailable, "diagnostics_unavailable", "control-plane diagnostics are not configured")
+		return
+	}
+	cloud, err := strconv.ParseBool(defaultValue(r.URL.Query().Get("cloud"), "false"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "cloud must be true or false")
+		return
+	}
+	serverless, err := strconv.ParseBool(defaultValue(r.URL.Query().Get("serverless"), "false"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "serverless must be true or false")
+		return
+	}
+	writeJSON(w, http.StatusOK, a.Diagnostics(r.Context(), cloud, serverless))
+}
+
+func defaultValue(value, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
 }
 
 func (a API) runBenchmark(w http.ResponseWriter, r *http.Request) {
@@ -481,6 +510,11 @@ func (a API) deployment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "internal", "Release Guard policy lookup failed")
 		return
 	}
+	activeOperation, operationErr := a.Store.ActiveOperationForResource(r.Context(), principal.TenantID, "deployment", resolved.Deployment.Name)
+	if operationErr != nil && !errors.Is(operationErr, domain.ErrNotFound) {
+		writeError(w, 500, "internal", "active operation lookup failed")
+		return
+	}
 	targets := make([]map[string]any, 0, len(resolved.Targets))
 	for _, target := range resolved.Targets {
 		targets = append(targets, targetResponse(target))
@@ -505,7 +539,11 @@ func (a API) deployment(w http.ResponseWriter, r *http.Request) {
 	for _, evaluation := range guardEvaluations {
 		guardData = append(guardData, releaseGuardResponse(evaluation))
 	}
-	writeJSON(w, 200, map[string]any{"deployment": deploymentResponse(resolved.Deployment), "targets": targets, "replicas": replicaData, "revisions": revisionData, "model_artifacts": artifactData, "request_stats": stats, "cold_start_stats": coldStarts, "release_guard_policy": guardPolicy, "release_guard_evaluations": guardData})
+	response := map[string]any{"deployment": deploymentResponse(resolved.Deployment), "targets": targets, "replicas": replicaData, "revisions": revisionData, "model_artifacts": artifactData, "request_stats": stats, "cold_start_stats": coldStarts, "release_guard_policy": guardPolicy, "release_guard_evaluations": guardData}
+	if operationErr == nil {
+		response["active_operation"] = operationResponse(activeOperation)
+	}
+	writeJSON(w, 200, response)
 }
 func (a API) deploymentEvents(w http.ResponseWriter, r *http.Request) {
 	principal := r.Context().Value(identityKey{}).(domain.Principal)

@@ -66,11 +66,9 @@ func run(ctx context.Context, args []string) error {
 		return nil
 	case "init":
 		return initCommand(args[1:])
-	case "doctor":
-		return doctorCommand(ctx, args[1:])
 	}
 	switch args[0] {
-	case "target", "deploy", "apply", "plan", "deployments", "route", "status", "events", "explain", "rollout", "delete", "inspect", "operation", "orphans", "tenant", "principal", "benchmark", "serve":
+	case "target", "deploy", "apply", "plan", "doctor", "deployments", "route", "status", "events", "explain", "rollout", "delete", "inspect", "operation", "orphans", "tenant", "principal", "benchmark", "serve":
 	default:
 		usage(os.Stderr)
 		return fmt.Errorf("unknown command %q", args[0])
@@ -94,6 +92,8 @@ func run(ctx context.Context, args []string) error {
 	switch args[0] {
 	case "plan":
 		return planCommand(ctx, cfg, args[1:])
+	case "doctor":
+		return doctorCommand(ctx, cfg, args[1:])
 	case "deploy":
 		return deployAPICommand(ctx, cfg, "deploy", args[1:])
 	case "apply":
@@ -300,7 +300,7 @@ func planCommand(ctx context.Context, cfg config.Config, args []string) error {
 	return nil
 }
 
-func doctorCommand(ctx context.Context, args []string) error {
+func doctorCommand(ctx context.Context, cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	output := fs.String("output", "human", "human or json")
 	cloud := fs.Bool("cloud", false, "also validate SkyPilot cloud credentials")
@@ -308,16 +308,12 @@ func doctorCommand(ctx context.Context, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	cfg, err := config.LoadForDiagnostics()
-	if err != nil {
-		return fmt.Errorf("invalid configuration: %w", err)
-	}
-	report := doctor.Run(ctx, cfg, doctor.Dependencies{})
-	if *cloud {
-		report.Add(doctor.CheckCloudCredentials(ctx, doctor.Dependencies{}))
-	}
-	if *serverless {
-		report.Add(doctor.CheckRunPodServerless(ctx, cfg, doctor.Dependencies{}))
+	query := url.Values{}
+	query.Set("cloud", fmt.Sprint(*cloud))
+	query.Set("serverless", fmt.Sprint(*serverless))
+	var report doctor.Report
+	if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/doctor?"+query.Encode(), "", nil, &report); err != nil {
+		return err
 	}
 	switch *output {
 	case "json":
@@ -597,6 +593,7 @@ type deploymentView struct {
 	ColdStartStats          domain.ColdStartStats     `json:"cold_start_stats"`
 	ReleaseGuardPolicy      domain.ReleaseGuardPolicy `json:"release_guard_policy"`
 	ReleaseGuardEvaluations []releaseGuardView        `json:"release_guard_evaluations"`
+	ActiveOperation         *domain.Operation         `json:"active_operation,omitempty"`
 }
 
 type releaseGuardView struct {
@@ -1117,6 +1114,16 @@ func explainCommand(ctx context.Context, cfg config.Config, args []string) error
 		return err
 	}
 	reasons := []string{}
+	if view.ActiveOperation != nil {
+		reason := fmt.Sprintf("operation %s (%s) is %s at %d%%", view.ActiveOperation.ID, view.ActiveOperation.Kind, view.ActiveOperation.Status, view.ActiveOperation.Progress)
+		if view.ActiveOperation.Message != "" {
+			reason += ": " + view.ActiveOperation.Message
+		}
+		if view.ActiveOperation.ErrorCode != "" {
+			reason += " [" + view.ActiveOperation.ErrorCode + "]"
+		}
+		reasons = append(reasons, reason)
+	}
 	for _, replica := range view.Replicas {
 		if replica.Health != "healthy" {
 			reasons = append(reasons, fmt.Sprintf("replica %s is %s (%s)", replica.ID, replica.LifecycleState, replica.Health))
@@ -1125,7 +1132,7 @@ func explainCommand(ctx context.Context, cfg config.Config, args []string) error
 	if len(reasons) == 0 {
 		reasons = append(reasons, "all persisted replicas are healthy")
 	}
-	result := map[string]any{"deployment": view.Deployment.Name, "state": view.Deployment.ObservedState, "reasons": reasons, "active_revision_id": view.Deployment.ActiveRevisionID, "candidate_revision_id": view.Deployment.CandidateRevisionID}
+	result := map[string]any{"deployment": view.Deployment.Name, "state": view.Deployment.ObservedState, "reasons": reasons, "active_revision_id": view.Deployment.ActiveRevisionID, "candidate_revision_id": view.Deployment.CandidateRevisionID, "blocking_operation": view.ActiveOperation}
 	if *output == "json" {
 		encoded, _ := json.MarshalIndent(result, "", "  ")
 		fmt.Println(string(encoded))
@@ -1425,7 +1432,17 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		return fmt.Errorf("load credential snapshot: %w", err)
 	}
 	go func() { _ = credentialCache.Run(ctx) }()
-	control := (controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: credentialCache, BenchmarkRunner: benchmark.Runner{}, GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary}).Handler()
+	diagnostics := func(checkCtx context.Context, cloud, checkServerless bool) doctor.Report {
+		report := doctor.Run(checkCtx, cfg, doctor.Dependencies{})
+		if cloud {
+			report.Add(doctor.CheckCloudCredentials(checkCtx, doctor.Dependencies{}))
+		}
+		if checkServerless {
+			report.Add(doctor.CheckRunPodServerless(checkCtx, cfg, doctor.Dependencies{}))
+		}
+		return report
+	}
+	control := (controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: credentialCache, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary}).Handler()
 	operationTelemetry := &operations.Telemetry{}
 	handlers := workflows.DeploymentHandlers(s)
 	for kind, handler := range workflows.RolloutHandlers(s) {

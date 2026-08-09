@@ -19,6 +19,10 @@ func (s *Store) Operation(ctx context.Context, id string) (domain.Operation, err
 	return s.scanOperation(s.QueryRowContext(ctx, `SELECT `+operationColumns+` FROM operations WHERE id=?`, id))
 }
 
+func (s *Store) ActiveOperationForResource(ctx context.Context, tenant, resourceType, resourceName string) (domain.Operation, error) {
+	return s.scanOperation(s.QueryRowContext(ctx, `SELECT `+operationColumns+` FROM operations WHERE tenant_id=? AND resource_type=? AND resource_name=? AND status IN ('pending','leased','running','waiting','cancelling') ORDER BY created_at DESC LIMIT 1`, tenant, resourceType, resourceName))
+}
+
 func (s *Store) scanOperation(row *sql.Row) (domain.Operation, error) {
 	var out domain.Operation
 	var created, updated string

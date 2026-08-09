@@ -22,6 +22,8 @@ default. `infercrane init` writes client URL/auth configuration to
 `$XDG_CONFIG_HOME/infercrane/config.json` (or `~/.config/infercrane/config.json`) with mode `0600`;
 environment variables override that file. Public lifecycle, status, event, inspection, and
 explanation commands use only the authenticated control-plane API and never open PostgreSQL.
+`infercrane doctor` also uses that API: dependency and optional provider checks execute in the
+control-plane environment, where the corresponding binaries and credentials live.
 The production image contains InferCrane and the pinned real vLLM Router. The `development` target
 adds fake workers/router and bootstrap script.
 
