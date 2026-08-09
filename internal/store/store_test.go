@@ -522,21 +522,21 @@ func TestRequestTelemetryPersistsMeasurementsAndDimensions(t *testing.T) {
 	ttft := 123.4
 	input, output := 17, 23
 	cold, workers, capacityObservedAt := true, 0, time.Now().Add(-2*time.Second)
-	record := domain.InferenceRecord{RequestID: "req-telemetry", DeploymentID: deployment.ID, RevisionID: resolved.Deployment.ActiveRevisionID, Provider: "runpod", Runtime: "vllm", ComputeMode: "serverless", OperationName: "chat", ResponseModel: "Qwen/Qwen3-8B", StartedAt: time.Now().Add(-time.Second), StatusCode: 200, LatencyMS: 456.7, TTFTMS: &ttft, InputTokens: &input, OutputTokens: &output, Streaming: true, ColdStart: &cold, ProviderWorkersAtArrival: &workers, ProviderCapacityObservedAt: &capacityObservedAt}
+	record := domain.InferenceRecord{RequestID: "req-telemetry", DeploymentID: deployment.ID, RevisionID: resolved.Deployment.ActiveRevisionID, Provider: "runpod", Runtime: "vllm", ComputeMode: "serverless", OperationName: "chat", RequestModel: "qwen-prod", ResponseModel: "Qwen/Qwen3-8B", SemanticConventionSchema: "https://opentelemetry.io/schemas/gen-ai/1.42.0", StartedAt: time.Now().Add(-time.Second), StatusCode: 200, LatencyMS: 456.7, TTFTMS: &ttft, InputTokens: &input, OutputTokens: &output, Streaming: true, ColdStart: &cold, ProviderWorkersAtArrival: &workers, ProviderCapacityObservedAt: &capacityObservedAt}
 	if err = s.RecordRequest(ctx, record); err != nil {
 		t.Fatal(err)
 	}
-	var revision, provider, runtime, mode, operation, model string
+	var revision, provider, runtime, mode, operation, requestModel, responseModel, schema string
 	var storedTTFT, latency float64
 	var storedInput, storedOutput int
 	var streaming, storedCold bool
 	var storedWorkers int
 	var storedCapacityObservedAt time.Time
-	if err = s.db.QueryRowContext(ctx, `SELECT revision_id,provider,runtime,compute_mode,operation_name,response_model,ttft_ms,latency_ms,input_tokens,output_tokens,streaming,cold_start,provider_workers_at_arrival,provider_capacity_observed_at FROM request_records WHERE request_id=$1`, record.RequestID).Scan(&revision, &provider, &runtime, &mode, &operation, &model, &storedTTFT, &latency, &storedInput, &storedOutput, &streaming, &storedCold, &storedWorkers, &storedCapacityObservedAt); err != nil {
+	if err = s.db.QueryRowContext(ctx, `SELECT revision_id,provider,runtime,compute_mode,operation_name,request_model,response_model,semantic_convention_schema,ttft_ms,latency_ms,input_tokens,output_tokens,streaming,cold_start,provider_workers_at_arrival,provider_capacity_observed_at FROM request_records WHERE request_id=$1`, record.RequestID).Scan(&revision, &provider, &runtime, &mode, &operation, &requestModel, &responseModel, &schema, &storedTTFT, &latency, &storedInput, &storedOutput, &streaming, &storedCold, &storedWorkers, &storedCapacityObservedAt); err != nil {
 		t.Fatal(err)
 	}
-	if revision != record.RevisionID || provider != "runpod" || runtime != "vllm" || mode != "serverless" || operation != "chat" || model != "Qwen/Qwen3-8B" || storedTTFT != ttft || latency != record.LatencyMS || storedInput != input || storedOutput != output || !streaming || !storedCold || storedWorkers != 0 || storedCapacityObservedAt.IsZero() {
-		t.Fatalf("stored telemetry mismatch: revision=%s provider=%s runtime=%s mode=%s operation=%s model=%s ttft=%g latency=%g input=%d output=%d streaming=%t", revision, provider, runtime, mode, operation, model, storedTTFT, latency, storedInput, storedOutput, streaming)
+	if revision != record.RevisionID || provider != "runpod" || runtime != "vllm" || mode != "serverless" || operation != "chat" || requestModel != "qwen-prod" || responseModel != "Qwen/Qwen3-8B" || schema != record.SemanticConventionSchema || storedTTFT != ttft || latency != record.LatencyMS || storedInput != input || storedOutput != output || !streaming || !storedCold || storedWorkers != 0 || storedCapacityObservedAt.IsZero() {
+		t.Fatalf("stored telemetry mismatch: revision=%s provider=%s runtime=%s mode=%s operation=%s request_model=%s response_model=%s schema=%s ttft=%g latency=%g input=%d output=%d streaming=%t", revision, provider, runtime, mode, operation, requestModel, responseModel, schema, storedTTFT, latency, storedInput, storedOutput, streaming)
 	}
 	stats, err := s.RequestStats(ctx, deployment.ID, 5*time.Minute)
 	if err != nil {

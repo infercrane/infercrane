@@ -83,7 +83,7 @@ func TestCompletionRecordsStreamingTelemetry(t *testing.T) {
 	captured.mu.Lock()
 	record := captured.record
 	captured.mu.Unlock()
-	if record.DeploymentID != "d1" || record.RevisionID != "rev-3" || record.Provider != "runpod" || record.Runtime != "vllm" || record.ComputeMode != "elastic" || record.OperationName != "chat" {
+	if record.DeploymentID != "d1" || record.RevisionID != "rev-3" || record.Provider != "runpod" || record.Runtime != "vllm" || record.ComputeMode != "elastic" || record.OperationName != "chat" || record.RequestModel != "alias" || record.SemanticConventionSchema != "https://opentelemetry.io/schemas/gen-ai/1.42.0" {
 		t.Fatalf("metadata=%+v", record)
 	}
 	if !record.Streaming || record.TTFTMS == nil || *record.TTFTMS < 0 || record.LatencyMS < *record.TTFTMS {

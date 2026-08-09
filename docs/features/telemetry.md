@@ -7,11 +7,24 @@ Persisted request dimensions are:
 - deployment and active revision
 - provider, runtime, and compute mode
 - GenAI operation name (`chat`)
+- requested logical model and runtime-reported response model
+- OpenTelemetry GenAI schema identity (`https://opentelemetry.io/schemas/gen-ai/1.42.0`)
 - HTTP status, error type, and whether the response streamed
 - response model, when returned by the runtime
 
-Persisted measurements are request latency, time to first response byte (TTFT at the InferCrane gateway boundary), and input/output token counts when vLLM returns OpenAI usage fields. Missing token usage remains unknown; InferCrane does not estimate it. Replica identity remains unset when the standalone router does not provide a trustworthy selected-worker identity.
+Persisted measurements are request latency, time to first response byte/chunk at the InferCrane
+gateway boundary, and input/output token counts when vLLM returns OpenAI usage fields. For streaming
+requests this timing maps to `gen_ai.response.time_to_first_chunk`; InferCrane does not claim it is
+the model server's internal `gen_ai.server.time_to_first_token`. Missing token usage remains unknown;
+InferCrane does not estimate it. Replica identity remains unset when the standalone router does not
+provide a trustworthy selected-worker identity.
 
-The corresponding OpenTelemetry GenAI concepts are `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.server.request.duration`, and `gen_ai.server.time_to_first_token`. InferCrane-specific deployment, revision, provider/runtime, compute-mode, and operation dimensions are retained with the durable request record so decisions can be reproduced later.
+The corresponding OpenTelemetry GenAI concepts are `gen_ai.operation.name`,
+`gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`,
+`gen_ai.request.stream`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`,
+`gen_ai.server.request.duration`, and `gen_ai.response.time_to_first_chunk`. InferCrane-specific
+deployment, revision, provider/runtime, compute-mode, and operation dimensions are retained with
+the durable request record so decisions can be reproduced later. `runpod` is a grounded custom
+provider value because the convention permits provider-specific names outside its well-known list.
 
 Aggregated deployment statistics expose request rate, error rate, latency p50/p95, TTFT p50/p95, and observed input/output tokens per second over the selected window. Token throughput is emitted only from runtime-reported usage.

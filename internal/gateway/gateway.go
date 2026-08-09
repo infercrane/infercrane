@@ -181,7 +181,7 @@ func (g *Gateway) completions(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, context.DeadlineExceeded) {
 			status, errorType, message = http.StatusGatewayTimeout, "timeout", "Inference upstream timed out"
 		}
-		g.record(r.Context(), requestID, route, started, status, errorType, streaming, responseObservation{}, evidence)
+		g.record(r.Context(), requestID, route, alias, started, status, errorType, streaming, responseObservation{}, evidence)
 		openAIError(w, message, status, "server_error")
 		return
 	}
@@ -200,7 +200,7 @@ func (g *Gateway) completions(w http.ResponseWriter, r *http.Request) {
 			errorType = "upstream_disconnect"
 		}
 	}
-	g.record(context.WithoutCancel(r.Context()), requestID, route, started, resp.StatusCode, errorType, streaming, observation, evidence)
+	g.record(context.WithoutCancel(r.Context()), requestID, route, alias, started, resp.StatusCode, errorType, streaming, observation, evidence)
 	if g.Logger != nil {
 		g.Logger.Info("inference request", "request_id", requestID, "traceparent", traceParent, "tenant_id", principal.TenantID, "deployment_id", route.DeploymentID, "status", resp.StatusCode, "duration_ms", float64(time.Since(started).Microseconds())/1000)
 	}
@@ -212,7 +212,7 @@ type capacityEvidence struct {
 	observedAt *time.Time
 }
 
-func (g *Gateway) record(ctx context.Context, id string, route routes.Snapshot, started time.Time, status int, errorType string, streaming bool, observation responseObservation, evidence capacityEvidence) {
+func (g *Gateway) record(ctx context.Context, id string, route routes.Snapshot, requestModel string, started time.Time, status int, errorType string, streaming bool, observation responseObservation, evidence capacityEvidence) {
 	if g.Recorder == nil {
 		return
 	}
@@ -223,7 +223,7 @@ func (g *Gateway) record(ctx context.Context, id string, route routes.Snapshot, 
 		ttft = &value
 	}
 	responseModel, inputTokens, outputTokens := observation.usage()
-	record := domain.InferenceRecord{RequestID: id, DeploymentID: route.DeploymentID, RevisionID: route.RevisionID, Provider: route.Provider, Runtime: route.Runtime, ComputeMode: route.ComputeMode, OperationName: "chat", ResponseModel: responseModel, StartedAt: started, StatusCode: status, LatencyMS: latency, TTFTMS: ttft, InputTokens: inputTokens, OutputTokens: outputTokens, Streaming: streaming, ErrorType: errorType, ColdStart: evidence.coldStart, ProviderWorkersAtArrival: evidence.workers, ProviderCapacityObservedAt: evidence.observedAt}
+	record := domain.InferenceRecord{RequestID: id, DeploymentID: route.DeploymentID, RevisionID: route.RevisionID, Provider: route.Provider, Runtime: route.Runtime, ComputeMode: route.ComputeMode, OperationName: "chat", RequestModel: requestModel, ResponseModel: responseModel, SemanticConventionSchema: "https://opentelemetry.io/schemas/gen-ai/1.42.0", StartedAt: started, StatusCode: status, LatencyMS: latency, TTFTMS: ttft, InputTokens: inputTokens, OutputTokens: outputTokens, Streaming: streaming, ErrorType: errorType, ColdStart: evidence.coldStart, ProviderWorkersAtArrival: evidence.workers, ProviderCapacityObservedAt: evidence.observedAt}
 	if err := g.Recorder.RecordRequest(ctx, record); err != nil && g.Logger != nil {
 		g.Logger.Error("record request", "error", err, "request_id", id)
 	}

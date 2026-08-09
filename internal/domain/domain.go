@@ -133,7 +133,8 @@ type BenchmarkResult struct {
 type InferenceRecord struct {
 	RequestID, DeploymentID, RevisionID, TargetID string
 	Provider, Runtime, ComputeMode, OperationName string
-	ResponseModel, ErrorType                      string
+	RequestModel, ResponseModel, ErrorType        string
+	SemanticConventionSchema                      string
 	StartedAt                                     time.Time
 	StatusCode                                    int
 	LatencyMS                                     float64

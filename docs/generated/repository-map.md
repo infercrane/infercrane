@@ -186,6 +186,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 - `internal/store/migrations/016_serverless_zero_workers.sql`
 - `internal/store/migrations/017_cold_start_evidence.sql`
 - `internal/store/migrations/018_benchmark_history.sql`
+- `internal/store/migrations/019_genai_semantic_identity.sql`
 
 ## Architecture decisions
 
