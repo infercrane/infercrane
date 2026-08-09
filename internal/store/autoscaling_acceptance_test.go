@@ -220,6 +220,58 @@ func TestGuardedRolloutAcceptanceResumesAfterCutoverRestart(t *testing.T) {
 	assertReplicaCount(t, s, deployment.ID, 1)
 }
 
+func TestBadCandidateAcceptanceRejectsRevisionAndDeletesCapacity(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	name := "bad-rollout-acceptance"
+	requestJSON := fmt.Sprintf(`{"name":%q,"model":"Qwen/Qwen3-8B","cloud":"runpod","gpu":"L40S","tenant_id":"global","min_replicas":1,"max_replicas":1}`, name)
+	deployment, _, _, err := s.SubmitCloudDeployment(ctx, domain.Deployment{Name: name, Model: "Qwen/Qwen3-8B", MinReplicas: 1, MaxReplicas: 1}, domain.Operation{Kind: workflows.ConvergeKind, IdempotencyKey: "bad-rollout-initial", RequestJSON: requestJSON})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := &acceptanceProvider{existing: map[string]bool{}}
+	handlers := workflows.CloudHandlers(s, provider, acceptanceRuntime{}, acceptanceArtifactResolver{})
+	worker := operations.Worker{Repository: s, Handlers: handlers, Owner: "bad-rollout-worker", Lease: time.Second, BaseBackoff: time.Millisecond, MaxBackoff: time.Millisecond, Jitter: func(d time.Duration) time.Duration { return d }}
+	if worked, workerErr := worker.Once(ctx); workerErr != nil || !worked {
+		t.Fatalf("initial converge worked=%t err=%v", worked, workerErr)
+	}
+	resolved, err := s.Resolve(ctx, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	activeRevisionID := resolved.Deployment.ActiveRevisionID
+	candidate, err := s.CreateCandidateRevision(ctx, "global", name, `{"model":"Bad/Model","runtime":"vllm","routing_strategy":"round-robin","min_replicas":1,"max_replicas":1,"compute_mode":"elastic","cloud":"runpod","gpu":"H100"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, _ := json.Marshal(workflows.RolloutRequest{Name: name, CandidateID: candidate.ID, TenantID: "global", Actor: "acceptance"})
+	operation, _, err := s.EnqueueOperation(ctx, domain.Operation{TenantID: "global", Kind: workflows.RolloutProvisionKind, ResourceType: "deployment", ResourceName: name, IdempotencyKey: "bad-rollout-provision", RequestJSON: string(request), MaxAttempts: 120})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if worked, workerErr := worker.Once(ctx); workerErr != nil || !worked {
+		t.Fatalf("candidate validation worked=%t err=%v", worked, workerErr)
+	}
+	current, err := s.Operation(ctx, operation.ID)
+	if err != nil || current.Status != "failed" || current.ErrorCode != "runtime_model_mismatch" {
+		t.Fatalf("operation=%+v err=%v", current, err)
+	}
+	revision, err := s.Revision(ctx, "global", name, candidate.ID)
+	if err != nil || revision.Status != "rejected" || revision.Reason == "" {
+		t.Fatalf("revision=%+v err=%v", revision, err)
+	}
+	resolved, err = s.Resolve(ctx, name)
+	if err != nil || resolved.Deployment.ActiveRevisionID != activeRevisionID || resolved.Deployment.CandidateRevisionID != "" {
+		t.Fatalf("deployment=%+v err=%v", resolved.Deployment, err)
+	}
+	activeKey := deployment.ID + "-r0"
+	candidateKey := deployment.ID + "-" + candidate.ID + "-r0"
+	if !provider.existing[activeKey] || provider.existing[candidateKey] || len(provider.existing) != 1 {
+		t.Fatalf("provider resources=%#v", provider.existing)
+	}
+	assertReplicaCount(t, s, deployment.ID, 1)
+}
+
 func assertReplicaCount(t *testing.T, s *Store, deploymentID string, want int) {
 	t.Helper()
 	var count int

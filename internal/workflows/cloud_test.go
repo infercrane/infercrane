@@ -9,19 +9,21 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/operations"
 	"github.com/infercrane/infercrane/internal/provision"
 )
 
 type fakeCloudStore struct {
-	deployment  domain.Deployment
-	replica     domain.Replica
-	replicas    map[string]domain.Replica
-	checkpoints []string
-	target      domain.Target
-	targetNames []string
-	deleted     bool
-	revision    domain.DeploymentRevision
-	applied     bool
+	deployment     domain.Deployment
+	replica        domain.Replica
+	replicas       map[string]domain.Replica
+	checkpoints    []string
+	target         domain.Target
+	targetNames    []string
+	deleted        bool
+	revision       domain.DeploymentRevision
+	applied        bool
+	rejectedReason string
 }
 
 func (f *fakeCloudStore) ResolveForTenant(context.Context, string, string) (domain.ResolvedDeployment, error) {
@@ -140,6 +142,36 @@ func TestCandidateProvisioningCreatesIsolatedRevisionCapacity(t *testing.T) {
 	}
 }
 
+func TestBadCandidateIsRejectedAndCapacityIsDeleted(t *testing.T) {
+	spec := domain.DeploymentRevisionSpec{Model: "Bad/Model", Runtime: "vllm", RoutingStrategy: "round-robin", MinReplicas: 1, MaxReplicas: 1, ComputeMode: "elastic", Cloud: "runpod", GPU: "L40S"}
+	encoded, _ := json.Marshal(spec)
+	store := &fakeCloudStore{deployment: domain.Deployment{ID: "deployment-1", Name: "qwen", ActiveRevisionID: "rev-1", CandidateRevisionID: "rev-bad"}, revision: domain.DeploymentRevision{ID: "rev-bad", Status: "candidate", SpecJSON: string(encoded)}}
+	provider := &fakeReplicaProvider{observation: provision.Observation{Exists: true, State: "ready", Endpoint: "http://bad:8000", Details: `{}`}}
+	operation := domain.Operation{ID: "operation-bad", LeaseOwner: "worker", LeaseGeneration: 1, RequestJSON: `{"name":"qwen","candidate_id":"rev-bad","tenant_id":"global"}`}
+	_, err := CloudHandlers(store, provider, fakeInspector{ready: true})[RolloutProvisionKind](context.Background(), operation)
+	var failure operations.Failure
+	if !errors.As(err, &failure) || failure.Code != "runtime_model_mismatch" || failure.Retryable || provider.deleteCalls != 1 || store.replica.LifecycleState != "deleted" || store.revision.Status != "rejected" || store.rejectedReason == "" || store.deployment.ActiveRevisionID != "rev-1" {
+		t.Fatalf("failure=%+v delete_calls=%d replica=%#v revision=%#v reason=%q active=%s err=%v", failure, provider.deleteCalls, store.replica, store.revision, store.rejectedReason, store.deployment.ActiveRevisionID, err)
+	}
+}
+
+func TestRejectedCandidateProvisionRetryOnlyResumesCleanup(t *testing.T) {
+	store := &fakeCloudStore{
+		deployment: domain.Deployment{ID: "deployment-1", Name: "qwen", ActiveRevisionID: "rev-1"},
+		revision:   domain.DeploymentRevision{ID: "rev-bad", Status: "rejected", Reason: "candidate validation failed"},
+		replicas: map[string]domain.Replica{
+			"candidate": {ID: "candidate", DeploymentID: "deployment-1", RevisionID: "rev-bad", ExternalKey: "deployment-1-rev-bad-r0", LifecycleState: "failed", ProviderResourceID: "bad-resource"},
+		},
+	}
+	provider := &fakeReplicaProvider{observation: provision.Observation{Exists: true, State: "ready"}}
+	operation := domain.Operation{ID: "operation-bad", LeaseOwner: "worker", LeaseGeneration: 2, RequestJSON: `{"name":"qwen","candidate_id":"rev-bad","tenant_id":"global"}`}
+	_, err := CloudHandlers(store, provider, fakeInspector{ready: true})[RolloutProvisionKind](context.Background(), operation)
+	var failure operations.Failure
+	if !errors.As(err, &failure) || failure.Code != "candidate_rejected" || failure.Retryable || provider.ensureCalls != 0 || provider.deleteCalls != 1 || store.replicas["candidate"].LifecycleState != "deleted" {
+		t.Fatalf("failure=%+v ensure_calls=%d delete_calls=%d replicas=%#v err=%v", failure, provider.ensureCalls, provider.deleteCalls, store.replicas, err)
+	}
+}
+
 func TestCandidateCancellationDeletesOnlyCandidateCapacity(t *testing.T) {
 	replicas := map[string]domain.Replica{
 		"active":    {ID: "active", DeploymentID: "deployment-1", RevisionID: "rev-1", ExternalKey: "deployment-1-r0", LifecycleState: "active", ProviderResourceID: "active-resource"},
@@ -203,7 +235,12 @@ func (f *fakeCloudStore) Revision(context.Context, string, string, string) (doma
 	}
 	return f.revision, nil
 }
-func (f *fakeCloudStore) RejectCandidateRevision(context.Context, string, string, string, string) error {
+
+func (f *fakeCloudStore) RejectCandidateRevision(_ context.Context, _, _ string, candidateID, reason string) error {
+	if f.revision.ID == candidateID {
+		f.revision.Status = "rejected"
+	}
+	f.rejectedReason = reason
 	return nil
 }
 func (f *fakeCloudStore) PromoteGuardedCandidate(_ context.Context, _, _ string, candidateID string, _ []string) error {

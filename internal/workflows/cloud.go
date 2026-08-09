@@ -257,6 +257,7 @@ func CloudHandlers(store CloudStore, provider ReplicaProvider, runtime RuntimeIn
 		operation.RequestJSON = mustJSON(request)
 		return converge(ctx, operation)
 	}
+	var candidateCleanup operations.Handler
 	candidate := func(ctx context.Context, operation domain.Operation) (string, error) {
 		var rollout RolloutRequest
 		if err := json.Unmarshal([]byte(operation.RequestJSON), &rollout); err != nil || rollout.Name == "" || rollout.TenantID == "" || rollout.CandidateID == "" {
@@ -265,6 +266,12 @@ func CloudHandlers(store CloudStore, provider ReplicaProvider, runtime RuntimeIn
 		revision, err := store.Revision(ctx, rollout.TenantID, rollout.Name, rollout.CandidateID)
 		if err != nil {
 			return "", operations.Permanent("candidate_not_found", fmt.Errorf("candidate revision lookup: %w", err))
+		}
+		if revision.Status == "rejected" {
+			if _, cleanupErr := candidateCleanup(context.WithoutCancel(ctx), operation); cleanupErr != nil {
+				return "", operations.Retryable("candidate_cleanup_failed", cleanupErr)
+			}
+			return "", operations.Permanent("candidate_rejected", errors.New("candidate revision was rejected"))
 		}
 		if revision.Status != "candidate" {
 			return "", operations.Permanent("candidate_not_found", errors.New("revision is not the current candidate"))
@@ -300,6 +307,16 @@ func CloudHandlers(store CloudStore, provider ReplicaProvider, runtime RuntimeIn
 		for ordinal := 0; ordinal < request.DesiredReplicas; ordinal++ {
 			_, endpoint, resourceID, ensureErr := ensureCloudReplica(ctx, store, provider, runtime, operation, request, ordinal)
 			if ensureErr != nil {
+				var failure operations.Failure
+				if errors.As(ensureErr, &failure) && !failure.Retryable {
+					reason := "candidate validation failed: " + ensureErr.Error()
+					if rejectErr := store.RejectCandidateRevision(context.WithoutCancel(ctx), rollout.TenantID, rollout.Name, rollout.CandidateID, reason); rejectErr != nil && !errors.Is(rejectErr, domain.ErrConflict) {
+						return "", operations.Retryable("candidate_reject_failed", rejectErr)
+					}
+					if _, cleanupErr := candidateCleanup(context.WithoutCancel(ctx), operation); cleanupErr != nil {
+						return "", operations.Retryable("candidate_cleanup_failed", cleanupErr)
+					}
+				}
 				return "", ensureErr
 			}
 			endpoints = append(endpoints, endpoint)
@@ -309,7 +326,7 @@ func CloudHandlers(store CloudStore, provider ReplicaProvider, runtime RuntimeIn
 		result, _ := json.Marshal(map[string]any{"candidate_id": revision.ID, "endpoints": endpoints, "resource_ids": resourceIDs, "replicas": len(endpoints)})
 		return string(result), nil
 	}
-	candidateCleanup := func(ctx context.Context, operation domain.Operation) (string, error) {
+	candidateCleanup = func(ctx context.Context, operation domain.Operation) (string, error) {
 		var rollout RolloutRequest
 		if err := json.Unmarshal([]byte(operation.RequestJSON), &rollout); err != nil || rollout.Name == "" || rollout.TenantID == "" || rollout.CandidateID == "" {
 			return "", operations.Permanent("invalid_request", errors.New("deployment and candidate revision are required"))
@@ -519,7 +536,12 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, provider ReplicaP
 		return "", "", "", operations.Retryable("replica_starting", errors.New("replica is not ready"))
 	}
 	ready, models := runtime.Inspect(ctx, observation.Endpoint)
-	if _, present := models[request.Model]; !ready || !present {
+	_, present := models[request.Model]
+	if ready && !present {
+		_ = store.ObserveReplica(ctx, replica.ID, "failed", observation.Endpoint, "unhealthy", observation.Details, time.Now())
+		return "", "", "", operations.Permanent("runtime_model_mismatch", errors.New("healthy vLLM runtime does not serve candidate model"))
+	}
+	if !ready {
 		_ = store.ObserveReplica(ctx, replica.ID, "starting", observation.Endpoint, "starting", observation.Details, time.Now())
 		_ = checkpoint(ctx, store, operation, step+".runtime", "waiting", observation, 70, "Waiting for vLLM model readiness")
 		return "", "", "", operations.Retryable("runtime_starting", errors.New("vLLM model is not ready"))
