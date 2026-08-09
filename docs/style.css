@@ -5,8 +5,8 @@
   --infercrane-text: #16181b;
   --infercrane-text-secondary: #626a73;
   --infercrane-border: #e5e2dc;
-  --infercrane-accent: #c2410c;
-  --infercrane-accent-hover: #9a3412;
+  --infercrane-accent: #2563eb;
+  --infercrane-accent-hover: #1d4ed8;
   --infercrane-healthy: #18a98c;
   --infercrane-info: #297ed1;
   --infercrane-warning: #a66c00;
@@ -25,8 +25,8 @@
   --infercrane-text: #f3f1ea;
   --infercrane-text-secondary: #9ca3ad;
   --infercrane-border: #242a31;
-  --infercrane-accent: #ff6b35;
-  --infercrane-accent-hover: #ff8258;
+  --infercrane-accent: #60a5fa;
+  --infercrane-accent-hover: #93c5fd;
   --infercrane-healthy: #44d7b6;
   --infercrane-info: #59a8ff;
   --infercrane-warning: #f5b942;
@@ -216,7 +216,7 @@ samp {
 }
 
 .ic-prompt {
-  color: #ff8258;
+  color: #60a5fa;
   display: inline-block;
   margin-right: 0.55rem;
   user-select: none;

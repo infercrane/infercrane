@@ -1,10 +1,10 @@
 # InferCrane documentation style guide
 
-This guide keeps the public documentation precise, consistent, and maintainable. Baseten, Linear, and Vercel are quality references—not templates. Do not copy their branding, assets, copy, or component arrangements. InferCrane uses Mintlify's Sequoia theme as a restrained content shell, with repository-owned tokens and infrastructure components layered on top.
+This guide keeps the public documentation precise, consistent, and maintainable. Baseten, Linear, and Vercel are quality references—not templates. Do not copy their branding, assets, copy, or component arrangements. InferCrane uses Mintlify's Maple theme for its compact documentation shell and upper-left appearance controls, with repository-owned tokens and infrastructure components layered on top.
 
 ## Visual tokens
 
-Tokens live in `style.css`; `docs.json` contains the subset Mintlify owns. The interface is mostly neutral. Orange calls attention to primary actions and current focus, not decoration. Light mode uses a darker accessible orange for text and controls; `#FF6B35` remains the dark-mode brand accent.
+Tokens live in `style.css`; `docs.json` contains the subset Mintlify owns. The interface is mostly neutral. Blue communicates trust, calm, and operational reliability; it identifies navigation focus and primary actions without becoming decorative. Green remains reserved for healthy runtime state.
 
 | Role | Dark | Light |
 |---|---|---|
@@ -14,7 +14,7 @@ Tokens live in `style.css`; `docs.json` contains the subset Mintlify owns. The i
 | Primary text | `#F3F1EA` | `#16181B` |
 | Secondary text | `#9CA3AD` | `#626A73` |
 | Border | `#242A31` | `#E5E2DC` |
-| Accent | `#FF6B35` | `#C2410C` |
+| Accent | `#60A5FA` | `#2563EB` |
 | Healthy | `#44D7B6` | `#18A98C` |
 | Information | `#59A8FF` | `#297ED1` |
 | Warning | `#F5B942` | `#A66C00` |

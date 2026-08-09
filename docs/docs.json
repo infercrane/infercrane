@@ -1,12 +1,12 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "sequoia",
+  "theme": "maple",
   "name": "InferCrane",
   "description": "Production inference without the platform engineering. Deploy, autoscale, benchmark, and safely update vLLM on RunPod.",
   "colors": {
-    "primary": "#C2410C",
-    "light": "#FF8258",
-    "dark": "#C2410C"
+    "primary": "#2563EB",
+    "light": "#60A5FA",
+    "dark": "#2563EB"
   },
   "appearance": {
     "default": "system",
