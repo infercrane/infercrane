@@ -3,20 +3,23 @@ package routes
 import (
 	"slices"
 	"sync"
+	"time"
 )
 
 type Snapshot struct {
-	DeploymentID    string
-	RevisionID      string
-	TenantID        string
-	Alias           string
-	UpstreamModel   string
-	RouterURL       string
-	RouterProcessID string
-	Provider        string
-	Runtime         string
-	ComputeMode     string
-	UpstreamAPIKey  string
+	DeploymentID       string
+	RevisionID         string
+	TenantID           string
+	Alias              string
+	UpstreamModel      string
+	RouterURL          string
+	RouterProcessID    string
+	Provider           string
+	Runtime            string
+	ComputeMode        string
+	UpstreamAPIKey     string
+	ProviderWorkers    *int
+	ProviderObservedAt time.Time
 }
 
 // Directory is an atomic in-memory data-plane snapshot. Reads never touch the database.

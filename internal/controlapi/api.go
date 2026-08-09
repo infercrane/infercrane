@@ -27,6 +27,7 @@ type Store interface {
 	ResolveForTenant(context.Context, string, string) (domain.ResolvedDeployment, error)
 	EventsForTenant(context.Context, string, string) ([]domain.Event, error)
 	RequestStats(context.Context, string, time.Duration) (domain.RequestStats, error)
+	ColdStartStats(context.Context, string, time.Duration) (domain.ColdStartStats, error)
 	ReplicasForDeployment(context.Context, string, string) ([]domain.Replica, error)
 	Revisions(context.Context, string, string) ([]domain.DeploymentRevision, error)
 	OperationEvents(context.Context, string, int) ([]domain.OperationEvent, error)
@@ -348,6 +349,11 @@ func (a API) deployment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "internal", "request statistics lookup failed")
 		return
 	}
+	coldStarts, err := a.Store.ColdStartStats(r.Context(), resolved.Deployment.ID, 24*time.Hour)
+	if err != nil {
+		writeError(w, 500, "internal", "cold-start statistics lookup failed")
+		return
+	}
 	guardEvaluations, err := a.Store.ReleaseGuardEvaluations(r.Context(), principal.TenantID, resolved.Deployment.Name, 20)
 	if err != nil {
 		writeError(w, 500, "internal", "Release Guard evaluation lookup failed")
@@ -382,7 +388,7 @@ func (a API) deployment(w http.ResponseWriter, r *http.Request) {
 	for _, evaluation := range guardEvaluations {
 		guardData = append(guardData, releaseGuardResponse(evaluation))
 	}
-	writeJSON(w, 200, map[string]any{"deployment": deploymentResponse(resolved.Deployment), "targets": targets, "replicas": replicaData, "revisions": revisionData, "model_artifacts": artifactData, "request_stats": stats, "release_guard_policy": guardPolicy, "release_guard_evaluations": guardData})
+	writeJSON(w, 200, map[string]any{"deployment": deploymentResponse(resolved.Deployment), "targets": targets, "replicas": replicaData, "revisions": revisionData, "model_artifacts": artifactData, "request_stats": stats, "cold_start_stats": coldStarts, "release_guard_policy": guardPolicy, "release_guard_evaluations": guardData})
 }
 func (a API) deploymentEvents(w http.ResponseWriter, r *http.Request) {
 	principal := r.Context().Value(identityKey{}).(domain.Principal)

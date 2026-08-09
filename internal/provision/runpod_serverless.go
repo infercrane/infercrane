@@ -27,6 +27,11 @@ type ServerlessEndpoint struct {
 	Workers              int
 }
 
+type ServerlessHealth struct {
+	WorkersIdle, WorkersRunning                          int
+	JobsCompleted, JobsFailed, JobsInProgress, JobsQueue int
+}
+
 type RunPodServerless struct {
 	APIKey, BaseURL, InferenceBaseURL, TemplateID string
 	Client                                        *http.Client
@@ -38,6 +43,28 @@ func (r RunPodServerless) EndpointURL(endpointID string) string {
 		base = "https://api.runpod.ai/v2"
 	}
 	return base + "/" + url.PathEscape(endpointID) + "/openai"
+}
+
+func (r RunPodServerless) EndpointHealth(ctx context.Context, endpointID string) (ServerlessHealth, error) {
+	if endpointID == "" {
+		return ServerlessHealth{}, errors.New("RunPod Serverless endpoint ID is required")
+	}
+	base := strings.TrimRight(r.InferenceBaseURL, "/")
+	if base == "" {
+		base = "https://api.runpod.ai/v2"
+	}
+	var response struct {
+		Workers struct {
+			Idle, Running int
+		} `json:"workers"`
+		Jobs struct {
+			Completed, Failed, InProgress, InQueue int
+		} `json:"jobs"`
+	}
+	if err := r.doAbsolute(ctx, http.MethodGet, base+"/"+url.PathEscape(endpointID)+"/health", nil, &response); err != nil {
+		return ServerlessHealth{}, err
+	}
+	return ServerlessHealth{WorkersIdle: response.Workers.Idle, WorkersRunning: response.Workers.Running, JobsCompleted: response.Jobs.Completed, JobsFailed: response.Jobs.Failed, JobsInProgress: response.Jobs.InProgress, JobsQueue: response.Jobs.InQueue}, nil
 }
 
 func (r RunPodServerless) EnsureEndpoint(ctx context.Context, spec ServerlessEndpointSpec) (ServerlessEndpoint, error) {
@@ -193,6 +220,13 @@ func (r RunPodServerless) do(ctx context.Context, method, path string, body, out
 	if base == "" {
 		base = defaultRunPodRESTURL
 	}
+	return r.doAbsolute(ctx, method, base+path, body, output)
+}
+
+func (r RunPodServerless) doAbsolute(ctx context.Context, method, endpoint string, body, output any) error {
+	if r.APIKey == "" {
+		return errors.New("RUNPOD_API_KEY is required")
+	}
 	var reader io.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)
@@ -201,7 +235,7 @@ func (r RunPodServerless) do(ctx context.Context, method, path string, body, out
 		}
 		reader = bytes.NewReader(encoded)
 	}
-	request, err := http.NewRequestWithContext(ctx, method, base+path, reader)
+	request, err := http.NewRequestWithContext(ctx, method, endpoint, reader)
 	if err != nil {
 		return err
 	}

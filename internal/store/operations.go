@@ -332,7 +332,7 @@ func (s *Store) UpdateProvisionedTarget(ctx context.Context, id, resourceID, det
 }
 
 func (s *Store) RecordRequest(ctx context.Context, record domain.InferenceRecord) error {
-	_, err := s.ExecContext(ctx, `INSERT INTO request_records(request_id,deployment_id,revision_id,target_id,started_at,completed_at,status_code,latency_ms,ttft_ms,input_tokens,output_tokens,retry_count,error_type,provider,runtime,compute_mode,operation_name,response_model,streaming) VALUES(?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,?,?,?) ON CONFLICT(request_id) DO UPDATE SET completed_at=EXCLUDED.completed_at,status_code=EXCLUDED.status_code,latency_ms=EXCLUDED.latency_ms,ttft_ms=EXCLUDED.ttft_ms,input_tokens=EXCLUDED.input_tokens,output_tokens=EXCLUDED.output_tokens,error_type=EXCLUDED.error_type,response_model=EXCLUDED.response_model`, record.RequestID, record.DeploymentID, null(record.RevisionID), null(record.TargetID), record.StartedAt.UTC().Format(time.RFC3339Nano), now(), record.StatusCode, record.LatencyMS, record.TTFTMS, record.InputTokens, record.OutputTokens, null(record.ErrorType), null(record.Provider), null(record.Runtime), null(record.ComputeMode), record.OperationName, null(record.ResponseModel), record.Streaming)
+	_, err := s.ExecContext(ctx, `INSERT INTO request_records(request_id,deployment_id,revision_id,target_id,started_at,completed_at,status_code,latency_ms,ttft_ms,input_tokens,output_tokens,retry_count,error_type,provider,runtime,compute_mode,operation_name,response_model,streaming,cold_start,provider_workers_at_arrival,provider_capacity_observed_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(request_id) DO UPDATE SET completed_at=EXCLUDED.completed_at,status_code=EXCLUDED.status_code,latency_ms=EXCLUDED.latency_ms,ttft_ms=EXCLUDED.ttft_ms,input_tokens=EXCLUDED.input_tokens,output_tokens=EXCLUDED.output_tokens,error_type=EXCLUDED.error_type,response_model=EXCLUDED.response_model,cold_start=EXCLUDED.cold_start,provider_workers_at_arrival=EXCLUDED.provider_workers_at_arrival,provider_capacity_observed_at=EXCLUDED.provider_capacity_observed_at`, record.RequestID, record.DeploymentID, null(record.RevisionID), null(record.TargetID), record.StartedAt.UTC().Format(time.RFC3339Nano), now(), record.StatusCode, record.LatencyMS, record.TTFTMS, record.InputTokens, record.OutputTokens, null(record.ErrorType), null(record.Provider), null(record.Runtime), null(record.ComputeMode), record.OperationName, null(record.ResponseModel), record.Streaming, record.ColdStart, record.ProviderWorkersAtArrival, record.ProviderCapacityObservedAt)
 	return err
 }
 
@@ -369,6 +369,35 @@ func (s *Store) RequestStats(ctx context.Context, deploymentID string, window ti
 	if ttftP95.Valid {
 		out.P95TTFTMS = &ttftP95.Float64
 	}
+	return out, nil
+}
+
+func (s *Store) ColdStartStats(ctx context.Context, deploymentID string, window time.Duration) (domain.ColdStartStats, error) {
+	if window <= 0 {
+		return domain.ColdStartStats{}, errors.New("stats window must be positive")
+	}
+	var out domain.ColdStartStats
+	var coldP50, coldP95, warmP50, warmP95 sql.NullFloat64
+	err := s.QueryRowContext(ctx, `SELECT COUNT(*) FILTER (WHERE cold_start IS NOT NULL),COUNT(*) FILTER (WHERE cold_start=TRUE),COUNT(*) FILTER (WHERE cold_start=FALSE),percentile_cont(0.50) WITHIN GROUP (ORDER BY ttft_ms) FILTER (WHERE cold_start=TRUE AND ttft_ms IS NOT NULL),percentile_cont(0.95) WITHIN GROUP (ORDER BY ttft_ms) FILTER (WHERE cold_start=TRUE AND ttft_ms IS NOT NULL),percentile_cont(0.50) WITHIN GROUP (ORDER BY ttft_ms) FILTER (WHERE cold_start=FALSE AND ttft_ms IS NOT NULL),percentile_cont(0.95) WITHIN GROUP (ORDER BY ttft_ms) FILTER (WHERE cold_start=FALSE AND ttft_ms IS NOT NULL) FROM request_records WHERE deployment_id=? AND started_at>=NOW()-(?*INTERVAL '1 second')`, deploymentID, window.Seconds()).Scan(&out.ClassifiedRequests, &out.ColdStarts, &out.WarmRequests, &coldP50, &coldP95, &warmP50, &warmP95)
+	if err != nil {
+		return domain.ColdStartStats{}, err
+	}
+	if coldP50.Valid {
+		out.ColdTTFTP50MS = &coldP50.Float64
+	}
+	if coldP95.Valid && out.ColdStarts >= 20 {
+		out.ColdTTFTP95MS = &coldP95.Float64
+	}
+	if warmP50.Valid {
+		out.WarmTTFTP50MS = &warmP50.Float64
+	}
+	if warmP95.Valid && out.WarmRequests >= 20 {
+		out.WarmTTFTP95MS = &warmP95.Float64
+	}
+	if out.ColdStarts > 0 {
+		out.BottleneckCode = "provider_capacity_or_worker_initialization"
+	}
+	out.Evidence = "Classification uses a fresh RunPod zero-worker observation at request arrival; provider sub-stage timings are unavailable and are not inferred."
 	return out, nil
 }
 

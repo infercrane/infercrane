@@ -65,6 +65,9 @@ func (f *fakeStore) EventsForTenant(context.Context, string, string) ([]domain.E
 func (f *fakeStore) RequestStats(context.Context, string, time.Duration) (domain.RequestStats, error) {
 	return domain.RequestStats{}, f.err
 }
+func (f *fakeStore) ColdStartStats(context.Context, string, time.Duration) (domain.ColdStartStats, error) {
+	return domain.ColdStartStats{}, f.err
+}
 func (f *fakeStore) ReplicasForDeployment(context.Context, string, string) ([]domain.Replica, error) {
 	return nil, f.err
 }

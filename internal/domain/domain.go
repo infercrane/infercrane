@@ -100,6 +100,18 @@ type RequestStats struct {
 	P95TTFTMS             *float64 `json:"p95_ttft_ms"`
 }
 
+type ColdStartStats struct {
+	ClassifiedRequests int      `json:"classified_requests"`
+	ColdStarts         int      `json:"cold_starts"`
+	WarmRequests       int      `json:"warm_requests"`
+	ColdTTFTP50MS      *float64 `json:"cold_ttft_p50_ms,omitempty"`
+	ColdTTFTP95MS      *float64 `json:"cold_ttft_p95_ms,omitempty"`
+	WarmTTFTP50MS      *float64 `json:"warm_ttft_p50_ms,omitempty"`
+	WarmTTFTP95MS      *float64 `json:"warm_ttft_p95_ms,omitempty"`
+	BottleneckCode     string   `json:"bottleneck_code,omitempty"`
+	Evidence           string   `json:"evidence"`
+}
+
 // InferenceRecord contains request metadata and measurements only. Prompt and
 // generated content are deliberately excluded.
 type InferenceRecord struct {
@@ -111,6 +123,9 @@ type InferenceRecord struct {
 	LatencyMS                                     float64
 	TTFTMS                                        *float64
 	InputTokens, OutputTokens                     *int
+	ColdStart                                     *bool
+	ProviderWorkersAtArrival                      *int
+	ProviderCapacityObservedAt                    *time.Time
 	Streaming                                     bool
 }
 

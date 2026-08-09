@@ -88,3 +88,18 @@ func TestRunPodServerlessCheckRejectsMutableTemplate(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 }
+
+func TestRunPodServerlessHealthReportsWorkersWithoutInferenceRequest(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/endpoint-1/health" || r.Method != http.MethodGet {
+			t.Fatalf("request=%s %s", r.Method, r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"workers": map[string]int{"idle": 0, "running": 0}, "jobs": map[string]int{"completed": 2, "failed": 1, "inProgress": 0, "inQueue": 1}})
+	}))
+	defer server.Close()
+	provider := RunPodServerless{APIKey: "secret", InferenceBaseURL: server.URL, Client: server.Client()}
+	health, err := provider.EndpointHealth(context.Background(), "endpoint-1")
+	if err != nil || health.WorkersIdle != 0 || health.WorkersRunning != 0 || health.JobsCompleted != 2 || health.JobsQueue != 1 {
+		t.Fatalf("health=%+v err=%v", health, err)
+	}
+}

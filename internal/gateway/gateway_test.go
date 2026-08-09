@@ -119,6 +119,65 @@ func TestCompletionReplacesPublicCredentialForServerlessUpstream(t *testing.T) {
 	}
 }
 
+func TestServerlessColdEvidenceClassifiesOnlyTriggeringRequest(t *testing.T) {
+	client := &http.Client{Transport: roundTripper(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"model":"Qwen/Qwen3-8B","choices":[]}`))}, nil
+	})}
+	workers := 0
+	directory := routes.New()
+	directory.Put(routes.Snapshot{DeploymentID: "d1", RevisionID: "rev-1", Alias: "alias", UpstreamModel: "Qwen/Qwen3-8B", RouterURL: "https://api.runpod.invalid/openai", Provider: "runpod", Runtime: "vllm", ComputeMode: "serverless", UpstreamAPIKey: "runpod-secret", ProviderWorkers: &workers, ProviderObservedAt: time.Now()})
+	captured := &captureRecorder{}
+	handler := (&Gateway{Routes: directory, APIKey: "infercrane-secret", Client: client, Recorder: captured}).Handler()
+	send := func() {
+		request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"alias","messages":[]}`))
+		request.Header.Set("Authorization", "Bearer infercrane-secret")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+		}
+	}
+	send()
+	captured.mu.Lock()
+	first := captured.record
+	captured.mu.Unlock()
+	if first.ColdStart == nil || !*first.ColdStart || first.ProviderWorkersAtArrival == nil || *first.ProviderWorkersAtArrival != 0 || first.ProviderCapacityObservedAt == nil {
+		t.Fatalf("first=%+v", first)
+	}
+	published, _ := directory.Get("alias")
+	if published.ProviderWorkers != nil || !published.ProviderObservedAt.IsZero() {
+		t.Fatalf("cold evidence was not invalidated: %+v", published)
+	}
+	send()
+	captured.mu.Lock()
+	second := captured.record
+	captured.mu.Unlock()
+	if second.ColdStart != nil || second.ProviderWorkersAtArrival != nil {
+		t.Fatalf("second request reused cold evidence: %+v", second)
+	}
+}
+
+func TestServerlessNonzeroWorkerEvidenceClassifiesWarmRequest(t *testing.T) {
+	client := &http.Client{Transport: roundTripper(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"choices":[]}`))}, nil
+	})}
+	workers := 1
+	directory := routes.New()
+	directory.Put(routes.Snapshot{DeploymentID: "d1", Alias: "alias", UpstreamModel: "model", RouterURL: "https://api.runpod.invalid/openai", Provider: "runpod", Runtime: "vllm", ComputeMode: "serverless", ProviderWorkers: &workers, ProviderObservedAt: time.Now()})
+	captured := &captureRecorder{}
+	handler := (&Gateway{Routes: directory, APIKey: "secret", Client: client, Recorder: captured}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"alias","messages":[]}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	captured.mu.Lock()
+	record := captured.record
+	captured.mu.Unlock()
+	if response.Code != http.StatusOK || record.ColdStart == nil || *record.ColdStart || record.ProviderWorkersAtArrival == nil || *record.ProviderWorkersAtArrival != 1 {
+		t.Fatalf("status=%d record=%+v", response.Code, record)
+	}
+}
+
 func TestAuthentication(t *testing.T) {
 	handler := (&Gateway{Routes: routes.New(), APIKey: "secret"}).Handler()
 	recorder := httptest.NewRecorder()

@@ -139,6 +139,21 @@ func (g *Gateway) completions(w http.ResponseWriter, r *http.Request) {
 		traceParent = "00-" + randomHex(16) + "-" + randomHex(8) + "-01"
 	}
 	started := time.Now()
+	evidence := capacityEvidence{}
+	if route.ComputeMode == "serverless" && route.ProviderWorkers != nil && !route.ProviderObservedAt.IsZero() {
+		age := started.Sub(route.ProviderObservedAt)
+		if age >= 0 && age <= 30*time.Second {
+			workers := *route.ProviderWorkers
+			cold := workers == 0
+			observedAt := route.ProviderObservedAt
+			evidence = capacityEvidence{coldStart: &cold, workers: &workers, observedAt: &observedAt}
+			if cold {
+				invalidated := route
+				invalidated.ProviderWorkers, invalidated.ProviderObservedAt = nil, time.Time{}
+				g.Routes.Put(invalidated)
+			}
+		}
+	}
 	target, err := url.JoinPath(route.RouterURL, "v1/chat/completions")
 	if err != nil {
 		openAIError(w, "Inference upstream is unavailable", http.StatusServiceUnavailable, "server_error")
@@ -166,7 +181,7 @@ func (g *Gateway) completions(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, context.DeadlineExceeded) {
 			status, errorType, message = http.StatusGatewayTimeout, "timeout", "Inference upstream timed out"
 		}
-		g.record(r.Context(), requestID, route, started, status, errorType, streaming, responseObservation{})
+		g.record(r.Context(), requestID, route, started, status, errorType, streaming, responseObservation{}, evidence)
 		openAIError(w, message, status, "server_error")
 		return
 	}
@@ -185,12 +200,19 @@ func (g *Gateway) completions(w http.ResponseWriter, r *http.Request) {
 			errorType = "upstream_disconnect"
 		}
 	}
-	g.record(context.WithoutCancel(r.Context()), requestID, route, started, resp.StatusCode, errorType, streaming, observation)
+	g.record(context.WithoutCancel(r.Context()), requestID, route, started, resp.StatusCode, errorType, streaming, observation, evidence)
 	if g.Logger != nil {
 		g.Logger.Info("inference request", "request_id", requestID, "traceparent", traceParent, "tenant_id", principal.TenantID, "deployment_id", route.DeploymentID, "status", resp.StatusCode, "duration_ms", float64(time.Since(started).Microseconds())/1000)
 	}
 }
-func (g *Gateway) record(ctx context.Context, id string, route routes.Snapshot, started time.Time, status int, errorType string, streaming bool, observation responseObservation) {
+
+type capacityEvidence struct {
+	coldStart  *bool
+	workers    *int
+	observedAt *time.Time
+}
+
+func (g *Gateway) record(ctx context.Context, id string, route routes.Snapshot, started time.Time, status int, errorType string, streaming bool, observation responseObservation, evidence capacityEvidence) {
 	if g.Recorder == nil {
 		return
 	}
@@ -201,7 +223,7 @@ func (g *Gateway) record(ctx context.Context, id string, route routes.Snapshot, 
 		ttft = &value
 	}
 	responseModel, inputTokens, outputTokens := observation.usage()
-	record := domain.InferenceRecord{RequestID: id, DeploymentID: route.DeploymentID, RevisionID: route.RevisionID, Provider: route.Provider, Runtime: route.Runtime, ComputeMode: route.ComputeMode, OperationName: "chat", ResponseModel: responseModel, StartedAt: started, StatusCode: status, LatencyMS: latency, TTFTMS: ttft, InputTokens: inputTokens, OutputTokens: outputTokens, Streaming: streaming, ErrorType: errorType}
+	record := domain.InferenceRecord{RequestID: id, DeploymentID: route.DeploymentID, RevisionID: route.RevisionID, Provider: route.Provider, Runtime: route.Runtime, ComputeMode: route.ComputeMode, OperationName: "chat", ResponseModel: responseModel, StartedAt: started, StatusCode: status, LatencyMS: latency, TTFTMS: ttft, InputTokens: inputTokens, OutputTokens: outputTokens, Streaming: streaming, ErrorType: errorType, ColdStart: evidence.coldStart, ProviderWorkersAtArrival: evidence.workers, ProviderCapacityObservedAt: evidence.observedAt}
 	if err := g.Recorder.RecordRequest(ctx, record); err != nil && g.Logger != nil {
 		g.Logger.Error("record request", "error", err, "request_id", id)
 	}

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/provision"
 	"github.com/infercrane/infercrane/internal/router"
 	"github.com/infercrane/infercrane/internal/routes"
 )
@@ -117,18 +118,25 @@ func (r *countingRuntime) Inspect(context.Context, string) (bool, map[string]str
 	return false, nil
 }
 
+type zeroWorkerStatus struct{}
+
+func (zeroWorkerStatus) EndpointHealth(context.Context, string) (provision.ServerlessHealth, error) {
+	return provision.ServerlessHealth{}, nil
+}
+
 func TestServerlessRouteDoesNotWarmWorkersOrStartRouter(t *testing.T) {
 	store, directory := reconcilerFixture()
 	store.target.Provider = "runpod-serverless"
+	store.target.ProviderResourceID = "endpoint-1"
 	store.target.URL = "https://api.runpod.invalid/v2/endpoint/openai"
 	backend := &fakeRouter{routes: directory}
 	runtime := &countingRuntime{}
-	reconciler := Reconciler{Store: store, Routes: directory, Router: backend, Runtime: runtime, ProviderAPIKeys: map[string]string{"runpod-serverless": "runpod-secret"}, RouterStartPort: 18080, InstanceID: "instance"}
+	reconciler := Reconciler{Store: store, Routes: directory, Router: backend, Runtime: runtime, ProviderAPIKeys: map[string]string{"runpod-serverless": "runpod-secret"}, Serverless: zeroWorkerStatus{}, RouterStartPort: 18080, InstanceID: "instance"}
 	if err := reconciler.Once(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	published, ok := directory.Get("prod")
-	if !ok || published.RouterURL != store.target.URL || published.ComputeMode != "serverless" || published.Provider != "runpod" || published.UpstreamAPIKey != "runpod-secret" || runtime.calls != 0 || backend.started != "" {
+	if !ok || published.RouterURL != store.target.URL || published.ComputeMode != "serverless" || published.Provider != "runpod" || published.UpstreamAPIKey != "runpod-secret" || published.ProviderWorkers == nil || *published.ProviderWorkers != 0 || published.ProviderObservedAt.IsZero() || runtime.calls != 0 || backend.started != "" {
 		t.Fatalf("published=%#v runtime_calls=%d router_started=%q", published, runtime.calls, backend.started)
 	}
 }

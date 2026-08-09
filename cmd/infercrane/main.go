@@ -563,6 +563,7 @@ type deploymentView struct {
 	Revisions               []revisionView            `json:"revisions"`
 	ModelArtifacts          []artifactView            `json:"model_artifacts"`
 	RequestStats            domain.RequestStats       `json:"request_stats"`
+	ColdStartStats          domain.ColdStartStats     `json:"cold_start_stats"`
 	ReleaseGuardPolicy      domain.ReleaseGuardPolicy `json:"release_guard_policy"`
 	ReleaseGuardEvaluations []releaseGuardView        `json:"release_guard_evaluations"`
 }
@@ -1014,7 +1015,47 @@ func explainCommand(ctx context.Context, cfg config.Config, args []string) error
 	if args[0] == "scaling" {
 		return explainScalingCommand(ctx, cfg, args[1:])
 	}
-	if args[0] == "rollout" || args[0] == "cold-start" {
+	if args[0] == "cold-start" {
+		if len(args) < 2 {
+			return errors.New("usage: infercrane explain cold-start DEPLOYMENT [--output human|json]")
+		}
+		fs := flag.NewFlagSet("explain cold-start", flag.ContinueOnError)
+		output := fs.String("output", "human", "human or json")
+		if err := fs.Parse(args[2:]); err != nil {
+			return err
+		}
+		view, err := fetchDeployment(ctx, cfg, args[1])
+		if err != nil {
+			return err
+		}
+		stats := view.ColdStartStats
+		if *output == "json" {
+			encoded, _ := json.MarshalIndent(map[string]any{"deployment": args[1], "cold_start": stats}, "", "  ")
+			fmt.Println(string(encoded))
+			return nil
+		}
+		if *output != "human" {
+			return errors.New("--output must be human or json")
+		}
+		fmt.Printf("%s cold-start evidence\nClassified requests  %d\nCold starts          %d\nWarm requests        %d\n", args[1], stats.ClassifiedRequests, stats.ColdStarts, stats.WarmRequests)
+		if stats.ColdTTFTP50MS != nil {
+			fmt.Printf("Cold TTFT p50        %.1fms\n", *stats.ColdTTFTP50MS)
+		}
+		if stats.ColdTTFTP95MS != nil {
+			fmt.Printf("Cold TTFT p95        %.1fms\n", *stats.ColdTTFTP95MS)
+		} else if stats.ColdStarts > 0 {
+			fmt.Println("Cold TTFT p95        unavailable (requires at least 20 classified cold starts)")
+		}
+		if stats.WarmTTFTP50MS != nil {
+			fmt.Printf("Warm TTFT p50        %.1fms\n", *stats.WarmTTFTP50MS)
+		}
+		if stats.BottleneckCode != "" {
+			fmt.Printf("Bottleneck           %s\n", stats.BottleneckCode)
+		}
+		fmt.Printf("Evidence             %s\n", stats.Evidence)
+		return nil
+	}
+	if args[0] == "rollout" {
 		return fmt.Errorf("explain %s is not available until its persisted evidence schema is enabled", args[0])
 	}
 	fs := flag.NewFlagSet("explain", flag.ContinueOnError)
@@ -1246,6 +1287,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	directory := routes.New()
 	backend := router.NewVLLM(cfg.RouterBinary, cfg.APIKey)
 	runtime := runtimeadapter.VLLM{APIKey: cfg.APIKey}
+	serverless := provision.RunPodServerless{APIKey: cfg.RunPodAPIKey, BaseURL: cfg.RunPodRESTURL, TemplateID: cfg.RunPodServerlessTemplateID}
 	logger := slog.Default()
 	recorder := accounting.New(s, logger, 8192, 4)
 	defer func() {
@@ -1253,7 +1295,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		defer cancel()
 		_ = recorder.Close(closeCtx)
 	}()
-	rec := &reconcile.Reconciler{Store: s, Routes: directory, Router: backend, Runtime: runtime, Interval: cfg.HealthInterval, RouterStartPort: cfg.RouterStartPort, InstanceID: cfg.InstanceID, Logger: logger, ProviderAPIKeys: map[string]string{"runpod-serverless": cfg.RunPodAPIKey}}
+	rec := &reconcile.Reconciler{Store: s, Routes: directory, Router: backend, Runtime: runtime, Interval: cfg.HealthInterval, RouterStartPort: cfg.RouterStartPort, InstanceID: cfg.InstanceID, Logger: logger, ProviderAPIKeys: map[string]string{"runpod-serverless": cfg.RunPodAPIKey}, Serverless: serverless}
 	go purgeRequests(ctx, s, cfg.RequestRetention, logger)
 	go func() {
 		_ = rec.Run(ctx)
@@ -1277,7 +1319,6 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	for kind, handler := range workflows.CloudHandlers(s, provision.SkyPilot{APIKey: cfg.APIKey}, runtime, artifact.HuggingFace{}) {
 		handlers[kind] = handler
 	}
-	serverless := provision.RunPodServerless{APIKey: cfg.RunPodAPIKey, BaseURL: cfg.RunPodRESTURL, TemplateID: cfg.RunPodServerlessTemplateID}
 	for kind, handler := range workflows.ServerlessHandlers(s, serverless, artifact.HuggingFace{}) {
 		handlers[kind] = handler
 	}

@@ -29,6 +29,7 @@ than loading the entire repository into one context window.
 - [Provisioning and runtimes](features/provisioning.md)
 - [Configuration and operations](features/operations.md)
 - [RunPod Serverless](features/serverless.md)
+- [Cold-start intelligence](features/cold-starts.md)
 
 ## Operations
 

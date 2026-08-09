@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/provision"
 	"github.com/infercrane/infercrane/internal/router"
 	"github.com/infercrane/infercrane/internal/routes"
 )
@@ -28,6 +29,9 @@ type Store interface {
 type Runtime interface {
 	Inspect(context.Context, string) (bool, map[string]struct{})
 }
+type ServerlessStatus interface {
+	EndpointHealth(context.Context, string) (provision.ServerlessHealth, error)
+}
 type Reconciler struct {
 	Store           Store
 	Routes          *routes.Directory
@@ -38,6 +42,7 @@ type Reconciler struct {
 	InstanceID      string
 	Logger          *slog.Logger
 	ProviderAPIKeys map[string]string
+	Serverless      ServerlessStatus
 }
 
 func (r *Reconciler) Run(ctx context.Context) error {
@@ -84,9 +89,11 @@ func (r *Reconciler) Once(ctx context.Context) error {
 			return err
 		}
 		type inspection struct {
-			target domain.Target
-			ok     bool
-			models map[string]struct{}
+			target     domain.Target
+			ok         bool
+			models     map[string]struct{}
+			workers    *int
+			observedAt time.Time
 		}
 		inspections := make([]inspection, len(resolved.Targets))
 		var wg sync.WaitGroup
@@ -101,7 +108,14 @@ func (r *Reconciler) Once(ctx context.Context) error {
 				if expected == "" {
 					expected = d.Model
 				}
-				inspections[i] = inspection{target: target, ok: true, models: map[string]struct{}{expected: {}}}
+				result := inspection{target: target, ok: true, models: map[string]struct{}{expected: {}}}
+				if r.Serverless != nil && target.ProviderResourceID != "" {
+					if health, healthErr := r.Serverless.EndpointHealth(ctx, target.ProviderResourceID); healthErr == nil {
+						workers := health.WorkersIdle + health.WorkersRunning
+						result.workers, result.observedAt = &workers, time.Now()
+					}
+				}
+				inspections[i] = result
 				continue
 			}
 			wg.Add(1)
@@ -149,7 +163,15 @@ func (r *Reconciler) Once(ctx context.Context) error {
 			if upstream == "" {
 				upstream = d.Model
 			}
-			r.Routes.Put(routes.Snapshot{DeploymentID: d.ID, RevisionID: d.ActiveRevisionID, TenantID: d.TenantID, Alias: d.Name, UpstreamModel: upstream, RouterURL: healthy[0].URL, Provider: "runpod", Runtime: d.Runtime, ComputeMode: "serverless", UpstreamAPIKey: r.ProviderAPIKeys["runpod-serverless"]})
+			var workers *int
+			var observedAt time.Time
+			for _, result := range inspections {
+				if result.target.ID == healthy[0].ID {
+					workers, observedAt = result.workers, result.observedAt
+					break
+				}
+			}
+			r.Routes.Put(routes.Snapshot{DeploymentID: d.ID, RevisionID: d.ActiveRevisionID, TenantID: d.TenantID, Alias: d.Name, UpstreamModel: upstream, RouterURL: healthy[0].URL, Provider: "runpod", Runtime: d.Runtime, ComputeMode: "serverless", UpstreamAPIKey: r.ProviderAPIKeys["runpod-serverless"], ProviderWorkers: workers, ProviderObservedAt: observedAt})
 			_ = r.Store.SetDeploymentState(ctx, d.ID, "healthy")
 			continue
 		}
