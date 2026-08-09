@@ -5,7 +5,8 @@ root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 compose_file="$root/compose.runpod-acceptance.yaml"
 project=${INFERCRANE_ACCEPTANCE_PROJECT:-infercrane-runpod}
 state_root=${INFERCRANE_ACCEPTANCE_STATE_DIR:-"$root/.infercrane/acceptance"}
-run_id=${INFERCRANE_ACCEPTANCE_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)}
+requested_run_id=${INFERCRANE_ACCEPTANCE_RUN_ID:-}
+run_id=${requested_run_id:-$(date -u +%Y%m%dT%H%M%SZ)}
 current_file="$state_root/current"
 approval=false
 
@@ -64,8 +65,14 @@ EOF
 }
 
 load_run() {
-  if [ ! -s "$current_file" ]; then new_run; fi
-  run_id=$(cat "$current_file")
+  if [ -n "$requested_run_id" ]; then
+    run_id=$requested_run_id
+    if [ ! -f "$state_root/$run_id/state.env" ]; then new_run; fi
+    printf '%s\n' "$run_id" >"$current_file"
+  else
+    if [ ! -s "$current_file" ]; then new_run; fi
+    run_id=$(cat "$current_file")
+  fi
   run_dir="$state_root/$run_id"
   [ -f "$run_dir/state.env" ] || { echo "acceptance state is missing: $run_dir/state.env" >&2; exit 1; }
   # The state file is generated above from bounded identifiers and contains no credentials.
