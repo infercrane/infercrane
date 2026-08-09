@@ -12,6 +12,7 @@ or link corrections. A changed decision gets a new ADR whose status supersedes t
 | [0005](0005-durable-operations-and-policy-boundaries.md) | Accepted | Persist mutations and separate fleet policies from provider execution. |
 | [0006](0006-leased-operation-execution.md) | Accepted | Lease durable work through PostgreSQL for crash-safe execution. |
 | [0007](0007-tenant-scoped-identity.md) | Accepted | Hash scoped credentials and qualify all resource access by tenant. |
+| [0008](0008-immutable-deployment-revisions.md) | Accepted | Persist immutable deployment revisions for safe update and rollback. |
 
 Use the next sequential number. Include context, decision, consequences, alternatives, and
 verification. Link affected feature documents.

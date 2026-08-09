@@ -16,10 +16,18 @@ type Target struct {
 
 type Deployment struct {
 	ID, TenantID, Name, Model, Runtime, RoutingStrategy string
+	ActiveRevisionID, CandidateRevisionID               string
 	DesiredState, ObservedState                         string
 	MinReplicas, MaxReplicas                            int
 	AutoscalingEnabled                                  bool
 	CreatedAt, UpdatedAt                                time.Time
+}
+
+type DeploymentRevision struct {
+	ID, DeploymentID, Status, SpecJSON, SourceRevisionID, Reason string
+	Number                                                       int
+	CreatedAt                                                    time.Time
+	ActivatedAt, CompletedAt                                     *time.Time
 }
 
 type ResolvedDeployment struct {
@@ -69,12 +77,12 @@ type RouterGeneration struct {
 }
 
 type Replica struct {
-	ID, TenantID, DeploymentID, ExternalKey, LifecycleState string
-	Provider, ProviderRequestID, ProviderResourceID         string
-	Endpoint, Health, ProviderDetails                       string
-	Ordinal                                                 int
-	LastObservedAt                                          *time.Time
-	CreatedAt, UpdatedAt                                    time.Time
+	ID, TenantID, DeploymentID, RevisionID, ExternalKey, LifecycleState string
+	Provider, ProviderRequestID, ProviderResourceID                     string
+	Endpoint, Health, ProviderDetails                                   string
+	Ordinal                                                             int
+	LastObservedAt                                                      *time.Time
+	CreatedAt, UpdatedAt                                                time.Time
 }
 
 type Operation struct {

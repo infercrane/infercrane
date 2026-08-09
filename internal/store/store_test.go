@@ -459,6 +459,54 @@ func TestReplicaIntentAndProviderIdentityAreIdempotent(t *testing.T) {
 	}
 }
 
+func TestDeploymentRevisionsAreImmutableAndPromoteExplicitly(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	if _, err := s.AddTarget(ctx, domain.Target{Name: "revision-seed", URL: "http://revision-seed", Provider: "existing", Runtime: "vllm", UpstreamModel: "model-v1"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApplyDeployment(ctx, domain.Deployment{Name: "revision-prod", Model: "model-v1", MinReplicas: 1, MaxReplicas: 1}, []string{"revision-seed"}); err != nil {
+		t.Fatal(err)
+	}
+	revisions, err := s.Revisions(ctx, "global", "revision-prod")
+	if err != nil || len(revisions) != 1 || revisions[0].Number != 1 || revisions[0].Status != "active" {
+		t.Fatalf("initial revisions=%#v err=%v", revisions, err)
+	}
+	initialSpec := revisions[0].SpecJSON
+	candidate, err := s.CreateCandidateRevision(ctx, "global", "revision-prod", `{"model":"model-v2","runtime":"vllm","routing_strategy":"round-robin","min_replicas":1,"max_replicas":2,"autoscaling_enabled":true}`)
+	if err != nil || candidate.Number != 2 || candidate.SourceRevisionID != revisions[0].ID {
+		t.Fatalf("candidate=%#v err=%v", candidate, err)
+	}
+	if _, conflictErr := s.CreateCandidateRevision(ctx, "global", "revision-prod", `{"model":"other"}`); !errors.Is(conflictErr, ErrConflict) {
+		t.Fatalf("second candidate error=%v, want conflict", conflictErr)
+	}
+	if err = s.RejectCandidateRevision(ctx, "global", "revision-prod", candidate.ID, "readiness failed"); err != nil {
+		t.Fatal(err)
+	}
+	candidate, err = s.CreateCandidateRevision(ctx, "global", "revision-prod", `{"model":"model-v2","runtime":"vllm","routing_strategy":"round-robin","min_replicas":1,"max_replicas":2,"autoscaling_enabled":true}`)
+	if err != nil || candidate.Number != 3 {
+		t.Fatalf("replacement candidate=%#v err=%v", candidate, err)
+	}
+	if err = s.PromoteCandidateRevision(ctx, "global", "revision-prod", candidate.ID); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := s.Resolve(ctx, "revision-prod")
+	if err != nil || resolved.Deployment.Model != "model-v2" || resolved.Deployment.MaxReplicas != 2 || !resolved.Deployment.AutoscalingEnabled {
+		t.Fatalf("promoted deployment=%#v err=%v", resolved.Deployment, err)
+	}
+	if err = s.RollbackRevision(ctx, "global", "revision-prod", revisions[0].ID, "operator rollback"); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err = s.Resolve(ctx, "revision-prod")
+	if err != nil || resolved.Deployment.Model != "model-v1" {
+		t.Fatalf("rolled back deployment=%#v err=%v", resolved.Deployment, err)
+	}
+	rows, err := s.Revisions(ctx, "global", "revision-prod")
+	if err != nil || len(rows) != 3 || rows[2].SpecJSON != initialSpec || rows[2].Status != "active" {
+		t.Fatalf("revision history=%#v err=%v", rows, err)
+	}
+}
+
 func TestTenantResourcesCanReuseNamesWithoutCrossTenantVisibility(t *testing.T) {
 	ctx := context.Background()
 	s := openStore(t, ctx)

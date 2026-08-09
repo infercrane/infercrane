@@ -18,8 +18,13 @@ retention.
 
 Cloud replica intent is persisted before provider mutation. Each replica has a stable external key,
 lifecycle state, provider request/resource identity, endpoint, health, provider details, and last
-observation timestamp. Provider identity is write-once: repeating the same identity is safe, while
-attempting to replace an established identity is a conflict.
+observation timestamp. Replicas belong to immutable deployment revisions so active and candidate
+capacity can coexist without identity collisions. Provider identity is write-once: repeating the
+same identity is safe, while attempting to replace an established identity is a conflict.
+
+Every logical deployment points to one active immutable revision and at most one candidate.
+Revision specifications and numbers are append-only; promotion, rejection, and rollback update
+explicit pointers and statuses without rewriting historical specifications.
 
 ## Migration policy
 
