@@ -12,6 +12,7 @@ func main() {
 	port := flag.Int("port", 8101, "port")
 	worker := flag.String("worker", "gpu", "worker")
 	model := flag.String("model", "Qwen/Qwen3-8B", "model")
+	apiKey := flag.String("api-key", "", "optional bearer token")
 	flag.Parse()
 	var running, waiting atomic.Int64
 	mux := http.NewServeMux()
@@ -49,7 +50,17 @@ func main() {
 		}
 		write(w, map[string]any{"id": "chatcmpl-fake", "object": "chat.completion", "model": body["model"], "choices": []any{map[string]any{"index": 0, "message": map[string]string{"role": "assistant", "content": "response from " + *worker}, "finish_reason": "stop"}}})
 	})
-	if err := http.ListenAndServe(fmt.Sprintf(":%d", *port), mux); err != nil {
+	handler := http.Handler(mux)
+	if *apiKey != "" {
+		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/health" && r.Header.Get("Authorization") != "Bearer "+*apiKey {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			mux.ServeHTTP(w, r)
+		})
+	}
+	if err := http.ListenAndServe(fmt.Sprintf(":%d", *port), handler); err != nil {
 		panic(err)
 	}
 }

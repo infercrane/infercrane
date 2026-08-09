@@ -3,9 +3,12 @@ package router
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
 	"os/exec"
 	"strconv"
 	"sync"
@@ -18,10 +21,10 @@ import (
 var ErrUnavailable = errors.New("router unavailable")
 
 type Spec struct {
-	DeploymentID, ProcessID string
-	Workers                 []string
-	Strategy, Host          string
-	Port                    int
+	DeploymentID, ProcessID, Model string
+	Workers                        []string
+	Strategy, Host                 string
+	Port                           int
 }
 type Backend interface {
 	Start(context.Context, Spec) (string, error)
@@ -70,7 +73,8 @@ func (v *VLLM) Start(ctx context.Context, s Spec) (string, error) {
 	}
 	var stderr bytes.Buffer
 	cmd := exec.Command(v.Command(binary, s)[0], v.Command(binary, s)[1:]...)
-	cmd.Stderr = &stderr
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = io.MultiWriter(os.Stderr, &stderr)
 	if err = cmd.Start(); err != nil {
 		return "", fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
@@ -104,10 +108,9 @@ func (v *VLLM) Start(ctx context.Context, s Spec) (string, error) {
 				return "", fmt.Errorf("%w: exited during startup: %s", ErrUnavailable, stderr.String())
 			default:
 			}
-			// Process health becomes available before vLLM Router has admitted a
-			// worker. Require its model-facing endpoint so a published generation
-			// cannot return a transient 503 on the deployment's first request.
-			req, _ := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"/v1/models", nil)
+			payload, _ := json.Marshal(map[string]any{"model": s.Model, "messages": []map[string]string{{"role": "user", "content": "ready"}}, "max_tokens": 1})
+			req, _ := http.NewRequestWithContext(ctx, http.MethodPost, endpoint+"/v1/chat/completions", bytes.NewReader(payload))
+			req.Header.Set("Content-Type", "application/json")
 			if v.APIKey != "" {
 				req.Header.Set("Authorization", "Bearer "+v.APIKey)
 			}
