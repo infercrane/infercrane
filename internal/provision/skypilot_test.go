@@ -3,6 +3,7 @@ package provision
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 )
@@ -15,6 +16,7 @@ type fakeSkyRunner struct {
 	statusPrefix    string
 	requestID       string
 	requestState    string
+	launchTask      string
 	launches, downs int
 }
 
@@ -29,6 +31,11 @@ func (f *fakeSkyRunner) Run(_ context.Context, _ []string, args ...string) ([]by
 	case strings.HasPrefix(command, "launch "):
 		f.launches++
 		f.exists = true
+		contents, err := os.ReadFile(args[len(args)-1])
+		if err != nil {
+			return nil, err
+		}
+		f.launchTask = string(contents)
 		return []byte("request 12345678-1234-1234-1234-123456789abc submitted"), nil
 	case strings.HasPrefix(command, "down "):
 		f.downs++
@@ -60,6 +67,18 @@ func (f *fakeSkyRunner) Run(_ context.Context, _ []string, args ...string) ([]by
 		return []byte(`[{"name":"infercrane-prod-r0","status":"UP"},{"name":"unmanaged","status":"UP"}]`), nil
 	default:
 		return nil, errors.New("unexpected command: " + command)
+	}
+}
+
+func TestEnsureUsesPinnedCompatibleRuntimeByDefault(t *testing.T) {
+	runner := &fakeSkyRunner{}
+	provider := SkyPilot{APIKey: "secret", Runner: runner}
+	_, err := provider.EnsureReplica(context.Background(), ReplicaSpec{ExternalKey: "prod-r0", Model: "model", Cloud: "runpod", GPU: "L40S"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(runner.launchTask, "vllm=="+defaultVLLMVersion) {
+		t.Fatalf("launch task does not pin compatible default runtime: %s", runner.launchTask)
 	}
 }
 

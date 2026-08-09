@@ -14,6 +14,11 @@ import (
 
 var ErrUnavailable = errors.New("SkyPilot unavailable")
 
+// defaultVLLMVersion is intentionally pinned. v0.8.5.post1 supports Qwen3 and
+// resolves to PyTorch's CUDA 12.4 runtime, which remains compatible with the
+// NVIDIA driver exposed by the current RunPod L40S fleet.
+const defaultVLLMVersion = "0.8.5.post1"
+
 type ReplicaSpec struct {
 	ExternalKey                                                    string
 	Name, Model, ModelRevision, Cloud, GPU, Region, RuntimeVersion string
@@ -61,7 +66,7 @@ func (s SkyPilot) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provider
 		spec.Port = 8000
 	}
 	if spec.RuntimeVersion == "" {
-		spec.RuntimeVersion = "0.23.0"
+		spec.RuntimeVersion = defaultVLLMVersion
 	}
 	resourceID := s.Handle(spec.ExternalKey).ResourceID
 	observation, err := s.observe(ctx, resourceID, spec.Port, false)
