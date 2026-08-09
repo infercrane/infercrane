@@ -130,6 +130,11 @@ func Run(ctx context.Context, cfg config.Config, deps Dependencies) Report {
 	} else {
 		add(Check{"SkyPilot", Pass, "SkyPilot CLI found at " + path, ""})
 	}
+	if path, err := deps.LookPath(cfg.AIPerfBinary); err != nil {
+		add(Check{"AIPerf", Fail, fmt.Sprintf("%q was not found on PATH", cfg.AIPerfBinary), "Install AIPerf with `pipx install aiperf` or set INFERCRANE_AIPERF_BINARY."})
+	} else {
+		add(Check{"AIPerf", Pass, "AIPerf binary found at " + path, ""})
+	}
 	return r
 }
 

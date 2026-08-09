@@ -68,11 +68,9 @@ func run(ctx context.Context, args []string) error {
 		return initCommand(args[1:])
 	case "doctor":
 		return doctorCommand(ctx, args[1:])
-	case "benchmark":
-		return benchmarkCommand(ctx, args[1:])
 	}
 	switch args[0] {
-	case "target", "deploy", "apply", "plan", "deployments", "route", "status", "events", "explain", "rollout", "delete", "inspect", "operation", "orphans", "tenant", "principal", "serve":
+	case "target", "deploy", "apply", "plan", "deployments", "route", "status", "events", "explain", "rollout", "delete", "inspect", "operation", "orphans", "tenant", "principal", "benchmark", "serve":
 	default:
 		usage(os.Stderr)
 		return fmt.Errorf("unknown command %q", args[0])
@@ -126,6 +124,8 @@ func run(ctx context.Context, args []string) error {
 		return tenantAPICommand(ctx, cfg, args[1:])
 	case "principal":
 		return principalAPICommand(ctx, cfg, args[1:])
+	case "benchmark":
+		return benchmarkCommand(ctx, cfg, args[1:])
 	}
 	return fmt.Errorf("%s has not yet been migrated to the control-plane API", args[0])
 }
@@ -338,25 +338,35 @@ func splitTargets(raw string) []string {
 	return names
 }
 
-func benchmarkCommand(ctx context.Context, args []string) error {
+func benchmarkCommand(ctx context.Context, cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("benchmark", flag.ContinueOnError)
-	endpoint := fs.String("endpoint", "http://127.0.0.1:18000", "InferCrane base URL")
-	model := fs.String("model", "", "logical model alias")
-	apiKey := fs.String("api-key", os.Getenv("INFERCRANE_API_KEY"), "API key (prefer environment variable)")
 	requests := fs.Int("requests", 100, "request count")
 	concurrency := fs.Int("concurrency", 10, "concurrent clients")
+	randomSeed := fs.Int64("random-seed", 17, "deterministic AIPerf dataset seed")
+	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	result, err := benchmark.Run(ctx, benchmark.Config{Endpoint: strings.TrimRight(*endpoint, "/"), APIKey: *apiKey, Model: *model, Requests: *requests, Concurrency: *concurrency})
-	encoded, _ := json.MarshalIndent(result, "", "  ")
-	fmt.Println(string(encoded))
-	if err != nil {
+	if fs.NArg() != 1 {
+		return errors.New("usage: infercrane benchmark DEPLOYMENT")
+	}
+	var response struct {
+		Benchmark map[string]any `json:"benchmark"`
+	}
+	request := map[string]any{"requests": *requests, "concurrency": *concurrency, "random_seed": *randomSeed}
+	// AIPerf runs can legitimately exceed the ordinary control request timeout.
+	if err := controlJSONWithTimeout(ctx, cfg, http.MethodPost, "/api/v1/deployments/"+url.PathEscape(fs.Arg(0))+"/benchmarks", "", request, &response, 35*time.Minute); err != nil {
 		return err
 	}
-	if result.Failed > 0 {
-		return fmt.Errorf("benchmark had %d failed requests", result.Failed)
+	if *output == "json" {
+		encoded, _ := json.MarshalIndent(response.Benchmark, "", "  ")
+		fmt.Println(string(encoded))
+		return nil
 	}
+	if *output != "human" {
+		return errors.New("--output must be human or json")
+	}
+	fmt.Printf("Benchmark     %v\nModel         %v\nRuntime       %v %v\nGPU           %v\nProvider      %v\nTTFT p50      %v ms\nTTFT p95      %v ms\nTPOT p95      %v ms\nOutput tok/s  %v\nErrors        %v\n\nReproduce:\n  %v\n", response.Benchmark["id"], response.Benchmark["model_identity"], response.Benchmark["runtime"], response.Benchmark["runtime_version"], response.Benchmark["gpu"], response.Benchmark["provider"], response.Benchmark["ttft_p50_ms"], response.Benchmark["ttft_p95_ms"], response.Benchmark["tpot_p95_ms"], response.Benchmark["output_token_throughput"], response.Benchmark["failed"], response.Benchmark["reproduction_command"])
 	return nil
 }
 func targetAPICommand(ctx context.Context, cfg config.Config, args []string) error {
@@ -727,6 +737,10 @@ func deleteAPICommand(ctx context.Context, cfg config.Config, args []string) err
 }
 
 func controlJSON(ctx context.Context, cfg config.Config, method, path, idempotencyKey string, requestBody, responseBody any) error {
+	return controlJSONWithTimeout(ctx, cfg, method, path, idempotencyKey, requestBody, responseBody, 30*time.Second)
+}
+
+func controlJSONWithTimeout(ctx context.Context, cfg config.Config, method, path, idempotencyKey string, requestBody, responseBody any, timeout time.Duration) error {
 	var body io.Reader
 	if requestBody != nil {
 		encoded, err := json.Marshal(requestBody)
@@ -746,7 +760,7 @@ func controlJSON(ctx context.Context, cfg config.Config, method, path, idempoten
 	if idempotencyKey != "" {
 		request.Header.Set("Idempotency-Key", idempotencyKey)
 	}
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{Timeout: timeout}
 	response, err := client.Do(request)
 	if err != nil {
 		return fmt.Errorf("control plane %s is unreachable: %w", cfg.ControlURL, err)
@@ -1307,7 +1321,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		return fmt.Errorf("load credential snapshot: %w", err)
 	}
 	go func() { _ = credentialCache.Run(ctx) }()
-	control := (controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: credentialCache}).Handler()
+	control := (controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: credentialCache, BenchmarkRunner: benchmark.Runner{}, GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary}).Handler()
 	operationTelemetry := &operations.Telemetry{}
 	handlers := workflows.DeploymentHandlers(s)
 	for kind, handler := range workflows.RolloutHandlers(s) {

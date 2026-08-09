@@ -9,16 +9,21 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/authz"
+	"github.com/infercrane/infercrane/internal/benchmark"
 	"github.com/infercrane/infercrane/internal/domain"
 )
 
 type fakeStore struct {
-	operation domain.Operation
-	cancelled bool
-	err       error
-	created   bool
-	principal domain.Principal
-	targets   []domain.Target
+	operation  domain.Operation
+	cancelled  bool
+	err        error
+	created    bool
+	principal  domain.Principal
+	targets    []domain.Target
+	resolved   domain.ResolvedDeployment
+	revisions  []domain.DeploymentRevision
+	artifact   domain.ModelArtifact
+	benchmarks []domain.BenchmarkResult
 }
 
 func (f *fakeStore) AuthenticatePrincipal(context.Context, string) (domain.Principal, error) {
@@ -57,6 +62,9 @@ func (f *fakeStore) ResolveForTenant(context.Context, string, string) (domain.Re
 	if f.err != nil {
 		return domain.ResolvedDeployment{}, f.err
 	}
+	if f.resolved.Deployment.ID != "" {
+		return f.resolved, nil
+	}
 	return domain.ResolvedDeployment{Deployment: domain.Deployment{ID: "deployment", Name: "qwen"}, Targets: f.targets}, nil
 }
 func (f *fakeStore) EventsForTenant(context.Context, string, string) ([]domain.Event, error) {
@@ -72,7 +80,7 @@ func (f *fakeStore) ReplicasForDeployment(context.Context, string, string) ([]do
 	return nil, f.err
 }
 func (f *fakeStore) Revisions(context.Context, string, string) ([]domain.DeploymentRevision, error) {
-	return nil, f.err
+	return f.revisions, f.err
 }
 func (f *fakeStore) OperationEvents(context.Context, string, int) ([]domain.OperationEvent, error) {
 	return nil, f.err
@@ -81,6 +89,9 @@ func (f *fakeStore) ScalingDecisionsForTenant(context.Context, string, string, i
 	return nil, f.err
 }
 func (f *fakeStore) ModelArtifactForRevision(context.Context, string, string) (domain.ModelArtifact, error) {
+	if f.artifact.ID != "" {
+		return f.artifact, nil
+	}
 	return domain.ModelArtifact{}, domain.ErrNotFound
 }
 func (f *fakeStore) ReleaseGuardEvaluations(context.Context, string, string, int) ([]domain.ReleaseGuardEvaluation, error) {
@@ -119,6 +130,22 @@ func (f *fakeStore) RotatePrincipalForTenant(context.Context, string, string) (s
 func (f *fakeStore) RevokePrincipalForTenant(context.Context, string, string) error  { return f.err }
 func (f *fakeStore) CreateTenant(context.Context, string, string) error              { return f.err }
 func (f *fakeStore) SetRouteForTenant(context.Context, string, string, string) error { return f.err }
+func (f *fakeStore) RecordBenchmark(_ context.Context, result domain.BenchmarkResult) (domain.BenchmarkResult, error) {
+	result.ID = "benchmark"
+	f.benchmarks = append(f.benchmarks, result)
+	return result, f.err
+}
+func (f *fakeStore) BenchmarksForDeployment(context.Context, string, string, int) ([]domain.BenchmarkResult, error) {
+	return f.benchmarks, f.err
+}
+
+type fakeBenchmarkRunner struct{ config benchmark.Config }
+
+func (f *fakeBenchmarkRunner) Run(_ context.Context, cfg benchmark.Config) (benchmark.Result, error) {
+	f.config = cfg
+	value := 12.5
+	return benchmark.Result{Tool: "aiperf", ToolVersion: "0.9.0", Command: "aiperf profile --api-key ${INFERCRANE_API_KEY}", Requests: 10, Succeeded: 10, TTFTP95MS: &value}, nil
+}
 func TestOperationAPIAuthenticationAndResponse(t *testing.T) {
 	store := &fakeStore{operation: domain.Operation{ID: "op", TenantID: "global", Status: "running", MaxAttempts: 5}}
 	handler := (API{Store: store, APIKey: "secret"}).Handler()
@@ -167,6 +194,22 @@ func TestScalingDecisionsAreReadThroughTenantAPI(t *testing.T) {
 	(API{Store: &fakeStore{}, APIKey: "secret"}).Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"data"`) {
 		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestBenchmarkRunsThroughControlPlaneAndPersistsIdentity(t *testing.T) {
+	spec := `{"model":"Qwen/Qwen3-8B","model_revision":"commit","runtime":"vllm","runtime_version":"0.10","compute_mode":"elastic","gpu":"L40S","region":"EU"}`
+	store := &fakeStore{resolved: domain.ResolvedDeployment{Deployment: domain.Deployment{ID: "dep", Name: "qwen", ActiveRevisionID: "rev"}, Targets: []domain.Target{{Provider: "runpod"}}}, revisions: []domain.DeploymentRevision{{ID: "rev", SpecJSON: spec}}, artifact: domain.ModelArtifact{ID: "artifact", ModelIdentity: "Qwen/Qwen3-8B@commit"}}
+	runner := &fakeBenchmarkRunner{}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments/qwen/benchmarks", strings.NewReader(`{"requests":10,"concurrency":2,"random_seed":42}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret", BenchmarkRunner: runner, GatewayURL: "http://gateway", AIPerfBinary: "aiperf"}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"model_identity":"Qwen/Qwen3-8B@commit"`) {
+		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+	if runner.config.APIKey != "secret" || runner.config.RandomSeed != 42 || len(store.benchmarks) != 1 || store.benchmarks[0].GPU != "L40S" {
+		t.Fatalf("config=%#v benchmarks=%#v", runner.config, store.benchmarks)
 	}
 }
 

@@ -11,6 +11,48 @@ import (
 	"github.com/infercrane/infercrane/internal/domain"
 )
 
+func (s *Store) RecordBenchmark(ctx context.Context, result domain.BenchmarkResult) (domain.BenchmarkResult, error) {
+	if result.TenantID == "" || result.DeploymentID == "" || result.RevisionID == "" || result.RequestCount < 1 {
+		return domain.BenchmarkResult{}, errors.New("benchmark tenant, deployment, revision, and request count are required")
+	}
+	if result.ID == "" {
+		var err error
+		result.ID, err = newID()
+		if err != nil {
+			return domain.BenchmarkResult{}, err
+		}
+	}
+	stamp := now()
+	_, err := s.ExecContext(ctx, `INSERT INTO benchmark_results(id,tenant_id,deployment_id,deployment_name,revision_id,model_artifact_id,model_identity,runtime,runtime_version,runtime_config_json,provider,region,gpu,compute_mode,tool,tool_version,workload_json,reproduction_command,request_count,succeeded,failed,duration_seconds,request_throughput,output_token_throughput,ttft_p50_ms,ttft_p95_ms,tpot_p50_ms,tpot_p95_ms,latency_p50_ms,latency_p95_ms,goodput,gpu_utilization,cost_metadata_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?::jsonb,?,?,?,?,?,?,?::jsonb,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?::jsonb,?)`, result.ID, result.TenantID, result.DeploymentID, result.DeploymentName, result.RevisionID, null(result.ModelArtifactID), result.ModelIdentity, result.Runtime, result.RuntimeVersion, nullJSON(result.RuntimeConfigJSON), result.Provider, result.Region, result.GPU, result.ComputeMode, result.Tool, result.ToolVersion, nullJSON(result.WorkloadJSON), result.ReproductionCommand, result.RequestCount, result.Succeeded, result.Failed, result.DurationSeconds, result.RequestThroughput, result.OutputTokenThroughput, result.TTFTP50MS, result.TTFTP95MS, result.TPOTP50MS, result.TPOTP95MS, result.LatencyP50MS, result.LatencyP95MS, result.Goodput, result.GPUUtilization, nullJSON(result.CostMetadataJSON), stamp)
+	if err != nil {
+		return domain.BenchmarkResult{}, err
+	}
+	result.CreatedAt = parseTime(stamp)
+	return result, nil
+}
+
+func (s *Store) BenchmarksForDeployment(ctx context.Context, tenant, name string, limit int) ([]domain.BenchmarkResult, error) {
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+	rows, err := s.QueryContext(ctx, `SELECT b.id,b.tenant_id,b.deployment_id,b.deployment_name,b.revision_id,COALESCE(b.model_artifact_id,''),b.model_identity,b.runtime,b.runtime_version,b.runtime_config_json::text,b.provider,b.region,b.gpu,b.compute_mode,b.tool,b.tool_version,b.workload_json::text,b.reproduction_command,b.request_count,b.succeeded,b.failed,b.duration_seconds,b.request_throughput,b.output_token_throughput,b.ttft_p50_ms,b.ttft_p95_ms,b.tpot_p50_ms,b.tpot_p95_ms,b.latency_p50_ms,b.latency_p95_ms,b.goodput,b.gpu_utilization,b.cost_metadata_json::text,b.created_at FROM benchmark_results b JOIN deployments d ON d.id=b.deployment_id WHERE b.tenant_id=? AND d.name=? ORDER BY b.created_at DESC LIMIT ?`, tenant, name, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var results []domain.BenchmarkResult
+	for rows.Next() {
+		var row domain.BenchmarkResult
+		var created string
+		if err = rows.Scan(&row.ID, &row.TenantID, &row.DeploymentID, &row.DeploymentName, &row.RevisionID, &row.ModelArtifactID, &row.ModelIdentity, &row.Runtime, &row.RuntimeVersion, &row.RuntimeConfigJSON, &row.Provider, &row.Region, &row.GPU, &row.ComputeMode, &row.Tool, &row.ToolVersion, &row.WorkloadJSON, &row.ReproductionCommand, &row.RequestCount, &row.Succeeded, &row.Failed, &row.DurationSeconds, &row.RequestThroughput, &row.OutputTokenThroughput, &row.TTFTP50MS, &row.TTFTP95MS, &row.TPOTP50MS, &row.TPOTP95MS, &row.LatencyP50MS, &row.LatencyP95MS, &row.Goodput, &row.GPUUtilization, &row.CostMetadataJSON, &created); err != nil {
+			return nil, err
+		}
+		row.CreatedAt = parseTime(created)
+		results = append(results, row)
+	}
+	return results, rows.Err()
+}
+
 func (s *Store) Targets(ctx context.Context) ([]domain.Target, error) {
 	return s.TargetsForTenant(ctx, "global")
 }

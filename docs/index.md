@@ -30,6 +30,7 @@ than loading the entire repository into one context window.
 - [Configuration and operations](features/operations.md)
 - [RunPod Serverless](features/serverless.md)
 - [Cold-start intelligence](features/cold-starts.md)
+- [Reproducible benchmarking](features/benchmarking.md)
 
 ## Operations
 

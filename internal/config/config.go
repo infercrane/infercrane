@@ -14,10 +14,10 @@ import (
 )
 
 type Config struct {
-	DatabaseURL, ControlURL, Host, APIKey, RouterBinary, InstanceID, Environment string
-	RunPodAPIKey, RunPodServerlessTemplateID, RunPodRESTURL                      string
-	Port, RouterStartPort, DatabaseMaxOpen, DatabaseMaxIdle                      int
-	HealthInterval, UpstreamTimeout, ShutdownTimeout, RequestRetention           time.Duration
+	DatabaseURL, ControlURL, Host, APIKey, RouterBinary, AIPerfBinary, InstanceID, Environment string
+	RunPodAPIKey, RunPodServerlessTemplateID, RunPodRESTURL                                    string
+	Port, RouterStartPort, DatabaseMaxOpen, DatabaseMaxIdle                                    int
+	HealthInterval, UpstreamTimeout, ShutdownTimeout, RequestRetention                         time.Duration
 }
 
 type clientFile struct {
@@ -165,6 +165,7 @@ func load(requireAPIKey bool) (Config, error) {
 		Host:                       env("INFERCRANE_HOST", "127.0.0.1"),
 		APIKey:                     env("INFERCRANE_API_KEY", ""),
 		RouterBinary:               env("INFERCRANE_ROUTER_BINARY", "vllm-router"),
+		AIPerfBinary:               env("INFERCRANE_AIPERF_BINARY", "aiperf"),
 		InstanceID:                 env("INFERCRANE_INSTANCE_ID", hostname),
 		Environment:                env("INFERCRANE_ENV", "development"),
 		RunPodAPIKey:               env("RUNPOD_API_KEY", ""),

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/authz"
+	"github.com/infercrane/infercrane/internal/benchmark"
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/workflows"
 )
@@ -48,6 +49,8 @@ type Store interface {
 	RevokePrincipalForTenant(context.Context, string, string) error
 	CreateTenant(context.Context, string, string) error
 	SetRouteForTenant(context.Context, string, string, string) error
+	RecordBenchmark(context.Context, domain.BenchmarkResult) (domain.BenchmarkResult, error)
+	BenchmarksForDeployment(context.Context, string, string, int) ([]domain.BenchmarkResult, error)
 }
 type API struct {
 	Store         Store
@@ -55,6 +58,10 @@ type API struct {
 	Authenticator interface {
 		AuthenticatePrincipal(context.Context, string) (domain.Principal, error)
 	}
+	BenchmarkRunner interface {
+		Run(context.Context, benchmark.Config) (benchmark.Result, error)
+	}
+	GatewayURL, AIPerfBinary string
 }
 type identityKey struct{}
 
@@ -69,6 +76,8 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/deployments", a.auth(authz.Read, a.deployments))
 	mux.HandleFunc("GET /api/v1/deployments/{name}", a.auth(authz.Read, a.deployment))
 	mux.HandleFunc("GET /api/v1/deployments/{name}/events", a.auth(authz.Read, a.deploymentEvents))
+	mux.HandleFunc("POST /api/v1/deployments/{name}/benchmarks", a.auth(authz.Deploy, a.runBenchmark))
+	mux.HandleFunc("GET /api/v1/deployments/{name}/benchmarks", a.auth(authz.Read, a.benchmarks))
 	mux.HandleFunc("GET /api/v1/deployments/{name}/revisions", a.auth(authz.Read, a.revisions))
 	mux.HandleFunc("POST /api/v1/deployments/{name}/rollouts", a.auth(authz.Deploy, a.createRollout))
 	mux.HandleFunc("POST /api/v1/deployments/{name}/rollouts/guard/evaluate", a.auth(authz.Deploy, a.evaluateReleaseGuard))
@@ -90,6 +99,114 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/principals/{id}/rotate", a.auth(authz.ManageTenant, a.rotatePrincipal))
 	mux.HandleFunc("DELETE /api/v1/principals/{id}", a.auth(authz.ManageTenant, a.revokePrincipal))
 	return mux
+}
+
+func (a API) runBenchmark(w http.ResponseWriter, r *http.Request) {
+	if a.BenchmarkRunner == nil || a.GatewayURL == "" {
+		writeError(w, http.StatusServiceUnavailable, "benchmark_unavailable", "AIPerf benchmark execution is not configured")
+		return
+	}
+	var request struct {
+		Requests    int   `json:"requests"`
+		Concurrency int   `json:"concurrency"`
+		RandomSeed  int64 `json:"random_seed"`
+	}
+	if !decodeMutationBody(w, r, &request) {
+		return
+	}
+	if request.Requests < 1 || request.Requests > 100000 || request.Concurrency < 1 || request.Concurrency > request.Requests {
+		writeError(w, http.StatusUnprocessableEntity, "validation_failed", "requests must be 1..100000 and concurrency must be 1..requests")
+		return
+	}
+	if request.RandomSeed == 0 {
+		request.RandomSeed = 17
+	}
+	principal := r.Context().Value(identityKey{}).(domain.Principal)
+	resolved, err := a.Store.ResolveForTenant(r.Context(), principal.TenantID, r.PathValue("name"))
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, 404, "not_found", "deployment was not found")
+		return
+	}
+	if err != nil {
+		writeError(w, 500, "internal", "deployment lookup failed")
+		return
+	}
+	deployment := resolved.Deployment
+	if deployment.ActiveRevisionID == "" {
+		writeError(w, 409, "deployment_not_ready", "deployment has no active revision")
+		return
+	}
+	revisions, err := a.Store.Revisions(r.Context(), principal.TenantID, deployment.Name)
+	if err != nil {
+		writeError(w, 500, "internal", "revision lookup failed")
+		return
+	}
+	var revision domain.DeploymentRevision
+	for _, candidate := range revisions {
+		if candidate.ID == deployment.ActiveRevisionID {
+			revision = candidate
+			break
+		}
+	}
+	if revision.ID == "" {
+		writeError(w, 409, "deployment_not_ready", "active revision metadata is unavailable")
+		return
+	}
+	var revisionSpec domain.DeploymentRevisionSpec
+	if err = json.Unmarshal([]byte(revision.SpecJSON), &revisionSpec); err != nil {
+		writeError(w, 500, "internal", "active revision specification is invalid")
+		return
+	}
+	credential := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+	measured, err := a.BenchmarkRunner.Run(r.Context(), benchmark.Config{Binary: a.AIPerfBinary, Endpoint: a.GatewayURL, APIKey: credential, Model: deployment.Name, Requests: request.Requests, Concurrency: request.Concurrency, RandomSeed: request.RandomSeed})
+	if err != nil {
+		writeError(w, 502, "benchmark_failed", err.Error())
+		return
+	}
+	provider := ""
+	if len(resolved.Targets) > 0 {
+		provider = resolved.Targets[0].Provider
+	}
+	artifact, artifactErr := a.Store.ModelArtifactForRevision(r.Context(), principal.TenantID, revision.ID)
+	if errors.Is(artifactErr, domain.ErrNotFound) {
+		writeError(w, 409, "artifact_unresolved", "active revision has no immutable ModelArtifact identity")
+		return
+	}
+	if artifactErr != nil {
+		writeError(w, 500, "internal", "model artifact lookup failed")
+		return
+	}
+	modelIdentity, artifactID := artifact.ModelIdentity, artifact.ID
+	if revisionSpec.ComputeMode == "" {
+		revisionSpec.ComputeMode = "elastic"
+	}
+	workload, _ := json.Marshal(map[string]any{"endpoint_type": "chat", "streaming": true, "request_count": request.Requests, "concurrency": request.Concurrency, "random_seed": request.RandomSeed, "server_token_count": true})
+	runtimeConfig, _ := json.Marshal(map[string]any{"args": revisionSpec.RuntimeArgs})
+	persisted, err := a.Store.RecordBenchmark(r.Context(), domain.BenchmarkResult{TenantID: principal.TenantID, DeploymentID: deployment.ID, DeploymentName: deployment.Name, RevisionID: revision.ID, ModelArtifactID: artifactID, ModelIdentity: modelIdentity, Runtime: revisionSpec.Runtime, RuntimeVersion: revisionSpec.RuntimeVersion, RuntimeConfigJSON: string(runtimeConfig), Provider: provider, Region: revisionSpec.Region, GPU: revisionSpec.GPU, ComputeMode: revisionSpec.ComputeMode, Tool: measured.Tool, ToolVersion: measured.ToolVersion, WorkloadJSON: string(workload), ReproductionCommand: measured.Command, RequestCount: measured.Requests, Succeeded: measured.Succeeded, Failed: measured.Failed, DurationSeconds: measured.DurationSeconds, RequestThroughput: measured.RequestThroughput, OutputTokenThroughput: measured.OutputTokenThroughput, TTFTP50MS: measured.TTFTP50MS, TTFTP95MS: measured.TTFTP95MS, TPOTP50MS: measured.TPOTP50MS, TPOTP95MS: measured.TPOTP95MS, LatencyP50MS: measured.LatencyP50MS, LatencyP95MS: measured.LatencyP95MS, CostMetadataJSON: "{}"})
+	if err != nil {
+		writeError(w, 500, "internal", "benchmark result could not be persisted")
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"benchmark": benchmarkResponse(persisted)})
+}
+
+func (a API) benchmarks(w http.ResponseWriter, r *http.Request) {
+	principal := r.Context().Value(identityKey{}).(domain.Principal)
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	rows, err := a.Store.BenchmarksForDeployment(r.Context(), principal.TenantID, r.PathValue("name"), limit)
+	if err != nil {
+		writeError(w, 500, "internal", "benchmark history lookup failed")
+		return
+	}
+	data := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		data = append(data, benchmarkResponse(row))
+	}
+	writeJSON(w, 200, map[string]any{"data": data})
+}
+
+func benchmarkResponse(row domain.BenchmarkResult) map[string]any {
+	return map[string]any{"id": row.ID, "deployment": row.DeploymentName, "revision_id": row.RevisionID, "model_artifact_id": row.ModelArtifactID, "model_identity": row.ModelIdentity, "runtime": row.Runtime, "runtime_version": row.RuntimeVersion, "runtime_configuration": json.RawMessage(row.RuntimeConfigJSON), "provider": row.Provider, "region": row.Region, "gpu": row.GPU, "compute_mode": row.ComputeMode, "tool": row.Tool, "tool_version": row.ToolVersion, "workload": json.RawMessage(row.WorkloadJSON), "reproduction_command": row.ReproductionCommand, "request_count": row.RequestCount, "succeeded": row.Succeeded, "failed": row.Failed, "duration_seconds": row.DurationSeconds, "request_throughput": row.RequestThroughput, "output_token_throughput": row.OutputTokenThroughput, "ttft_p50_ms": row.TTFTP50MS, "ttft_p95_ms": row.TTFTP95MS, "tpot_p50_ms": row.TPOTP50MS, "tpot_p95_ms": row.TPOTP95MS, "latency_p50_ms": row.LatencyP50MS, "latency_p95_ms": row.LatencyP95MS, "goodput": row.Goodput, "gpu_utilization": row.GPUUtilization, "cost_metadata": json.RawMessage(row.CostMetadataJSON), "created_at": row.CreatedAt}
 }
 
 func (a API) deleteDeployment(w http.ResponseWriter, r *http.Request) {

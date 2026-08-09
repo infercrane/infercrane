@@ -174,7 +174,7 @@ curl -fsS -H "Authorization: Bearer $INFERCRANE_API_KEY" \
 Run a reproducible functional load check against a real deployment:
 
 ```bash
-infercrane benchmark --model qwen-prod --requests 1000 --concurrency 32
+infercrane benchmark qwen-prod --requests 1000 --concurrency 32
 ```
 
 Supported routing strategies are delegated to the pinned upstream vLLM Router:

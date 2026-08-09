@@ -112,6 +112,22 @@ type ColdStartStats struct {
 	Evidence           string   `json:"evidence"`
 }
 
+// BenchmarkResult is the persisted, reproducible summary of one AIPerf run.
+// Raw prompts and generated content are intentionally not part of this schema.
+type BenchmarkResult struct {
+	ID, TenantID, DeploymentID, DeploymentName, RevisionID  string
+	ModelArtifactID, ModelIdentity, Runtime, RuntimeVersion string
+	RuntimeConfigJSON, Provider, Region, GPU, ComputeMode   string
+	Tool, ToolVersion, WorkloadJSON, ReproductionCommand    string
+	RequestCount, Succeeded, Failed                         int
+	DurationSeconds                                         float64
+	RequestThroughput, OutputTokenThroughput                *float64
+	TTFTP50MS, TTFTP95MS, TPOTP50MS, TPOTP95MS              *float64
+	LatencyP50MS, LatencyP95MS, Goodput, GPUUtilization     *float64
+	CostMetadataJSON                                        string
+	CreatedAt                                               time.Time
+}
+
 // InferenceRecord contains request metadata and measurements only. Prompt and
 // generated content are deliberately excluded.
 type InferenceRecord struct {

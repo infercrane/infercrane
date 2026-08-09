@@ -99,6 +99,30 @@ func TestSubmitCloudDeploymentIsAtomicAndIdempotent(t *testing.T) {
 	}
 }
 
+func TestBenchmarkHistoryPersistsReproductionMetadata(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	name := "benchmark-" + time.Now().UTC().Format("150405.000000000")
+	deployment, _, _, err := s.SubmitCloudDeployment(ctx, domain.Deployment{Name: name, Model: "Qwen/Qwen3-8B", MinReplicas: 1, MaxReplicas: 1}, domain.Operation{Kind: "deployment.converge", IdempotencyKey: "create-" + name, RequestJSON: `{"name":"` + name + `","model":"Qwen/Qwen3-8B","model_revision":"commit","cloud":"runpod","gpu":"L40S"}`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := s.Resolve(ctx, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deployment = resolved.Deployment
+	value := 12.5
+	created, err := s.RecordBenchmark(ctx, domain.BenchmarkResult{TenantID: "global", DeploymentID: deployment.ID, DeploymentName: name, RevisionID: deployment.ActiveRevisionID, ModelIdentity: "Qwen/Qwen3-8B@commit", Runtime: "vllm", RuntimeVersion: "0.10", RuntimeConfigJSON: `{"args":[]}`, Provider: "runpod", GPU: "L40S", ComputeMode: "elastic", Tool: "aiperf", ToolVersion: "0.9.0", WorkloadJSON: `{"request_count":10,"random_seed":17}`, ReproductionCommand: "aiperf profile --model qwen", RequestCount: 10, Succeeded: 10, DurationSeconds: 2, TTFTP95MS: &value, CostMetadataJSON: `{}`})
+	if err != nil || created.ID == "" {
+		t.Fatalf("record=%#v err=%v", created, err)
+	}
+	rows, err := s.BenchmarksForDeployment(ctx, "global", name, 10)
+	if err != nil || len(rows) != 1 || rows[0].Tool != "aiperf" || rows[0].TTFTP95MS == nil || *rows[0].TTFTP95MS != value || !strings.Contains(rows[0].WorkloadJSON, "random_seed") {
+		t.Fatalf("rows=%#v err=%v", rows, err)
+	}
+}
+
 func TestSubmitDeploymentDeleteWithdrawsDesiredStateAndQueuesCleanup(t *testing.T) {
 	ctx := context.Background()
 	s := openStore(t, ctx)
