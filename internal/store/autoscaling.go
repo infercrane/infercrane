@@ -41,7 +41,7 @@ func (s *Store) ScaleTo(ctx context.Context, deploymentID string, desired int) e
 		return fmt.Errorf("desired replicas %d outside %d..%d", desired, minReplicas, maxReplicas)
 	}
 	var existingDesired int
-	err = tx.QueryRowContext(ctx, `SELECT COALESCE((request_json->>'desired_replicas')::integer,0) FROM operations WHERE resource_type='deployment' AND resource_name=? AND tenant_id=? AND kind=? AND status IN ('pending','running','retry_wait') ORDER BY created_at DESC LIMIT 1`, name, tenant, workflows.ScaleKind).Scan(&existingDesired)
+	err = tx.QueryRowContext(ctx, `SELECT COALESCE((request_json->>'desired_replicas')::integer,0) FROM operations WHERE resource_type='deployment' AND resource_name=? AND tenant_id=? AND kind=? AND status IN ('pending','leased','running','waiting','cancelling') ORDER BY created_at DESC LIMIT 1`, name, tenant, workflows.ScaleKind).Scan(&existingDesired)
 	if err == nil {
 		if existingDesired == desired {
 			return tx.Commit()
