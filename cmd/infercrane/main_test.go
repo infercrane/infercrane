@@ -254,6 +254,72 @@ func TestDeployDisconnectLeavesDurableOperationRunning(t *testing.T) {
 	}
 }
 
+func TestInvalidOutputIsRejectedBeforeAnyControlPlaneRequest(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		requests++
+	}))
+	defer server.Close()
+	cfg := config.Config{ControlURL: server.URL, APIKey: "secret"}
+	tests := map[string]func() error{
+		"plan": func() error {
+			return planCommand(context.Background(), cfg, []string{"Qwen/Qwen3-8B", "--output", "xml"})
+		},
+		"doctor":      func() error { return doctorCommand(context.Background(), cfg, []string{"--output", "xml"}) },
+		"benchmark":   func() error { return benchmarkCommand(context.Background(), cfg, []string{"qwen", "--output", "xml"}) },
+		"deployments": func() error { return listDeployments(context.Background(), cfg, []string{"--output", "xml"}) },
+		"status":      func() error { return statusCommand(context.Background(), cfg, []string{"qwen", "--output", "xml"}) },
+		"orphans":     func() error { return orphanAPICommand(context.Background(), cfg, []string{"--output", "xml"}) },
+		"inspect":     func() error { return inspectCommand(context.Background(), cfg, []string{"qwen", "--output", "xml"}) },
+		"events":      func() error { return eventsCommand(context.Background(), cfg, []string{"qwen", "--output", "xml"}) },
+		"explain":     func() error { return explainCommand(context.Background(), cfg, []string{"qwen", "--output", "xml"}) },
+		"explain scaling": func() error {
+			return explainCommand(context.Background(), cfg, []string{"scaling", "qwen", "--output", "xml"})
+		},
+		"explain rollout": func() error {
+			return explainCommand(context.Background(), cfg, []string{"rollout", "qwen", "--output", "xml"})
+		},
+		"explain cold": func() error {
+			return explainCommand(context.Background(), cfg, []string{"cold-start", "qwen", "--output", "xml"})
+		},
+		"rollout inspect": func() error {
+			return rolloutCommand(context.Background(), cfg, []string{"inspect", "qwen", "--output", "xml"})
+		},
+	}
+	for name, run := range tests {
+		t.Run(name, func(t *testing.T) {
+			before := requests
+			if err := run(); err == nil || !strings.Contains(err.Error(), "--output") {
+				t.Fatalf("err=%v", err)
+			}
+			if requests != before {
+				t.Fatalf("control-plane requests=%d, want %d", requests, before)
+			}
+		})
+	}
+}
+
+func TestBenchmarkParsesFlagsAfterDeploymentName(t *testing.T) {
+	var path string
+	var body map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"benchmark":{"id":"benchmark-1"}}`))
+	}))
+	defer server.Close()
+
+	_, err := captureStdout(t, func() error {
+		return benchmarkCommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, []string{"qwen prod", "--requests", "40", "--concurrency", "4", "--revision", "candidate", "--output", "json"})
+	})
+	if err != nil || path != "/api/v1/deployments/qwen prod/benchmarks" || body["requests"] != float64(40) || body["concurrency"] != float64(4) || body["revision"] != "candidate" {
+		t.Fatalf("path=%q body=%#v err=%v", path, body, err)
+	}
+}
+
 func TestExplainReportsPersistedBlockingOperation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

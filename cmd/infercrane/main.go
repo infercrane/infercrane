@@ -209,6 +209,9 @@ func planCommand(ctx context.Context, cfg config.Config, args []string) error {
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
+	if err := validateOutput(*output); err != nil {
+		return err
+	}
 	minExplicit := false
 	fs.Visit(func(item *flag.Flag) {
 		if item.Name == "min" {
@@ -308,6 +311,9 @@ func doctorCommand(ctx context.Context, cfg config.Config, args []string) error 
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if err := validateOutput(*output); err != nil {
+		return err
+	}
 	query := url.Values{}
 	query.Set("cloud", fmt.Sprint(*cloud))
 	query.Set("serverless", fmt.Sprint(*serverless))
@@ -345,18 +351,32 @@ func splitTargets(raw string) []string {
 	return names
 }
 
+func validateOutput(output string) error {
+	if output != "human" && output != "json" {
+		return errors.New("--output must be human or json")
+	}
+	return nil
+}
+
 func benchmarkCommand(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return errors.New("usage: infercrane benchmark DEPLOYMENT [flags]")
+	}
+	deployment := args[0]
 	fs := flag.NewFlagSet("benchmark", flag.ContinueOnError)
 	requests := fs.Int("requests", 100, "request count")
 	concurrency := fs.Int("concurrency", 10, "concurrent clients")
 	randomSeed := fs.Int64("random-seed", 17, "deterministic AIPerf dataset seed")
 	revision := fs.String("revision", "active", "revision to benchmark: active, candidate, or revision ID")
 	output := fs.String("output", "human", "human or json")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
-	if fs.NArg() != 1 {
-		return errors.New("usage: infercrane benchmark DEPLOYMENT")
+	if fs.NArg() != 0 {
+		return errors.New("usage: infercrane benchmark DEPLOYMENT [flags]")
+	}
+	if err := validateOutput(*output); err != nil {
+		return err
 	}
 	var response struct {
 		Benchmark map[string]any `json:"benchmark"`
@@ -366,7 +386,7 @@ func benchmarkCommand(ctx context.Context, cfg config.Config, args []string) err
 		fmt.Fprintln(os.Stderr, "Notice: selected-revision validation sends an explicit AIPerf workload directly to revision capacity and may incur provider inference cost; it does not duplicate user traffic.")
 	}
 	// AIPerf runs can legitimately exceed the ordinary control request timeout.
-	if err := controlJSONWithTimeout(ctx, cfg, http.MethodPost, "/api/v1/deployments/"+url.PathEscape(fs.Arg(0))+"/benchmarks", "", request, &response, 35*time.Minute); err != nil {
+	if err := controlJSONWithTimeout(ctx, cfg, http.MethodPost, "/api/v1/deployments/"+url.PathEscape(deployment)+"/benchmarks", "", request, &response, 35*time.Minute); err != nil {
 		return err
 	}
 	if *output == "json" {
@@ -617,6 +637,9 @@ func listDeployments(ctx context.Context, cfg config.Config, args []string) erro
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if err := validateOutput(*output); err != nil {
+		return err
+	}
 	var response struct {
 		Data []deploymentSummary `json:"data"`
 	}
@@ -665,6 +688,9 @@ func statusCommand(ctx context.Context, cfg config.Config, args []string) error 
 	watch := fs.Bool("watch", false, "refresh until interrupted")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if err := validateOutput(*output); err != nil {
 		return err
 	}
 	for {
@@ -890,6 +916,9 @@ func orphanAPICommand(ctx context.Context, cfg config.Config, args []string) err
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if err := validateOutput(*output); err != nil {
+		return err
+	}
 	var response struct {
 		Data []struct {
 			Name               string    `json:"name"`
@@ -997,6 +1026,9 @@ func inspectCommand(ctx context.Context, cfg config.Config, args []string) error
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
+	if err := validateOutput(*output); err != nil {
+		return err
+	}
 	view, err := fetchDeployment(ctx, cfg, args[0])
 	if err != nil {
 		return err
@@ -1031,6 +1063,9 @@ func eventsCommand(ctx context.Context, cfg config.Config, args []string) error 
 	fs := flag.NewFlagSet("events", flag.ContinueOnError)
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if err := validateOutput(*output); err != nil {
 		return err
 	}
 	var response struct {
@@ -1074,6 +1109,9 @@ func explainCommand(ctx context.Context, cfg config.Config, args []string) error
 		if err := fs.Parse(args[2:]); err != nil {
 			return err
 		}
+		if err := validateOutput(*output); err != nil {
+			return err
+		}
 		view, err := fetchDeployment(ctx, cfg, args[1])
 		if err != nil {
 			return err
@@ -1111,6 +1149,9 @@ func explainCommand(ctx context.Context, cfg config.Config, args []string) error
 	fs := flag.NewFlagSet("explain", flag.ContinueOnError)
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if err := validateOutput(*output); err != nil {
 		return err
 	}
 	view, err := fetchDeployment(ctx, cfg, args[0])
@@ -1159,6 +1200,9 @@ func explainRolloutCommand(ctx context.Context, cfg config.Config, args []string
 	fs := flag.NewFlagSet("explain rollout", flag.ContinueOnError)
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if err := validateOutput(*output); err != nil {
 		return err
 	}
 	view, err := fetchDeployment(ctx, cfg, args[0])
@@ -1225,6 +1269,9 @@ func explainScalingCommand(ctx context.Context, cfg config.Config, args []string
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
+	if err := validateOutput(*output); err != nil {
+		return err
+	}
 	var response struct {
 		Data []struct {
 			ID          string          `json:"id"`
@@ -1272,6 +1319,9 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 		fs := flag.NewFlagSet("rollout inspect", flag.ContinueOnError)
 		output := fs.String("output", "human", "human or json")
 		if err := fs.Parse(args[2:]); err != nil {
+			return err
+		}
+		if err := validateOutput(*output); err != nil {
 			return err
 		}
 		var view deploymentView
