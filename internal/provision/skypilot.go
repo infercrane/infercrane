@@ -196,10 +196,10 @@ func (s SkyPilot) observe(ctx context.Context, resourceID string, port int, refr
 	}
 	args = append(args, "-o", "json", resourceID)
 	output, err := runner.Run(ctx, nil, args...)
+	if clusterMissing(output) {
+		return Observation{Exists: false, State: "absent"}, nil
+	}
 	if err != nil {
-		if clusterMissing(output) {
-			return Observation{Exists: false, State: "absent"}, nil
-		}
 		return Observation{}, fmt.Errorf("observe SkyPilot cluster %s: %w: %s", resourceID, err, strings.TrimSpace(string(output)))
 	}
 	statuses, err := parseStatuses(output)

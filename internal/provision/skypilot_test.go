@@ -11,6 +11,7 @@ type fakeSkyRunner struct {
 	exists          bool
 	statusErr       bool
 	missingErr      bool
+	missingSuccess  bool
 	statusPrefix    string
 	launches, downs int
 }
@@ -39,6 +40,9 @@ func (f *fakeSkyRunner) Run(_ context.Context, _ []string, args ...string) ([]by
 			if f.missingErr {
 				return []byte("Cluster 'infercrane-prod-r0' not found."), errors.New("exit status 1")
 			}
+			if f.missingSuccess {
+				return []byte("Cluster 'infercrane-prod-r0' not found."), nil
+			}
 			return []byte(`[]`), nil
 		}
 		return []byte(f.statusPrefix + `[{"name":"infercrane-prod-r0","status":"UP"}]`), nil
@@ -49,6 +53,15 @@ func (f *fakeSkyRunner) Run(_ context.Context, _ []string, args ...string) ([]by
 		return []byte(`[{"name":"infercrane-prod-r0","status":"UP"},{"name":"unmanaged","status":"UP"}]`), nil
 	default:
 		return nil, errors.New("unexpected command: " + command)
+	}
+}
+
+func TestEnsureTreatsSuccessfulMissingClusterMessageAsAbsent(t *testing.T) {
+	runner := &fakeSkyRunner{missingSuccess: true}
+	provider := SkyPilot{APIKey: "secret", Runner: runner}
+	_, err := provider.EnsureReplica(context.Background(), ReplicaSpec{ExternalKey: "prod-r0", Model: "model", Cloud: "runpod", GPU: "L40S"})
+	if err != nil || runner.launches != 1 {
+		t.Fatalf("launches=%d err=%v", runner.launches, err)
 	}
 }
 
