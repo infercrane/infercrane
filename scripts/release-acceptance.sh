@@ -334,14 +334,10 @@ case "$command_name" in
     # Refuse before installing the cleanup wrapper so a missing approval cannot
     # start even the local acceptance stack.
     require_paid_approval
-    if (set -e; run_qualify); then
-      run_cleanup
-    else
-      status=$?
-      echo "qualification failed; running guarded cleanup" >&2
-      run_cleanup || true
-      exit "$status"
-    fi
+    trap 'result=$?; trap - EXIT; echo "qualification failed; running guarded cleanup" >&2; run_cleanup || true; exit "$result"' EXIT
+    run_qualify
+    trap - EXIT
+    run_cleanup
     ;;
   cleanup) run_cleanup ;;
   report) run_report ;;

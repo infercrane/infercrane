@@ -68,15 +68,15 @@ func run(ctx context.Context, cfg Config, commands commandRunner) (Result, error
 		return Result{}, fmt.Errorf("create AIPerf artifact directory: %w", err)
 	}
 	defer os.RemoveAll(dir)
-	prefix := filepath.Join(dir, "infercrane")
-	args := []string{"profile", "--model", cfg.Model, "--url", strings.TrimRight(cfg.Endpoint, "/"), "--endpoint-type", "chat", "--streaming", "--use-server-token-count", "--request-count", strconv.Itoa(cfg.Requests), "--concurrency", strconv.Itoa(cfg.Concurrency), "--random-seed", strconv.FormatInt(cfg.RandomSeed, 10), "--ui", "none", "--export-level", "records", "--profile-export-prefix", prefix, "--no-auto-plot", "--no-gpu-telemetry", "--no-server-metrics"}
+	prefix := "infercrane"
+	args := []string{"profile", "--model", cfg.Model, "--url", strings.TrimRight(cfg.Endpoint, "/"), "--endpoint-type", "chat", "--streaming", "--use-server-token-count", "--request-count", strconv.Itoa(cfg.Requests), "--concurrency", strconv.Itoa(cfg.Concurrency), "--random-seed", strconv.FormatInt(cfg.RandomSeed, 10), "--ui", "none", "--export-level", "records", "--output-artifact-dir", dir, "--profile-export-prefix", prefix, "--no-auto-plot", "--no-gpu-telemetry", "--no-server-metrics"}
 	if cfg.APIKey != "" {
 		args = append(args, "--api-key", cfg.APIKey)
 	}
 	if cfg.APIKeyEnv == "" {
 		cfg.APIKeyEnv = "INFERCRANE_API_KEY"
 	}
-	command := portableReproductionCommand(shellCommand(cfg.Binary, args, cfg.APIKey, cfg.APIKeyEnv), prefix)
+	command := portableReproductionCommand(shellCommand(cfg.Binary, args, cfg.APIKey, cfg.APIKeyEnv), dir)
 	versionOutput, versionErr := commands.Run(ctx, cfg.Binary, "--version")
 	if versionErr != nil {
 		return Result{}, fmt.Errorf("AIPerf is unavailable (install with pipx install aiperf): %w", versionErr)
@@ -87,7 +87,7 @@ func run(ctx context.Context, cfg Config, commands commandRunner) (Result, error
 	if err != nil {
 		return Result{}, fmt.Errorf("AIPerf failed: %w: %s", err, strings.TrimSpace(string(output)))
 	}
-	result, err := parseRecords(prefix + ".jsonl")
+	result, err := parseRecords(filepath.Join(dir, prefix+".jsonl"))
 	if err != nil {
 		return Result{}, err
 	}
@@ -95,8 +95,8 @@ func run(ctx context.Context, cfg Config, commands commandRunner) (Result, error
 	return result, nil
 }
 
-func portableReproductionCommand(command, temporaryPrefix string) string {
-	return strings.Replace(command, quote(temporaryPrefix), "./infercrane-benchmark", 1)
+func portableReproductionCommand(command, temporaryDirectory string) string {
+	return strings.Replace(command, quote(temporaryDirectory), "./infercrane-benchmark-artifacts", 1)
 }
 
 func shellCommand(binary string, args []string, secret, secretEnv string) string {
