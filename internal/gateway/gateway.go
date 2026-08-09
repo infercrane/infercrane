@@ -25,7 +25,7 @@ import (
 )
 
 type Recorder interface {
-	RecordRequest(context.Context, string, string, time.Time, int, float64, string) error
+	RecordRequest(context.Context, domain.InferenceRecord) error
 }
 type Gateway struct {
 	Routes        *routes.Directory
@@ -124,6 +124,7 @@ func (g *Gateway) completions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	payload["model"] = route.UpstreamModel
+	streaming, _ := payload["stream"].(bool)
 	body, err = json.Marshal(payload)
 	if err != nil {
 		openAIError(w, "Invalid JSON body", http.StatusBadRequest, "invalid_request_error")
@@ -162,7 +163,7 @@ func (g *Gateway) completions(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, context.DeadlineExceeded) {
 			status, errorType, message = http.StatusGatewayTimeout, "timeout", "Inference upstream timed out"
 		}
-		g.record(r.Context(), requestID, route.DeploymentID, started, status, errorType)
+		g.record(r.Context(), requestID, route, started, status, errorType, streaming, responseObservation{})
 		openAIError(w, message, status, "server_error")
 		return
 	}
@@ -171,7 +172,8 @@ func (g *Gateway) completions(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Request-ID", requestID)
 	w.Header().Set("traceparent", traceParent)
 	w.WriteHeader(resp.StatusCode)
-	copyErr := copyResponse(w, resp)
+	observation := responseObservation{}
+	copyErr := copyResponse(w, resp, &observation)
 	errorType := ""
 	if copyErr != nil {
 		if r.Context().Err() != nil {
@@ -180,16 +182,24 @@ func (g *Gateway) completions(w http.ResponseWriter, r *http.Request) {
 			errorType = "upstream_disconnect"
 		}
 	}
-	g.record(context.WithoutCancel(r.Context()), requestID, route.DeploymentID, started, resp.StatusCode, errorType)
+	g.record(context.WithoutCancel(r.Context()), requestID, route, started, resp.StatusCode, errorType, streaming, observation)
 	if g.Logger != nil {
 		g.Logger.Info("inference request", "request_id", requestID, "traceparent", traceParent, "tenant_id", principal.TenantID, "deployment_id", route.DeploymentID, "status", resp.StatusCode, "duration_ms", float64(time.Since(started).Microseconds())/1000)
 	}
 }
-func (g *Gateway) record(ctx context.Context, id, deploymentID string, started time.Time, status int, errorType string) {
+func (g *Gateway) record(ctx context.Context, id string, route routes.Snapshot, started time.Time, status int, errorType string, streaming bool, observation responseObservation) {
 	if g.Recorder == nil {
 		return
 	}
-	if err := g.Recorder.RecordRequest(ctx, id, deploymentID, started, status, float64(time.Since(started).Microseconds())/1000, errorType); err != nil && g.Logger != nil {
+	latency := float64(time.Since(started).Microseconds()) / 1000
+	var ttft *float64
+	if !observation.firstByteAt.IsZero() {
+		value := float64(observation.firstByteAt.Sub(started).Microseconds()) / 1000
+		ttft = &value
+	}
+	responseModel, inputTokens, outputTokens := observation.usage()
+	record := domain.InferenceRecord{RequestID: id, DeploymentID: route.DeploymentID, RevisionID: route.RevisionID, Provider: route.Provider, Runtime: route.Runtime, ComputeMode: route.ComputeMode, OperationName: "chat", ResponseModel: responseModel, StartedAt: started, StatusCode: status, LatencyMS: latency, TTFTMS: ttft, InputTokens: inputTokens, OutputTokens: outputTokens, Streaming: streaming, ErrorType: errorType}
+	if err := g.Recorder.RecordRequest(ctx, record); err != nil && g.Logger != nil {
 		g.Logger.Error("record request", "error", err, "request_id", id)
 	}
 }
@@ -197,13 +207,74 @@ func (g *Gateway) record(ctx context.Context, id, deploymentID string, started t
 var hopHeaders = map[string]struct{}{"Connection": {}, "Keep-Alive": {}, "Proxy-Authenticate": {}, "Proxy-Authorization": {}, "Te": {}, "Trailer": {}, "Transfer-Encoding": {}, "Upgrade": {}, "Content-Length": {}, "Host": {}}
 var copyBuffers = sync.Pool{New: func() any { buffer := make([]byte, 32<<10); return &buffer }}
 
-func copyResponse(w http.ResponseWriter, resp *http.Response) error {
+const observationLimit = 2 << 20
+
+type responseObservation struct {
+	firstByteAt time.Time
+	body        []byte
+}
+
+func (o *responseObservation) observe(body []byte) {
+	if len(body) > 0 && o.firstByteAt.IsZero() {
+		o.firstByteAt = time.Now()
+	}
+	remaining := observationLimit - len(o.body)
+	if remaining > len(body) {
+		remaining = len(body)
+	}
+	if remaining > 0 {
+		o.body = append(o.body, body[:remaining]...)
+	}
+}
+
+func (o responseObservation) usage() (string, *int, *int) {
+	var response struct {
+		Model string `json:"model"`
+		Usage struct {
+			PromptTokens     *int `json:"prompt_tokens"`
+			CompletionTokens *int `json:"completion_tokens"`
+		} `json:"usage"`
+	}
+	decode := func(value []byte) bool { return json.Unmarshal(value, &response) == nil }
+	if !decode(o.body) {
+		for _, line := range bytes.Split(o.body, []byte("\n")) {
+			line = bytes.TrimSpace(line)
+			if !bytes.HasPrefix(line, []byte("data:")) {
+				continue
+			}
+			value := bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:")))
+			if bytes.Equal(value, []byte("[DONE]")) {
+				continue
+			}
+			var chunk struct {
+				Model string `json:"model"`
+				Usage *struct {
+					PromptTokens     *int `json:"prompt_tokens"`
+					CompletionTokens *int `json:"completion_tokens"`
+				} `json:"usage"`
+			}
+			if json.Unmarshal(value, &chunk) == nil {
+				if chunk.Model != "" {
+					response.Model = chunk.Model
+				}
+				if chunk.Usage != nil {
+					response.Usage.PromptTokens = chunk.Usage.PromptTokens
+					response.Usage.CompletionTokens = chunk.Usage.CompletionTokens
+				}
+			}
+		}
+	}
+	return response.Model, response.Usage.PromptTokens, response.Usage.CompletionTokens
+}
+
+func copyResponse(w http.ResponseWriter, resp *http.Response, observation *responseObservation) error {
 	buffer := copyBuffers.Get().(*[]byte)
 	defer copyBuffers.Put(buffer)
 	streaming := strings.HasPrefix(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream")
 	for {
 		n, err := resp.Body.Read(*buffer)
 		if n > 0 {
+			observation.observe((*buffer)[:n])
 			if _, writeErr := w.Write((*buffer)[:n]); writeErr != nil {
 				return writeErr
 			}

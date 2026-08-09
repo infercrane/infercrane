@@ -6,17 +6,15 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/infercrane/infercrane/internal/domain"
 )
 
 type Sink interface {
-	RecordRequest(context.Context, string, string, time.Time, int, float64, string) error
+	RecordRequest(context.Context, domain.InferenceRecord) error
 }
 type record struct {
-	id, deploymentID string
-	started          time.Time
-	status           int
-	latency          float64
-	errorType        string
+	domain.InferenceRecord
 }
 type Recorder struct {
 	sink    Sink
@@ -43,8 +41,8 @@ func New(sink Sink, logger *slog.Logger, capacity, workers int) *Recorder {
 	}
 	return r
 }
-func (r *Recorder) RecordRequest(_ context.Context, id, deploymentID string, started time.Time, status int, latency float64, errorType string) error {
-	item := record{id: id, deploymentID: deploymentID, started: started, status: status, latency: latency, errorType: errorType}
+func (r *Recorder) RecordRequest(_ context.Context, value domain.InferenceRecord) error {
+	item := record{InferenceRecord: value}
 	select {
 	case r.queue <- item:
 	default:
@@ -59,10 +57,10 @@ func (r *Recorder) run() {
 	defer r.wg.Done()
 	for item := range r.queue {
 		ctx, cancel := context.WithTimeout(r.ctx, 5*time.Second)
-		err := r.sink.RecordRequest(ctx, item.id, item.deploymentID, item.started, item.status, item.latency, item.errorType)
+		err := r.sink.RecordRequest(ctx, item.InferenceRecord)
 		cancel()
 		if err != nil && r.logger != nil {
-			r.logger.Error("persist request accounting", "error", err, "request_id", item.id)
+			r.logger.Error("persist request accounting", "error", err, "request_id", item.RequestID)
 		}
 	}
 }

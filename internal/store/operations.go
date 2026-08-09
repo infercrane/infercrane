@@ -328,8 +328,8 @@ func (s *Store) UpdateProvisionedTarget(ctx context.Context, id, resourceID, det
 	return nil
 }
 
-func (s *Store) RecordRequest(ctx context.Context, requestID, deploymentID string, started time.Time, status int, latencyMS float64, errorType string) error {
-	_, err := s.ExecContext(ctx, `INSERT INTO request_records(request_id,deployment_id,started_at,completed_at,status_code,latency_ms,retry_count,error_type) VALUES(?,?,?,?,?,?,0,?) ON CONFLICT(request_id) DO UPDATE SET completed_at=EXCLUDED.completed_at,status_code=EXCLUDED.status_code,latency_ms=EXCLUDED.latency_ms,error_type=EXCLUDED.error_type`, requestID, deploymentID, started.UTC().Format(time.RFC3339Nano), now(), status, latencyMS, null(errorType))
+func (s *Store) RecordRequest(ctx context.Context, record domain.InferenceRecord) error {
+	_, err := s.ExecContext(ctx, `INSERT INTO request_records(request_id,deployment_id,revision_id,target_id,started_at,completed_at,status_code,latency_ms,ttft_ms,input_tokens,output_tokens,retry_count,error_type,provider,runtime,compute_mode,operation_name,response_model,streaming) VALUES(?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,?,?,?) ON CONFLICT(request_id) DO UPDATE SET completed_at=EXCLUDED.completed_at,status_code=EXCLUDED.status_code,latency_ms=EXCLUDED.latency_ms,ttft_ms=EXCLUDED.ttft_ms,input_tokens=EXCLUDED.input_tokens,output_tokens=EXCLUDED.output_tokens,error_type=EXCLUDED.error_type,response_model=EXCLUDED.response_model`, record.RequestID, record.DeploymentID, null(record.RevisionID), null(record.TargetID), record.StartedAt.UTC().Format(time.RFC3339Nano), now(), record.StatusCode, record.LatencyMS, record.TTFTMS, record.InputTokens, record.OutputTokens, null(record.ErrorType), null(record.Provider), null(record.Runtime), null(record.ComputeMode), record.OperationName, null(record.ResponseModel), record.Streaming)
 	return err
 }
 
@@ -349,8 +349,8 @@ func (s *Store) RequestStats(ctx context.Context, deploymentID string, window ti
 		return domain.RequestStats{}, errors.New("stats window must be positive")
 	}
 	var out domain.RequestStats
-	var p50, p95 sql.NullFloat64
-	err := s.QueryRowContext(ctx, `SELECT COUNT(*)::double precision/?,COALESCE(AVG(CASE WHEN error_type IS NOT NULL OR status_code IS NULL OR status_code>=400 THEN 1.0 ELSE 0.0 END),0),percentile_cont(0.50) WITHIN GROUP (ORDER BY latency_ms) FILTER (WHERE latency_ms IS NOT NULL),percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms) FILTER (WHERE latency_ms IS NOT NULL) FROM request_records WHERE deployment_id=? AND started_at>=NOW()-(?*INTERVAL '1 second')`, window.Seconds(), deploymentID, window.Seconds()).Scan(&out.RequestsPerSecond, &out.ErrorRate, &p50, &p95)
+	var p50, p95, ttftP50, ttftP95 sql.NullFloat64
+	err := s.QueryRowContext(ctx, `SELECT COUNT(*)::double precision/?,COALESCE(SUM(input_tokens),0)::double precision/?,COALESCE(SUM(output_tokens),0)::double precision/?,COALESCE(AVG(CASE WHEN error_type IS NOT NULL OR status_code IS NULL OR status_code>=400 THEN 1.0 ELSE 0.0 END),0),percentile_cont(0.50) WITHIN GROUP (ORDER BY latency_ms) FILTER (WHERE latency_ms IS NOT NULL),percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms) FILTER (WHERE latency_ms IS NOT NULL),percentile_cont(0.50) WITHIN GROUP (ORDER BY ttft_ms) FILTER (WHERE ttft_ms IS NOT NULL),percentile_cont(0.95) WITHIN GROUP (ORDER BY ttft_ms) FILTER (WHERE ttft_ms IS NOT NULL) FROM request_records WHERE deployment_id=? AND started_at>=NOW()-(?*INTERVAL '1 second')`, window.Seconds(), window.Seconds(), window.Seconds(), deploymentID, window.Seconds()).Scan(&out.RequestsPerSecond, &out.InputTokensPerSecond, &out.OutputTokensPerSecond, &out.ErrorRate, &p50, &p95, &ttftP50, &ttftP95)
 	if err != nil {
 		return domain.RequestStats{}, err
 	}
@@ -359,6 +359,12 @@ func (s *Store) RequestStats(ctx context.Context, deploymentID string, window ti
 	}
 	if p95.Valid {
 		out.P95LatencyMS = &p95.Float64
+	}
+	if ttftP50.Valid {
+		out.P50TTFTMS = &ttftP50.Float64
+	}
+	if ttftP95.Valid {
+		out.P95TTFTMS = &ttftP95.Float64
 	}
 	return out, nil
 }

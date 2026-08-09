@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/routes"
@@ -22,6 +24,18 @@ func (f fakeAuthenticator) AuthenticatePrincipal(context.Context, string) (domai
 type roundTripper func(*http.Request) (*http.Response, error)
 
 func (fn roundTripper) RoundTrip(r *http.Request) (*http.Response, error) { return fn(r) }
+
+type captureRecorder struct {
+	mu     sync.Mutex
+	record domain.InferenceRecord
+}
+
+func (c *captureRecorder) RecordRequest(_ context.Context, record domain.InferenceRecord) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.record = record
+	return nil
+}
 
 func TestCompletionRewritesAlias(t *testing.T) {
 	client := &http.Client{Transport: roundTripper(func(r *http.Request) (*http.Response, error) {
@@ -47,6 +61,39 @@ func TestCompletionRewritesAlias(t *testing.T) {
 	}
 	if !validTraceParent.MatchString(recorder.Header().Get("traceparent")) {
 		t.Fatalf("response traceparent=%q", recorder.Header().Get("traceparent"))
+	}
+}
+
+func TestCompletionRecordsStreamingTelemetry(t *testing.T) {
+	client := &http.Client{Transport: roundTripper(func(*http.Request) (*http.Response, error) {
+		body := "data: {\"model\":\"Qwen/Qwen3-8B\",\"choices\":[]}\n\n" +
+			"data: {\"model\":\"Qwen/Qwen3-8B\",\"choices\":[],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":7}}\n\n" +
+			"data: [DONE]\n\n"
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(body))}, nil
+	})}
+	directory := routes.New()
+	directory.Put(routes.Snapshot{DeploymentID: "d1", RevisionID: "rev-3", Alias: "alias", UpstreamModel: "Qwen/Qwen3-8B", RouterURL: "http://router", Provider: "runpod", Runtime: "vllm", ComputeMode: "elastic"})
+	captured := &captureRecorder{}
+	handler := (&Gateway{Routes: directory, APIKey: "secret", Client: client, Recorder: captured}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"alias","stream":true,"messages":[]}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	captured.mu.Lock()
+	record := captured.record
+	captured.mu.Unlock()
+	if record.DeploymentID != "d1" || record.RevisionID != "rev-3" || record.Provider != "runpod" || record.Runtime != "vllm" || record.ComputeMode != "elastic" || record.OperationName != "chat" {
+		t.Fatalf("metadata=%+v", record)
+	}
+	if !record.Streaming || record.TTFTMS == nil || *record.TTFTMS < 0 || record.LatencyMS < *record.TTFTMS {
+		t.Fatalf("timings=%+v", record)
+	}
+	if record.InputTokens == nil || *record.InputTokens != 12 || record.OutputTokens == nil || *record.OutputTokens != 7 || record.ResponseModel != "Qwen/Qwen3-8B" {
+		t.Fatalf("usage=%+v", record)
+	}
+	if record.StartedAt.After(time.Now()) || record.ErrorType != "" {
+		t.Fatalf("record=%+v", record)
 	}
 }
 

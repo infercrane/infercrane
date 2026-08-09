@@ -20,7 +20,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 | `internal/controlapi` | 1 | 1 | `TestApplyQueuesIdempotentOperation`, `TestCancelHidesMissingOperation`, `TestCloudDeployPersistsAndQueuesConverge`, `TestDeleteQueuesDurableCleanup`, `TestDeploymentAndOperationEventsAreTenantScoped`, `TestDeploymentReadAPIReturnsDurableState`, `TestOperationAPIAuthenticationAndResponse`, `TestRouteAndTenantMutationsUseAuthenticatedAPI`, `TestScalingDecisionsAreReadThroughTenantAPI`, `TestTargetRegistrationRejectsEmbeddedCredentials`, `TestViewerCannotApply` |
 | `internal/doctor` | 1 | 1 | `TestCloudCredentialCheckIsRequiredWhenRequested`, `TestRunReadyWithoutSkyPilot`, `TestRunReportsRequiredAndOptionalChecks` |
 | `internal/domain` | 1 | 0 | — |
-| `internal/gateway` | 2 | 2 | `TestActiveStreamKeepsSelectedRouterAcrossGenerationPublish`, `TestAuthentication`, `TestCompletionRewritesAlias`, `TestModelsAreTenantScoped`, `TestTelemetryExportsPrometheusHistogram` |
+| `internal/gateway` | 2 | 2 | `TestActiveStreamKeepsSelectedRouterAcrossGenerationPublish`, `TestAuthentication`, `TestCompletionRecordsStreamingTelemetry`, `TestCompletionRewritesAlias`, `TestModelsAreTenantScoped`, `TestTelemetryExportsPrometheusHistogram` |
 | `internal/metrics` | 1 | 1 | `TestParse` |
 | `internal/operations` | 2 | 2 | `TestTelemetryExportsCounters`, `TestWorkerAppliesConfiguredJitter`, `TestWorkerCancelsRecoveredClaimBeforeHandler`, `TestWorkerCompletesClaimedOperation`, `TestWorkerRetriesFailedCancellationCleanup`, `TestWorkerSchedulesBoundedRetry`, `TestWorkerStopsRetryAtMaxAttempts` |
 | `internal/planning` | 1 | 1 | `TestBuildProvisionedPlan`, `TestBuildRejectsMixedModes`, `TestCompareProducesSemanticRevisionPlan`, `TestIncompletePlanIsActionable` |
@@ -31,7 +31,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 | `internal/routes` | 1 | 1 | `TestDirectoryIsolatesSameAliasByTenant`, `TestDirectoryOrdersAndRemovesSnapshots` |
 | `internal/runtime` | 1 | 0 | — |
 | `internal/spec` | 1 | 0 | — |
-| `internal/store` | 12 | 2 | `TestApplyDeploymentConvergesTargetMembership`, `TestCancellingQueuedOperationPreventsClaim`, `TestCancellingWaitingOperationRequiresCleanupClaim`, `TestCreateDeploymentRejectsIncompatibleTargets`, `TestDeploymentLifecycleMutationsAreSerialized`, `TestDeploymentRevisionsAreImmutableAndPromoteExplicitly`, `TestDurableAutoscalingAcceptanceOneToTwoToOne`, `TestModelArtifactIsImmutablePerRevision`, `TestOperationQueueLeasesAndRecoversExpiredWork`, `TestOrphanedTargetsOnlyReturnsProvisionedUnusedTargets`, `TestPrincipalCredentialRotationAndRevocation`, `TestReplicaIntentAndProviderIdentityAreIdempotent`, `TestScaleToQueuesExactlyOneDurableOperation`, `TestStaleLeaseCannotCheckpointOrFinish`, `TestSubmitCloudDeploymentIsAtomicAndIdempotent`, `TestSubmitDeploymentDeleteWithdrawsDesiredStateAndQueuesCleanup`, `TestTargetAndDeploymentLifecycle`, `TestTargetConflict`, `TestTenantQuotaRejectsDeploymentBeyondReplicaLimit`, `TestTenantResourcesCanReuseNamesWithoutCrossTenantVisibility` |
+| `internal/store` | 12 | 2 | `TestApplyDeploymentConvergesTargetMembership`, `TestCancellingQueuedOperationPreventsClaim`, `TestCancellingWaitingOperationRequiresCleanupClaim`, `TestCreateDeploymentRejectsIncompatibleTargets`, `TestDeploymentLifecycleMutationsAreSerialized`, `TestDeploymentRevisionsAreImmutableAndPromoteExplicitly`, `TestDurableAutoscalingAcceptanceOneToTwoToOne`, `TestModelArtifactIsImmutablePerRevision`, `TestOperationQueueLeasesAndRecoversExpiredWork`, `TestOrphanedTargetsOnlyReturnsProvisionedUnusedTargets`, `TestPrincipalCredentialRotationAndRevocation`, `TestReplicaIntentAndProviderIdentityAreIdempotent`, `TestRequestTelemetryPersistsMeasurementsAndDimensions`, `TestScaleToQueuesExactlyOneDurableOperation`, `TestStaleLeaseCannotCheckpointOrFinish`, `TestSubmitCloudDeploymentIsAtomicAndIdempotent`, `TestSubmitDeploymentDeleteWithdrawsDesiredStateAndQueuesCleanup`, `TestTargetAndDeploymentLifecycle`, `TestTargetConflict`, `TestTenantQuotaRejectsDeploymentBeyondReplicaLimit`, `TestTenantResourcesCanReuseNamesWithoutCrossTenantVisibility` |
 | `internal/testtools/fake-router` | 1 | 0 | — |
 | `internal/testtools/fake-vllm` | 1 | 0 | — |
 | `internal/workflows` | 2 | 2 | `TestApplyExistingHandlerIsDeterministic`, `TestApplyExistingHandlerRejectsInvalidPayload`, `TestConvergeCancellationDeletesProviderResource`, `TestConvergeCreatesExactlyOneResourcePerMinimumReplica`, `TestConvergeResumesAfterProviderCheckpoint`, `TestScaleDownWithdrawsRouterBeforeDeletingReplica` |
@@ -155,6 +155,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 - `internal/store/migrations/009_deployment_revisions.sql`
 - `internal/store/migrations/010_autoscaling_operations.sql`
 - `internal/store/migrations/011_model_artifacts.sql`
+- `internal/store/migrations/012_request_telemetry.sql`
 
 ## Architecture decisions
 

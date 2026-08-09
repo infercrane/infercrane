@@ -7,11 +7,15 @@ import (
 
 type Snapshot struct {
 	DeploymentID    string
+	RevisionID      string
 	TenantID        string
 	Alias           string
 	UpstreamModel   string
 	RouterURL       string
 	RouterProcessID string
+	Provider        string
+	Runtime         string
+	ComputeMode     string
 }
 
 // Directory is an atomic in-memory data-plane snapshot. Reads never touch the database.

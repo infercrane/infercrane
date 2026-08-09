@@ -164,7 +164,7 @@ func (r *Reconciler) Once(ctx context.Context) error {
 			if upstream == "" {
 				upstream = d.Model
 			}
-			r.Routes.Put(routes.Snapshot{DeploymentID: d.ID, TenantID: d.TenantID, Alias: d.Name, UpstreamModel: upstream, RouterURL: generation.InternalEndpoint, RouterProcessID: candidateID})
+			r.Routes.Put(routeSnapshot(d, healthy, upstream, generation.InternalEndpoint, candidateID))
 			if hadOldRoute && oldRoute.RouterProcessID != "" && oldRoute.RouterProcessID != candidateID {
 				_ = r.Router.Stop(oldRoute.RouterProcessID)
 			}
@@ -174,7 +174,7 @@ func (r *Reconciler) Once(ctx context.Context) error {
 			upstream = d.Model
 		}
 		if _, published := r.Routes.GetForTenant(d.TenantID, d.Name); !published {
-			r.Routes.Put(routes.Snapshot{DeploymentID: d.ID, TenantID: d.TenantID, Alias: d.Name, UpstreamModel: upstream, RouterURL: generation.InternalEndpoint, RouterProcessID: routerProcessID(d.ID, generation.Generation)})
+			r.Routes.Put(routeSnapshot(d, healthy, upstream, generation.InternalEndpoint, routerProcessID(d.ID, generation.Generation)))
 		}
 		state := "degraded"
 		if len(healthy) == len(resolved.Targets) {
@@ -183,6 +183,26 @@ func (r *Reconciler) Once(ctx context.Context) error {
 		_ = r.Store.SetDeploymentState(ctx, d.ID, state)
 	}
 	return nil
+}
+
+func routeSnapshot(deployment domain.Deployment, targets []domain.Target, upstream, endpoint, processID string) routes.Snapshot {
+	provider := ""
+	computeMode := ""
+	for _, target := range targets {
+		if provider == "" {
+			provider = target.Provider
+		} else if provider != target.Provider {
+			provider = ""
+			break
+		}
+	}
+	if provider != "" {
+		computeMode = "elastic"
+		if provider == "existing" {
+			computeMode = "existing"
+		}
+	}
+	return routes.Snapshot{DeploymentID: deployment.ID, RevisionID: deployment.ActiveRevisionID, TenantID: deployment.TenantID, Alias: deployment.Name, UpstreamModel: upstream, RouterURL: endpoint, RouterProcessID: processID, Provider: provider, Runtime: deployment.Runtime, ComputeMode: computeMode}
 }
 func routerPort(start int, deploymentID string) int {
 	sum := sha256.Sum256([]byte(deploymentID))

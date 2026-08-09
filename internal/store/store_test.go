@@ -476,6 +476,45 @@ func TestModelArtifactIsImmutablePerRevision(t *testing.T) {
 	}
 }
 
+func TestRequestTelemetryPersistsMeasurementsAndDimensions(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	if _, err := s.AddTarget(ctx, domain.Target{Name: "telemetry-target", URL: "http://telemetry.invalid", Provider: "runpod", Runtime: "vllm"}); err != nil {
+		t.Fatal(err)
+	}
+	deployment, err := s.ApplyDeployment(ctx, domain.Deployment{Name: "telemetry-deployment", Model: "Qwen/Qwen3-8B"}, []string{"telemetry-target"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := s.Resolve(ctx, deployment.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ttft := 123.4
+	input, output := 17, 23
+	record := domain.InferenceRecord{RequestID: "req-telemetry", DeploymentID: deployment.ID, RevisionID: resolved.Deployment.ActiveRevisionID, Provider: "runpod", Runtime: "vllm", ComputeMode: "elastic", OperationName: "chat", ResponseModel: "Qwen/Qwen3-8B", StartedAt: time.Now().Add(-time.Second), StatusCode: 200, LatencyMS: 456.7, TTFTMS: &ttft, InputTokens: &input, OutputTokens: &output, Streaming: true}
+	if err = s.RecordRequest(ctx, record); err != nil {
+		t.Fatal(err)
+	}
+	var revision, provider, runtime, mode, operation, model string
+	var storedTTFT, latency float64
+	var storedInput, storedOutput int
+	var streaming bool
+	if err = s.db.QueryRowContext(ctx, `SELECT revision_id,provider,runtime,compute_mode,operation_name,response_model,ttft_ms,latency_ms,input_tokens,output_tokens,streaming FROM request_records WHERE request_id=$1`, record.RequestID).Scan(&revision, &provider, &runtime, &mode, &operation, &model, &storedTTFT, &latency, &storedInput, &storedOutput, &streaming); err != nil {
+		t.Fatal(err)
+	}
+	if revision != record.RevisionID || provider != "runpod" || runtime != "vllm" || mode != "elastic" || operation != "chat" || model != "Qwen/Qwen3-8B" || storedTTFT != ttft || latency != record.LatencyMS || storedInput != input || storedOutput != output || !streaming {
+		t.Fatalf("stored telemetry mismatch: revision=%s provider=%s runtime=%s mode=%s operation=%s model=%s ttft=%g latency=%g input=%d output=%d streaming=%t", revision, provider, runtime, mode, operation, model, storedTTFT, latency, storedInput, storedOutput, streaming)
+	}
+	stats, err := s.RequestStats(ctx, deployment.ID, 5*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.P50TTFTMS == nil || *stats.P50TTFTMS != ttft || stats.P95TTFTMS == nil || *stats.P95TTFTMS != ttft || stats.InputTokensPerSecond <= 0 || stats.OutputTokensPerSecond <= 0 {
+		t.Fatalf("request stats=%+v", stats)
+	}
+}
+
 func TestReplicaIntentAndProviderIdentityAreIdempotent(t *testing.T) {
 	ctx := context.Background()
 	s := openStore(t, ctx)

@@ -72,10 +72,28 @@ type Metrics struct {
 }
 
 type RequestStats struct {
-	RequestsPerSecond float64  `json:"requests_per_second"`
-	ErrorRate         float64  `json:"error_rate"`
-	P50LatencyMS      *float64 `json:"p50_latency_ms"`
-	P95LatencyMS      *float64 `json:"p95_latency_ms"`
+	RequestsPerSecond     float64  `json:"requests_per_second"`
+	InputTokensPerSecond  float64  `json:"input_tokens_per_second"`
+	OutputTokensPerSecond float64  `json:"output_tokens_per_second"`
+	ErrorRate             float64  `json:"error_rate"`
+	P50LatencyMS          *float64 `json:"p50_latency_ms"`
+	P95LatencyMS          *float64 `json:"p95_latency_ms"`
+	P50TTFTMS             *float64 `json:"p50_ttft_ms"`
+	P95TTFTMS             *float64 `json:"p95_ttft_ms"`
+}
+
+// InferenceRecord contains request metadata and measurements only. Prompt and
+// generated content are deliberately excluded.
+type InferenceRecord struct {
+	RequestID, DeploymentID, RevisionID, TargetID string
+	Provider, Runtime, ComputeMode, OperationName string
+	ResponseModel, ErrorType                      string
+	StartedAt                                     time.Time
+	StatusCode                                    int
+	LatencyMS                                     float64
+	TTFTMS                                        *float64
+	InputTokens, OutputTokens                     *int
+	Streaming                                     bool
 }
 
 type RouterGeneration struct {
