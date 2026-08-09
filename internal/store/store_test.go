@@ -355,6 +355,43 @@ func TestPrincipalCredentialRotationAndRevocation(t *testing.T) {
 	}
 }
 
+func TestReplicaIntentAndProviderIdentityAreIdempotent(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	if _, err := s.AddTarget(ctx, domain.Target{Name: "seed", URL: "http://seed", Provider: "existing", Runtime: "vllm", UpstreamModel: "model"}); err != nil {
+		t.Fatal(err)
+	}
+	deployment, err := s.ApplyDeployment(ctx, domain.Deployment{Name: "replicas", Model: "model"}, []string{"seed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent := domain.Replica{TenantID: "global", DeploymentID: deployment.ID, Ordinal: 0, ExternalKey: "infercrane-replicas-r0", Provider: "skypilot"}
+	first, created, err := s.EnsureReplicaIntent(ctx, intent)
+	if err != nil || !created || first.LifecycleState != "pending" {
+		t.Fatalf("first=%#v created=%t err=%v", first, created, err)
+	}
+	again, created, err := s.EnsureReplicaIntent(ctx, intent)
+	if err != nil || created || again.ID != first.ID {
+		t.Fatalf("again=%#v created=%t err=%v", again, created, err)
+	}
+	if err = s.SetReplicaProviderIdentity(ctx, first.ID, "request-1", "resource-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.SetReplicaProviderIdentity(ctx, first.ID, "request-1", "resource-1"); err != nil {
+		t.Fatalf("repeating identical identity: %v", err)
+	}
+	if err = s.SetReplicaProviderIdentity(ctx, first.ID, "request-2", "resource-2"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("identity replacement error=%v, want conflict", err)
+	}
+	if err = s.ObserveReplica(ctx, first.ID, "ready", "https://worker.example", "healthy", `{"gpu":"L40S"}`, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := s.ReplicasForDeployment(ctx, "global", deployment.ID)
+	if err != nil || len(rows) != 1 || rows[0].ProviderResourceID != "resource-1" || rows[0].Endpoint != "https://worker.example" || rows[0].LastObservedAt == nil {
+		t.Fatalf("replicas=%#v err=%v", rows, err)
+	}
+}
+
 func TestTenantResourcesCanReuseNamesWithoutCrossTenantVisibility(t *testing.T) {
 	ctx := context.Background()
 	s := openStore(t, ctx)
@@ -389,7 +426,7 @@ func openStore(t *testing.T, ctx context.Context) *Store {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	if _, err := s.db.ExecContext(ctx, `TRUNCATE principals,tenant_quotas,audit_events,operations,scaling_decisions,scaling_policies,request_records,deployment_events,router_generations,deployment_targets,deployments,targets CASCADE`); err != nil {
+	if _, err := s.db.ExecContext(ctx, `TRUNCATE principals,tenant_quotas,audit_events,operations,scaling_decisions,scaling_policies,request_records,deployment_events,router_generations,deployment_targets,replicas,deployments,targets CASCADE`); err != nil {
 		t.Fatalf("reset test database: %v", err)
 	}
 	t.Cleanup(func() {

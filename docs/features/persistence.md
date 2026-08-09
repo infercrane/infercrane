@@ -16,6 +16,11 @@ each new file transactionally, and records it in `schema_migrations`. The pool i
 connection lifetime/idle limits. High-volume request records use indexed time access and batched
 retention.
 
+Cloud replica intent is persisted before provider mutation. Each replica has a stable external key,
+lifecycle state, provider request/resource identity, endpoint, health, provider details, and last
+observation timestamp. Provider identity is write-once: repeating the same identity is safe, while
+attempting to replace an established identity is a conflict.
+
 ## Migration policy
 
 - Use sequential zero-padded filenames such as `002_add_example.sql`.

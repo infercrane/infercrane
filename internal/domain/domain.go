@@ -73,6 +73,15 @@ type ProvisionedTarget struct {
 	Details                                      string
 }
 
+type Replica struct {
+	ID, TenantID, DeploymentID, ExternalKey, LifecycleState string
+	Provider, ProviderRequestID, ProviderResourceID         string
+	Endpoint, Health, ProviderDetails                       string
+	Ordinal                                                 int
+	LastObservedAt                                          *time.Time
+	CreatedAt, UpdatedAt                                    time.Time
+}
+
 type Operation struct {
 	ID, TenantID, Kind, ResourceType, ResourceName, IdempotencyKey string
 	Status, Message, RequestJSON, ResultJSON, ErrorCode            string
