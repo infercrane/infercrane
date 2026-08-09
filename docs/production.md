@@ -11,6 +11,12 @@ Required configuration:
 - `INFERCRANE_DATABASE_URL`: PostgreSQL URL with TLS enabled outside a trusted private network.
 - `INFERCRANE_API_KEY`: at least 32 characters, supplied by the workload secret manager; no production default exists.
 - `INFERCRANE_URL`: absolute HTTP(S) control-plane base URL used by lifecycle CLI commands.
+- `RUNPOD_API_KEY`: optional RunPod secret. The container entrypoint writes the RunPod CLI's
+  required user-scoped configuration with mode `0600` before starting InferCrane; it never logs the
+  value.
+- `RUNPOD_API_KEY_FILE`: preferred alternative containing a mounted RunPod secret. It takes effect
+  when `RUNPOD_API_KEY` is unset, avoiding secret exposure in container environment metadata.
+  The container user must have read permission on the mounted file.
 - `INFERCRANE_INSTANCE_ID`: stable and unique per replica, normally the Kubernetes pod name.
 - `INFERCRANE_DATABASE_MAX_OPEN` and `INFERCRANE_DATABASE_MAX_IDLE`: size these with the total
   replica count below PostgreSQL's connection budget or place PgBouncer in transaction mode.

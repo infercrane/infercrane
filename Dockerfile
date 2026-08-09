@@ -18,11 +18,13 @@ ARG SKYPILOT_VERSION=0.13.0
 RUN python -m pip install --no-cache-dir "vllm-router==${VLLM_ROUTER_VERSION}" "skypilot[runpod]==${SKYPILOT_VERSION}" \
     && useradd --create-home --uid 10001 app
 COPY --from=builder /out/infercrane /usr/local/bin/infercrane
+COPY scripts/entrypoint.sh /usr/local/bin/infercrane-entrypoint
+RUN chmod 755 /usr/local/bin/infercrane-entrypoint
 ENV INFERCRANE_HOST=0.0.0.0
 EXPOSE 8080
 USER app
-ENTRYPOINT ["infercrane"]
-CMD ["serve"]
+ENTRYPOINT ["infercrane-entrypoint"]
+CMD ["infercrane", "serve"]
 
 FROM runtime AS development
 USER root
