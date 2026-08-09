@@ -37,7 +37,8 @@ at least two replicas. Termination grace must exceed `INFERCRANE_SHUTDOWN_TIMEOU
 streaming requests and buffered request accounting can drain. Do not configure an HTTP server
 write timeout: it would terminate legitimate long-running streaming inference responses.
 
-The production image includes only InferCrane and the pinned upstream vLLM Router. Development
+The production image includes InferCrane, the pinned upstream vLLM Router, and the pinned SkyPilot
+RunPod client used by durable provider workers. Development
 workers and the simple development router exist only in the `development` image target and are
 not performance or reliability substitutes for vLLM and vLLM Router.
 

@@ -39,6 +39,8 @@ normalizes supported vLLM metric aliases and ignores malformed or non-finite sam
 ## Qualification
 
 SkyPilot requires credentialed acceptance tests for each supported provider/region/GPU combination.
+The production image pins SkyPilot 0.13.0 with its RunPod extra; changing this pin requires repeating
+the real-cloud lifecycle and zero-leak acceptance gate.
 Development fake workers demonstrate behavior only and cannot support performance or reliability
 claims.
 
