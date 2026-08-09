@@ -30,7 +30,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 | `internal/routes` | 1 | 1 | `TestDirectoryIsolatesSameAliasByTenant`, `TestDirectoryOrdersAndRemovesSnapshots` |
 | `internal/runtime` | 1 | 0 | — |
 | `internal/spec` | 1 | 0 | — |
-| `internal/store` | 8 | 1 | `TestApplyDeploymentConvergesTargetMembership`, `TestCancellingQueuedOperationPreventsClaim`, `TestCreateDeploymentRejectsIncompatibleTargets`, `TestOperationLifecycleIsIdempotentAndRetryable`, `TestOperationQueueLeasesAndRecoversExpiredWork`, `TestOrphanedTargetsOnlyReturnsProvisionedUnusedTargets`, `TestPrincipalCredentialRotationAndRevocation`, `TestStaleLeaseCannotCheckpointOrFinish`, `TestTargetAndDeploymentLifecycle`, `TestTargetConflict`, `TestTenantQuotaRejectsDeploymentBeyondReplicaLimit`, `TestTenantResourcesCanReuseNamesWithoutCrossTenantVisibility` |
+| `internal/store` | 8 | 1 | `TestApplyDeploymentConvergesTargetMembership`, `TestCancellingQueuedOperationPreventsClaim`, `TestCreateDeploymentRejectsIncompatibleTargets`, `TestDeploymentLifecycleMutationsAreSerialized`, `TestOperationLifecycleIsIdempotentAndRetryable`, `TestOperationQueueLeasesAndRecoversExpiredWork`, `TestOrphanedTargetsOnlyReturnsProvisionedUnusedTargets`, `TestPrincipalCredentialRotationAndRevocation`, `TestStaleLeaseCannotCheckpointOrFinish`, `TestTargetAndDeploymentLifecycle`, `TestTargetConflict`, `TestTenantQuotaRejectsDeploymentBeyondReplicaLimit`, `TestTenantResourcesCanReuseNamesWithoutCrossTenantVisibility` |
 | `internal/testtools/fake-router` | 1 | 0 | — |
 | `internal/testtools/fake-vllm` | 1 | 0 | — |
 | `internal/workflows` | 1 | 1 | `TestApplyExistingHandlerIsDeterministic`, `TestApplyExistingHandlerRejectsInvalidPayload` |
@@ -130,6 +130,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 - `internal/store/migrations/004_operation_leases.sql`
 - `internal/store/migrations/005_tenant_resource_names.sql`
 - `internal/store/migrations/006_operation_correctness.sql`
+- `internal/store/migrations/007_deployment_transition_serialization.sql`
 
 ## Architecture decisions
 

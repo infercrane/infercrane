@@ -39,7 +39,16 @@ func (s *Store) StartOperation(ctx context.Context, operation domain.Operation) 
 	_, err = s.ExecContext(ctx, `INSERT INTO operations(id,tenant_id,kind,resource_type,resource_name,idempotency_key,status,progress,message,request_json,result_json,attempt,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?::jsonb,'{}'::jsonb,?,?,?)`, operation.ID, operation.TenantID, operation.Kind, operation.ResourceType, operation.ResourceName, null(operation.IdempotencyKey), operation.Status, operation.Progress, operation.Message, operation.RequestJSON, operation.Attempt, stamp, stamp)
 	if isUniqueViolation(err) && operation.IdempotencyKey != "" {
 		existing, lookupErr := s.operationByKey(ctx, operation.TenantID, operation.Kind, operation.IdempotencyKey)
-		return existing, false, lookupErr
+		if lookupErr == nil {
+			return existing, false, nil
+		}
+		if !errors.Is(lookupErr, ErrNotFound) {
+			return domain.Operation{}, false, lookupErr
+		}
+		return domain.Operation{}, false, fmt.Errorf("%w: deployment already has an unresolved lifecycle operation", ErrConflict)
+	}
+	if isUniqueViolation(err) {
+		return domain.Operation{}, false, fmt.Errorf("%w: deployment already has an unresolved lifecycle operation", ErrConflict)
 	}
 	return operation, err == nil, err
 }

@@ -52,6 +52,10 @@ finish cancellation safely. Existing-target apply is executed by this leased wor
 apply remains available for administrative recovery. Cloud provisioning and deletion still execute
 synchronously and must move to checkpointed handlers before all mutations are crash-recoverable.
 
+A PostgreSQL partial unique index serializes lifecycle mutations by tenant and deployment name.
+Only one pending, leased, running, waiting, or cancelling deployment operation may exist at a time;
+competing requests receive a conflict and can retry after the active transition becomes terminal.
+
 Scoped credentials are stored as hashes, can be rotated or revoked, and carry viewer, operator, or
 admin role. Replicas refresh an in-memory credential snapshot every second, so authentication never
 reads PostgreSQL on the inference request path. API resources and inference aliases are tenant-qualified. Admin audit queries support a

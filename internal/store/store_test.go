@@ -275,6 +275,54 @@ func TestCancellingQueuedOperationPreventsClaim(t *testing.T) {
 	}
 }
 
+func TestDeploymentLifecycleMutationsAreSerialized(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	type result struct {
+		op      domain.Operation
+		created bool
+		err     error
+	}
+	start := make(chan struct{})
+	results := make(chan result, 2)
+	for _, key := range []string{"release-a", "release-b"} {
+		go func() {
+			<-start
+			op, created, err := s.EnqueueOperation(ctx, domain.Operation{Kind: "deployment.converge", ResourceType: "deployment", ResourceName: "prod", IdempotencyKey: key})
+			results <- result{op: op, created: created, err: err}
+		}()
+	}
+	close(start)
+	var createdCount, conflicts int
+	var winner domain.Operation
+	for range 2 {
+		item := <-results
+		if item.created && item.err == nil {
+			createdCount++
+			winner = item.op
+		}
+		if errors.Is(item.err, ErrConflict) {
+			conflicts++
+		}
+	}
+	if createdCount != 1 || conflicts != 1 {
+		t.Fatalf("created=%d conflicts=%d", createdCount, conflicts)
+	}
+	claimed, err := s.ClaimOperation(ctx, "worker", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.StartClaimedOperation(ctx, claimed.ID, "worker", claimed.LeaseGeneration); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.CompleteClaimedOperation(ctx, winner.ID, "worker", claimed.LeaseGeneration, `{}`); err != nil {
+		t.Fatal(err)
+	}
+	if _, nextCreated, err := s.EnqueueOperation(ctx, domain.Operation{Kind: "deployment.delete", ResourceType: "deployment", ResourceName: "prod", IdempotencyKey: "delete-a"}); err != nil || !nextCreated {
+		t.Fatalf("new transition after completion: created=%t err=%v", nextCreated, err)
+	}
+}
+
 func TestPrincipalCredentialRotationAndRevocation(t *testing.T) {
 	ctx := context.Background()
 	s := openStore(t, ctx)
