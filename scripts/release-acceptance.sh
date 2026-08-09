@@ -287,13 +287,16 @@ run_qualify() {
   require_paid_approval
   run_elastic
 
+  scale_up_timeout=${INFERCRANE_ACCEPTANCE_SCALE_UP_TIMEOUT_SECONDS:-2700}
+  scale_down_timeout=${INFERCRANE_ACCEPTANCE_SCALE_DOWN_TIMEOUT_SECONDS:-900}
+
   # The benchmark supplies bounded real queue pressure. Autoscaling must prove
   # both provider convergence to two replicas and the idle return to one.
   record elastic-autoscale-queue-load ic benchmark "$ELASTIC_NAME" --revision active \
     --requests 2000 --concurrency 400 --random-seed 29 --output json
   record elastic-explain-scale-up ic explain scaling "$ELASTIC_NAME" --output json
-  wait_replica_count "$ELASTIC_NAME" 2 900
-  wait_replica_count "$ELASTIC_NAME" 1 600
+  wait_replica_count "$ELASTIC_NAME" 2 "$scale_up_timeout"
+  wait_replica_count "$ELASTIC_NAME" 1 "$scale_down_timeout"
   wait_lifecycle_idle "$ELASTIC_NAME" 600
   record elastic-explain-scale-down ic explain scaling "$ELASTIC_NAME" --output json
 
@@ -351,8 +354,12 @@ run_report() {
 case "$command_name" in
   local) run_local ;;
   preflight) run_preflight ;;
-  elastic) run_elastic ;;
-  serverless) run_serverless ;;
+  elastic|serverless)
+    require_paid_approval
+    trap 'result=$?; trap - EXIT; if [ "$result" -ne 0 ]; then echo "acceptance failed; running guarded cleanup" >&2; run_cleanup || true; fi; exit "$result"' EXIT
+    if [ "$command_name" = elastic ]; then run_elastic; else run_serverless; fi
+    trap - EXIT
+    ;;
   qualify)
     # Refuse before installing the cleanup wrapper so a missing approval cannot
     # start even the local acceptance stack.

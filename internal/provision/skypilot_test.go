@@ -75,27 +75,27 @@ func (f *fakeSkyRunner) Run(_ context.Context, _ []string, args ...string) ([]by
 	}
 }
 
-func TestEnsureUsesPinnedCompatibleRuntimeByDefault(t *testing.T) {
+func TestEnsureUsesPinnedRuntimeImageByDefault(t *testing.T) {
 	runner := &fakeSkyRunner{}
 	provider := SkyPilot{APIKey: "secret", Runner: runner}
 	_, err := provider.EnsureReplica(context.Background(), ReplicaSpec{ExternalKey: "prod-r0", Model: "model", Cloud: "runpod", GPU: "L40S"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(runner.launchTask, "vllm=="+defaultVLLMVersion) || !strings.Contains(runner.launchTask, "transformers=="+defaultTransformersVersion) {
-		t.Fatalf("launch task does not pin compatible default runtime: %s", runner.launchTask)
+	if !strings.Contains(runner.launchTask, "image_id: docker:"+defaultVLLMImage) || strings.Contains(runner.launchTask, "pip install") {
+		t.Fatalf("launch task does not use the pinned default runtime image: %s", runner.launchTask)
 	}
 }
 
-func TestEnsureDoesNotConstrainExplicitRuntimeDependencies(t *testing.T) {
+func TestEnsureUsesVersionedImageForExplicitRuntime(t *testing.T) {
 	runner := &fakeSkyRunner{}
 	provider := SkyPilot{APIKey: "secret", Runner: runner}
 	_, err := provider.EnsureReplica(context.Background(), ReplicaSpec{ExternalKey: "prod-r0", Model: "model", Cloud: "runpod", GPU: "L40S", RuntimeVersion: "0.10.2"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(runner.launchTask, "vllm==0.10.2") || strings.Contains(runner.launchTask, "transformers==") {
-		t.Fatalf("launch task unexpectedly constrains explicit runtime: %s", runner.launchTask)
+	if !strings.Contains(runner.launchTask, "image_id: docker:vllm/vllm-openai:v0.10.2") || strings.Contains(runner.launchTask, "pip install") {
+		t.Fatalf("launch task does not use the requested runtime image: %s", runner.launchTask)
 	}
 }
 

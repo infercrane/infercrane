@@ -23,8 +23,18 @@ run.
 scale-up and scale-down, records a deterministic Release Guard rejection without provisioning the
 bad candidate, deletes elastic capacity, then verifies Serverless cold/warm traffic, scale-to-zero,
 and a second cold request. It never permits more than the deployment's configured maximum of two
-workers and stops on the first missing observation. Always follow it with `cleanup`, even after a
-failure.
+workers and stops on the first missing observation. Paid subcommands install a failure trap that
+deletes run-owned resources; running `cleanup` afterward is still a safe idempotent final check.
+
+RunPod does not publish a fixed Pod allocation-time guarantee. Its [container guidance](https://docs.runpod.io/tutorials/introduction/containers/docker-commands)
+recommends versioned images and explains host-side image caching. The harness therefore separates its
+operator timeout from a performance claim: readiness and scale-up allow 45 minutes by default and
+can be overridden with `INFERCRANE_ACCEPTANCE_READY_TIMEOUT_SECONDS` and
+`INFERCRANE_ACCEPTANCE_SCALE_UP_TIMEOUT_SECONDS`. A long `INIT` provider state is capacity or image
+startup evidence, not vLLM readiness. InferCrane launches elastic replicas from a digest-pinned
+official vLLM image, so a new replica does not install vLLM or its CUDA dependency stack at boot.
+Do not extend a timeout repeatedly while provider state is ambiguous; inspect the existing intent
+and resource before deciding whether to resume or clean up.
 
 This document is the evidence index for the first public release. A checkbox is not evidence:
 record the command, UTC time, final commit, sanitized log path, and provider resource identifiers
@@ -141,6 +151,12 @@ interruption after provider acceptance but before identity persistence). The can
 operation must recover the endpoint by the deterministic replica external-key name, persist no
 false deletion while the endpoint remains visible, and finish only after RunPod inventory confirms
 absence. Do not create an extra endpoint to simulate this case.
+
+For timing interpretation, RunPod [documents](https://docs.runpod.io/serverless/endpoints/job-states) that a Serverless cold start includes container
+startup, model loading, and initialization, and marks a worker unhealthy if initialization exceeds
+its configured limit ([seven minutes by default](https://docs.runpod.io/serverless/workers/overview) in the current platform documentation). Flex workers
+are expected to scale to zero and cold-start again. These are provider semantics, not InferCrane
+latency guarantees; record the measured values and only the timing boundaries actually exposed.
 
 ## Benchmark evidence
 

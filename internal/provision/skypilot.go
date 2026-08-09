@@ -15,10 +15,14 @@ import (
 var ErrUnavailable = errors.New("SkyPilot unavailable")
 
 // defaultVLLMVersion is intentionally pinned. v0.8.5.post1 supports Qwen3 and
-// resolves to PyTorch's CUDA 12.4 runtime, which remains compatible with the
-// NVIDIA driver exposed by the current RunPod L40S fleet.
+// resolves to PyTorch's CUDA 12.4 runtime.
 const defaultVLLMVersion = "0.8.5.post1"
-const defaultTransformersVersion = "4.51.3"
+
+// The default image is pinned by digest so a revision always boots the tested
+// runtime bits. Using vLLM's provider-neutral image keeps provisioning portable
+// across every SkyPilot cloud and avoids installing the CUDA dependency stack
+// on each new GPU replica.
+const defaultVLLMImage = "vllm/vllm-openai@sha256:c48cf118e1e6e39d7790e174d6014f7af5d06f79c2d29d984d11cbe2e8d414e7"
 
 type ReplicaSpec struct {
 	ExternalKey                                                    string
@@ -87,14 +91,11 @@ func (s SkyPilot) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provider
 			return ProviderHandle{RequestID: spec.RequestID, ResourceID: resourceID, ExternalKey: spec.ExternalKey}, nil
 		}
 	}
-	setup := "python -m pip install 'vllm==" + spec.RuntimeVersion + "'"
+	runtimeImage := "vllm/vllm-openai:v" + spec.RuntimeVersion
 	if usesDefaultRuntime {
-		// vLLM 0.8.5 permits transformers>=4.51.1, which otherwise allows a
-		// later incompatible major release. Lock the tested default stack while
-		// leaving explicitly requested runtime versions under user control.
-		setup += " 'transformers==" + defaultTransformersVersion + "'"
+		runtimeImage = defaultVLLMImage
 	}
-	task := map[string]any{"resources": map[string]any{"infra": infrastructure(spec.Cloud, spec.Region), "accelerators": spec.GPU, "ports": []int{spec.Port}}, "setup": setup, "run": runCommand(spec.Model, spec.ModelRevision, spec.Port, spec.RuntimeArgs)}
+	task := map[string]any{"resources": map[string]any{"infra": infrastructure(spec.Cloud, spec.Region), "accelerators": spec.GPU, "image_id": "docker:" + runtimeImage, "ports": []int{spec.Port}}, "run": runCommand(spec.Model, spec.ModelRevision, spec.Port, spec.RuntimeArgs)}
 	task["secrets"] = map[string]any{"INFERCRANE_WORKER_API_KEY": nil}
 	path, cleanup, err := writeTask(task)
 	if err != nil {
