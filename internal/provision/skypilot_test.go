@@ -16,6 +16,7 @@ type fakeSkyRunner struct {
 	statusPrefix    string
 	requestID       string
 	requestState    string
+	endpoint        string
 	launchTask      string
 	launches, downs int
 }
@@ -45,7 +46,11 @@ func (f *fakeSkyRunner) Run(_ context.Context, _ []string, args ...string) ([]by
 		if !f.exists {
 			return nil, errors.New("not found")
 		}
-		return []byte("https://worker.example\n"), nil
+		endpoint := f.endpoint
+		if endpoint == "" {
+			endpoint = "https://worker.example"
+		}
+		return []byte(endpoint + "\n"), nil
 	case strings.HasPrefix(command, "status") && strings.Contains(command, "infercrane-prod-r0"):
 		if f.statusErr {
 			return nil, errors.New("SkyPilot API unavailable")
@@ -147,6 +152,15 @@ func TestObserveParsesSkyPilotNoticeBeforeJSON(t *testing.T) {
 	provider := SkyPilot{Runner: runner}
 	observation, err := provider.ObserveReplica(context.Background(), ProviderHandle{ResourceID: "infercrane-prod-r0"}, 8000)
 	if err != nil || !observation.Exists || observation.Endpoint == "" {
+		t.Fatalf("observation=%#v err=%v", observation, err)
+	}
+}
+
+func TestObserveNormalizesBareSkyPilotEndpoint(t *testing.T) {
+	runner := &fakeSkyRunner{exists: true, endpoint: "91.199.227.82:16889"}
+	provider := SkyPilot{Runner: runner}
+	observation, err := provider.ObserveReplica(context.Background(), ProviderHandle{ResourceID: "infercrane-prod-r0"}, 8000)
+	if err != nil || observation.Endpoint != "http://91.199.227.82:16889" {
 		t.Fatalf("observation=%#v err=%v", observation, err)
 	}
 }

@@ -265,11 +265,19 @@ func (s SkyPilot) observe(ctx context.Context, resourceID string, port int, refr
 	if observation.State == "starting" || observation.State == "ready" {
 		endpoint, endpointErr := runner.Run(ctx, nil, "status", resourceID, "--endpoint", strconvPort(port))
 		if endpointErr == nil && strings.TrimSpace(string(endpoint)) != "" {
-			observation.Endpoint = strings.TrimRight(strings.TrimSpace(string(endpoint)), "/")
+			observation.Endpoint = normalizeEndpoint(string(endpoint))
 			observation.State = "ready"
 		}
 	}
 	return observation, nil
+}
+
+func normalizeEndpoint(value string) string {
+	value = strings.TrimRight(strings.TrimSpace(value), "/")
+	if value != "" && !strings.Contains(value, "://") {
+		value = "http://" + value
+	}
+	return value
 }
 
 func parseStatuses(data []byte) ([]clusterStatus, error) {
