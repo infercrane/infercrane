@@ -82,12 +82,27 @@ func TestWorkerStopsRetryAtMaxAttempts(t *testing.T) {
 
 func TestWorkerCancelsRecoveredClaimBeforeHandler(t *testing.T) {
 	repo := &fakeRepo{op: domain.Operation{ID: "1", Kind: "apply", Attempt: 2, MaxAttempts: 3, CancelRequested: true}}
-	called := false
+	called, cleaned := false, false
 	worked, err := (Worker{Repository: repo, Owner: "worker", Handlers: map[string]Handler{"apply": func(context.Context, domain.Operation) (string, error) {
 		called = true
 		return `{}`, nil
+	}, "apply.cancel": func(context.Context, domain.Operation) (string, error) {
+		cleaned = true
+		return `{}`, nil
 	}}}).Once(context.Background())
-	if err != nil || !worked || !repo.cancelled || called {
-		t.Fatalf("worked=%t cancelled=%t handler_called=%t err=%v", worked, repo.cancelled, called, err)
+	if err != nil || !worked || !repo.cancelled || called || !cleaned {
+		t.Fatalf("worked=%t cancelled=%t handler_called=%t cleaned=%t err=%v", worked, repo.cancelled, called, cleaned, err)
+	}
+}
+
+func TestWorkerRetriesFailedCancellationCleanup(t *testing.T) {
+	repo := &fakeRepo{op: domain.Operation{ID: "1", Kind: "apply", Attempt: 1, MaxAttempts: 3, CancelRequested: true}}
+	_, err := (Worker{Repository: repo, Owner: "worker", Handlers: map[string]Handler{
+		"apply.cancel": func(context.Context, domain.Operation) (string, error) {
+			return "", Retryable("cleanup_failed", errors.New("provider unavailable"))
+		},
+	}}).Once(context.Background())
+	if err != nil || repo.cancelled || !repo.failed || !repo.retryable {
+		t.Fatalf("repo=%#v err=%v", repo, err)
 	}
 }

@@ -69,7 +69,7 @@ func (s *Store) ClaimOperation(ctx context.Context, owner string, lease time.Dur
 	}
 	defer func() { _ = tx.Rollback() }()
 	var id string
-	err = tx.QueryRowContext(ctx, `SELECT id FROM operations WHERE ((((status IN ('pending','waiting') AND next_attempt_at<=NOW()) OR (status IN ('leased','running') AND lease_expires_at<NOW())) AND cancel_requested=FALSE) OR (status='cancelling' AND lease_expires_at<NOW())) AND attempt<max_attempts ORDER BY next_attempt_at,created_at FOR UPDATE SKIP LOCKED LIMIT 1`).Scan(&id)
+	err = tx.QueryRowContext(ctx, `SELECT id FROM operations WHERE ((((status IN ('pending','waiting') AND next_attempt_at<=NOW()) OR (status IN ('leased','running') AND lease_expires_at<NOW())) AND cancel_requested=FALSE) OR (status='cancelling' AND (lease_expires_at IS NULL OR lease_expires_at<NOW()))) AND attempt<max_attempts ORDER BY next_attempt_at,created_at FOR UPDATE SKIP LOCKED LIMIT 1`).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Operation{}, ErrNotFound
 	}
@@ -124,7 +124,7 @@ func (s *Store) FailClaimedOperation(ctx context.Context, id, owner string, gene
 		status = "waiting"
 		completed = nil
 	}
-	result, err := s.ExecContext(ctx, `UPDATE operations SET status=?,error_code=?,message=?,retryable=?,waiting_reason=?,next_attempt_at=?,lease_owner=NULL,lease_expires_at=NULL,updated_at=?,completed_at=? WHERE id=? AND status IN ('running','cancelling') AND lease_owner=? AND lease_generation=? AND lease_expires_at>NOW()`, status, code, message, retryable, nullIf(!retryable, message), next.UTC(), now(), completed, id, owner, generation)
+	result, err := s.ExecContext(ctx, `UPDATE operations SET status=CASE WHEN cancel_requested AND ? THEN 'cancelling' ELSE ? END,error_code=?,message=?,retryable=?,waiting_reason=?,next_attempt_at=?,lease_owner=NULL,lease_expires_at=NULL,updated_at=?,completed_at=? WHERE id=? AND status IN ('running','cancelling') AND lease_owner=? AND lease_generation=? AND lease_expires_at>NOW()`, retryable, status, code, message, retryable, nullIf(!retryable, message), next.UTC(), now(), completed, id, owner, generation)
 	if err != nil {
 		return err
 	}

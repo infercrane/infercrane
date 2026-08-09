@@ -304,6 +304,42 @@ func TestCancellingQueuedOperationPreventsClaim(t *testing.T) {
 	}
 }
 
+func TestCancellingWaitingOperationRequiresCleanupClaim(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	queued, _, err := s.EnqueueOperation(ctx, domain.Operation{Kind: "deployment.converge", ResourceType: "deployment", ResourceName: "cancel-waiting", MaxAttempts: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := s.ClaimOperation(ctx, "worker-a", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.StartClaimedOperation(ctx, claimed.ID, "worker-a", claimed.LeaseGeneration); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.FailClaimedOperation(ctx, claimed.ID, "worker-a", claimed.LeaseGeneration, "starting", "runtime starting", true, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.RequestOperationCancel(ctx, queued.ID); err != nil {
+		t.Fatal(err)
+	}
+	cleanup, err := s.ClaimOperation(ctx, "worker-b", time.Minute)
+	if err != nil || !cleanup.CancelRequested {
+		t.Fatalf("cleanup claim=%#v err=%v", cleanup, err)
+	}
+	if err = s.StartClaimedOperation(ctx, cleanup.ID, "worker-b", cleanup.LeaseGeneration); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.FailClaimedOperation(ctx, cleanup.ID, "worker-b", cleanup.LeaseGeneration, "cleanup_failed", "provider unavailable", true, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	current, err := s.Operation(ctx, queued.ID)
+	if err != nil || current.Status != "cancelling" || !current.CancelRequested {
+		t.Fatalf("operation=%#v err=%v", current, err)
+	}
+}
+
 func TestDeploymentLifecycleMutationsAreSerialized(t *testing.T) {
 	ctx := context.Background()
 	s := openStore(t, ctx)

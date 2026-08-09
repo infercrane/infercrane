@@ -57,6 +57,11 @@ and its queued converge operation in one PostgreSQL transaction. Its required id
 submission retries return the original deployment and operation. The CLI and control API do not use
 this primitive yet; that wiring is the next lifecycle increment.
 
+Queued operations with no side effects may be cancelled immediately. Once work has entered a
+retry/wait cycle, cancellation is itself leased work: the worker runs the operation-specific
+`.cancel` cleanup handler before publishing `cancelled`. Provider cleanup failures remain in
+`cancelling` and are retried, so cancellation cannot silently orphan a billable resource.
+
 A PostgreSQL partial unique index serializes lifecycle mutations by tenant and deployment name.
 Only one pending, leased, running, waiting, or cancelling deployment operation may exist at a time;
 competing requests receive a conflict and can retry after the active transition becomes terminal.

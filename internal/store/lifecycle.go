@@ -134,7 +134,7 @@ func (s *Store) FailOperation(ctx context.Context, id, code, message string, ret
 
 func (s *Store) RequestOperationCancel(ctx context.Context, id string) error {
 	stamp := now()
-	result, err := s.ExecContext(ctx, `UPDATE operations SET cancel_requested=TRUE,status=CASE WHEN status IN ('pending','waiting') THEN 'cancelled' ELSE 'cancelling' END,message=CASE WHEN status IN ('pending','waiting') THEN 'cancelled before execution' ELSE 'cancellation requested' END,completed_at=CASE WHEN status IN ('pending','waiting') THEN ? ELSE completed_at END,updated_at=? WHERE id=? AND status IN ('pending','leased','running','waiting','cancelling')`, stamp, stamp, id)
+	result, err := s.ExecContext(ctx, `UPDATE operations SET cancel_requested=TRUE,status=CASE WHEN status='pending' THEN 'cancelled' ELSE 'cancelling' END,message=CASE WHEN status='pending' THEN 'cancelled before execution' ELSE 'cancellation requested' END,completed_at=CASE WHEN status='pending' THEN ? ELSE completed_at END,lease_expires_at=CASE WHEN status='waiting' THEN ? ELSE lease_expires_at END,updated_at=? WHERE id=? AND status IN ('pending','leased','running','waiting','cancelling')`, stamp, stamp, stamp, id)
 	if err != nil {
 		return err
 	}

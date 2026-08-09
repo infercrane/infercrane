@@ -94,10 +94,15 @@ func (w Worker) Once(ctx context.Context) (bool, error) {
 	}
 	op.Status = "running"
 	if op.CancelRequested {
+		if cleanup := w.Handlers[op.Kind+".cancel"]; cleanup != nil {
+			if _, cleanupErr := cleanup(ctx, op); cleanupErr != nil {
+				return true, w.fail(ctx, op, cleanupErr)
+			}
+		}
 		if w.Telemetry != nil {
 			w.Telemetry.cancelled.Add(1)
 		}
-		return true, w.Repository.CancelClaimedOperation(ctx, op.ID, w.Owner, op.LeaseGeneration, "cancelled after recovery")
+		return true, w.Repository.CancelClaimedOperation(ctx, op.ID, w.Owner, op.LeaseGeneration, "cancellation cleanup completed")
 	}
 	handler := w.Handlers[op.Kind]
 	if handler == nil {
@@ -115,6 +120,11 @@ func (w Worker) Once(ctx context.Context) (bool, error) {
 	<-heartbeatDone
 	current, currentErr := w.Repository.Operation(context.WithoutCancel(ctx), op.ID)
 	if currentErr == nil && current.CancelRequested {
+		if cleanup := w.Handlers[op.Kind+".cancel"]; cleanup != nil {
+			if _, cleanupErr := cleanup(context.WithoutCancel(ctx), op); cleanupErr != nil {
+				return true, w.fail(context.WithoutCancel(ctx), op, cleanupErr)
+			}
+		}
 		if w.Telemetry != nil {
 			w.Telemetry.cancelled.Add(1)
 		}
@@ -147,6 +157,23 @@ func (w Worker) Once(ctx context.Context) (bool, error) {
 	}
 	next := w.now().Add(w.backoff(op.Attempt))
 	return true, w.Repository.FailClaimedOperation(context.WithoutCancel(ctx), op.ID, w.Owner, op.LeaseGeneration, code, handlerErr.Error(), retryable, next)
+}
+
+func (w Worker) fail(ctx context.Context, op domain.Operation, handlerErr error) error {
+	code, retryable := "operation_failed", false
+	var failure Failure
+	if errors.As(handlerErr, &failure) {
+		if failure.Code != "" {
+			code = failure.Code
+		}
+		retryable = failure.Retryable
+	}
+	if op.Attempt >= op.MaxAttempts {
+		retryable = false
+		code = "attempts_exhausted"
+	}
+	next := w.now().Add(w.backoff(op.Attempt))
+	return w.Repository.FailClaimedOperation(ctx, op.ID, w.Owner, op.LeaseGeneration, code, handlerErr.Error(), retryable, next)
 }
 
 func (w Worker) maintainLease(ctx context.Context, cancel context.CancelFunc, id string, generation int64, lease time.Duration, done chan<- struct{}) {
