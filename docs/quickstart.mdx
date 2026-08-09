@@ -124,6 +124,7 @@ The public installation formula is prepared but not yet published. Until the rel
 go build -o ./bin/infercrane ./cmd/infercrane
 export INFERCRANE_API_KEY='ISSUED_CONTROL_PLANE_CREDENTIAL'
 ./bin/infercrane init --url https://infercrane.example
+./bin/infercrane auth status
 ./bin/infercrane doctor --cloud
 ./bin/infercrane plan Qwen/Qwen3-8B --cloud runpod --gpu L40S
 ```

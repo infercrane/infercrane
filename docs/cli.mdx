@@ -5,7 +5,7 @@ description: Commands for configuring, deploying, observing, updating, and delet
 
 # CLI reference
 
-The public CLI talks to the authenticated control-plane API. It never opens PostgreSQL directly. Run `infercrane help` for the current command tree and `infercrane version` for the build version.
+The public CLI uses Cobra for grouped help, typo suggestions, aliases, and shell completion. It talks to the authenticated control-plane API and never opens PostgreSQL directly. Run `infercrane help` for the current command tree and `infercrane version` for the build version.
 
 ## Global conventions
 
@@ -15,6 +15,8 @@ The public CLI talks to the authenticated control-plane API. It never opens Post
 - `--wait` polls persisted operation state and prints only changed progress. Closing the client does not cancel server-side work; the CLI prints the exact operation command that resumes inspection.
 - JSON failures contain `code`, `category`, `message`, `retryable`, `remediation`, and provider HTTP status when available.
 - Command help is available before authentication: `infercrane COMMAND --help` never contacts the control plane.
+- `infercrane --context NAME COMMAND` selects a context for one invocation.
+- `infercrane --no-color COMMAND` and the standard `NO_COLOR` environment variable disable ANSI styling. Redirected output and JSON are never decorated.
 
 <Snippet file="_snippets/safe-retry.mdx" />
 
@@ -22,20 +24,48 @@ The public CLI talks to the authenticated control-plane API. It never opens Post
 
 ### `init`
 
-Store a control-plane URL and an already-issued credential in the private client configuration file.
+Validate and store a control-plane URL and an already-issued credential in a named private client context.
 
 ```bash
 INFERCRANE_API_KEY='ISSUED_CREDENTIAL' \
-  infercrane init --url https://infercrane.example
+  infercrane init --context production --url https://infercrane.example
 ```
 
 | Flag | Default | Meaning |
 |---|---|---|
 | `--url` | `http://127.0.0.1:8080` | Control-plane base URL |
+| `--context` | `default` | Context name to create and select |
 | `--api-key` | environment | Existing credential; prefer `INFERCRANE_API_KEY` to avoid shell history |
 | `--output` | `human` | `human` or `json` |
 
-`init` does not create or enroll a principal.
+`init` verifies authentication through the read-only identity endpoint before writing configuration. Use `--skip-check` only when intentionally configuring an offline control plane. It does not create or enroll a principal.
+
+### Contexts and authentication
+
+```bash
+infercrane context list
+infercrane context show
+infercrane context use production
+infercrane --context staging status qwen-prod
+infercrane auth status
+infercrane auth status --output json
+```
+
+Legacy single-context configuration is migrated on the next `init`. Context listing and display
+never print stored credentials.
+
+### Shell completion
+
+```bash
+infercrane completion bash
+infercrane completion zsh
+infercrane completion fish
+infercrane completion powershell
+```
+
+Homebrew installs generated completions automatically. Completion is read-only and may suggest
+deployment names from the configured control plane; an unavailable control plane produces no
+completion error or mutation.
 
 ### `doctor`
 
@@ -134,6 +164,7 @@ Supported v0.1 strategies are `round-robin`, `consistent-hash`, `power-of-two`, 
 | `deployments [--output json]` | List logical deployments |
 | `status DEPLOYMENT [--watch]` | Show health, readiness, traffic, revisions, and active operation |
 | `events DEPLOYMENT` | Show ordered durable deployment events |
+| `logs DEPLOYMENT [--follow]` | Stream a filtered durable operational timeline |
 | `request DEPLOYMENT` | Send a buffered or streaming OpenAI-compatible inference request |
 | `inspect DEPLOYMENT` | Show raw targets, replicas, artifacts, request statistics, and infrastructure metadata |
 | `operation ID` | Inspect durable progress and result |
@@ -142,6 +173,8 @@ Supported v0.1 strategies are `round-robin`, `consistent-hash`, `power-of-two`, 
 
 ```bash
 infercrane status qwen-prod --watch
+infercrane logs qwen-prod --follow
+infercrane logs qwen-prod --type runtime --since 15m
 infercrane events qwen-prod --output json
 infercrane inspect qwen-prod
 ```

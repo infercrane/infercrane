@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"text/tabwriter"
@@ -75,27 +76,47 @@ func writeCLIError(w io.Writer, args []string, err error) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"error": detail})
 }
 func run(ctx context.Context, args []string) error {
+	for len(args) > 0 {
+		switch args[0] {
+		case "--no-color":
+			if err := os.Setenv("NO_COLOR", "1"); err != nil {
+				return err
+			}
+			args = args[1:]
+		case "--context":
+			if len(args) < 2 || strings.HasPrefix(args[1], "-") {
+				return errors.New("--context requires a context name")
+			}
+			if err := os.Setenv("INFERCRANE_CONTEXT", args[1]); err != nil {
+				return err
+			}
+			args = args[2:]
+		default:
+			goto execute
+		}
+	}
+execute:
+	root := newRootCommand(ctx)
+	root.SetArgs(args)
+	return root.Execute()
+}
+
+func runLegacy(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		usage(os.Stdout)
-		return nil
+		return errors.New("a command is required")
 	}
 	switch args[0] {
-	case "help", "-h", "--help":
-		usage(os.Stdout)
-		return nil
 	case "version", "--version":
 		fmt.Println(version)
 		return nil
 	case "init":
 		return initCommand(args[1:])
-	}
-	if len(args) > 1 && (args[1] == "help" || args[1] == "-h" || args[1] == "--help") {
-		return commandHelp(os.Stdout, args[0])
+	case "context":
+		return contextCommand(args[1:])
 	}
 	switch args[0] {
-	case "target", "deploy", "apply", "plan", "doctor", "deployments", "route", "status", "events", "request", "explain", "rollout", "delete", "inspect", "operation", "orphans", "tenant", "principal", "benchmark", "serve":
+	case "target", "deploy", "apply", "plan", "doctor", "deployments", "route", "status", "events", "logs", "request", "explain", "rollout", "delete", "inspect", "operation", "orphans", "context", "auth", "tenant", "principal", "benchmark", "serve":
 	default:
-		usage(os.Stderr)
 		return fmt.Errorf("unknown command %q", args[0])
 	}
 	if args[0] == "serve" {
@@ -131,6 +152,10 @@ func run(ctx context.Context, args []string) error {
 		return statusCommand(ctx, cfg, args[1:])
 	case "events":
 		return eventsCommand(ctx, cfg, args[1:])
+	case "logs":
+		return logsCommand(ctx, cfg, args[1:])
+	case "auth":
+		return authCommand(ctx, cfg, args[1:])
 	case "request":
 		return requestCommand(ctx, cfg, args[1:])
 	case "inspect":
@@ -156,76 +181,12 @@ func run(ctx context.Context, args []string) error {
 	}
 	return fmt.Errorf("%s has not yet been migrated to the control-plane API", args[0])
 }
-func usage(w *os.File) {
-	fmt.Fprintln(w, `InferCrane — operate production LLM inference without hiding the infrastructure.
-
-Usage:
-  infercrane <command> [arguments]
-
-Trust and discovery:
-  init             Create private local control-plane configuration
-  plan MODEL       Preview deployment actions without side effects
-  doctor           Validate the local runtime environment
-  benchmark        Run a reproducible OpenAI-compatible load check
-  request          Send an OpenAI-compatible request to a deployment
-  help             Show this help
-  version          Print the version
-
-Operations:
-  target           Register or list existing inference targets
-  deploy           Create a deployment from flags or YAML
-  apply            Declaratively converge a deployment from flags or YAML
-  deployments      List deployments
-  route            Change a deployment routing strategy
-  status           Inspect deployment health and traffic
-  events           Show durable deployment events
-  inspect          Inspect deployment details
-  explain          Explain persisted operational state
-  rollout          Inspect and control immutable revision rollouts
-  operation        Inspect or request cancellation of a lifecycle operation
-  orphans          List unmanaged provisioned resources
-  tenant           Create an isolated tenant
-  principal        Create, rotate, or revoke scoped credentials
-  delete           Plan or confirm deletion of a deployment
-  serve            Run the control plane and gateway`)
-}
-
-func commandHelp(w io.Writer, command string) error {
-	help := map[string]string{
-		"init":        "infercrane init [--url URL] [--api-key KEY] [--output human|json]",
-		"doctor":      "infercrane doctor [--cloud] [--serverless] [--output human|json]",
-		"plan":        "infercrane plan MODEL [--name NAME] [--cloud CLOUD --gpu GPU | --targets NAMES] [--output human|json]",
-		"deploy":      "infercrane deploy MODEL [--name NAME] [--cloud CLOUD --gpu GPU | --targets NAMES] [--min N] [--max N] [--wait] [--output human|json]",
-		"apply":       "infercrane apply MODEL [deployment flags] [--wait] [--output human|json]",
-		"request":     "infercrane request DEPLOYMENT [--message TEXT] [--stream] [--output human|json]",
-		"status":      "infercrane status DEPLOYMENT [--watch] [--output human|json]",
-		"events":      "infercrane events DEPLOYMENT [--output human|json]",
-		"inspect":     "infercrane inspect DEPLOYMENT [--output human|json]",
-		"explain":     "infercrane explain [scaling|rollout|cold-start] DEPLOYMENT [--output human|json]",
-		"benchmark":   "infercrane benchmark DEPLOYMENT [--requests N] [--concurrency N] [--output human|json]",
-		"delete":      "infercrane delete DEPLOYMENT [--plan | --yes] [--wait] [--output human|json]",
-		"deployments": "infercrane deployments [--output human|json]",
-		"target":      "infercrane target list | infercrane target add NAME --url URL [--runtime RUNTIME]",
-		"rollout":     "infercrane rollout inspect DEPLOYMENT | infercrane rollout ACTION DEPLOYMENT [flags]",
-		"operation":   "infercrane operation ID | infercrane operation cancel ID",
-		"orphans":     "infercrane orphans [--output human|json]",
-		"route":       "infercrane route DEPLOYMENT --strategy STRATEGY",
-		"tenant":      "infercrane tenant create NAME",
-		"principal":   "infercrane principal create|rotate|revoke [arguments]",
-		"serve":       "infercrane serve",
-	}
-	usageLine, ok := help[command]
-	if !ok {
-		return fmt.Errorf("unknown command %q", command)
-	}
-	fmt.Fprintf(w, "Usage:\n  %s\n\nRun `infercrane help` to see all commands.\n", usageLine)
-	return nil
-}
-
 func initCommand(args []string) error {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	controlURL := fs.String("url", "http://127.0.0.1:8080", "control-plane URL")
 	apiKey := fs.String("api-key", "", "existing control-plane credential (prefer INFERCRANE_API_KEY to avoid shell history)")
+	contextName := fs.String("context", "default", "context name")
+	skipCheck := fs.Bool("skip-check", false, "store configuration without validating the control plane")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -237,17 +198,28 @@ func initCommand(args []string) error {
 	if credential == "" {
 		credential = os.Getenv("INFERCRANE_API_KEY")
 	}
-	path, err := config.InitializeClient(*controlURL, credential)
+	if credential == "" {
+		return errors.New("an existing control-plane credential is required; pass --api-key or set INFERCRANE_API_KEY")
+	}
+	if !*skipCheck {
+		var identity struct {
+			Principal map[string]any `json:"principal"`
+		}
+		if err := controlJSON(context.Background(), config.Config{ControlURL: *controlURL, APIKey: credential}, http.MethodGet, "/api/v1/whoami", "", nil, &identity); err != nil {
+			return fmt.Errorf("validate control-plane connection: %w (use --skip-check only when intentionally configuring an offline control plane)", err)
+		}
+	}
+	path, err := config.InitializeClientContext(*contextName, *controlURL, credential, true)
 	if err != nil {
 		return err
 	}
-	result := map[string]any{"config_path": path, "control_url": *controlURL, "credential_stored": true}
+	result := map[string]any{"config_path": path, "context": *contextName, "control_url": *controlURL, "credential_stored": true}
 	switch *output {
 	case "json":
 		encoded, _ := json.MarshalIndent(result, "", "  ")
 		fmt.Println(string(encoded))
 	case "human":
-		fmt.Printf("InferCrane configured\nControl plane  %s\nConfig         %s\nCredential     existing credential stored with mode 0600\n", *controlURL, path)
+		fmt.Printf("InferCrane configured\nContext        %s\nControl plane  %s\nConfig         %s\nCredential     existing credential stored with mode 0600\n", *contextName, *controlURL, path)
 	}
 	return nil
 }
@@ -623,7 +595,7 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 		encoded, _ := json.MarshalIndent(map[string]any{"deployment": *name, "idempotency_key": *idempotencyKey, "operation": response.Operation}, "", "  ")
 		fmt.Println(string(encoded))
 	} else if *output == "human" {
-		fmt.Printf("Deployment  %s\nOperation   %s\nStatus      %s\nRetry key   %s\n", *name, response.Operation.ID, response.Operation.Status, *idempotencyKey)
+		fmt.Printf("Deployment  %s\nOperation   %s\nStatus      %s\nRetry key   %s\n", *name, response.Operation.ID, terminalStatus(response.Operation.Status), *idempotencyKey)
 		if response.Operation.Status == "succeeded" {
 			fmt.Printf("\nNext\n  infercrane request %s --message \"Hello\"\n  infercrane status %s\n", *name, *name)
 		} else {
@@ -805,7 +777,7 @@ func statusCommand(ctx context.Context, cfg config.Config, args []string) error 
 				}
 			}
 			d := view.Deployment
-			fmt.Printf("%s  %s\nModel       %s\nRuntime     %s\nReplicas    %d\nHealthy     %d\nRouting     %s\nRevision    %s\nRequests/s  %.2f\nError rate  %.1f%%\n", d.Name, strings.ToUpper(d.ObservedState), d.Model, d.Runtime, capacity, healthy, d.RoutingStrategy, d.ActiveRevisionID, view.RequestStats.RequestsPerSecond, view.RequestStats.ErrorRate*100)
+			fmt.Printf("%s  %s\nModel       %s\nRuntime     %s\nReplicas    %d\nHealthy     %d\nRouting     %s\nRevision    %s\nRequests/s  %.2f\nError rate  %.1f%%\n", d.Name, terminalStatus(d.ObservedState), d.Model, d.Runtime, capacity, healthy, d.RoutingStrategy, d.ActiveRevisionID, view.RequestStats.RequestsPerSecond, view.RequestStats.ErrorRate*100)
 		} else {
 			return errors.New("--output must be human or json")
 		}
@@ -877,7 +849,7 @@ func deleteAPICommand(ctx context.Context, cfg config.Config, args []string) err
 		encoded, _ := json.MarshalIndent(map[string]any{"deployment": args[0], "idempotency_key": *idempotencyKey, "operation": response.Operation}, "", "  ")
 		fmt.Println(string(encoded))
 	} else if *output == "human" {
-		fmt.Printf("Deployment  %s\nOperation   %s\nStatus      %s\nRetry key   %s\n", args[0], response.Operation.ID, response.Operation.Status, *idempotencyKey)
+		fmt.Printf("Deployment  %s\nOperation   %s\nStatus      %s\nRetry key   %s\n", args[0], response.Operation.ID, terminalStatus(response.Operation.Status), *idempotencyKey)
 	}
 	return nil
 }
@@ -1013,6 +985,83 @@ func operationCommand(ctx context.Context, cfg config.Config, args []string) err
 		return err
 	}
 	fmt.Printf("%s  %s\nKind       %s\nResource   %s/%s\nProgress   %d%%\nAttempt    %d\nMessage    %s\nRetryable  %t\nCancel     %t\n", op.ID, strings.ToUpper(op.Status), op.Kind, op.ResourceType, op.ResourceName, op.Progress, op.Attempt, op.Message, op.Retryable, op.CancelRequested)
+	return nil
+}
+
+func contextCommand(args []string) error {
+	if len(args) == 0 || args[0] == "list" {
+		settings, err := config.ClientConfiguration()
+		if err != nil {
+			return err
+		}
+		if len(settings.Contexts) == 0 {
+			return errors.New("no contexts configured; run infercrane init")
+		}
+		names := make([]string, 0, len(settings.Contexts))
+		for name := range settings.Contexts {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			marker := " "
+			if name == settings.Current {
+				marker = "*"
+			}
+			fmt.Printf("%s %-16s %s\n", marker, name, settings.Contexts[name].URL)
+		}
+		return nil
+	}
+	if args[0] == "use" {
+		if len(args) != 2 {
+			return errors.New("usage: infercrane context use NAME")
+		}
+		if err := config.SelectClientContext(args[1]); err != nil {
+			return err
+		}
+		fmt.Printf("Current context  %s\n", args[1])
+		return nil
+	}
+	if args[0] == "show" {
+		settings, err := config.ClientConfiguration()
+		if err != nil {
+			return err
+		}
+		selected, ok := settings.Contexts[settings.Current]
+		if !ok {
+			return errors.New("no current context; run infercrane init")
+		}
+		fmt.Printf("Context        %s\nControl plane  %s\nCredential     configured\n", settings.Current, selected.URL)
+		return nil
+	}
+	return errors.New("usage: infercrane context list | context show | context use NAME")
+}
+
+func authCommand(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) == 0 || args[0] != "status" {
+		return errors.New("usage: infercrane auth status [--output human|json]")
+	}
+	fs := flag.NewFlagSet("auth status", flag.ContinueOnError)
+	output := fs.String("output", "human", "human or json")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if err := validateOutput(*output); err != nil {
+		return err
+	}
+	var response struct {
+		Principal struct {
+			ID, TenantID, Name, Role string
+		} `json:"principal"`
+	}
+	if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/whoami", "", nil, &response); err != nil {
+		return err
+	}
+	if *output == "json" {
+		encoded, _ := json.MarshalIndent(response, "", "  ")
+		fmt.Println(string(encoded))
+		return nil
+	}
+	fmt.Printf("Authenticated  yes\nPrincipal      %s\nRole           %s\nTenant         %s\nControl plane  %s\n", response.Principal.Name, response.Principal.Role, response.Principal.TenantID, cfg.ControlURL)
 	return nil
 }
 
@@ -1162,6 +1211,21 @@ func inspectCommand(ctx context.Context, cfg config.Config, args []string) error
 	return nil
 }
 
+type cliEvent struct {
+	Type      string          `json:"type"`
+	Summary   string          `json:"summary"`
+	Payload   json.RawMessage `json:"payload"`
+	CreatedAt time.Time       `json:"created_at"`
+}
+
+func deploymentEvents(ctx context.Context, cfg config.Config, name string) ([]cliEvent, error) {
+	var response struct {
+		Data []cliEvent `json:"data"`
+	}
+	err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/deployments/"+url.PathEscape(name)+"/events", "", nil, &response)
+	return response.Data, err
+}
+
 func eventsCommand(ctx context.Context, cfg config.Config, args []string) error {
 	if len(args) == 0 {
 		return errors.New("usage: infercrane events DEPLOYMENT [--output human|json]")
@@ -1174,29 +1238,78 @@ func eventsCommand(ctx context.Context, cfg config.Config, args []string) error 
 	if err := validateOutput(*output); err != nil {
 		return err
 	}
-	var response struct {
-		Data []struct {
-			Type      string          `json:"type"`
-			Summary   string          `json:"summary"`
-			Payload   json.RawMessage `json:"payload"`
-			CreatedAt time.Time       `json:"created_at"`
-		} `json:"data"`
-	}
-	if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/deployments/"+url.PathEscape(args[0])+"/events", "", nil, &response); err != nil {
+	events, err := deploymentEvents(ctx, cfg, args[0])
+	if err != nil {
 		return err
 	}
 	if *output == "json" {
-		encoded, _ := json.MarshalIndent(response, "", "  ")
+		encoded, _ := json.MarshalIndent(map[string]any{"data": events}, "", "  ")
 		fmt.Println(string(encoded))
 		return nil
 	}
 	if *output != "human" {
 		return errors.New("--output must be human or json")
 	}
-	for _, event := range response.Data {
+	for _, event := range events {
 		fmt.Printf("%s  %-24s %s\n", event.CreatedAt.Format(time.RFC3339), event.Type, event.Summary)
 	}
 	return nil
+}
+
+func logsCommand(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: infercrane logs DEPLOYMENT [--follow] [--since DURATION] [--type TYPE] [--output human|json]")
+	}
+	name := args[0]
+	fs := flag.NewFlagSet("logs", flag.ContinueOnError)
+	follow := fs.Bool("follow", false, "continue streaming new events")
+	since := fs.Duration("since", 0, "show events newer than this duration")
+	eventType := fs.String("type", "", "filter by event type or type prefix")
+	output := fs.String("output", "human", "human or json")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if err := validateOutput(*output); err != nil {
+		return err
+	}
+	seen := map[string]struct{}{}
+	for {
+		events, err := deploymentEvents(ctx, cfg, name)
+		if err != nil {
+			return err
+		}
+		cutoff := time.Time{}
+		if *since > 0 {
+			cutoff = time.Now().Add(-*since)
+		}
+		for _, event := range events {
+			if !cutoff.IsZero() && event.CreatedAt.Before(cutoff) {
+				continue
+			}
+			if *eventType != "" && event.Type != *eventType && !strings.HasPrefix(event.Type, *eventType+".") {
+				continue
+			}
+			identity := event.CreatedAt.Format(time.RFC3339Nano) + "\x00" + event.Type + "\x00" + event.Summary
+			if _, exists := seen[identity]; exists {
+				continue
+			}
+			seen[identity] = struct{}{}
+			if *output == "json" {
+				encoded, _ := json.Marshal(event)
+				fmt.Println(string(encoded))
+			} else {
+				fmt.Printf("%s  %-24s %s\n", event.CreatedAt.Format("15:04:05"), event.Type, event.Summary)
+			}
+		}
+		if !*follow {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(2 * time.Second):
+		}
+	}
 }
 
 func requestCommand(ctx context.Context, cfg config.Config, args []string) error {

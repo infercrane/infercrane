@@ -22,6 +22,7 @@ Errors are stable JSON objects:
 | Method and path | Minimum role | Purpose |
 |---|---|---|
 | `GET /doctor` | viewer | Run control-plane dependency diagnostics; optional `cloud` and `serverless` booleans add provider checks. |
+| `GET /whoami` | viewer | Return the authenticated principal, role, and tenant without exposing credential material. |
 | `POST /deployments/apply` | operator | Queue existing-target convergence; requires `Idempotency-Key`. |
 | `POST /deployments` | operator | Atomically create desired cloud deployment and queue convergence; requires `Idempotency-Key`. |
 | `GET /deployments` | viewer | List tenant deployments. |

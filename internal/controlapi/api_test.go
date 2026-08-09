@@ -185,6 +185,17 @@ func TestDeploymentReadAPIReturnsDurableState(t *testing.T) {
 	}
 }
 
+func TestWhoAmIReturnsAuthenticatedIdentity(t *testing.T) {
+	store := &fakeStore{}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/whoami", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret"}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"name":"bootstrap"`) || !strings.Contains(response.Body.String(), `"role":"admin"`) {
+		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+}
+
 func TestDeploymentAndOperationEventsAreTenantScoped(t *testing.T) {
 	store := &fakeStore{operation: domain.Operation{ID: "op", TenantID: "global"}}
 	for _, endpoint := range []string{"/api/v1/deployments/qwen/events", "/api/v1/operations/op/events"} {

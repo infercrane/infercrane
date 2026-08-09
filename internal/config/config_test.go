@@ -72,3 +72,40 @@ func TestInitializeClientRejectsUnregisteredLocalCredentialGeneration(t *testing
 		t.Fatalf("err=%v", err)
 	}
 }
+
+func TestClientContextsCanBeSelectedWithoutExposingCredentials(t *testing.T) {
+	t.Setenv("INFERCRANE_CONFIG", filepath.Join(t.TempDir(), "config.json"))
+	t.Setenv("INFERCRANE_API_KEY", "")
+	t.Setenv("INFERCRANE_URL", "")
+	if _, err := InitializeClientContext("staging", "https://staging.example", "staging-secret", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InitializeClientContext("production", "https://production.example", "production-secret", false); err != nil {
+		t.Fatal(err)
+	}
+	settings, err := ClientConfiguration()
+	if err != nil || settings.Current != "staging" || len(settings.Contexts) != 2 {
+		t.Fatalf("settings=%#v err=%v", settings, err)
+	}
+	if err = SelectClientContext("production"); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadClient()
+	if err != nil || loaded.ControlURL != "https://production.example" || loaded.APIKey != "production-secret" {
+		t.Fatalf("loaded=%#v err=%v", loaded, err)
+	}
+}
+
+func TestLoadClientReadsLegacySingleContextConfiguration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	t.Setenv("INFERCRANE_CONFIG", path)
+	t.Setenv("INFERCRANE_API_KEY", "")
+	t.Setenv("INFERCRANE_URL", "")
+	if err := os.WriteFile(path, []byte(`{"url":"https://legacy.example","api_key":"legacy-secret"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadClient()
+	if err != nil || loaded.ControlURL != "https://legacy.example" || loaded.APIKey != "legacy-secret" {
+		t.Fatalf("loaded=%#v err=%v", loaded, err)
+	}
+}

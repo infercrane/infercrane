@@ -26,6 +26,7 @@ class Infercrane < Formula
 
   def install
     bin.install "infercrane"
+    generate_completions_from_executable(bin/"infercrane", "completion")
   end
 
   test do

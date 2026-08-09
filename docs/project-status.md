@@ -6,6 +6,7 @@ but lacks production qualification; **planned** is not a product capability.
 | Capability | Status | Notes |
 |---|---|---|
 | Side-effect-free deployment planning | Implemented | Deterministic human and JSON output; live cost estimation is not yet available. |
+| CLI discovery and contexts | Implemented | Cobra grouped help, suggestions, generated completion, named contexts, authenticated identity, and durable timeline following are wired. |
 | Environment diagnostics | Implemented | Read-only checks for API auth, PostgreSQL, vLLM Router, and optional SkyPilot. |
 | Declarative existing-target apply | Implemented | Atomic convergence of routing, replica bounds, and target membership. |
 | Durable lifecycle operations | Implemented | Idempotency, progress, retry classification, and cooperative cancellation state. |

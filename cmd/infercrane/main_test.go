@@ -88,6 +88,51 @@ func TestRequestCommandPrintsStreamingDeltas(t *testing.T) {
 	}
 }
 
+func TestLogsCommandFiltersDurableTimeline(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/deployments/qwen-prod/events" {
+			t.Fatalf("path=%s", r.URL.Path)
+		}
+		_, _ = io.WriteString(w, `{"data":[{"type":"provider.capacity","summary":"capacity accepted","created_at":"2026-08-09T12:00:00Z"},{"type":"runtime.ready","summary":"model ready","created_at":"2026-08-09T12:01:00Z"}]}`)
+	}))
+	defer server.Close()
+	output, err := captureStdout(t, func() error {
+		return logsCommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, []string{"qwen-prod", "--type", "runtime"})
+	})
+	if err != nil || !strings.Contains(output, "runtime.ready") || strings.Contains(output, "provider.capacity") {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+}
+
+func TestCobraRootProvidesSuggestionsAndCompletion(t *testing.T) {
+	root := newRootCommand(context.Background())
+	root.SetArgs([]string{"completion", "bash"})
+	var output bytes.Buffer
+	root.SetOut(&output)
+	if err := root.Execute(); err != nil || !strings.Contains(output.String(), "__start_infercrane") {
+		t.Fatalf("completion output missing: err=%v output=%q", err, output.String())
+	}
+	root = newRootCommand(context.Background())
+	root.SetArgs([]string{"deply"})
+	if err := root.Execute(); err == nil || !strings.Contains(err.Error(), "unknown command") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestGlobalContextIsHandledBeforeCommandDispatch(t *testing.T) {
+	t.Setenv("INFERCRANE_CONFIG", filepath.Join(t.TempDir(), "config.json"))
+	t.Setenv("INFERCRANE_CONTEXT", "")
+	if _, err := config.InitializeClientContext("staging", "https://staging.example", "secret", true); err != nil {
+		t.Fatal(err)
+	}
+	output, err := captureStdout(t, func() error {
+		return run(context.Background(), []string{"--context", "staging", "context", "show"})
+	})
+	if err != nil || !strings.Contains(output, "https://staging.example") {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+}
+
 func TestDeployCLIOnlySubmitsControlPlaneRequest(t *testing.T) {
 	var path, key string
 	var body map[string]any

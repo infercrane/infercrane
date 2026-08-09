@@ -138,7 +138,8 @@
               "adr/0006-leased-operation-execution",
               "adr/0007-tenant-scoped-identity",
               "adr/0008-immutable-deployment-revisions",
-              "adr/0009-qualified-support-and-backend-registration"
+              "adr/0009-qualified-support-and-backend-registration",
+              "adr/0010-cobra-cli-and-progressive-terminal-output"
             ]
           },
           "release-acceptance"

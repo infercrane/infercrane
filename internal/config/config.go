@@ -18,9 +18,22 @@ type Config struct {
 	HealthInterval, UpstreamTimeout, ShutdownTimeout, RequestRetention                         time.Duration
 }
 
-type clientFile struct {
+type ClientContext struct {
 	URL    string `json:"url"`
-	APIKey string `json:"api_key"`
+	APIKey string `json:"api_key,omitempty"`
+}
+
+type ClientSettings struct {
+	Current  string                   `json:"current_context"`
+	Contexts map[string]ClientContext `json:"contexts"`
+}
+
+type clientFile struct {
+	// URL and APIKey retain read compatibility with the pre-context format.
+	URL      string                   `json:"url,omitempty"`
+	APIKey   string                   `json:"api_key,omitempty"`
+	Current  string                   `json:"current_context,omitempty"`
+	Contexts map[string]ClientContext `json:"contexts,omitempty"`
 }
 
 func Load() (Config, error) {
@@ -28,18 +41,33 @@ func Load() (Config, error) {
 }
 
 func LoadClient() (Config, error) {
+	return LoadClientContext(os.Getenv("INFERCRANE_CONTEXT"))
+}
+
+func LoadClientContext(contextName string) (Config, error) {
 	stored, err := readClientFile()
 	if err != nil {
 		return Config{}, err
 	}
-	controlURL := stored.URL
+	selected := ClientContext{URL: stored.URL, APIKey: stored.APIKey}
+	if contextName == "" {
+		contextName = stored.Current
+	}
+	if contextName != "" {
+		var ok bool
+		selected, ok = stored.Contexts[contextName]
+		if !ok {
+			return Config{}, fmt.Errorf("InferCrane context %q was not found", contextName)
+		}
+	}
+	controlURL := selected.URL
 	if value := os.Getenv("INFERCRANE_URL"); value != "" {
 		controlURL = value
 	}
 	if controlURL == "" {
 		controlURL = "http://127.0.0.1:8080"
 	}
-	apiKey := stored.APIKey
+	apiKey := selected.APIKey
 	if value := os.Getenv("INFERCRANE_API_KEY"); value != "" {
 		apiKey = value
 	}
@@ -54,6 +82,13 @@ func LoadClient() (Config, error) {
 }
 
 func InitializeClient(controlURL, apiKey string) (string, error) {
+	return InitializeClientContext("default", controlURL, apiKey, true)
+}
+
+func InitializeClientContext(name, controlURL, apiKey string, selectContext bool) (string, error) {
+	if name == "" {
+		name = "default"
+	}
 	if controlURL == "" {
 		controlURL = "http://127.0.0.1:8080"
 	}
@@ -71,7 +106,23 @@ func InitializeClient(controlURL, apiKey string) (string, error) {
 	if err = os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return "", fmt.Errorf("create config directory: %w", err)
 	}
-	encoded, _ := json.MarshalIndent(clientFile{URL: controlURL, APIKey: apiKey}, "", "  ")
+	stored, readErr := readClientFile()
+	if readErr != nil {
+		return "", readErr
+	}
+	contexts := stored.Contexts
+	if contexts == nil {
+		contexts = map[string]ClientContext{}
+		if stored.URL != "" && stored.APIKey != "" {
+			contexts["default"] = ClientContext{URL: stored.URL, APIKey: stored.APIKey}
+		}
+	}
+	contexts[name] = ClientContext{URL: controlURL, APIKey: apiKey}
+	current := stored.Current
+	if current == "" || selectContext {
+		current = name
+	}
+	encoded, _ := json.MarshalIndent(clientFile{Current: current, Contexts: contexts}, "", "  ")
 	encoded = append(encoded, '\n')
 	if err = os.WriteFile(path, encoded, 0o600); err != nil {
 		return "", fmt.Errorf("write client config: %w", err)
@@ -82,7 +133,47 @@ func InitializeClient(controlURL, apiKey string) (string, error) {
 	return path, nil
 }
 
+func ClientConfiguration() (ClientSettings, error) {
+	stored, err := readClientFile()
+	if err != nil {
+		return ClientSettings{}, err
+	}
+	contexts := stored.Contexts
+	current := stored.Current
+	if contexts == nil {
+		contexts = map[string]ClientContext{}
+		if stored.URL != "" {
+			contexts["default"] = ClientContext{URL: stored.URL, APIKey: stored.APIKey}
+			current = "default"
+		}
+	}
+	return ClientSettings{Current: current, Contexts: contexts}, nil
+}
+
+func SelectClientContext(name string) error {
+	settings, err := ClientConfiguration()
+	if err != nil {
+		return err
+	}
+	if _, ok := settings.Contexts[name]; !ok {
+		return fmt.Errorf("InferCrane context %q was not found", name)
+	}
+	path, err := clientConfigPath()
+	if err != nil {
+		return err
+	}
+	encoded, _ := json.MarshalIndent(clientFile{Current: name, Contexts: settings.Contexts}, "", "  ")
+	encoded = append(encoded, '\n')
+	if err = os.WriteFile(path, encoded, 0o600); err != nil {
+		return fmt.Errorf("write client config: %w", err)
+	}
+	return os.Chmod(path, 0o600)
+}
+
 func clientConfigPath() (string, error) {
+	if path := os.Getenv("INFERCRANE_CONFIG"); path != "" {
+		return path, nil
+	}
 	if root := os.Getenv("XDG_CONFIG_HOME"); root != "" {
 		return filepath.Join(root, "infercrane", "config.json"), nil
 	}
