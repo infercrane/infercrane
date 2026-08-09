@@ -831,12 +831,16 @@ func controlJSONWithTimeout(ctx context.Context, cfg config.Config, method, path
 		apiErr := &ControlError{StatusCode: response.StatusCode, Code: "http_error", Message: strings.TrimSpace(string(data))}
 		var envelope struct {
 			Error struct {
-				Code    string `json:"code"`
-				Message string `json:"message"`
+				Code        string `json:"code"`
+				Category    string `json:"category"`
+				Message     string `json:"message"`
+				Retryable   bool   `json:"retryable"`
+				Remediation string `json:"remediation"`
 			} `json:"error"`
 		}
 		if json.Unmarshal(data, &envelope) == nil && envelope.Error.Code != "" {
-			apiErr.Code, apiErr.Message = envelope.Error.Code, envelope.Error.Message
+			apiErr.Code, apiErr.Category, apiErr.Message = envelope.Error.Code, envelope.Error.Category, envelope.Error.Message
+			apiErr.Retryable, apiErr.Remediation = envelope.Error.Retryable, envelope.Error.Remediation
 		}
 		return apiErr
 	}
@@ -851,13 +855,27 @@ func controlJSONWithTimeout(ctx context.Context, cfg config.Config, method, path
 }
 
 type ControlError struct {
-	StatusCode int
-	Code       string
-	Message    string
+	StatusCode  int
+	Code        string
+	Category    string
+	Message     string
+	Retryable   bool
+	Remediation string
 }
 
 func (e *ControlError) Error() string {
-	return fmt.Sprintf("control plane %s: %s", e.Code, e.Message)
+	detail := fmt.Sprintf("control plane %s", e.Code)
+	if e.Category != "" {
+		detail += " [" + e.Category + "]"
+	}
+	detail += ": " + e.Message
+	if e.Remediation != "" {
+		detail += "; next: " + e.Remediation
+	}
+	if e.Retryable {
+		detail += " (retryable)"
+	}
+	return detail
 }
 
 func waitForOperation(ctx context.Context, cfg config.Config, id string, printProgress bool) (domain.Operation, error) {

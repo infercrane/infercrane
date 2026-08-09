@@ -371,3 +371,17 @@ func TestRolloutInspectFormatsPersistedGuardComparison(t *testing.T) {
 		t.Fatalf("output=%s err=%v", output, err)
 	}
 }
+
+func TestControlErrorPreservesTaxonomyAndRemediation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":{"code":"benchmark_unavailable","category":"dependency","message":"AIPerf is unavailable","retryable":true,"remediation":"Install the configured AIPerf version."}}`))
+	}))
+	defer server.Close()
+	err := controlJSON(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, http.MethodGet, "/api/v1/test", "", nil, nil)
+	var controlErr *ControlError
+	if !errors.As(err, &controlErr) || controlErr.Code != "benchmark_unavailable" || controlErr.Category != "dependency" || !controlErr.Retryable || controlErr.Remediation == "" || !strings.Contains(err.Error(), "next:") {
+		t.Fatalf("error=%#v rendered=%v", controlErr, err)
+	}
+}

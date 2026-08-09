@@ -2,6 +2,7 @@ package controlapi
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -396,5 +397,24 @@ func TestDoctorDiagnosticsRunInsideAuthenticatedControlPlane(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !called || !strings.Contains(response.Body.String(), `"ready":true`) {
 		t.Fatalf("response=%d %s called=%t", response.Code, response.Body.String(), called)
+	}
+}
+
+func TestErrorEnvelopeCarriesActionableTaxonomy(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/deployments/missing", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	(API{Store: &fakeStore{err: domain.ErrNotFound}, APIKey: "secret"}).Handler().ServeHTTP(response, request)
+	var envelope struct {
+		Error struct {
+			Code, Category, Remediation string
+			Retryable                   bool
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != http.StatusNotFound || envelope.Error.Code != "not_found" || envelope.Error.Category != "not_found" || envelope.Error.Retryable || envelope.Error.Remediation == "" {
+		t.Fatalf("status=%d envelope=%#v", response.Code, envelope)
 	}
 }

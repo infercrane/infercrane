@@ -981,7 +981,31 @@ func operationResponse(op domain.Operation) map[string]any {
 	return map[string]any{"id": op.ID, "tenant_id": op.TenantID, "kind": op.Kind, "resource_type": op.ResourceType, "resource_name": op.ResourceName, "status": op.Status, "progress": op.Progress, "message": op.Message, "attempt": op.Attempt, "max_attempts": op.MaxAttempts, "retryable": op.Retryable, "cancel_requested": op.CancelRequested, "created_at": op.CreatedAt, "updated_at": op.UpdatedAt, "completed_at": op.CompletedAt}
 }
 func writeError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, map[string]any{"error": map[string]string{"code": code, "message": message}})
+	category, retryable, remediation := classifyError(status, code)
+	writeJSON(w, status, map[string]any{"error": map[string]any{"code": code, "category": category, "message": message, "retryable": retryable, "remediation": remediation}})
+}
+
+func classifyError(status int, code string) (category string, retryable bool, remediation string) {
+	switch {
+	case code == "unauthenticated":
+		return "authentication", false, "Configure a valid control-plane credential with infercrane init or INFERCRANE_API_KEY."
+	case code == "forbidden":
+		return "authorization", false, "Use a principal whose role permits this operation."
+	case status == http.StatusNotFound:
+		return "not_found", false, "Inspect the deployment, revision, or operation name and retry with an existing resource."
+	case status == http.StatusBadRequest || status == http.StatusUnprocessableEntity:
+		return "validation", false, "Correct the request described by the message; infercrane plan can validate deployment changes without mutation."
+	case status == http.StatusConflict:
+		return "conflict", false, "Inspect current status and active durable operations before retrying with the same idempotency key."
+	case status == http.StatusTooManyRequests:
+		return "rate_limit", true, "Wait for provider or tenant capacity and retry with the same idempotency key."
+	case status == http.StatusBadGateway || status == http.StatusServiceUnavailable || status == http.StatusGatewayTimeout:
+		return "dependency", true, "Inspect durable operation events and provider status, then retry with the same idempotency key."
+	case status >= http.StatusInternalServerError:
+		return "internal", true, "Inspect control-plane logs and durable events, then retry without changing the idempotency key."
+	default:
+		return "request", false, "Inspect the error message and current deployment state before retrying."
+	}
 }
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")

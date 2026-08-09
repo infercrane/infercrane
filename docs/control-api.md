@@ -55,3 +55,21 @@ same tenant, operation kind, and idempotency key returns the original operation.
 
 Diagnostics execute inside the control-plane process. The public CLI receives only check status,
 messages, and remediation; it never receives or opens the PostgreSQL URL or provider credentials.
+
+Non-success responses use one stable envelope:
+
+```json
+{
+  "error": {
+    "code": "candidate_not_ready",
+    "category": "conflict",
+    "message": "selected revision has no healthy ready endpoint",
+    "retryable": false,
+    "remediation": "Inspect current status and active durable operations before retrying with the same idempotency key."
+  }
+}
+```
+
+Categories are `authentication`, `authorization`, `validation`, `not_found`, `conflict`,
+`rate_limit`, `dependency`, `internal`, or `request`. The mapping is deterministic from the HTTP
+status and error code. A retryable mutation must retain its original idempotency key.

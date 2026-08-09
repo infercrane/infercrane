@@ -19,3 +19,7 @@ operation state. Human output may print intermediate durable progress. `delete -
 side-effect-free and supports both output formats.
 `status --watch --output json` emits one complete JSON document per line for each durable-state
 refresh until the client disconnects.
+
+Control-plane failures retain the API error code, category, retryability, and remediation in the
+CLI error. Retryable does not mean “submit again with a new key”: inspect durable operation events
+and reuse the original idempotency key so a provider mutation cannot be duplicated.
