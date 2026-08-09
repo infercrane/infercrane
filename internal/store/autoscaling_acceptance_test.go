@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -51,6 +52,35 @@ type acceptanceArtifactResolver struct{}
 
 func (acceptanceArtifactResolver) Resolve(context.Context, string, string) (domain.ModelArtifact, error) {
 	return domain.ModelArtifact{Source: "huggingface", Repository: "Qwen/Qwen3-8B", RequestedRevision: "main", ImmutableRevision: "0123456789abcdef0123456789abcdef01234567", ModelIdentity: "Qwen/Qwen3-8B@0123456789abcdef0123456789abcdef01234567", CacheState: "unknown", RuntimeCompatibilityJSON: `{}`}, nil
+}
+
+type acceptanceServerlessProvider struct {
+	endpoints map[string]provision.ServerlessEndpoint
+}
+
+func (p *acceptanceServerlessProvider) EnsureEndpoint(_ context.Context, spec provision.ServerlessEndpointSpec) (provision.ServerlessEndpoint, error) {
+	for _, endpoint := range p.endpoints {
+		if endpoint.Name == spec.ExternalKey {
+			return endpoint, nil
+		}
+	}
+	endpoint := provision.ServerlessEndpoint{ID: "endpoint-1", Name: spec.ExternalKey, TemplateID: "template-qwen", GPUTypeIDs: []string{"NVIDIA L40S"}, WorkersMin: 0, WorkersMax: spec.WorkersMax}
+	p.endpoints[endpoint.ID] = endpoint
+	return endpoint, nil
+}
+func (p *acceptanceServerlessProvider) ListEndpoints(context.Context) ([]provision.ServerlessEndpoint, error) {
+	out := make([]provision.ServerlessEndpoint, 0, len(p.endpoints))
+	for _, endpoint := range p.endpoints {
+		out = append(out, endpoint)
+	}
+	return out, nil
+}
+func (p *acceptanceServerlessProvider) DeleteEndpoint(_ context.Context, id string) error {
+	delete(p.endpoints, id)
+	return nil
+}
+func (*acceptanceServerlessProvider) EndpointURL(id string) string {
+	return "https://api.runpod.invalid/v2/" + id + "/openai"
 }
 
 func TestDurableAutoscalingAcceptanceOneToTwoToOne(t *testing.T) {
@@ -270,6 +300,70 @@ func TestBadCandidateAcceptanceRejectsRevisionAndDeletesCapacity(t *testing.T) {
 		t.Fatalf("provider resources=%#v", provider.existing)
 	}
 	assertReplicaCount(t, s, deployment.ID, 1)
+}
+
+func TestRunPodServerlessAcceptanceConvergesAtZeroAndDeletesEndpoint(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	name := "serverless-acceptance"
+	requestJSON := fmt.Sprintf(`{"name":%q,"model":"Qwen/Qwen3-8B","compute_mode":"serverless","cloud":"runpod","gpu":"L40S","tenant_id":"global","min_replicas":0,"max_replicas":4}`, name)
+	deployment, _, _, err := s.SubmitCloudDeployment(ctx, domain.Deployment{Name: name, Model: "Qwen/Qwen3-8B", MinReplicas: 0, MaxReplicas: 4}, domain.Operation{Kind: workflows.ServerlessConvergeKind, IdempotencyKey: "serverless-initial", RequestJSON: requestJSON})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := &acceptanceServerlessProvider{endpoints: map[string]provision.ServerlessEndpoint{}}
+	handlers := workflows.ServerlessHandlers(s, provider, acceptanceArtifactResolver{})
+	worker := operations.Worker{Repository: s, Handlers: handlers, Owner: "serverless-worker", Lease: time.Second, BaseBackoff: time.Millisecond, MaxBackoff: time.Millisecond, Jitter: func(d time.Duration) time.Duration { return d }}
+	if worked, workerErr := worker.Once(ctx); workerErr != nil || !worked {
+		t.Fatalf("serverless converge worked=%t err=%v", worked, workerErr)
+	}
+	resolved, err := s.Resolve(ctx, name)
+	if err != nil || len(resolved.Targets) != 1 || resolved.Targets[0].Provider != "runpod-serverless" || resolved.Deployment.MinReplicas != 0 || resolved.Deployment.MaxReplicas != 4 || resolved.Deployment.AutoscalingEnabled || len(provider.endpoints) != 1 {
+		t.Fatalf("resolved=%+v endpoints=%#v err=%v", resolved, provider.endpoints, err)
+	}
+	revision, err := s.Revision(ctx, "global", name, resolved.Deployment.ActiveRevisionID)
+	if err != nil || !containsJSON(revision.SpecJSON, `"compute_mode":"serverless"`) {
+		t.Fatalf("revision=%+v err=%v", revision, err)
+	}
+	replicasBeforeDelete, err := s.ReplicasForDeployment(ctx, "global", deployment.ID)
+	if err != nil || len(replicasBeforeDelete) != 1 || replicasBeforeDelete[0].Provider != "runpod-serverless" || replicasBeforeDelete[0].ProviderResourceID != "endpoint-1" {
+		t.Fatalf("replicas before delete=%+v err=%v", replicasBeforeDelete, err)
+	}
+	deleteRequest, _ := json.Marshal(workflows.DeleteRequest{DeploymentID: deployment.ID, Name: name, TenantID: "global"})
+	deleteOperation, _, err := s.SubmitDeploymentDelete(ctx, "global", name, deployment.ID, domain.Operation{Kind: workflows.ServerlessDeleteKind, IdempotencyKey: "serverless-delete", RequestJSON: string(deleteRequest)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if worked, workerErr := worker.Once(ctx); workerErr != nil || !worked {
+		t.Fatalf("serverless delete worked=%t err=%v", worked, workerErr)
+	}
+	if len(provider.endpoints) != 0 {
+		current, operationErr := s.Operation(ctx, deleteOperation.ID)
+		t.Fatalf("leaked endpoints=%#v delete_operation=%+v operation_err=%v", provider.endpoints, current, operationErr)
+	}
+	var desired, observed string
+	var replicas, targets int
+	if err = s.db.QueryRowContext(ctx, `SELECT desired_state,observed_state FROM deployments WHERE id=$1`, deployment.ID).Scan(&desired, &observed); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM replicas WHERE deployment_id=$1 AND lifecycle_state!='deleted'`, deployment.ID).Scan(&replicas); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM targets WHERE provider_resource_id='endpoint-1'`).Scan(&targets); err != nil {
+		t.Fatal(err)
+	}
+	if desired != "deleted" || observed != "deleted" || replicas != 0 || targets != 0 {
+		t.Fatalf("deployment=%s/%s replicas=%d targets=%d", desired, observed, replicas, targets)
+	}
+}
+
+func containsJSON(value, fragment string) bool {
+	var compact map[string]any
+	if json.Unmarshal([]byte(value), &compact) != nil {
+		return false
+	}
+	encoded, _ := json.Marshal(compact)
+	return strings.Contains(string(encoded), fragment)
 }
 
 func assertReplicaCount(t *testing.T, s *Store, deploymentID string, want int) {

@@ -150,6 +150,9 @@ func (g *Gateway) completions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	copyHeaders(req.Header, r.Header)
+	if route.UpstreamAPIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+route.UpstreamAPIKey)
+	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Request-ID", requestID)
 	req.Header.Set("traceparent", traceParent)

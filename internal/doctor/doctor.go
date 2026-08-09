@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/config"
+	"github.com/infercrane/infercrane/internal/provision"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
@@ -35,9 +36,29 @@ type Report struct {
 }
 
 type Dependencies struct {
-	LookPath func(string) (string, error)
-	Ping     func(context.Context, string) error
-	SkyCheck func(context.Context) error
+	LookPath    func(string) (string, error)
+	Ping        func(context.Context, string) error
+	SkyCheck    func(context.Context) error
+	RunPodCheck func(context.Context) error
+}
+
+func CheckRunPodServerless(ctx context.Context, cfg config.Config, deps Dependencies) Check {
+	if cfg.RunPodAPIKey == "" {
+		return Check{"RunPod Serverless", Fail, "RUNPOD_API_KEY is not set", "Create a scoped RunPod API key and set RUNPOD_API_KEY on the control plane."}
+	}
+	if cfg.RunPodServerlessTemplateID == "" {
+		return Check{"RunPod Serverless", Fail, "Serverless vLLM template is not configured", "Set INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID to a RunPod Serverless vLLM template pinned to an immutable model revision."}
+	}
+	check := deps.RunPodCheck
+	if check == nil {
+		check = (provision.RunPodServerless{APIKey: cfg.RunPodAPIKey, BaseURL: cfg.RunPodRESTURL, TemplateID: cfg.RunPodServerlessTemplateID}).Check
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	if err := check(checkCtx); err != nil {
+		return Check{"RunPod Serverless", Fail, "RunPod Serverless configuration is invalid: " + err.Error(), "Verify the API key and template; pin MODEL_NAME and MODEL_REVISION and set RAW_OPENAI_OUTPUT=1."}
+	}
+	return Check{"RunPod Serverless", Pass, "RunPod API credentials and immutable vLLM template are valid", ""}
 }
 
 func CheckCloudCredentials(ctx context.Context, deps Dependencies) Check {

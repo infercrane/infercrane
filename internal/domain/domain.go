@@ -16,6 +16,7 @@ type Target struct {
 
 type Deployment struct {
 	ID, TenantID, Name, Model, Runtime, RoutingStrategy string
+	ComputeMode                                         string
 	ActiveRevisionID, CandidateRevisionID               string
 	DesiredState, ObservedState                         string
 	MinReplicas, MaxReplicas                            int

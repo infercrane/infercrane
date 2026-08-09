@@ -28,6 +28,7 @@ than loading the entire repository into one context window.
 - [Reconciliation and routing](features/reconciliation.md)
 - [Provisioning and runtimes](features/provisioning.md)
 - [Configuration and operations](features/operations.md)
+- [RunPod Serverless](features/serverless.md)
 
 ## Operations
 

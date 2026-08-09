@@ -47,3 +47,15 @@ func TestCloudCredentialCheckIsRequiredWhenRequested(t *testing.T) {
 		t.Fatalf("unexpected check: %#v", check)
 	}
 }
+
+func TestRunPodServerlessCheckIsRequiredWhenRequested(t *testing.T) {
+	cfg := config.Config{RunPodAPIKey: "secret", RunPodServerlessTemplateID: "template"}
+	check := CheckRunPodServerless(context.Background(), cfg, Dependencies{RunPodCheck: func(context.Context) error { return errors.New("mutable template") }})
+	if check.Status != Fail || check.Remediation == "" {
+		t.Fatalf("unexpected check: %#v", check)
+	}
+	check = CheckRunPodServerless(context.Background(), cfg, Dependencies{RunPodCheck: func(context.Context) error { return nil }})
+	if check.Status != Pass {
+		t.Fatalf("unexpected check: %#v", check)
+	}
+}

@@ -37,6 +37,7 @@ type Reconciler struct {
 	RouterStartPort int
 	InstanceID      string
 	Logger          *slog.Logger
+	ProviderAPIKeys map[string]string
 }
 
 func (r *Reconciler) Run(ctx context.Context) error {
@@ -91,6 +92,18 @@ func (r *Reconciler) Once(ctx context.Context) error {
 		var wg sync.WaitGroup
 		semaphore := make(chan struct{}, 16)
 		for i, target := range resolved.Targets {
+			if target.Provider == "runpod-serverless" {
+				if r.ProviderAPIKeys["runpod-serverless"] == "" {
+					inspections[i] = inspection{target: target}
+					continue
+				}
+				expected := target.UpstreamModel
+				if expected == "" {
+					expected = d.Model
+				}
+				inspections[i] = inspection{target: target, ok: true, models: map[string]struct{}{expected: {}}}
+				continue
+			}
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
@@ -125,6 +138,19 @@ func (r *Reconciler) Once(ctx context.Context) error {
 		if len(healthy) == 0 {
 			r.Routes.RemoveForTenant(d.TenantID, d.Name)
 			_ = r.Store.SetDeploymentState(ctx, d.ID, "unhealthy")
+			continue
+		}
+		if len(healthy) == 1 && healthy[0].Provider == "runpod-serverless" {
+			oldRoute, hadOldRoute := r.Routes.GetForTenant(d.TenantID, d.Name)
+			if hadOldRoute && oldRoute.RouterProcessID != "" {
+				_ = r.Router.Stop(oldRoute.RouterProcessID)
+			}
+			upstream := healthy[0].UpstreamModel
+			if upstream == "" {
+				upstream = d.Model
+			}
+			r.Routes.Put(routes.Snapshot{DeploymentID: d.ID, RevisionID: d.ActiveRevisionID, TenantID: d.TenantID, Alias: d.Name, UpstreamModel: upstream, RouterURL: healthy[0].URL, Provider: "runpod", Runtime: d.Runtime, ComputeMode: "serverless", UpstreamAPIKey: r.ProviderAPIKeys["runpod-serverless"]})
+			_ = r.Store.SetDeploymentState(ctx, d.ID, "healthy")
 			continue
 		}
 		workerURLs := make([]string, len(healthy))
@@ -200,6 +226,8 @@ func routeSnapshot(deployment domain.Deployment, targets []domain.Target, upstre
 		computeMode = "elastic"
 		if provider == "existing" {
 			computeMode = "existing"
+		} else if provider == "runpod-serverless" {
+			provider, computeMode = "runpod", "serverless"
 		}
 	}
 	return routes.Snapshot{DeploymentID: deployment.ID, RevisionID: deployment.ActiveRevisionID, TenantID: deployment.TenantID, Alias: deployment.Name, UpstreamModel: upstream, RouterURL: endpoint, RouterProcessID: processID, Provider: provider, Runtime: deployment.Runtime, ComputeMode: computeMode}

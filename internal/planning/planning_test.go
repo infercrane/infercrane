@@ -19,6 +19,16 @@ func TestBuildRejectsMixedModes(t *testing.T) {
 	}
 }
 
+func TestBuildServerlessPlanKeepsWorkersAtZero(t *testing.T) {
+	p, err := Build(Input{Model: "Qwen/Qwen3-8B", ComputeMode: "serverless", Cloud: "runpod", GPU: "L40S", MinReplicas: 0, MaxReplicas: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Mode != "serverless" || p.MinReplicas != 0 || p.MaxReplicas != 4 || p.Actions[len(p.Actions)-1].Summary != "Delegate zero-to-4 worker scaling to RunPod" {
+		t.Fatalf("unexpected plan: %#v", p)
+	}
+}
+
 func TestIncompletePlanIsActionable(t *testing.T) {
 	p, err := Build(Input{Model: "model"})
 	if err != nil {

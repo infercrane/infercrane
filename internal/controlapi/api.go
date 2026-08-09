@@ -109,7 +109,14 @@ func (a API) deleteDeployment(w http.ResponseWriter, r *http.Request) {
 	}
 	request := workflows.DeleteRequest{DeploymentID: resolved.Deployment.ID, Name: resolved.Deployment.Name, Actor: principal.Name, TenantID: principal.TenantID}
 	encoded, _ := json.Marshal(request)
-	operation, created, err := a.Store.SubmitDeploymentDelete(r.Context(), principal.TenantID, resolved.Deployment.Name, resolved.Deployment.ID, domain.Operation{Kind: workflows.DeleteKind, IdempotencyKey: key, RequestJSON: string(encoded)})
+	deleteKind := workflows.DeleteKind
+	for _, target := range resolved.Targets {
+		if target.Provider == "runpod-serverless" {
+			deleteKind = workflows.ServerlessDeleteKind
+			break
+		}
+	}
+	operation, created, err := a.Store.SubmitDeploymentDelete(r.Context(), principal.TenantID, resolved.Deployment.Name, resolved.Deployment.ID, domain.Operation{Kind: deleteKind, IdempotencyKey: key, RequestJSON: string(encoded)})
 	if errors.Is(err, domain.ErrConflict) {
 		writeError(w, http.StatusConflict, "conflict", err.Error())
 		return
@@ -145,8 +152,14 @@ func (a API) createCloudDeployment(w http.ResponseWriter, r *http.Request) {
 	}
 	principal := r.Context().Value(identityKey{}).(domain.Principal)
 	request.Actor, request.TenantID = principal.Name, principal.TenantID
+	if request.ComputeMode == "" {
+		request.ComputeMode = "elastic"
+	}
 	minReplicas, maxReplicas := 1, 1
-	if request.MinReplicas > 0 {
+	operationKind := workflows.ConvergeKind
+	if request.ComputeMode == "serverless" {
+		minReplicas, operationKind = 0, workflows.ServerlessConvergeKind
+	} else if request.MinReplicas > 0 {
 		minReplicas = request.MinReplicas
 	}
 	if request.MaxReplicas > 0 {
@@ -155,7 +168,8 @@ func (a API) createCloudDeployment(w http.ResponseWriter, r *http.Request) {
 		maxReplicas = minReplicas
 	}
 	encoded, _ := json.Marshal(request)
-	deployment, operation, created, err := a.Store.SubmitCloudDeployment(r.Context(), domain.Deployment{TenantID: principal.TenantID, Name: request.Name, Model: request.Model, MinReplicas: minReplicas, MaxReplicas: maxReplicas, AutoscalingEnabled: maxReplicas > minReplicas}, domain.Operation{TenantID: principal.TenantID, Kind: workflows.ConvergeKind, IdempotencyKey: key, RequestJSON: string(encoded)})
+	autoscalingEnabled := request.ComputeMode != "serverless" && maxReplicas > minReplicas
+	deployment, operation, created, err := a.Store.SubmitCloudDeployment(r.Context(), domain.Deployment{TenantID: principal.TenantID, Name: request.Name, Model: request.Model, MinReplicas: minReplicas, MaxReplicas: maxReplicas, AutoscalingEnabled: autoscalingEnabled}, domain.Operation{TenantID: principal.TenantID, Kind: operationKind, IdempotencyKey: key, RequestJSON: string(encoded)})
 	if errors.Is(err, domain.ErrConflict) {
 		writeError(w, http.StatusConflict, "conflict", err.Error())
 		return

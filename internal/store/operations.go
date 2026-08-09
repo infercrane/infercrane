@@ -246,13 +246,16 @@ func (s *Store) DeleteDeploymentForTenant(ctx context.Context, tenant, name stri
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	var id, state string
-	if err := tx.QueryRowContext(ctx, `SELECT id,desired_state FROM deployments WHERE tenant_id=? AND name=?`, tenant, name).Scan(&id, &state); errors.Is(err, sql.ErrNoRows) {
+	var id, desired, observed string
+	if err := tx.QueryRowContext(ctx, `SELECT id,desired_state,observed_state FROM deployments WHERE tenant_id=? AND name=?`, tenant, name).Scan(&id, &desired, &observed); errors.Is(err, sql.ErrNoRows) {
 		return nil
 	} else if err != nil {
 		return err
 	}
-	if state == "deleted" {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM deployment_targets WHERE deployment_id=?`, id); err != nil {
+		return err
+	}
+	if desired == "deleted" && observed == "deleted" {
 		return tx.Commit()
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE deployments SET desired_state='deleted',observed_state='deleted',updated_at=? WHERE id=?`, now(), id); err != nil {
@@ -414,7 +417,7 @@ func (s *Store) RoutingGenerationMatches(ctx context.Context, deploymentID, work
 }
 
 func (s *Store) DeleteProvisionedTarget(ctx context.Context, tenant, name string) error {
-	result, err := s.ExecContext(ctx, `DELETE FROM targets t WHERE t.tenant_id=? AND t.name=? AND t.provider='skypilot' AND NOT EXISTS(SELECT 1 FROM deployment_targets dt WHERE dt.target_id=t.id)`, tenant, name)
+	result, err := s.ExecContext(ctx, `DELETE FROM targets t WHERE t.tenant_id=? AND t.name=? AND t.provider IN ('skypilot','runpod-serverless') AND NOT EXISTS(SELECT 1 FROM deployment_targets dt WHERE dt.target_id=t.id)`, tenant, name)
 	if err != nil {
 		return err
 	}
@@ -423,6 +426,6 @@ func (s *Store) DeleteProvisionedTarget(ctx context.Context, tenant, name string
 }
 
 func (s *Store) DeleteProvisionedTargetByURL(ctx context.Context, tenant, endpoint string) error {
-	_, err := s.ExecContext(ctx, `DELETE FROM targets t WHERE t.tenant_id=? AND t.url=? AND t.provider='skypilot' AND NOT EXISTS(SELECT 1 FROM deployment_targets dt WHERE dt.target_id=t.id)`, tenant, NormalizeURL(endpoint))
+	_, err := s.ExecContext(ctx, `DELETE FROM targets t WHERE t.tenant_id=? AND t.url=? AND t.provider IN ('skypilot','runpod-serverless') AND NOT EXISTS(SELECT 1 FROM deployment_targets dt WHERE dt.target_id=t.id)`, tenant, NormalizeURL(endpoint))
 	return err
 }

@@ -1,15 +1,18 @@
 # InferCrane
 
-InferCrane is an open-source inference control plane and OpenAI-compatible gateway for vLLM.
-It gives applications a stable model endpoint while managing worker membership, health,
-routing configuration, deployment state, and provider resources behind it.
+Production inference without the platform engineering.
 
-```text
-OpenAI client ──> InferCrane gateway ──> vLLM Router ──> vLLM workers
-                       │
-                       ├── PostgreSQL control-plane state
-                       └── health reconciliation and provisioning
+Deploy, autoscale, benchmark, and safely update vLLM workloads on GPU infrastructure you control.
+
+```bash
+infercrane deploy Qwen/Qwen3-8B
 ```
+
+- No Kubernetes required
+- Deterministic Release Guard
+- Reproducible benchmarks
+- Explainable durable operations
+- Elastic and provider-native serverless compute
 
 ## Why InferCrane?
 
@@ -22,7 +25,7 @@ while workers are replaced, recovered, or reconfigured.
 - Health and served-model reconciliation for vLLM workers.
 - Supervised upstream vLLM Router processes with multiple routing strategies.
 - Streaming chat completions without database reads on the request-routing path.
-- Existing-worker registration and experimental SkyPilot provisioning.
+- Existing-worker registration, SkyPilot elastic provisioning, and RunPod Serverless lifecycle.
 - Prometheus telemetry, readiness/liveness probes, request accounting, and graceful shutdown.
 - Multi-replica gateway architecture with instance-owned local router generations.
 
@@ -55,8 +58,8 @@ Before changing infrastructure, validate the environment and preview the exact d
 ```bash
 infercrane doctor
 infercrane doctor --cloud
-infercrane plan Qwen/Qwen3-8B --cloud aws --gpu L4
-infercrane plan Qwen/Qwen3-8B --cloud aws --gpu L4 --output json
+infercrane plan Qwen/Qwen3-8B --cloud runpod --gpu L40S
+infercrane plan Qwen/Qwen3-8B --cloud runpod --gpu L40S --output json
 ```
 
 `plan` is side-effect free. Pricing is reported as unavailable until a live, timestamped provider
@@ -132,6 +135,18 @@ infercrane delete qwen-prod --yes
 `deploy`, `apply`, and `delete` submit durable operations to `INFERCRANE_URL`; they never execute
 cloud mutations or open PostgreSQL from the CLI process. Omitting `--wait` returns after submission,
 so closing the terminal cannot interrupt provisioning or cleanup.
+
+Provider-native serverless uses a RunPod-maintained vLLM worker template pinned to the requested
+immutable model artifact:
+
+```bash
+export RUNPOD_API_KEY='...'
+export INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID='...'
+infercrane doctor --serverless
+infercrane deploy Qwen/Qwen3-8B --compute serverless --cloud runpod --gpu L40S --max 4 --wait
+```
+
+See [RunPod Serverless setup and lifecycle](docs/features/serverless.md) before creating an endpoint.
 
 Create tenant-scoped credentials; the token is shown only once:
 

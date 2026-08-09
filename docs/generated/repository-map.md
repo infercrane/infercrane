@@ -8,7 +8,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 
 | Package path | Source files | Test files | Test functions |
 |---|---:|---:|---|
-| `cmd/infercrane` | 1 | 1 | `TestDeleteCLIOnlySubmitsControlPlaneRequest`, `TestDeployCLIOnlySubmitsControlPlaneRequest`, `TestPrimaryDeployPathDefaultsToRunPodL40S` |
+| `cmd/infercrane` | 1 | 1 | `TestDeleteCLIOnlySubmitsControlPlaneRequest`, `TestDeployCLIOnlySubmitsControlPlaneRequest`, `TestPrimaryDeployPathDefaultsToRunPodL40S`, `TestServerlessDeployDefaultsToZeroMinimumWorkers` |
 | `internal/accounting` | 1 | 0 | — |
 | `internal/artifact` | 1 | 1 | `TestHuggingFaceResolveRejectsMutableResponse`, `TestHuggingFaceResolveReturnsImmutableIdentity` |
 | `internal/authn` | 1 | 1 | `TestCacheAuthenticatesWithoutSourceOnRequestPath` |
@@ -17,25 +17,25 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 | `internal/benchmark` | 1 | 1 | `TestRunMeasuresSuccessfulRequests` |
 | `internal/capacity` | 1 | 1 | `TestChoosePrefersWarmThenCost`, `TestChooseRejectsInsufficientCapacity` |
 | `internal/config` | 1 | 1 | `TestInitializeClientWritesPrivateConfigAndLoadClientUsesIt`, `TestLoadForDiagnosticsAllowsMissingAPIKey`, `TestLoadRejectsInvalidInteger`, `TestLoadRequiresAPIKey`, `TestProductionRequiresStrongSecretAndDatabaseTLS`, `TestRejectsUnsafeControlPlaneURL` |
-| `internal/controlapi` | 1 | 1 | `TestApplyQueuesIdempotentOperation`, `TestCancelHidesMissingOperation`, `TestCloudDeployPersistsAndQueuesConverge`, `TestDeleteQueuesDurableCleanup`, `TestDeploymentAndOperationEventsAreTenantScoped`, `TestDeploymentReadAPIReturnsDurableState`, `TestOperationAPIAuthenticationAndResponse`, `TestRolloutTransitionsQueueDurableOperations`, `TestRouteAndTenantMutationsUseAuthenticatedAPI`, `TestScalingDecisionsAreReadThroughTenantAPI`, `TestTargetRegistrationRejectsEmbeddedCredentials`, `TestViewerCannotApply` |
-| `internal/doctor` | 1 | 1 | `TestCloudCredentialCheckIsRequiredWhenRequested`, `TestRunReadyWithoutSkyPilot`, `TestRunReportsRequiredAndOptionalChecks` |
+| `internal/controlapi` | 1 | 1 | `TestApplyQueuesIdempotentOperation`, `TestCancelHidesMissingOperation`, `TestCloudDeployPersistsAndQueuesConverge`, `TestDeleteQueuesDurableCleanup`, `TestDeploymentAndOperationEventsAreTenantScoped`, `TestDeploymentReadAPIReturnsDurableState`, `TestOperationAPIAuthenticationAndResponse`, `TestRolloutTransitionsQueueDurableOperations`, `TestRouteAndTenantMutationsUseAuthenticatedAPI`, `TestScalingDecisionsAreReadThroughTenantAPI`, `TestServerlessDeleteQueuesEndpointCleanup`, `TestServerlessDeployQueuesProviderNativeConverge`, `TestTargetRegistrationRejectsEmbeddedCredentials`, `TestViewerCannotApply` |
+| `internal/doctor` | 1 | 1 | `TestCloudCredentialCheckIsRequiredWhenRequested`, `TestRunPodServerlessCheckIsRequiredWhenRequested`, `TestRunReadyWithoutSkyPilot`, `TestRunReportsRequiredAndOptionalChecks` |
 | `internal/domain` | 1 | 0 | — |
-| `internal/gateway` | 2 | 2 | `TestActiveStreamKeepsSelectedRouterAcrossGenerationPublish`, `TestAuthentication`, `TestCompletionRecordsStreamingTelemetry`, `TestCompletionRewritesAlias`, `TestModelsAreTenantScoped`, `TestTelemetryExportsPrometheusHistogram` |
+| `internal/gateway` | 2 | 2 | `TestActiveStreamKeepsSelectedRouterAcrossGenerationPublish`, `TestAuthentication`, `TestCompletionRecordsStreamingTelemetry`, `TestCompletionReplacesPublicCredentialForServerlessUpstream`, `TestCompletionRewritesAlias`, `TestModelsAreTenantScoped`, `TestTelemetryExportsPrometheusHistogram` |
 | `internal/metrics` | 1 | 1 | `TestParse` |
 | `internal/operations` | 2 | 2 | `TestTelemetryExportsCounters`, `TestWorkerAppliesConfiguredJitter`, `TestWorkerCancelsRecoveredClaimBeforeHandler`, `TestWorkerCompletesClaimedOperation`, `TestWorkerRetriesFailedCancellationCleanup`, `TestWorkerSchedulesBoundedRetry`, `TestWorkerStopsRetryAtMaxAttempts` |
-| `internal/planning` | 1 | 1 | `TestBuildProvisionedPlan`, `TestBuildRejectsMixedModes`, `TestCompareProducesSemanticRevisionPlan`, `TestIncompletePlanIsActionable` |
+| `internal/planning` | 1 | 1 | `TestBuildProvisionedPlan`, `TestBuildRejectsMixedModes`, `TestBuildServerlessPlanKeepsWorkersAtZero`, `TestCompareProducesSemanticRevisionPlan`, `TestIncompletePlanIsActionable` |
 | `internal/pricing` | 1 | 1 | `TestCatalogAndStaleness` |
-| `internal/provision` | 1 | 1 | `TestDeleteReplicaIsIdempotent`, `TestEnsureDoesNotLaunchWhenDiscoveryFails`, `TestEnsureDoesNotRelaunchActiveRequest`, `TestEnsureRelaunchesMissingOrFailedRequest`, `TestEnsureReplicaDiscoversExistingResource`, `TestEnsureTreatsExplicitMissingClusterAsAbsent`, `TestEnsureTreatsSuccessfulMissingClusterMessageAsAbsent`, `TestInventoryFiltersOwnedResources`, `TestObserveParsesSkyPilotNoticeBeforeJSON`, `TestRunCommandPinsImmutableModelRevision` |
-| `internal/reconcile` | 1 | 1 | `TestRouterCandidateFailureLeavesOldGenerationServing`, `TestRouterCandidatePublishesBeforeOldRetires` |
+| `internal/provision` | 2 | 2 | `TestDeleteReplicaIsIdempotent`, `TestEnsureDoesNotLaunchWhenDiscoveryFails`, `TestEnsureDoesNotRelaunchActiveRequest`, `TestEnsureRelaunchesMissingOrFailedRequest`, `TestEnsureReplicaDiscoversExistingResource`, `TestEnsureTreatsExplicitMissingClusterAsAbsent`, `TestEnsureTreatsSuccessfulMissingClusterMessageAsAbsent`, `TestInventoryFiltersOwnedResources`, `TestObserveParsesSkyPilotNoticeBeforeJSON`, `TestRunCommandPinsImmutableModelRevision`, `TestRunPodServerlessCheckRejectsMutableTemplate`, `TestRunPodServerlessDeleteIsIdempotent`, `TestRunPodServerlessEnsureIsReplaySafeAndScaleToZeroNative`, `TestRunPodServerlessRejectsTemplateForMutableOrWrongArtifact` |
+| `internal/reconcile` | 1 | 1 | `TestRouterCandidateFailureLeavesOldGenerationServing`, `TestRouterCandidatePublishesBeforeOldRetires`, `TestServerlessRouteDoesNotWarmWorkersOrStartRouter` |
 | `internal/releaseguard` | 1 | 1 | `TestEvaluateIsDeterministicAndConservative` |
 | `internal/router` | 2 | 1 | `TestCommandUsesUpstreamPolicyAndSingleAttempt` |
 | `internal/routes` | 1 | 1 | `TestDirectoryIsolatesSameAliasByTenant`, `TestDirectoryOrdersAndRemovesSnapshots` |
 | `internal/runtime` | 1 | 0 | — |
 | `internal/spec` | 1 | 0 | — |
-| `internal/store` | 13 | 2 | `TestApplyDeploymentConvergesTargetMembership`, `TestBadCandidateAcceptanceRejectsRevisionAndDeletesCapacity`, `TestCancellingQueuedOperationPreventsClaim`, `TestCancellingWaitingOperationRequiresCleanupClaim`, `TestCreateDeploymentRejectsIncompatibleTargets`, `TestDeploymentLifecycleMutationsAreSerialized`, `TestDeploymentRevisionsAreImmutableAndPromoteExplicitly`, `TestDurableAutoscalingAcceptanceOneToTwoToOne`, `TestGuardedPromotionAtomicallySwitchesRevisionAndTargets`, `TestGuardedRolloutAcceptanceResumesAfterCutoverRestart`, `TestModelArtifactIsImmutablePerRevision`, `TestOperationQueueLeasesAndRecoversExpiredWork`, `TestOrphanedTargetsOnlyReturnsProvisionedUnusedTargets`, `TestPrincipalCredentialRotationAndRevocation`, `TestReleaseGuardPersistsDeterministicCandidateDecision`, `TestReplicaIntentAndProviderIdentityAreIdempotent`, `TestRequestTelemetryPersistsMeasurementsAndDimensions`, `TestRevisionTransitionsAreReplaySafeForDurableOperation`, `TestScaleToQueuesExactlyOneDurableOperation`, `TestStaleLeaseCannotCheckpointOrFinish`, `TestSubmitCloudDeploymentIsAtomicAndIdempotent`, `TestSubmitDeploymentDeleteWithdrawsDesiredStateAndQueuesCleanup`, `TestTargetAndDeploymentLifecycle`, `TestTargetConflict`, `TestTenantQuotaRejectsDeploymentBeyondReplicaLimit`, `TestTenantResourcesCanReuseNamesWithoutCrossTenantVisibility` |
+| `internal/store` | 13 | 2 | `TestApplyDeploymentConvergesTargetMembership`, `TestBadCandidateAcceptanceRejectsRevisionAndDeletesCapacity`, `TestCancellingQueuedOperationPreventsClaim`, `TestCancellingWaitingOperationRequiresCleanupClaim`, `TestCreateDeploymentRejectsIncompatibleTargets`, `TestDeploymentLifecycleMutationsAreSerialized`, `TestDeploymentRevisionsAreImmutableAndPromoteExplicitly`, `TestDurableAutoscalingAcceptanceOneToTwoToOne`, `TestGuardedPromotionAtomicallySwitchesRevisionAndTargets`, `TestGuardedRolloutAcceptanceResumesAfterCutoverRestart`, `TestModelArtifactIsImmutablePerRevision`, `TestOperationQueueLeasesAndRecoversExpiredWork`, `TestOrphanedTargetsOnlyReturnsProvisionedUnusedTargets`, `TestPrincipalCredentialRotationAndRevocation`, `TestReleaseGuardPersistsDeterministicCandidateDecision`, `TestReplicaIntentAndProviderIdentityAreIdempotent`, `TestRequestTelemetryPersistsMeasurementsAndDimensions`, `TestRevisionTransitionsAreReplaySafeForDurableOperation`, `TestRunPodServerlessAcceptanceConvergesAtZeroAndDeletesEndpoint`, `TestScaleToQueuesExactlyOneDurableOperation`, `TestStaleLeaseCannotCheckpointOrFinish`, `TestSubmitCloudDeploymentIsAtomicAndIdempotent`, `TestSubmitDeploymentDeleteWithdrawsDesiredStateAndQueuesCleanup`, `TestTargetAndDeploymentLifecycle`, `TestTargetConflict`, `TestTenantQuotaRejectsDeploymentBeyondReplicaLimit`, `TestTenantResourcesCanReuseNamesWithoutCrossTenantVisibility` |
 | `internal/testtools/fake-router` | 1 | 0 | — |
 | `internal/testtools/fake-vllm` | 1 | 0 | — |
-| `internal/workflows` | 4 | 3 | `TestApplyExistingHandlerIsDeterministic`, `TestApplyExistingHandlerRejectsInvalidPayload`, `TestBadCandidateIsRejectedAndCapacityIsDeleted`, `TestCandidateCancellationDeletesOnlyCandidateCapacity`, `TestCandidateProvisioningCreatesIsolatedRevisionCapacity`, `TestConvergeCancellationDeletesProviderResource`, `TestConvergeCreatesExactlyOneResourcePerMinimumReplica`, `TestConvergeResumesAfterProviderCheckpoint`, `TestGuardedPromotionCutsOverBeforeDeletingOldCapacity`, `TestRejectedCandidateProvisionRetryOnlyResumesCleanup`, `TestRolloutHandlersPersistExplicitTransitions`, `TestScaleDownWithdrawsRouterBeforeDeletingReplica` |
+| `internal/workflows` | 5 | 4 | `TestApplyExistingHandlerIsDeterministic`, `TestApplyExistingHandlerRejectsInvalidPayload`, `TestBadCandidateIsRejectedAndCapacityIsDeleted`, `TestCandidateCancellationDeletesOnlyCandidateCapacity`, `TestCandidateProvisioningCreatesIsolatedRevisionCapacity`, `TestConvergeCancellationDeletesProviderResource`, `TestConvergeCreatesExactlyOneResourcePerMinimumReplica`, `TestConvergeResumesAfterProviderCheckpoint`, `TestGuardedPromotionCutsOverBeforeDeletingOldCapacity`, `TestRejectedCandidateProvisionRetryOnlyResumesCleanup`, `TestRolloutHandlersPersistExplicitTransitions`, `TestScaleDownWithdrawsRouterBeforeDeletingReplica`, `TestServerlessConvergeRegistersScaleToZeroEndpointWithoutWarmingWorker`, `TestServerlessDeleteConfirmsEndpointAbsentBeforeDeletingDeployment` |
 | `tools/repo-context` | 1 | 0 | — |
 
 ## CLI commands
@@ -128,6 +128,8 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 - `INFERCRANE_REQUEST_RETENTION_HOURS`
 - `INFERCRANE_ROUTER_BINARY`
 - `INFERCRANE_ROUTER_START_PORT`
+- `INFERCRANE_RUNPOD_REST_URL`
+- `INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID`
 - `INFERCRANE_SHUTDOWN_TIMEOUT_SECONDS`
 - `INFERCRANE_TEST_DATABASE_URL`
 - `INFERCRANE_UPSTREAM_TIMEOUT_SECONDS`
@@ -176,6 +178,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 - `internal/store/migrations/013_revision_operation_identity.sql`
 - `internal/store/migrations/014_release_guard.sql`
 - `internal/store/migrations/015_revision_compute_spec.sql`
+- `internal/store/migrations/016_serverless_zero_workers.sql`
 
 ## Architecture decisions
 

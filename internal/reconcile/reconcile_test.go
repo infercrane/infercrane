@@ -109,3 +109,26 @@ func TestRouterCandidatePublishesBeforeOldRetires(t *testing.T) {
 		t.Fatalf("published=%#v started=%s stopped=%v", published, backend.started, backend.stopped)
 	}
 }
+
+type countingRuntime struct{ calls int }
+
+func (r *countingRuntime) Inspect(context.Context, string) (bool, map[string]struct{}) {
+	r.calls++
+	return false, nil
+}
+
+func TestServerlessRouteDoesNotWarmWorkersOrStartRouter(t *testing.T) {
+	store, directory := reconcilerFixture()
+	store.target.Provider = "runpod-serverless"
+	store.target.URL = "https://api.runpod.invalid/v2/endpoint/openai"
+	backend := &fakeRouter{routes: directory}
+	runtime := &countingRuntime{}
+	reconciler := Reconciler{Store: store, Routes: directory, Router: backend, Runtime: runtime, ProviderAPIKeys: map[string]string{"runpod-serverless": "runpod-secret"}, RouterStartPort: 18080, InstanceID: "instance"}
+	if err := reconciler.Once(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	published, ok := directory.Get("prod")
+	if !ok || published.RouterURL != store.target.URL || published.ComputeMode != "serverless" || published.Provider != "runpod" || published.UpstreamAPIKey != "runpod-secret" || runtime.calls != 0 || backend.started != "" {
+		t.Fatalf("published=%#v runtime_calls=%d router_started=%q", published, runtime.calls, backend.started)
+	}
+}

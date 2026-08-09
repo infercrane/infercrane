@@ -203,13 +203,23 @@ func planCommand(ctx context.Context, cfg config.Config, args []string) error {
 	cloud := fs.String("cloud", "", "SkyPilot cloud")
 	gpu := fs.String("gpu", "", "GPU")
 	region := fs.String("region", "", "region")
+	computeMode := fs.String("compute", "elastic", "compute mode: elastic or serverless")
 	minReplicas := fs.Int("min", 1, "minimum replicas")
 	maxReplicas := fs.Int("max", 1, "maximum replicas")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
-	in := planning.Input{Name: *name, Model: model, Cloud: *cloud, GPU: *gpu, Region: *region, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas}
+	minExplicit := false
+	fs.Visit(func(item *flag.Flag) {
+		if item.Name == "min" {
+			minExplicit = true
+		}
+	})
+	if *computeMode == "serverless" && !minExplicit {
+		*minReplicas = 0
+	}
+	in := planning.Input{Name: *name, Model: model, ComputeMode: *computeMode, Cloud: *cloud, GPU: *gpu, Region: *region, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas}
 	if ext := filepath.Ext(model); ext == ".yaml" || ext == ".yml" {
 		file, err := spec.Load(model)
 		if err != nil {
@@ -223,6 +233,9 @@ func planCommand(ctx context.Context, cfg config.Config, args []string) error {
 			RuntimeArgs: file.Runtime.Args, Routing: file.Routing.Strategy,
 			MinReplicas: file.Scaling.MinReplicas, MaxReplicas: file.Scaling.MaxReplicas}
 	} else if *targets != "" {
+		if *computeMode == "serverless" {
+			return errors.New("--compute serverless cannot be combined with --targets")
+		}
 		in.Targets = splitTargets(*targets)
 	}
 	if len(in.Targets) == 0 && in.Cloud == "" && in.GPU == "" {
@@ -280,6 +293,7 @@ func doctorCommand(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	output := fs.String("output", "human", "human or json")
 	cloud := fs.Bool("cloud", false, "also validate SkyPilot cloud credentials")
+	serverless := fs.Bool("serverless", false, "also validate RunPod Serverless credentials and template")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -290,6 +304,9 @@ func doctorCommand(ctx context.Context, args []string) error {
 	report := doctor.Run(ctx, cfg, doctor.Dependencies{})
 	if *cloud {
 		report.Add(doctor.CheckCloudCredentials(ctx, doctor.Dependencies{}))
+	}
+	if *serverless {
+		report.Add(doctor.CheckRunPodServerless(ctx, cfg, doctor.Dependencies{}))
 	}
 	switch *output {
 	case "json":
@@ -391,6 +408,7 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 	cloud := fs.String("cloud", "", "SkyPilot cloud")
 	gpu := fs.String("gpu", "", "GPU")
 	region := fs.String("region", "", "region")
+	computeMode := fs.String("compute", "elastic", "compute mode: elastic or serverless")
 	minReplicas := fs.Int("min", 1, "minimum replicas")
 	maxReplicas := fs.Int("max", 1, "maximum replicas")
 	wait := fs.Bool("wait", false, "wait for the operation to finish")
@@ -399,6 +417,12 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
+	minExplicit := false
+	fs.Visit(func(item *flag.Flag) {
+		if item.Name == "min" {
+			minExplicit = true
+		}
+	})
 	strategy := "round-robin"
 	runtimeArgs := []string{}
 	if ext := filepath.Ext(model); ext == ".yaml" || ext == ".yml" {
@@ -424,8 +448,14 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 	if *targets == "" && *cloud == "" && *gpu == "" {
 		*cloud, *gpu = "runpod", "L40S"
 	}
-	if *minReplicas < 1 || *maxReplicas < *minReplicas {
-		return errors.New("replica bounds must satisfy 1 <= min <= max")
+	if *computeMode == "serverless" && !minExplicit {
+		*minReplicas = 0
+	}
+	if *computeMode != "elastic" && *computeMode != "serverless" {
+		return errors.New("--compute must be elastic or serverless")
+	}
+	if (*computeMode == "elastic" && *minReplicas < 1) || (*computeMode == "serverless" && *minReplicas != 0) || *maxReplicas < 1 || *maxReplicas < *minReplicas {
+		return errors.New("elastic requires 1 <= min <= max; serverless requires min=0 and max>=1")
 	}
 	if *idempotencyKey == "" {
 		*idempotencyKey = fmt.Sprintf("cli-%s-%d", *name, time.Now().UnixNano())
@@ -433,13 +463,16 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 	path := "/api/v1/deployments"
 	var request any
 	if *targets != "" {
+		if *computeMode != "elastic" {
+			return errors.New("--compute serverless cannot be combined with --targets")
+		}
 		if *cloud != "" || *gpu != "" {
 			return errors.New("use either --targets or --cloud/--gpu")
 		}
 		path = "/api/v1/deployments/apply"
 		request = workflows.ApplyExistingRequest{Name: *name, Model: model, Targets: splitTargets(*targets), RoutingStrategy: strategy, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas, AutoscalingEnabled: *maxReplicas > *minReplicas}
 	} else if *cloud != "" && *gpu != "" {
-		request = workflows.CloudRequest{Name: *name, Model: model, Cloud: *cloud, GPU: *gpu, Region: *region, RuntimeArgs: runtimeArgs, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas}
+		request = workflows.CloudRequest{Name: *name, Model: model, ComputeMode: *computeMode, Cloud: *cloud, GPU: *gpu, Region: *region, RuntimeArgs: runtimeArgs, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas}
 	} else {
 		return errors.New("provide --targets or both --cloud and --gpu")
 	}
@@ -1220,7 +1253,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		defer cancel()
 		_ = recorder.Close(closeCtx)
 	}()
-	rec := &reconcile.Reconciler{Store: s, Routes: directory, Router: backend, Runtime: runtime, Interval: cfg.HealthInterval, RouterStartPort: cfg.RouterStartPort, InstanceID: cfg.InstanceID, Logger: logger}
+	rec := &reconcile.Reconciler{Store: s, Routes: directory, Router: backend, Runtime: runtime, Interval: cfg.HealthInterval, RouterStartPort: cfg.RouterStartPort, InstanceID: cfg.InstanceID, Logger: logger, ProviderAPIKeys: map[string]string{"runpod-serverless": cfg.RunPodAPIKey}}
 	go purgeRequests(ctx, s, cfg.RequestRetention, logger)
 	go func() {
 		_ = rec.Run(ctx)
@@ -1242,6 +1275,10 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		handlers[kind] = handler
 	}
 	for kind, handler := range workflows.CloudHandlers(s, provision.SkyPilot{APIKey: cfg.APIKey}, runtime, artifact.HuggingFace{}) {
+		handlers[kind] = handler
+	}
+	serverless := provision.RunPodServerless{APIKey: cfg.RunPodAPIKey, BaseURL: cfg.RunPodRESTURL, TemplateID: cfg.RunPodServerlessTemplateID}
+	for kind, handler := range workflows.ServerlessHandlers(s, serverless, artifact.HuggingFace{}) {
 		handlers[kind] = handler
 	}
 	operationWorker := operations.Worker{Repository: s, Handlers: handlers, Owner: cfg.InstanceID, Lease: 30 * time.Second, PollInterval: time.Second, BaseBackoff: 2 * time.Second, MaxBackoff: time.Minute, Telemetry: operationTelemetry}

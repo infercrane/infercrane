@@ -18,6 +18,7 @@ type fakeStore struct {
 	err       error
 	created   bool
 	principal domain.Principal
+	targets   []domain.Target
 }
 
 func (f *fakeStore) AuthenticatePrincipal(context.Context, string) (domain.Principal, error) {
@@ -56,7 +57,7 @@ func (f *fakeStore) ResolveForTenant(context.Context, string, string) (domain.Re
 	if f.err != nil {
 		return domain.ResolvedDeployment{}, f.err
 	}
-	return domain.ResolvedDeployment{Deployment: domain.Deployment{ID: "deployment", Name: "qwen"}}, nil
+	return domain.ResolvedDeployment{Deployment: domain.Deployment{ID: "deployment", Name: "qwen"}, Targets: f.targets}, nil
 }
 func (f *fakeStore) EventsForTenant(context.Context, string, string) ([]domain.Event, error) {
 	return nil, f.err
@@ -238,6 +239,18 @@ func TestCloudDeployPersistsAndQueuesConverge(t *testing.T) {
 	}
 }
 
+func TestServerlessDeployQueuesProviderNativeConverge(t *testing.T) {
+	store := &fakeStore{created: true}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments", strings.NewReader(`{"name":"qwen","model":"Qwen/Qwen3-8B","compute_mode":"serverless","cloud":"runpod","gpu":"L40S","min_replicas":0,"max_replicas":4}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Idempotency-Key", "deploy-qwen-serverless")
+	response := httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret"}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted || store.operation.Kind != "deployment.serverless.converge" || !strings.Contains(store.operation.RequestJSON, `"compute_mode":"serverless"`) {
+		t.Fatalf("response=%d %s operation=%#v", response.Code, response.Body.String(), store.operation)
+	}
+}
+
 func TestDeleteQueuesDurableCleanup(t *testing.T) {
 	store := &fakeStore{created: true}
 	request := httptest.NewRequest(http.MethodDelete, "/api/v1/deployments/qwen", nil)
@@ -246,6 +259,18 @@ func TestDeleteQueuesDurableCleanup(t *testing.T) {
 	response := httptest.NewRecorder()
 	(API{Store: store, APIKey: "secret"}).Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusAccepted || store.operation.Kind != "deployment.delete" || !strings.Contains(store.operation.RequestJSON, `"deployment_id":"deployment"`) {
+		t.Fatalf("response=%d %s operation=%#v", response.Code, response.Body.String(), store.operation)
+	}
+}
+
+func TestServerlessDeleteQueuesEndpointCleanup(t *testing.T) {
+	store := &fakeStore{created: true, targets: []domain.Target{{Provider: "runpod-serverless"}}}
+	request := httptest.NewRequest(http.MethodDelete, "/api/v1/deployments/qwen", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Idempotency-Key", "delete-qwen-serverless")
+	response := httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret"}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted || store.operation.Kind != "deployment.serverless.delete" {
 		t.Fatalf("response=%d %s operation=%#v", response.Code, response.Body.String(), store.operation)
 	}
 }

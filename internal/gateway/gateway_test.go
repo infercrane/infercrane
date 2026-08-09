@@ -97,6 +97,28 @@ func TestCompletionRecordsStreamingTelemetry(t *testing.T) {
 	}
 }
 
+func TestCompletionReplacesPublicCredentialForServerlessUpstream(t *testing.T) {
+	client := &http.Client{Transport: roundTripper(func(request *http.Request) (*http.Response, error) {
+		if request.Header.Get("Authorization") != "Bearer runpod-secret" {
+			t.Fatalf("upstream authorization=%q", request.Header.Get("Authorization"))
+		}
+		if request.URL.String() != "https://api.runpod.invalid/v2/endpoint/openai/v1/chat/completions" {
+			t.Fatalf("upstream URL=%s", request.URL)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"choices":[]}`))}, nil
+	})}
+	directory := routes.New()
+	directory.Put(routes.Snapshot{DeploymentID: "d1", Alias: "alias", UpstreamModel: "Qwen/Qwen3-8B", RouterURL: "https://api.runpod.invalid/v2/endpoint/openai", Provider: "runpod", Runtime: "vllm", ComputeMode: "serverless", UpstreamAPIKey: "runpod-secret"})
+	handler := (&Gateway{Routes: directory, APIKey: "infercrane-secret", Client: client}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"alias","messages":[]}`))
+	request.Header.Set("Authorization", "Bearer infercrane-secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestAuthentication(t *testing.T) {
 	handler := (&Gateway{Routes: routes.New(), APIKey: "secret"}).Handler()
 	recorder := httptest.NewRecorder()

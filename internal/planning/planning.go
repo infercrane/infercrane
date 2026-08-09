@@ -11,9 +11,9 @@ import (
 var nonNameCharacter = regexp.MustCompile(`[^a-z0-9]+`)
 
 type Input struct {
-	Name, Model, Cloud, GPU, Region, Runtime, Routing string
-	Targets, RuntimeArgs                              []string
-	MinReplicas, MaxReplicas                          int
+	Name, Model, ComputeMode, Cloud, GPU, Region, Runtime, Routing string
+	Targets, RuntimeArgs                                           []string
+	MinReplicas, MaxReplicas                                       int
 }
 
 type Action struct {
@@ -109,14 +109,23 @@ func Build(in Input) (Plan, error) {
 	if in.Routing == "" {
 		in.Routing = "round-robin"
 	}
-	if in.MinReplicas == 0 {
+	if in.ComputeMode == "" {
+		in.ComputeMode = "elastic"
+	}
+	if in.ComputeMode != "elastic" && in.ComputeMode != "serverless" {
+		return Plan{}, errors.New("compute mode must be elastic or serverless")
+	}
+	if in.ComputeMode == "elastic" && in.MinReplicas == 0 {
 		in.MinReplicas = 1
 	}
 	if in.MaxReplicas == 0 {
-		in.MaxReplicas = in.MinReplicas
+		in.MaxReplicas = max(1, in.MinReplicas)
 	}
-	if in.MinReplicas < 1 || in.MaxReplicas < in.MinReplicas {
+	if (in.ComputeMode == "elastic" && in.MinReplicas < 1) || (in.ComputeMode == "serverless" && in.MinReplicas != 0) || in.MaxReplicas < 1 || in.MaxReplicas < in.MinReplicas {
 		return Plan{}, errors.New("replicas must be positive and max replicas must be >= min replicas")
+	}
+	if in.ComputeMode == "serverless" && in.Cloud != "runpod" {
+		return Plan{}, errors.New("v0.1 serverless compute requires RunPod")
 	}
 
 	p := Plan{Version: 1, Name: in.Name, Model: in.Model, Cloud: in.Cloud, GPU: in.GPU,
@@ -131,6 +140,12 @@ func Build(in Input) (Plan, error) {
 	case len(in.Targets) > 0:
 		p.Mode = "existing-targets"
 		add("resolve", fmt.Sprintf("Resolve %d registered target(s)", len(in.Targets)))
+	case in.ComputeMode == "serverless" && in.Cloud != "":
+		p.Mode = "serverless"
+		add("artifact", "Resolve the model to an immutable Hugging Face artifact")
+		add("template", "Validate the configured RunPod vLLM template against that artifact")
+		add("endpoint", fmt.Sprintf("Create a RunPod Serverless endpoint on %s with zero minimum workers", in.GPU))
+		add("register", "Register the provider-native OpenAI-compatible endpoint")
 	case in.Cloud != "":
 		p.Mode = "provisioned"
 		add("provision", fmt.Sprintf("Provision %s on %s", in.GPU, in.Cloud))
@@ -144,7 +159,9 @@ func Build(in Input) (Plan, error) {
 		add("persist", "Converge the logical deployment transactionally")
 		add("route", fmt.Sprintf("Reconcile the %s routing generation", in.Routing))
 	}
-	if in.MaxReplicas > in.MinReplicas {
+	if p.Mode == "serverless" {
+		add("autoscale", fmt.Sprintf("Delegate zero-to-%d worker scaling to RunPod", in.MaxReplicas))
+	} else if in.MaxReplicas > in.MinReplicas {
 		add("autoscale", fmt.Sprintf("Enable bounded vLLM queue scaling from %d to %d replicas", in.MinReplicas, in.MaxReplicas))
 	}
 	return p, nil

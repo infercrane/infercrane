@@ -14,11 +14,13 @@ import (
 )
 
 const (
-	ConvergeKind         = "deployment.converge"
-	DeleteKind           = "deployment.delete"
-	ReplicaProvisionKind = "replica.provision"
-	ReplicaDeleteKind    = "replica.delete"
-	ScaleKind            = "deployment.scale"
+	ConvergeKind           = "deployment.converge"
+	DeleteKind             = "deployment.delete"
+	ServerlessConvergeKind = "deployment.serverless.converge"
+	ServerlessDeleteKind   = "deployment.serverless.delete"
+	ReplicaProvisionKind   = "replica.provision"
+	ReplicaDeleteKind      = "replica.delete"
+	ScaleKind              = "deployment.scale"
 )
 
 type CloudRequest struct {
@@ -26,6 +28,7 @@ type CloudRequest struct {
 	Name                   string   `json:"name"`
 	Model                  string   `json:"model"`
 	Cloud                  string   `json:"cloud"`
+	ComputeMode            string   `json:"compute_mode,omitempty"`
 	GPU                    string   `json:"gpu"`
 	Region                 string   `json:"region,omitempty"`
 	RuntimeVersion         string   `json:"runtime_version,omitempty"`
@@ -47,8 +50,20 @@ func (r CloudRequest) Validate() error {
 	if r.Name == "" || r.Model == "" || r.Cloud == "" || r.GPU == "" {
 		return errors.New("name, model, cloud, and gpu are required")
 	}
+	if r.Cloud != "runpod" {
+		return errors.New("v0.1 managed compute requires cloud runpod")
+	}
+	if r.ComputeMode == "" {
+		r.ComputeMode = "elastic"
+	}
+	if r.ComputeMode != "elastic" && r.ComputeMode != "serverless" {
+		return errors.New("compute mode must be elastic or serverless")
+	}
 	if r.MinReplicas < 0 || r.MaxReplicas < 0 || (r.MaxReplicas > 0 && r.MaxReplicas < r.MinReplicas) {
 		return errors.New("replica bounds must satisfy 0 <= min <= max")
+	}
+	if r.ComputeMode == "serverless" && r.MinReplicas != 0 {
+		return errors.New("RunPod Serverless requires min replicas 0")
 	}
 	return nil
 }
@@ -241,6 +256,13 @@ func CloudHandlers(store CloudStore, provider ReplicaProvider, runtime RuntimeIn
 		}
 		if err = store.DeleteDeploymentForTenant(ctx, request.TenantID, request.Name); err != nil {
 			return "", classify("deployment_delete_failed", err)
+		}
+		for _, replica := range replicas {
+			if replica.Endpoint != "" {
+				if err = store.DeleteProvisionedTargetByURL(ctx, request.TenantID, replica.Endpoint); err != nil && !errors.Is(err, domain.ErrNotFound) {
+					return "", classify("target_delete_failed", err)
+				}
+			}
 		}
 		_ = checkpoint(ctx, store, operation, "deployment.delete", "succeeded", map[string]int{"replicas": len(replicas)}, 95, "Provider resources deleted")
 		return `{"deleted":true}`, nil

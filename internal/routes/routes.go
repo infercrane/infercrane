@@ -16,6 +16,7 @@ type Snapshot struct {
 	Provider        string
 	Runtime         string
 	ComputeMode     string
+	UpstreamAPIKey  string
 }
 
 // Directory is an atomic in-memory data-plane snapshot. Reads never touch the database.

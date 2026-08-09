@@ -16,8 +16,9 @@ func (s *Store) SubmitCloudDeployment(ctx context.Context, deployment domain.Dep
 	if deployment.Name == "" || deployment.Model == "" {
 		return domain.Deployment{}, domain.Operation{}, false, errors.New("deployment name and model are required")
 	}
-	if deployment.MinReplicas < 1 || deployment.MaxReplicas < deployment.MinReplicas {
-		return domain.Deployment{}, domain.Operation{}, false, errors.New("replica bounds must satisfy 1 <= min <= max")
+	serverless := operation.Kind == "deployment.serverless.converge"
+	if (!serverless && deployment.MinReplicas < 1) || (serverless && deployment.MinReplicas != 0) || deployment.MaxReplicas < 1 || deployment.MaxReplicas < deployment.MinReplicas {
+		return domain.Deployment{}, domain.Operation{}, false, errors.New("replica bounds are invalid for compute mode")
 	}
 	if operation.Kind == "" || operation.IdempotencyKey == "" {
 		return domain.Deployment{}, domain.Operation{}, false, errors.New("operation kind and idempotency key are required")
@@ -106,7 +107,7 @@ func (s *Store) SubmitCloudDeployment(ctx context.Context, deployment domain.Dep
 		}
 		return domain.Deployment{}, domain.Operation{}, false, err
 	}
-	if _, err = tx.ExecContext(ctx, `UPDATE deployment_revisions SET spec_json=spec_json||jsonb_strip_nulls(jsonb_build_object('compute_mode','elastic','cloud',NULLIF(?::jsonb->>'cloud',''),'gpu',NULLIF(?::jsonb->>'gpu',''),'region',NULLIF(?::jsonb->>'region',''),'runtime_version',NULLIF(?::jsonb->>'runtime_version',''),'runtime_args',?::jsonb->'runtime_args','model_revision',NULLIF(?::jsonb->>'model_revision',''),'port',NULLIF(?::jsonb->>'port','')::integer)) WHERE id=?`, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, deployment.ID+"-rev-1"); err != nil {
+	if _, err = tx.ExecContext(ctx, `UPDATE deployment_revisions SET spec_json=spec_json||jsonb_strip_nulls(jsonb_build_object('compute_mode',COALESCE(NULLIF(?::jsonb->>'compute_mode',''),'elastic'),'cloud',NULLIF(?::jsonb->>'cloud',''),'gpu',NULLIF(?::jsonb->>'gpu',''),'region',NULLIF(?::jsonb->>'region',''),'runtime_version',NULLIF(?::jsonb->>'runtime_version',''),'runtime_args',?::jsonb->'runtime_args','model_revision',NULLIF(?::jsonb->>'model_revision',''),'port',NULLIF(?::jsonb->>'port','')::integer)) WHERE id=?`, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, deployment.ID+"-rev-1"); err != nil {
 		return domain.Deployment{}, domain.Operation{}, false, err
 	}
 	if err = tx.Commit(); err != nil {

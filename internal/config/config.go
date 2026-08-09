@@ -15,6 +15,7 @@ import (
 
 type Config struct {
 	DatabaseURL, ControlURL, Host, APIKey, RouterBinary, InstanceID, Environment string
+	RunPodAPIKey, RunPodServerlessTemplateID, RunPodRESTURL                      string
 	Port, RouterStartPort, DatabaseMaxOpen, DatabaseMaxIdle                      int
 	HealthInterval, UpstreamTimeout, ShutdownTimeout, RequestRetention           time.Duration
 }
@@ -159,14 +160,17 @@ func load(requireAPIKey bool) (Config, error) {
 		return Config{}, err
 	}
 	config := Config{
-		DatabaseURL:  env("INFERCRANE_DATABASE_URL", "postgres://infercrane:infercrane@127.0.0.1:5432/infercrane?sslmode=disable"),
-		ControlURL:   env("INFERCRANE_URL", "http://127.0.0.1:8080"),
-		Host:         env("INFERCRANE_HOST", "127.0.0.1"),
-		APIKey:       env("INFERCRANE_API_KEY", ""),
-		RouterBinary: env("INFERCRANE_ROUTER_BINARY", "vllm-router"),
-		InstanceID:   env("INFERCRANE_INSTANCE_ID", hostname),
-		Environment:  env("INFERCRANE_ENV", "development"),
-		Port:         port, RouterStartPort: routerPort, DatabaseMaxOpen: maxOpen, DatabaseMaxIdle: maxIdle,
+		DatabaseURL:                env("INFERCRANE_DATABASE_URL", "postgres://infercrane:infercrane@127.0.0.1:5432/infercrane?sslmode=disable"),
+		ControlURL:                 env("INFERCRANE_URL", "http://127.0.0.1:8080"),
+		Host:                       env("INFERCRANE_HOST", "127.0.0.1"),
+		APIKey:                     env("INFERCRANE_API_KEY", ""),
+		RouterBinary:               env("INFERCRANE_ROUTER_BINARY", "vllm-router"),
+		InstanceID:                 env("INFERCRANE_INSTANCE_ID", hostname),
+		Environment:                env("INFERCRANE_ENV", "development"),
+		RunPodAPIKey:               env("RUNPOD_API_KEY", ""),
+		RunPodServerlessTemplateID: env("INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID", ""),
+		RunPodRESTURL:              env("INFERCRANE_RUNPOD_REST_URL", "https://rest.runpod.io/v1"),
+		Port:                       port, RouterStartPort: routerPort, DatabaseMaxOpen: maxOpen, DatabaseMaxIdle: maxIdle,
 		HealthInterval: time.Duration(healthSeconds) * time.Second, UpstreamTimeout: time.Duration(upstreamSeconds) * time.Second,
 		ShutdownTimeout: time.Duration(shutdownSeconds) * time.Second, RequestRetention: time.Duration(retentionHours) * time.Hour,
 	}

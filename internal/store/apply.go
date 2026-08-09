@@ -30,13 +30,14 @@ func (s *Store) ApplyDeploymentForTenant(ctx context.Context, tenant string, dep
 	if _, ok := domain.RoutingStrategies[deployment.RoutingStrategy]; !ok {
 		return domain.Deployment{}, fmt.Errorf("unsupported routing strategy %q", deployment.RoutingStrategy)
 	}
-	if deployment.MinReplicas == 0 {
+	serverless := deployment.ComputeMode == "serverless"
+	if deployment.MinReplicas == 0 && !serverless {
 		deployment.MinReplicas = len(uniqueNames(targetNames))
 	}
 	if deployment.MaxReplicas == 0 {
 		deployment.MaxReplicas = deployment.MinReplicas
 	}
-	if deployment.MinReplicas < 1 || deployment.MaxReplicas < deployment.MinReplicas {
+	if (!serverless && deployment.MinReplicas < 1) || (serverless && deployment.MinReplicas != 0) || deployment.MaxReplicas < 1 || deployment.MaxReplicas < deployment.MinReplicas {
 		return domain.Deployment{}, errors.New("invalid replica bounds")
 	}
 
