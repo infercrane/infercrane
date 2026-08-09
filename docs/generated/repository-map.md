@@ -16,7 +16,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 | `internal/benchmark` | 1 | 1 | `TestRunMeasuresSuccessfulRequests` |
 | `internal/capacity` | 1 | 1 | `TestChoosePrefersWarmThenCost`, `TestChooseRejectsInsufficientCapacity` |
 | `internal/config` | 1 | 1 | `TestLoadForDiagnosticsAllowsMissingAPIKey`, `TestLoadRejectsInvalidInteger`, `TestLoadRequiresAPIKey`, `TestProductionRequiresStrongSecretAndDatabaseTLS` |
-| `internal/controlapi` | 1 | 1 | `TestApplyQueuesIdempotentOperation`, `TestCancelHidesMissingOperation`, `TestOperationAPIAuthenticationAndResponse`, `TestViewerCannotApply` |
+| `internal/controlapi` | 1 | 1 | `TestApplyQueuesIdempotentOperation`, `TestCancelHidesMissingOperation`, `TestOperationAPIAuthenticationAndResponse`, `TestTargetRegistrationRejectsEmbeddedCredentials`, `TestViewerCannotApply` |
 | `internal/doctor` | 1 | 1 | `TestCloudCredentialCheckIsRequiredWhenRequested`, `TestRunReadyWithoutSkyPilot`, `TestRunReportsRequiredAndOptionalChecks` |
 | `internal/domain` | 1 | 0 | — |
 | `internal/gateway` | 2 | 2 | `TestAuthentication`, `TestCompletionRewritesAlias`, `TestModelsAreTenantScoped`, `TestTelemetryExportsPrometheusHistogram` |

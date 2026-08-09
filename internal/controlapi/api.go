@@ -211,8 +211,8 @@ func (a API) addTarget(w http.ResponseWriter, r *http.Request) {
 		request.Runtime = "vllm"
 	}
 	parsed, err := url.Parse(request.URL)
-	if request.Name == "" || err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-		writeError(w, 422, "validation_failed", "name and an absolute HTTP(S) URL are required")
+	if request.Name == "" || err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
+		writeError(w, 422, "validation_failed", "name and an absolute HTTP(S) URL without credentials or a fragment are required")
 		return
 	}
 	target, err := a.Store.AddTargetForTenant(r.Context(), principal.TenantID, domain.Target{Name: request.Name, URL: request.URL, Provider: "existing", Runtime: request.Runtime, UpstreamModel: request.UpstreamModel})

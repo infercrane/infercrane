@@ -105,6 +105,19 @@ func TestViewerCannotApply(t *testing.T) {
 		t.Fatalf("response=%d %s", response.Code, response.Body.String())
 	}
 }
+
+func TestTargetRegistrationRejectsEmbeddedCredentials(t *testing.T) {
+	store := &fakeStore{}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/targets", strings.NewReader(`{"name":"gpu-a","url":"https://user:secret@worker.internal/v1"}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret"}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), "without credentials") {
+		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+}
+
 func TestCancelHidesMissingOperation(t *testing.T) {
 	store := &fakeStore{err: domain.ErrNotFound}
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/operations/missing/cancel", nil)
