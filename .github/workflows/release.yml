@@ -27,6 +27,13 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Scan release artifacts
+        uses: anchore/scan-action@v7
+        with:
+          path: dist
+          fail-build: true
+          severity-cutoff: critical
+          output-format: table
 
   image:
     runs-on: ubuntu-latest
@@ -38,14 +45,34 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
+      - id: build
+        uses: docker/build-push-action@v6
         with:
           context: .
           target: runtime
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: |
-            ghcr.io/infercrane/infercrane:${{ github.ref_name }}
-            ghcr.io/infercrane/infercrane:0.1-rc
+          tags: ghcr.io/infercrane/infercrane:${{ github.ref_name }}
           provenance: mode=max
           sbom: true
+      - name: Record immutable image digest
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE_TAG: ghcr.io/infercrane/infercrane:${{ github.ref_name }}
+        run: |
+          test -n "$IMAGE_DIGEST"
+          printf '%s@%s\n' "$IMAGE_TAG" "$IMAGE_DIGEST" > image-digest.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: image-digest-${{ github.ref_name }}
+          path: image-digest.txt
+          if-no-files-found: error
+      - name: Scan published image by digest
+        uses: anchore/scan-action@v7
+        with:
+          image: ghcr.io/infercrane/infercrane@${{ steps.build.outputs.digest }}
+          registry-username: ${{ github.actor }}
+          registry-password: ${{ secrets.GITHUB_TOKEN }}
+          fail-build: true
+          severity-cutoff: critical
+          output-format: table
