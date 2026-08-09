@@ -1,8 +1,6 @@
 package config
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -55,38 +53,33 @@ func LoadClient() (Config, error) {
 	return Config{ControlURL: controlURL, APIKey: apiKey}, nil
 }
 
-func InitializeClient(controlURL, apiKey string) (string, bool, error) {
+func InitializeClient(controlURL, apiKey string) (string, error) {
 	if controlURL == "" {
 		controlURL = "http://127.0.0.1:8080"
 	}
 	parsed, err := url.Parse(controlURL)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return "", false, fmt.Errorf("InferCrane URL must be absolute HTTP(S) without credentials, query, or fragment")
+		return "", fmt.Errorf("InferCrane URL must be absolute HTTP(S) without credentials, query, or fragment")
 	}
-	generated := false
 	if apiKey == "" {
-		buffer := make([]byte, 32)
-		if _, err = rand.Read(buffer); err != nil {
-			return "", false, fmt.Errorf("generate API key: %w", err)
-		}
-		apiKey, generated = hex.EncodeToString(buffer), true
+		return "", fmt.Errorf("an existing control-plane credential is required; pass --api-key or set INFERCRANE_API_KEY")
 	}
 	path, err := clientConfigPath()
 	if err != nil {
-		return "", false, err
+		return "", err
 	}
 	if err = os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return "", false, fmt.Errorf("create config directory: %w", err)
+		return "", fmt.Errorf("create config directory: %w", err)
 	}
 	encoded, _ := json.MarshalIndent(clientFile{URL: controlURL, APIKey: apiKey}, "", "  ")
 	encoded = append(encoded, '\n')
 	if err = os.WriteFile(path, encoded, 0o600); err != nil {
-		return "", false, fmt.Errorf("write client config: %w", err)
+		return "", fmt.Errorf("write client config: %w", err)
 	}
 	if err = os.Chmod(path, 0o600); err != nil {
-		return "", false, fmt.Errorf("secure client config: %w", err)
+		return "", fmt.Errorf("secure client config: %w", err)
 	}
-	return path, generated, nil
+	return path, nil
 }
 
 func clientConfigPath() (string, error) {

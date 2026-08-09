@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -48,9 +49,9 @@ func TestInitializeClientWritesPrivateConfigAndLoadClientUsesIt(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", root)
 	t.Setenv("INFERCRANE_API_KEY", "")
 	t.Setenv("INFERCRANE_URL", "")
-	path, generated, err := InitializeClient("https://control.example", "")
-	if err != nil || !generated || path != filepath.Join(root, "infercrane", "config.json") {
-		t.Fatalf("path=%q generated=%t err=%v", path, generated, err)
+	path, err := InitializeClient("https://control.example", "issued-control-plane-credential")
+	if err != nil || path != filepath.Join(root, "infercrane", "config.json") {
+		t.Fatalf("path=%q err=%v", path, err)
 	}
 	info, err := os.Stat(path)
 	if err != nil {
@@ -60,7 +61,14 @@ func TestInitializeClientWritesPrivateConfigAndLoadClientUsesIt(t *testing.T) {
 		t.Fatalf("config mode=%v", info.Mode().Perm())
 	}
 	config, err := LoadClient()
-	if err != nil || config.ControlURL != "https://control.example" || len(config.APIKey) != 64 {
+	if err != nil || config.ControlURL != "https://control.example" || config.APIKey != "issued-control-plane-credential" {
 		t.Fatalf("config=%#v err=%v", config, err)
+	}
+}
+
+func TestInitializeClientRejectsUnregisteredLocalCredentialGeneration(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	if _, err := InitializeClient("https://control.example", ""); err == nil || !strings.Contains(err.Error(), "existing control-plane credential") {
+		t.Fatalf("err=%v", err)
 	}
 }

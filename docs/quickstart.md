@@ -4,13 +4,17 @@ InferCrane v0.1 supports vLLM on RunPod. It does not require Kubernetes.
 
 ```console
 brew install infercrane
-infercrane init --url https://infercrane.example
+INFERCRANE_API_KEY='issued-control-plane-credential' \
+  infercrane init --url https://infercrane.example
 infercrane doctor --cloud
 infercrane deploy Qwen/Qwen3-8B
 infercrane status qwen3-8b --watch
 ```
 
-The control plane must have PostgreSQL, RunPod credentials, SkyPilot, AIPerf, and a vLLM Router available. See [provider setup](provider-setup.md). The deploy command returns a durable operation; disconnecting the CLI does not cancel or corrupt it.
+The credential must already be issued by the control-plane operator; `init` stores it privately but
+does not create or register credentials. The control plane must have PostgreSQL, RunPod credentials,
+SkyPilot, AIPerf, and a vLLM Router available. See [provider setup](provider-setup.md). The deploy
+command returns a durable operation; disconnecting the CLI does not cancel or corrupt it.
 
 Once ready, send an OpenAI-compatible request to the logical endpoint:
 

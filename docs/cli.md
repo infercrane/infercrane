@@ -2,7 +2,8 @@
 
 Public workflows use the authenticated control-plane API and support `--output json` where output is returned.
 
-- `init`: create a private client configuration.
+- `init`: privately store the control-plane URL and an already-issued credential supplied through
+  `INFERCRANE_API_KEY` or `--api-key`; it does not enroll or generate a principal.
 - `doctor`: ask the control plane to validate its dependencies; add `--cloud` or `--serverless` for provider checks.
 - `deploy`, `apply`, `plan`: create, converge, or preview a DeploymentSpec.
 - `status [--watch]`, `events`, `inspect`: view health, durable events, or raw infrastructure details.

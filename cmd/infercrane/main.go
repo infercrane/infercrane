@@ -165,7 +165,7 @@ Operations:
 func initCommand(args []string) error {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	controlURL := fs.String("url", "http://127.0.0.1:8080", "control-plane URL")
-	apiKey := fs.String("api-key", "", "existing API key; generated when omitted")
+	apiKey := fs.String("api-key", "", "existing control-plane credential (prefer INFERCRANE_API_KEY to avoid shell history)")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -173,20 +173,21 @@ func initCommand(args []string) error {
 	if *output != "human" && *output != "json" {
 		return errors.New("--output must be human or json")
 	}
-	path, generated, err := config.InitializeClient(*controlURL, *apiKey)
+	credential := *apiKey
+	if credential == "" {
+		credential = os.Getenv("INFERCRANE_API_KEY")
+	}
+	path, err := config.InitializeClient(*controlURL, credential)
 	if err != nil {
 		return err
 	}
-	result := map[string]any{"config_path": path, "control_url": *controlURL, "api_key_generated": generated}
+	result := map[string]any{"config_path": path, "control_url": *controlURL, "credential_stored": true}
 	switch *output {
 	case "json":
 		encoded, _ := json.MarshalIndent(result, "", "  ")
 		fmt.Println(string(encoded))
 	case "human":
-		fmt.Printf("InferCrane configured\nControl plane  %s\nConfig         %s\n", *controlURL, path)
-		if generated {
-			fmt.Println("API key       generated and stored with mode 0600")
-		}
+		fmt.Printf("InferCrane configured\nControl plane  %s\nConfig         %s\nCredential     existing credential stored with mode 0600\n", *controlURL, path)
 	}
 	return nil
 }
