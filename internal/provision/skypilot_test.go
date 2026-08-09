@@ -77,8 +77,20 @@ func TestEnsureUsesPinnedCompatibleRuntimeByDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(runner.launchTask, "vllm=="+defaultVLLMVersion) {
+	if !strings.Contains(runner.launchTask, "vllm=="+defaultVLLMVersion) || !strings.Contains(runner.launchTask, "transformers=="+defaultTransformersVersion) {
 		t.Fatalf("launch task does not pin compatible default runtime: %s", runner.launchTask)
+	}
+}
+
+func TestEnsureDoesNotConstrainExplicitRuntimeDependencies(t *testing.T) {
+	runner := &fakeSkyRunner{}
+	provider := SkyPilot{APIKey: "secret", Runner: runner}
+	_, err := provider.EnsureReplica(context.Background(), ReplicaSpec{ExternalKey: "prod-r0", Model: "model", Cloud: "runpod", GPU: "L40S", RuntimeVersion: "0.10.2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(runner.launchTask, "vllm==0.10.2") || strings.Contains(runner.launchTask, "transformers==") {
+		t.Fatalf("launch task unexpectedly constrains explicit runtime: %s", runner.launchTask)
 	}
 }
 

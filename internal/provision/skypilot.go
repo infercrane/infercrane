@@ -18,6 +18,7 @@ var ErrUnavailable = errors.New("SkyPilot unavailable")
 // resolves to PyTorch's CUDA 12.4 runtime, which remains compatible with the
 // NVIDIA driver exposed by the current RunPod L40S fleet.
 const defaultVLLMVersion = "0.8.5.post1"
+const defaultTransformersVersion = "4.51.3"
 
 type ReplicaSpec struct {
 	ExternalKey                                                    string
@@ -65,7 +66,8 @@ func (s SkyPilot) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provider
 	if spec.Port == 0 {
 		spec.Port = 8000
 	}
-	if spec.RuntimeVersion == "" {
+	usesDefaultRuntime := spec.RuntimeVersion == ""
+	if usesDefaultRuntime {
 		spec.RuntimeVersion = defaultVLLMVersion
 	}
 	resourceID := s.Handle(spec.ExternalKey).ResourceID
@@ -85,7 +87,14 @@ func (s SkyPilot) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provider
 			return ProviderHandle{RequestID: spec.RequestID, ResourceID: resourceID, ExternalKey: spec.ExternalKey}, nil
 		}
 	}
-	task := map[string]any{"resources": map[string]any{"infra": infrastructure(spec.Cloud, spec.Region), "accelerators": spec.GPU, "ports": []int{spec.Port}}, "setup": "python -m pip install 'vllm==" + spec.RuntimeVersion + "'", "run": runCommand(spec.Model, spec.ModelRevision, spec.Port, spec.RuntimeArgs)}
+	setup := "python -m pip install 'vllm==" + spec.RuntimeVersion + "'"
+	if usesDefaultRuntime {
+		// vLLM 0.8.5 permits transformers>=4.51.1, which otherwise allows a
+		// later incompatible major release. Lock the tested default stack while
+		// leaving explicitly requested runtime versions under user control.
+		setup += " 'transformers==" + defaultTransformersVersion + "'"
+	}
+	task := map[string]any{"resources": map[string]any{"infra": infrastructure(spec.Cloud, spec.Region), "accelerators": spec.GPU, "ports": []int{spec.Port}}, "setup": setup, "run": runCommand(spec.Model, spec.ModelRevision, spec.Port, spec.RuntimeArgs)}
 	task["secrets"] = map[string]any{"INFERCRANE_WORKER_API_KEY": nil}
 	path, cleanup, err := writeTask(task)
 	if err != nil {
