@@ -60,17 +60,23 @@ def parse_vllm_metrics(text: str) -> MetricSnapshot:
 
 
 class VLLMMetricsCollector(MetricsCollector):
-    def __init__(self, client: httpx.AsyncClient | None = None, timeout: float = 5.0):
+    def __init__(
+        self,
+        client: httpx.AsyncClient | None = None,
+        timeout: float = 5.0,
+        api_key: str | None = None,
+    ):
         self._client = client
         self.timeout = timeout
+        self.headers = {"authorization": f"Bearer {api_key}"} if api_key else {}
 
     async def collect(self, base_url: str) -> MetricSnapshot:
         if self._client:
             response = await self._client.get(
-                f"{base_url.rstrip('/')}/metrics", timeout=self.timeout
+                f"{base_url.rstrip('/')}/metrics", timeout=self.timeout, headers=self.headers
             )
         else:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.get(f"{base_url.rstrip('/')}/metrics")
+                response = await client.get(f"{base_url.rstrip('/')}/metrics", headers=self.headers)
         response.raise_for_status()
         return parse_vllm_metrics(response.text)

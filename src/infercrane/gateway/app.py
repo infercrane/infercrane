@@ -2,14 +2,18 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 import uuid
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from infercrane.persistence import Database
+from infercrane.persistence.models import RequestRecordRow
 from infercrane.settings import Settings
 
 from .routes import RouteDirectory
@@ -40,6 +44,7 @@ def create_gateway_app(
     routes: RouteDirectory,
     client: httpx.AsyncClient | None = None,
     reconciler: Any | None = None,
+    database: Database | None = None,
 ) -> FastAPI:
     owned_client = client is None
 
@@ -109,6 +114,8 @@ def create_gateway_app(
         forwarded = dict(payload)
         forwarded["model"] = route.upstream_model
         request_id = request.headers.get("x-request-id") or f"req_{uuid.uuid4().hex}"
+        started_at = datetime.now(UTC)
+        started_clock = time.monotonic()
         headers = {
             key: value
             for key, value in request.headers.items()
@@ -125,8 +132,20 @@ def create_gateway_app(
         try:
             upstream = await request.app.state.client.send(upstream_request, stream=True)
         except httpx.TimeoutException:
+            _record_request(
+                database, request_id, route.deployment_id, started_at, started_clock, 504, "timeout"
+            )
             return openai_error("Inference upstream timed out", 504)
         except httpx.HTTPError:
+            _record_request(
+                database,
+                request_id,
+                route.deployment_id,
+                started_at,
+                started_clock,
+                503,
+                "upstream_unavailable",
+            )
             return openai_error("Inference upstream is unavailable", 503)
 
         response_headers = {
@@ -135,13 +154,30 @@ def create_gateway_app(
         response_headers["x-request-id"] = request_id
 
         async def body():
+            error_type: str | None = None
             try:
                 async for chunk in upstream.aiter_raw():
                     if await request.is_disconnected():
+                        error_type = "client_cancelled"
                         break
                     yield chunk
+            except asyncio.CancelledError:
+                error_type = "client_cancelled"
+                raise
+            except httpx.HTTPError:
+                error_type = "upstream_disconnect"
+                raise
             finally:
                 await upstream.aclose()
+                _record_request(
+                    database,
+                    request_id,
+                    route.deployment_id,
+                    started_at,
+                    started_clock,
+                    upstream.status_code,
+                    error_type,
+                )
 
         return StreamingResponse(
             body(),
@@ -160,3 +196,29 @@ def _authorize(request: Request, settings: Settings) -> JSONResponse | None:
         response.headers["www-authenticate"] = "Bearer"
         return response
     return None
+
+
+def _record_request(
+    database: Database | None,
+    request_id: str,
+    deployment_id: str,
+    started_at: datetime,
+    started_clock: float,
+    status_code: int,
+    error_type: str | None,
+) -> None:
+    if database is None:
+        return
+    with database.session() as session:
+        session.add(
+            RequestRecordRow(
+                request_id=request_id,
+                deployment_id=deployment_id,
+                started_at=started_at,
+                completed_at=datetime.now(UTC),
+                status_code=status_code,
+                latency_ms=(time.monotonic() - started_clock) * 1000,
+                retry_count=0,
+                error_type=error_type,
+            )
+        )

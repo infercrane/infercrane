@@ -83,6 +83,7 @@ class RequestRecordRow(Base):
     latency_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
     input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    retry_count: Mapped[int] = mapped_column(Integer, default=0)
     error_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
 

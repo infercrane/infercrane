@@ -98,3 +98,28 @@ async def test_no_healthy_worker_removes_route(control, database, settings):
     assert routes.get("qwen-prod") is None
     assert control.resolve_deployment("qwen-prod").deployment.observed_state == "unhealthy"
     await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_deployment_deletion_removes_route_and_stops_router(control, database, settings):
+    control.add_target(TargetCreate(name="gpu-a", url="http://127.0.0.1:8101"))
+    deployment = control.create_deployment(
+        DeploymentCreate(name="qwen-prod", model="Qwen/Qwen3-8B", targets=["gpu-a"])
+    )
+    routes = RouteDirectory()
+    routes.put(
+        RouteSnapshot(
+            deployment_id=deployment.id,
+            alias="qwen-prod",
+            upstream_model="Qwen/Qwen3-8B",
+            router_url="http://old",
+        )
+    )
+    router = FakeRouter()
+    router.running.add(deployment.id)
+    control.delete_deployment("qwen-prod")
+    client = httpx.AsyncClient(transport=httpx.MockTransport(lambda _request: httpx.Response(503)))
+    await Reconciler(settings, database, routes, router, client).reconcile_once()
+    assert routes.get("qwen-prod") is None
+    assert deployment.id not in router.running
+    await client.aclose()

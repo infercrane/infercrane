@@ -6,14 +6,14 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
-COPY pyproject.toml README.md LICENSE ./
+RUN python -m pip install --no-cache-dir uv==0.12.3
+COPY pyproject.toml uv.lock README.md LICENSE ./
 COPY src ./src
-RUN python -m venv /opt/venv \
-    && /opt/venv/bin/pip install --no-cache-dir '.[router]'
+RUN uv sync --frozen --no-dev --extra router --no-editable
 
 FROM python:3.12-slim AS runtime
 RUN useradd --create-home --uid 10001 app
-COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder /build/.venv /opt/venv
 COPY scripts/dev-start.sh /usr/local/bin/infercrane-dev-start
 RUN chmod 755 /usr/local/bin/infercrane-dev-start \
     && mkdir -p /var/lib/infercrane \
@@ -26,4 +26,3 @@ USER app
 EXPOSE 8080
 ENTRYPOINT ["infercrane"]
 CMD ["serve"]
-

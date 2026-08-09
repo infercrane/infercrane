@@ -4,8 +4,12 @@ import json
 
 import httpx
 import pytest
+from openai import AsyncOpenAI
+from sqlalchemy import select
 
+from infercrane.domain.models import DeploymentCreate, TargetCreate
 from infercrane.gateway import RouteDirectory, RouteSnapshot, create_gateway_app
+from infercrane.persistence.models import RequestRecordRow
 
 
 class BytesStream(httpx.AsyncByteStream):
@@ -14,6 +18,12 @@ class BytesStream(httpx.AsyncByteStream):
 
     async def __aiter__(self):
         yield self.content
+
+
+class DisconnectingStream(httpx.AsyncByteStream):
+    async def __aiter__(self):
+        yield b'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'
+        raise httpx.ReadError("upstream disconnected")
 
 
 @pytest.fixture
@@ -71,6 +81,20 @@ async def test_alias_rewrite_and_non_streaming_forward(settings, routes, upstrea
 
 
 @pytest.mark.asyncio
+async def test_normal_openai_sdk_uses_logical_alias(settings, routes, upstream_transport):
+    upstream = httpx.AsyncClient(transport=upstream_transport)
+    app = create_gateway_app(settings, routes, upstream)
+    transport = httpx.ASGITransport(app=app)
+    http_client = httpx.AsyncClient(transport=transport, base_url="http://test")
+    sdk = AsyncOpenAI(base_url="http://test/v1", api_key="infercrane", http_client=http_client)
+    async with app.router.lifespan_context(app):
+        response = await sdk.chat.completions.create(model="qwen-prod", messages=[])
+    await sdk.close()
+    await upstream.aclose()
+    assert response.model == "Qwen/Qwen3-8B"
+
+
+@pytest.mark.asyncio
 async def test_streaming_is_preserved(settings, routes, upstream_transport):
     upstream = httpx.AsyncClient(transport=upstream_transport)
     app = create_gateway_app(settings, routes, upstream)
@@ -122,3 +146,90 @@ async def test_unknown_alias_returns_openai_error(settings, routes, upstream_tra
     await upstream.aclose()
     assert response.status_code == 404
     assert response.json()["error"]["type"] == "invalid_request_error"
+
+
+@pytest.mark.asyncio
+async def test_timeout_is_safe_and_accounted(settings, database, control):
+    control.add_target(TargetCreate(name="gpu-a", url="http://127.0.0.1:8101"))
+    deployment = control.create_deployment(
+        DeploymentCreate(name="qwen-prod", model="Qwen/Qwen3-8B", targets=["gpu-a"])
+    )
+    routes = RouteDirectory()
+    routes.put(
+        RouteSnapshot(
+            deployment_id=deployment.id,
+            alias="qwen-prod",
+            upstream_model="Qwen/Qwen3-8B",
+            router_url="http://router.internal",
+        )
+    )
+
+    async def timeout(_request: httpx.Request):
+        raise httpx.ConnectTimeout("timeout")
+
+    upstream = httpx.AsyncClient(transport=httpx.MockTransport(timeout))
+    app = create_gateway_app(settings, routes, upstream, database=database)
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client,
+    ):
+        response = await client.post(
+            "/v1/chat/completions",
+            headers={"authorization": "Bearer infercrane", "x-request-id": "req_timeout"},
+            json={"model": "qwen-prod", "messages": []},
+        )
+    await upstream.aclose()
+    assert response.status_code == 504
+    with database.session() as session:
+        record = session.scalar(
+            select(RequestRecordRow).where(RequestRecordRow.request_id == "req_timeout")
+        )
+        assert record is not None
+        assert record.error_type == "timeout"
+        assert record.status_code == 504
+        assert record.retry_count == 0
+
+
+@pytest.mark.asyncio
+async def test_upstream_disconnect_is_not_recorded_as_success(settings, database, control):
+    control.add_target(TargetCreate(name="gpu-a", url="http://127.0.0.1:8101"))
+    deployment = control.create_deployment(
+        DeploymentCreate(name="qwen-prod", model="Qwen/Qwen3-8B", targets=["gpu-a"])
+    )
+    routes = RouteDirectory()
+    routes.put(
+        RouteSnapshot(
+            deployment_id=deployment.id,
+            alias="qwen-prod",
+            upstream_model="Qwen/Qwen3-8B",
+            router_url="http://router.internal",
+        )
+    )
+
+    async def disconnect(_request: httpx.Request):
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            stream=DisconnectingStream(),
+        )
+
+    upstream = httpx.AsyncClient(transport=httpx.MockTransport(disconnect))
+    app = create_gateway_app(settings, routes, upstream, database=database)
+    with pytest.raises(httpx.ReadError):
+        async with (
+            app.router.lifespan_context(app),
+            httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://test"
+            ) as client,
+        ):
+            await client.post(
+                "/v1/chat/completions",
+                headers={"authorization": "Bearer infercrane", "x-request-id": "req_disconnect"},
+                json={"model": "qwen-prod", "messages": [], "stream": True},
+            )
+    await upstream.aclose()
+    with database.session() as session:
+        record = session.get(RequestRecordRow, "req_disconnect")
+        assert record is not None
+        assert record.error_type == "upstream_disconnect"
+        assert record.retry_count == 0

@@ -6,7 +6,7 @@ import json
 
 import uvicorn
 from fastapi import FastAPI, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 
 def create_app(worker: str = "fake") -> FastAPI:
@@ -25,8 +25,13 @@ def create_app(worker: str = "fake") -> FastAPI:
 
     @app.get("/metrics")
     async def metrics():
-        return (
-            "vllm:num_requests_running 0\nvllm:num_requests_waiting 0\nvllm:kv_cache_usage_perc 0\n"
+        return Response(
+            content=(
+                "vllm:num_requests_running 0\n"
+                "vllm:num_requests_waiting 0\n"
+                "vllm:kv_cache_usage_perc 0\n"
+            ),
+            media_type="text/plain",
         )
 
     @app.post("/v1/chat/completions")

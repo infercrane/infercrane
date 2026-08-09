@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -13,6 +13,7 @@ from infercrane.domain.models import (
     DeploymentView,
     DesiredState,
     ObservedState,
+    ProvisionedTarget,
     RoutingStrategy,
     TargetCreate,
     TargetHealth,
@@ -23,6 +24,7 @@ from infercrane.persistence.models import (
     DeploymentEventRow,
     DeploymentRow,
     DeploymentTargetRow,
+    RequestRecordRow,
     TargetRow,
 )
 
@@ -39,6 +41,14 @@ class NotFoundError(ValueError):
 class DeploymentResolved:
     deployment: DeploymentRow
     targets: tuple[TargetRow, ...]
+
+
+@dataclass(frozen=True)
+class RequestStats:
+    requests_per_second: float
+    error_rate: float
+    p50_latency_ms: float | None
+    p95_latency_ms: float | None
 
 
 class ControlPlane:
@@ -80,6 +90,24 @@ class ControlPlane:
         with self.database.session() as session:
             rows = session.scalars(select(TargetRow).order_by(TargetRow.name)).all()
             return [TargetView.model_validate(row) for row in rows]
+
+    def add_provisioned_target(self, target: ProvisionedTarget, provider: str) -> TargetView:
+        view = self.add_target(
+            TargetCreate(
+                name=target.name,
+                url=target.url,
+                provider=provider,
+                runtime="vllm",
+                upstream_model_name=target.upstream_model_name,
+            )
+        )
+        with self.database.session() as session:
+            row = session.get(TargetRow, view.id)
+            assert row is not None
+            row.provider_resource_id = target.provider_resource_id
+            row.provider_details_json = json.dumps(target.details, sort_keys=True)
+            session.flush()
+            return TargetView.model_validate(row)
 
     def create_deployment(self, spec: DeploymentCreate) -> DeploymentView:
         if not spec.targets:
@@ -204,3 +232,31 @@ class ControlPlane:
                     summary=f"Deployment {name} deleted",
                 )
             )
+
+    def request_stats(self, deployment_id: str, window_seconds: int = 300) -> RequestStats:
+        cutoff = datetime.now(UTC) - timedelta(seconds=window_seconds)
+        with self.database.session() as session:
+            rows = session.scalars(
+                select(RequestRecordRow).where(
+                    RequestRecordRow.deployment_id == deployment_id,
+                    RequestRecordRow.started_at >= cutoff,
+                )
+            ).all()
+        latencies = sorted(row.latency_ms for row in rows if row.latency_ms is not None)
+        errors = sum(bool(row.error_type) or (row.status_code or 500) >= 400 for row in rows)
+        return RequestStats(
+            requests_per_second=len(rows) / window_seconds,
+            error_rate=errors / len(rows) if rows else 0.0,
+            p50_latency_ms=_percentile(latencies, 0.50),
+            p95_latency_ms=_percentile(latencies, 0.95),
+        )
+
+
+def _percentile(values: list[float], quantile: float) -> float | None:
+    if not values:
+        return None
+    index = (len(values) - 1) * quantile
+    lower = int(index)
+    upper = min(lower + 1, len(values) - 1)
+    fraction = index - lower
+    return values[lower] * (1 - fraction) + values[upper] * fraction

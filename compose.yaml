@@ -21,7 +21,7 @@ services:
     environment:
       INFERCRANE_API_KEY: infercrane
     ports:
-      - "8080:8080"
+      - "${INFERCRANE_DEV_PORT:-18000}:8080"
     volumes:
       - infercrane-state:/var/lib/infercrane
     depends_on:
@@ -30,4 +30,3 @@ services:
 
 volumes:
   infercrane-state:
-

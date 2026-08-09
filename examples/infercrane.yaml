@@ -1,0 +1,23 @@
+name: qwen-prod
+
+model:
+  id: Qwen/Qwen3-8B
+
+runtime:
+  engine: vllm
+  args:
+    - --enable-prefix-caching
+
+resources:
+  gpu: A40
+
+provider:
+  cloud: runpod
+
+scaling:
+  min_replicas: 1
+  max_replicas: 1
+
+routing:
+  strategy: cache-aware
+

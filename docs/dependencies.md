@@ -4,7 +4,7 @@
 |---|---|---|---|---|---|---|
 | vLLM Router | https://github.com/vllm-project/router | Request routing | Apache-2.0 | External pinned process | No | Preserve license/notices; audit Rust transitive dependencies |
 | vLLM | https://github.com/vllm-project/vllm | Inference runtime | Apache-2.0 | External worker runtime | No | Preserve license/notices |
-| SkyPilot | https://github.com/skypilot-org/skypilot | Stage 2 GPU provisioning | Apache-2.0 | Optional supported SDK adapter | No | Preserve license/notices |
+| SkyPilot 0.13.x (`runpod` extra) | https://github.com/skypilot-org/skypilot | Stage 2 GPU provisioning | Apache-2.0 | Optional supported SDK adapter | No | Preserve license/notices; provider SDK transitive licenses require release audit |
 | AIBrix | https://github.com/vllm-project/aibrix | Future Kubernetes backend | Apache-2.0 | Optional external backend | No | Preserve license/notices |
 | KServe | https://github.com/kserve/kserve | Future Kubernetes backend | Apache-2.0 | Optional external backend | No | Preserve license/notices |
 | FastAPI | https://github.com/fastapi/fastapi | HTTP API and gateway | MIT | Python library | No | Retain license |
@@ -20,4 +20,3 @@
 No AGPL, SSPL, BSL, Commons Clause, or other source-available dependency is approved for
 the core. Lockfile and container-image transitive dependencies require automated license and
 vulnerability review before a release.
-

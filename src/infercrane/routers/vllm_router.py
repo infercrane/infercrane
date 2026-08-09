@@ -22,14 +22,9 @@ class VLLMRouterBackend(RouterBackend):
         self.settings = settings
         self._processes: dict[str, Process] = {}
 
-    async def start(self, spec: RouterSpec) -> str:
-        await self.stop(spec.deployment_id)
-        binary = shutil.which(self.settings.router_binary)
-        if binary is None:
-            raise RouterUnavailable(
-                f"{self.settings.router_binary!r} is not installed; install the pinned vLLM Router binary"
-            )
-        args = [
+    def command(self, binary: str, spec: RouterSpec) -> list[str]:
+        """Build the pinned upstream CLI contract in one testable place."""
+        return [
             binary,
             "--host",
             spec.host,
@@ -39,9 +34,21 @@ class VLLMRouterBackend(RouterBackend):
             spec.strategy.router_value,
             "--worker-urls",
             *spec.workers,
+            "--api-key",
+            self.settings.api_key,
             "--retry-max-retries",
-            "0",
+            # Upstream defines 1 as a single attempt (zero retries).
+            "1",
         ]
+
+    async def start(self, spec: RouterSpec) -> str:
+        await self.stop(spec.deployment_id)
+        binary = shutil.which(self.settings.router_binary)
+        if binary is None:
+            raise RouterUnavailable(
+                f"{self.settings.router_binary!r} is not installed; install the pinned vLLM Router binary"
+            )
+        args = self.command(binary, spec)
         process = await asyncio.create_subprocess_exec(
             *args,
             stdout=asyncio.subprocess.PIPE,

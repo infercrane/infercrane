@@ -37,7 +37,7 @@ class Reconciler:
         self.control = ControlPlane(database)
         self.routes = routes
         self.router = router
-        self.runtime = VLLMRuntime()
+        self.runtime = VLLMRuntime(settings.api_key)
         self.client = client
 
     async def run(self, stop: asyncio.Event) -> None:
@@ -52,7 +52,14 @@ class Reconciler:
         owned = self.client is None
         client = self.client or httpx.AsyncClient()
         try:
-            for view in self.control.list_deployments():
+            deployments = self.control.list_deployments()
+            active_aliases = {view.name for view in deployments}
+            for stale in (
+                route for route in self.routes.list() if route.alias not in active_aliases
+            ):
+                self.routes.remove(stale.alias)
+                await self.router.stop(stale.deployment_id)
+            for view in deployments:
                 resolved = self.control.resolve_deployment(view.name)
                 healthy: list[TargetRow] = []
                 for target in resolved.targets:

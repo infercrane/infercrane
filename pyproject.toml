@@ -23,11 +23,12 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  "openai>=1,<3",
   "pytest>=8,<9",
   "pytest-asyncio>=1,<2",
   "ruff>=0.12,<1",
 ]
-skypilot = ["skypilot>=1.0,<2"]
+skypilot = ["skypilot[runpod]>=0.13,<0.14"]
 router = ["vllm-router==0.1.15"]
 
 [project.scripts]
