@@ -1,4 +1,4 @@
-.PHONY: build context context-check test test-container test-stack test-failure test-store verify audit deadcode snapshot dev-up dev-down
+.PHONY: build context context-check docs-dev docs-check test test-container test-stack test-failure test-store verify audit deadcode snapshot dev-up dev-down
 
 build:
 	go build ./cmd/infercrane
@@ -8,6 +8,12 @@ context:
 
 context-check:
 	go run ./tools/repo-context -check
+
+docs-dev:
+	cd docs && npm run dev
+
+docs-check:
+	cd docs && npm run check && npm run check:a11y
 
 test:
 	go test -race -count=1 ./...

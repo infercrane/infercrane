@@ -10,6 +10,8 @@ __pycache__/
 dist/
 site/
 build/
+node_modules/
+.mintlify/
 .infercrane/
 /infercrane
 coverage.out

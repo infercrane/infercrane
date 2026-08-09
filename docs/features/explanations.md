@@ -15,6 +15,6 @@ progress, message, and error code. Scaling explanations reproduce the latest per
 action, reason, signal snapshot, and evaluation timestamp. Rollout explanations reproduce the
 Release Guard evaluation ID, active and candidate revisions, decision, reason codes, metric
 snapshot, policy snapshot, and timestamp. Cold-start explanations use the provider-worker
-observation and TTFT evidence described in [Cold-start intelligence](cold-starts.md).
+observation and TTFT evidence described in [Cold-start intelligence](/features/cold-starts).
 
 Every form supports `--output json`. Repeating an explanation against unchanged persisted state produces the same explanation code and evidence. If no evaluation exists, InferCrane says so instead of inventing a cause.

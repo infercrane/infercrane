@@ -1,0 +1,20 @@
+{
+  "name": "infercrane-docs",
+  "private": true,
+  "version": "0.1.0",
+  "description": "InferCrane documentation powered by Mintlify",
+  "scripts": {
+    "dev": "mint dev",
+    "build": "mint validate",
+    "validate": "mint validate",
+    "check:links": "mint broken-links --check-anchors --check-redirects --check-snippets",
+    "check:a11y": "mint a11y",
+    "check": "npm run validate && npm run check:links"
+  },
+  "devDependencies": {
+    "mint": "4.2.788"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,87 @@
+---
+title: InferCrane
+description: Production inference without the platform engineering.
+sidebarTitle: Introduction
+---
+
+<div className="ic-kicker">v0.1 release candidate</div>
+
+# Production inference without the platform engineering.
+
+Deploy, autoscale, benchmark, and safely update vLLM workloads on GPU infrastructure you control.
+
+<div className="not-prose flex flex-wrap gap-3 my-7">
+  <a className="button primary" href="/quickstart">Start the quickstart</a>
+  <a className="button" href="https://github.com/infercrane/infercrane">View on GitHub</a>
+</div>
+
+```bash Quick deployment
+infercrane deploy Qwen/Qwen3-8B
+```
+
+InferCrane gives applications one OpenAI-compatible logical endpoint while durable control-plane operations provision, reconcile, scale, and safely replace the vLLM workers behind it. Kubernetes is not required.
+
+<div className="ic-flow">
+  <div className="ic-node"><span className="ic-dot"></span> OpenAI client</div>
+  <div className="ic-node">logical deployment</div>
+  <div className="ic-node">vLLM Router</div>
+  <div className="ic-node"><span className="ic-dot"></span> vLLM replicas</div>
+</div>
+
+## The operational layer around vLLM
+
+<CardGroup cols={3}>
+  <Card title="Deploy" icon="server" href="/features/lifecycle">
+    Create a durable deployment on RunPod or connect existing vLLM workers. Disconnecting the CLI does not abandon the operation.
+  </Card>
+  <Card title="Protect releases" icon="shield-check" href="/features/release-guard">
+    Compare active and candidate revisions with deterministic, persisted Release Guard policy.
+  </Card>
+  <Card title="Understand behavior" icon="wave-pulse" href="/features/explanations">
+    Explain scaling, rollout, degradation, and cold starts from recorded state and measurements.
+  </Card>
+</CardGroup>
+
+## One product, two compute modes
+
+<Tabs>
+  <Tab title="Elastic">
+    SkyPilot provisions vLLM replicas on RunPod. InferCrane reconciles desired capacity, routes only to ready workers, and fences scale-down before termination.
+
+    ```bash
+    infercrane deploy Qwen/Qwen3-8B \
+      --cloud runpod \
+      --gpu L40S \
+      --min 1 \
+      --max 4
+    ```
+  </Tab>
+  <Tab title="Serverless">
+    RunPod Serverless owns worker allocation and scale-to-zero. InferCrane preserves the logical endpoint, lifecycle evidence, cancellation, and cleanup.
+
+    ```bash
+    infercrane deploy Qwen/Qwen3-8B \
+      --compute serverless \
+      --cloud runpod \
+      --gpu L40S \
+      --max 4
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+InferCrane v0.1 supports vLLM on RunPod. Real-provider acceptance is still in progress; consult [capability status](/project-status) before relying on experimental paths.
+</Note>
+
+## Evidence, not guesses
+
+InferCrane records durable operation events, immutable model and revision identity, normalized request telemetry, benchmark reproduction metadata, and deterministic policy decisions. It does not fabricate provider pricing or timing boundaries that the provider does not expose.
+
+<CardGroup cols={2}>
+  <Card title="Five-minute local tour" icon="rocket" href="/quickstart">
+    Run the GPU-free development stack and send your first OpenAI-compatible request.
+  </Card>
+  <Card title="Read the architecture" icon="diagram-project" href="/architecture/system">
+    See the control-plane and data-plane boundaries behind durable operations.
+  </Card>
+</CardGroup>

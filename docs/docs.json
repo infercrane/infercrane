@@ -1,0 +1,148 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "maple",
+  "name": "InferCrane",
+  "description": "Production inference without the platform engineering. Deploy, autoscale, benchmark, and safely update vLLM on RunPod.",
+  "colors": {
+    "primary": "#C2410C",
+    "light": "#FF8258",
+    "dark": "#C2410C"
+  },
+  "appearance": {
+    "default": "system",
+    "strict": false
+  },
+  "fonts": {
+    "heading": {
+      "family": "Space Grotesk",
+      "weight": 600
+    },
+    "body": {
+      "family": "Space Grotesk",
+      "weight": 400
+    }
+  },
+  "styling": {
+    "eyebrows": "section",
+    "codeblocks": {
+      "theme": {
+        "light": "github-light-default",
+        "dark": "vesper"
+      }
+    }
+  },
+  "navbar": {
+    "links": [
+      {
+        "type": "github",
+        "href": "https://github.com/infercrane/infercrane"
+      }
+    ],
+    "primary": {
+      "type": "button",
+      "label": "Quickstart",
+      "href": "/quickstart"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/infercrane/infercrane"
+    },
+    "links": [
+      {
+        "header": "Product",
+        "items": [
+          { "label": "Quickstart", "href": "/quickstart" },
+          { "label": "Architecture", "href": "/architecture/system" },
+          { "label": "Release Guard", "href": "/features/release-guard" }
+        ]
+      },
+      {
+        "header": "Project",
+        "items": [
+          { "label": "GitHub", "href": "https://github.com/infercrane/infercrane" },
+          { "label": "Contributing", "href": "https://github.com/infercrane/infercrane/blob/main/CONTRIBUTING.md" },
+          { "label": "Security", "href": "/security" }
+        ]
+      }
+    ]
+  },
+  "contextual": {
+    "options": ["copy", "view", "chatgpt", "claude", "mcp", "cursor"],
+    "display": "header"
+  },
+  "seo": {
+    "indexing": "navigable",
+    "metatags": {
+      "og:type": "website",
+      "og:site_name": "InferCrane Docs"
+    },
+    "organization": {
+      "name": "InferCrane",
+      "url": "https://github.com/infercrane/infercrane",
+      "sameAs": ["https://github.com/infercrane/infercrane"]
+    }
+  },
+  "navigation": {
+    "groups": [
+      {
+        "group": "START",
+        "pages": ["index", "quickstart", "concepts", "architecture/system"]
+      },
+      {
+        "group": "DEPLOY",
+        "pages": [
+          "deployment-spec",
+          "features/model-artifacts",
+          "features/provisioning",
+          "features/gateway",
+          "features/revisions"
+        ]
+      },
+      {
+        "group": "OPERATE",
+        "pages": [
+          "features/lifecycle",
+          "features/autoscaling",
+          "features/release-guard",
+          "features/serverless",
+          "features/telemetry",
+          "features/benchmarking",
+          "features/cold-starts",
+          "features/explanations"
+        ]
+      },
+      {
+        "group": "INTEGRATE",
+        "pages": ["integrations/vllm", "integrations/runpod", "integrations/aiperf", "integrations/hugging-face"]
+      },
+      {
+        "group": "REFERENCE",
+        "pages": ["cli", "control-api", "provider-setup", "troubleshooting", "faq"]
+      },
+      {
+        "group": "PROJECT",
+        "pages": [
+          "project-status",
+          "security",
+          "architecture/invariants",
+          {
+            "group": "Architecture decisions",
+            "pages": [
+              "adr/index",
+              "adr/0001-control-data-plane",
+              "adr/0002-postgresql-source-of-truth",
+              "adr/0003-instance-owned-router-generations",
+              "adr/0004-repository-native-engineering-memory",
+              "adr/0005-durable-operations-and-policy-boundaries",
+              "adr/0006-leased-operation-execution",
+              "adr/0007-tenant-scoped-identity",
+              "adr/0008-immutable-deployment-revisions"
+            ]
+          },
+          "release-acceptance"
+        ]
+      }
+    ]
+  }
+}

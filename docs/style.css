@@ -1,0 +1,99 @@
+:root {
+  --infercrane-background: #faf9f6;
+  --infercrane-surface: #ffffff;
+  --infercrane-surface-elevated: #f5f3ee;
+  --infercrane-text: #16181b;
+  --infercrane-text-secondary: #626a73;
+  --infercrane-border: #e5e2dc;
+  --infercrane-accent: #c2410c;
+  --infercrane-accent-hover: #9a3412;
+  --infercrane-healthy: #18a98c;
+  --infercrane-info: #297ed1;
+  --infercrane-warning: #a66c00;
+  --infercrane-error: #d6384c;
+  --infercrane-font-sans: "Space Grotesk", "Geist", sans-serif;
+  --infercrane-font-mono: "Geist Mono", "SFMono-Regular", Consolas, monospace;
+}
+
+.dark {
+  --infercrane-background: #0b0d0f;
+  --infercrane-surface: #111418;
+  --infercrane-surface-elevated: #171b20;
+  --infercrane-text: #f3f1ea;
+  --infercrane-text-secondary: #9ca3ad;
+  --infercrane-border: #242a31;
+  --infercrane-accent: #ff6b35;
+  --infercrane-accent-hover: #ff8258;
+  --infercrane-healthy: #44d7b6;
+  --infercrane-info: #59a8ff;
+  --infercrane-warning: #f5b942;
+  --infercrane-error: #ff5667;
+}
+
+body {
+  font-family: var(--infercrane-font-sans);
+  letter-spacing: -0.008em;
+}
+
+h1, h2, h3 {
+  font-family: var(--infercrane-font-sans);
+  text-wrap: balance;
+}
+
+h1 {
+  letter-spacing: -0.045em;
+  line-height: 1.08;
+}
+
+h2 {
+  letter-spacing: -0.03em;
+}
+
+code, pre, kbd, samp {
+  font-family: var(--infercrane-font-mono);
+  font-variant-ligatures: none;
+}
+
+.ic-kicker {
+  color: var(--infercrane-accent);
+  font-family: var(--infercrane-font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.ic-flow {
+  background: var(--infercrane-surface);
+  border: 1px solid var(--infercrane-border);
+  border-radius: 10px;
+  color: var(--infercrane-text);
+  display: grid;
+  font-family: var(--infercrane-font-mono);
+  font-size: 0.78rem;
+  gap: 0.65rem;
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+  margin: 1.5rem 0;
+  padding: 1rem;
+}
+
+.ic-node {
+  align-items: center;
+  border: 1px solid var(--infercrane-border);
+  border-radius: 7px;
+  display: flex;
+  gap: 0.5rem;
+  min-height: 2.6rem;
+  padding: 0.65rem 0.75rem;
+}
+
+.ic-dot {
+  background: var(--infercrane-healthy);
+  border-radius: 999px;
+  height: 0.45rem;
+  width: 0.45rem;
+}
+
+.ic-muted {
+  color: var(--infercrane-text-secondary);
+}

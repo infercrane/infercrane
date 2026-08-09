@@ -1,7 +1,7 @@
 # InferCrane engineering contract
 
 This file is the entry point for coding agents and engineers. Keep it concise. Detailed and
-authoritative knowledge is routed through [docs/index.md](docs/index.md).
+authoritative knowledge is routed through [docs/index.mdx](docs/index.mdx).
 
 ## Product
 
@@ -11,7 +11,7 @@ vLLM Router processes. Development fakes are never production substitutes.
 
 ## Before changing code
 
-1. Read [docs/index.md](docs/index.md).
+1. Read [docs/index.mdx](docs/index.mdx).
 2. Read [docs/project-status.md](docs/project-status.md) to distinguish implemented,
    experimental, and planned behavior.
 3. Read only the relevant feature document and ADRs it links.

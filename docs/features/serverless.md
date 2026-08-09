@@ -63,5 +63,5 @@ matches or immutable-spec mismatches fail visibly instead of creating another bi
 - InferCrane records request timing and token metadata but does not record prompts or generated
   content by default.
 
-See [cold-start intelligence](cold-starts.md) for the exact classification evidence and unavailable
+See [cold-start intelligence](/features/cold-starts) for the exact classification evidence and unavailable
 provider timing boundaries.

@@ -1,7 +1,7 @@
 # Architecture
 
 For the engineering-level component map, flows and invariants, see
-[docs/architecture](architecture/system.md).
+[docs/architecture](architecture/system.mdx).
 
 InferCrane separates its control plane from its request data plane.
 

@@ -1,0 +1,203 @@
+---
+title: CLI reference
+description: Commands for configuring, deploying, observing, updating, and deleting InferCrane deployments.
+---
+
+# CLI reference
+
+The public CLI talks to the authenticated control-plane API. It never opens PostgreSQL directly. Run `infercrane help` for the current command tree and `infercrane version` for the build version.
+
+## Global conventions
+
+- Commands that return data accept `--output human|json`.
+- `status --watch --output json` emits one JSON document per state refresh.
+- Mutation commands accept `--idempotency-key`; reuse the same key after an uncertain result.
+- `--wait` polls persisted operation state. Closing the client does not cancel server-side work.
+- JSON failures contain `code`, `category`, `message`, `retryable`, `remediation`, and provider HTTP status when available.
+
+<Snippet file="_snippets/safe-retry.mdx" />
+
+## Configure and diagnose
+
+### `init`
+
+Store a control-plane URL and an already-issued credential in the private client configuration file.
+
+```bash
+INFERCRANE_API_KEY='ISSUED_CREDENTIAL' \
+  infercrane init --url https://infercrane.example
+```
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--url` | `http://127.0.0.1:8080` | Control-plane base URL |
+| `--api-key` | environment | Existing credential; prefer `INFERCRANE_API_KEY` to avoid shell history |
+| `--output` | `human` | `human` or `json` |
+
+`init` does not create or enroll a principal.
+
+### `doctor`
+
+Ask the control plane to check its own dependencies.
+
+```bash
+infercrane doctor
+infercrane doctor --cloud
+infercrane doctor --serverless --output json
+```
+
+`--cloud` adds SkyPilot credentials; `--serverless` adds RunPod credentials and configured template validation. Diagnostics are read-only.
+
+## Plan and deploy
+
+### `plan`
+
+Preview semantic changes without provider or database mutation.
+
+```bash
+infercrane plan Qwen/Qwen3-8B \
+  --name qwen-prod \
+  --cloud runpod \
+  --gpu L40S \
+  --min 1 \
+  --max 4
+```
+
+### `deploy` and `apply`
+
+`deploy` creates a cloud or existing-target deployment. `apply` declaratively converges a deployment using the same input shape.
+
+```bash
+infercrane deploy Qwen/Qwen3-8B \
+  --cloud runpod \
+  --gpu L40S \
+  --min 1 \
+  --max 4 \
+  --idempotency-key qwen-prod-initial \
+  --wait
+
+infercrane apply examples/infercrane.yaml \
+  --idempotency-key qwen-prod-spec-01
+```
+
+| Flag | Default | Applies to | Meaning |
+|---|---|---|---|
+| `--name` | derived from model | all | Logical deployment name |
+| `--targets` | none | existing | Comma-separated registered targets |
+| `--cloud` | `runpod` on primary path | elastic/serverless | v0.1 provider |
+| `--gpu` | `L40S` on primary path | elastic/serverless | Requested GPU |
+| `--region` | provider-selected | provisioned | Provider region |
+| `--compute` | `elastic` | provisioned | `elastic` or `serverless` |
+| `--min` | `1`; serverless defaults to `0` | provisioned | Minimum replicas/workers |
+| `--max` | `1` | provisioned | Maximum replicas/workers |
+| `--wait` | false | mutations | Follow durable progress to a terminal state |
+| `--idempotency-key` | generated | mutations | Stable safe-retry identity |
+| `--output` | `human` | all | `human` or `json` |
+
+A YAML path cannot be combined with deployment flags. See [DeploymentSpec](/deployment-spec).
+
+## Existing targets and routing
+
+```bash
+infercrane target add gpu-a \
+  --url http://gpu-a:8000 \
+  --runtime vllm \
+  --upstream-model Qwen/Qwen3-8B
+
+infercrane target list --output json
+infercrane route qwen-prod --strategy cache-aware
+```
+
+Supported v0.1 strategies are `round-robin`, `consistent-hash`, `power-of-two`, and `cache-aware`, delegated to the pinned vLLM Router.
+
+## Observe and explain
+
+| Command | Purpose |
+|---|---|
+| `deployments [--output json]` | List logical deployments |
+| `status DEPLOYMENT [--watch]` | Show health, readiness, traffic, revisions, and active operation |
+| `events DEPLOYMENT` | Show ordered durable deployment events |
+| `inspect DEPLOYMENT` | Show raw targets, replicas, artifacts, request statistics, and infrastructure metadata |
+| `operation ID` | Inspect durable progress and result |
+| `operation cancel ID` | Request cooperative cancellation |
+| `orphans` | List unmanaged provisioned resources visible to the control plane |
+
+```bash
+infercrane status qwen-prod --watch
+infercrane events qwen-prod --output json
+infercrane inspect qwen-prod
+```
+
+Deterministic explanations use only persisted state and measurements:
+
+```bash
+infercrane explain qwen-prod
+infercrane explain scaling qwen-prod
+infercrane explain rollout qwen-prod
+infercrane explain cold-start qwen-prod
+```
+
+## Benchmark
+
+Run AIPerf and persist the exact reproduction metadata.
+
+```bash
+infercrane benchmark qwen-prod \
+  --requests 1000 \
+  --concurrency 32 \
+  --random-seed 17 \
+  --revision active
+```
+
+`--revision` accepts `active`, `candidate`, or an explicit revision ID. Defaults are 100 requests, concurrency 10, and seed 17.
+
+## Revisions and Release Guard
+
+```bash
+infercrane rollout inspect qwen-prod
+infercrane rollout policy qwen-prod
+
+infercrane rollout create qwen-prod \
+  --model Qwen/Qwen3-8B \
+  --cloud runpod \
+  --gpu H100 \
+  --min 1 \
+  --max 2 \
+  --idempotency-key qwen-prod-rev-19
+
+infercrane rollout provision qwen-prod REVISION_ID --wait
+infercrane rollout evaluate qwen-prod
+infercrane rollout promote qwen-prod REVISION_ID --reason 'guard accepted'
+infercrane rollout reject qwen-prod REVISION_ID --reason 'TTFT regression'
+infercrane rollout rollback qwen-prod REVISION_ID --wait
+```
+
+Candidate creation also accepts `--model-revision`, `--runtime`, `--runtime-version`, `--runtime-args`, `--routing`, and `--region`. Promotion remains policy-gated; no LLM decides the outcome.
+
+## Delete
+
+Preview cleanup, then confirm it explicitly.
+
+```bash
+infercrane delete qwen-prod --plan
+infercrane delete qwen-prod \
+  --yes \
+  --wait \
+  --idempotency-key qwen-prod-delete-01
+infercrane orphans
+```
+
+`--plan` is side-effect-free. `--yes` is required for mutation. After a paid test, also verify the provider inventory reaches zero.
+
+## Tenant administration
+
+These commands require an admin/bootstrap credential.
+
+```bash
+infercrane tenant create team-a --name 'Team A'
+infercrane principal create deploy-bot --role operator
+infercrane principal rotate PRINCIPAL_ID
+infercrane principal revoke PRINCIPAL_ID
+```
+
+New and rotated tokens are returned once. Roles are `viewer`, `operator`, and `admin` according to the configured authorization policy.

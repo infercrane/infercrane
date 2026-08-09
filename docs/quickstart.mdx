@@ -1,0 +1,136 @@
+---
+title: Quickstart
+description: Run InferCrane locally and send an OpenAI-compatible request in under five minutes.
+---
+
+# Run InferCrane locally
+
+This tour starts the complete development topology with PostgreSQL, InferCrane, two GPU-free fake vLLM workers, and a development router. It proves the control and request paths; it is not a performance test or production substitute for vLLM.
+
+## Prerequisites
+
+- Git
+- Docker with Compose v2
+- Ports `18000` and Docker's internal PostgreSQL network available
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/infercrane/infercrane.git
+    cd infercrane
+    ```
+  </Step>
+
+  <Step title="Start the development stack">
+    ```bash
+    docker compose up --build -d
+    docker compose ps
+    curl -fsS http://127.0.0.1:18000/readyz
+    ```
+
+    The final request exits successfully when PostgreSQL is ready. The development API key is `infercrane`; production configuration rejects this default.
+  </Step>
+
+  <Step title="List the logical model">
+    ```bash
+    curl -fsS \
+      -H 'Authorization: Bearer infercrane' \
+      http://127.0.0.1:18000/v1/models
+    ```
+
+    The seeded deployment exposes `qwen-prod`, independently of either worker's network address.
+  </Step>
+
+  <Step title="Send an OpenAI-compatible request">
+    <Tabs>
+      <Tab title="curl">
+        ```bash
+        curl -fsS http://127.0.0.1:18000/v1/chat/completions \
+          -H 'Authorization: Bearer infercrane' \
+          -H 'Content-Type: application/json' \
+          -d '{
+            "model": "qwen-prod",
+            "messages": [{"role": "user", "content": "Hello"}]
+          }'
+        ```
+      </Tab>
+      <Tab title="Python">
+        ```python
+        from openai import OpenAI
+
+        client = OpenAI(
+            base_url="http://127.0.0.1:18000/v1",
+            api_key="infercrane",
+        )
+
+        response = client.chat.completions.create(
+            model="qwen-prod",
+            messages=[{"role": "user", "content": "Hello"}],
+        )
+        print(response.choices[0].message.content)
+        ```
+      </Tab>
+      <Tab title="JavaScript">
+        ```javascript
+        import OpenAI from "openai";
+
+        const client = new OpenAI({
+          baseURL: "http://127.0.0.1:18000/v1",
+          apiKey: "infercrane",
+        });
+
+        const response = await client.chat.completions.create({
+          model: "qwen-prod",
+          messages: [{ role: "user", content: "Hello" }],
+        });
+        console.log(response.choices[0].message.content);
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="Inspect durable state">
+    ```bash
+    docker compose exec infercrane infercrane status qwen-prod
+    docker compose exec infercrane infercrane events qwen-prod
+    docker compose exec infercrane infercrane explain qwen-prod
+    ```
+
+    These CLI workflows call the authenticated control-plane API. They do not read PostgreSQL directly.
+  </Step>
+
+  <Step title="Stop without deleting data">
+    ```bash
+    docker compose down
+    ```
+
+    Add `--volumes` only when you intentionally want to delete the local database volume.
+  </Step>
+</Steps>
+
+## Move to RunPod
+
+The public installation formula is prepared but not yet published. Until the release artifact exists, build the CLI from source:
+
+```bash
+go build -o ./bin/infercrane ./cmd/infercrane
+export INFERCRANE_API_KEY='ISSUED_CONTROL_PLANE_CREDENTIAL'
+./bin/infercrane init --url https://infercrane.example
+./bin/infercrane doctor --cloud
+./bin/infercrane plan Qwen/Qwen3-8B --cloud runpod --gpu L40S
+```
+
+`init` stores an already-issued credential with private file permissions. It does not create a principal. `plan` is side-effect-free and reports pricing as unavailable unless trustworthy provider evidence exists.
+
+<Warning>
+Do not submit a deploy command until the operator has completed [RunPod setup](/provider-setup). A real deployment can create billable resources.
+</Warning>
+
+<CardGroup cols={2}>
+  <Card title="Deployment lifecycle" icon="rotate" href="/features/lifecycle">
+    Learn what remains durable when a terminal or control-plane process disconnects.
+  </Card>
+  <Card title="DeploymentSpec" icon="file-code" href="/deployment-spec">
+    Move from flags to a reviewable YAML deployment definition.
+  </Card>
+</CardGroup>

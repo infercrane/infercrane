@@ -14,6 +14,8 @@ infercrane deploy Qwen/Qwen3-8B
 - Explainable durable operations
 - Elastic and provider-native serverless compute
 
+Read the [InferCrane documentation](https://infercrane.mintlify.site) for the five-minute local quickstart, product concepts, operations, integrations, and references. The Mintlify source lives in [`docs/`](docs/index.mdx); run `npm install && npm run dev` there to preview documentation changes locally.
+
 ## Why InferCrane?
 
 Inference workers are ephemeral, but application endpoints should not be. InferCrane separates
@@ -196,7 +198,7 @@ does not enter the routing decision. A reconciliation loop probes workers concur
 healthy membership, supervises instance-local vLLM Router processes, and atomically publishes new
 routes.
 
-Read the [system architecture](docs/architecture/system.md),
+Read the [system architecture](docs/architecture/system.mdx),
 [data flows](docs/architecture/data-flows.md), and
 [system invariants](docs/architecture/invariants.md) for the complete design.
 
@@ -250,16 +252,16 @@ go test -race -count=1 -v ./internal/store
 ```
 
 Coding agents and contributors begin with [AGENTS.md](AGENTS.md) and the
-[engineering knowledge index](docs/index.md). Architectural decisions, feature contracts,
+[engineering knowledge index](docs/index.mdx). Architectural decisions, feature contracts,
 ownership, capability maturity, and a generated source inventory are maintained in the repository
 and checked by CI.
 
 ## Documentation
 
-- [Engineering knowledge index](docs/index.md)
+- [Engineering knowledge index](docs/index.mdx)
 - [Product vision and roadmap](docs/product-vision.md)
 - [Project status](docs/project-status.md)
-- [Architecture decisions](docs/adr/README.md)
+- [Architecture decisions](docs/adr/index.md)
 - [Production operations](docs/production.md)
 - [Stage 1 existing-worker guide](docs/stage1-poc.md)
 - [Stage 2 SkyPilot guide](docs/stage2-skypilot.md)

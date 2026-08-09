@@ -1,8 +1,15 @@
-# Control-plane API v1
+---
+title: HTTP control API
+description: Authenticated v1 endpoints, roles, idempotency, and stable errors implemented by InferCrane.
+---
+
+# HTTP control API
 
 Base path: `/api/v1`. All requests require `Authorization: Bearer TOKEN`. Mutations require operator
 or admin role; tenant/principal/audit administration requires admin. Cross-tenant resources return
 `404` to avoid existence disclosure.
+
+InferCrane does not currently publish an OpenAPI document, so this reference is maintained against the registered routes in `internal/controlapi/api.go`. Interactive OpenAPI consoles and generated SDK navigation are intentionally not shown until an executable specification becomes authoritative.
 
 Errors are stable JSON objects:
 
@@ -23,6 +30,14 @@ Errors are stable JSON objects:
 | `POST /deployments/{name}/benchmarks` | operator | Run and persist AIPerf evidence for `active`, `candidate`, or an explicit revision. |
 | `GET /deployments/{name}/benchmarks` | viewer | List persisted benchmark history and reproduction metadata. |
 | `GET /deployments/{name}/revisions` | viewer | List immutable revision history. |
+| `POST /deployments/{name}/rollouts` | operator | Create an immutable candidate revision. |
+| `POST /deployments/{name}/rollouts/{revision}/provision` | operator | Queue candidate capacity provisioning. |
+| `POST /deployments/{name}/rollouts/guard/evaluate` | operator | Persist a deterministic Release Guard evaluation. |
+| `GET /deployments/{name}/release-guard/policy` | viewer | Read the persisted Release Guard policy. |
+| `PUT /deployments/{name}/release-guard/policy` | operator | Replace the deterministic guard thresholds. |
+| `POST /deployments/{name}/rollouts/{revision}/promote` | operator | Promote an accepted ready candidate. |
+| `POST /deployments/{name}/rollouts/{revision}/reject` | operator | Reject a candidate with a persisted reason. |
+| `POST /deployments/{name}/rollback` | operator | Queue rollback to an immutable revision. |
 | `GET /deployments/{name}/scaling-decisions` | viewer | List deterministic scaling evaluations and their persisted signals. |
 | `PUT /deployments/{name}/route` | operator | Change the persisted routing strategy. |
 | `DELETE /deployments/{name}` | admin | Withdraw routing and queue verified provider cleanup; requires `Idempotency-Key`. |

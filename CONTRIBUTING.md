@@ -1,6 +1,6 @@
 # Contributing to InferCrane
 
-Start with [AGENTS.md](AGENTS.md) and [docs/index.md](docs/index.md). Humans and coding agents use
+Start with [AGENTS.md](AGENTS.md) and [docs/index.mdx](docs/index.mdx). Humans and coding agents use
 the same workflow and quality gates.
 
 ## Development
