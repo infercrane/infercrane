@@ -32,6 +32,22 @@ func TestDeployCLIOnlySubmitsControlPlaneRequest(t *testing.T) {
 	}
 }
 
+func TestPrimaryDeployPathDefaultsToRunPodL40S(t *testing.T) {
+	var body map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte(`{"operation":{"id":"op-1","status":"pending"}}`))
+	}))
+	defer server.Close()
+
+	err := deployAPICommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, "deploy", []string{"Qwen/Qwen3-8B", "--idempotency-key", "release-1"})
+	if err != nil || body["cloud"] != "runpod" || body["gpu"] != "L40S" {
+		t.Fatalf("body=%#v err=%v", body, err)
+	}
+}
+
 func TestDeleteCLIOnlySubmitsControlPlaneRequest(t *testing.T) {
 	var method, path string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

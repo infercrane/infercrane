@@ -64,15 +64,13 @@ func run(ctx context.Context, args []string) error {
 		return nil
 	case "init":
 		return initCommand(args[1:])
-	case "plan":
-		return planCommand(args[1:])
 	case "doctor":
 		return doctorCommand(ctx, args[1:])
 	case "benchmark":
 		return benchmarkCommand(ctx, args[1:])
 	}
 	switch args[0] {
-	case "target", "deploy", "apply", "deployments", "route", "status", "events", "explain", "delete", "inspect", "operation", "orphans", "tenant", "principal", "serve":
+	case "target", "deploy", "apply", "plan", "deployments", "route", "status", "events", "explain", "delete", "inspect", "operation", "orphans", "tenant", "principal", "serve":
 	default:
 		usage(os.Stderr)
 		return fmt.Errorf("unknown command %q", args[0])
@@ -94,6 +92,8 @@ func run(ctx context.Context, args []string) error {
 		return err
 	}
 	switch args[0] {
+	case "plan":
+		return planCommand(ctx, cfg, args[1:])
 	case "deploy":
 		return deployAPICommand(ctx, cfg, "deploy", args[1:])
 	case "apply":
@@ -187,7 +187,7 @@ func initCommand(args []string) error {
 	return nil
 }
 
-func planCommand(args []string) error {
+func planCommand(ctx context.Context, cfg config.Config, args []string) error {
 	if len(args) == 0 {
 		return errors.New("usage: infercrane plan MODEL [--name NAME] [--targets TARGETS | --cloud CLOUD --gpu GPU]")
 	}
@@ -198,11 +198,13 @@ func planCommand(args []string) error {
 	cloud := fs.String("cloud", "", "SkyPilot cloud")
 	gpu := fs.String("gpu", "", "GPU")
 	region := fs.String("region", "", "region")
+	minReplicas := fs.Int("min", 1, "minimum replicas")
+	maxReplicas := fs.Int("max", 1, "maximum replicas")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
-	in := planning.Input{Name: *name, Model: model, Cloud: *cloud, GPU: *gpu, Region: *region}
+	in := planning.Input{Name: *name, Model: model, Cloud: *cloud, GPU: *gpu, Region: *region, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas}
 	if ext := filepath.Ext(model); ext == ".yaml" || ext == ".yml" {
 		file, err := spec.Load(model)
 		if err != nil {
@@ -218,9 +220,28 @@ func planCommand(args []string) error {
 	} else if *targets != "" {
 		in.Targets = splitTargets(*targets)
 	}
+	if len(in.Targets) == 0 && in.Cloud == "" && in.GPU == "" {
+		in.Cloud, in.GPU = "runpod", "L40S"
+	}
 	p, err := planning.Build(in)
 	if err != nil {
 		return err
+	}
+	current, lookupErr := fetchDeployment(ctx, cfg, p.Name)
+	if lookupErr == nil {
+		activeNumber := 0
+		for _, revision := range current.Revisions {
+			if revision.ID == current.Deployment.ActiveRevisionID {
+				activeNumber = revision.Number
+				break
+			}
+		}
+		p = planning.Compare(p, planning.Current{Model: current.Deployment.Model, Runtime: current.Deployment.Runtime, Routing: current.Deployment.RoutingStrategy, MinReplicas: current.Deployment.MinReplicas, MaxReplicas: current.Deployment.MaxReplicas, ActiveRevision: current.Deployment.ActiveRevisionID, ActiveRevisionNumber: activeNumber})
+	} else {
+		var controlErr *ControlError
+		if !errors.As(lookupErr, &controlErr) || controlErr.Code != "not_found" {
+			return fmt.Errorf("read current deployment for plan: %w", lookupErr)
+		}
 	}
 	switch *output {
 	case "json":
@@ -231,6 +252,12 @@ func planCommand(args []string) error {
 		fmt.Println(string(encoded))
 	case "human":
 		fmt.Printf("Deployment plan: %s\nModel:           %s\nMode:            %s\nRuntime:         %s\nRouting:         %s\n\n", p.Name, p.Model, p.Mode, p.Runtime, p.Routing)
+		for _, change := range p.Changes {
+			fmt.Printf("%-15s %s -> %s\n", change.Field, change.Before, change.After)
+		}
+		if len(p.Changes) > 0 {
+			fmt.Println()
+		}
 		for _, action := range p.Actions {
 			fmt.Printf("%d. %-10s %s\n", action.Order, action.Kind, action.Summary)
 		}
@@ -388,6 +415,9 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 	}
 	if *name == "" {
 		*name = planning.DefaultName(model)
+	}
+	if *targets == "" && *cloud == "" && *gpu == "" {
+		*cloud, *gpu = "runpod", "L40S"
 	}
 	if *minReplicas < 1 || *maxReplicas < *minReplicas {
 		return errors.New("replica bounds must satisfy 1 <= min <= max")
@@ -658,7 +688,17 @@ func controlJSON(ctx context.Context, cfg config.Config, method, path, idempoten
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		data, _ := io.ReadAll(io.LimitReader(response.Body, 1<<20))
-		return fmt.Errorf("control plane returned %s: %s", response.Status, strings.TrimSpace(string(data)))
+		apiErr := &ControlError{StatusCode: response.StatusCode, Code: "http_error", Message: strings.TrimSpace(string(data))}
+		var envelope struct {
+			Error struct {
+				Code    string `json:"code"`
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if json.Unmarshal(data, &envelope) == nil && envelope.Error.Code != "" {
+			apiErr.Code, apiErr.Message = envelope.Error.Code, envelope.Error.Message
+		}
+		return apiErr
 	}
 	if responseBody == nil || response.StatusCode == http.StatusNoContent {
 		_, _ = io.Copy(io.Discard, response.Body)
@@ -668,6 +708,16 @@ func controlJSON(ctx context.Context, cfg config.Config, method, path, idempoten
 		return fmt.Errorf("decode control-plane response: %w", err)
 	}
 	return nil
+}
+
+type ControlError struct {
+	StatusCode int
+	Code       string
+	Message    string
+}
+
+func (e *ControlError) Error() string {
+	return fmt.Sprintf("control plane %s: %s", e.Code, e.Message)
 }
 
 func waitForOperation(ctx context.Context, cfg config.Config, id string) error {

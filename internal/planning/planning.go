@@ -27,6 +27,18 @@ type Cost struct {
 	Reason string `json:"reason"`
 }
 
+type Change struct {
+	Field  string `json:"field"`
+	Before string `json:"before"`
+	After  string `json:"after"`
+}
+
+type Current struct {
+	Model, Runtime, Routing, ActiveRevision string
+	MinReplicas, MaxReplicas                int
+	ActiveRevisionNumber                    int
+}
+
 type Plan struct {
 	Version     int      `json:"version"`
 	Name        string   `json:"name"`
@@ -41,8 +53,41 @@ type Plan struct {
 	MinReplicas int      `json:"min_replicas"`
 	MaxReplicas int      `json:"max_replicas"`
 	Actions     []Action `json:"actions"`
+	Changes     []Change `json:"changes,omitempty"`
 	Warnings    []string `json:"warnings,omitempty"`
 	Cost        Cost     `json:"cost"`
+}
+
+// Compare turns a creation plan into a deterministic revision rollout plan.
+func Compare(p Plan, current Current) Plan {
+	addChange := func(field, before, after string) {
+		if before != after {
+			p.Changes = append(p.Changes, Change{Field: field, Before: before, After: after})
+		}
+	}
+	addChange("model", current.Model, p.Model)
+	addChange("runtime", current.Runtime, p.Runtime)
+	addChange("routing", current.Routing, p.Routing)
+	addChange("replicas", fmt.Sprintf("%d..%d", current.MinReplicas, current.MaxReplicas), fmt.Sprintf("%d..%d", p.MinReplicas, p.MaxReplicas))
+	if len(p.Changes) == 0 {
+		p.Actions = []Action{{Order: 1, Kind: "noop", Summary: "Persisted deployment already matches the requested specification"}}
+		return p
+	}
+	next := current.ActiveRevisionNumber + 1
+	p.Changes = append(p.Changes, Change{Field: "revision", Before: current.ActiveRevision, After: fmt.Sprintf("candidate rev-%d", next)})
+	summaries := []struct{ kind, text string }{
+		{"provision", "Provision candidate capacity"},
+		{"health-check", "Wait for candidate readiness"},
+		{"validate", "Evaluate candidate with persisted guard policy"},
+		{"route", "Route the accepted candidate generation"},
+		{"drain", "Drain the old revision safely"},
+		{"terminate", "Terminate old capacity after drain"},
+	}
+	p.Actions = p.Actions[:0]
+	for i, action := range summaries {
+		p.Actions = append(p.Actions, Action{Order: i + 1, Kind: action.kind, Summary: action.text})
+	}
+	return p
 }
 
 func Build(in Input) (Plan, error) {

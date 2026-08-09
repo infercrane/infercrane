@@ -8,7 +8,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 
 | Package path | Source files | Test files | Test functions |
 |---|---:|---:|---|
-| `cmd/infercrane` | 1 | 1 | `TestDeleteCLIOnlySubmitsControlPlaneRequest`, `TestDeployCLIOnlySubmitsControlPlaneRequest` |
+| `cmd/infercrane` | 1 | 1 | `TestDeleteCLIOnlySubmitsControlPlaneRequest`, `TestDeployCLIOnlySubmitsControlPlaneRequest`, `TestPrimaryDeployPathDefaultsToRunPodL40S` |
 | `internal/accounting` | 1 | 0 | — |
 | `internal/authn` | 1 | 1 | `TestCacheAuthenticatesWithoutSourceOnRequestPath` |
 | `internal/authz` | 1 | 1 | `TestPolicy` |
@@ -22,7 +22,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 | `internal/gateway` | 2 | 2 | `TestActiveStreamKeepsSelectedRouterAcrossGenerationPublish`, `TestAuthentication`, `TestCompletionRewritesAlias`, `TestModelsAreTenantScoped`, `TestTelemetryExportsPrometheusHistogram` |
 | `internal/metrics` | 1 | 1 | `TestParse` |
 | `internal/operations` | 2 | 2 | `TestTelemetryExportsCounters`, `TestWorkerAppliesConfiguredJitter`, `TestWorkerCancelsRecoveredClaimBeforeHandler`, `TestWorkerCompletesClaimedOperation`, `TestWorkerRetriesFailedCancellationCleanup`, `TestWorkerSchedulesBoundedRetry`, `TestWorkerStopsRetryAtMaxAttempts` |
-| `internal/planning` | 1 | 1 | `TestBuildProvisionedPlan`, `TestBuildRejectsMixedModes`, `TestIncompletePlanIsActionable` |
+| `internal/planning` | 1 | 1 | `TestBuildProvisionedPlan`, `TestBuildRejectsMixedModes`, `TestCompareProducesSemanticRevisionPlan`, `TestIncompletePlanIsActionable` |
 | `internal/pricing` | 1 | 1 | `TestCatalogAndStaleness` |
 | `internal/provision` | 1 | 1 | `TestDeleteReplicaIsIdempotent`, `TestEnsureDoesNotLaunchWhenDiscoveryFails`, `TestEnsureDoesNotRelaunchActiveRequest`, `TestEnsureRelaunchesMissingOrFailedRequest`, `TestEnsureReplicaDiscoversExistingResource`, `TestEnsureTreatsExplicitMissingClusterAsAbsent`, `TestEnsureTreatsSuccessfulMissingClusterMessageAsAbsent`, `TestInventoryFiltersOwnedResources`, `TestObserveParsesSkyPilotNoticeBeforeJSON` |
 | `internal/reconcile` | 1 | 1 | `TestRouterCandidateFailureLeavesOldGenerationServing`, `TestRouterCandidatePublishesBeforeOldRetires` |

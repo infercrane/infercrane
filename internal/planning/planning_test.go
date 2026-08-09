@@ -28,3 +28,14 @@ func TestIncompletePlanIsActionable(t *testing.T) {
 		t.Fatalf("unexpected plan: %#v", p)
 	}
 }
+
+func TestCompareProducesSemanticRevisionPlan(t *testing.T) {
+	p, err := Build(Input{Model: "model-v2", Cloud: "runpod", GPU: "L40S", MinReplicas: 2, MaxReplicas: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p = Compare(p, Current{Model: "model-v1", Runtime: "vllm", Routing: "round-robin", MinReplicas: 1, MaxReplicas: 2, ActiveRevision: "deployment-rev-18", ActiveRevisionNumber: 18})
+	if len(p.Changes) != 3 || p.Changes[2].After != "candidate rev-19" || len(p.Actions) != 6 {
+		t.Fatalf("unexpected comparison: %#v", p)
+	}
+}
