@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -296,6 +297,21 @@ func TestInvalidOutputIsRejectedBeforeAnyControlPlaneRequest(t *testing.T) {
 				t.Fatalf("control-plane requests=%d, want %d", requests, before)
 			}
 		})
+	}
+}
+
+func TestJSONOutputRendersStructuredControlPlaneFailure(t *testing.T) {
+	var output bytes.Buffer
+	writeCLIError(&output, []string{"status", "qwen", "--output", "json"}, &ControlError{StatusCode: http.StatusServiceUnavailable, Code: "provider_unavailable", Category: "dependency", Message: "RunPod is unavailable", Retryable: true, Remediation: "Retry with the same idempotency key."})
+	var envelope struct {
+		Error struct {
+			Code, Category, Message, Remediation string
+			Retryable                            bool
+			Status                               int
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &envelope); err != nil || envelope.Error.Code != "provider_unavailable" || envelope.Error.Category != "dependency" || !envelope.Error.Retryable || envelope.Error.Status != http.StatusServiceUnavailable || strings.Contains(output.String(), "Error:") {
+		t.Fatalf("output=%s envelope=%#v err=%v", output.String(), envelope, err)
 	}
 }
 

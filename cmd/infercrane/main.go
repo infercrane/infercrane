@@ -48,9 +48,29 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := run(ctx, os.Args[1:]); err != nil {
-		fmt.Fprintln(os.Stderr, "Error:", err)
+		writeCLIError(os.Stderr, os.Args[1:], err)
 		os.Exit(2)
 	}
+}
+
+func writeCLIError(w io.Writer, args []string, err error) {
+	jsonOutput := false
+	for index, arg := range args {
+		if arg == "--output=json" || (arg == "--output" && index+1 < len(args) && args[index+1] == "json") {
+			jsonOutput = true
+			break
+		}
+	}
+	if !jsonOutput {
+		fmt.Fprintln(w, "Error:", err)
+		return
+	}
+	detail := map[string]any{"code": "client_error", "category": "client", "message": err.Error(), "retryable": false, "remediation": "Correct the command or inspect current durable state before retrying."}
+	var controlErr *ControlError
+	if errors.As(err, &controlErr) {
+		detail = map[string]any{"code": controlErr.Code, "category": controlErr.Category, "message": controlErr.Message, "retryable": controlErr.Retryable, "remediation": controlErr.Remediation, "status": controlErr.StatusCode}
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"error": detail})
 }
 func run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
