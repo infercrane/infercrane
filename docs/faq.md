@@ -2,7 +2,7 @@
 
 ## Does v0.1 support any model, engine, or cloud?
 
-No. The public contract is vLLM on RunPod with Hugging Face model artifacts.
+No. InferCrane's control-plane architecture is extensible, but v0.1 qualifies only vLLM on RunPod with Hugging Face model artifacts. Additional providers and runtimes require their own adapter and acceptance evidence before they become supported.
 
 ## Do I need Kubernetes?
 
@@ -14,7 +14,11 @@ No. It applies a persisted deterministic policy to measured evidence.
 
 ## Does serverless mean InferCrane schedules GPUs?
 
-No. RunPod owns worker allocation and scale-to-zero; InferCrane owns logical lifecycle and evidence.
+No. The registered serverless provider owns worker allocation and scale-to-zero; InferCrane owns logical lifecycle and evidence. RunPod Serverless is the first v0.1 backend.
+
+## Is InferCrane coupled to RunPod or vLLM?
+
+No at the lifecycle boundary. Providers, runtimes, serverless status, artifacts, and benchmark tools are external adapters composed around durable InferCrane state machines. The current release has one qualified combination, so some implementation pages necessarily describe RunPod and vLLM specifically.
 
 ## Are prompts or outputs stored?
 

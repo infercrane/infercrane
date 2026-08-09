@@ -1,6 +1,6 @@
 # Product vision and roadmap
 
-InferCrane should make operating high-performance, production LLM inference feel as dependable
+InferCrane should make operating high-performance, production inference feel as dependable
 as operating a mature database: simple at the entry point, explicit at risky boundaries, and
 observable all the way down.
 
@@ -13,7 +13,7 @@ policy, runtime configuration, cost uncertainty, or failure state.
 
 The experience is guided by five principles:
 
-1. **Fast first success.** A local evaluation and an existing-vLLM deployment should take minutes.
+1. **Fast first success.** A local evaluation and an existing-runtime deployment should take minutes.
 2. **Preview before mutation.** Potentially expensive actions have deterministic, machine-readable
    plans and explicit inputs.
 3. **Progressive disclosure.** Strong defaults serve the common path; YAML and APIs expose control

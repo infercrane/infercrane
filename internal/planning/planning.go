@@ -174,8 +174,8 @@ func Build(in Input) (Plan, error) {
 	case in.ComputeMode == "serverless" && in.Cloud != "":
 		p.Mode = "serverless"
 		add("artifact", "Resolve the model to an immutable Hugging Face artifact")
-		add("template", "Validate the configured RunPod vLLM template against that artifact")
-		add("endpoint", fmt.Sprintf("Create a RunPod Serverless endpoint on %s with zero minimum workers", in.GPU))
+		add("template", "Validate the configured serverless runtime template against that artifact")
+		add("endpoint", fmt.Sprintf("Create a provider-native serverless endpoint on %s with zero minimum workers", in.GPU))
 		add("register", "Register the provider-native OpenAI-compatible endpoint")
 	case in.Cloud != "":
 		p.Mode = "provisioned"
@@ -191,9 +191,9 @@ func Build(in Input) (Plan, error) {
 		add("route", fmt.Sprintf("Reconcile the %s routing generation", in.Routing))
 	}
 	if p.Mode == "serverless" {
-		add("autoscale", fmt.Sprintf("Delegate zero-to-%d worker scaling to RunPod", in.MaxReplicas))
+		add("autoscale", fmt.Sprintf("Delegate zero-to-%d worker scaling to the provider backend", in.MaxReplicas))
 	} else if in.MaxReplicas > in.MinReplicas {
-		add("autoscale", fmt.Sprintf("Enable bounded vLLM queue scaling from %d to %d replicas", in.MinReplicas, in.MaxReplicas))
+		add("autoscale", fmt.Sprintf("Enable bounded runtime-signal scaling from %d to %d replicas", in.MinReplicas, in.MaxReplicas))
 	}
 	return p, nil
 }

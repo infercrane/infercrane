@@ -17,6 +17,7 @@ import (
 	"github.com/infercrane/infercrane/internal/benchmark"
 	"github.com/infercrane/infercrane/internal/doctor"
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/support"
 	"github.com/infercrane/infercrane/internal/workflows"
 )
 
@@ -64,8 +65,14 @@ type API struct {
 		Run(context.Context, benchmark.Config) (benchmark.Result, error)
 	}
 	Diagnostics              func(context.Context, bool, bool) doctor.Report
-	BenchmarkAPIKeys         map[string]string
+	Backends                 map[string]BackendMetadata
 	GatewayURL, AIPerfBinary string
+}
+
+type BackendMetadata struct {
+	APIKey     string
+	APIKeyEnv  string
+	Serverless bool
 }
 type identityKey struct{}
 
@@ -229,16 +236,15 @@ func (a API) runBenchmark(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 409, "candidate_not_ready", "selected revision has no healthy ready endpoint")
 			return
 		}
-		credential = a.BenchmarkAPIKeys[provider]
+		backend := a.Backends[provider]
+		credential = backend.APIKey
 		if credential == "" {
 			writeError(w, 503, "benchmark_unavailable", "candidate benchmark credential is not configured for provider "+provider)
 			return
 		}
 		model = revisionSpec.Model
-		if provider == "runpod-serverless" {
-			apiKeyEnv = "RUNPOD_API_KEY"
-		} else {
-			apiKeyEnv = "INFERCRANE_WORKER_API_KEY"
+		if backend.APIKeyEnv != "" {
+			apiKeyEnv = backend.APIKeyEnv
 		}
 	}
 	measured, err := a.BenchmarkRunner.Run(r.Context(), benchmark.Config{Binary: a.AIPerfBinary, Endpoint: endpoint, APIKey: credential, APIKeyEnv: apiKeyEnv, Model: model, Requests: request.Requests, Concurrency: request.Concurrency, RandomSeed: request.RandomSeed})
@@ -308,7 +314,7 @@ func (a API) deleteDeployment(w http.ResponseWriter, r *http.Request) {
 	encoded, _ := json.Marshal(request)
 	deleteKind := workflows.DeleteKind
 	for _, target := range resolved.Targets {
-		if target.Provider == "runpod-serverless" {
+		if a.Backends[target.Provider].Serverless {
 			deleteKind = workflows.ServerlessDeleteKind
 			break
 		}
@@ -826,7 +832,7 @@ func (a API) addTarget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if request.Runtime == "" {
-		request.Runtime = "vllm"
+		request.Runtime = support.DefaultRuntime
 	}
 	parsed, err := url.Parse(request.URL)
 	if request.Name == "" || err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {

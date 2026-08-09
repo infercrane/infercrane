@@ -11,6 +11,8 @@ import (
 
 const (
 	DefaultRuntime = "vllm"
+	DefaultCloud   = "runpod"
+	DefaultGPU     = "L40S"
 	ElasticMode    = "elastic"
 	ServerlessMode = "serverless"
 )
@@ -47,7 +49,7 @@ func New(runtimes []string, clouds map[string][]string) Matrix {
 }
 
 func V01() Matrix {
-	return New([]string{DefaultRuntime}, map[string][]string{"runpod": {ElasticMode, ServerlessMode}})
+	return New([]string{DefaultRuntime}, map[string][]string{DefaultCloud: {ElasticMode, ServerlessMode}})
 }
 
 func (m Matrix) Validate(runtime, cloud, mode string) error {

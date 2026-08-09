@@ -39,6 +39,7 @@ import (
 	runtimeadapter "github.com/infercrane/infercrane/internal/runtime"
 	"github.com/infercrane/infercrane/internal/spec"
 	"github.com/infercrane/infercrane/internal/store"
+	"github.com/infercrane/infercrane/internal/support"
 	"github.com/infercrane/infercrane/internal/workflows"
 )
 
@@ -220,7 +221,7 @@ func planCommand(ctx context.Context, cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("plan", flag.ContinueOnError)
 	name := fs.String("name", "", "deployment name")
 	targets := fs.String("targets", "", "comma-separated existing targets")
-	cloud := fs.String("cloud", "", "SkyPilot cloud")
+	cloud := fs.String("cloud", "", "provider cloud")
 	gpu := fs.String("gpu", "", "GPU")
 	region := fs.String("region", "", "region")
 	computeMode := fs.String("compute", "elastic", "compute mode: elastic or serverless")
@@ -262,7 +263,7 @@ func planCommand(ctx context.Context, cfg config.Config, args []string) error {
 		in.Targets = splitTargets(*targets)
 	}
 	if len(in.Targets) == 0 && in.Cloud == "" && in.GPU == "" {
-		in.Cloud, in.GPU = "runpod", "L40S"
+		in.Cloud, in.GPU = support.DefaultCloud, support.DefaultGPU
 	}
 	p, err := planning.Build(in)
 	if err != nil {
@@ -485,7 +486,7 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 	fs := flag.NewFlagSet("deploy", flag.ContinueOnError)
 	name := fs.String("name", "", "deployment name")
 	targets := fs.String("targets", "", "comma-separated targets")
-	cloud := fs.String("cloud", "", "SkyPilot cloud")
+	cloud := fs.String("cloud", "", "provider cloud")
 	gpu := fs.String("gpu", "", "GPU")
 	region := fs.String("region", "", "region")
 	computeMode := fs.String("compute", "elastic", "compute mode: elastic or serverless")
@@ -536,7 +537,7 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 		*name = planning.DefaultName(model)
 	}
 	if *targets == "" && *cloud == "" && *gpu == "" {
-		*cloud, *gpu = "runpod", "L40S"
+		*cloud, *gpu = support.DefaultCloud, support.DefaultGPU
 	}
 	if *computeMode == "serverless" && !minExplicit {
 		*minReplicas = 0
@@ -1473,12 +1474,12 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 	routing := fs.String("routing", "round-robin", "candidate routing strategy")
 	minReplicas := fs.Int("min", 1, "candidate minimum replicas")
 	maxReplicas := fs.Int("max", 1, "candidate maximum replicas")
-	cloud := fs.String("cloud", "", "candidate cloud (runpod)")
+	cloud := fs.String("cloud", "", "candidate provider cloud")
 	gpu := fs.String("gpu", "", "candidate GPU")
 	region := fs.String("region", "", "candidate region")
 	modelRevision := fs.String("model-revision", "", "candidate model revision")
-	runtimeVersion := fs.String("runtime-version", "", "candidate vLLM version")
-	runtimeArgs := fs.String("runtime-args", "", "comma-separated candidate vLLM arguments")
+	runtimeVersion := fs.String("runtime-version", "", "candidate runtime version")
+	runtimeArgs := fs.String("runtime-args", "", "comma-separated candidate runtime arguments")
 	rest := args[2:]
 	revisionID := ""
 	if action != "create" && action != "evaluate" {
@@ -1593,7 +1594,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		defer cancel()
 		_ = recorder.Close(closeCtx)
 	}()
-	rec := &reconcile.Reconciler{Store: s, Routes: directory, Router: backend, Runtime: runtime, Interval: cfg.HealthInterval, RouterStartPort: cfg.RouterStartPort, InstanceID: cfg.InstanceID, Logger: logger, DirectTargets: map[string]reconcile.DirectTargetBackend{"runpod-serverless": {Provider: "runpod", APIKey: cfg.RunPodAPIKey, Status: serverless}}}
+	rec := &reconcile.Reconciler{Store: s, Routes: directory, Router: backend, Runtimes: map[string]reconcile.Runtime{support.DefaultRuntime: runtime}, Interval: cfg.HealthInterval, RouterStartPort: cfg.RouterStartPort, InstanceID: cfg.InstanceID, Logger: logger, DirectTargets: map[string]reconcile.DirectTargetBackend{"runpod-serverless": {Provider: "runpod", APIKey: cfg.RunPodAPIKey, Status: serverless}}}
 	go purgeRequests(ctx, s, cfg.RequestRetention, logger)
 	go func() {
 		_ = rec.Run(ctx)
@@ -1615,7 +1616,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		}
 		return report
 	}
-	control := (controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: credentialCache, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, BenchmarkAPIKeys: map[string]string{"skypilot": cfg.APIKey, "runpod-serverless": cfg.RunPodAPIKey}, GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary}).Handler()
+	control := (controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: credentialCache, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: map[string]controlapi.BackendMetadata{"skypilot": {APIKey: cfg.APIKey, APIKeyEnv: "INFERCRANE_WORKER_API_KEY"}, "runpod-serverless": {APIKey: cfg.RunPodAPIKey, APIKeyEnv: "RUNPOD_API_KEY", Serverless: true}}, GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary}).Handler()
 	operationTelemetry := &operations.Telemetry{}
 	handlers := workflows.DeploymentHandlers(s)
 	for kind, handler := range workflows.RolloutHandlers(s) {

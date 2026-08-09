@@ -236,7 +236,7 @@ func TestCandidateBenchmarkUsesExplicitHealthyRevisionEndpoint(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments/qwen/benchmarks", strings.NewReader(`{"requests":10,"concurrency":2,"random_seed":42,"revision":"candidate"}`))
 	request.Header.Set("Authorization", "Bearer bootstrap")
 	response := httptest.NewRecorder()
-	(API{Store: store, APIKey: "bootstrap", BenchmarkRunner: runner, BenchmarkAPIKeys: map[string]string{"skypilot": "worker-secret"}, GatewayURL: "http://gateway", AIPerfBinary: "aiperf"}).Handler().ServeHTTP(response, request)
+	(API{Store: store, APIKey: "bootstrap", BenchmarkRunner: runner, Backends: map[string]BackendMetadata{"skypilot": {APIKey: "worker-secret", APIKeyEnv: "INFERCRANE_WORKER_API_KEY"}}, GatewayURL: "http://gateway", AIPerfBinary: "aiperf"}).Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusCreated || runner.config.Endpoint != "https://candidate.invalid" || runner.config.Model != "Qwen/Qwen3-8B" || runner.config.APIKey != "worker-secret" || runner.config.APIKeyEnv != "INFERCRANE_WORKER_API_KEY" || len(store.benchmarks) != 1 || store.benchmarks[0].RevisionID != "rev-candidate" || !strings.Contains(store.benchmarks[0].WorkloadJSON, `"direct_revision_validation":true`) {
 		t.Fatalf("response=%d %s config=%#v benchmarks=%#v", response.Code, response.Body.String(), runner.config, store.benchmarks)
 	}
@@ -344,7 +344,7 @@ func TestServerlessDeleteQueuesEndpointCleanup(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer secret")
 	request.Header.Set("Idempotency-Key", "delete-qwen-serverless")
 	response := httptest.NewRecorder()
-	(API{Store: store, APIKey: "secret"}).Handler().ServeHTTP(response, request)
+	(API{Store: store, APIKey: "secret", Backends: map[string]BackendMetadata{"runpod-serverless": {Serverless: true}}}).Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusAccepted || store.operation.Kind != "deployment.serverless.delete" {
 		t.Fatalf("response=%d %s operation=%#v", response.Code, response.Body.String(), store.operation)
 	}

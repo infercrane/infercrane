@@ -75,7 +75,7 @@ func Load(path string) (Deployment, error) {
 		return out, fmt.Errorf("scaling.max_replicas must be >= scaling.min_replicas")
 	}
 	if out.Compute.Mode == "serverless" && out.Scaling.MinReplicas != 0 {
-		return out, fmt.Errorf("RunPod Serverless requires scaling.min_replicas 0")
+		return out, fmt.Errorf("serverless compute requires scaling.min_replicas 0")
 	}
 	return out, nil
 }

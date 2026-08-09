@@ -26,10 +26,11 @@ but lacks production qualification; **planned** is not a product capability.
 | Bounded autoscaling controller | Experimental | Durable fleet scaling and router-fenced scale-down are enabled; real RunPod 1→N→1 acceptance remains. |
 | Immutable ModelArtifact identity | Experimental | Hugging Face references resolve to immutable commits with grounded metadata; real transfer/cache evidence remains. |
 | Release Guard | Experimental | Policies, measurements, evaluations, and deterministic promote/reject reasons persist; real active/candidate evidence remains. |
-| RunPod Serverless | Experimental | Replay-safe endpoint lifecycle, scale-to-zero routing, cancellation, and accounting are implemented; real cold/warm acceptance remains. |
+| Provider-native serverless contract | Experimental | Replay-safe endpoint lifecycle, scale-to-zero routing, cancellation, accounting, and registered direct-target reconciliation are implemented. RunPod is the first adapter; real cold/warm acceptance remains. |
 | Cold-start intelligence | Experimental | Grounded worker-at-arrival and gateway TTFT evidence persist; provider-hidden substages remain unavailable. |
 | Deterministic explanations | Implemented | Deployment, scaling, rollout, and cold-start output is reproduced from persisted state and measurements. |
-| Capacity and runtime adapter contracts | Experimental | GPU/cache-aware deterministic placement exists; v0.1 operational paths are SkyPilot/RunPod elastic, RunPod Serverless, and vLLM. |
+| Integration registration and qualification | Implemented | Lifecycle backends resolve by cloud/runtime and durable adapter identity; the release qualification matrix remains separate. |
+| Capacity and runtime adapter contracts | Experimental | GPU/cache-aware deterministic placement exists; the first v0.1 operational composition is SkyPilot/RunPod elastic, RunPod Serverless, and vLLM. |
 | Scoped tenant identity and RBAC | Experimental | Hashed rotation/revocation credentials and resource isolation are wired; distributed request-rate enforcement and adversarial qualification remain. |
 | SkyPilot RunPod provisioning | Experimental | Requires credentialed elastic lifecycle acceptance and soak tests. |
 | Production performance claims | Planned | Must be backed by reproducible real-vLLM benchmarks. |

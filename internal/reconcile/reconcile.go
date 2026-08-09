@@ -47,7 +47,7 @@ type Reconciler struct {
 	Store           Store
 	Routes          *routes.Directory
 	Router          router.Backend
-	Runtime         Runtime
+	Runtimes        map[string]Runtime
 	Interval        time.Duration
 	RouterStartPort int
 	InstanceID      string
@@ -129,6 +129,15 @@ func (r *Reconciler) Once(ctx context.Context) error {
 				inspections[i] = result
 				continue
 			}
+			runtimeName := target.Runtime
+			if runtimeName == "" {
+				runtimeName = d.Runtime
+			}
+			runtimeInspector, registered := r.Runtimes[runtimeName]
+			if !registered {
+				inspections[i] = inspection{target: target}
+				continue
+			}
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
@@ -138,7 +147,7 @@ func (r *Reconciler) Once(ctx context.Context) error {
 				case <-ctx.Done():
 					return
 				}
-				ok, models := r.Runtime.Inspect(ctx, target.URL)
+				ok, models := runtimeInspector.Inspect(ctx, target.URL)
 				inspections[i] = inspection{target: target, ok: ok, models: models}
 			}()
 		}

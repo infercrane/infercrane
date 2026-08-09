@@ -1,15 +1,19 @@
-# RunPod Serverless
+# Provider-native serverless
 
-InferCrane v0.1 uses RunPod Serverless as its provider-native serverless backend. RunPod owns
-worker allocation, queueing, scale-up, idle scale-down, and GPU scheduling. InferCrane owns the
+InferCrane delegates worker allocation, queueing, scale-up, idle scale-down, and GPU scheduling to
+a registered provider-native backend. InferCrane owns the
 logical deployment, durable endpoint operation, immutable model identity, routing metadata,
 telemetry, deletion, and explanations.
 
-<img src="/images/diagrams/serverless-lifecycle.svg" alt="Animated RunPod Serverless lifecycle from zero workers through cold allocation, a warm request, and provider idle scale-down to zero." />
+<img src="/images/diagrams/serverless-lifecycle.svg" alt="Animated provider-native serverless lifecycle from zero workers through cold allocation, a warm request, and provider idle scale-down to zero." />
 
-## Provider setup
+Backends implement one lifecycle contract for endpoint creation, observation, deletion, inventory,
+health, and an OpenAI-compatible endpoint URL. InferCrane does not contain a GPU scheduler or a
+provider switch in its durable serverless workflow.
 
-Create or select a RunPod Serverless template using RunPod's maintained vLLM worker. The template
+## RunPod implementation in v0.1
+
+RunPod Serverless is the first qualified backend. Create or select a template using RunPod's maintained vLLM worker. The template
 must set:
 
 - `MODEL_NAME` to the exact Hugging Face repository, such as `Qwen/Qwen3-8B`.
@@ -38,17 +42,17 @@ infercrane deploy Qwen/Qwen3-8B --compute serverless --cloud runpod --gpu L40S -
 ```
 
 Serverless deployments always use zero minimum workers in v0.1. The logical InferCrane endpoint
-remains stable while RunPod scales workers from zero on the first request, back to zero after its
+remains stable while the provider scales workers from zero on the first request, back to zero after its
 idle timeout, and from zero again on later requests. InferCrane does not poll the inference URL for
 health because doing so would create or retain warm workers.
 
 Inference requests continue to use the InferCrane credential and logical model name. The gateway
-replaces that credential with the RunPod credential only for the upstream request. It forwards
+replaces that credential with the registered upstream credential only for the upstream request. It forwards
 streaming incrementally and propagates client cancellation through the request context.
 
 ## Delete and recovery
 
-Deletion first withdraws the logical route, then deletes the RunPod endpoint, confirms that the
+Deletion first withdraws the logical route, then deletes the provider endpoint, confirms that the
 endpoint is absent from provider inventory, removes persisted target capacity, and finally removes
 the logical deployment. Every step is a durable operation and can resume after a control-plane
 restart.
@@ -59,7 +63,7 @@ matches or immutable-spec mismatches fail visibly instead of creating another bi
 
 ## Current limitations
 
-- One configured immutable vLLM template is supported per control-plane process.
+- The first backend supports one configured immutable vLLM template per control-plane process.
 - Real RunPod cold/warm, streaming, cancellation, scale-to-zero, and billing acceptance is still
   required before the v0.1 release candidate is declared ready.
 - InferCrane records request timing and token metadata but does not record prompts or generated

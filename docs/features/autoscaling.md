@@ -4,4 +4,4 @@ Elastic deployments use bounded queue-aware scaling between explicit minimum and
 
 `infercrane explain scaling DEPLOYMENT` returns the latest action, old/new capacity, reason, signal snapshot, and timestamp. If evidence is insufficient or cooldown prevents a change, the persisted no-op decision explains why.
 
-Serverless deployments delegate zero-to-N worker scheduling to RunPod and retain one logical endpoint. InferCrane does not implement a GPU serverless scheduler.
+Serverless deployments delegate zero-to-N worker scheduling to the registered provider-native backend and retain one logical endpoint. InferCrane does not implement a GPU serverless scheduler. RunPod supplies the first qualified v0.1 implementation.

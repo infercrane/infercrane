@@ -96,7 +96,7 @@ func TestDurableAutoscalingAcceptanceOneToTwoToOne(t *testing.T) {
 		t.Fatal(err)
 	}
 	provider := &acceptanceProvider{existing: map[string]bool{}}
-	handlers := workflows.CloudHandlers(s, provider, acceptanceRuntime{}, acceptanceArtifactResolver{})
+	handlers := workflows.QualifiedV01CloudHandlers(s, provider, acceptanceRuntime{}, acceptanceArtifactResolver{})
 	worker := operations.Worker{Repository: s, Handlers: handlers, Owner: "acceptance-worker", Lease: time.Second, BaseBackoff: time.Millisecond, MaxBackoff: time.Millisecond, Jitter: func(d time.Duration) time.Duration { return d }}
 	if worked, workerErr := worker.Once(ctx); workerErr != nil || !worked {
 		t.Fatalf("initial converge worked=%t err=%v", worked, workerErr)
@@ -170,7 +170,7 @@ func TestGuardedRolloutAcceptanceResumesAfterCutoverRestart(t *testing.T) {
 	for kind, handler := range workflows.ReleaseGuardHandlers(s) {
 		handlers[kind] = handler
 	}
-	for kind, handler := range workflows.CloudHandlers(s, provider, acceptanceRuntime{}, acceptanceArtifactResolver{}) {
+	for kind, handler := range workflows.QualifiedV01CloudHandlers(s, provider, acceptanceRuntime{}, acceptanceArtifactResolver{}) {
 		handlers[kind] = handler
 	}
 	worker := operations.Worker{Repository: s, Handlers: handlers, Owner: "rollout-worker-before-restart", Lease: time.Second, BaseBackoff: time.Millisecond, MaxBackoff: time.Millisecond, Jitter: func(d time.Duration) time.Duration { return d }}
@@ -260,7 +260,7 @@ func TestBadCandidateAcceptanceRejectsRevisionAndDeletesCapacity(t *testing.T) {
 		t.Fatal(err)
 	}
 	provider := &acceptanceProvider{existing: map[string]bool{}}
-	handlers := workflows.CloudHandlers(s, provider, acceptanceRuntime{}, acceptanceArtifactResolver{})
+	handlers := workflows.QualifiedV01CloudHandlers(s, provider, acceptanceRuntime{}, acceptanceArtifactResolver{})
 	worker := operations.Worker{Repository: s, Handlers: handlers, Owner: "bad-rollout-worker", Lease: time.Second, BaseBackoff: time.Millisecond, MaxBackoff: time.Millisecond, Jitter: func(d time.Duration) time.Duration { return d }}
 	if worked, workerErr := worker.Once(ctx); workerErr != nil || !worked {
 		t.Fatalf("initial converge worked=%t err=%v", worked, workerErr)

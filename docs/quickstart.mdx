@@ -108,7 +108,7 @@ This tour starts the complete development topology with PostgreSQL, InferCrane, 
   </Step>
 </Steps>
 
-## Move to RunPod
+## Move to a qualified provider
 
 The public installation formula is prepared but not yet published. Until the release artifact exists, build the CLI from source:
 
@@ -123,7 +123,7 @@ export INFERCRANE_API_KEY='ISSUED_CONTROL_PLANE_CREDENTIAL'
 `init` stores an already-issued credential with private file permissions. It does not create a principal. `plan` is side-effect-free and reports pricing as unavailable unless trustworthy provider evidence exists.
 
 <Warning>
-Do not submit a deploy command until the operator has completed [RunPod setup](/provider-setup). A real deployment can create billable resources.
+RunPod is the first v0.1 qualification target. Do not submit a deploy command until the operator has completed [provider setup](/provider-setup). A real deployment can create billable resources.
 </Warning>
 
 <CardGroup cols={2}>

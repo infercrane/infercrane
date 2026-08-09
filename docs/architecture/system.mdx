@@ -23,19 +23,20 @@ flowchart LR
     REC[Reconciler]
     SNAP[Atomic route snapshot]
     GW[Gateway]
-    ROUTER[vLLM Router generation]
+    ROUTER[Replica router generation]
   end
 
   subgraph external[External systems]
-    SKY[SkyPilot]
-    RP[RunPod APIs]
-    V1[vLLM replica]
-    V2[vLLM replica]
+    ELASTIC[Elastic backend adapter]
+    NATIVE[Serverless backend adapter]
+    V1[Runtime replica]
+    V2[Runtime replica]
   end
 
   CLI --> API --> DB
   DB --> OPS
-  OPS --> SKY --> RP
+  OPS --> ELASTIC
+  OPS --> NATIVE
   DB --> REC
   REC --> V1
   REC --> V2
@@ -51,18 +52,18 @@ flowchart LR
 
 The CLI submits authenticated API operations. PostgreSQL stores desired and observed deployment state, immutable revisions, replicas, operations, events, policy evaluations, and bounded measurements. A leased worker resumes pending provider work after process failure and reconciles results back into persisted state.
 
-Provider ownership stays explicit:
+External ownership stays explicit and replaceable behind narrow adapters:
 
-- SkyPilot provisions elastic RunPod infrastructure.
-- RunPod owns provider-native serverless worker allocation.
-- Hugging Face tooling resolves and transfers model artifacts.
-- AIPerf generates benchmark load.
+- An elastic backend provisions and deletes replica infrastructure.
+- A provider-native serverless backend owns worker allocation and scale-to-zero.
+- An artifact resolver identifies and transfers immutable model artifacts.
+- A benchmark runner generates load and returns reproducible evidence.
 
-InferCrane does not replace any of them with a general scheduler or workflow engine.
+InferCrane does not replace any of them with a general scheduler or workflow engine. The v0.1 process composes SkyPilot/RunPod, RunPod Serverless, Hugging Face tooling, AIPerf, and vLLM implementations. The durable algorithms do not select those implementations with provider conditionals; [qualification is separate from registration](/adr/0009-qualified-support-and-backend-registration).
 
 ## Data plane
 
-An OpenAI-compatible request resolves the logical model alias from an atomic route snapshot. It then passes to an instance-owned vLLM Router generation and a healthy vLLM worker. No PostgreSQL lookup occurs in that routing decision.
+An OpenAI-compatible request resolves the logical model alias from an atomic route snapshot. For the v0.1 runtime, it then passes to an instance-owned vLLM Router generation and a healthy vLLM worker. No PostgreSQL lookup occurs in that routing decision.
 
 Each horizontally scaled gateway process owns its loopback router processes and deterministic ports. Gateway instances share PostgreSQL state, never another instance's local router.
 

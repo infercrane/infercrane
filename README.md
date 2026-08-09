@@ -2,7 +2,7 @@
 
 Production inference without the platform engineering.
 
-Deploy, autoscale, benchmark, and safely update vLLM workloads on GPU infrastructure you control.
+Deploy, autoscale, benchmark, and safely update inference workloads on GPU infrastructure you control.
 
 ```bash
 infercrane deploy Qwen/Qwen3-8B
@@ -24,19 +24,21 @@ while workers are replaced, recovered, or reconfigured.
 
 - Stable OpenAI-compatible model aliases.
 - Persistent desired and observed state in PostgreSQL.
-- Health and served-model reconciliation for vLLM workers.
-- Supervised upstream vLLM Router processes with multiple routing strategies.
+- Runtime health and served-model reconciliation through an adapter contract.
+- Supervised replica routing with deterministic generation safety.
 - Streaming chat completions without database reads on the request-routing path.
-- Existing-worker registration, SkyPilot elastic provisioning, and RunPod Serverless lifecycle.
+- Existing-worker registration plus registered elastic and provider-native serverless backends.
 - Prometheus telemetry, readiness/liveness probes, request accounting, and graceful shutdown.
 - Multi-replica gateway architecture with instance-owned local router generations.
 
 ## Project status
 
-InferCrane is under active development. The core gateway, PostgreSQL control plane, existing-worker
+InferCrane is under active development. Its lifecycle, persistence, routing, and policy layers are
+provider-neutral. Integrations are registered adapters and public availability is controlled by an
+explicit qualification matrix. The core gateway, PostgreSQL control plane, existing-worker
 workflow, reconciliation, router supervision, and durable bounded autoscaling are implemented and
-tested locally. SkyPilot provisioning and autoscaling remain experimental until real RunPod
-acceptance and soak testing complete.
+tested locally. The first v0.1 qualification target is vLLM on RunPod; that support boundary is not
+the architecture boundary, and real-provider acceptance and soak testing remain incomplete.
 
 See the authoritative [capability status](docs/project-status.md) before relying on a feature.
 The [product vision and roadmap](docs/product-vision.md) defines the developer experience and the

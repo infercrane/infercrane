@@ -174,7 +174,10 @@ type ArtifactResolver interface {
 	Resolve(context.Context, string, string) (domain.ModelArtifact, error)
 }
 
-func CloudHandlers(store CloudStore, provider ReplicaProvider, runtime RuntimeInspector, artifactResolvers ...ArtifactResolver) map[string]operations.Handler {
+// QualifiedV01CloudHandlers is a compatibility constructor for the single
+// backend qualified by v0.1. Production composition and future integrations
+// use CloudHandlersWithBackends directly.
+func QualifiedV01CloudHandlers(store CloudStore, provider ReplicaProvider, runtime RuntimeInspector, artifactResolvers ...ArtifactResolver) map[string]operations.Handler {
 	backends, err := NewReplicaBackends(ReplicaBackend{Name: "skypilot", Cloud: "runpod", Runtime: support.DefaultRuntime, Provider: provider})
 	if err != nil {
 		panic(err)

@@ -1,6 +1,6 @@
 ---
 title: Production inference without the platform engineering.
-description: Deploy, autoscale, benchmark, and safely update vLLM on RunPod.
+description: A durable, extensible control plane for production inference on infrastructure you control.
 sidebarTitle: Introduction
 mode: wide
 ---
@@ -12,8 +12,8 @@ mode: wide
     <a className="ic-button ic-button-secondary" href="https://github.com/infercrane/infercrane">View on GitHub <span aria-hidden="true">↗</span></a>
   </div>
   <div className="ic-proof">
-    <span>vLLM runtime</span>
-    <span>RunPod compute</span>
+    <span>Adapter-based runtimes</span>
+    <span>Provider-owned compute</span>
     <span>No Kubernetes required</span>
   </div>
 </div>
@@ -27,23 +27,23 @@ mode: wide
   <div className="ic-terminal-body"><span className="ic-prompt">$</span> infercrane deploy <span className="ic-code-value">Qwen/Qwen3-8B</span><br/><span className="ic-code-muted"># submits one durable operation through the control-plane API</span><br/><span className="ic-code-muted"># disconnecting the CLI does not abandon provisioning</span></div>
 </div>
 
-InferCrane gives applications one OpenAI-compatible logical endpoint while durable control-plane operations provision, reconcile, scale, and safely replace the vLLM workers behind it. Kubernetes is not required.
+InferCrane gives applications one OpenAI-compatible logical endpoint while durable control-plane operations provision, reconcile, scale, and safely replace inference workers behind it. Providers and runtimes integrate through explicit contracts; Kubernetes is not required.
 
 <div className="ic-flow not-prose" aria-label="InferCrane request path">
   <div className="ic-node"><span className="ic-node-label">request</span><strong>OpenAI client</strong></div>
   <span className="ic-flow-arrow" aria-hidden="true">→</span>
   <div className="ic-node ic-node-accent"><span className="ic-node-label">stable alias</span><strong>deployment</strong></div>
   <span className="ic-flow-arrow" aria-hidden="true">→</span>
-  <div className="ic-node"><span className="ic-node-label">policy</span><strong>vLLM Router</strong></div>
+  <div className="ic-node"><span className="ic-node-label">policy</span><strong>route generation</strong></div>
   <span className="ic-flow-arrow" aria-hidden="true">→</span>
-  <div className="ic-node"><span className="ic-node-label"><i className="ic-dot"></i> healthy</span><strong>vLLM replicas</strong></div>
+  <div className="ic-node"><span className="ic-node-label"><i className="ic-dot"></i> healthy</span><strong>runtime replicas</strong></div>
 </div>
 
-## The operational layer around vLLM
+## The operational layer around inference runtimes
 
 <CardGroup cols={3}>
   <Card title="Deploy" icon="server" href="/features/lifecycle">
-    Create a durable deployment on RunPod or connect existing vLLM workers. Disconnecting the CLI does not abandon the operation.
+    Create a durable deployment through a qualified provider backend or connect existing workers. Disconnecting the CLI does not abandon the operation.
   </Card>
   <Card title="Protect releases" icon="shield-check" href="/features/release-guard">
     Compare active and candidate revisions with deterministic, persisted Release Guard policy.
@@ -57,7 +57,7 @@ InferCrane gives applications one OpenAI-compatible logical endpoint while durab
 
 <Tabs>
   <Tab title="Elastic">
-    SkyPilot provisions vLLM replicas on RunPod. InferCrane reconciles desired capacity, routes only to ready workers, and fences scale-down before termination.
+    A registered elastic backend provisions runtime replicas. InferCrane reconciles desired capacity, routes only to ready workers, and fences scale-down before provider termination.
 
     ```bash
     infercrane deploy Qwen/Qwen3-8B \
@@ -68,7 +68,7 @@ InferCrane gives applications one OpenAI-compatible logical endpoint while durab
     ```
   </Tab>
   <Tab title="Serverless">
-    RunPod Serverless owns worker allocation and scale-to-zero. InferCrane preserves the logical endpoint, lifecycle evidence, cancellation, and cleanup.
+    A provider-native serverless backend owns worker allocation and scale-to-zero. InferCrane preserves the logical endpoint, lifecycle evidence, cancellation, and cleanup.
 
     ```bash
     infercrane deploy Qwen/Qwen3-8B \
@@ -81,7 +81,7 @@ InferCrane gives applications one OpenAI-compatible logical endpoint while durab
 </Tabs>
 
 <Note>
-InferCrane v0.1 supports vLLM on RunPod. Real-provider acceptance is still in progress; consult [capability status](/project-status) before relying on experimental paths.
+InferCrane is provider- and runtime-extensible by design. The first v0.1 qualification target is vLLM on RunPod; other integrations are not yet qualified. Consult [capability status](/project-status) before relying on experimental paths.
 </Note>
 
 ## Evidence, not guesses

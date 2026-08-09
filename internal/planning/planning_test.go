@@ -37,7 +37,7 @@ func TestBuildServerlessPlanKeepsWorkersAtZero(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Mode != "serverless" || p.MinReplicas != 0 || p.MaxReplicas != 4 || p.Actions[len(p.Actions)-1].Summary != "Delegate zero-to-4 worker scaling to RunPod" {
+	if p.Mode != "serverless" || p.MinReplicas != 0 || p.MaxReplicas != 4 || p.Actions[len(p.Actions)-1].Summary != "Delegate zero-to-4 worker scaling to the provider backend" {
 		t.Fatalf("unexpected plan: %#v", p)
 	}
 }
