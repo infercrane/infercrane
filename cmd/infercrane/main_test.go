@@ -281,3 +281,27 @@ func TestExplainReportsPersistedBlockingOperation(t *testing.T) {
 		t.Fatalf("output=%s explanation=%#v err=%v", output, explanation, err)
 	}
 }
+
+func TestRolloutInspectFormatsPersistedGuardComparison(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+  "deployment":{"name":"qwen","active_revision_id":"rev-active","candidate_revision_id":"rev-candidate"},
+  "targets":[],"replicas":[],"revisions":[],"model_artifacts":[],
+  "release_guard_evaluations":[{
+    "id":"guard-1","active_revision_id":"rev-active","candidate_revision_id":"rev-candidate","decision":"REJECT",
+    "metrics":{"active":{"requests":40,"ready_replicas":1,"error_rate":0.001,"p95_ttft_ms":221},"candidate":{"requests":40,"ready_replicas":1,"error_rate":0.002,"p95_ttft_ms":317}},
+    "reasons":[{"code":"ttft_regression","message":"Candidate TTFT regression 43.4% exceeds policy"}],
+    "policy":{},"created_at":"2026-08-09T12:00:00Z"
+  }]
+}`))
+	}))
+	defer server.Close()
+
+	output, err := captureStdout(t, func() error {
+		return rolloutCommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, []string{"inspect", "qwen"})
+	})
+	if err != nil || !strings.Contains(output, "TTFT p95") || !strings.Contains(output, "221.0ms") || !strings.Contains(output, "317.0ms") || !strings.Contains(output, "Guard: REJECT") || !strings.Contains(output, "ttft_regression") || strings.Contains(output, `\"active\"`) {
+		t.Fatalf("output=%s err=%v", output, err)
+	}
+}

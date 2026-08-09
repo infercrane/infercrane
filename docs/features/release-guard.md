@@ -16,6 +16,10 @@ An evaluation returns one of three decisions:
 
 The v0.1 policy persists minimum request counts and maximum permitted TTFT, request-latency, error-rate, and output-throughput regressions. Each evaluation snapshots the exact policy, active and candidate metrics, reason codes, and revision identities. Repeating an explanation therefore produces the same answer from stored evidence.
 
+`infercrane rollout inspect DEPLOYMENT` renders the latest persisted active/candidate comparison as
+a metric table and shows unavailable measurements explicitly. JSON output retains the complete
+policy, measurements, reason codes, revision identities, and evaluation timestamp.
+
 Missing measurements are not fabricated. Output throughput is compared only when both revisions report token usage. TTFT is required before acceptance. A candidate with no healthy ready replica is rejected immediately.
 
 InferCrane does not silently duplicate inference requests. Candidate evidence must come from explicit validation or traffic that the operator knowingly sends to the candidate. Bounded shadow traffic is not enabled in v0.1 until it can be implemented without a second router and with explicit privacy and incremental-cost controls.

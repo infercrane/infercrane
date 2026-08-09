@@ -1302,7 +1302,36 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 		}
 		if len(view.ReleaseGuardEvaluations) > 0 {
 			guard := view.ReleaseGuardEvaluations[0]
-			fmt.Printf("\nGuard: %s\nReasons: %s\n", guard.Decision, guard.Reasons)
+			var metrics struct {
+				Active    domain.RevisionMetrics `json:"active"`
+				Candidate domain.RevisionMetrics `json:"candidate"`
+			}
+			if err := json.Unmarshal(guard.Metrics, &metrics); err != nil {
+				return fmt.Errorf("decode persisted Release Guard metrics: %w", err)
+			}
+			w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+			fmt.Fprintln(w, "\nMetric\tActive\tCandidate")
+			fmt.Fprintf(w, "Ready replicas\t%d\t%d\n", metrics.Active.ReadyReplicas, metrics.Candidate.ReadyReplicas)
+			fmt.Fprintf(w, "Requests\t%d\t%d\n", metrics.Active.Requests, metrics.Candidate.Requests)
+			fmt.Fprintf(w, "TTFT p95\t%s\t%s\n", formatGuardMetric(metrics.Active.P95TTFTMS, "ms"), formatGuardMetric(metrics.Candidate.P95TTFTMS, "ms"))
+			fmt.Fprintf(w, "Latency p95\t%s\t%s\n", formatGuardMetric(metrics.Active.P95LatencyMS, "ms"), formatGuardMetric(metrics.Candidate.P95LatencyMS, "ms"))
+			fmt.Fprintf(w, "Error rate\t%.2f%%\t%.2f%%\n", metrics.Active.ErrorRate*100, metrics.Candidate.ErrorRate*100)
+			fmt.Fprintf(w, "Output tok/s\t%s\t%s\n", formatGuardMetric(metrics.Active.OutputTokensPerSecond, ""), formatGuardMetric(metrics.Candidate.OutputTokensPerSecond, ""))
+			if err := w.Flush(); err != nil {
+				return err
+			}
+			fmt.Printf("\nGuard: %s\n", guard.Decision)
+			var reasons []struct {
+				Code    string `json:"code"`
+				Message string `json:"message"`
+			}
+			if err := json.Unmarshal(guard.Reasons, &reasons); err != nil {
+				return fmt.Errorf("decode persisted Release Guard reasons: %w", err)
+			}
+			for _, reason := range reasons {
+				fmt.Printf("- %s: %s\n", reason.Code, reason.Message)
+			}
+			fmt.Printf("Evaluation: %s at %s\n", guard.ID, guard.CreatedAt.Format(time.RFC3339))
 		}
 		return nil
 	}
@@ -1404,6 +1433,13 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 		fmt.Printf("Deployment  %s\nAction      %s\nOperation   %s\nStatus      %s\n", name, action, response.Operation.ID, response.Operation.Status)
 	}
 	return nil
+}
+
+func formatGuardMetric(value *float64, suffix string) string {
+	if value == nil {
+		return "unavailable"
+	}
+	return fmt.Sprintf("%.1f%s", *value, suffix)
 }
 
 func serve(parent context.Context, cfg config.Config, s *store.Store) error {
