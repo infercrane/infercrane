@@ -39,6 +39,55 @@ func captureStdout(t *testing.T, run func() error) (string, error) {
 	return string(output), runErr
 }
 
+func TestCommandHelpDoesNotRequireAuthentication(t *testing.T) {
+	t.Setenv("INFERCRANE_API_KEY", "")
+	t.Setenv("INFERCRANE_CONFIG", filepath.Join(t.TempDir(), "missing.json"))
+	output, err := captureStdout(t, func() error {
+		return run(context.Background(), []string{"deploy", "--help"})
+	})
+	if err != nil || !strings.Contains(output, "infercrane deploy MODEL") {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+}
+
+func TestRequestCommandSendsOpenAICompatibleRequest(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" || r.Header.Get("Authorization") != "Bearer secret" {
+			t.Fatalf("path=%s auth=%q", r.URL.Path, r.Header.Get("Authorization"))
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["model"] != "qwen-prod" || body["stream"] != false {
+			t.Fatalf("body=%#v", body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"Hello from InferCrane"}}],"usage":{"total_tokens":8}}`))
+	}))
+	defer server.Close()
+	output, err := captureStdout(t, func() error {
+		return requestCommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, []string{"qwen-prod", "--message", "Hello"})
+	})
+	if err != nil || strings.TrimSpace(output) != "Hello from InferCrane" {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+}
+
+func TestRequestCommandPrintsStreamingDeltas(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"Hello \"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"world\"}}]}\n\ndata: [DONE]\n\n")
+	}))
+	defer server.Close()
+	output, err := captureStdout(t, func() error {
+		return requestCommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, []string{"qwen-prod", "--stream"})
+	})
+	if err != nil || output != "Hello world\n" {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+}
+
 func TestDeployCLIOnlySubmitsControlPlaneRequest(t *testing.T) {
 	var path, key string
 	var body map[string]any

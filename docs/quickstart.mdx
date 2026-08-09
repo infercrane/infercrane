@@ -43,6 +43,14 @@ This tour starts the complete development topology with PostgreSQL, InferCrane, 
 
   <Step title="Send an OpenAI-compatible request">
     <Tabs>
+      <Tab title="InferCrane CLI">
+        ```bash
+        docker compose exec infercrane \
+          infercrane request qwen-prod --message "Hello"
+        ```
+
+        Add `--stream` to print response text as tokens arrive.
+      </Tab>
       <Tab title="curl">
         ```bash
         curl -fsS http://127.0.0.1:18000/v1/chat/completions \

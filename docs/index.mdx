@@ -27,6 +27,10 @@ mode: wide
   <div className="ic-terminal-body"><span className="ic-prompt">$</span> infercrane deploy <span className="ic-code-value">Qwen/Qwen3-8B</span><br/><span className="ic-code-muted"># submits one durable operation through the control-plane API</span><br/><span className="ic-code-muted"># disconnecting the CLI does not abandon provisioning</span></div>
 </div>
 
+```bash
+infercrane request qwen3-8b --message "Hello" --stream
+```
+
 InferCrane gives applications one OpenAI-compatible logical endpoint while durable control-plane operations provision, reconcile, scale, and safely replace inference workers behind it. Providers and runtimes integrate through explicit contracts; Kubernetes is not required.
 
 <div className="ic-flow not-prose" aria-label="InferCrane request path">

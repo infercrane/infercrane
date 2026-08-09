@@ -8,7 +8,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 
 | Package path | Source files | Test files | Test functions |
 |---|---:|---:|---|
-| `cmd/infercrane` | 1 | 1 | `TestBenchmarkParsesFlagsAfterDeploymentName`, `TestControlErrorPreservesTaxonomyAndRemediation`, `TestDeleteCLIOnlySubmitsControlPlaneRequest`, `TestDeletePlanHonorsJSONWithoutControlPlaneMutation`, `TestDeployCLIOnlySubmitsControlPlaneRequest`, `TestDeployDisconnectLeavesDurableOperationRunning`, `TestDeployWaitJSONReturnsOneFinalDocument`, `TestDeployYAMLPreservesArtifactRuntimeAndServerlessFields`, `TestDoctorCLIOnlyReadsAuthenticatedControlPlaneDiagnostics`, `TestExplainColdStartMakesUnavailableBoundariesExplicit`, `TestExplainReportsPersistedBlockingOperation`, `TestInvalidOutputIsRejectedBeforeAnyControlPlaneRequest`, `TestJSONOutputRendersStructuredControlPlaneFailure`, `TestPrimaryDeployPathDefaultsToRunPodL40S`, `TestRolloutInspectFormatsPersistedGuardComparison`, `TestServerlessDeployDefaultsToZeroMinimumWorkers` |
+| `cmd/infercrane` | 1 | 1 | `TestBenchmarkParsesFlagsAfterDeploymentName`, `TestCommandHelpDoesNotRequireAuthentication`, `TestControlErrorPreservesTaxonomyAndRemediation`, `TestDeleteCLIOnlySubmitsControlPlaneRequest`, `TestDeletePlanHonorsJSONWithoutControlPlaneMutation`, `TestDeployCLIOnlySubmitsControlPlaneRequest`, `TestDeployDisconnectLeavesDurableOperationRunning`, `TestDeployWaitJSONReturnsOneFinalDocument`, `TestDeployYAMLPreservesArtifactRuntimeAndServerlessFields`, `TestDoctorCLIOnlyReadsAuthenticatedControlPlaneDiagnostics`, `TestExplainColdStartMakesUnavailableBoundariesExplicit`, `TestExplainReportsPersistedBlockingOperation`, `TestInvalidOutputIsRejectedBeforeAnyControlPlaneRequest`, `TestJSONOutputRendersStructuredControlPlaneFailure`, `TestPrimaryDeployPathDefaultsToRunPodL40S`, `TestRequestCommandPrintsStreamingDeltas`, `TestRequestCommandSendsOpenAICompatibleRequest`, `TestRolloutInspectFormatsPersistedGuardComparison`, `TestServerlessDeployDefaultsToZeroMinimumWorkers` |
 | `internal/accounting` | 1 | 1 | `TestRecorderExportsQueueDropAndPersistenceFailureEvidence` |
 | `internal/artifact` | 1 | 1 | `TestHuggingFaceResolveRejectsMutableResponse`, `TestHuggingFaceResolveReturnsImmutableIdentity` |
 | `internal/authn` | 1 | 1 | `TestCacheAuthenticatesWithoutSourceOnRequestPath` |
@@ -64,6 +64,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 - `promote`
 - `provision`
 - `reject`
+- `request`
 - `revoke`
 - `rollback`
 - `rollout`
@@ -121,6 +122,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 
 - `INFERCRANE_AIPERF_BINARY`
 - `INFERCRANE_API_KEY`
+- `INFERCRANE_CONFIG`
 - `INFERCRANE_DATABASE_MAX_IDLE`
 - `INFERCRANE_DATABASE_MAX_OPEN`
 - `INFERCRANE_DATABASE_URL`

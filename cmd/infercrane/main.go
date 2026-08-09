@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -88,8 +89,11 @@ func run(ctx context.Context, args []string) error {
 	case "init":
 		return initCommand(args[1:])
 	}
+	if len(args) > 1 && (args[1] == "help" || args[1] == "-h" || args[1] == "--help") {
+		return commandHelp(os.Stdout, args[0])
+	}
 	switch args[0] {
-	case "target", "deploy", "apply", "plan", "doctor", "deployments", "route", "status", "events", "explain", "rollout", "delete", "inspect", "operation", "orphans", "tenant", "principal", "benchmark", "serve":
+	case "target", "deploy", "apply", "plan", "doctor", "deployments", "route", "status", "events", "request", "explain", "rollout", "delete", "inspect", "operation", "orphans", "tenant", "principal", "benchmark", "serve":
 	default:
 		usage(os.Stderr)
 		return fmt.Errorf("unknown command %q", args[0])
@@ -127,6 +131,8 @@ func run(ctx context.Context, args []string) error {
 		return statusCommand(ctx, cfg, args[1:])
 	case "events":
 		return eventsCommand(ctx, cfg, args[1:])
+	case "request":
+		return requestCommand(ctx, cfg, args[1:])
 	case "inspect":
 		return inspectCommand(ctx, cfg, args[1:])
 	case "explain":
@@ -161,6 +167,7 @@ Trust and discovery:
   plan MODEL       Preview deployment actions without side effects
   doctor           Validate the local runtime environment
   benchmark        Run a reproducible OpenAI-compatible load check
+  request          Send an OpenAI-compatible request to a deployment
   help             Show this help
   version          Print the version
 
@@ -181,6 +188,38 @@ Operations:
   principal        Create, rotate, or revoke scoped credentials
   delete           Plan or confirm deletion of a deployment
   serve            Run the control plane and gateway`)
+}
+
+func commandHelp(w io.Writer, command string) error {
+	help := map[string]string{
+		"init":        "infercrane init [--url URL] [--api-key KEY] [--output human|json]",
+		"doctor":      "infercrane doctor [--cloud] [--serverless] [--output human|json]",
+		"plan":        "infercrane plan MODEL [--name NAME] [--cloud CLOUD --gpu GPU | --targets NAMES] [--output human|json]",
+		"deploy":      "infercrane deploy MODEL [--name NAME] [--cloud CLOUD --gpu GPU | --targets NAMES] [--min N] [--max N] [--wait] [--output human|json]",
+		"apply":       "infercrane apply MODEL [deployment flags] [--wait] [--output human|json]",
+		"request":     "infercrane request DEPLOYMENT [--message TEXT] [--stream] [--output human|json]",
+		"status":      "infercrane status DEPLOYMENT [--watch] [--output human|json]",
+		"events":      "infercrane events DEPLOYMENT [--output human|json]",
+		"inspect":     "infercrane inspect DEPLOYMENT [--output human|json]",
+		"explain":     "infercrane explain [scaling|rollout|cold-start] DEPLOYMENT [--output human|json]",
+		"benchmark":   "infercrane benchmark DEPLOYMENT [--requests N] [--concurrency N] [--output human|json]",
+		"delete":      "infercrane delete DEPLOYMENT [--plan | --yes] [--wait] [--output human|json]",
+		"deployments": "infercrane deployments [--output human|json]",
+		"target":      "infercrane target list | infercrane target add NAME --url URL [--runtime RUNTIME]",
+		"rollout":     "infercrane rollout inspect DEPLOYMENT | infercrane rollout ACTION DEPLOYMENT [flags]",
+		"operation":   "infercrane operation ID | infercrane operation cancel ID",
+		"orphans":     "infercrane orphans [--output human|json]",
+		"route":       "infercrane route DEPLOYMENT --strategy STRATEGY",
+		"tenant":      "infercrane tenant create NAME",
+		"principal":   "infercrane principal create|rotate|revoke [arguments]",
+		"serve":       "infercrane serve",
+	}
+	usageLine, ok := help[command]
+	if !ok {
+		return fmt.Errorf("unknown command %q", command)
+	}
+	fmt.Fprintf(w, "Usage:\n  %s\n\nRun `infercrane help` to see all commands.\n", usageLine)
+	return nil
 }
 
 func initCommand(args []string) error {
@@ -571,7 +610,7 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 		Operation domain.Operation `json:"operation"`
 	}
 	if err := controlJSON(ctx, cfg, http.MethodPost, path, *idempotencyKey, request, &response); err != nil {
-		return err
+		return fmt.Errorf("%w; safe retry key: %s", err, *idempotencyKey)
 	}
 	if *wait {
 		operation, err := waitForOperation(ctx, cfg, response.Operation.ID, *output == "human")
@@ -581,10 +620,15 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 		response.Operation = operation
 	}
 	if *output == "json" {
-		encoded, _ := json.MarshalIndent(map[string]any{"deployment": *name, "operation": response.Operation}, "", "  ")
+		encoded, _ := json.MarshalIndent(map[string]any{"deployment": *name, "idempotency_key": *idempotencyKey, "operation": response.Operation}, "", "  ")
 		fmt.Println(string(encoded))
 	} else if *output == "human" {
-		fmt.Printf("Deployment  %s\nOperation   %s\nStatus      %s\n", *name, response.Operation.ID, response.Operation.Status)
+		fmt.Printf("Deployment  %s\nOperation   %s\nStatus      %s\nRetry key   %s\n", *name, response.Operation.ID, response.Operation.Status, *idempotencyKey)
+		if response.Operation.Status == "succeeded" {
+			fmt.Printf("\nNext\n  infercrane request %s --message \"Hello\"\n  infercrane status %s\n", *name, *name)
+		} else {
+			fmt.Printf("\nFollow progress\n  infercrane status %s --watch\n  infercrane events %s\n", *name, *name)
+		}
 	}
 	_ = operationKind // deploy/apply share API semantics; retained for command UX.
 	return nil
@@ -820,7 +864,7 @@ func deleteAPICommand(ctx context.Context, cfg config.Config, args []string) err
 		Operation domain.Operation `json:"operation"`
 	}
 	if err := controlJSON(ctx, cfg, http.MethodDelete, "/api/v1/deployments/"+url.PathEscape(args[0]), *idempotencyKey, nil, &response); err != nil {
-		return err
+		return fmt.Errorf("%w; safe retry key: %s", err, *idempotencyKey)
 	}
 	if *wait {
 		operation, err := waitForOperation(ctx, cfg, response.Operation.ID, *output == "human")
@@ -830,10 +874,10 @@ func deleteAPICommand(ctx context.Context, cfg config.Config, args []string) err
 		response.Operation = operation
 	}
 	if *output == "json" {
-		encoded, _ := json.MarshalIndent(map[string]any{"deployment": args[0], "operation": response.Operation}, "", "  ")
+		encoded, _ := json.MarshalIndent(map[string]any{"deployment": args[0], "idempotency_key": *idempotencyKey, "operation": response.Operation}, "", "  ")
 		fmt.Println(string(encoded))
 	} else if *output == "human" {
-		fmt.Printf("Deployment  %s\nOperation   %s\nStatus      %s\n", args[0], response.Operation.ID, response.Operation.Status)
+		fmt.Printf("Deployment  %s\nOperation   %s\nStatus      %s\nRetry key   %s\n", args[0], response.Operation.ID, response.Operation.Status, *idempotencyKey)
 	}
 	return nil
 }
@@ -923,13 +967,15 @@ func (e *ControlError) Error() string {
 func waitForOperation(ctx context.Context, cfg config.Config, id string, printProgress bool) (domain.Operation, error) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
+	lastProgress, lastMessage := -1, ""
 	for {
 		var operation domain.Operation
 		if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/operations/"+url.PathEscape(id), "", nil, &operation); err != nil {
 			return domain.Operation{}, err
 		}
-		if printProgress {
+		if printProgress && (operation.Progress != lastProgress || operation.Message != lastMessage) {
 			fmt.Printf("Progress    %d%%  %s\n", operation.Progress, operation.Message)
+			lastProgress, lastMessage = operation.Progress, operation.Message
 		}
 		switch operation.Status {
 		case "succeeded":
@@ -939,7 +985,7 @@ func waitForOperation(ctx context.Context, cfg config.Config, id string, printPr
 		}
 		select {
 		case <-ctx.Done():
-			return operation, ctx.Err()
+			return operation, fmt.Errorf("stopped waiting; operation %s continues in the control plane (resume with: infercrane operation %s)", id, id)
 		case <-ticker.C:
 		}
 	}
@@ -1151,6 +1197,114 @@ func eventsCommand(ctx context.Context, cfg config.Config, args []string) error 
 		fmt.Printf("%s  %-24s %s\n", event.CreatedAt.Format(time.RFC3339), event.Type, event.Summary)
 	}
 	return nil
+}
+
+func requestCommand(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: infercrane request DEPLOYMENT [--message TEXT] [--stream] [--output human|json]")
+	}
+	name := args[0]
+	fs := flag.NewFlagSet("request", flag.ContinueOnError)
+	message := fs.String("message", "Say hello in one sentence.", "user message")
+	stream := fs.Bool("stream", false, "stream response text as it arrives")
+	output := fs.String("output", "human", "human or json")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if err := validateOutput(*output); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*message) == "" {
+		return errors.New("--message cannot be empty")
+	}
+	if *stream && *output == "json" {
+		return errors.New("--stream cannot be combined with --output json")
+	}
+	payload := map[string]any{"model": name, "messages": []map[string]string{{"role": "user", "content": *message}}, "stream": *stream}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("encode inference request: %w", err)
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(cfg.ControlURL, "/")+"/v1/chat/completions", bytes.NewReader(encoded))
+	if err != nil {
+		return fmt.Errorf("create inference request: %w", err)
+	}
+	request.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+	request.Header.Set("Content-Type", "application/json")
+	response, err := (&http.Client{}).Do(request)
+	if err != nil {
+		return fmt.Errorf("inference endpoint %s is unreachable: %w", cfg.ControlURL, err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		data, _ := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+		return fmt.Errorf("inference request returned HTTP %d: %s", response.StatusCode, strings.TrimSpace(string(data)))
+	}
+	if *stream {
+		return printStream(response.Body)
+	}
+	data, err := io.ReadAll(io.LimitReader(response.Body, 8<<20))
+	if err != nil {
+		return fmt.Errorf("read inference response: %w", err)
+	}
+	var result struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+		Usage json.RawMessage `json:"usage,omitempty"`
+	}
+	if err = json.Unmarshal(data, &result); err != nil {
+		return fmt.Errorf("decode inference response: %w", err)
+	}
+	if *output == "json" {
+		var complete any
+		if err = json.Unmarshal(data, &complete); err != nil {
+			return fmt.Errorf("decode inference JSON: %w", err)
+		}
+		out, _ := json.MarshalIndent(complete, "", "  ")
+		fmt.Println(string(out))
+		return nil
+	}
+	if len(result.Choices) == 0 {
+		return errors.New("inference response contained no choices")
+	}
+	fmt.Println(result.Choices[0].Message.Content)
+	return nil
+}
+
+func printStream(body io.Reader) error {
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 64*1024), 1<<20)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if data == "[DONE]" {
+			fmt.Println()
+			return nil
+		}
+		var chunk struct {
+			Choices []struct {
+				Delta struct {
+					Content string `json:"content"`
+				} `json:"delta"`
+			} `json:"choices"`
+		}
+		if json.Unmarshal([]byte(data), &chunk) != nil {
+			continue
+		}
+		for _, choice := range chunk.Choices {
+			fmt.Print(choice.Delta.Content)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("read inference stream: %w", err)
+	}
+	return errors.New("inference stream ended before [DONE]")
 }
 
 func explainCommand(ctx context.Context, cfg config.Config, args []string) error {

@@ -6,6 +6,7 @@ Deploy, autoscale, benchmark, and safely update inference workloads on GPU infra
 
 ```bash
 infercrane deploy Qwen/Qwen3-8B
+infercrane request qwen3-8b --message "Hello" --stream
 ```
 
 - No Kubernetes required
