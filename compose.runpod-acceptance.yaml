@@ -4,6 +4,8 @@ services:
       context: .
       target: runtime
     user: root
+    environment:
+      HOME: /home/app
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - |
