@@ -444,14 +444,17 @@ func TestReplicaIntentAndProviderIdentityAreIdempotent(t *testing.T) {
 	if err = s.SetReplicaProviderIdentity(ctx, first.ID, "request-1", "resource-1"); err != nil {
 		t.Fatalf("repeating identical identity: %v", err)
 	}
+	if err = s.SetReplicaProviderIdentity(ctx, first.ID, "request-2", "resource-1"); err != nil {
+		t.Fatalf("replace completed provider request: %v", err)
+	}
 	if err = s.SetReplicaProviderIdentity(ctx, first.ID, "request-2", "resource-2"); !errors.Is(err, ErrConflict) {
-		t.Fatalf("identity replacement error=%v, want conflict", err)
+		t.Fatalf("resource identity replacement error=%v, want conflict", err)
 	}
 	if err = s.ObserveReplica(ctx, first.ID, "ready", "https://worker.example", "healthy", `{"gpu":"L40S"}`, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := s.ReplicasForDeployment(ctx, "global", deployment.ID)
-	if err != nil || len(rows) != 1 || rows[0].ProviderResourceID != "resource-1" || rows[0].Endpoint != "https://worker.example" || rows[0].LastObservedAt == nil {
+	if err != nil || len(rows) != 1 || rows[0].ProviderRequestID != "request-2" || rows[0].ProviderResourceID != "resource-1" || rows[0].Endpoint != "https://worker.example" || rows[0].LastObservedAt == nil {
 		t.Fatalf("replicas=%#v err=%v", rows, err)
 	}
 }

@@ -17,6 +17,7 @@ var ErrUnavailable = errors.New("SkyPilot unavailable")
 type ReplicaSpec struct {
 	ExternalKey                                     string
 	Name, Model, Cloud, GPU, Region, RuntimeVersion string
+	RequestID                                       string
 	RuntimeArgs                                     []string
 	Port                                            int
 }
@@ -68,7 +69,16 @@ func (s SkyPilot) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provider
 		return ProviderHandle{}, err
 	}
 	if observation.Exists {
-		return ProviderHandle{ResourceID: resourceID, ExternalKey: spec.ExternalKey}, nil
+		return ProviderHandle{RequestID: spec.RequestID, ResourceID: resourceID, ExternalKey: spec.ExternalKey}, nil
+	}
+	if spec.RequestID != "" {
+		state, found, requestErr := s.requestState(ctx, spec.RequestID)
+		if requestErr != nil {
+			return ProviderHandle{}, requestErr
+		}
+		if found && state != "failed" && state != "cancelled" {
+			return ProviderHandle{RequestID: spec.RequestID, ResourceID: resourceID, ExternalKey: spec.ExternalKey}, nil
+		}
 	}
 	task := map[string]any{"resources": map[string]any{"infra": infrastructure(spec.Cloud, spec.Region), "accelerators": spec.GPU, "ports": []int{spec.Port}}, "setup": "python -m pip install 'vllm==" + spec.RuntimeVersion + "'", "run": runCommand(spec.Model, spec.Port, spec.RuntimeArgs)}
 	task["secrets"] = map[string]any{"INFERCRANE_WORKER_API_KEY": nil}
@@ -86,6 +96,27 @@ func (s SkyPilot) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provider
 		return ProviderHandle{}, fmt.Errorf("%w: launch %s: %s", ErrUnavailable, resourceID, strings.TrimSpace(string(output)))
 	}
 	return ProviderHandle{RequestID: requestID(string(output)), ResourceID: resourceID, ExternalKey: spec.ExternalKey}, nil
+}
+
+func (s SkyPilot) requestState(ctx context.Context, requestID string) (string, bool, error) {
+	runner, err := s.runner()
+	if err != nil {
+		return "", false, err
+	}
+	output, runErr := runner.Run(ctx, nil, "api", "status", "--all-status", "--output", "json", requestID)
+	if runErr != nil {
+		return "", false, fmt.Errorf("observe SkyPilot request %s: %w: %s", requestID, runErr, strings.TrimSpace(string(output)))
+	}
+	var rows []map[string]any
+	if err = json.Unmarshal(jsonPayload(output), &rows); err != nil {
+		return "", false, fmt.Errorf("parse SkyPilot request status: %w", err)
+	}
+	for _, row := range rows {
+		if stringField(row, "request_id") == requestID {
+			return strings.ToLower(stringField(row, "status")), true, nil
+		}
+	}
+	return "", false, nil
 }
 
 func (s SkyPilot) ObserveReplica(ctx context.Context, handle ProviderHandle, port int) (Observation, error) {

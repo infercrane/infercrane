@@ -101,7 +101,7 @@ func CloudHandlers(store CloudStore, provider ReplicaProvider, runtime RuntimeIn
 		if err = checkpoint(ctx, store, operation, "replica.intent", "succeeded", map[string]string{"replica_id": replica.ID, "external_key": externalKey, "resource_id": handle.ResourceID}, 15, "Replica identity persisted"); err != nil {
 			return "", err
 		}
-		ensured, err := provider.EnsureReplica(ctx, provision.ReplicaSpec{ExternalKey: externalKey, Name: request.Name, Model: request.Model, Cloud: request.Cloud, GPU: request.GPU, Region: request.Region, RuntimeVersion: request.RuntimeVersion, RuntimeArgs: request.RuntimeArgs, Port: request.Port})
+		ensured, err := provider.EnsureReplica(ctx, provision.ReplicaSpec{ExternalKey: externalKey, RequestID: replica.ProviderRequestID, Name: request.Name, Model: request.Model, Cloud: request.Cloud, GPU: request.GPU, Region: request.Region, RuntimeVersion: request.RuntimeVersion, RuntimeArgs: request.RuntimeArgs, Port: request.Port})
 		if err != nil {
 			return "", operations.Retryable("provider_ensure_failed", err)
 		}

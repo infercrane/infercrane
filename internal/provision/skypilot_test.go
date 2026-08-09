@@ -13,12 +13,19 @@ type fakeSkyRunner struct {
 	missingErr      bool
 	missingSuccess  bool
 	statusPrefix    string
+	requestID       string
+	requestState    string
 	launches, downs int
 }
 
 func (f *fakeSkyRunner) Run(_ context.Context, _ []string, args ...string) ([]byte, error) {
 	command := strings.Join(args, " ")
 	switch {
+	case strings.HasPrefix(command, "api status "):
+		if f.requestID == "" {
+			return []byte(`[]`), nil
+		}
+		return []byte(`[{"request_id":"` + f.requestID + `","status":"` + f.requestState + `"}]`), nil
 	case strings.HasPrefix(command, "launch "):
 		f.launches++
 		f.exists = true
@@ -53,6 +60,29 @@ func (f *fakeSkyRunner) Run(_ context.Context, _ []string, args ...string) ([]by
 		return []byte(`[{"name":"infercrane-prod-r0","status":"UP"},{"name":"unmanaged","status":"UP"}]`), nil
 	default:
 		return nil, errors.New("unexpected command: " + command)
+	}
+}
+
+func TestEnsureDoesNotRelaunchActiveRequest(t *testing.T) {
+	runner := &fakeSkyRunner{requestID: "request-1", requestState: "RUNNING"}
+	provider := SkyPilot{APIKey: "secret", Runner: runner}
+	handle, err := provider.EnsureReplica(context.Background(), ReplicaSpec{ExternalKey: "prod-r0", RequestID: "request-1", Model: "model", Cloud: "runpod", GPU: "L40S"})
+	if err != nil || runner.launches != 0 || handle.RequestID != "request-1" {
+		t.Fatalf("handle=%#v launches=%d err=%v", handle, runner.launches, err)
+	}
+}
+
+func TestEnsureRelaunchesMissingOrFailedRequest(t *testing.T) {
+	for _, state := range []string{"", "FAILED"} {
+		runner := &fakeSkyRunner{requestID: "request-1", requestState: state}
+		if state == "" {
+			runner.requestID = ""
+		}
+		provider := SkyPilot{APIKey: "secret", Runner: runner}
+		_, err := provider.EnsureReplica(context.Background(), ReplicaSpec{ExternalKey: "prod-r0", RequestID: "request-1", Model: "model", Cloud: "runpod", GPU: "L40S"})
+		if err != nil || runner.launches != 1 {
+			t.Fatalf("state=%q launches=%d err=%v", state, runner.launches, err)
+		}
 	}
 }
 
