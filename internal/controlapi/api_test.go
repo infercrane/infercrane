@@ -221,7 +221,7 @@ func TestScalingDecisionsAreReadThroughTenantAPI(t *testing.T) {
 
 func TestBenchmarkRunsThroughControlPlaneAndPersistsIdentity(t *testing.T) {
 	spec := `{"model":"Qwen/Qwen3-8B","model_revision":"commit","runtime":"vllm","runtime_version":"0.10","compute_mode":"elastic","gpu":"L40S","region":"EU"}`
-	store := &fakeStore{resolved: domain.ResolvedDeployment{Deployment: domain.Deployment{ID: "dep", Name: "qwen", ActiveRevisionID: "rev"}, Targets: []domain.Target{{Provider: "runpod"}}}, revisions: []domain.DeploymentRevision{{ID: "rev", SpecJSON: spec}}, artifact: domain.ModelArtifact{ID: "artifact", ModelIdentity: "Qwen/Qwen3-8B@commit"}}
+	store := &fakeStore{resolved: domain.ResolvedDeployment{Deployment: domain.Deployment{ID: "dep", Name: "qwen", ActiveRevisionID: "rev"}, Targets: []domain.Target{{Provider: "runpod"}}}, revisions: []domain.DeploymentRevision{{ID: "rev", SpecJSON: spec}}, artifact: domain.ModelArtifact{ID: "artifact", Repository: "Qwen/Qwen3-8B", ModelIdentity: "Qwen/Qwen3-8B@commit"}}
 	runner := &fakeBenchmarkRunner{}
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments/qwen/benchmarks", strings.NewReader(`{"requests":10,"concurrency":2,"random_seed":42}`))
 	request.Header.Set("Authorization", "Bearer secret")
@@ -230,7 +230,7 @@ func TestBenchmarkRunsThroughControlPlaneAndPersistsIdentity(t *testing.T) {
 	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"model_identity":"Qwen/Qwen3-8B@commit"`) || !strings.Contains(response.Body.String(), `"gpu_count":1`) {
 		t.Fatalf("response=%d %s", response.Code, response.Body.String())
 	}
-	if runner.config.APIKey != "secret" || runner.config.RandomSeed != 42 || len(store.benchmarks) != 1 || store.benchmarks[0].GPU != "L40S" || store.benchmarks[0].GPUCount == nil || *store.benchmarks[0].GPUCount != 1 || !strings.Contains(store.benchmarks[0].CostMetadataJSON, `"available":false`) {
+	if runner.config.APIKey != "secret" || runner.config.RandomSeed != 42 || runner.config.Model != "qwen" || runner.config.Tokenizer != "Qwen/Qwen3-8B" || len(store.benchmarks) != 1 || store.benchmarks[0].GPU != "L40S" || store.benchmarks[0].GPUCount == nil || *store.benchmarks[0].GPUCount != 1 || !strings.Contains(store.benchmarks[0].CostMetadataJSON, `"available":false`) {
 		t.Fatalf("config=%#v benchmarks=%#v", runner.config, store.benchmarks)
 	}
 }
@@ -241,14 +241,14 @@ func TestCandidateBenchmarkUsesExplicitHealthyRevisionEndpoint(t *testing.T) {
 		resolved:  domain.ResolvedDeployment{Deployment: domain.Deployment{ID: "dep", Name: "qwen", ActiveRevisionID: "rev-active", CandidateRevisionID: "rev-candidate"}},
 		revisions: []domain.DeploymentRevision{{ID: "rev-active", SpecJSON: spec}, {ID: "rev-candidate", SpecJSON: spec}},
 		replicas:  []domain.Replica{{RevisionID: "rev-candidate", Ordinal: 0, Provider: "skypilot", LifecycleState: "ready", Health: "healthy", Endpoint: "https://candidate.invalid"}},
-		artifact:  domain.ModelArtifact{ID: "artifact", ModelIdentity: "Qwen/Qwen3-8B@commit"},
+		artifact:  domain.ModelArtifact{ID: "artifact", Repository: "Qwen/Qwen3-8B", ModelIdentity: "Qwen/Qwen3-8B@commit"},
 	}
 	runner := &fakeBenchmarkRunner{}
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments/qwen/benchmarks", strings.NewReader(`{"requests":10,"concurrency":2,"random_seed":42,"revision":"candidate"}`))
 	request.Header.Set("Authorization", "Bearer bootstrap")
 	response := httptest.NewRecorder()
 	(API{Store: store, APIKey: "bootstrap", BenchmarkRunner: runner, Backends: map[string]BackendMetadata{"skypilot": {APIKey: "worker-secret", APIKeyEnv: "INFERCRANE_WORKER_API_KEY"}}, GatewayURL: "http://gateway", AIPerfBinary: "aiperf"}).Handler().ServeHTTP(response, request)
-	if response.Code != http.StatusCreated || runner.config.Endpoint != "https://candidate.invalid" || runner.config.Model != "Qwen/Qwen3-8B" || runner.config.APIKey != "worker-secret" || runner.config.APIKeyEnv != "INFERCRANE_WORKER_API_KEY" || len(store.benchmarks) != 1 || store.benchmarks[0].RevisionID != "rev-candidate" || !strings.Contains(store.benchmarks[0].WorkloadJSON, `"direct_revision_validation":true`) {
+	if response.Code != http.StatusCreated || runner.config.Endpoint != "https://candidate.invalid" || runner.config.Model != "Qwen/Qwen3-8B" || runner.config.Tokenizer != "Qwen/Qwen3-8B" || runner.config.APIKey != "worker-secret" || runner.config.APIKeyEnv != "INFERCRANE_WORKER_API_KEY" || len(store.benchmarks) != 1 || store.benchmarks[0].RevisionID != "rev-candidate" || !strings.Contains(store.benchmarks[0].WorkloadJSON, `"direct_revision_validation":true`) {
 		t.Fatalf("response=%d %s config=%#v benchmarks=%#v", response.Code, response.Body.String(), runner.config, store.benchmarks)
 	}
 }

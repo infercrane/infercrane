@@ -17,10 +17,10 @@ import (
 )
 
 type Config struct {
-	Binary, Endpoint, APIKey, APIKeyEnv, Model string
-	Requests, Concurrency                      int
-	RandomSeed                                 int64
-	Timeout                                    time.Duration
+	Binary, Endpoint, APIKey, APIKeyEnv, Model, Tokenizer string
+	Requests, Concurrency                                 int
+	RandomSeed                                            int64
+	Timeout                                               time.Duration
 }
 
 type Result struct {
@@ -70,6 +70,9 @@ func run(ctx context.Context, cfg Config, commands commandRunner) (Result, error
 	defer os.RemoveAll(dir)
 	prefix := "infercrane"
 	args := []string{"profile", "--model", cfg.Model, "--url", strings.TrimRight(cfg.Endpoint, "/"), "--endpoint-type", "chat", "--streaming", "--use-server-token-count", "--request-count", strconv.Itoa(cfg.Requests), "--concurrency", strconv.Itoa(cfg.Concurrency), "--random-seed", strconv.FormatInt(cfg.RandomSeed, 10), "--ui", "none", "--export-level", "records", "--output-artifact-dir", dir, "--profile-export-prefix", prefix, "--no-auto-plot", "--no-gpu-telemetry", "--no-server-metrics"}
+	if cfg.Tokenizer != "" {
+		args = append(args, "--tokenizer", cfg.Tokenizer)
+	}
 	if cfg.APIKey != "" {
 		args = append(args, "--api-key", cfg.APIKey)
 	}

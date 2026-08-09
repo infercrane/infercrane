@@ -253,7 +253,7 @@ func (a API) runBenchmark(w http.ResponseWriter, r *http.Request) {
 			apiKeyEnv = backend.APIKeyEnv
 		}
 	}
-	measured, err := a.BenchmarkRunner.Run(r.Context(), benchmark.Config{Binary: a.AIPerfBinary, Endpoint: endpoint, APIKey: credential, APIKeyEnv: apiKeyEnv, Model: model, Requests: request.Requests, Concurrency: request.Concurrency, RandomSeed: request.RandomSeed})
+	measured, err := a.BenchmarkRunner.Run(r.Context(), benchmark.Config{Binary: a.AIPerfBinary, Endpoint: endpoint, APIKey: credential, APIKeyEnv: apiKeyEnv, Model: model, Tokenizer: artifact.Repository, Requests: request.Requests, Concurrency: request.Concurrency, RandomSeed: request.RandomSeed})
 	if err != nil {
 		writeError(w, 502, "benchmark_failed", err.Error())
 		return

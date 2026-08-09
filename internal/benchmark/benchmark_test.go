@@ -36,6 +36,25 @@ func TestReproductionCommandRedactsCredential(t *testing.T) {
 	}
 }
 
+func TestRunUsesIndependentServingModelAndTokenizer(t *testing.T) {
+	runner := &capturingRunner{}
+	_, _ = run(context.Background(), Config{Endpoint: "http://example", Model: "logical-deployment", Tokenizer: "Qwen/Qwen3-8B", Requests: 1, Concurrency: 1}, runner)
+	command := strings.Join(runner.profileArgs, " ")
+	if !strings.Contains(command, "--model logical-deployment") || !strings.Contains(command, "--tokenizer Qwen/Qwen3-8B") {
+		t.Fatalf("args=%v", runner.profileArgs)
+	}
+}
+
+type capturingRunner struct{ profileArgs []string }
+
+func (r *capturingRunner) Run(_ context.Context, _ string, args ...string) ([]byte, error) {
+	if len(args) == 1 && args[0] == "--version" {
+		return []byte("test"), nil
+	}
+	r.profileArgs = append([]string(nil), args...)
+	return nil, os.ErrNotExist
+}
+
 func TestReproductionCommandDoesNotPersistDeletedTemporaryPath(t *testing.T) {
 	temporary := "/tmp/infercrane-aiperf-123"
 	command := portableReproductionCommand(shellCommand("aiperf", []string{"profile", "--output-artifact-dir", temporary, "--profile-export-prefix", "infercrane"}, "", "INFERCRANE_API_KEY"), temporary)
