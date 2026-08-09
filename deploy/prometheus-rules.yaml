@@ -1,0 +1,24 @@
+groups:
+  - name: infercrane
+    rules:
+      - alert: InferCraneGatewayErrorRateHigh
+        expr: rate(infercrane_gateway_failures_total[5m]) / clamp_min(rate(infercrane_gateway_requests_total[5m]), 0.001) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: InferCrane gateway error rate exceeds 5%
+      - alert: InferCraneGatewayLatencyHigh
+        expr: histogram_quantile(0.95, rate(infercrane_gateway_request_duration_seconds_bucket[5m])) > 10
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: InferCrane p95 request duration exceeds 10 seconds
+      - alert: InferCraneGatewayUnavailable
+        expr: up{job="infercrane"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: InferCrane metrics endpoint is unavailable

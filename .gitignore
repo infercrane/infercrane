@@ -9,4 +9,6 @@ __pycache__/
 .infercrane/
 dist/
 build/
-
+.infercrane/
+/infercrane
+coverage.out

@@ -1,32 +1,85 @@
 services:
+  verifier:
+    profiles: ["test"]
+    build:
+      context: .
+      target: test
+
+  test-postgres:
+    profiles: ["test"]
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: infercrane_test
+      POSTGRES_USER: infercrane
+      POSTGRES_PASSWORD: infercrane
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U infercrane -d infercrane_test"]
+      interval: 1s
+      timeout: 2s
+      retries: 30
+    tmpfs:
+      - /var/lib/postgresql/data
+
+  integration-test:
+    profiles: ["test"]
+    build:
+      context: .
+      target: builder
+    entrypoint: ["go", "test"]
+    command: ["-race", "-count=1", "./..."]
+    environment:
+      INFERCRANE_TEST_DATABASE_URL: postgres://infercrane:infercrane@test-postgres:5432/infercrane_test?sslmode=disable
+    depends_on:
+      test-postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: infercrane
+      POSTGRES_USER: infercrane
+      POSTGRES_PASSWORD: infercrane
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U infercrane -d infercrane"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
   worker-a:
     build:
       context: .
-      target: runtime
-    entrypoint: ["python", "-m", "infercrane.dev.fake_vllm"]
+      target: development
+    entrypoint: ["fake-vllm"]
     command: ["--port", "8101", "--worker", "gpu-a"]
 
   worker-b:
     build:
       context: .
-      target: runtime
-    entrypoint: ["python", "-m", "infercrane.dev.fake_vllm"]
+      target: development
+    entrypoint: ["fake-vllm"]
     command: ["--port", "8102", "--worker", "gpu-b"]
 
   infercrane:
     build:
       context: .
-      target: runtime
+      target: development
     entrypoint: ["infercrane-dev-start"]
     environment:
       INFERCRANE_API_KEY: infercrane
+      INFERCRANE_DATABASE_URL: postgres://infercrane:infercrane@postgres:5432/infercrane?sslmode=disable
+      INFERCRANE_INSTANCE_ID: compose-1
+      INFERCRANE_ROUTER_BINARY: fake-router
     ports:
       - "${INFERCRANE_DEV_PORT:-18000}:8080"
-    volumes:
-      - infercrane-state:/var/lib/infercrane
     depends_on:
-      - worker-a
-      - worker-b
+      postgres:
+        condition: service_healthy
+      worker-a:
+        condition: service_started
+      worker-b:
+        condition: service_started
 
 volumes:
-  infercrane-state:
+  postgres-data:

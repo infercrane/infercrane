@@ -1,0 +1,42 @@
+# Control-plane API v1
+
+Base path: `/api/v1`. All requests require `Authorization: Bearer TOKEN`. Mutations require operator
+or admin role; tenant/principal/audit administration requires admin. Cross-tenant resources return
+`404` to avoid existence disclosure.
+
+Errors are stable JSON objects:
+
+```json
+{"error":{"code":"forbidden","message":"principal is not allowed to perform this action"}}
+```
+
+## Resources
+
+| Method and path | Minimum role | Purpose |
+|---|---|---|
+| `POST /deployments/apply` | operator | Queue existing-target convergence; requires `Idempotency-Key`. |
+| `GET /deployments` | viewer | List tenant deployments. |
+| `GET /operations/{id}` | viewer | Inspect durable progress and result. |
+| `POST /operations/{id}/cancel` | operator | Request cooperative cancellation. |
+| `GET /targets` | viewer | List registered tenant targets. |
+| `POST /targets` | operator | Register an existing HTTP(S) inference target. |
+| `GET /orphans` | viewer | List unowned provisioned resources. |
+| `GET /audit-events` | admin | List up to 500 events; `before` accepts RFC3339. |
+| `PUT /tenant/quota` | admin | Set deployment, replica, and request policy limits. |
+| `POST /principals` | admin | Create a credential; secret is returned once. |
+| `POST /principals/{id}/rotate` | admin | Replace a credential immediately. |
+| `DELETE /principals/{id}` | admin | Revoke a credential immediately. |
+
+Existing-target apply request:
+
+```json
+{
+  "name": "qwen-prod",
+  "model": "Qwen/Qwen3-8B",
+  "targets": ["gpu-a", "gpu-b"],
+  "routing_strategy": "round-robin"
+}
+```
+
+An accepted mutation returns `202`, an operation object, and a `Location` header. Repeating the
+same tenant, operation kind, and idempotency key returns the original operation.
