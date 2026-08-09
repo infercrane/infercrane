@@ -7,6 +7,7 @@ The resumable operator harness reduces the normal workflow to a few guarded comm
 ./scripts/release-acceptance.sh preflight
 ./scripts/release-acceptance.sh elastic --approve-paid-resources
 ./scripts/release-acceptance.sh serverless --approve-paid-resources
+./scripts/release-acceptance.sh qualify --approve-paid-resources
 ./scripts/release-acceptance.sh cleanup
 ./scripts/release-acceptance.sh report
 ```
@@ -17,6 +18,13 @@ and idempotency keys, and retain sanitized evidence under the ignored
 guessing resource names. The harness automates smoke coverage; the controlled disruption and timed
 provider observations below remain release gates and may not be inferred from a successful smoke
 run.
+
+`qualify` is the guarded end-to-end path. It runs the elastic benchmark, verifies provider-backed
+scale-up and scale-down, records a deterministic Release Guard rejection without provisioning the
+bad candidate, deletes elastic capacity, then verifies Serverless cold/warm traffic, scale-to-zero,
+and a second cold request. It never permits more than the deployment's configured maximum of two
+workers and stops on the first missing observation. Always follow it with `cleanup`, even after a
+failure.
 
 This document is the evidence index for the first public release. A checkbox is not evidence:
 record the command, UTC time, final commit, sanitized log path, and provider resource identifiers

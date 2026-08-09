@@ -18,6 +18,7 @@ Commands:
   preflight   Validate credentials, dependencies, template, and inventories (read-only)
   elastic     Run the resumable paid elastic smoke workflow
   serverless  Run the resumable paid serverless smoke workflow
+  qualify     Run elastic benchmark/autoscaling/guard, then serverless cold-start qualification
   cleanup     Delete run-owned deployments and stop the acceptance stack
   report      Refresh the sanitized evidence summary
 
@@ -139,7 +140,7 @@ wait_ready() {
   while [ "$elapsed" -lt "$limit" ]; do
     status=$(ic status "$deployment" --output json 2>/dev/null || true)
     if [ -n "$status" ] && printf '%s' "$status" | jq -e \
-      '.deployment.observed_state == "ready" and ([.replicas[] | select(.health == "healthy")] | length) > 0' >/dev/null 2>&1; then
+      '.deployment.observed_state == "healthy" and ([.replicas[] | select(.health == "healthy" and (.lifecycle_state == "active" or .lifecycle_state == "ready"))] | length) > 0' >/dev/null 2>&1; then
       printf '%s\n' "$status" >"$evidence/$deployment-ready.json"
       return 0
     fi
@@ -147,6 +148,48 @@ wait_ready() {
     elapsed=$((elapsed + 10))
   done
   echo "deployment did not become ready within ${limit}s: $deployment" >&2
+  return 1
+}
+
+wait_replica_count() {
+  deployment=$1
+  expected=$2
+  limit=${3:-900}
+  elapsed=0
+  while [ "$elapsed" -lt "$limit" ]; do
+    status=$(ic status "$deployment" --output json 2>/dev/null || true)
+    count=$(printf '%s' "$status" | jq '[.replicas[]? | select(.health == "healthy" and (.lifecycle_state == "active" or .lifecycle_state == "ready"))] | length' 2>/dev/null || echo 0)
+    if [ "$count" -eq "$expected" ]; then
+      printf '%s\n' "$status" >"$evidence/$deployment-replicas-$expected.json"
+      return 0
+    fi
+    sleep 10
+    elapsed=$((elapsed + 10))
+  done
+  echo "deployment did not reach $expected healthy replicas within ${limit}s: $deployment" >&2
+  return 1
+}
+
+wait_serverless_zero() {
+  deployment=$1
+  limit=${2:-900}
+  endpoint=$(ic status "$deployment" --output json | jq -r '.replicas[0].provider_resource_id')
+  [ -n "$endpoint" ] && [ "$endpoint" != null ] || { echo "serverless endpoint ID is missing" >&2; return 1; }
+  api_key=$(tr -d '\r\n' <"$RUNPOD_KEY_FILE")
+  elapsed=0
+  while [ "$elapsed" -lt "$limit" ]; do
+    endpoint_json=$(curl -fsS -H "Authorization: Bearer $api_key" \
+      'https://rest.runpod.io/v1/endpoints?includeWorkers=true' | \
+      jq -c --arg id "$endpoint" '.[] | select(.id == $id) | {id,name,workersMin,workersMax,workers_observed:(.workers | length)}')
+    workers=$(printf '%s' "$endpoint_json" | jq -r '.workers_observed // -1')
+    if [ "$workers" -eq 0 ]; then
+      printf '%s\n' "$endpoint_json" >"$evidence/$deployment-scale-to-zero.json"
+      return 0
+    fi
+    sleep 10
+    elapsed=$((elapsed + 10))
+  done
+  echo "serverless endpoint did not scale to zero within ${limit}s: $endpoint" >&2
   return 1
 }
 
@@ -212,7 +255,43 @@ run_serverless() {
   record serverless-inspect ic inspect "$SERVERLESS_NAME" --output json
   record serverless-events ic events "$SERVERLESS_NAME" --output json
   record serverless-explain-cold-start ic explain cold-start "$SERVERLESS_NAME" --output json
-  echo "Serverless smoke completed. Provider scale-to-zero and a second cold request remain deliberate timed checkpoints."
+  wait_serverless_zero "$SERVERLESS_NAME" 900
+  ic request "$SERVERLESS_NAME" --message "second cold acceptance probe" --output json >/dev/null
+  printf 'provider scaled to zero and the second cold request passed\n' >"$evidence/serverless-second-cold.log"
+  record serverless-events-after-second-cold ic events "$SERVERLESS_NAME" --output json
+  record serverless-explain-second-cold ic explain cold-start "$SERVERLESS_NAME" --output json
+  echo "Serverless cold, warm, scale-to-zero, second-cold, and streaming smoke completed."
+}
+
+run_qualify() {
+  require_paid_approval
+  run_elastic
+
+  # The benchmark supplies bounded real queue pressure. Autoscaling must prove
+  # both provider convergence to two replicas and the idle return to one.
+  record elastic-explain-scale-up ic explain scaling "$ELASTIC_NAME" --output json
+  wait_replica_count "$ELASTIC_NAME" 2 900
+  wait_replica_count "$ELASTIC_NAME" 1 600
+  record elastic-explain-scale-down ic explain scaling "$ELASTIC_NAME" --output json
+
+  # A candidate with no provisioned capacity is a deterministic bad update:
+  # Release Guard must reject candidate_not_ready without creating another pod.
+  record guard-candidate-create ic rollout create "$ELASTIC_NAME" --model "$MODEL" \
+    --cloud runpod --gpu "$GPU" --min 1 --max 1 --wait \
+    --idempotency-key "$ELASTIC_NAME-guard-candidate" --output json
+  candidate=$(ic status "$ELASTIC_NAME" --output json | jq -r '.deployment.candidate_revision_id')
+  [ -n "$candidate" ] && [ "$candidate" != null ] || { echo "candidate revision was not persisted" >&2; return 1; }
+  record guard-evaluate ic rollout evaluate "$ELASTIC_NAME" --wait \
+    --idempotency-key "$ELASTIC_NAME-guard-evaluate" --output json
+  record guard-explain ic explain rollout "$ELASTIC_NAME" --output json
+  record guard-inspect ic rollout inspect "$ELASTIC_NAME" --output json
+  record guard-reject ic rollout reject "$ELASTIC_NAME" "$candidate" \
+    --reason "acceptance candidate intentionally has no ready capacity" --wait \
+    --idempotency-key "$ELASTIC_NAME-guard-reject" --output json
+
+  delete_if_present "$ELASTIC_NAME" "$ELASTIC_NAME-delete"
+  run_serverless
+  echo "Qualification smoke completed; guarded cleanup will now delete the serverless endpoint and verify InferCrane inventory."
 }
 
 run_cleanup() {
@@ -251,6 +330,19 @@ case "$command_name" in
   preflight) run_preflight ;;
   elastic) run_elastic ;;
   serverless) run_serverless ;;
+  qualify)
+    # Refuse before installing the cleanup wrapper so a missing approval cannot
+    # start even the local acceptance stack.
+    require_paid_approval
+    if (set -e; run_qualify); then
+      run_cleanup
+    else
+      status=$?
+      echo "qualification failed; running guarded cleanup" >&2
+      run_cleanup || true
+      exit "$status"
+    fi
+    ;;
   cleanup) run_cleanup ;;
   report) run_report ;;
   *) usage >&2; exit 2 ;;
