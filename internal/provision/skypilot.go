@@ -197,7 +197,10 @@ func (s SkyPilot) observe(ctx context.Context, resourceID string, port int, refr
 	args = append(args, "-o", "json", resourceID)
 	output, err := runner.Run(ctx, nil, args...)
 	if err != nil {
-		return Observation{}, fmt.Errorf("observe SkyPilot cluster %s: %w", resourceID, err)
+		if clusterMissing(output) {
+			return Observation{Exists: false, State: "absent"}, nil
+		}
+		return Observation{}, fmt.Errorf("observe SkyPilot cluster %s: %w: %s", resourceID, err, strings.TrimSpace(string(output)))
 	}
 	statuses, err := parseStatuses(output)
 	if err != nil {
@@ -219,6 +222,7 @@ func (s SkyPilot) observe(ctx context.Context, resourceID string, port int, refr
 }
 
 func parseStatuses(data []byte) ([]clusterStatus, error) {
+	data = jsonPayload(data)
 	var list []map[string]any
 	if err := json.Unmarshal(data, &list); err != nil {
 		var keyed map[string]map[string]any
@@ -239,6 +243,26 @@ func parseStatuses(data []byte) ([]clusterStatus, error) {
 		statuses = append(statuses, clusterStatus{Name: name, Status: stringField(item, "status", "state")})
 	}
 	return statuses, nil
+}
+
+func clusterMissing(output []byte) bool {
+	message := strings.ToLower(string(output))
+	return strings.Contains(message, "cluster") && strings.Contains(message, "not found")
+}
+
+// SkyPilot may prefix machine-readable output with API-server notices. Find the
+// first JSON value that decodes instead of requiring stdout to contain JSON only.
+func jsonPayload(data []byte) []byte {
+	for index, value := range data {
+		if value != '[' && value != '{' {
+			continue
+		}
+		var raw json.RawMessage
+		if json.NewDecoder(strings.NewReader(string(data[index:]))).Decode(&raw) == nil {
+			return raw
+		}
+	}
+	return data
 }
 func stringField(values map[string]any, keys ...string) string {
 	for _, key := range keys {

@@ -10,6 +10,8 @@ import (
 type fakeSkyRunner struct {
 	exists          bool
 	statusErr       bool
+	missingErr      bool
+	statusPrefix    string
 	launches, downs int
 }
 
@@ -34,9 +36,12 @@ func (f *fakeSkyRunner) Run(_ context.Context, _ []string, args ...string) ([]by
 			return nil, errors.New("SkyPilot API unavailable")
 		}
 		if !f.exists {
+			if f.missingErr {
+				return []byte("Cluster 'infercrane-prod-r0' not found."), errors.New("exit status 1")
+			}
 			return []byte(`[]`), nil
 		}
-		return []byte(`[{"name":"infercrane-prod-r0","status":"UP"}]`), nil
+		return []byte(f.statusPrefix + `[{"name":"infercrane-prod-r0","status":"UP"}]`), nil
 	case command == "status -o json":
 		if !f.exists {
 			return []byte(`[]`), nil
@@ -44,6 +49,24 @@ func (f *fakeSkyRunner) Run(_ context.Context, _ []string, args ...string) ([]by
 		return []byte(`[{"name":"infercrane-prod-r0","status":"UP"},{"name":"unmanaged","status":"UP"}]`), nil
 	default:
 		return nil, errors.New("unexpected command: " + command)
+	}
+}
+
+func TestEnsureTreatsExplicitMissingClusterAsAbsent(t *testing.T) {
+	runner := &fakeSkyRunner{missingErr: true}
+	provider := SkyPilot{APIKey: "secret", Runner: runner}
+	_, err := provider.EnsureReplica(context.Background(), ReplicaSpec{ExternalKey: "prod-r0", Model: "model", Cloud: "runpod", GPU: "L40S"})
+	if err != nil || runner.launches != 1 {
+		t.Fatalf("launches=%d err=%v", runner.launches, err)
+	}
+}
+
+func TestObserveParsesSkyPilotNoticeBeforeJSON(t *testing.T) {
+	runner := &fakeSkyRunner{exists: true, statusPrefix: "Connecting to SkyPilot API server.\n"}
+	provider := SkyPilot{Runner: runner}
+	observation, err := provider.ObserveReplica(context.Background(), ProviderHandle{ResourceID: "infercrane-prod-r0"}, 8000)
+	if err != nil || !observation.Exists || observation.Endpoint == "" {
+		t.Fatalf("observation=%#v err=%v", observation, err)
 	}
 }
 
