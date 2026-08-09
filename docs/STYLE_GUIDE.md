@@ -1,6 +1,6 @@
 # InferCrane documentation style guide
 
-This guide keeps the public documentation precise, consistent, and maintainable. Baseten, Linear, and Vercel are quality references—not templates. Do not copy their branding, assets, copy, or component arrangements.
+This guide keeps the public documentation precise, consistent, and maintainable. Baseten, Linear, and Vercel are quality references—not templates. Do not copy their branding, assets, copy, or component arrangements. InferCrane uses Mintlify's Sequoia theme as a restrained content shell, with repository-owned tokens and infrastructure components layered on top.
 
 ## Visual tokens
 
@@ -29,6 +29,8 @@ Use regular body copy and medium or semibold headings. Keep paragraphs short. Av
 ## Spacing and components
 
 - Prefer whitespace and thin borders to shadows.
+- Use square-to-soft geometry: 6px controls, 10px system panels. Avoid pill-shaped product surfaces except status dots.
+- The overview page uses `wide` mode; task and reference pages retain the default reading layout.
 - Use cards to direct readers to a next action, not to turn every capability into a tile.
 - Use `<Steps>` for procedures, `<Tabs>` for genuinely alternative paths, and `<Warning>` only for risk.
 - Keep status displays compact: dot, label, value. Never use color as the only status signal.

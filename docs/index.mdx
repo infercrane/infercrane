@@ -1,31 +1,42 @@
 ---
-title: InferCrane
-description: Production inference without the platform engineering.
+title: Production inference without the platform engineering.
+description: Deploy, autoscale, benchmark, and safely update vLLM on RunPod.
 sidebarTitle: Introduction
+mode: wide
 ---
 
-<div className="ic-kicker">v0.1 release candidate</div>
-
-# Production inference without the platform engineering.
-
-Deploy, autoscale, benchmark, and safely update vLLM workloads on GPU infrastructure you control.
-
-<div className="not-prose flex flex-wrap gap-3 my-7">
-  <a className="button primary" href="/quickstart">Start the quickstart</a>
-  <a className="button" href="https://github.com/infercrane/infercrane">View on GitHub</a>
+<div className="ic-hero not-prose">
+  <div className="ic-kicker"><span className="ic-status-dot"></span> v0.1 release candidate</div>
+  <div className="ic-actions">
+    <a className="ic-button ic-button-primary" href="/quickstart">Start the quickstart <span aria-hidden="true">→</span></a>
+    <a className="ic-button ic-button-secondary" href="https://github.com/infercrane/infercrane">View on GitHub <span aria-hidden="true">↗</span></a>
+  </div>
+  <div className="ic-proof">
+    <span>vLLM runtime</span>
+    <span>RunPod compute</span>
+    <span>No Kubernetes required</span>
+  </div>
 </div>
 
-```bash Quick deployment
-infercrane deploy Qwen/Qwen3-8B
-```
+<div className="ic-terminal not-prose" role="region" aria-label="InferCrane deployment command">
+  <div className="ic-terminal-bar">
+    <div className="ic-terminal-lights" aria-hidden="true"><span></span><span></span><span></span></div>
+    <span>deploy · qwen3-8b</span>
+    <span className="ic-terminal-state"><i></i> durable operation</span>
+  </div>
+  <div className="ic-terminal-body"><span className="ic-prompt">$</span> infercrane deploy <span className="ic-code-value">Qwen/Qwen3-8B</span><br/><span className="ic-code-muted"># submits one durable operation through the control-plane API</span><br/><span className="ic-code-muted"># disconnecting the CLI does not abandon provisioning</span></div>
+</div>
 
 InferCrane gives applications one OpenAI-compatible logical endpoint while durable control-plane operations provision, reconcile, scale, and safely replace the vLLM workers behind it. Kubernetes is not required.
 
-<div className="ic-flow">
-  <div className="ic-node"><span className="ic-dot"></span> OpenAI client</div>
-  <div className="ic-node">logical deployment</div>
-  <div className="ic-node">vLLM Router</div>
-  <div className="ic-node"><span className="ic-dot"></span> vLLM replicas</div>
+<div className="ic-flow not-prose" aria-label="InferCrane request path">
+  <div className="ic-node"><span className="ic-node-label">request</span><strong>OpenAI client</strong></div>
+  <span className="ic-flow-arrow" aria-hidden="true">→</span>
+  <div className="ic-node ic-node-accent"><span className="ic-node-label">stable alias</span><strong>deployment</strong></div>
+  <span className="ic-flow-arrow" aria-hidden="true">→</span>
+  <div className="ic-node"><span className="ic-node-label">policy</span><strong>vLLM Router</strong></div>
+  <span className="ic-flow-arrow" aria-hidden="true">→</span>
+  <div className="ic-node"><span className="ic-node-label"><i className="ic-dot"></i> healthy</span><strong>vLLM replicas</strong></div>
 </div>
 
 ## The operational layer around vLLM
