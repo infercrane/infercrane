@@ -17,7 +17,7 @@ Errors are stable JSON objects:
 | `POST /deployments/apply` | operator | Queue existing-target convergence; requires `Idempotency-Key`. |
 | `POST /deployments` | operator | Atomically create desired cloud deployment and queue convergence; requires `Idempotency-Key`. |
 | `GET /deployments` | viewer | List tenant deployments. |
-| `GET /deployments/{name}` | viewer | Inspect deployment, targets, replicas, revisions, and persisted request statistics. |
+| `GET /deployments/{name}` | viewer | Inspect deployment, targets, replicas, revisions, immutable model artifacts, and persisted request statistics. |
 | `GET /deployments/{name}/events` | viewer | List durable deployment events. |
 | `GET /deployments/{name}/revisions` | viewer | List immutable revision history. |
 | `GET /deployments/{name}/scaling-decisions` | viewer | List deterministic scaling evaluations and their persisted signals. |

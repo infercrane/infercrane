@@ -46,6 +46,12 @@ func (acceptanceRuntime) Inspect(context.Context, string) (bool, map[string]stru
 	return true, map[string]struct{}{"Qwen/Qwen3-8B": {}}
 }
 
+type acceptanceArtifactResolver struct{}
+
+func (acceptanceArtifactResolver) Resolve(context.Context, string, string) (domain.ModelArtifact, error) {
+	return domain.ModelArtifact{Source: "huggingface", Repository: "Qwen/Qwen3-8B", RequestedRevision: "main", ImmutableRevision: "0123456789abcdef0123456789abcdef01234567", ModelIdentity: "Qwen/Qwen3-8B@0123456789abcdef0123456789abcdef01234567", CacheState: "unknown", RuntimeCompatibilityJSON: `{}`}, nil
+}
+
 func TestDurableAutoscalingAcceptanceOneToTwoToOne(t *testing.T) {
 	ctx := context.Background()
 	s := openStore(t, ctx)
@@ -59,7 +65,7 @@ func TestDurableAutoscalingAcceptanceOneToTwoToOne(t *testing.T) {
 		t.Fatal(err)
 	}
 	provider := &acceptanceProvider{existing: map[string]bool{}}
-	handlers := workflows.CloudHandlers(s, provider, acceptanceRuntime{})
+	handlers := workflows.CloudHandlers(s, provider, acceptanceRuntime{}, acceptanceArtifactResolver{})
 	worker := operations.Worker{Repository: s, Handlers: handlers, Owner: "acceptance-worker", Lease: time.Second, BaseBackoff: time.Millisecond, MaxBackoff: time.Millisecond, Jitter: func(d time.Duration) time.Duration { return d }}
 	if worked, workerErr := worker.Once(ctx); workerErr != nil || !worked {
 		t.Fatalf("initial converge worked=%t err=%v", worked, workerErr)

@@ -76,6 +76,9 @@ func (f *fakeStore) OperationEvents(context.Context, string, int) ([]domain.Oper
 func (f *fakeStore) ScalingDecisionsForTenant(context.Context, string, string, int) ([]domain.ScalingDecision, error) {
 	return nil, f.err
 }
+func (f *fakeStore) ModelArtifactForRevision(context.Context, string, string) (domain.ModelArtifact, error) {
+	return domain.ModelArtifact{}, domain.ErrNotFound
+}
 func (f *fakeStore) AddTargetForTenant(_ context.Context, _ string, target domain.Target) (domain.Target, error) {
 	target.ID = "target"
 	return target, f.err

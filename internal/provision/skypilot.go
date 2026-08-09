@@ -15,11 +15,11 @@ import (
 var ErrUnavailable = errors.New("SkyPilot unavailable")
 
 type ReplicaSpec struct {
-	ExternalKey                                     string
-	Name, Model, Cloud, GPU, Region, RuntimeVersion string
-	RequestID                                       string
-	RuntimeArgs                                     []string
-	Port                                            int
+	ExternalKey                                                    string
+	Name, Model, ModelRevision, Cloud, GPU, Region, RuntimeVersion string
+	RequestID                                                      string
+	RuntimeArgs                                                    []string
+	Port                                                           int
 }
 type ProviderHandle struct{ RequestID, ResourceID, ExternalKey string }
 type Observation struct {
@@ -80,7 +80,7 @@ func (s SkyPilot) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provider
 			return ProviderHandle{RequestID: spec.RequestID, ResourceID: resourceID, ExternalKey: spec.ExternalKey}, nil
 		}
 	}
-	task := map[string]any{"resources": map[string]any{"infra": infrastructure(spec.Cloud, spec.Region), "accelerators": spec.GPU, "ports": []int{spec.Port}}, "setup": "python -m pip install 'vllm==" + spec.RuntimeVersion + "'", "run": runCommand(spec.Model, spec.Port, spec.RuntimeArgs)}
+	task := map[string]any{"resources": map[string]any{"infra": infrastructure(spec.Cloud, spec.Region), "accelerators": spec.GPU, "ports": []int{spec.Port}}, "setup": "python -m pip install 'vllm==" + spec.RuntimeVersion + "'", "run": runCommand(spec.Model, spec.ModelRevision, spec.Port, spec.RuntimeArgs)}
 	task["secrets"] = map[string]any{"INFERCRANE_WORKER_API_KEY": nil}
 	path, cleanup, err := writeTask(task)
 	if err != nil {
@@ -187,10 +187,13 @@ func clusterName(name string) string {
 	}
 	return strings.TrimRight(result, "-")
 }
-func runCommand(model string, port int, runtimeArgs []string) string {
+func runCommand(model, revision string, port int, runtimeArgs []string) string {
 	args := make([]string, len(runtimeArgs))
 	for i, arg := range runtimeArgs {
 		args[i] = shellQuote(arg)
+	}
+	if revision != "" {
+		args = append([]string{"--revision", shellQuote(revision)}, args...)
 	}
 	return fmt.Sprintf(`vllm serve %s --host 0.0.0.0 --port %d --served-model-name %s --api-key "$INFERCRANE_WORKER_API_KEY" %s`, shellQuote(model), port, shellQuote(model), strings.Join(args, " "))
 }

@@ -72,6 +72,13 @@ func TestEnsureDoesNotRelaunchActiveRequest(t *testing.T) {
 	}
 }
 
+func TestRunCommandPinsImmutableModelRevision(t *testing.T) {
+	command := runCommand("Qwen/Qwen3-8B", "0123456789abcdef0123456789abcdef01234567", 8000, nil)
+	if !strings.Contains(command, "--revision '0123456789abcdef0123456789abcdef01234567'") {
+		t.Fatalf("command does not pin revision: %s", command)
+	}
+}
+
 func TestEnsureRelaunchesMissingOrFailedRequest(t *testing.T) {
 	for _, state := range []string{"", "FAILED"} {
 		runner := &fakeSkyRunner{requestID: "request-1", requestState: state}

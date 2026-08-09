@@ -31,6 +31,7 @@ type Store interface {
 	Revisions(context.Context, string, string) ([]domain.DeploymentRevision, error)
 	OperationEvents(context.Context, string, int) ([]domain.OperationEvent, error)
 	ScalingDecisionsForTenant(context.Context, string, string, int) ([]domain.ScalingDecision, error)
+	ModelArtifactForRevision(context.Context, string, string) (domain.ModelArtifact, error)
 	AddTargetForTenant(context.Context, string, domain.Target) (domain.Target, error)
 	TargetsForTenant(context.Context, string) ([]domain.Target, error)
 	DeploymentsForTenant(context.Context, string) ([]domain.Deployment, error)
@@ -331,10 +332,18 @@ func (a API) deployment(w http.ResponseWriter, r *http.Request) {
 		replicaData = append(replicaData, replicaResponse(replica))
 	}
 	revisionData := make([]map[string]any, 0, len(revisions))
+	artifactData := make([]map[string]any, 0, len(revisions))
 	for _, revision := range revisions {
 		revisionData = append(revisionData, revisionResponse(revision))
+		modelArtifact, artifactErr := a.Store.ModelArtifactForRevision(r.Context(), principal.TenantID, revision.ID)
+		if artifactErr == nil {
+			artifactData = append(artifactData, artifactResponse(revision.ID, modelArtifact))
+		} else if !errors.Is(artifactErr, domain.ErrNotFound) {
+			writeError(w, 500, "internal", "model artifact lookup failed")
+			return
+		}
 	}
-	writeJSON(w, 200, map[string]any{"deployment": deploymentResponse(resolved.Deployment), "targets": targets, "replicas": replicaData, "revisions": revisionData, "request_stats": stats})
+	writeJSON(w, 200, map[string]any{"deployment": deploymentResponse(resolved.Deployment), "targets": targets, "replicas": replicaData, "revisions": revisionData, "model_artifacts": artifactData, "request_stats": stats})
 }
 func (a API) deploymentEvents(w http.ResponseWriter, r *http.Request) {
 	principal := r.Context().Value(identityKey{}).(domain.Principal)
@@ -478,6 +487,9 @@ func replicaResponse(row domain.Replica) map[string]any {
 }
 func revisionResponse(row domain.DeploymentRevision) map[string]any {
 	return map[string]any{"id": row.ID, "number": row.Number, "status": row.Status, "spec": json.RawMessage(row.SpecJSON), "source_revision_id": row.SourceRevisionID, "reason": row.Reason, "created_at": row.CreatedAt, "activated_at": row.ActivatedAt, "completed_at": row.CompletedAt}
+}
+func artifactResponse(revisionID string, row domain.ModelArtifact) map[string]any {
+	return map[string]any{"id": row.ID, "revision_id": revisionID, "source": row.Source, "repository": row.Repository, "requested_revision": row.RequestedRevision, "immutable_revision": row.ImmutableRevision, "model_identity": row.ModelIdentity, "approximate_size_bytes": row.ApproximateSizeBytes, "cache_state": row.CacheState, "runtime_compatibility": json.RawMessage(row.RuntimeCompatibilityJSON), "resolved_at": row.ResolvedAt}
 }
 
 func (a API) applyDeployment(w http.ResponseWriter, r *http.Request) {

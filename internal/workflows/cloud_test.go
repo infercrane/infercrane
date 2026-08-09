@@ -142,7 +142,13 @@ func (f *fakeCloudStore) RoutingGenerationMatches(context.Context, string, strin
 	return true, nil
 }
 func (f *fakeCloudStore) DeleteProvisionedTarget(context.Context, string, string) error { return nil }
-func (f *fakeCloudStore) Audit(context.Context, domain.AuditEvent) error                { return nil }
+func (f *fakeCloudStore) ModelArtifactForRevision(context.Context, string, string) (domain.ModelArtifact, error) {
+	return domain.ModelArtifact{Repository: "Qwen/Qwen3-8B", ImmutableRevision: "0123456789abcdef0123456789abcdef01234567", ModelIdentity: "Qwen/Qwen3-8B@0123456789abcdef0123456789abcdef01234567", CacheState: "unknown"}, nil
+}
+func (f *fakeCloudStore) AttachModelArtifact(_ context.Context, _, _ string, artifact domain.ModelArtifact) (domain.ModelArtifact, error) {
+	return artifact, nil
+}
+func (f *fakeCloudStore) Audit(context.Context, domain.AuditEvent) error { return nil }
 
 type fakeReplicaProvider struct {
 	observation provision.Observation

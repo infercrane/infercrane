@@ -450,6 +450,32 @@ func TestScaleToQueuesExactlyOneDurableOperation(t *testing.T) {
 	}
 }
 
+func TestModelArtifactIsImmutablePerRevision(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	if _, err := s.AddTarget(ctx, domain.Target{Name: "artifact-target", URL: "http://artifact.invalid", Provider: "existing", Runtime: "vllm"}); err != nil {
+		t.Fatal(err)
+	}
+	deployment, err := s.ApplyDeployment(ctx, domain.Deployment{Name: "artifact-deployment", Model: "Qwen/Qwen3-8B"}, []string{"artifact-target"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := s.Resolve(ctx, deployment.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deployment = resolved.Deployment
+	size := int64(100)
+	first, err := s.AttachModelArtifact(ctx, "global", deployment.ActiveRevisionID, domain.ModelArtifact{Source: "huggingface", Repository: "Qwen/Qwen3-8B", RequestedRevision: "main", ImmutableRevision: "0123456789abcdef0123456789abcdef01234567", ModelIdentity: "Qwen/Qwen3-8B@0123456789abcdef0123456789abcdef01234567", ApproximateSizeBytes: &size, CacheState: "unknown", RuntimeCompatibilityJSON: `{}`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.AttachModelArtifact(ctx, "global", deployment.ActiveRevisionID, domain.ModelArtifact{Source: "huggingface", Repository: "Qwen/Qwen3-8B", RequestedRevision: "main", ImmutableRevision: "ffffffffffffffffffffffffffffffffffffffff", ModelIdentity: "Qwen/Qwen3-8B@ffffffffffffffffffffffffffffffffffffffff", CacheState: "unknown", RuntimeCompatibilityJSON: `{}`})
+	if err != nil || first.ID != second.ID || second.ImmutableRevision != first.ImmutableRevision {
+		t.Fatalf("first=%#v second=%#v err=%v", first, second, err)
+	}
+}
+
 func TestReplicaIntentAndProviderIdentityAreIdempotent(t *testing.T) {
 	ctx := context.Background()
 	s := openStore(t, ctx)
@@ -572,7 +598,7 @@ func openStore(t *testing.T, ctx context.Context) *Store {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	if _, err := s.db.ExecContext(ctx, `TRUNCATE principals,tenant_quotas,audit_events,operations,scaling_decisions,scaling_policies,request_records,deployment_events,router_generations,deployment_targets,replicas,deployments,targets CASCADE`); err != nil {
+	if _, err := s.db.ExecContext(ctx, `TRUNCATE principals,tenant_quotas,audit_events,operations,scaling_decisions,scaling_policies,request_records,deployment_events,router_generations,deployment_targets,replicas,deployments,targets,model_artifacts CASCADE`); err != nil {
 		t.Fatalf("reset test database: %v", err)
 	}
 	t.Cleanup(func() {

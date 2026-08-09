@@ -22,21 +22,24 @@ const (
 )
 
 type CloudRequest struct {
-	DeploymentID     string   `json:"deployment_id"`
-	Name             string   `json:"name"`
-	Model            string   `json:"model"`
-	Cloud            string   `json:"cloud"`
-	GPU              string   `json:"gpu"`
-	Region           string   `json:"region,omitempty"`
-	RuntimeVersion   string   `json:"runtime_version,omitempty"`
-	RuntimeArgs      []string `json:"runtime_args,omitempty"`
-	Port             int      `json:"port,omitempty"`
-	MinReplicas      int      `json:"min_replicas,omitempty"`
-	MaxReplicas      int      `json:"max_replicas,omitempty"`
-	DesiredReplicas  int      `json:"desired_replicas,omitempty"`
-	PreviousReplicas int      `json:"previous_replicas,omitempty"`
-	Actor            string   `json:"actor,omitempty"`
-	TenantID         string   `json:"tenant_id,omitempty"`
+	DeploymentID           string   `json:"deployment_id"`
+	Name                   string   `json:"name"`
+	Model                  string   `json:"model"`
+	Cloud                  string   `json:"cloud"`
+	GPU                    string   `json:"gpu"`
+	Region                 string   `json:"region,omitempty"`
+	RuntimeVersion         string   `json:"runtime_version,omitempty"`
+	ModelRevision          string   `json:"model_revision,omitempty"`
+	ImmutableModelRevision string   `json:"immutable_model_revision,omitempty"`
+	RevisionID             string   `json:"revision_id,omitempty"`
+	RuntimeArgs            []string `json:"runtime_args,omitempty"`
+	Port                   int      `json:"port,omitempty"`
+	MinReplicas            int      `json:"min_replicas,omitempty"`
+	MaxReplicas            int      `json:"max_replicas,omitempty"`
+	DesiredReplicas        int      `json:"desired_replicas,omitempty"`
+	PreviousReplicas       int      `json:"previous_replicas,omitempty"`
+	Actor                  string   `json:"actor,omitempty"`
+	TenantID               string   `json:"tenant_id,omitempty"`
 }
 
 func (r CloudRequest) Validate() error {
@@ -70,6 +73,8 @@ type CloudStore interface {
 	DeleteDeploymentForTenant(context.Context, string, string) error
 	RoutingGenerationMatches(context.Context, string, string) (bool, error)
 	DeleteProvisionedTarget(context.Context, string, string) error
+	ModelArtifactForRevision(context.Context, string, string) (domain.ModelArtifact, error)
+	AttachModelArtifact(context.Context, string, string, domain.ModelArtifact) (domain.ModelArtifact, error)
 	Audit(context.Context, domain.AuditEvent) error
 }
 
@@ -84,7 +89,15 @@ type RuntimeInspector interface {
 	Inspect(context.Context, string) (bool, map[string]struct{})
 }
 
-func CloudHandlers(store CloudStore, provider ReplicaProvider, runtime RuntimeInspector) map[string]operations.Handler {
+type ArtifactResolver interface {
+	Resolve(context.Context, string, string) (domain.ModelArtifact, error)
+}
+
+func CloudHandlers(store CloudStore, provider ReplicaProvider, runtime RuntimeInspector, artifactResolvers ...ArtifactResolver) map[string]operations.Handler {
+	var artifactResolver ArtifactResolver
+	if len(artifactResolvers) > 0 {
+		artifactResolver = artifactResolvers[0]
+	}
 	converge := func(ctx context.Context, operation domain.Operation) (string, error) {
 		request, err := decodeCloudRequest(operation)
 		if err != nil {
@@ -95,6 +108,24 @@ func CloudHandlers(store CloudStore, provider ReplicaProvider, runtime RuntimeIn
 			return "", operations.Permanent("deployment_missing", fmt.Errorf("resolve desired deployment: %w", err))
 		}
 		request.DeploymentID = resolved.Deployment.ID
+		if request.RevisionID == "" {
+			request.RevisionID = resolved.Deployment.ActiveRevisionID
+		}
+		modelArtifact, artifactErr := store.ModelArtifactForRevision(ctx, request.TenantID, request.RevisionID)
+		if errors.Is(artifactErr, domain.ErrNotFound) {
+			if artifactResolver == nil {
+				return "", operations.Permanent("artifact_resolver_unavailable", errors.New("Hugging Face artifact resolver is required"))
+			}
+			modelArtifact, artifactErr = artifactResolver.Resolve(ctx, request.Model, request.ModelRevision)
+			if artifactErr == nil {
+				modelArtifact, artifactErr = store.AttachModelArtifact(ctx, request.TenantID, request.RevisionID, modelArtifact)
+			}
+		}
+		if artifactErr != nil {
+			return "", operations.Retryable("artifact_resolution_failed", artifactErr)
+		}
+		request.ImmutableModelRevision = modelArtifact.ImmutableRevision
+		_ = checkpoint(ctx, store, operation, "model.artifact", "succeeded", map[string]any{"identity": modelArtifact.ModelIdentity, "approximate_size_bytes": modelArtifact.ApproximateSizeBytes, "cache_state": modelArtifact.CacheState}, 10, "Immutable model artifact resolved")
 		desired := request.DesiredReplicas
 		if desired == 0 {
 			desired = resolved.Deployment.MinReplicas
@@ -249,7 +280,7 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, provider ReplicaP
 	if err = checkpoint(ctx, store, operation, step+".intent", "succeeded", map[string]string{"replica_id": replica.ID, "external_key": externalKey, "resource_id": handle.ResourceID}, 15, "Replica identity persisted"); err != nil {
 		return "", "", "", err
 	}
-	ensured, err := provider.EnsureReplica(ctx, provision.ReplicaSpec{ExternalKey: externalKey, RequestID: replica.ProviderRequestID, Name: fmt.Sprintf("%s-r%d", request.Name, ordinal), Model: request.Model, Cloud: request.Cloud, GPU: request.GPU, Region: request.Region, RuntimeVersion: request.RuntimeVersion, RuntimeArgs: request.RuntimeArgs, Port: request.Port})
+	ensured, err := provider.EnsureReplica(ctx, provision.ReplicaSpec{ExternalKey: externalKey, RequestID: replica.ProviderRequestID, Name: fmt.Sprintf("%s-r%d", request.Name, ordinal), Model: request.Model, ModelRevision: request.ImmutableModelRevision, Cloud: request.Cloud, GPU: request.GPU, Region: request.Region, RuntimeVersion: request.RuntimeVersion, RuntimeArgs: request.RuntimeArgs, Port: request.Port})
 	if err != nil {
 		return "", "", "", operations.Retryable("provider_ensure_failed", err)
 	}

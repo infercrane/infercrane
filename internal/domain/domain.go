@@ -30,6 +30,14 @@ type DeploymentRevision struct {
 	ActivatedAt, CompletedAt                                     *time.Time
 }
 
+type ModelArtifact struct {
+	ID, TenantID, Source, Repository, RequestedRevision string
+	ImmutableRevision, ModelIdentity, CacheState        string
+	ApproximateSizeBytes                                *int64
+	RuntimeCompatibilityJSON                            string
+	ResolvedAt                                          time.Time
+}
+
 type ResolvedDeployment struct {
 	Deployment Deployment
 	Targets    []Target

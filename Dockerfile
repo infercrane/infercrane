@@ -15,15 +15,19 @@ RUN --mount=type=cache,target=/go/pkg/mod go test -race -count=1 ./... \
 FROM python:3.12-slim-bookworm AS runtime
 ARG VLLM_ROUTER_VERSION=0.1.15
 ARG SKYPILOT_VERSION=0.13.0
+ARG HUGGINGFACE_HUB_VERSION=1.24.0
 RUN apt-get update \
     && apt-get install --no-install-recommends -y git openssh-client rsync \
     && rm -rf /var/lib/apt/lists/* \
-    && python -m pip install --no-cache-dir "vllm-router==${VLLM_ROUTER_VERSION}" "skypilot[runpod]==${SKYPILOT_VERSION}" \
+	&& python -m pip install --no-cache-dir "vllm-router==${VLLM_ROUTER_VERSION}" "skypilot[runpod]==${SKYPILOT_VERSION}" \
+	&& python -m venv /opt/infercrane-huggingface \
+	&& /opt/infercrane-huggingface/bin/pip install --no-cache-dir "huggingface_hub[hf_xet]==${HUGGINGFACE_HUB_VERSION}" \
     && useradd --create-home --uid 10001 app
 COPY --from=builder /out/infercrane /usr/local/bin/infercrane
 COPY scripts/entrypoint.sh /usr/local/bin/infercrane-entrypoint
 RUN chmod 755 /usr/local/bin/infercrane-entrypoint
 ENV INFERCRANE_HOST=0.0.0.0
+ENV INFERCRANE_HF_PYTHON=/opt/infercrane-huggingface/bin/python
 EXPOSE 8080
 USER app
 ENTRYPOINT ["infercrane-entrypoint"]

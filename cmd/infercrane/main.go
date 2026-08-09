@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/accounting"
+	"github.com/infercrane/infercrane/internal/artifact"
 	"github.com/infercrane/infercrane/internal/authn"
 	"github.com/infercrane/infercrane/internal/autoscale"
 	"github.com/infercrane/infercrane/internal/benchmark"
@@ -506,12 +507,26 @@ type revisionView struct {
 	Number           int             `json:"number"`
 	Spec             json.RawMessage `json:"spec"`
 }
+type artifactView struct {
+	ID                   string          `json:"id"`
+	RevisionID           string          `json:"revision_id"`
+	Source               string          `json:"source"`
+	Repository           string          `json:"repository"`
+	RequestedRevision    string          `json:"requested_revision"`
+	ImmutableRevision    string          `json:"immutable_revision"`
+	ModelIdentity        string          `json:"model_identity"`
+	ApproximateSizeBytes *int64          `json:"approximate_size_bytes"`
+	CacheState           string          `json:"cache_state"`
+	RuntimeCompatibility json.RawMessage `json:"runtime_compatibility"`
+	ResolvedAt           time.Time       `json:"resolved_at"`
+}
 type deploymentView struct {
-	Deployment   deploymentSummary   `json:"deployment"`
-	Targets      []targetView        `json:"targets"`
-	Replicas     []replicaView       `json:"replicas"`
-	Revisions    []revisionView      `json:"revisions"`
-	RequestStats domain.RequestStats `json:"request_stats"`
+	Deployment     deploymentSummary   `json:"deployment"`
+	Targets        []targetView        `json:"targets"`
+	Replicas       []replicaView       `json:"replicas"`
+	Revisions      []revisionView      `json:"revisions"`
+	ModelArtifacts []artifactView      `json:"model_artifacts"`
+	RequestStats   domain.RequestStats `json:"request_stats"`
 }
 
 func listDeployments(ctx context.Context, cfg config.Config, args []string) error {
@@ -895,6 +910,11 @@ func inspectCommand(ctx context.Context, cfg config.Config, args []string) error
 		return errors.New("--output must be human or json")
 	}
 	fmt.Printf("%s\nModel      %s\nRuntime    %s\nActive     %s\nCandidate  %s\n", view.Deployment.Name, view.Deployment.Model, view.Deployment.Runtime, view.Deployment.ActiveRevisionID, emptyAs(view.Deployment.CandidateRevisionID, "none"))
+	for _, modelArtifact := range view.ModelArtifacts {
+		if modelArtifact.RevisionID == view.Deployment.ActiveRevisionID {
+			fmt.Printf("Artifact   %s\nCache      %s\n", modelArtifact.ModelIdentity, modelArtifact.CacheState)
+		}
+	}
 	for _, replica := range view.Replicas {
 		fmt.Printf("\nReplica    %s\nProvider   %s\nRequest    %s\nResource   %s\nEndpoint   %s\nState      %s/%s\n", replica.ID, replica.Provider, emptyAs(replica.ProviderRequestID, "none"), emptyAs(replica.ProviderResourceID, "none"), emptyAs(replica.Endpoint, "pending"), replica.LifecycleState, replica.Health)
 		if len(replica.ProviderDetails) > 0 && string(replica.ProviderDetails) != "{}" {
@@ -1056,7 +1076,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	control := (controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: credentialCache}).Handler()
 	operationTelemetry := &operations.Telemetry{}
 	handlers := workflows.DeploymentHandlers(s)
-	for kind, handler := range workflows.CloudHandlers(s, provision.SkyPilot{APIKey: cfg.APIKey}, runtime) {
+	for kind, handler := range workflows.CloudHandlers(s, provision.SkyPilot{APIKey: cfg.APIKey}, runtime, artifact.HuggingFace{}) {
 		handlers[kind] = handler
 	}
 	operationWorker := operations.Worker{Repository: s, Handlers: handlers, Owner: cfg.InstanceID, Lease: 30 * time.Second, PollInterval: time.Second, BaseBackoff: 2 * time.Second, MaxBackoff: time.Minute, Telemetry: operationTelemetry}
