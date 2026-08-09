@@ -33,7 +33,7 @@ The production image includes the local `git`, OpenSSH, and `rsync` executables 
 SkyPilot's task packaging and remote synchronization paths.
 When running `infercrane serve`, its entrypoint also supervises SkyPilot's foreground API server;
 the container exits if that required subprocess stops.
-- `INFERCRANE_INSTANCE_ID`: stable and unique per replica, normally the Kubernetes pod name.
+- `INFERCRANE_INSTANCE_ID`: stable and unique per control-plane replica.
 - `INFERCRANE_DATABASE_MAX_OPEN` and `INFERCRANE_DATABASE_MAX_IDLE`: size these with the total
   replica count below PostgreSQL's connection budget or place PgBouncer in transaction mode.
 - `INFERCRANE_REQUEST_RETENTION_HOURS`: bounds high-volume request-accounting storage; the
@@ -50,7 +50,7 @@ Health and telemetry endpoints:
 - `/metrics`: Prometheus-format gateway request, failure, active request, byte, duration histogram,
   and operation claim, completion, failure, retry, and cancellation counters.
 
-Import [the baseline Prometheus alert rules](../deploy/prometheus-rules.yaml), then tune thresholds
+Import [the baseline Prometheus alert rules](https://github.com/infercrane/infercrane/blob/main/deploy/prometheus-rules.yaml), then tune thresholds
 from real model latency and traffic. Follow the [compatibility policy](compatibility.md) and perform
 the [backup/restore drill](runbooks/backup-restore.md) for every release containing migrations.
 

@@ -8,6 +8,7 @@ __pycache__/
 *.db-wal
 .infercrane/
 dist/
+site/
 build/
 .infercrane/
 /infercrane

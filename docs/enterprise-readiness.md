@@ -27,10 +27,10 @@ after environment evidence exists.
 
 ## Priority 2 — efficient fleet automation
 
-- Production SkyPilot and Kubernetes fleet scalers with distributed ownership.
+- Production SkyPilot RunPod fleet scaling with distributed control-plane ownership.
 - Drain, warm-up, rollback, capacity exhaustion, and scale-to-zero policies.
 - Live capacity inventory, model cache management, and timestamped provider prices.
-- SGLang and further runtime adapters behind compatibility suites.
+- Further runtime and cloud adapters are post-v0.1 work.
 
 ## Release blockers
 

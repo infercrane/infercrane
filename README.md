@@ -223,7 +223,7 @@ The production image includes InferCrane and the pinned upstream vLLM Router. De
 exist only in the Docker `development` target under `internal/testtools`.
 
 See [production operations](docs/production.md) and the
-[Kubernetes baseline](deploy/kubernetes.yaml).
+[RunPod provider setup](docs/provider-setup.md).
 
 ## Development
 

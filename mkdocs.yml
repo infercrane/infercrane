@@ -1,0 +1,26 @@
+site_name: InferCrane
+site_description: Production inference without the platform engineering.
+site_url: https://infercrane.github.io/infercrane/
+repo_url: https://github.com/infercrane/infercrane
+theme:
+  name: readthedocs
+nav:
+  - Home: index.md
+  - Quickstart: quickstart.md
+  - Concepts: concepts.md
+  - DeploymentSpec: deployment-spec.md
+  - CLI: cli.md
+  - Lifecycle: features/lifecycle.md
+  - Autoscaling: features/autoscaling.md
+  - Serverless: features/serverless.md
+  - Release Guard: features/release-guard.md
+  - Benchmarking: features/benchmarking.md
+  - Cold starts: features/cold-starts.md
+  - Durable Sessions: features/durable-sessions.md
+  - Explain: features/explanations.md
+  - Architecture: architecture/system.md
+  - Provider setup: provider-setup.md
+  - Troubleshooting: troubleshooting.md
+  - Security: security.md
+  - FAQ: faq.md
+strict: true

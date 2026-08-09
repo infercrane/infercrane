@@ -3,12 +3,25 @@ package planning
 import "testing"
 
 func TestBuildProvisionedPlan(t *testing.T) {
-	p, err := Build(Input{Model: "Qwen/Qwen3-8B", Cloud: "aws", GPU: "L4"})
+	p, err := Build(Input{Model: "Qwen/Qwen3-8B", Cloud: "runpod", GPU: "L40S"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if p.Name != "qwen3-8b" || p.Mode != "provisioned" || len(p.Actions) != 6 {
 		t.Fatalf("unexpected plan: %#v", p)
+	}
+}
+
+func TestBuildRejectsExcludedCloud(t *testing.T) {
+	_, err := Build(Input{Model: "model", Cloud: "aws", GPU: "L4"})
+	if err == nil {
+		t.Fatal("v0.1 must reject unsupported clouds")
+	}
+}
+func TestBuildRejectsExcludedRuntime(t *testing.T) {
+	_, err := Build(Input{Model: "model", Runtime: "sglang", Cloud: "runpod", GPU: "L40S"})
+	if err == nil {
+		t.Fatal("v0.1 must reject unsupported runtimes")
 	}
 }
 

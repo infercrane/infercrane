@@ -18,7 +18,7 @@ vLLM Router as a supervised external process. InferCrane does not embed or fork 
 algorithms. A router generation is reconstructible from persisted desired state.
 
 Provisioners are adapters. Stage 1 implements existing targets. Stage 2 adds SkyPilot.
-Future AIBrix and KServe adapters are alternatives and are not assumed to be stacked.
+Additional schedulers and runtime platforms are outside the v0.1 architecture.
 
 The product is a single Go binary. Package boundaries keep the gateway data plane independent
 of PostgreSQL reads, and provider/runtime/router integrations sit behind small interfaces. The

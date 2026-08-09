@@ -8,7 +8,6 @@ Status: Implemented baseline; environment qualification required
 - Process lifecycle: `cmd/infercrane/main.go`
 - Container targets: `Dockerfile`
 - Development stack: `compose.yaml`
-- Kubernetes baseline: `deploy/kubernetes.yaml`
 - Runbook: `docs/production.md`
 - Lifecycle operations: `internal/store/lifecycle.go`
 - Leased operation worker: `internal/operations`

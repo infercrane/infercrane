@@ -100,11 +100,17 @@ func Build(in Input) (Plan, error) {
 	if (in.Cloud == "") != (in.GPU == "") {
 		return Plan{}, errors.New("cloud and GPU must be provided together")
 	}
+	if in.Cloud != "" && in.Cloud != "runpod" {
+		return Plan{}, errors.New("v0.1 cloud provisioning supports RunPod only")
+	}
 	if in.Name == "" {
 		in.Name = DefaultName(in.Model)
 	}
 	if in.Runtime == "" {
 		in.Runtime = "vllm"
+	}
+	if in.Runtime != "vllm" {
+		return Plan{}, errors.New("v0.1 runtime must be vllm")
 	}
 	if in.Routing == "" {
 		in.Routing = "round-robin"

@@ -5,6 +5,10 @@ than loading the entire repository into one context window.
 
 ## Orientation
 
+- [Quickstart](quickstart.md)
+- [Concepts](concepts.md)
+- [DeploymentSpec](deployment-spec.md)
+- [CLI reference](cli.md)
 - [Product vision and roadmap](product-vision.md): product promise, golden path, milestones, and success measures.
 - [Enterprise readiness plan](enterprise-readiness.md): prioritized blockers and qualification order.
 - [Control-plane API v1](control-api.md): authentication, roles, resources, and stable errors.
@@ -12,7 +16,7 @@ than loading the entire repository into one context window.
 - [Generated repository map](generated/repository-map.md): packages, commands, endpoints,
   configuration, migrations, and tests derived from source.
 - [Ownership](ownership.md): stewardship and review responsibilities.
-- [Contributing](../CONTRIBUTING.md): development and review workflow.
+- [Contributing](https://github.com/infercrane/infercrane/blob/main/CONTRIBUTING.md): development and review workflow.
 
 ## Architecture
 
@@ -32,6 +36,10 @@ than loading the entire repository into one context window.
 - [Cold-start intelligence](features/cold-starts.md)
 - [Reproducible benchmarking](features/benchmarking.md)
 - [Deterministic explanations](features/explanations.md)
+- [Lifecycle](features/lifecycle.md)
+- [Autoscaling](features/autoscaling.md)
+- [Release Guard](features/release-guard.md)
+- [Durable Sessions](features/durable-sessions.md)
 
 ## Operations
 
@@ -41,7 +49,10 @@ than loading the entire repository into one context window.
 - [Stage 1 existing-worker guide](stage1-poc.md)
 - [Stage 2 SkyPilot guide](stage2-skypilot.md)
 - [Dependencies](dependencies.md)
-- [Kubernetes baseline](../deploy/kubernetes.yaml)
+- [RunPod provider setup](provider-setup.md)
+- [Troubleshooting](troubleshooting.md)
+- [Security](security.md)
+- [FAQ](faq.md)
 
 ## Authority order
 

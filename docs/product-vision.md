@@ -26,8 +26,8 @@ The experience is guided by five principles:
 
 ```text
 infercrane doctor
-infercrane plan Qwen/Qwen3-8B --cloud aws --gpu L4
-infercrane deploy Qwen/Qwen3-8B --cloud aws --gpu L4
+infercrane plan Qwen/Qwen3-8B --cloud runpod --gpu L40S
+infercrane deploy Qwen/Qwen3-8B --cloud runpod --gpu L40S
 infercrane status qwen3-8b
 ```
 
