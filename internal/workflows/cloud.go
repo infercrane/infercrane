@@ -89,67 +89,22 @@ func CloudHandlers(store CloudStore, provider ReplicaProvider, runtime RuntimeIn
 			return "", operations.Permanent("deployment_missing", fmt.Errorf("resolve desired deployment: %w", err))
 		}
 		request.DeploymentID = resolved.Deployment.ID
-		externalKey := request.DeploymentID + "-r0"
-		replica, _, err := store.EnsureReplicaIntent(ctx, domain.Replica{TenantID: request.TenantID, DeploymentID: request.DeploymentID, Ordinal: 0, ExternalKey: externalKey, Provider: "skypilot"})
-		if err != nil {
-			return "", classify("replica_intent_failed", err)
+		targetNames := make([]string, 0, resolved.Deployment.MinReplicas)
+		resourceIDs := make([]string, 0, resolved.Deployment.MinReplicas)
+		for ordinal := 0; ordinal < resolved.Deployment.MinReplicas; ordinal++ {
+			targetName, resourceID, ensureErr := ensureCloudReplica(ctx, store, provider, runtime, operation, request, ordinal)
+			if ensureErr != nil {
+				return "", ensureErr
+			}
+			targetNames = append(targetNames, targetName)
+			resourceIDs = append(resourceIDs, resourceID)
 		}
-		handle := provider.Handle(externalKey)
-		if err = store.SetReplicaProviderIdentity(ctx, replica.ID, "", handle.ResourceID); err != nil {
-			return "", classify("replica_identity_failed", err)
-		}
-		if err = checkpoint(ctx, store, operation, "replica.intent", "succeeded", map[string]string{"replica_id": replica.ID, "external_key": externalKey, "resource_id": handle.ResourceID}, 15, "Replica identity persisted"); err != nil {
-			return "", err
-		}
-		ensured, err := provider.EnsureReplica(ctx, provision.ReplicaSpec{ExternalKey: externalKey, RequestID: replica.ProviderRequestID, Name: request.Name, Model: request.Model, Cloud: request.Cloud, GPU: request.GPU, Region: request.Region, RuntimeVersion: request.RuntimeVersion, RuntimeArgs: request.RuntimeArgs, Port: request.Port})
-		if err != nil {
-			return "", operations.Retryable("provider_ensure_failed", err)
-		}
-		if err = store.SetReplicaProviderIdentity(ctx, replica.ID, ensured.RequestID, ensured.ResourceID); err != nil {
-			return "", classify("provider_identity_failed", err)
-		}
-		if err = checkpoint(ctx, store, operation, "replica.ensure", "succeeded", ensured, 40, "Provider accepted replica"); err != nil {
-			return "", err
-		}
-		observation, err := provider.ObserveReplica(ctx, ensured, request.Port)
-		if err != nil {
-			return "", operations.Retryable("provider_observe_failed", err)
-		}
-		if !observation.Exists {
-			return "", operations.Retryable("provider_not_visible", errors.New("replica is not visible in provider inventory yet"))
-		}
-		lifecycle := observation.State
-		if lifecycle != "ready" || observation.Endpoint == "" {
-			_ = store.ObserveReplica(ctx, replica.ID, lifecycle, observation.Endpoint, "starting", observation.Details, time.Now())
-			_ = checkpoint(ctx, store, operation, "replica.ready", "waiting", observation, 55, "Waiting for provider endpoint")
-			return "", operations.Retryable("replica_starting", errors.New("replica is not ready"))
-		}
-		ready, models := runtime.Inspect(ctx, observation.Endpoint)
-		if _, present := models[request.Model]; !ready || !present {
-			_ = store.ObserveReplica(ctx, replica.ID, "starting", observation.Endpoint, "starting", observation.Details, time.Now())
-			_ = checkpoint(ctx, store, operation, "runtime.ready", "waiting", observation, 70, "Waiting for vLLM model readiness")
-			return "", operations.Retryable("runtime_starting", errors.New("vLLM model is not ready"))
-		}
-		if err = store.ObserveReplica(ctx, replica.ID, "ready", observation.Endpoint, "healthy", observation.Details, time.Now()); err != nil {
-			return "", classify("observation_failed", err)
-		}
-		targetName := request.Name + "-r0"
-		target, err := store.AddTargetForTenant(ctx, request.TenantID, domain.Target{Name: targetName, URL: observation.Endpoint, Provider: "skypilot", Runtime: "vllm", UpstreamModel: request.Model})
-		if err != nil {
-			return "", classify("target_registration_failed", err)
-		}
-		if err = store.UpdateProvisionedTarget(ctx, target.ID, ensured.ResourceID, observation.Details); err != nil {
-			return "", classify("target_metadata_failed", err)
-		}
-		deployment, err := store.ApplyDeploymentForTenant(ctx, request.TenantID, domain.Deployment{Name: request.Name, Model: request.Model, RoutingStrategy: resolved.Deployment.RoutingStrategy, MinReplicas: resolved.Deployment.MinReplicas, MaxReplicas: resolved.Deployment.MaxReplicas, AutoscalingEnabled: resolved.Deployment.AutoscalingEnabled}, []string{targetName})
+		deployment, err := store.ApplyDeploymentForTenant(ctx, request.TenantID, domain.Deployment{Name: request.Name, Model: request.Model, RoutingStrategy: resolved.Deployment.RoutingStrategy, MinReplicas: resolved.Deployment.MinReplicas, MaxReplicas: resolved.Deployment.MaxReplicas, AutoscalingEnabled: resolved.Deployment.AutoscalingEnabled}, targetNames)
 		if err != nil {
 			return "", classify("routing_registration_failed", err)
 		}
-		if err = store.ObserveReplica(ctx, replica.ID, "active", observation.Endpoint, "healthy", observation.Details, time.Now()); err != nil {
-			return "", classify("activation_failed", err)
-		}
-		_ = checkpoint(ctx, store, operation, "deployment.route", "succeeded", map[string]string{"endpoint": observation.Endpoint}, 95, "Healthy capacity published")
-		result, _ := json.Marshal(map[string]string{"deployment_id": deployment.ID, "replica_id": replica.ID, "resource_id": ensured.ResourceID, "endpoint": observation.Endpoint})
+		_ = checkpoint(ctx, store, operation, "deployment.route", "succeeded", map[string]any{"targets": targetNames}, 95, "Healthy capacity published")
+		result, _ := json.Marshal(map[string]any{"deployment_id": deployment.ID, "resource_ids": resourceIDs, "replicas": len(targetNames)})
 		return string(result), nil
 	}
 
@@ -204,6 +159,65 @@ func CloudHandlers(store CloudStore, provider ReplicaProvider, runtime RuntimeIn
 		DeleteKind: cleanup, ReplicaDeleteKind: cleanup,
 		ConvergeKind + ".cancel": cleanup, ReplicaProvisionKind + ".cancel": cleanup,
 	}
+}
+
+func ensureCloudReplica(ctx context.Context, store CloudStore, provider ReplicaProvider, runtime RuntimeInspector, operation domain.Operation, request CloudRequest, ordinal int) (string, string, error) {
+	externalKey := fmt.Sprintf("%s-r%d", request.DeploymentID, ordinal)
+	replica, _, err := store.EnsureReplicaIntent(ctx, domain.Replica{TenantID: request.TenantID, DeploymentID: request.DeploymentID, Ordinal: ordinal, ExternalKey: externalKey, Provider: "skypilot"})
+	if err != nil {
+		return "", "", classify("replica_intent_failed", err)
+	}
+	handle := provider.Handle(externalKey)
+	if err = store.SetReplicaProviderIdentity(ctx, replica.ID, "", handle.ResourceID); err != nil {
+		return "", "", classify("replica_identity_failed", err)
+	}
+	step := fmt.Sprintf("replica.%d", ordinal)
+	if err = checkpoint(ctx, store, operation, step+".intent", "succeeded", map[string]string{"replica_id": replica.ID, "external_key": externalKey, "resource_id": handle.ResourceID}, 15, "Replica identity persisted"); err != nil {
+		return "", "", err
+	}
+	ensured, err := provider.EnsureReplica(ctx, provision.ReplicaSpec{ExternalKey: externalKey, RequestID: replica.ProviderRequestID, Name: fmt.Sprintf("%s-r%d", request.Name, ordinal), Model: request.Model, Cloud: request.Cloud, GPU: request.GPU, Region: request.Region, RuntimeVersion: request.RuntimeVersion, RuntimeArgs: request.RuntimeArgs, Port: request.Port})
+	if err != nil {
+		return "", "", operations.Retryable("provider_ensure_failed", err)
+	}
+	if err = store.SetReplicaProviderIdentity(ctx, replica.ID, ensured.RequestID, ensured.ResourceID); err != nil {
+		return "", "", classify("provider_identity_failed", err)
+	}
+	if err = checkpoint(ctx, store, operation, step+".ensure", "succeeded", ensured, 40, "Provider accepted replica"); err != nil {
+		return "", "", err
+	}
+	observation, err := provider.ObserveReplica(ctx, ensured, request.Port)
+	if err != nil {
+		return "", "", operations.Retryable("provider_observe_failed", err)
+	}
+	if !observation.Exists {
+		return "", "", operations.Retryable("provider_not_visible", errors.New("replica is not visible in provider inventory yet"))
+	}
+	if observation.State != "ready" || observation.Endpoint == "" {
+		_ = store.ObserveReplica(ctx, replica.ID, observation.State, observation.Endpoint, "starting", observation.Details, time.Now())
+		_ = checkpoint(ctx, store, operation, step+".ready", "waiting", observation, 55, "Waiting for provider endpoint")
+		return "", "", operations.Retryable("replica_starting", errors.New("replica is not ready"))
+	}
+	ready, models := runtime.Inspect(ctx, observation.Endpoint)
+	if _, present := models[request.Model]; !ready || !present {
+		_ = store.ObserveReplica(ctx, replica.ID, "starting", observation.Endpoint, "starting", observation.Details, time.Now())
+		_ = checkpoint(ctx, store, operation, step+".runtime", "waiting", observation, 70, "Waiting for vLLM model readiness")
+		return "", "", operations.Retryable("runtime_starting", errors.New("vLLM model is not ready"))
+	}
+	if err = store.ObserveReplica(ctx, replica.ID, "ready", observation.Endpoint, "healthy", observation.Details, time.Now()); err != nil {
+		return "", "", classify("observation_failed", err)
+	}
+	targetName := fmt.Sprintf("%s-r%d", request.Name, ordinal)
+	target, err := store.AddTargetForTenant(ctx, request.TenantID, domain.Target{Name: targetName, URL: observation.Endpoint, Provider: "skypilot", Runtime: "vllm", UpstreamModel: request.Model})
+	if err != nil {
+		return "", "", classify("target_registration_failed", err)
+	}
+	if err = store.UpdateProvisionedTarget(ctx, target.ID, ensured.ResourceID, observation.Details); err != nil {
+		return "", "", classify("target_metadata_failed", err)
+	}
+	if err = store.ObserveReplica(ctx, replica.ID, "active", observation.Endpoint, "healthy", observation.Details, time.Now()); err != nil {
+		return "", "", classify("activation_failed", err)
+	}
+	return targetName, ensured.ResourceID, nil
 }
 
 func decodeCloudRequest(operation domain.Operation) (CloudRequest, error) {
