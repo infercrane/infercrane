@@ -4,9 +4,11 @@
 .ruff_cache
 __pycache__
 *.db*
-.git
-.venv
-.pytest_cache
-.ruff_cache
-src
-tests
+dist
+build
+site
+node_modules
+docs/node_modules
+docs/.mintlify
+.infercrane
+coverage.out
