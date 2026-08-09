@@ -1,0 +1,33 @@
+services:
+  worker-a:
+    build:
+      context: .
+      target: runtime
+    entrypoint: ["python", "-m", "infercrane.dev.fake_vllm"]
+    command: ["--port", "8101", "--worker", "gpu-a"]
+
+  worker-b:
+    build:
+      context: .
+      target: runtime
+    entrypoint: ["python", "-m", "infercrane.dev.fake_vllm"]
+    command: ["--port", "8102", "--worker", "gpu-b"]
+
+  infercrane:
+    build:
+      context: .
+      target: runtime
+    entrypoint: ["infercrane-dev-start"]
+    environment:
+      INFERCRANE_API_KEY: infercrane
+    ports:
+      - "8080:8080"
+    volumes:
+      - infercrane-state:/var/lib/infercrane
+    depends_on:
+      - worker-a
+      - worker-b
+
+volumes:
+  infercrane-state:
+

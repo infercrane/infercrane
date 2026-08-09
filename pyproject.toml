@@ -28,6 +28,7 @@ dev = [
   "ruff>=0.12,<1",
 ]
 skypilot = ["skypilot>=1.0,<2"]
+router = ["vllm-router==0.1.15"]
 
 [project.scripts]
 infercrane = "infercrane.cli.app:app"
@@ -44,3 +45,5 @@ addopts = "-q"
 line-length = 100
 target-version = "py312"
 
+[tool.ruff.lint.per-file-ignores]
+"src/infercrane/dev/*" = ["S104"]
