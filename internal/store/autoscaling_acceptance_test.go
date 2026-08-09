@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -123,6 +124,100 @@ func TestDurableAutoscalingAcceptanceOneToTwoToOne(t *testing.T) {
 	if err != nil || len(decisions) < 2 || decisions[0].Action != "scale_down" {
 		t.Fatalf("decisions=%#v err=%v", decisions, err)
 	}
+}
+
+func TestGuardedRolloutAcceptanceResumesAfterCutoverRestart(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	name := "rollout-acceptance"
+	requestJSON := fmt.Sprintf(`{"name":%q,"model":"Qwen/Qwen3-8B","cloud":"runpod","gpu":"L40S","tenant_id":"global","min_replicas":1,"max_replicas":1}`, name)
+	deployment, _, _, err := s.SubmitCloudDeployment(ctx, domain.Deployment{Name: name, Model: "Qwen/Qwen3-8B", MinReplicas: 1, MaxReplicas: 1}, domain.Operation{Kind: workflows.ConvergeKind, IdempotencyKey: "rollout-initial", RequestJSON: requestJSON})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := &acceptanceProvider{existing: map[string]bool{}}
+	handlers := workflows.RolloutHandlers(s)
+	for kind, handler := range workflows.ReleaseGuardHandlers(s) {
+		handlers[kind] = handler
+	}
+	for kind, handler := range workflows.CloudHandlers(s, provider, acceptanceRuntime{}, acceptanceArtifactResolver{}) {
+		handlers[kind] = handler
+	}
+	worker := operations.Worker{Repository: s, Handlers: handlers, Owner: "rollout-worker-before-restart", Lease: time.Second, BaseBackoff: time.Millisecond, MaxBackoff: time.Millisecond, Jitter: func(d time.Duration) time.Duration { return d }}
+	if worked, workerErr := worker.Once(ctx); workerErr != nil || !worked {
+		t.Fatalf("initial converge worked=%t err=%v", worked, workerErr)
+	}
+	resolved, err := s.Resolve(ctx, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	activeRevisionID := resolved.Deployment.ActiveRevisionID
+	candidate, err := s.CreateCandidateRevision(ctx, "global", name, `{"model":"Qwen/Qwen3-8B","runtime":"vllm","routing_strategy":"round-robin","min_replicas":1,"max_replicas":1,"compute_mode":"elastic","cloud":"runpod","gpu":"H100"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provisionRequest := workflows.RolloutRequest{Name: name, CandidateID: candidate.ID, TenantID: "global", Actor: "acceptance"}
+	provisionJSON, _ := json.Marshal(provisionRequest)
+	if _, _, err = s.EnqueueOperation(ctx, domain.Operation{TenantID: "global", Kind: workflows.RolloutProvisionKind, ResourceType: "deployment", ResourceName: name, IdempotencyKey: "rollout-provision", RequestJSON: string(provisionJSON), MaxAttempts: 120}); err != nil {
+		t.Fatal(err)
+	}
+	if worked, workerErr := worker.Once(ctx); workerErr != nil || !worked {
+		t.Fatalf("candidate provision worked=%t err=%v", worked, workerErr)
+	}
+	if _, err = s.SetReleaseGuardPolicy(ctx, "global", name, domain.ReleaseGuardPolicy{Enabled: true, MinimumRequests: 1, MaxTTFTRegressionPercent: 15, MaxLatencyRegressionPercent: 15, MaxErrorRateIncrease: .01, MaxOutputThroughputDropPercent: 20}); err != nil {
+		t.Fatal(err)
+	}
+	activeTTFT, candidateTTFT := 100.0, 105.0
+	for _, record := range []domain.InferenceRecord{
+		{RequestID: "rollout-active-request", DeploymentID: deployment.ID, RevisionID: activeRevisionID, OperationName: "chat", StartedAt: time.Now(), StatusCode: 200, LatencyMS: 200, TTFTMS: &activeTTFT},
+		{RequestID: "rollout-candidate-request", DeploymentID: deployment.ID, RevisionID: candidate.ID, OperationName: "chat", StartedAt: time.Now(), StatusCode: 200, LatencyMS: 205, TTFTMS: &candidateTTFT},
+	} {
+		if err = s.RecordRequest(ctx, record); err != nil {
+			t.Fatal(err)
+		}
+	}
+	evaluation, err := s.EvaluateReleaseGuard(ctx, "global", name, 5*time.Minute)
+	if err != nil || evaluation.Decision != "ACCEPT" {
+		t.Fatalf("evaluation=%+v err=%v", evaluation, err)
+	}
+	promoteJSON, _ := json.Marshal(workflows.RolloutRequest{Name: name, CandidateID: candidate.ID, TenantID: "global", Actor: "acceptance"})
+	promote, _, err := s.EnqueueOperation(ctx, domain.Operation{TenantID: "global", Kind: workflows.RolloutPromoteKind, ResourceType: "deployment", ResourceName: name, IdempotencyKey: "rollout-promote", RequestJSON: string(promoteJSON), MaxAttempts: 120})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if worked, workerErr := worker.Once(ctx); workerErr != nil || !worked {
+		t.Fatalf("cutover pass worked=%t err=%v", worked, workerErr)
+	}
+	current, err := s.Operation(ctx, promote.ID)
+	if err != nil || current.Status != "waiting" || current.ErrorCode != "router_cutover_pending" {
+		t.Fatalf("promotion operation=%+v err=%v", current, err)
+	}
+	if !provider.existing[deployment.ID+"-r0"] {
+		t.Fatal("old provider resource was deleted before candidate router generation")
+	}
+	resolved, err = s.Resolve(ctx, name)
+	if err != nil || resolved.Deployment.ActiveRevisionID != candidate.ID || len(resolved.Targets) != 1 {
+		t.Fatalf("cutover desired state=%+v err=%v", resolved, err)
+	}
+	hash := router.WorkerSetHash("round-robin", []string{resolved.Targets[0].URL})
+	if _, err = s.RecordGeneration(ctx, domain.RouterGeneration{DeploymentID: deployment.ID, OwnerID: "rollout-router", Generation: 1, Strategy: "round-robin", WorkerSetHash: hash, InternalEndpoint: "http://candidate-router.invalid"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.db.ExecContext(ctx, `UPDATE operations SET next_attempt_at=NOW() WHERE id=$1`, promote.ID); err != nil {
+		t.Fatal(err)
+	}
+	restartedWorker := operations.Worker{Repository: s, Handlers: handlers, Owner: "rollout-worker-after-restart", Lease: time.Second, BaseBackoff: time.Millisecond, MaxBackoff: time.Millisecond, Jitter: func(d time.Duration) time.Duration { return d }}
+	if worked, workerErr := restartedWorker.Once(ctx); workerErr != nil || !worked {
+		t.Fatalf("post-restart drain worked=%t err=%v", worked, workerErr)
+	}
+	current, err = s.Operation(ctx, promote.ID)
+	if err != nil || current.Status != "succeeded" {
+		t.Fatalf("completed promotion=%+v err=%v", current, err)
+	}
+	if provider.existing[deployment.ID+"-r0"] || !provider.existing[deployment.ID+"-"+candidate.ID+"-r0"] {
+		t.Fatalf("provider resources=%#v", provider.existing)
+	}
+	assertReplicaCount(t, s, deployment.ID, 1)
 }
 
 func assertReplicaCount(t *testing.T, s *Store, deploymentID string, want int) {
