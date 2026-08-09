@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log/slog"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -71,7 +72,11 @@ func (r *Reconciler) Once(ctx context.Context) error {
 	for _, stale := range r.Routes.List() {
 		if _, ok := active[stale.TenantID+"\x00"+stale.Alias]; !ok {
 			r.Routes.RemoveForTenant(stale.TenantID, stale.Alias)
-			_ = r.Router.Stop(stale.DeploymentID)
+			processID := stale.RouterProcessID
+			if processID == "" {
+				processID = stale.DeploymentID
+			}
+			_ = r.Router.Stop(processID)
 		}
 	}
 	for _, d := range deployments {
@@ -140,23 +145,35 @@ func (r *Reconciler) Once(ctx context.Context) error {
 				workers[i] = t.URL
 			}
 			sort.Strings(workers)
-			endpoint, e := r.Router.Start(ctx, router.Spec{DeploymentID: d.ID, Workers: workers, Strategy: d.RoutingStrategy, Host: "127.0.0.1", Port: routerPort(r.RouterStartPort, d.ID)})
+			candidateID := routerProcessID(d.ID, next)
+			endpoint, e := r.Router.Start(ctx, router.Spec{DeploymentID: d.ID, ProcessID: candidateID, Workers: workers, Strategy: d.RoutingStrategy, Host: "127.0.0.1", Port: routerGenerationPort(r.RouterStartPort, d.ID, next)})
 			if e != nil {
-				r.Routes.RemoveForTenant(d.TenantID, d.Name)
 				_ = r.Store.Event(ctx, d.ID, "", "router_failed", e.Error(), "")
 				_ = r.Store.SetDeploymentState(ctx, d.ID, "degraded")
 				continue
 			}
 			generation, e = r.Store.RecordGeneration(ctx, domain.RouterGeneration{DeploymentID: d.ID, OwnerID: r.InstanceID, Generation: next, Strategy: d.RoutingStrategy, WorkerSetHash: hash, InternalEndpoint: endpoint})
 			if e != nil {
+				_ = r.Router.Stop(candidateID)
 				return e
+			}
+			oldRoute, hadOldRoute := r.Routes.GetForTenant(d.TenantID, d.Name)
+			upstream := healthy[0].UpstreamModel
+			if upstream == "" {
+				upstream = d.Model
+			}
+			r.Routes.Put(routes.Snapshot{DeploymentID: d.ID, TenantID: d.TenantID, Alias: d.Name, UpstreamModel: upstream, RouterURL: generation.InternalEndpoint, RouterProcessID: candidateID})
+			if hadOldRoute && oldRoute.RouterProcessID != "" && oldRoute.RouterProcessID != candidateID {
+				_ = r.Router.Stop(oldRoute.RouterProcessID)
 			}
 		}
 		upstream := healthy[0].UpstreamModel
 		if upstream == "" {
 			upstream = d.Model
 		}
-		r.Routes.Put(routes.Snapshot{DeploymentID: d.ID, TenantID: d.TenantID, Alias: d.Name, UpstreamModel: upstream, RouterURL: generation.InternalEndpoint})
+		if _, published := r.Routes.GetForTenant(d.TenantID, d.Name); !published {
+			r.Routes.Put(routes.Snapshot{DeploymentID: d.ID, TenantID: d.TenantID, Alias: d.Name, UpstreamModel: upstream, RouterURL: generation.InternalEndpoint, RouterProcessID: routerProcessID(d.ID, generation.Generation)})
+		}
 		state := "degraded"
 		if len(healthy) == len(resolved.Targets) {
 			state = "healthy"
@@ -169,6 +186,13 @@ func routerPort(start int, deploymentID string) int {
 	sum := sha256.Sum256([]byte(deploymentID))
 	offset := int(sum[0])<<8 | int(sum[1])
 	return start + offset%10000
+}
+func routerGenerationPort(start int, deploymentID string, generation int) int {
+	base := routerPort(start, deploymentID) - start
+	return start + (base+generation*7919)%10000
+}
+func routerProcessID(deploymentID string, generation int) string {
+	return deploymentID + "-g" + strconv.Itoa(generation)
 }
 func workerHash(strategy string, targets []domain.Target) string {
 	urls := make([]string, len(targets))

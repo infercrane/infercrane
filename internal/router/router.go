@@ -18,10 +18,10 @@ import (
 var ErrUnavailable = errors.New("router unavailable")
 
 type Spec struct {
-	DeploymentID   string
-	Workers        []string
-	Strategy, Host string
-	Port           int
+	DeploymentID, ProcessID string
+	Workers                 []string
+	Strategy, Host          string
+	Port                    int
 }
 type Backend interface {
 	Start(context.Context, Spec) (string, error)
@@ -50,7 +50,13 @@ func (v *VLLM) Command(binary string, s Spec) []string {
 	return append(args, "--api-key", v.APIKey, "--retry-max-retries", "1")
 }
 func (v *VLLM) Start(ctx context.Context, s Spec) (string, error) {
-	_ = v.Stop(s.DeploymentID)
+	processID := s.ProcessID
+	if processID == "" {
+		processID = s.DeploymentID
+	}
+	if v.Running(processID) {
+		return "", fmt.Errorf("%w: process %s is already running", ErrUnavailable, processID)
+	}
 	binary, err := exec.LookPath(v.Binary)
 	if err != nil {
 		return "", fmt.Errorf("%w: %q is not installed", ErrUnavailable, v.Binary)
@@ -64,7 +70,7 @@ func (v *VLLM) Start(ctx context.Context, s Spec) (string, error) {
 	running := &process{cmd: cmd, done: make(chan error, 1)}
 	go func() { running.done <- cmd.Wait() }()
 	v.mu.Lock()
-	v.processes[s.DeploymentID] = running
+	v.processes[processID] = running
 	v.mu.Unlock()
 	endpoint := fmt.Sprintf("http://%s:%d", s.Host, s.Port)
 	client := http.Client{Timeout: 500 * time.Millisecond}
@@ -75,14 +81,19 @@ func (v *VLLM) Start(ctx context.Context, s Spec) (string, error) {
 	for {
 		select {
 		case <-ctx.Done():
-			_ = v.Stop(s.DeploymentID)
+			_ = v.Stop(processID)
 			return "", ctx.Err()
 		case <-timer.C:
-			_ = v.Stop(s.DeploymentID)
+			_ = v.Stop(processID)
 			return "", fmt.Errorf("%w: readiness timeout", ErrUnavailable)
 		case <-ticker.C:
 			select {
 			case <-running.done:
+				v.mu.Lock()
+				if v.processes[processID] == running {
+					delete(v.processes, processID)
+				}
+				v.mu.Unlock()
 				return "", fmt.Errorf("%w: exited during startup: %s", ErrUnavailable, stderr.String())
 			default:
 			}

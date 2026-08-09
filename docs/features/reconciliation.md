@@ -16,6 +16,12 @@ route snapshot. Health probes are concurrent under a fixed bound. Membership and
 a deterministic hash; changes replace the local upstream router and create an instance-owned
 generation.
 
+Router replacement is generation-safe: reconciliation starts and health-checks a distinct
+candidate process, records the new generation, atomically publishes its route snapshot, and only
+then asks the old process to terminate. Candidate startup or generation persistence failure leaves
+the previously published router serving. vLLM Router owns request routing; InferCrane only owns
+process-generation lifecycle.
+
 Transient errors are logged and retried on the next interval rather than terminating the gateway.
 No healthy worker removes the route and marks the deployment unhealthy. Partial health produces a
 degraded deployment with only healthy members.

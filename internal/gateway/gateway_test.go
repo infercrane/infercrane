@@ -72,3 +72,33 @@ func TestModelsAreTenantScoped(t *testing.T) {
 		t.Fatalf("response=%d %s", response.Code, response.Body.String())
 	}
 }
+
+func TestActiveStreamKeepsSelectedRouterAcrossGenerationPublish(t *testing.T) {
+	selected := make(chan string, 1)
+	release := make(chan struct{})
+	client := &http.Client{Transport: roundTripper(func(r *http.Request) (*http.Response, error) {
+		selected <- r.URL.Host
+		<-release
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: first\n\ndata: [DONE]\n\n"))}, nil
+	})}
+	directory := routes.New()
+	directory.Put(routes.Snapshot{DeploymentID: "d1", Alias: "alias", UpstreamModel: "model", RouterURL: "http://router-g1", RouterProcessID: "d1-g1"})
+	handler := (&Gateway{Routes: directory, APIKey: "secret", Client: client}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"alias","stream":true,"messages":[]}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		handler.ServeHTTP(response, request)
+		close(done)
+	}()
+	if host := <-selected; host != "router-g1" {
+		t.Fatalf("selected router=%s", host)
+	}
+	directory.Put(routes.Snapshot{DeploymentID: "d1", Alias: "alias", UpstreamModel: "model", RouterURL: "http://router-g2", RouterProcessID: "d1-g2"})
+	close(release)
+	<-done
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "[DONE]") {
+		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+}

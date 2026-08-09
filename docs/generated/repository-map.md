@@ -19,13 +19,13 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 | `internal/controlapi` | 1 | 1 | `TestApplyQueuesIdempotentOperation`, `TestCancelHidesMissingOperation`, `TestCloudDeployPersistsAndQueuesConverge`, `TestDeleteQueuesDurableCleanup`, `TestOperationAPIAuthenticationAndResponse`, `TestTargetRegistrationRejectsEmbeddedCredentials`, `TestViewerCannotApply` |
 | `internal/doctor` | 1 | 1 | `TestCloudCredentialCheckIsRequiredWhenRequested`, `TestRunReadyWithoutSkyPilot`, `TestRunReportsRequiredAndOptionalChecks` |
 | `internal/domain` | 1 | 0 | — |
-| `internal/gateway` | 2 | 2 | `TestAuthentication`, `TestCompletionRewritesAlias`, `TestModelsAreTenantScoped`, `TestTelemetryExportsPrometheusHistogram` |
+| `internal/gateway` | 2 | 2 | `TestActiveStreamKeepsSelectedRouterAcrossGenerationPublish`, `TestAuthentication`, `TestCompletionRewritesAlias`, `TestModelsAreTenantScoped`, `TestTelemetryExportsPrometheusHistogram` |
 | `internal/metrics` | 1 | 1 | `TestParse` |
 | `internal/operations` | 2 | 2 | `TestTelemetryExportsCounters`, `TestWorkerAppliesConfiguredJitter`, `TestWorkerCancelsRecoveredClaimBeforeHandler`, `TestWorkerCompletesClaimedOperation`, `TestWorkerRetriesFailedCancellationCleanup`, `TestWorkerSchedulesBoundedRetry`, `TestWorkerStopsRetryAtMaxAttempts` |
 | `internal/planning` | 1 | 1 | `TestBuildProvisionedPlan`, `TestBuildRejectsMixedModes`, `TestIncompletePlanIsActionable` |
 | `internal/pricing` | 1 | 1 | `TestCatalogAndStaleness` |
 | `internal/provision` | 1 | 1 | `TestDeleteReplicaIsIdempotent`, `TestEnsureDoesNotLaunchWhenDiscoveryFails`, `TestEnsureReplicaDiscoversExistingResource`, `TestInventoryFiltersOwnedResources` |
-| `internal/reconcile` | 1 | 0 | — |
+| `internal/reconcile` | 1 | 1 | `TestRouterCandidateFailureLeavesOldGenerationServing`, `TestRouterCandidatePublishesBeforeOldRetires` |
 | `internal/router` | 1 | 1 | `TestCommandUsesUpstreamPolicyAndSingleAttempt` |
 | `internal/routes` | 1 | 1 | `TestDirectoryIsolatesSameAliasByTenant`, `TestDirectoryOrdersAndRemovesSnapshots` |
 | `internal/runtime` | 1 | 0 | — |
