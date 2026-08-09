@@ -1,0 +1,57 @@
+services:
+  credential-init:
+    build:
+      context: .
+      target: runtime
+    user: root
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        umask 077
+        runpod config "$$(cat /runpod-key)" >/dev/null
+        mkdir -p /home/app/.sky
+        chown -R 10001:10001 /home/app/.runpod /home/app/.sky
+    volumes:
+      - ${RUNPOD_KEY_FILE:?set RUNPOD_KEY_FILE}:/runpod-key:ro
+      - runpod-config:/home/app/.runpod
+      - skypilot-state:/home/app/.sky
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: infercrane_acceptance
+      POSTGRES_USER: infercrane
+      POSTGRES_PASSWORD: infercrane
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U infercrane -d infercrane_acceptance"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  infercrane:
+    build:
+      context: .
+      target: runtime
+    environment:
+      INFERCRANE_API_KEY: infercrane-runpod-acceptance-key
+      INFERCRANE_DATABASE_URL: postgres://infercrane:infercrane@postgres:5432/infercrane_acceptance?sslmode=disable
+      INFERCRANE_ENV: test
+      INFERCRANE_INSTANCE_ID: runpod-acceptance
+      INFERCRANE_ROUTER_BINARY: vllm-router
+    ports:
+      - "${INFERCRANE_ACCEPTANCE_PORT:-18001}:8080"
+    volumes:
+      - runpod-config:/home/app/.runpod
+      - skypilot-state:/home/app/.sky
+    depends_on:
+      credential-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+  runpod-config:
+  skypilot-state:

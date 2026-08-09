@@ -16,7 +16,18 @@ Required configuration:
   value.
 - `RUNPOD_API_KEY_FILE`: preferred alternative containing a mounted RunPod secret. It takes effect
   when `RUNPOD_API_KEY` is unset, avoiding secret exposure in container environment metadata.
-  The container user must have read permission on the mounted file.
+The container user must have read permission on the mounted file.
+
+The real RunPod qualification stack is isolated from the development Compose stack. It persists
+PostgreSQL, RunPod configuration, and SkyPilot state across control-plane restarts:
+
+```sh
+export RUNPOD_KEY_FILE=/absolute/path/to/runpod-key
+docker compose -p infercrane-runpod -f compose.runpod-acceptance.yaml up --build -d
+```
+
+This command starts the control plane but does not provision a GPU. GPU creation only begins after
+a cloud deployment is submitted.
 - `INFERCRANE_INSTANCE_ID`: stable and unique per replica, normally the Kubernetes pod name.
 - `INFERCRANE_DATABASE_MAX_OPEN` and `INFERCRANE_DATABASE_MAX_IDLE`: size these with the total
   replica count below PostgreSQL's connection budget or place PgBouncer in transaction mode.
