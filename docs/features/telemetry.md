@@ -28,3 +28,10 @@ the durable request record so decisions can be reproduced later. `runpod` is a g
 provider value because the convention permits provider-specific names outside its well-known list.
 
 Aggregated deployment statistics expose request rate, error rate, latency p50/p95, TTFT p50/p95, and observed input/output tokens per second over the selected window. Token throughput is emitted only from runtime-reported usage.
+
+The Prometheus endpoint also exposes accounting queue depth and capacity, persisted and dropped
+request-record counters, and persistence failures. These distinguish inference-path health from
+telemetry backpressure without putting PostgreSQL on the request path. vLLM running/waiting and
+cache signals are persisted with autoscaling decisions; streaming cancellations and upstream
+disconnects are persisted as `client_cancelled` and `upstream_disconnect` error types. GPU metrics
+remain unavailable unless the provider/runtime exposes a trustworthy measurement.

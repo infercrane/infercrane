@@ -1616,7 +1616,10 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	}()
 	autoscaler := autoscale.Controller{Repository: s, Signals: autoscale.VLLMSignals{Targets: s, Client: client, APIKey: cfg.APIKey}, Fleet: s}
 	go runAutoscaler(ctx, autoscaler, cfg.HealthInterval, logger)
-	gatewayTelemetry := &gateway.Telemetry{Extra: operationTelemetry.WritePrometheus}
+	gatewayTelemetry := &gateway.Telemetry{Extra: func(w io.Writer) {
+		operationTelemetry.WritePrometheus(w)
+		recorder.WritePrometheus(w)
+	}}
 	server := &http.Server{Addr: fmt.Sprintf("%s:%d", cfg.Host, cfg.Port), Handler: (&gateway.Gateway{Routes: directory, APIKey: cfg.APIKey, Authenticator: credentialCache, Recorder: recorder, Logger: logger, Client: client, Ready: s.Ping, Control: control, Telemetry: gatewayTelemetry}).Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 1 << 20}
 	go func() {
 		<-ctx.Done()

@@ -2,6 +2,8 @@ package accounting
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -17,13 +19,15 @@ type record struct {
 	domain.InferenceRecord
 }
 type Recorder struct {
-	sink    Sink
-	logger  *slog.Logger
-	queue   chan record
-	ctx     context.Context
-	cancel  context.CancelFunc
-	wg      sync.WaitGroup
-	dropped atomic.Uint64
+	sink      Sink
+	logger    *slog.Logger
+	queue     chan record
+	ctx       context.Context
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
+	dropped   atomic.Uint64
+	persisted atomic.Uint64
+	failures  atomic.Uint64
 }
 
 func New(sink Sink, logger *slog.Logger, capacity, workers int) *Recorder {
@@ -59,10 +63,19 @@ func (r *Recorder) run() {
 		ctx, cancel := context.WithTimeout(r.ctx, 5*time.Second)
 		err := r.sink.RecordRequest(ctx, item.InferenceRecord)
 		cancel()
-		if err != nil && r.logger != nil {
-			r.logger.Error("persist request accounting", "error", err, "request_id", item.RequestID)
+		if err != nil {
+			r.failures.Add(1)
+			if r.logger != nil {
+				r.logger.Error("persist request accounting", "error", err, "request_id", item.RequestID)
+			}
+		} else {
+			r.persisted.Add(1)
 		}
 	}
+}
+
+func (r *Recorder) WritePrometheus(w io.Writer) {
+	fmt.Fprintf(w, "# TYPE infercrane_accounting_queue_depth gauge\ninfercrane_accounting_queue_depth %d\n# TYPE infercrane_accounting_queue_capacity gauge\ninfercrane_accounting_queue_capacity %d\n# TYPE infercrane_accounting_records_persisted_total counter\ninfercrane_accounting_records_persisted_total %d\n# TYPE infercrane_accounting_records_dropped_total counter\ninfercrane_accounting_records_dropped_total %d\n# TYPE infercrane_accounting_persist_failures_total counter\ninfercrane_accounting_persist_failures_total %d\n", len(r.queue), cap(r.queue), r.persisted.Load(), r.dropped.Load(), r.failures.Load())
 }
 func (r *Recorder) Close(ctx context.Context) error {
 	close(r.queue)
