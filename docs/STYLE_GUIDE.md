@@ -38,7 +38,7 @@ Use regular body copy and medium or semibold headings. Keep paragraphs short. Av
 
 ## Diagrams
 
-Use Mermaid or the small `.ic-flow` system for maintainable infrastructure diagrams. Flow from client to data plane and from CLI to control plane. Label persistence and external-provider boundaries. Do not imply a database read in the inference routing path.
+Use Mermaid, the small `.ic-flow` system, or deterministic SVG for maintainable infrastructure diagrams. Flow from client to data plane and from CLI to control plane. Label persistence and external-provider boundaries. Do not imply a database read in the inference routing path. Animated SVGs must support light/dark mode, include `<title>` and `<desc>`, respect `prefers-reduced-motion`, and remain meaningful when animation is disabled. Avoid raster diagrams and GIFs when vector motion communicates the same idea with less weight.
 
 ## Code blocks
 

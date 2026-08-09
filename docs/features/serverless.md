@@ -5,6 +5,8 @@ worker allocation, queueing, scale-up, idle scale-down, and GPU scheduling. Infe
 logical deployment, durable endpoint operation, immutable model identity, routing metadata,
 telemetry, deletion, and explanations.
 
+<img src="/images/diagrams/serverless-lifecycle.svg" alt="Animated RunPod Serverless lifecycle from zero workers through cold allocation, a warm request, and provider idle scale-down to zero." />
+
 ## Provider setup
 
 Create or select a RunPod Serverless template using RunPod's maintained vLLM worker. The template

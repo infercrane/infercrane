@@ -7,6 +7,8 @@ description: InferCrane's persistent control plane, database-free inference path
 
 InferCrane separates durable deployment decisions from latency-sensitive inference routing. PostgreSQL is authoritative for the control plane; an atomic in-memory snapshot is authoritative for each gateway replica's request path.
 
+<img src="/images/diagrams/control-data-plane.svg" alt="Animated architecture diagram separating InferCrane's durable control plane from its database-free inference data plane." />
+
 ```mermaid
 flowchart LR
   subgraph clients[Clients]

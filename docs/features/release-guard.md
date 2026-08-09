@@ -2,6 +2,8 @@
 
 Release Guard is a deterministic, persisted comparison between an active revision and its candidate. It never uses an LLM to decide whether a candidate should be promoted.
 
+<img src="/images/diagrams/release-guard.svg" alt="Animated Release Guard flow comparing persisted active and candidate evidence against deterministic policy before returning wait, reject, or accept." />
+
 ```console
 infercrane rollout evaluate qwen-prod --wait
 infercrane rollout inspect qwen-prod
