@@ -17,6 +17,13 @@ Provisioners return ordinary targets so routing and reconciliation remain provid
 Provider resource IDs and non-secret details may be stored for inspection and cleanup. Worker API
 keys are injected as SkyPilot secrets and are never stored in provider detail JSON.
 
+The SkyPilot replica lifecycle is discovery-first and keyed by a stable external name. `Ensure`
+checks JSON cluster inventory before an asynchronous named launch, `Observe` refreshes cluster state
+and resolves the exposed endpoint, `Delete` treats an absent cluster as success, and `Inventory`
+returns owned clusters for leak reconciliation. Repeating ensure or delete does not create or
+destroy a second resource. The durable workflow must persist the external key and deterministic
+cluster identity before calling these methods.
+
 Runtime inspection requires both a healthy endpoint and the expected served model. Metrics parsing
 normalizes supported vLLM metric aliases and ignores malformed or non-finite samples.
 
