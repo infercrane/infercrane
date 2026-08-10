@@ -58,9 +58,20 @@ jobs:
           provenance: mode=max
           sbom: true
       - name: Make runtime image public
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh api --method PATCH \
             /orgs/infercrane/packages/container/vllm-runpod \
             -f visibility=public
+      - name: Record publication instructions
+        if: always()
+        run: |
+          cat >>"$GITHUB_STEP_SUMMARY" <<'EOF'
+          The image was built and pushed with immutable provenance. GitHub may
+          require an organization package administrator to set the package to
+          public once at:
+
+          https://github.com/orgs/infercrane/packages/container/package/vllm-runpod/settings
+          EOF

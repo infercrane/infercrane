@@ -82,7 +82,7 @@ func TestEnsureUsesPinnedRuntimeImageByDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(runner.launchTask, "image_id: docker:ghcr.io/infercrane/vllm-runpod:v"+defaultVLLMVersion) || strings.Contains(runner.launchTask, "pip install") {
+	if !strings.Contains(runner.launchTask, "image_id: docker:"+defaultRunPodVLLMImage) || strings.Contains(runner.launchTask, "pip install") {
 		t.Fatalf("launch task does not use the pinned default runtime image: %s", runner.launchTask)
 	}
 }

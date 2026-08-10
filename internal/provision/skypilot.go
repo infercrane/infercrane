@@ -24,6 +24,11 @@ const defaultVLLMVersion = "0.8.5.post1"
 // on each new GPU replica.
 const defaultVLLMImage = "vllm/vllm-openai@sha256:c48cf118e1e6e39d7790e174d6014f7af5d06f79c2d29d984d11cbe2e8d414e7"
 
+// The RunPod variant adds only the SSH bootstrap contract required by
+// SkyPilot. Pin it independently so a release never depends on a mutable GHCR
+// tag after qualification.
+const defaultRunPodVLLMImage = "ghcr.io/infercrane/vllm-runpod@sha256:756b25ad9eba581c0c2525102a266b7dc6735dc2fc967e74102e7b3c56b9cd21"
+
 type ReplicaSpec struct {
 	ExternalKey                                                    string
 	Name, Model, ModelRevision, Cloud, GPU, Region, RuntimeVersion string
@@ -113,6 +118,9 @@ func (s SkyPilot) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provider
 		// used by SkyPilot. The thin InferCrane image retains that contract while
 		// baking vLLM; other clouds remain on the provider-neutral official image.
 		runtimeImage = "ghcr.io/infercrane/vllm-runpod:v" + spec.RuntimeVersion
+		if usesDefaultRuntime {
+			runtimeImage = defaultRunPodVLLMImage
+		}
 	}
 	task := map[string]any{"resources": map[string]any{"infra": infrastructure(spec.Cloud, spec.Region), "accelerators": spec.GPU, "image_id": "docker:" + runtimeImage, "ports": []int{spec.Port}}, "run": runCommand(spec.Model, spec.ModelRevision, spec.Port, spec.RuntimeArgs)}
 	task["secrets"] = map[string]any{"INFERCRANE_WORKER_API_KEY": nil}
