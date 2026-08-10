@@ -84,6 +84,16 @@ The capability table distinguishes `supported`, `unsupported`, and `unknown`. In
 silently changes hardware, and never claims cache or fast-resume behavior that an adapter cannot
 observe.
 
+## Terminal operations console
+
+```bash
+infercrane ui
+```
+
+The optional preview console is a reconnectable, read-only view of deployments, active operations,
+Release Guard decisions, and durable events. It requires an interactive terminal and never uses
+tmux for persistence. See [Terminal operations console](/features/terminal-ui).
+
 ## Plan and deploy
 
 ### `plan`

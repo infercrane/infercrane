@@ -56,6 +56,7 @@ func newRootCommand(ctx context.Context) *cobra.Command {
 		{use: "doctor [flags]", short: "Validate configuration and dependencies", group: "start"},
 		{use: "plan MODEL [flags]", short: "Preview deployment changes without side effects", group: "start"},
 		{use: "deploy MODEL [flags]", short: "Create a durable inference deployment", group: "start"},
+		{use: "ui", short: "Open the read-only operations console", group: "operate"},
 		{use: "request DEPLOYMENT [flags]", short: "Send a buffered or streaming inference request", group: "start"},
 		{use: "version", short: "Print the InferCrane version", group: "start"},
 		{use: "apply MODEL_OR_SPEC [flags]", short: "Declaratively converge a deployment", group: "operate"},

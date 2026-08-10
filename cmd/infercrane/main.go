@@ -115,7 +115,7 @@ func runLegacy(ctx context.Context, args []string) error {
 		return contextCommand(args[1:])
 	}
 	switch args[0] {
-	case "target", "deploy", "apply", "plan", "doctor", "deployments", "route", "status", "events", "logs", "request", "explain", "rollout", "delete", "inspect", "operation", "orphans", "context", "auth", "tenant", "principal", "benchmark", "serve":
+	case "target", "deploy", "apply", "plan", "doctor", "ui", "deployments", "route", "status", "events", "logs", "request", "explain", "rollout", "delete", "inspect", "operation", "orphans", "context", "auth", "tenant", "principal", "benchmark", "serve":
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -140,6 +140,8 @@ func runLegacy(ctx context.Context, args []string) error {
 		return planCommand(ctx, cfg, args[1:])
 	case "doctor":
 		return doctorCommand(ctx, cfg, args[1:])
+	case "ui":
+		return uiCommand(ctx, cfg, args[1:])
 	case "deploy":
 		return deployAPICommand(ctx, cfg, "deploy", args[1:])
 	case "apply":

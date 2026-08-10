@@ -103,6 +103,7 @@
         "group": "OPERATE",
         "pages": [
           "features/lifecycle",
+          "features/terminal-ui",
           "features/autoscaling",
           "features/release-guard",
           "features/serverless",

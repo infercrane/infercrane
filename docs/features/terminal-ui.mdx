@@ -1,0 +1,113 @@
+---
+title: Terminal operations console preview
+description: Monitor deployments, durable operations, Release Guard, and events from a reconnectable read-only terminal interface.
+---
+
+`infercrane ui` opens an experimental read-only operations console backed by the same authenticated control-plane API as the scriptable CLI.
+
+```bash
+infercrane ui
+```
+
+```text
+InferCrane  operations console · read-only                     ● connected
+────────────────────────────────────────────────────────────────────────
+DEPLOYMENTS                    qwen-prod  ● HEALTHY
+
+› qwen-prod       ● HEALTHY    Model         Qwen/Qwen3-8B
+  llama-stage     ○ PENDING    Endpoint      https://infercrane.example/v1
+                               Revision      rev-18
+                               Replicas      2/2 ready
+
+                               ACTIVE OPERATION
+                               None · deployment is converged
+
+                               RELEASE GUARD
+                               Decision      REJECT
+
+                               EVENTS
+                               12:42:08  replica.ready  replica is serving
+────────────────────────────────────────────────────────────────────────
+j/k move  r refresh  e explain  c copy endpoint/resume  ? help  q quit
+```
+
+The console is an additional interface, not a replacement for commands or JSON. Use normal commands in automation, CI, redirected output, and agent workflows.
+
+## Durable reconnection
+
+The console does not keep deployment work alive. The control plane already owns durable operations. Closing the console, losing SSH, or quitting the terminal does not cancel an operation.
+
+Reopen it from any authenticated terminal:
+
+```bash
+infercrane ui
+```
+
+InferCrane reconstructs the view from persisted deployments, operations, Release Guard evaluations, and events. No local UI session needs restoration.
+
+<Note>
+tmux is optional. InferCrane does not require, create, or manage tmux sessions. Running the console inside tmux is supported like any other terminal program.
+</Note>
+
+## What the console shows
+
+- Serving and convergence health
+- Logical OpenAI-compatible endpoint
+- Model, runtime, provider adapter, and revision
+- Ready, provisioning, and draining replicas
+- Request rate and error rate
+- Active durable operation, lifecycle phase, progress, checks, and next retry
+- Latest persisted Release Guard decision
+- Durable event timeline
+- Deterministic explanation derived from the selected deployment state
+
+Press `e` to show or hide the explanation. Press `c` to copy the active operation's resume command; when no operation is active, it copies the logical endpoint.
+
+## Safety model
+
+The v0.1 console is intentionally read-only. No key can deploy, scale, promote, reject, cancel, or delete resources. Mutations remain explicit commands with plans, idempotency keys, and confirmations where appropriate.
+
+The console only calls authenticated read endpoints:
+
+```text
+GET /api/v1/deployments
+GET /api/v1/deployments/{name}
+GET /api/v1/deployments/{name}/events
+```
+
+It never connects directly to PostgreSQL, infrastructure providers, SkyPilot, or vLLM.
+
+## Terminal behavior
+
+The layout adapts to terminal width. Wide terminals show deployment navigation beside operational details; narrow terminals stack the same information. Status always includes text and a symbol rather than relying on color alone.
+
+The console:
+
+- detects light and dark terminal backgrounds
+- degrades colors to the terminal's supported profile
+- requires an interactive TTY
+- does not emit terminal control sequences into redirected output
+- reconnects automatically after transient API failures
+- refreshes every two seconds, with `r` available for immediate refresh
+
+For screen readers, logging, or noninteractive environments, use the equivalent commands:
+
+```bash
+infercrane deployments
+infercrane status DEPLOYMENT
+infercrane events DEPLOYMENT
+infercrane explain DEPLOYMENT
+infercrane operation watch OPERATION_ID
+```
+
+## Keyboard reference
+
+| Key | Action |
+| --- | --- |
+| `j`, `↓` | Select the next deployment |
+| `k`, `↑` | Select the previous deployment |
+| `r` | Refresh immediately |
+| `e` | Toggle the persisted explanation |
+| `c` | Copy the endpoint or operation resume command |
+| `?` | Toggle safety and keyboard help |
+| `q`, `Ctrl-C` | Close the console without cancelling operations |

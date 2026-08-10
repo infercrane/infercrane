@@ -67,6 +67,15 @@ infercrane plan Qwen/Qwen3-8B --cloud runpod --gpu L40S
 infercrane plan Qwen/Qwen3-8B --cloud runpod --gpu L40S --output json
 ```
 
+Open the optional read-only operations console preview at any time:
+
+```bash
+infercrane ui
+```
+
+The console reconnects to durable control-plane state; it does not require tmux and closing it does
+not cancel deployments.
+
 `plan` is side-effect free. Pricing is reported as unavailable until a live, timestamped provider
 pricing integration exists.
 
