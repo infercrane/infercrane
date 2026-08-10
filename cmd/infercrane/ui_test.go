@@ -4,7 +4,9 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,11 +16,14 @@ import (
 
 func TestLoadUISnapshotUsesOnlyReadControlPlaneAPIs(t *testing.T) {
 	var paths []string
+	var pathsMu sync.Mutex
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			t.Fatalf("TUI performed mutation: %s %s", r.Method, r.URL.Path)
 		}
+		pathsMu.Lock()
 		paths = append(paths, r.URL.Path)
+		pathsMu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/api/v1/deployments":
@@ -27,6 +32,10 @@ func TestLoadUISnapshotUsesOnlyReadControlPlaneAPIs(t *testing.T) {
 			_, _ = w.Write([]byte(`{"deployment":{"name":"qwen-prod","model":"Qwen/Qwen3-8B","runtime":"vllm"},"lifecycle_status":{"serving_state":"healthy","ready_replicas":1,"desired_replicas":1}}`))
 		case "/api/v1/deployments/qwen-prod/events":
 			_, _ = w.Write([]byte(`{"data":[{"type":"replica.ready","summary":"replica is serving"}]}`))
+		case "/api/v1/deployments/qwen-prod/benchmarks":
+			_, _ = w.Write([]byte(`{"data":[]}`))
+		case "/api/v1/deployments/qwen-prod/scaling-decisions":
+			_, _ = w.Write([]byte(`{"data":[]}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -37,7 +46,10 @@ func TestLoadUISnapshotUsesOnlyReadControlPlaneAPIs(t *testing.T) {
 	if snapshot.err != nil || snapshot.selected != "qwen-prod" || snapshot.view.Deployment.Name != "qwen-prod" || len(snapshot.events) != 1 {
 		t.Fatalf("unexpected snapshot: %#v", snapshot)
 	}
-	want := strings.Join([]string{"/api/v1/deployments", "/api/v1/deployments/qwen-prod", "/api/v1/deployments/qwen-prod/events"}, ",")
+	wantPaths := []string{"/api/v1/deployments", "/api/v1/deployments/qwen-prod", "/api/v1/deployments/qwen-prod/events", "/api/v1/deployments/qwen-prod/benchmarks", "/api/v1/deployments/qwen-prod/scaling-decisions"}
+	sort.Strings(paths)
+	sort.Strings(wantPaths)
+	want := strings.Join(wantPaths, ",")
 	if strings.Join(paths, ",") != want {
 		t.Fatalf("paths=%v want=%s", paths, want)
 	}
@@ -60,7 +72,7 @@ func TestUIRendersDurableOperationAndExplanation(t *testing.T) {
 		events: []cliEvent{{Type: "step.waiting", Summary: "capacity constrained", CreatedAt: next}},
 	}
 	output := model.render()
-	for _, expected := range []string{"operations console · read-only", "qwen-prod", "https://control.example.com/v1", "WAITING FOR CAPACITY", "check 6/120", "EXPLANATION", "blocking convergence", "capacity constrained"} {
+	for _, expected := range []string{"operations workspace", "Overview", "qwen-prod", "https://control.example.com/v1", "WAITING FOR CAPACITY", "check 6/120", "EXPLANATION", "blocking convergence"} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("rendered UI does not contain %q:\n%s", expected, output)
 		}
@@ -106,5 +118,47 @@ func TestUIEventTimeDistinguishesHistoricalEvents(t *testing.T) {
 	}
 	if got := uiEventTime(now.Add(-48*time.Hour), now); got != "08-09 12:00" {
 		t.Fatalf("historical event=%q", got)
+	}
+}
+
+func TestUIActionsAreStateAwareAndReadOnlyModeNeverMutates(t *testing.T) {
+	view := deploymentView{Deployment: deploymentSummary{Name: "prod", Model: "model", CandidateRevisionID: "rev-2", MinReplicas: 1, MaxReplicas: 4}, ActiveOperation: &domain.Operation{ID: "op-1"}, ReleaseGuardEvaluations: []releaseGuardView{{CandidateRevisionID: "rev-2", Decision: "pass"}}}
+	mutable := uiModel{view: view, deployments: []deploymentSummary{{Name: "prod"}}}.availableActions()
+	joined := ""
+	for _, action := range mutable {
+		joined += action.name + ","
+	}
+	for _, expected := range []string{"cancel", "evaluate", "promote"} {
+		if !strings.Contains(joined, expected) {
+			t.Fatalf("missing applicable action %q in %q", expected, joined)
+		}
+	}
+	for _, action := range (uiModel{readOnly: true, view: view, deployments: []deploymentSummary{{Name: "prod"}}}).availableActions() {
+		if action.method != "COPY" {
+			t.Fatalf("read-only action can mutate: %#v", action)
+		}
+	}
+}
+
+func TestUIPromoteRequiresCurrentPersistedAcceptance(t *testing.T) {
+	model := uiModel{deployments: []deploymentSummary{{Name: "prod"}}, view: deploymentView{Deployment: deploymentSummary{Name: "prod", CandidateRevisionID: "rev-2"}, ReleaseGuardEvaluations: []releaseGuardView{{CandidateRevisionID: "old", Decision: "pass"}}}}
+	for _, action := range model.availableActions() {
+		if action.name == "promote" {
+			t.Fatal("historical acceptance exposed promote action")
+		}
+	}
+}
+
+func TestUIV01CapabilityContractIsComplete(t *testing.T) {
+	want := []string{"deployment", "operation", "Release Guard", "benchmark", "cold starts", "infrastructure", "autoscaling", "event", "deletion", "administration"}
+	all := ""
+	for _, capability := range uiCapabilities {
+		all += capability.Capability + " " + capability.Surface + "\n"
+	}
+	all = strings.ToLower(all)
+	for _, term := range want {
+		if !strings.Contains(all, strings.ToLower(term)) {
+			t.Fatalf("v0.1 capability contract does not cover %q", term)
+		}
 	}
 }

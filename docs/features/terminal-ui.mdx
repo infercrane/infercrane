@@ -1,114 +1,79 @@
 ---
-title: Terminal operations console preview
-description: Monitor deployments, durable operations, Release Guard, and events from a reconnectable read-only terminal interface.
+title: Terminal operations workspace
+description: Observe and safely operate deployments from a reconnectable terminal interface.
 ---
 
-`infercrane ui` opens an experimental read-only operations console backed by the same authenticated control-plane API as the scriptable CLI.
+`infercrane ui` opens an interactive operations workspace backed by the same authenticated control-plane API and durable operations as the scriptable CLI.
 
 ```bash
 infercrane ui
 ```
 
-```text
-InferCrane  operations console · read-only                     ● connected
-────────────────────────────────────────────────────────────────────────
-DEPLOYMENTS                    qwen-prod  ● HEALTHY
+The workspace complements commands and JSON output. Use it for investigation and deliberate operator actions; use normal commands in automation, CI, redirected output, and agent workflows.
 
-› qwen-prod       ● HEALTHY    Model         Qwen/Qwen3-8B
-  llama-stage     ○ PENDING    Endpoint      https://infercrane.example/v1
-                               Revision      rev-18
-                               Replicas      2/2 ready
+## Product views
 
-                               ACTIVE OPERATION
-                               None · deployment is converged
+| View | What it answers |
+| --- | --- |
+| Overview | Is inference serving, what changed, and why? |
+| Operations | What durable work is active, when will it retry, and can it be cancelled? |
+| Rollout | Which revision is active, is there a candidate, and what did Release Guard decide? |
+| Performance | What are latency, TTFT, throughput, errors, cold-start evidence, and benchmark history? |
+| Infrastructure | Which provider adapter, targets, replicas, and immutable model artifact are involved? |
+| Scaling | What are the bounds and why did capacity change? |
+| Events | What persisted event occurred, when, and with what machine-readable payload? |
 
-                               RELEASE GUARD
-                               Evaluation    HISTORICAL
-                               Decision      REJECT
+Use `←` and `→` to change views. On the Events view, use `j` and `k` to inspect full historical details. Old events remain visible but are separated from live health so historical failures do not look like current incidents.
 
-                               EVENTS
-                               12:42:08  replica.ready  replica is serving
-────────────────────────────────────────────────────────────────────────
-j/k move  r refresh  e explain  c copy endpoint/resume  ? help  q quit
+## Safe actions
+
+Press `Ctrl-K` or `:` to open the action palette. InferCrane only shows actions applicable to the selected deployment and persisted state.
+
+Direct v0.1 actions include:
+
+- cooperatively cancel an active durable operation
+- evaluate Release Guard for the current candidate
+- promote only when the current candidate has a persisted accepting Guard decision
+
+Every mutation shows its impact, requires a second confirmation, uses an idempotency key, and queues a durable control-plane operation. Release Guard evaluation explicitly warns that measured candidate traffic may incur provider cost. Closing the terminal never cancels queued work.
+
+Complex authoring remains a CLI handoff in v0.1. The palette copies exact commands for test requests, reproducible benchmarks, and semantic capacity plans. Candidate creation, rollback, rejection reasons, deletion plans, and administrative workflows remain explicit CLI/spec operations where inputs and diffs are easier to review.
+
+<Warning>
+Promotion is unavailable when an evaluation is missing, rejecting, or belongs to a previous candidate. InferCrane never treats historical acceptance as permission to promote a new revision.
+</Warning>
+
+## Read-only environments
+
+Start the same workspace with mutation controls disabled:
+
+```bash
+infercrane ui --read-only
 ```
 
-The console is an additional interface, not a replacement for commands or JSON. Use normal commands in automation, CI, redirected output, and agent workflows.
+The action palette retains copyable command handoffs but cannot construct API mutations. This is useful for shared incident sessions, demos, and restricted credentials. Server-side authorization remains authoritative in both modes.
 
-## Durable reconnection
+## Reconnection
 
-The console does not keep deployment work alive. The control plane already owns durable operations. Closing the console, losing SSH, or quitting the terminal does not cancel an operation.
-
-Reopen it from any authenticated terminal:
+The control plane—not the terminal—owns deployment work. Quit, disconnect SSH, or close the laptop, then reopen:
 
 ```bash
 infercrane ui
 ```
 
-InferCrane reconstructs the view from persisted deployments, operations, Release Guard evaluations, and events. No local UI session needs restoration.
-
-<Note>
-tmux is optional. InferCrane does not require, create, or manage tmux sessions. Running the console inside tmux is supported like any other terminal program.
-</Note>
-
-## What the console shows
-
-- Serving and convergence health
-- Logical OpenAI-compatible endpoint
-- Model, runtime, provider adapter, and revision
-- Ready, provisioning, and draining replicas
-- Request rate and error rate
-- Active durable operation, lifecycle phase, progress, checks, and next retry
-- Latest persisted Release Guard decision
-- Durable event timeline
-- Deterministic explanation derived from the selected deployment state
-
-Press `e` to show or hide the explanation. Press `c` to copy the active operation's resume command; when no operation is active, it copies the logical endpoint.
-
-## Safety model
-
-The v0.1 console is intentionally read-only. No key can deploy, scale, promote, reject, cancel, or delete resources. Mutations remain explicit commands with plans, idempotency keys, and confirmations where appropriate.
-
-The console only calls authenticated read endpoints:
-
-```text
-GET /api/v1/deployments
-GET /api/v1/deployments/{name}
-GET /api/v1/deployments/{name}/events
-```
-
-It never connects directly to PostgreSQL, infrastructure providers, SkyPilot, or vLLM.
-
-## Terminal behavior
-
-The layout adapts to terminal width. Wide terminals show deployment navigation beside operational details; narrow terminals stack the same information. Status always includes text and a symbol rather than relying on color alone.
-
-The console:
-
-- detects light and dark terminal backgrounds
-- degrades colors to the terminal's supported profile
-- requires an interactive TTY
-- does not emit terminal control sequences into redirected output
-- reconnects automatically after transient API failures
-- refreshes every two seconds, with `r` available for immediate refresh
-
-For screen readers, logging, or noninteractive environments, use the equivalent commands:
-
-```bash
-infercrane deployments
-infercrane status DEPLOYMENT
-infercrane events DEPLOYMENT
-infercrane explain DEPLOYMENT
-infercrane operation watch OPERATION_ID
-```
+The workspace reconstructs itself from persisted deployments, operations, revisions, Guard evaluations, benchmarks, scaling decisions, and events. tmux is optional and InferCrane does not manage tmux sessions.
 
 ## Keyboard reference
 
 | Key | Action |
 | --- | --- |
-| `j`, `↓` | Select the next deployment |
-| `k`, `↑` | Select the previous deployment |
+| `←`, `h`, `Shift-Tab` | Previous product view |
+| `→`, `l`, `Tab` | Next product view |
+| `j`, `↓` / `k`, `↑` | Select deployment, or event on the Events view |
+| `Ctrl-K`, `:` | Open applicable action palette |
 | `r` | Refresh immediately |
-| `e` | Toggle the persisted explanation |
-| `c` | Copy the endpoint or operation resume command |
+| `c` | Copy endpoint or active operation resume command |
 | `?` | Toggle safety and keyboard help |
-| `q`, `Ctrl-C` | Close the console without cancelling operations |
+| `q`, `Ctrl-C` | Close without cancelling operations |
+
+The workspace detects light and dark terminal backgrounds, adapts to narrow screens, requires an interactive TTY, and reconnects after transient API failures. For screen readers and logs, use `--output json` or the equivalent `status`, `events`, `explain`, and `operation` commands.

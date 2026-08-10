@@ -56,7 +56,7 @@ func newRootCommand(ctx context.Context) *cobra.Command {
 		{use: "doctor [flags]", short: "Validate configuration and dependencies", group: "start"},
 		{use: "plan MODEL [flags]", short: "Preview deployment changes without side effects", group: "start"},
 		{use: "deploy MODEL [flags]", short: "Create a durable inference deployment", group: "start"},
-		{use: "ui", short: "Open the read-only operations console", group: "operate"},
+		{use: "ui", short: "Open the interactive operations workspace", group: "operate"},
 		{use: "request DEPLOYMENT [flags]", short: "Send a buffered or streaming inference request", group: "start"},
 		{use: "version", short: "Print the InferCrane version", group: "start"},
 		{use: "apply MODEL_OR_SPEC [flags]", short: "Declaratively converge a deployment", group: "operate"},
@@ -115,6 +115,8 @@ func addHelpFlags(command *cobra.Command, name string) {
 		stringFlag("output", "human", "output format: human or json")
 	}
 	switch name {
+	case "ui":
+		boolFlag("read-only", "disable control-plane mutation actions")
 	case "init":
 		stringFlag("url", "http://127.0.0.1:8080", "control-plane URL")
 		stringFlag("api-key", "", "existing control-plane credential")

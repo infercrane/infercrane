@@ -8,7 +8,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 
 | Package path | Source files | Test files | Test functions |
 |---|---:|---:|---|
-| `cmd/infercrane` | 4 | 3 | `TestBenchmarkParsesFlagsAfterDeploymentName`, `TestCobraRootProvidesSuggestionsAndCompletion`, `TestCommandHelpDoesNotRequireAuthentication`, `TestControlErrorPreservesTaxonomyAndRemediation`, `TestDeleteCLIOnlySubmitsControlPlaneRequest`, `TestDeletePlanHonorsJSONWithoutControlPlaneMutation`, `TestDeployCLIOnlySubmitsControlPlaneRequest`, `TestDeployDisconnectLeavesDurableOperationRunning`, `TestDeployWaitJSONReturnsOneFinalDocument`, `TestDeployYAMLPreservesArtifactRuntimeAndServerlessFields`, `TestDeploymentInfrastructureUsesImmutableRevisionSpec`, `TestDoctorCLIOnlyReadsAuthenticatedControlPlaneDiagnostics`, `TestExplainColdStartMakesUnavailableBoundariesExplicit`, `TestExplainReportsPersistedBlockingOperation`, `TestGlobalContextIsHandledBeforeCommandDispatch`, `TestInvalidOutputIsRejectedBeforeAnyControlPlaneRequest`, `TestJSONOutputRendersStructuredControlPlaneFailure`, `TestLoadUISnapshotUsesOnlyReadControlPlaneAPIs`, `TestLogsCommandFiltersDurableTimeline`, `TestOperationProgressExplainsDurableState`, `TestOperationWatchResumesPersistedOperation`, `TestPrimaryDeployPathDefaultsToRunPodL40S`, `TestRequestCommandPrintsStreamingDeltas`, `TestRequestCommandSendsOpenAICompatibleRequest`, `TestRolloutInspectFormatsPersistedGuardComparison`, `TestServerlessDeployDefaultsToZeroMinimumWorkers`, `TestStatusShowsServingAndConvergenceSeparately`, `TestUIEmptyStateIsActionable`, `TestUIEventTimeDistinguishesHistoricalEvents`, `TestUIIgnoresStaleRefreshResponses`, `TestUIRendersDurableOperationAndExplanation`, `TestWaitFailureIncludesDurableErrorAndInspectionCommand`, `TestWaitTimeoutDisconnectsWithoutCancellingDurableOperation` |
+| `cmd/infercrane` | 5 | 3 | `TestBenchmarkParsesFlagsAfterDeploymentName`, `TestCobraRootProvidesSuggestionsAndCompletion`, `TestCommandHelpDoesNotRequireAuthentication`, `TestControlErrorPreservesTaxonomyAndRemediation`, `TestDeleteCLIOnlySubmitsControlPlaneRequest`, `TestDeletePlanHonorsJSONWithoutControlPlaneMutation`, `TestDeployCLIOnlySubmitsControlPlaneRequest`, `TestDeployDisconnectLeavesDurableOperationRunning`, `TestDeployWaitJSONReturnsOneFinalDocument`, `TestDeployYAMLPreservesArtifactRuntimeAndServerlessFields`, `TestDeploymentInfrastructureUsesImmutableRevisionSpec`, `TestDoctorCLIOnlyReadsAuthenticatedControlPlaneDiagnostics`, `TestExplainColdStartMakesUnavailableBoundariesExplicit`, `TestExplainReportsPersistedBlockingOperation`, `TestGlobalContextIsHandledBeforeCommandDispatch`, `TestInvalidOutputIsRejectedBeforeAnyControlPlaneRequest`, `TestJSONOutputRendersStructuredControlPlaneFailure`, `TestLoadUISnapshotUsesOnlyReadControlPlaneAPIs`, `TestLogsCommandFiltersDurableTimeline`, `TestOperationProgressExplainsDurableState`, `TestOperationWatchResumesPersistedOperation`, `TestPrimaryDeployPathDefaultsToRunPodL40S`, `TestRequestCommandPrintsStreamingDeltas`, `TestRequestCommandSendsOpenAICompatibleRequest`, `TestRolloutInspectFormatsPersistedGuardComparison`, `TestServerlessDeployDefaultsToZeroMinimumWorkers`, `TestStatusShowsServingAndConvergenceSeparately`, `TestUIActionsAreStateAwareAndReadOnlyModeNeverMutates`, `TestUIEmptyStateIsActionable`, `TestUIEventTimeDistinguishesHistoricalEvents`, `TestUIIgnoresStaleRefreshResponses`, `TestUIPromoteRequiresCurrentPersistedAcceptance`, `TestUIRendersDurableOperationAndExplanation`, `TestUIV01CapabilityContractIsComplete`, `TestWaitFailureIncludesDurableErrorAndInspectionCommand`, `TestWaitTimeoutDisconnectsWithoutCancellingDurableOperation` |
 | `internal/accounting` | 1 | 1 | `TestRecorderExportsQueueDropAndPersistenceFailureEvidence` |
 | `internal/artifact` | 1 | 1 | `TestHuggingFaceResolveRejectsMutableResponse`, `TestHuggingFaceResolveReturnsImmutableIdentity` |
 | `internal/authn` | 1 | 1 | `TestCacheAuthenticatesWithoutSourceOnRequestPath` |
@@ -56,6 +56,8 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 - `doctor`
 - `down`
 - `e`
+- `enter`
+- `esc`
 - `evaluate`
 - `events`
 - `explain`
@@ -66,6 +68,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 - `inspect`
 - `json`
 - `logs`
+- `n`
 - `operation`
 - `orphans`
 - `pending`
@@ -85,12 +88,14 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 - `running`
 - `status`
 - `succeeded`
+- `tab`
 - `target`
 - `tenant`
 - `ui`
 - `up`
 - `version`
 - `waiting`
+- `y`
 
 ## HTTP endpoints
 
