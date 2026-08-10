@@ -15,6 +15,7 @@ type Snapshot struct {
 	RouterURL          string
 	RouterProcessID    string
 	Provider           string
+	ProviderResourceID string
 	Runtime            string
 	ComputeMode        string
 	UpstreamAPIKey     string

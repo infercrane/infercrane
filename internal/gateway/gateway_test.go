@@ -178,6 +178,36 @@ func TestServerlessNonzeroWorkerEvidenceClassifiesWarmRequest(t *testing.T) {
 	}
 }
 
+func TestServerlessFreshCapacityOverridesStaleRouteSnapshot(t *testing.T) {
+	client := &http.Client{Transport: roundTripper(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"choices":[]}`))}, nil
+	})}
+	staleWorkers := 2
+	directory := routes.New()
+	directory.Put(routes.Snapshot{DeploymentID: "d1", Alias: "alias", UpstreamModel: "model", RouterURL: "https://api.runpod.invalid/openai", Provider: "runpod", ProviderResourceID: "endpoint-1", Runtime: "vllm", ComputeMode: "serverless", ProviderWorkers: &staleWorkers, ProviderObservedAt: time.Now()})
+	captured := &captureRecorder{}
+	handler := (&Gateway{Routes: directory, APIKey: "secret", Client: client, Recorder: captured, CapacityObservers: map[string]CapacityObserver{"runpod": func(context.Context, string) (int, error) { return 0, nil }}}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"alias","messages":[]}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	captured.mu.Lock()
+	record := captured.record
+	captured.mu.Unlock()
+	if response.Code != http.StatusOK || record.ColdStart == nil || !*record.ColdStart || record.ProviderWorkersAtArrival == nil || *record.ProviderWorkersAtArrival != 0 {
+		t.Fatalf("status=%d record=%+v", response.Code, record)
+	}
+}
+
+func TestCopyResponseStopsAtTerminalSSEMarker(t *testing.T) {
+	response := &http.Response{Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: {\"choices\":[]}\n\ndata: [DONE]\n\n"))}
+	recorder := httptest.NewRecorder()
+	observation := responseObservation{}
+	if err := copyResponse(recorder, response, &observation); err != nil || !hasSSEDone(observation.body) {
+		t.Fatalf("body=%q err=%v", observation.body, err)
+	}
+}
+
 func TestAuthentication(t *testing.T) {
 	handler := (&Gateway{Routes: routes.New(), APIKey: "secret"}).Handler()
 	recorder := httptest.NewRecorder()

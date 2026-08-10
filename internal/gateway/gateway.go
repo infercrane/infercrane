@@ -27,16 +27,21 @@ import (
 type Recorder interface {
 	RecordRequest(context.Context, domain.InferenceRecord) error
 }
+type CapacityObserver func(context.Context, string) (int, error)
 type Gateway struct {
-	Routes        *routes.Directory
-	APIKey        string
-	Client        *http.Client
-	Recorder      Recorder
-	Logger        *slog.Logger
-	Ready         func(context.Context) error
-	Telemetry     *Telemetry
-	Control       http.Handler
-	Authenticator interface {
+	Routes    *routes.Directory
+	APIKey    string
+	Client    *http.Client
+	Recorder  Recorder
+	Logger    *slog.Logger
+	Ready     func(context.Context) error
+	Telemetry *Telemetry
+	Control   http.Handler
+	// CapacityObservers provide request-arrival evidence for provider-native
+	// serverless routes. The lookup is bounded and best-effort: inference must
+	// remain available when telemetry observation fails.
+	CapacityObservers map[string]CapacityObserver
+	Authenticator     interface {
 		AuthenticatePrincipal(context.Context, string) (domain.Principal, error)
 	}
 }
@@ -139,14 +144,14 @@ func (g *Gateway) completions(w http.ResponseWriter, r *http.Request) {
 		traceParent = "00-" + randomHex(16) + "-" + randomHex(8) + "-01"
 	}
 	started := time.Now()
-	evidence := capacityEvidence{}
-	if route.ComputeMode == "serverless" && route.ProviderWorkers != nil && !route.ProviderObservedAt.IsZero() {
+	evidenceResult := g.observeCapacity(r.Context(), route, started)
+	if route.ComputeMode == "serverless" && g.CapacityObservers[route.Provider] == nil && route.ProviderWorkers != nil && !route.ProviderObservedAt.IsZero() {
 		age := started.Sub(route.ProviderObservedAt)
 		if age >= 0 && age <= 30*time.Second {
 			workers := *route.ProviderWorkers
 			cold := workers == 0
 			observedAt := route.ProviderObservedAt
-			evidence = capacityEvidence{coldStart: &cold, workers: &workers, observedAt: &observedAt}
+			evidenceResult = resolvedCapacityEvidence(capacityEvidence{coldStart: &cold, workers: &workers, observedAt: &observedAt})
 			if cold {
 				invalidated := route
 				invalidated.ProviderWorkers, invalidated.ProviderObservedAt = nil, time.Time{}
@@ -181,7 +186,7 @@ func (g *Gateway) completions(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, context.DeadlineExceeded) {
 			status, errorType, message = http.StatusGatewayTimeout, "timeout", "Inference upstream timed out"
 		}
-		g.record(r.Context(), requestID, route, alias, started, status, errorType, streaming, responseObservation{}, evidence)
+		g.record(r.Context(), requestID, route, alias, started, status, errorType, streaming, responseObservation{}, <-evidenceResult)
 		openAIError(w, message, status, "server_error")
 		return
 	}
@@ -200,7 +205,7 @@ func (g *Gateway) completions(w http.ResponseWriter, r *http.Request) {
 			errorType = "upstream_disconnect"
 		}
 	}
-	g.record(context.WithoutCancel(r.Context()), requestID, route, alias, started, resp.StatusCode, errorType, streaming, observation, evidence)
+	g.record(context.WithoutCancel(r.Context()), requestID, route, alias, started, resp.StatusCode, errorType, streaming, observation, <-evidenceResult)
 	if g.Logger != nil {
 		g.Logger.Info("inference request", "request_id", requestID, "traceparent", traceParent, "tenant_id", principal.TenantID, "deployment_id", route.DeploymentID, "status", resp.StatusCode, "duration_ms", float64(time.Since(started).Microseconds())/1000)
 	}
@@ -210,6 +215,36 @@ type capacityEvidence struct {
 	coldStart  *bool
 	workers    *int
 	observedAt *time.Time
+}
+
+func resolvedCapacityEvidence(evidence capacityEvidence) <-chan capacityEvidence {
+	result := make(chan capacityEvidence, 1)
+	result <- evidence
+	return result
+}
+
+func (g *Gateway) observeCapacity(ctx context.Context, route routes.Snapshot, started time.Time) <-chan capacityEvidence {
+	observer := g.CapacityObservers[route.Provider]
+	if route.ComputeMode != "serverless" || observer == nil || route.ProviderResourceID == "" {
+		return resolvedCapacityEvidence(capacityEvidence{})
+	}
+	result := make(chan capacityEvidence, 1)
+	go func() {
+		observeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+		defer cancel()
+		workers, err := observer(observeCtx, route.ProviderResourceID)
+		if err != nil {
+			result <- capacityEvidence{}
+			return
+		}
+		cold := workers == 0
+		observedAt := time.Now()
+		if observedAt.Before(started) {
+			observedAt = started
+		}
+		result <- capacityEvidence{coldStart: &cold, workers: &workers, observedAt: &observedAt}
+	}()
+	return result
 }
 
 func (g *Gateway) record(ctx context.Context, id string, route routes.Snapshot, requestModel string, started time.Time, status int, errorType string, streaming bool, observation responseObservation, evidence capacityEvidence) {
@@ -307,6 +342,13 @@ func copyResponse(w http.ResponseWriter, resp *http.Response, observation *respo
 				if flushErr := http.NewResponseController(w).Flush(); flushErr != nil {
 					return flushErr
 				}
+				// Some provider-native OpenAI proxies keep the HTTP body open after
+				// the terminal SSE marker. The protocol is complete at [DONE]; do
+				// not wait for EOF and misclassify the client's normal exit as a
+				// cancellation.
+				if hasSSEDone(observation.body) {
+					return nil
+				}
 			}
 		}
 		if errors.Is(err, io.EOF) {
@@ -316,6 +358,15 @@ func copyResponse(w http.ResponseWriter, resp *http.Response, observation *respo
 			return err
 		}
 	}
+}
+
+func hasSSEDone(body []byte) bool {
+	for _, line := range bytes.Split(body, []byte("\n")) {
+		if bytes.Equal(bytes.TrimSpace(line), []byte("data: [DONE]")) {
+			return true
+		}
+	}
+	return false
 }
 
 func copyHeaders(dst, src http.Header) {

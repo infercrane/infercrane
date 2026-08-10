@@ -192,7 +192,7 @@ func (r *Reconciler) Once(ctx context.Context) error {
 					break
 				}
 			}
-			r.Routes.Put(routes.Snapshot{DeploymentID: d.ID, RevisionID: d.ActiveRevisionID, TenantID: d.TenantID, Alias: d.Name, UpstreamModel: upstream, RouterURL: healthy[0].URL, Provider: direct.Provider, Runtime: d.Runtime, ComputeMode: "serverless", UpstreamAPIKey: direct.APIKey, ProviderWorkers: workers, ProviderObservedAt: observedAt})
+			r.Routes.Put(routes.Snapshot{DeploymentID: d.ID, RevisionID: d.ActiveRevisionID, TenantID: d.TenantID, Alias: d.Name, UpstreamModel: upstream, RouterURL: healthy[0].URL, Provider: direct.Provider, ProviderResourceID: healthy[0].ProviderResourceID, Runtime: d.Runtime, ComputeMode: "serverless", UpstreamAPIKey: direct.APIKey, ProviderWorkers: workers, ProviderObservedAt: observedAt})
 			_ = r.Store.SetDeploymentState(ctx, d.ID, "healthy")
 			continue
 		}

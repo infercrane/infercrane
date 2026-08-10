@@ -120,21 +120,46 @@ func (r RunPodServerless) EnsureEndpoint(ctx context.Context, spec ServerlessEnd
 }
 
 func (r RunPodServerless) ListEndpoints(ctx context.Context) ([]ServerlessEndpoint, error) {
+	type worker struct {
+		DesiredStatus string `json:"desiredStatus"`
+	}
 	var endpoints []struct {
 		ID, Name, TemplateID string
 		GPUTypeIDs           []string `json:"gpuTypeIds"`
 		WorkersMin           int      `json:"workersMin"`
 		WorkersMax           int      `json:"workersMax"`
-		Workers              []any    `json:"workers"`
+		Workers              []worker `json:"workers"`
 	}
 	if err := r.do(ctx, http.MethodGet, "/endpoints?includeWorkers=true", nil, &endpoints); err != nil {
 		return nil, err
 	}
 	out := make([]ServerlessEndpoint, len(endpoints))
 	for i, endpoint := range endpoints {
-		out[i] = ServerlessEndpoint{ID: endpoint.ID, Name: endpoint.Name, TemplateID: endpoint.TemplateID, GPUTypeIDs: endpoint.GPUTypeIDs, WorkersMin: endpoint.WorkersMin, WorkersMax: endpoint.WorkersMax, Workers: len(endpoint.Workers)}
+		activeWorkers := 0
+		for _, worker := range endpoint.Workers {
+			if !strings.EqualFold(worker.DesiredStatus, "EXITED") {
+				activeWorkers++
+			}
+		}
+		out[i] = ServerlessEndpoint{ID: endpoint.ID, Name: endpoint.Name, TemplateID: endpoint.TemplateID, GPUTypeIDs: endpoint.GPUTypeIDs, WorkersMin: endpoint.WorkersMin, WorkersMax: endpoint.WorkersMax, Workers: activeWorkers}
 	}
 	return out, nil
+}
+
+func (r RunPodServerless) ActiveWorkers(ctx context.Context, endpointID string) (int, error) {
+	if endpointID == "" {
+		return 0, errors.New("RunPod Serverless endpoint ID is required")
+	}
+	endpoints, err := r.ListEndpoints(ctx)
+	if err != nil {
+		return 0, err
+	}
+	for _, endpoint := range endpoints {
+		if endpoint.ID == endpointID {
+			return endpoint.Workers, nil
+		}
+	}
+	return 0, fmt.Errorf("RunPod Serverless endpoint %s not found", endpointID)
 }
 
 func (r RunPodServerless) DeleteEndpoint(ctx context.Context, endpointID string) error {

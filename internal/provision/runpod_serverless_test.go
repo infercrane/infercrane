@@ -103,3 +103,15 @@ func TestRunPodServerlessHealthReportsWorkersWithoutInferenceRequest(t *testing.
 		t.Fatalf("health=%+v err=%v", health, err)
 	}
 }
+
+func TestRunPodServerlessActiveWorkersExcludesExitedHistory(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "endpoint-1", "workers": []map[string]string{{"desiredStatus": "RUNNING"}, {"desiredStatus": "EXITED"}, {"desiredStatus": "EXITED"}}}})
+	}))
+	defer server.Close()
+	provider := RunPodServerless{APIKey: "secret", BaseURL: server.URL, Client: server.Client()}
+	workers, err := provider.ActiveWorkers(context.Background(), "endpoint-1")
+	if err != nil || workers != 1 {
+		t.Fatalf("workers=%d err=%v", workers, err)
+	}
+}
