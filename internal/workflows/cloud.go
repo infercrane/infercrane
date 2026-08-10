@@ -661,6 +661,16 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 	if !observation.Exists {
 		return "", "", "", operations.Retryable("provider_not_visible", errors.New("replica is not visible in provider inventory yet"))
 	}
+	if observation.State == "failed" {
+		_ = store.ObserveReplica(ctx, replica.ID, "failed", observation.Endpoint, "unhealthy", observation.Details, time.Now())
+		if deleteErr := provider.DeleteReplica(ctx, ensured); deleteErr != nil {
+			return "", "", "", operations.Retryable("runtime_bootstrap_cleanup_failed", fmt.Errorf("runtime bootstrap failed and provider cleanup did not complete: %w", deleteErr))
+		}
+		if deleteErr := store.MarkReplicaDeleted(ctx, replica.ID); deleteErr != nil {
+			return "", "", "", classify("runtime_bootstrap_cleanup_failed", deleteErr)
+		}
+		return "", "", "", operations.Permanent("runtime_bootstrap_failed", errors.New("runtime process exited before readiness; inspect provider details for the vLLM error"))
+	}
 	if observation.State != "ready" || observation.Endpoint == "" {
 		_ = store.ObserveReplica(ctx, replica.ID, observation.State, observation.Endpoint, "starting", observation.Details, time.Now())
 		_ = checkpoint(ctx, store, operation, step+".ready", "waiting", observation, 55, "Waiting for provider capacity and secure worker bootstrap")

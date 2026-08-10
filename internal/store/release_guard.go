@@ -58,7 +58,7 @@ func (s *Store) RevisionMetrics(ctx context.Context, revisionID string, window t
 	if output.Valid {
 		metrics.OutputTokensPerSecond = &output.Float64
 	}
-	if err = s.QueryRowContext(ctx, `SELECT COUNT(*) FROM replicas WHERE revision_id=? AND lifecycle_state='ready' AND health='healthy'`, revisionID).Scan(&metrics.ReadyReplicas); err != nil {
+	if err = s.QueryRowContext(ctx, `SELECT COUNT(*) FROM replicas WHERE revision_id=? AND lifecycle_state IN ('ready','active') AND health='healthy'`, revisionID).Scan(&metrics.ReadyReplicas); err != nil {
 		return domain.RevisionMetrics{}, err
 	}
 	metrics.EvidenceSource = "request_telemetry"

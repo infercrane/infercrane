@@ -124,6 +124,30 @@ func TestBenchmarkHistoryPersistsReproductionMetadata(t *testing.T) {
 	}
 }
 
+func TestRevisionMetricsCountsHealthyActiveReplicas(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	name := "guard-active-" + time.Now().UTC().Format("150405.000000000")
+	deployment, _, _, err := s.SubmitCloudDeployment(ctx,
+		domain.Deployment{Name: name, Model: "Qwen/Qwen3-8B", MinReplicas: 1, MaxReplicas: 1},
+		domain.Operation{Kind: "deployment.converge", IdempotencyKey: "create-" + name, RequestJSON: `{"name":"` + name + `","model":"Qwen/Qwen3-8B","cloud":"runpod","gpu":"L40S"}`},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replica, _, err := s.EnsureReplicaIntent(ctx, domain.Replica{TenantID: "global", DeploymentID: deployment.ID, RevisionID: deployment.ActiveRevisionID, Ordinal: 0, ExternalKey: deployment.ID + "-r0", Provider: "skypilot"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.ObserveReplica(ctx, replica.ID, "active", "http://worker", "healthy", `{}`, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	metrics, err := s.RevisionMetrics(ctx, replica.RevisionID, time.Minute)
+	if err != nil || metrics.ReadyReplicas != 1 {
+		t.Fatalf("metrics=%+v err=%v", metrics, err)
+	}
+}
+
 func TestSubmitDeploymentDeleteWithdrawsDesiredStateAndQueuesCleanup(t *testing.T) {
 	ctx := context.Background()
 	s := openStore(t, ctx)

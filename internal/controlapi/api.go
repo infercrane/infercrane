@@ -261,6 +261,29 @@ func (a API) runBenchmark(w http.ResponseWriter, r *http.Request) {
 	if provider == "" && len(resolved.Targets) > 0 {
 		provider = resolved.Targets[0].Provider
 	}
+	benchmarkProvider := revisionSpec.Cloud
+	if benchmarkProvider == "" {
+		benchmarkProvider = provider
+	}
+	benchmarkRegion := revisionSpec.Region
+	if benchmarkRegion == "" {
+		replicas, replicaErr := a.Store.ReplicasForDeployment(r.Context(), principal.TenantID, deployment.ID)
+		if replicaErr != nil {
+			writeError(w, 500, "internal", "benchmark replica metadata lookup failed")
+			return
+		}
+		for _, replica := range replicas {
+			if replica.RevisionID == selectedRevisionID {
+				benchmarkRegion = regionFromProviderDetails(replica.ProviderDetails)
+				if benchmarkRegion != "" {
+					break
+				}
+			}
+		}
+	}
+	if revisionSpec.RuntimeVersion == "" && revisionSpec.Runtime == support.DefaultRuntime {
+		revisionSpec.RuntimeVersion = support.DefaultRuntimeVersion
+	}
 	modelIdentity, artifactID := artifact.ModelIdentity, artifact.ID
 	if revisionSpec.ComputeMode == "" {
 		revisionSpec.ComputeMode = "elastic"
@@ -273,12 +296,46 @@ func (a API) runBenchmark(w http.ResponseWriter, r *http.Request) {
 		gpuCount = &count
 	}
 	costMetadata, _ := json.Marshal(map[string]any{"available": false, "reason": "provider cost was not measured by this benchmark"})
-	persisted, err := a.Store.RecordBenchmark(r.Context(), domain.BenchmarkResult{TenantID: principal.TenantID, DeploymentID: deployment.ID, DeploymentName: deployment.Name, RevisionID: revision.ID, ModelArtifactID: artifactID, ModelIdentity: modelIdentity, Runtime: revisionSpec.Runtime, RuntimeVersion: revisionSpec.RuntimeVersion, RuntimeConfigJSON: string(runtimeConfig), Provider: provider, Region: revisionSpec.Region, GPU: revisionSpec.GPU, GPUCount: gpuCount, ComputeMode: revisionSpec.ComputeMode, Tool: measured.Tool, ToolVersion: measured.ToolVersion, WorkloadJSON: string(workload), ReproductionCommand: measured.Command, RequestCount: measured.Requests, Succeeded: measured.Succeeded, Failed: measured.Failed, DurationSeconds: measured.DurationSeconds, RequestThroughput: measured.RequestThroughput, OutputTokenThroughput: measured.OutputTokenThroughput, TTFTP50MS: measured.TTFTP50MS, TTFTP95MS: measured.TTFTP95MS, TPOTP50MS: measured.TPOTP50MS, TPOTP95MS: measured.TPOTP95MS, LatencyP50MS: measured.LatencyP50MS, LatencyP95MS: measured.LatencyP95MS, CostMetadataJSON: string(costMetadata)})
+	persisted, err := a.Store.RecordBenchmark(r.Context(), domain.BenchmarkResult{TenantID: principal.TenantID, DeploymentID: deployment.ID, DeploymentName: deployment.Name, RevisionID: revision.ID, ModelArtifactID: artifactID, ModelIdentity: modelIdentity, Runtime: revisionSpec.Runtime, RuntimeVersion: revisionSpec.RuntimeVersion, RuntimeConfigJSON: string(runtimeConfig), Provider: benchmarkProvider, Region: benchmarkRegion, GPU: revisionSpec.GPU, GPUCount: gpuCount, ComputeMode: revisionSpec.ComputeMode, Tool: measured.Tool, ToolVersion: measured.ToolVersion, WorkloadJSON: string(workload), ReproductionCommand: measured.Command, RequestCount: measured.Requests, Succeeded: measured.Succeeded, Failed: measured.Failed, DurationSeconds: measured.DurationSeconds, RequestThroughput: measured.RequestThroughput, OutputTokenThroughput: measured.OutputTokenThroughput, TTFTP50MS: measured.TTFTP50MS, TTFTP95MS: measured.TTFTP95MS, TPOTP50MS: measured.TPOTP50MS, TPOTP95MS: measured.TPOTP95MS, LatencyP50MS: measured.LatencyP50MS, LatencyP95MS: measured.LatencyP95MS, CostMetadataJSON: string(costMetadata)})
 	if err != nil {
 		writeError(w, 500, "internal", "benchmark result could not be persisted")
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"benchmark": benchmarkResponse(persisted)})
+}
+
+func regionFromProviderDetails(details string) string {
+	if strings.TrimSpace(details) == "" {
+		return ""
+	}
+	var value any
+	if json.Unmarshal([]byte(details), &value) != nil {
+		return ""
+	}
+	var find func(any) string
+	find = func(current any) string {
+		switch typed := current.(type) {
+		case map[string]any:
+			for _, key := range []string{"region", "Region"} {
+				if region, ok := typed[key].(string); ok && strings.TrimSpace(region) != "" {
+					return strings.TrimSpace(region)
+				}
+			}
+			for _, nested := range typed {
+				if region := find(nested); region != "" {
+					return region
+				}
+			}
+		case []any:
+			for _, nested := range typed {
+				if region := find(nested); region != "" {
+					return region
+				}
+			}
+		}
+		return ""
+	}
+	return find(value)
 }
 
 func (a API) benchmarks(w http.ResponseWriter, r *http.Request) {

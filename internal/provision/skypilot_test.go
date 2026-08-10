@@ -16,6 +16,8 @@ type fakeSkyRunner struct {
 	statusPrefix    string
 	requestID       string
 	requestState    string
+	jobState        string
+	jobFailure      string
 	endpoint        string
 	launchTask      string
 	launches, downs int
@@ -42,6 +44,12 @@ func (f *fakeSkyRunner) Run(_ context.Context, _ []string, args ...string) ([]by
 		f.downs++
 		f.exists = false
 		return []byte("submitted"), nil
+	case strings.HasPrefix(command, "queue "):
+		state := f.jobState
+		if state == "" {
+			state = "RUNNING"
+		}
+		return []byte(`[{"status":"` + state + `","failure_reason":"` + f.jobFailure + `"}]`), nil
 	case strings.Contains(command, "--endpoint"):
 		if !f.exists {
 			return nil, errors.New("not found")
@@ -182,6 +190,15 @@ func TestObserveNormalizesBareSkyPilotEndpoint(t *testing.T) {
 	provider := SkyPilot{Runner: runner}
 	observation, err := provider.ObserveReplica(context.Background(), ProviderHandle{ResourceID: "infercrane-prod-r0"}, 8000)
 	if err != nil || observation.Endpoint != "http://91.199.227.82:16889" {
+		t.Fatalf("observation=%#v err=%v", observation, err)
+	}
+}
+
+func TestObserveSurfacesFailedRuntimeJob(t *testing.T) {
+	runner := &fakeSkyRunner{exists: true, jobState: "FAILED", jobFailure: "CUDA kernel image unavailable"}
+	provider := SkyPilot{Runner: runner}
+	observation, err := provider.ObserveReplica(context.Background(), ProviderHandle{ResourceID: "infercrane-prod-r0"}, 8000)
+	if err != nil || observation.State != "failed" || !strings.Contains(observation.Details, "CUDA kernel image unavailable") {
 		t.Fatalf("observation=%#v err=%v", observation, err)
 	}
 }

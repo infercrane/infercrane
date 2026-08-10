@@ -124,6 +124,7 @@
         "group": "PROJECT",
         "pages": [
           "project-status",
+          "production-readiness",
           "security",
           "architecture/invariants",
           {

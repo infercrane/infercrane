@@ -13,6 +13,7 @@ import (
 	"github.com/infercrane/infercrane/internal/benchmark"
 	"github.com/infercrane/infercrane/internal/doctor"
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/support"
 )
 
 type fakeStore struct {
@@ -232,6 +233,27 @@ func TestBenchmarkRunsThroughControlPlaneAndPersistsIdentity(t *testing.T) {
 	}
 	if runner.config.APIKey != "secret" || runner.config.RandomSeed != 42 || runner.config.Model != "qwen" || runner.config.Tokenizer != "Qwen/Qwen3-8B" || len(store.benchmarks) != 1 || store.benchmarks[0].GPU != "L40S" || store.benchmarks[0].GPUCount == nil || *store.benchmarks[0].GPUCount != 1 || !strings.Contains(store.benchmarks[0].CostMetadataJSON, `"available":false`) {
 		t.Fatalf("config=%#v benchmarks=%#v", runner.config, store.benchmarks)
+	}
+}
+
+func TestBenchmarkNormalizesQualifiedRuntimeCloudAndObservedRegion(t *testing.T) {
+	spec := `{"model":"Qwen/Qwen3-8B","runtime":"vllm","compute_mode":"elastic","cloud":"runpod","gpu":"H100"}`
+	store := &fakeStore{
+		resolved:  domain.ResolvedDeployment{Deployment: domain.Deployment{ID: "dep", Name: "qwen", ActiveRevisionID: "rev"}, Targets: []domain.Target{{Provider: "skypilot"}}},
+		revisions: []domain.DeploymentRevision{{ID: "rev", SpecJSON: spec}},
+		replicas:  []domain.Replica{{RevisionID: "rev", ProviderDetails: `[{"cloud":"RunPod","region":"US-CA-1"}]`}},
+		artifact:  domain.ModelArtifact{ID: "artifact", Repository: "Qwen/Qwen3-8B", ModelIdentity: "Qwen/Qwen3-8B@commit"},
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments/qwen/benchmarks", strings.NewReader(`{"requests":10,"concurrency":2}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret", BenchmarkRunner: &fakeBenchmarkRunner{}, GatewayURL: "http://gateway", AIPerfBinary: "aiperf"}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || len(store.benchmarks) != 1 {
+		t.Fatalf("response=%d %s benchmarks=%#v", response.Code, response.Body.String(), store.benchmarks)
+	}
+	result := store.benchmarks[0]
+	if result.RuntimeVersion != support.DefaultRuntimeVersion || result.Provider != "runpod" || result.Region != "US-CA-1" {
+		t.Fatalf("runtime=%q provider=%q region=%q", result.RuntimeVersion, result.Provider, result.Region)
 	}
 }
 

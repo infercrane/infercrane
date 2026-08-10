@@ -11,10 +11,14 @@ import (
 
 const (
 	DefaultRuntime = "vllm"
-	DefaultCloud   = "runpod"
-	DefaultGPU     = "L40S"
-	ElasticMode    = "elastic"
-	ServerlessMode = "serverless"
+	// DefaultRuntimeVersion is the runtime qualified with the v0.1 provider
+	// matrix. Persist it in every revision so benchmarks and explanations never
+	// depend on an implicit image default.
+	DefaultRuntimeVersion = "0.8.5.post1"
+	DefaultCloud          = "runpod"
+	DefaultGPU            = "L40S"
+	ElasticMode           = "elastic"
+	ServerlessMode        = "serverless"
 )
 
 // Matrix is an immutable-by-convention set of qualified runtime and

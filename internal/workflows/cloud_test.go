@@ -345,6 +345,16 @@ func TestEnsureCloudReplicaClassifiesFailedProviderRequest(t *testing.T) {
 	}
 }
 
+func TestEnsureCloudReplicaStopsAndCleansFailedRuntimeJob(t *testing.T) {
+	store := &fakeCloudStore{}
+	provider := &fakeReplicaProvider{observation: provision.Observation{Exists: true, State: "failed", Endpoint: "http://gpu:8000", Details: `{"status":"FAILED"}`}}
+	_, _, _, err := ensureCloudReplica(context.Background(), store, ReplicaBackend{Name: "sky", Cloud: "runpod", Runtime: "vllm", Provider: provider}, fakeInspector{}, domain.Operation{ID: "operation-1"}, CloudRequest{TenantID: "global", DeploymentID: "deployment-1", RevisionID: "revision-1", Name: "qwen", Model: "Qwen/Qwen3-8B", Cloud: "runpod", GPU: "H100", Runtime: "vllm", Port: 8000}, 0)
+	var failure operations.Failure
+	if !errors.As(err, &failure) || failure.Code != "runtime_bootstrap_failed" || failure.Retryable || provider.deleteCalls != 1 || store.replica.LifecycleState != "deleted" {
+		t.Fatalf("failure=%+v deletes=%d replica=%+v err=%v", failure, provider.deleteCalls, store.replica, err)
+	}
+}
+
 func TestConvergeResumesAfterProviderCheckpoint(t *testing.T) {
 	store := &fakeCloudStore{deployment: domain.Deployment{ID: "deployment-1", Name: "qwen", Model: "Qwen/Qwen3-8B", RoutingStrategy: "round-robin", MinReplicas: 1, MaxReplicas: 1}}
 	provider := &fakeReplicaProvider{observation: provision.Observation{Exists: true, State: "starting"}}

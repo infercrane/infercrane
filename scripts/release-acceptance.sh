@@ -99,9 +99,9 @@ record() {
 }
 
 build_cli() {
-  if [ ! -x "$cli" ] || [ "$root/cmd/infercrane/main.go" -nt "$cli" ]; then
-    (cd "$root" && go build -o "$cli" ./cmd/infercrane)
-  fi
+  # Go's build cache makes this cheap, while timestamping only main.go can run
+  # stale acceptance binaries after changes elsewhere in the command package.
+  (cd "$root" && go build -o "$cli" ./cmd/infercrane)
 }
 
 ic() {
@@ -274,6 +274,11 @@ run_elastic() {
   ic request "$ELASTIC_NAME" --message "stream acceptance probe" --stream >/dev/null
   printf 'buffered and streaming requests passed\n' >"$evidence/elastic-requests.log"
   record elastic-benchmark ic benchmark "$ELASTIC_NAME" --revision active --requests 100 --concurrency 10 --random-seed 17 --output json
+  jq -e '.runtime_version != "" and .provider != "" and .region != "" and .model_identity != "" and .gpu_count == 1 and .request_count == 100 and .failed == 0 and (.reproduction_command | contains("${INFERCRANE_API_KEY}"))' \
+    "$evidence/elastic-benchmark.log" >/dev/null || {
+      echo "benchmark evidence is incomplete or contains failures" >&2
+      return 1
+    }
   record elastic-inspect ic inspect "$ELASTIC_NAME" --output json
   record elastic-events ic events "$ELASTIC_NAME" --output json
   record elastic-explain-scaling ic explain scaling "$ELASTIC_NAME" --output json

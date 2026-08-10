@@ -547,6 +547,9 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 	if *name == "" {
 		*name = planning.DefaultName(model)
 	}
+	if runtimeVersion == "" {
+		runtimeVersion = support.DefaultRuntimeVersion
+	}
 	if *targets == "" && *cloud == "" && *gpu == "" {
 		*cloud, *gpu = support.DefaultCloud, support.DefaultGPU
 	}

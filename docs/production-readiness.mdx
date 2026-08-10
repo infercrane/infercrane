@@ -1,0 +1,105 @@
+---
+title: Production readiness scenarios
+description: Risk-based acceptance scenarios and evidence required for an InferCrane release candidate.
+---
+
+This matrix is the release contract for InferCrane v0.1. A scenario passes only when its
+observable invariants are recorded; a successful command by itself is not sufficient evidence.
+
+## Test tiers
+
+| Tier | Environment | When it runs | Purpose |
+| --- | --- | --- | --- |
+| Unit | Go process | Every change | Deterministic policy, parsing, and state transitions |
+| Store | Ephemeral PostgreSQL | Every change in CI | Transactions, leases, idempotency, and restart recovery |
+| Stack | Local Docker Compose | Every release change | CLI/API/gateway/router behavior and process disruption |
+| Provider | RunPod account | Targeted changes and release sign-off | Real capacity, runtime, streaming, scaling, deletion, and leaks |
+| Package | Clean macOS/Linux environment | Release sign-off | Archives, checksums, Homebrew, image, and first-run UX |
+
+Provider qualification uses no more than two workers. Run the local tiers first, use a unique
+acceptance run ID, and inspect provider inventory before any retry.
+
+## Lifecycle and recovery
+
+| Scenario | Fault or action | Required invariant | Tier |
+| --- | --- | --- | --- |
+| Duplicate deploy | Submit the same idempotency key concurrently | One operation, revision, replica intent, and external resource | Store + Provider |
+| CLI disconnect | Stop the waiting CLI during provisioning | Durable operation continues; reconnect observes the same operation | Stack + Provider |
+| Provision restart | Restart the control plane after provider acceptance | Lease is recovered; no second provider request or pod | Stack + Provider |
+| Failed bootstrap | Runtime exits after capacity allocation | Failure is visible and retry cleans/reuses the deterministic identity | Unit + Provider |
+| Router publish | Replace a healthy routing generation | New requests use the new generation; existing streams finish on the old one | Stack + Provider |
+| Scale up | Sustain queue pressure for the configured intervals | Exactly one new intent per ordinal; `1 → 2` is persisted and explained | Stack + Provider |
+| Scale down | Remove load for the configured intervals | Replica is withdrawn, drained, deleted, and traffic remains healthy | Stack + Provider |
+| Delete restart | Restart after routing withdrawal and before provider deletion | The same delete operation resumes and confirms provider absence | Store + Provider |
+| Lost create response | Provider accepts create but the response is lost | Reconciliation adopts by deterministic external key; no duplicate endpoint | Unit + Provider |
+| Cancellation | Cancel waiting client and provider request independently | Client disconnect never corrupts state; explicit cancellation is auditable | Stack + Provider |
+
+## Serving and compatibility
+
+| Scenario | Required invariant | Tier |
+| --- | --- | --- |
+| Buffered chat | Authenticated OpenAI-compatible response with the selected logical model | Stack + Provider |
+| Streaming chat | SSE content type, valid chunks, one `[DONE]`, and first bytes before completion | Stack + Provider |
+| Concurrent traffic | No cross-request data, bounded errors, and accurate running/waiting signals | Stack + Provider |
+| Worker loss | Failed target is withdrawn and repeated requests stabilize on healthy capacity | Stack |
+| Unsupported GPU/runtime | Fails with an actionable compatibility error instead of waiting until the global timeout | Unit + Provider inventory |
+| Mutable model reference | `main` resolves once to an immutable artifact commit stored on the revision | Unit + Provider |
+
+## Release Guard, telemetry, and benchmark
+
+| Scenario | Required invariant | Tier |
+| --- | --- | --- |
+| Healthy active revision | Lifecycle `active` counts as ready in guard inputs | Store |
+| Bad candidate | Deterministic `REJECT`; active route and capacity are unchanged | Store + Provider |
+| Comparable candidate | Only matching AIPerf workloads and tool versions can be compared | Unit |
+| Benchmark identity | Runtime/version, cloud, observed region, GPU/count, artifact, workload, and reproduction command are non-empty | Stack + Provider |
+| Privacy | Prompts and generated bodies are absent from persisted request and benchmark records | Unit + Store |
+| Cold/warm classification | Worker state is sampled at request arrival; unavailable boundaries remain explicitly unavailable | Unit + Provider |
+| Explanation replay | Scaling, rollout, degradation, and cold-start answers reproduce persisted evidence | Store + Provider |
+
+## Serverless
+
+| Scenario | Required invariant | Tier |
+| --- | --- | --- |
+| First cold request | Endpoint begins at zero workers and one request creates bounded native capacity | Provider |
+| Warm request | Reuses active capacity and is classified warm | Provider |
+| Scale to zero | No active worker remains after the provider idle window | Provider |
+| Second cold request | The same logical endpoint serves after a second zero-to-worker transition | Provider |
+| Stream cancellation | Upstream work is cancelled when supported and the durable error category is correct | Stack + Provider |
+| Endpoint deletion | Endpoint and active/exited worker inventory are absent; reconciliation reports no orphan | Provider |
+
+## Performance budgets
+
+These are operator budgets, not public latency promises. Exceeding one requires an explanation in
+the release evidence.
+
+| Boundary | Budget |
+| --- | --- |
+| Local control-plane readiness | 30 seconds |
+| Local worker-loss convergence | 45 seconds |
+| CLI/API non-provider operation p95 | 500 ms |
+| Provider request submission | 30 seconds |
+| Elastic readiness | 20 minutes under available capacity |
+| Elastic scale decision after sustained queue signal | 30 seconds |
+| Provider resource deletion confirmation | 10 minutes |
+| Serverless worker initialization | Below the provider's configured unhealthy timeout |
+
+The dominant elastic cold path is provider image transfer followed by vLLM initialization. Keep
+the runtime image digest-pinned and prebuilt. Do not install Python/CUDA dependencies on a worker.
+Model/runtime caches may improve repeated starts, but acceptance must also include a fresh-host run.
+
+## Release commands
+
+```bash
+make verify
+make deadcode
+make audit
+make test-container
+make test-stack
+make test-failure
+./scripts/release-acceptance.sh qualify --approve-paid-resources
+./scripts/release-acceptance.sh report
+```
+
+After every provider run, independently list RunPod Pods and Serverless endpoints and confirm that
+all run-owned resources are absent. Never infer deletion from local state alone.

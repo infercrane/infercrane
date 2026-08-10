@@ -193,7 +193,7 @@ func TestPrimaryDeployPathDefaultsToRunPodL40S(t *testing.T) {
 	defer server.Close()
 
 	err := deployAPICommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, "deploy", []string{"Qwen/Qwen3-8B", "--idempotency-key", "release-1"})
-	if err != nil || body["cloud"] != "runpod" || body["gpu"] != "L40S" {
+	if err != nil || body["cloud"] != "runpod" || body["gpu"] != "L40S" || body["runtime_version"] != "0.8.5.post1" {
 		t.Fatalf("body=%#v err=%v", body, err)
 	}
 }

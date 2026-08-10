@@ -5,19 +5,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"gopkg.in/yaml.v3"
 	"os"
 	"os/exec"
 	"regexp"
 	"strings"
+
+	"github.com/infercrane/infercrane/internal/support"
+	"gopkg.in/yaml.v3"
 )
 
 var ErrUnavailable = errors.New("SkyPilot unavailable")
 var ErrRequestFailed = errors.New("SkyPilot launch request failed")
-
-// defaultVLLMVersion is intentionally pinned. v0.8.5.post1 supports Qwen3 and
-// resolves to PyTorch's CUDA 12.4 runtime.
-const defaultVLLMVersion = "0.8.5.post1"
 
 // The default image is pinned by digest so a revision always boots the tested
 // runtime bits. Using vLLM's provider-neutral image keeps provisioning portable
@@ -78,7 +76,7 @@ func (s SkyPilot) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provider
 	}
 	usesDefaultRuntime := spec.RuntimeVersion == ""
 	if usesDefaultRuntime {
-		spec.RuntimeVersion = defaultVLLMVersion
+		spec.RuntimeVersion = support.DefaultRuntimeVersion
 	}
 	resourceID := s.Handle(spec.ExternalKey).ResourceID
 	requestState, requestFound := "", false
@@ -296,9 +294,49 @@ func (s SkyPilot) observe(ctx context.Context, resourceID string, port int, refr
 		if endpointErr == nil && strings.TrimSpace(string(endpoint)) != "" {
 			observation.Endpoint = normalizeEndpoint(string(endpoint))
 			observation.State = "ready"
+			if queue, queueErr := runner.Run(ctx, nil, "queue", resourceID, "-o", "json"); queueErr == nil {
+				if failed, reason := failedJob(queue); failed {
+					observation.State = "failed"
+					observation.Details = string(output) + "\n" + string(queue)
+					if reason != "" {
+						observation.Details += "\nruntime job failure: " + reason
+					}
+				}
+			}
 		}
 	}
 	return observation, nil
+}
+
+func failedJob(data []byte) (bool, string) {
+	data = jsonPayload(data)
+	var value any
+	if json.Unmarshal(data, &value) != nil {
+		return false, ""
+	}
+	var inspect func(any) (bool, string)
+	inspect = func(current any) (bool, string) {
+		switch typed := current.(type) {
+		case map[string]any:
+			status := strings.ToUpper(stringField(typed, "status", "state"))
+			if status == "FAILED" || status == "CANCELLED" {
+				return true, stringField(typed, "failure_reason", "error", "message")
+			}
+			for _, nested := range typed {
+				if failed, reason := inspect(nested); failed {
+					return true, reason
+				}
+			}
+		case []any:
+			for _, nested := range typed {
+				if failed, reason := inspect(nested); failed {
+					return true, reason
+				}
+			}
+		}
+		return false, ""
+	}
+	return inspect(value)
 }
 
 func normalizeEndpoint(value string) string {
