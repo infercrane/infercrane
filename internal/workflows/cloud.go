@@ -688,7 +688,7 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 			if availabilityErr != nil {
 				availability = provision.Availability{State: "unknown", Message: "Provider availability check failed; continuing because stock signals are advisory", Details: availabilityErr.Error()}
 			}
-			if err = checkpoint(ctx, store, operation, step+".availability", availability.State, availability, 25, availability.Message); err != nil {
+			if err = checkpoint(ctx, store, operation, step+".availability", availabilityCheckpointStatus(availability.State), availability, 25, availability.Message); err != nil {
 				return "", "", "", err
 			}
 			if availability.State == "unavailable" {
@@ -826,6 +826,13 @@ func decodeCloudRequest(operation domain.Operation) (CloudRequest, error) {
 		return request, operations.Permanent("invalid_request", err)
 	}
 	return request, nil
+}
+
+func availabilityCheckpointStatus(state string) string {
+	if state == "unavailable" {
+		return "waiting"
+	}
+	return "succeeded"
 }
 
 func decodeDeleteCompatible(operation domain.Operation) (DeleteRequest, error) {

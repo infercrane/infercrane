@@ -151,6 +151,11 @@ func (s *Store) CheckpointClaimedOperation(ctx context.Context, id, owner string
 	if step == "" || progress < 0 || progress > 99 {
 		return errors.New("step and progress between 0 and 99 are required")
 	}
+	switch status {
+	case "pending", "running", "waiting", "succeeded", "failed", "cancelled":
+	default:
+		return fmt.Errorf("invalid operation step status %q", status)
+	}
 	if checkpoint == "" {
 		checkpoint = "{}"
 	}

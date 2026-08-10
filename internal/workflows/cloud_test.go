@@ -398,6 +398,19 @@ func TestEnsureCloudReplicaDefersCreateWhenCapacityIsUnavailable(t *testing.T) {
 	}
 }
 
+func TestAvailabilityCheckpointStatusUsesOperationLifecycleVocabulary(t *testing.T) {
+	for providerState, expected := range map[string]string{
+		"available":   "succeeded",
+		"constrained": "succeeded",
+		"unknown":     "succeeded",
+		"unavailable": "waiting",
+	} {
+		if actual := availabilityCheckpointStatus(providerState); actual != expected {
+			t.Fatalf("provider state %q mapped to %q, want %q", providerState, actual, expected)
+		}
+	}
+}
+
 func TestEnsureCloudReplicaAdoptsExistingCapacityBeforeStockCheck(t *testing.T) {
 	store := &fakeCloudStore{}
 	provider := &fakeReplicaProvider{observation: provision.Observation{Exists: true, State: "ready", Endpoint: "http://gpu:8000", Details: `{}`}}
