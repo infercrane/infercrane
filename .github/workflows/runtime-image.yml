@@ -1,0 +1,54 @@
+name: Runtime image
+
+on:
+  workflow_dispatch:
+    inputs:
+      vllm_version:
+        description: Pinned vLLM version
+        required: true
+        default: 0.8.5.post1
+  push:
+    branches: [main]
+    paths:
+      - images/vllm-runpod/Dockerfile
+      - .github/workflows/runtime-image.yml
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: runtime-image-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish-runpod-vllm:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/infercrane/vllm-runpod
+          tags: |
+            type=raw,value=v${{ inputs.vllm_version || '0.8.5.post1' }}
+            type=sha
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: images/vllm-runpod/Dockerfile
+          platforms: linux/amd64
+          push: true
+          build-args: VLLM_VERSION=${{ inputs.vllm_version || '0.8.5.post1' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true

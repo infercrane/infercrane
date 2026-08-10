@@ -82,8 +82,20 @@ func TestEnsureUsesPinnedRuntimeImageByDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(runner.launchTask, "image_id: docker:"+defaultVLLMImage) || strings.Contains(runner.launchTask, "pip install") {
+	if !strings.Contains(runner.launchTask, "image_id: docker:ghcr.io/infercrane/vllm-runpod:v"+defaultVLLMVersion) || strings.Contains(runner.launchTask, "pip install") {
 		t.Fatalf("launch task does not use the pinned default runtime image: %s", runner.launchTask)
+	}
+}
+
+func TestEnsureUsesProviderNeutralImageOutsideRunPod(t *testing.T) {
+	runner := &fakeSkyRunner{}
+	provider := SkyPilot{APIKey: "secret", Runner: runner}
+	_, err := provider.EnsureReplica(context.Background(), ReplicaSpec{ExternalKey: "prod-r0", Model: "model", Cloud: "aws", GPU: "L40S"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(runner.launchTask, "image_id: docker:"+defaultVLLMImage) {
+		t.Fatalf("launch task does not use the provider-neutral runtime image: %s", runner.launchTask)
 	}
 }
 
@@ -94,7 +106,7 @@ func TestEnsureUsesVersionedImageForExplicitRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(runner.launchTask, "image_id: docker:vllm/vllm-openai:v0.10.2") || strings.Contains(runner.launchTask, "pip install") {
+	if !strings.Contains(runner.launchTask, "image_id: docker:ghcr.io/infercrane/vllm-runpod:v0.10.2") || strings.Contains(runner.launchTask, "pip install") {
 		t.Fatalf("launch task does not use the requested runtime image: %s", runner.launchTask)
 	}
 }
@@ -126,6 +138,15 @@ func TestEnsureRelaunchesMissingOrFailedRequest(t *testing.T) {
 		if err != nil || runner.launches != 1 {
 			t.Fatalf("state=%q launches=%d err=%v", state, runner.launches, err)
 		}
+	}
+}
+
+func TestEnsureCleansResourceLeftByFailedAsyncRequest(t *testing.T) {
+	runner := &fakeSkyRunner{exists: true, requestID: "request-1", requestState: "FAILED"}
+	provider := SkyPilot{APIKey: "secret", Runner: runner}
+	_, err := provider.EnsureReplica(context.Background(), ReplicaSpec{ExternalKey: "prod-r0", RequestID: "request-1", Model: "model", Cloud: "runpod", GPU: "L40S"})
+	if err == nil || !errors.Is(err, ErrUnavailable) || runner.downs != 1 || runner.launches != 0 {
+		t.Fatalf("launches=%d downs=%d err=%v", runner.launches, runner.downs, err)
 	}
 }
 

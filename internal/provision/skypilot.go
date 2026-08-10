@@ -75,25 +75,44 @@ func (s SkyPilot) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provider
 		spec.RuntimeVersion = defaultVLLMVersion
 	}
 	resourceID := s.Handle(spec.ExternalKey).ResourceID
+	requestState, requestFound := "", false
+	if spec.RequestID != "" {
+		var requestErr error
+		requestState, requestFound, requestErr = s.requestState(ctx, spec.RequestID)
+		if requestErr != nil {
+			return ProviderHandle{}, requestErr
+		}
+	}
 	observation, err := s.observe(ctx, resourceID, spec.Port, false)
 	if err != nil {
 		return ProviderHandle{}, err
 	}
 	if observation.Exists {
+		if requestFound && (requestState == "failed" || requestState == "cancelled") {
+			// SkyPilot can leave a provider record behind when asynchronous setup
+			// fails after allocation. Remove that exact deterministic resource;
+			// the next durable retry may safely reuse the same replica intent.
+			if deleteErr := s.DeleteReplica(ctx, ProviderHandle{ResourceID: resourceID, ExternalKey: spec.ExternalKey}); deleteErr != nil {
+				return ProviderHandle{}, fmt.Errorf("%w: async request %s and cleanup failed: %v", ErrUnavailable, requestState, deleteErr)
+			}
+			return ProviderHandle{}, fmt.Errorf("%w: async request %s; stale resource cleanup submitted", ErrUnavailable, requestState)
+		}
 		return ProviderHandle{RequestID: spec.RequestID, ResourceID: resourceID, ExternalKey: spec.ExternalKey}, nil
 	}
 	if spec.RequestID != "" {
-		state, found, requestErr := s.requestState(ctx, spec.RequestID)
-		if requestErr != nil {
-			return ProviderHandle{}, requestErr
-		}
-		if found && state != "failed" && state != "cancelled" {
+		if requestFound && requestState != "failed" && requestState != "cancelled" {
 			return ProviderHandle{RequestID: spec.RequestID, ResourceID: resourceID, ExternalKey: spec.ExternalKey}, nil
 		}
 	}
 	runtimeImage := "vllm/vllm-openai:v" + spec.RuntimeVersion
 	if usesDefaultRuntime {
 		runtimeImage = defaultVLLMImage
+	}
+	if strings.EqualFold(spec.Cloud, "runpod") {
+		// RunPod Pods require their container to start the platform SSH service
+		// used by SkyPilot. The thin InferCrane image retains that contract while
+		// baking vLLM; other clouds remain on the provider-neutral official image.
+		runtimeImage = "ghcr.io/infercrane/vllm-runpod:v" + spec.RuntimeVersion
 	}
 	task := map[string]any{"resources": map[string]any{"infra": infrastructure(spec.Cloud, spec.Region), "accelerators": spec.GPU, "image_id": "docker:" + runtimeImage, "ports": []int{spec.Port}}, "run": runCommand(spec.Model, spec.ModelRevision, spec.Port, spec.RuntimeArgs)}
 	task["secrets"] = map[string]any{"INFERCRANE_WORKER_API_KEY": nil}

@@ -183,6 +183,11 @@ wait_lifecycle_idle() {
   elapsed=0
   while [ "$elapsed" -lt "$limit" ]; do
     status=$(ic status "$deployment" --output json 2>/dev/null || true)
+    if [ -z "$status" ]; then
+      # Cancellation cleanup may remove the deployment while this waiter is
+      # active. Absence is already terminal for cleanup serialization.
+      return 0
+    fi
     if [ -n "$status" ] && printf '%s' "$status" | jq -e '.active_operation == null' >/dev/null 2>&1; then
       return 0
     fi
