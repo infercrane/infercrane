@@ -1,18 +1,18 @@
 # syntax=docker/dockerfile:1.7
 
-# RunPod's base starts /start.sh, including the SSH daemon SkyPilot needs to
-# finish configuring a Pod. Pin the base by digest and install the tested vLLM
-# stack at image-build time so replicas never pip-install CUDA dependencies.
-FROM runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04@sha256:61a4aafb0094cd773f11eefa378929d5a687bd775febeb78eac62fc824141fb5
+# Keep the tested runtime byte-for-byte and add only RunPod's SSH bootstrap
+# contract. SkyPilot connects over the managed TCP mapping and starts vLLM as
+# its durable task; no Python or CUDA dependency is installed on the Pod.
+FROM vllm/vllm-openai@sha256:c48cf118e1e6e39d7790e174d6014f7af5d06f79c2d29d984d11cbe2e8d414e7
 
-ARG VLLM_VERSION=0.8.5.post1
-ARG TRANSFORMERS_VERSION=4.51.3
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends openssh-server \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /run/sshd /root/.ssh \
+    && chmod 700 /root/.ssh
 
-RUN python -m pip install --no-cache-dir \
-      "vllm==${VLLM_VERSION}" \
-      "transformers==${TRANSFORMERS_VERSION}" \
-    && python -m pip check \
-    && vllm --version
+COPY images/vllm-runpod/start-ssh.sh /usr/local/bin/infercrane-start-ssh
+RUN chmod 755 /usr/local/bin/infercrane-start-ssh
 
-# Preserve the base image ENTRYPOINT/CMD. SkyPilot connects over the RunPod
-# managed TCP mapping and starts the inference command as a durable task.
+EXPOSE 22
+ENTRYPOINT ["/usr/local/bin/infercrane-start-ssh"]
