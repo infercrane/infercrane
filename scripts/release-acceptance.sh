@@ -150,6 +150,20 @@ capture_inventory() {
   record "$1-deployments" ic deployments --output json
 }
 
+verify_provider_inventory_absent() {
+  api_key=$(tr -d '\r\n' <"$RUNPOD_KEY_FILE")
+  pods=$(curl -fsS -H "Authorization: Bearer $api_key" 'https://rest.runpod.io/v1/pods' | \
+    jq '[.[] | select((.name // "") | startswith("infercrane-")) | {id,name,desiredStatus}]')
+  endpoints=$(curl -fsS -H "Authorization: Bearer $api_key" \
+    'https://rest.runpod.io/v1/endpoints?includeWorkers=true' | \
+    jq '[.[] | select((.name // "") | startswith("infercrane-")) | {id,name,workersMin,workersMax,active_workers:([.workers[]? | select(.desiredStatus != "EXITED")] | length)}]')
+  jq -n --argjson pods "$pods" --argjson endpoints "$endpoints" \
+    '{pods:$pods,endpoints:$endpoints,verified_at:(now|todateiso8601)}' | \
+    tee "$evidence/provider-direct-after-cleanup.json"
+  [ "$(printf '%s' "$pods" | jq 'length')" -eq 0 ] || { echo "RunPod still has InferCrane pods" >&2; return 1; }
+  [ "$(printf '%s' "$endpoints" | jq 'length')" -eq 0 ] || { echo "RunPod still has InferCrane endpoints" >&2; return 1; }
+}
+
 wait_ready() {
   deployment=$1
   limit=${INFERCRANE_ACCEPTANCE_READY_TIMEOUT_SECONDS:-2700}
@@ -364,8 +378,9 @@ run_cleanup() {
   delete_if_present "$ELASTIC_NAME" "$ELASTIC_NAME-delete"
   delete_if_present "$SERVERLESS_NAME" "$SERVERLESS_NAME-delete"
   capture_inventory after-cleanup
+  verify_provider_inventory_absent
   compose down
-  echo "InferCrane cleanup completed. Confirm zero run-owned pods, endpoints, and workers in RunPod before removing volumes."
+  echo "InferCrane cleanup completed and direct RunPod inventory is empty."
 }
 
 run_report() {
@@ -383,7 +398,12 @@ run_report() {
     echo "## Evidence files"
     find "$evidence" -maxdepth 1 -type f -print | sort | sed 's#^.*/#- #'
     echo
-    echo "Provider inventory confirmation: PENDING OPERATOR CHECK"
+    if [ -f "$evidence/provider-direct-after-cleanup.json" ] && \
+      jq -e '.pods == [] and .endpoints == []' "$evidence/provider-direct-after-cleanup.json" >/dev/null 2>&1; then
+      echo "Provider inventory confirmation: VERIFIED — zero InferCrane pods and endpoints"
+    else
+      echo "Provider inventory confirmation: PENDING OPERATOR CHECK"
+    fi
   } >"$run_dir/report.md"
   echo "$run_dir/report.md"
 }
