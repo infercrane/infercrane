@@ -58,9 +58,11 @@ new_run() {
   run_dir="$state_root/$run_id"
   mkdir -p "$run_dir/evidence" "$run_dir/bin"
   chmod 700 "$state_root" "$run_dir" "$run_dir/evidence"
+  candidate_commit=$(git -C "$root" rev-parse HEAD)
   printf '%s\n' "$run_id" >"$current_file"
   cat >"$run_dir/state.env" <<EOF
 RUN_ID='$run_id'
+CANDIDATE_COMMIT='$candidate_commit'
 ELASTIC_NAME='qwen-elastic-$run_id'
 SERVERLESS_NAME='qwen-serverless-$run_id'
 MODEL='$model'
@@ -598,7 +600,8 @@ run_cleanup() {
 
 run_report() {
   load_run
-  commit=$(git -C "$root" rev-parse HEAD)
+  commit=${INFERCRANE_ACCEPTANCE_EVIDENCE_COMMIT:-${CANDIDATE_COMMIT:-$(git -C "$root" rev-parse HEAD)}}
+  case "$commit" in *[!0-9a-f]*) echo "invalid acceptance evidence commit" >&2; exit 1;; esac
   {
     echo "# InferCrane acceptance run $RUN_ID"
     echo

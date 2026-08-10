@@ -15,7 +15,8 @@ The resumable operator harness reduces the normal workflow to a few guarded comm
 `preflight` is read-only. Paid workflows require the explicit approval flag, generate stable names
 and idempotency keys, and retain sanitized evidence under the ignored
 `.infercrane/acceptance/` directory. `cleanup` resumes those same run-owned deployments instead of
-guessing resource names. The harness automates smoke coverage; the controlled disruption and timed
+guessing resource names. Each new run pins the candidate commit in its state and report so later
+harness edits cannot misattribute earlier infrastructure evidence. The harness automates smoke coverage; the controlled disruption and timed
 provider observations below remain release gates and may not be inferred from a successful smoke
 run.
 
