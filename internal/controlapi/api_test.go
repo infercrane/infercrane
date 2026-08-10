@@ -220,6 +220,34 @@ func TestScalingDecisionsAreReadThroughTenantAPI(t *testing.T) {
 	}
 }
 
+func TestLifecycleStatusSeparatesServingFromConvergence(t *testing.T) {
+	resolved := domain.ResolvedDeployment{
+		Deployment: domain.Deployment{ID: "dep", ActiveRevisionID: "rev-1", CandidateRevisionID: "rev-2", MinReplicas: 1},
+		Targets: []domain.Target{
+			{ID: "ready", Health: "healthy"},
+			{ID: "starting", Health: "starting"},
+		},
+	}
+	replicas := []domain.Replica{
+		{RevisionID: "rev-1", LifecycleState: "active", Health: "healthy"},
+		{RevisionID: "rev-1", LifecycleState: "starting", Health: "starting"},
+		{RevisionID: "rev-old", LifecycleState: "draining", Health: "healthy"},
+	}
+	operation := domain.Operation{ID: "op-scale", Kind: "deployment.scale", RequestJSON: `{"desired_replicas":2}`}
+	status := deploymentLifecycleStatus(resolved, replicas, []domain.DeploymentRevision{{ID: "rev-2", Status: "candidate"}}, operation, true)
+	if status.ServingState != "serving" || status.ConvergenceState != "converging" || status.ReadyReplicas != 1 || status.DesiredReplicas != 2 || status.ProvisioningReplicas != 1 || status.DrainingReplicas != 1 || status.CandidateState != "candidate" || status.BlockingOperationID != "op-scale" {
+		t.Fatalf("unexpected status: %+v", status)
+	}
+}
+
+func TestLifecycleStatusReportsReadyBeforeRoutePublication(t *testing.T) {
+	resolved := domain.ResolvedDeployment{Deployment: domain.Deployment{ID: "dep", ActiveRevisionID: "rev-1", MinReplicas: 1}}
+	status := deploymentLifecycleStatus(resolved, []domain.Replica{{RevisionID: "rev-1", LifecycleState: "active", Health: "healthy"}}, nil, domain.Operation{}, false)
+	if status.ServingState != "ready" || status.ConvergenceState != "converged" || status.ReadyReplicas != 1 {
+		t.Fatalf("unexpected status: %+v", status)
+	}
+}
+
 func TestBenchmarkRunsThroughControlPlaneAndPersistsIdentity(t *testing.T) {
 	spec := `{"model":"Qwen/Qwen3-8B","model_revision":"commit","runtime":"vllm","runtime_version":"0.10","compute_mode":"elastic","gpu":"L40S","region":"EU"}`
 	store := &fakeStore{resolved: domain.ResolvedDeployment{Deployment: domain.Deployment{ID: "dep", Name: "qwen", ActiveRevisionID: "rev"}, Targets: []domain.Target{{Provider: "runpod"}}}, revisions: []domain.DeploymentRevision{{ID: "rev", SpecJSON: spec}}, artifact: domain.ModelArtifact{ID: "artifact", Repository: "Qwen/Qwen3-8B", ModelIdentity: "Qwen/Qwen3-8B@commit"}}

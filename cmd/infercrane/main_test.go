@@ -436,6 +436,21 @@ func TestJSONOutputRendersStructuredControlPlaneFailure(t *testing.T) {
 	}
 }
 
+func TestStatusShowsServingAndConvergenceSeparately(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"deployment":{"name":"qwen","model":"Qwen/Qwen3-8B","runtime":"vllm","observed_state":"degraded","min_replicas":1,"active_revision_id":"rev-1"},"targets":[{"health":"healthy"},{"health":"starting"}],"replicas":[{"health":"healthy"},{"health":"starting"}],"lifecycle_status":{"serving_state":"serving","convergence_state":"converging","candidate_state":"none","ready_replicas":1,"desired_replicas":2,"provisioning_replicas":1,"draining_replicas":0,"blocking_operation_id":"op-scale","blocking_operation_kind":"deployment.scale"},"request_stats":{}}`))
+	}))
+	defer server.Close()
+
+	output, err := captureStdout(t, func() error {
+		return statusCommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, []string{"qwen"})
+	})
+	if err != nil || !strings.Contains(output, "Serving      serving") || !strings.Contains(output, "Convergence  converging") || !strings.Contains(output, "Ready        1/2") || !strings.Contains(output, "Operation    op-scale (deployment.scale)") {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+}
+
 func TestBenchmarkParsesFlagsAfterDeploymentName(t *testing.T) {
 	var path string
 	var body map[string]any

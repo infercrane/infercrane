@@ -46,6 +46,13 @@ stability windows, and cooldowns, and persist every evaluation. Capacity changes
 durable scale operation. Scale-down first withdraws the worker set and waits for a matching router
 generation before provider deletion. Real RunPod scale acceptance remains a release gate.
 
+Deployment reads expose a derived `lifecycle_status` with independent serving and convergence
+states. Serving is based on the currently published healthy route. Convergence covers active
+durable work plus provisioning and draining replicas. This prevents a healthy active revision from
+being labelled unavailable merely because candidate or scale-up capacity is still starting. The
+same object reports ready versus desired capacity, candidate state, and the exact blocking
+operation without replacing raw replica, target, or operation data in `inspect`.
+
 Queued work uses PostgreSQL leases and `SKIP LOCKED` so concurrent replicas cannot own the same
 operation. The durable state model distinguishes pending, leased, running, waiting, cancelling,
 cancelled, failed, and succeeded work. Every claim increments a lease generation; heartbeat,

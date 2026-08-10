@@ -4,7 +4,10 @@ Do not create the release tag until every evidence field is linked to a durable 
 Use the [release acceptance record](release-acceptance.md) for the requirement-by-requirement manual
 run. It is intentionally left pending until real evidence is attached.
 
-- [ ] `make verify`, `make deadcode`, `make audit`, and `make test-container` pass from a clean checkout.
+- [ ] `make verify`, `make deadcode`, `make audit`, `make test-container`, and
+      `make test-production-config` pass from a clean checkout.
+- [ ] `make release-check` passes; `make snapshot` produces all four archives, checksums, and
+      archive SBOMs with `syft` installed.
 - [ ] Gate 0 elastic RunPod lifecycle acceptance passes, including restart/disconnect/failure recovery.
 - [ ] Serverless zero-to-worker, warm, scale-to-zero, second cold start, streaming, cancellation, and deletion pass.
 - [ ] Provider inventory proves zero leaked billable resources after each demo.

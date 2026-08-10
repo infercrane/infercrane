@@ -683,6 +683,20 @@ type deploymentView struct {
 	ReleaseGuardPolicy      domain.ReleaseGuardPolicy `json:"release_guard_policy"`
 	ReleaseGuardEvaluations []releaseGuardView        `json:"release_guard_evaluations"`
 	ActiveOperation         *domain.Operation         `json:"active_operation,omitempty"`
+	LifecycleStatus         lifecycleStatusView       `json:"lifecycle_status"`
+}
+
+type lifecycleStatusView struct {
+	ServingState          string `json:"serving_state"`
+	ConvergenceState      string `json:"convergence_state"`
+	CandidateState        string `json:"candidate_state"`
+	ReadyReplicas         int    `json:"ready_replicas"`
+	DesiredReplicas       int    `json:"desired_replicas"`
+	ProvisioningReplicas  int    `json:"provisioning_replicas"`
+	DrainingReplicas      int    `json:"draining_replicas"`
+	UnhealthyTargets      int    `json:"unhealthy_targets"`
+	BlockingOperationID   string `json:"blocking_operation_id"`
+	BlockingOperationKind string `json:"blocking_operation_kind"`
 }
 
 type releaseGuardView struct {
@@ -784,7 +798,15 @@ func statusCommand(ctx context.Context, cfg config.Config, args []string) error 
 				}
 			}
 			d := view.Deployment
-			fmt.Printf("%s  %s\nModel       %s\nRuntime     %s\nReplicas    %d\nHealthy     %d\nRouting     %s\nRevision    %s\nRequests/s  %.2f\nError rate  %.1f%%\n", d.Name, terminalStatus(d.ObservedState), d.Model, d.Runtime, capacity, healthy, d.RoutingStrategy, d.ActiveRevisionID, view.RequestStats.RequestsPerSecond, view.RequestStats.ErrorRate*100)
+			lifecycle := view.LifecycleStatus
+			if lifecycle.ServingState == "" { // Compatibility with older control planes.
+				lifecycle.ServingState, lifecycle.ConvergenceState = d.ObservedState, "unknown"
+				lifecycle.ReadyReplicas, lifecycle.DesiredReplicas = healthy, d.MinReplicas
+			}
+			fmt.Printf("%s  %s · %s\nModel        %s\nRuntime      %s\nServing      %s\nConvergence  %s\nReady        %d/%d\nCapacity     %d\nProvisioning %d\nDraining     %d\nCandidate    %s\nRouting      %s\nRevision     %s\nRequests/s   %.2f\nError rate   %.1f%%\n", d.Name, terminalStatus(lifecycle.ServingState), terminalStatus(lifecycle.ConvergenceState), d.Model, d.Runtime, lifecycle.ServingState, lifecycle.ConvergenceState, lifecycle.ReadyReplicas, lifecycle.DesiredReplicas, capacity, lifecycle.ProvisioningReplicas, lifecycle.DrainingReplicas, lifecycle.CandidateState, d.RoutingStrategy, d.ActiveRevisionID, view.RequestStats.RequestsPerSecond, view.RequestStats.ErrorRate*100)
+			if lifecycle.BlockingOperationID != "" {
+				fmt.Printf("Operation    %s (%s)\n", lifecycle.BlockingOperationID, lifecycle.BlockingOperationKind)
+			}
 		} else {
 			return errors.New("--output must be human or json")
 		}

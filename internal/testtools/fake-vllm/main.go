@@ -48,6 +48,14 @@ func main() {
 			fmt.Fprint(w, "data: [DONE]\n\n")
 			return
 		}
+		if tools, ok := body["tools"].([]any); ok && len(tools) > 0 {
+			write(w, map[string]any{"id": "chatcmpl-fake", "object": "chat.completion", "model": body["model"], "choices": []any{map[string]any{"index": 0, "message": map[string]any{"role": "assistant", "content": nil, "tool_calls": []any{map[string]any{"id": "call_fake", "type": "function", "function": map[string]string{"name": "weather", "arguments": `{"city":"Berlin"}`}}}}, "finish_reason": "tool_calls"}}})
+			return
+		}
+		if format, ok := body["response_format"].(map[string]any); ok && format["type"] == "json_schema" {
+			write(w, map[string]any{"id": "chatcmpl-fake", "object": "chat.completion", "model": body["model"], "choices": []any{map[string]any{"index": 0, "message": map[string]string{"role": "assistant", "content": `{"answer":"ok"}`}, "finish_reason": "stop"}}})
+			return
+		}
 		write(w, map[string]any{"id": "chatcmpl-fake", "object": "chat.completion", "model": body["model"], "choices": []any{map[string]any{"index": 0, "message": map[string]string{"role": "assistant", "content": "response from " + *worker}, "finish_reason": "stop"}}})
 	})
 	handler := http.Handler(mux)

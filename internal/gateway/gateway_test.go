@@ -64,6 +64,37 @@ func TestCompletionRewritesAlias(t *testing.T) {
 	}
 }
 
+func TestCompletionPreservesOpenAIParametersAndStructuredTools(t *testing.T) {
+	client := &http.Client{Transport: roundTripper(func(r *http.Request) (*http.Response, error) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["model"] != "upstream-model" || body["temperature"] != 0.25 || body["max_tokens"] != float64(64) || body["tool_choice"] != "auto" {
+			t.Fatalf("scalar parameters changed: %#v", body)
+		}
+		if _, ok := body["tools"].([]any); !ok {
+			t.Fatalf("tools changed: %#v", body["tools"])
+		}
+		format, ok := body["response_format"].(map[string]any)
+		if !ok || format["type"] != "json_schema" {
+			t.Fatalf("response_format changed: %#v", body["response_format"])
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"choices":[]}`))}, nil
+	})}
+	directory := routes.New()
+	directory.Put(routes.Snapshot{DeploymentID: "d1", Alias: "alias", UpstreamModel: "upstream-model", RouterURL: "http://router"})
+	handler := (&Gateway{Routes: directory, APIKey: "secret", Client: client}).Handler()
+	requestBody := `{"model":"alias","messages":[],"temperature":0.25,"max_tokens":64,"tool_choice":"auto","tools":[{"type":"function","function":{"name":"weather","parameters":{"type":"object"}}}],"response_format":{"type":"json_schema","json_schema":{"name":"answer","schema":{"type":"object"}}}}`
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(requestBody))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestCompletionRecordsStreamingTelemetry(t *testing.T) {
 	client := &http.Client{Transport: roundTripper(func(*http.Request) (*http.Response, error) {
 		body := "data: {\"model\":\"Qwen/Qwen3-8B\",\"choices\":[]}\n\n" +

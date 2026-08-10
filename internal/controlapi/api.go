@@ -659,10 +659,75 @@ func (a API) deployment(w http.ResponseWriter, r *http.Request) {
 		guardData = append(guardData, releaseGuardResponse(evaluation))
 	}
 	response := map[string]any{"deployment": deploymentResponse(resolved.Deployment), "targets": targets, "replicas": replicaData, "revisions": revisionData, "model_artifacts": artifactData, "request_stats": stats, "cold_start_stats": coldStarts, "release_guard_policy": guardPolicy, "release_guard_evaluations": guardData}
+	response["lifecycle_status"] = deploymentLifecycleStatus(resolved, replicas, revisions, activeOperation, operationErr == nil)
 	if operationErr == nil {
 		response["active_operation"] = operationResponse(activeOperation)
 	}
 	writeJSON(w, 200, response)
+}
+
+type lifecycleStatus struct {
+	ServingState          string `json:"serving_state"`
+	ConvergenceState      string `json:"convergence_state"`
+	CandidateState        string `json:"candidate_state"`
+	ReadyReplicas         int    `json:"ready_replicas"`
+	DesiredReplicas       int    `json:"desired_replicas"`
+	ProvisioningReplicas  int    `json:"provisioning_replicas"`
+	DrainingReplicas      int    `json:"draining_replicas"`
+	UnhealthyTargets      int    `json:"unhealthy_targets"`
+	BlockingOperationID   string `json:"blocking_operation_id,omitempty"`
+	BlockingOperationKind string `json:"blocking_operation_kind,omitempty"`
+}
+
+func deploymentLifecycleStatus(resolved domain.ResolvedDeployment, replicas []domain.Replica, revisions []domain.DeploymentRevision, operation domain.Operation, hasOperation bool) lifecycleStatus {
+	status := lifecycleStatus{ServingState: "unavailable", ConvergenceState: "converged", CandidateState: "none", DesiredReplicas: resolved.Deployment.MinReplicas}
+	for _, target := range resolved.Targets {
+		if target.Health == "healthy" {
+			status.ServingState = "serving"
+		} else {
+			status.UnhealthyTargets++
+		}
+	}
+	for _, replica := range replicas {
+		if replica.RevisionID == resolved.Deployment.ActiveRevisionID || resolved.Deployment.ActiveRevisionID == "" {
+			if replica.Health == "healthy" && (replica.LifecycleState == "active" || replica.LifecycleState == "ready") {
+				status.ReadyReplicas++
+			}
+		}
+		switch replica.LifecycleState {
+		case "pending", "provisioning", "starting":
+			status.ProvisioningReplicas++
+		case "draining", "deleting":
+			status.DrainingReplicas++
+		}
+	}
+	if status.ServingState == "unavailable" && status.ReadyReplicas > 0 {
+		// Route publication can lag a freshly healthy replica by one reconciliation
+		// interval. Report it as ready but not yet serving, not as unhealthy.
+		status.ServingState = "ready"
+	}
+	for _, revision := range revisions {
+		if revision.ID == resolved.Deployment.CandidateRevisionID {
+			status.CandidateState = revision.Status
+			break
+		}
+	}
+	if hasOperation {
+		status.ConvergenceState = "converging"
+		status.BlockingOperationID = operation.ID
+		status.BlockingOperationKind = operation.Kind
+		var request struct {
+			DesiredReplicas int `json:"desired_replicas"`
+		}
+		if json.Unmarshal([]byte(operation.RequestJSON), &request) == nil && request.DesiredReplicas > 0 {
+			status.DesiredReplicas = request.DesiredReplicas
+		}
+	} else if status.ProvisioningReplicas > 0 || status.DrainingReplicas > 0 {
+		status.ConvergenceState = "converging"
+	} else if status.UnhealthyTargets > 0 {
+		status.ConvergenceState = "degraded"
+	}
+	return status
 }
 func (a API) deploymentEvents(w http.ResponseWriter, r *http.Request) {
 	principal := r.Context().Value(identityKey{}).(domain.Principal)

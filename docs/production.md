@@ -18,6 +18,23 @@ Required configuration:
   when `RUNPOD_API_KEY` is unset, avoiding secret exposure in container environment metadata.
 The container user must have read permission on the mounted file.
 
+For a single-host first installation, copy `.env.production.example` to a private path, replace
+every example secret and URL, then render and start the maintained production stack:
+
+```sh
+docker compose --env-file /private/path/infercrane.env \
+  -f compose.production.yaml config --quiet
+docker compose --env-file /private/path/infercrane.env \
+  -f compose.production.yaml up -d
+```
+
+Unlike `compose.yaml`, this stack contains no fake workers or development router. Unlike
+`compose.runpod-acceptance.yaml`, it contains no fault proxy or acceptance credential. PostgreSQL
+is private to the Compose network; only the InferCrane API port is published. The bundled database
+uses `sslmode=disable` only across that private bridge. Use managed PostgreSQL with TLS, external
+secret management, and multiple control-plane instances for a production service that must survive
+a host failure.
+
 The real RunPod qualification stack is isolated from the development Compose stack. It persists
 PostgreSQL, RunPod configuration, and SkyPilot state across control-plane restarts:
 
@@ -71,6 +88,10 @@ not performance or reliability substitutes for vLLM and vLLM Router.
 Before rollout, qualify the exact PostgreSQL, vLLM, vLLM Router, model, GPU, and provider versions
 with sustained load, streaming cancellation, worker loss, database failover, pod termination,
 and soak tests. Capacity limits must be based on those measurements rather than defaults.
+
+Release maintainers can validate packaging metadata without publishing by running
+`make release-check`. With `syft` installed, `make snapshot` creates the four local archives,
+checksums, and archive SBOMs under `dist/`. Neither command pushes a tag, image, or release.
 
 The control-plane API accepts the bootstrap bearer secret or hashed tenant-scoped credentials:
 

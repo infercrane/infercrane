@@ -1,0 +1,54 @@
+name: infercrane
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: infercrane
+      POSTGRES_USER: infercrane
+      POSTGRES_PASSWORD: ${INFERCRANE_POSTGRES_PASSWORD:?set INFERCRANE_POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U infercrane -d infercrane"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks: [control]
+
+  infercrane:
+    image: ${INFERCRANE_IMAGE:-ghcr.io/infercrane/infercrane:v0.1.0-rc.1}
+    restart: unless-stopped
+    environment:
+      INFERCRANE_ENV: production
+      INFERCRANE_API_KEY: ${INFERCRANE_API_KEY:?set INFERCRANE_API_KEY}
+      INFERCRANE_DATABASE_URL: postgres://infercrane:${INFERCRANE_POSTGRES_PASSWORD:?set INFERCRANE_POSTGRES_PASSWORD}@postgres:5432/infercrane?sslmode=disable
+      INFERCRANE_URL: ${INFERCRANE_URL:?set INFERCRANE_URL}
+      INFERCRANE_INSTANCE_ID: ${INFERCRANE_INSTANCE_ID:-compose-1}
+      INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID: ${INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID:-}
+      RUNPOD_API_KEY_FILE: /run/secrets/runpod-api-key
+    ports:
+      - "${INFERCRANE_PORT:-8080}:8080"
+    volumes:
+      - ${RUNPOD_KEY_FILE:?set RUNPOD_KEY_FILE}:/run/secrets/runpod-api-key:ro
+      - skypilot-state:/home/app/.sky
+      - runpod-state:/home/app/.runpod
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [control]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/readyz', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 20s
+
+networks:
+  control:
+
+volumes:
+  postgres-data:
+  runpod-state:
+  skypilot-state:

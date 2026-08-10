@@ -164,7 +164,7 @@ Supported v0.1 strategies are `round-robin`, `consistent-hash`, `power-of-two`, 
 | Command | Purpose |
 |---|---|
 | `deployments [--output json]` | List logical deployments |
-| `status DEPLOYMENT [--watch]` | Show health, readiness, traffic, revisions, and active operation |
+| `status DEPLOYMENT [--watch]` | Show serving health separately from convergence, readiness, traffic, revisions, and the blocking operation |
 | `events DEPLOYMENT` | Show ordered durable deployment events |
 | `logs DEPLOYMENT [--follow]` | Stream a filtered durable operational timeline |
 | `request DEPLOYMENT` | Send a buffered or streaming OpenAI-compatible inference request |
@@ -180,6 +180,13 @@ infercrane logs qwen-prod --type runtime --since 15m
 infercrane events qwen-prod --output json
 infercrane inspect qwen-prod
 ```
+
+`status` deliberately separates two concerns. `Serving` answers whether the current route can
+accept inference traffic. `Convergence` answers whether desired capacity, a rollout, or deletion is
+still progressing. A deployment can therefore be `serving · converging` while a provider allocates
+another replica; this is not reported as an outage. JSON output exposes the same stable fields under
+`lifecycle_status`, including ready and desired replica counts, provisioning and draining counts,
+candidate state, and the blocking durable operation.
 
 Deterministic explanations use only persisted state and measurements:
 

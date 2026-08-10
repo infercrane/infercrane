@@ -47,6 +47,16 @@ grep -qi '^Content-Type: text/event-stream' "$stream_headers"
 grep -q '^data: {' "$stream_body"
 grep -q '^data: \[DONE\]' "$stream_body"
 
+tool_response=$(curl -fsS -H "Authorization: Bearer $api_key" -H 'Content-Type: application/json' \
+  -d "{\"model\":\"$model\",\"messages\":[{\"role\":\"user\",\"content\":\"weather\"}],\"tool_choice\":\"auto\",\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"weather\",\"parameters\":{\"type\":\"object\"}}}]}" \
+  "$base_url/v1/chat/completions")
+printf '%s' "$tool_response" | jq -e '.choices[0].message.tool_calls[0].function.name == "weather" and .choices[0].finish_reason == "tool_calls"' >/dev/null
+
+structured_response=$(curl -fsS -H "Authorization: Bearer $api_key" -H 'Content-Type: application/json' \
+  -d "{\"model\":\"$model\",\"messages\":[{\"role\":\"user\",\"content\":\"answer\"}],\"response_format\":{\"type\":\"json_schema\",\"json_schema\":{\"name\":\"answer\",\"schema\":{\"type\":\"object\",\"properties\":{\"answer\":{\"type\":\"string\"}},\"required\":[\"answer\"]}}}}" \
+  "$base_url/v1/chat/completions")
+printf '%s' "$structured_response" | jq -e '.choices[0].message.content | fromjson | .answer == "ok"' >/dev/null
+
 docker compose exec -T infercrane infercrane plan Qwen/Qwen3-8B --targets gpu-a,gpu-b --output json >/dev/null
 docker compose exec -T infercrane infercrane doctor
 
