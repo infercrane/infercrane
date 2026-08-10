@@ -28,7 +28,7 @@ const defaultVLLMImage = "vllm/vllm-openai@sha256:c48cf118e1e6e39d7790e174d6014f
 // The RunPod variant adds only the SSH bootstrap contract required by
 // SkyPilot. Pin it independently so a release never depends on a mutable GHCR
 // tag after qualification.
-const defaultRunPodVLLMImage = "ghcr.io/infercrane/vllm-runpod@sha256:756b25ad9eba581c0c2525102a266b7dc6735dc2fc967e74102e7b3c56b9cd21"
+const defaultRunPodVLLMImage = "ghcr.io/infercrane/vllm-runpod@sha256:c9d8303ad7c36e3b25a160c892626be8b0dde8f5954b11095c33d2bca31a9711"
 
 type ReplicaSpec struct {
 	ExternalKey                                                    string
