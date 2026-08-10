@@ -101,21 +101,29 @@ record() {
   shift
   started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   started_epoch=$(date +%s)
-  stream="$evidence/$name.stream"
-  rm -f "$stream"
-  mkfifo "$stream"
+  output_stream="$evidence/$name-output.stream"
+  progress_stream="$evidence/$name-progress.stream"
+  rm -f "$output_stream" "$progress_stream"
+  mkfifo "$output_stream" "$progress_stream"
   echo "==> $name (started $started_at)"
-  tee "$evidence/$name.log" <"$stream" &
-  tee_pid=$!
-  if "$@" >"$stream" 2>&1; then
+  tee "$evidence/$name.log" <"$output_stream" >/dev/null &
+  output_tee_pid=$!
+  tee "$evidence/$name-progress.log" <"$progress_stream" >&2 &
+  progress_tee_pid=$!
+  if "$@" >"$output_stream" 2>"$progress_stream"; then
     status=0
   else
     status=$?
   fi
-  wait "$tee_pid"
-  rm -f "$stream"
+  wait "$output_tee_pid"
+  wait "$progress_tee_pid"
+  rm -f "$output_stream" "$progress_stream"
   elapsed=$(( $(date +%s) - started_epoch ))
   echo "<== $name (exit $status, ${elapsed}s)"
+  if [ "$status" -ne 0 ]; then
+    echo "Last output (full log: $evidence/$name.log):" >&2
+    tail -n 20 "$evidence/$name.log" >&2
+  fi
   return "$status"
 }
 
@@ -143,7 +151,14 @@ require_paid_approval() {
 
 start_stack() {
   require_key
-  compose up --build -d
+  started_epoch=$(date +%s)
+  bootstrap_log="$evidence/local-control-plane.log"
+  echo "==> local-control-plane (preparing Docker services)"
+  if ! compose up --build -d >"$bootstrap_log" 2>&1; then
+    echo "local control plane failed; last output (full log: $bootstrap_log):" >&2
+    tail -n 40 "$bootstrap_log" >&2
+    return 1
+  fi
   attempt=0
   until curl -fsS "http://127.0.0.1:${INFERCRANE_ACCEPTANCE_PORT:-18001}/readyz" >/dev/null 2>&1; do
     attempt=$((attempt + 1))
@@ -154,6 +169,7 @@ start_stack() {
   INFERCRANE_CONFIG="$config_file" "$cli" init --context acceptance \
     --url "http://127.0.0.1:${INFERCRANE_ACCEPTANCE_PORT:-18001}" \
     --api-key infercrane-runpod-acceptance-key >/dev/null
+  echo "<== local-control-plane (ready, $(( $(date +%s) - started_epoch ))s)"
 }
 
 ensure_stack() {
@@ -183,9 +199,10 @@ verify_provider_inventory_absent() {
     jq '[.[] | select((.name // "") | startswith("infercrane-")) | {id,name,workersMin,workersMax,active_workers:([.workers[]? | select(.desiredStatus != "EXITED")] | length)}]')
   jq -n --argjson pods "$pods" --argjson endpoints "$endpoints" \
     '{pods:$pods,endpoints:$endpoints,verified_at:(now|todateiso8601)}' | \
-    tee "$evidence/provider-direct-after-cleanup.json"
+    tee "$evidence/provider-direct-after-cleanup.json" >/dev/null
   [ "$(printf '%s' "$pods" | jq 'length')" -eq 0 ] || { echo "RunPod still has InferCrane pods" >&2; return 1; }
   [ "$(printf '%s' "$endpoints" | jq 'length')" -eq 0 ] || { echo "RunPod still has InferCrane endpoints" >&2; return 1; }
+  echo "Provider inventory verified clean · pods 0 · endpoints 0"
 }
 
 wait_ready() {
@@ -601,7 +618,12 @@ run_cleanup() {
   delete_if_present "$SERVERLESS_NAME" "$SERVERLESS_NAME-delete"
   capture_inventory after-cleanup
   verify_provider_inventory_absent
-  compose down
+  echo "==> local-control-plane (stopping Docker services)"
+  if ! compose down >>"$evidence/local-control-plane.log" 2>&1; then
+    echo "local control-plane shutdown failed; inspect $evidence/local-control-plane.log" >&2
+    return 1
+  fi
+  echo "<== local-control-plane (stopped)"
   echo "InferCrane cleanup completed and direct RunPod inventory is empty."
 }
 

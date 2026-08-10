@@ -17,8 +17,8 @@ and idempotency keys, and retain sanitized evidence under the ignored
 `.infercrane/acceptance/` directory. `cleanup` resumes those same run-owned deployments instead of
 guessing resource names. Each new run pins the candidate commit in its state and report so later
 harness edits cannot misattribute earlier infrastructure evidence. Every recorded stage streams
-output to the terminal while writing the same sanitized log, and prints UTC start time, exit status,
-and elapsed seconds. The harness automates smoke coverage; the controlled disruption and timed
+progress to the terminal while keeping machine-readable stdout in `NAME.log` and the human timeline
+in `NAME-progress.log`; it also prints UTC start time, exit status, and elapsed seconds. The harness automates smoke coverage; the controlled disruption and timed
 provider observations below remain release gates and may not be inferred from a successful smoke
 run.
 

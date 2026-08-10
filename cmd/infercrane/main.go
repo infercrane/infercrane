@@ -592,7 +592,10 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 		return fmt.Errorf("%w; safe retry key: %s", err, *idempotencyKey)
 	}
 	if *wait {
-		operation, err := waitForOperationWithin(ctx, *waitTimeout, cfg, response.Operation.ID, *output == "human")
+		if *output == "human" {
+			fmt.Printf("Deployment  %s\nOperation   %s\nStatus      %s\n\nYou can close this terminal safely. Resume with:\n  infercrane operation watch %s\n\n", *name, response.Operation.ID, terminalStatus(response.Operation.Status), response.Operation.ID)
+		}
+		operation, err := waitForOperationWithin(ctx, *waitTimeout, cfg, response.Operation.ID, true)
 		if err != nil {
 			return err
 		}
@@ -606,7 +609,7 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 		if response.Operation.Status == "succeeded" {
 			fmt.Printf("\nNext\n  infercrane request %s --message \"Hello\"\n  infercrane status %s\n", *name, *name)
 		} else {
-			fmt.Printf("\nFollow progress\n  infercrane status %s --watch\n  infercrane events %s\n", *name, *name)
+			fmt.Printf("\nFollow progress\n  infercrane operation watch %s\n  infercrane status %s --watch\n  infercrane events %s\n", response.Operation.ID, *name, *name)
 		}
 	}
 	_ = operationKind // deploy/apply share API semantics; retained for command UX.
@@ -872,7 +875,10 @@ func deleteAPICommand(ctx context.Context, cfg config.Config, args []string) err
 		return fmt.Errorf("%w; safe retry key: %s", err, *idempotencyKey)
 	}
 	if *wait {
-		operation, err := waitForOperationWithin(ctx, *waitTimeout, cfg, response.Operation.ID, *output == "human")
+		if *output == "human" {
+			fmt.Printf("Deployment  %s\nOperation   %s\nStatus      %s\n\nYou can close this terminal safely. Resume with:\n  infercrane operation watch %s\n\n", args[0], response.Operation.ID, terminalStatus(response.Operation.Status), response.Operation.ID)
+		}
+		operation, err := waitForOperationWithin(ctx, *waitTimeout, cfg, response.Operation.ID, true)
 		if err != nil {
 			return err
 		}
@@ -972,15 +978,16 @@ func (e *ControlError) Error() string {
 func waitForOperation(ctx context.Context, cfg config.Config, id string, printProgress bool) (domain.Operation, error) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
-	lastProgress, lastMessage := -1, ""
+	lastSignature := ""
 	for {
 		var operation domain.Operation
 		if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/operations/"+url.PathEscape(id), "", nil, &operation); err != nil {
 			return domain.Operation{}, err
 		}
-		if printProgress && (operation.Progress != lastProgress || operation.Message != lastMessage) {
-			fmt.Printf("Progress    %d%%  %s\n", operation.Progress, operation.Message)
-			lastProgress, lastMessage = operation.Progress, operation.Message
+		signature := fmt.Sprintf("%s:%d:%d:%s", operation.Status, operation.Progress, operation.Attempt, operation.Message)
+		if printProgress && signature != lastSignature {
+			fmt.Fprintln(os.Stderr, renderOperationProgress(operation, time.Now()))
+			lastSignature = signature
 		}
 		switch operation.Status {
 		case "succeeded":
@@ -1013,7 +1020,7 @@ func waitForOperationWithin(parent context.Context, timeout time.Duration, cfg c
 
 func operationCommand(ctx context.Context, cfg config.Config, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: infercrane operation ID | operation cancel ID")
+		return errors.New("usage: infercrane operation ID | operation watch ID | operation cancel ID")
 	}
 	if args[0] == "cancel" {
 		if len(args) != 2 {
@@ -1025,16 +1032,35 @@ func operationCommand(ctx context.Context, cfg config.Config, args []string) err
 		fmt.Printf("cancellation requested for operation %s\n", args[1])
 		return nil
 	}
+	watch := false
+	operationID := args[0]
+	flagArgs := args[1:]
+	if args[0] == "watch" {
+		if len(args) < 2 {
+			return errors.New("usage: infercrane operation watch ID [--output human|json] [--wait-timeout DURATION]")
+		}
+		watch, operationID, flagArgs = true, args[1], args[2:]
+	}
 	fs := flag.NewFlagSet("operation", flag.ContinueOnError)
 	output := fs.String("output", "human", "human or json")
-	if err := fs.Parse(args[1:]); err != nil {
+	waitTimeout := fs.Duration("wait-timeout", 0, "stop watching locally after this duration without cancelling the operation")
+	if err := fs.Parse(flagArgs); err != nil {
 		return err
 	}
 	if err := validateOutput(*output); err != nil {
 		return err
 	}
+	if *waitTimeout < 0 || (*waitTimeout > 0 && !watch) {
+		return errors.New("--wait-timeout must be non-negative and requires operation watch")
+	}
 	var op domain.Operation
-	if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/operations/"+url.PathEscape(args[0]), "", nil, &op); err != nil {
+	if watch {
+		var err error
+		op, err = waitForOperationWithin(ctx, *waitTimeout, cfg, operationID, true)
+		if err != nil {
+			return err
+		}
+	} else if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/operations/"+url.PathEscape(operationID), "", nil, &op); err != nil {
 		return err
 	}
 	if *output == "json" {

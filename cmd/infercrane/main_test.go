@@ -349,6 +349,26 @@ func TestWaitTimeoutDisconnectsWithoutCancellingDurableOperation(t *testing.T) {
 	}
 }
 
+func TestOperationWatchResumesPersistedOperation(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/operations/op-resume" {
+			t.Fatalf("method=%s path=%s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"op-resume","status":"succeeded","progress":100,"message":"completed"}`))
+	}))
+	defer server.Close()
+
+	output, err := captureStdout(t, func() error {
+		return operationCommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, []string{"watch", "op-resume", "--output", "json"})
+	})
+	if err != nil || requests != 1 || !strings.Contains(output, `"id": "op-resume"`) || !strings.Contains(output, `"status": "succeeded"`) {
+		t.Fatalf("requests=%d output=%q err=%v", requests, output, err)
+	}
+}
+
 func TestDeployDisconnectLeavesDurableOperationRunning(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

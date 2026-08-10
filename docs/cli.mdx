@@ -12,7 +12,7 @@ The public CLI uses Cobra for grouped help, typo suggestions, aliases, and shell
 - Commands that return data accept `--output human|json`.
 - `status --watch --output json` emits one JSON document per state refresh.
 - Mutation commands accept `--idempotency-key`; generated keys are printed in human and JSON output and attached to uncertain-request errors. Reuse the same key after an uncertain result.
-- `--wait` polls persisted operation state and prints only changed progress. Closing the client does not cancel server-side work; the CLI prints the exact operation command that resumes inspection.
+- `--wait` polls persisted operation state and prints only changed progress. Closing the client does not cancel server-side work; the operation ID and exact `infercrane operation watch ID` resume command are printed before waiting begins.
 - `--wait-timeout 20m` bounds the local wait without cancelling the durable operation. Use `infercrane operation ID` to resume inspection.
 - JSON failures contain `code`, `category`, `message`, `retryable`, `remediation`, and provider HTTP status when available.
 - Command help is available before authentication: `infercrane COMMAND --help` never contacts the control plane.
@@ -169,7 +169,8 @@ Supported v0.1 strategies are `round-robin`, `consistent-hash`, `power-of-two`, 
 | `logs DEPLOYMENT [--follow]` | Stream a filtered durable operational timeline |
 | `request DEPLOYMENT` | Send a buffered or streaming OpenAI-compatible inference request |
 | `inspect DEPLOYMENT` | Show raw targets, replicas, artifacts, request statistics, and infrastructure metadata |
-| `operation ID` | Inspect durable progress and result |
+| `operation ID` | Inspect durable progress and result once |
+| `operation watch ID` | Resume following a durable operation after disconnect or from another terminal |
 | `operation cancel ID` | Request cooperative cancellation |
 | `orphans` | List unmanaged provisioned resources visible to the control plane |
 
@@ -179,7 +180,14 @@ infercrane logs qwen-prod --follow
 infercrane logs qwen-prod --type runtime --since 15m
 infercrane events qwen-prod --output json
 infercrane inspect qwen-prod
+infercrane operation watch OPERATION_ID
 ```
+
+Long operations belong to the control plane, not the terminal. `deploy`, `apply`, rollout, scale,
+and deletion continue after the CLI disconnects. Pressing Ctrl-C stops only the local watcher. Run
+`infercrane operation watch ID` later to resume from persisted progress; add `--wait-timeout 20m`
+to bound only the new local watch. Explicit `infercrane operation cancel ID` is the separate action
+that requests cooperative server-side cancellation and provider cleanup.
 
 `status` deliberately separates two concerns. `Serving` answers whether the current route can
 accept inference traffic. `Convergence` answers whether desired capacity, a rollout, or deletion is

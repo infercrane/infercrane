@@ -65,7 +65,10 @@ persist named JSON checkpoints; each checkpoint emits an ordered structured oper
 Cancellation is cooperative, and a cancelling operation whose worker dies is reclaimed only to
 finish cancellation safely. Existing-target apply, cloud convergence, and cloud deletion are
 executed by this leased worker. The deploy/apply/delete CLI commands submit through the control API;
-terminating the CLI does not terminate lifecycle execution.
+terminating the CLI does not terminate lifecycle execution. Human wait output prints the durable
+operation ID and `infercrane operation watch ID` before blocking; a later terminal can resume the
+same persisted operation without submitting another provider request. Progress is written to
+stderr so `--output json` remains one valid document on stdout.
 
 Cloud submission has an atomic storage primitive that creates the targetless desired deployment
 and its queued converge operation in one PostgreSQL transaction. Its required idempotency key makes
