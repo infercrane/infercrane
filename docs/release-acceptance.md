@@ -32,7 +32,9 @@ operator timeout from a performance claim: readiness and scale-up allow 45 minut
 can be overridden with `INFERCRANE_ACCEPTANCE_READY_TIMEOUT_SECONDS` and
 `INFERCRANE_ACCEPTANCE_SCALE_UP_TIMEOUT_SECONDS`. A long `INIT` provider state is capacity or image
 startup evidence, not vLLM readiness. InferCrane launches elastic replicas from a digest-pinned
-official vLLM image, so a new replica does not install vLLM or its CUDA dependency stack at boot.
+image derived from the official vLLM image with only RunPod's required SSH bootstrap added, so a
+new replica does not install vLLM or its CUDA dependency stack at boot. The GHCR package must be
+public so a fresh provider worker can pull it without repository credentials.
 Do not extend a timeout repeatedly while provider state is ambiguous; inspect the existing intent
 and resource before deciding whether to resume or clean up.
 
