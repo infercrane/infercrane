@@ -99,17 +99,24 @@ load_run() {
 record() {
   name=$1
   shift
-  echo "==> $name"
-  temporary="$evidence/$name.tmp"
-  if "$@" >"$temporary" 2>&1; then
-    tee "$evidence/$name.log" <"$temporary"
-    rm -f "$temporary"
+  started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  started_epoch=$(date +%s)
+  stream="$evidence/$name.stream"
+  rm -f "$stream"
+  mkfifo "$stream"
+  echo "==> $name (started $started_at)"
+  tee "$evidence/$name.log" <"$stream" &
+  tee_pid=$!
+  if "$@" >"$stream" 2>&1; then
+    status=0
   else
     status=$?
-    tee "$evidence/$name.log" <"$temporary" >&2
-    rm -f "$temporary"
-    return "$status"
   fi
+  wait "$tee_pid"
+  rm -f "$stream"
+  elapsed=$(( $(date +%s) - started_epoch ))
+  echo "<== $name (exit $status, ${elapsed}s)"
+  return "$status"
 }
 
 build_cli() {
