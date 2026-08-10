@@ -33,6 +33,14 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
 
+  runpod-fault-proxy:
+    build:
+      context: .
+      target: runtime
+    entrypoint: ["/usr/local/bin/runpod-fault-proxy"]
+    environment:
+      RUNPOD_PROXY_DROP_FIRST_CREATE_RESPONSE: ${INFERCRANE_ACCEPTANCE_DROP_SERVERLESS_CREATE_RESPONSE:-0}
+
   infercrane:
     build:
       context: .
@@ -45,6 +53,7 @@ services:
       INFERCRANE_ROUTER_BINARY: vllm-router
       RUNPOD_API_KEY_FILE: /runpod-key
       INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID: ${INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID:-}
+      INFERCRANE_RUNPOD_REST_URL: http://runpod-fault-proxy:8090/v1
     ports:
       - "${INFERCRANE_ACCEPTANCE_PORT:-18001}:8080"
     volumes:
@@ -56,6 +65,8 @@ services:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
+      runpod-fault-proxy:
+        condition: service_started
 
 volumes:
   postgres-data:

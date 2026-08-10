@@ -174,6 +174,11 @@ type ArtifactResolver interface {
 	Resolve(context.Context, string, string) (domain.ModelArtifact, error)
 }
 
+type DrainTracker interface {
+	RetiringInFlight(string) int
+	HasCurrentDeployment(string) bool
+}
+
 // QualifiedV01CloudHandlers is a compatibility constructor for the single
 // backend qualified by v0.1. Production composition and future integrations
 // use CloudHandlersWithBackends directly.
@@ -186,6 +191,10 @@ func QualifiedV01CloudHandlers(store CloudStore, provider ReplicaProvider, runti
 }
 
 func CloudHandlersWithBackends(store CloudStore, backends ReplicaBackends, runtime RuntimeInspector, artifactResolvers ...ArtifactResolver) map[string]operations.Handler {
+	return CloudHandlersWithBackendsAndDrain(store, backends, runtime, nil, artifactResolvers...)
+}
+
+func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackends, runtime RuntimeInspector, drain DrainTracker, artifactResolvers ...ArtifactResolver) map[string]operations.Handler {
 	var artifactResolver ArtifactResolver
 	if len(artifactResolvers) > 0 {
 		artifactResolver = artifactResolvers[0]
@@ -265,6 +274,12 @@ func CloudHandlersWithBackends(store CloudStore, backends ReplicaBackends, runti
 				_ = checkpoint(ctx, store, operation, "deployment.drain", "waiting", map[string]int{"replicas": len(draining)}, 80, "Waiting for router generation to withdraw draining replicas")
 				return "", operations.Retryable("router_drain_pending", errors.New("router has not published the reduced worker set"))
 			}
+			if drain != nil {
+				if active := drain.RetiringInFlight(resolved.Deployment.ID); active > 0 {
+					_ = checkpoint(ctx, store, operation, "deployment.drain", "waiting", map[string]int{"active_requests": active}, 85, "Waiting for active requests on the withdrawn router generation")
+					return "", operations.Retryable("active_requests_draining", fmt.Errorf("%d active request(s) still use the withdrawn router generation", active))
+				}
+			}
 			for _, replica := range draining {
 				replicaBackend, backendErr := backends.ForProvider(replica.Provider)
 				if backendErr != nil {
@@ -311,6 +326,14 @@ func CloudHandlersWithBackends(store CloudStore, backends ReplicaBackends, runti
 		replicas, err := store.ReplicasForDeployment(ctx, request.TenantID, request.DeploymentID)
 		if err != nil {
 			return "", operations.Retryable("replica_lookup_failed", err)
+		}
+		if drain != nil {
+			if drain.HasCurrentDeployment(request.DeploymentID) {
+				return "", operations.Retryable("router_withdrawal_pending", errors.New("router has not withdrawn the deleting deployment"))
+			}
+			if active := drain.RetiringInFlight(request.DeploymentID); active > 0 {
+				return "", operations.Retryable("active_requests_draining", fmt.Errorf("%d active request(s) still use the deleting deployment", active))
+			}
 		}
 		for _, replica := range replicas {
 			if replica.LifecycleState == "deleted" {
@@ -553,6 +576,12 @@ func CloudHandlersWithBackends(store CloudStore, backends ReplicaBackends, runti
 		if !matched {
 			_ = checkpoint(ctx, store, operation, "candidate.route", "waiting", map[string]any{"worker_set_hash": expectedHash}, 80, "Waiting for guarded router generation")
 			return "", operations.Retryable("router_cutover_pending", errors.New("candidate router generation is not active yet"))
+		}
+		if drain != nil {
+			if active := drain.RetiringInFlight(resolved.Deployment.ID); active > 0 {
+				_ = checkpoint(ctx, store, operation, "candidate.drain", "waiting", map[string]int{"active_requests": active}, 90, "Waiting for active requests on the previous revision")
+				return "", operations.Retryable("active_requests_draining", fmt.Errorf("%d active request(s) still use the previous revision", active))
+			}
 		}
 		deleted := 0
 		for _, replica := range replicas {

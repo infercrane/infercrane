@@ -28,3 +28,21 @@ func TestDirectoryIsolatesSameAliasByTenant(t *testing.T) {
 		t.Fatalf("tenant b route=%#v", b)
 	}
 }
+
+func TestRetiredGenerationWaitsForPinnedRequest(t *testing.T) {
+	directory := New()
+	old := Snapshot{DeploymentID: "deployment", Alias: "model", RouterURL: "http://old", RouterProcessID: "deployment-g1"}
+	directory.Put(old)
+	selected, release, ok := directory.AcquireForTenant("global", "model")
+	if !ok || selected.RouterProcessID != old.RouterProcessID {
+		t.Fatalf("selected=%#v ok=%t", selected, ok)
+	}
+	directory.Put(Snapshot{DeploymentID: "deployment", Alias: "model", RouterURL: "http://new", RouterProcessID: "deployment-g2"})
+	if pending := directory.RetiringInFlight("deployment"); pending != 1 || len(directory.RetiredReady()) != 0 {
+		t.Fatalf("pending=%d ready=%#v", pending, directory.RetiredReady())
+	}
+	release()
+	if pending := directory.RetiringInFlight("deployment"); pending != 0 || len(directory.RetiredReady()) != 1 {
+		t.Fatalf("pending=%d ready=%#v", pending, directory.RetiredReady())
+	}
+}

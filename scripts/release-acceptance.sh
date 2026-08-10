@@ -21,6 +21,8 @@ Commands:
   preflight   Validate credentials, dependencies, template, and inventories (read-only)
   elastic     Run the resumable paid elastic smoke workflow
   serverless  Run the resumable paid serverless smoke workflow
+  elastic-faults    Run disconnect, restart, promotion/drain, and delete-restart gates
+  serverless-faults Run lost-create-response and stream-cancellation gates
   qualify     Run elastic benchmark/autoscaling/guard, then serverless cold-start qualification
   cleanup     Delete run-owned deployments and stop the acceptance stack
   report      Refresh the sanitized evidence summary
@@ -222,6 +224,50 @@ wait_lifecycle_idle() {
   return 1
 }
 
+operation_json() {
+  ic operation "$1" --output json
+}
+
+wait_operation_status() {
+  operation_id=$1
+  expected=$2
+  limit=${3:-1800}
+  elapsed=0
+  while [ "$elapsed" -lt "$limit" ]; do
+    operation=$(operation_json "$operation_id" 2>/dev/null || true)
+    status=$(printf '%s' "$operation" | jq -r '.status // empty')
+    if [ "$status" = "$expected" ]; then
+      printf '%s\n' "$operation" >"$evidence/operation-$operation_id-$expected.json"
+      return 0
+    fi
+    case "$status" in failed|cancelled) printf '%s\n' "$operation" >&2; return 1;; esac
+    sleep 2
+    elapsed=$((elapsed + 2))
+  done
+  echo "operation $operation_id did not reach $expected within ${limit}s" >&2
+  return 1
+}
+
+wait_operation_error() {
+  operation_id=$1
+  expected=$2
+  limit=${3:-120}
+  elapsed=0
+  while [ "$elapsed" -lt "$limit" ]; do
+    operation=$(operation_json "$operation_id" 2>/dev/null || true)
+    if printf '%s' "$operation" | jq -e --arg code "$expected" '.error_code == $code' >/dev/null 2>&1; then
+      printf '%s\n' "$operation" >"$evidence/operation-$operation_id-$expected.json"
+      return 0
+    fi
+    status=$(printf '%s' "$operation" | jq -r '.status // empty')
+    case "$status" in succeeded|failed|cancelled) printf '%s\n' "$operation" >&2; return 1;; esac
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+  echo "operation $operation_id did not expose $expected within ${limit}s" >&2
+  return 1
+}
+
 wait_serverless_zero() {
   deployment=$1
   limit=${2:-900}
@@ -334,6 +380,142 @@ run_serverless() {
   echo "Serverless cold, warm, scale-to-zero, second-cold, and streaming smoke completed."
 }
 
+run_elastic_faults() {
+  require_paid_approval
+  run_preflight
+
+  echo "==> controlled-cli-disconnect"
+  INFERCRANE_CONFIG="$config_file" "$cli" --context acceptance deploy "$MODEL" \
+    --name "$ELASTIC_NAME" --cloud runpod --gpu "$GPU" --min 1 --max 1 --wait \
+    --idempotency-key "$ELASTIC_NAME-create" --output json >"$evidence/disconnected-cli.log" 2>&1 &
+  client_pid=$!
+  operation_id=""
+  elapsed=0
+  while [ "$elapsed" -lt 120 ]; do
+    status=$(ic status "$ELASTIC_NAME" --output json 2>/dev/null || true)
+    operation_id=$(printf '%s' "$status" | jq -r '.active_operation.id // empty')
+    resource_id=$(printf '%s' "$status" | jq -r '.replicas[0].provider_resource_id // empty')
+    if [ -n "$operation_id" ] && [ -n "$resource_id" ]; then break; fi
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+  [ -n "$operation_id" ] && [ -n "$resource_id" ] || { echo "provisioning identity was not persisted" >&2; return 1; }
+  kill -INT "$client_pid" 2>/dev/null || true
+  set +e
+  wait "$client_pid"
+  disconnected_status=$?
+  set -e
+  [ "$disconnected_status" -ne 0 ] || { echo "waiting CLI did not disconnect" >&2; return 1; }
+  grep -F "operation $operation_id continues in the control plane" "$evidence/disconnected-cli.log" >/dev/null
+  printf '{"operation_id":"%s","provider_resource_id":"%s","client_exit":%s}\n' "$operation_id" "$resource_id" "$disconnected_status" >"$evidence/cli-disconnect.json"
+
+  echo "==> control-plane-restart-during-provisioning"
+  before=$(operation_json "$operation_id")
+  before_attempt=$(printf '%s' "$before" | jq -r '.attempt')
+  compose restart infercrane >/dev/null
+  start_wait=0
+  until curl -fsS "http://127.0.0.1:${INFERCRANE_ACCEPTANCE_PORT:-18001}/readyz" >/dev/null 2>&1; do
+    start_wait=$((start_wait + 1)); [ "$start_wait" -lt 60 ] || return 1; sleep 1
+  done
+  after=$(operation_json "$operation_id")
+  printf '%s\n' "$after" | jq -e --arg id "$operation_id" '.id == $id and (.status != "failed" and .status != "cancelled")' >/dev/null
+  current_resource=$(ic status "$ELASTIC_NAME" --output json | jq -r '.replicas[0].provider_resource_id')
+  [ "$current_resource" = "$resource_id" ] || { echo "provider identity changed across restart" >&2; return 1; }
+  printf '{"operation_id":"%s","attempt_before":%s,"provider_resource_id":"%s"}\n' "$operation_id" "$before_attempt" "$resource_id" >"$evidence/provision-restart.json"
+  wait_operation_status "$operation_id" succeeded 1800
+  wait_ready "$ELASTIC_NAME"
+  status=$(ic status "$ELASTIC_NAME" --output json)
+  printf '%s\n' "$status" | jq -e --arg resource "$resource_id" '([.replicas[] | select(.provider_resource_id == $resource and .health == "healthy")] | length) == 1' >/dev/null
+  record fault-active-benchmark ic benchmark "$ELASTIC_NAME" --revision active --requests 20 --concurrency 4 --random-seed 41 --output json
+
+  record healthy-candidate-create ic rollout create "$ELASTIC_NAME" --model "$MODEL" --cloud runpod --gpu "$GPU" --min 1 --max 1 --wait --idempotency-key "$ELASTIC_NAME-healthy-create" --output json
+  candidate=$(ic status "$ELASTIC_NAME" --output json | jq -r '.deployment.candidate_revision_id // empty')
+  [ -n "$candidate" ] || { echo "healthy candidate was not created" >&2; return 1; }
+  record healthy-candidate-provision ic rollout provision "$ELASTIC_NAME" "$candidate" --wait --idempotency-key "$ELASTIC_NAME-healthy-provision" --output json
+  record fault-candidate-benchmark ic benchmark "$ELASTIC_NAME" --revision "$candidate" --requests 20 --concurrency 4 --random-seed 41 --output json
+  record healthy-candidate-guard ic rollout evaluate "$ELASTIC_NAME" --wait --idempotency-key "$ELASTIC_NAME-healthy-guard" --output json
+  guard=$(ic rollout inspect "$ELASTIC_NAME" --output json)
+  printf '%s\n' "$guard" >"$evidence/healthy-candidate-guard-inspect.json"
+  printf '%s\n' "$guard" | jq -e '.release_guard_evaluations[0].decision == "ACCEPT"' >/dev/null
+
+  echo "==> generation-safe-active-stream"
+  stream_file="$evidence/active-generation-stream.log"
+  curl -fsSN --max-time 300 -H 'Authorization: Bearer infercrane-runpod-acceptance-key' -H 'Content-Type: application/json' \
+    -d "{\"model\":\"$ELASTIC_NAME\",\"messages\":[{\"role\":\"user\",\"content\":\"Count upward continuously. Output only numbers separated by spaces.\"}],\"stream\":true,\"max_tokens\":2048,\"ignore_eos\":true}" \
+    "http://127.0.0.1:${INFERCRANE_ACCEPTANCE_PORT:-18001}/v1/chat/completions" >"$stream_file" 2>&1 &
+  stream_pid=$!
+  elapsed=0
+  until grep -q '^data:' "$stream_file" 2>/dev/null; do
+    kill -0 "$stream_pid" 2>/dev/null || { echo "long stream exited before promotion" >&2; return 1; }
+    elapsed=$((elapsed + 1)); [ "$elapsed" -lt 60 ] || { kill "$stream_pid" 2>/dev/null || true; return 1; }; sleep 1
+  done
+  promote=$(ic rollout promote "$ELASTIC_NAME" "$candidate" --idempotency-key "$ELASTIC_NAME-healthy-promote" --output json)
+  printf '%s\n' "$promote" >"$evidence/healthy-candidate-promote-submit.json"
+  promote_id=$(printf '%s' "$promote" | jq -r '.operation.id')
+  wait_operation_error "$promote_id" active_requests_draining 120
+  kill -0 "$stream_pid" 2>/dev/null || { echo "stream ended before drain fence was observed" >&2; return 1; }
+  old_present=$(ic status "$ELASTIC_NAME" --output json | jq --arg old "$resource_id" '[.replicas[] | select(.provider_resource_id == $old and .lifecycle_state != "deleted")] | length')
+  [ "$old_present" -eq 1 ] || { echo "old capacity was deleted during active stream" >&2; return 1; }
+  wait "$stream_pid"
+  grep -q 'data: \[DONE\]' "$stream_file"
+  wait_operation_status "$promote_id" succeeded 900
+  promoted=$(ic status "$ELASTIC_NAME" --output json)
+  printf '%s\n' "$promoted" >"$evidence/healthy-promotion-final.json"
+  printf '%s\n' "$promoted" | jq -e --arg candidate "$candidate" --arg old "$resource_id" '.deployment.active_revision_id == $candidate and ([.replicas[] | select(.provider_resource_id == $old and .lifecycle_state != "deleted")] | length) == 0' >/dev/null
+
+  echo "==> restart-at-provider-delete-boundary"
+  deletion=$(ic delete "$ELASTIC_NAME" --yes --idempotency-key "$ELASTIC_NAME-delete-restart" --output json)
+  printf '%s\n' "$deletion" >"$evidence/delete-restart-submit.json"
+  delete_id=$(printf '%s' "$deletion" | jq -r '.operation.id')
+  wait_operation_error "$delete_id" router_withdrawal_pending 120
+  compose restart infercrane >/dev/null
+  start_wait=0
+  until curl -fsS "http://127.0.0.1:${INFERCRANE_ACCEPTANCE_PORT:-18001}/readyz" >/dev/null 2>&1; do
+    start_wait=$((start_wait + 1)); [ "$start_wait" -lt 60 ] || return 1; sleep 1
+  done
+  wait_operation_status "$delete_id" succeeded 900
+  if ic status "$ELASTIC_NAME" --output json >/dev/null 2>&1; then echo "deployment remained after restarted delete" >&2; return 1; fi
+  capture_inventory elastic-faults-after
+}
+
+run_serverless_faults() {
+  require_paid_approval
+  [ -n "${INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID:-}" ] || { echo "INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID is required" >&2; return 1; }
+  export INFERCRANE_ACCEPTANCE_DROP_SERVERLESS_CREATE_RESPONSE=1
+  run_preflight
+  record serverless-fault-deploy ic deploy "$MODEL" --name "$SERVERLESS_NAME" --compute serverless --cloud runpod --gpu "$GPU" --max 1 --wait --idempotency-key "$SERVERLESS_NAME-lost-create" --output json
+  deploy_attempt=$(jq -r '.operation.attempt' "$evidence/serverless-fault-deploy.log")
+  [ "$deploy_attempt" -ge 2 ] || { echo "lost create response was not retried" >&2; return 1; }
+  docker compose -p "$project" -f "$compose_file" logs runpod-fault-proxy >"$evidence/runpod-fault-proxy.log" 2>&1
+  grep -F 'provider create response intentionally lost' "$evidence/runpod-fault-proxy.log" >/dev/null
+  wait_ready "$SERVERLESS_NAME"
+  endpoint=$(ic status "$SERVERLESS_NAME" --output json | jq -r '.replicas[0].provider_resource_id')
+  api_key=$(tr -d '\r\n' <"$RUNPOD_KEY_FILE")
+  endpoint_count=$(curl -fsS -H "Authorization: Bearer $api_key" 'https://rest.runpod.io/v1/endpoints?includeWorkers=true' | jq --arg id "$endpoint" '[.[] | select(.id == $id)] | length')
+  [ "$endpoint_count" -eq 1 ] || { echo "lost response adoption did not produce exactly one endpoint" >&2; return 1; }
+  printf '{"endpoint_id":"%s","operation_attempt":%s,"endpoint_count":%s}\n' "$endpoint" "$deploy_attempt" "$endpoint_count" >"$evidence/lost-create-response-adoption.json"
+
+  echo "==> explicit-serverless-stream-cancellation"
+  set +e
+  curl -fsSN --max-time 2 -H 'Authorization: Bearer infercrane-runpod-acceptance-key' -H 'Content-Type: application/json' \
+    -d "{\"model\":\"$SERVERLESS_NAME\",\"messages\":[{\"role\":\"user\",\"content\":\"Write continuously.\"}],\"stream\":true,\"max_tokens\":2048,\"ignore_eos\":true}" \
+    "http://127.0.0.1:${INFERCRANE_ACCEPTANCE_PORT:-18001}/v1/chat/completions" >"$evidence/serverless-cancelled-stream.log" 2>&1
+  cancel_status=$?
+  set -e
+  [ "$cancel_status" -ne 0 ] || { echo "serverless stream completed before cancellation" >&2; return 1; }
+  elapsed=0
+  cancelled=0
+  while [ "$elapsed" -lt 30 ]; do
+    cancelled=$(compose exec -T postgres psql -U infercrane -d infercrane_acceptance -Atc "SELECT COUNT(*) FROM request_records WHERE deployment_id=(SELECT id FROM deployments WHERE name='$SERVERLESS_NAME') AND error_type='client_cancelled'" | tr -d '[:space:]')
+    [ "${cancelled:-0}" -gt 0 ] && break
+    sleep 1; elapsed=$((elapsed + 1))
+  done
+  [ "${cancelled:-0}" -gt 0 ] || { echo "client cancellation was not durably recorded" >&2; return 1; }
+  printf '{"curl_exit":%s,"persisted_client_cancelled":%s}\n' "$cancel_status" "$cancelled" >"$evidence/serverless-stream-cancellation.json"
+  delete_if_present "$SERVERLESS_NAME" "$SERVERLESS_NAME-delete"
+  capture_inventory serverless-faults-after
+}
+
 run_qualify() {
   require_paid_approval
   run_elastic
@@ -411,10 +593,15 @@ run_report() {
 case "$command_name" in
   local) run_local ;;
   preflight) run_preflight ;;
-  elastic|serverless)
+  elastic|serverless|elastic-faults|serverless-faults)
     require_paid_approval
     trap 'result=$?; trap - EXIT; if [ "$result" -ne 0 ]; then echo "acceptance failed; running guarded cleanup" >&2; run_cleanup || true; fi; exit "$result"' EXIT
-    if [ "$command_name" = elastic ]; then run_elastic; else run_serverless; fi
+    case "$command_name" in
+      elastic) run_elastic ;;
+      serverless) run_serverless ;;
+      elastic-faults) run_elastic_faults ;;
+      serverless-faults) run_serverless_faults ;;
+    esac
     trap - EXIT
     ;;
   qualify)

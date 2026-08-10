@@ -123,11 +123,12 @@ func (g *Gateway) completions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	principal := r.Context().Value(principalKey{}).(domain.Principal)
-	route, ok := g.Routes.GetForTenant(principal.TenantID, alias)
+	route, releaseRoute, ok := g.Routes.AcquireForTenant(principal.TenantID, alias)
 	if !ok {
 		openAIError(w, "Unknown model alias: "+alias, http.StatusNotFound, "invalid_request_error")
 		return
 	}
+	defer releaseRoute()
 	payload["model"] = route.UpstreamModel
 	streaming, _ := payload["stream"].(bool)
 	body, err = json.Marshal(payload)

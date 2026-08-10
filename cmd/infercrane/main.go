@@ -986,12 +986,22 @@ func operationCommand(ctx context.Context, cfg config.Config, args []string) err
 		fmt.Printf("cancellation requested for operation %s\n", args[1])
 		return nil
 	}
-	if len(args) != 1 {
-		return errors.New("usage: infercrane operation ID")
+	fs := flag.NewFlagSet("operation", flag.ContinueOnError)
+	output := fs.String("output", "human", "human or json")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if err := validateOutput(*output); err != nil {
+		return err
 	}
 	var op domain.Operation
 	if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/operations/"+url.PathEscape(args[0]), "", nil, &op); err != nil {
 		return err
+	}
+	if *output == "json" {
+		encoded, _ := json.MarshalIndent(op, "", "  ")
+		fmt.Println(string(encoded))
+		return nil
 	}
 	fmt.Printf("%s  %s\nKind       %s\nResource   %s/%s\nProgress   %d%%\nAttempt    %d\nMessage    %s\nRetryable  %t\nCancel     %t\n", op.ID, strings.ToUpper(op.Status), op.Kind, op.ResourceType, op.ResourceName, op.Progress, op.Attempt, op.Message, op.Retryable, op.CancelRequested)
 	return nil
@@ -1905,7 +1915,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	if err != nil {
 		return fmt.Errorf("configure replica backends: %w", err)
 	}
-	for kind, handler := range workflows.CloudHandlersWithBackends(s, replicaBackends, runtime, artifact.HuggingFace{}) {
+	for kind, handler := range workflows.CloudHandlersWithBackendsAndDrain(s, replicaBackends, runtime, directory, artifact.HuggingFace{}) {
 		handlers[kind] = handler
 	}
 	serverlessBackend := workflows.ServerlessBackend{Name: "runpod-serverless", Cloud: "runpod", Runtime: "vllm", Provider: serverless}

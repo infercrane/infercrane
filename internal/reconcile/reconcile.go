@@ -75,6 +75,7 @@ func (r *Reconciler) Run(ctx context.Context) error {
 	}
 }
 func (r *Reconciler) Once(ctx context.Context) error {
+	r.reapRetiredRoutes()
 	deployments, err := r.Store.Deployments(ctx)
 	if err != nil {
 		return err
@@ -86,11 +87,6 @@ func (r *Reconciler) Once(ctx context.Context) error {
 	for _, stale := range r.Routes.List() {
 		if _, ok := active[stale.TenantID+"\x00"+stale.Alias]; !ok {
 			r.Routes.RemoveForTenant(stale.TenantID, stale.Alias)
-			processID := stale.RouterProcessID
-			if processID == "" {
-				processID = stale.DeploymentID
-			}
-			_ = r.Router.Stop(processID)
 		}
 	}
 	for _, d := range deployments {
@@ -176,10 +172,6 @@ func (r *Reconciler) Once(ctx context.Context) error {
 		}
 		direct, isDirect := r.DirectTargets[healthy[0].Provider]
 		if len(healthy) == 1 && isDirect {
-			oldRoute, hadOldRoute := r.Routes.GetForTenant(d.TenantID, d.Name)
-			if hadOldRoute && oldRoute.RouterProcessID != "" {
-				_ = r.Router.Stop(oldRoute.RouterProcessID)
-			}
 			upstream := healthy[0].UpstreamModel
 			if upstream == "" {
 				upstream = d.Model
@@ -232,15 +224,11 @@ func (r *Reconciler) Once(ctx context.Context) error {
 				_ = r.Router.Stop(candidateID)
 				return e
 			}
-			oldRoute, hadOldRoute := r.Routes.GetForTenant(d.TenantID, d.Name)
 			upstream := healthy[0].UpstreamModel
 			if upstream == "" {
 				upstream = d.Model
 			}
 			r.Routes.Put(routeSnapshot(d, healthy, upstream, generation.InternalEndpoint, candidateID))
-			if hadOldRoute && oldRoute.RouterProcessID != "" && oldRoute.RouterProcessID != candidateID {
-				_ = r.Router.Stop(oldRoute.RouterProcessID)
-			}
 		}
 		upstream := healthy[0].UpstreamModel
 		if upstream == "" {
@@ -256,6 +244,15 @@ func (r *Reconciler) Once(ctx context.Context) error {
 		_ = r.Store.SetDeploymentState(ctx, d.ID, state)
 	}
 	return nil
+}
+
+func (r *Reconciler) reapRetiredRoutes() {
+	for _, retired := range r.Routes.RetiredReady() {
+		if retired.RouterProcessID != "" {
+			_ = r.Router.Stop(retired.RouterProcessID)
+		}
+		r.Routes.ForgetRetired(retired)
+	}
 }
 
 func routeSnapshot(deployment domain.Deployment, targets []domain.Target, upstream, endpoint, processID string) routes.Snapshot {

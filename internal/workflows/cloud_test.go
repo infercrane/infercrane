@@ -203,6 +203,38 @@ func TestGuardedPromotionCutsOverBeforeDeletingOldCapacity(t *testing.T) {
 	}
 }
 
+type fakeDrainTracker struct{ active int }
+
+func (f *fakeDrainTracker) RetiringInFlight(string) int      { return f.active }
+func (f *fakeDrainTracker) HasCurrentDeployment(string) bool { return false }
+
+func TestGuardedPromotionWaitsForRetiringRequests(t *testing.T) {
+	spec := domain.DeploymentRevisionSpec{Model: "Qwen/Qwen3-8B", Runtime: "vllm", RoutingStrategy: "round-robin", MinReplicas: 1, MaxReplicas: 1, ComputeMode: "elastic", Cloud: "runpod", GPU: "H100"}
+	encoded, _ := json.Marshal(spec)
+	replicas := map[string]domain.Replica{
+		"old": {ID: "old", DeploymentID: "deployment-1", RevisionID: "rev-1", ExternalKey: "deployment-1-r0", LifecycleState: "active", ProviderResourceID: "old-resource", Endpoint: "http://old:8000", Health: "healthy"},
+		"new": {ID: "new", DeploymentID: "deployment-1", RevisionID: "rev-2", ExternalKey: "deployment-1-rev-2-r0", LifecycleState: "ready", ProviderResourceID: "new-resource", Endpoint: "http://new:8000", Health: "healthy"},
+	}
+	store := &fakeCloudStore{deployment: domain.Deployment{ID: "deployment-1", Name: "qwen", ActiveRevisionID: "rev-1", CandidateRevisionID: "rev-2"}, revision: domain.DeploymentRevision{ID: "rev-2", Status: "candidate", SpecJSON: string(encoded)}, replicas: replicas}
+	provider := &fakeReplicaProvider{observation: provision.Observation{Exists: true, State: "ready"}}
+	backends, err := NewReplicaBackends(ReplicaBackend{Name: "skypilot", Cloud: "runpod", Runtime: "vllm", Provider: provider})
+	if err != nil {
+		t.Fatal(err)
+	}
+	drain := &fakeDrainTracker{active: 1}
+	handler := CloudHandlersWithBackendsAndDrain(store, backends, fakeInspector{}, drain)[RolloutPromoteKind]
+	operation := domain.Operation{ID: "promote", LeaseOwner: "worker", LeaseGeneration: 1, RequestJSON: `{"name":"qwen","candidate_id":"rev-2","tenant_id":"global"}`}
+	_, err = handler(context.Background(), operation)
+	var failure operations.Failure
+	if !errors.As(err, &failure) || failure.Code != "active_requests_draining" || !failure.Retryable || provider.deleteCalls != 0 {
+		t.Fatalf("failure=%+v deletes=%d err=%v", failure, provider.deleteCalls, err)
+	}
+	drain.active = 0
+	if _, err = handler(context.Background(), operation); err != nil || provider.deleteCalls != 1 {
+		t.Fatalf("deletes=%d err=%v", provider.deleteCalls, err)
+	}
+}
+
 func TestScaleDownWithdrawsRouterBeforeDeletingReplica(t *testing.T) {
 	replicas := map[string]domain.Replica{
 		"replica-1": {ID: "replica-1", DeploymentID: "deployment-1", ExternalKey: "deployment-1-r0", Ordinal: 0, LifecycleState: "active", ProviderResourceID: "infercrane-deployment-1-r0"},

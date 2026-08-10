@@ -5,6 +5,7 @@ COPY go.mod ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY . .
 RUN --mount=type=cache,target=/go/pkg/mod CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/infercrane ./cmd/infercrane \
+    && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/runpod-fault-proxy ./internal/testtools/runpod-fault-proxy \
     && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/fake-vllm ./internal/testtools/fake-vllm \
     && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/fake-router ./internal/testtools/fake-router
 
@@ -27,6 +28,7 @@ RUN apt-get update \
 	&& rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 10001 app
 COPY --from=builder /out/infercrane /usr/local/bin/infercrane
+COPY --from=builder /out/runpod-fault-proxy /usr/local/bin/runpod-fault-proxy
 COPY scripts/entrypoint.sh /usr/local/bin/infercrane-entrypoint
 RUN chmod 755 /usr/local/bin/infercrane-entrypoint
 ENV INFERCRANE_HOST=0.0.0.0

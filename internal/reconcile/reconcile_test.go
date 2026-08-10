@@ -123,8 +123,42 @@ func TestRouterCandidatePublishesBeforeOldRetires(t *testing.T) {
 		t.Fatal(err)
 	}
 	published, ok := directory.Get("prod")
-	if !ok || published.RouterURL != "http://new-router" || backend.started != "deployment-g2" || len(backend.stopped) != 1 || backend.stopped[0] != "deployment-g1" {
+	if !ok || published.RouterURL != "http://new-router" || backend.started != "deployment-g2" || len(backend.stopped) != 0 {
 		t.Fatalf("published=%#v started=%s stopped=%v", published, backend.started, backend.stopped)
+	}
+	store.generation.WorkerSetHash = router.WorkerSetHash("round-robin", []string{"http://gpu"})
+	if err := reconciler.Once(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(backend.stopped) != 1 || backend.stopped[0] != "deployment-g1" {
+		t.Fatalf("retired routers stopped=%v", backend.stopped)
+	}
+}
+
+func TestRouterRetirementWaitsForPinnedRequest(t *testing.T) {
+	store, directory := reconcilerFixture()
+	_, release, ok := directory.AcquireForTenant("global", "prod")
+	if !ok {
+		t.Fatal("old route was not acquired")
+	}
+	backend := &fakeRouter{routes: directory}
+	reconciler := Reconciler{Store: store, Routes: directory, Router: backend, Runtimes: map[string]Runtime{"vllm": healthyRuntime{}}, RouterStartPort: 18080, InstanceID: "instance"}
+	if err := reconciler.Once(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	store.generation.WorkerSetHash = router.WorkerSetHash("round-robin", []string{"http://gpu"})
+	if err := reconciler.Once(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(backend.stopped) != 0 {
+		t.Fatalf("old router stopped with active request: %v", backend.stopped)
+	}
+	release()
+	if err := reconciler.Once(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(backend.stopped) != 1 || backend.stopped[0] != "deployment-g1" {
+		t.Fatalf("old router was not reaped: %v", backend.stopped)
 	}
 }
 
