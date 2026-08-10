@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/infercrane/infercrane/internal/config"
 	"github.com/infercrane/infercrane/internal/domain"
 )
@@ -160,5 +162,38 @@ func TestUIV01CapabilityContractIsComplete(t *testing.T) {
 		if !strings.Contains(all, strings.ToLower(term)) {
 			t.Fatalf("v0.1 capability contract does not cover %q", term)
 		}
+	}
+}
+
+func TestUITabsRemainCompleteAcrossTerminalWidths(t *testing.T) {
+	styles := newUIStyles(true)
+	for _, width := range []int{40, 80, 120, 204} {
+		tabs := (uiModel{}).renderTabs(styles, width)
+		if lipgloss.Width(tabs) > width {
+			t.Fatalf("tabs overflow at width %d: visual width %d", width, lipgloss.Width(tabs))
+		}
+		for _, index := range []string{"1", "2", "3", "4", "5", "6", "7"} {
+			if !strings.Contains(tabs, index) {
+				t.Fatalf("tabs at width %d omit %s: %q", width, index, tabs)
+			}
+		}
+		if strings.Contains(tabs, "…") {
+			t.Fatalf("tabs were ANSI-truncated at width %d: %q", width, tabs)
+		}
+	}
+}
+
+func TestUIDirectTabNavigation(t *testing.T) {
+	updated, _ := (uiModel{}).Update(tea.KeyPressMsg{Text: "7", Code: '7'})
+	if updated.(uiModel).tab != 6 {
+		t.Fatalf("7 selected tab %d", updated.(uiModel).tab)
+	}
+}
+
+func TestUIFooterStaysAtBottomOfTallTerminal(t *testing.T) {
+	model := uiModel{width: 160, height: 40, dark: true, deployments: []deploymentSummary{{Name: "prod", ObservedState: "healthy"}}, view: deploymentView{Deployment: deploymentSummary{Name: "prod"}, LifecycleStatus: lifecycleStatusView{ServingState: "serving"}}}
+	output := model.render()
+	if got := lipgloss.Height(output); got < 39 || got > 40 {
+		t.Fatalf("rendered height=%d, want 39–40", got)
 	}
 }

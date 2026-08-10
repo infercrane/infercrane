@@ -23,7 +23,7 @@ The workspace complements commands and JSON output. Use it for investigation and
 | Scaling | What are the bounds and why did capacity change? |
 | Events | What persisted event occurred, when, and with what machine-readable payload? |
 
-Use `←` and `→` to change views. On the Events view, use `j` and `k` to inspect full historical details. Old events remain visible but are separated from live health so historical failures do not look like current incidents.
+Use `←` and `→` to change views, or press `1`–`7` to jump directly. Navigation uses compact labels on narrow terminals and adds a contextual workspace column on ultrawide terminals. On the Events view, use `j` and `k` to inspect full historical details. Old events remain visible but are separated from live health so historical failures do not look like current incidents.
 
 ## Safe actions
 
@@ -69,6 +69,7 @@ The workspace reconstructs itself from persisted deployments, operations, revisi
 | --- | --- |
 | `←`, `h`, `Shift-Tab` | Previous product view |
 | `→`, `l`, `Tab` | Next product view |
+| `1`–`7` | Jump directly to a product view |
 | `j`, `↓` / `k`, `↑` | Select deployment, or event on the Events view |
 | `Ctrl-K`, `:` | Open applicable action palette |
 | `r` | Refresh immediately |

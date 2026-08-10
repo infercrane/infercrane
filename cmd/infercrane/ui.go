@@ -186,6 +186,8 @@ func (m uiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.tab = (m.tab + 1) % len(uiTabs)
 		case "shift+tab", "left", "h":
 			m.tab = (m.tab + len(uiTabs) - 1) % len(uiTabs)
+		case "1", "2", "3", "4", "5", "6", "7":
+			m.tab = int(msg.String()[0] - '1')
 		case "e":
 			m.explain = !m.explain
 		case "up", "k":
@@ -471,6 +473,15 @@ func (m uiModel) render() string {
 	var body string
 	if len(m.deployments) == 0 && m.errorMessage == "" {
 		body = "\n" + s.title.Render("No deployments") + "\n\n" + s.subtle.Render("Create one with: infercrane deploy MODEL")
+	} else if width >= 160 {
+		leftWidth := 27
+		mainWidth := min(92, width-leftWidth-50)
+		contextWidth := width - leftWidth - mainWidth - 6
+		body = lipgloss.JoinHorizontal(lipgloss.Top,
+			m.renderDeployments(s, leftWidth), "   ",
+			m.renderDetails(s, mainWidth), "   ",
+			m.renderContext(s, contextWidth),
+		)
 	} else if width >= 100 {
 		leftWidth := min(32, width/3)
 		left := m.renderDeployments(s, leftWidth)
@@ -480,7 +491,10 @@ func (m uiModel) render() string {
 		body = m.renderCompact(s, width)
 	}
 
-	footer := "←/→ views  j/k move  ctrl+k actions  r refresh  c copy  ? help  q quit"
+	footer := "←/→ views  1–7 jump  j/k move  ctrl+k actions  r refresh  c copy  ? help  q quit"
+	if width < 105 {
+		footer = "←/→ views  1–7 jump  j/k move  ctrl+k actions  ? help  q quit"
+	}
 	if m.help {
 		safety := "Actions show impact, require confirmation, and queue idempotent durable operations."
 		if m.readOnly {
@@ -495,7 +509,12 @@ func (m uiModel) render() string {
 		footer = s.failureText.Render("Connection: "+truncateText(m.errorMessage, max(20, width-12))) + "\n" + footer
 	}
 	if !m.lastUpdated.IsZero() {
-		footer += s.subtle.Render("  · updated " + m.lastUpdated.Format("15:04:05"))
+		footer += "  · updated " + m.lastUpdated.Format("15:04:05")
+	}
+	footerLines := strings.Count(footer, "\n") + 1
+	availableBodyHeight := m.height - 6 - footerLines
+	if availableBodyHeight > lipgloss.Height(body) {
+		body += strings.Repeat("\n", availableBodyHeight-lipgloss.Height(body))
 	}
 	result := header + "\n" + separator + "\n" + m.renderTabs(s, width) + "\n" + separator + "\n" + body + "\n" + separator + "\n" + s.subtle.Render(footer)
 	if m.palette {
@@ -508,20 +527,68 @@ func (m uiModel) render() string {
 }
 
 func (m uiModel) renderTabs(s uiStyles, width int) string {
-	parts := make([]string, 0, len(uiTabs))
 	labels := uiTabs
-	if width < 110 {
+	if width < 118 {
 		labels = []string{"Home", "Ops", "Rollout", "Perf", "Infra", "Scale", "Events"}
 	}
+	if width < 72 {
+		labels = []string{"H", "O", "R", "P", "I", "S", "E"}
+	}
+	parts := make([]string, 0, len(labels))
 	for i := range uiTabs {
 		label := labels[i]
 		style := s.subtle
 		if i == m.tab {
 			style = s.selected
 		}
-		parts = append(parts, style.Render(fmt.Sprintf(" %d %s ", i+1, label)))
+		item := fmt.Sprintf(" %d %s ", i+1, label)
+		if width < 72 {
+			item = fmt.Sprintf("%d%s", i+1, label)
+		}
+		parts = append(parts, style.Render(item))
 	}
-	return truncateText(strings.Join(parts, " "), width)
+	return strings.Join(parts, " ")
+}
+
+func (m uiModel) renderContext(s uiStyles, width int) string {
+	lines := []string{s.title.Render("WORKSPACE"), ""}
+	switch m.tab {
+	case 1:
+		lines = append(lines, s.subtle.Render("Durable execution and recovery."), "", uiRow(s, "Active", boolLabel(m.view.ActiveOperation != nil)))
+	case 2:
+		lines = append(lines, s.subtle.Render("Revision safety and promotion evidence."), "", uiRow(s, "Candidate", shortID(m.view.Deployment.CandidateRevisionID)), uiRow(s, "Guard", latestGuardDecision(m.view)))
+	case 3:
+		lines = append(lines, s.subtle.Render("Measured behavior; no prompt content stored."), "", uiRow(s, "Benchmarks", fmt.Sprint(len(m.benchmarks))), uiRow(s, "Cold starts", fmt.Sprint(m.view.ColdStartStats.ColdStarts)))
+	case 4:
+		provider, compute := deploymentInfrastructure(m.view)
+		lines = append(lines, s.subtle.Render("Raw placement and artifact identity."), "", uiRow(s, "Provider", provider), uiRow(s, "Compute", compute))
+	case 5:
+		lines = append(lines, s.subtle.Render("Persisted capacity decisions."), "", uiRow(s, "Bounds", fmt.Sprintf("%d–%d", m.view.Deployment.MinReplicas, m.view.Deployment.MaxReplicas)), uiRow(s, "Decisions", fmt.Sprint(len(m.scaling))))
+	case 6:
+		lines = append(lines, s.subtle.Render("Full durable history; select an event for payload."), "", uiRow(s, "Events", fmt.Sprint(len(m.events))))
+	default:
+		lines = append(lines, s.subtle.Render("Live health and deterministic explanation."), "", uiRow(s, "Serving", strings.ToUpper(m.view.LifecycleStatus.ServingState)), uiRow(s, "Converged", strings.ToUpper(m.view.LifecycleStatus.ConvergenceState)))
+	}
+	lines = append(lines, "", s.title.Render("QUICK ACTIONS"), s.selected.Render("Ctrl-K")+"  applicable actions", "c       copy endpoint/resume", "r       refresh now", "?       safety and help", "", s.title.Render("DURABILITY"), s.subtle.Render("You can close this terminal. Control-plane operations continue and resume from persisted state."))
+	return lipgloss.NewStyle().Width(width).Render(strings.Join(lines, "\n"))
+}
+
+func boolLabel(value bool) string {
+	if value {
+		return "yes"
+	}
+	return "none"
+}
+
+func latestGuardDecision(view deploymentView) string {
+	if len(view.ReleaseGuardEvaluations) == 0 {
+		return "not evaluated"
+	}
+	g := view.ReleaseGuardEvaluations[0]
+	if g.CandidateRevisionID != view.Deployment.CandidateRevisionID {
+		return "historical " + strings.ToUpper(g.Decision)
+	}
+	return strings.ToUpper(g.Decision)
 }
 
 func (m uiModel) renderDeployments(s uiStyles, width int) string {
