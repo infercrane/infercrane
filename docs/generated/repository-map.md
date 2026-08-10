@@ -8,7 +8,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 
 | Package path | Source files | Test files | Test functions |
 |---|---:|---:|---|
-| `cmd/infercrane` | 3 | 1 | `TestBenchmarkParsesFlagsAfterDeploymentName`, `TestCobraRootProvidesSuggestionsAndCompletion`, `TestCommandHelpDoesNotRequireAuthentication`, `TestControlErrorPreservesTaxonomyAndRemediation`, `TestDeleteCLIOnlySubmitsControlPlaneRequest`, `TestDeletePlanHonorsJSONWithoutControlPlaneMutation`, `TestDeployCLIOnlySubmitsControlPlaneRequest`, `TestDeployDisconnectLeavesDurableOperationRunning`, `TestDeployWaitJSONReturnsOneFinalDocument`, `TestDeployYAMLPreservesArtifactRuntimeAndServerlessFields`, `TestDoctorCLIOnlyReadsAuthenticatedControlPlaneDiagnostics`, `TestExplainColdStartMakesUnavailableBoundariesExplicit`, `TestExplainReportsPersistedBlockingOperation`, `TestGlobalContextIsHandledBeforeCommandDispatch`, `TestInvalidOutputIsRejectedBeforeAnyControlPlaneRequest`, `TestJSONOutputRendersStructuredControlPlaneFailure`, `TestLogsCommandFiltersDurableTimeline`, `TestPrimaryDeployPathDefaultsToRunPodL40S`, `TestRequestCommandPrintsStreamingDeltas`, `TestRequestCommandSendsOpenAICompatibleRequest`, `TestRolloutInspectFormatsPersistedGuardComparison`, `TestServerlessDeployDefaultsToZeroMinimumWorkers` |
+| `cmd/infercrane` | 3 | 1 | `TestBenchmarkParsesFlagsAfterDeploymentName`, `TestCobraRootProvidesSuggestionsAndCompletion`, `TestCommandHelpDoesNotRequireAuthentication`, `TestControlErrorPreservesTaxonomyAndRemediation`, `TestDeleteCLIOnlySubmitsControlPlaneRequest`, `TestDeletePlanHonorsJSONWithoutControlPlaneMutation`, `TestDeployCLIOnlySubmitsControlPlaneRequest`, `TestDeployDisconnectLeavesDurableOperationRunning`, `TestDeployWaitJSONReturnsOneFinalDocument`, `TestDeployYAMLPreservesArtifactRuntimeAndServerlessFields`, `TestDoctorCLIOnlyReadsAuthenticatedControlPlaneDiagnostics`, `TestExplainColdStartMakesUnavailableBoundariesExplicit`, `TestExplainReportsPersistedBlockingOperation`, `TestGlobalContextIsHandledBeforeCommandDispatch`, `TestInvalidOutputIsRejectedBeforeAnyControlPlaneRequest`, `TestJSONOutputRendersStructuredControlPlaneFailure`, `TestLogsCommandFiltersDurableTimeline`, `TestPrimaryDeployPathDefaultsToRunPodL40S`, `TestRequestCommandPrintsStreamingDeltas`, `TestRequestCommandSendsOpenAICompatibleRequest`, `TestRolloutInspectFormatsPersistedGuardComparison`, `TestServerlessDeployDefaultsToZeroMinimumWorkers`, `TestWaitFailureIncludesDurableErrorAndInspectionCommand` |
 | `internal/accounting` | 1 | 1 | `TestRecorderExportsQueueDropAndPersistenceFailureEvidence` |
 | `internal/artifact` | 1 | 1 | `TestHuggingFaceResolveRejectsMutableResponse`, `TestHuggingFaceResolveReturnsImmutableIdentity` |
 | `internal/authn` | 1 | 1 | `TestCacheAuthenticatesWithoutSourceOnRequestPath` |
@@ -44,6 +44,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 - `apply`
 - `auth`
 - `benchmark`
+- `cancelled`
 - `context`
 - `create`
 - `degraded`

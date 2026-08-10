@@ -648,7 +648,7 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 	if err = store.SetReplicaProviderIdentity(ctx, replica.ID, ensured.RequestID, ensured.ResourceID); err != nil {
 		return "", "", "", classify("provider_identity_failed", err)
 	}
-	if err = checkpoint(ctx, store, operation, step+".ensure", "succeeded", ensured, 40, "Provider accepted replica"); err != nil {
+	if err = checkpoint(ctx, store, operation, step+".ensure", "succeeded", ensured, 40, "Replica request accepted; provider is allocating capacity"); err != nil {
 		return "", "", "", err
 	}
 	observation, err := provider.ObserveReplica(ctx, ensured, request.Port)
@@ -660,7 +660,7 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 	}
 	if observation.State != "ready" || observation.Endpoint == "" {
 		_ = store.ObserveReplica(ctx, replica.ID, observation.State, observation.Endpoint, "starting", observation.Details, time.Now())
-		_ = checkpoint(ctx, store, operation, step+".ready", "waiting", observation, 55, "Waiting for provider endpoint")
+		_ = checkpoint(ctx, store, operation, step+".ready", "waiting", observation, 55, "Waiting for provider capacity and secure worker bootstrap")
 		return "", "", "", operations.Retryable("replica_starting", errors.New("replica is not ready"))
 	}
 	ready, models := runtime.Inspect(ctx, observation.Endpoint)
@@ -671,7 +671,7 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 	}
 	if !ready {
 		_ = store.ObserveReplica(ctx, replica.ID, "starting", observation.Endpoint, "starting", observation.Details, time.Now())
-		_ = checkpoint(ctx, store, operation, step+".runtime", "waiting", observation, 70, "Waiting for runtime model readiness")
+		_ = checkpoint(ctx, store, operation, step+".runtime", "waiting", observation, 70, "Worker reachable; waiting for model artifact and runtime readiness")
 		return "", "", "", operations.Retryable("runtime_starting", fmt.Errorf("%s model is not ready", backend.Runtime))
 	}
 	if err = store.ObserveReplica(ctx, replica.ID, "ready", observation.Endpoint, "healthy", observation.Details, time.Now()); err != nil {

@@ -952,8 +952,14 @@ func waitForOperation(ctx context.Context, cfg config.Config, id string, printPr
 		switch operation.Status {
 		case "succeeded":
 			return operation, nil
-		case "failed", "cancelled":
-			return operation, fmt.Errorf("operation %s %s: %s", id, operation.Status, operation.Message)
+		case "failed":
+			code := operation.ErrorCode
+			if code == "" {
+				code = "operation_failed"
+			}
+			return operation, fmt.Errorf("operation %s failed [%s] after %d/%d attempts: %s; inspect with: infercrane operation %s", id, code, operation.Attempt, operation.MaxAttempts, operation.Message, id)
+		case "cancelled":
+			return operation, fmt.Errorf("operation %s cancelled: %s", id, operation.Message)
 		}
 		select {
 		case <-ctx.Done():

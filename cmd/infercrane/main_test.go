@@ -322,6 +322,19 @@ func TestDeployWaitJSONReturnsOneFinalDocument(t *testing.T) {
 	}
 }
 
+func TestWaitFailureIncludesDurableErrorAndInspectionCommand(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"op-failed","status":"failed","progress":55,"message":"secure worker bootstrap failed","error_code":"provider_ensure_failed","attempt":4,"max_attempts":120}`))
+	}))
+	defer server.Close()
+
+	_, err := waitForOperation(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, "op-failed", false)
+	if err == nil || !strings.Contains(err.Error(), "[provider_ensure_failed]") || !strings.Contains(err.Error(), "4/120 attempts") || !strings.Contains(err.Error(), "infercrane operation op-failed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestDeployDisconnectLeavesDurableOperationRunning(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
