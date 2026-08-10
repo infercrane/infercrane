@@ -60,15 +60,26 @@ checkpoint, failure, cancellation, and completion writes require the matching ow
 while the lease is unexpired. This fencing prevents a stale worker from publishing progress or a
 terminal result after ownership changes.
 
-Retryable work enters `waiting` with bounded exponential backoff and jitter. Resumable handlers can
-persist named JSON checkpoints; each checkpoint emits an ordered structured operation event.
+Retryable work enters `waiting` with bounded exponential backoff and jitter. Operation progress is
+persisted as a monotonic high-water mark, so replaying an idempotent checkpoint after a retry never
+makes clients appear to move backwards. The terminal renders stable lifecycle phases such as
+`WAITING FOR CAPACITY`, `PREPARING ARTIFACT`, and `STARTING RUNTIME`; retry counts and the next
+scheduled check remain separate from progress. Resumable handlers persist named JSON checkpoints;
+each checkpoint emits an ordered structured operation event.
 Cancellation is cooperative, and a cancelling operation whose worker dies is reclaimed only to
 finish cancellation safely. Existing-target apply, cloud convergence, and cloud deletion are
 executed by this leased worker. The deploy/apply/delete CLI commands submit through the control API;
 terminating the CLI does not terminate lifecycle execution. Human wait output prints the durable
 operation ID and `infercrane operation watch ID` before blocking; a later terminal can resume the
 same persisted operation without submitting another provider request. Progress is written to
-stderr so `--output json` remains one valid document on stdout.
+stderr so `--output json` remains one valid document on stdout. Deployment results include the
+stable OpenAI-compatible logical endpoint, model, runtime, provider, compute mode, operation ID,
+and safe retry key.
+
+Provider optimizations are exposed as normalized capabilities in `infercrane doctor`. Supported,
+unsupported, and unknown are distinct states. InferCrane reports model-cache, image-streaming, or
+fast-resume behavior as unknown when an adapter cannot observe it; it never infers an optimization
+or silently substitutes hardware when capacity is constrained.
 
 Cloud submission has an atomic storage primitive that creates the targetless desired deployment
 and its queued converge operation in one PostgreSQL transaction. Its required idempotency key makes

@@ -790,9 +790,9 @@ func providerCapacityMessage(observation provision.Observation) string {
 		message += " (region " + region + ")"
 	}
 	if observation.Endpoint == "" {
-		message += "; worker endpoint not exposed yet"
+		message += "; 1 resource observed; worker endpoint not exposed yet; billing state unavailable"
 	} else {
-		message += "; worker endpoint exposed, bootstrap still in progress"
+		message += "; 1 resource observed; worker endpoint exposed, bootstrap still in progress; billing state unavailable"
 	}
 	return message
 }

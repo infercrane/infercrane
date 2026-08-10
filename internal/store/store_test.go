@@ -333,8 +333,15 @@ func TestStaleLeaseCannotCheckpointOrFinish(t *testing.T) {
 	if err = s.CheckpointClaimedOperation(ctx, second.ID, "worker-b", second.LeaseGeneration, "provision", "succeeded", `{"resource_id":"gpu-1"}`, 50, "GPU provisioned"); err != nil {
 		t.Fatal(err)
 	}
+	if err = s.CheckpointClaimedOperation(ctx, second.ID, "worker-b", second.LeaseGeneration, "intent", "succeeded", `{}`, 15, "Replica identity replayed"); err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := s.Operation(ctx, second.ID)
+	if err != nil || persisted.Progress != 50 || persisted.Message != "GPU provisioned" {
+		t.Fatalf("operation regressed after replay: %#v err=%v", persisted, err)
+	}
 	events, err := s.OperationEvents(ctx, second.ID, 10)
-	if err != nil || len(events) != 1 || events[0].Type != "step.succeeded" || events[0].Message != "GPU provisioned" {
+	if err != nil || len(events) != 2 || events[0].Type != "step.succeeded" || events[0].Message != "Replica identity replayed" {
 		t.Fatalf("events=%#v err=%v", events, err)
 	}
 }

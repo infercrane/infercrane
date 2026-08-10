@@ -164,7 +164,12 @@ func (s *Store) CheckpointClaimedOperation(ctx context.Context, id, owner string
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	result, err := tx.ExecContext(ctx, `UPDATE operations SET progress=?,message=?,updated_at=? WHERE id=? AND status IN ('running','cancelling') AND lease_owner=? AND lease_generation=? AND lease_expires_at>NOW()`, progress, message, now(), id, owner, generation)
+	// A retry replays completed workflow steps before it reaches the blocking
+	// boundary. Keep the public operation cursor monotonic: replaying a 15%
+	// identity checkpoint after a 55% capacity wait must not make clients think
+	// the deployment moved backwards. Retain the message as well when the
+	// replayed checkpoint is behind the durable high-water mark.
+	result, err := tx.ExecContext(ctx, `UPDATE operations SET progress=GREATEST(progress,?),message=CASE WHEN ?>=progress THEN ? ELSE message END,updated_at=? WHERE id=? AND status IN ('running','cancelling') AND lease_owner=? AND lease_generation=? AND lease_expires_at>NOW()`, progress, progress, message, now(), id, owner, generation)
 	if err != nil {
 		return err
 	}

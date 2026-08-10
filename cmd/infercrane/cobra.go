@@ -133,6 +133,7 @@ func addHelpFlags(command *cobra.Command, name string) {
 		intFlag("max", 1, "maximum replicas")
 		if name != "plan" {
 			boolFlag("wait", "follow durable progress to completion")
+			stringFlag("wait-timeout", "", "stop watching locally without cancelling the operation")
 			stringFlag("idempotency-key", "", "stable safe-retry key")
 		}
 	case "request":
@@ -161,8 +162,8 @@ func addHelpFlags(command *cobra.Command, name string) {
 
 func completionFor(command string) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 	flags := map[string][]string{
-		"deploy":    {"--name", "--cloud", "--gpu", "--region", "--compute", "--min", "--max", "--wait", "--idempotency-key", "--output"},
-		"apply":     {"--name", "--cloud", "--gpu", "--region", "--compute", "--min", "--max", "--wait", "--idempotency-key", "--output"},
+		"deploy":    {"--name", "--cloud", "--gpu", "--region", "--compute", "--min", "--max", "--wait", "--wait-timeout", "--idempotency-key", "--output"},
+		"apply":     {"--name", "--cloud", "--gpu", "--region", "--compute", "--min", "--max", "--wait", "--wait-timeout", "--idempotency-key", "--output"},
 		"plan":      {"--name", "--targets", "--cloud", "--gpu", "--region", "--compute", "--min", "--max", "--output"},
 		"request":   {"--message", "--stream", "--output"},
 		"status":    {"--watch", "--output"},

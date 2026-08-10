@@ -38,9 +38,37 @@ func renderOperationProgress(operation domain.Operation, now time.Time) string {
 	}
 	attempt := ""
 	if operation.MaxAttempts > 0 {
-		attempt = fmt.Sprintf(" · attempt %d/%d", operation.Attempt, operation.MaxAttempts)
+		attempt = fmt.Sprintf(" · check %d/%d", operation.Attempt, operation.MaxAttempts)
 	}
-	return fmt.Sprintf("%s%3d%%  %-10s  %s · %s%s", symbol, operation.Progress, strings.ToUpper(operation.Status), operation.Message, elapsed, attempt)
+	next := ""
+	if operation.NextAttemptAt != nil && operation.NextAttemptAt.After(now) {
+		next = " · next " + operation.NextAttemptAt.Sub(now).Round(time.Second).String()
+	}
+	return fmt.Sprintf("%s%3d%%  %-18s  %s · %s%s%s", symbol, operation.Progress, operationPhase(operation), operation.Message, elapsed, attempt, next)
+}
+
+func operationPhase(operation domain.Operation) string {
+	if operation.Status == "succeeded" {
+		return "READY"
+	}
+	if operation.Status == "failed" || operation.Status == "cancelled" {
+		return strings.ToUpper(operation.Status)
+	}
+	message := strings.ToLower(operation.Message)
+	switch {
+	case strings.Contains(message, "artifact") || strings.Contains(message, "model identity"):
+		return "PREPARING ARTIFACT"
+	case strings.Contains(message, "runtime") || strings.Contains(message, "worker reachable"):
+		return "STARTING RUNTIME"
+	case strings.Contains(message, "capacity") || strings.Contains(message, "allocat") || strings.Contains(message, "provider"):
+		return "WAITING FOR CAPACITY"
+	case strings.Contains(message, "replica identity"):
+		return "REPLICA RECORDED"
+	case operation.Progress == 0:
+		return "QUEUED"
+	default:
+		return strings.ToUpper(operation.Status)
+	}
 }
 
 func terminalStatus(value string) string {

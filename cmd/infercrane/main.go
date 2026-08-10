@@ -368,6 +368,12 @@ func doctorCommand(ctx context.Context, cfg config.Config, args []string) error 
 				fmt.Printf("      Fix: %s\n", check.Remediation)
 			}
 		}
+		if len(report.Capabilities) > 0 {
+			fmt.Println("\nProvider capabilities")
+			for _, capability := range report.Capabilities {
+				fmt.Printf("%-10s %-24s %-11s %s\n", capability.Adapter, capability.Name, strings.ToUpper(capability.State), capability.Detail)
+			}
+		}
 	default:
 		return errors.New("--output must be human or json")
 	}
@@ -601,11 +607,12 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 		}
 		response.Operation = operation
 	}
+	logicalEndpoint := strings.TrimRight(cfg.ControlURL, "/") + "/v1"
 	if *output == "json" {
-		encoded, _ := json.MarshalIndent(map[string]any{"deployment": *name, "idempotency_key": *idempotencyKey, "operation": response.Operation}, "", "  ")
+		encoded, _ := json.MarshalIndent(map[string]any{"deployment": *name, "endpoint": logicalEndpoint, "model": model, "runtime": runtimeEngine, "provider": *cloud, "compute_mode": *computeMode, "idempotency_key": *idempotencyKey, "operation": response.Operation}, "", "  ")
 		fmt.Println(string(encoded))
 	} else if *output == "human" {
-		fmt.Printf("Deployment  %s\nOperation   %s\nStatus      %s\nRetry key   %s\n", *name, response.Operation.ID, terminalStatus(response.Operation.Status), *idempotencyKey)
+		fmt.Printf("Deployment  %s\nEndpoint    %s\nModel       %s\nRuntime     %s\nProvider    %s\nCompute     %s\nOperation   %s\nStatus      %s\nRetry key   %s\n", *name, logicalEndpoint, model, runtimeEngine, displayValue(*cloud, "existing targets"), *computeMode, response.Operation.ID, terminalStatus(response.Operation.Status), *idempotencyKey)
 		if response.Operation.Status == "succeeded" {
 			fmt.Printf("\nNext\n  infercrane request %s --message \"Hello\"\n  infercrane status %s\n", *name, *name)
 		} else {
@@ -614,6 +621,13 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 	}
 	_ = operationKind // deploy/apply share API semantics; retained for command UX.
 	return nil
+}
+
+func displayValue(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
 }
 
 type deploymentSummary struct {
@@ -1003,7 +1017,7 @@ func waitForOperation(ctx context.Context, cfg config.Config, id string, printPr
 		}
 		select {
 		case <-ctx.Done():
-			return operation, fmt.Errorf("%w: stopped waiting; operation %s continues in the control plane (resume with: infercrane operation %s)", ctx.Err(), id, id)
+			return operation, fmt.Errorf("%w: watcher stopped; operation %s continues safely in the control plane (resume: infercrane operation watch %s; cancel: infercrane operation cancel %s)", ctx.Err(), id, id, id)
 		case <-ticker.C:
 		}
 	}
@@ -1080,7 +1094,11 @@ func operationCommand(ctx context.Context, cfg config.Config, args []string) err
 	if !op.UpdatedAt.IsZero() {
 		updated = op.UpdatedAt.Format(time.RFC3339)
 	}
-	fmt.Printf("%s  %s\nKind       %s\nResource   %s/%s\nProgress   %d%%\nAttempt    %d/%d\nElapsed    %s\nUpdated    %s\nMessage    %s\nRetryable  %t\nCancel     %t\n", op.ID, strings.ToUpper(op.Status), op.Kind, op.ResourceType, op.ResourceName, op.Progress, op.Attempt, op.MaxAttempts, elapsed, updated, op.Message, op.Retryable, op.CancelRequested)
+	next := "not scheduled"
+	if op.NextAttemptAt != nil {
+		next = op.NextAttemptAt.Format(time.RFC3339)
+	}
+	fmt.Printf("%s  %s\nPhase      %s\nKind       %s\nResource   %s/%s\nProgress   %d%%\nChecks     %d/%d\nElapsed    %s\nUpdated    %s\nNext check %s\nMessage    %s\nRetryable  %t\nCancel     %t\n", op.ID, strings.ToUpper(op.Status), operationPhase(op), op.Kind, op.ResourceType, op.ResourceName, op.Progress, op.Attempt, op.MaxAttempts, elapsed, updated, next, op.Message, op.Retryable, op.CancelRequested)
 	return nil
 }
 
@@ -1977,9 +1995,22 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		report := doctor.Run(checkCtx, cfg, doctor.Dependencies{})
 		if cloud {
 			report.Add(doctor.CheckCloudCredentials(checkCtx, doctor.Dependencies{}))
+			report.Add(doctor.CheckCapacity(checkCtx, "runpod", support.DefaultGPU, provision.RunPodAvailability{APIKey: cfg.RunPodAPIKey}))
+			report.Capabilities = append(report.Capabilities,
+				doctor.Capability{Adapter: "skypilot", Name: "durable_replica_lifecycle", State: "supported", Detail: "create, observe, adopt, and delete through a deterministic resource identity"},
+				doctor.Capability{Adapter: "runpod", Name: "availability_probe", State: "supported", Detail: "advisory secure-capacity stock signal; not a reservation"},
+				doctor.Capability{Adapter: "runpod", Name: "image_streaming", State: "unknown", Detail: "not exposed by the configured elastic provider API"},
+				doctor.Capability{Adapter: "runpod", Name: "model_cache", State: "unknown", Detail: "cache locality is not reported for elastic replicas"},
+			)
 		}
 		if checkServerless {
 			report.Add(doctor.CheckRunPodServerless(checkCtx, cfg, doctor.Dependencies{}))
+			report.Capabilities = append(report.Capabilities,
+				doctor.Capability{Adapter: "runpod-serverless", Name: "scale_to_zero", State: "supported", Detail: "zero active workers with provider-native wake-up"},
+				doctor.Capability{Adapter: "runpod-serverless", Name: "warm_workers", State: "supported", Detail: "minimum active workers are provider managed"},
+				doctor.Capability{Adapter: "runpod-serverless", Name: "fast_resume", State: "unknown", Detail: "FlashBoot state is not exposed by the configured endpoint API"},
+				doctor.Capability{Adapter: "runpod-serverless", Name: "model_cache", State: "unknown", Detail: "template cache locality is not exposed by the configured endpoint API"},
+			)
 		}
 		return report
 	}

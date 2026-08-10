@@ -13,7 +13,7 @@ The public CLI uses Cobra for grouped help, typo suggestions, aliases, and shell
 - `status --watch --output json` emits one JSON document per state refresh.
 - Mutation commands accept `--idempotency-key`; generated keys are printed in human and JSON output and attached to uncertain-request errors. Reuse the same key after an uncertain result.
 - `--wait` polls persisted operation state and prints only changed progress. Closing the client does not cancel server-side work; the operation ID and exact `infercrane operation watch ID` resume command are printed before waiting begins.
-- `--wait-timeout 20m` bounds the local wait without cancelling the durable operation. Use `infercrane operation ID` to resume inspection.
+- `--wait-timeout 20m` bounds the local watcher without cancelling the durable operation. Resume with `infercrane operation watch ID`; cancel only with `infercrane operation cancel ID`.
 - JSON failures contain `code`, `category`, `message`, `retryable`, `remediation`, and provider HTTP status when available.
 - Command help is available before authentication: `infercrane COMMAND --help` never contacts the control plane.
 - `infercrane --context NAME COMMAND` selects a context for one invocation.
@@ -78,7 +78,11 @@ infercrane doctor --cloud
 infercrane doctor --serverless --output json
 ```
 
-`--cloud` adds SkyPilot credentials; `--serverless` adds RunPod credentials and configured template validation. Diagnostics are read-only.
+`--cloud` adds elastic-provider credentials and advisory accelerator availability; `--serverless`
+adds provider-native serverless credentials and template validation. Diagnostics are read-only.
+The capability table distinguishes `supported`, `unsupported`, and `unknown`. InferCrane never
+silently changes hardware, and never claims cache or fast-resume behavior that an adapter cannot
+observe.
 
 ## Plan and deploy
 

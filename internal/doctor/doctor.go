@@ -31,8 +31,19 @@ type Check struct {
 }
 
 type Report struct {
-	Ready  bool    `json:"ready"`
-	Checks []Check `json:"checks"`
+	Ready        bool         `json:"ready"`
+	Checks       []Check      `json:"checks"`
+	Capabilities []Capability `json:"capabilities,omitempty"`
+}
+
+// Capability describes a normalized provider/runtime behavior. State is one
+// of supported, unsupported, or unknown. Unknown is intentional: adapters must
+// not claim provider optimizations that the provider API did not expose.
+type Capability struct {
+	Adapter string `json:"adapter"`
+	Name    string `json:"name"`
+	State   string `json:"state"`
+	Detail  string `json:"detail,omitempty"`
 }
 
 type Dependencies struct {
@@ -40,6 +51,32 @@ type Dependencies struct {
 	Ping        func(context.Context, string) error
 	SkyCheck    func(context.Context) error
 	RunPodCheck func(context.Context) error
+}
+
+type CapacityAdvisor interface {
+	Availability(context.Context, provision.AvailabilityRequest) (provision.Availability, error)
+}
+
+// CheckCapacity is provider-neutral and advisory. Capacity can change between
+// the check and placement, so constrained or unavailable stock must inform the
+// operator without making an otherwise valid control plane unhealthy.
+func CheckCapacity(ctx context.Context, adapter, gpu string, advisor CapacityAdvisor) Check {
+	if advisor == nil {
+		return Check{"Capacity", Warn, "Capacity availability is not reported by adapter " + adapter, "Inspect provider availability before creating paid resources."}
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	availability, err := advisor.Availability(checkCtx, provision.AvailabilityRequest{GPU: gpu, Count: 1})
+	if err != nil {
+		return Check{"Capacity", Warn, "Capacity availability check failed", "Retry doctor or inspect the provider inventory before deployment."}
+	}
+	status := Pass
+	remediation := ""
+	if availability.State != "available" {
+		status = Warn
+		remediation = "Wait for capacity, broaden placement, or explicitly choose different hardware; InferCrane will not substitute hardware automatically."
+	}
+	return Check{"Capacity", status, availability.Message, remediation}
 }
 
 func CheckRunPodServerless(ctx context.Context, cfg config.Config, deps Dependencies) Check {

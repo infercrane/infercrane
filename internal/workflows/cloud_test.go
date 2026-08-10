@@ -423,14 +423,14 @@ func TestEnsureCloudReplicaAdoptsExistingCapacityBeforeStockCheck(t *testing.T) 
 
 func TestProviderCapacityMessageUsesGroundedPlacementDetails(t *testing.T) {
 	message := providerCapacityMessage(provision.Observation{State: "starting", Details: `[{"status":"INIT","region":"AU","init_status_reason":"Provisioning on runpod in AU"}]`})
-	if message != "Provider capacity: Provisioning on runpod in AU; worker endpoint not exposed yet" {
+	if message != "Provider capacity: Provisioning on runpod in AU; 1 resource observed; worker endpoint not exposed yet; billing state unavailable" {
 		t.Fatalf("unexpected message: %q", message)
 	}
 }
 
 func TestProviderCapacityMessageDoesNotInventUnavailableStages(t *testing.T) {
 	message := providerCapacityMessage(provision.Observation{State: "starting", Details: `{}`})
-	if message != "Provider capacity: starting; worker endpoint not exposed yet" || strings.Contains(message, "artifact") || strings.Contains(message, "container") {
+	if message != "Provider capacity: starting; 1 resource observed; worker endpoint not exposed yet; billing state unavailable" || strings.Contains(message, "artifact") || strings.Contains(message, "container") {
 		t.Fatalf("unexpected message: %q", message)
 	}
 }
