@@ -22,7 +22,8 @@ run.
 `qualify` is the guarded end-to-end path. It runs the elastic benchmark, verifies provider-backed
 scale-up and scale-down, records a deterministic Release Guard rejection without provisioning the
 bad candidate, deletes elastic capacity, then verifies Serverless cold/warm traffic, scale-to-zero,
-and a second cold request. It never permits more than the deployment's configured maximum of two
+and a second cold request. Elastic and Serverless smoke also verify a real tool call and strict
+structured JSON response through the logical OpenAI-compatible endpoint. It never permits more than the deployment's configured maximum of two
 workers and stops on the first missing observation. Paid subcommands install a failure trap that
 deletes run-owned resources; running `cleanup` afterward is still a safe idempotent final check.
 

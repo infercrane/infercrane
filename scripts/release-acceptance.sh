@@ -147,6 +147,19 @@ start_stack() {
     --api-key infercrane-runpod-acceptance-key >/dev/null
 }
 
+ensure_stack() {
+  if curl -fsS "http://127.0.0.1:${INFERCRANE_ACCEPTANCE_PORT:-18001}/readyz" >/dev/null 2>&1; then
+    build_cli
+    if [ ! -f "$config_file" ]; then
+      INFERCRANE_CONFIG="$config_file" "$cli" init --context acceptance \
+        --url "http://127.0.0.1:${INFERCRANE_ACCEPTANCE_PORT:-18001}" \
+        --api-key infercrane-runpod-acceptance-key >/dev/null
+    fi
+    return
+  fi
+  start_stack
+}
+
 capture_inventory() {
   record "$1-infercrane-orphans" ic orphans --output json
   record "$1-deployments" ic deployments --output json
@@ -291,6 +304,22 @@ wait_serverless_zero() {
   return 1
 }
 
+verify_openai_features() {
+  deployment=$1
+  prefix=$2
+  base_url="http://127.0.0.1:${INFERCRANE_ACCEPTANCE_PORT:-18001}"
+  tool_response=$(curl -fsS -H 'Authorization: Bearer infercrane-runpod-acceptance-key' -H 'Content-Type: application/json' \
+    -d "{\"model\":\"$deployment\",\"messages\":[{\"role\":\"user\",\"content\":\"What is the weather in Berlin? Use the weather tool.\"}],\"tool_choice\":\"auto\",\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"weather\",\"description\":\"Get weather\",\"parameters\":{\"type\":\"object\",\"properties\":{\"city\":{\"type\":\"string\"}},\"required\":[\"city\"]}}}]}" \
+    "$base_url/v1/chat/completions")
+  printf '%s' "$tool_response" | jq -e '.choices[0].message.tool_calls[0].function.name == "weather" and .choices[0].finish_reason == "tool_calls"' >/dev/null
+
+  structured_response=$(curl -fsS -H 'Authorization: Bearer infercrane-runpod-acceptance-key' -H 'Content-Type: application/json' \
+    -d "{\"model\":\"$deployment\",\"messages\":[{\"role\":\"user\",\"content\":\"Return a short acceptance result.\"}],\"response_format\":{\"type\":\"json_schema\",\"json_schema\":{\"name\":\"acceptance\",\"strict\":true,\"schema\":{\"type\":\"object\",\"properties\":{\"result\":{\"type\":\"string\"}},\"required\":[\"result\"],\"additionalProperties\":false}}}}" \
+    "$base_url/v1/chat/completions")
+  printf '%s' "$structured_response" | jq -e '.choices[0].message.content | fromjson | .result | type == "string"' >/dev/null
+  printf 'tool call and structured JSON response passed\n' >"$evidence/$prefix-openai-features.log"
+}
+
 delete_if_present() {
   deployment=$1
   key=$2
@@ -342,6 +371,7 @@ run_elastic() {
   wait_ready "$ELASTIC_NAME"
   ic request "$ELASTIC_NAME" --message "acceptance probe" --output json >/dev/null
   ic request "$ELASTIC_NAME" --message "stream acceptance probe" --stream >/dev/null
+  verify_openai_features "$ELASTIC_NAME" elastic
   printf 'buffered and streaming requests passed\n' >"$evidence/elastic-requests.log"
   record elastic-benchmark ic benchmark "$ELASTIC_NAME" --revision active --requests 100 --concurrency 10 --random-seed 17 --output json
   jq -e '.runtime_version != "" and .provider != "" and .region != "" and .model_identity != "" and .gpu_count == 1 and .request_count == 100 and .failed == 0 and (.reproduction_command | contains("${INFERCRANE_API_KEY}"))' \
@@ -368,6 +398,7 @@ run_serverless() {
   ic request "$SERVERLESS_NAME" --message "cold acceptance probe" --output json >/dev/null
   ic request "$SERVERLESS_NAME" --message "warm acceptance probe" --output json >/dev/null
   ic request "$SERVERLESS_NAME" --message "stream acceptance probe" --stream >/dev/null
+  verify_openai_features "$SERVERLESS_NAME" serverless
   printf 'cold, warm, and streaming requests passed\n' >"$evidence/serverless-requests.log"
   record serverless-inspect ic inspect "$SERVERLESS_NAME" --output json
   record serverless-events ic events "$SERVERLESS_NAME" --output json
@@ -556,7 +587,7 @@ run_qualify() {
 run_cleanup() {
   load_run
   need docker; need go; need curl; need jq
-  start_stack
+  ensure_stack
   delete_if_present "$ELASTIC_NAME" "$ELASTIC_NAME-delete"
   delete_if_present "$SERVERLESS_NAME" "$SERVERLESS_NAME-delete"
   capture_inventory after-cleanup
