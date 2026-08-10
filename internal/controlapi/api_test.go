@@ -248,6 +248,20 @@ func TestLifecycleStatusReportsReadyBeforeRoutePublication(t *testing.T) {
 	}
 }
 
+func TestLifecycleStatusCountsHealthyExistingTargetsAsReadyCapacity(t *testing.T) {
+	resolved := domain.ResolvedDeployment{
+		Deployment: domain.Deployment{ID: "dep", MinReplicas: 1},
+		Targets: []domain.Target{
+			{ID: "ready-a", Health: "healthy"},
+			{ID: "ready-b", Health: "healthy"},
+		},
+	}
+	status := deploymentLifecycleStatus(resolved, nil, nil, domain.Operation{}, false)
+	if status.ServingState != "serving" || status.ReadyReplicas != 2 || status.DesiredReplicas != 2 {
+		t.Fatalf("unexpected status: %+v", status)
+	}
+}
+
 func TestBenchmarkRunsThroughControlPlaneAndPersistsIdentity(t *testing.T) {
 	spec := `{"model":"Qwen/Qwen3-8B","model_revision":"commit","runtime":"vllm","runtime_version":"0.10","compute_mode":"elastic","gpu":"L40S","region":"EU"}`
 	store := &fakeStore{resolved: domain.ResolvedDeployment{Deployment: domain.Deployment{ID: "dep", Name: "qwen", ActiveRevisionID: "rev"}, Targets: []domain.Target{{Provider: "runpod"}}}, revisions: []domain.DeploymentRevision{{ID: "rev", SpecJSON: spec}}, artifact: domain.ModelArtifact{ID: "artifact", Repository: "Qwen/Qwen3-8B", ModelIdentity: "Qwen/Qwen3-8B@commit"}}

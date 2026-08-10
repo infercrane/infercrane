@@ -395,6 +395,10 @@ func (m uiModel) renderGuard(s uiStyles) string {
 		return strings.Join(append(lines, s.subtle.Render("No persisted evaluation")), "\n")
 	}
 	guard := m.view.ReleaseGuardEvaluations[0]
+	evaluationState := "CURRENT"
+	if m.view.Deployment.CandidateRevisionID == "" || m.view.Deployment.CandidateRevisionID != guard.CandidateRevisionID {
+		evaluationState = "HISTORICAL"
+	}
 	decision := strings.ToUpper(guard.Decision)
 	decisionStyle := s.warningText
 	if guard.Decision == "promote" || guard.Decision == "pass" {
@@ -403,6 +407,7 @@ func (m uiModel) renderGuard(s uiStyles) string {
 		decisionStyle = s.failureText
 	}
 	return strings.Join(append(lines,
+		uiRow(s, "Evaluation", evaluationState),
 		uiRow(s, "Active", shortID(guard.ActiveRevisionID)),
 		uiRow(s, "Candidate", shortID(guard.CandidateRevisionID)),
 		s.label.Render("Decision")+decisionStyle.Render(decision),
@@ -436,10 +441,21 @@ func (m uiModel) renderEvents(s uiStyles, limit, width int) string {
 		if index >= limit {
 			break
 		}
-		line := event.CreatedAt.Format("15:04:05") + "  " + fmt.Sprintf("%-20s", truncateText(event.Type, 20)) + " " + event.Summary
+		line := uiEventTime(event.CreatedAt, time.Now()) + "  " + fmt.Sprintf("%-20s", truncateText(event.Type, 20)) + " " + event.Summary
 		lines = append(lines, truncateText(line, max(20, width)))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func uiEventTime(stamp, now time.Time) string {
+	if stamp.IsZero() {
+		return "--:--:--"
+	}
+	localStamp, localNow := stamp.In(now.Location()), now
+	if localStamp.Year() == localNow.Year() && localStamp.YearDay() == localNow.YearDay() {
+		return localStamp.Format("15:04:05")
+	}
+	return localStamp.Format("01-02 15:04")
 }
 
 func uiRow(styles uiStyles, label, value string) string {
@@ -449,7 +465,7 @@ func uiRow(styles uiStyles, label, value string) string {
 func statusDot(status string, styles uiStyles) string {
 	upper := strings.ToUpper(emptyAs(status, "unknown"))
 	switch strings.ToLower(status) {
-	case "healthy", "ready", "active", "succeeded", "pass":
+	case "healthy", "ready", "active", "serving", "converged", "succeeded", "pass":
 		return styles.healthyText.Render("● " + upper)
 	case "failed", "unhealthy", "error", "cancelled", "reject":
 		return styles.failureText.Render("● " + upper)

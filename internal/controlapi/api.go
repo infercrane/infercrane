@@ -681,12 +681,22 @@ type lifecycleStatus struct {
 
 func deploymentLifecycleStatus(resolved domain.ResolvedDeployment, replicas []domain.Replica, revisions []domain.DeploymentRevision, operation domain.Operation, hasOperation bool) lifecycleStatus {
 	status := lifecycleStatus{ServingState: "unavailable", ConvergenceState: "converged", CandidateState: "none", DesiredReplicas: resolved.Deployment.MinReplicas}
+	healthyTargets := 0
 	for _, target := range resolved.Targets {
 		if target.Health == "healthy" {
 			status.ServingState = "serving"
+			healthyTargets++
 		} else {
 			status.UnhealthyTargets++
 		}
+	}
+	// Existing-target deployments have no provider-managed replica rows. Their
+	// healthy routed targets are the serving capacity and must participate in
+	// the same normalized readiness summary without double-counting managed
+	// replicas, which also materialize as targets once ready.
+	if len(replicas) == 0 {
+		status.ReadyReplicas = healthyTargets
+		status.DesiredReplicas = len(resolved.Targets)
 	}
 	for _, replica := range replicas {
 		if replica.RevisionID == resolved.Deployment.ActiveRevisionID || resolved.Deployment.ActiveRevisionID == "" {

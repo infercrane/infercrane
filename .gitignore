@@ -10,6 +10,7 @@ __pycache__/
 dist/
 site/
 build/
+bin/
 node_modules/
 .mintlify/
 .infercrane/

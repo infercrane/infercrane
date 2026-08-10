@@ -73,7 +73,7 @@ func operationPhase(operation domain.Operation) string {
 
 func terminalStatus(value string) string {
 	switch strings.ToLower(value) {
-	case "healthy", "ready", "active", "succeeded", "pass":
+	case "healthy", "ready", "active", "serving", "converged", "succeeded", "pass":
 		return terminalColor("32", strings.ToUpper(value))
 	case "pending", "starting", "running", "waiting":
 		return terminalColor("34", strings.ToUpper(value))

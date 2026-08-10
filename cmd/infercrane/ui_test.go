@@ -98,3 +98,13 @@ func TestDeploymentInfrastructureUsesImmutableRevisionSpec(t *testing.T) {
 		t.Fatalf("provider=%q compute=%q", provider, compute)
 	}
 }
+
+func TestUIEventTimeDistinguishesHistoricalEvents(t *testing.T) {
+	now := time.Date(2026, 8, 11, 12, 0, 0, 0, time.FixedZone("local", 2*60*60))
+	if got := uiEventTime(now.Add(-time.Minute), now); got != "11:59:00" {
+		t.Fatalf("same-day event=%q", got)
+	}
+	if got := uiEventTime(now.Add(-48*time.Hour), now); got != "08-09 12:00" {
+		t.Fatalf("historical event=%q", got)
+	}
+}
