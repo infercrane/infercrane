@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -264,6 +265,7 @@ func (f *fakeCloudStore) Audit(context.Context, domain.AuditEvent) error { retur
 
 type fakeReplicaProvider struct {
 	observation provision.Observation
+	ensureErr   error
 	ensureCalls int
 	deleteCalls int
 }
@@ -310,6 +312,9 @@ func (f *fakeReplicaProvider) Handle(key string) provision.ProviderHandle {
 }
 func (f *fakeReplicaProvider) EnsureReplica(_ context.Context, spec provision.ReplicaSpec) (provision.ProviderHandle, error) {
 	f.ensureCalls++
+	if f.ensureErr != nil {
+		return provision.ProviderHandle{}, f.ensureErr
+	}
 	return provision.ProviderHandle{ExternalKey: spec.ExternalKey, ResourceID: "infercrane-" + spec.ExternalKey, RequestID: "request-1"}, nil
 }
 func (f *fakeReplicaProvider) ObserveReplica(context.Context, provision.ProviderHandle, int) (provision.Observation, error) {
@@ -328,6 +333,16 @@ func (f fakeInspector) Inspect(context.Context, string) (bool, map[string]struct
 		return false, nil
 	}
 	return true, map[string]struct{}{"Qwen/Qwen3-8B": {}}
+}
+
+func TestEnsureCloudReplicaClassifiesFailedProviderRequest(t *testing.T) {
+	store := &fakeCloudStore{}
+	provider := &fakeReplicaProvider{ensureErr: fmt.Errorf("%w: no requested capacity", provision.ErrRequestFailed)}
+	_, _, _, err := ensureCloudReplica(context.Background(), store, ReplicaBackend{Name: "sky", Cloud: "runpod", Runtime: "vllm", Provider: provider}, fakeInspector{}, domain.Operation{ID: "operation-1"}, CloudRequest{TenantID: "global", DeploymentID: "deployment-1", RevisionID: "revision-1", Name: "qwen", Model: "Qwen/Qwen3-8B", Cloud: "runpod", GPU: "L40S", Runtime: "vllm", Port: 8000}, 0)
+	var failure operations.Failure
+	if !errors.As(err, &failure) || failure.Code != "provider_request_failed" || !failure.Retryable || !strings.Contains(err.Error(), "requested capacity may be unavailable") {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
 func TestConvergeResumesAfterProviderCheckpoint(t *testing.T) {

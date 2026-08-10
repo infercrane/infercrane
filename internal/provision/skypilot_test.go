@@ -145,7 +145,7 @@ func TestEnsureCleansResourceLeftByFailedAsyncRequest(t *testing.T) {
 	runner := &fakeSkyRunner{exists: true, requestID: "request-1", requestState: "FAILED"}
 	provider := SkyPilot{APIKey: "secret", Runner: runner}
 	_, err := provider.EnsureReplica(context.Background(), ReplicaSpec{ExternalKey: "prod-r0", RequestID: "request-1", Model: "model", Cloud: "runpod", GPU: "L40S"})
-	if err == nil || !errors.Is(err, ErrUnavailable) || runner.downs != 1 || runner.launches != 0 {
+	if err == nil || !errors.Is(err, ErrUnavailable) || !errors.Is(err, ErrRequestFailed) || runner.downs != 1 || runner.launches != 0 {
 		t.Fatalf("launches=%d downs=%d err=%v", runner.launches, runner.downs, err)
 	}
 }

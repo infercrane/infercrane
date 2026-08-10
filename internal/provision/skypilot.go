@@ -13,6 +13,7 @@ import (
 )
 
 var ErrUnavailable = errors.New("SkyPilot unavailable")
+var ErrRequestFailed = errors.New("SkyPilot launch request failed")
 
 // defaultVLLMVersion is intentionally pinned. v0.8.5.post1 supports Qwen3 and
 // resolves to PyTorch's CUDA 12.4 runtime.
@@ -98,9 +99,9 @@ func (s SkyPilot) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provider
 			// fails after allocation. Remove that exact deterministic resource;
 			// the next durable retry may safely reuse the same replica intent.
 			if deleteErr := s.DeleteReplica(ctx, ProviderHandle{ResourceID: resourceID, ExternalKey: spec.ExternalKey}); deleteErr != nil {
-				return ProviderHandle{}, fmt.Errorf("%w: async request %s and cleanup failed: %v", ErrUnavailable, requestState, deleteErr)
+				return ProviderHandle{}, fmt.Errorf("%w: %w: async request %s and cleanup failed: %v", ErrUnavailable, ErrRequestFailed, requestState, deleteErr)
 			}
-			return ProviderHandle{}, fmt.Errorf("%w: async request %s; stale resource cleanup submitted", ErrUnavailable, requestState)
+			return ProviderHandle{}, fmt.Errorf("%w: %w: async request %s; stale resource cleanup submitted", ErrUnavailable, ErrRequestFailed, requestState)
 		}
 		return ProviderHandle{RequestID: spec.RequestID, ResourceID: resourceID, ExternalKey: spec.ExternalKey}, nil
 	}

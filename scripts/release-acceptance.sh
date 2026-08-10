@@ -224,8 +224,18 @@ wait_serverless_zero() {
 delete_if_present() {
   deployment=$1
   key=$2
-  if ic status "$deployment" --output json >/dev/null 2>&1; then
+  status=$(ic status "$deployment" --output json 2>/dev/null || true)
+  if [ -n "$status" ]; then
+    active_operation=$(printf '%s' "$status" | jq -r '.active_operation.id // empty')
+    if [ -n "$active_operation" ]; then
+      record "cancel-$deployment" ic operation cancel "$active_operation"
+    fi
     wait_lifecycle_idle "$deployment" 600
+  fi
+  # Cancellation cleanup is allowed to remove a never-activated deployment.
+  # Recheck after the durable operation reaches a terminal state so cleanup
+  # does not race a correct 404 from the control plane.
+  if ic status "$deployment" --output json >/dev/null 2>&1; then
     record "delete-plan-$deployment" ic delete "$deployment" --plan --output json
     record "delete-$deployment" ic delete "$deployment" --yes --wait \
       --idempotency-key "$key" --output json

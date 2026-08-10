@@ -643,6 +643,9 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 	}
 	ensured, err := provider.EnsureReplica(ctx, provision.ReplicaSpec{ExternalKey: externalKey, RequestID: replica.ProviderRequestID, Name: fmt.Sprintf("%s-r%d", request.Name, ordinal), Model: request.Model, ModelRevision: request.ImmutableModelRevision, Cloud: request.Cloud, GPU: request.GPU, Region: request.Region, RuntimeVersion: request.RuntimeVersion, RuntimeArgs: request.RuntimeArgs, Port: request.Port})
 	if err != nil {
+		if errors.Is(err, provision.ErrRequestFailed) {
+			return "", "", "", operations.Retryable("provider_request_failed", fmt.Errorf("provider launch failed before the replica became ready; requested capacity may be unavailable: %w", err))
+		}
 		return "", "", "", operations.Retryable("provider_ensure_failed", err)
 	}
 	if err = store.SetReplicaProviderIdentity(ctx, replica.ID, ensured.RequestID, ensured.ResourceID); err != nil {
@@ -661,7 +664,7 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 	if observation.State != "ready" || observation.Endpoint == "" {
 		_ = store.ObserveReplica(ctx, replica.ID, observation.State, observation.Endpoint, "starting", observation.Details, time.Now())
 		_ = checkpoint(ctx, store, operation, step+".ready", "waiting", observation, 55, "Waiting for provider capacity and secure worker bootstrap")
-		return "", "", "", operations.Retryable("replica_starting", errors.New("replica is not ready"))
+		return "", "", "", operations.Retryable("replica_starting", errors.New("provider is allocating capacity or bootstrapping the worker"))
 	}
 	ready, models := runtime.Inspect(ctx, observation.Endpoint)
 	_, present := models[request.Model]
@@ -672,7 +675,7 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 	if !ready {
 		_ = store.ObserveReplica(ctx, replica.ID, "starting", observation.Endpoint, "starting", observation.Details, time.Now())
 		_ = checkpoint(ctx, store, operation, step+".runtime", "waiting", observation, 70, "Worker reachable; waiting for model artifact and runtime readiness")
-		return "", "", "", operations.Retryable("runtime_starting", fmt.Errorf("%s model is not ready", backend.Runtime))
+		return "", "", "", operations.Retryable("runtime_starting", fmt.Errorf("worker is reachable; %s is downloading the model artifact or initializing the runtime", backend.Runtime))
 	}
 	if err = store.ObserveReplica(ctx, replica.ID, "ready", observation.Endpoint, "healthy", observation.Details, time.Now()); err != nil {
 		return "", "", "", classify("observation_failed", err)
