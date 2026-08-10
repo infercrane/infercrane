@@ -431,7 +431,7 @@ run_elastic_faults() {
   record healthy-candidate-create ic rollout create "$ELASTIC_NAME" --model "$MODEL" --cloud runpod --gpu "$GPU" --min 1 --max 1 --wait --idempotency-key "$ELASTIC_NAME-healthy-create" --output json
   candidate=$(ic status "$ELASTIC_NAME" --output json | jq -r '.deployment.candidate_revision_id // empty')
   [ -n "$candidate" ] || { echo "healthy candidate was not created" >&2; return 1; }
-  record healthy-candidate-provision ic rollout provision "$ELASTIC_NAME" "$candidate" --wait --idempotency-key "$ELASTIC_NAME-healthy-provision" --output json
+  record healthy-candidate-provision ic rollout provision "$ELASTIC_NAME" "$candidate" --wait --wait-timeout "${INFERCRANE_ACCEPTANCE_PROVISION_TIMEOUT:-20m}" --idempotency-key "$ELASTIC_NAME-healthy-provision" --output json
   record fault-candidate-benchmark ic benchmark "$ELASTIC_NAME" --revision "$candidate" --requests 20 --concurrency 4 --random-seed 41 --output json
   record healthy-candidate-guard ic rollout evaluate "$ELASTIC_NAME" --wait --idempotency-key "$ELASTIC_NAME-healthy-guard" --output json
   guard=$(ic rollout inspect "$ELASTIC_NAME" --output json)

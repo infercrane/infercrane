@@ -36,7 +36,7 @@ services:
   runpod-fault-proxy:
     build:
       context: .
-      target: runtime
+      target: acceptance
     entrypoint: ["/usr/local/bin/runpod-fault-proxy"]
     environment:
       RUNPOD_PROXY_DROP_FIRST_CREATE_RESPONSE: ${INFERCRANE_ACCEPTANCE_DROP_SERVERLESS_CREATE_RESPONSE:-0}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
@@ -702,7 +703,7 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 	}
 	if observation.State != "ready" || observation.Endpoint == "" {
 		_ = store.ObserveReplica(ctx, replica.ID, observation.State, observation.Endpoint, "starting", observation.Details, time.Now())
-		_ = checkpoint(ctx, store, operation, step+".ready", "waiting", observation, 55, "Waiting for provider capacity and secure worker bootstrap")
+		_ = checkpoint(ctx, store, operation, step+".ready", "waiting", observation, 55, providerCapacityMessage(observation))
 		return "", "", "", operations.Retryable("replica_starting", errors.New("provider is allocating capacity or bootstrapping the worker"))
 	}
 	ready, models := runtime.Inspect(ctx, observation.Endpoint)
@@ -738,6 +739,57 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 		return "", "", "", classify("activation_failed", err)
 	}
 	return targetName, observation.Endpoint, ensured.ResourceID, nil
+}
+
+// providerCapacityMessage exposes only boundaries reported by the provider. It
+// deliberately does not label provider placement time as container, artifact,
+// or runtime startup time when no worker endpoint exists yet.
+func providerCapacityMessage(observation provision.Observation) string {
+	fields := map[string]string{}
+	var value any
+	if json.Unmarshal([]byte(observation.Details), &value) == nil {
+		collectProviderFields(value, fields)
+	}
+	state := fields["status"]
+	if state == "" {
+		state = observation.State
+	}
+	reason, region := fields["init_status_reason"], fields["region"]
+	message := "Provider capacity"
+	if reason != "" {
+		message += ": " + reason
+	} else if state != "" {
+		message += ": " + state
+	}
+	if region != "" && !strings.Contains(strings.ToLower(message), strings.ToLower(region)) {
+		message += " (region " + region + ")"
+	}
+	if observation.Endpoint == "" {
+		message += "; worker endpoint not exposed yet"
+	} else {
+		message += "; worker endpoint exposed, bootstrap still in progress"
+	}
+	return message
+}
+
+func collectProviderFields(value any, fields map[string]string) {
+	switch typed := value.(type) {
+	case []any:
+		for _, item := range typed {
+			collectProviderFields(item, fields)
+		}
+	case map[string]any:
+		for _, key := range []string{"init_status_reason", "status", "region"} {
+			if fields[key] == "" {
+				if text, ok := typed[key].(string); ok && strings.TrimSpace(text) != "" {
+					fields[key] = strings.TrimSpace(text)
+				}
+			}
+		}
+		for _, item := range typed {
+			collectProviderFields(item, fields)
+		}
+	}
 }
 
 func decodeCloudRequest(operation domain.Operation) (CloudRequest, error) {

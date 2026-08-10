@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/infercrane/infercrane/internal/config"
 )
@@ -331,6 +332,19 @@ func TestWaitFailureIncludesDurableErrorAndInspectionCommand(t *testing.T) {
 
 	_, err := waitForOperation(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, "op-failed", false)
 	if err == nil || !strings.Contains(err.Error(), "[provider_ensure_failed]") || !strings.Contains(err.Error(), "4/120 attempts") || !strings.Contains(err.Error(), "infercrane operation op-failed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestWaitTimeoutDisconnectsWithoutCancellingDurableOperation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"op-running","status":"running","progress":55,"message":"provider capacity: INIT"}`))
+	}))
+	defer server.Close()
+
+	_, err := waitForOperationWithin(context.Background(), 20*time.Millisecond, config.Config{ControlURL: server.URL, APIKey: "secret"}, "op-running", false)
+	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "operation op-running continues") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

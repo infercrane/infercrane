@@ -28,7 +28,6 @@ RUN apt-get update \
 	&& rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 10001 app
 COPY --from=builder /out/infercrane /usr/local/bin/infercrane
-COPY --from=builder /out/runpod-fault-proxy /usr/local/bin/runpod-fault-proxy
 COPY scripts/entrypoint.sh /usr/local/bin/infercrane-entrypoint
 RUN chmod 755 /usr/local/bin/infercrane-entrypoint
 ENV INFERCRANE_HOST=0.0.0.0
@@ -37,6 +36,11 @@ EXPOSE 8080
 USER app
 ENTRYPOINT ["infercrane-entrypoint"]
 CMD ["infercrane", "serve"]
+
+FROM runtime AS acceptance
+USER root
+COPY --from=builder /out/runpod-fault-proxy /usr/local/bin/runpod-fault-proxy
+USER app
 
 FROM runtime AS development
 USER root

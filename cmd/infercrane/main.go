@@ -504,6 +504,7 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 	minReplicas := fs.Int("min", 1, "minimum replicas")
 	maxReplicas := fs.Int("max", 1, "maximum replicas")
 	wait := fs.Bool("wait", false, "wait for the operation to finish")
+	waitTimeout := fs.Duration("wait-timeout", 0, "stop waiting after this duration; the durable operation continues")
 	idempotencyKey := fs.String("idempotency-key", "", "safe retry key")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args[1:]); err != nil {
@@ -511,6 +512,9 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 	}
 	if *output != "human" && *output != "json" {
 		return errors.New("--output must be human or json")
+	}
+	if *waitTimeout < 0 || (*waitTimeout > 0 && !*wait) {
+		return errors.New("--wait-timeout must be non-negative and requires --wait")
 	}
 	minExplicit := false
 	fs.Visit(func(item *flag.Flag) {
@@ -588,7 +592,7 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 		return fmt.Errorf("%w; safe retry key: %s", err, *idempotencyKey)
 	}
 	if *wait {
-		operation, err := waitForOperation(ctx, cfg, response.Operation.ID, *output == "human")
+		operation, err := waitForOperationWithin(ctx, *waitTimeout, cfg, response.Operation.ID, *output == "human")
 		if err != nil {
 			return err
 		}
@@ -808,6 +812,7 @@ func deleteAPICommand(ctx context.Context, cfg config.Config, args []string) err
 	planOnly := fs.Bool("plan", false, "show deletion actions without mutating")
 	yes := fs.Bool("yes", false, "confirm destructive deletion")
 	wait := fs.Bool("wait", false, "wait for provider cleanup")
+	waitTimeout := fs.Duration("wait-timeout", 0, "stop waiting after this duration; provider cleanup continues")
 	idempotencyKey := fs.String("idempotency-key", "", "safe retry key")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args[1:]); err != nil {
@@ -815,6 +820,9 @@ func deleteAPICommand(ctx context.Context, cfg config.Config, args []string) err
 	}
 	if *output != "human" && *output != "json" {
 		return errors.New("--output must be human or json")
+	}
+	if *waitTimeout < 0 || (*waitTimeout > 0 && !*wait) {
+		return errors.New("--wait-timeout must be non-negative and requires --wait")
 	}
 	if *planOnly {
 		actions := []string{"withdraw deployment from new routing", "delete every provider resource and verify inventory absence"}
@@ -842,7 +850,7 @@ func deleteAPICommand(ctx context.Context, cfg config.Config, args []string) err
 		return fmt.Errorf("%w; safe retry key: %s", err, *idempotencyKey)
 	}
 	if *wait {
-		operation, err := waitForOperation(ctx, cfg, response.Operation.ID, *output == "human")
+		operation, err := waitForOperationWithin(ctx, *waitTimeout, cfg, response.Operation.ID, *output == "human")
 		if err != nil {
 			return err
 		}
@@ -966,10 +974,19 @@ func waitForOperation(ctx context.Context, cfg config.Config, id string, printPr
 		}
 		select {
 		case <-ctx.Done():
-			return operation, fmt.Errorf("stopped waiting; operation %s continues in the control plane (resume with: infercrane operation %s)", id, id)
+			return operation, fmt.Errorf("%w: stopped waiting; operation %s continues in the control plane (resume with: infercrane operation %s)", ctx.Err(), id, id)
 		case <-ticker.C:
 		}
 	}
+}
+
+func waitForOperationWithin(parent context.Context, timeout time.Duration, cfg config.Config, id string, printProgress bool) (domain.Operation, error) {
+	if timeout <= 0 {
+		return waitForOperation(parent, cfg, id, printProgress)
+	}
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
+	return waitForOperation(ctx, cfg, id, printProgress)
 }
 
 func operationCommand(ctx context.Context, cfg config.Config, args []string) error {
@@ -1003,7 +1020,19 @@ func operationCommand(ctx context.Context, cfg config.Config, args []string) err
 		fmt.Println(string(encoded))
 		return nil
 	}
-	fmt.Printf("%s  %s\nKind       %s\nResource   %s/%s\nProgress   %d%%\nAttempt    %d\nMessage    %s\nRetryable  %t\nCancel     %t\n", op.ID, strings.ToUpper(op.Status), op.Kind, op.ResourceType, op.ResourceName, op.Progress, op.Attempt, op.Message, op.Retryable, op.CancelRequested)
+	elapsed := "unknown"
+	if !op.CreatedAt.IsZero() {
+		end := time.Now()
+		if op.CompletedAt != nil {
+			end = *op.CompletedAt
+		}
+		elapsed = end.Sub(op.CreatedAt).Round(time.Second).String()
+	}
+	updated := "unknown"
+	if !op.UpdatedAt.IsZero() {
+		updated = op.UpdatedAt.Format(time.RFC3339)
+	}
+	fmt.Printf("%s  %s\nKind       %s\nResource   %s/%s\nProgress   %d%%\nAttempt    %d/%d\nElapsed    %s\nUpdated    %s\nMessage    %s\nRetryable  %t\nCancel     %t\n", op.ID, strings.ToUpper(op.Status), op.Kind, op.ResourceType, op.ResourceName, op.Progress, op.Attempt, op.MaxAttempts, elapsed, updated, op.Message, op.Retryable, op.CancelRequested)
 	return nil
 }
 
@@ -1753,6 +1782,7 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 	fs := flag.NewFlagSet("rollout "+action, flag.ContinueOnError)
 	output := fs.String("output", "human", "human or json")
 	wait := fs.Bool("wait", false, "wait for the operation to finish")
+	waitTimeout := fs.Duration("wait-timeout", 0, "stop waiting after this duration; the durable operation continues")
 	key := fs.String("idempotency-key", "", "safe retry key")
 	reason := fs.String("reason", "", "persisted reason for the transition")
 	model := fs.String("model", "", "candidate model")
@@ -1779,6 +1809,9 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 	}
 	if *output != "human" && *output != "json" {
 		return errors.New("--output must be human or json")
+	}
+	if *waitTimeout < 0 || (*waitTimeout > 0 && !*wait) {
+		return errors.New("--wait-timeout must be non-negative and requires --wait")
 	}
 	if *key == "" {
 		*key = fmt.Sprintf("cli-rollout-%s-%s-%d", action, name, time.Now().UnixNano())
@@ -1834,7 +1867,7 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 		return err
 	}
 	if *wait {
-		operation, err := waitForOperation(ctx, cfg, response.Operation.ID, *output == "human")
+		operation, err := waitForOperationWithin(ctx, *waitTimeout, cfg, response.Operation.ID, *output == "human")
 		if err != nil {
 			return err
 		}
