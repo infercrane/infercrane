@@ -45,6 +45,17 @@ type Observation struct {
 type InventoryFilter struct{ Prefix string }
 type Resource struct{ ID, ExternalKey, State, Endpoint string }
 
+type AvailabilityRequest struct {
+	Cloud, GPU, Region string
+	Count              int
+}
+
+type Availability struct {
+	State   string `json:"state"`
+	Message string `json:"message"`
+	Details string `json:"details,omitempty"`
+}
+
 type CommandRunner interface {
 	Run(context.Context, []string, ...string) ([]byte, error)
 }

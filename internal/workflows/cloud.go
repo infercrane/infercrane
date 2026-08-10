@@ -108,12 +108,17 @@ type ReplicaProvider interface {
 	DeleteReplica(context.Context, provision.ProviderHandle) error
 }
 
+type CapacityAdvisor interface {
+	Availability(context.Context, provision.AvailabilityRequest) (provision.Availability, error)
+}
+
 // ReplicaBackend binds a provider adapter to durable identity and the runtime
 // it launches. Provider support is registered at composition time rather than
 // selected by conditionals inside lifecycle code.
 type ReplicaBackend struct {
 	Name, Cloud, Runtime string
 	Provider             ReplicaProvider
+	Capacity             CapacityAdvisor
 }
 
 type ReplicaBackends struct {
@@ -670,6 +675,26 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 	step := fmt.Sprintf("replica.%d", ordinal)
 	if err = checkpoint(ctx, store, operation, step+".intent", "succeeded", map[string]string{"replica_id": replica.ID, "external_key": externalKey, "resource_id": handle.ResourceID}, 15, "Replica identity persisted"); err != nil {
 		return "", "", "", err
+	}
+	if backend.Capacity != nil {
+		// Discover first so replay after a lost create response always adopts the
+		// deterministic resource. Availability is advisory, not a reservation.
+		existing, observeErr := provider.ObserveReplica(ctx, handle, request.Port)
+		if observeErr != nil {
+			return "", "", "", operations.Retryable("provider_discovery_failed", fmt.Errorf("discover capacity before availability check: %w", observeErr))
+		}
+		if !existing.Exists {
+			availability, availabilityErr := backend.Capacity.Availability(ctx, provision.AvailabilityRequest{Cloud: request.Cloud, GPU: request.GPU, Region: request.Region, Count: 1})
+			if availabilityErr != nil {
+				availability = provision.Availability{State: "unknown", Message: "Provider availability check failed; continuing because stock signals are advisory", Details: availabilityErr.Error()}
+			}
+			if err = checkpoint(ctx, store, operation, step+".availability", availability.State, availability, 25, availability.Message); err != nil {
+				return "", "", "", err
+			}
+			if availability.State == "unavailable" {
+				return "", "", "", operations.Retryable("provider_capacity_unavailable", errors.New(availability.Message))
+			}
+		}
 	}
 	ensured, err := provider.EnsureReplica(ctx, provision.ReplicaSpec{ExternalKey: externalKey, RequestID: replica.ProviderRequestID, Name: fmt.Sprintf("%s-r%d", request.Name, ordinal), Model: request.Model, ModelRevision: request.ImmutableModelRevision, Cloud: request.Cloud, GPU: request.GPU, Region: request.Region, RuntimeVersion: request.RuntimeVersion, RuntimeArgs: request.RuntimeArgs, Port: request.Port})
 	if err != nil {

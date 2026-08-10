@@ -360,6 +360,16 @@ func (f *fakeReplicaProvider) DeleteReplica(context.Context, provision.ProviderH
 
 type fakeInspector struct{ ready bool }
 
+type fakeCapacityAdvisor struct {
+	availability provision.Availability
+	calls        int
+}
+
+func (f *fakeCapacityAdvisor) Availability(context.Context, provision.AvailabilityRequest) (provision.Availability, error) {
+	f.calls++
+	return f.availability, nil
+}
+
 func (f fakeInspector) Inspect(context.Context, string) (bool, map[string]struct{}) {
 	if !f.ready {
 		return false, nil
@@ -374,6 +384,27 @@ func TestEnsureCloudReplicaClassifiesFailedProviderRequest(t *testing.T) {
 	var failure operations.Failure
 	if !errors.As(err, &failure) || failure.Code != "provider_request_failed" || !failure.Retryable || !strings.Contains(err.Error(), "requested capacity may be unavailable") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestEnsureCloudReplicaDefersCreateWhenCapacityIsUnavailable(t *testing.T) {
+	store := &fakeCloudStore{}
+	provider := &fakeReplicaProvider{}
+	advisor := &fakeCapacityAdvisor{availability: provision.Availability{State: "unavailable", Message: "Provider reports no current secure capacity for L40S"}}
+	_, _, _, err := ensureCloudReplica(context.Background(), store, ReplicaBackend{Name: "sky", Cloud: "runpod", Runtime: "vllm", Provider: provider, Capacity: advisor}, fakeInspector{}, domain.Operation{ID: "operation-1"}, CloudRequest{TenantID: "global", DeploymentID: "deployment-1", RevisionID: "revision-1", Name: "qwen", Model: "Qwen/Qwen3-8B", Cloud: "runpod", GPU: "L40S", Runtime: "vllm", Port: 8000}, 0)
+	var failure operations.Failure
+	if !errors.As(err, &failure) || failure.Code != "provider_capacity_unavailable" || !failure.Retryable || provider.ensureCalls != 0 || advisor.calls != 1 {
+		t.Fatalf("failure=%+v ensure_calls=%d advisor_calls=%d err=%v", failure, provider.ensureCalls, advisor.calls, err)
+	}
+}
+
+func TestEnsureCloudReplicaAdoptsExistingCapacityBeforeStockCheck(t *testing.T) {
+	store := &fakeCloudStore{}
+	provider := &fakeReplicaProvider{observation: provision.Observation{Exists: true, State: "ready", Endpoint: "http://gpu:8000", Details: `{}`}}
+	advisor := &fakeCapacityAdvisor{availability: provision.Availability{State: "unavailable"}}
+	_, _, _, err := ensureCloudReplica(context.Background(), store, ReplicaBackend{Name: "sky", Cloud: "runpod", Runtime: "vllm", Provider: provider, Capacity: advisor}, fakeInspector{ready: true}, domain.Operation{ID: "operation-1"}, CloudRequest{TenantID: "global", DeploymentID: "deployment-1", RevisionID: "revision-1", Name: "qwen", Model: "Qwen/Qwen3-8B", Cloud: "runpod", GPU: "L40S", Runtime: "vllm", Port: 8000}, 0)
+	if err != nil || provider.ensureCalls != 1 || advisor.calls != 0 {
+		t.Fatalf("ensure_calls=%d advisor_calls=%d err=%v", provider.ensureCalls, advisor.calls, err)
 	}
 }
 

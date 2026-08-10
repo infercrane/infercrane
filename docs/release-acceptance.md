@@ -87,7 +87,7 @@ external keys, and RunPod pod IDs.
 
 | Acceptance | Required observation | Status / artifact |
 |---|---|---|
-| Preflight | `doctor --cloud`; read-only RunPod inventory captured before mutation | pending |
+| Preflight | `doctor --cloud`; read-only RunPod inventory and GPU stock captured before mutation | pending |
 | CLI disconnect | client exits during provisioning; the same durable operation completes | pending |
 | Provision restart | control plane restarts mid-provision; the original operation resumes | pending |
 | Exactly-once intent | one RunPod pod for each persisted replica external key after replay | pending |

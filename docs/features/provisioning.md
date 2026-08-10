@@ -37,6 +37,20 @@ and vLLM readiness checks before registering a route. Its delete path re-observe
 deletion and does not mark a replica deleted while it remains in provider inventory. These handlers
 are locally qualified with fault-injected providers; real RunPod qualification is still required.
 
+Capacity availability is an optional backend capability, not a provider conditional in the
+lifecycle state machine. Before the first create, the workflow discovers the deterministic
+resource. If it already exists, InferCrane adopts it without consulting mutable stock. If it is
+absent, the registered advisor may return `available`, `constrained`, `unavailable`, or `unknown`;
+the complete result is persisted in operation progress. Explicitly unavailable capacity defers
+creation with a retryable error. Constrained capacity proceeds with a warning because a stock query
+is a point-in-time signal, not a reservation. An unavailable advisory service does not make an
+otherwise healthy provider unusable.
+
+The v0.1 RunPod advisor queries secure-cloud GPU stock without creating a Pod. A region-qualified
+request is clearly labeled as using a global signal because the provider response cannot prove
+availability in one requested region. Credentials are sent in an authorization header and are never
+written to URLs, checkpoints, or durable events.
+
 The superseded synchronous `Deploy`/`Destroy` adapter and direct-running operation store APIs have
 been removed. Provider mutation is reachable only through leased workflow handlers.
 

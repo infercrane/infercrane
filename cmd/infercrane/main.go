@@ -1944,7 +1944,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	for kind, handler := range workflows.ReleaseGuardHandlers(s) {
 		handlers[kind] = handler
 	}
-	replicaBackends, err := workflows.NewReplicaBackends(workflows.ReplicaBackend{Name: "skypilot", Cloud: "runpod", Runtime: "vllm", Provider: provision.SkyPilot{APIKey: cfg.APIKey}})
+	replicaBackends, err := workflows.NewReplicaBackends(workflows.ReplicaBackend{Name: "skypilot", Cloud: "runpod", Runtime: "vllm", Provider: provision.SkyPilot{APIKey: cfg.APIKey}, Capacity: provision.RunPodAvailability{APIKey: cfg.RunPodAPIKey}})
 	if err != nil {
 		return fmt.Errorf("configure replica backends: %w", err)
 	}
