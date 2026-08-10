@@ -6,7 +6,7 @@
 FROM vllm/vllm-openai@sha256:c48cf118e1e6e39d7790e174d6014f7af5d06f79c2d29d984d11cbe2e8d414e7
 
 RUN apt-get update \
-    && DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends openssh-server \
+    && DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends openssh-server rsync \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /run/sshd /root/.ssh \
     && chmod 700 /root/.ssh
