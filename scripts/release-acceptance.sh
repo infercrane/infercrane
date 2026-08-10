@@ -6,6 +6,8 @@ compose_file="$root/compose.runpod-acceptance.yaml"
 project=${INFERCRANE_ACCEPTANCE_PROJECT:-infercrane-runpod}
 state_root=${INFERCRANE_ACCEPTANCE_STATE_DIR:-"$root/.infercrane/acceptance"}
 requested_run_id=${INFERCRANE_ACCEPTANCE_RUN_ID:-}
+requested_model=${INFERCRANE_ACCEPTANCE_MODEL:-}
+requested_gpu=${INFERCRANE_ACCEPTANCE_GPU:-}
 run_id=${requested_run_id:-$(date -u +%Y%m%dT%H%M%SZ)}
 current_file="$state_root/current"
 approval=false
@@ -77,6 +79,14 @@ load_run() {
   [ -f "$run_dir/state.env" ] || { echo "acceptance state is missing: $run_dir/state.env" >&2; exit 1; }
   # The state file is generated above from bounded identifiers and contains no credentials.
   . "$run_dir/state.env"
+  if [ -n "$requested_model" ] && [ "$requested_model" != "$MODEL" ]; then
+    echo "acceptance run $run_id was created for model $MODEL, not requested model $requested_model; use a new run ID" >&2
+    exit 1
+  fi
+  if [ -n "$requested_gpu" ] && [ "$requested_gpu" != "$GPU" ]; then
+    echo "acceptance run $run_id was created for GPU $GPU, not requested GPU $requested_gpu; use a new run ID" >&2
+    exit 1
+  fi
   evidence="$run_dir/evidence"
   cli="$run_dir/bin/infercrane"
   config_file="$run_dir/client.json"
