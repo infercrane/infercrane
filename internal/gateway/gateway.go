@@ -3,6 +3,7 @@ package gateway
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -171,6 +172,7 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 		return
 	}
 	principal := r.Context().Value(principalKey{}).(domain.Principal)
+	replay := g.replayShape(payload, r.Header)
 	route, releaseRoute, ok := g.Routes.AcquireForTenant(principal.TenantID, alias)
 	if !ok {
 		openAIError(w, "Unknown model alias: "+alias, http.StatusNotFound, "invalid_request_error")
@@ -227,7 +229,7 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 	started := time.Now()
 	if g.RequestAuthorizer != nil {
 		if err := g.RequestAuthorizer.Authorize(principal.TenantID); err != nil {
-			g.record(r.Context(), requestID, route, alias, operation, started, http.StatusTooManyRequests, "tenant_request_quota_exhausted", streaming, responseObservation{}, capacityEvidence{})
+			g.record(r.Context(), requestID, route, alias, operation, started, http.StatusTooManyRequests, "tenant_request_quota_exhausted", streaming, responseObservation{}, capacityEvidence{}, replay)
 			openAIError(w, "Tenant request-rate quota is exhausted", http.StatusTooManyRequests, "rate_limit_error")
 			return
 		}
@@ -235,12 +237,12 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 	evidenceResult := g.observeCapacity(r.Context(), route, started)
 	if route.ExternalPolicyID != "" {
 		if g.ExternalAuthorizer == nil {
-			g.record(r.Context(), requestID, route, alias, operation, started, http.StatusTooManyRequests, "external_budget_unavailable", streaming, responseObservation{}, <-evidenceResult)
+			g.record(r.Context(), requestID, route, alias, operation, started, http.StatusTooManyRequests, "external_budget_unavailable", streaming, responseObservation{}, <-evidenceResult, replay)
 			openAIError(w, "External fallback budget is unavailable", http.StatusTooManyRequests, "rate_limit_error")
 			return
 		}
 		if _, err := g.ExternalAuthorizer.Authorize(route.ExternalPolicyID); err != nil {
-			g.record(r.Context(), requestID, route, alias, operation, started, http.StatusTooManyRequests, "external_budget_exhausted", streaming, responseObservation{}, <-evidenceResult)
+			g.record(r.Context(), requestID, route, alias, operation, started, http.StatusTooManyRequests, "external_budget_exhausted", streaming, responseObservation{}, <-evidenceResult, replay)
 			openAIError(w, "External fallback hard budget is exhausted", http.StatusTooManyRequests, "rate_limit_error")
 			return
 		}
@@ -306,12 +308,12 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 		if errors.Is(err, context.DeadlineExceeded) {
 			status, errorType, message = http.StatusGatewayTimeout, "timeout", "Inference upstream timed out"
 		}
-		g.record(r.Context(), requestID, route, alias, operation, started, status, errorType, streaming, responseObservation{}, <-evidenceResult)
+		g.record(r.Context(), requestID, route, alias, operation, started, status, errorType, streaming, responseObservation{}, <-evidenceResult, replay)
 		openAIError(w, message, status, "server_error")
 		return
 	}
 	if resp == nil {
-		g.record(r.Context(), requestID, route, alias, operation, started, http.StatusServiceUnavailable, "upstream_unavailable", streaming, responseObservation{}, <-evidenceResult)
+		g.record(r.Context(), requestID, route, alias, operation, started, http.StatusServiceUnavailable, "upstream_unavailable", streaming, responseObservation{}, <-evidenceResult, replay)
 		openAIError(w, "Inference upstream is unavailable", http.StatusServiceUnavailable, "server_error")
 		return
 	}
@@ -330,7 +332,7 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 			errorType = "upstream_disconnect"
 		}
 	}
-	g.record(context.WithoutCancel(r.Context()), requestID, route, alias, operation, started, resp.StatusCode, errorType, streaming, observation, <-evidenceResult)
+	g.record(context.WithoutCancel(r.Context()), requestID, route, alias, operation, started, resp.StatusCode, errorType, streaming, observation, <-evidenceResult, replay)
 	if g.Logger != nil {
 		g.Logger.Info("inference request", "request_id", requestID, "traceparent", traceParent, "tenant_id", principal.TenantID, "deployment_id", route.DeploymentID, "status", resp.StatusCode, "duration_ms", float64(time.Since(started).Microseconds())/1000)
 	}
@@ -380,7 +382,44 @@ func (g *Gateway) observeCapacity(ctx context.Context, route routes.Snapshot, st
 	return result
 }
 
-func (g *Gateway) record(ctx context.Context, id string, route routes.Snapshot, requestModel, operation string, started time.Time, status int, errorType string, streaming bool, observation responseObservation, evidence capacityEvidence) {
+type replayShape struct {
+	sessionIDHash, parentSessionIDHash, sharedPrefixHash string
+	toolPauseMS                                          *float64
+}
+
+func (g *Gateway) replayShape(payload map[string]any, headers http.Header) replayShape {
+	digest := func(value []byte) string {
+		if len(value) == 0 {
+			return ""
+		}
+		mac := hmac.New(sha256.New, []byte(g.APIKey))
+		_, _ = mac.Write(value)
+		return hex.EncodeToString(mac.Sum(nil))
+	}
+	shape := replayShape{sessionIDHash: digest([]byte(headers.Get("X-InferCrane-Session-ID"))), parentSessionIDHash: digest([]byte(headers.Get("X-InferCrane-Parent-Session-ID")))}
+	if messages, ok := payload["messages"].([]any); ok {
+		prefix := make([]any, 0)
+		for _, raw := range messages {
+			message, ok := raw.(map[string]any)
+			if !ok || message["role"] != "system" {
+				break
+			}
+			prefix = append(prefix, message)
+		}
+		if len(prefix) > 0 {
+			encoded, _ := json.Marshal(prefix)
+			shape.sharedPrefixHash = digest(encoded)
+		}
+	}
+	if text := headers.Get("X-InferCrane-Tool-Pause-MS"); text != "" {
+		if value, err := strconv.ParseFloat(text, 64); err == nil && value >= 0 && value <= 24*60*60*1000 {
+			shape.toolPauseMS = &value
+		}
+	}
+	return shape
+}
+
+func (g *Gateway) record(ctx context.Context, id string, route routes.Snapshot, requestModel, operation string, started time.Time, status int, errorType string, streaming bool, observation responseObservation, evidence capacityEvidence, replay replayShape) {
 	if g.Recorder == nil {
 		return
 	}
@@ -391,7 +430,7 @@ func (g *Gateway) record(ctx context.Context, id string, route routes.Snapshot, 
 		ttft = &value
 	}
 	responseModel, inputTokens, outputTokens := observation.usage()
-	record := domain.InferenceRecord{RequestID: id, TenantID: route.TenantID, DeploymentID: route.DeploymentID, RevisionID: route.RevisionID, TargetID: route.TargetID, LogicalModelID: route.LogicalModelID, EnvironmentID: route.EnvironmentID, EndpointID: route.EndpointID, ServingPlanID: route.ServingPlanID, BindingID: route.BindingID, Provider: route.Provider, Runtime: route.Runtime, ComputeMode: route.ComputeMode, OperationName: operation, RequestModel: requestModel, ResponseModel: responseModel, SemanticConventionSchema: "https://opentelemetry.io/schemas/gen-ai/1.42.0", StartedAt: started, StatusCode: status, LatencyMS: latency, TTFTMS: ttft, InputTokens: inputTokens, OutputTokens: outputTokens, Streaming: streaming, ErrorType: errorType, ColdStart: evidence.coldStart, ProviderWorkersAtArrival: evidence.workers, ProviderCapacityObservedAt: evidence.observedAt}
+	record := domain.InferenceRecord{RequestID: id, TenantID: route.TenantID, DeploymentID: route.DeploymentID, RevisionID: route.RevisionID, TargetID: route.TargetID, LogicalModelID: route.LogicalModelID, EnvironmentID: route.EnvironmentID, EndpointID: route.EndpointID, ServingPlanID: route.ServingPlanID, BindingID: route.BindingID, Provider: route.Provider, Runtime: route.Runtime, ComputeMode: route.ComputeMode, OperationName: operation, RequestModel: requestModel, ResponseModel: responseModel, SemanticConventionSchema: "https://opentelemetry.io/schemas/gen-ai/1.42.0", StartedAt: started, StatusCode: status, LatencyMS: latency, TTFTMS: ttft, InputTokens: inputTokens, OutputTokens: outputTokens, Streaming: streaming, ErrorType: errorType, ColdStart: evidence.coldStart, ProviderWorkersAtArrival: evidence.workers, ProviderCapacityObservedAt: evidence.observedAt, SessionIDHash: replay.sessionIDHash, ParentSessionIDHash: replay.parentSessionIDHash, SharedPrefixHash: replay.sharedPrefixHash, ToolPauseMS: replay.toolPauseMS}
 	if err := g.Recorder.RecordRequest(ctx, record); err != nil && g.Logger != nil {
 		g.Logger.Error("record request", "error", err, "request_id", id)
 	}

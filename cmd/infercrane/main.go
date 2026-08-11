@@ -249,6 +249,10 @@ func runLegacy(ctx context.Context, args []string) error {
 		return externalAPICommand(ctx, cfg, args[1:])
 	case "benchmark":
 		return benchmarkCommand(ctx, cfg, args[1:])
+	case "replay":
+		return replayCommand(ctx, cfg, args[1:])
+	case "capacity":
+		return capacityCommand(ctx, cfg, args[1:])
 	case "recipe":
 		return recipeCommand(ctx, cfg, args[1:])
 	case "recipes":
@@ -571,6 +575,8 @@ func benchmarkCommand(ctx context.Context, cfg config.Config, args []string) err
 	fs := flag.NewFlagSet("benchmark", flag.ContinueOnError)
 	requests := fs.Int("requests", 100, "request count")
 	concurrency := fs.Int("concurrency", 10, "concurrent clients")
+	inputTokens := fs.Int("input-tokens", 128, "mean input token count")
+	outputTokens := fs.Int("output-tokens", 32, "maximum output token count")
 	randomSeed := fs.Int64("random-seed", 17, "deterministic AIPerf dataset seed")
 	revision := fs.String("revision", "active", "revision to benchmark: active, candidate, or revision ID")
 	output := fs.String("output", "human", "human or json")
@@ -586,7 +592,7 @@ func benchmarkCommand(ctx context.Context, cfg config.Config, args []string) err
 	var response struct {
 		Benchmark map[string]any `json:"benchmark"`
 	}
-	request := map[string]any{"requests": *requests, "concurrency": *concurrency, "random_seed": *randomSeed, "revision": *revision}
+	request := map[string]any{"requests": *requests, "concurrency": *concurrency, "input_tokens": *inputTokens, "output_tokens": *outputTokens, "random_seed": *randomSeed, "revision": *revision}
 	if *revision != "active" {
 		fmt.Fprintln(os.Stderr, "Notice: selected-revision validation sends an explicit AIPerf workload directly to revision capacity and may incur provider inference cost; it does not duplicate user traffic.")
 	}
@@ -603,6 +609,119 @@ func benchmarkCommand(ctx context.Context, cfg config.Config, args []string) err
 		return errors.New("--output must be human or json")
 	}
 	fmt.Printf("Benchmark     %s\nRevision      %s\nModel         %s\nRuntime       %s %s\nRuntime args  %s\nGPU           %s x %s\nProvider      %s\nRegion        %s\nCompute mode  %s\nWorkload      %s\nTTFT p50      %s ms\nTTFT p95      %s ms\nTPOT p95      %s ms\nOutput tok/s  %s\nGoodput       %s\nGPU util      %s\nErrors        %s\nCost          %s\n\nReproduce:\n  %s\n", benchmarkValue(response.Benchmark["id"]), benchmarkValue(response.Benchmark["revision_id"]), benchmarkValue(response.Benchmark["model_identity"]), benchmarkValue(response.Benchmark["runtime"]), benchmarkValue(response.Benchmark["runtime_version"]), benchmarkValue(response.Benchmark["runtime_configuration"]), benchmarkValue(response.Benchmark["gpu"]), benchmarkValue(response.Benchmark["gpu_count"]), benchmarkValue(response.Benchmark["provider"]), benchmarkValue(response.Benchmark["region"]), benchmarkValue(response.Benchmark["compute_mode"]), benchmarkValue(response.Benchmark["workload"]), benchmarkValue(response.Benchmark["ttft_p50_ms"]), benchmarkValue(response.Benchmark["ttft_p95_ms"]), benchmarkValue(response.Benchmark["tpot_p95_ms"]), benchmarkValue(response.Benchmark["output_token_throughput"]), benchmarkValue(response.Benchmark["goodput"]), benchmarkValue(response.Benchmark["gpu_utilization"]), benchmarkValue(response.Benchmark["failed"]), benchmarkValue(response.Benchmark["cost_metadata"]), benchmarkValue(response.Benchmark["reproduction_command"]))
+	return nil
+}
+
+func replayCommand(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return errors.New("usage: infercrane replay DEPLOYMENT [flags]")
+	}
+	deployment := args[0]
+	fs := flag.NewFlagSet("replay", flag.ContinueOnError)
+	windowText := fs.String("window", "24h", "production-shape capture window")
+	maxRequests := fs.Int("max-requests", 1000, "maximum observations")
+	execute := fs.Bool("execute", false, "run an explicit AIPerf approximation")
+	acknowledge := fs.Bool("acknowledge-cost", false, "acknowledge provider cost")
+	revision := fs.String("revision", "candidate", "revision for explicit execution")
+	output := fs.String("output", "human", "human or json")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	window, err := time.ParseDuration(*windowText)
+	if err != nil || window <= 0 {
+		return errors.New("--window must be a positive duration")
+	}
+	if *execute && !*acknowledge {
+		return errors.New("--execute requires --acknowledge-cost because AIPerf consumes inference capacity")
+	}
+	var captured struct {
+		Replay struct {
+			ID           string          `json:"id"`
+			ShapeDigest  string          `json:"shape_digest"`
+			RequestCount int             `json:"request_count"`
+			Summary      json.RawMessage `json:"summary"`
+			WindowStart  time.Time       `json:"window_start"`
+			WindowEnd    time.Time       `json:"window_end"`
+		} `json:"replay"`
+	}
+	body := map[string]any{"window_seconds": int(window.Seconds()), "max_requests": *maxRequests}
+	if err = controlJSON(ctx, cfg, http.MethodPost, "/api/v1/deployments/"+url.PathEscape(deployment)+"/replays", "", body, &captured); err != nil {
+		return err
+	}
+	var summary struct{ Requests, InputTokensMean, OutputTokensMean, PeakConcurrency int }
+	if err = json.Unmarshal(captured.Replay.Summary, &summary); err != nil {
+		return fmt.Errorf("decode replay summary: %w", err)
+	}
+	if *output == "json" && !*execute {
+		return printJSON(captured.Replay)
+	}
+	fmt.Printf("Replay trace  %s\nDeployment    %s\nEvidence      production shape (prompt/output content not stored)\nWindow        %s → %s\nRequests      %d\nConcurrency   %d peak\nInput tokens  %d mean\nOutput tokens %d mean\nDigest        %s\n", captured.Replay.ID, deployment, captured.Replay.WindowStart.Format(time.RFC3339), captured.Replay.WindowEnd.Format(time.RFC3339), summary.Requests, summary.PeakConcurrency, summary.InputTokensMean, summary.OutputTokensMean, captured.Replay.ShapeDigest)
+	if !*execute {
+		fmt.Println("\nNo workload was sent. Add --execute --acknowledge-cost to run an AIPerf approximation.")
+		return nil
+	}
+	if summary.Requests == 0 {
+		return errors.New("captured replay has no requests to execute")
+	}
+	if summary.PeakConcurrency < 1 {
+		summary.PeakConcurrency = 1
+	}
+	if summary.InputTokensMean < 1 {
+		summary.InputTokensMean = 128
+	}
+	if summary.OutputTokensMean < 1 {
+		summary.OutputTokensMean = 32
+	}
+	var measured map[string]any
+	var response struct {
+		Benchmark map[string]any `json:"benchmark"`
+	}
+	benchmarkRequest := map[string]any{"requests": summary.Requests, "concurrency": summary.PeakConcurrency, "input_tokens": summary.InputTokensMean, "output_tokens": summary.OutputTokensMean, "random_seed": 17, "revision": *revision}
+	if err = controlJSONWithTimeout(ctx, cfg, http.MethodPost, "/api/v1/deployments/"+url.PathEscape(deployment)+"/benchmarks", "", benchmarkRequest, &response, 35*time.Minute); err != nil {
+		return err
+	}
+	measured = response.Benchmark
+	if *output == "json" {
+		return printJSON(map[string]any{"replay": captured.Replay, "benchmark": measured, "execution": "explicit_aiperf_approximation"})
+	}
+	fmt.Printf("\nExecuted      explicit AIPerf approximation\nBenchmark     %s\nTTFT p95      %s ms\nOutput tok/s  %s\n", benchmarkValue(measured["id"]), benchmarkValue(measured["ttft_p95_ms"]), benchmarkValue(measured["output_token_throughput"]))
+	return nil
+}
+
+func capacityCommand(ctx context.Context, cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("capacity", flag.ContinueOnError)
+	windowText := fs.String("window", "720h", "observation window")
+	output := fs.String("output", "human", "human or json")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	window, err := time.ParseDuration(*windowText)
+	if err != nil || window <= 0 {
+		return errors.New("--window must be a positive duration")
+	}
+	var response struct {
+		Capacity      []domain.CapacitySummary `json:"capacity"`
+		Evidence      string                   `json:"evidence"`
+		WindowSeconds int                      `json:"window_seconds"`
+	}
+	if err = controlJSON(ctx, cfg, http.MethodGet, "/api/v1/capacity/intelligence", "window_seconds="+strconv.Itoa(int(window.Seconds())), nil, &response); err != nil {
+		return err
+	}
+	if *output == "json" {
+		return printJSON(response)
+	}
+	fmt.Printf("Capacity intelligence · observed tenant evidence · window %s\n\n", window)
+	if len(response.Capacity) == 0 {
+		fmt.Println("No capacity operations observed in this window.")
+		return nil
+	}
+	for _, row := range response.Capacity {
+		gpu := row.GPU
+		if gpu == "" {
+			gpu = "any"
+		}
+		fmt.Printf("%-14s %-10s %-10s %-12s attempts %-5d success %6.1f%% capacity failures %d\n", row.Provider, row.Runtime, row.ComputeMode, gpu, row.Attempts, row.SuccessRate*100, row.CapacityFailures)
+	}
 	return nil
 }
 

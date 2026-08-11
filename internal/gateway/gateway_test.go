@@ -84,6 +84,31 @@ func TestCompletionRewritesAlias(t *testing.T) {
 	}
 }
 
+func TestReplayShapeHashesSessionAndPrefixWithoutContent(t *testing.T) {
+	client := &http.Client{Transport: roundTripper(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"usage":{"prompt_tokens":12,"completion_tokens":3},"choices":[]}`))}, nil
+	})}
+	directory := routes.New()
+	directory.Put(routes.Snapshot{DeploymentID: "d1", Alias: "alias", UpstreamModel: "model", RouterURL: "http://router"})
+	recorder := &captureRecorder{}
+	handler := (&Gateway{Routes: directory, APIKey: "secret", Client: client, Recorder: recorder}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"alias","messages":[{"role":"system","content":"private policy"},{"role":"user","content":"hello"}]}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("X-InferCrane-Session-ID", "session-raw")
+	request.Header.Set("X-InferCrane-Parent-Session-ID", "parent-raw")
+	request.Header.Set("X-InferCrane-Tool-Pause-MS", "25.5")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	record := recorder.record
+	if response.Code != 200 || len(record.SessionIDHash) != 64 || len(record.ParentSessionIDHash) != 64 || len(record.SharedPrefixHash) != 64 || record.ToolPauseMS == nil || *record.ToolPauseMS != 25.5 {
+		t.Fatalf("status=%d record=%#v", response.Code, record)
+	}
+	encoded, _ := json.Marshal(record)
+	if strings.Contains(string(encoded), "private policy") || strings.Contains(string(encoded), "session-raw") || strings.Contains(string(encoded), "parent-raw") {
+		t.Fatalf("raw replay content persisted: %s", encoded)
+	}
+}
+
 func TestCompletionEnforcesTenantQuotaBeforeUpstream(t *testing.T) {
 	upstreamCalled := false
 	client := &http.Client{Transport: roundTripper(func(*http.Request) (*http.Response, error) {

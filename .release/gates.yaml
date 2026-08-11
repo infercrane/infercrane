@@ -83,6 +83,11 @@ milestone_gates:
     - inference_lab_measured_evidence_only_and_no_hidden_provisioning
     - inference_lab_missing_metrics_and_cost_remain_unavailable
     - recipe_lab_api_cli_sdk_openapi_and_docs_drift
+    - replay_content_exclusion_hmac_pseudonymization_and_canonical_digest
+    - replay_tenant_isolation_bounded_window_and_explicit_paid_execution
+    - artifact_cache_expiry_and_provider_delegated_idempotent_prefetch
+    - capacity_intelligence_tenant_window_sample_and_percentile_evidence
+    - replay_capacity_api_cli_sdk_openapi_and_docs_drift
   deferred_until_v1_manual_qualification:
     - runpod_elastic
     - runpod_serverless

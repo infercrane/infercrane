@@ -283,6 +283,60 @@ type InferenceRecord struct {
 	RetryCount                                              int
 	QueueMS, GenerationMS                                   *float64
 	FallbackReason                                          string
+	SessionIDHash, ParentSessionIDHash, SharedPrefixHash    string
+	ToolPauseMS                                             *float64
+}
+
+type ReplayTrace struct {
+	ID             string    `json:"id"`
+	TenantID       string    `json:"-"`
+	DeploymentID   string    `json:"deployment_id"`
+	DeploymentName string    `json:"deployment_name"`
+	RevisionID     string    `json:"revision_id,omitempty"`
+	SchemaVersion  string    `json:"schema_version"`
+	ShapeJSON      string    `json:"shape"`
+	SummaryJSON    string    `json:"summary"`
+	ShapeDigest    string    `json:"shape_digest"`
+	RequestCount   int       `json:"request_count"`
+	WindowStart    time.Time `json:"window_start"`
+	WindowEnd      time.Time `json:"window_end"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+type ArtifactCacheObservation struct {
+	ID, TenantID, ModelArtifactID, Provider, Region, Location string
+	State, Source, EvidenceJSON                               string
+	ObservedAt, ExpiresAt, CreatedAt                          time.Time
+}
+
+type ArtifactPrefetch struct {
+	ID, TenantID, ModelArtifactID, Provider, Region, Location string
+	Status, IdempotencyKey, ProviderOperationID, ErrorCode    string
+	CreatedAt, UpdatedAt                                      time.Time
+}
+
+type CapacityOperation struct {
+	ID, TenantID, Provider, Runtime, ComputeMode, Region, GPU string
+	Operation, ResourceKey, Outcome, ErrorCode                string
+	StartedAt, CompletedAt, CreatedAt                         time.Time
+	DurationSeconds                                           float64
+}
+
+type CapacitySummary struct {
+	Provider           string    `json:"provider"`
+	Runtime            string    `json:"runtime"`
+	ComputeMode        string    `json:"compute_mode"`
+	Region             string    `json:"region"`
+	GPU                string    `json:"gpu"`
+	Attempts           int       `json:"attempts"`
+	Succeeded          int       `json:"succeeded"`
+	CapacityFailures   int       `json:"capacity_failures"`
+	RuntimeFailures    int       `json:"runtime_failures"`
+	SuccessRate        float64   `json:"success_rate"`
+	DurationP50Seconds *float64  `json:"duration_p50_seconds,omitempty"`
+	DurationP95Seconds *float64  `json:"duration_p95_seconds,omitempty"`
+	WindowStart        time.Time `json:"window_start"`
+	WindowEnd          time.Time `json:"window_end"`
 }
 
 type AdoptedWorkload struct {

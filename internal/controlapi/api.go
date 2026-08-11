@@ -110,6 +110,13 @@ type diagnosticStore interface {
 	RequestInspectionForTenant(context.Context, string, string) (domain.RequestInspection, error)
 	DiagnoseEndpoint(context.Context, string, string, time.Duration) ([]domain.DiagnosticFinding, error)
 }
+type intelligenceStore interface {
+	CaptureReplayTrace(context.Context, string, string, time.Duration, int) (domain.ReplayTrace, error)
+	ReplayTrace(context.Context, string, string) (domain.ReplayTrace, error)
+	RecordArtifactCacheObservation(context.Context, string, domain.ArtifactCacheObservation) (domain.ArtifactCacheObservation, error)
+	RequestArtifactPrefetch(context.Context, string, domain.ArtifactPrefetch) (domain.ArtifactPrefetch, bool, error)
+	CapacityIntelligence(context.Context, string, time.Duration) ([]domain.CapacitySummary, error)
+}
 type alertStore interface {
 	CreateAlertPolicy(context.Context, string, string, domain.AlertPolicy) (domain.AlertPolicy, error)
 	AlertPoliciesForEndpoint(context.Context, string, string) ([]domain.AlertPolicy, error)
@@ -188,6 +195,11 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/recipes", a.auth(authz.Read, a.recipes))
 	mux.HandleFunc("GET /api/v1/recipes/{name}/{version}", a.auth(authz.Read, a.getRecipe))
 	mux.HandleFunc("POST /api/v1/lab/evaluations", a.auth(authz.Deploy, a.evaluateLab))
+	mux.HandleFunc("POST /api/v1/deployments/{name}/replays", a.auth(authz.Deploy, a.captureReplay))
+	mux.HandleFunc("GET /api/v1/replays/{id}", a.auth(authz.Read, a.getReplay))
+	mux.HandleFunc("GET /api/v1/capacity/intelligence", a.auth(authz.Read, a.capacityIntelligence))
+	mux.HandleFunc("POST /api/v1/artifacts/{id}/cache-observations", a.auth(authz.Deploy, a.recordCacheObservation))
+	mux.HandleFunc("POST /api/v1/artifacts/{id}/prefetches", a.auth(authz.Deploy, a.requestPrefetch))
 	mux.HandleFunc("GET /api/v1/environments", a.auth(authz.Read, a.environments))
 	mux.HandleFunc("POST /api/v1/environments", a.auth(authz.Deploy, a.createEnvironment))
 	mux.HandleFunc("GET /api/v1/logical-models", a.auth(authz.Read, a.logicalModels))
@@ -1106,16 +1118,174 @@ func defaultValue(value, fallback string) string {
 	return value
 }
 
+func (a API) intelligence() (intelligenceStore, bool) {
+	store, ok := a.Store.(intelligenceStore)
+	return store, ok
+}
+
+func (a API) captureReplay(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.intelligence()
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "replay_unavailable", "replay storage is not configured")
+		return
+	}
+	var request struct {
+		WindowSeconds int `json:"window_seconds"`
+		MaxRequests   int `json:"max_requests"`
+	}
+	if !decodeMutationBody(w, r, &request) {
+		return
+	}
+	if request.WindowSeconds == 0 {
+		request.WindowSeconds = 86400
+	}
+	if request.MaxRequests == 0 {
+		request.MaxRequests = 1000
+	}
+	if request.WindowSeconds < 1 || request.WindowSeconds > 30*86400 || request.MaxRequests < 1 || request.MaxRequests > 10000 {
+		writeError(w, http.StatusUnprocessableEntity, "validation_failed", "window_seconds must be 1..2592000 and max_requests 1..10000")
+		return
+	}
+	principal := r.Context().Value(identityKey{}).(domain.Principal)
+	trace, err := store.CaptureReplayTrace(r.Context(), principal.TenantID, r.PathValue("name"), time.Duration(request.WindowSeconds)*time.Second, request.MaxRequests)
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, 404, "not_found", "deployment was not found")
+		return
+	}
+	if err != nil {
+		writeError(w, 500, "internal", "replay trace could not be captured")
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"replay": trace})
+}
+
+func (a API) getReplay(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.intelligence()
+	if !ok {
+		writeError(w, 501, "replay_unavailable", "replay storage is not configured")
+		return
+	}
+	principal := r.Context().Value(identityKey{}).(domain.Principal)
+	trace, err := store.ReplayTrace(r.Context(), principal.TenantID, r.PathValue("id"))
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, 404, "not_found", "replay trace was not found")
+		return
+	}
+	if err != nil {
+		writeError(w, 500, "internal", "replay trace lookup failed")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"replay": trace})
+}
+
+func (a API) capacityIntelligence(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.intelligence()
+	if !ok {
+		writeError(w, 501, "capacity_intelligence_unavailable", "capacity intelligence storage is not configured")
+		return
+	}
+	window := 30 * 24 * time.Hour
+	if raw := r.URL.Query().Get("window_seconds"); raw != "" {
+		seconds, err := strconv.Atoi(raw)
+		if err != nil || seconds < 1 || seconds > 365*86400 {
+			writeError(w, 422, "validation_failed", "window_seconds must be 1..31536000")
+			return
+		}
+		window = time.Duration(seconds) * time.Second
+	}
+	principal := r.Context().Value(identityKey{}).(domain.Principal)
+	rows, err := store.CapacityIntelligence(r.Context(), principal.TenantID, window)
+	if err != nil {
+		writeError(w, 500, "internal", "capacity intelligence lookup failed")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"capacity": rows, "evidence": "observed", "sample_scope": "tenant", "window_seconds": int(window.Seconds())})
+}
+
+func (a API) recordCacheObservation(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.intelligence()
+	if !ok {
+		writeError(w, 501, "artifact_cache_unavailable", "artifact cache storage is not configured")
+		return
+	}
+	var request struct {
+		Provider   string         `json:"provider"`
+		Region     string         `json:"region"`
+		Location   string         `json:"location"`
+		State      string         `json:"state"`
+		Source     string         `json:"source"`
+		Evidence   map[string]any `json:"evidence"`
+		TTLSeconds int            `json:"ttl_seconds"`
+	}
+	if !decodeMutationBody(w, r, &request) {
+		return
+	}
+	if request.TTLSeconds == 0 {
+		request.TTLSeconds = 300
+	}
+	evidence, _ := json.Marshal(request.Evidence)
+	principal := r.Context().Value(identityKey{}).(domain.Principal)
+	observed := time.Now().UTC()
+	row, err := store.RecordArtifactCacheObservation(r.Context(), principal.TenantID, domain.ArtifactCacheObservation{ModelArtifactID: r.PathValue("id"), Provider: request.Provider, Region: request.Region, Location: request.Location, State: request.State, Source: request.Source, EvidenceJSON: string(evidence), ObservedAt: observed, ExpiresAt: observed.Add(time.Duration(request.TTLSeconds) * time.Second)})
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, 404, "not_found", "model artifact was not found")
+		return
+	}
+	if err != nil {
+		writeError(w, 422, "validation_failed", err.Error())
+		return
+	}
+	writeJSON(w, 201, map[string]any{"observation": row})
+}
+
+func (a API) requestPrefetch(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.intelligence()
+	if !ok {
+		writeError(w, 501, "artifact_prefetch_unavailable", "artifact prefetch storage is not configured")
+		return
+	}
+	var request struct {
+		Provider       string `json:"provider"`
+		Region         string `json:"region"`
+		Location       string `json:"location"`
+		IdempotencyKey string `json:"idempotency_key"`
+	}
+	if !decodeMutationBody(w, r, &request) {
+		return
+	}
+	principal := r.Context().Value(identityKey{}).(domain.Principal)
+	row, created, err := store.RequestArtifactPrefetch(r.Context(), principal.TenantID, domain.ArtifactPrefetch{ModelArtifactID: r.PathValue("id"), Provider: request.Provider, Region: request.Region, Location: request.Location, IdempotencyKey: request.IdempotencyKey})
+	if errors.Is(err, domain.ErrConflict) {
+		writeError(w, 409, "idempotency_conflict", "idempotency key already identifies another prefetch request")
+		return
+	}
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, 404, "not_found", "model artifact was not found")
+		return
+	}
+	if err != nil {
+		writeError(w, 422, "validation_failed", err.Error())
+		return
+	}
+	status := http.StatusOK
+	if created {
+		status = http.StatusCreated
+	}
+	writeJSON(w, status, map[string]any{"prefetch": row, "created": created, "execution": "delegated_to_provider_adapter"})
+}
+
 func (a API) runBenchmark(w http.ResponseWriter, r *http.Request) {
 	if a.BenchmarkRunner == nil || a.GatewayURL == "" {
 		writeError(w, http.StatusServiceUnavailable, "benchmark_unavailable", "AIPerf benchmark execution is not configured")
 		return
 	}
 	var request struct {
-		Requests    int    `json:"requests"`
-		Concurrency int    `json:"concurrency"`
-		RandomSeed  int64  `json:"random_seed"`
-		Revision    string `json:"revision"`
+		Requests     int    `json:"requests"`
+		Concurrency  int    `json:"concurrency"`
+		InputTokens  int    `json:"input_tokens"`
+		OutputTokens int    `json:"output_tokens"`
+		RandomSeed   int64  `json:"random_seed"`
+		Revision     string `json:"revision"`
 	}
 	if !decodeMutationBody(w, r, &request) {
 		return
@@ -1126,6 +1296,16 @@ func (a API) runBenchmark(w http.ResponseWriter, r *http.Request) {
 	}
 	if request.RandomSeed == 0 {
 		request.RandomSeed = 17
+	}
+	if request.InputTokens == 0 {
+		request.InputTokens = 128
+	}
+	if request.OutputTokens == 0 {
+		request.OutputTokens = 32
+	}
+	if request.InputTokens < 1 || request.InputTokens > 1000000 || request.OutputTokens < 1 || request.OutputTokens > 1000000 {
+		writeError(w, http.StatusUnprocessableEntity, "validation_failed", "input_tokens and output_tokens must be 1..1000000")
+		return
 	}
 	principal := r.Context().Value(identityKey{}).(domain.Principal)
 	resolved, err := a.Store.ResolveForTenant(r.Context(), principal.TenantID, r.PathValue("name"))
@@ -1215,7 +1395,7 @@ func (a API) runBenchmark(w http.ResponseWriter, r *http.Request) {
 			apiKeyEnv = backend.APIKeyEnv
 		}
 	}
-	measured, err := a.BenchmarkRunner.Run(r.Context(), benchmark.Config{Binary: a.AIPerfBinary, Endpoint: endpoint, APIKey: credential, APIKeyEnv: apiKeyEnv, Model: model, Tokenizer: artifact.Repository, Requests: request.Requests, Concurrency: request.Concurrency, RandomSeed: request.RandomSeed})
+	measured, err := a.BenchmarkRunner.Run(r.Context(), benchmark.Config{Binary: a.AIPerfBinary, Endpoint: endpoint, APIKey: credential, APIKeyEnv: apiKeyEnv, Model: model, Tokenizer: artifact.Repository, Requests: request.Requests, Concurrency: request.Concurrency, InputTokens: request.InputTokens, OutputTokens: request.OutputTokens, RandomSeed: request.RandomSeed})
 	if err != nil {
 		writeError(w, 502, "benchmark_failed", err.Error())
 		return
@@ -1250,7 +1430,7 @@ func (a API) runBenchmark(w http.ResponseWriter, r *http.Request) {
 	if revisionSpec.ComputeMode == "" {
 		revisionSpec.ComputeMode = "elastic"
 	}
-	workload, _ := json.Marshal(map[string]any{"endpoint_type": "chat", "streaming": true, "request_count": request.Requests, "concurrency": request.Concurrency, "random_seed": request.RandomSeed, "output_tokens": 32, "server_token_count": true, "revision_selector": selector, "direct_revision_validation": selectedRevisionID != deployment.ActiveRevisionID})
+	workload, _ := json.Marshal(map[string]any{"endpoint_type": "chat", "streaming": true, "request_count": request.Requests, "concurrency": request.Concurrency, "random_seed": request.RandomSeed, "input_tokens": request.InputTokens, "output_tokens": request.OutputTokens, "server_token_count": true, "revision_selector": selector, "direct_revision_validation": selectedRevisionID != deployment.ActiveRevisionID})
 	runtimeConfig, _ := json.Marshal(map[string]any{"args": revisionSpec.RuntimeArgs})
 	var gpuCount *int
 	if revisionSpec.GPU != "" {

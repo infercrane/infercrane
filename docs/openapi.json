@@ -117,6 +117,70 @@
         ],
         "type": "object"
       },
+      "ArtifactCacheObservationRequest": {
+        "properties": {
+          "evidence": {
+            "type": "object"
+          },
+          "location": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "region": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "present",
+              "prefetching",
+              "missing",
+              "unknown"
+            ],
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "default": 300,
+            "maximum": 86400,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "provider",
+          "location",
+          "state",
+          "source"
+        ],
+        "type": "object"
+      },
+      "ArtifactPrefetchRequest": {
+        "properties": {
+          "idempotency_key": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "location": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "region": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "location",
+          "idempotency_key"
+        ],
+        "type": "object"
+      },
       "AsyncInferenceSubmit": {
         "additionalProperties": false,
         "properties": {
@@ -178,6 +242,18 @@
       "BenchmarkRequest": {
         "properties": {
           "concurrency": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "input_tokens": {
+            "default": 128,
+            "maximum": 1000000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "output_tokens": {
+            "default": 32,
+            "maximum": 1000000,
             "minimum": 1,
             "type": "integer"
           },
@@ -1109,6 +1185,23 @@
         "maxProperties": 0,
         "type": "object"
       },
+      "ReplayCaptureRequest": {
+        "properties": {
+          "max_requests": {
+            "default": 1000,
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "window_seconds": {
+            "default": 86400,
+            "maximum": 2592000,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
       "RuntimeWorkload": {
         "additionalProperties": false,
         "properties": {
@@ -1307,7 +1400,7 @@
   "info": {
     "description": "Durable, authenticated control-plane operations. Mutation responses may outlive the requesting client.",
     "title": "InferCrane Control API",
-    "version": "1.4.0"
+    "version": "1.8.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -1411,6 +1504,130 @@
         "summary": "Explicitly promote an adopted endpoint to traffic-managed ownership",
         "tags": [
           "Adoption"
+        ]
+      }
+    },
+    "/api/v1/artifacts/{id}/cache-observations": {
+      "post": {
+        "operationId": "recordArtifactCacheObservation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArtifactCacheObservationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Record bounded provider-native artifact cache evidence",
+        "tags": [
+          "Model artifacts"
+        ]
+      }
+    },
+    "/api/v1/artifacts/{id}/prefetches": {
+      "post": {
+        "operationId": "requestArtifactPrefetch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Stable key used to adopt the original durable operation after retries or disconnects.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArtifactPrefetchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Request provider-adapter artifact prefetch",
+        "tags": [
+          "Model artifacts"
         ]
       }
     },
@@ -1532,6 +1749,42 @@
         "summary": "List tenant audit events",
         "tags": [
           "Audit"
+        ]
+      }
+    },
+    "/api/v1/capacity/intelligence": {
+      "get": {
+        "operationId": "capacityIntelligence",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Summarize tenant-scoped observed capacity evidence",
+        "tags": [
+          "Capacity intelligence"
         ]
       }
     },
@@ -2398,6 +2651,63 @@
         "summary": "Set the persisted guard policy",
         "tags": [
           "Release Guard"
+        ]
+      }
+    },
+    "/api/v1/deployments/{name}/replays": {
+      "post": {
+        "operationId": "captureReplay",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplayCaptureRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Capture a privacy-preserving production workload shape",
+        "tags": [
+          "Replay"
         ]
       }
     },
@@ -4790,6 +5100,53 @@
         ]
       }
     },
+    "/api/v1/replays/{id}": {
+      "get": {
+        "operationId": "getReplay",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Inspect a persisted workload-shape trace",
+        "tags": [
+          "Replay"
+        ]
+      }
+    },
     "/api/v1/requests/{id}": {
       "get": {
         "operationId": "inspectRequest",
@@ -5558,6 +5915,9 @@
       "name": "Benchmarks"
     },
     {
+      "name": "Capacity intelligence"
+    },
+    {
       "name": "Deployments"
     },
     {
@@ -5585,6 +5945,9 @@
       "name": "Infrastructure"
     },
     {
+      "name": "Model artifacts"
+    },
+    {
       "name": "Operations"
     },
     {
@@ -5595,6 +5958,9 @@
     },
     {
       "name": "Release evidence"
+    },
+    {
+      "name": "Replay"
     },
     {
       "name": "Revisions"

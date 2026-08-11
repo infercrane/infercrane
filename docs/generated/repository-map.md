@@ -16,6 +16,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 | `internal/alert` | 1 | 1 | `TestDelivererRetriesBoundedlyAndRejectsPrivateDestinations`, `TestDelivererSignsCanonicalPayloadAndIsIdempotent` |
 | `internal/apicontract` | 1 | 1 | `TestDocumentBuilds`, `TestServerRouteCoverage` |
 | `internal/artifact` | 1 | 1 | `TestHuggingFaceResolveRejectsMutableResponse`, `TestHuggingFaceResolveReturnsImmutableIdentity` |
+| `internal/artifactcache` | 1 | 1 | `TestRequestIsProviderNeutralAndFailClosed` |
 | `internal/asyncinference` | 2 | 1 | `TestCipherRejectsWeakKey`, `TestCipherRoundTripAndBinding` |
 | `internal/authn` | 1 | 1 | `TestCacheAuthenticatesWithoutSourceOnRequestPath` |
 | `internal/authz` | 1 | 1 | `TestExplicitScopesCannotEscalateRole`, `TestPolicy` |
@@ -31,7 +32,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 | `internal/doctor` | 1 | 1 | `TestAWSBYOCCheckIsReadOnlyAndRequiredWhenRequested`, `TestCapacityCheckWarnsWithoutChangingHardware`, `TestCloudCredentialCheckIsRequiredWhenRequested`, `TestKubernetesCheckIsReadOnlyAndRequiredWhenRequested`, `TestRunPodServerlessCheckIsRequiredWhenRequested`, `TestRunReadyWithoutSkyPilot`, `TestRunReportsRequiredAndOptionalChecks` |
 | `internal/domain` | 1 | 0 | — |
 | `internal/external` | 2 | 2 | `TestBudgetPoolNeverAuthorizesBeyondLease`, `TestBudgetPoolPrefetchesWithoutPuttingStorageOnAuthorizePath`, `TestCoordinatorQueueOverflowUsesExplicitPolicyAndOneExternalRoute`, `TestCoordinatorRejectsUnacknowledgedPolicyBeforeCredentialResolution`, `TestCoordinatorSelectsOnlyHealthyExplicitBudgetedFallback` |
-| `internal/gateway` | 2 | 2 | `TestActiveStreamKeepsSelectedRouterAcrossGenerationPublish`, `TestAdmissionRejectsBeforeUpstream`, `TestAdmissionRetryBudgetDoesNotRetryStreaming`, `TestAdmissionRetryBudgetRetriesOnlyBufferedInternalRequest`, `TestAuthentication`, `TestClientCancellationPropagatesToRuntime`, `TestCompletionEnforcesTenantQuotaBeforeUpstream`, `TestCompletionPreservesOpenAIParametersAndStructuredTools`, `TestCompletionRecordsStreamingTelemetry`, `TestCompletionReplacesPublicCredentialForServerlessUpstream`, `TestCompletionRewritesAlias`, `TestCopyResponseStopsAtTerminalSSEMarker`, `TestDashboardIsMountedWithoutWeakeningAPIAuthentication`, `TestExternalFallbackConsumesHardBudgetBeforeTransmissionAndNeverReplaysStream`, `TestInferenceRequiresReadScope`, `TestModelsAreTenantScoped`, `TestQualifiedProtocolSurfacesPreservePayloads`, `TestResponsesUsageNormalizesInputAndOutputTokens`, `TestServerlessColdEvidenceClassifiesOnlyTriggeringRequest`, `TestServerlessFreshCapacityOverridesStaleRouteSnapshot`, `TestServerlessNonzeroWorkerEvidenceClassifiesWarmRequest`, `TestTelemetryExportsPrometheusHistogram`, `TestUnqualifiedProtocolFailsBeforeUpstream` |
+| `internal/gateway` | 2 | 2 | `TestActiveStreamKeepsSelectedRouterAcrossGenerationPublish`, `TestAdmissionRejectsBeforeUpstream`, `TestAdmissionRetryBudgetDoesNotRetryStreaming`, `TestAdmissionRetryBudgetRetriesOnlyBufferedInternalRequest`, `TestAuthentication`, `TestClientCancellationPropagatesToRuntime`, `TestCompletionEnforcesTenantQuotaBeforeUpstream`, `TestCompletionPreservesOpenAIParametersAndStructuredTools`, `TestCompletionRecordsStreamingTelemetry`, `TestCompletionReplacesPublicCredentialForServerlessUpstream`, `TestCompletionRewritesAlias`, `TestCopyResponseStopsAtTerminalSSEMarker`, `TestDashboardIsMountedWithoutWeakeningAPIAuthentication`, `TestExternalFallbackConsumesHardBudgetBeforeTransmissionAndNeverReplaysStream`, `TestInferenceRequiresReadScope`, `TestModelsAreTenantScoped`, `TestQualifiedProtocolSurfacesPreservePayloads`, `TestReplayShapeHashesSessionAndPrefixWithoutContent`, `TestResponsesUsageNormalizesInputAndOutputTokens`, `TestServerlessColdEvidenceClassifiesOnlyTriggeringRequest`, `TestServerlessFreshCapacityOverridesStaleRouteSnapshot`, `TestServerlessNonzeroWorkerEvidenceClassifiesWarmRequest`, `TestTelemetryExportsPrometheusHistogram`, `TestUnqualifiedProtocolFailsBeforeUpstream` |
 | `internal/integration` | 2 | 1 | `TestCapabilityEvidenceReferencesExistingTests`, `TestProfilesRejectInvalidOrUnsupportedClaims`, `TestProtocolCapabilitiesFailClosedAndProjectOnlySupportedClaims`, `TestRegistryLooksUpProfilesWithoutExposingMutableMaps`, `TestRegistryProducesDeterministicHonestSnapshot`, `TestRegistryRejectsDuplicateAdapters`, `TestRuntimeBackendsBindValidatedProfileToImplementation`, `TestRuntimeBackendsRejectInvalidComposition`, `TestSupportedCapabilityRequiresEvidence`, `TestV06CatalogPublishesExactRuntimeCompatibility`, `TestV09CatalogPublishesKubernetesWithoutAdvancedRoutingClaims`, `TestV15CatalogSeparatesProviderProfilesWithoutFabricatingQualification` |
 | `internal/lab` | 1 | 1 | `TestEvaluateLabelsOnlyMeasuredEvidenceAndNeverInventsCost` |
 | `internal/metrics` | 1 | 1 | `TestParse` |
@@ -45,6 +46,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 | `internal/recipe` | 1 | 1 | `TestBuildIsDeterministicAndRequiresMatchingMeasuredEvidence` |
 | `internal/reconcile` | 1 | 1 | `TestAdoptedEndpointOwnershipControlsRouteCompilation`, `TestExternalFallbackPublishesOnlyWhenNoPrimaryTargetIsHealthy`, `TestHealthyPrimaryIsNotDegradedByConfiguredExternalTarget`, `TestReconcilerCompilesStableEndpointWithoutDatabaseRequestLookup`, `TestRouterCandidateFailureLeavesOldGenerationServing`, `TestRouterCandidatePublishesBeforeOldRetires`, `TestRouterRetirementWaitsForPinnedRequest`, `TestServerlessRouteDoesNotWarmWorkersOrStartRouter`, `TestUnchangedGenerationUsesGenerationProcessIdentity`, `TestUnregisteredRuntimeNeverBecomesRoutable` |
 | `internal/releaseguard` | 1 | 1 | `TestEvaluateIsDeterministicAndConservative`, `TestEvaluateV2FailsClosedOnCompatibilitySyntheticAndCost`, `TestEvaluateV2WaitsWhenRequiredCostIsUnavailable` |
+| `internal/replay` | 1 | 1 | `TestBuildStoresShapeWithoutContentAndIsDeterministic` |
 | `internal/requestquota` | 1 | 1 | `TestPolicyChangeToZeroRevokesPreviouslyLeasedTokens`, `TestPoolAuthorizesOnlyPrefetchedHardLeaseWithoutIO`, `TestZeroQuotaFailsClosed` |
 | `internal/router` | 2 | 1 | `TestCommandUsesUpstreamPolicyAndSingleAttempt` |
 | `internal/routes` | 1 | 1 | `TestDirectoryIsolatesSameAliasByTenant`, `TestDirectoryOrdersAndRemovesSnapshots`, `TestEndpointPromotionPinsExistingRequestGeneration`, `TestRemovedEndpointDoesNotFallThroughToLegacyDeploymentAlias`, `TestRetiredGenerationWaitsForPinnedRequest`, `TestWeightedEndpointSelectionIsDeterministic` |
@@ -53,7 +55,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 | `internal/safehttp` | 1 | 1 | `TestWebhookClientRejectsPrivateResolvedAddress`, `TestWebhookClientRejectsRedirects` |
 | `internal/secrets` | 1 | 1 | `TestEnvironmentRejectsUnsafeReferenceNames`, `TestEnvironmentResolvesWithoutLeakingValueInErrors` |
 | `internal/spec` | 1 | 1 | `TestLoadElasticDefaults`, `TestLoadKubernetesElasticSpec`, `TestLoadPortableRuntimeContracts`, `TestLoadRejectsExcludedRuntimeAndCloud`, `TestLoadRejectsNonzeroServerlessMinimum`, `TestLoadRejectsUnknownPortableWorkloadField`, `TestLoadRejectsUnsupportedDeploymentSpecVersionAndKind`, `TestLoadServerlessArtifactAndRuntimeIdentity` |
-| `internal/store` | 27 | 8 | `TestAdoptInspectDiagnoseAndAlertPolicyAreTenantScoped`, `TestApplyDeploymentConvergesTargetMembership`, `TestAsyncInferenceIsIdempotentFencedCancellableAndExpirable`, `TestBadCandidateAcceptanceRejectsRevisionAndDeletesCapacity`, `TestBenchmarkGuardMetricsRequireComparableAIPerfRuns`, `TestBenchmarkHistoryPersistsReproductionMetadata`, `TestCancellingQueuedOperationPreventsClaim`, `TestCancellingWaitingOperationRequiresCleanupClaim`, `TestCandidateSGLangWorkloadIsCanonicalAndImmutable`, `TestConcurrentStartupSerializesMigrations`, `TestControlPlaneMembershipAllowsOverlapAndRejectsIncompatibleLiveVersion`, `TestControlPlaneMembershipIgnoresExpiredInstanceDuringCompatibilityCheck`, `TestCreateDeploymentRejectsIncompatibleTargets`, `TestDeploymentLifecycleMutationsAreSerialized`, `TestDeploymentRevisionsAreImmutableAndPromoteExplicitly`, `TestDurableAutoscalingAcceptanceOneToTwoToOne`, `TestEndpointReleaseGuardPersistsDeterministicPlanDecision`, `TestEndpointServingPlanRejectsCrossTenantBinding`, `TestEveryHistoricalMigrationPrefixUpgradesToCurrent`, `TestGuardedPromotionAtomicallySwitchesRevisionAndTargets`, `TestGuardedRolloutAcceptanceResumesAfterCutoverRestart`, `TestInferenceDecisionPolicyEvidenceAndRecommendationsAreTenantSafe`, `TestInferencePassportEvidenceIsTenantSafeAndBytePreserving`, `TestLegacyDeploymentBackfillsStableEndpoint`, `TestMigrationLedgerRejectsTamperGapAndNewerDatabase`, `TestModelArtifactIsImmutablePerRevision`, `TestNormalizeServingPlanIsCanonicalAndBounded`, `TestOperationQueueLeasesAndRecoversExpiredWork`, `TestOrphanedTargetsOnlyReturnsProvisionedUnusedTargets`, `TestPrincipalCredentialRotationAndRevocation`, `TestReleaseGuardPersistsDeterministicCandidateDecision`, `TestReplicaIntentAndProviderIdentityAreIdempotent`, `TestRequestQuotaReservationsAreDistributedAndWindowed`, `TestRequestTelemetryPersistsMeasurementsAndDimensions`, `TestRevisionMetricsCountsHealthyActiveReplicas`, `TestRevisionTransitionsAreReplaySafeForDurableOperation`, `TestRunPodServerlessAcceptanceConvergesAtZeroAndDeletesEndpoint`, `TestScaleToQueuesExactlyOneDurableOperation`, `TestScopedPrincipalAndExternalBudgetAreTenantSafe`, `TestStaleLeaseCannotCheckpointOrFinish`, `TestSubmitCloudDeploymentIsAtomicAndIdempotent`, `TestSubmitDeploymentDeleteWithdrawsDesiredStateAndQueuesCleanup`, `TestTargetAndDeploymentLifecycle`, `TestTargetConflict`, `TestTenantQuotaRejectsDeploymentBeyondReplicaLimit`, `TestTenantResourcesCanReuseNamesWithoutCrossTenantVisibility`, `TestV03MigrationPreservesLegacyPermissionsWithoutEscalation` |
+| `internal/store` | 28 | 8 | `TestAdoptInspectDiagnoseAndAlertPolicyAreTenantScoped`, `TestApplyDeploymentConvergesTargetMembership`, `TestAsyncInferenceIsIdempotentFencedCancellableAndExpirable`, `TestBadCandidateAcceptanceRejectsRevisionAndDeletesCapacity`, `TestBenchmarkGuardMetricsRequireComparableAIPerfRuns`, `TestBenchmarkHistoryPersistsReproductionMetadata`, `TestCancellingQueuedOperationPreventsClaim`, `TestCancellingWaitingOperationRequiresCleanupClaim`, `TestCandidateSGLangWorkloadIsCanonicalAndImmutable`, `TestConcurrentStartupSerializesMigrations`, `TestControlPlaneMembershipAllowsOverlapAndRejectsIncompatibleLiveVersion`, `TestControlPlaneMembershipIgnoresExpiredInstanceDuringCompatibilityCheck`, `TestCreateDeploymentRejectsIncompatibleTargets`, `TestDeploymentLifecycleMutationsAreSerialized`, `TestDeploymentRevisionsAreImmutableAndPromoteExplicitly`, `TestDurableAutoscalingAcceptanceOneToTwoToOne`, `TestEndpointReleaseGuardPersistsDeterministicPlanDecision`, `TestEndpointServingPlanRejectsCrossTenantBinding`, `TestEveryHistoricalMigrationPrefixUpgradesToCurrent`, `TestGuardedPromotionAtomicallySwitchesRevisionAndTargets`, `TestGuardedRolloutAcceptanceResumesAfterCutoverRestart`, `TestInferenceDecisionPolicyEvidenceAndRecommendationsAreTenantSafe`, `TestInferencePassportEvidenceIsTenantSafeAndBytePreserving`, `TestLegacyDeploymentBackfillsStableEndpoint`, `TestMigrationLedgerRejectsTamperGapAndNewerDatabase`, `TestModelArtifactIsImmutablePerRevision`, `TestNormalizeServingPlanIsCanonicalAndBounded`, `TestOperationQueueLeasesAndRecoversExpiredWork`, `TestOrphanedTargetsOnlyReturnsProvisionedUnusedTargets`, `TestPrincipalCredentialRotationAndRevocation`, `TestReleaseGuardPersistsDeterministicCandidateDecision`, `TestReplicaIntentAndProviderIdentityAreIdempotent`, `TestRequestQuotaReservationsAreDistributedAndWindowed`, `TestRequestTelemetryPersistsMeasurementsAndDimensions`, `TestRevisionMetricsCountsHealthyActiveReplicas`, `TestRevisionTransitionsAreReplaySafeForDurableOperation`, `TestRunPodServerlessAcceptanceConvergesAtZeroAndDeletesEndpoint`, `TestScaleToQueuesExactlyOneDurableOperation`, `TestScopedPrincipalAndExternalBudgetAreTenantSafe`, `TestStaleLeaseCannotCheckpointOrFinish`, `TestSubmitCloudDeploymentIsAtomicAndIdempotent`, `TestSubmitDeploymentDeleteWithdrawsDesiredStateAndQueuesCleanup`, `TestTargetAndDeploymentLifecycle`, `TestTargetConflict`, `TestTenantQuotaRejectsDeploymentBeyondReplicaLimit`, `TestTenantResourcesCanReuseNamesWithoutCrossTenantVisibility`, `TestV03MigrationPreservesLegacyPermissionsWithoutEscalation` |
 | `internal/support` | 1 | 1 | `TestMatrixCanQualifyNewAdaptersWithoutChangingValidationCode`, `TestV01QualificationIsExplicit`, `TestV03QualifiesOnlyNarrowAWSElasticPath`, `TestV06QualifiesExactPortableRuntimeCombinations`, `TestV09QualifiesOnlyKubernetesElasticRuntimeCombinations` |
 | `internal/testtools/fake-router` | 1 | 0 | — |
 | `internal/testtools/fake-vllm` | 1 | 0 | — |
@@ -79,6 +81,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 - `c`
 - `cancel`
 - `cancelled`
+- `capacity`
 - `chat`
 - `completions`
 - `configure`
@@ -132,6 +135,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 - `recipes`
 - `recommend`
 - `reject`
+- `replay`
 - `request`
 - `responses`
 - `revoke`
@@ -170,6 +174,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 - `DELETE /api/v1/secrets/{id}`
 - `GET /api/v1/async/jobs/{id}`
 - `GET /api/v1/audit-events`
+- `GET /api/v1/capacity/intelligence`
 - `GET /api/v1/deployments`
 - `GET /api/v1/deployments/{name}`
 - `GET /api/v1/deployments/{name}/benchmarks`
@@ -196,6 +201,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 - `GET /api/v1/orphans`
 - `GET /api/v1/recipes`
 - `GET /api/v1/recipes/{name}/{version}`
+- `GET /api/v1/replays/{id}`
 - `GET /api/v1/requests/{id}`
 - `GET /api/v1/secrets`
 - `GET /api/v1/system/instances`
@@ -208,12 +214,15 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 - `GET /readyz`
 - `GET /v1/models`
 - `POST /api/v1/adoptions/endpoints`
+- `POST /api/v1/artifacts/{id}/cache-observations`
+- `POST /api/v1/artifacts/{id}/prefetches`
 - `POST /api/v1/deployments`
 - `POST /api/v1/deployments/apply`
 - `POST /api/v1/deployments/{name}/benchmarks`
 - `POST /api/v1/deployments/{name}/passports`
 - `POST /api/v1/deployments/{name}/recipes`
 - `POST /api/v1/deployments/{name}/recommendations`
+- `POST /api/v1/deployments/{name}/replays`
 - `POST /api/v1/deployments/{name}/rollback`
 - `POST /api/v1/deployments/{name}/rollouts`
 - `POST /api/v1/deployments/{name}/rollouts/guard/evaluate`
@@ -328,12 +337,15 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 - `adopted_workloads`
 - `alert_deliveries`
 - `alert_policies`
+- `artifact_cache_observations`
+- `artifact_prefetches`
 - `async_inference_jobs`
 - `audit_events`
 - `autoscaling_state`
 - `backend_bindings`
 - `benchmark_results`
 - `capacity_evidence`
+- `capacity_operations`
 - `control_plane_instances`
 - `deployment_events`
 - `deployment_revisions`
@@ -362,6 +374,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 - `release_guard_evaluations`
 - `release_guard_monitors`
 - `release_guard_policies`
+- `replay_traces`
 - `replicas`
 - `request_records`
 - `router_generations`
@@ -409,6 +422,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 - `internal/store/migrations/029_admission_async_inference.sql`
 - `internal/store/migrations/030_control_plane_instances.sql`
 - `internal/store/migrations/031_recipes_and_lab.sql`
+- `internal/store/migrations/032_replay_cache_capacity.sql`
 
 ## Architecture decisions
 

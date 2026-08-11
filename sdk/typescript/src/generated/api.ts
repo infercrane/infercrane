@@ -243,6 +243,31 @@ export class ControlApi {
     return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
   }
 
+  captureReplay(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = `/deployments/${encodeURIComponent(name)}/replays`;
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  getReplay(id: string): Promise<Record<string, JsonValue>> {
+    const path = `/replays/${encodeURIComponent(id)}`;
+    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+  }
+
+  capacityIntelligence(): Promise<Record<string, JsonValue>> {
+    const path = '/capacity/intelligence';
+    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+  }
+
+  recordArtifactCacheObservation(id: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = `/artifacts/${encodeURIComponent(id)}/cache-observations`;
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  requestArtifactPrefetch(id: string, body: JsonValue, idempotencyKey: string): Promise<Record<string, JsonValue>> {
+    const path = `/artifacts/${encodeURIComponent(id)}/prefetches`;
+    return this.transport.request('POST', path, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
+  }
+
   createInferencePassport(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
     const path = `/deployments/${encodeURIComponent(name)}/passports`;
     return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;

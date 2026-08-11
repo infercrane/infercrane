@@ -351,6 +351,16 @@ infercrane lab 'Qwen/Qwen3-8B@IMMUTABLE_COMMIT' --max-ttft-p95-ms 250
 
 See [Recipes and Inference Lab](/features/recipes-lab) for the provenance and missing-evidence contract.
 
+## Replay and capacity
+
+```bash
+infercrane replay coder-production --window 24h
+infercrane capacity --window 720h
+```
+
+Replay captures content-free production shape by default. Running an AIPerf approximation requires both
+`--execute` and `--acknowledge-cost`. See [Replay and capacity intelligence](/features/replay-capacity).
+
 ## Revisions and Release Guard
 
 ```bash

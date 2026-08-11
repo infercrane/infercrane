@@ -203,6 +203,26 @@ class ControlAPI:
         path = "/lab/evaluations"
         return cast(dict[str, Any], self._transport.request("POST", path, body=body))
 
+    def capture_replay(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = f"/deployments/{quote(name, safe='')}/replays"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
+    def get_replay(self, id: str) -> dict[str, Any]:
+        path = f"/replays/{quote(id, safe='')}"
+        return cast(dict[str, Any], self._transport.request("GET", path))
+
+    def capacity_intelligence(self) -> dict[str, Any]:
+        path = "/capacity/intelligence"
+        return cast(dict[str, Any], self._transport.request("GET", path))
+
+    def record_artifact_cache_observation(self, id: str, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = f"/artifacts/{quote(id, safe='')}/cache-observations"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
+    def request_artifact_prefetch(self, id: str, *, body: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
+        path = f"/artifacts/{quote(id, safe='')}/prefetches"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body, idempotency_key=idempotency_key))
+
     def create_inference_passport(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
         path = f"/deployments/{quote(name, safe='')}/passports"
         return cast(dict[str, Any], self._transport.request("POST", path, body=body))

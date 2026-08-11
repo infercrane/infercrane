@@ -18,7 +18,7 @@ import (
 
 type Config struct {
 	Binary, Endpoint, APIKey, APIKeyEnv, Model, Tokenizer string
-	Requests, Concurrency, OutputTokens                   int
+	Requests, Concurrency, InputTokens, OutputTokens      int
 	RandomSeed                                            int64
 	Timeout                                               time.Duration
 }
@@ -63,6 +63,9 @@ func run(ctx context.Context, cfg Config, commands commandRunner) (Result, error
 	if cfg.OutputTokens <= 0 {
 		cfg.OutputTokens = 32
 	}
+	if cfg.InputTokens <= 0 {
+		cfg.InputTokens = 128
+	}
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = 30 * time.Minute
 	}
@@ -72,7 +75,7 @@ func run(ctx context.Context, cfg Config, commands commandRunner) (Result, error
 	}
 	defer os.RemoveAll(dir)
 	prefix := "infercrane"
-	args := []string{"profile", "--model", cfg.Model, "--url", strings.TrimRight(cfg.Endpoint, "/"), "--endpoint-type", "chat", "--streaming", "--use-server-token-count", "--request-count", strconv.Itoa(cfg.Requests), "--concurrency", strconv.Itoa(cfg.Concurrency), "--random-seed", strconv.FormatInt(cfg.RandomSeed, 10), "--prompt-output-tokens-mean", strconv.Itoa(cfg.OutputTokens), "--prompt-output-tokens-stddev", "0", "--ui", "none", "--export-level", "records", "--output-artifact-dir", dir, "--profile-export-prefix", prefix, "--no-auto-plot", "--no-gpu-telemetry", "--no-server-metrics"}
+	args := []string{"profile", "--model", cfg.Model, "--url", strings.TrimRight(cfg.Endpoint, "/"), "--endpoint-type", "chat", "--streaming", "--use-server-token-count", "--request-count", strconv.Itoa(cfg.Requests), "--concurrency", strconv.Itoa(cfg.Concurrency), "--random-seed", strconv.FormatInt(cfg.RandomSeed, 10), "--prompt-input-tokens-mean", strconv.Itoa(cfg.InputTokens), "--prompt-input-tokens-stddev", "0", "--prompt-output-tokens-mean", strconv.Itoa(cfg.OutputTokens), "--prompt-output-tokens-stddev", "0", "--ui", "none", "--export-level", "records", "--output-artifact-dir", dir, "--profile-export-prefix", prefix, "--no-auto-plot", "--no-gpu-telemetry", "--no-server-metrics"}
 	if cfg.Tokenizer != "" {
 		args = append(args, "--tokenizer", cfg.Tokenizer)
 	}

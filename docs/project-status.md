@@ -34,6 +34,7 @@ but lacks production qualification; **planned** is not a product capability.
 | Prometheus latency histograms and alerts | Implemented | Baseline rules require workload-specific tuning. |
 | Reproducible benchmark and recovery tooling | Experimental | AIPerf execution and benchmark history are implemented; local control-plane HA/restore is qualified while real GPU and customer PostgreSQL evidence remain external. |
 | Model Recipes and Inference Lab | Local-qualified | Immutable artifact/revision/AIPerf recipes and tenant-scoped measured comparisons are implemented; public registry and real GPU catalog evidence are deferred. |
+| Inference Replay and Capacity Intelligence | In qualification | Content-free workload-shape capture, explicit AIPerf approximation, bounded cache observations, delegated prefetch intents, and tenant-scoped capacity evidence are implemented; real-provider evidence remains deferred. |
 | Provider pricing contract | Implemented | Timestamp and staleness semantics; no live provider catalog is shipped. |
 | Bounded autoscaling controller | Experimental | Durable fleet scaling and router-fenced scale-down are enabled; real RunPod 1→N→1 acceptance remains. |
 | Immutable ModelArtifact identity | Experimental | Hugging Face references resolve to immutable commits with grounded metadata; real transfer/cache evidence remains. |

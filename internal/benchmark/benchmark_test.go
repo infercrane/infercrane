@@ -52,7 +52,7 @@ func TestRunUsesIndependentServingModelAndTokenizer(t *testing.T) {
 	runner := &capturingRunner{}
 	_, _ = run(context.Background(), Config{Endpoint: "http://example", Model: "logical-deployment", Tokenizer: "Qwen/Qwen3-8B", Requests: 1, Concurrency: 1}, runner)
 	command := strings.Join(runner.profileArgs, " ")
-	if !strings.Contains(command, "--model logical-deployment") || !strings.Contains(command, "--tokenizer Qwen/Qwen3-8B") || !strings.Contains(command, "--prompt-output-tokens-mean 32") {
+	if !strings.Contains(command, "--model logical-deployment") || !strings.Contains(command, "--tokenizer Qwen/Qwen3-8B") || !strings.Contains(command, "--prompt-input-tokens-mean 128") || !strings.Contains(command, "--prompt-output-tokens-mean 32") {
 		t.Fatalf("args=%v", runner.profileArgs)
 	}
 }

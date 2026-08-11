@@ -158,6 +158,9 @@ type CapacityAdvisor interface {
 type CapacityEvidenceStore interface {
 	RecordCapacityEvidence(context.Context, domain.CapacityEvidence) (domain.CapacityEvidence, error)
 }
+type CapacityOperationStore interface {
+	RecordCapacityOperation(context.Context, domain.CapacityOperation) (domain.CapacityOperation, error)
+}
 
 // ReplicaBackend binds a provider adapter to durable identity and the runtime
 // it launches. Provider support is registered at composition time rather than
@@ -916,12 +919,36 @@ func mustJSON(value any) string {
 	return string(encoded)
 }
 
-func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBackend, runtime RuntimeInspector, operation domain.Operation, request CloudRequest, ordinal int) (string, string, string, error) {
+func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBackend, runtime RuntimeInspector, operation domain.Operation, request CloudRequest, ordinal int) (targetName, endpoint, resourceID string, resultErr error) {
+	started := time.Now().UTC()
 	provider := backend.Provider
 	externalKey := fmt.Sprintf("%s-r%d", request.DeploymentID, ordinal)
 	if request.Candidate {
 		externalKey = fmt.Sprintf("%s-%s-r%d", request.DeploymentID, request.RevisionID, ordinal)
 	}
+	defer func() {
+		evidenceStore, ok := store.(CapacityOperationStore)
+		if !ok {
+			return
+		}
+		outcome, errorCode := "succeeded", ""
+		if resultErr != nil {
+			outcome = "provider_failed"
+			var failure operations.Failure
+			if errors.As(resultErr, &failure) {
+				errorCode = failure.Code
+				switch {
+				case failure.Code == "provider_capacity_unavailable" || failure.Code == "provider_capacity_constrained":
+					outcome = "capacity_unavailable"
+				case strings.HasPrefix(failure.Code, "runtime_"):
+					outcome = "runtime_failed"
+				case failure.Retryable:
+					outcome = "pending"
+				}
+			}
+		}
+		_, _ = evidenceStore.RecordCapacityOperation(context.WithoutCancel(ctx), domain.CapacityOperation{TenantID: request.TenantID, Provider: backend.Name, Runtime: request.Runtime, ComputeMode: request.ComputeMode, Region: request.Region, GPU: request.GPU, Operation: "replica.ensure", ResourceKey: externalKey, Outcome: outcome, ErrorCode: errorCode, StartedAt: started, CompletedAt: time.Now().UTC()})
+	}()
 	replica, _, err := store.EnsureReplicaIntent(ctx, domain.Replica{TenantID: request.TenantID, DeploymentID: request.DeploymentID, RevisionID: request.RevisionID, Ordinal: ordinal, ExternalKey: externalKey, Provider: backend.Name})
 	if err != nil {
 		return "", "", "", classify("replica_intent_failed", err)
@@ -1015,7 +1042,7 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 	if err = store.ObserveReplica(ctx, replica.ID, "ready", observation.Endpoint, "healthy", observation.Details, time.Now()); err != nil {
 		return "", "", "", classify("observation_failed", err)
 	}
-	targetName := fmt.Sprintf("%s-r%d", request.Name, ordinal)
+	targetName = fmt.Sprintf("%s-r%d", request.Name, ordinal)
 	if request.Candidate {
 		targetName = fmt.Sprintf("%s-%s-r%d", request.Name, request.RevisionID[:min(8, len(request.RevisionID))], ordinal)
 	}

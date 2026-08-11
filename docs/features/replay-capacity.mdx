@@ -1,0 +1,52 @@
+---
+title: Replay and capacity intelligence
+description: Capture privacy-preserving workload shape and reason from observed capacity evidence.
+---
+
+# Replay and capacity intelligence
+
+Inference Replay records the timing and token-count shape of production traffic without storing prompt
+or output bodies. Session, parent-session, and shared-prefix identities are tenant-secret HMACs, not raw
+identifiers. A trace records its window, sample count, schema, canonical digest, and evidence class.
+
+```bash
+infercrane replay coder-production --window 24h --max-requests 1000
+```
+
+This command only captures persisted observations. It sends no workload and creates no infrastructure.
+To approximate the captured mean token sizes and peak concurrency with AIPerf, opt in explicitly:
+
+```bash
+infercrane replay coder-production \
+  --execute --acknowledge-cost --revision candidate
+```
+
+Execution is an AIPerf approximation, not a reproduction of prompt semantics or exact arrival timing.
+The distinction is preserved in output and evidence.
+
+## Capacity intelligence
+
+```bash
+infercrane capacity --window 720h
+```
+
+Capacity Intelligence groups this tenant's observed lifecycle attempts by provider adapter, runtime,
+compute mode, region, and GPU. It reports sample counts, success rate, normalized capacity/runtime
+failures, and p50/p95 operation duration. It does not claim global availability or combine customer data.
+
+## Artifact placement
+
+The artifact cache contract records short-lived provider-native observations (`present`, `prefetching`,
+`missing`, or `unknown`). Prefetch requests are durable and idempotent, but execution belongs to the
+selected infrastructure adapter. InferCrane does not implement a model CDN or download protocol.
+
+<Warning>
+Cache observations expire after at most 24 hours. Missing or stale evidence must never be treated as a
+cache hit or a readiness guarantee.
+</Warning>
+
+## Current boundary
+
+Local qualification proves capture privacy, deterministic digests, tenancy, aggregation, and delegated
+prefetch semantics. Real cache behavior and capacity distributions require the consolidated provider
+qualification run.
