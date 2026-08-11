@@ -14,7 +14,7 @@ engineering checkpoints rather than public stable releases.
 | v0.6.0 | Automated gates passed | Qualified OCI workloads and SGLang |
 | v0.7.0 | Automated gates passed | Recommendations, capacity intelligence, hybrid overflow and SLO policy |
 | v0.8.0 | Automated gates passed | Release Guard V2 and Inference Passport |
-| v0.9.0 | Implementation gates passed | Kubernetes/KServe boundaries and namespaced lifecycle; exact-commit qualification pending |
+| v0.9.0 | Automated gates passed | Kubernetes/KServe boundaries and namespaced lifecycle |
 | v1.0.0 | Planned | Multi-provider hardening, packaging and consolidated RC evidence |
 
 Each milestone specification defines scope, exclusions, public surface, verification, and evidence.
