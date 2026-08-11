@@ -1,7 +1,7 @@
 class Infercrane < Formula
   desc "Production inference without the platform engineering"
   homepage "https://github.com/infercrane/infercrane"
-  # Generated release formulae replace every RELEASE_* token from checksums.txt.
+  # Generated release formulae substitute these template values from checksums.txt.
   version "RELEASE_VERSION"
   license "Apache-2.0"
 
