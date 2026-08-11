@@ -400,8 +400,10 @@ run_preflight() {
 run_elastic() {
   require_paid_approval
   run_preflight
+  ready_timeout=${INFERCRANE_ACCEPTANCE_READY_TIMEOUT_SECONDS:-2700}
   record elastic-deploy ic deploy "$MODEL" --name "$ELASTIC_NAME" --cloud runpod --gpu "$GPU" \
-    --min 1 --max 2 --wait --idempotency-key "$ELASTIC_NAME-create" --output json
+    --min 1 --max 2 --wait --wait-timeout "${ready_timeout}s" \
+    --idempotency-key "$ELASTIC_NAME-create" --output json
   wait_ready "$ELASTIC_NAME"
   ic request "$ELASTIC_NAME" --message "acceptance probe" --output json >/dev/null
   ic request "$ELASTIC_NAME" --message "stream acceptance probe" --stream >/dev/null
