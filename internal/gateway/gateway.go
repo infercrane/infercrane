@@ -22,6 +22,7 @@ import (
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/openaicompat"
 	"github.com/infercrane/infercrane/internal/routes"
+	"github.com/infercrane/infercrane/internal/runtimecontract"
 )
 
 type Recorder interface {
@@ -74,6 +75,10 @@ func (g *Gateway) Handler() http.Handler {
 		mux.Handle("/dashboard/", g.Dashboard)
 	}
 	mux.HandleFunc("POST /v1/chat/completions", g.Telemetry.Observe(g.auth(g.completions)))
+	mux.HandleFunc("POST /v1/chat/completions/batch", g.Telemetry.Observe(g.auth(g.chatBatch)))
+	mux.HandleFunc("POST /v1/responses", g.Telemetry.Observe(g.auth(g.responses)))
+	mux.HandleFunc("POST /v1/embeddings", g.Telemetry.Observe(g.auth(g.embeddings)))
+	mux.HandleFunc("POST /v1/completions", g.Telemetry.Observe(g.auth(g.legacyCompletions)))
 	return mux
 }
 func (g *Gateway) ready(w http.ResponseWriter, r *http.Request) {
@@ -116,18 +121,33 @@ func (g *Gateway) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "deployments": len(g.Routes.List())})
 }
 func (g *Gateway) models(w http.ResponseWriter, r *http.Request) {
-	data := make([]map[string]string, 0)
+	data := make([]map[string]any, 0)
 	principal := r.Context().Value(principalKey{}).(domain.Principal)
 	for _, route := range g.Routes.ListForTenant(principal.TenantID) {
 		owner := "deployment"
 		if route.EndpointID != "" {
 			owner = "endpoint"
 		}
-		data = append(data, map[string]string{"id": route.Alias, "object": "model", "owned_by": owner})
+		data = append(data, map[string]any{"id": route.Alias, "object": "model", "owned_by": owner, "infercrane_capabilities": route.ProtocolCapabilities})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": data})
 }
 func (g *Gateway) completions(w http.ResponseWriter, r *http.Request) {
+	g.proxyInference(w, r, "chat", "chat/completions")
+}
+func (g *Gateway) chatBatch(w http.ResponseWriter, r *http.Request) {
+	g.proxyInference(w, r, "batch", "chat/completions/batch")
+}
+func (g *Gateway) responses(w http.ResponseWriter, r *http.Request) {
+	g.proxyInference(w, r, "responses", "responses")
+}
+func (g *Gateway) embeddings(w http.ResponseWriter, r *http.Request) {
+	g.proxyInference(w, r, "embeddings", "embeddings")
+}
+func (g *Gateway) legacyCompletions(w http.ResponseWriter, r *http.Request) {
+	g.proxyInference(w, r, "completions", "completions")
+}
+func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operation, resource string) {
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 16<<20))
 	if err != nil {
 		openAIError(w, "Invalid JSON body", http.StatusBadRequest, "invalid_request_error")
@@ -150,8 +170,18 @@ func (g *Gateway) completions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer releaseRoute()
+	capabilities := route.ProtocolCapabilities
+	legacyChatRoute := operation == "chat" && capabilities == (runtimecontract.ProtocolCapabilities{})
+	if !legacyChatRoute && !capabilities.Supports(operation) {
+		openAIError(w, "Endpoint does not support the '"+operation+"' protocol", http.StatusUnprocessableEntity, "unsupported_protocol")
+		return
+	}
 	payload["model"] = route.UpstreamModel
 	streaming, _ := payload["stream"].(bool)
+	if streaming && !capabilities.Streaming && !legacyChatRoute {
+		openAIError(w, "Endpoint does not support streaming for the '"+operation+"' protocol", http.StatusUnprocessableEntity, "unsupported_protocol")
+		return
+	}
 	body, err = json.Marshal(payload)
 	if err != nil {
 		openAIError(w, "Invalid JSON body", http.StatusBadRequest, "invalid_request_error")
@@ -168,7 +198,7 @@ func (g *Gateway) completions(w http.ResponseWriter, r *http.Request) {
 	started := time.Now()
 	if g.RequestAuthorizer != nil {
 		if err := g.RequestAuthorizer.Authorize(principal.TenantID); err != nil {
-			g.record(r.Context(), requestID, route, alias, started, http.StatusTooManyRequests, "tenant_request_quota_exhausted", streaming, responseObservation{}, capacityEvidence{})
+			g.record(r.Context(), requestID, route, alias, operation, started, http.StatusTooManyRequests, "tenant_request_quota_exhausted", streaming, responseObservation{}, capacityEvidence{})
 			openAIError(w, "Tenant request-rate quota is exhausted", http.StatusTooManyRequests, "rate_limit_error")
 			return
 		}
@@ -176,12 +206,12 @@ func (g *Gateway) completions(w http.ResponseWriter, r *http.Request) {
 	evidenceResult := g.observeCapacity(r.Context(), route, started)
 	if route.ExternalPolicyID != "" {
 		if g.ExternalAuthorizer == nil {
-			g.record(r.Context(), requestID, route, alias, started, http.StatusTooManyRequests, "external_budget_unavailable", streaming, responseObservation{}, <-evidenceResult)
+			g.record(r.Context(), requestID, route, alias, operation, started, http.StatusTooManyRequests, "external_budget_unavailable", streaming, responseObservation{}, <-evidenceResult)
 			openAIError(w, "External fallback budget is unavailable", http.StatusTooManyRequests, "rate_limit_error")
 			return
 		}
 		if _, err := g.ExternalAuthorizer.Authorize(route.ExternalPolicyID); err != nil {
-			g.record(r.Context(), requestID, route, alias, started, http.StatusTooManyRequests, "external_budget_exhausted", streaming, responseObservation{}, <-evidenceResult)
+			g.record(r.Context(), requestID, route, alias, operation, started, http.StatusTooManyRequests, "external_budget_exhausted", streaming, responseObservation{}, <-evidenceResult)
 			openAIError(w, "External fallback hard budget is exhausted", http.StatusTooManyRequests, "rate_limit_error")
 			return
 		}
@@ -200,7 +230,7 @@ func (g *Gateway) completions(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	target, err := openaicompat.Endpoint(route.RouterURL, "chat/completions")
+	target, err := openaicompat.Endpoint(route.RouterURL, resource)
 	if err != nil {
 		openAIError(w, "Inference upstream is unavailable", http.StatusServiceUnavailable, "server_error")
 		return
@@ -227,7 +257,7 @@ func (g *Gateway) completions(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, context.DeadlineExceeded) {
 			status, errorType, message = http.StatusGatewayTimeout, "timeout", "Inference upstream timed out"
 		}
-		g.record(r.Context(), requestID, route, alias, started, status, errorType, streaming, responseObservation{}, <-evidenceResult)
+		g.record(r.Context(), requestID, route, alias, operation, started, status, errorType, streaming, responseObservation{}, <-evidenceResult)
 		openAIError(w, message, status, "server_error")
 		return
 	}
@@ -246,7 +276,7 @@ func (g *Gateway) completions(w http.ResponseWriter, r *http.Request) {
 			errorType = "upstream_disconnect"
 		}
 	}
-	g.record(context.WithoutCancel(r.Context()), requestID, route, alias, started, resp.StatusCode, errorType, streaming, observation, <-evidenceResult)
+	g.record(context.WithoutCancel(r.Context()), requestID, route, alias, operation, started, resp.StatusCode, errorType, streaming, observation, <-evidenceResult)
 	if g.Logger != nil {
 		g.Logger.Info("inference request", "request_id", requestID, "traceparent", traceParent, "tenant_id", principal.TenantID, "deployment_id", route.DeploymentID, "status", resp.StatusCode, "duration_ms", float64(time.Since(started).Microseconds())/1000)
 	}
@@ -288,7 +318,7 @@ func (g *Gateway) observeCapacity(ctx context.Context, route routes.Snapshot, st
 	return result
 }
 
-func (g *Gateway) record(ctx context.Context, id string, route routes.Snapshot, requestModel string, started time.Time, status int, errorType string, streaming bool, observation responseObservation, evidence capacityEvidence) {
+func (g *Gateway) record(ctx context.Context, id string, route routes.Snapshot, requestModel, operation string, started time.Time, status int, errorType string, streaming bool, observation responseObservation, evidence capacityEvidence) {
 	if g.Recorder == nil {
 		return
 	}
@@ -299,7 +329,7 @@ func (g *Gateway) record(ctx context.Context, id string, route routes.Snapshot, 
 		ttft = &value
 	}
 	responseModel, inputTokens, outputTokens := observation.usage()
-	record := domain.InferenceRecord{RequestID: id, TenantID: route.TenantID, DeploymentID: route.DeploymentID, RevisionID: route.RevisionID, TargetID: route.TargetID, LogicalModelID: route.LogicalModelID, EnvironmentID: route.EnvironmentID, EndpointID: route.EndpointID, ServingPlanID: route.ServingPlanID, BindingID: route.BindingID, Provider: route.Provider, Runtime: route.Runtime, ComputeMode: route.ComputeMode, OperationName: "chat", RequestModel: requestModel, ResponseModel: responseModel, SemanticConventionSchema: "https://opentelemetry.io/schemas/gen-ai/1.42.0", StartedAt: started, StatusCode: status, LatencyMS: latency, TTFTMS: ttft, InputTokens: inputTokens, OutputTokens: outputTokens, Streaming: streaming, ErrorType: errorType, ColdStart: evidence.coldStart, ProviderWorkersAtArrival: evidence.workers, ProviderCapacityObservedAt: evidence.observedAt}
+	record := domain.InferenceRecord{RequestID: id, TenantID: route.TenantID, DeploymentID: route.DeploymentID, RevisionID: route.RevisionID, TargetID: route.TargetID, LogicalModelID: route.LogicalModelID, EnvironmentID: route.EnvironmentID, EndpointID: route.EndpointID, ServingPlanID: route.ServingPlanID, BindingID: route.BindingID, Provider: route.Provider, Runtime: route.Runtime, ComputeMode: route.ComputeMode, OperationName: operation, RequestModel: requestModel, ResponseModel: responseModel, SemanticConventionSchema: "https://opentelemetry.io/schemas/gen-ai/1.42.0", StartedAt: started, StatusCode: status, LatencyMS: latency, TTFTMS: ttft, InputTokens: inputTokens, OutputTokens: outputTokens, Streaming: streaming, ErrorType: errorType, ColdStart: evidence.coldStart, ProviderWorkersAtArrival: evidence.workers, ProviderCapacityObservedAt: evidence.observedAt}
 	if err := g.Recorder.RecordRequest(ctx, record); err != nil && g.Logger != nil {
 		g.Logger.Error("record request", "error", err, "request_id", id)
 	}
@@ -334,6 +364,8 @@ func (o responseObservation) usage() (string, *int, *int) {
 		Usage struct {
 			PromptTokens     *int `json:"prompt_tokens"`
 			CompletionTokens *int `json:"completion_tokens"`
+			InputTokens      *int `json:"input_tokens"`
+			OutputTokens     *int `json:"output_tokens"`
 		} `json:"usage"`
 	}
 	decode := func(value []byte) bool { return json.Unmarshal(value, &response) == nil }
@@ -352,6 +384,8 @@ func (o responseObservation) usage() (string, *int, *int) {
 				Usage *struct {
 					PromptTokens     *int `json:"prompt_tokens"`
 					CompletionTokens *int `json:"completion_tokens"`
+					InputTokens      *int `json:"input_tokens"`
+					OutputTokens     *int `json:"output_tokens"`
 				} `json:"usage"`
 			}
 			if json.Unmarshal(value, &chunk) == nil {
@@ -361,11 +395,20 @@ func (o responseObservation) usage() (string, *int, *int) {
 				if chunk.Usage != nil {
 					response.Usage.PromptTokens = chunk.Usage.PromptTokens
 					response.Usage.CompletionTokens = chunk.Usage.CompletionTokens
+					response.Usage.InputTokens = chunk.Usage.InputTokens
+					response.Usage.OutputTokens = chunk.Usage.OutputTokens
 				}
 			}
 		}
 	}
-	return response.Model, response.Usage.PromptTokens, response.Usage.CompletionTokens
+	inputTokens, outputTokens := response.Usage.PromptTokens, response.Usage.CompletionTokens
+	if inputTokens == nil {
+		inputTokens = response.Usage.InputTokens
+	}
+	if outputTokens == nil {
+		outputTokens = response.Usage.OutputTokens
+	}
+	return response.Model, inputTokens, outputTokens
 }
 
 func copyResponse(w http.ResponseWriter, resp *http.Response, observation *responseObservation) error {

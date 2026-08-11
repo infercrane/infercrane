@@ -81,6 +81,34 @@ type RuntimeProfile struct {
 	DefaultWorkload runtimecontract.Workload `json:"default_workload,omitzero"`
 }
 
+// ProtocolCapabilities projects independently qualified protocol behavior
+// from the runtime profile. Unknown and unsupported declarations fail closed.
+func (p RuntimeProfile) ProtocolCapabilities() runtimecontract.ProtocolCapabilities {
+	var out runtimecontract.ProtocolCapabilities
+	for _, capability := range p.Capabilities {
+		if capability.State != CapabilitySupported {
+			continue
+		}
+		switch capability.Name {
+		case "buffered_chat":
+			out.ChatCompletions = true
+		case "responses":
+			out.Responses = true
+		case "embeddings":
+			out.Embeddings = true
+		case "chat_batch":
+			out.Batch = true
+		case "completions":
+			out.Completions = true
+		case "streaming_chat", "streaming_responses", "streaming_completions":
+			out.Streaming = true
+		case "tool_calling":
+			out.ToolCalling = true
+		}
+	}
+	return out
+}
+
 type RuntimeCompatibility struct {
 	Runtime  string             `json:"runtime"`
 	Cloud    string             `json:"cloud"`

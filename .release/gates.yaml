@@ -65,6 +65,10 @@ milestone_gates:
     - request_inspector_tenant_isolation_and_content_exclusion
     - deterministic_doctor_findings_with_persisted_evidence
     - signed_webhook_delivery_retry_and_secret_redaction
+    - protocol_capabilities_fail_closed_in_immutable_route_snapshot
+    - responses_embeddings_completions_and_chat_batch_faithful_proxy
+    - protocol_operation_telemetry_and_content_exclusion
+    - pinned_runtime_protocol_claims_match_versioned_evidence
   deferred_until_v1_manual_qualification:
     - runpod_elastic
     - runpod_serverless

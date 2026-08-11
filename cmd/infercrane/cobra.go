@@ -185,6 +185,7 @@ func addHelpFlags(command *cobra.Command, name string) {
 		}
 	case "request":
 		stringFlag("message", "Say hello in one sentence.", "user message")
+		stringFlag("protocol", "chat", "chat, responses, embeddings, completions, or batch")
 		boolFlag("stream", "stream response text as it arrives")
 	case "status":
 		boolFlag("watch", "refresh until interrupted")

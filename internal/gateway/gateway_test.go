@@ -14,6 +14,7 @@ import (
 
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/routes"
+	"github.com/infercrane/infercrane/internal/runtimecontract"
 )
 
 type fakeAuthenticator struct{ principal domain.Principal }
@@ -129,6 +130,92 @@ func TestCompletionPreservesOpenAIParametersAndStructuredTools(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestQualifiedProtocolSurfacesPreservePayloads(t *testing.T) {
+	for _, test := range []struct {
+		path      string
+		operation string
+		body      string
+	}{
+		{path: "/v1/responses", operation: "responses", body: `{"model":"alias","input":"hello","reasoning":{"effort":"low"}}`},
+		{path: "/v1/embeddings", operation: "embeddings", body: `{"model":"alias","input":["one","two"],"encoding_format":"float"}`},
+		{path: "/v1/completions", operation: "completions", body: `{"model":"alias","prompt":"hello","logprobs":2}`},
+		{path: "/v1/chat/completions/batch", operation: "batch", body: `{"model":"alias","messages":[[{"role":"user","content":"one"}],[{"role":"user","content":"two"}]]}`},
+	} {
+		t.Run(test.operation, func(t *testing.T) {
+			client := &http.Client{Transport: roundTripper(func(request *http.Request) (*http.Response, error) {
+				if request.URL.Path != test.path {
+					t.Fatalf("upstream path=%q want %q", request.URL.Path, test.path)
+				}
+				var payload map[string]any
+				if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+					t.Fatal(err)
+				}
+				if payload["model"] != "upstream-model" {
+					t.Fatalf("model=%v", payload["model"])
+				}
+				switch test.operation {
+				case "responses":
+					if payload["input"] != "hello" || payload["reasoning"].(map[string]any)["effort"] != "low" {
+						t.Fatalf("responses payload changed: %#v", payload)
+					}
+				case "embeddings":
+					if len(payload["input"].([]any)) != 2 || payload["encoding_format"] != "float" {
+						t.Fatalf("embeddings payload changed: %#v", payload)
+					}
+				case "completions":
+					if payload["prompt"] != "hello" || payload["logprobs"] != float64(2) {
+						t.Fatalf("completions payload changed: %#v", payload)
+					}
+				}
+				return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"model":"upstream-model","usage":{"prompt_tokens":2,"completion_tokens":1}}`))}, nil
+			})}
+			directory := routes.New()
+			directory.Put(routes.Snapshot{TenantID: "global", DeploymentID: "d1", Alias: "alias", UpstreamModel: "upstream-model", RouterURL: "http://runtime", ProtocolCapabilities: runtimecontract.ProtocolCapabilities{Responses: true, Embeddings: true, Completions: true, Batch: true}})
+			captured := &captureRecorder{}
+			handler := (&Gateway{Routes: directory, APIKey: "secret", Client: client, Recorder: captured}).Handler()
+			request := httptest.NewRequest(http.MethodPost, test.path, strings.NewReader(test.body))
+			request.Header.Set("Authorization", "Bearer secret")
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+			captured.mu.Lock()
+			operation := captured.record.OperationName
+			captured.mu.Unlock()
+			if operation != test.operation {
+				t.Fatalf("recorded operation=%q", operation)
+			}
+		})
+	}
+}
+
+func TestUnqualifiedProtocolFailsBeforeUpstream(t *testing.T) {
+	called := false
+	client := &http.Client{Transport: roundTripper(func(*http.Request) (*http.Response, error) {
+		called = true
+		return nil, errors.New("unexpected upstream request")
+	})}
+	directory := routes.New()
+	directory.Put(routes.Snapshot{TenantID: "global", Alias: "alias", UpstreamModel: "model", RouterURL: "http://runtime", ProtocolCapabilities: runtimecontract.ProtocolCapabilities{ChatCompletions: true}})
+	handler := (&Gateway{Routes: directory, APIKey: "secret", Client: client}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"alias","input":"hello"}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusUnprocessableEntity || called || !strings.Contains(response.Body.String(), "unsupported_protocol") {
+		t.Fatalf("status=%d called=%t body=%s", response.Code, called, response.Body.String())
+	}
+}
+
+func TestResponsesUsageNormalizesInputAndOutputTokens(t *testing.T) {
+	input, output := 7, 3
+	_, actualInput, actualOutput := (responseObservation{body: []byte(`{"model":"model","usage":{"input_tokens":7,"output_tokens":3}}`)}).usage()
+	if actualInput == nil || *actualInput != input || actualOutput == nil || *actualOutput != output {
+		t.Fatalf("input=%v output=%v", actualInput, actualOutput)
 	}
 }
 

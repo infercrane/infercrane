@@ -2141,11 +2141,12 @@ func requestCommand(ctx context.Context, cfg config.Config, args []string) error
 		return requestInspectCommand(ctx, cfg, args[1:])
 	}
 	if len(args) == 0 {
-		return errors.New("usage: infercrane request DEPLOYMENT [--message TEXT] [--stream] [--output human|json]")
+		return errors.New("usage: infercrane request ENDPOINT [--protocol chat|responses|embeddings|completions|batch] [--message TEXT] [--stream] [--output human|json]")
 	}
 	name := args[0]
 	fs := flag.NewFlagSet("request", flag.ContinueOnError)
 	message := fs.String("message", "Say hello in one sentence.", "user message")
+	protocol := fs.String("protocol", "chat", "chat, responses, embeddings, completions, or batch")
 	stream := fs.Bool("stream", false, "stream response text as it arrives")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args[1:]); err != nil {
@@ -2160,12 +2161,42 @@ func requestCommand(ctx context.Context, cfg config.Config, args []string) error
 	if *stream && *output == "json" {
 		return errors.New("--stream cannot be combined with --output json")
 	}
-	payload := map[string]any{"model": name, "messages": []map[string]string{{"role": "user", "content": *message}}, "stream": *stream}
+	path := ""
+	payload := map[string]any{"model": name}
+	switch *protocol {
+	case "chat":
+		path = "/v1/chat/completions"
+		payload["messages"] = []map[string]string{{"role": "user", "content": *message}}
+		payload["stream"] = *stream
+	case "responses":
+		path = "/v1/responses"
+		payload["input"] = *message
+	case "embeddings":
+		path = "/v1/embeddings"
+		payload["input"] = *message
+		if *stream {
+			return errors.New("--stream is not supported with --protocol embeddings")
+		}
+	case "completions":
+		path = "/v1/completions"
+		payload["prompt"] = *message
+	case "batch":
+		path = "/v1/chat/completions/batch"
+		payload["messages"] = [][]map[string]string{{{"role": "user", "content": *message}}}
+		if *stream {
+			return errors.New("--stream is not supported with --protocol batch")
+		}
+	default:
+		return errors.New("--protocol must be chat, responses, embeddings, completions, or batch")
+	}
+	if *stream {
+		payload["stream"] = true
+	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("encode inference request: %w", err)
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(cfg.ControlURL, "/")+"/v1/chat/completions", bytes.NewReader(encoded))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(cfg.ControlURL, "/")+path, bytes.NewReader(encoded))
 	if err != nil {
 		return fmt.Errorf("create inference request: %w", err)
 	}
@@ -2199,6 +2230,15 @@ func requestCommand(ctx context.Context, cfg config.Config, args []string) error
 		return fmt.Errorf("decode inference response: %w", err)
 	}
 	if *output == "json" {
+		var complete any
+		if err = json.Unmarshal(data, &complete); err != nil {
+			return fmt.Errorf("decode inference JSON: %w", err)
+		}
+		out, _ := json.MarshalIndent(complete, "", "  ")
+		fmt.Println(string(out))
+		return nil
+	}
+	if *protocol != "chat" {
 		var complete any
 		if err = json.Unmarshal(data, &complete); err != nil {
 			return fmt.Errorf("decode inference JSON: %w", err)

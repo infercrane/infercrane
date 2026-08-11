@@ -17,8 +17,8 @@ engineering checkpoints rather than public stable releases.
 | v0.9.0 | Automated gates passed | Kubernetes/KServe boundaries and namespaced lifecycle |
 | v1.0.0 | Automated gates passed | Multi-provider hardening, packaging and consolidated RC evidence; paid infrastructure deferred |
 | v1.1.0 | Automated gates passed | Stable logical models, environments, endpoints, backend bindings and serving plans |
-| v1.2.0 | In progress | Incremental workload adoption, request inspection, deterministic Doctor and signed alerts |
-| v1.3.0 | Planned | Protocol capability conformance for Responses, embeddings, batch and completions |
+| v1.2.0 | Automated gates passed | Incremental workload adoption, request inspection, deterministic Doctor and signed alerts |
+| v1.3.0 | In progress | Protocol capability conformance for Responses, embeddings, batch and completions |
 | v1.4.0 | Planned | Admission control and bounded asynchronous inference |
 | v1.5.0 | Planned | Qualified provider-neutral AWS, GCP and CoreWeave profiles |
 | v1.6.0 | Planned | Control-plane HA, recovery, private networking, workload identity and safe upgrades |

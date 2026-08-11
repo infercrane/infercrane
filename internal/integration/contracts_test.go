@@ -158,6 +158,23 @@ func TestRegistryLooksUpProfilesWithoutExposingMutableMaps(t *testing.T) {
 	}
 }
 
+func TestProtocolCapabilitiesFailClosedAndProjectOnlySupportedClaims(t *testing.T) {
+	profile := RuntimeProfile{Capabilities: []Capability{
+		{Name: "buffered_chat", State: CapabilitySupported},
+		{Name: "streaming_chat", State: CapabilitySupported},
+		{Name: "responses", State: CapabilityUnknown},
+		{Name: "embeddings", State: CapabilitySupported},
+		{Name: "completions", State: CapabilityUnsupported},
+	}}
+	capabilities := profile.ProtocolCapabilities()
+	if !capabilities.ChatCompletions || !capabilities.Streaming || !capabilities.Embeddings {
+		t.Fatalf("supported capabilities were not projected: %+v", capabilities)
+	}
+	if capabilities.Responses || capabilities.Completions || capabilities.Batch {
+		t.Fatalf("unknown or unsupported capabilities became routable: %+v", capabilities)
+	}
+}
+
 func TestCapabilityEvidenceReferencesExistingTests(t *testing.T) {
 	registry, err := V09Catalog()
 	if err != nil {

@@ -1138,7 +1138,7 @@
   "info": {
     "description": "Durable, authenticated control-plane operations. Mutation responses may outlive the requesting client.",
     "title": "InferCrane Control API",
-    "version": "1.2.0"
+    "version": "1.3.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -4593,6 +4593,192 @@
         ]
       }
     },
+    "/v1/chat/completions/batch": {
+      "post": {
+        "description": "The selected endpoint must explicitly qualify this protocol. InferCrane rewrites only the logical model identity and otherwise preserves the request and response.",
+        "operationId": "createChatCompletionBatch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Protocol-native JSON or streaming response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The selected endpoint has not qualified this protocol"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Proxy a capability-qualified OpenAI-compatible request",
+        "tags": [
+          "Inference"
+        ]
+      }
+    },
+    "/v1/completions": {
+      "post": {
+        "description": "The selected endpoint must explicitly qualify this protocol. InferCrane rewrites only the logical model identity and otherwise preserves the request and response.",
+        "operationId": "createCompletion",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Protocol-native JSON or streaming response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The selected endpoint has not qualified this protocol"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Proxy a capability-qualified OpenAI-compatible request",
+        "tags": [
+          "Inference"
+        ]
+      }
+    },
+    "/v1/embeddings": {
+      "post": {
+        "description": "The selected endpoint must explicitly qualify this protocol. InferCrane rewrites only the logical model identity and otherwise preserves the request and response.",
+        "operationId": "createEmbedding",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Protocol-native JSON or streaming response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The selected endpoint has not qualified this protocol"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Proxy a capability-qualified OpenAI-compatible request",
+        "tags": [
+          "Inference"
+        ]
+      }
+    },
     "/v1/models": {
       "get": {
         "operationId": "listInferenceModels",
@@ -4624,6 +4810,68 @@
           }
         ],
         "summary": "List logical inference models",
+        "tags": [
+          "Inference"
+        ]
+      }
+    },
+    "/v1/responses": {
+      "post": {
+        "description": "The selected endpoint must explicitly qualify this protocol. InferCrane rewrites only the logical model identity and otherwise preserves the request and response.",
+        "operationId": "createResponse",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Protocol-native JSON or streaming response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The selected endpoint has not qualified this protocol"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Proxy a capability-qualified OpenAI-compatible request",
         "tags": [
           "Inference"
         ]

@@ -58,6 +58,16 @@ func main() {
 		}
 		write(w, map[string]any{"id": "chatcmpl-fake", "object": "chat.completion", "model": body["model"], "choices": []any{map[string]any{"index": 0, "message": map[string]string{"role": "assistant", "content": "response from " + *worker}, "finish_reason": "stop"}}})
 	})
+	mux.HandleFunc("POST /v1/completions", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		write(w, map[string]any{"id": "cmpl-fake", "object": "text_completion", "model": body["model"], "choices": []any{map[string]any{"index": 0, "text": "response from " + *worker, "finish_reason": "stop"}}, "usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 3, "total_tokens": 4}})
+	})
+	mux.HandleFunc("POST /v1/embeddings", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		write(w, map[string]any{"object": "list", "model": body["model"], "data": []any{map[string]any{"object": "embedding", "index": 0, "embedding": []float64{0.1, 0.2, 0.3}}}, "usage": map[string]int{"prompt_tokens": 1, "total_tokens": 1}})
+	})
 	handler := http.Handler(mux)
 	if *apiKey != "" {
 		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

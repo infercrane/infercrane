@@ -185,11 +185,14 @@ Use the logical deployment name without assembling an HTTP request by hand:
 ```bash
 infercrane request qwen-prod --message "Explain continuous batching in one sentence."
 infercrane request qwen-prod --message "Count to five." --stream
+infercrane request search-production --protocol embeddings --message "Document to embed"
+infercrane request coder-production --protocol responses --message "Review this function"
 ```
 
 `--output json` returns the OpenAI-compatible choices and usage object for non-streaming requests.
 The command uses the configured endpoint and credential; applications can continue to use any
-OpenAI-compatible SDK directly.
+OpenAI-compatible SDK directly. `--protocol` accepts `chat`, `responses`, `embeddings`,
+`completions`, or `batch`; the endpoint must explicitly qualify the selected surface.
 
 Inspect the persisted routing and timing evidence for a returned `X-Request-Id` without retrieving
 prompt or output content:
@@ -260,7 +263,7 @@ Supported strategies are `round-robin`, `consistent-hash`, `power-of-two`, and `
 | `status DEPLOYMENT [--watch]` | Show serving health separately from convergence, readiness, traffic, revisions, and the blocking operation |
 | `events DEPLOYMENT` | Show ordered durable deployment events |
 | `logs DEPLOYMENT [--follow]` | Stream a filtered durable operational timeline |
-| `request DEPLOYMENT` | Send a buffered or streaming OpenAI-compatible inference request |
+| `request ENDPOINT` | Send a capability-qualified OpenAI-compatible inference request |
 | `inspect DEPLOYMENT` | Show raw targets, replicas, artifacts, request statistics, and infrastructure metadata |
 | `operation ID` | Inspect durable progress and result once |
 | `operation watch ID` | Resume following a durable operation after disconnect or from another terminal |

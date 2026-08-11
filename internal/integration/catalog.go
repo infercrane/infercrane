@@ -51,6 +51,10 @@ func V02Catalog() (*Registry, error) {
 		Runtime: support.DefaultRuntime, ContractVersion: RuntimeContractV1, AdapterVersion: "builtin-v0.2", EngineVersion: support.DefaultRuntimeVersion, Protocol: "openai",
 		Capabilities: []Capability{
 			{Name: "buffered_chat", State: CapabilitySupported, Evidence: "go:test/internal/gateway#TestCompletionRewritesAlias"},
+			{Name: "completions", State: CapabilitySupported, Evidence: "go:test/internal/gateway#TestQualifiedProtocolSurfacesPreservePayloads"},
+			{Name: "embeddings", State: CapabilitySupported, Detail: "requires an embedding-capable model", Evidence: "go:test/internal/gateway#TestQualifiedProtocolSurfacesPreservePayloads"},
+			{Name: "responses", State: CapabilityUnsupported, Detail: "the pinned vLLM 0.8.5.post1 runtime predates the Responses API; use an explicitly qualified runtime profile"},
+			{Name: "chat_batch", State: CapabilityUnsupported, Detail: "the pinned vLLM 0.8.5.post1 runtime does not qualify the online chat batch API"},
 			{Name: "cancellation", State: CapabilitySupported, Evidence: "go:test/internal/gateway#TestClientCancellationPropagatesToRuntime"},
 			{Name: "graceful_drain", State: CapabilitySupported, Evidence: "go:test/internal/reconcile#TestRouterRetirementWaitsForPinnedRequest"},
 			{Name: "readiness", State: CapabilitySupported, Evidence: "go:test/internal/conformance#TestRuntimeReadinessConformance"},

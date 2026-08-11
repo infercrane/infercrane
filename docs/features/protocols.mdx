@@ -1,0 +1,52 @@
+---
+title: "Inference protocols"
+description: "Faithful OpenAI-compatible protocol proxying with explicit runtime capability gates."
+---
+
+InferCrane exposes one stable logical endpoint while preserving the selected runtime's native
+OpenAI-compatible request and response shape. It does not translate every workload into a lossy
+universal schema.
+
+## Surfaces
+
+| Protocol | Gateway path | Pinned vLLM profile |
+|---|---|---|
+| Chat Completions | `POST /v1/chat/completions` | Qualified |
+| Completions | `POST /v1/completions` | Qualified for text-generation models |
+| Embeddings | `POST /v1/embeddings` | Qualified for embedding-capable models |
+| Responses | `POST /v1/responses` | Gateway implemented; pinned runtime not qualified |
+| Online chat batch | `POST /v1/chat/completions/batch` | Gateway implemented; pinned runtime not qualified |
+
+The current [vLLM protocol documentation](https://docs.vllm.ai/en/latest/serving/online_serving/openai_compatible_server/)
+lists these upstream surfaces, but availability depends on both runtime version and model task.
+InferCrane therefore treats each capability independently. An unknown or unsupported claim returns
+`422 unsupported_protocol` before any request reaches the workload.
+
+## Model identity
+
+Send the stable InferCrane endpoint name as `model`. The gateway selects a pinned route generation
+and rewrites only that field to the binding's upstream model identity.
+
+```bash
+curl -fsS "$INFERCRANE_URL/v1/embeddings" \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"search-production","input":["first document","second document"]}'
+```
+
+All other protocol fields pass through. Upstream status, content type, response body, cancellation,
+and streaming semantics are preserved. InferCrane never retries a partially transmitted stream.
+
+## Telemetry and privacy
+
+Every accepted surface records the protocol operation, logical endpoint, selected binding,
+deployment/revision where known, provider/runtime dimensions, latency, status, token counts where
+the upstream reports them, and streaming errors. Prompt, response, embedding vectors, and tool
+arguments are not persisted by default.
+
+## Current boundary
+
+The default vLLM image remains pinned to `0.8.5.post1`; its profile does not claim Responses or the
+newer online chat-batch endpoint. This is deliberate capability honesty, not automatic version
+guessing. A later runtime update must pass protocol conformance and real GPU qualification before
+those claims become default.

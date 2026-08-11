@@ -102,9 +102,10 @@
         "group": "DEPLOY",
         "pages": [
           "deployment-spec",
-          "features/endpoints",
-          "features/adoption-diagnostics",
-          "features/model-artifacts",
+        "features/endpoints",
+        "features/adoption-diagnostics",
+        "features/protocols",
+        "features/model-artifacts",
           "features/custom-oci",
           "features/provisioning",
           "features/gateway",

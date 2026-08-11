@@ -72,6 +72,16 @@ structured_response=$(curl -fsS -H "Authorization: Bearer $api_key" -H 'Content-
   "$base_url/v1/chat/completions")
 printf '%s' "$structured_response" | jq -e '.choices[0].message.content | fromjson | .answer == "ok"' >/dev/null
 
+completion_response=$(curl -fsS -H "Authorization: Bearer $api_key" -H 'Content-Type: application/json' \
+  -d "{\"model\":\"$model\",\"prompt\":\"complete this\",\"max_tokens\":8}" \
+  "$base_url/v1/completions")
+printf '%s' "$completion_response" | jq -e --arg model 'Qwen/Qwen3-8B' '.model == $model and .choices[0].text != ""' >/dev/null
+
+embedding_response=$(curl -fsS -H "Authorization: Bearer $api_key" -H 'Content-Type: application/json' \
+  -d "{\"model\":\"$model\",\"input\":\"embed this\"}" \
+  "$base_url/v1/embeddings")
+printf '%s' "$embedding_response" | jq -e --arg model 'Qwen/Qwen3-8B' '.model == $model and (.data[0].embedding | length) == 3' >/dev/null
+
 # Prove incremental adoption against existing workloads without transferring or
 # deleting their lifecycle. Run-scoped endpoint names keep repeated local runs independent.
 adoption_suffix=$(date -u +%H%M%S)-$$

@@ -16,6 +16,7 @@ import (
 	"github.com/infercrane/infercrane/internal/provision"
 	"github.com/infercrane/infercrane/internal/router"
 	"github.com/infercrane/infercrane/internal/routes"
+	"github.com/infercrane/infercrane/internal/runtimecontract"
 )
 
 type Store interface {
@@ -264,7 +265,7 @@ func (r *Reconciler) Once(ctx context.Context) error {
 					break
 				}
 			}
-			r.Routes.Put(routes.Snapshot{DeploymentID: d.ID, TargetID: healthy[0].ID, RevisionID: d.ActiveRevisionID, TenantID: d.TenantID, Alias: d.Name, UpstreamModel: upstream, RouterURL: healthy[0].URL, Provider: direct.Provider, ProviderResourceID: healthy[0].ProviderResourceID, Runtime: d.Runtime, ComputeMode: "serverless", UpstreamAPIKey: direct.APIKey, ProviderWorkers: workers, ProviderObservedAt: observedAt})
+			r.Routes.Put(routes.Snapshot{DeploymentID: d.ID, TargetID: healthy[0].ID, RevisionID: d.ActiveRevisionID, TenantID: d.TenantID, Alias: d.Name, UpstreamModel: upstream, RouterURL: healthy[0].URL, Provider: direct.Provider, ProviderResourceID: healthy[0].ProviderResourceID, Runtime: d.Runtime, ComputeMode: "serverless", UpstreamAPIKey: direct.APIKey, ProviderWorkers: workers, ProviderObservedAt: observedAt, ProtocolCapabilities: r.protocolCapabilities(d.Runtime)})
 			_ = r.Store.SetDeploymentState(ctx, d.ID, "healthy")
 			continue
 		}
@@ -308,14 +309,14 @@ func (r *Reconciler) Once(ctx context.Context) error {
 			if upstream == "" {
 				upstream = d.Model
 			}
-			r.Routes.Put(routeSnapshot(d, healthy, upstream, generation.InternalEndpoint, candidateID))
+			r.Routes.Put(routeSnapshot(d, healthy, upstream, generation.InternalEndpoint, candidateID, r.protocolCapabilities(d.Runtime)))
 		}
 		upstream := healthy[0].UpstreamModel
 		if upstream == "" {
 			upstream = d.Model
 		}
 		if _, published := r.Routes.GetForTenant(d.TenantID, d.Name); !published {
-			r.Routes.Put(routeSnapshot(d, healthy, upstream, generation.InternalEndpoint, routerProcessID(d.ID, generation.Generation)))
+			r.Routes.Put(routeSnapshot(d, healthy, upstream, generation.InternalEndpoint, routerProcessID(d.ID, generation.Generation), r.protocolCapabilities(d.Runtime)))
 		}
 		state := "degraded"
 		if len(healthy) == primaryCount {
@@ -434,7 +435,7 @@ func (r *Reconciler) compileEndpoints(ctx context.Context, deployments []domain.
 					if targetErr != nil || target.Health != "healthy" {
 						continue
 					}
-					compiled = append(compiled, routes.Snapshot{TenantID: tenant, Alias: endpoint.Name, TargetID: target.ID, UpstreamModel: target.UpstreamModel, RouterURL: target.URL, Provider: target.Provider, Runtime: target.Runtime, ComputeMode: "external", LogicalModelID: endpoint.LogicalModelID, EnvironmentID: endpoint.EnvironmentID, EndpointID: endpoint.ID, ServingPlanID: resolved.ActivePlan.ID, BindingID: binding.ID, RoutingWeight: planned.Weight})
+					compiled = append(compiled, routes.Snapshot{TenantID: tenant, Alias: endpoint.Name, TargetID: target.ID, UpstreamModel: target.UpstreamModel, RouterURL: target.URL, Provider: target.Provider, Runtime: target.Runtime, ComputeMode: "external", LogicalModelID: endpoint.LogicalModelID, EnvironmentID: endpoint.EnvironmentID, EndpointID: endpoint.ID, ServingPlanID: resolved.ActivePlan.ID, BindingID: binding.ID, RoutingWeight: planned.Weight, ProtocolCapabilities: r.protocolCapabilities(target.Runtime)})
 					continue
 				}
 				if binding.Kind != "deployment" {
@@ -497,7 +498,7 @@ func (r *Reconciler) reapRetiredRoutes() {
 	}
 }
 
-func routeSnapshot(deployment domain.Deployment, targets []domain.Target, upstream, endpoint, processID string) routes.Snapshot {
+func routeSnapshot(deployment domain.Deployment, targets []domain.Target, upstream, endpoint, processID string, capabilities runtimecontract.ProtocolCapabilities) routes.Snapshot {
 	provider := ""
 	computeMode := ""
 	for _, target := range targets {
@@ -514,7 +515,15 @@ func routeSnapshot(deployment domain.Deployment, targets []domain.Target, upstre
 			computeMode = "existing"
 		}
 	}
-	return routes.Snapshot{DeploymentID: deployment.ID, RevisionID: deployment.ActiveRevisionID, TenantID: deployment.TenantID, Alias: deployment.Name, UpstreamModel: upstream, RouterURL: endpoint, RouterProcessID: processID, Provider: provider, Runtime: deployment.Runtime, ComputeMode: computeMode}
+	return routes.Snapshot{DeploymentID: deployment.ID, RevisionID: deployment.ActiveRevisionID, TenantID: deployment.TenantID, Alias: deployment.Name, UpstreamModel: upstream, RouterURL: endpoint, RouterProcessID: processID, Provider: provider, Runtime: deployment.Runtime, ComputeMode: computeMode, ProtocolCapabilities: capabilities}
+}
+
+func (r *Reconciler) protocolCapabilities(runtime string) runtimecontract.ProtocolCapabilities {
+	backend, err := r.Runtimes.ForRuntime(runtime)
+	if err != nil {
+		return runtimecontract.ProtocolCapabilities{}
+	}
+	return backend.Profile.ProtocolCapabilities()
 }
 func routerPort(start int, deploymentID string) int {
 	sum := sha256.Sum256([]byte(deploymentID))

@@ -76,6 +76,30 @@ func TestRequestCommandSendsOpenAICompatibleRequest(t *testing.T) {
 	}
 }
 
+func TestRequestCommandSelectsProtocolSurface(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/embeddings" || r.Header.Get("Authorization") != "Bearer secret" {
+			t.Fatalf("path=%s auth=%q", r.URL.Path, r.Header.Get("Authorization"))
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["model"] != "search-production" || body["input"] != "document" {
+			t.Fatalf("body=%#v", body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"embedding":[0.1,0.2]}]}`))
+	}))
+	defer server.Close()
+	output, err := captureStdout(t, func() error {
+		return requestCommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, []string{"search-production", "--protocol", "embeddings", "--message", "document"})
+	})
+	if err != nil || !strings.Contains(output, `"embedding"`) {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+}
+
 func TestEndpointCommandsAcceptNaturalResourceThenFlagsOrder(t *testing.T) {
 	var requests []map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

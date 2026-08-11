@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-const Version = "1.2.0"
+const Version = "1.3.0"
 
 type Route struct {
 	Method      string
@@ -136,6 +136,9 @@ func Document() (map[string]any, error) {
 	tags["Inference"] = true
 	paths["/v1/models"] = map[string]any{"get": map[string]any{"operationId": "listInferenceModels", "summary": "List logical inference models", "tags": []string{"Inference"}, "security": []map[string][]string{{"bearerAuth": {}}}, "responses": map[string]any{"200": map[string]any{"description": "OpenAI-compatible model list", "content": map[string]any{"application/json": map[string]any{"schema": ref("Object")}}}, "default": map[string]any{"description": "Typed API error", "content": map[string]any{"application/json": map[string]any{"schema": ref("ErrorEnvelope")}}}}}}
 	paths["/v1/chat/completions"] = map[string]any{"post": map[string]any{"operationId": "createChatCompletion", "summary": "Create a buffered or streaming chat completion", "description": "When stream=true, the response is an SSE sequence of data JSON events terminated by data: [DONE]. InferCrane never replays a partially transmitted stream.", "tags": []string{"Inference"}, "security": []map[string][]string{{"bearerAuth": {}}}, "requestBody": map[string]any{"required": true, "content": map[string]any{"application/json": map[string]any{"schema": ref("ChatCompletionRequest")}}}, "responses": map[string]any{"200": map[string]any{"description": "Buffered JSON or streaming SSE response", "content": map[string]any{"application/json": map[string]any{"schema": ref("Object")}, "text/event-stream": map[string]any{"schema": map[string]any{"type": "string", "description": "SSE data events ending with [DONE]."}}}}, "default": map[string]any{"description": "Typed API error", "content": map[string]any{"application/json": map[string]any{"schema": ref("ErrorEnvelope")}}}}}}
+	for path, operation := range map[string]string{"/v1/responses": "createResponse", "/v1/embeddings": "createEmbedding", "/v1/completions": "createCompletion", "/v1/chat/completions/batch": "createChatCompletionBatch"} {
+		paths[path] = map[string]any{"post": map[string]any{"operationId": operation, "summary": "Proxy a capability-qualified OpenAI-compatible request", "description": "The selected endpoint must explicitly qualify this protocol. InferCrane rewrites only the logical model identity and otherwise preserves the request and response.", "tags": []string{"Inference"}, "security": []map[string][]string{{"bearerAuth": {}}}, "requestBody": map[string]any{"required": true, "content": map[string]any{"application/json": map[string]any{"schema": ref("Object")}}}, "responses": map[string]any{"200": map[string]any{"description": "Protocol-native JSON or streaming response", "content": map[string]any{"application/json": map[string]any{"schema": ref("Object")}, "text/event-stream": map[string]any{"schema": map[string]any{"type": "string"}}}}, "422": map[string]any{"description": "The selected endpoint has not qualified this protocol", "content": map[string]any{"application/json": map[string]any{"schema": ref("ErrorEnvelope")}}}, "default": map[string]any{"description": "Typed API error", "content": map[string]any{"application/json": map[string]any{"schema": ref("ErrorEnvelope")}}}}}}
+	}
 	tagList := make([]string, 0, len(tags))
 	for tag := range tags {
 		tagList = append(tagList, tag)

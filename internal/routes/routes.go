@@ -4,32 +4,35 @@ import (
 	"slices"
 	"sync"
 	"time"
+
+	"github.com/infercrane/infercrane/internal/runtimecontract"
 )
 
 type Snapshot struct {
-	DeploymentID       string
-	TargetID           string
-	RevisionID         string
-	TenantID           string
-	Alias              string
-	UpstreamModel      string
-	RouterURL          string
-	RouterProcessID    string
-	Provider           string
-	ProviderResourceID string
-	Runtime            string
-	ComputeMode        string
-	UpstreamAPIKey     string
-	ExternalPolicyID   string
-	SelectionReason    string
-	ProviderWorkers    *int
-	ProviderObservedAt time.Time
-	LogicalModelID     string
-	EnvironmentID      string
-	EndpointID         string
-	ServingPlanID      string
-	BindingID          string
-	RoutingWeight      int
+	DeploymentID         string
+	TargetID             string
+	RevisionID           string
+	TenantID             string
+	Alias                string
+	UpstreamModel        string
+	RouterURL            string
+	RouterProcessID      string
+	Provider             string
+	ProviderResourceID   string
+	Runtime              string
+	ComputeMode          string
+	UpstreamAPIKey       string
+	ExternalPolicyID     string
+	SelectionReason      string
+	ProviderWorkers      *int
+	ProviderObservedAt   time.Time
+	LogicalModelID       string
+	EnvironmentID        string
+	EndpointID           string
+	ServingPlanID        string
+	BindingID            string
+	RoutingWeight        int
+	ProtocolCapabilities runtimecontract.ProtocolCapabilities
 }
 
 type EndpointRoute struct {
