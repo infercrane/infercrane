@@ -57,6 +57,7 @@ step provider-contracts sh -c 'cd "$1" && go test -count=1 ./internal/integratio
 step acceptance-safety "$root/scripts/test-acceptance-safety.sh"
 
 if [ "$mode" = full ]; then
+  step automation-clients make -C "$root" test-automation-full
   step container-tests make -C "$root" test-container
   step stack-smoke "$root/scripts/test-stack.sh"
   step failure-recovery "$root/scripts/test-failure-recovery.sh"

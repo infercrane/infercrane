@@ -1,0 +1,63 @@
+---
+title: Terraform provider
+description: Manage logical InferCrane deployments without transferring provider-resource ownership to Terraform.
+---
+
+The Terraform provider manages `infercrane_deployment` through the control-plane API. InferCrane
+continues to own replicas, provider request identity, drain fencing, revisions, Release Guard, and
+cleanup.
+
+<Warning>
+The provider is not yet published in the Terraform Registry. v0.4 qualification builds it from
+`integrations/terraform`; registry installation begins only after release publication.
+</Warning>
+
+```hcl
+terraform {
+  required_providers {
+    infercrane = {
+      source  = "infercrane/infercrane"
+      version = "0.4.0-rc.1"
+    }
+  }
+}
+
+provider "infercrane" {
+  endpoint = "https://infercrane.internal"
+  # Prefer INFERCRANE_API_KEY; api_key is sensitive when set here.
+}
+
+resource "infercrane_deployment" "qwen" {
+  name         = "qwen-prod"
+  model        = "Qwen/Qwen3-8B"
+  runtime      = "vllm"
+  cloud        = "runpod"
+  compute_mode = "elastic"
+  gpu          = "L40S"
+  min_replicas = 1
+  max_replicas = 4
+
+  operation_timeout_seconds = 900
+}
+```
+
+## Lifecycle behavior
+
+| Terraform transition | InferCrane behavior |
+|---|---|
+| Create | Submit one idempotent durable deployment operation and wait |
+| Read | Refresh logical state and active revision through the API |
+| Update | Candidate → provision → Release Guard → promote; a rejection fails safely |
+| Delete | Submit durable logical deletion and wait for fenced cleanup |
+| Import | `terraform import infercrane_deployment.qwen qwen-prod` |
+
+If Terraform is interrupted, InferCrane continues the operation. The next apply derives the same
+idempotency identity, adopts the original logical deployment, and resumes observation. Terraform
+state never stores a provider API key supplied through `INFERCRANE_API_KEY`, and it does not contain
+provider-owned replica identifiers as desired inputs.
+
+<Note>
+An update can remain unpromoted when Release Guard lacks sufficient evidence or rejects the
+candidate. Inspect the persisted reason with `infercrane rollout inspect qwen-prod`; Terraform does
+not bypass the guard to force convergence.
+</Note>

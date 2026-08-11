@@ -1,0 +1,51 @@
+---
+title: "ADR 0014: Generated automation clients preserve durable semantics"
+sidebarTitle: "0014 Automation clients"
+---
+
+# ADR 0014: Generated automation clients preserve durable semantics
+
+- Status: Accepted
+- Date: 2026-08-11
+
+## Context
+
+Python, TypeScript, Terraform, GitHub Actions, the CLI, and future integrations can drift into
+different notions of deployment success. Terraform can also accidentally claim ownership of
+provider resources beneath InferCrane, while client retries can duplicate mutations or replay
+partially transmitted streams.
+
+## Decision
+
+An executable OpenAPI 3.1 contract describes every authenticated control route. A deterministic
+repository generator produces checked-in low-level Python and TypeScript methods, and qualification
+compares contract routes with the Go HTTP registration table.
+
+Ergonomic clients remain thin: they submit explicit idempotency keys, inspect and cancel durable
+operations, and provide local wait helpers. A timeout or client disconnect never implies operation
+cancellation. Streaming helpers perform one HTTP request and never replay after transmission.
+
+The Terraform provider owns only a logical deployment resource. Create, update, and delete call the
+control API; updates use candidate provisioning, Release Guard, and promotion. Provider replicas and
+external resource identities remain InferCrane observations. GitHub pull-request planning is
+read-only, while apply requires an explicit confirmation input and is designed for a protected
+GitHub environment.
+
+## Consequences
+
+OpenAPI changes require regeneration, SDK package tests, Terraform protocol acceptance, and action
+fixture tests in the same commit. Client conveniences cannot contain alternate rollout or provider
+lifecycle policy. Terraform may report a failed apply while the durable operation continues; its
+diagnostic includes the resumable operation identity.
+
+Generated clients cover the full low-level route set, but hand-written ergonomic methods initially
+focus on deployment, operation, and inference workflows. Package and Registry publication remain a
+separate authorized release action.
+
+## Verification
+
+Route-drift tests parse the registered server patterns. Python and TypeScript fixtures prove typed
+terminal failures, local timeout durability, malformed streams, and no replay. Terraform runs the
+real protocol against a hermetic control API for CRUD, import, guarded update, and interrupted-create
+adoption. GitHub Action tests prove deterministic ordering, ANSI removal, secret redaction, explicit
+apply confirmation, and exact-revision release checks.

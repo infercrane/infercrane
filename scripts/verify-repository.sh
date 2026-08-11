@@ -10,7 +10,9 @@ fi
 
 go mod verify
 go run ./tools/repo-context -check
+go run ./tools/openapi-codegen -check
 go test -race -count=1 ./...
+./scripts/test-automation-clients.sh quick
 go vet ./...
 go build ./cmd/infercrane
 docker compose config --quiet

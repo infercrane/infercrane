@@ -1,0 +1,75 @@
+---
+title: GitHub Actions
+description: Deterministic pull-request plans and protected InferCrane release checks.
+---
+
+The repository action renders an InferCrane semantic plan into the job summary and writes the exact
+JSON plan as an artifact. Plan mode is read-only.
+
+<Warning>
+  The action source is included in the v0.4 release candidate, but the public Git tag is not
+  available until release qualification and an authorized remote push. Use a commit SHA from your
+  own fork while evaluating an unpublished candidate.
+</Warning>
+
+```yaml
+name: inference delivery
+on: [pull_request]
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: infercrane/infercrane/actions/infercrane@v0.4.0-rc.1
+        with:
+          mode: plan
+          spec: deploy/qwen.yaml
+        env:
+          INFERCRANE_CONTROL_URL: ${{ secrets.INFERCRANE_CONTROL_URL }}
+          INFERCRANE_API_KEY: ${{ secrets.INFERCRANE_API_KEY }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: infercrane-plan
+          path: infercrane-delivery.json
+```
+
+## Protected apply
+
+Apply requires both `mode: apply` and `confirm-apply: "true"`. Configure a GitHub environment with
+required reviewers; the action cannot and does not infer organizational approval policy.
+
+```yaml
+jobs:
+  deploy:
+    environment: production
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: infercrane/infercrane/actions/infercrane@v0.4.0-rc.1
+        with:
+          mode: apply
+          confirm-apply: "true"
+          spec: deploy/qwen.yaml
+          wait-timeout: 30m
+        env:
+          INFERCRANE_CONTROL_URL: ${{ secrets.INFERCRANE_CONTROL_URL }}
+          INFERCRANE_API_KEY: ${{ secrets.INFERCRANE_API_KEY }}
+```
+
+Closing or cancelling the job stops only its waiter. The action reports the durable operation ID so
+an operator can resume with `infercrane operation watch`.
+
+## Exact release check
+
+```yaml
+- uses: infercrane/infercrane/actions/infercrane@v0.4.0-rc.1
+  with:
+    mode: release-check
+    deployment: qwen-prod
+    revision: ${{ needs.deploy.outputs.revision }}
+```
+
+The check passes only when the expected revision is active, serving, converged, and has no active
+operation. Output is stripped of terminal escapes, bounded for GitHub summaries, and redacts values
+from credential-like environment variables. The action does not print or upload prompt content.

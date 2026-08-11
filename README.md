@@ -38,9 +38,11 @@ InferCrane is under active development. Its lifecycle, persistence, routing, and
 provider-neutral. Integrations are registered adapters and public availability is controlled by an
 explicit qualification matrix. The core gateway, PostgreSQL control plane, existing-worker
 workflow, reconciliation, router supervision, and durable bounded autoscaling are implemented and
-tested locally. v0.3 adds a narrowly qualified AWS EC2 BYOC adapter and governed external fallback
-alongside the original RunPod paths. Registration is not real-provider proof: paid acceptance and
-soak testing remain explicitly incomplete until their evidence gates run.
+tested locally. v0.3 adds a narrowly qualified AWS EC2 BYOC adapter and governed external fallback.
+The v0.4 release candidate adds one executable OpenAPI contract, generated Python and TypeScript
+clients, a Terraform provider for logical deployments, and deterministic GitHub delivery checks.
+Registration is not real-provider proof: paid acceptance and soak testing remain explicitly
+incomplete until their evidence gates run.
 
 See the authoritative [capability status](docs/project-status.md) before relying on a feature.
 The [product vision and roadmap](docs/product-vision.md) defines the developer experience and the
@@ -254,6 +256,7 @@ Run the standard workflow:
 ```bash
 make dev-check       # fast repository and provider-contract feedback
 make dev-check-full  # isolated Docker, recovery, production-config, and docs gates
+make test-automation-full # SDK, GitHub Action, and real Terraform protocol fixtures
 ```
 
 Each run keeps compact evidence under `.infercrane/dev-check/`. Provider adapters pass the same
@@ -278,6 +281,10 @@ and checked by CI.
 - [Product vision and roadmap](docs/product-vision.md)
 - [Project status](docs/project-status.md)
 - [Architecture decisions](docs/adr/index.md)
+- [Python SDK](docs/integrations/python.mdx)
+- [TypeScript SDK](docs/integrations/typescript.mdx)
+- [Terraform provider](docs/integrations/terraform.mdx)
+- [GitHub Actions](docs/integrations/github-actions.mdx)
 - [Production operations](docs/production.md)
 - [Stage 1 existing-worker guide](docs/stage1-poc.md)
 - [Stage 2 SkyPilot guide](docs/stage2-skypilot.md)

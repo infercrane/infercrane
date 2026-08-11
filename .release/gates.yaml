@@ -15,6 +15,11 @@ milestone_gates:
     - documentation_drift
     - clean_tree_local_qualification
     - previous_milestone_regression
+    - openapi_route_and_generation_drift
+    - python_sdk_package_and_stack_smoke
+    - typescript_sdk_package_and_stack_smoke
+    - terraform_protocol_crud_import_and_adoption
+    - github_delivery_plan_and_release_check
   deferred_until_v1_manual_qualification:
     - runpod_elastic
     - runpod_serverless
@@ -66,4 +71,3 @@ safety:
     - hard_budget
     - privacy_disclosure
     - deterministic_explanation
-

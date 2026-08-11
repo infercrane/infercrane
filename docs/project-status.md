@@ -13,6 +13,9 @@ but lacks production qualification; **planned** is not a product capability.
 | Durable lifecycle operations | Implemented | Idempotency, progress, retry classification, and cooperative cancellation state. |
 | Leased operation execution engine | Experimental | Existing-target, elastic, revision, scale, delete, and serverless handlers resume from durable state; real provider restart qualification remains. |
 | Versioned control-plane API | Experimental | Tenant-scoped operations, apply, targets, deployments, orphans, audit, quota, and principal endpoints exist. |
+| OpenAPI and generated SDKs | Experimental | Full route coverage, deterministic Python/TypeScript low-level generation, typed durable helpers, and hermetic SSE tests are implemented; public package publication is deferred. |
+| Terraform provider | Experimental | Logical deployment CRUD, import, guarded update, and interrupted-apply adoption pass real Terraform protocol fixtures; Registry publication is deferred. |
+| GitHub delivery action | Experimental | Read-only semantic PR plans, explicit protected apply, exact-revision checks, bounded summaries, and secret redaction are implemented; Marketplace publication is deferred. |
 | Production configuration gates | Implemented | Production mode enforces strong API secrets and PostgreSQL TLS. |
 | Safe deletion and orphan discovery | Implemented | Side-effect-free deletion plans, explicit confirmation, and provisioned-resource inventory. |
 | PostgreSQL control-plane state | Implemented | Transactional embedded migrations and bounded pool. |

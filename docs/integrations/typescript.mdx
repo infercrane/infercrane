@@ -1,0 +1,56 @@
+---
+title: TypeScript SDK
+description: Typed durable operations and cancellation-aware inference streams for Node.js.
+---
+
+The TypeScript SDK targets Node.js 20 or newer and uses the platform `fetch` implementation. It has
+no runtime dependency and calls only the InferCrane HTTP surfaces.
+
+```bash
+cd sdk/typescript
+npm ci
+npm run build
+```
+
+<Warning>
+`@infercrane/sdk` is repository-local during v0.4 release-candidate qualification. Do not depend on
+an npm package until InferCrane publishes and signs it.
+</Warning>
+
+```typescript
+import { InferCrane } from '@infercrane/sdk';
+
+const client = new InferCrane({
+  apiKey: process.env.INFERCRANE_API_KEY!,
+  baseUrl: 'https://infercrane.internal',
+});
+
+const operation = await client.deploy({
+  name: 'qwen-prod',
+  model: 'Qwen/Qwen3-8B',
+  cloud: 'runpod',
+  gpu: 'L40S',
+  idempotencyKey: 'qwen-prod-initial',
+});
+
+await client.wait(operation.id, { timeoutMs: 900_000 });
+```
+
+`wait` accepts an `AbortSignal`. Aborting the local wait does not cancel the durable operation. Call
+`client.cancel(operation.id)` only when cooperative server-side cancellation is intentional.
+
+```typescript
+const controller = new AbortController();
+
+for await (const event of client.streamChat(
+  'qwen-prod',
+  [{ role: 'user', content: 'Explain this rollout.' }],
+  { signal: controller.signal },
+)) {
+  console.log(event);
+}
+```
+
+The SDK verifies HTTP status before decoding, exposes `ApiError`, `OperationFailed`,
+`OperationCancelled`, `OperationTimeout`, and `StreamError`, and never retries a streaming request
+after transmission begins.

@@ -31,6 +31,15 @@
       }
     }
   },
+  "api": {
+    "playground": {
+      "display": "interactive",
+      "proxy": false
+    },
+    "examples": {
+      "languages": ["curl", "python", "javascript", "go"]
+    }
+  },
   "navbar": {
     "links": [
       {
@@ -118,6 +127,10 @@
         "group": "INTEGRATE",
         "pages": [
           "integrations/overview",
+          "integrations/python",
+          "integrations/typescript",
+          "integrations/terraform",
+          "integrations/github-actions",
           "architecture/provider-contract",
           "architecture/runtime-contract",
           "integrations/vllm",
@@ -129,7 +142,18 @@
       },
       {
         "group": "REFERENCE",
-        "pages": ["cli", "control-api", "provider-setup", "development", "troubleshooting", "faq"]
+        "pages": [
+          "cli",
+          "control-api",
+          {
+            "group": "Control API endpoints",
+            "openapi": "openapi.json"
+          },
+          "provider-setup",
+          "development",
+          "troubleshooting",
+          "faq"
+        ]
       },
       {
         "group": "PROJECT",
@@ -154,7 +178,8 @@
               "adr/0010-cobra-cli-and-progressive-terminal-output",
               "adr/0011-tiered-provider-qualification",
               "adr/0012-versioned-integration-contracts",
-              "adr/0013-governed-external-capacity-and-byoc"
+              "adr/0013-governed-external-capacity-and-byoc",
+              "adr/0014-generated-automation-clients"
             ]
           },
           "release-acceptance"

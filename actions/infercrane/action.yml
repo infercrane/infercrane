@@ -1,0 +1,50 @@
+name: InferCrane delivery
+description: Render semantic deployment plans, explicitly apply them, or verify a released revision.
+author: InferCrane contributors
+branding:
+  icon: activity
+  color: blue
+inputs:
+  mode:
+    description: plan, apply, or release-check
+    required: true
+    default: plan
+  spec:
+    description: DeploymentSpec path for plan or apply
+    required: false
+  deployment:
+    description: Logical deployment for release-check
+    required: false
+  revision:
+    description: Exact active revision required by release-check
+    required: false
+  confirm-apply:
+    description: Must be true for apply; protect the job with a GitHub environment
+    required: false
+    default: "false"
+  wait-timeout:
+    description: Local apply wait limit; durable work continues after timeout
+    required: false
+    default: 30m
+  cli-path:
+    description: Existing InferCrane binary path, or auto to install the pinned version
+    required: false
+    default: auto
+  version:
+    description: Exact InferCrane release tag used when auto-installing
+    required: false
+    default: v0.4.0-rc.1
+  output-path:
+    description: Machine-readable plan or evidence path
+    required: false
+    default: infercrane-delivery.json
+outputs:
+  result:
+    description: pass or fail
+  operation-id:
+    description: Durable operation submitted by apply
+  revision:
+    description: Planned or verified revision identity
+runs:
+  using: node20
+  main: index.js

@@ -47,6 +47,12 @@ grep -qi '^Content-Type: text/event-stream' "$stream_headers"
 grep -q '^data: {' "$stream_body"
 grep -q '^data: \[DONE\]' "$stream_body"
 
+INFERCRANE_API_KEY="$api_key" INFERCRANE_CONTROL_URL="$base_url" INFERCRANE_DEPLOYMENT="$model" \
+  PYTHONPATH="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)/sdk/python/src" \
+  python3 "$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)/examples/sdk/python_stream.py"
+INFERCRANE_API_KEY="$api_key" INFERCRANE_CONTROL_URL="$base_url" INFERCRANE_DEPLOYMENT="$model" \
+  node "$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)/examples/sdk/typescript_stream.mjs"
+
 tool_response=$(curl -fsS -H "Authorization: Bearer $api_key" -H 'Content-Type: application/json' \
   -d "{\"model\":\"$model\",\"messages\":[{\"role\":\"user\",\"content\":\"weather\"}],\"tool_choice\":\"auto\",\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"weather\",\"parameters\":{\"type\":\"object\"}}}]}" \
   "$base_url/v1/chat/completions")

@@ -9,7 +9,10 @@ Base path: `/api/v1`. All requests require `Authorization: Bearer TOKEN`. Mutati
 or admin role; tenant/principal/audit administration requires admin. Cross-tenant resources return
 `404` to avoid existence disclosure.
 
-InferCrane does not currently publish an OpenAPI document, so this reference is maintained against the registered routes in `internal/controlapi/api.go`. Interactive OpenAPI consoles and generated SDK navigation are intentionally not shown until an executable specification becomes authoritative.
+InferCrane publishes an executable OpenAPI 3.1 document at `api/openapi.json`. The Mintlify
+navigation generates interactive endpoint pages from the same document used to generate the Python
+and TypeScript low-level clients. CI compares every contracted method/path pair with the registered
+routes in `internal/controlapi/api.go` and rejects stale generated files.
 
 Errors are stable JSON objects:
 
@@ -95,3 +98,9 @@ Non-success responses use one stable envelope:
 Categories are `authentication`, `authorization`, `validation`, `not_found`, `conflict`,
 `rate_limit`, `dependency`, `internal`, or `request`. The mapping is deterministic from the HTTP
 status and error code. A retryable mutation must retain its original idempotency key.
+
+<Note>
+The interactive API explorer targets the local server declared in the specification. Use it only
+against an InferCrane control plane you operate, and never paste production credentials into a
+shared browser session.
+</Note>

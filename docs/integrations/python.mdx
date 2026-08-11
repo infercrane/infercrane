@@ -1,0 +1,83 @@
+---
+title: Python SDK
+description: Submit and resume durable InferCrane operations from typed Python applications.
+---
+
+The zero-dependency Python SDK uses the authenticated control-plane API. It does not connect to
+PostgreSQL, invoke infrastructure providers, or implement deployment lifecycle logic in the client.
+
+## Install from the repository
+
+<Warning>
+The v0.4 release candidate package has not been published to PyPI. Install from a checked-out tag
+until release qualification and package publication are complete.
+</Warning>
+
+```bash
+python -m pip install ./sdk/python
+```
+
+## Submit durable work
+
+```python
+from infercrane import InferCrane
+
+client = InferCrane(
+    api_key="...",
+    base_url="https://infercrane.internal",
+)
+
+operation = client.deploy(
+    name="qwen-prod",
+    model="Qwen/Qwen3-8B",
+    cloud="runpod",  # use a provider qualified by your installation
+    gpu="L40S",
+    min_replicas=1,
+    max_replicas=4,
+    idempotency_key="qwen-prod-initial",
+)
+
+ready = client.wait(operation.id, timeout=900)
+```
+
+A wait timeout raises `OperationTimeout` and includes the operation ID. It does not call the cancel
+endpoint. A later process can resume with `client.wait(operation_id)`.
+
+<CodeGroup>
+```python Synchronous stream
+for event in client.stream_chat(
+    "qwen-prod",
+    [{"role": "user", "content": "Summarize durable operations."}],
+):
+    print(event)
+```
+
+```python Async operation
+from infercrane import AsyncInferCrane
+
+client = AsyncInferCrane(api_key="...", base_url="https://infercrane.internal")
+operation = await client.deploy(
+    name="qwen-prod",
+    model="Qwen/Qwen3-8B",
+    cloud="runpod",
+    gpu="L40S",
+)
+ready = await client.wait(operation.id, timeout=900)
+```
+</CodeGroup>
+
+The stream parser yields each SSE JSON event once and requires `[DONE]`. Closing the iterator closes
+the HTTP response; it never replays a partially transmitted inference request.
+
+## Errors
+
+| Error | Meaning |
+|---|---|
+| `APIError` | Typed status, code, retryability, and remediation from the control API |
+| `OperationFailed` | Persisted durable operation reached `failed` |
+| `OperationCancelled` | Persisted operation reached `cancelled` |
+| `OperationTimeout` | This client stopped waiting; server-side work continues |
+| `StreamError` | Malformed or incomplete SSE stream |
+
+The generated low-level client is available as `client.api`. Generated files carry a do-not-edit
+header and are checked against [`openapi.json`](/control-api) during qualification.

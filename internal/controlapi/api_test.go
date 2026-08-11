@@ -188,7 +188,7 @@ func (f *fakeBenchmarkRunner) Run(_ context.Context, cfg benchmark.Config) (benc
 	return benchmark.Result{Tool: "aiperf", ToolVersion: "0.9.0", Command: "aiperf profile --api-key ${INFERCRANE_API_KEY}", Requests: 10, Succeeded: 10, TTFTP95MS: &value}, nil
 }
 func TestOperationAPIAuthenticationAndResponse(t *testing.T) {
-	store := &fakeStore{operation: domain.Operation{ID: "op", TenantID: "global", Status: "running", MaxAttempts: 5}}
+	store := &fakeStore{operation: domain.Operation{ID: "op", TenantID: "global", Status: "failed", ErrorCode: "provider_denied", MaxAttempts: 5}}
 	handler := (API{Store: store, APIKey: "secret"}).Handler()
 	unauthorized := httptest.NewRecorder()
 	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/api/v1/operations/op", nil))
@@ -199,7 +199,7 @@ func TestOperationAPIAuthenticationAndResponse(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer secret")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"max_attempts":5`) {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"max_attempts":5`) || !strings.Contains(response.Body.String(), `"error_code":"provider_denied"`) {
 		t.Fatalf("response=%d %s", response.Code, response.Body.String())
 	}
 }

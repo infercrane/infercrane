@@ -1,6 +1,6 @@
 GORELEASER_VERSION := v2.12.7
 
-.PHONY: build context context-check docs-dev docs-check test test-container test-stack test-failure test-store test-production-config test-provider-contracts test-acceptance-safety verify audit deadcode release-check snapshot acceptance-local acceptance-preflight acceptance-cleanup qualify-local qualify-rc qualify-contracts dev-check dev-check-full dev-up dev-down
+.PHONY: build context context-check generate-api generate-api-check test-automation test-automation-full docs-dev docs-check test test-container test-stack test-failure test-store test-production-config test-provider-contracts test-acceptance-safety verify audit deadcode release-check snapshot acceptance-local acceptance-preflight acceptance-cleanup qualify-local qualify-rc qualify-contracts dev-check dev-check-full dev-up dev-down
 
 build:
 	go build ./cmd/infercrane
@@ -10,6 +10,18 @@ context:
 
 context-check:
 	go run ./tools/repo-context -check
+
+generate-api:
+	go run ./tools/openapi-codegen
+
+generate-api-check:
+	go run ./tools/openapi-codegen -check
+
+test-automation:
+	./scripts/test-automation-clients.sh quick
+
+test-automation-full:
+	./scripts/test-automation-clients.sh full
 
 docs-dev:
 	cd docs && npm run dev
@@ -48,6 +60,8 @@ verify:
 
 audit:
 	go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
+	cd integrations/terraform && go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
+	npm --prefix sdk/typescript audit --audit-level=high
 
 deadcode:
 	./scripts/check-dead-code.sh
