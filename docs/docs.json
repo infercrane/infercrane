@@ -169,6 +169,7 @@
           "runbooks/backup-restore",
           "upgrade",
           "release-packaging",
+          "v2-manual-qualification",
           "development",
           "troubleshooting",
           "faq"
