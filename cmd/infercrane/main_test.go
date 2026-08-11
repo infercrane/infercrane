@@ -75,6 +75,26 @@ func TestRequestCommandSendsOpenAICompatibleRequest(t *testing.T) {
 	}
 }
 
+func TestDashboardCommandPrintsCredentialFreeContextURL(t *testing.T) {
+	output, err := captureStdout(t, func() error {
+		return dashboardCommand(context.Background(), config.Config{ControlURL: "https://control.example/", APIKey: "never-print-me"}, []string{"--output", "json"})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result struct {
+		URL             string `json:"url"`
+		Opened          bool   `json:"opened"`
+		CredentialInURL bool   `json:"credential_in_url"`
+	}
+	if json.Unmarshal([]byte(output), &result) != nil || result.URL != "https://control.example/dashboard/" || result.Opened || result.CredentialInURL {
+		t.Fatalf("output=%q result=%+v", output, result)
+	}
+	if strings.Contains(output, "never-print-me") {
+		t.Fatal("dashboard output exposed the API key")
+	}
+}
+
 func TestRequestCommandPrintsStreamingDeltas(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

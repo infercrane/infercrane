@@ -13,7 +13,9 @@ InferCrane separates durable deployment decisions from latency-sensitive inferen
 flowchart LR
   subgraph clients[Clients]
     CLI[InferCrane CLI]
-    SDK[OpenAI-compatible client]
+    DASH[Embedded dashboard]
+    DELIVERY[SDK · Terraform · GitHub]
+    SDK[Inference client]
   end
 
   subgraph infercrane[InferCrane]
@@ -34,6 +36,8 @@ flowchart LR
   end
 
   CLI --> API --> DB
+  DASH --> API
+  DELIVERY --> API
   DB --> OPS
   OPS --> ELASTIC
   OPS --> NATIVE
@@ -50,7 +54,11 @@ flowchart LR
 
 ## Control plane
 
-The CLI submits authenticated API operations. PostgreSQL stores desired and observed deployment state, immutable revisions, replicas, operations, events, policy evaluations, and bounded measurements. A leased worker resumes pending provider work after process failure and reconciles results back into persisted state.
+The CLI, embedded dashboard, generated SDKs, Terraform provider, and GitHub delivery action use the
+same authenticated API. None owns provider resources or reads PostgreSQL. PostgreSQL stores desired
+and observed deployment state, immutable revisions, replicas, operations, events, policy
+evaluations, and bounded measurements. A leased worker resumes pending provider work after process
+failure and reconciles results back into persisted state.
 
 External ownership stays explicit and replaceable behind narrow adapters:
 

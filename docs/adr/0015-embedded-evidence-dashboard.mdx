@@ -1,0 +1,50 @@
+---
+title: "ADR 0015: Embed a static evidence dashboard"
+description: Keep browser operations on the public API and inside the release artifact.
+---
+
+## Status
+
+Accepted — 2026-08-11
+
+## Context
+
+Operators need fleet and release evidence that is easier to scan than JSON or a terminal workspace.
+A separate web backend would duplicate authorization, lifecycle ownership, data models, and
+deployment work. A hosted account product is outside the pre-v1 scope.
+
+## Decision
+
+Embed a dependency-light HTML/CSS/JavaScript dashboard in the InferCrane binary and serve it at
+`/dashboard/`. The browser calls only the authenticated public API. The shell is unauthenticated;
+all operational data and the only mutation—cooperative operation cancellation—remain protected by
+the existing bearer authentication, scopes, tenant isolation, and audit behavior.
+
+Credentials remain in tab-scoped session storage. Static assets use a restrictive CSP, no external
+runtime assets, no analytics, safe DOM text nodes, no persistent credential storage, and no cache.
+The dashboard owns presentation and local refresh state only. PostgreSQL, providers, runtimes,
+rollout policy, explanations, and durable operations retain their existing owners.
+
+## Consequences
+
+- The release binary and Docker image provide one self-contained operator surface.
+- CLI/API/SDK workflows remain authoritative for automation and complex authoring.
+- Static client compatibility can evolve without a second service or schema.
+- A future hosted dashboard may reuse API contracts but must not bypass them.
+- The embedded client cannot provide hosted identity, organization administration, billing, or
+  cross-installation aggregation.
+
+## Alternatives
+
+- A separate Next.js service was rejected because it creates another deployable backend and
+  operational boundary.
+- Extending only the terminal UI was rejected because incident and fleet evidence benefits from a
+  responsive browser surface and accessible tables.
+- Rendering secrets into server-generated HTML was rejected because it creates credential leakage
+  and caching risk.
+
+## Verification
+
+`make test-dashboard`, `make test-stack`, security/dependency gates, and complete local release
+qualification verify serving, headers, authenticated API use, deterministic view models,
+credential safety, responsive structure, and Docker packaging.

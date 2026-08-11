@@ -24,6 +24,7 @@ or link corrections. A changed decision gets a new ADR whose status supersedes t
 | [0012](/adr/0012-versioned-integration-contracts) | Accepted | Version provider/runtime contracts and require evidence for supported capabilities. |
 | [0013](/adr/0013-governed-external-capacity-and-byoc) | Accepted | Require explicit policy for external capacity and keep BYOC credentials ephemeral. |
 | [0014](/adr/0014-generated-automation-clients) | Accepted | Generate clients from one API contract and preserve durable operation ownership. |
+| [0015](/adr/0015-embedded-evidence-dashboard) | Accepted | Embed a static evidence dashboard that uses only authenticated public APIs. |
 
 Use the next sequential number. Include context, decision, consequences, alternatives, and
 verification. Link affected feature documents.

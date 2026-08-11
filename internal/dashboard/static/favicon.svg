@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img">
+  <title>InferCrane</title>
+  <rect x="1" y="1" width="30" height="30" rx="7" fill="#111418" stroke="#39414A"/>
+  <path d="M9 9h3v14H9zm6 0h8v3h-5v8h5v3h-8z" fill="#60A5FA"/>
+</svg>

@@ -7,7 +7,8 @@ but lacks production qualification; **planned** is not a product capability.
 |---|---|---|
 | Side-effect-free deployment planning | Implemented | Deterministic human and JSON output; live cost estimation is not yet available. |
 | CLI discovery and contexts | Implemented | Cobra grouped help, suggestions, generated completion, named contexts, authenticated identity, and durable timeline following are wired. |
-| Read-only terminal operations console | Experimental | Responsive deployment, operation, Release Guard, explanation, and event views use authenticated read APIs; broader terminal compatibility qualification remains. |
+| Terminal operations workspace | Experimental | Responsive evidence views and state-valid guarded actions use authenticated APIs and durable operations; `--read-only` disables mutations, and broader terminal compatibility qualification remains. |
+| Embedded operations dashboard | Experimental | Authenticated fleet/evidence views, explicit stale and partial states, tab-scoped credentials, and guarded cooperative cancellation pass local security and Docker tests; broader browser qualification remains. |
 | Environment diagnostics | Implemented | Read-only checks for API auth, PostgreSQL, vLLM Router, SkyPilot/RunPod, Serverless, and AWS role assumption. |
 | Declarative existing-target apply | Implemented | Atomic convergence of routing, replica bounds, and target membership. |
 | Durable lifecycle operations | Implemented | Idempotency, progress, retry classification, and cooperative cancellation state. |

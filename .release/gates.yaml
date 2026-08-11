@@ -20,6 +20,9 @@ milestone_gates:
     - typescript_sdk_package_and_stack_smoke
     - terraform_protocol_crud_import_and_adoption
     - github_delivery_plan_and_release_check
+    - embedded_dashboard_security_and_structure
+    - authenticated_dashboard_docker_smoke
+    - dashboard_responsive_accessibility_contract
   deferred_until_v1_manual_qualification:
     - runpod_elastic
     - runpod_serverless

@@ -61,3 +61,8 @@ Use Mermaid, the small `.ic-flow` system, or deterministic SVG for maintainable 
 ## Maintenance
 
 Run `npm run check` from `docs/` before review. Update navigation in `docs.json`. Reuse existing feature pages instead of duplicating explanations. When behavior changes, update the relevant page in the same change and verify it against implementation and tests.
+
+The embedded product dashboard keeps its tokens in `internal/dashboard/static/style.css`. Its role
+names and semantic colors intentionally match this guide, but its assets remain release-embedded
+and dependency-free. Change the two systems together when a shared visual role changes; do not copy
+Mintlify-generated selectors into the product UI.

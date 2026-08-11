@@ -25,8 +25,12 @@ This tour starts the complete development topology with PostgreSQL, InferCrane, 
     ```bash
     docker compose up --build -d
     docker compose ps
-    curl -fsS http://127.0.0.1:18000/readyz
-    ```
+curl -fsS http://127.0.0.1:18000/readyz
+```
+
+Run `infercrane dashboard --open` (or open `http://127.0.0.1:18000/dashboard/`) and connect with the development key `infercrane` to see
+the same fleet and persisted evidence in the embedded [operations dashboard](/features/dashboard).
+The key remains in the current browser tab.
 
     The final request exits successfully when PostgreSQL is ready. The development API key is `infercrane`; production configuration rejects this default.
   </Step>

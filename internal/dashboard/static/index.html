@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en" data-theme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <meta name="description" content="InferCrane operational evidence dashboard">
+  <title>InferCrane · Operations</title>
+  <link rel="icon" href="/dashboard/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/dashboard/style.css">
+  <script type="module" src="/dashboard/app.mjs"></script>
+</head>
+<body>
+  <a id="skip-link" class="skip-link" href="#connection-panel">Skip to connection</a>
+  <header class="topbar">
+    <div class="brand-row">
+      <button id="theme-toggle" class="icon-button" type="button" aria-label="Appearance: system" title="Change appearance">◐</button>
+      <a class="brand" href="/dashboard/" aria-label="InferCrane operations home">
+        <span class="brand-mark" aria-hidden="true">IC</span>
+        <span>InferCrane</span>
+      </a>
+      <span class="product-label">Operations</span>
+    </div>
+    <div id="connection-state" class="connection" role="status" aria-live="polite">
+      <span class="status-dot tone-muted" aria-hidden="true"></span>
+      <span>Not connected</span>
+    </div>
+  </header>
+
+  <section id="connection-panel" class="connection-panel" aria-labelledby="connection-title" tabindex="-1">
+    <div class="connection-copy">
+      <p class="eyebrow">CONTROL PLANE</p>
+      <h1 id="connection-title">Inspect production inference with evidence.</h1>
+      <p>Connect using an InferCrane API key. The key stays in this browser tab and is never placed in the URL or stored by the server.</p>
+    </div>
+    <form id="connection-form" class="connection-form">
+      <label for="api-key">API key</label>
+      <div class="credential-row">
+        <input id="api-key" name="api-key" type="password" autocomplete="current-password" spellcheck="false" required aria-describedby="credential-help connection-error">
+        <button class="button primary" type="submit">Connect</button>
+      </div>
+      <p id="credential-help" class="help">Use a viewer credential for investigation. Server-side role and scope checks still apply.</p>
+      <p id="connection-error" class="error-text" role="alert"></p>
+    </form>
+  </section>
+
+  <div id="workspace" class="workspace" hidden>
+    <aside class="fleet-panel" aria-labelledby="fleet-title">
+      <div class="panel-heading">
+        <div>
+          <p class="eyebrow">FLEET</p>
+          <h2 id="fleet-title">Deployments</h2>
+        </div>
+        <span id="fleet-count" class="count">0</span>
+      </div>
+      <div id="fleet-summary" class="fleet-summary" aria-label="Fleet health summary"></div>
+      <nav id="deployment-list" class="deployment-list" aria-label="Deployments"></nav>
+      <div id="fleet-empty" class="empty compact" hidden>
+        <strong>No deployments</strong>
+        <span>Deploy a model from the CLI or apply a DeploymentSpec.</span>
+      </div>
+    </aside>
+
+    <main id="main" class="main" tabindex="-1">
+      <div class="main-toolbar">
+        <div>
+          <p id="deployment-context" class="eyebrow">NO DEPLOYMENT SELECTED</p>
+          <h1 id="deployment-title">Fleet overview</h1>
+          <p id="deployment-subtitle" class="subtitle">Select a deployment to inspect persisted operational evidence.</p>
+        </div>
+        <div class="toolbar-actions">
+          <span id="updated-at" class="updated">Never refreshed</span>
+          <button id="refresh" class="button" type="button">Refresh</button>
+          <button id="forget" class="button quiet" type="button">Forget key</button>
+        </div>
+      </div>
+
+      <nav id="view-tabs" class="view-tabs" aria-label="Deployment evidence" hidden>
+        <button type="button" data-view="overview" aria-current="page">Overview</button>
+        <button type="button" data-view="rollout">Rollout</button>
+        <button type="button" data-view="performance">Performance</button>
+        <button type="button" data-view="infrastructure">Infrastructure</button>
+        <button type="button" data-view="scaling">Scaling</button>
+        <button type="button" data-view="activity">Activity</button>
+      </nav>
+
+      <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+      <section id="content" class="content" aria-busy="false">
+        <div class="empty">
+          <strong>Operational evidence appears here</strong>
+          <span>Fleet state is loaded through the authenticated control-plane API.</span>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="cancel-dialog" aria-labelledby="cancel-title" aria-describedby="cancel-copy">
+    <form method="dialog">
+      <p class="eyebrow">DURABLE OPERATION</p>
+      <h2 id="cancel-title">Request cancellation?</h2>
+      <p id="cancel-copy">InferCrane will cooperatively cancel the selected operation. Provider cleanup may continue after this page closes.</p>
+      <label for="cancel-confirmation">Type the operation ID to confirm</label>
+      <input id="cancel-confirmation" autocomplete="off" spellcheck="false">
+      <div class="dialog-actions">
+        <button class="button quiet" value="close">Keep running</button>
+        <button id="cancel-submit" class="button danger" value="confirm">Request cancellation</button>
+      </div>
+    </form>
+  </dialog>
+</body>
+</html>

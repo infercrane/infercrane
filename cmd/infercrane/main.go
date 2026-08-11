@@ -14,8 +14,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,6 +32,7 @@ import (
 	"github.com/infercrane/infercrane/internal/benchmark"
 	"github.com/infercrane/infercrane/internal/config"
 	"github.com/infercrane/infercrane/internal/controlapi"
+	"github.com/infercrane/infercrane/internal/dashboard"
 	"github.com/infercrane/infercrane/internal/doctor"
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/external"
@@ -49,7 +52,7 @@ import (
 	"github.com/infercrane/infercrane/internal/workflows"
 )
 
-var version = "0.3.0-rc.1"
+var version = "0.5.0-rc.1"
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -119,7 +122,7 @@ func runLegacy(ctx context.Context, args []string) error {
 		return contextCommand(args[1:])
 	}
 	switch args[0] {
-	case "target", "deploy", "apply", "plan", "doctor", "ui", "deployments", "route", "status", "events", "logs", "request", "explain", "rollout", "delete", "inspect", "operation", "orphans", "integrations", "context", "auth", "tenant", "principal", "secret", "external", "benchmark", "serve":
+	case "target", "deploy", "apply", "plan", "doctor", "ui", "dashboard", "deployments", "route", "status", "events", "logs", "request", "explain", "rollout", "delete", "inspect", "operation", "orphans", "integrations", "context", "auth", "tenant", "principal", "secret", "external", "benchmark", "serve":
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -146,6 +149,8 @@ func runLegacy(ctx context.Context, args []string) error {
 		return doctorCommand(ctx, cfg, args[1:])
 	case "ui":
 		return uiCommand(ctx, cfg, args[1:])
+	case "dashboard":
+		return dashboardCommand(ctx, cfg, args[1:])
 	case "deploy":
 		return deployAPICommand(ctx, cfg, "deploy", args[1:])
 	case "apply":
@@ -232,6 +237,46 @@ func initCommand(args []string) error {
 		fmt.Println(string(encoded))
 	case "human":
 		fmt.Printf("InferCrane configured\nContext        %s\nControl plane  %s\nConfig         %s\nCredential     existing credential stored with mode 0600\n", *contextName, *controlURL, path)
+	}
+	return nil
+}
+
+func dashboardCommand(ctx context.Context, cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("dashboard", flag.ContinueOnError)
+	open := fs.Bool("open", false, "open the dashboard in the default browser")
+	output := fs.String("output", "human", "human or json")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return errors.New("dashboard does not accept positional arguments")
+	}
+	if *output != "human" && *output != "json" {
+		return errors.New("--output must be human or json")
+	}
+	dashboardURL := strings.TrimRight(cfg.ControlURL, "/") + "/dashboard/"
+	if *open {
+		var command *exec.Cmd
+		switch runtime.GOOS {
+		case "darwin":
+			command = exec.CommandContext(ctx, "open", dashboardURL)
+		case "windows":
+			command = exec.CommandContext(ctx, "rundll32", "url.dll,FileProtocolHandler", dashboardURL)
+		default:
+			command = exec.CommandContext(ctx, "xdg-open", dashboardURL)
+		}
+		if err := command.Start(); err != nil {
+			return fmt.Errorf("open dashboard: %w (open %s manually)", err, dashboardURL)
+		}
+	}
+	if *output == "json" {
+		encoded, _ := json.Marshal(map[string]any{"url": dashboardURL, "opened": *open, "credential_in_url": false})
+		fmt.Println(string(encoded))
+		return nil
+	}
+	fmt.Println(dashboardURL)
+	if !*open {
+		fmt.Println("Run `infercrane dashboard --open` to open it. The API key is entered in the browser and never placed in the URL.")
 	}
 	return nil
 }
@@ -2365,7 +2410,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		operationTelemetry.WritePrometheus(w)
 		recorder.WritePrometheus(w)
 	}}
-	server := &http.Server{Addr: fmt.Sprintf("%s:%d", cfg.Host, cfg.Port), Handler: (&gateway.Gateway{Routes: directory, APIKey: cfg.APIKey, Authenticator: credentialCache, Recorder: recorder, Logger: logger, Client: client, Ready: s.Ping, Control: control, Telemetry: gatewayTelemetry, CapacityObservers: map[string]gateway.CapacityObserver{"runpod": serverless.ActiveWorkers}, ExternalAuthorizer: externalBudgets}).Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 1 << 20}
+	server := &http.Server{Addr: fmt.Sprintf("%s:%d", cfg.Host, cfg.Port), Handler: (&gateway.Gateway{Routes: directory, APIKey: cfg.APIKey, Authenticator: credentialCache, Recorder: recorder, Logger: logger, Client: client, Ready: s.Ping, Control: control, Dashboard: dashboard.Handler(), Telemetry: gatewayTelemetry, CapacityObservers: map[string]gateway.CapacityObserver{"runpod": serverless.ActiveWorkers}, ExternalAuthorizer: externalBudgets}).Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 1 << 20}
 	go func() {
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)

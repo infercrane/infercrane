@@ -57,6 +57,7 @@ func newRootCommand(ctx context.Context) *cobra.Command {
 		{use: "plan MODEL [flags]", short: "Preview deployment changes without side effects", group: "start"},
 		{use: "deploy MODEL [flags]", short: "Create a durable inference deployment", group: "start"},
 		{use: "ui", short: "Open the interactive operations workspace", group: "operate"},
+		{use: "dashboard [flags]", short: "Open or print the browser operations dashboard", group: "operate"},
 		{use: "request DEPLOYMENT [flags]", short: "Send a buffered or streaming inference request", group: "start"},
 		{use: "version", short: "Print the InferCrane version", group: "start"},
 		{use: "apply MODEL_OR_SPEC [flags]", short: "Declaratively converge a deployment", group: "operate"},
@@ -114,10 +115,12 @@ func addHelpFlags(command *cobra.Command, name string) {
 	boolFlag := func(flag, help string) { command.Flags().Bool(flag, false, help) }
 	intFlag := func(flag string, value int, help string) { command.Flags().Int(flag, value, help) }
 	switch name {
-	case "init", "doctor", "plan", "deploy", "apply", "request", "deployments", "status", "logs", "events", "inspect", "explain", "benchmark", "delete", "orphans", "operation", "integrations":
+	case "init", "doctor", "plan", "deploy", "apply", "request", "deployments", "status", "logs", "events", "inspect", "explain", "benchmark", "delete", "orphans", "operation", "integrations", "dashboard":
 		stringFlag("output", "human", "output format: human or json")
 	}
 	switch name {
+	case "dashboard":
+		boolFlag("open", "open the dashboard in the default browser")
 	case "ui":
 		boolFlag("read-only", "disable control-plane mutation actions")
 	case "init":
@@ -179,6 +182,7 @@ func completionFor(command string) func(*cobra.Command, []string, string) ([]str
 		"benchmark": {"--requests", "--concurrency", "--random-seed", "--revision", "--output"},
 		"doctor":    {"--cloud", "--serverless", "--output"},
 		"operation": {"--wait-timeout", "--output"},
+		"dashboard": {"--open", "--output"},
 	}
 	return func(cmd *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		if strings.HasPrefix(toComplete, "-") {

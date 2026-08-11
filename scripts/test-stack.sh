@@ -38,7 +38,16 @@ curl -fsS "$base_url/metrics" | grep -q 'infercrane_gateway_request_duration_sec
 
 stream_body=$(mktemp)
 stream_headers=$(mktemp)
-trap 'rm -f "$stream_body" "$stream_headers"' EXIT HUP INT TERM
+dashboard_body=$(mktemp)
+dashboard_headers=$(mktemp)
+trap 'rm -f "$stream_body" "$stream_headers" "$dashboard_body" "$dashboard_headers"' EXIT HUP INT TERM
+curl -fsS -D "$dashboard_headers" -o "$dashboard_body" "$base_url/dashboard/"
+grep -q '<title>InferCrane · Operations</title>' "$dashboard_body"
+grep -qi '^Content-Security-Policy:' "$dashboard_headers"
+grep -qi '^Cache-Control: no-store' "$dashboard_headers"
+curl -fsS "$base_url/dashboard/app.mjs" | grep -q "sessionStorage.getItem"
+test "$(curl -sS -o /dev/null -w '%{http_code}' "$base_url/api/v1/deployments")" = 401
+curl -fsS -H "Authorization: Bearer $api_key" "$base_url/api/v1/deployments" | jq -e '.data | type == "array"' >/dev/null
 curl -fsS -N -D "$stream_headers" -o "$stream_body" \
   -H "Authorization: Bearer $api_key" -H 'Content-Type: application/json' \
   -d "{\"model\":\"$model\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"stream smoke\"}]}" \

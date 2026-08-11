@@ -202,6 +202,9 @@ func TestOperationAPIAuthenticationAndResponse(t *testing.T) {
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"max_attempts":5`) || !strings.Contains(response.Body.String(), `"error_code":"provider_denied"`) {
 		t.Fatalf("response=%d %s", response.Code, response.Body.String())
 	}
+	if response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("authenticated control response may be cached: %q", response.Header().Get("Cache-Control"))
+	}
 }
 
 func TestIntegrationsReturnsVersionedCapabilityEvidence(t *testing.T) {

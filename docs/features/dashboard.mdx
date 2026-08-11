@@ -1,0 +1,94 @@
+---
+title: Operations dashboard
+description: Investigate fleet state, releases, performance, infrastructure, scaling, and audit evidence in a browser.
+---
+
+The embedded dashboard is a focused operational view over the same authenticated control-plane API
+used by the CLI, SDKs, Terraform provider, and terminal workspace. It does not contain a second
+backend and never reads PostgreSQL directly.
+
+Start InferCrane, then print the context-aware URL or open it directly:
+
+```bash
+infercrane dashboard
+infercrane dashboard --open
+```
+
+The default local URL is:
+
+```text
+http://127.0.0.1:18000/dashboard/
+```
+
+Enter an InferCrane API key. Prefer a viewer service account for investigation. The credential is
+held only in the current browser tab's session storage, is sent as a bearer header to same-origin
+API routes, and is removed with **Forget key**. It is never placed in a URL, cookie, event payload,
+or persistent browser storage.
+
+<Warning>
+  Anyone with access to the browser tab can act with the connected principal's scopes. Do not use a
+  bootstrap or administrator credential for a shared incident screen.
+</Warning>
+
+## Investigate a deployment
+
+Select a deployment from the fleet list, then move through the evidence views:
+
+| View | Persisted or measured evidence |
+| --- | --- |
+| Overview | normalized serving/convergence state, replica counts, deterministic explanation, active operation |
+| Rollout | immutable revisions, active/candidate pointers, Release Guard decisions and reasons |
+| Performance | request metrics, cold-start measurements, benchmark results and reproduction commands |
+| Infrastructure | route targets, provider-managed replicas, immutable model artifacts and orphan inventory |
+| Scaling | bounds, latest explanation, signals and scaling-decision history |
+| Activity | deployment events and permitted tenant audit history |
+
+Historical failure events are kept in Activity and do not change the current health indicator. A
+yellow or red connection banner means the displayed evidence may be stale; refresh before making a
+release or incident decision. Missing measurements are shown as **Not measured**, never as zero.
+
+## Resume durable work
+
+Closing the browser does not cancel deployment work. Reopen the dashboard or inspect the operation
+from any terminal:
+
+```bash
+infercrane operation watch OPERATION_ID
+```
+
+When an active operation is cancellable, the Overview shows **Request cancellation**. The dialog
+requires the exact operation ID. Cancellation is cooperative: provider cleanup may continue after
+the request is accepted or after the page closes.
+
+## Permissions and partial evidence
+
+The UI never guesses authorization. The server evaluates the principal for every request. A viewer
+can inspect deployment evidence; tenant audit history requires the tenant-management scope. When
+one optional endpoint is forbidden or temporarily unavailable, the dashboard preserves the rest of
+the deployment view and labels the missing section.
+
+## Responsive and accessible use
+
+At narrow widths, the fleet becomes a compact horizontal workspace above the selected deployment.
+Tables scroll inside their labelled region rather than widening the page. The interface provides a
+skip link, landmarks, labelled controls, keyboard navigation, visible focus, text status labels,
+reduced-motion behavior, system/light/dark appearance, and an ARIA live connection status.
+
+For screen readers, automation, or low-bandwidth incident access, the equivalent CLI commands and
+`--output json` remain first-class:
+
+```bash
+infercrane status DEPLOYMENT --output json
+infercrane events DEPLOYMENT --output json
+infercrane explain DEPLOYMENT --output json
+infercrane inspect DEPLOYMENT --output json
+```
+
+## Troubleshooting
+
+- **Credential rejected:** verify the selected context with `infercrane whoami`, then reconnect.
+- **Permission required:** use a service account with the required read or tenant-management scope.
+- **Disconnected/stale:** confirm `/readyz`, keep the retained evidence for context, and refresh after
+  control-plane recovery.
+- **Empty fleet:** create or apply a deployment; the dashboard intentionally does not provide a
+  deployment authoring wizard.

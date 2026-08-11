@@ -1237,6 +1237,7 @@ func (a API) applyDeployment(w http.ResponseWriter, r *http.Request) {
 }
 func (a API) auth(action authz.Action, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
 		header := r.Header.Get("Authorization")
 		token := strings.TrimPrefix(header, "Bearer ")
 		var principal domain.Principal

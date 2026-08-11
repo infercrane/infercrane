@@ -113,6 +113,7 @@
         "pages": [
           "features/lifecycle",
           "features/terminal-ui",
+          "features/dashboard",
           "features/autoscaling",
           "features/release-guard",
           "features/external-capacity",
@@ -179,7 +180,8 @@
               "adr/0011-tiered-provider-qualification",
               "adr/0012-versioned-integration-contracts",
               "adr/0013-governed-external-capacity-and-byoc",
-              "adr/0014-generated-automation-clients"
+              "adr/0014-generated-automation-clients",
+              "adr/0015-embedded-evidence-dashboard"
             ]
           },
           "release-acceptance"

@@ -41,6 +41,8 @@ workflow, reconciliation, router supervision, and durable bounded autoscaling ar
 tested locally. v0.3 adds a narrowly qualified AWS EC2 BYOC adapter and governed external fallback.
 The v0.4 release candidate adds one executable OpenAPI contract, generated Python and TypeScript
 clients, a Terraform provider for logical deployments, and deterministic GitHub delivery checks.
+The v0.5 candidate adds a responsive embedded operations dashboard over the same authenticated API;
+it does not introduce a hosted account service or duplicate control backend.
 Registration is not real-provider proof: paid acceptance and soak testing remain explicitly
 incomplete until their evidence gates run.
 
@@ -70,14 +72,23 @@ infercrane plan Qwen/Qwen3-8B --cloud runpod --gpu L40S
 infercrane plan Qwen/Qwen3-8B --cloud runpod --gpu L40S --output json
 ```
 
-Open the optional read-only operations console preview at any time:
+Open the optional terminal operations workspace at any time:
 
 ```bash
 infercrane ui
 ```
 
-The console reconnects to durable control-plane state; it does not require tmux and closing it does
-not cancel deployments.
+The workspace reconnects to durable control-plane state, exposes only state-valid guarded actions,
+and supports `--read-only` for shared incident screens. It does not require tmux, and closing it
+does not cancel deployments.
+
+For a browser-based fleet and evidence view, open the embedded dashboard after starting InferCrane:
+
+```bash
+infercrane dashboard --open
+```
+
+The API key stays in the current browser tab. Use **Forget key** before sharing the tab or screen.
 
 `plan` is side-effect free. Pricing is reported as unavailable until a live, timestamped provider
 pricing integration exists.
