@@ -91,6 +91,36 @@ func TestKubernetesConfigurationIsExplicitCompleteAndImmutable(t *testing.T) {
 	}
 }
 
+func TestGCPBYOCConfigurationIsAllOrNothingAndImmutable(t *testing.T) {
+	t.Setenv("INFERCRANE_API_KEY", "secret")
+	t.Setenv("INFERCRANE_GCP_PROJECT", "acme-prod")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "partial") {
+		t.Fatalf("expected partial GCP configuration failure, got %v", err)
+	}
+	for key, value := range map[string]string{
+		"INFERCRANE_GCP_ZONE": "europe-west4-a", "INFERCRANE_GCP_SUBNET": "private-runtime",
+		"INFERCRANE_GCP_MACHINE_TYPE": "g2-standard-4", "INFERCRANE_GCP_GPU": "nvidia-l4",
+		"INFERCRANE_GCP_SERVICE_ACCOUNT": "runtime@acme-prod.iam.gserviceaccount.com",
+		"INFERCRANE_GCP_VM_IMAGE":        "projects/cos-cloud/global/images/cos-stable-20260801",
+		"INFERCRANE_GCP_WORKER_SECRET":   "infercrane-worker-key",
+		"INFERCRANE_GCP_CONTAINER_IMAGE": "europe-docker.pkg.dev/acme/runtime:v1",
+	} {
+		t.Setenv(key, value)
+	}
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "sha256") {
+		t.Fatalf("expected mutable GCP image failure, got %v", err)
+	}
+	t.Setenv("INFERCRANE_GCP_CONTAINER_IMAGE", "europe-docker.pkg.dev/acme/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	cfg, err := Load()
+	if err != nil || !cfg.GCPEnabled() || cfg.GCPZone != "europe-west4-a" {
+		t.Fatalf("cfg=%#v err=%v", cfg, err)
+	}
+	t.Setenv("INFERCRANE_GCP_VM_IMAGE", "projects/cos-cloud/global/images/family/cos-stable")
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "image family") {
+		t.Fatalf("expected mutable VM image family failure, got %v", err)
+	}
+}
+
 func TestInitializeClientWritesPrivateConfigAndLoadClientUsesIt(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", root)

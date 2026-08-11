@@ -1,0 +1,20 @@
+apiVersion: infercrane.dev/v1
+kind: Deployment
+name: qwen-gcp
+model:
+  id: Qwen/Qwen3-8B
+runtime:
+  engine: vllm
+compute:
+  mode: elastic
+provider:
+  cloud: gcp
+  adapter: gcp-compute
+  region: europe-west4
+resources:
+  gpu: nvidia-l4
+scaling:
+  min_replicas: 1
+  max_replicas: 1
+routing:
+  strategy: round-robin

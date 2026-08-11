@@ -33,6 +33,7 @@ type CloudRequest struct {
 	Model                  string                   `json:"model"`
 	Runtime                string                   `json:"runtime,omitempty"`
 	Cloud                  string                   `json:"cloud"`
+	ProviderAdapter        string                   `json:"provider_adapter,omitempty"`
 	ComputeMode            string                   `json:"compute_mode,omitempty"`
 	GPU                    string                   `json:"gpu"`
 	Region                 string                   `json:"region,omitempty"`
@@ -163,20 +164,21 @@ type CapacityEvidenceStore interface {
 // selected by conditionals inside lifecycle code.
 type ReplicaBackend struct {
 	Name, Cloud, Runtime string
+	Default              bool
 	Profile              integration.ProviderProfile
 	Provider             ReplicaProvider
 	Capacity             CapacityAdvisor
 }
 
 type ReplicaBackends struct {
-	byCloudRuntime map[string]ReplicaBackend
+	byCloudRuntime map[string][]ReplicaBackend
 	byProvider     map[string]ReplicaBackend
 }
 
 func cloudRuntimeKey(cloud, runtime string) string { return cloud + "\x00" + runtime }
 
 func NewReplicaBackends(backends ...ReplicaBackend) (ReplicaBackends, error) {
-	registry := ReplicaBackends{byCloudRuntime: make(map[string]ReplicaBackend, len(backends)), byProvider: make(map[string]ReplicaBackend, len(backends))}
+	registry := ReplicaBackends{byCloudRuntime: make(map[string][]ReplicaBackend, len(backends)), byProvider: make(map[string]ReplicaBackend, len(backends))}
 	for _, backend := range backends {
 		if backend.Name == "" || backend.Cloud == "" || backend.Runtime == "" || backend.Provider == nil {
 			return ReplicaBackends{}, errors.New("replica backend name, cloud, runtime, and provider are required")
@@ -188,10 +190,15 @@ func NewReplicaBackends(backends ...ReplicaBackend) (ReplicaBackends, error) {
 			return ReplicaBackends{}, fmt.Errorf("replica backend %q profile does not match its adapter, cloud, and elastic mode", backend.Name)
 		}
 		key := cloudRuntimeKey(backend.Cloud, backend.Runtime)
-		if _, exists := registry.byCloudRuntime[key]; exists {
-			return ReplicaBackends{}, fmt.Errorf("replica backend for cloud %q and runtime %q is already registered", backend.Cloud, backend.Runtime)
+		for _, existing := range registry.byCloudRuntime[key] {
+			if existing.Name == backend.Name {
+				return ReplicaBackends{}, fmt.Errorf("replica backend %q for cloud %q and runtime %q is already registered", backend.Name, backend.Cloud, backend.Runtime)
+			}
+			if existing.Default && backend.Default {
+				return ReplicaBackends{}, fmt.Errorf("cloud %q and runtime %q have multiple default replica backends", backend.Cloud, backend.Runtime)
+			}
 		}
-		registry.byCloudRuntime[key] = backend
+		registry.byCloudRuntime[key] = append(registry.byCloudRuntime[key], backend)
 		if existing, exists := registry.byProvider[backend.Name]; exists {
 			if existing.Cloud != backend.Cloud {
 				return ReplicaBackends{}, fmt.Errorf("replica backend %q cannot bind different provider implementations", backend.Name)
@@ -204,14 +211,34 @@ func NewReplicaBackends(backends ...ReplicaBackend) (ReplicaBackends, error) {
 }
 
 func (r ReplicaBackends) ForCloud(cloud, runtime string) (ReplicaBackend, error) {
+	return r.ForAdapter(cloud, runtime, "")
+}
+
+func (r ReplicaBackends) ForAdapter(cloud, runtime, adapter string) (ReplicaBackend, error) {
 	if runtime == "" {
 		runtime = support.DefaultRuntime
 	}
-	backend, ok := r.byCloudRuntime[cloudRuntimeKey(cloud, runtime)]
-	if !ok {
+	backends := r.byCloudRuntime[cloudRuntimeKey(cloud, runtime)]
+	if len(backends) == 0 {
 		return ReplicaBackend{}, fmt.Errorf("no replica backend is registered for cloud %q and runtime %q", cloud, runtime)
 	}
-	return backend, nil
+	if adapter != "" {
+		for _, backend := range backends {
+			if backend.Name == adapter {
+				return backend, nil
+			}
+		}
+		return ReplicaBackend{}, fmt.Errorf("replica backend %q is not registered for cloud %q and runtime %q", adapter, cloud, runtime)
+	}
+	if len(backends) == 1 {
+		return backends[0], nil
+	}
+	for _, backend := range backends {
+		if backend.Default {
+			return backend, nil
+		}
+	}
+	return ReplicaBackend{}, fmt.Errorf("cloud %q and runtime %q have multiple replica backends; provider_adapter is required", cloud, runtime)
 }
 
 func (r ReplicaBackends) ForProvider(name string) (ReplicaBackend, error) {
@@ -285,7 +312,7 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 		if request.Runtime == "" {
 			request.Runtime = support.DefaultRuntime
 		}
-		backend, err := backends.ForCloud(request.Cloud, request.Runtime)
+		backend, err := backends.ForAdapter(request.Cloud, request.Runtime, request.ProviderAdapter)
 		if err != nil {
 			return "", operations.Permanent("provider_backend_unavailable", err)
 		}
@@ -506,12 +533,12 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 		if err != nil {
 			return "", operations.Permanent("deployment_missing", err)
 		}
-		request := CloudRequest{DeploymentID: resolved.Deployment.ID, Name: rollout.Name, Model: spec.Model, ModelRevision: spec.ModelRevision, RevisionID: revision.ID, Cloud: spec.Cloud, GPU: spec.GPU, Region: spec.Region, RuntimeVersion: spec.RuntimeVersion, RuntimeArgs: spec.RuntimeArgs, Port: spec.Port, Workload: spec.Workload, MinReplicas: spec.MinReplicas, MaxReplicas: spec.MaxReplicas, DesiredReplicas: spec.MinReplicas, TenantID: rollout.TenantID, Actor: rollout.Actor, Candidate: true}
+		request := CloudRequest{DeploymentID: resolved.Deployment.ID, Name: rollout.Name, Model: spec.Model, ModelRevision: spec.ModelRevision, RevisionID: revision.ID, Cloud: spec.Cloud, ProviderAdapter: spec.ProviderAdapter, GPU: spec.GPU, Region: spec.Region, RuntimeVersion: spec.RuntimeVersion, RuntimeArgs: spec.RuntimeArgs, Port: spec.Port, Workload: spec.Workload, MinReplicas: spec.MinReplicas, MaxReplicas: spec.MaxReplicas, DesiredReplicas: spec.MinReplicas, TenantID: rollout.TenantID, Actor: rollout.Actor, Candidate: true}
 		request.Runtime = spec.Runtime
 		if request.Runtime == "" {
 			request.Runtime = support.DefaultRuntime
 		}
-		backend, backendErr := backends.ForCloud(request.Cloud, request.Runtime)
+		backend, backendErr := backends.ForAdapter(request.Cloud, request.Runtime, request.ProviderAdapter)
 		if backendErr != nil {
 			return "", operations.Permanent("provider_backend_unavailable", backendErr)
 		}

@@ -47,7 +47,7 @@ func ServerlessHandlers(store CloudStore, backend ServerlessBackend, artifactRes
 		if err != nil {
 			return "", err
 		}
-		if request.ComputeMode != "serverless" || request.Cloud != backend.Cloud || request.MinReplicas != 0 || request.MaxReplicas < 1 {
+		if request.ComputeMode != "serverless" || request.Cloud != backend.Cloud || (request.ProviderAdapter != "" && request.ProviderAdapter != backend.Name) || request.MinReplicas != 0 || request.MaxReplicas < 1 {
 			return "", operations.Permanent("invalid_serverless_spec", fmt.Errorf("%s requires cloud=%s, compute_mode=serverless, min=0, and max>=1", backend.Name, backend.Cloud))
 		}
 		resolved, err := store.ResolveForTenant(ctx, request.TenantID, request.Name)

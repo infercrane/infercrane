@@ -145,6 +145,8 @@
           "integrations/sglang",
           "integrations/runpod",
           "integrations/aws-ec2",
+          "integrations/gcp-compute",
+          "integrations/provider-profiles",
           "integrations/kubernetes",
           "integrations/aiperf",
           "integrations/hugging-face"

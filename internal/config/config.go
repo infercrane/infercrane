@@ -21,6 +21,8 @@ type Config struct {
 	AWSRoleARN, AWSExternalID, AWSRegion, AWSSubnetID, AWSAMIID, AWSInstanceType, AWSGPU                               string
 	AWSInstanceProfileARN, AWSWorkerSecretARN, AWSImageDigest                                                          string
 	AWSSecurityGroupIDs                                                                                                []string
+	GCPProject, GCPZone, GCPSubnet, GCPMachineType, GCPGPU, GCPServiceAccount                                          string
+	GCPVMImage, GCPContainerImage, GCPWorkerSecret                                                                     string
 	KubernetesContext, KubernetesNamespace, KubernetesWorkloadAPI, KubernetesServiceAccount                            string
 	KubernetesWorkerSecretName, KubernetesWorkerSecretKey, KubernetesImageDigest                                       string
 	KubernetesGPUResource, KubernetesGPUProductLabel                                                                   string
@@ -273,6 +275,15 @@ func load(requireAPIKey bool) (Config, error) {
 		AWSInstanceProfileARN:       env("INFERCRANE_AWS_INSTANCE_PROFILE_ARN", ""),
 		AWSWorkerSecretARN:          env("INFERCRANE_AWS_WORKER_SECRET_ARN", ""),
 		AWSImageDigest:              env("INFERCRANE_AWS_IMAGE_DIGEST", ""),
+		GCPProject:                  env("INFERCRANE_GCP_PROJECT", ""),
+		GCPZone:                     env("INFERCRANE_GCP_ZONE", ""),
+		GCPSubnet:                   env("INFERCRANE_GCP_SUBNET", ""),
+		GCPMachineType:              env("INFERCRANE_GCP_MACHINE_TYPE", ""),
+		GCPGPU:                      env("INFERCRANE_GCP_GPU", ""),
+		GCPServiceAccount:           env("INFERCRANE_GCP_SERVICE_ACCOUNT", ""),
+		GCPVMImage:                  env("INFERCRANE_GCP_VM_IMAGE", ""),
+		GCPContainerImage:           env("INFERCRANE_GCP_CONTAINER_IMAGE", ""),
+		GCPWorkerSecret:             env("INFERCRANE_GCP_WORKER_SECRET", ""),
 		KubernetesContext:           env("INFERCRANE_KUBERNETES_CONTEXT", ""),
 		KubernetesNamespace:         env("INFERCRANE_KUBERNETES_NAMESPACE", "infercrane-system"),
 		KubernetesWorkloadAPI:       env("INFERCRANE_KUBERNETES_WORKLOAD_API", "deployment"),
@@ -327,6 +338,9 @@ func load(requireAPIKey bool) (Config, error) {
 	if err := validateAWS(config); err != nil {
 		return Config{}, err
 	}
+	if err := validateGCP(config); err != nil {
+		return Config{}, err
+	}
 	if err := validateKubernetes(config); err != nil {
 		return Config{}, err
 	}
@@ -334,6 +348,8 @@ func load(requireAPIKey bool) (Config, error) {
 }
 
 func (c Config) AWSEnabled() bool { return c.AWSRoleARN != "" }
+
+func (c Config) GCPEnabled() bool { return c.GCPProject != "" }
 
 func (c Config) KubernetesEnabled() bool { return c.KubernetesContext != "" }
 
@@ -356,6 +372,29 @@ func validateAWS(config Config) error {
 	}
 	if runtimecontract.ValidateImage(config.AWSImageDigest) != nil {
 		return errors.New("INFERCRANE_AWS_IMAGE_DIGEST must be pinned by sha256 digest")
+	}
+	return nil
+}
+
+func validateGCP(config Config) error {
+	values := []string{config.GCPProject, config.GCPZone, config.GCPSubnet, config.GCPMachineType, config.GCPGPU, config.GCPServiceAccount, config.GCPVMImage, config.GCPContainerImage, config.GCPWorkerSecret}
+	configured := false
+	for _, value := range values {
+		configured = configured || value != ""
+	}
+	if !configured {
+		return nil
+	}
+	for _, value := range values {
+		if value == "" {
+			return errors.New("GCP BYOC configuration is partial; project, zone, subnet, machine type, GPU, service account, VM image, worker secret, and immutable container image are required")
+		}
+	}
+	if runtimecontract.ValidateImage(config.GCPContainerImage) != nil {
+		return errors.New("INFERCRANE_GCP_CONTAINER_IMAGE must be pinned by sha256 digest")
+	}
+	if strings.Contains(config.GCPVMImage, "/family/") {
+		return errors.New("INFERCRANE_GCP_VM_IMAGE must identify an immutable image, not an image family")
 	}
 	return nil
 }

@@ -17,9 +17,10 @@ test('deploy preserves explicit idempotency and wait reaches terminal state', as
     return json(operations.shift());
   };
   const client = new InferCrane({ apiKey: 'secret', baseUrl: 'https://control.example', timeoutMs: 100, pollIntervalMs: 1, fetch });
-  const operation = await client.deploy({ model: 'Qwen/Qwen3-8B', name: 'qwen', cloud: 'runpod', gpu: 'L40S', idempotencyKey: 'stable' });
+  const operation = await client.deploy({ model: 'Qwen/Qwen3-8B', name: 'qwen', cloud: 'runpod', gpu: 'L40S', providerAdapter: 'skypilot', idempotencyKey: 'stable' });
   assert.equal(operation.id, 'op-1');
   assert.equal(calls[0].options.headers['Idempotency-Key'], 'stable');
+  assert.equal(JSON.parse(calls[0].options.body).provider_adapter, 'skypilot');
   assert.equal((await client.wait(operation.id)).status, 'succeeded');
 });
 

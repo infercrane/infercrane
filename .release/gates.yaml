@@ -69,6 +69,9 @@ milestone_gates:
     - responses_embeddings_completions_and_chat_batch_faithful_proxy
     - protocol_operation_telemetry_and_content_exclusion
     - pinned_runtime_protocol_claims_match_versioned_evidence
+    - provider_product_adapter_identity_persisted_and_ambiguity_fail_closed
+    - gcp_compute_private_identity_adoption_and_cleanup_conformance
+    - aws_gcp_coreweave_profile_ownership_and_qualification_boundaries
   deferred_until_v1_manual_qualification:
     - runpod_elastic
     - runpod_serverless

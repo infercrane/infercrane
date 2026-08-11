@@ -311,6 +311,10 @@
             "minimum": 1,
             "type": "integer"
           },
+          "provider_adapter": {
+            "description": "Exact provider profile for this immutable revision; omit only when the cloud/runtime default is unambiguous.",
+            "type": "string"
+          },
           "region": {
             "type": "string"
           },

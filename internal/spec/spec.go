@@ -31,8 +31,9 @@ type Deployment struct {
 		GPU string `yaml:"gpu"`
 	} `yaml:"resources"`
 	Provider struct {
-		Cloud  string `yaml:"cloud"`
-		Region string `yaml:"region"`
+		Cloud   string `yaml:"cloud"`
+		Adapter string `yaml:"adapter,omitempty"`
+		Region  string `yaml:"region"`
 	} `yaml:"provider"`
 	Scaling struct {
 		MinReplicas int `yaml:"min_replicas"`

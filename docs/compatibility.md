@@ -12,10 +12,11 @@ Python, container runtime, GPU driver, CUDA, model, and infrastructure provider.
 matrix means unqualified, not incompatible.
 
 `infercrane integrations --output json` is the executable capability inventory. RunPod
-elastic/serverless, AWS EC2 elastic, and Kubernetes elastic are distinct provider profiles;
+elastic/serverless, AWS EC2 elastic, GCP Compute elastic, and Kubernetes elastic are distinct provider profiles;
 OpenRouter is a governed external target profile. Local conformance and real-provider qualification
-are separate fields. AWS Serverless, EKS as a separate adapter, SageMaker, advanced
-KServe/llm-d/Dynamo topologies, and unregistered external adapters remain unqualified.
+are separate fields. AWS ASG/EKS/SageMaker/Bedrock, GCP MIG/GKE/Vertex, and CoreWeave CKS have
+independent registered boundaries but remain non-executable and deferred. Advanced KServe/llm-d/
+Dynamo topologies and unregistered external adapters remain unqualified.
 
 The OpenAI-compatible surface is contract-tested for model listing and chat completions. New API
 fields should pass through unless InferCrane must interpret them. Removing or changing an accepted

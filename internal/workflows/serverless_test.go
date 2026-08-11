@@ -2,6 +2,7 @@ package workflows
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/infercrane/infercrane/internal/domain"
@@ -47,6 +48,16 @@ func TestServerlessConvergeRegistersScaleToZeroEndpointWithoutWarmingWorker(t *t
 	result, err := ServerlessHandlers(store, testServerlessBackend(provider), fakeArtifactResolver{})[ServerlessConvergeKind](context.Background(), operation)
 	if err != nil || result == "" || provider.ensureCalls != 1 || store.replica.Provider != "runpod-serverless" || store.replica.ProviderResourceID != "endpoint-1" || store.target.URL != "https://api.runpod.invalid/v2/endpoint-1/openai" || !store.applied {
 		t.Fatalf("result=%s ensure=%d replica=%+v target=%+v applied=%t err=%v", result, provider.ensureCalls, store.replica, store.target, store.applied, err)
+	}
+}
+
+func TestServerlessConvergeRejectsDifferentPersistedAdapter(t *testing.T) {
+	store := &fakeCloudStore{}
+	provider := &fakeServerlessProvider{}
+	operation := domain.Operation{RequestJSON: `{"name":"qwen","model":"model","compute_mode":"serverless","cloud":"runpod","provider_adapter":"different-serverless","gpu":"L40S","tenant_id":"global","min_replicas":0,"max_replicas":1}`}
+	_, err := ServerlessHandlers(store, testServerlessBackend(provider), fakeArtifactResolver{})[ServerlessConvergeKind](context.Background(), operation)
+	if err == nil || !strings.Contains(err.Error(), "requires cloud=runpod") || provider.ensureCalls != 0 {
+		t.Fatalf("different persisted adapter was accepted: %v", err)
 	}
 }
 

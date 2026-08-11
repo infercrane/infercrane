@@ -936,6 +936,7 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 	name := fs.String("name", "", "deployment name")
 	targets := fs.String("targets", "", "comma-separated targets")
 	cloud := fs.String("cloud", "", "provider cloud")
+	providerAdapter := fs.String("provider-adapter", "", "provider adapter profile (advanced)")
 	gpu := fs.String("gpu", "", "GPU")
 	region := fs.String("region", "", "region")
 	computeMode := fs.String("compute", "elastic", "compute mode: elastic or serverless")
@@ -971,7 +972,7 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 		if err != nil {
 			return err
 		}
-		if *name != "" || *targets != "" || *cloud != "" || *gpu != "" || *region != "" {
+		if *name != "" || *targets != "" || *cloud != "" || *providerAdapter != "" || *gpu != "" || *region != "" {
 			return errors.New("deployment YAML cannot be combined with deployment flags")
 		}
 		*name = file.Name
@@ -981,6 +982,7 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 		runtimeEngine = file.Runtime.Engine
 		*computeMode = file.Compute.Mode
 		*cloud = file.Provider.Cloud
+		*providerAdapter = file.Provider.Adapter
 		*gpu = file.Resources.GPU
 		*region = file.Provider.Region
 		strategy = file.Routing.Strategy
@@ -1026,7 +1028,7 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 		path = "/api/v1/deployments/apply"
 		request = workflows.ApplyExistingRequest{Name: *name, Model: model, Targets: splitTargets(*targets), RoutingStrategy: strategy, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas, AutoscalingEnabled: *maxReplicas > *minReplicas}
 	} else if *cloud != "" && *gpu != "" {
-		request = workflows.CloudRequest{Name: *name, Model: model, ModelRevision: modelRevision, Runtime: runtimeEngine, RuntimeVersion: runtimeVersion, ComputeMode: *computeMode, Cloud: *cloud, GPU: *gpu, Region: *region, RuntimeArgs: runtimeArgs, Workload: runtimeWorkload, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas}
+		request = workflows.CloudRequest{Name: *name, Model: model, ModelRevision: modelRevision, Runtime: runtimeEngine, RuntimeVersion: runtimeVersion, ComputeMode: *computeMode, Cloud: *cloud, ProviderAdapter: *providerAdapter, GPU: *gpu, Region: *region, RuntimeArgs: runtimeArgs, Workload: runtimeWorkload, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas}
 	} else {
 		return errors.New("provide --targets or both --cloud and --gpu")
 	}
@@ -2693,6 +2695,7 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 	minReplicas := fs.Int("min", 1, "candidate minimum replicas")
 	maxReplicas := fs.Int("max", 1, "candidate maximum replicas")
 	cloud := fs.String("cloud", "", "candidate provider cloud")
+	providerAdapter := fs.String("provider-adapter", "", "candidate provider adapter profile (advanced)")
 	gpu := fs.String("gpu", "", "candidate GPU")
 	region := fs.String("region", "", "candidate region")
 	modelRevision := fs.String("model-revision", "", "candidate model revision")
@@ -2781,7 +2784,7 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 		if *cloud != "" {
 			computeMode = "elastic"
 		}
-		spec := domain.DeploymentRevisionSpec{Model: *model, ModelRevision: *modelRevision, Runtime: *runtimeName, RuntimeVersion: *runtimeVersion, RoutingStrategy: *routing, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas, AutoscalingEnabled: *maxReplicas > *minReplicas, ComputeMode: computeMode, Cloud: *cloud, GPU: *gpu, Region: *region}
+		spec := domain.DeploymentRevisionSpec{Model: *model, ModelRevision: *modelRevision, Runtime: *runtimeName, RuntimeVersion: *runtimeVersion, RoutingStrategy: *routing, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas, AutoscalingEnabled: *maxReplicas > *minReplicas, ComputeMode: computeMode, Cloud: *cloud, ProviderAdapter: *providerAdapter, GPU: *gpu, Region: *region}
 		if *runtimeArgs != "" {
 			spec.RuntimeArgs = splitTargets(*runtimeArgs)
 		}
@@ -2956,6 +2959,9 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	if cfg.AWSEnabled() {
 		benchmarkBackends["aws-ec2"] = controlapi.BackendMetadata{APIKey: cfg.APIKey, APIKeyEnv: "INFERCRANE_WORKER_API_KEY"}
 	}
+	if cfg.GCPEnabled() {
+		benchmarkBackends["gcp-compute"] = controlapi.BackendMetadata{APIKey: cfg.APIKey, APIKeyEnv: "INFERCRANE_WORKER_API_KEY"}
+	}
 	if cfg.KubernetesEnabled() {
 		benchmarkBackends["kubernetes"] = controlapi.BackendMetadata{APIKey: cfg.APIKey, APIKeyEnv: "INFERCRANE_WORKER_API_KEY"}
 	}
@@ -2982,7 +2988,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	}
 	skyProvider := provision.SkyPilot{APIKey: cfg.APIKey}
 	capacity := provision.RunPodAvailability{APIKey: cfg.RunPodAPIKey}
-	elasticBackends := []workflows.ReplicaBackend{{Name: "skypilot", Cloud: "runpod", Runtime: "vllm", Profile: elasticProfile, Provider: skyProvider, Capacity: capacity}}
+	elasticBackends := []workflows.ReplicaBackend{{Name: "skypilot", Cloud: "runpod", Runtime: "vllm", Default: true, Profile: elasticProfile, Provider: skyProvider, Capacity: capacity}}
 	if cfg.AWSEnabled() {
 		awsProfile, profileErr := integrationRegistry.Provider("aws-ec2")
 		if profileErr != nil {
@@ -2995,11 +3001,21 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 			InstanceProfileARN: cfg.AWSInstanceProfileARN, WorkerSecretARN: cfg.AWSWorkerSecretARN,
 			ImageDigest: cfg.AWSImageDigest,
 		}
-		elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: "aws-ec2", Cloud: "aws", Runtime: "vllm", Profile: awsProfile, Provider: awsProvider})
+		elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: "aws-ec2", Cloud: "aws", Runtime: "vllm", Default: true, Profile: awsProfile, Provider: awsProvider})
 		elasticBackends = append(elasticBackends,
-			workflows.ReplicaBackend{Name: "aws-ec2", Cloud: "aws", Runtime: "sglang", Profile: awsProfile, Provider: awsProvider},
-			workflows.ReplicaBackend{Name: "aws-ec2", Cloud: "aws", Runtime: "custom-oci", Profile: awsProfile, Provider: awsProvider},
+			workflows.ReplicaBackend{Name: "aws-ec2", Cloud: "aws", Runtime: "sglang", Default: true, Profile: awsProfile, Provider: awsProvider},
+			workflows.ReplicaBackend{Name: "aws-ec2", Cloud: "aws", Runtime: "custom-oci", Default: true, Profile: awsProfile, Provider: awsProvider},
 		)
+	}
+	if cfg.GCPEnabled() {
+		gcpProfile, profileErr := integrationRegistry.Provider("gcp-compute")
+		if profileErr != nil {
+			return fmt.Errorf("configure GCP integration: %w", profileErr)
+		}
+		gcpProvider := provision.GCPCompute{Project: cfg.GCPProject, Zone: cfg.GCPZone, Subnet: cfg.GCPSubnet, MachineType: cfg.GCPMachineType, GPUType: cfg.GCPGPU, ServiceAccount: cfg.GCPServiceAccount, VMImage: cfg.GCPVMImage, ContainerImage: cfg.GCPContainerImage, WorkerSecret: cfg.GCPWorkerSecret}
+		for _, runtimeName := range []string{"vllm", "sglang", "custom-oci"} {
+			elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: "gcp-compute", Cloud: "gcp", Runtime: runtimeName, Default: true, Profile: gcpProfile, Provider: gcpProvider})
+		}
 	}
 	if cfg.KubernetesEnabled() {
 		kubernetesProfile, profileErr := integrationRegistry.Provider("kubernetes")

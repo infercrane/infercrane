@@ -34,6 +34,7 @@ compute:
   mode: elastic
 provider:
   cloud: runpod
+  # adapter: skypilot # optional exact profile selection
   region: EU-RO-1
 resources:
   gpu: L40S
@@ -50,6 +51,8 @@ underspecified probes are rejected before provisioning.
 
 `compute.mode` defaults to `elastic`; elastic replica bounds default to `1..1`. Serverless requires
 `min_replicas: 0` and defaults `max_replicas` to one when omitted. Revisions are immutable; changing
-a field creates a candidate. v0.6 accepts vLLM on RunPod elastic/serverless and configured AWS EC2
-elastic; SGLang and custom OCI are limited to AWS EC2 elastic with fixed replica bounds. AWS requires
-an explicit `provider.region`. Cost is omitted unless a trustworthy provider measurement exists.
+a field creates a candidate. `provider.adapter` persists the exact implementation when more than one
+profile can serve a cloud/runtime pair; it is optional for an unambiguous default. Current executable
+elastic defaults include configured AWS EC2 and GCP Compute, while other v1.5 provider-product
+profiles remain registered/deferred. AWS and GCP require an explicit `provider.region`. Cost is
+omitted unless a trustworthy provider measurement exists.

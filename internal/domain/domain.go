@@ -45,6 +45,7 @@ type DeploymentRevisionSpec struct {
 	AutoscalingEnabled bool                     `json:"autoscaling_enabled"`
 	ComputeMode        string                   `json:"compute_mode,omitempty"`
 	Cloud              string                   `json:"cloud,omitempty"`
+	ProviderAdapter    string                   `json:"provider_adapter,omitempty"`
 	GPU                string                   `json:"gpu,omitempty"`
 	Region             string                   `json:"region,omitempty"`
 	Port               int                      `json:"port,omitempty"`

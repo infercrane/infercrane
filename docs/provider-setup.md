@@ -17,8 +17,21 @@ lifecycle engine. It requires a complete role, private network, AMI, instance pr
 instance type/GPU, region, and immutable image configuration. See [AWS EC2 BYOC](/integrations/aws-ec2)
 and run `infercrane doctor --aws` before provisioning.
 
-AWS Serverless, EKS, SageMaker, automatic hardware selection, and public-network bootstrap are not
-qualified by v0.3.
+ASG, EKS, SageMaker, and Bedrock have separate registered profiles. Registration documents their
+ownership boundary; it is not executable qualification. Inspect `infercrane integrations`.
+
+## GCP Compute BYOC
+
+The `gcp-compute` adapter launches private, digest-pinned workers with an attached service account
+and deterministic adoption identity. Configuration is all-or-nothing. See
+[GCP Compute BYOC](/integrations/gcp-compute). MIG, GKE, and Vertex remain separate registered,
+deferred profiles rather than implicit aliases.
+
+## CoreWeave
+
+The `coreweave-cks` profile is CKS-first: InferCrane reuses its namespaced Kubernetes lifecycle and
+does not install or own the provider-managed GPU operator. The profile is registered but not yet
+executable or locally qualified; real CKS qualification remains deferred.
 
 ## Kubernetes
 

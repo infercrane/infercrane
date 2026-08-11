@@ -111,6 +111,7 @@ func (p RuntimeProfile) ProtocolCapabilities() runtimecontract.ProtocolCapabilit
 
 type RuntimeCompatibility struct {
 	Runtime  string             `json:"runtime"`
+	Adapter  string             `json:"adapter"`
 	Cloud    string             `json:"cloud"`
 	Mode     ComputeMode        `json:"mode"`
 	State    QualificationState `json:"state"`
@@ -203,8 +204,12 @@ func (r *Registry) SetCompatibility(entries ...RuntimeCompatibility) error {
 		if _, err := r.Runtime(entry.Runtime); err != nil {
 			return err
 		}
-		if entry.Cloud == "" || (entry.Mode != ElasticMode && entry.Mode != ServerlessMode && entry.Mode != ExternalMode) {
-			return errors.New("runtime compatibility requires cloud and valid mode")
+		profile, err := r.Provider(entry.Adapter)
+		if err != nil {
+			return fmt.Errorf("runtime compatibility provider: %w", err)
+		}
+		if entry.Cloud == "" || profile.Cloud != entry.Cloud || !containsMode(profile.Modes, entry.Mode) {
+			return errors.New("runtime compatibility requires an adapter with matching cloud and mode")
 		}
 		switch entry.State {
 		case QualificationRegistered, QualificationSimulated, QualificationLocal, QualificationReal, QualificationDeferred, QualificationFailed:
@@ -214,7 +219,7 @@ func (r *Registry) SetCompatibility(entries ...RuntimeCompatibility) error {
 		if (entry.State == QualificationLocal || entry.State == QualificationReal || entry.State == QualificationSimulated) && entry.Evidence == "" {
 			return errors.New("qualified runtime compatibility requires evidence")
 		}
-		key := entry.Runtime + "\x00" + entry.Cloud + "\x00" + string(entry.Mode)
+		key := entry.Runtime + "\x00" + entry.Adapter + "\x00" + string(entry.Mode)
 		if _, ok := seen[key]; ok {
 			return fmt.Errorf("duplicate runtime compatibility for %s/%s/%s", entry.Runtime, entry.Cloud, entry.Mode)
 		}
@@ -222,6 +227,15 @@ func (r *Registry) SetCompatibility(entries ...RuntimeCompatibility) error {
 	}
 	r.compatibility = append([]RuntimeCompatibility(nil), entries...)
 	return nil
+}
+
+func containsMode(modes []ComputeMode, mode ComputeMode) bool {
+	for _, candidate := range modes {
+		if candidate == mode {
+			return true
+		}
+	}
+	return false
 }
 
 func NewRegistry() *Registry {

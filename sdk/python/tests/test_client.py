@@ -85,9 +85,10 @@ class ClientTest(unittest.TestCase):
         self.client = InferCrane(api_key="test-secret", base_url=self.url, timeout=1, poll_interval=0.001)
 
     def test_deploy_uses_explicit_idempotency_and_waits(self):
-        operation = self.client.deploy(model="Qwen/Qwen3-8B", name="qwen", cloud="runpod", gpu="L40S", idempotency_key="stable-key")
+        operation = self.client.deploy(model="Qwen/Qwen3-8B", name="qwen", cloud="runpod", gpu="L40S", provider_adapter="skypilot", idempotency_key="stable-key")
         self.assertEqual(operation.id, "op-1")
         self.assertEqual(Handler.requests[0][1], "stable-key")
+        self.assertEqual(Handler.requests[0][2]["provider_adapter"], "skypilot")
         self.assertEqual(self.client.wait(operation.id).status, "succeeded")
 
     def test_deploy_preserves_portable_runtime_workload(self):

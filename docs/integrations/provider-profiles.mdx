@@ -1,0 +1,44 @@
+---
+title: Provider profiles
+description: Understand executable, registered, and deferred infrastructure profiles.
+---
+
+# Provider profiles
+
+InferCrane separates the stable cloud identity from the adapter that implements a particular
+provider product. For example, `aws-ec2`, `aws-asg`, and `aws-sagemaker` are different profiles even
+though their cloud is `aws`. This prevents managed endpoint semantics from being forced into a
+one-resource-per-replica contract.
+
+| Cloud | Profile | Local state | Ownership boundary |
+| --- | --- | --- | --- |
+| AWS | `aws-ec2` | Locally qualified | One private VM per replica intent |
+| AWS | `aws-asg` | Registered | ASG owns instances and replacement |
+| AWS | `aws-eks` | Registered | Reuse namespaced Kubernetes lifecycle |
+| AWS | `aws-sagemaker` | Registered | SageMaker owns endpoint children |
+| AWS | `aws-bedrock` | Registered external | Customer-governed external capacity |
+| GCP | `gcp-compute` | Locally qualified | One private VM per replica intent |
+| GCP | `gcp-mig` | Registered | MIG owns instances and rolling replacement |
+| GCP | `gcp-gke` | Registered | Reuse namespaced Kubernetes lifecycle |
+| GCP | `gcp-vertex` | Registered | Vertex owns deployed-model children |
+| CoreWeave | `coreweave-cks` | Registered | Reuse namespaced Kubernetes lifecycle; CKS owns GPU platform services |
+
+Registered means the capability and ownership boundary is modeled and inspectable. It does **not**
+mean InferCrane can execute that profile. Local and real qualification are separate evidence states.
+Use `infercrane integrations` rather than relying on this prose for the running binary's exact state.
+
+## Exact selection
+
+Use an adapter only when a cloud/runtime pair has multiple installed implementations:
+
+```bash
+infercrane deploy Qwen/Qwen3-8B \
+  --cloud gcp \
+  --provider-adapter gcp-compute \
+  --region europe-west4 \
+  --gpu nvidia-l4
+```
+
+The adapter identity is persisted in immutable revision state. Reconciliation therefore resumes the
+same implementation after a control-plane restart instead of guessing from currently installed
+plugins.

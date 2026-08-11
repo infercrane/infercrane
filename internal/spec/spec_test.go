@@ -32,6 +32,7 @@ resources:
   gpu: L40S
 provider:
   cloud: runpod
+  adapter: runpod-serverless
 scaling:
   min_replicas: 0
   max_replicas: 4
@@ -39,7 +40,7 @@ scaling:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.Compute.Mode != "serverless" || loaded.Scaling.MinReplicas != 0 || loaded.Scaling.MaxReplicas != 4 || loaded.Model.Revision == "" || loaded.Runtime.Version != "0.10.2" {
+	if loaded.Compute.Mode != "serverless" || loaded.Provider.Adapter != "runpod-serverless" || loaded.Scaling.MinReplicas != 0 || loaded.Scaling.MaxReplicas != 4 || loaded.Model.Revision == "" || loaded.Runtime.Version != "0.10.2" {
 		t.Fatalf("loaded=%+v", loaded)
 	}
 }

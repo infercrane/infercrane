@@ -676,6 +676,18 @@ func TestServerlessDeployQueuesProviderNativeConverge(t *testing.T) {
 	}
 }
 
+func TestCloudDeployPersistsExactProviderAdapterIntent(t *testing.T) {
+	store := &fakeStore{created: true}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments", strings.NewReader(`{"name":"qwen-gcp","model":"Qwen/Qwen3-8B","cloud":"gcp","provider_adapter":"gcp-compute","region":"europe-west4","gpu":"nvidia-l4","min_replicas":1,"max_replicas":1}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Idempotency-Key", "deploy-qwen-gcp")
+	response := httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret"}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted || !strings.Contains(store.operation.RequestJSON, `"provider_adapter":"gcp-compute"`) {
+		t.Fatalf("response=%d %s operation=%#v", response.Code, response.Body.String(), store.operation)
+	}
+}
+
 func TestDeleteQueuesDurableCleanup(t *testing.T) {
 	store := &fakeStore{created: true}
 	request := httptest.NewRequest(http.MethodDelete, "/api/v1/deployments/qwen", nil)

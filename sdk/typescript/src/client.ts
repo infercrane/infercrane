@@ -16,6 +16,7 @@ export interface DeployRequest {
   model: string;
   name?: string;
   cloud: string;
+  providerAdapter?: string;
   gpu: string;
   runtime?: string;
   computeMode?: 'elastic' | 'serverless';
@@ -104,6 +105,7 @@ export class InferCrane {
     const name = request.name ?? request.model.split('/').at(-1)!.toLowerCase().replaceAll('_', '-');
     const body: Record<string, JsonValue> = { name, model: request.model, cloud: request.cloud, gpu: request.gpu, runtime: request.runtime ?? 'vllm', compute_mode: request.computeMode ?? 'elastic', min_replicas: request.minReplicas ?? 1, max_replicas: request.maxReplicas ?? 1 };
     if (request.region) body['region'] = request.region;
+    if (request.providerAdapter) body['provider_adapter'] = request.providerAdapter;
     if (request.modelRevision) body['model_revision'] = request.modelRevision;
     if (request.runtimeVersion) body['runtime_version'] = request.runtimeVersion;
     if (request.runtimeArgs?.length) body['runtime_args'] = request.runtimeArgs;

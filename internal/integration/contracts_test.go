@@ -63,7 +63,7 @@ func TestV09CatalogPublishesKubernetesWithoutAdvancedRoutingClaims(t *testing.T)
 		t.Fatalf("profile=%#v err=%v", profile, err)
 	}
 	encoded, _ := json.Marshal(registry.Snapshot())
-	for _, required := range []string{`"kserve_standard"`, `"gateway_api_exposure"`, `"advanced_disaggregated_runtime","state":"unsupported"`, `"runtime":"vllm","cloud":"kubernetes","mode":"elastic","state":"simulated"`, `"runtime":"vllm","cloud":"runpod","mode":"elastic"`, `"runtime":"vllm","cloud":"aws","mode":"elastic"`} {
+	for _, required := range []string{`"kserve_standard"`, `"gateway_api_exposure"`, `"advanced_disaggregated_runtime","state":"unsupported"`, `"runtime":"vllm","adapter":"kubernetes","cloud":"kubernetes","mode":"elastic","state":"simulated"`, `"runtime":"vllm","adapter":"skypilot","cloud":"runpod","mode":"elastic"`, `"runtime":"vllm","adapter":"aws-ec2","cloud":"aws","mode":"elastic"`} {
 		if !strings.Contains(string(encoded), required) {
 			t.Fatalf("missing %s: %s", required, encoded)
 		}
@@ -85,6 +85,32 @@ func TestProfilesRejectInvalidOrUnsupportedClaims(t *testing.T) {
 	runtime := RuntimeProfile{Runtime: "test", ContractVersion: "future", AdapterVersion: "1", Protocol: "openai"}
 	if err := runtime.Validate(); err == nil || !strings.Contains(err.Error(), "unsupported contract") {
 		t.Fatalf("unsupported runtime contract was accepted: %v", err)
+	}
+}
+
+func TestV15CatalogSeparatesProviderProfilesWithoutFabricatingQualification(t *testing.T) {
+	registry, err := V15Catalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := registry.Snapshot()
+	required := map[string]bool{"aws-ec2": false, "aws-asg": false, "aws-eks": false, "aws-sagemaker": false, "aws-bedrock": false, "gcp-compute": false, "gcp-mig": false, "gcp-gke": false, "gcp-vertex": false, "coreweave-cks": false}
+	for _, profile := range snapshot.Providers {
+		if _, ok := required[profile.Adapter]; ok {
+			required[profile.Adapter] = true
+		}
+		if profile.Adapter != "aws-ec2" && profile.Adapter != "gcp-compute" && required[profile.Adapter] {
+			for _, qualification := range profile.Qualification {
+				if qualification.State == QualificationLocal || qualification.State == QualificationReal {
+					t.Fatalf("profile %s fabricated qualification: %#v", profile.Adapter, qualification)
+				}
+			}
+		}
+	}
+	for adapter, found := range required {
+		if !found {
+			t.Errorf("missing provider profile %s", adapter)
+		}
 	}
 }
 

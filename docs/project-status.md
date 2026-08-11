@@ -53,6 +53,8 @@ but lacks production qualification; **planned** is not a product capability.
 | Reference-only secrets | Experimental | Environment references persist without values; additional production secret-manager resolvers remain planned. |
 | Governed external capacity | Experimental | Explicit health/queue overflow, hysteresis, cooldown, privacy acknowledgement, atomic request/cost reservations, OpenRouter, and no-replay streaming behavior are hermetically qualified; real billing evidence is deferred. |
 | AWS EC2 BYOC | Experimental | Private-network, role-assumed, tag-owned, immutable-image elastic lifecycle passes Provider Contract V1 hermetically; real AWS evidence is deferred. |
+| GCP Compute BYOC | Experimental | Private-network, attached-identity, label-owned, immutable-image lifecycle passes hermetic adapter tests; real GCP GPU evidence is deferred. |
+| Managed provider profiles | Planned | AWS ASG/EKS/SageMaker/Bedrock, GCP MIG/GKE/Vertex, and CoreWeave CKS have explicit ownership/capability boundaries but are not executable or locally qualified. |
 | Kubernetes elastic | Experimental | Namespace-scoped Deployment/Service and optional standard KServe ownership pass hermetic and Kind lifecycle gates; real Kubernetes GPU/runtime evidence is deferred. |
 | SkyPilot RunPod provisioning | Experimental | Requires credentialed elastic lifecycle acceptance and soak tests. |
 | Production performance claims | Planned | Must be backed by reproducible real-vLLM benchmarks. |

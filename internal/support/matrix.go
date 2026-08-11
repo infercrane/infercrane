@@ -125,7 +125,16 @@ func V09() Matrix {
 // V1 is the public v1 runtime/provider/compute qualification policy. Keep the
 // historical milestone functions so old qualification evidence remains
 // reproducible while current composition has a version-appropriate owner.
-func V1() Matrix { return V09() }
+func V15() Matrix {
+	return Qualified(map[string]map[string][]string{
+		DefaultCloud: {ElasticMode: {DefaultRuntime}, ServerlessMode: {DefaultRuntime}},
+		"aws":        {ElasticMode: {DefaultRuntime, "sglang", "custom-oci"}},
+		"gcp":        {ElasticMode: {DefaultRuntime, "sglang", "custom-oci"}},
+		"kubernetes": {ElasticMode: {DefaultRuntime, "sglang", "custom-oci"}},
+	})
+}
+
+func V1() Matrix { return V15() }
 
 func (m Matrix) Validate(runtime, cloud, mode string) error {
 	if err := m.ValidateRuntime(runtime); err != nil {

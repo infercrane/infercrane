@@ -76,10 +76,11 @@ class InferCrane:
         self.timeout = timeout
         self.poll_interval = poll_interval
 
-    def deploy(self, *, model: str, name: str | None = None, cloud: str, gpu: str, runtime: str = "vllm", compute_mode: str = "elastic", min_replicas: int = 1, max_replicas: int = 1, region: str = "", model_revision: str = "", runtime_version: str = "", runtime_args: list[str] | None = None, workload: dict[str, Any] | None = None, idempotency_key: str | None = None) -> Operation:
+    def deploy(self, *, model: str, name: str | None = None, cloud: str, gpu: str, provider_adapter: str = "", runtime: str = "vllm", compute_mode: str = "elastic", min_replicas: int = 1, max_replicas: int = 1, region: str = "", model_revision: str = "", runtime_version: str = "", runtime_args: list[str] | None = None, workload: dict[str, Any] | None = None, idempotency_key: str | None = None) -> Operation:
         deployment_name = name or model.rsplit("/", 1)[-1].lower().replace("_", "-")
         body: dict[str, Any] = {"name": deployment_name, "model": model, "runtime": runtime, "cloud": cloud, "gpu": gpu, "compute_mode": compute_mode, "min_replicas": min_replicas, "max_replicas": max_replicas}
         if region: body["region"] = region
+        if provider_adapter: body["provider_adapter"] = provider_adapter
         if model_revision: body["model_revision"] = model_revision
         if runtime_version: body["runtime_version"] = runtime_version
         if runtime_args: body["runtime_args"] = runtime_args

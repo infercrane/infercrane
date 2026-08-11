@@ -149,11 +149,11 @@ func V06Catalog() (*Registry, error) {
 		}
 	}
 	if err = registry.SetCompatibility(
-		RuntimeCompatibility{Runtime: "vllm", Cloud: "runpod", Mode: ElasticMode, State: QualificationLocal, Evidence: "make:dev-check-full"},
-		RuntimeCompatibility{Runtime: "vllm", Cloud: "runpod", Mode: ServerlessMode, State: QualificationLocal, Evidence: "go:test/internal/workflows#TestServerlessConvergeRegistersScaleToZeroEndpointWithoutWarmingWorker"},
-		RuntimeCompatibility{Runtime: "vllm", Cloud: "aws", Mode: ElasticMode, State: QualificationLocal, Evidence: "go:test/internal/conformance#TestAWSEC2ProviderContractConformance"},
-		RuntimeCompatibility{Runtime: "sglang", Cloud: "aws", Mode: ElasticMode, State: QualificationSimulated, Evidence: "go:test/internal/conformance#TestPortableRuntimeConformance"},
-		RuntimeCompatibility{Runtime: "custom-oci", Cloud: "aws", Mode: ElasticMode, State: QualificationSimulated, Evidence: "go:test/internal/conformance#TestPortableRuntimeConformance"},
+		RuntimeCompatibility{Runtime: "vllm", Adapter: "skypilot", Cloud: "runpod", Mode: ElasticMode, State: QualificationLocal, Evidence: "make:dev-check-full"},
+		RuntimeCompatibility{Runtime: "vllm", Adapter: "runpod-serverless", Cloud: "runpod", Mode: ServerlessMode, State: QualificationLocal, Evidence: "go:test/internal/workflows#TestServerlessConvergeRegistersScaleToZeroEndpointWithoutWarmingWorker"},
+		RuntimeCompatibility{Runtime: "vllm", Adapter: "aws-ec2", Cloud: "aws", Mode: ElasticMode, State: QualificationLocal, Evidence: "go:test/internal/conformance#TestAWSEC2ProviderContractConformance"},
+		RuntimeCompatibility{Runtime: "sglang", Adapter: "aws-ec2", Cloud: "aws", Mode: ElasticMode, State: QualificationSimulated, Evidence: "go:test/internal/conformance#TestPortableRuntimeConformance"},
+		RuntimeCompatibility{Runtime: "custom-oci", Adapter: "aws-ec2", Cloud: "aws", Mode: ElasticMode, State: QualificationSimulated, Evidence: "go:test/internal/conformance#TestPortableRuntimeConformance"},
 	); err != nil {
 		return nil, err
 	}
@@ -189,9 +189,9 @@ func V09Catalog() (*Registry, error) {
 		return nil, err
 	}
 	compatibility := append(registry.Snapshot().Compatibility,
-		RuntimeCompatibility{Runtime: "vllm", Cloud: "kubernetes", Mode: ElasticMode, State: QualificationSimulated, Evidence: "go:test/internal/conformance#TestKubernetesProviderContractConformance"},
-		RuntimeCompatibility{Runtime: "sglang", Cloud: "kubernetes", Mode: ElasticMode, State: QualificationSimulated, Evidence: "go:test/internal/conformance#TestPortableRuntimeConformance"},
-		RuntimeCompatibility{Runtime: "custom-oci", Cloud: "kubernetes", Mode: ElasticMode, State: QualificationSimulated, Evidence: "go:test/internal/conformance#TestPortableRuntimeConformance"},
+		RuntimeCompatibility{Runtime: "vllm", Adapter: "kubernetes", Cloud: "kubernetes", Mode: ElasticMode, State: QualificationSimulated, Evidence: "go:test/internal/conformance#TestKubernetesProviderContractConformance"},
+		RuntimeCompatibility{Runtime: "sglang", Adapter: "kubernetes", Cloud: "kubernetes", Mode: ElasticMode, State: QualificationSimulated, Evidence: "go:test/internal/conformance#TestPortableRuntimeConformance"},
+		RuntimeCompatibility{Runtime: "custom-oci", Adapter: "kubernetes", Cloud: "kubernetes", Mode: ElasticMode, State: QualificationSimulated, Evidence: "go:test/internal/conformance#TestPortableRuntimeConformance"},
 	)
 	if err = registry.SetCompatibility(compatibility...); err != nil {
 		return nil, err
@@ -199,6 +199,92 @@ func V09Catalog() (*Registry, error) {
 	return registry, nil
 }
 
-// V1Catalog is the public v1 integration catalog. V09Catalog remains available
-// so historical release evidence can continue to reproduce its exact input.
-func V1Catalog() (*Registry, error) { return V09Catalog() }
+// V15Catalog introduces independently identified provider profiles. Registration
+// is not qualification: mutation profiles become local-qualified only after an
+// executable adapter passes Provider Contract V1, while real environments stay
+// deferred until the approval-locked manual gate.
+func V15Catalog() (*Registry, error) {
+	registry, err := V09Catalog()
+	if err != nil {
+		return nil, err
+	}
+	profiles := []ProviderProfile{
+		providerBoundary("aws-asg", "aws", ElasticMode, []Capability{
+			{Name: "launch_template_version", State: CapabilityUnknown, Detail: "requires an explicit immutable numbered launch-template version"},
+			{Name: "intent_observation", State: CapabilityUnknown, Detail: "accepted ASG mutations must be observed to convergence"},
+			{Name: "instance_refresh", State: CapabilityUnknown, Detail: "provider-owned rolling replacement; InferCrane owns desired revision evidence"},
+		}),
+		providerBoundary("aws-eks", "aws", ElasticMode, []Capability{
+			{Name: "kubernetes_contract", State: CapabilityUnknown, Detail: "reuses the namespaced Kubernetes adapter against an explicit EKS context"},
+			{Name: "workload_identity", State: CapabilityUnknown, Detail: "service-account identity must be short-lived and cluster scoped"},
+		}),
+		providerBoundary("aws-sagemaker", "aws", ElasticMode, []Capability{
+			{Name: "import", State: CapabilityUnknown, Detail: "adopt an existing endpoint without assuming lifecycle ownership"},
+			{Name: "managed_endpoint_lifecycle", State: CapabilityUnknown, Detail: "SageMaker owns endpoint instances and autoscaling children"},
+			{Name: "private_network", State: CapabilityUnknown, Detail: "requires explicit VPC/private endpoint evidence"},
+		}),
+		providerBoundary("aws-bedrock", "aws", ExternalMode, []Capability{
+			{Name: "provisioning", State: CapabilityUnsupported, Detail: "Bedrock is governed external capacity"},
+			{Name: "hard_budget", State: CapabilityUnknown, Detail: "must reuse external-capacity request and cost reservations"},
+			{Name: "private_network", State: CapabilityUnknown, Detail: "optional interface VPC endpoint is customer configured"},
+		}),
+		providerBoundary("gcp-compute", "gcp", ElasticMode, []Capability{
+			{Name: "idempotent_request_id", State: CapabilityUnknown, Detail: "mutations require durable request identity and label adoption"},
+			{Name: "private_network", State: CapabilityUnknown, Detail: "workers require no external IP and explicit subnet"},
+			{Name: "workload_identity", State: CapabilityUnknown, Detail: "attached service account without stored key material"},
+		}),
+		providerBoundary("gcp-mig", "gcp", ElasticMode, []Capability{
+			{Name: "immutable_instance_template", State: CapabilityUnknown},
+			{Name: "intent_observation", State: CapabilityUnknown, Detail: "declarative update acceptance is not convergence"},
+			{Name: "rolling_update", State: CapabilityUnknown, Detail: "MIG owns replacement; rollback is a new desired template"},
+		}),
+		providerBoundary("gcp-gke", "gcp", ElasticMode, []Capability{
+			{Name: "kubernetes_contract", State: CapabilityUnknown, Detail: "reuses the namespaced Kubernetes adapter against an explicit GKE context"},
+			{Name: "workload_identity", State: CapabilityUnknown, Detail: "Kubernetes service account maps to short-lived Google identity"},
+		}),
+		providerBoundary("gcp-vertex", "gcp", ElasticMode, []Capability{
+			{Name: "import", State: CapabilityUnknown},
+			{Name: "managed_endpoint_lifecycle", State: CapabilityUnknown, Detail: "Vertex owns deployed model replicas"},
+			{Name: "private_service_connect", State: CapabilityUnknown, Detail: "endpoint type limitations remain provider-owned"},
+		}),
+		providerBoundary("coreweave-cks", "coreweave", ElasticMode, []Capability{
+			{Name: "kubernetes_contract", State: CapabilityUnknown, Detail: "CKS-first profile reuses namespaced Kubernetes lifecycle"},
+			{Name: "provider_managed_gpu_operator", State: CapabilityUnsupported, Detail: "InferCrane must not install or own the NVIDIA GPU Operator"},
+			{Name: "private_vpc", State: CapabilityUnknown},
+		}),
+	}
+	for _, profile := range profiles {
+		if profile.Adapter == "gcp-compute" {
+			profile.AdapterVersion = "builtin-v1.5"
+			profile.Capabilities = []Capability{{Name: "adoption", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestGCPComputeLifecycleIsPrivateIdempotentAndAdoptable"}, {Name: "idempotent_delete", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestGCPComputeLifecycleIsPrivateIdempotentAndAdoptable"}, {Name: "immutable_workload", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestGCPComputeRejectsMutableContainerBeforeProviderCall"}, {Name: "orphan_inventory", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestGCPComputeLifecycleIsPrivateIdempotentAndAdoptable"}, {Name: "private_network", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestGCPComputeLifecycleIsPrivateIdempotentAndAdoptable"}, {Name: "workload_identity", State: CapabilitySupported, Detail: "attached service account; no static service-account key", Evidence: "go:test/internal/provision#TestGCPComputeLifecycleIsPrivateIdempotentAndAdoptable"}}
+			profile.Qualification = []Qualification{{State: QualificationLocal, Environment: "hermetic-gcloud", Evidence: "go:test/internal/provision#TestGCPComputeLifecycleIsPrivateIdempotentAndAdoptable"}, {State: QualificationDeferred, Environment: "real-gcp-compute", Reason: "awaiting consolidated manual qualification"}}
+		}
+		if err = registry.RegisterProvider(profile); err != nil {
+			return nil, err
+		}
+	}
+	compatibility := append([]RuntimeCompatibility(nil), registry.Snapshot().Compatibility...)
+	compatibility = append(compatibility,
+		RuntimeCompatibility{Runtime: "vllm", Adapter: "gcp-compute", Cloud: "gcp", Mode: ElasticMode, State: QualificationLocal, Evidence: "go:test/internal/provision#TestGCPComputeLifecycleIsPrivateIdempotentAndAdoptable"},
+		RuntimeCompatibility{Runtime: "sglang", Adapter: "gcp-compute", Cloud: "gcp", Mode: ElasticMode, State: QualificationSimulated, Evidence: "go:test/internal/provision#TestGCPComputePortableWorkloadExpandsArgumentsSafely"},
+		RuntimeCompatibility{Runtime: "custom-oci", Adapter: "gcp-compute", Cloud: "gcp", Mode: ElasticMode, State: QualificationSimulated, Evidence: "go:test/internal/provision#TestGCPComputePortableWorkloadExpandsArgumentsSafely"},
+	)
+	for _, profile := range profiles {
+		if profile.Adapter == "gcp-compute" || profile.Adapter == "aws-bedrock" {
+			continue
+		}
+		compatibility = append(compatibility, RuntimeCompatibility{Runtime: "vllm", Adapter: profile.Adapter, Cloud: profile.Cloud, Mode: ElasticMode, State: QualificationDeferred, Reason: "registered provider boundary requires executable local conformance and real manual qualification"})
+	}
+	if err = registry.SetCompatibility(compatibility...); err != nil {
+		return nil, err
+	}
+	return registry, nil
+}
+
+func providerBoundary(adapter, cloud string, mode ComputeMode, capabilities []Capability) ProviderProfile {
+	return ProviderProfile{Adapter: adapter, Cloud: cloud, ContractVersion: ProviderContractV1, AdapterVersion: "boundary-v1.5", Modes: []ComputeMode{mode}, Capabilities: capabilities, Qualification: []Qualification{{State: QualificationRegistered, Environment: "contract-boundary"}, {State: QualificationDeferred, Environment: "real-" + adapter, Reason: "awaiting executable local adapter and consolidated manual qualification"}}}
+}
+
+// V1Catalog is the current public v1 integration catalog. Historical catalog
+// functions remain stable so prior release evidence is reproducible.
+func V1Catalog() (*Registry, error) { return V15Catalog() }

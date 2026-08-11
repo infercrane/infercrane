@@ -490,14 +490,21 @@ func TestReplicaBackendsAllowOneProviderAdapterToLaunchMultipleRuntimes(t *testi
 	}
 }
 
-func TestReplicaBackendsRejectAmbiguousRegistrations(t *testing.T) {
+func TestReplicaBackendsRequireExplicitSelectionForAmbiguousRegistrations(t *testing.T) {
 	provider := &fakeReplicaProvider{}
-	_, err := NewReplicaBackends(
+	registry, err := NewReplicaBackends(
 		ReplicaBackend{Name: "adapter-a", Cloud: "cloud-a", Runtime: "runtime-a", Profile: testElasticProfile("adapter-a", "cloud-a"), Provider: provider},
 		ReplicaBackend{Name: "adapter-b", Cloud: "cloud-a", Runtime: "runtime-a", Profile: testElasticProfile("adapter-b", "cloud-a"), Provider: provider},
 	)
-	if err == nil {
-		t.Fatal("expected duplicate cloud/runtime registration to fail")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = registry.ForCloud("cloud-a", "runtime-a"); err == nil {
+		t.Fatal("expected ambiguous lookup to require provider adapter")
+	}
+	selected, err := registry.ForAdapter("cloud-a", "runtime-a", "adapter-b")
+	if err != nil || selected.Name != "adapter-b" {
+		t.Fatalf("selected=%#v err=%v", selected, err)
 	}
 	_, err = NewReplicaBackends(
 		ReplicaBackend{Name: "adapter-a", Cloud: "cloud-a", Runtime: "runtime-a", Profile: testElasticProfile("adapter-a", "cloud-a"), Provider: provider},
