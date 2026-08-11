@@ -83,6 +83,8 @@ func newRootCommand(ctx context.Context) *cobra.Command {
 		{use: "capacity [flags]", short: "Inspect observed capacity reliability", group: "understand"},
 		{use: "finops DEPLOYMENT [flags]", short: "Build an evidence-backed cost report", group: "understand"},
 		{use: "autopilot ACTION SUBJECT [flags]", short: "Create and approve advisory serving plans", group: "operate"},
+		{use: "session ACTION SUBJECT [flags]", short: "Manage durable logical session identity", group: "operate"},
+		{use: "burst DEPLOYMENT [flags]", short: "Evaluate policy-bounded overflow", group: "operate"},
 		{use: "recipe create DEPLOYMENT [flags]", short: "Capture an immutable evidence-backed model recipe", group: "understand"},
 		{use: "recipes [QUERY] [flags]", short: "Search immutable model recipes", group: "understand"},
 		{use: "lab MODEL_IDENTITY [flags]", short: "Compare persisted measured serving evidence", group: "understand"},
@@ -134,7 +136,7 @@ func addHelpFlags(command *cobra.Command, name string) {
 	boolFlag := func(flag, help string) { command.Flags().Bool(flag, false, help) }
 	intFlag := func(flag string, value int, help string) { command.Flags().Int(flag, value, help) }
 	switch name {
-	case "init", "doctor", "adopt", "alert", "admission", "async", "plan", "deploy", "apply", "request", "deployments", "endpoints", "endpoint", "environment", "logical-model", "status", "logs", "events", "inspect", "explain", "benchmark", "replay", "capacity", "finops", "autopilot", "recipe", "recipes", "lab", "passport", "recommend", "slo", "delete", "orphans", "operation", "integrations", "dashboard":
+	case "init", "doctor", "adopt", "alert", "admission", "async", "plan", "deploy", "apply", "request", "deployments", "endpoints", "endpoint", "environment", "logical-model", "status", "logs", "events", "inspect", "explain", "benchmark", "replay", "capacity", "finops", "autopilot", "session", "burst", "recipe", "recipes", "lab", "passport", "recommend", "slo", "delete", "orphans", "operation", "integrations", "dashboard":
 		stringFlag("output", "human", "output format: human or json")
 	}
 	switch name {
@@ -245,6 +247,16 @@ func addHelpFlags(command *cobra.Command, name string) {
 		stringFlag("window", "720h", "cost evidence window")
 	case "autopilot":
 		stringFlag("objective", "minimize_cost", "advisory objective")
+	case "session":
+		stringFlag("ttl", "1h", "logical session expiry")
+		stringFlag("preferred-binding", "", "best-effort binding hint")
+		stringFlag("preferred-target", "", "best-effort target hint")
+	case "burst":
+		intFlag("queue-depth", 0, "observed queue depth")
+		intFlag("breaches", 1, "consecutive breach intervals")
+		intFlag("incremental-cost-microusd-hour", 0, "sourced incremental hourly cost")
+		intFlag("max-incremental-cost-microusd-hour", 1, "hard incremental hourly budget")
+		boolFlag("external-healthy", "fresh qualified overflow health evidence")
 	case "recipe":
 		stringFlag("name", "", "stable recipe name")
 		stringFlag("version", "", "immutable recipe version")

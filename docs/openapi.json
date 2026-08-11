@@ -290,6 +290,58 @@
         ],
         "type": "object"
       },
+      "BurstGuardEvaluationRequest": {
+        "properties": {
+          "breach_intervals": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "cooldown_seconds": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "external_healthy": {
+            "type": "boolean"
+          },
+          "incremental_cost_microusd_hour": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "max_incremental_cost_microusd_hour": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "observed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "queue_depth": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "queue_threshold": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "recovery_intervals": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "signal_max_age_seconds": {
+            "maximum": 300,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "max_incremental_cost_microusd_hour",
+          "observed_at"
+        ],
+        "type": "object"
+      },
       "ChatCompletionRequest": {
         "additionalProperties": true,
         "properties": {
@@ -324,6 +376,36 @@
         "required": [
           "model",
           "messages"
+        ],
+        "type": "object"
+      },
+      "ContextPassportRequest": {
+        "properties": {
+          "cache_hints": {
+            "type": "object"
+          },
+          "deployment": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "preferred_binding_id": {
+            "type": "string"
+          },
+          "preferred_target_id": {
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "default": 3600,
+            "maximum": 2592000,
+            "minimum": 60,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "deployment"
         ],
         "type": "object"
       },
@@ -1425,7 +1507,7 @@
   "info": {
     "description": "Durable, authenticated control-plane operations. Mutation responses may outlive the requesting client.",
     "title": "InferCrane Control API",
-    "version": "1.9.0"
+    "version": "2.0.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -1927,6 +2009,99 @@
         ]
       }
     },
+    "/api/v1/context-passports": {
+      "post": {
+        "operationId": "createContextPassport",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContextPassportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Create bounded durable logical session identity",
+        "tags": [
+          "Context Passport"
+        ]
+      }
+    },
+    "/api/v1/context-passports/{id}": {
+      "get": {
+        "operationId": "getContextPassport",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Inspect logical session identity and best-effort affinity",
+        "tags": [
+          "Context Passport"
+        ]
+      }
+    },
     "/api/v1/deployments": {
       "get": {
         "operationId": "listDeployments",
@@ -2345,6 +2520,63 @@
         "summary": "Run and persist an AIPerf benchmark",
         "tags": [
           "Benchmarks"
+        ]
+      }
+    },
+    "/api/v1/deployments/{name}/burst-guard/evaluate": {
+      "post": {
+        "operationId": "evaluateBurstGuard",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BurstGuardEvaluationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Persist a fresh budget-bounded overflow decision",
+        "tags": [
+          "Burst Guard"
         ]
       }
     },
@@ -6226,7 +6458,13 @@
       "name": "Benchmarks"
     },
     {
+      "name": "Burst Guard"
+    },
+    {
       "name": "Capacity intelligence"
+    },
+    {
+      "name": "Context Passport"
     },
     {
       "name": "Deployments"

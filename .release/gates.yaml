@@ -93,6 +93,12 @@ milestone_gates:
     - autopilot_plan_content_digest_idempotency_and_tenant_isolation
     - autopilot_human_approval_is_auditable_and_side_effect_free
     - finops_autopilot_api_cli_sdk_openapi_and_docs_drift
+    - context_passport_content_exclusion_expiry_tenant_and_subject_isolation
+    - context_passport_affinity_hit_fallback_and_reliability_override
+    - request_survival_delegated_mechanism_and_qualification_fail_closed
+    - burst_guard_fresh_signal_sustained_threshold_health_and_hard_cost_budget
+    - burst_guard_reuses_governed_external_policy_and_single_router_owner
+    - context_burst_api_cli_sdk_openapi_and_docs_drift
   deferred_until_v1_manual_qualification:
     - runpod_elastic
     - runpod_serverless

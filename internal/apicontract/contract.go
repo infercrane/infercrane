@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-const Version = "1.9.0"
+const Version = "2.0.0"
 
 type Route struct {
 	Method      string
@@ -84,6 +84,9 @@ var Routes = []Route{
 	{"POST", "/deployments/{name}/autopilot/plans", "createAutopilotPlan", "Autopilot", "Create an advisory plan from a persisted recommendation", "AutopilotPlanRequest", "Object", 201, true},
 	{"GET", "/autopilot/plans/{id}", "getAutopilotPlan", "Autopilot", "Inspect an immutable advisory plan", "", "Object", 200, false},
 	{"POST", "/autopilot/plans/{id}/approve", "approveAutopilotPlan", "Autopilot", "Record human approval without mutating serving state", "Object", "Object", 200, true},
+	{"POST", "/context-passports", "createContextPassport", "Context Passport", "Create bounded durable logical session identity", "ContextPassportRequest", "Object", 201, false},
+	{"GET", "/context-passports/{id}", "getContextPassport", "Context Passport", "Inspect logical session identity and best-effort affinity", "", "Object", 200, false},
+	{"POST", "/deployments/{name}/burst-guard/evaluate", "evaluateBurstGuard", "Burst Guard", "Persist a fresh budget-bounded overflow decision", "BurstGuardEvaluationRequest", "Object", 201, false},
 	{"POST", "/deployments/{name}/passports", "createInferencePassport", "Release evidence", "Issue a signed Inference Passport", "Object", "Object", 201, false},
 	{"GET", "/deployments/{name}/passports", "listInferencePassports", "Release evidence", "List signed Inference Passports", "", "ObjectList", 200, false},
 	{"GET", "/deployments/{name}/slo-policy", "getSLOPolicy", "Inference decisions", "Inspect deterministic SLO policy", "", "SLOPolicyEnvelope", 200, false},
@@ -257,6 +260,8 @@ func schemas() map[string]any {
 		"ArtifactPrefetchRequest":         map[string]any{"type": "object", "required": []string{"provider", "location", "idempotency_key"}, "properties": map[string]any{"provider": map[string]any{"type": "string"}, "region": map[string]any{"type": "string"}, "location": map[string]any{"type": "string"}, "idempotency_key": map[string]any{"type": "string", "minLength": 1}}},
 		"FinOpsReportRequest":             map[string]any{"type": "object", "properties": map[string]any{"window_seconds": map[string]any{"type": "integer", "minimum": 1, "maximum": 31536000, "default": 2592000}}},
 		"AutopilotPlanRequest":            map[string]any{"type": "object", "required": []string{"objective"}, "properties": map[string]any{"objective": map[string]any{"type": "string", "enum": []string{"minimize_cost"}}}},
+		"ContextPassportRequest":          map[string]any{"type": "object", "required": []string{"deployment"}, "properties": map[string]any{"deployment": map[string]any{"type": "string", "minLength": 1}, "ttl_seconds": map[string]any{"type": "integer", "minimum": 60, "maximum": 2592000, "default": 3600}, "preferred_binding_id": map[string]any{"type": "string"}, "preferred_target_id": map[string]any{"type": "string"}, "cache_hints": map[string]any{"type": "object"}, "metadata": map[string]any{"type": "object"}}},
+		"BurstGuardEvaluationRequest":     map[string]any{"type": "object", "required": []string{"max_incremental_cost_microusd_hour", "observed_at"}, "properties": map[string]any{"enabled": map[string]any{"type": "boolean"}, "queue_threshold": map[string]any{"type": "integer", "minimum": 0}, "breach_intervals": map[string]any{"type": "integer", "minimum": 1}, "recovery_intervals": map[string]any{"type": "integer", "minimum": 1}, "cooldown_seconds": map[string]any{"type": "integer", "minimum": 1}, "signal_max_age_seconds": map[string]any{"type": "integer", "minimum": 1, "maximum": 300}, "max_incremental_cost_microusd_hour": map[string]any{"type": "integer", "minimum": 1}, "queue_depth": map[string]any{"type": "integer", "minimum": 0}, "incremental_cost_microusd_hour": map[string]any{"type": "integer", "minimum": 0}, "external_healthy": map[string]any{"type": "boolean"}, "observed_at": map[string]any{"type": "string", "format": "date-time"}}},
 		"SLOPolicy":                       map[string]any{"type": "object", "minProperties": 1, "additionalProperties": false, "properties": map[string]any{"max_ttft_p95_ms": map[string]any{"type": "number", "minimum": 0}, "max_latency_p95_ms": map[string]any{"type": "number", "minimum": 0}, "max_error_rate": map[string]any{"type": "number", "minimum": 0, "maximum": 1}, "min_output_tokens_second": map[string]any{"type": "number", "minimum": 0}, "max_hourly_cost": map[string]any{"type": "number", "minimum": 0}}},
 		"SLOPolicyEnvelope":               map[string]any{"type": "object", "required": []string{"policy"}, "properties": map[string]any{"policy": ref("SLOPolicy")}},
 		"RecommendationRequest":           map[string]any{"type": "object", "maxProperties": 0, "additionalProperties": false},

@@ -22,6 +22,7 @@ import (
 
 	"github.com/infercrane/infercrane/internal/admission"
 	"github.com/infercrane/infercrane/internal/authz"
+	"github.com/infercrane/infercrane/internal/contextpassport"
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/openaicompat"
 	"github.com/infercrane/infercrane/internal/routes"
@@ -42,6 +43,9 @@ type AdmissionAuthorizer interface {
 	Acquire(context.Context, admission.Request) (func(), error)
 	RetryBudget(string) int
 }
+type ContextPassportResolver interface {
+	Resolve(tenant, id, subject string, now time.Time) (contextpassport.Hint, bool)
+}
 type Gateway struct {
 	Routes    *routes.Directory
 	APIKey    string
@@ -59,6 +63,7 @@ type Gateway struct {
 	ExternalAuthorizer  ExternalAuthorizer
 	RequestAuthorizer   RequestAuthorizer
 	AdmissionAuthorizer AdmissionAuthorizer
+	ContextPassports    ContextPassportResolver
 	Authenticator       interface {
 		AuthenticatePrincipal(context.Context, string) (domain.Principal, error)
 	}
@@ -173,12 +178,26 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 	}
 	principal := r.Context().Value(principalKey{}).(domain.Principal)
 	replay := g.replayShape(payload, r.Header)
-	route, releaseRoute, ok := g.Routes.AcquireForTenant(principal.TenantID, alias)
+	passportID := strings.TrimSpace(r.Header.Get("X-InferCrane-Context-Passport"))
+	preferredBinding, preferredTarget := "", ""
+	if passportID != "" && len(passportID) <= 128 && g.ContextPassports != nil {
+		if hint, found := g.ContextPassports.Resolve(principal.TenantID, passportID, alias, time.Now()); found {
+			preferredBinding, preferredTarget = hint.PreferredBindingID, hint.PreferredTargetID
+		}
+	}
+	route, releaseRoute, ok := g.Routes.AcquirePreferredForTenant(principal.TenantID, alias, preferredBinding, preferredTarget)
 	if !ok {
 		openAIError(w, "Unknown model alias: "+alias, http.StatusNotFound, "invalid_request_error")
 		return
 	}
 	defer releaseRoute()
+	if passportID != "" {
+		outcome := "fallback"
+		if (preferredBinding != "" && route.BindingID == preferredBinding) || (preferredTarget != "" && route.TargetID == preferredTarget) {
+			outcome = "hit"
+		}
+		w.Header().Set("X-InferCrane-Affinity", outcome)
+	}
 	capabilities := route.ProtocolCapabilities
 	legacyChatRoute := operation == "chat" && capabilities == (runtimecontract.ProtocolCapabilities{})
 	if !legacyChatRoute && !capabilities.Supports(operation) {

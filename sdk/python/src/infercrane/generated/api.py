@@ -243,6 +243,18 @@ class ControlAPI:
         path = f"/autopilot/plans/{quote(id, safe='')}/approve"
         return cast(dict[str, Any], self._transport.request("POST", path, body=body, idempotency_key=idempotency_key))
 
+    def create_context_passport(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = "/context-passports"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
+    def get_context_passport(self, id: str) -> dict[str, Any]:
+        path = f"/context-passports/{quote(id, safe='')}"
+        return cast(dict[str, Any], self._transport.request("GET", path))
+
+    def evaluate_burst_guard(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = f"/deployments/{quote(name, safe='')}/burst-guard/evaluate"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
     def create_inference_passport(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
         path = f"/deployments/{quote(name, safe='')}/passports"
         return cast(dict[str, Any], self._transport.request("POST", path, body=body))

@@ -293,6 +293,21 @@ export class ControlApi {
     return this.transport.request('POST', path, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
   }
 
+  createContextPassport(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = '/context-passports';
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  getContextPassport(id: string): Promise<Record<string, JsonValue>> {
+    const path = `/context-passports/${encodeURIComponent(id)}`;
+    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+  }
+
+  evaluateBurstGuard(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = `/deployments/${encodeURIComponent(name)}/burst-guard/evaluate`;
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
   createInferencePassport(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
     const path = `/deployments/${encodeURIComponent(name)}/passports`;
     return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;

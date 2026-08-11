@@ -36,6 +36,7 @@ but lacks production qualification; **planned** is not a product capability.
 | Model Recipes and Inference Lab | Local-qualified | Immutable artifact/revision/AIPerf recipes and tenant-scoped measured comparisons are implemented; public registry and real GPU catalog evidence are deferred. |
 | Inference Replay and Capacity Intelligence | In qualification | Content-free workload-shape capture, explicit AIPerf approximation, bounded cache observations, delegated prefetch intents, and tenant-scoped capacity evidence are implemented; real-provider evidence remains deferred. |
 | FinOps and advisory Autopilot | In qualification | Sourced cost reports and immutable human-approved recommendation plans are implemented; savings remain unavailable without direct evidence and approval never mutates production. |
+| Context Passport and Burst Guard | In qualification | Bounded logical session identity, reliability-first affinity fallback, delegated request-survival contracts, and fresh hard-cost-bounded overflow decisions are implemented; real backend migration remains deferred. |
 | Provider pricing contract | Implemented | Timestamp and staleness semantics; no live provider catalog is shipped. |
 | Bounded autoscaling controller | Experimental | Durable fleet scaling and router-fenced scale-down are enabled; real RunPod 1→N→1 acceptance remains. |
 | Immutable ModelArtifact identity | Experimental | Hugging Face references resolve to immutable commits with grounded metadata; real transfer/cache evidence remains. |

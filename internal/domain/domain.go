@@ -355,6 +355,26 @@ type AutopilotPlan struct {
 	CreatedAt, UpdatedAt                                         time.Time
 }
 
+type ContextPassport struct {
+	ID, TenantID, EndpointID, DeploymentID, Status                      string
+	PreferredBindingID, PreferredTargetID, CacheHintsJSON, MetadataJSON string
+	LastActivity, ExpiresAt, CreatedAt, UpdatedAt                       time.Time
+}
+
+type BurstGuardPolicy struct {
+	ID, TenantID, DeploymentID, ExternalPolicyID                                             string
+	Enabled                                                                                  bool
+	QueueThreshold, BreachIntervals, RecoveryIntervals, CooldownSeconds, SignalMaxAgeSeconds int
+	MaxIncrementalCostMicrousdHour                                                           int64
+	CreatedAt, UpdatedAt                                                                     time.Time
+}
+
+type BurstGuardDecision struct {
+	ID, TenantID, DeploymentID, PolicyID, Decision, Reason, EvidenceJSON string
+	IncrementalCostMicrousdHour                                          int64
+	CreatedAt                                                            time.Time
+}
+
 type AdoptedWorkload struct {
 	ID, TenantID, EndpointID, BindingID, TargetID string
 	OwnershipMode, Source, ImmutableIdentity      string

@@ -129,6 +129,7 @@
           "features/recipes-lab",
           "features/replay-capacity",
           "features/finops-autopilot",
+          "features/context-passport-burst",
           "features/inference-decisions",
           "features/cold-starts",
           "features/explanations"
@@ -182,6 +183,7 @@
           "release-notes-v1.7.0-rc.1",
           "release-notes-v1.8.0-rc.1",
           "release-notes-v1.9.0-rc.1",
+          "release-notes-v2.0.0-rc.1",
           "release-notes-v1.5.0-rc.1",
           "release-notes-v1.4.0-rc.1",
           "release-notes-v1.0.0-rc.1",
@@ -220,6 +222,7 @@
               ,"adr/0026-content-addressed-recipes-and-evidence-lab"
               ,"adr/0027-privacy-preserving-replay-and-observed-capacity"
               ,"adr/0028-trustworthy-finops-and-human-approved-autopilot"
+              ,"adr/0029-context-identity-delegated-survival-and-bounded-burst"
             ]
           },
           "release-acceptance"

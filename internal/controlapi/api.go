@@ -19,6 +19,7 @@ import (
 	"github.com/infercrane/infercrane/internal/asyncinference"
 	"github.com/infercrane/infercrane/internal/authz"
 	"github.com/infercrane/infercrane/internal/benchmark"
+	"github.com/infercrane/infercrane/internal/burstguard"
 	"github.com/infercrane/infercrane/internal/decision"
 	"github.com/infercrane/infercrane/internal/doctor"
 	"github.com/infercrane/infercrane/internal/domain"
@@ -127,6 +128,12 @@ type optimizationStore interface {
 	AutopilotPlan(context.Context, string, string, string, string) (domain.AutopilotPlan, error)
 	ApproveAutopilotPlan(context.Context, string, string, string) (domain.AutopilotPlan, error)
 }
+type contextBurstStore interface {
+	CreateContextPassport(context.Context, string, string, domain.ContextPassport) (domain.ContextPassport, error)
+	ContextPassport(context.Context, string, string) (domain.ContextPassport, error)
+	SetBurstGuardPolicy(context.Context, string, string, domain.BurstGuardPolicy) (domain.BurstGuardPolicy, error)
+	RecordBurstGuardDecision(context.Context, domain.BurstGuardDecision) (domain.BurstGuardDecision, error)
+}
 type alertStore interface {
 	CreateAlertPolicy(context.Context, string, string, domain.AlertPolicy) (domain.AlertPolicy, error)
 	AlertPoliciesForEndpoint(context.Context, string, string) ([]domain.AlertPolicy, error)
@@ -215,6 +222,9 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/deployments/{name}/autopilot/plans", a.auth(authz.Deploy, a.createAutopilotPlan))
 	mux.HandleFunc("GET /api/v1/autopilot/plans/{id}", a.auth(authz.Read, a.getAutopilotPlan))
 	mux.HandleFunc("POST /api/v1/autopilot/plans/{id}/approve", a.auth(authz.Deploy, a.approveAutopilotPlan))
+	mux.HandleFunc("POST /api/v1/context-passports", a.auth(authz.Deploy, a.createContextPassport))
+	mux.HandleFunc("GET /api/v1/context-passports/{id}", a.auth(authz.Read, a.getContextPassport))
+	mux.HandleFunc("POST /api/v1/deployments/{name}/burst-guard/evaluate", a.auth(authz.Deploy, a.evaluateBurstGuard))
 	mux.HandleFunc("GET /api/v1/environments", a.auth(authz.Read, a.environments))
 	mux.HandleFunc("POST /api/v1/environments", a.auth(authz.Deploy, a.createEnvironment))
 	mux.HandleFunc("GET /api/v1/logical-models", a.auth(authz.Read, a.logicalModels))
@@ -1141,6 +1151,108 @@ func (a API) intelligence() (intelligenceStore, bool) {
 func (a API) optimization() (optimizationStore, bool) {
 	store, ok := a.Store.(optimizationStore)
 	return store, ok
+}
+func (a API) contextBurst() (contextBurstStore, bool) {
+	s, ok := a.Store.(contextBurstStore)
+	return s, ok
+}
+func (a API) createContextPassport(w http.ResponseWriter, r *http.Request) {
+	s, ok := a.contextBurst()
+	if !ok {
+		writeError(w, 501, "context_passport_unavailable", "Context Passport storage is not configured")
+		return
+	}
+	var request struct {
+		Deployment         string         `json:"deployment"`
+		TTLSeconds         int            `json:"ttl_seconds"`
+		PreferredBindingID string         `json:"preferred_binding_id"`
+		PreferredTargetID  string         `json:"preferred_target_id"`
+		CacheHints         map[string]any `json:"cache_hints"`
+		Metadata           map[string]any `json:"metadata"`
+	}
+	if !decodeMutationBody(w, r, &request) {
+		return
+	}
+	if request.TTLSeconds == 0 {
+		request.TTLSeconds = 3600
+	}
+	if request.Deployment == "" || request.TTLSeconds < 60 || request.TTLSeconds > 2592000 {
+		writeError(w, 422, "validation_failed", "deployment and ttl_seconds 60..2592000 are required")
+		return
+	}
+	cache, _ := json.Marshal(request.CacheHints)
+	metadata, _ := json.Marshal(request.Metadata)
+	p := r.Context().Value(identityKey{}).(domain.Principal)
+	row, err := s.CreateContextPassport(r.Context(), p.TenantID, request.Deployment, domain.ContextPassport{PreferredBindingID: request.PreferredBindingID, PreferredTargetID: request.PreferredTargetID, CacheHintsJSON: string(cache), MetadataJSON: string(metadata), ExpiresAt: time.Now().UTC().Add(time.Duration(request.TTLSeconds) * time.Second)})
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, 404, "not_found", "deployment was not found")
+		return
+	}
+	if err != nil {
+		writeError(w, 422, "validation_failed", err.Error())
+		return
+	}
+	writeJSON(w, 201, map[string]any{"context_passport": contextPassportResponse(row), "durable_kv": false})
+}
+func (a API) getContextPassport(w http.ResponseWriter, r *http.Request) {
+	s, ok := a.contextBurst()
+	if !ok {
+		writeError(w, 501, "context_passport_unavailable", "Context Passport storage is not configured")
+		return
+	}
+	p := r.Context().Value(identityKey{}).(domain.Principal)
+	row, err := s.ContextPassport(r.Context(), p.TenantID, r.PathValue("id"))
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, 404, "not_found", "Context Passport was not found")
+		return
+	}
+	if err != nil {
+		writeError(w, 500, "internal", "Context Passport lookup failed")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"context_passport": contextPassportResponse(row), "durable_kv": false})
+}
+func contextPassportResponse(row domain.ContextPassport) map[string]any {
+	return map[string]any{"id": row.ID, "deployment_id": row.DeploymentID, "endpoint_id": row.EndpointID, "status": row.Status, "preferred_binding_id": row.PreferredBindingID, "preferred_target_id": row.PreferredTargetID, "cache_hints": json.RawMessage(row.CacheHintsJSON), "metadata": json.RawMessage(row.MetadataJSON), "last_activity": row.LastActivity, "expires_at": row.ExpiresAt, "created_at": row.CreatedAt, "updated_at": row.UpdatedAt}
+}
+func (a API) evaluateBurstGuard(w http.ResponseWriter, r *http.Request) {
+	s, ok := a.contextBurst()
+	if !ok {
+		writeError(w, 501, "burst_guard_unavailable", "Burst Guard storage is not configured")
+		return
+	}
+	var request struct {
+		Enabled                        bool      `json:"enabled"`
+		QueueThreshold                 int       `json:"queue_threshold"`
+		BreachIntervals                int       `json:"breach_intervals"`
+		RecoveryIntervals              int       `json:"recovery_intervals"`
+		CooldownSeconds                int       `json:"cooldown_seconds"`
+		SignalMaxAgeSeconds            int       `json:"signal_max_age_seconds"`
+		MaxIncrementalCostMicrousdHour int64     `json:"max_incremental_cost_microusd_hour"`
+		QueueDepth                     int       `json:"queue_depth"`
+		ConsecutiveBreaches            int       `json:"consecutive_breaches"`
+		ConsecutiveRecovery            int       `json:"consecutive_recovery"`
+		IncrementalCostMicrousdHour    int64     `json:"incremental_cost_microusd_hour"`
+		ExternalHealthy                bool      `json:"external_healthy"`
+		ObservedAt                     time.Time `json:"observed_at"`
+	}
+	if !decodeMutationBody(w, r, &request) {
+		return
+	}
+	p := r.Context().Value(identityKey{}).(domain.Principal)
+	policy, err := s.SetBurstGuardPolicy(r.Context(), p.TenantID, r.PathValue("name"), domain.BurstGuardPolicy{Enabled: request.Enabled, QueueThreshold: request.QueueThreshold, BreachIntervals: request.BreachIntervals, RecoveryIntervals: request.RecoveryIntervals, CooldownSeconds: request.CooldownSeconds, SignalMaxAgeSeconds: request.SignalMaxAgeSeconds, MaxIncrementalCostMicrousdHour: request.MaxIncrementalCostMicrousdHour})
+	if err != nil {
+		writeError(w, 422, "policy_required", err.Error())
+		return
+	}
+	decision := burstguard.Evaluate(burstguard.Policy{Enabled: policy.Enabled, QueueThreshold: policy.QueueThreshold, BreachIntervals: policy.BreachIntervals, RecoveryIntervals: policy.RecoveryIntervals, SignalMaxAge: time.Duration(policy.SignalMaxAgeSeconds) * time.Second, MaxIncrementalCostMicrousdHour: policy.MaxIncrementalCostMicrousdHour}, burstguard.Signal{QueueDepth: request.QueueDepth, ConsecutiveBreaches: request.ConsecutiveBreaches, ConsecutiveRecovery: request.ConsecutiveRecovery, IncrementalCostMicrousdHour: request.IncrementalCostMicrousdHour, ObservedAt: request.ObservedAt, ExternalHealthy: request.ExternalHealthy}, time.Now().UTC())
+	evidence, _ := json.Marshal(request)
+	row, err := s.RecordBurstGuardDecision(r.Context(), domain.BurstGuardDecision{TenantID: p.TenantID, DeploymentID: policy.DeploymentID, PolicyID: policy.ID, Decision: decision.Action, Reason: decision.Reason, IncrementalCostMicrousdHour: decision.Cost, EvidenceJSON: string(evidence)})
+	if err != nil {
+		writeError(w, 500, "internal", "Burst Guard decision could not be persisted")
+		return
+	}
+	writeJSON(w, 201, map[string]any{"decision": map[string]any{"id": row.ID, "action": row.Decision, "reason": row.Reason, "incremental_cost_microusd_hour": row.IncrementalCostMicrousdHour, "evidence": json.RawMessage(row.EvidenceJSON), "created_at": row.CreatedAt}, "routing_mutation": "policy_controller_only"})
 }
 
 func (a API) createFinOpsReport(w http.ResponseWriter, r *http.Request) {

@@ -53,6 +53,25 @@ type Capability struct {
 	Evidence string          `json:"evidence,omitempty"`
 }
 
+// RequestSurvivalContract delegates in-progress request migration to a
+// qualified runtime/backend. InferCrane never implements token/KV migration.
+type RequestSurvivalContract struct {
+	State         CapabilityState    `json:"state"`
+	Mechanism     string             `json:"mechanism,omitempty"`
+	Evidence      string             `json:"evidence,omitempty"`
+	Qualification QualificationState `json:"qualification"`
+}
+
+func (c RequestSurvivalContract) Validate() error {
+	if c.State == CapabilitySupported && (c.Mechanism == "" || c.Evidence == "" || (c.Qualification != QualificationLocal && c.Qualification != QualificationReal)) {
+		return errors.New("request survival support requires a delegated mechanism and qualified evidence")
+	}
+	if c.State != CapabilitySupported && c.State != CapabilityUnsupported && c.State != CapabilityUnknown {
+		return errors.New("invalid request survival state")
+	}
+	return nil
+}
+
 type Qualification struct {
 	State       QualificationState `json:"state"`
 	Evidence    string             `json:"evidence,omitempty"`

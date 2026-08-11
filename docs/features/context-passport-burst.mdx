@@ -1,0 +1,45 @@
+---
+title: Context Passport and Burst Guard
+description: Durable logical session identity, delegated request survival, and budget-bounded overflow.
+---
+
+# Context Passport and Burst Guard
+
+Context Passport persists bounded logical inference-session identity and best-effort affinity hints:
+
+```bash
+infercrane session create coder-production --ttl 1h
+```
+
+Send the returned ID as `X-InferCrane-Context-Passport`. The in-memory route snapshot prefers the hinted
+binding or target only while it remains eligible; otherwise ordinary healthy routing wins and the response
+reports `X-InferCrane-Affinity: fallback`.
+
+<Warning>
+Context Passport does not store conversation bodies and does not guarantee durable KV state. Logical
+identity survives a worker; engine cache survival does not unless a separately qualified backend provides it.
+</Warning>
+
+## Request survival
+
+Request survival is a delegated capability contract. A runtime/backend may claim support only with a named
+mechanism and local or real qualification evidence. Plain vLLM does not gain request migration from
+InferCrane; unsupported and unknown states fail closed. InferCrane never implements distributed KV or token
+migration.
+
+## Burst Guard
+
+Burst Guard combines fresh queue evidence, sustained breach/recovery intervals, qualified external health,
+and a hard incremental hourly cost ceiling:
+
+```bash
+infercrane burst coder-production \
+  --queue-depth 8 --breaches 3 \
+  --external-healthy \
+  --incremental-cost-microusd-hour 4000000 \
+  --max-incremental-cost-microusd-hour 5000000
+```
+
+It requires the existing governed external fallback policy, including privacy acknowledgement and its hard
+request/cost budget. Stale signals, unavailable capacity, or cost above policy produce a fail-closed decision.
+The evaluator persists evidence; route mutation remains owned by the existing policy controller.

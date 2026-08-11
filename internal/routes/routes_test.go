@@ -100,3 +100,19 @@ func TestRemovedEndpointDoesNotFallThroughToLegacyDeploymentAlias(t *testing.T) 
 		t.Fatal("removed endpoint fell through to concrete deployment alias")
 	}
 }
+
+func TestPreferredRouteFallsBackWhenHintDisappears(t *testing.T) {
+	directory := New()
+	directory.PublishEndpoint(EndpointRoute{TenantID: "tenant", Alias: "model", RoutingPolicy: "manual", Routes: []Snapshot{{TenantID: "tenant", Alias: "model", BindingID: "active", TargetID: "one"}, {TenantID: "tenant", Alias: "model", BindingID: "preferred", TargetID: "two"}}})
+	route, release, ok := directory.AcquirePreferredForTenant("tenant", "model", "preferred", "")
+	if !ok || route.BindingID != "preferred" {
+		t.Fatalf("preferred route = %#v", route)
+	}
+	release()
+	directory.PublishEndpoint(EndpointRoute{TenantID: "tenant", Alias: "model", RoutingPolicy: "manual", Routes: []Snapshot{{TenantID: "tenant", Alias: "model", BindingID: "active", TargetID: "one"}}})
+	route, release, ok = directory.AcquirePreferredForTenant("tenant", "model", "preferred", "")
+	if !ok || route.BindingID != "active" {
+		t.Fatalf("fallback route = %#v", route)
+	}
+	release()
+}

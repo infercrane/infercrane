@@ -257,6 +257,10 @@ func runLegacy(ctx context.Context, args []string) error {
 		return finOpsCommand(ctx, cfg, args[1:])
 	case "autopilot":
 		return autopilotCommand(ctx, cfg, args[1:])
+	case "session":
+		return sessionCommand(ctx, cfg, args[1:])
+	case "burst":
+		return burstCommand(ctx, cfg, args[1:])
 	case "recipe":
 		return recipeCommand(ctx, cfg, args[1:])
 	case "recipes":
@@ -798,6 +802,72 @@ func autopilotCommand(ctx context.Context, cfg config.Config, args []string) err
 	if response.Next != "" {
 		fmt.Printf("Next           %s\n", response.Next)
 	}
+	return nil
+}
+
+func sessionCommand(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) < 2 {
+		return errors.New("usage: infercrane session create DEPLOYMENT | session inspect ID")
+	}
+	action, subject := args[0], args[1]
+	fs := flag.NewFlagSet("session", flag.ContinueOnError)
+	ttl := fs.String("ttl", "1h", "logical session expiry")
+	preferredBinding := fs.String("preferred-binding", "", "best-effort binding hint")
+	preferredTarget := fs.String("preferred-target", "", "best-effort target hint")
+	output := fs.String("output", "human", "human or json")
+	if err := fs.Parse(args[2:]); err != nil {
+		return err
+	}
+	var response struct {
+		Passport  map[string]any `json:"context_passport"`
+		DurableKV bool           `json:"durable_kv"`
+	}
+	method, path, body := http.MethodGet, "/api/v1/context-passports/"+url.PathEscape(subject), any(nil)
+	if action == "create" {
+		duration, err := time.ParseDuration(*ttl)
+		if err != nil || duration < time.Minute {
+			return errors.New("--ttl must be at least one minute")
+		}
+		method, path = http.MethodPost, "/api/v1/context-passports"
+		body = map[string]any{"deployment": subject, "ttl_seconds": int(duration.Seconds()), "preferred_binding_id": *preferredBinding, "preferred_target_id": *preferredTarget, "cache_hints": map[string]any{}, "metadata": map[string]any{}}
+	} else if action != "inspect" {
+		return errors.New("usage: infercrane session create DEPLOYMENT | session inspect ID")
+	}
+	if err := controlJSON(ctx, cfg, method, path, "", body, &response); err != nil {
+		return err
+	}
+	if *output == "json" {
+		return printJSON(response)
+	}
+	fmt.Printf("Context Passport %s\nStatus           %s\nExpires          %s\nPreferred binding %s\nPreferred target  %s\nDurable KV       no\n\nUse: X-InferCrane-Context-Passport: %s\n", benchmarkValue(response.Passport["id"]), benchmarkValue(response.Passport["status"]), benchmarkValue(response.Passport["expires_at"]), benchmarkValue(response.Passport["preferred_binding_id"]), benchmarkValue(response.Passport["preferred_target_id"]), benchmarkValue(response.Passport["id"]))
+	return nil
+}
+
+func burstCommand(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) < 1 {
+		return errors.New("usage: infercrane burst DEPLOYMENT [flags]")
+	}
+	name := args[0]
+	fs := flag.NewFlagSet("burst", flag.ContinueOnError)
+	queue := fs.Int("queue-depth", 0, "observed queue depth")
+	breaches := fs.Int("breaches", 1, "consecutive breach intervals")
+	cost := fs.Int64("incremental-cost-microusd-hour", 0, "sourced incremental hourly cost")
+	maxCost := fs.Int64("max-incremental-cost-microusd-hour", 1, "hard incremental hourly budget")
+	externalHealthy := fs.Bool("external-healthy", false, "fresh qualified overflow health evidence")
+	output := fs.String("output", "human", "human or json")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	body := map[string]any{"enabled": true, "queue_threshold": 4, "breach_intervals": 3, "recovery_intervals": 2, "cooldown_seconds": 60, "signal_max_age_seconds": 30, "max_incremental_cost_microusd_hour": *maxCost, "queue_depth": *queue, "consecutive_breaches": *breaches, "consecutive_recovery": 0, "incremental_cost_microusd_hour": *cost, "external_healthy": *externalHealthy, "observed_at": time.Now().UTC()}
+	var response map[string]any
+	if err := controlJSON(ctx, cfg, http.MethodPost, "/api/v1/deployments/"+url.PathEscape(name)+"/burst-guard/evaluate", "", body, &response); err != nil {
+		return err
+	}
+	if *output == "json" {
+		return printJSON(response)
+	}
+	decision, _ := response["decision"].(map[string]any)
+	fmt.Printf("Burst Guard  %s\nReason       %s\nCost         %s microUSD/hour\nMutation     policy controller only\n", benchmarkValue(decision["action"]), benchmarkValue(decision["reason"]), benchmarkValue(decision["incremental_cost_microusd_hour"]))
 	return nil
 }
 

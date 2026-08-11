@@ -1,8 +1,7 @@
 # Durable Sessions
 
-Durable Session identity remains deferred beyond the v1 release candidate because adding affinity
-state before multi-provider lifecycle qualification would risk lifecycle correctness.
+InferCrane v2 implements bounded logical session identity as Context Passport. It persists expiry and
+best-effort binding/target hints, never conversation bodies. Reliability overrides affinity and it does not
+claim durable KV state or integrate LMCache.
 
-The future V0 contract will persist bounded logical session identity and a best-effort preferred-worker
-hint, never conversation bodies by default. Reliability will override affinity, and it will not
-claim durable KV state. InferCrane v1 does not integrate LMCache.
+See [Context Passport and Burst Guard](/features/context-passport-burst).

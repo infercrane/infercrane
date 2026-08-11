@@ -33,6 +33,15 @@ func TestRegistryProducesDeterministicHonestSnapshot(t *testing.T) {
 	}
 }
 
+func TestRequestSurvivalRequiresDelegationAndQualification(t *testing.T) {
+	if err := (RequestSurvivalContract{State: CapabilitySupported, Mechanism: "backend-migration", Evidence: "test", Qualification: QualificationRegistered}).Validate(); err == nil {
+		t.Fatal("unqualified survival accepted")
+	}
+	if err := (RequestSurvivalContract{State: CapabilitySupported, Mechanism: "backend-migration", Evidence: "qualified-suite", Qualification: QualificationLocal}).Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestV06CatalogPublishesExactRuntimeCompatibility(t *testing.T) {
 	registry, err := V06Catalog()
 	if err != nil {

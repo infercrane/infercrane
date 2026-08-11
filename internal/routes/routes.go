@@ -96,9 +96,27 @@ func (d *Directory) GetDeployment(deploymentID string) (Snapshot, bool) {
 // the lifetime of a request. Publication may replace the directory entry, but
 // retirement cannot stop its router or capacity until release is called.
 func (d *Directory) AcquireForTenant(tenant, alias string) (Snapshot, func(), bool) {
+	return d.AcquirePreferredForTenant(tenant, alias, "", "")
+}
+
+// AcquirePreferredForTenant prefers a healthy compiled binding/target when it
+// remains present. Ordinary routing is the reliability-preserving fallback.
+func (d *Directory) AcquirePreferredForTenant(tenant, alias, bindingID, targetID string) (Snapshot, func(), bool) {
 	d.mu.Lock()
 	key := tenant + "\x00" + alias
-	route, ok := d.selectLocked(key)
+	var route Snapshot
+	ok := false
+	if endpoint, exists := d.endpoints[key]; exists {
+		for _, candidate := range endpoint.Routes {
+			if (bindingID != "" && candidate.BindingID == bindingID) || (targetID != "" && candidate.TargetID == targetID) {
+				route, ok = candidate, true
+				break
+			}
+		}
+	}
+	if !ok {
+		route, ok = d.selectLocked(key)
+	}
 	if !ok {
 		d.mu.Unlock()
 		return Snapshot{}, func() {}, false
