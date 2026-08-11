@@ -63,6 +63,9 @@ if [ "$mode" = full ]; then
   step container-tests make -C "$root" test-container
   step stack-smoke "$root/scripts/test-stack.sh"
   step failure-recovery "$root/scripts/test-failure-recovery.sh"
+  step control-plane-ha "$root/scripts/test-ha-control-plane.sh"
+  step backup-restore-safety "$root/scripts/test-backup-restore-safety.sh"
+  step backup-restore-docker "$root/scripts/test-backup-restore-docker.sh"
   step production-config make -C "$root" test-production-config
   step docs make -C "$root" docs-check
 fi

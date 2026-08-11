@@ -16,6 +16,7 @@ import (
 
 type Config struct {
 	DatabaseURL, ControlURL, Host, APIKey, RouterBinary, AIPerfBinary, PassportSigningKeyFile, InstanceID, Environment string
+	TLSCertFile, TLSKeyFile, TLSClientCAFile, ClientTLSCertFile, ClientTLSKeyFile, ClientTLSCAFile                     string
 	AsyncEncryptionKey, AsyncEncryptionKeyReference                                                                    string
 	RunPodAPIKey, RunPodServerlessTemplateID, RunPodRESTURL                                                            string
 	AWSRoleARN, AWSExternalID, AWSRegion, AWSSubnetID, AWSAMIID, AWSInstanceType, AWSGPU                               string
@@ -90,7 +91,11 @@ func LoadClientContext(contextName string) (Config, error) {
 	if parseErr != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return Config{}, fmt.Errorf("InferCrane URL must be absolute HTTP(S) without credentials, query, or fragment")
 	}
-	return Config{ControlURL: controlURL, APIKey: apiKey}, nil
+	clientCert, clientKey := env("INFERCRANE_CLIENT_TLS_CERT_FILE", ""), env("INFERCRANE_CLIENT_TLS_KEY_FILE", "")
+	if (clientCert == "") != (clientKey == "") {
+		return Config{}, errors.New("INFERCRANE_CLIENT_TLS_CERT_FILE and INFERCRANE_CLIENT_TLS_KEY_FILE must be configured together")
+	}
+	return Config{ControlURL: controlURL, APIKey: apiKey, ClientTLSCertFile: clientCert, ClientTLSKeyFile: clientKey, ClientTLSCAFile: env("INFERCRANE_CLIENT_TLS_CA_FILE", "")}, nil
 }
 
 func InitializeClient(controlURL, apiKey string) (string, error) {
@@ -259,6 +264,9 @@ func load(requireAPIKey bool) (Config, error) {
 		PassportSigningKeyFile:      env("INFERCRANE_PASSPORT_SIGNING_KEY_FILE", ""),
 		InstanceID:                  env("INFERCRANE_INSTANCE_ID", hostname),
 		Environment:                 env("INFERCRANE_ENV", "development"),
+		TLSCertFile:                 env("INFERCRANE_TLS_CERT_FILE", ""),
+		TLSKeyFile:                  env("INFERCRANE_TLS_KEY_FILE", ""),
+		TLSClientCAFile:             env("INFERCRANE_TLS_CLIENT_CA_FILE", ""),
 		AsyncEncryptionKey:          env("INFERCRANE_ASYNC_ENCRYPTION_KEY", ""),
 		AsyncEncryptionKeyReference: env("INFERCRANE_ASYNC_ENCRYPTION_KEY_REFERENCE", "environment:INFERCRANE_ASYNC_ENCRYPTION_KEY"),
 		RunPodAPIKey:                env("RUNPOD_API_KEY", ""),
@@ -344,6 +352,9 @@ func load(requireAPIKey bool) (Config, error) {
 	if err := validateKubernetes(config); err != nil {
 		return Config{}, err
 	}
+	if err := validateServerTLS(config); err != nil {
+		return Config{}, err
+	}
 	return config, nil
 }
 
@@ -395,6 +406,16 @@ func validateGCP(config Config) error {
 	}
 	if strings.Contains(config.GCPVMImage, "/family/") {
 		return errors.New("INFERCRANE_GCP_VM_IMAGE must identify an immutable image, not an image family")
+	}
+	return nil
+}
+
+func validateServerTLS(config Config) error {
+	if (config.TLSCertFile == "") != (config.TLSKeyFile == "") {
+		return errors.New("INFERCRANE_TLS_CERT_FILE and INFERCRANE_TLS_KEY_FILE must be configured together")
+	}
+	if config.TLSClientCAFile != "" && config.TLSCertFile == "" {
+		return errors.New("INFERCRANE_TLS_CLIENT_CA_FILE requires the TLS certificate and key")
 	}
 	return nil
 }

@@ -72,6 +72,12 @@ milestone_gates:
     - provider_product_adapter_identity_persisted_and_ambiguity_fail_closed
     - gcp_compute_private_identity_adoption_and_cleanup_conformance
     - aws_gcp_coreweave_profile_ownership_and_qualification_boundaries
+    - stateless_multi_replica_api_survival
+    - fenced_operation_lease_recovery_and_stale_writer_rejection
+    - mixed_version_protocol_overlap_fail_closed
+    - tls13_mtls_and_partial_identity_fail_closed
+    - guarded_backup_restore_and_migration_ledger_preservation
+    - restored_control_plane_startup_and_rto_measurement
   deferred_until_v1_manual_qualification:
     - runpod_elastic
     - runpod_serverless

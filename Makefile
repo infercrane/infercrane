@@ -1,7 +1,7 @@
 GORELEASER_VERSION := v2.12.7
 RELEASE_CANDIDATE_TAG ?= v1.0.0-rc.1
 
-.PHONY: build context context-check generate-api generate-api-check test-automation test-automation-full test-dashboard docs-dev docs-check test test-container test-stack test-failure test-store test-production-config test-provider-contracts test-kubernetes-manifests test-kubernetes-kind test-acceptance-safety verify audit deadcode release-check snapshot candidate-artifacts release-artifacts acceptance-local acceptance-preflight acceptance-cleanup qualify-local qualify-rc qualify-v1 qualify-contracts dev-check dev-check-full dev-up dev-down
+.PHONY: build context context-check generate-api generate-api-check test-automation test-automation-full test-dashboard docs-dev docs-check test test-container test-stack test-failure test-ha test-backup-restore test-store test-production-config test-provider-contracts test-kubernetes-manifests test-kubernetes-kind test-acceptance-safety verify audit deadcode release-check snapshot candidate-artifacts release-artifacts acceptance-local acceptance-preflight acceptance-cleanup qualify-local qualify-rc qualify-v1 qualify-contracts dev-check dev-check-full dev-up dev-down
 
 build:
 	go build ./cmd/infercrane
@@ -45,6 +45,13 @@ test-stack:
 
 test-failure:
 	./scripts/test-failure-recovery.sh
+
+test-ha:
+	./scripts/test-ha-control-plane.sh
+
+test-backup-restore:
+	./scripts/test-backup-restore-safety.sh
+	./scripts/test-backup-restore-docker.sh
 
 test-production-config:
 	./scripts/test-production-compose.sh

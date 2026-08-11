@@ -52,6 +52,14 @@ test('terminal and API errors are typed', async () => {
   await assert.rejects(() => client.getDeployment('qwen'), ApiError);
 });
 
+test('control-plane membership exposes mixed-version protocol evidence', async () => {
+  const fetch = async () => json({ data: [{ id: 'node-a', binary_version: '1.6.0', protocol_min: 1, protocol_max: 2 }] });
+  const client = new InferCrane({ apiKey: 'secret', fetch });
+  const instances = await client.controlPlaneInstances();
+  assert.equal(instances[0].id, 'node-a');
+  assert.equal(instances[0].protocol_max, 2);
+});
+
 test('streaming parses fragmented SSE without replay', async () => {
   let calls = 0;
   const body = new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"hi"}}]}\n')); controller.enqueue(new TextEncoder().encode('\ndata: [DONE]\n\n')); controller.close(); } });

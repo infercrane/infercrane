@@ -11,6 +11,8 @@ Required configuration:
 - `INFERCRANE_DATABASE_URL`: PostgreSQL URL with TLS enabled outside a trusted private network.
 - `INFERCRANE_API_KEY`: at least 32 characters, supplied by the workload secret manager; no production default exists.
 - `INFERCRANE_URL`: absolute HTTP(S) control-plane base URL used by lifecycle CLI commands.
+- `INFERCRANE_TLS_CERT_FILE` and `INFERCRANE_TLS_KEY_FILE`: optional native server identity. Both are
+  required together. Add `INFERCRANE_TLS_CLIENT_CA_FILE` to require and verify client certificates.
 - `INFERCRANE_PASSPORT_SIGNING_KEY_FILE`: optional mounted Ed25519 private-key file for issuing
   Inference Passports. It must be readable only by its owner (`0600`); the private key is never
   persisted in PostgreSQL. Back it up and rotate it through the workload secret manager.
@@ -117,6 +119,14 @@ Use a disruption budget, topology spread constraints, anti-affinity across failu
 at least two replicas. Termination grace must exceed `INFERCRANE_SHUTDOWN_TIMEOUT_SECONDS` so
 streaming requests and buffered request accounting can drain. Do not configure an HTTP server
 write timeout: it would terminate legitimate long-running streaming inference responses.
+
+Each replica publishes its live binary and protocol interval. Use
+`infercrane system instances --output json` before and during a rolling upgrade. Membership does not
+elect a leader: durable operation claims are independently fenced in PostgreSQL. Configure CLI mTLS
+with `INFERCRANE_CLIENT_TLS_CA_FILE`, `INFERCRANE_CLIENT_TLS_CERT_FILE`, and
+`INFERCRANE_CLIENT_TLS_KEY_FILE`; Python SDK callers can pass `ca_file`, `cert_file`, and `key_file`.
+Put private DNS, firewalls, and workload identity at the deployment boundary; TLS does not replace
+network policy.
 
 The production image includes InferCrane, the pinned upstream vLLM Router, the pinned SkyPilot
 RunPod client, AWS CLI v2, and `kubectl`. Including provider clients does not select or configure a

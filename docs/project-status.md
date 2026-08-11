@@ -20,6 +20,7 @@ but lacks production qualification; **planned** is not a product capability.
 | Production configuration gates | Implemented | Production mode enforces strong API secrets and PostgreSQL TLS; the base Compose stack is provider-neutral and RunPod, AWS, and Kubernetes use explicit overlays. |
 | Safe deletion and orphan discovery | Implemented | Side-effect-free deletion plans, explicit confirmation, and provisioned-resource inventory. |
 | PostgreSQL control-plane state | Implemented | Transactional advisory-locked migrations, checksum/gap/newer-binary rejection, every-prefix upgrade coverage, concurrent-start serialization, and bounded pool. |
+| Control-plane HA and recovery | Local-qualified | Stateless replicas, fenced work reclaim, protocol-overlap admission, TLS 1.3/mTLS, guarded backup/restore, and restored-database startup pass local Docker drills; customer database topology and RTO/RPO remain external. |
 | Release packaging | Implemented | Exact-version darwin/linux amd64/arm64 archives, checksums, SPDX SBOMs, native smoke verification, and generated Homebrew formula run locally without publication. |
 | Existing vLLM target registration | Implemented | Persistent, idempotent registration. |
 | Logical deployments and aliases | Implemented | One common upstream model per deployment. |
@@ -31,7 +32,7 @@ but lacks production qualification; **planned** is not a product capability.
 | Supervised vLLM Router processes | Implemented | Instance-owned generations and deterministic ports. |
 | Prometheus gateway telemetry | Implemented | Core counters/gauges; expand before public SLOs. |
 | Prometheus latency histograms and alerts | Implemented | Baseline rules require workload-specific tuning. |
-| Reproducible benchmark and recovery tooling | Experimental | AIPerf execution and benchmark history are implemented; real GPU evidence and HA qualification remain external. |
+| Reproducible benchmark and recovery tooling | Experimental | AIPerf execution and benchmark history are implemented; local control-plane HA/restore is qualified while real GPU and customer PostgreSQL evidence remain external. |
 | Provider pricing contract | Implemented | Timestamp and staleness semantics; no live provider catalog is shipped. |
 | Bounded autoscaling controller | Experimental | Durable fleet scaling and router-fenced scale-down are enabled; real RunPod 1→N→1 acceptance remains. |
 | Immutable ModelArtifact identity | Experimental | Hugging Face references resolve to immutable commits with grounded metadata; real transfer/cache evidence remains. |

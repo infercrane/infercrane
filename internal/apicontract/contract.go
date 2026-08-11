@@ -31,6 +31,7 @@ var Routes = []Route{
 	{"GET", "/doctor", "getDoctor", "System", "Run control-plane diagnostics", "", "Object", 200, false},
 	{"GET", "/whoami", "getCurrentPrincipal", "Identity", "Inspect the authenticated principal", "", "Object", 200, false},
 	{"GET", "/integrations", "listIntegrations", "System", "Inspect registered integration capabilities", "", "Object", 200, false},
+	{"GET", "/system/instances", "listControlPlaneInstances", "System", "List live control-plane instances and protocol compatibility", "", "ObjectList", 200, false},
 	{"GET", "/environments", "listEnvironments", "Endpoints", "List endpoint environments", "", "ObjectList", 200, false},
 	{"POST", "/environments", "createEnvironment", "Endpoints", "Create an endpoint environment", "EnvironmentCreate", "Object", 201, false},
 	{"GET", "/logical-models", "listLogicalModels", "Endpoints", "List logical model identities", "", "ObjectList", 200, false},

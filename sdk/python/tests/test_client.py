@@ -36,6 +36,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, {"policy": {"max_ttft_p95_ms": 250}})
         elif "/recommendations?" in self.path:
             self._json(200, {"data": [{"status": "recommended"}]})
+        elif self.path == "/api/v1/system/instances":
+            self._json(200, {"data": [{"id": "node-a", "binary_version": "1.6.0", "protocol_min": 1, "protocol_max": 2}]})
         else:
             self._json(404, {"error": {"code": "not_found", "message": "missing", "retryable": False, "remediation": "check the name"}})
 
@@ -104,6 +106,11 @@ class ClientTest(unittest.TestCase):
         with self.assertRaises(OperationTimeout) as caught:
             self.client.wait("op-1", timeout=0.003)
         self.assertEqual(caught.exception.operation_id, "op-1")
+
+    def test_control_plane_instances_exposes_protocol_evidence(self):
+        instances = self.client.control_plane_instances()
+        self.assertEqual(instances[0]["id"], "node-a")
+        self.assertEqual(instances[0]["protocol_max"], 2)
         self.assertFalse(any(path.endswith("/cancel") for path, _, _ in Handler.requests))
 
     def test_terminal_failure_is_typed(self):

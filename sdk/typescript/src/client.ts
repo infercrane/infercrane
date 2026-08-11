@@ -115,6 +115,10 @@ export class InferCrane {
   }
 
   async getOperation(id: string): Promise<Operation> { return await this.api.getOperation(id) as Operation; }
+  async controlPlaneInstances(): Promise<Record<string, JsonValue>[]> {
+    const response = await this.api.listControlPlaneInstances() as { data?: Record<string, JsonValue>[] };
+    return response.data ?? [];
+  }
 
   async wait(id: string, options: { timeoutMs?: number; signal?: AbortSignal } = {}): Promise<Operation> {
     const timeoutMs = options.timeoutMs ?? this.timeoutMs;

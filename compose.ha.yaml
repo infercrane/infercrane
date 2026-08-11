@@ -1,0 +1,21 @@
+services:
+  infercrane:
+    ports: !reset []
+
+  infercrane-2:
+    build:
+      context: .
+      target: development
+    entrypoint: ["infercrane-dev-start"]
+    environment:
+      INFERCRANE_API_KEY: infercrane
+      INFERCRANE_DATABASE_URL: postgres://infercrane:infercrane@postgres:5432/infercrane?sslmode=disable
+      INFERCRANE_INSTANCE_ID: compose-2
+      INFERCRANE_ROUTER_BINARY: fake-router
+    depends_on:
+      postgres:
+        condition: service_healthy
+      worker-a:
+        condition: service_started
+      worker-b:
+        condition: service_started

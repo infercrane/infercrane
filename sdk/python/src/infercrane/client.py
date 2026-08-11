@@ -4,6 +4,7 @@ import asyncio
 import json
 import math
 import os
+import ssl
 import time
 import uuid
 from collections.abc import AsyncIterator, Iterator
@@ -28,10 +29,11 @@ def _gateway_url(value: str) -> str:
 
 
 class _Transport:
-    def __init__(self, base_url: str, api_key: str, timeout: float) -> None:
+    def __init__(self, base_url: str, api_key: str, timeout: float, ssl_context: ssl.SSLContext | None = None) -> None:
         self.base_url = _control_url(base_url)
         self.api_key = api_key
         self.timeout = timeout
+        self.ssl_context = ssl_context
 
     def request(self, method: str, path: str, *, body: Any | None = None, idempotency_key: str | None = None) -> Any:
         payload = None if body is None else json.dumps(body, separators=(",", ":")).encode()
@@ -42,7 +44,7 @@ class _Transport:
             headers["Idempotency-Key"] = idempotency_key
         request = Request(self.base_url + path, data=payload, headers=headers, method=method)
         try:
-            with urlopen(request, timeout=self.timeout) as response:
+            with urlopen(request, timeout=self.timeout, context=self.ssl_context) as response:
                 content = response.read()
         except HTTPError as error:
             content = error.read()
@@ -62,14 +64,22 @@ class _Transport:
 
 
 class InferCrane:
-    def __init__(self, *, api_key: str | None = None, base_url: str | None = None, gateway_url: str | None = None, timeout: float = 30.0, poll_interval: float = 1.0) -> None:
+    def __init__(self, *, api_key: str | None = None, base_url: str | None = None, gateway_url: str | None = None, timeout: float = 30.0, poll_interval: float = 1.0, ca_file: str | None = None, cert_file: str | None = None, key_file: str | None = None) -> None:
         resolved_key = api_key or os.getenv("INFERCRANE_API_KEY", "")
         if not resolved_key:
             raise ValueError("api_key or INFERCRANE_API_KEY is required")
         resolved_url = base_url or os.getenv("INFERCRANE_CONTROL_URL", "http://127.0.0.1:18000")
         if timeout <= 0 or poll_interval <= 0:
             raise ValueError("timeout and poll_interval must be positive")
-        self._transport = _Transport(resolved_url, resolved_key, timeout)
+        if bool(cert_file) != bool(key_file):
+            raise ValueError("cert_file and key_file must be configured together")
+        ssl_context = None
+        if ca_file or cert_file:
+            ssl_context = ssl.create_default_context(cafile=ca_file)
+            if cert_file and key_file:
+                ssl_context.load_cert_chain(certfile=cert_file, keyfile=key_file)
+        self._ssl_context = ssl_context
+        self._transport = _Transport(resolved_url, resolved_key, timeout, ssl_context)
         self.api = ControlAPI(self._transport)
         self.gateway_url = _gateway_url(gateway_url or resolved_url)
         self.api_key = resolved_key
@@ -90,6 +100,11 @@ class InferCrane:
 
     def get_operation(self, operation_id: str) -> Operation:
         return Operation.from_dict(self.api.get_operation(operation_id))
+
+    def control_plane_instances(self) -> list[dict[str, Any]]:
+        """Return live HA members and their mixed-version protocol intervals."""
+        response = self.api.list_control_plane_instances()
+        return list(response.get("data", []))
 
     def wait(self, operation_id: str, *, timeout: float | None = None) -> Operation:
         limit = self.timeout if timeout is None else timeout
@@ -141,7 +156,7 @@ class InferCrane:
         payload = {"model": deployment, "messages": messages, "stream": True, **parameters}
         request = Request(self.gateway_url + "/v1/chat/completions", data=json.dumps(payload, separators=(",", ":")).encode(), headers={"Accept": "text/event-stream", "Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json", "User-Agent": "infercrane-python/1.0.0rc1"}, method="POST")
         try:
-            response = urlopen(request, timeout=self.timeout)
+            response = urlopen(request, timeout=self.timeout, context=self._ssl_context)
         except HTTPError as error:
             raise APIError(error.code, "inference_error", error.read().decode(errors="replace")) from None
         completed = False

@@ -85,6 +85,7 @@ func newRootCommand(ctx context.Context) *cobra.Command {
 		{use: "operation ID | operation watch ID | operation cancel ID", short: "Inspect, resume, or cancel a durable operation", group: "understand"},
 		{use: "orphans [flags]", short: "List unmanaged provisioned resources", group: "understand"},
 		{use: "integrations [flags]", short: "Inspect registered and qualified integration capabilities", group: "understand"},
+		{use: "system instances [flags]", short: "Inspect live control-plane HA membership", group: "understand"},
 		{use: "target ACTION [arguments]", short: "Register or list existing inference targets", group: "admin"},
 		{use: "context ACTION [arguments]", short: "List, inspect, or select CLI contexts", group: "admin"},
 		{use: "auth status [flags]", short: "Show the authenticated control-plane identity", group: "admin"},

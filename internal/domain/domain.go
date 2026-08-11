@@ -52,6 +52,19 @@ type DeploymentRevisionSpec struct {
 	Workload           runtimecontract.Workload `json:"workload,omitzero"`
 }
 
+// ControlPlaneInstance is an ephemeral HA membership observation. PostgreSQL
+// remains the source of truth; a missed heartbeat expires membership rather
+// than granting ownership of any operation.
+type ControlPlaneInstance struct {
+	ID            string    `json:"id"`
+	BinaryVersion string    `json:"binary_version"`
+	ProtocolMin   int       `json:"protocol_min"`
+	ProtocolMax   int       `json:"protocol_max"`
+	StartedAt     time.Time `json:"started_at"`
+	HeartbeatAt   time.Time `json:"heartbeat_at"`
+	Draining      bool      `json:"draining"`
+}
+
 type ModelArtifact struct {
 	ID, TenantID, Source, Repository, RequestedRevision string
 	ImmutableRevision, ModelIdentity, CacheState        string

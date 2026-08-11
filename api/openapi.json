@@ -4718,6 +4718,42 @@
         ]
       }
     },
+    "/api/v1/system/instances": {
+      "get": {
+        "operationId": "listControlPlaneInstances",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List live control-plane instances and protocol compatibility",
+        "tags": [
+          "System"
+        ]
+      }
+    },
     "/api/v1/targets": {
       "get": {
         "operationId": "listTargets",

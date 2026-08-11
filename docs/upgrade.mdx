@@ -80,10 +80,22 @@ infercrane integrations --output json
 
 ## Rolling upgrades
 
-v1.0 supports a controlled stop/start upgrade and multiple identical-version control-plane replicas.
-Mixed InferCrane versions are not qualified for v1.0. Drain or stop old replicas, run one new replica
-to migrate, verify readiness, then start the remaining new replicas. A later release may qualify an
-adjacent-version rolling window explicitly.
+From v1.6, every live replica registers its binary version and control protocol interval. Startup
+fails before serving when that interval cannot overlap a live member. Inspect the actual window:
+
+```bash
+infercrane system instances --output json
+```
+
+For an adjacent-version rollout, first confirm the release notes declare overlapping protocol
+intervals. Add one new replica, verify `/readyz` and the membership list, then remove old replicas one
+at a time. An expired operation lease is reclaimed by another worker; the old fence token cannot
+checkpoint or complete work. This is not permission to mix arbitrary schema versions: take a verified
+backup first and follow the migration compatibility statement for both releases.
+
+Rotate server or client certificates by temporarily trusting both CA generations, rolling clients,
+then servers, and finally removing the old CA. InferCrane reads certificate files at process startup,
+so each trust change requires a graceful rolling restart.
 
 ## Support window
 

@@ -28,6 +28,11 @@ export class ControlApi {
     return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
   }
 
+  listControlPlaneInstances(): Promise<ObjectList> {
+    const path = '/system/instances';
+    return this.transport.request('GET', path) as Promise<ObjectList>;
+  }
+
   listEnvironments(): Promise<ObjectList> {
     const path = '/environments';
     return this.transport.request('GET', path) as Promise<ObjectList>;

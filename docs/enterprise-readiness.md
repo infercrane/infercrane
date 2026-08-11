@@ -20,8 +20,9 @@ after environment evidence exists.
 ## Priority 1 — observable and recoverable operation
 
 - OpenTelemetry traces and operation/reconciliation metrics.
-- HA PostgreSQL and multi-replica failure qualification.
-- Backup/restore, rolling upgrade, rollback, and schema compatibility drills.
+- Multi-replica control-plane failover, fenced work recovery, mixed-version protocol admission, and
+  local PostgreSQL backup/restore drills are implemented. Customer HA PostgreSQL topology evidence remains external.
+- Rolling upgrade, rollback, and schema compatibility policy is executable; customer RTO/RPO remains operator-measured.
 - Provider timeouts, rate limits, circuit breakers, and orphan cleanup.
 - Real vLLM streaming, cancellation, overload, and 24–72 hour soak evidence.
 

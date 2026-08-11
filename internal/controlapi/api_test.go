@@ -37,6 +37,15 @@ type fakeStore struct {
 	capacity        domain.CapacityEvidence
 }
 
+type fakeMembershipStore struct {
+	*fakeStore
+	instances []domain.ControlPlaneInstance
+}
+
+func (f *fakeMembershipStore) ControlPlaneInstances(context.Context, time.Duration) ([]domain.ControlPlaneInstance, error) {
+	return f.instances, nil
+}
+
 func TestAsyncInferenceRequiresConsentAndReturnsDurableJob(t *testing.T) {
 	service := &fakeAsyncService{}
 	handler := (API{Store: &fakeStore{}, APIKey: "secret", AsyncInference: service}).Handler()
@@ -858,6 +867,17 @@ func TestDoctorDiagnosticsRunInsideAuthenticatedControlPlane(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !called || !strings.Contains(response.Body.String(), `"ready":true`) {
 		t.Fatalf("response=%d %s called=%t", response.Code, response.Body.String(), called)
+	}
+}
+
+func TestControlPlaneMembershipIsAuthenticatedAndInspectable(t *testing.T) {
+	store := &fakeMembershipStore{fakeStore: &fakeStore{}, instances: []domain.ControlPlaneInstance{{ID: "node-a", BinaryVersion: "1.6.0", ProtocolMin: 1, ProtocolMax: 2, HeartbeatAt: time.Now().UTC()}}}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/system/instances", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret"}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"id":"node-a"`) || !strings.Contains(response.Body.String(), `"protocol_max":2`) {
+		t.Fatalf("response=%d %s", response.Code, response.Body.String())
 	}
 }
 

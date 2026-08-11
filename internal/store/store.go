@@ -240,6 +240,9 @@ func (s *Store) beginTx(ctx context.Context) (*tx, error) {
 func (t *tx) QueryRowContext(ctx context.Context, q string, args ...any) *sql.Row {
 	return t.Tx.QueryRowContext(ctx, rebind(q), args...)
 }
+func (t *tx) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
+	return t.Tx.QueryContext(ctx, rebind(q), args...)
+}
 func (t *tx) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error) {
 	return t.Tx.ExecContext(ctx, rebind(q), args...)
 }

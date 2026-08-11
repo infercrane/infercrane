@@ -44,6 +44,24 @@ func TestRejectsUnsafeControlPlaneURL(t *testing.T) {
 	}
 }
 
+func TestTLSConfigurationFailsClosedWhenIdentityIsPartial(t *testing.T) {
+	t.Setenv("INFERCRANE_API_KEY", "secret")
+	t.Setenv("INFERCRANE_TLS_CERT_FILE", "/cert.pem")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "configured together") {
+		t.Fatalf("partial server TLS identity accepted: %v", err)
+	}
+	t.Setenv("INFERCRANE_TLS_CERT_FILE", "")
+	t.Setenv("INFERCRANE_TLS_CLIENT_CA_FILE", "/ca.pem")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "requires") {
+		t.Fatalf("client CA without server TLS accepted: %v", err)
+	}
+	t.Setenv("INFERCRANE_TLS_CLIENT_CA_FILE", "")
+	t.Setenv("INFERCRANE_CLIENT_TLS_CERT_FILE", "/client.pem")
+	if _, err := LoadClient(); err == nil || !strings.Contains(err.Error(), "configured together") {
+		t.Fatalf("partial client TLS identity accepted: %v", err)
+	}
+}
+
 func TestAWSBYOCConfigurationIsAllOrNothingAndImmutable(t *testing.T) {
 	t.Setenv("INFERCRANE_API_KEY", "secret")
 	t.Setenv("INFERCRANE_AWS_ROLE_ARN", "arn:aws:iam::123456789012:role/infercrane")

@@ -121,6 +121,9 @@ type asyncInferenceService interface {
 	Result(context.Context, string, string) (domain.AsyncInferenceJob, []byte, error)
 	Cancel(context.Context, string, string) error
 }
+type controlPlaneMembershipStore interface {
+	ControlPlaneInstances(context.Context, time.Duration) ([]domain.ControlPlaneInstance, error)
+}
 type API struct {
 	Store         Store
 	APIKey        string
@@ -170,6 +173,7 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/doctor", a.auth(authz.Read, a.diagnostics))
 	mux.HandleFunc("GET /api/v1/whoami", a.auth(authz.Read, a.whoami))
 	mux.HandleFunc("GET /api/v1/integrations", a.auth(authz.Read, a.integrations))
+	mux.HandleFunc("GET /api/v1/system/instances", a.auth(authz.Read, a.controlPlaneInstances))
 	mux.HandleFunc("GET /api/v1/environments", a.auth(authz.Read, a.environments))
 	mux.HandleFunc("POST /api/v1/environments", a.auth(authz.Deploy, a.createEnvironment))
 	mux.HandleFunc("GET /api/v1/logical-models", a.auth(authz.Read, a.logicalModels))
@@ -1061,6 +1065,24 @@ func (a API) diagnostics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, a.Diagnostics(r.Context(), cloud, serverless, aws, kubernetes))
+}
+
+func (a API) controlPlaneInstances(w http.ResponseWriter, r *http.Request) {
+	membership, ok := a.Store.(controlPlaneMembershipStore)
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "membership_unavailable", "control-plane membership is not configured")
+		return
+	}
+	instances, err := membership.ControlPlaneInstances(r.Context(), 45*time.Second)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "control-plane membership could not be read")
+		return
+	}
+	data := make([]map[string]any, 0, len(instances))
+	for _, instance := range instances {
+		data = append(data, map[string]any{"id": instance.ID, "binary_version": instance.BinaryVersion, "protocol_min": instance.ProtocolMin, "protocol_max": instance.ProtocolMax, "started_at": instance.StartedAt, "heartbeat_at": instance.HeartbeatAt, "draining": instance.Draining})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": data, "count": len(data), "live_window_seconds": 45})
 }
 
 func defaultValue(value, fallback string) string {

@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -60,6 +62,8 @@ import (
 )
 
 var version = "1.0.0-rc.1"
+
+const controlPlaneProtocolMin, controlPlaneProtocolMax = 1, 2
 
 func loadPassportSigningKey(path string) (ed25519.PrivateKey, error) {
 	if path == "" {
@@ -154,7 +158,7 @@ func runLegacy(ctx context.Context, args []string) error {
 		return passportCommand(ctx, config.Config{}, args[1:])
 	}
 	switch args[0] {
-	case "target", "deploy", "apply", "plan", "doctor", "adopt", "alert", "admission", "async", "ui", "dashboard", "deployments", "endpoints", "endpoint", "environment", "logical-model", "route", "status", "events", "logs", "request", "explain", "rollout", "delete", "inspect", "operation", "orphans", "integrations", "context", "auth", "tenant", "principal", "secret", "external", "benchmark", "passport", "recommend", "slo", "serve":
+	case "target", "deploy", "apply", "plan", "doctor", "adopt", "alert", "admission", "async", "ui", "dashboard", "deployments", "endpoints", "endpoint", "environment", "logical-model", "route", "status", "events", "logs", "request", "explain", "rollout", "delete", "inspect", "operation", "orphans", "integrations", "system", "context", "auth", "tenant", "principal", "secret", "external", "benchmark", "passport", "recommend", "slo", "serve":
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -231,6 +235,8 @@ func runLegacy(ctx context.Context, args []string) error {
 		return orphanAPICommand(ctx, cfg, args[1:])
 	case "integrations":
 		return integrationsCommand(ctx, cfg, args[1:])
+	case "system":
+		return systemCommand(ctx, cfg, args[1:])
 	case "route":
 		return routeAPICommand(ctx, cfg, args[1:])
 	case "tenant":
@@ -1372,7 +1378,10 @@ func controlJSONWithTimeout(ctx context.Context, cfg config.Config, method, path
 	if idempotencyKey != "" {
 		request.Header.Set("Idempotency-Key", idempotencyKey)
 	}
-	client := &http.Client{Timeout: timeout}
+	client, err := controlHTTPClient(cfg, timeout)
+	if err != nil {
+		return err
+	}
 	response, err := client.Do(request)
 	if err != nil {
 		return fmt.Errorf("control plane %s is unreachable: %w", cfg.ControlURL, err)
@@ -1712,6 +1721,42 @@ func integrationsCommand(ctx context.Context, cfg config.Config, args []string) 
 		for _, item := range response.Data.Compatibility {
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", item.Runtime, item.Cloud, item.Mode, item.State)
 		}
+	}
+	return w.Flush()
+}
+
+func systemCommand(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) == 0 || args[0] != "instances" {
+		return errors.New("usage: infercrane system instances [--output human|json]")
+	}
+	fs := flag.NewFlagSet("system instances", flag.ContinueOnError)
+	output := fs.String("output", "human", "human or json")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if err := validateOutput(*output); err != nil {
+		return err
+	}
+	var response struct {
+		Data              []domain.ControlPlaneInstance `json:"data"`
+		Count             int                           `json:"count"`
+		LiveWindowSeconds int                           `json:"live_window_seconds"`
+	}
+	if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/system/instances", "", nil, &response); err != nil {
+		return err
+	}
+	if *output == "json" {
+		encoded, _ := json.MarshalIndent(response, "", "  ")
+		fmt.Println(string(encoded))
+		return nil
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintf(w, "INSTANCE\tVERSION\tPROTOCOL\tHEARTBEAT\n")
+	for _, instance := range response.Data {
+		fmt.Fprintf(w, "%s\t%s\t%d..%d\t%s\n", instance.ID, instance.BinaryVersion, instance.ProtocolMin, instance.ProtocolMax, instance.HeartbeatAt.Format(time.RFC3339))
+	}
+	if len(response.Data) == 0 {
+		fmt.Fprintln(w, "-\t-\t-\tno live instances")
 	}
 	return w.Flush()
 }
@@ -2210,7 +2255,11 @@ func requestCommand(ctx context.Context, cfg config.Config, args []string) error
 	}
 	request.Header.Set("Authorization", "Bearer "+cfg.APIKey)
 	request.Header.Set("Content-Type", "application/json")
-	response, err := (&http.Client{}).Do(request)
+	requestClient, err := controlHTTPClient(cfg, 0)
+	if err != nil {
+		return err
+	}
+	response, err := requestClient.Do(request)
 	if err != nil {
 		return fmt.Errorf("inference endpoint %s is unreachable: %w", cfg.ControlURL, err)
 	}
@@ -2852,6 +2901,16 @@ func formatGuardEvidence(metrics domain.RevisionMetrics) string {
 func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	const membershipLiveFor = 45 * time.Second
+	if err := s.RegisterControlPlaneInstance(ctx, domain.ControlPlaneInstance{ID: cfg.InstanceID, BinaryVersion: version, ProtocolMin: controlPlaneProtocolMin, ProtocolMax: controlPlaneProtocolMax}, membershipLiveFor); err != nil {
+		return fmt.Errorf("register control-plane instance: %w", err)
+	}
+	defer func() {
+		unregisterCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = s.UnregisterControlPlaneInstance(unregisterCtx, cfg.InstanceID)
+	}()
+	go heartbeatControlPlane(ctx, s, cfg.InstanceID, 10*time.Second)
 	integrationRegistry, err := integration.V1Catalog()
 	if err != nil {
 		return fmt.Errorf("configure integration contracts: %w", err)
@@ -3061,19 +3120,94 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		operationTelemetry.WritePrometheus(w)
 		recorder.WritePrometheus(w)
 	}}
-	server := &http.Server{Addr: fmt.Sprintf("%s:%d", cfg.Host, cfg.Port), Handler: (&gateway.Gateway{Routes: directory, APIKey: cfg.APIKey, Authenticator: credentialCache, Recorder: recorder, Logger: logger, Client: client, Ready: s.Ping, Control: control, Dashboard: dashboard.Handler(), Telemetry: gatewayTelemetry, CapacityObservers: map[string]gateway.CapacityObserver{"runpod": serverless.ActiveWorkers}, ExternalAuthorizer: externalBudgets, RequestAuthorizer: requestQuotas, AdmissionAuthorizer: admissionPool}).Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 1 << 20}
+	serverTLS, err := serverTLSConfig(cfg)
+	if err != nil {
+		return err
+	}
+	server := &http.Server{Addr: fmt.Sprintf("%s:%d", cfg.Host, cfg.Port), Handler: (&gateway.Gateway{Routes: directory, APIKey: cfg.APIKey, Authenticator: credentialCache, Recorder: recorder, Logger: logger, Client: client, Ready: s.Ping, Control: control, Dashboard: dashboard.Handler(), Telemetry: gatewayTelemetry, CapacityObservers: map[string]gateway.CapacityObserver{"runpod": serverless.ActiveWorkers}, ExternalAuthorizer: externalBudgets, RequestAuthorizer: requestQuotas, AdmissionAuthorizer: admissionPool}).Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 1 << 20, TLSConfig: serverTLS}
 	go func() {
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 		defer cancel()
 		_ = server.Shutdown(shutdown)
 	}()
-	fmt.Printf("InferCrane gateway listening on http://%s/v1\n", server.Addr)
-	err = server.ListenAndServe()
+	scheme := "http"
+	if cfg.TLSCertFile != "" {
+		scheme = "https"
+	}
+	fmt.Printf("InferCrane gateway listening on %s://%s/v1\n", scheme, server.Addr)
+	if cfg.TLSCertFile != "" {
+		err = server.ListenAndServeTLS(cfg.TLSCertFile, cfg.TLSKeyFile)
+	} else {
+		err = server.ListenAndServe()
+	}
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
 	}
 	return err
+}
+
+func controlHTTPClient(cfg config.Config, timeout time.Duration) (*http.Client, error) {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	if cfg.ClientTLSCAFile != "" || cfg.ClientTLSCertFile != "" {
+		tlsConfig := &tls.Config{MinVersion: tls.VersionTLS13}
+		if cfg.ClientTLSCAFile != "" {
+			body, err := os.ReadFile(cfg.ClientTLSCAFile)
+			if err != nil {
+				return nil, fmt.Errorf("read control-plane CA: %w", err)
+			}
+			pool := x509.NewCertPool()
+			if !pool.AppendCertsFromPEM(body) {
+				return nil, errors.New("control-plane CA file contains no certificates")
+			}
+			tlsConfig.RootCAs = pool
+		}
+		if cfg.ClientTLSCertFile != "" {
+			certificate, err := tls.LoadX509KeyPair(cfg.ClientTLSCertFile, cfg.ClientTLSKeyFile)
+			if err != nil {
+				return nil, fmt.Errorf("load control-plane client identity: %w", err)
+			}
+			tlsConfig.Certificates = []tls.Certificate{certificate}
+		}
+		transport.TLSClientConfig = tlsConfig
+	}
+	return &http.Client{Transport: transport, Timeout: timeout}, nil
+}
+
+func serverTLSConfig(cfg config.Config) (*tls.Config, error) {
+	if cfg.TLSCertFile == "" {
+		return nil, nil
+	}
+	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS13}
+	if cfg.TLSClientCAFile == "" {
+		return tlsConfig, nil
+	}
+	body, err := os.ReadFile(cfg.TLSClientCAFile)
+	if err != nil {
+		return nil, fmt.Errorf("read TLS client CA: %w", err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(body) {
+		return nil, errors.New("TLS client CA file contains no certificates")
+	}
+	tlsConfig.ClientCAs = pool
+	tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
+	return tlsConfig, nil
+}
+
+func heartbeatControlPlane(ctx context.Context, s *store.Store, instanceID string, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := s.HeartbeatControlPlaneInstance(ctx, instanceID); err != nil && ctx.Err() == nil {
+				slog.Error("control-plane membership heartbeat failed", "instance_id", instanceID, "error", err)
+			}
+		}
+	}
 }
 func runAutoscaler(ctx context.Context, controller autoscale.Controller, interval time.Duration, logger *slog.Logger) {
 	ticker := time.NewTicker(interval)

@@ -162,6 +162,7 @@
             "openapi": "openapi.json"
           },
           "provider-setup",
+          "runbooks/backup-restore",
           "upgrade",
           "release-packaging",
           "development",
@@ -174,6 +175,7 @@
         "pages": [
           "project-status",
           "production-readiness",
+          "release-notes-v1.6.0-rc.1",
           "release-notes-v1.5.0-rc.1",
           "release-notes-v1.4.0-rc.1",
           "release-notes-v1.0.0-rc.1",
@@ -207,6 +209,8 @@
               "adr/0021-stable-endpoint-serving-plans",
               "adr/0022-incremental-adoption-and-deterministic-diagnostics",
               "adr/0023-in-memory-admission-and-encrypted-async"
+              ,"adr/0024-provider-product-profiles"
+              ,"adr/0025-fenced-ha-and-protocol-overlap"
             ]
           },
           "release-acceptance"
