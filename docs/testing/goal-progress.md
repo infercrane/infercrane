@@ -67,10 +67,8 @@ fix locally reproducible defects, and leave exact real/manual qualification proc
 
 ### Outstanding
 
-- Bind the contract-qualification artifact to a clean implementation commit (the tool intentionally
-  refuses dirty worktrees).
-- Commit the qualified implementation, run contract qualification, then produce the final report and
-  exact real-infrastructure/manual checklist.
+- Automated qualification is complete. The only outstanding work is the exact real-infrastructure and
+  human/hosted-system qualification recorded in `final-qualification-report.md`.
 
 ### Manual / real infrastructure boundary
 
