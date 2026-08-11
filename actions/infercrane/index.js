@@ -14,7 +14,7 @@ async function main() {
   const mode = input('mode', 'plan'), spec = input('spec'), deployment = input('deployment'), expectedRevision = input('revision');
   const artifactPath = input('output-path', 'infercrane-delivery.json');
   if (!['plan', 'apply', 'release-check'].includes(mode)) throw new Error('mode must be plan, apply, or release-check');
-  const cli = await resolveCLI(input('cli-path', 'auto'), input('version', 'v0.4.0-rc.1'), path.join(process.env.RUNNER_TEMP ?? os.tmpdir(), 'infercrane-action'));
+  const cli = await resolveCLI(input('cli-path', 'auto'), input('version', 'v0.8.0-rc.1'), path.join(process.env.RUNNER_TEMP ?? os.tmpdir(), 'infercrane-action'));
   if (mode === 'plan') {
     if (!spec) throw new Error('spec is required for plan');
     const raw = run(cli, ['plan', spec, '--output', 'json']); const plan = JSON.parse(raw);
@@ -28,9 +28,12 @@ async function main() {
     fs.writeFileSync(artifactPath, `${JSON.stringify(result, null, 2)}\n`, { mode: 0o600 }); output('result', 'pass'); output('operation-id', result.operation?.id ?? ''); summary(`## InferCrane apply accepted\n\nDurable operation: \`${result.operation?.id ?? 'unknown'}\``);
   } else {
     if (!deployment || !expectedRevision) throw new Error('deployment and exact revision are required for release-check');
-    const raw = run(cli, ['status', deployment, '--output', 'json']); const view = JSON.parse(raw), evidence = evaluateRelease(view, expectedRevision);
+    const raw = run(cli, ['status', deployment, '--output', 'json']); const view = JSON.parse(raw);
+    const passportRaw = run(cli, ['passport', 'list', deployment, '--output', 'json']); const passports = JSON.parse(passportRaw).data ?? [];
+    const evidence = evaluateRelease(view, expectedRevision, passports);
     fs.writeFileSync(artifactPath, `${JSON.stringify(evidence, null, 2)}\n`, { mode: 0o600 }); output('result', evidence.pass ? 'pass' : 'fail'); output('revision', evidence.revision ?? '');
-    summary(`## InferCrane release check · \`${deployment}\`\n\n${evidence.pass ? '✅ Passed' : `❌ Failed\n\n${evidence.failures.map((failure) => `- ${failure}`).join('\n')}`}`);
+    output('passport-digest', evidence.passport_digest ?? '');
+    summary(`## InferCrane release check · \`${deployment}\`\n\n${evidence.pass ? `✅ Passed\n\nPassport: \`${evidence.passport_digest}\` · Key: \`${evidence.passport_key_id}\`` : `❌ Failed\n\n${evidence.failures.map((failure) => `- ${failure}`).join('\n')}`}`);
     if (!evidence.pass) throw new Error(`release check failed: ${evidence.failures.join('; ')}`);
   }
 }

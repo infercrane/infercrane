@@ -41,6 +41,8 @@ var Routes = []Route{
 	{"GET", "/deployments/{name}/events", "listDeploymentEvents", "Deployments", "List deployment events", "", "ObjectList", 200, false},
 	{"POST", "/deployments/{name}/benchmarks", "runBenchmark", "Benchmarks", "Run and persist an AIPerf benchmark", "BenchmarkRequest", "Object", 201, false},
 	{"GET", "/deployments/{name}/benchmarks", "listBenchmarks", "Benchmarks", "List benchmark history", "", "ObjectList", 200, false},
+	{"POST", "/deployments/{name}/passports", "createInferencePassport", "Release evidence", "Issue a signed Inference Passport", "Object", "Object", 201, false},
+	{"GET", "/deployments/{name}/passports", "listInferencePassports", "Release evidence", "List signed Inference Passports", "", "ObjectList", 200, false},
 	{"GET", "/deployments/{name}/slo-policy", "getSLOPolicy", "Inference decisions", "Inspect deterministic SLO policy", "", "SLOPolicyEnvelope", 200, false},
 	{"PUT", "/deployments/{name}/slo-policy", "setSLOPolicy", "Inference decisions", "Set deterministic SLO policy", "SLOPolicy", "SLOPolicyEnvelope", 200, false},
 	{"DELETE", "/deployments/{name}/slo-policy", "deleteSLOPolicy", "Inference decisions", "Delete deterministic SLO policy", "", "Empty", 204, false},

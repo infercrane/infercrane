@@ -191,6 +191,18 @@ func (s *Store) PromoteCandidateRevision(ctx context.Context, tenant, deployment
 	return s.transitionRevision(ctx, tenant, deploymentName, candidateID, "active", "")
 }
 
+func (s *Store) PreviousRevisionID(ctx context.Context, tenant, deploymentName, activeRevisionID string) (string, error) {
+	if tenant == "" {
+		tenant = "global"
+	}
+	var id string
+	err := s.QueryRowContext(ctx, `SELECT r.id FROM deployment_revisions r JOIN deployments d ON d.id=r.deployment_id WHERE d.tenant_id=? AND d.name=? AND r.id!=? AND r.status='superseded' ORDER BY r.completed_at DESC NULLS LAST,r.revision_number DESC LIMIT 1`, tenant, deploymentName, activeRevisionID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return id, err
+}
+
 // PromoteGuardedCandidate atomically commits a guard-accepted candidate and
 // its isolated healthy target set. Provider cleanup happens only after the
 // reconciler publishes the resulting router generation.
@@ -329,6 +341,84 @@ func (s *Store) RollbackRevision(ctx context.Context, tenant, deploymentName, re
 		return err
 	}
 	if err = insertRevisionEvent(ctx, tx, deploymentID, "revision_rolled_back", "Deployment rolled back to revision", map[string]any{"revision_id": revisionID, "previous_revision_id": activeID, "reason": reason}, stamp); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// RollbackGuardedPromotion atomically restores a retained historical revision,
+// its target set, and replica lifecycle. It is used only by a persisted
+// post-promotion monitor while the old capacity is deliberately retained.
+func (s *Store) RollbackGuardedPromotion(ctx context.Context, tenant, deploymentName, promotedRevisionID, rollbackRevisionID, reason string, targetNames []string) error {
+	if tenant == "" {
+		tenant = "global"
+	}
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var deploymentID, activeID string
+	if err = tx.QueryRowContext(ctx, `SELECT id,active_revision_id FROM deployments WHERE tenant_id=? AND name=? AND desired_state!='deleted' FOR UPDATE`, tenant, deploymentName).Scan(&deploymentID, &activeID); errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	if activeID == rollbackRevisionID {
+		return nil
+	}
+	if activeID != promotedRevisionID {
+		return fmt.Errorf("%w: monitored promoted revision is no longer active", ErrConflict)
+	}
+	var specJSON string
+	if err = tx.QueryRowContext(ctx, `SELECT spec_json::text FROM deployment_revisions WHERE id=? AND deployment_id=? AND status='superseded' FOR UPDATE`, rollbackRevisionID, deploymentID).Scan(&specJSON); errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("%w: rollback revision is unavailable", ErrConflict)
+	} else if err != nil {
+		return err
+	}
+	var spec domain.DeploymentRevisionSpec
+	if err = json.Unmarshal([]byte(specJSON), &spec); err != nil {
+		return err
+	}
+	deployment := domain.Deployment{Name: deploymentName, Model: spec.Model, Runtime: spec.Runtime, RoutingStrategy: spec.RoutingStrategy, MinReplicas: spec.MinReplicas, MaxReplicas: spec.MaxReplicas, AutoscalingEnabled: spec.AutoscalingEnabled}
+	targetIDs, err := validateTargetSet(ctx, tx, tenant, deployment, targetNames)
+	if err != nil {
+		return err
+	}
+	if len(targetIDs) < spec.MinReplicas {
+		return fmt.Errorf("%w: rollback revision has fewer retained targets than minimum replicas", ErrConflict)
+	}
+	for _, targetID := range targetIDs {
+		var ready bool
+		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM targets t JOIN replicas r ON r.tenant_id=t.tenant_id AND r.endpoint=t.url WHERE t.id=? AND r.deployment_id=? AND r.revision_id=? AND r.lifecycle_state IN ('ready','active','draining') AND r.health='healthy')`, targetID, deploymentID, rollbackRevisionID).Scan(&ready); err != nil {
+			return err
+		}
+		if !ready {
+			return fmt.Errorf("%w: retained rollback target is not healthy", ErrConflict)
+		}
+	}
+	stamp := now()
+	if _, err = tx.ExecContext(ctx, `UPDATE deployment_revisions SET status='superseded',completed_at=? WHERE id=?`, stamp, promotedRevisionID); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE deployment_revisions SET status='active',reason=?,activated_at=?,completed_at=NULL WHERE id=?`, reason, stamp, rollbackRevisionID); err != nil {
+		return err
+	}
+	if err = updateDeploymentFromRevision(ctx, tx, deploymentID, rollbackRevisionID, stamp); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `DELETE FROM deployment_targets WHERE deployment_id=?`, deploymentID); err != nil {
+		return err
+	}
+	for _, targetID := range targetIDs {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO deployment_targets(deployment_id,target_id) VALUES(?,?)`, deploymentID, targetID); err != nil {
+			return err
+		}
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE replicas SET lifecycle_state=CASE WHEN revision_id=? THEN 'active' WHEN revision_id=? AND lifecycle_state!='deleted' THEN 'draining' ELSE lifecycle_state END,updated_at=? WHERE deployment_id=?`, rollbackRevisionID, promotedRevisionID, stamp, deploymentID); err != nil {
+		return err
+	}
+	if err = insertRevisionEvent(ctx, tx, deploymentID, "revision_auto_rolled_back", "Release Guard restored retained revision", map[string]any{"revision_id": rollbackRevisionID, "failed_revision_id": promotedRevisionID, "reason": reason, "targets": targetNames}, stamp); err != nil {
 		return err
 	}
 	return tx.Commit()

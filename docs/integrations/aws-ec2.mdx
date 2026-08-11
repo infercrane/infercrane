@@ -44,6 +44,11 @@ export INFERCRANE_AWS_WORKER_SECRET_ARN='arn:aws:secretsmanager:eu-central-1:123
 export INFERCRANE_AWS_IMAGE_DIGEST='vllm/vllm-openai@sha256:REPLACE_WITH_QUALIFIED_DIGEST'
 ```
 
+The Secrets Manager value referenced by `INFERCRANE_AWS_WORKER_SECRET_ARN` must contain the same
+worker credential configured as `INFERCRANE_API_KEY` on this self-hosted control plane. InferCrane
+uses that value for private worker health checks, routing, and explicit candidate validation; it
+persists only the secret ARN in provider metadata.
+
 `INFERCRANE_AWS_IMAGE_DIGEST` is the configured vLLM default and remains required for the adapter's
 complete startup configuration. An SGLang or custom OCI revision supplies its own immutable image
 and argv; the EC2 adapter uses that revision workload instead of the vLLM default. It still uses the

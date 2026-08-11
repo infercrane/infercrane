@@ -19,6 +19,14 @@ This runs repository verification and the provider lifecycle contracts. It is th
 while editing and writes full logs under `.infercrane/dev-check/RUN_ID/` while keeping terminal
 output compact.
 
+Passport signing is opt-in in development. Generate a permission-restricted key and inject only its
+file path into the control-plane process:
+
+```bash
+infercrane passport keygen
+export INFERCRANE_PASSPORT_SIGNING_KEY_FILE="$HOME/.config/infercrane/passport-signing-key"
+```
+
 ## Full local qualification
 
 ```bash

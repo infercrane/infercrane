@@ -16,7 +16,7 @@ but lacks production qualification; **planned** is not a product capability.
 | Versioned control-plane API | Experimental | Tenant-scoped operations, apply, targets, deployments, orphans, audit, quota, and principal endpoints exist. |
 | OpenAPI and generated SDKs | Experimental | Full route coverage, deterministic Python/TypeScript low-level generation, typed durable helpers, and hermetic SSE tests are implemented; public package publication is deferred. |
 | Terraform provider | Experimental | Logical deployment CRUD, import, guarded update, and interrupted-apply adoption pass real Terraform protocol fixtures; Registry publication is deferred. |
-| GitHub delivery action | Experimental | Read-only semantic PR plans, explicit protected apply, exact-revision checks, bounded summaries, and secret redaction are implemented; Marketplace publication is deferred. |
+| GitHub delivery action | Experimental | Read-only semantic PR plans, explicit protected apply, exact-revision plus verified-passport checks, bounded summaries, and secret redaction are implemented; Marketplace publication is deferred. |
 | Production configuration gates | Implemented | Production mode enforces strong API secrets and PostgreSQL TLS. |
 | Safe deletion and orphan discovery | Implemented | Side-effect-free deletion plans, explicit confirmation, and provisioned-resource inventory. |
 | PostgreSQL control-plane state | Implemented | Transactional embedded migrations and bounded pool. |
@@ -31,7 +31,8 @@ but lacks production qualification; **planned** is not a product capability.
 | Provider pricing contract | Implemented | Timestamp and staleness semantics; no live provider catalog is shipped. |
 | Bounded autoscaling controller | Experimental | Durable fleet scaling and router-fenced scale-down are enabled; real RunPod 1→N→1 acceptance remains. |
 | Immutable ModelArtifact identity | Experimental | Hugging Face references resolve to immutable commits with grounded metadata; real transfer/cache evidence remains. |
-| Release Guard | Experimental | Policies, measurements, evaluations, and deterministic promote/reject reasons persist; real active/candidate evidence remains. |
+| Release Guard V2 | Experimental | Compatibility, explicit bounded AIPerf, performance, error, sourced-cost policy, persisted post-promotion monitoring, and restart-safe automatic rollback pass hermetic tests; real active/candidate evidence remains. |
+| Inference Passports | Experimental | Canonical Ed25519-signed revision, artifact, benchmark, cold-start and policy evidence is byte-preserving, tenant-safe, and offline-verifiable; organizational key custody and public release qualification remain. |
 | Provider-native serverless contract | Experimental | Replay-safe endpoint lifecycle, scale-to-zero routing, cancellation, accounting, and registered direct-target reconciliation are implemented. RunPod is the first adapter; real cold/warm acceptance remains. |
 | Cold-start intelligence | Experimental | Grounded worker-at-arrival and gateway TTFT evidence persist; provider-hidden substages remain unavailable. |
 | Deterministic explanations | Implemented | Deployment, scaling, rollout, and cold-start output is reproduced from persisted state and measurements. |

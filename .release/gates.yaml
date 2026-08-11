@@ -34,6 +34,12 @@ milestone_gates:
     - hybrid_overflow_oscillation_and_budget_simulation
     - recommendation_api_cli_sdk_dashboard_drift
     - inference_decision_migration_and_tenant_isolation
+    - release_guard_v2_compatibility_synthetic_and_sourced_cost
+    - bounded_explicit_aiperf_validation_without_shadow_traffic
+    - durable_post_promotion_monitor_and_automatic_rollback
+    - inference_passport_canonical_signature_and_tamper_detection
+    - inference_passport_migration_byte_preservation_and_tenant_isolation
+    - passport_api_cli_sdk_dashboard_and_github_release_check_drift
   deferred_until_v1_manual_qualification:
     - runpod_elastic
     - runpod_serverless

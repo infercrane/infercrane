@@ -33,7 +33,7 @@ inputs:
   version:
     description: Exact InferCrane release tag used when auto-installing
     required: false
-    default: v0.4.0-rc.1
+    default: v0.8.0-rc.1
   output-path:
     description: Machine-readable plan or evidence path
     required: false
@@ -45,6 +45,8 @@ outputs:
     description: Durable operation submitted by apply
   revision:
     description: Planned or verified revision identity
+  passport-digest:
+    description: Verified Inference Passport digest used by release-check
 runs:
   using: node20
   main: index.js

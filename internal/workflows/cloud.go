@@ -139,6 +139,16 @@ type CloudStore interface {
 	Audit(context.Context, domain.AuditEvent) error
 }
 
+type releaseGuardV2Store interface {
+	ReleaseGuardPolicy(context.Context, string, string) (domain.ReleaseGuardPolicy, error)
+	EnsureReleaseGuardMonitor(context.Context, string, string, string, string, time.Duration) (domain.ReleaseGuardMonitor, error)
+	ReleaseGuardMonitor(context.Context, string, string, string) (domain.ReleaseGuardMonitor, error)
+	EvaluateReleaseGuardMonitor(context.Context, string, string, string, time.Duration) (domain.ReleaseGuardEvaluation, error)
+	RollbackGuardedPromotion(context.Context, string, string, string, string, string, []string) error
+	MarkReleaseGuardMonitorRolledBack(context.Context, string, string, string) error
+	PreviousRevisionID(context.Context, string, string, string) (string, error)
+}
+
 type ReplicaProvider = integration.ElasticProvider
 
 type CapacityAdvisor interface {
@@ -628,8 +638,17 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 		if err != nil {
 			return "", operations.Permanent("candidate_not_found", err)
 		}
+		v2, hasV2 := store.(releaseGuardV2Store)
+		var recoveryMonitor domain.ReleaseGuardMonitor
+		recoveringRollback := false
 		if revision.Status != "candidate" && resolved.Deployment.ActiveRevisionID != rollout.CandidateID {
-			return "", operations.Permanent("candidate_not_found", errors.New("revision is neither current candidate nor active cutover"))
+			if hasV2 {
+				recoveryMonitor, err = v2.ReleaseGuardMonitor(ctx, rollout.TenantID, rollout.Name, rollout.CandidateID)
+				recoveringRollback = err == nil && resolved.Deployment.ActiveRevisionID == recoveryMonitor.RollbackRevisionID
+			}
+			if !recoveringRollback {
+				return "", operations.Permanent("candidate_not_found", errors.New("revision is neither current candidate, active cutover, nor persisted rollback cleanup"))
+			}
 		}
 		var spec domain.DeploymentRevisionSpec
 		if err = json.Unmarshal([]byte(revision.SpecJSON), &spec); err != nil {
@@ -641,16 +660,33 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 		}
 		var targetNames, targetURLs []string
 		for _, replica := range replicas {
-			if replica.RevisionID != rollout.CandidateID || (replica.LifecycleState != "ready" && replica.LifecycleState != "active") || replica.Health != "healthy" || replica.Endpoint == "" {
+			targetRevisionID := rollout.CandidateID
+			if recoveringRollback {
+				targetRevisionID = recoveryMonitor.RollbackRevisionID
+			}
+			if replica.RevisionID != targetRevisionID || (replica.LifecycleState != "ready" && replica.LifecycleState != "active") || replica.Health != "healthy" || replica.Endpoint == "" {
 				continue
 			}
-			targetNames = append(targetNames, fmt.Sprintf("%s-%s-r%d", rollout.Name, rollout.CandidateID[:min(8, len(rollout.CandidateID))], replica.Ordinal))
+			targetNames = append(targetNames, fmt.Sprintf("%s-%s-r%d", rollout.Name, targetRevisionID[:min(8, len(targetRevisionID))], replica.Ordinal))
 			targetURLs = append(targetURLs, replica.Endpoint)
+		}
+		if recoveringRollback {
+			rollbackRevision, revisionErr := store.Revision(ctx, rollout.TenantID, rollout.Name, recoveryMonitor.RollbackRevisionID)
+			if revisionErr != nil {
+				return "", operations.Permanent("rollback_revision_missing", revisionErr)
+			}
+			if err = json.Unmarshal([]byte(rollbackRevision.SpecJSON), &spec); err != nil {
+				return "", operations.Permanent("invalid_rollback_spec", err)
+			}
 		}
 		if len(targetNames) < spec.MinReplicas {
 			return "", operations.Permanent("candidate_not_ready", errors.New("candidate does not have its minimum healthy replica count"))
 		}
-		if err = store.PromoteGuardedCandidate(ctx, rollout.TenantID, rollout.Name, rollout.CandidateID, targetNames); err != nil {
+		previousRevisionID := resolved.Deployment.ActiveRevisionID
+		if !recoveringRollback {
+			err = store.PromoteGuardedCandidate(ctx, rollout.TenantID, rollout.Name, rollout.CandidateID, targetNames)
+		}
+		if err != nil {
 			return "", classify("guarded_promotion_failed", err)
 		}
 		expectedHash := router.WorkerSetHash(spec.RoutingStrategy, targetURLs)
@@ -662,6 +698,80 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 			_ = checkpoint(ctx, store, operation, "candidate.route", "waiting", map[string]any{"worker_set_hash": expectedHash}, 80, "Waiting for guarded router generation")
 			return "", operations.Retryable("router_cutover_pending", errors.New("candidate router generation is not active yet"))
 		}
+		keepRevisionID := rollout.CandidateID
+		autoRolledBack := false
+		if recoveringRollback {
+			keepRevisionID, autoRolledBack = recoveryMonitor.RollbackRevisionID, true
+			if err = v2.MarkReleaseGuardMonitorRolledBack(ctx, rollout.TenantID, rollout.Name, rollout.CandidateID); err != nil {
+				return "", operations.Retryable("release_monitor_finalize_failed", err)
+			}
+		}
+		if hasV2 && !recoveringRollback {
+			policy, policyErr := v2.ReleaseGuardPolicy(ctx, rollout.TenantID, rollout.Name)
+			if policyErr != nil {
+				return "", operations.Retryable("release_guard_policy_lookup_failed", policyErr)
+			}
+			existing, monitorErr := v2.ReleaseGuardMonitor(ctx, rollout.TenantID, rollout.Name, rollout.CandidateID)
+			monitorExists := monitorErr == nil
+			if monitorErr != nil && !errors.Is(monitorErr, domain.ErrNotFound) {
+				return "", operations.Retryable("release_monitor_lookup_failed", monitorErr)
+			}
+			if policy.AutoRollbackEnabled || monitorExists {
+				if monitorExists {
+					previousRevisionID = existing.RollbackRevisionID
+				} else if errors.Is(monitorErr, domain.ErrNotFound) && previousRevisionID == rollout.CandidateID {
+					previousRevisionID, monitorErr = v2.PreviousRevisionID(ctx, rollout.TenantID, rollout.Name, rollout.CandidateID)
+					if monitorErr != nil {
+						return "", operations.Retryable("rollback_revision_lookup_failed", monitorErr)
+					}
+				}
+				monitor, monitorErr := v2.EnsureReleaseGuardMonitor(ctx, rollout.TenantID, rollout.Name, rollout.CandidateID, previousRevisionID, time.Duration(policy.AutoRollbackWindowSeconds)*time.Second)
+				if monitorErr != nil {
+					return "", classify("release_monitor_create_failed", monitorErr)
+				}
+				evaluation, evaluationErr := v2.EvaluateReleaseGuardMonitor(ctx, rollout.TenantID, rollout.Name, rollout.CandidateID, time.Duration(policy.AutoRollbackWindowSeconds)*time.Second)
+				if evaluationErr != nil {
+					return "", operations.Retryable("release_monitor_evaluation_failed", evaluationErr)
+				}
+				if evaluation.Decision == "WAIT" {
+					_ = checkpoint(ctx, store, operation, "candidate.observe", "waiting", map[string]any{"monitor_id": monitor.ID, "deadline": monitor.Deadline, "evaluation_id": evaluation.ID}, 88, "Observing promoted revision against persisted Release Guard policy")
+					return "", operations.Retryable("release_guard_observation_pending", errors.New("post-promotion evidence is not sufficient yet"))
+				}
+				if evaluation.Decision == "REJECT" {
+					var rollbackTargets, rollbackURLs []string
+					for _, replica := range replicas {
+						if replica.RevisionID == previousRevisionID && replica.LifecycleState != "deleted" && replica.Health == "healthy" && replica.Endpoint != "" {
+							rollbackTargets = append(rollbackTargets, fmt.Sprintf("%s-%s-r%d", rollout.Name, previousRevisionID[:min(8, len(previousRevisionID))], replica.Ordinal))
+							rollbackURLs = append(rollbackURLs, replica.Endpoint)
+						}
+					}
+					if err = v2.RollbackGuardedPromotion(ctx, rollout.TenantID, rollout.Name, rollout.CandidateID, previousRevisionID, "automatic rollback after Release Guard rejection", rollbackTargets); err != nil {
+						return "", classify("automatic_rollback_failed", err)
+					}
+					rollbackRevision, revisionErr := store.Revision(ctx, rollout.TenantID, rollout.Name, previousRevisionID)
+					if revisionErr != nil {
+						return "", operations.Permanent("rollback_revision_missing", revisionErr)
+					}
+					var rollbackSpec domain.DeploymentRevisionSpec
+					if err = json.Unmarshal([]byte(rollbackRevision.SpecJSON), &rollbackSpec); err != nil {
+						return "", operations.Permanent("invalid_rollback_spec", err)
+					}
+					rollbackHash := router.WorkerSetHash(rollbackSpec.RoutingStrategy, rollbackURLs)
+					rollbackMatched, matchErr := store.RoutingGenerationMatches(ctx, resolved.Deployment.ID, rollbackHash)
+					if matchErr != nil {
+						return "", operations.Retryable("router_generation_lookup_failed", matchErr)
+					}
+					if !rollbackMatched {
+						_ = checkpoint(ctx, store, operation, "candidate.rollback.route", "waiting", map[string]any{"worker_set_hash": rollbackHash}, 92, "Waiting for rollback router generation")
+						return "", operations.Retryable("rollback_router_cutover_pending", errors.New("rollback router generation is not active yet"))
+					}
+					if err = v2.MarkReleaseGuardMonitorRolledBack(ctx, rollout.TenantID, rollout.Name, rollout.CandidateID); err != nil {
+						return "", operations.Retryable("release_monitor_finalize_failed", err)
+					}
+					keepRevisionID, autoRolledBack = previousRevisionID, true
+				}
+			}
+		}
 		if drain != nil {
 			if active := drain.RetiringInFlight(resolved.Deployment.ID); active > 0 {
 				_ = checkpoint(ctx, store, operation, "candidate.drain", "waiting", map[string]int{"active_requests": active}, 90, "Waiting for active requests on the previous revision")
@@ -670,7 +780,7 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 		}
 		deleted := 0
 		for _, replica := range replicas {
-			if replica.RevisionID == rollout.CandidateID || replica.LifecycleState == "deleted" {
+			if replica.RevisionID == keepRevisionID || replica.LifecycleState == "deleted" {
 				continue
 			}
 			replicaBackend, backendErr := backends.ForProvider(replica.Provider)
@@ -701,7 +811,7 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 			deleted++
 		}
 		_ = checkpoint(ctx, store, operation, "candidate.drain", "succeeded", map[string]int{"deleted_replicas": deleted}, 95, "Old revision capacity drained and deleted")
-		result, _ := json.Marshal(map[string]any{"candidate_id": rollout.CandidateID, "promoted": true, "deleted_old_replicas": deleted})
+		result, _ := json.Marshal(map[string]any{"candidate_id": rollout.CandidateID, "promoted": !autoRolledBack, "auto_rolled_back": autoRolledBack, "active_revision_id": keepRevisionID, "deleted_retired_replicas": deleted})
 		return string(result), nil
 	}
 	candidatePromoteCancel := func(ctx context.Context, operation domain.Operation) (string, error) {
@@ -712,6 +822,48 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 		resolved, err := store.ResolveForTenant(ctx, rollout.TenantID, rollout.Name)
 		if err != nil {
 			return "", operations.Permanent("deployment_missing", err)
+		}
+		if v2, ok := store.(releaseGuardV2Store); ok {
+			if monitor, monitorErr := v2.ReleaseGuardMonitor(ctx, rollout.TenantID, rollout.Name, rollout.CandidateID); monitorErr == nil {
+				if resolved.Deployment.ActiveRevisionID == monitor.RollbackRevisionID {
+					return candidatePromote(ctx, operation)
+				}
+				if resolved.Deployment.ActiveRevisionID == rollout.CandidateID && monitor.Status == "observing" {
+					replicas, lookupErr := store.ReplicasForDeployment(ctx, rollout.TenantID, resolved.Deployment.ID)
+					if lookupErr != nil {
+						return "", operations.Retryable("replica_lookup_failed", lookupErr)
+					}
+					rollbackRevision, revisionErr := store.Revision(ctx, rollout.TenantID, rollout.Name, monitor.RollbackRevisionID)
+					if revisionErr != nil {
+						return "", operations.Permanent("rollback_revision_missing", revisionErr)
+					}
+					var rollbackSpec domain.DeploymentRevisionSpec
+					if json.Unmarshal([]byte(rollbackRevision.SpecJSON), &rollbackSpec) != nil {
+						return "", operations.Permanent("invalid_rollback_spec", errors.New("retained rollback revision spec is invalid"))
+					}
+					var names, urls []string
+					for _, replica := range replicas {
+						if replica.RevisionID == monitor.RollbackRevisionID && replica.LifecycleState != "deleted" && replica.Health == "healthy" && replica.Endpoint != "" {
+							names = append(names, fmt.Sprintf("%s-%s-r%d", rollout.Name, monitor.RollbackRevisionID[:min(8, len(monitor.RollbackRevisionID))], replica.Ordinal))
+							urls = append(urls, replica.Endpoint)
+						}
+					}
+					if err = v2.RollbackGuardedPromotion(ctx, rollout.TenantID, rollout.Name, rollout.CandidateID, monitor.RollbackRevisionID, "automatic rollback after operator cancelled observation", names); err != nil {
+						return "", classify("automatic_rollback_failed", err)
+					}
+					hash := router.WorkerSetHash(rollbackSpec.RoutingStrategy, urls)
+					matched, matchErr := store.RoutingGenerationMatches(ctx, resolved.Deployment.ID, hash)
+					if matchErr != nil {
+						return "", operations.Retryable("router_generation_lookup_failed", matchErr)
+					}
+					if !matched {
+						return "", operations.Retryable("rollback_router_cutover_pending", errors.New("rollback router generation is not active yet"))
+					}
+					if err = v2.MarkReleaseGuardMonitorRolledBack(ctx, rollout.TenantID, rollout.Name, rollout.CandidateID); err != nil {
+						return "", operations.Retryable("release_monitor_finalize_failed", err)
+					}
+				}
+			}
 		}
 		if resolved.Deployment.ActiveRevisionID == rollout.CandidateID {
 			return candidatePromote(ctx, operation)

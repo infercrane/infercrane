@@ -1,0 +1,59 @@
+---
+title: Inference Passports
+description: Canonical, signed, reproducible evidence for an immutable inference revision.
+---
+
+# Inference Passports
+
+An Inference Passport answers four release questions with persisted evidence: what revision ran,
+which immutable artifacts and runtime configuration it used, how it was measured, and which policy
+decision allowed it to ship. It is an evidence envelope—not a compliance certificate.
+
+## Configure signing
+
+Generate an Ed25519 key once on a trusted operator machine:
+
+```bash
+infercrane passport keygen
+export INFERCRANE_PASSPORT_SIGNING_KEY_FILE="$HOME/.config/infercrane/passport-signing-key"
+```
+
+The command creates the private key with mode `0600` and refuses to overwrite an existing key.
+Mount the key into the control-plane process. InferCrane persists only the public key, key identity,
+signature, digest, and signed payload. Back up and rotate private keys using your normal secret
+management system.
+
+## Issue and verify
+
+```bash
+infercrane passport issue qwen-prod --file qwen-prod.passport.json
+infercrane passport verify qwen-prod.passport.json
+infercrane passport list qwen-prod
+```
+
+Verification is offline and requires no control-plane credential or private key. It recomputes the
+SHA-256 digest, verifies the Ed25519 signature, and confirms the derived key ID. Any payload,
+signature, public-key, digest, or key-ID change fails closed.
+
+The signed v1 payload contains:
+
+- immutable revision ID and complete normalized `DeploymentSpec`;
+- resolved model repository, immutable revision, model identity, and known cache state;
+- runtime, runtime version, OCI workload identity, provider, region, GPU, and compute mode;
+- revision-scoped AIPerf result identities, workloads, reproduction commands, and sourced cost data;
+- available cold-start measurements and explicitly unavailable timing boundaries; and
+- the latest relevant Release Guard policy, metrics, reasons, decision, and evidence identity.
+
+Passports never contain provider credentials, API tokens, prompt bodies, or generated output. An
+unavailable measurement remains unavailable; issuing a passport does not turn simulated or missing
+qualification into real evidence.
+
+Issuance is allowed when evidence is incomplete so an operator can inspect the signed gap list.
+Such a passport remains cryptographically `verified` but reports `complete: false` and deterministic
+`missing_evidence` codes. GitHub release checks require both `verified` and `complete`; a signature
+alone is never treated as release qualification.
+
+<Note>
+  PostgreSQL stores the canonical payload byte-for-byte rather than normalizing it as JSONB. This is
+  required so offline verification remains stable after reads, backups, and restores.
+</Note>

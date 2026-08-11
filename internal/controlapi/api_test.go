@@ -14,6 +14,7 @@ import (
 	"github.com/infercrane/infercrane/internal/doctor"
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/integration"
+	"github.com/infercrane/infercrane/internal/passport"
 	"github.com/infercrane/infercrane/internal/support"
 )
 
@@ -214,6 +215,25 @@ func (f *fakeStore) BenchmarksForDeployment(context.Context, string, string, int
 }
 
 type fakeBenchmarkRunner struct{ config benchmark.Config }
+
+type fakePassportStore struct {
+	*fakeStore
+	payload   passport.Payload
+	passports []domain.InferencePassport
+}
+
+func (f *fakePassportStore) InferencePassportPayload(context.Context, string, string, string) (passport.Payload, error) {
+	return f.payload, f.err
+}
+func (f *fakePassportStore) RecordInferencePassport(_ context.Context, value domain.InferencePassport) (domain.InferencePassport, error) {
+	value.ID = "passport-1"
+	value.CreatedAt = time.Now().UTC()
+	f.passports = append(f.passports, value)
+	return value, f.err
+}
+func (f *fakePassportStore) InferencePassports(context.Context, string, string, int) ([]domain.InferencePassport, error) {
+	return f.passports, f.err
+}
 
 func (f *fakeBenchmarkRunner) Run(_ context.Context, cfg benchmark.Config) (benchmark.Result, error) {
 	f.config = cfg
@@ -451,6 +471,39 @@ func TestCandidateBenchmarkUsesExplicitHealthyRevisionEndpoint(t *testing.T) {
 	(API{Store: store, APIKey: "bootstrap", BenchmarkRunner: runner, Backends: map[string]BackendMetadata{"skypilot": {APIKey: "worker-secret", APIKeyEnv: "INFERCRANE_WORKER_API_KEY"}}, GatewayURL: "http://gateway", AIPerfBinary: "aiperf"}).Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusCreated || runner.config.Endpoint != "https://candidate.invalid" || runner.config.Model != "Qwen/Qwen3-8B" || runner.config.Tokenizer != "Qwen/Qwen3-8B" || runner.config.APIKey != "worker-secret" || runner.config.APIKeyEnv != "INFERCRANE_WORKER_API_KEY" || len(store.benchmarks) != 1 || store.benchmarks[0].RevisionID != "rev-candidate" || !strings.Contains(store.benchmarks[0].WorkloadJSON, `"direct_revision_validation":true`) {
 		t.Fatalf("response=%d %s config=%#v benchmarks=%#v", response.Code, response.Body.String(), runner.config, store.benchmarks)
+	}
+}
+
+func TestInferencePassportAPIProducesVerifiableSecretFreeEvidence(t *testing.T) {
+	_, privateKey, err := passport.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &fakePassportStore{fakeStore: &fakeStore{resolved: domain.ResolvedDeployment{Deployment: domain.Deployment{ID: "dep", Name: "qwen", ActiveRevisionID: "rev-1"}}}, payload: passport.Payload{Schema: "infercrane.inference-passport/v1", Deployment: "qwen", RevisionID: "rev-1", RevisionSpec: domain.DeploymentRevisionSpec{Model: "model", Runtime: "vllm"}, Benchmarks: []passport.Benchmark{}, Reproduce: passport.Reproduction{BenchmarkCommands: []string{}}, IssuedAt: time.Unix(1, 0).UTC()}}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments/qwen/passports", strings.NewReader(`{"revision_id":"rev-1"}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret", PassportPrivateKey: privateKey}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"verified":true`) || strings.Contains(response.Body.String(), "secret") {
+		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+	if len(store.passports) != 1 {
+		t.Fatalf("passports=%#v", store.passports)
+	}
+	row := store.passports[0]
+	if err = passport.Verify(passport.Envelope{PayloadJSON: row.PayloadJSON, Digest: row.PayloadDigest, Signature: row.Signature, PublicKey: row.PublicKey, Algorithm: row.Algorithm, KeyID: row.KeyID}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestInferencePassportAPIFailsClosedWithoutSigningKey(t *testing.T) {
+	store := &fakePassportStore{fakeStore: &fakeStore{}}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments/qwen/passports", strings.NewReader(`{}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret"}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), "passport_signing_unavailable") {
+		t.Fatalf("response=%d %s", response.Code, response.Body.String())
 	}
 }
 

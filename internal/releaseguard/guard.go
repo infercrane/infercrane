@@ -31,9 +31,18 @@ func Evaluate(input Input) Result {
 	if !input.Policy.Enabled {
 		return Result{Decision: "ACCEPT", Reasons: []Reason{{Code: "guard_disabled", Message: "Release Guard is disabled by persisted policy"}}}
 	}
-	var rejected []Reason
+	var rejected, waiting []Reason
 	if input.Candidate.ReadyReplicas < 1 {
 		rejected = append(rejected, Reason{Code: "candidate_not_ready", Metric: "ready_replicas", Message: "Candidate has no ready replica"})
+	}
+	if input.Policy.RequireCompatibilityEvidence && input.Candidate.Compatible == nil {
+		waiting = append(waiting, Reason{Code: "compatibility_unproven", Metric: "compatibility", Message: "Candidate compatibility is not proven by comparable persisted evidence"})
+	}
+	if input.Policy.RequireCompatibilityEvidence && input.Candidate.Compatible != nil && !*input.Candidate.Compatible {
+		rejected = append(rejected, Reason{Code: "compatibility_mismatch", Metric: "compatibility", Message: "Candidate benchmark identity is incompatible with the active revision"})
+	}
+	if input.Policy.RequireSyntheticEvidence && (!input.Active.SyntheticValidation || !input.Candidate.SyntheticValidation) {
+		waiting = append(waiting, Reason{Code: "synthetic_validation_unproven", Metric: "synthetic_validation", Message: "Policy requires bounded direct-revision AIPerf evidence for both revisions"})
 	}
 	if increase := input.Candidate.ErrorRate - input.Active.ErrorRate; increase > input.Policy.MaxErrorRateIncrease {
 		rejected = append(rejected, comparisonReason("error_rate_regression", "error_rate", input.Active.ErrorRate, input.Candidate.ErrorRate, input.Policy.MaxErrorRateIncrease, "Candidate error-rate increase exceeds policy"))
@@ -47,8 +56,18 @@ func Evaluate(input Input) Result {
 	if drop, ok := percentDrop(input.Active.OutputTokensPerSecond, input.Candidate.OutputTokensPerSecond); ok && drop > input.Policy.MaxOutputThroughputDropPercent {
 		rejected = append(rejected, comparisonReason("output_throughput_regression", "output_tokens_per_second", value(input.Active.OutputTokensPerSecond), value(input.Candidate.OutputTokensPerSecond), input.Policy.MaxOutputThroughputDropPercent, fmt.Sprintf("Candidate output throughput drop %.1f%% exceeds policy", drop)))
 	}
+	if input.Policy.MaxCostRegressionPercent != nil {
+		if regression, ok := percentIncrease(input.Active.SourcedHourlyCost, input.Candidate.SourcedHourlyCost); ok && regression > *input.Policy.MaxCostRegressionPercent {
+			rejected = append(rejected, comparisonReason("cost_regression", "sourced_hourly_cost", value(input.Active.SourcedHourlyCost), value(input.Candidate.SourcedHourlyCost), *input.Policy.MaxCostRegressionPercent, fmt.Sprintf("Candidate sourced cost regression %.1f%% exceeds policy", regression)))
+		} else if input.Active.SourcedHourlyCost == nil || input.Candidate.SourcedHourlyCost == nil {
+			waiting = append(waiting, Reason{Code: "cost_evidence_unavailable", Metric: "sourced_hourly_cost", Message: "Cost policy requires sourced cost evidence for both revisions"})
+		}
+	}
 	if len(rejected) > 0 {
 		return Result{Decision: "REJECT", Reasons: rejected}
+	}
+	if len(waiting) > 0 {
+		return Result{Decision: "WAIT", Reasons: waiting}
 	}
 	if input.Active.Requests < input.Policy.MinimumRequests || input.Candidate.Requests < input.Policy.MinimumRequests {
 		return Result{Decision: "WAIT", Reasons: []Reason{{Code: "insufficient_requests", Metric: "requests", Message: fmt.Sprintf("Need at least %d requests for both revisions; active=%d candidate=%d", input.Policy.MinimumRequests, input.Active.Requests, input.Candidate.Requests)}}}

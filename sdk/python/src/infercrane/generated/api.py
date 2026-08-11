@@ -71,6 +71,14 @@ class ControlAPI:
         path = f"/deployments/{quote(name, safe='')}/benchmarks"
         return cast(ObjectList, self._transport.request("GET", path))
 
+    def create_inference_passport(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = f"/deployments/{quote(name, safe='')}/passports"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
+    def list_inference_passports(self, name: str) -> ObjectList:
+        path = f"/deployments/{quote(name, safe='')}/passports"
+        return cast(ObjectList, self._transport.request("GET", path))
+
     def get_s_l_o_policy(self, name: str) -> dict[str, Any]:
         path = f"/deployments/{quote(name, safe='')}/slo-policy"
         return cast(dict[str, Any], self._transport.request("GET", path))

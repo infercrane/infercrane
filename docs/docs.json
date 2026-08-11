@@ -117,6 +117,7 @@
           "features/dashboard",
           "features/autoscaling",
           "features/release-guard",
+          "features/inference-passports",
           "features/external-capacity",
           "features/serverless",
           "features/telemetry",
@@ -186,7 +187,8 @@
               "adr/0014-generated-automation-clients",
             "adr/0015-embedded-evidence-dashboard"
             ,"adr/0016-portable-oci-runtime-workloads",
-              "adr/0017-deterministic-inference-decisions"
+              "adr/0017-deterministic-inference-decisions",
+              "adr/0018-signed-release-evidence"
             ]
           },
           "release-acceptance"

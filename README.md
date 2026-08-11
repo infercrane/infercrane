@@ -11,6 +11,7 @@ infercrane request qwen3-8b --message "Hello" --stream
 
 - No Kubernetes required
 - Deterministic Release Guard
+- Signed, independently verifiable Inference Passports
 - Reproducible benchmarks
 - Evidence-based SLO recommendations
 - Explainable durable operations
@@ -50,6 +51,9 @@ real GPU behavior remains deferred.
 The v0.7 candidate adds deterministic SLO recommendations, expiring capacity evidence, and
 privacy/budget-governed health or queue overflow. Recommendations are advisory and never fabricate
 pricing, availability, or measurements.
+The v0.8 candidate adds explicit bounded AIPerf validation, durable post-promotion automatic
+rollback, and Ed25519-signed Inference Passports. It never silently mirrors user traffic or claims
+that signed evidence is a compliance certificate.
 Registration is not real-provider proof: paid acceptance and soak testing remain explicitly
 incomplete until their evidence gates run.
 

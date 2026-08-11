@@ -11,6 +11,9 @@ Required configuration:
 - `INFERCRANE_DATABASE_URL`: PostgreSQL URL with TLS enabled outside a trusted private network.
 - `INFERCRANE_API_KEY`: at least 32 characters, supplied by the workload secret manager; no production default exists.
 - `INFERCRANE_URL`: absolute HTTP(S) control-plane base URL used by lifecycle CLI commands.
+- `INFERCRANE_PASSPORT_SIGNING_KEY_FILE`: optional mounted Ed25519 private-key file for issuing
+  Inference Passports. It must be readable only by its owner (`0600`); the private key is never
+  persisted in PostgreSQL. Back it up and rotate it through the workload secret manager.
 - `RUNPOD_API_KEY`: optional RunPod secret. The container entrypoint writes the RunPod CLI's
   required user-scoped configuration with mode `0600` before starting InferCrane; it never logs the
   value.

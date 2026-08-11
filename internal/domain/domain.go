@@ -179,13 +179,20 @@ type InferenceRecord struct {
 }
 
 type ReleaseGuardPolicy struct {
-	DeploymentID                   string  `json:"deployment_id"`
-	Enabled                        bool    `json:"enabled"`
-	MinimumRequests                int     `json:"minimum_requests"`
-	MaxTTFTRegressionPercent       float64 `json:"max_ttft_regression_percent"`
-	MaxLatencyRegressionPercent    float64 `json:"max_latency_regression_percent"`
-	MaxErrorRateIncrease           float64 `json:"max_error_rate_increase"`
-	MaxOutputThroughputDropPercent float64 `json:"max_output_throughput_drop_percent"`
+	DeploymentID                   string   `json:"deployment_id"`
+	Enabled                        bool     `json:"enabled"`
+	MinimumRequests                int      `json:"minimum_requests"`
+	MaxTTFTRegressionPercent       float64  `json:"max_ttft_regression_percent"`
+	MaxLatencyRegressionPercent    float64  `json:"max_latency_regression_percent"`
+	MaxErrorRateIncrease           float64  `json:"max_error_rate_increase"`
+	MaxOutputThroughputDropPercent float64  `json:"max_output_throughput_drop_percent"`
+	RequireCompatibilityEvidence   bool     `json:"require_compatibility_evidence"`
+	RequireSyntheticEvidence       bool     `json:"require_synthetic_evidence"`
+	MaxCostRegressionPercent       *float64 `json:"max_cost_regression_percent,omitempty"`
+	AutoRollbackEnabled            bool     `json:"auto_rollback_enabled"`
+	AutoRollbackWindowSeconds      int      `json:"auto_rollback_window_seconds"`
+	ValidationMaxRequests          int      `json:"validation_max_requests"`
+	ValidationMaxConcurrency       int      `json:"validation_max_concurrency"`
 }
 
 type RevisionMetrics struct {
@@ -197,6 +204,10 @@ type RevisionMetrics struct {
 	P95TTFTMS             *float64 `json:"p95_ttft_ms"`
 	P95LatencyMS          *float64 `json:"p95_latency_ms"`
 	OutputTokensPerSecond *float64 `json:"output_tokens_per_second"`
+	SourcedHourlyCost     *float64 `json:"sourced_hourly_cost,omitempty"`
+	Compatible            *bool    `json:"compatible,omitempty"`
+	CompatibilityEvidence string   `json:"compatibility_evidence,omitempty"`
+	SyntheticValidation   bool     `json:"synthetic_validation"`
 }
 
 type ReleaseGuardEvaluation struct {
@@ -209,6 +220,22 @@ type ReleaseGuardEvaluation struct {
 	MetricsJSON         string    `json:"-"`
 	PolicyJSON          string    `json:"-"`
 	CreatedAt           time.Time `json:"created_at"`
+}
+
+// InferencePassport is an immutable, signed statement assembled exclusively
+// from persisted release evidence. The payload never contains credentials or
+// prompt/output content.
+type InferencePassport struct {
+	ID, TenantID, DeploymentID, RevisionID string
+	PayloadJSON, PayloadDigest             string
+	Signature, PublicKey, Algorithm, KeyID string
+	CreatedAt                              time.Time
+}
+
+type ReleaseGuardMonitor struct {
+	ID, TenantID, DeploymentID, PromotedRevisionID, RollbackRevisionID string
+	Status, EvaluationID, Reason, PolicyJSON                           string
+	Deadline, CreatedAt, UpdatedAt                                     time.Time
 }
 
 type RouterGeneration struct {

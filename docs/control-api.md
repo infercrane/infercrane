@@ -34,6 +34,8 @@ Errors are stable JSON objects:
 | `GET /deployments/{name}/events` | viewer | List durable deployment events. |
 | `POST /deployments/{name}/benchmarks` | operator | Run and persist AIPerf evidence for `active`, `candidate`, or an explicit revision. |
 | `GET /deployments/{name}/benchmarks` | viewer | List persisted benchmark history and reproduction metadata. |
+| `POST /deployments/{name}/passports` | operator | Assemble, sign, verify, and persist a revision's canonical Inference Passport. |
+| `GET /deployments/{name}/passports` | viewer | List signed release evidence and verification state. |
 | `GET /deployments/{name}/revisions` | viewer | List immutable revision history. |
 | `POST /deployments/{name}/rollouts` | operator | Create an immutable candidate revision. |
 | `POST /deployments/{name}/rollouts/{revision}/provision` | operator | Queue candidate capacity provisioning. |

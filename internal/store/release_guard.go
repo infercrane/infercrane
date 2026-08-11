@@ -17,7 +17,7 @@ func (s *Store) ReleaseGuardPolicy(ctx context.Context, tenant, deploymentName s
 		tenant = "global"
 	}
 	var policy domain.ReleaseGuardPolicy
-	err := s.QueryRowContext(ctx, `SELECT p.deployment_id,p.enabled,p.minimum_requests,p.max_ttft_regression_percent,p.max_latency_regression_percent,p.max_error_rate_increase,p.max_output_throughput_drop_percent FROM release_guard_policies p JOIN deployments d ON d.id=p.deployment_id WHERE d.tenant_id=? AND d.name=? AND d.desired_state!='deleted'`, tenant, deploymentName).Scan(&policy.DeploymentID, &policy.Enabled, &policy.MinimumRequests, &policy.MaxTTFTRegressionPercent, &policy.MaxLatencyRegressionPercent, &policy.MaxErrorRateIncrease, &policy.MaxOutputThroughputDropPercent)
+	err := s.QueryRowContext(ctx, `SELECT p.deployment_id,p.enabled,p.minimum_requests,p.max_ttft_regression_percent,p.max_latency_regression_percent,p.max_error_rate_increase,p.max_output_throughput_drop_percent,p.require_compatibility_evidence,p.require_synthetic_evidence,p.max_cost_regression_percent,p.auto_rollback_enabled,p.auto_rollback_window_seconds,p.validation_max_requests,p.validation_max_concurrency FROM release_guard_policies p JOIN deployments d ON d.id=p.deployment_id WHERE d.tenant_id=? AND d.name=? AND d.desired_state!='deleted'`, tenant, deploymentName).Scan(&policy.DeploymentID, &policy.Enabled, &policy.MinimumRequests, &policy.MaxTTFTRegressionPercent, &policy.MaxLatencyRegressionPercent, &policy.MaxErrorRateIncrease, &policy.MaxOutputThroughputDropPercent, &policy.RequireCompatibilityEvidence, &policy.RequireSyntheticEvidence, &policy.MaxCostRegressionPercent, &policy.AutoRollbackEnabled, &policy.AutoRollbackWindowSeconds, &policy.ValidationMaxRequests, &policy.ValidationMaxConcurrency)
 	if errors.Is(err, sql.ErrNoRows) {
 		return policy, ErrNotFound
 	}
@@ -25,14 +25,23 @@ func (s *Store) ReleaseGuardPolicy(ctx context.Context, tenant, deploymentName s
 }
 
 func (s *Store) SetReleaseGuardPolicy(ctx context.Context, tenant, deploymentName string, policy domain.ReleaseGuardPolicy) (domain.ReleaseGuardPolicy, error) {
-	if policy.MinimumRequests < 1 || policy.MaxTTFTRegressionPercent < 0 || policy.MaxLatencyRegressionPercent < 0 || policy.MaxErrorRateIncrease < 0 || policy.MaxErrorRateIncrease > 1 || policy.MaxOutputThroughputDropPercent < 0 {
+	if policy.AutoRollbackWindowSeconds == 0 {
+		policy.AutoRollbackWindowSeconds = 300
+	}
+	if policy.ValidationMaxRequests == 0 {
+		policy.ValidationMaxRequests = 100
+	}
+	if policy.ValidationMaxConcurrency == 0 {
+		policy.ValidationMaxConcurrency = 4
+	}
+	if policy.MinimumRequests < 1 || policy.MaxTTFTRegressionPercent < 0 || policy.MaxLatencyRegressionPercent < 0 || policy.MaxErrorRateIncrease < 0 || policy.MaxErrorRateIncrease > 1 || policy.MaxOutputThroughputDropPercent < 0 || policy.AutoRollbackWindowSeconds < 30 || policy.AutoRollbackWindowSeconds > 3600 || policy.ValidationMaxRequests < 1 || policy.ValidationMaxRequests > 10000 || policy.ValidationMaxConcurrency < 1 || policy.ValidationMaxConcurrency > 128 || (policy.MaxCostRegressionPercent != nil && *policy.MaxCostRegressionPercent < 0) {
 		return domain.ReleaseGuardPolicy{}, errors.New("invalid Release Guard policy")
 	}
 	current, err := s.ReleaseGuardPolicy(ctx, tenant, deploymentName)
 	if err != nil {
 		return domain.ReleaseGuardPolicy{}, err
 	}
-	_, err = s.ExecContext(ctx, `UPDATE release_guard_policies SET enabled=?,minimum_requests=?,max_ttft_regression_percent=?,max_latency_regression_percent=?,max_error_rate_increase=?,max_output_throughput_drop_percent=?,updated_at=? WHERE deployment_id=?`, policy.Enabled, policy.MinimumRequests, policy.MaxTTFTRegressionPercent, policy.MaxLatencyRegressionPercent, policy.MaxErrorRateIncrease, policy.MaxOutputThroughputDropPercent, now(), current.DeploymentID)
+	_, err = s.ExecContext(ctx, `UPDATE release_guard_policies SET enabled=?,minimum_requests=?,max_ttft_regression_percent=?,max_latency_regression_percent=?,max_error_rate_increase=?,max_output_throughput_drop_percent=?,require_compatibility_evidence=?,require_synthetic_evidence=?,max_cost_regression_percent=?,auto_rollback_enabled=?,auto_rollback_window_seconds=?,validation_max_requests=?,validation_max_concurrency=?,updated_at=? WHERE deployment_id=?`, policy.Enabled, policy.MinimumRequests, policy.MaxTTFTRegressionPercent, policy.MaxLatencyRegressionPercent, policy.MaxErrorRateIncrease, policy.MaxOutputThroughputDropPercent, policy.RequireCompatibilityEvidence, policy.RequireSyntheticEvidence, policy.MaxCostRegressionPercent, policy.AutoRollbackEnabled, policy.AutoRollbackWindowSeconds, policy.ValidationMaxRequests, policy.ValidationMaxConcurrency, now(), current.DeploymentID)
 	if err != nil {
 		return domain.ReleaseGuardPolicy{}, err
 	}
@@ -65,13 +74,50 @@ func (s *Store) RevisionMetrics(ctx context.Context, revisionID string, window t
 	return metrics, nil
 }
 
+func (s *Store) RevisionMetricsSince(ctx context.Context, revisionID string, since time.Time) (domain.RevisionMetrics, error) {
+	if since.IsZero() || since.After(time.Now().UTC()) {
+		return domain.RevisionMetrics{}, errors.New("metrics start must be a past timestamp")
+	}
+	duration := time.Since(since)
+	if duration < time.Second {
+		duration = time.Second
+	}
+	var metrics domain.RevisionMetrics
+	var ttft, latency, output sql.NullFloat64
+	err := s.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(AVG(CASE WHEN error_type IS NOT NULL OR status_code IS NULL OR status_code>=400 THEN 1.0 ELSE 0.0 END),0),percentile_cont(0.95) WITHIN GROUP (ORDER BY ttft_ms) FILTER (WHERE ttft_ms IS NOT NULL),percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms) FILTER (WHERE latency_ms IS NOT NULL),CASE WHEN COUNT(output_tokens)>0 THEN SUM(output_tokens)::double precision/? ELSE NULL END FROM request_records WHERE revision_id=? AND started_at>=?`, duration.Seconds(), revisionID, since.Format(time.RFC3339Nano)).Scan(&metrics.Requests, &metrics.ErrorRate, &ttft, &latency, &output)
+	if err != nil {
+		return metrics, err
+	}
+	if ttft.Valid {
+		metrics.P95TTFTMS = &ttft.Float64
+	}
+	if latency.Valid {
+		metrics.P95LatencyMS = &latency.Float64
+	}
+	if output.Valid {
+		metrics.OutputTokensPerSecond = &output.Float64
+	}
+	if err = s.QueryRowContext(ctx, `SELECT COUNT(*) FROM replicas WHERE revision_id=? AND lifecycle_state IN ('ready','active') AND health='healthy'`, revisionID).Scan(&metrics.ReadyReplicas); err != nil {
+		return domain.RevisionMetrics{}, err
+	}
+	metrics.EvidenceSource = "post_promotion_request_telemetry"
+	return metrics, nil
+}
+
 type guardBenchmarkWorkload struct {
-	EndpointType     string `json:"endpoint_type"`
-	Streaming        bool   `json:"streaming"`
-	RequestCount     int    `json:"request_count"`
-	Concurrency      int    `json:"concurrency"`
-	RandomSeed       int64  `json:"random_seed"`
-	ServerTokenCount bool   `json:"server_token_count"`
+	EndpointType             string `json:"endpoint_type"`
+	Streaming                bool   `json:"streaming"`
+	RequestCount             int    `json:"request_count"`
+	Concurrency              int    `json:"concurrency"`
+	RandomSeed               int64  `json:"random_seed"`
+	ServerTokenCount         bool   `json:"server_token_count"`
+	DirectRevisionValidation bool   `json:"direct_revision_validation"`
+}
+
+type guardCostMetadata struct {
+	Available bool     `json:"available"`
+	Hourly    *float64 `json:"hourly"`
+	Source    string   `json:"source"`
 }
 
 func benchmarkGuardMetrics(activeReady, candidateReady int, rows []domain.BenchmarkResult, activeRevisionID, candidateRevisionID string) (domain.RevisionMetrics, domain.RevisionMetrics, bool) {
@@ -89,7 +135,12 @@ func benchmarkGuardMetrics(activeReady, candidateReady int, rows []domain.Benchm
 		return domain.RevisionMetrics{}, domain.RevisionMetrics{}, false
 	}
 	var activeWorkload, candidateWorkload guardBenchmarkWorkload
-	if json.Unmarshal([]byte(active.WorkloadJSON), &activeWorkload) != nil || json.Unmarshal([]byte(candidate.WorkloadJSON), &candidateWorkload) != nil || activeWorkload != candidateWorkload {
+	if json.Unmarshal([]byte(active.WorkloadJSON), &activeWorkload) != nil || json.Unmarshal([]byte(candidate.WorkloadJSON), &candidateWorkload) != nil {
+		return domain.RevisionMetrics{}, domain.RevisionMetrics{}, false
+	}
+	directValidation := candidateWorkload.DirectRevisionValidation
+	activeWorkload.DirectRevisionValidation, candidateWorkload.DirectRevisionValidation = false, false
+	if activeWorkload != candidateWorkload {
 		return domain.RevisionMetrics{}, domain.RevisionMetrics{}, false
 	}
 	convert := func(row *domain.BenchmarkResult, ready int) domain.RevisionMetrics {
@@ -97,9 +148,20 @@ func benchmarkGuardMetrics(activeReady, candidateReady int, rows []domain.Benchm
 		if row.RequestCount > 0 {
 			errorRate = float64(row.Failed) / float64(row.RequestCount)
 		}
-		return domain.RevisionMetrics{EvidenceSource: "aiperf_benchmark", EvidenceID: row.ID, Requests: row.RequestCount, ReadyReplicas: ready, ErrorRate: errorRate, P95TTFTMS: row.TTFTP95MS, P95LatencyMS: row.LatencyP95MS, OutputTokensPerSecond: row.OutputTokenThroughput}
+		metrics := domain.RevisionMetrics{EvidenceSource: "aiperf_benchmark", EvidenceID: row.ID, Requests: row.RequestCount, ReadyReplicas: ready, ErrorRate: errorRate, P95TTFTMS: row.TTFTP95MS, P95LatencyMS: row.LatencyP95MS, OutputTokensPerSecond: row.OutputTokenThroughput}
+		metrics.SyntheticValidation = directValidation
+		var cost guardCostMetadata
+		if json.Unmarshal([]byte(row.CostMetadataJSON), &cost) == nil && cost.Available && cost.Hourly != nil && cost.Source != "" {
+			metrics.SourcedHourlyCost = cost.Hourly
+		}
+		return metrics
 	}
-	return convert(active, activeReady), convert(candidate, candidateReady), true
+	activeMetrics, candidateMetrics := convert(active, activeReady), convert(candidate, candidateReady)
+	compatible := active.ModelIdentity != "" && candidate.ModelIdentity != "" && active.Runtime != "" && active.Runtime == candidate.Runtime && active.RuntimeVersion != "" && active.RuntimeVersion == candidate.RuntimeVersion && active.ComputeMode == candidate.ComputeMode
+	activeMetrics.Compatible, candidateMetrics.Compatible = &compatible, &compatible
+	activeMetrics.CompatibilityEvidence = "revision-scoped immutable model identities plus matching runtime, runtime version and compute mode"
+	candidateMetrics.CompatibilityEvidence = activeMetrics.CompatibilityEvidence
+	return activeMetrics, candidateMetrics, true
 }
 
 func (s *Store) EvaluateReleaseGuard(ctx context.Context, tenant, deploymentName string, window time.Duration) (domain.ReleaseGuardEvaluation, error) {
@@ -130,6 +192,11 @@ func (s *Store) EvaluateReleaseGuard(ctx context.Context, tenant, deploymentName
 		if benchmarkActive, benchmarkCandidate, ok := benchmarkGuardMetrics(active.ReadyReplicas, candidate.ReadyReplicas, benchmarks, resolved.Deployment.ActiveRevisionID, resolved.Deployment.CandidateRevisionID); ok {
 			active, candidate = benchmarkActive, benchmarkCandidate
 		}
+	}
+	// Request telemetry alone cannot prove immutable model/runtime compatibility.
+	// A comparable AIPerf pair provides the persisted identity and workload proof.
+	if policy.RequireCompatibilityEvidence && candidate.Compatible == nil {
+		active.CompatibilityEvidence, candidate.CompatibilityEvidence = "comparable benchmark identity unavailable", "comparable benchmark identity unavailable"
 	}
 	result := releaseguard.Evaluate(releaseguard.Input{Policy: policy, Active: active, Candidate: candidate})
 	reasons, _ := json.Marshal(result.Reasons)

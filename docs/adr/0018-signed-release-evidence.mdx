@@ -1,0 +1,46 @@
+---
+title: "ADR 0018: Signed release evidence"
+description: Use explicit AIPerf validation, durable rollback monitors, and canonical Ed25519 Inference Passports.
+---
+
+# ADR 0018: Signed release evidence
+
+**Status:** Accepted
+
+## Context
+
+Promotion evidence must survive terminal disconnects and process restarts, remain independently
+verifiable, and avoid silently duplicating customer requests. Automatic rollback is unsafe if old
+capacity is deleted before the observation decision is durable.
+
+## Decision
+
+- Release Guard V2 compares only persisted, compatible evidence and fails closed when a configured
+  cost signal lacks a trustworthy source.
+- Candidate validation uses explicit, bounded AIPerf runs against active and candidate revisions.
+  It requires an operator cost acknowledgement and never mirrors production traffic.
+- Automatic rollback is a PostgreSQL-backed monitor with a frozen policy snapshot and deadline. Previous capacity remains withdrawn but alive
+  until the monitor accepts the promoted revision or atomically restores the retained target set.
+- Inference Passports use canonical JSON, SHA-256, and Ed25519. The private key is loaded from a
+  permission-restricted file and never persisted. Canonical payload bytes are stored as bounded
+  text so PostgreSQL cannot rewrite signed JSON.
+
+## Consequences
+
+Release checks can link an exact verified digest to an exact active revision. Automatic rollback
+temporarily costs more because previous capacity remains allocated during observation; the policy
+makes the duration explicit. Missing evidence produces `WAIT` or rollback at the persisted deadline.
+
+InferCrane does not claim X.509 identity, key custody, regulatory compliance, or transparency-log
+inclusion. Organizations remain responsible for backing up and rotating the signing key.
+
+## Alternatives
+
+Silent shadow traffic was rejected because it changes privacy and cost without an explicit request.
+Signing normalized JSONB was rejected because database serialization changes signed bytes. A
+CLI-only rollback timer was rejected because it dies with the terminal.
+
+## Verification
+
+Unit and PostgreSQL tests cover deterministic signatures, tamper failure, tenant isolation,
+byte-preserving persistence, compatibility/cost rejection, and restart-safe rollback orchestration.

@@ -3,6 +3,7 @@ package controlapi
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -19,6 +20,7 @@ import (
 	"github.com/infercrane/infercrane/internal/doctor"
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/integration"
+	"github.com/infercrane/infercrane/internal/passport"
 	"github.com/infercrane/infercrane/internal/support"
 	"github.com/infercrane/infercrane/internal/workflows"
 )
@@ -72,6 +74,11 @@ type decisionStore interface {
 	InferenceRecommendations(context.Context, string, string, int) ([]domain.InferenceRecommendation, error)
 	LatestCapacityEvidence(context.Context, string, string, string, string, string, string) (domain.CapacityEvidence, error)
 }
+type passportStore interface {
+	InferencePassportPayload(context.Context, string, string, string) (passport.Payload, error)
+	RecordInferencePassport(context.Context, domain.InferencePassport) (domain.InferencePassport, error)
+	InferencePassports(context.Context, string, string, int) ([]domain.InferencePassport, error)
+}
 type API struct {
 	Store         Store
 	APIKey        string
@@ -85,6 +92,7 @@ type API struct {
 	Backends                 map[string]BackendMetadata
 	Integrations             integration.Snapshot
 	GatewayURL, AIPerfBinary string
+	PassportPrivateKey       ed25519.PrivateKey
 }
 
 type BackendMetadata struct {
@@ -96,6 +104,11 @@ type identityKey struct{}
 
 func (a API) decisions() (decisionStore, bool) {
 	store, ok := a.Store.(decisionStore)
+	return store, ok
+}
+
+func (a API) passportsStore() (passportStore, bool) {
+	store, ok := a.Store.(passportStore)
 	return store, ok
 }
 
@@ -115,6 +128,8 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/deployments/{name}/events", a.auth(authz.Read, a.deploymentEvents))
 	mux.HandleFunc("POST /api/v1/deployments/{name}/benchmarks", a.auth(authz.Deploy, a.runBenchmark))
 	mux.HandleFunc("GET /api/v1/deployments/{name}/benchmarks", a.auth(authz.Read, a.benchmarks))
+	mux.HandleFunc("POST /api/v1/deployments/{name}/passports", a.auth(authz.Deploy, a.createPassport))
+	mux.HandleFunc("GET /api/v1/deployments/{name}/passports", a.auth(authz.Read, a.passports))
 	mux.HandleFunc("GET /api/v1/deployments/{name}/slo-policy", a.auth(authz.Read, a.sloPolicy))
 	mux.HandleFunc("PUT /api/v1/deployments/{name}/slo-policy", a.auth(authz.Deploy, a.setSLOPolicy))
 	mux.HandleFunc("DELETE /api/v1/deployments/{name}/slo-policy", a.auth(authz.Deploy, a.deleteSLOPolicy))
@@ -398,6 +413,79 @@ func (a API) benchmarks(w http.ResponseWriter, r *http.Request) {
 
 func benchmarkResponse(row domain.BenchmarkResult) map[string]any {
 	return map[string]any{"id": row.ID, "deployment": row.DeploymentName, "revision_id": row.RevisionID, "model_artifact_id": row.ModelArtifactID, "model_identity": row.ModelIdentity, "runtime": row.Runtime, "runtime_version": row.RuntimeVersion, "runtime_configuration": json.RawMessage(row.RuntimeConfigJSON), "provider": row.Provider, "region": row.Region, "gpu": row.GPU, "gpu_count": row.GPUCount, "compute_mode": row.ComputeMode, "tool": row.Tool, "tool_version": row.ToolVersion, "workload": json.RawMessage(row.WorkloadJSON), "reproduction_command": row.ReproductionCommand, "request_count": row.RequestCount, "succeeded": row.Succeeded, "failed": row.Failed, "duration_seconds": row.DurationSeconds, "request_throughput": row.RequestThroughput, "output_token_throughput": row.OutputTokenThroughput, "ttft_p50_ms": row.TTFTP50MS, "ttft_p95_ms": row.TTFTP95MS, "tpot_p50_ms": row.TPOTP50MS, "tpot_p95_ms": row.TPOTP95MS, "latency_p50_ms": row.LatencyP50MS, "latency_p95_ms": row.LatencyP95MS, "goodput": row.Goodput, "gpu_utilization": row.GPUUtilization, "cost_metadata": json.RawMessage(row.CostMetadataJSON), "created_at": row.CreatedAt}
+}
+
+func (a API) createPassport(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.passportsStore()
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "passport_unavailable", "passport persistence is unavailable")
+		return
+	}
+	if len(a.PassportPrivateKey) != ed25519.PrivateKeySize {
+		writeError(w, http.StatusServiceUnavailable, "passport_signing_unavailable", "configure INFERCRANE_PASSPORT_SIGNING_KEY_FILE before issuing passports")
+		return
+	}
+	var body struct {
+		RevisionID string `json:"revision_id"`
+	}
+	if !decodeMutationBody(w, r, &body) {
+		return
+	}
+	principal := r.Context().Value(identityKey{}).(domain.Principal)
+	payload, err := store.InferencePassportPayload(r.Context(), principal.TenantID, r.PathValue("name"), body.RevisionID)
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, 404, "not_found", "deployment or revision was not found")
+		return
+	}
+	if err != nil {
+		writeError(w, 500, "internal", "passport evidence could not be assembled")
+		return
+	}
+	payload.Qualification = passport.SelectQualification(a.Integrations, payload.RevisionSpec)
+	passport.FinalizeEvidence(&payload)
+	envelope, err := passport.Sign(payload, a.PassportPrivateKey)
+	if err != nil {
+		writeError(w, 500, "passport_signing_failed", err.Error())
+		return
+	}
+	resolved, err := a.Store.ResolveForTenant(r.Context(), principal.TenantID, r.PathValue("name"))
+	if err != nil {
+		writeError(w, 500, "internal", "deployment identity lookup failed")
+		return
+	}
+	value, err := store.RecordInferencePassport(r.Context(), domain.InferencePassport{TenantID: principal.TenantID, DeploymentID: resolved.Deployment.ID, RevisionID: payload.RevisionID, PayloadJSON: envelope.PayloadJSON, PayloadDigest: envelope.Digest, Signature: envelope.Signature, PublicKey: envelope.PublicKey, Algorithm: envelope.Algorithm, KeyID: envelope.KeyID})
+	if err != nil {
+		writeError(w, 500, "passport_persist_failed", "signed passport could not be persisted")
+		return
+	}
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: principal.TenantID, Actor: principal.Name, Action: "passport.issue", ResourceType: "deployment", ResourceName: r.PathValue("name"), Outcome: "succeeded", Payload: `{"digest":"` + value.PayloadDigest + `","key_id":"` + value.KeyID + `"}`})
+	writeJSON(w, http.StatusCreated, map[string]any{"passport": passportResponse(value), "verified": passport.Verify(envelope) == nil})
+}
+
+func (a API) passports(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.passportsStore()
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "passport_unavailable", "passport persistence is unavailable")
+		return
+	}
+	principal := r.Context().Value(identityKey{}).(domain.Principal)
+	rows, err := store.InferencePassports(r.Context(), principal.TenantID, r.PathValue("name"), 100)
+	if err != nil {
+		writeError(w, 500, "internal", "passport history lookup failed")
+		return
+	}
+	data := make([]any, 0, len(rows))
+	for _, row := range rows {
+		data = append(data, passportResponse(row))
+	}
+	writeJSON(w, 200, map[string]any{"data": data})
+}
+
+func passportResponse(row domain.InferencePassport) map[string]any {
+	envelope := passport.Envelope{PayloadJSON: row.PayloadJSON, Digest: row.PayloadDigest, Signature: row.Signature, PublicKey: row.PublicKey, Algorithm: row.Algorithm, KeyID: row.KeyID}
+	var payload passport.Payload
+	_ = json.Unmarshal([]byte(row.PayloadJSON), &payload)
+	return map[string]any{"id": row.ID, "revision_id": row.RevisionID, "payload": json.RawMessage(row.PayloadJSON), "digest": row.PayloadDigest, "signature": row.Signature, "public_key": row.PublicKey, "algorithm": row.Algorithm, "key_id": row.KeyID, "verified": passport.Verify(envelope) == nil, "complete": len(payload.MissingEvidence) == 0, "missing_evidence": payload.MissingEvidence, "created_at": row.CreatedAt}
 }
 
 func (a API) sloPolicy(w http.ResponseWriter, r *http.Request) {

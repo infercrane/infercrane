@@ -71,6 +71,7 @@ func newRootCommand(ctx context.Context) *cobra.Command {
 		{use: "inspect DEPLOYMENT [flags]", short: "Show raw deployment and infrastructure details", group: "understand"},
 		{use: "explain [TOPIC] DEPLOYMENT [flags]", short: "Explain persisted operational decisions", group: "understand"},
 		{use: "benchmark DEPLOYMENT [flags]", short: "Run and persist a reproducible benchmark", group: "understand"},
+		{use: "passport ACTION [arguments]", short: "Issue, inspect, or verify signed release evidence", group: "understand"},
 		{use: "recommend DEPLOYMENT [flags]", short: "Recommend a qualified configuration from persisted evidence", group: "understand"},
 		{use: "slo ACTION DEPLOYMENT [flags]", short: "Inspect or set deterministic inference SLO policy", group: "operate"},
 		{use: "operation ID | operation watch ID | operation cancel ID", short: "Inspect, resume, or cancel a durable operation", group: "understand"},
@@ -117,7 +118,7 @@ func addHelpFlags(command *cobra.Command, name string) {
 	boolFlag := func(flag, help string) { command.Flags().Bool(flag, false, help) }
 	intFlag := func(flag string, value int, help string) { command.Flags().Int(flag, value, help) }
 	switch name {
-	case "init", "doctor", "plan", "deploy", "apply", "request", "deployments", "status", "logs", "events", "inspect", "explain", "benchmark", "recommend", "slo", "delete", "orphans", "operation", "integrations", "dashboard":
+	case "init", "doctor", "plan", "deploy", "apply", "request", "deployments", "status", "logs", "events", "inspect", "explain", "benchmark", "passport", "recommend", "slo", "delete", "orphans", "operation", "integrations", "dashboard":
 		stringFlag("output", "human", "output format: human or json")
 	}
 	switch name {
@@ -166,6 +167,9 @@ func addHelpFlags(command *cobra.Command, name string) {
 		intFlag("concurrency", 10, "concurrent requests")
 		intFlag("random-seed", 17, "reproduction seed")
 		stringFlag("revision", "active", "active, candidate, or revision ID")
+	case "passport":
+		stringFlag("revision", "", "revision ID; defaults to active")
+		stringFlag("file", "", "write the issued passport JSON to a file")
 	case "recommend":
 		boolFlag("history", "list persisted recommendation history without evaluating")
 	case "slo":
@@ -191,6 +195,10 @@ func addHelpFlags(command *cobra.Command, name string) {
 		boolFlag("enable", "enable policy")
 	case "operation":
 		stringFlag("wait-timeout", "", "stop watching locally without cancelling the operation")
+	case "rollout":
+		intFlag("requests", 20, "bounded validation requests per revision")
+		intFlag("concurrency", 1, "bounded validation concurrency")
+		boolFlag("acknowledge-validation-cost", "confirm explicit validation traffic and provider cost")
 	}
 }
 
@@ -205,19 +213,21 @@ func completionFor(command string) func(*cobra.Command, []string, string) ([]str
 		"events":    {"--output"},
 		"delete":    {"--plan", "--yes", "--wait", "--idempotency-key", "--output"},
 		"benchmark": {"--requests", "--concurrency", "--random-seed", "--revision", "--output"},
+		"passport":  {"--revision", "--file", "--output"},
 		"recommend": {"--history", "--output"},
 		"slo":       {"--ttft-p95", "--latency-p95", "--error-rate", "--output-tokens-second", "--hourly-cost", "--output"},
 		"external":  {"--target", "--adapter", "--secret-reference", "--request-limit", "--cost-limit-usd", "--max-request-cost-usd", "--mode", "--queue-threshold", "--breach-intervals", "--recovery-intervals", "--cooldown-seconds", "--signal-max-age-seconds", "--acknowledge-external-data", "--enable", "--output"},
 		"doctor":    {"--cloud", "--serverless", "--output"},
 		"operation": {"--wait-timeout", "--output"},
 		"dashboard": {"--open", "--output"},
+		"rollout":   {"--requests", "--concurrency", "--acknowledge-validation-cost", "--wait", "--wait-timeout", "--output"},
 	}
 	return func(cmd *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		if strings.HasPrefix(toComplete, "-") {
 			return flags[command], cobra.ShellCompDirectiveNoFileComp
 		}
 		switch command {
-		case "request", "status", "logs", "events", "inspect", "explain", "benchmark", "recommend", "slo", "delete", "route", "rollout":
+		case "request", "status", "logs", "events", "inspect", "explain", "benchmark", "passport", "recommend", "slo", "delete", "route", "rollout":
 			cfg, err := config.LoadClient()
 			if err != nil {
 				return nil, cobra.ShellCompDirectiveNoFileComp

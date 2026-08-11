@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -39,6 +40,7 @@ import (
 	"github.com/infercrane/infercrane/internal/gateway"
 	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/operations"
+	"github.com/infercrane/infercrane/internal/passport"
 	"github.com/infercrane/infercrane/internal/planning"
 	"github.com/infercrane/infercrane/internal/provision"
 	"github.com/infercrane/infercrane/internal/reconcile"
@@ -53,7 +55,29 @@ import (
 	"github.com/infercrane/infercrane/internal/workflows"
 )
 
-var version = "0.7.0-rc.1"
+var version = "0.8.0-rc.1"
+
+func loadPassportSigningKey(path string) (ed25519.PrivateKey, error) {
+	if path == "" {
+		return nil, nil
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("inspect passport signing key: %w", err)
+	}
+	if info.Mode().Perm()&0o077 != 0 {
+		return nil, errors.New("passport signing key file must not be accessible by group or others")
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read passport signing key: %w", err)
+	}
+	key, err := passport.DecodePrivateKey(strings.TrimSpace(string(body)))
+	if err != nil {
+		return nil, err
+	}
+	return key, nil
+}
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -122,8 +146,11 @@ func runLegacy(ctx context.Context, args []string) error {
 	case "context":
 		return contextCommand(args[1:])
 	}
+	if args[0] == "passport" && len(args) > 1 && (args[1] == "keygen" || args[1] == "verify") {
+		return passportCommand(ctx, config.Config{}, args[1:])
+	}
 	switch args[0] {
-	case "target", "deploy", "apply", "plan", "doctor", "ui", "dashboard", "deployments", "route", "status", "events", "logs", "request", "explain", "rollout", "delete", "inspect", "operation", "orphans", "integrations", "context", "auth", "tenant", "principal", "secret", "external", "benchmark", "recommend", "slo", "serve":
+	case "target", "deploy", "apply", "plan", "doctor", "ui", "dashboard", "deployments", "route", "status", "events", "logs", "request", "explain", "rollout", "delete", "inspect", "operation", "orphans", "integrations", "context", "auth", "tenant", "principal", "secret", "external", "benchmark", "passport", "recommend", "slo", "serve":
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -196,6 +223,8 @@ func runLegacy(ctx context.Context, args []string) error {
 		return externalAPICommand(ctx, cfg, args[1:])
 	case "benchmark":
 		return benchmarkCommand(ctx, cfg, args[1:])
+	case "passport":
+		return passportCommand(ctx, cfg, args[1:])
 	case "recommend":
 		return recommendCommand(ctx, cfg, args[1:])
 	case "slo":
@@ -511,6 +540,169 @@ func benchmarkCommand(ctx context.Context, cfg config.Config, args []string) err
 	}
 	fmt.Printf("Benchmark     %s\nRevision      %s\nModel         %s\nRuntime       %s %s\nRuntime args  %s\nGPU           %s x %s\nProvider      %s\nRegion        %s\nCompute mode  %s\nWorkload      %s\nTTFT p50      %s ms\nTTFT p95      %s ms\nTPOT p95      %s ms\nOutput tok/s  %s\nGoodput       %s\nGPU util      %s\nErrors        %s\nCost          %s\n\nReproduce:\n  %s\n", benchmarkValue(response.Benchmark["id"]), benchmarkValue(response.Benchmark["revision_id"]), benchmarkValue(response.Benchmark["model_identity"]), benchmarkValue(response.Benchmark["runtime"]), benchmarkValue(response.Benchmark["runtime_version"]), benchmarkValue(response.Benchmark["runtime_configuration"]), benchmarkValue(response.Benchmark["gpu"]), benchmarkValue(response.Benchmark["gpu_count"]), benchmarkValue(response.Benchmark["provider"]), benchmarkValue(response.Benchmark["region"]), benchmarkValue(response.Benchmark["compute_mode"]), benchmarkValue(response.Benchmark["workload"]), benchmarkValue(response.Benchmark["ttft_p50_ms"]), benchmarkValue(response.Benchmark["ttft_p95_ms"]), benchmarkValue(response.Benchmark["tpot_p95_ms"]), benchmarkValue(response.Benchmark["output_token_throughput"]), benchmarkValue(response.Benchmark["goodput"]), benchmarkValue(response.Benchmark["gpu_utilization"]), benchmarkValue(response.Benchmark["failed"]), benchmarkValue(response.Benchmark["cost_metadata"]), benchmarkValue(response.Benchmark["reproduction_command"]))
 	return nil
+}
+
+type cliPassport struct {
+	ID         string          `json:"id"`
+	RevisionID string          `json:"revision_id"`
+	Digest     string          `json:"digest"`
+	Signature  string          `json:"signature"`
+	PublicKey  string          `json:"public_key"`
+	Algorithm  string          `json:"algorithm"`
+	KeyID      string          `json:"key_id"`
+	Payload    json.RawMessage `json:"payload"`
+	Verified   bool            `json:"verified"`
+	Complete   bool            `json:"complete"`
+	Missing    []string        `json:"missing_evidence"`
+	CreatedAt  time.Time       `json:"created_at"`
+}
+
+func passportCommand(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) < 1 {
+		return errors.New("usage: infercrane passport keygen [--file PATH] | passport issue|list DEPLOYMENT [flags] | passport verify FILE")
+	}
+	action := args[0]
+	if action == "keygen" {
+		fs := flag.NewFlagSet("passport keygen", flag.ContinueOnError)
+		path := fs.String("file", "", "private-key destination")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if fs.NArg() != 0 {
+			return errors.New("usage: infercrane passport keygen [--file PATH]")
+		}
+		if *path == "" {
+			configDir, err := os.UserConfigDir()
+			if err != nil {
+				return err
+			}
+			*path = filepath.Join(configDir, "infercrane", "passport-signing-key")
+		}
+		if err := os.MkdirAll(filepath.Dir(*path), 0o700); err != nil {
+			return err
+		}
+		_, privateKey, err := passport.GenerateKey()
+		if err != nil {
+			return err
+		}
+		file, err := os.OpenFile(*path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if errors.Is(err, os.ErrExist) {
+			return fmt.Errorf("refusing to overwrite existing passport signing key %s", *path)
+		}
+		if err != nil {
+			return err
+		}
+		if _, err = file.WriteString(passport.EncodePrivateKey(privateKey) + "\n"); err != nil {
+			file.Close()
+			return err
+		}
+		if err = file.Close(); err != nil {
+			return err
+		}
+		fmt.Printf("Passport signing key created\nFile  %s\nMode  0600\n\nSet INFERCRANE_PASSPORT_SIGNING_KEY_FILE to this path on the control plane. Back up the key securely; losing it prevents issuing evidence under the same key identity.\n", *path)
+		return nil
+	}
+	if action == "verify" {
+		if len(args) != 2 {
+			return errors.New("usage: infercrane passport verify FILE")
+		}
+		body, err := os.ReadFile(args[1])
+		if err != nil {
+			return err
+		}
+		var wrapper struct {
+			Passport cliPassport `json:"passport"`
+		}
+		if err = json.Unmarshal(body, &wrapper); err != nil {
+			return fmt.Errorf("decode passport: %w", err)
+		}
+		value := wrapper.Passport
+		if value.Digest == "" {
+			if err = json.Unmarshal(body, &value); err != nil {
+				return fmt.Errorf("decode passport: %w", err)
+			}
+		}
+		err = passport.Verify(passport.Envelope{PayloadJSON: string(value.Payload), Digest: value.Digest, Signature: value.Signature, PublicKey: value.PublicKey, Algorithm: value.Algorithm, KeyID: value.KeyID})
+		if err != nil {
+			return fmt.Errorf("passport verification failed: %w", err)
+		}
+		var signedPayload passport.Payload
+		if err = json.Unmarshal(value.Payload, &signedPayload); err != nil || signedPayload.Schema != "infercrane.inference-passport/v1" {
+			return errors.New("passport contains an unsupported signed payload")
+		}
+		complete := len(signedPayload.MissingEvidence) == 0
+		fmt.Printf("VERIFIED  %s\nRevision  %s\nKey       %s\nComplete  %t\n", value.Digest, signedPayload.RevisionID, value.KeyID, complete)
+		if !complete {
+			fmt.Printf("Missing   %s\n", strings.Join(signedPayload.MissingEvidence, ", "))
+		}
+		return nil
+	}
+	if len(args) < 2 {
+		return errors.New("deployment name is required")
+	}
+	name := args[1]
+	fs := flag.NewFlagSet("passport "+action, flag.ContinueOnError)
+	revisionID := fs.String("revision", "", "revision ID; defaults to active")
+	output := fs.String("output", "human", "human or json")
+	file := fs.String("file", "", "write passport JSON to file")
+	if err := fs.Parse(args[2:]); err != nil {
+		return err
+	}
+	if err := validateOutput(*output); err != nil {
+		return err
+	}
+	switch action {
+	case "issue":
+		var response struct {
+			Passport cliPassport `json:"passport"`
+			Verified bool        `json:"verified"`
+		}
+		if err := controlJSON(ctx, cfg, http.MethodPost, "/api/v1/deployments/"+url.PathEscape(name)+"/passports", "", map[string]string{"revision_id": *revisionID}, &response); err != nil {
+			return err
+		}
+		encoded, _ := json.MarshalIndent(response, "", "  ")
+		if *file != "" {
+			if err := os.WriteFile(*file, append(encoded, '\n'), 0o644); err != nil {
+				return err
+			}
+		}
+		if *output == "json" {
+			fmt.Println(string(encoded))
+		} else {
+			fmt.Printf("Inference Passport\nDeployment  %s\nRevision    %s\nDigest      %s\nKey         %s\nVerified    %t\nComplete    %t\n", name, response.Passport.RevisionID, response.Passport.Digest, response.Passport.KeyID, response.Verified, response.Passport.Complete)
+			if len(response.Passport.Missing) > 0 {
+				fmt.Printf("Missing     %s\n", strings.Join(response.Passport.Missing, ", "))
+			}
+			if *file != "" {
+				fmt.Printf("File        %s\n", *file)
+			}
+		}
+		return nil
+	case "list":
+		var response struct {
+			Data []cliPassport `json:"data"`
+		}
+		if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/deployments/"+url.PathEscape(name)+"/passports", "", nil, &response); err != nil {
+			return err
+		}
+		if *output == "json" {
+			encoded, _ := json.MarshalIndent(response, "", "  ")
+			fmt.Println(string(encoded))
+			return nil
+		}
+		if len(response.Data) == 0 {
+			fmt.Printf("%s has no signed inference passport yet\n", name)
+			return nil
+		}
+		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+		fmt.Fprintln(w, "CREATED\tREVISION\tDIGEST\tKEY\tVERIFIED\tCOMPLETE")
+		for _, row := range response.Data {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%t\t%t\n", row.CreatedAt.Format(time.RFC3339), shortID(row.RevisionID), row.Digest, row.KeyID, row.Verified, row.Complete)
+		}
+		return w.Flush()
+	default:
+		return fmt.Errorf("unknown passport action %q", action)
+	}
 }
 
 func benchmarkValue(value any) string {
@@ -2238,7 +2430,60 @@ func emptyAs(value, fallback string) string {
 
 func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error {
 	if len(args) < 2 {
-		return errors.New("usage: infercrane rollout inspect|policy|create|provision|evaluate|promote|reject|rollback DEPLOYMENT [REVISION] [flags]")
+		return errors.New("usage: infercrane rollout inspect|policy|create|provision|validate|evaluate|promote|reject|rollback DEPLOYMENT [REVISION] [flags]")
+	}
+	if args[0] == "policy" && args[1] == "set" {
+		if len(args) < 3 {
+			return errors.New("usage: infercrane rollout policy set DEPLOYMENT [policy flags]")
+		}
+		name := args[2]
+		var policy domain.ReleaseGuardPolicy
+		if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/deployments/"+url.PathEscape(name)+"/release-guard/policy", "", nil, &policy); err != nil {
+			return err
+		}
+		fs := flag.NewFlagSet("rollout policy set", flag.ContinueOnError)
+		enabled := fs.Bool("enabled", policy.Enabled, "enable Release Guard")
+		compatibility := fs.Bool("require-compatibility", policy.RequireCompatibilityEvidence, "require comparable model/runtime evidence")
+		synthetic := fs.Bool("require-synthetic", policy.RequireSyntheticEvidence, "require bounded AIPerf validation")
+		autoRollback := fs.Bool("auto-rollback", policy.AutoRollbackEnabled, "monitor promoted revision and automatically roll back rejection")
+		minimum := fs.Int("minimum-requests", policy.MinimumRequests, "minimum measured requests per revision")
+		maxCost := fs.String("max-cost-regression", "", "maximum sourced cost regression percent; omit to preserve")
+		window := fs.Int("auto-rollback-window", policy.AutoRollbackWindowSeconds, "observation window seconds")
+		maxRequests := fs.Int("validation-max-requests", policy.ValidationMaxRequests, "hard validation request bound")
+		maxConcurrency := fs.Int("validation-max-concurrency", policy.ValidationMaxConcurrency, "hard validation concurrency bound")
+		output := fs.String("output", "human", "human or json")
+		if err := fs.Parse(args[3:]); err != nil {
+			return err
+		}
+		policy.Enabled = *enabled
+		policy.RequireCompatibilityEvidence = *compatibility
+		policy.RequireSyntheticEvidence = *synthetic
+		policy.AutoRollbackEnabled = *autoRollback
+		policy.MinimumRequests = *minimum
+		policy.AutoRollbackWindowSeconds = *window
+		policy.ValidationMaxRequests = *maxRequests
+		policy.ValidationMaxConcurrency = *maxConcurrency
+		if *maxCost != "" {
+			value, err := strconv.ParseFloat(*maxCost, 64)
+			if err != nil {
+				return fmt.Errorf("--max-cost-regression: %w", err)
+			}
+			policy.MaxCostRegressionPercent = &value
+		}
+		if err := controlJSON(ctx, cfg, http.MethodPut, "/api/v1/deployments/"+url.PathEscape(name)+"/release-guard/policy", "", policy, &policy); err != nil {
+			return err
+		}
+		if *output == "json" {
+			return printJSON(policy)
+		}
+		fmt.Printf("%s Release Guard V2 policy updated\nCompatibility evidence  %t\nSynthetic validation    %t\nAutomatic rollback      %t (%ds)\nValidation bound        %d requests x %d concurrency\n", name, policy.RequireCompatibilityEvidence, policy.RequireSyntheticEvidence, policy.AutoRollbackEnabled, policy.AutoRollbackWindowSeconds, policy.ValidationMaxRequests, policy.ValidationMaxConcurrency)
+		return nil
+	}
+	if args[0] == "policy" && args[1] == "get" {
+		if len(args) < 3 {
+			return errors.New("deployment name is required")
+		}
+		args = append([]string{"policy", args[2]}, args[3:]...)
 	}
 	action, name := args[0], args[1]
 	if action == "inspect" || action == "policy" {
@@ -2269,7 +2514,7 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 		}
 		if action == "policy" {
 			policy := view.ReleaseGuardPolicy
-			fmt.Printf("%s Release Guard policy\nEnabled                %t\nMinimum requests       %d\nMax TTFT regression    %.1f%%\nMax latency regression %.1f%%\nMax error increase     %.2f%%\nMax throughput drop    %.1f%%\n", name, policy.Enabled, policy.MinimumRequests, policy.MaxTTFTRegressionPercent, policy.MaxLatencyRegressionPercent, policy.MaxErrorRateIncrease*100, policy.MaxOutputThroughputDropPercent)
+			fmt.Printf("%s Release Guard V2 policy\nEnabled                %t\nMinimum requests       %d\nMax TTFT regression    %.1f%%\nMax latency regression %.1f%%\nMax error increase     %.2f%%\nMax throughput drop    %.1f%%\nCompatibility evidence %t\nSynthetic validation   %t\nAutomatic rollback     %t (%ds)\nValidation bound       %d requests x %d concurrency\n", name, policy.Enabled, policy.MinimumRequests, policy.MaxTTFTRegressionPercent, policy.MaxLatencyRegressionPercent, policy.MaxErrorRateIncrease*100, policy.MaxOutputThroughputDropPercent, policy.RequireCompatibilityEvidence, policy.RequireSyntheticEvidence, policy.AutoRollbackEnabled, policy.AutoRollbackWindowSeconds, policy.ValidationMaxRequests, policy.ValidationMaxConcurrency)
 			return nil
 		}
 		fmt.Printf("%s rollout\nACTIVE       %s\nCANDIDATE    %s\n\n", name, emptyAs(view.Deployment.ActiveRevisionID, "none"), emptyAs(view.Deployment.CandidateRevisionID, "none"))
@@ -2334,9 +2579,12 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 	modelRevision := fs.String("model-revision", "", "candidate model revision")
 	runtimeVersion := fs.String("runtime-version", "", "candidate runtime version")
 	runtimeArgs := fs.String("runtime-args", "", "comma-separated candidate runtime arguments")
+	validationRequests := fs.Int("requests", 20, "bounded AIPerf requests per revision")
+	validationConcurrency := fs.Int("concurrency", 1, "bounded AIPerf concurrency")
+	acknowledgeValidationCost := fs.Bool("acknowledge-validation-cost", false, "confirm direct active/candidate validation may incur provider cost")
 	rest := args[2:]
 	revisionID := ""
-	if action != "create" && action != "evaluate" {
+	if action != "create" && action != "evaluate" && action != "validate" {
 		if len(rest) == 0 || strings.HasPrefix(rest[0], "-") {
 			return errors.New("revision ID is required")
 		}
@@ -2353,6 +2601,48 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 	}
 	if *key == "" {
 		*key = fmt.Sprintf("cli-rollout-%s-%s-%d", action, name, time.Now().UnixNano())
+	}
+	if action == "validate" {
+		if !*acknowledgeValidationCost {
+			return errors.New("rollout validate requires --acknowledge-validation-cost because it sends explicit measured traffic to both revisions")
+		}
+		var view deploymentView
+		if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/deployments/"+url.PathEscape(name), "", nil, &view); err != nil {
+			return err
+		}
+		if view.Deployment.CandidateRevisionID == "" {
+			return errors.New("deployment has no candidate revision")
+		}
+		if *validationRequests < 1 || *validationRequests > view.ReleaseGuardPolicy.ValidationMaxRequests || *validationConcurrency < 1 || *validationConcurrency > view.ReleaseGuardPolicy.ValidationMaxConcurrency {
+			return fmt.Errorf("validation exceeds persisted bounds: requests <= %d and concurrency <= %d", view.ReleaseGuardPolicy.ValidationMaxRequests, view.ReleaseGuardPolicy.ValidationMaxConcurrency)
+		}
+		fmt.Fprintln(os.Stderr, "Notice: sending explicit bounded AIPerf validation to active and candidate revisions; provider inference cost may be incurred. User traffic is never duplicated.")
+		for _, selector := range []string{"active", "candidate"} {
+			var benchmarkResponse map[string]any
+			if err := controlJSONWithTimeout(ctx, cfg, http.MethodPost, "/api/v1/deployments/"+url.PathEscape(name)+"/benchmarks", "", map[string]any{"requests": *validationRequests, "concurrency": *validationConcurrency, "random_seed": 17, "revision": selector}, &benchmarkResponse, 35*time.Minute); err != nil {
+				return fmt.Errorf("%s revision validation: %w", selector, err)
+			}
+		}
+		var response struct {
+			Operation domain.Operation `json:"operation"`
+		}
+		if err := controlJSON(ctx, cfg, http.MethodPost, "/api/v1/deployments/"+url.PathEscape(name)+"/rollouts/guard/evaluate", *key, struct{}{}, &response); err != nil {
+			return err
+		}
+		if *wait {
+			operation, err := waitForOperationWithin(ctx, *waitTimeout, cfg, response.Operation.ID, *output == "human")
+			if err != nil {
+				return err
+			}
+			response.Operation = operation
+		}
+		if *output == "json" {
+			encoded, _ := json.MarshalIndent(response, "", "  ")
+			fmt.Println(string(encoded))
+		} else {
+			fmt.Printf("Deployment  %s\nAction      validate\nOperation   %s\nStatus      %s\n", name, response.Operation.ID, response.Operation.Status)
+		}
+		return nil
 	}
 	path := ""
 	var request any = struct{}{}
@@ -2511,7 +2801,18 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		}
 		return report
 	}
-	control := (controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: credentialCache, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: map[string]controlapi.BackendMetadata{"skypilot": {APIKey: cfg.APIKey, APIKeyEnv: "INFERCRANE_WORKER_API_KEY"}, "runpod-serverless": {APIKey: cfg.RunPodAPIKey, APIKeyEnv: "RUNPOD_API_KEY", Serverless: true}}, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary}).Handler()
+	passportKey, err := loadPassportSigningKey(cfg.PassportSigningKeyFile)
+	if err != nil {
+		return err
+	}
+	benchmarkBackends := map[string]controlapi.BackendMetadata{
+		"skypilot":          {APIKey: cfg.APIKey, APIKeyEnv: "INFERCRANE_WORKER_API_KEY"},
+		"runpod-serverless": {APIKey: cfg.RunPodAPIKey, APIKeyEnv: "RUNPOD_API_KEY", Serverless: true},
+	}
+	if cfg.AWSEnabled() {
+		benchmarkBackends["aws-ec2"] = controlapi.BackendMetadata{APIKey: cfg.APIKey, APIKeyEnv: "INFERCRANE_WORKER_API_KEY"}
+	}
+	control := (controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: credentialCache, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey}).Handler()
 	operationTelemetry := &operations.Telemetry{}
 	handlers := workflows.DeploymentHandlers(s)
 	for kind, handler := range workflows.RolloutHandlers(s) {

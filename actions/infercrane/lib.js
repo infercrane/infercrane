@@ -27,7 +27,7 @@ function renderPlan(plan) {
   return bounded(lines.join('\n'));
 }
 
-function evaluateRelease(view, expectedRevision) {
+function evaluateRelease(view, expectedRevision, passports = []) {
   const deployment = view.deployment ?? {};
   const lifecycle = view.lifecycle_status ?? {};
   const failures = [];
@@ -35,7 +35,9 @@ function evaluateRelease(view, expectedRevision) {
   if (!['serving', 'ready'].includes(lifecycle.serving_state)) failures.push(`serving state is ${lifecycle.serving_state || 'unknown'}`);
   if (lifecycle.convergence_state !== 'converged') failures.push(`convergence state is ${lifecycle.convergence_state || 'unknown'}`);
   if (view.active_operation) failures.push(`operation ${view.active_operation.id} is still ${view.active_operation.status}`);
-  return { pass: failures.length === 0, deployment: deployment.name, revision: deployment.active_revision_id, failures };
+  const passport = passports.find((row) => row.revision_id === expectedRevision && row.verified === true && row.complete === true);
+  if (!passport) failures.push(`no complete, verified Inference Passport is persisted for revision ${expectedRevision}`);
+  return { pass: failures.length === 0, deployment: deployment.name, revision: deployment.active_revision_id, passport_id: passport?.id, passport_digest: passport?.digest, passport_key_id: passport?.key_id, failures };
 }
 
 function run(command, args, env = process.env) {

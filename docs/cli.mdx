@@ -269,7 +269,13 @@ infercrane benchmark qwen-prod \
 
 ```bash
 infercrane rollout inspect qwen-prod
-infercrane rollout policy qwen-prod
+infercrane rollout policy get qwen-prod
+infercrane rollout policy set qwen-prod \
+  --require-compatibility \
+  --require-synthetic \
+  --auto-rollback \
+  --validation-max-requests 100 \
+  --validation-max-concurrency 4
 
 infercrane rollout create qwen-prod \
   --model Qwen/Qwen3-8B \
@@ -280,13 +286,29 @@ infercrane rollout create qwen-prod \
   --idempotency-key qwen-prod-rev-19
 
 infercrane rollout provision qwen-prod REVISION_ID --wait
-infercrane rollout evaluate qwen-prod
+infercrane rollout validate qwen-prod --acknowledge-validation-cost --wait
 infercrane rollout promote qwen-prod REVISION_ID --reason 'guard accepted'
 infercrane rollout reject qwen-prod REVISION_ID --reason 'TTFT regression'
 infercrane rollout rollback qwen-prod REVISION_ID --wait
 ```
 
 Candidate creation also accepts `--model-revision`, `--runtime`, `--runtime-version`, `--runtime-args`, `--routing`, and `--region`. Promotion remains policy-gated; no LLM decides the outcome.
+
+`rollout validate` is explicit synthetic traffic, not shadowing. It runs the existing AIPerf adapter
+against active and candidate revisions using the same workload and persisted hard bounds. The
+acknowledgement is mandatory because both runs may incur provider cost.
+
+## Signed release evidence
+
+```bash
+infercrane passport keygen
+infercrane passport issue qwen-prod --file qwen-prod.passport.json
+infercrane passport verify qwen-prod.passport.json
+infercrane passport list qwen-prod --output json
+```
+
+`passport keygen` and `passport verify` work without a configured control-plane context. Issue and
+list use the authenticated API. See [Inference Passports](/features/inference-passports).
 
 ## Delete
 

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/config"
+	"github.com/infercrane/infercrane/internal/passport"
 )
 
 func captureStdout(t *testing.T, run func() error) (string, error) {
@@ -659,5 +660,60 @@ func TestExplainColdStartMakesUnavailableBoundariesExplicit(t *testing.T) {
 	})
 	if err != nil || !strings.Contains(output, "Time-to-ready        unavailable") || !strings.Contains(output, "capacity_allocation, time_to_ready, first_token") || !strings.Contains(output, "provider_capacity_or_worker_initialization") {
 		t.Fatalf("output=%s err=%v", output, err)
+	}
+}
+
+func TestPassportSigningKeyRequiresRestrictedFile(t *testing.T) {
+	_, key, err := passport.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "signing-key")
+	if err = os.WriteFile(path, []byte(passport.EncodePrivateKey(key)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := loadPassportSigningKey(path)
+	if err != nil || string(loaded) != string(key) {
+		t.Fatalf("loaded=%d err=%v", len(loaded), err)
+	}
+	if err = os.Chmod(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = loadPassportSigningKey(path); err == nil || !strings.Contains(err.Error(), "group or others") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestRolloutValidateUsesBoundedExplicitActiveAndCandidateBenchmarks(t *testing.T) {
+	var revisions []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/deployments/prod"):
+			_, _ = w.Write([]byte(`{"deployment":{"name":"prod","candidate_revision_id":"rev-2"},"release_guard_policy":{"validation_max_requests":20,"validation_max_concurrency":2}}`))
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/benchmarks"):
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			revisions = append(revisions, body["revision"].(string))
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"benchmark":{"id":"bench"}}`))
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/rollouts/guard/evaluate"):
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"operation":{"id":"op","status":"pending"}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	_, err := captureStdout(t, func() error {
+		return rolloutCommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, []string{"validate", "prod", "--requests", "20", "--concurrency", "2", "--acknowledge-validation-cost", "--output", "json"})
+	})
+	if err != nil || len(revisions) != 2 || revisions[0] != "active" || revisions[1] != "candidate" {
+		t.Fatalf("revisions=%#v err=%v", revisions, err)
+	}
+	if _, err = captureStdout(t, func() error {
+		return rolloutCommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, []string{"validate", "prod", "--requests", "21", "--acknowledge-validation-cost"})
+	}); err == nil || !strings.Contains(err.Error(), "persisted bounds") {
+		t.Fatalf("err=%v", err)
 	}
 }

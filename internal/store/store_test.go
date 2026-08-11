@@ -13,6 +13,7 @@ import (
 	"github.com/infercrane/infercrane/internal/authz"
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/overflow"
+	"github.com/infercrane/infercrane/internal/passport"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
 	"github.com/infercrane/infercrane/internal/support"
 	"github.com/infercrane/infercrane/internal/workflows"
@@ -914,6 +915,52 @@ func TestReleaseGuardPersistsDeterministicCandidateDecision(t *testing.T) {
 	}
 }
 
+func TestInferencePassportEvidenceIsTenantSafeAndBytePreserving(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	name := "passport-" + time.Now().UTC().Format("150405.000000000")
+	target := name + "-target"
+	if _, err := s.AddTarget(ctx, domain.Target{Name: target, URL: "http://passport-target", Provider: "existing", Runtime: "vllm", UpstreamModel: "model"}); err != nil {
+		t.Fatal(err)
+	}
+	deployment, err := s.ApplyDeployment(ctx, domain.Deployment{Name: name, Model: "model"}, []string{target})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := s.Resolve(ctx, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deployment = resolved.Deployment
+	payload, err := s.InferencePassportPayload(ctx, "global", name, deployment.ActiveRevisionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, key, err := passport.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelope, err := passport.Sign(payload, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := s.RecordInferencePassport(ctx, domain.InferencePassport{TenantID: "global", DeploymentID: deployment.ID, RevisionID: deployment.ActiveRevisionID, PayloadJSON: envelope.PayloadJSON, PayloadDigest: envelope.Digest, Signature: envelope.Signature, PublicKey: envelope.PublicKey, Algorithm: envelope.Algorithm, KeyID: envelope.KeyID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := s.InferencePassports(ctx, "global", name, 10)
+	if err != nil || len(rows) != 1 || rows[0].ID != created.ID || rows[0].PayloadJSON != envelope.PayloadJSON {
+		t.Fatalf("rows=%#v err=%v", rows, err)
+	}
+	if err = passport.Verify(passport.Envelope{PayloadJSON: rows[0].PayloadJSON, Digest: rows[0].PayloadDigest, Signature: rows[0].Signature, PublicKey: rows[0].PublicKey, Algorithm: rows[0].Algorithm, KeyID: rows[0].KeyID}); err != nil {
+		t.Fatal(err)
+	}
+	other, err := s.InferencePassports(ctx, "missing-tenant", name, 10)
+	if err != nil || len(other) != 0 {
+		t.Fatalf("cross tenant=%#v err=%v", other, err)
+	}
+}
+
 func TestGuardedPromotionAtomicallySwitchesRevisionAndTargets(t *testing.T) {
 	ctx := context.Background()
 	s := openStore(t, ctx)
@@ -944,7 +991,8 @@ func TestGuardedPromotionAtomicallySwitchesRevisionAndTargets(t *testing.T) {
 	if err = s.ObserveReplica(ctx, replica.ID, "ready", target.URL, "healthy", `{}`, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.SetReleaseGuardPolicy(ctx, "global", deployment.Name, domain.ReleaseGuardPolicy{Enabled: true, MinimumRequests: 1, MaxTTFTRegressionPercent: 15, MaxLatencyRegressionPercent: 15, MaxErrorRateIncrease: .01, MaxOutputThroughputDropPercent: 20}); err != nil {
+	policy, err := s.SetReleaseGuardPolicy(ctx, "global", deployment.Name, domain.ReleaseGuardPolicy{Enabled: true, MinimumRequests: 1, MaxTTFTRegressionPercent: 15, MaxLatencyRegressionPercent: 15, MaxErrorRateIncrease: .01, MaxOutputThroughputDropPercent: 20})
+	if err != nil {
 		t.Fatal(err)
 	}
 	activeTTFT, candidateTTFT := 100.0, 105.0
@@ -967,6 +1015,34 @@ func TestGuardedPromotionAtomicallySwitchesRevisionAndTargets(t *testing.T) {
 	resolved, err = s.Resolve(ctx, deployment.Name)
 	if err != nil || resolved.Deployment.ActiveRevisionID != candidate.ID || resolved.Deployment.CandidateRevisionID != "" || resolved.Deployment.Model != "model-v2" || len(resolved.Targets) != 1 || resolved.Targets[0].ID != target.ID {
 		t.Fatalf("resolved=%+v err=%v", resolved, err)
+	}
+	policy.AutoRollbackEnabled, policy.AutoRollbackWindowSeconds, policy.ValidationMaxRequests, policy.ValidationMaxConcurrency = true, 300, 100, 4
+	if _, err = s.SetReleaseGuardPolicy(ctx, "global", deployment.Name, policy); err != nil {
+		t.Fatal(err)
+	}
+	monitor, err := s.EnsureReleaseGuardMonitor(ctx, "global", deployment.Name, candidate.ID, activeRevisionID, 5*time.Minute)
+	if err != nil || monitor.Status != "observing" {
+		t.Fatalf("monitor=%+v err=%v", monitor, err)
+	}
+	var frozenPolicy domain.ReleaseGuardPolicy
+	if err = json.Unmarshal([]byte(monitor.PolicyJSON), &frozenPolicy); err != nil || frozenPolicy.MaxTTFTRegressionPercent != 15 {
+		t.Fatalf("frozen policy=%+v err=%v", frozenPolicy, err)
+	}
+	policy.MaxTTFTRegressionPercent = 0
+	if _, err = s.SetReleaseGuardPolicy(ctx, "global", deployment.Name, policy); err != nil {
+		t.Fatal(err)
+	}
+	postTTFT := 104.0
+	if err = s.RecordRequest(ctx, domain.InferenceRecord{RequestID: "post-promotion-candidate", DeploymentID: deployment.ID, RevisionID: candidate.ID, OperationName: "chat", StartedAt: time.Now().UTC().Add(time.Millisecond), StatusCode: 200, LatencyMS: 204, TTFTMS: &postTTFT}); err != nil {
+		t.Fatal(err)
+	}
+	postEvaluation, err := s.EvaluateReleaseGuardMonitor(ctx, "global", deployment.Name, candidate.ID, time.Hour)
+	if err != nil || postEvaluation.Decision != "ACCEPT" {
+		t.Fatalf("post evaluation=%+v err=%v", postEvaluation, err)
+	}
+	monitor, err = s.ReleaseGuardMonitor(ctx, "global", deployment.Name, candidate.ID)
+	if err != nil || monitor.Status != "accepted" || monitor.EvaluationID != postEvaluation.ID {
+		t.Fatalf("monitor=%+v err=%v", monitor, err)
 	}
 }
 

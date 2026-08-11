@@ -7,7 +7,7 @@ The repository action renders an InferCrane semantic plan into the job summary a
 JSON plan as an artifact. Plan mode is read-only.
 
 <Warning>
-  The action source is included in the v0.4 release candidate, but the public Git tag is not
+  The action source is included in the current release candidate, but the public Git tag is not
   available until release qualification and an authorized remote push. Use a commit SHA from your
   own fork while evaluating an unpublished candidate.
 </Warning>
@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: infercrane/infercrane/actions/infercrane@v0.4.0-rc.1
+      - uses: infercrane/infercrane/actions/infercrane@v0.8.0-rc.1
         with:
           mode: plan
           spec: deploy/qwen.yaml
@@ -46,7 +46,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: infercrane/infercrane/actions/infercrane@v0.4.0-rc.1
+      - uses: infercrane/infercrane/actions/infercrane@v0.8.0-rc.1
         with:
           mode: apply
           confirm-apply: "true"
@@ -63,13 +63,15 @@ an operator can resume with `infercrane operation watch`.
 ## Exact release check
 
 ```yaml
-- uses: infercrane/infercrane/actions/infercrane@v0.4.0-rc.1
+- uses: infercrane/infercrane/actions/infercrane@v0.8.0-rc.1
   with:
     mode: release-check
     deployment: qwen-prod
     revision: ${{ needs.deploy.outputs.revision }}
 ```
 
-The check passes only when the expected revision is active, serving, converged, and has no active
-operation. Output is stripped of terminal escapes, bounded for GitHub summaries, and redacts values
-from credential-like environment variables. The action does not print or upload prompt content.
+The check passes only when the expected revision is active, serving, converged, has no active
+operation, and has a persisted complete, cryptographically verified Inference Passport. The job summary and
+machine-readable artifact include its digest and public key identity. Output is stripped of
+terminal escapes, bounded for GitHub summaries, and redacts values from credential-like environment
+variables. The action does not print or upload prompt content.

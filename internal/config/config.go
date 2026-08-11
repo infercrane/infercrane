@@ -13,13 +13,13 @@ import (
 )
 
 type Config struct {
-	DatabaseURL, ControlURL, Host, APIKey, RouterBinary, AIPerfBinary, InstanceID, Environment string
-	RunPodAPIKey, RunPodServerlessTemplateID, RunPodRESTURL                                    string
-	AWSRoleARN, AWSExternalID, AWSRegion, AWSSubnetID, AWSAMIID, AWSInstanceType, AWSGPU       string
-	AWSInstanceProfileARN, AWSWorkerSecretARN, AWSImageDigest                                  string
-	AWSSecurityGroupIDs                                                                        []string
-	Port, RouterStartPort, DatabaseMaxOpen, DatabaseMaxIdle                                    int
-	HealthInterval, UpstreamTimeout, ShutdownTimeout, RequestRetention                         time.Duration
+	DatabaseURL, ControlURL, Host, APIKey, RouterBinary, AIPerfBinary, PassportSigningKeyFile, InstanceID, Environment string
+	RunPodAPIKey, RunPodServerlessTemplateID, RunPodRESTURL                                                            string
+	AWSRoleARN, AWSExternalID, AWSRegion, AWSSubnetID, AWSAMIID, AWSInstanceType, AWSGPU                               string
+	AWSInstanceProfileARN, AWSWorkerSecretARN, AWSImageDigest                                                          string
+	AWSSecurityGroupIDs                                                                                                []string
+	Port, RouterStartPort, DatabaseMaxOpen, DatabaseMaxIdle                                                            int
+	HealthInterval, UpstreamTimeout, ShutdownTimeout, RequestRetention                                                 time.Duration
 }
 
 type ClientContext struct {
@@ -248,6 +248,7 @@ func load(requireAPIKey bool) (Config, error) {
 		APIKey:                     env("INFERCRANE_API_KEY", ""),
 		RouterBinary:               env("INFERCRANE_ROUTER_BINARY", "vllm-router"),
 		AIPerfBinary:               env("INFERCRANE_AIPERF_BINARY", "aiperf"),
+		PassportSigningKeyFile:     env("INFERCRANE_PASSPORT_SIGNING_KEY_FILE", ""),
 		InstanceID:                 env("INFERCRANE_INSTANCE_ID", hostname),
 		Environment:                env("INFERCRANE_ENV", "development"),
 		RunPodAPIKey:               env("RUNPOD_API_KEY", ""),

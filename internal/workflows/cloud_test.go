@@ -277,6 +277,119 @@ func TestGuardedPromotionWaitsForRetiringRequests(t *testing.T) {
 	}
 }
 
+type fakeReleaseV2Store struct {
+	*fakeCloudStore
+	monitor      domain.ReleaseGuardMonitor
+	evaluation   domain.ReleaseGuardEvaluation
+	rolledBack   bool
+	routeMatches []bool
+}
+
+func (f *fakeReleaseV2Store) RoutingGenerationMatches(context.Context, string, string) (bool, error) {
+	if len(f.routeMatches) == 0 {
+		return true, nil
+	}
+	value := f.routeMatches[0]
+	f.routeMatches = f.routeMatches[1:]
+	return value, nil
+}
+
+func (f *fakeReleaseV2Store) ReleaseGuardPolicy(context.Context, string, string) (domain.ReleaseGuardPolicy, error) {
+	return domain.ReleaseGuardPolicy{Enabled: true, AutoRollbackEnabled: true, AutoRollbackWindowSeconds: 300}, nil
+}
+func (f *fakeReleaseV2Store) EnsureReleaseGuardMonitor(_ context.Context, _, _, promoted, rollback string, _ time.Duration) (domain.ReleaseGuardMonitor, error) {
+	if f.monitor.ID == "" {
+		f.monitor = domain.ReleaseGuardMonitor{ID: "monitor", PromotedRevisionID: promoted, RollbackRevisionID: rollback, Status: "observing", Deadline: time.Now().Add(time.Minute)}
+	}
+	return f.monitor, nil
+}
+func (f *fakeReleaseV2Store) ReleaseGuardMonitor(context.Context, string, string, string) (domain.ReleaseGuardMonitor, error) {
+	if f.monitor.ID == "" {
+		return domain.ReleaseGuardMonitor{}, domain.ErrNotFound
+	}
+	return f.monitor, nil
+}
+func (f *fakeReleaseV2Store) EvaluateReleaseGuardMonitor(context.Context, string, string, string, time.Duration) (domain.ReleaseGuardEvaluation, error) {
+	return f.evaluation, nil
+}
+func (f *fakeReleaseV2Store) RollbackGuardedPromotion(_ context.Context, _, _, promoted, rollback, _ string, _ []string) error {
+	f.deployment.ActiveRevisionID = rollback
+	if f.revision.ID == promoted {
+		f.revision.Status = "superseded"
+	}
+	for id, replica := range f.replicas {
+		if replica.RevisionID == rollback {
+			replica.LifecycleState = "active"
+		}
+		if replica.RevisionID == promoted {
+			replica.LifecycleState = "draining"
+		}
+		f.replicas[id] = replica
+	}
+	f.rolledBack = true
+	return nil
+}
+func (f *fakeReleaseV2Store) MarkReleaseGuardMonitorRolledBack(context.Context, string, string, string) error {
+	f.monitor.Status = "rolled_back"
+	return nil
+}
+func (f *fakeReleaseV2Store) PreviousRevisionID(context.Context, string, string, string) (string, error) {
+	return "rev-1", nil
+}
+
+func TestPostPromotionGuardAutomaticallyRollsBackBeforeDeletingRetainedCapacity(t *testing.T) {
+	spec := domain.DeploymentRevisionSpec{Model: "Qwen/Qwen3-8B", Runtime: "vllm", RoutingStrategy: "round-robin", MinReplicas: 1, MaxReplicas: 1, ComputeMode: "elastic", Cloud: "runpod", GPU: "H100"}
+	encoded, _ := json.Marshal(spec)
+	base := &fakeCloudStore{deployment: domain.Deployment{ID: "deployment-1", Name: "qwen", ActiveRevisionID: "rev-1", CandidateRevisionID: "rev-2"}, revision: domain.DeploymentRevision{ID: "rev-2", Status: "candidate", SpecJSON: string(encoded)}, replicas: map[string]domain.Replica{"old": {ID: "old", DeploymentID: "deployment-1", RevisionID: "rev-1", ExternalKey: "deployment-1-r0", LifecycleState: "active", ProviderResourceID: "old-resource", Endpoint: "http://old:8000", Health: "healthy"}, "new": {ID: "new", DeploymentID: "deployment-1", RevisionID: "rev-2", ExternalKey: "deployment-1-rev-2-r0", LifecycleState: "ready", ProviderResourceID: "new-resource", Endpoint: "http://new:8000", Health: "healthy"}}}
+	store := &fakeReleaseV2Store{fakeCloudStore: base, evaluation: domain.ReleaseGuardEvaluation{ID: "evaluation", Decision: "REJECT"}}
+	provider := &fakeReplicaProvider{observation: provision.Observation{Exists: true, State: "ready"}}
+	operation := domain.Operation{ID: "promote", LeaseOwner: "worker", LeaseGeneration: 1, RequestJSON: `{"name":"qwen","candidate_id":"rev-2","tenant_id":"global"}`}
+	result, err := QualifiedV01CloudHandlers(store, provider, fakeInspector{})[RolloutPromoteKind](context.Background(), operation)
+	if err != nil || !store.rolledBack || store.deployment.ActiveRevisionID != "rev-1" || store.replicas["old"].LifecycleState != "active" || store.replicas["new"].LifecycleState != "deleted" || provider.deleteCalls != 1 || !strings.Contains(result, `"auto_rolled_back":true`) {
+		t.Fatalf("result=%s deployment=%#v replicas=%#v deletes=%d rollback=%t err=%v", result, store.deployment, store.replicas, provider.deleteCalls, store.rolledBack, err)
+	}
+}
+
+func TestAutomaticRollbackResumesCleanupAfterRouterRestartBoundary(t *testing.T) {
+	spec := domain.DeploymentRevisionSpec{Model: "model", Runtime: "vllm", RoutingStrategy: "round-robin", MinReplicas: 1, MaxReplicas: 1, ComputeMode: "elastic", Cloud: "runpod", GPU: "H100"}
+	encoded, _ := json.Marshal(spec)
+	base := &fakeCloudStore{deployment: domain.Deployment{ID: "deployment-1", Name: "prod", ActiveRevisionID: "rev-1", CandidateRevisionID: "rev-2"}, revision: domain.DeploymentRevision{ID: "rev-2", Status: "candidate", SpecJSON: string(encoded)}, replicas: map[string]domain.Replica{"old": {ID: "old", DeploymentID: "deployment-1", RevisionID: "rev-1", ExternalKey: "old", Provider: "skypilot", LifecycleState: "active", Endpoint: "http://old", Health: "healthy"}, "new": {ID: "new", DeploymentID: "deployment-1", RevisionID: "rev-2", ExternalKey: "new", Provider: "skypilot", LifecycleState: "ready", Endpoint: "http://new", Health: "healthy"}}}
+	store := &fakeReleaseV2Store{fakeCloudStore: base, evaluation: domain.ReleaseGuardEvaluation{Decision: "REJECT"}, routeMatches: []bool{true, false}}
+	provider := &fakeReplicaProvider{observation: provision.Observation{Exists: true, State: "ready"}}
+	handler := QualifiedV01CloudHandlers(store, provider, fakeInspector{})[RolloutPromoteKind]
+	op := domain.Operation{ID: "promote", LeaseOwner: "worker", LeaseGeneration: 1, RequestJSON: `{"name":"prod","candidate_id":"rev-2","tenant_id":"global"}`}
+	if _, err := handler(context.Background(), op); err == nil || store.deployment.ActiveRevisionID != "rev-1" || provider.deleteCalls != 0 {
+		t.Fatalf("first err=%v active=%s deletes=%d", err, store.deployment.ActiveRevisionID, provider.deleteCalls)
+	}
+	store.revision.Status = "superseded"
+	store.routeMatches = []bool{true}
+	result, err := handler(context.Background(), op)
+	if err != nil || provider.deleteCalls != 1 || store.replicas["new"].LifecycleState != "deleted" || !strings.Contains(result, `"auto_rolled_back":true`) {
+		t.Fatalf("result=%s err=%v deletes=%d replicas=%#v", result, err, provider.deleteCalls, store.replicas)
+	}
+}
+
+func TestCanceledObservationResumesRollbackBeforeDeletingCandidate(t *testing.T) {
+	spec := domain.DeploymentRevisionSpec{Model: "model", Runtime: "vllm", RoutingStrategy: "round-robin", MinReplicas: 1, MaxReplicas: 1, ComputeMode: "elastic", Cloud: "runpod", GPU: "H100"}
+	encoded, _ := json.Marshal(spec)
+	base := &fakeCloudStore{deployment: domain.Deployment{ID: "deployment-1", Name: "prod", ActiveRevisionID: "rev-2"}, revision: domain.DeploymentRevision{ID: "rev-2", Status: "active", SpecJSON: string(encoded)}, replicas: map[string]domain.Replica{
+		"old": {ID: "old", DeploymentID: "deployment-1", RevisionID: "rev-1", ExternalKey: "old", Provider: "skypilot", LifecycleState: "draining", Endpoint: "http://old", Health: "healthy"},
+		"new": {ID: "new", DeploymentID: "deployment-1", RevisionID: "rev-2", ExternalKey: "new", Provider: "skypilot", LifecycleState: "active", Endpoint: "http://new", Health: "healthy"},
+	}}
+	store := &fakeReleaseV2Store{fakeCloudStore: base, monitor: domain.ReleaseGuardMonitor{ID: "monitor", PromotedRevisionID: "rev-2", RollbackRevisionID: "rev-1", Status: "observing"}, routeMatches: []bool{false}}
+	provider := &fakeReplicaProvider{observation: provision.Observation{Exists: true, State: "ready"}}
+	handler := QualifiedV01CloudHandlers(store, provider, fakeInspector{})[RolloutPromoteKind+".cancel"]
+	op := domain.Operation{ID: "promote", LeaseOwner: "worker", LeaseGeneration: 1, RequestJSON: `{"name":"prod","candidate_id":"rev-2","tenant_id":"global"}`}
+	if _, err := handler(context.Background(), op); err == nil || store.deployment.ActiveRevisionID != "rev-1" || provider.deleteCalls != 0 {
+		t.Fatalf("first err=%v active=%s deletes=%d", err, store.deployment.ActiveRevisionID, provider.deleteCalls)
+	}
+	store.routeMatches = []bool{true}
+	result, err := handler(context.Background(), op)
+	if err != nil || provider.deleteCalls != 1 || store.replicas["new"].LifecycleState != "deleted" || store.monitor.Status != "rolled_back" || !strings.Contains(result, `"auto_rolled_back":true`) {
+		t.Fatalf("result=%s err=%v deletes=%d monitor=%#v replicas=%#v", result, err, provider.deleteCalls, store.monitor, store.replicas)
+	}
+}
+
 func TestScaleDownWithdrawsRouterBeforeDeletingReplica(t *testing.T) {
 	replicas := map[string]domain.Replica{
 		"replica-1": {ID: "replica-1", DeploymentID: "deployment-1", ExternalKey: "deployment-1-r0", Ordinal: 0, LifecycleState: "active", ProviderResourceID: "infercrane-deployment-1-r0"},

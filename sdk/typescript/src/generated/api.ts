@@ -78,6 +78,16 @@ export class ControlApi {
     return this.transport.request('GET', path) as Promise<ObjectList>;
   }
 
+  createInferencePassport(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = `/deployments/${encodeURIComponent(name)}/passports`;
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  listInferencePassports(name: string): Promise<ObjectList> {
+    const path = `/deployments/${encodeURIComponent(name)}/passports`;
+    return this.transport.request('GET', path) as Promise<ObjectList>;
+  }
+
   getSLOPolicy(name: string): Promise<Record<string, JsonValue>> {
     const path = `/deployments/${encodeURIComponent(name)}/slo-policy`;
     return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;

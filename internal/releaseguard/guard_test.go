@@ -31,3 +31,43 @@ func TestEvaluateIsDeterministicAndConservative(t *testing.T) {
 		})
 	}
 }
+
+func TestEvaluateV2FailsClosedOnCompatibilitySyntheticAndCost(t *testing.T) {
+	compatible := true
+	costLimit := 10.0
+	policy := domain.ReleaseGuardPolicy{Enabled: true, MinimumRequests: 1, RequireCompatibilityEvidence: true, RequireSyntheticEvidence: true, MaxCostRegressionPercent: &costLimit}
+	baselineCost, candidateCost := 1.0, 1.2
+	base := domain.RevisionMetrics{ReadyReplicas: 1, Requests: 10, P95TTFTMS: number(100), Compatible: &compatible, SyntheticValidation: true, SourcedHourlyCost: &baselineCost}
+	candidate := domain.RevisionMetrics{ReadyReplicas: 1, Requests: 10, P95TTFTMS: number(100), Compatible: &compatible, SyntheticValidation: true, SourcedHourlyCost: &candidateCost}
+	result := Evaluate(Input{Policy: policy, Active: base, Candidate: candidate})
+	if result.Decision != "REJECT" || result.Reasons[0].Code != "cost_regression" {
+		t.Fatalf("result=%+v", result)
+	}
+	candidate.SourcedHourlyCost = &baselineCost
+	candidate.SyntheticValidation = false
+	result = Evaluate(Input{Policy: policy, Active: base, Candidate: candidate})
+	if result.Decision != "WAIT" || result.Reasons[0].Code != "synthetic_validation_unproven" {
+		t.Fatalf("result=%+v", result)
+	}
+	candidate.SyntheticValidation = true
+	compatible = false
+	result = Evaluate(Input{Policy: policy, Active: base, Candidate: candidate})
+	if result.Decision != "REJECT" || result.Reasons[0].Code != "compatibility_mismatch" {
+		t.Fatalf("result=%+v", result)
+	}
+	candidate.Compatible = nil
+	result = Evaluate(Input{Policy: policy, Active: base, Candidate: candidate})
+	if result.Decision != "WAIT" || result.Reasons[0].Code != "compatibility_unproven" {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestEvaluateV2WaitsWhenRequiredCostIsUnavailable(t *testing.T) {
+	limit := 10.0
+	policy := domain.ReleaseGuardPolicy{Enabled: true, MinimumRequests: 1, MaxCostRegressionPercent: &limit}
+	ttft := 100.0
+	result := Evaluate(Input{Policy: policy, Active: domain.RevisionMetrics{ReadyReplicas: 1, Requests: 1, P95TTFTMS: &ttft}, Candidate: domain.RevisionMetrics{ReadyReplicas: 1, Requests: 1, P95TTFTMS: &ttft}})
+	if result.Decision != "WAIT" || result.Reasons[0].Code != "cost_evidence_unavailable" {
+		t.Fatalf("result=%+v", result)
+	}
+}
