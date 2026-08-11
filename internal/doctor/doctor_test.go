@@ -79,6 +79,18 @@ func TestAWSBYOCCheckIsReadOnlyAndRequiredWhenRequested(t *testing.T) {
 	}
 }
 
+func TestKubernetesCheckIsReadOnlyAndRequiredWhenRequested(t *testing.T) {
+	cfg := config.Config{KubernetesContext: "cluster", KubernetesNamespace: "infercrane-system", KubernetesWorkloadAPI: "deployment", KubernetesServiceAccount: "infercrane-runtime", KubernetesWorkerSecretName: "infercrane-worker", KubernetesWorkerSecretKey: "api-key", KubernetesImageDigest: "image@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", KubernetesGPUResource: "nvidia.com/gpu", KubernetesGPUProductLabel: "nvidia.com/gpu.product"}
+	check := CheckKubernetes(context.Background(), cfg, Dependencies{KubernetesCheck: func(context.Context) error { return nil }})
+	if check.Status != Pass {
+		t.Fatalf("unexpected check: %#v", check)
+	}
+	check = CheckKubernetes(context.Background(), config.Config{}, Dependencies{})
+	if check.Status != Fail || check.Remediation == "" {
+		t.Fatalf("unexpected unconfigured check: %#v", check)
+	}
+}
+
 func TestCapacityCheckWarnsWithoutChangingHardware(t *testing.T) {
 	check := CheckCapacity(context.Background(), "provider-a", "L40S", capacityAdvisor(func(_ context.Context, request provision.AvailabilityRequest) (provision.Availability, error) {
 		if request.GPU != "L40S" || request.Count != 1 {

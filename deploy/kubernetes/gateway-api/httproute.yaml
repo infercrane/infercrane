@@ -1,0 +1,19 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: infercrane
+  namespace: infercrane-system
+spec:
+  parentRefs:
+    - name: REPLACE_WITH_GATEWAY
+      namespace: REPLACE_WITH_GATEWAY_NAMESPACE
+  hostnames:
+    - REPLACE_WITH_INFERCRANE_HOSTNAME
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: infercrane-gateway
+          port: 8080

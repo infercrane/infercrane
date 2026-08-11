@@ -88,7 +88,7 @@ type API struct {
 	BenchmarkRunner interface {
 		Run(context.Context, benchmark.Config) (benchmark.Result, error)
 	}
-	Diagnostics              func(context.Context, bool, bool, bool) doctor.Report
+	Diagnostics              func(context.Context, bool, bool, bool, bool) doctor.Report
 	Backends                 map[string]BackendMetadata
 	Integrations             integration.Snapshot
 	GatewayURL, AIPerfBinary string
@@ -192,7 +192,12 @@ func (a API) diagnostics(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "aws must be true or false")
 		return
 	}
-	writeJSON(w, http.StatusOK, a.Diagnostics(r.Context(), cloud, serverless, aws))
+	kubernetes, err := strconv.ParseBool(defaultValue(r.URL.Query().Get("kubernetes"), "false"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "kubernetes must be true or false")
+		return
+	}
+	writeJSON(w, http.StatusOK, a.Diagnostics(r.Context(), cloud, serverless, aws, kubernetes))
 }
 
 func defaultValue(value, fallback string) string {

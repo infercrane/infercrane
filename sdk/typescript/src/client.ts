@@ -49,7 +49,7 @@ class Transport implements ApiTransport {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new Error(`request timed out after ${this.timeoutMs}ms`)), this.timeoutMs);
     try {
-      const headers: Record<string, string> = { Accept: 'application/json', Authorization: `Bearer ${this.apiKey}`, 'User-Agent': 'infercrane-typescript/0.8.0-rc.1' };
+      const headers: Record<string, string> = { Accept: 'application/json', Authorization: `Bearer ${this.apiKey}`, 'User-Agent': 'infercrane-typescript/0.9.0-rc.1' };
       if (options.body !== undefined) headers['Content-Type'] = 'application/json';
       if (options.idempotencyKey) headers['Idempotency-Key'] = options.idempotencyKey;
       const init: RequestInit = { method, headers, signal: controller.signal };
@@ -154,7 +154,7 @@ export class InferCrane {
   async recommendations(deployment: string, limit = 20): Promise<Array<Record<string, JsonValue>>> { if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new TypeError('limit must be an integer between 1 and 100'); return (await this.transport.request('GET', `/deployments/${encodeURIComponent(deployment)}/recommendations?limit=${limit}`) as { data: Array<Record<string, JsonValue>> }).data; }
 
   async *streamChat(deployment: string, messages: Array<{ role: string; content: string }>, options: { signal?: AbortSignal; parameters?: Record<string, JsonValue> } = {}): AsyncGenerator<Record<string, JsonValue>> {
-    const init: RequestInit = { method: 'POST', headers: { Accept: 'text/event-stream', Authorization: `Bearer ${this.apiKey}`, 'Content-Type': 'application/json', 'User-Agent': 'infercrane-typescript/0.8.0-rc.1' }, body: JSON.stringify({ model: deployment, messages, stream: true, ...options.parameters }) };
+    const init: RequestInit = { method: 'POST', headers: { Accept: 'text/event-stream', Authorization: `Bearer ${this.apiKey}`, 'Content-Type': 'application/json', 'User-Agent': 'infercrane-typescript/0.9.0-rc.1' }, body: JSON.stringify({ model: deployment, messages, stream: true, ...options.parameters }) };
     if (options.signal) init.signal = options.signal;
     const response = await this.fetcher(`${this.gatewayUrl}/v1/chat/completions`, init);
     if (!response.ok) throw new ApiError(response.status, 'inference_error', await response.text());

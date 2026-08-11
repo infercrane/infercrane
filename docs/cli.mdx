@@ -77,11 +77,14 @@ infercrane doctor
 infercrane doctor --cloud
 infercrane doctor --serverless --output json
 infercrane doctor --aws
+infercrane doctor --kubernetes
 ```
 
 `--cloud` adds SkyPilot credentials and RunPod advisory accelerator availability; `--serverless`
 adds RunPod Serverless credentials and template validation; `--aws` performs a read-only role
-assumption and identity probe for the configured AWS BYOC adapter. Diagnostics are read-only.
+assumption and identity probe for the configured AWS BYOC adapter; `--kubernetes` checks the explicit
+context, optional KServe CRD, and required namespaced permissions. Diagnostics are read-only and do
+not create provider resources.
 The capability table distinguishes `supported`, `unsupported`, and `unknown`. InferCrane never
 silently changes hardware, and never claims cache or fast-resume behavior that an adapter cannot
 observe.
@@ -146,9 +149,9 @@ infercrane apply examples/infercrane.yaml \
 |---|---|---|---|
 | `--name` | derived from model | all | Logical deployment name |
 | `--targets` | none | existing | Comma-separated registered targets |
-| `--cloud` | `runpod` on primary path | elastic/serverless | Qualified provider cloud; `aws` is elastic-only in v0.3 |
+| `--cloud` | `runpod` on primary path | elastic/serverless | Registered provider cloud; `runpod`, `aws`, and `kubernetes` have distinct qualification states |
 | `--gpu` | `L40S` on primary path | elastic/serverless | Requested GPU |
-| `--region` | provider-selected | provisioned | Provider region; required for AWS BYOC |
+| `--region` | provider-selected | provisioned | Provider region; required for AWS BYOC and ignored by the namespace-scoped Kubernetes adapter |
 | `--compute` | `elastic` | provisioned | `elastic` or `serverless` |
 | `--min` | `1`; serverless defaults to `0` | provisioned | Minimum replicas/workers |
 | `--max` | `1` | provisioned | Maximum replicas/workers |

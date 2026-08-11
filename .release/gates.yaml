@@ -40,6 +40,11 @@ milestone_gates:
     - inference_passport_canonical_signature_and_tamper_detection
     - inference_passport_migration_byte_preservation_and_tenant_isolation
     - passport_api_cli_sdk_dashboard_and_github_release_check_drift
+    - kubernetes_namespaced_provider_contract_and_lost_response_adoption
+    - kubernetes_strict_server_side_apply_and_field_ownership_conflict
+    - kubernetes_kind_restart_repair_and_zero_resource_lifecycle
+    - kubernetes_least_privilege_rbac_and_gateway_ownership_boundary
+    - kserve_standard_crd_gating_and_single_owner_resource
   deferred_until_v1_manual_qualification:
     - runpod_elastic
     - runpod_serverless
@@ -47,6 +52,7 @@ milestone_gates:
     - real_vllm
     - real_sglang
     - real_custom_oci
+    - real_kubernetes_gpu
     - real_paid_cost_accounting
 
 tag_policy:

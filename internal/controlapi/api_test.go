@@ -587,6 +587,7 @@ func TestPortableRuntimeDeployValidationAndPersistence(t *testing.T) {
 		contains   string
 	}{
 		{"sglang-default", `{"name":"sg","model":"org/model","runtime":"sglang","cloud":"aws","region":"eu-central-1","gpu":"L40S"}`, http.StatusAccepted, `"image":"lmsysorg/sglang:v0.5.12@sha256:`},
+		{"kubernetes-vllm", `{"name":"kube","model":"org/model","runtime":"vllm","cloud":"kubernetes","gpu":"NVIDIA-L40S"}`, http.StatusAccepted, `"cloud":"kubernetes"`},
 		{"custom", `{"name":"custom","model":"org/model","runtime":"custom-oci","cloud":"aws","region":"eu-central-1","gpu":"L40S","workload":` + validWorkload + `}`, http.StatusAccepted, `"runtime":"custom-oci"`},
 		{"mutable", `{"name":"bad","model":"org/model","runtime":"custom-oci","cloud":"aws","region":"eu-central-1","gpu":"L40S","workload":` + strings.Replace(validWorkload, "@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ":latest", 1) + `}`, http.StatusUnprocessableEntity, `pinned by @sha256`},
 		{"missing", `{"name":"bad","model":"org/model","runtime":"custom-oci","cloud":"aws","region":"eu-central-1","gpu":"L40S"}`, http.StatusUnprocessableEntity, `requires an explicit workload`},
@@ -779,11 +780,11 @@ func TestCancelHidesMissingOperation(t *testing.T) {
 
 func TestDoctorDiagnosticsRunInsideAuthenticatedControlPlane(t *testing.T) {
 	called := false
-	handler := (API{Store: &fakeStore{}, APIKey: "secret", Diagnostics: func(_ context.Context, cloud, serverless, aws bool) doctor.Report {
-		called = cloud && serverless && aws
+	handler := (API{Store: &fakeStore{}, APIKey: "secret", Diagnostics: func(_ context.Context, cloud, serverless, aws, kubernetes bool) doctor.Report {
+		called = cloud && serverless && aws && kubernetes
 		return doctor.Report{Ready: true, Checks: []doctor.Check{{Name: "PostgreSQL", Status: doctor.Pass, Message: "connected"}}}
 	}}).Handler()
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/doctor?cloud=true&serverless=true&aws=true", nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/doctor?cloud=true&serverless=true&aws=true&kubernetes=true", nil)
 	request.Header.Set("Authorization", "Bearer secret")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)

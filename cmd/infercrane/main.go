@@ -55,7 +55,7 @@ import (
 	"github.com/infercrane/infercrane/internal/workflows"
 )
 
-var version = "0.8.0-rc.1"
+var version = "0.9.0-rc.1"
 
 func loadPassportSigningKey(path string) (ed25519.PrivateKey, error) {
 	if path == "" {
@@ -433,6 +433,7 @@ func doctorCommand(ctx context.Context, cfg config.Config, args []string) error 
 	cloud := fs.Bool("cloud", false, "also validate SkyPilot cloud credentials")
 	serverless := fs.Bool("serverless", false, "also validate RunPod Serverless credentials and template")
 	aws := fs.Bool("aws", false, "also validate the configured AWS BYOC role")
+	kubernetes := fs.Bool("kubernetes", false, "also validate the configured Kubernetes provider")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -443,6 +444,7 @@ func doctorCommand(ctx context.Context, cfg config.Config, args []string) error 
 	query.Set("cloud", fmt.Sprint(*cloud))
 	query.Set("serverless", fmt.Sprint(*serverless))
 	query.Set("aws", fmt.Sprint(*aws))
+	query.Set("kubernetes", fmt.Sprint(*kubernetes))
 	var report doctor.Report
 	if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/doctor?"+query.Encode(), "", nil, &report); err != nil {
 		return err
@@ -2730,7 +2732,7 @@ func formatGuardEvidence(metrics domain.RevisionMetrics) string {
 func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	integrationRegistry, err := integration.V06Catalog()
+	integrationRegistry, err := integration.V09Catalog()
 	if err != nil {
 		return fmt.Errorf("configure integration contracts: %w", err)
 	}
@@ -2775,7 +2777,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		return fmt.Errorf("load credential snapshot: %w", err)
 	}
 	go func() { _ = credentialCache.Run(ctx) }()
-	diagnostics := func(checkCtx context.Context, cloud, checkServerless, checkAWS bool) doctor.Report {
+	diagnostics := func(checkCtx context.Context, cloud, checkServerless, checkAWS, checkKubernetes bool) doctor.Report {
 		report := doctor.Run(checkCtx, cfg, doctor.Dependencies{})
 		if cloud {
 			report.Add(doctor.CheckCloudCredentials(checkCtx, doctor.Dependencies{}))
@@ -2799,6 +2801,13 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		if checkAWS {
 			report.Add(doctor.CheckAWSBYOC(checkCtx, cfg, doctor.Dependencies{}))
 		}
+		if checkKubernetes {
+			report.Add(doctor.CheckKubernetes(checkCtx, cfg, doctor.Dependencies{}))
+			report.Capabilities = append(report.Capabilities,
+				doctor.Capability{Adapter: "kubernetes", Name: "server_side_apply", State: "supported", Detail: "strict server-side validation and apply without force-conflicts"},
+				doctor.Capability{Adapter: "kubernetes", Name: "namespaced_ownership", State: "supported", Detail: "InferCrane owns a bounded Deployment/Service set or one KServe InferenceService"},
+			)
+		}
 		return report
 	}
 	passportKey, err := loadPassportSigningKey(cfg.PassportSigningKeyFile)
@@ -2811,6 +2820,9 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	}
 	if cfg.AWSEnabled() {
 		benchmarkBackends["aws-ec2"] = controlapi.BackendMetadata{APIKey: cfg.APIKey, APIKeyEnv: "INFERCRANE_WORKER_API_KEY"}
+	}
+	if cfg.KubernetesEnabled() {
+		benchmarkBackends["kubernetes"] = controlapi.BackendMetadata{APIKey: cfg.APIKey, APIKeyEnv: "INFERCRANE_WORKER_API_KEY"}
 	}
 	control := (controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: credentialCache, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey}).Handler()
 	operationTelemetry := &operations.Telemetry{}
@@ -2845,6 +2857,16 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 			workflows.ReplicaBackend{Name: "aws-ec2", Cloud: "aws", Runtime: "sglang", Profile: awsProfile, Provider: awsProvider},
 			workflows.ReplicaBackend{Name: "aws-ec2", Cloud: "aws", Runtime: "custom-oci", Profile: awsProfile, Provider: awsProvider},
 		)
+	}
+	if cfg.KubernetesEnabled() {
+		kubernetesProfile, profileErr := integrationRegistry.Provider("kubernetes")
+		if profileErr != nil {
+			return fmt.Errorf("configure Kubernetes integration: %w", profileErr)
+		}
+		kubernetesProvider := provision.Kubernetes{Context: cfg.KubernetesContext, Namespace: cfg.KubernetesNamespace, WorkloadAPI: cfg.KubernetesWorkloadAPI, ServiceAccount: cfg.KubernetesServiceAccount, WorkerSecretName: cfg.KubernetesWorkerSecretName, WorkerSecretKey: cfg.KubernetesWorkerSecretKey, ImageDigest: cfg.KubernetesImageDigest, GPUResource: cfg.KubernetesGPUResource, GPUProductLabel: cfg.KubernetesGPUProductLabel}
+		for _, runtimeName := range []string{"vllm", "sglang", "custom-oci"} {
+			elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: "kubernetes", Cloud: "kubernetes", Runtime: runtimeName, Profile: kubernetesProfile, Provider: kubernetesProvider})
+		}
 	}
 	replicaBackends, err := workflows.NewReplicaBackends(elasticBackends...)
 	if err != nil {

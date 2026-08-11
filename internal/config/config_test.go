@@ -70,6 +70,27 @@ func TestAWSBYOCConfigurationIsAllOrNothingAndImmutable(t *testing.T) {
 	}
 }
 
+func TestKubernetesConfigurationIsExplicitCompleteAndImmutable(t *testing.T) {
+	t.Setenv("INFERCRANE_API_KEY", "secret")
+	t.Setenv("INFERCRANE_KUBERNETES_CONTEXT", "production")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "partial") {
+		t.Fatalf("expected partial Kubernetes configuration failure, got %v", err)
+	}
+	t.Setenv("INFERCRANE_KUBERNETES_IMAGE_DIGEST", "ghcr.io/infercrane/runtime:latest")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "sha256") {
+		t.Fatalf("expected mutable Kubernetes image failure, got %v", err)
+	}
+	t.Setenv("INFERCRANE_KUBERNETES_IMAGE_DIGEST", "ghcr.io/infercrane/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	cfg, err := Load()
+	if err != nil || !cfg.KubernetesEnabled() || cfg.KubernetesNamespace != "infercrane-system" || cfg.KubernetesWorkloadAPI != "deployment" {
+		t.Fatalf("cfg=%#v err=%v", cfg, err)
+	}
+	t.Setenv("INFERCRANE_KUBERNETES_WORKLOAD_API", "operator")
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "deployment or kserve") {
+		t.Fatalf("expected bounded workload API failure, got %v", err)
+	}
+}
+
 func TestInitializeClientWritesPrivateConfigAndLoadClientUsesIt(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", root)

@@ -32,6 +32,13 @@ func TestBuildAWSElasticPlan(t *testing.T) {
 	}
 }
 
+func TestBuildKubernetesElasticPlan(t *testing.T) {
+	p, err := Build(Input{Model: "Qwen/Qwen3-8B", Cloud: "kubernetes", GPU: "NVIDIA-L40S"})
+	if err != nil || p.Mode != "provisioned" || p.Cloud != "kubernetes" {
+		t.Fatalf("plan=%#v err=%v", p, err)
+	}
+}
+
 func TestBuildRejectsMixedModes(t *testing.T) {
 	_, err := Build(Input{Model: "model", Targets: []string{"gpu-a"}, Cloud: "aws", GPU: "L4"})
 	if err == nil {

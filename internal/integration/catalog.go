@@ -155,3 +155,42 @@ func V06Catalog() (*Registry, error) {
 	}
 	return registry, nil
 }
+
+// V09Catalog adds the namespaced Kubernetes provider boundary. Kind proves
+// Kubernetes API lifecycle semantics; real GPU/runtime compatibility remains
+// deferred until the consolidated v1 manual qualification.
+func V09Catalog() (*Registry, error) {
+	registry, err := V06Catalog()
+	if err != nil {
+		return nil, err
+	}
+	if err = registry.RegisterProvider(ProviderProfile{
+		Adapter: "kubernetes", Cloud: "kubernetes", ContractVersion: ProviderContractV1, AdapterVersion: "builtin-v0.9", Modes: []ComputeMode{ElasticMode},
+		Capabilities: []Capability{
+			{Name: "adoption", State: CapabilitySupported, Evidence: "go:test/internal/conformance#TestKubernetesLostCreateResponseConformance"},
+			{Name: "idempotent_delete", State: CapabilitySupported, Evidence: "go:test/internal/conformance#TestKubernetesProviderContractConformance"},
+			{Name: "immutable_workload", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestKubernetesConfigurationAndManifestFailClosed"},
+			{Name: "kserve_standard", State: CapabilitySupported, Detail: "conditional on the serving.kserve.io InferenceService CRD; KServe owns generated children", Evidence: "go:test/internal/provision#TestKubernetesKServeModeRequiresCRDAndUsesOneOwner"},
+			{Name: "gateway_api_exposure", State: CapabilitySupported, Detail: "optional HTTPRoute exposes the InferCrane gateway and never routes revisions", Evidence: "script:scripts/test-kubernetes-manifests.sh"},
+			{Name: "namespaced_rbac", State: CapabilitySupported, Evidence: "script:scripts/test-kubernetes-manifests.sh"},
+			{Name: "orphan_inventory", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestKubernetesProviderAdoptsLostResponseAndRepairsPartialOwnerSet"},
+			{Name: "server_side_apply", State: CapabilitySupported, Evidence: "script:scripts/test-kubernetes-kind.sh"},
+			{Name: "advanced_disaggregated_runtime", State: CapabilityUnsupported, Detail: "KServe LLMInferenceService, llm-d, and Dynamo own routing or scheduling and require a future explicit routing contract"},
+		},
+		Qualification: []Qualification{
+			{State: QualificationLocal, Environment: "kind-and-hermetic-kubectl", Evidence: "script:scripts/test-kubernetes-kind.sh"},
+			{State: QualificationDeferred, Environment: "real-kubernetes-gpu", Reason: "awaiting consolidated v1 manual qualification"},
+		},
+	}); err != nil {
+		return nil, err
+	}
+	compatibility := append(registry.Snapshot().Compatibility,
+		RuntimeCompatibility{Runtime: "vllm", Cloud: "kubernetes", Mode: ElasticMode, State: QualificationSimulated, Evidence: "go:test/internal/conformance#TestKubernetesProviderContractConformance"},
+		RuntimeCompatibility{Runtime: "sglang", Cloud: "kubernetes", Mode: ElasticMode, State: QualificationSimulated, Evidence: "go:test/internal/conformance#TestPortableRuntimeConformance"},
+		RuntimeCompatibility{Runtime: "custom-oci", Cloud: "kubernetes", Mode: ElasticMode, State: QualificationSimulated, Evidence: "go:test/internal/conformance#TestPortableRuntimeConformance"},
+	)
+	if err = registry.SetCompatibility(compatibility...); err != nil {
+		return nil, err
+	}
+	return registry, nil
+}

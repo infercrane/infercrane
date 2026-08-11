@@ -2,7 +2,7 @@
   "schema_version": 1,
   "program": "infercrane-v1",
   "current_milestone": "v0.9.0",
-  "state": "planning",
+  "state": "ready_for_clean_qualification",
   "baseline": {
     "commit": "774ea8bb3b2e6b47baf338f7f79075e19e7490c4",
     "dev_check": "passed",
@@ -11,7 +11,7 @@
     "real_infrastructure": "deferred"
   },
   "last_completed_milestone": "v0.8.0-rc.1",
-  "next_action": "refine v0.9 Kubernetes, KServe, Gateway API, and conditional advanced-runtime acceptance criteria before implementation",
+  "next_action": "commit v0.9 implementation, run exact-commit contract and local qualification, record evidence, and create the local RC tag",
   "rc_tags": ["v0.2.0-rc.1", "v0.3.0-rc.1", "v0.4.0-rc.1", "v0.5.0-rc.1", "v0.6.0-rc.1", "v0.7.0-rc.1", "v0.8.0-rc.1"],
-  "updated_at": "2026-08-11T09:57:00Z"
+  "updated_at": "2026-08-11T10:33:00Z"
 }

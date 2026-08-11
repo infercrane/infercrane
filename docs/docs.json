@@ -102,8 +102,8 @@
         "group": "DEPLOY",
         "pages": [
           "deployment-spec",
-        "features/model-artifacts",
-        "features/custom-oci",
+          "features/model-artifacts",
+          "features/custom-oci",
           "features/provisioning",
           "features/gateway",
           "features/revisions"
@@ -137,10 +137,11 @@
           "integrations/github-actions",
           "architecture/provider-contract",
           "architecture/runtime-contract",
-        "integrations/vllm",
-        "integrations/sglang",
+          "integrations/vllm",
+          "integrations/sglang",
           "integrations/runpod",
           "integrations/aws-ec2",
+          "integrations/kubernetes",
           "integrations/aiperf",
           "integrations/hugging-face"
         ]
@@ -185,10 +186,11 @@
               "adr/0012-versioned-integration-contracts",
               "adr/0013-governed-external-capacity-and-byoc",
               "adr/0014-generated-automation-clients",
-            "adr/0015-embedded-evidence-dashboard"
-            ,"adr/0016-portable-oci-runtime-workloads",
+              "adr/0015-embedded-evidence-dashboard",
+              "adr/0016-portable-oci-runtime-workloads",
               "adr/0017-deterministic-inference-decisions",
-              "adr/0018-signed-release-evidence"
+              "adr/0018-signed-release-evidence",
+              "adr/0019-kubernetes-integration-boundaries"
             ]
           },
           "release-acceptance"

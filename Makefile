@@ -1,6 +1,6 @@
 GORELEASER_VERSION := v2.12.7
 
-.PHONY: build context context-check generate-api generate-api-check test-automation test-automation-full test-dashboard docs-dev docs-check test test-container test-stack test-failure test-store test-production-config test-provider-contracts test-acceptance-safety verify audit deadcode release-check snapshot acceptance-local acceptance-preflight acceptance-cleanup qualify-local qualify-rc qualify-contracts dev-check dev-check-full dev-up dev-down
+.PHONY: build context context-check generate-api generate-api-check test-automation test-automation-full test-dashboard docs-dev docs-check test test-container test-stack test-failure test-store test-production-config test-provider-contracts test-kubernetes-manifests test-kubernetes-kind test-acceptance-safety verify audit deadcode release-check snapshot acceptance-local acceptance-preflight acceptance-cleanup qualify-local qualify-rc qualify-contracts dev-check dev-check-full dev-up dev-down
 
 build:
 	go build ./cmd/infercrane
@@ -50,6 +50,12 @@ test-production-config:
 
 test-provider-contracts:
 	go test -count=1 -run ProviderContract ./internal/provision
+
+test-kubernetes-manifests:
+	./scripts/test-kubernetes-manifests.sh
+
+test-kubernetes-kind:
+	./scripts/test-kubernetes-kind.sh
 
 test-acceptance-safety:
 	./scripts/test-acceptance-safety.sh

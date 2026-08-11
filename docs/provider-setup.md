@@ -19,3 +19,11 @@ and run `infercrane doctor --aws` before provisioning.
 
 AWS Serverless, EKS, SageMaker, automatic hardware selection, and public-network bootstrap are not
 qualified by v0.3.
+
+## Kubernetes
+
+The Kubernetes adapter uses an explicit kubeconfig context, one namespace, an immutable default
+runtime image, and a worker Secret reference. It owns a bounded Deployment/Service set or one optional
+KServe InferenceService. Apply the reviewed namespace and RBAC manifests, then run
+`infercrane doctor --kubernetes`. See [Kubernetes](/integrations/kubernetes) for exact configuration,
+security boundaries, local Kind qualification, and current real-GPU limitations.

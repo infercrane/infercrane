@@ -1,0 +1,56 @@
+---
+title: "ADR 0019: Kubernetes integration boundaries"
+description: Keep Kubernetes, KServe, Gateway API, and advanced inference systems behind explicit ownership boundaries.
+---
+
+# ADR 0019: Kubernetes integration boundaries
+
+Status: accepted for v0.9.
+
+## Context
+
+InferCrane must operate workloads in enterprise Kubernetes clusters without becoming a Kubernetes
+distribution or recreating controllers already owned by Kubernetes, KServe, Gateway API, Dynamo, or
+llm-d. Kubernetes server-side apply provides field ownership and conflict detection; server dry-run
+exercises admission and schema validation without persistence.
+
+KServe recommends standard `InferenceService` for controlled generative workloads and owns the
+Deployments, Services, autoscaling, and networking it generates. Gateway API owns north-south route
+attachment. llm-d and Dynamo own advanced scheduling, routing, and disaggregated execution.
+
+## Decision
+
+- The core Kubernetes adapter owns one deterministic namespaced owner set per InferCrane replica
+  intent: an `apps/v1` Deployment and a cluster-local Service. Kubernetes owns ReplicaSets, Pods,
+  scheduling, restarts, and node placement.
+- Apply uses strict server-side dry-run followed by server-side apply under field manager
+  `infercrane-provider-v1`. InferCrane never forces field conflicts.
+- An optional KServe adapter owns only a standard `serving.kserve.io/v1beta1` InferenceService.
+  KServe owns every generated child. InferCrane refuses this mode when the CRD is absent.
+- Gateway API integration exposes the InferCrane gateway through an operator-applied HTTPRoute. It
+  never participates in active/candidate or replica routing.
+- The adapter uses a namespaced ServiceAccount and references an existing Secret by name/key. The
+  control plane does not read Secret values and receives no cluster-wide permissions.
+- Advanced KServe `LLMInferenceService`, llm-d, and Dynamo are capability registrations only in
+  v0.9. Their present routing/scheduling ownership overlaps InferCrane's current router boundary, so
+  enabling them without a new explicit routing contract would create two owners.
+
+## Consequences
+
+The dependency-light Kubernetes path works without installing an operator. KServe users can choose
+its standard controller while retaining InferCrane's durable release lifecycle. Existing cluster
+controllers keep their native inspection and field ownership. Advanced distributed inference is
+honestly deferred rather than represented as working from protocol compatibility alone.
+
+The first adapter shells out to `kubectl`, matching the existing narrow AWS CLI boundary and avoiding
+a large Kubernetes client dependency in the release binary. The command surface is bounded,
+context-aware, deadline-aware, redacted, and exercised against Kind. A future native client may
+replace transport without changing Provider Contract semantics.
+
+## References
+
+- [Kubernetes server-side apply](https://kubernetes.io/docs/reference/using-api/server-side-apply/)
+- [Kubernetes API dry-run](https://kubernetes.io/docs/reference/using-api/api-concepts#dry-run)
+- [KServe deployment guidance](https://kserve.github.io/website/docs/admin-guide/overview)
+- [Gateway API HTTPRoute](https://gateway-api.sigs.k8s.io/api-types/httproute/)
+- [llm-d architecture](https://github.com/llm-d/llm-d/blob/main/docs/proposals/llm-d.md)

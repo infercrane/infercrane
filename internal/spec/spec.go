@@ -74,7 +74,7 @@ func Load(path string) (Deployment, error) {
 	if out.Name == "" || out.Model.ID == "" || out.Resources.GPU == "" || out.Provider.Cloud == "" {
 		return out, fmt.Errorf("name, model.id, resources.gpu, and provider.cloud are required")
 	}
-	if err := support.V06().Validate(out.Runtime.Engine, out.Provider.Cloud, out.Compute.Mode); err != nil {
+	if err := support.V09().Validate(out.Runtime.Engine, out.Provider.Cloud, out.Compute.Mode); err != nil {
 		return out, fmt.Errorf("support policy: %w", err)
 	}
 	if out.Provider.Cloud == "aws" && out.Provider.Region == "" {

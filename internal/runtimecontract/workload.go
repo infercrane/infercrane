@@ -36,8 +36,8 @@ func (w Workload) Validate() error {
 	if len(w.Image) > 512 {
 		return errors.New("workload.image must not exceed 512 characters")
 	}
-	if !digestPattern.MatchString(strings.TrimSpace(w.Image)) {
-		return errors.New("workload.image must be an OCI reference pinned by @sha256:<64 lowercase hex characters>")
+	if err := ValidateImage(w.Image); err != nil {
+		return fmt.Errorf("workload.image: %w", err)
 	}
 	if len(w.Command) == 0 || len(w.Command) > 128 || strings.TrimSpace(w.Command[0]) == "" {
 		return errors.New("workload.command must contain executable argv")
@@ -72,6 +72,15 @@ func (w Workload) Validate() error {
 	}
 	if w.ShutdownGraceSeconds < 1 || w.ShutdownGraceSeconds > 3600 {
 		return errors.New("workload.shutdown_grace_seconds must be between 1 and 3600")
+	}
+	return nil
+}
+
+// ValidateImage validates an immutable OCI image identity shared by portable
+// workloads and provider-specific default runtime configuration.
+func ValidateImage(image string) error {
+	if len(image) > 512 || !digestPattern.MatchString(strings.TrimSpace(image)) {
+		return errors.New("must be an OCI reference pinned by @sha256:<64 lowercase hex characters>")
 	}
 	return nil
 }

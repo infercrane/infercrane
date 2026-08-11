@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/infercrane/infercrane/internal/runtimecontract"
 )
 
 type Config struct {
@@ -18,6 +20,9 @@ type Config struct {
 	AWSRoleARN, AWSExternalID, AWSRegion, AWSSubnetID, AWSAMIID, AWSInstanceType, AWSGPU                               string
 	AWSInstanceProfileARN, AWSWorkerSecretARN, AWSImageDigest                                                          string
 	AWSSecurityGroupIDs                                                                                                []string
+	KubernetesContext, KubernetesNamespace, KubernetesWorkloadAPI, KubernetesServiceAccount                            string
+	KubernetesWorkerSecretName, KubernetesWorkerSecretKey, KubernetesImageDigest                                       string
+	KubernetesGPUResource, KubernetesGPUProductLabel                                                                   string
 	Port, RouterStartPort, DatabaseMaxOpen, DatabaseMaxIdle                                                            int
 	HealthInterval, UpstreamTimeout, ShutdownTimeout, RequestRetention                                                 time.Duration
 }
@@ -265,6 +270,15 @@ func load(requireAPIKey bool) (Config, error) {
 		AWSInstanceProfileARN:      env("INFERCRANE_AWS_INSTANCE_PROFILE_ARN", ""),
 		AWSWorkerSecretARN:         env("INFERCRANE_AWS_WORKER_SECRET_ARN", ""),
 		AWSImageDigest:             env("INFERCRANE_AWS_IMAGE_DIGEST", ""),
+		KubernetesContext:          env("INFERCRANE_KUBERNETES_CONTEXT", ""),
+		KubernetesNamespace:        env("INFERCRANE_KUBERNETES_NAMESPACE", "infercrane-system"),
+		KubernetesWorkloadAPI:      env("INFERCRANE_KUBERNETES_WORKLOAD_API", "deployment"),
+		KubernetesServiceAccount:   env("INFERCRANE_KUBERNETES_SERVICE_ACCOUNT", "infercrane-runtime"),
+		KubernetesWorkerSecretName: env("INFERCRANE_KUBERNETES_WORKER_SECRET_NAME", "infercrane-worker"),
+		KubernetesWorkerSecretKey:  env("INFERCRANE_KUBERNETES_WORKER_SECRET_KEY", "api-key"),
+		KubernetesImageDigest:      env("INFERCRANE_KUBERNETES_IMAGE_DIGEST", ""),
+		KubernetesGPUResource:      env("INFERCRANE_KUBERNETES_GPU_RESOURCE", "nvidia.com/gpu"),
+		KubernetesGPUProductLabel:  env("INFERCRANE_KUBERNETES_GPU_PRODUCT_LABEL", "nvidia.com/gpu.product"),
 		Port:                       port, RouterStartPort: routerPort, DatabaseMaxOpen: maxOpen, DatabaseMaxIdle: maxIdle,
 		HealthInterval: time.Duration(healthSeconds) * time.Second, UpstreamTimeout: time.Duration(upstreamSeconds) * time.Second,
 		ShutdownTimeout: time.Duration(shutdownSeconds) * time.Second, RequestRetention: time.Duration(retentionHours) * time.Hour,
@@ -310,10 +324,15 @@ func load(requireAPIKey bool) (Config, error) {
 	if err := validateAWS(config); err != nil {
 		return Config{}, err
 	}
+	if err := validateKubernetes(config); err != nil {
+		return Config{}, err
+	}
 	return config, nil
 }
 
 func (c Config) AWSEnabled() bool { return c.AWSRoleARN != "" }
+
+func (c Config) KubernetesEnabled() bool { return c.KubernetesContext != "" }
 
 func validateAWS(config Config) error {
 	values := []string{config.AWSRoleARN, config.AWSRegion, config.AWSSubnetID, config.AWSAMIID, config.AWSInstanceType, config.AWSGPU, config.AWSInstanceProfileARN, config.AWSWorkerSecretARN, config.AWSImageDigest}
@@ -332,8 +351,28 @@ func validateAWS(config Config) error {
 	if len(config.AWSSecurityGroupIDs) == 0 {
 		return errors.New("AWS BYOC configuration requires at least one security group")
 	}
-	if !strings.Contains(config.AWSImageDigest, "@sha256:") {
+	if runtimecontract.ValidateImage(config.AWSImageDigest) != nil {
 		return errors.New("INFERCRANE_AWS_IMAGE_DIGEST must be pinned by sha256 digest")
+	}
+	return nil
+}
+
+func validateKubernetes(config Config) error {
+	configured := config.KubernetesContext != "" || config.KubernetesImageDigest != ""
+	if !configured {
+		return nil
+	}
+	values := []string{config.KubernetesContext, config.KubernetesNamespace, config.KubernetesWorkloadAPI, config.KubernetesServiceAccount, config.KubernetesWorkerSecretName, config.KubernetesWorkerSecretKey, config.KubernetesImageDigest, config.KubernetesGPUResource, config.KubernetesGPUProductLabel}
+	for _, value := range values {
+		if value == "" {
+			return errors.New("Kubernetes configuration is partial; context, namespace, workload API, service account, worker Secret name/key, immutable image digest, GPU resource, and GPU product label are required")
+		}
+	}
+	if config.KubernetesWorkloadAPI != "deployment" && config.KubernetesWorkloadAPI != "kserve" {
+		return errors.New("INFERCRANE_KUBERNETES_WORKLOAD_API must be deployment or kserve")
+	}
+	if runtimecontract.ValidateImage(config.KubernetesImageDigest) != nil {
+		return errors.New("INFERCRANE_KUBERNETES_IMAGE_DIGEST must be pinned by sha256 digest")
 	}
 	return nil
 }

@@ -47,11 +47,28 @@ type Capability struct {
 }
 
 type Dependencies struct {
-	LookPath    func(string) (string, error)
-	Ping        func(context.Context, string) error
-	SkyCheck    func(context.Context) error
-	RunPodCheck func(context.Context) error
-	AWSCheck    func(context.Context) error
+	LookPath        func(string) (string, error)
+	Ping            func(context.Context, string) error
+	SkyCheck        func(context.Context) error
+	RunPodCheck     func(context.Context) error
+	AWSCheck        func(context.Context) error
+	KubernetesCheck func(context.Context) error
+}
+
+func CheckKubernetes(ctx context.Context, cfg config.Config, deps Dependencies) Check {
+	if !cfg.KubernetesEnabled() {
+		return Check{"Kubernetes", Fail, "Kubernetes provider is not configured", "Set INFERCRANE_KUBERNETES_CONTEXT and the complete INFERCRANE_KUBERNETES_* configuration on the control plane."}
+	}
+	check := deps.KubernetesCheck
+	if check == nil {
+		check = (provision.Kubernetes{Context: cfg.KubernetesContext, Namespace: cfg.KubernetesNamespace, WorkloadAPI: cfg.KubernetesWorkloadAPI, ServiceAccount: cfg.KubernetesServiceAccount, WorkerSecretName: cfg.KubernetesWorkerSecretName, WorkerSecretKey: cfg.KubernetesWorkerSecretKey, ImageDigest: cfg.KubernetesImageDigest, GPUResource: cfg.KubernetesGPUResource, GPUProductLabel: cfg.KubernetesGPUProductLabel}).Check
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	if err := check(checkCtx); err != nil {
+		return Check{"Kubernetes", Fail, "Kubernetes API, CRD, or namespaced RBAC probe failed", "Verify kubectl access, namespace RBAC, configured workload API, and the optional KServe CRD."}
+	}
+	return Check{"Kubernetes", Pass, "Kubernetes API and namespaced provider permissions are ready", ""}
 }
 
 func CheckAWSBYOC(ctx context.Context, cfg config.Config, deps Dependencies) Check {

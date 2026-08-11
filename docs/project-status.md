@@ -9,7 +9,7 @@ but lacks production qualification; **planned** is not a product capability.
 | CLI discovery and contexts | Implemented | Cobra grouped help, suggestions, generated completion, named contexts, authenticated identity, and durable timeline following are wired. |
 | Terminal operations workspace | Experimental | Responsive evidence views and state-valid guarded actions use authenticated APIs and durable operations; `--read-only` disables mutations, and broader terminal compatibility qualification remains. |
 | Embedded operations dashboard | Experimental | Authenticated fleet/evidence views, explicit stale and partial states, tab-scoped credentials, and guarded cooperative cancellation pass local security and Docker tests; broader browser qualification remains. |
-| Environment diagnostics | Implemented | Read-only checks for API auth, PostgreSQL, vLLM Router, SkyPilot/RunPod, Serverless, and AWS role assumption. |
+| Environment diagnostics | Implemented | Read-only checks for API auth, PostgreSQL, vLLM Router, SkyPilot/RunPod, Serverless, AWS role assumption, and Kubernetes API/RBAC. |
 | Declarative existing-target apply | Implemented | Atomic convergence of routing, replica bounds, and target membership. |
 | Durable lifecycle operations | Implemented | Idempotency, progress, retry classification, and cooperative cancellation state. |
 | Leased operation execution engine | Experimental | Existing-target, elastic, revision, scale, delete, and serverless handlers resume from durable state; real provider restart qualification remains. |
@@ -41,13 +41,14 @@ but lacks production qualification; **planned** is not a product capability.
 | Portable custom OCI workloads | Experimental | Immutable digest, argv, OpenAI protocol, standard probes, cancellation/drain and shutdown declarations persist in revisions and pass hermetic launch conformance; real GPU evidence is deferred. |
 | SGLang runtime profile | Experimental | Official v0.5.12 image manifest is digest-pinned and hermetic fixtures exercise Runtime Contract V1 on the AWS EC2 elastic adapter; real GPU and feature-level compatibility evidence is deferred. |
 | Tiered developer qualification | Implemented | Fast provider contracts, isolated Docker recovery checks, paid-run locking, and CI evidence separate local correctness from real-cloud qualification. |
-| Capacity and runtime adapter contracts | Experimental | GPU/cache-aware deterministic placement exists; the first v0.1 operational composition is SkyPilot/RunPod elastic, RunPod Serverless, and vLLM. |
+| Capacity and runtime adapter contracts | Experimental | GPU/cache-aware deterministic placement exists; adapters are registered independently for RunPod, AWS EC2, Kubernetes, governed external targets, vLLM, SGLang, and custom OCI with explicit qualification states. |
 | Provider capacity preflight | Experimental | Optional provider advisors persist available/constrained/unavailable/unknown evidence; RunPod secure-GPU stock is the first read-only implementation. |
 | Inference decisions and SLO policy | Experimental | Versioned deterministic recommendations persist canonical benchmark provenance, exact compatibility, missing signals and sourced cost constraints; autonomous apply is excluded. |
 | Scoped tenant identity and RBAC | Experimental | Role-bounded service-account scopes, hashed rotation/revocation credentials, audit attribution, and adversarial tenant isolation are wired. |
 | Reference-only secrets | Experimental | Environment references persist without values; additional production secret-manager resolvers remain planned. |
 | Governed external capacity | Experimental | Explicit health/queue overflow, hysteresis, cooldown, privacy acknowledgement, atomic request/cost reservations, OpenRouter, and no-replay streaming behavior are hermetically qualified; real billing evidence is deferred. |
 | AWS EC2 BYOC | Experimental | Private-network, role-assumed, tag-owned, immutable-image elastic lifecycle passes Provider Contract V1 hermetically; real AWS evidence is deferred. |
+| Kubernetes elastic | Experimental | Namespace-scoped Deployment/Service and optional standard KServe ownership pass hermetic and Kind lifecycle gates; real Kubernetes GPU/runtime evidence is deferred. |
 | SkyPilot RunPod provisioning | Experimental | Requires credentialed elastic lifecycle acceptance and soak tests. |
 | Production performance claims | Planned | Must be backed by reproducible real-vLLM benchmarks. |
 

@@ -11,10 +11,11 @@ Every release candidate must record the tested versions of Go, PostgreSQL, vLLM 
 Python, container runtime, GPU driver, CUDA, model, and infrastructure provider. Absence from that
 matrix means unqualified, not incompatible.
 
-`infercrane integrations --output json` is the executable capability inventory. In v0.3, RunPod
-elastic/serverless and AWS EC2 elastic are distinct provider profiles; OpenRouter is a governed
-external target profile. Local conformance and real-provider qualification are separate fields.
-AWS Serverless, EKS, SageMaker, and unregistered external adapters remain unqualified.
+`infercrane integrations --output json` is the executable capability inventory. RunPod
+elastic/serverless, AWS EC2 elastic, and Kubernetes elastic are distinct provider profiles;
+OpenRouter is a governed external target profile. Local conformance and real-provider qualification
+are separate fields. AWS Serverless, EKS as a separate adapter, SageMaker, advanced
+KServe/llm-d/Dynamo topologies, and unregistered external adapters remain unqualified.
 
 The OpenAI-compatible surface is contract-tested for model listing and chat completions. New API
 fields should pass through unless InferCrane must interpret them. Removing or changing an accepted
@@ -37,4 +38,5 @@ Repository commands:
 make test-container  # race tests, vet, and real PostgreSQL integration
 make test-stack      # full Compose request and CLI smoke path
 make test-failure    # worker loss and control-plane restart recovery
+make test-kubernetes-kind # Kubernetes ownership and recovery without a GPU
 ```

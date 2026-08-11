@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "infercrane"
-version = "0.8.0rc1"
+version = "0.9.0rc1"
 description = "Typed Python client for the InferCrane inference control plane"
 readme = "README.md"
 requires-python = ">=3.10"

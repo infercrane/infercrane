@@ -59,6 +59,18 @@ provider: {cloud: runpod}
 	}
 }
 
+func TestLoadKubernetesElasticSpec(t *testing.T) {
+	loaded, err := Load(writeSpec(t, `
+name: qwen-kubernetes
+model: {id: Qwen/Qwen3-8B}
+resources: {gpu: NVIDIA-L40S}
+provider: {cloud: kubernetes}
+`))
+	if err != nil || loaded.Provider.Cloud != "kubernetes" || loaded.Compute.Mode != "elastic" {
+		t.Fatalf("loaded=%+v err=%v", loaded, err)
+	}
+}
+
 func TestLoadRejectsNonzeroServerlessMinimum(t *testing.T) {
 	_, err := Load(writeSpec(t, `
 name: qwen

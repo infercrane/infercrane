@@ -111,6 +111,17 @@ func V06() Matrix {
 	})
 }
 
+// V09 adds the Kubernetes elastic adapter to the executable pre-release
+// matrix. Its runtime combinations are simulated/Kind-qualified; callers must
+// still inspect the integration qualification state before production use.
+func V09() Matrix {
+	return Qualified(map[string]map[string][]string{
+		DefaultCloud: {ElasticMode: {DefaultRuntime}, ServerlessMode: {DefaultRuntime}},
+		"aws":        {ElasticMode: {DefaultRuntime, "sglang", "custom-oci"}},
+		"kubernetes": {ElasticMode: {DefaultRuntime, "sglang", "custom-oci"}},
+	})
+}
+
 func (m Matrix) Validate(runtime, cloud, mode string) error {
 	if err := m.ValidateRuntime(runtime); err != nil {
 		return err

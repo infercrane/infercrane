@@ -33,4 +33,10 @@ Secrets Manager through a narrowly scoped instance profile; the control plane st
 not the value. Require an external ID, restrict trust and permissions, and use tag conditions in
 production.
 
+The Kubernetes adapter always uses an explicit context and namespace. Its reference Role contains no
+wildcards and cannot read Secrets, mutate RBAC, or create Pods directly. Workers read one named Secret
+through their service account; the control plane stores only its name and key. Strict server-side
+apply preserves field ownership and never force-steals conflicts. InferCrane deletes only exact names
+with matching durable ownership labels and annotations.
+
 Run the container as its non-root user, pin immutable image tags, restrict network access, and protect `/metrics` according to your environment. Report vulnerabilities privately as described in the repository [security policy](https://github.com/infercrane/infercrane/blob/main/SECURITY.md).

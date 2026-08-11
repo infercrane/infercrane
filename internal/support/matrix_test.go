@@ -54,3 +54,15 @@ func TestV06QualifiesExactPortableRuntimeCombinations(t *testing.T) {
 		}
 	}
 }
+
+func TestV09QualifiesOnlyKubernetesElasticRuntimeCombinations(t *testing.T) {
+	matrix := V09()
+	for _, runtime := range []string{"vllm", "sglang", "custom-oci"} {
+		if err := matrix.Validate(runtime, "kubernetes", ElasticMode); err != nil {
+			t.Fatalf("%s Kubernetes elastic: %v", runtime, err)
+		}
+	}
+	if err := matrix.Validate("vllm", "kubernetes", ServerlessMode); err == nil {
+		t.Fatal("Kubernetes serverless must remain unqualified")
+	}
+}

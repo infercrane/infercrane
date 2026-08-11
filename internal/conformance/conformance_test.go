@@ -210,3 +210,26 @@ func TestAWSEC2LostCreateResponseConformance(t *testing.T) {
 		t.Fatalf("report=%+v creates=%d err=%v", report, runner.CreateCalls, err)
 	}
 }
+
+func TestKubernetesProviderContractConformance(t *testing.T) {
+	runner := providerfixture.NewKubernetesCLI()
+	provider := provision.Kubernetes{Runner: runner, Context: "kind-infercrane", Namespace: "infercrane-system", WorkloadAPI: "deployment", ServiceAccount: "infercrane-runtime", WorkerSecretName: "infercrane-worker", WorkerSecretKey: "api-key", ImageDigest: "vllm/vllm-openai@sha256:c48cf118e1e6e39d7790e174d6014f7af5d06f79c2d29d984d11cbe2e8d414e7", GPUResource: "nvidia.com/gpu", GPUProductLabel: "nvidia.com/gpu.product"}
+	profile := integration.ProviderProfile{Adapter: "kubernetes", Cloud: "kubernetes", ContractVersion: integration.ProviderContractV1, AdapterVersion: "test", Modes: []integration.ComputeMode{integration.ElasticMode}, Qualification: []integration.Qualification{{State: integration.QualificationSimulated, Environment: "hermetic-kubectl"}}}
+	spec := provision.ReplicaSpec{ExternalKey: "deployment-r0", Model: "Qwen/Qwen3-8B", ModelRevision: "immutable", Cloud: "kubernetes", GPU: "NVIDIA-L40S", Port: 8000}
+	report := ElasticLifecycle(context.Background(), profile, provider, spec, 8000)
+	if err := report.Err(); err != nil || runner.ApplyCalls != 2 || len(runner.Objects) != 0 || runner.DeleteCalls != 1 {
+		t.Fatalf("report=%+v applies=%d deletes=%d err=%v", report, runner.ApplyCalls, runner.DeleteCalls, err)
+	}
+}
+
+func TestKubernetesLostCreateResponseConformance(t *testing.T) {
+	runner := providerfixture.NewKubernetesCLI()
+	runner.FailAfterApplyOnce = true
+	provider := provision.Kubernetes{Runner: runner, Context: "kind-infercrane", Namespace: "infercrane-system", WorkloadAPI: "deployment", ServiceAccount: "infercrane-runtime", WorkerSecretName: "infercrane-worker", WorkerSecretKey: "api-key", ImageDigest: "vllm/vllm-openai@sha256:c48cf118e1e6e39d7790e174d6014f7af5d06f79c2d29d984d11cbe2e8d414e7", GPUResource: "nvidia.com/gpu", GPUProductLabel: "nvidia.com/gpu.product"}
+	profile := integration.ProviderProfile{Adapter: "kubernetes", Cloud: "kubernetes", ContractVersion: integration.ProviderContractV1, AdapterVersion: "test", Modes: []integration.ComputeMode{integration.ElasticMode}, Qualification: []integration.Qualification{{State: integration.QualificationSimulated, Environment: "hermetic-kubectl"}}}
+	spec := provision.ReplicaSpec{ExternalKey: "deployment-r0", Model: "Qwen/Qwen3-8B", ModelRevision: "immutable", Cloud: "kubernetes", GPU: "NVIDIA-L40S", Port: 8000}
+	report := LostEnsureResponse(context.Background(), profile, provider, spec, 8000)
+	if err := report.Err(); err != nil || runner.ApplyCalls != 2 || len(runner.Objects) != 2 {
+		t.Fatalf("report=%+v applies=%d err=%v", report, runner.ApplyCalls, err)
+	}
+}

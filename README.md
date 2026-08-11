@@ -54,6 +54,9 @@ pricing, availability, or measurements.
 The v0.8 candidate adds explicit bounded AIPerf validation, durable post-promotion automatic
 rollback, and Ed25519-signed Inference Passports. It never silently mirrors user traffic or claims
 that signed evidence is a compliance certificate.
+The v0.9 candidate adds a namespaced Kubernetes adapter with strict server-side ownership, optional
+standard KServe resources, and an optional Gateway API route to the InferCrane logical endpoint. Its
+Kind lifecycle is qualified locally; real Kubernetes GPU compatibility remains deferred.
 Registration is not real-provider proof: paid acceptance and soak testing remain explicitly
 incomplete until their evidence gates run.
 
@@ -79,6 +82,7 @@ Before changing infrastructure, validate the environment and preview the exact d
 ```bash
 infercrane doctor
 infercrane doctor --cloud
+infercrane doctor --kubernetes
 infercrane plan Qwen/Qwen3-8B --cloud runpod --gpu L40S
 infercrane plan Qwen/Qwen3-8B --cloud runpod --gpu L40S --output json
 ```
@@ -277,6 +281,7 @@ Run the standard workflow:
 
 ```bash
 make dev-check       # fast repository and provider-contract feedback
+make test-kubernetes-kind # disposable, GPU-free Kubernetes lifecycle
 make dev-check-full  # isolated Docker, recovery, production-config, and docs gates
 make test-automation-full # SDK, GitHub Action, and real Terraform protocol fixtures
 ```

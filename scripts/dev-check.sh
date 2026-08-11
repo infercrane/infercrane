@@ -57,6 +57,8 @@ step provider-contracts sh -c 'cd "$1" && go test -count=1 ./internal/integratio
 step acceptance-safety "$root/scripts/test-acceptance-safety.sh"
 
 if [ "$mode" = full ]; then
+  step kubernetes-manifests make -C "$root" test-kubernetes-manifests
+  step kubernetes-kind make -C "$root" test-kubernetes-kind
   step automation-clients make -C "$root" test-automation-full
   step container-tests make -C "$root" test-container
   step stack-smoke "$root/scripts/test-stack.sh"

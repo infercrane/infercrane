@@ -12,6 +12,10 @@ Start with `infercrane doctor`, then `status`, `events`, `inspect`, and `explain
   complete `INFERCRANE_AWS_*` set, exact requested region/GPU, immutable image digest, role trust,
   private subnet reachability, and instance-profile access to the worker secret. Retrying a
   configuration error does not create capacity.
+- **Kubernetes deployment is rejected before provisioning:** run `infercrane doctor --kubernetes`;
+  verify the explicit context, namespace RoleBinding, immutable image, GPU label/resource, worker
+  Secret reference, and optional KServe CRD. A server-side field conflict is intentional protection;
+  inspect `managedFields` and resolve ownership instead of forcing the apply.
 - **External fallback does not activate:** run `infercrane external inspect DEPLOYMENT`, then check
   primary health, privacy acknowledgement, the injected secret reference, external `/models`
   inventory, and remaining request/cost reservations. InferCrane fails closed and never replays a

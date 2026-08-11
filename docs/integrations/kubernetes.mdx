@@ -1,0 +1,128 @@
+---
+title: Kubernetes
+description: Run InferCrane-owned inference workloads in a namespace without adding another operator or scheduler.
+---
+
+# Kubernetes
+
+The Kubernetes provider maps one durable replica intent to either a `Deployment` plus `Service`, or
+one standard KServe `InferenceService`. Kubernetes owns scheduling and Pods. InferCrane owns revision
+lifecycle, rollout policy, routing membership, evidence, and deletion of its exact labeled resources.
+
+<Warning>
+The v0.9 adapter has hermetic and Kind lifecycle qualification. Real GPU, vLLM, SGLang, and custom OCI
+compatibility remains deferred to the consolidated v1 manual qualification. Registration is not a
+real-cluster support claim.
+</Warning>
+
+## Choose the workload API
+
+| Mode | InferCrane creates | Use when |
+|---|---|---|
+| `deployment` | one `apps/v1 Deployment` and one `v1 Service` | You want the narrowest dependency set |
+| `kserve` | one standard `serving.kserve.io/v1beta1 InferenceService` | KServe Standard mode is already installed and operated by your platform team |
+
+InferCrane does not create child Pods directly. It does not install KServe, Gateway API, a GPU device
+plugin, model storage, or a Kubernetes distribution.
+
+## Bootstrap a namespace
+
+Review the manifests before applying them:
+
+```bash
+kubectl apply -f deploy/kubernetes/base/namespace.yaml
+kubectl apply -f deploy/kubernetes/base/service-accounts.yaml
+kubectl apply -f deploy/kubernetes/base/provider-rbac.yaml
+```
+
+The included Role is namespace-scoped and contains no wildcard, Secret, Pod, cluster-wide, or RBAC
+mutation permission. If the control plane runs outside the cluster, bind the same Role to the user or
+identity in its kubeconfig instead of the included service account subject.
+
+Create the worker credential without putting it in Git or shell history. Its value must equal the
+control-plane worker credential used for health checks and routing:
+
+```bash
+kubectl --namespace infercrane-system create secret generic infercrane-worker \
+  --from-file=api-key="$HOME/.config/infercrane/worker-key"
+```
+
+## Configure the control plane
+
+```bash
+export INFERCRANE_KUBERNETES_CONTEXT='production-cluster'
+export INFERCRANE_KUBERNETES_NAMESPACE='infercrane-system'
+export INFERCRANE_KUBERNETES_WORKLOAD_API='deployment'
+export INFERCRANE_KUBERNETES_SERVICE_ACCOUNT='infercrane-runtime'
+export INFERCRANE_KUBERNETES_WORKER_SECRET_NAME='infercrane-worker'
+export INFERCRANE_KUBERNETES_WORKER_SECRET_KEY='api-key'
+export INFERCRANE_KUBERNETES_IMAGE_DIGEST='vllm/vllm-openai@sha256:REPLACE_WITH_QUALIFIED_DIGEST'
+export INFERCRANE_KUBERNETES_GPU_RESOURCE='nvidia.com/gpu'
+export INFERCRANE_KUBERNETES_GPU_PRODUCT_LABEL='nvidia.com/gpu.product'
+```
+
+Configuration is all-or-nothing. The image must be immutable. The adapter always passes an explicit
+context and namespace to `kubectl`; it never relies on or changes the current context.
+
+Validate the Kubernetes API, optional KServe CRD, and every required namespaced permission without
+creating a workload:
+
+```bash
+infercrane doctor --kubernetes
+```
+
+## Deploy
+
+The GPU value maps to the configured product-label value. It is never silently substituted.
+
+```bash
+infercrane plan Qwen/Qwen3-8B \
+  --name qwen-kubernetes \
+  --cloud kubernetes \
+  --gpu NVIDIA-L40S
+
+infercrane deploy Qwen/Qwen3-8B \
+  --name qwen-kubernetes \
+  --cloud kubernetes \
+  --gpu NVIDIA-L40S \
+  --idempotency-key qwen-kubernetes-initial
+```
+
+Provisioning uses strict server-side dry-run followed by server-side apply with the
+`infercrane-provider-v1` field manager. InferCrane does not use `--force-conflicts`; ownership drift
+fails visibly. A lost apply response is safe to retry because resource names and ownership metadata
+derive from the durable replica key.
+
+## KServe Standard mode
+
+Install and operate a compatible KServe release separately, apply
+`deploy/kubernetes/kserve/provider-rbac.yaml`, then set:
+
+```bash
+export INFERCRANE_KUBERNETES_WORKLOAD_API='kserve'
+```
+
+The provider verifies the `InferenceService` API and required permissions during `doctor`. KServe
+owns generated Deployments, Services, and Pods; InferCrane inventories and deletes only the parent
+InferenceService. Raw KServe condition metadata remains available through `infercrane inspect`.
+
+KServe `LLMInferenceService`, llm-d, and Dynamo are not enabled in v0.9 because each can own routing,
+scheduling, or disaggregation. They require a future explicit ownership contract rather than a hidden
+second router.
+
+## Expose the logical endpoint
+
+`deploy/kubernetes/gateway-api/httproute.yaml` is an optional placeholder. Replace the Gateway and
+hostname, then apply it only if your cluster already has Gateway API and a controller. It routes to
+the InferCrane gateway—not directly to revisions or workers—so safe rollout ownership stays singular.
+
+## Local conformance
+
+```bash
+make test-kubernetes-manifests
+make test-kubernetes-kind
+```
+
+The disposable Kind test proves strict apply, restart observation, lost-state repair, foreign field
+ownership rejection, idempotent deletion, and zero remaining run-owned resources. It schedules no GPU
+and sends no paid provider request.

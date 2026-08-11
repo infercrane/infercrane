@@ -67,7 +67,11 @@ External ownership stays explicit and replaceable behind narrow adapters:
 - An artifact resolver identifies and transfers immutable model artifacts.
 - A benchmark runner generates load and returns reproducible evidence.
 
-InferCrane does not replace any of them with a general scheduler or workflow engine. The v0.1 process composes SkyPilot/RunPod, RunPod Serverless, Hugging Face tooling, AIPerf, and vLLM implementations. The durable algorithms do not select those implementations with provider conditionals; [qualification is separate from registration](/adr/0009-qualified-support-and-backend-registration).
+InferCrane does not replace any of them with a general scheduler or workflow engine. The process
+composes registered elastic, serverless, external-target, runtime, artifact, and benchmark adapters.
+RunPod, AWS EC2, and Kubernetes are current infrastructure adapters with different qualification
+states; vLLM, SGLang, and custom OCI are current runtime profiles. Durable algorithms do not select
+implementations with provider conditionals; [qualification is separate from registration](/adr/0009-qualified-support-and-backend-registration).
 
 ## Data plane
 

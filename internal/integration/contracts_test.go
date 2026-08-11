@@ -53,6 +53,26 @@ func TestV06CatalogPublishesExactRuntimeCompatibility(t *testing.T) {
 	}
 }
 
+func TestV09CatalogPublishesKubernetesWithoutAdvancedRoutingClaims(t *testing.T) {
+	registry, err := V09Catalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile, err := registry.Provider("kubernetes")
+	if err != nil || profile.Cloud != "kubernetes" || len(profile.Modes) != 1 || profile.Modes[0] != ElasticMode {
+		t.Fatalf("profile=%#v err=%v", profile, err)
+	}
+	encoded, _ := json.Marshal(registry.Snapshot())
+	for _, required := range []string{`"kserve_standard"`, `"gateway_api_exposure"`, `"advanced_disaggregated_runtime","state":"unsupported"`, `"runtime":"vllm","cloud":"kubernetes","mode":"elastic","state":"simulated"`, `"runtime":"vllm","cloud":"runpod","mode":"elastic"`, `"runtime":"vllm","cloud":"aws","mode":"elastic"`} {
+		if !strings.Contains(string(encoded), required) {
+			t.Fatalf("missing %s: %s", required, encoded)
+		}
+	}
+	if strings.Contains(string(encoded), `"environment":"real-kubernetes-gpu","evidence"`) {
+		t.Fatalf("fabricated real Kubernetes evidence: %s", encoded)
+	}
+}
+
 func TestProfilesRejectInvalidOrUnsupportedClaims(t *testing.T) {
 	provider := ProviderProfile{Adapter: "bad", Cloud: "cloud", ContractVersion: ProviderContractV1, AdapterVersion: "1", Modes: []ComputeMode{ElasticMode}, Qualification: []Qualification{{State: QualificationReal}}}
 	if err := provider.Validate(); err == nil || !strings.Contains(err.Error(), "without evidence") {
@@ -121,7 +141,7 @@ func TestRuntimeBackendsRejectInvalidComposition(t *testing.T) {
 }
 
 func TestRegistryLooksUpProfilesWithoutExposingMutableMaps(t *testing.T) {
-	registry, err := V02Catalog()
+	registry, err := V09Catalog()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +159,7 @@ func TestRegistryLooksUpProfilesWithoutExposingMutableMaps(t *testing.T) {
 }
 
 func TestCapabilityEvidenceReferencesExistingTests(t *testing.T) {
-	registry, err := V02Catalog()
+	registry, err := V09Catalog()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,6 +172,13 @@ func TestCapabilityEvidenceReferencesExistingTests(t *testing.T) {
 	}
 	for _, capability := range capabilities {
 		if capability.State != CapabilitySupported {
+			continue
+		}
+		if strings.HasPrefix(capability.Evidence, "script:") {
+			path := strings.TrimPrefix(capability.Evidence, "script:")
+			if _, err := os.Stat(filepath.Join("..", "..", path)); err != nil {
+				t.Fatalf("supported capability %q references missing script %q", capability.Name, capability.Evidence)
+			}
 			continue
 		}
 		const prefix = "go:test/"
