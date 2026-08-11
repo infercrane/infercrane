@@ -488,7 +488,7 @@ run_elastic_faults() {
   disconnected_status=$?
   set -e
   [ "$disconnected_status" -ne 0 ] || { echo "waiting CLI did not disconnect" >&2; return 1; }
-  grep -F "operation $operation_id continues in the control plane" "$evidence/disconnected-cli.log" >/dev/null
+  grep -F "operation $operation_id continues safely in the control plane" "$evidence/disconnected-cli.log" >/dev/null
   printf '{"operation_id":"%s","provider_resource_id":"%s","client_exit":%s}\n' "$operation_id" "$resource_id" "$disconnected_status" >"$evidence/cli-disconnect.json"
 
   echo "==> control-plane-restart-during-provisioning"
