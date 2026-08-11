@@ -33,7 +33,7 @@ consolidated real-provider workflow is complete.
 
 | Evidence | State |
 | --- | --- |
-| Automated local/Docker/Kind/package gates | Pending final evidence commit |
+| Automated local/Docker/Kind/package gates | Passed on implementation commit `3c4cb6961640c471fbd12d79ec4d497f8da0ce9f` |
 | RunPod elastic and Serverless | Deferred to consolidated manual qualification |
 | AWS EC2 BYOC vLLM/SGLang/custom OCI | Deferred to consolidated manual qualification |
 | Kubernetes GPU vLLM/SGLang/custom OCI | Deferred to consolidated manual qualification |

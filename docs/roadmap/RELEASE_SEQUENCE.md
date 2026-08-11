@@ -15,7 +15,7 @@ engineering checkpoints rather than public stable releases.
 | v0.7.0 | Automated gates passed | Recommendations, capacity intelligence, hybrid overflow and SLO policy |
 | v0.8.0 | Automated gates passed | Release Guard V2 and Inference Passport |
 | v0.9.0 | Automated gates passed | Kubernetes/KServe boundaries and namespaced lifecycle |
-| v1.0.0 | Planned | Multi-provider hardening, packaging and consolidated RC evidence |
+| v1.0.0 | Automated gates passed | Multi-provider hardening, packaging and consolidated RC evidence; paid infrastructure deferred |
 
 Each milestone specification defines scope, exclusions, public surface, verification, and evidence.
 The machine-readable current state is `.release/current.json`; gates are `.release/gates.yaml`.
