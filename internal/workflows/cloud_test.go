@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/operations"
 	"github.com/infercrane/infercrane/internal/provision"
 )
@@ -25,6 +26,22 @@ type fakeCloudStore struct {
 	revision       domain.DeploymentRevision
 	applied        bool
 	rejectedReason string
+}
+
+func testElasticProfile(adapter, cloud string) integration.ProviderProfile {
+	return integration.ProviderProfile{Adapter: adapter, Cloud: cloud, ContractVersion: integration.ProviderContractV1, AdapterVersion: "test", Modes: []integration.ComputeMode{integration.ElasticMode}, Qualification: []integration.Qualification{{State: integration.QualificationSimulated, Environment: "hermetic"}}}
+}
+
+func testRuntimeBackends(t *testing.T, inspector integration.RuntimeInspector) integration.RuntimeBackends {
+	t.Helper()
+	backends, err := integration.NewRuntimeBackends(integration.RuntimeBackend{
+		Profile:   integration.RuntimeProfile{Runtime: "vllm", ContractVersion: integration.RuntimeContractV1, AdapterVersion: "test", Protocol: "openai", Qualification: []integration.Qualification{{State: integration.QualificationSimulated, Environment: "hermetic"}}},
+		Inspector: inspector,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return backends
 }
 
 func (f *fakeCloudStore) ResolveForTenant(context.Context, string, string) (domain.ResolvedDeployment, error) {
@@ -128,6 +145,25 @@ func TestConvergeCreatesExactlyOneResourcePerMinimumReplica(t *testing.T) {
 	}
 }
 
+func TestConvergeRejectsProviderWithoutMatchingRuntimeBackend(t *testing.T) {
+	store := &fakeCloudStore{deployment: domain.Deployment{ID: "deployment-1", Name: "qwen", Model: "Qwen/Qwen3-8B", MinReplicas: 1, MaxReplicas: 1}}
+	provider := &fakeReplicaProvider{}
+	backends, err := NewReplicaBackends(ReplicaBackend{Name: "fixture", Cloud: "runpod", Runtime: "vllm", Profile: testElasticProfile("fixture", "runpod"), Provider: provider})
+	if err != nil {
+		t.Fatal(err)
+	}
+	operation := domain.Operation{RequestJSON: `{"deployment_id":"deployment-1","name":"qwen","model":"Qwen/Qwen3-8B","cloud":"runpod","gpu":"L40S","runtime":"vllm","tenant_id":"global","min_replicas":1,"max_replicas":1}`}
+	emptyRuntimeBackends, runtimeErr := integration.NewRuntimeBackends()
+	if runtimeErr != nil {
+		t.Fatal(runtimeErr)
+	}
+	_, err = CloudHandlersWithBackends(store, backends, emptyRuntimeBackends)[ConvergeKind](context.Background(), operation)
+	var failure operations.Failure
+	if !errors.As(err, &failure) || failure.Code != "runtime_backend_unavailable" || provider.ensureCalls != 0 {
+		t.Fatalf("failure=%+v ensure_calls=%d err=%v", failure, provider.ensureCalls, err)
+	}
+}
+
 func TestCandidateProvisioningCreatesIsolatedRevisionCapacity(t *testing.T) {
 	spec := domain.DeploymentRevisionSpec{Model: "Qwen/Qwen3-8B", Runtime: "vllm", RoutingStrategy: "round-robin", MinReplicas: 1, MaxReplicas: 1, ComputeMode: "elastic", Cloud: "runpod", GPU: "L40S"}
 	encoded, _ := json.Marshal(spec)
@@ -217,12 +253,12 @@ func TestGuardedPromotionWaitsForRetiringRequests(t *testing.T) {
 	}
 	store := &fakeCloudStore{deployment: domain.Deployment{ID: "deployment-1", Name: "qwen", ActiveRevisionID: "rev-1", CandidateRevisionID: "rev-2"}, revision: domain.DeploymentRevision{ID: "rev-2", Status: "candidate", SpecJSON: string(encoded)}, replicas: replicas}
 	provider := &fakeReplicaProvider{observation: provision.Observation{Exists: true, State: "ready"}}
-	backends, err := NewReplicaBackends(ReplicaBackend{Name: "skypilot", Cloud: "runpod", Runtime: "vllm", Provider: provider})
+	backends, err := NewReplicaBackends(ReplicaBackend{Name: "skypilot", Cloud: "runpod", Runtime: "vllm", Profile: testElasticProfile("skypilot", "runpod"), Provider: provider})
 	if err != nil {
 		t.Fatal(err)
 	}
 	drain := &fakeDrainTracker{active: 1}
-	handler := CloudHandlersWithBackendsAndDrain(store, backends, fakeInspector{}, drain)[RolloutPromoteKind]
+	handler := CloudHandlersWithBackendsAndDrain(store, backends, testRuntimeBackends(t, fakeInspector{}), drain)[RolloutPromoteKind]
 	operation := domain.Operation{ID: "promote", LeaseOwner: "worker", LeaseGeneration: 1, RequestJSON: `{"name":"qwen","candidate_id":"rev-2","tenant_id":"global"}`}
 	_, err = handler(context.Background(), operation)
 	var failure operations.Failure
@@ -305,8 +341,8 @@ type fakeReplicaProvider struct {
 func TestReplicaBackendsResolveByCloudRuntimeAndDurableName(t *testing.T) {
 	first, second := &fakeReplicaProvider{}, &fakeReplicaProvider{}
 	registry, err := NewReplicaBackends(
-		ReplicaBackend{Name: "adapter-a", Cloud: "cloud-a", Runtime: "runtime-a", Provider: first},
-		ReplicaBackend{Name: "adapter-b", Cloud: "cloud-a", Runtime: "runtime-b", Provider: second},
+		ReplicaBackend{Name: "adapter-a", Cloud: "cloud-a", Runtime: "runtime-a", Profile: testElasticProfile("adapter-a", "cloud-a"), Provider: first},
+		ReplicaBackend{Name: "adapter-b", Cloud: "cloud-a", Runtime: "runtime-b", Profile: testElasticProfile("adapter-b", "cloud-a"), Provider: second},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -324,15 +360,15 @@ func TestReplicaBackendsResolveByCloudRuntimeAndDurableName(t *testing.T) {
 func TestReplicaBackendsRejectAmbiguousRegistrations(t *testing.T) {
 	provider := &fakeReplicaProvider{}
 	_, err := NewReplicaBackends(
-		ReplicaBackend{Name: "adapter-a", Cloud: "cloud-a", Runtime: "runtime-a", Provider: provider},
-		ReplicaBackend{Name: "adapter-b", Cloud: "cloud-a", Runtime: "runtime-a", Provider: provider},
+		ReplicaBackend{Name: "adapter-a", Cloud: "cloud-a", Runtime: "runtime-a", Profile: testElasticProfile("adapter-a", "cloud-a"), Provider: provider},
+		ReplicaBackend{Name: "adapter-b", Cloud: "cloud-a", Runtime: "runtime-a", Profile: testElasticProfile("adapter-b", "cloud-a"), Provider: provider},
 	)
 	if err == nil {
 		t.Fatal("expected duplicate cloud/runtime registration to fail")
 	}
 	_, err = NewReplicaBackends(
-		ReplicaBackend{Name: "adapter-a", Cloud: "cloud-a", Runtime: "runtime-a", Provider: provider},
-		ReplicaBackend{Name: "adapter-a", Cloud: "cloud-b", Runtime: "runtime-a", Provider: provider},
+		ReplicaBackend{Name: "adapter-a", Cloud: "cloud-a", Runtime: "runtime-a", Profile: testElasticProfile("adapter-a", "cloud-a"), Provider: provider},
+		ReplicaBackend{Name: "adapter-a", Cloud: "cloud-b", Runtime: "runtime-a", Profile: testElasticProfile("adapter-a", "cloud-b"), Provider: provider},
 	)
 	if err == nil {
 		t.Fatal("expected duplicate durable adapter name to fail")

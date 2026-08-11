@@ -9,6 +9,14 @@ InferCrane is a durable inference control plane, not a wrapper around one cloud.
 revision, operation, Release Guard, explanation, and telemetry models do not belong to RunPod,
 SkyPilot, or vLLM. External systems enter through capability-specific contracts.
 
+```bash
+infercrane integrations
+```
+
+This authenticated read returns the compiled Provider Contract and Runtime Contract versions,
+registered adapters, capabilities, and separate local versus real-infrastructure qualification
+states. It never upgrades registration or hermetic simulation into a public support claim.
+
 | Concern | InferCrane owns | Adapter owns |
 |---|---|---|
 | Elastic infrastructure | Replica intent, retries, drain and deletion ordering | Ensure, observe, delete and inventory |
@@ -42,7 +50,9 @@ the architectural boundary.
 4. Add configuration, diagnostics, documentation, and deterministic failure behavior.
 5. Qualify the exact cloud/runtime/compute-mode combination with real lifecycle evidence.
 
+The versioned contract details are documented in [Provider Contract V1](/architecture/provider-contract)
+and [Runtime Contract V1](/architecture/runtime-contract).
+
 Do not add a provider conditional to a generic workflow, expose registration as support, build a
 second scheduler, or silently fabricate unavailable provider data. See
 [ADR 0009](/adr/0009-qualified-support-and-backend-registration) for the accepted boundary.
-

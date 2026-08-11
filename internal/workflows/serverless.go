@@ -8,28 +8,31 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/operations"
 	"github.com/infercrane/infercrane/internal/provision"
 )
 
-type ServerlessProvider interface {
-	EnsureEndpoint(context.Context, provision.ServerlessEndpointSpec) (provision.ServerlessEndpoint, error)
-	ListEndpoints(context.Context) ([]provision.ServerlessEndpoint, error)
-	DeleteEndpoint(context.Context, string) error
-	EndpointURL(string) string
-}
+type ServerlessProvider = integration.ServerlessProvider
 
 // ServerlessBackend binds provider-neutral endpoint lifecycle operations to
 // persisted identity. A new provider supplies another backend; workflow logic
 // does not need provider-specific conditionals.
 type ServerlessBackend struct {
 	Name, Cloud, Runtime string
+	Profile              integration.ProviderProfile
 	Provider             ServerlessProvider
 }
 
 func (b ServerlessBackend) validate() error {
 	if b.Name == "" || b.Cloud == "" || b.Runtime == "" || b.Provider == nil {
 		return errors.New("serverless backend name, cloud, runtime, and provider are required")
+	}
+	if err := b.Profile.Validate(); err != nil {
+		return fmt.Errorf("serverless backend %q profile: %w", b.Name, err)
+	}
+	if b.Profile.Adapter != b.Name || b.Profile.Cloud != b.Cloud || !integration.HasMode(b.Profile, integration.ServerlessMode) {
+		return fmt.Errorf("serverless backend %q profile does not match its adapter, cloud, and serverless mode", b.Name)
 	}
 	return nil
 }

@@ -291,3 +291,38 @@ func TestActiveStreamKeepsSelectedRouterAcrossGenerationPublish(t *testing.T) {
 		t.Fatalf("response=%d %s", response.Code, response.Body.String())
 	}
 }
+
+func TestClientCancellationPropagatesToRuntime(t *testing.T) {
+	upstreamStarted := make(chan struct{})
+	upstreamCancelled := make(chan struct{})
+	client := &http.Client{Transport: roundTripper(func(request *http.Request) (*http.Response, error) {
+		close(upstreamStarted)
+		<-request.Context().Done()
+		close(upstreamCancelled)
+		return nil, request.Context().Err()
+	})}
+	directory := routes.New()
+	directory.Put(routes.Snapshot{DeploymentID: "d1", Alias: "alias", UpstreamModel: "model", RouterURL: "http://runtime", Runtime: "vllm"})
+	handler := (&Gateway{Routes: directory, APIKey: "secret", Client: client}).Handler()
+	ctx, cancel := context.WithCancel(context.Background())
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"alias","stream":true,"messages":[]}`)).WithContext(ctx)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		handler.ServeHTTP(response, request)
+		close(done)
+	}()
+	<-upstreamStarted
+	cancel()
+	select {
+	case <-upstreamCancelled:
+	case <-time.After(time.Second):
+		t.Fatal("runtime request did not observe client cancellation")
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("gateway did not finish after cancellation")
+	}
+}

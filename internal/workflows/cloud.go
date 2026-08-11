@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/operations"
 	"github.com/infercrane/infercrane/internal/provision"
 	"github.com/infercrane/infercrane/internal/router"
@@ -101,12 +102,7 @@ type CloudStore interface {
 	Audit(context.Context, domain.AuditEvent) error
 }
 
-type ReplicaProvider interface {
-	Handle(string) provision.ProviderHandle
-	EnsureReplica(context.Context, provision.ReplicaSpec) (provision.ProviderHandle, error)
-	ObserveReplica(context.Context, provision.ProviderHandle, int) (provision.Observation, error)
-	DeleteReplica(context.Context, provision.ProviderHandle) error
-}
+type ReplicaProvider = integration.ElasticProvider
 
 type CapacityAdvisor interface {
 	Availability(context.Context, provision.AvailabilityRequest) (provision.Availability, error)
@@ -117,6 +113,7 @@ type CapacityAdvisor interface {
 // selected by conditionals inside lifecycle code.
 type ReplicaBackend struct {
 	Name, Cloud, Runtime string
+	Profile              integration.ProviderProfile
 	Provider             ReplicaProvider
 	Capacity             CapacityAdvisor
 }
@@ -133,6 +130,12 @@ func NewReplicaBackends(backends ...ReplicaBackend) (ReplicaBackends, error) {
 	for _, backend := range backends {
 		if backend.Name == "" || backend.Cloud == "" || backend.Runtime == "" || backend.Provider == nil {
 			return ReplicaBackends{}, errors.New("replica backend name, cloud, runtime, and provider are required")
+		}
+		if err := backend.Profile.Validate(); err != nil {
+			return ReplicaBackends{}, fmt.Errorf("replica backend %q profile: %w", backend.Name, err)
+		}
+		if backend.Profile.Adapter != backend.Name || backend.Profile.Cloud != backend.Cloud || !integration.HasMode(backend.Profile, integration.ElasticMode) {
+			return ReplicaBackends{}, fmt.Errorf("replica backend %q profile does not match its adapter, cloud, and elastic mode", backend.Name)
 		}
 		key := cloudRuntimeKey(backend.Cloud, backend.Runtime)
 		if _, exists := registry.byCloudRuntime[key]; exists {
@@ -172,9 +175,7 @@ func (r ReplicaBackends) ForProvider(name string) (ReplicaBackend, error) {
 	return backend, nil
 }
 
-type RuntimeInspector interface {
-	Inspect(context.Context, string) (bool, map[string]struct{})
-}
+type RuntimeInspector = integration.RuntimeInspector
 
 type ArtifactResolver interface {
 	Resolve(context.Context, string, string) (domain.ModelArtifact, error)
@@ -189,18 +190,30 @@ type DrainTracker interface {
 // backend qualified by v0.1. Production composition and future integrations
 // use CloudHandlersWithBackends directly.
 func QualifiedV01CloudHandlers(store CloudStore, provider ReplicaProvider, runtime RuntimeInspector, artifactResolvers ...ArtifactResolver) map[string]operations.Handler {
-	backends, err := NewReplicaBackends(ReplicaBackend{Name: "skypilot", Cloud: "runpod", Runtime: support.DefaultRuntime, Provider: provider})
+	backends, err := NewReplicaBackends(ReplicaBackend{Name: "skypilot", Cloud: "runpod", Runtime: support.DefaultRuntime, Profile: builtinElasticProfile("skypilot", "runpod"), Provider: provider})
 	if err != nil {
 		panic(err)
 	}
-	return CloudHandlersWithBackends(store, backends, runtime, artifactResolvers...)
+	runtimes, err := integration.NewRuntimeBackends(integration.RuntimeBackend{Profile: builtinRuntimeProfile(support.DefaultRuntime), Inspector: runtime})
+	if err != nil {
+		panic(err)
+	}
+	return CloudHandlersWithBackends(store, backends, runtimes, artifactResolvers...)
 }
 
-func CloudHandlersWithBackends(store CloudStore, backends ReplicaBackends, runtime RuntimeInspector, artifactResolvers ...ArtifactResolver) map[string]operations.Handler {
-	return CloudHandlersWithBackendsAndDrain(store, backends, runtime, nil, artifactResolvers...)
+func builtinElasticProfile(adapter, cloud string) integration.ProviderProfile {
+	return integration.ProviderProfile{Adapter: adapter, Cloud: cloud, ContractVersion: integration.ProviderContractV1, AdapterVersion: "builtin", Modes: []integration.ComputeMode{integration.ElasticMode}, Qualification: []integration.Qualification{{State: integration.QualificationRegistered}}}
 }
 
-func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackends, runtime RuntimeInspector, drain DrainTracker, artifactResolvers ...ArtifactResolver) map[string]operations.Handler {
+func builtinRuntimeProfile(name string) integration.RuntimeProfile {
+	return integration.RuntimeProfile{Runtime: name, ContractVersion: integration.RuntimeContractV1, AdapterVersion: "builtin", Protocol: "openai", Qualification: []integration.Qualification{{State: integration.QualificationRegistered}}}
+}
+
+func CloudHandlersWithBackends(store CloudStore, backends ReplicaBackends, runtimes integration.RuntimeBackends, artifactResolvers ...ArtifactResolver) map[string]operations.Handler {
+	return CloudHandlersWithBackendsAndDrain(store, backends, runtimes, nil, artifactResolvers...)
+}
+
+func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackends, runtimes integration.RuntimeBackends, drain DrainTracker, artifactResolvers ...ArtifactResolver) map[string]operations.Handler {
 	var artifactResolver ArtifactResolver
 	if len(artifactResolvers) > 0 {
 		artifactResolver = artifactResolvers[0]
@@ -215,9 +228,16 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 			return "", operations.Permanent("deployment_missing", fmt.Errorf("resolve desired deployment: %w", err))
 		}
 		request.DeploymentID = resolved.Deployment.ID
+		if request.Runtime == "" {
+			request.Runtime = support.DefaultRuntime
+		}
 		backend, err := backends.ForCloud(request.Cloud, request.Runtime)
 		if err != nil {
 			return "", operations.Permanent("provider_backend_unavailable", err)
+		}
+		runtimeBackend, err := runtimes.ForRuntime(request.Runtime)
+		if err != nil {
+			return "", operations.Permanent("runtime_backend_unavailable", err)
 		}
 		if request.RevisionID == "" {
 			request.RevisionID = resolved.Deployment.ActiveRevisionID
@@ -248,7 +268,7 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 		targetURLs := make([]string, 0, desired)
 		resourceIDs := make([]string, 0, desired)
 		for ordinal := 0; ordinal < desired; ordinal++ {
-			targetName, targetURL, resourceID, ensureErr := ensureCloudReplica(ctx, store, backend, runtime, operation, request, ordinal)
+			targetName, targetURL, resourceID, ensureErr := ensureCloudReplica(ctx, store, backend, runtimeBackend.Inspector, operation, request, ordinal)
 			if ensureErr != nil {
 				return "", ensureErr
 			}
@@ -430,9 +450,16 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 		}
 		request := CloudRequest{DeploymentID: resolved.Deployment.ID, Name: rollout.Name, Model: spec.Model, ModelRevision: spec.ModelRevision, RevisionID: revision.ID, Cloud: spec.Cloud, GPU: spec.GPU, Region: spec.Region, RuntimeVersion: spec.RuntimeVersion, RuntimeArgs: spec.RuntimeArgs, Port: spec.Port, MinReplicas: spec.MinReplicas, MaxReplicas: spec.MaxReplicas, DesiredReplicas: spec.MinReplicas, TenantID: rollout.TenantID, Actor: rollout.Actor, Candidate: true}
 		request.Runtime = spec.Runtime
+		if request.Runtime == "" {
+			request.Runtime = support.DefaultRuntime
+		}
 		backend, backendErr := backends.ForCloud(request.Cloud, request.Runtime)
 		if backendErr != nil {
 			return "", operations.Permanent("provider_backend_unavailable", backendErr)
+		}
+		runtimeBackend, runtimeErr := runtimes.ForRuntime(request.Runtime)
+		if runtimeErr != nil {
+			return "", operations.Permanent("runtime_backend_unavailable", runtimeErr)
 		}
 		modelArtifact, artifactErr := store.ModelArtifactForRevision(ctx, request.TenantID, request.RevisionID)
 		if errors.Is(artifactErr, domain.ErrNotFound) {
@@ -451,7 +478,7 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 		var endpoints []string
 		var resourceIDs []string
 		for ordinal := 0; ordinal < request.DesiredReplicas; ordinal++ {
-			_, endpoint, resourceID, ensureErr := ensureCloudReplica(ctx, store, backend, runtime, operation, request, ordinal)
+			_, endpoint, resourceID, ensureErr := ensureCloudReplica(ctx, store, backend, runtimeBackend.Inspector, operation, request, ordinal)
 			if ensureErr != nil {
 				var failure operations.Failure
 				if errors.As(ensureErr, &failure) && !failure.Retryable {

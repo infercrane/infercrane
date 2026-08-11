@@ -53,7 +53,7 @@ step() {
 }
 
 step repository make -C "$root" verify
-step provider-contracts sh -c 'cd "$1" && go test -count=1 -run ProviderContract ./internal/provision' sh "$root"
+step provider-contracts sh -c 'cd "$1" && go test -count=1 ./internal/integration ./internal/conformance ./internal/provision ./internal/gateway ./internal/reconcile ./internal/workflows' sh "$root"
 step acceptance-safety "$root/scripts/test-acceptance-safety.sh"
 
 if [ "$mode" = full ]; then

@@ -187,6 +187,7 @@ Supported v0.1 strategies are `round-robin`, `consistent-hash`, `power-of-two`, 
 | `operation watch ID` | Resume following a durable operation after disconnect or from another terminal |
 | `operation cancel ID` | Request cooperative cancellation |
 | `orphans` | List unmanaged provisioned resources visible to the control plane |
+| `integrations` | Inspect registered provider/runtime capabilities and qualification state |
 
 ```bash
 infercrane status qwen-prod --watch
@@ -195,6 +196,8 @@ infercrane logs qwen-prod --type runtime --since 15m
 infercrane events qwen-prod --output json
 infercrane inspect qwen-prod
 infercrane operation watch OPERATION_ID
+infercrane integrations
+infercrane integrations --output json
 ```
 
 Long operations belong to the control plane, not the terminal. `deploy`, `apply`, rollout, scale,

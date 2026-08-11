@@ -419,14 +419,15 @@ func TestInvalidOutputIsRejectedBeforeAnyControlPlaneRequest(t *testing.T) {
 		"plan": func() error {
 			return planCommand(context.Background(), cfg, []string{"Qwen/Qwen3-8B", "--output", "xml"})
 		},
-		"doctor":      func() error { return doctorCommand(context.Background(), cfg, []string{"--output", "xml"}) },
-		"benchmark":   func() error { return benchmarkCommand(context.Background(), cfg, []string{"qwen", "--output", "xml"}) },
-		"deployments": func() error { return listDeployments(context.Background(), cfg, []string{"--output", "xml"}) },
-		"status":      func() error { return statusCommand(context.Background(), cfg, []string{"qwen", "--output", "xml"}) },
-		"orphans":     func() error { return orphanAPICommand(context.Background(), cfg, []string{"--output", "xml"}) },
-		"inspect":     func() error { return inspectCommand(context.Background(), cfg, []string{"qwen", "--output", "xml"}) },
-		"events":      func() error { return eventsCommand(context.Background(), cfg, []string{"qwen", "--output", "xml"}) },
-		"explain":     func() error { return explainCommand(context.Background(), cfg, []string{"qwen", "--output", "xml"}) },
+		"doctor":       func() error { return doctorCommand(context.Background(), cfg, []string{"--output", "xml"}) },
+		"benchmark":    func() error { return benchmarkCommand(context.Background(), cfg, []string{"qwen", "--output", "xml"}) },
+		"deployments":  func() error { return listDeployments(context.Background(), cfg, []string{"--output", "xml"}) },
+		"status":       func() error { return statusCommand(context.Background(), cfg, []string{"qwen", "--output", "xml"}) },
+		"orphans":      func() error { return orphanAPICommand(context.Background(), cfg, []string{"--output", "xml"}) },
+		"integrations": func() error { return integrationsCommand(context.Background(), cfg, []string{"--output", "xml"}) },
+		"inspect":      func() error { return inspectCommand(context.Background(), cfg, []string{"qwen", "--output", "xml"}) },
+		"events":       func() error { return eventsCommand(context.Background(), cfg, []string{"qwen", "--output", "xml"}) },
+		"explain":      func() error { return explainCommand(context.Background(), cfg, []string{"qwen", "--output", "xml"}) },
 		"explain scaling": func() error {
 			return explainCommand(context.Background(), cfg, []string{"scaling", "qwen", "--output", "xml"})
 		},
@@ -450,6 +451,24 @@ func TestInvalidOutputIsRejectedBeforeAnyControlPlaneRequest(t *testing.T) {
 				t.Fatalf("control-plane requests=%d, want %d", requests, before)
 			}
 		})
+	}
+}
+
+func TestIntegrationsCommandShowsContractsAndDeferredEvidence(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/integrations" || r.Header.Get("Authorization") != "Bearer secret" {
+			http.Error(w, "unexpected request", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"provider_contract":"infercrane.provider/v1","runtime_contract":"infercrane.runtime/v1","providers":[{"adapter":"fixture","cloud":"test","contract_version":"infercrane.provider/v1","adapter_version":"1","modes":["elastic"],"capabilities":[],"qualification":[{"state":"deferred","reason":"manual"}]}],"runtimes":[]}}`))
+	}))
+	defer server.Close()
+	output, err := captureStdout(t, func() error {
+		return integrationsCommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, nil)
+	})
+	if err != nil || !strings.Contains(output, "infercrane.provider/v1") || !strings.Contains(output, "fixture") || !strings.Contains(output, "deferred") {
+		t.Fatalf("output=%q err=%v", output, err)
 	}
 }
 

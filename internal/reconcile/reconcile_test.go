@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/provision"
 	"github.com/infercrane/infercrane/internal/router"
 	"github.com/infercrane/infercrane/internal/routes"
@@ -46,6 +47,18 @@ type healthyRuntime struct{}
 
 func (healthyRuntime) Inspect(context.Context, string) (bool, map[string]struct{}) {
 	return true, map[string]struct{}{"model": {}}
+}
+
+func testRuntimeBackends(t *testing.T, inspector integration.RuntimeInspector) integration.RuntimeBackends {
+	t.Helper()
+	backends, err := integration.NewRuntimeBackends(integration.RuntimeBackend{
+		Profile:   integration.RuntimeProfile{Runtime: "vllm", ContractVersion: integration.RuntimeContractV1, AdapterVersion: "test", Protocol: "openai", Qualification: []integration.Qualification{{State: integration.QualificationSimulated, Environment: "hermetic"}}},
+		Inspector: inspector,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return backends
 }
 
 type fakeRouter struct {
@@ -93,7 +106,7 @@ func TestUnchangedGenerationUsesGenerationProcessIdentity(t *testing.T) {
 	store, directory := reconcilerFixture()
 	store.generation.WorkerSetHash = router.WorkerSetHash("round-robin", []string{"http://gpu"})
 	backend := &fakeRouter{routes: directory}
-	reconciler := Reconciler{Store: store, Routes: directory, Router: backend, Runtimes: map[string]Runtime{"vllm": healthyRuntime{}}, RouterStartPort: 18080, InstanceID: "instance"}
+	reconciler := Reconciler{Store: store, Routes: directory, Router: backend, Runtimes: testRuntimeBackends(t, healthyRuntime{}), RouterStartPort: 18080, InstanceID: "instance"}
 	if err := reconciler.Once(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +118,7 @@ func TestUnchangedGenerationUsesGenerationProcessIdentity(t *testing.T) {
 func TestRouterCandidateFailureLeavesOldGenerationServing(t *testing.T) {
 	store, directory := reconcilerFixture()
 	backend := &fakeRouter{startErr: errors.New("candidate failed"), routes: directory}
-	reconciler := Reconciler{Store: store, Routes: directory, Router: backend, Runtimes: map[string]Runtime{"vllm": healthyRuntime{}}, RouterStartPort: 18080, InstanceID: "instance"}
+	reconciler := Reconciler{Store: store, Routes: directory, Router: backend, Runtimes: testRuntimeBackends(t, healthyRuntime{}), RouterStartPort: 18080, InstanceID: "instance"}
 	if err := reconciler.Once(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -115,10 +128,23 @@ func TestRouterCandidateFailureLeavesOldGenerationServing(t *testing.T) {
 	}
 }
 
+func TestUnregisteredRuntimeNeverBecomesRoutable(t *testing.T) {
+	store, directory := reconcilerFixture()
+	store.target.Runtime = "sglang"
+	backend := &fakeRouter{routes: directory}
+	reconciler := Reconciler{Store: store, Routes: directory, Router: backend, Runtimes: testRuntimeBackends(t, healthyRuntime{}), RouterStartPort: 18080, InstanceID: "instance"}
+	if err := reconciler.Once(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := directory.Get("prod"); ok || backend.started != "" {
+		t.Fatalf("unregistered runtime remained routable; started=%q", backend.started)
+	}
+}
+
 func TestRouterCandidatePublishesBeforeOldRetires(t *testing.T) {
 	store, directory := reconcilerFixture()
 	backend := &fakeRouter{routes: directory}
-	reconciler := Reconciler{Store: store, Routes: directory, Router: backend, Runtimes: map[string]Runtime{"vllm": healthyRuntime{}}, RouterStartPort: 18080, InstanceID: "instance"}
+	reconciler := Reconciler{Store: store, Routes: directory, Router: backend, Runtimes: testRuntimeBackends(t, healthyRuntime{}), RouterStartPort: 18080, InstanceID: "instance"}
 	if err := reconciler.Once(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +168,7 @@ func TestRouterRetirementWaitsForPinnedRequest(t *testing.T) {
 		t.Fatal("old route was not acquired")
 	}
 	backend := &fakeRouter{routes: directory}
-	reconciler := Reconciler{Store: store, Routes: directory, Router: backend, Runtimes: map[string]Runtime{"vllm": healthyRuntime{}}, RouterStartPort: 18080, InstanceID: "instance"}
+	reconciler := Reconciler{Store: store, Routes: directory, Router: backend, Runtimes: testRuntimeBackends(t, healthyRuntime{}), RouterStartPort: 18080, InstanceID: "instance"}
 	if err := reconciler.Once(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +208,7 @@ func TestServerlessRouteDoesNotWarmWorkersOrStartRouter(t *testing.T) {
 	store.target.URL = "https://api.runpod.invalid/v2/endpoint/openai"
 	backend := &fakeRouter{routes: directory}
 	runtime := &countingRuntime{}
-	reconciler := Reconciler{Store: store, Routes: directory, Router: backend, Runtimes: map[string]Runtime{"vllm": runtime}, DirectTargets: map[string]DirectTargetBackend{"runpod-serverless": {Provider: "runpod", APIKey: "runpod-secret", Status: zeroWorkerStatus{}}}, RouterStartPort: 18080, InstanceID: "instance"}
+	reconciler := Reconciler{Store: store, Routes: directory, Router: backend, Runtimes: testRuntimeBackends(t, runtime), DirectTargets: map[string]DirectTargetBackend{"runpod-serverless": {Provider: "runpod", APIKey: "runpod-secret", Status: zeroWorkerStatus{}}}, RouterStartPort: 18080, InstanceID: "instance"}
 	if err := reconciler.Once(context.Background()); err != nil {
 		t.Fatal(err)
 	}

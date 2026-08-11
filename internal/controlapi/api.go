@@ -17,6 +17,7 @@ import (
 	"github.com/infercrane/infercrane/internal/benchmark"
 	"github.com/infercrane/infercrane/internal/doctor"
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/support"
 	"github.com/infercrane/infercrane/internal/workflows"
 )
@@ -66,6 +67,7 @@ type API struct {
 	}
 	Diagnostics              func(context.Context, bool, bool) doctor.Report
 	Backends                 map[string]BackendMetadata
+	Integrations             integration.Snapshot
 	GatewayURL, AIPerfBinary string
 }
 
@@ -81,6 +83,7 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/operations/{id}", a.auth(authz.Read, a.operation))
 	mux.HandleFunc("GET /api/v1/doctor", a.auth(authz.Read, a.diagnostics))
 	mux.HandleFunc("GET /api/v1/whoami", a.auth(authz.Read, a.whoami))
+	mux.HandleFunc("GET /api/v1/integrations", a.auth(authz.Read, a.integrations))
 	mux.HandleFunc("GET /api/v1/operations/{id}/events", a.auth(authz.Read, a.operationEvents))
 	mux.HandleFunc("POST /api/v1/operations/{id}/cancel", a.auth(authz.Deploy, a.cancel))
 	mux.HandleFunc("POST /api/v1/deployments/apply", a.auth(authz.Deploy, a.applyDeployment))
@@ -112,6 +115,10 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/principals/{id}/rotate", a.auth(authz.ManageTenant, a.rotatePrincipal))
 	mux.HandleFunc("DELETE /api/v1/principals/{id}", a.auth(authz.ManageTenant, a.revokePrincipal))
 	return mux
+}
+
+func (a API) integrations(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"data": a.Integrations})
 }
 
 func (a API) whoami(w http.ResponseWriter, r *http.Request) {

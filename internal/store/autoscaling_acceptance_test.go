@@ -10,6 +10,7 @@ import (
 
 	"github.com/infercrane/infercrane/internal/autoscale"
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/operations"
 	"github.com/infercrane/infercrane/internal/provision"
 	"github.com/infercrane/infercrane/internal/router"
@@ -312,7 +313,8 @@ func TestRunPodServerlessAcceptanceConvergesAtZeroAndDeletesEndpoint(t *testing.
 		t.Fatal(err)
 	}
 	provider := &acceptanceServerlessProvider{endpoints: map[string]provision.ServerlessEndpoint{}}
-	handlers := workflows.ServerlessHandlers(s, workflows.ServerlessBackend{Name: "runpod-serverless", Cloud: "runpod", Runtime: "vllm", Provider: provider}, acceptanceArtifactResolver{})
+	profile := integration.ProviderProfile{Adapter: "runpod-serverless", Cloud: "runpod", ContractVersion: integration.ProviderContractV1, AdapterVersion: "test", Modes: []integration.ComputeMode{integration.ServerlessMode}, Qualification: []integration.Qualification{{State: integration.QualificationSimulated, Environment: "hermetic"}}}
+	handlers := workflows.ServerlessHandlers(s, workflows.ServerlessBackend{Name: "runpod-serverless", Cloud: "runpod", Runtime: "vllm", Profile: profile, Provider: provider}, acceptanceArtifactResolver{})
 	worker := operations.Worker{Repository: s, Handlers: handlers, Owner: "serverless-worker", Lease: time.Second, BaseBackoff: time.Millisecond, MaxBackoff: time.Millisecond, Jitter: func(d time.Duration) time.Duration { return d }}
 	if worked, workerErr := worker.Once(ctx); workerErr != nil || !worked {
 		t.Fatalf("serverless converge worked=%t err=%v", worked, workerErr)

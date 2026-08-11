@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/provision"
 )
 
@@ -82,7 +83,8 @@ func TestServerlessDeleteDoesNotPersistDeletionWhileRecoveredEndpointRemains(t *
 type fakeArtifactResolver struct{}
 
 func testServerlessBackend(provider ServerlessProvider) ServerlessBackend {
-	return ServerlessBackend{Name: "runpod-serverless", Cloud: "runpod", Runtime: "vllm", Provider: provider}
+	profile := integration.ProviderProfile{Adapter: "runpod-serverless", Cloud: "runpod", ContractVersion: integration.ProviderContractV1, AdapterVersion: "test", Modes: []integration.ComputeMode{integration.ServerlessMode}, Qualification: []integration.Qualification{{State: integration.QualificationSimulated, Environment: "hermetic"}}}
+	return ServerlessBackend{Name: "runpod-serverless", Cloud: "runpod", Runtime: "vllm", Profile: profile, Provider: provider}
 }
 
 func (fakeArtifactResolver) Resolve(context.Context, string, string) (domain.ModelArtifact, error) {

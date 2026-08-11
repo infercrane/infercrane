@@ -1,0 +1,69 @@
+schema_version: 1
+
+milestone_gates:
+  required:
+    - formatting
+    - static_analysis
+    - unit_tests
+    - api_cli_tests
+    - database_migration_tests
+    - provider_runtime_contracts
+    - deterministic_provider_simulation
+    - fault_injection
+    - docker_compose_integration
+    - security_dependency_checks
+    - documentation_drift
+    - clean_tree_local_qualification
+    - previous_milestone_regression
+  deferred_until_v1_manual_qualification:
+    - runpod_elastic
+    - runpod_serverless
+    - aws_byoc
+    - real_vllm
+    - real_sglang
+    - real_custom_oci
+    - real_paid_cost_accounting
+
+tag_policy:
+  format: "v<major>.<minor>.<patch>-rc.1"
+  annotated: true
+  require_clean_tree: true
+  require_required_gates: true
+  stable_tags: forbidden
+  remote_push: forbidden
+  package_publication: forbidden
+
+documentation_gate:
+  same_milestone: true
+  reject_undocumented_public_change: true
+  verify:
+    - mintlify_navigation
+    - internal_links
+    - cli_command_tree
+    - deployment_spec
+    - control_api_openapi
+    - sdk_exports_when_present
+    - provider_capability_registry
+    - runtime_capability_registry
+    - compatibility_matrix
+    - migration_upgrade_guides
+    - project_status
+  rules:
+    - primary product prose remains provider-neutral
+    - provider details live in provider pages
+    - commands and examples reflect executable behavior
+    - planned experimental deferred and qualified states are explicit
+    - simulated evidence is never described as real qualification
+
+safety:
+  paid_resources: forbidden_during_implementation
+  secrets_in_evidence: forbidden
+  weaken_gate_to_pass: forbidden
+  prompt_output_content_by_default: forbidden
+  external_fallback_requires:
+    - explicit_opt_in
+    - persisted_policy
+    - hard_budget
+    - privacy_disclosure
+    - deterministic_explanation
+

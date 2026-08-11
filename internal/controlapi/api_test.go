@@ -13,6 +13,7 @@ import (
 	"github.com/infercrane/infercrane/internal/benchmark"
 	"github.com/infercrane/infercrane/internal/doctor"
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/support"
 )
 
@@ -172,6 +173,26 @@ func TestOperationAPIAuthenticationAndResponse(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"max_attempts":5`) {
 		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestIntegrationsReturnsVersionedCapabilityEvidence(t *testing.T) {
+	registry, err := integration.V02Catalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/integrations", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	(API{Store: &fakeStore{}, APIKey: "secret", Integrations: registry.Snapshot()}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	for _, required := range []string{integration.ProviderContractV1, integration.RuntimeContractV1, "runpod-serverless", "real-runpod-serverless", "deferred"} {
+		if !strings.Contains(body, required) {
+			t.Fatalf("integration response missing %q: %s", required, body)
+		}
 	}
 }
 

@@ -32,6 +32,7 @@ import (
 	"github.com/infercrane/infercrane/internal/doctor"
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/gateway"
+	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/operations"
 	"github.com/infercrane/infercrane/internal/planning"
 	"github.com/infercrane/infercrane/internal/provision"
@@ -45,7 +46,7 @@ import (
 	"github.com/infercrane/infercrane/internal/workflows"
 )
 
-var version = "0.1.0"
+var version = "0.2.0-rc.1"
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -115,7 +116,7 @@ func runLegacy(ctx context.Context, args []string) error {
 		return contextCommand(args[1:])
 	}
 	switch args[0] {
-	case "target", "deploy", "apply", "plan", "doctor", "ui", "deployments", "route", "status", "events", "logs", "request", "explain", "rollout", "delete", "inspect", "operation", "orphans", "context", "auth", "tenant", "principal", "benchmark", "serve":
+	case "target", "deploy", "apply", "plan", "doctor", "ui", "deployments", "route", "status", "events", "logs", "request", "explain", "rollout", "delete", "inspect", "operation", "orphans", "integrations", "context", "auth", "tenant", "principal", "benchmark", "serve":
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -172,6 +173,8 @@ func runLegacy(ctx context.Context, args []string) error {
 		return targetAPICommand(ctx, cfg, args[1:])
 	case "orphans":
 		return orphanAPICommand(ctx, cfg, args[1:])
+	case "integrations":
+		return integrationsCommand(ctx, cfg, args[1:])
 	case "route":
 		return routeAPICommand(ctx, cfg, args[1:])
 	case "tenant":
@@ -1227,6 +1230,49 @@ func orphanAPICommand(ctx context.Context, cfg config.Config, args []string) err
 	return w.Flush()
 }
 
+func integrationsCommand(ctx context.Context, cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("integrations", flag.ContinueOnError)
+	output := fs.String("output", "human", "human or json")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if err := validateOutput(*output); err != nil {
+		return err
+	}
+	var response struct {
+		Data integration.Snapshot `json:"data"`
+	}
+	if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/integrations", "", nil, &response); err != nil {
+		return err
+	}
+	if *output == "json" {
+		encoded, _ := json.MarshalIndent(response, "", "  ")
+		fmt.Println(string(encoded))
+		return nil
+	}
+	qualified := func(entries []integration.Qualification) string {
+		states := make([]string, 0, len(entries))
+		for _, entry := range entries {
+			states = append(states, string(entry.State))
+		}
+		return strings.Join(states, ",")
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintf(w, "Provider contract\t%s\nRuntime contract\t%s\n\n", response.Data.ProviderContract, response.Data.RuntimeContract)
+	fmt.Fprintln(w, "TYPE\tADAPTER\tOWNER\tMODES/PROTOCOL\tQUALIFICATION")
+	for _, provider := range response.Data.Providers {
+		modes := make([]string, len(provider.Modes))
+		for index, mode := range provider.Modes {
+			modes[index] = string(mode)
+		}
+		fmt.Fprintf(w, "provider\t%s\t%s\t%s\t%s\n", provider.Adapter, provider.Cloud, strings.Join(modes, ","), qualified(provider.Qualification))
+	}
+	for _, runtime := range response.Data.Runtimes {
+		fmt.Fprintf(w, "runtime\t%s\t%s\t%s\t%s\n", runtime.Runtime, runtime.EngineVersion, runtime.Protocol, qualified(runtime.Qualification))
+	}
+	return w.Flush()
+}
+
 func tenantAPICommand(ctx context.Context, cfg config.Config, args []string) error {
 	if len(args) < 2 || args[0] != "create" {
 		return errors.New("usage: infercrane tenant create ID [--name NAME]")
@@ -1980,9 +2026,21 @@ func formatGuardEvidence(metrics domain.RevisionMetrics) string {
 func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	integrationRegistry, err := integration.V02Catalog()
+	if err != nil {
+		return fmt.Errorf("configure integration contracts: %w", err)
+	}
 	directory := routes.New()
 	backend := router.NewVLLM(cfg.RouterBinary, cfg.APIKey)
 	runtime := runtimeadapter.VLLM{APIKey: cfg.APIKey}
+	runtimeProfile, err := integrationRegistry.Runtime(support.DefaultRuntime)
+	if err != nil {
+		return fmt.Errorf("configure runtime contract: %w", err)
+	}
+	runtimeBackends, err := integration.NewRuntimeBackends(integration.RuntimeBackend{Profile: runtimeProfile, Inspector: runtime})
+	if err != nil {
+		return fmt.Errorf("bind runtime adapter: %w", err)
+	}
 	serverless := provision.RunPodServerless{APIKey: cfg.RunPodAPIKey, BaseURL: cfg.RunPodRESTURL, TemplateID: cfg.RunPodServerlessTemplateID}
 	logger := slog.Default()
 	recorder := accounting.New(s, logger, 8192, 4)
@@ -1991,7 +2049,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		defer cancel()
 		_ = recorder.Close(closeCtx)
 	}()
-	rec := &reconcile.Reconciler{Store: s, Routes: directory, Router: backend, Runtimes: map[string]reconcile.Runtime{support.DefaultRuntime: runtime}, Interval: cfg.HealthInterval, RouterStartPort: cfg.RouterStartPort, InstanceID: cfg.InstanceID, Logger: logger, DirectTargets: map[string]reconcile.DirectTargetBackend{"runpod-serverless": {Provider: "runpod", APIKey: cfg.RunPodAPIKey, Status: serverless}}}
+	rec := &reconcile.Reconciler{Store: s, Routes: directory, Router: backend, Runtimes: runtimeBackends, Interval: cfg.HealthInterval, RouterStartPort: cfg.RouterStartPort, InstanceID: cfg.InstanceID, Logger: logger, DirectTargets: map[string]reconcile.DirectTargetBackend{"runpod-serverless": {Provider: "runpod", APIKey: cfg.RunPodAPIKey, Status: serverless}}}
 	go purgeRequests(ctx, s, cfg.RequestRetention, logger)
 	go func() {
 		_ = rec.Run(ctx)
@@ -2026,7 +2084,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		}
 		return report
 	}
-	control := (controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: credentialCache, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: map[string]controlapi.BackendMetadata{"skypilot": {APIKey: cfg.APIKey, APIKeyEnv: "INFERCRANE_WORKER_API_KEY"}, "runpod-serverless": {APIKey: cfg.RunPodAPIKey, APIKeyEnv: "RUNPOD_API_KEY", Serverless: true}}, GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary}).Handler()
+	control := (controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: credentialCache, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: map[string]controlapi.BackendMetadata{"skypilot": {APIKey: cfg.APIKey, APIKeyEnv: "INFERCRANE_WORKER_API_KEY"}, "runpod-serverless": {APIKey: cfg.RunPodAPIKey, APIKeyEnv: "RUNPOD_API_KEY", Serverless: true}}, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary}).Handler()
 	operationTelemetry := &operations.Telemetry{}
 	handlers := workflows.DeploymentHandlers(s)
 	for kind, handler := range workflows.RolloutHandlers(s) {
@@ -2035,14 +2093,22 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	for kind, handler := range workflows.ReleaseGuardHandlers(s) {
 		handlers[kind] = handler
 	}
-	replicaBackends, err := workflows.NewReplicaBackends(workflows.ReplicaBackend{Name: "skypilot", Cloud: "runpod", Runtime: "vllm", Provider: provision.SkyPilot{APIKey: cfg.APIKey}, Capacity: provision.RunPodAvailability{APIKey: cfg.RunPodAPIKey}})
+	elasticProfile, err := integrationRegistry.Provider("skypilot")
+	if err != nil {
+		return fmt.Errorf("configure elastic integration: %w", err)
+	}
+	replicaBackends, err := workflows.NewReplicaBackends(workflows.ReplicaBackend{Name: "skypilot", Cloud: "runpod", Runtime: "vllm", Profile: elasticProfile, Provider: provision.SkyPilot{APIKey: cfg.APIKey}, Capacity: provision.RunPodAvailability{APIKey: cfg.RunPodAPIKey}})
 	if err != nil {
 		return fmt.Errorf("configure replica backends: %w", err)
 	}
-	for kind, handler := range workflows.CloudHandlersWithBackendsAndDrain(s, replicaBackends, runtime, directory, artifact.HuggingFace{}) {
+	for kind, handler := range workflows.CloudHandlersWithBackendsAndDrain(s, replicaBackends, runtimeBackends, directory, artifact.HuggingFace{}) {
 		handlers[kind] = handler
 	}
-	serverlessBackend := workflows.ServerlessBackend{Name: "runpod-serverless", Cloud: "runpod", Runtime: "vllm", Provider: serverless}
+	serverlessProfile, err := integrationRegistry.Provider("runpod-serverless")
+	if err != nil {
+		return fmt.Errorf("configure serverless integration: %w", err)
+	}
+	serverlessBackend := workflows.ServerlessBackend{Name: "runpod-serverless", Cloud: "runpod", Runtime: "vllm", Profile: serverlessProfile, Provider: serverless}
 	for kind, handler := range workflows.ServerlessHandlers(s, serverlessBackend, artifact.HuggingFace{}) {
 		handlers[kind] = handler
 	}

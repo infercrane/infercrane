@@ -72,6 +72,7 @@ func newRootCommand(ctx context.Context) *cobra.Command {
 		{use: "benchmark DEPLOYMENT [flags]", short: "Run and persist a reproducible benchmark", group: "understand"},
 		{use: "operation ID | operation watch ID | operation cancel ID", short: "Inspect, resume, or cancel a durable operation", group: "understand"},
 		{use: "orphans [flags]", short: "List unmanaged provisioned resources", group: "understand"},
+		{use: "integrations [flags]", short: "Inspect registered and qualified integration capabilities", group: "understand"},
 		{use: "target ACTION [arguments]", short: "Register or list existing inference targets", group: "admin"},
 		{use: "context ACTION [arguments]", short: "List, inspect, or select CLI contexts", group: "admin"},
 		{use: "auth status [flags]", short: "Show the authenticated control-plane identity", group: "admin"},
@@ -111,7 +112,7 @@ func addHelpFlags(command *cobra.Command, name string) {
 	boolFlag := func(flag, help string) { command.Flags().Bool(flag, false, help) }
 	intFlag := func(flag string, value int, help string) { command.Flags().Int(flag, value, help) }
 	switch name {
-	case "init", "doctor", "plan", "deploy", "apply", "request", "deployments", "status", "logs", "events", "inspect", "explain", "benchmark", "delete", "orphans", "operation":
+	case "init", "doctor", "plan", "deploy", "apply", "request", "deployments", "status", "logs", "events", "inspect", "explain", "benchmark", "delete", "orphans", "operation", "integrations":
 		stringFlag("output", "human", "output format: human or json")
 	}
 	switch name {

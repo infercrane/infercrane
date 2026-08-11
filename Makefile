@@ -1,6 +1,6 @@
 GORELEASER_VERSION := v2.12.7
 
-.PHONY: build context context-check docs-dev docs-check test test-container test-stack test-failure test-store test-production-config test-provider-contracts test-acceptance-safety verify audit deadcode release-check snapshot acceptance-local acceptance-preflight acceptance-cleanup qualify-local qualify-rc dev-check dev-check-full dev-up dev-down
+.PHONY: build context context-check docs-dev docs-check test test-container test-stack test-failure test-store test-production-config test-provider-contracts test-acceptance-safety verify audit deadcode release-check snapshot acceptance-local acceptance-preflight acceptance-cleanup qualify-local qualify-rc qualify-contracts dev-check dev-check-full dev-up dev-down
 
 build:
 	go build ./cmd/infercrane
@@ -74,6 +74,9 @@ qualify-local:
 
 qualify-rc:
 	./scripts/qualify-release.sh rc --approve-paid-resources
+
+qualify-contracts:
+	go run ./tools/contract-qualifier --output .infercrane/contract-qualification/$$(git rev-parse HEAD)/qualification.json
 
 dev-check:
 	./scripts/dev-check.sh quick

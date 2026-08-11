@@ -18,6 +18,9 @@ Changes that violate an invariant require an explicit superseding ADR and coordi
 - Worker membership changes create a new router generation.
 - Reconciliation work is bounded and cancellation-aware.
 - Durable operation work has one unexpired lease owner and bounded attempts.
+- Lifecycle core does not branch on provider or runtime names; composition binds versioned adapters.
+- Adapter registration, hermetic qualification, real qualification, and public support are distinct.
+- A supported integration capability cites executable evidence and cannot be inferred from protocol labels.
 
 ## Persistence
 

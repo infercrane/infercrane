@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/provision"
 	"github.com/infercrane/infercrane/internal/router"
 	"github.com/infercrane/infercrane/internal/routes"
@@ -25,9 +26,6 @@ type Store interface {
 	Event(context.Context, string, string, string, string, string) error
 	ActiveGeneration(context.Context, string, string) (domain.RouterGeneration, error)
 	RecordGeneration(context.Context, domain.RouterGeneration) (domain.RouterGeneration, error)
-}
-type Runtime interface {
-	Inspect(context.Context, string) (bool, map[string]struct{})
 }
 type ServerlessStatus interface {
 	EndpointHealth(context.Context, string) (provision.ServerlessHealth, error)
@@ -47,7 +45,7 @@ type Reconciler struct {
 	Store           Store
 	Routes          *routes.Directory
 	Router          router.Backend
-	Runtimes        map[string]Runtime
+	Runtimes        integration.RuntimeBackends
 	Interval        time.Duration
 	RouterStartPort int
 	InstanceID      string
@@ -129,8 +127,8 @@ func (r *Reconciler) Once(ctx context.Context) error {
 			if runtimeName == "" {
 				runtimeName = d.Runtime
 			}
-			runtimeInspector, registered := r.Runtimes[runtimeName]
-			if !registered {
+			runtimeBackend, runtimeErr := r.Runtimes.ForRuntime(runtimeName)
+			if runtimeErr != nil {
 				inspections[i] = inspection{target: target}
 				continue
 			}
@@ -143,7 +141,7 @@ func (r *Reconciler) Once(ctx context.Context) error {
 				case <-ctx.Done():
 					return
 				}
-				ok, models := runtimeInspector.Inspect(ctx, target.URL)
+				ok, models := runtimeBackend.Inspector.Inspect(ctx, target.URL)
 				inspections[i] = inspection{target: target, ok: ok, models: models}
 			}()
 		}

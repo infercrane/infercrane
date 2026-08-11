@@ -115,7 +115,15 @@
       },
       {
         "group": "INTEGRATE",
-        "pages": ["integrations/overview", "integrations/vllm", "integrations/runpod", "integrations/aiperf", "integrations/hugging-face"]
+        "pages": [
+          "integrations/overview",
+          "architecture/provider-contract",
+          "architecture/runtime-contract",
+          "integrations/vllm",
+          "integrations/runpod",
+          "integrations/aiperf",
+          "integrations/hugging-face"
+        ]
       },
       {
         "group": "REFERENCE",
@@ -142,7 +150,8 @@
               "adr/0008-immutable-deployment-revisions",
               "adr/0009-qualified-support-and-backend-registration",
               "adr/0010-cobra-cli-and-progressive-terminal-output",
-              "adr/0011-tiered-provider-qualification"
+              "adr/0011-tiered-provider-qualification",
+              "adr/0012-versioned-integration-contracts"
             ]
           },
           "release-acceptance"
