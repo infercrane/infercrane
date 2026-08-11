@@ -46,7 +46,7 @@ jobs:
       - run: go mod download
       - run: make verify
       - run: go test -coverprofile=coverage.out ./...
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: coverage
           path: coverage.out
@@ -85,7 +85,7 @@ jobs:
       - run: npm ci
         working-directory: docs
       - run: make dev-check-full
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: developer-check-${{ github.run_id }}
