@@ -8,7 +8,7 @@ engineering checkpoints rather than public stable releases.
 | Milestone | State | Outcome |
 |---|---|---|
 | v0.2.0 | Automated gates passed | Provider Contract V1, Runtime Contract V1, capabilities and conformance |
-| v0.3.0 | In progress | Security foundation, governed external targets, OpenRouter and narrow AWS BYOC |
+| v0.3.0 | Automated gates passed | Security foundation, governed external targets, OpenRouter and narrow AWS BYOC |
 | v0.4.0 | Planned | Python/TypeScript SDKs, Terraform and GitHub integration |
 | v0.5.0 | Planned | Operational dashboard and fleet evidence |
 | v0.6.0 | Planned | Qualified OCI workloads and SGLang |
