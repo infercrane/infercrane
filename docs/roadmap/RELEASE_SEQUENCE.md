@@ -10,7 +10,7 @@ engineering checkpoints rather than public stable releases.
 | v0.2.0 | Automated gates passed | Provider Contract V1, Runtime Contract V1, capabilities and conformance |
 | v0.3.0 | Automated gates passed | Security foundation, governed external targets, OpenRouter and narrow AWS BYOC |
 | v0.4.0 | Automated gates passed | Python/TypeScript SDKs, Terraform and GitHub integration |
-| v0.5.0 | Planned | Operational dashboard and fleet evidence |
+| v0.5.0 | Automated gates passed | Operational dashboard and fleet evidence |
 | v0.6.0 | Planned | Qualified OCI workloads and SGLang |
 | v0.7.0 | Planned | Recommendations, capacity intelligence, hybrid overflow and SLO policy |
 | v0.8.0 | Planned | Release Guard V2 and Inference Passport |
