@@ -14,6 +14,12 @@ import (
 
 const defaultRunPodRESTURL = "https://rest.runpod.io/v1"
 
+// The supported RunPod worker-v1-vllm image requires a CUDA 13 capable host.
+// Constraining placement prevents RunPod from repeatedly starting the worker on
+// hosts whose driver cannot load the image. CUDA's driver compatibility keeps
+// this safe for templates built with an older CUDA userspace as well.
+const runPodServerlessMinCUDAVersion = "13.0"
+
 type ServerlessEndpointSpec struct {
 	ExternalKey, Model, ModelRevision, TemplateID, GPU, Region string
 	WorkersMax                                                 int
@@ -105,7 +111,8 @@ func (r RunPodServerless) EnsureEndpoint(ctx context.Context, spec ServerlessEnd
 	body := map[string]any{
 		"name": name, "templateId": templateID, "computeType": "GPU",
 		"gpuTypeIds": []string{runPodGPUType(spec.GPU)}, "gpuCount": 1,
-		"workersMin": 0, "workersMax": spec.WorkersMax,
+		"minCudaVersion": runPodServerlessMinCUDAVersion,
+		"workersMin":     0, "workersMax": spec.WorkersMax,
 		"idleTimeout": 5, "scalerType": "QUEUE_DELAY", "scalerValue": 4,
 		"flashboot": true,
 	}

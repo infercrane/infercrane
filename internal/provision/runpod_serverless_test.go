@@ -29,7 +29,7 @@ func TestRunPodServerlessEnsureIsReplaySafeAndScaleToZeroNative(t *testing.T) {
 			creates++
 			var request map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&request)
-			if request["workersMin"] != float64(0) || request["workersMax"] != float64(4) || request["templateId"] != "template-qwen" {
+			if request["workersMin"] != float64(0) || request["workersMax"] != float64(4) || request["templateId"] != "template-qwen" || request["minCudaVersion"] != "13.0" {
 				t.Fatalf("request=%#v", request)
 			}
 			endpoint := ServerlessEndpoint{ID: "endpoint-1", Name: request["name"].(string), TemplateID: "template-qwen", GPUTypeIDs: []string{"NVIDIA L40S"}, WorkersMin: 0, WorkersMax: 4}

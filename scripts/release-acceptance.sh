@@ -197,7 +197,14 @@ capture_provider_inventory() {
     jq '[.[] | select((.name // "") | startswith("infercrane-")) | {id,name,desiredStatus,machineId,imageName,gpuCount,lastStatusChange,uptimeSeconds}]')
   endpoints=$(curl -fsS -H "Authorization: Bearer $api_key" \
     'https://rest.runpod.io/v1/endpoints?includeWorkers=true' | \
-    jq '[.[] | select((.name // "") | startswith("infercrane-")) | {id,name,workersMin,workersMax,active_workers:([.workers[]? | select(.desiredStatus != "EXITED")] | length)}]')
+    jq '[.[] | select((.name // "") | startswith("infercrane-")) |
+      {id,name,workersMin,workersMax,
+       active_workers:([.workers[]? | select(.desiredStatus != "EXITED")] | length),
+       exited_workers:([.workers[]? | select(.desiredStatus == "EXITED")] | length),
+       last_worker:([.workers[]?] | sort_by(.createdAt // "") | last |
+         if . == null then null else
+           {id,desiredStatus,createdAt,lastStartedAt,lastStatusChange,machineId,imageName,gpuCount}
+         end)}]')
   jq -n --argjson pods "$pods" --argjson endpoints "$endpoints" \
     '{pods:$pods,endpoints:$endpoints,verified_at:(now|todateiso8601)}' | \
     tee "$evidence/provider-direct-$label.json" >/dev/null

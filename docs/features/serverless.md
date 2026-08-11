@@ -34,6 +34,10 @@ The template ID is intentionally explicit. InferCrane does not build or own a cu
 image, and it refuses to create an endpoint when the template does not match the requested
 immutable model artifact.
 
+InferCrane also constrains RunPod worker placement to hosts with a CUDA 13-capable driver. The
+maintained `worker-v1-vllm` image requires CUDA 13 or newer; without that provider constraint a
+worker can be placed successfully and then exit before model initialization begins.
+
 ## Deploy
 
 ```bash
