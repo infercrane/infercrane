@@ -61,6 +61,9 @@ fix locally reproducible defects, and leave exact real/manual qualification proc
   Autopilot, Context Passport, and Burst Guard; all now reject unsupported output formats consistently.
 - Fixed repeat qualification contamination: `make test-container` now recreates only its test-profile
   PostgreSQL and runner containers before execution, without touching normal developer services.
+- Fixed release-version drift: the binary default, SDK packages/User-Agents, GitHub Action installer,
+  production image default, release scripts, and current release documentation now agree on
+  `v2.0.0-rc.1`. Client automation now enforces this parity on every run.
 
 ### Outstanding
 

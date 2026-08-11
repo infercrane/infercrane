@@ -3,7 +3,7 @@ set -eu
 
 root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 dist=${1:-"$root/dist"}
-tag=${2:-v1.0.0-rc.1}
+tag=${2:-v2.0.0-rc.1}
 output=${3:-"$dist/homebrew/infercrane.rb"}
 version=${tag#v}
 base_url=${INFERCRANE_HOMEBREW_BASE_URL:-"https://github.com/infercrane/infercrane/releases/download/$tag"}

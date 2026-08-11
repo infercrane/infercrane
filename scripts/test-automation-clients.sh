@@ -8,6 +8,19 @@ case "$mode" in quick|full) ;; *) echo "usage: $0 [quick|full]" >&2; exit 2;; es
 cd "$root"
 package_dir=$(mktemp -d)
 trap 'rm -rf "$package_dir"' EXIT HUP INT TERM
+
+release_version=$(go run ./cmd/infercrane version)
+case "$release_version" in
+  *-rc.*) python_version=${release_version%-rc.*}rc${release_version##*.} ;;
+  *) python_version=$release_version ;;
+esac
+grep -Fq "version = \"$python_version\"" "$root/sdk/python/pyproject.toml"
+grep -Fq "infercrane-python/$python_version" "$root/sdk/python/src/infercrane/client.py"
+node -e 'const p=require(process.argv[1]); if(p.version!==process.argv[2]) process.exit(1)' "$root/sdk/typescript/package.json" "$release_version"
+grep -Fq "infercrane-typescript/$release_version" "$root/sdk/typescript/src/client.ts"
+grep -Fq "default: v$release_version" "$root/actions/infercrane/action.yml"
+grep -Fq "infercrane:v$release_version" "$root/compose.production.yaml"
+
 go run ./tools/openapi-codegen -check
 PYTHONPATH="$root/sdk/python/src" python3 -m unittest discover -s "$root/sdk/python/tests"
 python3 -m pip wheel --disable-pip-version-check --no-deps --wheel-dir "$package_dir" "$root/sdk/python"

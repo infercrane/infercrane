@@ -62,7 +62,7 @@ import (
 	"github.com/infercrane/infercrane/internal/workflows"
 )
 
-var version = "1.0.0-rc.1"
+var version = "2.0.0-rc.1"
 
 const controlPlaneProtocolMin, controlPlaneProtocolMax = 1, 2
 

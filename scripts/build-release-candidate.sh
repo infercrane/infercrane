@@ -2,7 +2,7 @@
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-tag=${1:-v1.0.0-rc.1}
+tag=${1:-v2.0.0-rc.1}
 goreleaser_version=${2:-v2.12.7}
 
 printf '%s\n' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$' || {

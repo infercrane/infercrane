@@ -10,7 +10,7 @@ archives, SHA-256 checksums, one SPDX SBOM per archive, a generated Homebrew for
 install smoke test.
 
 ```bash
-make candidate-artifacts RELEASE_CANDIDATE_TAG=v1.0.0-rc.1
+make candidate-artifacts RELEASE_CANDIDATE_TAG=v2.0.0-rc.1
 ```
 
 GoReleaser runs inside an isolated local clone with a temporary annotated tag, then copies only the
@@ -20,7 +20,7 @@ repository ref or create a GitHub release, package, or image.
 Verify an existing artifact directory independently:
 
 ```bash
-./scripts/verify-release-artifacts.sh dist v1.0.0-rc.1
+./scripts/verify-release-artifacts.sh dist v2.0.0-rc.1
 ```
 
 The verifier checks the exact four-platform matrix, archive contents, checksums, SPDX documents,

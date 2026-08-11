@@ -2,7 +2,7 @@
 set -eu
 
 dist=${1:-dist}
-tag=${2:-v1.0.0-rc.1}
+tag=${2:-v2.0.0-rc.1}
 version=${tag#v}
 
 printf '%s\n' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$' || {

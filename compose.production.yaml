@@ -18,7 +18,7 @@ services:
     networks: [control]
 
   infercrane:
-    image: ${INFERCRANE_IMAGE:-ghcr.io/infercrane/infercrane:v1.0.0-rc.1}
+    image: ${INFERCRANE_IMAGE:-ghcr.io/infercrane/infercrane:v2.0.0-rc.1}
     restart: unless-stopped
     init: true
     security_opt:
