@@ -253,6 +253,10 @@ func runLegacy(ctx context.Context, args []string) error {
 		return replayCommand(ctx, cfg, args[1:])
 	case "capacity":
 		return capacityCommand(ctx, cfg, args[1:])
+	case "finops":
+		return finOpsCommand(ctx, cfg, args[1:])
+	case "autopilot":
+		return autopilotCommand(ctx, cfg, args[1:])
 	case "recipe":
 		return recipeCommand(ctx, cfg, args[1:])
 	case "recipes":
@@ -721,6 +725,78 @@ func capacityCommand(ctx context.Context, cfg config.Config, args []string) erro
 			gpu = "any"
 		}
 		fmt.Printf("%-14s %-10s %-10s %-12s attempts %-5d success %6.1f%% capacity failures %d\n", row.Provider, row.Runtime, row.ComputeMode, gpu, row.Attempts, row.SuccessRate*100, row.CapacityFailures)
+	}
+	return nil
+}
+
+func finOpsCommand(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return errors.New("usage: infercrane finops DEPLOYMENT [--window DURATION]")
+	}
+	name := args[0]
+	fs := flag.NewFlagSet("finops", flag.ContinueOnError)
+	windowText := fs.String("window", "720h", "cost evidence window")
+	output := fs.String("output", "human", "human or json")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	window, err := time.ParseDuration(*windowText)
+	if err != nil || window <= 0 {
+		return errors.New("--window must be a positive duration")
+	}
+	var response struct {
+		Report map[string]any `json:"report"`
+	}
+	if err = controlJSON(ctx, cfg, http.MethodPost, "/api/v1/deployments/"+url.PathEscape(name)+"/finops/reports", "", map[string]any{"window_seconds": int(window.Seconds())}, &response); err != nil {
+		return err
+	}
+	if *output == "json" {
+		return printJSON(response.Report)
+	}
+	fmt.Printf("FinOps report  %s\nDeployment     %s\nStatus         %s\nKnown cost     %s %s\nAvoidable      %s (unavailable unless directly evidenced)\nEvidence digest %s\n", benchmarkValue(response.Report["id"]), name, benchmarkValue(response.Report["status"]), benchmarkValue(response.Report["known_cost"]), benchmarkValue(response.Report["currency"]), benchmarkValue(response.Report["estimated_avoidable_cost"]), benchmarkValue(response.Report["input_digest"]))
+	return nil
+}
+
+func autopilotCommand(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) < 2 {
+		return errors.New("usage: infercrane autopilot plan DEPLOYMENT | autopilot inspect PLAN_ID | autopilot approve PLAN_ID")
+	}
+	action, subject := args[0], args[1]
+	fs := flag.NewFlagSet("autopilot", flag.ContinueOnError)
+	objective := fs.String("objective", "minimize_cost", "advisory objective")
+	output := fs.String("output", "human", "human or json")
+	if err := fs.Parse(args[2:]); err != nil {
+		return err
+	}
+	var response struct {
+		Plan     map[string]any `json:"plan"`
+		Mutation string         `json:"mutation"`
+		Next     string         `json:"next"`
+	}
+	method, path, body := http.MethodGet, "", any(nil)
+	switch action {
+	case "plan":
+		method = http.MethodPost
+		path = "/api/v1/deployments/" + url.PathEscape(subject) + "/autopilot/plans"
+		body = map[string]any{"objective": *objective}
+	case "inspect":
+		path = "/api/v1/autopilot/plans/" + url.PathEscape(subject)
+	case "approve":
+		method = http.MethodPost
+		path = "/api/v1/autopilot/plans/" + url.PathEscape(subject) + "/approve"
+		body = map[string]any{}
+	default:
+		return errors.New("usage: infercrane autopilot plan DEPLOYMENT | autopilot inspect PLAN_ID | autopilot approve PLAN_ID")
+	}
+	if err := controlJSON(ctx, cfg, method, path, "", body, &response); err != nil {
+		return err
+	}
+	if *output == "json" {
+		return printJSON(response)
+	}
+	fmt.Printf("Autopilot plan %s\nStatus         %s\nObjective      %s\nRecommendation %s\nMutation       none\n", benchmarkValue(response.Plan["id"]), benchmarkValue(response.Plan["status"]), benchmarkValue(response.Plan["objective"]), benchmarkValue(response.Plan["recommendation_id"]))
+	if response.Next != "" {
+		fmt.Printf("Next           %s\n", response.Next)
 	}
 	return nil
 }

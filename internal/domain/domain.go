@@ -339,6 +339,22 @@ type CapacitySummary struct {
 	WindowEnd          time.Time `json:"window_end"`
 }
 
+type FinOpsReport struct {
+	ID, TenantID, DeploymentID, DeploymentName               string
+	WindowStart, WindowEnd                                   time.Time
+	Currency, Status, SummaryJSON, EvidenceJSON, InputDigest string
+	KnownCost, EstimatedAvoidableCost                        *float64
+	CreatedAt                                                time.Time
+}
+
+type AutopilotPlan struct {
+	ID, TenantID, DeploymentID, DeploymentName, RecommendationID string
+	Status, Objective, CandidateJSON, EvidenceJSON, InputDigest  string
+	ApprovedBy                                                   string
+	ApprovedAt                                                   *time.Time
+	CreatedAt, UpdatedAt                                         time.Time
+}
+
 type AdoptedWorkload struct {
 	ID, TenantID, EndpointID, BindingID, TargetID string
 	OwnershipMode, Source, ImmutableIdentity      string

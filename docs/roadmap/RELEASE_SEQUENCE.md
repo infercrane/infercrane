@@ -24,7 +24,7 @@ engineering checkpoints rather than public stable releases.
 | v1.6.0 | Automated gates passed | Control-plane HA, recovery, private networking, workload identity and safe upgrades |
 | v1.7.0 | Automated gates passed | Evidence-backed model recipes and Inference Lab |
 | v1.8.0 | Implementation | Privacy-preserving replay, artifact placement and capacity intelligence |
-| v1.9.0 | Planned | FinOps evidence and advisory-only workload optimization |
+| v1.9.0 | Implementation | FinOps evidence and advisory-only workload optimization |
 | v2.0.0 | Planned | Context Passport, delegated request survival and policy-bounded Burst Guard |
 
 Each milestone specification defines scope, exclusions, public surface, verification, and evidence.

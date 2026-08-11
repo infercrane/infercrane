@@ -81,6 +81,8 @@ func newRootCommand(ctx context.Context) *cobra.Command {
 		{use: "benchmark DEPLOYMENT [flags]", short: "Run and persist a reproducible benchmark", group: "understand"},
 		{use: "replay DEPLOYMENT [flags]", short: "Capture a privacy-preserving production workload shape", group: "understand"},
 		{use: "capacity [flags]", short: "Inspect observed capacity reliability", group: "understand"},
+		{use: "finops DEPLOYMENT [flags]", short: "Build an evidence-backed cost report", group: "understand"},
+		{use: "autopilot ACTION SUBJECT [flags]", short: "Create and approve advisory serving plans", group: "operate"},
 		{use: "recipe create DEPLOYMENT [flags]", short: "Capture an immutable evidence-backed model recipe", group: "understand"},
 		{use: "recipes [QUERY] [flags]", short: "Search immutable model recipes", group: "understand"},
 		{use: "lab MODEL_IDENTITY [flags]", short: "Compare persisted measured serving evidence", group: "understand"},
@@ -132,7 +134,7 @@ func addHelpFlags(command *cobra.Command, name string) {
 	boolFlag := func(flag, help string) { command.Flags().Bool(flag, false, help) }
 	intFlag := func(flag string, value int, help string) { command.Flags().Int(flag, value, help) }
 	switch name {
-	case "init", "doctor", "adopt", "alert", "admission", "async", "plan", "deploy", "apply", "request", "deployments", "endpoints", "endpoint", "environment", "logical-model", "status", "logs", "events", "inspect", "explain", "benchmark", "replay", "capacity", "recipe", "recipes", "lab", "passport", "recommend", "slo", "delete", "orphans", "operation", "integrations", "dashboard":
+	case "init", "doctor", "adopt", "alert", "admission", "async", "plan", "deploy", "apply", "request", "deployments", "endpoints", "endpoint", "environment", "logical-model", "status", "logs", "events", "inspect", "explain", "benchmark", "replay", "capacity", "finops", "autopilot", "recipe", "recipes", "lab", "passport", "recommend", "slo", "delete", "orphans", "operation", "integrations", "dashboard":
 		stringFlag("output", "human", "output format: human or json")
 	}
 	switch name {
@@ -239,6 +241,10 @@ func addHelpFlags(command *cobra.Command, name string) {
 		stringFlag("revision", "candidate", "revision used by explicit execution")
 	case "capacity":
 		stringFlag("window", "720h", "observation window")
+	case "finops":
+		stringFlag("window", "720h", "cost evidence window")
+	case "autopilot":
+		stringFlag("objective", "minimize_cost", "advisory objective")
 	case "recipe":
 		stringFlag("name", "", "stable recipe name")
 		stringFlag("version", "", "immutable recipe version")

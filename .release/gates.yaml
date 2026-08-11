@@ -88,6 +88,11 @@ milestone_gates:
     - artifact_cache_expiry_and_provider_delegated_idempotent_prefetch
     - capacity_intelligence_tenant_window_sample_and_percentile_evidence
     - replay_capacity_api_cli_sdk_openapi_and_docs_drift
+    - finops_sourced_timestamped_currency_preserving_cost_only
+    - finops_missing_price_and_savings_remain_unavailable
+    - autopilot_plan_content_digest_idempotency_and_tenant_isolation
+    - autopilot_human_approval_is_auditable_and_side_effect_free
+    - finops_autopilot_api_cli_sdk_openapi_and_docs_drift
   deferred_until_v1_manual_qualification:
     - runpod_elastic
     - runpod_serverless

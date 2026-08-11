@@ -1,0 +1,34 @@
+---
+title: FinOps and advisory Autopilot
+description: Explain sourced inference cost and create human-approved serving recommendations.
+---
+
+# FinOps and advisory Autopilot
+
+InferCrane treats cost as evidence, not a guess. A FinOps report accepts only cost metadata carrying a
+source and observation time. Missing cost remains unavailable, currencies are never silently converted,
+and avoidable spend remains unknown until utilization and a qualified alternative directly support it.
+
+```bash
+infercrane finops coder-production --window 720h
+```
+
+The report persists its exact evidence, evaluation window, disclosure set, and canonical input digest.
+
+## Advisory Autopilot
+
+Autopilot consumes the deterministic SLO recommendation already persisted for a deployment:
+
+```bash
+infercrane recommend coder-production
+infercrane autopilot plan coder-production --objective minimize_cost
+infercrane autopilot approve PLAN_ID
+```
+
+`plan` creates an immutable evidence snapshot. `approve` records the authenticated human decision. Neither
+command changes a deployment, provisions capacity, or promotes a revision. The next production step is an
+ordinary explicit candidate rollout followed by Replay, benchmark, and Release Guard.
+
+<Warning>
+Approval is not execution. v1.9 intentionally has no autonomous production mutation path.
+</Warning>

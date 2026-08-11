@@ -4,7 +4,9 @@ package controlapi
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -20,6 +22,7 @@ import (
 	"github.com/infercrane/infercrane/internal/decision"
 	"github.com/infercrane/infercrane/internal/doctor"
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/finops"
 	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/lab"
 	"github.com/infercrane/infercrane/internal/passport"
@@ -117,6 +120,13 @@ type intelligenceStore interface {
 	RequestArtifactPrefetch(context.Context, string, domain.ArtifactPrefetch) (domain.ArtifactPrefetch, bool, error)
 	CapacityIntelligence(context.Context, string, time.Duration) ([]domain.CapacitySummary, error)
 }
+type optimizationStore interface {
+	RecordFinOpsReport(context.Context, domain.FinOpsReport) (domain.FinOpsReport, error)
+	FinOpsReports(context.Context, string, string, int) ([]domain.FinOpsReport, error)
+	CreateAutopilotPlan(context.Context, domain.AutopilotPlan) (domain.AutopilotPlan, bool, error)
+	AutopilotPlan(context.Context, string, string, string, string) (domain.AutopilotPlan, error)
+	ApproveAutopilotPlan(context.Context, string, string, string) (domain.AutopilotPlan, error)
+}
 type alertStore interface {
 	CreateAlertPolicy(context.Context, string, string, domain.AlertPolicy) (domain.AlertPolicy, error)
 	AlertPoliciesForEndpoint(context.Context, string, string) ([]domain.AlertPolicy, error)
@@ -200,6 +210,11 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/capacity/intelligence", a.auth(authz.Read, a.capacityIntelligence))
 	mux.HandleFunc("POST /api/v1/artifacts/{id}/cache-observations", a.auth(authz.Deploy, a.recordCacheObservation))
 	mux.HandleFunc("POST /api/v1/artifacts/{id}/prefetches", a.auth(authz.Deploy, a.requestPrefetch))
+	mux.HandleFunc("POST /api/v1/deployments/{name}/finops/reports", a.auth(authz.Deploy, a.createFinOpsReport))
+	mux.HandleFunc("GET /api/v1/deployments/{name}/finops/reports", a.auth(authz.Read, a.finOpsReports))
+	mux.HandleFunc("POST /api/v1/deployments/{name}/autopilot/plans", a.auth(authz.Deploy, a.createAutopilotPlan))
+	mux.HandleFunc("GET /api/v1/autopilot/plans/{id}", a.auth(authz.Read, a.getAutopilotPlan))
+	mux.HandleFunc("POST /api/v1/autopilot/plans/{id}/approve", a.auth(authz.Deploy, a.approveAutopilotPlan))
 	mux.HandleFunc("GET /api/v1/environments", a.auth(authz.Read, a.environments))
 	mux.HandleFunc("POST /api/v1/environments", a.auth(authz.Deploy, a.createEnvironment))
 	mux.HandleFunc("GET /api/v1/logical-models", a.auth(authz.Read, a.logicalModels))
@@ -1121,6 +1136,200 @@ func defaultValue(value, fallback string) string {
 func (a API) intelligence() (intelligenceStore, bool) {
 	store, ok := a.Store.(intelligenceStore)
 	return store, ok
+}
+
+func (a API) optimization() (optimizationStore, bool) {
+	store, ok := a.Store.(optimizationStore)
+	return store, ok
+}
+
+func (a API) createFinOpsReport(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.optimization()
+	if !ok {
+		writeError(w, 501, "finops_unavailable", "FinOps storage is not configured")
+		return
+	}
+	var request struct {
+		WindowSeconds int `json:"window_seconds"`
+	}
+	if !decodeMutationBody(w, r, &request) {
+		return
+	}
+	if request.WindowSeconds == 0 {
+		request.WindowSeconds = 30 * 86400
+	}
+	if request.WindowSeconds < 1 || request.WindowSeconds > 365*86400 {
+		writeError(w, 422, "validation_failed", "window_seconds must be 1..31536000")
+		return
+	}
+	principal := r.Context().Value(identityKey{}).(domain.Principal)
+	name := r.PathValue("name")
+	resolved, err := a.Store.ResolveForTenant(r.Context(), principal.TenantID, name)
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, 404, "not_found", "deployment was not found")
+		return
+	}
+	if err != nil {
+		writeError(w, 500, "internal", "deployment lookup failed")
+		return
+	}
+	end := time.Now().UTC()
+	start := end.Add(-time.Duration(request.WindowSeconds) * time.Second)
+	benchmarks, err := a.Store.BenchmarksForDeployment(r.Context(), principal.TenantID, name, 100)
+	if err != nil {
+		writeError(w, 500, "internal", "cost evidence lookup failed")
+		return
+	}
+	var evidence []finops.CostEvidence
+	for _, b := range benchmarks {
+		if b.CreatedAt.Before(start) {
+			continue
+		}
+		var cost struct {
+			Available  bool       `json:"available"`
+			Hourly     *float64   `json:"hourly"`
+			Currency   string     `json:"currency"`
+			Source     string     `json:"source"`
+			ObservedAt *time.Time `json:"observed_at"`
+			ExpiresAt  *time.Time `json:"expires_at"`
+		}
+		if json.Unmarshal([]byte(b.CostMetadataJSON), &cost) == nil && cost.Available && cost.Hourly != nil && cost.Source != "" && cost.ObservedAt != nil {
+			currency := cost.Currency
+			if currency == "" {
+				currency = "USD"
+			}
+			evidence = append(evidence, finops.CostEvidence{ID: b.ID, Scope: "deployment_hourly_rate", Source: cost.Source, Currency: currency, Amount: *cost.Hourly, ObservedAt: *cost.ObservedAt, ExpiresAt: cost.ExpiresAt})
+		}
+	}
+	report := finops.Evaluate(end, evidence)
+	summary, _ := json.Marshal(report)
+	evidenceJSON, _ := json.Marshal(report.Evidence)
+	persisted, err := store.RecordFinOpsReport(r.Context(), domain.FinOpsReport{TenantID: principal.TenantID, DeploymentID: resolved.Deployment.ID, DeploymentName: name, WindowStart: start, WindowEnd: end, Currency: report.Currency, Status: report.Status, KnownCost: report.KnownCost, EstimatedAvoidableCost: report.Avoidable, SummaryJSON: string(summary), EvidenceJSON: string(evidenceJSON), InputDigest: report.InputDigest})
+	if err != nil {
+		writeError(w, 500, "internal", "FinOps report could not be persisted")
+		return
+	}
+	writeJSON(w, 201, map[string]any{"report": finOpsResponse(persisted)})
+}
+
+func (a API) finOpsReports(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.optimization()
+	if !ok {
+		writeError(w, 501, "finops_unavailable", "FinOps storage is not configured")
+		return
+	}
+	p := r.Context().Value(identityKey{}).(domain.Principal)
+	rows, err := store.FinOpsReports(r.Context(), p.TenantID, r.PathValue("name"), 20)
+	if err != nil {
+		writeError(w, 500, "internal", "FinOps report lookup failed")
+		return
+	}
+	data := make([]any, 0, len(rows))
+	for _, row := range rows {
+		data = append(data, finOpsResponse(row))
+	}
+	writeJSON(w, 200, map[string]any{"data": data})
+}
+func finOpsResponse(row domain.FinOpsReport) map[string]any {
+	return map[string]any{"id": row.ID, "deployment": row.DeploymentName, "window_start": row.WindowStart, "window_end": row.WindowEnd, "currency": row.Currency, "status": row.Status, "known_cost": row.KnownCost, "estimated_avoidable_cost": row.EstimatedAvoidableCost, "summary": json.RawMessage(row.SummaryJSON), "evidence": json.RawMessage(row.EvidenceJSON), "input_digest": row.InputDigest, "created_at": row.CreatedAt}
+}
+
+func (a API) createAutopilotPlan(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.optimization()
+	if !ok {
+		writeError(w, 501, "autopilot_unavailable", "Autopilot storage is not configured")
+		return
+	}
+	decisions, ok := a.decisions()
+	if !ok {
+		writeError(w, 501, "autopilot_unavailable", "recommendation storage is not configured")
+		return
+	}
+	var request struct {
+		Objective string `json:"objective"`
+	}
+	if !decodeMutationBody(w, r, &request) {
+		return
+	}
+	if request.Objective != "minimize_cost" {
+		writeError(w, 422, "validation_failed", "v1 supports objective minimize_cost only")
+		return
+	}
+	p := r.Context().Value(identityKey{}).(domain.Principal)
+	name := r.PathValue("name")
+	resolved, err := a.Store.ResolveForTenant(r.Context(), p.TenantID, name)
+	if err != nil {
+		writeError(w, 404, "not_found", "deployment was not found")
+		return
+	}
+	rows, err := decisions.InferenceRecommendations(r.Context(), p.TenantID, name, 1)
+	if err != nil || len(rows) == 0 || rows[0].Status != "recommended" {
+		writeError(w, 409, "recommendation_required", "a current eligible recommendation is required")
+		return
+	}
+	recommendation := rows[0]
+	digest := sha256.Sum256([]byte(recommendation.InputSnapshotJSON))
+	plan, created, err := store.CreateAutopilotPlan(r.Context(), domain.AutopilotPlan{TenantID: p.TenantID, DeploymentID: resolved.Deployment.ID, DeploymentName: name, RecommendationID: recommendation.ID, Objective: request.Objective, CandidateJSON: recommendation.CandidatesJSON, EvidenceJSON: recommendation.InputSnapshotJSON, InputDigest: hex.EncodeToString(digest[:])})
+	if errors.Is(err, domain.ErrConflict) {
+		writeError(w, 409, "plan_conflict", "the recommendation already has different plan content")
+		return
+	}
+	if err != nil {
+		writeError(w, 500, "internal", "advisory plan could not be persisted")
+		return
+	}
+	status := 200
+	if created {
+		status = 201
+	}
+	writeJSON(w, status, map[string]any{"plan": autopilotResponse(plan), "mutation": "none"})
+}
+func (a API) getAutopilotPlan(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.optimization()
+	if !ok {
+		writeError(w, 501, "autopilot_unavailable", "Autopilot storage is not configured")
+		return
+	}
+	p := r.Context().Value(identityKey{}).(domain.Principal)
+	row, err := store.AutopilotPlan(r.Context(), p.TenantID, r.PathValue("id"), "", "")
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, 404, "not_found", "Autopilot plan was not found")
+		return
+	}
+	if err != nil {
+		writeError(w, 500, "internal", "Autopilot lookup failed")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"plan": autopilotResponse(row)})
+}
+func (a API) approveAutopilotPlan(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.optimization()
+	if !ok {
+		writeError(w, 501, "autopilot_unavailable", "Autopilot storage is not configured")
+		return
+	}
+	var body map[string]json.RawMessage
+	if !decodeMutationBody(w, r, &body) {
+		return
+	}
+	if len(body) != 0 {
+		writeError(w, 400, "invalid_request", "request body must be an empty object")
+		return
+	}
+	p := r.Context().Value(identityKey{}).(domain.Principal)
+	row, err := store.ApproveAutopilotPlan(r.Context(), p.TenantID, r.PathValue("id"), p.Name)
+	if errors.Is(err, domain.ErrConflict) {
+		writeError(w, 409, "invalid_state", "only advisory plans can be approved")
+		return
+	}
+	if err != nil {
+		writeError(w, 500, "internal", "plan approval failed")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"plan": autopilotResponse(row), "mutation": "none", "next": "create and validate a candidate explicitly"})
+}
+func autopilotResponse(row domain.AutopilotPlan) map[string]any {
+	return map[string]any{"id": row.ID, "deployment": row.DeploymentName, "recommendation_id": row.RecommendationID, "status": row.Status, "objective": row.Objective, "candidates": json.RawMessage(row.CandidateJSON), "evidence": json.RawMessage(row.EvidenceJSON), "input_digest": row.InputDigest, "approved_by": row.ApprovedBy, "approved_at": row.ApprovedAt, "created_at": row.CreatedAt, "updated_at": row.UpdatedAt}
 }
 
 func (a API) captureReplay(w http.ResponseWriter, r *http.Request) {

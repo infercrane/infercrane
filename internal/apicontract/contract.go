@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-const Version = "1.8.0"
+const Version = "1.9.0"
 
 type Route struct {
 	Method      string
@@ -79,6 +79,11 @@ var Routes = []Route{
 	{"GET", "/capacity/intelligence", "capacityIntelligence", "Capacity intelligence", "Summarize tenant-scoped observed capacity evidence", "", "Object", 200, false},
 	{"POST", "/artifacts/{id}/cache-observations", "recordArtifactCacheObservation", "Model artifacts", "Record bounded provider-native artifact cache evidence", "ArtifactCacheObservationRequest", "Object", 201, false},
 	{"POST", "/artifacts/{id}/prefetches", "requestArtifactPrefetch", "Model artifacts", "Request provider-adapter artifact prefetch", "ArtifactPrefetchRequest", "Object", 201, true},
+	{"POST", "/deployments/{name}/finops/reports", "createFinOpsReport", "FinOps", "Persist a sourced cost report without invented savings", "FinOpsReportRequest", "Object", 201, false},
+	{"GET", "/deployments/{name}/finops/reports", "listFinOpsReports", "FinOps", "List persisted FinOps evidence", "", "ObjectList", 200, false},
+	{"POST", "/deployments/{name}/autopilot/plans", "createAutopilotPlan", "Autopilot", "Create an advisory plan from a persisted recommendation", "AutopilotPlanRequest", "Object", 201, true},
+	{"GET", "/autopilot/plans/{id}", "getAutopilotPlan", "Autopilot", "Inspect an immutable advisory plan", "", "Object", 200, false},
+	{"POST", "/autopilot/plans/{id}/approve", "approveAutopilotPlan", "Autopilot", "Record human approval without mutating serving state", "Object", "Object", 200, true},
 	{"POST", "/deployments/{name}/passports", "createInferencePassport", "Release evidence", "Issue a signed Inference Passport", "Object", "Object", 201, false},
 	{"GET", "/deployments/{name}/passports", "listInferencePassports", "Release evidence", "List signed Inference Passports", "", "ObjectList", 200, false},
 	{"GET", "/deployments/{name}/slo-policy", "getSLOPolicy", "Inference decisions", "Inspect deterministic SLO policy", "", "SLOPolicyEnvelope", 200, false},
@@ -250,6 +255,8 @@ func schemas() map[string]any {
 		"ReplayCaptureRequest":            map[string]any{"type": "object", "properties": map[string]any{"window_seconds": map[string]any{"type": "integer", "minimum": 1, "maximum": 2592000, "default": 86400}, "max_requests": map[string]any{"type": "integer", "minimum": 1, "maximum": 10000, "default": 1000}}},
 		"ArtifactCacheObservationRequest": map[string]any{"type": "object", "required": []string{"provider", "location", "state", "source"}, "properties": map[string]any{"provider": map[string]any{"type": "string"}, "region": map[string]any{"type": "string"}, "location": map[string]any{"type": "string"}, "state": map[string]any{"type": "string", "enum": []string{"present", "prefetching", "missing", "unknown"}}, "source": map[string]any{"type": "string"}, "evidence": map[string]any{"type": "object"}, "ttl_seconds": map[string]any{"type": "integer", "minimum": 1, "maximum": 86400, "default": 300}}},
 		"ArtifactPrefetchRequest":         map[string]any{"type": "object", "required": []string{"provider", "location", "idempotency_key"}, "properties": map[string]any{"provider": map[string]any{"type": "string"}, "region": map[string]any{"type": "string"}, "location": map[string]any{"type": "string"}, "idempotency_key": map[string]any{"type": "string", "minLength": 1}}},
+		"FinOpsReportRequest":             map[string]any{"type": "object", "properties": map[string]any{"window_seconds": map[string]any{"type": "integer", "minimum": 1, "maximum": 31536000, "default": 2592000}}},
+		"AutopilotPlanRequest":            map[string]any{"type": "object", "required": []string{"objective"}, "properties": map[string]any{"objective": map[string]any{"type": "string", "enum": []string{"minimize_cost"}}}},
 		"SLOPolicy":                       map[string]any{"type": "object", "minProperties": 1, "additionalProperties": false, "properties": map[string]any{"max_ttft_p95_ms": map[string]any{"type": "number", "minimum": 0}, "max_latency_p95_ms": map[string]any{"type": "number", "minimum": 0}, "max_error_rate": map[string]any{"type": "number", "minimum": 0, "maximum": 1}, "min_output_tokens_second": map[string]any{"type": "number", "minimum": 0}, "max_hourly_cost": map[string]any{"type": "number", "minimum": 0}}},
 		"SLOPolicyEnvelope":               map[string]any{"type": "object", "required": []string{"policy"}, "properties": map[string]any{"policy": ref("SLOPolicy")}},
 		"RecommendationRequest":           map[string]any{"type": "object", "maxProperties": 0, "additionalProperties": false},

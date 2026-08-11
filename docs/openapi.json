@@ -239,6 +239,20 @@
         ],
         "type": "object"
       },
+      "AutopilotPlanRequest": {
+        "properties": {
+          "objective": {
+            "enum": [
+              "minimize_cost"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "objective"
+        ],
+        "type": "object"
+      },
       "BenchmarkRequest": {
         "properties": {
           "concurrency": {
@@ -888,6 +902,17 @@
         ],
         "type": "object"
       },
+      "FinOpsReportRequest": {
+        "properties": {
+          "window_seconds": {
+            "default": 2592000,
+            "maximum": 31536000,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
       "LabEvaluationRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1400,7 +1425,7 @@
   "info": {
     "description": "Durable, authenticated control-plane operations. Mutation responses may outlive the requesting client.",
     "title": "InferCrane Control API",
-    "version": "1.8.0"
+    "version": "1.9.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -1752,6 +1777,120 @@
         ]
       }
     },
+    "/api/v1/autopilot/plans/{id}": {
+      "get": {
+        "operationId": "getAutopilotPlan",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Inspect an immutable advisory plan",
+        "tags": [
+          "Autopilot"
+        ]
+      }
+    },
+    "/api/v1/autopilot/plans/{id}/approve": {
+      "post": {
+        "operationId": "approveAutopilotPlan",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Stable key used to adopt the original durable operation after retries or disconnects.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Record human approval without mutating serving state",
+        "tags": [
+          "Autopilot"
+        ]
+      }
+    },
     "/api/v1/capacity/intelligence": {
       "get": {
         "operationId": "capacityIntelligence",
@@ -2040,6 +2179,73 @@
         ]
       }
     },
+    "/api/v1/deployments/{name}/autopilot/plans": {
+      "post": {
+        "operationId": "createAutopilotPlan",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Stable key used to adopt the original durable operation after retries or disconnects.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AutopilotPlanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Create an advisory plan from a persisted recommendation",
+        "tags": [
+          "Autopilot"
+        ]
+      }
+    },
     "/api/v1/deployments/{name}/benchmarks": {
       "get": {
         "operationId": "listBenchmarks",
@@ -2288,6 +2494,108 @@
         "summary": "Configure governed external fallback",
         "tags": [
           "External capacity"
+        ]
+      }
+    },
+    "/api/v1/deployments/{name}/finops/reports": {
+      "get": {
+        "operationId": "listFinOpsReports",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List persisted FinOps evidence",
+        "tags": [
+          "FinOps"
+        ]
+      },
+      "post": {
+        "operationId": "createFinOpsReport",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FinOpsReportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Persist a sourced cost report without invented savings",
+        "tags": [
+          "FinOps"
         ]
       }
     },
@@ -5912,6 +6220,9 @@
       "name": "Audit"
     },
     {
+      "name": "Autopilot"
+    },
+    {
       "name": "Benchmarks"
     },
     {
@@ -5928,6 +6239,9 @@
     },
     {
       "name": "External capacity"
+    },
+    {
+      "name": "FinOps"
     },
     {
       "name": "Identity"

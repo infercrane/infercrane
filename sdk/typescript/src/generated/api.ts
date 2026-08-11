@@ -268,6 +268,31 @@ export class ControlApi {
     return this.transport.request('POST', path, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
   }
 
+  createFinOpsReport(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = `/deployments/${encodeURIComponent(name)}/finops/reports`;
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  listFinOpsReports(name: string): Promise<ObjectList> {
+    const path = `/deployments/${encodeURIComponent(name)}/finops/reports`;
+    return this.transport.request('GET', path) as Promise<ObjectList>;
+  }
+
+  createAutopilotPlan(name: string, body: JsonValue, idempotencyKey: string): Promise<Record<string, JsonValue>> {
+    const path = `/deployments/${encodeURIComponent(name)}/autopilot/plans`;
+    return this.transport.request('POST', path, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
+  }
+
+  getAutopilotPlan(id: string): Promise<Record<string, JsonValue>> {
+    const path = `/autopilot/plans/${encodeURIComponent(id)}`;
+    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+  }
+
+  approveAutopilotPlan(id: string, body: JsonValue, idempotencyKey: string): Promise<Record<string, JsonValue>> {
+    const path = `/autopilot/plans/${encodeURIComponent(id)}/approve`;
+    return this.transport.request('POST', path, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
+  }
+
   createInferencePassport(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
     const path = `/deployments/${encodeURIComponent(name)}/passports`;
     return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;

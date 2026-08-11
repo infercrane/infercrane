@@ -223,6 +223,26 @@ class ControlAPI:
         path = f"/artifacts/{quote(id, safe='')}/prefetches"
         return cast(dict[str, Any], self._transport.request("POST", path, body=body, idempotency_key=idempotency_key))
 
+    def create_fin_ops_report(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = f"/deployments/{quote(name, safe='')}/finops/reports"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
+    def list_fin_ops_reports(self, name: str) -> ObjectList:
+        path = f"/deployments/{quote(name, safe='')}/finops/reports"
+        return cast(ObjectList, self._transport.request("GET", path))
+
+    def create_autopilot_plan(self, name: str, *, body: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
+        path = f"/deployments/{quote(name, safe='')}/autopilot/plans"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body, idempotency_key=idempotency_key))
+
+    def get_autopilot_plan(self, id: str) -> dict[str, Any]:
+        path = f"/autopilot/plans/{quote(id, safe='')}"
+        return cast(dict[str, Any], self._transport.request("GET", path))
+
+    def approve_autopilot_plan(self, id: str, *, body: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
+        path = f"/autopilot/plans/{quote(id, safe='')}/approve"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body, idempotency_key=idempotency_key))
+
     def create_inference_passport(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
         path = f"/deployments/{quote(name, safe='')}/passports"
         return cast(dict[str, Any], self._transport.request("POST", path, body=body))
