@@ -88,7 +88,7 @@ snapshot: release-check
 candidate-artifacts: release-check
 	@command -v syft >/dev/null || { echo "syft is required to generate archive SBOMs; install it from https://github.com/anchore/syft" >&2; exit 1; }
 	@case "$(RELEASE_CANDIDATE_TAG)" in v*-rc.*) ;; *) echo "RELEASE_CANDIDATE_TAG must be an RC tag" >&2; exit 1;; esac
-	GORELEASER_CURRENT_TAG=$(RELEASE_CANDIDATE_TAG) go run github.com/goreleaser/goreleaser/v2@$(GORELEASER_VERSION) release --clean --skip=announce --skip=publish
+	./scripts/build-release-candidate.sh $(RELEASE_CANDIDATE_TAG) $(GORELEASER_VERSION)
 	./scripts/verify-release-artifacts.sh dist $(RELEASE_CANDIDATE_TAG)
 	./scripts/generate-homebrew-formula.sh dist $(RELEASE_CANDIDATE_TAG)
 
