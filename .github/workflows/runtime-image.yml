@@ -44,7 +44,7 @@ jobs:
           tags: |
             type=raw,value=v${{ inputs.vllm_version || '0.8.5.post1' }}
             type=sha
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           file: images/vllm-runpod/Dockerfile
