@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "program": "infercrane-v1",
-  "current_milestone": "v0.2.0",
-  "state": "qualifying",
+  "current_milestone": "v0.3.0",
+  "state": "implementing",
   "baseline": {
     "commit": "fac8218ef9917b6dabd115bd5c8b1551a81c5ec7",
     "dev_check": "passed",
@@ -10,8 +10,8 @@
     "local_qualification": ".infercrane/qualification/fac8218ef9917b6dabd115bd5c8b1551a81c5ec7/qualification.json",
     "real_infrastructure": "deferred"
   },
-  "last_completed_milestone": "v0.1.0-local-baseline",
-  "next_action": "run the v0.2 complete local and Docker gates, record exact-commit evidence, and create v0.2.0-rc.1",
-  "rc_tags": [],
-  "updated_at": "2026-08-11T03:43:00Z"
+  "last_completed_milestone": "v0.2.0-rc.1",
+  "next_action": "implement the v0.3 security, governed external-target, OpenRouter, and narrow AWS BYOC acceptance criteria",
+  "rc_tags": ["v0.2.0-rc.1"],
+  "updated_at": "2026-08-11T04:22:13Z"
 }
