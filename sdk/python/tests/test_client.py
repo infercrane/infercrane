@@ -38,6 +38,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, {"data": [{"status": "recommended"}]})
         elif self.path == "/api/v1/system/instances":
             self._json(200, {"data": [{"id": "node-a", "binary_version": "1.6.0", "protocol_min": 1, "protocol_max": 2}]})
+        elif self.path.startswith("/api/v1/recipes?"):
+            self._json(200, {"data": [{"name": "balanced", "version": "1.0.0"}]})
         else:
             self._json(404, {"error": {"code": "not_found", "message": "missing", "retryable": False, "remediation": "check the name"}})
 
@@ -54,6 +56,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "text/event-stream")
             self.end_headers()
             self.wfile.write(b'data: {"choices":[{"delta":{"content":"hello"}}]}\n\ndata: [DONE]\n\n')
+        elif self.path.endswith("/recipes"):
+            self._json(201, {"recipe": {"name": body["name"], "version": body["version"], "digest": "a" * 64}})
+        elif self.path == "/api/v1/lab/evaluations":
+            self._json(201, {"evaluation": {"id": "lab-1", "results": [{"evidence_class": "measured"}]}})
         else:
             self._json(202, {"status": "cancellation_requested"})
 
@@ -112,6 +118,12 @@ class ClientTest(unittest.TestCase):
         self.assertEqual(instances[0]["id"], "node-a")
         self.assertEqual(instances[0]["protocol_max"], 2)
         self.assertFalse(any(path.endswith("/cancel") for path, _, _ in Handler.requests))
+
+    def test_recipe_and_lab_helpers_preserve_evidence_labels(self):
+        recipe = self.client.capture_recipe("qwen prod", name="balanced", version="1.0.0", benchmark_id="bench-1")
+        self.assertEqual(recipe["digest"], "a" * 64)
+        self.assertEqual(self.client.recipes("bal", limit=1)[0]["name"], "balanced")
+        self.assertEqual(self.client.lab("org/model@commit", max_ttft_p95_ms=250)["results"][0]["evidence_class"], "measured")
 
     def test_terminal_failure_is_typed(self):
         with self.assertRaises(OperationFailed) as caught:

@@ -35,6 +35,7 @@ or link corrections. A changed decision gets a new ADR whose status supersedes t
 | [0023](/adr/0023-in-memory-admission-and-encrypted-async) | Accepted | Enforce admission from memory and persist async inference only as encrypted, fenced jobs. |
 | [0024](/adr/0024-provider-product-profiles) | Accepted | Model provider products as explicit profiles with honest ownership and qualification boundaries. |
 | [0025](/adr/0025-fenced-ha-and-protocol-overlap) | Accepted | Use PostgreSQL-fenced work and explicit protocol overlap for recoverable multi-replica operation. |
+| [0026](/adr/0026-content-addressed-recipes-and-evidence-lab) | Accepted | Capture immutable measured recipes and keep Lab comparisons provenance-explicit. |
 
 Use the next sequential number. Include context, decision, consequences, alternatives, and
 verification. Link affected feature documents.

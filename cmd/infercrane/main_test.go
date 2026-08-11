@@ -499,8 +499,15 @@ func TestInvalidOutputIsRejectedBeforeAnyControlPlaneRequest(t *testing.T) {
 		"plan": func() error {
 			return planCommand(context.Background(), cfg, []string{"Qwen/Qwen3-8B", "--output", "xml"})
 		},
-		"doctor":       func() error { return doctorCommand(context.Background(), cfg, []string{"--output", "xml"}) },
-		"benchmark":    func() error { return benchmarkCommand(context.Background(), cfg, []string{"qwen", "--output", "xml"}) },
+		"doctor":    func() error { return doctorCommand(context.Background(), cfg, []string{"--output", "xml"}) },
+		"benchmark": func() error { return benchmarkCommand(context.Background(), cfg, []string{"qwen", "--output", "xml"}) },
+		"recipe": func() error {
+			return recipeCommand(context.Background(), cfg, []string{"create", "qwen", "--name", "balanced", "--version", "1", "--output", "xml"})
+		},
+		"recipes": func() error { return recipesCommand(context.Background(), cfg, []string{"--output", "xml"}) },
+		"lab": func() error {
+			return labCommand(context.Background(), cfg, []string{"model@commit", "--output", "xml"})
+		},
 		"recommend":    func() error { return recommendCommand(context.Background(), cfg, []string{"qwen", "--output", "xml"}) },
 		"slo":          func() error { return sloCommand(context.Background(), cfg, []string{"get", "qwen", "--output", "xml"}) },
 		"deployments":  func() error { return listDeployments(context.Background(), cfg, []string{"--output", "xml"}) },
@@ -602,6 +609,40 @@ func TestBenchmarkParsesFlagsAfterDeploymentName(t *testing.T) {
 	})
 	if err != nil || path != "/api/v1/deployments/qwen prod/benchmarks" || body["requests"] != float64(40) || body["concurrency"] != float64(4) || body["revision"] != "candidate" {
 		t.Fatalf("path=%q body=%#v err=%v", path, body, err)
+	}
+}
+
+func TestRecipeAndLabCommandsUseControlAPI(t *testing.T) {
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/recipes"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"recipe": map[string]any{"name": "balanced", "version": "1.0.0", "digest": strings.Repeat("a", 64), "payload": map[string]any{"benchmark_id": "bench-1", "model_identity": "model@commit", "runtime": "vllm", "runtime_version": "1", "provider": "aws", "gpu": "H100"}}})
+		case r.URL.Path == "/api/v1/recipes":
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []any{}})
+		default:
+			_ = json.NewEncoder(w).Encode(map[string]any{"evaluation": map[string]any{"id": "lab-1", "input_digest": strings.Repeat("b", 64), "results": []any{map[string]any{"evidence_class": "measured", "provider": "aws", "runtime": "vllm", "gpu": "H100", "ttft_p95_ms": 200, "error_rate": 0, "cost_metadata": map[string]any{"available": false}}}}})
+		}
+	}))
+	defer server.Close()
+	cfg := config.Config{ControlURL: server.URL, APIKey: "secret"}
+	if _, err := captureStdout(t, func() error {
+		return recipeCommand(context.Background(), cfg, []string{"create", "qwen prod", "--name", "balanced", "--version", "1.0.0"})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := captureStdout(t, func() error { return recipesCommand(context.Background(), cfg, []string{"bal"}) }); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := captureStdout(t, func() error {
+		return labCommand(context.Background(), cfg, []string{"model@commit", "--max-ttft-p95-ms", "250"})
+	}); err != nil || !strings.Contains(output, "MEASURED") {
+		t.Fatalf("output=%s err=%v", output, err)
+	}
+	if strings.Join(paths, ",") != "/api/v1/deployments/qwen prod/recipes,/api/v1/recipes,/api/v1/lab/evaluations" {
+		t.Fatalf("paths=%v", paths)
 	}
 }
 

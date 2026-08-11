@@ -220,6 +220,24 @@ type BenchmarkResult struct {
 	CreatedAt                                               time.Time
 }
 
+// ModelRecipe is an immutable, content-addressed serving configuration captured
+// from a real revision and benchmark. Payload and provenance are bounded JSON;
+// the digest covers both canonical objects.
+type ModelRecipe struct {
+	ID, TenantID, Name, Version, Digest string
+	PayloadJSON, ProvenanceJSON         string
+	CreatedAt                           time.Time
+}
+
+// LabEvaluation is an immutable comparison of persisted evidence. Results
+// label every row measured, modeled, or heuristic; v1.7 emits measured rows
+// only and never synthesizes missing performance or cost.
+type LabEvaluation struct {
+	ID, TenantID, ModelIdentity, AlgorithmVersion string
+	InputJSON, ResultsJSON, InputDigest           string
+	CreatedAt                                     time.Time
+}
+
 type SLOPolicy struct {
 	DeploymentID          string    `json:"deployment_id"`
 	MaxTTFTP95MS          *float64  `json:"max_ttft_p95_ms,omitempty"`

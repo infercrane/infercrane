@@ -22,7 +22,7 @@ engineering checkpoints rather than public stable releases.
 | v1.4.0 | Automated gates passed | Admission control and bounded asynchronous inference |
 | v1.5.0 | Automated gates passed | Qualified provider-neutral AWS, GCP and CoreWeave profiles |
 | v1.6.0 | Automated gates passed | Control-plane HA, recovery, private networking, workload identity and safe upgrades |
-| v1.7.0 | Planned | Evidence-backed model recipes and Inference Lab |
+| v1.7.0 | Automated gates passed | Evidence-backed model recipes and Inference Lab |
 | v1.8.0 | Planned | Privacy-preserving replay, artifact placement and capacity intelligence |
 | v1.9.0 | Planned | FinOps evidence and advisory-only workload optimization |
 | v2.0.0 | Planned | Context Passport, delegated request survival and policy-bounded Burst Guard |

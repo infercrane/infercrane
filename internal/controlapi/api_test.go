@@ -42,6 +42,66 @@ type fakeMembershipStore struct {
 	instances []domain.ControlPlaneInstance
 }
 
+type fakeRecipeLabStore struct {
+	*fakeStore
+	recipes []domain.ModelRecipe
+	lab     domain.LabEvaluation
+}
+
+func (f *fakeRecipeLabStore) CreateModelRecipe(_ context.Context, _ string, value domain.ModelRecipe) (domain.ModelRecipe, error) {
+	value.ID = "recipe-1"
+	value.CreatedAt = time.Now().UTC()
+	f.recipes = append(f.recipes, value)
+	return value, nil
+}
+func (f *fakeRecipeLabStore) ModelRecipe(_ context.Context, _, name, version string) (domain.ModelRecipe, error) {
+	for _, row := range f.recipes {
+		if row.Name == name && row.Version == version {
+			return row, nil
+		}
+	}
+	return domain.ModelRecipe{}, domain.ErrNotFound
+}
+func (f *fakeRecipeLabStore) ModelRecipes(context.Context, string, string, int) ([]domain.ModelRecipe, error) {
+	return f.recipes, nil
+}
+func (f *fakeRecipeLabStore) BenchmarksForModel(_ context.Context, _ string, model string, _ int) ([]domain.BenchmarkResult, error) {
+	var out []domain.BenchmarkResult
+	for _, row := range f.benchmarks {
+		if row.ModelIdentity == model {
+			out = append(out, row)
+		}
+	}
+	return out, nil
+}
+func (f *fakeRecipeLabStore) RecordLabEvaluation(_ context.Context, _ string, value domain.LabEvaluation) (domain.LabEvaluation, error) {
+	value.ID = "lab-1"
+	value.CreatedAt = time.Now().UTC()
+	f.lab = value
+	return value, nil
+}
+
+func TestRecipeCaptureAndLabUseImmutableMeasuredEvidence(t *testing.T) {
+	identity := "org/model@" + strings.Repeat("a", 40)
+	base := &fakeStore{resolved: domain.ResolvedDeployment{Deployment: domain.Deployment{ID: "deployment-1", Name: "prod", ActiveRevisionID: "rev-1"}}, revisions: []domain.DeploymentRevision{{ID: "rev-1", SpecJSON: `{"model":"org/model","runtime":"vllm","runtime_version":"0.10.2","routing_strategy":"round_robin","min_replicas":1,"max_replicas":1,"compute_mode":"elastic","cloud":"aws","gpu":"H100"}`}}, artifact: domain.ModelArtifact{ID: "artifact-1", Repository: "org/model", ImmutableRevision: strings.Repeat("a", 40), ModelIdentity: identity}, benchmarks: []domain.BenchmarkResult{{ID: "bench-1", DeploymentName: "prod", RevisionID: "rev-1", ModelIdentity: identity, Runtime: "vllm", RuntimeVersion: "0.10.2", Provider: "aws", GPU: "H100", ComputeMode: "elastic", Tool: "aiperf", ToolVersion: "0.9", WorkloadJSON: `{"requests":10}`, CostMetadataJSON: `{"available":false}`, RequestCount: 10, Succeeded: 10}}}
+	store := &fakeRecipeLabStore{fakeStore: base}
+	handler := (API{Store: store, APIKey: "secret", ProductVersion: "1.7.0"}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments/prod/recipes", strings.NewReader(`{"name":"balanced","version":"1.0.0"}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || len(store.recipes) != 1 || store.recipes[0].Digest == "" || !strings.Contains(response.Body.String(), `"evidence_class":"measured"`) {
+		t.Fatalf("status=%d recipes=%#v body=%s", response.Code, store.recipes, response.Body.String())
+	}
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/lab/evaluations", strings.NewReader(`{"model_identity":"`+identity+`","max_ttft_p95_ms":250}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || store.lab.ID != "lab-1" || !strings.Contains(response.Body.String(), `"evidence_class":"measured"`) {
+		t.Fatalf("status=%d lab=%#v body=%s", response.Code, store.lab, response.Body.String())
+	}
+}
+
 func (f *fakeMembershipStore) ControlPlaneInstances(context.Context, time.Duration) ([]domain.ControlPlaneInstance, error) {
 	return f.instances, nil
 }

@@ -146,6 +146,30 @@ func TestBenchmarkHistoryPersistsReproductionMetadata(t *testing.T) {
 	if err != nil || len(rows) != 1 || rows[0].Tool != "aiperf" || rows[0].GPUCount == nil || *rows[0].GPUCount != 1 || rows[0].TTFTP95MS == nil || *rows[0].TTFTP95MS != value || !strings.Contains(rows[0].WorkloadJSON, "random_seed") || !strings.Contains(rows[0].CostMetadataJSON, `"available"`) {
 		t.Fatalf("rows=%#v err=%v", rows, err)
 	}
+	modelRows, err := s.BenchmarksForModel(ctx, "global", "Qwen/Qwen3-8B@commit", 10)
+	if err != nil || len(modelRows) != 1 || modelRows[0].ID != created.ID {
+		t.Fatalf("model rows=%#v err=%v", modelRows, err)
+	}
+	recipeValue := domain.ModelRecipe{Name: "balanced", Version: "1.0.0", Digest: strings.Repeat("a", 64), PayloadJSON: `{"schema_version":"infercrane.recipe/v1"}`, ProvenanceJSON: `{"evidence_class":"measured"}`}
+	recipeRow, err := s.CreateModelRecipe(ctx, "global", recipeValue)
+	if err != nil || recipeRow.ID == "" {
+		t.Fatalf("recipe=%#v err=%v", recipeRow, err)
+	}
+	again, err := s.CreateModelRecipe(ctx, "global", recipeValue)
+	if err != nil || again.ID != recipeRow.ID {
+		t.Fatalf("idempotent recipe=%#v err=%v", again, err)
+	}
+	recipeValue.Digest = strings.Repeat("b", 64)
+	if _, err = s.CreateModelRecipe(ctx, "global", recipeValue); !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("immutable conflict=%v", err)
+	}
+	if other, err := s.ModelRecipes(ctx, "missing-tenant", "", 10); err != nil || len(other) != 0 {
+		t.Fatalf("cross tenant recipes=%#v err=%v", other, err)
+	}
+	labRow, err := s.RecordLabEvaluation(ctx, "global", domain.LabEvaluation{ModelIdentity: "Qwen/Qwen3-8B@commit", AlgorithmVersion: "inference-lab-v1", InputJSON: `{"model_identity":"Qwen/Qwen3-8B@commit"}`, ResultsJSON: `[{"evidence_class":"measured"}]`, InputDigest: strings.Repeat("c", 64)})
+	if err != nil || labRow.ID == "" {
+		t.Fatalf("lab=%#v err=%v", labRow, err)
+	}
 }
 
 func TestInferenceDecisionPolicyEvidenceAndRecommendationsAreTenantSafe(t *testing.T) {

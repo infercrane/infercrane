@@ -21,7 +21,9 @@ import (
 	"github.com/infercrane/infercrane/internal/doctor"
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/integration"
+	"github.com/infercrane/infercrane/internal/lab"
 	"github.com/infercrane/infercrane/internal/passport"
+	"github.com/infercrane/infercrane/internal/recipe"
 	"github.com/infercrane/infercrane/internal/support"
 	"github.com/infercrane/infercrane/internal/workflows"
 )
@@ -124,6 +126,13 @@ type asyncInferenceService interface {
 type controlPlaneMembershipStore interface {
 	ControlPlaneInstances(context.Context, time.Duration) ([]domain.ControlPlaneInstance, error)
 }
+type recipeLabStore interface {
+	CreateModelRecipe(context.Context, string, domain.ModelRecipe) (domain.ModelRecipe, error)
+	ModelRecipe(context.Context, string, string, string) (domain.ModelRecipe, error)
+	ModelRecipes(context.Context, string, string, int) ([]domain.ModelRecipe, error)
+	BenchmarksForModel(context.Context, string, string, int) ([]domain.BenchmarkResult, error)
+	RecordLabEvaluation(context.Context, string, domain.LabEvaluation) (domain.LabEvaluation, error)
+}
 type API struct {
 	Store         Store
 	APIKey        string
@@ -143,6 +152,7 @@ type API struct {
 		Deliver(context.Context, domain.AlertPolicy, domain.DiagnosticFinding) (domain.AlertDelivery, error)
 	}
 	AsyncInference asyncInferenceService
+	ProductVersion string
 }
 
 type BackendMetadata struct {
@@ -174,6 +184,10 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/whoami", a.auth(authz.Read, a.whoami))
 	mux.HandleFunc("GET /api/v1/integrations", a.auth(authz.Read, a.integrations))
 	mux.HandleFunc("GET /api/v1/system/instances", a.auth(authz.Read, a.controlPlaneInstances))
+	mux.HandleFunc("POST /api/v1/deployments/{name}/recipes", a.auth(authz.Deploy, a.captureRecipe))
+	mux.HandleFunc("GET /api/v1/recipes", a.auth(authz.Read, a.recipes))
+	mux.HandleFunc("GET /api/v1/recipes/{name}/{version}", a.auth(authz.Read, a.getRecipe))
+	mux.HandleFunc("POST /api/v1/lab/evaluations", a.auth(authz.Deploy, a.evaluateLab))
 	mux.HandleFunc("GET /api/v1/environments", a.auth(authz.Read, a.environments))
 	mux.HandleFunc("POST /api/v1/environments", a.auth(authz.Deploy, a.createEnvironment))
 	mux.HandleFunc("GET /api/v1/logical-models", a.auth(authz.Read, a.logicalModels))
@@ -1303,6 +1317,174 @@ func (a API) benchmarks(w http.ResponseWriter, r *http.Request) {
 
 func benchmarkResponse(row domain.BenchmarkResult) map[string]any {
 	return map[string]any{"id": row.ID, "deployment": row.DeploymentName, "revision_id": row.RevisionID, "model_artifact_id": row.ModelArtifactID, "model_identity": row.ModelIdentity, "runtime": row.Runtime, "runtime_version": row.RuntimeVersion, "runtime_configuration": json.RawMessage(row.RuntimeConfigJSON), "provider": row.Provider, "region": row.Region, "gpu": row.GPU, "gpu_count": row.GPUCount, "compute_mode": row.ComputeMode, "tool": row.Tool, "tool_version": row.ToolVersion, "workload": json.RawMessage(row.WorkloadJSON), "reproduction_command": row.ReproductionCommand, "request_count": row.RequestCount, "succeeded": row.Succeeded, "failed": row.Failed, "duration_seconds": row.DurationSeconds, "request_throughput": row.RequestThroughput, "output_token_throughput": row.OutputTokenThroughput, "ttft_p50_ms": row.TTFTP50MS, "ttft_p95_ms": row.TTFTP95MS, "tpot_p50_ms": row.TPOTP50MS, "tpot_p95_ms": row.TPOTP95MS, "latency_p50_ms": row.LatencyP50MS, "latency_p95_ms": row.LatencyP95MS, "goodput": row.Goodput, "gpu_utilization": row.GPUUtilization, "cost_metadata": json.RawMessage(row.CostMetadataJSON), "created_at": row.CreatedAt}
+}
+
+func (a API) captureRecipe(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(recipeLabStore)
+	if !ok {
+		writeError(w, 503, "recipe_store_unavailable", "recipe persistence is unavailable")
+		return
+	}
+	var request struct {
+		Name        string `json:"name"`
+		Version     string `json:"version"`
+		BenchmarkID string `json:"benchmark_id,omitempty"`
+	}
+	if !decodeMutationBody(w, r, &request) {
+		return
+	}
+	principal := r.Context().Value(identityKey{}).(domain.Principal)
+	deploymentName := r.PathValue("name")
+	resolved, err := a.Store.ResolveForTenant(r.Context(), principal.TenantID, deploymentName)
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, 404, "not_found", "deployment was not found")
+		return
+	}
+	if err != nil || resolved.Deployment.ActiveRevisionID == "" {
+		writeError(w, 409, "active_revision_required", "deployment must have an active revision")
+		return
+	}
+	revisions, err := a.Store.Revisions(r.Context(), principal.TenantID, deploymentName)
+	if err != nil {
+		writeError(w, 500, "internal", "revision history lookup failed")
+		return
+	}
+	var revision domain.DeploymentRevision
+	for _, candidate := range revisions {
+		if candidate.ID == resolved.Deployment.ActiveRevisionID {
+			revision = candidate
+			break
+		}
+	}
+	if revision.ID == "" {
+		writeError(w, 409, "active_revision_required", "active revision evidence is unavailable")
+		return
+	}
+	artifact, err := a.Store.ModelArtifactForRevision(r.Context(), principal.TenantID, revision.ID)
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, 409, "immutable_artifact_required", "resolve an immutable model artifact before capturing a recipe")
+		return
+	}
+	if err != nil {
+		writeError(w, 500, "internal", "model artifact lookup failed")
+		return
+	}
+	benchmarks, err := a.Store.BenchmarksForDeployment(r.Context(), principal.TenantID, deploymentName, 100)
+	if err != nil {
+		writeError(w, 500, "internal", "benchmark history lookup failed")
+		return
+	}
+	var measured domain.BenchmarkResult
+	for _, candidate := range benchmarks {
+		if candidate.RevisionID == revision.ID && candidate.ModelIdentity == artifact.ModelIdentity && (request.BenchmarkID == "" || candidate.ID == request.BenchmarkID) {
+			measured = candidate
+			break
+		}
+	}
+	if measured.ID == "" {
+		writeError(w, 409, "measured_benchmark_required", "run an AIPerf benchmark for the active immutable revision before capturing a recipe")
+		return
+	}
+	productVersion := a.ProductVersion
+	if productVersion == "" {
+		productVersion = "development"
+	}
+	value, err := recipe.Build(request.Name, request.Version, productVersion, artifact, revision, measured)
+	if err != nil {
+		writeError(w, 422, "invalid_recipe", err.Error())
+		return
+	}
+	persisted, err := store.CreateModelRecipe(r.Context(), principal.TenantID, value)
+	if errors.Is(err, domain.ErrConflict) {
+		writeError(w, 409, "recipe_immutable", "recipe name and version already identify different content")
+		return
+	}
+	if err != nil {
+		writeError(w, 500, "recipe_persist_failed", "recipe could not be persisted")
+		return
+	}
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: principal.TenantID, Actor: principal.Name, Action: "recipe.capture", ResourceType: "recipe", ResourceName: persisted.Name + "@" + persisted.Version, Outcome: "succeeded", Payload: `{"digest":"` + persisted.Digest + `"}`})
+	writeJSON(w, http.StatusCreated, map[string]any{"recipe": recipeResponse(persisted)})
+}
+
+func (a API) recipes(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(recipeLabStore)
+	if !ok {
+		writeError(w, 503, "recipe_store_unavailable", "recipe persistence is unavailable")
+		return
+	}
+	principal := r.Context().Value(identityKey{}).(domain.Principal)
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	rows, err := store.ModelRecipes(r.Context(), principal.TenantID, r.URL.Query().Get("query"), limit)
+	if err != nil {
+		writeError(w, 500, "internal", "recipe search failed")
+		return
+	}
+	data := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		data = append(data, recipeResponse(row))
+	}
+	writeJSON(w, 200, map[string]any{"data": data})
+}
+func (a API) getRecipe(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(recipeLabStore)
+	if !ok {
+		writeError(w, 503, "recipe_store_unavailable", "recipe persistence is unavailable")
+		return
+	}
+	principal := r.Context().Value(identityKey{}).(domain.Principal)
+	row, err := store.ModelRecipe(r.Context(), principal.TenantID, r.PathValue("name"), r.PathValue("version"))
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, 404, "not_found", "recipe was not found")
+		return
+	}
+	if err != nil {
+		writeError(w, 500, "internal", "recipe lookup failed")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"recipe": recipeResponse(row)})
+}
+func recipeResponse(row domain.ModelRecipe) map[string]any {
+	return map[string]any{"id": row.ID, "name": row.Name, "version": row.Version, "digest": row.Digest, "payload": json.RawMessage(row.PayloadJSON), "provenance": json.RawMessage(row.ProvenanceJSON), "created_at": row.CreatedAt}
+}
+
+func (a API) evaluateLab(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(recipeLabStore)
+	if !ok {
+		writeError(w, 503, "lab_store_unavailable", "Inference Lab persistence is unavailable")
+		return
+	}
+	var request struct {
+		ModelIdentity  string   `json:"model_identity"`
+		MaxTTFTP95MS   *float64 `json:"max_ttft_p95_ms,omitempty"`
+		WorkloadDigest string   `json:"workload_digest,omitempty"`
+	}
+	if !decodeMutationBody(w, r, &request) {
+		return
+	}
+	if strings.TrimSpace(request.ModelIdentity) == "" || request.MaxTTFTP95MS != nil && (*request.MaxTTFTP95MS < 0 || *request.MaxTTFTP95MS > 86400000) || request.WorkloadDigest != "" && (len(request.WorkloadDigest) != 64 || strings.Trim(request.WorkloadDigest, "0123456789abcdef") != "") {
+		writeError(w, 422, "invalid_lab_input", "model identity, finite nonnegative SLO, and optional SHA-256 workload digest are required")
+		return
+	}
+	principal := r.Context().Value(identityKey{}).(domain.Principal)
+	evidence, err := store.BenchmarksForModel(r.Context(), principal.TenantID, request.ModelIdentity, 500)
+	if err != nil {
+		writeError(w, 500, "internal", "lab evidence lookup failed")
+		return
+	}
+	value, err := lab.Evaluate(lab.Input{ModelIdentity: request.ModelIdentity, MaxTTFTP95MS: request.MaxTTFTP95MS, WorkloadDigest: request.WorkloadDigest}, evidence)
+	if err != nil {
+		writeError(w, 500, "internal", "lab evidence could not be canonicalized")
+		return
+	}
+	persisted, err := store.RecordLabEvaluation(r.Context(), principal.TenantID, value)
+	if err != nil {
+		writeError(w, 500, "internal", "lab evaluation could not be persisted")
+		return
+	}
+	var results json.RawMessage = json.RawMessage(persisted.ResultsJSON)
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: principal.TenantID, Actor: principal.Name, Action: "lab.evaluate", ResourceType: "model", ResourceName: request.ModelIdentity, Outcome: "succeeded", Payload: `{"input_digest":"` + persisted.InputDigest + `"}`})
+	writeJSON(w, 201, map[string]any{"evaluation": map[string]any{"id": persisted.ID, "model_identity": persisted.ModelIdentity, "algorithm_version": persisted.AlgorithmVersion, "input": json.RawMessage(persisted.InputJSON), "input_digest": persisted.InputDigest, "results": results, "created_at": persisted.CreatedAt}})
 }
 
 func (a API) createPassport(w http.ResponseWriter, r *http.Request) {

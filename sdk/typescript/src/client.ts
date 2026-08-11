@@ -120,6 +120,24 @@ export class InferCrane {
     return response.data ?? [];
   }
 
+  async captureRecipe(deployment: string, name: string, version: string, benchmarkId = ''): Promise<Record<string, JsonValue>> {
+    const body: Record<string, JsonValue> = { name, version };
+    if (benchmarkId) body['benchmark_id'] = benchmarkId;
+    return (await this.api.captureRecipe(deployment, body)).recipe as Record<string, JsonValue>;
+  }
+
+  async recipes(query = '', limit = 20): Promise<Record<string, JsonValue>[]> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new TypeError('limit must be an integer between 1 and 100');
+    return (await this.transport.request('GET', `/recipes?query=${encodeURIComponent(query)}&limit=${limit}`) as { data: Record<string, JsonValue>[] }).data;
+  }
+
+  async lab(modelIdentity: string, options: { maxTtftP95Ms?: number; workloadDigest?: string } = {}): Promise<Record<string, JsonValue>> {
+    const body: Record<string, JsonValue> = { model_identity: modelIdentity };
+    if (options.maxTtftP95Ms !== undefined) body['max_ttft_p95_ms'] = options.maxTtftP95Ms;
+    if (options.workloadDigest) body['workload_digest'] = options.workloadDigest;
+    return (await this.api.evaluateLab(body)).evaluation as Record<string, JsonValue>;
+  }
+
   async wait(id: string, options: { timeoutMs?: number; signal?: AbortSignal } = {}): Promise<Operation> {
     const timeoutMs = options.timeoutMs ?? this.timeoutMs;
     if (timeoutMs <= 0) throw new TypeError('timeoutMs must be positive');

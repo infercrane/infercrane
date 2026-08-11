@@ -812,6 +812,27 @@
         ],
         "type": "object"
       },
+      "LabEvaluationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "max_ttft_p95_ms": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "model_identity": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "workload_digest": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_identity"
+        ],
+        "type": "object"
+      },
       "LogicalModelCreate": {
         "additionalProperties": false,
         "properties": {
@@ -925,6 +946,29 @@
         },
         "required": [
           "operation"
+        ],
+        "type": "object"
+      },
+      "RecipeCaptureRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "benchmark_id": {
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "version": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "version"
         ],
         "type": "object"
       },
@@ -2093,6 +2137,63 @@
         "summary": "Issue a signed Inference Passport",
         "tags": [
           "Release evidence"
+        ]
+      }
+    },
+    "/api/v1/deployments/{name}/recipes": {
+      "post": {
+        "operationId": "captureRecipe",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecipeCaptureRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Capture an immutable evidence-backed recipe",
+        "tags": [
+          "Recipes"
         ]
       }
     },
@@ -4161,6 +4262,52 @@
         ]
       }
     },
+    "/api/v1/lab/evaluations": {
+      "post": {
+        "operationId": "evaluateLab",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LabEvaluationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Compare persisted serving evidence",
+        "tags": [
+          "Inference Lab"
+        ]
+      }
+    },
     "/api/v1/logical-models": {
       "get": {
         "operationId": "listLogicalModels",
@@ -4548,6 +4695,98 @@
         "summary": "Rotate a service-account credential",
         "tags": [
           "Identity"
+        ]
+      }
+    },
+    "/api/v1/recipes": {
+      "get": {
+        "operationId": "listRecipes",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Search immutable model recipes",
+        "tags": [
+          "Recipes"
+        ]
+      }
+    },
+    "/api/v1/recipes/{name}/{version}": {
+      "get": {
+        "operationId": "getRecipe",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get one immutable model recipe",
+        "tags": [
+          "Recipes"
         ]
       }
     },
@@ -5337,6 +5576,9 @@
       "name": "Inference"
     },
     {
+      "name": "Inference Lab"
+    },
+    {
       "name": "Inference decisions"
     },
     {
@@ -5344,6 +5586,9 @@
     },
     {
       "name": "Operations"
+    },
+    {
+      "name": "Recipes"
     },
     {
       "name": "Release Guard"

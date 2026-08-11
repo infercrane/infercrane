@@ -223,6 +223,26 @@ export class ControlApi {
     return this.transport.request('GET', path) as Promise<ObjectList>;
   }
 
+  captureRecipe(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = `/deployments/${encodeURIComponent(name)}/recipes`;
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  listRecipes(): Promise<ObjectList> {
+    const path = '/recipes';
+    return this.transport.request('GET', path) as Promise<ObjectList>;
+  }
+
+  getRecipe(name: string, version: string): Promise<Record<string, JsonValue>> {
+    const path = `/recipes/${encodeURIComponent(name)}/${encodeURIComponent(version)}`;
+    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+  }
+
+  evaluateLab(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = '/lab/evaluations';
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
   createInferencePassport(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
     const path = `/deployments/${encodeURIComponent(name)}/passports`;
     return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;

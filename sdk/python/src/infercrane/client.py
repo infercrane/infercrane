@@ -106,6 +106,25 @@ class InferCrane:
         response = self.api.list_control_plane_instances()
         return list(response.get("data", []))
 
+    def capture_recipe(self, deployment: str, *, name: str, version: str, benchmark_id: str = "") -> dict[str, Any]:
+        body = {"name": name, "version": version}
+        if benchmark_id:
+            body["benchmark_id"] = benchmark_id
+        return self.api.capture_recipe(deployment, body=body)["recipe"]
+
+    def recipes(self, query: str = "", *, limit: int = 20) -> list[dict[str, Any]]:
+        if limit < 1 or limit > 100:
+            raise ValueError("limit must be between 1 and 100")
+        return self._transport.request("GET", f"/recipes?query={quote(query, safe='')}&limit={limit}")["data"]
+
+    def lab(self, model_identity: str, *, max_ttft_p95_ms: float | None = None, workload_digest: str = "") -> dict[str, Any]:
+        body: dict[str, Any] = {"model_identity": model_identity}
+        if max_ttft_p95_ms is not None:
+            body["max_ttft_p95_ms"] = max_ttft_p95_ms
+        if workload_digest:
+            body["workload_digest"] = workload_digest
+        return self.api.evaluate_lab(body=body)["evaluation"]
+
     def wait(self, operation_id: str, *, timeout: float | None = None) -> Operation:
         limit = self.timeout if timeout is None else timeout
         if limit <= 0: raise ValueError("timeout must be positive")
@@ -181,6 +200,15 @@ class AsyncInferCrane:
 
     async def deploy(self, **options: Any) -> Operation:
         return await asyncio.to_thread(self._sync.deploy, **options)
+
+    async def capture_recipe(self, deployment: str, **options: Any) -> dict[str, Any]:
+        return await asyncio.to_thread(self._sync.capture_recipe, deployment, **options)
+
+    async def recipes(self, query: str = "", *, limit: int = 20) -> list[dict[str, Any]]:
+        return await asyncio.to_thread(self._sync.recipes, query, limit=limit)
+
+    async def lab(self, model_identity: str, **options: Any) -> dict[str, Any]:
+        return await asyncio.to_thread(self._sync.lab, model_identity, **options)
 
     async def get_operation(self, operation_id: str) -> Operation:
         return await asyncio.to_thread(self._sync.get_operation, operation_id)

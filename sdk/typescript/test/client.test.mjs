@@ -60,6 +60,19 @@ test('control-plane membership exposes mixed-version protocol evidence', async (
   assert.equal(instances[0].protocol_max, 2);
 });
 
+test('recipe and lab helpers preserve immutable measured evidence', async () => {
+  const fetch = async (url, options = {}) => {
+    if (String(url).includes('/recipes?')) return json({ data: [{ name: 'balanced', version: '1.0.0' }] });
+    if (String(url).endsWith('/recipes')) return json({ recipe: { name: 'balanced', version: '1.0.0', digest: 'a'.repeat(64) } }, 201);
+    if (String(url).endsWith('/lab/evaluations')) return json({ evaluation: { id: 'lab-1', results: [{ evidence_class: 'measured' }] } }, 201);
+    throw new Error(`unexpected ${url} ${options.method}`);
+  };
+  const client = new InferCrane({ apiKey: 'secret', fetch });
+  assert.equal((await client.captureRecipe('qwen prod', 'balanced', '1.0.0', 'bench-1')).digest, 'a'.repeat(64));
+  assert.equal((await client.recipes('bal', 1))[0].name, 'balanced');
+  assert.equal((await client.lab('org/model@commit', { maxTtftP95Ms: 250 })).results[0].evidence_class, 'measured');
+});
+
 test('streaming parses fragmented SSE without replay', async () => {
   let calls = 0;
   const body = new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"hi"}}]}\n')); controller.enqueue(new TextEncoder().encode('\ndata: [DONE]\n\n')); controller.close(); } });

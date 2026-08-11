@@ -78,6 +78,11 @@ milestone_gates:
     - tls13_mtls_and_partial_identity_fail_closed
     - guarded_backup_restore_and_migration_ledger_preservation
     - restored_control_plane_startup_and_rto_measurement
+    - recipe_requires_immutable_artifact_revision_and_measured_benchmark
+    - recipe_canonical_digest_immutability_and_tenant_isolation
+    - inference_lab_measured_evidence_only_and_no_hidden_provisioning
+    - inference_lab_missing_metrics_and_cost_remain_unavailable
+    - recipe_lab_api_cli_sdk_openapi_and_docs_drift
   deferred_until_v1_manual_qualification:
     - runpod_elastic
     - runpod_serverless

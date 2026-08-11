@@ -126,6 +126,7 @@
           "features/serverless",
           "features/telemetry",
           "features/benchmarking",
+          "features/recipes-lab",
           "features/inference-decisions",
           "features/cold-starts",
           "features/explanations"
@@ -176,6 +177,7 @@
           "project-status",
           "production-readiness",
           "release-notes-v1.6.0-rc.1",
+          "release-notes-v1.7.0-rc.1",
           "release-notes-v1.5.0-rc.1",
           "release-notes-v1.4.0-rc.1",
           "release-notes-v1.0.0-rc.1",
@@ -211,6 +213,7 @@
               "adr/0023-in-memory-admission-and-encrypted-async"
               ,"adr/0024-provider-product-profiles"
               ,"adr/0025-fenced-ha-and-protocol-overlap"
+              ,"adr/0026-content-addressed-recipes-and-evidence-lab"
             ]
           },
           "release-acceptance"

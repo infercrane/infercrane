@@ -187,6 +187,22 @@ class ControlAPI:
         path = f"/deployments/{quote(name, safe='')}/benchmarks"
         return cast(ObjectList, self._transport.request("GET", path))
 
+    def capture_recipe(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = f"/deployments/{quote(name, safe='')}/recipes"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
+    def list_recipes(self) -> ObjectList:
+        path = "/recipes"
+        return cast(ObjectList, self._transport.request("GET", path))
+
+    def get_recipe(self, name: str, version: str) -> dict[str, Any]:
+        path = f"/recipes/{quote(name, safe='')}/{quote(version, safe='')}"
+        return cast(dict[str, Any], self._transport.request("GET", path))
+
+    def evaluate_lab(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = "/lab/evaluations"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
     def create_inference_passport(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
         path = f"/deployments/{quote(name, safe='')}/passports"
         return cast(dict[str, Any], self._transport.request("POST", path, body=body))

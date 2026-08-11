@@ -6,7 +6,8 @@ services:
     build:
       context: .
       target: development
-    entrypoint: ["infercrane-dev-start"]
+    entrypoint: ["infercrane"]
+    command: ["serve"]
     environment:
       INFERCRANE_API_KEY: infercrane
       INFERCRANE_DATABASE_URL: postgres://infercrane:infercrane@postgres:5432/infercrane?sslmode=disable

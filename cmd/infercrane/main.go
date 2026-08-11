@@ -158,7 +158,7 @@ func runLegacy(ctx context.Context, args []string) error {
 		return passportCommand(ctx, config.Config{}, args[1:])
 	}
 	switch args[0] {
-	case "target", "deploy", "apply", "plan", "doctor", "adopt", "alert", "admission", "async", "ui", "dashboard", "deployments", "endpoints", "endpoint", "environment", "logical-model", "route", "status", "events", "logs", "request", "explain", "rollout", "delete", "inspect", "operation", "orphans", "integrations", "system", "context", "auth", "tenant", "principal", "secret", "external", "benchmark", "passport", "recommend", "slo", "serve":
+	case "target", "deploy", "apply", "plan", "doctor", "adopt", "alert", "admission", "async", "ui", "dashboard", "deployments", "endpoints", "endpoint", "environment", "logical-model", "route", "status", "events", "logs", "request", "explain", "rollout", "delete", "inspect", "operation", "orphans", "integrations", "system", "context", "auth", "tenant", "principal", "secret", "external", "benchmark", "recipe", "recipes", "lab", "passport", "recommend", "slo", "serve":
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -249,6 +249,12 @@ func runLegacy(ctx context.Context, args []string) error {
 		return externalAPICommand(ctx, cfg, args[1:])
 	case "benchmark":
 		return benchmarkCommand(ctx, cfg, args[1:])
+	case "recipe":
+		return recipeCommand(ctx, cfg, args[1:])
+	case "recipes":
+		return recipesCommand(ctx, cfg, args[1:])
+	case "lab":
+		return labCommand(ctx, cfg, args[1:])
 	case "passport":
 		return passportCommand(ctx, cfg, args[1:])
 	case "recommend":
@@ -613,6 +619,147 @@ type cliPassport struct {
 	Complete   bool            `json:"complete"`
 	Missing    []string        `json:"missing_evidence"`
 	CreatedAt  time.Time       `json:"created_at"`
+}
+
+func recipeCommand(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) < 2 || args[0] != "create" {
+		return errors.New("usage: infercrane recipe create DEPLOYMENT --name NAME --version VERSION [--benchmark ID]")
+	}
+	deployment := args[1]
+	fs := flag.NewFlagSet("recipe create", flag.ContinueOnError)
+	name := fs.String("name", "", "stable recipe name")
+	recipeVersion := fs.String("version", "", "immutable recipe version")
+	benchmarkID := fs.String("benchmark", "", "specific measured benchmark ID")
+	output := fs.String("output", "human", "human or json")
+	if err := fs.Parse(args[2:]); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 || *name == "" || *recipeVersion == "" {
+		return errors.New("recipe name and version are required")
+	}
+	if err := validateOutput(*output); err != nil {
+		return err
+	}
+	var response struct {
+		Recipe map[string]any `json:"recipe"`
+	}
+	if err := controlJSON(ctx, cfg, http.MethodPost, "/api/v1/deployments/"+url.PathEscape(deployment)+"/recipes", "", map[string]any{"name": *name, "version": *recipeVersion, "benchmark_id": *benchmarkID}, &response); err != nil {
+		return err
+	}
+	if *output == "json" {
+		encoded, _ := json.MarshalIndent(response, "", "  ")
+		fmt.Println(string(encoded))
+		return nil
+	}
+	fmt.Printf("Recipe       %s@%s\nDigest       %s\nEvidence     measured · %s\nModel        %s\nRuntime      %s %s\nProvider     %s\nGPU          %s\n", benchmarkValue(response.Recipe["name"]), benchmarkValue(response.Recipe["version"]), benchmarkValue(response.Recipe["digest"]), nestedValue(response.Recipe, "payload", "benchmark_id"), nestedValue(response.Recipe, "payload", "model_identity"), nestedValue(response.Recipe, "payload", "runtime"), nestedValue(response.Recipe, "payload", "runtime_version"), nestedValue(response.Recipe, "payload", "provider"), nestedValue(response.Recipe, "payload", "gpu"))
+	return nil
+}
+
+func recipesCommand(ctx context.Context, cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("recipes", flag.ContinueOnError)
+	limit := fs.Int("limit", 20, "maximum results")
+	output := fs.String("output", "human", "human or json")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() > 1 {
+		return errors.New("usage: infercrane recipes [QUERY] [--limit N]")
+	}
+	if *limit < 1 || *limit > 100 {
+		return errors.New("limit must be between 1 and 100")
+	}
+	if err := validateOutput(*output); err != nil {
+		return err
+	}
+	query := ""
+	if fs.NArg() == 1 {
+		query = fs.Arg(0)
+	}
+	var response struct {
+		Data []map[string]any `json:"data"`
+	}
+	path := "/api/v1/recipes?limit=" + strconv.Itoa(*limit) + "&query=" + url.QueryEscape(query)
+	if err := controlJSON(ctx, cfg, http.MethodGet, path, "", nil, &response); err != nil {
+		return err
+	}
+	if *output == "json" {
+		encoded, _ := json.MarshalIndent(response, "", "  ")
+		fmt.Println(string(encoded))
+		return nil
+	}
+	if len(response.Data) == 0 {
+		fmt.Println("No immutable recipes match. Capture one from a measured deployment with `infercrane recipe create`.")
+		return nil
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "RECIPE\tMODEL\tRUNTIME\tGPU\tEVIDENCE\tDIGEST")
+	for _, row := range response.Data {
+		fmt.Fprintf(w, "%s@%s\t%s\t%s %s\t%s\t%s\t%s\n", benchmarkValue(row["name"]), benchmarkValue(row["version"]), nestedValue(row, "payload", "model_identity"), nestedValue(row, "payload", "runtime"), nestedValue(row, "payload", "runtime_version"), nestedValue(row, "payload", "gpu"), nestedValue(row, "provenance", "evidence_class"), shortID(benchmarkValue(row["digest"])))
+	}
+	return w.Flush()
+}
+
+func labCommand(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) < 1 {
+		return errors.New("usage: infercrane lab MODEL_IDENTITY [flags]")
+	}
+	model := args[0]
+	fs := flag.NewFlagSet("lab", flag.ContinueOnError)
+	ttft := fs.String("max-ttft-p95-ms", "", "optional p95 TTFT SLO")
+	workloadDigest := fs.String("workload-digest", "", "optional exact workload SHA-256")
+	output := fs.String("output", "human", "human or json")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return errors.New("usage: infercrane lab MODEL_IDENTITY [flags]")
+	}
+	if err := validateOutput(*output); err != nil {
+		return err
+	}
+	body := map[string]any{"model_identity": model, "workload_digest": *workloadDigest}
+	if *ttft != "" {
+		value, err := strconv.ParseFloat(*ttft, 64)
+		if err != nil || value < 0 {
+			return errors.New("max TTFT p95 must be a nonnegative number")
+		}
+		body["max_ttft_p95_ms"] = value
+	}
+	var response struct {
+		Evaluation struct {
+			ID          string           `json:"id"`
+			InputDigest string           `json:"input_digest"`
+			Results     []map[string]any `json:"results"`
+		} `json:"evaluation"`
+	}
+	if err := controlJSON(ctx, cfg, http.MethodPost, "/api/v1/lab/evaluations", "", body, &response); err != nil {
+		return err
+	}
+	if *output == "json" {
+		encoded, _ := json.MarshalIndent(response, "", "  ")
+		fmt.Println(string(encoded))
+		return nil
+	}
+	fmt.Printf("Inference Lab · %s\nEvidence %s · persisted comparison %s\n\n", model, shortID(response.Evaluation.InputDigest), response.Evaluation.ID)
+	if len(response.Evaluation.Results) == 0 {
+		fmt.Println("No comparable measured benchmark evidence. InferCrane did not model or invent a result.")
+		return nil
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "CLASS\tCANDIDATE\tTTFT P95\tOUTPUT TOK/S\tERRORS\tSLO\tCOST")
+	for _, row := range response.Evaluation.Results {
+		candidate := fmt.Sprintf("%s / %s / %s", benchmarkValue(row["provider"]), benchmarkValue(row["runtime"]), benchmarkValue(row["gpu"]))
+		fmt.Fprintf(w, "%s\t%s\t%s ms\t%s\t%s\t%s\t%s\n", strings.ToUpper(benchmarkValue(row["evidence_class"])), candidate, benchmarkValue(row["ttft_p95_ms"]), benchmarkValue(row["output_tokens_second"]), benchmarkValue(row["error_rate"]), benchmarkValue(row["meets_slo"]), nestedValue(row, "cost_metadata", "available"))
+	}
+	return w.Flush()
+}
+
+func nestedValue(row map[string]any, object, key string) string {
+	nested, ok := row[object].(map[string]any)
+	if !ok {
+		return "unavailable"
+	}
+	return benchmarkValue(nested[key])
 }
 
 func passportCommand(ctx context.Context, cfg config.Config, args []string) error {
@@ -3032,7 +3179,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		}
 		asyncService = &asyncinference.Service{Store: s, Cipher: cipher, KeyReference: cfg.AsyncEncryptionKeyReference, GatewayURL: cfg.ControlURL, APIKey: cfg.APIKey, Owner: cfg.InstanceID + ":async", Lease: time.Minute, Secrets: secrets.Environment{}}
 	}
-	control := (controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: credentialCache, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, AsyncInference: asyncService}).Handler()
+	control := (controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: credentialCache, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, AsyncInference: asyncService, ProductVersion: version}).Handler()
 	operationTelemetry := &operations.Telemetry{}
 	handlers := workflows.DeploymentHandlers(s)
 	for kind, handler := range workflows.RolloutHandlers(s) {

@@ -1,0 +1,38 @@
+---
+title: Content-addressed recipes and evidence-only Lab
+description: Why recipes capture existing proof and Inference Lab never invents comparisons.
+---
+
+# ADR 0026: Content-addressed recipes and evidence-only Lab
+
+## Context
+
+Users need reusable serving configurations and a way to compare candidates. A YAML marketplace with
+mutable model references or unsourced performance numbers would create attractive but untrustworthy output.
+
+## Decision
+
+Capture recipes only from an active immutable revision, its resolved ModelArtifact, and a matching
+AIPerf benchmark. Canonical payload plus provenance is SHA-256 addressed; name/version cannot be
+rebound. Inference Lab reads tenant-scoped benchmark history, persists its canonical input and output,
+and labels each row by evidence class. v1.7 accepts measured evidence only.
+
+## Consequences
+
+- Recipes are reproducible records, not a mutable marketplace listing.
+- Lab is fast and free of hidden infrastructure mutations.
+- A model without comparable evidence produces an honest empty result.
+- Community/vendor trust levels can be added later without changing immutable captured content.
+
+## Alternatives
+
+Bundling hand-written recipes would require unverifiable model commits and benchmarks. Automatically
+running every candidate would create paid resources from a read-like discovery workflow. Modeled
+numbers without explicit provenance would violate InferCrane's evidence contract.
+
+## Verification
+
+Unit tests prove canonical digest stability, matching artifact/revision/benchmark enforcement,
+measured-only labels, deterministic ordering, and absent-cost preservation. PostgreSQL tests prove
+immutability and tenant isolation. API, CLI, SDK, OpenAPI, migration, and Docker gates cover the public path.
+

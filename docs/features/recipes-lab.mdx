@@ -1,0 +1,49 @@
+---
+title: Recipes and Inference Lab
+description: Capture immutable serving evidence and compare measured candidates without hidden provisioning.
+---
+
+# Recipes and Inference Lab
+
+Recipes turn one real deployment revision into a content-addressed, reproducible record. InferCrane
+will only capture a recipe when the active revision has an immutable ModelArtifact, an explicit
+runtime version, and a matching persisted AIPerf benchmark.
+
+```bash
+infercrane benchmark qwen-prod --requests 100 --concurrency 10
+infercrane recipe create qwen-prod \
+  --name qwen3-8b-balanced \
+  --version 1.0.0
+infercrane recipes qwen3
+```
+
+The recipe payload records the immutable model commit, runtime/version/arguments, provider adapter,
+region, GPU, compute mode, workload contract, benchmark workload, and benchmark ID. Provenance records
+the deployment/revision, artifact, benchmark tool/version, InferCrane version, and evidence class.
+The SHA-256 digest covers both canonical objects. Retrying the same name/version is idempotent only
+for identical content; different content is rejected.
+
+## Compare evidence
+
+Inference Lab v1 compares existing benchmark history. It does not provision hardware or run another
+load generator:
+
+```bash
+infercrane lab 'Qwen/Qwen3-8B@IMMUTABLE_COMMIT' \
+  --max-ttft-p95-ms 250
+```
+
+Rows are ordered by measured p95 TTFT and include runtime, provider, GPU, error rate, throughput, SLO
+result when measurable, and cost metadata exactly as persisted. v1.7 emits only `MEASURED` rows.
+The schema reserves `modeled` and `heuristic` labels for future evidence sources, but InferCrane never
+substitutes them silently. With no comparable benchmark, the result is an empty persisted evaluation.
+
+Use `--workload-digest` to require an exact canonical benchmark workload. Prompt and output content
+are not part of recipes, benchmark history, or Lab evaluations.
+
+## Qualification boundary
+
+A captured recipe proves provenance, not universal portability. Provider/runtime support remains
+scoped to the integration matrix, and local benchmark fixtures are not real GPU evidence. Cost remains
+unavailable unless a trustworthy source and observation timestamp were persisted with the benchmark.
+

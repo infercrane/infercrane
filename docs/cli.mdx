@@ -336,6 +336,21 @@ infercrane benchmark qwen-prod \
 
 `--revision` accepts `active`, `candidate`, or an explicit revision ID. Defaults are 100 requests, concurrency 10, and seed 17.
 
+Capture and search immutable recipes only after a matching benchmark exists:
+
+```bash
+infercrane recipe create qwen-prod --name qwen3-balanced --version 1.0.0
+infercrane recipes qwen3 --limit 20
+```
+
+Compare persisted measured configurations without provisioning new capacity:
+
+```bash
+infercrane lab 'Qwen/Qwen3-8B@IMMUTABLE_COMMIT' --max-ttft-p95-ms 250
+```
+
+See [Recipes and Inference Lab](/features/recipes-lab) for the provenance and missing-evidence contract.
+
 ## Revisions and Release Guard
 
 ```bash
