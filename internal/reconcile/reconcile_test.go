@@ -13,12 +13,15 @@ import (
 )
 
 type fakeStore struct {
-	deployment domain.Deployment
-	target     domain.Target
-	targets    []domain.Target
-	state      string
-	generation domain.RouterGeneration
-	recorded   bool
+	deployment       domain.Deployment
+	target           domain.Target
+	targets          []domain.Target
+	state            string
+	generation       domain.RouterGeneration
+	recorded         bool
+	endpoints        []domain.Endpoint
+	resolvedEndpoint domain.ResolvedEndpoint
+	endpointState    string
 }
 
 func (f *fakeStore) Deployments(context.Context) ([]domain.Deployment, error) {
@@ -52,6 +55,16 @@ func (f *fakeStore) RecordGeneration(_ context.Context, generation domain.Router
 	generation.ID, generation.Status = "new-generation", "active"
 	f.generation = generation
 	return generation, nil
+}
+func (f *fakeStore) EndpointsForTenant(context.Context, string) ([]domain.Endpoint, error) {
+	return f.endpoints, nil
+}
+func (f *fakeStore) ResolveEndpointForTenant(context.Context, string, string) (domain.ResolvedEndpoint, error) {
+	return f.resolvedEndpoint, nil
+}
+func (f *fakeStore) SetEndpointState(_ context.Context, _, _, state string) error {
+	f.endpointState = state
+	return nil
 }
 
 type healthyRuntime struct{}
@@ -196,6 +209,30 @@ func TestRouterRetirementWaitsForPinnedRequest(t *testing.T) {
 	}
 	if len(backend.stopped) != 1 || backend.stopped[0] != "deployment-g1" {
 		t.Fatalf("old router was not reaped: %v", backend.stopped)
+	}
+}
+
+func TestReconcilerCompilesStableEndpointWithoutDatabaseRequestLookup(t *testing.T) {
+	store, directory := reconcilerFixture()
+	store.generation.WorkerSetHash = router.WorkerSetHash("round-robin", []string{"http://gpu"})
+	endpoint := domain.Endpoint{ID: "endpoint", TenantID: "global", Name: "coder-production", LogicalModelID: "model-id", EnvironmentID: "environment-id", DesiredState: "serving", ObservedState: "pending", ActiveServingPlanID: "plan"}
+	binding := domain.BackendBinding{ID: "binding", EndpointID: endpoint.ID, Kind: "deployment", DeploymentID: store.deployment.ID}
+	store.endpoints = []domain.Endpoint{endpoint}
+	store.resolvedEndpoint = domain.ResolvedEndpoint{Endpoint: endpoint, ActivePlan: domain.ServingPlan{ID: "plan", EndpointID: endpoint.ID, RoutingPolicy: "manual", Bindings: []domain.ServingPlanBinding{{BindingID: binding.ID, Weight: 100}}}, Bindings: []domain.BackendBinding{binding}}
+	reconciler := Reconciler{Store: store, Routes: directory, Router: &fakeRouter{routes: directory}, Runtimes: testRuntimeBackends(t, healthyRuntime{}), RouterStartPort: 18080, InstanceID: "instance"}
+	if err := reconciler.Once(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	route, release, ok := directory.AcquireForTenant("global", endpoint.Name)
+	if !ok {
+		t.Fatal("compiled endpoint is not routable")
+	}
+	defer release()
+	if route.EndpointID != endpoint.ID || route.LogicalModelID != "model-id" || route.EnvironmentID != "environment-id" || route.ServingPlanID != "plan" || route.BindingID != "binding" || route.DeploymentID != store.deployment.ID {
+		t.Fatalf("compiled route=%#v", route)
+	}
+	if store.endpointState != "serving" {
+		t.Fatalf("endpoint state=%q", store.endpointState)
 	}
 }
 

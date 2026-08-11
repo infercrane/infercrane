@@ -24,18 +24,32 @@ type Snapshot struct {
 	SelectionReason    string
 	ProviderWorkers    *int
 	ProviderObservedAt time.Time
+	LogicalModelID     string
+	EnvironmentID      string
+	EndpointID         string
+	ServingPlanID      string
+	BindingID          string
+	RoutingWeight      int
+}
+
+type EndpointRoute struct {
+	TenantID, Alias, RoutingPolicy string
+	Routes                         []Snapshot
 }
 
 // Directory is an atomic in-memory data-plane snapshot. Reads never touch the database.
 type Directory struct {
-	mu       sync.RWMutex
-	items    map[string]Snapshot
-	inflight map[string]int
-	retired  map[string]Snapshot
+	mu         sync.RWMutex
+	items      map[string]Snapshot
+	endpoints  map[string]EndpointRoute
+	selections map[string]uint64
+	blocked    map[string]bool
+	inflight   map[string]int
+	retired    map[string]Snapshot
 }
 
 func New() *Directory {
-	return &Directory{items: make(map[string]Snapshot), inflight: make(map[string]int), retired: make(map[string]Snapshot)}
+	return &Directory{items: make(map[string]Snapshot), endpoints: make(map[string]EndpointRoute), selections: make(map[string]uint64), blocked: make(map[string]bool), inflight: make(map[string]int), retired: make(map[string]Snapshot)}
 }
 
 func routeID(route Snapshot) string {
@@ -51,8 +65,28 @@ func (d *Directory) Get(alias string) (Snapshot, bool) {
 func (d *Directory) GetForTenant(tenant, alias string) (Snapshot, bool) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
+	if d.blocked[tenant+"\x00"+alias] {
+		return Snapshot{}, false
+	}
+	if endpoint, ok := d.endpoints[tenant+"\x00"+alias]; ok && len(endpoint.Routes) > 0 {
+		return endpoint.Routes[0], true
+	}
 	route, ok := d.items[tenant+"\x00"+alias]
 	return route, ok
+}
+
+// GetDeployment returns the concrete route published by lifecycle
+// reconciliation, bypassing endpoint aliases. It is a control-plane compiler
+// operation and is never called from the HTTP request path.
+func (d *Directory) GetDeployment(deploymentID string) (Snapshot, bool) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	for _, route := range d.items {
+		if route.DeploymentID == deploymentID {
+			return route, true
+		}
+	}
+	return Snapshot{}, false
 }
 
 // AcquireForTenant atomically pins the selected immutable route generation for
@@ -60,7 +94,8 @@ func (d *Directory) GetForTenant(tenant, alias string) (Snapshot, bool) {
 // retirement cannot stop its router or capacity until release is called.
 func (d *Directory) AcquireForTenant(tenant, alias string) (Snapshot, func(), bool) {
 	d.mu.Lock()
-	route, ok := d.items[tenant+"\x00"+alias]
+	key := tenant + "\x00" + alias
+	route, ok := d.selectLocked(key)
 	if !ok {
 		d.mu.Unlock()
 		return Snapshot{}, func() {}, false
@@ -80,6 +115,82 @@ func (d *Directory) AcquireForTenant(tenant, alias string) (Snapshot, func(), bo
 			d.mu.Unlock()
 		})
 	}, true
+}
+
+func (d *Directory) selectLocked(key string) (Snapshot, bool) {
+	if d.blocked[key] {
+		return Snapshot{}, false
+	}
+	endpoint, exists := d.endpoints[key]
+	if !exists || len(endpoint.Routes) == 0 {
+		route, ok := d.items[key]
+		return route, ok
+	}
+	if endpoint.RoutingPolicy != "weighted" || len(endpoint.Routes) == 1 {
+		return endpoint.Routes[0], true
+	}
+	// Plan compilation expands each binding by its bounded weight. Selection is
+	// stable across processes for a given acquisition ordinal and requires no
+	// request-path database or network lookup.
+	total := uint64(0)
+	for _, route := range endpoint.Routes {
+		weight := routeWeight(route)
+		total += uint64(weight)
+	}
+	ordinal := d.selections[key]
+	d.selections[key] = ordinal + 1
+	point := ordinal % total
+	for _, route := range endpoint.Routes {
+		weight := uint64(routeWeight(route))
+		if point < weight {
+			return route, true
+		}
+		point -= weight
+	}
+	return endpoint.Routes[0], true
+}
+
+func routeWeight(route Snapshot) int {
+	if route.RoutingWeight > 0 {
+		return route.RoutingWeight
+	}
+	return 1
+}
+
+// PublishEndpoint atomically replaces the routes future requests may acquire.
+// Existing requests retain their pinned immutable Snapshot until release.
+func (d *Directory) PublishEndpoint(endpoint EndpointRoute) {
+	if endpoint.TenantID == "" {
+		endpoint.TenantID = "global"
+	}
+	key := endpoint.TenantID + "\x00" + endpoint.Alias
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.endpoints[key] = EndpointRoute{TenantID: endpoint.TenantID, Alias: endpoint.Alias, RoutingPolicy: endpoint.RoutingPolicy, Routes: append([]Snapshot(nil), endpoint.Routes...)}
+	delete(d.blocked, key)
+}
+
+func (d *Directory) RemoveEndpointForTenant(tenant, alias string) {
+	key := tenant + "\x00" + alias
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	delete(d.endpoints, key)
+	delete(d.selections, key)
+	d.blocked[key] = true
+}
+
+func (d *Directory) EndpointAliasesForTenant(tenant string) []string {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	aliases := make([]string, 0)
+	for key, endpoint := range d.endpoints {
+		_ = key
+		if endpoint.TenantID == tenant {
+			aliases = append(aliases, endpoint.Alias)
+		}
+	}
+	slices.Sort(aliases)
+	return aliases
 }
 
 func (d *Directory) Put(route Snapshot) {
@@ -167,8 +278,22 @@ func (d *Directory) ForgetRetired(route Snapshot) {
 func (d *Directory) List() []Snapshot {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	out := make([]Snapshot, 0, len(d.items))
-	for _, route := range d.items {
+	out := make([]Snapshot, 0, len(d.items)+len(d.endpoints))
+	seen := make(map[string]struct{}, len(d.endpoints))
+	for key, endpoint := range d.endpoints {
+		if len(endpoint.Routes) == 0 {
+			continue
+		}
+		out = append(out, endpoint.Routes[0])
+		seen[key] = struct{}{}
+	}
+	for key, route := range d.items {
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		if d.blocked[key] {
+			continue
+		}
 		out = append(out, route)
 	}
 	slices.SortFunc(out, func(a, b Snapshot) int {

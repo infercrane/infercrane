@@ -28,6 +28,86 @@ export class ControlApi {
     return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
   }
 
+  listEnvironments(): Promise<ObjectList> {
+    const path = '/environments';
+    return this.transport.request('GET', path) as Promise<ObjectList>;
+  }
+
+  createEnvironment(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = '/environments';
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  listLogicalModels(): Promise<ObjectList> {
+    const path = '/logical-models';
+    return this.transport.request('GET', path) as Promise<ObjectList>;
+  }
+
+  createLogicalModel(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = '/logical-models';
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  listEndpoints(): Promise<ObjectList> {
+    const path = '/endpoints';
+    return this.transport.request('GET', path) as Promise<ObjectList>;
+  }
+
+  createEndpoint(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = '/endpoints';
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  getEndpoint(name: string): Promise<Record<string, JsonValue>> {
+    const path = `/endpoints/${encodeURIComponent(name)}`;
+    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+  }
+
+  deleteEndpoint(name: string): Promise<Record<string, JsonValue>> {
+    const path = `/endpoints/${encodeURIComponent(name)}`;
+    return this.transport.request('DELETE', path) as Promise<Record<string, JsonValue>>;
+  }
+
+  createEndpointBinding(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = `/endpoints/${encodeURIComponent(name)}/bindings`;
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  createServingPlan(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = `/endpoints/${encodeURIComponent(name)}/plans`;
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  activateServingPlan(name: string, plan: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = `/endpoints/${encodeURIComponent(name)}/plans/${encodeURIComponent(plan)}/active`;
+    return this.transport.request('PUT', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  stageServingPlan(name: string, plan: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = `/endpoints/${encodeURIComponent(name)}/plans/${encodeURIComponent(plan)}/candidate`;
+    return this.transport.request('PUT', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  getEndpointReleaseGuardPolicy(name: string): Promise<Record<string, JsonValue>> {
+    const path = `/endpoints/${encodeURIComponent(name)}/release-guard/policy`;
+    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+  }
+
+  setEndpointReleaseGuardPolicy(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = `/endpoints/${encodeURIComponent(name)}/release-guard/policy`;
+    return this.transport.request('PUT', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  evaluateEndpointReleaseGuard(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = `/endpoints/${encodeURIComponent(name)}/release-guard/evaluate`;
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  listEndpointReleaseGuardEvaluations(name: string): Promise<ObjectList> {
+    const path = `/endpoints/${encodeURIComponent(name)}/release-guard/evaluations`;
+    return this.transport.request('GET', path) as Promise<ObjectList>;
+  }
+
   listOperationEvents(id: string): Promise<ObjectList> {
     const path = `/operations/${encodeURIComponent(id)}/events`;
     return this.transport.request('GET', path) as Promise<ObjectList>;

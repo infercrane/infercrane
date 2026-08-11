@@ -102,6 +102,7 @@
         "group": "DEPLOY",
         "pages": [
           "deployment-spec",
+          "features/endpoints",
           "features/model-artifacts",
           "features/custom-oci",
           "features/provisioning",
@@ -195,7 +196,8 @@
               "adr/0017-deterministic-inference-decisions",
               "adr/0018-signed-release-evidence",
               "adr/0019-kubernetes-integration-boundaries",
-              "adr/0020-provider-neutral-production-artifact"
+              "adr/0020-provider-neutral-production-artifact",
+              "adr/0021-stable-endpoint-serving-plans"
             ]
           },
           "release-acceptance"

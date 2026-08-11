@@ -76,6 +76,41 @@ func TestRequestCommandSendsOpenAICompatibleRequest(t *testing.T) {
 	}
 }
 
+func TestEndpointCommandsAcceptNaturalResourceThenFlagsOrder(t *testing.T) {
+	var requests []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		requests = append(requests, body)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/logical-models":
+			_, _ = io.WriteString(w, `{"logical_model":{"name":"coder"}}`)
+		case "/api/v1/endpoints":
+			_, _ = io.WriteString(w, `{"endpoint":{"name":"coder-production"}}`)
+		default:
+			t.Fatalf("path=%s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	cfg := config.Config{ControlURL: server.URL, APIKey: "secret"}
+	if _, err := captureStdout(t, func() error {
+		return logicalModelCommand(context.Background(), cfg, []string{"create", "coder", "--description", "Stable coding model", "--output", "json"})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := captureStdout(t, func() error {
+		return endpointCommand(context.Background(), cfg, []string{"create", "coder-production", "--model", "coder", "--environment", "production", "--output", "json"})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(requests) != 2 || requests[0]["description"] != "Stable coding model" || requests[1]["logical_model"] != "coder" || requests[1]["environment"] != "production" {
+		t.Fatalf("requests=%#v", requests)
+	}
+}
+
 func TestDashboardCommandPrintsCredentialFreeContextURL(t *testing.T) {
 	output, err := captureStdout(t, func() error {
 		return dashboardCommand(context.Background(), config.Config{ControlURL: "https://control.example/", APIKey: "never-print-me"}, []string{"--output", "json"})

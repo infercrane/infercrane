@@ -1,10 +1,11 @@
 {
   "schema_version": 1,
-  "program": "infercrane-v1",
-  "current_milestone": "v1.0.0",
-  "state": "implementation_complete_manual_qualification_deferred",
+  "program": "infercrane-v2",
+  "current_milestone": "v1.1.0",
+  "state": "implementing",
   "baseline": {
-    "commit": "3c4cb6961640c471fbd12d79ec4d497f8da0ce9f",
+    "commit": "280d3409c3382b7def65ab3fe5256c55b6673385",
+    "tag": "v1.0.0-rc.1",
     "dev_check": "passed",
     "dev_check_full": "passed",
     "local_qualification": ".infercrane/qualification/3c4cb6961640c471fbd12d79ec4d497f8da0ce9f/qualification.json",
@@ -12,7 +13,7 @@
     "real_infrastructure": "deferred"
   },
   "last_completed_milestone": "v1.0.0-rc.1",
-  "next_action": "run the single consolidated manual infrastructure workflow against the frozen local v1.0.0-rc.1 tag, verify cleanup, then create and publish a stable release only with separate authorization",
+  "next_action": "implement and locally qualify the v1.1 stable endpoint domain without paid resources or data-path database reads",
   "rc_tags": ["v0.2.0-rc.1", "v0.3.0-rc.1", "v0.4.0-rc.1", "v0.5.0-rc.1", "v0.6.0-rc.1", "v0.7.0-rc.1", "v0.8.0-rc.1", "v0.9.0-rc.1", "v1.0.0-rc.1"],
   "updated_at": "2026-08-11T11:44:05Z"
 }

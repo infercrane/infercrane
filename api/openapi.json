@@ -49,7 +49,7 @@
             "type": "array"
           },
           "model": {
-            "description": "Logical InferCrane deployment alias.",
+            "description": "Stable InferCrane endpoint name; migrated v1 deployment aliases remain compatible endpoints.",
             "type": "string"
           },
           "stream": {
@@ -243,6 +243,135 @@
       },
       "Empty": {
         "type": "null"
+      },
+      "EndpointBindingCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "deployment": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "deployment",
+              "external"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "ownership_mode": {
+            "enum": [
+              "observe-only",
+              "traffic-managed",
+              "lifecycle-managed"
+            ],
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "ownership_mode"
+        ],
+        "type": "object"
+      },
+      "EndpointCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "environment": {
+            "type": "string"
+          },
+          "logical_model": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "logical_model",
+          "environment"
+        ],
+        "type": "object"
+      },
+      "EndpointGuardEvaluationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "window_seconds": {
+            "maximum": 2592000,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "EndpointReleaseGuardPolicy": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "max_error_rate_increase": {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "max_latency_regression_percent": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "max_output_throughput_drop_percent": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "max_ttft_regression_percent": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "minimum_requests": {
+            "maximum": 100000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "require_compatibility_evidence": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled",
+          "minimum_requests",
+          "max_ttft_regression_percent",
+          "max_latency_regression_percent",
+          "max_error_rate_increase",
+          "max_output_throughput_drop_percent",
+          "require_compatibility_evidence"
+        ],
+        "type": "object"
+      },
+      "EnvironmentCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "policy": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
       },
       "Error": {
         "properties": {
@@ -458,6 +587,22 @@
           "request_limit",
           "cost_limit_microusd",
           "max_request_cost_microusd"
+        ],
+        "type": "object"
+      },
+      "LogicalModelCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "maxLength": 4096,
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
         ],
         "type": "object"
       },
@@ -812,6 +957,52 @@
         ],
         "type": "object"
       },
+      "ServingPlanCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "bindings": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "priority": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "weight": {
+                  "maximum": 10000,
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "name",
+                "priority",
+                "weight"
+              ],
+              "type": "object"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "type": "array"
+          },
+          "routing_policy": {
+            "enum": [
+              "manual",
+              "primary-fallback",
+              "weighted"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "routing_policy",
+          "bindings"
+        ],
+        "type": "object"
+      },
       "TargetCreate": {
         "properties": {
           "name": {
@@ -850,7 +1041,7 @@
   "info": {
     "description": "Durable, authenticated control-plane operations. Mutation responses may outlive the requesting client.",
     "title": "InferCrane Control API",
-    "version": "0.7.0"
+    "version": "1.1.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -2435,6 +2626,710 @@
         ]
       }
     },
+    "/api/v1/endpoints": {
+      "get": {
+        "operationId": "listEndpoints",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List stable application endpoints",
+        "tags": [
+          "Endpoints"
+        ]
+      },
+      "post": {
+        "operationId": "createEndpoint",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndpointCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Create a stable application endpoint",
+        "tags": [
+          "Endpoints"
+        ]
+      }
+    },
+    "/api/v1/endpoints/{name}": {
+      "delete": {
+        "operationId": "deleteEndpoint",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Delete an endpoint without deleting its bound deployment",
+        "tags": [
+          "Endpoints"
+        ]
+      },
+      "get": {
+        "operationId": "getEndpoint",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Inspect an endpoint and its serving plans",
+        "tags": [
+          "Endpoints"
+        ]
+      }
+    },
+    "/api/v1/endpoints/{name}/bindings": {
+      "post": {
+        "operationId": "createEndpointBinding",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndpointBindingCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Attach a backend binding to an endpoint",
+        "tags": [
+          "Endpoints"
+        ]
+      }
+    },
+    "/api/v1/endpoints/{name}/plans": {
+      "post": {
+        "operationId": "createServingPlan",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServingPlanCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Create and stage an immutable serving plan",
+        "tags": [
+          "Endpoints"
+        ]
+      }
+    },
+    "/api/v1/endpoints/{name}/plans/{plan}/active": {
+      "put": {
+        "operationId": "activateServingPlan",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "plan",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Promote a serving plan for future requests",
+        "tags": [
+          "Endpoints"
+        ]
+      }
+    },
+    "/api/v1/endpoints/{name}/plans/{plan}/candidate": {
+      "put": {
+        "operationId": "stageServingPlan",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "plan",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Stage a candidate serving plan",
+        "tags": [
+          "Endpoints"
+        ]
+      }
+    },
+    "/api/v1/endpoints/{name}/release-guard/evaluate": {
+      "post": {
+        "operationId": "evaluateEndpointReleaseGuard",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndpointGuardEvaluationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Evaluate active and candidate serving plans",
+        "tags": [
+          "Endpoints"
+        ]
+      }
+    },
+    "/api/v1/endpoints/{name}/release-guard/evaluations": {
+      "get": {
+        "operationId": "listEndpointReleaseGuardEvaluations",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List endpoint Release Guard decisions",
+        "tags": [
+          "Endpoints"
+        ]
+      }
+    },
+    "/api/v1/endpoints/{name}/release-guard/policy": {
+      "get": {
+        "operationId": "getEndpointReleaseGuardPolicy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Inspect endpoint Release Guard policy",
+        "tags": [
+          "Endpoints"
+        ]
+      },
+      "put": {
+        "operationId": "setEndpointReleaseGuardPolicy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndpointReleaseGuardPolicy"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Set endpoint Release Guard policy",
+        "tags": [
+          "Endpoints"
+        ]
+      }
+    },
+    "/api/v1/environments": {
+      "get": {
+        "operationId": "listEnvironments",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List endpoint environments",
+        "tags": [
+          "Endpoints"
+        ]
+      },
+      "post": {
+        "operationId": "createEnvironment",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnvironmentCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Create an endpoint environment",
+        "tags": [
+          "Endpoints"
+        ]
+      }
+    },
     "/api/v1/integrations": {
       "get": {
         "operationId": "listIntegrations",
@@ -2468,6 +3363,86 @@
         "summary": "Inspect registered integration capabilities",
         "tags": [
           "System"
+        ]
+      }
+    },
+    "/api/v1/logical-models": {
+      "get": {
+        "operationId": "listLogicalModels",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List logical model identities",
+        "tags": [
+          "Endpoints"
+        ]
+      },
+      "post": {
+        "operationId": "createLogicalModel",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LogicalModelCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Create a logical model identity",
+        "tags": [
+          "Endpoints"
         ]
       }
     },
@@ -3207,6 +4182,9 @@
     },
     {
       "name": "Deployments"
+    },
+    {
+      "name": "Endpoints"
     },
     {
       "name": "External capacity"

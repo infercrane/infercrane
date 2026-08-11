@@ -151,7 +151,7 @@ func runLegacy(ctx context.Context, args []string) error {
 		return passportCommand(ctx, config.Config{}, args[1:])
 	}
 	switch args[0] {
-	case "target", "deploy", "apply", "plan", "doctor", "ui", "dashboard", "deployments", "route", "status", "events", "logs", "request", "explain", "rollout", "delete", "inspect", "operation", "orphans", "integrations", "context", "auth", "tenant", "principal", "secret", "external", "benchmark", "passport", "recommend", "slo", "serve":
+	case "target", "deploy", "apply", "plan", "doctor", "ui", "dashboard", "deployments", "endpoints", "endpoint", "environment", "logical-model", "route", "status", "events", "logs", "request", "explain", "rollout", "delete", "inspect", "operation", "orphans", "integrations", "context", "auth", "tenant", "principal", "secret", "external", "benchmark", "passport", "recommend", "slo", "serve":
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -188,6 +188,14 @@ func runLegacy(ctx context.Context, args []string) error {
 		return deleteAPICommand(ctx, cfg, args[1:])
 	case "deployments":
 		return listDeployments(ctx, cfg, args[1:])
+	case "endpoints":
+		return endpointCommand(ctx, cfg, append([]string{"list"}, args[1:]...))
+	case "endpoint":
+		return endpointCommand(ctx, cfg, args[1:])
+	case "environment":
+		return environmentCommand(ctx, cfg, args[1:])
+	case "logical-model":
+		return logicalModelCommand(ctx, cfg, args[1:])
 	case "status":
 		return statusCommand(ctx, cfg, args[1:])
 	case "events":
@@ -2834,7 +2842,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	if cfg.KubernetesEnabled() {
 		benchmarkBackends["kubernetes"] = controlapi.BackendMetadata{APIKey: cfg.APIKey, APIKeyEnv: "INFERCRANE_WORKER_API_KEY"}
 	}
-	control := (controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: credentialCache, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey}).Handler()
+	control := (controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: credentialCache, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints}).Handler()
 	operationTelemetry := &operations.Telemetry{}
 	handlers := workflows.DeploymentHandlers(s)
 	for kind, handler := range workflows.RolloutHandlers(s) {

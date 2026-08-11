@@ -119,7 +119,11 @@ func (g *Gateway) models(w http.ResponseWriter, r *http.Request) {
 	data := make([]map[string]string, 0)
 	principal := r.Context().Value(principalKey{}).(domain.Principal)
 	for _, route := range g.Routes.ListForTenant(principal.TenantID) {
-		data = append(data, map[string]string{"id": route.Alias, "object": "model", "owned_by": "deployment"})
+		owner := "deployment"
+		if route.EndpointID != "" {
+			owner = "endpoint"
+		}
+		data = append(data, map[string]string{"id": route.Alias, "object": "model", "owned_by": owner})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": data})
 }
@@ -295,7 +299,7 @@ func (g *Gateway) record(ctx context.Context, id string, route routes.Snapshot, 
 		ttft = &value
 	}
 	responseModel, inputTokens, outputTokens := observation.usage()
-	record := domain.InferenceRecord{RequestID: id, DeploymentID: route.DeploymentID, RevisionID: route.RevisionID, TargetID: route.TargetID, Provider: route.Provider, Runtime: route.Runtime, ComputeMode: route.ComputeMode, OperationName: "chat", RequestModel: requestModel, ResponseModel: responseModel, SemanticConventionSchema: "https://opentelemetry.io/schemas/gen-ai/1.42.0", StartedAt: started, StatusCode: status, LatencyMS: latency, TTFTMS: ttft, InputTokens: inputTokens, OutputTokens: outputTokens, Streaming: streaming, ErrorType: errorType, ColdStart: evidence.coldStart, ProviderWorkersAtArrival: evidence.workers, ProviderCapacityObservedAt: evidence.observedAt}
+	record := domain.InferenceRecord{RequestID: id, DeploymentID: route.DeploymentID, RevisionID: route.RevisionID, TargetID: route.TargetID, LogicalModelID: route.LogicalModelID, EnvironmentID: route.EnvironmentID, EndpointID: route.EndpointID, ServingPlanID: route.ServingPlanID, BindingID: route.BindingID, Provider: route.Provider, Runtime: route.Runtime, ComputeMode: route.ComputeMode, OperationName: "chat", RequestModel: requestModel, ResponseModel: responseModel, SemanticConventionSchema: "https://opentelemetry.io/schemas/gen-ai/1.42.0", StartedAt: started, StatusCode: status, LatencyMS: latency, TTFTMS: ttft, InputTokens: inputTokens, OutputTokens: outputTokens, Streaming: streaming, ErrorType: errorType, ColdStart: evidence.coldStart, ProviderWorkersAtArrival: evidence.workers, ProviderCapacityObservedAt: evidence.observedAt}
 	if err := g.Recorder.RecordRequest(ctx, record); err != nil && g.Logger != nil {
 		g.Logger.Error("record request", "error", err, "request_id", id)
 	}

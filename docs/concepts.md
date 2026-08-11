@@ -1,6 +1,12 @@
 # Concepts
 
-A **logical deployment** is the stable OpenAI-compatible name clients use. A **DeploymentSpec** is its desired model, immutable artifact identity, runtime configuration, compute mode, capacity bounds, and routing policy.
+An **endpoint** is the stable OpenAI-compatible model name clients use. A **logical model** names the
+product-level workload, and an **environment** supplies its deployment context and policy. An
+immutable **serving plan** binds the endpoint to one or more concrete backends. A **deployment** is a
+lifecycle-managed serving realization; it is no longer required to be the application's identity.
+
+A **DeploymentSpec** is a concrete deployment's desired model, immutable artifact identity, runtime
+configuration, compute mode, capacity bounds, and replica routing policy.
 
 A **revision** is an immutable snapshot of that specification. Updates create a candidate beside the active revision. Release Guard evaluates persisted readiness and request measurements before an explicit promotion. Rejected or failed candidates are drained and deleted without changing the active revision.
 

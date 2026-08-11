@@ -62,6 +62,10 @@ func newRootCommand(ctx context.Context) *cobra.Command {
 		{use: "version", short: "Print the InferCrane version", group: "start"},
 		{use: "apply MODEL_OR_SPEC [flags]", short: "Declaratively converge a deployment", group: "operate"},
 		{use: "deployments [flags]", short: "List logical deployments", group: "operate", aliases: []string{"ls"}},
+		{use: "endpoints [flags]", short: "List stable application endpoints", group: "operate"},
+		{use: "endpoint ACTION [arguments]", short: "Create and manage stable endpoint serving plans", group: "operate"},
+		{use: "environment ACTION [arguments]", short: "Manage endpoint environments", group: "admin"},
+		{use: "logical-model ACTION [arguments]", short: "Manage stable logical model identities", group: "admin"},
 		{use: "status DEPLOYMENT [flags]", short: "Inspect deployment health and traffic", group: "operate"},
 		{use: "logs DEPLOYMENT [flags]", short: "Stream the durable operational timeline", group: "operate"},
 		{use: "events DEPLOYMENT [flags]", short: "Show durable deployment events", group: "operate"},
@@ -118,7 +122,7 @@ func addHelpFlags(command *cobra.Command, name string) {
 	boolFlag := func(flag, help string) { command.Flags().Bool(flag, false, help) }
 	intFlag := func(flag string, value int, help string) { command.Flags().Int(flag, value, help) }
 	switch name {
-	case "init", "doctor", "plan", "deploy", "apply", "request", "deployments", "status", "logs", "events", "inspect", "explain", "benchmark", "passport", "recommend", "slo", "delete", "orphans", "operation", "integrations", "dashboard":
+	case "init", "doctor", "plan", "deploy", "apply", "request", "deployments", "endpoints", "endpoint", "environment", "logical-model", "status", "logs", "events", "inspect", "explain", "benchmark", "passport", "recommend", "slo", "delete", "orphans", "operation", "integrations", "dashboard":
 		stringFlag("output", "human", "output format: human or json")
 	}
 	switch name {
@@ -126,6 +130,21 @@ func addHelpFlags(command *cobra.Command, name string) {
 		boolFlag("open", "open the dashboard in the default browser")
 	case "ui":
 		boolFlag("read-only", "disable control-plane mutation actions")
+	case "endpoint":
+		stringFlag("model", "", "logical model name")
+		stringFlag("environment", "production", "environment name")
+		stringFlag("name", "primary", "binding name")
+		stringFlag("deployment", "", "deployment-backed binding")
+		stringFlag("target", "", "external target-backed binding")
+		stringFlag("ownership", "lifecycle-managed", "binding ownership mode")
+		stringFlag("policy", "manual", "serving-plan routing policy")
+		stringFlag("bindings", "", "ordered NAME[:WEIGHT] bindings")
+		boolFlag("evaluate", "evaluate endpoint Release Guard")
+		stringFlag("window", "1h", "Release Guard telemetry window")
+		boolFlag("disable", "disable endpoint Release Guard")
+		boolFlag("yes", "confirm endpoint deletion")
+		intFlag("minimum-requests", 0, "minimum requests per plan")
+		stringFlag("max-ttft-regression", "", "maximum TTFT regression percent")
 	case "init":
 		stringFlag("url", "http://127.0.0.1:8080", "control-plane URL")
 		stringFlag("api-key", "", "existing control-plane credential")
@@ -221,12 +240,44 @@ func completionFor(command string) func(*cobra.Command, []string, string) ([]str
 		"operation": {"--wait-timeout", "--output"},
 		"dashboard": {"--open", "--output"},
 		"rollout":   {"--requests", "--concurrency", "--acknowledge-validation-cost", "--wait", "--wait-timeout", "--output"},
+		"endpoint":  {"--model", "--environment", "--name", "--deployment", "--target", "--ownership", "--policy", "--bindings", "--evaluate", "--window", "--disable", "--minimum-requests", "--max-ttft-regression", "--yes", "--output"},
 	}
-	return func(cmd *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	return func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		if strings.HasPrefix(toComplete, "-") {
 			return flags[command], cobra.ShellCompDirectiveNoFileComp
 		}
 		switch command {
+		case "endpoint":
+			if len(args) == 0 {
+				actions := []string{"list", "inspect", "create", "bind", "plan", "guard", "stage", "promote", "delete"}
+				var values []string
+				for _, action := range actions {
+					if strings.HasPrefix(action, toComplete) {
+						values = append(values, action)
+					}
+				}
+				return values, cobra.ShellCompDirectiveNoFileComp
+			}
+			if args[0] == "list" || args[0] == "create" {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+			cfg, err := config.LoadClient()
+			if err != nil {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+			var response struct {
+				Data []endpointView `json:"data"`
+			}
+			if err = controlJSON(cmd.Context(), cfg, http.MethodGet, "/api/v1/endpoints", "", nil, &response); err != nil {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+			values := make([]string, 0, len(response.Data))
+			for _, endpoint := range response.Data {
+				if strings.HasPrefix(endpoint.Name, toComplete) {
+					values = append(values, endpoint.Name+"\t"+endpoint.ObservedState)
+				}
+			}
+			return values, cobra.ShellCompDirectiveNoFileComp
 		case "request", "status", "logs", "events", "inspect", "explain", "benchmark", "passport", "recommend", "slo", "delete", "route", "rollout":
 			cfg, err := config.LoadClient()
 			if err != nil {

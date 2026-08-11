@@ -1,0 +1,90 @@
+---
+title: Stable endpoints and serving plans
+description: Keep application model names stable while changing concrete inference implementations.
+---
+
+# Stable endpoints and serving plans
+
+An endpoint is the model name an application sends to InferCrane. It is deliberately separate from
+a deployment, provider, and runtime:
+
+```text
+application model="coder-production"
+              ↓
+           endpoint
+              ↓
+      active serving plan
+              ↓
+        backend binding
+              ↓
+ concrete deployment or imported target
+```
+
+This lets an operator stage a different serving implementation without changing application code.
+Existing v1 deployment aliases are migrated automatically to a `production` environment, a logical
+model, a lifecycle-managed binding, and a one-binding active plan of the same name.
+
+## Create an endpoint
+
+```bash
+infercrane logical-model create coder \
+  --description "Stable coding model"
+
+infercrane endpoint create coder-production \
+  --model coder \
+  --environment production
+
+infercrane endpoint bind coder-production \
+  --name primary \
+  --deployment qwen-prod \
+  --ownership lifecycle-managed
+
+infercrane endpoint plan coder-production \
+  --policy manual \
+  --bindings primary
+```
+
+The first plan becomes active. Later plans are staged as candidates and receive no application
+traffic until promoted:
+
+```bash
+infercrane endpoint plan coder-production \
+  --policy primary-fallback \
+  --bindings candidate,primary
+
+infercrane endpoint inspect coder-production
+infercrane endpoint guard coder-production --evaluate
+infercrane endpoint promote coder-production PLAN_ID
+```
+
+Plan creation returns `route_refresh: converged` when the in-memory route was published before the
+response. `pending` means durable state is committed and ordinary reconciliation will publish it.
+
+## Routing policies
+
+| Policy | Behavior |
+|---|---|
+| `manual` | Exactly one selected binding. |
+| `primary-fallback` | First available binding in declared priority order. InferCrane does not replay an accepted stream. |
+| `weighted` | Deterministic bounded weighted selection among currently available bindings. |
+
+Serving plans are immutable and SHA-256 identified. Promotion changes only future route
+acquisitions. A buffered or streaming request remains pinned to the route generation it acquired
+until the request finishes.
+
+Promotion fails closed unless the latest persisted endpoint Release Guard evaluation is `PASS` for
+the current active/candidate pair. `REJECT` and `INCONCLUSIVE` can be inspected but cannot be
+promoted. Candidate traffic is never duplicated silently; v1.1 evaluates trustworthy telemetry
+from the primary deployment-backed binding and reports insufficient evidence as `INCONCLUSIVE`.
+
+## Ownership boundaries
+
+Bindings record `observe-only`, `traffic-managed`, or `lifecycle-managed` ownership. v1.1 supports
+fully compiled lifecycle-managed deployment bindings. Incremental import/adopt workflows and
+customer-managed external bindings are the v1.2 scope; creating a record does not imply that
+InferCrane owns an external workload's lifecycle.
+
+The inference hot path reads an immutable in-memory endpoint snapshot. It never queries PostgreSQL.
+Request telemetry records the logical model, environment, endpoint, serving plan, binding,
+deployment, revision, replica where known, provider, and runtime without storing prompt or output
+content by default.

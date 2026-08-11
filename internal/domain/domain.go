@@ -64,6 +64,76 @@ type ResolvedDeployment struct {
 	Targets    []Target
 }
 
+// LogicalModel is a stable product-level identity. It intentionally contains
+// no provider or runtime fields.
+type LogicalModel struct {
+	ID, TenantID, Name, Description string
+	CreatedAt, UpdatedAt            time.Time
+}
+
+// Environment scopes endpoint policy without encoding a cloud environment.
+type Environment struct {
+	ID, TenantID, Name, PolicyJSON string
+	CreatedAt, UpdatedAt           time.Time
+}
+
+type Endpoint struct {
+	ID, TenantID, LogicalModelID, EnvironmentID string
+	Name, DesiredState, ObservedState           string
+	ActiveServingPlanID, CandidateServingPlanID string
+	CreatedAt, UpdatedAt                        time.Time
+}
+
+type BackendBinding struct {
+	ID, TenantID, EndpointID, Name, Kind, OwnershipMode string
+	DeploymentID, TargetID, ConfigJSON                  string
+	CreatedAt, UpdatedAt                                time.Time
+}
+
+type ServingPlanBinding struct {
+	BindingID string `json:"binding_id"`
+	Priority  int    `json:"priority"`
+	Weight    int    `json:"weight"`
+}
+
+// ServingPlan is immutable after creation. SpecDigest identifies the canonical
+// routing policy and ordered binding set.
+type ServingPlan struct {
+	ID, TenantID, EndpointID, RoutingPolicy string
+	SpecJSON, SpecDigest                    string
+	Version                                 int
+	Bindings                                []ServingPlanBinding
+	CreatedAt                               time.Time
+}
+
+type ResolvedEndpoint struct {
+	Endpoint      Endpoint
+	LogicalModel  LogicalModel
+	Environment   Environment
+	ActivePlan    ServingPlan
+	CandidatePlan *ServingPlan
+	Bindings      []BackendBinding
+}
+
+type EndpointReleaseGuardPolicy struct {
+	EndpointID                     string  `json:"endpoint_id"`
+	Enabled                        bool    `json:"enabled"`
+	MinimumRequests                int     `json:"minimum_requests"`
+	MaxTTFTRegressionPercent       float64 `json:"max_ttft_regression_percent"`
+	MaxLatencyRegressionPercent    float64 `json:"max_latency_regression_percent"`
+	MaxErrorRateIncrease           float64 `json:"max_error_rate_increase"`
+	MaxOutputThroughputDropPercent float64 `json:"max_output_throughput_drop_percent"`
+	RequireCompatibilityEvidence   bool    `json:"require_compatibility_evidence"`
+}
+
+type EndpointReleaseGuardEvaluation struct {
+	ID, TenantID, EndpointID                    string
+	ActiveServingPlanID, CandidateServingPlanID string
+	Decision, ReasonCodesJSON, MetricsJSON      string
+	PolicyJSON                                  string
+	CreatedAt                                   time.Time
+}
+
 type Event struct {
 	ID, DeploymentID, TargetID, Type, Summary, Payload string
 	CreatedAt                                          time.Time
@@ -164,6 +234,8 @@ type CapacityEvidence struct {
 // generated content are deliberately excluded.
 type InferenceRecord struct {
 	RequestID, DeploymentID, RevisionID, TargetID string
+	LogicalModelID, EnvironmentID, EndpointID     string
+	ServingPlanID, BindingID                      string
 	Provider, Runtime, ComputeMode, OperationName string
 	RequestModel, ResponseModel, ErrorType        string
 	SemanticConventionSchema                      string

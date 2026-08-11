@@ -190,6 +190,31 @@ infercrane request qwen-prod --message "Count to five." --stream
 The command uses the configured endpoint and credential; applications can continue to use any
 OpenAI-compatible SDK directly.
 
+## Stable endpoints
+
+Separate the name applications call from the deployment that currently serves it:
+
+```bash
+infercrane logical-model create coder --description "Stable coding model"
+infercrane endpoint create coder-production --model coder --environment production
+infercrane endpoint bind coder-production --name primary --deployment qwen-prod
+infercrane endpoint plan coder-production --policy manual --bindings primary
+infercrane request coder-production --message "Review this function."
+```
+
+`endpoint plan` makes the first plan active and stages later plans as candidates. Inspect and
+promote explicitly:
+
+```bash
+infercrane endpoints
+infercrane endpoint inspect coder-production
+infercrane endpoint guard coder-production --evaluate
+infercrane endpoint promote coder-production PLAN_ID
+```
+
+`--bindings` is ordered and accepts optional bounded weights, for example
+`primary:80,overflow:20`. See [stable endpoints and serving plans](/features/endpoints).
+
 ## Existing targets and routing
 
 ```bash

@@ -43,6 +43,12 @@ type QueueSignals interface {
 	Waiting(context.Context, string) (float64, error)
 }
 
+type endpointStore interface {
+	EndpointsForTenant(context.Context, string) ([]domain.Endpoint, error)
+	ResolveEndpointForTenant(context.Context, string, string) (domain.ResolvedEndpoint, error)
+	SetEndpointState(context.Context, string, string, string) error
+}
+
 // DirectTargetBackend describes a provider-native endpoint that bypasses the
 // standalone replica router. The reconciler depends on this metadata rather
 // than a RunPod-specific branch, so another serverless adapter can register the
@@ -315,7 +321,100 @@ func (r *Reconciler) Once(ctx context.Context) error {
 		}
 		_ = r.Store.SetDeploymentState(ctx, d.ID, state)
 	}
+	return r.compileEndpoints(ctx, deployments)
+}
+
+func (r *Reconciler) compileEndpoints(ctx context.Context, deployments []domain.Deployment) error {
+	store, ok := r.Store.(endpointStore)
+	if !ok {
+		return nil
+	}
+	byTenant := make(map[string]map[string]domain.Deployment)
+	for _, deployment := range deployments {
+		if byTenant[deployment.TenantID] == nil {
+			byTenant[deployment.TenantID] = make(map[string]domain.Deployment)
+		}
+		byTenant[deployment.TenantID][deployment.ID] = deployment
+	}
+	// Include tenants that currently have only endpoint snapshots so deleting
+	// their last concrete deployment cannot leave a stale routable alias.
+	for _, route := range r.Routes.List() {
+		if byTenant[route.TenantID] == nil {
+			byTenant[route.TenantID] = make(map[string]domain.Deployment)
+		}
+	}
+	for tenant, concrete := range byTenant {
+		endpoints, err := store.EndpointsForTenant(ctx, tenant)
+		if err != nil {
+			return err
+		}
+		active := make(map[string]struct{}, len(endpoints))
+		for _, endpoint := range endpoints {
+			active[endpoint.Name] = struct{}{}
+			if endpoint.DesiredState != "serving" || endpoint.ActiveServingPlanID == "" {
+				r.Routes.RemoveEndpointForTenant(tenant, endpoint.Name)
+				continue
+			}
+			resolved, resolveErr := store.ResolveEndpointForTenant(ctx, tenant, endpoint.Name)
+			if resolveErr != nil {
+				return resolveErr
+			}
+			bindings := make(map[string]domain.BackendBinding, len(resolved.Bindings))
+			for _, binding := range resolved.Bindings {
+				bindings[binding.ID] = binding
+			}
+			compiled := make([]routes.Snapshot, 0, len(resolved.ActivePlan.Bindings))
+			for _, planned := range resolved.ActivePlan.Bindings {
+				binding, found := bindings[planned.BindingID]
+				if !found || binding.Kind != "deployment" {
+					continue
+				}
+				deployment, found := concrete[binding.DeploymentID]
+				if !found {
+					continue
+				}
+				base, available := r.Routes.GetDeployment(deployment.ID)
+				if !available {
+					continue
+				}
+				base.Alias = endpoint.Name
+				base.LogicalModelID = endpoint.LogicalModelID
+				base.EnvironmentID = endpoint.EnvironmentID
+				base.EndpointID = endpoint.ID
+				base.ServingPlanID = resolved.ActivePlan.ID
+				base.BindingID = binding.ID
+				base.RoutingWeight = planned.Weight
+				compiled = append(compiled, base)
+			}
+			state := "serving"
+			if len(compiled) == 0 || resolved.ActivePlan.RoutingPolicy == "manual" && len(compiled) != 1 {
+				state = "degraded"
+				r.Routes.RemoveEndpointForTenant(tenant, endpoint.Name)
+			} else {
+				r.Routes.PublishEndpoint(routes.EndpointRoute{TenantID: tenant, Alias: endpoint.Name, RoutingPolicy: resolved.ActivePlan.RoutingPolicy, Routes: compiled})
+			}
+			if endpoint.ObservedState != state {
+				_ = store.SetEndpointState(ctx, tenant, endpoint.ID, state)
+			}
+		}
+		for _, alias := range r.Routes.EndpointAliasesForTenant(tenant) {
+			if _, found := active[alias]; !found {
+				r.Routes.RemoveEndpointForTenant(tenant, alias)
+			}
+		}
+	}
 	return nil
+}
+
+// RefreshEndpoints recompiles only the stable endpoint layer from already
+// published concrete deployment routes. It avoids provider probes and is safe
+// to invoke after an endpoint control-plane mutation.
+func (r *Reconciler) RefreshEndpoints(ctx context.Context) error {
+	deployments, err := r.Store.Deployments(ctx)
+	if err != nil {
+		return err
+	}
+	return r.compileEndpoints(ctx, deployments)
 }
 
 func (r *Reconciler) reapRetiredRoutes() {

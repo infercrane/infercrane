@@ -31,6 +31,70 @@ class ControlAPI:
         path = "/integrations"
         return cast(dict[str, Any], self._transport.request("GET", path))
 
+    def list_environments(self) -> ObjectList:
+        path = "/environments"
+        return cast(ObjectList, self._transport.request("GET", path))
+
+    def create_environment(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = "/environments"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
+    def list_logical_models(self) -> ObjectList:
+        path = "/logical-models"
+        return cast(ObjectList, self._transport.request("GET", path))
+
+    def create_logical_model(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = "/logical-models"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
+    def list_endpoints(self) -> ObjectList:
+        path = "/endpoints"
+        return cast(ObjectList, self._transport.request("GET", path))
+
+    def create_endpoint(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = "/endpoints"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
+    def get_endpoint(self, name: str) -> dict[str, Any]:
+        path = f"/endpoints/{quote(name, safe='')}"
+        return cast(dict[str, Any], self._transport.request("GET", path))
+
+    def delete_endpoint(self, name: str) -> dict[str, Any]:
+        path = f"/endpoints/{quote(name, safe='')}"
+        return cast(dict[str, Any], self._transport.request("DELETE", path))
+
+    def create_endpoint_binding(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = f"/endpoints/{quote(name, safe='')}/bindings"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
+    def create_serving_plan(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = f"/endpoints/{quote(name, safe='')}/plans"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
+    def activate_serving_plan(self, name: str, plan: str, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = f"/endpoints/{quote(name, safe='')}/plans/{quote(plan, safe='')}/active"
+        return cast(dict[str, Any], self._transport.request("PUT", path, body=body))
+
+    def stage_serving_plan(self, name: str, plan: str, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = f"/endpoints/{quote(name, safe='')}/plans/{quote(plan, safe='')}/candidate"
+        return cast(dict[str, Any], self._transport.request("PUT", path, body=body))
+
+    def get_endpoint_release_guard_policy(self, name: str) -> dict[str, Any]:
+        path = f"/endpoints/{quote(name, safe='')}/release-guard/policy"
+        return cast(dict[str, Any], self._transport.request("GET", path))
+
+    def set_endpoint_release_guard_policy(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = f"/endpoints/{quote(name, safe='')}/release-guard/policy"
+        return cast(dict[str, Any], self._transport.request("PUT", path, body=body))
+
+    def evaluate_endpoint_release_guard(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = f"/endpoints/{quote(name, safe='')}/release-guard/evaluate"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
+    def list_endpoint_release_guard_evaluations(self, name: str) -> ObjectList:
+        path = f"/endpoints/{quote(name, safe='')}/release-guard/evaluations"
+        return cast(ObjectList, self._transport.request("GET", path))
+
     def list_operation_events(self, id: str) -> ObjectList:
         path = f"/operations/{quote(id, safe='')}/events"
         return cast(ObjectList, self._transport.request("GET", path))

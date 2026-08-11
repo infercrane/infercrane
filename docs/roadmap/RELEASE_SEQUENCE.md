@@ -16,6 +16,16 @@ engineering checkpoints rather than public stable releases.
 | v0.8.0 | Automated gates passed | Release Guard V2 and Inference Passport |
 | v0.9.0 | Automated gates passed | Kubernetes/KServe boundaries and namespaced lifecycle |
 | v1.0.0 | Automated gates passed | Multi-provider hardening, packaging and consolidated RC evidence; paid infrastructure deferred |
+| v1.1.0 | In progress | Stable logical models, environments, endpoints, backend bindings and serving plans |
+| v1.2.0 | Planned | Incremental workload adoption, request inspection, deterministic Doctor and signed alerts |
+| v1.3.0 | Planned | Protocol capability conformance for Responses, embeddings, batch and completions |
+| v1.4.0 | Planned | Admission control and bounded asynchronous inference |
+| v1.5.0 | Planned | Qualified provider-neutral AWS, GCP and CoreWeave profiles |
+| v1.6.0 | Planned | Control-plane HA, recovery, private networking, workload identity and safe upgrades |
+| v1.7.0 | Planned | Evidence-backed model recipes and Inference Lab |
+| v1.8.0 | Planned | Privacy-preserving replay, artifact placement and capacity intelligence |
+| v1.9.0 | Planned | FinOps evidence and advisory-only workload optimization |
+| v2.0.0 | Planned | Context Passport, delegated request survival and policy-bounded Burst Guard |
 
 Each milestone specification defines scope, exclusions, public surface, verification, and evidence.
 The machine-readable current state is `.release/current.json`; gates are `.release/gates.yaml`.
@@ -30,4 +40,5 @@ The machine-readable current state is `.release/current.json`; gates are `.relea
 6. Record evidence, review the diff, commit, create the local annotated RC tag, and continue.
 
 No stable tag, package publication, remote tag push, or paid-resource creation is authorized by this
-sequence.
+sequence. Post-v1 milestones receive local `-rc.1` engineering tags under the same policy. One
+consolidated paid-provider qualification is deferred until the v2.0 release-candidate boundary.

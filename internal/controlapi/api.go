@@ -79,6 +79,26 @@ type passportStore interface {
 	RecordInferencePassport(context.Context, domain.InferencePassport) (domain.InferencePassport, error)
 	InferencePassports(context.Context, string, string, int) ([]domain.InferencePassport, error)
 }
+type endpointStore interface {
+	CreateEnvironment(context.Context, string, domain.Environment) (domain.Environment, error)
+	EnvironmentsForTenant(context.Context, string) ([]domain.Environment, error)
+	EnvironmentForTenant(context.Context, string, string) (domain.Environment, error)
+	CreateLogicalModel(context.Context, string, domain.LogicalModel) (domain.LogicalModel, error)
+	LogicalModelsForTenant(context.Context, string) ([]domain.LogicalModel, error)
+	LogicalModelForTenant(context.Context, string, string) (domain.LogicalModel, error)
+	CreateEndpoint(context.Context, string, domain.Endpoint) (domain.Endpoint, error)
+	EndpointsForTenant(context.Context, string) ([]domain.Endpoint, error)
+	ResolveEndpointForTenant(context.Context, string, string) (domain.ResolvedEndpoint, error)
+	CreateBackendBinding(context.Context, string, domain.BackendBinding) (domain.BackendBinding, error)
+	CreateServingPlan(context.Context, string, domain.ServingPlan) (domain.ServingPlan, error)
+	SetEndpointPlan(context.Context, string, string, string, string) error
+	DeleteEndpointForTenant(context.Context, string, string) error
+	EndpointReleaseGuardPolicy(context.Context, string, string) (domain.EndpointReleaseGuardPolicy, error)
+	SetEndpointReleaseGuardPolicy(context.Context, string, string, domain.EndpointReleaseGuardPolicy) (domain.EndpointReleaseGuardPolicy, error)
+	EvaluateEndpointReleaseGuard(context.Context, string, string, time.Duration) (domain.EndpointReleaseGuardEvaluation, error)
+	EndpointReleaseGuardEvaluations(context.Context, string, string, int) ([]domain.EndpointReleaseGuardEvaluation, error)
+	EndpointReleaseGuardAccepted(context.Context, string, string, string) (bool, error)
+}
 type API struct {
 	Store         Store
 	APIKey        string
@@ -93,6 +113,7 @@ type API struct {
 	Integrations             integration.Snapshot
 	GatewayURL, AIPerfBinary string
 	PassportPrivateKey       ed25519.PrivateKey
+	EndpointRefresh          func(context.Context) error
 }
 
 type BackendMetadata struct {
@@ -112,12 +133,33 @@ func (a API) passportsStore() (passportStore, bool) {
 	return store, ok
 }
 
+func (a API) endpointResources() (endpointStore, bool) {
+	store, ok := a.Store.(endpointStore)
+	return store, ok
+}
+
 func (a API) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/operations/{id}", a.auth(authz.Read, a.operation))
 	mux.HandleFunc("GET /api/v1/doctor", a.auth(authz.Read, a.diagnostics))
 	mux.HandleFunc("GET /api/v1/whoami", a.auth(authz.Read, a.whoami))
 	mux.HandleFunc("GET /api/v1/integrations", a.auth(authz.Read, a.integrations))
+	mux.HandleFunc("GET /api/v1/environments", a.auth(authz.Read, a.environments))
+	mux.HandleFunc("POST /api/v1/environments", a.auth(authz.Deploy, a.createEnvironment))
+	mux.HandleFunc("GET /api/v1/logical-models", a.auth(authz.Read, a.logicalModels))
+	mux.HandleFunc("POST /api/v1/logical-models", a.auth(authz.Deploy, a.createLogicalModel))
+	mux.HandleFunc("GET /api/v1/endpoints", a.auth(authz.Read, a.endpoints))
+	mux.HandleFunc("POST /api/v1/endpoints", a.auth(authz.Deploy, a.createEndpoint))
+	mux.HandleFunc("GET /api/v1/endpoints/{name}", a.auth(authz.Read, a.endpoint))
+	mux.HandleFunc("DELETE /api/v1/endpoints/{name}", a.auth(authz.Delete, a.deleteEndpoint))
+	mux.HandleFunc("POST /api/v1/endpoints/{name}/bindings", a.auth(authz.Deploy, a.createEndpointBinding))
+	mux.HandleFunc("POST /api/v1/endpoints/{name}/plans", a.auth(authz.Deploy, a.createEndpointPlan))
+	mux.HandleFunc("PUT /api/v1/endpoints/{name}/plans/{plan}/active", a.auth(authz.Deploy, a.activateEndpointPlan))
+	mux.HandleFunc("PUT /api/v1/endpoints/{name}/plans/{plan}/candidate", a.auth(authz.Deploy, a.stageEndpointPlan))
+	mux.HandleFunc("GET /api/v1/endpoints/{name}/release-guard/policy", a.auth(authz.Read, a.endpointGuardPolicy))
+	mux.HandleFunc("PUT /api/v1/endpoints/{name}/release-guard/policy", a.auth(authz.Deploy, a.setEndpointGuardPolicy))
+	mux.HandleFunc("POST /api/v1/endpoints/{name}/release-guard/evaluate", a.auth(authz.Deploy, a.evaluateEndpointGuard))
+	mux.HandleFunc("GET /api/v1/endpoints/{name}/release-guard/evaluations", a.auth(authz.Read, a.endpointGuardEvaluations))
 	mux.HandleFunc("GET /api/v1/operations/{id}/events", a.auth(authz.Read, a.operationEvents))
 	mux.HandleFunc("POST /api/v1/operations/{id}/cancel", a.auth(authz.Deploy, a.cancel))
 	mux.HandleFunc("POST /api/v1/deployments/apply", a.auth(authz.Deploy, a.applyDeployment))
@@ -165,6 +207,460 @@ func (a API) Handler() http.Handler {
 
 func (a API) integrations(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"data": a.Integrations})
+}
+
+func (a API) environments(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.endpointResources()
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "endpoint resources are not supported by this store")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	items, err := store.EnvironmentsForTenant(r.Context(), actor.TenantID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "environments could not be listed")
+		return
+	}
+	data := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		data = append(data, environmentResponse(item))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": data})
+}
+
+func (a API) createEnvironment(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.endpointResources()
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "endpoint resources are not supported by this store")
+		return
+	}
+	var request struct {
+		Name   string          `json:"name"`
+		Policy json.RawMessage `json:"policy"`
+	}
+	if !decodeMutationBody(w, r, &request) {
+		return
+	}
+	if len(request.Policy) == 0 {
+		request.Policy = json.RawMessage(`{}`)
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	item, err := store.CreateEnvironment(r.Context(), actor.TenantID, domain.Environment{Name: request.Name, PolicyJSON: string(request.Policy)})
+	if writeEndpointMutationError(w, err) {
+		return
+	}
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "environment.create", ResourceType: "environment", ResourceName: item.Name, Outcome: "succeeded"})
+	writeJSON(w, http.StatusCreated, map[string]any{"environment": environmentResponse(item)})
+}
+
+func (a API) logicalModels(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.endpointResources()
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "endpoint resources are not supported by this store")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	items, err := store.LogicalModelsForTenant(r.Context(), actor.TenantID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "logical models could not be listed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": items})
+}
+
+func (a API) createLogicalModel(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.endpointResources()
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "endpoint resources are not supported by this store")
+		return
+	}
+	var request struct {
+		Name, Description string
+	}
+	if !decodeMutationBody(w, r, &request) {
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	item, err := store.CreateLogicalModel(r.Context(), actor.TenantID, domain.LogicalModel{Name: request.Name, Description: request.Description})
+	if writeEndpointMutationError(w, err) {
+		return
+	}
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "logical_model.create", ResourceType: "logical_model", ResourceName: item.Name, Outcome: "succeeded"})
+	writeJSON(w, http.StatusCreated, map[string]any{"logical_model": logicalModelResponse(item)})
+}
+
+func (a API) endpoints(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.endpointResources()
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "endpoint resources are not supported by this store")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	items, err := store.EndpointsForTenant(r.Context(), actor.TenantID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "endpoints could not be listed")
+		return
+	}
+	data := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		data = append(data, endpointResponse(item))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": data})
+}
+
+func (a API) createEndpoint(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.endpointResources()
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "endpoint resources are not supported by this store")
+		return
+	}
+	var request struct {
+		Name         string `json:"name"`
+		LogicalModel string `json:"logical_model"`
+		Environment  string `json:"environment"`
+	}
+	if !decodeMutationBody(w, r, &request) {
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	model, err := store.LogicalModelForTenant(r.Context(), actor.TenantID, request.LogicalModel)
+	if err != nil {
+		writeEndpointMutationError(w, err)
+		return
+	}
+	environment, err := store.EnvironmentForTenant(r.Context(), actor.TenantID, request.Environment)
+	if err != nil {
+		writeEndpointMutationError(w, err)
+		return
+	}
+	item, err := store.CreateEndpoint(r.Context(), actor.TenantID, domain.Endpoint{Name: request.Name, LogicalModelID: model.ID, EnvironmentID: environment.ID})
+	if writeEndpointMutationError(w, err) {
+		return
+	}
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "endpoint.create", ResourceType: "endpoint", ResourceName: item.Name, Outcome: "succeeded"})
+	writeJSON(w, http.StatusCreated, map[string]any{"endpoint": endpointResponse(item)})
+}
+
+func (a API) endpoint(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.endpointResources()
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "endpoint resources are not supported by this store")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	resolved, err := store.ResolveEndpointForTenant(r.Context(), actor.TenantID, r.PathValue("name"))
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "endpoint was not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "endpoint could not be resolved")
+		return
+	}
+	writeJSON(w, http.StatusOK, resolvedEndpointResponse(resolved))
+}
+
+func (a API) deleteEndpoint(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.endpointResources()
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "endpoint resources are not supported by this store")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	if err := store.DeleteEndpointForTenant(r.Context(), actor.TenantID, r.PathValue("name")); err != nil {
+		writeEndpointMutationError(w, err)
+		return
+	}
+	refresh := a.refreshEndpoints(r.Context())
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "endpoint.delete", ResourceType: "endpoint", ResourceName: r.PathValue("name"), Outcome: "succeeded"})
+	writeJSON(w, http.StatusOK, map[string]string{"endpoint": r.PathValue("name"), "state": "deleted", "route_refresh": refresh})
+}
+
+func (a API) createEndpointBinding(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.endpointResources()
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "endpoint resources are not supported by this store")
+		return
+	}
+	var request struct {
+		Name          string          `json:"name"`
+		Kind          string          `json:"kind"`
+		OwnershipMode string          `json:"ownership_mode"`
+		Deployment    string          `json:"deployment"`
+		Target        string          `json:"target"`
+		Config        json.RawMessage `json:"config"`
+	}
+	if !decodeMutationBody(w, r, &request) {
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	resolved, err := store.ResolveEndpointForTenant(r.Context(), actor.TenantID, r.PathValue("name"))
+	if err != nil {
+		writeEndpointMutationError(w, err)
+		return
+	}
+	binding := domain.BackendBinding{EndpointID: resolved.Endpoint.ID, Name: request.Name, Kind: request.Kind, OwnershipMode: request.OwnershipMode, ConfigJSON: string(request.Config)}
+	if request.Kind == "deployment" {
+		deployment, lookupErr := a.Store.ResolveForTenant(r.Context(), actor.TenantID, request.Deployment)
+		if lookupErr != nil {
+			writeEndpointMutationError(w, lookupErr)
+			return
+		}
+		binding.DeploymentID = deployment.Deployment.ID
+	} else if request.Kind == "external" {
+		target, lookupErr := a.Store.TargetForTenantByName(r.Context(), actor.TenantID, request.Target)
+		if lookupErr != nil {
+			writeEndpointMutationError(w, lookupErr)
+			return
+		}
+		binding.TargetID = target.ID
+	}
+	item, err := store.CreateBackendBinding(r.Context(), actor.TenantID, binding)
+	if writeEndpointMutationError(w, err) {
+		return
+	}
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "endpoint_binding.create", ResourceType: "endpoint", ResourceName: resolved.Endpoint.Name, Outcome: "succeeded"})
+	writeJSON(w, http.StatusCreated, map[string]any{"binding": bindingResponse(item)})
+}
+
+func (a API) createEndpointPlan(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.endpointResources()
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "endpoint resources are not supported by this store")
+		return
+	}
+	var request struct {
+		RoutingPolicy string `json:"routing_policy"`
+		Bindings      []struct {
+			Name     string `json:"name"`
+			Priority int    `json:"priority"`
+			Weight   int    `json:"weight"`
+		} `json:"bindings"`
+	}
+	if !decodeMutationBody(w, r, &request) {
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	resolved, err := store.ResolveEndpointForTenant(r.Context(), actor.TenantID, r.PathValue("name"))
+	if err != nil {
+		writeEndpointMutationError(w, err)
+		return
+	}
+	byName := make(map[string]string, len(resolved.Bindings))
+	for _, binding := range resolved.Bindings {
+		byName[binding.Name] = binding.ID
+	}
+	plan := domain.ServingPlan{EndpointID: resolved.Endpoint.ID, RoutingPolicy: request.RoutingPolicy}
+	for _, requested := range request.Bindings {
+		id, found := byName[requested.Name]
+		if !found {
+			writeError(w, http.StatusUnprocessableEntity, "validation_failed", "serving plan references an unknown endpoint binding: "+requested.Name)
+			return
+		}
+		plan.Bindings = append(plan.Bindings, domain.ServingPlanBinding{BindingID: id, Priority: requested.Priority, Weight: requested.Weight})
+	}
+	plan, err = store.CreateServingPlan(r.Context(), actor.TenantID, plan)
+	if writeEndpointMutationError(w, err) {
+		return
+	}
+	slot := "candidate"
+	if resolved.Endpoint.ActiveServingPlanID == "" {
+		slot = "active"
+	}
+	if err = store.SetEndpointPlan(r.Context(), actor.TenantID, resolved.Endpoint.Name, plan.ID, slot); err != nil {
+		writeEndpointMutationError(w, err)
+		return
+	}
+	refresh := a.refreshEndpoints(r.Context())
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "serving_plan.create", ResourceType: "endpoint", ResourceName: resolved.Endpoint.Name, Outcome: "succeeded"})
+	writeJSON(w, http.StatusCreated, map[string]any{"plan": servingPlanResponse(plan), "slot": slot, "route_refresh": refresh})
+}
+
+func (a API) activateEndpointPlan(w http.ResponseWriter, r *http.Request) {
+	a.setEndpointPlanSlot(w, r, "active")
+}
+
+func (a API) stageEndpointPlan(w http.ResponseWriter, r *http.Request) {
+	a.setEndpointPlanSlot(w, r, "candidate")
+}
+
+func (a API) setEndpointPlanSlot(w http.ResponseWriter, r *http.Request, slot string) {
+	store, ok := a.endpointResources()
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "endpoint resources are not supported by this store")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	if slot == "active" {
+		accepted, err := store.EndpointReleaseGuardAccepted(r.Context(), actor.TenantID, r.PathValue("name"), r.PathValue("plan"))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal", "endpoint Release Guard evidence could not be read")
+			return
+		}
+		if !accepted {
+			writeError(w, http.StatusConflict, "release_guard_required", "candidate plan promotion requires a current PASS decision for the active/candidate pair")
+			return
+		}
+	}
+	if err := store.SetEndpointPlan(r.Context(), actor.TenantID, r.PathValue("name"), r.PathValue("plan"), slot); err != nil {
+		writeEndpointMutationError(w, err)
+		return
+	}
+	refresh := a.refreshEndpoints(r.Context())
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "serving_plan." + slot, ResourceType: "endpoint", ResourceName: r.PathValue("name"), Outcome: "succeeded"})
+	writeJSON(w, http.StatusOK, map[string]string{"endpoint": r.PathValue("name"), "plan_id": r.PathValue("plan"), "slot": slot, "route_refresh": refresh})
+}
+
+func (a API) endpointGuardPolicy(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.endpointResources()
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "endpoint resources are not supported by this store")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	policy, err := store.EndpointReleaseGuardPolicy(r.Context(), actor.TenantID, r.PathValue("name"))
+	if writeEndpointMutationError(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"policy": policy})
+}
+
+func (a API) setEndpointGuardPolicy(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.endpointResources()
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "endpoint resources are not supported by this store")
+		return
+	}
+	var policy domain.EndpointReleaseGuardPolicy
+	if !decodeMutationBody(w, r, &policy) {
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	policy, err := store.SetEndpointReleaseGuardPolicy(r.Context(), actor.TenantID, r.PathValue("name"), policy)
+	if writeEndpointMutationError(w, err) {
+		return
+	}
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "endpoint_guard.policy", ResourceType: "endpoint", ResourceName: r.PathValue("name"), Outcome: "succeeded"})
+	writeJSON(w, http.StatusOK, map[string]any{"policy": policy})
+}
+
+func (a API) evaluateEndpointGuard(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.endpointResources()
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "endpoint resources are not supported by this store")
+		return
+	}
+	var request struct {
+		WindowSeconds int `json:"window_seconds"`
+	}
+	if !decodeMutationBody(w, r, &request) {
+		return
+	}
+	if request.WindowSeconds == 0 {
+		request.WindowSeconds = 3600
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	evaluation, err := store.EvaluateEndpointReleaseGuard(r.Context(), actor.TenantID, r.PathValue("name"), time.Duration(request.WindowSeconds)*time.Second)
+	if writeEndpointMutationError(w, err) {
+		return
+	}
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "endpoint_guard.evaluate", ResourceType: "endpoint", ResourceName: r.PathValue("name"), Outcome: evaluation.Decision})
+	writeJSON(w, http.StatusCreated, map[string]any{"evaluation": endpointGuardEvaluationResponse(evaluation)})
+}
+
+func (a API) endpointGuardEvaluations(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.endpointResources()
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "endpoint resources are not supported by this store")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	items, err := store.EndpointReleaseGuardEvaluations(r.Context(), actor.TenantID, r.PathValue("name"), 20)
+	if writeEndpointMutationError(w, err) {
+		return
+	}
+	data := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		data = append(data, endpointGuardEvaluationResponse(item))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": data})
+}
+
+func endpointGuardEvaluationResponse(item domain.EndpointReleaseGuardEvaluation) map[string]any {
+	decode := func(raw string) any {
+		var value any
+		if json.Unmarshal([]byte(raw), &value) != nil {
+			return nil
+		}
+		return value
+	}
+	return map[string]any{"id": item.ID, "tenant_id": item.TenantID, "endpoint_id": item.EndpointID, "active_serving_plan_id": item.ActiveServingPlanID, "candidate_serving_plan_id": item.CandidateServingPlanID, "decision": item.Decision, "reasons": decode(item.ReasonCodesJSON), "metrics": decode(item.MetricsJSON), "policy": decode(item.PolicyJSON), "created_at": item.CreatedAt}
+}
+
+func (a API) refreshEndpoints(parent context.Context) string {
+	if a.EndpointRefresh == nil {
+		return "pending"
+	}
+	ctx, cancel := context.WithTimeout(parent, 2*time.Second)
+	defer cancel()
+	if err := a.EndpointRefresh(ctx); err != nil {
+		return "pending"
+	}
+	return "converged"
+}
+
+func writeEndpointMutationError(w http.ResponseWriter, err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", err.Error())
+	} else if errors.Is(err, domain.ErrConflict) {
+		writeError(w, http.StatusConflict, "conflict", err.Error())
+	} else {
+		writeError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
+	}
+	return true
+}
+
+func environmentResponse(item domain.Environment) map[string]any {
+	var policy any = map[string]any{}
+	if item.PolicyJSON != "" {
+		_ = json.Unmarshal([]byte(item.PolicyJSON), &policy)
+	}
+	return map[string]any{"id": item.ID, "tenant_id": item.TenantID, "name": item.Name, "policy": policy, "created_at": item.CreatedAt, "updated_at": item.UpdatedAt}
+}
+
+func logicalModelResponse(item domain.LogicalModel) map[string]any {
+	return map[string]any{"id": item.ID, "tenant_id": item.TenantID, "name": item.Name, "description": item.Description, "created_at": item.CreatedAt, "updated_at": item.UpdatedAt}
+}
+
+func endpointResponse(item domain.Endpoint) map[string]any {
+	return map[string]any{"id": item.ID, "tenant_id": item.TenantID, "logical_model_id": item.LogicalModelID, "environment_id": item.EnvironmentID, "name": item.Name, "desired_state": item.DesiredState, "observed_state": item.ObservedState, "active_serving_plan_id": item.ActiveServingPlanID, "candidate_serving_plan_id": item.CandidateServingPlanID, "created_at": item.CreatedAt, "updated_at": item.UpdatedAt}
+}
+
+func bindingResponse(item domain.BackendBinding) map[string]any {
+	var config any = map[string]any{}
+	if item.ConfigJSON != "" {
+		_ = json.Unmarshal([]byte(item.ConfigJSON), &config)
+	}
+	return map[string]any{"id": item.ID, "tenant_id": item.TenantID, "endpoint_id": item.EndpointID, "name": item.Name, "kind": item.Kind, "ownership_mode": item.OwnershipMode, "deployment_id": item.DeploymentID, "target_id": item.TargetID, "config": config, "created_at": item.CreatedAt, "updated_at": item.UpdatedAt}
+}
+
+func servingPlanResponse(item domain.ServingPlan) map[string]any {
+	return map[string]any{"id": item.ID, "tenant_id": item.TenantID, "endpoint_id": item.EndpointID, "version": item.Version, "routing_policy": item.RoutingPolicy, "spec_digest": item.SpecDigest, "bindings": item.Bindings, "created_at": item.CreatedAt}
+}
+
+func resolvedEndpointResponse(item domain.ResolvedEndpoint) map[string]any {
+	bindings := make([]map[string]any, 0, len(item.Bindings))
+	for _, binding := range item.Bindings {
+		bindings = append(bindings, bindingResponse(binding))
+	}
+	response := map[string]any{"endpoint": endpointResponse(item.Endpoint), "logical_model": logicalModelResponse(item.LogicalModel), "environment": environmentResponse(item.Environment), "active_plan": servingPlanResponse(item.ActivePlan), "bindings": bindings}
+	if item.CandidatePlan != nil {
+		response["candidate_plan"] = servingPlanResponse(*item.CandidatePlan)
+	}
+	return response
 }
 
 func (a API) whoami(w http.ResponseWriter, r *http.Request) {

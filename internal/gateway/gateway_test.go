@@ -140,7 +140,7 @@ func TestCompletionRecordsStreamingTelemetry(t *testing.T) {
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(body))}, nil
 	})}
 	directory := routes.New()
-	directory.Put(routes.Snapshot{DeploymentID: "d1", RevisionID: "rev-3", Alias: "alias", UpstreamModel: "Qwen/Qwen3-8B", RouterURL: "http://router", Provider: "runpod", Runtime: "vllm", ComputeMode: "elastic"})
+	directory.Put(routes.Snapshot{DeploymentID: "d1", RevisionID: "rev-3", LogicalModelID: "model-1", EnvironmentID: "environment-1", EndpointID: "endpoint-1", ServingPlanID: "plan-1", BindingID: "binding-1", Alias: "alias", UpstreamModel: "Qwen/Qwen3-8B", RouterURL: "http://router", Provider: "runpod", Runtime: "vllm", ComputeMode: "elastic"})
 	captured := &captureRecorder{}
 	handler := (&Gateway{Routes: directory, APIKey: "secret", Client: client, Recorder: captured}).Handler()
 	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"alias","stream":true,"messages":[]}`))
@@ -153,6 +153,9 @@ func TestCompletionRecordsStreamingTelemetry(t *testing.T) {
 	captured.mu.Unlock()
 	if record.DeploymentID != "d1" || record.RevisionID != "rev-3" || record.Provider != "runpod" || record.Runtime != "vllm" || record.ComputeMode != "elastic" || record.OperationName != "chat" || record.RequestModel != "alias" || record.SemanticConventionSchema != "https://opentelemetry.io/schemas/gen-ai/1.42.0" {
 		t.Fatalf("metadata=%+v", record)
+	}
+	if record.LogicalModelID != "model-1" || record.EnvironmentID != "environment-1" || record.EndpointID != "endpoint-1" || record.ServingPlanID != "plan-1" || record.BindingID != "binding-1" {
+		t.Fatalf("endpoint metadata=%+v", record)
 	}
 	if !record.Streaming || record.TTFTMS == nil || *record.TTFTMS < 0 || record.LatencyMS < *record.TTFTMS {
 		t.Fatalf("timings=%+v", record)
