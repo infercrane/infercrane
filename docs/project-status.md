@@ -23,7 +23,7 @@ but lacks production qualification; **planned** is not a product capability.
 | Release packaging | Implemented | Exact-version darwin/linux amd64/arm64 archives, checksums, SPDX SBOMs, native smoke verification, and generated Homebrew formula run locally without publication. |
 | Existing vLLM target registration | Implemented | Persistent, idempotent registration. |
 | Logical deployments and aliases | Implemented | One common upstream model per deployment. |
-| Stable endpoint domain | Experimental | Logical models, environments, immutable serving plans, lifecycle-managed deployment bindings, route generation pinning, and legacy alias backfill pass local tests; import/adopt and endpoint-level Release Guard qualification remain. |
+| Stable endpoint domain | Local-qualified | Logical models, environments, immutable serving plans, lifecycle-managed deployment bindings, route generation pinning, legacy alias backfill, and deterministic endpoint Release Guard pass the v1.1 clean-tree gates. External import/adopt begins in v1.2. |
 | OpenAI-compatible chat proxy | Implemented | Streaming, auth, alias rewrite, request accounting. |
 | vLLM health and model reconciliation | Implemented | Bounded concurrent probes. |
 | Supervised vLLM Router processes | Implemented | Instance-owned generations and deterministic ports. |

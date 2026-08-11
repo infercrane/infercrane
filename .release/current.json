@@ -1,19 +1,19 @@
 {
   "schema_version": 1,
   "program": "infercrane-v2",
-  "current_milestone": "v1.1.0",
+  "current_milestone": "v1.2.0",
   "state": "implementing",
   "baseline": {
-    "commit": "280d3409c3382b7def65ab3fe5256c55b6673385",
-    "tag": "v1.0.0-rc.1",
+    "commit": "bbad04dbee4a46c0255a994f6cf5c564948c4ef8",
+    "tag": "v1.1.0-rc.1",
     "dev_check": "passed",
     "dev_check_full": "passed",
-    "local_qualification": ".infercrane/qualification/3c4cb6961640c471fbd12d79ec4d497f8da0ce9f/qualification.json",
-    "contract_qualification": ".infercrane/contract-qualification/3c4cb6961640c471fbd12d79ec4d497f8da0ce9f/qualification.json",
+    "local_qualification": ".infercrane/qualification/bbad04dbee4a46c0255a994f6cf5c564948c4ef8/qualification.json",
+    "contract_qualification": ".infercrane/contract-qualification/bbad04dbee4a46c0255a994f6cf5c564948c4ef8/qualification.json",
     "real_infrastructure": "deferred"
   },
-  "last_completed_milestone": "v1.0.0-rc.1",
-  "next_action": "implement and locally qualify the v1.1 stable endpoint domain without paid resources or data-path database reads",
-  "rc_tags": ["v0.2.0-rc.1", "v0.3.0-rc.1", "v0.4.0-rc.1", "v0.5.0-rc.1", "v0.6.0-rc.1", "v0.7.0-rc.1", "v0.8.0-rc.1", "v0.9.0-rc.1", "v1.0.0-rc.1"],
-  "updated_at": "2026-08-11T11:44:05Z"
+  "last_completed_milestone": "v1.1.0-rc.1",
+  "next_action": "implement incremental workload adoption, request inspection, deterministic Doctor findings, and signed alerts without paid resources",
+  "rc_tags": ["v0.2.0-rc.1", "v0.3.0-rc.1", "v0.4.0-rc.1", "v0.5.0-rc.1", "v0.6.0-rc.1", "v0.7.0-rc.1", "v0.8.0-rc.1", "v0.9.0-rc.1", "v1.0.0-rc.1", "v1.1.0-rc.1"],
+  "updated_at": "2026-08-11T12:53:00Z"
 }
