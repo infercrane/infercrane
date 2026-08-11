@@ -1,8 +1,11 @@
 # syntax=docker/dockerfile:1.7
 FROM golang:1.26.5-bookworm AS builder
 WORKDIR /build
-COPY go.mod ./
-RUN --mount=type=cache,target=/go/pkg/mod go mod download
+COPY go.mod go.sum ./
+# Keep the module cache in the builder layer. The same builder image is used as
+# the containerized integration-test runner, so tests must not download the
+# dependency graph again every time the container starts.
+RUN go mod download
 COPY . .
 RUN --mount=type=cache,target=/go/pkg/mod CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/infercrane ./cmd/infercrane \
     && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/runpod-fault-proxy ./internal/testtools/runpod-fault-proxy \

@@ -251,10 +251,13 @@ go mod download
 Run the standard workflow:
 
 ```bash
-make context   # regenerate the source-derived repository map
-make test      # race-enabled tests
-make verify    # formatting, docs freshness, tests, vet, build, Compose validation
+make dev-check       # fast repository and provider-contract feedback
+make dev-check-full  # isolated Docker, recovery, production-config, and docs gates
 ```
+
+Each run keeps compact evidence under `.infercrane/dev-check/`. Provider adapters pass the same
+replay-safe lifecycle contract locally; paid cloud qualification is explicit and reserved for a
+locally green release candidate. See [development and testing](docs/development.mdx).
 
 PostgreSQL integration tests run when `INFERCRANE_TEST_DATABASE_URL` is set:
 

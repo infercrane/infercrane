@@ -9,8 +9,17 @@ the same workflow and quality gates.
 asdf install
 go mod download
 make context
-make verify
+make dev-check
 ```
+
+Use `make dev-check` for the normal seconds-scale loop. Before opening or updating a pull request,
+run `make dev-check-full` to exercise the isolated Docker stack, failure recovery, production
+configuration, and documentation. Logs are retained under `.infercrane/dev-check/`.
+
+Provider adapters must pass `make test-provider-contracts`. Real-cloud tests are explicit paid
+qualification, not part of ordinary development; see [development and testing](docs/development.mdx).
+Release maintainers use `make qualify-local` for machine-readable package proof and `make
+qualify-rc` only on a clean frozen commit with explicit paid-resource authorization.
 
 PostgreSQL-backed tests run when `INFERCRANE_TEST_DATABASE_URL` is set. `docker compose up -d
 postgres` starts development PostgreSQL, but it is intentionally not exposed on a host port; CI

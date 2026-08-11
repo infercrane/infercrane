@@ -119,7 +119,7 @@
       },
       {
         "group": "REFERENCE",
-        "pages": ["cli", "control-api", "provider-setup", "troubleshooting", "faq"]
+        "pages": ["cli", "control-api", "provider-setup", "development", "troubleshooting", "faq"]
       },
       {
         "group": "PROJECT",
@@ -141,7 +141,8 @@
               "adr/0007-tenant-scoped-identity",
               "adr/0008-immutable-deployment-revisions",
               "adr/0009-qualified-support-and-backend-registration",
-              "adr/0010-cobra-cli-and-progressive-terminal-output"
+              "adr/0010-cobra-cli-and-progressive-terminal-output",
+              "adr/0011-tiered-provider-qualification"
             ]
           },
           "release-acceptance"

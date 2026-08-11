@@ -10,6 +10,7 @@ requested_model=${INFERCRANE_ACCEPTANCE_MODEL:-}
 requested_gpu=${INFERCRANE_ACCEPTANCE_GPU:-}
 run_id=${requested_run_id:-$(date -u +%Y%m%dT%H%M%SZ)}
 current_file="$state_root/current"
+paid_lock="$state_root/.paid.lock"
 approval=false
 
 usage() {
@@ -20,6 +21,7 @@ Commands:
   local       Run non-provider repository and container acceptance
   preflight   Validate credentials, dependencies, template, and inventories (read-only)
   elastic     Run the resumable paid elastic smoke workflow
+  elastic-qualify Run elastic benchmark, autoscaling, and Release Guard qualification
   serverless  Run the resumable paid serverless smoke workflow
   elastic-faults    Run disconnect, restart, promotion/drain, and delete-restart gates
   serverless-faults Run lost-create-response and stream-cancellation gates
@@ -147,6 +149,29 @@ require_paid_approval() {
     echo "refusing paid provider mutation without --approve-paid-resources" >&2
     exit 1
   }
+}
+
+acquire_paid_lock() {
+  mkdir -p "$state_root"
+  if ! mkdir "$paid_lock" 2>/dev/null; then
+    owner=$(cat "$paid_lock/pid" 2>/dev/null || true)
+    owner_run=$(cat "$paid_lock/run_id" 2>/dev/null || true)
+    if [ -n "$owner" ] && kill -0 "$owner" 2>/dev/null; then
+      echo "another paid acceptance run is active (pid $owner, run ${owner_run:-unknown})" >&2
+      return 1
+    fi
+    rm -rf "$paid_lock"
+    mkdir "$paid_lock"
+  fi
+  printf '%s\n' "$$" >"$paid_lock/pid"
+  printf '%s\n' "$run_id" >"$paid_lock/run_id"
+}
+
+release_paid_lock() {
+  owner=$(cat "$paid_lock/pid" 2>/dev/null || true)
+  if [ "$owner" = "$$" ]; then
+    rm -rf "$paid_lock"
+  fi
 }
 
 start_stack() {
@@ -598,7 +623,7 @@ run_serverless_faults() {
   capture_inventory serverless-faults-after
 }
 
-run_qualify() {
+run_elastic_qualify() {
   require_paid_approval
   run_elastic
 
@@ -631,6 +656,11 @@ run_qualify() {
     --idempotency-key "$ELASTIC_NAME-guard-reject" --output json
 
   delete_if_present "$ELASTIC_NAME" "$ELASTIC_NAME-delete"
+  echo "Elastic benchmark, autoscaling, Release Guard, and cleanup qualification completed."
+}
+
+run_qualify() {
+  run_elastic_qualify
   run_serverless
   echo "Qualification smoke completed; guarded cleanup will now delete the serverless endpoint and verify InferCrane inventory."
 }
@@ -681,25 +711,30 @@ run_report() {
 case "$command_name" in
   local) run_local ;;
   preflight) run_preflight ;;
-  elastic|serverless|elastic-faults|serverless-faults)
+  elastic|elastic-qualify|serverless|elastic-faults|serverless-faults)
     require_paid_approval
-    trap 'result=$?; trap - EXIT; if [ "$result" -ne 0 ]; then echo "acceptance failed; preserving provider inventory before guarded cleanup" >&2; capture_provider_inventory failure || true; run_cleanup || true; fi; exit "$result"' EXIT
+    acquire_paid_lock
+    trap 'result=$?; trap - EXIT; if [ "$result" -ne 0 ]; then echo "acceptance failed; preserving provider inventory before guarded cleanup" >&2; capture_provider_inventory failure || true; run_cleanup || true; fi; release_paid_lock; exit "$result"' EXIT
     case "$command_name" in
       elastic) run_elastic ;;
+      elastic-qualify) run_elastic_qualify ;;
       serverless) run_serverless ;;
       elastic-faults) run_elastic_faults ;;
       serverless-faults) run_serverless_faults ;;
     esac
     trap - EXIT
+    release_paid_lock
     ;;
   qualify)
     # Refuse before installing the cleanup wrapper so a missing approval cannot
     # start even the local acceptance stack.
     require_paid_approval
-    trap 'result=$?; trap - EXIT; echo "qualification failed; preserving provider inventory before guarded cleanup" >&2; capture_provider_inventory failure || true; run_cleanup || true; exit "$result"' EXIT
+    acquire_paid_lock
+    trap 'result=$?; trap - EXIT; echo "qualification failed; preserving provider inventory before guarded cleanup" >&2; capture_provider_inventory failure || true; run_cleanup || true; release_paid_lock; exit "$result"' EXIT
     run_qualify
     trap - EXIT
     run_cleanup
+    release_paid_lock
     ;;
   cleanup) run_cleanup ;;
   report) run_report ;;

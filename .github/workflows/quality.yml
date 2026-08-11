@@ -60,6 +60,29 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  developer-environment:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+      - run: npm ci
+        working-directory: docs
+      - run: make dev-check-full
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: developer-check-${{ github.run_id }}
+          path: .infercrane/dev-check
+          if-no-files-found: error
+
   vulnerabilities:
     runs-on: ubuntu-latest
     steps:

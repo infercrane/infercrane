@@ -12,6 +12,18 @@ The resumable operator harness reduces the normal workflow to a few guarded comm
 ./scripts/release-acceptance.sh report
 ```
 
+For release sign-off, prefer the higher-level orchestrator:
+
+```bash
+make qualify-local
+make qualify-rc  # requires a clean commit and the configured paid-provider credentials
+```
+
+It separates elastic benchmark/autoscaling/Guard, serverless, and both disruption suites into
+independently resumable stages and writes
+`.infercrane/qualification/COMMIT/qualification.json`. A stage marker is accepted only for the
+same clean commit; a dirty worktree always reruns local stages.
+
 `preflight` is read-only. Paid workflows require the explicit approval flag, generate stable names
 and idempotency keys, and retain sanitized evidence under the ignored
 `.infercrane/acceptance/` directory. `cleanup` resumes those same run-owned deployments instead of
@@ -21,6 +33,11 @@ progress to the terminal while keeping machine-readable stdout in `NAME.log` and
 in `NAME-progress.log`; it also prints UTC start time, exit status, and elapsed seconds. The harness automates smoke coverage; the controlled disruption and timed
 provider observations below remain release gates and may not be inferred from a successful smoke
 run.
+
+Only one paid acceptance command may run from a checkout at a time. The harness stores its PID and
+run ID in `.infercrane/acceptance/.paid.lock`, rejects a concurrent paid mutation, and safely
+recovers a stale lock after its owner no longer exists. Prefer the narrow `elastic`, `serverless`,
+or fault stage while debugging; reserve `qualify` for a locally green frozen candidate.
 
 `qualify` is the guarded end-to-end path. It runs the elastic benchmark, verifies provider-backed
 scale-up and scale-down, records a deterministic Release Guard rejection without provisioning the

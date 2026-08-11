@@ -1,6 +1,6 @@
 GORELEASER_VERSION := v2.12.7
 
-.PHONY: build context context-check docs-dev docs-check test test-container test-stack test-failure test-store test-production-config verify audit deadcode release-check snapshot acceptance-local acceptance-preflight acceptance-cleanup dev-up dev-down
+.PHONY: build context context-check docs-dev docs-check test test-container test-stack test-failure test-store test-production-config test-provider-contracts test-acceptance-safety verify audit deadcode release-check snapshot acceptance-local acceptance-preflight acceptance-cleanup qualify-local qualify-rc dev-check dev-check-full dev-up dev-down
 
 build:
 	go build ./cmd/infercrane
@@ -33,6 +33,12 @@ test-failure:
 test-production-config:
 	./scripts/test-production-compose.sh
 
+test-provider-contracts:
+	go test -count=1 -run ProviderContract ./internal/provision
+
+test-acceptance-safety:
+	./scripts/test-acceptance-safety.sh
+
 test-store:
 	test -n "$$INFERCRANE_TEST_DATABASE_URL"
 	go test -race -count=1 -v ./internal/store
@@ -62,6 +68,18 @@ acceptance-preflight:
 
 acceptance-cleanup:
 	./scripts/release-acceptance.sh cleanup
+
+qualify-local:
+	./scripts/qualify-release.sh local
+
+qualify-rc:
+	./scripts/qualify-release.sh rc --approve-paid-resources
+
+dev-check:
+	./scripts/dev-check.sh quick
+
+dev-check-full:
+	./scripts/dev-check.sh full
 
 dev-up:
 	docker compose up --build -d
