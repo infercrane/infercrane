@@ -29,7 +29,7 @@ Use `←` and `→` to change views, or press `1`–`7` to jump directly. Naviga
 
 Press `Ctrl-K` or `:` to open the action palette. InferCrane only shows actions applicable to the selected deployment and persisted state.
 
-Direct v0.1 actions include:
+Direct guarded actions include:
 
 - cooperatively cancel an active durable operation
 - evaluate Release Guard for the current candidate
@@ -37,7 +37,10 @@ Direct v0.1 actions include:
 
 Every mutation shows its impact, requires a second confirmation, uses an idempotency key, and queues a durable control-plane operation. Release Guard evaluation explicitly warns that measured candidate traffic may incur provider cost. Closing the terminal never cancels queued work.
 
-Complex authoring remains a CLI handoff in v0.1. The palette copies exact commands for test requests, reproducible benchmarks, and semantic capacity plans. Candidate creation, rollback, rejection reasons, deletion plans, and administrative workflows remain explicit CLI/spec operations where inputs and diffs are easier to review.
+Complex authoring remains a CLI handoff. The palette copies exact commands for test requests,
+reproducible benchmarks, and semantic capacity plans. Candidate creation, rollback, rejection
+reasons, deletion plans, and administrative workflows remain explicit CLI/spec operations where
+inputs and diffs are easier to review.
 
 <Warning>
 Promotion is unavailable when an evaluation is missing, rejecting, or belongs to a previous candidate. InferCrane never treats historical acceptance as permission to promote a new revision.

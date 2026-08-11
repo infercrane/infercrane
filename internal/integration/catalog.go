@@ -194,3 +194,7 @@ func V09Catalog() (*Registry, error) {
 	}
 	return registry, nil
 }
+
+// V1Catalog is the public v1 integration catalog. V09Catalog remains available
+// so historical release evidence can continue to reproduce its exact input.
+func V1Catalog() (*Registry, error) { return V09Catalog() }

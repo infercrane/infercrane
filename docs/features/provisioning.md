@@ -13,8 +13,7 @@ Status: Existing targets implemented; SkyPilot experimental
 
 ## Contract
 
-The v0.1 support matrix and the backend registry are deliberately separate. The matrix qualifies
-vLLM with RunPod for public use. At process composition, an elastic backend binds a stable adapter
+The support matrix and backend registry are deliberately separate. At process composition, an elastic backend binds a stable adapter
 name, cloud, runtime, and provider implementation; durable workflows select it without provider
 conditionals. Serverless and direct-target reconciliation follow the same pattern. Registering an
 adapter does not make it supported until its configuration, documentation, and real lifecycle
@@ -52,7 +51,7 @@ while the provider retains the resource, but operation progress exposes the conc
 an explicit cancel-before-replacement instruction. InferCrane does not create a second resource or
 silently select different hardware in response to these diagnostics.
 
-The v0.1 RunPod advisor queries secure-cloud GPU stock without creating a Pod. A region-qualified
+The RunPod advisor queries secure-cloud GPU stock without creating a Pod. A region-qualified
 request is clearly labeled as using a global signal because the provider response cannot prove
 availability in one requested region. Credentials are sent in an authorization header and are never
 written to URLs, checkpoints, or durable events.

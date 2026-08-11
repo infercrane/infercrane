@@ -7,10 +7,10 @@ after environment evidence exists.
 ## Priority 0 — trustworthy mutation and identity
 
 1. **Durable execution:** PostgreSQL leases, heartbeats, crash recovery, bounded retry, cancellation,
-   and idempotency are implemented for asynchronous existing-target apply. Cloud provisioning and
-   deletion still need leased handlers.
+   and idempotency cover existing targets, provisioned replicas, revisions, scaling, Serverless, and
+   deletion. Real multi-provider disruption evidence remains required.
 2. **Scoped identity:** hashed credentials, rotation/revocation, tenant context, RBAC enforcement,
-   and audit attribution are implemented. Distributed request-rate quota enforcement remains.
+   audit attribution, and distributed hard request-rate leases are implemented.
 3. **Control-plane API:** operation read/cancel, asynchronous apply, targets, deployments, orphans,
    audit events, quotas, and principals are implemented. Optimistic concurrency and remaining
    provider/scaling resources remain.
@@ -30,7 +30,7 @@ after environment evidence exists.
 - Production SkyPilot RunPod fleet scaling with distributed control-plane ownership.
 - Drain, warm-up, rollback, capacity exhaustion, and scale-to-zero policies.
 - Live capacity inventory, model cache management, and timestamped provider prices.
-- Further runtime and cloud adapters are post-v0.1 work.
+- Every additional provider/runtime combination requires contract plus real-environment evidence.
 
 ## Release blockers
 

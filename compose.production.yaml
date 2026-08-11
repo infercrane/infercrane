@@ -18,22 +18,21 @@ services:
     networks: [control]
 
   infercrane:
-    image: ${INFERCRANE_IMAGE:-ghcr.io/infercrane/infercrane:v0.1.0-rc.1}
+    image: ${INFERCRANE_IMAGE:-ghcr.io/infercrane/infercrane:v1.0.0-rc.1}
     restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     environment:
       INFERCRANE_ENV: production
       INFERCRANE_API_KEY: ${INFERCRANE_API_KEY:?set INFERCRANE_API_KEY}
       INFERCRANE_DATABASE_URL: postgres://infercrane:${INFERCRANE_POSTGRES_PASSWORD:?set INFERCRANE_POSTGRES_PASSWORD}@postgres:5432/infercrane?sslmode=disable
       INFERCRANE_URL: ${INFERCRANE_URL:?set INFERCRANE_URL}
       INFERCRANE_INSTANCE_ID: ${INFERCRANE_INSTANCE_ID:-compose-1}
-      INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID: ${INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID:-}
-      RUNPOD_API_KEY_FILE: /run/secrets/runpod-api-key
     ports:
       - "${INFERCRANE_PORT:-8080}:8080"
-    volumes:
-      - ${RUNPOD_KEY_FILE:?set RUNPOD_KEY_FILE}:/run/secrets/runpod-api-key:ro
-      - skypilot-state:/home/app/.sky
-      - runpod-state:/home/app/.runpod
     depends_on:
       postgres:
         condition: service_healthy
@@ -50,5 +49,3 @@ networks:
 
 volumes:
   postgres-data:
-  runpod-state:
-  skypilot-state:

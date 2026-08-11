@@ -1,9 +1,9 @@
 # Compatibility and qualification policy
 
-InferCrane follows semantic versioning after `1.0`. Before `1.0`, release notes identify breaking
-CLI, configuration, schema, and API changes. PostgreSQL migrations are forward-only and must be
-backed up before rollout. Mixed-version operation is unsupported unless a release explicitly says
-otherwise.
+InferCrane follows semantic versioning after `1.0`. The complete API, DeploymentSpec, database,
+integration-contract, deprecation, mixed-version, and support-window rules are in
+[Upgrade and compatibility](/upgrade). PostgreSQL migrations are forward-only and must be backed up
+before rollout. Mixed-version operation is unsupported unless a release explicitly says otherwise.
 
 ## Compatibility dimensions
 

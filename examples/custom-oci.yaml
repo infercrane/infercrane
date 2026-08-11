@@ -1,3 +1,5 @@
+apiVersion: infercrane.dev/v1
+kind: Deployment
 name: custom-prod
 model:
   id: Qwen/Qwen3-8B

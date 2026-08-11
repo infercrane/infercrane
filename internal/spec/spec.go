@@ -11,8 +11,10 @@ import (
 )
 
 type Deployment struct {
-	Name  string `yaml:"name"`
-	Model struct {
+	APIVersion string `yaml:"apiVersion,omitempty"`
+	Kind       string `yaml:"kind,omitempty"`
+	Name       string `yaml:"name"`
+	Model      struct {
 		ID       string `yaml:"id"`
 		Revision string `yaml:"revision"`
 	} `yaml:"model"`
@@ -52,6 +54,15 @@ func Load(path string) (Deployment, error) {
 	if err = decoder.Decode(&out); err != nil {
 		return out, fmt.Errorf("parse deployment file: %w", err)
 	}
+	if out.APIVersion == "" {
+		out.APIVersion = "infercrane.dev/v1"
+	}
+	if out.Kind == "" {
+		out.Kind = "Deployment"
+	}
+	if out.APIVersion != "infercrane.dev/v1" || out.Kind != "Deployment" {
+		return out, fmt.Errorf("DeploymentSpec must use apiVersion infercrane.dev/v1 and kind Deployment")
+	}
 	if out.Runtime.Engine == "" {
 		out.Runtime.Engine = "vllm"
 	}
@@ -74,7 +85,7 @@ func Load(path string) (Deployment, error) {
 	if out.Name == "" || out.Model.ID == "" || out.Resources.GPU == "" || out.Provider.Cloud == "" {
 		return out, fmt.Errorf("name, model.id, resources.gpu, and provider.cloud are required")
 	}
-	if err := support.V09().Validate(out.Runtime.Engine, out.Provider.Cloud, out.Compute.Mode); err != nil {
+	if err := support.V1().Validate(out.Runtime.Engine, out.Provider.Cloud, out.Compute.Mode); err != nil {
 		return out, fmt.Errorf("support policy: %w", err)
 	}
 	if out.Provider.Cloud == "aws" && out.Provider.Region == "" {

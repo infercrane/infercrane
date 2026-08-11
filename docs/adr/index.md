@@ -29,6 +29,7 @@ or link corrections. A changed decision gets a new ADR whose status supersedes t
 | [0017](/adr/0017-deterministic-inference-decisions) | Accepted | Persist evidence-based recommendations, SLO policy, and bounded overflow decisions. |
 | [0018](/adr/0018-signed-release-evidence) | Accepted | Use explicit validation, durable rollback monitors, and canonical signed release evidence. |
 | [0019](/adr/0019-kubernetes-integration-boundaries) | Accepted | Integrate Kubernetes without duplicating cluster, serving, or routing controllers. |
+| [0020](/adr/0020-provider-neutral-production-artifact) | Accepted | Keep the base production artifact provider-neutral and make client boundaries executable. |
 
 Use the next sequential number. Include context, decision, consequences, alternatives, and
 verification. Link affected feature documents.

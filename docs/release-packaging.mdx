@@ -1,0 +1,35 @@
+---
+title: Release packaging
+description: Build and verify release archives, checksums, SPDX SBOMs, Homebrew formulae, and container provenance without publishing.
+---
+
+# Release packaging
+
+Release construction is local and non-publishing by default. The candidate gate produces four
+archives, SHA-256 checksums, one SPDX SBOM per archive, a generated Homebrew formula, and a native CLI
+install smoke test.
+
+```bash
+make candidate-artifacts RELEASE_CANDIDATE_TAG=v1.0.0-rc.1
+```
+
+This command uses `GORELEASER_CURRENT_TAG` only to construct the intended pre-tag candidate version.
+It skips announce and publish pipes. It does not create a Git tag, GitHub release, package, or image.
+
+Verify an existing artifact directory independently:
+
+```bash
+./scripts/verify-release-artifacts.sh dist v1.0.0-rc.1
+```
+
+The verifier checks the exact four-platform matrix, archive contents, checksums, SPDX documents,
+native `version`, completion generation, and help output. `syft` is required.
+
+The source Homebrew file is a strict template. Candidate construction resolves it from the archive
+checksums into `dist/homebrew/infercrane.rb`. Publish that generated formula to the Homebrew tap only
+after the matching immutable GitHub assets exist.
+
+The tag-triggered GitHub workflow creates a draft prerelease, multi-architecture container image,
+BuildKit SBOM/provenance attestations, immutable image digest artifact, and critical-severity scans.
+Those external outputs cannot be claimed from local construction and remain pending until the tag is
+explicitly pushed.

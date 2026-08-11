@@ -36,29 +36,19 @@ while workers are replaced, recovered, or reconfigured.
 
 ## Project status
 
-InferCrane is under active development. Its lifecycle, persistence, routing, and policy layers are
-provider-neutral. Integrations are registered adapters and public availability is controlled by an
-explicit qualification matrix. The core gateway, PostgreSQL control plane, existing-worker
-workflow, reconciliation, router supervision, and durable bounded autoscaling are implemented and
-tested locally. v0.3 adds a narrowly qualified AWS EC2 BYOC adapter and governed external fallback.
-The v0.4 release candidate adds one executable OpenAPI contract, generated Python and TypeScript
-clients, a Terraform provider for logical deployments, and deterministic GitHub delivery checks.
-The v0.5 candidate adds a responsive embedded operations dashboard over the same authenticated API;
-it does not introduce a hosted account service or duplicate control backend.
-The v0.6 candidate adds immutable custom OCI workload declarations and a digest-pinned SGLang
-profile through the same runtime contract. Their AWS EC2 combinations are simulated-qualified;
-real GPU behavior remains deferred.
-The v0.7 candidate adds deterministic SLO recommendations, expiring capacity evidence, and
-privacy/budget-governed health or queue overflow. Recommendations are advisory and never fabricate
-pricing, availability, or measurements.
-The v0.8 candidate adds explicit bounded AIPerf validation, durable post-promotion automatic
-rollback, and Ed25519-signed Inference Passports. It never silently mirrors user traffic or claims
-that signed evidence is a compliance certificate.
-The v0.9 candidate adds a namespaced Kubernetes adapter with strict server-side ownership, optional
-standard KServe resources, and an optional Gateway API route to the InferCrane logical endpoint. Its
-Kind lifecycle is qualified locally; real Kubernetes GPU compatibility remains deferred.
-Registration is not real-provider proof: paid acceptance and soak testing remain explicitly
-incomplete until their evidence gates run.
+InferCrane is preparing its v1.0 release candidate. Its lifecycle, persistence, routing, and policy
+layers are provider-neutral; adapters declare versioned capabilities and independent qualification
+evidence. The candidate includes durable lifecycle/autoscaling, governed external fallback, AWS EC2
+BYOC, RunPod elastic and native Serverless, namespaced Kubernetes/KServe, vLLM, SGLang, immutable
+custom OCI workloads, generated SDKs, Terraform, GitHub delivery checks, a terminal workspace, an
+embedded evidence dashboard, Release Guard V2, deterministic recommendations, and signed Inference
+Passports.
+
+Local race, PostgreSQL, fault-injection, Docker, Kind, package, migration, security, and
+documentation qualification is automated. Registration is not real-provider proof: RunPod, AWS,
+and Kubernetes GPU acceptance remains explicitly deferred until the single consolidated workflow
+runs against the frozen `v1.0.0-rc.1` commit. No public performance, pricing, or universal
+provider/runtime claim is made from simulated evidence.
 
 See the authoritative [capability status](docs/project-status.md) before relying on a feature.
 The [product vision and roadmap](docs/product-vision.md) defines the developer experience and the
@@ -262,11 +252,12 @@ Production requires:
 - Real vLLM workers and the pinned real vLLM Router.
 - Load, cancellation, worker-loss, database-failover, rolling-upgrade, and soak qualification.
 
-The production image includes InferCrane and the pinned upstream vLLM Router. Development fakes
-exist only in the Docker `development` target under `internal/testtools`.
+The provider-neutral production image includes InferCrane, the pinned upstream vLLM Router, and the
+explicit provider client boundaries used by registered adapters. Provider configuration is supplied
+through separate Compose overlays. Development fakes exist only in the Docker `development` target
+under `internal/testtools`.
 
-See [production operations](docs/production.md) and the
-[RunPod provider setup](docs/provider-setup.md).
+See [production operations](docs/production.md) and [provider setup](docs/provider-setup.md).
 
 ## Development
 

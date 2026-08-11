@@ -1,0 +1,92 @@
+---
+title: Upgrade and compatibility
+description: Version guarantees, database migration safety, rolling-upgrade boundaries, and rollback policy.
+---
+
+# Upgrade and compatibility
+
+InferCrane v1 separates four compatibility surfaces: the control API, DeploymentSpec, integration
+contracts, and PostgreSQL schema. A passing runtime or provider conformance test does not override
+the policy for another surface.
+
+## Before upgrading
+
+1. Read the release notes and compatibility matrix.
+2. Back up PostgreSQL and verify the dump with `pg_restore --list`.
+3. Run `infercrane plan` for representative DeploymentSpecs with the new CLI.
+4. Run local qualification against the exact candidate commit.
+5. Verify provider credentials and inventory with `infercrane doctor` and `infercrane orphans`.
+6. Upgrade the control plane before upgrading generated SDKs or automation clients.
+
+```bash
+scripts/backup-postgres.sh /secure/path/infercrane-before-v1.dump
+make qualify-local
+```
+
+## PostgreSQL migration contract
+
+Migrations are embedded, ordered, forward-only, and transactionally applied under a PostgreSQL
+advisory lock. The migration ledger stores a SHA-256 checksum for every migration. Startup fails if:
+
+- a previously applied migration was edited;
+- the ledger has a gap;
+- the database contains a migration unknown to the running binary; or
+- a migration cannot commit atomically.
+
+The first v1 startup backfills checksums for a pre-v1 ledger after matching every known migration
+name. This is a trust-on-first-v1-upgrade bootstrap: a legacy ledger did not retain enough
+information to prove the bytes originally executed. Back up and inspect that database before the
+first v1 startup. Every subsequent startup verifies the persisted checksum. Automated qualification
+upgrades every historical migration prefix to the current schema.
+
+Do not delete ledger rows, edit released SQL files, or start an older binary after a newer migration
+has run. Restore the pre-upgrade backup if application rollback requires schema rollback.
+
+## DeploymentSpec
+
+The current file contract is:
+
+```yaml
+apiVersion: infercrane.dev/v1
+kind: Deployment
+```
+
+Pre-v1 files without these two fields are read as v1 for compatibility. New files should include
+them. Unknown fields, versions, and kinds fail closed. Additive optional v1 fields are compatible;
+removing or changing a v1 field requires a future versioned conversion path.
+
+## Control API and SDKs
+
+`/api/v1` is the stable v1 namespace. Within v1:
+
+- new optional response fields are additive;
+- clients must ignore response fields they do not understand;
+- existing field meaning and error codes do not change silently;
+- removal requires deprecation in release notes for at least two minor releases;
+- generated SDK major versions track the API major version.
+
+CLI human output is not a parsing contract. Automation must use `--output json`, the generated SDKs,
+or Terraform.
+
+## Provider and runtime contracts
+
+Provider Contract `infercrane.provider/v1` and Runtime Contract `infercrane.runtime/v1` are versioned
+separately from the product. Registration exposes an adapter to composition; only the capability and
+qualification inventory establishes evidence for an exact runtime/provider/mode combination.
+
+```bash
+infercrane integrations --output json
+```
+
+## Rolling upgrades
+
+v1.0 supports a controlled stop/start upgrade and multiple identical-version control-plane replicas.
+Mixed InferCrane versions are not qualified for v1.0. Drain or stop old replicas, run one new replica
+to migrate, verify readiness, then start the remaining new replicas. A later release may qualify an
+adjacent-version rolling window explicitly.
+
+## Support window
+
+Before a stable v1.0 release, RCs receive best-effort migration fixes and may still change with
+release notes. After v1.0, security fixes target the latest minor and the immediately preceding minor;
+provider/runtime compatibility remains scoped to the published matrix and immutable evidence.

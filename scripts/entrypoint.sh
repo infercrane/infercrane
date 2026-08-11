@@ -3,7 +3,11 @@ set -eu
 
 runpod_key=${RUNPOD_API_KEY:-}
 if [ -z "$runpod_key" ] && [ -n "${RUNPOD_API_KEY_FILE:-}" ]; then
-  runpod_key=$(cat "$RUNPOD_API_KEY_FILE")
+  [ -r "$RUNPOD_API_KEY_FILE" ] || {
+    echo "RUNPOD_API_KEY_FILE is not readable: $RUNPOD_API_KEY_FILE" >&2
+    exit 1
+  }
+  runpod_key=$(tr -d '\r\n' <"$RUNPOD_API_KEY_FILE")
 fi
 if [ -n "$runpod_key" ]; then
   umask 077
@@ -16,6 +20,20 @@ unset runpod_key
 if [ "${1:-}" != "infercrane" ] || [ "${2:-}" != "serve" ]; then
   exec "$@"
 fi
+
+skypilot_mode=${INFERCRANE_SKYPILOT_API:-auto}
+case "$skypilot_mode" in
+  auto) [ -n "${RUNPOD_API_KEY:-}" ] || exec "$@" ;;
+  enabled) [ -n "${RUNPOD_API_KEY:-}" ] || {
+    echo "INFERCRANE_SKYPILOT_API=enabled requires a RunPod API key" >&2
+    exit 1
+  } ;;
+  disabled) exec "$@" ;;
+  *)
+    echo "INFERCRANE_SKYPILOT_API must be auto, enabled, or disabled" >&2
+    exit 1
+    ;;
+esac
 
 sky api start --host 127.0.0.1 --foreground &
 sky_pid=$!

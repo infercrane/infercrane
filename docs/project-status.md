@@ -17,9 +17,10 @@ but lacks production qualification; **planned** is not a product capability.
 | OpenAPI and generated SDKs | Experimental | Full route coverage, deterministic Python/TypeScript low-level generation, typed durable helpers, and hermetic SSE tests are implemented; public package publication is deferred. |
 | Terraform provider | Experimental | Logical deployment CRUD, import, guarded update, and interrupted-apply adoption pass real Terraform protocol fixtures; Registry publication is deferred. |
 | GitHub delivery action | Experimental | Read-only semantic PR plans, explicit protected apply, exact-revision plus verified-passport checks, bounded summaries, and secret redaction are implemented; Marketplace publication is deferred. |
-| Production configuration gates | Implemented | Production mode enforces strong API secrets and PostgreSQL TLS. |
+| Production configuration gates | Implemented | Production mode enforces strong API secrets and PostgreSQL TLS; the base Compose stack is provider-neutral and RunPod, AWS, and Kubernetes use explicit overlays. |
 | Safe deletion and orphan discovery | Implemented | Side-effect-free deletion plans, explicit confirmation, and provisioned-resource inventory. |
-| PostgreSQL control-plane state | Implemented | Transactional embedded migrations and bounded pool. |
+| PostgreSQL control-plane state | Implemented | Transactional advisory-locked migrations, checksum/gap/newer-binary rejection, every-prefix upgrade coverage, concurrent-start serialization, and bounded pool. |
+| Release packaging | Implemented | Exact-version darwin/linux amd64/arm64 archives, checksums, SPDX SBOMs, native smoke verification, and generated Homebrew formula run locally without publication. |
 | Existing vLLM target registration | Implemented | Persistent, idempotent registration. |
 | Logical deployments and aliases | Implemented | One common upstream model per deployment. |
 | OpenAI-compatible chat proxy | Implemented | Streaming, auth, alias rewrite, request accounting. |
@@ -45,6 +46,7 @@ but lacks production qualification; **planned** is not a product capability.
 | Provider capacity preflight | Experimental | Optional provider advisors persist available/constrained/unavailable/unknown evidence; RunPod secure-GPU stock is the first read-only implementation. |
 | Inference decisions and SLO policy | Experimental | Versioned deterministic recommendations persist canonical benchmark provenance, exact compatibility, missing signals and sourced cost constraints; autonomous apply is excluded. |
 | Scoped tenant identity and RBAC | Experimental | Role-bounded service-account scopes, hashed rotation/revocation credentials, audit attribution, and adversarial tenant isolation are wired. |
+| Distributed request-rate quotas | Implemented | PostgreSQL reserves aggregate UTC-minute leases; gateways authorize from memory and fail closed without adding database reads to the inference path. |
 | Reference-only secrets | Experimental | Environment references persist without values; additional production secret-manager resolvers remain planned. |
 | Governed external capacity | Experimental | Explicit health/queue overflow, hysteresis, cooldown, privacy acknowledgement, atomic request/cost reservations, OpenRouter, and no-replay streaming behavior are hermetically qualified; real billing evidence is deferred. |
 | AWS EC2 BYOC | Experimental | Private-network, role-assumed, tag-owned, immutable-image elastic lifecycle passes Provider Contract V1 hermetically; real AWS evidence is deferred. |

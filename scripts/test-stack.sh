@@ -74,6 +74,8 @@ printf '%s' "$structured_response" | jq -e '.choices[0].message.content | fromjs
 
 docker compose exec -T infercrane infercrane plan Qwen/Qwen3-8B --targets gpu-a,gpu-b --output json >/dev/null
 docker compose exec -T infercrane infercrane doctor
+docker compose exec -T infercrane aws --version
+docker compose exec -T infercrane kubectl version --client=true
 
 # Existing-target fixtures have no immutable Hugging Face artifact and are not
 # presented as reproducible performance benchmarks. Exercise concurrent logical

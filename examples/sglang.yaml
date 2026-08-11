@@ -1,3 +1,5 @@
+apiVersion: infercrane.dev/v1
+kind: Deployment
 name: qwen-sglang
 model:
   id: Qwen/Qwen3-8B

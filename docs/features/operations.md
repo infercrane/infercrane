@@ -104,4 +104,8 @@ competing requests receive a conflict and can retry after the active transition 
 Scoped credentials are stored as hashes, can be rotated or revoked, and carry viewer, operator, or
 admin role. Replicas refresh an in-memory credential snapshot every second, so authentication never
 reads PostgreSQL on the inference request path. API resources and inference aliases are tenant-qualified. Admin audit queries support a
-bounded RFC3339 `before` cursor. Request-rate quota enforcement is not yet distributed.
+bounded RFC3339 `before` cursor. Request-rate quotas use PostgreSQL-reserved minute-window leases
+consumed from memory by each gateway, so the aggregate hard limit is distributed without adding a
+database lookup to the inference path. Policy refresh and small-lease prefetch can cause conservative
+429 responses during startup, policy changes, or database unavailability; authorization never
+exceeds the durably reserved window.

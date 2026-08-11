@@ -1,26 +1,27 @@
 class Infercrane < Formula
   desc "Production inference without the platform engineering"
   homepage "https://github.com/infercrane/infercrane"
-  version "0.1.0-rc.1"
+  # Generated release formulae replace every RELEASE_* token from checksums.txt.
+  version "RELEASE_VERSION"
   license "Apache-2.0"
 
   on_macos do
     if Hardware::CPU.arm?
-      url "https://github.com/infercrane/infercrane/releases/download/v0.1.0-rc.1/infercrane_0.1.0-rc.1_darwin_arm64.tar.gz"
-      sha256 "REPLACE_WITH_RELEASE_CHECKSUM"
+      url "RELEASE_BASE_URL/infercrane_RELEASE_VERSION_darwin_arm64.tar.gz"
+      sha256 "RELEASE_DARWIN_ARM64_SHA256"
     else
-      url "https://github.com/infercrane/infercrane/releases/download/v0.1.0-rc.1/infercrane_0.1.0-rc.1_darwin_amd64.tar.gz"
-      sha256 "REPLACE_WITH_RELEASE_CHECKSUM"
+      url "RELEASE_BASE_URL/infercrane_RELEASE_VERSION_darwin_amd64.tar.gz"
+      sha256 "RELEASE_DARWIN_AMD64_SHA256"
     end
   end
 
   on_linux do
     if Hardware::CPU.arm?
-      url "https://github.com/infercrane/infercrane/releases/download/v0.1.0-rc.1/infercrane_0.1.0-rc.1_linux_arm64.tar.gz"
-      sha256 "REPLACE_WITH_RELEASE_CHECKSUM"
+      url "RELEASE_BASE_URL/infercrane_RELEASE_VERSION_linux_arm64.tar.gz"
+      sha256 "RELEASE_LINUX_ARM64_SHA256"
     else
-      url "https://github.com/infercrane/infercrane/releases/download/v0.1.0-rc.1/infercrane_0.1.0-rc.1_linux_amd64.tar.gz"
-      sha256 "REPLACE_WITH_RELEASE_CHECKSUM"
+      url "RELEASE_BASE_URL/infercrane_RELEASE_VERSION_linux_amd64.tar.gz"
+      sha256 "RELEASE_LINUX_AMD64_SHA256"
     end
   end
 

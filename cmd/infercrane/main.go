@@ -44,6 +44,7 @@ import (
 	"github.com/infercrane/infercrane/internal/planning"
 	"github.com/infercrane/infercrane/internal/provision"
 	"github.com/infercrane/infercrane/internal/reconcile"
+	"github.com/infercrane/infercrane/internal/requestquota"
 	"github.com/infercrane/infercrane/internal/router"
 	"github.com/infercrane/infercrane/internal/routes"
 	runtimeadapter "github.com/infercrane/infercrane/internal/runtime"
@@ -55,7 +56,7 @@ import (
 	"github.com/infercrane/infercrane/internal/workflows"
 )
 
-var version = "0.9.0-rc.1"
+var version = "1.0.0-rc.1"
 
 func loadPassportSigningKey(path string) (ed25519.PrivateKey, error) {
 	if path == "" {
@@ -2732,7 +2733,7 @@ func formatGuardEvidence(metrics domain.RevisionMetrics) string {
 func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	integrationRegistry, err := integration.V09Catalog()
+	integrationRegistry, err := integration.V1Catalog()
 	if err != nil {
 		return fmt.Errorf("configure integration contracts: %w", err)
 	}
@@ -2777,6 +2778,15 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		return fmt.Errorf("load credential snapshot: %w", err)
 	}
 	go func() { _ = credentialCache.Run(ctx) }()
+	requestQuotas := requestquota.New(s)
+	if err := requestQuotas.Refresh(ctx); err != nil {
+		return fmt.Errorf("load request quota leases: %w", err)
+	}
+	go func() {
+		if err := requestQuotas.Run(ctx); err != nil && ctx.Err() == nil {
+			logger.Error("request quota lease worker stopped", "error", err)
+		}
+	}()
 	diagnostics := func(checkCtx context.Context, cloud, checkServerless, checkAWS, checkKubernetes bool) doctor.Report {
 		report := doctor.Run(checkCtx, cfg, doctor.Dependencies{})
 		if cloud {
@@ -2895,7 +2905,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		operationTelemetry.WritePrometheus(w)
 		recorder.WritePrometheus(w)
 	}}
-	server := &http.Server{Addr: fmt.Sprintf("%s:%d", cfg.Host, cfg.Port), Handler: (&gateway.Gateway{Routes: directory, APIKey: cfg.APIKey, Authenticator: credentialCache, Recorder: recorder, Logger: logger, Client: client, Ready: s.Ping, Control: control, Dashboard: dashboard.Handler(), Telemetry: gatewayTelemetry, CapacityObservers: map[string]gateway.CapacityObserver{"runpod": serverless.ActiveWorkers}, ExternalAuthorizer: externalBudgets}).Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 1 << 20}
+	server := &http.Server{Addr: fmt.Sprintf("%s:%d", cfg.Host, cfg.Port), Handler: (&gateway.Gateway{Routes: directory, APIKey: cfg.APIKey, Authenticator: credentialCache, Recorder: recorder, Logger: logger, Client: client, Ready: s.Ping, Control: control, Dashboard: dashboard.Handler(), Telemetry: gatewayTelemetry, CapacityObservers: map[string]gateway.CapacityObserver{"runpod": serverless.ActiveWorkers}, ExternalAuthorizer: externalBudgets, RequestAuthorizer: requestQuotas}).Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 1 << 20}
 	go func() {
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)

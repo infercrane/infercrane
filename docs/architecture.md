@@ -13,12 +13,14 @@ The gateway owns the stable OpenAI-compatible endpoint. It resolves a logical mo
 rewrites it to the upstream served model name, and forwards the request to a deployment-local
 router. It does not select workers.
 
-The router owns per-request worker selection. Stage 1 integrates the upstream Apache-2.0
+The router owns per-request worker selection. InferCrane integrates the upstream Apache-2.0
 vLLM Router as a supervised external process. InferCrane does not embed or fork its routing
 algorithms. A router generation is reconstructible from persisted desired state.
 
-Provisioners are adapters. Stage 1 implements existing targets. Stage 2 adds SkyPilot.
-Additional schedulers and runtime platforms are outside the v0.1 architecture.
+Provisioners and runtimes are versioned adapters. Existing targets, RunPod elastic/Serverless, AWS
+EC2 BYOC, and namespaced Kubernetes are registered without provider switches in the lifecycle core.
+vLLM, SGLang, and immutable custom OCI workloads share Runtime Contract V1. Registration and real
+qualification remain separate.
 
 The product is a single Go binary. Package boundaries keep the gateway data plane independent
 of PostgreSQL reads, and provider/runtime/router integrations sit behind small interfaces. The

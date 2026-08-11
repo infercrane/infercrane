@@ -11,7 +11,7 @@ Backends implement one lifecycle contract for endpoint creation, observation, de
 health, and an OpenAI-compatible endpoint URL. InferCrane does not contain a GPU scheduler or a
 provider switch in its durable serverless workflow.
 
-## RunPod implementation in v0.1
+## RunPod implementation
 
 RunPod Serverless is the first qualified backend. Create or select a template using RunPod's maintained vLLM worker. The template
 must set:
@@ -47,7 +47,7 @@ infercrane plan Qwen/Qwen3-8B --compute serverless --cloud runpod --gpu L40S --m
 infercrane deploy Qwen/Qwen3-8B --compute serverless --cloud runpod --gpu L40S --max 4 --wait
 ```
 
-Serverless deployments always use zero minimum workers in v0.1. The logical InferCrane endpoint
+Serverless deployments always use zero minimum workers. The logical InferCrane endpoint
 remains stable while the provider scales workers from zero on the first request, back to zero after its
 idle timeout, and from zero again on later requests. InferCrane does not poll the inference URL for
 health because doing so would create or retain warm workers.
@@ -70,8 +70,8 @@ matches or immutable-spec mismatches fail visibly instead of creating another bi
 ## Current limitations
 
 - The first backend supports one configured immutable vLLM template per control-plane process.
-- Real RunPod cold/warm, streaming, cancellation, scale-to-zero, and billing acceptance is still
-  required before the v0.1 release candidate is declared ready.
+- RunPod is the only registered native Serverless backend in the v1 RC. Real cold/warm, streaming,
+  cancellation, scale-to-zero, and billing acceptance remains a final manual gate.
 - InferCrane records request timing and token metadata but does not record prompts or generated
   content by default.
 

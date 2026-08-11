@@ -38,7 +38,7 @@ advertised publicly. Qualification requires configuration, documentation, compat
 failure testing, real infrastructure acceptance, and zero leaked billable resources.
 
 <Note>
-v0.9 registers RunPod elastic/serverless, narrow AWS EC2 and Kubernetes elastic adapters, vLLM, SGLang, custom OCI,
+The v1 RC registers RunPod elastic/serverless, narrow AWS EC2 and Kubernetes elastic adapters, vLLM, SGLang, custom OCI,
 and governed external targets. The compatibility matrix qualifies only exact combinations; registration
 never implies real-cloud evidence.
 </Note>

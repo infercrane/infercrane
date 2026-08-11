@@ -1,5 +1,15 @@
 # DeploymentSpec
 
+New files declare the stable v1 file contract:
+
+```yaml
+apiVersion: infercrane.dev/v1
+kind: Deployment
+```
+
+Pre-v1 files without the header are interpreted as v1. Unknown versions, kinds, and fields fail
+closed. See [Upgrade and compatibility](/upgrade) for the change policy.
+
 The primary path uses defaults:
 
 ```console

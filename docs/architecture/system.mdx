@@ -75,7 +75,10 @@ implementations with provider conditionals; [qualification is separate from regi
 
 ## Data plane
 
-An OpenAI-compatible request resolves the logical model alias from an atomic route snapshot. For the v0.1 runtime, it then passes to an instance-owned vLLM Router generation and a healthy vLLM worker. No PostgreSQL lookup occurs in that routing decision.
+An OpenAI-compatible request resolves the logical model alias from an atomic route snapshot. For
+standalone replica runtimes, it then passes to an instance-owned vLLM Router generation and a
+healthy worker. Provider-native Serverless and governed external targets remain explicit route
+types. No PostgreSQL lookup occurs in that routing decision.
 
 Each horizontally scaled gateway process owns its loopback router processes and deterministic ports. Gateway instances share PostgreSQL state, never another instance's local router.
 

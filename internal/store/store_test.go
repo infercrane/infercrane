@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -326,6 +327,41 @@ func TestTenantQuotaRejectsDeploymentBeyondReplicaLimit(t *testing.T) {
 	_, err := s.ApplyDeployment(ctx, domain.Deployment{Name: "too-large", Model: "model"}, []string{"a", "b"})
 	if !errors.Is(err, ErrConflict) {
 		t.Fatalf("error=%v, want quota conflict", err)
+	}
+}
+
+func TestRequestQuotaReservationsAreDistributedAndWindowed(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	if err := s.SetTenantQuota(ctx, "global", 10, 10, 25); err != nil {
+		t.Fatal(err)
+	}
+	window := time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)
+	const contenders = 20
+	grants := make([]int, contenders)
+	errs := make([]error, contenders)
+	var group sync.WaitGroup
+	group.Add(contenders)
+	for i := range contenders {
+		go func(index int) {
+			defer group.Done()
+			grants[index], errs[index] = s.ReserveRequestQuota(ctx, "global", window, 7)
+		}(i)
+	}
+	group.Wait()
+	total := 0
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("reservation %d: %v", i, err)
+		}
+		total += grants[i]
+	}
+	if total != 25 {
+		t.Fatalf("distributed grants=%d want hard limit 25", total)
+	}
+	next, err := s.ReserveRequestQuota(ctx, "global", window.Add(time.Minute), 7)
+	if err != nil || next != 7 {
+		t.Fatalf("next window grant=%d err=%v", next, err)
 	}
 }
 

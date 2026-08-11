@@ -1,27 +1,47 @@
-# v0.1 release checklist
+# v1.0 release-candidate checklist
 
-Do not create the release tag until every evidence field is linked to a durable log or artifact.
-Use the [release acceptance record](release-acceptance.md) for the requirement-by-requirement manual
-run. It is intentionally left pending until real evidence is attached.
+An RC tag proves the automated implementation gates only. Real provider evidence is gathered once,
+after `v1.0.0-rc.1`, before any stable tag or public release. Never convert a deferred row to passed
+without its durable log and direct inventory evidence.
 
-- [ ] `make verify`, `make deadcode`, `make audit`, `make test-container`, and
-      `make test-production-config` pass from a clean checkout.
-- [ ] `make release-check` passes; `make snapshot` produces all four archives, checksums, and
-      archive SBOMs with `syft` installed.
-- [ ] Gate 0 elastic RunPod lifecycle acceptance passes, including restart/disconnect/failure recovery.
-- [ ] Serverless zero-to-worker, warm, scale-to-zero, second cold start, streaming, cancellation, and deletion pass.
-- [ ] Provider inventory proves zero leaked billable resources after each demo.
-- [ ] AIPerf benchmark result and exact reproduction configuration are persisted and attached.
-- [ ] Cold-start explanation is backed by provider worker evidence; unavailable substages remain explicit.
-- [ ] Release Guard rejects the bad candidate and persisted explanation reproduces the decision.
-- [ ] Clean-machine `brew install infercrane` acceptance passes with the final formula checksums.
-- [ ] All four archives, SHA-256 checksums, archive SBOMs, and multi-architecture image are present.
-- [ ] The uploaded `image-digest-TAG` artifact identifies the exact multi-architecture image; its
-      registry manifest carries BuildKit SBOM and maximum-mode provenance attestations.
-- [ ] Image and archive vulnerability scans are reviewed.
-- [ ] Documentation links, security reporting, examples, issue templates, and a 60-second-or-shorter demo are checked.
-- [ ] Release notes list measured evidence and known limitations without unsupported performance claims.
-- [ ] Replace every `pending` qualification field in
-      [`release-notes-v0.1.0-rc.1.md`](release-notes-v0.1.0-rc.1.md) from sanitized evidence; do not
-      publish the template's pending status.
-- [ ] Tag points at the audited final commit and the GitHub release remains a draft until sign-off.
+## Automated RC tag
+
+- [ ] `make context`, `make verify`, `make deadcode`, and `make audit` pass from one clean commit.
+- [ ] Every migration prefix upgrades; concurrent startup is serialized; modified, gapped, and
+      newer migration ledgers fail closed.
+- [ ] Provider/runtime contract, fault-injection, Docker/PostgreSQL, restart, Kind, SDK, Terraform,
+      GitHub Action, dashboard, and documentation gates pass.
+- [ ] The provider-neutral production image contains no development fakes and executes its pinned
+      AWS CLI v2 and `kubectl` boundaries on amd64 and arm64.
+- [ ] `make candidate-artifacts RELEASE_CANDIDATE_TAG=v1.0.0-rc.1` produces exactly four archives,
+      checksums, SPDX SBOMs, a generated Homebrew formula, and a native install smoke test.
+- [ ] Release notes, compatibility, upgrade, security, production, and provider/runtime docs match
+      executable capability states.
+- [ ] `.release/evidence/v1.0.0-rc.1.md` records exact commands and artifacts.
+- [ ] The worktree is clean and local annotated tag `v1.0.0-rc.1` points at the evidence commit.
+
+## Consolidated manual qualification
+
+- [ ] Read-only provider preflight succeeds before mutation.
+- [ ] RunPod elastic/serverless and disruption suites pass, including disconnect, restart,
+      create-response loss, stream cancellation, generation-safe drain, rollback, and zero inventory.
+- [ ] AWS BYOC runs real vLLM, SGLang, and custom OCI specs through readiness, buffered/streaming
+      requests, benchmark, delete, reconciliation, and direct zero-billable-instance inventory.
+- [ ] Kubernetes runs the same runtime matrix on a real GPU cluster and directly proves zero
+      InferCrane-managed workloads and services afterward.
+- [ ] Hermetic governed-fallback evidence remains attached; any real external API test is explicit,
+      privacy-acknowledged, hard-budgeted, and never silently duplicated.
+- [ ] Real benchmark/passport evidence records exact model commit, image digest, runtime, GPU,
+      provider, region, workload, errors, and trustworthy cost metadata only.
+- [ ] `scripts/v1-acceptance.sh report` reports `real_infrastructure: passed` for the same commit.
+- [ ] An operator independently confirms RunPod run-owned Pods/endpoints are zero and the AWS and
+      Kubernetes managed inventories match their pre-run baselines.
+
+## Publication
+
+- [ ] Upload archives, checksums, SBOMs, image digest, image SBOM, and provenance to a draft release.
+- [ ] Substitute the real release URL into the generated Homebrew formula and perform clean-machine
+      install, completion, `doctor`, and `version` checks.
+- [ ] Review image/archive vulnerability results and sanitize evidence for credentials or content.
+- [ ] Publish no performance or cost comparison without reproducible attached evidence.
+- [ ] Create stable tag `v1.0.0` only after every manual row is proven.

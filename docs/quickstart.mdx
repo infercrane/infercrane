@@ -136,7 +136,11 @@ export INFERCRANE_API_KEY='ISSUED_CONTROL_PLANE_CREDENTIAL'
 `init` stores an already-issued credential with private file permissions. It does not create a principal. `plan` is side-effect-free and reports pricing as unavailable unless trustworthy provider evidence exists.
 
 <Warning>
-RunPod is the first v0.1 qualification target. Do not submit a deploy command until the operator has completed [provider setup](/provider-setup). A real deployment can create billable resources.
+Choose a provider only after reading its capability and qualification state in `infercrane
+integrations`. Do not submit a deploy command until the operator has completed [provider
+setup](/provider-setup). A real deployment can create billable resources. RunPod, AWS BYOC, and
+Kubernetes have different prerequisites; registration is not proof that an exact combination has
+completed real-GPU qualification.
 </Warning>
 
 <CardGroup cols={2}>

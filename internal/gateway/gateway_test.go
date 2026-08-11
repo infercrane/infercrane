@@ -36,6 +36,13 @@ func (b *oneRequestBudget) Authorize(policy string) (domain.ExternalBudgetLease,
 	return domain.ExternalBudgetLease{}, errors.New("exhausted")
 }
 
+type denyRequestQuota struct{ tenant string }
+
+func (d *denyRequestQuota) Authorize(tenant string) error {
+	d.tenant = tenant
+	return errors.New("exhausted")
+}
+
 type captureRecorder struct {
 	mu     sync.Mutex
 	record domain.InferenceRecord
@@ -72,6 +79,25 @@ func TestCompletionRewritesAlias(t *testing.T) {
 	}
 	if !validTraceParent.MatchString(recorder.Header().Get("traceparent")) {
 		t.Fatalf("response traceparent=%q", recorder.Header().Get("traceparent"))
+	}
+}
+
+func TestCompletionEnforcesTenantQuotaBeforeUpstream(t *testing.T) {
+	upstreamCalled := false
+	client := &http.Client{Transport: roundTripper(func(*http.Request) (*http.Response, error) {
+		upstreamCalled = true
+		return nil, errors.New("must not be called")
+	})}
+	directory := routes.New()
+	directory.Put(routes.Snapshot{TenantID: "team", DeploymentID: "d1", Alias: "alias", UpstreamModel: "model", RouterURL: "http://router"})
+	quota := &denyRequestQuota{}
+	handler := (&Gateway{Routes: directory, Authenticator: fakeAuthenticator{principal: domain.Principal{ID: "p1", TenantID: "team", Role: "viewer", Scopes: []string{"read"}}}, Client: client, RequestAuthorizer: quota}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"alias","messages":[]}`))
+	request.Header.Set("Authorization", "Bearer tenant-token")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusTooManyRequests || quota.tenant != "team" || upstreamCalled {
+		t.Fatalf("status=%d tenant=%q upstream_called=%t body=%s", response.Code, quota.tenant, upstreamCalled, response.Body.String())
 	}
 }
 

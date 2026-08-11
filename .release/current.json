@@ -2,7 +2,7 @@
   "schema_version": 1,
   "program": "infercrane-v1",
   "current_milestone": "v1.0.0",
-  "state": "implementing",
+  "state": "qualifying",
   "baseline": {
     "commit": "a904ffaf1a609bdca48fe4cd4e3a0e6e09a1486e",
     "dev_check": "passed",
@@ -11,7 +11,7 @@
     "real_infrastructure": "deferred"
   },
   "last_completed_milestone": "v0.9.0-rc.1",
-  "next_action": "audit v1 acceptance criteria and implement compatibility, migration, security, packaging, documentation, and consolidated qualification hardening",
+  "next_action": "review the complete v1 diff, run every local and Docker release gate, fix failures, then record evidence and create the local annotated v1.0.0-rc.1 tag",
   "rc_tags": ["v0.2.0-rc.1", "v0.3.0-rc.1", "v0.4.0-rc.1", "v0.5.0-rc.1", "v0.6.0-rc.1", "v0.7.0-rc.1", "v0.8.0-rc.1", "v0.9.0-rc.1"],
-  "updated_at": "2026-08-11T10:42:00Z"
+  "updated_at": "2026-08-11T11:25:17Z"
 }

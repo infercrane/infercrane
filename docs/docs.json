@@ -156,6 +156,8 @@
             "openapi": "openapi.json"
           },
           "provider-setup",
+          "upgrade",
+          "release-packaging",
           "development",
           "troubleshooting",
           "faq"
@@ -166,7 +168,9 @@
         "pages": [
           "project-status",
           "production-readiness",
+          "release-notes-v1.0.0-rc.1",
           "security",
+          "security-review-v1",
           "architecture/invariants",
           {
             "group": "Architecture decisions",
@@ -190,7 +194,8 @@
               "adr/0016-portable-oci-runtime-workloads",
               "adr/0017-deterministic-inference-decisions",
               "adr/0018-signed-release-evidence",
-              "adr/0019-kubernetes-integration-boundaries"
+              "adr/0019-kubernetes-integration-boundaries",
+              "adr/0020-provider-neutral-production-artifact"
             ]
           },
           "release-acceptance"

@@ -54,8 +54,17 @@ provider: {cloud: runpod}
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.Compute.Mode != "elastic" || loaded.Runtime.Engine != "vllm" || loaded.Scaling.MinReplicas != 1 || loaded.Scaling.MaxReplicas != 1 || loaded.Routing.Strategy != "round-robin" {
+	if loaded.APIVersion != "infercrane.dev/v1" || loaded.Kind != "Deployment" || loaded.Compute.Mode != "elastic" || loaded.Runtime.Engine != "vllm" || loaded.Scaling.MinReplicas != 1 || loaded.Scaling.MaxReplicas != 1 || loaded.Routing.Strategy != "round-robin" {
 		t.Fatalf("loaded=%+v", loaded)
+	}
+}
+
+func TestLoadRejectsUnsupportedDeploymentSpecVersionAndKind(t *testing.T) {
+	for _, header := range []string{"apiVersion: infercrane.dev/v2\nkind: Deployment", "apiVersion: infercrane.dev/v1\nkind: Workflow"} {
+		_, err := Load(writeSpec(t, header+"\nname: qwen\nmodel: {id: org/model}\nresources: {gpu: L40S}\nprovider: {cloud: runpod}\n"))
+		if err == nil || !strings.Contains(err.Error(), "apiVersion infercrane.dev/v1") {
+			t.Fatalf("header=%q err=%v", header, err)
+		}
 	}
 }
 

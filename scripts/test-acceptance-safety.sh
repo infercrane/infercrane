@@ -27,4 +27,36 @@ fi
 grep -q 'refusing paid provider mutation' "$temporary/unapproved.log"
 test ! -e "$empty_state/.paid.lock"
 
-echo "acceptance paid-run lock and approval boundary passed"
+if INFERCRANE_V1_ACCEPTANCE_STATE_DIR="$temporary/v1" INFERCRANE_ACCEPTANCE_RUN_ID=unapproved-v1 \
+  "$root/scripts/v1-acceptance.sh" qualify >"$temporary/unapproved-v1.log" 2>&1; then
+  echo "unapproved v1 qualification unexpectedly started" >&2
+  exit 1
+fi
+grep -q 'qualification requires --approve-paid-resources' "$temporary/unapproved-v1.log"
+
+mkdir -p "$temporary/v1-locked/.paid.lock"
+printf '%s\n' "$$" >"$temporary/v1-locked/.paid.lock/pid"
+printf '%s\n' existing-run >"$temporary/v1-locked/.paid.lock/run_id"
+if INFERCRANE_V1_ACCEPTANCE_STATE_DIR="$temporary/v1-locked" INFERCRANE_ACCEPTANCE_RUN_ID=concurrent-v1 \
+  "$root/scripts/v1-acceptance.sh" qualify --approve-paid-resources >"$temporary/concurrent-v1.log" 2>&1; then
+  echo "concurrent v1 paid qualification unexpectedly started" >&2
+  exit 1
+fi
+grep -q 'another v1 paid qualification is active' "$temporary/concurrent-v1.log"
+
+if INFERCRANE_V1_ACCEPTANCE_STATE_DIR="$temporary/portable" INFERCRANE_ACCEPTANCE_RUN_ID=unapproved-provider \
+  "$root/scripts/portable-provider-acceptance.sh" aws >"$temporary/unapproved-provider.log" 2>&1; then
+  echo "unapproved portable provider qualification unexpectedly started" >&2
+  exit 1
+fi
+grep -q 'portable provider acceptance requires --approve-paid-resources' "$temporary/unapproved-provider.log"
+
+mkdir -p "$temporary/v1-report/stale/stages"
+for stage in runpod aws kubernetes; do
+  printf '%s\n' stale-commit >"$temporary/v1-report/stale/stages/$stage.passed"
+done
+report=$(INFERCRANE_V1_ACCEPTANCE_STATE_DIR="$temporary/v1-report" INFERCRANE_ACCEPTANCE_RUN_ID=stale \
+  "$root/scripts/v1-acceptance.sh" report)
+jq -e '.real_infrastructure == "incomplete" and (.passed_stages | length == 0)' "$report" >/dev/null
+
+echo "acceptance paid-run locks and approval boundaries passed"

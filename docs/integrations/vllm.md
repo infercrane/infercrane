@@ -1,11 +1,13 @@
 ---
 title: vLLM
-description: How InferCrane manages and routes requests to its only v0.1 inference runtime.
+description: How InferCrane manages and routes requests to vLLM runtimes.
 ---
 
 # vLLM
 
-vLLM is InferCrane v0.1's inference runtime. InferCrane owns deployment state and lifecycle; vLLM owns model execution. A supervised [vLLM Router](https://github.com/vllm-project/semantic-router) process distributes requests across healthy standalone replicas.
+vLLM is InferCrane's default qualified runtime profile. InferCrane owns deployment state and
+lifecycle; vLLM owns model execution. A supervised [vLLM Router](https://github.com/vllm-project/semantic-router)
+process distributes requests across healthy standalone replicas.
 
 ## Connect existing workers
 
@@ -35,7 +37,8 @@ The reconciler verifies health and served-model identity before publishing a rou
 | Health/model reconciliation | Token generation and KV cache |
 | Safe routing generations | Per-replica runtime metrics |
 
-InferCrane does not implement an inference engine or distributed KV cache. SGLang is not supported in v0.1.
+InferCrane does not implement an inference engine or distributed KV cache. SGLang and custom OCI
+workloads use the same versioned runtime boundary and have independent qualification states.
 
 <Card title="Gateway and routing" icon="route" href="/features/gateway">
   Follow an OpenAI request from alias resolution to a healthy vLLM replica.

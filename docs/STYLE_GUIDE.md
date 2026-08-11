@@ -53,7 +53,8 @@ Use Mermaid, the small `.ic-flow` system, or deterministic SVG for maintainable 
 - Say **deployment** for the logical endpoint and desired state; **replica** for one runtime worker intent; **target** for a registered existing worker.
 - Say **control plane** for durable state and lifecycle; **data plane** for OpenAI-compatible request routing.
 - Lead with InferCrane's provider-neutral lifecycle and adapter architecture. Name RunPod or vLLM when documenting the first qualified implementation, setup, behavior, or limitation.
-- Say **v0.1 qualifies vLLM on RunPod** rather than implying InferCrane itself is a RunPod-specific product.
+- State the exact provider/runtime/mode and evidence tier rather than implying every registered
+  combination is production-qualified or that InferCrane is coupled to one provider.
 - Release Guard is deterministic, persisted, and evidence-bound. It is not an LLM decision.
 - Durable Session identity is deferred to v0.2 and does not guarantee durable KV state.
 - Label unqualified or incomplete capabilities as experimental. Never turn planned work into present-tense product copy.

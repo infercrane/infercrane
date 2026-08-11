@@ -31,6 +31,9 @@ type CapacityObserver func(context.Context, string) (int, error)
 type ExternalAuthorizer interface {
 	Authorize(string) (domain.ExternalBudgetLease, error)
 }
+type RequestAuthorizer interface {
+	Authorize(string) error
+}
 type Gateway struct {
 	Routes    *routes.Directory
 	APIKey    string
@@ -46,6 +49,7 @@ type Gateway struct {
 	// remain available when telemetry observation fails.
 	CapacityObservers  map[string]CapacityObserver
 	ExternalAuthorizer ExternalAuthorizer
+	RequestAuthorizer  RequestAuthorizer
 	Authenticator      interface {
 		AuthenticatePrincipal(context.Context, string) (domain.Principal, error)
 	}
@@ -158,6 +162,13 @@ func (g *Gateway) completions(w http.ResponseWriter, r *http.Request) {
 		traceParent = "00-" + randomHex(16) + "-" + randomHex(8) + "-01"
 	}
 	started := time.Now()
+	if g.RequestAuthorizer != nil {
+		if err := g.RequestAuthorizer.Authorize(principal.TenantID); err != nil {
+			g.record(r.Context(), requestID, route, alias, started, http.StatusTooManyRequests, "tenant_request_quota_exhausted", streaming, responseObservation{}, capacityEvidence{})
+			openAIError(w, "Tenant request-rate quota is exhausted", http.StatusTooManyRequests, "rate_limit_error")
+			return
+		}
+	}
 	evidenceResult := g.observeCapacity(r.Context(), route, started)
 	if route.ExternalPolicyID != "" {
 		if g.ExternalAuthorizer == nil {

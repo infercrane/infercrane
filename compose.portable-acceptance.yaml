@@ -1,0 +1,4 @@
+services:
+  infercrane:
+    volumes:
+      - ${INFERCRANE_QUALIFICATION_SPEC_DIR:?set INFERCRANE_QUALIFICATION_SPEC_DIR}:/qualification:ro

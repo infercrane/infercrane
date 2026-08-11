@@ -10,7 +10,7 @@ one standard KServe `InferenceService`. Kubernetes owns scheduling and Pods. Inf
 lifecycle, rollout policy, routing membership, evidence, and deletion of its exact labeled resources.
 
 <Warning>
-The v0.9 adapter has hermetic and Kind lifecycle qualification. Real GPU, vLLM, SGLang, and custom OCI
+The adapter has hermetic and Kind lifecycle qualification. Real GPU, vLLM, SGLang, and custom OCI
 compatibility remains deferred to the consolidated v1 manual qualification. Registration is not a
 real-cluster support claim.
 </Warning>
@@ -106,7 +106,7 @@ The provider verifies the `InferenceService` API and required permissions during
 owns generated Deployments, Services, and Pods; InferCrane inventories and deletes only the parent
 InferenceService. Raw KServe condition metadata remains available through `infercrane inspect`.
 
-KServe `LLMInferenceService`, llm-d, and Dynamo are not enabled in v0.9 because each can own routing,
+KServe `LLMInferenceService`, llm-d, and Dynamo are not enabled in the v1 RC because each can own routing,
 scheduling, or disaggregation. They require a future explicit ownership contract rather than a hidden
 second router.
 

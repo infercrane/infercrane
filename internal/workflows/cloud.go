@@ -103,7 +103,7 @@ func (r *CloudRequest) Validate() error {
 			return fmt.Errorf("runtime workload: %w", err)
 		}
 	}
-	if err := support.V09().Validate(r.Runtime, r.Cloud, r.ComputeMode); err != nil {
+	if err := support.V1().Validate(r.Runtime, r.Cloud, r.ComputeMode); err != nil {
 		return err
 	}
 	return nil

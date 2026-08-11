@@ -5,7 +5,7 @@ and choose **Report a vulnerability** to open a private GitHub security advisory
 affected version, impact, reproduction, and any suggested mitigation. Do not include live
 credentials or customer prompt/output content.
 
-The latest v0.1 release candidate receives security fixes. The main branch is not itself a release
+The latest v1 release candidate receives security fixes. The main branch is not itself a release
 support commitment. Maintainers will acknowledge a private report within five business days and
 coordinate disclosure after a fix is available.
 

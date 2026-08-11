@@ -33,7 +33,7 @@ inputs:
   version:
     description: Exact InferCrane release tag used when auto-installing
     required: false
-    default: v0.9.0-rc.1
+    default: v1.0.0-rc.1
   output-path:
     description: Machine-readable plan or evidence path
     required: false

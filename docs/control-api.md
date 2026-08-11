@@ -55,7 +55,7 @@ Errors are stable JSON objects:
 | `POST /targets` | operator | Register an existing HTTP(S) inference target. |
 | `GET /orphans` | viewer | List unowned provisioned resources. |
 | `GET /audit-events` | admin | List up to 500 events; `before` accepts RFC3339. |
-| `PUT /tenant/quota` | admin | Set deployment, replica, and request policy limits. |
+| `PUT /tenant/quota` | admin | Set deployment, replica, and distributed per-minute request limits; zero blocks that resource. |
 | `POST /tenants` | bootstrap admin | Create a tenant. |
 | `POST /principals` | admin | Create a credential; secret is returned once. |
 | `POST /principals/{id}/rotate` | admin | Replace a credential immediately. |

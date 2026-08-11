@@ -45,6 +45,13 @@ milestone_gates:
     - kubernetes_kind_restart_repair_and_zero_resource_lifecycle
     - kubernetes_least_privilege_rbac_and_gateway_ownership_boundary
     - kserve_standard_crd_gating_and_single_owner_resource
+    - deployment_spec_v1_version_and_unknown_field_rejection
+    - every_historical_migration_prefix_upgrade
+    - migration_checksum_gap_and_newer_binary_rejection
+    - distributed_request_quota_leases_without_database_data_path
+    - provider_neutral_production_compose_and_executable_provider_clients
+    - consolidated_paid_qualification_approval_lock_resume_and_inventory_contract
+    - exact_rc_archives_checksums_spdx_sboms_and_native_install_smoke
   deferred_until_v1_manual_qualification:
     - runpod_elastic
     - runpod_serverless

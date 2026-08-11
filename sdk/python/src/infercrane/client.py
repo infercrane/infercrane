@@ -35,7 +35,7 @@ class _Transport:
 
     def request(self, method: str, path: str, *, body: Any | None = None, idempotency_key: str | None = None) -> Any:
         payload = None if body is None else json.dumps(body, separators=(",", ":")).encode()
-        headers = {"Accept": "application/json", "Authorization": f"Bearer {self.api_key}", "User-Agent": "infercrane-python/0.9.0rc1"}
+        headers = {"Accept": "application/json", "Authorization": f"Bearer {self.api_key}", "User-Agent": "infercrane-python/1.0.0rc1"}
         if payload is not None:
             headers["Content-Type"] = "application/json"
         if idempotency_key:
@@ -138,7 +138,7 @@ class InferCrane:
 
     def stream_chat(self, deployment: str, messages: list[dict[str, str]], **parameters: Any) -> Iterator[dict[str, Any]]:
         payload = {"model": deployment, "messages": messages, "stream": True, **parameters}
-        request = Request(self.gateway_url + "/v1/chat/completions", data=json.dumps(payload, separators=(",", ":")).encode(), headers={"Accept": "text/event-stream", "Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json", "User-Agent": "infercrane-python/0.9.0rc1"}, method="POST")
+        request = Request(self.gateway_url + "/v1/chat/completions", data=json.dumps(payload, separators=(",", ":")).encode(), headers={"Accept": "text/event-stream", "Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json", "User-Agent": "infercrane-python/1.0.0rc1"}, method="POST")
         try:
             response = urlopen(request, timeout=self.timeout)
         except HTTPError as error:

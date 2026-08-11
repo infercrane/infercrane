@@ -26,9 +26,9 @@ func NormalizeWorkload(runtime string, workload runtimecontract.Workload) runtim
 
 const (
 	DefaultRuntime = "vllm"
-	// DefaultRuntimeVersion is the runtime qualified with the v0.1 provider
-	// matrix. Persist it in every revision so benchmarks and explanations never
-	// depend on an implicit image default.
+	// DefaultRuntimeVersion is the default vLLM runtime qualified by the public
+	// support matrix. Persist it in every revision so benchmarks and
+	// explanations never depend on an implicit image default.
 	DefaultRuntimeVersion = "0.8.5.post1"
 	DefaultCloud          = "runpod"
 	DefaultGPU            = "L40S"
@@ -121,6 +121,11 @@ func V09() Matrix {
 		"kubernetes": {ElasticMode: {DefaultRuntime, "sglang", "custom-oci"}},
 	})
 }
+
+// V1 is the public v1 runtime/provider/compute qualification policy. Keep the
+// historical milestone functions so old qualification evidence remains
+// reproducible while current composition has a version-appropriate owner.
+func V1() Matrix { return V09() }
 
 func (m Matrix) Validate(runtime, cloud, mode string) error {
 	if err := m.ValidateRuntime(runtime); err != nil {

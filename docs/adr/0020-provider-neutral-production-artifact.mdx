@@ -1,0 +1,35 @@
+---
+title: Provider-neutral production artifact
+description: Keep provider selection out of the base deployment while shipping explicit client boundaries.
+---
+
+# ADR 0020: Provider-neutral production artifact with explicit client boundaries
+
+- Status: accepted
+- Date: 2026-08-11
+
+## Context
+
+InferCrane composes provider adapters at runtime. The original production Compose file nevertheless
+required a RunPod key and always supervised SkyPilot. At the same time, the production image omitted
+the AWS CLI v2 and `kubectl` executables required by the built-in AWS and Kubernetes adapters. The
+packaged behavior therefore contradicted the capability registry in both directions.
+
+## Decision
+
+The base production Compose stack is provider-neutral and starts InferCrane directly. RunPod state,
+credentials, and SkyPilot supervision live in an explicit `compose.production.runpod.yaml` overlay.
+The universal v1 image includes checksum-pinned AWS CLI v2 and `kubectl` binaries for its built-in
+process-boundary adapters on amd64 and arm64. Provider credentials, kubeconfig, and selection remain
+runtime configuration and are never baked into the image.
+
+The entrypoint accepts `INFERCRANE_SKYPILOT_API=auto|enabled|disabled`. `auto` starts SkyPilot only
+when a RunPod credential is present; the RunPod production overlay uses fail-closed `enabled` mode.
+
+## Consequences
+
+- A default installation does not imply RunPod and does not pay the SkyPilot process cost.
+- Every provider claimed by the universal image has its required executable boundary available.
+- The image is larger because it carries optional provider clients. A future image split may be
+  introduced only with equivalent installation clarity and qualification coverage.
+- Provider-specific secrets and state remain isolated in overlays and operator configuration.
