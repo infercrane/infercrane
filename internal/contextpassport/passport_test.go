@@ -19,3 +19,16 @@ func TestDirectoryTenantSubjectAndExpiry(t *testing.T) {
 		t.Fatal("expired")
 	}
 }
+
+func TestReplaceRemovesStaleHints(t *testing.T) {
+	d := New()
+	now := time.Now()
+	d.Put(Hint{ID: "old", TenantID: "a", SubjectID: "m", ExpiresAt: now.Add(time.Hour)})
+	d.Replace([]Hint{{ID: "new", TenantID: "a", SubjectID: "m", ExpiresAt: now.Add(time.Hour)}})
+	if _, ok := d.Resolve("a", "old", "m", now); ok {
+		t.Fatal("stale hint survived refresh")
+	}
+	if _, ok := d.Resolve("a", "new", "m", now); !ok {
+		t.Fatal("replacement missing")
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"reflect"
 
 	"github.com/infercrane/infercrane/internal/domain"
 )
@@ -68,13 +69,21 @@ func (s *Store) CreateAutopilotPlan(ctx context.Context, row domain.AutopilotPla
 	count, _ := result.RowsAffected()
 	if count == 0 {
 		row, err = s.AutopilotPlan(ctx, row.TenantID, "", row.RecommendationID, row.Objective)
-		if err == nil && (row.DeploymentID != requested.DeploymentID || row.CandidateJSON != requested.CandidateJSON || row.InputDigest != requested.InputDigest) {
+		if err == nil && (row.DeploymentID != requested.DeploymentID || !semanticJSONEqual(row.CandidateJSON, requested.CandidateJSON) || !semanticJSONEqual(row.EvidenceJSON, requested.EvidenceJSON) || row.InputDigest != requested.InputDigest) {
 			return row, false, domain.ErrConflict
 		}
 		return row, false, err
 	}
 	row.CreatedAt, row.UpdatedAt = parseTime(stamp), parseTime(stamp)
 	return row, true, nil
+}
+
+func semanticJSONEqual(left, right string) bool {
+	var a, b any
+	if json.Unmarshal([]byte(left), &a) != nil || json.Unmarshal([]byte(right), &b) != nil {
+		return false
+	}
+	return reflect.DeepEqual(a, b)
 }
 
 func (s *Store) AutopilotPlan(ctx context.Context, tenant, id, recommendation, objective string) (domain.AutopilotPlan, error) {

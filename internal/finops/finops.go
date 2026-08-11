@@ -32,7 +32,7 @@ func Evaluate(now time.Time, evidence []CostEvidence) Report {
 	latest := map[string]CostEvidence{}
 	currency := ""
 	for _, row := range rows {
-		if row.ID == "" || row.Source == "" || row.Currency == "" || row.Amount < 0 || row.ObservedAt.IsZero() || (row.ExpiresAt != nil && !row.ExpiresAt.After(now)) {
+		if row.ID == "" || row.Source == "" || row.Currency == "" || row.Amount < 0 || row.ObservedAt.IsZero() || row.ObservedAt.After(now) || (row.ExpiresAt != nil && !row.ExpiresAt.After(now)) {
 			continue
 		}
 		if currency != "" && currency != row.Currency {

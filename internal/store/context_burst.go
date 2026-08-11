@@ -5,12 +5,15 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"github.com/infercrane/infercrane/internal/domain"
+	"fmt"
 	"time"
+
+	"github.com/infercrane/infercrane/internal/domain"
 )
 
 func (s *Store) CreateContextPassport(ctx context.Context, tenant, deploymentName string, row domain.ContextPassport) (domain.ContextPassport, error) {
-	if row.ExpiresAt.Before(time.Now().Add(time.Second)) || row.ExpiresAt.After(time.Now().Add(30*24*time.Hour)) || !json.Valid([]byte(row.CacheHintsJSON)) || !json.Valid([]byte(row.MetadataJSON)) {
+	stampTime := time.Now().UTC()
+	if row.ExpiresAt.Before(stampTime.Add(time.Second)) || row.ExpiresAt.After(stampTime.Add(30*24*time.Hour)) || !json.Valid([]byte(row.CacheHintsJSON)) || !json.Valid([]byte(row.MetadataJSON)) {
 		return row, errors.New("bounded expiry and valid metadata are required")
 	}
 	resolved, err := s.ResolveForTenant(ctx, tenant, deploymentName)
@@ -22,20 +25,47 @@ func (s *Store) CreateContextPassport(ctx context.Context, tenant, deploymentNam
 		return row, err
 	}
 	row.TenantID, row.DeploymentID, row.Status = tenant, resolved.Deployment.ID, "active"
-	stamp := now()
-	_, err = s.ExecContext(ctx, `INSERT INTO context_passports(id,tenant_id,deployment_id,status,preferred_binding_id,preferred_target_id,cache_hints_json,metadata_json,last_activity,expires_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?::jsonb,?::jsonb,?,?,?,?)`, row.ID, tenant, row.DeploymentID, row.Status, null(row.PreferredBindingID), null(row.PreferredTargetID), row.CacheHintsJSON, row.MetadataJSON, stamp, row.ExpiresAt, stamp, stamp)
+	row.DeploymentName = resolved.Deployment.Name
+	stamp := stampTime.Format(time.RFC3339Nano)
+	expires := row.ExpiresAt.UTC().Format(time.RFC3339Nano)
+	_, err = s.ExecContext(ctx, `INSERT INTO context_passports(id,tenant_id,deployment_id,status,preferred_binding_id,preferred_target_id,cache_hints_json,metadata_json,last_activity,expires_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?::jsonb,?::jsonb,?,?,?,?)`, row.ID, tenant, row.DeploymentID, row.Status, null(row.PreferredBindingID), null(row.PreferredTargetID), row.CacheHintsJSON, row.MetadataJSON, stamp, expires, stamp, stamp)
+	if err != nil {
+		return row, fmt.Errorf("persist context passport with expiry %s after creation %s: %w", expires, stamp, err)
+	}
 	row.LastActivity, row.CreatedAt, row.UpdatedAt = parseTime(stamp), parseTime(stamp), parseTime(stamp)
-	return row, err
+	return row, nil
 }
 func (s *Store) ContextPassport(ctx context.Context, tenant, id string) (domain.ContextPassport, error) {
 	var r domain.ContextPassport
 	var activity, expiry, created, updated string
-	err := s.QueryRowContext(ctx, `SELECT id,tenant_id,COALESCE(endpoint_id,''),COALESCE(deployment_id,''),status,COALESCE(preferred_binding_id,''),COALESCE(preferred_target_id,''),cache_hints_json::text,metadata_json::text,last_activity,expires_at,created_at,updated_at FROM context_passports WHERE tenant_id=? AND id=?`, tenant, id).Scan(&r.ID, &r.TenantID, &r.EndpointID, &r.DeploymentID, &r.Status, &r.PreferredBindingID, &r.PreferredTargetID, &r.CacheHintsJSON, &r.MetadataJSON, &activity, &expiry, &created, &updated)
+	err := s.QueryRowContext(ctx, `SELECT c.id,c.tenant_id,COALESCE(c.endpoint_id,''),COALESCE(c.deployment_id,''),COALESCE(d.name,''),c.status,COALESCE(c.preferred_binding_id,''),COALESCE(c.preferred_target_id,''),c.cache_hints_json::text,c.metadata_json::text,c.last_activity,c.expires_at,c.created_at,c.updated_at FROM context_passports c LEFT JOIN deployments d ON d.id=c.deployment_id WHERE c.tenant_id=? AND c.id=?`, tenant, id).Scan(&r.ID, &r.TenantID, &r.EndpointID, &r.DeploymentID, &r.DeploymentName, &r.Status, &r.PreferredBindingID, &r.PreferredTargetID, &r.CacheHintsJSON, &r.MetadataJSON, &activity, &expiry, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return r, domain.ErrNotFound
 	}
 	r.LastActivity, r.ExpiresAt, r.CreatedAt, r.UpdatedAt = parseTime(activity), parseTime(expiry), parseTime(created), parseTime(updated)
 	return r, err
+}
+
+func (s *Store) ActiveContextPassports(ctx context.Context, at time.Time, limit int) ([]domain.ContextPassport, error) {
+	if limit < 1 || limit > 10000 {
+		limit = 10000
+	}
+	rows, err := s.QueryContext(ctx, `SELECT c.id,c.tenant_id,COALESCE(c.endpoint_id,''),COALESCE(c.deployment_id,''),COALESCE(d.name,''),c.status,COALESCE(c.preferred_binding_id,''),COALESCE(c.preferred_target_id,''),c.cache_hints_json::text,c.metadata_json::text,c.last_activity,c.expires_at,c.created_at,c.updated_at FROM context_passports c LEFT JOIN deployments d ON d.id=c.deployment_id WHERE c.status='active' AND c.expires_at>? ORDER BY c.expires_at LIMIT ?`, at, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.ContextPassport
+	for rows.Next() {
+		var r domain.ContextPassport
+		var activity, expiry, created, updated string
+		if err = rows.Scan(&r.ID, &r.TenantID, &r.EndpointID, &r.DeploymentID, &r.DeploymentName, &r.Status, &r.PreferredBindingID, &r.PreferredTargetID, &r.CacheHintsJSON, &r.MetadataJSON, &activity, &expiry, &created, &updated); err != nil {
+			return nil, err
+		}
+		r.LastActivity, r.ExpiresAt, r.CreatedAt, r.UpdatedAt = parseTime(activity), parseTime(expiry), parseTime(created), parseTime(updated)
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
 func (s *Store) SetBurstGuardPolicy(ctx context.Context, tenant, name string, p domain.BurstGuardPolicy) (domain.BurstGuardPolicy, error) {
 	resolved, err := s.ResolveForTenant(ctx, tenant, name)

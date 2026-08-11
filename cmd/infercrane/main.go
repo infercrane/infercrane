@@ -37,6 +37,7 @@ import (
 	"github.com/infercrane/infercrane/internal/autoscale"
 	"github.com/infercrane/infercrane/internal/benchmark"
 	"github.com/infercrane/infercrane/internal/config"
+	"github.com/infercrane/infercrane/internal/contextpassport"
 	"github.com/infercrane/infercrane/internal/controlapi"
 	"github.com/infercrane/infercrane/internal/dashboard"
 	"github.com/infercrane/infercrane/internal/doctor"
@@ -635,6 +636,9 @@ func replayCommand(ctx context.Context, cfg config.Config, args []string) error 
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
+	if err := validateOutput(*output); err != nil {
+		return err
+	}
 	window, err := time.ParseDuration(*windowText)
 	if err != nil || window <= 0 {
 		return errors.New("--window must be a positive duration")
@@ -703,6 +707,9 @@ func capacityCommand(ctx context.Context, cfg config.Config, args []string) erro
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if err := validateOutput(*output); err != nil {
+		return err
+	}
 	window, err := time.ParseDuration(*windowText)
 	if err != nil || window <= 0 {
 		return errors.New("--window must be a positive duration")
@@ -712,7 +719,8 @@ func capacityCommand(ctx context.Context, cfg config.Config, args []string) erro
 		Evidence      string                   `json:"evidence"`
 		WindowSeconds int                      `json:"window_seconds"`
 	}
-	if err = controlJSON(ctx, cfg, http.MethodGet, "/api/v1/capacity/intelligence", "window_seconds="+strconv.Itoa(int(window.Seconds())), nil, &response); err != nil {
+	query := url.Values{"window_seconds": {strconv.Itoa(int(window.Seconds()))}}
+	if err = controlJSON(ctx, cfg, http.MethodGet, "/api/v1/capacity/intelligence?"+query.Encode(), "", nil, &response); err != nil {
 		return err
 	}
 	if *output == "json" {
@@ -744,6 +752,9 @@ func finOpsCommand(ctx context.Context, cfg config.Config, args []string) error 
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
+	if err := validateOutput(*output); err != nil {
+		return err
+	}
 	window, err := time.ParseDuration(*windowText)
 	if err != nil || window <= 0 {
 		return errors.New("--window must be a positive duration")
@@ -770,6 +781,9 @@ func autopilotCommand(ctx context.Context, cfg config.Config, args []string) err
 	objective := fs.String("objective", "minimize_cost", "advisory objective")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args[2:]); err != nil {
+		return err
+	}
+	if err := validateOutput(*output); err != nil {
 		return err
 	}
 	var response struct {
@@ -818,6 +832,9 @@ func sessionCommand(ctx context.Context, cfg config.Config, args []string) error
 	if err := fs.Parse(args[2:]); err != nil {
 		return err
 	}
+	if err := validateOutput(*output); err != nil {
+		return err
+	}
 	var response struct {
 		Passport  map[string]any `json:"context_passport"`
 		DurableKV bool           `json:"durable_kv"`
@@ -856,6 +873,9 @@ func burstCommand(ctx context.Context, cfg config.Config, args []string) error {
 	externalHealthy := fs.Bool("external-healthy", false, "fresh qualified overflow health evidence")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if err := validateOutput(*output); err != nil {
 		return err
 	}
 	body := map[string]any{"enabled": true, "queue_threshold": 4, "breach_intervals": 3, "recovery_intervals": 2, "cooldown_seconds": 60, "signal_max_age_seconds": 30, "max_incremental_cost_microusd_hour": *maxCost, "queue_depth": *queue, "consecutive_breaches": *breaches, "consecutive_recovery": 0, "incremental_cost_microusd_hour": *cost, "external_healthy": *externalHealthy, "observed_at": time.Now().UTC()}
@@ -3328,6 +3348,11 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		return fmt.Errorf("configure integration contracts: %w", err)
 	}
 	directory := routes.New()
+	contextPassports := contextpassport.New()
+	if err := refreshContextPassports(ctx, s, contextPassports); err != nil {
+		return fmt.Errorf("load Context Passport snapshot: %w", err)
+	}
+	go runContextPassportRefresh(ctx, s, contextPassports, time.Second, slog.Default())
 	backend := router.NewVLLM(cfg.RouterBinary, cfg.APIKey)
 	runtime := runtimeadapter.OpenAI{APIKey: cfg.APIKey}
 	runtimeProfile, err := integrationRegistry.Runtime(support.DefaultRuntime)
@@ -3444,7 +3469,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		}
 		asyncService = &asyncinference.Service{Store: s, Cipher: cipher, KeyReference: cfg.AsyncEncryptionKeyReference, GatewayURL: cfg.ControlURL, APIKey: cfg.APIKey, Owner: cfg.InstanceID + ":async", Lease: time.Minute, Secrets: secrets.Environment{}}
 	}
-	control := (controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: credentialCache, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, AsyncInference: asyncService, ProductVersion: version}).Handler()
+	control := (controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: credentialCache, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, AsyncInference: asyncService, ContextPassports: contextPassports, ProductVersion: version}).Handler()
 	operationTelemetry := &operations.Telemetry{}
 	handlers := workflows.DeploymentHandlers(s)
 	for kind, handler := range workflows.RolloutHandlers(s) {
@@ -3536,7 +3561,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	if err != nil {
 		return err
 	}
-	server := &http.Server{Addr: fmt.Sprintf("%s:%d", cfg.Host, cfg.Port), Handler: (&gateway.Gateway{Routes: directory, APIKey: cfg.APIKey, Authenticator: credentialCache, Recorder: recorder, Logger: logger, Client: client, Ready: s.Ping, Control: control, Dashboard: dashboard.Handler(), Telemetry: gatewayTelemetry, CapacityObservers: map[string]gateway.CapacityObserver{"runpod": serverless.ActiveWorkers}, ExternalAuthorizer: externalBudgets, RequestAuthorizer: requestQuotas, AdmissionAuthorizer: admissionPool}).Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 1 << 20, TLSConfig: serverTLS}
+	server := &http.Server{Addr: fmt.Sprintf("%s:%d", cfg.Host, cfg.Port), Handler: (&gateway.Gateway{Routes: directory, APIKey: cfg.APIKey, Authenticator: credentialCache, Recorder: recorder, Logger: logger, Client: client, Ready: s.Ping, Control: control, Dashboard: dashboard.Handler(), Telemetry: gatewayTelemetry, CapacityObservers: map[string]gateway.CapacityObserver{"runpod": serverless.ActiveWorkers}, ExternalAuthorizer: externalBudgets, RequestAuthorizer: requestQuotas, AdmissionAuthorizer: admissionPool, ContextPassports: contextPassports}).Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 1 << 20, TLSConfig: serverTLS}
 	go func() {
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
@@ -3617,6 +3642,47 @@ func heartbeatControlPlane(ctx context.Context, s *store.Store, instanceID strin
 		case <-ticker.C:
 			if err := s.HeartbeatControlPlaneInstance(ctx, instanceID); err != nil && ctx.Err() == nil {
 				slog.Error("control-plane membership heartbeat failed", "instance_id", instanceID, "error", err)
+			}
+		}
+	}
+}
+
+func refreshContextPassports(ctx context.Context, s *store.Store, directory *contextpassport.Directory) error {
+	rows, err := s.ActiveContextPassports(ctx, time.Now().UTC(), 10000)
+	if err != nil {
+		return err
+	}
+	hints := make([]contextpassport.Hint, 0, len(rows))
+	for _, row := range rows {
+		subject := row.DeploymentName
+		if subject == "" {
+			subject = row.EndpointID
+		}
+		if subject == "" {
+			continue
+		}
+		hints = append(hints, contextpassport.Hint{ID: row.ID, TenantID: row.TenantID, SubjectID: subject, PreferredBindingID: row.PreferredBindingID, PreferredTargetID: row.PreferredTargetID, ExpiresAt: row.ExpiresAt})
+	}
+	directory.Replace(hints)
+	return nil
+}
+
+func runContextPassportRefresh(ctx context.Context, s *store.Store, directory *contextpassport.Directory, interval time.Duration, logger *slog.Logger) {
+	if interval <= 0 {
+		interval = time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			refreshCtx, cancel := context.WithTimeout(ctx, interval)
+			err := refreshContextPassports(refreshCtx, s, directory)
+			cancel()
+			if err != nil && ctx.Err() == nil {
+				logger.Error("Context Passport snapshot refresh failed", "error", err)
 			}
 		}
 	}

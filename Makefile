@@ -38,6 +38,7 @@ test:
 
 test-container:
 	docker compose --profile test build verifier
+	docker compose --profile test rm -sf integration-test test-postgres
 	docker compose --profile test up --build --abort-on-container-exit --exit-code-from integration-test integration-test
 
 test-stack:

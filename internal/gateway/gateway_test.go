@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/admission"
+	"github.com/infercrane/infercrane/internal/contextpassport"
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/routes"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
@@ -81,6 +82,45 @@ func TestCompletionRewritesAlias(t *testing.T) {
 	}
 	if !validTraceParent.MatchString(recorder.Header().Get("traceparent")) {
 		t.Fatalf("response traceparent=%q", recorder.Header().Get("traceparent"))
+	}
+}
+
+func TestContextPassportAffinityHitsAndFallsBackWithoutDatabaseLookup(t *testing.T) {
+	selected := make(chan string, 2)
+	client := &http.Client{Transport: roundTripper(func(r *http.Request) (*http.Response, error) {
+		selected <- r.URL.Host
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"choices":[]}`))}, nil
+	})}
+	directory := routes.New()
+	directory.PublishEndpoint(routes.EndpointRoute{TenantID: "global", Alias: "coder", RoutingPolicy: "manual", Routes: []routes.Snapshot{
+		{TenantID: "global", Alias: "coder", BindingID: "active", RouterURL: "http://active", UpstreamModel: "model"},
+		{TenantID: "global", Alias: "coder", BindingID: "preferred", RouterURL: "http://preferred", UpstreamModel: "model"},
+	}})
+	passports := contextpassport.New()
+	passports.Put(contextpassport.Hint{ID: "session", TenantID: "global", SubjectID: "coder", PreferredBindingID: "preferred", ExpiresAt: time.Now().Add(time.Hour)})
+	handler := (&Gateway{Routes: directory, APIKey: "secret", Client: client, ContextPassports: passports}).Handler()
+	invoke := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"coder","messages":[]}`))
+		req.Header.Set("Authorization", "Bearer secret")
+		req.Header.Set("X-InferCrane-Context-Passport", "session")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, req)
+		return response
+	}
+	response := invoke()
+	if host := <-selected; host != "preferred" {
+		t.Fatalf("selected=%s", host)
+	}
+	if response.Header().Get("X-InferCrane-Affinity") != "hit" {
+		t.Fatalf("affinity=%q", response.Header().Get("X-InferCrane-Affinity"))
+	}
+	directory.PublishEndpoint(routes.EndpointRoute{TenantID: "global", Alias: "coder", RoutingPolicy: "manual", Routes: []routes.Snapshot{{TenantID: "global", Alias: "coder", BindingID: "active", RouterURL: "http://active", UpstreamModel: "model"}}})
+	response = invoke()
+	if host := <-selected; host != "active" {
+		t.Fatalf("fallback selected=%s", host)
+	}
+	if response.Header().Get("X-InferCrane-Affinity") != "fallback" {
+		t.Fatalf("fallback affinity=%q", response.Header().Get("X-InferCrane-Affinity"))
 	}
 }
 

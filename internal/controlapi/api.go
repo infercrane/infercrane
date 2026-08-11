@@ -20,6 +20,7 @@ import (
 	"github.com/infercrane/infercrane/internal/authz"
 	"github.com/infercrane/infercrane/internal/benchmark"
 	"github.com/infercrane/infercrane/internal/burstguard"
+	"github.com/infercrane/infercrane/internal/contextpassport"
 	"github.com/infercrane/infercrane/internal/decision"
 	"github.com/infercrane/infercrane/internal/doctor"
 	"github.com/infercrane/infercrane/internal/domain"
@@ -175,8 +176,9 @@ type API struct {
 	AlertDeliverer           interface {
 		Deliver(context.Context, domain.AlertPolicy, domain.DiagnosticFinding) (domain.AlertDelivery, error)
 	}
-	AsyncInference asyncInferenceService
-	ProductVersion string
+	AsyncInference   asyncInferenceService
+	ContextPassports interface{ Put(contextpassport.Hint) }
+	ProductVersion   string
 }
 
 type BackendMetadata struct {
@@ -1180,6 +1182,12 @@ func (a API) createContextPassport(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 422, "validation_failed", "deployment and ttl_seconds 60..2592000 are required")
 		return
 	}
+	if request.CacheHints == nil {
+		request.CacheHints = map[string]any{}
+	}
+	if request.Metadata == nil {
+		request.Metadata = map[string]any{}
+	}
 	cache, _ := json.Marshal(request.CacheHints)
 	metadata, _ := json.Marshal(request.Metadata)
 	p := r.Context().Value(identityKey{}).(domain.Principal)
@@ -1191,6 +1199,9 @@ func (a API) createContextPassport(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, 422, "validation_failed", err.Error())
 		return
+	}
+	if a.ContextPassports != nil {
+		a.ContextPassports.Put(contextpassport.Hint{ID: row.ID, TenantID: row.TenantID, SubjectID: row.DeploymentName, PreferredBindingID: row.PreferredBindingID, PreferredTargetID: row.PreferredTargetID, ExpiresAt: row.ExpiresAt})
 	}
 	writeJSON(w, 201, map[string]any{"context_passport": contextPassportResponse(row), "durable_kv": false})
 }
@@ -1305,12 +1316,8 @@ func (a API) createFinOpsReport(w http.ResponseWriter, r *http.Request) {
 			ObservedAt *time.Time `json:"observed_at"`
 			ExpiresAt  *time.Time `json:"expires_at"`
 		}
-		if json.Unmarshal([]byte(b.CostMetadataJSON), &cost) == nil && cost.Available && cost.Hourly != nil && cost.Source != "" && cost.ObservedAt != nil {
-			currency := cost.Currency
-			if currency == "" {
-				currency = "USD"
-			}
-			evidence = append(evidence, finops.CostEvidence{ID: b.ID, Scope: "deployment_hourly_rate", Source: cost.Source, Currency: currency, Amount: *cost.Hourly, ObservedAt: *cost.ObservedAt, ExpiresAt: cost.ExpiresAt})
+		if json.Unmarshal([]byte(b.CostMetadataJSON), &cost) == nil && cost.Available && cost.Hourly != nil && cost.Source != "" && cost.Currency != "" && cost.ObservedAt != nil && !cost.ObservedAt.Before(start) && !cost.ObservedAt.After(end) {
+			evidence = append(evidence, finops.CostEvidence{ID: b.ID, Scope: "deployment_hourly_rate", Source: cost.Source, Currency: cost.Currency, Amount: *cost.Hourly, ObservedAt: *cost.ObservedAt, ExpiresAt: cost.ExpiresAt})
 		}
 	}
 	report := finops.Evaluate(end, evidence)

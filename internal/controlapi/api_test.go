@@ -12,6 +12,7 @@ import (
 	"github.com/infercrane/infercrane/internal/asyncinference"
 	"github.com/infercrane/infercrane/internal/authz"
 	"github.com/infercrane/infercrane/internal/benchmark"
+	"github.com/infercrane/infercrane/internal/contextpassport"
 	"github.com/infercrane/infercrane/internal/doctor"
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/integration"
@@ -40,6 +41,56 @@ type fakeStore struct {
 type fakeMembershipStore struct {
 	*fakeStore
 	instances []domain.ControlPlaneInstance
+}
+type fakeContextBurstStore struct {
+	*fakeStore
+	passport domain.ContextPassport
+}
+
+type fakeOptimizationStore struct {
+	*fakeStore
+	report domain.FinOpsReport
+}
+
+func (f *fakeOptimizationStore) RecordFinOpsReport(_ context.Context, row domain.FinOpsReport) (domain.FinOpsReport, error) {
+	row.ID = "finops-1"
+	row.CreatedAt = time.Now().UTC()
+	f.report = row
+	return row, nil
+}
+func (f *fakeOptimizationStore) FinOpsReports(context.Context, string, string, int) ([]domain.FinOpsReport, error) {
+	return []domain.FinOpsReport{f.report}, nil
+}
+func (f *fakeOptimizationStore) CreateAutopilotPlan(context.Context, domain.AutopilotPlan) (domain.AutopilotPlan, bool, error) {
+	return domain.AutopilotPlan{}, false, domain.ErrNotFound
+}
+func (f *fakeOptimizationStore) AutopilotPlan(context.Context, string, string, string, string) (domain.AutopilotPlan, error) {
+	return domain.AutopilotPlan{}, domain.ErrNotFound
+}
+func (f *fakeOptimizationStore) ApproveAutopilotPlan(context.Context, string, string, string) (domain.AutopilotPlan, error) {
+	return domain.AutopilotPlan{}, domain.ErrNotFound
+}
+
+func (f *fakeContextBurstStore) CreateContextPassport(_ context.Context, tenant, name string, row domain.ContextPassport) (domain.ContextPassport, error) {
+	row.ID = "session-1"
+	row.TenantID = tenant
+	row.DeploymentID = "deployment-1"
+	row.DeploymentName = name
+	row.Status = "active"
+	f.passport = row
+	return row, nil
+}
+func (f *fakeContextBurstStore) ContextPassport(context.Context, string, string) (domain.ContextPassport, error) {
+	if f.passport.ID == "" {
+		return domain.ContextPassport{}, domain.ErrNotFound
+	}
+	return f.passport, nil
+}
+func (f *fakeContextBurstStore) SetBurstGuardPolicy(context.Context, string, string, domain.BurstGuardPolicy) (domain.BurstGuardPolicy, error) {
+	return domain.BurstGuardPolicy{}, nil
+}
+func (f *fakeContextBurstStore) RecordBurstGuardDecision(context.Context, domain.BurstGuardDecision) (domain.BurstGuardDecision, error) {
+	return domain.BurstGuardDecision{}, nil
 }
 
 type fakeRecipeLabStore struct {
@@ -122,6 +173,36 @@ func TestAsyncInferenceRequiresConsentAndReturnsDurableJob(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusAccepted || service.submitted.Endpoint != "coder" || service.submitted.IdempotencyKey != "key" || strings.Contains(response.Body.String(), "ciphertext") {
 		t.Fatalf("submit status=%d submitted=%#v body=%s", response.Code, service.submitted, response.Body.String())
+	}
+}
+
+func TestCreateContextPassportPublishesDataPathHint(t *testing.T) {
+	directory := contextpassport.New()
+	store := &fakeContextBurstStore{fakeStore: &fakeStore{}}
+	handler := (API{Store: store, APIKey: "secret", ContextPassports: directory}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/context-passports", strings.NewReader(`{"deployment":"coder","ttl_seconds":3600,"preferred_binding_id":"binding"}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	hint, ok := directory.Resolve("global", "session-1", "coder", time.Now())
+	if !ok || hint.PreferredBindingID != "binding" {
+		t.Fatalf("hint=%#v ok=%v", hint, ok)
+	}
+}
+
+func TestFinOpsPersistsUnavailableWithoutInventingCurrency(t *testing.T) {
+	base := &fakeStore{resolved: domain.ResolvedDeployment{Deployment: domain.Deployment{ID: "deployment-1", Name: "prod"}}}
+	store := &fakeOptimizationStore{fakeStore: base}
+	handler := (API{Store: store, APIKey: "secret"}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments/prod/finops/reports", strings.NewReader(`{"window_seconds":3600}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || store.report.Status != "unavailable" || store.report.Currency != "" || store.report.KnownCost != nil || !strings.Contains(response.Body.String(), `"currency":""`) {
+		t.Fatalf("status=%d report=%#v body=%s", response.Code, store.report, response.Body.String())
 	}
 }
 

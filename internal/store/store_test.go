@@ -224,6 +224,45 @@ func TestInferenceDecisionPolicyEvidenceAndRecommendationsAreTenantSafe(t *testi
 	}
 }
 
+func TestContextPassportPersistsAndRestoresOnlyActiveTenantScopedHints(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	name := "passport-session-" + time.Now().UTC().Format("150405.000000000")
+	target := name + "-target"
+	if _, err := s.AddTarget(ctx, domain.Target{Name: target, URL: "http://session", Provider: "existing", Runtime: "vllm", UpstreamModel: "model"}); err != nil {
+		t.Fatal(err)
+	}
+	deployment, err := s.ApplyDeployment(ctx, domain.Deployment{Name: name, Model: "model", MinReplicas: 1, MaxReplicas: 1}, []string{target})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, err := s.CreateContextPassport(ctx, "global", name, domain.ContextPassport{PreferredBindingID: "binding", PreferredTargetID: "target", CacheHintsJSON: `{"location":"worker"}`, MetadataJSON: `{"bounded":true}`, ExpiresAt: time.Now().UTC().Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.DeploymentID != deployment.ID || row.DeploymentName != name || row.ID == "" {
+		t.Fatalf("passport=%#v", row)
+	}
+	loaded, err := s.ContextPassport(ctx, "global", row.ID)
+	if err != nil || loaded.DeploymentName != name || loaded.PreferredBindingID != "binding" {
+		t.Fatalf("loaded=%#v err=%v", loaded, err)
+	}
+	if _, err = s.ContextPassport(ctx, "other", row.ID); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("cross tenant err=%v", err)
+	}
+	active, err := s.ActiveContextPassports(ctx, time.Now().UTC(), 100)
+	if err != nil || len(active) != 1 || active[0].ID != row.ID {
+		t.Fatalf("active=%#v err=%v", active, err)
+	}
+	if _, err = s.ExecContext(ctx, `UPDATE context_passports SET status='expired',updated_at=? WHERE id=?`, time.Now().UTC(), row.ID); err != nil {
+		t.Fatal(err)
+	}
+	active, err = s.ActiveContextPassports(ctx, time.Now().UTC(), 100)
+	if err != nil || len(active) != 0 {
+		t.Fatalf("expired active=%#v err=%v", active, err)
+	}
+}
+
 func TestRevisionMetricsCountsHealthyActiveReplicas(t *testing.T) {
 	ctx := context.Background()
 	s := openStore(t, ctx)

@@ -52,6 +52,92 @@ func TestCommandHelpDoesNotRequireAuthentication(t *testing.T) {
 	}
 }
 
+func TestIntelligenceCommandsRejectUnsupportedOutputBeforeNetworkAccess(t *testing.T) {
+	cfg := config.Config{ControlURL: "http://127.0.0.1:1", APIKey: "secret"}
+	tests := []struct {
+		name string
+		run  func() error
+	}{
+		{"replay", func() error { return replayCommand(context.Background(), cfg, []string{"prod", "--output", "yaml"}) }},
+		{"capacity", func() error { return capacityCommand(context.Background(), cfg, []string{"--output", "yaml"}) }},
+		{"finops", func() error { return finOpsCommand(context.Background(), cfg, []string{"prod", "--output", "yaml"}) }},
+		{"autopilot", func() error {
+			return autopilotCommand(context.Background(), cfg, []string{"plan", "prod", "--output", "yaml"})
+		}},
+		{"session", func() error {
+			return sessionCommand(context.Background(), cfg, []string{"inspect", "session-1", "--output", "yaml"})
+		}},
+		{"burst", func() error { return burstCommand(context.Background(), cfg, []string{"prod", "--output", "yaml"}) }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if err := test.run(); err == nil || err.Error() != "--output must be human or json" {
+				t.Fatalf("err=%v", err)
+			}
+		})
+	}
+}
+
+func TestIntelligenceCommandsUseDocumentedControlPlaneRoutes(t *testing.T) {
+	var seen []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Method+" "+r.URL.RequestURI())
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/deployments/prod/replays":
+			_, _ = io.WriteString(w, `{"replay":{"id":"replay-1","shape_digest":"digest","request_count":1,"summary":{"requests":1,"inputtokensmean":8,"outputtokensmean":4,"peakconcurrency":1},"window_start":"2026-08-11T00:00:00Z","window_end":"2026-08-11T01:00:00Z"}}`)
+		case "/api/v1/capacity/intelligence":
+			_, _ = io.WriteString(w, `{"capacity":[],"evidence":"observed","window_seconds":3600}`)
+		case "/api/v1/deployments/prod/finops/reports":
+			_, _ = io.WriteString(w, `{"report":{"id":"cost-1","status":"unavailable","currency":"","input_digest":"digest"}}`)
+		case "/api/v1/deployments/prod/autopilot/plans":
+			_, _ = io.WriteString(w, `{"plan":{"id":"plan-1","status":"advisory","objective":"minimize_cost","recommendation_id":"rec-1"},"mutation":"none"}`)
+		case "/api/v1/context-passports":
+			_, _ = io.WriteString(w, `{"context_passport":{"id":"session-1","status":"active","expires_at":"2026-08-12T00:00:00Z"},"durable_kv":false}`)
+		case "/api/v1/deployments/prod/burst-guard/evaluate":
+			_, _ = io.WriteString(w, `{"decision":{"action":"hold","reason":"below threshold","incremental_cost_microusd_hour":0}}`)
+		default:
+			t.Fatalf("unexpected route %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	cfg := config.Config{ControlURL: server.URL, APIKey: "secret"}
+	runs := []func() error{
+		func() error {
+			return replayCommand(context.Background(), cfg, []string{"prod", "--window", "1h", "--output", "json"})
+		},
+		func() error {
+			return capacityCommand(context.Background(), cfg, []string{"--window", "1h", "--output", "json"})
+		},
+		func() error {
+			return finOpsCommand(context.Background(), cfg, []string{"prod", "--window", "1h", "--output", "json"})
+		},
+		func() error {
+			return autopilotCommand(context.Background(), cfg, []string{"plan", "prod", "--output", "json"})
+		},
+		func() error {
+			return sessionCommand(context.Background(), cfg, []string{"create", "prod", "--ttl", "1h", "--output", "json"})
+		},
+		func() error { return burstCommand(context.Background(), cfg, []string{"prod", "--output", "json"}) },
+	}
+	for _, run := range runs {
+		if _, err := captureStdout(t, run); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []string{
+		"POST /api/v1/deployments/prod/replays",
+		"GET /api/v1/capacity/intelligence?window_seconds=3600",
+		"POST /api/v1/deployments/prod/finops/reports",
+		"POST /api/v1/deployments/prod/autopilot/plans",
+		"POST /api/v1/context-passports",
+		"POST /api/v1/deployments/prod/burst-guard/evaluate",
+	}
+	if strings.Join(seen, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("seen=%q want=%q", seen, want)
+	}
+}
+
 func TestRequestCommandSendsOpenAICompatibleRequest(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/chat/completions" || r.Header.Get("Authorization") != "Bearer secret" {

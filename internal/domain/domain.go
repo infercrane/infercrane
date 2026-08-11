@@ -356,7 +356,7 @@ type AutopilotPlan struct {
 }
 
 type ContextPassport struct {
-	ID, TenantID, EndpointID, DeploymentID, Status                      string
+	ID, TenantID, EndpointID, DeploymentID, DeploymentName, Status      string
 	PreferredBindingID, PreferredTargetID, CacheHintsJSON, MetadataJSON string
 	LastActivity, ExpiresAt, CreatedAt, UpdatedAt                       time.Time
 }

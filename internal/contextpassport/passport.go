@@ -22,6 +22,15 @@ func (d *Directory) Put(h Hint) {
 	defer d.mu.Unlock()
 	d.items[h.TenantID+"\x00"+h.ID] = h
 }
+func (d *Directory) Replace(hints []Hint) {
+	next := make(map[string]Hint, len(hints))
+	for _, h := range hints {
+		next[h.TenantID+"\x00"+h.ID] = h
+	}
+	d.mu.Lock()
+	d.items = next
+	d.mu.Unlock()
+}
 func (d *Directory) Resolve(tenant, id, subject string, now time.Time) (Hint, bool) {
 	d.mu.RLock()
 	h, ok := d.items[tenant+"\x00"+id]
