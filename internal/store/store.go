@@ -254,7 +254,13 @@ func (s *Store) AddTargetForTenant(ctx context.Context, tenant string, target do
 	err := s.QueryRowContext(ctx, `SELECT id,name,url,provider,runtime,COALESCE(upstream_model_name,''),health,COALESCE(provider_resource_id,''),COALESCE(provider_details_json::text,''),created_at,updated_at FROM targets WHERE tenant_id=? AND (name=? OR url=?)`, tenant, target.Name, target.URL).Scan(&existing.ID, &existing.Name, &existing.URL, &existing.Provider, &existing.Runtime, &existing.UpstreamModel, &existing.Health, &existing.ProviderResourceID, &existing.ProviderDetails, &created, &updated)
 	if err == nil {
 		existing.CreatedAt, existing.UpdatedAt = parseTime(created), parseTime(updated)
-		if existing.Name == target.Name && existing.URL == target.URL && existing.Runtime == target.Runtime && existing.Provider == target.Provider && existing.UpstreamModel == target.UpstreamModel {
+		// Empty optional metadata means "unspecified" on an idempotent retry. An
+		// adoption or observation may have enriched the target after its original
+		// registration; a later bootstrap must not erase that metadata or fail just
+		// because it did not repeat it. Explicit contradictory metadata remains a
+		// conflict.
+		upstreamCompatible := target.UpstreamModel == "" || existing.UpstreamModel == target.UpstreamModel
+		if existing.Name == target.Name && existing.URL == target.URL && existing.Runtime == target.Runtime && existing.Provider == target.Provider && upstreamCompatible {
 			return existing, nil
 		}
 		return domain.Target{}, fmt.Errorf("%w: target name or URL already registered", ErrConflict)
@@ -281,6 +287,20 @@ func (s *Store) TargetForTenantByName(ctx context.Context, tenant, name string) 
 	var target domain.Target
 	var created, updated string
 	err := s.QueryRowContext(ctx, `SELECT id,name,url,provider,runtime,COALESCE(upstream_model_name,''),health,COALESCE(provider_resource_id,''),COALESCE(provider_details_json::text,''),created_at,updated_at FROM targets WHERE tenant_id=? AND name=?`, tenant, name).Scan(&target.ID, &target.Name, &target.URL, &target.Provider, &target.Runtime, &target.UpstreamModel, &target.Health, &target.ProviderResourceID, &target.ProviderDetails, &created, &updated)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.Target{}, ErrNotFound
+	}
+	if err != nil {
+		return domain.Target{}, err
+	}
+	target.CreatedAt, target.UpdatedAt = parseTime(created), parseTime(updated)
+	return target, nil
+}
+
+func (s *Store) TargetForTenantByID(ctx context.Context, tenant, id string) (domain.Target, error) {
+	var target domain.Target
+	var created, updated string
+	err := s.QueryRowContext(ctx, `SELECT id,name,url,provider,runtime,COALESCE(upstream_model_name,''),health,COALESCE(provider_resource_id,''),COALESCE(provider_details_json::text,''),created_at,updated_at FROM targets WHERE tenant_id=? AND id=?`, tenant, id).Scan(&target.ID, &target.Name, &target.URL, &target.Provider, &target.Runtime, &target.UpstreamModel, &target.Health, &target.ProviderResourceID, &target.ProviderDetails, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Target{}, ErrNotFound
 	}

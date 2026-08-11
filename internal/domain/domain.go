@@ -233,21 +233,64 @@ type CapacityEvidence struct {
 // InferenceRecord contains request metadata and measurements only. Prompt and
 // generated content are deliberately excluded.
 type InferenceRecord struct {
-	RequestID, DeploymentID, RevisionID, TargetID string
-	LogicalModelID, EnvironmentID, EndpointID     string
-	ServingPlanID, BindingID                      string
-	Provider, Runtime, ComputeMode, OperationName string
-	RequestModel, ResponseModel, ErrorType        string
-	SemanticConventionSchema                      string
-	StartedAt                                     time.Time
-	StatusCode                                    int
-	LatencyMS                                     float64
-	TTFTMS                                        *float64
-	InputTokens, OutputTokens                     *int
-	ColdStart                                     *bool
-	ProviderWorkersAtArrival                      *int
-	ProviderCapacityObservedAt                    *time.Time
-	Streaming                                     bool
+	RequestID, TenantID, DeploymentID, RevisionID, TargetID string
+	LogicalModelID, EnvironmentID, EndpointID               string
+	ServingPlanID, BindingID                                string
+	Provider, Runtime, ComputeMode, OperationName           string
+	RequestModel, ResponseModel, ErrorType                  string
+	SemanticConventionSchema                                string
+	StartedAt                                               time.Time
+	StatusCode                                              int
+	LatencyMS                                               float64
+	TTFTMS                                                  *float64
+	InputTokens, OutputTokens                               *int
+	ColdStart                                               *bool
+	ProviderWorkersAtArrival                                *int
+	ProviderCapacityObservedAt                              *time.Time
+	Streaming                                               bool
+	RetryCount                                              int
+	QueueMS, GenerationMS                                   *float64
+	FallbackReason                                          string
+}
+
+type AdoptedWorkload struct {
+	ID, TenantID, EndpointID, BindingID, TargetID string
+	OwnershipMode, Source, ImmutableIdentity      string
+	CreatedAt, UpdatedAt                          time.Time
+}
+
+type RequestInspection struct {
+	InferenceRecord
+	LogicalModel, Environment, Endpoint, ServingPlan, Binding string `json:"-"`
+	Deployment, Revision, Target                              string `json:"-"`
+}
+
+type DiagnosticFinding struct {
+	ID             string    `json:"id"`
+	TenantID       string    `json:"tenant_id"`
+	EndpointID     string    `json:"endpoint_id"`
+	Code           string    `json:"code"`
+	Severity       string    `json:"severity"`
+	Confidence     string    `json:"confidence"`
+	Summary        string    `json:"summary"`
+	EvidenceJSON   string    `json:"evidence_json"`
+	EvidenceDigest string    `json:"evidence_digest"`
+	ObservedAt     time.Time `json:"observed_at"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+type AlertPolicy struct {
+	ID, TenantID, EndpointID, Name, WebhookURL, SecretReferenceID string
+	MinimumSeverity                                               string
+	Enabled                                                       bool
+	MaxAttempts                                                   int
+	CreatedAt, UpdatedAt                                          time.Time
+}
+
+type AlertDelivery struct {
+	ID, TenantID, PolicyID, FindingID, Status, ErrorCode, BodyDigest string
+	Attempts, ResponseStatus                                         int
+	CreatedAt, UpdatedAt, DeliveredAt                                time.Time
 }
 
 type ReleaseGuardPolicy struct {

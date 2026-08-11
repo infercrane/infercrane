@@ -44,8 +44,10 @@ type QueueSignals interface {
 }
 
 type endpointStore interface {
+	TenantsWithEndpoints(context.Context) ([]string, error)
 	EndpointsForTenant(context.Context, string) ([]domain.Endpoint, error)
 	ResolveEndpointForTenant(context.Context, string, string) (domain.ResolvedEndpoint, error)
+	TargetForTenantByID(context.Context, string, string) (domain.Target, error)
 	SetEndpointState(context.Context, string, string, string) error
 }
 
@@ -321,7 +323,56 @@ func (r *Reconciler) Once(ctx context.Context) error {
 		}
 		_ = r.Store.SetDeploymentState(ctx, d.ID, state)
 	}
+	if err := r.observeAdoptedTargets(ctx); err != nil {
+		return err
+	}
 	return r.compileEndpoints(ctx, deployments)
+}
+
+func (r *Reconciler) observeAdoptedTargets(ctx context.Context) error {
+	store, ok := r.Store.(endpointStore)
+	if !ok {
+		return nil
+	}
+	tenants, err := store.TenantsWithEndpoints(ctx)
+	if err != nil {
+		return err
+	}
+	for _, tenant := range tenants {
+		endpoints, listErr := store.EndpointsForTenant(ctx, tenant)
+		if listErr != nil {
+			return listErr
+		}
+		for _, endpoint := range endpoints {
+			resolved, resolveErr := store.ResolveEndpointForTenant(ctx, tenant, endpoint.Name)
+			if resolveErr != nil {
+				return resolveErr
+			}
+			for _, binding := range resolved.Bindings {
+				if binding.Kind != "external" || binding.TargetID == "" {
+					continue
+				}
+				target, targetErr := store.TargetForTenantByID(ctx, tenant, binding.TargetID)
+				if targetErr != nil {
+					return targetErr
+				}
+				backend, runtimeErr := r.Runtimes.ForRuntime(target.Runtime)
+				if runtimeErr != nil {
+					continue
+				}
+				health := "unhealthy"
+				if ok, models := backend.Inspector.Inspect(ctx, target.URL); ok {
+					if _, found := models[target.UpstreamModel]; found {
+						health = "healthy"
+					}
+				}
+				if target.Health != health {
+					_ = r.Store.SetTargetHealth(ctx, target.ID, health)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func (r *Reconciler) compileEndpoints(ctx context.Context, deployments []domain.Deployment) error {
@@ -341,6 +392,15 @@ func (r *Reconciler) compileEndpoints(ctx context.Context, deployments []domain.
 	for _, route := range r.Routes.List() {
 		if byTenant[route.TenantID] == nil {
 			byTenant[route.TenantID] = make(map[string]domain.Deployment)
+		}
+	}
+	tenants, err := store.TenantsWithEndpoints(ctx)
+	if err != nil {
+		return err
+	}
+	for _, tenant := range tenants {
+		if byTenant[tenant] == nil {
+			byTenant[tenant] = make(map[string]domain.Deployment)
 		}
 	}
 	for tenant, concrete := range byTenant {
@@ -366,7 +426,18 @@ func (r *Reconciler) compileEndpoints(ctx context.Context, deployments []domain.
 			compiled := make([]routes.Snapshot, 0, len(resolved.ActivePlan.Bindings))
 			for _, planned := range resolved.ActivePlan.Bindings {
 				binding, found := bindings[planned.BindingID]
-				if !found || binding.Kind != "deployment" {
+				if !found || binding.OwnershipMode == "observe-only" {
+					continue
+				}
+				if binding.Kind == "external" {
+					target, targetErr := store.TargetForTenantByID(ctx, tenant, binding.TargetID)
+					if targetErr != nil || target.Health != "healthy" {
+						continue
+					}
+					compiled = append(compiled, routes.Snapshot{TenantID: tenant, Alias: endpoint.Name, TargetID: target.ID, UpstreamModel: target.UpstreamModel, RouterURL: target.URL, Provider: target.Provider, Runtime: target.Runtime, ComputeMode: "external", LogicalModelID: endpoint.LogicalModelID, EnvironmentID: endpoint.EnvironmentID, EndpointID: endpoint.ID, ServingPlanID: resolved.ActivePlan.ID, BindingID: binding.ID, RoutingWeight: planned.Weight})
+					continue
+				}
+				if binding.Kind != "deployment" {
 					continue
 				}
 				deployment, found := concrete[binding.DeploymentID]

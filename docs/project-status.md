@@ -24,6 +24,7 @@ but lacks production qualification; **planned** is not a product capability.
 | Existing vLLM target registration | Implemented | Persistent, idempotent registration. |
 | Logical deployments and aliases | Implemented | One common upstream model per deployment. |
 | Stable endpoint domain | Local-qualified | Logical models, environments, immutable serving plans, lifecycle-managed deployment bindings, route generation pinning, legacy alias backfill, and deterministic endpoint Release Guard pass the v1.1 clean-tree gates. External import/adopt begins in v1.2. |
+| Incremental adoption and diagnostics | Experimental | Observe-only and traffic-managed adoption, content-free request inspection, deterministic Doctor findings, and bounded signed webhook alerts pass focused local tests; the v1.2 clean-tree gate is pending. |
 | OpenAI-compatible chat proxy | Implemented | Streaming, auth, alias rewrite, request accounting. |
 | vLLM health and model reconciliation | Implemented | Bounded concurrent probes. |
 | Supervised vLLM Router processes | Implemented | Instance-owned generations and deterministic ports. |

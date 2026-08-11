@@ -31,6 +31,7 @@ or link corrections. A changed decision gets a new ADR whose status supersedes t
 | [0019](/adr/0019-kubernetes-integration-boundaries) | Accepted | Integrate Kubernetes without duplicating cluster, serving, or routing controllers. |
 | [0020](/adr/0020-provider-neutral-production-artifact) | Accepted | Keep the base production artifact provider-neutral and make client boundaries executable. |
 | [0021](/adr/0021-stable-endpoint-serving-plans) | Accepted | Separate stable application endpoints from concrete lifecycle resources with immutable serving plans. |
+| [0022](/adr/0022-incremental-adoption-and-deterministic-diagnostics) | Accepted | Adopt incrementally and derive request inspection, Doctor findings, and signed alerts from persisted evidence. |
 
 Use the next sequential number. Include context, decision, consequences, alternatives, and
 verification. Link affected feature documents.

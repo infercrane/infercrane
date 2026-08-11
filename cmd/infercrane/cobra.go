@@ -56,6 +56,8 @@ func newRootCommand(ctx context.Context) *cobra.Command {
 		{use: "doctor [flags]", short: "Validate configuration and dependencies", group: "start"},
 		{use: "plan MODEL [flags]", short: "Preview deployment changes without side effects", group: "start"},
 		{use: "deploy MODEL [flags]", short: "Create a durable inference deployment", group: "start"},
+		{use: "adopt endpoint|promote NAME [flags]", short: "Connect an existing inference workload", group: "start"},
+		{use: "alert ACTION ENDPOINT [flags]", short: "Configure and evaluate signed webhook alerts", group: "operate"},
 		{use: "ui", short: "Open the interactive operations workspace", group: "operate"},
 		{use: "dashboard [flags]", short: "Open or print the browser operations dashboard", group: "operate"},
 		{use: "request DEPLOYMENT [flags]", short: "Send a buffered or streaming inference request", group: "start"},
@@ -122,12 +124,25 @@ func addHelpFlags(command *cobra.Command, name string) {
 	boolFlag := func(flag, help string) { command.Flags().Bool(flag, false, help) }
 	intFlag := func(flag string, value int, help string) { command.Flags().Int(flag, value, help) }
 	switch name {
-	case "init", "doctor", "plan", "deploy", "apply", "request", "deployments", "endpoints", "endpoint", "environment", "logical-model", "status", "logs", "events", "inspect", "explain", "benchmark", "passport", "recommend", "slo", "delete", "orphans", "operation", "integrations", "dashboard":
+	case "init", "doctor", "adopt", "alert", "plan", "deploy", "apply", "request", "deployments", "endpoints", "endpoint", "environment", "logical-model", "status", "logs", "events", "inspect", "explain", "benchmark", "passport", "recommend", "slo", "delete", "orphans", "operation", "integrations", "dashboard":
 		stringFlag("output", "human", "output format: human or json")
 	}
 	switch name {
 	case "dashboard":
 		boolFlag("open", "open the dashboard in the default browser")
+	case "adopt":
+		stringFlag("url", "", "existing OpenAI-compatible base URL")
+		stringFlag("model", "", "stable logical model name")
+		stringFlag("upstream-model", "", "physical model exposed by the workload")
+		stringFlag("source", "vllm", "source type: vllm or openai-compatible")
+		stringFlag("ownership", "observe-only", "observe-only or traffic-managed")
+		stringFlag("runtime", "vllm", "qualified runtime inspector")
+	case "alert":
+		stringFlag("name", "operations", "alert policy name")
+		stringFlag("webhook", "", "HTTPS webhook URL")
+		stringFlag("secret-reference", "", "signing secret reference ID")
+		stringFlag("minimum-severity", "warning", "info, warning, or critical")
+		intFlag("max-attempts", 3, "bounded delivery attempts")
 	case "ui":
 		boolFlag("read-only", "disable control-plane mutation actions")
 	case "endpoint":
@@ -153,6 +168,7 @@ func addHelpFlags(command *cobra.Command, name string) {
 	case "doctor":
 		boolFlag("cloud", "validate elastic provider dependencies")
 		boolFlag("serverless", "validate serverless provider dependencies")
+		stringFlag("window", "1h", "persisted endpoint evidence window")
 	case "plan", "deploy", "apply":
 		stringFlag("name", "", "logical deployment name")
 		stringFlag("targets", "", "comma-separated existing target names")

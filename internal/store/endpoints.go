@@ -383,6 +383,23 @@ func (s *Store) EndpointsForTenant(ctx context.Context, tenant string) ([]domain
 	return out, rows.Err()
 }
 
+func (s *Store) TenantsWithEndpoints(ctx context.Context) ([]string, error) {
+	rows, err := s.QueryContext(ctx, `SELECT DISTINCT tenant_id FROM endpoints WHERE desired_state<>'deleted' ORDER BY tenant_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var tenant string
+		if err = rows.Scan(&tenant); err != nil {
+			return nil, err
+		}
+		out = append(out, tenant)
+	}
+	return out, rows.Err()
+}
+
 type rowScanner interface{ Scan(...any) error }
 
 func scanEndpoint(row rowScanner) (domain.Endpoint, error) {

@@ -99,6 +99,18 @@ type endpointStore interface {
 	EndpointReleaseGuardEvaluations(context.Context, string, string, int) ([]domain.EndpointReleaseGuardEvaluation, error)
 	EndpointReleaseGuardAccepted(context.Context, string, string, string) (bool, error)
 }
+type adoptionStore interface {
+	AdoptEndpoint(context.Context, string, string, string, string, string, string, string, string) (domain.ResolvedEndpoint, domain.AdoptedWorkload, error)
+	PromoteAdoptionOwnership(context.Context, string, string, string) (domain.AdoptedWorkload, error)
+}
+type diagnosticStore interface {
+	RequestInspectionForTenant(context.Context, string, string) (domain.RequestInspection, error)
+	DiagnoseEndpoint(context.Context, string, string, time.Duration) ([]domain.DiagnosticFinding, error)
+}
+type alertStore interface {
+	CreateAlertPolicy(context.Context, string, string, domain.AlertPolicy) (domain.AlertPolicy, error)
+	AlertPoliciesForEndpoint(context.Context, string, string) ([]domain.AlertPolicy, error)
+}
 type API struct {
 	Store         Store
 	APIKey        string
@@ -114,6 +126,9 @@ type API struct {
 	GatewayURL, AIPerfBinary string
 	PassportPrivateKey       ed25519.PrivateKey
 	EndpointRefresh          func(context.Context) error
+	AlertDeliverer           interface {
+		Deliver(context.Context, domain.AlertPolicy, domain.DiagnosticFinding) (domain.AlertDelivery, error)
+	}
 }
 
 type BackendMetadata struct {
@@ -150,6 +165,13 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/logical-models", a.auth(authz.Deploy, a.createLogicalModel))
 	mux.HandleFunc("GET /api/v1/endpoints", a.auth(authz.Read, a.endpoints))
 	mux.HandleFunc("POST /api/v1/endpoints", a.auth(authz.Deploy, a.createEndpoint))
+	mux.HandleFunc("POST /api/v1/adoptions/endpoints", a.auth(authz.Deploy, a.adoptEndpoint))
+	mux.HandleFunc("PUT /api/v1/adoptions/endpoints/{name}/ownership", a.auth(authz.Deploy, a.promoteAdoptionOwnership))
+	mux.HandleFunc("GET /api/v1/requests/{id}", a.auth(authz.Read, a.requestInspection))
+	mux.HandleFunc("POST /api/v1/endpoints/{name}/doctor", a.auth(authz.Deploy, a.diagnoseEndpoint))
+	mux.HandleFunc("GET /api/v1/endpoints/{name}/alerts", a.auth(authz.Read, a.alertPolicies))
+	mux.HandleFunc("POST /api/v1/endpoints/{name}/alerts", a.auth(authz.Deploy, a.createAlertPolicy))
+	mux.HandleFunc("POST /api/v1/endpoints/{name}/alerts/evaluate", a.auth(authz.Deploy, a.evaluateAlerts))
 	mux.HandleFunc("GET /api/v1/endpoints/{name}", a.auth(authz.Read, a.endpoint))
 	mux.HandleFunc("DELETE /api/v1/endpoints/{name}", a.auth(authz.Delete, a.deleteEndpoint))
 	mux.HandleFunc("POST /api/v1/endpoints/{name}/bindings", a.auth(authz.Deploy, a.createEndpointBinding))
@@ -339,6 +361,192 @@ func (a API) createEndpoint(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "endpoint.create", ResourceType: "endpoint", ResourceName: item.Name, Outcome: "succeeded"})
 	writeJSON(w, http.StatusCreated, map[string]any{"endpoint": endpointResponse(item)})
+}
+
+func (a API) adoptEndpoint(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(adoptionStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "endpoint adoption is not supported by this store")
+		return
+	}
+	var request struct {
+		Name          string `json:"name"`
+		LogicalModel  string `json:"logical_model"`
+		UpstreamModel string `json:"upstream_model"`
+		URL           string `json:"url"`
+		Source        string `json:"source"`
+		OwnershipMode string `json:"ownership_mode"`
+		Runtime       string `json:"runtime"`
+	}
+	if !decodeMutationBody(w, r, &request) {
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	resolved, adoption, err := store.AdoptEndpoint(r.Context(), actor.TenantID, request.Name, request.LogicalModel, request.UpstreamModel, request.URL, request.Source, request.OwnershipMode, request.Runtime)
+	if writeEndpointMutationError(w, err) {
+		return
+	}
+	refresh := a.refreshEndpoints(r.Context())
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "endpoint.adopt", ResourceType: "endpoint", ResourceName: request.Name, Outcome: "succeeded"})
+	writeJSON(w, http.StatusCreated, map[string]any{"endpoint": resolvedEndpointResponse(resolved), "adoption": map[string]any{"id": adoption.ID, "target_id": adoption.TargetID, "binding_id": adoption.BindingID, "ownership_mode": adoption.OwnershipMode, "source": adoption.Source, "immutable_identity": adoption.ImmutableIdentity}, "route_refresh": refresh})
+}
+
+func (a API) requestInspection(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(diagnosticStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "request inspection is not supported by this store")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	item, err := store.RequestInspectionForTenant(r.Context(), actor.TenantID, r.PathValue("id"))
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "request was not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "request evidence could not be read")
+		return
+	}
+	writeJSON(w, http.StatusOK, requestInspectionResponse(item))
+}
+
+func (a API) promoteAdoptionOwnership(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(adoptionStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "endpoint adoption is not supported by this store")
+		return
+	}
+	var request struct {
+		OwnershipMode string `json:"ownership_mode"`
+	}
+	if !decodeMutationBody(w, r, &request) {
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	item, err := store.PromoteAdoptionOwnership(r.Context(), actor.TenantID, r.PathValue("name"), request.OwnershipMode)
+	if writeEndpointMutationError(w, err) {
+		return
+	}
+	refresh := a.refreshEndpoints(r.Context())
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "endpoint_adoption.promote", ResourceType: "endpoint", ResourceName: r.PathValue("name"), Outcome: "succeeded"})
+	writeJSON(w, http.StatusOK, map[string]any{"adoption": item, "route_refresh": refresh})
+}
+
+func (a API) diagnoseEndpoint(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(diagnosticStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "endpoint diagnostics are not supported by this store")
+		return
+	}
+	windowSeconds, err := strconv.Atoi(defaultValue(r.URL.Query().Get("window_seconds"), "3600"))
+	if err != nil || windowSeconds < 1 || windowSeconds > 30*24*60*60 {
+		writeError(w, http.StatusBadRequest, "invalid_request", "window_seconds must be between 1 and 2592000")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	items, err := store.DiagnoseEndpoint(r.Context(), actor.TenantID, r.PathValue("name"), time.Duration(windowSeconds)*time.Second)
+	if writeEndpointMutationError(w, err) {
+		return
+	}
+	data := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		data = append(data, diagnosticFindingResponse(item))
+	}
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "endpoint.doctor", ResourceType: "endpoint", ResourceName: r.PathValue("name"), Outcome: "succeeded"})
+	writeJSON(w, http.StatusOK, map[string]any{"data": data, "deterministic": true})
+}
+
+func requestInspectionResponse(item domain.RequestInspection) map[string]any {
+	return map[string]any{"request_id": item.RequestID, "logical_model": item.LogicalModel, "endpoint": item.Endpoint, "environment": item.Environment, "serving_plan": item.ServingPlan, "binding": item.Binding, "deployment": item.Deployment, "revision": item.Revision, "target": item.Target, "provider": item.Provider, "runtime": item.Runtime, "compute_mode": item.ComputeMode, "operation": item.OperationName, "request_model": item.RequestModel, "response_model": item.ResponseModel, "started_at": item.StartedAt, "status_code": item.StatusCode, "latency_ms": item.LatencyMS, "ttft_ms": item.TTFTMS, "queue_ms": item.QueueMS, "generation_ms": item.GenerationMS, "input_tokens": item.InputTokens, "output_tokens": item.OutputTokens, "streaming": item.Streaming, "retry_count": item.RetryCount, "fallback_reason": item.FallbackReason, "error_type": item.ErrorType, "content_recorded": false}
+}
+
+func diagnosticFindingResponse(item domain.DiagnosticFinding) map[string]any {
+	var evidence any
+	_ = json.Unmarshal([]byte(item.EvidenceJSON), &evidence)
+	return map[string]any{"id": item.ID, "endpoint_id": item.EndpointID, "code": item.Code, "severity": item.Severity, "confidence": item.Confidence, "summary": item.Summary, "evidence": evidence, "evidence_digest": item.EvidenceDigest, "observed_at": item.ObservedAt, "created_at": item.CreatedAt}
+}
+
+func (a API) alertPolicies(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(alertStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "alerts are not supported by this store")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	items, err := store.AlertPoliciesForEndpoint(r.Context(), actor.TenantID, r.PathValue("name"))
+	if writeEndpointMutationError(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": items})
+}
+
+func (a API) createAlertPolicy(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(alertStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "alerts are not supported by this store")
+		return
+	}
+	var request struct {
+		Name              string `json:"name"`
+		WebhookURL        string `json:"webhook_url"`
+		SecretReferenceID string `json:"secret_reference_id"`
+		MinimumSeverity   string `json:"minimum_severity"`
+		Enabled           *bool  `json:"enabled"`
+		MaxAttempts       int    `json:"max_attempts"`
+	}
+	if !decodeMutationBody(w, r, &request) {
+		return
+	}
+	enabled := true
+	if request.Enabled != nil {
+		enabled = *request.Enabled
+	}
+	if request.MinimumSeverity == "" {
+		request.MinimumSeverity = "warning"
+	}
+	if request.MaxAttempts == 0 {
+		request.MaxAttempts = 3
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	item, err := store.CreateAlertPolicy(r.Context(), actor.TenantID, r.PathValue("name"), domain.AlertPolicy{Name: request.Name, WebhookURL: request.WebhookURL, SecretReferenceID: request.SecretReferenceID, MinimumSeverity: request.MinimumSeverity, Enabled: enabled, MaxAttempts: request.MaxAttempts})
+	if writeEndpointMutationError(w, err) {
+		return
+	}
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "alert_policy.create", ResourceType: "endpoint", ResourceName: r.PathValue("name"), Outcome: "succeeded"})
+	writeJSON(w, http.StatusCreated, map[string]any{"policy": item})
+}
+
+func (a API) evaluateAlerts(w http.ResponseWriter, r *http.Request) {
+	store, storeOK := a.Store.(alertStore)
+	diagnostics, diagnosticsOK := a.Store.(diagnosticStore)
+	if !storeOK || !diagnosticsOK || a.AlertDeliverer == nil {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "alert delivery is not configured")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	findings, err := diagnostics.DiagnoseEndpoint(r.Context(), actor.TenantID, r.PathValue("name"), time.Hour)
+	if writeEndpointMutationError(w, err) {
+		return
+	}
+	policies, err := store.AlertPoliciesForEndpoint(r.Context(), actor.TenantID, r.PathValue("name"))
+	if writeEndpointMutationError(w, err) {
+		return
+	}
+	deliveries := make([]domain.AlertDelivery, 0)
+	for _, policy := range policies {
+		for _, finding := range findings {
+			delivery, deliveryErr := a.AlertDeliverer.Deliver(r.Context(), policy, finding)
+			if delivery.ID != "" {
+				deliveries = append(deliveries, delivery)
+			}
+			if deliveryErr != nil {
+				writeJSON(w, http.StatusBadGateway, map[string]any{"error": map[string]any{"code": "alert_delivery_failed", "message": deliveryErr.Error()}, "deliveries": deliveries})
+				return
+			}
+		}
+	}
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "alerts.evaluate", ResourceType: "endpoint", ResourceName: r.PathValue("name"), Outcome: "succeeded"})
+	writeJSON(w, http.StatusOK, map[string]any{"findings": len(findings), "deliveries": deliveries})
 }
 
 func (a API) endpoint(w http.ResponseWriter, r *http.Request) {

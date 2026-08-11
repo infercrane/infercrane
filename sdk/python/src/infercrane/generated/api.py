@@ -55,9 +55,37 @@ class ControlAPI:
         path = "/endpoints"
         return cast(dict[str, Any], self._transport.request("POST", path, body=body))
 
+    def adopt_endpoint(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = "/adoptions/endpoints"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
+    def promote_adoption_ownership(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = f"/adoptions/endpoints/{quote(name, safe='')}/ownership"
+        return cast(dict[str, Any], self._transport.request("PUT", path, body=body))
+
+    def inspect_request(self, id: str) -> dict[str, Any]:
+        path = f"/requests/{quote(id, safe='')}"
+        return cast(dict[str, Any], self._transport.request("GET", path))
+
     def get_endpoint(self, name: str) -> dict[str, Any]:
         path = f"/endpoints/{quote(name, safe='')}"
         return cast(dict[str, Any], self._transport.request("GET", path))
+
+    def diagnose_endpoint(self, name: str, *, body: dict[str, Any]) -> ObjectList:
+        path = f"/endpoints/{quote(name, safe='')}/doctor"
+        return cast(ObjectList, self._transport.request("POST", path, body=body))
+
+    def list_alert_policies(self, name: str) -> ObjectList:
+        path = f"/endpoints/{quote(name, safe='')}/alerts"
+        return cast(ObjectList, self._transport.request("GET", path))
+
+    def create_alert_policy(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = f"/endpoints/{quote(name, safe='')}/alerts"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
+    def evaluate_alerts(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = f"/endpoints/{quote(name, safe='')}/alerts/evaluate"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
 
     def delete_endpoint(self, name: str) -> dict[str, Any]:
         path = f"/endpoints/{quote(name, safe='')}"

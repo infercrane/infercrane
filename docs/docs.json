@@ -103,6 +103,7 @@
         "pages": [
           "deployment-spec",
           "features/endpoints",
+          "features/adoption-diagnostics",
           "features/model-artifacts",
           "features/custom-oci",
           "features/provisioning",
@@ -197,7 +198,8 @@
               "adr/0018-signed-release-evidence",
               "adr/0019-kubernetes-integration-boundaries",
               "adr/0020-provider-neutral-production-artifact",
-              "adr/0021-stable-endpoint-serving-plans"
+              "adr/0021-stable-endpoint-serving-plans",
+              "adr/0022-incremental-adoption-and-deterministic-diagnostics"
             ]
           },
           "release-acceptance"

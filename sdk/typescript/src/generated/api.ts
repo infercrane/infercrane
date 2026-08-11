@@ -58,9 +58,44 @@ export class ControlApi {
     return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
   }
 
+  adoptEndpoint(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = '/adoptions/endpoints';
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  promoteAdoptionOwnership(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = `/adoptions/endpoints/${encodeURIComponent(name)}/ownership`;
+    return this.transport.request('PUT', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  inspectRequest(id: string): Promise<Record<string, JsonValue>> {
+    const path = `/requests/${encodeURIComponent(id)}`;
+    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+  }
+
   getEndpoint(name: string): Promise<Record<string, JsonValue>> {
     const path = `/endpoints/${encodeURIComponent(name)}`;
     return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+  }
+
+  diagnoseEndpoint(name: string, body: JsonValue): Promise<ObjectList> {
+    const path = `/endpoints/${encodeURIComponent(name)}/doctor`;
+    return this.transport.request('POST', path, { body }) as Promise<ObjectList>;
+  }
+
+  listAlertPolicies(name: string): Promise<ObjectList> {
+    const path = `/endpoints/${encodeURIComponent(name)}/alerts`;
+    return this.transport.request('GET', path) as Promise<ObjectList>;
+  }
+
+  createAlertPolicy(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = `/endpoints/${encodeURIComponent(name)}/alerts`;
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  evaluateAlerts(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = `/endpoints/${encodeURIComponent(name)}/alerts/evaluate`;
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   deleteEndpoint(name: string): Promise<Record<string, JsonValue>> {

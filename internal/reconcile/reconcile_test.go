@@ -59,6 +59,15 @@ func (f *fakeStore) RecordGeneration(_ context.Context, generation domain.Router
 func (f *fakeStore) EndpointsForTenant(context.Context, string) ([]domain.Endpoint, error) {
 	return f.endpoints, nil
 }
+func (f *fakeStore) TenantsWithEndpoints(context.Context) ([]string, error) {
+	if len(f.endpoints) == 0 {
+		return nil, nil
+	}
+	return []string{"global"}, nil
+}
+func (f *fakeStore) TargetForTenantByID(context.Context, string, string) (domain.Target, error) {
+	return f.target, nil
+}
 func (f *fakeStore) ResolveEndpointForTenant(context.Context, string, string) (domain.ResolvedEndpoint, error) {
 	return f.resolvedEndpoint, nil
 }
@@ -233,6 +242,33 @@ func TestReconcilerCompilesStableEndpointWithoutDatabaseRequestLookup(t *testing
 	}
 	if store.endpointState != "serving" {
 		t.Fatalf("endpoint state=%q", store.endpointState)
+	}
+}
+
+func TestAdoptedEndpointOwnershipControlsRouteCompilation(t *testing.T) {
+	for _, test := range []struct {
+		ownership string
+		routable  bool
+	}{{"observe-only", false}, {"traffic-managed", true}} {
+		t.Run(test.ownership, func(t *testing.T) {
+			store, directory := reconcilerFixture()
+			store.target = domain.Target{ID: "external-target", URL: "https://runtime.example/v1", Runtime: "vllm", Provider: "external", UpstreamModel: "model", Health: "healthy"}
+			endpoint := domain.Endpoint{ID: "external-endpoint", TenantID: "global", Name: "adopted", LogicalModelID: "model-id", EnvironmentID: "environment-id", DesiredState: "serving", ObservedState: "pending", ActiveServingPlanID: "plan"}
+			binding := domain.BackendBinding{ID: "external-binding", EndpointID: endpoint.ID, Kind: "external", TargetID: store.target.ID, OwnershipMode: test.ownership}
+			store.endpoints = []domain.Endpoint{endpoint}
+			store.resolvedEndpoint = domain.ResolvedEndpoint{Endpoint: endpoint, ActivePlan: domain.ServingPlan{ID: "plan", EndpointID: endpoint.ID, RoutingPolicy: "manual", Bindings: []domain.ServingPlanBinding{{BindingID: binding.ID, Weight: 100}}}, Bindings: []domain.BackendBinding{binding}}
+			reconciler := Reconciler{Store: store, Routes: directory, Router: &fakeRouter{routes: directory}, Runtimes: testRuntimeBackends(t, healthyRuntime{})}
+			if err := reconciler.RefreshEndpoints(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			route, _, ok := directory.AcquireForTenant("global", endpoint.Name)
+			if ok != test.routable {
+				t.Fatalf("routable=%t want=%t route=%#v", ok, test.routable, route)
+			}
+			if ok && (route.DeploymentID != "" || route.TargetID != store.target.ID || route.ComputeMode != "external") {
+				t.Fatalf("external route=%#v", route)
+			}
+		})
 	}
 }
 

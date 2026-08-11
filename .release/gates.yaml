@@ -59,6 +59,12 @@ milestone_gates:
     - endpoint_generation_safe_stream_promotion
     - endpoint_telemetry_identity_propagation
     - endpoint_release_guard_persistence_and_determinism
+    - adoption_atomicity_idempotency_and_ownership_enforcement
+    - observe_only_never_routes_or_mutates
+    - traffic_managed_external_route_compilation_without_database_hot_path
+    - request_inspector_tenant_isolation_and_content_exclusion
+    - deterministic_doctor_findings_with_persisted_evidence
+    - signed_webhook_delivery_retry_and_secret_redaction
   deferred_until_v1_manual_qualification:
     - runpod_elastic
     - runpod_serverless

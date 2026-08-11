@@ -404,7 +404,43 @@ func (s *Store) UpdateProvisionedTarget(ctx context.Context, id, resourceID, det
 }
 
 func (s *Store) RecordRequest(ctx context.Context, record domain.InferenceRecord) error {
-	_, err := s.ExecContext(ctx, `INSERT INTO request_records(request_id,deployment_id,revision_id,target_id,started_at,completed_at,status_code,latency_ms,ttft_ms,input_tokens,output_tokens,retry_count,error_type,provider,runtime,compute_mode,operation_name,request_model,response_model,semantic_convention_schema,streaming,cold_start,provider_workers_at_arrival,provider_capacity_observed_at,logical_model_id,environment_id,endpoint_id,serving_plan_id,binding_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(request_id) DO UPDATE SET completed_at=EXCLUDED.completed_at,status_code=EXCLUDED.status_code,latency_ms=EXCLUDED.latency_ms,ttft_ms=EXCLUDED.ttft_ms,input_tokens=EXCLUDED.input_tokens,output_tokens=EXCLUDED.output_tokens,error_type=EXCLUDED.error_type,request_model=EXCLUDED.request_model,response_model=EXCLUDED.response_model,semantic_convention_schema=EXCLUDED.semantic_convention_schema,cold_start=EXCLUDED.cold_start,provider_workers_at_arrival=EXCLUDED.provider_workers_at_arrival,provider_capacity_observed_at=EXCLUDED.provider_capacity_observed_at,logical_model_id=EXCLUDED.logical_model_id,environment_id=EXCLUDED.environment_id,endpoint_id=EXCLUDED.endpoint_id,serving_plan_id=EXCLUDED.serving_plan_id,binding_id=EXCLUDED.binding_id`, record.RequestID, record.DeploymentID, null(record.RevisionID), null(record.TargetID), record.StartedAt.UTC().Format(time.RFC3339Nano), now(), record.StatusCode, record.LatencyMS, record.TTFTMS, record.InputTokens, record.OutputTokens, null(record.ErrorType), null(record.Provider), null(record.Runtime), null(record.ComputeMode), record.OperationName, null(record.RequestModel), null(record.ResponseModel), null(record.SemanticConventionSchema), record.Streaming, record.ColdStart, record.ProviderWorkersAtArrival, record.ProviderCapacityObservedAt, null(record.LogicalModelID), null(record.EnvironmentID), null(record.EndpointID), null(record.ServingPlanID), null(record.BindingID))
+	if record.TenantID == "" {
+		record.TenantID = "global"
+	}
+	const query = `INSERT INTO request_records(
+		request_id,tenant_id,deployment_id,revision_id,target_id,started_at,completed_at,status_code,
+		latency_ms,ttft_ms,input_tokens,output_tokens,retry_count,error_type,provider,runtime,
+		compute_mode,operation_name,request_model,response_model,semantic_convention_schema,
+		streaming,cold_start,provider_workers_at_arrival,provider_capacity_observed_at,
+		logical_model_id,environment_id,endpoint_id,serving_plan_id,binding_id,queue_ms,
+		generation_ms,fallback_reason
+	) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+	ON CONFLICT(request_id) DO UPDATE SET
+		completed_at=EXCLUDED.completed_at,status_code=EXCLUDED.status_code,
+		latency_ms=EXCLUDED.latency_ms,ttft_ms=EXCLUDED.ttft_ms,
+		input_tokens=EXCLUDED.input_tokens,output_tokens=EXCLUDED.output_tokens,
+		retry_count=EXCLUDED.retry_count,error_type=EXCLUDED.error_type,
+		request_model=EXCLUDED.request_model,response_model=EXCLUDED.response_model,
+		semantic_convention_schema=EXCLUDED.semantic_convention_schema,
+		cold_start=EXCLUDED.cold_start,
+		provider_workers_at_arrival=EXCLUDED.provider_workers_at_arrival,
+		provider_capacity_observed_at=EXCLUDED.provider_capacity_observed_at,
+		logical_model_id=EXCLUDED.logical_model_id,environment_id=EXCLUDED.environment_id,
+		endpoint_id=EXCLUDED.endpoint_id,serving_plan_id=EXCLUDED.serving_plan_id,
+		binding_id=EXCLUDED.binding_id,queue_ms=EXCLUDED.queue_ms,
+		generation_ms=EXCLUDED.generation_ms,fallback_reason=EXCLUDED.fallback_reason`
+	_, err := s.ExecContext(ctx, query,
+		record.RequestID, record.TenantID, null(record.DeploymentID), null(record.RevisionID), null(record.TargetID),
+		record.StartedAt.UTC().Format(time.RFC3339Nano), now(), record.StatusCode,
+		record.LatencyMS, record.TTFTMS, record.InputTokens, record.OutputTokens,
+		record.RetryCount, null(record.ErrorType), null(record.Provider), null(record.Runtime),
+		null(record.ComputeMode), record.OperationName, null(record.RequestModel),
+		null(record.ResponseModel), null(record.SemanticConventionSchema), record.Streaming,
+		record.ColdStart, record.ProviderWorkersAtArrival, record.ProviderCapacityObservedAt,
+		null(record.LogicalModelID), null(record.EnvironmentID), null(record.EndpointID),
+		null(record.ServingPlanID), null(record.BindingID), record.QueueMS, record.GenerationMS,
+		null(record.FallbackReason),
+	)
 	return err
 }
 

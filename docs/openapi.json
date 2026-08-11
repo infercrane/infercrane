@@ -1,6 +1,59 @@
 {
   "components": {
     "schemas": {
+      "AdoptionOwnership": {
+        "additionalProperties": false,
+        "properties": {
+          "ownership_mode": {
+            "enum": [
+              "traffic-managed"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "ownership_mode"
+        ],
+        "type": "object"
+      },
+      "AlertPolicyCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "max_attempts": {
+            "maximum": 5,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "minimum_severity": {
+            "enum": [
+              "info",
+              "warning",
+              "critical"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "secret_reference_id": {
+            "type": "string"
+          },
+          "webhook_url": {
+            "format": "uri",
+            "pattern": "^https://",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "webhook_url",
+          "secret_reference_id"
+        ],
+        "type": "object"
+      },
       "BenchmarkRequest": {
         "properties": {
           "concurrency": {
@@ -243,6 +296,50 @@
       },
       "Empty": {
         "type": "null"
+      },
+      "EndpointAdoption": {
+        "additionalProperties": false,
+        "properties": {
+          "logical_model": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "ownership_mode": {
+            "enum": [
+              "observe-only",
+              "traffic-managed"
+            ],
+            "type": "string"
+          },
+          "runtime": {
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "vllm",
+              "openai-compatible"
+            ],
+            "type": "string"
+          },
+          "upstream_model": {
+            "type": "string"
+          },
+          "url": {
+            "format": "uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "logical_model",
+          "url",
+          "source",
+          "ownership_mode",
+          "runtime"
+        ],
+        "type": "object"
       },
       "EndpointBindingCreate": {
         "additionalProperties": false,
@@ -1041,10 +1138,113 @@
   "info": {
     "description": "Durable, authenticated control-plane operations. Mutation responses may outlive the requesting client.",
     "title": "InferCrane Control API",
-    "version": "1.1.0"
+    "version": "1.2.0"
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/adoptions/endpoints": {
+      "post": {
+        "operationId": "adoptEndpoint",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndpointAdoption"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Adopt an existing inference endpoint without transferring lifecycle ownership",
+        "tags": [
+          "Adoption"
+        ]
+      }
+    },
+    "/api/v1/adoptions/endpoints/{name}/ownership": {
+      "put": {
+        "operationId": "promoteAdoptionOwnership",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdoptionOwnership"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Explicitly promote an adopted endpoint to traffic-managed ownership",
+        "tags": [
+          "Adoption"
+        ]
+      }
+    },
     "/api/v1/audit-events": {
       "get": {
         "operationId": "listAuditEvents",
@@ -2798,6 +2998,165 @@
         ]
       }
     },
+    "/api/v1/endpoints/{name}/alerts": {
+      "get": {
+        "operationId": "listAlertPolicies",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List signed webhook alert policies",
+        "tags": [
+          "Alerts"
+        ]
+      },
+      "post": {
+        "operationId": "createAlertPolicy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AlertPolicyCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Create a signed webhook alert policy",
+        "tags": [
+          "Alerts"
+        ]
+      }
+    },
+    "/api/v1/endpoints/{name}/alerts/evaluate": {
+      "post": {
+        "operationId": "evaluateAlerts",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Evaluate deterministic findings and deliver eligible alerts",
+        "tags": [
+          "Alerts"
+        ]
+      }
+    },
     "/api/v1/endpoints/{name}/bindings": {
       "post": {
         "operationId": "createEndpointBinding",
@@ -2852,6 +3211,63 @@
         "summary": "Attach a backend binding to an endpoint",
         "tags": [
           "Endpoints"
+        ]
+      }
+    },
+    "/api/v1/endpoints/{name}/doctor": {
+      "post": {
+        "operationId": "diagnoseEndpoint",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Persist deterministic endpoint findings",
+        "tags": [
+          "Diagnostics"
         ]
       }
     },
@@ -3756,6 +4172,53 @@
         ]
       }
     },
+    "/api/v1/requests/{id}": {
+      "get": {
+        "operationId": "inspectRequest",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Inspect persisted request metadata without content",
+        "tags": [
+          "Diagnostics"
+        ]
+      }
+    },
     "/api/v1/secrets": {
       "get": {
         "operationId": "listSecretReferences",
@@ -4175,6 +4638,12 @@
   ],
   "tags": [
     {
+      "name": "Adoption"
+    },
+    {
+      "name": "Alerts"
+    },
+    {
       "name": "Audit"
     },
     {
@@ -4182,6 +4651,9 @@
     },
     {
       "name": "Deployments"
+    },
+    {
+      "name": "Diagnostics"
     },
     {
       "name": "Endpoints"

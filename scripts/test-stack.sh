@@ -72,6 +72,42 @@ structured_response=$(curl -fsS -H "Authorization: Bearer $api_key" -H 'Content-
   "$base_url/v1/chat/completions")
 printf '%s' "$structured_response" | jq -e '.choices[0].message.content | fromjson | .answer == "ok"' >/dev/null
 
+# Prove incremental adoption against existing workloads without transferring or
+# deleting their lifecycle. Run-scoped endpoint names keep repeated local runs independent.
+adoption_suffix=$(date -u +%H%M%S)-$$
+observe_endpoint=adopt-observe-$adoption_suffix
+traffic_endpoint=adopt-traffic-$adoption_suffix
+docker compose exec -T infercrane infercrane adopt endpoint "$observe_endpoint" --url http://worker-a:8101 --model adopted-smoke --upstream-model Qwen/Qwen3-8B --ownership observe-only >/dev/null
+observe_status=$(curl -sS -o /dev/null -w '%{http_code}' \
+  -H "Authorization: Bearer $api_key" -H 'Content-Type: application/json' \
+  -d "{\"model\":\"$observe_endpoint\",\"messages\":[{\"role\":\"user\",\"content\":\"must not route\"}]}" \
+  "$base_url/v1/chat/completions")
+if [ "$observe_status" != 404 ]; then
+  echo "Observe-only adoption unexpectedly routed a request (HTTP $observe_status)" >&2
+  exit 1
+fi
+docker compose exec -T infercrane infercrane adopt endpoint "$traffic_endpoint" --url http://worker-b:8102 --model adopted-smoke --upstream-model Qwen/Qwen3-8B --ownership traffic-managed >/dev/null
+attempt=0
+until request_headers=$(curl -fsS -D - -o /dev/null -H "Authorization: Bearer $api_key" -H 'Content-Type: application/json' -d "{\"model\":\"$traffic_endpoint\",\"messages\":[{\"role\":\"user\",\"content\":\"adoption smoke\"}]}" "$base_url/v1/chat/completions" 2>/dev/null); do
+  attempt=$((attempt + 1))
+  test "$attempt" -lt 30 || { echo "Traffic-managed adoption did not become routable" >&2; exit 1; }
+  sleep 1
+done
+request_id=$(printf '%s\n' "$request_headers" | awk '/^X-Request-Id:/ {gsub("\r", "", $2); print $2}')
+test -n "$request_id"
+docker compose exec -T infercrane infercrane request inspect "$request_id" --output json | jq -e --arg endpoint "$traffic_endpoint" '.endpoint == $endpoint and .content_recorded == false and .deployment == ""' >/dev/null
+docker compose exec -T infercrane infercrane doctor "$traffic_endpoint" --output json | jq -e '.[].code == "no_active_finding"' >/dev/null
+docker compose exec -T infercrane infercrane adopt promote "$observe_endpoint" --ownership traffic-managed >/dev/null
+attempt=0
+until curl -fsS -o /dev/null -H "Authorization: Bearer $api_key" -H 'Content-Type: application/json' -d "{\"model\":\"$observe_endpoint\",\"messages\":[{\"role\":\"user\",\"content\":\"promoted adoption\"}]}" "$base_url/v1/chat/completions" 2>/dev/null; do
+  attempt=$((attempt + 1))
+  test "$attempt" -lt 30 || { echo "Promoted adoption did not become routable" >&2; exit 1; }
+  sleep 1
+done
+docker compose exec -T infercrane infercrane endpoint delete "$observe_endpoint" --yes >/dev/null
+docker compose exec -T infercrane infercrane endpoint delete "$traffic_endpoint" --yes >/dev/null
+curl -fsS -H "Authorization: Bearer $api_key" -H 'Content-Type: application/json' -d "{\"model\":\"$model\",\"messages\":[{\"role\":\"user\",\"content\":\"shared target remains\"}]}" "$base_url/v1/chat/completions" >/dev/null
+
 docker compose exec -T infercrane infercrane plan Qwen/Qwen3-8B --targets gpu-a,gpu-b --output json >/dev/null
 docker compose exec -T infercrane infercrane doctor
 docker compose exec -T infercrane aws --version

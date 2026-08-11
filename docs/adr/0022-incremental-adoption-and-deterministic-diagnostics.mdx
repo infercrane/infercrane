@@ -1,0 +1,36 @@
+---
+title: "0022: Incremental adoption and deterministic diagnostics"
+description: Keep workload ownership explicit while building daily operational value from persisted evidence.
+---
+
+## Status
+
+Accepted.
+
+## Decision
+
+InferCrane adopts existing workloads through an explicit ownership ladder: `observe-only`,
+`traffic-managed`, then `lifecycle-managed` only when backed by an InferCrane Deployment. Imported
+workloads never become provider-owned resources through inference or configuration defaults.
+
+Request inspection stores metadata and measurements without prompt/output content. Doctor findings
+are deterministic rules over persisted evidence. Signed generic webhooks distribute eligible
+findings using secret references, bounded idempotent delivery, and safe destination validation.
+
+## Consequences
+
+- teams can land InferCrane without a migration or provider credential transfer;
+- read-only adoption cannot affect application traffic;
+- every finding is reproducible and auditable;
+- webhook delivery does not create a second workflow system;
+- ownership escalation remains an explicit future mutation rather than an in-place adoption retry.
+
+## Alternatives
+
+Requiring immediate lifecycle transfer would raise adoption risk. LLM-generated diagnoses would be
+non-reproducible. A separate alert workflow engine would duplicate durable ownership.
+
+## Verification
+
+Migration, store, routing, gateway, CLI/API, webhook signature/retry/SSRF, Docker and documentation
+gates verify this boundary.

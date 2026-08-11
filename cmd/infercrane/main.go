@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/accounting"
+	"github.com/infercrane/infercrane/internal/alert"
 	"github.com/infercrane/infercrane/internal/artifact"
 	"github.com/infercrane/infercrane/internal/authn"
 	"github.com/infercrane/infercrane/internal/autoscale"
@@ -151,7 +152,7 @@ func runLegacy(ctx context.Context, args []string) error {
 		return passportCommand(ctx, config.Config{}, args[1:])
 	}
 	switch args[0] {
-	case "target", "deploy", "apply", "plan", "doctor", "ui", "dashboard", "deployments", "endpoints", "endpoint", "environment", "logical-model", "route", "status", "events", "logs", "request", "explain", "rollout", "delete", "inspect", "operation", "orphans", "integrations", "context", "auth", "tenant", "principal", "secret", "external", "benchmark", "passport", "recommend", "slo", "serve":
+	case "target", "deploy", "apply", "plan", "doctor", "adopt", "alert", "ui", "dashboard", "deployments", "endpoints", "endpoint", "environment", "logical-model", "route", "status", "events", "logs", "request", "explain", "rollout", "delete", "inspect", "operation", "orphans", "integrations", "context", "auth", "tenant", "principal", "secret", "external", "benchmark", "passport", "recommend", "slo", "serve":
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -176,6 +177,10 @@ func runLegacy(ctx context.Context, args []string) error {
 		return planCommand(ctx, cfg, args[1:])
 	case "doctor":
 		return doctorCommand(ctx, cfg, args[1:])
+	case "adopt":
+		return adoptCommand(ctx, cfg, args[1:])
+	case "alert":
+		return alertCommand(ctx, cfg, args[1:])
 	case "ui":
 		return uiCommand(ctx, cfg, args[1:])
 	case "dashboard":
@@ -437,6 +442,9 @@ func planCommand(ctx context.Context, cfg config.Config, args []string) error {
 }
 
 func doctorCommand(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		return endpointDoctorCommand(ctx, cfg, args)
+	}
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	output := fs.String("output", "human", "human or json")
 	cloud := fs.Bool("cloud", false, "also validate SkyPilot cloud credentials")
@@ -482,6 +490,33 @@ func doctorCommand(ctx context.Context, cfg config.Config, args []string) error 
 		return errors.New("--output must be human or json")
 	}
 	return report.Err()
+}
+
+func endpointDoctorCommand(ctx context.Context, cfg config.Config, args []string) error {
+	name := args[0]
+	fs := flag.NewFlagSet("doctor endpoint", flag.ContinueOnError)
+	window := fs.Duration("window", time.Hour, "persisted evidence window")
+	output := fs.String("output", "human", "human or json")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 || *window <= 0 || *window > 30*24*time.Hour {
+		return errors.New("usage: infercrane doctor ENDPOINT [--window 1h] [--output human|json]")
+	}
+	var response struct {
+		Data []map[string]any `json:"data"`
+	}
+	path := fmt.Sprintf("/api/v1/endpoints/%s/doctor?window_seconds=%d", url.PathEscape(name), int(window.Seconds()))
+	if err := controlJSON(ctx, cfg, http.MethodPost, path, "", map[string]any{}, &response); err != nil {
+		return err
+	}
+	if *output == "json" {
+		return printJSON(response.Data)
+	}
+	for _, finding := range response.Data {
+		fmt.Printf("%-8s %-28s %s\n", strings.ToUpper(fmt.Sprint(finding["severity"])), fmt.Sprint(finding["code"]), fmt.Sprint(finding["summary"]))
+	}
+	return nil
 }
 
 func splitTargets(raw string) []string {
@@ -2102,6 +2137,9 @@ func logsCommand(ctx context.Context, cfg config.Config, args []string) error {
 }
 
 func requestCommand(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) > 0 && args[0] == "inspect" {
+		return requestInspectCommand(ctx, cfg, args[1:])
+	}
 	if len(args) == 0 {
 		return errors.New("usage: infercrane request DEPLOYMENT [--message TEXT] [--stream] [--output human|json]")
 	}
@@ -2173,6 +2211,30 @@ func requestCommand(ctx context.Context, cfg config.Config, args []string) error
 		return errors.New("inference response contained no choices")
 	}
 	fmt.Println(result.Choices[0].Message.Content)
+	return nil
+}
+
+func requestInspectCommand(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: infercrane request inspect REQUEST_ID [--output human|json]")
+	}
+	requestID := args[0]
+	fs := flag.NewFlagSet("request inspect", flag.ContinueOnError)
+	output := fs.String("output", "human", "human or json")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 || requestID == "" {
+		return errors.New("usage: infercrane request inspect REQUEST_ID [--output human|json]")
+	}
+	var response map[string]any
+	if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/requests/"+url.PathEscape(requestID), "", nil, &response); err != nil {
+		return err
+	}
+	if *output == "json" {
+		return printJSON(response)
+	}
+	fmt.Printf("Request      %s\nEndpoint     %v\nEnvironment  %v\nBinding      %v\nDeployment   %v\nRevision     %v\nTarget       %v\nLatency      %v ms\nTTFT         %v ms\nStatus       %v\nRetries      %v\nFallback     %v\nContent      not recorded\n", response["request_id"], response["endpoint"], response["environment"], response["binding"], response["deployment"], response["revision"], response["target"], response["latency_ms"], response["ttft_ms"], response["status_code"], response["retry_count"], response["fallback_reason"])
 	return nil
 }
 
@@ -2842,7 +2904,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	if cfg.KubernetesEnabled() {
 		benchmarkBackends["kubernetes"] = controlapi.BackendMetadata{APIKey: cfg.APIKey, APIKeyEnv: "INFERCRANE_WORKER_API_KEY"}
 	}
-	control := (controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: credentialCache, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints}).Handler()
+	control := (controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: credentialCache, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}}).Handler()
 	operationTelemetry := &operations.Telemetry{}
 	handlers := workflows.DeploymentHandlers(s)
 	for kind, handler := range workflows.RolloutHandlers(s) {

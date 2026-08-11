@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -209,5 +210,93 @@ func TestEndpointReleaseGuardPersistsDeterministicPlanDecision(t *testing.T) {
 	history, err = s.EndpointReleaseGuardEvaluations(ctx, "global", endpoint.Name, 10)
 	if err != nil || len(history) != 2 || history[0].ID != acceptedEvaluation.ID || history[1].ID != evaluation.ID {
 		t.Fatalf("history=%#v err=%v", history, err)
+	}
+}
+
+func TestAdoptInspectDiagnoseAndAlertPolicyAreTenantScoped(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	suffix := time.Now().UTC().Format("150405.000000000")
+	name := "adopted-" + suffix
+	resolved, adoption, err := s.AdoptEndpoint(ctx, "global", name, "coder-"+suffix, "coder", "https://inference.example.test/v1/", "vllm", "observe-only", "vllm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if adoption.OwnershipMode != "observe-only" || len(resolved.Bindings) != 1 || resolved.Bindings[0].OwnershipMode != "observe-only" || resolved.Bindings[0].DeploymentID != "" {
+		t.Fatalf("adoption=%#v resolved=%#v", adoption, resolved)
+	}
+	_, repeated, err := s.AdoptEndpoint(ctx, "global", name, "coder-"+suffix, "coder", "https://inference.example.test/v1", "vllm", "observe-only", "vllm")
+	if err != nil || repeated.ID != adoption.ID {
+		t.Fatalf("idempotent adoption=%#v err=%v", repeated, err)
+	}
+	if _, _, err = s.AdoptEndpoint(ctx, "global", name, "coder-"+suffix, "coder", "https://inference.example.test/v1", "vllm", "traffic-managed", "vllm"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("ownership escalation error=%v", err)
+	}
+	promoted, err := s.PromoteAdoptionOwnership(ctx, "global", name, "traffic-managed")
+	if err != nil || promoted.OwnershipMode != "traffic-managed" {
+		t.Fatalf("promoted=%#v err=%v", promoted, err)
+	}
+	resolved, err = s.ResolveEndpointForTenant(ctx, "global", name)
+	if err != nil || resolved.Bindings[0].OwnershipMode != "traffic-managed" {
+		t.Fatalf("promoted binding=%#v err=%v", resolved.Bindings, err)
+	}
+	record := domain.InferenceRecord{RequestID: "request-" + suffix, TenantID: "global", TargetID: adoption.TargetID, LogicalModelID: resolved.LogicalModel.ID, EnvironmentID: resolved.Environment.ID, EndpointID: resolved.Endpoint.ID, ServingPlanID: resolved.ActivePlan.ID, BindingID: adoption.BindingID, Provider: "external", Runtime: "vllm", ComputeMode: "external", OperationName: "chat", StartedAt: time.Now().UTC(), StatusCode: 503, LatencyMS: 250, ErrorType: "upstream_unavailable"}
+	if err = s.RecordRequest(ctx, record); err != nil {
+		t.Fatal(err)
+	}
+	inspection, err := s.RequestInspectionForTenant(ctx, "global", record.RequestID)
+	if err != nil || inspection.Endpoint != name || inspection.Deployment != "" || inspection.ErrorType != "upstream_unavailable" {
+		t.Fatalf("inspection=%#v err=%v", inspection, err)
+	}
+	if _, err = s.RequestInspectionForTenant(ctx, "another-tenant", record.RequestID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-tenant inspection error=%v", err)
+	}
+	for i := 1; i < 20; i++ {
+		record.RequestID = fmt.Sprintf("request-%s-%d", suffix, i)
+		if err = s.RecordRequest(ctx, record); err != nil {
+			t.Fatal(err)
+		}
+	}
+	findings, err := s.DiagnoseEndpoint(ctx, "global", name, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	codes := map[string]bool{}
+	for _, finding := range findings {
+		codes[finding.Code] = true
+	}
+	if !codes["endpoint_not_serving"] || !codes["elevated_error_rate"] {
+		t.Fatalf("findings=%#v", findings)
+	}
+	secret, err := s.CreateSecretReference(ctx, "global", "alert-"+suffix, "env", "INFERCRANE_ALERT_SIGNING_SECRET")
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, err := s.CreateAlertPolicy(ctx, "global", name, domain.AlertPolicy{Name: "operations", WebhookURL: "https://alerts.example.test/infercrane", SecretReferenceID: secret.ID, MinimumSeverity: "warning", Enabled: true, MaxAttempts: 3})
+	if err != nil || policy.EndpointID != resolved.Endpoint.ID {
+		t.Fatalf("policy=%#v err=%v", policy, err)
+	}
+	var critical domain.DiagnosticFinding
+	for _, finding := range findings {
+		if finding.Severity == "critical" {
+			critical = finding
+			break
+		}
+	}
+	delivery, created, err := s.BeginAlertDelivery(ctx, policy, critical, "sha256:body")
+	if err != nil || !created || delivery.Status != "pending" {
+		t.Fatalf("delivery=%#v created=%t err=%v", delivery, created, err)
+	}
+	if err = s.RecordAlertDeliveryAttempt(ctx, delivery.ID, false, 503, "http_503", policy.MaxAttempts); err != nil {
+		t.Fatal(err)
+	}
+	if repeated, createdAgain, err := s.BeginAlertDelivery(ctx, policy, critical, "sha256:body"); err != nil || createdAgain || repeated.Attempts != 1 || repeated.Status != "pending" {
+		t.Fatalf("repeated delivery=%#v created=%t err=%v", repeated, createdAgain, err)
+	}
+	if err = s.DeleteEndpointForTenant(ctx, "global", name); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.TargetForTenantByID(ctx, "global", adoption.TargetID); err != nil {
+		t.Fatalf("adopted target was deleted: %v", err)
 	}
 }

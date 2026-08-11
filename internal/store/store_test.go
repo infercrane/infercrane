@@ -46,6 +46,20 @@ func TestTargetAndDeploymentLifecycle(t *testing.T) {
 		t.Fatalf("idempotent add = (%q, %v), want %q", again.ID, err, first.ID)
 	}
 
+	omittedMetadata, err := s.AddTarget(ctx, domain.Target{
+		Name: "worker-a", URL: "http://127.0.0.1:8001", Provider: "existing",
+		Runtime: "vllm",
+	})
+	if err != nil || omittedMetadata.ID != first.ID || omittedMetadata.UpstreamModel != first.UpstreamModel {
+		t.Fatalf("metadata-omitting retry = (%#v, %v), want enriched target %#v", omittedMetadata, err, first)
+	}
+	if _, err = s.AddTarget(ctx, domain.Target{
+		Name: "worker-a", URL: "http://127.0.0.1:8001", Provider: "existing",
+		Runtime: "vllm", UpstreamModel: "different-model",
+	}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("contradictory metadata error = %v, want conflict", err)
+	}
+
 	deployment, err := s.CreateDeployment(ctx, domain.Deployment{
 		Name: "qwen-prod", Model: "qwen", RoutingStrategy: "round-robin",
 	}, []string{"worker-a", "worker-a"})
