@@ -1,17 +1,17 @@
 {
   "schema_version": 1,
   "program": "infercrane-v1",
-  "current_milestone": "v0.7.0",
-  "state": "qualifying",
+  "current_milestone": "v0.8.0",
+  "state": "planning",
   "baseline": {
-    "commit": "fa0f96ea1f475bdd3bc59843935f22e5308a1f4c",
+    "commit": "1d79ab36df5c92959f9b88496889c36aaa31127d",
     "dev_check": "passed",
     "dev_check_full": "passed",
-    "local_qualification": ".infercrane/qualification/fa0f96ea1f475bdd3bc59843935f22e5308a1f4c/qualification.json",
+    "local_qualification": ".infercrane/qualification/1d79ab36df5c92959f9b88496889c36aaa31127d/qualification.json",
     "real_infrastructure": "deferred"
   },
-  "last_completed_milestone": "v0.6.0-rc.1",
-  "next_action": "commit the reviewed v0.7 implementation, qualify the exact clean commit, and record release-candidate evidence",
-  "rc_tags": ["v0.2.0-rc.1", "v0.3.0-rc.1", "v0.4.0-rc.1", "v0.5.0-rc.1", "v0.6.0-rc.1"],
-  "updated_at": "2026-08-11T09:01:00Z"
+  "last_completed_milestone": "v0.7.0-rc.1",
+  "next_action": "refine v0.8 Release Guard V2, bounded canary, automated rollback, and Inference Passport acceptance criteria before implementation",
+  "rc_tags": ["v0.2.0-rc.1", "v0.3.0-rc.1", "v0.4.0-rc.1", "v0.5.0-rc.1", "v0.6.0-rc.1", "v0.7.0-rc.1"],
+  "updated_at": "2026-08-11T09:02:00Z"
 }
