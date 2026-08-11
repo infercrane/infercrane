@@ -1,0 +1,79 @@
+---
+title: Governed external capacity
+description: Explicit, budgeted health fallback to OpenRouter or another OpenAI-compatible target.
+---
+
+# Governed external capacity
+
+InferCrane can route to a registered external API only when all primary targets are unhealthy. This
+is emergency capacity, not a model marketplace: InferCrane does not resell access, select a model,
+or hide the external provider from the operator.
+
+<Warning>
+External fallback can transmit prompts and generated output outside infrastructure you control and
+can create a separate provider charge. Enabling it requires an explicit privacy acknowledgement and
+hard request and cost-reservation limits.
+</Warning>
+
+## Configure OpenRouter fallback
+
+Inject the credential into the control-plane environment, then register only its reference:
+
+```bash
+export OPENROUTER_API_KEY='...'
+infercrane secret create openrouter --from-env OPENROUTER_API_KEY --output json
+```
+
+Register the exact endpoint and model mapping. Replace `SECRET_REFERENCE_ID` with the returned ID:
+
+```bash
+infercrane target add openrouter-qwen \
+  --provider openrouter \
+  --url https://openrouter.ai/api/v1 \
+  --upstream-model qwen/qwen3-8b
+
+infercrane external configure qwen-prod \
+  --target openrouter-qwen \
+  --adapter openrouter \
+  --secret-reference SECRET_REFERENCE_ID \
+  --request-limit 100 \
+  --cost-limit-usd 10.00 \
+  --max-request-cost-usd 0.10 \
+  --acknowledge-external-data \
+  --enable
+```
+
+The policy attaches the registered fallback target to `qwen-prod`; it is excluded from ordinary
+healthy-primary routing. Inspect the durable policy and reserved budget:
+
+```bash
+infercrane external inspect qwen-prod
+infercrane external inspect qwen-prod --output json
+```
+
+## Selection and budget behavior
+
+The reconciler publishes the external route only after every ordinary target is unhealthy. Before
+each external transmission, the gateway atomically consumes a request reservation and the configured
+worst-case cost reservation. Exhaustion returns an error before sending bytes.
+
+Reservations are deliberately conservative. A request that reserves more than its eventual provider
+charge does not receive an automatic refund in v0.3 because InferCrane does not ingest an authoritative
+provider invoice. `cost_limit_usd` is therefore an authorization ceiling, not an estimated bill.
+
+InferCrane selects the provider before transmission. It never replays a request after a possible send,
+never duplicates streaming traffic, and does not silently shadow user requests. Selection, denial,
+budget counters, and health changes remain available through persisted events and request records.
+
+## Disable fallback
+
+Re-run `external configure` without `--enable` using the same target, reference, acknowledgement, and
+limits. This replaces the policy with a disabled policy; it does not delete the target or secret
+reference.
+
+## Current limits
+
+- Only explicit health fallback is implemented; weighted or semantic external routing is not.
+- Environment references are the only secret resolver in v0.3.
+- Provider prices are not fetched or fabricated.
+- Real OpenRouter billing qualification is deferred to the consolidated manual release gate.

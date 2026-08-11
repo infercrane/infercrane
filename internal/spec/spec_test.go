@@ -75,12 +75,12 @@ scaling: {min_replicas: 1, max_replicas: 4}
 func TestLoadRejectsExcludedRuntimeAndCloud(t *testing.T) {
 	for name, override := range map[string]string{
 		"runtime": "runtime: {engine: sglang}\nprovider: {cloud: runpod}",
-		"cloud":   "runtime: {engine: vllm}\nprovider: {cloud: aws}",
+		"cloud":   "runtime: {engine: vllm}\nprovider: {cloud: unqualified-cloud}",
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := Load(writeSpec(t, "name: qwen\nmodel: {id: Qwen/Qwen3-8B}\nresources: {gpu: L40S}\n"+override+"\n"))
 			if err == nil {
-				t.Fatal("expected v0.1 exclusion error")
+				t.Fatal("expected support-policy exclusion error")
 			}
 		})
 	}

@@ -51,6 +51,23 @@ type Dependencies struct {
 	Ping        func(context.Context, string) error
 	SkyCheck    func(context.Context) error
 	RunPodCheck func(context.Context) error
+	AWSCheck    func(context.Context) error
+}
+
+func CheckAWSBYOC(ctx context.Context, cfg config.Config, deps Dependencies) Check {
+	if !cfg.AWSEnabled() {
+		return Check{"AWS BYOC", Fail, "AWS BYOC is not configured", "Configure the complete INFERCRANE_AWS_* set on the control plane."}
+	}
+	check := deps.AWSCheck
+	if check == nil {
+		check = (provision.AWSEC2{RoleARN: cfg.AWSRoleARN, ExternalID: cfg.AWSExternalID, Region: cfg.AWSRegion}).Check
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	if err := check(checkCtx); err != nil {
+		return Check{"AWS BYOC", Fail, "AWS role assumption or identity probe failed", "Verify the control-plane source identity, trust policy, external ID, region, and AWS CLI v2 installation."}
+	}
+	return Check{"AWS BYOC", Pass, "AWS role assumption and identity probe succeeded", ""}
 }
 
 type CapacityAdvisor interface {

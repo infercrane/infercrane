@@ -8,6 +8,7 @@ import (
 
 type Snapshot struct {
 	DeploymentID       string
+	TargetID           string
 	RevisionID         string
 	TenantID           string
 	Alias              string
@@ -19,6 +20,8 @@ type Snapshot struct {
 	Runtime            string
 	ComputeMode        string
 	UpstreamAPIKey     string
+	ExternalPolicyID   string
+	SelectionReason    string
 	ProviderWorkers    *int
 	ProviderObservedAt time.Time
 }

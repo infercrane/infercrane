@@ -67,6 +67,18 @@ func TestRunPodServerlessCheckIsRequiredWhenRequested(t *testing.T) {
 	}
 }
 
+func TestAWSBYOCCheckIsReadOnlyAndRequiredWhenRequested(t *testing.T) {
+	cfg := config.Config{AWSRoleARN: "arn:aws:iam::123456789012:role/infercrane", AWSRegion: "eu-central-1"}
+	check := CheckAWSBYOC(context.Background(), cfg, Dependencies{AWSCheck: func(context.Context) error { return nil }})
+	if check.Status != Pass {
+		t.Fatalf("unexpected check: %#v", check)
+	}
+	check = CheckAWSBYOC(context.Background(), config.Config{}, Dependencies{})
+	if check.Status != Fail || check.Remediation == "" {
+		t.Fatalf("unexpected unconfigured check: %#v", check)
+	}
+}
+
 func TestCapacityCheckWarnsWithoutChangingHardware(t *testing.T) {
 	check := CheckCapacity(context.Background(), "provider-a", "L40S", capacityAdvisor(func(_ context.Context, request provision.AvailabilityRequest) (provision.Availability, error) {
 		if request.GPU != "L40S" || request.Count != 1 {

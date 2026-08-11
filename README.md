@@ -15,7 +15,7 @@ infercrane request qwen3-8b --message "Hello" --stream
 - Explainable durable operations
 - Elastic and provider-native serverless compute
 
-Read the [InferCrane documentation](https://infercrane.mintlify.app) for the five-minute local quickstart, product concepts, operations, integrations, and references. The Mintlify source lives in [`docs/`](docs/index.mdx); run `npm install && npm run dev` there to preview documentation changes locally.
+Read the [InferCrane documentation](https://infercrane.mintlify.site) for the five-minute local quickstart, product concepts, operations, integrations, and references. The Mintlify source lives in [`docs/`](docs/index.mdx); run `npm install && npm run dev` there to preview documentation changes locally.
 
 ## Why InferCrane?
 
@@ -38,8 +38,9 @@ InferCrane is under active development. Its lifecycle, persistence, routing, and
 provider-neutral. Integrations are registered adapters and public availability is controlled by an
 explicit qualification matrix. The core gateway, PostgreSQL control plane, existing-worker
 workflow, reconciliation, router supervision, and durable bounded autoscaling are implemented and
-tested locally. The first v0.1 qualification target is vLLM on RunPod; that support boundary is not
-the architecture boundary, and real-provider acceptance and soak testing remain incomplete.
+tested locally. v0.3 adds a narrowly qualified AWS EC2 BYOC adapter and governed external fallback
+alongside the original RunPod paths. Registration is not real-provider proof: paid acceptance and
+soak testing remain explicitly incomplete until their evidence gates run.
 
 See the authoritative [capability status](docs/project-status.md) before relying on a feature.
 The [product vision and roadmap](docs/product-vision.md) defines the developer experience and the

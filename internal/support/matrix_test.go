@@ -30,3 +30,13 @@ func TestMatrixCanQualifyNewAdaptersWithoutChangingValidationCode(t *testing.T) 
 		t.Fatal("unqualified provider mode was accepted")
 	}
 }
+
+func TestV03QualifiesOnlyNarrowAWSElasticPath(t *testing.T) {
+	matrix := V03()
+	if err := matrix.Validate("vllm", "aws", "elastic"); err != nil {
+		t.Fatal(err)
+	}
+	if err := matrix.Validate("vllm", "aws", "serverless"); err == nil {
+		t.Fatal("AWS serverless must remain outside the v0.3 qualification policy")
+	}
+}

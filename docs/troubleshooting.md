@@ -8,5 +8,16 @@ Start with `infercrane doctor`, then `status`, `events`, `inspect`, and `explain
 - **Candidate rejected:** use `explain rollout`; compare persisted metrics and policy rather than retrying promotion blindly.
 - **Slow first request:** use `explain cold-start`; unavailable provider substages are intentionally not inferred.
 - **Delete interrupted:** reconnect and inspect the same durable operation. Confirm provider inventory is empty before considering cleanup complete.
+- **AWS deployment is rejected before provisioning:** run `infercrane doctor --aws`; verify the
+  complete `INFERCRANE_AWS_*` set, exact requested region/GPU, immutable image digest, role trust,
+  private subnet reachability, and instance-profile access to the worker secret. Retrying a
+  configuration error does not create capacity.
+- **External fallback does not activate:** run `infercrane external inspect DEPLOYMENT`, then check
+  primary health, privacy acknowledgement, the injected secret reference, external `/models`
+  inventory, and remaining request/cost reservations. InferCrane fails closed and never replays a
+  possibly transmitted request.
+- **External fallback returns 429:** the in-memory lease or persisted hard budget is exhausted.
+  Inspect the policy before deliberately increasing its ceilings; InferCrane does not fabricate or
+  refund provider cost.
 
 Never paste API keys, prompts, generated content, or unredacted provider responses into a public issue.

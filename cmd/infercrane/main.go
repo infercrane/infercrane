@@ -17,6 +17,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"text/tabwriter"
@@ -31,6 +32,7 @@ import (
 	"github.com/infercrane/infercrane/internal/controlapi"
 	"github.com/infercrane/infercrane/internal/doctor"
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/external"
 	"github.com/infercrane/infercrane/internal/gateway"
 	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/operations"
@@ -40,13 +42,14 @@ import (
 	"github.com/infercrane/infercrane/internal/router"
 	"github.com/infercrane/infercrane/internal/routes"
 	runtimeadapter "github.com/infercrane/infercrane/internal/runtime"
+	"github.com/infercrane/infercrane/internal/secrets"
 	"github.com/infercrane/infercrane/internal/spec"
 	"github.com/infercrane/infercrane/internal/store"
 	"github.com/infercrane/infercrane/internal/support"
 	"github.com/infercrane/infercrane/internal/workflows"
 )
 
-var version = "0.2.0-rc.1"
+var version = "0.3.0-rc.1"
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -116,7 +119,7 @@ func runLegacy(ctx context.Context, args []string) error {
 		return contextCommand(args[1:])
 	}
 	switch args[0] {
-	case "target", "deploy", "apply", "plan", "doctor", "ui", "deployments", "route", "status", "events", "logs", "request", "explain", "rollout", "delete", "inspect", "operation", "orphans", "integrations", "context", "auth", "tenant", "principal", "benchmark", "serve":
+	case "target", "deploy", "apply", "plan", "doctor", "ui", "deployments", "route", "status", "events", "logs", "request", "explain", "rollout", "delete", "inspect", "operation", "orphans", "integrations", "context", "auth", "tenant", "principal", "secret", "external", "benchmark", "serve":
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -181,6 +184,10 @@ func runLegacy(ctx context.Context, args []string) error {
 		return tenantAPICommand(ctx, cfg, args[1:])
 	case "principal":
 		return principalAPICommand(ctx, cfg, args[1:])
+	case "secret":
+		return secretAPICommand(ctx, cfg, args[1:])
+	case "external":
+		return externalAPICommand(ctx, cfg, args[1:])
 	case "benchmark":
 		return benchmarkCommand(ctx, cfg, args[1:])
 	}
@@ -346,6 +353,7 @@ func doctorCommand(ctx context.Context, cfg config.Config, args []string) error 
 	output := fs.String("output", "human", "human or json")
 	cloud := fs.Bool("cloud", false, "also validate SkyPilot cloud credentials")
 	serverless := fs.Bool("serverless", false, "also validate RunPod Serverless credentials and template")
+	aws := fs.Bool("aws", false, "also validate the configured AWS BYOC role")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -355,6 +363,7 @@ func doctorCommand(ctx context.Context, cfg config.Config, args []string) error 
 	query := url.Values{}
 	query.Set("cloud", fmt.Sprint(*cloud))
 	query.Set("serverless", fmt.Sprint(*serverless))
+	query.Set("aws", fmt.Sprint(*aws))
 	var report doctor.Report
 	if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/doctor?"+query.Encode(), "", nil, &report); err != nil {
 		return err
@@ -399,6 +408,15 @@ func validateOutput(output string) error {
 	if output != "human" && output != "json" {
 		return errors.New("--output must be human or json")
 	}
+	return nil
+}
+
+func printJSON(value any) error {
+	encoded, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(encoded))
 	return nil
 }
 
@@ -485,7 +503,8 @@ func targetAPICommand(ctx context.Context, cfg config.Config, args []string) err
 	}
 	fs := flag.NewFlagSet("target add", flag.ContinueOnError)
 	targetURL := fs.String("url", "", "target URL")
-	runtimeName := fs.String("runtime", "vllm", "runtime")
+	provider := fs.String("provider", "existing", "existing, openrouter, or openai-compatible-external")
+	runtimeName := fs.String("runtime", "", "runtime identity; defaults to vllm for existing targets and openai-compatible-api for external targets")
 	upstream := fs.String("upstream-model", "", "upstream model")
 	if err := fs.Parse(args[2:]); err != nil {
 		return err
@@ -493,7 +512,7 @@ func targetAPICommand(ctx context.Context, cfg config.Config, args []string) err
 	if *targetURL == "" {
 		return errors.New("--url is required")
 	}
-	request := map[string]string{"name": args[1], "url": *targetURL, "runtime": *runtimeName, "upstream_model": *upstream}
+	request := map[string]string{"name": args[1], "url": *targetURL, "provider": *provider, "runtime": *runtimeName, "upstream_model": *upstream}
 	if err := controlJSON(ctx, cfg, http.MethodPost, "/api/v1/targets", "", request, nil); err != nil {
 		return err
 	}
@@ -1179,7 +1198,8 @@ func authCommand(ctx context.Context, cfg config.Config, args []string) error {
 	}
 	var response struct {
 		Principal struct {
-			ID, TenantID, Name, Role string
+			ID, TenantID, Name, Role, Kind string
+			Scopes                         []string `json:"scopes"`
 		} `json:"principal"`
 	}
 	if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/whoami", "", nil, &response); err != nil {
@@ -1190,7 +1210,7 @@ func authCommand(ctx context.Context, cfg config.Config, args []string) error {
 		fmt.Println(string(encoded))
 		return nil
 	}
-	fmt.Printf("Authenticated  yes\nPrincipal      %s\nRole           %s\nTenant         %s\nControl plane  %s\n", response.Principal.Name, response.Principal.Role, response.Principal.TenantID, cfg.ControlURL)
+	fmt.Printf("Authenticated  yes\nPrincipal      %s\nRole           %s\nScopes         %s\nTenant         %s\nControl plane  %s\n", response.Principal.Name, response.Principal.Role, strings.Join(response.Principal.Scopes, ","), response.Principal.TenantID, cfg.ControlURL)
 	return nil
 }
 
@@ -1301,6 +1321,7 @@ func principalAPICommand(ctx context.Context, cfg config.Config, args []string) 
 		}
 		fs := flag.NewFlagSet("principal create", flag.ContinueOnError)
 		role := fs.String("role", "", "principal role")
+		scopes := fs.String("scopes", "", "comma-separated scopes (defaults to the role ceiling)")
 		if err := fs.Parse(args[2:]); err != nil {
 			return err
 		}
@@ -1309,14 +1330,23 @@ func principalAPICommand(ctx context.Context, cfg config.Config, args []string) 
 		}
 		var response struct {
 			Principal struct {
-				ID, Name, Role, TenantID string
+				ID, Name, Role, Kind, TenantID string
+				Scopes                         []string `json:"scopes"`
 			} `json:"principal"`
 			Credential string `json:"credential"`
 		}
-		if err := controlJSON(ctx, cfg, http.MethodPost, "/api/v1/principals", "", map[string]string{"name": args[1], "role": *role}, &response); err != nil {
+		request := map[string]any{"name": args[1], "role": *role}
+		if *scopes != "" {
+			requested := strings.Split(*scopes, ",")
+			for i := range requested {
+				requested[i] = strings.TrimSpace(requested[i])
+			}
+			request["scopes"] = requested
+		}
+		if err := controlJSON(ctx, cfg, http.MethodPost, "/api/v1/principals", "", request, &response); err != nil {
 			return err
 		}
-		fmt.Printf("principal %s created with role %s\nCredential  %s\n", response.Principal.ID, response.Principal.Role, response.Credential)
+		fmt.Printf("service account %s created with role %s and scopes %s\nCredential  %s\n", response.Principal.ID, response.Principal.Role, strings.Join(response.Principal.Scopes, ","), response.Credential)
 		return nil
 	case "rotate":
 		if len(args) != 2 {
@@ -1342,6 +1372,197 @@ func principalAPICommand(ctx context.Context, cfg config.Config, args []string) 
 	default:
 		return errors.New("usage: infercrane principal create NAME --role ROLE | principal rotate ID | principal revoke ID")
 	}
+}
+
+func secretAPICommand(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: infercrane secret create NAME --from-env VARIABLE | secret list [--output human|json] | secret delete ID --yes")
+	}
+	switch args[0] {
+	case "create":
+		if len(args) < 2 {
+			return errors.New("usage: infercrane secret create NAME --from-env VARIABLE")
+		}
+		fs := flag.NewFlagSet("secret create", flag.ContinueOnError)
+		fromEnv := fs.String("from-env", "", "environment variable containing the secret")
+		output := fs.String("output", "human", "human or json")
+		if err := fs.Parse(args[2:]); err != nil {
+			return err
+		}
+		if *fromEnv == "" {
+			return errors.New("--from-env is required; raw secret values are never accepted")
+		}
+		if err := validateOutput(*output); err != nil {
+			return err
+		}
+		var response struct {
+			Secret domain.SecretReference `json:"secret"`
+		}
+		request := map[string]string{"name": args[1], "resolver": "env", "reference": *fromEnv}
+		if err := controlJSON(ctx, cfg, http.MethodPost, "/api/v1/secrets", "", request, &response); err != nil {
+			return err
+		}
+		if *output == "json" {
+			return printJSON(response)
+		}
+		fmt.Printf("secret reference %s created\nResolver  env:%s\n", response.Secret.ID, response.Secret.Reference)
+		return nil
+	case "list":
+		fs := flag.NewFlagSet("secret list", flag.ContinueOnError)
+		output := fs.String("output", "human", "human or json")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if err := validateOutput(*output); err != nil {
+			return err
+		}
+		var response struct {
+			Data []domain.SecretReference `json:"data"`
+		}
+		if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/secrets", "", nil, &response); err != nil {
+			return err
+		}
+		if *output == "json" {
+			return printJSON(response)
+		}
+		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+		fmt.Fprintln(w, "ID\tNAME\tRESOLVER\tREFERENCE")
+		for _, item := range response.Data {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", item.ID, item.Name, item.Resolver, item.Reference)
+		}
+		return w.Flush()
+	case "delete":
+		if len(args) < 2 {
+			return errors.New("usage: infercrane secret delete ID --yes")
+		}
+		fs := flag.NewFlagSet("secret delete", flag.ContinueOnError)
+		yes := fs.Bool("yes", false, "confirm deletion")
+		if err := fs.Parse(args[2:]); err != nil {
+			return err
+		}
+		if !*yes {
+			return errors.New("secret reference deletion requires --yes")
+		}
+		if err := controlJSON(ctx, cfg, http.MethodDelete, "/api/v1/secrets/"+url.PathEscape(args[1]), "", nil, nil); err != nil {
+			return err
+		}
+		fmt.Printf("secret reference %s deleted\n", args[1])
+		return nil
+	default:
+		return errors.New("usage: infercrane secret create NAME --from-env VARIABLE | secret list | secret delete ID --yes")
+	}
+}
+
+func externalAPICommand(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) < 2 {
+		return errors.New("usage: infercrane external configure DEPLOYMENT [flags] | external inspect DEPLOYMENT [--output human|json]")
+	}
+	deployment := args[1]
+	switch args[0] {
+	case "configure":
+		fs := flag.NewFlagSet("external configure", flag.ContinueOnError)
+		target := fs.String("target", "", "attached external target name")
+		adapter := fs.String("adapter", "openrouter", "openrouter or openai-compatible-external")
+		secretReference := fs.String("secret-reference", "", "secret reference ID")
+		requestLimit := fs.Int64("request-limit", 0, "hard maximum reserved requests")
+		costLimit := fs.String("cost-limit-usd", "", "hard USD reservation budget")
+		maxRequestCost := fs.String("max-request-cost-usd", "", "worst-case USD reserved per request")
+		acknowledge := fs.Bool("acknowledge-external-data", false, "acknowledge prompts and outputs leave controlled infrastructure")
+		enable := fs.Bool("enable", false, "enable fallback after validation")
+		output := fs.String("output", "human", "human or json")
+		if err := fs.Parse(args[2:]); err != nil {
+			return err
+		}
+		if *target == "" || *secretReference == "" || *requestLimit < 1 || *costLimit == "" || *maxRequestCost == "" {
+			return errors.New("--target, --secret-reference, --request-limit, --cost-limit-usd, and --max-request-cost-usd are required")
+		}
+		if *enable && !*acknowledge {
+			return errors.New("--enable requires --acknowledge-external-data")
+		}
+		if err := validateOutput(*output); err != nil {
+			return err
+		}
+		costMicrousd, err := parseMicrousd(*costLimit)
+		if err != nil {
+			return fmt.Errorf("--cost-limit-usd: %w", err)
+		}
+		maxMicrousd, err := parseMicrousd(*maxRequestCost)
+		if err != nil {
+			return fmt.Errorf("--max-request-cost-usd: %w", err)
+		}
+		request := map[string]any{"target": *target, "adapter": *adapter, "secret_reference_id": *secretReference, "enabled": *enable, "privacy_acknowledged": *acknowledge, "request_limit": *requestLimit, "cost_limit_microusd": costMicrousd, "max_request_cost_microusd": maxMicrousd}
+		var response struct {
+			Policy domain.ExternalTargetPolicy `json:"policy"`
+		}
+		if err := controlJSON(ctx, cfg, http.MethodPut, "/api/v1/deployments/"+url.PathEscape(deployment)+"/external-policy", "", request, &response); err != nil {
+			return err
+		}
+		if *output == "json" {
+			return printJSON(response)
+		}
+		state := "configured (disabled)"
+		if response.Policy.Enabled {
+			state = "enabled"
+		}
+		fmt.Printf("External fallback %s\nDeployment       %s\nAdapter          %s\nRequests         %d hard limit\nCost reservation $%s hard limit\nPrivacy          acknowledged\n", state, deployment, response.Policy.Adapter, response.Policy.RequestLimit, formatMicrousd(response.Policy.CostLimitMicrousd))
+		return nil
+	case "inspect":
+		fs := flag.NewFlagSet("external inspect", flag.ContinueOnError)
+		output := fs.String("output", "human", "human or json")
+		if err := fs.Parse(args[2:]); err != nil {
+			return err
+		}
+		if err := validateOutput(*output); err != nil {
+			return err
+		}
+		var response struct {
+			Policy domain.ExternalTargetPolicy `json:"policy"`
+		}
+		if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/deployments/"+url.PathEscape(deployment)+"/external-policy", "", nil, &response); err != nil {
+			return err
+		}
+		if *output == "json" {
+			return printJSON(response)
+		}
+		fmt.Printf("Deployment       %s\nAdapter          %s\nEnabled          %t\nPrivacy          %t\nRequests         %d/%d reserved\nCost reservation $%s/$%s\n", deployment, response.Policy.Adapter, response.Policy.Enabled, response.Policy.PrivacyAcknowledged, response.Policy.RequestsReserved, response.Policy.RequestLimit, formatMicrousd(response.Policy.CostReservedMicrousd), formatMicrousd(response.Policy.CostLimitMicrousd))
+		return nil
+	default:
+		return errors.New("usage: infercrane external configure DEPLOYMENT [flags] | external inspect DEPLOYMENT")
+	}
+}
+
+func parseMicrousd(value string) (int64, error) {
+	value = strings.TrimSpace(value)
+	parts := strings.Split(value, ".")
+	if len(parts) > 2 || parts[0] == "" || len(parts) == 2 && len(parts[1]) > 6 {
+		return 0, errors.New("use a positive decimal with at most six fractional digits")
+	}
+	for _, part := range parts {
+		for _, digit := range part {
+			if digit < '0' || digit > '9' {
+				return 0, errors.New("use a positive decimal with at most six fractional digits")
+			}
+		}
+	}
+	whole, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || whole > (1<<63-1)/1_000_000 {
+		return 0, errors.New("USD amount is too large")
+	}
+	fraction := ""
+	if len(parts) == 2 {
+		fraction = parts[1]
+	}
+	fraction += strings.Repeat("0", 6-len(fraction))
+	fractional, _ := strconv.ParseInt(fraction, 10, 64)
+	result := whole*1_000_000 + fractional
+	if result < 1 {
+		return 0, errors.New("amount must be positive")
+	}
+	return result, nil
+}
+
+func formatMicrousd(value int64) string {
+	return fmt.Sprintf("%d.%06d", value/1_000_000, value%1_000_000)
 }
 
 func inspectCommand(ctx context.Context, cfg config.Config, args []string) error {
@@ -2026,7 +2247,7 @@ func formatGuardEvidence(metrics domain.RevisionMetrics) string {
 func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	integrationRegistry, err := integration.V02Catalog()
+	integrationRegistry, err := integration.V03Catalog()
 	if err != nil {
 		return fmt.Errorf("configure integration contracts: %w", err)
 	}
@@ -2042,6 +2263,8 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		return fmt.Errorf("bind runtime adapter: %w", err)
 	}
 	serverless := provision.RunPodServerless{APIKey: cfg.RunPodAPIKey, BaseURL: cfg.RunPodRESTURL, TemplateID: cfg.RunPodServerlessTemplateID}
+	externalBudgets := external.NewBudgetPool()
+	externalCoordinator := &external.Coordinator{Store: s, Secrets: secrets.Environment{}, Budgets: externalBudgets}
 	logger := slog.Default()
 	recorder := accounting.New(s, logger, 8192, 4)
 	defer func() {
@@ -2049,7 +2272,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		defer cancel()
 		_ = recorder.Close(closeCtx)
 	}()
-	rec := &reconcile.Reconciler{Store: s, Routes: directory, Router: backend, Runtimes: runtimeBackends, Interval: cfg.HealthInterval, RouterStartPort: cfg.RouterStartPort, InstanceID: cfg.InstanceID, Logger: logger, DirectTargets: map[string]reconcile.DirectTargetBackend{"runpod-serverless": {Provider: "runpod", APIKey: cfg.RunPodAPIKey, Status: serverless}}}
+	rec := &reconcile.Reconciler{Store: s, Routes: directory, Router: backend, Runtimes: runtimeBackends, Interval: cfg.HealthInterval, RouterStartPort: cfg.RouterStartPort, InstanceID: cfg.InstanceID, Logger: logger, DirectTargets: map[string]reconcile.DirectTargetBackend{"runpod-serverless": {Provider: "runpod", APIKey: cfg.RunPodAPIKey, Status: serverless}}, ExternalFallback: externalCoordinator}
 	go purgeRequests(ctx, s, cfg.RequestRetention, logger)
 	go func() {
 		_ = rec.Run(ctx)
@@ -2061,7 +2284,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		return fmt.Errorf("load credential snapshot: %w", err)
 	}
 	go func() { _ = credentialCache.Run(ctx) }()
-	diagnostics := func(checkCtx context.Context, cloud, checkServerless bool) doctor.Report {
+	diagnostics := func(checkCtx context.Context, cloud, checkServerless, checkAWS bool) doctor.Report {
 		report := doctor.Run(checkCtx, cfg, doctor.Dependencies{})
 		if cloud {
 			report.Add(doctor.CheckCloudCredentials(checkCtx, doctor.Dependencies{}))
@@ -2082,6 +2305,9 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 				doctor.Capability{Adapter: "runpod-serverless", Name: "model_cache", State: "unknown", Detail: "template cache locality is not exposed by the configured endpoint API"},
 			)
 		}
+		if checkAWS {
+			report.Add(doctor.CheckAWSBYOC(checkCtx, cfg, doctor.Dependencies{}))
+		}
 		return report
 	}
 	control := (controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: credentialCache, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: map[string]controlapi.BackendMetadata{"skypilot": {APIKey: cfg.APIKey, APIKeyEnv: "INFERCRANE_WORKER_API_KEY"}, "runpod-serverless": {APIKey: cfg.RunPodAPIKey, APIKeyEnv: "RUNPOD_API_KEY", Serverless: true}}, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary}).Handler()
@@ -2097,7 +2323,22 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	if err != nil {
 		return fmt.Errorf("configure elastic integration: %w", err)
 	}
-	replicaBackends, err := workflows.NewReplicaBackends(workflows.ReplicaBackend{Name: "skypilot", Cloud: "runpod", Runtime: "vllm", Profile: elasticProfile, Provider: provision.SkyPilot{APIKey: cfg.APIKey}, Capacity: provision.RunPodAvailability{APIKey: cfg.RunPodAPIKey}})
+	elasticBackends := []workflows.ReplicaBackend{{Name: "skypilot", Cloud: "runpod", Runtime: "vllm", Profile: elasticProfile, Provider: provision.SkyPilot{APIKey: cfg.APIKey}, Capacity: provision.RunPodAvailability{APIKey: cfg.RunPodAPIKey}}}
+	if cfg.AWSEnabled() {
+		awsProfile, profileErr := integrationRegistry.Provider("aws-ec2")
+		if profileErr != nil {
+			return fmt.Errorf("configure AWS integration: %w", profileErr)
+		}
+		awsProvider := provision.AWSEC2{
+			RoleARN: cfg.AWSRoleARN, ExternalID: cfg.AWSExternalID, Region: cfg.AWSRegion,
+			SubnetID: cfg.AWSSubnetID, SecurityGroupIDs: cfg.AWSSecurityGroupIDs,
+			AMIID: cfg.AWSAMIID, InstanceType: cfg.AWSInstanceType, GPU: cfg.AWSGPU,
+			InstanceProfileARN: cfg.AWSInstanceProfileARN, WorkerSecretARN: cfg.AWSWorkerSecretARN,
+			ImageDigest: cfg.AWSImageDigest,
+		}
+		elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: "aws-ec2", Cloud: "aws", Runtime: "vllm", Profile: awsProfile, Provider: awsProvider})
+	}
+	replicaBackends, err := workflows.NewReplicaBackends(elasticBackends...)
 	if err != nil {
 		return fmt.Errorf("configure replica backends: %w", err)
 	}
@@ -2124,7 +2365,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		operationTelemetry.WritePrometheus(w)
 		recorder.WritePrometheus(w)
 	}}
-	server := &http.Server{Addr: fmt.Sprintf("%s:%d", cfg.Host, cfg.Port), Handler: (&gateway.Gateway{Routes: directory, APIKey: cfg.APIKey, Authenticator: credentialCache, Recorder: recorder, Logger: logger, Client: client, Ready: s.Ping, Control: control, Telemetry: gatewayTelemetry, CapacityObservers: map[string]gateway.CapacityObserver{"runpod": serverless.ActiveWorkers}}).Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 1 << 20}
+	server := &http.Server{Addr: fmt.Sprintf("%s:%d", cfg.Host, cfg.Port), Handler: (&gateway.Gateway{Routes: directory, APIKey: cfg.APIKey, Authenticator: credentialCache, Recorder: recorder, Logger: logger, Client: client, Ready: s.Ping, Control: control, Telemetry: gatewayTelemetry, CapacityObservers: map[string]gateway.CapacityObserver{"runpod": serverless.ActiveWorkers}, ExternalAuthorizer: externalBudgets}).Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 1 << 20}
 	go func() {
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)

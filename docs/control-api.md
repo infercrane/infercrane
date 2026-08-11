@@ -21,7 +21,7 @@ Errors are stable JSON objects:
 
 | Method and path | Minimum role | Purpose |
 |---|---|---|
-| `GET /doctor` | viewer | Run control-plane dependency diagnostics; optional `cloud` and `serverless` booleans add provider checks. |
+| `GET /doctor` | viewer | Run control-plane dependency diagnostics; optional `cloud`, `serverless`, and `aws` booleans add read-only provider checks. |
 | `GET /whoami` | viewer | Return the authenticated principal, role, and tenant without exposing credential material. |
 | `GET /integrations` | viewer | Return versioned provider/runtime contracts, registered capabilities, and honest qualification evidence. |
 | `POST /deployments/apply` | operator | Queue existing-target convergence; requires `Idempotency-Key`. |
@@ -55,6 +55,11 @@ Errors are stable JSON objects:
 | `POST /principals` | admin | Create a credential; secret is returned once. |
 | `POST /principals/{id}/rotate` | admin | Replace a credential immediately. |
 | `DELETE /principals/{id}` | admin | Revoke a credential immediately. |
+| `GET /secrets` | admin with `manage_secrets` | List resolver metadata; values are never resolved into the response. |
+| `POST /secrets` | admin with `manage_secrets` | Create a reference-only secret object. |
+| `DELETE /secrets/{id}` | admin with `manage_secrets` | Delete a tenant-scoped secret reference. |
+| `GET /deployments/{name}/external-policy` | viewer | Inspect the persisted fallback policy and reserved hard budgets. |
+| `PUT /deployments/{name}/external-policy` | operator/admin with `manage_external` | Replace an explicit external policy; enablement requires privacy acknowledgement and positive hard limits. |
 
 Existing-target apply request:
 

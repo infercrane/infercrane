@@ -13,15 +13,22 @@ func TestBuildProvisionedPlan(t *testing.T) {
 }
 
 func TestBuildRejectsExcludedCloud(t *testing.T) {
-	_, err := Build(Input{Model: "model", Cloud: "aws", GPU: "L4"})
+	_, err := Build(Input{Model: "model", Cloud: "unqualified-cloud", GPU: "L4"})
 	if err == nil {
-		t.Fatal("v0.1 must reject unsupported clouds")
+		t.Fatal("support policy must reject unqualified clouds")
 	}
 }
 func TestBuildRejectsExcludedRuntime(t *testing.T) {
 	_, err := Build(Input{Model: "model", Runtime: "sglang", Cloud: "runpod", GPU: "L40S"})
 	if err == nil {
-		t.Fatal("v0.1 must reject unsupported runtimes")
+		t.Fatal("support policy must reject unsupported runtimes")
+	}
+}
+
+func TestBuildAWSElasticPlan(t *testing.T) {
+	p, err := Build(Input{Model: "Qwen/Qwen3-8B", Cloud: "aws", GPU: "L40S", Region: "eu-central-1"})
+	if err != nil || p.Mode != "provisioned" || p.Cloud != "aws" {
+		t.Fatalf("plan=%#v err=%v", p, err)
 	}
 }
 

@@ -11,6 +11,7 @@ Ownership is expressed by responsibility until public repository teams and handl
 | Provider, runtime and metrics adapters | `internal/provision`, `internal/runtime`, `internal/metrics` | Integration maintainer |
 | Provider contracts and development fakes | `internal/conformance`, `internal/testtools`, `tools/contract-qualifier`, `scripts/dev-check.sh`, `scripts/test-acceptance-safety.sh` | Integration maintainer |
 | Fleet policy and tenancy | `internal/autoscale`, `internal/capacity`, `internal/authz`, `internal/pricing` | Control-plane maintainer |
+| Governed external capacity and secret resolution | `internal/external`, `internal/secrets`, `internal/store/external_policies.go`, `internal/store/secrets.go` | Security and control-plane maintainers |
 | Release and operations | `Dockerfile`, `compose.yaml`, `deploy`, `docs/production.md` | Operations maintainer |
 | Engineering governance | `AGENTS.md`, `CLAUDE.md`, `docs`, `tools`, `.github` | Project maintainer |
 

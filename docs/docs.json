@@ -106,6 +106,7 @@
           "features/terminal-ui",
           "features/autoscaling",
           "features/release-guard",
+          "features/external-capacity",
           "features/serverless",
           "features/telemetry",
           "features/benchmarking",
@@ -121,6 +122,7 @@
           "architecture/runtime-contract",
           "integrations/vllm",
           "integrations/runpod",
+          "integrations/aws-ec2",
           "integrations/aiperf",
           "integrations/hugging-face"
         ]
@@ -151,7 +153,8 @@
               "adr/0009-qualified-support-and-backend-registration",
               "adr/0010-cobra-cli-and-progressive-terminal-output",
               "adr/0011-tiered-provider-qualification",
-              "adr/0012-versioned-integration-contracts"
+              "adr/0012-versioned-integration-contracts",
+              "adr/0013-governed-external-capacity-and-byoc"
             ]
           },
           "release-acceptance"

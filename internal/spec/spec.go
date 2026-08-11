@@ -68,8 +68,11 @@ func Load(path string) (Deployment, error) {
 	if out.Name == "" || out.Model.ID == "" || out.Resources.GPU == "" || out.Provider.Cloud == "" {
 		return out, fmt.Errorf("name, model.id, resources.gpu, and provider.cloud are required")
 	}
-	if err := support.V01().Validate(out.Runtime.Engine, out.Provider.Cloud, out.Compute.Mode); err != nil {
-		return out, fmt.Errorf("v0.1 support policy: %w", err)
+	if err := support.V03().Validate(out.Runtime.Engine, out.Provider.Cloud, out.Compute.Mode); err != nil {
+		return out, fmt.Errorf("support policy: %w", err)
+	}
+	if out.Provider.Cloud == "aws" && out.Provider.Region == "" {
+		return out, fmt.Errorf("AWS BYOC requires provider.region")
 	}
 	if out.Scaling.MaxReplicas < out.Scaling.MinReplicas {
 		return out, fmt.Errorf("scaling.max_replicas must be >= scaling.min_replicas")

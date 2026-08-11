@@ -15,6 +15,8 @@ import (
 type fakeStore struct {
 	deployment domain.Deployment
 	target     domain.Target
+	targets    []domain.Target
+	state      string
 	generation domain.RouterGeneration
 	recorded   bool
 }
@@ -23,13 +25,22 @@ func (f *fakeStore) Deployments(context.Context) ([]domain.Deployment, error) {
 	return []domain.Deployment{f.deployment}, nil
 }
 func (f *fakeStore) Resolve(context.Context, string) (domain.ResolvedDeployment, error) {
-	return domain.ResolvedDeployment{Deployment: f.deployment, Targets: []domain.Target{f.target}}, nil
+	return domain.ResolvedDeployment{Deployment: f.deployment, Targets: f.resolvedTargets()}, nil
 }
 func (f *fakeStore) ResolveForTenant(context.Context, string, string) (domain.ResolvedDeployment, error) {
-	return domain.ResolvedDeployment{Deployment: f.deployment, Targets: []domain.Target{f.target}}, nil
+	return domain.ResolvedDeployment{Deployment: f.deployment, Targets: f.resolvedTargets()}, nil
 }
-func (f *fakeStore) SetTargetHealth(context.Context, string, string) error    { return nil }
-func (f *fakeStore) SetDeploymentState(context.Context, string, string) error { return nil }
+func (f *fakeStore) resolvedTargets() []domain.Target {
+	if f.targets != nil {
+		return f.targets
+	}
+	return []domain.Target{f.target}
+}
+func (f *fakeStore) SetTargetHealth(context.Context, string, string) error { return nil }
+func (f *fakeStore) SetDeploymentState(_ context.Context, _ string, state string) error {
+	f.state = state
+	return nil
+}
 func (f *fakeStore) Event(context.Context, string, string, string, string, string) error {
 	return nil
 }
@@ -199,6 +210,51 @@ type zeroWorkerStatus struct{}
 
 func (zeroWorkerStatus) EndpointHealth(context.Context, string) (provision.ServerlessHealth, error) {
 	return provision.ServerlessHealth{}, nil
+}
+
+type fixtureExternalFallback struct{ calls int }
+
+func (f *fixtureExternalFallback) Owns(provider string) bool { return provider == "openrouter" }
+func (f *fixtureExternalFallback) Resolve(_ context.Context, deployment domain.Deployment, targets []domain.Target) (routes.Snapshot, error) {
+	f.calls++
+	for _, target := range targets {
+		if target.Provider == "openrouter" {
+			return routes.Snapshot{DeploymentID: deployment.ID, TargetID: target.ID, TenantID: deployment.TenantID, Alias: deployment.Name, RouterURL: target.URL, Provider: "openrouter", ComputeMode: "external", ExternalPolicyID: "policy", SelectionReason: "explicit fallback"}, nil
+		}
+	}
+	return routes.Snapshot{}, errors.New("fallback missing")
+}
+
+func TestHealthyPrimaryIsNotDegradedByConfiguredExternalTarget(t *testing.T) {
+	store, directory := reconcilerFixture()
+	store.targets = []domain.Target{
+		store.target,
+		{ID: "external", Name: "fallback", Provider: "openrouter", URL: "https://openrouter.invalid/api/v1", Runtime: "vllm", UpstreamModel: "provider/model", Health: "healthy"},
+	}
+	fallback := &fixtureExternalFallback{}
+	reconciler := Reconciler{Store: store, Routes: directory, Router: &fakeRouter{routes: directory}, Runtimes: testRuntimeBackends(t, healthyRuntime{}), ExternalFallback: fallback, RouterStartPort: 18080, InstanceID: "instance"}
+	if err := reconciler.Once(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	published, ok := directory.Get("prod")
+	if !ok || published.ComputeMode == "external" || fallback.calls != 0 || store.state != "healthy" {
+		t.Fatalf("published=%#v fallback_calls=%d state=%q", published, fallback.calls, store.state)
+	}
+}
+
+func TestExternalFallbackPublishesOnlyWhenNoPrimaryTargetIsHealthy(t *testing.T) {
+	store, directory := reconcilerFixture()
+	store.target.Provider = "openrouter"
+	store.target.URL = "https://external.invalid/api"
+	fallback := &fixtureExternalFallback{}
+	reconciler := Reconciler{Store: store, Routes: directory, Router: &fakeRouter{routes: directory}, Runtimes: testRuntimeBackends(t, healthyRuntime{}), ExternalFallback: fallback, RouterStartPort: 18080, InstanceID: "instance"}
+	if err := reconciler.Once(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	published, ok := directory.Get("prod")
+	if !ok || published.ComputeMode != "external" || published.ExternalPolicyID != "policy" || fallback.calls != 1 {
+		t.Fatalf("published=%#v calls=%d", published, fallback.calls)
+	}
 }
 
 func TestServerlessRouteDoesNotWarmWorkersOrStartRouter(t *testing.T) {

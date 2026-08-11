@@ -76,10 +76,12 @@ Ask the control plane to check its own dependencies.
 infercrane doctor
 infercrane doctor --cloud
 infercrane doctor --serverless --output json
+infercrane doctor --aws
 ```
 
-`--cloud` adds elastic-provider credentials and advisory accelerator availability; `--serverless`
-adds provider-native serverless credentials and template validation. Diagnostics are read-only.
+`--cloud` adds SkyPilot credentials and RunPod advisory accelerator availability; `--serverless`
+adds RunPod Serverless credentials and template validation; `--aws` performs a read-only role
+assumption and identity probe for the configured AWS BYOC adapter. Diagnostics are read-only.
 The capability table distinguishes `supported`, `unsupported`, and `unknown`. InferCrane never
 silently changes hardware, and never claims cache or fast-resume behavior that an adapter cannot
 observe.
@@ -130,9 +132,9 @@ infercrane apply examples/infercrane.yaml \
 |---|---|---|---|
 | `--name` | derived from model | all | Logical deployment name |
 | `--targets` | none | existing | Comma-separated registered targets |
-| `--cloud` | `runpod` on primary path | elastic/serverless | v0.1 provider |
+| `--cloud` | `runpod` on primary path | elastic/serverless | Qualified provider cloud; `aws` is elastic-only in v0.3 |
 | `--gpu` | `L40S` on primary path | elastic/serverless | Requested GPU |
-| `--region` | provider-selected | provisioned | Provider region |
+| `--region` | provider-selected | provisioned | Provider region; required for AWS BYOC |
 | `--compute` | `elastic` | provisioned | `elastic` or `serverless` |
 | `--min` | `1`; serverless defaults to `0` | provisioned | Minimum replicas/workers |
 | `--max` | `1` | provisioned | Maximum replicas/workers |
@@ -280,9 +282,49 @@ These commands require an admin/bootstrap credential.
 
 ```bash
 infercrane tenant create team-a --name 'Team A'
-infercrane principal create deploy-bot --role operator
+infercrane principal create deploy-bot --role operator --scopes read,deploy
 infercrane principal rotate PRINCIPAL_ID
 infercrane principal revoke PRINCIPAL_ID
 ```
 
-New and rotated tokens are returned once. Roles are `viewer`, `operator`, and `admin` according to the configured authorization policy.
+New and rotated tokens are returned once. Service-account scopes can only restrict the role ceiling;
+they can never grant an action unavailable to `viewer`, `operator`, or `admin`. Omitting `--scopes`
+uses every action allowed by the selected role for compatibility.
+
+## Secret references
+
+Register metadata that points to an injected environment value. InferCrane never accepts the raw
+secret on the command line or through its API.
+
+```bash
+infercrane secret create openrouter --from-env OPENROUTER_API_KEY
+infercrane secret list
+infercrane secret list --output json
+infercrane secret delete SECRET_ID --yes
+```
+
+## Governed external fallback
+
+External targets require `manage_external`. They are selected only when ordinary targets are
+unhealthy and require an explicit privacy acknowledgement plus hard budgets.
+
+```bash
+infercrane target add openrouter-qwen \
+  --provider openrouter \
+  --url https://openrouter.ai/api/v1 \
+  --upstream-model qwen/qwen3-8b
+
+infercrane external configure qwen-prod \
+  --target openrouter-qwen \
+  --secret-reference SECRET_REFERENCE_ID \
+  --request-limit 100 \
+  --cost-limit-usd 10 \
+  --max-request-cost-usd 0.10 \
+  --acknowledge-external-data \
+  --enable
+
+infercrane external inspect qwen-prod --output json
+```
+
+See [Governed external capacity](/features/external-capacity) for transmission and reservation
+semantics.

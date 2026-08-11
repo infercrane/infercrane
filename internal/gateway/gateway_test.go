@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -24,6 +25,16 @@ func (f fakeAuthenticator) AuthenticatePrincipal(context.Context, string) (domai
 type roundTripper func(*http.Request) (*http.Response, error)
 
 func (fn roundTripper) RoundTrip(r *http.Request) (*http.Response, error) { return fn(r) }
+
+type oneRequestBudget struct{ remaining int }
+
+func (b *oneRequestBudget) Authorize(policy string) (domain.ExternalBudgetLease, error) {
+	if policy == "policy" && b.remaining > 0 {
+		b.remaining--
+		return domain.ExternalBudgetLease{PolicyID: policy, Requests: 1, ReservedCostMicrousd: 100, MaxRequestCostMicrousd: 100}, nil
+	}
+	return domain.ExternalBudgetLease{}, errors.New("exhausted")
+}
 
 type captureRecorder struct {
 	mu     sync.Mutex
@@ -259,6 +270,45 @@ func TestModelsAreTenantScoped(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != 200 || !strings.Contains(response.Body.String(), "shared") || strings.Contains(response.Body.String(), "private") {
 		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestInferenceRequiresReadScope(t *testing.T) {
+	directory := routes.New()
+	directory.Put(routes.Snapshot{TenantID: "tenant-a", Alias: "model"})
+	handler := (&Gateway{Routes: directory, Authenticator: fakeAuthenticator{principal: domain.Principal{ID: "p", TenantID: "tenant-a", Role: "operator", Scopes: []string{"deploy"}}}}).Handler()
+	request := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	request.Header.Set("Authorization", "Bearer scoped")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestExternalFallbackConsumesHardBudgetBeforeTransmissionAndNeverReplaysStream(t *testing.T) {
+	requests := 0
+	client := &http.Client{Transport: roundTripper(func(r *http.Request) (*http.Response, error) {
+		requests++
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: [DONE]\n\n"))}, nil
+	})}
+	directory := routes.New()
+	directory.Put(routes.Snapshot{DeploymentID: "deployment", Alias: "alias", UpstreamModel: "provider/model", RouterURL: "https://external.invalid/api", Provider: "openrouter", ComputeMode: "external", ExternalPolicyID: "policy", UpstreamAPIKey: "provider-key"})
+	handler := (&Gateway{Routes: directory, APIKey: "secret", Client: client, ExternalAuthorizer: &oneRequestBudget{remaining: 1}}).Handler()
+	for attempt := 0; attempt < 2; attempt++ {
+		request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"alias","stream":true,"messages":[]}`))
+		request.Header.Set("Authorization", "Bearer secret")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if attempt == 0 && response.Code != http.StatusOK {
+			t.Fatalf("first response=%d %s", response.Code, response.Body.String())
+		}
+		if attempt == 1 && response.Code != http.StatusTooManyRequests {
+			t.Fatalf("second response=%d %s", response.Code, response.Body.String())
+		}
+	}
+	if requests != 1 {
+		t.Fatalf("external stream was transmitted %d times", requests)
 	}
 }
 

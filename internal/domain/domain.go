@@ -250,13 +250,49 @@ type AuditEvent struct {
 }
 
 type Principal struct {
-	ID, TenantID, Name, Role string
-	Disabled                 bool
-	CreatedAt                time.Time
+	ID, TenantID, Name, Role, Kind string
+	Scopes                         []string
+	Disabled                       bool
+	CreatedAt                      time.Time
 }
 type CredentialRecord struct {
 	Hash      string
 	Principal Principal
+}
+
+type SecretReference struct {
+	ID        string    `json:"id"`
+	TenantID  string    `json:"tenant_id"`
+	Name      string    `json:"name"`
+	Resolver  string    `json:"resolver"`
+	Reference string    `json:"reference"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type ExternalTargetPolicy struct {
+	ID                     string    `json:"id"`
+	TenantID               string    `json:"tenant_id"`
+	DeploymentID           string    `json:"deployment_id"`
+	TargetID               string    `json:"target_id"`
+	Adapter                string    `json:"adapter"`
+	SecretReferenceID      string    `json:"secret_reference_id"`
+	Enabled                bool      `json:"enabled"`
+	PrivacyAcknowledged    bool      `json:"privacy_acknowledged"`
+	RequestLimit           int64     `json:"request_limit"`
+	RequestsReserved       int64     `json:"requests_reserved"`
+	CostLimitMicrousd      int64     `json:"cost_limit_microusd"`
+	MaxRequestCostMicrousd int64     `json:"max_request_cost_microusd"`
+	CostReservedMicrousd   int64     `json:"cost_reserved_microusd"`
+	CreatedAt              time.Time `json:"created_at"`
+	UpdatedAt              time.Time `json:"updated_at"`
+}
+
+type ExternalBudgetLease struct {
+	PolicyID               string `json:"policy_id"`
+	Requests               int64  `json:"requests"`
+	ReservedCostMicrousd   int64  `json:"reserved_cost_microusd"`
+	MaxRequestCostMicrousd int64  `json:"max_request_cost_microusd"`
 }
 
 var RoutingStrategies = map[string]string{

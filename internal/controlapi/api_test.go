@@ -123,6 +123,14 @@ func (f *fakeStore) AddTargetForTenant(_ context.Context, _ string, target domai
 func (f *fakeStore) TargetsForTenant(context.Context, string) ([]domain.Target, error) {
 	return nil, f.err
 }
+func (f *fakeStore) TargetForTenantByName(_ context.Context, _, name string) (domain.Target, error) {
+	for _, target := range f.targets {
+		if target.Name == name {
+			return target, nil
+		}
+	}
+	return domain.Target{}, domain.ErrNotFound
+}
 func (f *fakeStore) DeploymentsForTenant(context.Context, string) ([]domain.Deployment, error) {
 	return nil, f.err
 }
@@ -134,14 +142,34 @@ func (f *fakeStore) AuditEventsForTenant(context.Context, string, time.Time, int
 	return nil, f.err
 }
 func (f *fakeStore) SetTenantQuota(context.Context, string, int, int, int) error { return f.err }
-func (f *fakeStore) CreatePrincipal(_ context.Context, tenant, name string, role authz.Role) (domain.Principal, string, error) {
-	return domain.Principal{ID: "new", TenantID: tenant, Name: name, Role: string(role)}, "ic_token", f.err
+func (f *fakeStore) CreatePrincipalScoped(_ context.Context, tenant, name string, role authz.Role, scopes []authz.Action) (domain.Principal, string, error) {
+	names := make([]string, len(scopes))
+	for i, scope := range scopes {
+		names[i] = string(scope)
+	}
+	return domain.Principal{ID: "new", TenantID: tenant, Name: name, Role: string(role), Kind: "service_account", Scopes: names}, "ic_token", f.err
 }
 func (f *fakeStore) RotatePrincipalForTenant(context.Context, string, string) (string, error) {
 	return "ic_rotated", f.err
 }
-func (f *fakeStore) RevokePrincipalForTenant(context.Context, string, string) error  { return f.err }
-func (f *fakeStore) CreateTenant(context.Context, string, string) error              { return f.err }
+func (f *fakeStore) RevokePrincipalForTenant(context.Context, string, string) error { return f.err }
+func (f *fakeStore) CreateTenant(context.Context, string, string) error             { return f.err }
+func (f *fakeStore) CreateSecretReference(_ context.Context, tenant, name, resolver, reference string) (domain.SecretReference, error) {
+	return domain.SecretReference{ID: "secret", TenantID: tenant, Name: name, Resolver: resolver, Reference: reference}, f.err
+}
+func (f *fakeStore) SecretReferencesForTenant(context.Context, string) ([]domain.SecretReference, error) {
+	return []domain.SecretReference{{ID: "secret", Name: "openrouter", Resolver: "env", Reference: "OPENROUTER_API_KEY"}}, f.err
+}
+func (f *fakeStore) DeleteSecretReferenceForTenant(context.Context, string, string) error {
+	return f.err
+}
+func (f *fakeStore) SetExternalTargetPolicyForTenant(_ context.Context, policy domain.ExternalTargetPolicy) (domain.ExternalTargetPolicy, error) {
+	policy.ID = "policy"
+	return policy, f.err
+}
+func (f *fakeStore) ExternalTargetPolicyForDeployment(context.Context, string, string) (domain.ExternalTargetPolicy, error) {
+	return domain.ExternalTargetPolicy{ID: "policy", Enabled: true, PrivacyAcknowledged: true}, f.err
+}
 func (f *fakeStore) SetRouteForTenant(context.Context, string, string, string) error { return f.err }
 func (f *fakeStore) RecordBenchmark(_ context.Context, result domain.BenchmarkResult) (domain.BenchmarkResult, error) {
 	result.ID = "benchmark"
@@ -458,6 +486,97 @@ func TestViewerCannotApply(t *testing.T) {
 	}
 }
 
+func TestServiceAccountScopeRestrictsRolePermission(t *testing.T) {
+	store := &fakeStore{principal: domain.Principal{ID: "operator", TenantID: "tenant-a", Name: "read-bot", Role: "operator", Scopes: []string{"read"}}}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments/apply", strings.NewReader(`{"name":"prod","model":"model","targets":["gpu-a"]}`))
+	request.Header.Set("Authorization", "Bearer ic_operator")
+	request.Header.Set("Idempotency-Key", "release-1")
+	response := httptest.NewRecorder()
+	(API{Store: store, Authenticator: store}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestServiceAccountCannotRequestScopeAboveRole(t *testing.T) {
+	store := &fakeStore{}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/principals", strings.NewReader(`{"name":"bad-bot","role":"viewer","scopes":["deploy"]}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret"}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), "exceeds role") {
+		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestSecretAPIAcceptsReferencesButNeverRawValues(t *testing.T) {
+	store := &fakeStore{}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/secrets", strings.NewReader(`{"name":"openrouter","resolver":"env","reference":"OPENROUTER_API_KEY"}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret"}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), "OPENROUTER_API_KEY") {
+		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/secrets", strings.NewReader(`{"name":"unsafe","resolver":"env","reference":"OPENROUTER_API_KEY","value":"must-not-persist"}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret"}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || strings.Contains(response.Body.String(), "must-not-persist") {
+		t.Fatalf("raw value was accepted or reflected: %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestOperatorCannotManageSecretReferences(t *testing.T) {
+	store := &fakeStore{principal: domain.Principal{ID: "operator", TenantID: "tenant-a", Name: "operator", Role: "operator", Scopes: []string{"read", "deploy"}}}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/secrets", nil)
+	request.Header.Set("Authorization", "Bearer scoped")
+	response := httptest.NewRecorder()
+	(API{Store: store, Authenticator: store}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestExternalTargetRegistrationRequiresExternalScopeAndSafeURL(t *testing.T) {
+	store := &fakeStore{principal: domain.Principal{ID: "operator", TenantID: "tenant-a", Name: "deploy-bot", Role: "operator", Scopes: []string{"deploy"}}}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/targets", strings.NewReader(`{"name":"external","provider":"openrouter","url":"https://openrouter.ai/api","runtime":"openai","upstream_model":"provider/model"}`))
+	request.Header.Set("Authorization", "Bearer scoped")
+	response := httptest.NewRecorder()
+	(API{Store: store, Authenticator: store}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/targets", strings.NewReader(`{"name":"external","provider":"openrouter","url":"https://openrouter.ai/api?key=unsafe","runtime":"openai","upstream_model":"provider/model"}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	(API{Store: &fakeStore{}, APIKey: "secret"}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), "query parameters") {
+		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestExternalPolicyRequiresPrivacyAndHardBudgets(t *testing.T) {
+	store := &fakeStore{targets: []domain.Target{{ID: "external", Name: "external", Provider: "openrouter"}}}
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/deployments/qwen/external-policy", strings.NewReader(`{"target":"external","adapter":"openrouter","secret_reference_id":"secret","enabled":true,"privacy_acknowledged":false,"request_limit":10,"cost_limit_microusd":1000,"max_request_cost_microusd":100}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret"}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), "privacy_acknowledgement_required") {
+		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodPut, "/api/v1/deployments/qwen/external-policy", strings.NewReader(`{"target":"external","adapter":"openrouter","secret_reference_id":"secret","enabled":true,"privacy_acknowledged":true,"request_limit":10,"cost_limit_microusd":1000,"max_request_cost_microusd":100}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret"}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"id":"policy"`) {
+		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+}
+
 func TestTargetRegistrationRejectsEmbeddedCredentials(t *testing.T) {
 	store := &fakeStore{}
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/targets", strings.NewReader(`{"name":"gpu-a","url":"https://user:secret@worker.internal/v1"}`))
@@ -483,11 +602,11 @@ func TestCancelHidesMissingOperation(t *testing.T) {
 
 func TestDoctorDiagnosticsRunInsideAuthenticatedControlPlane(t *testing.T) {
 	called := false
-	handler := (API{Store: &fakeStore{}, APIKey: "secret", Diagnostics: func(_ context.Context, cloud, serverless bool) doctor.Report {
-		called = cloud && serverless
+	handler := (API{Store: &fakeStore{}, APIKey: "secret", Diagnostics: func(_ context.Context, cloud, serverless, aws bool) doctor.Report {
+		called = cloud && serverless && aws
 		return doctor.Report{Ready: true, Checks: []doctor.Check{{Name: "PostgreSQL", Status: doctor.Pass, Message: "connected"}}}
 	}}).Handler()
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/doctor?cloud=true&serverless=true", nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/doctor?cloud=true&serverless=true&aws=true", nil)
 	request.Header.Set("Authorization", "Bearer secret")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)

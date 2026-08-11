@@ -8,12 +8,16 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
 type Config struct {
 	DatabaseURL, ControlURL, Host, APIKey, RouterBinary, AIPerfBinary, InstanceID, Environment string
 	RunPodAPIKey, RunPodServerlessTemplateID, RunPodRESTURL                                    string
+	AWSRoleARN, AWSExternalID, AWSRegion, AWSSubnetID, AWSAMIID, AWSInstanceType, AWSGPU       string
+	AWSInstanceProfileARN, AWSWorkerSecretARN, AWSImageDigest                                  string
+	AWSSecurityGroupIDs                                                                        []string
 	Port, RouterStartPort, DatabaseMaxOpen, DatabaseMaxIdle                                    int
 	HealthInterval, UpstreamTimeout, ShutdownTimeout, RequestRetention                         time.Duration
 }
@@ -249,6 +253,17 @@ func load(requireAPIKey bool) (Config, error) {
 		RunPodAPIKey:               env("RUNPOD_API_KEY", ""),
 		RunPodServerlessTemplateID: env("INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID", ""),
 		RunPodRESTURL:              env("INFERCRANE_RUNPOD_REST_URL", "https://rest.runpod.io/v1"),
+		AWSRoleARN:                 env("INFERCRANE_AWS_ROLE_ARN", ""),
+		AWSExternalID:              env("INFERCRANE_AWS_EXTERNAL_ID", ""),
+		AWSRegion:                  env("INFERCRANE_AWS_REGION", ""),
+		AWSSubnetID:                env("INFERCRANE_AWS_SUBNET_ID", ""),
+		AWSSecurityGroupIDs:        splitCSV(env("INFERCRANE_AWS_SECURITY_GROUP_IDS", "")),
+		AWSAMIID:                   env("INFERCRANE_AWS_AMI_ID", ""),
+		AWSInstanceType:            env("INFERCRANE_AWS_INSTANCE_TYPE", ""),
+		AWSGPU:                     env("INFERCRANE_AWS_GPU", ""),
+		AWSInstanceProfileARN:      env("INFERCRANE_AWS_INSTANCE_PROFILE_ARN", ""),
+		AWSWorkerSecretARN:         env("INFERCRANE_AWS_WORKER_SECRET_ARN", ""),
+		AWSImageDigest:             env("INFERCRANE_AWS_IMAGE_DIGEST", ""),
 		Port:                       port, RouterStartPort: routerPort, DatabaseMaxOpen: maxOpen, DatabaseMaxIdle: maxIdle,
 		HealthInterval: time.Duration(healthSeconds) * time.Second, UpstreamTimeout: time.Duration(upstreamSeconds) * time.Second,
 		ShutdownTimeout: time.Duration(shutdownSeconds) * time.Second, RequestRetention: time.Duration(retentionHours) * time.Hour,
@@ -291,7 +306,45 @@ func load(requireAPIKey bool) (Config, error) {
 	if config.HealthInterval <= 0 || config.UpstreamTimeout <= 0 || config.ShutdownTimeout <= 0 || config.RequestRetention <= 0 {
 		return Config{}, fmt.Errorf("timeouts must be positive")
 	}
+	if err := validateAWS(config); err != nil {
+		return Config{}, err
+	}
 	return config, nil
+}
+
+func (c Config) AWSEnabled() bool { return c.AWSRoleARN != "" }
+
+func validateAWS(config Config) error {
+	values := []string{config.AWSRoleARN, config.AWSRegion, config.AWSSubnetID, config.AWSAMIID, config.AWSInstanceType, config.AWSGPU, config.AWSInstanceProfileARN, config.AWSWorkerSecretARN, config.AWSImageDigest}
+	configured := len(config.AWSSecurityGroupIDs) > 0
+	for _, value := range values {
+		configured = configured || value != ""
+	}
+	if !configured {
+		return nil
+	}
+	for _, value := range values {
+		if value == "" {
+			return errors.New("AWS BYOC configuration is partial; role ARN, region, subnet, security groups, AMI, instance type, GPU, instance profile, worker secret ARN, and immutable image digest are required")
+		}
+	}
+	if len(config.AWSSecurityGroupIDs) == 0 {
+		return errors.New("AWS BYOC configuration requires at least one security group")
+	}
+	if !strings.Contains(config.AWSImageDigest, "@sha256:") {
+		return errors.New("INFERCRANE_AWS_IMAGE_DIGEST must be pinned by sha256 digest")
+	}
+	return nil
+}
+
+func splitCSV(raw string) []string {
+	var values []string
+	for _, value := range strings.Split(raw, ",") {
+		if value = strings.TrimSpace(value); value != "" {
+			values = append(values, value)
+		}
+	}
+	return values
 }
 
 func env(key, fallback string) string {

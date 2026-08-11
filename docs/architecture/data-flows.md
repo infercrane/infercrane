@@ -38,6 +38,18 @@
 
 ## Provisioning
 
-SkyPilot is invoked across a process boundary. Secrets are provided using SkyPilot secret
-injection, not persisted metadata. Provisioning returns a target that follows the same runtime
-and reconciliation path as an externally registered worker.
+The durable workflow resolves a registered provider backend by cloud, runtime, and persisted adapter
+identity. RunPod elastic delegates to SkyPilot. AWS EC2 delegates API compatibility and STS to AWS
+CLI v2 while InferCrane retains idempotency, adoption, private-network, tag, and deletion policy.
+Both return a target that follows the same runtime and reconciliation path as an existing worker.
+
+## Governed external fallback
+
+1. Reconciliation excludes policy-owned external targets from ordinary primary membership.
+2. Only when no primary is healthy, the coordinator loads an enabled, privacy-acknowledged policy,
+   resolves its reference-only credential in memory, and checks the exact model mapping.
+3. A bounded request/cost batch is atomically reserved in PostgreSQL and prefetched into memory.
+4. The gateway authorizes each request from that in-memory lease before transmission; PostgreSQL
+   never enters the inference path.
+5. The selected target and any denial are persisted in bounded request evidence. Requests are not
+   replayed or duplicated after a possible send.

@@ -43,15 +43,21 @@ type Store interface {
 	SetReleaseGuardPolicy(context.Context, string, string, domain.ReleaseGuardPolicy) (domain.ReleaseGuardPolicy, error)
 	AddTargetForTenant(context.Context, string, domain.Target) (domain.Target, error)
 	TargetsForTenant(context.Context, string) ([]domain.Target, error)
+	TargetForTenantByName(context.Context, string, string) (domain.Target, error)
 	DeploymentsForTenant(context.Context, string) ([]domain.Deployment, error)
 	OrphanedTargetsForTenant(context.Context, string) ([]domain.Orphan, error)
 	Audit(context.Context, domain.AuditEvent) error
 	AuditEventsForTenant(context.Context, string, time.Time, int) ([]domain.AuditEvent, error)
 	SetTenantQuota(context.Context, string, int, int, int) error
-	CreatePrincipal(context.Context, string, string, authz.Role) (domain.Principal, string, error)
+	CreatePrincipalScoped(context.Context, string, string, authz.Role, []authz.Action) (domain.Principal, string, error)
 	RotatePrincipalForTenant(context.Context, string, string) (string, error)
 	RevokePrincipalForTenant(context.Context, string, string) error
 	CreateTenant(context.Context, string, string) error
+	CreateSecretReference(context.Context, string, string, string, string) (domain.SecretReference, error)
+	SecretReferencesForTenant(context.Context, string) ([]domain.SecretReference, error)
+	DeleteSecretReferenceForTenant(context.Context, string, string) error
+	SetExternalTargetPolicyForTenant(context.Context, domain.ExternalTargetPolicy) (domain.ExternalTargetPolicy, error)
+	ExternalTargetPolicyForDeployment(context.Context, string, string) (domain.ExternalTargetPolicy, error)
 	SetRouteForTenant(context.Context, string, string, string) error
 	RecordBenchmark(context.Context, domain.BenchmarkResult) (domain.BenchmarkResult, error)
 	BenchmarksForDeployment(context.Context, string, string, int) ([]domain.BenchmarkResult, error)
@@ -65,7 +71,7 @@ type API struct {
 	BenchmarkRunner interface {
 		Run(context.Context, benchmark.Config) (benchmark.Result, error)
 	}
-	Diagnostics              func(context.Context, bool, bool) doctor.Report
+	Diagnostics              func(context.Context, bool, bool, bool) doctor.Report
 	Backends                 map[string]BackendMetadata
 	Integrations             integration.Snapshot
 	GatewayURL, AIPerfBinary string
@@ -114,6 +120,11 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/principals", a.auth(authz.ManageTenant, a.createPrincipal))
 	mux.HandleFunc("POST /api/v1/principals/{id}/rotate", a.auth(authz.ManageTenant, a.rotatePrincipal))
 	mux.HandleFunc("DELETE /api/v1/principals/{id}", a.auth(authz.ManageTenant, a.revokePrincipal))
+	mux.HandleFunc("GET /api/v1/secrets", a.auth(authz.ManageSecrets, a.secretReferences))
+	mux.HandleFunc("POST /api/v1/secrets", a.auth(authz.ManageSecrets, a.createSecretReference))
+	mux.HandleFunc("DELETE /api/v1/secrets/{id}", a.auth(authz.ManageSecrets, a.deleteSecretReference))
+	mux.HandleFunc("GET /api/v1/deployments/{name}/external-policy", a.auth(authz.Read, a.externalTargetPolicy))
+	mux.HandleFunc("PUT /api/v1/deployments/{name}/external-policy", a.auth(authz.ManageExternal, a.setExternalTargetPolicy))
 	return mux
 }
 
@@ -123,7 +134,7 @@ func (a API) integrations(w http.ResponseWriter, _ *http.Request) {
 
 func (a API) whoami(w http.ResponseWriter, r *http.Request) {
 	principal := r.Context().Value(identityKey{}).(domain.Principal)
-	writeJSON(w, http.StatusOK, map[string]any{"principal": map[string]any{"id": principal.ID, "tenant_id": principal.TenantID, "name": principal.Name, "role": principal.Role}})
+	writeJSON(w, http.StatusOK, map[string]any{"principal": map[string]any{"id": principal.ID, "tenant_id": principal.TenantID, "name": principal.Name, "role": principal.Role, "kind": principal.Kind, "scopes": principal.Scopes}})
 }
 
 func (a API) diagnostics(w http.ResponseWriter, r *http.Request) {
@@ -141,7 +152,12 @@ func (a API) diagnostics(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "serverless must be true or false")
 		return
 	}
-	writeJSON(w, http.StatusOK, a.Diagnostics(r.Context(), cloud, serverless))
+	aws, err := strconv.ParseBool(defaultValue(r.URL.Query().Get("aws"), "false"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "aws must be true or false")
+		return
+	}
+	writeJSON(w, http.StatusOK, a.Diagnostics(r.Context(), cloud, serverless, aws))
 }
 
 func defaultValue(value, fallback string) string {
@@ -534,8 +550,9 @@ func (a API) createTenant(w http.ResponseWriter, r *http.Request) {
 func (a API) createPrincipal(w http.ResponseWriter, r *http.Request) {
 	actor := r.Context().Value(identityKey{}).(domain.Principal)
 	var request struct {
-		Name string     `json:"name"`
-		Role authz.Role `json:"role"`
+		Name   string         `json:"name"`
+		Role   authz.Role     `json:"role"`
+		Scopes []authz.Action `json:"scopes,omitempty"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 	decoder.DisallowUnknownFields()
@@ -543,7 +560,14 @@ func (a API) createPrincipal(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid_request", err.Error())
 		return
 	}
-	principal, token, err := a.Store.CreatePrincipal(r.Context(), actor.TenantID, request.Name, request.Role)
+	if len(request.Scopes) == 0 {
+		request.Scopes = authz.DefaultScopes(request.Role)
+	}
+	if err := authz.ValidateScopes(request.Role, request.Scopes); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
+		return
+	}
+	principal, token, err := a.Store.CreatePrincipalScoped(r.Context(), actor.TenantID, request.Name, request.Role, request.Scopes)
 	if errors.Is(err, domain.ErrConflict) {
 		writeError(w, 409, "conflict", err.Error())
 		return
@@ -553,7 +577,7 @@ func (a API) createPrincipal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "principal.create", ResourceType: "principal", ResourceName: principal.ID, Outcome: "succeeded"})
-	writeJSON(w, 201, map[string]any{"principal": map[string]any{"id": principal.ID, "name": principal.Name, "role": principal.Role, "tenant_id": principal.TenantID}, "credential": token})
+	writeJSON(w, 201, map[string]any{"principal": map[string]any{"id": principal.ID, "name": principal.Name, "role": principal.Role, "kind": principal.Kind, "scopes": principal.Scopes, "tenant_id": principal.TenantID}, "credential": token})
 }
 func (a API) rotatePrincipal(w http.ResponseWriter, r *http.Request) {
 	actor := r.Context().Value(identityKey{}).(domain.Principal)
@@ -580,6 +604,138 @@ func (a API) revokePrincipal(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "principal.revoke", ResourceType: "principal", ResourceName: r.PathValue("id"), Outcome: "succeeded"})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a API) secretReferences(w http.ResponseWriter, r *http.Request) {
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	items, err := a.Store.SecretReferencesForTenant(r.Context(), actor.TenantID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "secret references could not be listed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": items})
+}
+
+func (a API) createSecretReference(w http.ResponseWriter, r *http.Request) {
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	var request struct {
+		Name, Resolver, Reference string
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+		return
+	}
+	item, err := a.Store.CreateSecretReference(r.Context(), actor.TenantID, request.Name, request.Resolver, request.Reference)
+	if errors.Is(err, domain.ErrConflict) {
+		writeError(w, http.StatusConflict, "conflict", err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
+		return
+	}
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "secret.create", ResourceType: "secret_reference", ResourceName: item.ID, Outcome: "succeeded"})
+	writeJSON(w, http.StatusCreated, map[string]any{"secret": item})
+}
+
+func (a API) deleteSecretReference(w http.ResponseWriter, r *http.Request) {
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	id := r.PathValue("id")
+	if err := a.Store.DeleteSecretReferenceForTenant(r.Context(), actor.TenantID, id); errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "secret reference was not found")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusConflict, "conflict", "secret reference could not be deleted")
+		return
+	}
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "secret.delete", ResourceType: "secret_reference", ResourceName: id, Outcome: "succeeded"})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a API) externalTargetPolicy(w http.ResponseWriter, r *http.Request) {
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	resolved, err := a.Store.ResolveForTenant(r.Context(), actor.TenantID, r.PathValue("name"))
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "deployment was not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "deployment could not be resolved")
+		return
+	}
+	policy, err := a.Store.ExternalTargetPolicyForDeployment(r.Context(), actor.TenantID, resolved.Deployment.ID)
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "external target policy was not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "external target policy could not be read")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"policy": policy})
+}
+
+func (a API) setExternalTargetPolicy(w http.ResponseWriter, r *http.Request) {
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	var request struct {
+		TargetName             string `json:"target"`
+		Adapter                string `json:"adapter"`
+		SecretReferenceID      string `json:"secret_reference_id"`
+		Enabled                bool   `json:"enabled"`
+		PrivacyAcknowledged    bool   `json:"privacy_acknowledged"`
+		RequestLimit           int64  `json:"request_limit"`
+		CostLimitMicrousd      int64  `json:"cost_limit_microusd"`
+		MaxRequestCostMicrousd int64  `json:"max_request_cost_microusd"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+		return
+	}
+	if request.Enabled && !request.PrivacyAcknowledged {
+		writeError(w, http.StatusUnprocessableEntity, "privacy_acknowledgement_required", "enabled external fallback requires explicit privacy acknowledgement")
+		return
+	}
+	if request.RequestLimit < 1 || request.CostLimitMicrousd < 1 || request.MaxRequestCostMicrousd < 1 || request.MaxRequestCostMicrousd > request.CostLimitMicrousd {
+		writeError(w, http.StatusUnprocessableEntity, "budget_required", "positive hard request, cost, and worst-case per-request budgets are required")
+		return
+	}
+	resolved, err := a.Store.ResolveForTenant(r.Context(), actor.TenantID, r.PathValue("name"))
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "deployment was not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "deployment could not be resolved")
+		return
+	}
+	target, targetErr := a.Store.TargetForTenantByName(r.Context(), actor.TenantID, request.TargetName)
+	if errors.Is(targetErr, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "external target was not found")
+		return
+	}
+	if targetErr != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "external target could not be read")
+		return
+	}
+	if target.ID == "" || target.Provider != request.Adapter {
+		writeError(w, http.StatusUnprocessableEntity, "validation_failed", "target must match the external adapter")
+		return
+	}
+	policy, err := a.Store.SetExternalTargetPolicyForTenant(r.Context(), domain.ExternalTargetPolicy{TenantID: actor.TenantID, DeploymentID: resolved.Deployment.ID, TargetID: target.ID, Adapter: request.Adapter, SecretReferenceID: request.SecretReferenceID, Enabled: request.Enabled, PrivacyAcknowledged: request.PrivacyAcknowledged, RequestLimit: request.RequestLimit, CostLimitMicrousd: request.CostLimitMicrousd, MaxRequestCostMicrousd: request.MaxRequestCostMicrousd})
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "target or secret reference was not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
+		return
+	}
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "external_policy.update", ResourceType: "deployment", ResourceName: resolved.Deployment.Name, Outcome: "succeeded"})
+	writeJSON(w, http.StatusOK, map[string]any{"policy": policy})
 }
 
 func (a API) deployments(w http.ResponseWriter, r *http.Request) {
@@ -967,6 +1123,7 @@ func (a API) addTarget(w http.ResponseWriter, r *http.Request) {
 	var request struct {
 		Name          string `json:"name"`
 		URL           string `json:"url"`
+		Provider      string `json:"provider,omitempty"`
 		Runtime       string `json:"runtime"`
 		UpstreamModel string `json:"upstream_model,omitempty"`
 	}
@@ -976,15 +1133,39 @@ func (a API) addTarget(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid_request", err.Error())
 		return
 	}
+	if request.Provider == "" {
+		request.Provider = "existing"
+	}
 	if request.Runtime == "" {
 		request.Runtime = support.DefaultRuntime
+		if request.Provider != "existing" {
+			request.Runtime = "openai-compatible-api"
+		}
+	}
+	if request.Provider != "existing" && request.Provider != "openrouter" && request.Provider != "openai-compatible-external" {
+		writeError(w, 422, "validation_failed", "provider must be existing, openrouter, or openai-compatible-external")
+		return
+	}
+	if request.Provider != "existing" {
+		if request.UpstreamModel == "" {
+			writeError(w, 422, "validation_failed", "external targets require an explicit upstream_model")
+			return
+		}
+		if !authz.AllowedScoped(authz.Role(principal.Role), principal.Scopes, authz.ManageExternal) {
+			writeError(w, http.StatusForbidden, "forbidden", "principal is not allowed to register external targets")
+			return
+		}
 	}
 	parsed, err := url.Parse(request.URL)
 	if request.Name == "" || err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
 		writeError(w, 422, "validation_failed", "name and an absolute HTTP(S) URL without credentials or a fragment are required")
 		return
 	}
-	target, err := a.Store.AddTargetForTenant(r.Context(), principal.TenantID, domain.Target{Name: request.Name, URL: request.URL, Provider: "existing", Runtime: request.Runtime, UpstreamModel: request.UpstreamModel})
+	if request.Provider != "existing" && parsed.RawQuery != "" {
+		writeError(w, 422, "validation_failed", "external target URLs cannot contain query parameters")
+		return
+	}
+	target, err := a.Store.AddTargetForTenant(r.Context(), principal.TenantID, domain.Target{Name: request.Name, URL: request.URL, Provider: request.Provider, Runtime: request.Runtime, UpstreamModel: request.UpstreamModel})
 	if errors.Is(err, domain.ErrConflict) {
 		writeError(w, 409, "conflict", err.Error())
 		return
@@ -1061,7 +1242,7 @@ func (a API) auth(action authz.Action, next http.HandlerFunc) http.HandlerFunc {
 		var principal domain.Principal
 		expected := "Bearer " + a.APIKey
 		if a.APIKey != "" && subtle.ConstantTimeCompare([]byte(header), []byte(expected)) == 1 {
-			principal = domain.Principal{ID: "bootstrap", TenantID: "global", Name: "bootstrap", Role: string(authz.Admin)}
+			principal = domain.Principal{ID: "bootstrap", TenantID: "global", Name: "bootstrap", Role: string(authz.Admin), Kind: "bootstrap", Scopes: authz.DefaultScopeNames(authz.Admin)}
 		} else if a.Authenticator != nil && token != "" {
 			resolved, err := a.Authenticator.AuthenticatePrincipal(r.Context(), token)
 			if err == nil {
@@ -1072,7 +1253,7 @@ func (a API) auth(action authz.Action, next http.HandlerFunc) http.HandlerFunc {
 			writeError(w, http.StatusUnauthorized, "unauthenticated", "valid bearer authentication is required")
 			return
 		}
-		if !authz.Allowed(authz.Role(principal.Role), action) {
+		if !authz.AllowedScoped(authz.Role(principal.Role), principal.Scopes, action) {
 			writeError(w, http.StatusForbidden, "forbidden", "principal is not allowed to perform this action")
 			return
 		}

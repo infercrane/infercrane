@@ -140,3 +140,25 @@ func TestRuntimeCapabilityConformance(t *testing.T) {
 		t.Fatalf("report=%+v err=%v", report, err)
 	}
 }
+
+func TestAWSEC2ProviderContractConformance(t *testing.T) {
+	runner := &providerfixture.AWSCLI{}
+	provider := provision.AWSEC2{Runner: runner, RoleARN: "arn:aws:iam::123456789012:role/infercrane", Region: "eu-central-1", SubnetID: "subnet-private", SecurityGroupIDs: []string{"sg-worker"}, AMIID: "ami-gpu", InstanceType: "g6e.xlarge", GPU: "L40S", InstanceProfileARN: "arn:aws:iam::123456789012:instance-profile/worker", WorkerSecretARN: "arn:aws:secretsmanager:eu-central-1:123456789012:secret:worker", ImageDigest: "vllm/vllm-openai@sha256:c48cf118e1e6e39d7790e174d6014f7af5d06f79c2d29d984d11cbe2e8d414e7"}
+	profile := integration.ProviderProfile{Adapter: "aws-ec2", Cloud: "aws", ContractVersion: integration.ProviderContractV1, AdapterVersion: "test", Modes: []integration.ComputeMode{integration.ElasticMode}, Qualification: []integration.Qualification{{State: integration.QualificationSimulated, Environment: "hermetic-aws-cli"}}}
+	spec := provision.ReplicaSpec{ExternalKey: "deployment-r0", Model: "Qwen/Qwen3-8B", ModelRevision: "immutable", Cloud: "aws", GPU: "L40S", Region: "eu-central-1", Port: 8000}
+	report := ElasticLifecycle(context.Background(), profile, provider, spec, 8000)
+	if err := report.Err(); err != nil || runner.CreateCalls != 1 || runner.DeleteCalls != 1 {
+		t.Fatalf("report=%+v creates=%d deletes=%d err=%v", report, runner.CreateCalls, runner.DeleteCalls, err)
+	}
+}
+
+func TestAWSEC2LostCreateResponseConformance(t *testing.T) {
+	runner := &providerfixture.AWSCLI{FailAfterCreateOnce: true}
+	provider := provision.AWSEC2{Runner: runner, RoleARN: "arn:aws:iam::123456789012:role/infercrane", Region: "eu-central-1", SubnetID: "subnet-private", SecurityGroupIDs: []string{"sg-worker"}, AMIID: "ami-gpu", InstanceType: "g6e.xlarge", GPU: "L40S", InstanceProfileARN: "arn:aws:iam::123456789012:instance-profile/worker", WorkerSecretARN: "arn:aws:secretsmanager:eu-central-1:123456789012:secret:worker", ImageDigest: "vllm/vllm-openai@sha256:c48cf118e1e6e39d7790e174d6014f7af5d06f79c2d29d984d11cbe2e8d414e7"}
+	profile := integration.ProviderProfile{Adapter: "aws-ec2", Cloud: "aws", ContractVersion: integration.ProviderContractV1, AdapterVersion: "test", Modes: []integration.ComputeMode{integration.ElasticMode}, Qualification: []integration.Qualification{{State: integration.QualificationSimulated, Environment: "hermetic-aws-cli"}}}
+	spec := provision.ReplicaSpec{ExternalKey: "deployment-r0", Model: "Qwen/Qwen3-8B", ModelRevision: "immutable", Cloud: "aws", GPU: "L40S", Region: "eu-central-1", Port: 8000}
+	report := LostEnsureResponse(context.Background(), profile, provider, spec, 8000)
+	if err := report.Err(); err != nil || runner.CreateCalls != 1 {
+		t.Fatalf("report=%+v creates=%d err=%v", report, runner.CreateCalls, err)
+	}
+}

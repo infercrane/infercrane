@@ -13,7 +13,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"regexp"
 	"strings"
 	"sync"
@@ -21,6 +20,7 @@ import (
 
 	"github.com/infercrane/infercrane/internal/authz"
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/openaicompat"
 	"github.com/infercrane/infercrane/internal/routes"
 )
 
@@ -28,6 +28,9 @@ type Recorder interface {
 	RecordRequest(context.Context, domain.InferenceRecord) error
 }
 type CapacityObserver func(context.Context, string) (int, error)
+type ExternalAuthorizer interface {
+	Authorize(string) (domain.ExternalBudgetLease, error)
+}
 type Gateway struct {
 	Routes    *routes.Directory
 	APIKey    string
@@ -40,8 +43,9 @@ type Gateway struct {
 	// CapacityObservers provide request-arrival evidence for provider-native
 	// serverless routes. The lookup is bounded and best-effort: inference must
 	// remain available when telemetry observation fails.
-	CapacityObservers map[string]CapacityObserver
-	Authenticator     interface {
+	CapacityObservers  map[string]CapacityObserver
+	ExternalAuthorizer ExternalAuthorizer
+	Authenticator      interface {
 		AuthenticatePrincipal(context.Context, string) (domain.Principal, error)
 	}
 }
@@ -80,7 +84,7 @@ func (g *Gateway) auth(next http.HandlerFunc) http.HandlerFunc {
 		token := strings.TrimPrefix(actual, "Bearer ")
 		var principal domain.Principal
 		if g.APIKey != "" && subtle.ConstantTimeCompare([]byte(actual), []byte(expected)) == 1 {
-			principal = domain.Principal{ID: "bootstrap", TenantID: "global", Name: "bootstrap", Role: string(authz.Admin)}
+			principal = domain.Principal{ID: "bootstrap", TenantID: "global", Name: "bootstrap", Role: string(authz.Admin), Kind: "bootstrap", Scopes: authz.DefaultScopeNames(authz.Admin)}
 		} else if g.Authenticator != nil && token != "" {
 			resolved, err := g.Authenticator.AuthenticatePrincipal(r.Context(), token)
 			if err == nil {
@@ -90,6 +94,10 @@ func (g *Gateway) auth(next http.HandlerFunc) http.HandlerFunc {
 		if principal.ID == "" {
 			w.Header().Set("WWW-Authenticate", "Bearer")
 			openAIError(w, "Invalid API key", http.StatusUnauthorized, "authentication_error")
+			return
+		}
+		if !authz.AllowedScoped(authz.Role(principal.Role), principal.Scopes, authz.Read) {
+			openAIError(w, "API key is not allowed to invoke inference", http.StatusForbidden, "permission_error")
 			return
 		}
 		next(w, r.WithContext(context.WithValue(r.Context(), principalKey{}, principal)))
@@ -146,6 +154,18 @@ func (g *Gateway) completions(w http.ResponseWriter, r *http.Request) {
 	}
 	started := time.Now()
 	evidenceResult := g.observeCapacity(r.Context(), route, started)
+	if route.ExternalPolicyID != "" {
+		if g.ExternalAuthorizer == nil {
+			g.record(r.Context(), requestID, route, alias, started, http.StatusTooManyRequests, "external_budget_unavailable", streaming, responseObservation{}, <-evidenceResult)
+			openAIError(w, "External fallback budget is unavailable", http.StatusTooManyRequests, "rate_limit_error")
+			return
+		}
+		if _, err := g.ExternalAuthorizer.Authorize(route.ExternalPolicyID); err != nil {
+			g.record(r.Context(), requestID, route, alias, started, http.StatusTooManyRequests, "external_budget_exhausted", streaming, responseObservation{}, <-evidenceResult)
+			openAIError(w, "External fallback hard budget is exhausted", http.StatusTooManyRequests, "rate_limit_error")
+			return
+		}
+	}
 	if route.ComputeMode == "serverless" && g.CapacityObservers[route.Provider] == nil && route.ProviderWorkers != nil && !route.ProviderObservedAt.IsZero() {
 		age := started.Sub(route.ProviderObservedAt)
 		if age >= 0 && age <= 30*time.Second {
@@ -160,7 +180,7 @@ func (g *Gateway) completions(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	target, err := url.JoinPath(route.RouterURL, "v1/chat/completions")
+	target, err := openaicompat.Endpoint(route.RouterURL, "chat/completions")
 	if err != nil {
 		openAIError(w, "Inference upstream is unavailable", http.StatusServiceUnavailable, "server_error")
 		return
@@ -259,7 +279,7 @@ func (g *Gateway) record(ctx context.Context, id string, route routes.Snapshot, 
 		ttft = &value
 	}
 	responseModel, inputTokens, outputTokens := observation.usage()
-	record := domain.InferenceRecord{RequestID: id, DeploymentID: route.DeploymentID, RevisionID: route.RevisionID, Provider: route.Provider, Runtime: route.Runtime, ComputeMode: route.ComputeMode, OperationName: "chat", RequestModel: requestModel, ResponseModel: responseModel, SemanticConventionSchema: "https://opentelemetry.io/schemas/gen-ai/1.42.0", StartedAt: started, StatusCode: status, LatencyMS: latency, TTFTMS: ttft, InputTokens: inputTokens, OutputTokens: outputTokens, Streaming: streaming, ErrorType: errorType, ColdStart: evidence.coldStart, ProviderWorkersAtArrival: evidence.workers, ProviderCapacityObservedAt: evidence.observedAt}
+	record := domain.InferenceRecord{RequestID: id, DeploymentID: route.DeploymentID, RevisionID: route.RevisionID, TargetID: route.TargetID, Provider: route.Provider, Runtime: route.Runtime, ComputeMode: route.ComputeMode, OperationName: "chat", RequestModel: requestModel, ResponseModel: responseModel, SemanticConventionSchema: "https://opentelemetry.io/schemas/gen-ai/1.42.0", StartedAt: started, StatusCode: status, LatencyMS: latency, TTFTMS: ttft, InputTokens: inputTokens, OutputTokens: outputTokens, Streaming: streaming, ErrorType: errorType, ColdStart: evidence.coldStart, ProviderWorkersAtArrival: evidence.workers, ProviderCapacityObservedAt: evidence.observedAt}
 	if err := g.Recorder.RecordRequest(ctx, record); err != nil && g.Logger != nil {
 		g.Logger.Error("record request", "error", err, "request_id", id)
 	}

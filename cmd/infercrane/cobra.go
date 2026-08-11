@@ -78,6 +78,8 @@ func newRootCommand(ctx context.Context) *cobra.Command {
 		{use: "auth status [flags]", short: "Show the authenticated control-plane identity", group: "admin"},
 		{use: "tenant ACTION [arguments]", short: "Manage isolated tenants", group: "admin"},
 		{use: "principal ACTION [arguments]", short: "Manage scoped credentials", group: "admin"},
+		{use: "secret ACTION [arguments]", short: "Manage reference-only secrets", group: "admin"},
+		{use: "external ACTION [arguments]", short: "Govern explicit external fallback capacity", group: "operate"},
 		{use: "serve", short: "Run the control plane and gateway", group: "admin"},
 	}
 	for _, spec := range specs {

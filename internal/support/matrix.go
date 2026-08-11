@@ -56,6 +56,16 @@ func V01() Matrix {
 	return New([]string{DefaultRuntime}, map[string][]string{DefaultCloud: {ElasticMode, ServerlessMode}})
 }
 
+// V03 is the public qualification policy for the v0.3 release. Provider
+// adapters remain registered separately; adding one to the integration
+// catalog does not expose it until this policy is intentionally expanded.
+func V03() Matrix {
+	return New([]string{DefaultRuntime}, map[string][]string{
+		DefaultCloud: {ElasticMode, ServerlessMode},
+		"aws":        {ElasticMode},
+	})
+}
+
 func (m Matrix) Validate(runtime, cloud, mode string) error {
 	if err := m.ValidateRuntime(runtime); err != nil {
 		return err

@@ -1,0 +1,88 @@
+---
+title: AWS EC2 BYOC
+description: Configure the narrow, private-network AWS EC2 provider adapter.
+---
+
+# AWS EC2 BYOC
+
+The v0.3 AWS adapter provisions one EC2 instance per durable replica intent through Provider Contract
+V1. InferCrane assumes a customer role, uses explicit private networking, and adopts resources by
+idempotency token and ownership tags after uncertain responses.
+
+This is intentionally narrow. It is not EKS, SageMaker, automatic instance selection, public-IP
+bootstrap, or a general AWS abstraction.
+
+## Prerequisites
+
+- AWS CLI v2 on the control-plane host
+- a source identity permitted to call `sts:AssumeRole`
+- a role trust policy scoped to that source identity and, preferably, an external ID
+- an explicit private subnet and security group path between the control plane and worker port `8000`
+- a GPU-compatible AMI containing NVIDIA drivers, Docker, and AWS CLI v2
+- an EC2 instance profile permitted to read exactly the worker API-key secret
+- an OCI runtime image pinned by `sha256` digest
+
+The assumed control-plane role needs the narrow EC2 describe, run, tag, and terminate permissions for
+InferCrane-owned instances. Restrict resources and tag conditions according to your AWS account policy.
+
+## Control-plane configuration
+
+Configure the complete set. Partial configuration fails startup rather than silently disabling safety
+controls.
+
+```bash
+export INFERCRANE_AWS_ROLE_ARN='arn:aws:iam::123456789012:role/infercrane-control-plane'
+export INFERCRANE_AWS_EXTERNAL_ID='organization-controlled-value'
+export INFERCRANE_AWS_REGION='eu-central-1'
+export INFERCRANE_AWS_SUBNET_ID='subnet-0123456789abcdef0'
+export INFERCRANE_AWS_SECURITY_GROUP_IDS='sg-0123456789abcdef0'
+export INFERCRANE_AWS_AMI_ID='ami-0123456789abcdef0'
+export INFERCRANE_AWS_INSTANCE_TYPE='g6e.xlarge'
+export INFERCRANE_AWS_GPU='L40S'
+export INFERCRANE_AWS_INSTANCE_PROFILE_ARN='arn:aws:iam::123456789012:instance-profile/infercrane-worker'
+export INFERCRANE_AWS_WORKER_SECRET_ARN='arn:aws:secretsmanager:eu-central-1:123456789012:secret:infercrane-worker-key'
+export INFERCRANE_AWS_IMAGE_DIGEST='vllm/vllm-openai@sha256:REPLACE_WITH_QUALIFIED_DIGEST'
+```
+
+Validate role assumption without creating a resource:
+
+```bash
+infercrane doctor --aws
+```
+
+## Deploy
+
+The requested region and GPU must exactly match the configured, qualified instance profile:
+
+```bash
+infercrane plan Qwen/Qwen3-8B \
+  --name qwen-aws \
+  --cloud aws \
+  --region eu-central-1 \
+  --gpu L40S
+
+infercrane deploy Qwen/Qwen3-8B \
+  --name qwen-aws \
+  --cloud aws \
+  --region eu-central-1 \
+  --gpu L40S \
+  --idempotency-key qwen-aws-initial
+```
+
+Closing the terminal does not stop provisioning. Resume with the operation ID printed by `deploy`.
+Deletion terminates only instances carrying InferCrane ownership tags and the persisted replica key.
+
+## Security and accounting behavior
+
+STS credentials are short lived and exist only in the child AWS CLI process environment. InferCrane
+does not persist or return them. Workers retrieve their API key directly from Secrets Manager through
+the instance profile. EC2 is launched without a public IP.
+
+Cost is reported as `unknown` in v0.3. InferCrane does not ship a live AWS pricing catalog and will not
+infer cost from an instance-type name.
+
+## Qualification state
+
+Hermetic contract tests cover create-response loss, adoption, replay, deletion, tag-scoped inventory,
+private networking, immutable images, and credential redaction. Real AWS provisioning remains deferred
+until the consolidated v1 manual qualification; inspect `infercrane integrations` for the exact state.

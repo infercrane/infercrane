@@ -22,6 +22,7 @@ or link corrections. A changed decision gets a new ADR whose status supersedes t
 | [0010](/adr/0010-cobra-cli-and-progressive-terminal-output) | Accepted | Use Cobra for command discovery and progressively enhance terminal output. |
 | [0011](/adr/0011-tiered-provider-qualification) | Accepted | Tier provider contracts, Docker qualification, and explicitly paid acceptance. |
 | [0012](/adr/0012-versioned-integration-contracts) | Accepted | Version provider/runtime contracts and require evidence for supported capabilities. |
+| [0013](/adr/0013-governed-external-capacity-and-byoc) | Accepted | Require explicit policy for external capacity and keep BYOC credentials ephemeral. |
 
 Use the next sequential number. Include context, decision, consequences, alternatives, and
 verification. Link affected feature documents.

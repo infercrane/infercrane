@@ -66,7 +66,10 @@ func (r CloudRequest) Validate() error {
 	if r.ComputeMode == "serverless" && r.MinReplicas != 0 {
 		return errors.New("serverless compute requires min replicas 0")
 	}
-	if err := support.V01().Validate(r.Runtime, r.Cloud, r.ComputeMode); err != nil {
+	if r.Cloud == "aws" && r.Region == "" {
+		return errors.New("AWS BYOC requires an explicit region")
+	}
+	if err := support.V03().Validate(r.Runtime, r.Cloud, r.ComputeMode); err != nil {
 		return err
 	}
 	return nil
@@ -725,6 +728,9 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 	}
 	ensured, err := provider.EnsureReplica(ctx, provision.ReplicaSpec{ExternalKey: externalKey, RequestID: replica.ProviderRequestID, Name: fmt.Sprintf("%s-r%d", request.Name, ordinal), Model: request.Model, ModelRevision: request.ImmutableModelRevision, Cloud: request.Cloud, GPU: request.GPU, Region: request.Region, RuntimeVersion: request.RuntimeVersion, RuntimeArgs: request.RuntimeArgs, Port: request.Port})
 	if err != nil {
+		if errors.Is(err, provision.ErrInvalidReplicaSpec) {
+			return "", "", "", operations.Permanent("provider_configuration_invalid", err)
+		}
 		if errors.Is(err, provision.ErrRequestFailed) {
 			return "", "", "", operations.Retryable("provider_request_failed", fmt.Errorf("provider launch failed before the replica became ready; requested capacity may be unavailable: %w", err))
 		}

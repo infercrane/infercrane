@@ -44,6 +44,32 @@ func TestRejectsUnsafeControlPlaneURL(t *testing.T) {
 	}
 }
 
+func TestAWSBYOCConfigurationIsAllOrNothingAndImmutable(t *testing.T) {
+	t.Setenv("INFERCRANE_API_KEY", "secret")
+	t.Setenv("INFERCRANE_AWS_ROLE_ARN", "arn:aws:iam::123456789012:role/infercrane")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "partial") {
+		t.Fatalf("expected partial AWS configuration failure, got %v", err)
+	}
+	for key, value := range map[string]string{
+		"INFERCRANE_AWS_REGION": "eu-central-1", "INFERCRANE_AWS_SUBNET_ID": "subnet-private",
+		"INFERCRANE_AWS_SECURITY_GROUP_IDS": "sg-runtime, sg-egress", "INFERCRANE_AWS_AMI_ID": "ami-gpu",
+		"INFERCRANE_AWS_INSTANCE_TYPE": "g6e.xlarge", "INFERCRANE_AWS_GPU": "L40S",
+		"INFERCRANE_AWS_INSTANCE_PROFILE_ARN": "arn:aws:iam::123456789012:instance-profile/infercrane-worker",
+		"INFERCRANE_AWS_WORKER_SECRET_ARN":    "arn:aws:secretsmanager:eu-central-1:123456789012:secret:worker",
+		"INFERCRANE_AWS_IMAGE_DIGEST":         "ghcr.io/infercrane/runtime:mutable",
+	} {
+		t.Setenv(key, value)
+	}
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "sha256") {
+		t.Fatalf("expected mutable image failure, got %v", err)
+	}
+	t.Setenv("INFERCRANE_AWS_IMAGE_DIGEST", "ghcr.io/infercrane/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	cfg, err := Load()
+	if err != nil || !cfg.AWSEnabled() || len(cfg.AWSSecurityGroupIDs) != 2 {
+		t.Fatalf("cfg=%#v err=%v", cfg, err)
+	}
+}
+
 func TestInitializeClientWritesPrivateConfigAndLoadClientUsesIt(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", root)

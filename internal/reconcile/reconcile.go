@@ -30,6 +30,10 @@ type Store interface {
 type ServerlessStatus interface {
 	EndpointHealth(context.Context, string) (provision.ServerlessHealth, error)
 }
+type ExternalFallback interface {
+	Owns(string) bool
+	Resolve(context.Context, domain.Deployment, []domain.Target) (routes.Snapshot, error)
+}
 
 // DirectTargetBackend describes a provider-native endpoint that bypasses the
 // standalone replica router. The reconciler depends on this metadata rather
@@ -42,15 +46,16 @@ type DirectTargetBackend struct {
 }
 
 type Reconciler struct {
-	Store           Store
-	Routes          *routes.Directory
-	Router          router.Backend
-	Runtimes        integration.RuntimeBackends
-	Interval        time.Duration
-	RouterStartPort int
-	InstanceID      string
-	Logger          *slog.Logger
-	DirectTargets   map[string]DirectTargetBackend
+	Store            Store
+	Routes           *routes.Directory
+	Router           router.Backend
+	Runtimes         integration.RuntimeBackends
+	Interval         time.Duration
+	RouterStartPort  int
+	InstanceID       string
+	Logger           *slog.Logger
+	DirectTargets    map[string]DirectTargetBackend
+	ExternalFallback ExternalFallback
 }
 
 func (r *Reconciler) Run(ctx context.Context) error {
@@ -100,9 +105,15 @@ func (r *Reconciler) Once(ctx context.Context) error {
 			observedAt time.Time
 		}
 		inspections := make([]inspection, len(resolved.Targets))
+		primaryCount := 0
 		var wg sync.WaitGroup
 		semaphore := make(chan struct{}, 16)
 		for i, target := range resolved.Targets {
+			if r.ExternalFallback != nil && r.ExternalFallback.Owns(target.Provider) {
+				inspections[i] = inspection{target: target}
+				continue
+			}
+			primaryCount++
 			direct, isDirect := r.DirectTargets[target.Provider]
 			if isDirect {
 				if direct.APIKey == "" || direct.Provider == "" {
@@ -149,6 +160,9 @@ func (r *Reconciler) Once(ctx context.Context) error {
 		healthy := make([]domain.Target, 0, len(resolved.Targets))
 		for _, result := range inspections {
 			target, ok, models := result.target, result.ok, result.models
+			if r.ExternalFallback != nil && r.ExternalFallback.Owns(target.Provider) {
+				continue
+			}
 			expected := target.UpstreamModel
 			if expected == "" {
 				expected = d.Model
@@ -164,6 +178,26 @@ func (r *Reconciler) Once(ctx context.Context) error {
 			}
 		}
 		if len(healthy) == 0 {
+			if r.ExternalFallback != nil {
+				fallback, fallbackErr := r.ExternalFallback.Resolve(ctx, d, resolved.Targets)
+				if fallbackErr == nil {
+					r.Routes.Put(fallback)
+					_ = r.Store.SetDeploymentState(ctx, d.ID, "degraded")
+					for _, target := range resolved.Targets {
+						if target.ID == fallback.TargetID && target.Health != "healthy" {
+							_ = r.Store.SetTargetHealth(ctx, target.ID, "healthy")
+							_ = r.Store.Event(ctx, d.ID, target.ID, "external_fallback_available", fallback.SelectionReason, "")
+						}
+					}
+					continue
+				}
+				for _, target := range resolved.Targets {
+					if r.ExternalFallback.Owns(target.Provider) && target.Health != "unhealthy" {
+						_ = r.Store.SetTargetHealth(ctx, target.ID, "unhealthy")
+						_ = r.Store.Event(ctx, d.ID, target.ID, "external_fallback_unavailable", "Configured external fallback is unavailable: "+fallbackErr.Error(), "")
+					}
+				}
+			}
 			r.Routes.RemoveForTenant(d.TenantID, d.Name)
 			_ = r.Store.SetDeploymentState(ctx, d.ID, "unhealthy")
 			continue
@@ -182,7 +216,7 @@ func (r *Reconciler) Once(ctx context.Context) error {
 					break
 				}
 			}
-			r.Routes.Put(routes.Snapshot{DeploymentID: d.ID, RevisionID: d.ActiveRevisionID, TenantID: d.TenantID, Alias: d.Name, UpstreamModel: upstream, RouterURL: healthy[0].URL, Provider: direct.Provider, ProviderResourceID: healthy[0].ProviderResourceID, Runtime: d.Runtime, ComputeMode: "serverless", UpstreamAPIKey: direct.APIKey, ProviderWorkers: workers, ProviderObservedAt: observedAt})
+			r.Routes.Put(routes.Snapshot{DeploymentID: d.ID, TargetID: healthy[0].ID, RevisionID: d.ActiveRevisionID, TenantID: d.TenantID, Alias: d.Name, UpstreamModel: upstream, RouterURL: healthy[0].URL, Provider: direct.Provider, ProviderResourceID: healthy[0].ProviderResourceID, Runtime: d.Runtime, ComputeMode: "serverless", UpstreamAPIKey: direct.APIKey, ProviderWorkers: workers, ProviderObservedAt: observedAt})
 			_ = r.Store.SetDeploymentState(ctx, d.ID, "healthy")
 			continue
 		}
@@ -236,7 +270,7 @@ func (r *Reconciler) Once(ctx context.Context) error {
 			r.Routes.Put(routeSnapshot(d, healthy, upstream, generation.InternalEndpoint, routerProcessID(d.ID, generation.Generation)))
 		}
 		state := "degraded"
-		if len(healthy) == len(resolved.Targets) {
+		if len(healthy) == primaryCount {
 			state = "healthy"
 		}
 		_ = r.Store.SetDeploymentState(ctx, d.ID, state)

@@ -2,7 +2,7 @@
   "schema_version": 1,
   "program": "infercrane-v1",
   "current_milestone": "v0.3.0",
-  "state": "implementing",
+  "state": "qualifying",
   "baseline": {
     "commit": "fac8218ef9917b6dabd115bd5c8b1551a81c5ec7",
     "dev_check": "passed",
@@ -11,7 +11,7 @@
     "real_infrastructure": "deferred"
   },
   "last_completed_milestone": "v0.2.0-rc.1",
-  "next_action": "implement the v0.3 security, governed external-target, OpenRouter, and narrow AWS BYOC acceptance criteria",
+  "next_action": "complete clean-tree v0.3 local qualification, record commit-addressed evidence, and create v0.3.0-rc.1",
   "rc_tags": ["v0.2.0-rc.1"],
-  "updated_at": "2026-08-11T04:22:13Z"
+  "updated_at": "2026-08-11T05:14:12Z"
 }

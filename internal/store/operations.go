@@ -226,7 +226,14 @@ func (s *Store) ResolveForTenant(ctx context.Context, tenant, name string) (doma
 		return out, err
 	}
 	out.Deployment.CreatedAt, out.Deployment.UpdatedAt = parseTime(created), parseTime(updated)
-	rows, err := s.QueryContext(ctx, `SELECT t.id,t.name,t.url,t.provider,t.runtime,COALESCE(t.upstream_model_name,''),t.health,COALESCE(t.provider_resource_id,''),COALESCE(t.provider_details_json::text,''),t.created_at,t.updated_at FROM targets t JOIN deployment_targets dt ON dt.target_id=t.id WHERE dt.deployment_id=? ORDER BY t.name`, out.Deployment.ID)
+	rows, err := s.QueryContext(ctx, `SELECT t.id,t.name,t.url,t.provider,t.runtime,COALESCE(t.upstream_model_name,''),t.health,COALESCE(t.provider_resource_id,''),COALESCE(t.provider_details_json::text,''),t.created_at,t.updated_at
+		FROM targets t
+		WHERE t.id IN (
+			SELECT dt.target_id FROM deployment_targets dt WHERE dt.deployment_id=?
+			UNION
+			SELECT p.target_id FROM external_target_policies p WHERE p.deployment_id=?
+		)
+		ORDER BY t.name`, out.Deployment.ID, out.Deployment.ID)
 	if err != nil {
 		return out, err
 	}

@@ -481,6 +481,62 @@ func TestPrincipalCredentialRotationAndRevocation(t *testing.T) {
 	}
 }
 
+func TestScopedPrincipalAndExternalBudgetAreTenantSafe(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	if err := s.CreateTenant(ctx, "external-a", "External A"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateTenant(ctx, "external-b", "External B"); err != nil {
+		t.Fatal(err)
+	}
+	principal, token, err := s.CreatePrincipalScoped(ctx, "external-a", "read-bot", authz.Operator, []authz.Action{authz.Read})
+	if err != nil {
+		t.Fatal(err)
+	}
+	authenticated, err := s.AuthenticatePrincipal(ctx, token)
+	if err != nil || authenticated.Kind != "service_account" || len(authenticated.Scopes) != 1 || authenticated.Scopes[0] != "read" || authz.AllowedScoped(authz.Operator, authenticated.Scopes, authz.Deploy) {
+		t.Fatalf("principal=%#v authenticated=%#v err=%v", principal, authenticated, err)
+	}
+	target, err := s.AddTargetForTenant(ctx, "external-a", domain.Target{Name: "openrouter", URL: "https://openrouter.ai/api", Provider: "openrouter", Runtime: "vllm", UpstreamModel: "provider/model"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.AddTargetForTenant(ctx, "external-a", domain.Target{Name: "primary", URL: "http://primary.internal:8000", Provider: "existing", Runtime: "vllm", UpstreamModel: "alias"}); err != nil {
+		t.Fatal(err)
+	}
+	deployment, err := s.CreateDeploymentForTenant(ctx, "external-a", domain.Deployment{Name: "prod", Model: "alias", Runtime: "vllm", RoutingStrategy: "round-robin", MinReplicas: 1, MaxReplicas: 1}, []string{"primary"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := s.CreateSecretReference(ctx, "external-a", "openrouter", "env", "OPENROUTER_API_KEY")
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, err := s.SetExternalTargetPolicyForTenant(ctx, domain.ExternalTargetPolicy{TenantID: "external-a", DeploymentID: deployment.ID, TargetID: target.ID, Adapter: "openrouter", SecretReferenceID: secret.ID, Enabled: true, PrivacyAcknowledged: true, RequestLimit: 5, CostLimitMicrousd: 500, MaxRequestCostMicrousd: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := s.ResolveForTenant(ctx, "external-a", "prod")
+	if err != nil || len(resolved.Targets) != 2 {
+		t.Fatalf("external policy did not associate fallback target: targets=%#v err=%v", resolved.Targets, err)
+	}
+	first, err := s.LeaseExternalBudget(ctx, "external-a", policy.ID, 4)
+	if err != nil || first.Requests != 4 || first.ReservedCostMicrousd != 400 {
+		t.Fatalf("first lease=%#v err=%v", first, err)
+	}
+	second, err := s.LeaseExternalBudget(ctx, "external-a", policy.ID, 4)
+	if err != nil || second.Requests != 1 || second.ReservedCostMicrousd != 100 {
+		t.Fatalf("second lease=%#v err=%v", second, err)
+	}
+	if _, err = s.LeaseExternalBudget(ctx, "external-a", policy.ID, 1); !errors.Is(err, ErrConflict) {
+		t.Fatalf("exhausted budget was not enforced: %v", err)
+	}
+	if _, err = s.ExternalTargetPolicyForDeployment(ctx, "external-b", deployment.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-tenant policy was visible: %v", err)
+	}
+}
+
 func TestScaleToQueuesExactlyOneDurableOperation(t *testing.T) {
 	s := openStore(t, context.Background())
 	ctx := context.Background()
@@ -841,7 +897,7 @@ func openStore(t *testing.T, ctx context.Context) *Store {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	if _, err := s.db.ExecContext(ctx, `TRUNCATE principals,tenant_quotas,audit_events,operations,scaling_decisions,scaling_policies,request_records,deployment_events,router_generations,deployment_targets,replicas,deployments,targets,model_artifacts CASCADE`); err != nil {
+	if _, err := s.db.ExecContext(ctx, `TRUNCATE principals,secret_references,tenant_quotas,audit_events,operations,scaling_decisions,scaling_policies,request_records,deployment_events,router_generations,deployment_targets,replicas,deployments,targets,model_artifacts CASCADE`); err != nil {
 		t.Fatalf("reset test database: %v", err)
 	}
 	t.Cleanup(func() {

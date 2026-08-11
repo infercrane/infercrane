@@ -38,8 +38,9 @@ advertised publicly. Qualification requires configuration, documentation, compat
 failure testing, real infrastructure acceptance, and zero leaked billable resources.
 
 <Note>
-The first v0.1 qualification target is vLLM on RunPod. This is the current support boundary, not
-the architectural boundary.
+v0.3 registers RunPod elastic/serverless, a narrow AWS EC2 elastic adapter, and governed external
+targets. Each exact mode retains its own qualification state; registration never implies real-cloud
+evidence.
 </Note>
 
 ## Adding an integration

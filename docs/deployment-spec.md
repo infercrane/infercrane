@@ -36,6 +36,6 @@ routing:
 
 `compute.mode` defaults to `elastic`; elastic replica bounds default to `1..1`. Serverless requires
 `min_replicas: 0` and defaults `max_replicas` to one when omitted. Revisions are immutable; changing
-a field creates a candidate. v0.1 rejects non-vLLM runtimes, clouds other than RunPod, and
-serverless minimums other than zero. Cost is omitted unless a trustworthy provider measurement
-exists.
+a field creates a candidate. v0.3 accepts vLLM on RunPod elastic/serverless and the configured AWS
+EC2 elastic adapter. AWS requires an explicit `provider.region`; AWS Serverless and non-vLLM
+runtimes remain unqualified. Cost is omitted unless a trustworthy provider measurement exists.

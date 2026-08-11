@@ -8,7 +8,7 @@ but lacks production qualification; **planned** is not a product capability.
 | Side-effect-free deployment planning | Implemented | Deterministic human and JSON output; live cost estimation is not yet available. |
 | CLI discovery and contexts | Implemented | Cobra grouped help, suggestions, generated completion, named contexts, authenticated identity, and durable timeline following are wired. |
 | Read-only terminal operations console | Experimental | Responsive deployment, operation, Release Guard, explanation, and event views use authenticated read APIs; broader terminal compatibility qualification remains. |
-| Environment diagnostics | Implemented | Read-only checks for API auth, PostgreSQL, vLLM Router, and optional SkyPilot. |
+| Environment diagnostics | Implemented | Read-only checks for API auth, PostgreSQL, vLLM Router, SkyPilot/RunPod, Serverless, and AWS role assumption. |
 | Declarative existing-target apply | Implemented | Atomic convergence of routing, replica bounds, and target membership. |
 | Durable lifecycle operations | Implemented | Idempotency, progress, retry classification, and cooperative cancellation state. |
 | Leased operation execution engine | Experimental | Existing-target, elastic, revision, scale, delete, and serverless handlers resume from durable state; real provider restart qualification remains. |
@@ -36,7 +36,10 @@ but lacks production qualification; **planned** is not a product capability.
 | Tiered developer qualification | Implemented | Fast provider contracts, isolated Docker recovery checks, paid-run locking, and CI evidence separate local correctness from real-cloud qualification. |
 | Capacity and runtime adapter contracts | Experimental | GPU/cache-aware deterministic placement exists; the first v0.1 operational composition is SkyPilot/RunPod elastic, RunPod Serverless, and vLLM. |
 | Provider capacity preflight | Experimental | Optional provider advisors persist available/constrained/unavailable/unknown evidence; RunPod secure-GPU stock is the first read-only implementation. |
-| Scoped tenant identity and RBAC | Experimental | Hashed rotation/revocation credentials and resource isolation are wired; distributed request-rate enforcement and adversarial qualification remain. |
+| Scoped tenant identity and RBAC | Experimental | Role-bounded service-account scopes, hashed rotation/revocation credentials, audit attribution, and adversarial tenant isolation are wired. |
+| Reference-only secrets | Experimental | Environment references persist without values; additional production secret-manager resolvers remain planned. |
+| Governed external capacity | Experimental | Explicit health fallback, privacy acknowledgement, atomic request/cost reservations, OpenRouter, and no-replay streaming behavior are hermetically qualified; real billing evidence is deferred. |
+| AWS EC2 BYOC | Experimental | Private-network, role-assumed, tag-owned, immutable-image elastic lifecycle passes Provider Contract V1 hermetically; real AWS evidence is deferred. |
 | SkyPilot RunPod provisioning | Experimental | Requires credentialed elastic lifecycle acceptance and soak tests. |
 | Production performance claims | Planned | Must be backed by reproducible real-vLLM benchmarks. |
 

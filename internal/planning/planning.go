@@ -132,8 +132,8 @@ func Build(in Input) (Plan, error) {
 	if in.Runtime == "" {
 		in.Runtime = support.DefaultRuntime
 	}
-	if err := support.V01().ValidateRuntime(in.Runtime); err != nil {
-		return Plan{}, fmt.Errorf("v0.1 support policy: %w", err)
+	if err := support.V03().ValidateRuntime(in.Runtime); err != nil {
+		return Plan{}, fmt.Errorf("support policy: %w", err)
 	}
 	if in.Routing == "" {
 		in.Routing = "round-robin"
@@ -154,8 +154,11 @@ func Build(in Input) (Plan, error) {
 		return Plan{}, errors.New("replicas must be positive and max replicas must be >= min replicas")
 	}
 	if in.Cloud != "" {
-		if err := support.V01().Validate(in.Runtime, in.Cloud, in.ComputeMode); err != nil {
-			return Plan{}, fmt.Errorf("v0.1 support policy: %w", err)
+		if err := support.V03().Validate(in.Runtime, in.Cloud, in.ComputeMode); err != nil {
+			return Plan{}, fmt.Errorf("support policy: %w", err)
+		}
+		if in.Cloud == "aws" && in.Region == "" {
+			return Plan{}, errors.New("AWS BYOC requires an explicit region")
 		}
 	}
 

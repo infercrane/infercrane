@@ -52,8 +52,8 @@ func (s *Store) EnsureCandidateRevision(ctx context.Context, tenant, deploymentN
 		return domain.DeploymentRevision{}, errors.New("elastic revision requires cloud and gpu")
 	}
 	if normalized.ComputeMode != "existing" {
-		if err := support.V01().Validate(normalized.Runtime, normalized.Cloud, normalized.ComputeMode); err != nil {
-			return domain.DeploymentRevision{}, fmt.Errorf("v0.1 support policy: %w", err)
+		if err := support.V03().Validate(normalized.Runtime, normalized.Cloud, normalized.ComputeMode); err != nil {
+			return domain.DeploymentRevision{}, fmt.Errorf("support policy: %w", err)
 		}
 	}
 	if normalized.RoutingStrategy == "" {
