@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/safehttp"
 	"github.com/infercrane/infercrane/internal/secrets"
 )
 
@@ -126,37 +127,7 @@ func (d Deliverer) Deliver(ctx context.Context, policy domain.AlertPolicy, findi
 }
 
 func (d Deliverer) safeClient() *http.Client {
-	resolve := d.ResolveIP
-	if resolve == nil {
-		resolve = net.DefaultResolver.LookupIPAddr
-	}
-	dialer := &net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}
-	transport := &http.Transport{DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
-		host, port, err := net.SplitHostPort(address)
-		if err != nil {
-			return nil, err
-		}
-		addresses, err := resolve(ctx, host)
-		if err != nil || len(addresses) == 0 {
-			return nil, errors.New("webhook destination DNS could not be validated")
-		}
-		var lastErr error
-		for _, resolved := range addresses {
-			if !d.AllowPrivate && (resolved.IP.IsPrivate() || resolved.IP.IsLoopback() || resolved.IP.IsLinkLocalUnicast() || resolved.IP.IsUnspecified()) {
-				continue
-			}
-			connection, dialErr := dialer.DialContext(ctx, network, net.JoinHostPort(resolved.IP.String(), port))
-			if dialErr == nil {
-				return connection, nil
-			}
-			lastErr = dialErr
-		}
-		if lastErr != nil {
-			return nil, lastErr
-		}
-		return nil, errors.New("webhook destination has no permitted address")
-	}}
-	return &http.Client{Timeout: 10 * time.Second, Transport: transport}
+	return safehttp.WebhookClient(d.ResolveIP, d.AllowPrivate)
 }
 
 func sign(secret, timestamp string, body []byte) string {

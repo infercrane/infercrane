@@ -293,6 +293,28 @@ type AlertDelivery struct {
 	CreatedAt, UpdatedAt, DeliveredAt                                time.Time
 }
 
+type AdmissionPolicy struct {
+	EndpointID, TenantID                          string
+	MaxConcurrency, MaxQueueDepth, QueueTimeoutMS int
+	MaxRequestBytes, MaxOutputTokens, RetryBudget int
+	AllowedPrioritiesJSON                         string
+	Enabled                                       bool
+	CreatedAt, UpdatedAt                          time.Time
+}
+
+type AsyncInferenceJob struct {
+	ID, TenantID, EndpointID, RequestID, Protocol, Status string
+	IdempotencyKey, EncryptionKeyReference                string
+	WebhookURL, WebhookSecretReferenceID                  string
+	WebhookStatus, WebhookErrorCode                       string
+	LeaseOwner, LeaseToken, ErrorCode, ErrorMessage       string
+	PayloadCiphertext, PayloadNonce, ResultCiphertext     []byte
+	ResultNonce                                           []byte
+	Priority, Attempt, WebhookAttempts                    int
+	ExecutionDeadline, ExpiresAt, CreatedAt, UpdatedAt    time.Time
+	StartedAt, CompletedAt, LeaseExpiresAt                *time.Time
+}
+
 type ReleaseGuardPolicy struct {
 	DeploymentID                   string   `json:"deployment_id"`
 	Enabled                        bool     `json:"enabled"`

@@ -58,6 +58,8 @@ func newRootCommand(ctx context.Context) *cobra.Command {
 		{use: "deploy MODEL [flags]", short: "Create a durable inference deployment", group: "start"},
 		{use: "adopt endpoint|promote NAME [flags]", short: "Connect an existing inference workload", group: "start"},
 		{use: "alert ACTION ENDPOINT [flags]", short: "Configure and evaluate signed webhook alerts", group: "operate"},
+		{use: "admission ACTION ENDPOINT [flags]", short: "Bound endpoint concurrency and queueing", group: "operate"},
+		{use: "async ACTION SUBJECT [flags]", short: "Submit and resume durable encrypted inference", group: "operate"},
 		{use: "ui", short: "Open the interactive operations workspace", group: "operate"},
 		{use: "dashboard [flags]", short: "Open or print the browser operations dashboard", group: "operate"},
 		{use: "request DEPLOYMENT [flags]", short: "Send a buffered or streaming inference request", group: "start"},
@@ -124,7 +126,7 @@ func addHelpFlags(command *cobra.Command, name string) {
 	boolFlag := func(flag, help string) { command.Flags().Bool(flag, false, help) }
 	intFlag := func(flag string, value int, help string) { command.Flags().Int(flag, value, help) }
 	switch name {
-	case "init", "doctor", "adopt", "alert", "plan", "deploy", "apply", "request", "deployments", "endpoints", "endpoint", "environment", "logical-model", "status", "logs", "events", "inspect", "explain", "benchmark", "passport", "recommend", "slo", "delete", "orphans", "operation", "integrations", "dashboard":
+	case "init", "doctor", "adopt", "alert", "admission", "async", "plan", "deploy", "apply", "request", "deployments", "endpoints", "endpoint", "environment", "logical-model", "status", "logs", "events", "inspect", "explain", "benchmark", "passport", "recommend", "slo", "delete", "orphans", "operation", "integrations", "dashboard":
 		stringFlag("output", "human", "output format: human or json")
 	}
 	switch name {
@@ -143,6 +145,24 @@ func addHelpFlags(command *cobra.Command, name string) {
 		stringFlag("secret-reference", "", "signing secret reference ID")
 		stringFlag("minimum-severity", "warning", "info, warning, or critical")
 		intFlag("max-attempts", 3, "bounded delivery attempts")
+	case "admission":
+		intFlag("max-concurrency", 32, "maximum concurrently executing requests")
+		intFlag("max-queue", 64, "maximum queued requests")
+		intFlag("queue-timeout-ms", 5000, "maximum queue wait in milliseconds")
+		intFlag("max-request-bytes", 16<<20, "maximum encoded request size")
+		intFlag("max-output-tokens", 8192, "maximum requested output tokens")
+		stringFlag("priorities", "normal", "comma-separated allowed priorities")
+		intFlag("retry-budget", 0, "bounded inference retry budget")
+		boolFlag("disabled", "store the policy without enforcing it")
+	case "async":
+		stringFlag("file", "", "protocol-native JSON request file")
+		stringFlag("protocol", "chat", "request protocol")
+		stringFlag("idempotency-key", "", "stable submission idempotency key")
+		intFlag("priority", 0, "job priority from -100 to 100")
+		intFlag("deadline-seconds", 900, "execution deadline")
+		intFlag("retention-seconds", 86400, "encrypted result retention")
+		stringFlag("webhook", "", "HTTPS completion webhook")
+		stringFlag("webhook-secret-reference", "", "webhook signing secret reference")
 	case "ui":
 		boolFlag("read-only", "disable control-plane mutation actions")
 	case "endpoint":

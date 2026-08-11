@@ -26,7 +26,10 @@ services:
       context: .
       target: builder
     entrypoint: ["go", "test"]
-    command: ["-race", "-count=1", "./..."]
+    # Database-backed packages share this intentionally ephemeral PostgreSQL
+    # instance. Serialize packages so fixture truncation cannot race another
+    # package while retaining per-package race detection and full coverage.
+    command: ["-race", "-count=1", "-p=1", "./..."]
     environment:
       INFERCRANE_TEST_DATABASE_URL: postgres://infercrane:infercrane@test-postgres:5432/infercrane_test?sslmode=disable
     depends_on:

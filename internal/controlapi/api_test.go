@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/infercrane/infercrane/internal/asyncinference"
 	"github.com/infercrane/infercrane/internal/authz"
 	"github.com/infercrane/infercrane/internal/benchmark"
 	"github.com/infercrane/infercrane/internal/doctor"
@@ -34,6 +35,61 @@ type fakeStore struct {
 	sloPolicy       domain.SLOPolicy
 	recommendations []domain.InferenceRecommendation
 	capacity        domain.CapacityEvidence
+}
+
+func TestAsyncInferenceRequiresConsentAndReturnsDurableJob(t *testing.T) {
+	service := &fakeAsyncService{}
+	handler := (API{Store: &fakeStore{}, APIKey: "secret", AsyncInference: service}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/endpoints/coder/async", strings.NewReader(`{"input":{"model":"coder","messages":[]},"idempotency_key":"key"}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "content_consent_required") {
+		t.Fatalf("consent status=%d body=%s", response.Code, response.Body.String())
+	}
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/endpoints/coder/async", strings.NewReader(`{"protocol":"chat","input":{"model":"coder","messages":[]},"idempotency_key":"key","store_encrypted_content":true}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted || service.submitted.Endpoint != "coder" || service.submitted.IdempotencyKey != "key" || strings.Contains(response.Body.String(), "ciphertext") {
+		t.Fatalf("submit status=%d submitted=%#v body=%s", response.Code, service.submitted, response.Body.String())
+	}
+}
+
+func TestAsyncInferenceResultAndCancellation(t *testing.T) {
+	service := &fakeAsyncService{}
+	handler := (API{Store: &fakeStore{}, APIKey: "secret", AsyncInference: service}).Handler()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/async/jobs/job-1", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"result":{"ok":true}`) {
+		t.Fatalf("result status=%d body=%s", response.Code, response.Body.String())
+	}
+	request = httptest.NewRequest(http.MethodDelete, "/api/v1/async/jobs/job-1", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent || service.cancelled != "job-1" {
+		t.Fatalf("cancel status=%d id=%s", response.Code, service.cancelled)
+	}
+}
+
+type fakeAsyncService struct {
+	submitted asyncinference.SubmitRequest
+	cancelled string
+}
+
+func (f *fakeAsyncService) Submit(_ context.Context, request asyncinference.SubmitRequest) (domain.AsyncInferenceJob, bool, error) {
+	f.submitted = request
+	return domain.AsyncInferenceJob{ID: "job-1", TenantID: request.Tenant, EndpointID: "endpoint-1", RequestID: "request-1", Protocol: request.Protocol, Status: "queued", ExecutionDeadline: request.ExecutionDeadline, ExpiresAt: request.ExpiresAt, CreatedAt: time.Now().UTC(), WebhookStatus: "not_configured"}, true, nil
+}
+func (f *fakeAsyncService) Result(context.Context, string, string) (domain.AsyncInferenceJob, []byte, error) {
+	return domain.AsyncInferenceJob{ID: "job-1", Status: "succeeded", Protocol: "chat", WebhookStatus: "not_configured"}, []byte(`{"ok":true}`), nil
+}
+func (f *fakeAsyncService) Cancel(_ context.Context, _ string, id string) error {
+	f.cancelled = id
+	return nil
 }
 
 func (f *fakeStore) SetSLOPolicy(_ context.Context, _, _ string, policy domain.SLOPolicy) (domain.SLOPolicy, error) {

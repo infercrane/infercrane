@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/infercrane/infercrane/internal/admission"
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/routes"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
@@ -208,6 +209,69 @@ func TestUnqualifiedProtocolFailsBeforeUpstream(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusUnprocessableEntity || called || !strings.Contains(response.Body.String(), "unsupported_protocol") {
 		t.Fatalf("status=%d called=%t body=%s", response.Code, called, response.Body.String())
+	}
+}
+
+func TestAdmissionRejectsBeforeUpstream(t *testing.T) {
+	called := false
+	client := &http.Client{Transport: roundTripper(func(*http.Request) (*http.Response, error) {
+		called = true
+		return nil, errors.New("unexpected upstream request")
+	})}
+	pool := admission.New()
+	pool.Replace([]admission.Policy{{Key: "global\x00alias", MaxConcurrency: 1, MaxQueueDepth: 0, QueueTimeout: time.Second, MaxRequestBytes: 10, MaxOutputTokens: 4, AllowedPriorities: map[string]struct{}{"normal": {}}, Enabled: true}})
+	directory := routes.New()
+	directory.Put(routes.Snapshot{TenantID: "global", Alias: "alias", UpstreamModel: "model", RouterURL: "http://runtime", ProtocolCapabilities: runtimecontract.ProtocolCapabilities{ChatCompletions: true}})
+	handler := (&Gateway{Routes: directory, APIKey: "secret", Client: client, AdmissionAuthorizer: pool}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"alias","messages":[]}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusRequestEntityTooLarge || called {
+		t.Fatalf("status=%d called=%t body=%s", response.Code, called, response.Body.String())
+	}
+}
+
+func TestAdmissionRetryBudgetRetriesOnlyBufferedInternalRequest(t *testing.T) {
+	attempts := 0
+	client := &http.Client{Transport: roundTripper(func(request *http.Request) (*http.Response, error) {
+		attempts++
+		if request.Header.Get("X-InferCrane-Attempt") != string(rune('0'+attempts)) {
+			t.Fatalf("attempt header=%q", request.Header.Get("X-InferCrane-Attempt"))
+		}
+		if attempts < 3 {
+			return &http.Response{StatusCode: http.StatusServiceUnavailable, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":"starting"}`))}, nil
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"model":"model","choices":[]}`))}, nil
+	})}
+	pool := admission.New()
+	pool.Replace([]admission.Policy{{Key: "global\x00alias", MaxConcurrency: 1, MaxQueueDepth: 0, QueueTimeout: time.Second, MaxRequestBytes: 4096, MaxOutputTokens: 4096, AllowedPriorities: map[string]struct{}{"normal": {}}, RetryBudget: 2, Enabled: true}})
+	directory := routes.New()
+	directory.Put(routes.Snapshot{TenantID: "global", Alias: "alias", UpstreamModel: "model", RouterURL: "http://runtime", ProtocolCapabilities: runtimecontract.ProtocolCapabilities{ChatCompletions: true}})
+	handler := (&Gateway{Routes: directory, APIKey: "secret", Client: client, AdmissionAuthorizer: pool}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"alias","messages":[]}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || attempts != 3 {
+		t.Fatalf("status=%d attempts=%d body=%s", response.Code, attempts, response.Body.String())
+	}
+}
+
+func TestAdmissionRetryBudgetDoesNotRetryStreaming(t *testing.T) {
+	attempts := 0
+	client := &http.Client{Transport: roundTripper(func(*http.Request) (*http.Response, error) { attempts++; return nil, errors.New("unavailable") })}
+	pool := admission.New()
+	pool.Replace([]admission.Policy{{Key: "global\x00alias", MaxConcurrency: 1, MaxQueueDepth: 0, QueueTimeout: time.Second, MaxRequestBytes: 4096, MaxOutputTokens: 4096, AllowedPriorities: map[string]struct{}{"normal": {}}, RetryBudget: 3, Enabled: true}})
+	directory := routes.New()
+	directory.Put(routes.Snapshot{TenantID: "global", Alias: "alias", UpstreamModel: "model", RouterURL: "http://runtime", ProtocolCapabilities: runtimecontract.ProtocolCapabilities{ChatCompletions: true, Streaming: true}})
+	handler := (&Gateway{Routes: directory, APIKey: "secret", Client: client, AdmissionAuthorizer: pool}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"alias","messages":[],"stream":true}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if attempts != 1 {
+		t.Fatalf("stream was retried %d times", attempts)
 	}
 }
 

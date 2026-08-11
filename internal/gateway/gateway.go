@@ -14,10 +14,12 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/infercrane/infercrane/internal/admission"
 	"github.com/infercrane/infercrane/internal/authz"
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/openaicompat"
@@ -35,6 +37,10 @@ type ExternalAuthorizer interface {
 type RequestAuthorizer interface {
 	Authorize(string) error
 }
+type AdmissionAuthorizer interface {
+	Acquire(context.Context, admission.Request) (func(), error)
+	RetryBudget(string) int
+}
 type Gateway struct {
 	Routes    *routes.Directory
 	APIKey    string
@@ -48,10 +54,11 @@ type Gateway struct {
 	// CapacityObservers provide request-arrival evidence for provider-native
 	// serverless routes. The lookup is bounded and best-effort: inference must
 	// remain available when telemetry observation fails.
-	CapacityObservers  map[string]CapacityObserver
-	ExternalAuthorizer ExternalAuthorizer
-	RequestAuthorizer  RequestAuthorizer
-	Authenticator      interface {
+	CapacityObservers   map[string]CapacityObserver
+	ExternalAuthorizer  ExternalAuthorizer
+	RequestAuthorizer   RequestAuthorizer
+	AdmissionAuthorizer AdmissionAuthorizer
+	Authenticator       interface {
 		AuthenticatePrincipal(context.Context, string) (domain.Principal, error)
 	}
 }
@@ -182,6 +189,28 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 		openAIError(w, "Endpoint does not support streaming for the '"+operation+"' protocol", http.StatusUnprocessableEntity, "unsupported_protocol")
 		return
 	}
+	maxOutputTokens := integerField(payload, "max_output_tokens")
+	if maxOutputTokens == 0 {
+		maxOutputTokens = integerField(payload, "max_tokens")
+	}
+	if g.AdmissionAuthorizer != nil {
+		releaseAdmission, admissionErr := g.AdmissionAuthorizer.Acquire(r.Context(), admission.Request{Key: principal.TenantID + "\x00" + alias, Priority: r.Header.Get("X-InferCrane-Priority"), RequestBytes: len(body), OutputTokens: maxOutputTokens})
+		if admissionErr != nil {
+			status, errorType := http.StatusTooManyRequests, "admission_rejected"
+			if errors.Is(admissionErr, admission.ErrRequestSize) {
+				status, errorType = http.StatusRequestEntityTooLarge, "request_too_large"
+			} else if errors.Is(admissionErr, admission.ErrOutputLimit) || errors.Is(admissionErr, admission.ErrPriority) {
+				status, errorType = http.StatusUnprocessableEntity, "admission_policy_violation"
+			}
+			openAIError(w, admissionErr.Error(), status, errorType)
+			return
+		}
+		defer releaseAdmission()
+	}
+	retryBudget := 0
+	if g.AdmissionAuthorizer != nil && !streaming && route.ExternalPolicyID == "" {
+		retryBudget = g.AdmissionAuthorizer.RetryBudget(principal.TenantID + "\x00" + alias)
+	}
 	body, err = json.Marshal(payload)
 	if err != nil {
 		openAIError(w, "Invalid JSON body", http.StatusBadRequest, "invalid_request_error")
@@ -235,23 +264,43 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 		openAIError(w, "Inference upstream is unavailable", http.StatusServiceUnavailable, "server_error")
 		return
 	}
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, target, bytes.NewReader(body))
-	if err != nil {
-		openAIError(w, "Inference upstream is unavailable", http.StatusServiceUnavailable, "server_error")
-		return
-	}
-	copyHeaders(req.Header, r.Header)
-	if route.UpstreamAPIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+route.UpstreamAPIKey)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Request-ID", requestID)
-	req.Header.Set("traceparent", traceParent)
 	client := g.Client
 	if client == nil {
 		client = &http.Client{Transport: &http.Transport{MaxIdleConns: 512, MaxIdleConnsPerHost: 128, IdleConnTimeout: 90 * time.Second, ResponseHeaderTimeout: 5 * time.Minute}}
 	}
-	resp, err := client.Do(req)
+	var resp *http.Response
+	for attempt := 0; attempt <= retryBudget; attempt++ {
+		req, requestErr := http.NewRequestWithContext(r.Context(), http.MethodPost, target, bytes.NewReader(body))
+		if requestErr != nil {
+			err = requestErr
+			break
+		}
+		copyHeaders(req.Header, r.Header)
+		if route.UpstreamAPIKey != "" {
+			req.Header.Set("Authorization", "Bearer "+route.UpstreamAPIKey)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Request-ID", requestID)
+		req.Header.Set("traceparent", traceParent)
+		req.Header.Set("X-InferCrane-Attempt", strconv.Itoa(attempt+1))
+		resp, err = client.Do(req)
+		if err == nil && (resp.StatusCode != http.StatusBadGateway && resp.StatusCode != http.StatusServiceUnavailable && resp.StatusCode != http.StatusGatewayTimeout) {
+			break
+		}
+		if resp != nil {
+			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+			_ = resp.Body.Close()
+			resp = nil
+		}
+		if attempt < retryBudget {
+			select {
+			case <-r.Context().Done():
+				err = r.Context().Err()
+				attempt = retryBudget
+			case <-time.After(time.Duration(attempt+1) * 25 * time.Millisecond):
+			}
+		}
+	}
 	if err != nil {
 		status, errorType, message := http.StatusServiceUnavailable, "upstream_unavailable", "Inference upstream is unavailable"
 		if errors.Is(err, context.DeadlineExceeded) {
@@ -259,6 +308,11 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 		}
 		g.record(r.Context(), requestID, route, alias, operation, started, status, errorType, streaming, responseObservation{}, <-evidenceResult)
 		openAIError(w, message, status, "server_error")
+		return
+	}
+	if resp == nil {
+		g.record(r.Context(), requestID, route, alias, operation, started, http.StatusServiceUnavailable, "upstream_unavailable", streaming, responseObservation{}, <-evidenceResult)
+		openAIError(w, "Inference upstream is unavailable", http.StatusServiceUnavailable, "server_error")
 		return
 	}
 	defer resp.Body.Close()
@@ -280,6 +334,14 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 	if g.Logger != nil {
 		g.Logger.Info("inference request", "request_id", requestID, "traceparent", traceParent, "tenant_id", principal.TenantID, "deployment_id", route.DeploymentID, "status", resp.StatusCode, "duration_ms", float64(time.Since(started).Microseconds())/1000)
 	}
+}
+
+func integerField(payload map[string]any, name string) int {
+	value, ok := payload[name].(float64)
+	if !ok || value <= 0 || value > float64(^uint(0)>>1) {
+		return 0
+	}
+	return int(value)
 }
 
 type capacityEvidence struct {

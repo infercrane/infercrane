@@ -27,8 +27,10 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/accounting"
+	"github.com/infercrane/infercrane/internal/admission"
 	"github.com/infercrane/infercrane/internal/alert"
 	"github.com/infercrane/infercrane/internal/artifact"
+	"github.com/infercrane/infercrane/internal/asyncinference"
 	"github.com/infercrane/infercrane/internal/authn"
 	"github.com/infercrane/infercrane/internal/autoscale"
 	"github.com/infercrane/infercrane/internal/benchmark"
@@ -152,7 +154,7 @@ func runLegacy(ctx context.Context, args []string) error {
 		return passportCommand(ctx, config.Config{}, args[1:])
 	}
 	switch args[0] {
-	case "target", "deploy", "apply", "plan", "doctor", "adopt", "alert", "ui", "dashboard", "deployments", "endpoints", "endpoint", "environment", "logical-model", "route", "status", "events", "logs", "request", "explain", "rollout", "delete", "inspect", "operation", "orphans", "integrations", "context", "auth", "tenant", "principal", "secret", "external", "benchmark", "passport", "recommend", "slo", "serve":
+	case "target", "deploy", "apply", "plan", "doctor", "adopt", "alert", "admission", "async", "ui", "dashboard", "deployments", "endpoints", "endpoint", "environment", "logical-model", "route", "status", "events", "logs", "request", "explain", "rollout", "delete", "inspect", "operation", "orphans", "integrations", "context", "auth", "tenant", "principal", "secret", "external", "benchmark", "passport", "recommend", "slo", "serve":
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -181,6 +183,10 @@ func runLegacy(ctx context.Context, args []string) error {
 		return adoptCommand(ctx, cfg, args[1:])
 	case "alert":
 		return alertCommand(ctx, cfg, args[1:])
+	case "admission":
+		return admissionCommand(ctx, cfg, args[1:])
+	case "async":
+		return asyncCommand(ctx, cfg, args[1:])
 	case "ui":
 		return uiCommand(ctx, cfg, args[1:])
 	case "dashboard":
@@ -2897,6 +2903,15 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 			logger.Error("request quota lease worker stopped", "error", err)
 		}
 	}()
+	admissionPool := admission.New()
+	if err := admissionPool.Refresh(ctx, s); err != nil {
+		return fmt.Errorf("load admission policy snapshot: %w", err)
+	}
+	go func() {
+		if err := admissionPool.Run(ctx, s, time.Second); err != nil && ctx.Err() == nil {
+			logger.Error("admission policy refresh stopped", "error", err)
+		}
+	}()
 	diagnostics := func(checkCtx context.Context, cloud, checkServerless, checkAWS, checkKubernetes bool) doctor.Report {
 		report := doctor.Run(checkCtx, cfg, doctor.Dependencies{})
 		if cloud {
@@ -2944,7 +2959,15 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	if cfg.KubernetesEnabled() {
 		benchmarkBackends["kubernetes"] = controlapi.BackendMetadata{APIKey: cfg.APIKey, APIKeyEnv: "INFERCRANE_WORKER_API_KEY"}
 	}
-	control := (controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: credentialCache, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}}).Handler()
+	var asyncService *asyncinference.Service
+	if cfg.AsyncEncryptionKey != "" {
+		cipher, cipherErr := asyncinference.NewCipher(cfg.AsyncEncryptionKey)
+		if cipherErr != nil {
+			return fmt.Errorf("configure async inference encryption: %w", cipherErr)
+		}
+		asyncService = &asyncinference.Service{Store: s, Cipher: cipher, KeyReference: cfg.AsyncEncryptionKeyReference, GatewayURL: cfg.ControlURL, APIKey: cfg.APIKey, Owner: cfg.InstanceID + ":async", Lease: time.Minute, Secrets: secrets.Environment{}}
+	}
+	control := (controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: credentialCache, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, AsyncInference: asyncService}).Handler()
 	operationTelemetry := &operations.Telemetry{}
 	handlers := workflows.DeploymentHandlers(s)
 	for kind, handler := range workflows.RolloutHandlers(s) {
@@ -3009,13 +3032,20 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 			logger.Error("operation worker stopped", "error", err)
 		}
 	}()
+	if asyncService != nil {
+		go func() {
+			if err := asyncService.Run(ctx); err != nil && ctx.Err() == nil {
+				logger.Error("async inference worker stopped", "error", err)
+			}
+		}()
+	}
 	autoscaler := autoscale.Controller{Repository: s, Signals: autoscale.VLLMSignals{Targets: s, Client: client, APIKey: cfg.APIKey}, Fleet: s}
 	go runAutoscaler(ctx, autoscaler, cfg.HealthInterval, logger)
 	gatewayTelemetry := &gateway.Telemetry{Extra: func(w io.Writer) {
 		operationTelemetry.WritePrometheus(w)
 		recorder.WritePrometheus(w)
 	}}
-	server := &http.Server{Addr: fmt.Sprintf("%s:%d", cfg.Host, cfg.Port), Handler: (&gateway.Gateway{Routes: directory, APIKey: cfg.APIKey, Authenticator: credentialCache, Recorder: recorder, Logger: logger, Client: client, Ready: s.Ping, Control: control, Dashboard: dashboard.Handler(), Telemetry: gatewayTelemetry, CapacityObservers: map[string]gateway.CapacityObserver{"runpod": serverless.ActiveWorkers}, ExternalAuthorizer: externalBudgets, RequestAuthorizer: requestQuotas}).Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 1 << 20}
+	server := &http.Server{Addr: fmt.Sprintf("%s:%d", cfg.Host, cfg.Port), Handler: (&gateway.Gateway{Routes: directory, APIKey: cfg.APIKey, Authenticator: credentialCache, Recorder: recorder, Logger: logger, Client: client, Ready: s.Ping, Control: control, Dashboard: dashboard.Handler(), Telemetry: gatewayTelemetry, CapacityObservers: map[string]gateway.CapacityObserver{"runpod": serverless.ActiveWorkers}, ExternalAuthorizer: externalBudgets, RequestAuthorizer: requestQuotas, AdmissionAuthorizer: admissionPool}).Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 1 << 20}
 	go func() {
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)

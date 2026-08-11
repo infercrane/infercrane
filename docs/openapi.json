@@ -1,6 +1,69 @@
 {
   "components": {
     "schemas": {
+      "AdmissionPolicy": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed_priorities": {
+            "items": {
+              "enum": [
+                "low",
+                "normal",
+                "high"
+              ],
+              "type": "string"
+            },
+            "maxItems": 3,
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "max_concurrency": {
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_output_tokens": {
+            "maximum": 1048576,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_queue_depth": {
+            "maximum": 100000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "max_request_bytes": {
+            "maximum": 16777216,
+            "minimum": 1024,
+            "type": "integer"
+          },
+          "queue_timeout_ms": {
+            "maximum": 300000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "retry_budget": {
+            "maximum": 3,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "max_concurrency",
+          "max_queue_depth",
+          "queue_timeout_ms",
+          "max_request_bytes",
+          "max_output_tokens",
+          "allowed_priorities",
+          "retry_budget",
+          "enabled"
+        ],
+        "type": "object"
+      },
       "AdoptionOwnership": {
         "additionalProperties": false,
         "properties": {
@@ -51,6 +114,64 @@
           "name",
           "webhook_url",
           "secret_reference_id"
+        ],
+        "type": "object"
+      },
+      "AsyncInferenceSubmit": {
+        "additionalProperties": false,
+        "properties": {
+          "execution_deadline_seconds": {
+            "maximum": 86400,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "input": {
+            "description": "Protocol-native request body; encrypted before persistence.",
+            "type": "object"
+          },
+          "priority": {
+            "maximum": 100,
+            "minimum": -100,
+            "type": "integer"
+          },
+          "protocol": {
+            "default": "chat",
+            "enum": [
+              "chat",
+              "responses",
+              "embeddings",
+              "completions",
+              "batch"
+            ],
+            "type": "string"
+          },
+          "retention_seconds": {
+            "maximum": 604800,
+            "minimum": 2,
+            "type": "integer"
+          },
+          "store_encrypted_content": {
+            "const": true,
+            "type": "boolean"
+          },
+          "webhook_secret_reference_id": {
+            "type": "string"
+          },
+          "webhook_url": {
+            "format": "uri",
+            "pattern": "^https://",
+            "type": "string"
+          }
+        },
+        "required": [
+          "input",
+          "idempotency_key",
+          "store_encrypted_content"
         ],
         "type": "object"
       },
@@ -1138,7 +1259,7 @@
   "info": {
     "description": "Durable, authenticated control-plane operations. Mutation responses may outlive the requesting client.",
     "title": "InferCrane Control API",
-    "version": "1.3.0"
+    "version": "1.4.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -1242,6 +1363,91 @@
         "summary": "Explicitly promote an adopted endpoint to traffic-managed ownership",
         "tags": [
           "Adoption"
+        ]
+      }
+    },
+    "/api/v1/async/jobs/{id}": {
+      "delete": {
+        "operationId": "cancelAsyncInferenceJob",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Cancel queued or executing async inference",
+        "tags": [
+          "Async inference"
+        ]
+      },
+      "get": {
+        "operationId": "getAsyncInferenceJob",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Inspect an async job and its result when complete",
+        "tags": [
+          "Async inference"
         ]
       }
     },
@@ -2998,6 +3204,108 @@
         ]
       }
     },
+    "/api/v1/endpoints/{name}/admission": {
+      "get": {
+        "operationId": "getAdmissionPolicy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Inspect bounded endpoint admission policy",
+        "tags": [
+          "Admission"
+        ]
+      },
+      "put": {
+        "operationId": "setAdmissionPolicy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdmissionPolicy"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Set bounded endpoint admission policy",
+        "tags": [
+          "Admission"
+        ]
+      }
+    },
     "/api/v1/endpoints/{name}/alerts": {
       "get": {
         "operationId": "listAlertPolicies",
@@ -3154,6 +3462,73 @@
         "summary": "Evaluate deterministic findings and deliver eligible alerts",
         "tags": [
           "Alerts"
+        ]
+      }
+    },
+    "/api/v1/endpoints/{name}/async": {
+      "post": {
+        "operationId": "submitAsyncInference",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Stable key used to adopt the original durable operation after retries or disconnects.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AsyncInferenceSubmit"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Durable operation accepted"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Submit one encrypted durable inference job",
+        "tags": [
+          "Async inference"
         ]
       }
     },
@@ -4886,10 +5261,16 @@
   ],
   "tags": [
     {
+      "name": "Admission"
+    },
+    {
       "name": "Adoption"
     },
     {
       "name": "Alerts"
+    },
+    {
+      "name": "Async inference"
     },
     {
       "name": "Audit"

@@ -87,6 +87,26 @@ class ControlAPI:
         path = f"/endpoints/{quote(name, safe='')}/alerts/evaluate"
         return cast(dict[str, Any], self._transport.request("POST", path, body=body))
 
+    def get_admission_policy(self, name: str) -> dict[str, Any]:
+        path = f"/endpoints/{quote(name, safe='')}/admission"
+        return cast(dict[str, Any], self._transport.request("GET", path))
+
+    def set_admission_policy(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = f"/endpoints/{quote(name, safe='')}/admission"
+        return cast(dict[str, Any], self._transport.request("PUT", path, body=body))
+
+    def submit_async_inference(self, name: str, *, body: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
+        path = f"/endpoints/{quote(name, safe='')}/async"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body, idempotency_key=idempotency_key))
+
+    def get_async_inference_job(self, id: str) -> dict[str, Any]:
+        path = f"/async/jobs/{quote(id, safe='')}"
+        return cast(dict[str, Any], self._transport.request("GET", path))
+
+    def cancel_async_inference_job(self, id: str) -> None:
+        path = f"/async/jobs/{quote(id, safe='')}"
+        return cast(None, self._transport.request("DELETE", path))
+
     def delete_endpoint(self, name: str) -> dict[str, Any]:
         path = f"/endpoints/{quote(name, safe='')}"
         return cast(dict[str, Any], self._transport.request("DELETE", path))

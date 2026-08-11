@@ -98,6 +98,31 @@ export class ControlApi {
     return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
   }
 
+  getAdmissionPolicy(name: string): Promise<Record<string, JsonValue>> {
+    const path = `/endpoints/${encodeURIComponent(name)}/admission`;
+    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+  }
+
+  setAdmissionPolicy(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = `/endpoints/${encodeURIComponent(name)}/admission`;
+    return this.transport.request('PUT', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  submitAsyncInference(name: string, body: JsonValue, idempotencyKey: string): Promise<Record<string, JsonValue>> {
+    const path = `/endpoints/${encodeURIComponent(name)}/async`;
+    return this.transport.request('POST', path, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
+  }
+
+  getAsyncInferenceJob(id: string): Promise<Record<string, JsonValue>> {
+    const path = `/async/jobs/${encodeURIComponent(id)}`;
+    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+  }
+
+  cancelAsyncInferenceJob(id: string): Promise<void> {
+    const path = `/async/jobs/${encodeURIComponent(id)}`;
+    return this.transport.request('DELETE', path) as Promise<void>;
+  }
+
   deleteEndpoint(name: string): Promise<Record<string, JsonValue>> {
     const path = `/endpoints/${encodeURIComponent(name)}`;
     return this.transport.request('DELETE', path) as Promise<Record<string, JsonValue>>;

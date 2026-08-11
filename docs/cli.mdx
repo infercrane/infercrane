@@ -92,6 +92,23 @@ observe.
 
 ## Operations workspaces
 
+## Admission and async inference
+
+```bash
+infercrane admission get coder-production
+infercrane admission set coder-production --max-concurrency 32 --max-queue 64 \
+  --queue-timeout-ms 5000 --max-output-tokens 8192 --priorities normal,high
+
+infercrane async submit coder-production --file request.json \
+  --idempotency-key document-42
+infercrane async get JOB_ID
+infercrane async cancel JOB_ID
+```
+
+`async submit` persists protocol-native request content only after explicit encrypted-storage
+consent, returns a durable job ID, and does not depend on the client remaining connected. See
+[Admission and async inference](/features/admission-async) for retry, retention and webhook rules.
+
 ### Terminal
 
 ```bash

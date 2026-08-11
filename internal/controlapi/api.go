@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/infercrane/infercrane/internal/asyncinference"
 	"github.com/infercrane/infercrane/internal/authz"
 	"github.com/infercrane/infercrane/internal/benchmark"
 	"github.com/infercrane/infercrane/internal/decision"
@@ -111,6 +112,15 @@ type alertStore interface {
 	CreateAlertPolicy(context.Context, string, string, domain.AlertPolicy) (domain.AlertPolicy, error)
 	AlertPoliciesForEndpoint(context.Context, string, string) ([]domain.AlertPolicy, error)
 }
+type admissionStore interface {
+	AdmissionPolicy(context.Context, string, string) (domain.AdmissionPolicy, error)
+	SetAdmissionPolicy(context.Context, string, string, domain.AdmissionPolicy) (domain.AdmissionPolicy, error)
+}
+type asyncInferenceService interface {
+	Submit(context.Context, asyncinference.SubmitRequest) (domain.AsyncInferenceJob, bool, error)
+	Result(context.Context, string, string) (domain.AsyncInferenceJob, []byte, error)
+	Cancel(context.Context, string, string) error
+}
 type API struct {
 	Store         Store
 	APIKey        string
@@ -129,6 +139,7 @@ type API struct {
 	AlertDeliverer           interface {
 		Deliver(context.Context, domain.AlertPolicy, domain.DiagnosticFinding) (domain.AlertDelivery, error)
 	}
+	AsyncInference asyncInferenceService
 }
 
 type BackendMetadata struct {
@@ -172,6 +183,11 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/endpoints/{name}/alerts", a.auth(authz.Read, a.alertPolicies))
 	mux.HandleFunc("POST /api/v1/endpoints/{name}/alerts", a.auth(authz.Deploy, a.createAlertPolicy))
 	mux.HandleFunc("POST /api/v1/endpoints/{name}/alerts/evaluate", a.auth(authz.Deploy, a.evaluateAlerts))
+	mux.HandleFunc("GET /api/v1/endpoints/{name}/admission", a.auth(authz.Read, a.admissionPolicy))
+	mux.HandleFunc("PUT /api/v1/endpoints/{name}/admission", a.auth(authz.Deploy, a.setAdmissionPolicy))
+	mux.HandleFunc("POST /api/v1/endpoints/{name}/async", a.auth(authz.Deploy, a.submitAsyncInference))
+	mux.HandleFunc("GET /api/v1/async/jobs/{id}", a.auth(authz.Read, a.asyncInferenceJob))
+	mux.HandleFunc("DELETE /api/v1/async/jobs/{id}", a.auth(authz.Deploy, a.cancelAsyncInferenceJob))
 	mux.HandleFunc("GET /api/v1/endpoints/{name}", a.auth(authz.Read, a.endpoint))
 	mux.HandleFunc("DELETE /api/v1/endpoints/{name}", a.auth(authz.Delete, a.deleteEndpoint))
 	mux.HandleFunc("POST /api/v1/endpoints/{name}/bindings", a.auth(authz.Deploy, a.createEndpointBinding))
@@ -547,6 +563,149 @@ func (a API) evaluateAlerts(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "alerts.evaluate", ResourceType: "endpoint", ResourceName: r.PathValue("name"), Outcome: "succeeded"})
 	writeJSON(w, http.StatusOK, map[string]any{"findings": len(findings), "deliveries": deliveries})
+}
+
+func (a API) admissionPolicy(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(admissionStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "admission policies are not supported by this store")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	policy, err := store.AdmissionPolicy(r.Context(), actor.TenantID, r.PathValue("name"))
+	if writeEndpointMutationError(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"policy": admissionPolicyResponse(policy)})
+}
+
+func (a API) setAdmissionPolicy(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(admissionStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "admission policies are not supported by this store")
+		return
+	}
+	var request struct {
+		MaxConcurrency    int      `json:"max_concurrency"`
+		MaxQueueDepth     int      `json:"max_queue_depth"`
+		QueueTimeoutMS    int      `json:"queue_timeout_ms"`
+		MaxRequestBytes   int      `json:"max_request_bytes"`
+		MaxOutputTokens   int      `json:"max_output_tokens"`
+		AllowedPriorities []string `json:"allowed_priorities"`
+		RetryBudget       int      `json:"retry_budget"`
+		Enabled           *bool    `json:"enabled"`
+	}
+	if !decodeMutationBody(w, r, &request) {
+		return
+	}
+	enabled := true
+	if request.Enabled != nil {
+		enabled = *request.Enabled
+	}
+	priorities, _ := json.Marshal(request.AllowedPriorities)
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	policy, err := store.SetAdmissionPolicy(r.Context(), actor.TenantID, r.PathValue("name"), domain.AdmissionPolicy{MaxConcurrency: request.MaxConcurrency, MaxQueueDepth: request.MaxQueueDepth, QueueTimeoutMS: request.QueueTimeoutMS, MaxRequestBytes: request.MaxRequestBytes, MaxOutputTokens: request.MaxOutputTokens, AllowedPrioritiesJSON: string(priorities), RetryBudget: request.RetryBudget, Enabled: enabled})
+	if writeEndpointMutationError(w, err) {
+		return
+	}
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "endpoint_admission.set", ResourceType: "endpoint", ResourceName: r.PathValue("name"), Outcome: "succeeded"})
+	writeJSON(w, http.StatusOK, map[string]any{"policy": admissionPolicyResponse(policy), "effective_within_seconds": 1})
+}
+
+func (a API) submitAsyncInference(w http.ResponseWriter, r *http.Request) {
+	if a.AsyncInference == nil {
+		writeError(w, http.StatusServiceUnavailable, "capability_unavailable", "async inference requires INFERCRANE_ASYNC_ENCRYPTION_KEY")
+		return
+	}
+	var request struct {
+		Protocol                 string          `json:"protocol"`
+		Input                    json.RawMessage `json:"input"`
+		IdempotencyKey           string          `json:"idempotency_key"`
+		Priority                 int             `json:"priority"`
+		ExecutionDeadlineSeconds int             `json:"execution_deadline_seconds"`
+		RetentionSeconds         int             `json:"retention_seconds"`
+		WebhookURL               string          `json:"webhook_url"`
+		WebhookSecretReferenceID string          `json:"webhook_secret_reference_id"`
+		StoreEncryptedContent    bool            `json:"store_encrypted_content"`
+	}
+	if !decodeMutationBody(w, r, &request) {
+		return
+	}
+	if !request.StoreEncryptedContent {
+		writeError(w, http.StatusBadRequest, "content_consent_required", "async inference requires explicit store_encrypted_content=true because request and result content are durably encrypted")
+		return
+	}
+	if request.IdempotencyKey == "" || len(request.Input) == 0 {
+		writeError(w, http.StatusBadRequest, "invalid_request", "idempotency_key and input are required")
+		return
+	}
+	if request.ExecutionDeadlineSeconds == 0 {
+		request.ExecutionDeadlineSeconds = 900
+	}
+	if request.RetentionSeconds == 0 {
+		request.RetentionSeconds = 86400
+	}
+	if request.ExecutionDeadlineSeconds < 1 || request.ExecutionDeadlineSeconds > 86400 || request.RetentionSeconds <= request.ExecutionDeadlineSeconds || request.RetentionSeconds > 604800 {
+		writeError(w, http.StatusBadRequest, "invalid_request", "deadline must be 1..86400 seconds and retention must be greater than deadline and at most 604800 seconds")
+		return
+	}
+	if (request.WebhookURL == "") != (request.WebhookSecretReferenceID == "") {
+		writeError(w, http.StatusBadRequest, "invalid_request", "webhook_url and webhook_secret_reference_id must be configured together")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	now := time.Now().UTC()
+	job, created, err := a.AsyncInference.Submit(r.Context(), asyncinference.SubmitRequest{Tenant: actor.TenantID, Endpoint: r.PathValue("name"), Protocol: request.Protocol, IdempotencyKey: request.IdempotencyKey, Payload: request.Input, Priority: request.Priority, ExecutionDeadline: now.Add(time.Duration(request.ExecutionDeadlineSeconds) * time.Second), ExpiresAt: now.Add(time.Duration(request.RetentionSeconds) * time.Second), WebhookURL: request.WebhookURL, WebhookSecretReferenceID: request.WebhookSecretReferenceID})
+	if writeEndpointMutationError(w, err) {
+		return
+	}
+	status := http.StatusOK
+	if created {
+		status = http.StatusAccepted
+	}
+	writeJSON(w, status, map[string]any{"job": asyncJobResponse(job), "created": created})
+}
+
+func (a API) asyncInferenceJob(w http.ResponseWriter, r *http.Request) {
+	if a.AsyncInference == nil {
+		writeError(w, http.StatusServiceUnavailable, "capability_unavailable", "async inference is not configured")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	job, result, err := a.AsyncInference.Result(r.Context(), actor.TenantID, r.PathValue("id"))
+	if writeEndpointMutationError(w, err) {
+		return
+	}
+	response := map[string]any{"job": asyncJobResponse(job), "content_recorded": true, "content_encrypted_at_rest": true}
+	if job.Status == "succeeded" {
+		var decoded any
+		if json.Unmarshal(result, &decoded) == nil {
+			response["result"] = decoded
+		}
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (a API) cancelAsyncInferenceJob(w http.ResponseWriter, r *http.Request) {
+	if a.AsyncInference == nil {
+		writeError(w, http.StatusServiceUnavailable, "capability_unavailable", "async inference is not configured")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	if writeEndpointMutationError(w, a.AsyncInference.Cancel(r.Context(), actor.TenantID, r.PathValue("id"))) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func asyncJobResponse(job domain.AsyncInferenceJob) map[string]any {
+	return map[string]any{"id": job.ID, "request_id": job.RequestID, "endpoint_id": job.EndpointID, "protocol": job.Protocol, "status": job.Status, "priority": job.Priority, "attempt": job.Attempt, "execution_deadline": job.ExecutionDeadline, "expires_at": job.ExpiresAt, "error_code": job.ErrorCode, "error_message": job.ErrorMessage, "webhook_status": job.WebhookStatus, "webhook_attempts": job.WebhookAttempts, "webhook_error_code": job.WebhookErrorCode, "created_at": job.CreatedAt, "started_at": job.StartedAt, "completed_at": job.CompletedAt, "content_recorded": true, "content_encrypted_at_rest": true}
+}
+
+func admissionPolicyResponse(policy domain.AdmissionPolicy) map[string]any {
+	var priorities any
+	_ = json.Unmarshal([]byte(policy.AllowedPrioritiesJSON), &priorities)
+	return map[string]any{"endpoint_id": policy.EndpointID, "max_concurrency": policy.MaxConcurrency, "max_queue_depth": policy.MaxQueueDepth, "queue_timeout_ms": policy.QueueTimeoutMS, "max_request_bytes": policy.MaxRequestBytes, "max_output_tokens": policy.MaxOutputTokens, "allowed_priorities": priorities, "retry_budget": policy.RetryBudget, "enabled": policy.Enabled, "created_at": policy.CreatedAt, "updated_at": policy.UpdatedAt}
 }
 
 func (a API) endpoint(w http.ResponseWriter, r *http.Request) {

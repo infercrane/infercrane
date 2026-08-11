@@ -22,6 +22,13 @@ existing secret manager and restrict the control-plane process environment.
 
 Prompt and output content are not recorded by default. Request telemetry stores identifiers, dimensions, status, timing, and token counts. AIPerf uses metrics-only record exports; InferCrane does not upload benchmark data. Shadow traffic is not implemented, so requests are never duplicated silently.
 
+Durable async inference is the explicit exception. It remains disabled until an operator injects
+`INFERCRANE_ASYNC_ENCRYPTION_KEY`, and every submission must acknowledge encrypted content storage.
+Request and result bodies are stored only as AES-256-GCM ciphertext bound to tenant and job identity.
+Completion webhooks are signed, HTTPS-only, redirect-free and resolved through an SSRF-hardened
+transport. Webhook payloads contain results, so their destinations are part of the application data
+boundary. Synchronous inference remains content-free by default.
+
 External fallback is disabled by default. Enabling it requires a persisted acknowledgement that
 prompt and output data can leave controlled infrastructure, plus atomic hard request and worst-case
 cost reservations. Selection happens before transmission; InferCrane does not replay a stream or

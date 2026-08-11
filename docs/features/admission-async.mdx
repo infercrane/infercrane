@@ -1,0 +1,103 @@
+---
+title: Admission and async inference
+description: Bound overload before it reaches GPUs and run reconnectable inference jobs with encrypted persistence.
+---
+
+# Admission and async inference
+
+InferCrane applies endpoint admission before an inference request reaches a runtime. Policies are
+loaded from PostgreSQL into an in-memory snapshot, so the request path never waits on a database.
+
+```bash
+infercrane admission set coder-production \
+  --max-concurrency 32 \
+  --max-queue 64 \
+  --queue-timeout-ms 5000 \
+  --max-request-bytes 16777216 \
+  --max-output-tokens 8192 \
+  --priorities normal,high \
+  --retry-budget 1
+```
+
+The policy bounds concurrency, queue depth, queue wait, encoded request size, requested output
+tokens and accepted priority classes. Rejections use OpenAI-compatible errors and happen before
+upstream transmission. Tenant request/token limits and external-capacity budgets remain separate
+hard controls.
+
+## Retry semantics
+
+Retries are intentionally narrow. InferCrane retries only buffered requests to InferCrane-managed
+capacity, up to the persisted endpoint budget, for connection failures and HTTP `502`, `503` or
+`504`. It never automatically retries streaming requests or paid external fallback. Attempts retain
+one request ID and expose `X-InferCrane-Attempt` to the runtime.
+
+## Durable async requests
+
+Create a protocol-native request file:
+
+```json request.json
+{
+  "model": "coder-production",
+  "messages": [{ "role": "user", "content": "Summarize this document." }]
+}
+```
+
+Submit it and close the terminal safely:
+
+```bash
+infercrane async submit coder-production \
+  --file request.json \
+  --protocol chat \
+  --idempotency-key document-42
+```
+
+The command returns a job ID immediately. Resume, poll or cancel from any configured client:
+
+```bash
+infercrane async get JOB_ID
+infercrane async get JOB_ID --output json
+infercrane async cancel JOB_ID
+```
+
+Async execution is one bounded inference request, not a workflow engine. Claims use PostgreSQL
+leases and fencing tokens. Another worker adopts an expired lease; a stale worker cannot commit the
+result. Deadlines, three execution attempts and encrypted-result retention are bounded.
+
+## Content and keys
+
+Async mode is disabled until the control plane receives an encryption key of at least 32 bytes:
+
+```bash
+export INFERCRANE_ASYNC_ENCRYPTION_KEY='replace-with-secret-manager-injected-key-material'
+```
+
+The API requires `store_encrypted_content: true`. Payloads and results use AES-256-GCM with the
+tenant and job identity as associated data. Plaintext is never written to PostgreSQL. Losing or
+rotating a key without retaining the previous key makes existing results unreadable; production key
+rotation therefore requires an operator-managed overlap procedure.
+
+## Signed completion webhook
+
+```bash
+infercrane async submit coder-production \
+  --file request.json \
+  --idempotency-key document-42 \
+  --webhook https://jobs.example.com/infercrane \
+  --webhook-secret-reference WEBHOOK_SECRET_REFERENCE_ID
+```
+
+Webhooks are HTTPS-only and signed with `InferCrane-Timestamp` and
+`InferCrane-Signature: v1=<hmac-sha256>`. Delivery has at most three attempts. The outbound transport
+rejects redirects and private, loopback, link-local and multicast addresses after DNS resolution.
+
+<Warning>
+Completion webhooks contain the inference result. Configure them only when the destination is
+authorized to receive that content.
+</Warning>
+
+## Current limits
+
+- Queue order is priority then creation time; it is not a general scheduler.
+- Results are limited to 32 MiB.
+- Async streaming is not exposed; use synchronous streaming when incremental tokens matter.
+- Cross-key decryption and automatic key re-encryption are not implemented in v1.4.

@@ -119,6 +119,7 @@
           "features/terminal-ui",
           "features/dashboard",
           "features/autoscaling",
+          "features/admission-async",
           "features/release-guard",
           "features/inference-passports",
           "features/external-capacity",
@@ -171,6 +172,7 @@
         "pages": [
           "project-status",
           "production-readiness",
+          "release-notes-v1.4.0-rc.1",
           "release-notes-v1.0.0-rc.1",
           "security",
           "security-review-v1",
@@ -200,7 +202,8 @@
               "adr/0019-kubernetes-integration-boundaries",
               "adr/0020-provider-neutral-production-artifact",
               "adr/0021-stable-endpoint-serving-plans",
-              "adr/0022-incremental-adoption-and-deterministic-diagnostics"
+              "adr/0022-incremental-adoption-and-deterministic-diagnostics",
+              "adr/0023-in-memory-admission-and-encrypted-async"
             ]
           },
           "release-acceptance"
