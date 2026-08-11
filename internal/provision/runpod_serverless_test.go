@@ -18,7 +18,7 @@ func TestRunPodServerlessEnsureIsReplaySafeAndScaleToZeroNative(t *testing.T) {
 		}
 		switch {
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/templates/template-qwen"):
-			_ = json.NewEncoder(w).Encode(map[string]any{"id": "template-qwen", "isServerless": true, "env": map[string]string{"MODEL_NAME": "Qwen/Qwen3-8B", "MODEL_REVISION": "0123456789abcdef", "RAW_OPENAI_OUTPUT": "1"}})
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "template-qwen", "isServerless": true, "env": map[string]string{"MODEL_NAME": "Qwen/Qwen3-8B", "MODEL_REVISION": "0123456789abcdef", "RAW_OPENAI_OUTPUT": "1", "ENABLE_AUTO_TOOL_CHOICE": "true", "TOOL_CALL_PARSER": "hermes"}})
 		case r.Method == http.MethodGet && r.URL.Path == "/endpoints":
 			listed := make([]map[string]any, len(endpoints))
 			for i, endpoint := range endpoints {
@@ -85,6 +85,17 @@ func TestRunPodServerlessCheckRejectsMutableTemplate(t *testing.T) {
 	defer server.Close()
 	provider := RunPodServerless{APIKey: "secret", BaseURL: server.URL, TemplateID: "template", Client: server.Client()}
 	if err := provider.Check(context.Background()); err == nil || !strings.Contains(err.Error(), "immutable") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestRunPodServerlessCheckRejectsTemplateWithoutToolCalling(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "template", "isServerless": true, "env": map[string]string{"MODEL_NAME": "Qwen/Qwen3-8B", "MODEL_REVISION": "immutable", "RAW_OPENAI_OUTPUT": "1"}})
+	}))
+	defer server.Close()
+	provider := RunPodServerless{APIKey: "secret", BaseURL: server.URL, TemplateID: "template", Client: server.Client()}
+	if err := provider.Check(context.Background()); err == nil || !strings.Contains(err.Error(), "tool") {
 		t.Fatalf("err=%v", err)
 	}
 }

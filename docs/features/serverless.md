@@ -20,6 +20,8 @@ must set:
 - `MODEL_REVISION` to the immutable Hugging Face commit resolved for the deployment. `main` and
   `master` are rejected.
 - `RAW_OPENAI_OUTPUT=1` so streaming remains OpenAI-compatible SSE.
+- `ENABLE_AUTO_TOOL_CHOICE=true` and a model-compatible `TOOL_CALL_PARSER`. For
+  `Qwen/Qwen3-8B`, RunPod recommends `TOOL_CALL_PARSER=hermes`.
 
 Configure the control plane, keeping the RunPod credential separate from InferCrane client
 credentials:

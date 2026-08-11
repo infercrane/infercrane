@@ -207,6 +207,9 @@ func (r RunPodServerless) Check(ctx context.Context) error {
 	if template.Env["RAW_OPENAI_OUTPUT"] != "1" {
 		return errors.New("RunPod template must set RAW_OPENAI_OUTPUT=1")
 	}
+	if !strings.EqualFold(template.Env["ENABLE_AUTO_TOOL_CHOICE"], "true") || template.Env["TOOL_CALL_PARSER"] == "" {
+		return errors.New("RunPod template must enable automatic tool choice and set TOOL_CALL_PARSER")
+	}
 	return nil
 }
 
@@ -231,6 +234,9 @@ func (r RunPodServerless) validateTemplate(ctx context.Context, templateID, mode
 	}
 	if template.Env["RAW_OPENAI_OUTPUT"] != "1" {
 		return errors.New("RunPod template must set RAW_OPENAI_OUTPUT=1 for OpenAI-compatible streaming")
+	}
+	if !strings.EqualFold(template.Env["ENABLE_AUTO_TOOL_CHOICE"], "true") || template.Env["TOOL_CALL_PARSER"] == "" {
+		return errors.New("RunPod template must set ENABLE_AUTO_TOOL_CHOICE=true and TOOL_CALL_PARSER for OpenAI-compatible tool calls")
 	}
 	return nil
 }
