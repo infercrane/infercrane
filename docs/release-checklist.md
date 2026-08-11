@@ -45,3 +45,5 @@ without its durable log and direct inventory evidence.
 - [ ] Review image/archive vulnerability results and sanitize evidence for credentials or content.
 - [ ] Publish no performance or cost comparison without reproducible attached evidence.
 - [ ] Create stable tag `v1.0.0` only after every manual row is proven.
+- [ ] Follow the exact stable artifact, tag, push, and `gh release create` sequence in
+      [Release packaging](/release-packaging); publication requires separate authorization.

@@ -9,7 +9,10 @@ version=${tag#v}
 base_url=${INFERCRANE_HOMEBREW_BASE_URL:-"https://github.com/infercrane/infercrane/releases/download/$tag"}
 checksums="$dist/checksums.txt"
 
-case "$tag" in v[0-9]*.[0-9]*.[0-9]*-rc.[0-9]*) ;; *) echo "invalid release-candidate tag: $tag" >&2; exit 2;; esac
+printf '%s\n' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$' || {
+  echo "invalid release tag: $tag" >&2
+  exit 2
+}
 test -f "$checksums" || { echo "missing $checksums" >&2; exit 1; }
 
 checksum() {

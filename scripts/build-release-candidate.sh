@@ -5,14 +5,17 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 tag=${1:-v1.0.0-rc.1}
 goreleaser_version=${2:-v2.12.7}
 
-case "$tag" in v[0-9]*.[0-9]*.[0-9]*-rc.[0-9]*) ;; *) echo "invalid release-candidate tag: $tag" >&2; exit 2;; esac
+printf '%s\n' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$' || {
+  echo "invalid release tag: $tag" >&2
+  exit 2
+}
 [ -z "$(git -C "$root" status --porcelain)" ] || {
   echo "release-candidate artifacts require a clean worktree" >&2
   exit 1
 }
 
-# GoReleaser requires the requested release tag to exist at HEAD. The RC tag is
-# deliberately created only after every artifact gate passes, so build inside
+# GoReleaser requires the requested release tag to exist at HEAD. Release tags
+# are deliberately created only after every artifact gate passes, so build in
 # an isolated local clone with a temporary annotated tag. No source ref is
 # added, removed, pushed, or published by this operation.
 build_root=$(mktemp -d)

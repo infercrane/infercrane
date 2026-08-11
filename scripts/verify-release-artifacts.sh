@@ -5,7 +5,10 @@ dist=${1:-dist}
 tag=${2:-v1.0.0-rc.1}
 version=${tag#v}
 
-case "$tag" in v[0-9]*.[0-9]*.[0-9]*-rc.[0-9]*) ;; *) echo "invalid release-candidate tag: $tag" >&2; exit 2;; esac
+printf '%s\n' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$' || {
+  echo "invalid release tag: $tag" >&2
+  exit 2
+}
 test -f "$dist/checksums.txt"
 
 expected="darwin_amd64 darwin_arm64 linux_amd64 linux_arm64"

@@ -13,8 +13,9 @@ install smoke test.
 make candidate-artifacts RELEASE_CANDIDATE_TAG=v1.0.0-rc.1
 ```
 
-This command uses `GORELEASER_CURRENT_TAG` only to construct the intended pre-tag candidate version.
-It skips announce and publish pipes. It does not create a Git tag, GitHub release, package, or image.
+GoReleaser runs inside an isolated local clone with a temporary annotated tag, then copies only the
+resulting `dist/` output back. It skips announce and publish pipes. It does not change a source
+repository ref or create a GitHub release, package, or image.
 
 Verify an existing artifact directory independently:
 
@@ -33,3 +34,27 @@ The tag-triggered GitHub workflow creates a draft prerelease, multi-architecture
 BuildKit SBOM/provenance attestations, immutable image digest artifact, and critical-severity scans.
 Those external outputs cannot be claimed from local construction and remain pending until the tag is
 explicitly pushed.
+
+## Stable release after manual qualification
+
+Do not run this sequence until the consolidated manual report says `real_infrastructure: passed`,
+cleanup inventory is verified, tracked evidence and final release notes are committed, and remote
+publication is explicitly authorized. From that clean evidence commit:
+
+```bash
+make release-artifacts RELEASE_TAG=v1.0.0
+git tag -a v1.0.0 -m "InferCrane v1.0.0"
+git push origin main
+git push origin v1.0.0
+gh release create v1.0.0 \
+  dist/infercrane_1.0.0_*.tar.gz \
+  dist/infercrane_1.0.0_*.tar.gz.sbom.json \
+  dist/checksums.txt \
+  --title "InferCrane v1.0.0" \
+  --notes-file docs/release-notes-v1.0.0.md
+```
+
+Create `docs/release-notes-v1.0.0.md` from the RC notes plus the accepted real-provider evidence
+before running the commands. Upload the generated Homebrew formula only after its URLs resolve and
+a clean-machine installation passes. The commands intentionally push only `main` and the stable
+tag; RC tags remain local unless separately approved for publication.
