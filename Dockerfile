@@ -16,7 +16,7 @@ FROM builder AS test
 RUN --mount=type=cache,target=/go/pkg/mod go test -race -count=1 ./... \
     && go vet ./...
 
-FROM python:3.12-slim-bookworm AS runtime
+FROM python:3.14-slim-bookworm AS runtime
 ARG TARGETARCH
 ARG VLLM_ROUTER_VERSION=0.1.15
 ARG SKYPILOT_VERSION=0.13.0
