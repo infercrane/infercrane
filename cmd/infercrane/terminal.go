@@ -47,6 +47,29 @@ func renderOperationProgress(operation domain.Operation, now time.Time) string {
 	return fmt.Sprintf("%s%3d%%  %-18s  %s · %s%s%s", symbol, operation.Progress, operationPhase(operation), operation.Message, elapsed, attempt, next)
 }
 
+const operationProgressHeartbeat = 30 * time.Second
+
+func shouldRenderOperationProgress(previous *domain.Operation, current domain.Operation, lastPrinted, now time.Time) bool {
+	if previous == nil {
+		return true
+	}
+	if current.Status == "succeeded" || current.Status == "failed" || current.Status == "cancelled" {
+		return true
+	}
+	message := strings.TrimSpace(strings.ToLower(current.Message))
+	if (current.Status == "running" || current.Status == "leased") && (message == "" || message == "running") {
+		return false
+	}
+	if operationProgressSignature(*previous) != operationProgressSignature(current) {
+		return true
+	}
+	return !lastPrinted.IsZero() && now.Sub(lastPrinted) >= operationProgressHeartbeat
+}
+
+func operationProgressSignature(operation domain.Operation) string {
+	return fmt.Sprintf("%s:%d:%s", operationPhase(operation), operation.Progress, operation.Message)
+}
+
 func operationPhase(operation domain.Operation) string {
 	if operation.Status == "succeeded" {
 		return "READY"

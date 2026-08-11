@@ -994,16 +994,19 @@ func (e *ControlError) Error() string {
 func waitForOperation(ctx context.Context, cfg config.Config, id string, printProgress bool) (domain.Operation, error) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
-	lastSignature := ""
+	var lastRendered *domain.Operation
+	var lastPrinted time.Time
 	for {
 		var operation domain.Operation
 		if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/operations/"+url.PathEscape(id), "", nil, &operation); err != nil {
 			return domain.Operation{}, err
 		}
-		signature := fmt.Sprintf("%s:%d:%d:%s", operation.Status, operation.Progress, operation.Attempt, operation.Message)
-		if printProgress && signature != lastSignature {
-			fmt.Fprintln(os.Stderr, renderOperationProgress(operation, time.Now()))
-			lastSignature = signature
+		now := time.Now()
+		if printProgress && shouldRenderOperationProgress(lastRendered, operation, lastPrinted, now) {
+			fmt.Fprintln(os.Stderr, renderOperationProgress(operation, now))
+			copy := operation
+			lastRendered = &copy
+			lastPrinted = now
 		}
 		switch operation.Status {
 		case "succeeded":

@@ -17,3 +17,22 @@ func TestOperationProgressExplainsDurableState(t *testing.T) {
 		}
 	}
 }
+
+func TestProgressSuppressesGenericRetryLeaseButKeepsWaitingHeartbeat(t *testing.T) {
+	now := time.Date(2026, 8, 11, 10, 0, 0, 0, time.UTC)
+	waiting := domain.Operation{Status: "waiting", Progress: 55, Message: "provider is allocating capacity", Attempt: 1}
+	if !shouldRenderOperationProgress(nil, waiting, time.Time{}, now) {
+		t.Fatal("initial meaningful waiting state was suppressed")
+	}
+	running := domain.Operation{Status: "running", Progress: 55, Message: "running", Attempt: 2}
+	if shouldRenderOperationProgress(&waiting, running, now, now.Add(10*time.Second)) {
+		t.Fatal("generic retry lease should not produce a duplicate progress row")
+	}
+	waiting.Attempt = 2
+	if shouldRenderOperationProgress(&waiting, waiting, now, now.Add(20*time.Second)) {
+		t.Fatal("unchanged waiting state printed before heartbeat interval")
+	}
+	if !shouldRenderOperationProgress(&waiting, waiting, now, now.Add(operationProgressHeartbeat)) {
+		t.Fatal("waiting heartbeat was suppressed")
+	}
+}

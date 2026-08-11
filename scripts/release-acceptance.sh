@@ -334,14 +334,22 @@ verify_openai_features() {
   deployment=$1
   prefix=$2
   base_url="http://127.0.0.1:${INFERCRANE_ACCEPTANCE_PORT:-18001}"
-  tool_response=$(curl -fsS -H 'Authorization: Bearer infercrane-runpod-acceptance-key' -H 'Content-Type: application/json' \
-    -d "{\"model\":\"$deployment\",\"messages\":[{\"role\":\"user\",\"content\":\"What is the weather in Berlin? Use the weather tool.\"}],\"tool_choice\":\"auto\",\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"weather\",\"description\":\"Get weather\",\"parameters\":{\"type\":\"object\",\"properties\":{\"city\":{\"type\":\"string\"}},\"required\":[\"city\"]}}}]}" \
+  # Named function choice validates the portable default vLLM contract. Auto
+  # selection is opt-in and requires a model-specific parser at server launch.
+  tool_file="$evidence/$prefix-tool-response.json"
+  tool_status=$(curl -sS -o "$tool_file" -w '%{http_code}' -H 'Authorization: Bearer infercrane-runpod-acceptance-key' -H 'Content-Type: application/json' \
+    -d "{\"model\":\"$deployment\",\"messages\":[{\"role\":\"user\",\"content\":\"What is the weather in Berlin? Use the weather tool.\"}],\"tool_choice\":{\"type\":\"function\",\"function\":{\"name\":\"weather\"}},\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"weather\",\"description\":\"Get weather\",\"strict\":true,\"parameters\":{\"type\":\"object\",\"properties\":{\"city\":{\"type\":\"string\"}},\"required\":[\"city\"],\"additionalProperties\":false}}}]}" \
     "$base_url/v1/chat/completions")
-  printf '%s' "$tool_response" | jq -e '.choices[0].message.tool_calls[0].function.name == "weather" and .choices[0].finish_reason == "tool_calls"' >/dev/null
+  case "$tool_status" in 2??) ;; *) echo "named tool-call probe failed with HTTP $tool_status; response: $tool_file" >&2; return 1 ;; esac
+  tool_response=$(cat "$tool_file")
+  printf '%s' "$tool_response" | jq -e '.choices[0].message.tool_calls[0].function.name == "weather" and (.choices[0].finish_reason == "tool_calls" or .choices[0].finish_reason == "stop")' >/dev/null
 
-  structured_response=$(curl -fsS -H 'Authorization: Bearer infercrane-runpod-acceptance-key' -H 'Content-Type: application/json' \
+  structured_file="$evidence/$prefix-structured-response.json"
+  structured_status=$(curl -sS -o "$structured_file" -w '%{http_code}' -H 'Authorization: Bearer infercrane-runpod-acceptance-key' -H 'Content-Type: application/json' \
     -d "{\"model\":\"$deployment\",\"messages\":[{\"role\":\"user\",\"content\":\"Return a short acceptance result.\"}],\"response_format\":{\"type\":\"json_schema\",\"json_schema\":{\"name\":\"acceptance\",\"strict\":true,\"schema\":{\"type\":\"object\",\"properties\":{\"result\":{\"type\":\"string\"}},\"required\":[\"result\"],\"additionalProperties\":false}}}}" \
     "$base_url/v1/chat/completions")
+  case "$structured_status" in 2??) ;; *) echo "structured-output probe failed with HTTP $structured_status; response: $structured_file" >&2; return 1 ;; esac
+  structured_response=$(cat "$structured_file")
   printf '%s' "$structured_response" | jq -e '.choices[0].message.content | fromjson | .result | type == "string"' >/dev/null
   printf 'tool call and structured JSON response passed\n' >"$evidence/$prefix-openai-features.log"
 }
