@@ -190,16 +190,23 @@ capture_inventory() {
   record "$1-deployments" ic deployments --output json
 }
 
-verify_provider_inventory_absent() {
+capture_provider_inventory() {
+  label=$1
   api_key=$(tr -d '\r\n' <"$RUNPOD_KEY_FILE")
   pods=$(curl -fsS -H "Authorization: Bearer $api_key" 'https://rest.runpod.io/v1/pods' | \
-    jq '[.[] | select((.name // "") | startswith("infercrane-")) | {id,name,desiredStatus}]')
+    jq '[.[] | select((.name // "") | startswith("infercrane-")) | {id,name,desiredStatus,machineId,imageName,gpuCount,lastStatusChange,uptimeSeconds}]')
   endpoints=$(curl -fsS -H "Authorization: Bearer $api_key" \
     'https://rest.runpod.io/v1/endpoints?includeWorkers=true' | \
     jq '[.[] | select((.name // "") | startswith("infercrane-")) | {id,name,workersMin,workersMax,active_workers:([.workers[]? | select(.desiredStatus != "EXITED")] | length)}]')
   jq -n --argjson pods "$pods" --argjson endpoints "$endpoints" \
     '{pods:$pods,endpoints:$endpoints,verified_at:(now|todateiso8601)}' | \
-    tee "$evidence/provider-direct-after-cleanup.json" >/dev/null
+    tee "$evidence/provider-direct-$label.json" >/dev/null
+}
+
+verify_provider_inventory_absent() {
+  capture_provider_inventory after-cleanup
+  pods=$(jq '.pods' "$evidence/provider-direct-after-cleanup.json")
+  endpoints=$(jq '.endpoints' "$evidence/provider-direct-after-cleanup.json")
   [ "$(printf '%s' "$pods" | jq 'length')" -eq 0 ] || { echo "RunPod still has InferCrane pods" >&2; return 1; }
   [ "$(printf '%s' "$endpoints" | jq 'length')" -eq 0 ] || { echo "RunPod still has InferCrane endpoints" >&2; return 1; }
   echo "Provider inventory verified clean · pods 0 · endpoints 0"
@@ -394,6 +401,7 @@ run_preflight() {
     echo "serverless template is not configured; elastic preflight only" | tee "$evidence/preflight-serverless-skipped.log"
   fi
   capture_inventory before
+  capture_provider_inventory before
   record elastic-plan ic plan "$MODEL" --name "$ELASTIC_NAME" --cloud runpod --gpu "$GPU" --min 1 --max 2 --output json
 }
 
@@ -668,7 +676,7 @@ case "$command_name" in
   preflight) run_preflight ;;
   elastic|serverless|elastic-faults|serverless-faults)
     require_paid_approval
-    trap 'result=$?; trap - EXIT; if [ "$result" -ne 0 ]; then echo "acceptance failed; running guarded cleanup" >&2; run_cleanup || true; fi; exit "$result"' EXIT
+    trap 'result=$?; trap - EXIT; if [ "$result" -ne 0 ]; then echo "acceptance failed; preserving provider inventory before guarded cleanup" >&2; capture_provider_inventory failure || true; run_cleanup || true; fi; exit "$result"' EXIT
     case "$command_name" in
       elastic) run_elastic ;;
       serverless) run_serverless ;;
@@ -681,7 +689,7 @@ case "$command_name" in
     # Refuse before installing the cleanup wrapper so a missing approval cannot
     # start even the local acceptance stack.
     require_paid_approval
-    trap 'result=$?; trap - EXIT; echo "qualification failed; running guarded cleanup" >&2; run_cleanup || true; exit "$result"' EXIT
+    trap 'result=$?; trap - EXIT; echo "qualification failed; preserving provider inventory before guarded cleanup" >&2; capture_provider_inventory failure || true; run_cleanup || true; exit "$result"' EXIT
     run_qualify
     trap - EXIT
     run_cleanup

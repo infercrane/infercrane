@@ -349,6 +349,18 @@ func TestWaitTimeoutDisconnectsWithoutCancellingDurableOperation(t *testing.T) {
 	}
 }
 
+func TestWaitTimeoutDuringControlPlanePollStillExplainsDurability(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		time.Sleep(100 * time.Millisecond)
+	}))
+	defer server.Close()
+
+	_, err := waitForOperationWithin(context.Background(), 20*time.Millisecond, config.Config{ControlURL: server.URL, APIKey: "secret"}, "op-slow", false)
+	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "operation op-slow continues safely") || strings.Contains(err.Error(), "is unreachable") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestOperationWatchResumesPersistedOperation(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

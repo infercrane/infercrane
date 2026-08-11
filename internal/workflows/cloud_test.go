@@ -422,16 +422,29 @@ func TestEnsureCloudReplicaAdoptsExistingCapacityBeforeStockCheck(t *testing.T) 
 }
 
 func TestProviderCapacityMessageUsesGroundedPlacementDetails(t *testing.T) {
-	message := providerCapacityMessage(provision.Observation{State: "starting", Details: `[{"status":"INIT","region":"AU","init_status_reason":"Provisioning on runpod in AU"}]`})
+	message, code := providerCapacityMessage(provision.Observation{State: "starting", Details: `[{"status":"INIT","region":"AU","init_status_reason":"Provisioning on runpod in AU"}]`})
+	if code != "" {
+		t.Fatalf("code=%q, want empty", code)
+	}
 	if message != "Provider capacity: Provisioning on runpod in AU; 1 resource observed; worker endpoint not exposed yet; billing state unavailable" {
 		t.Fatalf("unexpected message: %q", message)
 	}
 }
 
 func TestProviderCapacityMessageDoesNotInventUnavailableStages(t *testing.T) {
-	message := providerCapacityMessage(provision.Observation{State: "starting", Details: `{}`})
+	message, code := providerCapacityMessage(provision.Observation{State: "starting", Details: `{}`})
+	if code != "" {
+		t.Fatalf("code=%q, want empty", code)
+	}
 	if message != "Provider capacity: starting; 1 resource observed; worker endpoint not exposed yet; billing state unavailable" || strings.Contains(message, "artifact") || strings.Contains(message, "container") {
 		t.Fatalf("unexpected message: %q", message)
+	}
+}
+
+func TestProviderCapacityMessageSurfacesImagePullFailure(t *testing.T) {
+	message, code := providerCapacityMessage(provision.Observation{State: "provisioning", Details: `failed to pull image: unexpected EOF`})
+	if code != "provider_image_pull_failed" || !strings.Contains(message, "registry stream ended unexpectedly") || !strings.Contains(message, "existing resource is retained") {
+		t.Fatalf("message=%q code=%q", message, code)
 	}
 }
 

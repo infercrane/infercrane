@@ -999,6 +999,9 @@ func waitForOperation(ctx context.Context, cfg config.Config, id string, printPr
 	for {
 		var operation domain.Operation
 		if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/operations/"+url.PathEscape(id), "", nil, &operation); err != nil {
+			if ctx.Err() != nil {
+				return operation, watcherStoppedError(ctx.Err(), id)
+			}
 			return domain.Operation{}, err
 		}
 		now := time.Now()
@@ -1022,10 +1025,14 @@ func waitForOperation(ctx context.Context, cfg config.Config, id string, printPr
 		}
 		select {
 		case <-ctx.Done():
-			return operation, fmt.Errorf("%w: watcher stopped; operation %s continues safely in the control plane (resume: infercrane operation watch %s; cancel: infercrane operation cancel %s)", ctx.Err(), id, id, id)
+			return operation, watcherStoppedError(ctx.Err(), id)
 		case <-ticker.C:
 		}
 	}
+}
+
+func watcherStoppedError(cause error, id string) error {
+	return fmt.Errorf("%w: watcher stopped; operation %s continues safely in the control plane (resume: infercrane operation watch %s; cancel: infercrane operation cancel %s)", cause, id, id, id)
 }
 
 func waitForOperationWithin(parent context.Context, timeout time.Duration, cfg config.Config, id string, printProgress bool) (domain.Operation, error) {

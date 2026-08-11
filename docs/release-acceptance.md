@@ -30,7 +30,9 @@ structured JSON response through the logical OpenAI-compatible endpoint. Named f
 supported by default in vLLM. Automatic tool selection is not implied because vLLM requires an
 explicitly enabled, model-specific parser for `tool_choice: auto`. The harness never permits more than the deployment's configured maximum of two
 workers and stops on the first missing observation. Paid subcommands install a failure trap that
-deletes run-owned resources; running `cleanup` afterward is still a safe idempotent final check.
+captures direct provider identifiers and host/image metadata before deleting run-owned resources;
+running `cleanup` afterward is still a safe idempotent final check. This preserves bootstrap
+diagnostics after the billable resource is removed without persisting provider credentials.
 
 RunPod does not publish a fixed Pod allocation-time guarantee. Its [container guidance](https://docs.runpod.io/tutorials/introduction/containers/docker-commands)
 recommends versioned images and explains host-side image caching. The harness therefore separates its

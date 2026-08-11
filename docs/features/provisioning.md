@@ -46,6 +46,12 @@ creation with a retryable error. Constrained capacity proceeds with a warning be
 is a point-in-time signal, not a reservation. An unavailable advisory service does not make an
 otherwise healthy provider unusable.
 
+Provider observation details are also classified at the integration boundary. Known container
+bootstrap failures such as an interrupted image pull or exhausted host storage remain retryable
+while the provider retains the resource, but operation progress exposes the concrete boundary and
+an explicit cancel-before-replacement instruction. InferCrane does not create a second resource or
+silently select different hardware in response to these diagnostics.
+
 The v0.1 RunPod advisor queries secure-cloud GPU stock without creating a Pod. A region-qualified
 request is clearly labeled as using a global signal because the provider response cannot prove
 availability in one requested region. Credentials are sent in an authorization header and are never

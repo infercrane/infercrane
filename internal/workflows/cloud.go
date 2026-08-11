@@ -728,7 +728,11 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 	}
 	if observation.State != "ready" || observation.Endpoint == "" {
 		_ = store.ObserveReplica(ctx, replica.ID, observation.State, observation.Endpoint, "starting", observation.Details, time.Now())
-		_ = checkpoint(ctx, store, operation, step+".ready", "waiting", observation, 55, providerCapacityMessage(observation))
+		message, errorCode := providerCapacityMessage(observation)
+		_ = checkpoint(ctx, store, operation, step+".ready", "waiting", observation, 55, message)
+		if errorCode != "" {
+			return "", "", "", operations.Retryable(errorCode, errors.New(message))
+		}
 		return "", "", "", operations.Retryable("replica_starting", errors.New("provider is allocating capacity or bootstrapping the worker"))
 	}
 	ready, models := runtime.Inspect(ctx, observation.Endpoint)
@@ -769,7 +773,10 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 // providerCapacityMessage exposes only boundaries reported by the provider. It
 // deliberately does not label provider placement time as container, artifact,
 // or runtime startup time when no worker endpoint exists yet.
-func providerCapacityMessage(observation provision.Observation) string {
+func providerCapacityMessage(observation provision.Observation) (string, string) {
+	if message, code := providerBootstrapDiagnostic(observation.Details); code != "" {
+		return message, code
+	}
 	fields := map[string]string{}
 	var value any
 	if json.Unmarshal([]byte(observation.Details), &value) == nil {
@@ -794,7 +801,22 @@ func providerCapacityMessage(observation provision.Observation) string {
 	} else {
 		message += "; 1 resource observed; worker endpoint exposed, bootstrap still in progress; billing state unavailable"
 	}
-	return message
+	return message, ""
+}
+
+func providerBootstrapDiagnostic(details string) (string, string) {
+	normalized := strings.ToLower(details)
+	switch {
+	case strings.Contains(normalized, "failed to pull image") || strings.Contains(normalized, "error pulling image"):
+		reason := "Provider container-image pull failed"
+		if strings.Contains(normalized, "unexpected eof") {
+			reason += " because the registry stream ended unexpectedly"
+		}
+		return reason + "; the existing resource is retained for provider retry; cancel the durable operation before choosing another placement", "provider_image_pull_failed"
+	case strings.Contains(normalized, "no space left on device"):
+		return "Provider worker bootstrap failed because the assigned host ran out of container storage; cancel the durable operation before choosing another placement", "provider_container_storage_exhausted"
+	}
+	return "", ""
 }
 
 func collectProviderFields(value any, fields map[string]string) {
