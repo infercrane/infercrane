@@ -21,6 +21,9 @@ printf '%s\n' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$' || {
 build_root=$(mktemp -d)
 trap 'rm -rf "$build_root"' EXIT HUP INT TERM
 git clone --quiet --local --no-hardlinks "$root" "$build_root/source"
+if git -C "$build_root/source" rev-parse --verify --quiet "refs/tags/$tag" >/dev/null; then
+  git -C "$build_root/source" tag -d "$tag" >/dev/null
+fi
 git -C "$build_root/source" tag -a "$tag" -m "temporary isolated build tag $tag" HEAD
 (
   cd "$build_root/source"
