@@ -53,7 +53,7 @@ import (
 	"github.com/infercrane/infercrane/internal/workflows"
 )
 
-var version = "0.6.0-rc.1"
+var version = "0.7.0-rc.1"
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -123,7 +123,7 @@ func runLegacy(ctx context.Context, args []string) error {
 		return contextCommand(args[1:])
 	}
 	switch args[0] {
-	case "target", "deploy", "apply", "plan", "doctor", "ui", "dashboard", "deployments", "route", "status", "events", "logs", "request", "explain", "rollout", "delete", "inspect", "operation", "orphans", "integrations", "context", "auth", "tenant", "principal", "secret", "external", "benchmark", "serve":
+	case "target", "deploy", "apply", "plan", "doctor", "ui", "dashboard", "deployments", "route", "status", "events", "logs", "request", "explain", "rollout", "delete", "inspect", "operation", "orphans", "integrations", "context", "auth", "tenant", "principal", "secret", "external", "benchmark", "recommend", "slo", "serve":
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -196,6 +196,10 @@ func runLegacy(ctx context.Context, args []string) error {
 		return externalAPICommand(ctx, cfg, args[1:])
 	case "benchmark":
 		return benchmarkCommand(ctx, cfg, args[1:])
+	case "recommend":
+		return recommendCommand(ctx, cfg, args[1:])
+	case "slo":
+		return sloCommand(ctx, cfg, args[1:])
 	}
 	return fmt.Errorf("%s has not yet been migrated to the control-plane API", args[0])
 }
@@ -525,6 +529,120 @@ func benchmarkValue(value any) string {
 		}
 	}
 	return fmt.Sprint(value)
+}
+
+func recommendCommand(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return errors.New("usage: infercrane recommend DEPLOYMENT [--history] [--output human|json]")
+	}
+	deployment := args[0]
+	fs := flag.NewFlagSet("recommend", flag.ContinueOnError)
+	history := fs.Bool("history", false, "list persisted history")
+	output := fs.String("output", "human", "human or json")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return errors.New("usage: infercrane recommend DEPLOYMENT [flags]")
+	}
+	if err := validateOutput(*output); err != nil {
+		return err
+	}
+	if *history {
+		var response struct {
+			Data []map[string]any `json:"data"`
+		}
+		if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/deployments/"+url.PathEscape(deployment)+"/recommendations", "", nil, &response); err != nil {
+			return err
+		}
+		if *output == "json" {
+			return printJSON(response)
+		}
+		if len(response.Data) == 0 {
+			fmt.Println("No persisted recommendations.")
+			return nil
+		}
+		for _, row := range response.Data {
+			fmt.Printf("%-14s %-12s %s\n", benchmarkValue(row["status"]), benchmarkValue(row["id"]), benchmarkValue(row["reason"]))
+		}
+		return nil
+	}
+	var response struct {
+		Recommendation map[string]any `json:"recommendation"`
+	}
+	if err := controlJSON(ctx, cfg, http.MethodPost, "/api/v1/deployments/"+url.PathEscape(deployment)+"/recommendations", "", map[string]any{}, &response); err != nil {
+		return err
+	}
+	if *output == "json" {
+		return printJSON(response.Recommendation)
+	}
+	fmt.Printf("Recommendation  %s\nEvidence        %s\nReason          %s\nAlgorithm       %s\nInput digest    %s\nMissing         %s\n", strings.ToUpper(benchmarkValue(response.Recommendation["status"])), benchmarkValue(response.Recommendation["selected_evidence_id"]), benchmarkValue(response.Recommendation["reason"]), benchmarkValue(response.Recommendation["algorithm_version"]), benchmarkValue(response.Recommendation["input_digest"]), benchmarkValue(response.Recommendation["missing"]))
+	return nil
+}
+
+func sloCommand(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) < 2 || (args[0] != "get" && args[0] != "set" && args[0] != "delete") {
+		return errors.New("usage: infercrane slo get DEPLOYMENT | infercrane slo set DEPLOYMENT [threshold flags] | infercrane slo delete DEPLOYMENT")
+	}
+	action, deployment := args[0], args[1]
+	fs := flag.NewFlagSet("slo "+action, flag.ContinueOnError)
+	ttft := fs.String("ttft-p95", "", "maximum p95 TTFT milliseconds")
+	latency := fs.String("latency-p95", "", "maximum p95 latency milliseconds")
+	errorRate := fs.String("error-rate", "", "maximum error ratio")
+	throughput := fs.String("output-tokens-second", "", "minimum output tokens/second")
+	hourly := fs.String("hourly-cost", "", "maximum sourced hourly cost")
+	output := fs.String("output", "human", "human or json")
+	if err := fs.Parse(args[2:]); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return errors.New("unexpected SLO arguments")
+	}
+	if err := validateOutput(*output); err != nil {
+		return err
+	}
+	path := "/api/v1/deployments/" + url.PathEscape(deployment) + "/slo-policy"
+	if action == "delete" {
+		if err := controlJSON(ctx, cfg, http.MethodDelete, path, "", nil, nil); err != nil {
+			return err
+		}
+		if *output == "json" {
+			return printJSON(map[string]any{"deleted": true, "deployment": deployment})
+		}
+		fmt.Printf("SLO policy for %s deleted\n", deployment)
+		return nil
+	}
+	var response struct {
+		Policy map[string]any `json:"policy"`
+	}
+	if action == "get" {
+		if err := controlJSON(ctx, cfg, http.MethodGet, path, "", nil, &response); err != nil {
+			return err
+		}
+	} else {
+		request := map[string]any{}
+		for key, raw := range map[string]string{"max_ttft_p95_ms": *ttft, "max_latency_p95_ms": *latency, "max_error_rate": *errorRate, "min_output_tokens_second": *throughput, "max_hourly_cost": *hourly} {
+			if raw == "" {
+				continue
+			}
+			value, err := strconv.ParseFloat(raw, 64)
+			if err != nil {
+				return fmt.Errorf("%s must be numeric: %w", key, err)
+			}
+			request[key] = value
+		}
+		if len(request) == 0 {
+			return errors.New("slo set requires at least one threshold")
+		}
+		if err := controlJSON(ctx, cfg, http.MethodPut, path, "", request, &response); err != nil {
+			return err
+		}
+	}
+	if *output == "json" {
+		return printJSON(response.Policy)
+	}
+	fmt.Printf("SLO policy for %s\nTTFT p95 max       %s ms\nLatency p95 max    %s ms\nError rate max     %s\nOutput tok/s min   %s\nHourly cost max    %s\n", deployment, benchmarkValue(response.Policy["max_ttft_p95_ms"]), benchmarkValue(response.Policy["max_latency_p95_ms"]), benchmarkValue(response.Policy["max_error_rate"]), benchmarkValue(response.Policy["min_output_tokens_second"]), benchmarkValue(response.Policy["max_hourly_cost"]))
+	return nil
 }
 func targetAPICommand(ctx context.Context, cfg config.Config, args []string) error {
 	if len(args) == 0 {
@@ -1526,6 +1644,12 @@ func externalAPICommand(ctx context.Context, cfg config.Config, args []string) e
 		requestLimit := fs.Int64("request-limit", 0, "hard maximum reserved requests")
 		costLimit := fs.String("cost-limit-usd", "", "hard USD reservation budget")
 		maxRequestCost := fs.String("max-request-cost-usd", "", "worst-case USD reserved per request")
+		overflowMode := fs.String("mode", "health", "health or health_and_queue")
+		queueThreshold := fs.String("queue-threshold", "", "waiting-request threshold for queue overflow")
+		breachIntervals := fs.Int("breach-intervals", 2, "consecutive queue breaches before overflow")
+		recoveryIntervals := fs.Int("recovery-intervals", 2, "consecutive healthy observations before recovery")
+		cooldownSeconds := fs.Int("cooldown-seconds", 60, "minimum seconds between route changes")
+		signalMaxAgeSeconds := fs.Int("signal-max-age-seconds", 30, "maximum queue evidence age")
 		acknowledge := fs.Bool("acknowledge-external-data", false, "acknowledge prompts and outputs leave controlled infrastructure")
 		enable := fs.Bool("enable", false, "enable fallback after validation")
 		output := fs.String("output", "human", "human or json")
@@ -1549,7 +1673,17 @@ func externalAPICommand(ctx context.Context, cfg config.Config, args []string) e
 		if err != nil {
 			return fmt.Errorf("--max-request-cost-usd: %w", err)
 		}
-		request := map[string]any{"target": *target, "adapter": *adapter, "secret_reference_id": *secretReference, "enabled": *enable, "privacy_acknowledged": *acknowledge, "request_limit": *requestLimit, "cost_limit_microusd": costMicrousd, "max_request_cost_microusd": maxMicrousd}
+		request := map[string]any{"target": *target, "adapter": *adapter, "secret_reference_id": *secretReference, "enabled": *enable, "privacy_acknowledged": *acknowledge, "request_limit": *requestLimit, "cost_limit_microusd": costMicrousd, "max_request_cost_microusd": maxMicrousd, "overflow_mode": *overflowMode, "breach_intervals": *breachIntervals, "recovery_intervals": *recoveryIntervals, "cooldown_seconds": *cooldownSeconds, "signal_max_age_seconds": *signalMaxAgeSeconds}
+		if *overflowMode == "health_and_queue" {
+			if *queueThreshold == "" {
+				return errors.New("--queue-threshold is required for health_and_queue mode")
+			}
+			threshold, parseErr := strconv.ParseFloat(*queueThreshold, 64)
+			if parseErr != nil || threshold <= 0 {
+				return errors.New("--queue-threshold must be positive")
+			}
+			request["queue_threshold"] = threshold
+		}
 		var response struct {
 			Policy domain.ExternalTargetPolicy `json:"policy"`
 		}
@@ -1563,7 +1697,7 @@ func externalAPICommand(ctx context.Context, cfg config.Config, args []string) e
 		if response.Policy.Enabled {
 			state = "enabled"
 		}
-		fmt.Printf("External fallback %s\nDeployment       %s\nAdapter          %s\nRequests         %d hard limit\nCost reservation $%s hard limit\nPrivacy          acknowledged\n", state, deployment, response.Policy.Adapter, response.Policy.RequestLimit, formatMicrousd(response.Policy.CostLimitMicrousd))
+		fmt.Printf("External fallback %s\nDeployment       %s\nAdapter          %s\nMode             %s\nRequests         %d hard limit\nCost reservation $%s hard limit\nPrivacy          acknowledged\n", state, deployment, response.Policy.Adapter, response.Policy.OverflowMode, response.Policy.RequestLimit, formatMicrousd(response.Policy.CostLimitMicrousd))
 		return nil
 	case "inspect":
 		fs := flag.NewFlagSet("external inspect", flag.ContinueOnError)
@@ -2339,7 +2473,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		defer cancel()
 		_ = recorder.Close(closeCtx)
 	}()
-	rec := &reconcile.Reconciler{Store: s, Routes: directory, Router: backend, Runtimes: runtimeBackends, Interval: cfg.HealthInterval, RouterStartPort: cfg.RouterStartPort, InstanceID: cfg.InstanceID, Logger: logger, DirectTargets: map[string]reconcile.DirectTargetBackend{"runpod-serverless": {Provider: "runpod", APIKey: cfg.RunPodAPIKey, Status: serverless}}, ExternalFallback: externalCoordinator}
+	rec := &reconcile.Reconciler{Store: s, Routes: directory, Router: backend, Runtimes: runtimeBackends, Interval: cfg.HealthInterval, RouterStartPort: cfg.RouterStartPort, InstanceID: cfg.InstanceID, Logger: logger, DirectTargets: map[string]reconcile.DirectTargetBackend{"runpod-serverless": {Provider: "runpod", APIKey: cfg.RunPodAPIKey, Status: serverless}}, ExternalFallback: externalCoordinator, QueueSignals: autoscale.VLLMSignals{Targets: s, APIKey: cfg.APIKey}}
 	go purgeRequests(ctx, s, cfg.RequestRetention, logger)
 	go func() {
 		_ = rec.Run(ctx)

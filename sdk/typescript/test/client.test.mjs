@@ -67,3 +67,17 @@ test('stream requires a terminal done event', async () => {
   const client = new InferCrane({ apiKey: 'secret', fetch });
   await assert.rejects(async () => { for await (const _ of client.streamChat('qwen', [])) void _; }, StreamError);
 });
+
+test('SLO and recommendation helpers preserve explicit evidence policy', async () => {
+  const calls = [];
+	const fetch = async (url, options = {}) => { calls.push({ url: String(url), options }); if (options.method === 'DELETE') return new Response(null, { status: 204 }); if (String(url).includes('/recommendations?')) return json({ data: [{ status: 'recommended' }] }); if (String(url).endsWith('/slo-policy')) return json({ policy: options.body ? JSON.parse(options.body) : { max_ttft_p95_ms: 250 } }); return json({ recommendation: { status: 'recommended', selected_evidence_id: 'bench-1' } }, 201); };
+  const client = new InferCrane({ apiKey: 'secret', fetch });
+	assert.equal((await client.setSloPolicy('qwen prod', { max_ttft_p95_ms: 250 })).max_ttft_p95_ms, 250);
+	assert.equal((await client.getSloPolicy('qwen prod')).max_ttft_p95_ms, 250);
+	assert.equal((await client.recommend('qwen prod')).selected_evidence_id, 'bench-1');
+	assert.equal((await client.recommendations('qwen prod', 1))[0].status, 'recommended');
+	await client.deleteSloPolicy('qwen prod');
+  assert.match(calls[0].url, /\/slo-policy$/);
+	assert.match(calls[0].url, /qwen%20prod/);
+	await assert.rejects(() => client.setSloPolicy('qwen', { max_ttft_p95_ms: Number.NaN }), TypeError);
+});

@@ -121,6 +121,7 @@
           "features/serverless",
           "features/telemetry",
           "features/benchmarking",
+          "features/inference-decisions",
           "features/cold-starts",
           "features/explanations"
         ]
@@ -184,7 +185,8 @@
               "adr/0013-governed-external-capacity-and-byoc",
               "adr/0014-generated-automation-clients",
             "adr/0015-embedded-evidence-dashboard"
-            ,"adr/0016-portable-oci-runtime-workloads"
+            ,"adr/0016-portable-oci-runtime-workloads",
+              "adr/0017-deterministic-inference-decisions"
             ]
           },
           "release-acceptance"

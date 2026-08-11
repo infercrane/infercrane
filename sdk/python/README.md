@@ -14,6 +14,9 @@ operation = client.deploy(
     gpu="L40S",
 )
 ready = client.wait(operation.id, timeout=900)
+
+client.set_slo_policy("qwen-prod", max_ttft_p95_ms=250)
+recommendation = client.recommend("qwen-prod")
 ```
 
 See the [SDK guide](https://infercrane.mintlify.site/integrations/python) for async operations and

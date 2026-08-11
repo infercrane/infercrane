@@ -26,6 +26,7 @@ or link corrections. A changed decision gets a new ADR whose status supersedes t
 | [0014](/adr/0014-generated-automation-clients) | Accepted | Generate clients from one API contract and preserve durable operation ownership. |
 | [0015](/adr/0015-embedded-evidence-dashboard) | Accepted | Embed a static evidence dashboard that uses only authenticated public APIs. |
 | [0016](/adr/0016-portable-oci-runtime-workloads) | Accepted | Persist immutable runtime workload declarations and delegate container execution to providers. |
+| [0017](/adr/0017-deterministic-inference-decisions) | Accepted | Persist evidence-based recommendations, SLO policy, and bounded overflow decisions. |
 
 Use the next sequential number. Include context, decision, consequences, alternatives, and
 verification. Link affected feature documents.

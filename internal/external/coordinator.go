@@ -11,6 +11,7 @@ import (
 
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/openaicompat"
+	"github.com/infercrane/infercrane/internal/overflow"
 	"github.com/infercrane/infercrane/internal/routes"
 	"github.com/infercrane/infercrane/internal/secrets"
 )
@@ -19,6 +20,10 @@ type Store interface {
 	ExternalTargetPolicyForDeployment(context.Context, string, string) (domain.ExternalTargetPolicy, error)
 	SecretReferenceForTenant(context.Context, string, string) (domain.SecretReference, error)
 	LeaseExternalBudget(context.Context, string, string, int64) (domain.ExternalBudgetLease, error)
+}
+
+type OverflowStore interface {
+	EvaluateOverflow(context.Context, string, string, overflow.Signal, bool, time.Time) (overflow.Decision, error)
 }
 
 type Coordinator struct {
@@ -97,6 +102,42 @@ func (c *Coordinator) Resolve(ctx context.Context, deployment domain.Deployment,
 		UpstreamAPIKey: apiKey, ExternalPolicyID: policy.ID,
 		SelectionReason: "all primary targets are unhealthy; explicit external fallback policy selected",
 	}, nil
+}
+
+func (c *Coordinator) ResolveHybrid(ctx context.Context, deployment domain.Deployment, targets []domain.Target, signal overflow.Signal, now time.Time) (routes.Snapshot, overflow.Decision, error) {
+	store, ok := c.Store.(OverflowStore)
+	if !ok {
+		return routes.Snapshot{}, overflow.Decision{}, errors.New("hybrid overflow persistence is unavailable")
+	}
+	policy, err := c.Store.ExternalTargetPolicyForDeployment(ctx, deployment.TenantID, deployment.ID)
+	if err != nil {
+		return routes.Snapshot{}, overflow.Decision{}, err
+	}
+	budgetAvailable := c.Budgets != nil && c.Budgets.Remaining(policy.ID) > 0 || policy.RequestsReserved < policy.RequestLimit && policy.CostReservedMicrousd < policy.CostLimitMicrousd
+	decision, err := store.EvaluateOverflow(ctx, deployment.TenantID, deployment.ID, signal, budgetAvailable, now)
+	if err != nil {
+		return routes.Snapshot{}, decision, err
+	}
+	if decision.Route != "external" {
+		return routes.Snapshot{}, decision, nil
+	}
+	route, err := c.Resolve(ctx, deployment, targets)
+	if err != nil {
+		return routes.Snapshot{}, decision, err
+	}
+	route.SelectionReason = decision.Reason
+	return route, decision, nil
+}
+
+func (c *Coordinator) OverflowMode(ctx context.Context, deployment domain.Deployment) (string, error) {
+	policy, err := c.Store.ExternalTargetPolicyForDeployment(ctx, deployment.TenantID, deployment.ID)
+	if err != nil {
+		return "", err
+	}
+	if !policy.Enabled {
+		return "", errors.New("external fallback policy is disabled")
+	}
+	return policy.OverflowMode, nil
 }
 
 func (c *Coordinator) healthy(ctx context.Context, target domain.Target, apiKey string) error {

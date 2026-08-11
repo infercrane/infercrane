@@ -136,6 +136,30 @@ type BenchmarkResult struct {
 	CreatedAt                                               time.Time
 }
 
+type SLOPolicy struct {
+	DeploymentID          string    `json:"deployment_id"`
+	MaxTTFTP95MS          *float64  `json:"max_ttft_p95_ms,omitempty"`
+	MaxLatencyP95MS       *float64  `json:"max_latency_p95_ms,omitempty"`
+	MaxErrorRate          *float64  `json:"max_error_rate,omitempty"`
+	MinOutputTokensSecond *float64  `json:"min_output_tokens_second,omitempty"`
+	MaxHourlyCost         *float64  `json:"max_hourly_cost,omitempty"`
+	CreatedAt             time.Time `json:"created_at"`
+	UpdatedAt             time.Time `json:"updated_at"`
+}
+
+type InferenceRecommendation struct {
+	ID, TenantID, DeploymentID, Status, AlgorithmVersion    string
+	SelectedEvidenceID, Reason, MissingJSON, CandidatesJSON string
+	InputSnapshotJSON, InputDigest                          string
+	CreatedAt                                               time.Time
+}
+
+type CapacityEvidence struct {
+	ID, TenantID, Provider, Runtime, ComputeMode, Region, GPU string
+	State, Source, EvidenceJSON                               string
+	ObservedAt, ExpiresAt, CreatedAt                          time.Time
+}
+
 // InferenceRecord contains request metadata and measurements only. Prompt and
 // generated content are deliberately excluded.
 type InferenceRecord struct {
@@ -287,6 +311,12 @@ type ExternalTargetPolicy struct {
 	CostLimitMicrousd      int64     `json:"cost_limit_microusd"`
 	MaxRequestCostMicrousd int64     `json:"max_request_cost_microusd"`
 	CostReservedMicrousd   int64     `json:"cost_reserved_microusd"`
+	OverflowMode           string    `json:"overflow_mode"`
+	QueueThreshold         *float64  `json:"queue_threshold,omitempty"`
+	BreachIntervals        int       `json:"breach_intervals"`
+	RecoveryIntervals      int       `json:"recovery_intervals"`
+	CooldownSeconds        int       `json:"cooldown_seconds"`
+	SignalMaxAgeSeconds    int       `json:"signal_max_age_seconds"`
 	CreatedAt              time.Time `json:"created_at"`
 	UpdatedAt              time.Time `json:"updated_at"`
 }

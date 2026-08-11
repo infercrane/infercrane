@@ -2,7 +2,7 @@
   "schema_version": 1,
   "program": "infercrane-v1",
   "current_milestone": "v0.7.0",
-  "state": "planning",
+  "state": "qualifying",
   "baseline": {
     "commit": "fa0f96ea1f475bdd3bc59843935f22e5308a1f4c",
     "dev_check": "passed",
@@ -11,7 +11,7 @@
     "real_infrastructure": "deferred"
   },
   "last_completed_milestone": "v0.6.0-rc.1",
-  "next_action": "refine v0.7 recommendations, capacity intelligence, hybrid overflow, and SLO policy acceptance criteria before implementation",
+  "next_action": "commit the reviewed v0.7 implementation, qualify the exact clean commit, and record release-candidate evidence",
   "rc_tags": ["v0.2.0-rc.1", "v0.3.0-rc.1", "v0.4.0-rc.1", "v0.5.0-rc.1", "v0.6.0-rc.1"],
-  "updated_at": "2026-08-11T07:56:18Z"
+  "updated_at": "2026-08-11T09:01:00Z"
 }

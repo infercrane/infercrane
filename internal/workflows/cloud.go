@@ -144,6 +144,9 @@ type ReplicaProvider = integration.ElasticProvider
 type CapacityAdvisor interface {
 	Availability(context.Context, provision.AvailabilityRequest) (provision.Availability, error)
 }
+type CapacityEvidenceStore interface {
+	RecordCapacityEvidence(context.Context, domain.CapacityEvidence) (domain.CapacityEvidence, error)
+}
 
 // ReplicaBackend binds a provider adapter to durable identity and the runtime
 // it launches. Provider support is registered at composition time rather than
@@ -763,6 +766,11 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 			availability, availabilityErr := backend.Capacity.Availability(ctx, provision.AvailabilityRequest{Cloud: request.Cloud, GPU: request.GPU, Region: request.Region, Count: 1})
 			if availabilityErr != nil {
 				availability = provision.Availability{State: "unknown", Message: "Provider availability check failed; continuing because stock signals are advisory", Details: availabilityErr.Error()}
+			}
+			if evidenceStore, ok := store.(CapacityEvidenceStore); ok {
+				observed := time.Now().UTC()
+				details, _ := json.Marshal(map[string]string{"message": availability.Message, "details": availability.Details})
+				_, _ = evidenceStore.RecordCapacityEvidence(ctx, domain.CapacityEvidence{TenantID: request.TenantID, Provider: request.Cloud, Runtime: request.Runtime, ComputeMode: request.ComputeMode, Region: request.Region, GPU: request.GPU, State: availability.State, Source: backend.Name + ".availability", EvidenceJSON: string(details), ObservedAt: observed, ExpiresAt: observed.Add(30 * time.Second)})
 			}
 			if err = checkpoint(ctx, store, operation, step+".availability", availabilityCheckpointStatus(availability.State), availability, 25, availability.Message); err != nil {
 				return "", "", "", err

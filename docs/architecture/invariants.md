@@ -23,6 +23,8 @@ Changes that violate an invariant require an explicit superseding ADR and coordi
 - A supported integration capability cites executable evidence and cannot be inferred from protocol labels.
 - Custom runtime revisions contain an immutable OCI digest and bounded argv; the control plane never
   builds an image or evaluates image-provided build/probe code.
+- Recommendations and overflow decisions are versioned, persisted, reproducible, and fail closed on
+  missing policy-required evidence; they never use an LLM or mutate a DeploymentSpec implicitly.
 
 ## Persistence
 

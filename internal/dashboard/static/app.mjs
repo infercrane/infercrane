@@ -115,14 +115,16 @@ async function optional(name, path) {
   }
 }
 
+async function optionalConfiguration(name,path) { try { return await api(path); } catch(error) { if(error?.status===404)return {}; if(error?.status===401)throw error; state.partial.push(name);return {unavailable:true,status:error?.status}; } }
+
 async function loadDetail() {
   const name = encodeURIComponent(state.selected);
   const detail = await api(`/deployments/${name}`);
   const operationPath = detail.active_operation?.id ? `/operations/${encodeURIComponent(detail.active_operation.id)}/events?limit=100` : '';
-  const [events, scaling, benchmarks, orphans, audit, operationEvents] = await Promise.all([
-    optional('events', `/deployments/${name}/events`), optional('scaling decisions', `/deployments/${name}/scaling-decisions?limit=100`), optional('benchmarks', `/deployments/${name}/benchmarks?limit=50`), optional('orphan inventory', '/orphans'), optional('audit history', '/audit-events?limit=100'), operationPath ? optional('operation timeline', operationPath) : Promise.resolve({ data: [] }),
+  const [events, scaling, benchmarks, recommendations, slo, orphans, audit, operationEvents] = await Promise.all([
+    optional('events', `/deployments/${name}/events`), optional('scaling decisions', `/deployments/${name}/scaling-decisions?limit=100`), optional('benchmarks', `/deployments/${name}/benchmarks?limit=50`), optional('recommendations', `/deployments/${name}/recommendations?limit=50`), optionalConfiguration('SLO policy',`/deployments/${name}/slo-policy`), optional('orphan inventory', '/orphans'), optional('audit history', '/audit-events?limit=100'), operationPath ? optional('operation timeline', operationPath) : Promise.resolve({ data: [] }),
   ]);
-  state.detail = detail; state.supplemental = { events: array(events.data), scaling: array(scaling.data), benchmarks: array(benchmarks.data), orphans: array(orphans.data), audit: array(audit.data), operationEvents: array(operationEvents.data), auditForbidden: audit.status === 403 };
+  state.detail = detail; state.supplemental = { events: array(events.data), scaling: array(scaling.data), benchmarks: array(benchmarks.data), recommendations: array(recommendations.data), slo: slo.policy ?? null, orphans: array(orphans.data), audit: array(audit.data), operationEvents: array(operationEvents.data), auditForbidden: audit.status === 403 };
 }
 
 function render() {
@@ -193,7 +195,7 @@ function renderRollout() {
 }
 
 function renderPerformance() {
-  const stats = state.detail.request_stats ?? {}, cold = state.detail.cold_start_stats ?? {}, benchmarks = state.supplemental.benchmarks;
+  const stats = state.detail.request_stats ?? {}, cold = state.detail.cold_start_stats ?? {}, benchmarks = state.supplemental.benchmarks, recommendations=state.supplemental.recommendations, slo=state.supplemental.slo;
   const latest = benchmarks[0] ?? {};
   const errorRate = valueAt(stats, 'error_rate');
   const requestsPerSecond = valueAt(stats, 'requests_per_second');
@@ -202,6 +204,7 @@ function renderPerformance() {
   grid.append(panel('Cold starts · 24h', metrics([['Cold starts', metric(valueAt(cold, 'cold_starts', 'count'))], ['Cold TTFT p95', metric(valueAt(cold, 'cold_ttft_p95_ms'), 'ms')], ['Warm TTFT p95', metric(valueAt(cold, 'warm_ttft_p95_ms'), 'ms')], ['Time to ready p95', metric(valueAt(cold, 'time_to_ready_p95_ms'), 'ms')]]), 5));
   grid.append(panel('Cold-start evidence', keyValues([['Classified requests', metric(cold.classified_requests)], ['Available boundaries', array(cold.available_boundaries).join(' → ') || 'None exposed'], ['Unavailable boundaries', array(cold.unavailable_boundaries).join(', ') || 'None'], ['Bottleneck code', cold.bottleneck_code || 'Not established'], ['Method', cold.evidence || 'No persisted evidence']]), 12, 'Only provider/runtime boundaries actually observed by InferCrane are shown.'));
   grid.append(panel('Latest benchmark', latest.id ? keyValues([['Tool', `${latest.tool} ${latest.tool_version ?? ''}`], ['Revision', latest.revision_id], ['TTFT p95', metric(latest.ttft_p95_ms, 'ms')], ['TPOT p95', metric(latest.tpot_p95_ms, 'ms')], ['Output tok/s', metric(latest.output_token_throughput)], ['Errors', metric(latest.failed)], ['Cost', costLabel(latest.cost_metadata)], ['Reproduce', latest.reproduction_command]]) : empty('No benchmark history', 'Run infercrane benchmark to persist a reproducible measurement.'), 12));
+  const recommendation=recommendations[0];grid.append(panel('Inference decision',recommendation?keyValues([['Status',recommendation.status],['Selected evidence',recommendation.selected_evidence_id],['Reason',recommendation.reason],['Algorithm',recommendation.algorithm_version],['Input digest',recommendation.input_digest],['Recorded',timestamp(recommendation.created_at)]]):empty('No recommendation','Set an SLO policy, collect comparable benchmarks, then run infercrane recommend.'),7,'Recommendations are advisory and never create or mutate capacity.'));grid.append(panel('SLO policy',slo?keyValues([['TTFT p95 max',metric(slo.max_ttft_p95_ms,'ms')],['Latency p95 max',metric(slo.max_latency_p95_ms,'ms')],['Error rate max',slo.max_error_rate==null?'Not constrained':metric(slo.max_error_rate*100,'%')],['Output tok/s min',metric(slo.min_output_tokens_second)],['Hourly cost max',slo.max_hourly_cost==null?'Not constrained':`$${slo.max_hourly_cost}`]]):empty('No SLO policy','Use infercrane slo set to define explicit fail-closed thresholds.'),5));
   grid.append(panel('Benchmark history', table([['When', (r) => timestamp(r.created_at)], ['Revision', (r) => shortID(r.revision_id)], ['GPU', (r) => r.gpu], ['TTFT p95', (r) => metric(r.ttft_p95_ms, 'ms')], ['TPOT p95', (r) => metric(r.tpot_p95_ms, 'ms')], ['Output tok/s', (r) => metric(r.output_token_throughput)], ['Errors', (r) => r.failed]], benchmarks, 'No benchmark has been persisted.'), 12)); return grid;
 }
 

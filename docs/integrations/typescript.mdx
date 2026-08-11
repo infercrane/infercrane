@@ -13,7 +13,7 @@ npm run build
 ```
 
 <Warning>
-`@infercrane/sdk` is repository-local during v0.4 release-candidate qualification. Do not depend on
+`@infercrane/sdk` is repository-local during v0.7 release-candidate qualification. Do not depend on
 an npm package until InferCrane publishes and signs it.
 </Warning>
 
@@ -54,3 +54,18 @@ for await (const event of client.streamChat(
 The SDK verifies HTTP status before decoding, exposes `ApiError`, `OperationFailed`,
 `OperationCancelled`, `OperationTimeout`, and `StreamError`, and never retries a streaming request
 after transmission begins.
+
+## Evaluate inference evidence
+
+```typescript
+await client.setSloPolicy('qwen-prod', {
+  max_ttft_p95_ms: 250,
+  max_error_rate: 0.01,
+});
+
+const recommendation = await client.recommend('qwen-prod');
+const history = await client.recommendations('qwen-prod', 20);
+```
+
+SLO thresholds are validated before transmission. These methods persist and inspect deterministic,
+advisory decisions; they do not apply a candidate configuration automatically.

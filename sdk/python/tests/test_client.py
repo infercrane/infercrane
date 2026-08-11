@@ -32,6 +32,10 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, value)
         elif self.path == "/api/v1/operations/fail":
             self._json(200, {"id": "fail", "kind": "deployment.converge", "status": "failed", "progress": 55, "message": "capacity denied", "error_code": "provider_denied"})
+        elif self.path.endswith("/slo-policy"):
+            self._json(200, {"policy": {"max_ttft_p95_ms": 250}})
+        elif "/recommendations?" in self.path:
+            self._json(200, {"data": [{"status": "recommended"}]})
         else:
             self._json(404, {"error": {"code": "not_found", "message": "missing", "retryable": False, "remediation": "check the name"}})
 
@@ -41,6 +45,8 @@ class Handler(BaseHTTPRequestHandler):
         self.requests.append((self.path, self.headers.get("Idempotency-Key"), body))
         if self.path == "/api/v1/deployments":
             self._json(202, {"operation": {"id": "op-1", "kind": "deployment.converge", "status": "pending", "progress": 0}})
+        elif self.path.endswith("/recommendations"):
+            self._json(201, {"recommendation": {"status": "recommended", "selected_evidence_id": "bench-1"}})
         elif self.path == "/v1/chat/completions":
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
@@ -48,6 +54,17 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(b'data: {"choices":[{"delta":{"content":"hello"}}]}\n\ndata: [DONE]\n\n')
         else:
             self._json(202, {"status": "cancellation_requested"})
+
+    def do_PUT(self):
+        length = int(self.headers.get("Content-Length", "0"))
+        body = json.loads(self.rfile.read(length) or b"{}")
+        self.requests.append((self.path, None, body))
+        self._json(200, {"policy": body})
+
+    def do_DELETE(self):
+        self.requests.append((self.path, None, None))
+        self.send_response(204)
+        self.end_headers()
 
 
 class ClientTest(unittest.TestCase):
@@ -108,6 +125,18 @@ class ClientTest(unittest.TestCase):
             client = AsyncInferCrane(api_key="test-secret", base_url=self.url, timeout=1, poll_interval=0.001)
             return await client.wait("op-1")
         self.assertEqual(asyncio.run(run()).status, "succeeded")
+
+    def test_slo_and_recommendation_helpers_preserve_explicit_evidence_contract(self):
+        policy = self.client.set_slo_policy("qwen prod", max_ttft_p95_ms=250, max_error_rate=0.01)
+        self.assertEqual(policy["max_ttft_p95_ms"], 250)
+        self.assertEqual(self.client.get_slo_policy("qwen prod")["max_ttft_p95_ms"], 250)
+        recommendation = self.client.recommend("qwen prod")
+        self.assertEqual(recommendation["selected_evidence_id"], "bench-1")
+        self.assertEqual(self.client.recommendations("qwen prod", limit=1)[0]["status"], "recommended")
+        self.client.delete_slo_policy("qwen prod")
+        self.assertEqual(Handler.requests[0][0], "/api/v1/deployments/qwen%20prod/slo-policy")
+        with self.assertRaises(ValueError):
+            self.client.set_slo_policy("qwen", max_ttft_p95_ms=float("nan"))
 
 
 if __name__ == "__main__":

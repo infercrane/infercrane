@@ -26,6 +26,12 @@ type fakeCloudStore struct {
 	revision       domain.DeploymentRevision
 	applied        bool
 	rejectedReason string
+	capacity       domain.CapacityEvidence
+}
+
+func (f *fakeCloudStore) RecordCapacityEvidence(_ context.Context, row domain.CapacityEvidence) (domain.CapacityEvidence, error) {
+	f.capacity = row
+	return row, nil
 }
 
 func testElasticProfile(adapter, cloud string) integration.ProviderProfile {
@@ -443,7 +449,7 @@ func TestEnsureCloudReplicaDefersCreateWhenCapacityIsUnavailable(t *testing.T) {
 	advisor := &fakeCapacityAdvisor{availability: provision.Availability{State: "unavailable", Message: "Provider reports no current secure capacity for L40S"}}
 	_, _, _, err := ensureCloudReplica(context.Background(), store, ReplicaBackend{Name: "sky", Cloud: "runpod", Runtime: "vllm", Provider: provider, Capacity: advisor}, fakeInspector{}, domain.Operation{ID: "operation-1"}, CloudRequest{TenantID: "global", DeploymentID: "deployment-1", RevisionID: "revision-1", Name: "qwen", Model: "Qwen/Qwen3-8B", Cloud: "runpod", GPU: "L40S", Runtime: "vllm", Port: 8000}, 0)
 	var failure operations.Failure
-	if !errors.As(err, &failure) || failure.Code != "provider_capacity_unavailable" || !failure.Retryable || provider.ensureCalls != 0 || advisor.calls != 1 {
+	if !errors.As(err, &failure) || failure.Code != "provider_capacity_unavailable" || !failure.Retryable || provider.ensureCalls != 0 || advisor.calls != 1 || store.capacity.State != "unavailable" || store.capacity.Source != "sky.availability" || !store.capacity.ExpiresAt.After(store.capacity.ObservedAt) {
 		t.Fatalf("failure=%+v ensure_calls=%d advisor_calls=%d err=%v", failure, provider.ensureCalls, advisor.calls, err)
 	}
 }

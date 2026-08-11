@@ -3,8 +3,10 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -14,6 +16,17 @@ import (
 func (s *Store) RecordBenchmark(ctx context.Context, result domain.BenchmarkResult) (domain.BenchmarkResult, error) {
 	if result.TenantID == "" || result.DeploymentID == "" || result.RevisionID == "" || result.RequestCount < 1 {
 		return domain.BenchmarkResult{}, errors.New("benchmark tenant, deployment, revision, and request count are required")
+	}
+	if result.Succeeded < 0 || result.Failed < 0 || result.Succeeded+result.Failed != result.RequestCount || !finiteNonnegative(result.DurationSeconds) {
+		return domain.BenchmarkResult{}, errors.New("benchmark counts and duration must be complete, finite, and nonnegative")
+	}
+	for _, metric := range []*float64{result.RequestThroughput, result.OutputTokenThroughput, result.TTFTP50MS, result.TTFTP95MS, result.TPOTP50MS, result.TPOTP95MS, result.LatencyP50MS, result.LatencyP95MS, result.Goodput, result.GPUUtilization} {
+		if metric != nil && !finiteNonnegative(*metric) {
+			return domain.BenchmarkResult{}, errors.New("benchmark measurements must be finite and nonnegative")
+		}
+	}
+	if len(result.WorkloadJSON) == 0 || len(result.WorkloadJSON) > 1<<20 || !json.Valid([]byte(result.WorkloadJSON)) || !validBoundedJSON(result.RuntimeConfigJSON, 1<<20) || !validBoundedJSON(result.CostMetadataJSON, 256<<10) || len(result.ReproductionCommand) > 16<<10 {
+		return domain.BenchmarkResult{}, errors.New("benchmark reproduction metadata is invalid or exceeds bounded storage limits")
 	}
 	if result.ID == "" {
 		var err error
@@ -29,6 +42,14 @@ func (s *Store) RecordBenchmark(ctx context.Context, result domain.BenchmarkResu
 	}
 	result.CreatedAt = parseTime(stamp)
 	return result, nil
+}
+
+func finiteNonnegative(value float64) bool {
+	return value >= 0 && !math.IsNaN(value) && !math.IsInf(value, 0)
+}
+
+func validBoundedJSON(value string, limit int) bool {
+	return value == "" || len(value) <= limit && json.Valid([]byte(value))
 }
 
 func (s *Store) BenchmarksForDeployment(ctx context.Context, tenant, name string, limit int) ([]domain.BenchmarkResult, error) {

@@ -62,3 +62,8 @@ func (s VLLMSignals) Signals(ctx context.Context, deploymentID string) (Signals,
 	}
 	return out, nil
 }
+
+func (s VLLMSignals) Waiting(ctx context.Context, deploymentID string) (float64, error) {
+	signals, err := s.Signals(ctx, deploymentID)
+	return signals.Waiting, err
+}

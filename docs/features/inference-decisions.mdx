@@ -1,0 +1,63 @@
+---
+title: Inference decisions
+description: Deterministic SLO policies, evidence-based recommendations, and explicit unknowns.
+---
+
+# Inference decisions
+
+InferCrane compares persisted, reproducible benchmark evidence against an explicit deployment SLO
+policy. It does not ask an LLM to choose infrastructure, mutate a deployment automatically, or
+invent missing price and capacity measurements.
+
+## Define the acceptance envelope
+
+Set at least one threshold. Omitted metrics are unconstrained; configured metrics fail closed when
+the corresponding benchmark signal is missing.
+
+```bash
+infercrane slo set qwen-prod \
+  --ttft-p95 250 \
+  --latency-p95 1200 \
+  --error-rate 0.01 \
+  --output-tokens-second 30
+```
+
+Hourly cost is accepted only when benchmark cost metadata includes an authoritative source and
+observation timestamp. InferCrane does not convert unavailable pricing into zero.
+
+```bash
+infercrane slo get qwen-prod --output json
+infercrane slo delete qwen-prod
+```
+
+## Evaluate persisted evidence
+
+Collect comparable AIPerf measurements, then request a recommendation:
+
+```bash
+infercrane benchmark qwen-prod
+infercrane recommend qwen-prod
+infercrane recommend qwen-prod --history --output json
+```
+
+Every evaluation persists its status, algorithm version, canonical input digest, immutable
+benchmark provenance, exact compatibility state, selected and rejected candidates, violated
+constraints, missing evidence, and current bounded capacity disclosure where available.
+
+Candidates must reference the active immutable model artifact and the same canonical benchmark
+workload as the newest observation. InferCrane will not rank unlike models, request shapes, or
+concurrency profiles as though they were interchangeable performance samples.
+
+<Note>
+A v0.7 recommendation is advisory. It never provisions resources, changes the DeploymentSpec, or
+substitutes hardware. Apply a selected configuration explicitly after reviewing its evidence.
+</Note>
+
+## Unknown is a useful answer
+
+InferCrane returns `unknown` when a configured metric, qualification record, or required cost signal
+is unavailable. Capacity is disclosed as available, constrained, unavailable, or unknown with an
+expiry. Stale evidence becomes unknown; it is never retained as live stock.
+
+The same policy and canonical evidence snapshot reproduce the same output. This supports audit and
+CI review without turning the recommendation into an opaque optimizer.

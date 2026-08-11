@@ -111,7 +111,7 @@ func (s *Store) AutoscalingDeployments(ctx context.Context) ([]autoscale.Deploym
 }
 
 func (s *Store) AutoscalingTargetURLs(ctx context.Context, deploymentID string) ([]string, error) {
-	rows, err := s.QueryContext(ctx, `SELECT t.url FROM targets t JOIN deployment_targets dt ON dt.target_id=t.id WHERE dt.deployment_id=? AND t.health='healthy' ORDER BY t.name`, deploymentID)
+	rows, err := s.QueryContext(ctx, `SELECT t.url FROM targets t JOIN deployment_targets dt ON dt.target_id=t.id WHERE dt.deployment_id=? AND t.health='healthy' AND NOT EXISTS(SELECT 1 FROM external_target_policies p WHERE p.target_id=t.id) ORDER BY t.name`, deploymentID)
 	if err != nil {
 		return nil, err
 	}

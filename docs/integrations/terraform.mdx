@@ -7,6 +7,20 @@ The Terraform provider manages `infercrane_deployment` through the control-plane
 continues to own replicas, provider request identity, drain fencing, revisions, Release Guard, and
 cleanup.
 
+`infercrane_slo_policy` manages the deterministic policy used by `infercrane recommend`:
+
+```hcl
+resource "infercrane_slo_policy" "qwen" {
+  deployment               = infercrane_deployment.qwen.name
+  max_ttft_p95_ms          = 250
+  max_error_rate           = 0.01
+  min_output_tokens_second = 30
+}
+```
+
+Destroying this resource deletes the policy but preserves benchmark and recommendation history.
+Recommendations remain an explicit evaluation rather than a Terraform apply.
+
 <Warning>
 The provider is not yet published in the Terraform Registry. v0.4 qualification builds it from
 `integrations/terraform`; registry installation begins only after release publication.
@@ -17,7 +31,7 @@ terraform {
   required_providers {
     infercrane = {
       source  = "infercrane/infercrane"
-      version = "0.4.0-rc.1"
+      version = "0.7.0-rc.1"
     }
   }
 }

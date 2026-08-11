@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"os"
 	"strings"
 	"testing"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/infercrane/infercrane/internal/authz"
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/overflow"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
 	"github.com/infercrane/infercrane/internal/support"
 	"github.com/infercrane/infercrane/internal/workflows"
@@ -121,9 +123,64 @@ func TestBenchmarkHistoryPersistsReproductionMetadata(t *testing.T) {
 	if err != nil || created.ID == "" {
 		t.Fatalf("record=%#v err=%v", created, err)
 	}
+	if _, err = s.RecordBenchmark(ctx, domain.BenchmarkResult{TenantID: "global", DeploymentID: deployment.ID, RevisionID: deployment.ActiveRevisionID, WorkloadJSON: `{}`, RequestCount: 1, Succeeded: 1, DurationSeconds: math.NaN()}); err == nil {
+		t.Fatal("non-finite benchmark evidence was persisted")
+	}
 	rows, err := s.BenchmarksForDeployment(ctx, "global", name, 10)
 	if err != nil || len(rows) != 1 || rows[0].Tool != "aiperf" || rows[0].GPUCount == nil || *rows[0].GPUCount != 1 || rows[0].TTFTP95MS == nil || *rows[0].TTFTP95MS != value || !strings.Contains(rows[0].WorkloadJSON, "random_seed") || !strings.Contains(rows[0].CostMetadataJSON, `"available"`) {
 		t.Fatalf("rows=%#v err=%v", rows, err)
+	}
+}
+
+func TestInferenceDecisionPolicyEvidenceAndRecommendationsAreTenantSafe(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	name := "decision-" + time.Now().UTC().Format("150405.000000000")
+	target := name + "-target"
+	if _, err := s.AddTarget(ctx, domain.Target{Name: target, URL: "http://decision", Provider: "existing", Runtime: "vllm", UpstreamModel: "model"}); err != nil {
+		t.Fatal(err)
+	}
+	deployment, err := s.ApplyDeployment(ctx, domain.Deployment{Name: name, Model: "model", MinReplicas: 1, MaxReplicas: 1}, []string{target})
+	if err != nil {
+		t.Fatal(err)
+	}
+	maxTTFT := 250.0
+	policy, err := s.SetSLOPolicy(ctx, "global", name, domain.SLOPolicy{MaxTTFTP95MS: &maxTTFT})
+	if err != nil || policy.DeploymentID != deployment.ID || policy.MaxTTFTP95MS == nil || *policy.MaxTTFTP95MS != maxTTFT {
+		t.Fatalf("policy=%#v err=%v", policy, err)
+	}
+	row, err := s.RecordInferenceRecommendation(ctx, domain.InferenceRecommendation{TenantID: "global", DeploymentID: deployment.ID, Status: "unknown", AlgorithmVersion: "recommendation-v1", Reason: "missing benchmark", MissingJSON: `["benchmark_evidence"]`, CandidatesJSON: `[]`, InputSnapshotJSON: `{"evidence":[]}`})
+	if err != nil || len(row.InputDigest) != 64 {
+		t.Fatalf("recommendation=%#v err=%v", row, err)
+	}
+	if _, err = s.RecordInferenceRecommendation(ctx, domain.InferenceRecommendation{TenantID: "global", DeploymentID: deployment.ID, Status: "unknown", AlgorithmVersion: "recommendation-v1", Reason: "invalid", MissingJSON: `[]`, CandidatesJSON: `[]`, InputSnapshotJSON: `{not-json}`}); err == nil {
+		t.Fatal("invalid recommendation evidence was persisted")
+	}
+	rows, err := s.InferenceRecommendations(ctx, "global", name, 10)
+	if err != nil || len(rows) != 1 || rows[0].InputDigest != row.InputDigest {
+		t.Fatalf("rows=%#v err=%v", rows, err)
+	}
+	if other, err := s.InferenceRecommendations(ctx, "missing-tenant", name, 10); err != nil || len(other) != 0 {
+		t.Fatalf("cross-tenant rows=%#v err=%v", other, err)
+	}
+	observed := time.Now().UTC().Add(-time.Minute)
+	evidence, err := s.RecordCapacityEvidence(ctx, domain.CapacityEvidence{TenantID: "global", Provider: "runpod", Runtime: "vllm", ComputeMode: "elastic", GPU: "L40S", State: "available", Source: "provider-api", EvidenceJSON: `{"stock":1}`, ObservedAt: observed, ExpiresAt: observed.Add(5 * time.Minute)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	latest, err := s.LatestCapacityEvidence(ctx, "global", "runpod", "vllm", "elastic", "", "L40S")
+	if err != nil || latest.ID != evidence.ID || latest.State != "available" {
+		t.Fatalf("capacity=%#v err=%v", latest, err)
+	}
+	if _, err = s.RecordCapacityEvidence(ctx, domain.CapacityEvidence{TenantID: "global", Provider: "runpod", Runtime: "vllm", ComputeMode: "elastic", State: "available", Source: "provider-api", EvidenceJSON: `{}`, ObservedAt: observed, ExpiresAt: observed.Add(25 * time.Hour)}); err == nil {
+		t.Fatal("unbounded capacity evidence was persisted")
+	}
+	if _, err = s.ExecContext(ctx, `UPDATE capacity_evidence SET expires_at=? WHERE id=?`, time.Now().UTC().Add(-time.Second).Format(time.RFC3339Nano), evidence.ID); err != nil {
+		t.Fatal(err)
+	}
+	latest, err = s.LatestCapacityEvidence(ctx, "global", "runpod", "vllm", "elastic", "", "L40S")
+	if err != nil || latest.State != "unknown" {
+		t.Fatalf("expired capacity remained live: %#v err=%v", latest, err)
 	}
 }
 
@@ -523,6 +580,24 @@ func TestScopedPrincipalAndExternalBudgetAreTenantSafe(t *testing.T) {
 	resolved, err := s.ResolveForTenant(ctx, "external-a", "prod")
 	if err != nil || len(resolved.Targets) != 2 {
 		t.Fatalf("external policy did not associate fallback target: targets=%#v err=%v", resolved.Targets, err)
+	}
+	evaluatedAt := time.Now().UTC()
+	selected, err := s.EvaluateOverflow(ctx, "external-a", deployment.ID, overflow.Signal{PrimaryHealthy: false}, true, evaluatedAt)
+	if err != nil || selected.Route != "external" || selected.Action != "overflow" {
+		t.Fatalf("selected=%#v err=%v", selected, err)
+	}
+	recovered, err := s.EvaluateOverflow(ctx, "external-a", deployment.ID, overflow.Signal{PrimaryHealthy: true}, true, evaluatedAt.Add(2*time.Minute))
+	if err != nil || recovered.Route != "primary" || recovered.Action != "recover" {
+		t.Fatalf("recovered=%#v err=%v", recovered, err)
+	}
+	for _, offset := range []time.Duration{3 * time.Minute, 4 * time.Minute} {
+		if held, holdErr := s.EvaluateOverflow(ctx, "external-a", deployment.ID, overflow.Signal{PrimaryHealthy: true}, true, evaluatedAt.Add(offset)); holdErr != nil || held.Action != "hold" {
+			t.Fatalf("steady hold=%#v err=%v", held, holdErr)
+		}
+	}
+	var decisions int
+	if err = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM overflow_decisions WHERE tenant_id='external-a' AND deployment_id=$1`, deployment.ID).Scan(&decisions); err != nil || decisions != 3 {
+		t.Fatalf("decisions=%d err=%v", decisions, err)
 	}
 	first, err := s.LeaseExternalBudget(ctx, "external-a", policy.ID, 4)
 	if err != nil || first.Requests != 4 || first.ReservedCostMicrousd != 400 {

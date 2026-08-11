@@ -1,11 +1,12 @@
 ---
 title: Governed external capacity
-description: Explicit, budgeted health fallback to OpenRouter or another OpenAI-compatible target.
+description: Explicit, budgeted health or queue overflow to an OpenAI-compatible external target.
 ---
 
 # Governed external capacity
 
-InferCrane can route to a registered external API only when all primary targets are unhealthy. This
+InferCrane can route to a registered external API when all primary targets are unhealthy or an
+explicit bounded queue policy is satisfied. This
 is emergency capacity, not a model marketplace: InferCrane does not resell access, select a model,
 or hide the external provider from the operator.
 
@@ -51,9 +52,35 @@ infercrane external inspect qwen-prod
 infercrane external inspect qwen-prod --output json
 ```
 
+For queue overflow, opt in to hysteresis and cooldown explicitly:
+
+```bash
+infercrane external configure qwen-prod \
+  --target openrouter-qwen \
+  --adapter openrouter \
+  --secret-reference SECRET_REFERENCE_ID \
+  --mode health_and_queue \
+  --queue-threshold 4 \
+  --breach-intervals 3 \
+  --recovery-intervals 3 \
+  --cooldown-seconds 60 \
+  --signal-max-age-seconds 30 \
+  --request-limit 100 \
+  --cost-limit-usd 10.00 \
+  --max-request-cost-usd 0.10 \
+  --acknowledge-external-data \
+  --enable
+```
+
+Missing or stale queue metrics never imply an empty queue. Consecutive observations and cooldown
+prevent route oscillation. Every selection, recovery, denial, reason change, and hysteresis-counter
+transition is persisted with the exact policy and signal snapshot. Identical steady-state holds are
+coalesced rather than writing an unbounded row on every health interval.
+
 ## Selection and budget behavior
 
-The reconciler publishes the external route only after every ordinary target is unhealthy. Before
+The reconciler publishes one external route after every ordinary target is unhealthy or after the
+configured queue breach persists for the required intervals. Before
 each external transmission, the gateway atomically consumes a request reservation and the configured
 worst-case cost reservation. Exhaustion returns an error before sending bytes.
 
@@ -73,7 +100,7 @@ reference.
 
 ## Current limits
 
-- Only explicit health fallback is implemented; weighted or semantic external routing is not.
+- Weighted, semantic, shadow, and request-duplicating external routing are not implemented.
 - Environment references are the only secret resolver in v0.3.
 - Provider prices are not fetched or fabricated.
 - Real OpenRouter billing qualification is deferred to the consolidated manual release gate.

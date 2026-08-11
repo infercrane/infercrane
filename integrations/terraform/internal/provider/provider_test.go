@@ -23,7 +23,7 @@ func TestProtocol6Schema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.Provider == nil || response.ResourceSchemas["infercrane_deployment"] == nil {
+	if response.Provider == nil || response.ResourceSchemas["infercrane_deployment"] == nil || response.ResourceSchemas["infercrane_slo_policy"] == nil {
 		t.Fatalf("incomplete provider schema: %#v", response)
 	}
 	for _, diagnostic := range response.Diagnostics {
@@ -66,6 +66,19 @@ func TestAccInterruptedCreateAdoptsLogicalDeployment(t *testing.T) {
 	})
 }
 
+func TestAccSLOPolicyCRUDAndImport(t *testing.T) {
+	fixture := newControlFixture(t)
+	defer fixture.Close()
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){"infercrane": providerserver.NewProtocol6WithError(New("test"))},
+		Steps: []resource.TestStep{
+			{Config: terraformSLOConfig(fixture.URL, 250), Check: resource.TestCheckResourceAttr("infercrane_slo_policy.qwen", "max_ttft_p95_ms", "250")},
+			{ResourceName: "infercrane_slo_policy.qwen", ImportState: true, ImportStateId: "qwen-prod", ImportStateVerify: true},
+			{Config: terraformSLOConfig(fixture.URL, 175), Check: resource.TestCheckResourceAttr("infercrane_slo_policy.qwen", "max_ttft_p95_ms", "175")},
+		},
+	})
+}
+
 func terraformConfig(endpoint, model string, max int) string {
 	return terraformConfigWithTimeout(endpoint, model, max, 5)
 }
@@ -89,6 +102,19 @@ resource "infercrane_deployment" "qwen" {
 `, endpoint, model, max, timeout)
 }
 
+func terraformSLOConfig(endpoint string, maxTTFT int) string {
+	return fmt.Sprintf(`
+provider "infercrane" {
+  endpoint = %q
+  api_key = "test-only"
+}
+resource "infercrane_slo_policy" "qwen" {
+  deployment = "qwen-prod"
+  max_ttft_p95_ms = %d
+}
+`, endpoint, maxTTFT)
+}
+
 type controlFixture struct {
 	*httptest.Server
 	mu                sync.Mutex
@@ -102,6 +128,7 @@ type controlFixture struct {
 	interruptFirst    bool
 	operationGets     int
 	logicalCreates    int
+	maxTTFT           *float64
 }
 
 func newControlFixture(t *testing.T) *controlFixture {
@@ -120,6 +147,24 @@ func (f *controlFixture) serve(t *testing.T, w http.ResponseWriter, r *http.Requ
 	}
 	path := strings.TrimPrefix(r.URL.Path, "/api/v1")
 	switch {
+	case r.Method == "PUT" && path == "/deployments/qwen-prod/slo-policy":
+		var body struct {
+			MaxTTFT float64 `json:"max_ttft_p95_ms"`
+		}
+		if json.NewDecoder(r.Body).Decode(&body) != nil {
+			t.Error("invalid SLO policy body")
+		}
+		f.maxTTFT = &body.MaxTTFT
+		_ = json.NewEncoder(w).Encode(map[string]any{"policy": map[string]any{"deployment_id": "dep-1", "max_ttft_p95_ms": body.MaxTTFT}})
+	case r.Method == "GET" && path == "/deployments/qwen-prod/slo-policy":
+		if f.maxTTFT == nil {
+			f.notFound(w)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"policy": map[string]any{"deployment_id": "dep-1", "max_ttft_p95_ms": *f.maxTTFT}})
+	case r.Method == "DELETE" && path == "/deployments/qwen-prod/slo-policy":
+		f.maxTTFT = nil
+		w.WriteHeader(http.StatusNoContent)
 	case r.Method == "POST" && path == "/deployments":
 		var body struct {
 			Model string `json:"model"`

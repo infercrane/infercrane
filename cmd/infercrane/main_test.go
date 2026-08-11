@@ -441,6 +441,8 @@ func TestInvalidOutputIsRejectedBeforeAnyControlPlaneRequest(t *testing.T) {
 		},
 		"doctor":       func() error { return doctorCommand(context.Background(), cfg, []string{"--output", "xml"}) },
 		"benchmark":    func() error { return benchmarkCommand(context.Background(), cfg, []string{"qwen", "--output", "xml"}) },
+		"recommend":    func() error { return recommendCommand(context.Background(), cfg, []string{"qwen", "--output", "xml"}) },
+		"slo":          func() error { return sloCommand(context.Background(), cfg, []string{"get", "qwen", "--output", "xml"}) },
 		"deployments":  func() error { return listDeployments(context.Background(), cfg, []string{"--output", "xml"}) },
 		"status":       func() error { return statusCommand(context.Background(), cfg, []string{"qwen", "--output", "xml"}) },
 		"orphans":      func() error { return orphanAPICommand(context.Background(), cfg, []string{"--output", "xml"}) },
@@ -540,6 +542,39 @@ func TestBenchmarkParsesFlagsAfterDeploymentName(t *testing.T) {
 	})
 	if err != nil || path != "/api/v1/deployments/qwen prod/benchmarks" || body["requests"] != float64(40) || body["concurrency"] != float64(4) || body["revision"] != "candidate" {
 		t.Fatalf("path=%q body=%#v err=%v", path, body, err)
+	}
+}
+
+func TestSLOAndRecommendationCommandsUseControlAPI(t *testing.T) {
+	var methods, paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		methods = append(methods, r.Method)
+		paths = append(paths, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodPut {
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"policy": body})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"recommendation": map[string]any{"status": "unknown", "reason": "missing benchmark", "algorithm_version": "recommendation-v1", "input_digest": strings.Repeat("a", 64), "missing": []string{"benchmark_evidence"}}})
+	}))
+	defer server.Close()
+	cfg := config.Config{ControlURL: server.URL, APIKey: "secret"}
+	if _, err := captureStdout(t, func() error {
+		return sloCommand(context.Background(), cfg, []string{"set", "qwen prod", "--ttft-p95", "250", "--output", "json"})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := captureStdout(t, func() error {
+		return recommendCommand(context.Background(), cfg, []string{"qwen prod", "--output", "json"})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(methods, ",") != "PUT,POST" || paths[0] != "/api/v1/deployments/qwen prod/slo-policy" || paths[1] != "/api/v1/deployments/qwen prod/recommendations" {
+		t.Fatalf("methods=%v paths=%v", methods, paths)
 	}
 }
 

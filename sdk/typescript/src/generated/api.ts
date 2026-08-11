@@ -78,6 +78,31 @@ export class ControlApi {
     return this.transport.request('GET', path) as Promise<ObjectList>;
   }
 
+  getSLOPolicy(name: string): Promise<Record<string, JsonValue>> {
+    const path = `/deployments/${encodeURIComponent(name)}/slo-policy`;
+    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+  }
+
+  setSLOPolicy(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = `/deployments/${encodeURIComponent(name)}/slo-policy`;
+    return this.transport.request('PUT', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  deleteSLOPolicy(name: string): Promise<void> {
+    const path = `/deployments/${encodeURIComponent(name)}/slo-policy`;
+    return this.transport.request('DELETE', path) as Promise<void>;
+  }
+
+  createRecommendation(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = `/deployments/${encodeURIComponent(name)}/recommendations`;
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  listRecommendations(name: string): Promise<ObjectList> {
+    const path = `/deployments/${encodeURIComponent(name)}/recommendations`;
+    return this.transport.request('GET', path) as Promise<ObjectList>;
+  }
+
   listRevisions(name: string): Promise<ObjectList> {
     const path = `/deployments/${encodeURIComponent(name)}/revisions`;
     return this.transport.request('GET', path) as Promise<ObjectList>;

@@ -66,7 +66,13 @@ func TestShellAccessibilityAndCredentialSafetyContract(t *testing.T) {
 		}
 	}
 	app, _ := fs.ReadFile(assets, "static/app.mjs")
-	if strings.Contains(string(app), "localStorage") || strings.Contains(string(app), "innerHTML") {
+	application := string(app)
+	if strings.Contains(application, "localStorage") || strings.Contains(application, "innerHTML") {
 		t.Fatal("application may not persist credentials or use unsafe HTML sinks")
+	}
+	for _, required := range []string{"/recommendations?limit=50", "/slo-policy", "Inference decision", "SLO policy", "Recommendations are advisory"} {
+		if !strings.Contains(application, required) {
+			t.Errorf("performance evidence UI is missing %q", required)
+		}
 	}
 }

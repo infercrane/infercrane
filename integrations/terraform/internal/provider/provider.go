@@ -55,7 +55,7 @@ func (p *inferCraneProvider) Configure(ctx context.Context, request provider.Con
 	response.DataSourceData, response.ResourceData = client, client
 }
 func (p *inferCraneProvider) Resources(context.Context) []func() resource.Resource {
-	return []func() resource.Resource{NewDeploymentResource}
+	return []func() resource.Resource{NewDeploymentResource, NewSLOPolicyResource}
 }
 func (p *inferCraneProvider) DataSources(context.Context) []func() datasource.DataSource { return nil }
 func invalidClientDiagnostic() diag.Diagnostic {

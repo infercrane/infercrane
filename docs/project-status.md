@@ -42,9 +42,10 @@ but lacks production qualification; **planned** is not a product capability.
 | Tiered developer qualification | Implemented | Fast provider contracts, isolated Docker recovery checks, paid-run locking, and CI evidence separate local correctness from real-cloud qualification. |
 | Capacity and runtime adapter contracts | Experimental | GPU/cache-aware deterministic placement exists; the first v0.1 operational composition is SkyPilot/RunPod elastic, RunPod Serverless, and vLLM. |
 | Provider capacity preflight | Experimental | Optional provider advisors persist available/constrained/unavailable/unknown evidence; RunPod secure-GPU stock is the first read-only implementation. |
+| Inference decisions and SLO policy | Experimental | Versioned deterministic recommendations persist canonical benchmark provenance, exact compatibility, missing signals and sourced cost constraints; autonomous apply is excluded. |
 | Scoped tenant identity and RBAC | Experimental | Role-bounded service-account scopes, hashed rotation/revocation credentials, audit attribution, and adversarial tenant isolation are wired. |
 | Reference-only secrets | Experimental | Environment references persist without values; additional production secret-manager resolvers remain planned. |
-| Governed external capacity | Experimental | Explicit health fallback, privacy acknowledgement, atomic request/cost reservations, OpenRouter, and no-replay streaming behavior are hermetically qualified; real billing evidence is deferred. |
+| Governed external capacity | Experimental | Explicit health/queue overflow, hysteresis, cooldown, privacy acknowledgement, atomic request/cost reservations, OpenRouter, and no-replay streaming behavior are hermetically qualified; real billing evidence is deferred. |
 | AWS EC2 BYOC | Experimental | Private-network, role-assumed, tag-owned, immutable-image elastic lifecycle passes Provider Contract V1 hermetically; real AWS evidence is deferred. |
 | SkyPilot RunPod provisioning | Experimental | Requires credentialed elastic lifecycle acceptance and soak tests. |
 | Production performance claims | Planned | Must be backed by reproducible real-vLLM benchmarks. |

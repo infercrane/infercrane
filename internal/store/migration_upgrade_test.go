@@ -99,7 +99,7 @@ func TestV03MigrationPreservesLegacyPermissionsWithoutEscalation(t *testing.T) {
 	if got := strings.Join(principal.Scopes, ","); got != want || authz.AllowedScoped(authz.Operator, principal.Scopes, authz.ManageExternal) {
 		t.Fatalf("legacy scopes=%q want=%q", got, want)
 	}
-	for _, table := range []string{"secret_references", "external_target_policies"} {
+	for _, table := range []string{"secret_references", "external_target_policies", "deployment_slo_policies", "inference_recommendations", "capacity_evidence", "overflow_states", "overflow_decisions"} {
 		var exists bool
 		if err = upgraded.QueryRowContext(ctx, `SELECT to_regclass($1) IS NOT NULL`, fmt.Sprintf("%s.%s", schema, table)).Scan(&exists); err != nil || !exists {
 			t.Fatalf("table %s exists=%t err=%v", table, exists, err)

@@ -11,6 +11,9 @@ const operation = await client.deploy({
   gpu: 'L40S',
 });
 await client.wait(operation.id, { timeoutMs: 900_000 });
+
+await client.setSloPolicy('qwen-prod', { max_ttft_p95_ms: 250 });
+const recommendation = await client.recommend('qwen-prod');
 ```
 
 Waiting is client-side only. A timeout or process exit leaves the durable operation running. See the

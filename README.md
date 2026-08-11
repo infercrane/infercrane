@@ -12,6 +12,7 @@ infercrane request qwen3-8b --message "Hello" --stream
 - No Kubernetes required
 - Deterministic Release Guard
 - Reproducible benchmarks
+- Evidence-based SLO recommendations
 - Explainable durable operations
 - Elastic and provider-native serverless compute
 
@@ -46,6 +47,9 @@ it does not introduce a hosted account service or duplicate control backend.
 The v0.6 candidate adds immutable custom OCI workload declarations and a digest-pinned SGLang
 profile through the same runtime contract. Their AWS EC2 combinations are simulated-qualified;
 real GPU behavior remains deferred.
+The v0.7 candidate adds deterministic SLO recommendations, expiring capacity evidence, and
+privacy/budget-governed health or queue overflow. Recommendations are advisory and never fabricate
+pricing, availability, or measurements.
 Registration is not real-provider proof: paid acceptance and soak testing remain explicitly
 incomplete until their evidence gates run.
 

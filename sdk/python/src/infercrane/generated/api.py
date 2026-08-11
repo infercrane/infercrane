@@ -71,6 +71,26 @@ class ControlAPI:
         path = f"/deployments/{quote(name, safe='')}/benchmarks"
         return cast(ObjectList, self._transport.request("GET", path))
 
+    def get_s_l_o_policy(self, name: str) -> dict[str, Any]:
+        path = f"/deployments/{quote(name, safe='')}/slo-policy"
+        return cast(dict[str, Any], self._transport.request("GET", path))
+
+    def set_s_l_o_policy(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = f"/deployments/{quote(name, safe='')}/slo-policy"
+        return cast(dict[str, Any], self._transport.request("PUT", path, body=body))
+
+    def delete_s_l_o_policy(self, name: str) -> None:
+        path = f"/deployments/{quote(name, safe='')}/slo-policy"
+        return cast(None, self._transport.request("DELETE", path))
+
+    def create_recommendation(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = f"/deployments/{quote(name, safe='')}/recommendations"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
+    def list_recommendations(self, name: str) -> ObjectList:
+        path = f"/deployments/{quote(name, safe='')}/recommendations"
+        return cast(ObjectList, self._transport.request("GET", path))
+
     def list_revisions(self, name: str) -> ObjectList:
         path = f"/deployments/{quote(name, safe='')}/revisions"
         return cast(ObjectList, self._transport.request("GET", path))

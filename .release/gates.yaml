@@ -28,6 +28,12 @@ milestone_gates:
     - sglang_runtime_conformance
     - runtime_compatibility_matrix
     - portable_runtime_api_sdk_and_spec_drift
+    - deterministic_recommendation_provenance
+    - slo_policy_fail_closed_evaluation
+    - capacity_evidence_freshness_and_compatibility
+    - hybrid_overflow_oscillation_and_budget_simulation
+    - recommendation_api_cli_sdk_dashboard_drift
+    - inference_decision_migration_and_tenant_isolation
   deferred_until_v1_manual_qualification:
     - runpod_elastic
     - runpod_serverless

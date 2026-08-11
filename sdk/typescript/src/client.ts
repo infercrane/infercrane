@@ -49,7 +49,7 @@ class Transport implements ApiTransport {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new Error(`request timed out after ${this.timeoutMs}ms`)), this.timeoutMs);
     try {
-      const headers: Record<string, string> = { Accept: 'application/json', Authorization: `Bearer ${this.apiKey}`, 'User-Agent': 'infercrane-typescript/0.6.0-rc.1' };
+      const headers: Record<string, string> = { Accept: 'application/json', Authorization: `Bearer ${this.apiKey}`, 'User-Agent': 'infercrane-typescript/0.7.0-rc.1' };
       if (options.body !== undefined) headers['Content-Type'] = 'application/json';
       if (options.idempotencyKey) headers['Idempotency-Key'] = options.idempotencyKey;
       const init: RequestInit = { method, headers, signal: controller.signal };
@@ -77,6 +77,7 @@ class Transport implements ApiTransport {
 
 export class InferCrane {
   readonly api: ControlApi;
+	private readonly transport: Transport;
   private readonly apiKey: string;
   private readonly gatewayUrl: string;
   private readonly timeoutMs: number;
@@ -95,7 +96,8 @@ export class InferCrane {
     this.timeoutMs = timeoutMs;
     this.pollIntervalMs = pollIntervalMs;
     this.fetcher = options.fetch ?? globalThis.fetch;
-    this.api = new ControlApi(new Transport(controlUrl(baseUrl), apiKey, timeoutMs, this.fetcher));
+	this.transport = new Transport(controlUrl(baseUrl), apiKey, timeoutMs, this.fetcher);
+	this.api = new ControlApi(this.transport);
   }
 
   async deploy(request: DeployRequest): Promise<Operation> {
@@ -136,8 +138,23 @@ export class InferCrane {
   async getDeployment(name: string): Promise<Deployment> { return (await this.api.getDeployment(name) as { deployment: Deployment }).deployment; }
   async delete(name: string, idempotencyKey = `sdk-delete-${randomUUID()}`): Promise<Operation> { return (await this.api.deleteDeployment(name, idempotencyKey) as { operation: Operation }).operation; }
 
+  async setSloPolicy(deployment: string, policy: { max_ttft_p95_ms?: number; max_latency_p95_ms?: number; max_error_rate?: number; min_output_tokens_second?: number; max_hourly_cost?: number }): Promise<Record<string, JsonValue>> {
+    if (!Object.keys(policy).length) throw new TypeError('at least one SLO threshold is required');
+    if (Object.values(policy).some((value) => value === undefined || !Number.isFinite(value) || value < 0) || (policy.max_error_rate ?? 0) > 1) throw new TypeError('SLO thresholds must be finite, nonnegative, and error rate cannot exceed 1');
+    return (await this.transport.request('PUT', `/deployments/${encodeURIComponent(deployment)}/slo-policy`, { body: policy as JsonValue }) as { policy: Record<string, JsonValue> }).policy;
+  }
+
+  async getSloPolicy(deployment: string): Promise<Record<string, JsonValue>> { return (await this.transport.request('GET', `/deployments/${encodeURIComponent(deployment)}/slo-policy`) as { policy: Record<string, JsonValue> }).policy; }
+  async deleteSloPolicy(deployment: string): Promise<void> { await this.transport.request('DELETE', `/deployments/${encodeURIComponent(deployment)}/slo-policy`); }
+
+  async recommend(deployment: string): Promise<Record<string, JsonValue>> {
+    return (await this.transport.request('POST', `/deployments/${encodeURIComponent(deployment)}/recommendations`, { body: {} }) as { recommendation: Record<string, JsonValue> }).recommendation;
+  }
+
+  async recommendations(deployment: string, limit = 20): Promise<Array<Record<string, JsonValue>>> { if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new TypeError('limit must be an integer between 1 and 100'); return (await this.transport.request('GET', `/deployments/${encodeURIComponent(deployment)}/recommendations?limit=${limit}`) as { data: Array<Record<string, JsonValue>> }).data; }
+
   async *streamChat(deployment: string, messages: Array<{ role: string; content: string }>, options: { signal?: AbortSignal; parameters?: Record<string, JsonValue> } = {}): AsyncGenerator<Record<string, JsonValue>> {
-    const init: RequestInit = { method: 'POST', headers: { Accept: 'text/event-stream', Authorization: `Bearer ${this.apiKey}`, 'Content-Type': 'application/json', 'User-Agent': 'infercrane-typescript/0.6.0-rc.1' }, body: JSON.stringify({ model: deployment, messages, stream: true, ...options.parameters }) };
+    const init: RequestInit = { method: 'POST', headers: { Accept: 'text/event-stream', Authorization: `Bearer ${this.apiKey}`, 'Content-Type': 'application/json', 'User-Agent': 'infercrane-typescript/0.7.0-rc.1' }, body: JSON.stringify({ model: deployment, messages, stream: true, ...options.parameters }) };
     if (options.signal) init.signal = options.signal;
     const response = await this.fetcher(`${this.gatewayUrl}/v1/chat/completions`, init);
     if (!response.ok) throw new ApiError(response.status, 'inference_error', await response.text());

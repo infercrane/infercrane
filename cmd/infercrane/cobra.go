@@ -71,6 +71,8 @@ func newRootCommand(ctx context.Context) *cobra.Command {
 		{use: "inspect DEPLOYMENT [flags]", short: "Show raw deployment and infrastructure details", group: "understand"},
 		{use: "explain [TOPIC] DEPLOYMENT [flags]", short: "Explain persisted operational decisions", group: "understand"},
 		{use: "benchmark DEPLOYMENT [flags]", short: "Run and persist a reproducible benchmark", group: "understand"},
+		{use: "recommend DEPLOYMENT [flags]", short: "Recommend a qualified configuration from persisted evidence", group: "understand"},
+		{use: "slo ACTION DEPLOYMENT [flags]", short: "Inspect or set deterministic inference SLO policy", group: "operate"},
 		{use: "operation ID | operation watch ID | operation cancel ID", short: "Inspect, resume, or cancel a durable operation", group: "understand"},
 		{use: "orphans [flags]", short: "List unmanaged provisioned resources", group: "understand"},
 		{use: "integrations [flags]", short: "Inspect registered and qualified integration capabilities", group: "understand"},
@@ -115,7 +117,7 @@ func addHelpFlags(command *cobra.Command, name string) {
 	boolFlag := func(flag, help string) { command.Flags().Bool(flag, false, help) }
 	intFlag := func(flag string, value int, help string) { command.Flags().Int(flag, value, help) }
 	switch name {
-	case "init", "doctor", "plan", "deploy", "apply", "request", "deployments", "status", "logs", "events", "inspect", "explain", "benchmark", "delete", "orphans", "operation", "integrations", "dashboard":
+	case "init", "doctor", "plan", "deploy", "apply", "request", "deployments", "status", "logs", "events", "inspect", "explain", "benchmark", "recommend", "slo", "delete", "orphans", "operation", "integrations", "dashboard":
 		stringFlag("output", "human", "output format: human or json")
 	}
 	switch name {
@@ -164,6 +166,29 @@ func addHelpFlags(command *cobra.Command, name string) {
 		intFlag("concurrency", 10, "concurrent requests")
 		intFlag("random-seed", 17, "reproduction seed")
 		stringFlag("revision", "active", "active, candidate, or revision ID")
+	case "recommend":
+		boolFlag("history", "list persisted recommendation history without evaluating")
+	case "slo":
+		stringFlag("ttft-p95", "", "maximum p95 time to first token in milliseconds")
+		stringFlag("latency-p95", "", "maximum p95 request latency in milliseconds")
+		stringFlag("error-rate", "", "maximum request error ratio from 0 to 1")
+		stringFlag("output-tokens-second", "", "minimum output-token throughput")
+		stringFlag("hourly-cost", "", "maximum sourced hourly cost")
+	case "external":
+		stringFlag("target", "", "attached external target name")
+		stringFlag("adapter", "openrouter", "external adapter")
+		stringFlag("secret-reference", "", "secret reference ID")
+		intFlag("request-limit", 0, "hard request reservation limit")
+		stringFlag("cost-limit-usd", "", "hard USD reservation budget")
+		stringFlag("max-request-cost-usd", "", "worst-case USD per request")
+		stringFlag("mode", "health", "health or health_and_queue")
+		stringFlag("queue-threshold", "", "waiting-request threshold")
+		intFlag("breach-intervals", 2, "consecutive breaches")
+		intFlag("recovery-intervals", 2, "consecutive recovery observations")
+		intFlag("cooldown-seconds", 60, "route-change cooldown")
+		intFlag("signal-max-age-seconds", 30, "maximum queue evidence age")
+		boolFlag("acknowledge-external-data", "acknowledge external data transmission")
+		boolFlag("enable", "enable policy")
 	case "operation":
 		stringFlag("wait-timeout", "", "stop watching locally without cancelling the operation")
 	}
@@ -180,6 +205,9 @@ func completionFor(command string) func(*cobra.Command, []string, string) ([]str
 		"events":    {"--output"},
 		"delete":    {"--plan", "--yes", "--wait", "--idempotency-key", "--output"},
 		"benchmark": {"--requests", "--concurrency", "--random-seed", "--revision", "--output"},
+		"recommend": {"--history", "--output"},
+		"slo":       {"--ttft-p95", "--latency-p95", "--error-rate", "--output-tokens-second", "--hourly-cost", "--output"},
+		"external":  {"--target", "--adapter", "--secret-reference", "--request-limit", "--cost-limit-usd", "--max-request-cost-usd", "--mode", "--queue-threshold", "--breach-intervals", "--recovery-intervals", "--cooldown-seconds", "--signal-max-age-seconds", "--acknowledge-external-data", "--enable", "--output"},
 		"doctor":    {"--cloud", "--serverless", "--output"},
 		"operation": {"--wait-timeout", "--output"},
 		"dashboard": {"--open", "--output"},
@@ -189,7 +217,7 @@ func completionFor(command string) func(*cobra.Command, []string, string) ([]str
 			return flags[command], cobra.ShellCompDirectiveNoFileComp
 		}
 		switch command {
-		case "request", "status", "logs", "events", "inspect", "explain", "benchmark", "delete", "route", "rollout":
+		case "request", "status", "logs", "events", "inspect", "explain", "benchmark", "recommend", "slo", "delete", "route", "rollout":
 			cfg, err := config.LoadClient()
 			if err != nil {
 				return nil, cobra.ShellCompDirectiveNoFileComp

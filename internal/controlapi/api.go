@@ -15,6 +15,7 @@ import (
 
 	"github.com/infercrane/infercrane/internal/authz"
 	"github.com/infercrane/infercrane/internal/benchmark"
+	"github.com/infercrane/infercrane/internal/decision"
 	"github.com/infercrane/infercrane/internal/doctor"
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/integration"
@@ -62,6 +63,15 @@ type Store interface {
 	RecordBenchmark(context.Context, domain.BenchmarkResult) (domain.BenchmarkResult, error)
 	BenchmarksForDeployment(context.Context, string, string, int) ([]domain.BenchmarkResult, error)
 }
+
+type decisionStore interface {
+	SetSLOPolicy(context.Context, string, string, domain.SLOPolicy) (domain.SLOPolicy, error)
+	SLOPolicy(context.Context, string, string) (domain.SLOPolicy, error)
+	DeleteSLOPolicy(context.Context, string, string) error
+	RecordInferenceRecommendation(context.Context, domain.InferenceRecommendation) (domain.InferenceRecommendation, error)
+	InferenceRecommendations(context.Context, string, string, int) ([]domain.InferenceRecommendation, error)
+	LatestCapacityEvidence(context.Context, string, string, string, string, string, string) (domain.CapacityEvidence, error)
+}
 type API struct {
 	Store         Store
 	APIKey        string
@@ -84,6 +94,11 @@ type BackendMetadata struct {
 }
 type identityKey struct{}
 
+func (a API) decisions() (decisionStore, bool) {
+	store, ok := a.Store.(decisionStore)
+	return store, ok
+}
+
 func (a API) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/operations/{id}", a.auth(authz.Read, a.operation))
@@ -100,6 +115,11 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/deployments/{name}/events", a.auth(authz.Read, a.deploymentEvents))
 	mux.HandleFunc("POST /api/v1/deployments/{name}/benchmarks", a.auth(authz.Deploy, a.runBenchmark))
 	mux.HandleFunc("GET /api/v1/deployments/{name}/benchmarks", a.auth(authz.Read, a.benchmarks))
+	mux.HandleFunc("GET /api/v1/deployments/{name}/slo-policy", a.auth(authz.Read, a.sloPolicy))
+	mux.HandleFunc("PUT /api/v1/deployments/{name}/slo-policy", a.auth(authz.Deploy, a.setSLOPolicy))
+	mux.HandleFunc("DELETE /api/v1/deployments/{name}/slo-policy", a.auth(authz.Deploy, a.deleteSLOPolicy))
+	mux.HandleFunc("POST /api/v1/deployments/{name}/recommendations", a.auth(authz.Deploy, a.recommendDeployment))
+	mux.HandleFunc("GET /api/v1/deployments/{name}/recommendations", a.auth(authz.Read, a.recommendations))
 	mux.HandleFunc("GET /api/v1/deployments/{name}/revisions", a.auth(authz.Read, a.revisions))
 	mux.HandleFunc("POST /api/v1/deployments/{name}/rollouts", a.auth(authz.Deploy, a.createRollout))
 	mux.HandleFunc("POST /api/v1/deployments/{name}/rollouts/guard/evaluate", a.auth(authz.Deploy, a.evaluateReleaseGuard))
@@ -380,6 +400,219 @@ func benchmarkResponse(row domain.BenchmarkResult) map[string]any {
 	return map[string]any{"id": row.ID, "deployment": row.DeploymentName, "revision_id": row.RevisionID, "model_artifact_id": row.ModelArtifactID, "model_identity": row.ModelIdentity, "runtime": row.Runtime, "runtime_version": row.RuntimeVersion, "runtime_configuration": json.RawMessage(row.RuntimeConfigJSON), "provider": row.Provider, "region": row.Region, "gpu": row.GPU, "gpu_count": row.GPUCount, "compute_mode": row.ComputeMode, "tool": row.Tool, "tool_version": row.ToolVersion, "workload": json.RawMessage(row.WorkloadJSON), "reproduction_command": row.ReproductionCommand, "request_count": row.RequestCount, "succeeded": row.Succeeded, "failed": row.Failed, "duration_seconds": row.DurationSeconds, "request_throughput": row.RequestThroughput, "output_token_throughput": row.OutputTokenThroughput, "ttft_p50_ms": row.TTFTP50MS, "ttft_p95_ms": row.TTFTP95MS, "tpot_p50_ms": row.TPOTP50MS, "tpot_p95_ms": row.TPOTP95MS, "latency_p50_ms": row.LatencyP50MS, "latency_p95_ms": row.LatencyP95MS, "goodput": row.Goodput, "gpu_utilization": row.GPUUtilization, "cost_metadata": json.RawMessage(row.CostMetadataJSON), "created_at": row.CreatedAt}
 }
 
+func (a API) sloPolicy(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.decisions()
+	if !ok {
+		writeError(w, 503, "decision_store_unavailable", "inference decision storage is unavailable")
+		return
+	}
+	principal := r.Context().Value(identityKey{}).(domain.Principal)
+	policy, err := store.SLOPolicy(r.Context(), principal.TenantID, r.PathValue("name"))
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, 404, "not_found", "SLO policy was not found")
+		return
+	}
+	if err != nil {
+		writeError(w, 500, "internal", "SLO policy lookup failed")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"policy": policy})
+}
+
+func (a API) setSLOPolicy(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.decisions()
+	if !ok {
+		writeError(w, 503, "decision_store_unavailable", "inference decision storage is unavailable")
+		return
+	}
+	principal := r.Context().Value(identityKey{}).(domain.Principal)
+	var policy domain.SLOPolicy
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&policy); err != nil {
+		writeError(w, 400, "invalid_request", "request body must be one strict JSON object")
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		writeError(w, 400, "invalid_request", "request body must contain exactly one JSON object")
+		return
+	}
+	if err := (decision.SLOPolicy{MaxTTFTP95MS: policy.MaxTTFTP95MS, MaxLatencyP95MS: policy.MaxLatencyP95MS, MaxErrorRate: policy.MaxErrorRate, MinOutputTokensSecond: policy.MinOutputTokensSecond, MaxHourlyCost: policy.MaxHourlyCost}).Validate(); err != nil {
+		writeError(w, 422, "invalid_slo_policy", err.Error())
+		return
+	}
+	persisted, err := store.SetSLOPolicy(r.Context(), principal.TenantID, r.PathValue("name"), policy)
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, 404, "not_found", "deployment was not found")
+		return
+	}
+	if err != nil {
+		writeError(w, 422, "invalid_slo_policy", err.Error())
+		return
+	}
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: principal.TenantID, Actor: principal.Name, Action: "slo_policy.update", ResourceType: "deployment", ResourceName: r.PathValue("name"), Outcome: "succeeded"})
+	writeJSON(w, 200, map[string]any{"policy": persisted})
+}
+
+func (a API) deleteSLOPolicy(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.decisions()
+	if !ok {
+		writeError(w, 503, "decision_store_unavailable", "inference decision storage is unavailable")
+		return
+	}
+	principal := r.Context().Value(identityKey{}).(domain.Principal)
+	if err := store.DeleteSLOPolicy(r.Context(), principal.TenantID, r.PathValue("name")); errors.Is(err, domain.ErrNotFound) {
+		writeError(w, 404, "not_found", "SLO policy was not found")
+		return
+	} else if err != nil {
+		writeError(w, 500, "internal", "SLO policy could not be deleted")
+		return
+	}
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: principal.TenantID, Actor: principal.Name, Action: "slo_policy.delete", ResourceType: "deployment", ResourceName: r.PathValue("name"), Outcome: "succeeded"})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a API) recommendDeployment(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.decisions()
+	if !ok {
+		writeError(w, 503, "decision_store_unavailable", "inference decision storage is unavailable")
+		return
+	}
+	var request map[string]json.RawMessage
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err := decoder.Decode(&request); err != nil || request == nil || len(request) != 0 {
+		writeError(w, 400, "invalid_request", "request body must be an empty JSON object")
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		writeError(w, 400, "invalid_request", "request body must contain exactly one JSON object")
+		return
+	}
+	principal := r.Context().Value(identityKey{}).(domain.Principal)
+	name := r.PathValue("name")
+	resolved, err := a.Store.ResolveForTenant(r.Context(), principal.TenantID, name)
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, 404, "not_found", "deployment was not found")
+		return
+	}
+	if err != nil {
+		writeError(w, 500, "internal", "deployment lookup failed")
+		return
+	}
+	policy, err := store.SLOPolicy(r.Context(), principal.TenantID, name)
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, 409, "slo_policy_required", "set an explicit SLO policy before requesting a recommendation")
+		return
+	}
+	if err != nil {
+		writeError(w, 500, "internal", "SLO policy lookup failed")
+		return
+	}
+	benchmarks, err := a.Store.BenchmarksForDeployment(r.Context(), principal.TenantID, name, 100)
+	if err != nil {
+		writeError(w, 500, "internal", "benchmark evidence lookup failed")
+		return
+	}
+	decisionPolicy := decision.SLOPolicy{MaxTTFTP95MS: policy.MaxTTFTP95MS, MaxLatencyP95MS: policy.MaxLatencyP95MS, MaxErrorRate: policy.MaxErrorRate, MinOutputTokensSecond: policy.MinOutputTokensSecond, MaxHourlyCost: policy.MaxHourlyCost}
+	activeModelIdentity := ""
+	if resolved.Deployment.ActiveRevisionID != "" {
+		if artifact, artifactErr := a.Store.ModelArtifactForRevision(r.Context(), principal.TenantID, resolved.Deployment.ActiveRevisionID); artifactErr == nil {
+			activeModelIdentity = artifact.ModelIdentity
+		}
+	}
+	baselineWorkload := ""
+	if len(benchmarks) > 0 {
+		baselineWorkload = canonicalJSON(benchmarks[0].WorkloadJSON)
+	}
+	evidence := make([]decision.Evidence, 0, len(benchmarks))
+	for _, benchmark := range benchmarks {
+		workload := canonicalJSON(benchmark.WorkloadJSON)
+		row := decision.Evidence{ID: benchmark.ID, ModelIdentity: benchmark.ModelIdentity, Runtime: benchmark.Runtime, RuntimeVersion: benchmark.RuntimeVersion, Provider: benchmark.Provider, Region: benchmark.Region, GPU: benchmark.GPU, ComputeMode: benchmark.ComputeMode, ComparableModel: activeModelIdentity != "" && benchmark.ModelIdentity == activeModelIdentity, ComparableWorkload: baselineWorkload != "" && workload == baselineWorkload, Requests: benchmark.RequestCount, Failed: benchmark.Failed, TTFTP95MS: benchmark.TTFTP95MS, LatencyP95MS: benchmark.LatencyP95MS, OutputTokensSecond: benchmark.OutputTokenThroughput, CreatedAt: benchmark.CreatedAt}
+		runtimeVersionQualified := false
+		for _, runtimeProfile := range a.Integrations.Runtimes {
+			if runtimeProfile.Runtime == row.Runtime && (runtimeProfile.EngineVersion == "" || runtimeProfile.EngineVersion == row.RuntimeVersion) {
+				runtimeVersionQualified = true
+				break
+			}
+		}
+		for _, compatibility := range a.Integrations.Compatibility {
+			if compatibility.Runtime == row.Runtime && compatibility.Cloud == row.Provider && string(compatibility.Mode) == row.ComputeMode {
+				row.QualificationState = string(compatibility.State)
+				row.Qualified = runtimeVersionQualified && (compatibility.State == integration.QualificationReal || compatibility.State == integration.QualificationLocal)
+				if !runtimeVersionQualified {
+					row.QualificationState = "runtime-version-mismatch"
+				}
+				break
+			}
+		}
+		if capacity, capacityErr := store.LatestCapacityEvidence(r.Context(), principal.TenantID, row.Provider, row.Runtime, row.ComputeMode, row.Region, row.GPU); capacityErr == nil {
+			row.CapacityState, row.CapacitySource = capacity.State, capacity.Source
+			row.CapacityObservedAt, row.CapacityExpiresAt = &capacity.ObservedAt, &capacity.ExpiresAt
+		}
+		var cost struct {
+			Available  bool       `json:"available"`
+			Hourly     *float64   `json:"hourly"`
+			Source     string     `json:"source"`
+			ObservedAt *time.Time `json:"observed_at"`
+		}
+		if json.Unmarshal([]byte(benchmark.CostMetadataJSON), &cost) == nil && cost.Available && cost.Hourly != nil && cost.Source != "" && cost.ObservedAt != nil {
+			row.HourlyCost, row.CostSource, row.CostObservedAt = cost.Hourly, cost.Source, cost.ObservedAt
+		}
+		evidence = append(evidence, row)
+	}
+	result := decision.Recommend(decisionPolicy, evidence)
+	missing, _ := json.Marshal(result.Missing)
+	candidates, _ := json.Marshal(result.Candidates)
+	snapshot, err := decision.Snapshot(decisionPolicy, evidence, result)
+	if err != nil {
+		writeError(w, 500, "internal", "recommendation evidence could not be canonicalized")
+		return
+	}
+	persisted, err := store.RecordInferenceRecommendation(r.Context(), domain.InferenceRecommendation{TenantID: principal.TenantID, DeploymentID: resolved.Deployment.ID, Status: result.Status, AlgorithmVersion: result.AlgorithmVersion, SelectedEvidenceID: result.SelectedEvidence, Reason: result.Reason, MissingJSON: string(missing), CandidatesJSON: string(candidates), InputSnapshotJSON: snapshot})
+	if err != nil {
+		writeError(w, 500, "internal", "recommendation could not be persisted")
+		return
+	}
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: principal.TenantID, Actor: principal.Name, Action: "recommendation.evaluate", ResourceType: "deployment", ResourceName: name, Outcome: "succeeded"})
+	writeJSON(w, 201, map[string]any{"recommendation": recommendationResponse(persisted)})
+}
+
+func (a API) recommendations(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.decisions()
+	if !ok {
+		writeError(w, 503, "decision_store_unavailable", "inference decision storage is unavailable")
+		return
+	}
+	principal := r.Context().Value(identityKey{}).(domain.Principal)
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	rows, err := store.InferenceRecommendations(r.Context(), principal.TenantID, r.PathValue("name"), limit)
+	if err != nil {
+		writeError(w, 500, "internal", "recommendation history lookup failed")
+		return
+	}
+	data := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		data = append(data, recommendationResponse(row))
+	}
+	writeJSON(w, 200, map[string]any{"data": data})
+}
+
+func recommendationResponse(row domain.InferenceRecommendation) map[string]any {
+	return map[string]any{"id": row.ID, "deployment_id": row.DeploymentID, "status": row.Status, "algorithm_version": row.AlgorithmVersion, "selected_evidence_id": row.SelectedEvidenceID, "reason": row.Reason, "missing": json.RawMessage(row.MissingJSON), "candidates": json.RawMessage(row.CandidatesJSON), "input_snapshot": json.RawMessage(row.InputSnapshotJSON), "input_digest": row.InputDigest, "created_at": row.CreatedAt}
+}
+
+func canonicalJSON(value string) string {
+	var decoded any
+	if json.Unmarshal([]byte(value), &decoded) != nil {
+		return ""
+	}
+	encoded, err := json.Marshal(decoded)
+	if err != nil {
+		return ""
+	}
+	return string(encoded)
+}
+
 func (a API) deleteDeployment(w http.ResponseWriter, r *http.Request) {
 	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
 	if key == "" || len(key) > 128 {
@@ -627,6 +860,10 @@ func (a API) createSecretReference(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
 		return
 	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "request body must contain exactly one JSON object")
+		return
+	}
 	item, err := a.Store.CreateSecretReference(r.Context(), actor.TenantID, request.Name, request.Resolver, request.Reference)
 	if errors.Is(err, domain.ErrConflict) {
 		writeError(w, http.StatusConflict, "conflict", err.Error())
@@ -680,19 +917,29 @@ func (a API) externalTargetPolicy(w http.ResponseWriter, r *http.Request) {
 func (a API) setExternalTargetPolicy(w http.ResponseWriter, r *http.Request) {
 	actor := r.Context().Value(identityKey{}).(domain.Principal)
 	var request struct {
-		TargetName             string `json:"target"`
-		Adapter                string `json:"adapter"`
-		SecretReferenceID      string `json:"secret_reference_id"`
-		Enabled                bool   `json:"enabled"`
-		PrivacyAcknowledged    bool   `json:"privacy_acknowledged"`
-		RequestLimit           int64  `json:"request_limit"`
-		CostLimitMicrousd      int64  `json:"cost_limit_microusd"`
-		MaxRequestCostMicrousd int64  `json:"max_request_cost_microusd"`
+		TargetName             string   `json:"target"`
+		Adapter                string   `json:"adapter"`
+		SecretReferenceID      string   `json:"secret_reference_id"`
+		Enabled                bool     `json:"enabled"`
+		PrivacyAcknowledged    bool     `json:"privacy_acknowledged"`
+		RequestLimit           int64    `json:"request_limit"`
+		CostLimitMicrousd      int64    `json:"cost_limit_microusd"`
+		MaxRequestCostMicrousd int64    `json:"max_request_cost_microusd"`
+		OverflowMode           string   `json:"overflow_mode"`
+		QueueThreshold         *float64 `json:"queue_threshold"`
+		BreachIntervals        int      `json:"breach_intervals"`
+		RecoveryIntervals      int      `json:"recovery_intervals"`
+		CooldownSeconds        int      `json:"cooldown_seconds"`
+		SignalMaxAgeSeconds    int      `json:"signal_max_age_seconds"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&request); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "request body must contain exactly one JSON object")
 		return
 	}
 	if request.Enabled && !request.PrivacyAcknowledged {
@@ -725,7 +972,7 @@ func (a API) setExternalTargetPolicy(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, "validation_failed", "target must match the external adapter")
 		return
 	}
-	policy, err := a.Store.SetExternalTargetPolicyForTenant(r.Context(), domain.ExternalTargetPolicy{TenantID: actor.TenantID, DeploymentID: resolved.Deployment.ID, TargetID: target.ID, Adapter: request.Adapter, SecretReferenceID: request.SecretReferenceID, Enabled: request.Enabled, PrivacyAcknowledged: request.PrivacyAcknowledged, RequestLimit: request.RequestLimit, CostLimitMicrousd: request.CostLimitMicrousd, MaxRequestCostMicrousd: request.MaxRequestCostMicrousd})
+	policy, err := a.Store.SetExternalTargetPolicyForTenant(r.Context(), domain.ExternalTargetPolicy{TenantID: actor.TenantID, DeploymentID: resolved.Deployment.ID, TargetID: target.ID, Adapter: request.Adapter, SecretReferenceID: request.SecretReferenceID, Enabled: request.Enabled, PrivacyAcknowledged: request.PrivacyAcknowledged, RequestLimit: request.RequestLimit, CostLimitMicrousd: request.CostLimitMicrousd, MaxRequestCostMicrousd: request.MaxRequestCostMicrousd, OverflowMode: request.OverflowMode, QueueThreshold: request.QueueThreshold, BreachIntervals: request.BreachIntervals, RecoveryIntervals: request.RecoveryIntervals, CooldownSeconds: request.CooldownSeconds, SignalMaxAgeSeconds: request.SignalMaxAgeSeconds})
 	if errors.Is(err, domain.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "not_found", "target or secret reference was not found")
 		return

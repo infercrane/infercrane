@@ -30,6 +30,39 @@ type fakeStore struct {
 	benchmarks      []domain.BenchmarkResult
 	replicas        []domain.Replica
 	activeOperation domain.Operation
+	sloPolicy       domain.SLOPolicy
+	recommendations []domain.InferenceRecommendation
+	capacity        domain.CapacityEvidence
+}
+
+func (f *fakeStore) SetSLOPolicy(_ context.Context, _, _ string, policy domain.SLOPolicy) (domain.SLOPolicy, error) {
+	f.sloPolicy = policy
+	return policy, f.err
+}
+func (f *fakeStore) SLOPolicy(context.Context, string, string) (domain.SLOPolicy, error) {
+	if f.sloPolicy.DeploymentID == "" && f.sloPolicy.MaxTTFTP95MS == nil && f.sloPolicy.MaxLatencyP95MS == nil && f.sloPolicy.MaxErrorRate == nil && f.sloPolicy.MinOutputTokensSecond == nil && f.sloPolicy.MaxHourlyCost == nil {
+		return domain.SLOPolicy{}, domain.ErrNotFound
+	}
+	return f.sloPolicy, f.err
+}
+func (f *fakeStore) DeleteSLOPolicy(context.Context, string, string) error {
+	f.sloPolicy = domain.SLOPolicy{}
+	return f.err
+}
+func (f *fakeStore) RecordInferenceRecommendation(_ context.Context, row domain.InferenceRecommendation) (domain.InferenceRecommendation, error) {
+	row.ID = "recommendation-1"
+	row.InputDigest = strings.Repeat("a", 64)
+	f.recommendations = append([]domain.InferenceRecommendation{row}, f.recommendations...)
+	return row, f.err
+}
+func (f *fakeStore) InferenceRecommendations(context.Context, string, string, int) ([]domain.InferenceRecommendation, error) {
+	return f.recommendations, f.err
+}
+func (f *fakeStore) LatestCapacityEvidence(context.Context, string, string, string, string, string, string) (domain.CapacityEvidence, error) {
+	if f.capacity.ID == "" {
+		return domain.CapacityEvidence{}, domain.ErrNotFound
+	}
+	return f.capacity, f.err
 }
 
 func (f *fakeStore) AuthenticatePrincipal(context.Context, string) (domain.Principal, error) {
@@ -223,6 +256,58 @@ func TestIntegrationsReturnsVersionedCapabilityEvidence(t *testing.T) {
 	for _, required := range []string{integration.ProviderContractV1, integration.RuntimeContractV1, "runpod-serverless", "real-runpod-serverless", "deferred"} {
 		if !strings.Contains(body, required) {
 			t.Fatalf("integration response missing %q: %s", required, body)
+		}
+	}
+}
+
+func TestRecommendationAPIUsesPersistedQualifiedEvidenceAndDisclosesCapacity(t *testing.T) {
+	maxTTFT, measured := 250.0, 200.0
+	observed := time.Now().UTC()
+	store := &fakeStore{resolved: domain.ResolvedDeployment{Deployment: domain.Deployment{ID: "deployment-1", TenantID: "global", Name: "qwen", ActiveRevisionID: "revision-1"}}, artifact: domain.ModelArtifact{ID: "artifact-1", ModelIdentity: "Qwen/Qwen3-8B@commit"}, capacity: domain.CapacityEvidence{ID: "capacity-1", State: "available", Source: "provider.stock", ObservedAt: observed, ExpiresAt: observed.Add(time.Minute)}, sloPolicy: domain.SLOPolicy{DeploymentID: "deployment-1", MaxTTFTP95MS: &maxTTFT}, benchmarks: []domain.BenchmarkResult{{ID: "benchmark-1", DeploymentID: "deployment-1", ModelIdentity: "Qwen/Qwen3-8B@commit", Runtime: "vllm", RuntimeVersion: support.DefaultRuntimeVersion, Provider: "runpod", GPU: "L40S", ComputeMode: "elastic", WorkloadJSON: `{"requests":100,"concurrency":1}`, RequestCount: 100, Succeeded: 100, TTFTP95MS: &measured, CostMetadataJSON: `{"available":false}`}}}
+	registry, err := integration.V06Catalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments/qwen/recommendations", strings.NewReader(`{}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret", Integrations: registry.Snapshot()}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"status":"recommended"`) || !strings.Contains(response.Body.String(), `"capacity_state":"available"`) || !strings.Contains(response.Body.String(), `"capacity_source":"provider.stock"`) || !strings.Contains(response.Body.String(), `"input_snapshot"`) {
+		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+	if len(store.recommendations) != 1 || store.recommendations[0].InputSnapshotJSON == "" {
+		t.Fatalf("recommendation not persisted: %#v", store.recommendations)
+	}
+}
+
+func TestRecommendationAPIRejectsInputAndUnlikeEvidence(t *testing.T) {
+	maxTTFT, measured := 250.0, 100.0
+	store := &fakeStore{resolved: domain.ResolvedDeployment{Deployment: domain.Deployment{ID: "deployment-1", Name: "qwen", ActiveRevisionID: "revision-1"}}, artifact: domain.ModelArtifact{ID: "artifact-1", ModelIdentity: "model@active"}, sloPolicy: domain.SLOPolicy{DeploymentID: "deployment-1", MaxTTFTP95MS: &maxTTFT}, benchmarks: []domain.BenchmarkResult{{ID: "benchmark-1", ModelIdentity: "model@other", Runtime: "vllm", Provider: "runpod", ComputeMode: "elastic", WorkloadJSON: `{}`, RequestCount: 10, TTFTP95MS: &measured}}}
+	registry, _ := integration.V06Catalog()
+	for _, body := range []string{`{"unexpected":true}`, `{}`, "{} {}"} {
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments/qwen/recommendations", strings.NewReader(body))
+		request.Header.Set("Authorization", "Bearer secret")
+		response := httptest.NewRecorder()
+		(API{Store: store, APIKey: "secret", Integrations: registry.Snapshot()}).Handler().ServeHTTP(response, request)
+		if body == `{}` {
+			if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"status":"unknown"`) || !strings.Contains(response.Body.String(), `comparable_model_artifact`) || !strings.Contains(response.Body.String(), `runtime-version-mismatch`) {
+				t.Fatalf("unlike evidence response=%d %s", response.Code, response.Body.String())
+			}
+		} else if response.Code != http.StatusBadRequest {
+			t.Fatalf("invalid body %q accepted: %d %s", body, response.Code, response.Body.String())
+		}
+	}
+}
+
+func TestSLOPolicyAPIRejectsUnknownAndEmptyInput(t *testing.T) {
+	store := &fakeStore{}
+	for _, body := range []string{`{"typo":1}`, `{}`, `{"max_ttft_p95_ms":1}{}`} {
+		request := httptest.NewRequest(http.MethodPut, "/api/v1/deployments/qwen/slo-policy", strings.NewReader(body))
+		request.Header.Set("Authorization", "Bearer secret")
+		response := httptest.NewRecorder()
+		(API{Store: store, APIKey: "secret"}).Handler().ServeHTTP(response, request)
+		if response.Code < 400 {
+			t.Fatalf("body %s accepted: %d %s", body, response.Code, response.Body.String())
 		}
 	}
 }
@@ -605,6 +690,14 @@ func TestExternalPolicyRequiresPrivacyAndHardBudgets(t *testing.T) {
 	(API{Store: store, APIKey: "secret"}).Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"id":"policy"`) {
 		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodPut, "/api/v1/deployments/qwen/external-policy", strings.NewReader(`{"target":"external","adapter":"openrouter","secret_reference_id":"secret","enabled":true,"privacy_acknowledged":true,"request_limit":10,"cost_limit_microusd":1000,"max_request_cost_microusd":100,"overflow_mode":"health_and_queue","queue_threshold":4,"breach_intervals":3,"recovery_intervals":2,"cooldown_seconds":60,"signal_max_age_seconds":30}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret"}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"overflow_mode":"health_and_queue"`) || !strings.Contains(response.Body.String(), `"queue_threshold":4`) {
+		t.Fatalf("queue policy response=%d %s", response.Code, response.Body.String())
 	}
 }
 

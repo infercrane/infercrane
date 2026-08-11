@@ -12,6 +12,7 @@ import (
 
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/integration"
+	"github.com/infercrane/infercrane/internal/overflow"
 	"github.com/infercrane/infercrane/internal/provision"
 	"github.com/infercrane/infercrane/internal/router"
 	"github.com/infercrane/infercrane/internal/routes"
@@ -33,6 +34,13 @@ type ServerlessStatus interface {
 type ExternalFallback interface {
 	Owns(string) bool
 	Resolve(context.Context, domain.Deployment, []domain.Target) (routes.Snapshot, error)
+}
+type HybridFallback interface {
+	OverflowMode(context.Context, domain.Deployment) (string, error)
+	ResolveHybrid(context.Context, domain.Deployment, []domain.Target, overflow.Signal, time.Time) (routes.Snapshot, overflow.Decision, error)
+}
+type QueueSignals interface {
+	Waiting(context.Context, string) (float64, error)
 }
 
 // DirectTargetBackend describes a provider-native endpoint that bypasses the
@@ -56,6 +64,7 @@ type Reconciler struct {
 	Logger           *slog.Logger
 	DirectTargets    map[string]DirectTargetBackend
 	ExternalFallback ExternalFallback
+	QueueSignals     QueueSignals
 }
 
 func (r *Reconciler) Run(ctx context.Context) error {
@@ -175,6 +184,37 @@ func (r *Reconciler) Once(ctx context.Context) error {
 			if target.Health != health {
 				_ = r.Store.SetTargetHealth(ctx, target.ID, health)
 				_ = r.Store.Event(ctx, d.ID, target.ID, "replica_"+health, "Target "+target.Name+" became "+health, "")
+			}
+		}
+		if hybrid, ok := r.ExternalFallback.(HybridFallback); ok {
+			mode, modeErr := hybrid.OverflowMode(ctx, d)
+			var waiting *float64
+			observedAt := time.Time{}
+			if modeErr == nil && mode == "health_and_queue" && r.QueueSignals != nil {
+				if value, signalErr := r.QueueSignals.Waiting(ctx, d.ID); signalErr == nil {
+					waiting = &value
+					observedAt = time.Now().UTC()
+				}
+			}
+			if modeErr == nil {
+				fallback, decision, hybridErr := hybrid.ResolveHybrid(ctx, d, resolved.Targets, overflow.Signal{PrimaryHealthy: len(healthy) > 0, Waiting: waiting, ObservedAt: observedAt}, time.Now().UTC())
+				if hybridErr == nil && decision.Route == "external" {
+					r.Routes.Put(fallback)
+					_ = r.Store.SetDeploymentState(ctx, d.ID, "degraded")
+					if decision.Action == "overflow" {
+						_ = r.Store.Event(ctx, d.ID, fallback.TargetID, "external_overflow_selected", decision.Reason, "")
+					}
+					continue
+				}
+				if hybridErr == nil && decision.Action == "recover" {
+					_ = r.Store.Event(ctx, d.ID, "", "external_overflow_recovered", decision.Reason, "")
+				}
+				if hybridErr == nil && decision.Route == "unavailable" && len(healthy) == 0 {
+					r.Routes.RemoveForTenant(d.TenantID, d.Name)
+					_ = r.Store.SetDeploymentState(ctx, d.ID, "unhealthy")
+					_ = r.Store.Event(ctx, d.ID, "", "external_overflow_denied", decision.Reason, "")
+					continue
+				}
 			}
 		}
 		if len(healthy) == 0 {

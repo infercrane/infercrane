@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import os
 import time
 import uuid
 from collections.abc import AsyncIterator, Iterator
 from typing import Any
 from urllib.error import HTTPError, URLError
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from .errors import APIError, OperationCancelled, OperationFailed, OperationTimeout, StreamError
@@ -33,7 +35,7 @@ class _Transport:
 
     def request(self, method: str, path: str, *, body: Any | None = None, idempotency_key: str | None = None) -> Any:
         payload = None if body is None else json.dumps(body, separators=(",", ":")).encode()
-        headers = {"Accept": "application/json", "Authorization": f"Bearer {self.api_key}", "User-Agent": "infercrane-python/0.6.0rc1"}
+        headers = {"Accept": "application/json", "Authorization": f"Bearer {self.api_key}", "User-Agent": "infercrane-python/0.7.0rc1"}
         if payload is not None:
             headers["Content-Type"] = "application/json"
         if idempotency_key:
@@ -112,9 +114,31 @@ class InferCrane:
         result = self.api.delete_deployment(name, idempotency_key=idempotency_key or f"sdk-delete-{uuid.uuid4()}")
         return Operation.from_dict(result["operation"])
 
+    def set_slo_policy(self, deployment: str, **thresholds: float) -> dict[str, Any]:
+        allowed = {"max_ttft_p95_ms", "max_latency_p95_ms", "max_error_rate", "min_output_tokens_second", "max_hourly_cost"}
+        if not thresholds or set(thresholds) - allowed:
+            raise ValueError("provide only supported SLO thresholds")
+        if any(not math.isfinite(value) or value < 0 for value in thresholds.values()) or thresholds.get("max_error_rate", 0) > 1:
+            raise ValueError("SLO thresholds must be finite, nonnegative, and error rate cannot exceed 1")
+        return self._transport.request("PUT", f"/deployments/{quote(deployment, safe='')}/slo-policy", body=thresholds)["policy"]
+
+    def get_slo_policy(self, deployment: str) -> dict[str, Any]:
+        return self._transport.request("GET", f"/deployments/{quote(deployment, safe='')}/slo-policy")["policy"]
+
+    def delete_slo_policy(self, deployment: str) -> None:
+        self._transport.request("DELETE", f"/deployments/{quote(deployment, safe='')}/slo-policy")
+
+    def recommend(self, deployment: str) -> dict[str, Any]:
+        return self._transport.request("POST", f"/deployments/{quote(deployment, safe='')}/recommendations", body={})["recommendation"]
+
+    def recommendations(self, deployment: str, *, limit: int = 20) -> list[dict[str, Any]]:
+        if limit < 1 or limit > 100:
+            raise ValueError("limit must be between 1 and 100")
+        return self._transport.request("GET", f"/deployments/{quote(deployment, safe='')}/recommendations?limit={limit}")["data"]
+
     def stream_chat(self, deployment: str, messages: list[dict[str, str]], **parameters: Any) -> Iterator[dict[str, Any]]:
         payload = {"model": deployment, "messages": messages, "stream": True, **parameters}
-        request = Request(self.gateway_url + "/v1/chat/completions", data=json.dumps(payload, separators=(",", ":")).encode(), headers={"Accept": "text/event-stream", "Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json", "User-Agent": "infercrane-python/0.6.0rc1"}, method="POST")
+        request = Request(self.gateway_url + "/v1/chat/completions", data=json.dumps(payload, separators=(",", ":")).encode(), headers={"Accept": "text/event-stream", "Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json", "User-Agent": "infercrane-python/0.7.0rc1"}, method="POST")
         try:
             response = urlopen(request, timeout=self.timeout)
         except HTTPError as error:
@@ -150,6 +174,21 @@ class AsyncInferCrane:
 
     async def cancel(self, operation_id: str) -> None:
         await asyncio.to_thread(self._sync.cancel, operation_id)
+
+    async def set_slo_policy(self, deployment: str, **thresholds: float) -> dict[str, Any]:
+        return await asyncio.to_thread(self._sync.set_slo_policy, deployment, **thresholds)
+
+    async def get_slo_policy(self, deployment: str) -> dict[str, Any]:
+        return await asyncio.to_thread(self._sync.get_slo_policy, deployment)
+
+    async def delete_slo_policy(self, deployment: str) -> None:
+        await asyncio.to_thread(self._sync.delete_slo_policy, deployment)
+
+    async def recommend(self, deployment: str) -> dict[str, Any]:
+        return await asyncio.to_thread(self._sync.recommend, deployment)
+
+    async def recommendations(self, deployment: str, *, limit: int = 20) -> list[dict[str, Any]]:
+        return await asyncio.to_thread(self._sync.recommendations, deployment, limit=limit)
 
     async def stream_chat(self, deployment: str, messages: list[dict[str, str]], **parameters: Any) -> AsyncIterator[dict[str, Any]]:
         iterator = self._sync.stream_chat(deployment, messages, **parameters)

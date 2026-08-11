@@ -355,3 +355,20 @@ infercrane external inspect qwen-prod --output json
 
 See [Governed external capacity](/features/external-capacity) for transmission and reservation
 semantics.
+
+## SLO policy and recommendations
+
+Define explicit fail-closed thresholds, then evaluate persisted benchmark evidence. Recommendations
+are advisory and never mutate the deployment.
+
+```bash
+infercrane slo set qwen-prod --ttft-p95 250 --error-rate 0.01
+infercrane slo get qwen-prod --output json
+infercrane recommend qwen-prod
+infercrane recommend qwen-prod --history --output json
+infercrane slo delete qwen-prod
+```
+
+`recommended` identifies a qualified candidate satisfying the policy. `no_match` means measured
+candidates violate it. `unknown` means required evidence is missing. See
+[Inference decisions](/features/inference-decisions).
