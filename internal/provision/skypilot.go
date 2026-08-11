@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/infercrane/infercrane/internal/runtimecontract"
 	"github.com/infercrane/infercrane/internal/support"
 	"gopkg.in/yaml.v3"
 )
@@ -35,6 +36,7 @@ type ReplicaSpec struct {
 	RequestID                                                      string
 	RuntimeArgs                                                    []string
 	Port                                                           int
+	Workload                                                       runtimecontract.Workload
 }
 type ProviderHandle struct{ RequestID, ResourceID, ExternalKey string }
 type Observation struct {
@@ -82,6 +84,12 @@ func (s SkyPilot) Handle(externalKey string) ProviderHandle {
 func (s SkyPilot) EnsureReplica(ctx context.Context, spec ReplicaSpec) (ProviderHandle, error) {
 	if spec.ExternalKey == "" || spec.Model == "" || spec.Cloud == "" || spec.GPU == "" {
 		return ProviderHandle{}, errors.New("external key, model, cloud, and GPU are required")
+	}
+	if !spec.Workload.Empty() {
+		if err := spec.Workload.Validate(); err != nil {
+			return ProviderHandle{}, fmt.Errorf("%w: %v", ErrInvalidReplicaSpec, err)
+		}
+		spec.Port = spec.Workload.Port
 	}
 	if spec.Port == 0 {
 		spec.Port = 8000
@@ -133,7 +141,12 @@ func (s SkyPilot) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provider
 			runtimeImage = defaultRunPodVLLMImage
 		}
 	}
-	task := map[string]any{"resources": map[string]any{"infra": infrastructure(spec.Cloud, spec.Region), "accelerators": spec.GPU, "image_id": "docker:" + runtimeImage, "ports": []int{spec.Port}}, "run": runCommand(spec.Model, spec.ModelRevision, spec.Port, spec.RuntimeArgs)}
+	run := runCommand(spec.Model, spec.ModelRevision, spec.Port, spec.RuntimeArgs)
+	if !spec.Workload.Empty() {
+		runtimeImage = spec.Workload.Image
+		run = workloadCommand(spec.Workload.Command, spec.Model, spec.ModelRevision, spec.Port, spec.RuntimeArgs)
+	}
+	task := map[string]any{"resources": map[string]any{"infra": infrastructure(spec.Cloud, spec.Region), "accelerators": spec.GPU, "image_id": "docker:" + runtimeImage, "ports": []int{spec.Port}}, "run": run}
 	task["secrets"] = map[string]any{"INFERCRANE_WORKER_API_KEY": nil}
 	path, cleanup, err := writeTask(task)
 	if err != nil {
@@ -252,6 +265,20 @@ func runCommand(model, revision string, port int, runtimeArgs []string) string {
 	// without installing that package. Disable it so huggingface_hub uses its
 	// supported hf_xet/HTTP transfer path instead of failing before model load.
 	return fmt.Sprintf(`unset HF_HUB_ENABLE_HF_TRANSFER; vllm serve %s --host 0.0.0.0 --port %d --served-model-name %s --api-key "$INFERCRANE_WORKER_API_KEY" %s`, shellQuote(model), port, shellQuote(model), strings.Join(args, " "))
+}
+func workloadCommand(command []string, model, revision string, port int, runtimeArgs []string) string {
+	values := append(append([]string(nil), command...), runtimeArgs...)
+	for i, value := range values {
+		if value == "${WORKER_API_KEY}" {
+			values[i] = `"$INFERCRANE_WORKER_API_KEY"`
+			continue
+		}
+		value = strings.ReplaceAll(value, "${MODEL}", model)
+		value = strings.ReplaceAll(value, "${MODEL_REVISION}", revision)
+		value = strings.ReplaceAll(value, "${PORT}", fmt.Sprint(port))
+		values[i] = shellQuote(value)
+	}
+	return "exec " + strings.Join(values, " ")
 }
 func shellQuote(value string) string { return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'" }
 func defaultString(value, fallback string) string {

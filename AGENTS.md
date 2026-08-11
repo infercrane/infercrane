@@ -5,7 +5,7 @@ authoritative knowledge is routed through [docs/index.mdx](docs/index.mdx).
 
 ## Product
 
-InferCrane is a production-oriented Go control plane and OpenAI-compatible gateway for vLLM.
+InferCrane is a production-oriented Go control plane and OpenAI-compatible gateway for qualified inference runtimes.
 PostgreSQL is the source of truth. Each gateway replica supervises instance-local upstream
 vLLM Router processes. Development fakes are never production substitutes.
 

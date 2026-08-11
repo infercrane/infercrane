@@ -1,9 +1,11 @@
 package spec
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 
+	"github.com/infercrane/infercrane/internal/runtimecontract"
 	"github.com/infercrane/infercrane/internal/support"
 	"gopkg.in/yaml.v3"
 )
@@ -15,9 +17,10 @@ type Deployment struct {
 		Revision string `yaml:"revision"`
 	} `yaml:"model"`
 	Runtime struct {
-		Engine  string   `yaml:"engine"`
-		Version string   `yaml:"version"`
-		Args    []string `yaml:"args"`
+		Engine   string                   `yaml:"engine"`
+		Version  string                   `yaml:"version"`
+		Args     []string                 `yaml:"args"`
+		Workload runtimecontract.Workload `yaml:"workload"`
 	} `yaml:"runtime"`
 	Compute struct {
 		Mode string `yaml:"mode"`
@@ -44,12 +47,15 @@ func Load(path string) (Deployment, error) {
 		return Deployment{}, fmt.Errorf("read deployment file: %w", err)
 	}
 	var out Deployment
-	if err = yaml.Unmarshal(data, &out); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err = decoder.Decode(&out); err != nil {
 		return out, fmt.Errorf("parse deployment file: %w", err)
 	}
 	if out.Runtime.Engine == "" {
 		out.Runtime.Engine = "vllm"
 	}
+	out.Runtime.Workload = support.NormalizeWorkload(out.Runtime.Engine, out.Runtime.Workload)
 	if out.Compute.Mode == "" {
 		out.Compute.Mode = "elastic"
 	}
@@ -68,11 +74,22 @@ func Load(path string) (Deployment, error) {
 	if out.Name == "" || out.Model.ID == "" || out.Resources.GPU == "" || out.Provider.Cloud == "" {
 		return out, fmt.Errorf("name, model.id, resources.gpu, and provider.cloud are required")
 	}
-	if err := support.V03().Validate(out.Runtime.Engine, out.Provider.Cloud, out.Compute.Mode); err != nil {
+	if err := support.V06().Validate(out.Runtime.Engine, out.Provider.Cloud, out.Compute.Mode); err != nil {
 		return out, fmt.Errorf("support policy: %w", err)
 	}
 	if out.Provider.Cloud == "aws" && out.Provider.Region == "" {
 		return out, fmt.Errorf("AWS BYOC requires provider.region")
+	}
+	if out.Runtime.Engine == "custom-oci" && out.Runtime.Workload.Empty() {
+		return out, fmt.Errorf("runtime.workload is required for custom-oci")
+	}
+	if !out.Runtime.Workload.Empty() {
+		if err := out.Runtime.Workload.Validate(); err != nil {
+			return out, fmt.Errorf("runtime.workload: %w", err)
+		}
+		if out.Compute.Mode != "elastic" {
+			return out, fmt.Errorf("custom OCI workloads require compute.mode elastic")
+		}
 	}
 	if out.Scaling.MaxReplicas < out.Scaling.MinReplicas {
 		return out, fmt.Errorf("scaling.max_replicas must be >= scaling.min_replicas")

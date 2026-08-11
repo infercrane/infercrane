@@ -15,7 +15,11 @@ fi
 
 report=$(
   cd "$root/integrations/terraform"
-  go run golang.org/x/tools/cmd/deadcode@v0.48.0 -test ./... github.com/infercrane/infercrane/internal/controlclient
+  # The Terraform module imports persisted domain DTOs through controlclient.
+  # Runtime workload validation methods are exercised by the root control
+  # plane, but are intentionally not called by this API-only integration.
+  go run golang.org/x/tools/cmd/deadcode@v0.48.0 -test ./... github.com/infercrane/infercrane/internal/controlclient |
+    grep -v '/internal/runtimecontract/' || true
 )
 if [ -n "$report" ]; then
   echo "Unreachable Terraform integration functions detected:" >&2

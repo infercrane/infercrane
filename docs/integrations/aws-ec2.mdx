@@ -44,6 +44,11 @@ export INFERCRANE_AWS_WORKER_SECRET_ARN='arn:aws:secretsmanager:eu-central-1:123
 export INFERCRANE_AWS_IMAGE_DIGEST='vllm/vllm-openai@sha256:REPLACE_WITH_QUALIFIED_DIGEST'
 ```
 
+`INFERCRANE_AWS_IMAGE_DIGEST` is the configured vLLM default and remains required for the adapter's
+complete startup configuration. An SGLang or custom OCI revision supplies its own immutable image
+and argv; the EC2 adapter uses that revision workload instead of the vLLM default. It still uses the
+same private network, instance profile, worker secret and ownership tags.
+
 Validate role assumption without creating a resource:
 
 ```bash
@@ -71,6 +76,12 @@ infercrane deploy Qwen/Qwen3-8B \
 
 Closing the terminal does not stop provisioning. Resume with the operation ID printed by `deploy`.
 Deletion terminates only instances carrying InferCrane ownership tags and the persisted replica key.
+
+For the simulated v0.6 portable-runtime path, apply
+[`examples/sglang.yaml`](https://github.com/infercrane/infercrane/blob/main/examples/sglang.yaml) or
+replace the placeholder image in
+[`examples/custom-oci.yaml`](https://github.com/infercrane/infercrane/blob/main/examples/custom-oci.yaml).
+Real GPU compatibility remains a deferred v1 manual gate.
 
 ## Security and accounting behavior
 

@@ -85,6 +85,9 @@ func (a AWSEC2) Handle(externalKey string) ProviderHandle {
 }
 
 func (a AWSEC2) EnsureReplica(ctx context.Context, spec ReplicaSpec) (ProviderHandle, error) {
+	if !spec.Workload.Empty() {
+		spec.Port = spec.Workload.Port
+	}
 	if err := a.validate(spec); err != nil {
 		return ProviderHandle{}, fmt.Errorf("%w: %v", ErrInvalidReplicaSpec, err)
 	}
@@ -192,7 +195,11 @@ func (a AWSEC2) validate(spec ReplicaSpec) error {
 	if spec.GPU != a.GPU {
 		return fmt.Errorf("configured AWS instance type %s is qualified for GPU %s, not %s", a.InstanceType, a.GPU, spec.GPU)
 	}
-	if !strings.Contains(a.ImageDigest, "@sha256:") {
+	if !spec.Workload.Empty() {
+		if err := spec.Workload.Validate(); err != nil {
+			return fmt.Errorf("portable workload: %w", err)
+		}
+	} else if !strings.Contains(a.ImageDigest, "@sha256:") {
 		return errors.New("AWS workload image must be pinned by sha256 digest")
 	}
 	return nil
@@ -291,6 +298,23 @@ func (a AWSEC2) clientToken(externalKey string) string {
 }
 
 func (a AWSEC2) userData(spec ReplicaSpec, port int) string {
+	if !spec.Workload.Empty() {
+		args := append(append([]string(nil), spec.Workload.Command...), spec.RuntimeArgs...)
+		quoted := make([]string, len(args))
+		for i, arg := range args {
+			switch arg {
+			case "${WORKER_API_KEY}":
+				quoted[i] = `"$worker_key"`
+			default:
+				arg = strings.ReplaceAll(arg, "${MODEL}", spec.Model)
+				arg = strings.ReplaceAll(arg, "${MODEL_REVISION}", spec.ModelRevision)
+				arg = strings.ReplaceAll(arg, "${PORT}", fmt.Sprint(port))
+				quoted[i] = shellQuote(arg)
+			}
+		}
+		image := spec.Workload.Image
+		return "#!/bin/sh\nset -eu\nworker_key=$(aws secretsmanager get-secret-value --region " + shellQuote(a.Region) + " --secret-id " + shellQuote(a.WorkerSecretARN) + " --query SecretString --output text)\ndocker pull " + shellQuote(image) + "\ndocker run -d --restart=unless-stopped --gpus all -e INFERCRANE_WORKER_API_KEY=\"$worker_key\" -p " + fmt.Sprintf("%d:%d", port, port) + " " + shellQuote(image) + " " + strings.Join(quoted, " ") + "\n"
+	}
 	args := []string{"--model", spec.Model, "--port", fmt.Sprint(port), "--api-key", "$worker_key"}
 	if spec.ModelRevision != "" {
 		args = append(args, "--revision", spec.ModelRevision)

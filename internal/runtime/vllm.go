@@ -9,14 +9,18 @@ import (
 	"time"
 )
 
-type VLLM struct {
+// OpenAI inspects the narrow HTTP readiness and model-identity contract shared
+// by qualified runtimes. The VLLM alias preserves source compatibility.
+type OpenAI struct {
 	Client *http.Client
 	APIKey string
 }
 
+type VLLM = OpenAI
+
 var defaultClient = &http.Client{Transport: &http.Transport{MaxIdleConns: 256, MaxIdleConnsPerHost: 32, IdleConnTimeout: 90 * time.Second}}
 
-func (v VLLM) Inspect(ctx context.Context, baseURL string) (bool, map[string]struct{}) {
+func (v OpenAI) Inspect(ctx context.Context, baseURL string) (bool, map[string]struct{}) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	client := v.Client

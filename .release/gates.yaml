@@ -23,6 +23,11 @@ milestone_gates:
     - embedded_dashboard_security_and_structure
     - authenticated_dashboard_docker_smoke
     - dashboard_responsive_accessibility_contract
+    - immutable_oci_workload_validation
+    - portable_runtime_provider_translation
+    - sglang_runtime_conformance
+    - runtime_compatibility_matrix
+    - portable_runtime_api_sdk_and_spec_drift
   deferred_until_v1_manual_qualification:
     - runpod_elastic
     - runpod_serverless

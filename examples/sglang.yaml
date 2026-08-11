@@ -1,0 +1,19 @@
+name: qwen-sglang
+model:
+  id: Qwen/Qwen3-8B
+  revision: main
+runtime:
+  engine: sglang
+  version: 0.5.12
+compute:
+  mode: elastic
+provider:
+  cloud: aws
+  region: eu-central-1
+resources:
+  gpu: L40S
+scaling:
+  min_replicas: 1
+  max_replicas: 1
+routing:
+  strategy: round-robin

@@ -357,6 +357,20 @@ func TestReplicaBackendsResolveByCloudRuntimeAndDurableName(t *testing.T) {
 	}
 }
 
+func TestReplicaBackendsAllowOneProviderAdapterToLaunchMultipleRuntimes(t *testing.T) {
+	provider := &fakeReplicaProvider{}
+	registry, err := NewReplicaBackends(
+		ReplicaBackend{Name: "adapter-a", Cloud: "cloud-a", Runtime: "vllm", Profile: testElasticProfile("adapter-a", "cloud-a"), Provider: provider},
+		ReplicaBackend{Name: "adapter-a", Cloud: "cloud-a", Runtime: "sglang", Profile: testElasticProfile("adapter-a", "cloud-a"), Provider: provider},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if backend, lookupErr := registry.ForCloud("cloud-a", "sglang"); lookupErr != nil || backend.Provider != provider {
+		t.Fatalf("backend=%#v err=%v", backend, lookupErr)
+	}
+}
+
 func TestReplicaBackendsRejectAmbiguousRegistrations(t *testing.T) {
 	provider := &fakeReplicaProvider{}
 	_, err := NewReplicaBackends(

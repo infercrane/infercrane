@@ -102,7 +102,8 @@
         "group": "DEPLOY",
         "pages": [
           "deployment-spec",
-          "features/model-artifacts",
+        "features/model-artifacts",
+        "features/custom-oci",
           "features/provisioning",
           "features/gateway",
           "features/revisions"
@@ -134,7 +135,8 @@
           "integrations/github-actions",
           "architecture/provider-contract",
           "architecture/runtime-contract",
-          "integrations/vllm",
+        "integrations/vllm",
+        "integrations/sglang",
           "integrations/runpod",
           "integrations/aws-ec2",
           "integrations/aiperf",
@@ -181,7 +183,8 @@
               "adr/0012-versioned-integration-contracts",
               "adr/0013-governed-external-capacity-and-byoc",
               "adr/0014-generated-automation-clients",
-              "adr/0015-embedded-evidence-dashboard"
+            "adr/0015-embedded-evidence-dashboard"
+            ,"adr/0016-portable-oci-runtime-workloads"
             ]
           },
           "release-acceptance"

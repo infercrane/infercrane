@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/infercrane/infercrane/internal/runtimecontract"
 )
 
 type fakeSkyRunner struct {
@@ -116,6 +118,29 @@ func TestEnsureUsesVersionedImageForExplicitRuntime(t *testing.T) {
 	}
 	if !strings.Contains(runner.launchTask, "image_id: docker:ghcr.io/infercrane/vllm-runpod:v0.10.2") || strings.Contains(runner.launchTask, "pip install") {
 		t.Fatalf("launch task does not use the requested runtime image: %s", runner.launchTask)
+	}
+}
+
+func TestEnsurePortableOCIUsesImmutableImageAndArgv(t *testing.T) {
+	runner := &fakeSkyRunner{}
+	workload := runtimecontract.Workload{Image: "registry.example/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Command: []string{"serve", "--model", "${MODEL}", "--label", "two words", "--port", "${PORT}"}, Protocol: "openai", Port: 9000, ReadinessPath: "/health", ModelsPath: "/v1/models", MetricsPath: "/metrics", Cancellation: "http-disconnect", Drain: "connection", ShutdownGraceSeconds: 20}
+	_, err := (SkyPilot{APIKey: "secret", Runner: runner}).EnsureReplica(context.Background(), ReplicaSpec{ExternalKey: "prod-r0", Model: "org/model", Cloud: "runpod", GPU: "L40S", Workload: workload})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"image_id: docker:" + workload.Image, "ports:\n        - 9000", "exec 'serve' '--model' 'org/model' '--label' 'two words' '--port' '9000'"} {
+		if !strings.Contains(runner.launchTask, want) {
+			t.Fatalf("task missing %q:\n%s", want, runner.launchTask)
+		}
+	}
+}
+
+func TestEnsurePortableOCIRejectsMutableImageBeforeLaunch(t *testing.T) {
+	runner := &fakeSkyRunner{}
+	workload := runtimecontract.Workload{Image: "registry.example/runtime:latest", Command: []string{"serve"}, Protocol: "openai", Port: 8000, ReadinessPath: "/health", ModelsPath: "/v1/models", MetricsPath: "/metrics", Cancellation: "http-disconnect", Drain: "connection", ShutdownGraceSeconds: 20}
+	_, err := (SkyPilot{APIKey: "secret", Runner: runner}).EnsureReplica(context.Background(), ReplicaSpec{ExternalKey: "prod-r0", Model: "model", Cloud: "runpod", GPU: "L40S", Workload: workload})
+	if !errors.Is(err, ErrInvalidReplicaSpec) || runner.launches != 0 {
+		t.Fatalf("launches=%d err=%v", runner.launches, err)
 	}
 }
 

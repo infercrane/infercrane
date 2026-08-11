@@ -1,6 +1,6 @@
 {
   "name": "@infercrane/sdk",
-  "version": "0.4.0-rc.1",
+  "version": "0.6.0-rc.1",
   "description": "Typed TypeScript client for the InferCrane inference control plane",
   "type": "module",
   "main": "./dist/index.js",

@@ -45,6 +45,7 @@ import (
 	"github.com/infercrane/infercrane/internal/router"
 	"github.com/infercrane/infercrane/internal/routes"
 	runtimeadapter "github.com/infercrane/infercrane/internal/runtime"
+	"github.com/infercrane/infercrane/internal/runtimecontract"
 	"github.com/infercrane/infercrane/internal/secrets"
 	"github.com/infercrane/infercrane/internal/spec"
 	"github.com/infercrane/infercrane/internal/store"
@@ -52,7 +53,7 @@ import (
 	"github.com/infercrane/infercrane/internal/workflows"
 )
 
-var version = "0.5.0-rc.1"
+var version = "0.6.0-rc.1"
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -599,6 +600,7 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 	})
 	strategy := "round-robin"
 	runtimeArgs := []string{}
+	var runtimeWorkload runtimecontract.Workload
 	runtimeEngine := "vllm"
 	modelRevision := ""
 	runtimeVersion := ""
@@ -621,13 +623,19 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 		*region = file.Provider.Region
 		strategy = file.Routing.Strategy
 		runtimeArgs = file.Runtime.Args
+		runtimeWorkload = file.Runtime.Workload
 		*minReplicas, *maxReplicas = file.Scaling.MinReplicas, file.Scaling.MaxReplicas
 	}
 	if *name == "" {
 		*name = planning.DefaultName(model)
 	}
 	if runtimeVersion == "" {
-		runtimeVersion = support.DefaultRuntimeVersion
+		switch runtimeEngine {
+		case "vllm":
+			runtimeVersion = support.DefaultRuntimeVersion
+		case "sglang":
+			runtimeVersion = support.SGLangRuntimeVersion
+		}
 	}
 	if *targets == "" && *cloud == "" && *gpu == "" {
 		*cloud, *gpu = support.DefaultCloud, support.DefaultGPU
@@ -656,7 +664,7 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 		path = "/api/v1/deployments/apply"
 		request = workflows.ApplyExistingRequest{Name: *name, Model: model, Targets: splitTargets(*targets), RoutingStrategy: strategy, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas, AutoscalingEnabled: *maxReplicas > *minReplicas}
 	} else if *cloud != "" && *gpu != "" {
-		request = workflows.CloudRequest{Name: *name, Model: model, ModelRevision: modelRevision, Runtime: runtimeEngine, RuntimeVersion: runtimeVersion, ComputeMode: *computeMode, Cloud: *cloud, GPU: *gpu, Region: *region, RuntimeArgs: runtimeArgs, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas}
+		request = workflows.CloudRequest{Name: *name, Model: model, ModelRevision: modelRevision, Runtime: runtimeEngine, RuntimeVersion: runtimeVersion, ComputeMode: *computeMode, Cloud: *cloud, GPU: *gpu, Region: *region, RuntimeArgs: runtimeArgs, Workload: runtimeWorkload, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas}
 	} else {
 		return errors.New("provide --targets or both --cloud and --gpu")
 	}
@@ -1334,6 +1342,12 @@ func integrationsCommand(ctx context.Context, cfg config.Config, args []string) 
 	}
 	for _, runtime := range response.Data.Runtimes {
 		fmt.Fprintf(w, "runtime\t%s\t%s\t%s\t%s\n", runtime.Runtime, runtime.EngineVersion, runtime.Protocol, qualified(runtime.Qualification))
+	}
+	if len(response.Data.Compatibility) > 0 {
+		fmt.Fprintln(w, "\nRUNTIME\tCLOUD\tMODE\tEVIDENCE STATE")
+		for _, item := range response.Data.Compatibility {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", item.Runtime, item.Cloud, item.Mode, item.State)
+		}
 	}
 	return w.Flush()
 }
@@ -2292,18 +2306,26 @@ func formatGuardEvidence(metrics domain.RevisionMetrics) string {
 func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	integrationRegistry, err := integration.V03Catalog()
+	integrationRegistry, err := integration.V06Catalog()
 	if err != nil {
 		return fmt.Errorf("configure integration contracts: %w", err)
 	}
 	directory := routes.New()
 	backend := router.NewVLLM(cfg.RouterBinary, cfg.APIKey)
-	runtime := runtimeadapter.VLLM{APIKey: cfg.APIKey}
+	runtime := runtimeadapter.OpenAI{APIKey: cfg.APIKey}
 	runtimeProfile, err := integrationRegistry.Runtime(support.DefaultRuntime)
 	if err != nil {
 		return fmt.Errorf("configure runtime contract: %w", err)
 	}
-	runtimeBackends, err := integration.NewRuntimeBackends(integration.RuntimeBackend{Profile: runtimeProfile, Inspector: runtime})
+	sglangProfile, err := integrationRegistry.Runtime("sglang")
+	if err != nil {
+		return fmt.Errorf("configure SGLang runtime contract: %w", err)
+	}
+	customProfile, err := integrationRegistry.Runtime("custom-oci")
+	if err != nil {
+		return fmt.Errorf("configure custom OCI runtime contract: %w", err)
+	}
+	runtimeBackends, err := integration.NewRuntimeBackends(integration.RuntimeBackend{Profile: runtimeProfile, Inspector: runtime}, integration.RuntimeBackend{Profile: sglangProfile, Inspector: runtime}, integration.RuntimeBackend{Profile: customProfile, Inspector: runtime})
 	if err != nil {
 		return fmt.Errorf("bind runtime adapter: %w", err)
 	}
@@ -2368,7 +2390,9 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	if err != nil {
 		return fmt.Errorf("configure elastic integration: %w", err)
 	}
-	elasticBackends := []workflows.ReplicaBackend{{Name: "skypilot", Cloud: "runpod", Runtime: "vllm", Profile: elasticProfile, Provider: provision.SkyPilot{APIKey: cfg.APIKey}, Capacity: provision.RunPodAvailability{APIKey: cfg.RunPodAPIKey}}}
+	skyProvider := provision.SkyPilot{APIKey: cfg.APIKey}
+	capacity := provision.RunPodAvailability{APIKey: cfg.RunPodAPIKey}
+	elasticBackends := []workflows.ReplicaBackend{{Name: "skypilot", Cloud: "runpod", Runtime: "vllm", Profile: elasticProfile, Provider: skyProvider, Capacity: capacity}}
 	if cfg.AWSEnabled() {
 		awsProfile, profileErr := integrationRegistry.Provider("aws-ec2")
 		if profileErr != nil {
@@ -2382,6 +2406,10 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 			ImageDigest: cfg.AWSImageDigest,
 		}
 		elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: "aws-ec2", Cloud: "aws", Runtime: "vllm", Profile: awsProfile, Provider: awsProvider})
+		elasticBackends = append(elasticBackends,
+			workflows.ReplicaBackend{Name: "aws-ec2", Cloud: "aws", Runtime: "sglang", Profile: awsProfile, Provider: awsProvider},
+			workflows.ReplicaBackend{Name: "aws-ec2", Cloud: "aws", Runtime: "custom-oci", Profile: awsProfile, Provider: awsProvider},
+		)
 	}
 	replicaBackends, err := workflows.NewReplicaBackends(elasticBackends...)
 	if err != nil {

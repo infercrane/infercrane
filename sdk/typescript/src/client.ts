@@ -23,6 +23,13 @@ export interface DeployRequest {
   maxReplicas?: number;
   region?: string;
   modelRevision?: string;
+  runtimeVersion?: string;
+  runtimeArgs?: string[];
+  workload?: {
+    image: string; command: string[]; protocol: 'openai'; port: number;
+    readiness_path: '/health'; models_path: '/v1/models'; metrics_path: '/metrics';
+    cancellation: 'http-disconnect'; drain: 'connection'; shutdown_grace_seconds: number;
+  };
   idempotencyKey?: string;
 }
 
@@ -42,7 +49,7 @@ class Transport implements ApiTransport {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new Error(`request timed out after ${this.timeoutMs}ms`)), this.timeoutMs);
     try {
-      const headers: Record<string, string> = { Accept: 'application/json', Authorization: `Bearer ${this.apiKey}`, 'User-Agent': 'infercrane-typescript/0.4.0-rc.1' };
+      const headers: Record<string, string> = { Accept: 'application/json', Authorization: `Bearer ${this.apiKey}`, 'User-Agent': 'infercrane-typescript/0.6.0-rc.1' };
       if (options.body !== undefined) headers['Content-Type'] = 'application/json';
       if (options.idempotencyKey) headers['Idempotency-Key'] = options.idempotencyKey;
       const init: RequestInit = { method, headers, signal: controller.signal };
@@ -96,6 +103,9 @@ export class InferCrane {
     const body: Record<string, JsonValue> = { name, model: request.model, cloud: request.cloud, gpu: request.gpu, runtime: request.runtime ?? 'vllm', compute_mode: request.computeMode ?? 'elastic', min_replicas: request.minReplicas ?? 1, max_replicas: request.maxReplicas ?? 1 };
     if (request.region) body['region'] = request.region;
     if (request.modelRevision) body['model_revision'] = request.modelRevision;
+    if (request.runtimeVersion) body['runtime_version'] = request.runtimeVersion;
+    if (request.runtimeArgs?.length) body['runtime_args'] = request.runtimeArgs;
+    if (request.workload) body['workload'] = request.workload as unknown as JsonValue;
     const result = await this.api.createDeployment(body, request.idempotencyKey ?? `sdk-deploy-${randomUUID()}`) as { operation: Operation };
     return result.operation;
   }
@@ -127,7 +137,7 @@ export class InferCrane {
   async delete(name: string, idempotencyKey = `sdk-delete-${randomUUID()}`): Promise<Operation> { return (await this.api.deleteDeployment(name, idempotencyKey) as { operation: Operation }).operation; }
 
   async *streamChat(deployment: string, messages: Array<{ role: string; content: string }>, options: { signal?: AbortSignal; parameters?: Record<string, JsonValue> } = {}): AsyncGenerator<Record<string, JsonValue>> {
-    const init: RequestInit = { method: 'POST', headers: { Accept: 'text/event-stream', Authorization: `Bearer ${this.apiKey}`, 'Content-Type': 'application/json', 'User-Agent': 'infercrane-typescript/0.4.0-rc.1' }, body: JSON.stringify({ model: deployment, messages, stream: true, ...options.parameters }) };
+    const init: RequestInit = { method: 'POST', headers: { Accept: 'text/event-stream', Authorization: `Bearer ${this.apiKey}`, 'Content-Type': 'application/json', 'User-Agent': 'infercrane-typescript/0.6.0-rc.1' }, body: JSON.stringify({ model: deployment, messages, stream: true, ...options.parameters }) };
     if (options.signal) init.signal = options.signal;
     const response = await this.fetcher(`${this.gatewayUrl}/v1/chat/completions`, init);
     if (!response.ok) throw new ApiError(response.status, 'inference_error', await response.text());

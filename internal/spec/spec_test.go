@@ -3,6 +3,7 @@ package spec
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -74,7 +75,7 @@ scaling: {min_replicas: 1, max_replicas: 4}
 
 func TestLoadRejectsExcludedRuntimeAndCloud(t *testing.T) {
 	for name, override := range map[string]string{
-		"runtime": "runtime: {engine: sglang}\nprovider: {cloud: runpod}",
+		"runtime": "runtime: {engine: unknown-runtime}\nprovider: {cloud: runpod}",
 		"cloud":   "runtime: {engine: vllm}\nprovider: {cloud: unqualified-cloud}",
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -83,5 +84,43 @@ func TestLoadRejectsExcludedRuntimeAndCloud(t *testing.T) {
 				t.Fatal("expected support-policy exclusion error")
 			}
 		})
+	}
+}
+
+func TestLoadPortableRuntimeContracts(t *testing.T) {
+	sglang, err := Load("../../examples/sglang.yaml")
+	if err != nil || sglang.Runtime.Engine != "sglang" || sglang.Runtime.Workload.Image == "" {
+		t.Fatalf("sglang=%#v err=%v", sglang.Runtime, err)
+	}
+	custom, err := Load("../../examples/custom-oci.yaml")
+	if err != nil || custom.Runtime.Engine != "custom-oci" || custom.Runtime.Workload.Port != 8000 {
+		t.Fatalf("custom=%#v err=%v", custom.Runtime, err)
+	}
+}
+
+func TestLoadRejectsUnknownPortableWorkloadField(t *testing.T) {
+	_, err := Load(writeSpec(t, `
+name: custom
+model: {id: org/model}
+runtime:
+  engine: custom-oci
+  workload:
+    image: registry.example/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    command: [serve]
+    protocol: openai
+    port: 8000
+    readiness_path: /health
+    models_path: /v1/models
+    metrics_path: /metrics
+    cancellation: http-disconnect
+    drain: connection
+    shutdown_grace_seconds: 30
+    readyness_path: /typo
+compute: {mode: elastic}
+provider: {cloud: aws, region: eu-central-1}
+resources: {gpu: L40S}
+`))
+	if err == nil || !strings.Contains(err.Error(), "readyness_path") {
+		t.Fatalf("err=%v", err)
 	}
 }

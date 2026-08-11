@@ -21,6 +21,8 @@ Changes that violate an invariant require an explicit superseding ADR and coordi
 - Lifecycle core does not branch on provider or runtime names; composition binds versioned adapters.
 - Adapter registration, hermetic qualification, real qualification, and public support are distinct.
 - A supported integration capability cites executable evidence and cannot be inferred from protocol labels.
+- Custom runtime revisions contain an immutable OCI digest and bounded argv; the control plane never
+  builds an image or evaluates image-provided build/probe code.
 
 ## Persistence
 
@@ -36,4 +38,4 @@ Changes that violate an invariant require an explicit superseding ADR and coordi
 - External input sizes, concurrency, queues, timeouts and identifiers are bounded.
 - Liveness does not depend on downstream systems; readiness verifies required dependencies.
 - Development fakes are excluded from the production image target.
-- Performance claims require reproducible tests against real vLLM and real vLLM Router.
+- Performance claims require reproducible tests against the exact real runtime, router and provider combination.

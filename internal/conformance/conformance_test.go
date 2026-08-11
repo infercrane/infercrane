@@ -141,6 +141,54 @@ func TestRuntimeCapabilityConformance(t *testing.T) {
 	}
 }
 
+func TestPortableRuntimeConformance(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/health":
+			w.WriteHeader(http.StatusOK)
+		case "/v1/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[{"id":"model"}]}`))
+		case "/metrics":
+			_, _ = w.Write([]byte("runtime_requests_total 1\n"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	registry, err := integration.V06Catalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"sglang", "custom-oci"} {
+		profile, profileErr := registry.Runtime(name)
+		if profileErr != nil {
+			t.Fatal(profileErr)
+		}
+		report := RuntimeCapabilities(profile, "readiness", "buffered_chat", "streaming_chat", "cancellation", "graceful_drain", "telemetry", "immutable_oci_image")
+		if err = report.Err(); err != nil {
+			t.Fatalf("%s capabilities: %v", name, err)
+		}
+		if name == "sglang" {
+			if err = profile.DefaultWorkload.Validate(); err != nil {
+				t.Fatalf("SGLang workload: %v", err)
+			}
+		}
+		if err = RuntimeReadiness(context.Background(), profile, runtime.VLLM{Client: server.Client()}, server.URL, "model").Err(); err != nil {
+			t.Fatalf("%s readiness: %v", name, err)
+		}
+		request, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL+"/metrics", nil)
+		response, metricsErr := server.Client().Do(request)
+		if metricsErr != nil {
+			t.Fatalf("%s metrics contract: %v", name, metricsErr)
+		}
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("%s metrics contract: status=%v", name, response.StatusCode)
+		}
+		response.Body.Close()
+	}
+}
+
 func TestAWSEC2ProviderContractConformance(t *testing.T) {
 	runner := &providerfixture.AWSCLI{}
 	provider := provision.AWSEC2{Runner: runner, RoleARN: "arn:aws:iam::123456789012:role/infercrane", Region: "eu-central-1", SubnetID: "subnet-private", SecurityGroupIDs: []string{"sg-worker"}, AMIID: "ami-gpu", InstanceType: "g6e.xlarge", GPU: "L40S", InstanceProfileARN: "arn:aws:iam::123456789012:instance-profile/worker", WorkerSecretARN: "arn:aws:secretsmanager:eu-central-1:123456789012:secret:worker", ImageDigest: "vllm/vllm-openai@sha256:c48cf118e1e6e39d7790e174d6014f7af5d06f79c2d29d984d11cbe2e8d414e7"}

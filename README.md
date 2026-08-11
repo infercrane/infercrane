@@ -29,7 +29,7 @@ while workers are replaced, recovered, or reconfigured.
 - Supervised replica routing with deterministic generation safety.
 - Streaming chat completions without database reads on the request-routing path.
 - Existing-worker registration plus registered elastic and provider-native serverless backends.
-- Prometheus telemetry, readiness/liveness probes, request accounting, and graceful shutdown.
+- Prometheus telemetry, readiness/liveness probes, request accounting, and graceful shutdown across qualified runtime contracts.
 - Multi-replica gateway architecture with instance-owned local router generations.
 
 ## Project status
@@ -43,6 +43,9 @@ The v0.4 release candidate adds one executable OpenAPI contract, generated Pytho
 clients, a Terraform provider for logical deployments, and deterministic GitHub delivery checks.
 The v0.5 candidate adds a responsive embedded operations dashboard over the same authenticated API;
 it does not introduce a hosted account service or duplicate control backend.
+The v0.6 candidate adds immutable custom OCI workload declarations and a digest-pinned SGLang
+profile through the same runtime contract. Their AWS EC2 combinations are simulated-qualified;
+real GPU behavior remains deferred.
 Registration is not real-provider proof: paid acceptance and soak testing remain explicitly
 incomplete until their evidence gates run.
 

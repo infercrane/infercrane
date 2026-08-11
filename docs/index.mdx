@@ -6,7 +6,7 @@ mode: wide
 ---
 
 <div className="ic-hero not-prose">
-  <div className="ic-kicker"><span className="ic-status-dot"></span> v0.5 release candidate development</div>
+  <div className="ic-kicker"><span className="ic-status-dot"></span> v0.6 release candidate development</div>
   <div className="ic-actions">
     <a className="ic-button ic-button-primary" href="/quickstart">Start the quickstart <span aria-hidden="true">→</span></a>
     <a className="ic-button ic-button-secondary" href="https://github.com/infercrane/infercrane">View on GitHub <span aria-hidden="true">↗</span></a>
@@ -86,9 +86,9 @@ InferCrane gives applications one OpenAI-compatible logical endpoint while durab
 
 <Note>
 InferCrane is provider- and runtime-extensible by design. Provider and runtime capabilities are
-declared and conformance-tested; each adapter still has an independent qualification status. The
-first operational target remains vLLM on RunPod, while narrow AWS BYOC support is experimental.
-Consult [capability status](/project-status) before relying on an adapter.
+declared and conformance-tested; each adapter still has an independent qualification status. vLLM,
+SGLang, and custom OCI have separate evidence states, as do RunPod and narrow AWS BYOC adapters.
+Consult [capability status](/project-status) before relying on a combination.
 </Note>
 
 ## Evidence, not guesses

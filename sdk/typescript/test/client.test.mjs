@@ -23,6 +23,15 @@ test('deploy preserves explicit idempotency and wait reaches terminal state', as
   assert.equal((await client.wait(operation.id)).status, 'succeeded');
 });
 
+test('deploy preserves portable runtime workload intent', async () => {
+	let body;
+	const fetch = async (_url, options = {}) => { body = JSON.parse(options.body); return json({ operation: { id: 'op-oci', kind: 'deployment.converge', status: 'pending', progress: 0 } }, 202); };
+	const client = new InferCrane({ apiKey: 'secret', fetch });
+	const workload = { image: `registry.example/runtime@sha256:${'a'.repeat(64)}`, command: ['serve', '--model', '${MODEL}'], protocol: 'openai', port: 8000, readiness_path: '/health', models_path: '/v1/models', metrics_path: '/metrics', cancellation: 'http-disconnect', drain: 'connection', shutdown_grace_seconds: 30 };
+	await client.deploy({ model: 'org/model', cloud: 'runpod', gpu: 'L40S', runtime: 'custom-oci', runtimeVersion: '1', runtimeArgs: ['--safe'], workload });
+	assert.deepEqual(body.workload, workload); assert.deepEqual(body.runtime_args, ['--safe']); assert.equal(body.runtime_version, '1');
+});
+
 test('wait timeout never sends cancellation', async () => {
   const paths = [];
   const fetch = async (url) => { paths.push(String(url)); return json({ id: 'op-1', kind: 'deployment.converge', status: 'waiting', progress: 55 }); };

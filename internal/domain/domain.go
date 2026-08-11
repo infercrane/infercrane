@@ -3,6 +3,8 @@ package domain
 import (
 	"errors"
 	"time"
+
+	"github.com/infercrane/infercrane/internal/runtimecontract"
 )
 
 var ErrNotFound = errors.New("not found")
@@ -32,20 +34,21 @@ type DeploymentRevision struct {
 }
 
 type DeploymentRevisionSpec struct {
-	Model              string   `json:"model"`
-	ModelRevision      string   `json:"model_revision,omitempty"`
-	Runtime            string   `json:"runtime"`
-	RuntimeVersion     string   `json:"runtime_version,omitempty"`
-	RuntimeArgs        []string `json:"runtime_args,omitempty"`
-	RoutingStrategy    string   `json:"routing_strategy"`
-	MinReplicas        int      `json:"min_replicas"`
-	MaxReplicas        int      `json:"max_replicas"`
-	AutoscalingEnabled bool     `json:"autoscaling_enabled"`
-	ComputeMode        string   `json:"compute_mode,omitempty"`
-	Cloud              string   `json:"cloud,omitempty"`
-	GPU                string   `json:"gpu,omitempty"`
-	Region             string   `json:"region,omitempty"`
-	Port               int      `json:"port,omitempty"`
+	Model              string                   `json:"model"`
+	ModelRevision      string                   `json:"model_revision,omitempty"`
+	Runtime            string                   `json:"runtime"`
+	RuntimeVersion     string                   `json:"runtime_version,omitempty"`
+	RuntimeArgs        []string                 `json:"runtime_args,omitempty"`
+	RoutingStrategy    string                   `json:"routing_strategy"`
+	MinReplicas        int                      `json:"min_replicas"`
+	MaxReplicas        int                      `json:"max_replicas"`
+	AutoscalingEnabled bool                     `json:"autoscaling_enabled"`
+	ComputeMode        string                   `json:"compute_mode,omitempty"`
+	Cloud              string                   `json:"cloud,omitempty"`
+	GPU                string                   `json:"gpu,omitempty"`
+	Region             string                   `json:"region,omitempty"`
+	Port               int                      `json:"port,omitempty"`
+	Workload           runtimecontract.Workload `json:"workload,omitzero"`
 }
 
 type ModelArtifact struct {

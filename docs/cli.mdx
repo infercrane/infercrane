@@ -158,9 +158,21 @@ infercrane apply examples/infercrane.yaml \
 | `--output` | `human` | all | `human` or `json` |
 
 A YAML path cannot be combined with deployment flags. See [DeploymentSpec](/deployment-spec).
+SGLang and custom OCI use the YAML form because their runtime contract is part of the immutable
+revision. See [SGLang](/integrations/sglang) and [Custom OCI workloads](/features/custom-oci).
 
 After submission, human output prints the exact commands to follow durable progress. A successful
 wait prints the command for the first inference request.
+
+### `integrations`
+
+```bash
+infercrane integrations
+infercrane integrations --output json
+```
+
+Displays registered provider/runtime capabilities, evidence state, and the exact qualified
+runtime/provider/compute-mode combinations. Registration alone never implies production support.
 
 ## Send a request
 

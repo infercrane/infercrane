@@ -1,0 +1,28 @@
+name: custom-prod
+model:
+  id: Qwen/Qwen3-8B
+runtime:
+  engine: custom-oci
+  workload:
+    image: registry.example/acme/runtime@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    command: ["/opt/acme/serve", "--model", "${MODEL}", "--port", "${PORT}"]
+    protocol: openai
+    port: 8000
+    readiness_path: /health
+    models_path: /v1/models
+    metrics_path: /metrics
+    cancellation: http-disconnect
+    drain: connection
+    shutdown_grace_seconds: 30
+compute:
+  mode: elastic
+provider:
+  cloud: aws
+  region: eu-central-1
+resources:
+  gpu: L40S
+scaling:
+  min_replicas: 1
+  max_replicas: 1
+routing:
+  strategy: round-robin

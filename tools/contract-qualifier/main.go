@@ -59,7 +59,7 @@ func main() {
 	if dirty && !allowDirty {
 		fatal(errors.New("contract release qualification requires a clean worktree"))
 	}
-	registry, err := integration.V03Catalog()
+	registry, err := integration.V06Catalog()
 	if err != nil {
 		fatal(err)
 	}

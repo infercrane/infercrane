@@ -1,0 +1,68 @@
+---
+title: Custom OCI workloads
+description: Bring an immutable OpenAI-compatible inference image through the portable runtime contract.
+---
+
+# Custom OCI workloads
+
+InferCrane can launch a user-supplied inference image without becoming an image builder or
+container engine. The deployment revision records the exact image digest, argv and observable
+lifecycle contract before a provider mutation is submitted.
+
+```yaml
+name: custom-prod
+model:
+  id: Qwen/Qwen3-8B
+runtime:
+  engine: custom-oci
+  workload:
+    image: registry.example/acme/runtime@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    command: ["/opt/acme/serve", "--model", "${MODEL}", "--port", "${PORT}"]
+    protocol: openai
+    port: 8000
+    readiness_path: /health
+    models_path: /v1/models
+    metrics_path: /metrics
+    cancellation: http-disconnect
+    drain: connection
+    shutdown_grace_seconds: 30
+compute:
+  mode: elastic
+provider:
+  cloud: aws
+  region: eu-central-1
+resources:
+  gpu: L40S
+scaling:
+  min_replicas: 1
+  max_replicas: 1
+routing:
+  strategy: round-robin
+```
+
+The command is argv, not a shell program. `${MODEL}`, `${MODEL_REVISION}`, `${PORT}`, and the exact
+`${WORKER_API_KEY}` argument placeholder are replaced
+without losing argument boundaries. The workload receives the worker credential as
+`INFERCRANE_WORKER_API_KEY`; the value is not persisted in revision or provider metadata.
+v0.6 still resolves `model.id` through the Hugging Face `ModelArtifact` adapter before launch; a
+custom image does not imply arbitrary artifact protocols.
+
+## v0.6 contract
+
+The image must be pinned by `@sha256`. The supported protocol and probe paths are deliberately
+narrow: OpenAI-compatible HTTP, `/health`, `/v1/models`, and `/metrics`. Client disconnect must
+cancel upstream HTTP work, and InferCrane withdraws the router generation and drains active
+connections before provider deletion.
+
+Custom OCI is currently simulated-qualified on the AWS EC2 elastic path, whose user-data bootstrap
+launches the immutable image directly. Real GPU evidence is deferred to the consolidated v1
+qualification. RunPod/SkyPilot images require an additional SSH bootstrap contract and are not
+claimed compatible. Serverless, arbitrary probe scripts, mutable tags, image builds and autoscaling
+signals for custom runtimes are rejected rather than silently assumed.
+
+Inspect the executable support boundary with:
+
+```bash
+infercrane integrations
+infercrane integrations --output json
+```

@@ -33,6 +33,26 @@ func TestRegistryProducesDeterministicHonestSnapshot(t *testing.T) {
 	}
 }
 
+func TestV06CatalogPublishesExactRuntimeCompatibility(t *testing.T) {
+	registry, err := V06Catalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := registry.Snapshot()
+	if len(snapshot.Compatibility) != 5 {
+		t.Fatalf("compatibility=%#v", snapshot.Compatibility)
+	}
+	encoded, _ := json.Marshal(snapshot)
+	for _, required := range []string{`"runtime":"sglang"`, `"runtime":"custom-oci"`, `"mode":"serverless"`, `"default_workload"`} {
+		if !strings.Contains(string(encoded), required) {
+			t.Fatalf("missing %s: %s", required, encoded)
+		}
+	}
+	if strings.Contains(string(encoded), `"state":"real-qualified"`) {
+		t.Fatalf("fabricated real evidence: %s", encoded)
+	}
+}
+
 func TestProfilesRejectInvalidOrUnsupportedClaims(t *testing.T) {
 	provider := ProviderProfile{Adapter: "bad", Cloud: "cloud", ContractVersion: ProviderContractV1, AdapterVersion: "1", Modes: []ComputeMode{ElasticMode}, Qualification: []Qualification{{State: QualificationReal}}}
 	if err := provider.Validate(); err == nil || !strings.Contains(err.Error(), "without evidence") {

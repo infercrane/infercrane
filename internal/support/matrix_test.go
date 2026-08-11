@@ -40,3 +40,17 @@ func TestV03QualifiesOnlyNarrowAWSElasticPath(t *testing.T) {
 		t.Fatal("AWS serverless must remain outside the v0.3 qualification policy")
 	}
 }
+
+func TestV06QualifiesExactPortableRuntimeCombinations(t *testing.T) {
+	matrix := V06()
+	for _, combination := range [][3]string{{"sglang", "aws", "elastic"}, {"custom-oci", "aws", "elastic"}, {"vllm", "aws", "elastic"}} {
+		if err := matrix.Validate(combination[0], combination[1], combination[2]); err != nil {
+			t.Fatalf("%v: %v", combination, err)
+		}
+	}
+	for _, combination := range [][3]string{{"sglang", "runpod", "elastic"}, {"sglang", "runpod", "serverless"}, {"custom-oci", "runpod", "serverless"}} {
+		if err := matrix.Validate(combination[0], combination[1], combination[2]); err == nil {
+			t.Fatalf("unqualified combination accepted: %v", combination)
+		}
+	}
+}

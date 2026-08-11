@@ -2,7 +2,9 @@
 
 ## Does v0.1 support any model, engine, or cloud?
 
-No. InferCrane's control-plane architecture is extensible, but v0.1 qualifies only vLLM on RunPod with Hugging Face model artifacts. Additional providers and runtimes require their own adapter and acceptance evidence before they become supported.
+No. v0.1 qualified only vLLM on RunPod. The v0.6 development matrix adds simulated SGLang and
+custom OCI profiles on AWS EC2 elastic, but real-GPU evidence remains deferred. Every exact
+provider/runtime/mode combination needs independent evidence.
 
 ## Do I need Kubernetes?
 
@@ -18,7 +20,9 @@ No. The registered serverless provider owns worker allocation and scale-to-zero;
 
 ## Is InferCrane coupled to RunPod or vLLM?
 
-No at the lifecycle boundary. Providers, runtimes, serverless status, artifacts, and benchmark tools are external adapters composed around durable InferCrane state machines. The current release has one qualified combination, so some implementation pages necessarily describe RunPod and vLLM specifically.
+No at the lifecycle boundary. Providers, runtimes, serverless status, artifacts, and benchmark tools
+are external adapters composed around durable InferCrane state machines. `infercrane integrations`
+shows the current exact combinations and separates simulated, local, deferred and real evidence.
 
 ## Are prompts or outputs stored?
 

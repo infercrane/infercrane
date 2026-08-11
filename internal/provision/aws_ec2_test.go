@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/infercrane/infercrane/internal/runtimecontract"
 )
 
 type fakeAWSRunner struct {
@@ -118,6 +120,29 @@ func TestAWSEC2LifecycleIsIdempotentPrivateAndTagged(t *testing.T) {
 	}
 	if err := provider.DeleteReplica(context.Background(), second); err != nil || runner.deleteCalls != 1 {
 		t.Fatalf("delete calls=%d err=%v", runner.deleteCalls, err)
+	}
+}
+
+func TestAWSEC2PortableWorkloadUsesDigestArgvAndSecretEnvironment(t *testing.T) {
+	runner := &fakeAWSRunner{}
+	spec := awsReplicaSpec()
+	spec.Workload = runtimecontract.Workload{Image: "registry.example/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Command: []string{"serve", "--model", "${MODEL}", "--label", "two words", "--api-key", "${WORKER_API_KEY}", "--port", "${PORT}"}, Protocol: "openai", Port: 9000, ReadinessPath: "/health", ModelsPath: "/v1/models", MetricsPath: "/metrics", Cancellation: "http-disconnect", Drain: "connection", ShutdownGraceSeconds: 30}
+	if _, err := testAWSEC2(runner).EnsureReplica(context.Background(), spec); err != nil {
+		t.Fatal(err)
+	}
+	userData := ""
+	for i, arg := range runner.runInstanceArgs {
+		if arg == "--user-data" && i+1 < len(runner.runInstanceArgs) {
+			userData = runner.runInstanceArgs[i+1]
+		}
+	}
+	for _, want := range []string{"docker pull '" + spec.Workload.Image + "'", `-e INFERCRANE_WORKER_API_KEY="$worker_key"`, "'serve' '--model' 'Qwen/Qwen3-8B' '--label' 'two words' '--api-key' \"$worker_key\" '--port' '9000'"} {
+		if !strings.Contains(userData, want) {
+			t.Fatalf("user data missing %q:\n%s", want, userData)
+		}
+	}
+	if strings.Contains(userData, "temporary-secret") {
+		t.Fatal("temporary AWS credentials leaked into user data")
 	}
 }
 

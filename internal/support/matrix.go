@@ -7,7 +7,22 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/infercrane/infercrane/internal/runtimecontract"
 )
+
+const SGLangRuntimeVersion = "0.5.12"
+
+func SGLangWorkload() runtimecontract.Workload {
+	return runtimecontract.Workload{Image: "lmsysorg/sglang:v0.5.12@sha256:42194170546745092e74cd5f81ad32a7c6e944c7111fe7bf13588152277ff356", Command: []string{"python3", "-m", "sglang.launch_server", "--model-path", "${MODEL}", "--host", "0.0.0.0", "--port", "${PORT}", "--api-key", "${WORKER_API_KEY}"}, Protocol: "openai", Port: 8000, ReadinessPath: "/health", ModelsPath: "/v1/models", MetricsPath: "/metrics", Cancellation: "http-disconnect", Drain: "connection", ShutdownGraceSeconds: 30}
+}
+
+func NormalizeWorkload(runtime string, workload runtimecontract.Workload) runtimecontract.Workload {
+	if workload.Empty() && runtime == "sglang" {
+		return SGLangWorkload()
+	}
+	return workload
+}
 
 const (
 	DefaultRuntime = "vllm"
@@ -25,8 +40,28 @@ const (
 // provider/compute-mode combinations. Adding an adapter does not silently make
 // it public: qualification must be added here explicitly.
 type Matrix struct {
-	runtimes map[string]struct{}
-	clouds   map[string]map[string]struct{}
+	runtimes     map[string]struct{}
+	clouds       map[string]map[string]struct{}
+	combinations map[string]map[string]map[string]struct{}
+}
+
+// Qualified builds an exact runtime/provider/mode matrix. It avoids implying
+// that every registered runtime works on every provider.
+func Qualified(combinations map[string]map[string][]string) Matrix {
+	m := Matrix{runtimes: map[string]struct{}{}, clouds: map[string]map[string]struct{}{}, combinations: map[string]map[string]map[string]struct{}{}}
+	for cloud, modes := range combinations {
+		m.clouds[cloud] = map[string]struct{}{}
+		m.combinations[cloud] = map[string]map[string]struct{}{}
+		for mode, runtimes := range modes {
+			m.clouds[cloud][mode] = struct{}{}
+			m.combinations[cloud][mode] = map[string]struct{}{}
+			for _, runtime := range runtimes {
+				m.runtimes[runtime] = struct{}{}
+				m.combinations[cloud][mode][runtime] = struct{}{}
+			}
+		}
+	}
+	return m
 }
 
 func New(runtimes []string, clouds map[string][]string) Matrix {
@@ -66,6 +101,16 @@ func V03() Matrix {
 	})
 }
 
+// V06 is the local qualification policy for portable runtimes. SGLang and
+// custom OCI are deliberately limited to the SkyPilot elastic path until each
+// additional provider proves the workload contract independently.
+func V06() Matrix {
+	return Qualified(map[string]map[string][]string{
+		DefaultCloud: {ElasticMode: {DefaultRuntime}, ServerlessMode: {DefaultRuntime}},
+		"aws":        {ElasticMode: {DefaultRuntime, "sglang", "custom-oci"}},
+	})
+}
+
 func (m Matrix) Validate(runtime, cloud, mode string) error {
 	if err := m.ValidateRuntime(runtime); err != nil {
 		return err
@@ -77,7 +122,19 @@ func (m Matrix) Validate(runtime, cloud, mode string) error {
 	if _, ok = modes[mode]; !ok {
 		return fmt.Errorf("compute mode %q is not qualified for cloud %q", mode, cloud)
 	}
+	if len(m.combinations) > 0 {
+		if _, ok = m.combinations[cloud][mode][defaultRuntime(runtime)]; !ok {
+			return fmt.Errorf("runtime %q is not qualified for cloud %q in %s mode", defaultRuntime(runtime), cloud, mode)
+		}
+	}
 	return nil
+}
+
+func defaultRuntime(runtime string) string {
+	if runtime == "" {
+		return DefaultRuntime
+	}
+	return runtime
 }
 
 func (m Matrix) ValidateRuntime(runtime string) error {

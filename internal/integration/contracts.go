@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/infercrane/infercrane/internal/provision"
+	"github.com/infercrane/infercrane/internal/runtimecontract"
 )
 
 const (
@@ -70,13 +71,23 @@ type ProviderProfile struct {
 }
 
 type RuntimeProfile struct {
-	Runtime         string          `json:"runtime"`
-	ContractVersion string          `json:"contract_version"`
-	AdapterVersion  string          `json:"adapter_version"`
-	EngineVersion   string          `json:"engine_version,omitempty"`
-	Protocol        string          `json:"protocol"`
-	Capabilities    []Capability    `json:"capabilities"`
-	Qualification   []Qualification `json:"qualification"`
+	Runtime         string                   `json:"runtime"`
+	ContractVersion string                   `json:"contract_version"`
+	AdapterVersion  string                   `json:"adapter_version"`
+	EngineVersion   string                   `json:"engine_version,omitempty"`
+	Protocol        string                   `json:"protocol"`
+	Capabilities    []Capability             `json:"capabilities"`
+	Qualification   []Qualification          `json:"qualification"`
+	DefaultWorkload runtimecontract.Workload `json:"default_workload,omitzero"`
+}
+
+type RuntimeCompatibility struct {
+	Runtime  string             `json:"runtime"`
+	Cloud    string             `json:"cloud"`
+	Mode     ComputeMode        `json:"mode"`
+	State    QualificationState `json:"state"`
+	Evidence string             `json:"evidence,omitempty"`
+	Reason   string             `json:"reason,omitempty"`
 }
 
 // ElasticProvider is the mutation boundary for one durable replica intent.
@@ -145,15 +156,44 @@ func (r RuntimeBackends) ForRuntime(name string) (RuntimeBackend, error) {
 }
 
 type Registry struct {
-	providers map[string]ProviderProfile
-	runtimes  map[string]RuntimeProfile
+	providers     map[string]ProviderProfile
+	runtimes      map[string]RuntimeProfile
+	compatibility []RuntimeCompatibility
 }
 
 type Snapshot struct {
-	ProviderContract string            `json:"provider_contract"`
-	RuntimeContract  string            `json:"runtime_contract"`
-	Providers        []ProviderProfile `json:"providers"`
-	Runtimes         []RuntimeProfile  `json:"runtimes"`
+	ProviderContract string                 `json:"provider_contract"`
+	RuntimeContract  string                 `json:"runtime_contract"`
+	Providers        []ProviderProfile      `json:"providers"`
+	Runtimes         []RuntimeProfile       `json:"runtimes"`
+	Compatibility    []RuntimeCompatibility `json:"compatibility"`
+}
+
+func (r *Registry) SetCompatibility(entries ...RuntimeCompatibility) error {
+	seen := map[string]struct{}{}
+	for _, entry := range entries {
+		if _, err := r.Runtime(entry.Runtime); err != nil {
+			return err
+		}
+		if entry.Cloud == "" || (entry.Mode != ElasticMode && entry.Mode != ServerlessMode && entry.Mode != ExternalMode) {
+			return errors.New("runtime compatibility requires cloud and valid mode")
+		}
+		switch entry.State {
+		case QualificationRegistered, QualificationSimulated, QualificationLocal, QualificationReal, QualificationDeferred, QualificationFailed:
+		default:
+			return fmt.Errorf("runtime compatibility has invalid state %q", entry.State)
+		}
+		if (entry.State == QualificationLocal || entry.State == QualificationReal || entry.State == QualificationSimulated) && entry.Evidence == "" {
+			return errors.New("qualified runtime compatibility requires evidence")
+		}
+		key := entry.Runtime + "\x00" + entry.Cloud + "\x00" + string(entry.Mode)
+		if _, ok := seen[key]; ok {
+			return fmt.Errorf("duplicate runtime compatibility for %s/%s/%s", entry.Runtime, entry.Cloud, entry.Mode)
+		}
+		seen[key] = struct{}{}
+	}
+	r.compatibility = append([]RuntimeCompatibility(nil), entries...)
+	return nil
 }
 
 func NewRegistry() *Registry {
@@ -223,8 +263,19 @@ func (r *Registry) Snapshot() Snapshot {
 	for _, profile := range r.runtimes {
 		out.Runtimes = append(out.Runtimes, profile)
 	}
+	out.Compatibility = append([]RuntimeCompatibility(nil), r.compatibility...)
 	sort.Slice(out.Providers, func(i, j int) bool { return out.Providers[i].Adapter < out.Providers[j].Adapter })
 	sort.Slice(out.Runtimes, func(i, j int) bool { return out.Runtimes[i].Runtime < out.Runtimes[j].Runtime })
+	sort.Slice(out.Compatibility, func(i, j int) bool {
+		a, b := out.Compatibility[i], out.Compatibility[j]
+		if a.Runtime != b.Runtime {
+			return a.Runtime < b.Runtime
+		}
+		if a.Cloud != b.Cloud {
+			return a.Cloud < b.Cloud
+		}
+		return a.Mode < b.Mode
+	})
 	return out
 }
 
@@ -257,6 +308,11 @@ func (p RuntimeProfile) Validate() error {
 	}
 	if p.ContractVersion != RuntimeContractV1 {
 		return fmt.Errorf("runtime %q uses unsupported contract %q", p.Runtime, p.ContractVersion)
+	}
+	if !p.DefaultWorkload.Empty() {
+		if err := p.DefaultWorkload.Validate(); err != nil {
+			return fmt.Errorf("runtime %q default workload: %w", p.Runtime, err)
+		}
 	}
 	return validateEvidence(p.Runtime, p.Capabilities, p.Qualification)
 }
@@ -315,6 +371,7 @@ func normalizeRuntime(profile RuntimeProfile) RuntimeProfile {
 	profile.Protocol = strings.TrimSpace(profile.Protocol)
 	profile.Capabilities = append([]Capability(nil), profile.Capabilities...)
 	profile.Qualification = append([]Qualification(nil), profile.Qualification...)
+	profile.DefaultWorkload.Command = append([]string(nil), profile.DefaultWorkload.Command...)
 	sort.Slice(profile.Capabilities, func(i, j int) bool { return profile.Capabilities[i].Name < profile.Capabilities[j].Name })
 	return profile
 }

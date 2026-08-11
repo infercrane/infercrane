@@ -1,0 +1,28 @@
+---
+title: "0016: Portable OCI runtime workloads"
+description: Keep workload declarations immutable and provider execution delegated.
+---
+
+# 0016: Portable OCI runtime workloads
+
+Status: accepted · v0.6.0
+
+## Decision
+
+Persist a declarative runtime workload inside each deployment revision: immutable OCI digest,
+argv, protocol, port, standard probe paths, cancellation/drain semantics and bounded shutdown
+grace. Provider adapters translate this declaration to their existing container mechanism.
+
+SGLang is a built-in profile over that same contract. Custom OCI supplies the declaration in the
+DeploymentSpec or API. The control plane validates it but never builds the image, evaluates a
+shell fragment, runs image-provided probes locally, or infers untested capabilities.
+
+## Consequences
+
+- Replays and rollbacks preserve exact workload identity.
+- Runtime and provider qualification remain independent and are joined by an explicit matrix.
+- v0.6 standardizes probe paths instead of accepting arbitrary scripts or URLs.
+- Provider/runtime combinations not present in the matrix fail before provisioning. v0.6 uses the
+  direct-Docker AWS EC2 adapter for SGLang/custom OCI; it does not assume arbitrary images satisfy
+  SkyPilot's RunPod SSH bootstrap contract.
+- Real custom-image and SGLang GPU evidence stays deferred until v1 manual qualification.

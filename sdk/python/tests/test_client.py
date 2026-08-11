@@ -73,6 +73,14 @@ class ClientTest(unittest.TestCase):
         self.assertEqual(Handler.requests[0][1], "stable-key")
         self.assertEqual(self.client.wait(operation.id).status, "succeeded")
 
+    def test_deploy_preserves_portable_runtime_workload(self):
+        workload = {"image": "registry.example/runtime@sha256:" + "a" * 64, "command": ["serve", "--model", "${MODEL}"], "protocol": "openai", "port": 8000, "readiness_path": "/health", "models_path": "/v1/models", "metrics_path": "/metrics", "cancellation": "http-disconnect", "drain": "connection", "shutdown_grace_seconds": 30}
+        self.client.deploy(model="org/model", cloud="runpod", gpu="L40S", runtime="custom-oci", runtime_version="1", runtime_args=["--safe"], workload=workload)
+        body = Handler.requests[0][2]
+        self.assertEqual(body["workload"], workload)
+        self.assertEqual(body["runtime_args"], ["--safe"])
+        self.assertEqual(body["runtime_version"], "1")
+
     def test_timeout_does_not_cancel_operation(self):
         Handler.operations = [{"id": "op-1", "kind": "deployment.converge", "status": "waiting", "progress": 55}]
         with self.assertRaises(OperationTimeout) as caught:

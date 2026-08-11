@@ -115,3 +115,43 @@ func V03Catalog() (*Registry, error) {
 	}
 	return registry, nil
 }
+
+// V06Catalog adds portable OCI and SGLang profiles without changing the V1
+// contract version. Real GPU qualification remains explicitly deferred.
+func V06Catalog() (*Registry, error) {
+	registry, err := V03Catalog()
+	if err != nil {
+		return nil, err
+	}
+	common := []Capability{
+		{Name: "autoscaling_signals", State: CapabilityUnsupported, Detail: "v0.6 portable runtimes require fixed replica bounds until normalized runtime metrics are qualified"},
+		{Name: "buffered_chat", State: CapabilitySupported, Evidence: "go:test/internal/gateway#TestCompletionRewritesAlias"},
+		{Name: "cancellation", State: CapabilitySupported, Evidence: "go:test/internal/gateway#TestClientCancellationPropagatesToRuntime"},
+		{Name: "graceful_drain", State: CapabilitySupported, Evidence: "go:test/internal/reconcile#TestRouterRetirementWaitsForPinnedRequest"},
+		{Name: "immutable_oci_image", State: CapabilitySupported, Evidence: "go:test/internal/runtimecontract#TestWorkloadValidation"},
+		{Name: "readiness", State: CapabilitySupported, Evidence: "go:test/internal/conformance#TestPortableRuntimeConformance"},
+		{Name: "streaming_chat", State: CapabilitySupported, Evidence: "go:test/internal/gateway#TestActiveStreamKeepsSelectedRouterAcrossGenerationPublish"},
+		{Name: "telemetry", State: CapabilitySupported, Evidence: "go:test/internal/conformance#TestPortableRuntimeConformance"},
+	}
+	sglang := RuntimeProfile{
+		Runtime: "sglang", ContractVersion: RuntimeContractV1, AdapterVersion: "builtin-v0.6", EngineVersion: support.SGLangRuntimeVersion, Protocol: "openai", Capabilities: common,
+		DefaultWorkload: support.SGLangWorkload(),
+		Qualification:   []Qualification{{State: QualificationSimulated, Environment: "hermetic-runtime-contract", Evidence: "go:test/internal/conformance#TestPortableRuntimeConformance"}, {State: QualificationDeferred, Environment: "real-sglang-gpu", Reason: "awaiting consolidated v1 manual qualification"}},
+	}
+	custom := RuntimeProfile{Runtime: "custom-oci", ContractVersion: RuntimeContractV1, AdapterVersion: "declarative-v0.6", Protocol: "openai", Capabilities: common, Qualification: []Qualification{{State: QualificationSimulated, Environment: "hermetic-runtime-contract", Evidence: "go:test/internal/conformance#TestPortableRuntimeConformance"}, {State: QualificationDeferred, Environment: "real-custom-oci-gpu", Reason: "awaiting consolidated v1 manual qualification"}}}
+	for _, profile := range []RuntimeProfile{sglang, custom} {
+		if err = registry.RegisterRuntime(profile); err != nil {
+			return nil, err
+		}
+	}
+	if err = registry.SetCompatibility(
+		RuntimeCompatibility{Runtime: "vllm", Cloud: "runpod", Mode: ElasticMode, State: QualificationLocal, Evidence: "make:dev-check-full"},
+		RuntimeCompatibility{Runtime: "vllm", Cloud: "runpod", Mode: ServerlessMode, State: QualificationLocal, Evidence: "go:test/internal/workflows#TestServerlessConvergeRegistersScaleToZeroEndpointWithoutWarmingWorker"},
+		RuntimeCompatibility{Runtime: "vllm", Cloud: "aws", Mode: ElasticMode, State: QualificationLocal, Evidence: "go:test/internal/conformance#TestAWSEC2ProviderContractConformance"},
+		RuntimeCompatibility{Runtime: "sglang", Cloud: "aws", Mode: ElasticMode, State: QualificationSimulated, Evidence: "go:test/internal/conformance#TestPortableRuntimeConformance"},
+		RuntimeCompatibility{Runtime: "custom-oci", Cloud: "aws", Mode: ElasticMode, State: QualificationSimulated, Evidence: "go:test/internal/conformance#TestPortableRuntimeConformance"},
+	); err != nil {
+		return nil, err
+	}
+	return registry, nil
+}

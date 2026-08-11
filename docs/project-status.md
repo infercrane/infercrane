@@ -37,6 +37,8 @@ but lacks production qualification; **planned** is not a product capability.
 | Deterministic explanations | Implemented | Deployment, scaling, rollout, and cold-start output is reproduced from persisted state and measurements. |
 | Integration registration and qualification | Implemented | Lifecycle backends resolve by cloud/runtime and durable adapter identity; the release qualification matrix remains separate. |
 | Versioned provider/runtime contract inventory | Experimental | V1 descriptors, validated executable bindings, capabilities, authenticated inspection, and hermetic conformance evidence are implemented; real-provider/runtime qualification remains deferred. |
+| Portable custom OCI workloads | Experimental | Immutable digest, argv, OpenAI protocol, standard probes, cancellation/drain and shutdown declarations persist in revisions and pass hermetic launch conformance; real GPU evidence is deferred. |
+| SGLang runtime profile | Experimental | Official v0.5.12 image manifest is digest-pinned and hermetic fixtures exercise Runtime Contract V1 on the AWS EC2 elastic adapter; real GPU and feature-level compatibility evidence is deferred. |
 | Tiered developer qualification | Implemented | Fast provider contracts, isolated Docker recovery checks, paid-run locking, and CI evidence separate local correctness from real-cloud qualification. |
 | Capacity and runtime adapter contracts | Experimental | GPU/cache-aware deterministic placement exists; the first v0.1 operational composition is SkyPilot/RunPod elastic, RunPod Serverless, and vLLM. |
 | Provider capacity preflight | Experimental | Optional provider advisors persist available/constrained/unavailable/unknown evidence; RunPod secure-GPU stock is the first read-only implementation. |

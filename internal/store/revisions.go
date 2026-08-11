@@ -38,6 +38,14 @@ func (s *Store) EnsureCandidateRevision(ctx context.Context, tenant, deploymentN
 	if normalized.Runtime == "" {
 		normalized.Runtime = "vllm"
 	}
+	if normalized.RuntimeVersion == "" {
+		if normalized.Runtime == support.DefaultRuntime {
+			normalized.RuntimeVersion = support.DefaultRuntimeVersion
+		} else if normalized.Runtime == "sglang" {
+			normalized.RuntimeVersion = support.SGLangRuntimeVersion
+		}
+	}
+	normalized.Workload = support.NormalizeWorkload(normalized.Runtime, normalized.Workload)
 	if normalized.ComputeMode == "" {
 		if normalized.Cloud != "" || normalized.GPU != "" {
 			normalized.ComputeMode = "elastic"
@@ -52,9 +60,21 @@ func (s *Store) EnsureCandidateRevision(ctx context.Context, tenant, deploymentN
 		return domain.DeploymentRevision{}, errors.New("elastic revision requires cloud and gpu")
 	}
 	if normalized.ComputeMode != "existing" {
-		if err := support.V03().Validate(normalized.Runtime, normalized.Cloud, normalized.ComputeMode); err != nil {
+		if err := support.V06().Validate(normalized.Runtime, normalized.Cloud, normalized.ComputeMode); err != nil {
 			return domain.DeploymentRevision{}, fmt.Errorf("support policy: %w", err)
 		}
+	}
+	if normalized.Runtime == "custom-oci" && normalized.Workload.Empty() {
+		return domain.DeploymentRevision{}, errors.New("custom-oci revision requires an explicit workload contract")
+	}
+	if !normalized.Workload.Empty() {
+		if err := normalized.Workload.Validate(); err != nil {
+			return domain.DeploymentRevision{}, fmt.Errorf("runtime workload: %w", err)
+		}
+		if normalized.ComputeMode != "elastic" {
+			return domain.DeploymentRevision{}, errors.New("custom OCI workload requires elastic compute")
+		}
+		normalized.Port = normalized.Workload.Port
 	}
 	if normalized.RoutingStrategy == "" {
 		normalized.RoutingStrategy = "round-robin"
@@ -70,6 +90,9 @@ func (s *Store) EnsureCandidateRevision(ctx context.Context, tenant, deploymentN
 	}
 	if normalized.MinReplicas < 1 || normalized.MaxReplicas < normalized.MinReplicas {
 		return domain.DeploymentRevision{}, errors.New("revision replica bounds are invalid")
+	}
+	if normalized.Runtime != support.DefaultRuntime && normalized.MaxReplicas > normalized.MinReplicas {
+		return domain.DeploymentRevision{}, errors.New("autoscaling is not yet qualified for this runtime; set min and max replicas equal")
 	}
 	canonical, err := json.Marshal(normalized)
 	if err != nil {

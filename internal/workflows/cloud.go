@@ -13,6 +13,7 @@ import (
 	"github.com/infercrane/infercrane/internal/operations"
 	"github.com/infercrane/infercrane/internal/provision"
 	"github.com/infercrane/infercrane/internal/router"
+	"github.com/infercrane/infercrane/internal/runtimecontract"
 	"github.com/infercrane/infercrane/internal/support"
 )
 
@@ -27,30 +28,49 @@ const (
 )
 
 type CloudRequest struct {
-	DeploymentID           string   `json:"deployment_id"`
-	Name                   string   `json:"name"`
-	Model                  string   `json:"model"`
-	Runtime                string   `json:"runtime,omitempty"`
-	Cloud                  string   `json:"cloud"`
-	ComputeMode            string   `json:"compute_mode,omitempty"`
-	GPU                    string   `json:"gpu"`
-	Region                 string   `json:"region,omitempty"`
-	RuntimeVersion         string   `json:"runtime_version,omitempty"`
-	ModelRevision          string   `json:"model_revision,omitempty"`
-	ImmutableModelRevision string   `json:"immutable_model_revision,omitempty"`
-	RevisionID             string   `json:"revision_id,omitempty"`
-	RuntimeArgs            []string `json:"runtime_args,omitempty"`
-	Port                   int      `json:"port,omitempty"`
-	MinReplicas            int      `json:"min_replicas,omitempty"`
-	MaxReplicas            int      `json:"max_replicas,omitempty"`
-	DesiredReplicas        int      `json:"desired_replicas,omitempty"`
-	PreviousReplicas       int      `json:"previous_replicas,omitempty"`
-	Candidate              bool     `json:"candidate,omitempty"`
-	Actor                  string   `json:"actor,omitempty"`
-	TenantID               string   `json:"tenant_id,omitempty"`
+	DeploymentID           string                   `json:"deployment_id"`
+	Name                   string                   `json:"name"`
+	Model                  string                   `json:"model"`
+	Runtime                string                   `json:"runtime,omitempty"`
+	Cloud                  string                   `json:"cloud"`
+	ComputeMode            string                   `json:"compute_mode,omitempty"`
+	GPU                    string                   `json:"gpu"`
+	Region                 string                   `json:"region,omitempty"`
+	RuntimeVersion         string                   `json:"runtime_version,omitempty"`
+	ModelRevision          string                   `json:"model_revision,omitempty"`
+	ImmutableModelRevision string                   `json:"immutable_model_revision,omitempty"`
+	RevisionID             string                   `json:"revision_id,omitempty"`
+	RuntimeArgs            []string                 `json:"runtime_args,omitempty"`
+	Port                   int                      `json:"port,omitempty"`
+	MinReplicas            int                      `json:"min_replicas,omitempty"`
+	MaxReplicas            int                      `json:"max_replicas,omitempty"`
+	DesiredReplicas        int                      `json:"desired_replicas,omitempty"`
+	PreviousReplicas       int                      `json:"previous_replicas,omitempty"`
+	Candidate              bool                     `json:"candidate,omitempty"`
+	Actor                  string                   `json:"actor,omitempty"`
+	TenantID               string                   `json:"tenant_id,omitempty"`
+	Workload               runtimecontract.Workload `json:"workload,omitzero"`
 }
 
-func (r CloudRequest) Validate() error {
+func (r *CloudRequest) Validate() error {
+	providedPort := r.Port
+	if r.Runtime == "" {
+		r.Runtime = support.DefaultRuntime
+	}
+	if r.RuntimeVersion == "" {
+		if r.Runtime == support.DefaultRuntime {
+			r.RuntimeVersion = support.DefaultRuntimeVersion
+		} else if r.Runtime == "sglang" {
+			r.RuntimeVersion = support.SGLangRuntimeVersion
+		}
+	}
+	r.Workload = support.NormalizeWorkload(r.Runtime, r.Workload)
+	if !r.Workload.Empty() {
+		if providedPort != 0 && providedPort != r.Workload.Port {
+			return errors.New("port conflicts with workload.port")
+		}
+		r.Port = r.Workload.Port
+	}
 	if r.Name == "" || r.Model == "" || r.Cloud == "" || r.GPU == "" {
 		return errors.New("name, model, cloud, and gpu are required")
 	}
@@ -66,10 +86,24 @@ func (r CloudRequest) Validate() error {
 	if r.ComputeMode == "serverless" && r.MinReplicas != 0 {
 		return errors.New("serverless compute requires min replicas 0")
 	}
+	if r.Runtime != "" && r.Runtime != support.DefaultRuntime && r.MaxReplicas > r.MinReplicas {
+		return errors.New("autoscaling is not yet qualified for this runtime; set min and max replicas equal")
+	}
 	if r.Cloud == "aws" && r.Region == "" {
 		return errors.New("AWS BYOC requires an explicit region")
 	}
-	if err := support.V03().Validate(r.Runtime, r.Cloud, r.ComputeMode); err != nil {
+	if r.Runtime == "custom-oci" && r.Workload.Empty() {
+		return errors.New("custom-oci runtime requires an explicit workload contract")
+	}
+	if !r.Workload.Empty() {
+		if r.ComputeMode != "elastic" {
+			return errors.New("custom OCI workloads currently require elastic compute")
+		}
+		if err := r.Workload.Validate(); err != nil {
+			return fmt.Errorf("runtime workload: %w", err)
+		}
+	}
+	if err := support.V06().Validate(r.Runtime, r.Cloud, r.ComputeMode); err != nil {
 		return err
 	}
 	return nil
@@ -144,10 +178,14 @@ func NewReplicaBackends(backends ...ReplicaBackend) (ReplicaBackends, error) {
 		if _, exists := registry.byCloudRuntime[key]; exists {
 			return ReplicaBackends{}, fmt.Errorf("replica backend for cloud %q and runtime %q is already registered", backend.Cloud, backend.Runtime)
 		}
-		if _, exists := registry.byProvider[backend.Name]; exists {
-			return ReplicaBackends{}, fmt.Errorf("replica backend %q is already registered", backend.Name)
+		registry.byCloudRuntime[key] = backend
+		if existing, exists := registry.byProvider[backend.Name]; exists {
+			if existing.Cloud != backend.Cloud {
+				return ReplicaBackends{}, fmt.Errorf("replica backend %q cannot bind different provider implementations", backend.Name)
+			}
+		} else {
+			registry.byProvider[backend.Name] = backend
 		}
-		registry.byCloudRuntime[key], registry.byProvider[backend.Name] = backend, backend
 	}
 	return registry, nil
 }
@@ -241,6 +279,10 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 		runtimeBackend, err := runtimes.ForRuntime(request.Runtime)
 		if err != nil {
 			return "", operations.Permanent("runtime_backend_unavailable", err)
+		}
+		if request.Workload.Empty() && !runtimeBackend.Profile.DefaultWorkload.Empty() {
+			request.Workload = runtimeBackend.Profile.DefaultWorkload
+			request.Port = request.Workload.Port
 		}
 		if request.RevisionID == "" {
 			request.RevisionID = resolved.Deployment.ActiveRevisionID
@@ -451,7 +493,7 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 		if err != nil {
 			return "", operations.Permanent("deployment_missing", err)
 		}
-		request := CloudRequest{DeploymentID: resolved.Deployment.ID, Name: rollout.Name, Model: spec.Model, ModelRevision: spec.ModelRevision, RevisionID: revision.ID, Cloud: spec.Cloud, GPU: spec.GPU, Region: spec.Region, RuntimeVersion: spec.RuntimeVersion, RuntimeArgs: spec.RuntimeArgs, Port: spec.Port, MinReplicas: spec.MinReplicas, MaxReplicas: spec.MaxReplicas, DesiredReplicas: spec.MinReplicas, TenantID: rollout.TenantID, Actor: rollout.Actor, Candidate: true}
+		request := CloudRequest{DeploymentID: resolved.Deployment.ID, Name: rollout.Name, Model: spec.Model, ModelRevision: spec.ModelRevision, RevisionID: revision.ID, Cloud: spec.Cloud, GPU: spec.GPU, Region: spec.Region, RuntimeVersion: spec.RuntimeVersion, RuntimeArgs: spec.RuntimeArgs, Port: spec.Port, Workload: spec.Workload, MinReplicas: spec.MinReplicas, MaxReplicas: spec.MaxReplicas, DesiredReplicas: spec.MinReplicas, TenantID: rollout.TenantID, Actor: rollout.Actor, Candidate: true}
 		request.Runtime = spec.Runtime
 		if request.Runtime == "" {
 			request.Runtime = support.DefaultRuntime
@@ -463,6 +505,10 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 		runtimeBackend, runtimeErr := runtimes.ForRuntime(request.Runtime)
 		if runtimeErr != nil {
 			return "", operations.Permanent("runtime_backend_unavailable", runtimeErr)
+		}
+		if request.Workload.Empty() && !runtimeBackend.Profile.DefaultWorkload.Empty() {
+			request.Workload = runtimeBackend.Profile.DefaultWorkload
+			request.Port = request.Workload.Port
 		}
 		modelArtifact, artifactErr := store.ModelArtifactForRevision(ctx, request.TenantID, request.RevisionID)
 		if errors.Is(artifactErr, domain.ErrNotFound) {
@@ -726,7 +772,7 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 			}
 		}
 	}
-	ensured, err := provider.EnsureReplica(ctx, provision.ReplicaSpec{ExternalKey: externalKey, RequestID: replica.ProviderRequestID, Name: fmt.Sprintf("%s-r%d", request.Name, ordinal), Model: request.Model, ModelRevision: request.ImmutableModelRevision, Cloud: request.Cloud, GPU: request.GPU, Region: request.Region, RuntimeVersion: request.RuntimeVersion, RuntimeArgs: request.RuntimeArgs, Port: request.Port})
+	ensured, err := provider.EnsureReplica(ctx, provision.ReplicaSpec{ExternalKey: externalKey, RequestID: replica.ProviderRequestID, Name: fmt.Sprintf("%s-r%d", request.Name, ordinal), Model: request.Model, ModelRevision: request.ImmutableModelRevision, Cloud: request.Cloud, GPU: request.GPU, Region: request.Region, RuntimeVersion: request.RuntimeVersion, RuntimeArgs: request.RuntimeArgs, Port: request.Port, Workload: request.Workload})
 	if err != nil {
 		if errors.Is(err, provision.ErrInvalidReplicaSpec) {
 			return "", "", "", operations.Permanent("provider_configuration_invalid", err)
@@ -757,7 +803,7 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 		if deleteErr := store.MarkReplicaDeleted(ctx, replica.ID); deleteErr != nil {
 			return "", "", "", classify("runtime_bootstrap_cleanup_failed", deleteErr)
 		}
-		return "", "", "", operations.Permanent("runtime_bootstrap_failed", errors.New("runtime process exited before readiness; inspect provider details for the vLLM error"))
+		return "", "", "", operations.Permanent("runtime_bootstrap_failed", fmt.Errorf("%s process exited before readiness; inspect provider details for the runtime error", backend.Runtime))
 	}
 	if observation.State != "ready" || observation.Endpoint == "" {
 		_ = store.ObserveReplica(ctx, replica.ID, observation.State, observation.Endpoint, "starting", observation.Details, time.Now())

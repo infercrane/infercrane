@@ -34,8 +34,12 @@ routing:
   strategy: round-robin
 ```
 
+SGLang uses a built-in immutable workload profile. Custom OCI images declare the full contract in
+`runtime.workload`; see [Custom OCI workloads](/features/custom-oci). Mutable image tags and
+underspecified probes are rejected before provisioning.
+
 `compute.mode` defaults to `elastic`; elastic replica bounds default to `1..1`. Serverless requires
 `min_replicas: 0` and defaults `max_replicas` to one when omitted. Revisions are immutable; changing
-a field creates a candidate. v0.3 accepts vLLM on RunPod elastic/serverless and the configured AWS
-EC2 elastic adapter. AWS requires an explicit `provider.region`; AWS Serverless and non-vLLM
-runtimes remain unqualified. Cost is omitted unless a trustworthy provider measurement exists.
+a field creates a candidate. v0.6 accepts vLLM on RunPod elastic/serverless and configured AWS EC2
+elastic; SGLang and custom OCI are limited to AWS EC2 elastic with fixed replica bounds. AWS requires
+an explicit `provider.region`. Cost is omitted unless a trustworthy provider measurement exists.

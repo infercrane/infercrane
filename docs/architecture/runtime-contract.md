@@ -1,7 +1,8 @@
 # Runtime Contract V1
 
-Status: implemented contract foundation for v0.2.0. vLLM is locally qualified; real-GPU runtime
-evidence remains deferred until the consolidated v1 qualification.
+Status: implemented through v0.6. vLLM is locally qualified; SGLang and declarative custom OCI
+workloads exercise the contract through hermetic simulation. Real-GPU evidence remains deferred
+until consolidated v1 qualification.
 
 ## Ownership
 
@@ -35,3 +36,9 @@ under a different runtime's capability claims, and an unregistered runtime remai
 InferCrane may accept an immutable OCI image plus explicit protocol, port, health, telemetry and
 shutdown declarations. It does not build or execute an image builder, sandbox arbitrary code, or
 infer compatibility from an `OpenAI-compatible` label alone.
+
+The v0.6 portable contract persists argv rather than a shell fragment and standardizes `/health`,
+`/v1/models`, and `/metrics`. It supports OpenAI-compatible HTTP, HTTP-disconnect cancellation,
+connection-generation draining, and a bounded shutdown-grace declaration. See [Custom OCI
+workloads](/features/custom-oci) and inspect the exact runtime/provider matrix with
+`infercrane integrations`.

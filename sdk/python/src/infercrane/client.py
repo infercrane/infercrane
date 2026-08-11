@@ -33,7 +33,7 @@ class _Transport:
 
     def request(self, method: str, path: str, *, body: Any | None = None, idempotency_key: str | None = None) -> Any:
         payload = None if body is None else json.dumps(body, separators=(",", ":")).encode()
-        headers = {"Accept": "application/json", "Authorization": f"Bearer {self.api_key}", "User-Agent": "infercrane-python/0.4.0rc1"}
+        headers = {"Accept": "application/json", "Authorization": f"Bearer {self.api_key}", "User-Agent": "infercrane-python/0.6.0rc1"}
         if payload is not None:
             headers["Content-Type"] = "application/json"
         if idempotency_key:
@@ -74,11 +74,14 @@ class InferCrane:
         self.timeout = timeout
         self.poll_interval = poll_interval
 
-    def deploy(self, *, model: str, name: str | None = None, cloud: str, gpu: str, runtime: str = "vllm", compute_mode: str = "elastic", min_replicas: int = 1, max_replicas: int = 1, region: str = "", model_revision: str = "", idempotency_key: str | None = None) -> Operation:
+    def deploy(self, *, model: str, name: str | None = None, cloud: str, gpu: str, runtime: str = "vllm", compute_mode: str = "elastic", min_replicas: int = 1, max_replicas: int = 1, region: str = "", model_revision: str = "", runtime_version: str = "", runtime_args: list[str] | None = None, workload: dict[str, Any] | None = None, idempotency_key: str | None = None) -> Operation:
         deployment_name = name or model.rsplit("/", 1)[-1].lower().replace("_", "-")
         body: dict[str, Any] = {"name": deployment_name, "model": model, "runtime": runtime, "cloud": cloud, "gpu": gpu, "compute_mode": compute_mode, "min_replicas": min_replicas, "max_replicas": max_replicas}
         if region: body["region"] = region
         if model_revision: body["model_revision"] = model_revision
+        if runtime_version: body["runtime_version"] = runtime_version
+        if runtime_args: body["runtime_args"] = runtime_args
+        if workload is not None: body["workload"] = workload
         result = self.api.create_deployment(body=body, idempotency_key=idempotency_key or f"sdk-deploy-{uuid.uuid4()}")
         return Operation.from_dict(result["operation"])
 
@@ -111,7 +114,7 @@ class InferCrane:
 
     def stream_chat(self, deployment: str, messages: list[dict[str, str]], **parameters: Any) -> Iterator[dict[str, Any]]:
         payload = {"model": deployment, "messages": messages, "stream": True, **parameters}
-        request = Request(self.gateway_url + "/v1/chat/completions", data=json.dumps(payload, separators=(",", ":")).encode(), headers={"Accept": "text/event-stream", "Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json", "User-Agent": "infercrane-python/0.4.0rc1"}, method="POST")
+        request = Request(self.gateway_url + "/v1/chat/completions", data=json.dumps(payload, separators=(",", ":")).encode(), headers={"Accept": "text/event-stream", "Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json", "User-Agent": "infercrane-python/0.6.0rc1"}, method="POST")
         try:
             response = urlopen(request, timeout=self.timeout)
         except HTTPError as error:

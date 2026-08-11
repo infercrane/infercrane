@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"strings"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/infercrane/infercrane/internal/authz"
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/runtimecontract"
+	"github.com/infercrane/infercrane/internal/support"
 	"github.com/infercrane/infercrane/internal/workflows"
 )
 
@@ -70,7 +73,7 @@ func TestSubmitCloudDeploymentIsAtomicAndIdempotent(t *testing.T) {
 	ctx := context.Background()
 	s := openStore(t, ctx)
 	name := "cloud-" + time.Now().UTC().Format("150405.000000000")
-	request := `{"name":"` + name + `","model":"Qwen/Qwen3-8B","cloud":"runpod","gpu":"L40S","runtime_version":"0.10.2"}`
+	request := `{"name":"` + name + `","model":"Qwen/Qwen3-8B","cloud":"runpod","gpu":"L40S","runtime_version":"0.10.2","workload":{"image":"registry.example/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","command":["serve"],"protocol":"openai","port":8000,"readiness_path":"/health","models_path":"/v1/models","metrics_path":"/metrics","cancellation":"http-disconnect","drain":"connection","shutdown_grace_seconds":30}}`
 	deployment, operation, created, err := s.SubmitCloudDeployment(ctx,
 		domain.Deployment{Name: name, Model: "Qwen/Qwen3-8B", MinReplicas: 1, MaxReplicas: 4, AutoscalingEnabled: true},
 		domain.Operation{Kind: "deployment.converge", IdempotencyKey: "submit-" + name, RequestJSON: request},
@@ -86,7 +89,7 @@ func TestSubmitCloudDeploymentIsAtomicAndIdempotent(t *testing.T) {
 		t.Fatalf("resolve targetless desired deployment = (%#v, %v)", resolved, err)
 	}
 	revision, err := s.Revision(ctx, "global", name, resolved.Deployment.ActiveRevisionID)
-	if err != nil || !strings.Contains(revision.SpecJSON, `"compute_mode": "elastic"`) || !strings.Contains(revision.SpecJSON, `"cloud": "runpod"`) || !strings.Contains(revision.SpecJSON, `"gpu": "L40S"`) {
+	if err != nil || !strings.Contains(revision.SpecJSON, `"compute_mode": "elastic"`) || !strings.Contains(revision.SpecJSON, `"cloud": "runpod"`) || !strings.Contains(revision.SpecJSON, `"gpu": "L40S"`) || !strings.Contains(revision.SpecJSON, `"image": "registry.example/runtime@sha256:aaaaaaaa`) {
 		t.Fatalf("active revision spec=%s err=%v", revision.SpecJSON, err)
 	}
 
@@ -724,6 +727,35 @@ func TestDeploymentRevisionsAreImmutableAndPromoteExplicitly(t *testing.T) {
 	rows, err := s.Revisions(ctx, "global", "revision-prod")
 	if err != nil || len(rows) != 3 || rows[2].SpecJSON != initialSpec || rows[2].Status != "active" {
 		t.Fatalf("revision history=%#v err=%v", rows, err)
+	}
+}
+
+func TestCandidateSGLangWorkloadIsCanonicalAndImmutable(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	name := "sglang-revision-" + time.Now().UTC().Format("150405.000000000")
+	target := name + "-seed"
+	if _, err := s.AddTarget(ctx, domain.Target{Name: target, URL: "http://sglang-seed", Provider: "existing", Runtime: "vllm", UpstreamModel: "model-v1"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApplyDeployment(ctx, domain.Deployment{Name: name, Model: "model-v1", MinReplicas: 1, MaxReplicas: 1}, []string{target}); err != nil {
+		t.Fatal(err)
+	}
+	candidate, err := s.CreateCandidateRevision(ctx, "global", name, `{"model":"model-v2","runtime":"sglang","routing_strategy":"round-robin","min_replicas":1,"max_replicas":1,"compute_mode":"elastic","cloud":"aws","region":"eu-central-1","gpu":"L40S"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var persisted struct {
+		RuntimeVersion string                   `json:"runtime_version"`
+		Workload       runtimecontract.Workload `json:"workload"`
+	}
+	if err := json.Unmarshal([]byte(candidate.SpecJSON), &persisted); err != nil {
+		t.Fatalf("decode candidate spec: %v", err)
+	}
+	if persisted.RuntimeVersion != support.SGLangRuntimeVersion ||
+		!strings.HasPrefix(persisted.Workload.Image, "lmsysorg/sglang:v0.5.12@sha256:") ||
+		persisted.Workload.ReadinessPath != "/health" {
+		t.Fatalf("candidate spec was not canonicalized: %#v", persisted)
 	}
 }
 

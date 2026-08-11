@@ -441,6 +441,34 @@ func TestCloudDeployPersistsAndQueuesConverge(t *testing.T) {
 	}
 }
 
+func TestPortableRuntimeDeployValidationAndPersistence(t *testing.T) {
+	validWorkload := `{"image":"registry.example/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","command":["serve","--model","${MODEL}"],"protocol":"openai","port":8000,"readiness_path":"/health","models_path":"/v1/models","metrics_path":"/metrics","cancellation":"http-disconnect","drain":"connection","shutdown_grace_seconds":30}`
+	for _, test := range []struct {
+		name, body string
+		status     int
+		contains   string
+	}{
+		{"sglang-default", `{"name":"sg","model":"org/model","runtime":"sglang","cloud":"aws","region":"eu-central-1","gpu":"L40S"}`, http.StatusAccepted, `"image":"lmsysorg/sglang:v0.5.12@sha256:`},
+		{"custom", `{"name":"custom","model":"org/model","runtime":"custom-oci","cloud":"aws","region":"eu-central-1","gpu":"L40S","workload":` + validWorkload + `}`, http.StatusAccepted, `"runtime":"custom-oci"`},
+		{"mutable", `{"name":"bad","model":"org/model","runtime":"custom-oci","cloud":"aws","region":"eu-central-1","gpu":"L40S","workload":` + strings.Replace(validWorkload, "@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ":latest", 1) + `}`, http.StatusUnprocessableEntity, `pinned by @sha256`},
+		{"missing", `{"name":"bad","model":"org/model","runtime":"custom-oci","cloud":"aws","region":"eu-central-1","gpu":"L40S"}`, http.StatusUnprocessableEntity, `requires an explicit workload`},
+		{"port-conflict", `{"name":"bad","model":"org/model","runtime":"custom-oci","cloud":"aws","region":"eu-central-1","gpu":"L40S","port":9000,"workload":` + validWorkload + `}`, http.StatusUnprocessableEntity, `port conflicts with workload.port`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := &fakeStore{created: true}
+			request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments", strings.NewReader(test.body))
+			request.Header.Set("Authorization", "Bearer secret")
+			request.Header.Set("Idempotency-Key", "portable-"+test.name)
+			response := httptest.NewRecorder()
+			(API{Store: store, APIKey: "secret"}).Handler().ServeHTTP(response, request)
+			combined := response.Body.String() + store.operation.RequestJSON
+			if response.Code != test.status || !strings.Contains(combined, test.contains) {
+				t.Fatalf("status=%d body=%s operation=%s", response.Code, response.Body.String(), store.operation.RequestJSON)
+			}
+		})
+	}
+}
+
 func TestServerlessDeployQueuesProviderNativeConverge(t *testing.T) {
 	store := &fakeStore{created: true}
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments", strings.NewReader(`{"name":"qwen","model":"Qwen/Qwen3-8B","compute_mode":"serverless","cloud":"runpod","gpu":"L40S","min_replicas":0,"max_replicas":4}`))
