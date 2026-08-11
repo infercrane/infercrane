@@ -76,6 +76,10 @@ milestone_gates:
     - runpod_elastic
     - runpod_serverless
     - aws_byoc
+    - gcp_compute_byoc
+    - aws_managed_profiles
+    - gcp_managed_profiles
+    - coreweave_cks
     - real_vllm
     - real_sglang
     - real_custom_oci
