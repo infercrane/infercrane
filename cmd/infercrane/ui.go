@@ -739,21 +739,6 @@ func (m uiModel) renderExplanation(s uiStyles, width int) string {
 	return s.title.Render("EXPLANATION") + "\n" + truncateText(reason, max(20, width))
 }
 
-func (m uiModel) renderEvents(s uiStyles, limit, width int) string {
-	lines := []string{s.title.Render("EVENTS")}
-	if len(m.events) == 0 {
-		return strings.Join(append(lines, s.subtle.Render("No persisted events")), "\n")
-	}
-	for index, event := range m.events {
-		if index >= limit {
-			break
-		}
-		line := uiEventTime(event.CreatedAt, time.Now()) + "  " + fmt.Sprintf("%-20s", truncateText(event.Type, 20)) + " " + event.Summary
-		lines = append(lines, truncateText(line, max(20, width)))
-	}
-	return strings.Join(lines, "\n")
-}
-
 func (m uiModel) renderOperationView(s uiStyles, width int) string {
 	content := m.renderOperation(s)
 	if m.view.ActiveOperation == nil {

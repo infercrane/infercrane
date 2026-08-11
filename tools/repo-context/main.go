@@ -70,9 +70,16 @@ func generate(root string) ([]byte, error) {
 		}
 		rel := relative(root, path)
 		if entry.IsDir() {
-			if rel == ".git" || rel == ".venv" || rel == "dist" || rel == "build" || rel == "node_modules" || rel == "docs/node_modules" || rel == "docs/.mintlify" {
+			if skipRepositoryDirectory(rel) {
 				return filepath.SkipDir
 			}
+			return nil
+		}
+		// Acceptance evidence uses named pipes to split human progress from
+		// machine-readable output. Never open sockets, devices, FIFOs, or symlinks
+		// while generating a source inventory: reads may block indefinitely and
+		// ignored runtime artifacts are not repository context.
+		if entry.Type()&os.ModeType != 0 {
 			return nil
 		}
 		data, err := os.ReadFile(path)
@@ -124,6 +131,15 @@ func generate(root string) ([]byte, error) {
 		return nil, err
 	}
 	return render(packages, sortedKeys(commands), sortedKeys(endpoints), sortedKeys(envs), sortedKeys(tables), sorted(migrations), sorted(adrs)), nil
+}
+
+func skipRepositoryDirectory(rel string) bool {
+	switch rel {
+	case ".git", ".venv", ".infercrane", "bin", "dist", "build", "node_modules", "docs/node_modules", "docs/.mintlify":
+		return true
+	default:
+		return false
+	}
 }
 
 func render(packages map[string]*packageInfo, commands, endpoints, envs, tables, migrations, adrs []string) []byte {
@@ -207,7 +223,7 @@ func validateLinks(root string) error {
 		}
 		rel := relative(root, path)
 		if entry.IsDir() {
-			if rel == ".git" || rel == ".venv" || rel == "node_modules" || rel == "docs/node_modules" || rel == "docs/.mintlify" {
+			if skipRepositoryDirectory(rel) {
 				return filepath.SkipDir
 			}
 			return nil
