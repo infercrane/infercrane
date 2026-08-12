@@ -1,3 +1,8 @@
+---
+title: Compatibility and qualification
+description: How InferCrane separates registered adapters, local conformance, and real-infrastructure support evidence.
+---
+
 # Compatibility and qualification policy
 
 InferCrane follows semantic versioning after `1.0`. The complete API, DeploymentSpec, database,

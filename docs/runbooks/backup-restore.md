@@ -1,3 +1,9 @@
+---
+title: PostgreSQL backup and restore
+description: Back up control-plane state, restore into a safe target, and reconcile external resources.
+sidebarTitle: Backup and restore
+---
+
 # PostgreSQL backup and restore drill
 
 Set a TLS-protected `INFERCRANE_DATABASE_URL`, then create and validate a custom-format backup:

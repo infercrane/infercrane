@@ -1,3 +1,8 @@
+---
+title: Release Guard
+description: Compare active and candidate evidence with deterministic, persisted promotion policy.
+---
+
 # Release Guard
 
 Release Guard is a deterministic, persisted comparison between an active revision and its candidate. It never uses an LLM to decide whether a candidate should be promoted.

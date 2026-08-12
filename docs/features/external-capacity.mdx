@@ -85,7 +85,7 @@ each external transmission, the gateway atomically consumes a request reservatio
 worst-case cost reservation. Exhaustion returns an error before sending bytes.
 
 Reservations are deliberately conservative. A request that reserves more than its eventual provider
-charge does not receive an automatic refund in v0.3 because InferCrane does not ingest an authoritative
+charge does not receive an automatic refund because InferCrane does not ingest an authoritative
 provider invoice. `cost_limit_usd` is therefore an authorization ceiling, not an estimated bill.
 
 InferCrane selects the provider before transmission. It never replays a request after a possible send,
@@ -101,6 +101,6 @@ reference.
 ## Current limits
 
 - Weighted, semantic, shadow, and request-duplicating external routing are not implemented.
-- Environment references are the only secret resolver in v0.3.
+- Environment references are currently the only secret resolver.
 - Provider prices are not fetched or fabricated.
 - Real OpenRouter billing qualification is deferred to the consolidated manual release gate.

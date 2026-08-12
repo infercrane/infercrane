@@ -1,3 +1,8 @@
+---
+title: Reproducible benchmarking
+description: Run AIPerf workloads and persist exact model, runtime, hardware, and workload evidence.
+---
+
 # Reproducible benchmarking
 
 InferCrane delegates load generation and measurement to [AIPerf](https://github.com/ai-dynamo/aiperf). It does not contain a second load generator.

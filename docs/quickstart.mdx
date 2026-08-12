@@ -3,126 +3,139 @@ title: Quickstart
 description: Run InferCrane locally and send an OpenAI-compatible request in under five minutes.
 ---
 
-# Run InferCrane locally
+# Your first InferCrane request
 
-This tour starts the complete development topology with PostgreSQL, InferCrane, two GPU-free fake vLLM workers, and a development router. It proves the control and request paths; it is not a performance test or production substitute for vLLM.
+In this guide you will start the complete control and request path, call a stable model endpoint, and
+inspect the durable state behind it. No GPU or cloud account is required.
+
+<Info>
+The local stack uses GPU-free fake vLLM workers. It proves application and lifecycle behavior, not
+model quality, GPU performance, or real-provider compatibility.
+</Info>
 
 ## Prerequisites
 
 - Git
 - Docker with Compose v2
-- Ports `18000` and Docker's internal PostgreSQL network available
+- Port `18000` available
 
 <Steps>
-  <Step title="Clone the repository">
+  <Step title="Clone InferCrane">
     ```bash
     git clone https://github.com/infercrane/infercrane.git
     cd infercrane
     ```
   </Step>
 
-  <Step title="Start the development stack">
+  <Step title="Start the local stack">
     ```bash
     docker compose up --build -d
-    docker compose ps
-curl -fsS http://127.0.0.1:18000/readyz
-```
-
-Run `infercrane dashboard --open` (or open `http://127.0.0.1:18000/dashboard/`) and connect with the development key `infercrane` to see
-the same fleet and persisted evidence in the embedded [operations dashboard](/features/dashboard).
-The key remains in the current browser tab.
-
-    The final request exits successfully when PostgreSQL is ready. The development API key is `infercrane`; production configuration rejects this default.
-  </Step>
-
-  <Step title="List the logical model">
-    ```bash
-    curl -fsS \
-      -H 'Authorization: Bearer infercrane' \
-      http://127.0.0.1:18000/v1/models
+    curl -fsS http://127.0.0.1:18000/readyz
     ```
 
-    The seeded deployment exposes `qwen-prod`, independently of either worker's network address.
+    The stack includes PostgreSQL, InferCrane, two fake workers, and a development router. The
+    development API key is `infercrane`; production mode rejects that default.
   </Step>
 
-  <Step title="Send an OpenAI-compatible request">
-    <Tabs>
-      <Tab title="InferCrane CLI">
-        ```bash
-        docker compose exec infercrane \
-          infercrane request qwen-prod --message "Hello"
-        ```
+  <Step title="Send a request">
+    <CodeGroup>
+    ```bash InferCrane CLI
+    docker compose exec infercrane \
+      infercrane request qwen-prod --message "Explain durable operations in one sentence."
+    ```
 
-        Add `--stream` to print response text as tokens arrive.
-      </Tab>
-      <Tab title="curl">
-        ```bash
-        curl -fsS http://127.0.0.1:18000/v1/chat/completions \
-          -H 'Authorization: Bearer infercrane' \
-          -H 'Content-Type: application/json' \
-          -d '{
-            "model": "qwen-prod",
-            "messages": [{"role": "user", "content": "Hello"}]
-          }'
-        ```
-      </Tab>
-      <Tab title="Python">
-        ```python
-        from openai import OpenAI
+    ```bash cURL
+    curl -fsS http://127.0.0.1:18000/v1/chat/completions \
+      -H 'Authorization: Bearer infercrane' \
+      -H 'Content-Type: application/json' \
+      -d '{
+        "model": "qwen-prod",
+        "messages": [{"role": "user", "content": "Hello"}]
+      }'
+    ```
 
-        client = OpenAI(
-            base_url="http://127.0.0.1:18000/v1",
-            api_key="infercrane",
-        )
+    ```python Python
+    from openai import OpenAI
 
-        response = client.chat.completions.create(
-            model="qwen-prod",
-            messages=[{"role": "user", "content": "Hello"}],
-        )
-        print(response.choices[0].message.content)
-        ```
-      </Tab>
-      <Tab title="JavaScript">
-        ```javascript
-        import OpenAI from "openai";
+    client = OpenAI(
+        base_url="http://127.0.0.1:18000/v1",
+        api_key="infercrane",
+    )
 
-        const client = new OpenAI({
-          baseURL: "http://127.0.0.1:18000/v1",
-          apiKey: "infercrane",
-        });
+    response = client.chat.completions.create(
+        model="qwen-prod",
+        messages=[{"role": "user", "content": "Hello"}],
+    )
+    print(response.choices[0].message.content)
+    ```
 
-        const response = await client.chat.completions.create({
-          model: "qwen-prod",
-          messages: [{ role: "user", content: "Hello" }],
-        });
-        console.log(response.choices[0].message.content);
-        ```
-      </Tab>
-    </Tabs>
+    ```typescript TypeScript
+    import OpenAI from "openai";
+
+    const client = new OpenAI({
+      baseURL: "http://127.0.0.1:18000/v1",
+      apiKey: "infercrane",
+    });
+
+    const response = await client.chat.completions.create({
+      model: "qwen-prod",
+      messages: [{ role: "user", content: "Hello" }],
+    });
+    console.log(response.choices[0].message.content);
+    ```
+    </CodeGroup>
+
+    Add `--stream` to the CLI request to print response text as chunks arrive.
   </Step>
 
-  <Step title="Inspect durable state">
+  <Step title="Inspect what happened">
     ```bash
     docker compose exec infercrane infercrane status qwen-prod
     docker compose exec infercrane infercrane events qwen-prod
     docker compose exec infercrane infercrane explain qwen-prod
     ```
 
-    These CLI workflows call the authenticated control-plane API. They do not read PostgreSQL directly.
+    These commands use the authenticated control-plane API. Public CLI workflows never connect
+    directly to PostgreSQL.
   </Step>
 
-  <Step title="Stop without deleting data">
+  <Step title="Open the operations view">
+    ```bash
+    docker compose exec infercrane infercrane dashboard
+    ```
+
+    Open [http://127.0.0.1:18000/dashboard/](http://127.0.0.1:18000/dashboard/) and use the local key
+    `infercrane`. The browser keeps it in the current tab only. You can also run `infercrane ui` in an
+    interactive terminal.
+  </Step>
+
+  <Step title="Stop the stack">
     ```bash
     docker compose down
     ```
 
-    Add `--volumes` only when you intentionally want to delete the local database volume.
+    This preserves PostgreSQL data. Add `--volumes` only when you intend to delete the local state.
   </Step>
 </Steps>
 
-## Move to a qualified provider
+## Choose your next path
 
-The public installation formula is prepared but not yet published. Until the release artifact exists, build the CLI from source:
+<CardGroup cols={3}>
+  <Card title="Deploy a real model" icon="server" href="/showcase/build-inference">
+    Plan provider and runtime choices before creating billable capacity.
+  </Card>
+  <Card title="Connect an endpoint" icon="plug" href="/showcase/connect-existing">
+    Observe an existing vLLM, LiteLLM, or OpenAI-compatible endpoint first.
+  </Card>
+  <Card title="Understand the model" icon="shapes" href="/concepts">
+    Learn endpoints, environments, serving plans, deployments, and revisions.
+  </Card>
+</CardGroup>
+
+## Before creating real infrastructure
+
+The Homebrew formula and release archives are prepared but not yet publicly released. Until the
+release package is published, build the CLI from source:
 
 ```bash
 go build -o ./bin/infercrane ./cmd/infercrane
@@ -133,21 +146,7 @@ export INFERCRANE_API_KEY='ISSUED_CONTROL_PLANE_CREDENTIAL'
 ./bin/infercrane plan Qwen/Qwen3-8B --cloud runpod --gpu L40S
 ```
 
-`init` stores an already-issued credential with private file permissions. It does not create a principal. `plan` is side-effect-free and reports pricing as unavailable unless trustworthy provider evidence exists.
-
-<Warning>
-Choose a provider only after reading its capability and qualification state in `infercrane
-integrations`. Do not submit a deploy command until the operator has completed [provider
-setup](/provider-setup). A real deployment can create billable resources. RunPod, AWS BYOC, and
-Kubernetes have different prerequisites; registration is not proof that an exact combination has
-completed real-GPU qualification.
-</Warning>
-
-<CardGroup cols={2}>
-  <Card title="Deployment lifecycle" icon="rotate" href="/features/lifecycle">
-    Learn what remains durable when a terminal or control-plane process disconnects.
-  </Card>
-  <Card title="DeploymentSpec" icon="file-code" href="/deployment-spec">
-    Move from flags to a reviewable YAML deployment definition.
-  </Card>
-</CardGroup>
+`plan` is side-effect free. A real `deploy` can create billable resources, so check
+[provider setup](/provider-setup) and the [capability matrix](/project-status) first. Adapter
+registration does not prove that an exact model, runtime, GPU, and provider combination has passed
+real-infrastructure qualification.

@@ -52,7 +52,7 @@ while workers are replaced, recovered, or reconfigured.
 
 ## Project status
 
-InferCrane is preparing its v1.0 release candidate. Its lifecycle, persistence, routing, and policy
+InferCrane is preparing its v2.0 release candidate. Its lifecycle, persistence, routing, and policy
 layers are provider-neutral; adapters declare versioned capabilities and independent qualification
 evidence. The candidate includes durable lifecycle/autoscaling, governed external fallback, AWS EC2
 BYOC, RunPod elastic and native Serverless, namespaced Kubernetes/KServe, vLLM, SGLang, immutable
@@ -62,8 +62,8 @@ Passports.
 
 Local race, PostgreSQL, fault-injection, Docker, Kind, package, migration, security, and
 documentation qualification is automated. Registration is not real-provider proof: RunPod, AWS,
-and Kubernetes GPU acceptance remains explicitly deferred until the single consolidated workflow
-runs against the frozen `v1.0.0-rc.1` commit. No public performance, pricing, or universal
+GCP, and Kubernetes GPU acceptance remains explicitly deferred until the consolidated manual
+qualification runs against the frozen release candidate. No public performance, pricing, or universal
 provider/runtime claim is made from simulated evidence.
 
 See the authoritative [capability status](docs/project-status.md) before relying on a feature.

@@ -5,7 +5,7 @@ description: Configure the narrow, private-network AWS EC2 provider adapter.
 
 # AWS EC2 BYOC
 
-The v0.3 AWS adapter provisions one EC2 instance per durable replica intent through Provider Contract
+The AWS adapter provisions one EC2 instance per durable replica intent through Provider Contract
 V1. InferCrane assumes a customer role, uses explicit private networking, and adopts resources by
 idempotency token and ownership tags after uncertain responses.
 
@@ -82,11 +82,11 @@ infercrane deploy Qwen/Qwen3-8B \
 Closing the terminal does not stop provisioning. Resume with the operation ID printed by `deploy`.
 Deletion terminates only instances carrying InferCrane ownership tags and the persisted replica key.
 
-For the simulated v0.6 portable-runtime path, apply
+For the simulated portable-runtime path, apply
 [`examples/sglang.yaml`](https://github.com/infercrane/infercrane/blob/main/examples/sglang.yaml) or
 replace the placeholder image in
 [`examples/custom-oci.yaml`](https://github.com/infercrane/infercrane/blob/main/examples/custom-oci.yaml).
-Real GPU compatibility remains a deferred v1 manual gate.
+Real GPU compatibility remains a deferred manual qualification gate.
 
 ## Security and accounting behavior
 
@@ -94,11 +94,11 @@ STS credentials are short lived and exist only in the child AWS CLI process envi
 does not persist or return them. Workers retrieve their API key directly from Secrets Manager through
 the instance profile. EC2 is launched without a public IP.
 
-Cost is reported as `unknown` in v0.3. InferCrane does not ship a live AWS pricing catalog and will not
+Cost is reported as `unknown`. InferCrane does not ship a live AWS pricing catalog and will not
 infer cost from an instance-type name.
 
 ## Qualification state
 
 Hermetic contract tests cover create-response loss, adoption, replay, deletion, tag-scoped inventory,
 private networking, immutable images, and credential redaction. Real AWS provisioning remains deferred
-until the consolidated v1 manual qualification; inspect `infercrane integrations` for the exact state.
+until consolidated manual qualification; inspect `infercrane integrations` for the exact state.

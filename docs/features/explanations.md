@@ -1,3 +1,8 @@
+---
+title: Deterministic explanations
+description: Explain degraded state, scaling, rollouts, and cold starts from persisted evidence.
+---
+
 # Deterministic explanations
 
 InferCrane explanations are projections of persisted state, events, decisions, policies, and measurements. They do not call an LLM and do not infer facts that were not recorded.

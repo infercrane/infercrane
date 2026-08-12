@@ -1,3 +1,8 @@
+---
+title: Troubleshooting
+description: Diagnose configuration, provisioning, readiness, routing, rollout, and cleanup failures.
+---
+
 # Troubleshooting
 
 Start with `infercrane doctor`, then `status`, `events`, `inspect`, and `explain`. Use `operation ID` when a lifecycle operation is retrying. `inspect` exposes provider request/resource IDs needed to reconcile external inventory.

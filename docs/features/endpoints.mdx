@@ -74,14 +74,14 @@ until the request finishes.
 
 Promotion fails closed unless the latest persisted endpoint Release Guard evaluation is `PASS` for
 the current active/candidate pair. `REJECT` and `INCONCLUSIVE` can be inspected but cannot be
-promoted. Candidate traffic is never duplicated silently; v1.1 evaluates trustworthy telemetry
+promoted. Candidate traffic is never duplicated silently; Release Guard evaluates trustworthy telemetry
 from the primary deployment-backed binding and reports insufficient evidence as `INCONCLUSIVE`.
 
 ## Ownership boundaries
 
-Bindings record `observe-only`, `traffic-managed`, or `lifecycle-managed` ownership. v1.1 supports
+Bindings record `observe-only`, `traffic-managed`, or `lifecycle-managed` ownership. InferCrane supports
 fully compiled lifecycle-managed deployment bindings. Incremental import/adopt workflows and
-customer-managed external bindings are the v1.2 scope; creating a record does not imply that
+customer-managed external bindings; creating a record does not imply that
 InferCrane owns an external workload's lifecycle.
 
 The inference hot path reads an immutable in-memory endpoint snapshot. It never queries PostgreSQL.

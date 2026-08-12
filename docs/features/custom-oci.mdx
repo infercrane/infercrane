@@ -44,10 +44,10 @@ The command is argv, not a shell program. `${MODEL}`, `${MODEL_REVISION}`, `${PO
 `${WORKER_API_KEY}` argument placeholder are replaced
 without losing argument boundaries. The workload receives the worker credential as
 `INFERCRANE_WORKER_API_KEY`; the value is not persisted in revision or provider metadata.
-v0.6 still resolves `model.id` through the Hugging Face `ModelArtifact` adapter before launch; a
+InferCrane resolves `model.id` through the Hugging Face `ModelArtifact` adapter before launch; a
 custom image does not imply arbitrary artifact protocols.
 
-## v0.6 contract
+## Runtime contract
 
 The image must be pinned by `@sha256`. The supported protocol and probe paths are deliberately
 narrow: OpenAI-compatible HTTP, `/health`, `/v1/models`, and `/metrics`. Client disconnect must
@@ -55,7 +55,7 @@ cancel upstream HTTP work, and InferCrane withdraws the router generation and dr
 connections before provider deletion.
 
 Custom OCI is currently simulated-qualified on the AWS EC2 elastic path, whose user-data bootstrap
-launches the immutable image directly. Real GPU evidence is deferred to the consolidated v1
+launches the immutable image directly. Real GPU evidence is deferred to consolidated
 qualification. RunPod/SkyPilot images require an additional SSH bootstrap contract and are not
 claimed compatible. Serverless, arbitrary probe scripts, mutable tags, image builds and autoscaling
 signals for custom runtimes are rejected rather than silently assumed.

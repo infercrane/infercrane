@@ -1,3 +1,8 @@
+---
+title: DeploymentSpec
+description: Declaratively define model identity, runtime, provider, compute, scaling, and routing.
+---
+
 # DeploymentSpec
 
 New files declare the stable v1 file contract:

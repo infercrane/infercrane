@@ -2,7 +2,7 @@
   "$schema": "https://mintlify.com/docs.json",
   "theme": "maple",
   "name": "InferCrane",
-  "description": "Production inference without the platform engineering. Durable lifecycle, safe releases, and reproducible operations across registered infrastructure and runtime adapters.",
+  "description": "Deploy and operate AI models across your infrastructure. Build or connect inference with durable operations, safe releases, and inspectable evidence.",
   "colors": {
     "primary": "#2563EB",
     "light": "#60A5FA",
@@ -95,31 +95,21 @@
   "navigation": {
     "groups": [
       {
-        "group": "START",
-        "pages": ["index", "quickstart", "concepts", "architecture/system"]
+        "group": "GET STARTED",
+        "pages": ["index", "why-infercrane", "compare", "quickstart", "concepts", "architecture/system"]
       },
       {
-        "group": "SHOWCASE",
+        "group": "BUILD",
         "pages": [
           "showcase/index",
           "showcase/build-inference",
           "showcase/connect-existing",
-          "showcase/gateways-and-sandboxes",
-          "showcase/safe-rollouts",
-          "showcase/capacity-evidence"
-        ]
-      },
-      {
-        "group": "DEPLOY",
-        "pages": [
+          "features/endpoints",
           "deployment-spec",
-        "features/endpoints",
-        "features/adoption-diagnostics",
-        "features/protocols",
-        "features/model-artifacts",
+          "features/protocols",
+          "features/model-artifacts",
           "features/custom-oci",
           "features/provisioning",
-          "features/gateway",
           "features/revisions"
         ]
       },
@@ -132,18 +122,25 @@
           "features/autoscaling",
           "features/admission-async",
           "features/release-guard",
-          "features/inference-passports",
           "features/external-capacity",
           "features/serverless",
           "features/telemetry",
           "features/benchmarking",
+          "features/cold-starts",
+          "features/explanations",
+          "showcase/safe-rollouts",
+          "showcase/capacity-evidence"
+        ]
+      },
+      {
+        "group": "INTELLIGENCE",
+        "pages": [
           "features/recipes-lab",
           "features/replay-capacity",
-          "features/finops-autopilot",
-          "features/context-passport-burst",
           "features/inference-decisions",
-          "features/cold-starts",
-          "features/explanations"
+          "features/finops-autopilot",
+          "features/inference-passports",
+          "features/context-passport-burst"
         ]
       },
       {
@@ -154,8 +151,7 @@
           "integrations/typescript",
           "integrations/terraform",
           "integrations/github-actions",
-          "architecture/provider-contract",
-          "architecture/runtime-contract",
+          "showcase/gateways-and-sandboxes",
           "integrations/vllm",
           "integrations/sglang",
           "integrations/runpod",
@@ -164,7 +160,9 @@
           "integrations/provider-profiles",
           "integrations/kubernetes",
           "integrations/aiperf",
-          "integrations/hugging-face"
+          "integrations/hugging-face",
+          "architecture/provider-contract",
+          "architecture/runtime-contract"
         ]
       },
       {
@@ -179,8 +177,6 @@
           "provider-setup",
           "runbooks/backup-restore",
           "upgrade",
-          "release-packaging",
-          "v2-manual-qualification",
           "development",
           "troubleshooting",
           "faq"
@@ -190,54 +186,9 @@
         "group": "PROJECT",
         "pages": [
           "project-status",
-          "production-readiness",
-          "release-notes-v1.6.0-rc.1",
-          "release-notes-v1.7.0-rc.1",
-          "release-notes-v1.8.0-rc.1",
-          "release-notes-v1.9.0-rc.1",
-          "release-notes-v2.0.0",
-          "release-notes-v1.5.0-rc.1",
-          "release-notes-v1.4.0-rc.1",
-          "release-notes-v1.0.0-rc.1",
+          "roadmap",
           "security",
-          "security-review-v1",
-          "architecture/invariants",
-          {
-            "group": "Architecture decisions",
-            "pages": [
-              "adr/index",
-              "adr/0001-control-data-plane",
-              "adr/0002-postgresql-source-of-truth",
-              "adr/0003-instance-owned-router-generations",
-              "adr/0004-repository-native-engineering-memory",
-              "adr/0005-durable-operations-and-policy-boundaries",
-              "adr/0006-leased-operation-execution",
-              "adr/0007-tenant-scoped-identity",
-              "adr/0008-immutable-deployment-revisions",
-              "adr/0009-qualified-support-and-backend-registration",
-              "adr/0010-cobra-cli-and-progressive-terminal-output",
-              "adr/0011-tiered-provider-qualification",
-              "adr/0012-versioned-integration-contracts",
-              "adr/0013-governed-external-capacity-and-byoc",
-              "adr/0014-generated-automation-clients",
-              "adr/0015-embedded-evidence-dashboard",
-              "adr/0016-portable-oci-runtime-workloads",
-              "adr/0017-deterministic-inference-decisions",
-              "adr/0018-signed-release-evidence",
-              "adr/0019-kubernetes-integration-boundaries",
-              "adr/0020-provider-neutral-production-artifact",
-              "adr/0021-stable-endpoint-serving-plans",
-              "adr/0022-incremental-adoption-and-deterministic-diagnostics",
-              "adr/0023-in-memory-admission-and-encrypted-async"
-              ,"adr/0024-provider-product-profiles"
-              ,"adr/0025-fenced-ha-and-protocol-overlap"
-              ,"adr/0026-content-addressed-recipes-and-evidence-lab"
-              ,"adr/0027-privacy-preserving-replay-and-observed-capacity"
-              ,"adr/0028-trustworthy-finops-and-human-approved-autopilot"
-              ,"adr/0029-context-identity-delegated-survival-and-bounded-burst"
-            ]
-          },
-          "release-acceptance"
+          "compatibility"
         ]
       }
     ]

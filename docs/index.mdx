@@ -1,19 +1,20 @@
 ---
-title: Production inference without the platform engineering.
-description: A durable, extensible control plane for production inference on infrastructure you control.
+title: Deploy and operate AI models across your infrastructure.
+description: Build or connect inference with durable operations, autoscaling, safe releases, and evidence you can inspect.
 sidebarTitle: Introduction
 mode: wide
 ---
 
 <div className="ic-hero not-prose">
-  <div className="ic-kicker"><span className="ic-status-dot"></span> v1.1 endpoint development</div>
+  <div className="ic-kicker"><span className="ic-status-dot"></span> Open-source inference control plane</div>
   <div className="ic-actions">
     <a className="ic-button ic-button-primary" href="/quickstart">Start the quickstart <span aria-hidden="true">→</span></a>
     <a className="ic-button ic-button-secondary" href="https://github.com/infercrane/infercrane">View on GitHub <span aria-hidden="true">↗</span></a>
   </div>
   <div className="ic-proof">
-    <span>Adapter-based runtimes</span>
-    <span>Provider-owned compute</span>
+    <span>Build or connect</span>
+    <span>Safe releases</span>
+    <span>Explainable operations</span>
     <span>No Kubernetes required</span>
   </div>
 </div>
@@ -63,6 +64,20 @@ integrate through explicit contracts; Kubernetes is not required.
   </Card>
   <Card title="Understand behavior" icon="wave-pulse" href="/features/explanations">
     Explain scaling, rollout, degradation, and cold starts from recorded state and measurements.
+  </Card>
+</CardGroup>
+
+## Start from where you are
+
+<CardGroup cols={3}>
+  <Card title="I have a model" icon="cube" href="/showcase/build-inference">
+    Plan a qualified serving configuration and create a durable endpoint.
+  </Card>
+  <Card title="I have an endpoint" icon="plug" href="/showcase/connect-existing">
+    Add health and operational evidence without migrating or transferring lifecycle ownership.
+  </Card>
+  <Card title="I am evaluating" icon="flask" href="/quickstart">
+    Run the complete GPU-free control and request path locally in under five minutes.
   </Card>
 </CardGroup>
 

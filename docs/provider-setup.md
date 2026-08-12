@@ -1,3 +1,8 @@
+---
+title: Provider setup
+description: Configure credentials and prerequisites for qualified infrastructure adapters.
+---
+
 # Provider setup
 
 Provider integrations are registered control-plane adapters. Each provider owns its credentials, infrastructure semantics, and billable resources; InferCrane owns durable intent, reconciliation, and cleanup. A provider is supported only after its adapter combination appears in the release qualification matrix.

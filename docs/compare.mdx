@@ -1,0 +1,72 @@
+---
+title: Choose the right inference approach
+description: Compare InferCrane with managed inference platforms, model APIs, gateways, and Kubernetes-native stacks.
+sidebarTitle: Compare approaches
+mode: wide
+---
+
+# Not every team needs an inference control plane
+
+Choose based on the responsibility you want to own. InferCrane is designed for teams that want
+control of their infrastructure or existing inference stack without building the operational layer
+from scratch.
+
+| Approach | Best when | You delegate | You retain |
+| --- | --- | --- | --- |
+| Managed inference platform | Fastest hosted path matters more than infrastructure portability | Compute, scheduling, builds, scaling, and much of operations | Model/application behavior |
+| Hosted model API | You want an API call and no model-serving operations | Model weights, runtime, infrastructure, and capacity | Application and provider selection |
+| AI gateway | You need one API across managed model providers | Protocol translation, provider routing, and accounting | Provider accounts and workload deployment |
+| Kubernetes-native serving | Your platform team already operates Kubernetes and wants native resources | Cluster reconciliation primitives | Cluster, networking, storage, GPU scheduling, and serving stack |
+| InferCrane | You want a stable endpoint and evidence-driven lifecycle across infrastructure you control | Durable operations, revisions, rollout policy, explanations, and adapter contracts | Provider accounts, runtime choice, infrastructure visibility, and data boundary |
+
+## InferCrane and managed platforms
+
+[Baseten](https://docs.baseten.co/overview) and [Modal](https://modal.com/docs/guide) offer managed
+compute and highly integrated hosted experiences. They are usually a better fit when the team wants
+the vendor to own infrastructure and capacity from day one.
+
+InferCrane is differentiated by customer-controlled infrastructure, incremental adoption of existing
+endpoints, replaceable provider/runtime contracts, persisted operational decisions, and explicit
+qualification boundaries. It is not currently a managed-compute substitute.
+
+## InferCrane and gateways
+
+LiteLLM and OpenRouter solve different layers:
+
+- A user-managed LiteLLM gateway can translate and route among managed model APIs.
+- OpenRouter can provide external model capacity through its hosted API.
+- InferCrane manages stable endpoint identity, lifecycle state, revisions, infrastructure-backed
+  deployments, rollout evidence, and bounded external overflow.
+
+These tools can compose. InferCrane can connect a LiteLLM endpoint or use explicitly governed
+OpenRouter capacity; it does not fork or silently replace either product.
+
+## InferCrane and Kubernetes inference stacks
+
+KServe, llm-d, NVIDIA Dynamo, and Kubernetes Gateway API provide powerful cluster-native serving and
+data-plane capabilities. InferCrane can use qualified infrastructure/runtime integrations while
+remaining the user-facing lifecycle and evidence layer. It does not build another Kubernetes
+operator or reimplement distributed serving.
+
+## The decision shortcut
+
+<CardGroup cols={2}>
+  <Card title="Choose a managed platform" icon="cloud" href="https://docs.baseten.co/overview">
+    You want the vendor to own compute and the fastest route to a hosted endpoint.
+  </Card>
+  <Card title="Choose a model API" icon="bolt" href="https://openrouter.ai/docs">
+    You want to consume hosted models and do not need to operate weights or runtimes.
+  </Card>
+  <Card title="Choose Kubernetes-native" icon="dharmachakra" href="https://kserve.github.io/website/">
+    You already have a platform team and want cluster-native serving resources.
+  </Card>
+  <Card title="Choose InferCrane" icon="route" href="/quickstart">
+    You want to build or connect inference on your infrastructure with durable operations and evidence.
+  </Card>
+</CardGroup>
+
+<Note>
+This comparison describes product categories, not a benchmark. Verify current vendor capabilities,
+pricing, support, and deployment boundaries directly with each provider.
+</Note>
+

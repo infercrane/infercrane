@@ -1,3 +1,8 @@
+---
+title: Autoscaling
+description: Scale replicas with bounded decisions, durable evidence, and generation-safe drain.
+---
+
 # Autoscaling
 
 Elastic deployments use bounded queue-aware scaling between explicit minimum and maximum replicas. Persisted vLLM running/waiting signals, consecutive-interval thresholds, and cooldowns produce an auditable scaling decision. Scale-up creates durable replica intents. Scale-down withdraws the worker from the matching router generation, drains it, and then terminates it.

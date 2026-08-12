@@ -1,3 +1,8 @@
+---
+title: Provisioning and readiness
+description: Follow capacity allocation, artifact preparation, runtime startup, readiness, and metrics.
+---
+
 # Provisioning, runtimes and metrics
 
 Status: Existing targets implemented; SkyPilot experimental

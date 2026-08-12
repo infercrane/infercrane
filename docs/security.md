@@ -1,11 +1,16 @@
+---
+title: Security
+description: Authentication, tenant isolation, secret references, network boundaries, and secure deployment guidance.
+---
+
 # Security
 
 InferCrane authenticates the control and data planes with bearer credentials and tenant-scopes public API reads and writes. Use separate, least-privilege provider credentials and rotate them through your secret manager. Production PostgreSQL must use TLS; back up and restore it as the lifecycle source of truth.
 
-The v0.3 identity boundary is a tenant. Principals are service accounts with a role ceiling and
+The identity boundary is a tenant. Principals are service accounts with a role ceiling and
 explicit action scopes. A scope can remove a role permission but cannot add one. Credentials are
 shown once, stored only as SHA-256 digests, and support rotation and revocation.
-Existing pre-v0.3 principals are migrated to their previous explicit action set; new secret and
+Existing legacy principals are migrated to their previous explicit action set; new secret and
 external-capacity permissions are never granted implicitly during upgrade.
 
 Gateway authentication uses an in-memory last-known-good credential snapshot so an established data

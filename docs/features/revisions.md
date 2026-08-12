@@ -1,3 +1,8 @@
+---
+title: Revisions and rollouts
+description: Create immutable candidates, inspect evidence, promote safely, and roll back.
+---
+
 # Revisions and rollout operations
 
 Every deployment starts with an immutable active revision. A rollout creates a separate candidate revision; it does not mutate or replace the active revision. Candidate creation, promotion, rejection, and rollback are durable control-plane operations and may be safely retried after a CLI disconnect or control-plane restart.

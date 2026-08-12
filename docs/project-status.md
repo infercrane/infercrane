@@ -1,7 +1,16 @@
+---
+title: Capability status
+description: The authoritative implementation and qualification state of every InferCrane capability.
+sidebarTitle: Project status
+---
+
 # Project status
 
-Status labels are strict: **implemented** is tested in this repository; **experimental** works
-but lacks production qualification; **planned** is not a product capability.
+Status labels are strict: **implemented** is tested in this repository; **local-qualified** has
+passed the maintained hermetic/local gates; **in qualification** has an implemented surface with
+incomplete release evidence; **experimental** works but lacks production qualification; **planned**
+is not a product capability. None of these labels substitutes for real-provider evidence where the
+behavior depends on external infrastructure.
 
 | Capability | Status | Notes |
 |---|---|---|
@@ -24,8 +33,8 @@ but lacks production qualification; **planned** is not a product capability.
 | Release packaging | Implemented | Exact-version darwin/linux amd64/arm64 archives, checksums, SPDX SBOMs, native smoke verification, and generated Homebrew formula run locally without publication. |
 | Existing vLLM target registration | Implemented | Persistent, idempotent registration. |
 | Logical deployments and aliases | Implemented | One common upstream model per deployment. |
-| Stable endpoint domain | Local-qualified | Logical models, environments, immutable serving plans, lifecycle-managed deployment bindings, route generation pinning, legacy alias backfill, and deterministic endpoint Release Guard pass the v1.1 clean-tree gates. External import/adopt begins in v1.2. |
-| Incremental adoption and diagnostics | Local-qualified | Observe-only and traffic-managed adoption, content-free request inspection, deterministic Doctor findings, and bounded signed webhook alerts pass the v1.2 clean-tree gates. Real external workloads remain deferred to consolidated manual qualification. |
+| Stable endpoint domain | Local-qualified | Logical models, environments, immutable serving plans, lifecycle-managed deployment bindings, route generation pinning, legacy alias backfill, and deterministic endpoint Release Guard pass local clean-tree gates. |
+| Incremental adoption and diagnostics | Local-qualified | Observe-only and traffic-managed adoption, content-free request inspection, deterministic Doctor findings, and bounded signed webhook alerts pass clean-tree gates. Real external workloads remain deferred to consolidated manual qualification. |
 | Capability-qualified inference protocols | Local-qualified | Chat, Completions, Embeddings, Responses, and online chat-batch paths are independently gated and faithfully proxied. The pinned vLLM profile locally qualifies Chat, Completions, and model-dependent Embeddings; Responses and online batch require a newer explicitly qualified runtime profile. |
 | OpenAI-compatible chat proxy | Implemented | Streaming, auth, alias rewrite, request accounting. |
 | vLLM health and model reconciliation | Implemented | Bounded concurrent probes. |

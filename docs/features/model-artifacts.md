@@ -1,3 +1,8 @@
+---
+title: Model artifacts
+description: Resolve mutable model references to immutable, evidence-bearing artifact identity.
+---
+
 # Model artifacts
 
 InferCrane resolves a Hugging Face repository and requested revision through

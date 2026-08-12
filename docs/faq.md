@@ -1,9 +1,15 @@
+---
+title: Frequently asked questions
+description: Product scope, compatibility, data handling, serverless, sessions, and pricing answers.
+sidebarTitle: FAQ
+---
+
 # FAQ
 
 ## Does InferCrane support any model, engine, or cloud?
 
-No. The v1 registry contains vLLM, SGLang, and immutable custom OCI profiles across specific
-RunPod, AWS EC2 BYOC, and namespaced Kubernetes modes. `infercrane integrations` reports the exact
+No. The current registry contains vLLM, SGLang, and immutable custom OCI profiles across specific
+RunPod, AWS EC2 BYOC, GCP Compute BYOC, and namespaced Kubernetes modes. `infercrane integrations` reports the exact
 qualification state; real-GPU evidence remains deferred until final RC qualification. Every exact
 provider/runtime/mode combination needs independent evidence.
 
@@ -33,9 +39,13 @@ shows the current exact combinations and separates simulated, local, deferred an
 
 Not by default. Telemetry and benchmark history contain measurements and operational metadata.
 
-## Are Durable Sessions in v1?
+## Does InferCrane preserve agent or inference sessions?
 
-No. Session identity remains deferred and InferCrane makes no durable-KV claim.
+Context Passport preserves bounded logical session identity and a preferred-backend hint. Reliability
+always overrides affinity: when a worker disappears, the stale hint is removed and the next request
+falls back to an ordinary healthy route. InferCrane does not store conversation bodies by default and
+does not claim durable KV state or transparent request migration unless the selected backend declares
+and qualifies that capability.
 
 ## Is provider pricing estimated?
 

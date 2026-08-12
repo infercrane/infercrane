@@ -1,3 +1,8 @@
+---
+title: Deployment lifecycle
+description: How durable operations survive disconnects, retries, restarts, updates, and deletion.
+---
+
 # Deployment lifecycle
 
 <Snippet file="_snippets/safe-retry.mdx" />

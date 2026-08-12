@@ -1,3 +1,8 @@
+---
+title: Provider-native serverless
+description: Preserve a stable endpoint while a qualified provider owns workers and scale-to-zero.
+---
+
 # Provider-native serverless
 
 InferCrane delegates worker allocation, queueing, scale-up, idle scale-down, and GPU scheduling to
@@ -70,7 +75,7 @@ matches or immutable-spec mismatches fail visibly instead of creating another bi
 ## Current limitations
 
 - The first backend supports one configured immutable vLLM template per control-plane process.
-- RunPod is the only registered native Serverless backend in the v1 RC. Real cold/warm, streaming,
+- RunPod is the only registered native Serverless backend in the current release candidate. Real cold/warm, streaming,
   cancellation, scale-to-zero, and billing acceptance remains a final manual gate.
 - InferCrane records request timing and token metadata but does not record prompts or generated
   content by default.

@@ -1,3 +1,8 @@
+---
+title: Inference telemetry
+description: Normalize latency, token, error, runtime, deployment, revision, and provider evidence.
+---
+
 # Inference telemetry
 
 InferCrane records operational measurements for each request without storing prompts or generated content. Request bodies are used only to forward the OpenAI-compatible request, and response chunks are observed transiently to extract timing and usage metadata when the runtime supplies it.

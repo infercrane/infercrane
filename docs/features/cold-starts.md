@@ -1,3 +1,8 @@
+---
+title: Cold-start intelligence
+description: Measure exposed cold-start boundaries without inventing provider-hidden timing.
+---
+
 # Cold-start intelligence
 
 InferCrane classifies a RunPod Serverless request as cold only when a fresh provider `/health`

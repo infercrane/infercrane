@@ -1,5 +1,24 @@
 # InferCrane documentation style guide
 
+## Information architecture
+
+Public navigation follows a user journey:
+
+1. **Get started** — understand the problem, evaluate fit, run one request.
+2. **Build** — create or connect a stable endpoint.
+3. **Operate** — keep it healthy, scalable, explainable, and safe to change.
+4. **Intelligence** — benchmark, compare, recommend, and verify decisions.
+5. **Integrate** — connect providers, runtimes, SDKs, and delivery tools.
+6. **Reference** — exact commands, APIs, setup, runbooks, and troubleshooting.
+
+Release notes, milestone specifications, testing ledgers, ADRs, security reviews, and qualification
+procedures remain linkable repository documentation but do not belong in the primary user sidebar.
+Promote one only when a user needs it to complete a product task.
+
+Every public page needs frontmatter with a specific `title` and outcome-oriented `description`. Begin
+with the result or problem, put a working example near the top, state destructive/billable boundaries
+before the command, and end with the most likely next action.
+
 This guide keeps the public documentation precise, consistent, and maintainable. Baseten, Linear, and Vercel are quality references—not templates. Do not copy their branding, assets, copy, or component arrangements. InferCrane uses Mintlify's Maple theme for its compact documentation shell and upper-left appearance controls, with repository-owned tokens and infrastructure components layered on top.
 
 ## Visual tokens
@@ -50,13 +69,13 @@ Use Mermaid, the small `.ic-flow` system, or deterministic SVG for maintainable 
 
 ## Terminology and claims
 
-- Say **deployment** for the logical endpoint and desired state; **replica** for one runtime worker intent; **target** for a registered existing worker.
+- Say **endpoint** for the stable application-facing identity; **deployment** for one lifecycle-managed serving realization; **replica** for one runtime worker intent; **target** for a registered existing worker.
 - Say **control plane** for durable state and lifecycle; **data plane** for OpenAI-compatible request routing.
 - Lead with InferCrane's provider-neutral lifecycle and adapter architecture. Name RunPod or vLLM when documenting the first qualified implementation, setup, behavior, or limitation.
 - State the exact provider/runtime/mode and evidence tier rather than implying every registered
   combination is production-qualified or that InferCrane is coupled to one provider.
 - Release Guard is deterministic, persisted, and evidence-bound. It is not an LLM decision.
-- Durable Session identity is deferred to v0.2 and does not guarantee durable KV state.
+- Context Passport persists bounded logical session identity and preferred-backend hints. It does not guarantee durable KV state or backend request migration.
 - Label unqualified or incomplete capabilities as experimental. Never turn planned work into present-tense product copy.
 
 ## Maintenance

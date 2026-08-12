@@ -1,8 +1,13 @@
+---
+title: Provider contract
+description: The lifecycle, ownership, idempotency, inventory, and qualification contract for infrastructure adapters.
+---
+
 # Provider Contract V1
 
-Status: implemented contract foundation for v0.2.0. Existing elastic and serverless adapters are
+Status: implemented contract foundation. Existing elastic and serverless adapters are
 bound to validated profiles without changing durable lifecycle semantics; real-provider evidence
-remains deferred until the consolidated v1 qualification.
+remains deferred until consolidated real-infrastructure qualification.
 
 ## Ownership
 
