@@ -50,6 +50,9 @@ func TestRetiredGenerationWaitsForPinnedRequest(t *testing.T) {
 func TestEndpointPromotionPinsExistingRequestGeneration(t *testing.T) {
 	directory := New()
 	old := Snapshot{DeploymentID: "old", EndpointID: "endpoint", ServingPlanID: "plan-1", BindingID: "binding-1", TenantID: "tenant", Alias: "coder-production", RouterURL: "http://old", RouterProcessID: "old-g1"}
+	concreteOld := old
+	concreteOld.Alias = "old-deployment"
+	directory.Put(concreteOld)
 	directory.PublishEndpoint(EndpointRoute{TenantID: "tenant", Alias: old.Alias, RoutingPolicy: "manual", Routes: []Snapshot{old}})
 	selected, release, ok := directory.AcquireForTenant("tenant", old.Alias)
 	if !ok || selected.ServingPlanID != "plan-1" {
@@ -60,12 +63,25 @@ func TestEndpointPromotionPinsExistingRequestGeneration(t *testing.T) {
 	if selected.RouterURL != "http://old" {
 		t.Fatalf("pinned route changed=%#v", selected)
 	}
+	if pending := directory.RetiringInFlight(old.DeploymentID); pending != 1 {
+		t.Fatalf("endpoint promotion did not fence old capacity: pending=%d", pending)
+	}
 	future, futureRelease, ok := directory.AcquireForTenant("tenant", old.Alias)
 	if !ok || future.RouterURL != "http://new" {
 		t.Fatalf("future route = %#v", future)
 	}
 	futureRelease()
 	release()
+	if pending := directory.RetiringInFlight(old.DeploymentID); pending != 0 {
+		t.Fatalf("released endpoint generation remains in flight: pending=%d", pending)
+	}
+	if ready := directory.RetiredReady(); len(ready) != 0 {
+		t.Fatalf("endpoint retirement attempted to stop a still-published concrete deployment: %#v", ready)
+	}
+	directory.RemoveForTenant("tenant", concreteOld.Alias)
+	if ready := directory.RetiredReady(); len(ready) != 1 || ready[0].RouterProcessID != old.RouterProcessID {
+		t.Fatalf("withdrawn concrete deployment was not reaped: %#v", ready)
+	}
 }
 
 func TestWeightedEndpointSelectionIsDeterministic(t *testing.T) {
@@ -115,4 +131,89 @@ func TestPreferredRouteFallsBackWhenHintDisappears(t *testing.T) {
 		t.Fatalf("fallback route = %#v", route)
 	}
 	release()
+}
+
+func FuzzDirectoryGenerationSafety(f *testing.F) {
+	f.Add([]byte{0, 1, 4, 2, 0, 3, 5, 2})
+	f.Add([]byte{4, 1, 4, 1, 5, 0, 2, 2, 3})
+	f.Fuzz(func(t *testing.T, sequence []byte) {
+		if len(sequence) > 256 {
+			sequence = sequence[:256]
+		}
+		directory := New()
+		generation := 0
+		var releases []func()
+		publish := func(endpoint bool) {
+			generation++
+			route := Snapshot{TenantID: "tenant", Alias: "model", DeploymentID: "deployment", RevisionID: "revision", RouterURL: "http://router", RouterProcessID: "router-g" + string(rune(generation))}
+			if endpoint {
+				directory.PublishEndpoint(EndpointRoute{TenantID: "tenant", Alias: "model", RoutingPolicy: "manual", Routes: []Snapshot{route}})
+			} else {
+				directory.Put(route)
+			}
+		}
+		for _, operation := range sequence {
+			switch operation % 7 {
+			case 0:
+				publish(false)
+			case 1:
+				if _, release, ok := directory.AcquireForTenant("tenant", "model"); ok {
+					releases = append(releases, release)
+				}
+			case 2:
+				if len(releases) > 0 {
+					releases[0]()
+					releases[0]()
+					releases = releases[1:]
+				}
+			case 3:
+				directory.RemoveForTenant("tenant", "model")
+			case 4:
+				publish(true)
+			case 5:
+				directory.RemoveEndpointForTenant("tenant", "model")
+			case 6:
+				for _, route := range directory.RetiredReady() {
+					directory.ForgetRetired(route)
+				}
+			}
+			assertDirectoryGenerationInvariant(t, directory)
+		}
+		for _, release := range releases {
+			release()
+		}
+		assertDirectoryGenerationInvariant(t, directory)
+	})
+}
+
+func assertDirectoryGenerationInvariant(t *testing.T, directory *Directory) {
+	t.Helper()
+	directory.mu.RLock()
+	current := map[string]struct{}{}
+	inflight := make(map[string]int, len(directory.inflight))
+	for _, route := range directory.items {
+		current[routeID(route)] = struct{}{}
+	}
+	for _, endpoint := range directory.endpoints {
+		for _, route := range endpoint.Routes {
+			current[routeID(route)] = struct{}{}
+		}
+	}
+	for id, count := range directory.inflight {
+		inflight[id] = count
+		if count <= 0 {
+			directory.mu.RUnlock()
+			t.Fatalf("route %q has non-positive in-flight count %d", id, count)
+		}
+	}
+	directory.mu.RUnlock()
+	for _, route := range directory.RetiredReady() {
+		id := routeID(route)
+		if inflight[id] != 0 {
+			t.Fatalf("in-flight route %q became reapable", id)
+		}
+		if _, published := current[id]; published {
+			t.Fatalf("published route %q became reapable", id)
+		}
+	}
 }

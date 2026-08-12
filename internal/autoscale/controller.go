@@ -3,6 +3,7 @@ package autoscale
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -43,31 +44,39 @@ func (c Controller) Once(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	var failures []error
 	for _, deployment := range deployments {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(append(failures, err)...)
+		}
 		signals, err := c.Signals.Signals(ctx, deployment.ID)
 		if err != nil {
-			return fmt.Errorf("signals for %s: %w", deployment.ID, err)
+			failures = append(failures, fmt.Errorf("signals for %s: %w", deployment.ID, err))
+			continue
 		}
 		signals.ObservedAt = now()
 		decision, err := Evaluate(deployment.Policy, deployment.State, signals)
 		if err != nil {
-			return fmt.Errorf("evaluate %s: %w", deployment.ID, err)
+			failures = append(failures, fmt.Errorf("evaluate %s: %w", deployment.ID, err))
+			continue
 		}
 		encoded, _ := json.Marshal(signals)
 		if decision.Action != "hold" {
 			if err := c.Fleet.ScaleTo(ctx, deployment.ID, decision.NewReplicas); err != nil {
-				return fmt.Errorf("scale %s: %w", deployment.ID, err)
+				failures = append(failures, fmt.Errorf("scale %s: %w", deployment.ID, err))
+				continue
 			}
 			deployment.State.Replicas = decision.NewReplicas
 			deployment.State.LastScaledAt = signals.ObservedAt
 		}
 		deployment.State.ConsecutiveHigh, deployment.State.ConsecutiveLow = decision.NextConsecutiveHigh, decision.NextConsecutiveLow
 		if err := c.Repository.RecordDecision(ctx, deployment.ID, decision, string(encoded)); err != nil {
-			return err
+			failures = append(failures, fmt.Errorf("record autoscaling decision for %s: %w", deployment.ID, err))
+			continue
 		}
 		if err := c.Repository.SaveState(ctx, deployment.ID, deployment.State); err != nil {
-			return err
+			failures = append(failures, fmt.Errorf("save autoscaling state for %s: %w", deployment.ID, err))
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }

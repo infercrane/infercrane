@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sort"
 	"strconv"
@@ -96,6 +97,7 @@ func (r *Reconciler) Run(ctx context.Context) error {
 	}
 }
 func (r *Reconciler) Once(ctx context.Context) error {
+	var failures []error
 	r.reapRetiredRoutes()
 	deployments, err := r.Store.Deployments(ctx)
 	if err != nil {
@@ -113,7 +115,11 @@ func (r *Reconciler) Once(ctx context.Context) error {
 	for _, d := range deployments {
 		resolved, err := r.Store.ResolveForTenant(ctx, d.TenantID, d.Name)
 		if err != nil {
-			return err
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			failures = append(failures, fmt.Errorf("reconcile deployment %s/%s: %w", d.TenantID, d.Name, err))
+			continue
 		}
 		type inspection struct {
 			target     domain.Target
@@ -276,7 +282,8 @@ func (r *Reconciler) Once(ctx context.Context) error {
 		hash := router.WorkerSetHash(d.RoutingStrategy, workerURLs)
 		generation, gerr := r.Store.ActiveGeneration(ctx, d.ID, r.InstanceID)
 		if gerr != nil && !errors.Is(gerr, domain.ErrNotFound) {
-			return gerr
+			failures = append(failures, fmt.Errorf("read router generation for %s/%s: %w", d.TenantID, d.Name, gerr))
+			continue
 		}
 		running := false
 		if gerr == nil {
@@ -303,7 +310,8 @@ func (r *Reconciler) Once(ctx context.Context) error {
 			generation, e = r.Store.RecordGeneration(ctx, domain.RouterGeneration{DeploymentID: d.ID, OwnerID: r.InstanceID, Generation: next, Strategy: d.RoutingStrategy, WorkerSetHash: hash, InternalEndpoint: endpoint})
 			if e != nil {
 				_ = r.Router.Stop(candidateID)
-				return e
+				failures = append(failures, fmt.Errorf("record router generation for %s/%s: %w", d.TenantID, d.Name, e))
+				continue
 			}
 			upstream := healthy[0].UpstreamModel
 			if upstream == "" {
@@ -325,9 +333,12 @@ func (r *Reconciler) Once(ctx context.Context) error {
 		_ = r.Store.SetDeploymentState(ctx, d.ID, state)
 	}
 	if err := r.observeAdoptedTargets(ctx); err != nil {
-		return err
+		failures = append(failures, err)
 	}
-	return r.compileEndpoints(ctx, deployments)
+	if err := r.compileEndpoints(ctx, deployments); err != nil {
+		failures = append(failures, err)
+	}
+	return errors.Join(failures...)
 }
 
 func (r *Reconciler) observeAdoptedTargets(ctx context.Context) error {

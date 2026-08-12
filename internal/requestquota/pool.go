@@ -5,6 +5,8 @@ package requestquota
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sort"
 	"sync"
 	"time"
 )
@@ -86,6 +88,13 @@ func (p *Pool) Refresh(ctx context.Context) error {
 			state.window = window
 			state.lastAttempt = time.Time{}
 		}
+		// Tokens were leased under the previous policy. They cannot safely be
+		// carried into a changed limit because doing so could exceed a newly
+		// reduced quota. The durable allocator may grant a safe replacement.
+		if state.limit != policy.MaxRequestsPerMinute {
+			state.tokens = 0
+			state.lastAttempt = time.Time{}
+		}
 		state.limit = policy.MaxRequestsPerMinute
 		next[policy.TenantID] = state
 	}
@@ -102,12 +111,14 @@ func (p *Pool) refillAll(ctx context.Context, window, now time.Time) error {
 		tenants = append(tenants, tenant)
 	}
 	p.mu.Unlock()
+	sort.Strings(tenants)
+	var failures []error
 	for _, tenant := range tenants {
 		if err := p.refill(ctx, tenant, window, now); err != nil {
-			return err
+			failures = append(failures, fmt.Errorf("refill request quota for %s: %w", tenant, err))
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }
 
 func (p *Pool) refill(ctx context.Context, tenant string, window, now time.Time) error {

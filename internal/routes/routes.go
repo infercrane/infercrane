@@ -187,6 +187,9 @@ func (d *Directory) PublishEndpoint(endpoint EndpointRoute) {
 	key := endpoint.TenantID + "\x00" + endpoint.Alias
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if previous, ok := d.endpoints[key]; ok {
+		d.retireEndpointRoutesLocked(previous.Routes, endpoint.Routes)
+	}
 	d.endpoints[key] = EndpointRoute{TenantID: endpoint.TenantID, Alias: endpoint.Alias, RoutingPolicy: endpoint.RoutingPolicy, Routes: append([]Snapshot(nil), endpoint.Routes...)}
 	delete(d.blocked, key)
 }
@@ -195,9 +198,25 @@ func (d *Directory) RemoveEndpointForTenant(tenant, alias string) {
 	key := tenant + "\x00" + alias
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if previous, ok := d.endpoints[key]; ok {
+		d.retireEndpointRoutesLocked(previous.Routes, nil)
+	}
 	delete(d.endpoints, key)
 	delete(d.selections, key)
 	d.blocked[key] = true
+}
+
+func (d *Directory) retireEndpointRoutesLocked(previous, next []Snapshot) {
+	retained := make(map[string]struct{}, len(next))
+	for _, route := range next {
+		retained[routeID(route)] = struct{}{}
+	}
+	for _, route := range previous {
+		id := routeID(route)
+		if _, ok := retained[id]; !ok {
+			d.retired[id] = route
+		}
+	}
 }
 
 func (d *Directory) EndpointAliasesForTenant(tenant string) []string {
@@ -281,9 +300,19 @@ func (d *Directory) HasCurrentDeployment(deploymentID string) bool {
 func (d *Directory) RetiredReady() []Snapshot {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
+	current := make(map[string]struct{}, len(d.items)+len(d.endpoints))
+	for _, route := range d.items {
+		current[routeID(route)] = struct{}{}
+	}
+	for _, endpoint := range d.endpoints {
+		for _, route := range endpoint.Routes {
+			current[routeID(route)] = struct{}{}
+		}
+	}
 	ready := make([]Snapshot, 0)
 	for id, route := range d.retired {
-		if d.inflight[id] == 0 {
+		_, stillPublished := current[id]
+		if !stillPublished && d.inflight[id] == 0 {
 			ready = append(ready, route)
 		}
 	}

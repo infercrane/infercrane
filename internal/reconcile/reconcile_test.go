@@ -3,6 +3,7 @@ package reconcile
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/infercrane/infercrane/internal/domain"
@@ -22,6 +23,32 @@ type fakeStore struct {
 	endpoints        []domain.Endpoint
 	resolvedEndpoint domain.ResolvedEndpoint
 	endpointState    string
+}
+
+type isolatingStore struct {
+	*fakeStore
+	deployments []domain.Deployment
+	failedName  string
+	resolved    []string
+}
+
+func (f *isolatingStore) Deployments(context.Context) ([]domain.Deployment, error) {
+	return f.deployments, nil
+}
+
+func (f *isolatingStore) ResolveForTenant(_ context.Context, _, name string) (domain.ResolvedDeployment, error) {
+	f.resolved = append(f.resolved, name)
+	if name == f.failedName {
+		return domain.ResolvedDeployment{}, errors.New("injected lookup failure")
+	}
+	deployment := f.deployment
+	for _, candidate := range f.deployments {
+		if candidate.Name == name {
+			deployment = candidate
+			break
+		}
+	}
+	return domain.ResolvedDeployment{Deployment: deployment, Targets: f.resolvedTargets()}, nil
 }
 
 func (f *fakeStore) Deployments(context.Context) ([]domain.Deployment, error) {
@@ -145,6 +172,24 @@ func TestUnchangedGenerationUsesGenerationProcessIdentity(t *testing.T) {
 	}
 	if backend.started != "" || len(backend.stopped) != 0 || len(backend.running) != 1 || backend.running[0] != "deployment-g1" {
 		t.Fatalf("started=%q stopped=%v running=%v", backend.started, backend.stopped, backend.running)
+	}
+}
+
+func TestReconcilerIsolatesDeploymentLookupFailure(t *testing.T) {
+	base, directory := reconcilerFixture()
+	healthy := base.deployment
+	healthy.ID, healthy.Name = "healthy-deployment", "healthy"
+	broken := healthy
+	broken.ID, broken.Name = "broken-deployment", "broken"
+	store := &isolatingStore{fakeStore: base, deployments: []domain.Deployment{broken, healthy}, failedName: broken.Name}
+	backend := &fakeRouter{routes: directory}
+	reconciler := Reconciler{Store: store, Routes: directory, Router: backend, Runtimes: testRuntimeBackends(t, healthyRuntime{}), RouterStartPort: 18080, InstanceID: "instance"}
+	err := reconciler.Once(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "injected lookup failure") {
+		t.Fatalf("aggregate error=%v", err)
+	}
+	if len(store.resolved) != 2 || store.resolved[1] != healthy.Name {
+		t.Fatalf("resolved deployments=%v; healthy deployment was starved", store.resolved)
 	}
 }
 
