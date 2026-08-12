@@ -31,7 +31,10 @@ mode: wide
 infercrane request qwen3-8b --message "Hello" --stream
 ```
 
-InferCrane gives applications one OpenAI-compatible logical endpoint while durable control-plane operations provision, reconcile, scale, and safely replace inference workers behind it. Providers and runtimes integrate through explicit contracts; Kubernetes is not required.
+Build a deployment from a model or custom OCI workload, or connect inference you already run.
+InferCrane gives applications one OpenAI-compatible logical endpoint while durable control-plane
+operations provision, reconcile, scale, and safely replace workers behind it. Providers and runtimes
+integrate through explicit contracts; Kubernetes is not required.
 
 <div className="ic-flow not-prose" aria-label="InferCrane request path">
   <div className="ic-node"><span className="ic-node-label">request</span><strong>OpenAI client</strong></div>
@@ -46,8 +49,8 @@ InferCrane gives applications one OpenAI-compatible logical endpoint while durab
 ## The operational layer around inference runtimes
 
 <CardGroup cols={3}>
-  <Card title="Deploy" icon="server" href="/features/lifecycle">
-    Create a durable deployment through a qualified provider backend or connect existing workers. Disconnecting the CLI does not abandon the operation.
+  <Card title="Build and deploy" icon="server" href="/showcase/build-inference">
+    Start from a model, recipe, or immutable custom OCI workload. Disconnecting the CLI does not abandon the operation.
   </Card>
   <Card title="Protect releases" icon="shield-check" href="/features/release-guard">
     Compare active and candidate revisions with deterministic, persisted Release Guard policy.
@@ -103,6 +106,6 @@ InferCrane records durable operation events, immutable model and revision identi
     See the control-plane and data-plane boundaries behind durable operations.
   </Card>
   <Card title="See production patterns" icon="sparkles" href="/showcase/index">
-    Connect an existing stack, reject a bad release, and operate through uncertain capacity.
+    Deploy a model, connect an existing stack, compose gateways and sandboxes, and reject a bad release.
   </Card>
 </CardGroup>

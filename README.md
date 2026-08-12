@@ -2,7 +2,7 @@
 
 Production inference without the platform engineering.
 
-Deploy, autoscale, benchmark, and safely update inference workloads on GPU infrastructure you control.
+Build or connect, autoscale, benchmark, and safely update inference workloads on GPU infrastructure you control.
 
 ```bash
 infercrane deploy Qwen/Qwen3-8B
@@ -26,7 +26,9 @@ infercrane connect https://vllm.internal/v1 --as coder-production
 infercrane doctor coder-production
 ```
 
-See the [production showcase](https://infercrane.mintlify.site/showcase) for existing-workload adoption, safe rollouts, cold-start evidence, and modular user-managed gateways.
+See the [production showcase](https://infercrane.mintlify.site/showcase) for model-to-endpoint deployment,
+existing-workload adoption, LiteLLM and OpenRouter composition, agent sandbox integration, safe
+rollouts, and cold-start evidence.
 
 ## Why InferCrane?
 

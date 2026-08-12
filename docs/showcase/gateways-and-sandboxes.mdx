@@ -1,0 +1,121 @@
+---
+title: Compose gateways and agent sandboxes
+description: Keep InferCrane focused on inference lifecycle while integrating gateways, external capacity, and sandbox runtimes through explicit boundaries.
+sidebarTitle: Gateways and sandboxes
+---
+
+# Use the right owner for each layer
+
+InferCrane does not need to replace every component in an inference or agent stack. It provides the
+stable model endpoint, durable lifecycle, routing policy, and operational evidence. A user-managed
+gateway can translate provider protocols, and a sandbox can execute agent tools while calling that
+endpoint like any other application.
+
+```mermaid
+flowchart LR
+  APP[Application or agent] --> IC[InferCrane endpoint<br/>identity · lifecycle · evidence]
+  IC --> DEP[InferCrane-managed deployment]
+  IC --> LL[User-managed LiteLLM gateway]
+  IC -. explicit budgeted overflow .-> OR[OpenRouter]
+  SB[User-managed sandbox<br/>E2B · Daytona · Modal · Kubernetes] --> IC
+```
+
+## Connect a user-managed LiteLLM gateway
+
+Keep LiteLLM's provider configuration and credentials in LiteLLM. Connect its OpenAI-compatible
+surface to InferCrane in observe-only mode first:
+
+```bash
+infercrane connect https://litellm.internal.example/v1 \
+  --as company-models \
+  --type litellm \
+  --model coder
+
+infercrane doctor company-models
+```
+
+After qualification, transfer routing ownership explicitly:
+
+```bash
+infercrane adopt promote company-models --ownership traffic-managed
+```
+
+InferCrane does not bundle, fork, install, or license LiteLLM. It owns the logical endpoint and
+operational evidence; LiteLLM remains responsible for protocol translation and its upstreams.
+
+## Use OpenRouter only as governed overflow
+
+OpenRouter is an optional external capacity target, not an implicit default. Configure it with a
+secret reference, explicit model mapping, privacy acknowledgement, and hard request and cost
+reservation ceilings. InferCrane selects it before sending bytes and never silently duplicates or
+shadows a request.
+
+```bash
+export OPENROUTER_API_KEY='...'
+infercrane secret create openrouter --from-env OPENROUTER_API_KEY --output json
+
+infercrane target add openrouter-qwen \
+  --provider openrouter \
+  --url https://openrouter.ai/api/v1 \
+  --upstream-model qwen/qwen3-8b
+```
+
+Complete the bounded policy using [Governed external capacity](/features/external-capacity). Real
+OpenRouter billing qualification is still deferred; InferCrane does not fabricate price evidence.
+
+## Call InferCrane from an agent sandbox
+
+The sandbox is the application execution environment. Give it a scoped InferCrane credential and
+the stable endpoint, then use an ordinary OpenAI client inside the sandbox:
+
+<CodeGroup>
+```python Python
+import os
+from openai import OpenAI
+
+client = OpenAI(
+    base_url=os.environ["INFERCRANE_URL"].rstrip("/") + "/v1",
+    api_key=os.environ["INFERCRANE_API_KEY"],
+)
+
+response = client.responses.create(
+    model="coder-production",
+    input="Summarize the test failure in /workspace/test.log.",
+)
+print(response.output_text)
+```
+
+```typescript TypeScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: `${process.env.INFERCRANE_URL}/v1`,
+  apiKey: process.env.INFERCRANE_API_KEY,
+});
+
+const response = await client.responses.create({
+  model: "coder-production",
+  input: "Summarize the test failure in /workspace/test.log.",
+});
+console.log(response.output_text);
+```
+</CodeGroup>
+
+Use the sandbox provider's secret injection and network allow-list controls. Prefer a tenant-scoped,
+least-privilege InferCrane principal and rotate or revoke it through InferCrane when the workload
+ends.
+
+<Warning>
+InferCrane does not currently create, pause, snapshot, isolate, or delete sandboxes, and it does not
+record sandbox commands or files. E2B, Daytona, Modal, Kubernetes, and similar names describe a
+composition pattern, not qualified InferCrane sandbox adapters. Sandbox lifecycle management remains
+outside the current release scope.
+</Warning>
+
+## Why the boundary is useful
+
+- Change inference providers without rebuilding the agent sandbox.
+- Change sandbox vendors without changing the logical model endpoint.
+- Keep model rollout evidence separate from tool-execution security policy.
+- Avoid turning InferCrane into a gateway fork, workflow engine, or sandbox isolation runtime.
+

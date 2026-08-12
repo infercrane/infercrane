@@ -1,0 +1,112 @@
+---
+title: Build your inference deployment
+description: Go from a model or immutable OCI workload to a durable, OpenAI-compatible endpoint.
+sidebarTitle: Build your inference
+---
+
+# A model is enough to start
+
+InferCrane turns a model reference and a serving plan into a durable deployment. The CLI submits the
+intent to the control plane and can disconnect safely while provider allocation, artifact transfer,
+runtime startup, readiness, and route publication continue.
+
+```bash
+infercrane deploy Qwen/Qwen3-8B
+```
+
+The short path uses configured defaults. Make infrastructure choices explicit when you need them:
+
+```bash
+infercrane plan Qwen/Qwen3-8B \
+  --cloud runpod \
+  --gpu L40S \
+  --min 1 \
+  --max 4
+
+infercrane deploy Qwen/Qwen3-8B \
+  --cloud runpod \
+  --gpu L40S \
+  --min 1 \
+  --max 4
+```
+
+`plan` is side-effect free. `deploy` returns a durable operation unless `--wait` is supplied. Closing
+the terminal stops only the local watch; use the returned operation ID to reconnect:
+
+```bash
+infercrane operation watch OPERATION_ID
+infercrane status qwen3-8b
+infercrane events qwen3-8b
+```
+
+<Note>
+RunPod is one currently qualified adapter, not the InferCrane domain model. AWS BYOC, Kubernetes,
+existing targets, and future providers implement the same provider contract with independent
+qualification evidence. Check the [capability matrix](/project-status) before selecting a backend.
+</Note>
+
+## Bring an immutable runtime when a model flag is not enough
+
+For a qualified custom runtime, describe the OCI image, digest, startup contract, health contract,
+and protocol capabilities in a DeploymentSpec. InferCrane persists that configuration as an
+immutable revision and manages its lifecycle; it does not build images or execute arbitrary build
+scripts.
+
+```bash
+infercrane plan deployment.yaml
+infercrane apply deployment.yaml --idempotency-key release-2026-08-12
+```
+
+See [Custom OCI workloads](/features/custom-oci) for the exact schema and safety requirements.
+
+## What “build” means here
+
+| InferCrane owns | Existing tools keep owning |
+| --- | --- |
+| Serving intent and stable endpoint identity | Model implementation |
+| Provider and runtime adapter selection | Container registry and image build |
+| Durable create, update, rollback, scale, and delete | CUDA/runtime internals |
+| Immutable revisions and artifact identity | Inference engine execution |
+| Readiness, routing, telemetry, and policy evidence | Provider infrastructure primitives |
+
+This boundary keeps the product extensible: vLLM, SGLang, a custom OCI runtime, or another qualified
+runtime can change without changing the application-facing endpoint.
+
+## Separate development, staging, and production
+
+Environments are first-class, tenant-scoped resources. Bind separate stable endpoints to the same
+logical model so application configuration and policy do not leak across stages:
+
+```bash
+infercrane environment create development
+infercrane environment create staging
+infercrane environment create production
+
+infercrane logical-model create coder --description "Stable coding model"
+infercrane endpoint create coder-development --model coder --environment development
+infercrane endpoint create coder-staging --model coder --environment staging
+infercrane endpoint create coder-production --model coder --environment production
+```
+
+Each endpoint has independent active and candidate serving plans. Request records preserve logical
+model, endpoint, and environment identity.
+
+<Warning>
+InferCrane does not yet provide a one-command cross-environment promotion such as
+`promote --from staging --to production`. Promote a qualified immutable configuration by applying it
+explicitly to the next environment. This keeps production changes deliberate, but automated artifact
+promotion remains future work.
+</Warning>
+
+## Make the next revision safely
+
+Use the same declarative path for updates:
+
+```bash
+infercrane plan deployment-v2.yaml
+infercrane apply deployment-v2.yaml --idempotency-key release-2026-08-13
+infercrane rollout inspect qwen-prod
+```
+
+InferCrane creates an immutable candidate and preserves the active revision until promotion policy is
+satisfied. Continue with the [safe rollout showcase](/showcase/safe-rollouts).

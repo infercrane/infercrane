@@ -102,7 +102,9 @@
         "group": "SHOWCASE",
         "pages": [
           "showcase/index",
+          "showcase/build-inference",
           "showcase/connect-existing",
+          "showcase/gateways-and-sandboxes",
           "showcase/safe-rollouts",
           "showcase/capacity-evidence"
         ]
