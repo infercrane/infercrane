@@ -32,6 +32,41 @@ fi
 grep -q 'refusing paid provider mutation' "$temporary/unapproved.log"
 test ! -e "$empty_state/.paid.lock"
 
+# Paid-suite result bookkeeping must be initialized before the first provider
+# preflight. This reproduces the nested whole-product invocation without any
+# network or paid mutation: Docker fails immediately, the guarded trap runs,
+# and a durable FAILED result must still be recorded (never an unbound
+# run_dir shell error or an INCOMPLETE report).
+mkdir -p "$temporary/failed-preflight-bin"
+cat >"$temporary/failed-preflight-bin/docker" <<'EOF'
+#!/bin/sh
+exit 23
+EOF
+cat >"$temporary/failed-preflight-bin/curl" <<'EOF'
+#!/bin/sh
+exit 23
+EOF
+chmod +x "$temporary/failed-preflight-bin/docker" "$temporary/failed-preflight-bin/curl"
+printf '%s\n' fixture-key >"$temporary/runpod-key"
+failed_preflight_state="$temporary/failed-preflight"
+if PATH="$temporary/failed-preflight-bin:$PATH" \
+  RUNPOD_KEY_FILE="$temporary/runpod-key" \
+  INFERCRANE_ACCEPTANCE_STATE_DIR="$failed_preflight_state" \
+  INFERCRANE_ACCEPTANCE_RUN_ID=failed-preflight \
+  "$root/scripts/release-acceptance.sh" qualify --approve-paid-resources \
+  >"$temporary/failed-preflight.log" 2>&1; then
+  echo "paid qualification unexpectedly survived a failed Docker preflight" >&2
+  exit 1
+fi
+test -f "$failed_preflight_state/failed-preflight/suite-result.json"
+jq -e '.command == "qualify" and .outcome == "failed" and .exit_code != 0' \
+  "$failed_preflight_state/failed-preflight/suite-result.json" >/dev/null
+! grep -q 'unbound variable' "$temporary/failed-preflight.log"
+INFERCRANE_ACCEPTANCE_STATE_DIR="$failed_preflight_state" \
+  INFERCRANE_ACCEPTANCE_RUN_ID=failed-preflight \
+  "$root/scripts/release-acceptance.sh" report >/dev/null
+grep -Fq 'Suite outcome: **FAILED**' "$failed_preflight_state/failed-preflight/report.md"
+
 if INFERCRANE_V1_ACCEPTANCE_STATE_DIR="$temporary/v1" INFERCRANE_ACCEPTANCE_RUN_ID=unapproved-v1 \
   "$root/scripts/v1-acceptance.sh" qualify >"$temporary/unapproved-v1.log" 2>&1; then
   echo "unapproved v1 qualification unexpectedly started" >&2

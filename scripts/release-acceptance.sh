@@ -740,6 +740,11 @@ case "$command_name" in
   preflight) run_preflight ;;
   elastic|elastic-qualify|serverless|elastic-faults|serverless-faults)
     require_paid_approval
+    # Suite bookkeeping and the EXIT recovery trap both require the durable
+    # run paths. Initialize them before either can execute. Individual suites
+    # load the same state again during preflight, which is intentionally
+    # idempotent and validates any requested model/GPU overrides.
+    load_run
     acquire_paid_lock
     write_suite_result "$command_name" running 0
     trap 'result=$?; trap - EXIT; if [ "$result" -ne 0 ]; then write_suite_result "$command_name" failed "$result" || true; echo "acceptance failed; preserving provider inventory before guarded cleanup" >&2; capture_provider_inventory failure || true; run_cleanup || true; else write_suite_result "$command_name" passed 0 || result=$?; fi; release_paid_lock; exit "$result"' EXIT
@@ -758,6 +763,7 @@ case "$command_name" in
     # Refuse before installing the cleanup wrapper so a missing approval cannot
     # start even the local acceptance stack.
     require_paid_approval
+    load_run
     acquire_paid_lock
     write_suite_result "$command_name" running 0
     trap 'result=$?; trap - EXIT; write_suite_result "$command_name" failed "$result" || true; echo "qualification failed; preserving provider inventory before guarded cleanup" >&2; capture_provider_inventory failure || true; run_cleanup || true; release_paid_lock; exit "$result"' EXIT
