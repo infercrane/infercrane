@@ -445,8 +445,8 @@ run_elastic() {
     --min 1 --max 2 --wait --wait-timeout "${ready_timeout}s" \
     --idempotency-key "$ELASTIC_NAME-create" --output json
   wait_ready "$ELASTIC_NAME"
-  ic request "$ELASTIC_NAME" --message "acceptance probe" --output json >/dev/null
-  ic request "$ELASTIC_NAME" --message "stream acceptance probe" --stream >/dev/null
+  record elastic-buffered-request ic request "$ELASTIC_NAME" --message "acceptance probe" --output json
+  record elastic-streaming-request ic request "$ELASTIC_NAME" --message "stream acceptance probe" --stream
   verify_openai_features "$ELASTIC_NAME" elastic
   printf 'buffered and streaming requests passed\n' >"$evidence/elastic-requests.log"
   record elastic-benchmark ic benchmark "$ELASTIC_NAME" --revision active --requests 100 --concurrency 10 --random-seed 17 --output json
@@ -471,16 +471,16 @@ run_serverless() {
   # Provider endpoint persistence completes before the reconciler publishes the
   # logical alias. Do not race the first request against route publication.
   wait_ready "$SERVERLESS_NAME"
-  ic request "$SERVERLESS_NAME" --message "cold acceptance probe" --output json >/dev/null
-  ic request "$SERVERLESS_NAME" --message "warm acceptance probe" --output json >/dev/null
-  ic request "$SERVERLESS_NAME" --message "stream acceptance probe" --stream >/dev/null
+  record serverless-cold-request ic request "$SERVERLESS_NAME" --message "cold acceptance probe" --output json
+  record serverless-warm-request ic request "$SERVERLESS_NAME" --message "warm acceptance probe" --output json
+  record serverless-streaming-request ic request "$SERVERLESS_NAME" --message "stream acceptance probe" --stream
   verify_openai_features "$SERVERLESS_NAME" serverless
   printf 'cold, warm, and streaming requests passed\n' >"$evidence/serverless-requests.log"
   record serverless-inspect ic inspect "$SERVERLESS_NAME" --output json
   record serverless-events ic events "$SERVERLESS_NAME" --output json
   record serverless-explain-cold-start ic explain cold-start "$SERVERLESS_NAME" --output json
   wait_serverless_zero "$SERVERLESS_NAME" 900
-  ic request "$SERVERLESS_NAME" --message "second cold acceptance probe" --output json >/dev/null
+  record serverless-second-cold-request ic request "$SERVERLESS_NAME" --message "second cold acceptance probe" --output json
   printf 'provider scaled to zero and the second cold request passed\n' >"$evidence/serverless-second-cold.log"
   record serverless-events-after-second-cold ic events "$SERVERLESS_NAME" --output json
   record serverless-explain-second-cold ic explain cold-start "$SERVERLESS_NAME" --output json

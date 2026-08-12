@@ -88,4 +88,11 @@ grep -Fq 'COMPOSE_PROJECT_NAME=$project INFERCRANE_DEV_PORT=$port INFERCRANE_SMO
   "$root/scripts/product-acceptance.sh"
 grep -Fq '"$root/scripts/test-stack.sh" || return' "$root/scripts/product-acceptance.sh"
 
+# Paid protocol probes are release evidence. Never discard their response and
+# error output, otherwise a real runtime rejection cannot be diagnosed after
+# guarded cleanup removes the provider resource.
+grep -Fq 'record elastic-buffered-request ic request' "$root/scripts/release-acceptance.sh"
+grep -Fq 'record elastic-streaming-request ic request' "$root/scripts/release-acceptance.sh"
+grep -Fq 'record serverless-cold-request ic request' "$root/scripts/release-acceptance.sh"
+
 echo "acceptance paid-run locks and approval boundaries passed"
