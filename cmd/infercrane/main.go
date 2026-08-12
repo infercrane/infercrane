@@ -3402,7 +3402,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		defer cancel()
 		_ = recorder.Close(closeCtx)
 	}()
-	rec := &reconcile.Reconciler{Store: s, Routes: directory, Router: backend, Runtimes: runtimeBackends, Interval: cfg.HealthInterval, RouterStartPort: cfg.RouterStartPort, InstanceID: cfg.InstanceID, Logger: logger, DirectTargets: map[string]reconcile.DirectTargetBackend{"runpod-serverless": {Provider: "runpod", APIKey: cfg.RunPodAPIKey, Status: serverless}}, ExternalFallback: externalCoordinator, QueueSignals: autoscale.VLLMSignals{Targets: s, APIKey: cfg.APIKey}}
+	rec := &reconcile.Reconciler{Store: s, Routes: directory, Router: backend, RouterAPIKey: cfg.APIKey, Runtimes: runtimeBackends, Interval: cfg.HealthInterval, RouterStartPort: cfg.RouterStartPort, InstanceID: cfg.InstanceID, Logger: logger, DirectTargets: map[string]reconcile.DirectTargetBackend{"runpod-serverless": {Provider: "runpod", APIKey: cfg.RunPodAPIKey, Status: serverless}}, ExternalFallback: externalCoordinator, QueueSignals: autoscale.VLLMSignals{Targets: s, APIKey: cfg.APIKey}}
 	go purgeRequests(ctx, s, cfg.RequestRetention, logger)
 	go func() {
 		_ = rec.Run(ctx)

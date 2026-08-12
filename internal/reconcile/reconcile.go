@@ -64,9 +64,13 @@ type DirectTargetBackend struct {
 }
 
 type Reconciler struct {
-	Store            Store
-	Routes           *routes.Directory
-	Router           router.Backend
+	Store  Store
+	Routes *routes.Directory
+	Router router.Backend
+	// RouterAPIKey authenticates gateway requests to the internal replica
+	// router. It is kept only in the in-memory route snapshot and is never
+	// persisted as deployment or provider state.
+	RouterAPIKey     string
 	Runtimes         integration.RuntimeBackends
 	Interval         time.Duration
 	RouterStartPort  int
@@ -317,14 +321,14 @@ func (r *Reconciler) Once(ctx context.Context) error {
 			if upstream == "" {
 				upstream = d.Model
 			}
-			r.Routes.Put(routeSnapshot(d, healthy, upstream, generation.InternalEndpoint, candidateID, r.protocolCapabilities(d.Runtime)))
+			r.Routes.Put(routeSnapshot(d, healthy, upstream, generation.InternalEndpoint, candidateID, r.RouterAPIKey, r.protocolCapabilities(d.Runtime)))
 		}
 		upstream := healthy[0].UpstreamModel
 		if upstream == "" {
 			upstream = d.Model
 		}
 		if _, published := r.Routes.GetForTenant(d.TenantID, d.Name); !published {
-			r.Routes.Put(routeSnapshot(d, healthy, upstream, generation.InternalEndpoint, routerProcessID(d.ID, generation.Generation), r.protocolCapabilities(d.Runtime)))
+			r.Routes.Put(routeSnapshot(d, healthy, upstream, generation.InternalEndpoint, routerProcessID(d.ID, generation.Generation), r.RouterAPIKey, r.protocolCapabilities(d.Runtime)))
 		}
 		state := "degraded"
 		if len(healthy) == primaryCount {
@@ -509,7 +513,7 @@ func (r *Reconciler) reapRetiredRoutes() {
 	}
 }
 
-func routeSnapshot(deployment domain.Deployment, targets []domain.Target, upstream, endpoint, processID string, capabilities runtimecontract.ProtocolCapabilities) routes.Snapshot {
+func routeSnapshot(deployment domain.Deployment, targets []domain.Target, upstream, endpoint, processID, routerAPIKey string, capabilities runtimecontract.ProtocolCapabilities) routes.Snapshot {
 	provider := ""
 	computeMode := ""
 	for _, target := range targets {
@@ -526,7 +530,7 @@ func routeSnapshot(deployment domain.Deployment, targets []domain.Target, upstre
 			computeMode = "existing"
 		}
 	}
-	return routes.Snapshot{DeploymentID: deployment.ID, RevisionID: deployment.ActiveRevisionID, TenantID: deployment.TenantID, Alias: deployment.Name, UpstreamModel: upstream, RouterURL: endpoint, RouterProcessID: processID, Provider: provider, Runtime: deployment.Runtime, ComputeMode: computeMode, ProtocolCapabilities: capabilities}
+	return routes.Snapshot{DeploymentID: deployment.ID, RevisionID: deployment.ActiveRevisionID, TenantID: deployment.TenantID, Alias: deployment.Name, UpstreamModel: upstream, RouterURL: endpoint, RouterProcessID: processID, Provider: provider, Runtime: deployment.Runtime, ComputeMode: computeMode, UpstreamAPIKey: routerAPIKey, ProtocolCapabilities: capabilities}
 }
 
 func (r *Reconciler) protocolCapabilities(runtime string) runtimecontract.ProtocolCapabilities {

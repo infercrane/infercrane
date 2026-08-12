@@ -1,6 +1,20 @@
 package routes
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
+
+func TestSnapshotNeverSerializesUpstreamCredential(t *testing.T) {
+	encoded, err := json.Marshal(Snapshot{Alias: "model", UpstreamAPIKey: "internal-router-secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "internal-router-secret") || strings.Contains(string(encoded), "UpstreamAPIKey") {
+		t.Fatalf("serialized route leaked upstream credential: %s", encoded)
+	}
+}
 
 func TestDirectoryOrdersAndRemovesSnapshots(t *testing.T) {
 	directory := New()

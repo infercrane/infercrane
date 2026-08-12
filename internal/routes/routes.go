@@ -21,7 +21,7 @@ type Snapshot struct {
 	ProviderResourceID   string
 	Runtime              string
 	ComputeMode          string
-	UpstreamAPIKey       string
+	UpstreamAPIKey       string `json:"-"`
 	ExternalPolicyID     string
 	SelectionReason      string
 	ProviderWorkers      *int

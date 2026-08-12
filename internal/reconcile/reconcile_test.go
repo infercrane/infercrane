@@ -175,6 +175,34 @@ func TestUnchangedGenerationUsesGenerationProcessIdentity(t *testing.T) {
 	}
 }
 
+func TestElasticRouteAuthenticatesToInternalRouter(t *testing.T) {
+	store, directory := reconcilerFixture()
+	backend := &fakeRouter{routes: directory}
+	reconciler := Reconciler{Store: store, Routes: directory, Router: backend, RouterAPIKey: "internal-router-secret", Runtimes: testRuntimeBackends(t, healthyRuntime{}), RouterStartPort: 18080, InstanceID: "instance"}
+	if err := reconciler.Once(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	published, ok := directory.Get("prod")
+	if !ok {
+		t.Fatal("elastic route was not published")
+	}
+	if published.UpstreamAPIKey != "internal-router-secret" {
+		t.Fatalf("internal router credential=%q", published.UpstreamAPIKey)
+	}
+
+	// Prove restart recovery also republishes the credential when the router
+	// generation already exists but the in-memory route directory is empty.
+	directory.Remove("prod")
+	store.generation.WorkerSetHash = router.WorkerSetHash("round-robin", []string{"http://gpu"})
+	if err := reconciler.Once(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	published, ok = directory.Get("prod")
+	if !ok || published.UpstreamAPIKey != "internal-router-secret" {
+		t.Fatalf("recovered route=%#v published=%t", published, ok)
+	}
+}
+
 func TestReconcilerIsolatesDeploymentLookupFailure(t *testing.T) {
 	base, directory := reconcilerFixture()
 	healthy := base.deployment
