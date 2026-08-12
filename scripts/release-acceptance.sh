@@ -549,13 +549,17 @@ run_elastic_faults() {
   wait_ready "$ELASTIC_NAME"
   status=$(ic status "$ELASTIC_NAME" --output json)
   printf '%s\n' "$status" | jq -e --arg resource "$resource_id" '([.replicas[] | select(.provider_resource_id == $resource and .health == "healthy")] | length) == 1' >/dev/null
-  record fault-active-benchmark ic benchmark "$ELASTIC_NAME" --revision active --requests 20 --concurrency 4 --random-seed 41 --output json
+  guard_requests=${INFERCRANE_ACCEPTANCE_GUARD_REQUESTS:-100}
+  guard_concurrency=${INFERCRANE_ACCEPTANCE_GUARD_CONCURRENCY:-4}
+  record fault-active-benchmark ic benchmark "$ELASTIC_NAME" --revision active \
+    --requests "$guard_requests" --concurrency "$guard_concurrency" --random-seed 41 --output json
 
   record healthy-candidate-create ic rollout create "$ELASTIC_NAME" --model "$MODEL" --cloud runpod --gpu "$GPU" --min 1 --max 1 --wait --idempotency-key "$ELASTIC_NAME-healthy-create" --output json
   candidate=$(ic status "$ELASTIC_NAME" --output json | jq -r '.deployment.candidate_revision_id // empty')
   [ -n "$candidate" ] || { echo "healthy candidate was not created" >&2; return 1; }
   record healthy-candidate-provision ic rollout provision "$ELASTIC_NAME" "$candidate" --wait --wait-timeout "${INFERCRANE_ACCEPTANCE_PROVISION_TIMEOUT:-20m}" --idempotency-key "$ELASTIC_NAME-healthy-provision" --output json
-  record fault-candidate-benchmark ic benchmark "$ELASTIC_NAME" --revision "$candidate" --requests 20 --concurrency 4 --random-seed 41 --output json
+  record fault-candidate-benchmark ic benchmark "$ELASTIC_NAME" --revision "$candidate" \
+    --requests "$guard_requests" --concurrency "$guard_concurrency" --random-seed 41 --output json
   record healthy-candidate-guard ic rollout evaluate "$ELASTIC_NAME" --wait --idempotency-key "$ELASTIC_NAME-healthy-guard" --output json
   guard=$(ic rollout inspect "$ELASTIC_NAME" --output json)
   printf '%s\n' "$guard" >"$evidence/healthy-candidate-guard-inspect.json"
@@ -652,9 +656,9 @@ run_elastic_qualify() {
   # finish before two autoscaler intervals on faster hardware, producing no
   # queue signal even though clients time out. Long bounded generations keep
   # the workload present without relying on a particular GPU's throughput.
-  autoscale_requests=${INFERCRANE_ACCEPTANCE_AUTOSCALE_REQUESTS:-2000}
-  autoscale_concurrency=${INFERCRANE_ACCEPTANCE_AUTOSCALE_CONCURRENCY:-400}
-  autoscale_output_tokens=${INFERCRANE_ACCEPTANCE_AUTOSCALE_OUTPUT_TOKENS:-512}
+  autoscale_requests=${INFERCRANE_ACCEPTANCE_AUTOSCALE_REQUESTS:-4000}
+  autoscale_concurrency=${INFERCRANE_ACCEPTANCE_AUTOSCALE_CONCURRENCY:-800}
+  autoscale_output_tokens=${INFERCRANE_ACCEPTANCE_AUTOSCALE_OUTPUT_TOKENS:-1024}
   record elastic-autoscale-queue-load ic benchmark "$ELASTIC_NAME" --revision active \
     --requests "$autoscale_requests" --concurrency "$autoscale_concurrency" \
     --output-tokens "$autoscale_output_tokens" --random-seed 29 --output json &

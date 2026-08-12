@@ -134,9 +134,10 @@ grep -Fq 'record serverless-cold-request ic request' "$root/scripts/release-acce
 # sustained workload is still active. This avoids hardware-speed-dependent
 # false failures where a short benchmark ends before the control loop samples
 # two consecutive queue intervals.
-grep -Fq 'INFERCRANE_ACCEPTANCE_AUTOSCALE_OUTPUT_TOKENS:-512' "$root/scripts/release-acceptance.sh"
+grep -Fq 'INFERCRANE_ACCEPTANCE_AUTOSCALE_OUTPUT_TOKENS:-1024' "$root/scripts/release-acceptance.sh"
 grep -Fq 'wait_replica_count "$ELASTIC_NAME" 2 "$scale_up_timeout"' "$root/scripts/release-acceptance.sh"
 grep -Fq 'wait "$load_pid"' "$root/scripts/release-acceptance.sh"
+grep -Fq 'INFERCRANE_ACCEPTANCE_GUARD_REQUESTS:-100' "$root/scripts/release-acceptance.sh"
 
 # Cleanup success and provider inventory absence are separate from the suite
 # result. A failed suite report must never look qualified merely because its
