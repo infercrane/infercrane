@@ -174,6 +174,22 @@ release_paid_lock() {
   fi
 }
 
+write_suite_result() {
+  suite_command=$1
+  outcome=$2
+  exit_code=$3
+  case "$suite_command" in elastic|elastic-qualify|serverless|elastic-faults|serverless-faults|qualify) ;;
+    *) echo "invalid acceptance suite command: $suite_command" >&2; return 1;;
+  esac
+  case "$outcome" in running|passed|failed) ;;
+    *) echo "invalid acceptance suite outcome: $outcome" >&2; return 1;;
+  esac
+  case "$exit_code" in ''|*[!0-9]*) echo "invalid acceptance suite exit code: $exit_code" >&2; return 1;; esac
+  jq -n --arg command "$suite_command" --arg outcome "$outcome" --argjson exit_code "$exit_code" \
+    '{schema_version:1,command:$command,outcome:$outcome,exit_code:$exit_code,recorded_at:(now|todateiso8601)}' \
+    >"$run_dir/suite-result.json"
+}
+
 start_stack() {
   require_key
   started_epoch=$(date +%s)
@@ -695,6 +711,17 @@ run_report() {
     echo "- Elastic deployment: \`$ELASTIC_NAME\`"
     echo "- Serverless deployment: \`$SERVERLESS_NAME\`"
     echo
+    if [ -f "$run_dir/suite-result.json" ] && jq -e \
+      '.schema_version == 1 and (.command | type == "string") and (.outcome == "running" or .outcome == "passed" or .outcome == "failed") and (.exit_code | type == "number")' \
+      "$run_dir/suite-result.json" >/dev/null 2>&1; then
+      suite_command=$(jq -r '.command' "$run_dir/suite-result.json")
+      suite_outcome=$(jq -r '.outcome | ascii_upcase' "$run_dir/suite-result.json")
+      suite_exit=$(jq -r '.exit_code' "$run_dir/suite-result.json")
+      echo "Suite outcome: **$suite_outcome** — \`$suite_command\` (exit $suite_exit)"
+    else
+      echo "Suite outcome: **INCOMPLETE** — no terminal suite result was recorded"
+    fi
+    echo
     echo "## Evidence files"
     find "$evidence" -maxdepth 1 -type f -print | sort | sed 's#^.*/#- #'
     echo
@@ -714,7 +741,8 @@ case "$command_name" in
   elastic|elastic-qualify|serverless|elastic-faults|serverless-faults)
     require_paid_approval
     acquire_paid_lock
-    trap 'result=$?; trap - EXIT; if [ "$result" -ne 0 ]; then echo "acceptance failed; preserving provider inventory before guarded cleanup" >&2; capture_provider_inventory failure || true; run_cleanup || true; fi; release_paid_lock; exit "$result"' EXIT
+    write_suite_result "$command_name" running 0
+    trap 'result=$?; trap - EXIT; if [ "$result" -ne 0 ]; then write_suite_result "$command_name" failed "$result" || true; echo "acceptance failed; preserving provider inventory before guarded cleanup" >&2; capture_provider_inventory failure || true; run_cleanup || true; else write_suite_result "$command_name" passed 0 || result=$?; fi; release_paid_lock; exit "$result"' EXIT
     case "$command_name" in
       elastic) run_elastic ;;
       elastic-qualify) run_elastic_qualify ;;
@@ -722,6 +750,7 @@ case "$command_name" in
       elastic-faults) run_elastic_faults ;;
       serverless-faults) run_serverless_faults ;;
     esac
+    write_suite_result "$command_name" passed 0
     trap - EXIT
     release_paid_lock
     ;;
@@ -730,10 +759,12 @@ case "$command_name" in
     # start even the local acceptance stack.
     require_paid_approval
     acquire_paid_lock
-    trap 'result=$?; trap - EXIT; echo "qualification failed; preserving provider inventory before guarded cleanup" >&2; capture_provider_inventory failure || true; run_cleanup || true; release_paid_lock; exit "$result"' EXIT
+    write_suite_result "$command_name" running 0
+    trap 'result=$?; trap - EXIT; write_suite_result "$command_name" failed "$result" || true; echo "qualification failed; preserving provider inventory before guarded cleanup" >&2; capture_provider_inventory failure || true; run_cleanup || true; release_paid_lock; exit "$result"' EXIT
     run_qualify
     trap - EXIT
     run_cleanup
+    write_suite_result "$command_name" passed 0
     release_paid_lock
     ;;
   cleanup) run_cleanup ;;
