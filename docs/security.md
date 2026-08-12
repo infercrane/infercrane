@@ -8,6 +8,12 @@ shown once, stored only as SHA-256 digests, and support rotation and revocation.
 Existing pre-v0.3 principals are migrated to their previous explicit action set; new secret and
 external-capacity permissions are never granted implicitly during upgrade.
 
+Gateway authentication uses an in-memory last-known-good credential snapshot so an established data
+plane does not add PostgreSQL latency or fail immediately during a database outage. Rotation and
+revocation take effect on the next successful snapshot refresh. If immediate revocation is required
+while PostgreSQL is unreachable, restore authoritative database access or fence/restart the affected
+gateway instances; InferCrane cannot infer a revocation it cannot read.
+
 Secret objects are references, not a secret store. For example:
 
 ```bash

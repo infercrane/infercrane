@@ -9,10 +9,10 @@ fix locally reproducible defects, and leave exact real/manual qualification proc
 
 ### Inspected
 
-- Current clean worktree at `8eea00d`; implementation tag `v2.0.0-rc.1` points to `1886ab8`.
+- Qualification baseline was clean at `8eea00d`; implementation tag `v2.0.0-rc.1` points to `1886ab8`.
 - Complete Cobra command inventory and legacy dispatch.
 - Authenticated API contract and server route parity source.
-- All top-level internal packages, 34 forward migrations, provider/runtime registries, SDKs, Terraform,
+- All top-level internal packages, 35 forward migrations, provider/runtime registries, SDKs, Terraform,
   GitHub workflows, dashboard, Docker/Kind/HA/recovery/release and acceptance scripts.
 - Existing v1.1–v2.0 qualification evidence was located but is treated as prior evidence, not as proof that
   this goal's complete feature-by-feature audit is finished.
