@@ -21,6 +21,12 @@
       "covers": ["runpod-contract", "aws-contract", "gcp-contract", "kubernetes-contract", "external-provider-contract", "vllm-contract", "sglang-contract", "custom-oci-contract"]
     },
     {
+      "id": "simulated-clouds",
+      "tier": "local",
+      "description": "Race-enabled hostile AWS, GCP, RunPod and Kubernetes adapter fixtures",
+      "covers": ["aws-api-faults", "gcp-api-faults", "runpod-api-faults", "kubernetes-api-faults", "lost-response-adoption", "idempotency", "ownership", "redaction"]
+    },
+    {
       "id": "supply-chain",
       "tier": "local",
       "description": "Dead-code, vulnerability and release artifact verification",
@@ -37,6 +43,12 @@
       "tier": "scheduled",
       "description": "Repeated shuffled race and PostgreSQL contention tests for lifecycle-critical packages",
       "covers": ["operation-fencing", "async-leases", "admission", "quota", "autoscaling", "routing", "reconciliation", "provider-retries"]
+    },
+    {
+      "id": "network-chaos",
+      "tier": "scheduled",
+      "description": "Full-stack PostgreSQL partition and recovery through a deterministic TCP fault proxy",
+      "covers": ["database-partition", "readiness-fail-closed", "database-independent-data-path", "connection-recovery"]
     },
     {
       "id": "kubernetes-scale",

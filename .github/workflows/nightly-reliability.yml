@@ -43,6 +43,12 @@ jobs:
           go-version-file: go.mod
           cache: true
       - run: ./scripts/qualify-product.sh nightly
+      - name: Preserve Docker diagnostics
+        if: failure()
+        run: |
+          mkdir -p .infercrane/product-qualification/diagnostics
+          docker ps -a > .infercrane/product-qualification/diagnostics/docker-ps.txt
+          docker system df > .infercrane/product-qualification/diagnostics/docker-disk.txt
       - uses: actions/upload-artifact@v7
         if: always()
         with:

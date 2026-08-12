@@ -20,6 +20,7 @@ pull request
 scheduled
   ├─ coverage-guided fuzzing
   ├─ shuffled race/lease/contention soak
+  ├─ PostgreSQL TCP partition + recovery
   ├─ Kind Kubernetes-version matrix
   └─ KWOK large-fleet and scheduler disruption
 
@@ -56,6 +57,12 @@ deletion, and credential-bearing errors. The same conformance properties apply t
 - fail-closed immutable configuration matching;
 - idempotent deletion and independently verified inventory;
 - bounded, normalized, secret-free error evidence.
+
+Run the complete hermetic cloud boundary directly with:
+
+```bash
+make test-simulated-clouds
+```
 
 LocalStack is not a required dependency. It can be used as an optional AWS API compatibility probe,
 but its mock EC2 manager supplies CRUD semantics, Docker-backed EC2 has networking limitations on
@@ -108,9 +115,15 @@ make qualify-product-nightly
 InferCrane prefers deterministic HTTP fixtures when an HTTP semantic matters and real process/TCP
 boundaries when connection behavior matters. The local recovery suite kills workers, routers,
 control-plane replicas, and PostgreSQL connections; provider fault proxies inject timeouts and lost
-responses. A general TCP fault proxy such as Toxiproxy is appropriate when testing latency, reset,
-bandwidth, partial transfer, or slow close against a full stack, but should complement—not replace—
-assertions about durable state and ownership.
+responses. The scheduled Toxiproxy gate cuts every PostgreSQL connection in a full Docker stack and
+proves that readiness fails closed, an already-published inference route remains available without a
+database lookup, and the control plane recovers after connectivity returns. Future latency, reset,
+bandwidth, partial-transfer, and slow-close cases belong in the same boundary; this complements—not
+replaces—assertions about durable state and ownership.
+
+```bash
+make test-network-chaos
+```
 
 ## Evidence retention and release policy
 

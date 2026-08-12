@@ -9,7 +9,7 @@ state="$temporary/$commit"
 mkdir -p "$state/gates"
 
 INFERCRANE_PRODUCT_QUALIFICATION_DIR="$temporary" "$root/scripts/qualify-product.sh" report >"$temporary/initial.log"
-jq -e '.verdict=="INCOMPLETE" and .summary.NOT_RUN==8 and .summary.REAL_INFRA_REQUIRED==7 and .summary.HUMAN_REQUIRED==1' "$state/report.json" >/dev/null
+jq -e '.verdict=="INCOMPLETE" and .summary.NOT_RUN==10 and .summary.REAL_INFRA_REQUIRED==7 and .summary.HUMAN_REQUIRED==1' "$state/report.json" >/dev/null
 
 # Copying evidence from another source revision into the current directory
 # must not qualify this commit.
@@ -22,11 +22,11 @@ jq -n --arg commit "$commit" '{schema_version:1,gate:"product-journeys",status:"
 INFERCRANE_PRODUCT_QUALIFICATION_DIR="$temporary" "$root/scripts/qualify-product.sh" report >"$temporary/failed.log"
 jq -e '.verdict=="FAILED" and ([.gates[]|select(.id=="product-journeys")][0].status)=="FAILED"' "$state/report.json" >/dev/null
 
-for gate in product-journeys adapter-contracts supply-chain; do
+for gate in product-journeys adapter-contracts simulated-clouds supply-chain; do
   jq -n --arg commit "$commit" --arg gate "$gate" '{schema_version:1,gate:$gate,status:"PASSED",reason:"fixture",commit:$commit,generated_at:"fixture",log:null}' >"$state/gates/$gate.json"
 done
 INFERCRANE_PRODUCT_QUALIFICATION_DIR="$temporary" "$root/scripts/qualify-product.sh" report >"$temporary/passed.log"
-jq -e '.verdict=="LOCAL_QUALIFIED" and .summary.PASSED==4 and .summary.NOT_RUN==4 and .summary.REAL_INFRA_REQUIRED==7' "$state/report.json" >/dev/null
+jq -e '.verdict=="LOCAL_QUALIFIED" and .summary.PASSED==5 and .summary.NOT_RUN==5 and .summary.REAL_INFRA_REQUIRED==7' "$state/report.json" >/dev/null
 
 # RunPod evidence is deliberately split so elastic stock failures cannot hide
 # successful serverless qualification (or vice versa).

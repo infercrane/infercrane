@@ -78,6 +78,7 @@ run_local() {
   run_gate developer-environment "$root/scripts/dev-check.sh" full || failed=1
   run_gate product-journeys run_product_journeys || failed=1
   run_gate adapter-contracts run_contracts || failed=1
+  run_gate simulated-clouds "$root/scripts/test-simulated-clouds.sh" || failed=1
   run_gate supply-chain run_supply_chain || failed=1
   report >/dev/null
   return "$failed"
@@ -88,6 +89,7 @@ run_nightly() {
   failed=0
   run_gate continuous-fuzz "$root/scripts/test-fuzz.sh" || failed=1
   run_gate reliability-soak "$root/scripts/test-reliability-soak.sh" || failed=1
+  run_gate network-chaos "$root/scripts/test-network-chaos.sh" || failed=1
   run_gate kubernetes-scale "$root/scripts/test-kubernetes-kwok.sh" || failed=1
   run_gate kubernetes-version-matrix "$root/scripts/test-kubernetes-versions.sh" || failed=1
   report >/dev/null
