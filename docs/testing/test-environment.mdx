@@ -1,0 +1,140 @@
+---
+title: Reliability test environment
+description: InferCrane's long-term local, scheduled, simulated, and real-infrastructure qualification strategy.
+sidebarTitle: Reliability environment
+---
+
+# Reliability test environment
+
+InferCrane uses an evidence ladder. Every failure is tested at the cheapest boundary that can
+faithfully reproduce it, while claims that depend on a real provider, GPU, runtime, or customer
+network remain explicitly unqualified until that boundary runs.
+
+```text
+pull request
+  ├─ unit + property + state-machine seeds
+  ├─ race detector + PostgreSQL integration
+  ├─ provider/runtime fault contracts
+  └─ public CLI/API product journeys
+
+scheduled
+  ├─ coverage-guided fuzzing
+  ├─ shuffled race/lease/contention soak
+  ├─ Kind Kubernetes-version matrix
+  └─ KWOK large-fleet and scheduler disruption
+
+release candidate
+  ├─ RunPod elastic + serverless
+  ├─ AWS BYOC
+  ├─ GCP BYOC (runner still required)
+  └─ GPU Kubernetes/KServe
+```
+
+## Test tiers
+
+| Tier | Trigger | What it proves | What it cannot prove |
+|---|---|---|---|
+| Fast | Every change | Pure logic, validation, API compatibility, deterministic state transitions | Processes, databases, providers |
+| Full local | Every pull request | Race behavior, real PostgreSQL, Docker crashes, Kind API, SDKs, Terraform, black-box UX | Real cloud and GPU semantics |
+| Scheduled | Nightly and on demand | Longer fuzzing, randomized order, repeated leases, fleet scale, Kubernetes version skew | Provider quota, IAM, CUDA, performance |
+| Real infrastructure | Explicit RC approval | Actual provider identity, networking, capacity, runtime, deletion, billing inventory | Other untested providers or configurations |
+| Human | RC review | Terminal/browser usability, hosted docs and operator comprehension | Distributed-system correctness |
+
+The machine-readable inventory is [`qualification/product-gates.json`](https://github.com/infercrane/infercrane/blob/main/qualification/product-gates.json).
+Each result is bound to a Git commit and has its own status. Successful cleanup never overwrites a
+failed suite.
+
+## Provider simulation
+
+AWS, GCP, RunPod, Kubernetes, external capacity, vLLM, SGLang, and custom OCI adapters use
+fault-injectable contracts. Fixtures can return lost create responses, delayed observations,
+mismatched identities, invalid success bodies, rate limits, malformed/truncated data, eventual
+deletion, and credential-bearing errors. The same conformance properties apply to every adapter:
+
+- stable intent identity and at-most-one owned resource;
+- restart-safe adoption after ambiguous create;
+- fail-closed immutable configuration matching;
+- idempotent deletion and independently verified inventory;
+- bounded, normalized, secret-free error evidence.
+
+LocalStack is not a required dependency. It can be used as an optional AWS API compatibility probe,
+but its mock EC2 manager supplies CRUD semantics, Docker-backed EC2 has networking limitations on
+macOS, and IAM enforcement depends on configuration and plan. InferCrane's deterministic adapter
+fixtures are faster and more precise for control-plane fault injection; real AWS remains the
+qualification boundary for IAM propagation, VPC behavior, capacity, quota, and eventual consistency.
+
+Google does not ship a Compute Engine emulator. Its official emulators cover data services such as
+Firestore, Spanner, Pub/Sub, Bigtable, and Datastore. InferCrane therefore keeps a deterministic
+Compute API/CLI model locally and requires an isolated GCP project for real VM evidence.
+
+## Kubernetes fidelity and scale
+
+Kind boots a real Kubernetes API server, controller manager, scheduler, kubelet, and server-side
+apply implementation. InferCrane tests ownership, RBAC, stale `observedGeneration`, field conflicts,
+partial owner repair, restart adoption, asynchronous deletion, and clean inventory against the
+current API.
+
+The scheduled matrix repeats this lifecycle against Kubernetes 1.34, 1.35, and 1.36 using
+digest-pinned Kind images.
+
+KWOK adds a different boundary: hundreds of simulated nodes and InferCrane-managed workloads with
+very low resource usage. The fleet test proves that missing GPU capacity stays provisioning and
+unroutable, large inventory remains coherent, half-fleet node loss cannot manufacture readiness,
+and bulk cleanup reaches zero. KWOK does not run containers or GPUs, so it never qualifies runtime
+startup or performance.
+
+```bash
+make test-kubernetes-kind
+make test-kubernetes-kwok
+```
+
+## Fuzz and soak
+
+Go's coverage-guided fuzz engine continuously mutates critical state-machine inputs. A discovered
+failure is minimized and committed to the corpus so ordinary test runs preserve it as a regression.
+
+The soak tier repeatedly shuffles and race-tests operation leasing, async execution, admission,
+quotas, autoscaling, routing, reconciliation, providers, and workflows. When
+`INFERCRANE_TEST_DATABASE_URL` is present it also repeats PostgreSQL fencing and contention cases.
+
+```bash
+INFERCRANE_FUZZ_TIME=2m make test-fuzz
+INFERCRANE_SOAK_COUNT=20 make test-reliability-soak
+make qualify-product-nightly
+```
+
+## Network and process faults
+
+InferCrane prefers deterministic HTTP fixtures when an HTTP semantic matters and real process/TCP
+boundaries when connection behavior matters. The local recovery suite kills workers, routers,
+control-plane replicas, and PostgreSQL connections; provider fault proxies inject timeouts and lost
+responses. A general TCP fault proxy such as Toxiproxy is appropriate when testing latency, reset,
+bandwidth, partial transfer, or slow close against a full stack, but should complement—not replace—
+assertions about durable state and ownership.
+
+## Evidence retention and release policy
+
+The nightly GitHub workflow uploads qualification evidence for 30 days. Release evidence remains
+under `.infercrane/product-qualification/<commit>` locally and should be attached to the RC. A
+release decision must inspect:
+
+1. all local gates for the exact commit;
+2. the most recent scheduled gates on the same lineage;
+3. every real-provider/runtime combination advertised as qualified;
+4. independent zero-resource inventory after paid suites;
+5. human terminal, dashboard, docs, and clean-install review.
+
+No aggregate percentage can erase a missing boundary. For example, 100% fixture coverage still does
+not qualify AWS IAM or CUDA behavior.
+
+## Primary design references
+
+- [Go coverage-guided fuzzing](https://go.dev/doc/security/fuzz/)
+- [Kind local Kubernetes clusters](https://kind.sigs.k8s.io/docs/user/quick-start/)
+- [KWOK architecture](https://kwok.sigs.k8s.io/docs/design/architecture/) and [lifecycle stages](https://kwok.sigs.k8s.io/docs/user/stages-configuration/)
+- [Kubernetes large-cluster considerations](https://kubernetes.io/docs/setup/best-practices/cluster-large/)
+- [AWS idempotent API design](https://aws.amazon.com/builders-library/making-retries-safe-with-idempotent-APIs/)
+- [LocalStack EC2 behavior and limitations](https://docs.localstack.cloud/aws/services/ec2/)
+- [Google Cloud emulator scope](https://cloud.google.com/sdk/docs/overview)
+- [Toxiproxy deterministic network conditions](https://github.com/Shopify/toxiproxy)
+- [vLLM model and dummy-weight test guidance](https://docs.vllm.ai/en/latest/contributing/model/tests/)

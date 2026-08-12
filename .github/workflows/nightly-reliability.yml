@@ -1,0 +1,52 @@
+name: nightly reliability
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-reliability-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  fuzz-soak-scale:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: infercrane_test
+          POSTGRES_USER: infercrane
+          POSTGRES_PASSWORD: infercrane
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U infercrane -d infercrane_test"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 20
+    env:
+      INFERCRANE_TEST_DATABASE_URL: postgres://infercrane:infercrane@127.0.0.1:5432/infercrane_test?sslmode=disable
+      INFERCRANE_FUZZ_TIME: 2m
+      INFERCRANE_FUZZ_PARALLEL: 4
+      INFERCRANE_SOAK_COUNT: 20
+      INFERCRANE_KWOK_NODES: 500
+      INFERCRANE_KWOK_WORKLOADS: 250
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: ./scripts/qualify-product.sh nightly
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: nightly-qualification-${{ github.run_id }}
+          path: .infercrane/product-qualification
+          if-no-files-found: error
+          retention-days: 30

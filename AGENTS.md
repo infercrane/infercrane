@@ -63,6 +63,7 @@ make dev-check-full   # isolated Docker, failure, production-config, and docs ga
 make test-product     # black-box first-value journey through public product surfaces
 make acceptance-product # all local black-box product journeys and release evidence
 make qualify-product  # resumable whole-product local qualification and evidence matrix
+make qualify-product-nightly # fuzz, shuffled race soak, and KWOK fleet simulation
 make qualify-product-status # report local, real-provider, and human evidence gaps
 make qualify-local    # resumable local release/package proof and JSON manifest
 make deadcode         # reject unreachable functions with the pinned deadcode tool

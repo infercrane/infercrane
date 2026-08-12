@@ -5,8 +5,8 @@ root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 command_name=${1:-status}
 shift || true
 approval=false
-case "$command_name" in local|runpod|aws|kubernetes|status|report|reset) ;; *)
-  echo "usage: $0 local|runpod|aws|kubernetes|status|report|reset [--approve-paid-resources]" >&2; exit 2;;
+case "$command_name" in local|nightly|runpod|aws|kubernetes|status|report|reset) ;; *)
+  echo "usage: $0 local|nightly|runpod|aws|kubernetes|status|report|reset [--approve-paid-resources]" >&2; exit 2;;
 esac
 while [ "$#" -gt 0 ]; do
   case "$1" in --approve-paid-resources) approval=true;; *) echo "unknown argument: $1" >&2; exit 2;; esac
@@ -83,6 +83,17 @@ run_local() {
   return "$failed"
 }
 
+run_nightly() {
+  [ "$dirty" = false ] || { echo "scheduled qualification requires a clean worktree" >&2; return 2; }
+  failed=0
+  run_gate continuous-fuzz "$root/scripts/test-fuzz.sh" || failed=1
+  run_gate reliability-soak "$root/scripts/test-reliability-soak.sh" || failed=1
+  run_gate kubernetes-scale "$root/scripts/test-kubernetes-kwok.sh" || failed=1
+  run_gate kubernetes-version-matrix "$root/scripts/test-kubernetes-versions.sh" || failed=1
+  report >/dev/null
+  return "$failed"
+}
+
 require_paid() {
   [ "$approval" = true ] || { echo "$command_name requires --approve-paid-resources" >&2; exit 2; }
   [ "$dirty" = false ] || { echo "real-infrastructure evidence requires a clean worktree" >&2; exit 2; }
@@ -119,7 +130,7 @@ report() {
       "$tmp" >"$tmp.next"
     mv "$tmp.next" "$tmp"
   done
-  jq '.gates |= map(if has("status") then . else . + {status:(if .tier=="local" then "NOT_RUN" else if .tier=="human" then "HUMAN_REQUIRED" else "REAL_INFRA_REQUIRED" end end),reason:"no commit-bound evidence"} end)
+  jq '.gates |= map(if has("status") then . else . + {status:(if .tier=="local" or .tier=="scheduled" then "NOT_RUN" else if .tier=="human" then "HUMAN_REQUIRED" else "REAL_INFRA_REQUIRED" end end),reason:"no commit-bound evidence"} end)
       | .summary = (reduce .gates[] as $g ({}; .[$g.status] = ((.[$g.status] // 0) + 1)))
       | .verdict = (if any(.gates[]; .status=="FAILED") then "FAILED" else if all(.gates[] | select(.tier=="local"); .status=="PASSED") then "LOCAL_QUALIFIED" else "INCOMPLETE" end end)' "$tmp" >"$state/report.json" || return
   rm -f "$tmp"
@@ -140,6 +151,7 @@ report() {
 
 case "$command_name" in
   local) run_local;;
+  nightly) run_nightly;;
   runpod) run_runpod; result=$?; report; exit "$result";;
   aws) run_portable aws aws-real; result=$?; report; exit "$result";;
   kubernetes) run_portable kubernetes kubernetes-gpu-real; result=$?; report; exit "$result";;

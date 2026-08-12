@@ -3,7 +3,7 @@ set -euo pipefail
 
 repo_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 kind_version=v0.32.0
-node_image='kindest/node:v1.36.1@sha256:3489c7674813ba5d8b1a9977baea8a6e553784dab7b84759d1014dbd78f7ebd5'
+node_image=${INFERCRANE_KIND_NODE_IMAGE:-'kindest/node:v1.36.1@sha256:3489c7674813ba5d8b1a9977baea8a6e553784dab7b84759d1014dbd78f7ebd5'}
 tool_dir="$repo_dir/.infercrane/tools/kind-$kind_version"
 kind_bin=${KIND_BIN:-}
 

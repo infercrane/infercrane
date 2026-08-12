@@ -27,6 +27,30 @@
       "covers": ["dead-code", "dependency-audit", "archives", "checksums", "sbom", "homebrew"]
     },
     {
+      "id": "continuous-fuzz",
+      "tier": "scheduled",
+      "description": "Coverage-guided fuzzing of critical state machines with preserved regression corpus",
+      "covers": ["route-state-machine", "generation-safety", "malformed-event-sequences"]
+    },
+    {
+      "id": "reliability-soak",
+      "tier": "scheduled",
+      "description": "Repeated shuffled race and PostgreSQL contention tests for lifecycle-critical packages",
+      "covers": ["operation-fencing", "async-leases", "admission", "quota", "autoscaling", "routing", "reconciliation", "provider-retries"]
+    },
+    {
+      "id": "kubernetes-scale",
+      "tier": "scheduled",
+      "description": "KWOK large-fleet API, scheduler disruption, unroutable pending capacity, inventory and cleanup proof",
+      "covers": ["large-kubernetes-fleet", "pending-gpu-capacity", "node-loss", "inventory-scale", "bulk-cleanup"]
+    },
+    {
+      "id": "kubernetes-version-matrix",
+      "tier": "scheduled",
+      "description": "Kind lifecycle qualification against the maintained Kubernetes minor-version window",
+      "covers": ["kubernetes-1.34", "kubernetes-1.35", "kubernetes-1.36"]
+    },
+    {
       "id": "runpod-real",
       "tier": "real-infrastructure",
       "description": "RunPod elastic and serverless lifecycle, protocols, scaling, faults, cancellation and zero-resource cleanup",

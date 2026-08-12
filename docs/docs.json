@@ -195,6 +195,7 @@
           "project-status",
           "roadmap",
           "testing/product-qualification",
+          "testing/test-environment",
           "security",
           "compatibility"
         ]

@@ -37,6 +37,15 @@ Inspect the current matrix without running tests:
 make qualify-product-status
 ```
 
+Longer fuzz, soak, and fleet simulation run separately so pull-request feedback remains fast:
+
+```bash
+make qualify-product-nightly
+```
+
+See [Reliability test environment](/testing/test-environment) for the evidence ladder, provider
+simulation boundaries, version matrix, and scheduled workflow.
+
 The verdict vocabulary is intentionally strict:
 
 | Status | Meaning |
@@ -44,6 +53,7 @@ The verdict vocabulary is intentionally strict:
 | `PASSED` | This exact commit passed the named gate. |
 | `FAILED` | The gate ran and failed. Cleanup cannot change this result. |
 | `NOT_RUN` | A locally automatable gate has no evidence for this commit. |
+| `NOT_RUN` (scheduled) | A nightly fuzz, soak, scale, or version gate has no evidence for this commit. |
 | `REAL_INFRA_REQUIRED` | Fixtures prove the adapter logic, not the external provider semantics. |
 | `BLOCKED_ACCESS` | The real suite was requested but credentials or configuration were absent. |
 | `HUMAN_REQUIRED` | Visual, hosted, or operator-comprehension review remains. |

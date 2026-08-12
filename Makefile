@@ -1,7 +1,7 @@
 GORELEASER_VERSION := v2.12.7
 RELEASE_CANDIDATE_TAG ?= v2.0.0-rc.1
 
-.PHONY: build context context-check generate-api generate-api-check test-automation test-automation-full test-dashboard docs-dev docs-check demo-connect test test-container test-stack test-failure test-ha test-backup-restore test-store test-production-config test-provider-contracts test-kubernetes-manifests test-kubernetes-kind test-acceptance-safety test-product test-product-qualification acceptance-product verify audit deadcode release-check snapshot candidate-artifacts release-artifacts acceptance-local acceptance-preflight acceptance-cleanup qualify-local qualify-product qualify-product-status qualify-rc qualify-v1 qualify-contracts dev-check dev-check-full dev-up dev-down
+.PHONY: build context context-check generate-api generate-api-check test-automation test-automation-full test-dashboard docs-dev docs-check demo-connect test test-container test-stack test-failure test-ha test-backup-restore test-store test-production-config test-provider-contracts test-kubernetes-manifests test-kubernetes-kind test-kubernetes-kwok test-kubernetes-versions test-fuzz test-reliability-soak test-acceptance-safety test-product test-product-qualification acceptance-product verify audit deadcode release-check snapshot candidate-artifacts release-artifacts acceptance-local acceptance-preflight acceptance-cleanup qualify-local qualify-product qualify-product-nightly qualify-product-status qualify-rc qualify-v1 qualify-contracts dev-check dev-check-full dev-up dev-down
 
 build:
 	go build ./cmd/infercrane
@@ -70,6 +70,18 @@ test-kubernetes-manifests:
 test-kubernetes-kind:
 	./scripts/test-kubernetes-kind.sh
 
+test-kubernetes-kwok:
+	./scripts/test-kubernetes-kwok.sh
+
+test-kubernetes-versions:
+	./scripts/test-kubernetes-versions.sh
+
+test-fuzz:
+	./scripts/test-fuzz.sh
+
+test-reliability-soak:
+	./scripts/test-reliability-soak.sh
+
 test-acceptance-safety:
 	./scripts/test-acceptance-safety.sh
 
@@ -127,6 +139,9 @@ qualify-local:
 
 qualify-product:
 	./scripts/qualify-product.sh local
+
+qualify-product-nightly:
+	./scripts/qualify-product.sh nightly
 
 qualify-product-status:
 	./scripts/qualify-product.sh status

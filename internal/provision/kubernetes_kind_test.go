@@ -2,10 +2,13 @@ package provision_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -88,6 +91,106 @@ func TestKubernetesKindLifecycle(t *testing.T) {
 	}
 }
 
+func TestKubernetesKWOKFleetLifecycle(t *testing.T) {
+	contextName := os.Getenv("INFERCRANE_KWOK_CONTEXT")
+	if contextName == "" {
+		t.Skip("INFERCRANE_KWOK_CONTEXT is not set")
+	}
+	count := 100
+	if raw := os.Getenv("INFERCRANE_KWOK_WORKLOADS"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 1000 {
+			t.Fatalf("invalid INFERCRANE_KWOK_WORKLOADS %q", raw)
+		}
+		count = parsed
+	}
+	provider := provision.Kubernetes{Context: contextName, Namespace: "infercrane-system", WorkloadAPI: "deployment", ServiceAccount: "infercrane-runtime", WorkerSecretName: "infercrane-worker", WorkerSecretKey: "api-key", ImageDigest: testKubernetesImage, GPUResource: "nvidia.com/gpu", GPUProductLabel: "nvidia.com/gpu.product"}
+	if err := provider.Check(context.Background()); err != nil {
+		t.Fatalf("cluster capability check: %v", err)
+	}
+
+	runBounded := func(action func(int) error) {
+		t.Helper()
+		jobs := make(chan int)
+		errorsByIndex := make([]error, count)
+		var workers sync.WaitGroup
+		for range 16 {
+			workers.Add(1)
+			go func() {
+				defer workers.Done()
+				for index := range jobs {
+					errorsByIndex[index] = action(index)
+				}
+			}()
+		}
+		for index := range count {
+			jobs <- index
+		}
+		close(jobs)
+		workers.Wait()
+		for index, err := range errorsByIndex {
+			if err != nil {
+				t.Fatalf("fleet item %d: %v", index, err)
+			}
+		}
+	}
+
+	spec := func(index int) provision.ReplicaSpec {
+		return provision.ReplicaSpec{ExternalKey: fmt.Sprintf("kwok-fleet-%04d", index), Model: "Qwen/Qwen3-8B", ModelRevision: "immutable", Cloud: "kubernetes", GPU: "NVIDIA-L40S", Port: 8000}
+	}
+	runBounded(func(index int) error {
+		_, err := provider.EnsureReplica(context.Background(), spec(index))
+		return err
+	})
+
+	started := time.Now()
+	resources, err := provider.Inventory(context.Background(), provision.InventoryFilter{Prefix: "kwok-fleet-"})
+	if err != nil || len(resources) != count {
+		t.Fatalf("inventory count=%d want=%d err=%v", len(resources), count, err)
+	}
+	for _, resource := range resources {
+		if resource.State != "provisioning" || resource.Endpoint != "" {
+			t.Fatalf("unscheduled GPU workload was routable: %#v", resource)
+		}
+	}
+	if elapsed := time.Since(started); elapsed > 15*time.Second {
+		t.Fatalf("fleet inventory took %s for %d workloads", elapsed, count)
+	}
+
+	// Removing half the simulated nodes models a large scheduler disruption.
+	// Pending GPU workloads must remain present and unroutable rather than
+	// disappearing or being inferred healthy from cluster-level node state.
+	nodeNames := kubectlOutput(t, contextName, "get", "nodes", "-o", "name")
+	nodes := strings.Fields(nodeNames)
+	for _, node := range nodes[:len(nodes)/2] {
+		runKubectl(t, contextName, "delete", node, "--wait=false")
+	}
+	resources, err = provider.Inventory(context.Background(), provision.InventoryFilter{Prefix: "kwok-fleet-"})
+	if err != nil || len(resources) != count {
+		t.Fatalf("post-disruption inventory count=%d want=%d err=%v", len(resources), count, err)
+	}
+	for _, resource := range resources {
+		if resource.State != "provisioning" || resource.Endpoint != "" {
+			t.Fatalf("node disruption made pending workload routable: %#v", resource)
+		}
+	}
+
+	runBounded(func(index int) error {
+		return provider.DeleteReplica(context.Background(), provider.Handle(spec(index).ExternalKey))
+	})
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		remaining, listErr := provider.Inventory(context.Background(), provision.InventoryFilter{Prefix: "kwok-fleet-"})
+		if listErr == nil && len(remaining) == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("fleet resources remain after cleanup: count=%d err=%v", len(remaining), listErr)
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+}
+
 func runKubectl(t *testing.T, contextName string, args ...string) {
 	t.Helper()
 	commandArgs := append([]string{"--context", contextName}, args...)
@@ -95,4 +198,14 @@ func runKubectl(t *testing.T, contextName string, args ...string) {
 	if err != nil {
 		t.Fatalf("kubectl %s: %v: %s", strings.Join(args, " "), err, output)
 	}
+}
+
+func kubectlOutput(t *testing.T, contextName string, args ...string) string {
+	t.Helper()
+	commandArgs := append([]string{"--context", contextName}, args...)
+	output, err := exec.Command("kubectl", commandArgs...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("kubectl %s: %v: %s", strings.Join(args, " "), err, output)
+	}
+	return string(output)
 }

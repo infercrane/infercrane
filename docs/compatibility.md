@@ -51,4 +51,6 @@ make test-container  # race tests, vet, and real PostgreSQL integration
 make test-stack      # full Compose request and CLI smoke path
 make test-failure    # worker loss and control-plane restart recovery
 make test-kubernetes-kind # Kubernetes ownership and recovery without a GPU
+make test-kubernetes-kwok # large fleet, pending GPU capacity, node loss, and cleanup
+make qualify-product-nightly # coverage-guided fuzzing and repeated reliability soak
 ```
