@@ -73,6 +73,13 @@
           { "label": "Contributing", "href": "https://github.com/infercrane/infercrane/blob/main/CONTRIBUTING.md" },
           { "label": "Security", "href": "/security" }
         ]
+      },
+      {
+        "header": "For AI agents",
+        "items": [
+          { "label": "llms.txt", "href": "/llms.txt" },
+          { "label": "llms-full.txt", "href": "/llms-full.txt" }
+        ]
       }
     ]
   },

@@ -19,6 +19,11 @@ Every public page needs frontmatter with a specific `title` and outcome-oriented
 with the result or problem, put a working example near the top, state destructive/billable boundaries
 before the command, and end with the most likely next action.
 
+Mintlify generates `/llms.txt`, `/llms-full.txt`, `/.well-known/llms.txt`, and Markdown page variants
+from public navigation and frontmatter. Do not commit a custom `llms.txt` unless the generated index
+cannot express a required agent directive: a custom file replaces automatic generation and must then
+be maintained manually.
+
 This guide keeps the public documentation precise, consistent, and maintainable. Baseten, Linear, and Vercel are quality references—not templates. Do not copy their branding, assets, copy, or component arrangements. InferCrane uses Mintlify's Maple theme for its compact documentation shell and upper-left appearance controls, with repository-owned tokens and infrastructure components layered on top.
 
 ## Visual tokens

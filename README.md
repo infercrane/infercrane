@@ -24,6 +24,11 @@ qualified for the exact serving plan.
 
 Read the [InferCrane documentation](https://infercrane.mintlify.site) for the five-minute local quickstart, product concepts, operations, integrations, and references. The Mintlify source lives in [`docs/`](docs/index.mdx); run `npm install && npm run dev` there to preview documentation changes locally.
 
+For coding agents and LLM indexing, Mintlify continuously generates
+[`llms.txt`](https://infercrane.mintlify.site/llms.txt) and
+[`llms-full.txt`](https://infercrane.mintlify.site/llms-full.txt) from the current public navigation.
+Every public page is also available as Markdown by appending `.md` to its documentation URL.
+
 Already running inference? Connect it without transferring lifecycle ownership:
 
 ```bash
