@@ -112,6 +112,33 @@ func TestKubernetesKServeModeRequiresCRDAndUsesOneOwner(t *testing.T) {
 	}
 }
 
+func TestKubernetesDoesNotAcceptReadinessFromStaleObservedGeneration(t *testing.T) {
+	for _, api := range []string{"deployment", "kserve"} {
+		t.Run(api, func(t *testing.T) {
+			fixture := providerfixture.NewKubernetesCLI()
+			provider := testKubernetesProvider(fixture, api)
+			spec := testKubernetesSpec()
+			handle, err := provider.EnsureReplica(context.Background(), spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			name := resourceNameFromHandle(handle)
+			kind := "deployment"
+			if api == "kserve" {
+				kind = "inferenceservice"
+			}
+			fixture.Objects[kind+"/"+name]["metadata"].(map[string]any)["generation"] = float64(2)
+			observation, err := provider.ObserveReplica(context.Background(), handle, 8000)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if observation.State != "provisioning" || observation.Endpoint != "" {
+				t.Fatalf("stale status was accepted as current readiness: %#v", observation)
+			}
+		})
+	}
+}
+
 func TestKubernetesConfigurationAndManifestFailClosed(t *testing.T) {
 	fixture := providerfixture.NewKubernetesCLI()
 	provider := testKubernetesProvider(fixture, "deployment")

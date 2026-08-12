@@ -44,8 +44,17 @@ type awsDescribe struct {
 	Reservations []struct {
 		Instances []struct {
 			InstanceID       string `json:"InstanceId"`
+			ImageID          string `json:"ImageId"`
+			InstanceType     string `json:"InstanceType"`
+			SubnetID         string `json:"SubnetId"`
 			PrivateIPAddress string `json:"PrivateIpAddress"`
-			State            struct {
+			IAMProfile       struct {
+				ARN string `json:"Arn"`
+			} `json:"IamInstanceProfile"`
+			SecurityGroups []struct {
+				GroupID string `json:"GroupId"`
+			} `json:"SecurityGroups"`
+			State struct {
 				Name string `json:"Name"`
 			} `json:"State"`
 			Tags []struct {
@@ -57,6 +66,9 @@ type awsDescribe struct {
 
 type awsInstance struct {
 	ID, ExternalKey, State, PrivateIP string
+	ImageID, InstanceType, SubnetID   string
+	InstanceProfileARN                string
+	SecurityGroupIDs                  []string
 }
 
 // Check performs a read-only role-assumption and identity probe. It validates
@@ -96,6 +108,9 @@ func (a AWSEC2) EnsureReplica(ctx context.Context, spec ReplicaSpec) (ProviderHa
 		return ProviderHandle{}, err
 	}
 	if existing.ID != "" {
+		if err := a.validateAdoptedInstance(existing); err != nil {
+			return ProviderHandle{}, err
+		}
 		return ProviderHandle{RequestID: a.clientToken(spec.ExternalKey), ResourceID: existing.ID, ExternalKey: spec.ExternalKey}, nil
 	}
 	port := spec.Port
@@ -236,6 +251,17 @@ func (a AWSEC2) find(ctx context.Context, externalKey string) (awsInstance, erro
 	return active[0], nil
 }
 
+func (a AWSEC2) validateAdoptedInstance(instance awsInstance) error {
+	expectedGroups := append([]string(nil), a.SecurityGroupIDs...)
+	actualGroups := append([]string(nil), instance.SecurityGroupIDs...)
+	sort.Strings(expectedGroups)
+	sort.Strings(actualGroups)
+	if instance.ImageID != a.AMIID || instance.InstanceType != a.InstanceType || instance.SubnetID != a.SubnetID || instance.InstanceProfileARN != a.InstanceProfileARN || strings.Join(actualGroups, "\x00") != strings.Join(expectedGroups, "\x00") {
+		return fmt.Errorf("AWS EC2 instance %s with durable key %q does not match the configured AMI, instance type, subnet, instance profile, and security groups", instance.ID, instance.ExternalKey)
+	}
+	return nil
+}
+
 func (a AWSEC2) describe(ctx context.Context, filter string) ([]awsInstance, error) {
 	output, err := a.run(ctx, "ec2", "describe-instances", "--region", a.Region, "--filters", filter, "--output", "json", "--no-cli-pager")
 	if err != nil {
@@ -248,7 +274,10 @@ func (a AWSEC2) describe(ctx context.Context, filter string) ([]awsInstance, err
 	var out []awsInstance
 	for _, reservation := range response.Reservations {
 		for _, instance := range reservation.Instances {
-			item := awsInstance{ID: instance.InstanceID, State: instance.State.Name, PrivateIP: instance.PrivateIPAddress}
+			item := awsInstance{ID: instance.InstanceID, State: instance.State.Name, PrivateIP: instance.PrivateIPAddress, ImageID: instance.ImageID, InstanceType: instance.InstanceType, SubnetID: instance.SubnetID, InstanceProfileARN: instance.IAMProfile.ARN}
+			for _, group := range instance.SecurityGroups {
+				item.SecurityGroupIDs = append(item.SecurityGroupIDs, group.GroupID)
+			}
 			for _, tag := range instance.Tags {
 				if tag.Key == "infercrane:external-key" {
 					item.ExternalKey = tag.Value

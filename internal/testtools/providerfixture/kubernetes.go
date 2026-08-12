@@ -84,9 +84,9 @@ func (k *KubernetesCLI) apply(args []string) ([]byte, error) {
 		metadata["generation"] = float64(1)
 		switch kind {
 		case "Deployment":
-			item["status"] = map[string]any{"availableReplicas": 1, "readyReplicas": 1, "conditions": []any{map[string]any{"type": "Available", "status": "True", "reason": "MinimumReplicasAvailable"}}}
+			item["status"] = map[string]any{"observedGeneration": 1, "availableReplicas": 1, "readyReplicas": 1, "conditions": []any{map[string]any{"type": "Available", "status": "True", "reason": "MinimumReplicasAvailable"}}}
 		case "InferenceService":
-			item["status"] = map[string]any{"url": "http://" + name + ".example.test", "conditions": []any{map[string]any{"type": "Ready", "status": "True", "reason": "Ready"}}}
+			item["status"] = map[string]any{"observedGeneration": 1, "url": "http://" + name + ".example.test", "conditions": []any{map[string]any{"type": "Ready", "status": "True", "reason": "Ready"}}}
 		}
 		k.Objects[strings.ToLower(kind)+"/"+name] = item
 	}

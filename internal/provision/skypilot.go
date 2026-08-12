@@ -2,6 +2,7 @@ package provision
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/infercrane/infercrane/internal/runtimecontract"
 	"github.com/infercrane/infercrane/internal/support"
@@ -64,10 +66,42 @@ type CommandRunner interface {
 }
 type execRunner struct{ binary string }
 
+const maxProviderCommandOutput = 8 << 20
+
+var errProviderCommandOutputLimit = errors.New("provider command output exceeded 8 MiB")
+
+type boundedCommandOutput struct {
+	mu       sync.Mutex
+	data     []byte
+	exceeded bool
+}
+
+func (w *boundedCommandOutput) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	remaining := maxProviderCommandOutput - len(w.data)
+	if remaining > 0 {
+		if remaining > len(p) {
+			remaining = len(p)
+		}
+		w.data = append(w.data, p[:remaining]...)
+	}
+	if remaining < len(p) {
+		w.exceeded = true
+	}
+	return len(p), nil
+}
+
 func (r execRunner) Run(ctx context.Context, env []string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, r.binary, args...)
 	cmd.Env = append(os.Environ(), env...)
-	return cmd.CombinedOutput()
+	output := &boundedCommandOutput{data: make([]byte, 0, 64<<10)}
+	cmd.Stdout, cmd.Stderr = output, output
+	err := cmd.Run()
+	if output.exceeded {
+		err = errors.Join(err, errProviderCommandOutputLimit)
+	}
+	return output.data, err
 }
 
 type SkyPilot struct {
@@ -159,7 +193,7 @@ func (s SkyPilot) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provider
 	}
 	output, err := runner.Run(ctx, []string{"INFERCRANE_WORKER_API_KEY=" + s.APIKey}, "launch", "-c", resourceID, "-y", "--async", "--secret", "INFERCRANE_WORKER_API_KEY", path)
 	if err != nil {
-		return ProviderHandle{}, fmt.Errorf("%w: launch %s: %s", ErrUnavailable, resourceID, strings.TrimSpace(string(output)))
+		return ProviderHandle{}, fmt.Errorf("%w: launch %s: %s", ErrUnavailable, resourceID, s.safeDiagnostic(output))
 	}
 	return ProviderHandle{RequestID: requestID(string(output)), ResourceID: resourceID, ExternalKey: spec.ExternalKey}, nil
 }
@@ -171,7 +205,7 @@ func (s SkyPilot) requestState(ctx context.Context, requestID string) (string, b
 	}
 	output, runErr := runner.Run(ctx, nil, "api", "status", "--all-status", "--output", "json", requestID)
 	if runErr != nil {
-		return "", false, fmt.Errorf("observe SkyPilot request %s: %w: %s", requestID, runErr, strings.TrimSpace(string(output)))
+		return "", false, fmt.Errorf("observe SkyPilot request %s: %w: %s", requestID, runErr, s.safeDiagnostic(output))
 	}
 	var rows []map[string]any
 	if err = json.Unmarshal(jsonPayload(output), &rows); err != nil {
@@ -216,7 +250,7 @@ func (s SkyPilot) DeleteReplica(ctx context.Context, handle ProviderHandle) erro
 		if current, observeErr := s.observe(ctx, handle.ResourceID, 8000, false); observeErr == nil && !current.Exists {
 			return nil
 		}
-		return fmt.Errorf("delete %s: %s", handle.ResourceID, strings.TrimSpace(string(output)))
+		return fmt.Errorf("delete %s: %s", handle.ResourceID, s.safeDiagnostic(output))
 	}
 	return nil
 }
@@ -249,7 +283,10 @@ func clusterName(name string) string {
 	slug = strings.Trim(slug, "-")
 	result := "infercrane-" + slug
 	if len(result) > 63 {
-		result = result[:63]
+		digest := sha256.Sum256([]byte(name))
+		const suffixLength = 12
+		prefixLength := 63 - 1 - suffixLength
+		result = strings.TrimRight(result[:prefixLength], "-") + "-" + fmt.Sprintf("%x", digest[:6])
 	}
 	return strings.TrimRight(result, "-")
 }
@@ -317,7 +354,7 @@ func (s SkyPilot) observe(ctx context.Context, resourceID string, port int, refr
 		return Observation{Exists: false, State: "absent"}, nil
 	}
 	if err != nil {
-		return Observation{}, fmt.Errorf("observe SkyPilot cluster %s: %w: %s", resourceID, err, strings.TrimSpace(string(output)))
+		return Observation{}, fmt.Errorf("observe SkyPilot cluster %s: %w: %s", resourceID, err, s.safeDiagnostic(output))
 	}
 	statuses, err := parseStatuses(output)
 	if err != nil {
@@ -327,7 +364,7 @@ func (s SkyPilot) observe(ctx context.Context, resourceID string, port int, refr
 		return Observation{Exists: false, State: "absent"}, nil
 	}
 	status := statuses[0]
-	observation := Observation{Exists: true, State: normalizeState(status.Status), Details: string(output)}
+	observation := Observation{Exists: true, State: normalizeState(status.Status), Details: s.safeDiagnostic(output)}
 	if observation.State == "starting" || observation.State == "ready" {
 		endpoint, endpointErr := runner.Run(ctx, nil, "status", resourceID, "--endpoint", strconvPort(port))
 		if endpointErr == nil && strings.TrimSpace(string(endpoint)) != "" {
@@ -336,7 +373,7 @@ func (s SkyPilot) observe(ctx context.Context, resourceID string, port int, refr
 			if queue, queueErr := runner.Run(ctx, nil, "queue", resourceID, "-o", "json"); queueErr == nil {
 				if failed, reason := failedJob(queue); failed {
 					observation.State = "failed"
-					observation.Details = string(output) + "\n" + string(queue)
+					observation.Details = s.safeDiagnostic(output) + "\n" + s.safeDiagnostic(queue)
 					if reason != "" {
 						observation.Details += "\nruntime job failure: " + reason
 					}
@@ -345,6 +382,18 @@ func (s SkyPilot) observe(ctx context.Context, resourceID string, port int, refr
 		}
 	}
 	return observation, nil
+}
+
+func (s SkyPilot) safeDiagnostic(output []byte) string {
+	const limit = 4096
+	if len(output) > limit {
+		output = append(append([]byte(nil), output[:limit]...), []byte("…")...)
+	}
+	message := strings.TrimSpace(string(output))
+	if s.APIKey != "" {
+		message = strings.ReplaceAll(message, s.APIKey, "[REDACTED]")
+	}
+	return message
 }
 
 func failedJob(data []byte) (bool, string) {

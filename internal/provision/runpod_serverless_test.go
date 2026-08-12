@@ -53,6 +53,26 @@ func TestRunPodServerlessEnsureIsReplaySafeAndScaleToZeroNative(t *testing.T) {
 	}
 }
 
+func TestRunPodServerlessRejectsSemanticallyInvalidCreateSuccess(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/templates/template") {
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "template", "isServerless": true, "env": map[string]string{"MODEL_NAME": "model", "MODEL_REVISION": "immutable", "RAW_OPENAI_OUTPUT": "1", "ENABLE_AUTO_TOOL_CHOICE": "true", "TOOL_CALL_PARSER": "hermes"}})
+			return
+		}
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(`[]`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"id":"","name":"wrong","templateId":"other"}`))
+	}))
+	defer server.Close()
+	provider := RunPodServerless{APIKey: "secret", BaseURL: server.URL, Client: server.Client()}
+	_, err := provider.EnsureEndpoint(context.Background(), ServerlessEndpointSpec{ExternalKey: "key", Model: "model", ModelRevision: "immutable", TemplateID: "template", GPU: "L40S", WorkersMax: 1})
+	if err == nil || !strings.Contains(err.Error(), "invalid endpoint identity") {
+		t.Fatalf("invalid 2xx create response accepted: %v", err)
+	}
+}
+
 func TestRunPodServerlessRejectsTemplateForMutableOrWrongArtifact(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"id": "template", "isServerless": true, "env": map[string]string{"MODEL_NAME": "Other/Model", "MODEL_REVISION": "main", "RAW_OPENAI_OUTPUT": "1"}})
@@ -75,6 +95,18 @@ func TestRunPodServerlessDeleteIsIdempotent(t *testing.T) {
 	provider := RunPodServerless{APIKey: "secret", BaseURL: server.URL, Client: server.Client()}
 	if err := provider.DeleteEndpoint(context.Background(), "gone"); err != nil || deletes != 1 {
 		t.Fatalf("deletes=%d err=%v", deletes, err)
+	}
+}
+
+func TestRunPodServerlessRedactsAndBoundsProviderErrorBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("diagnostic secret " + strings.Repeat("x", 16<<10)))
+	}))
+	defer server.Close()
+	err := (RunPodServerless{APIKey: "secret", BaseURL: server.URL, Client: server.Client()}).DeleteEndpoint(context.Background(), "endpoint")
+	if err == nil || strings.Contains(err.Error(), "secret") || len(err.Error()) > 5000 {
+		t.Fatalf("unsafe provider error length=%d err=%v", len(err.Error()), err)
 	}
 }
 

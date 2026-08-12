@@ -44,6 +44,9 @@ func (g GCPCompute) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provid
 		return ProviderHandle{}, err
 	}
 	if existing.Name != "" {
+		if metadataValue(existing, "infercrane-external-key") != spec.ExternalKey || metadataValue(existing, "infercrane-intent-digest") != g.intentDigest(spec) {
+			return ProviderHandle{}, fmt.Errorf("GCP Compute instance %s does not match immutable intent", existing.Name)
+		}
 		return handle, nil
 	}
 	port := spec.Port
@@ -54,7 +57,7 @@ func (g GCPCompute) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provid
 		port = 8000
 	}
 	startup := g.startup(spec, port)
-	metadata := "^|||^infercrane-external-key=" + spec.ExternalKey + "|||startup-script=" + startup
+	metadata := "^|||^infercrane-external-key=" + spec.ExternalKey + "|||infercrane-intent-digest=" + g.intentDigest(spec) + "|||startup-script=" + startup
 	args := []string{"compute", "instances", "create", handle.ResourceID, "--project", g.Project, "--zone", g.Zone, "--machine-type", g.MachineType, "--accelerator", "type=" + g.GPUType + ",count=1", "--subnet", g.Subnet, "--no-address", "--service-account", g.ServiceAccount, "--scopes", "cloud-platform", "--image", g.VMImage, "--maintenance-policy", "TERMINATE", "--metadata", metadata, "--labels", "infercrane-managed=true", "--format", "json", "--quiet"}
 	output, err := g.run(ctx, args...)
 	if err != nil {
@@ -192,6 +195,18 @@ func (g GCPCompute) name(key string) string {
 func (g GCPCompute) requestID(key string) string {
 	sum := sha256.Sum256([]byte("gcp-compute\x00" + key))
 	return hex.EncodeToString(sum[:16])
+}
+func (g GCPCompute) intentDigest(spec ReplicaSpec) string {
+	port := spec.Port
+	if !spec.Workload.Empty() {
+		port = spec.Workload.Port
+	}
+	if port == 0 {
+		port = 8000
+	}
+	canonical := strings.Join([]string{g.Project, g.Zone, g.Subnet, g.MachineType, g.GPUType, g.ServiceAccount, g.VMImage, g.startup(spec, port)}, "\x00")
+	sum := sha256.Sum256([]byte(canonical))
+	return hex.EncodeToString(sum[:])
 }
 func (g GCPCompute) startup(spec ReplicaSpec, port int) string {
 	image := g.ContainerImage

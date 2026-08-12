@@ -23,6 +23,7 @@ type fakeSkyRunner struct {
 	endpoint        string
 	launchTask      string
 	launches, downs int
+	launchError     string
 }
 
 func (f *fakeSkyRunner) Run(_ context.Context, _ []string, args ...string) ([]byte, error) {
@@ -41,6 +42,9 @@ func (f *fakeSkyRunner) Run(_ context.Context, _ []string, args ...string) ([]by
 			return nil, err
 		}
 		f.launchTask = string(contents)
+		if f.launchError != "" {
+			return []byte(f.launchError), errors.New("launch failed")
+		}
 		return []byte("request 12345678-1234-1234-1234-123456789abc submitted"), nil
 	case strings.HasPrefix(command, "down "):
 		f.downs++
@@ -237,6 +241,24 @@ func TestEnsureDoesNotLaunchWhenDiscoveryFails(t *testing.T) {
 	}
 }
 
+func TestSkyPilotLaunchFailureRedactsAndBoundsCredentialOutput(t *testing.T) {
+	runner := &fakeSkyRunner{launchError: "secret " + strings.Repeat("x", 16<<10)}
+	_, err := (SkyPilot{APIKey: "secret", Runner: runner}).EnsureReplica(context.Background(), ReplicaSpec{ExternalKey: "prod-r0", Model: "model", Cloud: "runpod", GPU: "L40S"})
+	if err == nil || strings.Contains(err.Error(), "secret") || len(err.Error()) > 5000 {
+		t.Fatalf("unsafe SkyPilot error length=%d err=%v", len(err.Error()), err)
+	}
+}
+
+func TestProviderCommandRunnerBoundsCombinedOutput(t *testing.T) {
+	output, err := (execRunner{binary: "sh"}).Run(context.Background(), nil, "-c", "head -c 9437184 /dev/zero")
+	if !errors.Is(err, errProviderCommandOutputLimit) {
+		t.Fatalf("error=%v, want output limit", err)
+	}
+	if len(output) != maxProviderCommandOutput {
+		t.Fatalf("captured output=%d, want %d", len(output), maxProviderCommandOutput)
+	}
+}
+
 func TestEnsureReplicaDiscoversExistingResource(t *testing.T) {
 	runner := &fakeSkyRunner{}
 	provider := SkyPilot{APIKey: "secret", Runner: runner}
@@ -275,5 +297,15 @@ func TestInventoryFiltersOwnedResources(t *testing.T) {
 	resources, err := provider.Inventory(context.Background(), InventoryFilter{Prefix: "infercrane-"})
 	if err != nil || len(resources) != 1 || resources[0].ID != "infercrane-prod-r0" {
 		t.Fatalf("resources=%#v err=%v", resources, err)
+	}
+}
+
+func TestClusterNamePreservesUniquenessAfterProviderLengthLimit(t *testing.T) {
+	deploymentID := strings.Repeat("a", 32)
+	revisionID := strings.Repeat("b", 32)
+	first := clusterName(deploymentID + "-" + revisionID + "-r0")
+	second := clusterName(deploymentID + "-" + revisionID + "-r1")
+	if first == second || len(first) > 63 || len(second) > 63 {
+		t.Fatalf("provider identities collided or exceeded limit: %q %q", first, second)
 	}
 }

@@ -43,10 +43,13 @@ func (f *fakeGCPRunner) Run(_ context.Context, _ []string, args ...string) ([]by
 					if strings.HasPrefix(part, "infercrane-external-key=") {
 						f.external = strings.TrimPrefix(part, "infercrane-external-key=")
 					}
+					if strings.HasPrefix(part, "infercrane-intent-digest=") {
+						f.instance.Metadata.Items = append(f.instance.Metadata.Items, struct{ Key, Value string }{Key: "infercrane-intent-digest", Value: strings.TrimPrefix(part, "infercrane-intent-digest=")})
+					}
 				}
 			}
 		}
-		f.instance.Metadata.Items = []struct{ Key, Value string }{{Key: "infercrane-external-key", Value: f.external}}
+		f.instance.Metadata.Items = append(f.instance.Metadata.Items, struct{ Key, Value string }{Key: "infercrane-external-key", Value: f.external})
 		if f.loseCreate {
 			f.loseCreate = false
 			return nil, errors.New("lost create response")
@@ -114,6 +117,17 @@ func TestGCPComputeRejectsMutableContainerBeforeProviderCall(t *testing.T) {
 	_, err := provider.EnsureReplica(context.Background(), ReplicaSpec{ExternalKey: "r0", Model: "model", Cloud: "gcp", Region: "europe-west4", GPU: "nvidia-l4"})
 	if err == nil || runner.creates != 0 {
 		t.Fatalf("mutable image accepted err=%v creates=%d", err, runner.creates)
+	}
+}
+
+func TestGCPComputeRefusesSameNameInstanceWithMismatchedIntent(t *testing.T) {
+	provider := testGCPCompute(nil)
+	spec := ReplicaSpec{ExternalKey: "prod-r0", Model: "Qwen/Qwen3-8B", Cloud: "gcp", Region: "europe-west4", GPU: "nvidia-l4"}
+	runner := &fakeGCPRunner{instance: gcpInstance{Name: provider.Handle(spec.ExternalKey).ResourceID, Status: "RUNNING"}}
+	provider.Runner = runner
+	_, err := provider.EnsureReplica(context.Background(), spec)
+	if err == nil || !strings.Contains(err.Error(), "does not match immutable intent") || runner.creates != 0 {
+		t.Fatalf("same-name conflicting VM was adopted: creates=%d err=%v", runner.creates, err)
 	}
 }
 

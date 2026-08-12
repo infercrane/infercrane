@@ -43,3 +43,14 @@ func TestRunPodAvailabilityDoesNotExposeCredentialInTransportError(t *testing.T)
 		t.Fatalf("unsafe error: %v", err)
 	}
 }
+
+func TestRunPodAvailabilityRedactsAndBoundsGraphQLError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"errors":[{"message":"credential secret ` + strings.Repeat("x", 16<<10) + `"}]}`))
+	}))
+	defer server.Close()
+	_, err := (RunPodAvailability{APIKey: "secret", BaseURL: server.URL, Client: server.Client()}).Availability(context.Background(), AvailabilityRequest{GPU: "L40S"})
+	if err == nil || strings.Contains(err.Error(), "secret") || len(err.Error()) > 5000 {
+		t.Fatalf("unsafe GraphQL error length=%d err=%v", len(err.Error()), err)
+	}
+}

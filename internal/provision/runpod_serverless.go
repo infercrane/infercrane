@@ -123,6 +123,12 @@ func (r RunPodServerless) EnsureEndpoint(ctx context.Context, spec ServerlessEnd
 	if err = r.do(ctx, http.MethodPost, "/endpoints", body, &endpoint); err != nil {
 		return ServerlessEndpoint{}, err
 	}
+	if endpoint.ID == "" || endpoint.Name != name || endpoint.TemplateID != templateID {
+		return ServerlessEndpoint{}, errors.New("RunPod Serverless create returned an invalid endpoint identity")
+	}
+	if endpoint.WorkersMin != 0 || endpoint.WorkersMax != spec.WorkersMax || !contains(endpoint.GPUTypeIDs, runPodGPUType(spec.GPU)) {
+		return ServerlessEndpoint{}, errors.New("RunPod Serverless create returned endpoint configuration that does not match immutable intent")
+	}
 	return endpoint, nil
 }
 
@@ -295,7 +301,8 @@ func (r RunPodServerless) doAbsolute(ctx context.Context, method, endpoint strin
 		return fmt.Errorf("read RunPod API response: %w", err)
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return &providerHTTPError{Status: response.StatusCode, Body: strings.TrimSpace(string(payload))}
+		message := safeRunPodDiagnostic(string(payload), r.APIKey)
+		return &providerHTTPError{Status: response.StatusCode, Body: message}
 	}
 	if output != nil && len(payload) > 0 {
 		if err = json.Unmarshal(payload, output); err != nil {

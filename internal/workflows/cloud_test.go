@@ -451,10 +451,11 @@ func (f *fakeCloudStore) AttachModelArtifact(_ context.Context, _, _ string, art
 func (f *fakeCloudStore) Audit(context.Context, domain.AuditEvent) error { return nil }
 
 type fakeReplicaProvider struct {
-	observation provision.Observation
-	ensureErr   error
-	ensureCalls int
-	deleteCalls int
+	observation   provision.Observation
+	ensureErr     error
+	ensureCalls   int
+	deleteCalls   int
+	deleteLingers int
 }
 
 func TestReplicaBackendsResolveByCloudRuntimeAndDurableName(t *testing.T) {
@@ -530,6 +531,10 @@ func (f *fakeReplicaProvider) ObserveReplica(context.Context, provision.Provider
 }
 func (f *fakeReplicaProvider) DeleteReplica(context.Context, provision.ProviderHandle) error {
 	f.deleteCalls++
+	if f.deleteLingers > 0 {
+		f.deleteLingers--
+		return nil
+	}
 	f.observation = provision.Observation{}
 	return nil
 }
@@ -662,5 +667,20 @@ func TestConvergeCancellationDeletesProviderResource(t *testing.T) {
 	_, err := QualifiedV01CloudHandlers(store, provider, fakeInspector{})[ConvergeKind+".cancel"](context.Background(), operation)
 	if err != nil || provider.deleteCalls != 1 || store.replica.LifecycleState != "deleted" || !store.deleted {
 		t.Fatalf("delete_calls=%d replica=%#v deleted=%t err=%v", provider.deleteCalls, store.replica, store.deleted, err)
+	}
+}
+
+func TestConvergeCancellationWaitsForEventuallyConsistentProviderDelete(t *testing.T) {
+	store := &fakeCloudStore{deployment: domain.Deployment{ID: "deployment-1", Name: "qwen"}, replica: domain.Replica{ID: "replica-1", DeploymentID: "deployment-1", ExternalKey: "deployment-1-r0", ProviderResourceID: "infercrane-deployment-1-r0", LifecycleState: "starting"}}
+	provider := &fakeReplicaProvider{observation: provision.Observation{Exists: true, State: "deleting"}, deleteLingers: 1}
+	operation := domain.Operation{ID: "operation-1", LeaseOwner: "worker", LeaseGeneration: 1, RequestJSON: `{"deployment_id":"deployment-1","name":"qwen","model":"Qwen/Qwen3-8B","cloud":"runpod","gpu":"L40S","tenant_id":"global"}`}
+	handler := QualifiedV01CloudHandlers(store, provider, fakeInspector{})[ConvergeKind+".cancel"]
+	_, err := handler(context.Background(), operation)
+	var failure operations.Failure
+	if !errors.As(err, &failure) || failure.Code != "provider_delete_pending" || !failure.Retryable || store.replica.LifecycleState == "deleted" || store.deleted {
+		t.Fatalf("first delete finalized early: failure=%+v replica=%#v deployment_deleted=%t err=%v", failure, store.replica, store.deleted, err)
+	}
+	if _, err = handler(context.Background(), operation); err != nil || store.replica.LifecycleState != "deleted" || !store.deleted {
+		t.Fatalf("delete did not converge after provider absence: replica=%#v deleted=%t err=%v", store.replica, store.deleted, err)
 	}
 }

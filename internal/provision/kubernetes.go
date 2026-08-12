@@ -42,10 +42,11 @@ type kubernetesObject struct {
 		ClusterIP string `json:"clusterIP"`
 	} `json:"spec"`
 	Status struct {
-		AvailableReplicas int    `json:"availableReplicas"`
-		ReadyReplicas     int    `json:"readyReplicas"`
-		URL               string `json:"url"`
-		Address           struct {
+		ObservedGeneration int64  `json:"observedGeneration"`
+		AvailableReplicas  int    `json:"availableReplicas"`
+		ReadyReplicas      int    `json:"readyReplicas"`
+		URL                string `json:"url"`
+		Address            struct {
 			URL string `json:"url"`
 		} `json:"address"`
 		Conditions []struct {
@@ -131,7 +132,7 @@ func (k Kubernetes) ObserveReplica(ctx context.Context, handle ProviderHandle, p
 	state, endpoint := "provisioning", ""
 	if k.WorkloadAPI == "kserve" {
 		item := objects[0]
-		if conditionTrue(item.Status.Conditions, "Ready") {
+		if generationObserved(item) && conditionTrue(item.Status.Conditions, "Ready") {
 			state = "ready"
 			endpoint = item.Status.Address.URL
 			if endpoint == "" {
@@ -140,7 +141,7 @@ func (k Kubernetes) ObserveReplica(ctx context.Context, handle ProviderHandle, p
 		}
 	} else if k.ownerSetComplete(objects) {
 		for _, item := range objects {
-			if item.Kind == "Deployment" && item.Status.AvailableReplicas > 0 {
+			if item.Kind == "Deployment" && generationObserved(item) && item.Status.AvailableReplicas > 0 {
 				state = "ready"
 				endpoint = fmt.Sprintf("http://%s.%s.svc:%d", k.resourceName(handle.ExternalKey), k.Namespace, port)
 			}
@@ -232,7 +233,7 @@ func (k Kubernetes) observationFromObjects(externalKey string, objects []kuberne
 	state, endpoint := "degraded", ""
 	if k.WorkloadAPI == "kserve" && len(objects) == 1 {
 		state = "provisioning"
-		if conditionTrue(objects[0].Status.Conditions, "Ready") {
+		if generationObserved(objects[0]) && conditionTrue(objects[0].Status.Conditions, "Ready") {
 			state, endpoint = "ready", objects[0].Status.Address.URL
 			if endpoint == "" {
 				endpoint = objects[0].Status.URL
@@ -241,7 +242,7 @@ func (k Kubernetes) observationFromObjects(externalKey string, objects []kuberne
 	} else if k.WorkloadAPI == "deployment" && k.ownerSetComplete(objects) {
 		state = "provisioning"
 		for _, item := range objects {
-			if item.Kind == "Deployment" && item.Status.AvailableReplicas > 0 {
+			if item.Kind == "Deployment" && generationObserved(item) && item.Status.AvailableReplicas > 0 {
 				state = "ready"
 				endpoint = fmt.Sprintf("http://%s.%s.svc:%d", k.resourceName(externalKey), k.Namespace, port)
 			}
@@ -411,9 +412,13 @@ func (k Kubernetes) nativeDetails(objects []kubernetesObject) map[string]any {
 		for _, condition := range item.Status.Conditions {
 			conditions = append(conditions, map[string]string{"type": condition.Type, "status": condition.Status, "reason": condition.Reason})
 		}
-		items = append(items, map[string]any{"api_version": item.APIVersion, "kind": item.Kind, "name": item.Metadata.Name, "namespace": item.Metadata.Namespace, "uid": item.Metadata.UID, "generation": item.Metadata.Generation, "available_replicas": item.Status.AvailableReplicas, "ready_replicas": item.Status.ReadyReplicas, "conditions": conditions})
+		items = append(items, map[string]any{"api_version": item.APIVersion, "kind": item.Kind, "name": item.Metadata.Name, "namespace": item.Metadata.Namespace, "uid": item.Metadata.UID, "generation": item.Metadata.Generation, "observed_generation": item.Status.ObservedGeneration, "available_replicas": item.Status.AvailableReplicas, "ready_replicas": item.Status.ReadyReplicas, "conditions": conditions})
 	}
 	return map[string]any{"context": k.Context, "namespace": k.Namespace, "workload_api": k.WorkloadAPI, "resources": items}
+}
+
+func generationObserved(item kubernetesObject) bool {
+	return item.Metadata.Generation > 0 && item.Status.ObservedGeneration == item.Metadata.Generation
 }
 
 func (k Kubernetes) run(ctx context.Context, namespaced bool, args ...string) ([]byte, error) {

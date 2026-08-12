@@ -74,7 +74,7 @@ func (r RunPodAvailability) Availability(ctx context.Context, request Availabili
 		return Availability{}, fmt.Errorf("decode provider availability: %w", err)
 	}
 	if len(payload.Errors) > 0 {
-		return Availability{}, errors.New("provider availability query was rejected: " + payload.Errors[0].Message)
+		return Availability{}, errors.New("provider availability query was rejected: " + safeRunPodDiagnostic(payload.Errors[0].Message, r.APIKey))
 	}
 	matches := make([]string, 0)
 	best := "none"
@@ -102,7 +102,7 @@ func (r RunPodAvailability) Availability(ctx context.Context, request Availabili
 	if request.Region != "" {
 		message += "; the signal is global and does not guarantee region " + request.Region
 	}
-	return Availability{State: state, Message: message, Details: strings.Join(matches, ",")}, nil
+	return Availability{State: state, Message: message, Details: safeRunPodDiagnostic(strings.Join(matches, ","), r.APIKey)}, nil
 }
 
 func gpuMatches(requested, id, display string) bool {

@@ -21,6 +21,7 @@ type fakeAWSRunner struct {
 	apiEnvironments    [][]string
 	runInstanceArgs    []string
 	roleFailurePayload string
+	instanceType       string
 }
 
 func (f *fakeAWSRunner) Run(_ context.Context, environment []string, args ...string) ([]byte, error) {
@@ -39,7 +40,11 @@ func (f *fakeAWSRunner) Run(_ context.Context, environment []string, args ...str
 		if f.instanceID == "" {
 			return []byte(`{"Reservations":[]}`), nil
 		}
-		response := map[string]any{"Reservations": []any{map[string]any{"Instances": []any{map[string]any{"InstanceId": f.instanceID, "PrivateIpAddress": "10.0.1.12", "State": map[string]string{"Name": f.state}, "Tags": []map[string]string{{"Key": "infercrane:external-key", "Value": f.externalKey}}}}}}}
+		instanceType := f.instanceType
+		if instanceType == "" {
+			instanceType = "g6e.xlarge"
+		}
+		response := map[string]any{"Reservations": []any{map[string]any{"Instances": []any{map[string]any{"InstanceId": f.instanceID, "ImageId": "ami-gpu", "InstanceType": instanceType, "SubnetId": "subnet-private", "PrivateIpAddress": "10.0.1.12", "IamInstanceProfile": map[string]string{"Arn": "arn:aws:iam::123456789012:instance-profile/infercrane-worker"}, "SecurityGroups": []map[string]string{{"GroupId": "sg-inference"}}, "State": map[string]string{"Name": f.state}, "Tags": []map[string]string{{"Key": "infercrane:external-key", "Value": f.externalKey}}}}}}}
 		return json.Marshal(response)
 	case "run-instances":
 		f.createCalls++
@@ -155,6 +160,33 @@ func TestAWSEC2AdoptsAfterLostCreateResponse(t *testing.T) {
 	handle, err := provider.EnsureReplica(context.Background(), awsReplicaSpec())
 	if err != nil || handle.ResourceID != "i-fixture" || runner.createCalls != 1 {
 		t.Fatalf("handle=%#v creates=%d err=%v", handle, runner.createCalls, err)
+	}
+}
+
+func TestAWSEC2RefusesMismatchedInstanceDuringAdoption(t *testing.T) {
+	runner := &fakeAWSRunner{instanceID: "i-stale", externalKey: awsReplicaSpec().ExternalKey, state: "running", instanceType: "p5.48xlarge"}
+	_, err := testAWSEC2(runner).EnsureReplica(context.Background(), awsReplicaSpec())
+	if err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("mismatched instance was adopted: %v", err)
+	}
+	if runner.createCalls != 0 {
+		t.Fatalf("provider created replacement while conflicting resource exists: %d", runner.createCalls)
+	}
+}
+
+func TestAWSEC2ClientTokenIsStableBoundedAndZonallyScoped(t *testing.T) {
+	provider := testAWSEC2(&fakeAWSRunner{})
+	token := provider.clientToken("deployment-r0")
+	if len(token) != 64 || token != provider.clientToken("deployment-r0") {
+		t.Fatalf("client token must be a stable 64-character digest: %q", token)
+	}
+	changedKey := provider.clientToken("deployment-r1")
+	changedRegionProvider := provider
+	changedRegionProvider.Region = "us-east-1"
+	changedSubnetProvider := provider
+	changedSubnetProvider.SubnetID = "subnet-other-az"
+	if token == changedKey || token == changedRegionProvider.clientToken("deployment-r0") || token == changedSubnetProvider.clientToken("deployment-r0") {
+		t.Fatal("client token did not change across resource, region, or subnet scope")
 	}
 }
 
