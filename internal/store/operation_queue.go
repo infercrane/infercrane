@@ -45,7 +45,12 @@ func (s *Store) EnqueueOperation(ctx context.Context, operation domain.Operation
 	operation.Attempt = 0
 	operation.CreatedAt = parseTime(stamp)
 	operation.UpdatedAt = operation.CreatedAt
-	_, err = s.ExecContext(ctx, `INSERT INTO operations(id,tenant_id,kind,resource_type,resource_name,idempotency_key,status,progress,message,request_json,result_json,attempt,max_attempts,next_attempt_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?::jsonb,'{}'::jsonb,?,?,?,?,?)`, operation.ID, operation.TenantID, operation.Kind, operation.ResourceType, operation.ResourceName, null(operation.IdempotencyKey), operation.Status, 0, "queued", operation.RequestJSON, 0, operation.MaxAttempts, stamp, stamp, stamp)
+	// Immediate queue eligibility must be based on the same clock used by
+	// ClaimOperation. Application and PostgreSQL clocks can differ slightly in
+	// real deployments (and when PostgreSQL runs in a VM/container); persisting
+	// the application timestamp as next_attempt_at can therefore make a newly
+	// queued operation temporarily invisible to workers.
+	_, err = s.ExecContext(ctx, `INSERT INTO operations(id,tenant_id,kind,resource_type,resource_name,idempotency_key,status,progress,message,request_json,result_json,attempt,max_attempts,next_attempt_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?::jsonb,'{}'::jsonb,?,?,NOW(),NOW(),NOW())`, operation.ID, operation.TenantID, operation.Kind, operation.ResourceType, operation.ResourceName, null(operation.IdempotencyKey), operation.Status, 0, "queued", operation.RequestJSON, 0, operation.MaxAttempts)
 	if isUniqueViolation(err) && operation.IdempotencyKey != "" {
 		existing, lookupErr := s.operationByKey(ctx, operation.TenantID, operation.Kind, operation.IdempotencyKey)
 		if lookupErr == nil {
@@ -133,7 +138,11 @@ func (s *Store) FailClaimedOperation(ctx context.Context, id, owner string, gene
 		status = "waiting"
 		completed = nil
 	}
-	result, err := s.ExecContext(ctx, `UPDATE operations SET status=CASE WHEN cancel_requested AND ? THEN 'cancelling' ELSE ? END,error_code=?,message=?,retryable=?,waiting_reason=?,next_attempt_at=?,lease_owner=NULL,lease_expires_at=NULL,updated_at=?,completed_at=? WHERE id=? AND status IN ('running','cancelling') AND lease_owner=? AND lease_generation=? AND lease_expires_at>NOW()`, retryable, status, code, message, retryable, nullIf(!retryable, message), next.UTC(), now(), completed, id, owner, generation)
+	delay := time.Until(next)
+	if delay < 0 {
+		delay = 0
+	}
+	result, err := s.ExecContext(ctx, `UPDATE operations SET status=CASE WHEN cancel_requested AND ? THEN 'cancelling' ELSE ? END,error_code=?,message=?,retryable=?,waiting_reason=?,next_attempt_at=NOW()+(? * INTERVAL '1 microsecond'),lease_owner=NULL,lease_expires_at=NULL,updated_at=NOW(),completed_at=? WHERE id=? AND status IN ('running','cancelling') AND lease_owner=? AND lease_generation=? AND lease_expires_at>NOW()`, retryable, status, code, message, retryable, nullIf(!retryable, message), delay.Microseconds(), completed, id, owner, generation)
 	if err != nil {
 		return err
 	}

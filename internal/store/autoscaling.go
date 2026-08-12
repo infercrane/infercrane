@@ -73,7 +73,7 @@ func (s *Store) ScaleTo(ctx context.Context, deploymentID string, desired int) e
 	}
 	stamp := now()
 	key := fmt.Sprintf("autoscale-%s-%d", deploymentID, generation)
-	if _, err = tx.ExecContext(ctx, `INSERT INTO operations(id,tenant_id,kind,resource_type,resource_name,idempotency_key,status,progress,message,request_json,result_json,attempt,max_attempts,next_attempt_at,created_at,updated_at) VALUES(?,?,?,?,?,?,'pending',0,'queued',?::jsonb,'{}'::jsonb,0,120,?,?,?)`, id, tenant, workflows.ScaleKind, "deployment", name, key, string(encoded), stamp, stamp, stamp); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO operations(id,tenant_id,kind,resource_type,resource_name,idempotency_key,status,progress,message,request_json,result_json,attempt,max_attempts,next_attempt_at,created_at,updated_at) VALUES(?,?,?,?,?,?,'pending',0,'queued',?::jsonb,'{}'::jsonb,0,120,NOW(),NOW(),NOW())`, id, tenant, workflows.ScaleKind, "deployment", name, key, string(encoded)); err != nil {
 		return err
 	}
 	eventID, err := newID()

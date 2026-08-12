@@ -51,8 +51,7 @@ func (s *Store) scanOperation(row *sql.Row) (domain.Operation, error) {
 }
 
 func (s *Store) RequestOperationCancel(ctx context.Context, id string) error {
-	stamp := now()
-	result, err := s.ExecContext(ctx, `UPDATE operations SET cancel_requested=TRUE,status=CASE WHEN status='pending' THEN 'cancelled' ELSE 'cancelling' END,message=CASE WHEN status='pending' THEN 'cancelled before execution' ELSE 'cancellation requested' END,completed_at=CASE WHEN status='pending' THEN ? ELSE completed_at END,lease_expires_at=CASE WHEN status='waiting' THEN ? ELSE lease_expires_at END,updated_at=? WHERE id=? AND status IN ('pending','leased','running','waiting','cancelling')`, stamp, stamp, stamp, id)
+	result, err := s.ExecContext(ctx, `UPDATE operations SET cancel_requested=TRUE,status=CASE WHEN status='pending' THEN 'cancelled' ELSE 'cancelling' END,message=CASE WHEN status='pending' THEN 'cancelled before execution' ELSE 'cancellation requested' END,completed_at=CASE WHEN status='pending' THEN NOW() ELSE completed_at END,lease_expires_at=CASE WHEN status='waiting' THEN NOW() ELSE lease_expires_at END,updated_at=NOW() WHERE id=? AND status IN ('pending','leased','running','waiting','cancelling')`, id)
 	if err != nil {
 		return err
 	}

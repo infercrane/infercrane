@@ -511,6 +511,28 @@ func TestOperationQueueLeasesAndRecoversExpiredWork(t *testing.T) {
 	}
 }
 
+func TestEnqueuedOperationIsImmediatelyClaimableByDatabaseClock(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	op, created, err := s.EnqueueOperation(ctx, domain.Operation{
+		TenantID:       "global",
+		Kind:           "test.immediate",
+		ResourceType:   "deployment",
+		ResourceName:   "immediate",
+		IdempotencyKey: "immediate-claim",
+	})
+	if err != nil || !created {
+		t.Fatalf("enqueue operation=%+v created=%t err=%v", op, created, err)
+	}
+	claimed, err := s.ClaimOperation(ctx, "immediate-worker", time.Minute)
+	if err != nil {
+		t.Fatalf("newly enqueued operation was not immediately claimable: %v", err)
+	}
+	if claimed.ID != op.ID {
+		t.Fatalf("claimed operation %q, want %q", claimed.ID, op.ID)
+	}
+}
+
 func TestConcurrentOperationClaimsAreExactlyOnce(t *testing.T) {
 	ctx := context.Background()
 	s := openStore(t, ctx)
