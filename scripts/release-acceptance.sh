@@ -648,10 +648,31 @@ run_elastic_qualify() {
 
   # The benchmark supplies bounded real queue pressure. Autoscaling must prove
   # both provider convergence to two replicas and the idle return to one.
+  # Observe scaling while pressure is active. A short fixed-token benchmark can
+  # finish before two autoscaler intervals on faster hardware, producing no
+  # queue signal even though clients time out. Long bounded generations keep
+  # the workload present without relying on a particular GPU's throughput.
+  autoscale_requests=${INFERCRANE_ACCEPTANCE_AUTOSCALE_REQUESTS:-2000}
+  autoscale_concurrency=${INFERCRANE_ACCEPTANCE_AUTOSCALE_CONCURRENCY:-400}
+  autoscale_output_tokens=${INFERCRANE_ACCEPTANCE_AUTOSCALE_OUTPUT_TOKENS:-512}
   record elastic-autoscale-queue-load ic benchmark "$ELASTIC_NAME" --revision active \
-    --requests 2000 --concurrency 400 --random-seed 29 --output json
+    --requests "$autoscale_requests" --concurrency "$autoscale_concurrency" \
+    --output-tokens "$autoscale_output_tokens" --random-seed 29 --output json &
+  load_pid=$!
+  if ! wait_replica_count "$ELASTIC_NAME" 2 "$scale_up_timeout"; then
+    kill "$load_pid" 2>/dev/null || true
+    wait "$load_pid" 2>/dev/null || true
+    return 1
+  fi
+  if ! wait "$load_pid"; then
+    echo "autoscaling load generator failed" >&2
+    return 1
+  fi
+  jq -e '.request_count > 0 and .failed < .request_count' "$evidence/elastic-autoscale-queue-load.log" >/dev/null || {
+    echo "autoscaling load produced no successful inference requests" >&2
+    return 1
+  }
   record elastic-explain-scale-up ic explain scaling "$ELASTIC_NAME" --output json
-  wait_replica_count "$ELASTIC_NAME" 2 "$scale_up_timeout"
   wait_replica_count "$ELASTIC_NAME" 1 "$scale_down_timeout"
   wait_lifecycle_idle "$ELASTIC_NAME" 600
   record elastic-explain-scale-down ic explain scaling "$ELASTIC_NAME" --output json
