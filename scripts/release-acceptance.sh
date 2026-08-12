@@ -594,7 +594,13 @@ run_elastic_faults() {
   deletion=$(ic delete "$ELASTIC_NAME" --yes --idempotency-key "$ELASTIC_NAME-delete-restart" --output json)
   printf '%s\n' "$deletion" >"$evidence/delete-restart-submit.json"
   delete_id=$(printf '%s' "$deletion" | jq -r '.operation.id')
-  wait_operation_error "$delete_id" router_withdrawal_pending 120
+  # Restart immediately after the durable API acknowledgement. Waiting for a
+  # transient retry code is racy: on a fast router/provider the entire delete
+  # can succeed before the observer samples that intermediate state, causing a
+  # false failure despite correct recovery and zero inventory. The submitted
+  # operation is still PENDING in the captured response, so this deterministically
+  # cuts the client/control-plane process boundary without depending on timing.
+  printf '%s\n' "$deletion" | jq -e '.operation.status == "pending"' >/dev/null
   compose restart infercrane >/dev/null
   start_wait=0
   until curl -fsS "http://127.0.0.1:${INFERCRANE_ACCEPTANCE_PORT:-18001}/readyz" >/dev/null 2>&1; do

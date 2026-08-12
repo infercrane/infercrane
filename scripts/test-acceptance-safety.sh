@@ -136,6 +136,15 @@ grep -Fq 'record serverless-cold-request ic request' "$root/scripts/release-acce
 # two consecutive queue intervals.
 grep -Fq 'INFERCRANE_ACCEPTANCE_AUTOSCALE_OUTPUT_TOKENS:-1024' "$root/scripts/release-acceptance.sh"
 grep -Fq 'wait_replica_count "$ELASTIC_NAME" 2 "$scale_up_timeout"' "$root/scripts/release-acceptance.sh"
+
+# Delete-restart qualification must cut immediately after the durable pending
+# acknowledgement. Sampling a transient router retry state races fast deletes
+# and can falsely fail after the operation already succeeded.
+grep -Fq '.operation.status == "pending"' "$root/scripts/release-acceptance.sh"
+if grep -Fq 'wait_operation_error "$delete_id" router_withdrawal_pending' "$root/scripts/release-acceptance.sh"; then
+  echo "delete restart still depends on a transient operation error" >&2
+  exit 1
+fi
 grep -Fq 'wait "$load_pid"' "$root/scripts/release-acceptance.sh"
 grep -Fq 'INFERCRANE_ACCEPTANCE_GUARD_REQUESTS:-100' "$root/scripts/release-acceptance.sh"
 
