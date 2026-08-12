@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -39,10 +40,13 @@ func TestProviderContractSkyPilotLifecycle(t *testing.T) {
 }
 
 func TestProviderContractRunPodServerlessLifecycleAndLostResponseAdoption(t *testing.T) {
+	var mu sync.Mutex
 	var endpoints []ServerlessEndpoint
 	creates, deletes := 0, 0
 	dropFirstResponse := true
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
 		switch {
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/templates/template-qwen"):
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": "template-qwen", "isServerless": true, "env": map[string]string{
@@ -86,8 +90,11 @@ func TestProviderContractRunPodServerlessLifecycleAndLostResponseAdoption(t *tes
 		t.Fatal("lost provider response was not surfaced")
 	}
 	adopted, err := provider.EnsureEndpoint(context.Background(), spec)
-	if err != nil || adopted.ID != "endpoint-1" || creates != 1 {
-		t.Fatalf("provider response loss created a duplicate: endpoint=%+v creates=%d err=%v", adopted, creates, err)
+	mu.Lock()
+	createCount := creates
+	mu.Unlock()
+	if err != nil || adopted.ID != "endpoint-1" || createCount != 1 {
+		t.Fatalf("provider response loss created a duplicate: endpoint=%+v creates=%d err=%v", adopted, createCount, err)
 	}
 	if err = provider.DeleteEndpoint(context.Background(), adopted.ID); err != nil {
 		t.Fatal(err)
@@ -96,7 +103,10 @@ func TestProviderContractRunPodServerlessLifecycleAndLostResponseAdoption(t *tes
 		// The fake returns 404 on the replay, which the adapter must treat as success.
 		t.Fatal(err)
 	}
-	if deletes != 1 || len(endpoints) != 0 {
-		t.Fatalf("cleanup incomplete: deletes=%d endpoints=%d", deletes, len(endpoints))
+	mu.Lock()
+	deleteCount, endpointCount := deletes, len(endpoints)
+	mu.Unlock()
+	if deleteCount != 1 || endpointCount != 0 {
+		t.Fatalf("cleanup incomplete: deletes=%d endpoints=%d", deleteCount, endpointCount)
 	}
 }
