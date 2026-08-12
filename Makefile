@@ -1,7 +1,7 @@
 GORELEASER_VERSION := v2.12.7
 RELEASE_CANDIDATE_TAG ?= v2.0.0-rc.1
 
-.PHONY: build context context-check generate-api generate-api-check test-automation test-automation-full test-dashboard docs-dev docs-check demo-connect test test-container test-stack test-failure test-ha test-backup-restore test-store test-production-config test-provider-contracts test-kubernetes-manifests test-kubernetes-kind test-acceptance-safety test-product acceptance-product verify audit deadcode release-check snapshot candidate-artifacts release-artifacts acceptance-local acceptance-preflight acceptance-cleanup qualify-local qualify-rc qualify-v1 qualify-contracts dev-check dev-check-full dev-up dev-down
+.PHONY: build context context-check generate-api generate-api-check test-automation test-automation-full test-dashboard docs-dev docs-check demo-connect test test-container test-stack test-failure test-ha test-backup-restore test-store test-production-config test-provider-contracts test-kubernetes-manifests test-kubernetes-kind test-acceptance-safety test-product test-product-qualification acceptance-product verify audit deadcode release-check snapshot candidate-artifacts release-artifacts acceptance-local acceptance-preflight acceptance-cleanup qualify-local qualify-product qualify-product-status qualify-rc qualify-v1 qualify-contracts dev-check dev-check-full dev-up dev-down
 
 build:
 	go build ./cmd/infercrane
@@ -73,6 +73,9 @@ test-kubernetes-kind:
 test-acceptance-safety:
 	./scripts/test-acceptance-safety.sh
 
+test-product-qualification:
+	./scripts/test-product-qualification.sh
+
 test-store:
 	test -n "$$INFERCRANE_TEST_DATABASE_URL"
 	go test -race -count=1 -v ./internal/store
@@ -121,6 +124,12 @@ acceptance-cleanup:
 
 qualify-local:
 	./scripts/qualify-release.sh local
+
+qualify-product:
+	./scripts/qualify-product.sh local
+
+qualify-product-status:
+	./scripts/qualify-product.sh status
 
 qualify-rc:
 	./scripts/qualify-release.sh rc --approve-paid-resources

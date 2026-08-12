@@ -122,4 +122,8 @@ EOF
   grep -Fq 'Provider inventory confirmation: VERIFIED' "$report_run/report.md"
 done
 
+# The whole-product verdict is independently regression-tested: local passes,
+# cloud access gaps, human review, and cleanup evidence must remain distinct.
+"$root/scripts/test-product-qualification.sh"
+
 echo "acceptance paid-run locks and approval boundaries passed"

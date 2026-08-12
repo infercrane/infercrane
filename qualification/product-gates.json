@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "product": "InferCrane",
+  "gates": [
+    {
+      "id": "developer-environment",
+      "tier": "local",
+      "description": "Repository, PostgreSQL, race, Kind, SDK, Terraform, recovery, HA, security, dashboard and documentation gates",
+      "covers": ["lifecycle", "operations", "routing", "autoscaling", "release-guard", "protocols", "admission", "async", "inspector-doctor", "alerts", "replay", "recipes-lab", "capacity-intelligence", "finops", "passport", "sessions", "sdks", "terraform", "dashboard", "terminal-ui", "persistence-ha", "security", "kubernetes-api"]
+    },
+    {
+      "id": "product-journeys",
+      "tier": "local",
+      "description": "Black-box installation, first value, adoption, recovery and release journeys through public surfaces",
+      "covers": ["cli", "stable-endpoints", "adoption", "openai-gateway", "durable-resume", "explanations", "release-package"]
+    },
+    {
+      "id": "adapter-contracts",
+      "tier": "local",
+      "description": "Provider and runtime idempotency, adoption, inventory and capability conformance",
+      "covers": ["runpod-contract", "aws-contract", "gcp-contract", "kubernetes-contract", "external-provider-contract", "vllm-contract", "sglang-contract", "custom-oci-contract"]
+    },
+    {
+      "id": "supply-chain",
+      "tier": "local",
+      "description": "Dead-code, vulnerability and release artifact verification",
+      "covers": ["dead-code", "dependency-audit", "archives", "checksums", "sbom", "homebrew"]
+    },
+    {
+      "id": "runpod-real",
+      "tier": "real-infrastructure",
+      "description": "RunPod elastic and serverless lifecycle, protocols, scaling, faults, cancellation and zero-resource cleanup",
+      "covers": ["runpod-elastic", "runpod-serverless", "real-vllm", "streaming", "tool-calls", "structured-output", "aiperf", "autoscaling", "generation-drain", "lost-response-adoption"]
+    },
+    {
+      "id": "aws-real",
+      "tier": "real-infrastructure",
+      "description": "AWS BYOC lifecycle with real IAM, networking, capacity and GPU runtime",
+      "covers": ["aws-ec2", "aws-iam", "aws-private-network", "aws-gpu-runtime"]
+    },
+    {
+      "id": "gcp-real",
+      "tier": "real-infrastructure",
+      "description": "GCP BYOC lifecycle with real identity, networking, capacity and GPU runtime",
+      "covers": ["gcp-compute", "gcp-identity", "gcp-private-network", "gcp-gpu-runtime"]
+    },
+    {
+      "id": "kubernetes-gpu-real",
+      "tier": "real-infrastructure",
+      "description": "GPU Kubernetes/KServe scheduling, runtime readiness, disruption and cleanup",
+      "covers": ["kubernetes-gpu", "kserve-gpu", "node-disruption", "real-cluster-networking"]
+    },
+    {
+      "id": "human-experience",
+      "tier": "human",
+      "description": "Terminal, browser, docs, installation and operator comprehension review",
+      "covers": ["terminal-visual", "dashboard-responsive", "docs-hosted", "clean-machine-install", "operator-remediation"]
+    }
+  ]
+}

@@ -194,6 +194,7 @@
         "pages": [
           "project-status",
           "roadmap",
+          "testing/product-qualification",
           "security",
           "compatibility"
         ]

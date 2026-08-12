@@ -1,0 +1,94 @@
+---
+title: Product qualification
+description: Run InferCrane's resumable, commit-bound local and real-infrastructure evidence system.
+sidebarTitle: Product qualification
+---
+
+# Product qualification
+
+InferCrane has one top-level qualification command. It composes the maintained unit, race,
+PostgreSQL, Docker, Kind, black-box journey, provider-contract, SDK, Terraform, security,
+documentation, supply-chain, and real-provider suites. It does not replace those suites or hide
+their logs. Overlapping release work runs once: the black-box gate runs user journeys, while the
+supply-chain gate owns archive, checksum, SBOM, and Homebrew verification.
+
+```bash
+make qualify-product
+```
+
+The command is resumable. A passed gate is reused only for the exact Git commit. The worktree must
+be clean, so uncommitted changes can never inherit release evidence from an earlier source tree.
+Evidence is written to:
+
+```text
+.infercrane/product-qualification/<commit>/
+├── gates/
+│   ├── developer-environment.json
+│   ├── product-journeys.json
+│   ├── adapter-contracts.json
+│   └── supply-chain.json
+├── report.json
+└── report.md
+```
+
+Inspect the current matrix without running tests:
+
+```bash
+make qualify-product-status
+```
+
+The verdict vocabulary is intentionally strict:
+
+| Status | Meaning |
+|---|---|
+| `PASSED` | This exact commit passed the named gate. |
+| `FAILED` | The gate ran and failed. Cleanup cannot change this result. |
+| `NOT_RUN` | A locally automatable gate has no evidence for this commit. |
+| `REAL_INFRA_REQUIRED` | Fixtures prove the adapter logic, not the external provider semantics. |
+| `BLOCKED_ACCESS` | The real suite was requested but credentials or configuration were absent. |
+| `HUMAN_REQUIRED` | Visual, hosted, or operator-comprehension review remains. |
+
+## Real RunPod qualification
+
+Paid provider mutation always requires an explicit approval flag. Reuse the run ID after a shell
+disconnect; durable operations and stage evidence allow the workflow to resume.
+
+```bash
+export RUNPOD_KEY_FILE="$HOME/.config/infercrane/runpod-key"
+export INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID="<immutable-template-id>"
+export INFERCRANE_V2_QUALIFICATION_RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short HEAD)"
+
+./scripts/qualify-product.sh runpod --approve-paid-resources
+```
+
+This gate covers real elastic and serverless lifecycle, vLLM protocols, AIPerf, autoscaling,
+Release Guard, streaming cancellation, lost-response adoption, disruption, deletion, and direct
+zero-inventory checks. A provider allocation or image-transfer failure remains a failed suite even
+when guarded cleanup succeeds.
+
+## AWS and Kubernetes GPU qualification
+
+The portable qualification runner needs an isolated provider environment, immutable workload specs,
+and one API key shared by the control plane and workers. See [provider setup](/provider-setup) before
+running either paid gate.
+
+```bash
+export INFERCRANE_V1_PROVIDER_ENV_FILE=/private/provider.env
+export INFERCRANE_V1_SPEC_DIR=/private/qualification-specs
+export INFERCRANE_V1_API_KEY_FILE=/private/control-and-worker-key
+
+./scripts/qualify-product.sh aws --approve-paid-resources
+./scripts/qualify-product.sh kubernetes --approve-paid-resources
+```
+
+The compatibility-prefixed `INFERCRANE_V1_*` names do not select an old release. GCP Compute has a
+hermetic contract today, but no repository-owned real GCP runner; its report row therefore remains
+`REAL_INFRA_REQUIRED` rather than implying qualification.
+
+## What the system proves
+
+Local qualification proves control-plane behavior against deterministic dependencies, a real
+PostgreSQL process, Docker process failures, and a real Kind API. It cannot prove GPU availability,
+provider eventual consistency, customer networking, runtime performance, public package delivery,
+or human usability. Those boundaries remain separate rows in `report.json` so automation can enforce
+release policy without turning simulated evidence into a production claim.
