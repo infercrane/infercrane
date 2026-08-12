@@ -71,10 +71,12 @@ export INFERCRANE_V2_QUALIFICATION_RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-
 ./scripts/qualify-product.sh runpod --approve-paid-resources
 ```
 
-This gate covers real elastic and serverless lifecycle, vLLM protocols, AIPerf, autoscaling,
-Release Guard, streaming cancellation, lost-response adoption, disruption, deletion, and direct
-zero-inventory checks. A provider allocation or image-transfer failure remains a failed suite even
-when guarded cleanup succeeds.
+The command records four independent gates: serverless lifecycle, serverless faults, elastic
+lifecycle, and elastic faults. A provider allocation failure in one gate cannot erase successful
+evidence from another. Together they cover vLLM protocols, AIPerf, autoscaling, Release Guard,
+streaming cancellation, lost-response adoption, disruption, deletion, and direct zero-inventory
+checks. A provider allocation or image-transfer failure remains a failed suite even when guarded
+cleanup succeeds.
 
 ## AWS and Kubernetes GPU qualification
 

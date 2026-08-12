@@ -101,11 +101,35 @@ require_paid() {
 
 run_runpod() {
   require_paid
-  [ -r "${RUNPOD_KEY_FILE:-}" ] || { record runpod-real BLOCKED_ACCESS "RUNPOD_KEY_FILE is not readable"; return 3; }
-  [ -n "${INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID:-}" ] || { record runpod-real BLOCKED_ACCESS "serverless template ID is missing"; return 3; }
+  if [ ! -r "${RUNPOD_KEY_FILE:-}" ]; then
+    for gate in runpod-serverless-real runpod-serverless-faults-real runpod-elastic-real runpod-elastic-faults-real; do
+      record "$gate" BLOCKED_ACCESS "RUNPOD_KEY_FILE is not readable"
+    done
+    return 3
+  fi
+  if [ -z "${INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID:-}" ]; then
+    record runpod-serverless-real BLOCKED_ACCESS "serverless template ID is missing"
+    record runpod-serverless-faults-real BLOCKED_ACCESS "serverless template ID is missing"
+  fi
   run_id=${INFERCRANE_V2_QUALIFICATION_RUN_ID:-"$(date -u +%Y%m%dT%H%M%SZ)-$short"}
-  INFERCRANE_V2_QUALIFICATION_RUN_ID="$run_id" run_gate runpod-real \
-    "$root/scripts/qualify-v2-manual.sh" run --approve-paid-resources
+  failed=0
+  if [ -n "${INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID:-}" ]; then
+    INFERCRANE_ACCEPTANCE_RUN_ID="$run_id-serverless" run_gate runpod-serverless-real \
+      "$root/scripts/release-acceptance.sh" serverless --approve-paid-resources || failed=1
+    INFERCRANE_ACCEPTANCE_RUN_ID="$run_id-serverless" "$root/scripts/release-acceptance.sh" cleanup >/dev/null 2>&1 || failed=1
+    INFERCRANE_ACCEPTANCE_RUN_ID="$run_id-serverless-faults" run_gate runpod-serverless-faults-real \
+      "$root/scripts/release-acceptance.sh" serverless-faults --approve-paid-resources || failed=1
+    INFERCRANE_ACCEPTANCE_RUN_ID="$run_id-serverless-faults" "$root/scripts/release-acceptance.sh" cleanup >/dev/null 2>&1 || failed=1
+  else
+    failed=1
+  fi
+  INFERCRANE_ACCEPTANCE_RUN_ID="$run_id-elastic" run_gate runpod-elastic-real \
+    "$root/scripts/release-acceptance.sh" elastic-qualify --approve-paid-resources || failed=1
+  INFERCRANE_ACCEPTANCE_RUN_ID="$run_id-elastic" "$root/scripts/release-acceptance.sh" cleanup >/dev/null 2>&1 || failed=1
+  INFERCRANE_ACCEPTANCE_RUN_ID="$run_id-elastic-faults" run_gate runpod-elastic-faults-real \
+    "$root/scripts/release-acceptance.sh" elastic-faults --approve-paid-resources || failed=1
+  INFERCRANE_ACCEPTANCE_RUN_ID="$run_id-elastic-faults" "$root/scripts/release-acceptance.sh" cleanup >/dev/null 2>&1 || failed=1
+  return "$failed"
 }
 
 run_portable() {

@@ -51,10 +51,28 @@
       "covers": ["kubernetes-1.34", "kubernetes-1.35", "kubernetes-1.36"]
     },
     {
-      "id": "runpod-real",
+      "id": "runpod-serverless-real",
       "tier": "real-infrastructure",
-      "description": "RunPod elastic and serverless lifecycle, protocols, scaling, faults, cancellation and zero-resource cleanup",
-      "covers": ["runpod-elastic", "runpod-serverless", "real-vllm", "streaming", "tool-calls", "structured-output", "aiperf", "autoscaling", "generation-drain", "lost-response-adoption"]
+      "description": "RunPod Serverless cold/warm/zero lifecycle, protocols and zero-resource cleanup",
+      "covers": ["runpod-serverless", "real-vllm", "streaming", "tool-calls", "structured-output", "cold-warm-zero"]
+    },
+    {
+      "id": "runpod-serverless-faults-real",
+      "tier": "real-infrastructure",
+      "description": "RunPod Serverless lost-create-response adoption, cancellation and cleanup",
+      "covers": ["runpod-serverless", "stream-cancellation", "lost-response-adoption"]
+    },
+    {
+      "id": "runpod-elastic-real",
+      "tier": "real-infrastructure",
+      "description": "RunPod elastic vLLM lifecycle, protocols, benchmark, autoscaling, Release Guard and cleanup",
+      "covers": ["runpod-elastic", "real-vllm", "streaming", "tool-calls", "structured-output", "aiperf", "autoscaling", "release-guard"]
+    },
+    {
+      "id": "runpod-elastic-faults-real",
+      "tier": "real-infrastructure",
+      "description": "RunPod elastic disconnect, restart, exactly-once creation, generation drain and delete-boundary recovery",
+      "covers": ["cli-disconnect", "control-plane-restart", "exactly-one-resource", "generation-drain", "delete-boundary-restart"]
     },
     {
       "id": "aws-real",
