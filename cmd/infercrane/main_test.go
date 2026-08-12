@@ -463,6 +463,37 @@ func TestDeleteCLIOnlySubmitsControlPlaneRequest(t *testing.T) {
 	}
 }
 
+func TestAuthStatusJSONUsesStableLowercaseFields(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"principal":{"id":"principal-1","tenant_id":"tenant-1","name":"developer","role":"operator","kind":"service","scopes":["read"]}}`))
+	}))
+	defer server.Close()
+
+	output, err := captureStdout(t, func() error {
+		return authCommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, []string{"status", "--output", "json"})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result struct {
+		Principal struct {
+			ID       string `json:"id"`
+			TenantID string `json:"tenant_id"`
+			Role     string `json:"role"`
+		} `json:"principal"`
+	}
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("output is not JSON: %q: %v", output, err)
+	}
+	if result.Principal.ID != "principal-1" || result.Principal.TenantID != "tenant-1" || result.Principal.Role != "operator" {
+		t.Fatalf("unstable auth JSON: %s", output)
+	}
+	if strings.Contains(output, `"TenantID"`) || strings.Contains(output, `"Role"`) {
+		t.Fatalf("Go field names leaked into public JSON: %s", output)
+	}
+}
+
 func TestDeletePlanHonorsJSONWithoutControlPlaneMutation(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {

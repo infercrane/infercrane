@@ -60,6 +60,8 @@ make test             # race-enabled tests; store tests skip without test Postgr
 make verify           # format check, generated-doc check, tests, vet, and build
 make dev-check        # fast repository and provider-contract feedback
 make dev-check-full   # isolated Docker, failure, production-config, and docs gates
+make test-product     # black-box first-value journey through public product surfaces
+make acceptance-product # all local black-box product journeys and release evidence
 make qualify-local    # resumable local release/package proof and JSON manifest
 make deadcode         # reject unreachable functions with the pinned deadcode tool
 make dev-up           # development PostgreSQL, fake workers, and fake router

@@ -64,4 +64,28 @@ report=$(INFERCRANE_V1_ACCEPTANCE_STATE_DIR="$temporary/v1-report" INFERCRANE_AC
   "$root/scripts/v1-acceptance.sh" report)
 jq -e '.real_infrastructure == "incomplete" and (.passed_stages | length == 0)' "$report" >/dev/null
 
+# A failed black-box prerequisite must never be converted into a pass by a
+# successful cleanup command. Rerunning a fixed identity also invalidates any
+# stale marker for the journey before preflight begins.
+mkdir -p "$temporary/mock-bin" "$temporary/product-state/product-failure/stages"
+printf '%s\n' '#!/bin/sh' 'exit 23' >"$temporary/mock-bin/docker"
+chmod +x "$temporary/mock-bin/docker"
+printf '%s\n' stale >"$temporary/product-state/product-failure/stages/first-value.passed"
+if PATH="$temporary/mock-bin:$PATH" \
+  INFERCRANE_PRODUCT_ACCEPTANCE_STATE_DIR="$temporary/product-state" \
+  INFERCRANE_PRODUCT_ACCEPTANCE_RUN_ID=product-failure \
+  "$root/scripts/product-acceptance.sh" first-value >"$temporary/product-failure.log" 2>&1; then
+  echo "product acceptance converted a Docker failure into success" >&2
+  exit 1
+fi
+test ! -e "$temporary/product-state/product-failure/stages/first-value.passed"
+grep -q 'docker-preflight (failed' "$temporary/product-failure.log"
+
+# The worker-loss journey requires a running isolated stack. It must not rely
+# on a developer's default Compose project or a prior journey leaving services
+# behind.
+grep -Fq 'COMPOSE_PROJECT_NAME=$project INFERCRANE_DEV_PORT=$port INFERCRANE_SMOKE_URL=http://127.0.0.1:$port' \
+  "$root/scripts/product-acceptance.sh"
+grep -Fq '"$root/scripts/test-stack.sh" || return' "$root/scripts/product-acceptance.sh"
+
 echo "acceptance paid-run locks and approval boundaries passed"

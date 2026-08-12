@@ -52,6 +52,9 @@ infercrane auth status
 infercrane auth status --output json
 ```
 
+JSON output uses stable lowercase fields (`id`, `tenant_id`, `name`, `role`, `kind`, and `scopes`)
+so authentication checks can be consumed directly by scripts without depending on Go field names.
+
 Legacy single-context configuration is migrated on the next `init`. Context listing and display
 never print stored credentials.
 

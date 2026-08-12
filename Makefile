@@ -1,7 +1,7 @@
 GORELEASER_VERSION := v2.12.7
 RELEASE_CANDIDATE_TAG ?= v2.0.0-rc.1
 
-.PHONY: build context context-check generate-api generate-api-check test-automation test-automation-full test-dashboard docs-dev docs-check demo-connect test test-container test-stack test-failure test-ha test-backup-restore test-store test-production-config test-provider-contracts test-kubernetes-manifests test-kubernetes-kind test-acceptance-safety verify audit deadcode release-check snapshot candidate-artifacts release-artifacts acceptance-local acceptance-preflight acceptance-cleanup qualify-local qualify-rc qualify-v1 qualify-contracts dev-check dev-check-full dev-up dev-down
+.PHONY: build context context-check generate-api generate-api-check test-automation test-automation-full test-dashboard docs-dev docs-check demo-connect test test-container test-stack test-failure test-ha test-backup-restore test-store test-production-config test-provider-contracts test-kubernetes-manifests test-kubernetes-kind test-acceptance-safety test-product acceptance-product verify audit deadcode release-check snapshot candidate-artifacts release-artifacts acceptance-local acceptance-preflight acceptance-cleanup qualify-local qualify-rc qualify-v1 qualify-contracts dev-check dev-check-full dev-up dev-down
 
 build:
 	go build ./cmd/infercrane
@@ -136,6 +136,12 @@ dev-check:
 
 dev-check-full:
 	./scripts/dev-check.sh full
+
+test-product:
+	./scripts/product-acceptance.sh first-value
+
+acceptance-product:
+	./scripts/product-acceptance.sh local
 
 dev-up:
 	docker compose up --build -d

@@ -2059,8 +2059,12 @@ func authCommand(ctx context.Context, cfg config.Config, args []string) error {
 	}
 	var response struct {
 		Principal struct {
-			ID, TenantID, Name, Role, Kind string
-			Scopes                         []string `json:"scopes"`
+			ID       string   `json:"id"`
+			TenantID string   `json:"tenant_id"`
+			Name     string   `json:"name"`
+			Role     string   `json:"role"`
+			Kind     string   `json:"kind"`
+			Scopes   []string `json:"scopes"`
 		} `json:"principal"`
 	}
 	if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/whoami", "", nil, &response); err != nil {
