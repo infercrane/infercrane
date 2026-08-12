@@ -5,12 +5,12 @@ description: Build and verify release archives, checksums, SPDX SBOMs, Homebrew 
 
 # Release packaging
 
-Release construction is local and non-publishing by default. The candidate gate produces four
+Release construction is local and non-publishing by default. The stable gate produces four
 archives, SHA-256 checksums, one SPDX SBOM per archive, a generated Homebrew formula, and a native CLI
 install smoke test.
 
 ```bash
-make candidate-artifacts RELEASE_CANDIDATE_TAG=v2.0.0-rc.1
+make release-artifacts RELEASE_TAG=v2.0.0
 ```
 
 GoReleaser runs inside an isolated local clone with a temporary annotated tag, then copies only the
@@ -20,7 +20,7 @@ repository ref or create a GitHub release, package, or image.
 Verify an existing artifact directory independently:
 
 ```bash
-./scripts/verify-release-artifacts.sh dist v2.0.0-rc.1
+./scripts/verify-release-artifacts.sh dist v2.0.0
 ```
 
 The verifier checks the exact four-platform matrix, archive contents, checksums, SPDX documents,
@@ -37,24 +37,24 @@ explicitly pushed.
 
 ## Stable release after manual qualification
 
-Do not run this sequence until the consolidated manual report says `real_infrastructure: passed`,
-cleanup inventory is verified, tracked evidence and final release notes are committed, and remote
-publication is explicitly authorized. From that clean evidence commit:
+For a fully qualified release, wait until the consolidated manual report says
+`real_infrastructure: passed` and cleanup inventory is verified. An early-project release may instead
+ship with those limitations explicitly documented when the maintainer accepts that risk. From the
+clean release commit:
 
 ```bash
-make release-artifacts RELEASE_TAG=v1.0.0
-git tag -a v1.0.0 -m "InferCrane v1.0.0"
+make release-artifacts RELEASE_TAG=v2.0.0
+git tag -a v2.0.0 -m "InferCrane v2.0.0"
 git push origin main
-git push origin v1.0.0
-gh release create v1.0.0 \
-  dist/infercrane_1.0.0_*.tar.gz \
-  dist/infercrane_1.0.0_*.tar.gz.sbom.json \
+git push origin v2.0.0
+gh release create v2.0.0 \
+  dist/infercrane_2.0.0_*.tar.gz \
+  dist/infercrane_2.0.0_*.tar.gz.sbom.json \
   dist/checksums.txt \
-  --title "InferCrane v1.0.0" \
-  --notes-file docs/release-notes-v1.0.0.md
+  --title "InferCrane v2.0.0" \
+  --notes-file docs/release-notes-v2.0.0.md
 ```
 
-Create `docs/release-notes-v1.0.0.md` from the RC notes plus the accepted real-provider evidence
-before running the commands. Upload the generated Homebrew formula only after its URLs resolve and
+Keep deferred real-provider evidence explicit in the release notes. Upload the generated Homebrew formula only after its URLs resolve and
 a clean-machine installation passes. The commands intentionally push only `main` and the stable
 tag; RC tags remain local unless separately approved for publication.

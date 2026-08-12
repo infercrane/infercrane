@@ -139,7 +139,7 @@ with sustained load, streaming cancellation, worker loss, database failover, pod
 and soak tests. Capacity limits must be based on those measurements rather than defaults.
 
 Release maintainers can validate packaging metadata without publishing with `make release-check`.
-With `syft` installed, `make candidate-artifacts RELEASE_CANDIDATE_TAG=v2.0.0-rc.1` creates and
+With `syft` installed, `make release-artifacts RELEASE_TAG=v2.0.0` creates and
 verifies four exact-version archives, checksums, archive SBOMs, and a generated Homebrew formula
 under `dist/`. It pushes no tag, image, package, or release. See [Release packaging](/release-packaging).
 

@@ -14,7 +14,7 @@ async function main() {
   const mode = input('mode', 'plan'), spec = input('spec'), deployment = input('deployment'), expectedRevision = input('revision');
   const artifactPath = input('output-path', 'infercrane-delivery.json');
   if (!['plan', 'apply', 'release-check'].includes(mode)) throw new Error('mode must be plan, apply, or release-check');
-  const cli = await resolveCLI(input('cli-path', 'auto'), input('version', 'v2.0.0-rc.1'), path.join(process.env.RUNNER_TEMP ?? os.tmpdir(), 'infercrane-action'));
+  const cli = await resolveCLI(input('cli-path', 'auto'), input('version', 'v2.0.0'), path.join(process.env.RUNNER_TEMP ?? os.tmpdir(), 'infercrane-action'));
   if (mode === 'plan') {
     if (!spec) throw new Error('spec is required for plan');
     const raw = run(cli, ['plan', spec, '--output', 'json']); const plan = JSON.parse(raw);

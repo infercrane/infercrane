@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: infercrane/infercrane/actions/infercrane@v2.0.0-rc.1
+      - uses: infercrane/infercrane/actions/infercrane@v2.0.0
         with:
           mode: plan
           spec: deploy/qwen.yaml
@@ -46,7 +46,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: infercrane/infercrane/actions/infercrane@v2.0.0-rc.1
+      - uses: infercrane/infercrane/actions/infercrane@v2.0.0
         with:
           mode: apply
           confirm-apply: "true"
@@ -63,7 +63,7 @@ an operator can resume with `infercrane operation watch`.
 ## Exact release check
 
 ```yaml
-- uses: infercrane/infercrane/actions/infercrane@v2.0.0-rc.1
+- uses: infercrane/infercrane/actions/infercrane@v2.0.0
   with:
     mode: release-check
     deployment: qwen-prod
