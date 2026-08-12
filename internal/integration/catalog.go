@@ -208,6 +208,22 @@ func V15Catalog() (*Registry, error) {
 	if err != nil {
 		return nil, err
 	}
+	// External gateways remain separately operated dependencies. These profiles
+	// describe only the protocol surfaces InferCrane is qualified to preserve;
+	// they do not transfer gateway lifecycle or licensing into the control plane.
+	externalCapabilities := []Capability{
+		{Name: "buffered_chat", State: CapabilitySupported, Evidence: "go:test/internal/gateway#TestQualifiedProtocolSurfacesPreservePayloads"},
+		{Name: "responses", State: CapabilitySupported, Evidence: "go:test/internal/gateway#TestQualifiedProtocolSurfacesPreservePayloads"},
+		{Name: "embeddings", State: CapabilitySupported, Evidence: "go:test/internal/gateway#TestQualifiedProtocolSurfacesPreservePayloads"},
+		{Name: "completions", State: CapabilitySupported, Evidence: "go:test/internal/gateway#TestQualifiedProtocolSurfacesPreservePayloads"},
+		{Name: "streaming_chat", State: CapabilitySupported, Evidence: "go:test/internal/gateway#TestActiveStreamKeepsSelectedRouterAcrossGenerationPublish"},
+		{Name: "cancellation", State: CapabilitySupported, Evidence: "go:test/internal/gateway#TestClientCancellationPropagatesToRuntime"},
+	}
+	for _, runtimeName := range []string{"openai-compatible", "litellm"} {
+		if err = registry.RegisterRuntime(RuntimeProfile{Runtime: runtimeName, ContractVersion: RuntimeContractV1, AdapterVersion: "external-v2.1", Protocol: "openai", Capabilities: externalCapabilities, Qualification: []Qualification{{State: QualificationLocal, Environment: "hermetic-openai-compatible", Evidence: "go:test/internal/controlapi#TestDiscoverEndpointSelectsSingleModelAndConservativelyClassifiesRuntime"}, {State: QualificationDeferred, Environment: "real-" + runtimeName, Reason: "operator-managed gateway requires target-specific qualification"}}}); err != nil {
+			return nil, err
+		}
+	}
 	profiles := []ProviderProfile{
 		providerBoundary("aws-asg", "aws", ElasticMode, []Capability{
 			{Name: "launch_template_version", State: CapabilityUnknown, Detail: "requires an explicit immutable numbered launch-template version"},

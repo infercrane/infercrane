@@ -1,0 +1,103 @@
+---
+title: What you can build
+description: Production inference patterns that start with one command and preserve evidence, ownership, and control.
+sidebarTitle: Showcase
+mode: wide
+---
+
+# Bring the inference stack you already have
+
+InferCrane adds a durable operational layer around inference runtimes and infrastructure. Start by
+connecting an existing endpoint, or ask InferCrane to own the deployment lifecycle. Your application
+keeps one OpenAI-compatible model name while providers, runtimes, and capacity plans change behind it.
+
+<CardGroup cols={3}>
+  <Card title="Connect without migrating" icon="plug" href="/showcase/connect-existing">
+    Add health, request evidence, and deterministic diagnosis around an existing vLLM, LiteLLM, or OpenAI-compatible endpoint.
+  </Card>
+  <Card title="Ship a safer revision" icon="shield-check" href="/showcase/safe-rollouts">
+    Validate a candidate with bounded benchmark traffic and keep production unchanged when Release Guard rejects it.
+  </Card>
+  <Card title="Handle uncertain capacity" icon="gauge-high" href="/showcase/capacity-evidence">
+    Resume long operations, explain cold starts, compare measured serving plans, and govern external overflow.
+  </Card>
+</CardGroup>
+
+## One stable application contract
+
+<CodeGroup>
+```python Python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="https://infercrane.example/v1",
+    api_key="${INFERCRANE_API_KEY}",
+)
+
+response = client.responses.create(
+    model="coder-production",
+    input="Review this function for concurrency bugs.",
+)
+```
+
+```typescript TypeScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "https://infercrane.example/v1",
+  apiKey: process.env.INFERCRANE_API_KEY,
+});
+
+const response = await client.responses.create({
+  model: "coder-production",
+  input: "Review this function for concurrency bugs.",
+});
+```
+
+```bash cURL
+curl https://infercrane.example/v1/responses \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"coder-production","input":"Review this function for concurrency bugs."}'
+```
+</CodeGroup>
+
+`coder-production` is the stable product identity. A binding may resolve it to an InferCrane-managed
+deployment, an adopted workload, or governed external capacity. Applications do not need provider
+credentials or physical model names when the serving plan changes.
+
+## Choose how much InferCrane owns
+
+| Start here | InferCrane can observe | InferCrane can route | InferCrane can create or delete compute |
+| --- | --- | --- | --- |
+| `observe-only` connection | Yes | No | No |
+| `traffic-managed` connection | Yes | Yes | No |
+| lifecycle-managed deployment | Yes | Yes | Yes |
+
+This ownership ladder lets a platform team prove value before handing over traffic or provider
+lifecycle. Promotion is explicit; connecting an endpoint never silently changes production routing.
+
+## The proof loop
+
+```mermaid
+flowchart LR
+  A[Connect or deploy] --> B[Observe requests and operations]
+  B --> C[Doctor explains persisted evidence]
+  C --> D[Create a candidate]
+  D --> E[Benchmark with bounded traffic]
+  E --> F{Release Guard}
+  F -->|ACCEPT| G[Promote safely]
+  F -->|REJECT| H[Keep active revision]
+  G --> B
+  H --> B
+```
+
+InferCrane does not use an LLM to decide production promotion. Policy inputs, measurements, reason
+codes, and revision identities are persisted so the result can be inspected and reproduced.
+
+<Note>
+Examples use qualified product surfaces, but infrastructure and runtime combinations have independent
+evidence states. Check the [capability matrix](/project-status) before relying on a combination in
+production.
+</Note>
+

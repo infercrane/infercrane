@@ -151,6 +151,13 @@ func normalizeAdoptionURL(raw string) (string, error) {
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
 		return "", errors.New("adoption URL must be an absolute http(s) URL without credentials or fragments")
 	}
+	// Users commonly copy the OpenAI SDK base ending in /v1. InferCrane stores
+	// the service root because readiness lives at /health while request paths
+	// are composed through openaicompat.Endpoint without duplicating /v1.
+	path := strings.TrimRight(parsed.Path, "/")
+	if strings.HasSuffix(path, "/v1") {
+		parsed.Path = strings.TrimSuffix(path, "/v1")
+	}
 	return NormalizeURL(parsed.String()), nil
 }
 

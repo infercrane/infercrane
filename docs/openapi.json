@@ -597,6 +597,19 @@
       "EndpointAdoption": {
         "additionalProperties": false,
         "properties": {
+          "connector": {
+            "enum": [
+              "auto",
+              "vllm",
+              "litellm",
+              "openai-compatible"
+            ],
+            "type": "string"
+          },
+          "discover": {
+            "description": "Ask the control plane to verify /v1/models and resolve the selected model before adoption.",
+            "type": "boolean"
+          },
           "logical_model": {
             "type": "string"
           },

@@ -73,6 +73,49 @@ RunPod, AWS EC2, and Kubernetes are current infrastructure adapters with differe
 states; vLLM, SGLang, and custom OCI are current runtime profiles. Durable algorithms do not select
 implementations with provider conditionals; [qualification is separate from registration](/adr/0009-qualified-support-and-backend-registration).
 
+## A modular system, not a bundled stack
+
+Users select a serving plan; adapters translate it into infrastructure-specific work. Core lifecycle
+state does not depend on a RunPod, AWS, Kubernetes, vLLM, SGLang, or gateway-specific domain model.
+
+```mermaid
+flowchart TB
+  INTENT[Endpoint · environment · serving intent]
+  CORE[InferCrane core<br/>desired state · operations · revisions · evidence]
+  INTENT --> CORE
+
+  CORE --> INFRA{Infrastructure contract}
+  CORE --> RUNTIME{Runtime contract}
+  CORE --> ROUTE{Route type}
+  CORE --> ARTIFACT{Artifact resolver}
+  CORE --> BENCH{Benchmark runner}
+
+  INFRA --> AWS[AWS EC2]
+  INFRA --> RP[RunPod]
+  INFRA --> K8S[Kubernetes]
+  RUNTIME --> VLLM[vLLM]
+  RUNTIME --> SGL[SGLang]
+  RUNTIME --> OCI[Custom OCI]
+  ROUTE --> NATIVE[InferCrane-managed replicas]
+  ROUTE --> SL[Provider-native serverless]
+  ROUTE --> EXT[Adopted or governed external target]
+  ARTIFACT --> HF[Hugging Face / Xet]
+  BENCH --> AIP[AIPerf]
+```
+
+| Layer | InferCrane owns | Integrated system owns |
+| --- | --- | --- |
+| Infrastructure | intent, durable identity, retries, reconciliation, cleanup evidence | compute allocation and provider API semantics |
+| Runtime | capability contract, immutable configuration, readiness qualification | inference engine and model execution |
+| Gateway or external target | stable endpoint identity, admission, policy, request evidence | optional protocol translation and its provider credentials |
+| Artifact | immutable model identity and cache observations | transfer and provider-native storage primitives |
+| Benchmark | reproduction record, comparison, policy input | load generation and raw measurement |
+
+A user-managed LiteLLM deployment, for example, can be connected as an OpenAI-compatible external
+gateway. InferCrane does not bundle or fork LiteLLM: it retains endpoint identity and operational
+evidence while LiteLLM retains provider translation and its own configuration. See the
+[existing-stack showcase](/showcase/connect-existing).
+
 ## Data plane
 
 An OpenAI-compatible request resolves the logical model alias from an atomic route snapshot. For

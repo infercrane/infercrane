@@ -19,6 +19,15 @@ infercrane request qwen3-8b --message "Hello" --stream
 
 Read the [InferCrane documentation](https://infercrane.mintlify.site) for the five-minute local quickstart, product concepts, operations, integrations, and references. The Mintlify source lives in [`docs/`](docs/index.mdx); run `npm install && npm run dev` there to preview documentation changes locally.
 
+Already running inference? Connect it without transferring lifecycle ownership:
+
+```bash
+infercrane connect https://vllm.internal/v1 --as coder-production
+infercrane doctor coder-production
+```
+
+See the [production showcase](https://infercrane.mintlify.site/showcase) for existing-workload adoption, safe rollouts, cold-start evidence, and modular user-managed gateways.
+
 ## Why InferCrane?
 
 Inference workers are ephemeral, but application endpoints should not be. InferCrane separates

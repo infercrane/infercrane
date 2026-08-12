@@ -56,6 +56,7 @@ func newRootCommand(ctx context.Context) *cobra.Command {
 		{use: "doctor [flags]", short: "Validate configuration and dependencies", group: "start"},
 		{use: "plan MODEL [flags]", short: "Preview deployment changes without side effects", group: "start"},
 		{use: "deploy MODEL [flags]", short: "Create a durable inference deployment", group: "start"},
+		{use: "connect URL --as NAME [flags]", short: "Connect an existing inference endpoint", group: "start"},
 		{use: "adopt endpoint|promote NAME [flags]", short: "Connect an existing inference workload", group: "start"},
 		{use: "alert ACTION ENDPOINT [flags]", short: "Configure and evaluate signed webhook alerts", group: "operate"},
 		{use: "admission ACTION ENDPOINT [flags]", short: "Bound endpoint concurrency and queueing", group: "operate"},
@@ -136,10 +137,15 @@ func addHelpFlags(command *cobra.Command, name string) {
 	boolFlag := func(flag, help string) { command.Flags().Bool(flag, false, help) }
 	intFlag := func(flag string, value int, help string) { command.Flags().Int(flag, value, help) }
 	switch name {
-	case "init", "doctor", "adopt", "alert", "admission", "async", "plan", "deploy", "apply", "request", "deployments", "endpoints", "endpoint", "environment", "logical-model", "status", "logs", "events", "inspect", "explain", "benchmark", "replay", "capacity", "finops", "autopilot", "session", "burst", "recipe", "recipes", "lab", "passport", "recommend", "slo", "delete", "orphans", "operation", "integrations", "dashboard":
+	case "init", "doctor", "connect", "adopt", "alert", "admission", "async", "plan", "deploy", "apply", "request", "deployments", "endpoints", "endpoint", "environment", "logical-model", "status", "logs", "events", "inspect", "explain", "benchmark", "replay", "capacity", "finops", "autopilot", "session", "burst", "recipe", "recipes", "lab", "passport", "recommend", "slo", "delete", "orphans", "operation", "integrations", "dashboard":
 		stringFlag("output", "human", "output format: human or json")
 	}
 	switch name {
+	case "connect":
+		stringFlag("as", "", "stable endpoint and logical model name")
+		stringFlag("model", "", "physical upstream model; discovered when omitted")
+		stringFlag("type", "auto", "auto, vllm, litellm, or openai-compatible")
+		boolFlag("manage-traffic", "route requests through InferCrane after qualification")
 	case "dashboard":
 		boolFlag("open", "open the dashboard in the default browser")
 	case "adopt":

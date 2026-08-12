@@ -193,6 +193,23 @@ func TestRegistryLooksUpProfilesWithoutExposingMutableMaps(t *testing.T) {
 	}
 }
 
+func TestCurrentCatalogIncludesExternalGatewayRuntimeProfiles(t *testing.T) {
+	registry, err := V1Catalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"openai-compatible", "litellm"} {
+		profile, lookupErr := registry.Runtime(name)
+		if lookupErr != nil {
+			t.Fatalf("runtime %s: %v", name, lookupErr)
+		}
+		capabilities := profile.ProtocolCapabilities()
+		if !capabilities.ChatCompletions || !capabilities.Responses || !capabilities.Embeddings || !capabilities.Streaming {
+			t.Fatalf("runtime %s capabilities = %+v", name, capabilities)
+		}
+	}
+}
+
 func TestProtocolCapabilitiesFailClosedAndProjectOnlySupportedClaims(t *testing.T) {
 	profile := RuntimeProfile{Capabilities: []Capability{
 		{Name: "buffered_chat", State: CapabilitySupported},

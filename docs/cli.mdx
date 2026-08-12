@@ -244,7 +244,18 @@ infercrane endpoint promote coder-production PLAN_ID
 `--bindings` is ordered and accepts optional bounded weights, for example
 `primary:80,overflow:20`. See [stable endpoints and serving plans](/features/endpoints).
 
-## Adopt an existing workload
+## Connect an existing workload
+
+The simple path verifies the upstream model list through the control-plane API and starts in
+observe-only mode:
+
+```bash
+infercrane connect https://vllm.internal/v1 --as coder-production --type vllm
+```
+
+Use `--model` when the endpoint exposes more than one physical model. Use `--manage-traffic` only
+when the endpoint has been qualified and should immediately enter the InferCrane logical route.
+The advanced ownership-compatible command remains available:
 
 ```bash
 infercrane adopt endpoint coder-production \

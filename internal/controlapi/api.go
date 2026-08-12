@@ -173,6 +173,7 @@ type API struct {
 	GatewayURL, AIPerfBinary string
 	PassportPrivateKey       ed25519.PrivateKey
 	EndpointRefresh          func(context.Context) error
+	DiscoveryClient          *http.Client
 	AlertDeliverer           interface {
 		Deliver(context.Context, domain.AlertPolicy, domain.DiagnosticFinding) (domain.AlertDelivery, error)
 	}
@@ -450,18 +451,35 @@ func (a API) adoptEndpoint(w http.ResponseWriter, r *http.Request) {
 		Source        string `json:"source"`
 		OwnershipMode string `json:"ownership_mode"`
 		Runtime       string `json:"runtime"`
+		Discover      bool   `json:"discover,omitempty"`
+		Connector     string `json:"connector,omitempty"`
 	}
 	if !decodeMutationBody(w, r, &request) {
 		return
 	}
 	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	discovery := endpointDiscovery{Runtime: request.Runtime, Model: request.UpstreamModel, Health: "not-checked", Connector: request.Connector}
+	if request.Discover {
+		var discoveryErr error
+		discovery, discoveryErr = discoverEndpoint(r.Context(), a.DiscoveryClient, request.URL, request.UpstreamModel, request.Connector)
+		if discoveryErr != nil {
+			writeError(w, http.StatusUnprocessableEntity, "endpoint_discovery_failed", discoveryErr.Error())
+			return
+		}
+		request.UpstreamModel = discovery.Model
+		request.Runtime = discovery.Runtime
+		request.Source = "openai-compatible"
+		if discovery.Runtime == "vllm" {
+			request.Source = "vllm"
+		}
+	}
 	resolved, adoption, err := store.AdoptEndpoint(r.Context(), actor.TenantID, request.Name, request.LogicalModel, request.UpstreamModel, request.URL, request.Source, request.OwnershipMode, request.Runtime)
 	if writeEndpointMutationError(w, err) {
 		return
 	}
 	refresh := a.refreshEndpoints(r.Context())
 	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "endpoint.adopt", ResourceType: "endpoint", ResourceName: request.Name, Outcome: "succeeded"})
-	writeJSON(w, http.StatusCreated, map[string]any{"endpoint": resolvedEndpointResponse(resolved), "adoption": map[string]any{"id": adoption.ID, "target_id": adoption.TargetID, "binding_id": adoption.BindingID, "ownership_mode": adoption.OwnershipMode, "source": adoption.Source, "immutable_identity": adoption.ImmutableIdentity}, "route_refresh": refresh})
+	writeJSON(w, http.StatusCreated, map[string]any{"endpoint": resolvedEndpointResponse(resolved), "adoption": map[string]any{"id": adoption.ID, "target_id": adoption.TargetID, "binding_id": adoption.BindingID, "ownership_mode": adoption.OwnershipMode, "source": adoption.Source, "immutable_identity": adoption.ImmutableIdentity}, "discovery": discovery, "route_refresh": refresh})
 }
 
 func (a API) requestInspection(w http.ResponseWriter, r *http.Request) {

@@ -349,6 +349,36 @@ func TestDoctorCLIOnlyReadsAuthenticatedControlPlaneDiagnostics(t *testing.T) {
 	}
 }
 
+func TestConnectUsesControlPlaneDiscoveryAndPrintsUsefulNextSteps(t *testing.T) {
+	var body map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/adoptions/endpoints" || r.Header.Get("Authorization") != "Bearer secret" {
+			t.Fatalf("request = %s %s authorization=%q", r.Method, r.URL.Path, r.Header.Get("Authorization"))
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"discovery":{"runtime":"vllm","connector":"vllm","model":"Qwen/Qwen3-8B","models":["Qwen/Qwen3-8B"],"health":"reachable"}}`))
+	}))
+	defer server.Close()
+
+	output, err := captureStdout(t, func() error {
+		return connectCommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, []string{"https://worker.example/v1", "--as", "coder"})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body["discover"] != true || body["connector"] != "auto" || body["ownership_mode"] != "observe-only" || body["logical_model"] != "coder" {
+		t.Fatalf("body = %#v", body)
+	}
+	for _, wanted := range []string{"Connected coder", "Qwen/Qwen3-8B", server.URL + "/v1", "infercrane doctor coder", "infercrane adopt promote coder"} {
+		if !strings.Contains(output, wanted) {
+			t.Fatalf("output %q missing %q", output, wanted)
+		}
+	}
+}
+
 func TestPrimaryDeployPathDefaultsToRunPodL40S(t *testing.T) {
 	var body map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

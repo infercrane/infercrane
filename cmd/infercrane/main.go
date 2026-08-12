@@ -159,7 +159,7 @@ func runLegacy(ctx context.Context, args []string) error {
 		return passportCommand(ctx, config.Config{}, args[1:])
 	}
 	switch args[0] {
-	case "target", "deploy", "apply", "plan", "doctor", "adopt", "alert", "admission", "async", "ui", "dashboard", "deployments", "endpoints", "endpoint", "environment", "logical-model", "route", "status", "events", "logs", "request", "explain", "rollout", "delete", "inspect", "operation", "orphans", "integrations", "system", "context", "auth", "tenant", "principal", "secret", "external", "benchmark", "recipe", "recipes", "lab", "passport", "recommend", "slo", "serve":
+	case "target", "deploy", "apply", "plan", "doctor", "connect", "adopt", "alert", "admission", "async", "ui", "dashboard", "deployments", "endpoints", "endpoint", "environment", "logical-model", "route", "status", "events", "logs", "request", "explain", "rollout", "delete", "inspect", "operation", "orphans", "integrations", "system", "context", "auth", "tenant", "principal", "secret", "external", "benchmark", "recipe", "recipes", "lab", "passport", "recommend", "slo", "serve":
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -184,6 +184,8 @@ func runLegacy(ctx context.Context, args []string) error {
 		return planCommand(ctx, cfg, args[1:])
 	case "doctor":
 		return doctorCommand(ctx, cfg, args[1:])
+	case "connect":
+		return connectCommand(ctx, cfg, args[1:])
 	case "adopt":
 		return adoptCommand(ctx, cfg, args[1:])
 	case "alert":
@@ -545,8 +547,9 @@ func endpointDoctorCommand(ctx context.Context, cfg config.Config, args []string
 		return printJSON(response.Data)
 	}
 	for _, finding := range response.Data {
-		fmt.Printf("%-8s %-28s %s\n", strings.ToUpper(fmt.Sprint(finding["severity"])), fmt.Sprint(finding["code"]), fmt.Sprint(finding["summary"]))
+		fmt.Printf("%-8s %s\n         %s\n         Confidence %s · evidence %s\n", strings.ToUpper(fmt.Sprint(finding["severity"])), fmt.Sprint(finding["code"]), fmt.Sprint(finding["summary"]), strings.ToUpper(fmt.Sprint(finding["confidence"])), fmt.Sprint(finding["evidence_digest"]))
 	}
+	fmt.Printf("\nInspect evidence\n  infercrane request inspect REQUEST_ID\n  infercrane events %s\n", name)
 	return nil
 }
 
@@ -2763,8 +2766,22 @@ func requestInspectCommand(ctx context.Context, cfg config.Config, args []string
 	if *output == "json" {
 		return printJSON(response)
 	}
-	fmt.Printf("Request      %s\nEndpoint     %v\nEnvironment  %v\nBinding      %v\nDeployment   %v\nRevision     %v\nTarget       %v\nLatency      %v ms\nTTFT         %v ms\nStatus       %v\nRetries      %v\nFallback     %v\nContent      not recorded\n", response["request_id"], response["endpoint"], response["environment"], response["binding"], response["deployment"], response["revision"], response["target"], response["latency_ms"], response["ttft_ms"], response["status_code"], response["retry_count"], response["fallback_reason"])
+	fmt.Printf("Request        %s\n\nResolution\n  Logical model  %v\n  Endpoint       %v\n  Environment    %v\n  Binding        %v\n  Deployment     %s\n  Revision       %s\n  Target         %s\n  Provider       %v\n  Runtime        %v\n\nTiming\n  Queue          %s\n  TTFT           %s\n  Generation     %s\n  Total          %s\n\nUsage\n  Input          %s\n  Output         %s\n  Streaming      %v\n\nOutcome\n  Status         %v\n  Retries        %v\n  Fallback       %s\n  Error          %s\n\nPrivacy\n  Content        not recorded\n", response["request_id"], response["logical_model"], response["endpoint"], response["environment"], response["binding"], inspectionValue(response["deployment"]), inspectionValue(response["revision"]), inspectionValue(response["target"]), response["provider"], response["runtime"], inspectionMetric(response["queue_ms"], "ms"), inspectionMetric(response["ttft_ms"], "ms"), inspectionMetric(response["generation_ms"], "ms"), inspectionMetric(response["latency_ms"], "ms"), inspectionMetric(response["input_tokens"], "tokens"), inspectionMetric(response["output_tokens"], "tokens"), response["streaming"], response["status_code"], response["retry_count"], inspectionValue(response["fallback_reason"]), inspectionValue(response["error_type"]))
 	return nil
+}
+
+func inspectionValue(value any) string {
+	if value == nil || strings.TrimSpace(fmt.Sprint(value)) == "" || fmt.Sprint(value) == "<nil>" {
+		return "—"
+	}
+	return fmt.Sprint(value)
+}
+
+func inspectionMetric(value any, unit string) string {
+	if inspectionValue(value) == "—" {
+		return "unavailable"
+	}
+	return fmt.Sprintf("%v %s", value, unit)
 }
 
 func printStream(body io.Reader) error {

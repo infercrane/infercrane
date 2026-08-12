@@ -99,6 +99,15 @@
         "pages": ["index", "quickstart", "concepts", "architecture/system"]
       },
       {
+        "group": "SHOWCASE",
+        "pages": [
+          "showcase/index",
+          "showcase/connect-existing",
+          "showcase/safe-rollouts",
+          "showcase/capacity-evidence"
+        ]
+      },
+      {
         "group": "DEPLOY",
         "pages": [
           "deployment-spec",
