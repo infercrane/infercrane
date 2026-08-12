@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"sort"
 	"strings"
 )
@@ -29,6 +30,19 @@ type gcpInstance struct {
 		NetworkIP string `json:"networkIP"`
 	} `json:"networkInterfaces"`
 	Metadata struct{ Items []struct{ Key, Value string } }
+}
+
+// Check performs a read-only identity and Compute API probe. It deliberately
+// does not create capacity: doctor must be safe to run in production.
+func (g GCPCompute) Check(ctx context.Context) error {
+	if g.Project == "" || g.Zone == "" {
+		return errors.New("GCP project and zone are required")
+	}
+	if _, err := g.run(ctx, "auth", "print-access-token", "--quiet"); err != nil {
+		return err
+	}
+	_, err := g.run(ctx, "compute", "zones", "describe", g.Zone, "--project", g.Project, "--format", "value(name)")
+	return err
 }
 
 func (g GCPCompute) Handle(externalKey string) ProviderHandle {
@@ -231,7 +245,17 @@ func (g GCPCompute) startup(spec ReplicaSpec, port int) string {
 		arg = strings.ReplaceAll(arg, "${PORT}", fmt.Sprint(port))
 		quoted[i] = shellQuote(arg)
 	}
-	return "#!/bin/sh\nset -eu\nworker_key=$(gcloud secrets versions access latest --secret=" + shellQuote(g.WorkerSecret) + ")\ndocker pull " + shellQuote(image) + "\ndocker run -d --restart=unless-stopped --gpus all -e INFERCRANE_WORKER_API_KEY=\"$worker_key\" -p " + fmt.Sprintf("%d:%d", port, port) + " " + shellQuote(image) + " " + strings.Join(quoted, " ") + "\n"
+	secretURL := "https://secretmanager.googleapis.com/v1/projects/" + url.PathEscape(g.Project) + "/secrets/" + url.PathEscape(g.WorkerSecret) + "/versions/latest:access"
+	return "#!/bin/sh\nset -eu\n" +
+		"token_json=$(curl -fsS -H 'Metadata-Flavor: Google' 'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token')\n" +
+		"access_token=$(printf '%s' \"$token_json\" | sed -n 's/.*\"access_token\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p')\n" +
+		"[ -n \"$access_token\" ] || { echo 'workload identity token unavailable' >&2; exit 1; }\n" +
+		"secret_json=$(curl -fsS -H \"Authorization: Bearer $access_token\" " + shellQuote(secretURL) + ")\n" +
+		"secret_data=$(printf '%s' \"$secret_json\" | sed -n 's/.*\"data\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p')\n" +
+		"[ -n \"$secret_data\" ] || { echo 'worker secret payload unavailable' >&2; exit 1; }\n" +
+		"worker_key=$(printf '%s' \"$secret_data\" | base64 -d)\n" +
+		"unset token_json access_token secret_json secret_data\n" +
+		"docker pull " + shellQuote(image) + "\ndocker run -d --restart=unless-stopped --gpus all -e INFERCRANE_WORKER_API_KEY=\"$worker_key\" -p " + fmt.Sprintf("%d:%d", port, port) + " " + shellQuote(image) + " " + strings.Join(quoted, " ") + "\n"
 }
 func metadataValue(instance gcpInstance, key string) string {
 	for _, item := range instance.Metadata.Items {

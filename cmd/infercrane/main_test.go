@@ -335,7 +335,7 @@ func TestDoctorCLIOnlyReadsAuthenticatedControlPlaneDiagnostics(t *testing.T) {
 	defer server.Close()
 
 	output, err := captureStdout(t, func() error {
-		return doctorCommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, []string{"--cloud", "--serverless", "--aws", "--kubernetes", "--output", "json"})
+		return doctorCommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, []string{"--cloud", "--serverless", "--aws", "--gcp", "--kubernetes", "--output", "json"})
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -344,7 +344,7 @@ func TestDoctorCLIOnlyReadsAuthenticatedControlPlaneDiagnostics(t *testing.T) {
 	if err := json.Unmarshal([]byte(output), &report); err != nil || report["ready"] != true {
 		t.Fatalf("output=%q report=%#v err=%v", output, report, err)
 	}
-	if requested != "/api/v1/doctor?aws=true&cloud=true&kubernetes=true&serverless=true" {
+	if requested != "/api/v1/doctor?aws=true&cloud=true&gcp=true&kubernetes=true&serverless=true" {
 		t.Fatalf("request=%q", requested)
 	}
 }

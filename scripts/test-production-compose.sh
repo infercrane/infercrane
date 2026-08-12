@@ -5,15 +5,18 @@ project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 compose_file="$project_root/compose.production.yaml"
 runpod_compose_file="$project_root/compose.production.runpod.yaml"
 aws_compose_file="$project_root/compose.production.aws.yaml"
+gcp_compose_file="$project_root/compose.production.gcp.yaml"
 kubernetes_compose_file="$project_root/compose.production.kubernetes.yaml"
 fixture_key=$(mktemp)
 fixture_aws=$(mktemp -d)
+fixture_gcloud=$(mktemp -d)
 fixture_kubeconfig=$(mktemp)
 base_rendered=$(mktemp)
 runpod_rendered=$(mktemp)
 aws_rendered=$(mktemp)
+gcp_rendered=$(mktemp)
 kubernetes_rendered=$(mktemp)
-trap 'rm -rf "$fixture_aws"; rm -f "$fixture_key" "$fixture_kubeconfig" "$base_rendered" "$runpod_rendered" "$aws_rendered" "$kubernetes_rendered"' EXIT
+trap 'rm -rf "$fixture_aws" "$fixture_gcloud"; rm -f "$fixture_key" "$fixture_kubeconfig" "$base_rendered" "$runpod_rendered" "$aws_rendered" "$gcp_rendered" "$kubernetes_rendered"' EXIT
 
 chmod 600 "$fixture_key"
 printf '%s\n' 'test-only-runpod-key' >"$fixture_key"
@@ -76,6 +79,28 @@ if grep -Eqi 'runpod|skypilot' "$aws_rendered"; then
   exit 1
 fi
 
+INFERCRANE_IMAGE=ghcr.io/infercrane/infercrane:test \
+INFERCRANE_URL=https://infercrane.invalid \
+INFERCRANE_API_KEY=test-only-api-key-at-least-32-characters \
+INFERCRANE_POSTGRES_PASSWORD=test-only-postgres-password \
+GCLOUD_CONFIG_DIR="$fixture_gcloud" \
+INFERCRANE_GCP_PROJECT=acme-test \
+INFERCRANE_GCP_ZONE=europe-west4-a \
+INFERCRANE_GCP_SUBNET=private-test \
+INFERCRANE_GCP_MACHINE_TYPE=g2-standard-4 \
+INFERCRANE_GCP_GPU=nvidia-l4 \
+INFERCRANE_GCP_SERVICE_ACCOUNT=runtime@acme-test.iam.gserviceaccount.com \
+INFERCRANE_GCP_VM_IMAGE=projects/cos-cloud/global/images/cos-stable-test \
+INFERCRANE_GCP_WORKER_SECRET=infercrane-worker-key \
+INFERCRANE_GCP_CONTAINER_IMAGE=example.invalid/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+  docker compose -f "$compose_file" -f "$gcp_compose_file" config >"$gcp_rendered"
+grep -q 'INFERCRANE_GCP_PROJECT: acme-test' "$gcp_rendered"
+grep -q 'target: /home/app/.config/gcloud' "$gcp_rendered"
+if grep -Eqi 'runpod|skypilot|INFERCRANE_AWS_' "$gcp_rendered"; then
+  echo 'GCP production overlay is coupled to another provider' >&2
+  exit 1
+fi
+
 printf '%s\n' 'apiVersion: v1' >"$fixture_kubeconfig"
 INFERCRANE_IMAGE=ghcr.io/infercrane/infercrane:test \
 INFERCRANE_URL=https://infercrane.invalid \
@@ -92,4 +117,4 @@ if grep -Eqi 'runpod|skypilot|INFERCRANE_AWS_' "$kubernetes_rendered"; then
   exit 1
 fi
 
-echo 'provider-neutral, RunPod, AWS, and Kubernetes production Compose configurations passed'
+echo 'provider-neutral, RunPod, AWS, GCP, and Kubernetes production Compose configurations passed'

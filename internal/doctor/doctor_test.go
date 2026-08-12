@@ -79,6 +79,18 @@ func TestAWSBYOCCheckIsReadOnlyAndRequiredWhenRequested(t *testing.T) {
 	}
 }
 
+func TestGCPBYOCCheckIsReadOnlyAndRequiredWhenRequested(t *testing.T) {
+	cfg := config.Config{GCPProject: "acme-prod", GCPZone: "europe-west4-a"}
+	check := CheckGCPBYOC(context.Background(), cfg, Dependencies{GCPCheck: func(context.Context) error { return nil }})
+	if check.Status != Pass {
+		t.Fatalf("unexpected check: %#v", check)
+	}
+	check = CheckGCPBYOC(context.Background(), config.Config{}, Dependencies{})
+	if check.Status != Fail || check.Remediation == "" {
+		t.Fatalf("unexpected unconfigured check: %#v", check)
+	}
+}
+
 func TestKubernetesCheckIsReadOnlyAndRequiredWhenRequested(t *testing.T) {
 	cfg := config.Config{KubernetesContext: "cluster", KubernetesNamespace: "infercrane-system", KubernetesWorkloadAPI: "deployment", KubernetesServiceAccount: "infercrane-runtime", KubernetesWorkerSecretName: "infercrane-worker", KubernetesWorkerSecretKey: "api-key", KubernetesImageDigest: "image@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", KubernetesGPUResource: "nvidia.com/gpu", KubernetesGPUProductLabel: "nvidia.com/gpu.product"}
 	check := CheckKubernetes(context.Background(), cfg, Dependencies{KubernetesCheck: func(context.Context) error { return nil }})

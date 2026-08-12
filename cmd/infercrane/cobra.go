@@ -325,7 +325,7 @@ func completionFor(command string) func(*cobra.Command, []string, string) ([]str
 		"recommend": {"--history", "--output"},
 		"slo":       {"--ttft-p95", "--latency-p95", "--error-rate", "--output-tokens-second", "--hourly-cost", "--output"},
 		"external":  {"--target", "--adapter", "--secret-reference", "--request-limit", "--cost-limit-usd", "--max-request-cost-usd", "--mode", "--queue-threshold", "--breach-intervals", "--recovery-intervals", "--cooldown-seconds", "--signal-max-age-seconds", "--acknowledge-external-data", "--enable", "--output"},
-		"doctor":    {"--cloud", "--serverless", "--aws", "--kubernetes", "--output"},
+		"doctor":    {"--cloud", "--serverless", "--aws", "--gcp", "--kubernetes", "--output"},
 		"operation": {"--wait-timeout", "--output"},
 		"dashboard": {"--open", "--output"},
 		"rollout":   {"--requests", "--concurrency", "--acknowledge-validation-cost", "--wait", "--wait-timeout", "--output"},

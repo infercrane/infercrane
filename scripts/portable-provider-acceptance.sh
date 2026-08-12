@@ -3,7 +3,7 @@ set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cloud=${1:-}
-case "$cloud" in aws|kubernetes) ;; *) echo "usage: $0 aws|kubernetes --approve-paid-resources" >&2; exit 2;; esac
+case "$cloud" in aws|gcp|kubernetes) ;; *) echo "usage: $0 aws|gcp|kubernetes --approve-paid-resources" >&2; exit 2;; esac
 [ "${2:-}" = "--approve-paid-resources" ] || {
   echo "portable provider acceptance requires --approve-paid-resources" >&2
   exit 1
@@ -47,6 +47,7 @@ baseline_inventory="$state/provider-inventory.before"
 
 case "$cloud" in
   aws) provider_compose="$root/compose.production.aws.yaml"; doctor_flag=--aws ;;
+  gcp) provider_compose="$root/compose.production.gcp.yaml"; doctor_flag=--gcp ;;
   kubernetes) provider_compose="$root/compose.production.kubernetes.yaml"; doctor_flag=--kubernetes ;;
 esac
 
@@ -121,6 +122,13 @@ provider_inventory() {
         if kubectl --context "$INFERCRANE_KUBERNETES_CONTEXT" api-resources --api-group serving.kserve.io -o name | grep -qx inferenceservices; then
           kubectl --context "$INFERCRANE_KUBERNETES_CONTEXT" --namespace "$INFERCRANE_KUBERNETES_NAMESPACE" get inferenceservices.serving.kserve.io -l app.kubernetes.io/managed-by=infercrane -o name
         fi
+      '
+      ;;
+    gcp)
+      compose exec -T infercrane sh -eu -c '
+        gcloud compute instances list --project "$INFERCRANE_GCP_PROJECT" \
+          --filter="labels.infercrane-managed=true AND (status=PROVISIONING OR status=STAGING OR status=RUNNING OR status=STOPPING)" \
+          --format="value(name)" --quiet
       '
       ;;
   esac | tr '\t ' '\n\n' | sed '/^$/d' | sort -u

@@ -91,6 +91,13 @@ if INFERCRANE_V1_ACCEPTANCE_STATE_DIR="$temporary/portable" INFERCRANE_ACCEPTANC
 fi
 grep -q 'portable provider acceptance requires --approve-paid-resources' "$temporary/unapproved-provider.log"
 
+if INFERCRANE_V1_ACCEPTANCE_STATE_DIR="$temporary/portable-gcp" INFERCRANE_ACCEPTANCE_RUN_ID=unapproved-gcp \
+  "$root/scripts/portable-provider-acceptance.sh" gcp >"$temporary/unapproved-gcp.log" 2>&1; then
+  echo "unapproved GCP qualification unexpectedly started" >&2
+  exit 1
+fi
+grep -q 'portable provider acceptance requires --approve-paid-resources' "$temporary/unapproved-gcp.log"
+
 mkdir -p "$temporary/v1-report/stale/stages"
 for stage in runpod aws kubernetes; do
   printf '%s\n' stale-commit >"$temporary/v1-report/stale/stages/$stage.passed"

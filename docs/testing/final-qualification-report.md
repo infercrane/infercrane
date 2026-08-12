@@ -79,7 +79,7 @@ export INFERCRANE_V2_QUALIFICATION_RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-v2.0.0-rc.
 Reuse the same run ID after a disconnect. After cleanup, independently confirm zero run-owned RunPod
 Pods and Serverless endpoints.
 
-### AWS and real Kubernetes GPU
+### AWS, GCP, and real Kubernetes GPU
 
 Prepare the private env/spec/key inputs in [release-acceptance.md](../release-acceptance.md), build or
 load the exact v2 candidate image, and run each provider separately:
@@ -92,6 +92,12 @@ export INFERCRANE_V1_API_KEY_FILE=/private/infercrane-worker-and-control-key
 export INFERCRANE_V1_IMAGE=infercrane:v2.0.0-rc.1
 ./scripts/portable-provider-acceptance.sh aws --approve-paid-resources
 
+export INFERCRANE_ACCEPTANCE_RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-v2-gcp"
+export INFERCRANE_V1_PROVIDER_ENV_FILE=/private/infercrane-gcp.env
+export INFERCRANE_V1_SPEC_DIR=/private/infercrane-v2-specs/gcp
+export INFERCRANE_V1_IMAGE=infercrane:v2.0.0-rc.1
+./scripts/portable-provider-acceptance.sh gcp --approve-paid-resources
+
 export INFERCRANE_ACCEPTANCE_RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-v2-kubernetes"
 export INFERCRANE_V1_PROVIDER_ENV_FILE=/private/infercrane-kubernetes.env
 export INFERCRANE_V1_SPEC_DIR=/private/infercrane-v2-specs/kubernetes
@@ -100,13 +106,14 @@ export INFERCRANE_V1_IMAGE=infercrane:v2.0.0-rc.1
 ```
 
 The `INFERCRANE_V1_*` names are retained script compatibility names, not a v1 artifact requirement.
-Confirm AWS/Kubernetes managed inventory exactly matches its recorded pre-run baseline.
+Confirm AWS/GCP/Kubernetes managed inventory exactly matches its recorded pre-run baseline.
 
 ### Other registered boundaries
 
-GCP Compute is hermetically local-qualified, while ASG, Bedrock, EKS, SageMaker, GKE, MIG, Vertex, and
-CoreWeave CKS are registered contract boundaries. There is no repository-owned consolidated real
-qualification harness for those boundaries yet. They must remain advertised as unqualified/deferred,
+GCP Compute is hermetically local-qualified and has a guarded real-provider runner, while ASG,
+Bedrock, EKS, SageMaker, GKE, MIG, Vertex, and CoreWeave CKS are registered contract boundaries.
+Those remaining boundaries have no repository-owned consolidated real qualification harness. They
+must remain advertised as unqualified/deferred,
 not as fully supported production adapters. Real SGLang, custom OCI, Dynamo request survival,
 provider-native cache/prefetch, external managed fallback, trustworthy cost/pricing, and real AIPerf
 also remain external evidence requirements.

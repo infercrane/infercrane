@@ -30,7 +30,8 @@ ownership boundary; it is not executable qualification. Inspect `infercrane inte
 The `gcp-compute` adapter launches private, digest-pinned workers with an attached service account
 and deterministic adoption identity. Configuration is all-or-nothing. See
 [GCP Compute BYOC](/integrations/gcp-compute). MIG, GKE, and Vertex remain separate registered,
-deferred profiles rather than implicit aliases.
+deferred profiles rather than implicit aliases. Run `infercrane doctor --gcp` before provisioning;
+it performs only identity and Compute API reads.
 
 ## CoreWeave
 

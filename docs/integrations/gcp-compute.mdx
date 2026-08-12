@@ -16,8 +16,11 @@ InferCrane does not store a service-account key, assign a public IP, or infer pr
 
 ## Configure
 
-Install and authenticate `gcloud` on the control-plane host using an identity allowed to create,
-describe, list, and delete only the intended project resources. Configure all fields together:
+The production image contains a checksum-pinned `gcloud` client. Authenticate with Application
+Default Credentials using an identity allowed to create, describe, list, and delete only the
+intended project resources. For Docker Compose, set `GCLOUD_CONFIG_DIR` to a read-only gcloud
+configuration directory. Prefer workload identity when the control plane runs on GCP; do not put a
+service-account key in a DeploymentSpec. Configure all fields together:
 
 ```bash
 export INFERCRANE_GCP_PROJECT='acme-production'
@@ -29,6 +32,13 @@ export INFERCRANE_GCP_SERVICE_ACCOUNT='runtime@acme-production.iam.gserviceaccou
 export INFERCRANE_GCP_VM_IMAGE='projects/cos-cloud/global/images/cos-stable-QUALIFIED_VERSION'
 export INFERCRANE_GCP_WORKER_SECRET='infercrane-worker-key'
 export INFERCRANE_GCP_CONTAINER_IMAGE='REGISTRY/IMAGE@sha256:QUALIFIED_DIGEST'
+export GCLOUD_CONFIG_DIR="$HOME/.config/gcloud"
+```
+
+Validate identity, Compute API access, and the configured zone without creating capacity:
+
+```bash
+infercrane doctor --gcp
 ```
 
 The attached service account reads the worker credential from Secret Manager at startup. Grant it
@@ -68,6 +78,12 @@ infercrane deploy deployment.yaml --idempotency-key qwen-gcp-initial
 The operation remains durable if the terminal disconnects. Inventory and deletion are restricted to
 resources labeled `infercrane-managed=true`; real cleanup must still be confirmed during manual
 qualification.
+
+The guarded real-provider harness is available when an isolated paid project is ready:
+
+```bash
+./scripts/portable-provider-acceptance.sh gcp --approve-paid-resources
+```
 
 ## Other GCP profiles
 

@@ -52,7 +52,24 @@ type Dependencies struct {
 	SkyCheck        func(context.Context) error
 	RunPodCheck     func(context.Context) error
 	AWSCheck        func(context.Context) error
+	GCPCheck        func(context.Context) error
 	KubernetesCheck func(context.Context) error
+}
+
+func CheckGCPBYOC(ctx context.Context, cfg config.Config, deps Dependencies) Check {
+	if !cfg.GCPEnabled() {
+		return Check{"GCP BYOC", Fail, "GCP BYOC is not configured", "Configure the complete INFERCRANE_GCP_* set on the control plane."}
+	}
+	check := deps.GCPCheck
+	if check == nil {
+		check = (provision.GCPCompute{Project: cfg.GCPProject, Zone: cfg.GCPZone}).Check
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	if err := check(checkCtx); err != nil {
+		return Check{"GCP BYOC", Fail, "GCP identity or Compute API probe failed", "Verify Application Default Credentials, project access, zone, Compute API enablement, and the gcloud installation."}
+	}
+	return Check{"GCP BYOC", Pass, "GCP identity and Compute API probe succeeded", ""}
 }
 
 func CheckKubernetes(ctx context.Context, cfg config.Config, deps Dependencies) Check {

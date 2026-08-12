@@ -494,6 +494,7 @@ func doctorCommand(ctx context.Context, cfg config.Config, args []string) error 
 	cloud := fs.Bool("cloud", false, "also validate SkyPilot cloud credentials")
 	serverless := fs.Bool("serverless", false, "also validate RunPod Serverless credentials and template")
 	aws := fs.Bool("aws", false, "also validate the configured AWS BYOC role")
+	gcp := fs.Bool("gcp", false, "also validate the configured GCP BYOC identity")
 	kubernetes := fs.Bool("kubernetes", false, "also validate the configured Kubernetes provider")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -505,6 +506,7 @@ func doctorCommand(ctx context.Context, cfg config.Config, args []string) error 
 	query.Set("cloud", fmt.Sprint(*cloud))
 	query.Set("serverless", fmt.Sprint(*serverless))
 	query.Set("aws", fmt.Sprint(*aws))
+	query.Set("gcp", fmt.Sprint(*gcp))
 	query.Set("kubernetes", fmt.Sprint(*kubernetes))
 	var report doctor.Report
 	if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/doctor?"+query.Encode(), "", nil, &report); err != nil {
@@ -3454,7 +3456,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 			logger.Error("admission policy refresh stopped", "error", err)
 		}
 	}()
-	diagnostics := func(checkCtx context.Context, cloud, checkServerless, checkAWS, checkKubernetes bool) doctor.Report {
+	diagnostics := func(checkCtx context.Context, cloud, checkServerless, checkAWS, checkGCP, checkKubernetes bool) doctor.Report {
 		report := doctor.Run(checkCtx, cfg, doctor.Dependencies{})
 		if cloud {
 			report.Add(doctor.CheckCloudCredentials(checkCtx, doctor.Dependencies{}))
@@ -3477,6 +3479,9 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		}
 		if checkAWS {
 			report.Add(doctor.CheckAWSBYOC(checkCtx, cfg, doctor.Dependencies{}))
+		}
+		if checkGCP {
+			report.Add(doctor.CheckGCPBYOC(checkCtx, cfg, doctor.Dependencies{}))
 		}
 		if checkKubernetes {
 			report.Add(doctor.CheckKubernetes(checkCtx, cfg, doctor.Dependencies{}))

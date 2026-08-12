@@ -80,15 +80,17 @@ infercrane doctor
 infercrane doctor --cloud
 infercrane doctor --serverless --output json
 infercrane doctor --aws
+infercrane doctor --gcp
 infercrane doctor --kubernetes
 infercrane doctor coder-production --window 1h
 ```
 
 `--cloud` adds SkyPilot credentials and RunPod advisory accelerator availability; `--serverless`
 adds RunPod Serverless credentials and template validation; `--aws` performs a read-only role
-assumption and identity probe for the configured AWS BYOC adapter; `--kubernetes` checks the explicit
-context, optional KServe CRD, and required namespaced permissions. Diagnostics are read-only and do
-not create provider resources.
+assumption and identity probe for the configured AWS BYOC adapter; `--gcp` checks Application
+Default Credentials plus read-only Compute zone access; `--kubernetes` checks the explicit context,
+optional KServe CRD, and required namespaced permissions. Diagnostics are read-only and do not
+create provider resources.
 The capability table distinguishes `supported`, `unsupported`, and `unknown`. InferCrane never
 silently changes hardware, and never claims cache or fast-resume behavior that an adapter cannot
 observe.

@@ -35,9 +35,9 @@ a host failure.
 
 The base production stack is provider-neutral: it does not require a RunPod credential and does
 not start SkyPilot. Provider adapters remain dormant until a DeploymentSpec selects them. The
-image contains pinned AWS CLI v2 and `kubectl` clients because those are the explicit process
-boundaries used by the AWS and Kubernetes adapters; credentials and kubeconfig are always supplied
-by the operator at runtime.
+image contains pinned AWS CLI v2, Google Cloud CLI, and `kubectl` clients because those are the
+explicit process boundaries used by the AWS, GCP, and Kubernetes adapters; credentials and
+kubeconfig are always supplied by the operator at runtime.
 
 For RunPod, add the explicit production overlay and the variables from `.env.runpod.example`:
 
@@ -62,6 +62,10 @@ AWS and Kubernetes follow the same explicit composition pattern:
 docker compose --env-file /private/path/infercrane-aws.env \
   -f compose.production.yaml -f compose.production.aws.yaml up -d
 
+# GCP: complete INFERCRANE_GCP_* values and read-only Application Default Credentials
+docker compose --env-file /private/path/infercrane-gcp.env \
+  -f compose.production.yaml -f compose.production.gcp.yaml up -d
+
 # Kubernetes: values from .env.kubernetes.example and a read-only kubeconfig
 docker compose --env-file /private/path/infercrane-kubernetes.env \
   -f compose.production.yaml -f compose.production.kubernetes.yaml up -d
@@ -69,9 +73,10 @@ docker compose --env-file /private/path/infercrane-kubernetes.env \
 
 The AWS overlay exposes only the complete adapter configuration and mounts the source profile
 read-only; each provider call still assumes the configured role and keeps temporary STS credentials
-in the child process. The Kubernetes overlay mounts one kubeconfig read-only and preserves the
-explicit context/namespace/RBAC boundary. Never combine overlays merely because their clients are
-present in the image—enable only providers this control-plane instance is intended to operate.
+in the child process. The GCP overlay mounts Application Default Credentials read-only. The
+Kubernetes overlay mounts one kubeconfig read-only and preserves the explicit
+context/namespace/RBAC boundary. Never combine overlays merely because their clients are present in
+the image—enable only providers this control-plane instance is intended to operate.
 
 The real RunPod qualification stack is isolated from the development Compose stack. It persists
 PostgreSQL, RunPod configuration, and SkyPilot state across control-plane restarts:

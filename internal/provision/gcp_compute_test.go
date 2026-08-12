@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -16,6 +17,13 @@ type fakeGCPRunner struct {
 	creates, deletes int
 	loseCreate       bool
 	lastCreate       []string
+}
+
+type gcpCheckRunner struct{ calls [][]string }
+
+func (r *gcpCheckRunner) Run(_ context.Context, _ []string, args ...string) ([]byte, error) {
+	r.calls = append(r.calls, append([]string(nil), args...))
+	return []byte("ok"), nil
 }
 
 func (f *fakeGCPRunner) Run(_ context.Context, _ []string, args ...string) ([]byte, error) {
@@ -71,6 +79,17 @@ func (f *fakeGCPRunner) Run(_ context.Context, _ []string, args ...string) ([]by
 
 func testGCPCompute(runner CommandRunner) GCPCompute {
 	return GCPCompute{Runner: runner, Project: "project", Zone: "europe-west4-a", Subnet: "private-inference", MachineType: "g2-standard-4", GPUType: "nvidia-l4", ServiceAccount: "runtime@project.iam.gserviceaccount.com", VMImage: "projects/cos-cloud/global/images/cos-immutable", ContainerImage: "vllm/vllm-openai@sha256:" + strings.Repeat("a", 64), WorkerSecret: "infercrane-worker"}
+}
+
+func TestGCPComputeCheckIsReadOnly(t *testing.T) {
+	runner := &gcpCheckRunner{}
+	provider := GCPCompute{Runner: runner, Project: "project", Zone: "europe-west4-a"}
+	if err := provider.Check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(runner.calls) != 2 || runner.calls[0][0] != "auth" || runner.calls[1][1] != "zones" {
+		t.Fatalf("unexpected read-only calls: %#v", runner.calls)
+	}
 }
 
 func TestGCPComputeLifecycleIsPrivateIdempotentAndAdoptable(t *testing.T) {
@@ -145,5 +164,23 @@ func TestGCPComputePortableWorkloadExpandsArgumentsSafely(t *testing.T) {
 	}
 	if strings.Contains(startup, " sh -c ") || !strings.Contains(startup, `'acme/model; touch /tmp/pwned'`) {
 		t.Fatalf("portable argv was not passed as shell-quoted container argv: %s", startup)
+	}
+}
+
+func TestGCPComputeStartupUsesWorkloadIdentityWithoutWorkerGcloud(t *testing.T) {
+	provider := testGCPCompute(&fakeGCPRunner{})
+	script := provider.startup(ReplicaSpec{Model: "Qwen/Qwen3-8B", ModelRevision: strings.Repeat("a", 40)}, 8000)
+	for _, required := range []string{"metadata.google.internal", "Metadata-Flavor: Google", "secretmanager.googleapis.com", "base64 -d", "unset token_json access_token secret_json secret_data"} {
+		if !strings.Contains(script, required) {
+			t.Fatalf("startup script missing %q: %s", required, script)
+		}
+	}
+	if strings.Contains(script, "gcloud secrets") {
+		t.Fatalf("worker startup unexpectedly depends on gcloud: %s", script)
+	}
+	command := exec.Command("sh", "-n")
+	command.Stdin = strings.NewReader(script)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("startup script is not valid POSIX shell: %v: %s\n%s", err, output, script)
 	}
 }

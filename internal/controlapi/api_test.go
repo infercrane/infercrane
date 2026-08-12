@@ -1022,11 +1022,11 @@ func TestCancelHidesMissingOperation(t *testing.T) {
 
 func TestDoctorDiagnosticsRunInsideAuthenticatedControlPlane(t *testing.T) {
 	called := false
-	handler := (API{Store: &fakeStore{}, APIKey: "secret", Diagnostics: func(_ context.Context, cloud, serverless, aws, kubernetes bool) doctor.Report {
-		called = cloud && serverless && aws && kubernetes
+	handler := (API{Store: &fakeStore{}, APIKey: "secret", Diagnostics: func(_ context.Context, cloud, serverless, aws, gcp, kubernetes bool) doctor.Report {
+		called = cloud && serverless && aws && gcp && kubernetes
 		return doctor.Report{Ready: true, Checks: []doctor.Check{{Name: "PostgreSQL", Status: doctor.Pass, Message: "connected"}}}
 	}}).Handler()
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/doctor?cloud=true&serverless=true&aws=true&kubernetes=true", nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/doctor?cloud=true&serverless=true&aws=true&gcp=true&kubernetes=true", nil)
 	request.Header.Set("Authorization", "Bearer secret")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)

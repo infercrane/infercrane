@@ -5,8 +5,8 @@ root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 command_name=${1:-status}
 shift || true
 approval=false
-case "$command_name" in local|nightly|runpod|aws|kubernetes|status|report|reset) ;; *)
-  echo "usage: $0 local|nightly|runpod|aws|kubernetes|status|report|reset [--approve-paid-resources]" >&2; exit 2;;
+case "$command_name" in local|nightly|runpod|aws|gcp|kubernetes|status|report|reset) ;; *)
+  echo "usage: $0 local|nightly|runpod|aws|gcp|kubernetes|status|report|reset [--approve-paid-resources]" >&2; exit 2;;
 esac
 while [ "$#" -gt 0 ]; do
   case "$1" in --approve-paid-resources) approval=true;; *) echo "unknown argument: $1" >&2; exit 2;; esac
@@ -180,6 +180,7 @@ case "$command_name" in
   nightly) run_nightly;;
   runpod) run_runpod; result=$?; report; exit "$result";;
   aws) run_portable aws aws-real; result=$?; report; exit "$result";;
+  gcp) run_portable gcp gcp-real; result=$?; report; exit "$result";;
   kubernetes) run_portable kubernetes kubernetes-gpu-real; result=$?; report; exit "$result";;
   status|report) report;;
   reset) rm -rf "$state"; echo "removed qualification evidence for $commit";;

@@ -78,11 +78,11 @@ streaming cancellation, lost-response adoption, disruption, deletion, and direct
 checks. A provider allocation or image-transfer failure remains a failed suite even when guarded
 cleanup succeeds.
 
-## AWS and Kubernetes GPU qualification
+## AWS, GCP, and Kubernetes GPU qualification
 
 The portable qualification runner needs an isolated provider environment, immutable workload specs,
 and one API key shared by the control plane and workers. See [provider setup](/provider-setup) before
-running either paid gate.
+running any paid gate.
 
 ```bash
 export INFERCRANE_V1_PROVIDER_ENV_FILE=/private/provider.env
@@ -90,12 +90,13 @@ export INFERCRANE_V1_SPEC_DIR=/private/qualification-specs
 export INFERCRANE_V1_API_KEY_FILE=/private/control-and-worker-key
 
 ./scripts/qualify-product.sh aws --approve-paid-resources
+./scripts/qualify-product.sh gcp --approve-paid-resources
 ./scripts/qualify-product.sh kubernetes --approve-paid-resources
 ```
 
-The compatibility-prefixed `INFERCRANE_V1_*` names do not select an old release. GCP Compute has a
-hermetic contract today, but no repository-owned real GCP runner; its report row therefore remains
-`REAL_INFRA_REQUIRED` rather than implying qualification.
+The compatibility-prefixed `INFERCRANE_V1_*` names do not select an old release. A gate remains
+`REAL_INFRA_REQUIRED` until its exact-commit paid run passes; the existence of the guarded runner is
+not qualification evidence.
 
 ## What the system proves
 

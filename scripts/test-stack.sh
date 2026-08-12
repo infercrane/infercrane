@@ -121,6 +121,7 @@ curl -fsS -H "Authorization: Bearer $api_key" -H 'Content-Type: application/json
 docker compose exec -T infercrane infercrane plan Qwen/Qwen3-8B --targets gpu-a,gpu-b --output json >/dev/null
 docker compose exec -T infercrane infercrane doctor
 docker compose exec -T infercrane aws --version
+docker compose exec -T infercrane gcloud --version
 docker compose exec -T infercrane kubectl version --client=true
 
 # Existing-target fixtures have no immutable Hugging Face artifact and are not
