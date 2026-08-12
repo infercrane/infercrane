@@ -27,6 +27,12 @@ func (v OpenAI) Inspect(ctx context.Context, baseURL string) (bool, map[string]s
 	if client == nil {
 		client = defaultClient
 	}
+	// Readiness and identity must be proven by the provider-observed worker
+	// origin itself. Following redirects can validate the wrong runtime and can
+	// forward a worker credential to another service on the same host.
+	clientCopy := *client
+	clientCopy.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	client = &clientCopy
 	do := func(path string) (*http.Response, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+path, nil)
 		if err != nil {

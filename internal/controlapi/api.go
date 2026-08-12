@@ -2407,10 +2407,7 @@ func (a API) setQuota(w http.ResponseWriter, r *http.Request) {
 		MaxReplicas          int `json:"max_replicas"`
 		MaxRequestsPerMinute int `json:"max_requests_per_minute"`
 	}
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&request); err != nil {
-		writeError(w, 400, "invalid_request", err.Error())
+	if !decodeMutationBody(w, r, &request) {
 		return
 	}
 	if err := a.Store.SetTenantQuota(r.Context(), principal.TenantID, request.MaxDeployments, request.MaxReplicas, request.MaxRequestsPerMinute); err != nil {
@@ -2430,9 +2427,10 @@ func (a API) createTenant(w http.ResponseWriter, r *http.Request) {
 		ID   string `json:"id"`
 		Name string `json:"name"`
 	}
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&request); err != nil || request.ID == "" {
+	if !decodeMutationBody(w, r, &request) {
+		return
+	}
+	if request.ID == "" {
 		writeError(w, 400, "invalid_request", "tenant id is required")
 		return
 	}
@@ -2455,10 +2453,7 @@ func (a API) createPrincipal(w http.ResponseWriter, r *http.Request) {
 		Role   authz.Role     `json:"role"`
 		Scopes []authz.Action `json:"scopes,omitempty"`
 	}
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&request); err != nil {
-		writeError(w, 400, "invalid_request", err.Error())
+	if !decodeMutationBody(w, r, &request) {
 		return
 	}
 	if len(request.Scopes) == 0 {
@@ -2992,9 +2987,10 @@ func (a API) setRoute(w http.ResponseWriter, r *http.Request) {
 	var request struct {
 		Strategy string `json:"strategy"`
 	}
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&request); err != nil || request.Strategy == "" {
+	if !decodeMutationBody(w, r, &request) {
+		return
+	}
+	if request.Strategy == "" {
 		writeError(w, 400, "invalid_request", "routing strategy is required")
 		return
 	}
@@ -3042,10 +3038,7 @@ func (a API) addTarget(w http.ResponseWriter, r *http.Request) {
 		Runtime       string `json:"runtime"`
 		UpstreamModel string `json:"upstream_model,omitempty"`
 	}
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&request); err != nil {
-		writeError(w, 400, "invalid_request", err.Error())
+	if !decodeMutationBody(w, r, &request) {
 		return
 	}
 	if request.Provider == "" {

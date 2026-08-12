@@ -455,7 +455,7 @@ func (g *Gateway) record(ctx context.Context, id string, route routes.Snapshot, 
 	}
 }
 
-var hopHeaders = map[string]struct{}{"Connection": {}, "Keep-Alive": {}, "Proxy-Authenticate": {}, "Proxy-Authorization": {}, "Te": {}, "Trailer": {}, "Transfer-Encoding": {}, "Upgrade": {}, "Content-Length": {}, "Host": {}}
+var hopHeaders = map[string]struct{}{"Authorization": {}, "Connection": {}, "Keep-Alive": {}, "Proxy-Authenticate": {}, "Proxy-Authorization": {}, "Te": {}, "Trailer": {}, "Transfer-Encoding": {}, "Upgrade": {}, "Content-Length": {}, "Host": {}}
 var copyBuffers = sync.Pool{New: func() any { buffer := make([]byte, 32<<10); return &buffer }}
 
 const observationLimit = 2 << 20

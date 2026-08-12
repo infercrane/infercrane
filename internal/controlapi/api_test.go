@@ -157,6 +157,30 @@ func (f *fakeMembershipStore) ControlPlaneInstances(context.Context, time.Durati
 	return f.instances, nil
 }
 
+func TestMutationEndpointsRejectTrailingJSONValues(t *testing.T) {
+	handler := (API{Store: &fakeStore{}, APIKey: "secret"}).Handler()
+	tests := []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{http.MethodPut, "/api/v1/tenant/quota", `{"max_deployments":1,"max_replicas":1,"max_requests_per_minute":1} {}`},
+		{http.MethodPost, "/api/v1/tenants", `{"id":"tenant-a","name":"Tenant A"} {}`},
+		{http.MethodPost, "/api/v1/principals", `{"name":"operator","role":"operator"} {}`},
+		{http.MethodPut, "/api/v1/deployments/prod/route", `{"strategy":"round-robin"} {}`},
+		{http.MethodPost, "/api/v1/targets", `{"name":"worker","url":"http://worker.test:8000","provider":"existing","runtime":"vllm"} {}`},
+	}
+	for _, test := range tests {
+		request := httptest.NewRequest(test.method, test.path, strings.NewReader(test.body))
+		request.Header.Set("Authorization", "Bearer secret")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "invalid_request") {
+			t.Errorf("%s %s status=%d body=%s", test.method, test.path, response.Code, response.Body.String())
+		}
+	}
+}
+
 func TestAsyncInferenceRequiresConsentAndReturnsDurableJob(t *testing.T) {
 	service := &fakeAsyncService{}
 	handler := (API{Store: &fakeStore{}, APIKey: "secret", AsyncInference: service}).Handler()

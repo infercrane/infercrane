@@ -406,6 +406,25 @@ func TestCompletionReplacesPublicCredentialForServerlessUpstream(t *testing.T) {
 	}
 }
 
+func TestCompletionDoesNotForwardPublicCredentialToUncredentialedUpstream(t *testing.T) {
+	client := &http.Client{Transport: roundTripper(func(request *http.Request) (*http.Response, error) {
+		if authorization := request.Header.Get("Authorization"); authorization != "" {
+			t.Fatalf("public credential leaked upstream: %q", authorization)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"choices":[]}`))}, nil
+	})}
+	directory := routes.New()
+	directory.Put(routes.Snapshot{DeploymentID: "d1", Alias: "alias", UpstreamModel: "model", RouterURL: "http://router"})
+	handler := (&Gateway{Routes: directory, APIKey: "infercrane-secret", Client: client}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"alias","messages":[]}`))
+	request.Header.Set("Authorization", "Bearer infercrane-secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestServerlessColdEvidenceClassifiesOnlyTriggeringRequest(t *testing.T) {
 	client := &http.Client{Transport: roundTripper(func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"model":"Qwen/Qwen3-8B","choices":[]}`))}, nil
