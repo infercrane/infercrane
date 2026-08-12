@@ -5,6 +5,11 @@ root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 temporary=$(mktemp -d)
 trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 
+# Developer qualification owns its PostgreSQL fixture. A stale database URL
+# inherited from an operator shell must not alter the pre-container verifier.
+grep -Fq 'step repository env -u INFERCRANE_TEST_DATABASE_URL make -C "$root" verify' \
+  "$root/scripts/dev-check.sh"
+
 state="$temporary/state"
 mkdir -p "$state/.paid.lock"
 printf '%s\n' "$$" >"$state/.paid.lock/pid"

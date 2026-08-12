@@ -52,7 +52,11 @@ step() {
   fi
 }
 
-step repository make -C "$root" verify
+# The repository verifier deliberately skips PostgreSQL integration tests when
+# no test database is configured; the full developer check runs those tests
+# later in its isolated container stage. Never let a stale caller-owned URL
+# accidentally enable them against an unavailable or unrelated database.
+step repository env -u INFERCRANE_TEST_DATABASE_URL make -C "$root" verify
 step provider-contracts sh -c 'cd "$1" && go test -count=1 ./internal/integration ./internal/conformance ./internal/provision ./internal/gateway ./internal/reconcile ./internal/workflows' sh "$root"
 step acceptance-safety "$root/scripts/test-acceptance-safety.sh"
 
