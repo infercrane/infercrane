@@ -110,6 +110,17 @@ func writeCLIError(w io.Writer, args []string, err error) {
 		return
 	}
 	detail := map[string]any{"code": "client_error", "category": "client", "message": err.Error(), "retryable": false, "remediation": "Correct the command or inspect current durable state before retrying."}
+	var watcherErr *WatcherStoppedError
+	if errors.As(err, &watcherErr) {
+		code, message := "operation_watch_interrupted", "Operation watch stopped; the durable operation continues safely in the control plane."
+		if errors.Is(watcherErr.Cause, context.DeadlineExceeded) {
+			code, message = "operation_watch_timeout", "Wait timeout reached; the durable operation continues safely in the control plane."
+		}
+		detail = map[string]any{
+			"code": code, "category": "operation", "message": message, "retryable": true,
+			"remediation": "Resume with: infercrane operation watch " + watcherErr.OperationID + "; cancel only if intended: infercrane operation cancel " + watcherErr.OperationID,
+		}
+	}
 	var controlErr *ControlError
 	if errors.As(err, &controlErr) {
 		detail = map[string]any{"code": controlErr.Code, "category": controlErr.Category, "message": controlErr.Message, "retryable": controlErr.Retryable, "remediation": controlErr.Remediation, "status": controlErr.StatusCode}
@@ -1914,8 +1925,19 @@ func waitForOperation(ctx context.Context, cfg config.Config, id string, printPr
 	}
 }
 
+type WatcherStoppedError struct {
+	Cause       error
+	OperationID string
+}
+
+func (e *WatcherStoppedError) Error() string {
+	return fmt.Sprintf("%v: watcher stopped; operation %s continues safely in the control plane (resume: infercrane operation watch %s; cancel: infercrane operation cancel %s)", e.Cause, e.OperationID, e.OperationID, e.OperationID)
+}
+
+func (e *WatcherStoppedError) Unwrap() error { return e.Cause }
+
 func watcherStoppedError(cause error, id string) error {
-	return fmt.Errorf("%w: watcher stopped; operation %s continues safely in the control plane (resume: infercrane operation watch %s; cancel: infercrane operation cancel %s)", cause, id, id, id)
+	return &WatcherStoppedError{Cause: cause, OperationID: id}
 }
 
 func waitForOperationWithin(parent context.Context, timeout time.Duration, cfg config.Config, id string, printProgress bool) (domain.Operation, error) {

@@ -723,6 +723,30 @@ func TestJSONOutputRendersStructuredControlPlaneFailure(t *testing.T) {
 	}
 }
 
+func TestJSONOutputClassifiesDurableOperationWatchTimeout(t *testing.T) {
+	var output bytes.Buffer
+	writeCLIError(&output, []string{"operation", "watch", "op-123", "--output", "json"}, watcherStoppedError(context.DeadlineExceeded, "op-123"))
+	var envelope struct {
+		Error struct {
+			Code, Category, Message, Remediation string
+			Retryable                            bool
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Error.Code != "operation_watch_timeout" || envelope.Error.Category != "operation" || !envelope.Error.Retryable || !strings.Contains(envelope.Error.Remediation, "operation watch op-123") || strings.Contains(envelope.Error.Remediation, "Correct the command") {
+		t.Fatalf("unexpected timeout taxonomy: %#v", envelope.Error)
+	}
+}
+
+func TestWatcherStoppedErrorPreservesCancellationCause(t *testing.T) {
+	err := watcherStoppedError(context.Canceled, "op-456")
+	if !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "operation op-456 continues safely") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
 func TestStatusShowsServingAndConvergenceSeparately(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
