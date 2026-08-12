@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
@@ -64,6 +65,27 @@ func (s *Store) RecordInferencePassport(ctx context.Context, value domain.Infere
 	if value.TenantID == "" || value.DeploymentID == "" || value.RevisionID == "" || !json.Valid([]byte(value.PayloadJSON)) || len(value.PayloadJSON) > 4<<20 || value.PayloadDigest == "" || value.Signature == "" || value.PublicKey == "" || value.Algorithm != passport.Algorithm || value.KeyID == "" {
 		return domain.InferencePassport{}, errors.New("invalid inference passport")
 	}
+	envelope := passport.Envelope{PayloadJSON: value.PayloadJSON, Digest: value.PayloadDigest, Signature: value.Signature, PublicKey: value.PublicKey, Algorithm: value.Algorithm, KeyID: value.KeyID}
+	if err := passport.Verify(envelope); err != nil {
+		return domain.InferencePassport{}, errors.New("invalid inference passport signature")
+	}
+	var payload passport.Payload
+	if err := json.Unmarshal([]byte(value.PayloadJSON), &payload); err != nil || payload.Schema != "infercrane.inference-passport/v1" || payload.RevisionID != value.RevisionID {
+		return domain.InferencePassport{}, errors.New("inference passport payload identity does not match the record")
+	}
+	var deploymentName, specJSON string
+	var revisionNumber int
+	err := s.QueryRowContext(ctx, `SELECT d.name,r.revision_number,r.spec_json::text FROM deployments d JOIN deployment_revisions r ON r.deployment_id=d.id WHERE d.id=? AND d.tenant_id=? AND r.id=?`, value.DeploymentID, value.TenantID, value.RevisionID).Scan(&deploymentName, &revisionNumber, &specJSON)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.InferencePassport{}, ErrNotFound
+	}
+	if err != nil {
+		return domain.InferencePassport{}, err
+	}
+	var expectedSpec domain.DeploymentRevisionSpec
+	if json.Unmarshal([]byte(specJSON), &expectedSpec) != nil || payload.Deployment != deploymentName || payload.RevisionNumber != revisionNumber || !reflect.DeepEqual(payload.RevisionSpec, expectedSpec) {
+		return domain.InferencePassport{}, errors.New("inference passport evidence does not match persisted revision state")
+	}
 	if value.ID == "" {
 		var err error
 		value.ID, err = newID()
@@ -72,7 +94,7 @@ func (s *Store) RecordInferencePassport(ctx context.Context, value domain.Infere
 		}
 	}
 	stamp := now()
-	_, err := s.ExecContext(ctx, `INSERT INTO inference_passports(id,tenant_id,deployment_id,revision_id,payload_json,payload_digest,signature,public_key,algorithm,key_id,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(tenant_id,deployment_id,revision_id,payload_digest,key_id) DO NOTHING`, value.ID, value.TenantID, value.DeploymentID, value.RevisionID, value.PayloadJSON, value.PayloadDigest, value.Signature, value.PublicKey, value.Algorithm, value.KeyID, stamp)
+	_, err = s.ExecContext(ctx, `INSERT INTO inference_passports(id,tenant_id,deployment_id,revision_id,payload_json,payload_digest,signature,public_key,algorithm,key_id,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(tenant_id,deployment_id,revision_id,payload_digest,key_id) DO NOTHING`, value.ID, value.TenantID, value.DeploymentID, value.RevisionID, value.PayloadJSON, value.PayloadDigest, value.Signature, value.PublicKey, value.Algorithm, value.KeyID, stamp)
 	if err != nil {
 		return domain.InferencePassport{}, err
 	}

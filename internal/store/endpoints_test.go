@@ -207,6 +207,16 @@ func TestEndpointReleaseGuardPersistsDeterministicPlanDecision(t *testing.T) {
 	if accepted, err := s.EndpointReleaseGuardAccepted(ctx, "global", endpoint.Name, candidatePlan.ID); err != nil || !accepted {
 		t.Fatalf("passing candidate accepted=%t err=%v", accepted, err)
 	}
+	replacementPlan, err := s.CreateServingPlan(ctx, "global", domain.ServingPlan{EndpointID: endpoint.ID, RoutingPolicy: "weighted", Bindings: []domain.ServingPlanBinding{{BindingID: candidateBinding.ID, Weight: 100}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.SetEndpointPlan(ctx, "global", endpoint.Name, replacementPlan.ID, "candidate"); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.SetEndpointPlan(ctx, "global", endpoint.Name, candidatePlan.ID, "active"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale accepted plan activation error=%v, want conflict", err)
+	}
 	history, err = s.EndpointReleaseGuardEvaluations(ctx, "global", endpoint.Name, 10)
 	if err != nil || len(history) != 2 || history[0].ID != acceptedEvaluation.ID || history[1].ID != evaluation.ID {
 		t.Fatalf("history=%#v err=%v", history, err)

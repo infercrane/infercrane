@@ -14,6 +14,7 @@ type fakeRepo struct {
 	completed, failed, cancelled bool
 	retryable                    bool
 	next                         time.Time
+	heartbeatErr                 error
 }
 
 func (f *fakeRepo) ClaimOperation(context.Context, string, time.Duration) (domain.Operation, error) {
@@ -24,7 +25,29 @@ func (f *fakeRepo) ClaimOperation(context.Context, string, time.Duration) (domai
 }
 func (f *fakeRepo) StartClaimedOperation(context.Context, string, string, int64) error { return nil }
 func (f *fakeRepo) HeartbeatOperation(context.Context, string, string, int64, time.Duration) error {
-	return nil
+	return f.heartbeatErr
+}
+
+func TestWorkerDoesNotFinalizeAfterLeaseMaintenanceFailure(t *testing.T) {
+	repo := &fakeRepo{
+		op:           domain.Operation{ID: "1", Kind: "apply", Attempt: 1, MaxAttempts: 3},
+		heartbeatErr: errors.New("database connection reset"),
+	}
+	worked, err := (Worker{
+		Repository: repo,
+		Owner:      "worker",
+		Lease:      30 * time.Millisecond,
+		Handlers: map[string]Handler{"apply": func(ctx context.Context, _ domain.Operation) (string, error) {
+			<-ctx.Done()
+			return "", ctx.Err()
+		}},
+	}).Once(context.Background())
+	if !worked || !errors.Is(err, repo.heartbeatErr) {
+		t.Fatalf("worked=%t err=%v", worked, err)
+	}
+	if repo.completed || repo.failed || repo.cancelled {
+		t.Fatalf("lease-lost worker finalized operation: %#v", repo)
+	}
 }
 func (f *fakeRepo) Operation(context.Context, string) (domain.Operation, error) { return f.op, nil }
 func (f *fakeRepo) CompleteClaimedOperation(context.Context, string, string, int64, string) error {

@@ -427,6 +427,7 @@ type AdmissionPolicy struct {
 type AsyncInferenceJob struct {
 	ID, TenantID, EndpointID, RequestID, Protocol, Status string
 	IdempotencyKey, EncryptionKeyReference                string
+	PayloadDigest                                         string
 	WebhookURL, WebhookSecretReferenceID                  string
 	WebhookStatus, WebhookErrorCode                       string
 	LeaseOwner, LeaseToken, ErrorCode, ErrorMessage       string

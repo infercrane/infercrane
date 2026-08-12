@@ -21,18 +21,27 @@ func TestAsyncInferenceIsIdempotentFencedCancellableAndExpirable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := domain.AsyncInferenceJob{ID: "job-" + suffix, RequestID: "request-" + suffix, Protocol: "chat", IdempotencyKey: "key-" + suffix, PayloadCiphertext: []byte("sealed"), PayloadNonce: []byte("nonce"), EncryptionKeyReference: "test-key", ExecutionDeadline: time.Now().UTC().Add(time.Hour), ExpiresAt: time.Now().UTC().Add(2 * time.Hour)}
+	request := domain.AsyncInferenceJob{ID: "job-" + suffix, RequestID: "request-" + suffix, Protocol: "chat", IdempotencyKey: "key-" + suffix, PayloadDigest: "sha256-payload", PayloadCiphertext: []byte("sealed"), PayloadNonce: []byte("nonce"), EncryptionKeyReference: "test-key", ExecutionDeadline: time.Now().UTC().Add(time.Hour), ExpiresAt: time.Now().UTC().Add(2 * time.Hour)}
 	created, wasCreated, err := s.CreateAsyncInferenceJob(ctx, "global", deployment.Name, request)
 	if err != nil || !wasCreated {
 		t.Fatalf("create=(%#v,%t,%v)", created, wasCreated, err)
 	}
-	replay, replayCreated, err := s.CreateAsyncInferenceJob(ctx, "global", deployment.Name, domain.AsyncInferenceJob{ID: "different", RequestID: "different", Protocol: "chat", IdempotencyKey: request.IdempotencyKey, PayloadCiphertext: []byte("other"), PayloadNonce: []byte("other"), EncryptionKeyReference: "test-key", ExecutionDeadline: request.ExecutionDeadline, ExpiresAt: request.ExpiresAt})
+	replay, replayCreated, err := s.CreateAsyncInferenceJob(ctx, "global", deployment.Name, domain.AsyncInferenceJob{ID: "different", RequestID: "different", Protocol: "chat", IdempotencyKey: request.IdempotencyKey, PayloadDigest: request.PayloadDigest, PayloadCiphertext: []byte("other"), PayloadNonce: []byte("other"), EncryptionKeyReference: "test-key", ExecutionDeadline: request.ExecutionDeadline, ExpiresAt: request.ExpiresAt})
 	if err != nil || replayCreated || replay.ID != created.ID {
 		t.Fatalf("replay=(%#v,%t,%v)", replay, replayCreated, err)
+	}
+	conflict := request
+	conflict.ID, conflict.RequestID, conflict.PayloadDigest = "conflict", "conflict", "sha256-other"
+	if _, _, err = s.CreateAsyncInferenceJob(ctx, "global", deployment.Name, conflict); !errors.Is(err, ErrConflict) {
+		t.Fatalf("different async payload reused idempotency key: %v", err)
 	}
 	first, err := s.ClaimAsyncInferenceJob(ctx, "worker-a", "lease-a", time.Minute)
 	if err != nil || first.ID != created.ID || first.Attempt != 1 {
 		t.Fatalf("first claim=%#v %v", first, err)
+	}
+	var leaseSeconds float64
+	if err = s.db.QueryRowContext(ctx, `SELECT EXTRACT(EPOCH FROM (lease_expires_at-clock_timestamp())) FROM async_inference_jobs WHERE id=$1`, first.ID).Scan(&leaseSeconds); err != nil || leaseSeconds < 55 || leaseSeconds > 61 {
+		t.Fatalf("database-clock async lease duration=%g err=%v", leaseSeconds, err)
 	}
 	if _, err = s.ExecContext(ctx, `UPDATE async_inference_jobs SET lease_expires_at=NOW()-INTERVAL '1 second' WHERE id=?`, created.ID); err != nil {
 		t.Fatal(err)
@@ -40,6 +49,12 @@ func TestAsyncInferenceIsIdempotentFencedCancellableAndExpirable(t *testing.T) {
 	second, err := s.ClaimAsyncInferenceJob(ctx, "worker-b", "lease-b", time.Minute)
 	if err != nil || second.ID != created.ID || second.Attempt != 2 {
 		t.Fatalf("adopted claim=%#v %v", second, err)
+	}
+	if err = s.HeartbeatAsyncInferenceJob(ctx, created.ID, "worker-a", "lease-a", time.Minute); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("stale heartbeat=%v", err)
+	}
+	if err = s.HeartbeatAsyncInferenceJob(ctx, created.ID, "worker-b", "lease-b", time.Minute); err != nil {
+		t.Fatalf("current heartbeat=%v", err)
 	}
 	if err = s.CompleteAsyncInferenceJob(ctx, created.ID, "worker-a", "lease-a", []byte("stale"), []byte("nonce")); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("stale completion=%v", err)

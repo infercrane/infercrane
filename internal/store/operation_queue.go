@@ -26,6 +26,9 @@ func (s *Store) EnqueueOperation(ctx context.Context, operation domain.Operation
 	if operation.IdempotencyKey != "" {
 		existing, err := s.operationByKey(ctx, operation.TenantID, operation.Kind, operation.IdempotencyKey)
 		if err == nil {
+			if !sameOperationIntent(existing, operation) {
+				return domain.Operation{}, false, fmt.Errorf("%w: idempotency key was already used for a different operation intent", ErrConflict)
+			}
 			return existing, false, nil
 		}
 		if !errors.Is(err, ErrNotFound) {
@@ -46,6 +49,9 @@ func (s *Store) EnqueueOperation(ctx context.Context, operation domain.Operation
 	if isUniqueViolation(err) && operation.IdempotencyKey != "" {
 		existing, lookupErr := s.operationByKey(ctx, operation.TenantID, operation.Kind, operation.IdempotencyKey)
 		if lookupErr == nil {
+			if !sameOperationIntent(existing, operation) {
+				return domain.Operation{}, false, fmt.Errorf("%w: idempotency key was concurrently used for a different operation intent", ErrConflict)
+			}
 			return existing, false, nil
 		}
 		if !errors.Is(lookupErr, ErrNotFound) {
@@ -57,6 +63,10 @@ func (s *Store) EnqueueOperation(ctx context.Context, operation domain.Operation
 		return domain.Operation{}, false, fmt.Errorf("%w: deployment already has an unresolved lifecycle operation", ErrConflict)
 	}
 	return operation, err == nil, err
+}
+
+func sameOperationIntent(existing, requested domain.Operation) bool {
+	return existing.TenantID == requested.TenantID && existing.Kind == requested.Kind && existing.ResourceType == requested.ResourceType && existing.ResourceName == requested.ResourceName && semanticJSONEqual(existing.RequestJSON, requested.RequestJSON)
 }
 
 func (s *Store) ClaimOperation(ctx context.Context, owner string, lease time.Duration) (domain.Operation, error) {
@@ -76,8 +86,7 @@ func (s *Store) ClaimOperation(ctx context.Context, owner string, lease time.Dur
 	if err != nil {
 		return domain.Operation{}, err
 	}
-	expires := time.Now().UTC().Add(lease)
-	if _, err = tx.ExecContext(ctx, `UPDATE operations SET status='leased',attempt=attempt+1,lease_owner=?,lease_generation=lease_generation+1,lease_expires_at=?,last_heartbeat_at=?,message='leased',updated_at=? WHERE id=?`, owner, expires, now(), now(), id); err != nil {
+	if _, err = tx.ExecContext(ctx, `UPDATE operations SET status='leased',attempt=attempt+1,lease_owner=?,lease_generation=lease_generation+1,lease_expires_at=NOW()+(? * INTERVAL '1 microsecond'),last_heartbeat_at=?,message='leased',updated_at=? WHERE id=?`, owner, lease.Microseconds(), now(), now(), id); err != nil {
 		return domain.Operation{}, err
 	}
 	if err = tx.Commit(); err != nil {
@@ -91,7 +100,7 @@ func (s *Store) StartClaimedOperation(ctx context.Context, id, owner string, gen
 }
 
 func (s *Store) HeartbeatOperation(ctx context.Context, id, owner string, generation int64, lease time.Duration) error {
-	result, err := s.ExecContext(ctx, `UPDATE operations SET lease_expires_at=?,last_heartbeat_at=?,updated_at=? WHERE id=? AND status IN ('leased','running','cancelling') AND lease_owner=? AND lease_generation=? AND lease_expires_at>NOW()`, time.Now().UTC().Add(lease), now(), now(), id, owner, generation)
+	result, err := s.ExecContext(ctx, `UPDATE operations SET lease_expires_at=NOW()+(? * INTERVAL '1 microsecond'),last_heartbeat_at=?,updated_at=? WHERE id=? AND status IN ('leased','running','cancelling') AND lease_owner=? AND lease_generation=? AND lease_expires_at>NOW()`, lease.Microseconds(), now(), now(), id, owner, generation)
 	if err != nil {
 		return err
 	}

@@ -14,7 +14,7 @@ func (s *Store) CreateAsyncInferenceJob(ctx context.Context, tenant, endpointNam
 	if err != nil {
 		return domain.AsyncInferenceJob{}, false, err
 	}
-	if job.IdempotencyKey == "" || len(job.PayloadCiphertext) == 0 || len(job.PayloadNonce) == 0 || job.EncryptionKeyReference == "" || !job.ExecutionDeadline.Before(job.ExpiresAt) {
+	if job.IdempotencyKey == "" || job.PayloadDigest == "" || len(job.PayloadCiphertext) == 0 || len(job.PayloadNonce) == 0 || job.EncryptionKeyReference == "" || !job.ExecutionDeadline.Before(job.ExpiresAt) {
 		return domain.AsyncInferenceJob{}, false, errors.New("invalid async inference job")
 	}
 	if job.ID == "" {
@@ -34,10 +34,13 @@ func (s *Store) CreateAsyncInferenceJob(ctx context.Context, tenant, endpointNam
 	if job.WebhookURL != "" {
 		webhookStatus = "pending"
 	}
-	_, err = s.ExecContext(ctx, `INSERT INTO async_inference_jobs(id,tenant_id,endpoint_id,request_id,protocol,status,priority,idempotency_key,payload_ciphertext,payload_nonce,encryption_key_reference,webhook_url,webhook_secret_reference_id,webhook_status,execution_deadline,expires_at,created_at,updated_at) VALUES(?,?,?,?,?,'queued',?,?,?,?,?,?,?,?,?,?,?,?)`, job.ID, tenant, endpoint.Endpoint.ID, job.RequestID, job.Protocol, job.Priority, job.IdempotencyKey, job.PayloadCiphertext, job.PayloadNonce, job.EncryptionKeyReference, nullIf(job.WebhookURL == "", job.WebhookURL), nullIf(job.WebhookSecretReferenceID == "", job.WebhookSecretReferenceID), webhookStatus, job.ExecutionDeadline.UTC(), job.ExpiresAt.UTC(), stamp, stamp)
+	_, err = s.ExecContext(ctx, `INSERT INTO async_inference_jobs(id,tenant_id,endpoint_id,request_id,protocol,status,priority,idempotency_key,payload_digest,payload_ciphertext,payload_nonce,encryption_key_reference,webhook_url,webhook_secret_reference_id,webhook_status,execution_deadline,expires_at,created_at,updated_at) VALUES(?,?,?,?,?,'queued',?,?,?,?,?,?,?,?,?,?,?,?,?)`, job.ID, tenant, endpoint.Endpoint.ID, job.RequestID, job.Protocol, job.Priority, job.IdempotencyKey, job.PayloadDigest, job.PayloadCiphertext, job.PayloadNonce, job.EncryptionKeyReference, nullIf(job.WebhookURL == "", job.WebhookURL), nullIf(job.WebhookSecretReferenceID == "", job.WebhookSecretReferenceID), webhookStatus, job.ExecutionDeadline.UTC(), job.ExpiresAt.UTC(), stamp, stamp)
 	if err != nil {
 		if isUniqueViolation(err) {
 			existing, lookup := s.AsyncInferenceJobByIdempotency(ctx, tenant, job.IdempotencyKey)
+			if lookup == nil && !sameAsyncInferenceIntent(existing, endpoint.Endpoint.ID, job) {
+				return domain.AsyncInferenceJob{}, false, ErrConflict
+			}
 			return existing, false, lookup
 		}
 		return domain.AsyncInferenceJob{}, false, err
@@ -54,7 +57,7 @@ func (s *Store) AsyncInferenceJob(ctx context.Context, tenant, id string) (domai
 	return s.scanAsyncJob(s.QueryRowContext(ctx, asyncJobSelect+` WHERE tenant_id=? AND id=?`, tenant, id))
 }
 
-const asyncJobSelect = `SELECT id,tenant_id,endpoint_id,request_id,protocol,status,priority,idempotency_key,payload_ciphertext,payload_nonce,COALESCE(result_ciphertext,'\\x'::bytea),COALESCE(result_nonce,'\\x'::bytea),encryption_key_reference,COALESCE(webhook_url,''),COALESCE(webhook_secret_reference_id,''),webhook_status,webhook_attempts,COALESCE(webhook_error_code,''),execution_deadline,expires_at,COALESCE(lease_owner,''),COALESCE(lease_token,''),attempt,COALESCE(error_code,''),COALESCE(error_message,''),created_at,started_at,completed_at,lease_expires_at,updated_at FROM async_inference_jobs`
+const asyncJobSelect = `SELECT id,tenant_id,endpoint_id,request_id,protocol,status,priority,idempotency_key,payload_digest,payload_ciphertext,payload_nonce,COALESCE(result_ciphertext,'\\x'::bytea),COALESCE(result_nonce,'\\x'::bytea),encryption_key_reference,COALESCE(webhook_url,''),COALESCE(webhook_secret_reference_id,''),webhook_status,webhook_attempts,COALESCE(webhook_error_code,''),execution_deadline,expires_at,COALESCE(lease_owner,''),COALESCE(lease_token,''),attempt,COALESCE(error_code,''),COALESCE(error_message,''),created_at,started_at,completed_at,lease_expires_at,updated_at FROM async_inference_jobs`
 
 type asyncRowScanner interface{ Scan(...any) error }
 
@@ -62,7 +65,7 @@ func (s *Store) scanAsyncJob(row asyncRowScanner) (domain.AsyncInferenceJob, err
 	var j domain.AsyncInferenceJob
 	var execution, expires, created, updated string
 	var started, completed, lease sql.NullString
-	err := row.Scan(&j.ID, &j.TenantID, &j.EndpointID, &j.RequestID, &j.Protocol, &j.Status, &j.Priority, &j.IdempotencyKey, &j.PayloadCiphertext, &j.PayloadNonce, &j.ResultCiphertext, &j.ResultNonce, &j.EncryptionKeyReference, &j.WebhookURL, &j.WebhookSecretReferenceID, &j.WebhookStatus, &j.WebhookAttempts, &j.WebhookErrorCode, &execution, &expires, &j.LeaseOwner, &j.LeaseToken, &j.Attempt, &j.ErrorCode, &j.ErrorMessage, &created, &started, &completed, &lease, &updated)
+	err := row.Scan(&j.ID, &j.TenantID, &j.EndpointID, &j.RequestID, &j.Protocol, &j.Status, &j.Priority, &j.IdempotencyKey, &j.PayloadDigest, &j.PayloadCiphertext, &j.PayloadNonce, &j.ResultCiphertext, &j.ResultNonce, &j.EncryptionKeyReference, &j.WebhookURL, &j.WebhookSecretReferenceID, &j.WebhookStatus, &j.WebhookAttempts, &j.WebhookErrorCode, &execution, &expires, &j.LeaseOwner, &j.LeaseToken, &j.Attempt, &j.ErrorCode, &j.ErrorMessage, &created, &started, &completed, &lease, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return j, ErrNotFound
 	}
@@ -85,6 +88,13 @@ func (s *Store) scanAsyncJob(row asyncRowScanner) (domain.AsyncInferenceJob, err
 	return j, nil
 }
 
+func sameAsyncInferenceIntent(existing domain.AsyncInferenceJob, endpointID string, requested domain.AsyncInferenceJob) bool {
+	sameTime := func(left, right time.Time) bool {
+		return left.UTC().Truncate(time.Microsecond).Equal(right.UTC().Truncate(time.Microsecond))
+	}
+	return existing.EndpointID == endpointID && existing.Protocol == requested.Protocol && existing.Priority == requested.Priority && existing.PayloadDigest == requested.PayloadDigest && existing.EncryptionKeyReference == requested.EncryptionKeyReference && existing.WebhookURL == requested.WebhookURL && existing.WebhookSecretReferenceID == requested.WebhookSecretReferenceID && sameTime(existing.ExecutionDeadline, requested.ExecutionDeadline) && sameTime(existing.ExpiresAt, requested.ExpiresAt)
+}
+
 func (s *Store) ClaimAsyncInferenceJob(ctx context.Context, owner, token string, lease time.Duration) (domain.AsyncInferenceJob, error) {
 	if owner == "" || token == "" || lease <= 0 {
 		return domain.AsyncInferenceJob{}, errors.New("owner, token, and positive lease are required")
@@ -103,7 +113,7 @@ func (s *Store) ClaimAsyncInferenceJob(ctx context.Context, owner, token string,
 		return domain.AsyncInferenceJob{}, err
 	}
 	stamp := now()
-	_, err = tx.ExecContext(ctx, `UPDATE async_inference_jobs SET status='running',lease_owner=?,lease_token=?,lease_expires_at=?,attempt=attempt+1,started_at=COALESCE(started_at,?),updated_at=? WHERE id=?`, owner, token, time.Now().UTC().Add(lease), stamp, stamp, id)
+	_, err = tx.ExecContext(ctx, `UPDATE async_inference_jobs SET status='running',lease_owner=?,lease_token=?,lease_expires_at=NOW()+(? * INTERVAL '1 microsecond'),attempt=attempt+1,started_at=COALESCE(started_at,?),updated_at=? WHERE id=?`, owner, token, lease.Microseconds(), stamp, stamp, id)
 	if err != nil {
 		return domain.AsyncInferenceJob{}, err
 	}
@@ -111,6 +121,20 @@ func (s *Store) ClaimAsyncInferenceJob(ctx context.Context, owner, token string,
 		return domain.AsyncInferenceJob{}, err
 	}
 	return s.AsyncInferenceJob(ctx, tenant, id)
+}
+
+func (s *Store) HeartbeatAsyncInferenceJob(ctx context.Context, id, owner, token string, lease time.Duration) error {
+	if id == "" || owner == "" || token == "" || lease <= 0 {
+		return errors.New("job, owner, token, and positive lease are required")
+	}
+	result, err := s.ExecContext(ctx, `UPDATE async_inference_jobs SET lease_expires_at=NOW()+(? * INTERVAL '1 microsecond'),updated_at=? WHERE id=? AND status='running' AND lease_owner=? AND lease_token=? AND lease_expires_at>NOW()`, lease.Microseconds(), now(), id, owner, token)
+	if err != nil {
+		return err
+	}
+	if changed, _ := result.RowsAffected(); changed == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s *Store) CompleteAsyncInferenceJob(ctx context.Context, id, owner, token string, ciphertext, nonce []byte) error {

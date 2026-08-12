@@ -25,6 +25,7 @@ type Store interface {
 	CreateAsyncInferenceJob(context.Context, string, string, domain.AsyncInferenceJob) (domain.AsyncInferenceJob, bool, error)
 	AsyncInferenceJob(context.Context, string, string) (domain.AsyncInferenceJob, error)
 	ClaimAsyncInferenceJob(context.Context, string, string, time.Duration) (domain.AsyncInferenceJob, error)
+	HeartbeatAsyncInferenceJob(context.Context, string, string, string, time.Duration) error
 	CompleteAsyncInferenceJob(context.Context, string, string, string, []byte, []byte) error
 	FailAsyncInferenceJob(context.Context, string, string, string, string, string, bool) error
 	ExpireAsyncInferenceJobs(context.Context) (int64, error)
@@ -75,7 +76,8 @@ func (s Service) Submit(ctx context.Context, request SubmitRequest) (domain.Asyn
 	if err != nil {
 		return domain.AsyncInferenceJob{}, false, err
 	}
-	return s.Store.CreateAsyncInferenceJob(ctx, request.Tenant, request.Endpoint, domain.AsyncInferenceJob{ID: jobID, Protocol: request.Protocol, Priority: request.Priority, IdempotencyKey: request.IdempotencyKey, PayloadCiphertext: ciphertext, PayloadNonce: nonce, EncryptionKeyReference: s.KeyReference, WebhookURL: request.WebhookURL, WebhookSecretReferenceID: request.WebhookSecretReferenceID, ExecutionDeadline: request.ExecutionDeadline, ExpiresAt: request.ExpiresAt})
+	payloadDigest := sha256.Sum256(request.Payload)
+	return s.Store.CreateAsyncInferenceJob(ctx, request.Tenant, request.Endpoint, domain.AsyncInferenceJob{ID: jobID, Protocol: request.Protocol, Priority: request.Priority, IdempotencyKey: request.IdempotencyKey, PayloadDigest: hex.EncodeToString(payloadDigest[:]), PayloadCiphertext: ciphertext, PayloadNonce: nonce, EncryptionKeyReference: s.KeyReference, WebhookURL: request.WebhookURL, WebhookSecretReferenceID: request.WebhookSecretReferenceID, ExecutionDeadline: request.ExecutionDeadline, ExpiresAt: request.ExpiresAt})
 }
 
 func (s Service) Result(ctx context.Context, tenant, id string) (domain.AsyncInferenceJob, []byte, error) {
@@ -126,9 +128,42 @@ func (s Service) Run(ctx context.Context) error {
 				continue
 			}
 		}
-		if executeErr := s.execute(ctx, owner, token, job); executeErr != nil {
+		executionCtx, cancelExecution := context.WithCancel(ctx)
+		leaseResult := make(chan error, 1)
+		go s.maintainLease(executionCtx, cancelExecution, job.ID, owner, token, lease, leaseResult)
+		executeErr := s.execute(executionCtx, owner, token, job)
+		cancelExecution()
+		leaseErr := <-leaseResult
+		if leaseErr != nil {
+			// Ownership is uncertain. Never issue a stale terminal mutation; the
+			// durable lease can be reclaimed and fenced by another worker.
+			continue
+		}
+		if executeErr != nil {
 			retryable := job.Attempt < 3 && time.Now().UTC().Before(job.ExecutionDeadline)
 			_ = s.Store.FailAsyncInferenceJob(ctx, job.ID, owner, token, "execution_failed", executeErr.Error(), retryable)
+		}
+	}
+}
+
+func (s Service) maintainLease(ctx context.Context, cancel context.CancelFunc, jobID, owner, token string, lease time.Duration, result chan<- error) {
+	interval := lease / 3
+	if interval < time.Second {
+		interval = time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			result <- nil
+			return
+		case <-ticker.C:
+			if err := s.Store.HeartbeatAsyncInferenceJob(ctx, jobID, owner, token, lease); err != nil {
+				cancel()
+				result <- err
+				return
+			}
 		}
 	}
 }

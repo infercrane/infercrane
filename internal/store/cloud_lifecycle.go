@@ -32,6 +32,10 @@ func (s *Store) SubmitCloudDeployment(ctx context.Context, deployment domain.Dep
 	if deployment.TenantID != operation.TenantID {
 		return domain.Deployment{}, domain.Operation{}, false, errors.New("deployment and operation tenant must match")
 	}
+	operation.ResourceType, operation.ResourceName = "deployment", deployment.Name
+	if operation.RequestJSON == "" {
+		operation.RequestJSON = "{}"
+	}
 
 	tx, err := s.beginTx(ctx)
 	if err != nil {
@@ -42,6 +46,9 @@ func (s *Store) SubmitCloudDeployment(ctx context.Context, deployment domain.Dep
 	existingOperation, lookupErr := operationByKeyQuery(ctx, tx, operation.TenantID, operation.Kind, operation.IdempotencyKey)
 	if lookupErr == nil {
 		existingDeployment, deploymentErr := deploymentByNameQuery(ctx, tx, deployment.TenantID, deployment.Name)
+		if deploymentErr == nil && (!sameOperationIntent(existingOperation, operation) || !sameDeploymentSubmission(existingDeployment, deployment)) {
+			return domain.Deployment{}, domain.Operation{}, false, fmt.Errorf("%w: idempotency key was already used for a different deployment intent", ErrConflict)
+		}
 		return existingDeployment, existingOperation, false, deploymentErr
 	}
 	if !errors.Is(lookupErr, ErrNotFound) {
@@ -94,13 +101,9 @@ func (s *Store) SubmitCloudDeployment(ctx context.Context, deployment domain.Dep
 	if err != nil {
 		return domain.Deployment{}, domain.Operation{}, false, err
 	}
-	operation.ResourceType, operation.ResourceName = "deployment", deployment.Name
 	operation.Status, operation.Progress, operation.Attempt = "pending", 0, 0
 	if operation.MaxAttempts == 0 {
 		operation.MaxAttempts = 120
-	}
-	if operation.RequestJSON == "" {
-		operation.RequestJSON = "{}"
 	}
 	operation.CreatedAt, operation.UpdatedAt = parseTime(stamp), parseTime(stamp)
 	if _, err = tx.ExecContext(ctx, `INSERT INTO operations(id,tenant_id,kind,resource_type,resource_name,idempotency_key,status,progress,message,request_json,result_json,attempt,max_attempts,next_attempt_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?::jsonb,'{}'::jsonb,?,?,?,?,?)`, operation.ID, operation.TenantID, operation.Kind, operation.ResourceType, operation.ResourceName, operation.IdempotencyKey, operation.Status, 0, "queued", operation.RequestJSON, 0, operation.MaxAttempts, stamp, stamp, stamp); err != nil {
@@ -124,12 +127,19 @@ func (s *Store) SubmitDeploymentDelete(ctx context.Context, tenant, name, deploy
 	if tenant == "" || name == "" || deploymentID == "" || operation.Kind == "" || operation.IdempotencyKey == "" {
 		return domain.Operation{}, false, errors.New("tenant, deployment identity, operation kind, and idempotency key are required")
 	}
+	operation.TenantID, operation.ResourceType, operation.ResourceName = tenant, "deployment", name
+	if operation.RequestJSON == "" {
+		operation.RequestJSON = "{}"
+	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return domain.Operation{}, false, err
 	}
 	defer func() { _ = tx.Rollback() }()
 	if existing, lookupErr := operationByKeyQuery(ctx, tx, tenant, operation.Kind, operation.IdempotencyKey); lookupErr == nil {
+		if !sameOperationIntent(existing, operation) {
+			return domain.Operation{}, false, fmt.Errorf("%w: idempotency key was already used for a different deletion intent", ErrConflict)
+		}
 		return existing, false, nil
 	} else if !errors.Is(lookupErr, ErrNotFound) {
 		return domain.Operation{}, false, lookupErr
@@ -154,13 +164,9 @@ func (s *Store) SubmitDeploymentDelete(ctx context.Context, tenant, name, deploy
 	if err != nil {
 		return domain.Operation{}, false, err
 	}
-	operation.TenantID, operation.ResourceType, operation.ResourceName = tenant, "deployment", name
 	operation.Status = "pending"
 	if operation.MaxAttempts == 0 {
 		operation.MaxAttempts = 120
-	}
-	if operation.RequestJSON == "" {
-		operation.RequestJSON = "{}"
 	}
 	operation.CreatedAt, operation.UpdatedAt = parseTime(stamp), parseTime(stamp)
 	if _, err = tx.ExecContext(ctx, `INSERT INTO operations(id,tenant_id,kind,resource_type,resource_name,idempotency_key,status,progress,message,request_json,result_json,attempt,max_attempts,next_attempt_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?::jsonb,'{}'::jsonb,?,?,?,?,?)`, operation.ID, tenant, operation.Kind, operation.ResourceType, operation.ResourceName, operation.IdempotencyKey, operation.Status, 0, "queued", operation.RequestJSON, 0, operation.MaxAttempts, stamp, stamp, stamp); err != nil {
@@ -173,6 +179,18 @@ func (s *Store) SubmitDeploymentDelete(ctx context.Context, tenant, name, deploy
 		return domain.Operation{}, false, err
 	}
 	return operation, true, nil
+}
+
+func sameDeploymentSubmission(existing, requested domain.Deployment) bool {
+	runtime := requested.Runtime
+	if runtime == "" {
+		runtime = "vllm"
+	}
+	routing := requested.RoutingStrategy
+	if routing == "" {
+		routing = "round-robin"
+	}
+	return existing.TenantID == requested.TenantID && existing.Name == requested.Name && existing.Model == requested.Model && existing.Runtime == runtime && existing.RoutingStrategy == routing && existing.MinReplicas == requested.MinReplicas && existing.MaxReplicas == requested.MaxReplicas && existing.AutoscalingEnabled == requested.AutoscalingEnabled
 }
 
 func operationByKeyQuery(ctx context.Context, tx *tx, tenant, kind, key string) (domain.Operation, error) {

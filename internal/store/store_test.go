@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"os"
 	"strings"
@@ -87,6 +88,35 @@ func TestTargetAndDeploymentLifecycle(t *testing.T) {
 	}
 }
 
+func TestDeploymentEventsAreInputAndReadBounded(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	target, err := s.AddTarget(ctx, domain.Target{Name: "event-bound-target", URL: "http://event-bound-target", Provider: "existing", Runtime: "vllm", UpstreamModel: "model"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deployment, err := s.CreateDeployment(ctx, domain.Deployment{Name: "event-bound", Model: "model"}, []string{target.Name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Event(ctx, deployment.ID, target.ID, "oversized", strings.Repeat("x", 4097), `{}`); err == nil {
+		t.Fatal("oversized event summary was persisted")
+	}
+	if err = s.Event(ctx, deployment.ID, target.ID, "invalid", "invalid JSON", `{`); err == nil {
+		t.Fatal("invalid event payload was persisted")
+	}
+	if _, err = s.db.ExecContext(ctx, `INSERT INTO deployment_events(id,deployment_id,event_type,summary,payload_json,created_at) SELECT 'event-'||value,$1,'stress','stress','{}'::jsonb,NOW()+(value * INTERVAL '1 microsecond') FROM generate_series(1,1001) value`, deployment.ID); err != nil {
+		t.Fatal(err)
+	}
+	events, err := s.EventsForTenant(ctx, "global", deployment.Name)
+	if err != nil || len(events) != 1000 {
+		t.Fatalf("events=%d err=%v", len(events), err)
+	}
+	if events[0].ID != "event-1001" || events[len(events)-1].ID != "event-2" {
+		t.Fatalf("event window is not the latest deterministic 1000: first=%s last=%s", events[0].ID, events[len(events)-1].ID)
+	}
+}
+
 func TestSubmitCloudDeploymentIsAtomicAndIdempotent(t *testing.T) {
 	ctx := context.Background()
 	s := openStore(t, ctx)
@@ -117,6 +147,12 @@ func TestSubmitCloudDeploymentIsAtomicAndIdempotent(t *testing.T) {
 	)
 	if err != nil || againCreated || againDeployment.ID != deployment.ID || againOperation.ID != operation.ID {
 		t.Fatalf("idempotent submission = (%#v, %#v, %t, %v)", againDeployment, againOperation, againCreated, err)
+	}
+	if _, _, _, err = s.SubmitCloudDeployment(ctx,
+		domain.Deployment{Name: name, Model: "Qwen/Qwen3-8B", MinReplicas: 1, MaxReplicas: 4, AutoscalingEnabled: true},
+		domain.Operation{Kind: "deployment.converge", IdempotencyKey: "submit-" + name, RequestJSON: strings.Replace(request, `"gpu":"L40S"`, `"gpu":"H100"`, 1)},
+	); !errors.Is(err, ErrConflict) {
+		t.Fatalf("conflicting cloud submission reused idempotency key: %v", err)
 	}
 }
 
@@ -453,6 +489,10 @@ func TestOperationQueueLeasesAndRecoversExpiredWork(t *testing.T) {
 	if err != nil || claimed.ID != queued.ID || claimed.Attempt != 1 || claimed.LeaseOwner != "worker-a" {
 		t.Fatalf("claim=%#v err=%v", claimed, err)
 	}
+	var leaseSeconds float64
+	if err = s.db.QueryRowContext(ctx, `SELECT EXTRACT(EPOCH FROM (lease_expires_at-clock_timestamp())) FROM operations WHERE id=$1`, claimed.ID).Scan(&leaseSeconds); err != nil || leaseSeconds < 55 || leaseSeconds > 61 {
+		t.Fatalf("database-clock lease duration=%g err=%v", leaseSeconds, err)
+	}
 	if _, err = s.ClaimOperation(ctx, "worker-b", time.Minute); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("active lease was claimed twice: %v", err)
 	}
@@ -468,6 +508,49 @@ func TestOperationQueueLeasesAndRecoversExpiredWork(t *testing.T) {
 	}
 	if err = s.CompleteClaimedOperation(ctx, recovered.ID, "worker-b", recovered.LeaseGeneration, `{"ok":true}`); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestConcurrentOperationClaimsAreExactlyOnce(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	const total = 64
+	for index := 0; index < total; index++ {
+		name := fmt.Sprintf("claim-%03d", index)
+		if _, created, err := s.EnqueueOperation(ctx, domain.Operation{Kind: "apply", ResourceType: "deployment", ResourceName: name, IdempotencyKey: name, MaxAttempts: 3}); err != nil || !created {
+			t.Fatalf("enqueue %d created=%t err=%v", index, created, err)
+		}
+	}
+	claimed := make(chan string, total)
+	errs := make(chan error, total)
+	var group sync.WaitGroup
+	for index := 0; index < total; index++ {
+		group.Add(1)
+		go func(index int) {
+			defer group.Done()
+			operation, err := s.ClaimOperation(ctx, fmt.Sprintf("worker-%03d", index), time.Minute)
+			if err != nil {
+				errs <- err
+				return
+			}
+			claimed <- operation.ID
+		}(index)
+	}
+	group.Wait()
+	close(claimed)
+	close(errs)
+	for err := range errs {
+		t.Fatalf("concurrent claim: %v", err)
+	}
+	seen := make(map[string]struct{}, total)
+	for id := range claimed {
+		if _, duplicate := seen[id]; duplicate {
+			t.Fatalf("operation %s was claimed more than once", id)
+		}
+		seen[id] = struct{}{}
+	}
+	if len(seen) != total {
+		t.Fatalf("claimed=%d want=%d", len(seen), total)
 	}
 }
 
@@ -575,6 +658,32 @@ func TestCancellingWaitingOperationRequiresCleanupClaim(t *testing.T) {
 	}
 }
 
+func TestCancellationPersistedBeforeCompletionCannotBeOverwrittenBySuccess(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	queued, _, err := s.EnqueueOperation(ctx, domain.Operation{Kind: "apply", ResourceType: "deployment", ResourceName: "cancel-complete-race", MaxAttempts: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := s.ClaimOperation(ctx, "worker-a", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.StartClaimedOperation(ctx, claimed.ID, "worker-a", claimed.LeaseGeneration); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.RequestOperationCancel(ctx, queued.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.CompleteClaimedOperation(ctx, claimed.ID, "worker-a", claimed.LeaseGeneration, `{"ok":true}`); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("completion overwrote a persisted cancellation: %v", err)
+	}
+	current, err := s.Operation(ctx, queued.ID)
+	if err != nil || current.Status != "cancelling" || !current.CancelRequested {
+		t.Fatalf("operation=%#v err=%v", current, err)
+	}
+}
+
 func TestDeploymentLifecycleMutationsAreSerialized(t *testing.T) {
 	ctx := context.Background()
 	s := openStore(t, ctx)
@@ -620,6 +729,27 @@ func TestDeploymentLifecycleMutationsAreSerialized(t *testing.T) {
 	}
 	if _, nextCreated, err := s.EnqueueOperation(ctx, domain.Operation{Kind: "deployment.delete", ResourceType: "deployment", ResourceName: "prod", IdempotencyKey: "delete-a"}); err != nil || !nextCreated {
 		t.Fatalf("new transition after completion: created=%t err=%v", nextCreated, err)
+	}
+}
+
+func TestOperationIdempotencyRejectsConflictingIntent(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	first, created, err := s.EnqueueOperation(ctx, domain.Operation{Kind: "deployment.converge", ResourceType: "deployment", ResourceName: "alpha", IdempotencyKey: "same-key", RequestJSON: `{"model":"one","replicas":1}`})
+	if err != nil || !created {
+		t.Fatalf("first=%#v created=%t err=%v", first, created, err)
+	}
+	replay, created, err := s.EnqueueOperation(ctx, domain.Operation{Kind: "deployment.converge", ResourceType: "deployment", ResourceName: "alpha", IdempotencyKey: "same-key", RequestJSON: `{ "replicas": 1, "model": "one" }`})
+	if err != nil || created || replay.ID != first.ID {
+		t.Fatalf("semantic replay=%#v created=%t err=%v", replay, created, err)
+	}
+	for _, conflicting := range []domain.Operation{
+		{Kind: "deployment.converge", ResourceType: "deployment", ResourceName: "alpha", IdempotencyKey: "same-key", RequestJSON: `{"model":"two","replicas":1}`},
+		{Kind: "deployment.converge", ResourceType: "deployment", ResourceName: "beta", IdempotencyKey: "same-key", RequestJSON: `{"model":"one","replicas":1}`},
+	} {
+		if _, _, err := s.EnqueueOperation(ctx, conflicting); !errors.Is(err, ErrConflict) {
+			t.Fatalf("conflicting idempotency intent accepted: %#v err=%v", conflicting, err)
+		}
 	}
 }
 
@@ -1065,6 +1195,19 @@ func TestInferencePassportEvidenceIsTenantSafeAndBytePreserving(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	invalidSignature := domain.InferencePassport{TenantID: "global", DeploymentID: deployment.ID, RevisionID: deployment.ActiveRevisionID, PayloadJSON: envelope.PayloadJSON, PayloadDigest: envelope.Digest, Signature: envelope.Signature + "x", PublicKey: envelope.PublicKey, Algorithm: envelope.Algorithm, KeyID: envelope.KeyID}
+	if _, err = s.RecordInferencePassport(ctx, invalidSignature); err == nil {
+		t.Fatal("passport with invalid signature was persisted")
+	}
+	wrongPayload := payload
+	wrongPayload.RevisionID = "different-revision"
+	wrongEnvelope, signErr := passport.Sign(wrongPayload, key)
+	if signErr != nil {
+		t.Fatal(signErr)
+	}
+	if _, err = s.RecordInferencePassport(ctx, domain.InferencePassport{TenantID: "global", DeploymentID: deployment.ID, RevisionID: deployment.ActiveRevisionID, PayloadJSON: wrongEnvelope.PayloadJSON, PayloadDigest: wrongEnvelope.Digest, Signature: wrongEnvelope.Signature, PublicKey: wrongEnvelope.PublicKey, Algorithm: wrongEnvelope.Algorithm, KeyID: wrongEnvelope.KeyID}); err == nil {
+		t.Fatal("signed passport for a different revision was persisted")
+	}
 	created, err := s.RecordInferencePassport(ctx, domain.InferencePassport{TenantID: "global", DeploymentID: deployment.ID, RevisionID: deployment.ActiveRevisionID, PayloadJSON: envelope.PayloadJSON, PayloadDigest: envelope.Digest, Signature: envelope.Signature, PublicKey: envelope.PublicKey, Algorithm: envelope.Algorithm, KeyID: envelope.KeyID})
 	if err != nil {
 		t.Fatal(err)
@@ -1201,7 +1344,13 @@ func openStore(t *testing.T, ctx context.Context) *Store {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	if _, err := s.db.ExecContext(ctx, `TRUNCATE principals,secret_references,tenant_quotas,audit_events,operations,scaling_decisions,scaling_policies,request_records,deployment_events,router_generations,deployment_targets,replicas,deployments,targets,model_artifacts CASCADE`); err != nil {
+	// Reset from the tenancy root so tables introduced by later migrations
+	// cannot retain rows merely because this helper's explicit table list was
+	// not updated. Control-plane membership is intentionally global and is the
+	// only application table outside that ownership tree. The global tenant is
+	// migration seed data required by legacy API compatibility paths, so
+	// recreate only that root after the cascade.
+	if _, err := s.db.ExecContext(ctx, `TRUNCATE control_plane_instances,tenants CASCADE; INSERT INTO tenants(id,name,created_at) VALUES('global','global',NOW())`); err != nil {
 		t.Fatalf("reset test database: %v", err)
 	}
 	t.Cleanup(func() {

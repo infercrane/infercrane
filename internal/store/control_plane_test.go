@@ -49,3 +49,28 @@ func TestControlPlaneMembershipIgnoresExpiredInstanceDuringCompatibilityCheck(t 
 		t.Fatalf("expired member blocked startup: %v", err)
 	}
 }
+
+func TestControlPlaneMembershipUsesDatabaseClock(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	instance := domain.ControlPlaneInstance{ID: "database-clock", BinaryVersion: "1.0.0", ProtocolMin: 1, ProtocolMax: 1}
+	if err := s.RegisterControlPlaneInstance(ctx, instance, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	var ageSeconds float64
+	if err := s.db.QueryRowContext(ctx, `SELECT EXTRACT(EPOCH FROM (clock_timestamp()-heartbeat_at)) FROM control_plane_instances WHERE instance_id=$1`, instance.ID).Scan(&ageSeconds); err != nil {
+		t.Fatal(err)
+	}
+	if ageSeconds < 0 || ageSeconds > 2 {
+		t.Fatalf("heartbeat is not anchored to database time: age=%fs", ageSeconds)
+	}
+	if err := s.HeartbeatControlPlaneInstance(ctx, instance.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT EXTRACT(EPOCH FROM (clock_timestamp()-heartbeat_at)) FROM control_plane_instances WHERE instance_id=$1`, instance.ID).Scan(&ageSeconds); err != nil {
+		t.Fatal(err)
+	}
+	if ageSeconds < 0 || ageSeconds > 2 {
+		t.Fatalf("heartbeat refresh is not anchored to database time: age=%fs", ageSeconds)
+	}
+}

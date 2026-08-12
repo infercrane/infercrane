@@ -113,11 +113,18 @@ func (w Worker) Once(ctx context.Context) (bool, error) {
 	}
 	handlerCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	heartbeatDone := make(chan struct{})
+	heartbeatDone := make(chan error, 1)
 	go w.maintainLease(handlerCtx, cancel, op.ID, op.LeaseGeneration, lease, heartbeatDone)
 	result, handlerErr := handler(handlerCtx, op)
 	cancel()
-	<-heartbeatDone
+	leaseErr := <-heartbeatDone
+	// Once lease maintenance fails, this worker can no longer prove that it is
+	// the sole owner. Do not translate the handler's resulting context
+	// cancellation into an operation failure and do not attempt any terminal
+	// write. The durable lease will expire and a fenced worker can safely resume.
+	if leaseErr != nil {
+		return true, leaseErr
+	}
 	current, currentErr := w.Repository.Operation(context.WithoutCancel(ctx), op.ID)
 	if currentErr == nil && current.CancelRequested {
 		if cleanup := w.Handlers[op.Kind+".cancel"]; cleanup != nil {
@@ -176,8 +183,9 @@ func (w Worker) fail(ctx context.Context, op domain.Operation, handlerErr error)
 	return w.Repository.FailClaimedOperation(ctx, op.ID, w.Owner, op.LeaseGeneration, code, handlerErr.Error(), retryable, next)
 }
 
-func (w Worker) maintainLease(ctx context.Context, cancel context.CancelFunc, id string, generation int64, lease time.Duration, done chan<- struct{}) {
-	defer close(done)
+func (w Worker) maintainLease(ctx context.Context, cancel context.CancelFunc, id string, generation int64, lease time.Duration, done chan<- error) {
+	var maintenanceErr error
+	defer func() { done <- maintenanceErr }()
 	interval := lease / 3
 	if interval < time.Second {
 		interval = time.Second
@@ -190,11 +198,17 @@ func (w Worker) maintainLease(ctx context.Context, cancel context.CancelFunc, id
 			return
 		case <-ticker.C:
 			if err := w.Repository.HeartbeatOperation(ctx, id, w.Owner, generation, lease); err != nil {
+				maintenanceErr = err
 				cancel()
 				return
 			}
 			op, err := w.Repository.Operation(ctx, id)
-			if err != nil || op.CancelRequested {
+			if err != nil {
+				maintenanceErr = err
+				cancel()
+				return
+			}
+			if op.CancelRequested {
 				cancel()
 				return
 			}

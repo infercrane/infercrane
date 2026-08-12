@@ -63,7 +63,16 @@ func (s *Store) AdoptEndpoint(ctx context.Context, tenant, name, modelName, upst
 	}
 
 	var environmentID string
-	if err = tx.QueryRowContext(ctx, `SELECT id FROM environments WHERE tenant_id=? AND name='production'`, tenant).Scan(&environmentID); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT id FROM environments WHERE tenant_id=? AND name='production'`, tenant).Scan(&environmentID); errors.Is(err, sql.ErrNoRows) {
+		environmentID, err = newID()
+		if err == nil {
+			_, err = tx.ExecContext(ctx, `INSERT INTO environments(id,tenant_id,name,policy_json,created_at,updated_at) VALUES(?,?,'production','{}'::jsonb,?,?) ON CONFLICT(tenant_id,name) DO NOTHING`, environmentID, tenant, now(), now())
+		}
+		if err == nil {
+			err = tx.QueryRowContext(ctx, `SELECT id FROM environments WHERE tenant_id=? AND name='production'`, tenant).Scan(&environmentID)
+		}
+	}
+	if err != nil {
 		return domain.ResolvedEndpoint{}, domain.AdoptedWorkload{}, fmt.Errorf("production environment: %w", err)
 	}
 	var modelID string

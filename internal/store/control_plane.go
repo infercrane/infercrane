@@ -21,8 +21,7 @@ func (s *Store) RegisterControlPlaneInstance(ctx context.Context, instance domai
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	cutoff := time.Now().UTC().Add(-liveFor)
-	rows, err := tx.QueryContext(ctx, `SELECT instance_id,binary_version,protocol_min,protocol_max FROM control_plane_instances WHERE heartbeat_at>=? AND instance_id<>? FOR SHARE`, cutoff, instance.ID)
+	rows, err := tx.QueryContext(ctx, `SELECT instance_id,binary_version,protocol_min,protocol_max FROM control_plane_instances WHERE heartbeat_at>=NOW()-(? * INTERVAL '1 microsecond') AND instance_id<>? FOR SHARE`, liveFor.Microseconds(), instance.ID)
 	if err != nil {
 		return err
 	}
@@ -41,8 +40,7 @@ func (s *Store) RegisterControlPlaneInstance(ctx context.Context, instance domai
 	if err = rows.Close(); err != nil {
 		return err
 	}
-	stamp := time.Now().UTC()
-	_, err = tx.ExecContext(ctx, `INSERT INTO control_plane_instances(instance_id,binary_version,protocol_min,protocol_max,started_at,heartbeat_at,draining) VALUES(?,?,?,?,?,?,FALSE) ON CONFLICT(instance_id) DO UPDATE SET binary_version=EXCLUDED.binary_version,protocol_min=EXCLUDED.protocol_min,protocol_max=EXCLUDED.protocol_max,started_at=EXCLUDED.started_at,heartbeat_at=EXCLUDED.heartbeat_at,draining=FALSE`, instance.ID, instance.BinaryVersion, instance.ProtocolMin, instance.ProtocolMax, stamp, stamp)
+	_, err = tx.ExecContext(ctx, `INSERT INTO control_plane_instances(instance_id,binary_version,protocol_min,protocol_max,started_at,heartbeat_at,draining) VALUES(?,?,?,?,NOW(),NOW(),FALSE) ON CONFLICT(instance_id) DO UPDATE SET binary_version=EXCLUDED.binary_version,protocol_min=EXCLUDED.protocol_min,protocol_max=EXCLUDED.protocol_max,started_at=EXCLUDED.started_at,heartbeat_at=EXCLUDED.heartbeat_at,draining=FALSE`, instance.ID, instance.BinaryVersion, instance.ProtocolMin, instance.ProtocolMax)
 	if err != nil {
 		return err
 	}
@@ -50,7 +48,7 @@ func (s *Store) RegisterControlPlaneInstance(ctx context.Context, instance domai
 }
 
 func (s *Store) HeartbeatControlPlaneInstance(ctx context.Context, id string) error {
-	result, err := s.ExecContext(ctx, `UPDATE control_plane_instances SET heartbeat_at=?,draining=FALSE WHERE instance_id=?`, time.Now().UTC(), id)
+	result, err := s.ExecContext(ctx, `UPDATE control_plane_instances SET heartbeat_at=NOW(),draining=FALSE WHERE instance_id=?`, id)
 	if err != nil {
 		return err
 	}
@@ -72,7 +70,7 @@ func (s *Store) ControlPlaneInstances(ctx context.Context, liveFor time.Duration
 	if liveFor <= 0 {
 		return nil, errors.New("positive live interval is required")
 	}
-	rows, err := s.QueryContext(ctx, `SELECT instance_id,binary_version,protocol_min,protocol_max,started_at,heartbeat_at,draining FROM control_plane_instances WHERE heartbeat_at>=? ORDER BY instance_id`, time.Now().UTC().Add(-liveFor))
+	rows, err := s.QueryContext(ctx, `SELECT instance_id,binary_version,protocol_min,protocol_max,started_at,heartbeat_at,draining FROM control_plane_instances WHERE heartbeat_at>=NOW()-(? * INTERVAL '1 microsecond') ORDER BY instance_id`, liveFor.Microseconds())
 	if err != nil {
 		return nil, err
 	}

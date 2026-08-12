@@ -306,8 +306,8 @@ func (s *Store) SetEndpointPlan(ctx context.Context, tenant, name, planID, slot 
 		return err
 	}
 	defer tx.Rollback()
-	var endpointID string
-	if err = tx.QueryRowContext(ctx, `SELECT id FROM endpoints WHERE tenant_id=? AND name=? FOR UPDATE`, tenant, name).Scan(&endpointID); errors.Is(err, sql.ErrNoRows) {
+	var endpointID, activePlanID, candidatePlanID string
+	if err = tx.QueryRowContext(ctx, `SELECT id,COALESCE(active_serving_plan_id,''),COALESCE(candidate_serving_plan_id,'') FROM endpoints WHERE tenant_id=? AND name=? FOR UPDATE`, tenant, name).Scan(&endpointID, &activePlanID, &candidatePlanID); errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	} else if err != nil {
 		return err
@@ -320,6 +320,22 @@ func (s *Store) SetEndpointPlan(ctx context.Context, tenant, name, planID, slot 
 	}
 	if planEndpoint != endpointID {
 		return fmt.Errorf("%w: serving plan belongs to another endpoint", ErrConflict)
+	}
+	if slot == "active" && activePlanID != "" {
+		if candidatePlanID != planID {
+			return fmt.Errorf("%w: serving plan is not the current candidate", ErrConflict)
+		}
+		var decision, evaluatedActive string
+		err = tx.QueryRowContext(ctx, `SELECT decision,active_serving_plan_id FROM endpoint_release_guard_evaluations WHERE endpoint_id=? AND candidate_serving_plan_id=? ORDER BY created_at DESC,id DESC LIMIT 1`, endpointID, planID).Scan(&decision, &evaluatedActive)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("%w: current endpoint candidate lacks a PASS decision against the current active plan", ErrConflict)
+		}
+		if err != nil {
+			return err
+		}
+		if decision != "PASS" || evaluatedActive != activePlanID {
+			return fmt.Errorf("%w: current endpoint candidate lacks a PASS decision against the current active plan", ErrConflict)
+		}
 	}
 	column := "candidate_serving_plan_id"
 	if slot == "active" {

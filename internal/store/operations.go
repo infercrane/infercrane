@@ -354,6 +354,9 @@ func (s *Store) Event(ctx context.Context, deploymentID, targetID, eventType, su
 	if payload == "" {
 		payload = "{}"
 	}
+	if eventType == "" || len(eventType) > 128 || len(summary) > 4096 || len(payload) > 64<<10 || !json.Valid([]byte(payload)) {
+		return errors.New("event type, summary, or payload is invalid or exceeds its persistence bound")
+	}
 	id, err := newID()
 	if err != nil {
 		return err
@@ -369,7 +372,7 @@ func (s *Store) EventsForTenant(ctx context.Context, tenant, name string) ([]dom
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.QueryContext(ctx, `SELECT id,COALESCE(deployment_id,''),COALESCE(target_id,''),event_type,summary,payload_json::text,created_at FROM deployment_events WHERE deployment_id=? ORDER BY created_at DESC`, resolved.Deployment.ID)
+	rows, err := s.QueryContext(ctx, `SELECT id,COALESCE(deployment_id,''),COALESCE(target_id,''),event_type,summary,payload_json::text,created_at FROM deployment_events WHERE deployment_id=? ORDER BY created_at DESC,id DESC LIMIT 1000`, resolved.Deployment.ID)
 	if err != nil {
 		return nil, err
 	}
