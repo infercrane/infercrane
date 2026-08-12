@@ -9,6 +9,11 @@ infercrane deploy Qwen/Qwen3-8B
 infercrane request qwen3-8b --message "Hello" --stream
 ```
 
+The model is not hard-coded. Qwen3-8B is the release acceptance baseline because it is practical to
+qualify repeatedly on a single GPU. InferCrane also accepts other Hugging Face model identities and
+custom OCI workloads; runtime, accelerator, memory, license, and protocol compatibility must be
+qualified for the exact serving plan.
+
 - No Kubernetes required
 - Deterministic Release Guard
 - Signed, independently verifiable Inference Passports

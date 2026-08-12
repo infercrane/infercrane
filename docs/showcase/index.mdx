@@ -12,6 +12,10 @@ complete deployment lifecycle or add policy and evidence around existing infrast
 application keeps one OpenAI-compatible model name while providers, runtimes, and capacity plans
 change behind it.
 
+Qwen, Llama, Gemma, Kimi, and private fine-tunes all enter through the same model-artifact contract.
+Support is evidence-based per model, runtime, accelerator, and provider combination—not a blanket
+“every model everywhere” promise.
+
 <CardGroup cols={3}>
   <Card title="Deploy from a model" icon="server" href="/showcase/build-inference">
     Turn a model and serving plan into a durable endpoint, then evolve it through immutable revisions.

@@ -27,6 +27,12 @@ mode: wide
   <div className="ic-terminal-body"><span className="ic-prompt">$</span> infercrane deploy <span className="ic-code-value">Qwen/Qwen3-8B</span><br/><span className="ic-code-muted"># submits one durable operation through the control-plane API</span><br/><span className="ic-code-muted"># disconnecting the CLI does not abandon provisioning</span></div>
 </div>
 
+<Tip>
+`Qwen/Qwen3-8B` is the repeatable release-acceptance model, not a product restriction. Use another
+Hugging Face model identity or an immutable custom OCI workload when its runtime, hardware, license,
+and protocol requirements have been qualified.
+</Tip>
+
 ```bash
 infercrane request qwen3-8b --message "Hello" --stream
 ```

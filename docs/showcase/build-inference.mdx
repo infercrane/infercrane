@@ -14,6 +14,59 @@ runtime startup, readiness, and route publication continue.
 infercrane deploy Qwen/Qwen3-8B
 ```
 
+Qwen3-8B is intentionally used as the release acceptance baseline: it is small enough for frequent
+single-GPU qualification and exercises the production lifecycle without making every test unusually
+expensive. It is not embedded in the InferCrane domain model.
+
+## Use the model your workload needs
+
+The same model-to-endpoint path accepts other Hugging Face repository identities. These examples show
+portable input syntax; they do **not** claim that every model fits every GPU or that every adapter has
+been production-qualified for it.
+
+<CodeGroup>
+```bash Qwen
+infercrane plan Qwen/Qwen3-8B --cloud runpod --gpu L40S
+```
+
+```bash Meta Llama
+infercrane plan meta-llama/Llama-4-Scout-17B-16E-Instruct \
+  --cloud aws \
+  --gpu H100
+```
+
+```bash Google Gemma
+infercrane plan google/gemma-3-4b-it \
+  --cloud runpod \
+  --gpu L40S
+```
+
+```bash Moonshot Kimi
+infercrane plan moonshotai/Kimi-K2-Instruct \
+  --cloud aws \
+  --gpu H100
+```
+</CodeGroup>
+
+`plan` validates InferCrane's serving intent without creating resources. Before `deploy`, confirm the
+model card license or access grant, total and active parameter memory, quantization, tensor-parallel
+topology, runtime version, multimodal requirements, and provider capacity. Large MoE models such as
+Llama 4 and Kimi generally require materially different topology from an 8B dense model; the example
+GPU flag alone is not a sizing recommendation.
+
+| Example family | Why teams use it | Qualification concern |
+| --- | --- | --- |
+| Qwen | Compact general and coding deployments | Exact chat template, tool calling, and quantization |
+| Meta Llama | Broad ecosystem and open-weight deployment | Meta license/access and multi-GPU topology for larger variants |
+| Google Gemma | Small-to-large open-weight family | Google terms, multimodal/runtime support, and artifact access |
+| Moonshot Kimi | Long-context, reasoning, coding, and multimodal variants | Very large MoE topology and version-specific runtime requirements |
+| Your fine-tune | Private or domain-specific behavior | Immutable artifact commit, tokenizer compatibility, and registry access |
+
+<Note>
+Model popularity changes faster than InferCrane releases. The source of truth is the immutable model
+artifact and the evidence attached to its serving plan—not a marketing list of “supported models.”
+</Note>
+
 The short path uses configured defaults. Make infrastructure choices explicit when you need them:
 
 ```bash
