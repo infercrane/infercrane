@@ -12,7 +12,6 @@ on:
     paths:
       - images/vllm-runpod/Dockerfile
       - images/vllm-runpod/start-ssh.sh
-      - .github/workflows/runtime-image.yml
 
 permissions:
   contents: read
