@@ -8,6 +8,11 @@ var uiCapabilities = []struct {
 	Capability string
 	Surface    string
 }{
+	{"stable endpoint, logical model, and environment", "Dashboard endpoint overview + CLI"},
+	{"serving-plan bindings and adoption ownership", "Dashboard endpoint overview + CLI"},
+	{"endpoint candidate and Release Guard evidence", "Dashboard endpoint rollout + CLI"},
+	{"environment, admission, and alert policy", "Dashboard endpoint policies + CLI"},
+	{"signed semantic quality evidence", "Dashboard deployment rollout + CLI"},
 	{"deployment health and endpoint", "Overview"},
 	{"deterministic explanation", "Overview"},
 	{"durable operation and cancellation", "Operations + action"},

@@ -73,7 +73,7 @@ This is the authoritative inventory for the current whole-product qualification.
 | Tenant isolation/audit | Every resource scoped and mutation audited | store/API/gateway | store/API security tests | Cross-tenant route/API/property tests | None expected | AUTOMATED_QUALIFIED |
 | Secret references/redaction | Reference-only secrets and no leakage | secrets/store/API/logging | secret/security tests | Canary secret through errors/logs/reports | External secret manager access | AUTOMATED_QUALIFIED |
 | Embedded terminal UI | Read/operate workspace, responsive navigation | CLI UI | UI snapshot/interaction tests | PTY sizes, empty/error/action handoff | Human visual/keyboard review | MANUAL_REQUIRED |
-| Browser dashboard | Authenticated fleet evidence UI | dashboard/static/control API | dashboard script/DOM tests | Build + same-origin auth/error/empty/loading | Human visual/mobile/accessibility review | MANUAL_REQUIRED |
+| Browser dashboard | Endpoint-first stable identity and deployment evidence UI | dashboard/static/control API | dashboard script/model/DOM tests | Build + endpoint/deployment switching + same-origin auth/error/empty/loading | Human visual/mobile/accessibility review | MANUAL_REQUIRED |
 | OpenAPI route contract | Server/API schema parity | apicontract/codegen | route drift tests | Generate/check every route/schema | None expected | AUTOMATED_QUALIFIED |
 | Python SDK | Generated API plus streaming client/package | `sdk/python` | unittest/wheel/stack | Package and local stack E2E | PyPI publication forbidden | AUTOMATED_QUALIFIED |
 | TypeScript SDK | Generated API plus streaming client/package | `sdk/typescript` | node tests/npm pack/stack | Package and local stack E2E | npm publication forbidden | AUTOMATED_QUALIFIED |

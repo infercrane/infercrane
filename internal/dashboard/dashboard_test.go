@@ -75,4 +75,12 @@ func TestShellAccessibilityAndCredentialSafetyContract(t *testing.T) {
 			t.Errorf("performance evidence UI is missing %q", required)
 		}
 	}
+	for _, required := range []string{"/endpoints", "/logical-models", "/environments", "/release-guard/evaluations", "/admission", "/quality-evidence", "Stable application identity", "Signed semantic quality"} {
+		if !strings.Contains(application, required) {
+			t.Errorf("endpoint-first evidence UI is missing %q", required)
+		}
+	}
+	if !strings.Contains(html, `data-resource="endpoint"`) || !strings.Contains(html, `data-resources="endpoint deployment"`) {
+		t.Fatal("shell is missing accessible endpoint/deployment resource navigation")
+	}
 }

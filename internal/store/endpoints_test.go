@@ -329,6 +329,9 @@ func TestAdoptInspectDiagnoseAndAlertPolicyAreTenantScoped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err = s.CreateAlertPolicy(ctx, "global", name, domain.AlertPolicy{Name: "unsafe-query", WebhookURL: "https://alerts.example.test/hook?token=secret", SecretReferenceID: "missing", MinimumSeverity: "warning", Enabled: true, MaxAttempts: 3}); err == nil || !strings.Contains(err.Error(), "query parameters") {
+		t.Fatalf("webhook query credential was accepted: %v", err)
+	}
 	if adoption.OwnershipMode != "observe-only" || len(resolved.Bindings) != 1 || resolved.Bindings[0].OwnershipMode != "observe-only" || resolved.Bindings[0].DeploymentID != "" {
 		t.Fatalf("adoption=%#v resolved=%#v", adoption, resolved)
 	}

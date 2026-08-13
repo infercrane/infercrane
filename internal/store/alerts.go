@@ -13,8 +13,8 @@ import (
 
 func (s *Store) CreateAlertPolicy(ctx context.Context, tenant, endpointName string, policy domain.AlertPolicy) (domain.AlertPolicy, error) {
 	parsed, err := url.Parse(policy.WebhookURL)
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
-		return domain.AlertPolicy{}, errors.New("webhook URL must be absolute HTTPS without credentials or fragments")
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return domain.AlertPolicy{}, errors.New("webhook URL must be absolute HTTPS without credentials, query parameters, or fragments; use the secret reference for signing")
 	}
 	if !validEndpointName(policy.Name) || policy.SecretReferenceID == "" {
 		return domain.AlertPolicy{}, errors.New("valid alert policy name and secret reference are required")

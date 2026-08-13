@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { canCancel, classifyError, costLabel, duration, fleetSummary, freshness, metric, statusTone } from './static/model.mjs';
+import { activePlanBindings, canCancel, classifyError, costLabel, duration, fleetSummary, freshness, metric, parseResourceSelection, resourceSelection, statusTone } from './static/model.mjs';
 
 test('API failures distinguish credentials, authorization, and disconnects', () => {
   assert.equal(classifyError(401, {}).kind, 'unauthorized');
@@ -37,4 +37,17 @@ test('only active non-cancelled operations expose cancellation', () => {
   assert.equal(canCancel({ id: 'op', status: 'running', cancel_requested: true }), false);
   assert.equal(canCancel({ id: 'op', status: 'succeeded' }), false);
   assert.equal(canCancel(null), false);
+});
+
+test('resource selections preserve old deployment bookmarks and endpoint identity', () => {
+  assert.equal(resourceSelection('endpoint', 'coder-production'), 'endpoint:coder-production');
+  assert.deepEqual(parseResourceSelection('endpoint:coder-production'), { kind: 'endpoint', name: 'coder-production' });
+  assert.deepEqual(parseResourceSelection('legacy-deployment'), { kind: 'deployment', name: 'legacy-deployment' });
+  assert.deepEqual(parseResourceSelection('endpoint:'), { kind: '', name: '' });
+});
+
+test('active endpoint bindings are resolved from the immutable serving plan', () => {
+  const endpoint = { active_plan: { bindings: [{ binding_id: 'b2' }] }, bindings: [{ id: 'b1', name: 'old' }, { id: 'b2', name: 'active' }] };
+  assert.deepEqual(activePlanBindings(endpoint), [{ id: 'b2', name: 'active' }]);
+  assert.deepEqual(activePlanBindings({}), []);
 });

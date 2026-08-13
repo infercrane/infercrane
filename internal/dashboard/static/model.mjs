@@ -68,3 +68,27 @@ export function costLabel(value) {
   if (!Number.isFinite(Number(value.microusd))) return 'Not measured';
   return `$${(Number(value.microusd) / 1_000_000).toFixed(4)}`;
 }
+
+export function resourceSelection(kind, name) {
+  const normalizedKind = kind === 'endpoint' ? 'endpoint' : 'deployment';
+  return name ? `${normalizedKind}:${name}` : '';
+}
+
+export function parseResourceSelection(value) {
+  const raw = String(value ?? '');
+  const separator = raw.indexOf(':');
+  if (separator > 0) {
+    const kind = raw.slice(0, separator);
+    const name = raw.slice(separator + 1);
+    if ((kind === 'endpoint' || kind === 'deployment') && name) return { kind, name };
+    return { kind: '', name: '' };
+  }
+  // Dashboard versions before endpoint-first navigation persisted only a
+  // deployment name. Preserve that selection across upgrades.
+  return raw ? { kind: 'deployment', name: raw } : { kind: '', name: '' };
+}
+
+export function activePlanBindings(endpoint) {
+  const planned = new Set((Array.isArray(endpoint?.active_plan?.bindings) ? endpoint.active_plan.bindings : []).map((item) => item?.binding_id).filter(Boolean));
+  return (Array.isArray(endpoint?.bindings) ? endpoint.bindings : []).filter((binding) => planned.has(binding?.id));
+}

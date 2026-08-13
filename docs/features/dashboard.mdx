@@ -1,6 +1,6 @@
 ---
 title: Operations dashboard
-description: Investigate fleet state, releases, performance, infrastructure, scaling, and audit evidence in a browser.
+description: Investigate stable endpoints, environments, releases, deployments, performance, infrastructure, scaling, and audit evidence in a browser.
 ---
 
 The embedded dashboard is a focused operational view over the same authenticated control-plane API
@@ -30,14 +30,34 @@ or persistent browser storage.
   bootstrap or administrator credential for a shared incident screen.
 </Warning>
 
-## Investigate a deployment
+## Start from the application endpoint
 
-Select a deployment from the fleet list, then move through the evidence views:
+The dashboard opens on **Endpoints**, the stable identity applications call. It shows the logical
+model, environment, active serving plan, adoption ownership, active bindings, staged candidate,
+environment policy, admission policy, signed alerts, and endpoint Release Guard history.
+
+This distinction matters when an endpoint routes to an adopted vLLM server, an InferCrane-managed
+deployment, or a future qualified backend: application identity remains stable while infrastructure
+changes underneath it.
+
+Use the **Endpoints / Deployments** switch at the top of the fleet. The selected resource type and
+name remain in tab-scoped session storage; dashboard upgrades preserve legacy deployment selections.
+
+| Endpoint view | Persisted evidence |
+| --- | --- |
+| Overview | logical model, environment, stable endpoint, active plan, bindings, ownership and bound deployments |
+| Rollout | active/candidate plans, exact plan digests, current/stale Guard evidence and deterministic explanation |
+| Policies | environment policy, admission limits and signed webhook alert policy |
+
+## Drill into deployment infrastructure
+
+Switch to **Deployments** when you need runtime, revision, replica, benchmark, scaling, or provider
+evidence:
 
 | View | Persisted or measured evidence |
 | --- | --- |
 | Overview | normalized serving/convergence state, replica counts, deterministic explanation, active operation |
-| Rollout | immutable revisions, active/candidate pointers, Release Guard decisions and reasons |
+| Rollout | immutable revisions, active/candidate pointers, Release Guard decisions, and signed aggregate semantic-quality evidence |
 | Performance | request metrics, cold-start measurements, benchmark results and reproduction commands |
 | Infrastructure | route targets, provider-managed replicas, immutable model artifacts and orphan inventory |
 | Scaling | bounds, latest explanation, signals and scaling-decision history |
@@ -69,7 +89,7 @@ the deployment view and labels the missing section.
 
 ## Responsive and accessible use
 
-At narrow widths, the fleet becomes a compact horizontal workspace above the selected deployment.
+At narrow widths, the fleet becomes a compact horizontal workspace above the selected endpoint or deployment.
 Tables scroll inside their labelled region rather than widening the page. The interface provides a
 skip link, landmarks, labelled controls, keyboard navigation, visible focus, text status labels,
 reduced-motion behavior, system/light/dark appearance, and an ARIA live connection status.
@@ -90,5 +110,5 @@ infercrane inspect DEPLOYMENT --output json
 - **Permission required:** use a service account with the required read or tenant-management scope.
 - **Disconnected/stale:** confirm `/readyz`, keep the retained evidence for context, and refresh after
   control-plane recovery.
-- **Empty fleet:** create or apply a deployment; the dashboard intentionally does not provide a
-  deployment authoring wizard.
+- **Empty endpoint fleet:** deploy a model or connect an existing OpenAI-compatible workload. The
+  dashboard intentionally does not provide a deployment authoring wizard.

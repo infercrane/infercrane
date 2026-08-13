@@ -105,6 +105,9 @@ input { min-width: 0; width: 100%; padding: 9px 11px; border: 1px solid var(--bo
 
 .workspace { min-height: calc(100vh - 58px); display: grid; grid-template-columns: 294px minmax(0, 1fr); }
 .fleet-panel { position: sticky; top: 58px; height: calc(100vh - 58px); overflow: auto; padding: 24px 16px; border-right: 1px solid var(--border); background: var(--surface); }
+.resource-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; margin: 0 8px 18px; padding: 3px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-2); }
+.resource-tabs button { min-width: 0; padding: 6px 7px; border: 1px solid transparent; border-radius: 4px; color: var(--muted); background: transparent; cursor: pointer; font-size: 11px; }
+.resource-tabs button[aria-pressed="true"] { border-color: var(--border); color: var(--text); background: var(--surface); }
 .panel-heading, .main-toolbar { display: flex; justify-content: space-between; gap: 20px; }
 .panel-heading { align-items: center; padding: 0 8px 16px; }
 .panel-heading h2 { margin: 2px 0 0; font-size: 18px; letter-spacing: -.02em; }

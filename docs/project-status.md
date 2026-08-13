@@ -24,7 +24,7 @@ behavior depends on external infrastructure.
 | Side-effect-free deployment planning | Implemented | Deterministic human and JSON output; live cost estimation is not yet available. |
 | CLI discovery and contexts | Implemented | Cobra grouped help, suggestions, generated completion, named contexts, authenticated identity, and durable timeline following are wired. |
 | Terminal operations workspace | Experimental | Responsive evidence views and state-valid guarded actions use authenticated APIs and durable operations; `--read-only` disables mutations, and broader terminal compatibility qualification remains. |
-| Embedded operations dashboard | Experimental | Authenticated fleet/evidence views, explicit stale and partial states, tab-scoped credentials, and guarded cooperative cancellation pass local security and Docker tests; broader browser qualification remains. |
+| Embedded operations dashboard | Experimental | Endpoint-first logical-model/environment/plan/policy views, deployment drill-down, signed quality evidence, explicit stale and partial states, tab-scoped credentials, and guarded cooperative cancellation pass local security and Docker tests; broader browser qualification remains. |
 | Environment diagnostics | Implemented | Read-only checks for API auth, PostgreSQL, vLLM Router, SkyPilot/RunPod, Serverless, AWS role assumption, and Kubernetes API/RBAC. |
 | Declarative existing-target apply | Implemented | Atomic convergence of routing, replica bounds, and target membership. |
 | Durable lifecycle operations | Implemented | Idempotency, progress, retry classification, and cooperative cancellation state. |
