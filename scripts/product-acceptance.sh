@@ -55,6 +55,14 @@ docker_preflight() {
   }
 }
 
+acceptance_port() {
+  if [ -n "${INFERCRANE_PRODUCT_ACCEPTANCE_PORT:-}" ]; then
+    printf '%s\n' "$INFERCRANE_PRODUCT_ACCEPTANCE_PORT"
+    return
+  fi
+  python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()'
+}
+
 offline() {
   offline_dir=$(mktemp -d) || return
   cleanup_offline() { rm -rf "$offline_dir"; }
@@ -89,11 +97,7 @@ offline() {
 
 first_value() {
   project=$(printf '%s' "infercrane-product-$run_id" | tr '[:upper:]' '[:lower:]')
-  if [ -n "${INFERCRANE_PRODUCT_ACCEPTANCE_PORT:-}" ]; then
-    port=$INFERCRANE_PRODUCT_ACCEPTANCE_PORT
-  else
-    port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()') || return
-  fi
+  port=$(acceptance_port) || return
   cleanup() { INFERCRANE_DEV_PORT=$port docker compose -p "$project" down --volumes --remove-orphans >/dev/null 2>&1 || true; }
   trap cleanup EXIT HUP INT TERM
   COMPOSE_PROJECT_NAME=$project INFERCRANE_DEV_PORT=$port INFERCRANE_SMOKE_URL=http://127.0.0.1:$port \
@@ -126,7 +130,7 @@ adoption() {
 
 reliability() {
   project=$(printf '%s' "infercrane-recovery-$run_id" | tr '[:upper:]' '[:lower:]')
-  port=${INFERCRANE_PRODUCT_ACCEPTANCE_PORT:-18000}
+  port=$(acceptance_port) || return
   cleanup_reliability() {
     INFERCRANE_DEV_PORT=$port docker compose -p "$project" down --volumes --remove-orphans >/dev/null 2>&1 || true
   }

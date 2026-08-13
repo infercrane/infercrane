@@ -36,6 +36,14 @@ done
 grep -Fq 'run_gate runpod-serverless-real' "$root/scripts/qualify-product.sh"
 grep -Fq 'run_gate runpod-elastic-real' "$root/scripts/qualify-product.sh"
 
+# Both Compose-backed product journeys must allocate an isolated host port by
+# default so qualification can run while a developer stack owns port 18000.
+test "$(grep -Fc 'port=$(acceptance_port) || return' "$root/scripts/product-acceptance.sh")" -eq 2
+if grep -Fq 'INFERCRANE_PRODUCT_ACCEPTANCE_PORT:-18000' "$root/scripts/product-acceptance.sh"; then
+  echo "product acceptance still has a shared default host port" >&2
+  exit 1
+fi
+
 if INFERCRANE_PRODUCT_QUALIFICATION_DIR="$temporary" "$root/scripts/qualify-product.sh" runpod >"$temporary/unapproved.log" 2>&1; then
   echo "paid qualification ran without approval" >&2; exit 1
 fi
