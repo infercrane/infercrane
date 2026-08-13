@@ -1,0 +1,68 @@
+---
+title: Semantic quality evidence
+description: Bind signed, aggregate task-quality evidence to exact revisions and enforce deterministic rollout thresholds.
+---
+
+# Healthy infrastructure is not enough
+
+A candidate may be ready, fast, and error-free while producing worse answers. InferCrane accepts
+aggregate evidence from a customer-owned evaluation suite, verifies its signature and revision
+identity, and lets Release Guard enforce explicit score thresholds.
+
+InferCrane does not store prompts or generated outputs in this evidence format and does not choose an
+LLM judge for you.
+
+## Create an evaluator key
+
+```bash
+infercrane evaluation keygen --file ./quality-evidence.key
+```
+
+Keep the private Ed25519 key outside the control plane. The operator authorized to attach evidence is
+the trust boundary.
+
+## Sign aggregate evidence
+
+```bash
+infercrane evaluation sign qwen-prod REVISION_ID \
+  --suite support-answers \
+  --suite-version git:8a91d7c \
+  --evaluator ragas \
+  --evaluator-version 0.3.9 \
+  --score 0.91 \
+  --passed=true \
+  --samples 250 \
+  --artifact-digest sha256:RESULT_ARTIFACT_SHA256 \
+  --key ./quality-evidence.key \
+  --file ./candidate-quality.json
+
+infercrane evaluation verify ./candidate-quality.json
+infercrane evaluation attach qwen-prod --file ./candidate-quality.json
+```
+
+The signed payload records deployment, immutable revision, suite and evaluator versions, normalized
+score, pass/fail result, sample count, result-artifact digest, and evaluation time. Attaching the same
+evidence twice is idempotent.
+
+## Fail closed in Release Guard
+
+```bash
+infercrane rollout policy set qwen-prod \
+  --require-quality \
+  --minimum-quality-score 0.90 \
+  --max-quality-regression 3
+
+infercrane rollout evaluate qwen-prod
+infercrane rollout inspect qwen-prod
+```
+
+Active and candidate evidence must use the same suite version and evaluator version to be comparable.
+Missing or incomparable required evidence leaves the decision waiting. A failed suite, score below
+the minimum, or regression beyond policy rejects the candidate. The evaluator cannot activate a
+revision; promotion remains a separate, authorized control-plane decision.
+
+<Warning>
+An artifact digest proves which private result bundle was evaluated, not that the evaluator was
+well-designed. Teams remain responsible for representative datasets, evaluator calibration, privacy,
+and human review of high-risk changes.
+</Warning>

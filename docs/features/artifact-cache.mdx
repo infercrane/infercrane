@@ -1,0 +1,50 @@
+---
+title: Artifact cache and prewarming
+description: Record provider-neutral cache observations and durable prefetch intent without claiming an unverified cache hit.
+---
+
+# Treat model locality as evidence
+
+Large model artifacts often dominate readiness time. InferCrane records cache state through a neutral
+contract while each provider adapter retains its native mechanism: a volume or provider cache, an
+AWS volume or snapshot, a Kubernetes volume or node cache, or another qualified implementation.
+
+```bash
+infercrane artifact inspect ARTIFACT_ID
+```
+
+The result separates observations from requested work and shows whether an observation is still
+fresh.
+
+## Request prefetch
+
+```bash
+infercrane artifact prefetch ARTIFACT_ID \
+  --provider aws \
+  --region eu-central-1 \
+  --location cache://production-models \
+  --idempotency-key release-42-prefetch
+```
+
+This persists durable intent. It is **not** proof that the artifact is present. A provider adapter
+must execute the request and publish a fresh observation before a planner can rely on locality.
+
+## Record an adapter observation
+
+```bash
+infercrane artifact observe ARTIFACT_ID \
+  --provider aws \
+  --region eu-central-1 \
+  --location cache://production-models \
+  --state present \
+  --source aws-ebs-adapter \
+  --ttl 10m
+```
+
+Valid states are `present`, `prefetching`, `missing`, and `unknown`. Expiry prevents stale provider
+state from becoming a permanent planning assumption.
+
+<Note>
+The current surface establishes lifecycle-safe intent and evidence. Actual cache population remains
+adapter-specific and requires qualification on the selected infrastructure.
+</Note>

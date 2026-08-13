@@ -10,14 +10,18 @@ api_key=infercrane
 
 cd "$root"
 cleanup() {
-	  rm -f "/tmp/infercrane-demo-response.$$"
+	rm -f "/tmp/infercrane-demo-response.$$" "/tmp/infercrane-demo-compose.$$"
   docker compose -p "$project" down -v --remove-orphans >/dev/null 2>&1 || true
 }
 trap cleanup EXIT HUP INT TERM
 cleanup
 
 echo "Starting the local InferCrane evidence stack..."
-INFERCRANE_DEV_PORT=$port docker compose -p "$project" up --build -d
+if ! INFERCRANE_DEV_PORT=$port docker compose -p "$project" up --build -d \
+  >"/tmp/infercrane-demo-compose.$$" 2>&1; then
+  tail -n 100 "/tmp/infercrane-demo-compose.$$" >&2
+  exit 1
+fi
 
 attempt=0
 until curl -fsS "$base_url/readyz" >/dev/null 2>&1; do

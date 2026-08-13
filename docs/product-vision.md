@@ -26,13 +26,19 @@ The experience is guided by five principles:
 
 ```text
 infercrane doctor
-infercrane plan Qwen/Qwen3-8B --cloud runpod --gpu L40S
-infercrane deploy Qwen/Qwen3-8B --cloud runpod --gpu L40S
-infercrane status qwen3-8b
+infercrane workload init my-model --model mistralai/Mistral-7B-Instruct-v0.3
+cd my-model
+infercrane workload validate
+infercrane workload plan
+infercrane workload deploy
+infercrane observe my-model
 ```
 
-The same plan will be available as JSON for CI, user interfaces, and coding agents. A plan must be
-side-effect free. Deploy remains the explicit mutation boundary.
+Teams that already operate an OpenAI-compatible runtime can begin with observe-only adoption instead
+of rebuilding it. Both paths converge on the same endpoint, revision, evidence, and lifecycle model.
+Plans are available as JSON for CI, user interfaces, and coding agents. A plan must be side-effect
+free. Build publication, deployment, diagnosis, promotion, and cache prefetch remain explicit mutation
+boundaries.
 
 ## Roadmap
 

@@ -5,8 +5,11 @@ Production inference without the platform engineering.
 Build or connect, autoscale, benchmark, and safely update inference workloads on GPU infrastructure you control.
 
 ```bash
-infercrane deploy Qwen/Qwen3-8B
-infercrane request qwen3-8b --message "Hello" --stream
+infercrane workload init ./fraud-explainer \
+  --model mistralai/Mistral-7B-Instruct-v0.3
+cd fraud-explainer
+infercrane workload plan
+infercrane workload deploy --wait
 ```
 
 The model is not hard-coded. Qwen3-8B is the release acceptance baseline because it is practical to
@@ -20,6 +23,8 @@ qualified for the exact serving plan.
 - Reproducible benchmarks
 - Evidence-based SLO recommendations
 - Explainable durable operations
+- Signed external task-quality evidence
+- Safe staging-to-production candidate promotion
 - Elastic and provider-native serverless compute
 
 Read the [InferCrane documentation](https://infercrane.mintlify.site) for the five-minute local quickstart, product concepts, operations, integrations, and references. The Mintlify source lives in [`docs/`](docs/index.mdx); run `npm install && npm run dev` there to preview documentation changes locally.
@@ -28,6 +33,8 @@ For coding agents and LLM indexing, Mintlify continuously generates
 [`llms.txt`](https://infercrane.mintlify.site/llms.txt) and
 [`llms-full.txt`](https://infercrane.mintlify.site/llms-full.txt) from the current public navigation.
 Every public page is also available as Markdown by appending `.md` to its documentation URL.
+`infercrane mcp` exposes six read-only operational-evidence tools over stdio; it cannot deploy,
+scale, promote, delete, change budgets, or read secrets.
 
 Already running inference? Connect it without transferring lifecycle ownership:
 
@@ -86,7 +93,7 @@ for real vLLM or vLLM Router.
 Requirements:
 
 - Docker with Compose
-- Go 1.26.5 for local development
+- Go 1.26.6 for local development
 
 Before changing infrastructure, validate the environment and preview the exact deployment plan:
 

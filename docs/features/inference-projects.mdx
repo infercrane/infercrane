@@ -1,0 +1,82 @@
+---
+title: Inference projects
+description: Scaffold, validate, build, and deploy one reproducible inference workload from its own directory.
+---
+
+# One directory, one serving intent
+
+An inference project keeps the deployment specification beside the code and configuration that
+produce it. InferCrane discovers `infercrane.yaml` from the current directory or a parent, validates
+it locally, and uses the same file for planning and deployment.
+
+<CodeGroup>
+```bash Start from a model
+infercrane workload init ./fraud-explainer \
+  --model mistralai/Mistral-7B-Instruct-v0.3 \
+  --name fraud-explainer
+
+cd fraud-explainer
+infercrane workload validate
+infercrane workload plan
+infercrane workload deploy --wait
+```
+
+```bash Start from a curated recipe
+infercrane recipes curated mistral
+infercrane workload init ./fraud-explainer \
+  --recipe mistral-7b-instruct \
+  --name fraud-explainer
+```
+</CodeGroup>
+
+`workload init` writes a valid DeploymentSpec. A curated recipe also pins the model commit. Recipes
+are reviewed configuration starting points, not performance claims; use benchmark or replay evidence
+for serving decisions.
+
+## Local validation before GPU allocation
+
+```bash
+infercrane workload validate
+infercrane workload plan
+```
+
+Validation catches schema, runtime, provider, and workload-contract problems without contacting a
+GPU provider. `plan` is also non-mutating. This keeps an invalid container command or unsupported
+runtime combination from becoming a paid provisioning attempt.
+
+## Build a custom OCI workload
+
+Custom OCI projects can build through Docker Buildx:
+
+```bash
+infercrane workload build \
+  --tag ghcr.io/acme/fraud-explainer:v1
+```
+
+A local build is useful for development, but it is deliberately **not** written into the production
+DeploymentSpec as deployable proof. Publish the image to record a registry-confirmed immutable
+digest:
+
+```bash
+infercrane workload build \
+  --tag ghcr.io/acme/fraud-explainer:v1 \
+  --push
+```
+
+The Dockerfile must remain inside the project directory. InferCrane passes arguments directly to
+Docker rather than invoking a shell, and the resulting DeploymentSpec references the immutable
+registry digest.
+
+## Run a custom workload locally
+
+```bash
+infercrane workload dev --port 8000 --detach
+```
+
+The development container binds only to `127.0.0.1`. The command is available for `custom-oci`
+projects; vLLM and SGLang model projects use their qualified runtime adapters.
+
+<Note>
+InferCrane owns the reproducible serving intent, not a new container build system. Docker/Buildx,
+your registry, vLLM, SGLang, and custom OCI runtimes retain their established responsibilities.
+</Note>

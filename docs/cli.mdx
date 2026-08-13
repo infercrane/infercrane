@@ -97,6 +97,53 @@ observe.
 
 ## Operations workspaces
 
+### `observe`
+
+```bash
+infercrane observe coder-production
+infercrane observe qwen-prod --watch
+infercrane observe coder-production --diagnose
+```
+
+The default snapshot is read-only. Endpoint snapshots combine logical identity, serving plans,
+Guard, admission, and alerts; deployment snapshots combine lifecycle, traffic, active operation,
+Guard, and events. `--diagnose` explicitly persists a fresh deterministic Doctor evaluation.
+
+### `artifact`
+
+```bash
+infercrane artifact inspect ARTIFACT_ID
+infercrane artifact prefetch ARTIFACT_ID --provider aws --location cache://models
+infercrane artifact observe ARTIFACT_ID --provider aws --location cache://models \
+  --state present --source aws-ebs-adapter --ttl 10m
+```
+
+Prefetch records durable intent; only a fresh provider observation is cache-hit evidence.
+
+### `evaluation`
+
+```bash
+infercrane evaluation keygen --file quality-evidence.key
+infercrane evaluation sign DEPLOYMENT REVISION --suite SUITE --suite-version VERSION \
+  --evaluator NAME --evaluator-version VERSION --score 0.95 --passed=true \
+  --samples 100 --artifact-digest sha256:DIGEST \
+  --key quality-evidence.key --file evidence.json
+infercrane evaluation verify evidence.json
+infercrane evaluation attach DEPLOYMENT --file evidence.json
+infercrane evaluation list DEPLOYMENT
+```
+
+Evidence is signature-verified, bound to one immutable revision, and contains aggregate values only.
+
+### `mcp`
+
+```bash
+infercrane mcp
+```
+
+Starts a stdio MCP server with read-only deployment, endpoint, request, operation, and curated-recipe
+tools. No mutation tool is registered. See [MCP for coding agents](/integrations/mcp).
+
 ## Admission and async inference
 
 ```bash
@@ -137,6 +184,24 @@ launches the default browser; it never places the API key in the URL. See the [o
 dashboard](/features/dashboard).
 
 ## Plan and deploy
+
+### `workload`
+
+Create a repository-local inference project, validate it without allocating a GPU, and use the same
+DeploymentSpec for build, plan, and deployment:
+
+```bash
+infercrane workload init ./fraud-explainer \
+  --model mistralai/Mistral-7B-Instruct-v0.3
+infercrane workload validate ./fraud-explainer
+infercrane workload plan ./fraud-explainer
+infercrane workload deploy ./fraud-explainer --wait
+```
+
+`workload init --recipe NAME` pins a reviewed model commit. `workload build --tag IMAGE` performs a
+local Docker Buildx build for custom OCI projects; add `--push` to record a registry-confirmed
+immutable digest. `workload dev` binds a custom OCI workload only to loopback. See
+[Inference projects](/features/inference-projects).
 
 ### `plan`
 
@@ -248,6 +313,16 @@ infercrane endpoint promote coder-production PLAN_ID
 
 `--bindings` is ordered and accepts optional bounded weights, for example
 `primary:80,overflow:20`. See [stable endpoints and serving plans](/features/endpoints).
+
+Stage one environment's active immutable plan as another endpoint's candidate:
+
+```bash
+infercrane environment promote coder-staging --to coder-production
+infercrane environment promote coder-staging --to coder-production --yes
+```
+
+The first command is a non-mutating preview. Staging never switches production traffic; destination
+Release Guard and explicit endpoint promotion remain required.
 
 ## Connect an existing workload
 

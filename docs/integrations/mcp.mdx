@@ -1,0 +1,54 @@
+---
+title: MCP for coding agents
+description: Give coding agents read-only access to persisted InferCrane evidence without granting deployment authority.
+---
+
+# Operational context without mutation
+
+InferCrane includes an MCP server over standard input/output:
+
+```bash
+infercrane mcp
+```
+
+Configure your MCP-compatible client to launch that command with the same InferCrane context and
+credential it would use for read-only CLI inspection.
+
+```json
+{
+  "mcpServers": {
+    "infercrane": {
+      "command": "infercrane",
+      "args": ["mcp"],
+      "env": {
+        "INFERCRANE_CONTEXT": "production"
+      }
+    }
+  }
+}
+```
+
+The server exposes six bounded tools:
+
+| Tool | Evidence |
+| --- | --- |
+| `infercrane_list_deployments` | Logical deployments and lifecycle state |
+| `infercrane_inspect_deployment` | Desired/observed state, revisions, replicas, operations, measurements, and Guard evidence |
+| `infercrane_inspect_endpoint` | Logical model, environment, bindings, active plan, and candidate plan |
+| `infercrane_inspect_request` | Content-free routing, latency, tokens, retries, and fallback evidence |
+| `infercrane_inspect_operation` | Durable operation state and resume identity |
+| `infercrane_list_curated_recipes` | Reviewed, commit-pinned configuration recipes |
+
+All tools declare read-only, non-destructive, closed-world annotations. The server has no deploy,
+scale, promote, delete, budget, secret, or provider mutation tool.
+
+<Warning>
+Read-only access can still reveal operational metadata. Use a least-privilege InferCrane principal,
+scope it to the appropriate tenant, and do not place credentials in the client configuration when
+the client supports secret references or environment injection.
+</Warning>
+
+Mintlify also publishes the navigable documentation as
+[`llms.txt`](https://infercrane.mintlify.site/llms.txt) and
+[`llms-full.txt`](https://infercrane.mintlify.site/llms-full.txt) for agents that need product
+knowledge rather than live operational evidence.

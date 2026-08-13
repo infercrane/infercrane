@@ -1,0 +1,45 @@
+---
+title: Environment promotion
+description: Stage an immutable serving plan from development or staging into a destination endpoint without changing production traffic.
+---
+
+# Promote evidence, not mutable configuration
+
+Development, staging, and production endpoints can share one logical model while retaining separate
+policies, budgets, networking, and active serving plans.
+
+```bash
+infercrane environment promote coder-staging \
+  --to coder-production
+```
+
+The default command prints a semantic plan and makes no changes. It verifies that both endpoints
+belong to the same logical model and that the source has an active immutable plan.
+
+```text
++ clone source bindings into destination
++ stage immutable destination candidate
+= keep destination active plan serving
+= require destination Release Guard PASS before activation
+```
+
+Apply the staging transaction explicitly:
+
+```bash
+infercrane environment promote coder-staging \
+  --to coder-production \
+  --yes \
+  --idempotency-key release-2026-08-14
+```
+
+InferCrane clones the source bindings into destination-scoped identities and stages an immutable
+candidate atomically. It never activates the destination plan as part of promotion staging.
+
+```bash
+infercrane observe coder-production
+infercrane endpoint guard coder-production --evaluate
+infercrane endpoint promote coder-production PLAN_ID
+```
+
+The destination Release Guard remains the decision authority. A concurrent promotion, occupied
+candidate slot, different logical model, or missing source plan fails safely.

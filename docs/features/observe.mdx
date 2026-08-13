@@ -1,0 +1,52 @@
+---
+title: Observe operations
+description: Read one useful snapshot of a deployment or stable endpoint, then reconnect when work takes longer than a terminal session.
+---
+
+# Start with one command
+
+```bash
+infercrane observe coder-production
+```
+
+`observe` resolves either a stable endpoint or a deployment and presents the highest-value persisted
+evidence together. Endpoint output includes its logical model, environment, active/candidate serving
+plans, Release Guard, admission policy, and alerts. Deployment output includes desired and observed
+lifecycle, traffic, the active operation, Guard decision, and recent events.
+
+```bash
+infercrane observe coder-production --output json
+infercrane observe qwen-prod --watch
+```
+
+The default command is read-only. `--watch` redraws only when state changes and can be closed safely;
+the control-plane operation continues.
+
+## Reconnect to durable work
+
+```bash
+infercrane operation inspect OPERATION_ID
+infercrane operation watch OPERATION_ID
+infercrane events qwen-prod
+```
+
+Closing a laptop or losing a network connection stops the client watcher, not the deployment. The
+operation ID is the resume handle. Retrying a mutation with the original idempotency key is safe when
+the request result was uncertain.
+
+## Ask for a deterministic diagnosis
+
+```bash
+infercrane observe coder-production --diagnose
+infercrane request inspect REQUEST_ID
+infercrane explain rollout qwen-prod
+```
+
+`--diagnose` is the one intentionally mutating form: it persists a fresh Doctor evaluation derived
+from metrics, events, provider observations, and revision state. InferCrane does not ask an LLM to
+invent the cause.
+
+<Tip>
+Use `infercrane ui` for a keyboard-driven operations workspace and `infercrane dashboard` for the
+browser view. Both reconstruct state from the same control-plane API; neither is the source of truth.
+</Tip>

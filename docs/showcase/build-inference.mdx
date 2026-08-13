@@ -144,12 +144,17 @@ infercrane endpoint create coder-production --model coder --environment producti
 Each endpoint has independent active and candidate serving plans. Request records preserve logical
 model, endpoint, and environment identity.
 
-<Warning>
-InferCrane does not yet provide a one-command cross-environment promotion such as
-`promote --from staging --to production`. Promote a qualified immutable configuration by applying it
-explicitly to the next environment. This keeps production changes deliberate, but automated artifact
-promotion remains future work.
-</Warning>
+Stage the exact serving plan from staging as a production candidate without changing production
+traffic:
+
+```bash
+infercrane environment promote coder-staging --to coder-production
+infercrane environment promote coder-staging --to coder-production --yes
+```
+
+The first command is a side-effect-free plan. The second atomically clones destination-scoped
+bindings and stages an immutable candidate. Production Release Guard remains the authority for
+activation. See [Environment promotion](/features/environment-promotion).
 
 ## Make the next revision safely
 
