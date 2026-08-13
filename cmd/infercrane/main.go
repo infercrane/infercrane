@@ -216,6 +216,8 @@ func runLegacy(ctx context.Context, args []string) error {
 		return mcpCommand(ctx, cfg, args[1:])
 	case "observe":
 		return observeCommand(ctx, cfg, args[1:])
+	case "inbox":
+		return inboxCommand(ctx, cfg, args[1:])
 	case "deploy":
 		return deployAPICommand(ctx, cfg, "deploy", args[1:])
 	case "apply":
@@ -1615,18 +1617,19 @@ func displayValue(value, fallback string) string {
 }
 
 type deploymentSummary struct {
-	ID                  string `json:"id"`
-	Name                string `json:"name"`
-	Model               string `json:"model"`
-	Runtime             string `json:"runtime"`
-	RoutingStrategy     string `json:"routing_strategy"`
-	DesiredState        string `json:"desired_state"`
-	ObservedState       string `json:"observed_state"`
-	ActiveRevisionID    string `json:"active_revision_id"`
-	CandidateRevisionID string `json:"candidate_revision_id"`
-	MinReplicas         int    `json:"min_replicas"`
-	MaxReplicas         int    `json:"max_replicas"`
-	AutoscalingEnabled  bool   `json:"autoscaling_enabled"`
+	ID                  string    `json:"id"`
+	Name                string    `json:"name"`
+	Model               string    `json:"model"`
+	Runtime             string    `json:"runtime"`
+	RoutingStrategy     string    `json:"routing_strategy"`
+	DesiredState        string    `json:"desired_state"`
+	ObservedState       string    `json:"observed_state"`
+	ActiveRevisionID    string    `json:"active_revision_id"`
+	CandidateRevisionID string    `json:"candidate_revision_id"`
+	MinReplicas         int       `json:"min_replicas"`
+	MaxReplicas         int       `json:"max_replicas"`
+	AutoscalingEnabled  bool      `json:"autoscaling_enabled"`
+	UpdatedAt           time.Time `json:"updated_at"`
 }
 type targetView struct {
 	ID                 string          `json:"id"`

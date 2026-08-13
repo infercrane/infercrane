@@ -15,7 +15,7 @@ behavior depends on external infrastructure.
 | Capability | Status | Notes |
 |---|---|---|
 | Inference project workflow | Local-qualified | `workload init`, `validate`, `build`, `dev`, `plan`, and `deploy` share one schema-backed project; remote deployment requires an immutable pushed image digest. Real registry and GPU qualification remain external. |
-| Unified operations observation | Local-qualified | `observe` joins deployment or endpoint state, traffic, durable operations, Release Guard, policy, and recent events without mutation; `--diagnose` is the explicit persisted-diagnosis boundary. |
+| Unified operations observation | Local-qualified | `inbox` deterministically ranks tenant-scoped persisted fleet attention and fails closed on partial inventory; `observe` joins one deployment or endpoint's state, traffic, operations, Release Guard, policy, and events. `--diagnose` remains the explicit persisted-diagnosis boundary. |
 | Safe environment promotion | Local-qualified | Promotion is plan-first and atomically stages a source serving plan as the destination candidate; it never activates traffic, requires the same logical model, and remains subject to Release Guard. |
 | Signed semantic evaluation evidence | Local-qualified | Aggregate, content-free Ed25519 evidence is revision-, suite-, evaluator-, artifact-, and version-bound; incompatible evidence fails closed and promotion remains a deterministic policy decision. External evaluator quality and key custody remain user responsibilities. |
 | Artifact cache operations | Local-qualified | Inspect, observe, and prefetch-intent workflows separate requested cache work from fresh provider observation; only observation proves availability. Real provider cache qualification remains external. |

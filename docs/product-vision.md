@@ -31,6 +31,7 @@ cd my-model
 infercrane workload validate
 infercrane workload plan
 infercrane workload deploy
+infercrane inbox
 infercrane observe my-model
 ```
 

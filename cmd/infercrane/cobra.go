@@ -31,6 +31,7 @@ var publicCommandSpecs = []commandSpec{
 	{use: "dashboard [flags]", short: "Open or print the browser operations dashboard", group: "operate"},
 	{use: "mcp", short: "Serve read-only operational evidence over MCP stdio", group: "understand"},
 	{use: "observe ENDPOINT_OR_DEPLOYMENT [flags]", short: "See health, traffic, operations, Guard evidence, and recent events", group: "operate"},
+	{use: "inbox [flags]", short: "Rank fleet state that needs operator attention", group: "operate"},
 	{use: "request DEPLOYMENT [flags]", short: "Send a buffered or streaming inference request", group: "start"},
 	{use: "version", short: "Print the InferCrane version", group: "start"},
 	{use: "apply MODEL_OR_SPEC [flags]", short: "Declaratively converge a deployment", group: "operate"},
@@ -152,7 +153,7 @@ func addHelpFlags(command *cobra.Command, name string) {
 	boolFlag := func(flag, help string) { command.Flags().Bool(flag, false, help) }
 	intFlag := func(flag string, value int, help string) { command.Flags().Int(flag, value, help) }
 	switch name {
-	case "init", "workload", "evaluation", "doctor", "connect", "adopt", "alert", "admission", "async", "plan", "deploy", "apply", "request", "deployments", "endpoints", "endpoint", "environment", "logical-model", "status", "logs", "events", "inspect", "explain", "benchmark", "replay", "capacity", "artifact", "finops", "autopilot", "session", "burst", "recipe", "recipes", "lab", "passport", "recommend", "slo", "delete", "orphans", "operation", "integrations", "dashboard", "observe", "target", "auth", "system", "secret", "external", "rollout":
+	case "init", "workload", "evaluation", "doctor", "connect", "adopt", "alert", "admission", "async", "plan", "deploy", "apply", "request", "deployments", "endpoints", "endpoint", "environment", "logical-model", "status", "logs", "events", "inspect", "explain", "benchmark", "replay", "capacity", "artifact", "finops", "autopilot", "session", "burst", "recipe", "recipes", "lab", "passport", "recommend", "slo", "delete", "orphans", "operation", "integrations", "dashboard", "observe", "inbox", "target", "auth", "system", "secret", "external", "rollout":
 		stringFlag("output", "human", "output format: human or json")
 	}
 	switch name {
@@ -204,6 +205,8 @@ func addHelpFlags(command *cobra.Command, name string) {
 		boolFlag("diagnose", "persist a fresh deterministic Doctor evaluation")
 		intFlag("events", 5, "recent deployment events")
 		stringFlag("window", "1h", "evidence window")
+	case "inbox":
+		intFlag("limit", 50, "maximum attention items")
 	case "adopt":
 		stringFlag("url", "", "existing OpenAI-compatible base URL")
 		stringFlag("model", "", "stable logical model name")
@@ -396,6 +399,7 @@ func completionFor(command string) func(*cobra.Command, []string, string) ([]str
 		"operation":   {"--wait-timeout", "--output"},
 		"dashboard":   {"--open", "--output"},
 		"observe":     {"--watch", "--diagnose", "--events", "--window", "--output"},
+		"inbox":       {"--limit", "--output"},
 		"rollout":     {"--requests", "--concurrency", "--acknowledge-validation-cost", "--require-quality", "--minimum-quality-score", "--max-quality-regression", "--wait", "--wait-timeout", "--output"},
 		"endpoint":    {"--model", "--environment", "--name", "--deployment", "--target", "--ownership", "--policy", "--bindings", "--evaluate", "--window", "--disable", "--minimum-requests", "--max-ttft-regression", "--yes", "--output"},
 		"environment": {"--to", "--policy", "--idempotency-key", "--yes", "--output"},

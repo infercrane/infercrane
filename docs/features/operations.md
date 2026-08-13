@@ -17,6 +17,17 @@ Status: Implemented baseline; environment qualification required
 - Authorization policy: `internal/authz`
 - Provider pricing contract: `internal/pricing`
 
+## Start with the fleet inbox
+
+```bash
+infercrane inbox
+```
+
+The inbox is a read-only prioritization layer over persisted endpoint and deployment state. It shows
+degraded or non-converged resources before staged candidates, preserves total counts when output is
+limited, and links every item to a deeper `observe`, `doctor`, or rollout command. It does not treat
+persisted state as a new diagnosis and never reads prompt or response content.
+
 Server configuration is environment-driven, validated at startup, and has no production API-key
 default. `infercrane init` writes an already-issued client URL/auth configuration to
 `$XDG_CONFIG_HOME/infercrane/config.json` (or `~/.config/infercrane/config.json`) with mode `0600`;

@@ -119,12 +119,14 @@ infercrane plan Qwen/Qwen3-8B --cloud runpod --gpu L40S --output json
 Open the optional terminal operations workspace at any time:
 
 ```bash
+infercrane inbox
 infercrane ui
 ```
 
-The workspace reconnects to durable control-plane state, exposes only state-valid guarded actions,
-and supports `--read-only` for shared incident screens. It does not require tmux, and closing it
-does not cancel deployments.
+`inbox` ranks persisted fleet state requiring attention without running diagnosis or recording
+request content. The workspace reconnects to durable control-plane state, exposes only state-valid
+guarded actions, and supports `--read-only` for shared incident screens. It does not require tmux,
+and closing it does not cancel deployments.
 
 For a browser-based fleet and evidence view, open the embedded dashboard after starting InferCrane:
 
