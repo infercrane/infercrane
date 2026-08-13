@@ -235,6 +235,10 @@ func TestAdoptInspectDiagnoseAndAlertPolicyAreTenantScoped(t *testing.T) {
 	if adoption.OwnershipMode != "observe-only" || len(resolved.Bindings) != 1 || resolved.Bindings[0].OwnershipMode != "observe-only" || resolved.Bindings[0].DeploymentID != "" {
 		t.Fatalf("adoption=%#v resolved=%#v", adoption, resolved)
 	}
+	emptyPolicies, err := s.AlertPoliciesForEndpoint(ctx, "global", name)
+	if err != nil || emptyPolicies == nil || len(emptyPolicies) != 0 {
+		t.Fatalf("empty alert policies=%#v err=%v, want non-nil empty collection", emptyPolicies, err)
+	}
 	_, repeated, err := s.AdoptEndpoint(ctx, "global", name, "coder-"+suffix, "coder", "https://inference.example.test", "vllm", "observe-only", "vllm")
 	if err != nil || repeated.ID != adoption.ID {
 		t.Fatalf("idempotent adoption=%#v err=%v", repeated, err)

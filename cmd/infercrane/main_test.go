@@ -286,6 +286,40 @@ func TestCobraRootProvidesSuggestionsAndCompletion(t *testing.T) {
 	}
 }
 
+func TestAdvertisedIntelligenceCommandsReachPublicDispatcher(t *testing.T) {
+	t.Setenv("INFERCRANE_URL", "http://127.0.0.1:1")
+	t.Setenv("INFERCRANE_API_KEY", "test")
+	commands := [][]string{
+		{"replay", "prod", "--output", "yaml"},
+		{"capacity", "--output", "yaml"},
+		{"finops", "prod", "--output", "yaml"},
+		{"autopilot", "plan", "prod", "--output", "yaml"},
+		{"session", "inspect", "session-1", "--output", "yaml"},
+		{"burst", "prod", "--output", "yaml"},
+	}
+	for _, args := range commands {
+		err := runLegacy(context.Background(), args)
+		if err == nil || strings.Contains(err.Error(), "unknown command") {
+			t.Fatalf("runLegacy(%v) error = %v, want handler validation error", args, err)
+		}
+	}
+}
+
+func TestRecipesAcceptsDocumentedQueryBeforeFlags(t *testing.T) {
+	var query string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query = r.URL.Query().Get("query")
+		_, _ = io.WriteString(w, `{"data":[]}`)
+	}))
+	defer server.Close()
+	if err := recipesCommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, []string{"qwen-local", "--output", "json"}); err != nil {
+		t.Fatal(err)
+	}
+	if query != "qwen-local" {
+		t.Fatalf("query = %q", query)
+	}
+}
+
 func TestGlobalContextIsHandledBeforeCommandDispatch(t *testing.T) {
 	t.Setenv("INFERCRANE_CONFIG", filepath.Join(t.TempDir(), "config.json"))
 	t.Setenv("INFERCRANE_CONTEXT", "")

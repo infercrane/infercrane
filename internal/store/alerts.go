@@ -58,7 +58,7 @@ func (s *Store) AlertPoliciesForEndpoint(ctx context.Context, tenant, endpointNa
 		return nil, err
 	}
 	defer rows.Close()
-	var out []domain.AlertPolicy
+	out := make([]domain.AlertPolicy, 0)
 	for rows.Next() {
 		var item domain.AlertPolicy
 		if err = rows.Scan(&item.ID, &item.TenantID, &item.EndpointID, &item.Name, &item.WebhookURL, &item.SecretReferenceID, &item.MinimumSeverity, &item.Enabled, &item.MaxAttempts, &item.CreatedAt, &item.UpdatedAt); err != nil {

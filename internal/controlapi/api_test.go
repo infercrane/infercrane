@@ -47,9 +47,45 @@ type fakeContextBurstStore struct {
 	passport domain.ContextPassport
 }
 
+type fakeAlertStore struct {
+	*fakeStore
+	policies []domain.AlertPolicy
+}
+
+func (f *fakeAlertStore) CreateAlertPolicy(_ context.Context, tenant, _ string, item domain.AlertPolicy) (domain.AlertPolicy, error) {
+	item.ID, item.TenantID, item.EndpointID = "alert-1", tenant, "endpoint-1"
+	item.CreatedAt, item.UpdatedAt = time.Now().UTC(), time.Now().UTC()
+	f.policies = append(f.policies, item)
+	return item, nil
+}
+func (f *fakeAlertStore) AlertPoliciesForEndpoint(context.Context, string, string) ([]domain.AlertPolicy, error) {
+	return f.policies, nil
+}
+
 type fakeOptimizationStore struct {
 	*fakeStore
 	report domain.FinOpsReport
+}
+
+type fakeIntelligenceStore struct {
+	*fakeStore
+	trace domain.ReplayTrace
+}
+
+func (f *fakeIntelligenceStore) CaptureReplayTrace(context.Context, string, string, time.Duration, int) (domain.ReplayTrace, error) {
+	return f.trace, nil
+}
+func (f *fakeIntelligenceStore) ReplayTrace(context.Context, string, string) (domain.ReplayTrace, error) {
+	return f.trace, nil
+}
+func (f *fakeIntelligenceStore) RecordArtifactCacheObservation(context.Context, string, domain.ArtifactCacheObservation) (domain.ArtifactCacheObservation, error) {
+	return domain.ArtifactCacheObservation{}, nil
+}
+func (f *fakeIntelligenceStore) RequestArtifactPrefetch(context.Context, string, domain.ArtifactPrefetch) (domain.ArtifactPrefetch, bool, error) {
+	return domain.ArtifactPrefetch{}, false, nil
+}
+func (f *fakeIntelligenceStore) CapacityIntelligence(context.Context, string, time.Duration) ([]domain.CapacitySummary, error) {
+	return []domain.CapacitySummary{}, nil
 }
 
 func (f *fakeOptimizationStore) RecordFinOpsReport(_ context.Context, row domain.FinOpsReport) (domain.FinOpsReport, error) {
@@ -200,6 +236,23 @@ func TestAsyncInferenceRequiresConsentAndReturnsDurableJob(t *testing.T) {
 	}
 }
 
+func TestAsyncInferenceTypedNilServiceReturnsCapabilityUnavailable(t *testing.T) {
+	var service *fakeAsyncService
+	handler := (API{Store: &fakeStore{}, APIKey: "secret", AsyncInference: service}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/endpoints/qwen-prod/async", strings.NewReader(`{"store_encrypted_content":true,"idempotency_key":"request-1","input":{"model":"qwen-prod"}}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d; body=%s", response.Code, http.StatusServiceUnavailable, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"code":"capability_unavailable"`) {
+		t.Fatalf("body = %s, want capability_unavailable", response.Body.String())
+	}
+}
+
 func TestCreateContextPassportPublishesDataPathHint(t *testing.T) {
 	directory := contextpassport.New()
 	store := &fakeContextBurstStore{fakeStore: &fakeStore{}}
@@ -246,6 +299,92 @@ func TestAsyncInferenceResultAndCancellation(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusNoContent || service.cancelled != "job-1" {
 		t.Fatalf("cancel status=%d id=%s", response.Code, service.cancelled)
+	}
+}
+
+func TestReplaySerializesPersistedJSONAsObjects(t *testing.T) {
+	now := time.Now().UTC()
+	store := &fakeIntelligenceStore{fakeStore: &fakeStore{}, trace: domain.ReplayTrace{
+		ID: "replay-1", DeploymentID: "deployment-1", DeploymentName: "qwen-prod",
+		SchemaVersion: "infercrane.replay/v1", ShapeJSON: `[{"input_tokens":8}]`,
+		SummaryJSON: `{"requests":1,"input_tokens_mean":8,"output_tokens_mean":4,"peak_concurrency":1}`,
+		ShapeDigest: strings.Repeat("a", 64), RequestCount: 1,
+		WindowStart: now.Add(-time.Hour), WindowEnd: now, CreatedAt: now,
+	}}
+	handler := (API{Store: store, APIKey: "secret"}).Handler()
+	for _, tc := range []struct {
+		method, path, body string
+	}{
+		{http.MethodPost, "/api/v1/deployments/qwen-prod/replays", `{"window_seconds":3600,"max_requests":10}`},
+		{http.MethodGet, "/api/v1/replays/replay-1", ""},
+	} {
+		request := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+		request.Header.Set("Authorization", "Bearer secret")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code < 200 || response.Code >= 300 {
+			t.Fatalf("%s %s status=%d body=%s", tc.method, tc.path, response.Code, response.Body.String())
+		}
+		var envelope struct {
+			Replay struct {
+				Shape   []map[string]any `json:"shape"`
+				Summary map[string]any   `json:"summary"`
+			} `json:"replay"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil || len(envelope.Replay.Shape) != 1 || envelope.Replay.Summary["requests"] != float64(1) {
+			t.Fatalf("%s %s replay JSON was double encoded: body=%s err=%v", tc.method, tc.path, response.Body.String(), err)
+		}
+	}
+}
+
+func TestCapacityIntelligenceSerializesEmptyCollection(t *testing.T) {
+	store := &fakeIntelligenceStore{fakeStore: &fakeStore{}}
+	handler := (API{Store: store, APIKey: "secret"}).Handler()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/capacity/intelligence", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"capacity":[]`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestAlertPolicyResponsesUsePublicJSONContract(t *testing.T) {
+	store := &fakeAlertStore{fakeStore: &fakeStore{}}
+	handler := (API{Store: store, APIKey: "secret"}).Handler()
+	create := httptest.NewRequest(http.MethodPost, "/api/v1/endpoints/prod/alerts", strings.NewReader(`{"name":"ops","webhook_url":"https://example.test/hook","secret_reference_id":"secret-1","minimum_severity":"warning","max_attempts":2}`))
+	create.Header.Set("Authorization", "Bearer secret")
+	created := httptest.NewRecorder()
+	handler.ServeHTTP(created, create)
+	if created.Code != http.StatusCreated || !strings.Contains(created.Body.String(), `"webhook_url"`) || strings.Contains(created.Body.String(), `"WebhookURL"`) {
+		t.Fatalf("create status=%d body=%s", created.Code, created.Body.String())
+	}
+	list := httptest.NewRequest(http.MethodGet, "/api/v1/endpoints/prod/alerts", nil)
+	list.Header.Set("Authorization", "Bearer secret")
+	listed := httptest.NewRecorder()
+	handler.ServeHTTP(listed, list)
+	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"minimum_severity":"warning"`) || strings.Contains(listed.Body.String(), `"MinimumSeverity"`) {
+		t.Fatalf("list status=%d body=%s", listed.Code, listed.Body.String())
+	}
+}
+
+func TestUntaggedDomainValuesAreNormalizedAtAPIBoundary(t *testing.T) {
+	values := []map[string]any{
+		logicalModelResponse(domain.LogicalModel{ID: "model-1", TenantID: "tenant-1", Name: "coder"}),
+		adoptedWorkloadResponse(domain.AdoptedWorkload{ID: "adoption-1", OwnershipMode: "traffic-managed"}),
+		artifactCacheObservationResponse(domain.ArtifactCacheObservation{ID: "cache-1", EvidenceJSON: `{}`}),
+		artifactPrefetchResponse(domain.ArtifactPrefetch{ID: "prefetch-1", IdempotencyKey: "key-1"}),
+	}
+	for _, value := range values {
+		body, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, forbidden := range []string{"TenantID", "OwnershipMode", "EvidenceJSON", "IdempotencyKey"} {
+			if strings.Contains(string(body), forbidden) {
+				t.Fatalf("internal field %q leaked in %s", forbidden, body)
+			}
+		}
 	}
 }
 
@@ -646,6 +785,20 @@ func TestLifecycleStatusCountsHealthyExistingTargetsAsReadyCapacity(t *testing.T
 	status := deploymentLifecycleStatus(resolved, nil, nil, domain.Operation{}, false)
 	if status.ServingState != "serving" || status.ReadyReplicas != 2 || status.DesiredReplicas != 2 {
 		t.Fatalf("unexpected status: %+v", status)
+	}
+}
+
+func TestLifecycleStatusDoesNotCountGovernedFallbackAsPrimaryCapacity(t *testing.T) {
+	resolved := domain.ResolvedDeployment{
+		Deployment: domain.Deployment{ID: "dep", MinReplicas: 1},
+		Targets: []domain.Target{
+			{ID: "primary", Provider: "existing", Health: "healthy"},
+			{ID: "fallback", Provider: "openai-compatible-external", Health: "starting"},
+		},
+	}
+	status := deploymentLifecycleStatus(resolved, nil, nil, domain.Operation{}, false)
+	if status.ServingState != "serving" || status.ConvergenceState != "converged" || status.ReadyReplicas != 1 || status.DesiredReplicas != 1 || status.UnhealthyTargets != 0 {
+		t.Fatalf("fallback changed primary lifecycle status: %+v", status)
 	}
 }
 

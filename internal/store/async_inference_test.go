@@ -30,6 +30,15 @@ func TestAsyncInferenceIsIdempotentFencedCancellableAndExpirable(t *testing.T) {
 	if err != nil || replayCreated || replay.ID != created.ID {
 		t.Fatalf("replay=(%#v,%t,%v)", replay, replayCreated, err)
 	}
+	shiftedReplay := request
+	shiftedReplay.ID = "shifted-deadline"
+	shiftedReplay.RequestID = "shifted-deadline"
+	shiftedReplay.ExecutionDeadline = request.ExecutionDeadline.Add(time.Minute)
+	shiftedReplay.ExpiresAt = request.ExpiresAt.Add(time.Minute)
+	shifted, shiftedCreated, err := s.CreateAsyncInferenceJob(ctx, "global", deployment.Name, shiftedReplay)
+	if err != nil || shiftedCreated || shifted.ID != created.ID {
+		t.Fatalf("network retry with derived deadlines=(%#v,%t,%v)", shifted, shiftedCreated, err)
+	}
 	conflict := request
 	conflict.ID, conflict.RequestID, conflict.PayloadDigest = "conflict", "conflict", "sha256-other"
 	if _, _, err = s.CreateAsyncInferenceJob(ctx, "global", deployment.Name, conflict); !errors.Is(err, ErrConflict) {

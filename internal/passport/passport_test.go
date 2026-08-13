@@ -1,6 +1,8 @@
 package passport
 
 import (
+	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -31,6 +33,30 @@ func TestCanonicalSignedPassportRejectsTampering(t *testing.T) {
 	first.PayloadJSON = strings.Replace(first.PayloadJSON, "rev-1", "rev-2", 1)
 	if err = Verify(first); err == nil {
 		t.Fatal("tampered payload verified")
+	}
+}
+
+func TestSignedPassportSurvivesPresentationFormatting(t *testing.T) {
+	_, privateKey, err := GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelope, err := Sign(map[string]any{"schema": "infercrane.passport/v1", "revision": "rev-1", "ratio": 1.25}, privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var indented bytes.Buffer
+	if err = json.Indent(&indented, []byte(envelope.PayloadJSON), "", "  "); err != nil {
+		t.Fatal(err)
+	}
+	envelope.PayloadJSON = indented.String()
+	if err = Verify(envelope); err != nil {
+		t.Fatalf("presentation-only formatting invalidated signed evidence: %v", err)
+	}
+
+	envelope.PayloadJSON = strings.Replace(envelope.PayloadJSON, `"ratio": 1.25`, `"ratio": 1.5`, 1)
+	if err = Verify(envelope); err == nil {
+		t.Fatal("semantic payload mutation verified")
 	}
 }
 

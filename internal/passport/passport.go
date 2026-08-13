@@ -2,6 +2,7 @@
 package passport
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
@@ -192,7 +193,11 @@ func Verify(envelope Envelope) error {
 	if envelope.Algorithm != Algorithm {
 		return fmt.Errorf("unsupported passport algorithm %q", envelope.Algorithm)
 	}
-	digest := sha256.Sum256([]byte(envelope.PayloadJSON))
+	canonical, err := compactPayload([]byte(envelope.PayloadJSON))
+	if err != nil {
+		return err
+	}
+	digest := sha256.Sum256(canonical)
 	want := "sha256:" + hex.EncodeToString(digest[:])
 	if envelope.Digest != want {
 		return errors.New("passport payload digest mismatch")
@@ -213,4 +218,17 @@ func Verify(envelope Envelope) error {
 		return errors.New("passport key ID mismatch")
 	}
 	return nil
+}
+
+// compactPayload makes signed payload verification insensitive to JSON
+// presentation whitespace. The API signs compact json.Marshal output, while
+// clients may legitimately indent an envelope when saving it to disk. This is
+// deliberately narrower than semantic JSON canonicalization: key order and
+// number representation remain part of the signed evidence.
+func compactPayload(payload []byte) ([]byte, error) {
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, payload); err != nil {
+		return nil, fmt.Errorf("invalid passport payload JSON: %w", err)
+	}
+	return compact.Bytes(), nil
 }

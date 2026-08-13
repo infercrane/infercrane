@@ -74,6 +74,7 @@ services:
       INFERCRANE_DATABASE_URL: postgres://infercrane:infercrane@postgres:5432/infercrane?sslmode=disable
       INFERCRANE_INSTANCE_ID: compose-1
       INFERCRANE_ROUTER_BINARY: fake-router
+      INFERCRANE_ASYNC_ENCRYPTION_KEY: ${INFERCRANE_ASYNC_ENCRYPTION_KEY:-}
     ports:
       - "${INFERCRANE_DEV_PORT:-18000}:8080"
     depends_on:

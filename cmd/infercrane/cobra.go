@@ -15,6 +15,70 @@ type commandSpec struct {
 	aliases           []string
 }
 
+var publicCommandSpecs = []commandSpec{
+	{use: "init [flags]", short: "Connect this CLI to a control plane", group: "start"},
+	{use: "doctor [flags]", short: "Validate configuration and dependencies", group: "start"},
+	{use: "plan MODEL [flags]", short: "Preview deployment changes without side effects", group: "start"},
+	{use: "deploy MODEL [flags]", short: "Create a durable inference deployment", group: "start"},
+	{use: "connect URL --as NAME [flags]", short: "Connect an existing inference endpoint", group: "start"},
+	{use: "adopt endpoint|promote NAME [flags]", short: "Connect an existing inference workload", group: "start"},
+	{use: "alert ACTION ENDPOINT [flags]", short: "Configure and evaluate signed webhook alerts", group: "operate"},
+	{use: "admission ACTION ENDPOINT [flags]", short: "Bound endpoint concurrency and queueing", group: "operate"},
+	{use: "async ACTION SUBJECT [flags]", short: "Submit and resume durable encrypted inference", group: "operate"},
+	{use: "ui", short: "Open the interactive operations workspace", group: "operate"},
+	{use: "dashboard [flags]", short: "Open or print the browser operations dashboard", group: "operate"},
+	{use: "request DEPLOYMENT [flags]", short: "Send a buffered or streaming inference request", group: "start"},
+	{use: "version", short: "Print the InferCrane version", group: "start"},
+	{use: "apply MODEL_OR_SPEC [flags]", short: "Declaratively converge a deployment", group: "operate"},
+	{use: "deployments [flags]", short: "List logical deployments", group: "operate", aliases: []string{"ls"}},
+	{use: "endpoints [flags]", short: "List stable application endpoints", group: "operate"},
+	{use: "endpoint ACTION [arguments]", short: "Create and manage stable endpoint serving plans", group: "operate"},
+	{use: "environment ACTION [arguments]", short: "Manage endpoint environments", group: "admin"},
+	{use: "logical-model ACTION [arguments]", short: "Manage stable logical model identities", group: "admin"},
+	{use: "status DEPLOYMENT [flags]", short: "Inspect deployment health and traffic", group: "operate"},
+	{use: "logs DEPLOYMENT [flags]", short: "Stream the durable operational timeline", group: "operate"},
+	{use: "events DEPLOYMENT [flags]", short: "Show durable deployment events", group: "operate"},
+	{use: "rollout ACTION [arguments]", short: "Inspect and control immutable revisions", group: "operate"},
+	{use: "route DEPLOYMENT --strategy STRATEGY", short: "Change replica routing policy", group: "operate"},
+	{use: "delete DEPLOYMENT [flags]", short: "Preview or execute safe deletion", group: "operate"},
+	{use: "inspect DEPLOYMENT [flags]", short: "Show raw deployment and infrastructure details", group: "understand"},
+	{use: "explain [TOPIC] DEPLOYMENT [flags]", short: "Explain persisted operational decisions", group: "understand"},
+	{use: "benchmark DEPLOYMENT [flags]", short: "Run and persist a reproducible benchmark", group: "understand"},
+	{use: "replay DEPLOYMENT [flags]", short: "Capture a privacy-preserving production workload shape", group: "understand"},
+	{use: "capacity [flags]", short: "Inspect observed capacity reliability", group: "understand"},
+	{use: "finops DEPLOYMENT [flags]", short: "Build an evidence-backed cost report", group: "understand"},
+	{use: "autopilot ACTION SUBJECT [flags]", short: "Create and approve advisory serving plans", group: "operate"},
+	{use: "session ACTION SUBJECT [flags]", short: "Manage durable logical session identity", group: "operate"},
+	{use: "burst DEPLOYMENT [flags]", short: "Evaluate policy-bounded overflow", group: "operate"},
+	{use: "recipe create DEPLOYMENT [flags]", short: "Capture an immutable evidence-backed model recipe", group: "understand"},
+	{use: "recipes [QUERY] [flags]", short: "Search immutable model recipes", group: "understand"},
+	{use: "lab MODEL_IDENTITY [flags]", short: "Compare persisted measured serving evidence", group: "understand"},
+	{use: "passport ACTION [arguments]", short: "Issue, inspect, or verify signed release evidence", group: "understand"},
+	{use: "recommend DEPLOYMENT [flags]", short: "Recommend a qualified configuration from persisted evidence", group: "understand"},
+	{use: "slo ACTION DEPLOYMENT [flags]", short: "Inspect or set deterministic inference SLO policy", group: "operate"},
+	{use: "operation ID | operation watch ID | operation cancel ID", short: "Inspect, resume, or cancel a durable operation", group: "understand"},
+	{use: "orphans [flags]", short: "List unmanaged provisioned resources", group: "understand"},
+	{use: "integrations [flags]", short: "Inspect registered and qualified integration capabilities", group: "understand"},
+	{use: "system instances [flags]", short: "Inspect live control-plane HA membership", group: "understand"},
+	{use: "target ACTION [arguments]", short: "Register or list existing inference targets", group: "admin"},
+	{use: "context ACTION [arguments]", short: "List, inspect, or select CLI contexts", group: "admin"},
+	{use: "auth status [flags]", short: "Show the authenticated control-plane identity", group: "admin"},
+	{use: "tenant ACTION [arguments]", short: "Manage isolated tenants", group: "admin"},
+	{use: "principal ACTION [arguments]", short: "Manage scoped credentials", group: "admin"},
+	{use: "secret ACTION [arguments]", short: "Manage reference-only secrets", group: "admin"},
+	{use: "external ACTION [arguments]", short: "Govern explicit external fallback capacity", group: "operate"},
+	{use: "serve", short: "Run the control plane and gateway", group: "admin"},
+}
+
+func isPublicCommand(name string) bool {
+	for _, spec := range publicCommandSpecs {
+		if strings.Fields(spec.use)[0] == name {
+			return true
+		}
+	}
+	return false
+}
+
 func newRootCommand(ctx context.Context) *cobra.Command {
 	var contextName string
 	var noColor bool
@@ -51,61 +115,7 @@ func newRootCommand(ctx context.Context) *cobra.Command {
 		&cobra.Group{ID: "understand", Title: "Understand:"},
 		&cobra.Group{ID: "admin", Title: "Administration:"},
 	)
-	specs := []commandSpec{
-		{use: "init [flags]", short: "Connect this CLI to a control plane", group: "start"},
-		{use: "doctor [flags]", short: "Validate configuration and dependencies", group: "start"},
-		{use: "plan MODEL [flags]", short: "Preview deployment changes without side effects", group: "start"},
-		{use: "deploy MODEL [flags]", short: "Create a durable inference deployment", group: "start"},
-		{use: "connect URL --as NAME [flags]", short: "Connect an existing inference endpoint", group: "start"},
-		{use: "adopt endpoint|promote NAME [flags]", short: "Connect an existing inference workload", group: "start"},
-		{use: "alert ACTION ENDPOINT [flags]", short: "Configure and evaluate signed webhook alerts", group: "operate"},
-		{use: "admission ACTION ENDPOINT [flags]", short: "Bound endpoint concurrency and queueing", group: "operate"},
-		{use: "async ACTION SUBJECT [flags]", short: "Submit and resume durable encrypted inference", group: "operate"},
-		{use: "ui", short: "Open the interactive operations workspace", group: "operate"},
-		{use: "dashboard [flags]", short: "Open or print the browser operations dashboard", group: "operate"},
-		{use: "request DEPLOYMENT [flags]", short: "Send a buffered or streaming inference request", group: "start"},
-		{use: "version", short: "Print the InferCrane version", group: "start"},
-		{use: "apply MODEL_OR_SPEC [flags]", short: "Declaratively converge a deployment", group: "operate"},
-		{use: "deployments [flags]", short: "List logical deployments", group: "operate", aliases: []string{"ls"}},
-		{use: "endpoints [flags]", short: "List stable application endpoints", group: "operate"},
-		{use: "endpoint ACTION [arguments]", short: "Create and manage stable endpoint serving plans", group: "operate"},
-		{use: "environment ACTION [arguments]", short: "Manage endpoint environments", group: "admin"},
-		{use: "logical-model ACTION [arguments]", short: "Manage stable logical model identities", group: "admin"},
-		{use: "status DEPLOYMENT [flags]", short: "Inspect deployment health and traffic", group: "operate"},
-		{use: "logs DEPLOYMENT [flags]", short: "Stream the durable operational timeline", group: "operate"},
-		{use: "events DEPLOYMENT [flags]", short: "Show durable deployment events", group: "operate"},
-		{use: "rollout ACTION [arguments]", short: "Inspect and control immutable revisions", group: "operate"},
-		{use: "route DEPLOYMENT --strategy STRATEGY", short: "Change replica routing policy", group: "operate"},
-		{use: "delete DEPLOYMENT [flags]", short: "Preview or execute safe deletion", group: "operate"},
-		{use: "inspect DEPLOYMENT [flags]", short: "Show raw deployment and infrastructure details", group: "understand"},
-		{use: "explain [TOPIC] DEPLOYMENT [flags]", short: "Explain persisted operational decisions", group: "understand"},
-		{use: "benchmark DEPLOYMENT [flags]", short: "Run and persist a reproducible benchmark", group: "understand"},
-		{use: "replay DEPLOYMENT [flags]", short: "Capture a privacy-preserving production workload shape", group: "understand"},
-		{use: "capacity [flags]", short: "Inspect observed capacity reliability", group: "understand"},
-		{use: "finops DEPLOYMENT [flags]", short: "Build an evidence-backed cost report", group: "understand"},
-		{use: "autopilot ACTION SUBJECT [flags]", short: "Create and approve advisory serving plans", group: "operate"},
-		{use: "session ACTION SUBJECT [flags]", short: "Manage durable logical session identity", group: "operate"},
-		{use: "burst DEPLOYMENT [flags]", short: "Evaluate policy-bounded overflow", group: "operate"},
-		{use: "recipe create DEPLOYMENT [flags]", short: "Capture an immutable evidence-backed model recipe", group: "understand"},
-		{use: "recipes [QUERY] [flags]", short: "Search immutable model recipes", group: "understand"},
-		{use: "lab MODEL_IDENTITY [flags]", short: "Compare persisted measured serving evidence", group: "understand"},
-		{use: "passport ACTION [arguments]", short: "Issue, inspect, or verify signed release evidence", group: "understand"},
-		{use: "recommend DEPLOYMENT [flags]", short: "Recommend a qualified configuration from persisted evidence", group: "understand"},
-		{use: "slo ACTION DEPLOYMENT [flags]", short: "Inspect or set deterministic inference SLO policy", group: "operate"},
-		{use: "operation ID | operation watch ID | operation cancel ID", short: "Inspect, resume, or cancel a durable operation", group: "understand"},
-		{use: "orphans [flags]", short: "List unmanaged provisioned resources", group: "understand"},
-		{use: "integrations [flags]", short: "Inspect registered and qualified integration capabilities", group: "understand"},
-		{use: "system instances [flags]", short: "Inspect live control-plane HA membership", group: "understand"},
-		{use: "target ACTION [arguments]", short: "Register or list existing inference targets", group: "admin"},
-		{use: "context ACTION [arguments]", short: "List, inspect, or select CLI contexts", group: "admin"},
-		{use: "auth status [flags]", short: "Show the authenticated control-plane identity", group: "admin"},
-		{use: "tenant ACTION [arguments]", short: "Manage isolated tenants", group: "admin"},
-		{use: "principal ACTION [arguments]", short: "Manage scoped credentials", group: "admin"},
-		{use: "secret ACTION [arguments]", short: "Manage reference-only secrets", group: "admin"},
-		{use: "external ACTION [arguments]", short: "Govern explicit external fallback capacity", group: "operate"},
-		{use: "serve", short: "Run the control plane and gateway", group: "admin"},
-	}
-	for _, spec := range specs {
+	for _, spec := range publicCommandSpecs {
 		root.AddCommand(newLegacyCommand(ctx, spec))
 	}
 	return root

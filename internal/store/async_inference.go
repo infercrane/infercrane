@@ -89,10 +89,11 @@ func (s *Store) scanAsyncJob(row asyncRowScanner) (domain.AsyncInferenceJob, err
 }
 
 func sameAsyncInferenceIntent(existing domain.AsyncInferenceJob, endpointID string, requested domain.AsyncInferenceJob) bool {
-	sameTime := func(left, right time.Time) bool {
-		return left.UTC().Truncate(time.Microsecond).Equal(right.UTC().Truncate(time.Microsecond))
-	}
-	return existing.EndpointID == endpointID && existing.Protocol == requested.Protocol && existing.Priority == requested.Priority && existing.PayloadDigest == requested.PayloadDigest && existing.EncryptionKeyReference == requested.EncryptionKeyReference && existing.WebhookURL == requested.WebhookURL && existing.WebhookSecretReferenceID == requested.WebhookSecretReferenceID && sameTime(existing.ExecutionDeadline, requested.ExecutionDeadline) && sameTime(existing.ExpiresAt, requested.ExpiresAt)
+	// Execution and retention deadlines are derived from relative durations at
+	// request receipt. A network retry necessarily produces new absolute times,
+	// so treating them as intent would reject a byte-identical idempotent replay.
+	// The original job keeps its original bounded deadlines.
+	return existing.EndpointID == endpointID && existing.Protocol == requested.Protocol && existing.Priority == requested.Priority && existing.PayloadDigest == requested.PayloadDigest && existing.EncryptionKeyReference == requested.EncryptionKeyReference && existing.WebhookURL == requested.WebhookURL && existing.WebhookSecretReferenceID == requested.WebhookSecretReferenceID
 }
 
 func (s *Store) ClaimAsyncInferenceJob(ctx context.Context, owner, token string, lease time.Duration) (domain.AsyncInferenceJob, error) {

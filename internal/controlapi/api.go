@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -361,7 +362,11 @@ func (a API) logicalModels(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "logical models could not be listed")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": items})
+	data := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		data = append(data, logicalModelResponse(item))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": data})
 }
 
 func (a API) createLogicalModel(w http.ResponseWriter, r *http.Request) {
@@ -520,7 +525,11 @@ func (a API) promoteAdoptionOwnership(w http.ResponseWriter, r *http.Request) {
 	}
 	refresh := a.refreshEndpoints(r.Context())
 	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "endpoint_adoption.promote", ResourceType: "endpoint", ResourceName: r.PathValue("name"), Outcome: "succeeded"})
-	writeJSON(w, http.StatusOK, map[string]any{"adoption": item, "route_refresh": refresh})
+	writeJSON(w, http.StatusOK, map[string]any{"adoption": adoptedWorkloadResponse(item), "route_refresh": refresh})
+}
+
+func adoptedWorkloadResponse(item domain.AdoptedWorkload) map[string]any {
+	return map[string]any{"id": item.ID, "endpoint_id": item.EndpointID, "binding_id": item.BindingID, "target_id": item.TargetID, "ownership_mode": item.OwnershipMode, "source": item.Source, "immutable_identity": item.ImmutableIdentity, "created_at": item.CreatedAt, "updated_at": item.UpdatedAt}
 }
 
 func (a API) diagnoseEndpoint(w http.ResponseWriter, r *http.Request) {
@@ -568,7 +577,11 @@ func (a API) alertPolicies(w http.ResponseWriter, r *http.Request) {
 	if writeEndpointMutationError(w, err) {
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": items})
+	data := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		data = append(data, alertPolicyResponse(item))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": data})
 }
 
 func (a API) createAlertPolicy(w http.ResponseWriter, r *http.Request) {
@@ -604,7 +617,11 @@ func (a API) createAlertPolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "alert_policy.create", ResourceType: "endpoint", ResourceName: r.PathValue("name"), Outcome: "succeeded"})
-	writeJSON(w, http.StatusCreated, map[string]any{"policy": item})
+	writeJSON(w, http.StatusCreated, map[string]any{"policy": alertPolicyResponse(item)})
+}
+
+func alertPolicyResponse(item domain.AlertPolicy) map[string]any {
+	return map[string]any{"id": item.ID, "tenant_id": item.TenantID, "endpoint_id": item.EndpointID, "name": item.Name, "webhook_url": item.WebhookURL, "secret_reference_id": item.SecretReferenceID, "minimum_severity": item.MinimumSeverity, "enabled": item.Enabled, "max_attempts": item.MaxAttempts, "created_at": item.CreatedAt, "updated_at": item.UpdatedAt}
 }
 
 func (a API) evaluateAlerts(w http.ResponseWriter, r *http.Request) {
@@ -623,12 +640,12 @@ func (a API) evaluateAlerts(w http.ResponseWriter, r *http.Request) {
 	if writeEndpointMutationError(w, err) {
 		return
 	}
-	deliveries := make([]domain.AlertDelivery, 0)
+	deliveries := make([]map[string]any, 0)
 	for _, policy := range policies {
 		for _, finding := range findings {
 			delivery, deliveryErr := a.AlertDeliverer.Deliver(r.Context(), policy, finding)
 			if delivery.ID != "" {
-				deliveries = append(deliveries, delivery)
+				deliveries = append(deliveries, alertDeliveryResponse(delivery))
 			}
 			if deliveryErr != nil {
 				writeJSON(w, http.StatusBadGateway, map[string]any{"error": map[string]any{"code": "alert_delivery_failed", "message": deliveryErr.Error()}, "deliveries": deliveries})
@@ -638,6 +655,10 @@ func (a API) evaluateAlerts(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "alerts.evaluate", ResourceType: "endpoint", ResourceName: r.PathValue("name"), Outcome: "succeeded"})
 	writeJSON(w, http.StatusOK, map[string]any{"findings": len(findings), "deliveries": deliveries})
+}
+
+func alertDeliveryResponse(item domain.AlertDelivery) map[string]any {
+	return map[string]any{"id": item.ID, "policy_id": item.PolicyID, "finding_id": item.FindingID, "status": item.Status, "error_code": item.ErrorCode, "attempts": item.Attempts, "response_status": item.ResponseStatus, "body_digest": item.BodyDigest, "created_at": item.CreatedAt, "updated_at": item.UpdatedAt, "delivered_at": item.DeliveredAt}
 }
 
 func (a API) admissionPolicy(w http.ResponseWriter, r *http.Request) {
@@ -688,7 +709,7 @@ func (a API) setAdmissionPolicy(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a API) submitAsyncInference(w http.ResponseWriter, r *http.Request) {
-	if a.AsyncInference == nil {
+	if isNilAsyncInferenceService(a.AsyncInference) {
 		writeError(w, http.StatusServiceUnavailable, "capability_unavailable", "async inference requires INFERCRANE_ASYNC_ENCRYPTION_KEY")
 		return
 	}
@@ -742,7 +763,7 @@ func (a API) submitAsyncInference(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a API) asyncInferenceJob(w http.ResponseWriter, r *http.Request) {
-	if a.AsyncInference == nil {
+	if isNilAsyncInferenceService(a.AsyncInference) {
 		writeError(w, http.StatusServiceUnavailable, "capability_unavailable", "async inference is not configured")
 		return
 	}
@@ -762,7 +783,7 @@ func (a API) asyncInferenceJob(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a API) cancelAsyncInferenceJob(w http.ResponseWriter, r *http.Request) {
-	if a.AsyncInference == nil {
+	if isNilAsyncInferenceService(a.AsyncInference) {
 		writeError(w, http.StatusServiceUnavailable, "capability_unavailable", "async inference is not configured")
 		return
 	}
@@ -771,6 +792,14 @@ func (a API) cancelAsyncInferenceJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func isNilAsyncInferenceService(service asyncInferenceService) bool {
+	if service == nil {
+		return true
+	}
+	value := reflect.ValueOf(service)
+	return value.Kind() == reflect.Pointer && value.IsNil()
 }
 
 func asyncJobResponse(job domain.AsyncInferenceJob) map[string]any {
@@ -1507,7 +1536,7 @@ func (a API) captureReplay(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "internal", "replay trace could not be captured")
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"replay": trace})
+	writeJSON(w, http.StatusCreated, map[string]any{"replay": replayTraceResponse(trace)})
 }
 
 func (a API) getReplay(w http.ResponseWriter, r *http.Request) {
@@ -1526,7 +1555,17 @@ func (a API) getReplay(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "internal", "replay trace lookup failed")
 		return
 	}
-	writeJSON(w, 200, map[string]any{"replay": trace})
+	writeJSON(w, 200, map[string]any{"replay": replayTraceResponse(trace)})
+}
+
+func replayTraceResponse(trace domain.ReplayTrace) map[string]any {
+	return map[string]any{
+		"id": trace.ID, "deployment_id": trace.DeploymentID, "deployment_name": trace.DeploymentName,
+		"revision_id": trace.RevisionID, "schema_version": trace.SchemaVersion,
+		"shape": json.RawMessage(trace.ShapeJSON), "summary": json.RawMessage(trace.SummaryJSON),
+		"shape_digest": trace.ShapeDigest, "request_count": trace.RequestCount,
+		"window_start": trace.WindowStart, "window_end": trace.WindowEnd, "created_at": trace.CreatedAt,
+	}
 }
 
 func (a API) capacityIntelligence(w http.ResponseWriter, r *http.Request) {
@@ -1549,6 +1588,9 @@ func (a API) capacityIntelligence(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, 500, "internal", "capacity intelligence lookup failed")
 		return
+	}
+	if rows == nil {
+		rows = make([]domain.CapacitySummary, 0)
 	}
 	writeJSON(w, 200, map[string]any{"capacity": rows, "evidence": "observed", "sample_scope": "tenant", "window_seconds": int(window.Seconds())})
 }
@@ -1586,7 +1628,7 @@ func (a API) recordCacheObservation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 422, "validation_failed", err.Error())
 		return
 	}
-	writeJSON(w, 201, map[string]any{"observation": row})
+	writeJSON(w, 201, map[string]any{"observation": artifactCacheObservationResponse(row)})
 }
 
 func (a API) requestPrefetch(w http.ResponseWriter, r *http.Request) {
@@ -1622,7 +1664,15 @@ func (a API) requestPrefetch(w http.ResponseWriter, r *http.Request) {
 	if created {
 		status = http.StatusCreated
 	}
-	writeJSON(w, status, map[string]any{"prefetch": row, "created": created, "execution": "delegated_to_provider_adapter"})
+	writeJSON(w, status, map[string]any{"prefetch": artifactPrefetchResponse(row), "created": created, "execution": "delegated_to_provider_adapter"})
+}
+
+func artifactCacheObservationResponse(row domain.ArtifactCacheObservation) map[string]any {
+	return map[string]any{"id": row.ID, "model_artifact_id": row.ModelArtifactID, "provider": row.Provider, "region": row.Region, "location": row.Location, "state": row.State, "source": row.Source, "evidence": json.RawMessage(row.EvidenceJSON), "observed_at": row.ObservedAt, "expires_at": row.ExpiresAt, "created_at": row.CreatedAt}
+}
+
+func artifactPrefetchResponse(row domain.ArtifactPrefetch) map[string]any {
+	return map[string]any{"id": row.ID, "model_artifact_id": row.ModelArtifactID, "provider": row.Provider, "region": row.Region, "location": row.Location, "status": row.Status, "idempotency_key": row.IdempotencyKey, "provider_operation_id": row.ProviderOperationID, "error_code": row.ErrorCode, "created_at": row.CreatedAt, "updated_at": row.UpdatedAt}
 }
 
 func (a API) runBenchmark(w http.ResponseWriter, r *http.Request) {
@@ -2778,7 +2828,18 @@ type lifecycleStatus struct {
 func deploymentLifecycleStatus(resolved domain.ResolvedDeployment, replicas []domain.Replica, revisions []domain.DeploymentRevision, operation domain.Operation, hasOperation bool) lifecycleStatus {
 	status := lifecycleStatus{ServingState: "unavailable", ConvergenceState: "converged", CandidateState: "none", DesiredReplicas: resolved.Deployment.MinReplicas}
 	healthyTargets := 0
+	primaryTargets := 0
 	for _, target := range resolved.Targets {
+		if target.Provider == "openrouter" || target.Provider == "openai-compatible-external" {
+			// Governed fallback is an alternate serving path, not desired primary
+			// replica capacity. Its health is exposed in inspect and external policy
+			// views but must not make a healthy primary deployment look degraded.
+			if target.Health == "healthy" {
+				status.ServingState = "serving"
+			}
+			continue
+		}
+		primaryTargets++
 		if target.Health == "healthy" {
 			status.ServingState = "serving"
 			healthyTargets++
@@ -2792,7 +2853,7 @@ func deploymentLifecycleStatus(resolved domain.ResolvedDeployment, replicas []do
 	// replicas, which also materialize as targets once ready.
 	if len(replicas) == 0 {
 		status.ReadyReplicas = healthyTargets
-		status.DesiredReplicas = len(resolved.Targets)
+		status.DesiredReplicas = primaryTargets
 	}
 	for _, replica := range replicas {
 		if replica.RevisionID == resolved.Deployment.ActiveRevisionID || resolved.Deployment.ActiveRevisionID == "" {

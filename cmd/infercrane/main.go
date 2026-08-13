@@ -169,9 +169,7 @@ func runLegacy(ctx context.Context, args []string) error {
 	if args[0] == "passport" && len(args) > 1 && (args[1] == "keygen" || args[1] == "verify") {
 		return passportCommand(ctx, config.Config{}, args[1:])
 	}
-	switch args[0] {
-	case "target", "deploy", "apply", "plan", "doctor", "connect", "adopt", "alert", "admission", "async", "ui", "dashboard", "deployments", "endpoints", "endpoint", "environment", "logical-model", "route", "status", "events", "logs", "request", "explain", "rollout", "delete", "inspect", "operation", "orphans", "integrations", "system", "context", "auth", "tenant", "principal", "secret", "external", "benchmark", "recipe", "recipes", "lab", "passport", "recommend", "slo", "serve":
-	default:
+	if !isPublicCommand(args[0]) {
 		return fmt.Errorf("unknown command %q", args[0])
 	}
 	if args[0] == "serve" {
@@ -677,7 +675,14 @@ func replayCommand(ctx context.Context, cfg config.Config, args []string) error 
 		return err
 	}
 	var summary struct{ Requests, InputTokensMean, OutputTokensMean, PeakConcurrency int }
-	if err = json.Unmarshal(captured.Replay.Summary, &summary); err != nil {
+	summaryJSON := captured.Replay.Summary
+	if len(summaryJSON) > 0 && summaryJSON[0] == '"' {
+		var encoded string
+		if err = json.Unmarshal(summaryJSON, &encoded); err == nil {
+			summaryJSON = []byte(encoded)
+		}
+	}
+	if err = json.Unmarshal(summaryJSON, &summary); err != nil {
 		return fmt.Errorf("decode replay summary: %w", err)
 	}
 	if *output == "json" && !*execute {
@@ -957,13 +962,17 @@ func recipeCommand(ctx context.Context, cfg config.Config, args []string) error 
 }
 
 func recipesCommand(ctx context.Context, cfg config.Config, args []string) error {
+	query := ""
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		query, args = args[0], args[1:]
+	}
 	fs := flag.NewFlagSet("recipes", flag.ContinueOnError)
 	limit := fs.Int("limit", 20, "maximum results")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if fs.NArg() > 1 {
+	if fs.NArg() != 0 {
 		return errors.New("usage: infercrane recipes [QUERY] [--limit N]")
 	}
 	if *limit < 1 || *limit > 100 {
@@ -971,10 +980,6 @@ func recipesCommand(ctx context.Context, cfg config.Config, args []string) error
 	}
 	if err := validateOutput(*output); err != nil {
 		return err
-	}
-	query := ""
-	if fs.NArg() == 1 {
-		query = fs.Arg(0)
 	}
 	var response struct {
 		Data []map[string]any `json:"data"`
@@ -3517,7 +3522,14 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		}
 		asyncService = &asyncinference.Service{Store: s, Cipher: cipher, KeyReference: cfg.AsyncEncryptionKeyReference, GatewayURL: cfg.ControlURL, APIKey: cfg.APIKey, Owner: cfg.InstanceID + ":async", Lease: time.Minute, Secrets: secrets.Environment{}}
 	}
-	control := (controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: credentialCache, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, AsyncInference: asyncService, ContextPassports: contextPassports, ProductVersion: version}).Handler()
+	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: credentialCache, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ProductVersion: version}
+	// Assign the optional service only when it exists. A nil *Service stored in
+	// an interface is non-nil and would otherwise turn the intended capability
+	// error into a panic when async encryption is not configured.
+	if asyncService != nil {
+		controlAPI.AsyncInference = asyncService
+	}
+	control := controlAPI.Handler()
 	operationTelemetry := &operations.Telemetry{}
 	handlers := workflows.DeploymentHandlers(s)
 	for kind, handler := range workflows.RolloutHandlers(s) {
