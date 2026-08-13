@@ -1093,6 +1093,23 @@ func TestSecretAPIAcceptsReferencesButNeverRawValues(t *testing.T) {
 	}
 }
 
+func TestSecretAPIEmptyListIsAJSONCollection(t *testing.T) {
+	store := &fakeEmptySecretStore{fakeStore: &fakeStore{}}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/secrets", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret"}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"data":[]`) {
+		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+}
+
+type fakeEmptySecretStore struct{ *fakeStore }
+
+func (*fakeEmptySecretStore) SecretReferencesForTenant(context.Context, string) ([]domain.SecretReference, error) {
+	return nil, nil
+}
+
 func TestOperatorCannotManageSecretReferences(t *testing.T) {
 	store := &fakeStore{principal: domain.Principal{ID: "operator", TenantID: "tenant-a", Name: "operator", Role: "operator", Scopes: []string{"read", "deploy"}}}
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/secrets", nil)

@@ -2582,6 +2582,9 @@ func (a API) secretReferences(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "secret references could not be listed")
 		return
 	}
+	if items == nil {
+		items = make([]domain.SecretReference, 0)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": items})
 }
 

@@ -55,7 +55,7 @@ func (s *Store) SecretReferencesForTenant(ctx context.Context, tenant string) ([
 		return nil, err
 	}
 	defer rows.Close()
-	var out []domain.SecretReference
+	out := make([]domain.SecretReference, 0)
 	for rows.Next() {
 		var item domain.SecretReference
 		var created, updated string

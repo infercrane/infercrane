@@ -88,6 +88,15 @@ func TestTargetAndDeploymentLifecycle(t *testing.T) {
 	}
 }
 
+func TestEmptySecretReferenceListIsNonNil(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	items, err := s.SecretReferencesForTenant(ctx, "global")
+	if err != nil || items == nil || len(items) != 0 {
+		t.Fatalf("secret references=%#v err=%v, want non-nil empty collection", items, err)
+	}
+}
+
 func TestDeploymentEventsAreInputAndReadBounded(t *testing.T) {
 	ctx := context.Background()
 	s := openStore(t, ctx)
