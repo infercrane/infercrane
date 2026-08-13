@@ -29,6 +29,18 @@ type Cost struct {
 	Reason string `json:"reason"`
 }
 
+// Readiness describes only evidence available before a deployment starts. It
+// deliberately carries no duration estimate: provider capacity, image
+// locality, and artifact locality are eventually consistent observations and
+// must not be guessed from a static specification.
+type Readiness struct {
+	EstimateStatus     string   `json:"estimate_status"`
+	ArtifactCacheState string   `json:"artifact_cache_state"`
+	CapacityState      string   `json:"capacity_state"`
+	Stages             []string `json:"stages,omitempty"`
+	Reason             string   `json:"reason"`
+}
+
 type Change struct {
 	Field  string `json:"field"`
 	Before string `json:"before"`
@@ -42,22 +54,23 @@ type Current struct {
 }
 
 type Plan struct {
-	Version     int      `json:"version"`
-	Name        string   `json:"name"`
-	Model       string   `json:"model"`
-	Mode        string   `json:"mode"`
-	Cloud       string   `json:"cloud,omitempty"`
-	GPU         string   `json:"gpu,omitempty"`
-	Region      string   `json:"region,omitempty"`
-	Runtime     string   `json:"runtime"`
-	Routing     string   `json:"routing"`
-	Targets     []string `json:"targets,omitempty"`
-	MinReplicas int      `json:"min_replicas"`
-	MaxReplicas int      `json:"max_replicas"`
-	Actions     []Action `json:"actions"`
-	Changes     []Change `json:"changes,omitempty"`
-	Warnings    []string `json:"warnings,omitempty"`
-	Cost        Cost     `json:"cost"`
+	Version     int       `json:"version"`
+	Name        string    `json:"name"`
+	Model       string    `json:"model"`
+	Mode        string    `json:"mode"`
+	Cloud       string    `json:"cloud,omitempty"`
+	GPU         string    `json:"gpu,omitempty"`
+	Region      string    `json:"region,omitempty"`
+	Runtime     string    `json:"runtime"`
+	Routing     string    `json:"routing"`
+	Targets     []string  `json:"targets,omitempty"`
+	MinReplicas int       `json:"min_replicas"`
+	MaxReplicas int       `json:"max_replicas"`
+	Actions     []Action  `json:"actions"`
+	Changes     []Change  `json:"changes,omitempty"`
+	Warnings    []string  `json:"warnings,omitempty"`
+	Cost        Cost      `json:"cost"`
+	Readiness   Readiness `json:"readiness"`
 }
 
 // Compare turns a creation plan into a deterministic revision rollout plan.
@@ -165,7 +178,14 @@ func Build(in Input) (Plan, error) {
 	p := Plan{Version: 1, Name: in.Name, Model: in.Model, Cloud: in.Cloud, GPU: in.GPU,
 		Region: in.Region, Runtime: in.Runtime, Routing: in.Routing, Targets: in.Targets,
 		MinReplicas: in.MinReplicas, MaxReplicas: in.MaxReplicas,
-		Cost: Cost{Status: "unavailable", Reason: "live provider pricing is not configured; no estimate is fabricated"}}
+		Cost: Cost{Status: "unavailable", Reason: "live provider pricing is not configured; no estimate is fabricated"},
+		Readiness: Readiness{
+			EstimateStatus:     "unavailable",
+			ArtifactCacheState: "unknown",
+			CapacityState:      "unknown",
+			Stages:             []string{"capacity", "container", "artifact", "runtime", "readiness"},
+			Reason:             "fresh provider capacity and artifact-cache observations are not available during this static plan; no startup time is fabricated",
+		}}
 	add := func(kind, summary string) {
 		p.Actions = append(p.Actions, Action{Order: len(p.Actions) + 1, Kind: kind, Summary: summary})
 	}
@@ -173,6 +193,7 @@ func Build(in Input) (Plan, error) {
 	switch {
 	case len(in.Targets) > 0:
 		p.Mode = "existing-targets"
+		p.Readiness = Readiness{EstimateStatus: "externally-managed", ArtifactCacheState: "not-observed", CapacityState: "not-observed", Reason: "startup and cache lifecycle remain owned by the connected target operator"}
 		add("resolve", fmt.Sprintf("Resolve %d registered target(s)", len(in.Targets)))
 	case in.ComputeMode == "serverless" && in.Cloud != "":
 		p.Mode = "serverless"

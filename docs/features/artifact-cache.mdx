@@ -48,3 +48,16 @@ state from becoming a permanent planning assumption.
 The current surface establishes lifecycle-safe intent and evidence. Actual cache population remains
 adapter-specific and requires qualification on the selected infrastructure.
 </Note>
+
+## Why prefetch is not a universal download command
+
+Providers expose different ownership boundaries. For example, RunPod Serverless configures one
+[cached model on an endpoint](https://docs.runpod.io/serverless/endpoints/model-caching), while an
+EC2 or Kubernetes deployment commonly obtains locality from a persistent volume, snapshot, node
+cache, or image strategy owned by that workload. Those are not interchangeable APIs.
+
+InferCrane therefore does not download model weights through a custom protocol and does not mark a
+prefetch request as a cache hit. An adapter may consume the durable intent using its native
+mechanism, but it must publish a bounded fresh observation before planning or placement can rely on
+locality. Until then, `infercrane plan` reports artifact cache and startup time as `unknown` and
+`unavailable`.

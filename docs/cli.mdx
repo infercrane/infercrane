@@ -216,6 +216,18 @@ infercrane plan Qwen/Qwen3-8B \
   --max 4
 ```
 
+Provisioned and serverless plans include an explicit readiness-evidence boundary:
+
+```text
+Readiness: unavailable — fresh provider capacity and artifact-cache observations are not available during this static plan; no startup time is fabricated
+Artifact cache: unknown
+Capacity:       unknown
+Startup stages: capacity -> container -> artifact -> runtime -> readiness
+```
+
+This is intentionally not a time estimate. Once an operation starts, durable events replace unknown
+stages with provider and runtime observations where those boundaries are actually exposed.
+
 ### `deploy` and `apply`
 
 `deploy` creates a cloud or existing-target deployment. `apply` declaratively converges a deployment using the same input shape.

@@ -418,6 +418,44 @@ func TestDeployCLIOnlySubmitsControlPlaneRequest(t *testing.T) {
 	}
 }
 
+func TestPlanMakesUnknownStartupEvidenceExplicit(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || !strings.HasPrefix(r.URL.Path, "/api/v1/deployments/") {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = io.WriteString(w, `{"error":{"code":"not_found","message":"deployment was not found"}}`)
+	}))
+	defer server.Close()
+	cfg := config.Config{ControlURL: server.URL, APIKey: "secret"}
+
+	human, err := captureStdout(t, func() error {
+		return planCommand(context.Background(), cfg, []string{"Qwen/Qwen3-8B", "--cloud", "runpod", "--gpu", "L40S"})
+	})
+	if err != nil || !strings.Contains(human, "Readiness: unavailable") || !strings.Contains(human, "Artifact cache: unknown") || !strings.Contains(human, "capacity -> container -> artifact -> runtime -> readiness") {
+		t.Fatalf("human=%q err=%v", human, err)
+	}
+
+	encoded, err := captureStdout(t, func() error {
+		return planCommand(context.Background(), cfg, []string{"Qwen/Qwen3-8B", "--cloud", "runpod", "--gpu", "L40S", "--output", "json"})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output struct {
+		Readiness struct {
+			EstimateStatus     string   `json:"estimate_status"`
+			ArtifactCacheState string   `json:"artifact_cache_state"`
+			CapacityState      string   `json:"capacity_state"`
+			Stages             []string `json:"stages"`
+		} `json:"readiness"`
+	}
+	if err = json.Unmarshal([]byte(encoded), &output); err != nil || output.Readiness.EstimateStatus != "unavailable" || output.Readiness.ArtifactCacheState != "unknown" || output.Readiness.CapacityState != "unknown" || len(output.Readiness.Stages) != 5 {
+		t.Fatalf("output=%s parsed=%#v err=%v", encoded, output, err)
+	}
+}
+
 func TestDoctorCLIOnlyReadsAuthenticatedControlPlaneDiagnostics(t *testing.T) {
 	var requested string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

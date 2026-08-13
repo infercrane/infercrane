@@ -114,3 +114,15 @@ Examples use qualified product surfaces, but infrastructure and runtime combinat
 evidence states. Check the [capability matrix](/project-status) before relying on a combination in
 production.
 </Note>
+
+## Run the proof loop locally
+
+```bash
+git clone https://github.com/infercrane/infercrane.git
+cd infercrane
+make demo
+```
+
+The hermetic demo exercises adoption, a real proxied fixture request, Request Inspector, Doctor,
+immutable candidate creation, Release Guard rejection, deterministic explanation, and cleanup. It
+does not provision a GPU and cannot be used as provider or performance evidence.

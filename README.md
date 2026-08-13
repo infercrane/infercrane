@@ -29,6 +29,17 @@ qualified for the exact serving plan.
 
 Read the [InferCrane documentation](https://infercrane.mintlify.site) for the five-minute local quickstart, product concepts, operations, integrations, and references. The Mintlify source lives in [`docs/`](docs/index.mdx); run `npm install && npm run dev` there to preview documentation changes locally.
 
+See the complete safety loop locally with one hermetic command:
+
+```bash
+make demo
+```
+
+The demo connects an existing OpenAI-compatible worker, sends and inspects a request, creates an
+intentionally unready candidate, records a deterministic Release Guard rejection, proves the active
+revision did not change, and removes the isolated stack. It uses fixtures and creates no cloud or GPU
+resources.
+
 For coding agents and LLM indexing, Mintlify continuously generates
 [`llms.txt`](https://infercrane.mintlify.site/llms.txt) and
 [`llms-full.txt`](https://infercrane.mintlify.site/llms-full.txt) from the current public navigation.

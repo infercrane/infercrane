@@ -7,7 +7,7 @@ func TestBuildProvisionedPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Name != "qwen3-8b" || p.Mode != "provisioned" || len(p.Actions) != 6 {
+	if p.Name != "qwen3-8b" || p.Mode != "provisioned" || len(p.Actions) != 6 || p.Readiness.EstimateStatus != "unavailable" || p.Readiness.ArtifactCacheState != "unknown" || len(p.Readiness.Stages) != 5 {
 		t.Fatalf("unexpected plan: %#v", p)
 	}
 }
@@ -43,6 +43,16 @@ func TestBuildRejectsMixedModes(t *testing.T) {
 	_, err := Build(Input{Model: "model", Targets: []string{"gpu-a"}, Cloud: "aws", GPU: "L4"})
 	if err == nil {
 		t.Fatal("expected mixed mode error")
+	}
+}
+
+func TestExistingTargetPlanDoesNotClaimProviderReadinessEvidence(t *testing.T) {
+	p, err := Build(Input{Model: "model", Targets: []string{"worker-a"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Readiness.EstimateStatus != "externally-managed" || p.Readiness.ArtifactCacheState != "not-observed" || p.Readiness.CapacityState != "not-observed" || len(p.Readiness.Stages) != 0 {
+		t.Fatalf("unexpected readiness evidence: %#v", p.Readiness)
 	}
 }
 

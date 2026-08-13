@@ -155,6 +155,18 @@ fi
 grep -Fq 'wait "$load_pid"' "$root/scripts/release-acceptance.sh"
 grep -Fq 'INFERCRANE_ACCEPTANCE_GUARD_REQUESTS:-100' "$root/scripts/release-acceptance.sh"
 
+# The public local demo must remain hermetic. It may persist an intentionally
+# unready cloud-shaped candidate to exercise policy, but it must never invoke
+# provisioning or paid qualification. It also has to assert the active
+# revision identity before claiming that the rejected candidate was safe.
+grep -Fq 'LOCAL FIXTURE DEMO' "$root/scripts/demo-connect.sh"
+grep -Fq 'rollout evaluate qwen-prod --wait' "$root/scripts/demo-connect.sh"
+grep -Fq '.deployment.active_revision_id == $active' "$root/scripts/demo-connect.sh"
+if grep -Eq 'rollout (provision|validate)|--approve-paid-resources|release-acceptance\.sh' "$root/scripts/demo-product.sh" "$root/scripts/demo-connect.sh"; then
+  echo "local product demo contains a paid or provisioning action" >&2
+  exit 1
+fi
+
 # Cleanup success and provider inventory absence are separate from the suite
 # result. A failed suite report must never look qualified merely because its
 # guarded cleanup reached zero resources.

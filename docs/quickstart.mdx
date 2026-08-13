@@ -13,6 +13,20 @@ The local stack uses GPU-free fake vLLM workers. It proves application and lifec
 model quality, GPU performance, or real-provider compatibility.
 </Info>
 
+## See the complete safety loop first
+
+From a repository checkout, one command runs the local product proof and cleans up its isolated
+Docker project:
+
+```bash
+make demo
+```
+
+It connects an existing endpoint, sends and inspects a request, creates an intentionally unready
+candidate without provisioning it, records a deterministic Release Guard rejection, verifies the
+active revision did not change, rejects the candidate, and removes all temporary state. The output
+is explicitly marked as fixture evidence; it does not claim GPU or provider qualification.
+
 ## Prerequisites
 
 - Git

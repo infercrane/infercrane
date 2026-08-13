@@ -487,6 +487,11 @@ func planCommand(ctx context.Context, cfg config.Config, args []string) error {
 		for _, warning := range p.Warnings {
 			fmt.Printf("\nWarning: %s\n", warning)
 		}
+		fmt.Printf("\nReadiness: %s — %s\n", p.Readiness.EstimateStatus, p.Readiness.Reason)
+		fmt.Printf("Artifact cache: %s\nCapacity:       %s\n", p.Readiness.ArtifactCacheState, p.Readiness.CapacityState)
+		if len(p.Readiness.Stages) > 0 {
+			fmt.Printf("Startup stages: %s\n", strings.Join(p.Readiness.Stages, " -> "))
+		}
 		fmt.Printf("\nCost: %s — %s\n", p.Cost.Status, p.Cost.Reason)
 	default:
 		return errors.New("--output must be human or json")
