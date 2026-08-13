@@ -24,6 +24,7 @@ qualified for the exact serving plan.
 - Evidence-based SLO recommendations
 - Explainable durable operations
 - Signed external task-quality evidence
+- Evaluator-neutral quality-result ingestion for CI, Ragas, DeepEval, or custom suites
 - Safe staging-to-production candidate promotion
 - Elastic and provider-native serverless compute
 

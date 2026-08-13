@@ -175,6 +175,7 @@ func addHelpFlags(command *cobra.Command, name string) {
 		intFlag("port", 8000, "local loopback port")
 	case "evaluation":
 		stringFlag("file", "", "input or output evidence file")
+		stringFlag("result", "", "content-free evaluator result JSON")
 		stringFlag("key", "", "Ed25519 evaluator private key")
 		stringFlag("suite", "", "evaluation suite name")
 		stringFlag("suite-version", "", "immutable suite version")
@@ -185,6 +186,7 @@ func addHelpFlags(command *cobra.Command, name string) {
 		stringFlag("evaluated-at", "", "RFC3339 evaluation time")
 		intFlag("samples", 0, "evaluated sample count")
 		boolFlag("passed", "external suite pass result")
+		boolFlag("attach", "attach ingested evidence through the control-plane API")
 	case "artifact":
 		stringFlag("provider", "", "provider adapter")
 		stringFlag("region", "", "provider region")
@@ -377,7 +379,7 @@ func addHelpFlags(command *cobra.Command, name string) {
 func completionFor(command string) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 	flags := map[string][]string{
 		"workload":    {"--model", "--recipe", "--name", "--runtime", "--cloud", "--gpu", "--region", "--tag", "--file", "--platform", "--push", "--force", "--wait", "--detach", "--port", "--output"},
-		"evaluation":  {"--file", "--key", "--suite", "--suite-version", "--evaluator", "--evaluator-version", "--score", "--passed", "--samples", "--artifact-digest", "--evaluated-at", "--output"},
+		"evaluation":  {"--file", "--result", "--key", "--suite", "--suite-version", "--evaluator", "--evaluator-version", "--score", "--passed", "--samples", "--artifact-digest", "--evaluated-at", "--attach", "--output"},
 		"artifact":    {"--provider", "--region", "--location", "--state", "--source", "--ttl", "--idempotency-key", "--output"},
 		"deploy":      {"--name", "--cloud", "--gpu", "--region", "--compute", "--min", "--max", "--wait", "--wait-timeout", "--idempotency-key", "--output"},
 		"apply":       {"--name", "--cloud", "--gpu", "--region", "--compute", "--min", "--max", "--wait", "--wait-timeout", "--idempotency-key", "--output"},

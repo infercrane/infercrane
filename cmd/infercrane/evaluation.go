@@ -22,13 +22,15 @@ import (
 
 func evaluationCommand(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: infercrane evaluation keygen|sign|verify|attach|list [arguments]")
+		return errors.New("usage: infercrane evaluation keygen|ingest|sign|verify|attach|list [arguments]")
 	}
 	switch args[0] {
 	case "keygen":
 		return evaluationKeygenCommand(args[1:])
 	case "sign":
 		return evaluationSignCommand(args[1:])
+	case "ingest":
+		return evaluationIngestCommand(ctx, args[1:])
 	case "verify":
 		return evaluationVerifyCommand(args[1:])
 	case "attach", "list":
@@ -40,6 +42,62 @@ func evaluationCommand(ctx context.Context, args []string) error {
 	default:
 		return fmt.Errorf("unknown evaluation action %q", args[0])
 	}
+}
+
+func evaluationIngestCommand(ctx context.Context, args []string) error {
+	if len(args) < 2 {
+		return errors.New("usage: infercrane evaluation ingest DEPLOYMENT REVISION --result RESULT.json --key KEY --file EVIDENCE.json [--attach]")
+	}
+	deployment, revision := args[0], args[1]
+	fs := flag.NewFlagSet("evaluation ingest", flag.ContinueOnError)
+	resultPath := fs.String("result", "", "content-free evaluator result JSON")
+	keyPath := fs.String("key", "", "Ed25519 evaluator private key")
+	filePath := fs.String("file", "", "signed evidence destination")
+	attach := fs.Bool("attach", false, "attach signed evidence through the control-plane API")
+	if err := fs.Parse(args[2:]); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 || *resultPath == "" || *keyPath == "" || *filePath == "" {
+		return errors.New("ingest requires --result, --key, and --file")
+	}
+	body, err := os.ReadFile(*resultPath)
+	if err != nil {
+		return fmt.Errorf("read evaluator result: %w", err)
+	}
+	result, err := qualityevidence.DecodeResult(body)
+	if err != nil {
+		return err
+	}
+	payload := result.Bind(deployment, revision)
+	if err = payload.Validate(); err != nil {
+		return err
+	}
+	privateKey, err := loadPassportSigningKey(*keyPath)
+	if err != nil {
+		return err
+	}
+	envelope, err := passport.Sign(payload, privateKey)
+	if err != nil {
+		return err
+	}
+	if err = writeQualityEnvelope(*filePath, envelope); err != nil {
+		return err
+	}
+
+	if *attach {
+		cfg, loadErr := config.LoadClient()
+		if loadErr != nil {
+			return fmt.Errorf("signed evidence was written to %s but could not load control-plane configuration for attachment: %w", *filePath, loadErr)
+		}
+		path := "/api/v1/deployments/" + url.PathEscape(deployment) + "/quality-evidence"
+		var response map[string]any
+		if attachErr := controlJSON(ctx, cfg, http.MethodPost, path, envelope.Digest, envelope, &response); attachErr != nil {
+			return fmt.Errorf("signed evidence was written to %s but attachment failed: %w", *filePath, attachErr)
+		}
+	}
+
+	fmt.Printf("Evaluator result ingested\nDeployment  %s\nRevision    %s\nSuite       %s@%s\nEvaluator   %s@%s\nScore       %.4f\nPassed      %t\nDigest      %s\nFile        %s\nAttached    %t\n\nOnly aggregate evidence was signed; unknown fields and prompt/output content are rejected.\n", deployment, revision, result.Suite, result.SuiteVersion, result.Evaluator, result.EvaluatorVersion, result.Score, result.Passed, envelope.Digest, *filePath, *attach)
+	return nil
 }
 
 func evaluationKeygenCommand(args []string) error {
@@ -124,10 +182,21 @@ func evaluationSignCommand(args []string) error {
 	if err != nil {
 		return err
 	}
-	encoded, _ := json.MarshalIndent(envelope, "", "  ")
-	file, err := os.OpenFile(*filePath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err = writeQualityEnvelope(*filePath, envelope); err != nil {
+		return err
+	}
+	fmt.Printf("Signed quality evidence\nDeployment  %s\nRevision    %s\nSuite       %s@%s\nScore       %.4f\nPassed      %t\nDigest      %s\nKey         %s\nFile        %s\n\nNo prompt or output content was included.\n", deployment, revision, *suite, *suiteVersion, score, *passed, envelope.Digest, envelope.KeyID, *filePath)
+	return nil
+}
+
+func writeQualityEnvelope(path string, envelope passport.Envelope) error {
+	encoded, err := json.MarshalIndent(envelope, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode quality evidence: %w", err)
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if errors.Is(err, os.ErrExist) {
-		return fmt.Errorf("refusing to overwrite existing evidence file %s", *filePath)
+		return fmt.Errorf("refusing to overwrite existing evidence file %s", path)
 	}
 	if err != nil {
 		return err
@@ -136,11 +205,7 @@ func evaluationSignCommand(args []string) error {
 		_ = file.Close()
 		return err
 	}
-	if err = file.Close(); err != nil {
-		return err
-	}
-	fmt.Printf("Signed quality evidence\nDeployment  %s\nRevision    %s\nSuite       %s@%s\nScore       %.4f\nPassed      %t\nDigest      %s\nKey         %s\nFile        %s\n\nNo prompt or output content was included.\n", deployment, revision, *suite, *suiteVersion, score, *passed, envelope.Digest, envelope.KeyID, *filePath)
-	return nil
+	return file.Close()
 }
 
 func evaluationVerifyCommand(args []string) error {
@@ -218,7 +283,7 @@ func readQualityEnvelope(path string) (passport.Envelope, qualityevidence.Payloa
 	if err != nil {
 		return passport.Envelope{}, qualityevidence.Payload{}, fmt.Errorf("read quality evidence: %w", err)
 	}
-	if len(body) > 1<<20 {
+	if len(body) > qualityevidence.MaxFileSize {
 		return passport.Envelope{}, qualityevidence.Payload{}, errors.New("quality evidence file exceeds 1 MiB")
 	}
 	decoder := json.NewDecoder(strings.NewReader(string(body)))

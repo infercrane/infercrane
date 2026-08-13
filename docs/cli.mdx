@@ -136,6 +136,8 @@ Prefetch records durable intent; only a fresh provider observation is cache-hit 
 
 ```bash
 infercrane evaluation keygen --file quality-evidence.key
+infercrane evaluation ingest DEPLOYMENT REVISION --result evaluator-result.json \
+  --key quality-evidence.key --file evidence.json --attach
 infercrane evaluation sign DEPLOYMENT REVISION --suite SUITE --suite-version VERSION \
   --evaluator NAME --evaluator-version VERSION --score 0.95 --passed=true \
   --samples 100 --artifact-digest sha256:DIGEST \
@@ -145,7 +147,9 @@ infercrane evaluation attach DEPLOYMENT --file evidence.json
 infercrane evaluation list DEPLOYMENT
 ```
 
-Evidence is signature-verified, bound to one immutable revision, and contains aggregate values only.
+`ingest` accepts the strict evaluator-result v1 interchange contract, rejects unknown content fields,
+binds it to one immutable revision, signs it, and optionally attaches it. Evidence is
+signature-verified and contains aggregate values only.
 
 ### `mcp`
 

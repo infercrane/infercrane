@@ -16,7 +16,11 @@ import (
 	"github.com/infercrane/infercrane/internal/passport"
 )
 
-const Schema = "infercrane.dev/quality-evidence/v1"
+const (
+	Schema       = "infercrane.dev/quality-evidence/v1"
+	ResultSchema = "infercrane.dev/evaluator-result/v1"
+	MaxFileSize  = 1 << 20
+)
 
 var sha256Pattern = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
 
@@ -33,6 +37,68 @@ type Payload struct {
 	SampleCount      int       `json:"sample_count"`
 	ArtifactDigest   string    `json:"artifact_digest"`
 	EvaluatedAt      time.Time `json:"evaluated_at"`
+}
+
+// Result is the content-free interchange boundary between a customer-owned
+// evaluator and InferCrane. It deliberately excludes deployment identity,
+// prompt bodies, and generated outputs. The CLI binds a validated result to an
+// immutable deployment revision before signing the existing Payload format.
+type Result struct {
+	Schema           string    `json:"schema"`
+	Suite            string    `json:"suite"`
+	SuiteVersion     string    `json:"suite_version"`
+	Evaluator        string    `json:"evaluator"`
+	EvaluatorVersion string    `json:"evaluator_version"`
+	Score            float64   `json:"score"`
+	Passed           bool      `json:"passed"`
+	SampleCount      int       `json:"sample_count"`
+	ArtifactDigest   string    `json:"artifact_digest"`
+	EvaluatedAt      time.Time `json:"evaluated_at"`
+}
+
+func DecodeResult(body []byte) (Result, error) {
+	if len(body) > MaxFileSize {
+		return Result{}, errors.New("evaluator result exceeds 1 MiB")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	var result Result
+	if err := decoder.Decode(&result); err != nil {
+		return Result{}, fmt.Errorf("decode evaluator result: %w", err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return Result{}, errors.New("evaluator result contains trailing JSON")
+		}
+		return Result{}, fmt.Errorf("decode trailing evaluator result: %w", err)
+	}
+	if err := result.Validate(); err != nil {
+		return Result{}, err
+	}
+	return result, nil
+}
+
+func (r Result) Validate() error {
+	if r.Schema != ResultSchema {
+		return fmt.Errorf("evaluator result schema must be %q", ResultSchema)
+	}
+	payload := Payload{
+		Schema: Schema, Deployment: "binding-validated-by-cli", RevisionID: "binding-validated-by-cli",
+		Suite: r.Suite, SuiteVersion: r.SuiteVersion, Evaluator: r.Evaluator,
+		EvaluatorVersion: r.EvaluatorVersion, Score: r.Score, Passed: r.Passed,
+		SampleCount: r.SampleCount, ArtifactDigest: r.ArtifactDigest, EvaluatedAt: r.EvaluatedAt,
+	}
+	return payload.Validate()
+}
+
+func (r Result) Bind(deployment, revision string) Payload {
+	return Payload{
+		Schema: Schema, Deployment: deployment, RevisionID: revision, Suite: r.Suite,
+		SuiteVersion: r.SuiteVersion, Evaluator: r.Evaluator,
+		EvaluatorVersion: r.EvaluatorVersion, Score: r.Score, Passed: r.Passed,
+		SampleCount: r.SampleCount, ArtifactDigest: r.ArtifactDigest, EvaluatedAt: r.EvaluatedAt,
+	}
 }
 
 func Decode(envelope passport.Envelope) (Payload, error) {

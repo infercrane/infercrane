@@ -1,0 +1,12 @@
+{
+  "schema": "infercrane.dev/evaluator-result/v1",
+  "suite": "support-answers",
+  "suite_version": "git:8a91d7c",
+  "evaluator": "customer-eval-ci",
+  "evaluator_version": "1.4.0",
+  "score": 0.93,
+  "passed": true,
+  "sample_count": 250,
+  "artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "evaluated_at": "2026-08-13T20:00:00Z"
+}

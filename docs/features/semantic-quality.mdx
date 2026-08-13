@@ -21,7 +21,44 @@ infercrane evaluation keygen --file ./quality-evidence.key
 Keep the private Ed25519 key outside the control plane. The operator authorized to attach evidence is
 the trust boundary.
 
-## Sign aggregate evidence
+## Ingest a result from any evaluator
+
+Have Ragas, DeepEval, a custom CI evaluator, or another customer-controlled system emit the strict
+content-free [evaluator result contract](https://github.com/infercrane/infercrane/blob/main/schemas/evaluator-result-v1.schema.json):
+
+```json evaluator-result.json
+{
+  "schema": "infercrane.dev/evaluator-result/v1",
+  "suite": "support-answers",
+  "suite_version": "git:8a91d7c",
+  "evaluator": "customer-eval-ci",
+  "evaluator_version": "1.4.0",
+  "score": 0.93,
+  "passed": true,
+  "sample_count": 250,
+  "artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "evaluated_at": "2026-08-13T20:00:00Z"
+}
+```
+
+Bind that aggregate result to the exact immutable candidate revision, sign it, and explicitly attach
+it through the control-plane API:
+
+```bash
+infercrane evaluation ingest qwen-prod REVISION_ID \
+  --result ./evaluator-result.json \
+  --key ./quality-evidence.key \
+  --file ./candidate-quality.json \
+  --attach
+
+infercrane evaluation verify ./candidate-quality.json
+```
+
+Unknown fields are rejected, so prompt and generated-output bodies cannot accidentally enter the
+evidence envelope. If API attachment fails, the signed local file remains available for a safe
+`evaluation attach` retry.
+
+## Sign aggregate evidence directly
 
 ```bash
 infercrane evaluation sign qwen-prod REVISION_ID \

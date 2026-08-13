@@ -69,3 +69,47 @@ func TestSignedEvidenceRejectsTrailingJSON(t *testing.T) {
 		t.Fatalf("expected trailing JSON rejection, got %v", err)
 	}
 }
+
+func TestEvaluatorResultStrictlyDecodesAndBinds(t *testing.T) {
+	resultJSON := `{
+  "schema":"infercrane.dev/evaluator-result/v1",
+  "suite":"support-answers",
+  "suite_version":"git:8a91d7c",
+  "evaluator":"custom-ci",
+  "evaluator_version":"1.4.0",
+  "score":0.93,
+  "passed":true,
+  "sample_count":250,
+  "artifact_digest":"sha256:` + strings.Repeat("d", 64) + `",
+  "evaluated_at":"2026-08-13T20:00:00Z"
+}`
+	result, err := DecodeResult([]byte(resultJSON))
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := result.Bind("coder-prod", "rev-19")
+	if err = payload.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Deployment != "coder-prod" || payload.RevisionID != "rev-19" || payload.Score != .93 {
+		t.Fatalf("payload=%+v", payload)
+	}
+}
+
+func TestEvaluatorResultRejectsContentUnknownFieldsAndOversize(t *testing.T) {
+	base := `{"schema":"infercrane.dev/evaluator-result/v1","suite":"s","suite_version":"v1","evaluator":"e","evaluator_version":"v1","score":0.8,"passed":true,"sample_count":1,"artifact_digest":"sha256:` + strings.Repeat("e", 64) + `","evaluated_at":"2026-08-13T20:00:00Z"`
+	for name, suffix := range map[string]string{
+		"prompt content":  `,"prompt":"secret prompt"}`,
+		"output content":  `,"output":"secret answer"}`,
+		"trailing object": `} {"unexpected":true}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := DecodeResult([]byte(base + suffix)); err == nil {
+				t.Fatalf("expected %s rejection", name)
+			}
+		})
+	}
+	if _, err := DecodeResult(make([]byte, MaxFileSize+1)); err == nil || !strings.Contains(err.Error(), "exceeds 1 MiB") {
+		t.Fatalf("err=%v", err)
+	}
+}
