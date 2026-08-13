@@ -147,7 +147,7 @@ func addHelpFlags(command *cobra.Command, name string) {
 	boolFlag := func(flag, help string) { command.Flags().Bool(flag, false, help) }
 	intFlag := func(flag string, value int, help string) { command.Flags().Int(flag, value, help) }
 	switch name {
-	case "init", "doctor", "connect", "adopt", "alert", "admission", "async", "plan", "deploy", "apply", "request", "deployments", "endpoints", "endpoint", "environment", "logical-model", "status", "logs", "events", "inspect", "explain", "benchmark", "replay", "capacity", "finops", "autopilot", "session", "burst", "recipe", "recipes", "lab", "passport", "recommend", "slo", "delete", "orphans", "operation", "integrations", "dashboard":
+	case "init", "doctor", "connect", "adopt", "alert", "admission", "async", "plan", "deploy", "apply", "request", "deployments", "endpoints", "endpoint", "environment", "logical-model", "status", "logs", "events", "inspect", "explain", "benchmark", "replay", "capacity", "finops", "autopilot", "session", "burst", "recipe", "recipes", "lab", "passport", "recommend", "slo", "delete", "orphans", "operation", "integrations", "dashboard", "target", "auth", "system", "secret", "external", "rollout":
 		stringFlag("output", "human", "output format: human or json")
 	}
 	switch name {

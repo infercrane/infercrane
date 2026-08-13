@@ -97,7 +97,7 @@ type Result struct {
 }
 
 func Recommend(policy SLOPolicy, evidence []Evidence) Result {
-	result := Result{Status: "unknown", AlgorithmVersion: AlgorithmVersion, Reason: "insufficient trustworthy benchmark evidence"}
+	result := Result{Status: "unknown", AlgorithmVersion: AlgorithmVersion, Reason: "insufficient trustworthy benchmark evidence", Missing: []string{}, Candidates: []Candidate{}}
 	if len(evidence) == 0 {
 		result.Missing = []string{"benchmark_evidence"}
 		return result
@@ -226,6 +226,9 @@ func finite(value float64) bool { return !math.IsNaN(value) && !math.IsInf(value
 
 func Snapshot(policy SLOPolicy, evidence []Evidence, result Result) (string, error) {
 	evidence = append([]Evidence(nil), evidence...)
+	if evidence == nil {
+		evidence = []Evidence{}
+	}
 	sort.Slice(evidence, func(i, j int) bool { return evidence[i].ID < evidence[j].ID })
 	value := struct {
 		Policy   SLOPolicy  `json:"policy"`

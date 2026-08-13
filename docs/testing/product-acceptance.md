@@ -18,6 +18,7 @@ journeys are available when investigating a failure:
 ./scripts/product-acceptance.sh list
 ./scripts/product-acceptance.sh offline
 ./scripts/product-acceptance.sh first-value
+./scripts/product-acceptance.sh modules
 ./scripts/product-acceptance.sh adoption
 ./scripts/product-acceptance.sh reliability
 ./scripts/product-acceptance.sh release
@@ -31,6 +32,11 @@ The journeys prove:
 - Python and TypeScript client compatibility;
 - dashboard security headers and authenticated control API behavior;
 - status, events, inspect, integrations, explanations, and JSON automation output;
+- logical models, environments, stable serving plans, admission, governed external fallback, alerts,
+  encrypted async jobs, sessions, replay, capacity, FinOps, SLOs, recommendations, Burst Guard,
+  Inference Lab, and evidence-unavailable fail-closed behavior through public commands;
+- strict async protocol/model validation before durable queueing, consistent JSON collection
+  contracts, CLI argument rejection, referenced-secret protection, and bounded public HTTP headers;
 - observe-only and traffic-managed adoption without deleting externally owned workers;
 - control-plane failure recovery, HA, and backup/restore behavior;
 - the full repository, provider-contract, Kind, container, documentation, audit, dead-code, and
@@ -40,6 +46,10 @@ Local fake runtimes prove InferCrane behavior, not GPU model quality or provider
 RunPod, AWS, and Kubernetes qualification remains separate and explicitly paid. Use the consolidated
 RunPod orchestrator in `docs/v2-manual-qualification.md`; never run it concurrently with another paid
 acceptance command.
+
+Release Guard proves deterministic infrastructure and measured performance policy. It does not
+evaluate semantic answer correctness, hallucination, groundedness, or task success. Those remain an
+external offline-evaluation and human-approval responsibility.
 
 ## Acceptance rules
 

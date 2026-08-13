@@ -66,7 +66,7 @@ run_supply_chain() {
 }
 
 run_product_journeys() {
-  for journey in offline first-value adoption reliability; do
+  for journey in offline first-value modules adoption reliability; do
     INFERCRANE_PRODUCT_ACCEPTANCE_RUN_ID="$short-product" \
       "$root/scripts/product-acceptance.sh" "$journey" || return
   done

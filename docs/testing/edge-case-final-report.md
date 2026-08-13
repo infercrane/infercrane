@@ -3,10 +3,10 @@
 ## Executive Summary
 
 - Failure patterns researched: 16 production failure classes, covering distributed operations, PostgreSQL transactions, reconciliation, autoscaling, routing/streaming, releases, serverless, provider APIs, security, admission, Kubernetes, AWS, RunPod, runtimes, resource exhaustion, and upgrades.
-- Hypotheses investigated: 44 ledgered high-value hypotheses.
-- New tests added: 27 named regression, stress, and fuzz tests, plus strengthened existing provider and workflow cases.
-- Bugs reproduced: 28 locally reproducible defects.
-- Bugs fixed: 28, each retained in the regression suite.
+- Hypotheses investigated: 50 ledgered high-value hypotheses.
+- New tests added: 33 named regression, stress, and fuzz tests, plus a broad public module journey and an immutable runtime-publication contract.
+- Bugs reproduced: 32 locally reproducible defects.
+- Bugs fixed: 32, each retained in the regression suite.
 - Critical bugs remaining: 0 known locally reproducible defects.
 - High bugs remaining: 0 known locally reproducible defects.
 - Real-infrastructure edge cases remaining: provider, GPU-runtime, network, multi-host, and long-duration behavior listed in [manual edge cases](/testing/manual-edge-cases). One directly applicable security qualification remains open: replacing or isolating the pinned vLLM 0.8.5.post1 runtime because of GHSA-rxc4-3w6r-4v47.
@@ -96,6 +96,45 @@ These results prove the tested InferCrane logic against local, PostgreSQL, Docke
 - Fix: process all independent items, aggregate errors afterward, and still stop promptly for context cancellation.
 - Regression tests: autoscale, request-quota, and reconciler isolation cases.
 
+### Invalid async work was queued and retried
+
+- Failure scenario: a request without the endpoint model identity enters the durable encrypted
+  queue, consumes three attempts, and only then fails at the gateway.
+- Source/inspiration: queue admission must reject permanently invalid work before persistence.
+- Reproduction: the black-box endpoint accepted a missing-model payload and recorded all retry
+  attempts.
+- Root cause: protocol-native validation happened only during execution.
+- Fix: validate the supported protocol, JSON object, required model, and endpoint/model equality
+  before encryption and durable submission.
+- Regression test: `TestAsyncInferenceRejectsInvalidProtocolAndEndpointModelBeforeQueueing` plus the
+  public module journey.
+
+### Public CLI automation contracts were inconsistent
+
+- Failure scenario: target commands advertised automation but printed human tables for JSON, a
+  positional capacity argument silently stopped flag parsing, and unavailable evidence encoded
+  collections as `null`.
+- Source/inspiration: hostile/careless operator testing through public commands.
+- Reproduction: the black-box CLI produced each incompatible output.
+- Root cause: older commands did not share output/argument validation, and empty decision slices
+  were not normalized.
+- Fix: consistent output validation and help, strict positional rejection, and stable empty arrays
+  without fabricated evidence.
+- Regression tests: target/capacity/help CLI cases, decision collection-contract test, and the
+  public module journey.
+
+### Runtime publication could mislabel old vLLM bytes
+
+- Failure scenario: the workflow publishes a requested newer vLLM tag while the Dockerfile still
+  builds the old unconditional base digest.
+- Source/inspiration: immutable artifact/version binding and the applicable vLLM header advisory.
+- Reproduction: static data-flow inspection proved the workflow build argument had no consumer.
+- Root cause: version selection existed only in image metadata.
+- Fix: candidate publication now requires an immutable official base digest and verifies the
+  installed package version before layering or tagging.
+- Regression test: `scripts/test-runtime-image-contract.sh`. Changing the production default still
+  requires real GPU qualification.
+
 ## Failure Classes Proven Safe Locally
 
 - Durable mutations are semantically idempotent under retry, concurrent submission, cancellation ordering, worker restart, lease expiry, and database-clock differences.
@@ -104,6 +143,10 @@ These results prove the tested InferCrane logic against local, PostgreSQL, Docke
 - Admission and quota accounting preserve exact limits under concurrent acquire/release, cancellation, policy reduction, queue timeout, and per-tenant refill failure.
 - Release state rejects stale promotion evidence, preserves immutable revisions, verifies passport signatures and bindings, and cleans rejected candidates in deterministic workflows.
 - Public mutation APIs reject unknown/trailing JSON, authentication and authorization remain tenant-scoped, public credentials are not forwarded upstream, and webhook destinations reject non-public address classes.
+- Public product journeys cover endpoint identity and plans, admission, secrets, governed external
+  fallback, alerts, encrypted async inference, sessions, replay, capacity/cost evidence, SLOs,
+  recommendations, Burst Guard, Inference Lab, cleanup ownership, and oversized HTTP headers without
+  direct database access.
 - Store/event/resource boundaries prevent unbounded public history and provider/subprocess diagnostic growth; 64 concurrent PostgreSQL operation claims produced exactly one owner per operation.
 - The rebuilt race suite, dependency audits, vet, generated-contract checks, Docker integration, disposable Kind lifecycle, migration-prefix/restore checks, and local acceptance gates are the final local verification boundary.
 

@@ -236,6 +236,29 @@ func TestAsyncInferenceRequiresConsentAndReturnsDurableJob(t *testing.T) {
 	}
 }
 
+func TestAsyncInferenceRejectsInvalidProtocolAndEndpointModelBeforeQueueing(t *testing.T) {
+	for _, body := range []string{
+		`{"protocol":"audio","input":{"model":"coder"},"idempotency_key":"key","store_encrypted_content":true}`,
+		`{"protocol":"chat","input":{"messages":[]},"idempotency_key":"key","store_encrypted_content":true}`,
+		`{"protocol":"chat","input":{"model":"different","messages":[]},"idempotency_key":"key","store_encrypted_content":true}`,
+	} {
+		service := &fakeAsyncService{}
+		handler := (API{Store: &fakeStore{}, APIKey: "secret", AsyncInference: service}).Handler()
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/endpoints/coder/async", strings.NewReader(body))
+		request.Header.Set("Authorization", "Bearer secret")
+		response := httptest.NewRecorder()
+
+		handler.ServeHTTP(response, request)
+
+		if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"invalid_request"`) {
+			t.Fatalf("body=%s status=%d", body, response.Code)
+		}
+		if service.submitted.Endpoint != "" {
+			t.Fatalf("invalid request was queued: %#v", service.submitted)
+		}
+	}
+}
+
 func TestAsyncInferenceTypedNilServiceReturnsCapabilityUnavailable(t *testing.T) {
 	var service *fakeAsyncService
 	handler := (API{Store: &fakeStore{}, APIKey: "secret", AsyncInference: service}).Handler()

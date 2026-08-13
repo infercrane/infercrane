@@ -728,6 +728,9 @@ func capacityCommand(ctx context.Context, cfg config.Config, args []string) erro
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if fs.NArg() != 0 {
+		return errors.New("usage: infercrane capacity [--window DURATION] [--output human|json]")
+	}
 	if err := validateOutput(*output); err != nil {
 		return err
 	}
@@ -1352,11 +1355,25 @@ func targetAPICommand(ctx context.Context, cfg config.Config, args []string) err
 		return errors.New("target requires add or list")
 	}
 	if args[0] == "list" {
+		fs := flag.NewFlagSet("target list", flag.ContinueOnError)
+		output := fs.String("output", "human", "human or json")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if fs.NArg() != 0 {
+			return errors.New("usage: infercrane target list [--output human|json]")
+		}
+		if err := validateOutput(*output); err != nil {
+			return err
+		}
 		var response struct {
 			Data []targetView `json:"data"`
 		}
 		if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/targets", "", nil, &response); err != nil {
 			return err
+		}
+		if *output == "json" {
+			return printJSON(response)
 		}
 		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 		fmt.Fprintln(w, "NAME\tURL\tRUNTIME\tHEALTH")
@@ -1373,15 +1390,26 @@ func targetAPICommand(ctx context.Context, cfg config.Config, args []string) err
 	provider := fs.String("provider", "existing", "existing, openrouter, or openai-compatible-external")
 	runtimeName := fs.String("runtime", "", "runtime identity; defaults to vllm for existing targets and openai-compatible-api for external targets")
 	upstream := fs.String("upstream-model", "", "upstream model")
+	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args[2:]); err != nil {
 		return err
+	}
+	if fs.NArg() != 0 {
+		return errors.New("usage: infercrane target add NAME --url URL [--output human|json]")
 	}
 	if *targetURL == "" {
 		return errors.New("--url is required")
 	}
-	request := map[string]string{"name": args[1], "url": *targetURL, "provider": *provider, "runtime": *runtimeName, "upstream_model": *upstream}
-	if err := controlJSON(ctx, cfg, http.MethodPost, "/api/v1/targets", "", request, nil); err != nil {
+	if err := validateOutput(*output); err != nil {
 		return err
+	}
+	request := map[string]string{"name": args[1], "url": *targetURL, "provider": *provider, "runtime": *runtimeName, "upstream_model": *upstream}
+	var response map[string]any
+	if err := controlJSON(ctx, cfg, http.MethodPost, "/api/v1/targets", "", request, &response); err != nil {
+		return err
+	}
+	if *output == "json" {
+		return printJSON(response)
 	}
 	fmt.Printf("target %s registered\n", args[1])
 	return nil

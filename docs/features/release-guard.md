@@ -33,6 +33,14 @@ policy, measurements, reason codes, revision identities, and evaluation timestam
 
 Missing measurements are not fabricated. Output throughput is compared only when both revisions report token usage. TTFT is required before acceptance. A candidate with no healthy ready replica is rejected immediately.
 
+<Warning>
+Release Guard does not currently judge answer correctness, hallucination, groundedness, task
+success, or other semantic output quality. Infrastructure can be healthy while model behavior has
+regressed. For quality-sensitive changes, run a task-specific offline evaluation and require human
+approval in addition to Release Guard. InferCrane does not use an LLM judge to invent or approve a
+promotion decision.
+</Warning>
+
 Because a candidate is deliberately absent from the logical route, operators gather bounded
 candidate evidence explicitly with AIPerf rather than duplicating production requests:
 

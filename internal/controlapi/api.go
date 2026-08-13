@@ -735,6 +735,24 @@ func (a API) submitAsyncInference(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "idempotency_key and input are required")
 		return
 	}
+	if request.Protocol == "" {
+		request.Protocol = "chat"
+	}
+	if _, supported := map[string]struct{}{"chat": {}, "responses": {}, "embeddings": {}, "completions": {}, "batch": {}}[request.Protocol]; !supported {
+		writeError(w, http.StatusBadRequest, "invalid_request", "protocol must be chat, responses, embeddings, completions, or batch")
+		return
+	}
+	var input struct {
+		Model string `json:"model"`
+	}
+	if err := json.Unmarshal(request.Input, &input); err != nil || input.Model == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "async input must be a protocol-native JSON object with model set to the endpoint name")
+		return
+	}
+	if input.Model != r.PathValue("name") {
+		writeError(w, http.StatusBadRequest, "invalid_request", "async input model must match the endpoint name in the request path")
+		return
+	}
 	if request.ExecutionDeadlineSeconds == 0 {
 		request.ExecutionDeadlineSeconds = 900
 	}

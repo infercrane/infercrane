@@ -52,6 +52,19 @@ func TestCommandHelpDoesNotRequireAuthentication(t *testing.T) {
 	}
 }
 
+func TestJSONCapableCommandsAdvertiseOutputFlag(t *testing.T) {
+	for _, name := range []string{"auth", "system", "secret", "external", "rollout", "target"} {
+		t.Run(name, func(t *testing.T) {
+			output, err := captureStdout(t, func() error {
+				return run(context.Background(), []string{name, "--help"})
+			})
+			if err != nil || !strings.Contains(output, "--output string") {
+				t.Fatalf("output=%q err=%v", output, err)
+			}
+		})
+	}
+}
+
 func TestIntelligenceCommandsRejectUnsupportedOutputBeforeNetworkAccess(t *testing.T) {
 	cfg := config.Config{ControlURL: "http://127.0.0.1:1", APIKey: "secret"}
 	tests := []struct {
@@ -75,6 +88,55 @@ func TestIntelligenceCommandsRejectUnsupportedOutputBeforeNetworkAccess(t *testi
 				t.Fatalf("err=%v", err)
 			}
 		})
+	}
+}
+
+func TestCapacityRejectsUnexpectedPositionalArgument(t *testing.T) {
+	err := capacityCommand(context.Background(), config.Config{ControlURL: "http://127.0.0.1:1", APIKey: "secret"}, []string{"deployment-name"})
+	if err == nil || !strings.Contains(err.Error(), "usage: infercrane capacity") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestTargetListSupportsJSONOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/targets" {
+			t.Fatalf("request=%s %s", r.Method, r.URL.Path)
+		}
+		_, _ = io.WriteString(w, `{"data":[]}`)
+	}))
+	defer server.Close()
+	output, err := captureStdout(t, func() error {
+		return targetAPICommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, []string{"list", "--output", "json"})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response struct {
+		Data []targetView `json:"data"`
+	}
+	if err = json.Unmarshal([]byte(output), &response); err != nil || response.Data == nil {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+}
+
+func TestTargetAddSupportsJSONOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/targets" {
+			t.Fatalf("request=%s %s", r.Method, r.URL.Path)
+		}
+		_, _ = io.WriteString(w, `{"target":{"name":"existing"}}`)
+	}))
+	defer server.Close()
+	output, err := captureStdout(t, func() error {
+		return targetAPICommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, []string{"add", "existing", "--url", "http://runtime.test:8000", "--output", "json"})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response map[string]any
+	if err = json.Unmarshal([]byte(output), &response); err != nil || response["target"] == nil {
+		t.Fatalf("output=%q err=%v", output, err)
 	}
 }
 

@@ -1,6 +1,7 @@
 package decision
 
 import (
+	"encoding/json"
 	"math"
 	"testing"
 	"time"
@@ -35,6 +36,31 @@ func TestRecommendKeepsMissingCostUnknown(t *testing.T) {
 	result := Recommend(SLOPolicy{MaxHourlyCost: pointer(2)}, []Evidence{{ID: "bench", Qualified: true, ComparableModel: true, ComparableWorkload: true, Requests: 10, CreatedAt: time.Now()}})
 	if result.Status != "unknown" || len(result.Missing) != 1 || result.Missing[0] != "trustworthy_hourly_cost" {
 		t.Fatalf("missing cost was fabricated: %#v", result)
+	}
+}
+
+func TestMissingEvidenceUsesStableEmptyCollectionContracts(t *testing.T) {
+	result := Recommend(SLOPolicy{MaxTTFTP95MS: pointer(250)}, nil)
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var public map[string]any
+	if err = json.Unmarshal(encoded, &public); err != nil {
+		t.Fatal(err)
+	}
+	if candidates, ok := public["candidates"].([]any); !ok || len(candidates) != 0 {
+		t.Fatalf("result=%s", encoded)
+	}
+	snapshot, err := Snapshot(SLOPolicy{MaxTTFTP95MS: pointer(250)}, nil, result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var evidence struct {
+		Evidence []Evidence `json:"evidence"`
+	}
+	if err = json.Unmarshal([]byte(snapshot), &evidence); err != nil || evidence.Evidence == nil {
+		t.Fatalf("snapshot=%s err=%v", snapshot, err)
 	}
 }
 

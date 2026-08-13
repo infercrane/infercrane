@@ -67,6 +67,23 @@ Local fixtures prove InferCrane logic only. This document will contain the exact
 - Evidence: runtime/image/model digests, protocol transcripts, request IDs, vLLM logs/metrics, generation counters, drain timing, and resource cleanup.
 - Cleanup: delete the owning deployment and prove provider/cluster absence.
 
+## Model revisions — semantic output quality
+
+- Research signal: production operators report that an infrastructure-healthy model or runtime
+  rollout can still regress correctness, groundedness, hallucination rate, or task success.
+- Why local simulation is insufficient: these outcomes depend on the customer's model, prompts,
+  domain, expected answers, safety policy, and evaluation rubric. Generic latency/error fixtures
+  cannot establish semantic correctness.
+- Safe procedure: before promotion, run a versioned customer-owned offline evaluation dataset
+  against active and candidate revisions. Record the evaluator and dataset identity, compare task
+  metrics, review regressions, and require explicit human approval. Do not shadow live prompts or
+  retain request/output bodies without separate informed privacy approval.
+- Expected behavior: Release Guard continues to evaluate only trustworthy readiness, error,
+  performance, compatibility, and sourced-cost evidence. Semantic evaluation remains a separate
+  explicit release prerequisite; no LLM decides promotion.
+- Evidence: immutable model/runtime identities, evaluation dataset and evaluator versions, aggregate
+  results, privacy approval if production content was used, and the human promotion decision.
+
 ## SGLang and custom OCI — Runtime Contract V1
 
 - Why local simulation is insufficient: the hermetic contract cannot prove GPU model compatibility, production probe semantics, metrics, cancellation, or graceful shutdown for the exact image.
