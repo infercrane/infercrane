@@ -223,6 +223,103 @@ func TestEndpointReleaseGuardPersistsDeterministicPlanDecision(t *testing.T) {
 	}
 }
 
+func TestEnvironmentPromotionStagesAtomicallyAndIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	suffix := strings.ReplaceAll(time.Now().UTC().Format("150405.000000000"), ".", "-")
+	environment, err := s.CreateEnvironment(ctx, "global", domain.Environment{Name: "production", PolicyJSON: `{}`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	logical, err := s.CreateLogicalModel(ctx, "global", domain.LogicalModel{Name: "promotion-model-" + suffix})
+	if err != nil {
+		t.Fatal(err)
+	}
+	createDeployment := func(name string) domain.Deployment {
+		target, createErr := s.AddTarget(ctx, domain.Target{Name: name + "-target", URL: "http://" + name, Provider: "existing", Runtime: "vllm", UpstreamModel: "coder"})
+		if createErr != nil {
+			t.Fatal(createErr)
+		}
+		deployment, createErr := s.CreateDeployment(ctx, domain.Deployment{Name: name, Model: "coder", Runtime: "vllm"}, []string{target.Name})
+		if createErr != nil {
+			t.Fatal(createErr)
+		}
+		return deployment
+	}
+	sourceDeployment := createDeployment("promotion-source-dep-" + suffix)
+	destinationDeployment := createDeployment("promotion-dest-dep-" + suffix)
+	createEndpoint := func(name string, deployment domain.Deployment) (domain.Endpoint, domain.ServingPlan) {
+		endpoint, createErr := s.CreateEndpoint(ctx, "global", domain.Endpoint{Name: name, LogicalModelID: logical.ID, EnvironmentID: environment.ID})
+		if createErr != nil {
+			t.Fatal(createErr)
+		}
+		binding, createErr := s.CreateBackendBinding(ctx, "global", domain.BackendBinding{EndpointID: endpoint.ID, Name: "primary", Kind: "deployment", OwnershipMode: "lifecycle-managed", DeploymentID: deployment.ID})
+		if createErr != nil {
+			t.Fatal(createErr)
+		}
+		plan, createErr := s.CreateServingPlan(ctx, "global", domain.ServingPlan{EndpointID: endpoint.ID, RoutingPolicy: "manual", Bindings: []domain.ServingPlanBinding{{BindingID: binding.ID, Weight: 100}}})
+		if createErr != nil {
+			t.Fatal(createErr)
+		}
+		if createErr = s.SetEndpointPlan(ctx, "global", endpoint.Name, plan.ID, "active"); createErr != nil {
+			t.Fatal(createErr)
+		}
+		return endpoint, plan
+	}
+	sourceEndpoint, sourcePlan := createEndpoint("promotion-staging-"+suffix, sourceDeployment)
+	destinationEndpoint, oldDestinationPlan := createEndpoint("promotion-production-"+suffix, destinationDeployment)
+	promotion, created, err := s.StageEnvironmentPromotion(ctx, "global", sourceEndpoint.Name, destinationEndpoint.Name, "promotion-key-"+suffix)
+	if err != nil || !created {
+		t.Fatalf("stage promotion=%+v created=%t err=%v", promotion, created, err)
+	}
+	resolved, err := s.ResolveEndpointForTenant(ctx, "global", destinationEndpoint.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.Endpoint.ActiveServingPlanID != oldDestinationPlan.ID || resolved.Endpoint.CandidateServingPlanID != promotion.DestinationPlanID {
+		t.Fatalf("destination active/candidate changed unsafely: %+v", resolved.Endpoint)
+	}
+	if promotion.SourcePlanID != sourcePlan.ID || len(resolved.CandidatePlan.Bindings) != 1 {
+		t.Fatalf("promotion did not clone source plan: promotion=%+v candidate=%+v", promotion, resolved.CandidatePlan)
+	}
+	firstPromotedBindingID := resolved.CandidatePlan.Bindings[0].BindingID
+	again, created, err := s.StageEnvironmentPromotion(ctx, "global", sourceEndpoint.Name, destinationEndpoint.Name, "promotion-key-"+suffix)
+	if err != nil || created || again.ID != promotion.ID || again.DestinationPlanID != promotion.DestinationPlanID {
+		t.Fatalf("retry=%+v created=%t err=%v", again, created, err)
+	}
+	if _, _, err = s.StageEnvironmentPromotion(ctx, "global", sourceEndpoint.Name, destinationEndpoint.Name, "different-key-"+suffix); !errors.Is(err, ErrConflict) {
+		t.Fatalf("expected existing-candidate conflict, got %v", err)
+	}
+	if _, _, err = s.StageEnvironmentPromotion(ctx, "global", sourceEndpoint.Name, destinationEndpoint.Name, strings.Repeat("x", 256)); err == nil {
+		t.Fatal("accepted an idempotency key beyond the API contract")
+	}
+
+	// A later immutable source plan must receive a distinct destination binding
+	// snapshot. Sharing the binding would allow a future ownership transition to
+	// alter the semantics of both historical destination plans.
+	secondSourcePlan, err := s.CreateServingPlan(ctx, "global", domain.ServingPlan{EndpointID: sourceEndpoint.ID, RoutingPolicy: "weighted", Bindings: sourcePlan.Bindings})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.ExecContext(ctx, `UPDATE endpoints SET active_serving_plan_id=? WHERE id=?`, secondSourcePlan.ID, sourceEndpoint.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.ExecContext(ctx, `UPDATE endpoints SET candidate_serving_plan_id=NULL WHERE id=?`, destinationEndpoint.ID); err != nil {
+		t.Fatal(err)
+	}
+	second, created, err := s.StageEnvironmentPromotion(ctx, "global", sourceEndpoint.Name, destinationEndpoint.Name, "second-promotion-"+suffix)
+	if err != nil || !created {
+		t.Fatalf("second promotion=%+v created=%t err=%v", second, created, err)
+	}
+	resolved, err = s.ResolveEndpointForTenant(ctx, "global", destinationEndpoint.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resolved.CandidatePlan.Bindings) != 1 || resolved.CandidatePlan.Bindings[0].BindingID == firstPromotedBindingID {
+		t.Fatalf("second promotion reused a mutable destination binding snapshot: %+v", resolved.CandidatePlan.Bindings)
+	}
+}
+
 func TestAdoptInspectDiagnoseAndAlertPolicyAreTenantScoped(t *testing.T) {
 	ctx := context.Background()
 	s := openStore(t, ctx)

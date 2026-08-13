@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -28,7 +29,10 @@ type endpointView struct {
 
 func environmentCommand(ctx context.Context, cfg config.Config, args []string) error {
 	if len(args) == 0 {
-		return errors.New("environment requires list or create")
+		return errors.New("environment requires list, create, or promote")
+	}
+	if args[0] == "promote" {
+		return environmentPromoteCommand(ctx, cfg, args[1:])
 	}
 	fs := flag.NewFlagSet("environment "+args[0], flag.ContinueOnError)
 	policy := fs.String("policy", "{}", "bounded environment policy JSON")
@@ -65,6 +69,73 @@ func environmentCommand(ctx context.Context, cfg config.Config, args []string) e
 	}
 	fmt.Printf("environment %s created\n", resource)
 	return nil
+}
+
+func environmentPromoteCommand(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return errors.New("usage: infercrane environment promote SOURCE_ENDPOINT --to DESTINATION_ENDPOINT [--yes]")
+	}
+	source := args[0]
+	fs := flag.NewFlagSet("environment promote", flag.ContinueOnError)
+	destination := fs.String("to", "", "destination endpoint")
+	confirm := fs.Bool("yes", false, "stage the destination candidate")
+	idempotencyKey := fs.String("idempotency-key", "", "stable safe-retry key")
+	output := fs.String("output", "human", "human or json")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if err := validateOutput(*output); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 || *destination == "" || source == *destination {
+		return errors.New("promotion requires distinct source and destination endpoints")
+	}
+	var sourceView, destinationView map[string]any
+	if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/endpoints/"+url.PathEscape(source), "", nil, &sourceView); err != nil {
+		return fmt.Errorf("inspect source endpoint: %w", err)
+	}
+	if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/endpoints/"+url.PathEscape(*destination), "", nil, &destinationView); err != nil {
+		return fmt.Errorf("inspect destination endpoint: %w", err)
+	}
+	sourceModel := nestedString(sourceView, "logical_model", "name")
+	destinationModel := nestedString(destinationView, "logical_model", "name")
+	sourceEnvironment := nestedString(sourceView, "environment", "name")
+	destinationEnvironment := nestedString(destinationView, "environment", "name")
+	sourcePlan := nestedString(sourceView, "active_plan", "id")
+	destinationPlan := nestedString(destinationView, "active_plan", "id")
+	if sourceModel == "" || sourceModel != destinationModel {
+		return errors.New("source and destination must use the same logical model")
+	}
+	plan := map[string]any{"source_endpoint": source, "source_environment": sourceEnvironment, "source_plan": sourcePlan, "destination_endpoint": *destination, "destination_environment": destinationEnvironment, "destination_active_plan": destinationPlan, "action": "atomically stage source plan as destination candidate", "activation": "requires destination Release Guard PASS"}
+	if !*confirm {
+		if *output == "json" {
+			return printJSON(map[string]any{"plan": plan, "mutation": false})
+		}
+		fmt.Printf("Environment promotion plan\n\nLogical model  %s\nSource         %s (%s) · plan %s\nDestination    %s (%s) · active %s\n\n+ clone source bindings into destination\n+ stage immutable destination candidate\n= keep destination active plan serving\n= require destination Release Guard PASS before activation\n\nNo mutation performed. Apply with:\n  infercrane environment promote %s --to %s --yes\n", sourceModel, source, sourceEnvironment, shortValue(sourcePlan), *destination, destinationEnvironment, shortValue(destinationPlan), source, *destination)
+		return nil
+	}
+	if *idempotencyKey == "" {
+		*idempotencyKey = "environment-promotion-" + source + "-to-" + *destination + "-" + sourcePlan
+	}
+	var response map[string]any
+	body := map[string]string{"source_endpoint": source, "destination_endpoint": *destination, "idempotency_key": *idempotencyKey}
+	if err := controlJSON(ctx, cfg, http.MethodPost, "/api/v1/environment-promotions", *idempotencyKey, body, &response); err != nil {
+		return err
+	}
+	if *output == "json" {
+		return printJSON(response)
+	}
+	promotion, _ := response["promotion"].(map[string]any)
+	fmt.Printf("Environment candidate staged\nLogical model  %s\nSource         %s (%s)\nDestination    %s (%s)\nCandidate      %s\n\nProduction traffic did not change. Next:\n  infercrane endpoint guard %s --evaluate\n  infercrane endpoint promote %s %v\n", sourceModel, source, sourceEnvironment, *destination, destinationEnvironment, shortValue(fmt.Sprint(promotion["destination_plan_id"])), *destination, *destination, promotion["destination_plan_id"])
+	return nil
+}
+
+func nestedString(value map[string]any, object, key string) string {
+	nested, _ := value[object].(map[string]any)
+	if nested == nil || nested[key] == nil {
+		return ""
+	}
+	return fmt.Sprint(nested[key])
 }
 
 func logicalModelCommand(ctx context.Context, cfg config.Config, args []string) error {

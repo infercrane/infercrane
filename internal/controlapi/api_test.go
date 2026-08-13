@@ -17,6 +17,7 @@ import (
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/passport"
+	"github.com/infercrane/infercrane/internal/qualityevidence"
 	"github.com/infercrane/infercrane/internal/support"
 )
 
@@ -72,6 +73,22 @@ type fakeIntelligenceStore struct {
 	trace domain.ReplayTrace
 }
 
+type fakeQualityEvidenceStore struct {
+	*fakeStore
+	evidence []domain.QualityEvidence
+}
+
+func (f *fakeQualityEvidenceStore) RecordQualityEvidence(_ context.Context, tenant, _ string, item domain.QualityEvidence) (domain.QualityEvidence, bool, error) {
+	item.ID, item.TenantID, item.DeploymentID = "quality-1", tenant, "deployment-1"
+	item.CreatedAt = time.Now().UTC()
+	f.evidence = append(f.evidence, item)
+	return item, true, nil
+}
+
+func (f *fakeQualityEvidenceStore) QualityEvidenceForDeployment(context.Context, string, string, int) ([]domain.QualityEvidence, error) {
+	return f.evidence, nil
+}
+
 func (f *fakeIntelligenceStore) CaptureReplayTrace(context.Context, string, string, time.Duration, int) (domain.ReplayTrace, error) {
 	return f.trace, nil
 }
@@ -86,6 +103,51 @@ func (f *fakeIntelligenceStore) RequestArtifactPrefetch(context.Context, string,
 }
 func (f *fakeIntelligenceStore) CapacityIntelligence(context.Context, string, time.Duration) ([]domain.CapacitySummary, error) {
 	return []domain.CapacitySummary{}, nil
+}
+
+func TestQualityEvidenceAPIRequiresValidRevisionBoundSignedAggregate(t *testing.T) {
+	base := &fakeStore{resolved: domain.ResolvedDeployment{Deployment: domain.Deployment{ID: "deployment-1", Name: "prod", ActiveRevisionID: "rev-1"}}}
+	store := &fakeQualityEvidenceStore{fakeStore: base}
+	handler := (API{Store: store, APIKey: "secret"}).Handler()
+	_, key, err := passport.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := qualityevidence.Payload{Schema: qualityevidence.Schema, Deployment: "prod", RevisionID: "rev-2", Suite: "support-answers", SuiteVersion: "git:abc123", Evaluator: "offline", EvaluatorVersion: "1.0.0", Score: .91, Passed: true, SampleCount: 200, ArtifactDigest: "sha256:" + strings.Repeat("a", 64), EvaluatedAt: time.Now().UTC()}
+	envelope, err := passport.Sign(payload, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(envelope)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments/prod/quality-evidence", strings.NewReader(string(body)))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || len(store.evidence) != 1 || store.evidence[0].RevisionID != "rev-2" || !strings.Contains(response.Body.String(), `"content_recorded":false`) {
+		t.Fatalf("status=%d evidence=%+v body=%s", response.Code, store.evidence, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/deployments/prod/quality-evidence", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"suite":"support-answers"`) || strings.Contains(response.Body.String(), "prompt") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	payload.Deployment = "other"
+	envelope, err = passport.Sign(payload, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ = json.Marshal(envelope)
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/deployments/prod/quality-evidence", strings.NewReader(string(body)))
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusUnprocessableEntity || len(store.evidence) != 1 {
+		t.Fatalf("mismatched deployment status=%d evidence=%+v body=%s", response.Code, store.evidence, response.Body.String())
+	}
 }
 
 func (f *fakeOptimizationStore) RecordFinOpsReport(_ context.Context, row domain.FinOpsReport) (domain.FinOpsReport, error) {

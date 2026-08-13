@@ -453,6 +453,9 @@ type ReleaseGuardPolicy struct {
 	AutoRollbackWindowSeconds      int      `json:"auto_rollback_window_seconds"`
 	ValidationMaxRequests          int      `json:"validation_max_requests"`
 	ValidationMaxConcurrency       int      `json:"validation_max_concurrency"`
+	RequireQualityEvidence         bool     `json:"require_quality_evidence"`
+	MinimumQualityScore            *float64 `json:"minimum_quality_score,omitempty"`
+	MaxQualityRegressionPercent    *float64 `json:"max_quality_regression_percent,omitempty"`
 }
 
 type RevisionMetrics struct {
@@ -468,6 +471,31 @@ type RevisionMetrics struct {
 	Compatible            *bool    `json:"compatible,omitempty"`
 	CompatibilityEvidence string   `json:"compatibility_evidence,omitempty"`
 	SyntheticValidation   bool     `json:"synthetic_validation"`
+	QualityScore          *float64 `json:"quality_score,omitempty"`
+	QualityPassed         *bool    `json:"quality_passed,omitempty"`
+	QualityComparable     *bool    `json:"quality_comparable,omitempty"`
+	QualityEvidenceID     string   `json:"quality_evidence_id,omitempty"`
+	QualitySuite          string   `json:"quality_suite,omitempty"`
+}
+
+// QualityEvidence is signed, revision-bound output from a customer-selected
+// semantic evaluator. It contains aggregate evidence only, never prompt or
+// response bodies.
+type QualityEvidence struct {
+	ID, TenantID, DeploymentID, RevisionID                     string
+	Suite, SuiteVersion, Evaluator, EvaluatorVersion           string
+	ArtifactDigest, PayloadDigest, Signature, PublicKey, KeyID string
+	Algorithm                                                  string
+	Score                                                      float64
+	Passed                                                     bool
+	SampleCount                                                int
+	EvaluatedAt, CreatedAt                                     time.Time
+}
+
+type EnvironmentPromotion struct {
+	ID, TenantID, SourceEndpointID, SourcePlanID             string
+	DestinationEndpointID, DestinationPlanID, IdempotencyKey string
+	CreatedAt                                                time.Time
 }
 
 type ReleaseGuardEvaluation struct {

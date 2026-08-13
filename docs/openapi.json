@@ -780,6 +780,30 @@
         ],
         "type": "object"
       },
+      "EnvironmentPromotionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "destination_endpoint": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "idempotency_key": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "source_endpoint": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_endpoint",
+          "destination_endpoint",
+          "idempotency_key"
+        ],
+        "type": "object"
+      },
       "Error": {
         "properties": {
           "category": {
@@ -1305,6 +1329,81 @@
         "maxProperties": 0,
         "type": "object"
       },
+      "ReleaseGuardPolicy": {
+        "additionalProperties": false,
+        "properties": {
+          "auto_rollback_enabled": {
+            "type": "boolean"
+          },
+          "auto_rollback_window_seconds": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "max_cost_regression_percent": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "max_error_rate_increase": {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "max_latency_regression_percent": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "max_output_throughput_drop_percent": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "max_quality_regression_percent": {
+            "maximum": 100,
+            "minimum": 0,
+            "type": "number"
+          },
+          "max_ttft_regression_percent": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "minimum_quality_score": {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "minimum_requests": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "require_compatibility_evidence": {
+            "type": "boolean"
+          },
+          "require_quality_evidence": {
+            "type": "boolean"
+          },
+          "require_synthetic_evidence": {
+            "type": "boolean"
+          },
+          "validation_max_concurrency": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "validation_max_requests": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "enabled",
+          "minimum_requests",
+          "require_compatibility_evidence",
+          "require_synthetic_evidence",
+          "require_quality_evidence"
+        ],
+        "type": "object"
+      },
       "ReplayCaptureRequest": {
         "properties": {
           "max_requests": {
@@ -1482,6 +1581,42 @@
         ],
         "type": "object"
       },
+      "SignedEvidenceEnvelope": {
+        "additionalProperties": false,
+        "properties": {
+          "algorithm": {
+            "enum": [
+              "Ed25519-SHA256"
+            ],
+            "type": "string"
+          },
+          "digest": {
+            "type": "string"
+          },
+          "key_id": {
+            "type": "string"
+          },
+          "payload": {
+            "description": "Canonical aggregate evidence JSON. Prompt and output content are not accepted by the v1 schema.",
+            "type": "string"
+          },
+          "public_key": {
+            "type": "string"
+          },
+          "signature": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "payload",
+          "digest",
+          "signature",
+          "public_key",
+          "algorithm",
+          "key_id"
+        ],
+        "type": "object"
+      },
       "TargetCreate": {
         "properties": {
           "name": {
@@ -1624,6 +1759,53 @@
         "summary": "Explicitly promote an adopted endpoint to traffic-managed ownership",
         "tags": [
           "Adoption"
+        ]
+      }
+    },
+    "/api/v1/artifacts/{id}/cache": {
+      "get": {
+        "operationId": "inspectArtifactCache",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Inspect fresh and expired cache observations separately from prefetch intent",
+        "tags": [
+          "Model artifacts"
         ]
       }
     },
@@ -2946,6 +3128,118 @@
         ]
       }
     },
+    "/api/v1/deployments/{name}/quality-evidence": {
+      "get": {
+        "operationId": "listQualityEvidence",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List revision-bound semantic quality evidence without prompt or output content",
+        "tags": [
+          "Release evidence"
+        ]
+      },
+      "post": {
+        "operationId": "attachQualityEvidence",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Stable key used to adopt the original durable operation after retries or disconnects.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignedEvidenceEnvelope"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Attach signed aggregate semantic quality evidence to an immutable revision",
+        "tags": [
+          "Release evidence"
+        ]
+      }
+    },
     "/api/v1/deployments/{name}/recipes": {
       "post": {
         "operationId": "captureRecipe",
@@ -3168,7 +3462,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Object"
+                "$ref": "#/components/schemas/ReleaseGuardPolicy"
               }
             }
           },
@@ -5004,6 +5298,64 @@
           }
         ],
         "summary": "Set endpoint Release Guard policy",
+        "tags": [
+          "Endpoints"
+        ]
+      }
+    },
+    "/api/v1/environment-promotions": {
+      "post": {
+        "operationId": "stageEnvironmentPromotion",
+        "parameters": [
+          {
+            "description": "Stable key used to adopt the original durable operation after retries or disconnects.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnvironmentPromotionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Stage one environment endpoint's immutable plan as another endpoint's candidate",
         "tags": [
           "Endpoints"
         ]

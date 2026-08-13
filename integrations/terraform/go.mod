@@ -1,6 +1,6 @@
 module github.com/infercrane/infercrane/integrations/terraform
 
-go 1.26.5
+go 1.26.6
 
 require (
 	github.com/hashicorp/terraform-plugin-framework v1.19.0

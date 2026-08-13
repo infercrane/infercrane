@@ -133,6 +133,53 @@ func (s *Store) RequestArtifactPrefetch(ctx context.Context, tenant string, row 
 	return row, true, nil
 }
 
+func (s *Store) ArtifactCacheState(ctx context.Context, tenant, artifactID string) ([]domain.ArtifactCacheObservation, []domain.ArtifactPrefetch, error) {
+	if tenant == "" || artifactID == "" {
+		return nil, nil, errors.New("tenant and artifact are required")
+	}
+	var exists bool
+	if err := s.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM model_artifacts WHERE tenant_id=? AND id=?)`, tenant, artifactID).Scan(&exists); err != nil {
+		return nil, nil, err
+	}
+	if !exists {
+		return nil, nil, domain.ErrNotFound
+	}
+	observationRows, err := s.QueryContext(ctx, `SELECT id,tenant_id,model_artifact_id,provider,region,location,state,source,evidence_json::text,observed_at,expires_at,created_at FROM artifact_cache_observations WHERE tenant_id=? AND model_artifact_id=? ORDER BY observed_at DESC,id DESC LIMIT 100`, tenant, artifactID)
+	if err != nil {
+		return nil, nil, err
+	}
+	observations := make([]domain.ArtifactCacheObservation, 0)
+	for observationRows.Next() {
+		var row domain.ArtifactCacheObservation
+		var observedAt, expiresAt, createdAt string
+		if err = observationRows.Scan(&row.ID, &row.TenantID, &row.ModelArtifactID, &row.Provider, &row.Region, &row.Location, &row.State, &row.Source, &row.EvidenceJSON, &observedAt, &expiresAt, &createdAt); err != nil {
+			_ = observationRows.Close()
+			return nil, nil, err
+		}
+		row.ObservedAt, row.ExpiresAt, row.CreatedAt = parseTime(observedAt), parseTime(expiresAt), parseTime(createdAt)
+		observations = append(observations, row)
+	}
+	if err = observationRows.Close(); err != nil {
+		return nil, nil, err
+	}
+	prefetchRows, err := s.QueryContext(ctx, `SELECT id,tenant_id,model_artifact_id,provider,region,location,status,idempotency_key,COALESCE(provider_operation_id,''),COALESCE(error_code,''),created_at,updated_at FROM artifact_prefetches WHERE tenant_id=? AND model_artifact_id=? ORDER BY created_at DESC,id DESC LIMIT 100`, tenant, artifactID)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer prefetchRows.Close()
+	prefetches := make([]domain.ArtifactPrefetch, 0)
+	for prefetchRows.Next() {
+		var row domain.ArtifactPrefetch
+		var createdAt, updatedAt string
+		if err = prefetchRows.Scan(&row.ID, &row.TenantID, &row.ModelArtifactID, &row.Provider, &row.Region, &row.Location, &row.Status, &row.IdempotencyKey, &row.ProviderOperationID, &row.ErrorCode, &createdAt, &updatedAt); err != nil {
+			return nil, nil, err
+		}
+		row.CreatedAt, row.UpdatedAt = parseTime(createdAt), parseTime(updatedAt)
+		prefetches = append(prefetches, row)
+	}
+	return observations, prefetches, prefetchRows.Err()
+}
+
 func (s *Store) RecordCapacityOperation(ctx context.Context, row domain.CapacityOperation) (domain.CapacityOperation, error) {
 	if row.TenantID == "" || row.Provider == "" || row.Runtime == "" || row.ComputeMode == "" || row.Operation == "" || row.ResourceKey == "" || row.StartedAt.IsZero() || row.CompletedAt.Before(row.StartedAt) {
 		return row, errors.New("complete capacity operation is required")

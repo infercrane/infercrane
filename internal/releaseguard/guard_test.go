@@ -71,3 +71,52 @@ func TestEvaluateV2WaitsWhenRequiredCostIsUnavailable(t *testing.T) {
 		t.Fatalf("result=%+v", result)
 	}
 }
+
+func TestEvaluateRequiresComparableSignedSemanticQuality(t *testing.T) {
+	minimum, maxRegression := .8, 5.0
+	policy := domain.ReleaseGuardPolicy{Enabled: true, MinimumRequests: 1, RequireQualityEvidence: true, MinimumQualityScore: &minimum, MaxQualityRegressionPercent: &maxRegression}
+	ttft, activeScore, candidateScore := 100.0, .90, .84
+	passed, comparable := true, true
+	base := domain.RevisionMetrics{ReadyReplicas: 1, Requests: 1, P95TTFTMS: &ttft, QualityScore: &activeScore, QualityPassed: &passed, QualityComparable: &comparable}
+	candidate := domain.RevisionMetrics{ReadyReplicas: 1, Requests: 1, P95TTFTMS: &ttft}
+
+	result := Evaluate(Input{Policy: policy, Active: base, Candidate: candidate})
+	if result.Decision != "WAIT" || result.Reasons[0].Code != "quality_evidence_unavailable" {
+		t.Fatalf("missing evidence result=%+v", result)
+	}
+
+	candidate.QualityScore, candidate.QualityPassed, candidate.QualityComparable = &candidateScore, &passed, &comparable
+	result = Evaluate(Input{Policy: policy, Active: base, Candidate: candidate})
+	if result.Decision != "REJECT" || result.Reasons[0].Code != "quality_score_regression" {
+		t.Fatalf("regression result=%+v", result)
+	}
+
+	candidateScore = .86
+	result = Evaluate(Input{Policy: policy, Active: base, Candidate: candidate})
+	if result.Decision != "ACCEPT" {
+		t.Fatalf("within policy result=%+v", result)
+	}
+
+	comparable = false
+	result = Evaluate(Input{Policy: policy, Active: base, Candidate: candidate})
+	if result.Decision != "WAIT" || result.Reasons[0].Code != "quality_evidence_not_comparable" {
+		t.Fatalf("incomparable result=%+v", result)
+	}
+
+	comparable = true
+	passed = false
+	result = Evaluate(Input{Policy: policy, Active: base, Candidate: candidate})
+	if result.Decision != "REJECT" || result.Reasons[0].Code != "quality_evaluation_failed" {
+		t.Fatalf("failed suite result=%+v", result)
+	}
+}
+
+func TestEvaluateMinimumQualityThresholdFailsClosedWithoutEvidence(t *testing.T) {
+	minimum, ttft := .8, 100.0
+	policy := domain.ReleaseGuardPolicy{Enabled: true, MinimumRequests: 1, MinimumQualityScore: &minimum}
+	metrics := domain.RevisionMetrics{ReadyReplicas: 1, Requests: 1, P95TTFTMS: &ttft}
+	result := Evaluate(Input{Policy: policy, Active: metrics, Candidate: metrics})
+	if result.Decision != "WAIT" || len(result.Reasons) != 1 || result.Reasons[0].Code != "quality_evidence_unavailable" {
+		t.Fatalf("missing threshold evidence result=%+v", result)
+	}
+}

@@ -39,6 +39,7 @@ import (
 	"github.com/infercrane/infercrane/internal/config"
 	"github.com/infercrane/infercrane/internal/contextpassport"
 	"github.com/infercrane/infercrane/internal/controlapi"
+	"github.com/infercrane/infercrane/internal/curatedrecipe"
 	"github.com/infercrane/infercrane/internal/dashboard"
 	"github.com/infercrane/infercrane/internal/doctor"
 	"github.com/infercrane/infercrane/internal/domain"
@@ -165,6 +166,10 @@ func runLegacy(ctx context.Context, args []string) error {
 		return initCommand(args[1:])
 	case "context":
 		return contextCommand(args[1:])
+	case "workload":
+		return workloadCommand(ctx, args[1:])
+	case "evaluation":
+		return evaluationCommand(ctx, args[1:])
 	}
 	if args[0] == "passport" && len(args) > 1 && (args[1] == "keygen" || args[1] == "verify") {
 		return passportCommand(ctx, config.Config{}, args[1:])
@@ -207,6 +212,10 @@ func runLegacy(ctx context.Context, args []string) error {
 		return uiCommand(ctx, cfg, args[1:])
 	case "dashboard":
 		return dashboardCommand(ctx, cfg, args[1:])
+	case "mcp":
+		return mcpCommand(ctx, cfg, args[1:])
+	case "observe":
+		return observeCommand(ctx, cfg, args[1:])
 	case "deploy":
 		return deployAPICommand(ctx, cfg, "deploy", args[1:])
 	case "apply":
@@ -265,6 +274,8 @@ func runLegacy(ctx context.Context, args []string) error {
 		return replayCommand(ctx, cfg, args[1:])
 	case "capacity":
 		return capacityCommand(ctx, cfg, args[1:])
+	case "artifact":
+		return artifactCommand(ctx, cfg, args[1:])
 	case "finops":
 		return finOpsCommand(ctx, cfg, args[1:])
 	case "autopilot":
@@ -965,6 +976,9 @@ func recipeCommand(ctx context.Context, cfg config.Config, args []string) error 
 }
 
 func recipesCommand(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) > 0 && args[0] == "curated" {
+		return curatedRecipesCommand(args[1:])
+	}
 	query := ""
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		query, args = args[0], args[1:]
@@ -1006,6 +1020,43 @@ func recipesCommand(ctx context.Context, cfg config.Config, args []string) error
 		fmt.Fprintf(w, "%s@%s\t%s\t%s %s\t%s\t%s\t%s\n", benchmarkValue(row["name"]), benchmarkValue(row["version"]), nestedValue(row, "payload", "model_identity"), nestedValue(row, "payload", "runtime"), nestedValue(row, "payload", "runtime_version"), nestedValue(row, "payload", "gpu"), nestedValue(row, "provenance", "evidence_class"), shortID(benchmarkValue(row["digest"])))
 	}
 	return w.Flush()
+}
+
+func curatedRecipesCommand(args []string) error {
+	query := ""
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		query, args = args[0], args[1:]
+	}
+	fs := flag.NewFlagSet("recipes curated", flag.ContinueOnError)
+	output := fs.String("output", "human", "human or json")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return errors.New("usage: infercrane recipes curated [QUERY] [--output human|json]")
+	}
+	entries := curatedrecipe.Search(query)
+	if *output == "json" {
+		return printJSON(map[string]any{"data": entries, "evidence_class": "configuration-only"})
+	}
+	if len(entries) == 0 {
+		fmt.Println("No curated configuration recipes match.")
+		return nil
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "RECIPE\tMODEL\tPROTOCOL\tLICENSE\tACCESS\tEVIDENCE")
+	for _, entry := range entries {
+		access := "public"
+		if entry.Gated {
+			access = "gated"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", entry.Name, entry.Model, entry.Protocol, entry.License, access, entry.EvidenceClass)
+	}
+	if err := w.Flush(); err != nil {
+		return err
+	}
+	fmt.Println("\nCreate a pinned project with: infercrane workload init --recipe NAME\nConfiguration recipes are reviewed starting points, not measured performance claims.")
+	return nil
 }
 
 func labCommand(ctx context.Context, cfg config.Config, args []string) error {
@@ -3125,9 +3176,12 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 		enabled := fs.Bool("enabled", policy.Enabled, "enable Release Guard")
 		compatibility := fs.Bool("require-compatibility", policy.RequireCompatibilityEvidence, "require comparable model/runtime evidence")
 		synthetic := fs.Bool("require-synthetic", policy.RequireSyntheticEvidence, "require bounded AIPerf validation")
+		quality := fs.Bool("require-quality", policy.RequireQualityEvidence, "require signed comparable semantic quality evidence")
 		autoRollback := fs.Bool("auto-rollback", policy.AutoRollbackEnabled, "monitor promoted revision and automatically roll back rejection")
 		minimum := fs.Int("minimum-requests", policy.MinimumRequests, "minimum measured requests per revision")
 		maxCost := fs.String("max-cost-regression", "", "maximum sourced cost regression percent; omit to preserve")
+		minimumQuality := fs.String("minimum-quality-score", "", "minimum candidate score from 0 to 1; omit to preserve")
+		maxQualityRegression := fs.String("max-quality-regression", "", "maximum comparable score regression percent; omit to preserve")
 		window := fs.Int("auto-rollback-window", policy.AutoRollbackWindowSeconds, "observation window seconds")
 		maxRequests := fs.Int("validation-max-requests", policy.ValidationMaxRequests, "hard validation request bound")
 		maxConcurrency := fs.Int("validation-max-concurrency", policy.ValidationMaxConcurrency, "hard validation concurrency bound")
@@ -3138,6 +3192,7 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 		policy.Enabled = *enabled
 		policy.RequireCompatibilityEvidence = *compatibility
 		policy.RequireSyntheticEvidence = *synthetic
+		policy.RequireQualityEvidence = *quality
 		policy.AutoRollbackEnabled = *autoRollback
 		policy.MinimumRequests = *minimum
 		policy.AutoRollbackWindowSeconds = *window
@@ -3150,13 +3205,27 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 			}
 			policy.MaxCostRegressionPercent = &value
 		}
+		if *minimumQuality != "" {
+			value, err := strconv.ParseFloat(*minimumQuality, 64)
+			if err != nil {
+				return fmt.Errorf("--minimum-quality-score: %w", err)
+			}
+			policy.MinimumQualityScore = &value
+		}
+		if *maxQualityRegression != "" {
+			value, err := strconv.ParseFloat(*maxQualityRegression, 64)
+			if err != nil {
+				return fmt.Errorf("--max-quality-regression: %w", err)
+			}
+			policy.MaxQualityRegressionPercent = &value
+		}
 		if err := controlJSON(ctx, cfg, http.MethodPut, "/api/v1/deployments/"+url.PathEscape(name)+"/release-guard/policy", "", policy, &policy); err != nil {
 			return err
 		}
 		if *output == "json" {
 			return printJSON(policy)
 		}
-		fmt.Printf("%s Release Guard V2 policy updated\nCompatibility evidence  %t\nSynthetic validation    %t\nAutomatic rollback      %t (%ds)\nValidation bound        %d requests x %d concurrency\n", name, policy.RequireCompatibilityEvidence, policy.RequireSyntheticEvidence, policy.AutoRollbackEnabled, policy.AutoRollbackWindowSeconds, policy.ValidationMaxRequests, policy.ValidationMaxConcurrency)
+		fmt.Printf("%s Release Guard policy updated\nCompatibility evidence  %t\nSynthetic validation    %t\nSemantic quality         %t\nAutomatic rollback      %t (%ds)\nValidation bound        %d requests x %d concurrency\n", name, policy.RequireCompatibilityEvidence, policy.RequireSyntheticEvidence, policy.RequireQualityEvidence, policy.AutoRollbackEnabled, policy.AutoRollbackWindowSeconds, policy.ValidationMaxRequests, policy.ValidationMaxConcurrency)
 		return nil
 	}
 	if args[0] == "policy" && args[1] == "get" {
@@ -3194,7 +3263,7 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 		}
 		if action == "policy" {
 			policy := view.ReleaseGuardPolicy
-			fmt.Printf("%s Release Guard V2 policy\nEnabled                %t\nMinimum requests       %d\nMax TTFT regression    %.1f%%\nMax latency regression %.1f%%\nMax error increase     %.2f%%\nMax throughput drop    %.1f%%\nCompatibility evidence %t\nSynthetic validation   %t\nAutomatic rollback     %t (%ds)\nValidation bound       %d requests x %d concurrency\n", name, policy.Enabled, policy.MinimumRequests, policy.MaxTTFTRegressionPercent, policy.MaxLatencyRegressionPercent, policy.MaxErrorRateIncrease*100, policy.MaxOutputThroughputDropPercent, policy.RequireCompatibilityEvidence, policy.RequireSyntheticEvidence, policy.AutoRollbackEnabled, policy.AutoRollbackWindowSeconds, policy.ValidationMaxRequests, policy.ValidationMaxConcurrency)
+			fmt.Printf("%s Release Guard policy\nEnabled                %t\nMinimum requests       %d\nMax TTFT regression    %.1f%%\nMax latency regression %.1f%%\nMax error increase     %.2f%%\nMax throughput drop    %.1f%%\nCompatibility evidence %t\nSynthetic validation   %t\nSemantic quality       %t\nMinimum quality        %s\nMax quality regression %s\nAutomatic rollback     %t (%ds)\nValidation bound       %d requests x %d concurrency\n", name, policy.Enabled, policy.MinimumRequests, policy.MaxTTFTRegressionPercent, policy.MaxLatencyRegressionPercent, policy.MaxErrorRateIncrease*100, policy.MaxOutputThroughputDropPercent, policy.RequireCompatibilityEvidence, policy.RequireSyntheticEvidence, policy.RequireQualityEvidence, formatGuardMetric(policy.MinimumQualityScore, ""), formatGuardMetric(policy.MaxQualityRegressionPercent, "%"), policy.AutoRollbackEnabled, policy.AutoRollbackWindowSeconds, policy.ValidationMaxRequests, policy.ValidationMaxConcurrency)
 			return nil
 		}
 		fmt.Printf("%s rollout\nACTIVE       %s\nCANDIDATE    %s\n\n", name, emptyAs(view.Deployment.ActiveRevisionID, "none"), emptyAs(view.Deployment.CandidateRevisionID, "none"))
@@ -3223,6 +3292,7 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 			fmt.Fprintf(w, "Latency p95\t%s\t%s\n", formatGuardMetric(metrics.Active.P95LatencyMS, "ms"), formatGuardMetric(metrics.Candidate.P95LatencyMS, "ms"))
 			fmt.Fprintf(w, "Error rate\t%.2f%%\t%.2f%%\n", metrics.Active.ErrorRate*100, metrics.Candidate.ErrorRate*100)
 			fmt.Fprintf(w, "Output tok/s\t%s\t%s\n", formatGuardMetric(metrics.Active.OutputTokensPerSecond, ""), formatGuardMetric(metrics.Candidate.OutputTokensPerSecond, ""))
+			fmt.Fprintf(w, "Semantic quality\t%s\t%s\n", formatGuardMetric(metrics.Active.QualityScore, ""), formatGuardMetric(metrics.Candidate.QualityScore, ""))
 			if err := w.Flush(); err != nil {
 				return err
 			}

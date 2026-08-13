@@ -63,6 +63,37 @@ func Evaluate(input Input) Result {
 			waiting = append(waiting, Reason{Code: "cost_evidence_unavailable", Metric: "sourced_hourly_cost", Message: "Cost policy requires sourced cost evidence for both revisions"})
 		}
 	}
+	qualityComparable := input.Candidate.QualityComparable != nil && *input.Candidate.QualityComparable && input.Active.QualityScore != nil
+	if input.Policy.RequireQualityEvidence {
+		if input.Candidate.QualityScore == nil || input.Candidate.QualityPassed == nil {
+			waiting = append(waiting, Reason{Code: "quality_evidence_unavailable", Metric: "quality_score", Message: "Policy requires signed revision-bound semantic evaluation evidence"})
+		} else if !*input.Candidate.QualityPassed {
+			rejected = append(rejected, Reason{Code: "quality_evaluation_failed", Metric: "quality_score", Candidate: input.Candidate.QualityScore, Message: "Candidate failed its external semantic evaluation suite"})
+		}
+		if !qualityComparable {
+			waiting = append(waiting, Reason{Code: "quality_evidence_not_comparable", Metric: "quality_score", Message: "Active and candidate require the same versioned evaluation suite and evaluator"})
+		}
+	}
+	if input.Policy.MinimumQualityScore != nil {
+		if input.Candidate.QualityScore == nil {
+			if !input.Policy.RequireQualityEvidence {
+				waiting = append(waiting, Reason{Code: "quality_evidence_unavailable", Metric: "quality_score", Message: "Minimum semantic quality policy requires signed revision-bound evidence"})
+			}
+		} else if *input.Candidate.QualityScore < *input.Policy.MinimumQualityScore {
+			rejected = append(rejected, comparisonReason("quality_score_below_minimum", "quality_score", value(input.Active.QualityScore), value(input.Candidate.QualityScore), *input.Policy.MinimumQualityScore, "Candidate semantic quality score is below policy"))
+		}
+	}
+	if input.Policy.MaxQualityRegressionPercent != nil {
+		if !qualityComparable {
+			if !input.Policy.RequireQualityEvidence {
+				waiting = append(waiting, Reason{Code: "quality_evidence_not_comparable", Metric: "quality_score", Message: "Quality regression policy requires the same versioned evaluation suite and evaluator"})
+			}
+		} else if regression, ok := percentDrop(input.Active.QualityScore, input.Candidate.QualityScore); ok && regression > *input.Policy.MaxQualityRegressionPercent {
+			rejected = append(rejected, comparisonReason("quality_score_regression", "quality_score", value(input.Active.QualityScore), value(input.Candidate.QualityScore), *input.Policy.MaxQualityRegressionPercent, fmt.Sprintf("Candidate semantic quality regression %.1f%% exceeds policy", regression)))
+		} else if input.Candidate.QualityScore == nil {
+			waiting = append(waiting, Reason{Code: "quality_score_unavailable", Metric: "quality_score", Message: "Quality regression policy requires comparable scores for both revisions"})
+		}
+	}
 	if len(rejected) > 0 {
 		return Result{Decision: "REJECT", Reasons: rejected}
 	}

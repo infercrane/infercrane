@@ -20,6 +20,8 @@ var publicCommandSpecs = []commandSpec{
 	{use: "doctor [flags]", short: "Validate configuration and dependencies", group: "start"},
 	{use: "plan MODEL [flags]", short: "Preview deployment changes without side effects", group: "start"},
 	{use: "deploy MODEL [flags]", short: "Create a durable inference deployment", group: "start"},
+	{use: "workload ACTION [PATH] [flags]", short: "Initialize, validate, build, develop, and deploy inference projects", group: "start"},
+	{use: "evaluation ACTION [arguments]", short: "Sign, verify, attach, and inspect semantic quality evidence", group: "understand"},
 	{use: "connect URL --as NAME [flags]", short: "Connect an existing inference endpoint", group: "start"},
 	{use: "adopt endpoint|promote NAME [flags]", short: "Connect an existing inference workload", group: "start"},
 	{use: "alert ACTION ENDPOINT [flags]", short: "Configure and evaluate signed webhook alerts", group: "operate"},
@@ -27,6 +29,8 @@ var publicCommandSpecs = []commandSpec{
 	{use: "async ACTION SUBJECT [flags]", short: "Submit and resume durable encrypted inference", group: "operate"},
 	{use: "ui", short: "Open the interactive operations workspace", group: "operate"},
 	{use: "dashboard [flags]", short: "Open or print the browser operations dashboard", group: "operate"},
+	{use: "mcp", short: "Serve read-only operational evidence over MCP stdio", group: "understand"},
+	{use: "observe ENDPOINT_OR_DEPLOYMENT [flags]", short: "See health, traffic, operations, Guard evidence, and recent events", group: "operate"},
 	{use: "request DEPLOYMENT [flags]", short: "Send a buffered or streaming inference request", group: "start"},
 	{use: "version", short: "Print the InferCrane version", group: "start"},
 	{use: "apply MODEL_OR_SPEC [flags]", short: "Declaratively converge a deployment", group: "operate"},
@@ -46,6 +50,7 @@ var publicCommandSpecs = []commandSpec{
 	{use: "benchmark DEPLOYMENT [flags]", short: "Run and persist a reproducible benchmark", group: "understand"},
 	{use: "replay DEPLOYMENT [flags]", short: "Capture a privacy-preserving production workload shape", group: "understand"},
 	{use: "capacity [flags]", short: "Inspect observed capacity reliability", group: "understand"},
+	{use: "artifact ACTION ARTIFACT_ID [flags]", short: "Inspect cache evidence and request provider-native prefetch", group: "understand"},
 	{use: "finops DEPLOYMENT [flags]", short: "Build an evidence-backed cost report", group: "understand"},
 	{use: "autopilot ACTION SUBJECT [flags]", short: "Create and approve advisory serving plans", group: "operate"},
 	{use: "session ACTION SUBJECT [flags]", short: "Manage durable logical session identity", group: "operate"},
@@ -147,10 +152,46 @@ func addHelpFlags(command *cobra.Command, name string) {
 	boolFlag := func(flag, help string) { command.Flags().Bool(flag, false, help) }
 	intFlag := func(flag string, value int, help string) { command.Flags().Int(flag, value, help) }
 	switch name {
-	case "init", "doctor", "connect", "adopt", "alert", "admission", "async", "plan", "deploy", "apply", "request", "deployments", "endpoints", "endpoint", "environment", "logical-model", "status", "logs", "events", "inspect", "explain", "benchmark", "replay", "capacity", "finops", "autopilot", "session", "burst", "recipe", "recipes", "lab", "passport", "recommend", "slo", "delete", "orphans", "operation", "integrations", "dashboard", "target", "auth", "system", "secret", "external", "rollout":
+	case "init", "workload", "evaluation", "doctor", "connect", "adopt", "alert", "admission", "async", "plan", "deploy", "apply", "request", "deployments", "endpoints", "endpoint", "environment", "logical-model", "status", "logs", "events", "inspect", "explain", "benchmark", "replay", "capacity", "artifact", "finops", "autopilot", "session", "burst", "recipe", "recipes", "lab", "passport", "recommend", "slo", "delete", "orphans", "operation", "integrations", "dashboard", "observe", "target", "auth", "system", "secret", "external", "rollout":
 		stringFlag("output", "human", "output format: human or json")
 	}
 	switch name {
+	case "workload":
+		stringFlag("model", "", "Hugging Face model identity")
+		stringFlag("recipe", "", "reviewed curated recipe name")
+		stringFlag("name", "", "deployment name")
+		stringFlag("runtime", "vllm", "vllm or sglang")
+		stringFlag("cloud", "runpod", "infrastructure provider")
+		stringFlag("gpu", "L40S", "GPU type")
+		stringFlag("region", "", "provider region")
+		stringFlag("tag", "", "registry image tag")
+		stringFlag("file", "Dockerfile", "Dockerfile path inside the project")
+		stringFlag("platform", "", "target image platform")
+		boolFlag("push", "push and record an immutable registry digest")
+		boolFlag("force", "replace an existing project spec")
+		boolFlag("wait", "follow durable deployment progress")
+		boolFlag("detach", "run a local workload in the background")
+		intFlag("port", 8000, "local loopback port")
+	case "evaluation":
+		stringFlag("file", "", "input or output evidence file")
+		stringFlag("key", "", "Ed25519 evaluator private key")
+		stringFlag("suite", "", "evaluation suite name")
+		stringFlag("suite-version", "", "immutable suite version")
+		stringFlag("evaluator", "", "evaluator name")
+		stringFlag("evaluator-version", "", "evaluator version")
+		stringFlag("score", "", "normalized quality score")
+		stringFlag("artifact-digest", "", "private result artifact digest")
+		stringFlag("evaluated-at", "", "RFC3339 evaluation time")
+		intFlag("samples", 0, "evaluated sample count")
+		boolFlag("passed", "external suite pass result")
+	case "artifact":
+		stringFlag("provider", "", "provider adapter")
+		stringFlag("region", "", "provider region")
+		stringFlag("location", "", "provider-native cache location")
+		stringFlag("state", "unknown", "cache observation state")
+		stringFlag("source", "operator", "observation source")
+		stringFlag("ttl", "5m", "observation validity")
+		stringFlag("idempotency-key", "", "stable safe-retry key")
 	case "connect":
 		stringFlag("as", "", "stable endpoint and logical model name")
 		stringFlag("model", "", "physical upstream model; discovered when omitted")
@@ -158,6 +199,11 @@ func addHelpFlags(command *cobra.Command, name string) {
 		boolFlag("manage-traffic", "route requests through InferCrane after qualification")
 	case "dashboard":
 		boolFlag("open", "open the dashboard in the default browser")
+	case "observe":
+		boolFlag("watch", "refresh until interrupted")
+		boolFlag("diagnose", "persist a fresh deterministic Doctor evaluation")
+		intFlag("events", 5, "recent deployment events")
+		stringFlag("window", "1h", "evidence window")
 	case "adopt":
 		stringFlag("url", "", "existing OpenAI-compatible base URL")
 		stringFlag("model", "", "stable logical model name")
@@ -206,6 +252,11 @@ func addHelpFlags(command *cobra.Command, name string) {
 		boolFlag("yes", "confirm endpoint deletion")
 		intFlag("minimum-requests", 0, "minimum requests per plan")
 		stringFlag("max-ttft-regression", "", "maximum TTFT regression percent")
+	case "environment":
+		stringFlag("to", "", "destination endpoint for environment promotion")
+		stringFlag("policy", "{}", "bounded environment policy JSON")
+		stringFlag("idempotency-key", "", "stable safe-retry key")
+		boolFlag("yes", "stage the destination candidate")
 	case "init":
 		stringFlag("url", "http://127.0.0.1:8080", "control-plane URL")
 		stringFlag("api-key", "", "existing control-plane credential")
@@ -314,32 +365,40 @@ func addHelpFlags(command *cobra.Command, name string) {
 		intFlag("requests", 20, "bounded validation requests per revision")
 		intFlag("concurrency", 1, "bounded validation concurrency")
 		boolFlag("acknowledge-validation-cost", "confirm explicit validation traffic and provider cost")
+		boolFlag("require-quality", "require signed comparable semantic quality evidence")
+		stringFlag("minimum-quality-score", "", "minimum candidate semantic quality score")
+		stringFlag("max-quality-regression", "", "maximum semantic quality regression percent")
 	}
 }
 
 func completionFor(command string) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 	flags := map[string][]string{
-		"deploy":    {"--name", "--cloud", "--gpu", "--region", "--compute", "--min", "--max", "--wait", "--wait-timeout", "--idempotency-key", "--output"},
-		"apply":     {"--name", "--cloud", "--gpu", "--region", "--compute", "--min", "--max", "--wait", "--wait-timeout", "--idempotency-key", "--output"},
-		"plan":      {"--name", "--targets", "--cloud", "--gpu", "--region", "--compute", "--min", "--max", "--output"},
-		"request":   {"--message", "--stream", "--output"},
-		"status":    {"--watch", "--output"},
-		"logs":      {"--follow", "--since", "--type", "--output"},
-		"events":    {"--output"},
-		"delete":    {"--plan", "--yes", "--wait", "--idempotency-key", "--output"},
-		"benchmark": {"--requests", "--concurrency", "--input-tokens", "--output-tokens", "--random-seed", "--revision", "--output"},
-		"recipe":    {"--name", "--version", "--benchmark", "--output"},
-		"recipes":   {"--limit", "--output"},
-		"lab":       {"--max-ttft-p95-ms", "--workload-digest", "--output"},
-		"passport":  {"--revision", "--file", "--output"},
-		"recommend": {"--history", "--output"},
-		"slo":       {"--ttft-p95", "--latency-p95", "--error-rate", "--output-tokens-second", "--hourly-cost", "--output"},
-		"external":  {"--target", "--adapter", "--secret-reference", "--request-limit", "--cost-limit-usd", "--max-request-cost-usd", "--mode", "--queue-threshold", "--breach-intervals", "--recovery-intervals", "--cooldown-seconds", "--signal-max-age-seconds", "--acknowledge-external-data", "--enable", "--output"},
-		"doctor":    {"--cloud", "--serverless", "--aws", "--gcp", "--kubernetes", "--output"},
-		"operation": {"--wait-timeout", "--output"},
-		"dashboard": {"--open", "--output"},
-		"rollout":   {"--requests", "--concurrency", "--acknowledge-validation-cost", "--wait", "--wait-timeout", "--output"},
-		"endpoint":  {"--model", "--environment", "--name", "--deployment", "--target", "--ownership", "--policy", "--bindings", "--evaluate", "--window", "--disable", "--minimum-requests", "--max-ttft-regression", "--yes", "--output"},
+		"workload":    {"--model", "--recipe", "--name", "--runtime", "--cloud", "--gpu", "--region", "--tag", "--file", "--platform", "--push", "--force", "--wait", "--detach", "--port", "--output"},
+		"evaluation":  {"--file", "--key", "--suite", "--suite-version", "--evaluator", "--evaluator-version", "--score", "--passed", "--samples", "--artifact-digest", "--evaluated-at", "--output"},
+		"artifact":    {"--provider", "--region", "--location", "--state", "--source", "--ttl", "--idempotency-key", "--output"},
+		"deploy":      {"--name", "--cloud", "--gpu", "--region", "--compute", "--min", "--max", "--wait", "--wait-timeout", "--idempotency-key", "--output"},
+		"apply":       {"--name", "--cloud", "--gpu", "--region", "--compute", "--min", "--max", "--wait", "--wait-timeout", "--idempotency-key", "--output"},
+		"plan":        {"--name", "--targets", "--cloud", "--gpu", "--region", "--compute", "--min", "--max", "--output"},
+		"request":     {"--message", "--stream", "--output"},
+		"status":      {"--watch", "--output"},
+		"logs":        {"--follow", "--since", "--type", "--output"},
+		"events":      {"--output"},
+		"delete":      {"--plan", "--yes", "--wait", "--idempotency-key", "--output"},
+		"benchmark":   {"--requests", "--concurrency", "--input-tokens", "--output-tokens", "--random-seed", "--revision", "--output"},
+		"recipe":      {"--name", "--version", "--benchmark", "--output"},
+		"recipes":     {"--limit", "--output"},
+		"lab":         {"--max-ttft-p95-ms", "--workload-digest", "--output"},
+		"passport":    {"--revision", "--file", "--output"},
+		"recommend":   {"--history", "--output"},
+		"slo":         {"--ttft-p95", "--latency-p95", "--error-rate", "--output-tokens-second", "--hourly-cost", "--output"},
+		"external":    {"--target", "--adapter", "--secret-reference", "--request-limit", "--cost-limit-usd", "--max-request-cost-usd", "--mode", "--queue-threshold", "--breach-intervals", "--recovery-intervals", "--cooldown-seconds", "--signal-max-age-seconds", "--acknowledge-external-data", "--enable", "--output"},
+		"doctor":      {"--cloud", "--serverless", "--aws", "--gcp", "--kubernetes", "--output"},
+		"operation":   {"--wait-timeout", "--output"},
+		"dashboard":   {"--open", "--output"},
+		"observe":     {"--watch", "--diagnose", "--events", "--window", "--output"},
+		"rollout":     {"--requests", "--concurrency", "--acknowledge-validation-cost", "--require-quality", "--minimum-quality-score", "--max-quality-regression", "--wait", "--wait-timeout", "--output"},
+		"endpoint":    {"--model", "--environment", "--name", "--deployment", "--target", "--ownership", "--policy", "--bindings", "--evaluate", "--window", "--disable", "--minimum-requests", "--max-ttft-regression", "--yes", "--output"},
+		"environment": {"--to", "--policy", "--idempotency-key", "--yes", "--output"},
 	}
 	return func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		if strings.HasPrefix(toComplete, "-") {
@@ -377,7 +436,7 @@ func completionFor(command string) func(*cobra.Command, []string, string) ([]str
 				}
 			}
 			return values, cobra.ShellCompDirectiveNoFileComp
-		case "request", "status", "logs", "events", "inspect", "explain", "benchmark", "passport", "recommend", "slo", "delete", "route", "rollout":
+		case "request", "status", "observe", "logs", "events", "inspect", "explain", "benchmark", "passport", "recommend", "slo", "delete", "route", "rollout":
 			cfg, err := config.LoadClient()
 			if err != nil {
 				return nil, cobra.ShellCompDirectiveNoFileComp

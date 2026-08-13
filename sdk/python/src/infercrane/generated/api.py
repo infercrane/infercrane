@@ -43,6 +43,10 @@ class ControlAPI:
         path = "/environments"
         return cast(dict[str, Any], self._transport.request("POST", path, body=body))
 
+    def stage_environment_promotion(self, *, body: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
+        path = "/environment-promotions"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body, idempotency_key=idempotency_key))
+
     def list_logical_models(self) -> ObjectList:
         path = "/logical-models"
         return cast(ObjectList, self._transport.request("GET", path))
@@ -179,6 +183,14 @@ class ControlAPI:
         path = f"/deployments/{quote(name, safe='')}/events"
         return cast(ObjectList, self._transport.request("GET", path))
 
+    def attach_quality_evidence(self, name: str, *, body: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
+        path = f"/deployments/{quote(name, safe='')}/quality-evidence"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body, idempotency_key=idempotency_key))
+
+    def list_quality_evidence(self, name: str) -> ObjectList:
+        path = f"/deployments/{quote(name, safe='')}/quality-evidence"
+        return cast(ObjectList, self._transport.request("GET", path))
+
     def run_benchmark(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
         path = f"/deployments/{quote(name, safe='')}/benchmarks"
         return cast(dict[str, Any], self._transport.request("POST", path, body=body))
@@ -222,6 +234,10 @@ class ControlAPI:
     def request_artifact_prefetch(self, id: str, *, body: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
         path = f"/artifacts/{quote(id, safe='')}/prefetches"
         return cast(dict[str, Any], self._transport.request("POST", path, body=body, idempotency_key=idempotency_key))
+
+    def inspect_artifact_cache(self, id: str) -> dict[str, Any]:
+        path = f"/artifacts/{quote(id, safe='')}/cache"
+        return cast(dict[str, Any], self._transport.request("GET", path))
 
     def create_fin_ops_report(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
         path = f"/deployments/{quote(name, safe='')}/finops/reports"

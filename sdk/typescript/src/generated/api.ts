@@ -43,6 +43,11 @@ export class ControlApi {
     return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
   }
 
+  stageEnvironmentPromotion(body: JsonValue, idempotencyKey: string): Promise<Record<string, JsonValue>> {
+    const path = '/environment-promotions';
+    return this.transport.request('POST', path, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
+  }
+
   listLogicalModels(): Promise<ObjectList> {
     const path = '/logical-models';
     return this.transport.request('GET', path) as Promise<ObjectList>;
@@ -213,6 +218,16 @@ export class ControlApi {
     return this.transport.request('GET', path) as Promise<ObjectList>;
   }
 
+  attachQualityEvidence(name: string, body: JsonValue, idempotencyKey: string): Promise<Record<string, JsonValue>> {
+    const path = `/deployments/${encodeURIComponent(name)}/quality-evidence`;
+    return this.transport.request('POST', path, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
+  }
+
+  listQualityEvidence(name: string): Promise<ObjectList> {
+    const path = `/deployments/${encodeURIComponent(name)}/quality-evidence`;
+    return this.transport.request('GET', path) as Promise<ObjectList>;
+  }
+
   runBenchmark(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
     const path = `/deployments/${encodeURIComponent(name)}/benchmarks`;
     return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
@@ -266,6 +281,11 @@ export class ControlApi {
   requestArtifactPrefetch(id: string, body: JsonValue, idempotencyKey: string): Promise<Record<string, JsonValue>> {
     const path = `/artifacts/${encodeURIComponent(id)}/prefetches`;
     return this.transport.request('POST', path, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
+  }
+
+  inspectArtifactCache(id: string): Promise<Record<string, JsonValue>> {
+    const path = `/artifacts/${encodeURIComponent(id)}/cache`;
+    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
   }
 
   createFinOpsReport(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {

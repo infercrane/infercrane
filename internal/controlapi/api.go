@@ -29,6 +29,7 @@ import (
 	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/lab"
 	"github.com/infercrane/infercrane/internal/passport"
+	"github.com/infercrane/infercrane/internal/qualityevidence"
 	"github.com/infercrane/infercrane/internal/recipe"
 	"github.com/infercrane/infercrane/internal/support"
 	"github.com/infercrane/infercrane/internal/workflows"
@@ -159,6 +160,16 @@ type recipeLabStore interface {
 	BenchmarksForModel(context.Context, string, string, int) ([]domain.BenchmarkResult, error)
 	RecordLabEvaluation(context.Context, string, domain.LabEvaluation) (domain.LabEvaluation, error)
 }
+type qualityEvidenceStore interface {
+	RecordQualityEvidence(context.Context, string, string, domain.QualityEvidence) (domain.QualityEvidence, bool, error)
+	QualityEvidenceForDeployment(context.Context, string, string, int) ([]domain.QualityEvidence, error)
+}
+type artifactCacheStateStore interface {
+	ArtifactCacheState(context.Context, string, string) ([]domain.ArtifactCacheObservation, []domain.ArtifactPrefetch, error)
+}
+type environmentPromotionStore interface {
+	StageEnvironmentPromotion(context.Context, string, string, string, string) (domain.EnvironmentPromotion, bool, error)
+}
 type API struct {
 	Store         Store
 	APIKey        string
@@ -221,6 +232,7 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/capacity/intelligence", a.auth(authz.Read, a.capacityIntelligence))
 	mux.HandleFunc("POST /api/v1/artifacts/{id}/cache-observations", a.auth(authz.Deploy, a.recordCacheObservation))
 	mux.HandleFunc("POST /api/v1/artifacts/{id}/prefetches", a.auth(authz.Deploy, a.requestPrefetch))
+	mux.HandleFunc("GET /api/v1/artifacts/{id}/cache", a.auth(authz.Read, a.artifactCacheState))
 	mux.HandleFunc("POST /api/v1/deployments/{name}/finops/reports", a.auth(authz.Deploy, a.createFinOpsReport))
 	mux.HandleFunc("GET /api/v1/deployments/{name}/finops/reports", a.auth(authz.Read, a.finOpsReports))
 	mux.HandleFunc("POST /api/v1/deployments/{name}/autopilot/plans", a.auth(authz.Deploy, a.createAutopilotPlan))
@@ -231,6 +243,7 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/deployments/{name}/burst-guard/evaluate", a.auth(authz.Deploy, a.evaluateBurstGuard))
 	mux.HandleFunc("GET /api/v1/environments", a.auth(authz.Read, a.environments))
 	mux.HandleFunc("POST /api/v1/environments", a.auth(authz.Deploy, a.createEnvironment))
+	mux.HandleFunc("POST /api/v1/environment-promotions", a.auth(authz.Deploy, a.stageEnvironmentPromotion))
 	mux.HandleFunc("GET /api/v1/logical-models", a.auth(authz.Read, a.logicalModels))
 	mux.HandleFunc("POST /api/v1/logical-models", a.auth(authz.Deploy, a.createLogicalModel))
 	mux.HandleFunc("GET /api/v1/endpoints", a.auth(authz.Read, a.endpoints))
@@ -275,6 +288,8 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/deployments/{name}/recommendations", a.auth(authz.Deploy, a.recommendDeployment))
 	mux.HandleFunc("GET /api/v1/deployments/{name}/recommendations", a.auth(authz.Read, a.recommendations))
 	mux.HandleFunc("GET /api/v1/deployments/{name}/revisions", a.auth(authz.Read, a.revisions))
+	mux.HandleFunc("POST /api/v1/deployments/{name}/quality-evidence", a.auth(authz.Deploy, a.recordQualityEvidence))
+	mux.HandleFunc("GET /api/v1/deployments/{name}/quality-evidence", a.auth(authz.Read, a.qualityEvidence))
 	mux.HandleFunc("POST /api/v1/deployments/{name}/rollouts", a.auth(authz.Deploy, a.createRollout))
 	mux.HandleFunc("POST /api/v1/deployments/{name}/rollouts/guard/evaluate", a.auth(authz.Deploy, a.evaluateReleaseGuard))
 	mux.HandleFunc("GET /api/v1/deployments/{name}/release-guard/policy", a.auth(authz.Read, a.releaseGuardPolicy))
@@ -300,6 +315,71 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/deployments/{name}/external-policy", a.auth(authz.Read, a.externalTargetPolicy))
 	mux.HandleFunc("PUT /api/v1/deployments/{name}/external-policy", a.auth(authz.ManageExternal, a.setExternalTargetPolicy))
 	return mux
+}
+
+func (a API) recordQualityEvidence(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(qualityEvidenceStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "quality evidence storage is not configured")
+		return
+	}
+	var envelope passport.Envelope
+	if !decodeMutationBody(w, r, &envelope) {
+		return
+	}
+	payload, err := qualityevidence.Decode(envelope)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_quality_evidence", err.Error())
+		return
+	}
+	if payload.Deployment != r.PathValue("name") {
+		writeError(w, http.StatusUnprocessableEntity, "revision_mismatch", "quality evidence deployment does not match the request path")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	item := domain.QualityEvidence{RevisionID: payload.RevisionID, Suite: payload.Suite, SuiteVersion: payload.SuiteVersion, Evaluator: payload.Evaluator, EvaluatorVersion: payload.EvaluatorVersion, Score: payload.Score, Passed: payload.Passed, SampleCount: payload.SampleCount, ArtifactDigest: payload.ArtifactDigest, PayloadDigest: envelope.Digest, Signature: envelope.Signature, PublicKey: envelope.PublicKey, Algorithm: envelope.Algorithm, KeyID: envelope.KeyID, EvaluatedAt: payload.EvaluatedAt}
+	item, created, err := store.RecordQualityEvidence(r.Context(), actor.TenantID, payload.Deployment, item)
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "deployment or revision was not found")
+		return
+	}
+	if errors.Is(err, domain.ErrConflict) {
+		writeError(w, http.StatusConflict, "idempotency_conflict", err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "quality evidence could not be persisted")
+		return
+	}
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "quality_evidence.attach", ResourceType: "deployment_revision", ResourceName: payload.RevisionID, Outcome: "succeeded"})
+	status := http.StatusOK
+	if created {
+		status = http.StatusCreated
+	}
+	writeJSON(w, status, map[string]any{"evidence": qualityEvidenceResponse(item), "created": created, "content_recorded": false, "decision_authority": "persisted_release_guard_policy"})
+}
+
+func (a API) qualityEvidence(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(qualityEvidenceStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "quality evidence storage is not configured")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	items, err := store.QualityEvidenceForDeployment(r.Context(), actor.TenantID, r.PathValue("name"), 100)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "quality evidence could not be listed")
+		return
+	}
+	data := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		data = append(data, qualityEvidenceResponse(item))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": data, "content_recorded": false})
+}
+
+func qualityEvidenceResponse(item domain.QualityEvidence) map[string]any {
+	return map[string]any{"id": item.ID, "deployment_id": item.DeploymentID, "revision_id": item.RevisionID, "suite": item.Suite, "suite_version": item.SuiteVersion, "evaluator": item.Evaluator, "evaluator_version": item.EvaluatorVersion, "score": item.Score, "passed": item.Passed, "sample_count": item.SampleCount, "artifact_digest": item.ArtifactDigest, "payload_digest": item.PayloadDigest, "algorithm": item.Algorithm, "key_id": item.KeyID, "evaluated_at": item.EvaluatedAt, "created_at": item.CreatedAt}
 }
 
 func (a API) integrations(w http.ResponseWriter, _ *http.Request) {
@@ -348,6 +428,43 @@ func (a API) createEnvironment(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "environment.create", ResourceType: "environment", ResourceName: item.Name, Outcome: "succeeded"})
 	writeJSON(w, http.StatusCreated, map[string]any{"environment": environmentResponse(item)})
+}
+
+func (a API) stageEnvironmentPromotion(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(environmentPromotionStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "environment promotion is not configured")
+		return
+	}
+	var request struct {
+		SourceEndpoint      string `json:"source_endpoint"`
+		DestinationEndpoint string `json:"destination_endpoint"`
+		IdempotencyKey      string `json:"idempotency_key"`
+	}
+	if !decodeMutationBody(w, r, &request) {
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	promotion, created, err := store.StageEnvironmentPromotion(r.Context(), actor.TenantID, request.SourceEndpoint, request.DestinationEndpoint, request.IdempotencyKey)
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+	if errors.Is(err, domain.ErrConflict) {
+		writeError(w, http.StatusConflict, "promotion_conflict", err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
+		return
+	}
+	refresh := a.refreshEndpoints(r.Context())
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "environment_promotion.stage", ResourceType: "endpoint", ResourceName: request.DestinationEndpoint, Outcome: "succeeded"})
+	status := http.StatusOK
+	if created {
+		status = http.StatusCreated
+	}
+	writeJSON(w, status, map[string]any{"promotion": map[string]any{"id": promotion.ID, "source_endpoint_id": promotion.SourceEndpointID, "source_plan_id": promotion.SourcePlanID, "destination_endpoint_id": promotion.DestinationEndpointID, "destination_plan_id": promotion.DestinationPlanID, "idempotency_key": promotion.IdempotencyKey, "created_at": promotion.CreatedAt}, "created": created, "state": "candidate_staged", "activation": "requires_destination_release_guard_pass", "route_refresh": refresh})
 }
 
 func (a API) logicalModels(w http.ResponseWriter, r *http.Request) {
@@ -1647,6 +1764,33 @@ func (a API) recordCacheObservation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 201, map[string]any{"observation": artifactCacheObservationResponse(row)})
+}
+
+func (a API) artifactCacheState(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(artifactCacheStateStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "artifact_cache_unavailable", "artifact cache state is not configured")
+		return
+	}
+	principal := r.Context().Value(identityKey{}).(domain.Principal)
+	observations, prefetches, err := store.ArtifactCacheState(r.Context(), principal.TenantID, r.PathValue("id"))
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "model artifact was not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "artifact cache state could not be read")
+		return
+	}
+	observationData := make([]map[string]any, 0, len(observations))
+	for _, row := range observations {
+		observationData = append(observationData, artifactCacheObservationResponse(row))
+	}
+	prefetchData := make([]map[string]any, 0, len(prefetches))
+	for _, row := range prefetches {
+		prefetchData = append(prefetchData, artifactPrefetchResponse(row))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"artifact_id": r.PathValue("id"), "observations": observationData, "prefetches": prefetchData, "execution_boundary": "provider_adapter"})
 }
 
 func (a API) requestPrefetch(w http.ResponseWriter, r *http.Request) {

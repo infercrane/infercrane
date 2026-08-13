@@ -355,6 +355,158 @@ func (s *Store) SetEndpointPlan(ctx context.Context, tenant, name, planID, slot 
 	return tx.Commit()
 }
 
+// StageEnvironmentPromotion atomically copies the source endpoint's active
+// serving plan into the destination candidate slot. It never activates the
+// candidate; Endpoint Release Guard remains the promotion authority.
+func (s *Store) StageEnvironmentPromotion(ctx context.Context, tenant, sourceName, destinationName, idempotencyKey string) (domain.EnvironmentPromotion, bool, error) {
+	if tenant == "" || sourceName == "" || destinationName == "" || sourceName == destinationName || idempotencyKey == "" || len(idempotencyKey) > 255 {
+		return domain.EnvironmentPromotion{}, false, errors.New("tenant, distinct source/destination endpoints, and a bounded idempotency key are required")
+	}
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return domain.EnvironmentPromotion{}, false, err
+	}
+	defer tx.Rollback()
+	var existing domain.EnvironmentPromotion
+	var existingCreated string
+	err = tx.QueryRowContext(ctx, `SELECT id,tenant_id,source_endpoint_id,source_plan_id,destination_endpoint_id,destination_plan_id,idempotency_key,created_at FROM environment_promotions WHERE tenant_id=? AND idempotency_key=?`, tenant, idempotencyKey).Scan(&existing.ID, &existing.TenantID, &existing.SourceEndpointID, &existing.SourcePlanID, &existing.DestinationEndpointID, &existing.DestinationPlanID, &existing.IdempotencyKey, &existingCreated)
+	if err == nil {
+		existing.CreatedAt = parseTime(existingCreated)
+		var sourceID, destinationID string
+		if lookupErr := tx.QueryRowContext(ctx, `SELECT (SELECT id FROM endpoints WHERE tenant_id=? AND name=?),(SELECT id FROM endpoints WHERE tenant_id=? AND name=?)`, tenant, sourceName, tenant, destinationName).Scan(&sourceID, &destinationID); lookupErr != nil {
+			return domain.EnvironmentPromotion{}, false, lookupErr
+		}
+		if existing.SourceEndpointID != sourceID || existing.DestinationEndpointID != destinationID {
+			return domain.EnvironmentPromotion{}, false, fmt.Errorf("%w: promotion idempotency key identifies another endpoint pair", ErrConflict)
+		}
+		return existing, false, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return domain.EnvironmentPromotion{}, false, err
+	}
+	var sourceID, sourceModelID, sourcePlanID, sourcePolicy string
+	if err = tx.QueryRowContext(ctx, `SELECT e.id,e.logical_model_id,COALESCE(e.active_serving_plan_id,''),COALESCE(p.routing_policy,'') FROM endpoints e LEFT JOIN serving_plans p ON p.id=e.active_serving_plan_id WHERE e.tenant_id=? AND e.name=? AND e.desired_state='serving' FOR UPDATE OF e`, tenant, sourceName).Scan(&sourceID, &sourceModelID, &sourcePlanID, &sourcePolicy); errors.Is(err, sql.ErrNoRows) {
+		return domain.EnvironmentPromotion{}, false, fmt.Errorf("%w: source endpoint", ErrNotFound)
+	} else if err != nil {
+		return domain.EnvironmentPromotion{}, false, err
+	}
+	if sourcePlanID == "" {
+		return domain.EnvironmentPromotion{}, false, fmt.Errorf("%w: source endpoint has no active serving plan", ErrConflict)
+	}
+	var destinationID, destinationModelID, destinationActive, destinationCandidate string
+	if err = tx.QueryRowContext(ctx, `SELECT id,logical_model_id,COALESCE(active_serving_plan_id,''),COALESCE(candidate_serving_plan_id,'') FROM endpoints WHERE tenant_id=? AND name=? AND desired_state='serving' FOR UPDATE`, tenant, destinationName).Scan(&destinationID, &destinationModelID, &destinationActive, &destinationCandidate); errors.Is(err, sql.ErrNoRows) {
+		return domain.EnvironmentPromotion{}, false, fmt.Errorf("%w: destination endpoint", ErrNotFound)
+	} else if err != nil {
+		return domain.EnvironmentPromotion{}, false, err
+	}
+	if sourceModelID != destinationModelID {
+		return domain.EnvironmentPromotion{}, false, fmt.Errorf("%w: endpoints belong to different logical models", ErrConflict)
+	}
+	if destinationActive == "" {
+		return domain.EnvironmentPromotion{}, false, fmt.Errorf("%w: destination has no active plan; initialize it explicitly before environment promotion", ErrConflict)
+	}
+	if destinationCandidate != "" {
+		return domain.EnvironmentPromotion{}, false, fmt.Errorf("%w: destination already has a candidate plan", ErrConflict)
+	}
+	type sourceBinding struct {
+		Name, Kind, Ownership, DeploymentID, TargetID, Config string
+		Priority, Weight                                      int
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT b.name,b.kind,b.ownership_mode,COALESCE(b.deployment_id,''),COALESCE(b.target_id,''),b.config_json::text,pb.priority,pb.weight FROM serving_plan_bindings pb JOIN backend_bindings b ON b.id=pb.binding_id WHERE pb.serving_plan_id=? ORDER BY pb.priority`, sourcePlanID)
+	if err != nil {
+		return domain.EnvironmentPromotion{}, false, err
+	}
+	bindings := make([]sourceBinding, 0)
+	for rows.Next() {
+		var binding sourceBinding
+		if err = rows.Scan(&binding.Name, &binding.Kind, &binding.Ownership, &binding.DeploymentID, &binding.TargetID, &binding.Config, &binding.Priority, &binding.Weight); err != nil {
+			_ = rows.Close()
+			return domain.EnvironmentPromotion{}, false, err
+		}
+		bindings = append(bindings, binding)
+	}
+	if err = rows.Close(); err != nil {
+		return domain.EnvironmentPromotion{}, false, err
+	}
+	if len(bindings) == 0 {
+		return domain.EnvironmentPromotion{}, false, fmt.Errorf("%w: source serving plan has no bindings", ErrConflict)
+	}
+	destinationBindings := make([]domain.ServingPlanBinding, 0, len(bindings))
+	for _, source := range bindings {
+		// Bind the destination snapshot to the immutable source plan. Reusing a
+		// destination binding across source plans would let a later mutable
+		// binding field (for example adoption ownership) alter historical plans.
+		bindingDigest := sha256.Sum256([]byte(sourcePlanID + "\x00" + source.Name))
+		bindingName := "promoted-" + source.Name
+		if len(bindingName) > 53 {
+			bindingName = bindingName[:53]
+		}
+		bindingName += "-" + hex.EncodeToString(bindingDigest[:4])
+		var bindingID, kind, ownership, deploymentID, targetID, configJSON string
+		lookupErr := tx.QueryRowContext(ctx, `SELECT id,kind,ownership_mode,COALESCE(deployment_id,''),COALESCE(target_id,''),config_json::text FROM backend_bindings WHERE endpoint_id=? AND name=?`, destinationID, bindingName).Scan(&bindingID, &kind, &ownership, &deploymentID, &targetID, &configJSON)
+		if lookupErr == nil {
+			if kind != source.Kind || ownership != source.Ownership || deploymentID != source.DeploymentID || targetID != source.TargetID || configJSON != source.Config {
+				return domain.EnvironmentPromotion{}, false, fmt.Errorf("%w: destination promoted binding %q differs from source", ErrConflict, bindingName)
+			}
+		} else if errors.Is(lookupErr, sql.ErrNoRows) {
+			bindingID, err = newID()
+			if err != nil {
+				return domain.EnvironmentPromotion{}, false, err
+			}
+			stamp := now()
+			if _, err = tx.ExecContext(ctx, `INSERT INTO backend_bindings(id,tenant_id,endpoint_id,name,kind,ownership_mode,deployment_id,target_id,config_json,created_at,updated_at) VALUES(?,?,?,?,?,?,NULLIF(?,''),NULLIF(?,''),?::jsonb,?,?)`, bindingID, tenant, destinationID, bindingName, source.Kind, source.Ownership, source.DeploymentID, source.TargetID, source.Config, stamp, stamp); err != nil {
+				return domain.EnvironmentPromotion{}, false, err
+			}
+		} else {
+			return domain.EnvironmentPromotion{}, false, lookupErr
+		}
+		destinationBindings = append(destinationBindings, domain.ServingPlanBinding{BindingID: bindingID, Priority: source.Priority, Weight: source.Weight})
+	}
+	_, specBody, err := normalizePlan(sourcePolicy, destinationBindings)
+	if err != nil {
+		return domain.EnvironmentPromotion{}, false, err
+	}
+	digest := sha256.Sum256(specBody)
+	planDigest := "sha256:" + hex.EncodeToString(digest[:])
+	var destinationPlanID string
+	if err = tx.QueryRowContext(ctx, `SELECT id FROM serving_plans WHERE endpoint_id=? AND spec_digest=?`, destinationID, planDigest).Scan(&destinationPlanID); errors.Is(err, sql.ErrNoRows) {
+		destinationPlanID, err = newID()
+		if err != nil {
+			return domain.EnvironmentPromotion{}, false, err
+		}
+		var version int
+		if err = tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(version),0)+1 FROM serving_plans WHERE endpoint_id=?`, destinationID).Scan(&version); err != nil {
+			return domain.EnvironmentPromotion{}, false, err
+		}
+		stamp := now()
+		if _, err = tx.ExecContext(ctx, `INSERT INTO serving_plans(id,tenant_id,endpoint_id,version,routing_policy,spec_json,spec_digest,created_at) VALUES(?,?,?,?,?,?::jsonb,?,?)`, destinationPlanID, tenant, destinationID, version, sourcePolicy, string(specBody), planDigest, stamp); err != nil {
+			return domain.EnvironmentPromotion{}, false, err
+		}
+		for _, binding := range destinationBindings {
+			if _, err = tx.ExecContext(ctx, `INSERT INTO serving_plan_bindings(serving_plan_id,binding_id,priority,weight) VALUES(?,?,?,?)`, destinationPlanID, binding.BindingID, binding.Priority, binding.Weight); err != nil {
+				return domain.EnvironmentPromotion{}, false, err
+			}
+		}
+	} else if err != nil {
+		return domain.EnvironmentPromotion{}, false, err
+	}
+	promotionID, err := newID()
+	if err != nil {
+		return domain.EnvironmentPromotion{}, false, err
+	}
+	stamp := now()
+	if _, err = tx.ExecContext(ctx, `INSERT INTO environment_promotions(id,tenant_id,source_endpoint_id,source_plan_id,destination_endpoint_id,destination_plan_id,idempotency_key,created_at) VALUES(?,?,?,?,?,?,?,?)`, promotionID, tenant, sourceID, sourcePlanID, destinationID, destinationPlanID, idempotencyKey, stamp); err != nil {
+		return domain.EnvironmentPromotion{}, false, err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE endpoints SET candidate_serving_plan_id=?,updated_at=? WHERE id=? AND candidate_serving_plan_id IS NULL`, destinationPlanID, stamp, destinationID); err != nil {
+		return domain.EnvironmentPromotion{}, false, err
+	}
+	if err = tx.Commit(); err != nil {
+		return domain.EnvironmentPromotion{}, false, err
+	}
+	return domain.EnvironmentPromotion{ID: promotionID, TenantID: tenant, SourceEndpointID: sourceID, SourcePlanID: sourcePlanID, DestinationEndpointID: destinationID, DestinationPlanID: destinationPlanID, IdempotencyKey: idempotencyKey, CreatedAt: parseTime(stamp)}, true, nil
+}
+
 func (s *Store) SetEndpointState(ctx context.Context, tenant, id, state string) error {
 	if state != "pending" && state != "serving" && state != "degraded" && state != "suspended" && state != "deleted" {
 		return errors.New("invalid endpoint observed state")

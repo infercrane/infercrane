@@ -1184,6 +1184,12 @@ func TestReleaseGuardPersistsDeterministicCandidateDecision(t *testing.T) {
 	if err != nil || policy.MinimumRequests != 5 || policy.MaxTTFTRegressionPercent != 10 {
 		t.Fatalf("policy=%+v err=%v", policy, err)
 	}
+	invalidQualityRegression := 101.0
+	invalidPolicy := policy
+	invalidPolicy.MaxQualityRegressionPercent = &invalidQualityRegression
+	if _, err = s.SetReleaseGuardPolicy(ctx, "global", deployment.Name, invalidPolicy); err == nil {
+		t.Fatal("quality regression above 100 percent was accepted")
+	}
 	evaluation, err := s.EvaluateReleaseGuard(ctx, "global", deployment.Name, 5*time.Minute)
 	if err != nil {
 		t.Fatal(err)
@@ -1194,6 +1200,58 @@ func TestReleaseGuardPersistsDeterministicCandidateDecision(t *testing.T) {
 	rows, err := s.ReleaseGuardEvaluations(ctx, "global", deployment.Name, 10)
 	if err != nil || len(rows) != 1 || rows[0].ID != evaluation.ID || rows[0].PolicyJSON == "" || rows[0].MetricsJSON == "" {
 		t.Fatalf("evaluations=%+v err=%v", rows, err)
+	}
+}
+
+func TestQualityEvidenceIsRevisionBoundTenantSafeAndIdempotent(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	suffix := time.Now().UTC().Format("150405.000000000")
+	createDeployment := func(name string) domain.Deployment {
+		target, err := s.AddTarget(ctx, domain.Target{Name: name + "-target", URL: "http://" + name, Provider: "existing", Runtime: "vllm", UpstreamModel: "model"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		deployment, err := s.ApplyDeployment(ctx, domain.Deployment{Name: name, Model: "model"}, []string{target.Name})
+		if err != nil {
+			t.Fatal(err)
+		}
+		resolved, err := s.ResolveForTenant(ctx, "global", deployment.Name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resolved.Deployment
+	}
+	deployment := createDeployment("quality-" + suffix)
+	candidate, err := s.CreateCandidateRevision(ctx, "global", deployment.Name, `{"model":"model-v2"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence := domain.QualityEvidence{RevisionID: candidate.ID, Suite: "support-answers", SuiteVersion: "git:abc123", Evaluator: "offline-evaluator", EvaluatorVersion: "1.0.0", Score: .91, Passed: true, SampleCount: 200, ArtifactDigest: "sha256:" + strings.Repeat("a", 64), PayloadDigest: "sha256:" + strings.Repeat("b", 64), Signature: "signature", PublicKey: "public-key", Algorithm: "Ed25519-SHA256", KeyID: "sha256:key", EvaluatedAt: time.Now().UTC()}
+	created, inserted, err := s.RecordQualityEvidence(ctx, "global", deployment.Name, evidence)
+	if err != nil || !inserted || created.ID == "" {
+		t.Fatalf("created=%+v inserted=%t err=%v", created, inserted, err)
+	}
+	replayed, inserted, err := s.RecordQualityEvidence(ctx, "global", deployment.Name, evidence)
+	if err != nil || inserted || replayed.ID != created.ID {
+		t.Fatalf("replayed=%+v inserted=%t err=%v", replayed, inserted, err)
+	}
+	conflict := evidence
+	conflict.Signature = "different-signature"
+	if _, _, err = s.RecordQualityEvidence(ctx, "global", deployment.Name, conflict); !errors.Is(err, ErrConflict) {
+		t.Fatalf("digest conflict error=%v", err)
+	}
+	other := createDeployment("quality-other-" + suffix)
+	if _, _, err = s.RecordQualityEvidence(ctx, "global", other.Name, evidence); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-deployment revision error=%v", err)
+	}
+	rows, err := s.QualityEvidenceForDeployment(ctx, "global", deployment.Name, 10)
+	if err != nil || len(rows) != 1 || rows[0].ID != created.ID || rows[0].RevisionID != candidate.ID {
+		t.Fatalf("rows=%+v err=%v", rows, err)
+	}
+	crossTenant, err := s.QualityEvidenceForDeployment(ctx, "another-tenant", deployment.Name, 10)
+	if err != nil || len(crossTenant) != 0 {
+		t.Fatalf("cross-tenant rows=%+v err=%v", crossTenant, err)
 	}
 }
 
