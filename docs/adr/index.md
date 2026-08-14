@@ -41,6 +41,7 @@ or link corrections. A changed decision gets a new ADR whose status supersedes t
 | [0029](/adr/0029-context-identity-delegated-survival-and-bounded-burst) | Accepted | Persist logical context identity while delegating runtime state survival. |
 | [0030](/adr/0030-separate-web-products) | Accepted | Separate the public site and authenticated console from the inference gateway release artifact. |
 | [0031](/adr/0031-managed-external-endpoint-bindings) | Accepted | Make authenticated external APIs governed, hard-budgeted endpoint bindings. |
+| [0032](/adr/0032-sandbox-and-training-integration-boundaries) | Accepted | Keep sandbox isolation and training schedulers external while importing identity, evidence, and immutable artifact handoffs. |
 
 Use the next sequential number. Include context, decision, consequences, alternatives, and
 verification. Link affected feature documents.

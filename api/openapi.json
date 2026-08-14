@@ -774,6 +774,78 @@
         },
         "type": "object"
       },
+      "EndpointMonitoring": {
+        "additionalProperties": false,
+        "properties": {
+          "breakdowns": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "maxItems": 50,
+            "type": "array"
+          },
+          "bucket_seconds": {
+            "minimum": 60,
+            "type": "integer"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "environment": {
+            "type": "string"
+          },
+          "events": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "maxItems": 200,
+            "type": "array"
+          },
+          "evidence": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "logical_model": {
+            "type": "string"
+          },
+          "series": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "maxItems": 500,
+            "type": "array"
+          },
+          "summary": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "window_end": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "window_start": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "endpoint",
+          "logical_model",
+          "environment",
+          "window_start",
+          "window_end",
+          "bucket_seconds",
+          "summary",
+          "series",
+          "breakdowns",
+          "events",
+          "evidence"
+        ],
+        "type": "object"
+      },
       "EndpointReleaseGuardPolicy": {
         "additionalProperties": false,
         "properties": {
@@ -5077,6 +5149,53 @@
         ]
       }
     },
+    "/api/v1/endpoints/{name}/monitoring": {
+      "get": {
+        "operationId": "getEndpointMonitoring",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndpointMonitoring"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read bounded normalized inference and lifecycle evidence",
+        "tags": [
+          "Monitoring"
+        ]
+      }
+    },
     "/api/v1/endpoints/{name}/plans": {
       "post": {
         "operationId": "createServingPlan",
@@ -7102,6 +7221,9 @@
     },
     {
       "name": "Model artifacts"
+    },
+    {
+      "name": "Monitoring"
     },
     {
       "name": "Operations"

@@ -25,8 +25,26 @@ func TestInitDiscoverAndValidate(t *testing.T) {
 	if discovered != path || deployment.Model.ID != "meta-llama/Llama-3.1-8B-Instruct" || deployment.Provider.Region != "eu-central-1" {
 		t.Fatalf("unexpected project: path=%q deployment=%+v", discovered, deployment)
 	}
+	content, err := os.ReadFile(path)
+	if err != nil || !strings.HasPrefix(string(content), "# yaml-language-server: $schema=https://raw.githubusercontent.com/infercrane/infercrane/main/schemas/deployment-v1.schema.json\n") {
+		t.Fatalf("editor schema directive missing: err=%v content=%q", err, content)
+	}
 	if _, err = Init(InitOptions{Directory: filepath.Dir(path), Model: "other/model"}); err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("expected overwrite protection, got %v", err)
+	}
+}
+
+func TestDeploymentSchemaIsValidJSONAndMatchesRuntimeEnums(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "schemas", "deployment-v1.schema.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema map[string]any
+	if err = json.Unmarshal(data, &schema); err != nil {
+		t.Fatalf("parse deployment schema: %v", err)
+	}
+	if schema["$id"] != "https://infercrane.dev/schemas/deployment-v1.schema.json" {
+		t.Fatalf("unexpected schema identity: %v", schema["$id"])
 	}
 }
 

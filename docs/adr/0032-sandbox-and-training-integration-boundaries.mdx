@@ -1,0 +1,77 @@
+---
+title: "ADR 0032: Sandbox and training integration boundaries"
+description: Keep execution isolation and training schedulers external while InferCrane owns inference-facing identity, evidence, and promotion.
+---
+
+# ADR 0032: Sandbox and training integration boundaries
+
+Status: Accepted
+
+## Context
+
+Agent applications may execute tools in E2B, Daytona, Modal, Kubernetes, or another sandbox. Model
+artifacts may originate from a managed fine-tuning service, a customer training platform, or an
+offline pipeline. Those systems have their own isolation, scheduling, data, checkpoint, and billing
+semantics. Treating them as inference runtimes would make the core domain depend on one vendor and
+would turn InferCrane into a workflow engine.
+
+## Decision
+
+Sandbox and training support remains post-launch and enters through two narrow contracts.
+
+```go
+type SandboxReference struct {
+    Provider, ExternalID, Revision, Status string
+}
+
+type TrainingArtifactHandoff struct {
+    Provider, ExternalRunID, Repository, ImmutableRevision, Digest string
+}
+```
+
+These are conceptual contracts, not public Go APIs in the current release. A future adapter may:
+
+- resolve externally created sandbox or training identity;
+- observe bounded status and timestamps;
+- attach content-free provenance and cost evidence;
+- hand an immutable checkpoint to `ModelArtifact` resolution;
+- revoke or delete only resources whose ownership was explicitly transferred.
+
+InferCrane continues to own the stable endpoint, DeploymentSpec, immutable revision, Release Guard,
+request evidence, and promotion decision. The external system owns code execution, isolation,
+files, training data, distributed training, checkpoints before handoff, and its native scheduler.
+
+The first sandbox integration must be composition-only: inject a scoped InferCrane endpoint token
+into a user-managed sandbox. The first training integration must be lineage-only: import a signed,
+immutable checkpoint handoff. Neither may create a general workflow graph.
+
+## Consequences
+
+- Applications can change sandbox or training vendors without changing their logical inference
+  endpoint.
+- InferCrane can later correlate inference and upstream artifact provenance without storing tool
+  commands, files, prompts, outputs, or training data by default.
+- Sandbox lifecycle and training orchestration remain explicitly unavailable in the immediate
+  launch; documentation must not imply otherwise.
+- Any mutating adapter must pass ownership, idempotency, lost-response adoption, cancellation, and
+  orphan-cleanup conformance before qualification.
+
+## Alternatives rejected
+
+- Building a microVM runtime duplicates gVisor, Firecracker, E2B, Daytona, Modal, and Kubernetes.
+- Building a training scheduler duplicates established training platforms and violates the narrow
+  inference-control-plane scope.
+- Encoding E2B, Modal, or a training vendor in core endpoint types creates vendor coupling.
+- Storing agent commands, files, prompts, outputs, or training examples by default creates an
+  unnecessary privacy and retention boundary.
+
+## Verification
+
+- Current code contains no sandbox executor or training scheduler.
+- The public docs label sandbox lifecycle and training orchestration as planned.
+- Existing stable endpoints can already be called from a user-managed sandbox with a scoped token.
+- Future adapters must use the provider conformance and signed evidence patterns before a support
+  claim is added.
+
+See [Compose gateways and agent sandboxes](/showcase/gateways-and-sandboxes) and the
+[end-to-end platform plan](/roadmap/end-to-end-inference-platform).

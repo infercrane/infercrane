@@ -17,12 +17,19 @@ reads PostgreSQL or provider credentials directly.
 - fleet attention, stable endpoints, and concrete workloads;
 - durable operations with reconnectable timelines and cooperative cancellation;
 - Request Inspector and deterministic Doctor findings;
+- endpoint monitoring for request rate, errors, fallback, TTFT, queueing, latency, and reported token throughput;
 - Release Guard, benchmark, replay, revision, and replica evidence where available;
+- lifecycle overlays, signed alert policies, sourced FinOps reports, and signed output-quality evidence;
 - provider/runtime capability inventory and secret references;
 - scoped API-key lifecycle and private-preview team access.
 
 Missing or forbidden evidence remains explicit. A failed optional panel does not make a deployment
 look healthy, and an unavailable measurement is never rendered as zero.
+
+The monitoring page queries only the authenticated control API. PostgreSQL request evidence and
+lifecycle events form the initial local evidence store; OpenTelemetry GenAI semantics define the
+portable names and dimensions. Runtime-internal and GPU metrics remain unavailable until a
+qualified runtime or provider adapter reports them.
 
 ## Local self-hosted console
 

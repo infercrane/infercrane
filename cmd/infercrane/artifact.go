@@ -92,7 +92,14 @@ func artifactCommand(ctx context.Context, cfg config.Config, args []string) erro
 			digest := sha256.Sum256([]byte(artifactID + "\x00" + *provider + "\x00" + *region + "\x00" + *location))
 			*idempotencyKey = "artifact-prefetch-" + hex.EncodeToString(digest[:16])
 		}
-		var response map[string]any
+		var response struct {
+			Prefetch struct {
+				Status              string `json:"status"`
+				ProviderOperationID string `json:"provider_operation_id"`
+			} `json:"prefetch"`
+			Created   bool   `json:"created"`
+			Execution string `json:"execution"`
+		}
 		body := map[string]any{"provider": *provider, "region": *region, "location": *location, "idempotency_key": *idempotencyKey}
 		if err := controlJSON(ctx, cfg, http.MethodPost, path+"/prefetches", *idempotencyKey, body, &response); err != nil {
 			return err
@@ -100,7 +107,15 @@ func artifactCommand(ctx context.Context, cfg config.Config, args []string) erro
 		if *output == "json" {
 			return printJSON(response)
 		}
-		fmt.Printf("Artifact prefetch intent persisted\nArtifact  %s\nProvider  %s\nLocation  %s\nStatus    requested\n\nThis records durable intent. It is not cache-hit proof; provider execution and a fresh observation are required before planning assumes locality.\n", artifactID, *provider, *location)
+		fmt.Printf("Artifact prefetch intent persisted\nArtifact   %s\nProvider   %s\nLocation   %s\nStatus     %s\nExecution  %s\n", artifactID, *provider, *location, response.Prefetch.Status, response.Execution)
+		if response.Prefetch.ProviderOperationID != "" {
+			fmt.Printf("Provider operation  %s\n", response.Prefetch.ProviderOperationID)
+		}
+		if response.Execution == "not_configured" {
+			fmt.Println("\nNo provider cache adapter is configured here. The durable intent is waiting for an adapter; warming has not started.")
+		} else {
+			fmt.Println("\nThis is not cache-hit proof. Wait for a fresh provider observation before planning assumes locality.")
+		}
 		return nil
 	default:
 		return fmt.Errorf("unknown artifact action %q", action)

@@ -32,6 +32,7 @@ Provider, runtime, gateway, evaluator, and sandbox implementations remain replac
 - Do not turn simulated provider behavior into a real-provider claim.
 - Do not publish managed compute before billing and abuse risk have explicit owners.
 - Prefer a five-minute existing-endpoint connection over forcing migration.
+- Keep sandbox and training integrations behind the boundaries in [ADR 0032](/adr/0032-sandbox-and-training-integration-boundaries); they are not immediate-launch capabilities.
 
 ## Success measures
 

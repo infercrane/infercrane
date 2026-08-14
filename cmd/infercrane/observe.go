@@ -12,19 +12,22 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/config"
+	"github.com/infercrane/infercrane/internal/domain"
 )
 
 type observeSnapshot struct {
-	Kind         string           `json:"kind"`
-	Name         string           `json:"name"`
-	Endpoint     map[string]any   `json:"endpoint,omitempty"`
-	Deployment   *deploymentView  `json:"deployment,omitempty"`
-	Guard        map[string]any   `json:"release_guard,omitempty"`
-	Admission    map[string]any   `json:"admission,omitempty"`
-	Alerts       []map[string]any `json:"alerts"`
-	Findings     []map[string]any `json:"findings"`
-	RecentEvents []cliEvent       `json:"recent_events"`
-	ObservedAt   time.Time        `json:"observed_at"`
+	Kind                  string                             `json:"kind"`
+	Name                  string                             `json:"name"`
+	Endpoint              map[string]any                     `json:"endpoint,omitempty"`
+	Deployment            *deploymentView                    `json:"deployment,omitempty"`
+	Guard                 map[string]any                     `json:"release_guard,omitempty"`
+	Admission             map[string]any                     `json:"admission,omitempty"`
+	Alerts                []map[string]any                   `json:"alerts"`
+	Findings              []map[string]any                   `json:"findings"`
+	RecentEvents          []cliEvent                         `json:"recent_events"`
+	Monitoring            *domain.EndpointMonitoringSnapshot `json:"monitoring,omitempty"`
+	MonitoringUnavailable string                             `json:"monitoring_unavailable,omitempty"`
+	ObservedAt            time.Time                          `json:"observed_at"`
 }
 
 func observeCommand(ctx context.Context, cfg config.Config, args []string) error {
@@ -79,6 +82,13 @@ func readObserveSnapshot(ctx context.Context, cfg config.Config, name string, di
 	err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/endpoints/"+url.PathEscape(name), "", nil, &endpoint)
 	if err == nil {
 		snapshot.Kind, snapshot.Endpoint = "endpoint", endpoint
+		monitoringPath := fmt.Sprintf("/api/v1/endpoints/%s/monitoring?window_seconds=%d", url.PathEscape(name), int(window.Seconds()))
+		var monitoring domain.EndpointMonitoringSnapshot
+		if monitoringErr := controlJSON(ctx, cfg, http.MethodGet, monitoringPath, "", nil, &monitoring); monitoringErr == nil {
+			snapshot.Monitoring = &monitoring
+		} else {
+			snapshot.MonitoringUnavailable = monitoringErr.Error()
+		}
 		var guardPolicy struct {
 			Policy map[string]any `json:"policy"`
 		}
@@ -167,6 +177,12 @@ func printObserveSnapshot(snapshot observeSnapshot) {
 	candidate, _ := snapshot.Endpoint["candidate_plan"].(map[string]any)
 	bindings, _ := snapshot.Endpoint["bindings"].([]any)
 	fmt.Printf("IDENTITY\n  Logical model  %v\n  Environment    %v\n  State          %v\n  Stable model   %s\n\nSERVING PLAN\n  Active         %s\n  Policy         %v\n  Candidate      %s\n  Bindings       %d\n", logical["name"], environment["name"], endpoint["observed_state"], snapshot.Name, shortValue(fmt.Sprint(active["id"])), active["routing_policy"], emptyAs(shortValue(fmt.Sprint(candidate["id"])), "none"), len(bindings))
+	if snapshot.Monitoring != nil {
+		stats := snapshot.Monitoring.Summary
+		fmt.Printf("\nTRAFFIC\n  Requests      %d (%.2f/s)\n  Error rate    %s\n  Fallback      %s\n  TTFT p95      %s\n  Latency p95   %s\n  Output        %s\n  Evidence      %s · %d samples\n", stats.Requests, stats.RequestsPerSecond, observePercent(stats.ErrorRate), observePercent(stats.FallbackRate), observeMillis(stats.P95TTFTMS), observeMillis(stats.P95LatencyMS), observeTokenRate(stats.OutputTokensPerSecond), observeFreshness(snapshot.Monitoring.Evidence), snapshot.Monitoring.Evidence.SampleCount)
+	} else {
+		fmt.Printf("\nTRAFFIC\n  Unavailable   %s\n", emptyAs(snapshot.MonitoringUnavailable, "monitoring capability unavailable"))
+	}
 	if evaluations, ok := snapshot.Guard["evaluations"].([]map[string]any); ok && len(evaluations) > 0 {
 		fmt.Printf("\nRELEASE GUARD\n  Decision       %v\n  Evaluated      %v\n", evaluations[0]["decision"], evaluations[0]["created_at"])
 	} else {
@@ -185,4 +201,35 @@ func printObserveSnapshot(snapshot observeSnapshot) {
 		fmt.Printf("\nADMISSION\n  %s\n", encoded)
 	}
 	fmt.Printf("\nNEXT\n  Send request    infercrane request %s\n  Diagnose        infercrane observe %s --diagnose\n  Open console    infercrane ui\n", snapshot.Name, snapshot.Name)
+}
+
+func observePercent(value *float64) string {
+	if value == nil {
+		return "unavailable"
+	}
+	return fmt.Sprintf("%.2f%%", *value*100)
+}
+
+func observeMillis(value *float64) string {
+	if value == nil {
+		return "unavailable"
+	}
+	return fmt.Sprintf("%.1fms", *value)
+}
+
+func observeTokenRate(value *float64) string {
+	if value == nil {
+		return "unavailable"
+	}
+	return fmt.Sprintf("%.2f tok/s", *value)
+}
+
+func observeFreshness(evidence domain.MonitoringEvidence) string {
+	if evidence.SampleCount == 0 {
+		return "empty"
+	}
+	if evidence.Fresh {
+		return "fresh"
+	}
+	return "stale"
 }

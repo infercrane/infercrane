@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://infercrane.dev/schemas/deployment-v1.schema.json",
+  "title": "InferCrane DeploymentSpec v1",
+  "description": "Provider-neutral desired state for one inference deployment.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "name", "model", "runtime", "compute", "resources", "provider", "scaling", "routing"],
+  "properties": {
+    "apiVersion": { "const": "infercrane.dev/v1" },
+    "kind": { "const": "Deployment" },
+    "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,62}$" },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "revision": { "type": "string", "maxLength": 256 }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["engine"],
+      "properties": {
+        "engine": { "enum": ["vllm", "sglang", "custom-oci"] },
+        "version": { "type": "string", "maxLength": 128 },
+        "args": { "type": "array", "maxItems": 128, "items": { "type": "string", "maxLength": 4096 } },
+        "workload": { "$ref": "#/$defs/workload" }
+      }
+    },
+    "compute": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": { "mode": { "enum": ["elastic", "serverless"] } }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gpu"],
+      "properties": { "gpu": { "type": "string", "minLength": 1, "maxLength": 128 } }
+    },
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cloud"],
+      "properties": {
+        "cloud": { "enum": ["runpod", "aws", "gcp", "kubernetes"] },
+        "adapter": { "type": "string", "maxLength": 128 },
+        "region": { "type": "string", "maxLength": 128 }
+      }
+    },
+    "scaling": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["min_replicas", "max_replicas"],
+      "properties": {
+        "min_replicas": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "max_replicas": { "type": "integer", "minimum": 1, "maximum": 10000 }
+      }
+    },
+    "routing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["strategy"],
+      "properties": { "strategy": { "enum": ["round-robin", "consistent-hash", "power-of-two", "cache-aware"] } }
+    }
+  },
+  "$defs": {
+    "workload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["image", "protocol", "port", "readiness_path", "models_path", "metrics_path", "cancellation", "drain", "shutdown_grace_seconds"],
+      "properties": {
+        "image": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "command": { "type": "array", "maxItems": 128, "items": { "type": "string", "maxLength": 4096 } },
+        "protocol": { "enum": ["openai"] },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "readiness_path": { "type": "string", "pattern": "^/" },
+        "models_path": { "type": "string", "pattern": "^/" },
+        "metrics_path": { "type": "string", "pattern": "^/" },
+        "cancellation": { "enum": ["http-disconnect"] },
+        "drain": { "enum": ["connection"] },
+        "shutdown_grace_seconds": { "type": "integer", "minimum": 1, "maximum": 3600 }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "provider": { "properties": { "cloud": { "const": "aws" } }, "required": ["cloud"] } } },
+      "then": { "properties": { "provider": { "required": ["cloud", "region"] } } }
+    },
+    {
+      "if": { "properties": { "compute": { "properties": { "mode": { "const": "serverless" } }, "required": ["mode"] } } },
+      "then": { "properties": { "scaling": { "properties": { "min_replicas": { "const": 0 } } } } }
+    },
+    {
+      "if": { "properties": { "runtime": { "properties": { "engine": { "const": "custom-oci" } }, "required": ["engine"] } } },
+      "then": {
+        "properties": {
+          "runtime": { "required": ["engine", "workload"] },
+          "compute": { "properties": { "mode": { "const": "elastic" } } }
+        }
+      }
+    }
+  ]
+}

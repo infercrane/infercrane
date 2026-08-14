@@ -19,8 +19,8 @@ type Adapter interface {
 }
 
 func (r Request) Validate() error {
-	if r.ArtifactID == "" || r.ModelIdentity == "" || r.Provider == "" || r.Location == "" {
-		return errors.New("artifact identity, model identity, provider, and location are required")
+	if r.ArtifactID == "" || r.ModelIdentity == "" || r.Provider == "" || r.Location == "" || r.IdempotencyKey == "" {
+		return errors.New("artifact identity, model identity, provider, location, and idempotency key are required")
 	}
 	return nil
 }

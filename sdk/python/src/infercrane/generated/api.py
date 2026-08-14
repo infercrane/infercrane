@@ -95,6 +95,10 @@ class ControlAPI:
         path = f"/endpoints/{quote(name, safe='')}"
         return cast(dict[str, Any], self._transport.request("GET", path))
 
+    def get_endpoint_monitoring(self, name: str) -> dict[str, Any]:
+        path = f"/endpoints/{quote(name, safe='')}/monitoring"
+        return cast(dict[str, Any], self._transport.request("GET", path))
+
     def diagnose_endpoint(self, name: str, *, body: dict[str, Any]) -> ObjectList:
         path = f"/endpoints/{quote(name, safe='')}/doctor"
         return cast(ObjectList, self._transport.request("POST", path, body=body))

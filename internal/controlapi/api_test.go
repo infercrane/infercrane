@@ -3,12 +3,14 @@ package controlapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/infercrane/infercrane/internal/artifactcache"
 	"github.com/infercrane/infercrane/internal/asyncinference"
 	"github.com/infercrane/infercrane/internal/authz"
 	"github.com/infercrane/infercrane/internal/benchmark"
@@ -137,12 +139,53 @@ type fakeOptimizationStore struct {
 
 type fakeIntelligenceStore struct {
 	*fakeStore
-	trace domain.ReplayTrace
+	trace       domain.ReplayTrace
+	artifact    domain.ModelArtifact
+	artifactErr error
+	prefetch    domain.ArtifactPrefetch
+	updateErr   error
 }
 
 type fakeQualityEvidenceStore struct {
 	*fakeStore
 	evidence []domain.QualityEvidence
+}
+
+type fakeMonitoringStore struct {
+	*fakeStore
+	snapshot domain.EndpointMonitoringSnapshot
+}
+
+func (f *fakeMonitoringStore) EndpointMonitoring(context.Context, string, string, time.Duration, time.Duration) (domain.EndpointMonitoringSnapshot, error) {
+	return f.snapshot, f.err
+}
+
+func TestEndpointMonitoringIsAuthenticatedBoundedAndContentFree(t *testing.T) {
+	now := time.Now().UTC()
+	value := .02
+	store := &fakeMonitoringStore{fakeStore: &fakeStore{}, snapshot: domain.EndpointMonitoringSnapshot{Endpoint: "coder-production", LogicalModel: "coder", Environment: "production", WindowStart: now.Add(-time.Hour), WindowEnd: now, BucketSeconds: 60, Summary: domain.MonitoringSummary{Requests: 20, ErrorRate: &value}, Series: []domain.MonitoringBucket{}, Breakdowns: []domain.MonitoringBreakdown{}, Events: []domain.MonitoringEvent{}, Evidence: domain.MonitoringEvidence{Source: "infercrane_gateway_request_records", SampleCount: 20, Fresh: true, ContentRecorded: false, Available: []string{}, Unavailable: []string{}}}}
+	handler := (API{Store: store, APIKey: "secret"}).Handler()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/endpoints/coder-production/monitoring?window_seconds=3600&bucket_seconds=60", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"endpoint":"coder-production"`) || !strings.Contains(response.Body.String(), `"content_recorded":false`) || strings.Contains(response.Body.String(), "prompt") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/endpoints/coder-production/monitoring?window_seconds=2592000&bucket_seconds=60", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("unbounded points status=%d body=%s", response.Code, response.Body.String())
+	}
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/endpoints/coder-production/monitoring?unexpected=1", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("unknown query status=%d body=%s", response.Code, response.Body.String())
+	}
 }
 
 func (f *fakeQualityEvidenceStore) RecordQualityEvidence(_ context.Context, tenant, _ string, item domain.QualityEvidence) (domain.QualityEvidence, bool, error) {
@@ -165,11 +208,141 @@ func (f *fakeIntelligenceStore) ReplayTrace(context.Context, string, string) (do
 func (f *fakeIntelligenceStore) RecordArtifactCacheObservation(context.Context, string, domain.ArtifactCacheObservation) (domain.ArtifactCacheObservation, error) {
 	return domain.ArtifactCacheObservation{}, nil
 }
-func (f *fakeIntelligenceStore) RequestArtifactPrefetch(context.Context, string, domain.ArtifactPrefetch) (domain.ArtifactPrefetch, bool, error) {
-	return domain.ArtifactPrefetch{}, false, nil
+func (f *fakeIntelligenceStore) RequestArtifactPrefetch(_ context.Context, tenant string, row domain.ArtifactPrefetch) (domain.ArtifactPrefetch, bool, error) {
+	if f.prefetch.ID != "" {
+		return f.prefetch, false, nil
+	}
+	row.ID, row.TenantID, row.Status = "prefetch-1", tenant, "requested"
+	f.prefetch = row
+	return row, true, nil
 }
 func (f *fakeIntelligenceStore) CapacityIntelligence(context.Context, string, time.Duration) ([]domain.CapacitySummary, error) {
 	return []domain.CapacitySummary{}, nil
+}
+func (f *fakeIntelligenceStore) ModelArtifactForTenantByID(context.Context, string, string) (domain.ModelArtifact, error) {
+	return f.artifact, f.artifactErr
+}
+func (f *fakeIntelligenceStore) UpdateArtifactPrefetch(_ context.Context, _, _ string, status, providerOperationID, errorCode string) (domain.ArtifactPrefetch, error) {
+	if f.updateErr != nil {
+		return f.prefetch, f.updateErr
+	}
+	f.prefetch.Status, f.prefetch.ProviderOperationID, f.prefetch.ErrorCode = status, providerOperationID, errorCode
+	return f.prefetch, nil
+}
+
+type fakeArtifactCacheAdapter struct {
+	calls        int
+	resourceKeys map[string]string
+}
+
+func (f *fakeArtifactCacheAdapter) Observe(context.Context, artifactcache.Request) (artifactcache.Observation, error) {
+	return artifactcache.Observation{}, nil
+}
+func (f *fakeArtifactCacheAdapter) Prefetch(_ context.Context, request artifactcache.Request) (artifactcache.Operation, error) {
+	f.calls++
+	if err := request.Validate(); err != nil {
+		return artifactcache.Operation{}, err
+	}
+	if f.resourceKeys == nil {
+		f.resourceKeys = map[string]string{}
+	}
+	operationID := f.resourceKeys[request.IdempotencyKey]
+	if operationID == "" {
+		operationID = "provider-prefetch-1"
+		f.resourceKeys[request.IdempotencyKey] = operationID
+	}
+	return artifactcache.Operation{ProviderOperationID: operationID, Status: "running"}, nil
+}
+
+func TestArtifactPrefetchExecutesConfiguredProviderWithoutDuplicateResource(t *testing.T) {
+	store := &fakeIntelligenceStore{fakeStore: &fakeStore{}, artifact: domain.ModelArtifact{ID: "artifact-1", ModelIdentity: "org/model@commit"}}
+	adapter := &fakeArtifactCacheAdapter{}
+	handler := (API{Store: store, APIKey: "secret", ArtifactCacheAdapters: map[string]artifactcache.Adapter{"fixture": adapter}}).Handler()
+	for attempt := 0; attempt < 2; attempt++ {
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/artifacts/artifact-1/prefetches", strings.NewReader(`{"provider":"fixture","region":"zone-a","location":"cache://models","idempotency_key":"warm-release-1"}`))
+		request.Header.Set("Authorization", "Bearer secret")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code < 200 || response.Code >= 300 {
+			t.Fatalf("attempt=%d status=%d body=%s", attempt, response.Code, response.Body.String())
+		}
+		if attempt == 0 && (!strings.Contains(response.Body.String(), `"execution":"provider_accepted"`) || !strings.Contains(response.Body.String(), `"provider_operation_id":"provider-prefetch-1"`)) {
+			t.Fatalf("configured execution was not disclosed: %s", response.Body.String())
+		}
+		if attempt == 1 && !strings.Contains(response.Body.String(), `"execution":"already_requested"`) {
+			t.Fatalf("replay state was not disclosed: %s", response.Body.String())
+		}
+	}
+	if adapter.calls != 1 || len(adapter.resourceKeys) != 1 {
+		t.Fatalf("provider calls=%d resources=%d, want one accepted resource", adapter.calls, len(adapter.resourceKeys))
+	}
+}
+
+type uncertainArtifactCacheAdapter struct{ keys []string }
+
+func (f *uncertainArtifactCacheAdapter) Observe(context.Context, artifactcache.Request) (artifactcache.Observation, error) {
+	return artifactcache.Observation{}, nil
+}
+func (f *uncertainArtifactCacheAdapter) Prefetch(_ context.Context, request artifactcache.Request) (artifactcache.Operation, error) {
+	f.keys = append(f.keys, request.IdempotencyKey)
+	if len(f.keys) == 1 {
+		return artifactcache.Operation{}, errors.New("response lost after provider acceptance")
+	}
+	return artifactcache.Operation{ProviderOperationID: "adopted-provider-operation", Status: "running"}, nil
+}
+
+func TestArtifactPrefetchRetriesUnknownProviderResultWithStableIdentity(t *testing.T) {
+	store := &fakeIntelligenceStore{fakeStore: &fakeStore{}, artifact: domain.ModelArtifact{ID: "artifact-1", ModelIdentity: "org/model@commit"}}
+	adapter := &uncertainArtifactCacheAdapter{}
+	handler := (API{Store: store, APIKey: "secret", ArtifactCacheAdapters: map[string]artifactcache.Adapter{"fixture": adapter}}).Handler()
+	for attempt := 0; attempt < 2; attempt++ {
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/artifacts/artifact-1/prefetches", strings.NewReader(`{"provider":"fixture","location":"cache://models","idempotency_key":"stable-prefetch"}`))
+		request.Header.Set("Authorization", "Bearer secret")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code < 200 || response.Code >= 300 {
+			t.Fatalf("attempt=%d status=%d body=%s", attempt, response.Code, response.Body.String())
+		}
+		if attempt == 0 && !strings.Contains(response.Body.String(), `"execution":"provider_result_unknown"`) {
+			t.Fatalf("unknown result not preserved: %s", response.Body.String())
+		}
+		if attempt == 1 && !strings.Contains(response.Body.String(), `"provider_operation_id":"adopted-provider-operation"`) {
+			t.Fatalf("provider operation not adopted: %s", response.Body.String())
+		}
+	}
+	if len(adapter.keys) != 2 || adapter.keys[0] != adapter.keys[1] {
+		t.Fatalf("provider retry identity changed: %#v", adapter.keys)
+	}
+}
+
+func TestArtifactPrefetchStorageFailuresRemainReplayableAndNeverDuplicateProviderWork(t *testing.T) {
+	adapter := &fakeArtifactCacheAdapter{}
+	store := &fakeIntelligenceStore{fakeStore: &fakeStore{}, artifactErr: errors.New("database temporarily unavailable")}
+	handler := (API{Store: store, APIKey: "secret", ArtifactCacheAdapters: map[string]artifactcache.Adapter{"fixture": adapter}}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/artifacts/artifact-1/prefetches", strings.NewReader(`{"provider":"fixture","location":"cache://models","idempotency_key":"storage-failure"}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusInternalServerError || !strings.Contains(response.Body.String(), `"code":"prefetch_artifact_read_failed"`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if adapter.calls != 0 || store.prefetch.Status != "requested" {
+		t.Fatalf("provider calls=%d durable status=%q, want no side effect and replayable request", adapter.calls, store.prefetch.Status)
+	}
+
+	store.artifactErr = nil
+	store.artifact = domain.ModelArtifact{ID: "artifact-1", ModelIdentity: "org/model@commit"}
+	store.updateErr = errors.New("checkpoint unavailable")
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/artifacts/artifact-1/prefetches", strings.NewReader(`{"provider":"fixture","location":"cache://models","idempotency_key":"storage-failure"}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusInternalServerError || !strings.Contains(response.Body.String(), `"code":"prefetch_checkpoint_failed"`) {
+		t.Fatalf("checkpoint status=%d body=%s", response.Code, response.Body.String())
+	}
+	if adapter.calls != 1 || store.prefetch.Status != "requested" {
+		t.Fatalf("provider calls=%d durable status=%q, want one idempotent call and replayable request", adapter.calls, store.prefetch.Status)
+	}
 }
 
 func TestQualityEvidenceAPIRequiresValidRevisionBoundSignedAggregate(t *testing.T) {

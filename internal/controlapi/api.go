@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/infercrane/infercrane/internal/artifactcache"
 	"github.com/infercrane/infercrane/internal/asyncinference"
 	"github.com/infercrane/infercrane/internal/authz"
 	"github.com/infercrane/infercrane/internal/benchmark"
@@ -118,12 +119,19 @@ type diagnosticStore interface {
 	RequestInspectionForTenant(context.Context, string, string) (domain.RequestInspection, error)
 	DiagnoseEndpoint(context.Context, string, string, time.Duration) ([]domain.DiagnosticFinding, error)
 }
+type monitoringStore interface {
+	EndpointMonitoring(context.Context, string, string, time.Duration, time.Duration) (domain.EndpointMonitoringSnapshot, error)
+}
 type intelligenceStore interface {
 	CaptureReplayTrace(context.Context, string, string, time.Duration, int) (domain.ReplayTrace, error)
 	ReplayTrace(context.Context, string, string) (domain.ReplayTrace, error)
 	RecordArtifactCacheObservation(context.Context, string, domain.ArtifactCacheObservation) (domain.ArtifactCacheObservation, error)
 	RequestArtifactPrefetch(context.Context, string, domain.ArtifactPrefetch) (domain.ArtifactPrefetch, bool, error)
 	CapacityIntelligence(context.Context, string, time.Duration) ([]domain.CapacitySummary, error)
+}
+type artifactPrefetchExecutionStore interface {
+	ModelArtifactForTenantByID(context.Context, string, string) (domain.ModelArtifact, error)
+	UpdateArtifactPrefetch(context.Context, string, string, string, string, string) (domain.ArtifactPrefetch, error)
 }
 type optimizationStore interface {
 	RecordFinOpsReport(context.Context, domain.FinOpsReport) (domain.FinOpsReport, error)
@@ -202,9 +210,10 @@ type API struct {
 	AlertDeliverer           interface {
 		Deliver(context.Context, domain.AlertPolicy, domain.DiagnosticFinding) (domain.AlertDelivery, error)
 	}
-	AsyncInference   asyncInferenceService
-	ContextPassports interface{ Put(contextpassport.Hint) }
-	ProductVersion   string
+	AsyncInference        asyncInferenceService
+	ArtifactCacheAdapters map[string]artifactcache.Adapter
+	ContextPassports      interface{ Put(contextpassport.Hint) }
+	ProductVersion        string
 }
 
 type BackendMetadata struct {
@@ -278,6 +287,7 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/async/jobs/{id}", a.auth(authz.Read, a.asyncInferenceJob))
 	mux.HandleFunc("DELETE /api/v1/async/jobs/{id}", a.auth(authz.Deploy, a.cancelAsyncInferenceJob))
 	mux.HandleFunc("GET /api/v1/endpoints/{name}", a.auth(authz.Read, a.endpoint))
+	mux.HandleFunc("GET /api/v1/endpoints/{name}/monitoring", a.auth(authz.Read, a.endpointMonitoring))
 	mux.HandleFunc("DELETE /api/v1/endpoints/{name}", a.auth(authz.Delete, a.deleteEndpoint))
 	mux.HandleFunc("POST /api/v1/endpoints/{name}/bindings", a.auth(authz.Deploy, a.createEndpointBinding))
 	mux.HandleFunc("POST /api/v1/endpoints/{name}/plans", a.auth(authz.Deploy, a.createEndpointPlan))
@@ -982,6 +992,69 @@ func (a API) endpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, resolvedEndpointResponse(resolved))
+}
+
+func (a API) endpointMonitoring(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(monitoringStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "endpoint monitoring is not supported by this store")
+		return
+	}
+	allowed := map[string]bool{"window_seconds": true, "bucket_seconds": true}
+	for key, values := range r.URL.Query() {
+		if !allowed[key] || len(values) != 1 {
+			writeError(w, http.StatusBadRequest, "invalid_request", "monitoring accepts one window_seconds and one bucket_seconds value")
+			return
+		}
+	}
+	windowSeconds := 3600
+	if raw := r.URL.Query().Get("window_seconds"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "window_seconds must be an integer")
+			return
+		}
+		windowSeconds = value
+	}
+	bucketSeconds := defaultMonitoringBucket(windowSeconds)
+	if raw := r.URL.Query().Get("bucket_seconds"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "bucket_seconds must be an integer")
+			return
+		}
+		bucketSeconds = value
+	}
+	if windowSeconds < 60 || windowSeconds > 30*24*60*60 || bucketSeconds < 60 || bucketSeconds > 24*60*60 || bucketSeconds > windowSeconds || (windowSeconds+bucketSeconds-1)/bucketSeconds+1 > 500 {
+		writeError(w, http.StatusUnprocessableEntity, "validation_failed", "monitoring requires a 1 minute..30 day window, a 1 minute..24 hour bucket, and at most 500 buckets")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	snapshot, err := store.EndpointMonitoring(r.Context(), actor.TenantID, r.PathValue("name"), time.Duration(windowSeconds)*time.Second, time.Duration(bucketSeconds)*time.Second)
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "endpoint was not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "endpoint monitoring evidence could not be read")
+		return
+	}
+	writeJSON(w, http.StatusOK, snapshot)
+}
+
+func defaultMonitoringBucket(windowSeconds int) int {
+	switch {
+	case windowSeconds <= 3600:
+		return 60
+	case windowSeconds <= 6*3600:
+		return 300
+	case windowSeconds <= 24*3600:
+		return 900
+	case windowSeconds <= 7*24*3600:
+		return 3600
+	default:
+		return 4 * 3600
+	}
 }
 
 func (a API) deleteEndpoint(w http.ResponseWriter, r *http.Request) {
@@ -1936,7 +2009,57 @@ func (a API) requestPrefetch(w http.ResponseWriter, r *http.Request) {
 	if created {
 		status = http.StatusCreated
 	}
-	writeJSON(w, status, map[string]any{"prefetch": artifactPrefetchResponse(row), "created": created, "execution": "delegated_to_provider_adapter"})
+	execution := "already_requested"
+	if row.Status == "requested" {
+		execution = "not_configured"
+		adapter := a.ArtifactCacheAdapters[row.Provider]
+		executionStore, canExecute := a.Store.(artifactPrefetchExecutionStore)
+		if adapter != nil && canExecute {
+			durableContext, durableCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Second)
+			defer durableCancel()
+			artifact, artifactErr := executionStore.ModelArtifactForTenantByID(durableContext, principal.TenantID, row.ModelArtifactID)
+			if errors.Is(artifactErr, domain.ErrNotFound) {
+				row, _ = executionStore.UpdateArtifactPrefetch(durableContext, principal.TenantID, row.ID, "failed", "", "artifact_unavailable")
+				execution = "failed"
+			} else if artifactErr != nil {
+				writeError(w, http.StatusInternalServerError, "prefetch_artifact_read_failed", "artifact identity could not be read; the durable prefetch request remains replayable")
+				return
+			} else {
+				cacheRequest := artifactcache.Request{ArtifactID: artifact.ID, ModelIdentity: artifact.ModelIdentity, Provider: row.Provider, Region: row.Region, Location: row.Location, IdempotencyKey: row.IdempotencyKey}
+				if requestErr := cacheRequest.Validate(); requestErr != nil {
+					row, _ = executionStore.UpdateArtifactPrefetch(durableContext, principal.TenantID, row.ID, "failed", "", "invalid_prefetch_request")
+					execution = "failed"
+					writeError(w, http.StatusInternalServerError, "invalid_prefetch_request", "persisted artifact prefetch state could not form a valid provider request")
+					return
+				}
+				adapterContext, cancel := context.WithTimeout(durableContext, 10*time.Second)
+				operation, adapterErr := adapter.Prefetch(adapterContext, cacheRequest)
+				cancel()
+				if adapterErr != nil {
+					// The provider may have accepted the side effect before the response was
+					// lost. Keep the durable request replayable under the same key.
+					row, adapterErr = executionStore.UpdateArtifactPrefetch(durableContext, principal.TenantID, row.ID, "requested", "", "provider_result_unknown")
+					if adapterErr != nil {
+						writeError(w, http.StatusInternalServerError, "prefetch_checkpoint_failed", "provider prefetch result was unknown and its durable checkpoint could not be updated")
+						return
+					}
+					execution = "provider_result_unknown"
+				} else {
+					operationStatus := operation.Status
+					if operationStatus == "" || operationStatus == "requested" {
+						operationStatus = "running"
+					}
+					row, adapterErr = executionStore.UpdateArtifactPrefetch(durableContext, principal.TenantID, row.ID, operationStatus, operation.ProviderOperationID, operation.ErrorCode)
+					if adapterErr != nil {
+						writeError(w, http.StatusInternalServerError, "prefetch_checkpoint_failed", "provider accepted prefetch but its operation could not be checkpointed")
+						return
+					}
+					execution = "provider_accepted"
+				}
+			}
+		}
+	}
+	writeJSON(w, status, map[string]any{"prefetch": artifactPrefetchResponse(row), "created": created, "execution": execution})
 }
 
 func artifactCacheObservationResponse(row domain.ArtifactCacheObservation) map[string]any {

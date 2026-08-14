@@ -71,6 +71,14 @@ func TestReplayCacheCapacityFinOpsAndAutopilotPersistence(t *testing.T) {
 	if _, _, err = s.RequestArtifactPrefetch(ctx, "global", domain.ArtifactPrefetch{ModelArtifactID: artifact.ID, Provider: fixtureProvider, Region: "other", Location: "zone/cache", IdempotencyKey: "prefetch-" + suffix}); !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("prefetch conflict err=%v", err)
 	}
+	loadedArtifact, err := s.ModelArtifactForTenantByID(ctx, "global", artifact.ID)
+	if err != nil || loadedArtifact.ModelIdentity != artifact.ModelIdentity {
+		t.Fatalf("artifact lookup=%#v err=%v", loadedArtifact, err)
+	}
+	updated, err := s.UpdateArtifactPrefetch(ctx, "global", prefetch.ID, "running", "provider-operation-1", "")
+	if err != nil || updated.Status != "running" || updated.ProviderOperationID != "provider-operation-1" {
+		t.Fatalf("updated prefetch=%#v err=%v", updated, err)
+	}
 	for index, outcome := range []string{"succeeded", "succeeded", "capacity_unavailable"} {
 		begin := now.Add(-10*time.Second + time.Duration(index)*time.Second)
 		if _, err = s.RecordCapacityOperation(ctx, domain.CapacityOperation{TenantID: "global", Provider: fixtureProvider, Runtime: "vllm", ComputeMode: "elastic", Region: "zone", GPU: "GPU", Operation: "ensure", ResourceKey: name + string(rune('a'+index)), Outcome: outcome, StartedAt: begin, CompletedAt: begin.Add(time.Duration(index+1) * time.Second)}); err != nil {

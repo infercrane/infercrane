@@ -26,8 +26,14 @@ infercrane artifact prefetch ARTIFACT_ID \
   --idempotency-key release-42-prefetch
 ```
 
-This persists durable intent. It is **not** proof that the artifact is present. A provider adapter
-must execute the request and publish a fresh observation before a planner can rely on locality.
+This persists durable intent. When an adapter for the named provider is configured, InferCrane
+ensures that intent with a stable idempotency key and checkpoints the provider operation identity.
+If a provider response is lost, a retry may repeat the API call with the same key and adopt the same
+logical operation; it must not create a second cache resource. If no adapter is configured, the
+response says `execution: not_configured` instead of implying that warming began.
+
+Submission is **not** proof that the artifact is present. The adapter must publish a fresh
+observation before a planner can rely on locality.
 
 ## Record an adapter observation
 
@@ -45,8 +51,9 @@ Valid states are `present`, `prefetching`, `missing`, and `unknown`. Expiry prev
 state from becoming a permanent planning assumption.
 
 <Note>
-The current surface establishes lifecycle-safe intent and evidence. Actual cache population remains
-adapter-specific and requires qualification on the selected infrastructure.
+  Cache population remains adapter-specific and requires qualification on the selected
+  infrastructure. `requested` or `running` describes work, while only a fresh `present`
+  observation describes locality.
 </Note>
 
 ## Why prefetch is not a universal download command

@@ -75,6 +75,13 @@ func (s *Store) ModelArtifactForRevision(ctx context.Context, tenant, revisionID
 	return modelArtifactQuery(ctx, s, tenant, artifactID.String)
 }
 
+func (s *Store) ModelArtifactForTenantByID(ctx context.Context, tenant, id string) (domain.ModelArtifact, error) {
+	if tenant == "" || id == "" {
+		return domain.ModelArtifact{}, errors.New("tenant and artifact ID are required")
+	}
+	return modelArtifactQuery(ctx, s, tenant, id)
+}
+
 type artifactQuerier interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }

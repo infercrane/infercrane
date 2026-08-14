@@ -29,8 +29,10 @@ infercrane workload init ./fraud-explainer \
 ```
 </CodeGroup>
 
-`workload init` writes a valid DeploymentSpec. A curated recipe also pins the model commit. Recipes
-are reviewed configuration starting points, not performance claims; use benchmark or replay evidence
+`workload init` writes a valid DeploymentSpec with a JSON Schema directive understood by YAML
+language servers in VS Code, JetBrains editors, and other schema-aware tools. Fields, enums, and
+unknown keys are checked while you type. A curated recipe also pins the model commit. Recipes are
+reviewed configuration starting points, not performance claims; use benchmark or replay evidence
 for serving decisions.
 
 ## Local validation before GPU allocation
@@ -43,6 +45,11 @@ infercrane workload plan
 Validation catches schema, runtime, provider, and workload-contract problems without contacting a
 GPU provider. `plan` is also non-mutating. This keeps an invalid container command or unsupported
 runtime combination from becoming a paid provisioning attempt.
+
+The versioned schema is published from
+[`schemas/deployment-v1.schema.json`](https://github.com/infercrane/infercrane/blob/main/schemas/deployment-v1.schema.json).
+The Go loader remains authoritative; the schema improves editing and never weakens server-side
+validation.
 
 ## Build a custom OCI workload
 

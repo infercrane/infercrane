@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -185,6 +186,108 @@ type RequestStats struct {
 	P95LatencyMS          *float64 `json:"p95_latency_ms"`
 	P50TTFTMS             *float64 `json:"p50_ttft_ms"`
 	P95TTFTMS             *float64 `json:"p95_ttft_ms"`
+}
+
+// EndpointMonitoringSnapshot is the bounded, tenant-scoped read model used by
+// operator surfaces. It deliberately contains normalized aggregates and
+// persisted lifecycle evidence rather than raw runtime/provider metrics.
+type EndpointMonitoringSnapshot struct {
+	Endpoint      string                `json:"endpoint"`
+	LogicalModel  string                `json:"logical_model"`
+	Environment   string                `json:"environment"`
+	WindowStart   time.Time             `json:"window_start"`
+	WindowEnd     time.Time             `json:"window_end"`
+	BucketSeconds int                   `json:"bucket_seconds"`
+	Summary       MonitoringSummary     `json:"summary"`
+	Series        []MonitoringBucket    `json:"series"`
+	Breakdowns    []MonitoringBreakdown `json:"breakdowns"`
+	Events        []MonitoringEvent     `json:"events"`
+	Evidence      MonitoringEvidence    `json:"evidence"`
+}
+
+type MonitoringSummary struct {
+	Requests              int      `json:"requests"`
+	Errors                int      `json:"errors"`
+	Fallbacks             int      `json:"fallbacks"`
+	Retried               int      `json:"retried"`
+	Streaming             int      `json:"streaming"`
+	TokenUsageSamples     int      `json:"token_usage_samples"`
+	InputTokenSamples     int      `json:"input_token_samples"`
+	OutputTokenSamples    int      `json:"output_token_samples"`
+	InputTokens           int64    `json:"input_tokens"`
+	OutputTokens          int64    `json:"output_tokens"`
+	RequestsPerSecond     float64  `json:"requests_per_second"`
+	InputTokensPerSecond  *float64 `json:"input_tokens_per_second"`
+	OutputTokensPerSecond *float64 `json:"output_tokens_per_second"`
+	ErrorRate             *float64 `json:"error_rate"`
+	FallbackRate          *float64 `json:"fallback_rate"`
+	RetryRate             *float64 `json:"retry_rate"`
+	P50LatencyMS          *float64 `json:"p50_latency_ms"`
+	P95LatencyMS          *float64 `json:"p95_latency_ms"`
+	P50TTFTMS             *float64 `json:"p50_ttft_ms"`
+	P95TTFTMS             *float64 `json:"p95_ttft_ms"`
+	P95QueueMS            *float64 `json:"p95_queue_ms"`
+	P95GenerationMS       *float64 `json:"p95_generation_ms"`
+}
+
+type MonitoringBucket struct {
+	StartedAt             time.Time `json:"started_at"`
+	Requests              int       `json:"requests"`
+	Errors                int       `json:"errors"`
+	Fallbacks             int       `json:"fallbacks"`
+	Retried               int       `json:"retried"`
+	Streaming             int       `json:"streaming"`
+	TokenUsageSamples     int       `json:"token_usage_samples"`
+	InputTokenSamples     int       `json:"input_token_samples"`
+	OutputTokenSamples    int       `json:"output_token_samples"`
+	InputTokens           int64     `json:"input_tokens"`
+	OutputTokens          int64     `json:"output_tokens"`
+	RequestsPerSecond     float64   `json:"requests_per_second"`
+	InputTokensPerSecond  *float64  `json:"input_tokens_per_second"`
+	OutputTokensPerSecond *float64  `json:"output_tokens_per_second"`
+	ErrorRate             *float64  `json:"error_rate"`
+	FallbackRate          *float64  `json:"fallback_rate"`
+	P50LatencyMS          *float64  `json:"p50_latency_ms"`
+	P95LatencyMS          *float64  `json:"p95_latency_ms"`
+	P50TTFTMS             *float64  `json:"p50_ttft_ms"`
+	P95TTFTMS             *float64  `json:"p95_ttft_ms"`
+	P95QueueMS            *float64  `json:"p95_queue_ms"`
+	P95GenerationMS       *float64  `json:"p95_generation_ms"`
+}
+
+type MonitoringBreakdown struct {
+	Binding      string    `json:"binding"`
+	Deployment   string    `json:"deployment"`
+	Revision     string    `json:"revision"`
+	Provider     string    `json:"provider"`
+	Runtime      string    `json:"runtime"`
+	Requests     int       `json:"requests"`
+	Errors       int       `json:"errors"`
+	Fallbacks    int       `json:"fallbacks"`
+	ErrorRate    *float64  `json:"error_rate"`
+	P95LatencyMS *float64  `json:"p95_latency_ms"`
+	P95TTFTMS    *float64  `json:"p95_ttft_ms"`
+	LastSeenAt   time.Time `json:"last_seen_at"`
+}
+
+type MonitoringEvent struct {
+	Kind        string          `json:"kind"`
+	Type        string          `json:"type"`
+	Summary     string          `json:"summary"`
+	DetailsJSON string          `json:"-"`
+	Details     json.RawMessage `json:"details"`
+	OccurredAt  time.Time       `json:"occurred_at"`
+}
+
+type MonitoringEvidence struct {
+	Source                   string     `json:"source"`
+	SemanticConventionSchema string     `json:"semantic_convention_schema"`
+	SampleCount              int        `json:"sample_count"`
+	LatestRequestAt          *time.Time `json:"latest_request_at"`
+	Fresh                    bool       `json:"fresh"`
+	ContentRecorded          bool       `json:"content_recorded"`
+	Available                []string   `json:"available"`
+	Unavailable              []string   `json:"unavailable"`
 }
 
 type ColdStartStats struct {

@@ -34,6 +34,18 @@ provider value because the convention permits provider-specific names outside it
 
 Aggregated deployment statistics expose request rate, error rate, latency p50/p95, TTFT p50/p95, and observed input/output tokens per second over the selected window. Token throughput is emitted only from runtime-reported usage.
 
+The endpoint monitoring API returns the same content-free evidence as a bounded time series, plus
+binding/deployment/revision attribution and persisted lifecycle overlays. The console uses this API;
+it never queries PostgreSQL or an OpenTelemetry collector from the browser. Missing buckets and
+unsupported runtime metrics stay null or explicitly unavailable rather than becoming zero.
+
+```bash
+infercrane observe coder-production
+```
+
+The human view includes the latest traffic summary. Use the authenticated console for 1-hour to
+30-day charts and correlated scaling or release events.
+
 The Prometheus endpoint also exposes accounting queue depth and capacity, persisted and dropped
 request-record counters, and persistence failures. These distinguish inference-path health from
 telemetry backpressure without putting PostgreSQL on the request path. vLLM running/waiting and

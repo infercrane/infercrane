@@ -133,6 +133,30 @@ func (s *Store) RequestArtifactPrefetch(ctx context.Context, tenant string, row 
 	return row, true, nil
 }
 
+func (s *Store) UpdateArtifactPrefetch(ctx context.Context, tenant, id, status, providerOperationID, errorCode string) (domain.ArtifactPrefetch, error) {
+	if tenant == "" || id == "" {
+		return domain.ArtifactPrefetch{}, errors.New("tenant and prefetch ID are required")
+	}
+	switch status {
+	case "requested", "running", "succeeded", "failed", "cancelled":
+	default:
+		return domain.ArtifactPrefetch{}, errors.New("invalid prefetch status")
+	}
+	stamp := now()
+	result, err := s.ExecContext(ctx, `UPDATE artifact_prefetches SET status=?,provider_operation_id=NULLIF(?,''),error_code=NULLIF(?,''),updated_at=? WHERE tenant_id=? AND id=?`, status, providerOperationID, errorCode, stamp, tenant, id)
+	if err != nil {
+		return domain.ArtifactPrefetch{}, err
+	}
+	if count, _ := result.RowsAffected(); count != 1 {
+		return domain.ArtifactPrefetch{}, domain.ErrNotFound
+	}
+	var row domain.ArtifactPrefetch
+	var created, updated string
+	err = s.QueryRowContext(ctx, `SELECT id,tenant_id,model_artifact_id,provider,region,location,status,idempotency_key,COALESCE(provider_operation_id,''),COALESCE(error_code,''),created_at,updated_at FROM artifact_prefetches WHERE tenant_id=? AND id=?`, tenant, id).Scan(&row.ID, &row.TenantID, &row.ModelArtifactID, &row.Provider, &row.Region, &row.Location, &row.Status, &row.IdempotencyKey, &row.ProviderOperationID, &row.ErrorCode, &created, &updated)
+	row.CreatedAt, row.UpdatedAt = parseTime(created), parseTime(updated)
+	return row, err
+}
+
 func (s *Store) ArtifactCacheState(ctx context.Context, tenant, artifactID string) ([]domain.ArtifactCacheObservation, []domain.ArtifactPrefetch, error) {
 	if tenant == "" || artifactID == "" {
 		return nil, nil, errors.New("tenant and artifact are required")

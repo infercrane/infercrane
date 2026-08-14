@@ -302,7 +302,8 @@ func renderSpec(name, model, modelRevision, runtimeName, cloud, gpu, region stri
 	if strings.TrimSpace(modelRevision) != "" {
 		revisionLine = "\n  revision: " + modelRevision
 	}
-	return fmt.Sprintf(`apiVersion: infercrane.dev/v1
+	return fmt.Sprintf(`# yaml-language-server: $schema=https://raw.githubusercontent.com/infercrane/infercrane/main/schemas/deployment-v1.schema.json
+apiVersion: infercrane.dev/v1
 kind: Deployment
 name: %s
 

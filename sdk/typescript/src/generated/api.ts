@@ -108,6 +108,11 @@ export class ControlApi {
     return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
   }
 
+  getEndpointMonitoring(name: string): Promise<Record<string, JsonValue>> {
+    const path = `/endpoints/${encodeURIComponent(name)}/monitoring`;
+    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+  }
+
   diagnoseEndpoint(name: string, body: JsonValue): Promise<ObjectList> {
     const path = `/endpoints/${encodeURIComponent(name)}/doctor`;
     return this.transport.request('POST', path, { body }) as Promise<ObjectList>;
