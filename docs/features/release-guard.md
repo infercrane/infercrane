@@ -33,6 +33,13 @@ policy, measurements, reason codes, revision identities, and evaluation timestam
 
 Missing measurements are not fabricated. Output throughput is compared only when both revisions report token usage. TTFT is required before acceptance. A candidate with no healthy ready replica is rejected immediately.
 
+Endpoint Release Guard never applies one primary deployment's metrics to an arbitrary routing
+graph. It currently qualifies single-primary comparisons, a primary change with an unchanged
+`primary-fallback` graph, and an append-only managed fallback whose immutable policy includes
+explicit privacy consent and hard request/cost reservations. Weighted changes or other unmeasured
+topology changes persist `INCONCLUSIVE` with `serving_plan_topology_unqualified`; they cannot be
+promoted until per-binding evidence exists.
+
 Infrastructure can be healthy while model behavior has regressed. For quality-sensitive changes,
 run a task-specific customer-owned evaluation and attach its
 [signed aggregate evidence](/features/semantic-quality). Release Guard can require comparable

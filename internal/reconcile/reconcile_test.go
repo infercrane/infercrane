@@ -345,6 +345,28 @@ func TestAdoptedEndpointOwnershipControlsRouteCompilation(t *testing.T) {
 	}
 }
 
+func TestManagedExternalBindingCompilesThroughCredentialAndBudgetCoordinator(t *testing.T) {
+	store, directory := reconcilerFixture()
+	store.target = domain.Target{ID: "managed-target", URL: "https://provider.invalid/v1", Runtime: "vllm", Provider: "openrouter", UpstreamModel: "provider/model", Health: "unhealthy"}
+	endpoint := domain.Endpoint{ID: "managed-endpoint", TenantID: "global", Name: "coder-production", LogicalModelID: "model-id", EnvironmentID: "environment-id", DesiredState: "serving", ObservedState: "pending", ActiveServingPlanID: "plan"}
+	binding := domain.BackendBinding{ID: "managed-binding", EndpointID: endpoint.ID, Kind: "external", TargetID: store.target.ID, OwnershipMode: "traffic-managed", ConfigJSON: `{"adapter":"openrouter","secret_reference_id":"secret","enabled":true,"privacy_acknowledged":true,"request_limit":10,"cost_limit_microusd":1000,"max_request_cost_microusd":100}`}
+	store.endpoints = []domain.Endpoint{endpoint}
+	store.resolvedEndpoint = domain.ResolvedEndpoint{Endpoint: endpoint, ActivePlan: domain.ServingPlan{ID: "plan", EndpointID: endpoint.ID, RoutingPolicy: "manual", Bindings: []domain.ServingPlanBinding{{BindingID: binding.ID, Weight: 100}}}, Bindings: []domain.BackendBinding{binding}}
+	fallback := &fixtureExternalFallback{}
+	reconciler := Reconciler{Store: store, Routes: directory, Router: &fakeRouter{routes: directory}, Runtimes: testRuntimeBackends(t, healthyRuntime{}), ExternalFallback: fallback}
+	if err := reconciler.RefreshEndpoints(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	route, release, ok := directory.AcquireForTenant("global", endpoint.Name)
+	if !ok {
+		t.Fatal("managed external endpoint was not routable")
+	}
+	defer release()
+	if route.ExternalPolicyID != binding.ID || route.BindingID != binding.ID || route.EndpointID != endpoint.ID || fallback.calls != 1 {
+		t.Fatalf("route=%#v calls=%d", route, fallback.calls)
+	}
+}
+
 type countingRuntime struct{ calls int }
 
 func (r *countingRuntime) Inspect(context.Context, string) (bool, map[string]struct{}) {
@@ -369,6 +391,10 @@ func (f *fixtureExternalFallback) Resolve(_ context.Context, deployment domain.D
 		}
 	}
 	return routes.Snapshot{}, errors.New("fallback missing")
+}
+func (f *fixtureExternalFallback) ResolveBinding(_ context.Context, endpoint domain.Endpoint, binding domain.BackendBinding, target domain.Target) (routes.Snapshot, error) {
+	f.calls++
+	return routes.Snapshot{TenantID: endpoint.TenantID, Alias: endpoint.Name, TargetID: target.ID, RouterURL: target.URL, Provider: target.Provider, ComputeMode: "external", ExternalPolicyID: binding.ID}, nil
 }
 
 func TestHealthyPrimaryIsNotDegradedByConfiguredExternalTarget(t *testing.T) {

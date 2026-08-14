@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/external"
 	"github.com/infercrane/infercrane/internal/releaseguard"
 )
 
@@ -80,6 +81,85 @@ func endpointGuardPolicy(policy domain.EndpointReleaseGuardPolicy) domain.Releas
 	return domain.ReleaseGuardPolicy{Enabled: policy.Enabled, MinimumRequests: policy.MinimumRequests, MaxTTFTRegressionPercent: policy.MaxTTFTRegressionPercent, MaxLatencyRegressionPercent: policy.MaxLatencyRegressionPercent, MaxErrorRateIncrease: policy.MaxErrorRateIncrease, MaxOutputThroughputDropPercent: policy.MaxOutputThroughputDropPercent, RequireCompatibilityEvidence: policy.RequireCompatibilityEvidence}
 }
 
+func samePlanBinding(left, right domain.ServingPlanBinding) bool {
+	return left.BindingID == right.BindingID && left.Priority == right.Priority && left.Weight == right.Weight
+}
+
+func managedFallbackBinding(resolved domain.ResolvedEndpoint, id string) bool {
+	for _, binding := range resolved.Bindings {
+		if binding.ID != id {
+			continue
+		}
+		config, managed, err := external.ParseManagedBindingConfig(binding.ConfigJSON)
+		return err == nil && managed && binding.Kind == "external" && binding.OwnershipMode == "traffic-managed" && config.Enabled && config.PrivacyAcknowledged
+	}
+	return false
+}
+
+func deploymentBackedBinding(resolved domain.ResolvedEndpoint, id string) bool {
+	for _, binding := range resolved.Bindings {
+		if binding.ID == id {
+			return binding.Kind == "deployment" && binding.DeploymentID != ""
+		}
+	}
+	return false
+}
+
+// endpointPlanTopologyEvidence prevents Release Guard from applying one
+// deployment's metrics to an unmeasured routing graph. Today it can qualify a
+// single primary change, an unchanged primary-fallback graph, or an append-only
+// governed fallback that receives no traffic while the primary is healthy.
+func endpointPlanTopologyEvidence(resolved domain.ResolvedEndpoint) (bool, string) {
+	active, candidate := resolved.ActivePlan, resolved.CandidatePlan
+	if candidate == nil || len(active.Bindings) == 0 || len(candidate.Bindings) == 0 {
+		return false, "missing active or candidate binding graph"
+	}
+	if !deploymentBackedBinding(resolved, active.Bindings[0].BindingID) || !deploymentBackedBinding(resolved, candidate.Bindings[0].BindingID) {
+		return false, "primary comparison requires deployment-backed bindings"
+	}
+	if active.RoutingPolicy == "weighted" || candidate.RoutingPolicy == "weighted" {
+		return false, "weighted routing requires per-binding candidate evidence"
+	}
+	if active.RoutingPolicy == "manual" && candidate.RoutingPolicy == "manual" && len(active.Bindings) == 1 && len(candidate.Bindings) == 1 {
+		return true, "single deployment-backed primary comparison"
+	}
+	if active.RoutingPolicy == "primary-fallback" && candidate.RoutingPolicy == "primary-fallback" && len(active.Bindings) == len(candidate.Bindings) {
+		for index := 1; index < len(active.Bindings); index++ {
+			if !samePlanBinding(active.Bindings[index], candidate.Bindings[index]) {
+				return false, "fallback graph changed without per-binding evidence"
+			}
+		}
+		return true, "primary comparison with unchanged fallback graph"
+	}
+	if candidate.RoutingPolicy != "primary-fallback" || len(candidate.Bindings) <= len(active.Bindings) {
+		return false, "routing topology change is not locally qualified"
+	}
+	for index := range active.Bindings {
+		if !samePlanBinding(active.Bindings[index], candidate.Bindings[index]) {
+			return false, "candidate does not preserve the active routing prefix"
+		}
+	}
+	for _, addition := range candidate.Bindings[len(active.Bindings):] {
+		if !managedFallbackBinding(resolved, addition.BindingID) {
+			return false, "new fallback lacks immutable consent and hard-budget policy"
+		}
+	}
+	return true, "active routing preserved; append-only governed fallback"
+}
+
+func (s *Store) recordEndpointGuardEvaluation(ctx context.Context, tenant string, resolved domain.ResolvedEndpoint, policy domain.EndpointReleaseGuardPolicy, decision string, reasons, metrics any) (domain.EndpointReleaseGuardEvaluation, error) {
+	reasonJSON, _ := json.Marshal(reasons)
+	metricJSON, _ := json.Marshal(metrics)
+	policyJSON, _ := json.Marshal(policy)
+	id, err := newID()
+	if err != nil {
+		return domain.EndpointReleaseGuardEvaluation{}, err
+	}
+	evaluation := domain.EndpointReleaseGuardEvaluation{ID: id, TenantID: tenant, EndpointID: resolved.Endpoint.ID, ActiveServingPlanID: resolved.ActivePlan.ID, CandidateServingPlanID: resolved.CandidatePlan.ID, Decision: decision, ReasonCodesJSON: string(reasonJSON), MetricsJSON: string(metricJSON), PolicyJSON: string(policyJSON), CreatedAt: time.Now().UTC()}
+	_, err = s.ExecContext(ctx, `INSERT INTO endpoint_release_guard_evaluations(id,tenant_id,endpoint_id,active_serving_plan_id,candidate_serving_plan_id,decision,reason_codes_json,metrics_json,policy_json,created_at) VALUES(?,?,?,?,?,?,?::jsonb,?::jsonb,?::jsonb,?)`, evaluation.ID, evaluation.TenantID, evaluation.EndpointID, evaluation.ActiveServingPlanID, evaluation.CandidateServingPlanID, evaluation.Decision, evaluation.ReasonCodesJSON, evaluation.MetricsJSON, evaluation.PolicyJSON, evaluation.CreatedAt.Format(time.RFC3339Nano))
+	return evaluation, err
+}
+
 func (s *Store) EvaluateEndpointReleaseGuard(ctx context.Context, tenant, name string, window time.Duration) (domain.EndpointReleaseGuardEvaluation, error) {
 	if window <= 0 || window > 30*24*time.Hour {
 		return domain.EndpointReleaseGuardEvaluation{}, errors.New("endpoint guard window must be between zero and 30 days")
@@ -94,6 +174,10 @@ func (s *Store) EvaluateEndpointReleaseGuard(ctx context.Context, tenant, name s
 	policy, err := s.EndpointReleaseGuardPolicy(ctx, tenant, name)
 	if err != nil {
 		return domain.EndpointReleaseGuardEvaluation{}, err
+	}
+	topologyQualified, topologyEvidence := endpointPlanTopologyEvidence(resolved)
+	if !topologyQualified {
+		return s.recordEndpointGuardEvaluation(ctx, tenant, resolved, policy, "INCONCLUSIVE", []string{"serving_plan_topology_unqualified"}, map[string]any{"plan_topology": topologyEvidence})
 	}
 	activeSubject, err := s.endpointGuardSubject(ctx, tenant, resolved, resolved.ActivePlan)
 	if err != nil {
@@ -117,16 +201,7 @@ func (s *Store) EvaluateEndpointReleaseGuard(ctx context.Context, tenant, name s
 	candidate.CompatibilityEvidence = active.CompatibilityEvidence
 	result := releaseguard.Evaluate(releaseguard.Input{Policy: endpointGuardPolicy(policy), Active: active, Candidate: candidate})
 	decision := map[string]string{"ACCEPT": "PASS", "REJECT": "REJECT", "WAIT": "INCONCLUSIVE"}[result.Decision]
-	reasons, _ := json.Marshal(result.Reasons)
-	metrics, _ := json.Marshal(map[string]domain.RevisionMetrics{"active": active, "candidate": candidate})
-	policyJSON, _ := json.Marshal(policy)
-	id, err := newID()
-	if err != nil {
-		return domain.EndpointReleaseGuardEvaluation{}, err
-	}
-	evaluation := domain.EndpointReleaseGuardEvaluation{ID: id, TenantID: tenant, EndpointID: resolved.Endpoint.ID, ActiveServingPlanID: resolved.ActivePlan.ID, CandidateServingPlanID: resolved.CandidatePlan.ID, Decision: decision, ReasonCodesJSON: string(reasons), MetricsJSON: string(metrics), PolicyJSON: string(policyJSON), CreatedAt: time.Now().UTC()}
-	_, err = s.ExecContext(ctx, `INSERT INTO endpoint_release_guard_evaluations(id,tenant_id,endpoint_id,active_serving_plan_id,candidate_serving_plan_id,decision,reason_codes_json,metrics_json,policy_json,created_at) VALUES(?,?,?,?,?,?,?::jsonb,?::jsonb,?::jsonb,?)`, evaluation.ID, evaluation.TenantID, evaluation.EndpointID, evaluation.ActiveServingPlanID, evaluation.CandidateServingPlanID, evaluation.Decision, evaluation.ReasonCodesJSON, evaluation.MetricsJSON, evaluation.PolicyJSON, evaluation.CreatedAt.Format(time.RFC3339Nano))
-	return evaluation, err
+	return s.recordEndpointGuardEvaluation(ctx, tenant, resolved, policy, decision, result.Reasons, map[string]any{"active": active, "candidate": candidate, "plan_topology": topologyEvidence})
 }
 
 func (s *Store) EndpointReleaseGuardEvaluations(ctx context.Context, tenant, name string, limit int) ([]domain.EndpointReleaseGuardEvaluation, error) {

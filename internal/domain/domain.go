@@ -659,6 +659,31 @@ type ExternalTargetPolicy struct {
 	UpdatedAt              time.Time `json:"updated_at"`
 }
 
+// ManagedExternalBindingConfig is the immutable, secret-free policy attached
+// to a stable endpoint binding backed by an authenticated external model API.
+// Secret values remain behind SecretReferenceID and are resolved only by the
+// control plane. Hard budgets are durably reserved before the gateway can send
+// a request.
+type ManagedExternalBindingConfig struct {
+	Adapter                string `json:"adapter"`
+	SecretReferenceID      string `json:"secret_reference_id"`
+	Enabled                bool   `json:"enabled"`
+	PrivacyAcknowledged    bool   `json:"privacy_acknowledged"`
+	RequestLimit           int64  `json:"request_limit"`
+	CostLimitMicrousd      int64  `json:"cost_limit_microusd"`
+	MaxRequestCostMicrousd int64  `json:"max_request_cost_microusd"`
+}
+
+type ManagedExternalBindingPolicy struct {
+	ID, TenantID, BindingID, TargetID         string
+	Adapter, SecretReferenceID                string
+	Enabled, PrivacyAcknowledged              bool
+	RequestLimit, RequestsReserved            int64
+	CostLimitMicrousd, MaxRequestCostMicrousd int64
+	CostReservedMicrousd                      int64
+	CreatedAt, UpdatedAt                      time.Time
+}
+
 type ExternalBudgetLease struct {
 	PolicyID               string `json:"policy_id"`
 	Requests               int64  `json:"requests"`

@@ -12,6 +12,7 @@ import (
 	"sort"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/external"
 )
 
 var endpointNamePattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$`)
@@ -184,6 +185,13 @@ func (s *Store) CreateBackendBinding(ctx context.Context, tenant string, binding
 	if binding.ConfigJSON == "" {
 		binding.ConfigJSON = "{}"
 	}
+	managedConfig, managed, err := external.ParseManagedBindingConfig(binding.ConfigJSON)
+	if err != nil {
+		return domain.BackendBinding{}, err
+	}
+	if managed && (binding.Kind != "external" || binding.OwnershipMode != "traffic-managed") {
+		return domain.BackendBinding{}, errors.New("managed external configuration requires a traffic-managed external binding")
+	}
 	if binding.ID == "" {
 		var err error
 		binding.ID, err = newID()
@@ -192,7 +200,24 @@ func (s *Store) CreateBackendBinding(ctx context.Context, tenant string, binding
 		}
 	}
 	stamp := now()
-	result, err := s.ExecContext(ctx, `INSERT INTO backend_bindings(id,tenant_id,endpoint_id,name,kind,ownership_mode,deployment_id,target_id,config_json,created_at,updated_at) SELECT ?,?,?,?,?,?,?,?,?::jsonb,?,? WHERE EXISTS(SELECT 1 FROM endpoints WHERE id=? AND tenant_id=?) AND ((?='deployment' AND EXISTS(SELECT 1 FROM deployments WHERE id=? AND tenant_id=?)) OR (?='external' AND EXISTS(SELECT 1 FROM targets WHERE id=? AND tenant_id=?)))`, binding.ID, tenant, binding.EndpointID, binding.Name, binding.Kind, binding.OwnershipMode, null(binding.DeploymentID), null(binding.TargetID), binding.ConfigJSON, stamp, stamp, binding.EndpointID, tenant, binding.Kind, binding.DeploymentID, tenant, binding.Kind, binding.TargetID, tenant)
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return domain.BackendBinding{}, err
+	}
+	defer tx.Rollback()
+	if managed {
+		var targetOK, secretOK bool
+		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM targets WHERE id=? AND tenant_id=? AND provider=?)`, binding.TargetID, tenant, managedConfig.Adapter).Scan(&targetOK); err != nil {
+			return domain.BackendBinding{}, err
+		}
+		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM secret_references WHERE id=? AND tenant_id=?)`, managedConfig.SecretReferenceID, tenant).Scan(&secretOK); err != nil {
+			return domain.BackendBinding{}, err
+		}
+		if !targetOK || !secretOK {
+			return domain.BackendBinding{}, fmt.Errorf("%w: managed external target or secret reference", ErrNotFound)
+		}
+	}
+	result, err := tx.ExecContext(ctx, `INSERT INTO backend_bindings(id,tenant_id,endpoint_id,name,kind,ownership_mode,deployment_id,target_id,config_json,created_at,updated_at) SELECT ?,?,?,?,?,?,?,?,?::jsonb,?,? WHERE EXISTS(SELECT 1 FROM endpoints WHERE id=? AND tenant_id=?) AND ((?='deployment' AND EXISTS(SELECT 1 FROM deployments WHERE id=? AND tenant_id=?)) OR (?='external' AND EXISTS(SELECT 1 FROM targets WHERE id=? AND tenant_id=?)))`, binding.ID, tenant, binding.EndpointID, binding.Name, binding.Kind, binding.OwnershipMode, null(binding.DeploymentID), null(binding.TargetID), binding.ConfigJSON, stamp, stamp, binding.EndpointID, tenant, binding.Kind, binding.DeploymentID, tenant, binding.Kind, binding.TargetID, tenant)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return domain.BackendBinding{}, fmt.Errorf("%w: binding already exists", ErrConflict)
@@ -202,6 +227,14 @@ func (s *Store) CreateBackendBinding(ctx context.Context, tenant string, binding
 	n, _ := result.RowsAffected()
 	if n == 0 {
 		return domain.BackendBinding{}, fmt.Errorf("%w: endpoint or backing resource", ErrNotFound)
+	}
+	if managed {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO managed_external_binding_budgets(binding_id,tenant_id,created_at,updated_at) VALUES(?,?,?,?)`, binding.ID, tenant, stamp, stamp); err != nil {
+			return domain.BackendBinding{}, err
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		return domain.BackendBinding{}, err
 	}
 	binding.TenantID = tenant
 	binding.CreatedAt, binding.UpdatedAt = parseTime(stamp), parseTime(stamp)

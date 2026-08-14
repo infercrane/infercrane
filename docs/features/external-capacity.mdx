@@ -16,6 +16,19 @@ can create a separate provider charge. Enabling it requires an explicit privacy 
 hard request and cost-reservation limits.
 </Warning>
 
+External capacity has two explicit scopes:
+
+- **Stable endpoint binding:** an authenticated external API participates in an immutable `manual`,
+  `primary-fallback`, or `weighted` serving plan. This is the preferred one-endpoint composition.
+- **Deployment overflow:** emergency external capacity is selected when one concrete deployment's
+  primary targets are unhealthy or its bounded queue policy is satisfied.
+
+Both scopes use reference-only credentials, consent, in-memory budget leases, and no request replay.
+They are configured separately so a deployment policy cannot silently change an endpoint plan.
+
+See [Stable endpoints](/features/endpoints#add-an-authenticated-managed-api) for first-class endpoint
+bindings.
+
 ## Configure OpenRouter fallback
 
 Inject the credential into the control-plane environment, then register only its reference:

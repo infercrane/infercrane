@@ -1,0 +1,64 @@
+---
+title: Governed external APIs as endpoint bindings
+description: Route stable endpoints to authenticated external model APIs without leaking credentials or bypassing hard budgets.
+---
+
+# ADR 0031: Governed external APIs as endpoint bindings
+
+- Status: accepted
+- Date: 2026-08-14
+
+## Context
+
+Stable endpoints can bind lifecycle-managed deployments and adopted OpenAI-compatible targets.
+Deployment-level external policy can also provide emergency overflow. Neither path lets an
+authenticated managed model API participate directly in an endpoint serving plan: adopted target
+probes must not receive provider credentials, while deployment overflow is coupled to one concrete
+deployment rather than the stable application identity.
+
+## Decision
+
+An external `traffic-managed` backend binding may carry an immutable managed-external policy:
+
+- an explicit `openrouter` or `openai-compatible-external` adapter;
+- a reference-only credential identity;
+- explicit acknowledgement that request data leaves controlled infrastructure;
+- a hard request ceiling;
+- a hard cost-reservation ceiling and bounded worst-case reservation per request.
+
+The binding ID is the durable budget-policy identity. PostgreSQL reserves bounded request batches;
+the gateway consumes them from memory. The inference path therefore performs no database lookup.
+The reconciler resolves the referenced credential only into its in-memory route snapshot and uses
+an authenticated model-inventory probe before publishing the binding.
+
+Serving plans remain immutable. Adding managed capacity creates a candidate plan and does not move
+traffic. Existing streams stay pinned to their acquired route generation. External streams are
+never replayed, duplicated, or shadowed after bytes may have been transmitted.
+
+Endpoint Release Guard may qualify the change from primary-only to `primary-fallback` only when the
+candidate preserves the active routing prefix and every appended binding has this governed policy.
+It records that topology classification. Weighted or otherwise unmeasured graph changes are
+`INCONCLUSIVE`, so primary-only telemetry can never authorize them.
+
+## Consequences
+
+- Applications can keep one endpoint name across customer-hosted and managed capacity.
+- Raw provider credentials never enter binding JSON, API responses, browser state, or PostgreSQL.
+- A budget reservation is conservative authorization, not a fabricated invoice or price estimate.
+- Provider-native model identity and protocol support remain explicit and independently qualified.
+- Credential rotation changes the referenced resolver value without mutating an immutable serving
+  plan; changing provider, limits, or model mapping requires a new binding and candidate plan.
+
+## Rejected alternatives
+
+- Forwarding the caller's InferCrane token upstream crosses the credential boundary and was rejected.
+- Storing provider API keys in binding JSON or frontend state was rejected.
+- Making LiteLLM configuration authoritative would couple the core domain to one replaceable gateway.
+- Automatically promoting the new fallback would bypass Release Guard and explicit operator intent.
+
+## Verification
+
+Strict configuration, tenant isolation, durable hard-budget reservation, credential resolution,
+authenticated health, route compilation, no-replay gateway behavior, CLI validation, console staging,
+and migration-prefix compatibility are required local gates. Real provider billing and protocol
+semantics remain manual qualification.

@@ -3,7 +3,25 @@ set -eu
 
 infercrane serve &
 server_pid=$!
-trap 'kill "$server_pid" 2>/dev/null || true' INT TERM EXIT
+
+shutdown_server() {
+  trap - INT TERM EXIT
+  kill -TERM "$server_pid" 2>/dev/null || true
+  status=0
+  wait "$server_pid" || status=$?
+  exit "$status"
+}
+
+cleanup_server() {
+  kill -TERM "$server_pid" 2>/dev/null || true
+  wait "$server_pid" 2>/dev/null || true
+}
+
+# The shell is PID 1 in the development image. Waiting for the child is
+# essential: exiting immediately lets the container runtime kill the Go process
+# before it can withdraw HA membership and finish its own shutdown hooks.
+trap shutdown_server INT TERM
+trap cleanup_server EXIT
 
 until python -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8080/readyz", timeout=2)' >/dev/null 2>&1; do
   if ! kill -0 "$server_pid" 2>/dev/null; then

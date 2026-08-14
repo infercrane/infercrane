@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -36,6 +38,110 @@ func TestNormalizeServingPlanIsCanonicalAndBounded(t *testing.T) {
 	}
 	if _, _, err = normalizePlan("manual", bindings); err == nil {
 		t.Fatal("manual plan accepted multiple bindings")
+	}
+}
+
+func TestEndpointGuardTopologyOnlyQualifiesMeasuredPrimaryOrGovernedAppend(t *testing.T) {
+	primary := domain.ServingPlanBinding{BindingID: "primary", Priority: 0, Weight: 100}
+	fallback := domain.ServingPlanBinding{BindingID: "fallback", Priority: 1, Weight: 100}
+	resolved := domain.ResolvedEndpoint{
+		ActivePlan:    domain.ServingPlan{RoutingPolicy: "manual", Bindings: []domain.ServingPlanBinding{primary}},
+		CandidatePlan: &domain.ServingPlan{RoutingPolicy: "primary-fallback", Bindings: []domain.ServingPlanBinding{primary, fallback}},
+		Bindings: []domain.BackendBinding{
+			{ID: "primary", Kind: "deployment", OwnershipMode: "lifecycle-managed", DeploymentID: "deployment"},
+			{ID: "fallback", Kind: "external", OwnershipMode: "traffic-managed", ConfigJSON: `{"adapter":"openrouter","secret_reference_id":"secret","enabled":true,"privacy_acknowledged":true,"request_limit":10,"cost_limit_microusd":1000,"max_request_cost_microusd":100}`},
+		},
+	}
+	if qualified, evidence := endpointPlanTopologyEvidence(resolved); !qualified || !strings.Contains(evidence, "append-only") {
+		t.Fatalf("qualified=%t evidence=%q", qualified, evidence)
+	}
+	resolved.CandidatePlan.RoutingPolicy = "weighted"
+	if qualified, _ := endpointPlanTopologyEvidence(resolved); qualified {
+		t.Fatal("weighted topology reused primary-only evidence")
+	}
+	resolved.CandidatePlan.RoutingPolicy = "primary-fallback"
+	resolved.Bindings[1].ConfigJSON = `{}`
+	if qualified, _ := endpointPlanTopologyEvidence(resolved); qualified {
+		t.Fatal("ungoverned fallback was qualified")
+	}
+}
+
+func TestManagedExternalBindingIsImmutableTenantSafeAndHardBudgeted(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	suffix := strings.ReplaceAll(time.Now().UTC().Format("150405.000000000"), ".", "-")
+	tenant := "managed-binding-" + suffix
+	if err := s.CreateTenant(ctx, tenant, "Managed Binding"); err != nil {
+		t.Fatal(err)
+	}
+	environment, err := s.CreateEnvironment(ctx, tenant, domain.Environment{Name: "production", PolicyJSON: `{}`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	model, err := s.CreateLogicalModel(ctx, tenant, domain.LogicalModel{Name: "coder"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint, err := s.CreateEndpoint(ctx, tenant, domain.Endpoint{Name: "coder-production", LogicalModelID: model.ID, EnvironmentID: environment.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := s.AddTargetForTenant(ctx, tenant, domain.Target{Name: "managed-api", URL: "https://provider.invalid/v1", Provider: "openai-compatible-external", Runtime: "openai-compatible", UpstreamModel: "provider/coder"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := s.CreateSecretReference(ctx, tenant, "managed-api", "env", "MANAGED_API_KEY")
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := fmt.Sprintf(`{"adapter":"openai-compatible-external","secret_reference_id":%q,"enabled":true,"privacy_acknowledged":true,"request_limit":5,"cost_limit_microusd":500,"max_request_cost_microusd":100}`, secret.ID)
+	binding, err := s.CreateBackendBinding(ctx, tenant, domain.BackendBinding{EndpointID: endpoint.ID, Name: "external-primary", Kind: "external", OwnershipMode: "traffic-managed", TargetID: target.ID, ConfigJSON: config})
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, err := s.ManagedExternalBindingPolicy(ctx, tenant, binding.ID)
+	if err != nil || policy.TargetID != target.ID || policy.SecretReferenceID != secret.ID || policy.RequestsReserved != 0 {
+		t.Fatalf("policy=%#v err=%v", policy, err)
+	}
+	first, err := s.LeaseManagedExternalBindingBudget(ctx, tenant, binding.ID, 4)
+	if err != nil || first.Requests != 4 || first.ReservedCostMicrousd != 400 {
+		t.Fatalf("first lease=%#v err=%v", first, err)
+	}
+	second, err := s.LeaseManagedExternalBindingBudget(ctx, tenant, binding.ID, 4)
+	if err != nil || second.Requests != 1 || second.ReservedCostMicrousd != 100 {
+		t.Fatalf("second lease=%#v err=%v", second, err)
+	}
+	if _, err = s.LeaseManagedExternalBindingBudget(ctx, tenant, binding.ID, 1); !errors.Is(err, ErrConflict) {
+		t.Fatalf("exhausted budget error=%v", err)
+	}
+	if _, err = s.ManagedExternalBindingPolicy(ctx, "global", binding.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-tenant policy visible: %v", err)
+	}
+	if _, err = s.CreateBackendBinding(ctx, tenant, domain.BackendBinding{EndpointID: endpoint.ID, Name: "raw-secret", Kind: "external", OwnershipMode: "traffic-managed", TargetID: target.ID, ConfigJSON: `{"adapter":"openai-compatible-external","secret_reference_id":"secret","api_key":"must-not-persist","enabled":true,"privacy_acknowledged":true,"request_limit":1,"cost_limit_microusd":1,"max_request_cost_microusd":1}`}); err == nil {
+		t.Fatal("raw external credential field was accepted")
+	}
+
+	concurrentConfig := fmt.Sprintf(`{"adapter":"openai-compatible-external","secret_reference_id":%q,"enabled":true,"privacy_acknowledged":true,"request_limit":8,"cost_limit_microusd":800,"max_request_cost_microusd":100}`, secret.ID)
+	concurrentBinding, err := s.CreateBackendBinding(ctx, tenant, domain.BackendBinding{EndpointID: endpoint.ID, Name: "concurrent-budget", Kind: "external", OwnershipMode: "traffic-managed", TargetID: target.ID, ConfigJSON: concurrentConfig})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var successes atomic.Int64
+	var wait sync.WaitGroup
+	for range 32 {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			if lease, leaseErr := s.LeaseManagedExternalBindingBudget(ctx, tenant, concurrentBinding.ID, 1); leaseErr == nil && lease.Requests == 1 {
+				successes.Add(1)
+			} else if !errors.Is(leaseErr, ErrConflict) {
+				t.Errorf("unexpected concurrent lease: lease=%#v err=%v", lease, leaseErr)
+			}
+		}()
+	}
+	wait.Wait()
+	if successes.Load() != 8 {
+		t.Fatalf("distributed hard budget authorized %d requests, want 8", successes.Load())
 	}
 }
 
@@ -214,11 +320,18 @@ func TestEndpointReleaseGuardPersistsDeterministicPlanDecision(t *testing.T) {
 	if err = s.SetEndpointPlan(ctx, "global", endpoint.Name, replacementPlan.ID, "candidate"); err != nil {
 		t.Fatal(err)
 	}
+	weightedEvaluation, err := s.EvaluateEndpointReleaseGuard(ctx, "global", endpoint.Name, time.Hour)
+	if err != nil || weightedEvaluation.Decision != "INCONCLUSIVE" || !strings.Contains(weightedEvaluation.ReasonCodesJSON, "serving_plan_topology_unqualified") {
+		t.Fatalf("weighted evaluation=%#v err=%v", weightedEvaluation, err)
+	}
+	if accepted, err := s.EndpointReleaseGuardAccepted(ctx, "global", endpoint.Name, replacementPlan.ID); err != nil || accepted {
+		t.Fatalf("unmeasured weighted candidate accepted=%t err=%v", accepted, err)
+	}
 	if err = s.SetEndpointPlan(ctx, "global", endpoint.Name, candidatePlan.ID, "active"); !errors.Is(err, ErrConflict) {
 		t.Fatalf("stale accepted plan activation error=%v, want conflict", err)
 	}
 	history, err = s.EndpointReleaseGuardEvaluations(ctx, "global", endpoint.Name, 10)
-	if err != nil || len(history) != 2 || history[0].ID != acceptedEvaluation.ID || history[1].ID != evaluation.ID {
+	if err != nil || len(history) != 3 || history[0].ID != weightedEvaluation.ID || history[1].ID != acceptedEvaluation.ID || history[2].ID != evaluation.ID {
 		t.Fatalf("history=%#v err=%v", history, err)
 	}
 }

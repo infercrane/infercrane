@@ -36,10 +36,16 @@ func V02Catalog() (*Registry, error) {
 		{
 			Adapter: "openai-compatible-external", Cloud: "external", ContractVersion: ProviderContractV1, AdapterVersion: "boundary-v0.2", Modes: []ComputeMode{ExternalMode},
 			Capabilities: []Capability{
+				{Name: "hard_budget", State: CapabilitySupported, Evidence: "go:test/internal/store#TestManagedExternalBindingIsImmutableTenantSafeAndHardBudgeted"},
 				{Name: "provisioning", State: CapabilityUnsupported, Detail: "external targets are registered, not provisioned"},
+				{Name: "reference_credentials", State: CapabilitySupported, Evidence: "go:test/internal/controlapi#TestManagedExternalEndpointBindingRequiresConsentReferenceAndHardBudget"},
+				{Name: "stable_endpoint_binding", State: CapabilitySupported, Evidence: "go:test/internal/reconcile#TestManagedExternalBindingCompilesThroughCredentialAndBudgetCoordinator"},
 				{Name: "streaming", State: CapabilityUnknown, Detail: "must be qualified per target"},
 			},
-			Qualification: []Qualification{{State: QualificationRegistered, Environment: "contract-boundary"}},
+			Qualification: []Qualification{
+				{State: QualificationLocal, Environment: "hermetic-openai-compatible", Evidence: "go:test/internal/external#TestCoordinatorResolvesManagedExternalBindingWithoutPersistingCredential"},
+				{State: QualificationDeferred, Environment: "real-openai-compatible", Reason: "target-specific streaming and provider behavior require operator qualification"},
+			},
 		},
 	}
 	for _, profile := range profiles {
@@ -88,6 +94,8 @@ func V03Catalog() (*Registry, error) {
 				{Name: "explicit_health_fallback", State: CapabilitySupported, Evidence: "go:test/internal/reconcile#TestExternalFallbackPublishesOnlyWhenNoPrimaryTargetIsHealthy"},
 				{Name: "hard_budget", State: CapabilitySupported, Evidence: "go:test/internal/external#TestBudgetPoolNeverAuthorizesBeyondLease"},
 				{Name: "privacy_acknowledgement", State: CapabilitySupported, Evidence: "go:test/internal/controlapi#TestExternalPolicyRequiresPrivacyAndHardBudgets"},
+				{Name: "reference_credentials", State: CapabilitySupported, Evidence: "go:test/internal/controlapi#TestManagedExternalEndpointBindingRequiresConsentReferenceAndHardBudget"},
+				{Name: "stable_endpoint_binding", State: CapabilitySupported, Evidence: "go:test/internal/reconcile#TestManagedExternalBindingCompilesThroughCredentialAndBudgetCoordinator"},
 				{Name: "streaming_without_replay", State: CapabilitySupported, Evidence: "go:test/internal/gateway#TestExternalFallbackConsumesHardBudgetBeforeTransmissionAndNeverReplaysStream"},
 				{Name: "provisioning", State: CapabilityUnsupported, Detail: "OpenRouter is a governed external target, not provisioned capacity"},
 			},

@@ -47,6 +47,69 @@ type fakeMembershipStore struct {
 	*fakeStore
 	instances []domain.ControlPlaneInstance
 }
+type fakeEndpointStore struct {
+	*fakeStore
+	resolvedEndpoint domain.ResolvedEndpoint
+	binding          domain.BackendBinding
+}
+
+func (f *fakeEndpointStore) CreateEnvironment(context.Context, string, domain.Environment) (domain.Environment, error) {
+	return domain.Environment{}, f.err
+}
+func (f *fakeEndpointStore) EnvironmentsForTenant(context.Context, string) ([]domain.Environment, error) {
+	return nil, f.err
+}
+func (f *fakeEndpointStore) EnvironmentForTenant(context.Context, string, string) (domain.Environment, error) {
+	return domain.Environment{}, f.err
+}
+func (f *fakeEndpointStore) CreateLogicalModel(context.Context, string, domain.LogicalModel) (domain.LogicalModel, error) {
+	return domain.LogicalModel{}, f.err
+}
+func (f *fakeEndpointStore) LogicalModelsForTenant(context.Context, string) ([]domain.LogicalModel, error) {
+	return nil, f.err
+}
+func (f *fakeEndpointStore) LogicalModelForTenant(context.Context, string, string) (domain.LogicalModel, error) {
+	return domain.LogicalModel{}, f.err
+}
+func (f *fakeEndpointStore) CreateEndpoint(context.Context, string, domain.Endpoint) (domain.Endpoint, error) {
+	return domain.Endpoint{}, f.err
+}
+func (f *fakeEndpointStore) EndpointsForTenant(context.Context, string) ([]domain.Endpoint, error) {
+	return nil, f.err
+}
+func (f *fakeEndpointStore) ResolveEndpointForTenant(context.Context, string, string) (domain.ResolvedEndpoint, error) {
+	return f.resolvedEndpoint, f.err
+}
+func (f *fakeEndpointStore) CreateBackendBinding(_ context.Context, tenant string, binding domain.BackendBinding) (domain.BackendBinding, error) {
+	binding.ID, binding.TenantID = "binding", tenant
+	f.binding = binding
+	return binding, f.err
+}
+func (f *fakeEndpointStore) CreateServingPlan(context.Context, string, domain.ServingPlan) (domain.ServingPlan, error) {
+	return domain.ServingPlan{}, f.err
+}
+func (f *fakeEndpointStore) SetEndpointPlan(context.Context, string, string, string, string) error {
+	return f.err
+}
+func (f *fakeEndpointStore) DeleteEndpointForTenant(context.Context, string, string) error {
+	return f.err
+}
+func (f *fakeEndpointStore) EndpointReleaseGuardPolicy(context.Context, string, string) (domain.EndpointReleaseGuardPolicy, error) {
+	return domain.EndpointReleaseGuardPolicy{}, f.err
+}
+func (f *fakeEndpointStore) SetEndpointReleaseGuardPolicy(context.Context, string, string, domain.EndpointReleaseGuardPolicy) (domain.EndpointReleaseGuardPolicy, error) {
+	return domain.EndpointReleaseGuardPolicy{}, f.err
+}
+func (f *fakeEndpointStore) EvaluateEndpointReleaseGuard(context.Context, string, string, time.Duration) (domain.EndpointReleaseGuardEvaluation, error) {
+	return domain.EndpointReleaseGuardEvaluation{}, f.err
+}
+func (f *fakeEndpointStore) EndpointReleaseGuardEvaluations(context.Context, string, string, int) ([]domain.EndpointReleaseGuardEvaluation, error) {
+	return nil, f.err
+}
+func (f *fakeEndpointStore) EndpointReleaseGuardAccepted(context.Context, string, string, string) (bool, error) {
+	return false, f.err
+}
+
 type fakeContextBurstStore struct {
 	*fakeStore
 	passport domain.ContextPassport
@@ -683,6 +746,36 @@ func (f *fakeStore) RecordBenchmark(_ context.Context, result domain.BenchmarkRe
 }
 func (f *fakeStore) BenchmarksForDeployment(context.Context, string, string, int) ([]domain.BenchmarkResult, error) {
 	return f.benchmarks, f.err
+}
+
+func TestManagedExternalEndpointBindingRequiresConsentReferenceAndHardBudget(t *testing.T) {
+	base := &fakeStore{targets: []domain.Target{{ID: "target", Name: "managed-api", Provider: "openai-compatible-external", Runtime: "openai-compatible", URL: "https://provider.invalid/v1", UpstreamModel: "provider/coder"}}}
+	store := &fakeEndpointStore{fakeStore: base, resolvedEndpoint: domain.ResolvedEndpoint{Endpoint: domain.Endpoint{ID: "endpoint", TenantID: "global", Name: "coder-production"}}}
+	handler := (API{Store: store, APIKey: "secret"}).Handler()
+	valid := `{"name":"managed","kind":"external","ownership_mode":"traffic-managed","target":"managed-api","config":{"adapter":"openai-compatible-external","secret_reference_id":"secret","enabled":true,"privacy_acknowledged":true,"request_limit":100,"cost_limit_microusd":1000000,"max_request_cost_microusd":10000}}`
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/endpoints/coder-production/bindings", strings.NewReader(valid))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || store.binding.ID == "" || !strings.Contains(store.binding.ConfigJSON, `"secret_reference_id":"secret"`) || strings.Contains(store.binding.ConfigJSON, "api_key") {
+		t.Fatalf("response=%d %s binding=%#v", response.Code, response.Body.String(), store.binding)
+	}
+
+	for name, body := range map[string]string{
+		"missing policy": `{"name":"unsafe","kind":"external","ownership_mode":"traffic-managed","target":"managed-api","config":{}}`,
+		"raw credential": `{"name":"unsafe","kind":"external","ownership_mode":"traffic-managed","target":"managed-api","config":{"adapter":"openai-compatible-external","secret_reference_id":"secret","api_key":"leak","enabled":true,"privacy_acknowledged":true,"request_limit":1,"cost_limit_microusd":1,"max_request_cost_microusd":1}}`,
+		"no consent":     `{"name":"unsafe","kind":"external","ownership_mode":"traffic-managed","target":"managed-api","config":{"adapter":"openai-compatible-external","secret_reference_id":"secret","enabled":true,"privacy_acknowledged":false,"request_limit":1,"cost_limit_microusd":1,"max_request_cost_microusd":1}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "/api/v1/endpoints/coder-production/bindings", strings.NewReader(body))
+			request.Header.Set("Authorization", "Bearer secret")
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != http.StatusUnprocessableEntity {
+				t.Fatalf("response=%d %s", response.Code, response.Body.String())
+			}
+		})
+	}
 }
 
 type fakeBenchmarkRunner struct{ config benchmark.Config }

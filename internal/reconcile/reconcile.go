@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/external"
 	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/overflow"
 	"github.com/infercrane/infercrane/internal/provision"
@@ -36,6 +37,7 @@ type ServerlessStatus interface {
 type ExternalFallback interface {
 	Owns(string) bool
 	Resolve(context.Context, domain.Deployment, []domain.Target) (routes.Snapshot, error)
+	ResolveBinding(context.Context, domain.Endpoint, domain.BackendBinding, domain.Target) (routes.Snapshot, error)
 }
 type HybridFallback interface {
 	OverflowMode(context.Context, domain.Deployment) (string, error)
@@ -368,6 +370,13 @@ func (r *Reconciler) observeAdoptedTargets(ctx context.Context) error {
 				if binding.Kind != "external" || binding.TargetID == "" {
 					continue
 				}
+				_, managed, configErr := external.ParseManagedBindingConfig(binding.ConfigJSON)
+				if configErr == nil && managed {
+					// Authenticated external APIs are observed by the external
+					// coordinator because the generic runtime inspector must never
+					// receive their credential.
+					continue
+				}
 				target, targetErr := store.TargetForTenantByID(ctx, tenant, binding.TargetID)
 				if targetErr != nil {
 					return targetErr
@@ -447,7 +456,36 @@ func (r *Reconciler) compileEndpoints(ctx context.Context, deployments []domain.
 				}
 				if binding.Kind == "external" {
 					target, targetErr := store.TargetForTenantByID(ctx, tenant, binding.TargetID)
-					if targetErr != nil || target.Health != "healthy" {
+					if targetErr != nil {
+						continue
+					}
+					_, managed, configErr := external.ParseManagedBindingConfig(binding.ConfigJSON)
+					if configErr != nil {
+						continue
+					}
+					if managed {
+						if r.ExternalFallback == nil || !r.ExternalFallback.Owns(target.Provider) {
+							continue
+						}
+						base, resolveErr := r.ExternalFallback.ResolveBinding(ctx, endpoint, binding, target)
+						health := "unhealthy"
+						if resolveErr == nil {
+							health = "healthy"
+							base.LogicalModelID = endpoint.LogicalModelID
+							base.EnvironmentID = endpoint.EnvironmentID
+							base.EndpointID = endpoint.ID
+							base.ServingPlanID = resolved.ActivePlan.ID
+							base.BindingID = binding.ID
+							base.RoutingWeight = planned.Weight
+							base.ProtocolCapabilities = r.protocolCapabilities(target.Runtime)
+							compiled = append(compiled, base)
+						}
+						if target.Health != health {
+							_ = r.Store.SetTargetHealth(ctx, target.ID, health)
+						}
+						continue
+					}
+					if target.Health != "healthy" {
 						continue
 					}
 					compiled = append(compiled, routes.Snapshot{TenantID: tenant, Alias: endpoint.Name, TargetID: target.ID, UpstreamModel: target.UpstreamModel, RouterURL: target.URL, Provider: target.Provider, Runtime: target.Runtime, ComputeMode: "external", LogicalModelID: endpoint.LogicalModelID, EnvironmentID: endpoint.EnvironmentID, EndpointID: endpoint.ID, ServingPlanID: resolved.ActivePlan.ID, BindingID: binding.ID, RoutingWeight: planned.Weight, ProtocolCapabilities: r.protocolCapabilities(target.Runtime)})

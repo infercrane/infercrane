@@ -25,6 +25,7 @@ import (
 	"github.com/infercrane/infercrane/internal/decision"
 	"github.com/infercrane/infercrane/internal/doctor"
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/external"
 	"github.com/infercrane/infercrane/internal/finops"
 	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/lab"
@@ -1022,7 +1023,11 @@ func (a API) createEndpointBinding(w http.ResponseWriter, r *http.Request) {
 		writeEndpointMutationError(w, err)
 		return
 	}
-	binding := domain.BackendBinding{EndpointID: resolved.Endpoint.ID, Name: request.Name, Kind: request.Kind, OwnershipMode: request.OwnershipMode, ConfigJSON: string(request.Config)}
+	configJSON := string(request.Config)
+	if configJSON == "" {
+		configJSON = "{}"
+	}
+	binding := domain.BackendBinding{EndpointID: resolved.Endpoint.ID, Name: request.Name, Kind: request.Kind, OwnershipMode: request.OwnershipMode, ConfigJSON: configJSON}
 	if request.Kind == "deployment" {
 		deployment, lookupErr := a.Store.ResolveForTenant(r.Context(), actor.TenantID, request.Deployment)
 		if lookupErr != nil {
@@ -1037,6 +1042,42 @@ func (a API) createEndpointBinding(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		binding.TargetID = target.ID
+		config, managed, configErr := external.ParseManagedBindingConfig(configJSON)
+		providerManaged := target.Provider == "openrouter" || target.Provider == "openai-compatible-external"
+		if configErr != nil {
+			writeError(w, http.StatusUnprocessableEntity, "validation_failed", configErr.Error())
+			return
+		}
+		if providerManaged && !managed {
+			writeError(w, http.StatusUnprocessableEntity, "managed_external_policy_required", "authenticated external provider bindings require reference-only credentials, explicit privacy acknowledgement, and hard request/cost budgets")
+			return
+		}
+		if managed {
+			if !authz.AllowedScoped(authz.Role(actor.Role), actor.Scopes, authz.ManageExternal) {
+				writeError(w, http.StatusForbidden, "permission_denied", "principal is not allowed to manage external inference capacity")
+				return
+			}
+			if request.OwnershipMode != "traffic-managed" || config.Adapter != target.Provider {
+				writeError(w, http.StatusUnprocessableEntity, "validation_failed", "managed external policy must match a traffic-managed target adapter")
+				return
+			}
+			references, secretErr := a.Store.SecretReferencesForTenant(r.Context(), actor.TenantID)
+			if secretErr != nil {
+				writeError(w, http.StatusInternalServerError, "internal", "secret references could not be validated")
+				return
+			}
+			secretFound := false
+			for _, reference := range references {
+				if reference.ID == config.SecretReferenceID {
+					secretFound = true
+					break
+				}
+			}
+			if !secretFound {
+				writeError(w, http.StatusUnprocessableEntity, "secret_reference_not_found", "managed external binding secret reference was not found in the active tenant")
+				return
+			}
+		}
 	}
 	item, err := store.CreateBackendBinding(r.Context(), actor.TenantID, binding)
 	if writeEndpointMutationError(w, err) {

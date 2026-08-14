@@ -66,6 +66,8 @@ the request data plane from the deployment control plane so clients can use a lo
 while workers are replaced, recovered, or reconfigured.
 
 - Stable OpenAI-compatible model aliases.
+- Candidate-only, authenticated OpenRouter and generic OpenAI-compatible bindings with server-side
+  credential references, explicit privacy consent, and hard request/cost reservations.
 - Persistent desired and observed state in PostgreSQL.
 - Runtime health and served-model reconciliation through an adapter contract.
 - Supervised replica routing with deterministic generation safety.

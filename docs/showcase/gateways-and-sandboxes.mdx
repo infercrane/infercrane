@@ -16,7 +16,7 @@ flowchart LR
   APP[Application or agent] --> IC[InferCrane endpoint<br/>identity · lifecycle · evidence]
   IC --> DEP[InferCrane-managed deployment]
   IC --> LL[User-managed LiteLLM gateway]
-  IC -. explicit budgeted overflow .-> OR[OpenRouter]
+  IC -. governed binding or overflow .-> OR[External model API]
   SB[User-managed sandbox<br/>E2B · Daytona · Modal · Kubernetes] --> IC
 ```
 
@@ -43,9 +43,35 @@ infercrane adopt promote company-models --ownership traffic-managed
 InferCrane does not bundle, fork, install, or license LiteLLM. It owns the logical endpoint and
 operational evidence; LiteLLM remains responsible for protocol translation and its upstreams.
 
-## Use OpenRouter only as governed overflow
+## Add managed APIs without changing application code
 
-OpenRouter is an optional external capacity target, not an implicit default. Configure it with a
+An authenticated OpenRouter or OpenAI-compatible API can be a first-class endpoint binding. Stage
+it as a fallback while the application continues sending `model="coder-production"`:
+
+```bash
+infercrane endpoint bind coder-production \
+  --name managed-fallback \
+  --target managed-coder \
+  --ownership traffic-managed \
+  --external-adapter openai-compatible-external \
+  --secret-reference SECRET_REFERENCE_ID \
+  --request-limit 1000 \
+  --cost-limit-usd 25.00 \
+  --max-request-cost-usd 0.10 \
+  --acknowledge-external-data \
+  --enable-external
+
+infercrane endpoint plan coder-production \
+  --policy primary-fallback \
+  --bindings self-hosted,managed-fallback
+```
+
+The plan remains a candidate until evaluated and promoted. InferCrane never forwards its public API
+key to the provider and never stores the provider key in binding configuration.
+
+## Use OpenRouter as deployment overflow
+
+OpenRouter can also be optional deployment-level emergency capacity, not an implicit default. Configure it with a
 secret reference, explicit model mapping, privacy acknowledgement, and hard request and cost
 reservation ceilings. InferCrane selects it before sending bytes and never silently duplicates or
 shadows a request.
@@ -118,4 +144,3 @@ outside the current release scope.
 - Change sandbox vendors without changing the logical model endpoint.
 - Keep model rollout evidence separate from tool-execution security policy.
 - Avoid turning InferCrane into a gateway fork, workflow engine, or sandbox isolation runtime.
-

@@ -76,6 +76,10 @@ Promotion fails closed unless the latest persisted endpoint Release Guard evalua
 the current active/candidate pair. `REJECT` and `INCONCLUSIVE` can be inspected but cannot be
 promoted. Candidate traffic is never duplicated silently; Release Guard evaluates trustworthy telemetry
 from the primary deployment-backed binding and reports insufficient evidence as `INCONCLUSIVE`.
+It does not reuse those primary metrics for a weighted or otherwise unmeasured routing topology.
+An append-only managed fallback is eligible only when it preserves the active routing prefix and
+has immutable consent plus hard-budget policy; the persisted evaluation records that topology
+classification explicitly.
 
 ## Ownership boundaries
 
@@ -88,3 +92,48 @@ The inference hot path reads an immutable in-memory endpoint snapshot. It never 
 Request telemetry records the logical model, environment, endpoint, serving plan, binding,
 deployment, revision, replica where known, provider, and runtime without storing prompt or output
 content by default.
+
+## Add an authenticated managed API
+
+An OpenRouter or generic OpenAI-compatible API can be staged behind the same endpoint. Provider
+credentials remain reference-only, external data transmission requires explicit consent, and hard
+request/cost reservations fail closed before any bytes are sent:
+
+```bash
+export MANAGED_MODEL_API_KEY='...'
+infercrane secret create managed-model-api \
+  --from-env MANAGED_MODEL_API_KEY \
+  --output json
+
+infercrane target add managed-coder \
+  --provider openai-compatible-external \
+  --runtime openai-compatible \
+  --url https://models.example.com/v1 \
+  --upstream-model provider/coder-model
+
+infercrane endpoint bind coder-production \
+  --name managed-fallback \
+  --target managed-coder \
+  --ownership traffic-managed \
+  --external-adapter openai-compatible-external \
+  --secret-reference SECRET_REFERENCE_ID \
+  --request-limit 1000 \
+  --cost-limit-usd 25.00 \
+  --max-request-cost-usd 0.10 \
+  --acknowledge-external-data \
+  --enable-external
+
+infercrane endpoint plan coder-production \
+  --policy primary-fallback \
+  --bindings primary,managed-fallback
+```
+
+The new plan is a candidate. It receives no application traffic until Release Guard passes and an
+operator explicitly promotes it. Adding a fallback never changes the application request:
+
+```python
+client.responses.create(model="coder-production", input="Explain this incident.")
+```
+
+The web console exposes the same staging workflow on the endpoint page. It never receives the
+provider credential; it sends only the selected secret-reference ID to the control API.

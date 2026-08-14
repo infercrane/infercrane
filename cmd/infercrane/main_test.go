@@ -283,6 +283,56 @@ func TestEndpointCommandsAcceptNaturalResourceThenFlagsOrder(t *testing.T) {
 	}
 }
 
+func TestEndpointBindBuildsReferenceOnlyManagedExternalPolicy(t *testing.T) {
+	var request map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/endpoints/coder-production/bindings" {
+			t.Fatalf("path=%s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"binding":{"id":"binding"}}`)
+	}))
+	defer server.Close()
+	cfg := config.Config{ControlURL: server.URL, APIKey: "secret"}
+	_, err := captureStdout(t, func() error {
+		return endpointCommand(context.Background(), cfg, []string{
+			"bind", "coder-production", "--name", "managed-api", "--target", "openrouter-coder",
+			"--ownership", "traffic-managed", "--external-adapter", "openrouter",
+			"--secret-reference", "secret-ref", "--request-limit", "1000",
+			"--cost-limit-usd", "25", "--max-request-cost-usd", "0.05",
+			"--acknowledge-external-data", "--enable-external",
+		})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	configValue, _ := request["config"].(map[string]any)
+	if request["ownership_mode"] != "traffic-managed" || configValue["secret_reference_id"] != "secret-ref" || configValue["adapter"] != "openrouter" || configValue["privacy_acknowledged"] != true || configValue["enabled"] != true {
+		t.Fatalf("request=%#v", request)
+	}
+	if _, ok := configValue["api_key"]; ok {
+		t.Fatalf("raw credential entered request: %#v", request)
+	}
+	if configValue["cost_limit_microusd"] != float64(25_000_000) || configValue["max_request_cost_microusd"] != float64(50_000) {
+		t.Fatalf("budget=%#v", configValue)
+	}
+}
+
+func TestEndpointBindRejectsEnabledExternalPolicyWithoutConsent(t *testing.T) {
+	err := endpointCommand(context.Background(), config.Config{}, []string{
+		"bind", "coder-production", "--target", "openrouter-coder",
+		"--external-adapter", "openrouter", "--secret-reference", "secret-ref",
+		"--request-limit", "10", "--cost-limit-usd", "1", "--max-request-cost-usd", "0.10",
+		"--enable-external",
+	})
+	if err == nil || !strings.Contains(err.Error(), "--acknowledge-external-data") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
 func TestRequestCommandPrintsStreamingDeltas(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

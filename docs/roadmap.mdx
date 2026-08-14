@@ -18,6 +18,8 @@ lives in [Project status](/project-status).
 ## Now — prove the production core
 
 - Complete real-provider and real-runtime qualification for the release candidate.
+- Keep one stable endpoint identity across customer-operated workers and explicitly budgeted managed
+  model APIs; credentials remain server-side references and new bindings begin as candidates.
 - Make build, connect, update, rollback, autoscaling, serverless, and deletion boring and recoverable.
 - Publish reproducible model/runtime/GPU evidence instead of unsupported performance claims.
 - Tighten the five-minute path from installation to a successful request.
@@ -39,6 +41,23 @@ lives in [Project status](/project-status).
 - Verify recommendations through benchmark, Release Guard, human approval, and post-change results.
 - Explore policy-bounded automation only after recommendations repeatedly predict reality.
 
+## Dependency order toward end-to-end inference operations
+
+InferCrane expands around one control loop rather than accumulating unrelated infrastructure:
+
+1. **Serve:** build or connect a workload, then expose one stable endpoint.
+2. **Govern:** admission, quotas, referenced credentials, budgets, private networking, and identity.
+3. **Observe:** request evidence, deterministic Doctor findings, alerts, cold starts, and cost.
+4. **Change safely:** immutable candidates, replay or benchmark evidence, Release Guard, and rollback.
+5. **Optimize:** artifact prewarming, capacity history, Inference Lab, and advisory recommendations.
+6. **Expand by adapters:** runtimes, clouds, external APIs, and future sandbox or training lineage stay
+   behind narrow contracts.
+
+Sandbox execution and training orchestration are not part of the current release. If added, InferCrane
+will track their identity, evidence, policy, and handoff while delegating isolation and training
+execution to qualified systems. Managed compute remains demand-gated because it adds billing, abuse,
+capacity, and support obligations—not just another adapter.
+
 ## Explicit non-goals
 
 InferCrane will not become another inference engine, GPU scheduler, distributed KV cache, generic
@@ -59,4 +78,3 @@ A roadmap item moves forward when it does at least one of the following:
 Public milestones are intentionally outcome-oriented. Engineering checkpoint history, ADRs, and
 release qualification procedures remain in the repository for contributors without occupying the
 primary user documentation navigation.
-
