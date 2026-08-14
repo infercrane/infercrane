@@ -29,7 +29,12 @@ $compose stop infercrane >/dev/null
 attempt=0
 until [ "$($compose exec -T infercrane-2 python -c "import json,urllib.request; r=urllib.request.Request('http://127.0.0.1:8080/api/v1/system/instances',headers={'Authorization':'Bearer infercrane'}); print(json.load(urllib.request.urlopen(r))['count'])")" = "1" ]; do
   attempt=$((attempt+1))
-  [ "$attempt" -lt 15 ] || { echo "stopped instance remained live" >&2; exit 1; }
+  [ "$attempt" -lt 15 ] || {
+    echo "stopped instance remained live" >&2
+    $compose logs --tail 100 infercrane infercrane-2 >&2 || true
+    $compose exec -T postgres psql -U infercrane -d infercrane -c 'TABLE control_plane_instances' >&2 || true
+    exit 1
+  }
   sleep 1
 done
 $compose exec -T infercrane-2 python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/readyz', timeout=2)" >/dev/null
