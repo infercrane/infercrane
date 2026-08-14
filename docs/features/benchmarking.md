@@ -35,6 +35,12 @@ the credential with its environment-variable reference. Goodput and GPU telemetr
 `null` values, while cost metadata contains `available: false` and a reason when AIPerf or the
 provider did not measure them; none are fabricated.
 
+InferCrane normalizes the unit carried by each AIPerf latency record to milliseconds and rejects
+unknown units instead of silently mislabeling evidence. Percentiles reconstructed from those records
+use the nearest-rank definition. Small samples remain visibly weak evidence: Release Guard separately
+requires the persisted minimum request count, and matching workload/tool identity, before a comparison
+can pass.
+
 InferCrane asks AIPerf for the `records` export level. This contains per-request measurements but not the raw request/response export, so prompt and generated content are not persisted. Results remain in the InferCrane PostgreSQL database and are never uploaded by default.
 
 The control-plane image pins its AIPerf version. For a standalone control plane, install AIPerf with `pipx install aiperf`; `infercrane doctor` verifies that the configured executable is available.

@@ -47,7 +47,10 @@ class _Transport:
             with urlopen(request, timeout=self.timeout, context=self.ssl_context) as response:
                 content = response.read()
         except HTTPError as error:
-            content = error.read()
+            try:
+                content = error.read()
+            finally:
+                error.close()
             try:
                 detail = json.loads(content).get("error", {})
             except (json.JSONDecodeError, AttributeError):
@@ -177,7 +180,11 @@ class InferCrane:
         try:
             response = urlopen(request, timeout=self.timeout, context=self._ssl_context)
         except HTTPError as error:
-            raise APIError(error.code, "inference_error", error.read().decode(errors="replace")) from None
+            try:
+                detail = error.read().decode(errors="replace")
+            finally:
+                error.close()
+            raise APIError(error.code, "inference_error", detail) from None
         completed = False
         try:
             for raw in response:

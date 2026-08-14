@@ -1,10 +1,13 @@
 import asyncio
+import io
 import json
 import os
 import sys
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from unittest.mock import patch
+from urllib.error import HTTPError
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
@@ -86,6 +89,8 @@ class ClientTest(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.server.shutdown()
+        cls.server.server_close()
+        cls.thread.join(timeout=1)
 
     def setUp(self):
         Handler.requests = []
@@ -135,6 +140,14 @@ class ClientTest(unittest.TestCase):
             self.client.get_deployment("missing")
         self.assertEqual(caught.exception.code, "not_found")
         self.assertEqual(caught.exception.remediation, "check the name")
+
+    def test_api_error_closes_response(self):
+        payload = io.BytesIO(b'{"error":{"code":"rate_limited","message":"slow down"}}')
+        error = HTTPError(self.url, 429, "Too Many Requests", {}, payload)
+        with patch("infercrane.client.urlopen", side_effect=error):
+            with self.assertRaises(APIError):
+                self.client.get_deployment("limited")
+        self.assertTrue(payload.closed)
 
     def test_stream_is_incremental_and_requires_done(self):
         chunks = list(self.client.stream_chat("qwen", [{"role": "user", "content": "hello"}]))

@@ -21,11 +21,45 @@ func TestParseRecordsMeasuresAIPerfMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Requests != 2 || result.Succeeded != 2 || result.TTFTP50MS == nil || *result.TTFTP50MS != 10 || result.TPOTP95MS == nil || *result.TPOTP95MS != 2 {
+	if result.Requests != 2 || result.Succeeded != 2 || result.TTFTP50MS == nil || *result.TTFTP50MS != 10 || result.TPOTP95MS == nil || *result.TPOTP95MS != 4 {
 		t.Fatalf("result=%#v", result)
 	}
 	if result.DurationSeconds != 2 || result.OutputTokenThroughput == nil || *result.OutputTokenThroughput != 25 {
 		t.Fatalf("throughput result=%#v", result)
+	}
+}
+
+func TestPercentileUsesNearestRankWithoutHidingTail(t *testing.T) {
+	values := []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 100}
+	if got := percentile(values, .95); got != 100 {
+		t.Fatalf("p95=%v, want 100", got)
+	}
+}
+
+func TestParseRecordsNormalizesAIPerfLatencyUnits(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "records.jsonl")
+	data := `{"metadata":{"benchmark_phase":"profiling","request_start_ns":1,"request_end_ns":1000000001},"metrics":{"time_to_first_token":{"value":0.25,"unit":"s"},"request_latency":{"value":900000000,"unit":"ns"},"inter_token_latency":{"value":12000,"unit":"us"}}}` + "\n"
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := parseRecords(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.TTFTP50MS == nil || *result.TTFTP50MS != 250 || result.LatencyP50MS == nil || *result.LatencyP50MS != 900 || result.TPOTP50MS == nil || *result.TPOTP50MS != 12 {
+		t.Fatalf("result=%#v", result)
+	}
+}
+
+func TestParseRecordsRejectsUnknownLatencyUnit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "records.jsonl")
+	data := `{"metadata":{"benchmark_phase":"profiling"},"metrics":{"time_to_first_token":{"value":10,"unit":"ticks"}}}` + "\n"
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := parseRecords(path)
+	if err == nil || !strings.Contains(err.Error(), `unsupported latency unit "ticks"`) {
+		t.Fatalf("err=%v", err)
 	}
 }
 

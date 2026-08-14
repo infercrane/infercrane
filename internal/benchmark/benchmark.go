@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -163,22 +164,50 @@ func parseRecords(path string) (Result, error) {
 			continue
 		}
 		result.Succeeded++
-		appendMetric := func(name string, destination *[]float64) {
+		appendMetric := func(name string, destination *[]float64) error {
 			if metric, ok := row.Metrics[name]; ok {
 				var value float64
-				if len(metric.Value) > 0 && json.Unmarshal(metric.Value, &value) == nil {
-					*destination = append(*destination, value)
+				if len(metric.Value) == 0 || json.Unmarshal(metric.Value, &value) != nil {
+					return fmt.Errorf("AIPerf metric %q is not numeric", name)
 				}
+				*destination = append(*destination, value)
+			}
+			return nil
+		}
+		appendLatencyMetric := func(name string, destination *[]float64) error {
+			metric, ok := row.Metrics[name]
+			if !ok {
+				return nil
+			}
+			var value float64
+			if len(metric.Value) == 0 || json.Unmarshal(metric.Value, &value) != nil {
+				return fmt.Errorf("AIPerf metric %q is not numeric", name)
+			}
+			value, err = milliseconds(value, metric.Unit)
+			if err != nil {
+				return fmt.Errorf("AIPerf metric %q: %w", name, err)
+			}
+			*destination = append(*destination, value)
+			return nil
+		}
+		if err := appendLatencyMetric("time_to_first_token", &ttft); err != nil {
+			return Result{}, err
+		}
+		if err := appendLatencyMetric("request_latency", &latency); err != nil {
+			return Result{}, err
+		}
+		if _, ok := row.Metrics["time_per_output_token"]; ok {
+			if err := appendLatencyMetric("time_per_output_token", &tpot); err != nil {
+				return Result{}, err
+			}
+		} else {
+			if err := appendLatencyMetric("inter_token_latency", &tpot); err != nil {
+				return Result{}, err
 			}
 		}
-		appendMetric("time_to_first_token", &ttft)
-		appendMetric("request_latency", &latency)
-		if _, ok := row.Metrics["time_per_output_token"]; ok {
-			appendMetric("time_per_output_token", &tpot)
-		} else {
-			appendMetric("inter_token_latency", &tpot)
+		if err := appendMetric("output_token_count", &outputTokens); err != nil {
+			return Result{}, err
 		}
-		appendMetric("output_token_count", &outputTokens)
 		if row.Metadata.RequestStartNS > 0 && (earliest == 0 || row.Metadata.RequestStartNS < earliest) {
 			earliest = row.Metadata.RequestStartNS
 		}
@@ -211,6 +240,21 @@ func parseRecords(path string) (Result, error) {
 	return result, nil
 }
 
+func milliseconds(value float64, unit string) (float64, error) {
+	switch strings.ToLower(strings.TrimSpace(unit)) {
+	case "", "ms", "millisecond", "milliseconds":
+		return value, nil
+	case "s", "sec", "second", "seconds":
+		return value * 1_000, nil
+	case "us", "µs", "μs", "microsecond", "microseconds":
+		return value / 1_000, nil
+	case "ns", "nanosecond", "nanoseconds":
+		return value / 1_000_000, nil
+	default:
+		return 0, fmt.Errorf("unsupported latency unit %q", unit)
+	}
+}
+
 func percentiles(values []float64) (*float64, *float64) {
 	if len(values) == 0 {
 		return nil, nil
@@ -219,4 +263,15 @@ func percentiles(values []float64) (*float64, *float64) {
 	p50, p95 := percentile(values, .50), percentile(values, .95)
 	return &p50, &p95
 }
-func percentile(values []float64, p float64) float64 { return values[int(float64(len(values)-1)*p)] }
+func percentile(values []float64, p float64) float64 {
+	// Use the nearest-rank definition. A floor-index calculation understates
+	// tail latency for small samples; for example, p95 of [2, 4] must be 4.
+	index := int(math.Ceil(p*float64(len(values)))) - 1
+	if index < 0 {
+		index = 0
+	}
+	if index >= len(values) {
+		index = len(values) - 1
+	}
+	return values[index]
+}
