@@ -49,7 +49,7 @@ func (s *Store) CreatePrincipalScoped(ctx context.Context, tenant, name string, 
 		scopeNames[i] = string(scope)
 	}
 	encodedScopes, _ := json.Marshal(scopeNames)
-	_, err = s.ExecContext(ctx, `INSERT INTO principals(id,tenant_id,name,role,credential_hash,kind,scopes_json,created_at) VALUES(?,?,?,?,?,'service_account',?::jsonb,?)`, id, tenant, name, string(role), hash, string(encodedScopes), stamp)
+	_, err = s.ExecContext(ctx, `INSERT INTO principals(id,tenant_id,name,role,credential_hash,kind,scopes_json,created_at,endpoint_names_json) VALUES(?,?,?,?,?,'service_account',?::jsonb,?,'[]'::jsonb)`, id, tenant, name, string(role), hash, string(encodedScopes), stamp)
 	if isUniqueViolation(err) {
 		return domain.Principal{}, "", fmt.Errorf("%w: principal name or credential already exists", ErrConflict)
 	}
@@ -58,9 +58,9 @@ func (s *Store) CreatePrincipalScoped(ctx context.Context, tenant, name string, 
 func (s *Store) AuthenticatePrincipal(ctx context.Context, token string) (domain.Principal, error) {
 	hash := credentialHash(token)
 	var out domain.Principal
-	var stamp string
-	var scopesJSON string
-	err := s.QueryRowContext(ctx, `SELECT id,tenant_id,name,role,kind,scopes_json::text,disabled,created_at FROM principals WHERE credential_hash=? AND disabled=FALSE`, hash).Scan(&out.ID, &out.TenantID, &out.Name, &out.Role, &out.Kind, &scopesJSON, &out.Disabled, &stamp)
+	var stamp, scopesJSON, endpointsJSON string
+	var expires sql.NullString
+	err := s.QueryRowContext(ctx, `SELECT id,tenant_id,name,role,kind,scopes_json::text,endpoint_names_json::text,disabled,created_at,expires_at FROM principals WHERE credential_hash=? AND disabled=FALSE AND (expires_at IS NULL OR expires_at>NOW())`, hash).Scan(&out.ID, &out.TenantID, &out.Name, &out.Role, &out.Kind, &scopesJSON, &endpointsJSON, &out.Disabled, &stamp, &expires)
 	if errors.Is(err, sql.ErrNoRows) {
 		return out, ErrNotFound
 	}
@@ -71,10 +71,17 @@ func (s *Store) AuthenticatePrincipal(ctx context.Context, token string) (domain
 	if err := json.Unmarshal([]byte(scopesJSON), &out.Scopes); err != nil {
 		return domain.Principal{}, fmt.Errorf("decode principal scopes: %w", err)
 	}
+	if err := json.Unmarshal([]byte(endpointsJSON), &out.EndpointNames); err != nil {
+		return domain.Principal{}, fmt.Errorf("decode principal endpoint restrictions: %w", err)
+	}
+	if expires.Valid {
+		value := parseTime(expires.String)
+		out.ExpiresAt = &value
+	}
 	return out, nil
 }
 func (s *Store) ActiveCredentials(ctx context.Context) ([]domain.CredentialRecord, error) {
-	rows, err := s.QueryContext(ctx, `SELECT credential_hash,id,tenant_id,name,role,kind,scopes_json::text,disabled,created_at FROM principals WHERE disabled=FALSE`)
+	rows, err := s.QueryContext(ctx, `SELECT credential_hash,id,tenant_id,name,role,kind,scopes_json::text,endpoint_names_json::text,disabled,created_at,expires_at FROM principals WHERE disabled=FALSE AND (expires_at IS NULL OR expires_at>NOW())`)
 	if err != nil {
 		return nil, err
 	}
@@ -82,22 +89,30 @@ func (s *Store) ActiveCredentials(ctx context.Context) ([]domain.CredentialRecor
 	var out []domain.CredentialRecord
 	for rows.Next() {
 		var record domain.CredentialRecord
-		var scopesJSON string
+		var scopesJSON, endpointsJSON string
 		var stamp string
-		if err := rows.Scan(&record.Hash, &record.Principal.ID, &record.Principal.TenantID, &record.Principal.Name, &record.Principal.Role, &record.Principal.Kind, &scopesJSON, &record.Principal.Disabled, &stamp); err != nil {
+		var expires sql.NullString
+		if err := rows.Scan(&record.Hash, &record.Principal.ID, &record.Principal.TenantID, &record.Principal.Name, &record.Principal.Role, &record.Principal.Kind, &scopesJSON, &endpointsJSON, &record.Principal.Disabled, &stamp, &expires); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(scopesJSON), &record.Principal.Scopes); err != nil {
 			return nil, fmt.Errorf("decode principal scopes: %w", err)
 		}
 		record.Principal.CreatedAt = parseTime(stamp)
+		if err := json.Unmarshal([]byte(endpointsJSON), &record.Principal.EndpointNames); err != nil {
+			return nil, fmt.Errorf("decode principal endpoint restrictions: %w", err)
+		}
+		if expires.Valid {
+			value := parseTime(expires.String)
+			record.Principal.ExpiresAt = &value
+		}
 		out = append(out, record)
 	}
 	return out, rows.Err()
 }
 
 func (s *Store) PrincipalsForTenant(ctx context.Context, tenant string) ([]domain.Principal, error) {
-	rows, err := s.QueryContext(ctx, `SELECT id,tenant_id,name,role,kind,scopes_json::text,disabled,created_at FROM principals WHERE tenant_id=? ORDER BY created_at DESC,id DESC`, tenant)
+	rows, err := s.QueryContext(ctx, `SELECT id,tenant_id,name,role,kind,scopes_json::text,endpoint_names_json::text,disabled,created_at,expires_at FROM principals WHERE tenant_id=? ORDER BY created_at DESC,id DESC`, tenant)
 	if err != nil {
 		return nil, err
 	}
@@ -105,14 +120,22 @@ func (s *Store) PrincipalsForTenant(ctx context.Context, tenant string) ([]domai
 	out := make([]domain.Principal, 0)
 	for rows.Next() {
 		var principal domain.Principal
-		var scopesJSON, stamp string
-		if err := rows.Scan(&principal.ID, &principal.TenantID, &principal.Name, &principal.Role, &principal.Kind, &scopesJSON, &principal.Disabled, &stamp); err != nil {
+		var scopesJSON, endpointsJSON, stamp string
+		var expires sql.NullString
+		if err := rows.Scan(&principal.ID, &principal.TenantID, &principal.Name, &principal.Role, &principal.Kind, &scopesJSON, &endpointsJSON, &principal.Disabled, &stamp, &expires); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(scopesJSON), &principal.Scopes); err != nil {
 			return nil, fmt.Errorf("decode principal scopes: %w", err)
 		}
 		principal.CreatedAt = parseTime(stamp)
+		if err := json.Unmarshal([]byte(endpointsJSON), &principal.EndpointNames); err != nil {
+			return nil, fmt.Errorf("decode principal endpoint restrictions: %w", err)
+		}
+		if expires.Valid {
+			value := parseTime(expires.String)
+			principal.ExpiresAt = &value
+		}
 		out = append(out, principal)
 	}
 	return out, rows.Err()

@@ -13,9 +13,10 @@ SkyPilot, or vLLM. External systems enter through capability-specific contracts.
 infercrane integrations
 ```
 
-This authenticated read returns the compiled Provider Contract and Runtime Contract versions,
-registered adapters, capabilities, and separate local versus real-infrastructure qualification
-states. It never upgrades registration or hermetic simulation into a public support claim.
+This authenticated read returns the compiled Provider Contract, Runtime Contract, and Composition
+Contract versions, registered adapters, capabilities, ownership boundaries, and separate local
+versus real-system qualification states. It never upgrades registration or hermetic simulation into
+a public support claim.
 
 | Concern | InferCrane owns | Adapter owns |
 |---|---|---|
@@ -26,6 +27,9 @@ states. It never upgrades registration or hermetic simulation into a public supp
 | Model artifacts | Immutable `ModelArtifact` identity and attachment | Repository resolution and transfer |
 | Benchmarking | Reproduction record and history | Workload generation and raw measurements |
 | Metrics | Normalized dimensions and persisted evidence | Runtime/provider signal extraction |
+| Gateway composition | Stable endpoint, adoption state, policy, and evidence | Protocol translation, upstream credentials, and gateway lifecycle |
+| External sandbox | External reference and endpoint-scoped access | Isolation, commands, files, network policy, and sandbox lifecycle |
+| Training handoff | Signature verification, immutable artifact lineage, and revision binding | Training data, execution, checkpoints, and scheduler |
 
 ## Registration is not qualification
 
@@ -38,9 +42,10 @@ advertised publicly. Qualification requires configuration, documentation, compat
 failure testing, real infrastructure acceptance, and zero leaked billable resources.
 
 <Note>
-The current release candidate registers RunPod elastic/serverless, narrow AWS EC2, GCP Compute, and Kubernetes elastic adapters, vLLM, SGLang, custom OCI,
-and governed external targets. The compatibility matrix qualifies only exact combinations; registration
-never implies real-cloud evidence.
+The current release candidate registers RunPod elastic/serverless, narrow AWS EC2, GCP Compute, and
+Kubernetes elastic adapters; vLLM, SGLang, custom OCI, and governed external targets; plus LiteLLM,
+external-sandbox access, and signed-artifact-handoff composition profiles. The compatibility matrix
+qualifies only exact combinations; registration never implies real-system evidence.
 </Note>
 
 ## Adding an integration
@@ -51,8 +56,9 @@ never implies real-cloud evidence.
 4. Add configuration, diagnostics, documentation, and deterministic failure behavior.
 5. Qualify the exact cloud/runtime/compute-mode combination with real lifecycle evidence.
 
-The versioned contract details are documented in [Provider Contract V1](/architecture/provider-contract)
-and [Runtime Contract V1](/architecture/runtime-contract).
+The versioned contract details are documented in [Provider Contract V1](/architecture/provider-contract),
+[Runtime Contract V1](/architecture/runtime-contract), and
+[ADR 0033](/adr/0033-replaceable-external-composition-contracts).
 
 Do not add a provider conditional to a generic workflow, expose registration as support, build a
 second scheduler, or silently fabricate unavailable provider data. See

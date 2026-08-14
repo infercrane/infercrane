@@ -1660,6 +1660,46 @@
         ],
         "type": "object"
       },
+      "SandboxReferenceCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "endpoint": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "external_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "external_revision": {
+            "maxLength": 256,
+            "type": "string"
+          },
+          "metadata": {
+            "description": "Bounded content-free labels. Commands, files, prompts, outputs, credentials, and secrets are rejected.",
+            "type": "object"
+          },
+          "provider": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "default": 1800,
+            "maximum": 86400,
+            "minimum": 60,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "provider",
+          "external_id",
+          "endpoint"
+        ],
+        "type": "object"
+      },
       "ServingPlanCreate": {
         "additionalProperties": false,
         "properties": {
@@ -4499,6 +4539,118 @@
         ]
       }
     },
+    "/api/v1/deployments/{name}/training-artifacts": {
+      "get": {
+        "operationId": "listTrainingArtifacts",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List content-free external training provenance for deployment revisions",
+        "tags": [
+          "Training lineage"
+        ]
+      },
+      "post": {
+        "operationId": "attachTrainingArtifact",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Stable key used to adopt the original durable operation after retries or disconnects.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignedEvidenceEnvelope"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Verify and attach a signed immutable checkpoint handoff",
+        "tags": [
+          "Training lineage"
+        ]
+      }
+    },
     "/api/v1/doctor": {
       "get": {
         "operationId": "getDoctor",
@@ -6457,6 +6609,180 @@
         ]
       }
     },
+    "/api/v1/sandboxes/references": {
+      "get": {
+        "operationId": "listSandboxReferences",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List external sandbox references without command, file, prompt, or output content",
+        "tags": [
+          "Sandboxes"
+        ]
+      },
+      "post": {
+        "operationId": "createSandboxReference",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SandboxReferenceCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Register an externally owned sandbox and issue an expiring endpoint-scoped credential",
+        "tags": [
+          "Sandboxes"
+        ]
+      }
+    },
+    "/api/v1/sandboxes/references/{id}": {
+      "delete": {
+        "operationId": "revokeSandboxReference",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Revoke InferCrane access without mutating the external sandbox",
+        "tags": [
+          "Sandboxes"
+        ]
+      }
+    },
+    "/api/v1/sandboxes/references/{id}/credential/rotate": {
+      "post": {
+        "operationId": "rotateSandboxCredential",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Rotate the expiring endpoint-scoped credential for an active sandbox reference",
+        "tags": [
+          "Sandboxes"
+        ]
+      }
+    },
     "/api/v1/secrets": {
       "get": {
         "operationId": "listSecretReferences",
@@ -7247,6 +7573,9 @@
       "name": "Routing"
     },
     {
+      "name": "Sandboxes"
+    },
+    {
       "name": "Scaling"
     },
     {
@@ -7257,6 +7586,9 @@
     },
     {
       "name": "Targets"
+    },
+    {
+      "name": "Training lineage"
     }
   ]
 }

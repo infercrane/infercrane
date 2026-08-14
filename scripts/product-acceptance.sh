@@ -258,6 +258,32 @@ PY
   cli lab nonexistent-model@immutable --output json | jq -e '.evaluation.results | type == "array" and length == 0' >/dev/null || return
   cli doctor "$endpoint" --output json | jq -e 'type == "array" and length > 0' >/dev/null || return
 
+  sandbox=$(cli sandbox connect --provider e2b --external-id "acceptance-$suffix" \
+    --external-revision template-v1 --endpoint "$endpoint" --ttl 10m --output json) || return
+  sandbox_id=$(printf '%s\n' "$sandbox" | jq -r '.reference.id') || return
+  sandbox_token=$(printf '%s\n' "$sandbox" | jq -r '.credential') || return
+  printf '%s\n' "$sandbox" |
+    jq -e --arg endpoint "$endpoint" '.credential_once == true and .credential_cache_synchronized == true and .external_resource_mutated == false and .reference.endpoint == $endpoint' >/dev/null || return
+  curl -fsS -H "Authorization: Bearer $sandbox_token" "http://127.0.0.1:$port/v1/models" |
+    jq -e --arg endpoint "$endpoint" '.data | length == 1 and .[0].id == $endpoint' >/dev/null || return
+  curl -fsS -H "Authorization: Bearer $sandbox_token" -H 'Content-Type: application/json' \
+    -d "{\"model\":\"$endpoint\",\"messages\":[{\"role\":\"user\",\"content\":\"sandbox-scoped acceptance\"}]}" \
+    "http://127.0.0.1:$port/v1/chat/completions" | jq -e '.choices[0].message.content != null' >/dev/null || return
+  denied=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $sandbox_token" -H 'Content-Type: application/json' \
+    -d '{"model":"qwen-prod","messages":[{"role":"user","content":"must be denied"}]}' \
+    "http://127.0.0.1:$port/v1/chat/completions") || return
+  [ "$denied" = 403 ] || { echo "sandbox credential invoked an unscoped endpoint: HTTP $denied" >&2; return 1; }
+  rotated=$(cli sandbox rotate "$sandbox_id" --output json) || return
+  rotated_token=$(printf '%s\n' "$rotated" | jq -r '.credential') || return
+  printf '%s\n' "$rotated" | jq -e '.credential_cache_synchronized == true' >/dev/null || return
+  [ "$rotated_token" != "$sandbox_token" ] || return
+  expired=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $sandbox_token" "http://127.0.0.1:$port/v1/models") || return
+  [ "$expired" = 401 ] || { echo "rotated sandbox credential remained valid: HTTP $expired" >&2; return 1; }
+  cli sandbox revoke "$sandbox_id" --yes --output json |
+    jq -e '.status == "stopped" and .credential_cache_synchronized == true and .external_resource_mutated == false' >/dev/null || return
+  revoked=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $rotated_token" "http://127.0.0.1:$port/v1/models") || return
+  [ "$revoked" = 401 ] || { echo "revoked sandbox credential remained valid: HTTP $revoked" >&2; return 1; }
+
   if cli benchmark qwen-prod --requests 1 --concurrency 1 --output json >"$run_dir/benchmark-unavailable.out" 2>"$run_dir/benchmark-unavailable.err"; then
     echo "benchmark fabricated immutable artifact evidence for an adopted target" >&2
     return 1
@@ -268,6 +294,23 @@ PY
     return 1
   fi
   grep -q 'immutable_artifact_required' "$run_dir/recipe-unavailable.err" || return
+
+  training_revision=$(cli inspect qwen-prod --output json | jq -r '.deployment.active_revision_id') || return
+  training_key="/tmp/infercrane-training-$suffix.key"
+  training_file="/tmp/infercrane-training-$suffix.json"
+  cli training keygen --file "$training_key" --output json | jq -e '.mode == "0600" and .private_key_exposed == false' >/dev/null || return
+  cli training sign qwen-prod "$training_revision" --provider mlflow --run "run-$suffix" \
+    --repository "mlflow://registry/qwen-prod/$suffix" --immutable-revision "$suffix" \
+    --digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+    --framework transformers --framework-version 5.0.0 --method lora \
+    --key "$training_key" --file "$training_file" --output json |
+    jq -e '.content_recorded == false and .evidence_digest != null' >/dev/null || return
+  cli training verify "$training_file" --output json |
+    jq -e --arg revision "$training_revision" '.verified == true and .revision_id == $revision and .content_recorded == false' >/dev/null || return
+  cli training attach qwen-prod "$training_file" --output json |
+    jq -e --arg revision "$training_revision" '.handoff.revision_id == $revision and .training_executed_by_infercrane == false' >/dev/null || return
+  cli training list qwen-prod --output json |
+    jq -e --arg revision "$training_revision" '.data | length == 1 and .[0].revision_id == $revision' >/dev/null || return
 
   cli endpoint delete "$endpoint" --yes --output json | jq -e '.state == "deleted"' >/dev/null || return
   curl -fsS -H 'Authorization: Bearer infercrane' -H 'Content-Type: application/json' \

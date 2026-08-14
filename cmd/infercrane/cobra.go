@@ -51,6 +51,8 @@ var publicCommandSpecs = []commandSpec{
 	{use: "replay DEPLOYMENT [flags]", short: "Capture a privacy-preserving production workload shape", group: "understand"},
 	{use: "capacity [flags]", short: "Inspect observed capacity reliability", group: "understand"},
 	{use: "artifact ACTION ARTIFACT_ID [flags]", short: "Inspect cache evidence and request provider-native prefetch", group: "understand"},
+	{use: "sandbox ACTION [arguments]", short: "Compose external sandboxes with expiring endpoint access", group: "operate"},
+	{use: "training ACTION [arguments]", short: "Verify and attach immutable external training artifacts", group: "operate"},
 	{use: "finops DEPLOYMENT [flags]", short: "Build an evidence-backed cost report", group: "understand"},
 	{use: "autopilot ACTION SUBJECT [flags]", short: "Create and approve advisory serving plans", group: "operate"},
 	{use: "session ACTION SUBJECT [flags]", short: "Manage durable logical session identity", group: "operate"},
@@ -152,7 +154,7 @@ func addHelpFlags(command *cobra.Command, name string) {
 	boolFlag := func(flag, help string) { command.Flags().Bool(flag, false, help) }
 	intFlag := func(flag string, value int, help string) { command.Flags().Int(flag, value, help) }
 	switch name {
-	case "init", "workload", "evaluation", "doctor", "connect", "adopt", "alert", "admission", "async", "plan", "deploy", "apply", "request", "deployments", "endpoints", "endpoint", "environment", "logical-model", "status", "logs", "events", "inspect", "explain", "benchmark", "replay", "capacity", "artifact", "finops", "autopilot", "session", "burst", "recipe", "recipes", "lab", "passport", "recommend", "slo", "delete", "orphans", "operation", "integrations", "observe", "inbox", "target", "auth", "system", "secret", "external", "rollout":
+	case "init", "workload", "evaluation", "doctor", "connect", "adopt", "alert", "admission", "async", "plan", "deploy", "apply", "request", "deployments", "endpoints", "endpoint", "environment", "logical-model", "status", "logs", "events", "inspect", "explain", "benchmark", "replay", "capacity", "artifact", "sandbox", "training", "finops", "autopilot", "session", "burst", "recipe", "recipes", "lab", "passport", "recommend", "slo", "delete", "orphans", "operation", "integrations", "observe", "inbox", "target", "auth", "system", "secret", "external", "rollout":
 		stringFlag("output", "human", "output format: human or json")
 	}
 	switch name {
@@ -194,6 +196,27 @@ func addHelpFlags(command *cobra.Command, name string) {
 		stringFlag("source", "operator", "observation source")
 		stringFlag("ttl", "5m", "observation validity")
 		stringFlag("idempotency-key", "", "stable safe-retry key")
+	case "sandbox":
+		stringFlag("provider", "", "external sandbox provider or adapter name")
+		stringFlag("external-id", "", "externally owned sandbox identity")
+		stringFlag("external-revision", "", "external sandbox template or revision")
+		stringFlag("endpoint", "", "single endpoint the credential may invoke")
+		stringFlag("ttl", "30m", "credential lifetime")
+		boolFlag("yes", "confirm credential revocation without deleting the external sandbox")
+	case "training":
+		stringFlag("provider", "", "external training system")
+		stringFlag("run", "", "external immutable run identity")
+		stringFlag("repository", "", "checkpoint repository or approved URI")
+		stringFlag("immutable-revision", "", "immutable checkpoint or registry version")
+		stringFlag("digest", "", "checkpoint sha256 digest")
+		stringFlag("base-model", "", "immutable base model identity")
+		stringFlag("method", "", "training method")
+		stringFlag("framework", "", "training framework")
+		stringFlag("framework-version", "", "training framework version")
+		stringFlag("dataset-fingerprint", "", "content-free dataset fingerprint")
+		stringFlag("produced-at", "", "RFC3339 production time")
+		stringFlag("key", "", "Ed25519 training-system private key")
+		stringFlag("file", "", "signed handoff file")
 	case "connect":
 		stringFlag("as", "", "stable endpoint and logical model name")
 		stringFlag("model", "", "physical upstream model; discovered when omitted")

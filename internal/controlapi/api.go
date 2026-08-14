@@ -34,6 +34,7 @@ import (
 	"github.com/infercrane/infercrane/internal/qualityevidence"
 	"github.com/infercrane/infercrane/internal/recipe"
 	"github.com/infercrane/infercrane/internal/support"
+	"github.com/infercrane/infercrane/internal/trainingartifact"
 	"github.com/infercrane/infercrane/internal/workflows"
 )
 
@@ -191,6 +192,14 @@ type artifactCacheStateStore interface {
 type environmentPromotionStore interface {
 	StageEnvironmentPromotion(context.Context, string, string, string, string) (domain.EnvironmentPromotion, bool, error)
 }
+type externalWorkloadStore interface {
+	CreateSandboxReference(context.Context, string, domain.SandboxReference, time.Duration) (domain.SandboxReference, string, error)
+	SandboxReferences(context.Context, string) ([]domain.SandboxReference, error)
+	RevokeSandboxReference(context.Context, string, string) error
+	RotateSandboxCredential(context.Context, string, string) (string, error)
+	AttachTrainingArtifactHandoff(context.Context, string, string, domain.TrainingArtifactHandoff, domain.ModelArtifact) (domain.TrainingArtifactHandoff, domain.ModelArtifact, error)
+	TrainingArtifactHandoffs(context.Context, string, string) ([]domain.TrainingArtifactHandoff, error)
+}
 type API struct {
 	Store         Store
 	APIKey        string
@@ -206,6 +215,7 @@ type API struct {
 	GatewayURL, AIPerfBinary string
 	PassportPrivateKey       ed25519.PrivateKey
 	EndpointRefresh          func(context.Context) error
+	CredentialRefresh        func(context.Context) error
 	DiscoveryClient          *http.Client
 	AlertDeliverer           interface {
 		Deliver(context.Context, domain.AlertPolicy, domain.DiagnosticFinding) (domain.AlertDelivery, error)
@@ -259,6 +269,12 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/artifacts/{id}/cache-observations", a.auth(authz.Deploy, a.recordCacheObservation))
 	mux.HandleFunc("POST /api/v1/artifacts/{id}/prefetches", a.auth(authz.Deploy, a.requestPrefetch))
 	mux.HandleFunc("GET /api/v1/artifacts/{id}/cache", a.auth(authz.Read, a.artifactCacheState))
+	mux.HandleFunc("POST /api/v1/sandboxes/references", a.auth(authz.ManageTenant, a.createSandboxReference))
+	mux.HandleFunc("GET /api/v1/sandboxes/references", a.auth(authz.Read, a.sandboxReferences))
+	mux.HandleFunc("POST /api/v1/sandboxes/references/{id}/credential/rotate", a.auth(authz.ManageTenant, a.rotateSandboxCredential))
+	mux.HandleFunc("DELETE /api/v1/sandboxes/references/{id}", a.auth(authz.ManageTenant, a.revokeSandboxReference))
+	mux.HandleFunc("POST /api/v1/deployments/{name}/training-artifacts", a.auth(authz.Deploy, a.attachTrainingArtifact))
+	mux.HandleFunc("GET /api/v1/deployments/{name}/training-artifacts", a.auth(authz.Read, a.trainingArtifacts))
 	mux.HandleFunc("POST /api/v1/deployments/{name}/finops/reports", a.auth(authz.Deploy, a.createFinOpsReport))
 	mux.HandleFunc("GET /api/v1/deployments/{name}/finops/reports", a.auth(authz.Read, a.finOpsReports))
 	mux.HandleFunc("POST /api/v1/deployments/{name}/autopilot/plans", a.auth(authz.Deploy, a.createAutopilotPlan))
@@ -1913,6 +1929,215 @@ func (a API) capacityIntelligence(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"capacity": rows, "evidence": "observed", "sample_scope": "tenant", "window_seconds": int(window.Seconds())})
 }
 
+func (a API) createSandboxReference(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(externalWorkloadStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "sandbox_composition_unavailable", "sandbox composition storage is not configured")
+		return
+	}
+	var request struct {
+		Provider         string         `json:"provider"`
+		ExternalID       string         `json:"external_id"`
+		ExternalRevision string         `json:"external_revision"`
+		Endpoint         string         `json:"endpoint"`
+		TTLSeconds       int            `json:"ttl_seconds"`
+		Metadata         map[string]any `json:"metadata"`
+	}
+	if !decodeMutationBody(w, r, &request) {
+		return
+	}
+	if request.TTLSeconds == 0 {
+		request.TTLSeconds = 1800
+	}
+	metadata, err := json.Marshal(request.Metadata)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "validation_failed", "sandbox metadata is invalid")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	reference, credential, err := store.CreateSandboxReference(r.Context(), actor.TenantID, domain.SandboxReference{Provider: request.Provider, ExternalID: request.ExternalID, ExternalRevision: request.ExternalRevision, EndpointName: request.Endpoint, MetadataJSON: string(metadata)}, time.Duration(request.TTLSeconds)*time.Second)
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "endpoint_not_found", "the endpoint was not found")
+		return
+	}
+	if errors.Is(err, domain.ErrConflict) {
+		writeError(w, http.StatusConflict, "conflict", err.Error()+"; rotate the existing sandbox credential instead of creating a duplicate")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
+		return
+	}
+	cacheSynchronized := a.refreshCredentialCache(r.Context())
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "sandbox.reference.create", ResourceType: "sandbox_reference", ResourceName: reference.ID, Outcome: "succeeded"})
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"reference": sandboxReferenceResponse(reference), "credential": credential,
+		"credential_once": true, "credential_cache_synchronized": cacheSynchronized,
+		"external_resource_mutated": false,
+	})
+}
+
+func (a API) sandboxReferences(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(externalWorkloadStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "sandbox_composition_unavailable", "sandbox composition storage is not configured")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	rows, err := store.SandboxReferences(r.Context(), actor.TenantID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "sandbox references could not be read")
+		return
+	}
+	data := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		data = append(data, sandboxReferenceResponse(row))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": data, "execution_boundary": "external_provider"})
+}
+
+func (a API) rotateSandboxCredential(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(externalWorkloadStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "sandbox_composition_unavailable", "sandbox composition storage is not configured")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	credential, err := store.RotateSandboxCredential(r.Context(), actor.TenantID, r.PathValue("id"))
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "active sandbox reference was not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "sandbox credential could not be rotated")
+		return
+	}
+	cacheSynchronized := a.refreshCredentialCache(r.Context())
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "sandbox.credential.rotate", ResourceType: "sandbox_reference", ResourceName: r.PathValue("id"), Outcome: "succeeded"})
+	writeJSON(w, http.StatusOK, map[string]any{"credential": credential, "credential_once": true, "credential_cache_synchronized": cacheSynchronized, "external_resource_mutated": false})
+}
+
+func (a API) revokeSandboxReference(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(externalWorkloadStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "sandbox_composition_unavailable", "sandbox composition storage is not configured")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	if err := store.RevokeSandboxReference(r.Context(), actor.TenantID, r.PathValue("id")); errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "sandbox reference was not found")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "sandbox reference could not be revoked")
+		return
+	}
+	cacheSynchronized := a.refreshCredentialCache(r.Context())
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "sandbox.reference.revoke", ResourceType: "sandbox_reference", ResourceName: r.PathValue("id"), Outcome: "succeeded"})
+	writeJSON(w, http.StatusOK, map[string]any{"status": "stopped", "credential_revoked": true, "credential_cache_synchronized": cacheSynchronized, "external_resource_mutated": false})
+}
+
+func (a API) refreshCredentialCache(ctx context.Context) bool {
+	if a.CredentialRefresh == nil {
+		return false
+	}
+	refreshCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	return a.CredentialRefresh(refreshCtx) == nil
+}
+
+func sandboxReferenceResponse(row domain.SandboxReference) map[string]any {
+	status := row.Status
+	if status == "referenced" && !row.ExpiresAt.After(time.Now().UTC()) {
+		status = "expired"
+	}
+	return map[string]any{
+		"id": row.ID, "provider": row.Provider, "external_id": row.ExternalID,
+		"external_revision": row.ExternalRevision, "endpoint": row.EndpointName,
+		"status": status, "metadata": json.RawMessage(row.MetadataJSON), "expires_at": row.ExpiresAt,
+		"created_at": row.CreatedAt, "updated_at": row.UpdatedAt,
+	}
+}
+
+func (a API) attachTrainingArtifact(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(externalWorkloadStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "training_handoff_unavailable", "training artifact handoff storage is not configured")
+		return
+	}
+	var envelope passport.Envelope
+	if !decodeMutationBody(w, r, &envelope) {
+		return
+	}
+	payload, err := trainingartifact.Decode(envelope)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_training_handoff", err.Error())
+		return
+	}
+	if payload.Deployment != r.PathValue("name") {
+		writeError(w, http.StatusUnprocessableEntity, "handoff_binding_mismatch", "signed training handoff deployment does not match the request path")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	handoff := domain.TrainingArtifactHandoff{
+		RevisionID: payload.RevisionID, Provider: payload.Provider, ExternalRunID: payload.ExternalRunID,
+		Repository: payload.Repository, ImmutableRevision: payload.ImmutableRevision,
+		ArtifactDigest: payload.ArtifactDigest, BaseModelIdentity: payload.BaseModelIdentity,
+		Method: payload.Method, Framework: payload.Framework, FrameworkVersion: payload.FrameworkVersion,
+		DatasetFingerprint: payload.DatasetFingerprint, PayloadDigest: envelope.Digest,
+		Signature: envelope.Signature, PublicKey: envelope.PublicKey, Algorithm: envelope.Algorithm, KeyID: envelope.KeyID,
+	}
+	artifact := domain.ModelArtifact{
+		Source: "training-handoff", Repository: payload.Repository, RequestedRevision: payload.ImmutableRevision,
+		ImmutableRevision: payload.ImmutableRevision, ModelIdentity: payload.Repository + "@" + payload.ImmutableRevision,
+		CacheState: "unknown", RuntimeCompatibilityJSON: "{}",
+	}
+	handoff, artifact, err = store.AttachTrainingArtifactHandoff(r.Context(), actor.TenantID, payload.Deployment, handoff, artifact)
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "revision_not_found", "the deployment revision was not found")
+		return
+	}
+	if errors.Is(err, domain.ErrConflict) {
+		writeError(w, http.StatusConflict, "immutable_artifact_conflict", err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "training_handoff_failed", err.Error())
+		return
+	}
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "training_artifact.attach", ResourceType: "deployment_revision", ResourceName: payload.RevisionID, Outcome: "succeeded", Payload: `{"artifact_digest":"` + payload.ArtifactDigest + `","key_id":"` + envelope.KeyID + `"}`})
+	writeJSON(w, http.StatusCreated, map[string]any{"handoff": trainingHandoffResponse(handoff), "artifact": artifactResponse(handoff.RevisionID, artifact), "training_executed_by_infercrane": false})
+}
+
+func (a API) trainingArtifacts(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(externalWorkloadStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "training_handoff_unavailable", "training artifact handoff storage is not configured")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	rows, err := store.TrainingArtifactHandoffs(r.Context(), actor.TenantID, r.PathValue("name"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "training artifact handoffs could not be read")
+		return
+	}
+	data := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		data = append(data, trainingHandoffResponse(row))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": data, "execution_boundary": "external_training_system"})
+}
+
+func trainingHandoffResponse(row domain.TrainingArtifactHandoff) map[string]any {
+	return map[string]any{
+		"id": row.ID, "deployment_id": row.DeploymentID, "revision_id": row.RevisionID,
+		"model_artifact_id": row.ModelArtifactID, "provider": row.Provider, "external_run_id": row.ExternalRunID,
+		"repository": row.Repository, "immutable_revision": row.ImmutableRevision, "artifact_digest": row.ArtifactDigest,
+		"base_model_identity": row.BaseModelIdentity, "method": row.Method, "framework": row.Framework,
+		"framework_version": row.FrameworkVersion, "dataset_fingerprint": row.DatasetFingerprint,
+		"payload_digest": row.PayloadDigest, "algorithm": row.Algorithm, "key_id": row.KeyID, "created_at": row.CreatedAt,
+	}
+}
+
 func (a API) recordCacheObservation(w http.ResponseWriter, r *http.Request) {
 	store, ok := a.intelligence()
 	if !ok {
@@ -2940,8 +3165,9 @@ func (a API) createPrincipal(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 422, "validation_failed", err.Error())
 		return
 	}
+	cacheSynchronized := a.refreshCredentialCache(r.Context())
 	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "principal.create", ResourceType: "principal", ResourceName: principal.ID, Outcome: "succeeded"})
-	writeJSON(w, 201, map[string]any{"principal": map[string]any{"id": principal.ID, "name": principal.Name, "role": principal.Role, "kind": principal.Kind, "scopes": principal.Scopes, "tenant_id": principal.TenantID}, "credential": token})
+	writeJSON(w, 201, map[string]any{"principal": map[string]any{"id": principal.ID, "name": principal.Name, "role": principal.Role, "kind": principal.Kind, "scopes": principal.Scopes, "tenant_id": principal.TenantID}, "credential": token, "credential_cache_synchronized": cacheSynchronized})
 }
 
 func (a API) principals(w http.ResponseWriter, r *http.Request) {
@@ -2961,6 +3187,7 @@ func (a API) principals(w http.ResponseWriter, r *http.Request) {
 		data = append(data, map[string]any{
 			"id": principal.ID, "tenant_id": principal.TenantID, "name": principal.Name,
 			"role": principal.Role, "kind": principal.Kind, "scopes": principal.Scopes,
+			"endpoint_names": principal.EndpointNames, "expires_at": principal.ExpiresAt,
 			"disabled": principal.Disabled, "created_at": principal.CreatedAt,
 		})
 	}
@@ -2977,8 +3204,9 @@ func (a API) rotatePrincipal(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "internal", "credential rotation failed")
 		return
 	}
+	cacheSynchronized := a.refreshCredentialCache(r.Context())
 	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "principal.rotate", ResourceType: "principal", ResourceName: r.PathValue("id"), Outcome: "succeeded"})
-	writeJSON(w, 200, map[string]string{"credential": token})
+	writeJSON(w, 200, map[string]any{"credential": token, "credential_cache_synchronized": cacheSynchronized})
 }
 func (a API) revokePrincipal(w http.ResponseWriter, r *http.Request) {
 	actor := r.Context().Value(identityKey{}).(domain.Principal)
@@ -2989,6 +3217,7 @@ func (a API) revokePrincipal(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "internal", "principal revocation failed")
 		return
 	}
+	a.refreshCredentialCache(r.Context())
 	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "principal.revoke", ResourceType: "principal", ResourceName: r.PathValue("id"), Outcome: "succeeded"})
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -3665,6 +3894,10 @@ func (a API) auth(action authz.Action, next http.HandlerFunc) http.HandlerFunc {
 		}
 		if principal.ID == "" {
 			writeError(w, http.StatusUnauthorized, "unauthenticated", "valid bearer authentication is required")
+			return
+		}
+		if principal.Kind == "inference_token" {
+			writeError(w, http.StatusForbidden, "forbidden", "endpoint-scoped inference credentials cannot access the control-plane API")
 			return
 		}
 		if !authz.AllowedScoped(authz.Role(principal.Role), principal.Scopes, action) {

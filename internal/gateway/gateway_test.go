@@ -85,6 +85,43 @@ func TestCompletionRewritesAlias(t *testing.T) {
 	}
 }
 
+func TestEndpointRestrictedInferenceCredentialCannotEnumerateOrInvokeOtherAlias(t *testing.T) {
+	called := ""
+	client := &http.Client{Transport: roundTripper(func(r *http.Request) (*http.Response, error) {
+		called = r.URL.Host
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"choices":[]}`))}, nil
+	})}
+	directory := routes.New()
+	directory.Put(routes.Snapshot{TenantID: "team", DeploymentID: "allowed", Alias: "coder-production", UpstreamModel: "coder", RouterURL: "http://allowed"})
+	directory.Put(routes.Snapshot{TenantID: "team", DeploymentID: "other", Alias: "finance-production", UpstreamModel: "finance", RouterURL: "http://other"})
+	principal := domain.Principal{ID: "sandbox", TenantID: "team", Role: "viewer", Kind: "inference_token", Scopes: []string{"read"}, EndpointNames: []string{"coder-production"}}
+	handler := (&Gateway{Routes: directory, Authenticator: fakeAuthenticator{principal: principal}, Client: client}).Handler()
+
+	modelsRequest := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	modelsRequest.Header.Set("Authorization", "Bearer sandbox-token")
+	modelsResponse := httptest.NewRecorder()
+	handler.ServeHTTP(modelsResponse, modelsRequest)
+	if modelsResponse.Code != http.StatusOK || !strings.Contains(modelsResponse.Body.String(), "coder-production") || strings.Contains(modelsResponse.Body.String(), "finance-production") {
+		t.Fatalf("models status=%d body=%s", modelsResponse.Code, modelsResponse.Body.String())
+	}
+
+	denied := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"finance-production","messages":[]}`))
+	denied.Header.Set("Authorization", "Bearer sandbox-token")
+	deniedResponse := httptest.NewRecorder()
+	handler.ServeHTTP(deniedResponse, denied)
+	if deniedResponse.Code != http.StatusForbidden || called != "" {
+		t.Fatalf("denied status=%d called=%q body=%s", deniedResponse.Code, called, deniedResponse.Body.String())
+	}
+
+	allowed := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"coder-production","messages":[]}`))
+	allowed.Header.Set("Authorization", "Bearer sandbox-token")
+	allowedResponse := httptest.NewRecorder()
+	handler.ServeHTTP(allowedResponse, allowed)
+	if allowedResponse.Code != http.StatusOK || called != "allowed" {
+		t.Fatalf("allowed status=%d called=%q body=%s", allowedResponse.Code, called, allowedResponse.Body.String())
+	}
+}
+
 func TestContextPassportAffinityHitsAndFallsBackWithoutDatabaseLookup(t *testing.T) {
 	selected := make(chan string, 2)
 	client := &http.Client{Transport: roundTripper(func(r *http.Request) (*http.Response, error) {

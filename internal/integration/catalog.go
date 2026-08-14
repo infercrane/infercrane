@@ -232,6 +232,42 @@ func V15Catalog() (*Registry, error) {
 			return nil, err
 		}
 	}
+	for _, profile := range []CompositionProfile{
+		{
+			Adapter: "litellm", Kind: "gateway", ContractVersion: CompositionV1,
+			Ownership: "LiteLLM owns provider protocol translation and credentials; InferCrane owns stable endpoint identity, policy, evidence, and release semantics.",
+			Capabilities: []Capability{
+				{Name: "connect_existing", State: CapabilitySupported, Evidence: "go:test/internal/controlapi#TestDiscoverEndpointNamesLiteLLMOnlyFromEvidence"},
+				{Name: "provider_translation", State: CapabilitySupported, Detail: "executed by the separately operated LiteLLM deployment"},
+				{Name: "gateway_lifecycle", State: CapabilityUnsupported, Detail: "InferCrane does not install, fork, or upgrade LiteLLM"},
+			},
+			Qualification: []Qualification{{State: QualificationLocal, Environment: "hermetic-openai-compatible", Evidence: "go:test/internal/controlapi#TestDiscoverEndpointNamesLiteLLMOnlyFromEvidence"}, {State: QualificationDeferred, Environment: "real-litellm", Reason: "operator-managed gateway requires target-specific protocol qualification"}},
+		},
+		{
+			Adapter: "external-sandbox", Kind: "sandbox", ContractVersion: CompositionV1,
+			Ownership: "The sandbox provider owns isolation, commands, files, snapshots, and network policy; InferCrane owns only the external reference and expiring endpoint-scoped inference credential.",
+			Capabilities: []Capability{
+				{Name: "external_reference", State: CapabilitySupported, Evidence: "go:test/internal/store#TestSandboxReferenceIssuesEndpointRestrictedExpiringCredential"},
+				{Name: "endpoint_scoped_credential", State: CapabilitySupported, Evidence: "go:test/internal/gateway#TestEndpointRestrictedInferenceCredentialCannotEnumerateOrInvokeOtherAlias"},
+				{Name: "sandbox_execution", State: CapabilityUnsupported, Detail: "execution remains in E2B, Modal, Kubernetes, or another user-managed sandbox"},
+			},
+			Qualification: []Qualification{{State: QualificationLocal, Environment: "postgres-and-hermetic-gateway", Evidence: "go:test/internal/store#TestSandboxReferenceIssuesEndpointRestrictedExpiringCredential"}, {State: QualificationDeferred, Environment: "real-sandbox-provider", Reason: "provider secret injection and network policy remain provider-specific"}},
+		},
+		{
+			Adapter: "signed-artifact-handoff", Kind: "training", ContractVersion: CompositionV1,
+			Ownership: "The external platform owns training data, execution, checkpoints, and scheduling; InferCrane verifies immutable provenance and connects the artifact to release qualification.",
+			Capabilities: []Capability{
+				{Name: "signed_lineage", State: CapabilitySupported, Evidence: "go:test/internal/trainingartifact#TestSignedHandoffRoundTripAndTamperRejection"},
+				{Name: "immutable_revision_binding", State: CapabilitySupported, Evidence: "go:test/internal/store#TestTrainingHandoffIsRevisionBoundImmutableAndTenantSafe"},
+				{Name: "training_execution", State: CapabilityUnsupported, Detail: "training remains in MLflow-connected pipelines, SkyPilot, Kubeflow, or another external system"},
+			},
+			Qualification: []Qualification{{State: QualificationLocal, Environment: "signed-fixture-and-postgres", Evidence: "go:test/internal/store#TestTrainingHandoffIsRevisionBoundImmutableAndTenantSafe"}, {State: QualificationDeferred, Environment: "real-training-platform", Reason: "registry identity and checkpoint availability require system-specific qualification"}},
+		},
+	} {
+		if err = registry.RegisterComposition(profile); err != nil {
+			return nil, err
+		}
+	}
 	profiles := []ProviderProfile{
 		providerBoundary("aws-asg", "aws", ElasticMode, []Capability{
 			{Name: "launch_template_version", State: CapabilityUnknown, Detail: "requires an explicit immutable numbered launch-template version"},

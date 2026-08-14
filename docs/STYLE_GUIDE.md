@@ -75,6 +75,7 @@ Use Mermaid, the small `.ic-flow` system, or deterministic SVG for maintainable 
 ## Terminology and claims
 
 - Say **endpoint** for the stable application-facing identity; **deployment** for one lifecycle-managed serving realization; **replica** for one runtime worker intent; **target** for a registered existing worker.
+- Say **composition** when InferCrane records identity, access, or evidence for an externally owned gateway, sandbox, or training system. Do not call composition a managed integration unless InferCrane actually owns its lifecycle.
 - Say **control plane** for durable state and lifecycle; **data plane** for OpenAI-compatible request routing.
 - Lead with InferCrane's provider-neutral lifecycle and adapter architecture. Name RunPod or vLLM when documenting the first qualified implementation, setup, behavior, or limitation.
 - State the exact provider/runtime/mode and evidence tier rather than implying every registered

@@ -313,6 +313,36 @@ export class ControlApi {
     return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
   }
 
+  createSandboxReference(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = '/sandboxes/references';
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  listSandboxReferences(): Promise<ObjectList> {
+    const path = '/sandboxes/references';
+    return this.transport.request('GET', path) as Promise<ObjectList>;
+  }
+
+  rotateSandboxCredential(id: string): Promise<Record<string, JsonValue>> {
+    const path = `/sandboxes/references/${encodeURIComponent(id)}/credential/rotate`;
+    return this.transport.request('POST', path) as Promise<Record<string, JsonValue>>;
+  }
+
+  revokeSandboxReference(id: string): Promise<Record<string, JsonValue>> {
+    const path = `/sandboxes/references/${encodeURIComponent(id)}`;
+    return this.transport.request('DELETE', path) as Promise<Record<string, JsonValue>>;
+  }
+
+  attachTrainingArtifact(name: string, body: JsonValue, idempotencyKey: string): Promise<Record<string, JsonValue>> {
+    const path = `/deployments/${encodeURIComponent(name)}/training-artifacts`;
+    return this.transport.request('POST', path, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
+  }
+
+  listTrainingArtifacts(name: string): Promise<ObjectList> {
+    const path = `/deployments/${encodeURIComponent(name)}/training-artifacts`;
+    return this.transport.request('GET', path) as Promise<ObjectList>;
+  }
+
   createFinOpsReport(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
     const path = `/deployments/${encodeURIComponent(name)}/finops/reports`;
     return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;

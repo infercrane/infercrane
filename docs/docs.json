@@ -159,6 +159,9 @@
         "group": "INTEGRATE",
         "pages": [
           "integrations/overview",
+          "integrations/litellm",
+          "integrations/sandboxes",
+          "integrations/training-artifacts",
           "integrations/python",
           "integrations/typescript",
           "integrations/terraform",

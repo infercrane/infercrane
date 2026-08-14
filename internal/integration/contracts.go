@@ -17,6 +17,7 @@ import (
 const (
 	ProviderContractV1 = "infercrane.provider/v1"
 	RuntimeContractV1  = "infercrane.runtime/v1"
+	CompositionV1      = "infercrane.composition/v1"
 )
 
 type ComputeMode string
@@ -138,6 +139,35 @@ type RuntimeCompatibility struct {
 	Reason   string             `json:"reason,omitempty"`
 }
 
+// CompositionProfile describes a replaceable external system that composes
+// with InferCrane without becoming a provider, runtime, or lifecycle owner.
+type CompositionProfile struct {
+	Adapter         string          `json:"adapter"`
+	Kind            string          `json:"kind"`
+	ContractVersion string          `json:"contract_version"`
+	Ownership       string          `json:"ownership"`
+	Capabilities    []Capability    `json:"capabilities"`
+	Qualification   []Qualification `json:"qualification"`
+}
+
+func (p CompositionProfile) Validate() error {
+	if p.Adapter == "" || p.ContractVersion != CompositionV1 {
+		return errors.New("composition adapter and current contract version are required")
+	}
+	if p.Kind != "gateway" && p.Kind != "sandbox" && p.Kind != "training" {
+		return errors.New("composition kind must be gateway, sandbox, or training")
+	}
+	if p.Ownership == "" || len(p.Capabilities) == 0 || len(p.Qualification) == 0 {
+		return errors.New("composition ownership, capabilities, and qualification are required")
+	}
+	for _, capability := range p.Capabilities {
+		if capability.Name == "" || (capability.State != CapabilitySupported && capability.State != CapabilityUnsupported && capability.State != CapabilityUnknown) {
+			return errors.New("composition capability is invalid")
+		}
+	}
+	return nil
+}
+
 // ElasticProvider is the mutation boundary for one durable replica intent.
 // Implementations must use ExternalKey for replay-safe ensure/adoption.
 type ElasticProvider interface {
@@ -206,15 +236,18 @@ func (r RuntimeBackends) ForRuntime(name string) (RuntimeBackend, error) {
 type Registry struct {
 	providers     map[string]ProviderProfile
 	runtimes      map[string]RuntimeProfile
+	compositions  map[string]CompositionProfile
 	compatibility []RuntimeCompatibility
 }
 
 type Snapshot struct {
-	ProviderContract string                 `json:"provider_contract"`
-	RuntimeContract  string                 `json:"runtime_contract"`
-	Providers        []ProviderProfile      `json:"providers"`
-	Runtimes         []RuntimeProfile       `json:"runtimes"`
-	Compatibility    []RuntimeCompatibility `json:"compatibility"`
+	ProviderContract    string                 `json:"provider_contract"`
+	RuntimeContract     string                 `json:"runtime_contract"`
+	Providers           []ProviderProfile      `json:"providers"`
+	Runtimes            []RuntimeProfile       `json:"runtimes"`
+	Compatibility       []RuntimeCompatibility `json:"compatibility"`
+	CompositionContract string                 `json:"composition_contract"`
+	Compositions        []CompositionProfile   `json:"compositions"`
 }
 
 func (r *Registry) SetCompatibility(entries ...RuntimeCompatibility) error {
@@ -258,7 +291,7 @@ func containsMode(modes []ComputeMode, mode ComputeMode) bool {
 }
 
 func NewRegistry() *Registry {
-	return &Registry{providers: map[string]ProviderProfile{}, runtimes: map[string]RuntimeProfile{}}
+	return &Registry{providers: map[string]ProviderProfile{}, runtimes: map[string]RuntimeProfile{}, compositions: map[string]CompositionProfile{}}
 }
 
 func (r *Registry) RegisterProvider(profile ProviderProfile) error {
@@ -291,6 +324,21 @@ func (r *Registry) RegisterRuntime(profile RuntimeProfile) error {
 	return nil
 }
 
+func (r *Registry) RegisterComposition(profile CompositionProfile) error {
+	if r == nil {
+		return errors.New("integration registry is nil")
+	}
+	if err := profile.Validate(); err != nil {
+		return err
+	}
+	key := profile.Kind + "\x00" + profile.Adapter
+	if _, exists := r.compositions[key]; exists {
+		return fmt.Errorf("%s composition adapter %q is already registered", profile.Kind, profile.Adapter)
+	}
+	r.compositions[key] = profile
+	return nil
+}
+
 func (r *Registry) Provider(adapter string) (ProviderProfile, error) {
 	if r == nil {
 		return ProviderProfile{}, errors.New("integration registry is nil")
@@ -314,7 +362,7 @@ func (r *Registry) Runtime(name string) (RuntimeProfile, error) {
 }
 
 func (r *Registry) Snapshot() Snapshot {
-	out := Snapshot{ProviderContract: ProviderContractV1, RuntimeContract: RuntimeContractV1}
+	out := Snapshot{ProviderContract: ProviderContractV1, RuntimeContract: RuntimeContractV1, CompositionContract: CompositionV1}
 	if r == nil {
 		return out
 	}
@@ -324,9 +372,18 @@ func (r *Registry) Snapshot() Snapshot {
 	for _, profile := range r.runtimes {
 		out.Runtimes = append(out.Runtimes, profile)
 	}
+	for _, profile := range r.compositions {
+		out.Compositions = append(out.Compositions, profile)
+	}
 	out.Compatibility = append([]RuntimeCompatibility(nil), r.compatibility...)
 	sort.Slice(out.Providers, func(i, j int) bool { return out.Providers[i].Adapter < out.Providers[j].Adapter })
 	sort.Slice(out.Runtimes, func(i, j int) bool { return out.Runtimes[i].Runtime < out.Runtimes[j].Runtime })
+	sort.Slice(out.Compositions, func(i, j int) bool {
+		if out.Compositions[i].Kind != out.Compositions[j].Kind {
+			return out.Compositions[i].Kind < out.Compositions[j].Kind
+		}
+		return out.Compositions[i].Adapter < out.Compositions[j].Adapter
+	})
 	sort.Slice(out.Compatibility, func(i, j int) bool {
 		a, b := out.Compatibility[i], out.Compatibility[j]
 		if a.Runtime != b.Runtime {

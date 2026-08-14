@@ -50,13 +50,14 @@ InferCrane expands around one control loop rather than accumulating unrelated in
 3. **Observe:** request evidence, deterministic Doctor findings, alerts, cold starts, and cost.
 4. **Change safely:** immutable candidates, replay or benchmark evidence, Release Guard, and rollback.
 5. **Optimize:** artifact prewarming, capacity history, Inference Lab, and advisory recommendations.
-6. **Expand by adapters:** runtimes, clouds, external APIs, and future sandbox or training lineage stay
+6. **Expand by adapters:** runtimes, clouds, external APIs, sandbox access, and training lineage stay
    behind narrow contracts.
 
-Sandbox execution and training orchestration are not part of the current release. If added, InferCrane
-will track their identity, evidence, policy, and handoff while delegating isolation and training
-execution to qualified systems. Managed compute remains demand-gated because it adds billing, abuse,
-capacity, and support obligations—not just another adapter.
+Sandbox execution and training orchestration are not part of the current release. InferCrane now
+tracks external sandbox identity plus endpoint-scoped access and verifies signed training artifact
+handoffs while delegating isolation and training execution to qualified systems. Managed compute
+remains demand-gated because it adds billing, abuse, capacity, and support obligations—not just
+another adapter.
 
 ## Explicit non-goals
 

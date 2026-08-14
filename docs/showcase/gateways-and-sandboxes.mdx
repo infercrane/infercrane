@@ -91,8 +91,20 @@ OpenRouter billing qualification is still deferred; InferCrane does not fabricat
 
 ## Call InferCrane from an agent sandbox
 
-The sandbox is the application execution environment. Give it a scoped InferCrane credential and
-the stable endpoint, then use an ordinary OpenAI client inside the sandbox:
+The sandbox is the application execution environment. Create it with the sandbox provider, then
+issue a short-lived credential restricted to exactly one InferCrane endpoint:
+
+```bash
+infercrane sandbox connect \
+  --provider e2b \
+  --external-id sandbox-01JCGW \
+  --external-revision template-v3 \
+  --endpoint coder-production \
+  --ttl 30m
+```
+
+Inject the shown-once credential through the sandbox provider's secret mechanism, then use an
+ordinary OpenAI client inside the sandbox:
 
 <CodeGroup>
 ```python Python
@@ -127,20 +139,50 @@ console.log(response.output_text);
 ```
 </CodeGroup>
 
-Use the sandbox provider's secret injection and network allow-list controls. Prefer a tenant-scoped,
-least-privilege InferCrane principal and rotate or revoke it through InferCrane when the workload
-ends.
+Use the sandbox provider's secret injection and network allow-list controls. InferCrane's issued
+token cannot enumerate or invoke another endpoint alias and cannot access the control API.
+
+```bash
+infercrane sandbox list
+infercrane sandbox rotate SANDBOX_REFERENCE_ID
+infercrane sandbox revoke SANDBOX_REFERENCE_ID --yes
+```
 
 <Warning>
-InferCrane does not currently create, pause, snapshot, isolate, or delete sandboxes, and it does not
-record sandbox commands or files. E2B, Daytona, Modal, Kubernetes, and similar names describe a
-composition pattern, not qualified InferCrane sandbox adapters. Sandbox lifecycle management remains
-outside the current release scope.
+InferCrane does not create, pause, snapshot, isolate, or delete sandboxes, and it does not record
+sandbox commands, files, prompts, or outputs. E2B, Modal, Kubernetes, and similar names describe the
+external execution owner, not an InferCrane sandbox runtime. Real provider secret injection and
+isolation remain provider-specific qualification.
 </Warning>
+
+## Bring a trained artifact into the release path
+
+Keep training data and execution in MLflow, Kubeflow, SkyPilot, or your existing pipeline. Hand
+InferCrane a signed content-free artifact identity bound to one immutable candidate revision:
+
+```bash
+infercrane training keygen --file training-handoff.key
+
+infercrane training sign coder-runtime REVISION_ID \
+  --provider mlflow \
+  --run run-2026-08-14-42 \
+  --repository mlflow://registry/coder/42 \
+  --immutable-revision 42 \
+  --digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+  --key training-handoff.key \
+  --file coder-42.handoff.json
+
+infercrane training verify coder-42.handoff.json
+infercrane training attach coder-runtime coder-42.handoff.json
+```
+
+Attachment does not promote the revision. Continue through benchmark, Replay, semantic quality
+evidence, and Release Guard. See [Training artifact handoffs](/integrations/training-artifacts).
 
 ## Why the boundary is useful
 
 - Change inference providers without rebuilding the agent sandbox.
 - Change sandbox vendors without changing the logical model endpoint.
 - Keep model rollout evidence separate from tool-execution security policy.
+- Move externally trained artifacts into a guarded release without moving training data or keys.
 - Avoid turning InferCrane into a gateway fork, workflow engine, or sandbox isolation runtime.

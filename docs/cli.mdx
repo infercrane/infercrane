@@ -278,8 +278,50 @@ infercrane integrations
 infercrane integrations --output json
 ```
 
-Displays registered provider/runtime capabilities, evidence state, and the exact qualified
-runtime/provider/compute-mode combinations. Registration alone never implies production support.
+Displays registered provider, runtime, and external composition capabilities, evidence state, and
+the exact qualified runtime/provider/compute-mode combinations. Registration alone never implies
+production support.
+
+### `sandbox`
+
+Compose an externally operated sandbox with one stable inference endpoint:
+
+```bash
+infercrane sandbox connect \
+  --provider e2b \
+  --external-id sandbox-01JCGW \
+  --external-revision template-v3 \
+  --endpoint coder-production \
+  --ttl 30m
+
+infercrane sandbox list --output json
+infercrane sandbox rotate SANDBOX_REFERENCE_ID --output json
+infercrane sandbox revoke SANDBOX_REFERENCE_ID --yes
+```
+
+`connect` and `rotate` reveal a credential once. It expires within 24 hours, can invoke only the
+selected endpoint alias, and cannot use control-plane routes. `revoke` disables InferCrane access
+without mutating the external sandbox. See [External agent sandboxes](/integrations/sandboxes).
+
+### `training`
+
+Verify a signed, content-free artifact handoff from an external training system:
+
+```bash
+infercrane training keygen --file training-handoff.key
+infercrane training sign DEPLOYMENT REVISION_ID \
+  --provider mlflow --run RUN_ID \
+  --repository mlflow://registry/model/VERSION \
+  --immutable-revision VERSION --digest sha256:DIGEST \
+  --key training-handoff.key --file artifact.handoff.json
+infercrane training verify artifact.handoff.json
+infercrane training attach DEPLOYMENT artifact.handoff.json
+infercrane training list DEPLOYMENT --output json
+```
+
+The private signing key remains local. Attachment binds immutable identity to one revision but does
+not promote it or claim that InferCrane executed training. See
+[Training artifact handoffs](/integrations/training-artifacts).
 
 ## Send a request
 
@@ -414,7 +456,9 @@ Supported strategies are `round-robin`, `consistent-hash`, `power-of-two`, and `
 | `operation watch ID` | Resume following a durable operation after disconnect or from another terminal |
 | `operation cancel ID` | Request cooperative cancellation |
 | `orphans` | List unmanaged provisioned resources visible to the control plane |
-| `integrations` | Inspect registered provider/runtime capabilities and qualification state |
+| `integrations` | Inspect provider, runtime, and external composition capabilities and qualification state |
+| `sandbox connect/list/rotate/revoke` | Manage only endpoint-scoped access for externally owned sandboxes |
+| `training keygen/sign/verify/attach/list` | Verify and bind signed external training artifact lineage |
 
 ```bash
 infercrane status qwen-prod --watch

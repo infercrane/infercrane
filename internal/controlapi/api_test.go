@@ -21,6 +21,7 @@ import (
 	"github.com/infercrane/infercrane/internal/passport"
 	"github.com/infercrane/infercrane/internal/qualityevidence"
 	"github.com/infercrane/infercrane/internal/support"
+	"github.com/infercrane/infercrane/internal/trainingartifact"
 )
 
 type fakeStore struct {
@@ -43,6 +44,8 @@ type fakeStore struct {
 	operations      []domain.Operation
 	principals      []domain.Principal
 	consoleMembers  []domain.ConsoleIdentity
+	sandboxRefs     []domain.SandboxReference
+	trainingRows    []domain.TrainingArtifactHandoff
 }
 
 type fakeMembershipStore struct {
@@ -895,6 +898,29 @@ func (f *fakeStore) ConsoleIdentitiesForTenant(context.Context, string) ([]domai
 func (f *fakeStore) PrincipalsForTenant(context.Context, string) ([]domain.Principal, error) {
 	return f.principals, f.err
 }
+func (f *fakeStore) CreateSandboxReference(_ context.Context, tenant string, row domain.SandboxReference, ttl time.Duration) (domain.SandboxReference, string, error) {
+	row.ID, row.TenantID, row.PrincipalID, row.Status = "sandbox-ref", tenant, "sandbox-principal", "referenced"
+	row.CreatedAt, row.UpdatedAt, row.ExpiresAt = time.Now().UTC(), time.Now().UTC(), time.Now().UTC().Add(ttl)
+	f.sandboxRefs = append([]domain.SandboxReference{row}, f.sandboxRefs...)
+	return row, "ic_sandbox_once", f.err
+}
+func (f *fakeStore) SandboxReferences(context.Context, string) ([]domain.SandboxReference, error) {
+	return f.sandboxRefs, f.err
+}
+func (f *fakeStore) RevokeSandboxReference(context.Context, string, string) error { return f.err }
+func (f *fakeStore) RotateSandboxCredential(context.Context, string, string) (string, error) {
+	return "ic_sandbox_rotated", f.err
+}
+func (f *fakeStore) AttachTrainingArtifactHandoff(_ context.Context, tenant, _ string, row domain.TrainingArtifactHandoff, artifact domain.ModelArtifact) (domain.TrainingArtifactHandoff, domain.ModelArtifact, error) {
+	row.ID, row.TenantID, row.DeploymentID, row.ModelArtifactID = "handoff", tenant, "deployment", "artifact"
+	row.CreatedAt = time.Now().UTC()
+	artifact.ID, artifact.TenantID = "artifact", tenant
+	f.trainingRows = append([]domain.TrainingArtifactHandoff{row}, f.trainingRows...)
+	return row, artifact, f.err
+}
+func (f *fakeStore) TrainingArtifactHandoffs(context.Context, string, string) ([]domain.TrainingArtifactHandoff, error) {
+	return f.trainingRows, f.err
+}
 func (f *fakeStore) CreateSecretReference(_ context.Context, tenant, name, resolver, reference string) (domain.SecretReference, error) {
 	return domain.SecretReference{ID: "secret", TenantID: tenant, Name: name, Resolver: resolver, Reference: reference}, f.err
 }
@@ -1630,6 +1656,80 @@ func TestControlPlaneMembershipIsAuthenticatedAndInspectable(t *testing.T) {
 	(API{Store: store, APIKey: "secret"}).Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"id":"node-a"`) || !strings.Contains(response.Body.String(), `"protocol_max":2`) {
 		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestSandboxCompositionIssuesOneTimeScopedCredentialWithoutExternalMutation(t *testing.T) {
+	store := &fakeStore{}
+	refreshes := 0
+	refresh := func(context.Context) error { refreshes++; return nil }
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/sandboxes/references", strings.NewReader(`{"provider":"e2b","external_id":"sandbox-42","endpoint":"coder-production","ttl_seconds":1800,"metadata":{"team":"agents"}}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret", CredentialRefresh: refresh}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"credential":"ic_sandbox_once"`) || !strings.Contains(response.Body.String(), `"credential_cache_synchronized":true`) || !strings.Contains(response.Body.String(), `"external_resource_mutated":false`) || strings.Contains(response.Body.String(), "sandbox-principal") {
+		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/sandboxes/references/sandbox-ref/credential/rotate", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret", CredentialRefresh: refresh}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"credential_cache_synchronized":true`) {
+		t.Fatalf("rotate response=%d %s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodDelete, "/api/v1/sandboxes/references/sandbox-ref", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret", CredentialRefresh: refresh}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"credential_revoked":true`) || !strings.Contains(response.Body.String(), `"external_resource_mutated":false`) {
+		t.Fatalf("revoke response=%d %s", response.Code, response.Body.String())
+	}
+	if refreshes != 3 {
+		t.Fatalf("credential cache refreshes=%d, want 3", refreshes)
+	}
+}
+
+func TestInferenceTokenCannotUseControlAPI(t *testing.T) {
+	store := &fakeStore{principal: domain.Principal{ID: "sandbox", TenantID: "tenant", Kind: "inference_token", Role: "viewer", Scopes: []string{"read"}, EndpointNames: []string{"coder-production"}}}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/deployments", nil)
+	request.Header.Set("Authorization", "Bearer sandbox-token")
+	response := httptest.NewRecorder()
+	(API{Store: store, Authenticator: store}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "endpoint-scoped inference credentials") {
+		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestSignedTrainingHandoffAttachesContentFreeRevisionEvidence(t *testing.T) {
+	store := &fakeStore{}
+	_, key, err := passport.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := trainingartifact.Payload{Schema: trainingartifact.Schema, Deployment: "coder", RevisionID: "rev-2", Provider: "mlflow", ExternalRunID: "run-42", Repository: "mlflow://models/coder/42", ImmutableRevision: "42", ArtifactDigest: "sha256:" + strings.Repeat("a", 64), DatasetFingerprint: "sha256:" + strings.Repeat("b", 64), ProducedAt: time.Now().UTC()}
+	envelope, err := passport.Sign(payload, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(envelope)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments/coder/training-artifacts", strings.NewReader(string(body)))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret"}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"training_executed_by_infercrane":false`) || !strings.Contains(response.Body.String(), `"external_run_id":"run-42"`) || strings.Contains(response.Body.String(), `"signature"`) || strings.Contains(response.Body.String(), `"public_key"`) {
+		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+
+	tampered := envelope
+	tampered.PayloadJSON = strings.Replace(tampered.PayloadJSON, "run-42", "run-43", 1)
+	body, _ = json.Marshal(tampered)
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/deployments/coder/training-artifacts", strings.NewReader(string(body)))
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret"}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), "invalid_training_handoff") {
+		t.Fatalf("tampered response=%d %s", response.Code, response.Body.String())
 	}
 }
 

@@ -132,6 +132,9 @@ func (g *Gateway) models(w http.ResponseWriter, r *http.Request) {
 	data := make([]map[string]any, 0)
 	principal := r.Context().Value(principalKey{}).(domain.Principal)
 	for _, route := range g.Routes.ListForTenant(principal.TenantID) {
+		if !principalAllowsEndpoint(principal, route.Alias) {
+			continue
+		}
 		owner := "deployment"
 		if route.EndpointID != "" {
 			owner = "endpoint"
@@ -172,6 +175,10 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 		return
 	}
 	principal := r.Context().Value(principalKey{}).(domain.Principal)
+	if !principalAllowsEndpoint(principal, alias) {
+		openAIError(w, "API key is not allowed to invoke this model alias", http.StatusForbidden, "permission_error")
+		return
+	}
 	replay := g.replayShape(payload, r.Header)
 	passportID := strings.TrimSpace(r.Header.Get("X-InferCrane-Context-Passport"))
 	preferredBinding, preferredTarget := "", ""
@@ -350,6 +357,18 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 	if g.Logger != nil {
 		g.Logger.Info("inference request", "request_id", requestID, "traceparent", traceParent, "tenant_id", principal.TenantID, "deployment_id", route.DeploymentID, "status", resp.StatusCode, "duration_ms", float64(time.Since(started).Microseconds())/1000)
 	}
+}
+
+func principalAllowsEndpoint(principal domain.Principal, alias string) bool {
+	if len(principal.EndpointNames) == 0 {
+		return true
+	}
+	for _, allowed := range principal.EndpointNames {
+		if subtle.ConstantTimeCompare([]byte(allowed), []byte(alias)) == 1 {
+			return true
+		}
+	}
+	return false
 }
 
 func integerField(payload map[string]any, name string) int {

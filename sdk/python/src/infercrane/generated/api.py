@@ -259,6 +259,30 @@ class ControlAPI:
         path = f"/artifacts/{quote(id, safe='')}/cache"
         return cast(dict[str, Any], self._transport.request("GET", path))
 
+    def create_sandbox_reference(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = "/sandboxes/references"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
+    def list_sandbox_references(self) -> ObjectList:
+        path = "/sandboxes/references"
+        return cast(ObjectList, self._transport.request("GET", path))
+
+    def rotate_sandbox_credential(self, id: str) -> dict[str, Any]:
+        path = f"/sandboxes/references/{quote(id, safe='')}/credential/rotate"
+        return cast(dict[str, Any], self._transport.request("POST", path))
+
+    def revoke_sandbox_reference(self, id: str) -> dict[str, Any]:
+        path = f"/sandboxes/references/{quote(id, safe='')}"
+        return cast(dict[str, Any], self._transport.request("DELETE", path))
+
+    def attach_training_artifact(self, name: str, *, body: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
+        path = f"/deployments/{quote(name, safe='')}/training-artifacts"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body, idempotency_key=idempotency_key))
+
+    def list_training_artifacts(self, name: str) -> ObjectList:
+        path = f"/deployments/{quote(name, safe='')}/training-artifacts"
+        return cast(ObjectList, self._transport.request("GET", path))
+
     def create_fin_ops_report(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
         path = f"/deployments/{quote(name, safe='')}/finops/reports"
         return cast(dict[str, Any], self._transport.request("POST", path, body=body))

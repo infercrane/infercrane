@@ -168,6 +168,9 @@ func runLegacy(ctx context.Context, args []string) error {
 	case "evaluation":
 		return evaluationCommand(ctx, args[1:])
 	}
+	if args[0] == "training" && len(args) > 1 && (args[1] == "keygen" || args[1] == "sign" || args[1] == "verify") {
+		return trainingCommand(ctx, config.Config{}, args[1:])
+	}
 	if args[0] == "passport" && len(args) > 1 && (args[1] == "keygen" || args[1] == "verify") {
 		return passportCommand(ctx, config.Config{}, args[1:])
 	}
@@ -273,6 +276,10 @@ func runLegacy(ctx context.Context, args []string) error {
 		return capacityCommand(ctx, cfg, args[1:])
 	case "artifact":
 		return artifactCommand(ctx, cfg, args[1:])
+	case "sandbox":
+		return sandboxCommand(ctx, cfg, args[1:])
+	case "training":
+		return trainingCommand(ctx, cfg, args[1:])
 	case "finops":
 		return finOpsCommand(ctx, cfg, args[1:])
 	case "autopilot":
@@ -2214,7 +2221,7 @@ func integrationsCommand(ctx context.Context, cfg config.Config, args []string) 
 		return strings.Join(states, ",")
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintf(w, "Provider contract\t%s\nRuntime contract\t%s\n\n", response.Data.ProviderContract, response.Data.RuntimeContract)
+	fmt.Fprintf(w, "Provider contract\t%s\nRuntime contract\t%s\nComposition contract\t%s\n\n", response.Data.ProviderContract, response.Data.RuntimeContract, response.Data.CompositionContract)
 	fmt.Fprintln(w, "TYPE\tADAPTER\tOWNER\tMODES/PROTOCOL\tQUALIFICATION")
 	for _, provider := range response.Data.Providers {
 		modes := make([]string, len(provider.Modes))
@@ -2225,6 +2232,9 @@ func integrationsCommand(ctx context.Context, cfg config.Config, args []string) 
 	}
 	for _, runtime := range response.Data.Runtimes {
 		fmt.Fprintf(w, "runtime\t%s\t%s\t%s\t%s\n", runtime.Runtime, runtime.EngineVersion, runtime.Protocol, qualified(runtime.Qualification))
+	}
+	for _, composition := range response.Data.Compositions {
+		fmt.Fprintf(w, "%s\t%s\texternal\tcomposition\t%s\n", composition.Kind, composition.Adapter, qualified(composition.Qualification))
 	}
 	if len(response.Data.Compatibility) > 0 {
 		fmt.Fprintln(w, "\nRUNTIME\tCLOUD\tMODE\tEVIDENCE STATE")
@@ -3595,7 +3605,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		}
 		asyncService = &asyncinference.Service{Store: s, Cipher: cipher, KeyReference: cfg.AsyncEncryptionKeyReference, GatewayURL: cfg.ControlURL, APIKey: cfg.APIKey, Owner: cfg.InstanceID + ":async", Lease: time.Minute, Secrets: secrets.Environment{}}
 	}
-	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ProductVersion: version}
+	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ProductVersion: version}
 	// Assign the optional service only when it exists. A nil *Service stored in
 	// an interface is non-nil and would otherwise turn the intended capability
 	// error into a panic when async encryption is not configured.

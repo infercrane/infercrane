@@ -26,3 +26,8 @@ integration has been independently qualified in a later milestone.
 
 OpenRouter and generic OpenAI-compatible APIs are remote integrations, not linked dependencies or
 resold services. Their terms, data handling, and charges remain between the operator and provider.
+LiteLLM is connected through its operator-managed OpenAI-compatible endpoint; InferCrane does not
+fork, embed, install, or redistribute it. E2B, Modal, Kubernetes sandbox implementations, MLflow,
+Kubeflow, SkyPilot training pipelines, and similar systems are external composition owners rather
+than InferCrane dependencies. Their licenses, credentials, isolation, data handling, execution, and
+charges remain with the operator and the chosen system.

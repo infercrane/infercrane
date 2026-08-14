@@ -55,6 +55,25 @@ infercrane connect https://vllm.internal/v1 --as coder-production
 infercrane doctor coder-production
 ```
 
+Keep specialist systems in their lane while InferCrane owns the production inference decision:
+
+```bash
+# Keep LiteLLM provider translation and credentials.
+infercrane connect https://litellm.internal/v1 \
+  --as support-production --type litellm
+
+# Give an external agent sandbox short-lived access to one endpoint.
+infercrane sandbox connect --provider e2b --external-id sandbox-01JCGW \
+  --endpoint coder-production --ttl 30m
+
+# Verify externally trained artifact lineage before release qualification.
+infercrane training attach coder-runtime coder-42.handoff.json
+```
+
+InferCrane does not fork LiteLLM, execute sandbox commands, or schedule training. It connects those
+systems through replaceable, versioned composition contracts and stores no sandbox commands, files,
+prompts, outputs, or training data.
+
 See the [production showcase](https://infercrane.mintlify.site/showcase) for model-to-endpoint deployment,
 existing-workload adoption, LiteLLM and OpenRouter composition, agent sandbox integration, safe
 rollouts, and cold-start evidence.
@@ -83,8 +102,9 @@ layers are provider-neutral; adapters declare versioned capabilities and indepen
 evidence. The candidate includes durable lifecycle/autoscaling, governed external fallback, AWS EC2
 BYOC, RunPod elastic and native Serverless, namespaced Kubernetes/KServe, vLLM, SGLang, immutable
 custom OCI workloads, generated SDKs, Terraform, GitHub delivery checks, a terminal workspace, an
-embedded evidence dashboard, Release Guard V2, deterministic recommendations, and signed Inference
-Passports.
+authenticated private-preview operations console, LiteLLM composition, endpoint-scoped external
+sandbox access, signed training artifact lineage, Release Guard V2, deterministic recommendations,
+and signed Inference Passports.
 
 Local race, PostgreSQL, fault-injection, Docker, Kind, package, migration, security, and
 documentation qualification is automated. Registration is not real-provider proof: RunPod, AWS,
@@ -344,6 +364,9 @@ and checked by CI.
 - [TypeScript SDK](docs/integrations/typescript.mdx)
 - [Terraform provider](docs/integrations/terraform.mdx)
 - [GitHub Actions](docs/integrations/github-actions.mdx)
+- [LiteLLM gateway](docs/integrations/litellm.mdx)
+- [External agent sandboxes](docs/integrations/sandboxes.mdx)
+- [Training artifact handoffs](docs/integrations/training-artifacts.mdx)
 - [Production operations](docs/production.md)
 - [Stage 1 existing-worker guide](docs/stage1-poc.md)
 - [Stage 2 SkyPilot guide](docs/stage2-skypilot.md)

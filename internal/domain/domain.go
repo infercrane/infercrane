@@ -74,6 +74,25 @@ type ModelArtifact struct {
 	ResolvedAt                                          time.Time
 }
 
+// SandboxReference records composition with an externally owned execution
+// sandbox. InferCrane never stores commands, files, prompts, or outputs here.
+type SandboxReference struct {
+	ID, TenantID, Provider, ExternalID, ExternalRevision string
+	EndpointName, PrincipalID, Status, MetadataJSON      string
+	ExpiresAt, CreatedAt, UpdatedAt                      time.Time
+}
+
+// TrainingArtifactHandoff binds signed, content-free external training
+// provenance to the immutable model artifact of one deployment revision.
+type TrainingArtifactHandoff struct {
+	ID, TenantID, DeploymentID, RevisionID, ModelArtifactID string
+	Provider, ExternalRunID, Repository, ImmutableRevision  string
+	ArtifactDigest, BaseModelIdentity, Method               string
+	Framework, FrameworkVersion, DatasetFingerprint         string
+	PayloadDigest, Signature, PublicKey, Algorithm, KeyID   string
+	CreatedAt                                               time.Time
+}
+
 type ResolvedDeployment struct {
 	Deployment Deployment
 	Targets    []Target
@@ -697,8 +716,10 @@ type AuditEvent struct {
 type Principal struct {
 	ID, TenantID, Name, Role, Kind string
 	Scopes                         []string
+	EndpointNames                  []string
 	Disabled                       bool
 	CreatedAt                      time.Time
+	ExpiresAt                      *time.Time
 }
 type CredentialRecord struct {
 	Hash      string

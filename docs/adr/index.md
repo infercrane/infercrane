@@ -42,6 +42,7 @@ or link corrections. A changed decision gets a new ADR whose status supersedes t
 | [0030](/adr/0030-separate-web-products) | Accepted | Separate the public site and authenticated console from the inference gateway release artifact. |
 | [0031](/adr/0031-managed-external-endpoint-bindings) | Accepted | Make authenticated external APIs governed, hard-budgeted endpoint bindings. |
 | [0032](/adr/0032-sandbox-and-training-integration-boundaries) | Accepted | Keep sandbox isolation and training schedulers external while importing identity, evidence, and immutable artifact handoffs. |
+| [0033](/adr/0033-replaceable-external-composition-contracts) | Accepted | Make LiteLLM, sandbox access, and signed training lineage executable through a versioned composition contract while leaving execution external. |
 
 Use the next sequential number. Include context, decision, consequences, alternatives, and
 verification. Link affected feature documents.
