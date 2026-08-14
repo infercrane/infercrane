@@ -37,6 +37,10 @@ type fakeStore struct {
 	sloPolicy       domain.SLOPolicy
 	recommendations []domain.InferenceRecommendation
 	capacity        domain.CapacityEvidence
+	consoleIdentity domain.ConsoleIdentity
+	operations      []domain.Operation
+	principals      []domain.Principal
+	consoleMembers  []domain.ConsoleIdentity
 }
 
 type fakeMembershipStore struct {
@@ -537,6 +541,9 @@ func (f *fakeStore) ActiveOperationForResource(context.Context, string, string, 
 func (f *fakeStore) Operation(context.Context, string) (domain.Operation, error) {
 	return f.operation, f.err
 }
+func (f *fakeStore) OperationsForTenant(context.Context, string, time.Time, int) ([]domain.Operation, error) {
+	return f.operations, f.err
+}
 func (f *fakeStore) RequestOperationCancel(context.Context, string) error {
 	f.cancelled = true
 	return f.err
@@ -642,6 +649,16 @@ func (f *fakeStore) RotatePrincipalForTenant(context.Context, string, string) (s
 }
 func (f *fakeStore) RevokePrincipalForTenant(context.Context, string, string) error { return f.err }
 func (f *fakeStore) CreateTenant(context.Context, string, string) error             { return f.err }
+func (f *fakeStore) ProvisionConsoleIdentity(_ context.Context, tenant string, request domain.ConsoleIdentityProvisioning) (domain.ConsoleIdentity, error) {
+	f.consoleIdentity = domain.ConsoleIdentity{UserID: "user-internal", TenantID: tenant, DisplayName: request.DisplayName, Role: request.Role, Scopes: request.Scopes, Access: request.Access}
+	return f.consoleIdentity, f.err
+}
+func (f *fakeStore) ConsoleIdentitiesForTenant(context.Context, string) ([]domain.ConsoleIdentity, error) {
+	return f.consoleMembers, f.err
+}
+func (f *fakeStore) PrincipalsForTenant(context.Context, string) ([]domain.Principal, error) {
+	return f.principals, f.err
+}
 func (f *fakeStore) CreateSecretReference(_ context.Context, tenant, name, resolver, reference string) (domain.SecretReference, error) {
 	return domain.SecretReference{ID: "secret", TenantID: tenant, Name: name, Resolver: resolver, Reference: reference}, f.err
 }
@@ -805,6 +822,55 @@ func TestWhoAmIReturnsAuthenticatedIdentity(t *testing.T) {
 	(API{Store: store, APIKey: "secret"}).Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"name":"bootstrap"`) || !strings.Contains(response.Body.String(), `"role":"admin"`) {
 		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestConsoleSessionUsesAuthenticatedTenantAndNeverBrowserTenantInput(t *testing.T) {
+	store := &fakeStore{principal: domain.Principal{ID: "human-1", TenantID: "tenant-a", Name: "Ada", Role: "viewer", Kind: "human", Scopes: []string{"read"}}}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/console/session?tenant_id=tenant-b", nil)
+	request.Header.Set("Authorization", "Bearer hosted-session")
+	response := httptest.NewRecorder()
+	(API{Store: store, Authenticator: store}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"tenant_id":"tenant-a"`) || strings.Contains(response.Body.String(), `tenant-b`) || !strings.Contains(response.Body.String(), `"web_console_access"`) {
+		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestConsoleAccessProvisioningIsAdminOnlyAndTenantScoped(t *testing.T) {
+	body := `{"provider":"clerk","external_user_id":"user_external","external_organization_id":"org_external","display_name":"Ada","role":"operator","scopes":["read","deploy"],"access":true}`
+	store := &fakeStore{}
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/console/access", strings.NewReader(body))
+	request.Header.Set("Authorization", "Bearer bootstrap")
+	response := httptest.NewRecorder()
+	(API{Store: store, APIKey: "bootstrap"}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || store.consoleIdentity.TenantID != "global" || !store.consoleIdentity.Access {
+		t.Fatalf("identity=%#v response=%d %s", store.consoleIdentity, response.Code, response.Body.String())
+	}
+
+	store.principal = domain.Principal{ID: "viewer", TenantID: "tenant-a", Name: "viewer", Role: "viewer", Scopes: []string{"read"}}
+	request = httptest.NewRequest(http.MethodPut, "/api/v1/console/access", strings.NewReader(body))
+	request.Header.Set("Authorization", "Bearer viewer-token")
+	response = httptest.NewRecorder()
+	(API{Store: store, Authenticator: store}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("viewer response=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestConsoleAdministrativeListsAreTenantScopedAndCredentialSafe(t *testing.T) {
+	store := &fakeStore{
+		operations:     []domain.Operation{{ID: "op-1", TenantID: "global", Kind: "converge", Status: "running"}},
+		principals:     []domain.Principal{{ID: "key-1", TenantID: "global", Name: "ci", Role: "operator", Kind: "service_account", Scopes: []string{"read", "deploy"}}},
+		consoleMembers: []domain.ConsoleIdentity{{UserID: "user-1", TenantID: "global", DisplayName: "Ada", Role: "admin", Scopes: []string{"read"}, Access: true}},
+	}
+	for _, endpoint := range []string{"/api/v1/operations", "/api/v1/principals", "/api/v1/console/access"} {
+		request := httptest.NewRequest(http.MethodGet, endpoint, nil)
+		request.Header.Set("Authorization", "Bearer secret")
+		response := httptest.NewRecorder()
+		(API{Store: store, APIKey: "secret"}).Handler().ServeHTTP(response, request)
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"data"`) || strings.Contains(response.Body.String(), "credential_hash") {
+			t.Fatalf("endpoint=%s response=%d %s", endpoint, response.Code, response.Body.String())
+		}
 	}
 }
 

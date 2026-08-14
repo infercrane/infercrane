@@ -113,14 +113,14 @@ is explicitly marked as fixture evidence; it does not claim GPU or provider qual
     directly to PostgreSQL.
   </Step>
 
-  <Step title="Open the operations view">
+  <Step title="Open the terminal operations view">
     ```bash
-    docker compose exec infercrane infercrane dashboard
+    docker compose exec infercrane infercrane ui
     ```
 
-    Open [http://127.0.0.1:18000/dashboard/](http://127.0.0.1:18000/dashboard/) and use the local key
-    `infercrane`. The browser keeps it in the current tab only. You can also run `infercrane ui` in an
-    interactive terminal.
+    The terminal workspace reads the same durable control API and can be closed without cancelling
+    operations. The separately released browser console is currently in private preview; see
+    [Operations console](/features/dashboard) for the local self-hosted boundary.
   </Step>
 
   <Step title="Stop the stack">

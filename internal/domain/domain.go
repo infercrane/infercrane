@@ -602,6 +602,29 @@ type CredentialRecord struct {
 	Principal Principal
 }
 
+type ExternalIdentity struct {
+	Provider               string `json:"provider"`
+	ExternalUserID         string `json:"external_user_id"`
+	ExternalOrganizationID string `json:"external_organization_id"`
+}
+
+type ConsoleIdentityProvisioning struct {
+	ExternalIdentity
+	DisplayName string   `json:"display_name"`
+	Role        string   `json:"role"`
+	Scopes      []string `json:"scopes,omitempty"`
+	Access      bool     `json:"access"`
+}
+
+type ConsoleIdentity struct {
+	UserID      string   `json:"user_id"`
+	TenantID    string   `json:"tenant_id"`
+	DisplayName string   `json:"display_name"`
+	Role        string   `json:"role"`
+	Scopes      []string `json:"scopes"`
+	Access      bool     `json:"access"`
+}
+
 type SecretReference struct {
 	ID        string    `json:"id"`
 	TenantID  string    `json:"tenant_id"`

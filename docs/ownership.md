@@ -13,7 +13,7 @@ Ownership is expressed by responsibility until public repository teams and handl
 | Fleet and inference decision policy | `internal/autoscale`, `internal/capacity`, `internal/decision`, `internal/overflow`, `internal/authz`, `internal/pricing` | Control-plane maintainer |
 | Governed external capacity and secret resolution | `internal/external`, `internal/secrets`, `internal/store/external_policies.go`, `internal/store/secrets.go` | Security and control-plane maintainers |
 | API contract, SDKs and delivery automation | `internal/apicontract`, `internal/controlclient`, `api`, `sdk`, `integrations/terraform`, `actions/infercrane` | Developer experience and control-plane maintainers |
-| Embedded operations dashboard | `internal/dashboard` | Developer experience and security maintainers |
+| Web console API and hosted identity boundary | `internal/authn`, `internal/store/console_identity.go`, `internal/controlapi` | Developer experience and security maintainers |
 | Release and operations | `Dockerfile`, `compose.yaml`, `deploy`, `docs/production.md` | Operations maintainer |
 | Engineering governance | `AGENTS.md`, `CLAUDE.md`, `docs`, `tools`, `.github` | Project maintainer |
 

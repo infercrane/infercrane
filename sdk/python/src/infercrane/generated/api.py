@@ -19,6 +19,10 @@ class ControlAPI:
         path = f"/operations/{quote(id, safe='')}"
         return cast(OperationData, self._transport.request("GET", path))
 
+    def list_operations(self) -> ObjectList:
+        path = "/operations"
+        return cast(ObjectList, self._transport.request("GET", path))
+
     def get_doctor(self) -> dict[str, Any]:
         path = "/doctor"
         return cast(dict[str, Any], self._transport.request("GET", path))
@@ -26,6 +30,18 @@ class ControlAPI:
     def get_current_principal(self) -> dict[str, Any]:
         path = "/whoami"
         return cast(dict[str, Any], self._transport.request("GET", path))
+
+    def get_console_session(self) -> dict[str, Any]:
+        path = "/console/session"
+        return cast(dict[str, Any], self._transport.request("GET", path))
+
+    def configure_console_access(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = "/console/access"
+        return cast(dict[str, Any], self._transport.request("PUT", path, body=body))
+
+    def list_console_access(self) -> ObjectList:
+        path = "/console/access"
+        return cast(ObjectList, self._transport.request("GET", path))
 
     def list_integrations(self) -> dict[str, Any]:
         path = "/integrations"
@@ -370,6 +386,10 @@ class ControlAPI:
     def create_principal(self, *, body: dict[str, Any]) -> dict[str, Any]:
         path = "/principals"
         return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
+    def list_principals(self) -> ObjectList:
+        path = "/principals"
+        return cast(ObjectList, self._transport.request("GET", path))
 
     def rotate_principal(self, id: str) -> dict[str, Any]:
         path = f"/principals/{quote(id, safe='')}/rotate"

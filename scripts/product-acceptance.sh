@@ -115,7 +115,6 @@ first_value() {
   cli events qwen-prod --output json | jq -e '.data | type == "array"' >/dev/null || return
   cli inspect qwen-prod --output json | jq -e '.deployment.name == "qwen-prod"' >/dev/null || return
   cli integrations --output json | jq -e '.data.provider_contract != null and .data.runtime_contract != null' >/dev/null || return
-  cli dashboard --output json | jq -e '.url | endswith("/dashboard/")' >/dev/null || return
   cli explain qwen-prod --output json | jq -e '.deployment == "qwen-prod"' >/dev/null || return
   cli explain scaling qwen-prod --output json | jq -e '.data | type == "array"' >/dev/null || return
   cli explain rollout qwen-prod --output json | jq -e '.deployment == "qwen-prod"' >/dev/null || return

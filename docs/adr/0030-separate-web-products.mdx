@@ -1,0 +1,54 @@
+---
+title: "ADR 0030: Separate public and authenticated web products"
+description: Keep web release and identity boundaries independent from the inference gateway while preserving one control API.
+---
+
+## Status
+
+Accepted — 2026-08-14. Supersedes [ADR 0015](/adr/0015-embedded-evidence-dashboard).
+
+## Context
+
+The release-embedded static dashboard proved that browser operations could remain API-first, but it
+required users to place a long-lived control credential in tab storage and tied frontend release
+cadence to the gateway binary. Hosted human identity, organization switching, deny-by-default
+private preview, and a production-quality operational console need a separate security and release
+boundary.
+
+## Decision
+
+Maintain two Next.js applications in a separate lightweight workspace repository:
+
+- a public marketing site and honest Dashboard Coming Soon page;
+- a complete authenticated console for local self-hosting and hosted private preview.
+
+Both consume the versioned InferCrane control API. Browser code never reads PostgreSQL or provider
+credentials. The local adapter exchanges an existing API credential for a short-lived encrypted
+HttpOnly session. The hosted adapter uses Clerk for identity and organization UX, while the Go
+control plane independently verifies tokens and owns external identity mapping, membership,
+entitlement, scopes, tenant authorization, and every resource mutation.
+
+The gateway no longer embeds or serves frontend assets. CLI, terminal UI, API, SDK, Terraform, and
+GitHub workflows remain complete without the web application.
+
+## Consequences
+
+- Frontend and gateway releases can be tested, rolled back, and deployed independently.
+- Opening the console publicly is an access-policy decision rather than a frontend rewrite.
+- Local OSS users do not require Clerk, but must run the console as a separate process.
+- The web repository must pin a compatible control API contract and test unknown/partial states.
+- Public navigation never exposes the private console URL while access remains private preview.
+
+## Alternatives
+
+Continuing the embedded static dashboard was rejected because it could not meet the hosted identity
+and private-preview requirements without turning the inference gateway into a web application
+server. Building a second application backend was rejected; Next.js remains a narrow authenticated
+BFF and PostgreSQL stays behind the Go API.
+
+## Verification
+
+The Go repository verifies hosted JWT claims, tenant-safe identity mapping, entitlements, operation
+and principal lists, and independent API authorization. The web repository verifies local encrypted
+sessions, protected rendering, responsive workflows, accessibility, production builds, and
+contract-faithful end-to-end flows.

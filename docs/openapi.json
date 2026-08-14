@@ -379,6 +379,59 @@
         ],
         "type": "object"
       },
+      "ConsoleIdentityProvisioning": {
+        "additionalProperties": false,
+        "properties": {
+          "access": {
+            "type": "boolean"
+          },
+          "display_name": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "external_organization_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "external_user_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "provider": {
+            "enum": [
+              "clerk"
+            ],
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "viewer",
+              "operator",
+              "admin"
+            ],
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "type": "array"
+          }
+        },
+        "required": [
+          "provider",
+          "external_user_id",
+          "external_organization_id",
+          "display_name",
+          "role",
+          "access"
+        ],
+        "type": "object"
+      },
       "ContextPassportRequest": {
         "properties": {
           "cache_hints": {
@@ -2201,6 +2254,122 @@
         "summary": "Summarize tenant-scoped observed capacity evidence",
         "tags": [
           "Capacity intelligence"
+        ]
+      }
+    },
+    "/api/v1/console/access": {
+      "get": {
+        "operationId": "listConsoleAccess",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List private-console members for the authenticated organization",
+        "tags": [
+          "Identity"
+        ]
+      },
+      "put": {
+        "operationId": "configureConsoleAccess",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsoleIdentityProvisioning"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Map a hosted identity and grant or revoke private-console access",
+        "tags": [
+          "Identity"
+        ]
+      }
+    },
+    "/api/v1/console/session": {
+      "get": {
+        "operationId": "getConsoleSession",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Resolve the authenticated console organization and entitlements",
+        "tags": [
+          "Identity"
         ]
       }
     },
@@ -5603,6 +5772,42 @@
         ]
       }
     },
+    "/api/v1/operations": {
+      "get": {
+        "operationId": "listOperations",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List durable operations for the authenticated organization",
+        "tags": [
+          "Operations"
+        ]
+      }
+    },
     "/api/v1/operations/{id}": {
       "get": {
         "operationId": "getOperation",
@@ -5781,6 +5986,40 @@
       }
     },
     "/api/v1/principals": {
+      "get": {
+        "operationId": "listPrincipals",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List service accounts for the authenticated organization",
+        "tags": [
+          "Identity"
+        ]
+      },
       "post": {
         "operationId": "createPrincipal",
         "requestBody": {

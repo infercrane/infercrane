@@ -55,7 +55,6 @@ type Gateway struct {
 	Ready     func(context.Context) error
 	Telemetry *Telemetry
 	Control   http.Handler
-	Dashboard http.Handler
 	// CapacityObservers provide request-arrival evidence for provider-native
 	// serverless routes. The lookup is bounded and best-effort: inference must
 	// remain available when telemetry observation fails.
@@ -82,10 +81,6 @@ func (g *Gateway) Handler() http.Handler {
 	mux.Handle("GET /metrics", g.Telemetry)
 	if g.Control != nil {
 		mux.Handle("/api/v1/", g.Control)
-	}
-	if g.Dashboard != nil {
-		mux.Handle("/dashboard", g.Dashboard)
-		mux.Handle("/dashboard/", g.Dashboard)
 	}
 	mux.HandleFunc("POST /v1/chat/completions", g.Telemetry.Observe(g.auth(g.completions)))
 	mux.HandleFunc("POST /v1/chat/completions/batch", g.Telemetry.Observe(g.auth(g.chatBatch)))

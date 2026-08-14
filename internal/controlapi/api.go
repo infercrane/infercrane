@@ -164,6 +164,18 @@ type qualityEvidenceStore interface {
 	RecordQualityEvidence(context.Context, string, string, domain.QualityEvidence) (domain.QualityEvidence, bool, error)
 	QualityEvidenceForDeployment(context.Context, string, string, int) ([]domain.QualityEvidence, error)
 }
+type consoleIdentityStore interface {
+	ProvisionConsoleIdentity(context.Context, string, domain.ConsoleIdentityProvisioning) (domain.ConsoleIdentity, error)
+}
+type consoleIdentityListStore interface {
+	ConsoleIdentitiesForTenant(context.Context, string) ([]domain.ConsoleIdentity, error)
+}
+type operationListStore interface {
+	OperationsForTenant(context.Context, string, time.Time, int) ([]domain.Operation, error)
+}
+type principalListStore interface {
+	PrincipalsForTenant(context.Context, string) ([]domain.Principal, error)
+}
 type artifactCacheStateStore interface {
 	ArtifactCacheState(context.Context, string, string) ([]domain.ArtifactCacheObservation, []domain.ArtifactPrefetch, error)
 }
@@ -219,8 +231,12 @@ func (a API) endpointResources() (endpointStore, bool) {
 func (a API) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/operations/{id}", a.auth(authz.Read, a.operation))
+	mux.HandleFunc("GET /api/v1/operations", a.auth(authz.Read, a.operations))
 	mux.HandleFunc("GET /api/v1/doctor", a.auth(authz.Read, a.diagnostics))
 	mux.HandleFunc("GET /api/v1/whoami", a.auth(authz.Read, a.whoami))
+	mux.HandleFunc("GET /api/v1/console/session", a.auth(authz.Read, a.consoleSession))
+	mux.HandleFunc("PUT /api/v1/console/access", a.auth(authz.ManageTenant, a.configureConsoleAccess))
+	mux.HandleFunc("GET /api/v1/console/access", a.auth(authz.ManageTenant, a.consoleAccess))
 	mux.HandleFunc("GET /api/v1/integrations", a.auth(authz.Read, a.integrations))
 	mux.HandleFunc("GET /api/v1/system/instances", a.auth(authz.Read, a.controlPlaneInstances))
 	mux.HandleFunc("POST /api/v1/deployments/{name}/recipes", a.auth(authz.Deploy, a.captureRecipe))
@@ -307,6 +323,7 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/v1/tenant/quota", a.auth(authz.ManageTenant, a.setQuota))
 	mux.HandleFunc("POST /api/v1/tenants", a.auth(authz.ManageTenant, a.createTenant))
 	mux.HandleFunc("POST /api/v1/principals", a.auth(authz.ManageTenant, a.createPrincipal))
+	mux.HandleFunc("GET /api/v1/principals", a.auth(authz.ManageTenant, a.principals))
 	mux.HandleFunc("POST /api/v1/principals/{id}/rotate", a.auth(authz.ManageTenant, a.rotatePrincipal))
 	mux.HandleFunc("DELETE /api/v1/principals/{id}", a.auth(authz.ManageTenant, a.revokePrincipal))
 	mux.HandleFunc("GET /api/v1/secrets", a.auth(authz.ManageSecrets, a.secretReferences))
@@ -1272,6 +1289,58 @@ func resolvedEndpointResponse(item domain.ResolvedEndpoint) map[string]any {
 func (a API) whoami(w http.ResponseWriter, r *http.Request) {
 	principal := r.Context().Value(identityKey{}).(domain.Principal)
 	writeJSON(w, http.StatusOK, map[string]any{"principal": map[string]any{"id": principal.ID, "tenant_id": principal.TenantID, "name": principal.Name, "role": principal.Role, "kind": principal.Kind, "scopes": principal.Scopes}})
+}
+
+func (a API) consoleSession(w http.ResponseWriter, r *http.Request) {
+	principal := r.Context().Value(identityKey{}).(domain.Principal)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"principal":    map[string]any{"id": principal.ID, "tenant_id": principal.TenantID, "name": principal.Name, "role": principal.Role, "kind": principal.Kind, "scopes": principal.Scopes},
+		"organization": map[string]any{"id": principal.TenantID},
+		"entitlements": []string{"web_console_access"},
+	})
+}
+
+func (a API) configureConsoleAccess(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(consoleIdentityStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "console identity storage is not configured")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	var request domain.ConsoleIdentityProvisioning
+	if !decodeMutationBody(w, r, &request) {
+		return
+	}
+	identity, err := store.ProvisionConsoleIdentity(r.Context(), actor.TenantID, request)
+	if errors.Is(err, domain.ErrConflict) {
+		writeError(w, http.StatusConflict, "conflict", "external identity is already mapped")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
+		return
+	}
+	outcome := "revoked"
+	if identity.Access {
+		outcome = "granted"
+	}
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "console.access." + outcome, ResourceType: "user", ResourceName: identity.UserID, Outcome: "succeeded"})
+	writeJSON(w, http.StatusOK, map[string]any{"identity": identity})
+}
+
+func (a API) consoleAccess(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(consoleIdentityListStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "console identity storage is not configured")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	identities, err := store.ConsoleIdentitiesForTenant(r.Context(), actor.TenantID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "console membership lookup failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": identities})
 }
 
 func (a API) diagnostics(w http.ResponseWriter, r *http.Request) {
@@ -2710,6 +2779,29 @@ func (a API) createPrincipal(w http.ResponseWriter, r *http.Request) {
 	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "principal.create", ResourceType: "principal", ResourceName: principal.ID, Outcome: "succeeded"})
 	writeJSON(w, 201, map[string]any{"principal": map[string]any{"id": principal.ID, "name": principal.Name, "role": principal.Role, "kind": principal.Kind, "scopes": principal.Scopes, "tenant_id": principal.TenantID}, "credential": token})
 }
+
+func (a API) principals(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(principalListStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "principal listing is not configured")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	items, err := store.PrincipalsForTenant(r.Context(), actor.TenantID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "principal lookup failed")
+		return
+	}
+	data := make([]map[string]any, 0, len(items))
+	for _, principal := range items {
+		data = append(data, map[string]any{
+			"id": principal.ID, "tenant_id": principal.TenantID, "name": principal.Name,
+			"role": principal.Role, "kind": principal.Kind, "scopes": principal.Scopes,
+			"disabled": principal.Disabled, "created_at": principal.CreatedAt,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": data})
+}
 func (a API) rotatePrincipal(w http.ResponseWriter, r *http.Request) {
 	actor := r.Context().Value(identityKey{}).(domain.Principal)
 	token, err := a.Store.RotatePrincipalForTenant(r.Context(), actor.TenantID, r.PathValue("id"))
@@ -3434,6 +3526,34 @@ func (a API) operation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, operationResponse(op))
+}
+func (a API) operations(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(operationListStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "operation listing is not configured")
+		return
+	}
+	principal := r.Context().Value(identityKey{}).(domain.Principal)
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	var before time.Time
+	if raw := r.URL.Query().Get("before"); raw != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_cursor", "before must be RFC3339")
+			return
+		}
+		before = parsed
+	}
+	items, err := store.OperationsForTenant(r.Context(), principal.TenantID, before, limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "operation lookup failed")
+		return
+	}
+	data := make([]map[string]any, 0, len(items))
+	for _, operation := range items {
+		data = append(data, operationResponse(operation))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": data})
 }
 func (a API) operationEvents(w http.ResponseWriter, r *http.Request) {
 	op, err := a.Store.Operation(r.Context(), r.PathValue("id"))

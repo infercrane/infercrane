@@ -13,7 +13,7 @@ InferCrane separates durable deployment decisions from latency-sensitive inferen
 flowchart LR
   subgraph clients[Clients]
     CLI[InferCrane CLI]
-    DASH[Embedded dashboard]
+    DASH[Separate web console]
     DELIVERY[SDK · Terraform · GitHub]
     SDK[Inference client]
   end
@@ -54,7 +54,7 @@ flowchart LR
 
 ## Control plane
 
-The CLI, embedded dashboard, generated SDKs, Terraform provider, and GitHub delivery action use the
+The CLI, separately deployed web console, generated SDKs, Terraform provider, and GitHub delivery action use the
 same authenticated API. None owns provider resources or reads PostgreSQL. PostgreSQL stores desired
 and observed deployment state, immutable revisions, replicas, operations, events, policy
 evaluations, and bounded measurements. A leased worker resumes pending provider work after process

@@ -129,13 +129,10 @@ request content. The workspace reconnects to durable control-plane state, expose
 guarded actions, and supports `--read-only` for shared incident screens. It does not require tmux,
 and closing it does not cancel deployments.
 
-For a browser-based fleet and evidence view, open the embedded dashboard after starting InferCrane:
-
-```bash
-infercrane dashboard --open
-```
-
-The API key stays in the current browser tab. Use **Forget key** before sharing the tab or screen.
+The browser console is maintained as a separate web application so its authentication and release
+boundary can evolve independently from the inference gateway. The initial public release remains
+CLI- and API-first; the hosted console is deny-by-default private preview. Local self-hosted console
+setup is documented in the [operations console](docs/features/dashboard.mdx).
 
 `plan` is side-effect free. Pricing is reported as unavailable until a live, timestamped provider
 pricing integration exists.

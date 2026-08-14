@@ -187,18 +187,6 @@ The terminal workspace is reconnectable, supports state-valid guarded actions, a
 read-only with `infercrane ui --read-only`. It requires an interactive terminal and never uses tmux
 for persistence. See [Terminal operations workspace](/features/terminal-ui).
 
-### Browser dashboard
-
-```bash
-infercrane dashboard
-infercrane dashboard --open
-infercrane dashboard --output json
-```
-
-The command derives a credential-free `/dashboard/` URL from the selected CLI context. `--open`
-launches the default browser; it never places the API key in the URL. See the [operations
-dashboard](/features/dashboard).
-
 ## Plan and deploy
 
 ### `workload`
@@ -408,7 +396,6 @@ Supported strategies are `round-robin`, `consistent-hash`, `power-of-two`, and `
 | `operation cancel ID` | Request cooperative cancellation |
 | `orphans` | List unmanaged provisioned resources visible to the control plane |
 | `integrations` | Inspect registered provider/runtime capabilities and qualification state |
-| `dashboard [--open]` | Print or open the selected context's embedded operations dashboard |
 
 ```bash
 infercrane status qwen-prod --watch

@@ -13,6 +13,11 @@ export class ControlApi {
     return this.transport.request('GET', path) as Promise<Operation>;
   }
 
+  listOperations(): Promise<ObjectList> {
+    const path = '/operations';
+    return this.transport.request('GET', path) as Promise<ObjectList>;
+  }
+
   getDoctor(): Promise<Record<string, JsonValue>> {
     const path = '/doctor';
     return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
@@ -21,6 +26,21 @@ export class ControlApi {
   getCurrentPrincipal(): Promise<Record<string, JsonValue>> {
     const path = '/whoami';
     return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+  }
+
+  getConsoleSession(): Promise<Record<string, JsonValue>> {
+    const path = '/console/session';
+    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+  }
+
+  configureConsoleAccess(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = '/console/access';
+    return this.transport.request('PUT', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  listConsoleAccess(): Promise<ObjectList> {
+    const path = '/console/access';
+    return this.transport.request('GET', path) as Promise<ObjectList>;
   }
 
   listIntegrations(): Promise<Record<string, JsonValue>> {
@@ -451,6 +471,11 @@ export class ControlApi {
   createPrincipal(body: JsonValue): Promise<Record<string, JsonValue>> {
     const path = '/principals';
     return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  listPrincipals(): Promise<ObjectList> {
+    const path = '/principals';
+    return this.transport.request('GET', path) as Promise<ObjectList>;
   }
 
   rotatePrincipal(id: string): Promise<Record<string, JsonValue>> {

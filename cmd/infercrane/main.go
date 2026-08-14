@@ -17,10 +17,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -40,7 +38,6 @@ import (
 	"github.com/infercrane/infercrane/internal/contextpassport"
 	"github.com/infercrane/infercrane/internal/controlapi"
 	"github.com/infercrane/infercrane/internal/curatedrecipe"
-	"github.com/infercrane/infercrane/internal/dashboard"
 	"github.com/infercrane/infercrane/internal/doctor"
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/external"
@@ -210,8 +207,6 @@ func runLegacy(ctx context.Context, args []string) error {
 		return asyncCommand(ctx, cfg, args[1:])
 	case "ui":
 		return uiCommand(ctx, cfg, args[1:])
-	case "dashboard":
-		return dashboardCommand(ctx, cfg, args[1:])
 	case "mcp":
 		return mcpCommand(ctx, cfg, args[1:])
 	case "observe":
@@ -340,46 +335,6 @@ func initCommand(args []string) error {
 		fmt.Println(string(encoded))
 	case "human":
 		fmt.Printf("InferCrane configured\nContext        %s\nControl plane  %s\nConfig         %s\nCredential     existing credential stored with mode 0600\n", *contextName, *controlURL, path)
-	}
-	return nil
-}
-
-func dashboardCommand(ctx context.Context, cfg config.Config, args []string) error {
-	fs := flag.NewFlagSet("dashboard", flag.ContinueOnError)
-	open := fs.Bool("open", false, "open the dashboard in the default browser")
-	output := fs.String("output", "human", "human or json")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if fs.NArg() != 0 {
-		return errors.New("dashboard does not accept positional arguments")
-	}
-	if *output != "human" && *output != "json" {
-		return errors.New("--output must be human or json")
-	}
-	dashboardURL := strings.TrimRight(cfg.ControlURL, "/") + "/dashboard/"
-	if *open {
-		var command *exec.Cmd
-		switch runtime.GOOS {
-		case "darwin":
-			command = exec.CommandContext(ctx, "open", dashboardURL)
-		case "windows":
-			command = exec.CommandContext(ctx, "rundll32", "url.dll,FileProtocolHandler", dashboardURL)
-		default:
-			command = exec.CommandContext(ctx, "xdg-open", dashboardURL)
-		}
-		if err := command.Start(); err != nil {
-			return fmt.Errorf("open dashboard: %w (open %s manually)", err, dashboardURL)
-		}
-	}
-	if *output == "json" {
-		encoded, _ := json.Marshal(map[string]any{"url": dashboardURL, "opened": *open, "credential_in_url": false})
-		fmt.Println(string(encoded))
-		return nil
-	}
-	fmt.Println(dashboardURL)
-	if !*open {
-		fmt.Println("Run `infercrane dashboard --open` to open it. The API key is entered in the browser and never placed in the URL.")
 	}
 	return nil
 }
@@ -3549,6 +3504,18 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		return fmt.Errorf("load credential snapshot: %w", err)
 	}
 	go func() { _ = credentialCache.Run(ctx) }()
+	controlAuthenticator := authn.Chain{Authenticators: []authn.PrincipalAuthenticator{credentialCache}}
+	if cfg.HostedAuthEnabled() {
+		jwtKey, readErr := os.ReadFile(cfg.HostedAuthJWTKeyFile)
+		if readErr != nil {
+			return fmt.Errorf("read hosted auth JWT public key: %w", readErr)
+		}
+		hosted, hostedErr := authn.NewClerkAuthenticator(authn.ClerkVerifierConfig{JWTKey: string(jwtKey), Issuer: cfg.HostedAuthIssuer, Audience: cfg.HostedAuthAudience, AuthorizedParties: cfg.HostedAuthAuthorizedParties}, s, store.WebConsoleAccess)
+		if hostedErr != nil {
+			return fmt.Errorf("configure hosted authentication: %w", hostedErr)
+		}
+		controlAuthenticator.Authenticators = append(controlAuthenticator.Authenticators, hosted)
+	}
 	requestQuotas := requestquota.New(s)
 	if err := requestQuotas.Refresh(ctx); err != nil {
 		return fmt.Errorf("load request quota leases: %w", err)
@@ -3628,7 +3595,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		}
 		asyncService = &asyncinference.Service{Store: s, Cipher: cipher, KeyReference: cfg.AsyncEncryptionKeyReference, GatewayURL: cfg.ControlURL, APIKey: cfg.APIKey, Owner: cfg.InstanceID + ":async", Lease: time.Minute, Secrets: secrets.Environment{}}
 	}
-	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: credentialCache, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ProductVersion: version}
+	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ProductVersion: version}
 	// Assign the optional service only when it exists. A nil *Service stored in
 	// an interface is non-nil and would otherwise turn the intended capability
 	// error into a panic when async encryption is not configured.
@@ -3727,7 +3694,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	if err != nil {
 		return err
 	}
-	server := &http.Server{Addr: fmt.Sprintf("%s:%d", cfg.Host, cfg.Port), Handler: (&gateway.Gateway{Routes: directory, APIKey: cfg.APIKey, Authenticator: credentialCache, Recorder: recorder, Logger: logger, Client: client, Ready: s.Ping, Control: control, Dashboard: dashboard.Handler(), Telemetry: gatewayTelemetry, CapacityObservers: map[string]gateway.CapacityObserver{"runpod": serverless.ActiveWorkers}, ExternalAuthorizer: externalBudgets, RequestAuthorizer: requestQuotas, AdmissionAuthorizer: admissionPool, ContextPassports: contextPassports}).Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 1 << 20, TLSConfig: serverTLS}
+	server := &http.Server{Addr: fmt.Sprintf("%s:%d", cfg.Host, cfg.Port), Handler: (&gateway.Gateway{Routes: directory, APIKey: cfg.APIKey, Authenticator: credentialCache, Recorder: recorder, Logger: logger, Client: client, Ready: s.Ping, Control: control, Telemetry: gatewayTelemetry, CapacityObservers: map[string]gateway.CapacityObserver{"runpod": serverless.ActiveWorkers}, ExternalAuthorizer: externalBudgets, RequestAuthorizer: requestQuotas, AdmissionAuthorizer: admissionPool, ContextPassports: contextPassports}).Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 1 << 20, TLSConfig: serverTLS}
 	go func() {
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)

@@ -28,8 +28,12 @@ type Route struct {
 // drift a release failure.
 var Routes = []Route{
 	{"GET", "/operations/{id}", "getOperation", "Operations", "Inspect a durable operation", "", "Operation", 200, false},
+	{"GET", "/operations", "listOperations", "Operations", "List durable operations for the authenticated organization", "", "ObjectList", 200, false},
 	{"GET", "/doctor", "getDoctor", "System", "Run control-plane diagnostics", "", "Object", 200, false},
 	{"GET", "/whoami", "getCurrentPrincipal", "Identity", "Inspect the authenticated principal", "", "Object", 200, false},
+	{"GET", "/console/session", "getConsoleSession", "Identity", "Resolve the authenticated console organization and entitlements", "", "Object", 200, false},
+	{"PUT", "/console/access", "configureConsoleAccess", "Identity", "Map a hosted identity and grant or revoke private-console access", "ConsoleIdentityProvisioning", "Object", 200, false},
+	{"GET", "/console/access", "listConsoleAccess", "Identity", "List private-console members for the authenticated organization", "", "ObjectList", 200, false},
 	{"GET", "/integrations", "listIntegrations", "System", "Inspect registered integration capabilities", "", "Object", 200, false},
 	{"GET", "/system/instances", "listControlPlaneInstances", "System", "List live control-plane instances and protocol compatibility", "", "ObjectList", 200, false},
 	{"GET", "/environments", "listEnvironments", "Endpoints", "List endpoint environments", "", "ObjectList", 200, false},
@@ -116,6 +120,7 @@ var Routes = []Route{
 	{"PUT", "/tenant/quota", "setTenantQuota", "Identity", "Set tenant safety quotas", "Object", "Empty", 204, false},
 	{"POST", "/tenants", "createTenant", "Identity", "Create a tenant", "Object", "Object", 201, false},
 	{"POST", "/principals", "createPrincipal", "Identity", "Create a scoped service account", "Object", "Object", 201, false},
+	{"GET", "/principals", "listPrincipals", "Identity", "List service accounts for the authenticated organization", "", "ObjectList", 200, false},
 	{"POST", "/principals/{id}/rotate", "rotatePrincipal", "Identity", "Rotate a service-account credential", "", "Object", 200, false},
 	{"DELETE", "/principals/{id}", "revokePrincipal", "Identity", "Revoke a service account", "", "Empty", 204, false},
 	{"GET", "/secrets", "listSecretReferences", "Secrets", "List secret references", "", "ObjectList", 200, false},
@@ -236,6 +241,7 @@ func schemas() map[string]any {
 		"ObjectList":                      map[string]any{"type": "object", "required": []string{"data"}, "properties": map[string]any{"data": map[string]any{"type": "array", "items": stringMap}}},
 		"Error":                           map[string]any{"type": "object", "required": []string{"code", "message"}, "properties": map[string]any{"code": map[string]any{"type": "string"}, "category": map[string]any{"type": "string"}, "message": map[string]any{"type": "string"}, "request_id": map[string]any{"type": "string"}, "retryable": map[string]any{"type": "boolean"}, "remediation": map[string]any{"type": "string"}}},
 		"ErrorEnvelope":                   map[string]any{"type": "object", "required": []string{"error"}, "properties": map[string]any{"error": ref("Error")}},
+		"ConsoleIdentityProvisioning":     map[string]any{"type": "object", "additionalProperties": false, "required": []string{"provider", "external_user_id", "external_organization_id", "display_name", "role", "access"}, "properties": map[string]any{"provider": map[string]any{"type": "string", "enum": []string{"clerk"}}, "external_user_id": map[string]any{"type": "string", "minLength": 1, "maxLength": 255}, "external_organization_id": map[string]any{"type": "string", "minLength": 1, "maxLength": 255}, "display_name": map[string]any{"type": "string", "minLength": 1, "maxLength": 255}, "role": map[string]any{"type": "string", "enum": []string{"viewer", "operator", "admin"}}, "scopes": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": 32}, "access": map[string]any{"type": "boolean"}}},
 		"Operation":                       map[string]any{"type": "object", "required": []string{"id", "kind", "status", "progress"}, "properties": map[string]any{"id": map[string]any{"type": "string"}, "kind": map[string]any{"type": "string"}, "resource_type": map[string]any{"type": "string"}, "resource_name": map[string]any{"type": "string"}, "status": map[string]any{"type": "string", "enum": []string{"pending", "leased", "running", "waiting", "cancelling", "succeeded", "failed", "cancelled"}}, "progress": map[string]any{"type": "integer", "minimum": 0, "maximum": 100}, "message": map[string]any{"type": "string"}, "error_code": map[string]any{"type": "string"}, "retryable": map[string]any{"type": "boolean"}, "cancel_requested": map[string]any{"type": "boolean"}, "attempt": map[string]any{"type": "integer"}, "max_attempts": map[string]any{"type": "integer"}, "created_at": map[string]any{"type": "string", "format": "date-time"}, "updated_at": map[string]any{"type": "string", "format": "date-time"}}},
 		"OperationEnvelope":               map[string]any{"type": "object", "required": []string{"operation"}, "properties": map[string]any{"operation": ref("Operation"), "created": map[string]any{"type": "boolean"}}},
 		"DeploymentOperationEnvelope":     map[string]any{"allOf": []map[string]any{ref("OperationEnvelope"), {"type": "object", "properties": map[string]any{"deployment": ref("Deployment")}}}},

@@ -5,7 +5,7 @@ description: Keep browser operations on the public API and inside the release ar
 
 ## Status
 
-Accepted — 2026-08-11
+Superseded by [ADR 0030](/adr/0030-separate-web-products) — 2026-08-14
 
 ## Context
 
@@ -43,7 +43,7 @@ rollout policy, explanations, and durable operations retain their existing owner
 - Rendering secrets into server-generated HTML was rejected because it creates credential leakage
   and caching risk.
 
-## Verification
+## Historical verification
 
 `make test-dashboard`, `make test-stack`, security/dependency gates, and complete local release
 qualification verify serving, headers, authenticated API use, deterministic view models,

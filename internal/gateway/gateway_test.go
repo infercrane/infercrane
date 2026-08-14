@@ -514,22 +514,6 @@ func TestCopyResponseStopsAtTerminalSSEMarker(t *testing.T) {
 	}
 }
 
-func TestDashboardIsMountedWithoutWeakeningAPIAuthentication(t *testing.T) {
-	dashboard := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("dashboard")) })
-	control := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusUnauthorized) })
-	handler := (&Gateway{Routes: routes.New(), Dashboard: dashboard, Control: control}).Handler()
-	page := httptest.NewRecorder()
-	handler.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/dashboard/", nil))
-	if page.Code != http.StatusOK || page.Body.String() != "dashboard" {
-		t.Fatalf("dashboard=%d %q", page.Code, page.Body.String())
-	}
-	api := httptest.NewRecorder()
-	handler.ServeHTTP(api, httptest.NewRequest(http.MethodGet, "/api/v1/deployments", nil))
-	if api.Code != http.StatusUnauthorized {
-		t.Fatalf("control status=%d", api.Code)
-	}
-}
-
 func TestAuthentication(t *testing.T) {
 	handler := (&Gateway{Routes: routes.New(), APIKey: "secret"}).Handler()
 	recorder := httptest.NewRecorder()

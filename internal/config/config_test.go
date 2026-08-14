@@ -62,6 +62,30 @@ func TestTLSConfigurationFailsClosedWhenIdentityIsPartial(t *testing.T) {
 	}
 }
 
+func TestHostedAuthenticationIsExplicitAndProductionPartiesRequireHTTPS(t *testing.T) {
+	t.Setenv("INFERCRANE_API_KEY", "secret")
+	t.Setenv("INFERCRANE_HOSTED_AUTH_ISSUER", "https://infercrane.clerk.accounts.dev")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "partial") {
+		t.Fatalf("partial hosted auth accepted: %v", err)
+	}
+	t.Setenv("INFERCRANE_HOSTED_AUTH_JWT_KEY_FILE", "/run/secrets/clerk-jwt.pem")
+	t.Setenv("INFERCRANE_HOSTED_AUTH_AUTHORIZED_PARTIES", "http://localhost:3200")
+	config, err := Load()
+	if err != nil || !config.HostedAuthEnabled() {
+		t.Fatalf("development hosted auth config=%#v err=%v", config, err)
+	}
+	t.Setenv("INFERCRANE_ENV", "production")
+	t.Setenv("INFERCRANE_API_KEY", "01234567890123456789012345678901")
+	t.Setenv("INFERCRANE_DATABASE_URL", "postgres://db/infercrane?sslmode=verify-full")
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "authorized party") {
+		t.Fatalf("production localhost party accepted: %v", err)
+	}
+	t.Setenv("INFERCRANE_HOSTED_AUTH_AUTHORIZED_PARTIES", "https://app.infercrane.ai")
+	if _, err = Load(); err != nil {
+		t.Fatalf("production hosted auth rejected: %v", err)
+	}
+}
+
 func TestAWSBYOCConfigurationIsAllOrNothingAndImmutable(t *testing.T) {
 	t.Setenv("INFERCRANE_API_KEY", "secret")
 	t.Setenv("INFERCRANE_AWS_ROLE_ARN", "arn:aws:iam::123456789012:role/infercrane")

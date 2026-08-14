@@ -18,6 +18,8 @@ type Config struct {
 	DatabaseURL, ControlURL, Host, APIKey, RouterBinary, AIPerfBinary, PassportSigningKeyFile, InstanceID, Environment string
 	TLSCertFile, TLSKeyFile, TLSClientCAFile, ClientTLSCertFile, ClientTLSKeyFile, ClientTLSCAFile                     string
 	AsyncEncryptionKey, AsyncEncryptionKeyReference                                                                    string
+	HostedAuthIssuer, HostedAuthAudience, HostedAuthJWTKeyFile                                                         string
+	HostedAuthAuthorizedParties                                                                                        []string
 	RunPodAPIKey, RunPodServerlessTemplateID, RunPodRESTURL                                                            string
 	AWSRoleARN, AWSExternalID, AWSRegion, AWSSubnetID, AWSAMIID, AWSInstanceType, AWSGPU                               string
 	AWSInstanceProfileARN, AWSWorkerSecretARN, AWSImageDigest                                                          string
@@ -269,6 +271,10 @@ func load(requireAPIKey bool) (Config, error) {
 		TLSClientCAFile:             env("INFERCRANE_TLS_CLIENT_CA_FILE", ""),
 		AsyncEncryptionKey:          env("INFERCRANE_ASYNC_ENCRYPTION_KEY", ""),
 		AsyncEncryptionKeyReference: env("INFERCRANE_ASYNC_ENCRYPTION_KEY_REFERENCE", "environment:INFERCRANE_ASYNC_ENCRYPTION_KEY"),
+		HostedAuthIssuer:            env("INFERCRANE_HOSTED_AUTH_ISSUER", ""),
+		HostedAuthAudience:          env("INFERCRANE_HOSTED_AUTH_AUDIENCE", ""),
+		HostedAuthJWTKeyFile:        env("INFERCRANE_HOSTED_AUTH_JWT_KEY_FILE", ""),
+		HostedAuthAuthorizedParties: splitCSV(env("INFERCRANE_HOSTED_AUTH_AUTHORIZED_PARTIES", "")),
 		RunPodAPIKey:                env("RUNPOD_API_KEY", ""),
 		RunPodServerlessTemplateID:  env("INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID", ""),
 		RunPodRESTURL:               env("INFERCRANE_RUNPOD_REST_URL", "https://rest.runpod.io/v1"),
@@ -355,6 +361,9 @@ func load(requireAPIKey bool) (Config, error) {
 	if err := validateServerTLS(config); err != nil {
 		return Config{}, err
 	}
+	if err := validateHostedAuth(config); err != nil {
+		return Config{}, err
+	}
 	return config, nil
 }
 
@@ -363,6 +372,29 @@ func (c Config) AWSEnabled() bool { return c.AWSRoleARN != "" }
 func (c Config) GCPEnabled() bool { return c.GCPProject != "" }
 
 func (c Config) KubernetesEnabled() bool { return c.KubernetesContext != "" }
+
+func (c Config) HostedAuthEnabled() bool { return c.HostedAuthJWTKeyFile != "" }
+
+func validateHostedAuth(config Config) error {
+	configured := config.HostedAuthIssuer != "" || config.HostedAuthAudience != "" || config.HostedAuthJWTKeyFile != "" || len(config.HostedAuthAuthorizedParties) > 0
+	if !configured {
+		return nil
+	}
+	if config.HostedAuthIssuer == "" || config.HostedAuthJWTKeyFile == "" || len(config.HostedAuthAuthorizedParties) == 0 {
+		return errors.New("hosted auth configuration is partial; issuer, JWT public-key file, and authorized parties are required")
+	}
+	issuer, err := url.Parse(config.HostedAuthIssuer)
+	if err != nil || issuer.Scheme != "https" || issuer.Host == "" || issuer.User != nil || issuer.RawQuery != "" || issuer.Fragment != "" {
+		return errors.New("INFERCRANE_HOSTED_AUTH_ISSUER must be an absolute HTTPS URL without credentials, query, or fragment")
+	}
+	for _, party := range config.HostedAuthAuthorizedParties {
+		parsed, parseErr := url.Parse(party)
+		if parseErr != nil || (parsed.Scheme != "https" && !(config.Environment != "production" && parsed.Scheme == "http" && parsed.Hostname() == "localhost")) || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return fmt.Errorf("invalid hosted auth authorized party %q", party)
+		}
+	}
+	return nil
+}
 
 func validateAWS(config Config) error {
 	values := []string{config.AWSRoleARN, config.AWSRegion, config.AWSSubnetID, config.AWSAMIID, config.AWSInstanceType, config.AWSGPU, config.AWSInstanceProfileARN, config.AWSWorkerSecretARN, config.AWSImageDigest}

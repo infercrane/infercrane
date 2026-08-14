@@ -95,6 +95,28 @@ func (s *Store) ActiveCredentials(ctx context.Context) ([]domain.CredentialRecor
 	}
 	return out, rows.Err()
 }
+
+func (s *Store) PrincipalsForTenant(ctx context.Context, tenant string) ([]domain.Principal, error) {
+	rows, err := s.QueryContext(ctx, `SELECT id,tenant_id,name,role,kind,scopes_json::text,disabled,created_at FROM principals WHERE tenant_id=? ORDER BY created_at DESC,id DESC`, tenant)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]domain.Principal, 0)
+	for rows.Next() {
+		var principal domain.Principal
+		var scopesJSON, stamp string
+		if err := rows.Scan(&principal.ID, &principal.TenantID, &principal.Name, &principal.Role, &principal.Kind, &scopesJSON, &principal.Disabled, &stamp); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(scopesJSON), &principal.Scopes); err != nil {
+			return nil, fmt.Errorf("decode principal scopes: %w", err)
+		}
+		principal.CreatedAt = parseTime(stamp)
+		out = append(out, principal)
+	}
+	return out, rows.Err()
+}
 func (s *Store) RotatePrincipal(ctx context.Context, id string) (string, error) {
 	return s.RotatePrincipalForTenant(ctx, "", id)
 }

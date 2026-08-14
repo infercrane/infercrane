@@ -23,7 +23,11 @@ func (s *Store) ActiveOperationForResource(ctx context.Context, tenant, resource
 	return s.scanOperation(s.QueryRowContext(ctx, `SELECT `+operationColumns+` FROM operations WHERE tenant_id=? AND resource_type=? AND resource_name=? AND status IN ('pending','leased','running','waiting','cancelling') ORDER BY created_at DESC LIMIT 1`, tenant, resourceType, resourceName))
 }
 
-func (s *Store) scanOperation(row *sql.Row) (domain.Operation, error) {
+type operationScanner interface {
+	Scan(...any) error
+}
+
+func (s *Store) scanOperation(row operationScanner) (domain.Operation, error) {
 	var out domain.Operation
 	var created, updated string
 	var completed, leaseExpires, nextAttempt sql.NullTime
@@ -48,6 +52,34 @@ func (s *Store) scanOperation(row *sql.Row) (domain.Operation, error) {
 		out.NextAttemptAt = &stamp
 	}
 	return out, nil
+}
+
+func (s *Store) OperationsForTenant(ctx context.Context, tenant string, before time.Time, limit int) ([]domain.Operation, error) {
+	if limit < 1 || limit > 500 {
+		limit = 100
+	}
+	query := `SELECT ` + operationColumns + ` FROM operations WHERE tenant_id=?`
+	args := []any{tenant}
+	if !before.IsZero() {
+		query += ` AND created_at<?`
+		args = append(args, before.UTC())
+	}
+	query += ` ORDER BY created_at DESC,id DESC LIMIT ?`
+	args = append(args, limit)
+	rows, err := s.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]domain.Operation, 0)
+	for rows.Next() {
+		operation, scanErr := s.scanOperation(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		out = append(out, operation)
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) RequestOperationCancel(ctx context.Context, id string) error {
