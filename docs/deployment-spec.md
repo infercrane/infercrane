@@ -58,6 +58,6 @@ underspecified probes are rejected before provisioning.
 `min_replicas: 0` and defaults `max_replicas` to one when omitted. Revisions are immutable; changing
 a field creates a candidate. `provider.adapter` persists the exact implementation when more than one
 profile can serve a cloud/runtime pair; it is optional for an unambiguous default. Current executable
-elastic defaults include configured AWS EC2 and GCP Compute, while other v1.5 provider-product
-profiles remain registered/deferred. AWS and GCP require an explicit `provider.region`. Cost is
-omitted unless a trustworthy provider measurement exists.
+elastic defaults include configured AWS EC2 and GCP Compute, while other provider-product profiles
+remain registered but deferred until their exact combination is qualified. AWS and GCP require an
+explicit `provider.region`. Cost is omitted unless a trustworthy provider measurement exists.

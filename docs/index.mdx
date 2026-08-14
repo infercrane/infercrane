@@ -19,23 +19,18 @@ mode: wide
   </div>
 </div>
 
-<div className="ic-terminal not-prose" role="region" aria-label="InferCrane deployment command">
-  <div className="ic-terminal-bar">
-    <div className="ic-terminal-lights" aria-hidden="true"><span></span><span></span><span></span></div>
-    <span>deploy · qwen3-8b</span>
-    <span className="ic-terminal-state"><i></i> durable operation</span>
-  </div>
-  <div className="ic-terminal-body"><span className="ic-prompt">$</span> infercrane deploy <span className="ic-code-value">Qwen/Qwen3-8B</span><br/><span className="ic-code-muted"># submits one durable operation through the control-plane API</span><br/><span className="ic-code-muted"># disconnecting the CLI does not abandon provisioning</span></div>
-</div>
+```bash Deploy a model
+infercrane deploy mistralai/Mistral-7B-Instruct-v0.3 \
+  --name support-production
 
-<Tip>
-`Qwen/Qwen3-8B` is the repeatable release-acceptance model, not a product restriction. Use another
-Hugging Face model identity or an immutable custom OCI workload when its runtime, hardware, license,
-and protocol requirements have been qualified.
-</Tip>
+# The operation continues if this terminal disconnects.
+infercrane status support-production --watch
+```
 
-```bash
-infercrane request qwen3-8b --message "Hello" --stream
+```bash Send a streaming request
+infercrane request support-production \
+  --message "Summarize this incident." \
+  --stream
 ```
 
 Build a deployment from a model or custom OCI workload, or connect inference you already run.
@@ -88,7 +83,7 @@ integrate through explicit contracts; Kubernetes is not required.
     A registered elastic backend provisions runtime replicas. InferCrane reconciles desired capacity, routes only to ready workers, and fences scale-down before provider termination.
 
     ```bash
-    infercrane deploy Qwen/Qwen3-8B \
+    infercrane deploy mistralai/Mistral-7B-Instruct-v0.3 \
       --cloud runpod \
       --gpu L40S \
       --min 1 \
@@ -99,7 +94,7 @@ integrate through explicit contracts; Kubernetes is not required.
     A provider-native serverless backend owns worker allocation and scale-to-zero. InferCrane preserves the logical endpoint, lifecycle evidence, cancellation, and cleanup.
 
     ```bash
-    infercrane deploy Qwen/Qwen3-8B \
+    infercrane deploy mistralai/Mistral-7B-Instruct-v0.3 \
       --compute serverless \
       --cloud runpod \
       --gpu L40S \

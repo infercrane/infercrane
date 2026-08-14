@@ -66,6 +66,11 @@ Use Mermaid, the small `.ic-flow` system, or deterministic SVG for maintainable 
 
 ## Code blocks
 
+- Mintlify code uses the repository-owned Shiki CSS-variable palette in `style.css`: blue for control
+  flow, green for strings and values, violet for parameters, amber for constants, and quiet gray for
+  comments. Do not introduce a second syntax-highlighting theme in individual pages.
+- Give the first or most important example in a section a short filename-style title so readers can
+  identify it before copying. Keep titles task-oriented, such as `Deploy a model` or `Send a request`.
 - Use `bash` for commands, `console` when command output is included, `json` for HTTP bodies, and `yaml` for DeploymentSpec.
 - Separate commands from output unless the relationship matters.
 - Every public command must exist in `cmd/infercrane/main.go` and be practical in the documented context.

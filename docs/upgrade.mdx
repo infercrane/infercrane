@@ -80,7 +80,7 @@ infercrane integrations --output json
 
 ## Rolling upgrades
 
-From v1.6, every live replica registers its binary version and control protocol interval. Startup
+Every live replica registers its binary version and control protocol interval. Startup
 fails before serving when that interval cannot overlap a live member. Inspect the actual window:
 
 ```bash

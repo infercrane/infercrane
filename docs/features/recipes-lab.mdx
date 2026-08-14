@@ -34,7 +34,8 @@ infercrane lab 'Qwen/Qwen3-8B@IMMUTABLE_COMMIT' \
 ```
 
 Rows are ordered by measured p95 TTFT and include runtime, provider, GPU, error rate, throughput, SLO
-result when measurable, and cost metadata exactly as persisted. v1.7 emits only `MEASURED` rows.
+result when measurable, and cost metadata exactly as persisted. Current Lab results emit only
+`MEASURED` rows.
 The schema reserves `modeled` and `heuristic` labels for future evidence sources, but InferCrane never
 substitutes them silently. With no comparable benchmark, the result is an empty persisted evaluation.
 
@@ -46,4 +47,3 @@ are not part of recipes, benchmark history, or Lab evaluations.
 A captured recipe proves provenance, not universal portability. Provider/runtime support remains
 scoped to the integration matrix, and local benchmark fixtures are not real GPU evidence. Cost remains
 unavailable unless a trustworthy source and observation timestamp were persisted with the benchmark.
-

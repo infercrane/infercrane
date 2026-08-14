@@ -42,7 +42,7 @@ advertised publicly. Qualification requires configuration, documentation, compat
 failure testing, real infrastructure acceptance, and zero leaked billable resources.
 
 <Note>
-The current release candidate registers RunPod elastic/serverless, narrow AWS EC2, GCP Compute, and
+The current adapter registry includes RunPod elastic/serverless, narrow AWS EC2, GCP Compute, and
 Kubernetes elastic adapters; vLLM, SGLang, custom OCI, and governed external targets; plus LiteLLM,
 external-sandbox access, and signed-artifact-handoff composition profiles. The compatibility matrix
 qualifies only exact combinations; registration never implies real-system evidence.

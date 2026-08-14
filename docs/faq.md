@@ -10,7 +10,7 @@ sidebarTitle: FAQ
 
 No. The current registry contains vLLM, SGLang, and immutable custom OCI profiles across specific
 RunPod, AWS EC2 BYOC, GCP Compute BYOC, and namespaced Kubernetes modes. `infercrane integrations` reports the exact
-qualification state; real-GPU evidence remains deferred until final RC qualification. Every exact
+qualification state; real-GPU evidence remains deferred until real-infrastructure qualification. Every exact
 provider/runtime/mode combination needs independent evidence.
 
 ## Do I need Kubernetes?

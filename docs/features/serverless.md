@@ -75,7 +75,7 @@ matches or immutable-spec mismatches fail visibly instead of creating another bi
 ## Current limitations
 
 - The first backend supports one configured immutable vLLM template per control-plane process.
-- RunPod is the only registered native Serverless backend in the current release candidate. Real cold/warm, streaming,
+- RunPod is currently the only executable native Serverless adapter. Real cold/warm, streaming,
   cancellation, scale-to-zero, and billing acceptance remains a final manual gate.
 - InferCrane records request timing and token metadata but does not record prompts or generated
   content by default.

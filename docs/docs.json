@@ -25,10 +25,7 @@
   "styling": {
     "eyebrows": "section",
     "codeblocks": {
-      "theme": {
-        "light": "github-light-default",
-        "dark": "vesper"
-      }
+      "theme": "css-variables"
     }
   },
   "api": {
