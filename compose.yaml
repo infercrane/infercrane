@@ -13,7 +13,10 @@ services:
       POSTGRES_USER: infercrane
       POSTGRES_PASSWORD: infercrane
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U infercrane -d infercrane_test"]
+      # Probe TCP explicitly. The official image starts a temporary Unix-socket
+      # server while initializing a new volume; a socket-only pg_isready can
+      # mark the service healthy just before that temporary server exits.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U infercrane -d infercrane_test"]
       interval: 1s
       timeout: 2s
       retries: 30
@@ -43,7 +46,7 @@ services:
       POSTGRES_USER: infercrane
       POSTGRES_PASSWORD: infercrane
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U infercrane -d infercrane"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U infercrane -d infercrane"]
       interval: 2s
       timeout: 2s
       retries: 20

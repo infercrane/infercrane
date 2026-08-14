@@ -3,10 +3,10 @@
 ## Executive Summary
 
 - Failure patterns researched: 16 production failure classes, covering distributed operations, PostgreSQL transactions, reconciliation, autoscaling, routing/streaming, releases, serverless, provider APIs, security, admission, Kubernetes, AWS, RunPod, runtimes, resource exhaustion, and upgrades.
-- Hypotheses investigated: 50 ledgered high-value hypotheses.
-- New tests added: 33 named regression, stress, and fuzz tests, plus a broad public module journey and an immutable runtime-publication contract.
-- Bugs reproduced: 32 locally reproducible defects.
-- Bugs fixed: 32, each retained in the regression suite.
+- Hypotheses investigated: 51 ledgered high-value hypotheses.
+- New tests added: 34 named regression, stress, and fuzz checks, plus a broad public module journey and an immutable runtime-publication contract.
+- Bugs reproduced: 33 locally reproducible defects.
+- Bugs fixed: 33, each retained in the regression suite.
 - Critical bugs remaining: 0 known locally reproducible defects.
 - High bugs remaining: 0 known locally reproducible defects.
 - Real-infrastructure edge cases remaining: provider, GPU-runtime, network, multi-host, and long-duration behavior listed in [manual edge cases](/testing/manual-edge-cases). One directly applicable security qualification remains open: replacing or isolating the pinned vLLM 0.8.5.post1 runtime because of GHSA-rxc4-3w6r-4v47.
@@ -134,6 +134,20 @@ These results prove the tested InferCrane logic against local, PostgreSQL, Docke
   installed package version before layering or tagging.
 - Regression test: `scripts/test-runtime-image-contract.sh`. Changing the production default still
   requires real GPU qualification.
+
+### PostgreSQL dependency health could race fresh-volume initialization
+
+- Failure scenario: Compose reports a fresh PostgreSQL volume healthy, starts InferCrane, and the
+  control plane receives `connection refused` while PostgreSQL replaces its temporary
+  initialization server with the final TCP server.
+- Source/inspiration: official PostgreSQL image initialization and dependency-readiness behavior.
+- Reproduction: the whole-product module journey passed the PostgreSQL dependency and then failed
+  its first database connection on a clean volume.
+- Root cause: `pg_isready` omitted a host, so it tested the temporary Unix-socket server instead of
+  the TCP endpoint used by InferCrane.
+- Fix: every PostgreSQL Compose health check probes `127.0.0.1` explicitly.
+- Regression: production Compose and acceptance-safety checks require the TCP probe, and the module
+  journey passes from a new volume.
 
 ## Failure Classes Proven Safe Locally
 

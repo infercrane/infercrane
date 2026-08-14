@@ -9,7 +9,9 @@ services:
       POSTGRES_USER: infercrane
       POSTGRES_PASSWORD: ${INFERCRANE_POSTGRES_PASSWORD:?set INFERCRANE_POSTGRES_PASSWORD}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U infercrane -d infercrane"]
+      # Avoid reporting healthy from PostgreSQL's temporary initialization
+      # server, which only listens on the container's Unix socket.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U infercrane -d infercrane"]
       interval: 5s
       timeout: 3s
       retries: 30

@@ -30,6 +30,7 @@ INFERCRANE_POSTGRES_PASSWORD=test-only-postgres-password \
 grep -q 'INFERCRANE_ENV: production' "$base_rendered"
 grep -q 'no-new-privileges:true' "$base_rendered"
 grep -q -- '- ALL' "$base_rendered"
+grep -q 'pg_isready -h 127.0.0.1 -U infercrane -d infercrane' "$base_rendered"
 if grep -Eqi 'runpod|skypilot|RUNPOD_KEY_FILE' "$base_rendered"; then
   echo 'base production Compose is coupled to RunPod or SkyPilot' >&2
   exit 1

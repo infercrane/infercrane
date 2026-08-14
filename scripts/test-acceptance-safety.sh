@@ -5,6 +5,16 @@ root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 temporary=$(mktemp -d)
 trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 
+# PostgreSQL's official image briefly runs a socket-only temporary server while
+# initializing a fresh volume. Every Compose dependency probe must use TCP so
+# dependents cannot start in the shutdown gap before the final server listens.
+for compose_file in compose.yaml compose.production.yaml compose.runpod-acceptance.yaml; do
+  if grep 'test:.*pg_isready' "$root/$compose_file" | grep -Fqv -- '-h 127.0.0.1'; then
+    echo "$compose_file has a socket-only PostgreSQL readiness probe" >&2
+    exit 1
+  fi
+done
+
 # Developer qualification owns its PostgreSQL fixture. A stale database URL
 # inherited from an operator shell must not alter the pre-container verifier.
 grep -Fq 'step repository env -u INFERCRANE_TEST_DATABASE_URL make -C "$root" verify' \
