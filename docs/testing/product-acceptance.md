@@ -47,6 +47,18 @@ RunPod, AWS, and Kubernetes qualification remains separate and explicitly paid. 
 RunPod orchestrator in `docs/v2-manual-qualification.md`; never run it concurrently with another paid
 acceptance command.
 
+The separately maintained web product has its own release gate. From a sibling checkout, run:
+
+```bash
+cd ../infercrane-web
+npm run qualify:local
+```
+
+That command performs the production build, unit, accessibility, responsive browser, visual-regression,
+and API-client checks, then starts a disposable real InferCrane Go/PostgreSQL control plane and verifies
+the authenticated console against it. The fixture is removed, including its test volume, whether the
+browser test succeeds, fails, or is interrupted.
+
 Release Guard proves deterministic infrastructure and measured performance policy. It does not
 evaluate semantic answer correctness, hallucination, groundedness, or task success. Those remain an
 external offline-evaluation and human-approval responsibility.

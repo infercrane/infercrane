@@ -3461,7 +3461,9 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	defer func() {
 		unregisterCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_ = s.UnregisterControlPlaneInstance(unregisterCtx, cfg.InstanceID)
+		if unregisterErr := unregisterControlPlaneInstance(unregisterCtx, s, cfg.InstanceID, 100*time.Millisecond); unregisterErr != nil {
+			slog.Error("control-plane membership withdrawal failed", "instance_id", cfg.InstanceID, "error", unregisterErr)
+		}
 	}()
 	go heartbeatControlPlane(ctx, s, cfg.InstanceID, 10*time.Second)
 	integrationRegistry, err := integration.V1Catalog()
@@ -3773,6 +3775,31 @@ func serverTLSConfig(cfg config.Config) (*tls.Config, error) {
 	tlsConfig.ClientCAs = pool
 	tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
 	return tlsConfig, nil
+}
+
+type controlPlaneUnregisterer interface {
+	UnregisterControlPlaneInstance(context.Context, string) error
+}
+
+func unregisterControlPlaneInstance(ctx context.Context, membership controlPlaneUnregisterer, instanceID string, retryInterval time.Duration) error {
+	if retryInterval <= 0 {
+		return errors.New("positive membership withdrawal retry interval is required")
+	}
+	var lastErr error
+	for {
+		if err := membership.UnregisterControlPlaneInstance(ctx, instanceID); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+		timer := time.NewTimer(retryInterval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return fmt.Errorf("withdraw control-plane membership after retry: %w", errors.Join(lastErr, ctx.Err()))
+		case <-timer.C:
+		}
+	}
 }
 
 func heartbeatControlPlane(ctx context.Context, s *store.Store, instanceID string, interval time.Duration) {
