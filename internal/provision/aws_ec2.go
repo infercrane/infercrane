@@ -122,7 +122,7 @@ func (a AWSEC2) EnsureReplica(ctx context.Context, spec ReplicaSpec) (ProviderHa
 	networkJSON, _ := json.Marshal(network)
 	tags := []map[string]any{{"ResourceType": "instance", "Tags": []map[string]string{{"Key": "infercrane:managed", "Value": "true"}, {"Key": "infercrane:external-key", "Value": spec.ExternalKey}, {"Key": "Name", "Value": "infercrane-" + spec.ExternalKey}}}}
 	tagsJSON, _ := json.Marshal(tags)
-	args := []string{"ec2", "run-instances", "--region", a.Region, "--image-id", a.AMIID, "--instance-type", a.InstanceType, "--min-count", "1", "--max-count", "1", "--client-token", a.clientToken(spec.ExternalKey), "--iam-instance-profile", "Arn=" + a.InstanceProfileARN, "--network-interfaces", string(networkJSON), "--tag-specifications", string(tagsJSON), "--user-data", userData, "--output", "json", "--no-cli-pager"}
+	args := []string{"ec2", "run-instances", "--region", a.Region, "--image-id", a.AMIID, "--instance-type", a.InstanceType, "--count", "1", "--client-token", a.clientToken(spec.ExternalKey), "--iam-instance-profile", "Arn=" + a.InstanceProfileARN, "--network-interfaces", string(networkJSON), "--tag-specifications", string(tagsJSON), "--user-data", userData, "--output", "json", "--no-cli-pager"}
 	output, err := a.run(ctx, args...)
 	if err != nil {
 		return ProviderHandle{}, fmt.Errorf("launch AWS EC2 instance: %w", err)

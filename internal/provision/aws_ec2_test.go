@@ -117,7 +117,7 @@ func TestAWSEC2LifecycleIsIdempotentPrivateAndTagged(t *testing.T) {
 		t.Fatalf("observation=%#v err=%v", observation, err)
 	}
 	joined := strings.Join(runner.runInstanceArgs, " ")
-	if !strings.Contains(joined, `"AssociatePublicIpAddress":false`) || !strings.Contains(joined, "infercrane:external-key") || !strings.Contains(joined, "--client-token") || strings.Contains(joined, "temporary-secret") {
+	if !strings.Contains(joined, `"AssociatePublicIpAddress":false`) || !strings.Contains(joined, "infercrane:external-key") || !strings.Contains(joined, "--client-token") || !strings.Contains(joined, "--count 1") || strings.Contains(joined, "--min-count") || strings.Contains(joined, "--max-count") || strings.Contains(joined, "temporary-secret") {
 		t.Fatalf("unsafe or non-idempotent run-instances args: %s", joined)
 	}
 	if err := provider.DeleteReplica(context.Background(), second); err != nil {
