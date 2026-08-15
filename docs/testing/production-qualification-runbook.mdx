@@ -1,0 +1,410 @@
+---
+title: Production qualification runbook
+description: Qualify one frozen InferCrane commit on RunPod, AWS, GCP, and a GPU Kubernetes cluster without confusing local simulation with provider evidence.
+sidebarTitle: Production qualification
+---
+
+# Production qualification runbook
+
+Use this runbook after local qualification passes for the exact commit you intend to release.
+Run one provider at a time in an isolated environment. Every paid run must have a stable run ID,
+an explicit spending decision, preserved evidence, and independently verified cleanup.
+
+<Warning>
+Real-provider qualification creates billable resources. Never use a shared production account,
+project, cluster, namespace, network, or credential. Never start a second run while a create response
+from the first run is unresolved.
+</Warning>
+
+## What each evidence boundary proves
+
+| Boundary | Proves | Does not prove |
+|---|---|---|
+| Local and simulated | InferCrane state machines, persistence, retries, ownership, APIs, protocols, security, Docker recovery, and Kubernetes API behavior | Provider IAM, quota, stock, networking, GPUs, CUDA, runtime performance, or billing |
+| Real provider | The exact provider, region, network, image, runtime, model, and accelerator combination exercised by that run | Other providers, regions, runtimes, models, or topologies |
+| Human review | Installation clarity, terminal/browser usability, documentation, provider-console inventory, and operator comprehension | Distributed-system correctness |
+
+Do not convert one successful provider run into an “any model, any cloud” claim.
+
+## Operator and automation responsibilities
+
+| You provide or approve | The automation agent can perform |
+|---|---|
+| An isolated provider account/project/cluster and a spending limit | Inspect the repository and bind evidence to the exact commit |
+| Short-lived, least-privilege access installed locally | Run read-only preflight and inventory commands |
+| Private networking between the qualification host and workers | Run the guarded qualification suites after explicit paid-resource approval |
+| Immutable runtime images, model revisions, and runtime specifications | Follow durable operations, preserve logs, diagnose failures, and rerun with the same ID |
+| Interactive SSO/OAuth login when credentials expire | Run guarded cleanup and API-level zero-inventory checks |
+| Final provider-console inventory confirmation | Produce a sanitized qualification report and list remaining uncertainty |
+| Final visual review of terminal, hosted docs, and private console | Fix locally reproducible product or harness defects and rerun affected gates |
+
+An automation agent must not receive secrets in chat. Put credentials in restricted files outside
+the repository and provide only their paths and non-secret resource identifiers. The agent can read
+those files from the authorized workstation, but evidence and terminal summaries must never print
+their contents.
+
+## Phase 0 — Freeze one candidate
+
+Start from a clean worktree. Qualification evidence is commit-addressed and cannot be reused after a
+source change.
+
+```bash
+cd /path/to/infercrane
+
+git status --short
+git rev-parse HEAD
+git describe --tags --always
+```
+
+`git status --short` must print nothing. Record the full commit in the release issue. If a fix is
+required, commit it, discard the old qualification result, and restart from the new commit.
+
+Create a private credential workspace outside the repository:
+
+```bash
+export INFERCRANE_QUALIFICATION_HOME="$HOME/.config/infercrane/qualification"
+
+umask 077
+mkdir -p "$INFERCRANE_QUALIFICATION_HOME"
+openssl rand -hex 32 >"$INFERCRANE_QUALIFICATION_HOME/worker-key"
+chmod 600 "$INFERCRANE_QUALIFICATION_HOME/worker-key"
+```
+
+For portable AWS, GCP, and Kubernetes runs, the same worker key must be installed in the provider
+worker secret and supplied through `INFERCRANE_V1_API_KEY_FILE`. Do not reuse a personal API key or
+a production application key.
+
+## Phase 1 — Complete all non-paid evidence
+
+Run the commit-bound local product gate first:
+
+```bash
+make qualify-product
+make qualify-product-status
+```
+
+Then run the longer scheduled boundary:
+
+```bash
+make qualify-product-nightly
+make qualify-product-status
+```
+
+The local result must not contain `FAILED` or locally runnable `NOT_RUN` gates. Review the report at:
+
+```text
+.infercrane/product-qualification/<full-commit>/report.md
+```
+
+These commands already cover PostgreSQL, races, process recovery, deterministic provider faults,
+Kind, KWOK, public CLI/API journeys, SDKs, Terraform, packaging, fuzzing, and network chaos. Do not
+manually repeat locally qualified feature cases unless a real-provider boundary changes their
+semantics.
+
+## Phase 2 — Prepare immutable runtime specifications
+
+AWS, GCP, and Kubernetes use the portable provider runner. Prepare a private directory containing:
+
+```text
+qualification-specs/
+├── vllm.yaml
+├── sglang.yaml
+└── custom-oci.yaml
+```
+
+Every specification must contain:
+
+- an immutable model commit rather than `main`;
+- an OCI image pinned by `sha256` digest;
+- a runtime/version combination you intend to advertise;
+- the exact provider, region, and accelerator configured in the provider environment;
+- `minReplicas: 1` and `maxReplicas: 1` unless that provider/runtime scaling combination is being
+  qualified explicitly;
+- bounded request and shutdown behavior.
+
+The runner replaces only the top-level deployment name with a unique run-owned name. It does not
+repair placeholder digests, incompatible runtime arguments, or unreachable networking.
+
+Bind the portable control-plane image name to this candidate as well:
+
+```bash
+export INFERCRANE_V1_IMAGE="infercrane:qualification-$(git rev-parse --short HEAD)"
+```
+
+The runner builds that image from the frozen source when it is not already present locally. The
+compatibility-prefixed `INFERCRANE_V1_*` variables name the portable harness contract; they do not
+select an old InferCrane release.
+
+## Phase 3 — RunPod qualification
+
+### Prepare
+
+1. Use an isolated RunPod project with a known balance and no unrelated InferCrane resources.
+2. Create a restricted RunPod API key with only the Pod and Serverless permissions required by the
+   suite.
+3. Create an immutable vLLM Serverless template and record its template ID.
+4. Confirm the selected secure GPU has stock. Low stock is a provider constraint, not a reason to
+   create duplicate runs.
+5. Save the key outside the repository:
+
+```bash
+mkdir -p "$HOME/.config/infercrane"
+chmod 700 "$HOME/.config/infercrane"
+# Save the key as ~/.config/infercrane/runpod-key without printing it.
+chmod 600 "$HOME/.config/infercrane/runpod-key"
+```
+
+### Read-only preflight
+
+```bash
+export RUNPOD_KEY_FILE="$HOME/.config/infercrane/runpod-key"
+export INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID="YOUR_IMMUTABLE_TEMPLATE_ID"
+export INFERCRANE_ACCEPTANCE_RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short HEAD)-preflight"
+
+./scripts/release-acceptance.sh preflight
+```
+
+This validates credentials, dependencies, template configuration, and current inventory without
+creating paid capacity.
+
+### Paid qualification
+
+```bash
+export INFERCRANE_V2_QUALIFICATION_RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short HEAD)-runpod"
+
+./scripts/qualify-product.sh runpod --approve-paid-resources
+./scripts/qualify-product.sh report
+```
+
+This runs Serverless lifecycle and faults plus elastic lifecycle and faults as independent gates.
+It covers cold/warm/zero behavior, cancellation, lost-create-response adoption, real vLLM
+protocols, AIPerf, autoscaling, Release Guard, disconnect/restart behavior, generation-safe drain,
+deletion, and direct inventory.
+
+If the terminal disconnects, rerun the same command with the same
+`INFERCRANE_V2_QUALIFICATION_RUN_ID`. Do not generate another ID.
+
+If cleanup must be invoked explicitly, retain the parent ID and clean each child run:
+
+```bash
+for suffix in serverless serverless-faults elastic elastic-faults; do
+  INFERCRANE_ACCEPTANCE_RUN_ID="$INFERCRANE_V2_QUALIFICATION_RUN_ID-$suffix" \
+    ./scripts/release-acceptance.sh cleanup
+done
+```
+
+Finally, confirm in the RunPod console that the run owns zero Pods and zero Serverless endpoints.
+
+## Phase 4 — AWS EC2 BYOC qualification
+
+### Infrastructure you must prepare
+
+- an isolated AWS account or dedicated test environment;
+- a federated source identity that can assume one narrow InferCrane control-plane role;
+- an external ID and least-privilege EC2 describe/run/tag/terminate permissions;
+- a private subnet and security group;
+- a route from the qualification host to private worker port `8000`;
+- a qualified GPU AMI containing NVIDIA drivers, Docker, and AWS CLI v2;
+- an instance profile that can read only the worker secret;
+- the shared worker key stored in AWS Secrets Manager;
+- sufficient GPU instance quota and capacity in the selected Availability Zone;
+- a cost budget/alarm and run ownership tags.
+
+The portable runner executes the InferCrane control plane in Docker on the qualification host. A
+private EC2 address is useful only when that host can reach the VPC through VPN, peering, a private
+runner, or an equivalent controlled path. Credentials alone cannot satisfy this requirement.
+
+Prefer AWS federation and temporary role credentials; do not create a long-lived administrator
+access key for qualification.
+
+### Private files
+
+Copy `.env.production.example` and `.env.aws.example` into one private file outside the repository,
+replace every placeholder, and restrict it:
+
+```bash
+chmod 600 "$INFERCRANE_QUALIFICATION_HOME/aws.env"
+
+export INFERCRANE_V1_PROVIDER_ENV_FILE="$INFERCRANE_QUALIFICATION_HOME/aws.env"
+export INFERCRANE_V1_SPEC_DIR="$INFERCRANE_QUALIFICATION_HOME/specs/aws"
+export INFERCRANE_V1_API_KEY_FILE="$INFERCRANE_QUALIFICATION_HOME/worker-key"
+export INFERCRANE_ACCEPTANCE_RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short HEAD)-aws"
+```
+
+The environment file points `AWS_CONFIG_DIR` at a read-only AWS CLI configuration directory. The
+runner assumes `INFERCRANE_AWS_ROLE_ARN`; it does not persist the resulting STS credentials.
+
+### Run
+
+```bash
+./scripts/qualify-product.sh aws --approve-paid-resources
+./scripts/qualify-product.sh report
+```
+
+The runner performs doctor, records baseline managed inventory, and qualifies vLLM, SGLang, and
+custom OCI sequentially. Each runtime must pass readiness, buffered and streaming requests, its
+declared protocol checks, a bounded AIPerf run, deletion, InferCrane orphan inspection, and provider
+inventory equality.
+
+Afterward, independently inspect EC2 instances, root/data volumes, ENIs, addresses, and run tags.
+There must be no additional run-owned resource relative to the recorded baseline.
+
+## Phase 5 — GCP Compute BYOC qualification
+
+### Infrastructure you must prepare
+
+- an isolated GCP project with Compute Engine and Secret Manager enabled;
+- a dedicated gcloud configuration using user federation, Workload Identity Federation, or service
+  account impersonation rather than a downloadable service-account key where possible;
+- a least-privilege control identity and a separate worker service account;
+- an isolated VPC/subnet and firewall rule for worker port `8000`;
+- a route from the qualification host to the worker's private address;
+- a qualified immutable VM image and digest-pinned runtime images;
+- the shared worker key in Secret Manager;
+- regional GPU quota and verified zone availability;
+- a billing budget/alert and run labels.
+
+Google Cloud alerts-only budgets do not stop ordinary Compute Engine spending. Treat cleanup and
+quota limits as the hard controls.
+
+The portable runner invokes `gcloud` from the InferCrane container and mounts
+`GCLOUD_CONFIG_DIR` read-only. Confirm the selected configuration is active before starting.
+
+### Private files and run
+
+Copy `.env.production.example` and `.env.gcp.example` into one restricted private environment file,
+then set:
+
+```bash
+chmod 600 "$INFERCRANE_QUALIFICATION_HOME/gcp.env"
+
+export INFERCRANE_V1_PROVIDER_ENV_FILE="$INFERCRANE_QUALIFICATION_HOME/gcp.env"
+export INFERCRANE_V1_SPEC_DIR="$INFERCRANE_QUALIFICATION_HOME/specs/gcp"
+export INFERCRANE_V1_API_KEY_FILE="$INFERCRANE_QUALIFICATION_HOME/worker-key"
+export INFERCRANE_ACCEPTANCE_RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short HEAD)-gcp"
+
+./scripts/qualify-product.sh gcp --approve-paid-resources
+./scripts/qualify-product.sh report
+```
+
+If authentication expires, refresh the same gcloud configuration and rerun with the same run ID.
+Afterward, inspect run-labeled VMs, disks, addresses, forwarding rules, and provider operations.
+The before/after managed inventory must match and no run-owned resource may remain.
+
+## Phase 6 — GPU Kubernetes or KServe qualification
+
+### Start with the local API boundaries
+
+```bash
+make test-kubernetes-manifests
+make test-kubernetes-kind
+make test-kubernetes-kwok
+make test-kubernetes-versions
+```
+
+These prove API ownership, server-side apply, RBAC, restart adoption, deletion, version skew, and
+large-fleet behavior without claiming GPU/runtime execution.
+
+### Real cluster prerequisites
+
+- an isolated cluster or dedicated namespace and GPU node pool;
+- NVIDIA drivers and device plugin verified independently;
+- a trusted restricted kubeconfig and explicit context;
+- namespace-scoped InferCrane provider RBAC;
+- the runtime service account and shared worker Secret;
+- digest-pinned runtime images accessible by the cluster;
+- model storage/download access;
+- KServe installed separately only when testing `kserve` mode;
+- a network and DNS path from the qualification control plane to
+  `<service>.<namespace>.svc:8000`.
+
+The final network requirement is mandatory. The current portable runner starts the control plane in
+Docker and the Kubernetes adapter publishes cluster-local `.svc` addresses. Run the qualifier from
+a host/container environment connected to cluster DNS and the service CIDR, or deploy the
+qualification control plane inside that cluster. A normal laptop kubeconfig proves Kubernetes API
+access but usually does not make ClusterIP services reachable.
+
+Review and apply the namespaced manifests:
+
+```bash
+kubectl apply -f deploy/kubernetes/base/namespace.yaml
+kubectl apply -f deploy/kubernetes/base/service-accounts.yaml
+kubectl apply -f deploy/kubernetes/base/provider-rbac.yaml
+
+kubectl --namespace infercrane-system create secret generic infercrane-worker \
+  --from-file=api-key="$INFERCRANE_QUALIFICATION_HOME/worker-key"
+```
+
+Copy `.env.production.example` and `.env.kubernetes.example` into one restricted private file and
+set the exact context, namespace, workload API, image digest, GPU resource, and product label:
+
+```bash
+chmod 600 "$INFERCRANE_QUALIFICATION_HOME/kubernetes.env"
+
+export INFERCRANE_V1_PROVIDER_ENV_FILE="$INFERCRANE_QUALIFICATION_HOME/kubernetes.env"
+export INFERCRANE_V1_SPEC_DIR="$INFERCRANE_QUALIFICATION_HOME/specs/kubernetes"
+export INFERCRANE_V1_API_KEY_FILE="$INFERCRANE_QUALIFICATION_HOME/worker-key"
+export INFERCRANE_ACCEPTANCE_RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short HEAD)-kubernetes"
+
+./scripts/qualify-product.sh kubernetes --approve-paid-resources
+./scripts/qualify-product.sh report
+```
+
+For `deployment` mode, inspect run-owned Deployments, Services, ReplicaSets, Pods, PVCs, Jobs, and
+events. For `kserve` mode, also inspect the parent InferenceService, its current UID/generation and
+its operator-owned descendants. The namespace must contain no run-owned resources after cleanup.
+
+## Resume, failure, and cleanup rules
+
+1. Keep the same run ID after Ctrl-C, SSH loss, laptop sleep, credential refresh, or a control-plane
+   restart.
+2. Do not erase `.infercrane/`, the acceptance PostgreSQL volume, or provider labels while cleanup is
+   incomplete.
+3. A provider capacity or image-pull failure is a failed qualification even when cleanup succeeds.
+4. Never manually delete a resource until its ownership labels, run ID, and persisted external ID
+   match the failed run.
+5. Cleanup success never changes a failed test into a passed test.
+6. If the source commit changes, start a new qualification ID and preserve the old report.
+
+For AWS, GCP, or Kubernetes, rerun the same provider command with the same
+`INFERCRANE_ACCEPTANCE_RUN_ID`. Passed stages are commit-bound and skipped; incomplete work resumes,
+and the exit trap retries cleanup.
+
+## Final human review
+
+Complete these checks after all automated and provider gates:
+
+- install the release archive or Homebrew formula on a clean machine;
+- run `infercrane init`, `doctor`, deploy/adopt, request, status/watch, inspect, explain, and delete;
+- close and reopen the terminal during a durable operation and reattach by operation ID;
+- review terminal layout at narrow and wide sizes;
+- review hosted Mintlify links, code-copy behavior, light/dark mode, and mobile layout;
+- review the private console's authentication, endpoint switching, monitoring freshness, partial
+  states, responsive layout, and authorization denial paths;
+- independently confirm provider-console zero inventory;
+- revoke or disable temporary qualification credentials.
+
+Record the result in the release checklist. Human review may find a UX defect, but it must not be
+used to override a failed lifecycle or cleanup gate.
+
+## Final release decision
+
+```bash
+make qualify-product-status
+```
+
+Release only when:
+
+- every local gate is `PASSED` for the exact commit;
+- scheduled fuzz/soak/network/Kubernetes evidence is green on the same lineage;
+- every provider/runtime combination advertised as qualified has real evidence;
+- every paid run has zero independently confirmed run-owned resources;
+- human installation and UX review is complete;
+- all remaining gaps are stated as limitations rather than hidden behind an aggregate score.
+
+## Primary credential and access references
+
+- [AWS IAM security best practices](https://docs.aws.amazon.com/IAM/latest/UserGuide/best-practices.html)
+- [Google Cloud Application Default Credentials](https://cloud.google.com/docs/authentication/provide-credentials-adc)
+- [RunPod restricted API keys](https://docs.runpod.io/get-started/api-keys)
+- [Kubernetes kubeconfig security](https://kubernetes.io/docs/concepts/configuration/organize-cluster-access-kubeconfig/)
