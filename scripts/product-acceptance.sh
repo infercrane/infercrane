@@ -351,7 +351,7 @@ reliability() {
 }
 
 release_check() {
-  INFERCRANE_RELEASE_CANDIDATE_TAG=${INFERCRANE_RELEASE_CANDIDATE_TAG:-v2.0.0-rc.2} \
+  INFERCRANE_RELEASE_CANDIDATE_TAG=${INFERCRANE_RELEASE_CANDIDATE_TAG:-v2.0.0-rc.1} \
     "$root/scripts/qualify-release.sh" local
 }
 

@@ -46,6 +46,19 @@ fi
 grep -Fq 'stage modules modules' "$root/scripts/product-acceptance.sh"
 grep -Fq 'for journey in offline first-value modules adoption reliability' "$root/scripts/qualify-product.sh"
 
+# Every release path must default to the candidate named by the authoritative
+# release manifest. Otherwise separately green suites can certify different
+# archives while appearing to qualify the same source commit.
+release_candidate=$(jq -r '.current_milestone' "$root/.release/current.json")
+case "$release_candidate" in v*-rc.*) ;; *) echo "current milestone is not an RC tag: $release_candidate" >&2; exit 1;; esac
+grep -Fq "RELEASE_CANDIDATE_TAG ?= $release_candidate" "$root/Makefile"
+grep -Fq "INFERCRANE_RELEASE_CANDIDATE_TAG:-$release_candidate" "$root/scripts/product-acceptance.sh"
+grep -Fq "INFERCRANE_RELEASE_CANDIDATE_TAG:-$release_candidate" "$root/scripts/qualify-product.sh"
+grep -Fq "INFERCRANE_RELEASE_CANDIDATE_TAG:-$release_candidate" "$root/scripts/qualify-release.sh"
+grep -Fq "tag=\${1:-$release_candidate}" "$root/scripts/build-release-candidate.sh"
+grep -Fq "tag=\${2:-$release_candidate}" "$root/scripts/verify-release-artifacts.sh"
+grep -Fq "tag=\${2:-$release_candidate}" "$root/scripts/generate-homebrew-formula.sh"
+
 if INFERCRANE_PRODUCT_QUALIFICATION_DIR="$temporary" "$root/scripts/qualify-product.sh" runpod >"$temporary/unapproved.log" 2>&1; then
   echo "paid qualification ran without approval" >&2; exit 1
 fi
