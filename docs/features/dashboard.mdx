@@ -26,6 +26,23 @@ reads PostgreSQL or provider credentials directly.
 Missing or forbidden evidence remains explicit. A failed optional panel does not make a deployment
 look healthy, and an unavailable measurement is never rendered as zero.
 
+## First-run paths
+
+**New inference** starts from the user's existing situation instead of requiring infrastructure
+migration:
+
+1. **Use a model API** registers OpenRouter or another OpenAI-compatible provider. Configuration
+   alone sends no traffic and authorizes no spend.
+2. **Connect existing inference** discovers vLLM, SGLang, LiteLLM, or another compatible endpoint
+   and starts observe-only.
+3. **Deploy a model** starts from a reviewed model configuration and then asks for explicit
+   infrastructure, runtime, accelerator, compute mode, region, and replica bounds.
+
+The deployment templates mirror InferCrane's reviewed curated recipes. They are configuration-only
+starting points—not benchmark, price, compatibility, or performance claims. The console never
+chooses hardware or displays a cost estimate without grounded evidence. Deployment operations are
+durable and remain reattachable after the browser closes.
+
 The monitoring page queries only the authenticated control API. PostgreSQL request evidence and
 lifecycle events form the initial local evidence store; OpenTelemetry GenAI semantics define the
 portable names and dimensions. Runtime-internal and GPU metrics remain unavailable until a
