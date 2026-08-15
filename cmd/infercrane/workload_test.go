@@ -22,3 +22,15 @@ func TestWorkloadCommandsAcceptDocumentedPathBeforeFlags(t *testing.T) {
 		t.Fatalf("standard runtime build boundary error=%v", err)
 	}
 }
+
+func TestWorkloadInitMissingServingSourceIsActionable(t *testing.T) {
+	err := workloadInitCommand([]string{filepath.Join(t.TempDir(), "missing-model")})
+	if err == nil {
+		t.Fatal("workload init accepted a project without a model or recipe")
+	}
+	for _, expected := range []string{"--model MODEL", "--recipe NAME", "infercrane recipes curated"} {
+		if !strings.Contains(err.Error(), expected) {
+			t.Fatalf("error %q does not explain %q", err, expected)
+		}
+	}
+}

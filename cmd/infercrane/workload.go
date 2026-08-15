@@ -64,6 +64,9 @@ func workloadInitCommand(args []string) error {
 	if fs.NArg() == 1 {
 		directory = fs.Arg(0)
 	}
+	if strings.TrimSpace(*model) == "" && strings.TrimSpace(*recipeName) == "" {
+		return errors.New("workload init requires --model MODEL or --recipe NAME; list reviewed recipes with `infercrane recipes curated`")
+	}
 	modelRevision := ""
 	if *recipeName != "" {
 		if *model != "" {

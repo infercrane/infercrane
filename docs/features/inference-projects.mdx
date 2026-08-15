@@ -29,6 +29,9 @@ infercrane workload init ./fraud-explainer \
 ```
 </CodeGroup>
 
+`workload init` requires one serving source: either `--model MODEL` or `--recipe NAME`. If you have
+not selected one yet, run `infercrane recipes curated` to inspect the reviewed starting points.
+
 `workload init` writes a valid DeploymentSpec with a JSON Schema directive understood by YAML
 language servers in VS Code, JetBrains editors, and other schema-aware tools. Fields, enums, and
 unknown keys are checked while you type. A curated recipe also pins the model commit. Recipes are
