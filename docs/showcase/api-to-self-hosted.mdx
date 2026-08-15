@@ -1,0 +1,126 @@
+---
+title: Start with an API, add your own GPUs later
+description: Keep one application model alias while InferCrane governs external and self-hosted inference behind it.
+---
+
+# Start with an API, add your own GPUs later
+
+You do not need GPU infrastructure to get value from InferCrane. Start with a model API, add
+budgets and evidence, then introduce customer-operated capacity when measurements justify it. The
+application continues using one model name throughout.
+
+## 1. Connect the API
+
+```bash
+export OPENROUTER_API_KEY='...'
+infercrane provider connect openrouter-main \
+  --model openai/gpt-4.1-mini \
+  --from-env OPENROUTER_API_KEY
+```
+
+`--from-env` stores only the variable name. The variable and its value must exist in the control-plane
+environment. InferCrane does not put the provider key in endpoint configuration, browser state, or
+CLI output. This is non-billable configuration; it does not route a request.
+
+## 2. Create the stable application endpoint
+
+```bash
+infercrane logical-model create support
+infercrane endpoint create support-production \
+  --model support \
+  --environment production
+
+infercrane endpoint bind support-production \
+  --name api-primary \
+  --connection openrouter-main \
+  --request-limit 10000 \
+  --cost-limit-usd 100.00 \
+  --max-request-cost-usd 0.25 \
+  --acknowledge-external-data \
+  --enable-external
+
+infercrane endpoint plan support-production \
+  --policy manual \
+  --bindings api-primary
+```
+
+Every external binding has its own privacy acknowledgement and hard authorization ceiling. The
+connection itself cannot silently authorize another endpoint to spend.
+
+## 3. Call one endpoint
+
+<CodeGroup>
+```python Python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="https://inference.example.com/v1",
+    api_key="INFERCRANE_ENDPOINT_TOKEN",
+)
+
+response = client.responses.create(
+    model="support-production",
+    input="Summarize the incident report.",
+)
+```
+
+```typescript TypeScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "https://inference.example.com/v1",
+  apiKey: "INFERCRANE_ENDPOINT_TOKEN",
+});
+
+const response = await client.responses.create({
+  model: "support-production",
+  input: "Summarize the incident report.",
+});
+```
+
+```bash curl
+curl https://inference.example.com/v1/responses \
+  -H "Authorization: Bearer $INFERCRANE_ENDPOINT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"support-production","input":"Summarize the incident report."}'
+```
+</CodeGroup>
+
+## 5. Add self-hosted capacity without changing the app
+
+```bash
+infercrane deploy meta-llama/Llama-3.1-8B-Instruct \
+  --name support-self-hosted \
+  --cloud YOUR_CLOUD \
+  --gpu YOUR_GPU
+
+infercrane endpoint bind support-production \
+  --name self-hosted \
+  --deployment support-self-hosted
+
+infercrane endpoint plan support-production \
+  --policy primary-fallback \
+  --bindings self-hosted,api-primary
+```
+
+The new plan is a candidate. Validate it with benchmark or replay evidence, evaluate Release Guard,
+and promote explicitly. InferCrane does not shadow or duplicate user traffic silently.
+
+```bash
+infercrane endpoint guard support-production --evaluate
+infercrane endpoint inspect support-production
+```
+
+The application still calls `model="support-production"`. What changed is the governed serving
+plan, not the application contract.
+
+## What this proves
+
+- API-first onboarding without building GPU infrastructure first.
+- One stable model alias across external and customer-operated compute.
+- Provider keys remain server-side references.
+- External data transmission and spend are explicit and bounded.
+- Migration is an immutable candidate plus evidence, not a risky cutover script.
+
+Real provider protocol behavior and billing remain provider-specific qualification. Local fixtures
+prove InferCrane's policy and lifecycle logic, not a provider's production semantics.

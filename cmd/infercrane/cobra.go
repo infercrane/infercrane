@@ -68,6 +68,7 @@ var publicCommandSpecs = []commandSpec{
 	{use: "integrations [flags]", short: "Inspect registered and qualified integration capabilities", group: "understand"},
 	{use: "system instances [flags]", short: "Inspect live control-plane HA membership", group: "understand"},
 	{use: "target ACTION [arguments]", short: "Register or list existing inference targets", group: "admin"},
+	{use: "provider ACTION [arguments]", short: "Connect and manage external inference APIs", group: "admin"},
 	{use: "context ACTION [arguments]", short: "List, inspect, or select CLI contexts", group: "admin"},
 	{use: "auth status [flags]", short: "Show the authenticated control-plane identity", group: "admin"},
 	{use: "tenant ACTION [arguments]", short: "Manage isolated tenants", group: "admin"},
@@ -154,7 +155,7 @@ func addHelpFlags(command *cobra.Command, name string) {
 	boolFlag := func(flag, help string) { command.Flags().Bool(flag, false, help) }
 	intFlag := func(flag string, value int, help string) { command.Flags().Int(flag, value, help) }
 	switch name {
-	case "init", "workload", "evaluation", "doctor", "connect", "adopt", "alert", "admission", "async", "plan", "deploy", "apply", "request", "deployments", "endpoints", "endpoint", "environment", "logical-model", "status", "logs", "events", "inspect", "explain", "benchmark", "replay", "capacity", "artifact", "sandbox", "training", "finops", "autopilot", "session", "burst", "recipe", "recipes", "lab", "passport", "recommend", "slo", "delete", "orphans", "operation", "integrations", "observe", "inbox", "target", "auth", "system", "secret", "external", "rollout":
+	case "init", "workload", "evaluation", "doctor", "connect", "adopt", "alert", "admission", "async", "plan", "deploy", "apply", "request", "deployments", "endpoints", "endpoint", "environment", "logical-model", "status", "logs", "events", "inspect", "explain", "benchmark", "replay", "capacity", "artifact", "sandbox", "training", "finops", "autopilot", "session", "burst", "recipe", "recipes", "lab", "passport", "recommend", "slo", "delete", "orphans", "operation", "integrations", "observe", "inbox", "target", "provider", "auth", "system", "secret", "external", "rollout":
 		stringFlag("output", "human", "output format: human or json")
 	}
 	switch name {
@@ -268,6 +269,7 @@ func addHelpFlags(command *cobra.Command, name string) {
 		stringFlag("name", "primary", "binding name")
 		stringFlag("deployment", "", "deployment-backed binding")
 		stringFlag("target", "", "external target-backed binding")
+		stringFlag("connection", "", "configured external provider connection")
 		stringFlag("ownership", "lifecycle-managed", "binding ownership mode")
 		stringFlag("external-adapter", "", "authenticated external adapter")
 		stringFlag("secret-reference", "", "external credential reference ID")
@@ -391,6 +393,12 @@ func addHelpFlags(command *cobra.Command, name string) {
 		intFlag("signal-max-age-seconds", 30, "maximum queue evidence age")
 		boolFlag("acknowledge-external-data", "acknowledge external data transmission")
 		boolFlag("enable", "enable policy")
+	case "provider":
+		stringFlag("adapter", "openrouter", "openrouter or openai-compatible-external")
+		stringFlag("url", "", "provider OpenAI-compatible base URL")
+		stringFlag("model", "", "provider model identifier")
+		stringFlag("secret-reference", "", "existing secret reference ID")
+		stringFlag("from-env", "", "control-plane environment variable containing the provider credential")
 	case "operation":
 		stringFlag("wait-timeout", "", "stop watching locally without cancelling the operation")
 	case "rollout":
@@ -429,7 +437,8 @@ func completionFor(command string) func(*cobra.Command, []string, string) ([]str
 		"observe":     {"--watch", "--diagnose", "--events", "--window", "--output"},
 		"inbox":       {"--limit", "--output"},
 		"rollout":     {"--requests", "--concurrency", "--acknowledge-validation-cost", "--require-quality", "--minimum-quality-score", "--max-quality-regression", "--wait", "--wait-timeout", "--output"},
-		"endpoint":    {"--model", "--environment", "--name", "--deployment", "--target", "--ownership", "--policy", "--bindings", "--evaluate", "--window", "--disable", "--minimum-requests", "--max-ttft-regression", "--yes", "--output"},
+		"endpoint":    {"--model", "--environment", "--name", "--deployment", "--target", "--connection", "--ownership", "--policy", "--bindings", "--evaluate", "--window", "--disable", "--minimum-requests", "--max-ttft-regression", "--yes", "--output"},
+		"provider":    {"--adapter", "--url", "--model", "--secret-reference", "--from-env", "--output"},
 		"environment": {"--to", "--policy", "--idempotency-key", "--yes", "--output"},
 	}
 	return func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {

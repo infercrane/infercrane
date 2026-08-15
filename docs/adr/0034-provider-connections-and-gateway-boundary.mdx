@@ -1,0 +1,79 @@
+---
+title: "ADR 0034: Provider connections and the gateway boundary"
+description: Make external model APIs a first-class onboarding surface while keeping provider translation replaceable and spend fail-closed.
+---
+
+# ADR 0034: Provider connections and the gateway boundary
+
+Status: Accepted
+
+## Context
+
+Many application teams begin with hosted model APIs rather than GPU infrastructure. They still need
+stable model aliases, credential isolation, request evidence, admission, budgets, fallback, and a
+safe path to self-hosted capacity. Requiring a deployment before InferCrane provides value excludes
+that audience. Making LiteLLM configuration the InferCrane domain model would instead couple the
+control plane to one gateway implementation and duplicate its provider churn.
+
+## Decision
+
+InferCrane exposes one OpenAI-compatible application endpoint across externally hosted and
+self-hosted bindings. It owns the stable endpoint, immutable serving plan, routing policy, hard
+budget reservations, privacy acknowledgement, request evidence, and release decision.
+
+A tenant-scoped `ProviderConnection` records only:
+
+- a stable connection name;
+- a qualified adapter identity;
+- an existing external target reference;
+- a secret-reference ID.
+
+It never stores a provider key. Creating a connection does not enable traffic or spend. An endpoint
+binding snapshots its own explicit privacy acknowledgement and hard request, total-cost, and
+worst-case-per-request limits. Deleting connection metadata does not mutate immutable bindings.
+
+The first adapters are direct OpenRouter and generic OpenAI-compatible APIs. Operator-managed
+LiteLLM remains supported as an adopted OpenAI-compatible gateway. A future managed gateway
+backend may execute a pinned upstream LiteLLM or Envoy AI Gateway process, but only behind a
+versioned gateway contract and conformance suite. Its YAML or database schema may not become the
+InferCrane domain model.
+
+InferCrane will not fork LiteLLM for this feature. The upstream non-enterprise tree is MIT-licensed,
+but a fork would transfer provider protocol churn, vulnerability response, and upgrade ownership to
+InferCrane without improving the product moat.
+
+## Consequences
+
+- API-only teams can start with a provider and later add self-hosted capacity without changing the
+  application model alias.
+- Browser and CLI clients handle only secret references; provider credentials resolve in the
+  control plane.
+- Connections are reusable while every traffic activation remains independently budgeted and
+  consented.
+- Provider translation remains replaceable; direct adapters and external gateways can coexist.
+- Provider billing accuracy, protocol extensions, and streaming behavior require adapter-specific
+  qualification and cannot be inferred from the OpenAI-compatible label.
+
+## Alternatives rejected
+
+- Building a second general-purpose provider gateway duplicates mature upstream routing and
+  translation projects.
+- Forking LiteLLM creates a permanent maintenance branch for no domain advantage.
+- Storing raw provider keys in PostgreSQL or the browser expands the credential blast radius.
+- Enabling a provider connection immediately makes configuration unexpectedly billable.
+- Making budgets global to a connection allows one endpoint to consume another endpoint's safety
+  envelope.
+
+## Verification
+
+- `TestProviderConnectionIsTenantScopedReferenceOnlyAndIdempotent` proves tenant isolation,
+  adapter consistency, idempotency, and non-destructive deletion.
+- `TestProviderConnectionCompilesBindingWithoutBrowserCredentialMetadata` proves that a binding
+  receives the configured adapter and credential reference and rejects client overrides.
+- `TestEndpointBindUsesProviderConnectionAndStillRequiresConsent` proves the short CLI path remains
+  fail-closed without explicit privacy acknowledgement and budgets.
+- The API contract publishes provider-connection create, list, and delete routes for generated
+  clients and the private console.
+
+See [External capacity](/features/external-capacity), [Endpoints](/features/endpoints), and
+[LiteLLM](/integrations/litellm).

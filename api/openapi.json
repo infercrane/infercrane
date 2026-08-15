@@ -732,6 +732,9 @@
             ],
             "type": "string"
           },
+          "provider_connection": {
+            "type": "string"
+          },
           "target": {
             "type": "string"
           }
@@ -1291,6 +1294,34 @@
         },
         "required": [
           "operation"
+        ],
+        "type": "object"
+      },
+      "ProviderConnectionCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "adapter": {
+            "enum": [
+              "openrouter",
+              "openai-compatible-external"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "secret_reference_id": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "adapter",
+          "target",
+          "secret_reference_id"
         ],
         "type": "object"
       },
@@ -6423,6 +6454,133 @@
         ]
       }
     },
+    "/api/v1/provider-connections": {
+      "get": {
+        "operationId": "listProviderConnections",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List reusable external provider connections",
+        "tags": [
+          "Providers"
+        ]
+      },
+      "post": {
+        "operationId": "createProviderConnection",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderConnectionCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Create a secret-reference-only external provider connection",
+        "tags": [
+          "Providers"
+        ]
+      }
+    },
+    "/api/v1/provider-connections/{name}": {
+      "delete": {
+        "operationId": "deleteProviderConnection",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Delete provider configuration without mutating immutable endpoint bindings",
+        "tags": [
+          "Providers"
+        ]
+      }
+    },
     "/api/v1/recipes": {
       "get": {
         "operationId": "listRecipes",
@@ -7553,6 +7711,9 @@
     },
     {
       "name": "Operations"
+    },
+    {
+      "name": "Providers"
     },
     {
       "name": "Recipes"

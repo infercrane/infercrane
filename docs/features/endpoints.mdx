@@ -101,22 +101,15 @@ request/cost reservations fail closed before any bytes are sent:
 
 ```bash
 export MANAGED_MODEL_API_KEY='...'
-infercrane secret create managed-model-api \
-  --from-env MANAGED_MODEL_API_KEY \
-  --output json
-
-infercrane target add managed-coder \
-  --provider openai-compatible-external \
-  --runtime openai-compatible \
+infercrane provider connect managed-coder \
+  --adapter openai-compatible-external \
   --url https://models.example.com/v1 \
-  --upstream-model provider/coder-model
+  --model provider/coder-model \
+  --from-env MANAGED_MODEL_API_KEY
 
 infercrane endpoint bind coder-production \
   --name managed-fallback \
-  --target managed-coder \
-  --ownership traffic-managed \
-  --external-adapter openai-compatible-external \
-  --secret-reference SECRET_REFERENCE_ID \
+  --connection managed-coder \
   --request-limit 1000 \
   --cost-limit-usd 25.00 \
   --max-request-cost-usd 0.10 \

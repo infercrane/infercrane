@@ -20,6 +20,14 @@ func (s *Store) CreateSecretReference(ctx context.Context, tenant, name, resolve
 	if err := secrets.ValidateReference(domain.SecretReference{Resolver: resolver, Reference: reference}); err != nil {
 		return domain.SecretReference{}, err
 	}
+	if existing, err := s.secretReferenceForTenantByName(ctx, tenant, name); err == nil {
+		if existing.Resolver == resolver && existing.Reference == reference {
+			return existing, nil
+		}
+		return domain.SecretReference{}, fmt.Errorf("%w: secret reference name already exists with different configuration", ErrConflict)
+	} else if !errors.Is(err, ErrNotFound) {
+		return domain.SecretReference{}, err
+	}
 	id, err := newID()
 	if err != nil {
 		return domain.SecretReference{}, err
@@ -27,12 +35,30 @@ func (s *Store) CreateSecretReference(ctx context.Context, tenant, name, resolve
 	stamp := now()
 	_, err = s.ExecContext(ctx, `INSERT INTO secret_references(id,tenant_id,name,resolver,reference,created_at,updated_at) VALUES(?,?,?,?,?,?,?)`, id, tenant, name, resolver, reference, stamp, stamp)
 	if isUniqueViolation(err) {
-		return domain.SecretReference{}, fmt.Errorf("%w: secret reference name already exists", ErrConflict)
+		existing, lookupErr := s.secretReferenceForTenantByName(ctx, tenant, name)
+		if lookupErr == nil && existing.Resolver == resolver && existing.Reference == reference {
+			return existing, nil
+		}
+		return domain.SecretReference{}, fmt.Errorf("%w: secret reference name already exists with different configuration", ErrConflict)
 	}
 	if err != nil {
 		return domain.SecretReference{}, err
 	}
 	return domain.SecretReference{ID: id, TenantID: tenant, Name: name, Resolver: resolver, Reference: reference, CreatedAt: parseTime(stamp), UpdatedAt: parseTime(stamp)}, nil
+}
+
+func (s *Store) secretReferenceForTenantByName(ctx context.Context, tenant, name string) (domain.SecretReference, error) {
+	var out domain.SecretReference
+	var created, updated string
+	err := s.QueryRowContext(ctx, `SELECT id,tenant_id,name,resolver,reference,created_at,updated_at FROM secret_references WHERE tenant_id=? AND name=?`, tenant, name).Scan(&out.ID, &out.TenantID, &out.Name, &out.Resolver, &out.Reference, &created, &updated)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.SecretReference{}, ErrNotFound
+	}
+	if err != nil {
+		return domain.SecretReference{}, err
+	}
+	out.CreatedAt, out.UpdatedAt = parseTime(created), parseTime(updated)
+	return out, nil
 }
 
 func (s *Store) SecretReferenceForTenant(ctx context.Context, tenant, id string) (domain.SecretReference, error) {

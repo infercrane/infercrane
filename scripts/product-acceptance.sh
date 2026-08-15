@@ -191,17 +191,31 @@ PY
     jq -e '.policy.max_concurrency == 2 and .policy.max_queue_depth == 3' >/dev/null || return
   cli admission get "$endpoint" --output json | jq -e '.policy.max_output_tokens == 64' >/dev/null || return
 
-  secret=$(cli secret create "external-$suffix" --from-env INFERCRANE_EXTERNAL_ACCEPTANCE_KEY --output json) || return
-  secret_id=$(printf '%s\n' "$secret" | jq -r '.secret.id') || return
-  external_target="external-$suffix"
-  cli target add "$external_target" --url https://openrouter.ai/api/v1 --provider openrouter \
-    --runtime openai-compatible-api --upstream-model openai/gpt-oss-20b --output json |
-    jq -e --arg name "$external_target" '.target.name == $name' >/dev/null || return
+  provider_connection="model-api-$suffix"
+  provider=$(cli provider connect "$provider_connection" --adapter openrouter \
+    --model openai/gpt-oss-20b --from-env INFERCRANE_EXTERNAL_ACCEPTANCE_KEY --output json) || return
+  printf '%s\n' "$provider" |
+    jq -e --arg name "$provider_connection" '.connection.name == $name and .connection.adapter == "openrouter"' >/dev/null || return
+  secret_id=$(printf '%s\n' "$provider" | jq -r '.connection.secret_reference_id') || return
+  cli provider list --output json |
+    jq -e --arg name "$provider_connection" 'map(select(.name == $name)) | length == 1' >/dev/null || return
+  external_target="provider-$provider_connection"
   cli external configure qwen-prod --target "$external_target" --secret-reference "$secret_id" \
     --request-limit 3 --cost-limit-usd 0.30 --max-request-cost-usd 0.10 \
     --acknowledge-external-data --output json |
     jq -e '.policy.enabled == false and .policy.privacy_acknowledged == true and .policy.request_limit == 3' >/dev/null || return
   cli external inspect qwen-prod --output json | jq -e '.policy.cost_limit_microusd == 300000' >/dev/null || return
+  managed_binding="managed-api-$suffix"
+  cli endpoint bind "$endpoint" --name "$managed_binding" --connection "$provider_connection" \
+    --request-limit 3 --cost-limit-usd 0.30 --max-request-cost-usd 0.10 \
+    --acknowledge-external-data --enable-external --output json |
+    jq -e --arg name "$managed_binding" '.binding.name == $name and .binding.kind == "external" and .binding.ownership_mode == "traffic-managed" and .binding.config.adapter == "openrouter" and .binding.config.enabled == true' >/dev/null || return
+  cli provider delete "$provider_connection" --output json |
+    jq -e --arg name "$provider_connection" '.connection == $name and .deleted == true and .existing_bindings_unchanged == true' >/dev/null || return
+  cli endpoint inspect "$endpoint" |
+    jq -e --arg name "$managed_binding" '.bindings | map(select(.name == $name and .config.adapter == "openrouter")) | length == 1' >/dev/null || return
+  cli provider list --output json |
+    jq -e --arg name "$provider_connection" 'map(select(.name == $name)) | length == 0' >/dev/null || return
   cli alert configure "$endpoint" --name operations --webhook https://alerts.example.com/infercrane \
     --secret-reference "$secret_id" --minimum-severity warning --output json |
     jq -e '.policy.name == "operations" and .policy.max_attempts == 3' >/dev/null || return

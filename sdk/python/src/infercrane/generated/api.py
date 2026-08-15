@@ -395,6 +395,18 @@ class ControlAPI:
         path = "/targets"
         return cast(dict[str, Any], self._transport.request("POST", path, body=body))
 
+    def list_provider_connections(self) -> ObjectList:
+        path = "/provider-connections"
+        return cast(ObjectList, self._transport.request("GET", path))
+
+    def create_provider_connection(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = "/provider-connections"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
+    def delete_provider_connection(self, name: str) -> dict[str, Any]:
+        path = f"/provider-connections/{quote(name, safe='')}"
+        return cast(dict[str, Any], self._transport.request("DELETE", path))
+
     def list_orphans(self) -> ObjectList:
         path = "/orphans"
         return cast(ObjectList, self._transport.request("GET", path))

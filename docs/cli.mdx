@@ -375,12 +375,15 @@ infercrane endpoint promote coder-production PLAN_ID
 Authenticated external APIs add provider-neutral policy flags to `endpoint bind`:
 
 ```bash
+infercrane provider connect managed-coder \
+  --adapter openai-compatible-external \
+  --url https://models.example.com/v1 \
+  --model company/coder \
+  --from-env MANAGED_MODEL_API_KEY
+
 infercrane endpoint bind coder-production \
   --name managed-fallback \
-  --target managed-coder \
-  --ownership traffic-managed \
-  --external-adapter openai-compatible-external \
-  --secret-reference SECRET_REFERENCE_ID \
+  --connection managed-coder \
   --request-limit 1000 \
   --cost-limit-usd 25.00 \
   --max-request-cost-usd 0.10 \
@@ -390,6 +393,14 @@ infercrane endpoint bind coder-production \
 
 The control plane rejects raw credentials, missing consent, absent hard limits, cross-tenant secret
 references, and adapter/target mismatches before creating the binding.
+
+`infercrane provider list` shows reusable connection metadata without resolving credentials.
+`infercrane provider delete NAME` removes only the reusable configuration; immutable endpoint
+bindings and their release history are deliberately unchanged.
+
+`--from-env` creates or reuses a secret reference by variable name, making a disconnected retry
+idempotent without accepting the raw key. Use `--secret-reference ID` instead when secret references
+are provisioned separately. The two flags are mutually exclusive.
 
 Stage one environment's active immutable plan as another endpoint's candidate:
 

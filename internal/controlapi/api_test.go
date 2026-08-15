@@ -58,6 +58,38 @@ type fakeEndpointStore struct {
 	binding          domain.BackendBinding
 }
 
+type fakeProviderEndpointStore struct {
+	*fakeEndpointStore
+	connections []domain.ProviderConnection
+}
+
+func (f *fakeProviderEndpointStore) CreateProviderConnection(_ context.Context, tenant string, item domain.ProviderConnection) (domain.ProviderConnection, error) {
+	item.ID, item.TenantID = "connection", tenant
+	item.TargetName, item.SecretReferenceName = "provider-openrouter", "openrouter"
+	f.connections = append(f.connections, item)
+	return item, f.err
+}
+func (f *fakeProviderEndpointStore) ProviderConnectionForTenant(_ context.Context, _, name string) (domain.ProviderConnection, error) {
+	for _, item := range f.connections {
+		if item.Name == name {
+			return item, f.err
+		}
+	}
+	return domain.ProviderConnection{}, domain.ErrNotFound
+}
+func (f *fakeProviderEndpointStore) ProviderConnectionsForTenant(context.Context, string) ([]domain.ProviderConnection, error) {
+	return f.connections, f.err
+}
+func (f *fakeProviderEndpointStore) DeleteProviderConnectionForTenant(_ context.Context, _, name string) error {
+	for index, item := range f.connections {
+		if item.Name == name {
+			f.connections = append(f.connections[:index], f.connections[index+1:]...)
+			return f.err
+		}
+	}
+	return domain.ErrNotFound
+}
+
 func (f *fakeEndpointStore) CreateEnvironment(context.Context, string, domain.Environment) (domain.Environment, error) {
 	return domain.Environment{}, f.err
 }
@@ -974,6 +1006,29 @@ func TestManagedExternalEndpointBindingRequiresConsentReferenceAndHardBudget(t *
 				t.Fatalf("response=%d %s", response.Code, response.Body.String())
 			}
 		})
+	}
+}
+
+func TestProviderConnectionCompilesBindingWithoutBrowserCredentialMetadata(t *testing.T) {
+	base := &fakeStore{targets: []domain.Target{{ID: "target", Name: "provider-openrouter", Provider: "openrouter", Runtime: "openai-compatible-api", URL: "https://openrouter.ai/api/v1", UpstreamModel: "provider/model"}}}
+	endpointStore := &fakeEndpointStore{fakeStore: base, resolvedEndpoint: domain.ResolvedEndpoint{Endpoint: domain.Endpoint{ID: "endpoint", TenantID: "global", Name: "coder-production"}}}
+	store := &fakeProviderEndpointStore{fakeEndpointStore: endpointStore, connections: []domain.ProviderConnection{{ID: "connection", TenantID: "global", Name: "openrouter-main", Adapter: "openrouter", TargetID: "target", TargetName: "provider-openrouter", SecretReferenceID: "secret", SecretReferenceName: "openrouter"}}}
+	handler := (API{Store: store, APIKey: "secret"}).Handler()
+	body := `{"name":"fallback","kind":"external","ownership_mode":"traffic-managed","provider_connection":"openrouter-main","config":{"enabled":true,"privacy_acknowledged":true,"request_limit":100,"cost_limit_microusd":1000000,"max_request_cost_microusd":10000}}`
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/endpoints/coder-production/bindings", strings.NewReader(body))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || store.binding.TargetID != "target" || !strings.Contains(store.binding.ConfigJSON, `"adapter":"openrouter"`) || !strings.Contains(store.binding.ConfigJSON, `"secret_reference_id":"secret"`) {
+		t.Fatalf("response=%d %s binding=%#v", response.Code, response.Body.String(), store.binding)
+	}
+	conflict := strings.Replace(body, `"config":{`, `"config":{"adapter":"openai-compatible-external",`, 1)
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/endpoints/coder-production/bindings", strings.NewReader(conflict))
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), "conflicts") {
+		t.Fatalf("conflicting connection metadata response=%d %s", response.Code, response.Body.String())
 	}
 }
 

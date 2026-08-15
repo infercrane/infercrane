@@ -145,6 +145,52 @@ func TestManagedExternalBindingIsImmutableTenantSafeAndHardBudgeted(t *testing.T
 	}
 }
 
+func TestProviderConnectionIsTenantScopedReferenceOnlyAndIdempotent(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	suffix := strings.ReplaceAll(time.Now().UTC().Format("150405.000000000"), ".", "-")
+	tenant := "provider-connection-" + suffix
+	if err := s.CreateTenant(ctx, tenant, "Provider Connection"); err != nil {
+		t.Fatal(err)
+	}
+	target, err := s.AddTargetForTenant(ctx, tenant, domain.Target{Name: "openrouter-main", URL: "https://openrouter.ai/api/v1", Provider: "openrouter", Runtime: "openai-compatible-api", UpstreamModel: "provider/model"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := s.CreateSecretReference(ctx, tenant, "openrouter", "env", "OPENROUTER_API_KEY")
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := domain.ProviderConnection{Name: "primary", Adapter: "openrouter", TargetID: target.ID, SecretReferenceID: secret.ID}
+	created, err := s.CreateProviderConnection(ctx, tenant, input)
+	if err != nil || created.TargetName != target.Name || created.SecretReferenceName != secret.Name {
+		t.Fatalf("created=%#v err=%v", created, err)
+	}
+	retry, err := s.CreateProviderConnection(ctx, tenant, input)
+	if err != nil || retry.ID != created.ID {
+		t.Fatalf("retry=%#v err=%v", retry, err)
+	}
+	if _, err = s.ProviderConnectionForTenant(ctx, "global", created.Name); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-tenant connection visible: %v", err)
+	}
+	rows, err := s.ProviderConnectionsForTenant(ctx, tenant)
+	if err != nil || len(rows) != 1 || rows[0].SecretReferenceID != secret.ID {
+		t.Fatalf("rows=%#v err=%v", rows, err)
+	}
+	if _, err = s.CreateProviderConnection(ctx, tenant, domain.ProviderConnection{Name: "wrong-adapter", Adapter: "openai-compatible-external", TargetID: target.ID, SecretReferenceID: secret.ID}); err == nil {
+		t.Fatal("adapter/target mismatch accepted")
+	}
+	if err = s.DeleteProviderConnectionForTenant(ctx, tenant, created.Name); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.ProviderConnectionForTenant(ctx, tenant, created.Name); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("deleted connection still visible: %v", err)
+	}
+	if _, err = s.TargetForTenantByName(ctx, tenant, target.Name); err != nil {
+		t.Fatalf("deleting connection mutated its external target: %v", err)
+	}
+}
+
 func TestLegacyDeploymentBackfillsStableEndpoint(t *testing.T) {
 	ctx := context.Background()
 	s := openStore(t, ctx)

@@ -252,6 +252,8 @@ func runLegacy(ctx context.Context, args []string) error {
 		return operationCommand(ctx, cfg, args[1:])
 	case "target":
 		return targetAPICommand(ctx, cfg, args[1:])
+	case "provider":
+		return providerCommand(ctx, cfg, args[1:])
 	case "orphans":
 		return orphanAPICommand(ctx, cfg, args[1:])
 	case "integrations":

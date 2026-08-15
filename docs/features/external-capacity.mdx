@@ -29,25 +29,48 @@ They are configured separately so a deployment policy cannot silently change an 
 See [Stable endpoints](/features/endpoints#add-an-authenticated-managed-api) for first-class endpoint
 bindings.
 
-## Configure OpenRouter fallback
+## Connect a provider once
 
-Inject the credential into the control-plane environment, then register only its reference:
+Inject the credential into the control-plane environment, then connect the exact model mapping in
+one retry-safe command:
 
 ```bash
 export OPENROUTER_API_KEY='...'
-infercrane secret create openrouter --from-env OPENROUTER_API_KEY --output json
+infercrane provider connect openrouter-main \
+  --model openai/gpt-4.1-mini \
+  --from-env OPENROUTER_API_KEY
+
+infercrane provider list
 ```
 
-Register the exact endpoint and model mapping. Replace `SECRET_REFERENCE_ID` with the returned ID:
+The command stores only the environment-variable name. The raw value must be available to the
+control plane and never enters the request, database, browser, or CLI output. Advanced automation
+may create a reference separately with `infercrane secret create` and pass its ID using
+`--secret-reference`.
+
+Creating a provider connection does not send traffic or authorize spend. Use it as an immutable
+endpoint binding only with explicit per-binding consent and budgets:
 
 ```bash
-infercrane target add openrouter-qwen \
-  --provider openrouter \
-  --url https://openrouter.ai/api/v1 \
-  --upstream-model qwen/qwen3-8b
+infercrane endpoint bind support-production \
+  --name openrouter-fallback \
+  --connection openrouter-main \
+  --request-limit 100 \
+  --cost-limit-usd 10.00 \
+  --max-request-cost-usd 0.10 \
+  --acknowledge-external-data \
+  --enable-external
+```
+
+For the older deployment-scoped overflow policy, the generated target is named
+`provider-openrouter-main`. Resolve the reference ID from the reusable connection metadata:
+
+```bash
+SECRET_REFERENCE_ID=$(infercrane provider list --output json |
+  jq -r '.[] | select(.name == "openrouter-main") | .secret_reference_id')
 
 infercrane external configure qwen-prod \
-  --target openrouter-qwen \
+  --target provider-openrouter-main \
   --adapter openrouter \
   --secret-reference SECRET_REFERENCE_ID \
   --request-limit 100 \
@@ -69,7 +92,7 @@ For queue overflow, opt in to hysteresis and cooldown explicitly:
 
 ```bash
 infercrane external configure qwen-prod \
-  --target openrouter-qwen \
+  --target provider-openrouter-main \
   --adapter openrouter \
   --secret-reference SECRET_REFERENCE_ID \
   --mode health_and_queue \

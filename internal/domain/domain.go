@@ -17,6 +17,16 @@ type Target struct {
 	CreatedAt, UpdatedAt                               time.Time
 }
 
+// ProviderConnection is reusable, tenant-scoped configuration for an
+// authenticated external inference API. It contains only references: secret
+// values remain in the configured resolver and endpoint bindings retain their
+// own immutable privacy and budget policy.
+type ProviderConnection struct {
+	ID, TenantID, Name, Adapter, TargetID, TargetName string
+	SecretReferenceID, SecretReferenceName            string
+	CreatedAt, UpdatedAt                              time.Time
+}
+
 type Deployment struct {
 	ID, TenantID, Name, Model, Runtime, RoutingStrategy string
 	ComputeMode                                         string

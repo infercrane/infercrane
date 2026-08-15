@@ -123,6 +123,12 @@ type diagnosticStore interface {
 type monitoringStore interface {
 	EndpointMonitoring(context.Context, string, string, time.Duration, time.Duration) (domain.EndpointMonitoringSnapshot, error)
 }
+type providerConnectionStore interface {
+	CreateProviderConnection(context.Context, string, domain.ProviderConnection) (domain.ProviderConnection, error)
+	ProviderConnectionForTenant(context.Context, string, string) (domain.ProviderConnection, error)
+	ProviderConnectionsForTenant(context.Context, string) ([]domain.ProviderConnection, error)
+	DeleteProviderConnectionForTenant(context.Context, string, string) error
+}
 type intelligenceStore interface {
 	CaptureReplayTrace(context.Context, string, string, time.Duration, int) (domain.ReplayTrace, error)
 	ReplayTrace(context.Context, string, string) (domain.ReplayTrace, error)
@@ -345,6 +351,9 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/v1/deployments/{name}/route", a.auth(authz.Deploy, a.setRoute))
 	mux.HandleFunc("GET /api/v1/targets", a.auth(authz.Read, a.targets))
 	mux.HandleFunc("POST /api/v1/targets", a.auth(authz.Deploy, a.addTarget))
+	mux.HandleFunc("GET /api/v1/provider-connections", a.auth(authz.ManageExternal, a.providerConnections))
+	mux.HandleFunc("POST /api/v1/provider-connections", a.auth(authz.ManageExternal, a.createProviderConnection))
+	mux.HandleFunc("DELETE /api/v1/provider-connections/{name}", a.auth(authz.ManageExternal, a.deleteProviderConnection))
 	mux.HandleFunc("GET /api/v1/orphans", a.auth(authz.Read, a.orphans))
 	mux.HandleFunc("GET /api/v1/audit-events", a.auth(authz.ManageTenant, a.auditEvents))
 	mux.HandleFunc("PUT /api/v1/tenant/quota", a.auth(authz.ManageTenant, a.setQuota))
@@ -1096,12 +1105,13 @@ func (a API) createEndpointBinding(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var request struct {
-		Name          string          `json:"name"`
-		Kind          string          `json:"kind"`
-		OwnershipMode string          `json:"ownership_mode"`
-		Deployment    string          `json:"deployment"`
-		Target        string          `json:"target"`
-		Config        json.RawMessage `json:"config"`
+		Name               string          `json:"name"`
+		Kind               string          `json:"kind"`
+		OwnershipMode      string          `json:"ownership_mode"`
+		Deployment         string          `json:"deployment"`
+		Target             string          `json:"target"`
+		ProviderConnection string          `json:"provider_connection"`
+		Config             json.RawMessage `json:"config"`
 	}
 	if !decodeMutationBody(w, r, &request) {
 		return
@@ -1115,6 +1125,44 @@ func (a API) createEndpointBinding(w http.ResponseWriter, r *http.Request) {
 	configJSON := string(request.Config)
 	if configJSON == "" {
 		configJSON = "{}"
+	}
+	if request.ProviderConnection != "" {
+		connections, supported := a.Store.(providerConnectionStore)
+		if !supported {
+			writeError(w, http.StatusNotImplemented, "capability_unavailable", "provider connections are not supported by this store")
+			return
+		}
+		if request.Kind != "external" || request.Target != "" {
+			writeError(w, http.StatusUnprocessableEntity, "validation_failed", "provider_connection is valid only for an external binding and cannot be combined with target")
+			return
+		}
+		connection, lookupErr := connections.ProviderConnectionForTenant(r.Context(), actor.TenantID, request.ProviderConnection)
+		if lookupErr != nil {
+			writeEndpointMutationError(w, lookupErr)
+			return
+		}
+		var connectionConfig domain.ManagedExternalBindingConfig
+		if err = json.Unmarshal([]byte(configJSON), &connectionConfig); err != nil {
+			writeError(w, http.StatusUnprocessableEntity, "validation_failed", "managed external binding config is invalid JSON")
+			return
+		}
+		if connectionConfig.Adapter != "" && connectionConfig.Adapter != connection.Adapter {
+			writeError(w, http.StatusUnprocessableEntity, "validation_failed", "binding adapter conflicts with provider connection")
+			return
+		}
+		if connectionConfig.SecretReferenceID != "" && connectionConfig.SecretReferenceID != connection.SecretReferenceID {
+			writeError(w, http.StatusUnprocessableEntity, "validation_failed", "binding secret reference conflicts with provider connection")
+			return
+		}
+		connectionConfig.Adapter = connection.Adapter
+		connectionConfig.SecretReferenceID = connection.SecretReferenceID
+		encoded, encodeErr := json.Marshal(connectionConfig)
+		if encodeErr != nil {
+			writeError(w, http.StatusInternalServerError, "internal", "provider connection could not be compiled")
+			return
+		}
+		configJSON = string(encoded)
+		request.Target = connection.TargetName
 	}
 	binding := domain.BackendBinding{EndpointID: resolved.Endpoint.ID, Name: request.Name, Kind: request.Kind, OwnershipMode: request.OwnershipMode, ConfigJSON: configJSON}
 	if request.Kind == "deployment" {
@@ -3820,11 +3868,101 @@ func (a API) addTarget(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 201, map[string]any{"target": targetResponse(target)})
 }
 
+func (a API) providerConnections(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(providerConnectionStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "provider connections are not supported by this store")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	rows, err := store.ProviderConnectionsForTenant(r.Context(), actor.TenantID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "provider connections could not be read")
+		return
+	}
+	data := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		data = append(data, providerConnectionResponse(row))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": data})
+}
+
+func (a API) createProviderConnection(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(providerConnectionStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "provider connections are not supported by this store")
+		return
+	}
+	var request struct {
+		Name              string `json:"name"`
+		Adapter           string `json:"adapter"`
+		Target            string `json:"target"`
+		SecretReferenceID string `json:"secret_reference_id"`
+	}
+	if !decodeMutationBody(w, r, &request) {
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	target, err := a.Store.TargetForTenantByName(r.Context(), actor.TenantID, request.Target)
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusUnprocessableEntity, "target_not_found", "provider connection target was not found in the active tenant")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "provider connection target could not be validated")
+		return
+	}
+	item, err := store.CreateProviderConnection(r.Context(), actor.TenantID, domain.ProviderConnection{
+		Name: request.Name, Adapter: request.Adapter, TargetID: target.ID, SecretReferenceID: request.SecretReferenceID,
+	})
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusUnprocessableEntity, "secret_reference_not_found", "provider connection secret reference was not found in the active tenant")
+		return
+	}
+	if errors.Is(err, domain.ErrConflict) {
+		writeError(w, http.StatusConflict, "conflict", err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
+		return
+	}
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "provider_connection.create", ResourceType: "provider_connection", ResourceName: request.Name, Outcome: "succeeded"})
+	writeJSON(w, http.StatusCreated, map[string]any{"connection": providerConnectionResponse(item)})
+}
+
+func (a API) deleteProviderConnection(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(providerConnectionStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "provider connections are not supported by this store")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	name := r.PathValue("name")
+	if err := store.DeleteProviderConnectionForTenant(r.Context(), actor.TenantID, name); errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "provider connection was not found")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "provider connection could not be deleted")
+		return
+	}
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "provider_connection.delete", ResourceType: "provider_connection", ResourceName: name, Outcome: "succeeded"})
+	writeJSON(w, http.StatusOK, map[string]any{"connection": name, "deleted": true, "existing_bindings_unchanged": true})
+}
+
 func deploymentResponse(row domain.Deployment) map[string]any {
 	return map[string]any{"id": row.ID, "tenant_id": row.TenantID, "name": row.Name, "model": row.Model, "runtime": row.Runtime, "routing_strategy": row.RoutingStrategy, "desired_state": row.DesiredState, "observed_state": row.ObservedState, "min_replicas": row.MinReplicas, "max_replicas": row.MaxReplicas, "autoscaling_enabled": row.AutoscalingEnabled, "active_revision_id": row.ActiveRevisionID, "candidate_revision_id": row.CandidateRevisionID, "created_at": row.CreatedAt, "updated_at": row.UpdatedAt}
 }
 func targetResponse(row domain.Target) map[string]any {
 	return map[string]any{"id": row.ID, "name": row.Name, "url": row.URL, "provider": row.Provider, "runtime": row.Runtime, "upstream_model": row.UpstreamModel, "health": row.Health, "provider_resource_id": row.ProviderResourceID, "created_at": row.CreatedAt, "updated_at": row.UpdatedAt}
+}
+func providerConnectionResponse(row domain.ProviderConnection) map[string]any {
+	return map[string]any{
+		"id": row.ID, "name": row.Name, "adapter": row.Adapter,
+		"target_id": row.TargetID, "target": row.TargetName,
+		"secret_reference_id": row.SecretReferenceID, "secret_reference": row.SecretReferenceName,
+		"created_at": row.CreatedAt, "updated_at": row.UpdatedAt,
+	}
 }
 func replicaResponse(row domain.Replica) map[string]any {
 	return map[string]any{"id": row.ID, "revision_id": row.RevisionID, "ordinal": row.Ordinal, "external_key": row.ExternalKey, "lifecycle_state": row.LifecycleState, "provider": row.Provider, "provider_request_id": row.ProviderRequestID, "provider_resource_id": row.ProviderResourceID, "endpoint": row.Endpoint, "health": row.Health, "provider_details": json.RawMessage(row.ProviderDetails), "last_observed_at": row.LastObservedAt, "created_at": row.CreatedAt, "updated_at": row.UpdatedAt}

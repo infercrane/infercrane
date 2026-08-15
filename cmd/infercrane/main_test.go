@@ -321,6 +321,130 @@ func TestEndpointBindBuildsReferenceOnlyManagedExternalPolicy(t *testing.T) {
 	}
 }
 
+func TestProviderConnectRegistersReusableReferenceOnlyConfiguration(t *testing.T) {
+	var requests []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		requests = append(requests, body)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/targets":
+			_, _ = io.WriteString(w, `{"target":{"id":"target","name":"provider-openrouter-main"}}`)
+		case "/api/v1/provider-connections":
+			_, _ = io.WriteString(w, `{"connection":{"id":"connection","name":"openrouter-main"}}`)
+		default:
+			t.Fatalf("path=%s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	output, err := captureStdout(t, func() error {
+		return providerCommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, []string{"connect", "openrouter-main", "--model", "openai/gpt-4.1-mini", "--secret-reference", "secret-ref"})
+	})
+	if err != nil || len(requests) != 2 {
+		t.Fatalf("output=%q requests=%#v err=%v", output, requests, err)
+	}
+	if requests[0]["url"] != "https://openrouter.ai/api/v1" || requests[0]["upstream_model"] != "openai/gpt-4.1-mini" || requests[1]["secret_reference_id"] != "secret-ref" {
+		t.Fatalf("requests=%#v", requests)
+	}
+	for _, request := range requests {
+		if _, leaked := request["api_key"]; leaked {
+			t.Fatalf("raw credential entered request: %#v", request)
+		}
+	}
+}
+
+func TestProviderConnectCanCreateIdempotentEnvironmentReference(t *testing.T) {
+	var paths []string
+	var requests []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, r.URL.Path)
+		requests = append(requests, body)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/secrets":
+			_, _ = io.WriteString(w, `{"secret":{"id":"secret-ref","name":"provider-openrouter-main","resolver":"env","reference":"OPENROUTER_API_KEY"}}`)
+		case "/api/v1/targets":
+			_, _ = io.WriteString(w, `{"target":{"id":"target","name":"provider-openrouter-main"}}`)
+		case "/api/v1/provider-connections":
+			_, _ = io.WriteString(w, `{"connection":{"id":"connection","name":"openrouter-main","secret_reference_id":"secret-ref"}}`)
+		default:
+			t.Fatalf("path=%s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	output, err := captureStdout(t, func() error {
+		return providerCommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, []string{"connect", "openrouter-main", "--model", "openai/gpt-4.1-mini", "--from-env", "OPENROUTER_API_KEY", "--output", "json"})
+	})
+	if err != nil || len(requests) != 3 {
+		t.Fatalf("output=%q paths=%#v requests=%#v err=%v", output, paths, requests, err)
+	}
+	if paths[0] != "/api/v1/secrets" || requests[0]["reference"] != "OPENROUTER_API_KEY" || requests[0]["resolver"] != "env" || requests[2]["secret_reference_id"] != "secret-ref" {
+		t.Fatalf("paths=%#v requests=%#v", paths, requests)
+	}
+	for _, request := range requests {
+		if _, leaked := request["api_key"]; leaked {
+			t.Fatalf("raw credential entered request: %#v", request)
+		}
+	}
+	if !strings.Contains(output, `"secret_reference_id": "secret-ref"`) {
+		t.Fatalf("output=%q", output)
+	}
+}
+
+func TestProviderConnectRequiresExactlyOneCredentialReferenceSource(t *testing.T) {
+	for name, args := range map[string][]string{
+		"missing": {"connect", "openrouter-main", "--model", "openai/gpt-4.1-mini"},
+		"both":    {"connect", "openrouter-main", "--model", "openai/gpt-4.1-mini", "--from-env", "OPENROUTER_API_KEY", "--secret-reference", "secret-ref"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := providerCommand(context.Background(), config.Config{}, args)
+			if err == nil || !strings.Contains(err.Error(), "--from-env VARIABLE | --secret-reference ID") {
+				t.Fatalf("err=%v", err)
+			}
+		})
+	}
+}
+
+func TestEndpointBindUsesProviderConnectionAndStillRequiresConsent(t *testing.T) {
+	var request map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"binding":{"id":"binding"}}`)
+	}))
+	defer server.Close()
+	_, err := captureStdout(t, func() error {
+		return endpointCommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, []string{
+			"bind", "coder-production", "--name", "fallback", "--connection", "openrouter-main",
+			"--request-limit", "100", "--cost-limit-usd", "10", "--max-request-cost-usd", "0.10",
+			"--acknowledge-external-data", "--enable-external",
+		})
+	})
+	if err != nil || request["provider_connection"] != "openrouter-main" || request["ownership_mode"] != "traffic-managed" || request["target"] != "" {
+		t.Fatalf("request=%#v err=%v", request, err)
+	}
+	configValue, _ := request["config"].(map[string]any)
+	if configValue["privacy_acknowledged"] != true || configValue["request_limit"] != float64(100) {
+		t.Fatalf("config=%#v", configValue)
+	}
+	err = endpointCommand(context.Background(), config.Config{}, []string{
+		"bind", "coder-production", "--connection", "openrouter-main", "--request-limit", "1",
+		"--cost-limit-usd", "1", "--max-request-cost-usd", "1", "--enable-external",
+	})
+	if err == nil || !strings.Contains(err.Error(), "--acknowledge-external-data") {
+		t.Fatalf("missing consent err=%v", err)
+	}
+}
+
 func TestEndpointBindRejectsEnabledExternalPolicyWithoutConsent(t *testing.T) {
 	err := endpointCommand(context.Background(), config.Config{}, []string{
 		"bind", "coder-production", "--target", "openrouter-coder",

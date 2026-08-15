@@ -107,6 +107,7 @@
         "pages": [
           "showcase/index",
           "showcase/build-inference",
+          "showcase/api-to-self-hosted",
           "features/inference-projects",
           "showcase/connect-existing",
           "features/endpoints",
@@ -199,7 +200,10 @@
         "group": "PROJECT",
         "pages": [
           "project-status",
-          "roadmap",
+        "roadmap",
+        "roadmap/end-to-end-inference-platform",
+        "roadmap/end-to-end-inference-engineering-plan",
+        "roadmap/integration-ownership-matrix",
           "testing/product-qualification",
           "testing/production-qualification-runbook",
           "testing/test-environment",

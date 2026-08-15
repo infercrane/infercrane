@@ -890,6 +890,26 @@ func TestScopedPrincipalAndExternalBudgetAreTenantSafe(t *testing.T) {
 	}
 }
 
+func TestSecretReferenceCreationIsRetrySafeButRejectsChangedIntent(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	tenant := "secret-retry"
+	if err := s.CreateTenant(ctx, tenant, "Secret Retry"); err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.CreateSecretReference(ctx, tenant, "provider-openrouter", "env", "OPENROUTER_API_KEY")
+	if err != nil {
+		t.Fatal(err)
+	}
+	retried, err := s.CreateSecretReference(ctx, tenant, "provider-openrouter", "env", "OPENROUTER_API_KEY")
+	if err != nil || retried.ID != first.ID {
+		t.Fatalf("retried=%#v first=%#v err=%v", retried, first, err)
+	}
+	if _, err = s.CreateSecretReference(ctx, tenant, "provider-openrouter", "env", "DIFFERENT_API_KEY"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("changed intent err=%v", err)
+	}
+}
+
 func TestScaleToQueuesExactlyOneDurableOperation(t *testing.T) {
 	s := openStore(t, context.Background())
 	ctx := context.Background()

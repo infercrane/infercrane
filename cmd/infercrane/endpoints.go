@@ -190,6 +190,7 @@ func endpointCommand(ctx context.Context, cfg config.Config, args []string) erro
 	bindingName := fs.String("name", "primary", "binding name")
 	deployment := fs.String("deployment", "", "deployment name")
 	target := fs.String("target", "", "external target name")
+	connection := fs.String("connection", "", "configured external provider connection")
 	ownership := fs.String("ownership", "lifecycle-managed", "observe-only, traffic-managed, or lifecycle-managed")
 	externalAdapter := fs.String("external-adapter", "", "openrouter or openai-compatible-external")
 	secretReference := fs.String("secret-reference", "", "secret reference ID for an authenticated external API")
@@ -262,17 +263,23 @@ func endpointCommand(ctx context.Context, cfg config.Config, args []string) erro
 		fmt.Printf("endpoint %s created · add a binding, then create its first plan\n", resource)
 		return nil
 	case "bind":
-		if resource == "" || fs.NArg() != 0 || (*deployment == "" && *target == "") || (*deployment != "" && *target != "") {
-			return errors.New("usage: infercrane endpoint bind ENDPOINT --name NAME (--deployment NAME | --target NAME) [--ownership MODE] [authenticated external policy flags]")
+		sources := 0
+		for _, source := range []string{*deployment, *target, *connection} {
+			if source != "" {
+				sources++
+			}
+		}
+		if resource == "" || fs.NArg() != 0 || sources != 1 {
+			return errors.New("usage: infercrane endpoint bind ENDPOINT --name NAME (--deployment NAME | --target NAME | --connection NAME) [policy flags]")
 		}
 		kind := "deployment"
-		if *target != "" {
+		if *target != "" || *connection != "" {
 			kind = "external"
 		}
 		config := map[string]any{}
-		if *externalAdapter != "" || *secretReference != "" || *enableExternal {
-			if kind != "external" || *externalAdapter == "" || *secretReference == "" || *requestLimit < 1 || *costLimit == "" || *maxRequestCost == "" {
-				return errors.New("authenticated external binding requires --target, --external-adapter, --secret-reference, --request-limit, --cost-limit-usd, and --max-request-cost-usd")
+		if *connection != "" || *externalAdapter != "" || *secretReference != "" || *enableExternal {
+			if kind != "external" || *requestLimit < 1 || *costLimit == "" || *maxRequestCost == "" || (*connection == "" && (*externalAdapter == "" || *secretReference == "")) {
+				return errors.New("authenticated external binding requires --connection (or --target with adapter and secret reference), request and cost limits")
 			}
 			if *enableExternal && !*acknowledgeExternal {
 				return errors.New("--enable-external requires --acknowledge-external-data")
@@ -285,9 +292,16 @@ func endpointCommand(ctx context.Context, cfg config.Config, args []string) erro
 			if err != nil {
 				return fmt.Errorf("--max-request-cost-usd: %w", err)
 			}
-			config = map[string]any{"adapter": *externalAdapter, "secret_reference_id": *secretReference, "enabled": *enableExternal, "privacy_acknowledged": *acknowledgeExternal, "request_limit": *requestLimit, "cost_limit_microusd": costMicrousd, "max_request_cost_microusd": maxMicrousd}
+			config = map[string]any{"enabled": *enableExternal, "privacy_acknowledged": *acknowledgeExternal, "request_limit": *requestLimit, "cost_limit_microusd": costMicrousd, "max_request_cost_microusd": maxMicrousd}
+			if *connection == "" {
+				config["adapter"] = *externalAdapter
+				config["secret_reference_id"] = *secretReference
+			}
 		}
-		request := map[string]any{"name": *bindingName, "kind": kind, "ownership_mode": *ownership, "deployment": *deployment, "target": *target, "config": config}
+		if *connection != "" {
+			*ownership = "traffic-managed"
+		}
+		request := map[string]any{"name": *bindingName, "kind": kind, "ownership_mode": *ownership, "deployment": *deployment, "target": *target, "provider_connection": *connection, "config": config}
 		var response map[string]any
 		if err := controlJSON(ctx, cfg, http.MethodPost, "/api/v1/endpoints/"+resource+"/bindings", "", request, &response); err != nil {
 			return err

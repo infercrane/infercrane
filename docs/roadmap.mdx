@@ -53,6 +53,12 @@ InferCrane expands around one control loop rather than accumulating unrelated in
 6. **Expand by adapters:** runtimes, clouds, external APIs, sandbox access, and training lineage stay
    behind narrow contracts.
 
+The detailed [end-to-end execution plan](/roadmap/end-to-end-inference-platform),
+[engineering delivery plan](/roadmap/end-to-end-inference-engineering-plan), and
+[integration ownership matrix](/roadmap/integration-ownership-matrix) define the dependency order,
+license boundary, and build-versus-integrate decision for gateways, training, retrieval, agents,
+sandboxes, runtimes, Kubernetes, schedulers, and workflow systems.
+
 Sandbox execution and training orchestration are not part of the current release. InferCrane now
 tracks external sandbox identity plus endpoint-scoped access and verifies signed training artifact
 handoffs while delegating isolation and training execution to qualified systems. Managed compute

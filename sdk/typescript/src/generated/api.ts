@@ -483,6 +483,21 @@ export class ControlApi {
     return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
   }
 
+  listProviderConnections(): Promise<ObjectList> {
+    const path = '/provider-connections';
+    return this.transport.request('GET', path) as Promise<ObjectList>;
+  }
+
+  createProviderConnection(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = '/provider-connections';
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  deleteProviderConnection(name: string): Promise<Record<string, JsonValue>> {
+    const path = `/provider-connections/${encodeURIComponent(name)}`;
+    return this.transport.request('DELETE', path) as Promise<Record<string, JsonValue>>;
+  }
+
   listOrphans(): Promise<ObjectList> {
     const path = '/orphans';
     return this.transport.request('GET', path) as Promise<ObjectList>;

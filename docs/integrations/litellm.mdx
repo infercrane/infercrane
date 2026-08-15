@@ -101,3 +101,8 @@ Bundling would make InferCrane responsible for another gateway's security patche
 provider catalog, and upgrades. The composition contract keeps that dependency replaceable and lets
 teams use LiteLLM, another gateway, or InferCrane's native data plane without changing the logical
 endpoint contract.
+
+The open-source tree outside LiteLLM's separately identified enterprise area is MIT-licensed. The
+decision not to fork is operational rather than merely legal: provider integrations and security
+patches should continue arriving from their specialist owner. Any future managed-process adapter
+must pin an exact upstream image, publish an SBOM, qualify its behavior, and remain replaceable.
