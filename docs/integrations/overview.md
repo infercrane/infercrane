@@ -30,6 +30,10 @@ a public support claim.
 | Gateway composition | Stable endpoint, adoption state, policy, and evidence | Protocol translation, upstream credentials, and gateway lifecycle |
 | External sandbox | External reference and endpoint-scoped access | Isolation, commands, files, network policy, and sandbox lifecycle |
 | Training handoff | Signature verification, immutable artifact lineage, and revision binding | Training data, execution, checkpoints, and scheduler |
+| Agent applications | Stable OpenAI-compatible endpoint, request evidence, and optional logical session identity | Agent graph, tools, memory, and business logic |
+| Vector database / RAG | Inference request behavior after retrieval | Documents, embeddings, indexes, retrieval policy, and data lifecycle |
+| Workflow orchestration | Idempotent async inference, cancellation, encrypted result retention, and signed completion webhook | DAG, retries between business steps, schedules, and non-inference work |
+| Kubernetes GPU scheduling | Desired inference workload and observed serving evidence | Queue admission, placement, preemption, and node scheduling |
 
 ## Registration is not qualification
 
@@ -59,6 +63,10 @@ qualifies only exact combinations; registration never implies real-system eviden
 The versioned contract details are documented in [Provider Contract V1](/architecture/provider-contract),
 [Runtime Contract V1](/architecture/runtime-contract), and
 [ADR 0033](/adr/0033-replaceable-external-composition-contracts).
+
+See [Ecosystem compatibility](/integrations/ecosystem) for the exact user path and maturity of
+model APIs, gateways, agents, vector databases, workflow engines, training systems, sandboxes,
+runtimes, Kubernetes, and GPU schedulers.
 
 Do not add a provider conditional to a generic workflow, expose registration as support, build a
 second scheduler, or silently fabricate unavailable provider data. See

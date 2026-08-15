@@ -157,6 +157,7 @@
         "group": "INTEGRATE",
         "pages": [
           "integrations/overview",
+          "integrations/ecosystem",
           "integrations/litellm",
           "integrations/sandboxes",
           "integrations/training-artifacts",

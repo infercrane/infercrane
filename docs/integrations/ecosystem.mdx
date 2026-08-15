@@ -1,0 +1,131 @@
+---
+title: Ecosystem compatibility
+description: What InferCrane operates, what connects through a stable protocol, what remains externally owned, and what is still planned.
+sidebarTitle: Ecosystem compatibility
+---
+
+# One inference control plane, replaceable specialist systems
+
+OpenRouter is a quickstart example, not a product boundary. InferCrane can connect an authenticated
+OpenAI-compatible model API, adopt an existing LiteLLM or inference endpoint, or deploy qualified
+self-hosted runtimes. Other systems keep the responsibilities they are better suited to own.
+
+| System category | Current InferCrane path | Maturity | InferCrane deliberately does not own |
+|---|---|---|---|
+| OpenRouter | Governed provider connection and immutable endpoint binding | Local-qualified; real billing/protocol qualification required | Provider catalog and model execution |
+| Generic OpenAI-compatible API | Governed provider connection with exact URL and model mapping | Local-qualified per protocol fixture; target-specific qualification required | Provider lifecycle and credentials |
+| LiteLLM | Discover, connect observe-only, then explicitly transfer traffic ownership | Local-qualified; real plugin/provider combinations deferred | Installation, upgrades, provider translation, upstream credentials |
+| vLLM | Runtime Contract and lifecycle-managed deployment | Local-qualified; real GPU qualification remains environment-specific | Inference engine implementation |
+| SGLang / custom OCI | Portable Runtime Contract | Simulated/local contract evidence; real GPU qualification deferred | Inference engine implementation |
+| Kubernetes / KServe | Namespaced provider lifecycle and optional standard KServe ownership | Kind-qualified; real GPU cluster deferred | Kubernetes distribution and scheduling |
+| External sandboxes | External identity plus expiring credential restricted to one endpoint | Local-qualified | Isolation, commands, files, snapshots, and network policy |
+| MLflow/Kubeflow/SkyPilot training | Signed immutable artifact handoff bound to one candidate revision | Local-qualified handoff; external registry availability deferred | Training data, execution, checkpoint storage, and scheduling |
+| Agent frameworks | Call the stable OpenAI-compatible endpoint and optional session identity | Protocol-compatible; no framework-specific lifecycle adapter needed | Agent graph, tools, memory, and application logic |
+| Vector databases | Remain in the application/RAG request path | Application-owned; direct dependency health adapter is planned | Documents, embeddings, indexes, retrieval, and retention |
+| Argo/Temporal/Airflow | Submit idempotent async inference and receive a signed completion webhook | API and webhook path local-qualified | DAG execution, schedules, and non-inference retries |
+| Kueue/Volcano | May schedule Kubernetes workloads below InferCrane | No direct CRD adapter yet | Queueing, placement, preemption, and node scheduling |
+
+## Start with a model API
+
+OpenRouter needs no special application contract. It supplies a convenient default URL; any other
+OpenAI-compatible provider uses the same path with an explicit adapter and URL.
+
+<CodeGroup>
+```bash OpenRouter
+export OPENROUTER_API_KEY='...'
+
+infercrane provider connect openrouter-main \
+  --model openai/gpt-4.1-mini \
+  --from-env OPENROUTER_API_KEY
+```
+
+```bash Any OpenAI-compatible API
+export MODEL_API_KEY='...'
+
+infercrane provider connect company-model-api \
+  --adapter openai-compatible-external \
+  --url https://models.example.com/v1 \
+  --model company/coder \
+  --from-env MODEL_API_KEY
+```
+</CodeGroup>
+
+Both commands create reusable configuration only. Neither sends a request nor authorizes spend.
+Traffic requires a separate endpoint binding with explicit data-transmission consent and hard
+request, total-cost, and per-request cost limits.
+
+## Keep an existing LiteLLM gateway
+
+```bash
+infercrane connect https://litellm.internal.example/v1 \
+  --as support-production \
+  --type litellm \
+  --model company-coder
+
+infercrane observe support-production
+infercrane doctor support-production
+```
+
+The initial ownership mode is observe-only. InferCrane never imports LiteLLM credentials or silently
+moves application traffic. See [LiteLLM gateway](/integrations/litellm).
+
+## Agent frameworks and vector databases
+
+Agent and RAG applications use the stable endpoint exactly as they use another OpenAI-compatible
+surface:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="https://inference.example.com/v1",
+    api_key="INFERCRANE_ENDPOINT_TOKEN",
+)
+
+response = client.responses.create(
+    model="support-production",
+    input="Answer using the documents already retrieved by the application.",
+)
+```
+
+LangGraph, LlamaIndex, or another framework may wrap this client. Qdrant, Milvus, pgvector, or
+another vector store stays in the application data path. InferCrane does not copy documents,
+embeddings, prompts, tool arguments, or retrieved context by default.
+
+<Warning>
+InferCrane does not yet inspect vector-database availability or attribute retrieval latency. A
+future dependency adapter must add grounded health and timing evidence without taking ownership of
+the index or data lifecycle.
+</Warning>
+
+## Workflow engines
+
+Argo, Temporal, Airflow, or an internal orchestrator can call the control API or CLI as one durable
+inference step:
+
+```bash
+infercrane async submit support-production \
+  --file request.json \
+  --idempotency-key workflow-run-42 \
+  --webhook https://jobs.example.com/infercrane \
+  --webhook-secret-reference WEBHOOK_SECRET_REFERENCE_ID
+```
+
+InferCrane owns the inference job, cancellation, execution deadline, encrypted result retention,
+and bounded signed-webhook delivery. The external workflow engine owns the larger DAG.
+
+## Kubernetes and GPU schedulers
+
+InferCrane can own a bounded namespaced Deployment/Service set or one KServe InferenceService. A
+cluster may use its own scheduler and policies underneath that boundary.
+
+Kueue and Volcano are not currently direct InferCrane adapters. Do not interpret Kubernetes support
+as evidence that their CRD status, queue admission, preemption, or placement decisions are visible
+to InferCrane. A future adapter should remain read-mostly: compile explicit workload intent, observe
+standard status, and preserve scheduler ownership.
+
+## Why the boundaries matter
+
+An end-to-end inference product does not need to reimplement every layer. InferCrane owns the stable
+application identity, desired state, durable operations, release policy, evidence, and economic
+decision. Specialist systems remain replaceable behind versioned, qualified contracts.
