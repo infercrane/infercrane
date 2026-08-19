@@ -67,6 +67,25 @@ Local fixtures prove InferCrane logic only. This document will contain the exact
 - Evidence: runtime/image/model digests, protocol transcripts, request IDs, vLLM logs/metrics, generation counters, drain timing, and resource cleanup.
 - Cleanup: delete the owning deployment and prove provider/cluster absence.
 
+## NVIDIA DCGM — real hardware telemetry
+
+- Source: [NVIDIA DCGM Exporter metrics](https://docs.nvidia.com/datacenter/dcgm/latest/reference/dcgm-exporter-metrics.html).
+- Why local simulation is insufficient: the parser and evidence lifecycle can be proven from
+  fixtures, but metric availability, units, GPU labels, XID semantics, MIG behavior, and exporter
+  compatibility depend on the physical GPU, driver, DCGM, and deployment topology.
+- Safe procedure: on an isolated qualified GPU workload, expose DCGM Exporter only to an operator
+  or protected collector network. Confirm its workload labels, then run
+  `infercrane telemetry collect dcgm DEPLOYMENT --url URL --selector key=value --replica REPLICA --ttl 2m`.
+  Compare the normalized values with the same raw snapshot. Stop the exporter and verify each value
+  becomes stale and loses its rendered numeric value after two minutes.
+- Risk/cost: no extra GPU load beyond ordinary telemetry, but the test needs an already-running GPU
+  workload. Never make the exporter publicly reachable.
+- Expected behavior: the snapshot binds to the active revision, selectors exclude unrelated GPUs,
+  units and aggregation match the documented contract, and stale evidence never looks live.
+- Evidence: immutable workload revision, GPU/DCGM/driver versions, exact selector, saved raw scrape,
+  API response, monitoring response before and after expiry, and confirmation that prompt/output
+  content and credentials are absent.
+
 ## Model revisions — semantic output quality
 
 - Research signal: production operators report that an infrastructure-healthy model or runtime

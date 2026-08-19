@@ -191,6 +191,21 @@ type fakeMonitoringStore struct {
 	snapshot domain.EndpointMonitoringSnapshot
 }
 
+type fakeOperationalMeasurementStore struct {
+	*fakeStore
+	rows []domain.OperationalMeasurement
+}
+
+func (f *fakeOperationalMeasurementStore) RecordOperationalMeasurements(_ context.Context, tenant, deployment string, rows []domain.OperationalMeasurement) ([]domain.OperationalMeasurement, error) {
+	for index := range rows {
+		rows[index].ID = "measurement"
+		rows[index].TenantID = tenant
+		rows[index].Deployment = deployment
+	}
+	f.rows = append(f.rows, rows...)
+	return rows, f.err
+}
+
 func (f *fakeMonitoringStore) EndpointMonitoring(context.Context, string, string, time.Duration, time.Duration) (domain.EndpointMonitoringSnapshot, error) {
 	return f.snapshot, f.err
 }
@@ -220,6 +235,32 @@ func TestEndpointMonitoringIsAuthenticatedBoundedAndContentFree(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("unknown query status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestOperationalMeasurementIngestionIsAuthenticatedStrictAndContentFree(t *testing.T) {
+	store := &fakeOperationalMeasurementStore{fakeStore: &fakeStore{}}
+	handler := (API{Store: store, APIKey: "secret"}).Handler()
+	body := `{"source":"dcgm_exporter","evidence_class":"measured","replica_id":"replica-1","observed_at":"2026-08-19T20:00:00Z","valid_until":"2026-08-19T20:02:00Z","measurements":[{"name":"gpu_utilization","value":72,"unit":"percent","sample_count":2}]}`
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments/coder/measurements", strings.NewReader(body))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || len(store.rows) != 1 || store.rows[0].Name != "gpu_utilization" || strings.Contains(response.Body.String(), "prompt") || !strings.Contains(response.Body.String(), `"content_recorded":false`) {
+		t.Fatalf("status=%d body=%s rows=%+v", response.Code, response.Body.String(), store.rows)
+	}
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/deployments/coder/measurements", strings.NewReader(strings.Replace(body, `"measurements"`, `"unknown":true,"measurements"`, 1)))
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("unknown field status=%d body=%s", response.Code, response.Body.String())
+	}
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/deployments/coder/measurements", strings.NewReader(body))
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 

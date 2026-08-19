@@ -49,6 +49,7 @@ behavior depends on external infrastructure.
 | Supervised vLLM Router processes | Implemented | Instance-owned generations and deterministic ports. |
 | Prometheus gateway telemetry | Implemented | Core counters/gauges; expand before public SLOs. |
 | Prometheus latency histograms and alerts | Implemented | Baseline rules require workload-specific tuning. |
+| Qualified operational evidence collectors | Local-qualified | Authenticated, tenant-scoped, active-revision-bound measurement ingestion and a bounded DCGM parser expose fresh GPU utilization, memory, temperature, power, and XID evidence without browser credentials. Real NVIDIA hardware/DCGM compatibility and provider-wide completeness remain external qualification. |
 | Reproducible benchmark and recovery tooling | Experimental | AIPerf execution and benchmark history are implemented; local control-plane HA/restore is qualified while real GPU and customer PostgreSQL evidence remain external. |
 | Model Recipes and Inference Lab | Local-qualified | Immutable artifact/revision/AIPerf recipes and tenant-scoped measured comparisons are implemented; public registry and real GPU catalog evidence are deferred. |
 | Inference Replay and Capacity Intelligence | In qualification | Content-free workload-shape capture, explicit AIPerf approximation, bounded cache observations, delegated prefetch intents, and tenant-scoped capacity evidence are implemented; real-provider evidence remains deferred. |

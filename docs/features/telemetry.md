@@ -58,4 +58,40 @@ request-record counters, and persistence failures. These distinguish inference-p
 telemetry backpressure without putting PostgreSQL on the request path. vLLM running/waiting and
 cache signals are persisted with autoscaling decisions; streaming cancellations and upstream
 disconnects are persisted as `client_cancelled` and `upstream_disconnect` error types. GPU metrics
-remain unavailable unless the provider/runtime exposes a trustworthy measurement.
+remain unavailable unless a qualified provider/runtime collector supplies a trustworthy fresh
+measurement.
+
+## NVIDIA GPU evidence
+
+When an environment already runs [NVIDIA DCGM Exporter](https://docs.nvidia.com/datacenter/dcgm/latest/reference/dcgm-exporter-metrics.html),
+an operator can import a bounded snapshot without exposing the exporter to the browser:
+
+```bash
+infercrane telemetry collect dcgm coder-production \
+  --url http://127.0.0.1:9400/metrics \
+  --selector deployment=coder-production \
+  --replica replica-03 \
+  --ttl 2m
+```
+
+Use `--file dcgm.prom` instead of `--url` for an offline snapshot. `--selector` accepts exact,
+comma-separated Prometheus label matches. Shared exporters should always be scoped to the intended
+workload. `DCGM_FI_DEV_GPU_UTIL` is percent by default; pass `--utilization-unit ratio` only when an
+upstream compatibility layer deliberately rewrites it to `0..1`.
+
+InferCrane normalizes only:
+
+| DCGM input | InferCrane measurement | Aggregation |
+|---|---|---|
+| `DCGM_FI_DEV_GPU_UTIL` | `gpu_utilization` in percent | maximum selected GPU pressure |
+| `DCGM_FI_PROF_GR_ENGINE_ACTIVE` | `gpu_utilization` in percent | maximum; fallback only |
+| `DCGM_FI_DEV_FB_USED` | `gpu_memory` in bytes | sum of selected GPUs |
+| `DCGM_FI_DEV_GPU_TEMP` | `gpu_temperature` in Celsius | maximum selected temperature |
+| `DCGM_FI_DEV_POWER_USAGE` | `gpu_power` in watts | sum of selected GPUs |
+| `DCGM_FI_DEV_XID_ERRORS` | `gpu_xid_errors` count | sum of selected GPUs |
+
+The snapshot is attached to the active revision at ingestion time. It cannot silently move to a
+later rollout. Once its TTL expires, the monitoring API returns a stale envelope with no value.
+This integration proves the control-plane semantics locally; actual DCGM field availability varies
+by GPU and DCGM version and still requires real-hardware qualification. Collector snapshots follow
+the configured high-volume request-evidence retention period (`INFERCRANE_REQUEST_RETENTION_HOURS`).

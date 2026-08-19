@@ -30,6 +30,7 @@ var publicCommandSpecs = []commandSpec{
 	{use: "ui", short: "Open the interactive operations workspace", group: "operate"},
 	{use: "mcp", short: "Serve read-only operational evidence over MCP stdio", group: "understand"},
 	{use: "observe ENDPOINT_OR_DEPLOYMENT [flags]", short: "See health, traffic, operations, Guard evidence, and recent events", group: "operate"},
+	{use: "telemetry collect dcgm DEPLOYMENT [flags]", short: "Collect bounded hardware evidence through the control plane", group: "understand"},
 	{use: "inbox [flags]", short: "Rank fleet state that needs operator attention", group: "operate"},
 	{use: "request DEPLOYMENT [flags]", short: "Send a buffered or streaming inference request", group: "start"},
 	{use: "version", short: "Print the InferCrane version", group: "start"},
@@ -156,10 +157,18 @@ func addHelpFlags(command *cobra.Command, name string) {
 	boolFlag := func(flag, help string) { command.Flags().Bool(flag, false, help) }
 	intFlag := func(flag string, value int, help string) { command.Flags().Int(flag, value, help) }
 	switch name {
-	case "init", "workload", "evaluation", "doctor", "connect", "adopt", "alert", "admission", "async", "plan", "deploy", "apply", "request", "deployments", "endpoints", "endpoint", "environment", "logical-model", "status", "logs", "events", "inspect", "explain", "benchmark", "replay", "capacity", "artifact", "sandbox", "training", "finops", "autopilot", "session", "burst", "recipe", "recipes", "models", "lab", "passport", "recommend", "slo", "delete", "orphans", "operation", "integrations", "observe", "inbox", "target", "provider", "auth", "system", "secret", "external", "rollout":
+	case "init", "workload", "evaluation", "doctor", "connect", "adopt", "alert", "admission", "async", "plan", "deploy", "apply", "request", "deployments", "endpoints", "endpoint", "environment", "logical-model", "status", "logs", "events", "inspect", "explain", "benchmark", "replay", "capacity", "artifact", "sandbox", "training", "finops", "autopilot", "session", "burst", "recipe", "recipes", "models", "lab", "passport", "recommend", "slo", "delete", "orphans", "operation", "integrations", "observe", "telemetry", "inbox", "target", "provider", "auth", "system", "secret", "external", "rollout":
 		stringFlag("output", "human", "output format: human or json")
 	}
 	switch name {
+	case "telemetry":
+		stringFlag("url", "http://127.0.0.1:9400/metrics", "DCGM Prometheus metrics URL")
+		stringFlag("file", "", "read a saved DCGM Prometheus snapshot instead of a URL")
+		stringFlag("selector", "", "comma-separated exact Prometheus label selectors")
+		stringFlag("replica", "", "InferCrane replica identity represented by this snapshot")
+		stringFlag("source", "dcgm_exporter", "bounded evidence source identity")
+		stringFlag("utilization-unit", "percent", "DCGM_FI_DEV_GPU_UTIL input unit: percent or ratio")
+		stringFlag("ttl", "2m", "maximum time this snapshot may be presented as fresh")
 	case "workload":
 		stringFlag("model", "", "Hugging Face model identity")
 		stringFlag("recipe", "", "reviewed curated recipe name")

@@ -1,0 +1,72 @@
+---
+title: "ADR 0035: Qualified operational evidence collectors"
+description: Import bounded hardware and cost evidence without coupling the domain or browser to one telemetry vendor.
+---
+
+# ADR 0035: Qualified operational evidence collectors
+
+Status: Accepted
+
+## Context
+
+Request records explain application-visible latency and errors, but they cannot prove GPU pressure,
+memory use, hardware faults, or infrastructure cost. Providers and clusters expose those facts
+through different systems. Querying those systems directly from the console would leak credentials,
+make page rendering depend on third parties, and silently reinterpret stale evidence as live state.
+Copying every upstream metric into the InferCrane domain would also create an unbounded-cardinality
+telemetry store.
+
+## Decision
+
+InferCrane accepts qualified, content-free operational measurements through one provider-neutral
+contract. Every snapshot is:
+
+- tenant- and deployment-scoped;
+- transactionally bound to the deployment's active immutable revision;
+- timestamped with a mandatory validity boundary of at most 24 hours;
+- classified as `measured` or `provider_reported`;
+- immutable and conflict-detecting under retry;
+- bounded to 32 normalized measurements per write;
+- exposed only through the authenticated monitoring read model.
+
+Collector adapters own upstream semantics. The first adapter parses a closed subset of NVIDIA
+DCGM Exporter metrics: GPU utilization, framebuffer memory used, temperature, power, and XID
+errors. It requires an explicit utilization unit, supports exact Prometheus-label selectors, and
+aggregates with documented operators. Unknown metrics and labels do not become domain fields.
+
+The CLI fetches DCGM locally and posts normalized evidence through the control API. The browser
+never receives exporter or provider credentials and never queries a collector. Expired evidence
+loses its value and renders as stale. A disconnected collector therefore cannot leave an
+apparently-live healthy GPU signal behind.
+
+The same persistence boundary may later accept an OpenCost adapter, but cost currency, allocation,
+window, source, and freshness must remain explicit. OpenCost data will not be mixed into hardware
+measurements or presented as savings without comparable evidence.
+
+## Consequences
+
+- Runtime and infrastructure telemetry are replaceable integrations rather than core-domain
+  dependencies.
+- Monitoring can correlate request behavior, lifecycle events, and fresh hardware observations.
+- A partial scrape is truthfully a measured subset; it is not described as complete fleet coverage.
+- DCGM exporter deployment and GPU-driver compatibility remain owned by the user's environment.
+- Real GPU correctness still requires qualification on physical NVIDIA hardware.
+
+## Alternatives rejected
+
+- Embedding Prometheus, Grafana, or DCGM in InferCrane would duplicate mature telemetry systems.
+- Browser-side collector queries expose network topology and credentials and bypass tenant policy.
+- Persisting arbitrary metric names and labels creates unbounded cardinality and unstable APIs.
+- Keeping the last value forever makes collector outages look healthy.
+- Estimating missing hardware signals violates InferCrane's evidence contract.
+
+## Verification
+
+- `TestParseDCGMAggregatesSelectedQualifiedEvidence` proves exact selection, units, and aggregation.
+- `TestParseDCGMRejectsAmbiguousOrHostileEvidence` proves input, cardinality, finite-value, and unit boundaries.
+- `TestOperationalMeasurementsAreImmutableTenantSafeAndFreshnessBounded` proves revision binding,
+  tenant isolation, retry conflict detection, and stale-value removal.
+- `TestOperationalMeasurementIngestionIsAuthenticatedStrictAndContentFree` proves the API boundary.
+- `TestTelemetryCollectDCGMUsesBoundedControlPlaneEvidencePath` proves the CLI-to-API path.
+
+See [Inference telemetry](/features/telemetry) and [Operations console](/features/dashboard).

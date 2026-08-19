@@ -59,9 +59,10 @@ not converted to zero.
 
 The monitoring page queries only the authenticated control API. PostgreSQL request evidence and
 lifecycle events form the initial local evidence store; OpenTelemetry GenAI semantics define the
-portable names and dimensions. Runtime-internal and GPU metrics remain unavailable until a
-qualified runtime or provider adapter reports them. The UI displays why evidence is absent rather
-than rendering an unknown value as zero.
+portable names and dimensions. Runtime-internal metrics remain unavailable until a qualified
+runtime adapter reports them. GPU utilization, memory, temperature, power, and XID evidence appear
+when a qualified collector posts a fresh revision-bound snapshot. The UI displays why evidence is
+absent or stale rather than rendering an unknown value as zero.
 
 ## Local self-hosted console
 

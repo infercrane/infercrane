@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
@@ -41,6 +42,9 @@ func (s *Store) EndpointMonitoring(ctx context.Context, tenant, name string, win
 		},
 	}
 	if err = s.monitoringSummary(ctx, tenant, resolved.Endpoint.ID, start, end, window, &out); err != nil {
+		return domain.EndpointMonitoringSnapshot{}, err
+	}
+	if err = s.monitoringOperationalMeasurements(ctx, tenant, resolved.Endpoint.ID, start, end, &out); err != nil {
 		return domain.EndpointMonitoringSnapshot{}, err
 	}
 	if err = s.monitoringSeries(ctx, tenant, resolved.Endpoint.ID, start, end, bucket, &out); err != nil {
@@ -147,8 +151,11 @@ func populateMeasurementEvidence(out *domain.EndpointMonitoringSnapshot) {
 	for _, unavailable := range []struct{ name, unit, reason string }{
 		{"runtime_internal_itl", "milliseconds", "the connected runtime has not supplied qualified ITL telemetry"},
 		{"runtime_internal_tpot", "milliseconds", "the connected runtime has not supplied qualified TPOT telemetry"},
-		{"gpu_utilization", "ratio", "no qualified hardware telemetry collector is connected"},
+		{"gpu_utilization", "percent", "no qualified hardware telemetry collector is connected"},
 		{"gpu_memory", "bytes", "no qualified hardware telemetry collector is connected"},
+		{"gpu_temperature", "celsius", "no qualified hardware telemetry collector is connected"},
+		{"gpu_power", "watts", "no qualified hardware telemetry collector is connected"},
+		{"gpu_xid_errors", "count", "no qualified hardware telemetry collector is connected"},
 		{"runtime_kv_cache_timeseries", "ratio", "the connected runtime has not supplied qualified KV-cache telemetry"},
 	} {
 		out.Evidence.Measurements = append(out.Evidence.Measurements, domain.MeasurementEvidence{
@@ -156,6 +163,117 @@ func populateMeasurementEvidence(out *domain.EndpointMonitoringSnapshot) {
 			EvidenceClass: "measured", Source: "runtime_adapter", Reason: unavailable.reason,
 		})
 	}
+}
+
+type operationalMeasurementAggregate struct {
+	name, unit, evidenceClass string
+	value                     float64
+	sampleCount               int
+	observedAt, freshUntil    time.Time
+	sources                   map[string]struct{}
+	fresh                     bool
+}
+
+func (s *Store) monitoringOperationalMeasurements(ctx context.Context, tenant, endpointID string, start, end time.Time, out *domain.EndpointMonitoringSnapshot) error {
+	rows, err := s.QueryContext(ctx, `SELECT DISTINCT ON (m.deployment_id,m.replica_id,m.name) m.name,m.value,m.unit,m.evidence_class,m.source,m.sample_count,m.observed_at,m.valid_until FROM operational_measurements m JOIN deployments d ON d.id=m.deployment_id AND d.tenant_id=m.tenant_id JOIN backend_bindings b ON b.deployment_id=m.deployment_id AND b.tenant_id=m.tenant_id WHERE m.tenant_id=? AND b.endpoint_id=? AND m.revision_id=d.active_revision_id AND m.observed_at<=? AND m.valid_until>=? ORDER BY m.deployment_id,m.replica_id,m.name,m.observed_at DESC,m.created_at DESC`, tenant, endpointID, end, start)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	aggregates := map[string]*operationalMeasurementAggregate{}
+	for rows.Next() {
+		var name, unit, evidenceClass, source string
+		var value float64
+		var sampleCount int
+		var observedAt, validUntil time.Time
+		if err = rows.Scan(&name, &value, &unit, &evidenceClass, &source, &sampleCount, &observedAt, &validUntil); err != nil {
+			return err
+		}
+		fresh := validUntil.After(end) || validUntil.Equal(end)
+		aggregate, ok := aggregates[name]
+		if !ok {
+			aggregate = &operationalMeasurementAggregate{name: name, unit: unit, evidenceClass: evidenceClass, sources: map[string]struct{}{}, observedAt: observedAt.UTC(), freshUntil: validUntil.UTC()}
+			aggregates[name] = aggregate
+		}
+		if !fresh {
+			if !aggregate.fresh && (aggregate.sampleCount == 0 || observedAt.After(aggregate.observedAt)) {
+				aggregate.unit = unit
+				aggregate.evidenceClass = evidenceClass
+				aggregate.observedAt = observedAt.UTC()
+				aggregate.freshUntil = validUntil.UTC()
+				aggregate.sampleCount = sampleCount
+				aggregate.sources = map[string]struct{}{source: {}}
+			}
+			continue
+		}
+		if !aggregate.fresh {
+			aggregate.value = value
+			aggregate.unit = unit
+			aggregate.evidenceClass = evidenceClass
+			aggregate.observedAt = observedAt.UTC()
+			aggregate.freshUntil = validUntil.UTC()
+			aggregate.sampleCount = 0
+			aggregate.sources = map[string]struct{}{}
+			aggregate.fresh = true
+		} else {
+			switch name {
+			case "gpu_memory", "gpu_power", "gpu_xid_errors":
+				aggregate.value += value
+			default:
+				if value > aggregate.value {
+					aggregate.value = value
+				}
+			}
+			if validUntil.Before(aggregate.freshUntil) {
+				aggregate.freshUntil = validUntil.UTC()
+			}
+			if observedAt.After(aggregate.observedAt) {
+				aggregate.observedAt = observedAt.UTC()
+			}
+		}
+		aggregate.sources[source] = struct{}{}
+		if evidenceClass == "provider_reported" {
+			aggregate.evidenceClass = "provider_reported"
+		}
+		aggregate.sampleCount += sampleCount
+	}
+	if err = rows.Err(); err != nil {
+		return err
+	}
+	for _, name := range []string{"gpu_utilization", "gpu_memory", "gpu_temperature", "gpu_power", "gpu_xid_errors"} {
+		aggregate, ok := aggregates[name]
+		if !ok {
+			continue
+		}
+		sources := make([]string, 0, len(aggregate.sources))
+		for source := range aggregate.sources {
+			sources = append(sources, source)
+		}
+		sort.Strings(sources)
+		measurement := domain.MeasurementEvidence{Name: name, Unit: aggregate.unit, EvidenceClass: aggregate.evidenceClass, Source: strings.Join(sources, ","), ObservedAt: &aggregate.observedAt, SampleCount: aggregate.sampleCount}
+		if aggregate.fresh {
+			measurement.Value = floatPointer(aggregate.value)
+			measurement.Availability = "available"
+			measurement.FreshUntil = &aggregate.freshUntil
+			out.Evidence.Available = append(out.Evidence.Available, name)
+			out.Evidence.Unavailable = removeString(out.Evidence.Unavailable, name)
+		} else {
+			measurement.Availability = "stale"
+			measurement.Reason = "the latest qualified collector snapshot is outside its declared validity window"
+		}
+		replaceMeasurementEvidence(&out.Evidence.Measurements, measurement)
+	}
+	return nil
+}
+
+func replaceMeasurementEvidence(values *[]domain.MeasurementEvidence, replacement domain.MeasurementEvidence) {
+	for index := range *values {
+		if (*values)[index].Name == replacement.Name {
+			(*values)[index] = replacement
+			return
+		}
+	}
+	*values = append(*values, replacement)
 }
 
 func (s *Store) monitoringSeries(ctx context.Context, tenant, endpointID string, start, end time.Time, bucket time.Duration, out *domain.EndpointMonitoringSnapshot) error {

@@ -1733,6 +1733,78 @@
         ],
         "type": "object"
       },
+      "OperationalMeasurementIngest": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_class": {
+            "enum": [
+              "measured",
+              "provider_reported"
+            ],
+            "type": "string"
+          },
+          "measurements": {
+            "items": {
+              "$ref": "#/components/schemas/OperationalMeasurementValue"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "type": "array"
+          },
+          "observed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "replica_id": {
+            "maxLength": 255,
+            "type": "string"
+          },
+          "source": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "valid_until": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "evidence_class",
+          "observed_at",
+          "valid_until",
+          "measurements"
+        ],
+        "type": "object"
+      },
+      "OperationalMeasurementValue": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "pattern": "^[a-z][a-z0-9_]{0,63}$",
+            "type": "string"
+          },
+          "sample_count": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "unit": {
+            "pattern": "^[a-z][a-z0-9_]{0,63}$",
+            "type": "string"
+          },
+          "value": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "value",
+          "unit",
+          "sample_count"
+        ],
+        "type": "object"
+      },
       "ProviderConnectionCreate": {
         "additionalProperties": false,
         "properties": {
@@ -3854,6 +3926,63 @@
         "summary": "Persist a sourced cost report without invented savings",
         "tags": [
           "FinOps"
+        ]
+      }
+    },
+    "/api/v1/deployments/{name}/measurements": {
+      "post": {
+        "operationId": "recordOperationalMeasurements",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperationalMeasurementIngest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectList"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Attach bounded content-free operational measurements to the active revision",
+        "tags": [
+          "Monitoring"
         ]
       }
     },

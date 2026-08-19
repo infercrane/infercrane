@@ -124,6 +124,9 @@ type diagnosticStore interface {
 type monitoringStore interface {
 	EndpointMonitoring(context.Context, string, string, time.Duration, time.Duration) (domain.EndpointMonitoringSnapshot, error)
 }
+type operationalMeasurementStore interface {
+	RecordOperationalMeasurements(context.Context, string, string, []domain.OperationalMeasurement) ([]domain.OperationalMeasurement, error)
+}
 type providerConnectionStore interface {
 	CreateProviderConnection(context.Context, string, domain.ProviderConnection) (domain.ProviderConnection, error)
 	ProviderConnectionForTenant(context.Context, string, string) (domain.ProviderConnection, error)
@@ -329,6 +332,7 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/v1/deployments/{name}", a.auth(authz.Delete, a.deleteDeployment))
 	mux.HandleFunc("GET /api/v1/deployments", a.auth(authz.Read, a.deployments))
 	mux.HandleFunc("GET /api/v1/deployments/{name}", a.auth(authz.Read, a.deployment))
+	mux.HandleFunc("POST /api/v1/deployments/{name}/measurements", a.auth(authz.Deploy, a.recordOperationalMeasurements))
 	mux.HandleFunc("GET /api/v1/deployments/{name}/events", a.auth(authz.Read, a.deploymentEvents))
 	mux.HandleFunc("POST /api/v1/deployments/{name}/benchmarks", a.auth(authz.Deploy, a.runBenchmark))
 	mux.HandleFunc("GET /api/v1/deployments/{name}/benchmarks", a.auth(authz.Read, a.benchmarks))
@@ -1094,6 +1098,58 @@ func (a API) endpointMonitoring(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, snapshot)
+}
+
+type operationalMeasurementRequest struct {
+	Source        string                        `json:"source"`
+	EvidenceClass string                        `json:"evidence_class"`
+	ReplicaID     string                        `json:"replica_id,omitempty"`
+	ObservedAt    time.Time                     `json:"observed_at"`
+	ValidUntil    time.Time                     `json:"valid_until"`
+	Measurements  []operationalMeasurementValue `json:"measurements"`
+}
+
+type operationalMeasurementValue struct {
+	Name        string  `json:"name"`
+	Value       float64 `json:"value"`
+	Unit        string  `json:"unit"`
+	SampleCount int     `json:"sample_count"`
+}
+
+func (a API) recordOperationalMeasurements(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(operationalMeasurementStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "operational measurement storage is not configured")
+		return
+	}
+	var request operationalMeasurementRequest
+	if !decodeMutationBody(w, r, &request) {
+		return
+	}
+	rows := make([]domain.OperationalMeasurement, 0, len(request.Measurements))
+	for _, measurement := range request.Measurements {
+		rows = append(rows, domain.OperationalMeasurement{
+			ReplicaID: request.ReplicaID, Name: measurement.Name, Value: measurement.Value,
+			Unit: measurement.Unit, EvidenceClass: request.EvidenceClass, Source: request.Source,
+			SampleCount: measurement.SampleCount, ObservedAt: request.ObservedAt, ValidUntil: request.ValidUntil,
+		})
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	persisted, err := store.RecordOperationalMeasurements(r.Context(), actor.TenantID, r.PathValue("name"), rows)
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "deployment was not found")
+		return
+	}
+	if errors.Is(err, domain.ErrConflict) {
+		writeError(w, http.StatusConflict, "idempotency_conflict", err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_measurement_evidence", err.Error())
+		return
+	}
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "operational_measurements.record", ResourceType: "deployment", ResourceName: r.PathValue("name"), Outcome: "succeeded"})
+	writeJSON(w, http.StatusCreated, map[string]any{"data": persisted, "content_recorded": false})
 }
 
 func defaultMonitoringBucket(windowSeconds int) int {

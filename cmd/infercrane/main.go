@@ -214,6 +214,8 @@ func runLegacy(ctx context.Context, args []string) error {
 		return mcpCommand(ctx, cfg, args[1:])
 	case "observe":
 		return observeCommand(ctx, cfg, args[1:])
+	case "telemetry":
+		return telemetryCommand(ctx, cfg, args[1:])
 	case "inbox":
 		return inboxCommand(ctx, cfg, args[1:])
 	case "deploy":
@@ -3948,6 +3950,18 @@ func purgeRequests(ctx context.Context, s *store.Store, retention time.Duration,
 			if err != nil {
 				if ctx.Err() == nil {
 					logger.Error("purge request records", "error", err)
+				}
+				break
+			}
+			if deleted < 10000 {
+				break
+			}
+		}
+		for {
+			deleted, err := s.PurgeOperationalMeasurements(ctx, time.Now().Add(-retention), 10000)
+			if err != nil {
+				if ctx.Err() == nil {
+					logger.Error("purge operational measurements", "error", err)
 				}
 				break
 			}

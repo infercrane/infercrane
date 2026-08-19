@@ -121,6 +121,20 @@ The default snapshot is read-only. Endpoint snapshots combine logical identity, 
 Guard, admission, and alerts; deployment snapshots combine lifecycle, traffic, active operation,
 Guard, and events. `--diagnose` explicitly persists a fresh deterministic Doctor evaluation.
 
+### `telemetry collect dcgm`
+
+```bash
+infercrane telemetry collect dcgm coder-production \
+  --url http://127.0.0.1:9400/metrics \
+  --selector deployment=coder-production \
+  --replica replica-03 --ttl 2m
+```
+
+The command parses a bounded, documented subset of DCGM Prometheus metrics locally and sends
+normalized content-free evidence through the authenticated control API. Use `--file SNAPSHOT` for
+offline input. The snapshot is immutable, active-revision-bound, and becomes stale at its declared
+TTL; arbitrary Prometheus metrics are not accepted.
+
 ### `artifact`
 
 ```bash

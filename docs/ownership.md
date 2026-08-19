@@ -9,6 +9,7 @@ Ownership is expressed by responsibility until public repository teams and handl
 | Reconciliation and routers | `internal/reconcile`, `internal/router` | Control-plane maintainer |
 | Integration contracts and qualification | `internal/integration`, `internal/support`, `internal/workflows`, `internal/reconcile` | Control-plane maintainer |
 | Provider, runtime and metrics adapters | `internal/provision`, `internal/runtime`, `internal/runtimecontract`, `internal/metrics` | Integration maintainer |
+| Operational evidence ingestion | `internal/metrics`, `internal/store/operational_measurements.go`, `internal/store/monitoring.go`, `cmd/infercrane/telemetry.go` | Integration, database, and security maintainers |
 | Provider contracts and development fakes | `internal/conformance`, `internal/testtools`, `tools/contract-qualifier`, `scripts/dev-check.sh`, `scripts/test-acceptance-safety.sh` | Integration maintainer |
 | Fleet and inference decision policy | `internal/autoscale`, `internal/capacity`, `internal/decision`, `internal/overflow`, `internal/authz`, `internal/pricing` | Control-plane maintainer |
 | Governed external capacity and secret resolution | `internal/external`, `internal/secrets`, `internal/store/external_policies.go`, `internal/store/secrets.go` | Security and control-plane maintainers |

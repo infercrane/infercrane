@@ -207,6 +207,10 @@ class ControlAPI:
         path = f"/deployments/{quote(name, safe='')}"
         return cast(DeploymentView, self._transport.request("GET", path))
 
+    def record_operational_measurements(self, name: str, *, body: dict[str, Any]) -> ObjectList:
+        path = f"/deployments/{quote(name, safe='')}/measurements"
+        return cast(ObjectList, self._transport.request("POST", path, body=body))
+
     def list_deployment_events(self, name: str) -> ObjectList:
         path = f"/deployments/{quote(name, safe='')}/events"
         return cast(ObjectList, self._transport.request("GET", path))

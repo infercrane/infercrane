@@ -335,6 +335,27 @@ type MeasurementEvidence struct {
 	Reason        string     `json:"reason,omitempty"`
 }
 
+// OperationalMeasurement is a content-free observation imported from a
+// qualified runtime or infrastructure collector. ValidUntil is mandatory so a
+// disconnected collector can never leave apparently-live evidence behind.
+type OperationalMeasurement struct {
+	ID            string    `json:"id"`
+	TenantID      string    `json:"-"`
+	DeploymentID  string    `json:"deployment_id"`
+	Deployment    string    `json:"deployment"`
+	RevisionID    string    `json:"revision_id"`
+	ReplicaID     string    `json:"replica_id,omitempty"`
+	Name          string    `json:"name"`
+	Value         float64   `json:"value"`
+	Unit          string    `json:"unit"`
+	EvidenceClass string    `json:"evidence_class"`
+	Source        string    `json:"source"`
+	SampleCount   int       `json:"sample_count"`
+	ObservedAt    time.Time `json:"observed_at"`
+	ValidUntil    time.Time `json:"valid_until"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
 type ColdStartStats struct {
 	ClassifiedRequests    int      `json:"classified_requests"`
 	ColdStarts            int      `json:"cold_starts"`
