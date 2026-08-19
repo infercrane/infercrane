@@ -940,6 +940,7 @@ func TestInvalidOutputIsRejectedBeforeAnyControlPlaneRequest(t *testing.T) {
 			return recipeCommand(context.Background(), cfg, []string{"create", "qwen", "--name", "balanced", "--version", "1", "--output", "xml"})
 		},
 		"recipes": func() error { return recipesCommand(context.Background(), cfg, []string{"--output", "xml"}) },
+		"models":  func() error { return modelsCommand([]string{"--output", "xml"}) },
 		"lab": func() error {
 			return labCommand(context.Background(), cfg, []string{"model@commit", "--output", "xml"})
 		},
@@ -975,6 +976,25 @@ func TestInvalidOutputIsRejectedBeforeAnyControlPlaneRequest(t *testing.T) {
 				t.Fatalf("control-plane requests=%d, want %d", requests, before)
 			}
 		})
+	}
+}
+
+func TestModelsCommandExploresReviewedCatalogWithoutControlPlane(t *testing.T) {
+	output, err := captureStdout(t, func() error { return modelsCommand([]string{"embeddings"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output, "bge-m3-embeddings") || strings.Contains(output, "qwen3-8b") || !strings.Contains(output, "configuration-verified") {
+		t.Fatalf("unexpected catalog output: %s", output)
+	}
+	detail, err := captureStdout(t, func() error { return modelsCommand([]string{"inspect", "mistral-7b-instruct"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"Mistral 7B Instruct", "c170c708c41dac9275d15a8fff4eca08d52bab71", "performance", "workload init --recipe mistral-7b-instruct"} {
+		if !strings.Contains(strings.ToLower(detail), strings.ToLower(expected)) {
+			t.Fatalf("detail missing %q: %s", expected, detail)
+		}
 	}
 }
 

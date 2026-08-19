@@ -39,6 +39,13 @@ binding/deployment/revision attribution and persisted lifecycle overlays. The co
 it never queries PostgreSQL or an OpenTelemetry collector from the browser. Missing buckets and
 unsupported runtime metrics stay null or explicitly unavailable rather than becoming zero.
 
+Each operator-visible metric also carries a normalized evidence envelope: value, unit,
+availability, evidence class, source, observation time, freshness boundary, sample count, and a
+machine-readable absence reason. Availability distinguishes `available`, `stale`, `not_observed`,
+and `unsupported`; evidence class distinguishes measured, provider-reported, modeled, and estimated
+values. This lets CLIs, SDKs, and consoles preserve the same truth boundary instead of inferring one
+from a nullable number.
+
 ```bash
 infercrane observe coder-production
 ```

@@ -12,7 +12,7 @@ mode: wide
     <a className="ic-button ic-button-secondary" href="https://github.com/infercrane/infercrane">View on GitHub <span aria-hidden="true">↗</span></a>
   </div>
   <div className="ic-proof">
-    <span>Build or connect</span>
+    <span>Model to endpoint</span>
     <span>Safe releases</span>
     <span>Explainable operations</span>
     <span>No Kubernetes required</span>
@@ -33,10 +33,10 @@ infercrane request support-production \
   --stream
 ```
 
-Build a deployment from a model or custom OCI workload, or connect inference you already run.
-InferCrane gives applications one OpenAI-compatible logical endpoint while durable control-plane
-operations provision, reconcile, scale, and safely replace workers behind it. Providers and runtimes
-integrate through explicit contracts; Kubernetes is not required.
+Build a deployment from a model or custom OCI workload and expose one OpenAI-compatible logical
+endpoint. Durable control-plane operations provision, reconcile, scale, and safely replace workers
+behind it. If inference already exists, adopt it later without migrating first. Providers and
+runtimes integrate through explicit contracts; Kubernetes is not required.
 
 <div className="ic-flow not-prose" aria-label="InferCrane request path">
   <div className="ic-node"><span className="ic-node-label">request</span><strong>OpenAI client</strong></div>

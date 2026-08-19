@@ -67,6 +67,16 @@ func TestEndpointMonitoringAggregatesBoundedTenantEvidenceAndLifecycle(t *testin
 	if snapshot.Evidence.SampleCount != 2 || !snapshot.Evidence.Fresh || snapshot.Evidence.ContentRecorded || snapshot.Evidence.LatestRequestAt == nil {
 		t.Fatalf("snapshot evidence=%+v", snapshot.Evidence)
 	}
+	measurements := map[string]domain.MeasurementEvidence{}
+	for _, measurement := range snapshot.Evidence.Measurements {
+		measurements[measurement.Name] = measurement
+	}
+	if measurements["latency_p95"].Availability != "available" || measurements["latency_p95"].EvidenceClass != "measured" {
+		t.Fatalf("latency evidence=%+v", measurements["latency_p95"])
+	}
+	if measurements["gpu_utilization"].Availability != "unsupported" || measurements["gpu_utilization"].Value != nil {
+		t.Fatalf("GPU evidence must remain unavailable: %+v", measurements["gpu_utilization"])
+	}
 	if len(snapshot.Series) < 2 || len(snapshot.Series) > 14 || len(snapshot.Breakdowns) != 1 || len(snapshot.Events) == 0 || snapshot.Events[0].Type != "replica_healthy" {
 		t.Fatalf("series=%d breakdowns=%+v events=%+v", len(snapshot.Series), snapshot.Breakdowns, snapshot.Events)
 	}

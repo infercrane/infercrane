@@ -108,6 +108,7 @@
           "showcase/index",
           "showcase/build-inference",
           "showcase/api-to-self-hosted",
+          "features/model-catalog",
           "features/inference-projects",
           "showcase/connect-existing",
           "features/endpoints",
@@ -147,6 +148,7 @@
         "pages": [
           "features/recipes-lab",
           "features/replay-capacity",
+          "showcase/cost-performance",
           "features/inference-decisions",
           "features/finops-autopilot",
           "features/inference-passports",

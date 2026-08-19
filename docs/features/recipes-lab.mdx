@@ -23,10 +23,11 @@ the deployment/revision, artifact, benchmark tool/version, InferCrane version, a
 The SHA-256 digest covers both canonical objects. Retrying the same name/version is idempotent only
 for identical content; different content is rejected.
 
-The private browser console exposes the reviewed configuration catalog under **New inference →
-Deploy a model**. Selecting a template prefills the model and runtime while leaving infrastructure,
-accelerator, compute mode, region, and replica bounds explicit. A curated template remains
-configuration-only until that exact serving plan has measured benchmark evidence.
+The CLI and private browser console expose the reviewed catalog through `infercrane models` and
+**Models**. Selecting a serving profile prefills the model, immutable revision, and runtime while
+leaving infrastructure, accelerator, compute mode, region, and replica bounds explicit. A catalog
+entry remains configuration-verified until that exact serving plan has measured benchmark evidence.
+See [Verified Models](/features/model-catalog) for the complete evidence boundary.
 
 ## Compare evidence
 

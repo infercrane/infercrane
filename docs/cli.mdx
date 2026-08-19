@@ -504,6 +504,22 @@ infercrane explain rollout qwen-prod
 infercrane explain cold-start qwen-prod
 ```
 
+## Models and recipes
+
+Explore the built-in reviewed catalog without contacting a control plane:
+
+```bash
+infercrane models
+infercrane models embeddings
+infercrane models inspect qwen3-8b
+infercrane models --output json
+```
+
+`models inspect` prints the immutable revision, license URL, protocol capabilities, serving
+profiles, and the exact qualification boundary. Create a project with `infercrane workload init
+--recipe NAME`. Catalog profiles are configuration-verified—not benchmark, price, capacity, or
+universal GPU-fit claims. See [Verified Models](/features/model-catalog).
+
 ## Benchmark
 
 Run AIPerf and persist the exact reproduction metadata.

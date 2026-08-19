@@ -23,6 +23,7 @@ import (
 	"github.com/infercrane/infercrane/internal/benchmark"
 	"github.com/infercrane/infercrane/internal/burstguard"
 	"github.com/infercrane/infercrane/internal/contextpassport"
+	"github.com/infercrane/infercrane/internal/curatedrecipe"
 	"github.com/infercrane/infercrane/internal/decision"
 	"github.com/infercrane/infercrane/internal/doctor"
 	"github.com/infercrane/infercrane/internal/domain"
@@ -264,6 +265,8 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/v1/console/access", a.auth(authz.ManageTenant, a.configureConsoleAccess))
 	mux.HandleFunc("GET /api/v1/console/access", a.auth(authz.ManageTenant, a.consoleAccess))
 	mux.HandleFunc("GET /api/v1/integrations", a.auth(authz.Read, a.integrations))
+	mux.HandleFunc("GET /api/v1/catalog/models", a.auth(authz.Read, a.catalogModels))
+	mux.HandleFunc("GET /api/v1/catalog/models/{name}", a.auth(authz.Read, a.catalogModel))
 	mux.HandleFunc("GET /api/v1/system/instances", a.auth(authz.Read, a.controlPlaneInstances))
 	mux.HandleFunc("POST /api/v1/deployments/{name}/recipes", a.auth(authz.Deploy, a.captureRecipe))
 	mux.HandleFunc("GET /api/v1/recipes", a.auth(authz.Read, a.recipes))
@@ -437,6 +440,32 @@ func qualityEvidenceResponse(item domain.QualityEvidence) map[string]any {
 
 func (a API) integrations(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"data": a.Integrations})
+}
+
+func (a API) catalogModels(w http.ResponseWriter, r *http.Request) {
+	for key := range r.URL.Query() {
+		if key != "query" {
+			writeError(w, http.StatusBadRequest, "invalid_query", "only the query filter is supported")
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"data":               curatedrecipe.Search(r.URL.Query().Get("query")),
+		"evidence_policy":    "configuration metadata is reviewed; performance, price, and provider qualification require measured tenant evidence",
+		"performance_claims": false,
+	})
+}
+
+func (a API) catalogModel(w http.ResponseWriter, r *http.Request) {
+	entry, found := curatedrecipe.Get(r.PathValue("name"))
+	if !found {
+		writeError(w, http.StatusNotFound, "not_found", "catalog model was not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"model":              entry,
+		"performance_claims": false,
+	})
 }
 
 func (a API) environments(w http.ResponseWriter, r *http.Request) {
@@ -1751,7 +1780,7 @@ func (a API) createFinOpsReport(w http.ResponseWriter, r *http.Request) {
 			ExpiresAt  *time.Time `json:"expires_at"`
 		}
 		if json.Unmarshal([]byte(b.CostMetadataJSON), &cost) == nil && cost.Available && cost.Hourly != nil && cost.Source != "" && cost.Currency != "" && cost.ObservedAt != nil && !cost.ObservedAt.Before(start) && !cost.ObservedAt.After(end) {
-			evidence = append(evidence, finops.CostEvidence{ID: b.ID, Scope: "deployment_hourly_rate", Source: cost.Source, Currency: cost.Currency, Amount: *cost.Hourly, ObservedAt: *cost.ObservedAt, ExpiresAt: cost.ExpiresAt})
+			evidence = append(evidence, finops.CostEvidence{ID: b.ID, Scope: "deployment_hourly_rate", Resource: name, Source: cost.Source, Currency: cost.Currency, BillingUnit: "gpu_hour", EvidenceClass: "provider_reported", Amount: *cost.Hourly, ObservedAt: *cost.ObservedAt, ValidUntil: cost.ExpiresAt})
 		}
 	}
 	report := finops.Evaluate(end, evidence)

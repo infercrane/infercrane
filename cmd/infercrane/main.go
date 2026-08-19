@@ -294,6 +294,8 @@ func runLegacy(ctx context.Context, args []string) error {
 		return recipeCommand(ctx, cfg, args[1:])
 	case "recipes":
 		return recipesCommand(ctx, cfg, args[1:])
+	case "models":
+		return modelsCommand(args[1:])
 	case "lab":
 		return labCommand(ctx, cfg, args[1:])
 	case "passport":
@@ -1008,7 +1010,7 @@ func curatedRecipesCommand(args []string) error {
 	}
 	entries := curatedrecipe.Search(query)
 	if *output == "json" {
-		return printJSON(map[string]any{"data": entries, "evidence_class": "configuration-only"})
+		return printJSON(map[string]any{"data": entries, "evidence_class": "configuration-verified", "performance_claims": false})
 	}
 	if len(entries) == 0 {
 		fmt.Println("No curated configuration recipes match.")
@@ -1027,6 +1029,70 @@ func curatedRecipesCommand(args []string) error {
 		return err
 	}
 	fmt.Println("\nCreate a pinned project with: infercrane workload init --recipe NAME\nConfiguration recipes are reviewed starting points, not measured performance claims.")
+	return nil
+}
+
+func modelsCommand(args []string) error {
+	inspect := false
+	query := ""
+	if len(args) > 0 && args[0] == "inspect" {
+		inspect = true
+		args = args[1:]
+	}
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		query, args = args[0], args[1:]
+	}
+	fs := flag.NewFlagSet("models", flag.ContinueOnError)
+	output := fs.String("output", "human", "human or json")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if err := validateOutput(*output); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 || (inspect && query == "") {
+		return errors.New("usage: infercrane models [QUERY] | infercrane models inspect NAME [--output human|json]")
+	}
+	if inspect {
+		entry, found := curatedrecipe.Get(query)
+		if !found {
+			return fmt.Errorf("catalog model %q was not found", query)
+		}
+		if *output == "json" {
+			return printJSON(map[string]any{"model": entry, "performance_claims": false})
+		}
+		access := "public"
+		if entry.Gated {
+			access = "gated"
+		}
+		fmt.Printf("%s\n\nModel       %s@%s\nPublisher   %s\nTasks       %s\nProtocol    %s\nCapabilities %s\nLicense     %s · %s\nAccess      %s\nEvidence    %s\nReviewed    %s\n\nServing profiles\n", entry.DisplayName, entry.Model, entry.Revision, entry.Publisher, strings.Join(entry.Tasks, ", "), entry.Protocol, strings.Join(entry.Capabilities, ", "), entry.License, entry.LicenseURL, access, entry.EvidenceClass, entry.ReviewedAt)
+		for _, profile := range entry.Profiles {
+			fmt.Printf("  %s  %s · %s · %s · replicas %d–%d\n    %s\n", profile.Name, profile.Runtime, profile.ComputeMode, profile.GPUHint, profile.MinReplicas, profile.MaxReplicas, profile.QualificationScope)
+		}
+		fmt.Printf("\nCreate a project:\n  infercrane workload init --recipe %s\n", entry.Name)
+		return nil
+	}
+	entries := curatedrecipe.Search(query)
+	if *output == "json" {
+		return printJSON(map[string]any{"data": entries, "performance_claims": false})
+	}
+	if len(entries) == 0 {
+		fmt.Println("No reviewed model starting points match. Use `infercrane workload init --model REPOSITORY` for an explicit model.")
+		return nil
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "MODEL\tTASKS\tPROTOCOL\tLICENSE\tACCESS\tEVIDENCE")
+	for _, entry := range entries {
+		access := "public"
+		if entry.Gated {
+			access = "gated"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", entry.Name, strings.Join(entry.Tasks, ","), entry.Protocol, entry.License, access, entry.EvidenceClass)
+	}
+	if err := w.Flush(); err != nil {
+		return err
+	}
+	fmt.Println("\nInspect details with: infercrane models inspect NAME")
 	return nil
 }
 

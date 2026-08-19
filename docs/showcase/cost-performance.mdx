@@ -1,0 +1,58 @@
+---
+title: Compare cost and performance
+description: Use sourced cost, request telemetry, benchmark evidence, and Release Guard to evaluate an inference serving plan.
+sidebarTitle: Cost and performance
+---
+
+# Choose a serving plan with evidence
+
+Model APIs are often the fastest way to start. Self-hosted inference can offer more control for a
+stable workload. Hybrid routing can support migration or bounded overflow. InferCrane keeps the
+application endpoint stable while it records the evidence needed to compare those choices.
+
+## 1. Establish the current baseline
+
+```bash Baseline the endpoint
+infercrane observe coder-production
+infercrane finops coder-runtime --window 168h
+```
+
+The request view can report gateway-observed TTFT, latency, queueing, errors, fallback, and token
+usage when the upstream supplies it. FinOps accepts sourced cost observations only. Unknown price,
+currency, or coverage stays unavailable.
+
+## 2. Create a comparable candidate
+
+```bash Evaluate a candidate
+infercrane benchmark coder-runtime --revision REVISION_ID \
+  --requests 100 --concurrency 4
+
+infercrane recommend coder-runtime
+```
+
+A benchmark is measured evidence for its exact model artifact, runtime, configuration, provider,
+accelerator, and workload. It is not a universal price or performance claim.
+
+## 3. Protect production
+
+```bash Inspect the release decision
+infercrane rollout inspect coder-runtime
+infercrane explain rollout coder-runtime
+```
+
+Release Guard compares only compatible active and candidate evidence. A missing cost or task-quality
+signal can produce `INCONCLUSIVE`; a measured regression can produce `REJECT`. Neither recommendation
+nor approval silently moves traffic.
+
+| Question | Evidence InferCrane uses |
+| --- | --- |
+| Is the API path meeting latency expectations? | Request telemetry attributed to the external binding |
+| Can self-hosted capacity meet the workload? | Immutable benchmark or replay evidence |
+| Is hybrid overflow bounded? | Privacy acknowledgement, request reservation, and hard cost reservation |
+| Did the change actually help? | Comparable post-promotion monitoring and sourced cost windows |
+
+<Warning>
+InferCrane does not fabricate provider pricing or advertise an estimated savings percentage as a
+realized result. Verify provider billing, workload comparability, and production performance before
+using the result for financial planning.
+</Warning>

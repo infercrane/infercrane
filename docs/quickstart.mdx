@@ -13,7 +13,7 @@ The local stack uses GPU-free fake vLLM workers. It proves application and lifec
 model quality, GPU performance, or real-provider compatibility.
 </Info>
 
-## See the complete safety loop first
+## Prove the control plane locally first
 
 From a repository checkout, one command runs the local product proof and cleans up its isolated
 Docker project:
@@ -22,10 +22,11 @@ Docker project:
 make demo
 ```
 
-It connects an existing endpoint, sends and inspects a request, creates an intentionally unready
-candidate without provisioning it, records a deterministic Release Guard rejection, verifies the
-active revision did not change, rejects the candidate, and removes all temporary state. The output
-is explicitly marked as fixture evidence; it does not claim GPU or provider qualification.
+The GPU-free proof connects a fixture endpoint because it cannot provision a real model. It sends
+and inspects a request, creates an intentionally unready candidate, records a deterministic Release
+Guard rejection, verifies the active revision did not change, rejects the candidate, and removes all
+temporary state. This proves the application and lifecycle loop locally; it does not replace the
+model-to-endpoint deployment path or claim GPU/provider qualification.
 
 ## Prerequisites
 
@@ -135,14 +136,14 @@ is explicitly marked as fixture evidence; it does not claim GPU or provider qual
 ## Choose your next path
 
 <CardGroup cols={2}>
-  <Card title="Connect a model API" icon="cloud" href="/features/external-capacity">
-    Register OpenRouter or another OpenAI-compatible API without enabling traffic or spend.
-  </Card>
   <Card title="Deploy a real model" icon="server" href="/showcase/build-inference">
     Plan provider and runtime choices before creating billable capacity.
   </Card>
   <Card title="Connect an endpoint" icon="plug" href="/showcase/connect-existing">
     Observe an existing vLLM, LiteLLM, or OpenAI-compatible endpoint first.
+  </Card>
+  <Card title="Connect a model API" icon="cloud" href="/features/external-capacity">
+    Register OpenRouter or another OpenAI-compatible API without enabling traffic or spend.
   </Card>
   <Card title="Understand the model" icon="shapes" href="/concepts">
     Learn endpoints, environments, serving plans, deployments, and revisions.

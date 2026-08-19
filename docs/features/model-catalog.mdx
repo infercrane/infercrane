@@ -1,0 +1,119 @@
+---
+title: Verified Models
+description: Start from reviewed, immutable model configurations without confusing templates with measured performance.
+sidebarTitle: Verified Models
+---
+
+# Choose a model without accepting a black box
+
+InferCrane's Verified Models catalog is a small, reviewed set of deployment starting points. It is
+not a hosted-model marketplace and it does not imply that one model runs on every GPU, runtime, or
+provider.
+
+```bash
+infercrane models
+infercrane models embeddings
+infercrane models inspect mistral-7b-instruct
+```
+
+Each entry exposes:
+
+- the Hugging Face repository and immutable commit;
+- publisher, task, protocol, capabilities, and modalities;
+- license URL and gated-access requirement;
+- reviewed runtime configuration and serving profiles;
+- review date and an explicit evidence boundary.
+
+Create a project from one reviewed entry:
+
+```bash
+infercrane workload init ./support-model \
+  --recipe mistral-7b-instruct
+
+cd ./support-model
+infercrane workload validate
+infercrane workload plan
+infercrane workload deploy --wait
+```
+
+The browser console exposes the same control-plane catalog under **Models**. A model detail page
+shows the immutable identity and qualification scope before the deployment form is populated.
+
+## Evidence levels
+
+| Level | What it proves | What it does not prove |
+| --- | --- | --- |
+| Configuration verified | Repository identity, immutable revision, license metadata, protocol, and reviewed runtime configuration | GPU fit, provider capacity, latency, throughput, or price |
+| Measured recipe | One exact artifact, runtime, provider, GPU, region, workload, and AIPerf run | Portability to a different serving plan |
+| Community recipe | Contributor-supplied configuration with visible provenance | InferCrane qualification unless separately recorded |
+| Explicit model | The operator selected a repository and serving plan | Compatibility or production readiness |
+
+The current built-in catalog contains only **configuration-verified** entries. Measured results stay
+tenant-scoped in benchmark history and immutable model recipes; InferCrane does not silently promote
+them into universal claims.
+
+## Current collections
+
+The catalog follows application tasks rather than a single popularity ranking. Selection considers
+current ecosystem adoption, an official upstream model card, license clarity, and compatibility with
+InferCrane's qualified runtime line.
+
+| Collection | Reviewed starting points | Typical application |
+| --- | --- | --- |
+| General chat | Mistral 7B Instruct, Qwen3 8B, Llama 3.1 8B Instruct | Support, assistants, generation |
+| Reasoning | Qwen3 8B, DeepSeek R1 Distill Qwen 7B | Analysis and multi-step tasks |
+| Coding | Qwen2.5 Coder 7B Instruct | Completion, explanation, transformation, repair |
+| Vision and documents | Gemma 3 4B IT, Qwen2.5 VL 7B Instruct | Screenshots, forms, diagrams, visual question answering |
+| Embeddings and RAG | BGE-M3 | Multilingual search and private retrieval |
+| Extraction and summarization | Granite 3.3 8B Instruct | Controlled enterprise text pipelines |
+
+This is not a claim that every entry is best for its category. Evaluate quality on the application's
+own data, then benchmark the exact serving plan before promotion.
+
+Catalog review uses the upstream [Hugging Face model metadata](https://huggingface.co/models), the
+[vLLM 0.8.5 support matrix](https://docs.vllm.ai/en/v0.8.5/models/supported_models.html), and each
+publisher's model card and license. Task-oriented discovery is informed by model-library patterns
+used by [Replicate](https://replicate.com/collections) and
+[Baseten](https://www.baseten.co/library/), but InferCrane entries remain provider-neutral and do not
+copy their performance or availability claims.
+
+<Note>
+Popular models that require a newer, unqualified runtime are not presented as one-click templates.
+They remain available through the explicit-model path, and can enter the reviewed catalog after the
+runtime and protocol matrix is qualified.
+</Note>
+
+<Warning>
+The `gpu_hint` in a serving profile is an editable configuration starting point. Run `plan`, confirm
+model memory/topology requirements, and qualify the exact provider/runtime combination before
+production.
+</Warning>
+
+## Any Hugging Face model remains available
+
+The catalog is convenience, not an allowlist:
+
+```bash
+infercrane workload init ./my-model --model organization/repository
+infercrane workload plan ./my-model
+```
+
+Mutable references are resolved into `ModelArtifact` identity during the durable deployment
+lifecycle. A catalog entry simply starts with a reviewed commit and clearer license/protocol
+metadata.
+
+## API
+
+Authenticated consoles and automation can use:
+
+```bash
+curl -sS "$INFERCRANE_CONTROL_URL/api/v1/catalog/models?query=chat" \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY"
+
+curl -sS "$INFERCRANE_CONTROL_URL/api/v1/catalog/models/qwen3-8b" \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY"
+```
+
+The response includes `performance_claims: false`. Trustworthy performance comes from
+[AIPerf benchmarking](/features/benchmarking), [Inference Lab](/features/recipes-lab), and the exact
+evidence attached to a revision.

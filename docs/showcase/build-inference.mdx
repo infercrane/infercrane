@@ -14,6 +14,17 @@ runtime startup, readiness, and route publication continue.
 infercrane deploy Qwen/Qwen3-8B
 ```
 
+If you want a reviewed immutable starting point first:
+
+```bash
+infercrane models
+infercrane models inspect mistral-7b-instruct
+infercrane workload init ./support-model --recipe mistral-7b-instruct
+```
+
+Catalog entries make repository, commit, license, protocol, and configuration evidence visible.
+They are not performance or provider-availability claims. See [Verified Models](/features/model-catalog).
+
 Qwen3-8B is intentionally used as the release acceptance baseline: it is small enough for frequent
 single-GPU qualification and exercises the production lifecycle without making every test unusually
 expensive. It is not embedded in the InferCrane domain model.

@@ -782,8 +782,7 @@
         "properties": {
           "breakdowns": {
             "items": {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/components/schemas/MonitoringBreakdown"
             },
             "maxItems": 50,
             "type": "array"
@@ -800,30 +799,26 @@
           },
           "events": {
             "items": {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/components/schemas/MonitoringEvent"
             },
             "maxItems": 200,
             "type": "array"
           },
           "evidence": {
-            "additionalProperties": true,
-            "type": "object"
+            "$ref": "#/components/schemas/MonitoringEvidence"
           },
           "logical_model": {
             "type": "string"
           },
           "series": {
             "items": {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/components/schemas/MonitoringBucket"
             },
             "maxItems": 500,
             "type": "array"
           },
           "summary": {
-            "additionalProperties": true,
-            "type": "object"
+            "$ref": "#/components/schemas/MonitoringSummary"
           },
           "window_end": {
             "format": "date-time",
@@ -1195,6 +1190,447 @@
         "required": [
           "name"
         ],
+        "type": "object"
+      },
+      "MeasurementEvidence": {
+        "additionalProperties": false,
+        "properties": {
+          "availability": {
+            "enum": [
+              "available",
+              "unavailable",
+              "stale",
+              "not_observed",
+              "unsupported"
+            ],
+            "type": "string"
+          },
+          "evidence_class": {
+            "enum": [
+              "measured",
+              "provider_reported",
+              "modeled",
+              "estimated"
+            ],
+            "type": "string"
+          },
+          "fresh_until": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "observed_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "sample_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "source": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "value": {
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "value",
+          "unit",
+          "availability",
+          "evidence_class",
+          "source",
+          "observed_at",
+          "fresh_until",
+          "sample_count"
+        ],
+        "type": "object"
+      },
+      "MonitoringBreakdown": {
+        "additionalProperties": false,
+        "properties": {
+          "binding": {
+            "type": "string"
+          },
+          "deployment": {
+            "type": "string"
+          },
+          "error_rate": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "errors": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "fallbacks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "last_seen_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "p95_latency_ms": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "p95_ttft_ms": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "provider": {
+            "type": "string"
+          },
+          "requests": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "revision": {
+            "type": "string"
+          },
+          "runtime": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "MonitoringBucket": {
+        "additionalProperties": false,
+        "properties": {
+          "error_rate": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "errors": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "fallback_rate": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "fallbacks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "input_token_samples": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "input_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "input_tokens_per_second": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "output_token_samples": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "output_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "output_tokens_per_second": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "p50_latency_ms": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "p50_ttft_ms": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "p95_generation_ms": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "p95_latency_ms": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "p95_queue_ms": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "p95_ttft_ms": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "requests": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "requests_per_second": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "retried": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "streaming": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "token_usage_samples": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "MonitoringEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "details": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "MonitoringEvidence": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "content_recorded": {
+            "const": false,
+            "type": "boolean"
+          },
+          "fresh": {
+            "type": "boolean"
+          },
+          "latest_request_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "measurements": {
+            "items": {
+              "$ref": "#/components/schemas/MeasurementEvidence"
+            },
+            "maxItems": 32,
+            "type": "array"
+          },
+          "sample_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "semantic_convention_schema": {
+            "format": "uri",
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "unavailable": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "source",
+          "semantic_convention_schema",
+          "sample_count",
+          "latest_request_at",
+          "fresh",
+          "content_recorded",
+          "available",
+          "unavailable",
+          "measurements"
+        ],
+        "type": "object"
+      },
+      "MonitoringSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "error_rate": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "errors": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "fallback_rate": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "fallbacks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "input_token_samples": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "input_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "input_tokens_per_second": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "output_token_samples": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "output_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "output_tokens_per_second": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "p50_latency_ms": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "p50_ttft_ms": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "p95_generation_ms": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "p95_latency_ms": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "p95_queue_ms": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "p95_ttft_ms": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "requests": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "requests_per_second": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "retried": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "retry_rate": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "streaming": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "token_usage_samples": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
         "type": "object"
       },
       "Object": {
@@ -2397,6 +2833,89 @@
         "summary": "Summarize tenant-scoped observed capacity evidence",
         "tags": [
           "Capacity intelligence"
+        ]
+      }
+    },
+    "/api/v1/catalog/models": {
+      "get": {
+        "operationId": "listCatalogModels",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Search reviewed model starting points",
+        "tags": [
+          "Model catalog"
+        ]
+      }
+    },
+    "/api/v1/catalog/models/{name}": {
+      "get": {
+        "operationId": "getCatalogModel",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Inspect one reviewed model and its serving profiles",
+        "tags": [
+          "Model catalog"
         ]
       }
     },
@@ -7705,6 +8224,9 @@
     },
     {
       "name": "Model artifacts"
+    },
+    {
+      "name": "Model catalog"
     },
     {
       "name": "Monitoring"

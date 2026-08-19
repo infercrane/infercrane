@@ -35,6 +35,8 @@ var Routes = []Route{
 	{"PUT", "/console/access", "configureConsoleAccess", "Identity", "Map a hosted identity and grant or revoke private-console access", "ConsoleIdentityProvisioning", "Object", 200, false},
 	{"GET", "/console/access", "listConsoleAccess", "Identity", "List private-console members for the authenticated organization", "", "ObjectList", 200, false},
 	{"GET", "/integrations", "listIntegrations", "System", "Inspect registered integration capabilities", "", "Object", 200, false},
+	{"GET", "/catalog/models", "listCatalogModels", "Model catalog", "Search reviewed model starting points", "", "ObjectList", 200, false},
+	{"GET", "/catalog/models/{name}", "getCatalogModel", "Model catalog", "Inspect one reviewed model and its serving profiles", "", "Object", 200, false},
 	{"GET", "/system/instances", "listControlPlaneInstances", "System", "List live control-plane instances and protocol compatibility", "", "ObjectList", 200, false},
 	{"GET", "/environments", "listEnvironments", "Endpoints", "List endpoint environments", "", "ObjectList", 200, false},
 	{"POST", "/environments", "createEnvironment", "Endpoints", "Create an endpoint environment", "EnvironmentCreate", "Object", 201, false},
@@ -268,7 +270,13 @@ func schemas() map[string]any {
 		"LogicalModelCreate":              map[string]any{"type": "object", "additionalProperties": false, "required": []string{"name"}, "properties": map[string]any{"name": map[string]any{"type": "string"}, "description": map[string]any{"type": "string", "maxLength": 4096}}},
 		"EndpointCreate":                  map[string]any{"type": "object", "additionalProperties": false, "required": []string{"name", "logical_model", "environment"}, "properties": map[string]any{"name": map[string]any{"type": "string"}, "logical_model": map[string]any{"type": "string"}, "environment": map[string]any{"type": "string"}}},
 		"EndpointAdoption":                map[string]any{"type": "object", "additionalProperties": false, "required": []string{"name", "logical_model", "url", "source", "ownership_mode", "runtime"}, "properties": map[string]any{"name": map[string]any{"type": "string"}, "logical_model": map[string]any{"type": "string"}, "upstream_model": map[string]any{"type": "string"}, "url": map[string]any{"type": "string", "format": "uri"}, "source": map[string]any{"type": "string", "enum": []string{"vllm", "openai-compatible"}}, "ownership_mode": map[string]any{"type": "string", "enum": []string{"observe-only", "traffic-managed"}}, "runtime": map[string]any{"type": "string"}, "discover": map[string]any{"type": "boolean", "description": "Ask the control plane to verify /v1/models and resolve the selected model before adoption."}, "connector": map[string]any{"type": "string", "enum": []string{"auto", "vllm", "litellm", "openai-compatible"}}}},
-		"EndpointMonitoring":              map[string]any{"type": "object", "additionalProperties": false, "required": []string{"endpoint", "logical_model", "environment", "window_start", "window_end", "bucket_seconds", "summary", "series", "breakdowns", "events", "evidence"}, "properties": map[string]any{"endpoint": map[string]any{"type": "string"}, "logical_model": map[string]any{"type": "string"}, "environment": map[string]any{"type": "string"}, "window_start": map[string]any{"type": "string", "format": "date-time"}, "window_end": map[string]any{"type": "string", "format": "date-time"}, "bucket_seconds": map[string]any{"type": "integer", "minimum": 60}, "summary": stringMap, "series": map[string]any{"type": "array", "maxItems": 500, "items": stringMap}, "breakdowns": map[string]any{"type": "array", "maxItems": 50, "items": stringMap}, "events": map[string]any{"type": "array", "maxItems": 200, "items": stringMap}, "evidence": stringMap}},
+		"MeasurementEvidence":             measurementEvidenceSchema(),
+		"MonitoringSummary":               monitoringSummarySchema(),
+		"MonitoringBucket":                monitoringBucketSchema(),
+		"MonitoringBreakdown":             monitoringBreakdownSchema(),
+		"MonitoringEvent":                 monitoringEventSchema(),
+		"MonitoringEvidence":              monitoringEvidenceSchema(),
+		"EndpointMonitoring":              map[string]any{"type": "object", "additionalProperties": false, "required": []string{"endpoint", "logical_model", "environment", "window_start", "window_end", "bucket_seconds", "summary", "series", "breakdowns", "events", "evidence"}, "properties": map[string]any{"endpoint": map[string]any{"type": "string"}, "logical_model": map[string]any{"type": "string"}, "environment": map[string]any{"type": "string"}, "window_start": map[string]any{"type": "string", "format": "date-time"}, "window_end": map[string]any{"type": "string", "format": "date-time"}, "bucket_seconds": map[string]any{"type": "integer", "minimum": 60}, "summary": ref("MonitoringSummary"), "series": map[string]any{"type": "array", "maxItems": 500, "items": ref("MonitoringBucket")}, "breakdowns": map[string]any{"type": "array", "maxItems": 50, "items": ref("MonitoringBreakdown")}, "events": map[string]any{"type": "array", "maxItems": 200, "items": ref("MonitoringEvent")}, "evidence": ref("MonitoringEvidence")}},
 		"AdoptionOwnership":               map[string]any{"type": "object", "additionalProperties": false, "required": []string{"ownership_mode"}, "properties": map[string]any{"ownership_mode": map[string]any{"type": "string", "enum": []string{"traffic-managed"}}}},
 		"AlertPolicyCreate":               map[string]any{"type": "object", "additionalProperties": false, "required": []string{"name", "webhook_url", "secret_reference_id"}, "properties": map[string]any{"name": map[string]any{"type": "string"}, "webhook_url": map[string]any{"type": "string", "format": "uri", "pattern": "^https://"}, "secret_reference_id": map[string]any{"type": "string"}, "minimum_severity": map[string]any{"type": "string", "enum": []string{"info", "warning", "critical"}}, "enabled": map[string]any{"type": "boolean"}, "max_attempts": map[string]any{"type": "integer", "minimum": 1, "maximum": 5}}},
 		"AdmissionPolicy":                 map[string]any{"type": "object", "additionalProperties": false, "required": []string{"max_concurrency", "max_queue_depth", "queue_timeout_ms", "max_request_bytes", "max_output_tokens", "allowed_priorities", "retry_budget", "enabled"}, "properties": map[string]any{"max_concurrency": map[string]any{"type": "integer", "minimum": 1, "maximum": 10000}, "max_queue_depth": map[string]any{"type": "integer", "minimum": 0, "maximum": 100000}, "queue_timeout_ms": map[string]any{"type": "integer", "minimum": 1, "maximum": 300000}, "max_request_bytes": map[string]any{"type": "integer", "minimum": 1024, "maximum": 16777216}, "max_output_tokens": map[string]any{"type": "integer", "minimum": 1, "maximum": 1048576}, "allowed_priorities": map[string]any{"type": "array", "minItems": 1, "maxItems": 3, "uniqueItems": true, "items": map[string]any{"type": "string", "enum": []string{"low", "normal", "high"}}}, "retry_budget": map[string]any{"type": "integer", "minimum": 0, "maximum": 3}, "enabled": map[string]any{"type": "boolean"}}},
@@ -301,5 +309,82 @@ func schemas() map[string]any {
 		"ExternalPolicyEnvelope":          map[string]any{"type": "object", "required": []string{"policy"}, "properties": map[string]any{"policy": ref("ExternalPolicy")}},
 		"ChatCompletionRequest":           map[string]any{"type": "object", "required": []string{"model", "messages"}, "properties": map[string]any{"model": map[string]any{"type": "string", "description": "Stable InferCrane endpoint name; migrated v1 deployment aliases remain compatible endpoints."}, "messages": map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "object", "required": []string{"role", "content"}, "properties": map[string]any{"role": map[string]any{"type": "string"}, "content": map[string]any{"type": "string"}}}}, "stream": map[string]any{"type": "boolean", "default": false}}, "additionalProperties": true},
 		"Empty":                           map[string]any{"type": "null"},
+	}
+}
+
+func nullableNumberSchema() map[string]any {
+	return map[string]any{"type": []string{"number", "null"}}
+}
+
+func measurementEvidenceSchema() map[string]any {
+	return map[string]any{
+		"type": "object", "additionalProperties": false,
+		"required": []string{"name", "value", "unit", "availability", "evidence_class", "source", "observed_at", "fresh_until", "sample_count"},
+		"properties": map[string]any{
+			"name": map[string]any{"type": "string"}, "value": nullableNumberSchema(), "unit": map[string]any{"type": "string"},
+			"availability":   map[string]any{"type": "string", "enum": []string{"available", "unavailable", "stale", "not_observed", "unsupported"}},
+			"evidence_class": map[string]any{"type": "string", "enum": []string{"measured", "provider_reported", "modeled", "estimated"}},
+			"source":         map[string]any{"type": "string"}, "observed_at": map[string]any{"type": []string{"string", "null"}, "format": "date-time"},
+			"fresh_until": map[string]any{"type": []string{"string", "null"}, "format": "date-time"}, "sample_count": map[string]any{"type": "integer", "minimum": 0},
+			"reason": map[string]any{"type": "string"},
+		},
+	}
+}
+
+func monitoringMetricProperties() map[string]any {
+	return map[string]any{
+		"requests": map[string]any{"type": "integer", "minimum": 0}, "errors": map[string]any{"type": "integer", "minimum": 0},
+		"fallbacks": map[string]any{"type": "integer", "minimum": 0}, "retried": map[string]any{"type": "integer", "minimum": 0},
+		"streaming": map[string]any{"type": "integer", "minimum": 0}, "token_usage_samples": map[string]any{"type": "integer", "minimum": 0},
+		"input_token_samples": map[string]any{"type": "integer", "minimum": 0}, "output_token_samples": map[string]any{"type": "integer", "minimum": 0},
+		"input_tokens": map[string]any{"type": "integer", "minimum": 0}, "output_tokens": map[string]any{"type": "integer", "minimum": 0},
+		"requests_per_second": map[string]any{"type": "number", "minimum": 0}, "input_tokens_per_second": nullableNumberSchema(),
+		"output_tokens_per_second": nullableNumberSchema(), "error_rate": nullableNumberSchema(), "fallback_rate": nullableNumberSchema(),
+		"p50_latency_ms": nullableNumberSchema(), "p95_latency_ms": nullableNumberSchema(), "p50_ttft_ms": nullableNumberSchema(),
+		"p95_ttft_ms": nullableNumberSchema(), "p95_queue_ms": nullableNumberSchema(), "p95_generation_ms": nullableNumberSchema(),
+	}
+}
+
+func monitoringSummarySchema() map[string]any {
+	properties := monitoringMetricProperties()
+	properties["retry_rate"] = nullableNumberSchema()
+	return map[string]any{"type": "object", "additionalProperties": false, "properties": properties}
+}
+
+func monitoringBucketSchema() map[string]any {
+	properties := monitoringMetricProperties()
+	properties["started_at"] = map[string]any{"type": "string", "format": "date-time"}
+	return map[string]any{"type": "object", "additionalProperties": false, "properties": properties}
+}
+
+func monitoringBreakdownSchema() map[string]any {
+	return map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{
+		"binding": map[string]any{"type": "string"}, "deployment": map[string]any{"type": "string"}, "revision": map[string]any{"type": "string"},
+		"provider": map[string]any{"type": "string"}, "runtime": map[string]any{"type": "string"}, "requests": map[string]any{"type": "integer", "minimum": 0},
+		"errors": map[string]any{"type": "integer", "minimum": 0}, "fallbacks": map[string]any{"type": "integer", "minimum": 0},
+		"error_rate": nullableNumberSchema(), "p95_latency_ms": nullableNumberSchema(), "p95_ttft_ms": nullableNumberSchema(),
+		"last_seen_at": map[string]any{"type": "string", "format": "date-time"},
+	}}
+}
+
+func monitoringEventSchema() map[string]any {
+	return map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{
+		"kind": map[string]any{"type": "string"}, "type": map[string]any{"type": "string"}, "summary": map[string]any{"type": "string"},
+		"details": map[string]any{"type": "object", "additionalProperties": true}, "occurred_at": map[string]any{"type": "string", "format": "date-time"},
+	}}
+}
+
+func monitoringEvidenceSchema() map[string]any {
+	return map[string]any{
+		"type": "object", "additionalProperties": false,
+		"required": []string{"source", "semantic_convention_schema", "sample_count", "latest_request_at", "fresh", "content_recorded", "available", "unavailable", "measurements"},
+		"properties": map[string]any{
+			"source": map[string]any{"type": "string"}, "semantic_convention_schema": map[string]any{"type": "string", "format": "uri"},
+			"sample_count": map[string]any{"type": "integer", "minimum": 0}, "latest_request_at": map[string]any{"type": []string{"string", "null"}, "format": "date-time"},
+			"fresh": map[string]any{"type": "boolean"}, "content_recorded": map[string]any{"type": "boolean", "const": false},
+			"available":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"unavailable":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"measurements": map[string]any{"type": "array", "maxItems": 32, "items": ref("MeasurementEvidence")},
+		},
 	}
 }

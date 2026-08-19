@@ -10,10 +10,16 @@ import (
 )
 
 type CostEvidence struct {
-	ID, Scope, Source, Currency string
-	Amount                      float64
-	ObservedAt                  time.Time
-	ExpiresAt                   *time.Time
+	ID            string     `json:"id"`
+	Scope         string     `json:"scope"`
+	Resource      string     `json:"resource"`
+	Source        string     `json:"source"`
+	Currency      string     `json:"currency"`
+	BillingUnit   string     `json:"billing_unit"`
+	EvidenceClass string     `json:"evidence_class"`
+	Amount        float64    `json:"amount"`
+	ObservedAt    time.Time  `json:"observed_at"`
+	ValidUntil    *time.Time `json:"valid_until,omitempty"`
 }
 type Report struct {
 	Status      string         `json:"status"`
@@ -29,15 +35,26 @@ type Report struct {
 func Evaluate(now time.Time, evidence []CostEvidence) Report {
 	rows := append([]CostEvidence(nil), evidence...)
 	sort.Slice(rows, func(i, j int) bool { return rows[i].ID < rows[j].ID })
+	validRows := make([]CostEvidence, 0, len(rows))
+	currencies := map[string]struct{}{}
+	for _, row := range rows {
+		if row.ID == "" || row.Source == "" || row.Currency == "" || row.Amount < 0 || row.ObservedAt.IsZero() || row.ObservedAt.After(now) || (row.ValidUntil != nil && !row.ValidUntil.After(now)) {
+			continue
+		}
+		validRows = append(validRows, row)
+		currencies[row.Currency] = struct{}{}
+	}
+	encoded, _ := json.Marshal(rows)
+	digest := sha256.Sum256(encoded)
+	report := Report{Status: "unavailable", Evidence: []CostEvidence{}, InputDigest: hex.EncodeToString(digest[:]), Disclosures: []string{"no savings estimate without measured utilization and a qualified alternative"}}
+	if len(currencies) > 1 {
+		report.Missing = []string{"single_currency_cost_evidence"}
+		report.Disclosures = append(report.Disclosures, "mixed currencies are never converted or silently discarded")
+		return report
+	}
 	latest := map[string]CostEvidence{}
 	currency := ""
-	for _, row := range rows {
-		if row.ID == "" || row.Source == "" || row.Currency == "" || row.Amount < 0 || row.ObservedAt.IsZero() || row.ObservedAt.After(now) || (row.ExpiresAt != nil && !row.ExpiresAt.After(now)) {
-			continue
-		}
-		if currency != "" && currency != row.Currency {
-			continue
-		}
+	for _, row := range validRows {
 		currency = row.Currency
 		if current, ok := latest[row.Scope]; !ok || row.ObservedAt.After(current.ObservedAt) {
 			latest[row.Scope] = row
@@ -48,9 +65,7 @@ func Evaluate(now time.Time, evidence []CostEvidence) Report {
 		valid = append(valid, row)
 	}
 	sort.Slice(valid, func(i, j int) bool { return valid[i].ID < valid[j].ID })
-	encoded, _ := json.Marshal(rows)
-	digest := sha256.Sum256(encoded)
-	report := Report{Status: "unavailable", Evidence: valid, InputDigest: hex.EncodeToString(digest[:]), Disclosures: []string{"no savings estimate without measured utilization and a qualified alternative"}}
+	report.Evidence = valid
 	if len(valid) == 0 {
 		report.Missing = []string{"sourced_current_cost"}
 		return report

@@ -47,6 +47,14 @@ class ControlAPI:
         path = "/integrations"
         return cast(dict[str, Any], self._transport.request("GET", path))
 
+    def list_catalog_models(self) -> ObjectList:
+        path = "/catalog/models"
+        return cast(ObjectList, self._transport.request("GET", path))
+
+    def get_catalog_model(self, name: str) -> dict[str, Any]:
+        path = f"/catalog/models/{quote(name, safe='')}"
+        return cast(dict[str, Any], self._transport.request("GET", path))
+
     def list_control_plane_instances(self) -> ObjectList:
         path = "/system/instances"
         return cast(ObjectList, self._transport.request("GET", path))

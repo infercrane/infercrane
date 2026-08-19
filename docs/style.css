@@ -92,20 +92,33 @@ samp {
 }
 
 code-block {
-  border: 1px solid color-mix(in srgb, var(--infercrane-border) 88%, transparent);
-  border-radius: var(--infercrane-radius-md);
-  box-shadow: 0 12px 32px rgb(15 23 42 / 0.07);
+  background: color-mix(in srgb, var(--infercrane-surface) 88%, var(--infercrane-background));
+  border: 1px solid color-mix(in srgb, var(--infercrane-border) 92%, var(--infercrane-text-secondary));
+  border-radius: 9px;
+  box-shadow: inset 0 1px rgb(255 255 255 / 0.4);
   overflow: hidden;
 }
 
 .dark code-block {
-  box-shadow: 0 14px 34px rgb(0 0 0 / 0.22);
+  background: #090c10;
+  border-color: #29313b;
+  box-shadow: inset 0 1px rgb(255 255 255 / 0.035);
 }
 
 code-block pre {
-  font-size: 0.81rem;
-  line-height: 1.72;
+  font-size: 0.8rem;
+  font-variant-ligatures: none;
+  line-height: 1.7;
+  padding-block: 0.35rem;
   tab-size: 2;
+}
+
+code-block code {
+  font-weight: 450;
+}
+
+code-block ::selection {
+  background: color-mix(in srgb, var(--infercrane-accent) 28%, transparent);
 }
 
 code-block button:focus-visible {

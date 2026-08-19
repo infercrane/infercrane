@@ -14,10 +14,11 @@ reads PostgreSQL or provider credentials directly.
 
 ## What the console covers
 
-- fleet attention, stable endpoints, and concrete workloads;
+- fleet attention, stable endpoints, and concrete deployments;
 - durable operations with reconnectable timelines and cooperative cancellation;
 - Request Inspector and deterministic Doctor findings;
 - endpoint monitoring for request rate, errors, fallback, TTFT, queueing, latency, and reported token throughput;
+- typed freshness, source, sample count, and availability for every monitoring measurement;
 - Release Guard, benchmark, replay, revision, and replica evidence where available;
 - lifecycle overlays, signed alert policies, sourced FinOps reports, and signed output-quality evidence;
 - provider/runtime capability inventory and secret references;
@@ -28,25 +29,39 @@ look healthy, and an unavailable measurement is never rendered as zero.
 
 ## First-run paths
 
-**New inference** starts from the user's existing situation instead of requiring infrastructure
-migration:
+**Create endpoint** starts with the application identity the user wants, then asks how it should be
+served. The primary paths are ordered by intent:
 
-1. **Use a model API** registers OpenRouter or another OpenAI-compatible provider. Configuration
-   alone sends no traffic and authorizes no spend.
+1. **Deploy an open model** starts from a reviewed model configuration, exposes only the required
+   serving choices, and keeps runtime, accelerator, region, and scaling under Advanced.
 2. **Connect existing inference** discovers vLLM, SGLang, LiteLLM, or another compatible endpoint
    and starts observe-only.
-3. **Deploy a model** starts from a reviewed model configuration and then asks for explicit
-   infrastructure, runtime, accelerator, compute mode, region, and replica bounds.
+3. **Use a model API** registers OpenRouter or another OpenAI-compatible provider. Configuration
+   alone sends no traffic and authorizes no spend.
+
+Each workflow separates configuration from review. The review step states ownership, billable
+effects, missing cost evidence, and whether traffic changes before the mutation is submitted.
 
 The deployment templates mirror InferCrane's reviewed curated recipes. They are configuration-only
 starting points—not benchmark, price, compatibility, or performance claims. The console never
 chooses hardware or displays a cost estimate without grounded evidence. Deployment operations are
 durable and remain reattachable after the browser closes.
 
+The console navigation keeps stable application identities under **Endpoints**, lifecycle-managed
+capacity under **Deployments**, live evidence under **Monitoring**, and provider/runtime setup under
+**Settings → Connections**. Endpoint pages expose task tabs for monitoring, requests, releases,
+routing, and settings. Deployment pages expose replicas, revisions, autoscaling, benchmarks, and
+events without turning every capability into a global navigation item.
+
+Optional evidence fails locally: a missing benchmark, alert, member directory, or adapter inventory
+shows an explicit unavailable panel while the rest of the resource stays usable. Unknown values are
+not converted to zero.
+
 The monitoring page queries only the authenticated control API. PostgreSQL request evidence and
 lifecycle events form the initial local evidence store; OpenTelemetry GenAI semantics define the
 portable names and dimensions. Runtime-internal and GPU metrics remain unavailable until a
-qualified runtime or provider adapter reports them.
+qualified runtime or provider adapter reports them. The UI displays why evidence is absent rather
+than rendering an unknown value as zero.
 
 ## Local self-hosted console
 

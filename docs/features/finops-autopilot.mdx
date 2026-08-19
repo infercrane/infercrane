@@ -15,6 +15,12 @@ infercrane finops coder-production --window 720h
 
 The report persists its exact evidence, evaluation window, disclosure set, and canonical input digest.
 
+The current release reports only sourced cost that InferCrane can bind to the selected workload and
+window. Cost per request, per-token unit economics, idle-capacity attribution, and verified savings
+remain unavailable unless request coverage, billing units, currency, and a comparable post-change
+window are all grounded. The product never silently mixes currencies or turns a provider list price
+into realized savings.
+
 ## Advisory Autopilot
 
 Autopilot consumes the deterministic SLO recommendation already persisted for a deployment:

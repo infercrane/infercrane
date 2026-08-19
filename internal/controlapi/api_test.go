@@ -223,6 +223,40 @@ func TestEndpointMonitoringIsAuthenticatedBoundedAndContentFree(t *testing.T) {
 	}
 }
 
+func TestModelCatalogIsAuthenticatedSearchableAndTruthful(t *testing.T) {
+	handler := (API{Store: &fakeStore{}, APIKey: "secret"}).Handler()
+
+	unauthorized := httptest.NewRecorder()
+	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/api/v1/catalog/models", nil))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized status=%d body=%s", unauthorized.Code, unauthorized.Body.String())
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/catalog/models?query=embeddings", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"name":"bge-m3-embeddings"`) || !strings.Contains(response.Body.String(), `"performance_claims":false`) || strings.Contains(response.Body.String(), `"name":"qwen3-8b"`) {
+		t.Fatalf("catalog status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/catalog/models/qwen3-8b", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"revision":"b968826d9c46dd6066d109eabc6255188de91218"`) || !strings.Contains(response.Body.String(), `"evidence_class":"configuration-verified"`) || !strings.Contains(response.Body.String(), `"qualification_scope"`) {
+		t.Fatalf("detail status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/catalog/models?limit=10", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("unexpected query status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func (f *fakeQualityEvidenceStore) RecordQualityEvidence(_ context.Context, tenant, _ string, item domain.QualityEvidence) (domain.QualityEvidence, bool, error) {
 	item.ID, item.TenantID, item.DeploymentID = "quality-1", tenant, "deployment-1"
 	item.CreatedAt = time.Now().UTC()

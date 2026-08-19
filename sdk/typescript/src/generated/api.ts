@@ -48,6 +48,16 @@ export class ControlApi {
     return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
   }
 
+  listCatalogModels(): Promise<ObjectList> {
+    const path = '/catalog/models';
+    return this.transport.request('GET', path) as Promise<ObjectList>;
+  }
+
+  getCatalogModel(name: string): Promise<Record<string, JsonValue>> {
+    const path = `/catalog/models/${encodeURIComponent(name)}`;
+    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+  }
+
   listControlPlaneInstances(): Promise<ObjectList> {
     const path = '/system/instances';
     return this.transport.request('GET', path) as Promise<ObjectList>;

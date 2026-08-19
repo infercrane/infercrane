@@ -2,7 +2,15 @@
 
 Production inference without the platform engineering.
 
-Build or connect, autoscale, benchmark, and safely update inference workloads on GPU infrastructure you control.
+Deploy, autoscale, monitor, benchmark, and safely update inference workloads on GPU infrastructure you control. Already running inference? Connect it without migrating first.
+
+Explore reviewed, immutable starting points without treating them as benchmark claims:
+
+```bash
+infercrane models
+infercrane models inspect mistral-7b-instruct
+infercrane workload init ./support-model --recipe mistral-7b-instruct
+```
 
 ```bash
 infercrane workload init ./fraud-explainer \

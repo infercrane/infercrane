@@ -28,3 +28,14 @@ func TestEvaluateRejectsFutureOrCurrencylessEvidenceAndUsesLatestScope(t *testin
 		t.Fatalf("dedup=%#v", got)
 	}
 }
+
+func TestEvaluateFailsClosedOnMixedCurrencies(t *testing.T) {
+	now := time.Now()
+	got := Evaluate(now, []CostEvidence{
+		{ID: "eur", Scope: "rate-a", Source: "provider", Currency: "EUR", Amount: 4, ObservedAt: now},
+		{ID: "usd", Scope: "rate-b", Source: "provider", Currency: "USD", Amount: 5, ObservedAt: now},
+	})
+	if got.Status != "unavailable" || got.KnownCost != nil || len(got.Evidence) != 0 || len(got.Missing) != 1 || got.Missing[0] != "single_currency_cost_evidence" {
+		t.Fatalf("mixed currencies must fail closed: %#v", got)
+	}
+}

@@ -309,14 +309,30 @@ type MonitoringEvent struct {
 }
 
 type MonitoringEvidence struct {
-	Source                   string     `json:"source"`
-	SemanticConventionSchema string     `json:"semantic_convention_schema"`
-	SampleCount              int        `json:"sample_count"`
-	LatestRequestAt          *time.Time `json:"latest_request_at"`
-	Fresh                    bool       `json:"fresh"`
-	ContentRecorded          bool       `json:"content_recorded"`
-	Available                []string   `json:"available"`
-	Unavailable              []string   `json:"unavailable"`
+	Source                   string                `json:"source"`
+	SemanticConventionSchema string                `json:"semantic_convention_schema"`
+	SampleCount              int                   `json:"sample_count"`
+	LatestRequestAt          *time.Time            `json:"latest_request_at"`
+	Fresh                    bool                  `json:"fresh"`
+	ContentRecorded          bool                  `json:"content_recorded"`
+	Available                []string              `json:"available"`
+	Unavailable              []string              `json:"unavailable"`
+	Measurements             []MeasurementEvidence `json:"measurements"`
+}
+
+// MeasurementEvidence is a content-free, normalized measurement exposed to
+// operators. Missing, stale, and unsupported evidence never carries a value.
+type MeasurementEvidence struct {
+	Name          string     `json:"name"`
+	Value         *float64   `json:"value"`
+	Unit          string     `json:"unit"`
+	Availability  string     `json:"availability"`
+	EvidenceClass string     `json:"evidence_class"`
+	Source        string     `json:"source"`
+	ObservedAt    *time.Time `json:"observed_at"`
+	FreshUntil    *time.Time `json:"fresh_until"`
+	SampleCount   int        `json:"sample_count"`
+	Reason        string     `json:"reason,omitempty"`
 }
 
 type ColdStartStats struct {

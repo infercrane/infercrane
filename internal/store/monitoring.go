@@ -35,8 +35,9 @@ func (s *Store) EndpointMonitoring(ctx context.Context, tenant, name string, win
 		Series: []domain.MonitoringBucket{}, Breakdowns: []domain.MonitoringBreakdown{}, Events: []domain.MonitoringEvent{},
 		Evidence: domain.MonitoringEvidence{
 			Source: "infercrane_gateway_request_records", SemanticConventionSchema: monitoringSchema,
-			Available:   []string{"request_rate", "error_rate", "gateway_request_latency", "gateway_time_to_first_response", "fallback", "retry"},
-			Unavailable: []string{"reported_input_token_usage", "reported_output_token_usage", "runtime_internal_itl", "runtime_internal_tpot", "gpu_utilization", "gpu_memory", "runtime_kv_cache_timeseries"},
+			Available:    []string{"request_rate", "error_rate", "gateway_request_latency", "gateway_time_to_first_response", "fallback", "retry"},
+			Unavailable:  []string{"reported_input_token_usage", "reported_output_token_usage", "runtime_internal_itl", "runtime_internal_tpot", "gpu_utilization", "gpu_memory", "runtime_kv_cache_timeseries"},
+			Measurements: []domain.MeasurementEvidence{},
 		},
 	}
 	if err = s.monitoringSummary(ctx, tenant, resolved.Endpoint.ID, start, end, window, &out); err != nil {
@@ -91,7 +92,70 @@ func (s *Store) monitoringSummary(ctx context.Context, tenant, endpointID string
 		}
 		out.Evidence.Fresh = out.WindowEnd.Sub(value) <= freshness
 	}
+	populateMeasurementEvidence(out)
 	return nil
+}
+
+func populateMeasurementEvidence(out *domain.EndpointMonitoringSnapshot) {
+	observedAt := out.Evidence.LatestRequestAt
+	var freshUntil *time.Time
+	availability := "not_observed"
+	reason := "no request evidence was recorded in the selected window"
+	if observedAt != nil {
+		freshness := 5 * time.Minute
+		if candidate := 2 * time.Duration(out.BucketSeconds) * time.Second; candidate > freshness {
+			freshness = candidate
+		}
+		until := observedAt.Add(freshness)
+		freshUntil = &until
+		if out.Evidence.Fresh {
+			availability, reason = "available", ""
+		} else {
+			availability = "stale"
+			reason = "the latest request sample is older than the monitoring freshness window"
+		}
+	}
+	add := func(name, unit string, value *float64, samples int) {
+		state, why := availability, reason
+		if observedAt != nil && value == nil {
+			state = "not_observed"
+			why = "requests were recorded but this measurement was not reported"
+		}
+		out.Evidence.Measurements = append(out.Evidence.Measurements, domain.MeasurementEvidence{
+			Name: name, Value: value, Unit: unit, Availability: state,
+			EvidenceClass: "measured", Source: out.Evidence.Source,
+			ObservedAt: observedAt, FreshUntil: freshUntil, SampleCount: samples, Reason: why,
+		})
+	}
+	requests := float64(out.Summary.Requests)
+	requestValue := &requests
+	if out.Summary.Requests == 0 {
+		requestValue = nil
+	}
+	requestRate := out.Summary.RequestsPerSecond
+	add("requests", "requests", requestValue, out.Summary.Requests)
+	add("request_rate", "requests_per_second", &requestRate, out.Summary.Requests)
+	add("error_rate", "ratio", out.Summary.ErrorRate, out.Summary.Requests)
+	add("fallback_rate", "ratio", out.Summary.FallbackRate, out.Summary.Requests)
+	add("retry_rate", "ratio", out.Summary.RetryRate, out.Summary.Requests)
+	add("latency_p95", "milliseconds", out.Summary.P95LatencyMS, out.Summary.Requests)
+	add("ttft_p95", "milliseconds", out.Summary.P95TTFTMS, out.Summary.Requests)
+	add("queue_p95", "milliseconds", out.Summary.P95QueueMS, out.Summary.Requests)
+	add("generation_p95", "milliseconds", out.Summary.P95GenerationMS, out.Summary.Requests)
+	add("input_token_throughput", "tokens_per_second", out.Summary.InputTokensPerSecond, out.Summary.InputTokenSamples)
+	add("output_token_throughput", "tokens_per_second", out.Summary.OutputTokensPerSecond, out.Summary.OutputTokenSamples)
+	for _, unavailable := range []struct{ name, unit, reason string }{
+		{"runtime_internal_itl", "milliseconds", "the connected runtime has not supplied qualified ITL telemetry"},
+		{"runtime_internal_tpot", "milliseconds", "the connected runtime has not supplied qualified TPOT telemetry"},
+		{"gpu_utilization", "ratio", "no qualified hardware telemetry collector is connected"},
+		{"gpu_memory", "bytes", "no qualified hardware telemetry collector is connected"},
+		{"runtime_kv_cache_timeseries", "ratio", "the connected runtime has not supplied qualified KV-cache telemetry"},
+	} {
+		out.Evidence.Measurements = append(out.Evidence.Measurements, domain.MeasurementEvidence{
+			Name: unavailable.name, Unit: unavailable.unit, Availability: "unsupported",
+			EvidenceClass: "measured", Source: "runtime_adapter", Reason: unavailable.reason,
+		})
+	}
 }
 
 func (s *Store) monitoringSeries(ctx context.Context, tenant, endpointID string, start, end time.Time, bucket time.Duration, out *domain.EndpointMonitoringSnapshot) error {

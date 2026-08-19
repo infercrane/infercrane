@@ -35,6 +35,9 @@ Support is evidence-based per model, runtime, accelerator, and provider combinat
   <Card title="Handle uncertain capacity" icon="gauge-high" href="/showcase/capacity-evidence">
     Resume long operations, explain cold starts, compare measured serving plans, and govern external overflow.
   </Card>
+  <Card title="Compare cost and performance" icon="chart-line" href="/showcase/cost-performance">
+    Decide between a model API, self-hosted capacity, and a hybrid plan without inventing prices or savings.
+  </Card>
 </CardGroup>
 
 ## One stable application contract
@@ -95,7 +98,7 @@ lifecycle. Promotion is explicit; connecting an endpoint never silently changes 
 
 ```mermaid
 flowchart LR
-  A[Connect or deploy] --> B[Observe requests and operations]
+  A[Deploy or connect] --> B[Observe requests and operations]
   B --> C[Doctor explains persisted evidence]
   C --> D[Create a candidate]
   D --> E[Benchmark with bounded traffic]
