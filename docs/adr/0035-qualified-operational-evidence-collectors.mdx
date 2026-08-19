@@ -39,9 +39,11 @@ never receives exporter or provider credentials and never queries a collector. E
 loses its value and renders as stale. A disconnected collector therefore cannot leave an
 apparently-live healthy GPU signal behind.
 
-The same persistence boundary may later accept an OpenCost adapter, but cost currency, allocation,
-window, source, and freshness must remain explicit. OpenCost data will not be mixed into hardware
-measurements or presented as savings without comparable evidence.
+Cost evidence uses a separate revision-bound persistence contract. The OpenCost adapter reads the
+standard `/allocation` API and accepts only exact allocation keys named by the operator. Currency,
+allocation, source window, source identity, observation time, and freshness are mandatory. Its window
+total is normalized to an average hourly rate with the original window preserved. OpenCost data is
+not mixed into hardware measurements or presented as savings without comparable evidence.
 
 ## Consequences
 
@@ -51,6 +53,9 @@ measurements or presented as savings without comparable evidence.
 - A partial scrape is truthfully a measured subset; it is not described as complete fleet coverage.
 - DCGM exporter deployment and GPU-driver compatibility remain owned by the user's environment.
 - Real GPU correctness still requires qualification on physical NVIDIA hardware.
+- OpenCost remains independently deployed and owned by the user's environment; InferCrane imports
+  attributed evidence rather than becoming a Kubernetes cost calculator.
+- A changed retry for the same revision, source, resource, and source window fails with a conflict.
 
 ## Alternatives rejected
 
@@ -68,5 +73,11 @@ measurements or presented as savings without comparable evidence.
   tenant isolation, retry conflict detection, and stale-value removal.
 - `TestOperationalMeasurementIngestionIsAuthenticatedStrictAndContentFree` proves the API boundary.
 - `TestTelemetryCollectDCGMUsesBoundedControlPlaneEvidencePath` proves the CLI-to-API path.
+- `TestParseOpenCostAllocationRequiresExplicitExactSelection` proves exact allocation selection and
+  average-hour normalization.
+- `TestCostEvidenceIsImmutableRevisionBoundTenantSafeAndCurrencyExplicit` proves cost evidence
+  ownership, tenant isolation, retry conflict detection, and explicit currency.
+- `TestFinOpsCollectOpenCostUsesExactAllocationAndCreatesReport` proves collector-to-report flow.
 
-See [Inference telemetry](/features/telemetry) and [Operations console](/features/dashboard).
+See [Inference telemetry](/features/telemetry), [FinOps and advisory Autopilot](/features/finops-autopilot),
+and [Operations console](/features/dashboard).

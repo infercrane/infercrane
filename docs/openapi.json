@@ -462,6 +462,94 @@
         ],
         "type": "object"
       },
+      "CostEvidenceIngest": {
+        "additionalProperties": false,
+        "properties": {
+          "allocations": {
+            "items": {
+              "$ref": "#/components/schemas/CostEvidenceValue"
+            },
+            "maxItems": 128,
+            "minItems": 1,
+            "type": "array"
+          },
+          "currency": {
+            "pattern": "^[A-Z]{3}$",
+            "type": "string"
+          },
+          "evidence_class": {
+            "enum": [
+              "measured",
+              "provider_reported"
+            ],
+            "type": "string"
+          },
+          "observed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "source": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "valid_until": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "currency",
+          "evidence_class",
+          "observed_at",
+          "valid_until",
+          "allocations"
+        ],
+        "type": "object"
+      },
+      "CostEvidenceValue": {
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "billing_unit": {
+            "enum": [
+              "hour"
+            ],
+            "type": "string"
+          },
+          "resource": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "scope": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "window_end": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "window_start": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope",
+          "resource",
+          "billing_unit",
+          "amount",
+          "window_start",
+          "window_end"
+        ],
+        "type": "object"
+      },
       "Deployment": {
         "properties": {
           "active_revision_id": {
@@ -3675,6 +3763,63 @@
         "summary": "Persist a fresh budget-bounded overflow decision",
         "tags": [
           "Burst Guard"
+        ]
+      }
+    },
+    "/api/v1/deployments/{name}/cost-evidence": {
+      "post": {
+        "operationId": "recordCostEvidence",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CostEvidenceIngest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectList"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Attach bounded currency-explicit cost evidence to the active revision",
+        "tags": [
+          "FinOps"
         ]
       }
     },

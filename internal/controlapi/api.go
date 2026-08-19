@@ -127,6 +127,10 @@ type monitoringStore interface {
 type operationalMeasurementStore interface {
 	RecordOperationalMeasurements(context.Context, string, string, []domain.OperationalMeasurement) ([]domain.OperationalMeasurement, error)
 }
+type costEvidenceStore interface {
+	RecordCostEvidence(context.Context, string, string, []domain.CostEvidence) ([]domain.CostEvidence, error)
+	CostEvidenceForDeployment(context.Context, string, string, time.Time, time.Time, int) ([]domain.CostEvidence, error)
+}
 type providerConnectionStore interface {
 	CreateProviderConnection(context.Context, string, domain.ProviderConnection) (domain.ProviderConnection, error)
 	ProviderConnectionForTenant(context.Context, string, string) (domain.ProviderConnection, error)
@@ -333,6 +337,7 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/deployments", a.auth(authz.Read, a.deployments))
 	mux.HandleFunc("GET /api/v1/deployments/{name}", a.auth(authz.Read, a.deployment))
 	mux.HandleFunc("POST /api/v1/deployments/{name}/measurements", a.auth(authz.Deploy, a.recordOperationalMeasurements))
+	mux.HandleFunc("POST /api/v1/deployments/{name}/cost-evidence", a.auth(authz.Deploy, a.recordCostEvidence))
 	mux.HandleFunc("GET /api/v1/deployments/{name}/events", a.auth(authz.Read, a.deploymentEvents))
 	mux.HandleFunc("POST /api/v1/deployments/{name}/benchmarks", a.auth(authz.Deploy, a.runBenchmark))
 	mux.HandleFunc("GET /api/v1/deployments/{name}/benchmarks", a.auth(authz.Read, a.benchmarks))
@@ -1152,6 +1157,56 @@ func (a API) recordOperationalMeasurements(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusCreated, map[string]any{"data": persisted, "content_recorded": false})
 }
 
+type costEvidenceRequest struct {
+	Source        string              `json:"source"`
+	Currency      string              `json:"currency"`
+	EvidenceClass string              `json:"evidence_class"`
+	ObservedAt    time.Time           `json:"observed_at"`
+	ValidUntil    time.Time           `json:"valid_until"`
+	Allocations   []costEvidenceValue `json:"allocations"`
+}
+
+type costEvidenceValue struct {
+	Scope       string    `json:"scope"`
+	Resource    string    `json:"resource"`
+	BillingUnit string    `json:"billing_unit"`
+	Amount      float64   `json:"amount"`
+	WindowStart time.Time `json:"window_start"`
+	WindowEnd   time.Time `json:"window_end"`
+}
+
+func (a API) recordCostEvidence(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(costEvidenceStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "cost evidence storage is not configured")
+		return
+	}
+	var request costEvidenceRequest
+	if !decodeMutationBody(w, r, &request) {
+		return
+	}
+	rows := make([]domain.CostEvidence, 0, len(request.Allocations))
+	for _, allocation := range request.Allocations {
+		rows = append(rows, domain.CostEvidence{Source: request.Source, Currency: request.Currency, EvidenceClass: request.EvidenceClass, ObservedAt: request.ObservedAt, ValidUntil: request.ValidUntil, Scope: allocation.Scope, Resource: allocation.Resource, BillingUnit: allocation.BillingUnit, Amount: allocation.Amount, WindowStart: allocation.WindowStart, WindowEnd: allocation.WindowEnd})
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	persisted, err := store.RecordCostEvidence(r.Context(), actor.TenantID, r.PathValue("name"), rows)
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "deployment was not found")
+		return
+	}
+	if errors.Is(err, domain.ErrConflict) {
+		writeError(w, http.StatusConflict, "idempotency_conflict", err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_cost_evidence", err.Error())
+		return
+	}
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "cost_evidence.record", ResourceType: "deployment", ResourceName: r.PathValue("name"), Outcome: "succeeded"})
+	writeJSON(w, http.StatusCreated, map[string]any{"data": persisted, "content_recorded": false, "currency_converted": false})
+}
+
 func defaultMonitoringBucket(windowSeconds int) int {
 	switch {
 	case windowSeconds <= 3600:
@@ -1823,20 +1878,35 @@ func (a API) createFinOpsReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var evidence []finops.CostEvidence
-	for _, b := range benchmarks {
-		if b.CreatedAt.Before(start) {
-			continue
+	if costs, available := a.Store.(costEvidenceStore); available {
+		rows, lookupErr := costs.CostEvidenceForDeployment(r.Context(), principal.TenantID, name, start, end, 1000)
+		if lookupErr != nil {
+			writeError(w, 500, "internal", "cost evidence lookup failed")
+			return
 		}
-		var cost struct {
-			Available  bool       `json:"available"`
-			Hourly     *float64   `json:"hourly"`
-			Currency   string     `json:"currency"`
-			Source     string     `json:"source"`
-			ObservedAt *time.Time `json:"observed_at"`
-			ExpiresAt  *time.Time `json:"expires_at"`
+		for _, row := range rows {
+			validUntil := row.ValidUntil
+			evidence = append(evidence, finops.CostEvidence{ID: row.ID, Scope: row.Scope, Resource: row.Resource, Source: row.Source, Currency: row.Currency, BillingUnit: row.BillingUnit, EvidenceClass: row.EvidenceClass, Amount: row.Amount, ObservedAt: row.ObservedAt, ValidUntil: &validUntil})
 		}
-		if json.Unmarshal([]byte(b.CostMetadataJSON), &cost) == nil && cost.Available && cost.Hourly != nil && cost.Source != "" && cost.Currency != "" && cost.ObservedAt != nil && !cost.ObservedAt.Before(start) && !cost.ObservedAt.After(end) {
-			evidence = append(evidence, finops.CostEvidence{ID: b.ID, Scope: "deployment_hourly_rate", Resource: name, Source: cost.Source, Currency: cost.Currency, BillingUnit: "gpu_hour", EvidenceClass: "provider_reported", Amount: *cost.Hourly, ObservedAt: *cost.ObservedAt, ValidUntil: cost.ExpiresAt})
+	}
+	// Benchmark price metadata remains a fallback when no current external cost
+	// source is connected; unlike units are never silently combined.
+	if len(evidence) == 0 {
+		for _, b := range benchmarks {
+			if b.CreatedAt.Before(start) {
+				continue
+			}
+			var cost struct {
+				Available  bool       `json:"available"`
+				Hourly     *float64   `json:"hourly"`
+				Currency   string     `json:"currency"`
+				Source     string     `json:"source"`
+				ObservedAt *time.Time `json:"observed_at"`
+				ExpiresAt  *time.Time `json:"expires_at"`
+			}
+			if json.Unmarshal([]byte(b.CostMetadataJSON), &cost) == nil && cost.Available && cost.Hourly != nil && cost.Source != "" && cost.Currency != "" && cost.ObservedAt != nil && !cost.ObservedAt.Before(start) && !cost.ObservedAt.After(end) {
+				evidence = append(evidence, finops.CostEvidence{ID: b.ID, Scope: "deployment_hourly_rate", Resource: name, Source: cost.Source, Currency: cost.Currency, BillingUnit: "gpu_hour", EvidenceClass: "provider_reported", Amount: *cost.Hourly, ObservedAt: *cost.ObservedAt, ValidUntil: cost.ExpiresAt})
+			}
 		}
 	}
 	report := finops.Evaluate(end, evidence)

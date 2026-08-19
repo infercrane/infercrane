@@ -9,14 +9,33 @@ InferCrane treats cost as evidence, not a guess. A FinOps report accepts only co
 source and observation time. Missing cost remains unavailable, currencies are never silently converted,
 and avoidable spend remains unknown until utilization and a qualified alternative directly support it.
 
+For Kubernetes workloads already measured by OpenCost, import one or more exact allocation keys:
+
+```bash
+kubectl -n opencost port-forward service/opencost 9003:9003
+
+infercrane finops collect opencost coder-production \
+  --url http://127.0.0.1:9003/allocation \
+  --window 24h \
+  --aggregate controller \
+  --allocation coder-production \
+  --currency USD
+```
+
+The collector uses OpenCost's standard `/allocation` API. It imports only allocation keys named by
+`--allocation`; InferCrane never treats whole-cluster cost as one deployment implicitly. OpenCost's
+window total becomes an average hourly rate over that same persisted window. The result is classified
+as provider-reported because it is derived from resource allocation and pricing inputs rather than a
+settled invoice. Use `--file allocation.json` for an offline response.
+
 ```bash
 infercrane finops coder-production --window 720h
 ```
 
 The report persists its exact evidence, evaluation window, disclosure set, and canonical input digest.
 
-The current release reports only sourced cost that InferCrane can bind to the selected workload and
-window. Cost per request, per-token unit economics, idle-capacity attribution, and verified savings
+The current release reports only fresh sourced hourly cost that InferCrane can bind to the selected
+workload, immutable revision, and window. Cost per request, per-token unit economics, idle-capacity attribution, and verified savings
 remain unavailable unless request coverage, billing units, currency, and a comparable post-change
 window are all grounded. The product never silently mixes currencies or turns a provider list price
 into realized savings.

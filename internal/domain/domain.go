@@ -356,6 +356,30 @@ type OperationalMeasurement struct {
 	CreatedAt     time.Time `json:"created_at"`
 }
 
+// CostEvidence is an immutable, revision-bound cost observation imported from
+// a qualified external cost source. Amount is the normalized rate denominated
+// by BillingUnit and retains its source window; InferCrane never assumes or
+// converts currency.
+type CostEvidence struct {
+	ID            string    `json:"id"`
+	TenantID      string    `json:"-"`
+	DeploymentID  string    `json:"deployment_id"`
+	Deployment    string    `json:"deployment"`
+	RevisionID    string    `json:"revision_id"`
+	Source        string    `json:"source"`
+	Scope         string    `json:"scope"`
+	Resource      string    `json:"resource"`
+	Currency      string    `json:"currency"`
+	BillingUnit   string    `json:"billing_unit"`
+	EvidenceClass string    `json:"evidence_class"`
+	Amount        float64   `json:"amount"`
+	WindowStart   time.Time `json:"window_start"`
+	WindowEnd     time.Time `json:"window_end"`
+	ObservedAt    time.Time `json:"observed_at"`
+	ValidUntil    time.Time `json:"valid_until"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
 type ColdStartStats struct {
 	ClassifiedRequests    int      `json:"classified_requests"`
 	ColdStarts            int      `json:"cold_starts"`

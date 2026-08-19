@@ -253,6 +253,11 @@ export class ControlApi {
     return this.transport.request('POST', path, { body }) as Promise<ObjectList>;
   }
 
+  recordCostEvidence(name: string, body: JsonValue): Promise<ObjectList> {
+    const path = `/deployments/${encodeURIComponent(name)}/cost-evidence`;
+    return this.transport.request('POST', path, { body }) as Promise<ObjectList>;
+  }
+
   listDeploymentEvents(name: string): Promise<ObjectList> {
     const path = `/deployments/${encodeURIComponent(name)}/events`;
     return this.transport.request('GET', path) as Promise<ObjectList>;

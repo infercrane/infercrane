@@ -752,8 +752,11 @@ func capacityCommand(ctx context.Context, cfg config.Config, args []string) erro
 }
 
 func finOpsCommand(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) > 0 && args[0] == "collect" {
+		return finOpsCollectCommand(ctx, cfg, args[1:])
+	}
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
-		return errors.New("usage: infercrane finops DEPLOYMENT [--window DURATION]")
+		return errors.New("usage: infercrane finops DEPLOYMENT [--window DURATION] | infercrane finops collect opencost DEPLOYMENT [flags]")
 	}
 	name := args[0]
 	fs := flag.NewFlagSet("finops", flag.ContinueOnError)

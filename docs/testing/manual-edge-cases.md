@@ -86,6 +86,23 @@ Local fixtures prove InferCrane logic only. This document will contain the exact
   API response, monitoring response before and after expiry, and confirmation that prompt/output
   content and credentials are absent.
 
+## OpenCost — real Kubernetes allocation and billing reconciliation
+
+- Source: [OpenCost Allocation API](https://opencost.io/docs/integrations/api/) and
+  [OpenCost specification](https://opencost.io/docs/specification/).
+- Why local simulation is insufficient: fixtures prove parsing, exact selection, persistence, and
+  report semantics, but not cluster labeling, pricing configuration, idle-cost policy, or agreement
+  with the provider invoice.
+- Safe procedure: on a non-production namespace with OpenCost already installed, port-forward its
+  API; query one completed 24-hour controller allocation; save the JSON; run
+  `infercrane finops collect opencost DEPLOYMENT --file allocation.json --window 24h --allocation EXACT_KEY --currency CODE`;
+  then compare the persisted source window and hourly rate with the OpenCost UI/API.
+- Cost/risk: read-only API access and local control-plane persistence; no provider mutation.
+- Expected behavior: only the exact allocation is recorded, the active revision is bound, retry is
+  idempotent, changed evidence conflicts, and no currency conversion or savings claim appears.
+- Evidence: OpenCost version/configuration, query parameters, exact allocation key, response digest,
+  InferCrane revision/evidence IDs, report digest, and provider invoice comparison when available.
+
 ## Model revisions — semantic output quality
 
 - Research signal: production operators report that an infrastructure-healthy model or runtime

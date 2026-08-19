@@ -135,6 +135,20 @@ normalized content-free evidence through the authenticated control API. Use `--f
 offline input. The snapshot is immutable, active-revision-bound, and becomes stale at its declared
 TTL; arbitrary Prometheus metrics are not accepted.
 
+### `finops collect opencost`
+
+```bash
+infercrane finops collect opencost coder-production \
+  --url http://127.0.0.1:9003/allocation \
+  --window 24h --aggregate controller \
+  --allocation coder-production --currency USD
+```
+
+The command selects exact OpenCost allocation keys, records a currency-explicit average hourly rate
+against the active immutable revision, and creates a persisted FinOps report. Multiple exact keys may
+be comma-separated. `--allocation` and `--currency` are mandatory; cluster-wide attribution and
+currency conversion are never inferred. Use `--file allocation.json` for offline evidence.
+
 ### `artifact`
 
 ```bash

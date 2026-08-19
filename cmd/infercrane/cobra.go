@@ -54,7 +54,7 @@ var publicCommandSpecs = []commandSpec{
 	{use: "artifact ACTION ARTIFACT_ID [flags]", short: "Inspect cache evidence and request provider-native prefetch", group: "understand"},
 	{use: "sandbox ACTION [arguments]", short: "Compose external sandboxes with expiring endpoint access", group: "operate"},
 	{use: "training ACTION [arguments]", short: "Verify and attach immutable external training artifacts", group: "operate"},
-	{use: "finops DEPLOYMENT [flags]", short: "Build an evidence-backed cost report", group: "understand"},
+	{use: "finops DEPLOYMENT | finops collect opencost DEPLOYMENT [flags]", short: "Collect and report attributed inference cost evidence", group: "understand"},
 	{use: "autopilot ACTION SUBJECT [flags]", short: "Create and approve advisory serving plans", group: "operate"},
 	{use: "session ACTION SUBJECT [flags]", short: "Manage durable logical session identity", group: "operate"},
 	{use: "burst DEPLOYMENT [flags]", short: "Evaluate policy-bounded overflow", group: "operate"},
@@ -356,6 +356,13 @@ func addHelpFlags(command *cobra.Command, name string) {
 		stringFlag("window", "720h", "observation window")
 	case "finops":
 		stringFlag("window", "720h", "cost evidence window")
+		stringFlag("url", "http://127.0.0.1:9003/allocation", "OpenCost allocation API URL")
+		stringFlag("file", "", "read a saved OpenCost allocation response")
+		stringFlag("aggregate", "controller", "OpenCost allocation aggregation")
+		stringFlag("allocation", "", "comma-separated exact allocation keys to import")
+		stringFlag("currency", "", "explicit three-letter evidence currency")
+		stringFlag("source", "opencost/allocation", "bounded cost evidence source")
+		stringFlag("ttl", "1h", "maximum time this cost snapshot may be treated as fresh")
 	case "autopilot":
 		stringFlag("objective", "minimize_cost", "advisory objective")
 	case "session":

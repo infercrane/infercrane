@@ -196,6 +196,39 @@ type fakeOperationalMeasurementStore struct {
 	rows []domain.OperationalMeasurement
 }
 
+type fakeCostEvidenceStore struct {
+	*fakeStore
+	rows []domain.CostEvidence
+}
+
+type fakeCostOptimizationStore struct {
+	*fakeOptimizationStore
+	costs []domain.CostEvidence
+}
+
+func (f *fakeCostOptimizationStore) RecordCostEvidence(_ context.Context, _, _ string, rows []domain.CostEvidence) ([]domain.CostEvidence, error) {
+	f.costs = append(f.costs, rows...)
+	return rows, f.err
+}
+
+func (f *fakeCostOptimizationStore) CostEvidenceForDeployment(context.Context, string, string, time.Time, time.Time, int) ([]domain.CostEvidence, error) {
+	return f.costs, f.err
+}
+
+func (f *fakeCostEvidenceStore) RecordCostEvidence(_ context.Context, tenant, deployment string, rows []domain.CostEvidence) ([]domain.CostEvidence, error) {
+	for index := range rows {
+		rows[index].ID = "cost"
+		rows[index].TenantID = tenant
+		rows[index].Deployment = deployment
+	}
+	f.rows = append(f.rows, rows...)
+	return rows, f.err
+}
+
+func (f *fakeCostEvidenceStore) CostEvidenceForDeployment(context.Context, string, string, time.Time, time.Time, int) ([]domain.CostEvidence, error) {
+	return f.rows, f.err
+}
+
 func (f *fakeOperationalMeasurementStore) RecordOperationalMeasurements(_ context.Context, tenant, deployment string, rows []domain.OperationalMeasurement) ([]domain.OperationalMeasurement, error) {
 	for index := range rows {
 		rows[index].ID = "measurement"
@@ -261,6 +294,26 @@ func TestOperationalMeasurementIngestionIsAuthenticatedStrictAndContentFree(t *t
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthorized status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestCostEvidenceIngestionIsAuthenticatedStrictAndCurrencyExplicit(t *testing.T) {
+	store := &fakeCostEvidenceStore{fakeStore: &fakeStore{}}
+	handler := (API{Store: store, APIKey: "secret"}).Handler()
+	body := `{"source":"opencost/allocation","currency":"USD","evidence_class":"provider_reported","observed_at":"2026-08-19T20:00:00Z","valid_until":"2026-08-19T21:00:00Z","allocations":[{"scope":"deployment_hourly_rate/inference","resource":"inference","billing_unit":"hour","amount":1.25,"window_start":"2026-08-19T19:00:00Z","window_end":"2026-08-19T20:00:00Z"}]}`
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments/coder/cost-evidence", strings.NewReader(body))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || len(store.rows) != 1 || store.rows[0].Currency != "USD" || store.rows[0].Amount != 1.25 || strings.Contains(response.Body.String(), "prompt") || !strings.Contains(response.Body.String(), `"currency_converted":false`) {
+		t.Fatalf("status=%d body=%s rows=%+v", response.Code, response.Body.String(), store.rows)
+	}
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/deployments/coder/cost-evidence", strings.NewReader(strings.Replace(body, `"allocations"`, `"unknown":true,"allocations"`, 1)))
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("unknown field status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 
@@ -714,6 +767,20 @@ func TestFinOpsPersistsUnavailableWithoutInventingCurrency(t *testing.T) {
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusCreated || store.report.Status != "unavailable" || store.report.Currency != "" || store.report.KnownCost != nil || !strings.Contains(response.Body.String(), `"currency":""`) {
+		t.Fatalf("status=%d report=%#v body=%s", response.Code, store.report, response.Body.String())
+	}
+}
+
+func TestFinOpsUsesFreshImportedCostEvidenceBeforeBenchmarkPriceFallback(t *testing.T) {
+	now := time.Now().UTC()
+	base := &fakeStore{resolved: domain.ResolvedDeployment{Deployment: domain.Deployment{ID: "deployment-1", Name: "prod"}}}
+	store := &fakeCostOptimizationStore{fakeOptimizationStore: &fakeOptimizationStore{fakeStore: base}, costs: []domain.CostEvidence{{ID: "cost-1", Scope: "deployment_hourly_rate/prod", Resource: "prod", Source: "opencost/allocation", Currency: "USD", BillingUnit: "hour", EvidenceClass: "provider_reported", Amount: 1.25, WindowStart: now.Add(-time.Hour), WindowEnd: now, ObservedAt: now.Add(-time.Second), ValidUntil: now.Add(time.Hour)}}}
+	handler := (API{Store: store, APIKey: "secret"}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments/prod/finops/reports", strings.NewReader(`{"window_seconds":3600}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || store.report.Status != "measured" || store.report.Currency != "USD" || store.report.KnownCost == nil || *store.report.KnownCost != 1.25 || !strings.Contains(store.report.EvidenceJSON, "opencost/allocation") {
 		t.Fatalf("status=%d report=%#v body=%s", response.Code, store.report, response.Body.String())
 	}
 }
