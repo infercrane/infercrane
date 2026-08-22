@@ -2,8 +2,25 @@ name: infercrane
 
 services:
   postgres:
-    image: postgres:17-alpine
+    image: postgres:17-bookworm
     restart: unless-stopped
+    entrypoint: ["/bin/bash", "-euo", "pipefail", "-c"]
+    command:
+      - |
+        install -d -m 0700 -o postgres -g postgres /var/lib/postgresql/tls
+        if [ ! -s /var/lib/postgresql/tls/server.key ] || [ ! -s /var/lib/postgresql/tls/server.crt ]; then
+          openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 3650 \
+            -subj /CN=postgres -addext subjectAltName=DNS:postgres \
+            -keyout /var/lib/postgresql/tls/server.key \
+            -out /var/lib/postgresql/tls/server.crt
+          chown postgres:postgres /var/lib/postgresql/tls/server.key /var/lib/postgresql/tls/server.crt
+          chmod 0600 /var/lib/postgresql/tls/server.key
+          chmod 0644 /var/lib/postgresql/tls/server.crt
+        fi
+        exec /usr/local/bin/docker-entrypoint.sh postgres \
+          -c ssl=on \
+          -c ssl_cert_file=/var/lib/postgresql/tls/server.crt \
+          -c ssl_key_file=/var/lib/postgresql/tls/server.key
     environment:
       POSTGRES_DB: infercrane
       POSTGRES_USER: infercrane
@@ -11,12 +28,17 @@ services:
     healthcheck:
       # Avoid reporting healthy from PostgreSQL's temporary initialization
       # server, which only listens on the container's Unix socket.
-      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U infercrane -d infercrane"]
+      test:
+        [
+          "CMD-SHELL",
+          "PGPASSWORD=$$POSTGRES_PASSWORD psql 'host=127.0.0.1 user=infercrane dbname=infercrane sslmode=require' -c 'SELECT 1' >/dev/null",
+        ]
       interval: 5s
       timeout: 3s
       retries: 30
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      - postgres-tls:/var/lib/postgresql/tls
     networks: [control]
 
   infercrane:
@@ -30,7 +52,7 @@ services:
     environment:
       INFERCRANE_ENV: production
       INFERCRANE_API_KEY: ${INFERCRANE_API_KEY:?set INFERCRANE_API_KEY}
-      INFERCRANE_DATABASE_URL: postgres://infercrane:${INFERCRANE_POSTGRES_PASSWORD:?set INFERCRANE_POSTGRES_PASSWORD}@postgres:5432/infercrane?sslmode=disable
+      INFERCRANE_DATABASE_URL: postgres://infercrane:${INFERCRANE_POSTGRES_PASSWORD:?set INFERCRANE_POSTGRES_PASSWORD}@postgres:5432/infercrane?sslmode=require
       INFERCRANE_URL: ${INFERCRANE_URL:?set INFERCRANE_URL}
       INFERCRANE_INSTANCE_ID: ${INFERCRANE_INSTANCE_ID:-compose-1}
     ports:
@@ -51,3 +73,4 @@ networks:
 
 volumes:
   postgres-data:
+  postgres-tls:

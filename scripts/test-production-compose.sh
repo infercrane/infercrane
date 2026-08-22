@@ -16,7 +16,20 @@ runpod_rendered=$(mktemp)
 aws_rendered=$(mktemp)
 gcp_rendered=$(mktemp)
 kubernetes_rendered=$(mktemp)
-trap 'rm -rf "$fixture_aws" "$fixture_gcloud"; rm -f "$fixture_key" "$fixture_kubeconfig" "$base_rendered" "$runpod_rendered" "$aws_rendered" "$gcp_rendered" "$kubernetes_rendered"' EXIT
+production_project="infercrane-production-compose-test-$$"
+stop_production_stack() {
+  INFERCRANE_IMAGE=ghcr.io/infercrane/infercrane:test \
+  INFERCRANE_URL=https://infercrane.invalid \
+  INFERCRANE_API_KEY=test-only-api-key-at-least-32-characters \
+  INFERCRANE_POSTGRES_PASSWORD=test-only-postgres-password \
+    docker compose -p "$production_project" -f "$compose_file" down --volumes --remove-orphans >/dev/null 2>&1 || true
+}
+cleanup() {
+  stop_production_stack
+  rm -rf "$fixture_aws" "$fixture_gcloud"
+  rm -f "$fixture_key" "$fixture_kubeconfig" "$base_rendered" "$runpod_rendered" "$aws_rendered" "$gcp_rendered" "$kubernetes_rendered"
+}
+trap cleanup EXIT
 
 chmod 600 "$fixture_key"
 printf '%s\n' 'test-only-runpod-key' >"$fixture_key"
@@ -28,13 +41,31 @@ INFERCRANE_POSTGRES_PASSWORD=test-only-postgres-password \
   docker compose -f "$compose_file" config >"$base_rendered"
 
 grep -q 'INFERCRANE_ENV: production' "$base_rendered"
+grep -q 'sslmode=require' "$base_rendered"
+grep -q 'ssl=on' "$base_rendered"
 grep -q 'no-new-privileges:true' "$base_rendered"
 grep -q -- '- ALL' "$base_rendered"
-grep -q 'pg_isready -h 127.0.0.1 -U infercrane -d infercrane' "$base_rendered"
+grep -q 'sslmode=require.*SELECT 1' "$base_rendered"
 if grep -Eqi 'runpod|skypilot|RUNPOD_KEY_FILE' "$base_rendered"; then
   echo 'base production Compose is coupled to RunPod or SkyPilot' >&2
   exit 1
 fi
+
+INFERCRANE_IMAGE=ghcr.io/infercrane/infercrane:test \
+INFERCRANE_URL=https://infercrane.invalid \
+INFERCRANE_API_KEY=test-only-api-key-at-least-32-characters \
+INFERCRANE_POSTGRES_PASSWORD=test-only-postgres-password \
+  docker compose -p "$production_project" -f "$compose_file" up -d --wait --wait-timeout 120 postgres
+tls_active=$(
+  INFERCRANE_IMAGE=ghcr.io/infercrane/infercrane:test \
+  INFERCRANE_URL=https://infercrane.invalid \
+  INFERCRANE_API_KEY=test-only-api-key-at-least-32-characters \
+  INFERCRANE_POSTGRES_PASSWORD=test-only-postgres-password \
+    docker compose -p "$production_project" -f "$compose_file" exec -T postgres \
+      sh -eu -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql "host=127.0.0.1 user=infercrane dbname=infercrane sslmode=require" -Atc "SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()"'
+)
+[ "$tls_active" = t ] || { echo 'production PostgreSQL connection did not negotiate TLS' >&2; exit 1; }
+stop_production_stack
 if grep -Eq 'fake-vllm|fake-router|runpod-fault-proxy|infercrane-runpod-acceptance-key' "$base_rendered"; then
   echo 'production Compose includes a development or acceptance-only component' >&2
   exit 1

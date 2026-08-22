@@ -29,9 +29,11 @@ docker compose --env-file /private/path/infercrane.env \
 Unlike `compose.yaml`, this stack contains no fake workers or development router. Unlike
 `compose.runpod-acceptance.yaml`, it contains no fault proxy or acceptance credential. PostgreSQL
 is private to the Compose network; only the InferCrane API port is published. The bundled database
-uses `sslmode=disable` only across that private bridge. Use managed PostgreSQL with TLS, external
-secret management, and multiple control-plane instances for a production service that must survive
-a host failure.
+generates a persistent, self-signed server certificate and requires an encrypted
+`sslmode=require` connection across that bridge. This encrypts the single-host transport but does
+not provide CA-backed server identity; use managed PostgreSQL with `verify-full`, external secret
+management, and multiple control-plane instances for a production service that must survive a host
+failure.
 
 The base production stack is provider-neutral: it does not require a RunPod credential and does
 not start SkyPilot. Provider adapters remain dormant until a DeploymentSpec selects them. The
