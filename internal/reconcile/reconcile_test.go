@@ -175,6 +175,28 @@ func TestUnchangedGenerationUsesGenerationProcessIdentity(t *testing.T) {
 	}
 }
 
+func TestDeletedDesiredDeploymentWithdrawsBeforeProviderInspection(t *testing.T) {
+	store, directory := reconcilerFixture()
+	deployment := store.deployment
+	// Match the PostgreSQL store contract: desired-deleted deployments are no
+	// longer returned to reconciliation. A same-name endpoint shadows the
+	// concrete route in the ordinary directory listing.
+	store.deployment = domain.Deployment{}
+	directory.Put(routes.Snapshot{TenantID: deployment.TenantID, Alias: deployment.Name, DeploymentID: deployment.ID, RouterURL: "http://concrete", RouterProcessID: "deployment-g1"})
+	directory.PublishEndpoint(routes.EndpointRoute{TenantID: deployment.TenantID, Alias: deployment.Name, Routes: []routes.Snapshot{{TenantID: deployment.TenantID, Alias: deployment.Name, DeploymentID: deployment.ID, EndpointID: "stable-endpoint", RouterURL: "http://concrete", RouterProcessID: "deployment-g1"}}})
+	backend := &fakeRouter{routes: directory}
+	reconciler := Reconciler{Store: &isolatingStore{fakeStore: store, deployments: []domain.Deployment{}}, Routes: directory, Router: backend, Runtimes: testRuntimeBackends(t, healthyRuntime{}), RouterStartPort: 18080, InstanceID: "instance"}
+	if err := reconciler.Once(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if directory.HasCurrentDeployment(deployment.ID) {
+		t.Fatal("deleted desired deployment remained on the current route generation")
+	}
+	if backend.started != "" || len(backend.running) != 0 {
+		t.Fatalf("deleted deployment touched router lifecycle: started=%q running=%v", backend.started, backend.running)
+	}
+}
+
 func TestElasticRouteAuthenticatesToInternalRouter(t *testing.T) {
 	store, directory := reconcilerFixture()
 	backend := &fakeRouter{routes: directory}

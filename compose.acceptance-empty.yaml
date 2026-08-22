@@ -1,0 +1,10 @@
+# Test-only overlay for a genuinely empty PostgreSQL-backed control plane.
+#
+# The default development entrypoint registers fake workers and creates a sample
+# deployment. Product-journey qualification needs to prove the first-run state
+# before any user-owned resource exists, so this overlay starts the production
+# server entrypoint without the development bootstrap. Fake runtimes remain
+# available only as explicit targets that the journey may register later.
+services:
+  infercrane:
+    entrypoint: ["infercrane", "serve"]
