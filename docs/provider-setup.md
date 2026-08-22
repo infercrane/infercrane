@@ -7,6 +7,39 @@ description: Configure credentials and prerequisites for qualified infrastructur
 
 Provider integrations are registered control-plane adapters. Each provider owns its credentials, infrastructure semantics, and billable resources; InferCrane owns durable intent, reconciliation, and cleanup. A provider is supported only after its adapter combination appears in the release qualification matrix.
 
+## Data residency and production qualification
+
+A region flag is placement intent, not a residency guarantee. InferCrane cannot prove where a
+provider stores control metadata, model artifacts, logs, backups, or failed requests unless the
+provider and customer configuration expose evidence for each boundary. Credentials must remain in
+the provider-specific workload identity or referenced secret path; region selection does not weaken
+that rule.
+
+Before approving a residency-constrained production path:
+
+```bash
+infercrane integrations --output json
+infercrane models inspect MODEL_CATALOG_NAME --output json
+infercrane plan MODEL_REPOSITORY \
+  --cloud PROVIDER \
+  --region REQUIRED_REGION \
+  --gpu ACCELERATOR \
+  --output json
+```
+
+Require the exact provider/runtime/mode/model/accelerator/region evidence, private-network design,
+artifact location, telemetry destination, backup location, and external-fallback policy. See the
+[exact compatibility procedure](/compatibility#check-one-exact-serving-combination) and
+[security boundary](/security).
+
+<Warning>
+The private preview currently has no generally production-qualified AWS, GCP, RunPod, or real-GPU
+Kubernetes combination and makes no data-residency guarantee. The safest supported choice for a
+strict production residency requirement is to stop after `plan`, or connect a customer-owned
+in-region endpoint in observe-only mode while keeping routing and lifecycle ownership unchanged.
+Do not approve a configuration from a region name or hermetic adapter test alone.
+</Warning>
+
 ## RunPod
 
 Set a scoped `RUNPOD_API_KEY` on the control plane and configure SkyPilot's RunPod credentials for elastic workers. Run `infercrane doctor --cloud` before provisioning.

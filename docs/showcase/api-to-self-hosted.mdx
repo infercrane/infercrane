@@ -11,6 +11,14 @@ application continues using one model name throughout.
 
 ## 1. Connect the API
 
+<Warning>
+Do not create this connection until the provider, data-processing terms, residency, credential
+reference, current pricing/currency, and maximum spend envelope are approved. Connecting does not
+route a request or bill inference, but an unapproved user must stop here. InferCrane does not import
+provider invoices today, so missing billing evidence remains `unavailable` rather than an estimated
+savings claim.
+</Warning>
+
 ```bash
 export OPENROUTER_API_KEY='...'
 infercrane provider connect openrouter-main \

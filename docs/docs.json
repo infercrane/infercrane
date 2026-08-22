@@ -4,7 +4,7 @@
   "name": "InferCrane",
   "description": "Deploy and operate AI models across your infrastructure. Build or connect inference with durable operations, safe releases, and inspectable evidence.",
   "colors": {
-    "primary": "#2563EB",
+    "primary": "#1E40AF",
     "light": "#60A5FA",
     "dark": "#2563EB"
   },
@@ -14,16 +14,16 @@
   },
   "fonts": {
     "heading": {
-      "family": "Space Grotesk",
+      "family": "Albert Sans",
       "weight": 600
     },
     "body": {
-      "family": "Space Grotesk",
+      "family": "Albert Sans",
       "weight": 400
     }
   },
   "styling": {
-    "eyebrows": "section",
+    "eyebrows": "breadcrumbs",
     "codeblocks": {
       "theme": "css-variables"
     }
@@ -38,12 +38,6 @@
     }
   },
   "navbar": {
-    "links": [
-      {
-        "type": "github",
-        "href": "https://github.com/infercrane/infercrane"
-      }
-    ],
     "primary": {
       "type": "button",
       "label": "Quickstart",
@@ -51,9 +45,6 @@
     }
   },
   "footer": {
-    "socials": {
-      "github": "https://github.com/infercrane/infercrane"
-    },
     "links": [
       {
         "header": "Product",
@@ -64,10 +55,10 @@
         ]
       },
       {
-        "header": "Project",
+        "header": "Company",
         "items": [
-          { "label": "GitHub", "href": "https://github.com/infercrane/infercrane" },
-          { "label": "Contributing", "href": "https://github.com/infercrane/infercrane/blob/main/CONTRIBUTING.md" },
+          { "label": "Website", "href": "https://infercrane.com" },
+          { "label": "Join waitlist", "href": "https://infercrane.com/#private-preview" },
           { "label": "Security", "href": "/security" }
         ]
       },
@@ -87,131 +78,167 @@
   "seo": {
     "indexing": "navigable",
     "metatags": {
+      "canonical": "https://docs.infercrane.com",
       "og:type": "website",
       "og:site_name": "InferCrane Docs"
     },
     "organization": {
       "name": "InferCrane",
-      "url": "https://github.com/infercrane/infercrane",
-      "sameAs": ["https://github.com/infercrane/infercrane"]
+      "url": "https://infercrane.com",
+      "sameAs": ["https://infercrane.com"]
     }
   },
   "navigation": {
-    "groups": [
+    "tabs": [
       {
-        "group": "GET STARTED",
-        "pages": ["index", "why-infercrane", "compare", "quickstart", "concepts", "architecture/system"]
-      },
-      {
-        "group": "BUILD",
-        "pages": [
-          "showcase/index",
-          "showcase/build-inference",
-          "showcase/api-to-self-hosted",
-          "features/model-catalog",
-          "features/inference-projects",
-          "showcase/connect-existing",
-          "features/endpoints",
-          "deployment-spec",
-          "features/protocols",
-          "features/model-artifacts",
-          "features/custom-oci",
-          "features/provisioning",
-          "features/revisions"
-        ]
-      },
-      {
-        "group": "OPERATE",
-        "pages": [
-          "features/lifecycle",
-          "features/observe",
-          "features/terminal-ui",
-          "features/dashboard",
-          "features/autoscaling",
-          "features/admission-async",
-          "features/release-guard",
-          "features/semantic-quality",
-          "features/environment-promotion",
-          "features/external-capacity",
-          "features/serverless",
-          "features/telemetry",
-          "features/benchmarking",
-          "features/cold-starts",
-          "features/artifact-cache",
-          "features/explanations",
-          "showcase/safe-rollouts",
-          "showcase/capacity-evidence"
-        ]
-      },
-      {
-        "group": "INTELLIGENCE",
-        "pages": [
-          "features/recipes-lab",
-          "features/replay-capacity",
-          "showcase/cost-performance",
-          "features/inference-decisions",
-          "features/finops-autopilot",
-          "features/inference-passports",
-          "features/context-passport-burst"
-        ]
-      },
-      {
-        "group": "INTEGRATE",
-        "pages": [
-          "integrations/overview",
-          "integrations/ecosystem",
-          "integrations/litellm",
-          "integrations/sandboxes",
-          "integrations/training-artifacts",
-          "integrations/python",
-          "integrations/typescript",
-          "integrations/terraform",
-          "integrations/github-actions",
-          "integrations/mcp",
-          "showcase/gateways-and-sandboxes",
-          "integrations/vllm",
-          "integrations/sglang",
-          "integrations/runpod",
-          "integrations/aws-ec2",
-          "integrations/gcp-compute",
-          "integrations/provider-profiles",
-          "integrations/kubernetes",
-          "integrations/aiperf",
-          "integrations/hugging-face",
-          "architecture/provider-contract",
-          "architecture/runtime-contract"
-        ]
-      },
-      {
-        "group": "REFERENCE",
-        "pages": [
-          "cli",
-          "control-api",
+        "tab": "Guides",
+        "icon": "book-open",
+        "groups": [
           {
-            "group": "Control API endpoints",
-            "openapi": "openapi.json"
+            "group": "Start here",
+            "boost": 2,
+            "pages": ["index", "quickstart", "why-infercrane", "compare", "concepts", "architecture/system"]
           },
-          "provider-setup",
-          "runbooks/backup-restore",
-          "upgrade",
-          "development",
-          "troubleshooting",
-          "faq"
+          {
+            "group": "Deploy and connect",
+            "boost": 1.5,
+            "pages": [
+              "showcase/index",
+              "showcase/build-inference",
+              "features/model-catalog",
+              "features/inference-projects",
+              "showcase/connect-existing",
+              "showcase/api-to-self-hosted",
+              "features/endpoints",
+              "deployment-spec",
+              "features/protocols",
+              "features/model-artifacts",
+              "features/custom-oci",
+              "features/provisioning",
+              "features/revisions"
+            ]
+          },
+          {
+            "group": "Operate",
+            "pages": [
+              "features/lifecycle",
+              "features/observe",
+              "features/autoscaling",
+              "features/release-guard",
+              "features/explanations",
+              "features/telemetry",
+              "features/benchmarking",
+              "features/cold-starts",
+              "features/artifact-cache",
+              "features/admission-async",
+              "features/environment-promotion",
+              "features/external-capacity",
+              "features/serverless",
+              "features/semantic-quality",
+              "features/terminal-ui",
+              "features/dashboard",
+              "showcase/safe-rollouts",
+              "showcase/capacity-evidence"
+            ]
+          },
+          {
+            "group": "Evidence and decisions",
+            "pages": [
+              "features/recipes-lab",
+              "features/replay-capacity",
+              "showcase/cost-performance",
+              "features/inference-decisions",
+              "features/finops-autopilot",
+              "features/inference-passports",
+              "features/context-passport-burst"
+            ]
+          }
         ]
       },
       {
-        "group": "PROJECT",
-        "pages": [
-          "project-status",
-        "roadmap",
-        "roadmap/end-to-end-inference-platform",
-        "roadmap/end-to-end-inference-engineering-plan",
-        "roadmap/integration-ownership-matrix",
-          "testing/product-qualification",
-          "testing/production-qualification-runbook",
-          "testing/test-environment",
-          "security",
-          "compatibility"
+        "tab": "Integrations",
+        "icon": "plug",
+        "groups": [
+          {
+            "group": "Start here",
+            "pages": ["integrations/overview", "integrations/ecosystem", "showcase/gateways-and-sandboxes"]
+          },
+          {
+            "group": "Gateways and external systems",
+            "pages": [
+              "integrations/litellm",
+              "integrations/sandboxes",
+              "integrations/training-artifacts",
+              "integrations/mcp"
+            ]
+          },
+          {
+            "group": "SDKs and automation",
+            "pages": [
+              "integrations/python",
+              "integrations/typescript",
+              "integrations/terraform",
+              "integrations/github-actions"
+            ]
+          },
+          {
+            "group": "Providers",
+            "pages": [
+              "integrations/runpod",
+              "integrations/aws-ec2",
+              "integrations/gcp-compute",
+              "integrations/kubernetes",
+              "integrations/provider-profiles",
+              "architecture/provider-contract"
+            ]
+          },
+          {
+            "group": "Runtimes and evidence tools",
+            "pages": [
+              "integrations/vllm",
+              "integrations/sglang",
+              "integrations/aiperf",
+              "integrations/hugging-face",
+              "architecture/runtime-contract"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Reference",
+        "icon": "brackets-curly",
+        "groups": [
+          {
+            "group": "CLI and configuration",
+            "pages": ["cli", "provider-setup", "compatibility"]
+          },
+          {
+            "group": "Control API",
+            "pages": [
+              "control-api",
+              {
+                "group": "Control API endpoints",
+                "openapi": "openapi.json"
+              }
+            ]
+          },
+          {
+          "group": "Operate the control plane",
+          "pages": [
+            "runbooks/backup-restore",
+            "runbooks/production-service",
+            "runbooks/provider-outage",
+            "runbooks/release-evidence-ci",
+            "runbooks/release-approval",
+            "runbooks/protocol-rollout",
+            "runbooks/ownership-transfer",
+            "runbooks/shared-development",
+            "upgrade",
+              "troubleshooting",
+              "faq",
+              "security"
+            ]
+          }
         ]
       }
     ]

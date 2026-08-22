@@ -1,0 +1,219 @@
+---
+title: Roll out a client or protocol change
+description: Qualify OpenAI-compatible behavior from development through production and restore the prior consumer contract on regression.
+---
+
+# Roll out a client or protocol change
+
+A healthy model server does not prove that an application client still receives the same buffered,
+streaming, cancellation, or error behavior. Treat a runtime/protocol change as an immutable
+candidate and a client-library change as an application release. The stable InferCrane endpoint
+name remains unchanged in both cases.
+
+This runbook does not use silent shadow traffic or an unqualified weighted route. It promotes in
+order—development, staging, production—and fails closed when a required comparison is missing.
+Provider-backed validation may transmit the fixture and incur cost; obtain data and spend approval
+before the first real-environment probe.
+
+## 1. Freeze the contract and rollback identities
+
+Use non-sensitive, deterministic fixtures and record the exact application clients that must remain
+compatible. Before staging anything, export the current destination and deployment state:
+
+```bash
+mkdir -p protocol-evidence/{baseline,development,staging,production}
+
+infercrane endpoint inspect coder-production --output json \
+  > protocol-evidence/baseline/endpoint.json
+infercrane rollout inspect coder-runtime --output json \
+  > protocol-evidence/baseline/rollout.json
+infercrane integrations --output json \
+  > protocol-evidence/baseline/integrations.json
+
+PREVIOUS_REVISION_ID=$(jq -er '.active_revision_id' \
+  protocol-evidence/baseline/rollout.json)
+```
+
+The retained revision must exist and its provider resource identity must be known before production
+promotion. If the change is only an application SDK version, record the prior application artifact
+in that application's deployment system; InferCrane cannot roll back consumer code.
+
+The minimum consumer contract is:
+
+| Probe | Required comparison |
+| --- | --- |
+| Buffered Chat Completions | HTTP status, content type, OpenAI-compatible JSON shape, endpoint model identity, request ID |
+| Streaming Chat Completions | HTTP status, `text/event-stream`, ordered SSE frames, terminal `[DONE]`, no replay after partial output |
+| Error response | Same intentional invalid request, HTTP status, `.error.type`, `.error.code`, and retry decision |
+| Cancellation | One request ID, no automatic second stream; exact runtime stop behavior recorded as proven or unavailable |
+| Official clients | Pinned Python and TypeScript package versions, InferCrane `/v1` base URL, stable model alias, automatic retries disabled during qualification |
+
+Do not compare generated prose byte-for-byte. Compare protocol shape. When task-specific quality is
+required, use a customer-owned, versioned evaluator and attach only its signed aggregate score,
+sample count, result-artifact digest, and evaluator identity; missing comparable quality evidence
+blocks promotion.
+
+## 2. Run the same probes in every environment
+
+Set `CONTRACT_URL` to the environment endpoint and write each run to a new evidence directory. Keep
+automatic client retries disabled so one observed result represents one request:
+
+```bash
+export CONTRACT_URL='https://infercrane.development.example.com'
+export CONTRACT_MODEL='coder-development'
+export CONTRACT_EVIDENCE='protocol-evidence/development'
+
+curl --retry 0 --silent --show-error \
+  --dump-header "$CONTRACT_EVIDENCE/buffered.headers" \
+  --output "$CONTRACT_EVIDENCE/buffered.json" \
+  --write-out '%{http_code}\n' \
+  "$CONTRACT_URL/v1/chat/completions" \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d "{\"model\":\"$CONTRACT_MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"Return the word ready.\"}]}" \
+  > "$CONTRACT_EVIDENCE/buffered.status"
+
+curl --retry 0 --no-buffer --silent --show-error --max-time 30 \
+  --dump-header "$CONTRACT_EVIDENCE/stream.headers" \
+  --output "$CONTRACT_EVIDENCE/stream.sse" \
+  --write-out '%{http_code}\n' \
+  "$CONTRACT_URL/v1/chat/completions" \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d "{\"model\":\"$CONTRACT_MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"Count from one to three.\"}],\"stream\":true}" \
+  > "$CONTRACT_EVIDENCE/stream.status"
+
+curl --retry 0 --silent --show-error \
+  --dump-header "$CONTRACT_EVIDENCE/error.headers" \
+  --output "$CONTRACT_EVIDENCE/error.json" \
+  --write-out '%{http_code}\n' \
+  "$CONTRACT_URL/v1/chat/completions" \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"contract-does-not-exist","messages":[]}' \
+  > "$CONTRACT_EVIDENCE/error.status"
+
+jq -e '.choices | type == "array"' "$CONTRACT_EVIDENCE/buffered.json"
+jq -e '.error | type == "object" and (.message | type == "string") and (.type | type == "string")' \
+  "$CONTRACT_EVIDENCE/error.json"
+grep -q '^content-type: text/event-stream' "$CONTRACT_EVIDENCE/stream.headers"
+grep -q '^data: \[DONE\]' "$CONTRACT_EVIDENCE/stream.sse"
+```
+
+Header casing can vary; normalize headers before automated comparison. Capture `X-Request-Id` and
+run `infercrane request inspect REQUEST_ID --output json` for accepted requests. For Python, use the
+official OpenAI client with the InferCrane `/v1` base URL, stable endpoint alias, `max_retries=0`,
+and a bounded timeout. For TypeScript, use the same contract with `maxRetries: 0`. Consume each
+streaming iterator to completion, capture the request ID, and persist both package lockfiles with
+the evidence.
+
+If the exact runtime does not expose one timing or cancellation boundary, record it as unavailable.
+Do not turn an unavailable result into PASS.
+
+## 3. Development to staging
+
+First make the new runtime revision active only behind `coder-development` after its deployment
+Release Guard accepts it. Run the probes above against development. Then stage that immutable
+serving plan into staging:
+
+```bash
+infercrane environment promote coder-development \
+  --to coder-staging \
+  --output json \
+  > protocol-evidence/staging/plan.json
+
+STAGING_PLAN_ID=$(infercrane environment promote coder-development \
+  --to coder-staging \
+  --yes \
+  --idempotency-key protocol-release-development-to-staging \
+  --output json | jq -er '.promotion.destination_plan_id')
+
+infercrane endpoint guard coder-staging --evaluate --output json \
+  > protocol-evidence/staging/guard.json
+jq -e '.evaluation.decision == "PASS"' protocol-evidence/staging/guard.json
+infercrane endpoint promote coder-staging "$STAGING_PLAN_ID"
+```
+
+Now set `CONTRACT_URL`, `CONTRACT_MODEL`, and `CONTRACT_EVIDENCE` to staging and rerun every probe.
+Compare normalized status, content type, JSON/error shape, SSE termination, request attribution, and
+client-library results with the known-good baseline. A missing result, changed retry decision,
+partial/replayed stream, or unqualified model/runtime pair blocks production.
+
+## 4. Staging to production
+
+Keep existing consumers on `coder-production` while staging the candidate. The dry run is
+side-effect free; applying the promotion only fills the production candidate slot:
+
+```bash
+infercrane environment promote coder-staging \
+  --to coder-production \
+  --output json \
+  > protocol-evidence/production/plan.json
+
+PRODUCTION_PLAN_ID=$(infercrane environment promote coder-staging \
+  --to coder-production \
+  --yes \
+  --idempotency-key protocol-release-staging-to-production \
+  --output json | jq -er '.promotion.destination_plan_id')
+
+infercrane endpoint guard coder-production --evaluate --output json \
+  > protocol-evidence/production/guard.json
+jq -e '.evaluation.decision == "PASS"' protocol-evidence/production/guard.json
+```
+
+Confirm the production candidate digest is the staging-tested digest and that the Guard evaluation
+names the still-current active and intended candidate plan IDs. `WAIT`, `REJECT`, missing client
+evidence, or changed consumer semantics means stop; production traffic has not moved.
+
+InferCrane does not currently qualify arbitrary weighted endpoint canaries. If the application team
+needs a client-library canary, deploy that consumer canary through the application deployment
+system while it calls the unchanged production endpoint. Do not use an unqualified weighted model
+route as a substitute.
+
+Promote only after the consumer owners approve the evidence:
+
+```bash
+infercrane endpoint promote coder-production "$PRODUCTION_PLAN_ID"
+```
+
+Immediately rerun the short buffered, streaming, and intentional-error probes against production.
+Continue monitoring real request IDs and error/latency evidence within the bounded observation
+window; do not duplicate customer traffic.
+
+## 5. Restore the prior behavior
+
+If the protocol change came from an InferCrane-managed deployment revision, restore the retained
+known-good revision behind the unchanged endpoint:
+
+```bash
+infercrane rollout inspect coder-runtime --output json
+infercrane rollout rollback coder-runtime "$PREVIOUS_REVISION_ID" \
+  --reason 'protocol or client compatibility regression' \
+  --wait
+infercrane status coder-runtime --watch
+infercrane explain rollout coder-runtime
+```
+
+Rollback changes routing, generation-drains active streams, and preserves the failed revision and
+Guard evidence. Rerun all three protocol probes and the affected client versions; recovery is not
+complete until the stable production endpoint again matches the recorded contract.
+
+If only consumer code changed, roll back the client artifact with the application deployment system
+and leave InferCrane's endpoint untouched. If the change was an endpoint routing-plan change rather
+than a deployment revision, do not use the deployment rollback command: stage the recorded prior
+plan as a candidate, require a current endpoint Guard PASS, then promote that exact plan. There is no
+unsafe endpoint-Guard bypass in this release. If the old plan cannot be proven healthy, apply
+admission/load shedding and preserve request and provider evidence. Buffered requests with a request
+ID are inspected; partial streams and paid external requests are never replayed; unknown provider
+outcomes remain unresolved until read-only inventory proves one identity or absence. Do not guess.
+
+## Promotion gates
+
+- exact development plan passes the documented protocol/client matrix
+- exact staging plan passes the same matrix and environment qualification
+- production candidate digest matches staging evidence
+- endpoint Guard is `PASS` for the current active/candidate pair
+- prior deployment revision and provider identities remain available for rollback
+- consumer owners approve changed error/retry semantics explicitly
+- post-promotion buffered, streaming, error, and request-attribution probes pass
+- any missing or unavailable required evidence stops promotion

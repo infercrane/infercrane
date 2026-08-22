@@ -23,8 +23,16 @@ the trust boundary.
 
 ## Ingest a result from any evaluator
 
+<Warning>
+An artifact digest proves which private result bundle was evaluated, not that the evaluator was
+well-designed. Before generating or attaching evidence, approve the representative dataset, privacy
+boundary, evaluator and version, calibration procedure, sampling method, and required human review
+for high-risk changes. The commands below persist signed release evidence and `--attach` mutates the
+candidate record; they do not upload prompt/output bodies or authorize promotion.
+</Warning>
+
 Have Ragas, DeepEval, a custom CI evaluator, or another customer-controlled system emit the strict
-content-free [evaluator result contract](https://github.com/infercrane/infercrane/blob/main/schemas/evaluator-result-v1.schema.json):
+content-free evaluator result contract at `schemas/evaluator-result-v1.schema.json`:
 
 ```json evaluator-result.json
 {
@@ -97,9 +105,3 @@ Active and candidate evidence must use the same suite version and evaluator vers
 Missing or incomparable required evidence leaves the decision waiting. A failed suite, score below
 the minimum, or regression beyond policy rejects the candidate. The evaluator cannot activate a
 revision; promotion remains a separate, authorized control-plane decision.
-
-<Warning>
-An artifact digest proves which private result bundle was evaluated, not that the evaluator was
-well-designed. Teams remain responsible for representative datasets, evaluator calibration, privacy,
-and human review of high-risk changes.
-</Warning>

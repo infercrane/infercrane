@@ -1,0 +1,158 @@
+---
+title: Share a development endpoint safely
+description: Move from the local fixture to a TLS-protected team endpoint without creating provider resources by accident.
+---
+
+# Share a development endpoint safely
+
+The Compose quickstart is a single-developer proof. It uses a known credential and fake workers, so
+publishing it through a tunnel, port forward, or shared host is unsafe. A teammate can use one stable
+InferCrane endpoint only after you create a separate customer-owned control-plane environment with
+TLS, network policy, tenant-scoped credentials, and a real upstream that the team already operates.
+
+This runbook creates **no cloud or GPU resource**. It connects an existing OpenAI-compatible
+upstream. That upstream still has its own compute and cost boundary. If no approved upstream exists,
+stop after the local quickstart; a real model response cannot be produced without model compute.
+
+## 1. Record the boundary before starting
+
+Choose and record:
+
+| Boundary | Required decision |
+| --- | --- |
+| Control URL | Private DNS name such as `https://infercrane.dev.example.com`; never a loopback or tunnel URL |
+| TLS identity | Certificate and key supplied by the team's existing certificate system |
+| Network access | VPN, private network, or firewall allowlist for the intended teammates |
+| PostgreSQL | Customer-owned durable database; TLS outside a trusted private bridge |
+| Upstream | Existing in-region vLLM, SGLang, LiteLLM, or compatible endpoint reachable by the control plane |
+| Ownership | Begin `observe-only`; traffic transfer is a separate reviewed action |
+| Data | Non-sensitive staging input until protocol and residency are qualified |
+
+Do not proceed if the TLS identity, network owner, upstream owner, or data boundary is unknown.
+
+## 2. Start a production-mode control plane
+
+Copy `.env.production.example` to a private path. Set a unique 32-character-or-longer bootstrap key,
+the PostgreSQL URL, public control URL, and mounted TLS certificate paths. Keep the file out of Git.
+Render before starting so missing variables fail without creating provider resources:
+
+```bash
+docker compose --env-file /private/path/infercrane.env \
+  -f compose.production.yaml config --quiet
+
+docker compose --env-file /private/path/infercrane.env \
+  -f compose.production.yaml up -d
+
+curl --fail --silent --show-error \
+  --cacert /path/to/team-ca.pem \
+  https://infercrane.dev.example.com/readyz
+```
+
+The base production stack is provider-neutral and contains no fake workers. Do not add a provider
+overlay for this workflow. Enforce the recorded private-network policy outside Compose before
+giving anyone the URL. See [Production operations](/production) for HA, PostgreSQL TLS, mTLS, and
+secret-manager requirements; this single control-plane instance is a development environment, not
+a production availability claim.
+
+## 3. Connect the existing upstream without taking traffic
+
+Configure the administrator CLI locally, then connect the exact existing upstream:
+
+```bash
+export INFERCRANE_API_KEY='BOOTSTRAP_KEY_FROM_SECRET_MANAGER'
+infercrane init \
+  --url https://infercrane.dev.example.com \
+  --context team-development
+infercrane auth status
+
+infercrane connect https://vllm.dev.internal.example/v1 \
+  --as coder-development \
+  --type vllm \
+  --model Qwen/Qwen3-32B
+
+infercrane observe coder-development --output json
+infercrane doctor coder-development --window 15m
+```
+
+The connection is `observe-only`: InferCrane does not mutate, scale, update, delete, or receive
+application traffic for the upstream. Substitute `--type sglang` or `--type litellm` only when that
+is the upstream actually qualified. Keep applications on the original URL while you complete the
+[direct-versus-managed comparison](/showcase/connect-existing#compare-the-existing-and-managed-request-paths).
+
+## 4. Create a least-privilege teammate credential
+
+Create a read-only service principal. The credential is printed once; capture the principal ID in
+the team's access record and transfer the credential through the existing secret manager—not chat,
+email, a shell transcript, or a ticket:
+
+```bash
+infercrane principal create teammate-development \
+  --role viewer \
+  --scopes read
+```
+
+On the teammate's machine:
+
+```bash
+export INFERCRANE_API_KEY='ONE_TIME_VALUE_FROM_SECRET_MANAGER'
+infercrane init \
+  --url https://infercrane.dev.example.com \
+  --context team-development
+infercrane auth status
+infercrane observe coder-development --output json
+```
+
+`init` verifies `/api/v1/whoami` before storing the context. A TLS, authorization, or tenant mismatch
+must stop the workflow; do not use `--skip-check` to bypass it.
+
+## 5. Qualify the managed request path before switching a client
+
+Promoting adoption changes routing ownership, although it creates no provider resource. Use an
+operator credential only after the direct-versus-managed buffered, streaming, error, cancellation,
+and model-identity comparison passes with non-sensitive staging data:
+
+```bash
+infercrane adopt promote coder-development --ownership traffic-managed
+```
+
+The teammate can then call the stable endpoint with the same read-only credential:
+
+```bash
+curl --retry 0 --fail --silent --show-error \
+  https://infercrane.dev.example.com/v1/chat/completions \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "coder-development",
+    "messages": [{"role": "user", "content": "Return one word."}]
+  }'
+```
+
+Verify the returned `X-Request-Id` with `infercrane request inspect REQUEST_ID --output json`. Stop
+and keep the application on the original upstream if the comparison, request attribution, TLS, or
+network evidence is incomplete. InferCrane still does not own upstream lifecycle in
+`traffic-managed` mode.
+
+## 6. Remove access and verify
+
+Revoke by the principal ID captured when the credential was issued:
+
+```bash
+infercrane principal revoke PRINCIPAL_ID
+```
+
+After the next successful credential-snapshot refresh, the revoked credential must receive `401`.
+If PostgreSQL is unavailable, revocation cannot become visible to a gateway from an updated
+snapshot; restore the database or fence/restart affected gateways as described in
+[Security](/security). Keep the upstream running because this workflow never transferred lifecycle
+ownership. Review the principal creation and revocation in the audit log.
+
+## Evidence checklist
+
+- TLS certificate and private-network policy owner
+- control-plane `/readyz` response over the trusted CA
+- upstream URL, runtime, model identity, and ownership mode
+- direct-versus-managed protocol results
+- principal ID, role, scopes, issuer, and revocation time—never the credential
+- stable-endpoint request ID and Request Inspector attribution
+- explicit statement that no provider resource was created by this runbook

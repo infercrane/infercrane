@@ -22,6 +22,69 @@ lists these upstream surfaces, but availability depends on both runtime version 
 InferCrane therefore treats each capability independently. An unknown or unsupported claim returns
 `422 unsupported_protocol` before any request reaches the workload.
 
+## Client compatibility contract
+
+InferCrane qualifies HTTP protocol behavior, not every release of every OpenAI-compatible SDK. Use
+the InferCrane `/v1` base URL, an InferCrane tenant credential, and the stable endpoint name as
+`model`. Disable automatic client retries while qualifying streaming or failure behavior.
+
+<CodeGroup>
+```bash cURL
+curl --retry 0 -fsS "$INFERCRANE_URL/v1/chat/completions" \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"coder-production","messages":[{"role":"user","content":"Hello"}]}'
+```
+
+```python Python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="https://inference.example.com/v1",
+    api_key="INFERCRANE_ENDPOINT_TOKEN",
+    max_retries=0,
+    timeout=30.0,
+)
+response = client.chat.completions.create(
+    model="coder-production",
+    messages=[{"role": "user", "content": "Hello"}],
+)
+```
+
+```typescript TypeScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "https://inference.example.com/v1",
+  apiKey: "INFERCRANE_ENDPOINT_TOKEN",
+  maxRetries: 0,
+  timeout: 30_000,
+});
+const response = await client.chat.completions.create({
+  model: "coder-production",
+  messages: [{ role: "user", content: "Hello" }],
+});
+```
+</CodeGroup>
+
+| Input | InferCrane behavior |
+| --- | --- |
+| `model` | Required stable endpoint alias; rewritten only for the selected upstream. |
+| `stream` | Preserved only when the runtime profile claims streaming; partial streams are never retried. |
+| `max_tokens` / `max_output_tokens` | Passed through and interpreted only to enforce endpoint admission limits. |
+| `temperature`, `top_p`, `stop`, `seed` | Passed through; semantics and support belong to the exact runtime/model. |
+| `tools`, `tool_choice`, `response_format` | Passed through; must be qualified for the exact runtime/model and template. |
+| Unknown optional request fields | Passed through unless InferCrane must interpret them; acceptance by one runtime is not a portable guarantee. |
+| Unsupported protocol or streaming claim | `422 unsupported_protocol` before upstream transmission. |
+| Request too large | Gateway limit or endpoint admission returns `413 request_too_large`. |
+
+The current pinned vLLM profile qualifies Chat Completions, text Completions for compatible models,
+and Embeddings for embedding models. Responses and online batch remain gateway-implemented but
+unqualified for that profile. LiteLLM or another upstream may accept more parameters, but InferCrane
+does not inherit those claims automatically. For any other client library, first run the same
+buffered, streaming, error-schema, cancellation, and model-identity fixtures in staging; otherwise
+the safe configuration is only the subset proven by the HTTP contract above.
+
 ## Model identity
 
 Send the stable InferCrane endpoint name as `model`. The gateway selects a pinned route generation
@@ -36,6 +99,126 @@ curl -fsS "$INFERCRANE_URL/v1/embeddings" \
 
 All other protocol fields pass through. Upstream status, content type, response body, cancellation,
 and streaming semantics are preserved. InferCrane never retries a partially transmitted stream.
+
+## Qualify tool calling and streaming
+
+Protocol registration is not proof that one runtime/model pair implements every optional behavior.
+Use an isolated staging endpoint backed by the exact candidate revision; do not send qualification
+traffic to the production alias.
+
+First inspect the registered runtime claim and candidate identity:
+
+```bash
+infercrane integrations --output json
+infercrane endpoint inspect coder-staging --output json
+infercrane inspect coder-candidate --output json
+```
+
+Then exercise a buffered tool call. The response must be valid OpenAI-compatible JSON and contain
+the tool-call structure expected by your application; a healthy HTTP status alone is insufficient:
+
+```bash
+curl -i -fsS "$INFERCRANE_URL/v1/chat/completions" \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "coder-staging",
+    "messages": [{"role":"user","content":"What is the weather in Berlin?"}],
+    "tools": [{
+      "type": "function",
+      "function": {
+        "name": "get_weather",
+        "description": "Read current weather for a city",
+        "parameters": {
+          "type": "object",
+          "properties": {"city": {"type": "string"}},
+          "required": ["city"]
+        }
+      }
+    }],
+    "tool_choice": "auto"
+  }'
+```
+
+Exercise streaming independently. `curl -N` disables client buffering; the stream must produce
+well-formed SSE data and a terminal `[DONE]` without replaying a partial request:
+
+```bash
+curl -N -i -fsS "$INFERCRANE_URL/v1/chat/completions" \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "coder-staging",
+    "messages": [{"role":"user","content":"Count from one to five."}],
+    "stream": true
+  }'
+```
+
+Capture the `X-Request-Id` header from each response and inspect the persisted attribution:
+
+```bash
+infercrane request inspect REQUEST_ID --output json
+```
+
+See the [Request Inspector field contract](/features/adoption-diagnostics#inspect-one-request) for
+which routing and timing boundaries remain explicit or unavailable.
+
+Record the InferCrane release, endpoint serving-plan digest, deployment revision, immutable model
+commit, runtime version, container digest, provider, accelerator, request fixture, response schema,
+and streaming outcome. Repeat under the representative load and cancellation behavior required by
+your production application before promotion.
+
+<Warning>
+These commands prove only the exact runtime, model, revision, and environment tested. Local fake
+runtimes prove gateway control flow, not real tool selection, CUDA execution, streaming behavior, or
+model quality. Keep Release Guard `INCONCLUSIVE` when required real-runtime evidence is absent.
+</Warning>
+
+## Qualify streaming, cancellation, quotas, and retries together
+
+Run this only against an isolated staging tenant and endpoint. First persist bounded admission and
+record the exact identity under test:
+
+```bash
+infercrane admission set coder-staging \
+  --max-concurrency 2 \
+  --max-queue 2 \
+  --queue-timeout-ms 1000 \
+  --max-output-tokens 512 \
+  --retry-budget 1
+infercrane admission get coder-staging --output json
+infercrane endpoint inspect coder-staging --output json
+infercrane inspect coder-candidate --output json
+```
+
+Use the [tenant quota API procedure](/features/admission-async#set-a-distributed-tenant-request-ceiling)
+to set a small staging-only requests-per-minute ceiling without guessing the existing production
+quota. Then perform four independent checks:
+
+1. Send a successful buffered request and verify `X-InferCrane-Attempt` never exceeds the configured
+   retry budget. Only connection failures and `502`, `503`, or `504` on InferCrane-managed capacity
+   are retryable.
+2. Start the `curl -N` streaming request above, capture its response headers, and terminate the
+   client while chunks are arriving. Inspect its `X-Request-Id`. The recorded request must remain one
+   request, and no second stream may appear. Client cancellation propagation to the exact runtime is
+   real-runtime evidence, not something a local fake proves.
+3. Issue concurrent buffered requests beyond `max-concurrency + max-queue`; excess work must receive
+   an OpenAI-compatible rejection within the configured queue timeout rather than silently exceeding
+   admission.
+4. Exhaust the staging tenant's request ceiling within one UTC minute. The next request must return
+   `429` before upstream transmission. Correlate the available request IDs and the `quota.update`
+   audit event.
+
+Record a qualification result containing InferCrane version, endpoint serving-plan digest,
+candidate revision, immutable model, runtime/container version, provider, accelerator, admission
+policy, tenant ceiling, request fixture, response codes, attempt counts, stream cancellation result,
+and request evidence. Passing local fixture tests proves admission and accounting state machines;
+only the same procedure against the real runtime proves cancellation after upstream transmission.
+
+If any request cannot be correlated, a partial stream is replayed, the retry ceiling is exceeded,
+quota accounting cannot be demonstrated, or required real-runtime evidence is absent, do not run
+`endpoint promote` or `rollout promote`. Preserve the candidate and persisted evidence and leave
+Release Guard `INCONCLUSIVE`.
 
 ## Telemetry and privacy
 

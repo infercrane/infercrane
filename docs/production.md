@@ -116,7 +116,7 @@ Health and telemetry endpoints:
 - `/metrics`: Prometheus-format gateway request, failure, active request, byte, duration histogram,
   and operation claim, completion, failure, retry, and cancellation counters.
 
-Import [the baseline Prometheus alert rules](https://github.com/infercrane/infercrane/blob/main/deploy/prometheus-rules.yaml), then tune thresholds
+Import the baseline rules at `deploy/prometheus-rules.yaml` from the private-preview repository, then tune thresholds
 from real model latency and traffic. Follow the [compatibility policy](compatibility.md) and perform
 the [backup/restore drill](runbooks/backup-restore.md) for every release containing migrations.
 

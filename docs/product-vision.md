@@ -92,4 +92,4 @@ is governed by the capability table and compatibility policy.
 - Operator time required to identify and remediate a failed deployment.
 
 These metrics describe desired evidence, not current claims. Capability maturity remains tracked in
-[Project status](project-status.md).
+[Capability qualification](project-status.md).

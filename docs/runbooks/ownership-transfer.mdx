@@ -1,0 +1,58 @@
+---
+title: Ownership and credential transfer
+description: Preserve a stable endpoint while changing operators without duplicating provider resources.
+sidebarTitle: Ownership transfer
+---
+
+# Ownership transfer boundary
+
+InferCrane does not currently implement an atomic cross-tenant transfer of a deployment, endpoint,
+provider identity, or audit history. A stable endpoint name is tenant-scoped and cannot be reassigned
+to another tenant by changing a browser or provider credential. If atomic cross-organization
+transfer is required, stop: use an application-owned DNS/API gateway cutover or redeploy under the
+new tenant after an approved migration.
+
+## Transfer operating responsibility within one tenant
+
+1. Freeze rollout, scale, delete, provider credential, and endpoint-plan mutations. Record active
+   operations, serving plan, revision, provider identities, and direct provider inventory:
+
+   ```bash
+   infercrane observe coder-production --output json
+   infercrane endpoint inspect coder-production --output json
+   infercrane inspect coder-runtime --output json
+   infercrane inbox --output json
+   infercrane orphans --output json
+   ```
+
+2. Map the receiving operator to a least-privilege InferCrane principal in the same tenant. Verify
+   read-only access before granting deploy, release, secret-reference, or tenant-management scopes.
+   Never share the bootstrap credential.
+3. Rotate provider credentials in the owning secret manager. InferCrane stores only the resolver and
+   reference, not the value. Keep old and new credentials overlapped until the new identity can read
+   the exact resource inventory. For environment-backed references, inject the new value and restart
+   control-plane processes according to the upgrade procedure; never put it in a URL, spec, event, or
+   evidence file.
+4. Run the provider's read-only doctor and direct inventory check. The new credential must see the
+   same provider resource IDs, ownership tags/labels, revision, and replica ordinals as persisted
+   state. It must not create or retag resources as a credential test.
+5. Remove the old operator only after new authorization and inventory agree. Resume with one
+   designated mutation owner; PostgreSQL leases fence operation workers, but they do not resolve two
+   organizations issuing conflicting product intents.
+6. Send a non-sensitive request through the unchanged endpoint and inspect its request ID. Endpoint,
+   serving plan, revision, and tenant must remain unchanged. Record the credential rotation as an
+   external security audit because secret values are intentionally absent from InferCrane evidence.
+
+## Move to another tenant or organization
+
+Keep the source endpoint serving. The receiving tenant may connect the existing upstream in
+`observe-only` mode and qualify it, but that does not transfer lifecycle ownership. Do not let both
+tenants claim the same provider resource. Choose one explicit cutover:
+
+- keep provider lifecycle with the source and give the destination only traffic-managed access; or
+- provision a new destination-owned deployment, qualify it, switch the application-owned endpoint,
+  then plan-first delete the source after direct inventory confirms ownership.
+
+There is no supported in-place reassignment of lifecycle-managed provider identities or retained
+audit history between tenants. Manual tag edits are not a transfer protocol. Any ambiguous resource,
+credential scope, stable endpoint, or post-backup state keeps the transfer blocked.

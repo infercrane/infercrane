@@ -35,7 +35,9 @@ served. The primary paths are ordered by intent:
 1. **Deploy an open model** starts from a reviewed model configuration, exposes only the required
    serving choices, and keeps runtime, accelerator, region, and scaling under Advanced.
 2. **Connect existing inference** discovers vLLM, SGLang, LiteLLM, or another compatible endpoint
-   and starts observe-only.
+   and starts observe-only. The endpoint page then presents a separate, explicit ownership action
+   before InferCrane can route traffic. Promotion changes routing ownership only; it does not grant
+   lifecycle control over the external workload.
 3. **Use a model API** registers OpenRouter or another OpenAI-compatible provider. Configuration
    alone sends no traffic and authorizes no spend.
 
@@ -136,3 +138,8 @@ infercrane inspect DEPLOYMENT --output json
 
 The public Dashboard link intentionally leads to a Coming Soon page until hosted access is ready for
 general users.
+
+The web workspace's `npm run test:e2e:empty-control-plane` journey starts with a new PostgreSQL
+volume and verifies this first-run flow through the real control API. It is the regression boundary
+for empty states and browser-to-control-plane wiring; the hosted identity provider and real GPU/cloud
+boundaries remain separate release qualifications.

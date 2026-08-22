@@ -9,6 +9,12 @@ InferCrane v1 separates four compatibility surfaces: the control API, Deployment
 contracts, and PostgreSQL schema. A passing runtime or provider conformance test does not override
 the policy for another surface.
 
+For an application SDK, OpenAI-compatible protocol, or runtime behavior change, use the complete
+[development → staging → production protocol rollout](/runbooks/protocol-rollout). It defines the
+buffered, streaming, cancellation, error-schema, consumer-canary, fail-closed promotion, and
+restoration gates; the control-plane binary procedure on this page is a separate compatibility
+boundary.
+
 ## Before upgrading
 
 1. Read the release notes and compatibility matrix.
@@ -22,6 +28,38 @@ the policy for another surface.
 scripts/backup-postgres.sh /secure/path/infercrane-before-v1.dump
 make qualify-local
 ```
+
+## Automate a provider or serving-plan change safely
+
+A provider change is a candidate revision, not an in-place infrastructure edit. Automation should
+stop before mutation unless the exact combination is present in release evidence:
+
+```bash
+infercrane integrations --output json
+infercrane models inspect MODEL_CATALOG_NAME --output json
+infercrane plan deployment-provider-change.yaml --output json
+```
+
+Follow the [exact-combination compatibility check](/compatibility#check-one-exact-serving-combination).
+The dry run must name the provider adapter, runtime and version, compute mode, immutable model,
+accelerator/topology, region, and replica bounds. Stop safely when any required capability is
+`unsupported`, `unknown`, `planned`, or lacks the environment-specific qualification required by
+policy. Do not reinterpret missing evidence as a warning in deployment automation.
+
+Only after the dry run and qualification gate pass should automation submit the same reviewed spec:
+
+```bash
+infercrane apply deployment-provider-change.yaml \
+  --idempotency-key provider-change-REVISION \
+  --wait
+infercrane rollout inspect DEPLOYMENT
+```
+
+`apply` stages an immutable candidate; it does not replace active traffic. Run Release Guard and
+promote explicitly. If provisioning or validation fails, preserve the operation/evaluation evidence
+and reject the candidate; the active provider remains routed. The current decision must be `ACCEPT`
+for the same active/candidate pair before promotion. After a post-promotion regression, restore the
+retained previous revision with `rollout rollback`; never delete the deployment as release recovery.
 
 ## PostgreSQL migration contract
 
@@ -78,7 +116,108 @@ qualification inventory establishes evidence for an exact runtime/provider/mode 
 infercrane integrations --output json
 ```
 
-## Rolling upgrades
+## Private-preview support boundary
+
+<Warning>
+The private preview does not yet publish a supported adjacent-release compatibility pair. A
+mixed-version rolling upgrade is therefore **not supported**. Use the single-version maintenance
+procedure below. Do not infer rolling compatibility solely from live protocol numbers.
+</Warning>
+
+## Safe private-preview upgrade
+
+Because no adjacent pair is currently qualified, a mixed-version rollout is **not a supported
+private-preview workflow**. Use this maintenance procedure instead:
+
+<Steps>
+  <Step title="Converge or record active operations">
+    ```bash
+    infercrane system instances --output json
+    infercrane deployments --output json
+    infercrane orphans --output json
+    ```
+
+    Let ordinary operations finish when possible. For every operation that must cross the
+    maintenance window, retain its ID and current status; do not cancel or recreate it merely to
+    upgrade.
+  </Step>
+
+  <Step title="Back up and stop the old application replicas">
+    ```bash
+    scripts/backup-postgres.sh /secure/path/infercrane-before-upgrade.dump
+    pg_restore --list /secure/path/infercrane-before-upgrade.dump >/dev/null
+    ```
+
+    Keep PostgreSQL and provider resources intact. Stop all old InferCrane application replicas so
+    old and new binaries never mutate the database concurrently.
+  </Step>
+
+  <Step title="Start exactly one new-version replica">
+    Start the candidate image against the preserved database. Its startup migration lock and ledger
+    validation must complete before `/readyz` becomes healthy. If startup rejects the ledger or a
+    migration fails, stop and follow the release-specific restore procedure; do not edit migration
+    rows.
+  </Step>
+
+  <Step title="Verify recovery before adding replicas">
+    ```bash
+    infercrane system instances --output json
+    infercrane deployments --output json
+    infercrane orphans --output json
+    infercrane operation watch OPERATION_ID --wait-timeout 15m
+    ```
+
+    Confirm the membership list contains only the intended version, incomplete operations resume
+    under fresh leases, and external inventory has not duplicated. Add further same-version replicas
+    only after these checks pass.
+  </Step>
+</Steps>
+
+This procedure preserves durable operations but includes a control-plane maintenance window. A true
+rolling upgrade becomes available only when release notes publish an exact old/new pair, overlapping
+protocol intervals, and compatible schema behavior.
+
+## Roll back without erasing evidence
+
+If the new binary or migration fails, do not start the old binary against the migrated database and
+do not delete provider resources. While the failed-version API can still serve read-only requests,
+export its post-upgrade state as a separate evidence set:
+
+```bash
+mkdir -p /secure/path/infercrane-upgrade-evidence
+infercrane system instances --output json \
+  > /secure/path/infercrane-upgrade-evidence/instances.json
+infercrane deployments --output json \
+  > /secure/path/infercrane-upgrade-evidence/deployments.json
+infercrane inbox --output json \
+  > /secure/path/infercrane-upgrade-evidence/inbox.json
+infercrane orphans --output json \
+  > /secure/path/infercrane-upgrade-evidence/orphans.json
+curl -fsS "$INFERCRANE_URL/api/v1/audit-events?limit=1000" \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY" \
+  > /secure/path/infercrane-upgrade-evidence/audit-events.json
+```
+
+Then stop every InferCrane application replica and preserve the failed database:
+
+```bash
+scripts/backup-postgres.sh \
+  /secure/path/infercrane-upgrade-evidence/failed-upgrade.dump
+```
+
+If the failed API cannot serve those reads, retain its database snapshot and collect what remains
+available directly under the incident procedure; never fabricate the missing interval. Provision a
+separate empty rollback database, point `INFERCRANE_DATABASE_URL` at it, set
+`INFERCRANE_RESTORE_TARGET_DATABASE` to its exact database name, and restore the verified pre-upgrade
+dump using [Backup and restore](/runbooks/backup-restore#recover-the-active-control-plane-after-a-failed-migration).
+
+The restored database is authoritative only through the backup timestamp. Post-backup exports and
+the failed-upgrade database remain immutable external audit evidence; the current release cannot
+reattach those rows automatically to the restored ledger. Before enabling reconciliation, compare
+the restored active revision and provider identities with the retained exports and read-only
+provider inventory. Any provider mutation after the backup is a manual reconciliation boundary.
+
+## Future rolling-upgrade contract
 
 Every live replica registers its binary version and control protocol interval. Startup
 fails before serving when that interval cannot overlap a live member. Inspect the actual window:

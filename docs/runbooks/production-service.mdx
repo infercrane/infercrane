@@ -1,0 +1,262 @@
+---
+title: Build a production service safely
+description: Combine a stable endpoint, quotas, bounded autoscaling, isolated failure testing, and exact real-provider qualification.
+sidebarTitle: Production service recipe
+---
+
+# Build a production service safely
+
+This recipe defines one logical model, separate staging and production endpoints, one
+version-controlled deployment, endpoint admission, a distributed tenant request ceiling, bounded
+autoscaling, and a fail-closed candidate test. It does not make an experimental provider/runtime
+combination production-qualified.
+
+<Warning>
+`deploy`, `apply`, candidate provisioning, validation, and autoscaling can create billable provider
+capacity; validation sends the approved fixture to runtimes; promotion changes traffic; rejection
+and deletion can remove capacity. Complete the read-only plan, provider identity/inventory review,
+data approval, maximum-replica exposure, and exact real-environment qualification before mutation.
+Use a dedicated staging deployment for failure tests. Never send customer traffic to an unqualified
+candidate.
+</Warning>
+
+## 1. Keep the serving intent in version control
+
+Create `coder-runtime.yaml` with the exact reviewed model, runtime, provider, region, GPU, and
+`min=1,max=2`. Do not depend on implicit CLI defaults:
+
+```yaml
+apiVersion: infercrane.dev/v1
+kind: Deployment
+name: coder-runtime
+model:
+  id: Qwen/Qwen3-8B
+  revision: IMMUTABLE_MODEL_COMMIT
+runtime:
+  engine: vllm
+  version: QUALIFIED_RUNTIME_VERSION
+compute:
+  mode: elastic
+resources:
+  gpu: ACCELERATOR
+provider:
+  cloud: PROVIDER
+  region: REGION
+scaling:
+  min_replicas: 1
+  max_replicas: 2
+```
+
+The schema does not accept placeholders at apply time; replace every uppercase value. First run only
+read-only checks:
+
+```bash
+infercrane integrations --output json
+infercrane models inspect MODEL_CATALOG_NAME --output json
+infercrane doctor --cloud
+infercrane plan coder-runtime.yaml --output json
+```
+
+The outputs must agree on the exact immutable combination. `max_replicas: 2` is a capacity ceiling,
+not a monetary budget. Stop if provider price, stock, quota, ownership, or required qualification is
+unknown.
+
+## 2. Create stable environment identities
+
+Create the domain objects before provider mutation:
+
+```bash
+infercrane environment create staging
+infercrane environment create production
+infercrane logical-model create coder --description 'Stable coding model'
+infercrane endpoint create coder-staging --model coder --environment staging
+infercrane endpoint create coder-production --model coder --environment production
+```
+
+Applications will call `model="coder-production"`; they never need a provider address or revision
+ID.
+
+## 3. Deploy and bind one reviewed runtime
+
+```bash
+infercrane apply coder-runtime.yaml \
+  --idempotency-key coder-runtime-v1 \
+  --wait
+
+infercrane endpoint bind coder-production \
+  --name primary \
+  --deployment coder-runtime \
+  --ownership lifecycle-managed
+infercrane endpoint plan coder-production \
+  --policy manual \
+  --bindings primary
+infercrane endpoint inspect coder-production --output json
+```
+
+The first serving plan becomes active because the endpoint has no prior plan. A later plan is a
+candidate and requires endpoint Release Guard. Reattach to the returned durable operation after a
+CLI disconnect; never submit a second deployment to recover an uncertain provider response.
+
+## 4. Bound new requests and tenant volume
+
+Persist endpoint-wide admission first:
+
+```bash
+infercrane admission set coder-production \
+  --max-concurrency 32 \
+  --max-queue 64 \
+  --queue-timeout-ms 5000 \
+  --max-request-bytes 16777216 \
+  --max-output-tokens 8192 \
+  --priorities normal,high \
+  --retry-budget 0
+infercrane admission get coder-production --output json
+```
+
+Tenant quota updates require an admin credential, affect the whole active tenant, and have no read
+endpoint. Record the current reviewed policy externally, set every field, and use a dedicated
+tenant while qualifying:
+
+```bash
+curl -fsS -X PUT "$INFERCRANE_URL/api/v1/tenant/quota" \
+  -H "Authorization: Bearer $INFERCRANE_ADMIN_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "max_deployments": 20,
+    "max_replicas": 40,
+    "max_requests_per_minute": 600
+  }'
+```
+
+Omitted fields decode as zero. Endpoint admission is shared by its authorized tenants and does not
+provide per-tenant queue/concurrency isolation; use separate backend pools when strict noisy-neighbor
+isolation is required. Save the reviewed previous three-field quota document before mutation and
+restore it with the same `PUT --data-binary @previous-quota.json`; never reconstruct it from memory.
+Qualify in a dedicated tenant just after a UTC-minute boundary: send exactly the approved nonzero
+number of requests, require the next request to return `429` before upstream transmission, and
+confirm the audited `quota.update`. Missing 429 or audit evidence blocks opening the endpoint.
+
+## 5. Prove failure handling away from production
+
+The GPU-free local proof first verifies control flow without cost:
+
+```bash
+make demo
+```
+
+It stages an intentionally unready candidate, records a deterministic Guard rejection, verifies the
+active revision remains unchanged, and cleans local fixture state. It does not prove GPU/runtime or
+provider behavior.
+
+For real-environment evidence, create a separate `coder-staging-runtime` deployment and bind it only
+to `coder-staging`. Use a deliberately invalid **candidate revision** there—never invalid production
+configuration and never a second deployment after an uncertain response:
+
+<Warning>
+The next `apply` may provision billable staging capacity before the candidate fails. Before running
+it, approve the selected provider's maximum cost and timeout, capture direct inventory, verify the
+candidate-cleanup procedure and ownership identities, and reserve enough time to watch deletion back
+to the recorded baseline. If any of those conditions is missing, stop after `plan`.
+</Warning>
+
+```bash
+infercrane rollout inspect coder-staging-runtime --output json \
+  > staging-before.json
+infercrane plan staging-bad-candidate.yaml --output json
+infercrane apply staging-bad-candidate.yaml \
+  --idempotency-key coder-staging-known-bad-v1 \
+  --wait
+infercrane rollout inspect coder-staging-runtime --output json
+infercrane explain rollout coder-staging-runtime
+```
+
+The expected outcome is candidate readiness failure or Guard `REJECT`; the staging active revision
+must remain routed. Preserve evidence, then remove only the exact candidate:
+
+```bash
+infercrane rollout reject coder-staging-runtime CANDIDATE_REVISION_ID \
+  --reason 'expected staging failure-path qualification' \
+  --wait
+infercrane rollout inspect coder-staging-runtime --output json
+infercrane orphans --output json
+```
+
+The same paid-resource and cleanup boundary applies to every retry. Reattach to the original durable
+operation and idempotency key; do not submit another candidate because a terminal or client wait
+ended.
+
+## 6. Qualify autoscaling and active-stream drain
+
+Against the exact valid staging combination, start one long SSE request and a bounded AIPerf load in
+separate terminals:
+
+```bash
+curl --no-buffer --dump-header stream.headers --output stream.sse \
+  "$INFERCRANE_URL/v1/chat/completions" \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model":"coder-staging",
+    "messages":[{"role":"user","content":"Count upward continuously."}],
+    "stream":true,
+    "max_tokens":2048
+  }'
+
+infercrane benchmark coder-staging \
+  --requests 200 \
+  --concurrency 32 \
+  --input-tokens 256 \
+  --output-tokens 128 \
+  --output json
+```
+
+While load is active and after it stops, capture:
+
+```bash
+infercrane status coder-staging-runtime --watch
+infercrane explain scaling coder-staging-runtime --output json
+infercrane events coder-staging-runtime --output json
+infercrane inspect coder-staging-runtime --output json
+```
+
+Acceptance requires observed `1 → 2 → 1`, fresh vLLM signals, no capacity above `max=2`, one
+persisted provider identity per replica intent, an intact stream with terminal `data: [DONE]`, one
+request ID with no replay, generation-safe drain, full cooldown/recovery, and canonical direct
+provider inventory returning to baseline after staging cleanup. Missing metrics or real capacity is
+`INCONCLUSIVE`—not permission to promote. The stream/list behavior and provider timing must be
+proven in the exact environment; local fake workers do not qualify it.
+
+## 7. Open production only after real qualification
+
+Run the selected provider's credentialed product gate with an isolated account/project/namespace,
+least-privilege credentials, a fixed run ID, explicit paid-resource approval, and a recorded
+canonical inventory baseline:
+
+```bash
+export INFERCRANE_V2_QUALIFICATION_RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short HEAD)-PROVIDER"
+./scripts/qualify-product.sh PROVIDER --approve-paid-resources
+./scripts/qualify-product.sh report
+```
+
+Replace `PROVIDER` only with the selected maintained gate (`runpod`, `aws`, `gcp`, or `kubernetes`)
+and satisfy that gate's documented credential/network prerequisites first. The exact model commit,
+runtime/container, provider adapter, region, accelerator, network, replica bounds, and InferCrane
+release must match this service. Rerun a disconnected gate with the same run ID; a new ID risks
+duplicate resources. The report must prove readiness, buffered/streaming protocols, cancellation,
+benchmarking, durable recovery, deletion, empty InferCrane orphan state, and provider inventory equal
+to baseline. Local fixtures, Kind, and provider HTTP simulations prove control logic but cannot prove
+GPU readiness, IAM/networking, capacity, billing, or deletion semantics.
+
+Before application traffic:
+
+```bash
+infercrane endpoint inspect coder-production --output json
+infercrane admission get coder-production --output json
+infercrane status coder-runtime
+infercrane request coder-production --message 'Return the word ready.'
+infercrane request inspect REQUEST_ID --output json
+```
+
+Confirm direct provider inventory and retain the qualification report. If real qualification is
+unavailable, keep the endpoint private and describe the combination as experimental; do not market
+it as production-qualified.

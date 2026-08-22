@@ -1,0 +1,159 @@
+---
+title: Approve or reject a production candidate
+description: One fail-closed checklist for quality, performance, streams, recovery, rollback, and provider cleanup evidence.
+sidebarTitle: Production release approval
+---
+
+# Approve or reject a production candidate
+
+There is no one-command production certification. Release approval is a review of immutable,
+persisted evidence for one active revision, one candidate revision, and one exact environment. A
+healthy runtime alone is not approval.
+
+<Warning>
+Candidate creation/provisioning can create billable resources; validation sends the approved fixture
+to active and candidate runtimes; semantic evaluation may process sensitive customer examples in
+your evaluator; promotion changes production traffic; rejection and rollback can delete
+candidate/failed capacity. Before any mutation, approve maximum spend, data handling, provider
+ownership, immutable model/runtime/container identity, staging-only load, and the retained rollback
+revision. Unknown identity, inventory, price, privacy, or qualification is a stop condition.
+</Warning>
+
+## 1. Read-only preflight
+
+```bash
+mkdir -p "release-evidence/$RELEASE_ID"
+evidence="release-evidence/$RELEASE_ID"
+
+infercrane integrations --output json > "$evidence/integrations.json"
+infercrane models inspect "$MODEL_CATALOG_NAME" --output json > "$evidence/model.json"
+infercrane plan candidate.yaml --output json > "$evidence/plan.json"
+infercrane rollout inspect "$DEPLOYMENT" --output json > "$evidence/before.json"
+infercrane orphans --output json > "$evidence/orphans-before.json"
+```
+
+Also capture the selected provider's canonical read-only baseline from
+[release evidence in CI](/runbooks/release-evidence-ci). The plan, integration catalog, and model
+record must agree on provider adapter, compute mode, runtime/version, immutable model commit,
+container digest, accelerator/topology, region, and replica bounds. Local qualification does not
+replace exact real-environment evidence.
+
+## 2. Stage one candidate
+
+Use one stable idempotency key. Do not create another candidate after an uncertain response:
+
+```bash
+infercrane apply candidate.yaml \
+  --idempotency-key "$RELEASE_ID" \
+  --wait
+infercrane rollout inspect "$DEPLOYMENT" --output json > "$evidence/candidate.json"
+```
+
+Record `ACTIVE_REVISION_ID` and `CANDIDATE_REVISION_ID` from that inspection. Reattach to the same
+durable operation on disconnect. If provider identity is uncertain, reconcile persisted identity
+against read-only inventory before retrying.
+
+## 3. Require independent evidence
+
+The release reviewer must collect all applicable rows:
+
+| Evidence | Pass condition |
+| --- | --- |
+| Readiness and identity | Candidate ready; exact immutable model/runtime/provider/GPU identity matches the reviewed plan |
+| Buffered and streaming protocol | OpenAI-compatible response; SSE ends in `[DONE]`; cancellation does not create a replay; required error schema unchanged |
+| Performance | Comparable active/candidate AIPerf workload and tool version; TTFT/latency/throughput/error gates within policy |
+| Semantic quality | Same customer-owned suite and evaluator versions; minimum score and maximum regression pass; representative-data/privacy review recorded |
+| Autoscaling | Matching staging evidence observes bounded `1 → N → 1`, fresh signals, active-stream-safe drain, and no capacity above `max` |
+| Recovery | Provider delay/loss and request uncertainty follow the no-duplicate/no-stream-replay procedure |
+| Rollback | Previous revision still exists, is healthy, and its provider identities are retained through the observation window |
+| Cleanup | InferCrane orphans are empty and canonical direct provider inventory returns to the recorded baseline after rejection/deletion |
+
+Use the exact procedures in [protocol rollout](/runbooks/protocol-rollout),
+[semantic quality](/features/semantic-quality),
+[autoscaling qualification](/features/autoscaling#qualify-scale-up-streaming-drain-and-scale-down),
+and [provider outage recovery](/runbooks/provider-outage). If a row is required by policy and not
+measurable in the exact environment, the result is `WAIT`/`INCONCLUSIVE`, not PASS.
+
+Configure bounded validation and deterministic policy, then collect the persisted result:
+
+```bash
+infercrane rollout policy set "$DEPLOYMENT" \
+  --require-compatibility \
+  --require-synthetic \
+  --require-quality \
+  --auto-rollback \
+  --auto-rollback-window 300 \
+  --validation-max-requests 100 \
+  --validation-max-concurrency 4
+
+infercrane rollout validate "$DEPLOYMENT" \
+  --requests 100 \
+  --concurrency 4 \
+  --acknowledge-validation-cost \
+  --wait
+
+infercrane rollout inspect "$DEPLOYMENT" --output json > "$evidence/guard.json"
+infercrane explain rollout "$DEPLOYMENT" > "$evidence/explanation.txt"
+```
+
+The Guard snapshot must name the same active/candidate pair and explicit policy. It cannot infer
+semantic quality, provider billing, active-stream completion, autoscaling recovery, or inventory
+cleanup from readiness.
+
+## 4. Decide
+
+Promote only when the current decision is `ACCEPT`, every required external checklist row passes,
+and the rollback revision is retained:
+
+```bash
+infercrane rollout promote "$DEPLOYMENT" "$CANDIDATE_REVISION_ID" \
+  --reason "approved release $RELEASE_ID" \
+  --wait
+infercrane status "$DEPLOYMENT" --watch
+```
+
+Keep the bounded automatic observation window. Run a non-duplicated production smoke request,
+inspect its request ID, and retain the stream to terminal `[DONE]`. If the monitor rejects, verify
+that the prior revision and router generation are restored before cleanup.
+
+If Guard is `REJECT`, record the evidence before removing only the candidate:
+
+```bash
+infercrane rollout reject "$DEPLOYMENT" "$CANDIDATE_REVISION_ID" \
+  --reason "release $RELEASE_ID rejected" \
+  --wait
+```
+
+If a regression appears after promotion and automatic rollback has not restored service:
+
+```bash
+infercrane rollout rollback "$DEPLOYMENT" "$ACTIVE_REVISION_ID" \
+  --reason "post-promotion regression in $RELEASE_ID" \
+  --wait
+infercrane status "$DEPLOYMENT" --watch
+infercrane explain rollout "$DEPLOYMENT"
+```
+
+Never delete the whole deployment to recover a release.
+
+## 5. Close the evidence bundle
+
+```bash
+infercrane rollout inspect "$DEPLOYMENT" --output json > "$evidence/final-rollout.json"
+infercrane deployments --output json > "$evidence/deployments.json"
+infercrane orphans --output json > "$evidence/orphans-after.json"
+```
+
+Capture canonical provider inventory again and compare it with the baseline. Promotion may retain
+the explicitly documented rollback capacity only for its bounded monitor; rejection/cleanup must
+not leave candidate-only resources. Sign an Inference Passport only after all required evidence is
+complete. A passport attests to the bundle—it cannot convert a missing row into approval.
+
+## Reviewer outcome
+
+- **APPROVE**: Guard `ACCEPT`, every applicable checklist row passes, rollback is ready, identities match.
+- **REJECT**: a measured readiness, protocol, quality, performance, recovery, or policy regression exists.
+- **WAIT**: evidence is missing, stale, incomparable, unavailable, or the provider outcome is uncertain.
+
+Record the outcome, reviewer, timestamp, exact revision IDs, and evidence paths. No LLM decides
+promotion.

@@ -1,0 +1,155 @@
+---
+title: Fail-closed release evidence in CI
+description: Capture request, operation, revision, and provider outcomes without parsing human CLI output.
+sidebarTitle: Release evidence in CI
+---
+
+# Build a fail-closed evidence bundle
+
+There is no one-command production certification. CI can assemble a reproducible bundle from stable
+JSON surfaces, while real provider inventory remains an adapter-specific external assertion.
+
+<Warning>
+`apply` or candidate provisioning can create billable resources, validation sends inference, and
+promotion changes traffic. Use a staging environment, pre-approved maximum cost, non-sensitive
+fixtures, and an exact qualified serving combination. Run read-only plan and compatibility checks
+before the first mutation.
+</Warning>
+
+```bash
+set -eu
+evidence="release-evidence/${GIT_SHA}"
+mkdir -p "$evidence"
+
+infercrane integrations --output json > "$evidence/integrations.json"
+infercrane plan release.yaml --output json > "$evidence/plan.json"
+
+infercrane apply release.yaml \
+  --idempotency-key "release-${GIT_SHA}" \
+  --output json > "$evidence/submission.json"
+operation_id=$(jq -er '.operation.id' "$evidence/submission.json")
+
+infercrane operation watch "$operation_id" \
+  --wait-timeout 30m \
+  --output json > "$evidence/operation.json"
+jq -e '.status == "succeeded"' "$evidence/operation.json" >/dev/null
+
+infercrane inspect "$DEPLOYMENT" --output json > "$evidence/deployment.json"
+infercrane rollout inspect "$DEPLOYMENT" --output json > "$evidence/rollout.json"
+infercrane orphans --output json > "$evidence/orphans.json"
+
+curl -fsS -D "$evidence/request.headers" \
+  -o "$evidence/response.json" \
+  "$INFERCRANE_URL/v1/chat/completions" \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d @qualification-request.json
+request_id=$(awk 'BEGIN{IGNORECASE=1} /^X-Request-Id:/{gsub("\\r",""); print $2}' \
+  "$evidence/request.headers")
+test -n "$request_id"
+infercrane request inspect "$request_id" --output json \
+  > "$evidence/request.json"
+```
+
+Do not parse human CLI output. Preserve stderr separately if progress is needed; JSON stdout must
+remain one document. The pipeline must fail when any of these is missing or inconsistent:
+
+- operation ID and terminal `succeeded` state;
+- deployment, active/candidate revision, serving-plan, and immutable model/runtime identity;
+- request ID, status, selected binding, revision/target where exposed, and content-free evidence;
+- Release Guard decision for the same active/candidate pair when promotion is intended;
+- one persisted provider identity per lifecycle-managed replica intent;
+- zero unexplained InferCrane orphans; and
+- direct provider inventory outcome from the selected adapter guide.
+
+InferCrane cannot provide one provider-neutral command proving account inventory. Add the RunPod,
+AWS, GCP, or Kubernetes read-only inventory command below as a required CI step. Capture a canonical
+baseline before candidate creation and another result after rejection/deletion; a successful API
+call plus byte-equal canonical inventories is the cleanup gate. An empty result is valid only when
+the command succeeded. Unknown, stale, unauthorized, malformed, or incomplete inventory fails
+closed. Do not promote when an
+operation is only `waiting`, a request lacks correlation, Guard is `WAIT`/`REJECT`/`INCONCLUSIVE`, or
+the provider outcome cannot be proven.
+
+<Tabs>
+  <Tab title="RunPod">
+    ```bash
+    runpod_key=$(tr -d '\r\n' < "$RUNPOD_KEY_FILE")
+    curl -fsS -H "Authorization: Bearer $runpod_key" \
+      https://rest.runpod.io/v1/pods |
+      jq -S '[.[] | select((.name // "") | startswith("infercrane-")) |
+        {id,name,desiredStatus,machineId}] | sort_by(.id)' \
+      > "$evidence/provider-inventory.json"
+    curl -fsS -H "Authorization: Bearer $runpod_key" \
+      'https://rest.runpod.io/v1/endpoints?includeWorkers=true' |
+      jq -S '[.[] | select((.name // "") | startswith("infercrane-")) |
+        {id,name,workersMin,workersMax,
+         active_workers:([.workers[]? | select(.desiredStatus != "EXITED")] | length)}] |
+        sort_by(.id)' \
+      > "$evidence/provider-endpoints.json"
+    unset runpod_key
+    ```
+  </Tab>
+  <Tab title="AWS EC2">
+    ```bash
+    read -r AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN <<EOF
+    $(aws sts assume-role \
+      --role-arn "$INFERCRANE_AWS_ROLE_ARN" \
+      --role-session-name infercrane-release-inventory \
+      --external-id "$INFERCRANE_AWS_EXTERNAL_ID" \
+      --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
+      --output text --no-cli-pager)
+    EOF
+    export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+    aws ec2 describe-instances --region "$INFERCRANE_AWS_REGION" \
+      --filters Name=tag:infercrane:managed,Values=true \
+        Name=instance-state-name,Values=pending,running,stopping \
+      --query 'Reservations[].Instances[].{id:InstanceId,state:State.Name,external_key:Tags[?Key==`infercrane:external-key`]|[0].Value}' \
+      --output json --no-cli-pager | jq -S 'sort_by(.id)' \
+      > "$evidence/provider-inventory.json"
+    unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+    ```
+  </Tab>
+  <Tab title="GCP Compute">
+    ```bash
+    gcloud compute instances list \
+      --project "$INFERCRANE_GCP_PROJECT" \
+      --filter='labels.infercrane-managed=true AND
+        (status=PROVISIONING OR status=STAGING OR status=RUNNING OR status=STOPPING)' \
+      --format=json --quiet |
+      jq -S '[.[] | {id,name,status,zone,labels}] | sort_by(.id)' \
+      > "$evidence/provider-inventory.json"
+    ```
+  </Tab>
+  <Tab title="Kubernetes or KServe">
+    ```bash
+    kubectl --context "$INFERCRANE_KUBERNETES_CONTEXT" \
+      --namespace "$INFERCRANE_KUBERNETES_NAMESPACE" \
+      get deployment,service \
+      -l app.kubernetes.io/managed-by=infercrane \
+      -o json | jq -S '[.items[] | {apiVersion,kind,metadata:{name:.metadata.name,uid:.metadata.uid}}] | sort_by(.kind,.metadata.name)' \
+      > "$evidence/provider-inventory.json"
+
+    if kubectl --context "$INFERCRANE_KUBERNETES_CONTEXT" \
+      api-resources --api-group serving.kserve.io -o name |
+      grep -qx inferenceservices; then
+      kubectl --context "$INFERCRANE_KUBERNETES_CONTEXT" \
+        --namespace "$INFERCRANE_KUBERNETES_NAMESPACE" \
+        get inferenceservices.serving.kserve.io \
+        -l app.kubernetes.io/managed-by=infercrane \
+        -o json | jq -S '[.items[] | {apiVersion,kind,metadata:{name:.metadata.name,uid:.metadata.uid}}] | sort_by(.metadata.name)' \
+        > "$evidence/provider-kserve-inventory.json"
+    fi
+    ```
+  </Tab>
+</Tabs>
+
+These commands list every InferCrane-managed resource visible to the configured account/project or
+namespace, not only the current release. In a shared environment, compare canonical before/after
+files; do not require global zero and do not delete another deployment's resource. For RunPod,
+compare both files. For Kubernetes, compare the KServe file only when the CRD existed in both runs.
+Credential or permission failure must terminate CI rather than producing an empty success artifact.
+
+Keep the bundle with the release artifact or issue an [Inference Passport](/features/inference-passports)
+after all required evidence exists. A passport signs evidence; it does not turn missing evidence into
+a pass.

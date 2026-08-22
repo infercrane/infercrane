@@ -62,6 +62,13 @@ infercrane doctor --aws
 
 ## Deploy
 
+<Warning>
+The `deploy` command below can create a billable EC2 instance. InferCrane currently reports AWS
+price as unknown, and the adapter has only hermetic contract evidence—not real AWS GPU
+qualification. Run `doctor` and `plan` first, obtain the required quota, and use a disposable test
+account or explicit cost approval before proceeding.
+</Warning>
+
 The requested region and GPU must exactly match the configured, qualified instance profile:
 
 ```bash
@@ -83,9 +90,9 @@ Closing the terminal does not stop provisioning. Resume with the operation ID pr
 Deletion terminates only instances carrying InferCrane ownership tags and the persisted replica key.
 
 For the simulated portable-runtime path, apply
-[`examples/sglang.yaml`](https://github.com/infercrane/infercrane/blob/main/examples/sglang.yaml) or
+`examples/sglang.yaml` or
 replace the placeholder image in
-[`examples/custom-oci.yaml`](https://github.com/infercrane/infercrane/blob/main/examples/custom-oci.yaml).
+`examples/custom-oci.yaml` in the private-preview repository.
 Real GPU compatibility remains a deferred manual qualification gate.
 
 ## Security and accounting behavior

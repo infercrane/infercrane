@@ -13,7 +13,16 @@ The local stack uses GPU-free fake vLLM workers. It proves application and lifec
 model quality, GPU performance, or real-provider compatibility.
 </Info>
 
-## Prove the control plane locally first
+<Warning>
+Local proof and teammate access are two separate workflows. The quickstart binds a loopback fixture
+with the public development credential `infercrane`; sharing, tunneling, or port-forwarding that
+endpoint is unsupported. To serve a teammate without provisioning new GPU capacity, connect an
+already-operated upstream in a customer-owned TLS environment and issue a tenant-scoped credential.
+Follow [Share a development endpoint safely](/runbooks/shared-development); do not reuse the local
+fixture or its credential.
+</Warning>
+
+## Fast proof: one command
 
 From a repository checkout, one command runs the local product proof and cleans up its isolated
 Docker project:
@@ -28,6 +37,13 @@ Guard rejection, verifies the active revision did not change, rejects the candid
 temporary state. This proves the application and lifecycle loop locally; it does not replace the
 model-to-endpoint deployment path or claim GPU/provider qualification.
 
+<Note>
+Choose either the one-command proof above or the manual tour below. `make demo` already starts an
+isolated stack, exercises the workflow, and tears that stack down; you do not need to run both paths.
+</Note>
+
+## Manual tour: inspect each step
+
 ## Prerequisites
 
 - Git
@@ -35,11 +51,17 @@ model-to-endpoint deployment path or claim GPU/provider qualification.
 - Port `18000` available
 
 <Steps>
-  <Step title="Clone InferCrane">
+  <Step title="Open the private-preview repository">
+    InferCrane is currently distributed to approved preview users. Authenticate GitHub CLI with the
+    invited account, then clone the repository:
+
     ```bash
-    git clone https://github.com/infercrane/infercrane.git
+    gh auth status
+    gh repo clone infercrane/infercrane
     cd infercrane
     ```
+
+    If you have not received repository access, [join the private preview](https://infercrane.com/#private-preview).
   </Step>
 
   <Step title="Start the local stack">
@@ -48,11 +70,53 @@ model-to-endpoint deployment path or claim GPU/provider qualification.
     curl -fsS http://127.0.0.1:18000/readyz
     ```
 
+    If Docker reports that port `18000` is already allocated, identify the owner before changing
+    anything:
+
+    ```bash
+    docker compose ps
+    lsof -nP -iTCP:18000 -sTCP:LISTEN
+    ```
+
+    If it is an earlier InferCrane stack from this checkout, `docker compose down` stops it without
+    deleting the named PostgreSQL volume, then retry `up`. If another application owns the port,
+    leave it alone and choose a different host port:
+
+    ```bash
+    export INFERCRANE_DEV_PORT=18001
+    docker compose up --build -d
+    curl -fsS "http://127.0.0.1:${INFERCRANE_DEV_PORT}/readyz"
+    ```
+
+    Replace `18000` with the selected port in the remaining manual-tour URLs. Do not use
+    `docker compose down --volumes` unless you intentionally want to erase local InferCrane state.
+
+    If the port opens but `/readyz` does not become healthy, inspect the existing containers before
+    retrying setup:
+
+    ```bash
+    docker compose ps
+    docker compose logs --tail 100 postgres
+    docker compose logs --tail 100 infercrane
+    curl -i "http://127.0.0.1:${INFERCRANE_DEV_PORT:-18000}/livez"
+    curl -i "http://127.0.0.1:${INFERCRANE_DEV_PORT:-18000}/readyz"
+    ```
+
+    `/livez` proves the process is running; `/readyz` additionally requires PostgreSQL. Fix the first
+    concrete container, configuration, or migration error, then rerun `docker compose up --build -d`.
+    That retry reuses the same named volume and does not create provider resources. Never delete the
+    PostgreSQL volume, edit migration-ledger rows, or start a paid deployment to repair a local
+    readiness failure. If logs show a migration checksum, gap, or newer-schema error, stop and follow
+    [Upgrade and compatibility](/upgrade) rather than retrying destructively.
+
     The stack includes PostgreSQL, InferCrane, two fake workers, and a development router. The
     development API key is `infercrane`; production mode rejects that default.
   </Step>
 
   <Step title="Send a request">
+    The CLI and cURL examples require no language package. For the Python example, install the
+    official OpenAI client in your active virtual environment with `python -m pip install openai`.
+
     <CodeGroup>
     ```bash InferCrane CLI
     docker compose exec infercrane \
@@ -142,6 +206,9 @@ model-to-endpoint deployment path or claim GPU/provider qualification.
   <Card title="Connect an endpoint" icon="plug" href="/showcase/connect-existing">
     Observe an existing vLLM, LiteLLM, or OpenAI-compatible endpoint first.
   </Card>
+  <Card title="Share with a teammate" icon="users" href="/runbooks/shared-development">
+    Use a separate TLS-protected environment and scoped credentials; never expose the local fixture.
+  </Card>
   <Card title="Connect a model API" icon="cloud" href="/features/external-capacity">
     Register OpenRouter or another OpenAI-compatible API without enabling traffic or spend.
   </Card>
@@ -152,8 +219,42 @@ model-to-endpoint deployment path or claim GPU/provider qualification.
 
 ## Before creating real infrastructure
 
-The Homebrew formula and release archives are prepared but not yet publicly released. Until the
-release package is published, build the CLI from source:
+### Do not expose the local fixture as a team service
+
+The Compose quickstart binds a development control plane and uses the known development credential
+`infercrane`. It is not a supported shared-access mode. Do not port-forward it, publish it through a
+tunnel, send the credential to a teammate, or treat loopback fake workers as a shared model.
+
+To collaborate without creating paid infrastructure, keep each developer's fixture local and share
+the same version-controlled DeploymentSpec and qualification evidence. If the team needs one shared
+endpoint, use a customer-owned, TLS-protected environment with tenant-scoped credentials and network
+policy. Follow [Share a development endpoint safely](/runbooks/shared-development) for the complete
+deployment, credential, qualification, request, and revocation path. An existing in-region
+vLLM/SGLang service can be connected `observe-only` without provisioning capacity; see
+[Connect existing inference](/showcase/connect-existing). Otherwise stop after `plan` until a
+provider budget and exact real-environment qualification are approved.
+
+The local fixture cannot be promoted into a shared environment: its workers do not contain the
+model, runtime, accelerator, or provider settings of a real deployment. Recreate the intended
+combination explicitly and stop before mutation if its evidence is incomplete:
+
+```bash
+infercrane integrations --output json
+infercrane models inspect MODEL_CATALOG_NAME --output json
+infercrane plan MODEL_REPOSITORY \
+  --cloud PROVIDER \
+  --gpu ACCELERATOR \
+  --output json
+```
+
+The three results must agree on the adapter, runtime/version, compute mode, immutable model,
+accelerator, environment, and required real-system qualification. The local smoke result is only
+control-flow evidence and does not satisfy any missing row. Follow the selected
+[provider guide](/provider-setup) and [exact-combination policy](/compatibility#check-one-exact-serving-combination)
+before `deploy`.
+
+The Homebrew formula and release archives are prepared but not yet publicly released. Approved
+preview users can build the CLI from their authenticated repository checkout:
 
 ```bash
 go build -o ./bin/infercrane ./cmd/infercrane

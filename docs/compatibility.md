@@ -23,6 +23,63 @@ are separate fields. AWS ASG/EKS/SageMaker/Bedrock, GCP MIG/GKE/Vertex, and Core
 independent registered boundaries but remain non-executable and deferred. Advanced KServe/llm-d/
 Dynamo topologies and unregistered external adapters remain unqualified.
 
+## Check one exact serving combination
+
+There is no universal “supported model” flag. Qualification is the intersection of adapter,
+runtime, compute mode, runtime version, immutable model artifact, accelerator, and real evidence:
+
+```bash
+infercrane integrations --output json
+infercrane models inspect MODEL_CATALOG_NAME --output json
+infercrane plan MODEL_REPOSITORY --cloud PROVIDER --gpu ACCELERATOR --output json
+```
+
+- `integrations` proves which provider/runtime/mode combinations are registered and locally or
+  externally qualified.
+- `models inspect` exposes reviewed immutable configuration and license evidence, not GPU fit or
+  performance.
+- `plan` checks the requested serving intent without allocating capacity, but cannot manufacture
+  real provider, model-load, or benchmark evidence.
+
+If no release evidence names the complete combination, treat it as **unqualified** and run the
+documented real-infrastructure gate. Do not combine several partial “implemented” rows into a
+production-support claim.
+
+## Reconcile a partial declarative apply
+
+`apply` and the control API persist desired state plus a durable operation before provider mutation.
+Automation must preserve both the exact desired document and its idempotency key:
+
+```bash
+infercrane plan release.yaml --output json
+infercrane apply release.yaml \
+  --idempotency-key release-2026-08-22 \
+  --output json
+
+infercrane operation inspect OPERATION_ID --output json
+infercrane operation watch OPERATION_ID --wait-timeout 15m --output json
+infercrane inspect DEPLOYMENT --output json
+infercrane events DEPLOYMENT --output json
+infercrane orphans --output json
+```
+
+If the API response is lost or the watcher disconnects, do not submit a new intent. Query the
+operation. Retrying is safe only with the byte-equivalent desired state and original idempotency key;
+a conflicting intent must fail rather than reuse the key. The worker re-observes deterministic
+provider identity and adopts a matching resource before create.
+
+For an update, the active revision remains routed while the immutable candidate converges. A failed
+candidate is rejected and cleaned independently; it does not authorize in-place mutation of active
+capacity. For a create/update whose provider outcome is ambiguous, compare persisted resource ID,
+intent digest, ownership tags, revision, and ordinal with direct provider inventory. Exact match may
+resume; proven absence may recreate from the original intent; mismatch or incomplete inventory
+stops all create/delete work for manual ownership recovery.
+
+CLI, generated SDK, Terraform, and raw API callers share this same operation contract. An
+experimental client surface does not weaken server-side idempotency or qualify a provider. See
+[Provisioning recovery](/features/provisioning#reconcile-an-interrupted-create) and the
+[provider outage runbook](/runbooks/provider-outage).
+
 The OpenAI-compatible surface is contract-tested for model listing and chat completions. New API
 fields should pass through unless InferCrane must interpret them. Removing or changing an accepted
 field requires a deprecation period after `1.0`.

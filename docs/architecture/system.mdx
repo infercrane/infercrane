@@ -1,162 +1,110 @@
 ---
 title: Architecture
-description: InferCrane's persistent control plane, database-free inference path, and provider boundaries.
+description: InferCrane's persistent control plane, database-free inference path, and replaceable provider and runtime boundaries.
 ---
 
 # Architecture
 
-InferCrane separates durable deployment decisions from latency-sensitive inference routing. PostgreSQL is authoritative for the control plane; an atomic in-memory snapshot is authoritative for each gateway replica's request path.
+InferCrane separates durable deployment decisions from latency-sensitive inference routing.
+PostgreSQL is authoritative for control-plane state. An atomic in-memory snapshot is authoritative
+for each gateway replica's request path.
 
-<img src="/images/diagrams/control-data-plane.svg" alt="Animated architecture diagram separating InferCrane's durable control plane from its database-free inference data plane." />
+<Tabs>
+  <Tab title="Request path">
+    <div className="ic-flow not-prose" aria-label="Application request flow">
+      <div className="ic-node"><span className="ic-node-label">01 · application</span><strong>OpenAI client</strong></div>
+      <span className="ic-flow-arrow" aria-hidden="true">→</span>
+      <div className="ic-node ic-node-accent"><span className="ic-node-label">02 · stable identity</span><strong>logical endpoint</strong></div>
+      <span className="ic-flow-arrow" aria-hidden="true">→</span>
+      <div className="ic-node"><span className="ic-node-label">03 · memory</span><strong>route snapshot</strong></div>
+      <span className="ic-flow-arrow" aria-hidden="true">→</span>
+      <div className="ic-node"><span className="ic-node-label">04 · qualified</span><strong>runtime binding</strong></div>
+    </div>
 
-```mermaid
-flowchart LR
-  subgraph clients[Clients]
-    CLI[InferCrane CLI]
-    DASH[Separate web console]
-    DELIVERY[SDK · Terraform · GitHub]
-    SDK[Inference client]
-  end
+    The gateway authenticates the request, resolves the logical model alias from one atomic route
+    snapshot, and streams to a ready binding. **No PostgreSQL lookup occurs in this routing
+    decision.**
+  </Tab>
 
-  subgraph infercrane[InferCrane]
-    API[Authenticated control API]
-    OPS[Leased operation worker]
-    DB[(PostgreSQL)]
-    REC[Reconciler]
-    SNAP[Atomic route snapshot]
-    GW[Gateway]
-    ROUTER[Replica router generation]
-    COMPOSE[Composition registry]
-  end
+  <Tab title="Durable change">
+    <div className="ic-flow not-prose" aria-label="Durable deployment change flow">
+      <div className="ic-node"><span className="ic-node-label">01 · intent</span><strong>CLI / API</strong></div>
+      <span className="ic-flow-arrow" aria-hidden="true">→</span>
+      <div className="ic-node ic-node-accent"><span className="ic-node-label">02 · source of truth</span><strong>PostgreSQL</strong></div>
+      <span className="ic-flow-arrow" aria-hidden="true">→</span>
+      <div className="ic-node"><span className="ic-node-label">03 · fenced</span><strong>leased operation</strong></div>
+      <span className="ic-flow-arrow" aria-hidden="true">→</span>
+      <div className="ic-node"><span className="ic-node-label">04 · replaceable</span><strong>adapter</strong></div>
+    </div>
 
-  subgraph external[External systems]
-    ELASTIC[Elastic backend adapter]
-    NATIVE[Serverless backend adapter]
-    V1[Runtime replica]
-    V2[Runtime replica]
-    EXTGW[User-managed gateway]
-    SANDBOX[External sandbox]
-    TRAIN[Training pipeline / registry]
-  end
+    Intent is committed before provider work begins. A leased worker resumes pending operations
+    after process failure and reconciles the observed result into persisted state.
+  </Tab>
 
-  CLI --> API --> DB
-  DASH --> API
-  DELIVERY --> API
-  DB --> OPS
-  OPS --> ELASTIC
-  OPS --> NATIVE
-  DB --> REC
-  REC --> V1
-  REC --> V2
-  REC --> ROUTER
-  REC --> SNAP
-  API --> COMPOSE
-  COMPOSE --> EXTGW
-  COMPOSE --> SANDBOX
-  COMPOSE --> TRAIN
-  SDK --> GW --> SNAP --> ROUTER
-  SANDBOX -. endpoint-scoped inference token .-> GW
-  TRAIN -. signed artifact handoff .-> API
-  ROUTER --> V1
-  ROUTER --> V2
-  GW -. buffered accounting .-> DB
-```
+  <Tab title="Recovery">
+    <div className="ic-flow not-prose" aria-label="Control-plane recovery flow">
+      <div className="ic-node"><span className="ic-node-label">01 · failure</span><strong>client disconnect</strong></div>
+      <span className="ic-flow-arrow" aria-hidden="true">→</span>
+      <div className="ic-node ic-node-accent"><span className="ic-node-label">02 · durable</span><strong>persisted operation</strong></div>
+      <span className="ic-flow-arrow" aria-hidden="true">→</span>
+      <div className="ic-node"><span className="ic-node-label">03 · ownership</span><strong>lease transfer</strong></div>
+      <span className="ic-flow-arrow" aria-hidden="true">→</span>
+      <div className="ic-node"><span className="ic-node-label">04 · idempotent</span><strong>adopt resource</strong></div>
+    </div>
 
-## Control plane
+    A new fenced worker continues from persisted state. Provider resource identity lets it adopt a
+    successful remote create whose response was lost instead of creating a duplicate.
+  </Tab>
+</Tabs>
 
-The CLI, separately deployed web console, generated SDKs, Terraform provider, and GitHub delivery action use the
-same authenticated API. None owns provider resources or reads PostgreSQL. PostgreSQL stores desired
-and observed deployment state, immutable revisions, replicas, operations, events, policy
-evaluations, and bounded measurements. A leased worker resumes pending provider work after process
-failure and reconciles results back into persisted state.
+## Control plane and data plane
 
-External ownership stays explicit and replaceable behind narrow adapters:
+| Plane | Owns | Critical property |
+| --- | --- | --- |
+| Control | desired and observed state, revisions, operations, policy, evidence | durable, restart-safe, auditable |
+| Data | authentication, admission, route snapshot, streaming proxy, bounded accounting | database-free hot path |
 
-- An elastic backend provisions and deletes replica infrastructure.
-- A provider-native serverless backend owns worker allocation and scale-to-zero.
-- An artifact resolver identifies and transfers immutable model artifacts.
-- A benchmark runner generates load and returns reproducible evidence.
-- A composition registry describes replaceable gateway, sandbox, and training handoff contracts
-  without claiming lifecycle ownership of those external systems.
+The CLI, separately deployed web console, generated SDKs, Terraform provider, and GitHub delivery
+action use the same authenticated API. None reads PostgreSQL directly or owns provider resources.
 
-InferCrane does not replace any of them with a general scheduler or workflow engine. The process
-composes registered elastic, serverless, external-target, runtime, artifact, and benchmark adapters.
-RunPod, AWS EC2, and Kubernetes are current infrastructure adapters with different qualification
-states; vLLM, SGLang, and custom OCI are current runtime profiles. Durable algorithms do not select
-implementations with provider conditionals; [qualification is separate from registration](/adr/0009-qualified-support-and-backend-registration).
+Each horizontally scaled gateway process owns its loopback router processes and deterministic
+ports. Gateway instances share PostgreSQL state, never another instance's local router.
 
-## A modular system, not a bundled stack
+## Replaceable contracts
 
-Users select a serving plan; adapters translate it into infrastructure-specific work. Core lifecycle
-state does not depend on a RunPod, AWS, Kubernetes, vLLM, SGLang, or gateway-specific domain model.
+Core lifecycle state does not depend on RunPod, AWS, Kubernetes, vLLM, SGLang, or a specific
+gateway. Users select a serving plan; adapters translate it into infrastructure-specific work and
+report capabilities and qualification evidence separately.
 
-```mermaid
-flowchart TB
-  INTENT[Endpoint · environment · serving intent]
-  CORE[InferCrane core<br/>desired state · operations · revisions · evidence]
-  INTENT --> CORE
-
-  CORE --> INFRA{Infrastructure contract}
-  CORE --> RUNTIME{Runtime contract}
-  CORE --> ROUTE{Route type}
-  CORE --> ARTIFACT{Artifact resolver}
-  CORE --> BENCH{Benchmark runner}
-  CORE --> COMPOSE{Composition contract}
-
-  INFRA --> AWS[AWS EC2]
-  INFRA --> RP[RunPod]
-  INFRA --> K8S[Kubernetes]
-  RUNTIME --> VLLM[vLLM]
-  RUNTIME --> SGL[SGLang]
-  RUNTIME --> OCI[Custom OCI]
-  ROUTE --> NATIVE[InferCrane-managed replicas]
-  ROUTE --> SL[Provider-native serverless]
-  ROUTE --> EXT[Adopted or governed external target]
-  ARTIFACT --> HF[Hugging Face / Xet]
-  BENCH --> AIP[AIPerf]
-  COMPOSE --> LLMGW[LiteLLM or another gateway]
-  COMPOSE --> SBX[E2B · Modal · Kubernetes sandbox]
-  COMPOSE --> TRN[MLflow · Kubeflow · external training]
-```
-
-| Layer | InferCrane owns | Integrated system owns |
+| Boundary | InferCrane owns | Integrated system owns |
 | --- | --- | --- |
 | Infrastructure | intent, durable identity, retries, reconciliation, cleanup evidence | compute allocation and provider API semantics |
 | Runtime | capability contract, immutable configuration, readiness qualification | inference engine and model execution |
-| Gateway or external target | stable endpoint identity, admission, policy, request evidence | optional protocol translation and its provider credentials |
+| Gateway or external target | stable endpoint identity, admission, policy, request evidence | optional protocol translation and provider credentials |
 | Artifact | immutable model identity and cache observations | transfer and provider-native storage primitives |
 | Benchmark | reproduction record, comparison, policy input | load generation and raw measurement |
-| Sandbox composition | endpoint-scoped, expiring inference identity and content-free reference metadata | isolation, commands, files, networking, snapshots, and execution lifecycle |
-| Training composition | signature verification, immutable artifact lineage, and revision attachment | datasets, training jobs, registry availability, and checkpoint storage |
+| Sandbox | endpoint-scoped, expiring inference identity and content-free reference metadata | isolation, commands, files, networking, and execution lifecycle |
+| Training | signature verification, immutable artifact lineage, and revision attachment | datasets, jobs, registry availability, and checkpoint storage |
 
-A user-managed LiteLLM deployment, for example, can be connected as an OpenAI-compatible external
-gateway. InferCrane does not bundle or fork LiteLLM: it retains endpoint identity and operational
-evidence while LiteLLM retains provider translation and its own configuration. See the
+A user-managed LiteLLM deployment, for example, is connected as an OpenAI-compatible external
+gateway. InferCrane does not bundle or fork LiteLLM: InferCrane retains endpoint identity and
+operational evidence while LiteLLM retains provider translation and configuration. See the
 [gateway and sandbox showcase](/showcase/gateways-and-sandboxes).
-
-## Data plane
-
-An OpenAI-compatible request resolves the logical model alias from an atomic route snapshot. For
-standalone replica runtimes, it then passes to an instance-owned vLLM Router generation and a
-healthy worker. Provider-native Serverless and governed external targets remain explicit route
-types. No PostgreSQL lookup occurs in that routing decision.
-
-Each horizontally scaled gateway process owns its loopback router processes and deterministic ports. Gateway instances share PostgreSQL state, never another instance's local router.
 
 ## Request lifecycle
 
 <Steps>
-  <Step title="Authenticate and validate">
-    The gateway authenticates the bearer token, validates the OpenAI request, and resolves the requested deployment alias.
+  <Step title="Authenticate and admit">
+    The gateway authenticates the bearer token, validates the protocol request, applies budgets and quotas, and resolves the endpoint alias.
   </Step>
   <Step title="Read one route snapshot">
     The route directory returns a ready generation without network or database I/O.
   </Step>
-  <Step title="Route to a replica">
-    vLLM Router applies the persisted strategy to its healthy standalone vLLM endpoints.
+  <Step title="Route to a binding">
+    A standalone runtime, provider-native serverless endpoint, or governed external target remains an explicit route type.
   </Step>
-  <Step title="Stream without a write deadline">
-    The gateway proxies the upstream response. Streaming responses are not constrained by the ordinary server write timeout.
+  <Step title="Stream safely">
+    The gateway propagates cancellation and does not constrain streaming responses with the ordinary server write timeout.
   </Step>
   <Step title="Record bounded telemetry">
     Request accounting and normalized measurements enter bounded buffers and persist outside the routing decision.
@@ -165,13 +113,16 @@ Each horizontally scaled gateway process owns its loopback router processes and 
 
 ## Safe route changes
 
-The reconciler probes worker health and served-model identity, calculates membership, starts a candidate router generation, and only then publishes a new snapshot. Scale-down fences routing and drains the worker before provider termination. Failed candidates never replace the last healthy route.
+The reconciler probes worker health and served-model identity, calculates membership, starts a
+candidate router generation, and only then publishes a new snapshot. Scale-down fences routing and
+drains the worker before provider termination. Failed candidates never replace the last healthy
+route.
 
 <CardGroup cols={2}>
   <Card title="System invariants" icon="lock" href="/architecture/invariants">
     Read the rules every implementation change must preserve.
   </Card>
-  <Card title="Architecture decisions" icon="landmark" href="/adr/index">
-    Follow the reasoning behind persistence, tenancy, revisions, and operation execution.
+  <Card title="Provider contract" icon="arrows-rotate" href="/architecture/provider-contract">
+    See how idempotency, adoption, inventory, and qualification keep providers replaceable.
   </Card>
 </CardGroup>

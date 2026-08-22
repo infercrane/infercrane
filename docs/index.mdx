@@ -6,10 +6,10 @@ mode: wide
 ---
 
 <div className="ic-hero not-prose">
-  <div className="ic-kicker"><span className="ic-status-dot"></span> Open-source inference control plane</div>
+  <div className="ic-kicker"><span className="ic-status-dot"></span> Private-preview inference control plane</div>
   <div className="ic-actions">
-    <a className="ic-button ic-button-primary" href="/quickstart">Start the quickstart <span aria-hidden="true">→</span></a>
-    <a className="ic-button ic-button-secondary" href="https://github.com/infercrane/infercrane">View on GitHub <span aria-hidden="true">↗</span></a>
+    <a className="ic-button ic-button-primary" href="/quickstart">Start the local tour <span aria-hidden="true">→</span></a>
+    <a className="ic-button ic-button-secondary" href="https://infercrane.com/#private-preview">Join private preview <span aria-hidden="true">↗</span></a>
   </div>
   <div className="ic-proof">
     <span>Model to endpoint</span>
@@ -23,105 +23,72 @@ mode: wide
 infercrane deploy mistralai/Mistral-7B-Instruct-v0.3 \
   --name support-production
 
-# The operation continues if this terminal disconnects.
+# Safe to close: the operation is persisted by the control plane.
 infercrane status support-production --watch
 ```
 
-```bash Send a streaming request
-infercrane request support-production \
-  --message "Summarize this incident." \
-  --stream
-```
-
-Build a deployment from a model or custom OCI workload and expose one OpenAI-compatible logical
-endpoint. Durable control-plane operations provision, reconcile, scale, and safely replace workers
-behind it. If inference already exists, adopt it later without migrating first. Providers and
-runtimes integrate through explicit contracts; Kubernetes is not required.
+InferCrane turns a model or immutable OCI workload into one OpenAI-compatible logical endpoint.
+Durable operations provision, reconcile, scale, and safely replace workers behind it. Already
+running inference? Connect it in observe-only mode without migrating or transferring ownership.
 
 <div className="ic-flow not-prose" aria-label="InferCrane request path">
   <div className="ic-node"><span className="ic-node-label">request</span><strong>OpenAI client</strong></div>
   <span className="ic-flow-arrow" aria-hidden="true">→</span>
   <div className="ic-node ic-node-accent"><span className="ic-node-label">stable identity</span><strong>endpoint</strong></div>
   <span className="ic-flow-arrow" aria-hidden="true">→</span>
-  <div className="ic-node"><span className="ic-node-label">policy</span><strong>route generation</strong></div>
+  <div className="ic-node"><span className="ic-node-label">atomic policy</span><strong>route snapshot</strong></div>
   <span className="ic-flow-arrow" aria-hidden="true">→</span>
-  <div className="ic-node"><span className="ic-node-label"><i className="ic-dot"></i> healthy</span><strong>runtime replicas</strong></div>
+  <div className="ic-node"><span className="ic-node-label"><i className="ic-dot"></i> ready</span><strong>runtime binding</strong></div>
 </div>
 
-## The operational layer around inference runtimes
-
-<CardGroup cols={3}>
-  <Card title="Build and deploy" icon="server" href="/showcase/build-inference">
-    Start from a model, recipe, or immutable custom OCI workload. Disconnecting the CLI does not abandon the operation.
-  </Card>
-  <Card title="Protect releases" icon="shield-check" href="/features/release-guard">
-    Compare active and candidate revisions with deterministic, persisted Release Guard policy.
-  </Card>
-  <Card title="Understand behavior" icon="wave-pulse" href="/features/explanations">
-    Explain scaling, rollout, degradation, and cold starts from recorded state and measurements.
-  </Card>
-</CardGroup>
-
-## Start from where you are
-
-<CardGroup cols={3}>
-  <Card title="I have a model" icon="cube" href="/showcase/build-inference">
-    Plan a qualified serving configuration and create a durable endpoint.
-  </Card>
-  <Card title="I have an endpoint" icon="plug" href="/showcase/connect-existing">
-    Add health and operational evidence without migrating or transferring lifecycle ownership.
-  </Card>
-  <Card title="I am evaluating" icon="flask" href="/quickstart">
-    Run the complete GPU-free control and request path locally in under five minutes.
-  </Card>
-</CardGroup>
-
-## One product, two compute modes
-
-<Tabs>
-  <Tab title="Elastic">
-    A registered elastic backend provisions runtime replicas. InferCrane reconciles desired capacity, routes only to ready workers, and fences scale-down before provider termination.
-
-    ```bash
-    infercrane deploy mistralai/Mistral-7B-Instruct-v0.3 \
-      --cloud runpod \
-      --gpu L40S \
-      --min 1 \
-      --max 4
-    ```
-  </Tab>
-  <Tab title="Serverless">
-    A provider-native serverless backend owns worker allocation and scale-to-zero. InferCrane preserves the logical endpoint, lifecycle evidence, cancellation, and cleanup.
-
-    ```bash
-    infercrane deploy mistralai/Mistral-7B-Instruct-v0.3 \
-      --compute serverless \
-      --cloud runpod \
-      --gpu L40S \
-      --max 4
-    ```
-  </Tab>
-</Tabs>
-
-<Note>
-InferCrane is provider- and runtime-extensible by design. Provider and runtime capabilities are
-declared and conformance-tested; each adapter still has an independent qualification status. vLLM,
-SGLang, and custom OCI have separate evidence states, as do RunPod and narrow AWS BYOC adapters.
-Consult [capability status](/project-status) before relying on a combination.
-</Note>
-
-## Evidence, not guesses
-
-InferCrane records durable operation events, immutable model and revision identity, normalized request telemetry, benchmark reproduction metadata, and deterministic policy decisions. It does not fabricate provider pricing or timing boundaries that the provider does not expose.
+## Choose your starting point
 
 <CardGroup cols={2}>
-  <Card title="Five-minute local tour" icon="rocket" href="/quickstart">
-    Run the GPU-free development stack and send your first OpenAI-compatible request.
+  <Card title="Deploy a model" icon="server" href="/showcase/build-inference">
+    Start from a reviewed model configuration or explicit serving plan. One durable operation owns the lifecycle.
   </Card>
-  <Card title="Read the architecture" icon="diagram-project" href="/architecture/system">
-    See the control-plane and data-plane boundaries behind durable operations.
+  <Card title="Connect existing inference" icon="plug" href="/showcase/connect-existing">
+    Discover vLLM, SGLang, LiteLLM, or another OpenAI-compatible endpoint before transferring ownership.
   </Card>
+  <Card title="Prove the loop locally" icon="flask" href="/quickstart">
+    Run the complete GPU-free control and request path in under five minutes.
+  </Card>
+</CardGroup>
+
+## The production operating loop
+
+<Steps>
+  <Step title="Deploy and converge">
+    Persist the desired model, runtime, infrastructure, and scale policy before provider work begins.
+  </Step>
+  <Step title="Observe the real request path">
+    Correlate endpoint, revision, replica, queueing, TTFT, generation, errors, and cost evidence.
+  </Step>
+  <Step title="Validate a candidate">
+    Compare active and candidate revisions with benchmark, replay, runtime, and optional signed task-quality evidence.
+  </Step>
+  <Step title="Promote, reject, or explain">
+    Apply deterministic Release Guard policy and preserve the decision for audit and recovery.
+  </Step>
+</Steps>
+
+<Note>
+Provider and runtime capabilities are declared and conformance-tested, but each adapter has an
+independent qualification state. Review [capability status](/project-status) before relying on an
+exact provider, runtime, model, and accelerator combination.
+</Note>
+
+<CardGroup cols={3}>
   <Card title="See production patterns" icon="sparkles" href="/showcase/index">
-    Deploy a model, connect LiteLLM, scope a sandbox, attach trained artifact lineage, and reject a bad release.
+    Follow real-life deployment, adoption, rollout, cost, and composition journeys.
+  </Card>
+  <Card title="Understand the architecture" icon="diagram-project" href="/architecture/system">
+    See the durable control plane, database-free request path, and replaceable adapter boundaries.
+  </Card>
+  <Card title="Inspect the CLI" icon="terminal" href="/cli">
+    Browse current commands, durable operation behavior, and machine-readable output.
+  </Card>
+  <Card title="Release and upgrade safely" icon="arrow-up-from-bracket" href="/upgrade">
+    Qualify client, protocol, runtime, and control-plane changes with explicit restoration paths.
   </Card>
 </CardGroup>

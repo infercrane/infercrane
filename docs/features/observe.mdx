@@ -42,9 +42,94 @@ infercrane request inspect REQUEST_ID
 infercrane explain rollout qwen-prod
 ```
 
+The request ID comes from the inference response's `X-Request-Id` header. Request Inspector ties it
+to the logical endpoint, serving plan, binding, deployment, revision, selected target, latency,
+tokens, retry, and fallback evidence where the upstream exposes those boundaries. See the complete
+[Request Inspector field contract](/features/adoption-diagnostics#inspect-one-request); prompt and
+output content are not persisted.
+
 `--diagnose` is the one intentionally mutating form: it persists a fresh Doctor evaluation derived
 from metrics, events, provider observations, and revision state. InferCrane does not ask an LLM to
 invent the cause.
+
+## Trace a slow async request through the control plane
+
+InferCrane uses distinct durable handles; it does not pretend one trace ID spans boundaries a
+provider does not expose:
+
+| Boundary | Handle and evidence |
+| --- | --- |
+| Client submission | async job ID and idempotency key |
+| Stable API route | endpoint, serving plan, and binding from `observe` |
+| Async execution | job status, attempt, deadline, cancellation, and expiry from `async get` |
+| Inference request | `X-Request-Id` and Request Inspector, when execution reached the gateway |
+| Deployment mutation | durable operation ID and ordered events |
+| Provider allocation | persisted provider resource ID, stage, attempt, and next observation |
+| Replica/runtime | target and replica only when the adapter exposes them |
+| Scaling | persisted scaling decision and signal timestamp |
+
+Start with the symptom's handle and walk outward:
+
+```bash
+infercrane async get JOB_ID --output json
+infercrane observe coder-production --window 1h --output json
+infercrane request inspect REQUEST_ID --output json
+infercrane status coder-runtime
+infercrane operation inspect OPERATION_ID
+infercrane operation watch OPERATION_ID --wait-timeout 15m
+infercrane logs coder-runtime --since 1h --output json
+infercrane explain scaling coder-runtime --output json
+infercrane explain cold-start coder-runtime --output json
+```
+
+An async job can remain queued before it has an inference request ID. A provider allocation can be
+pending without a physical replica, and some Serverless APIs never reveal a worker identity. Keep
+those fields unavailable. Distinguish outcomes this way:
+
+- client/gateway rejection: an OpenAI-compatible status appears before upstream work;
+- async deadline or cancellation: the durable job is terminal even if an already transmitted
+  provider request does not stop immediately;
+- provider delay: the operation remains waiting with a stable provider identity and ordered stage;
+- runtime failure: provider capacity exists, but health/model identity or request evidence fails;
+- scaling delay: a persisted decision exists, while desired and ready replica counts differ.
+
+If a required handle is missing, preserve the remaining time window and use the
+[missing-request-ID procedure](/features/adoption-diagnostics#when-the-request-id-is-missing). Do not
+join unrelated records by timestamp alone or report a provider-hidden boundary as measured.
+
+For automation, use the [fail-closed release evidence CI runbook](/runbooks/release-evidence-ci).
+It captures stable JSON request, operation, deployment/revision, Guard, orphan, and direct provider
+outcomes and rejects a release when any required boundary is unavailable.
+
+## Choose a reversible recovery action
+
+Diagnose first, then act on the persisted finding rather than treating every latency increase as a
+deployment failure:
+
+| Evidence | Reversible first action |
+| --- | --- |
+| Queue-dominant latency with healthy replicas | Preview higher replica bounds with `infercrane plan`; apply the complete serving spec only after cost/capacity review |
+| Candidate regression while active stays healthy | Preserve evidence and `rollout reject` the candidate |
+| Post-promotion regression with retained prior revision | `rollout rollback` to the exact prior revision ID |
+| Provider allocation or startup still progressing | Reattach with `operation watch`; do not create a duplicate resource |
+| Existing upstream unhealthy under observe-only ownership | Keep routing ownership unchanged and recover it in the owning system |
+| External fallback disabled or budget exhausted | Keep it fail-closed; do not enable privacy/spend changes as an automatic diagnostic action |
+
+Example recovery loop:
+
+```bash
+infercrane observe coder-production --diagnose
+infercrane request inspect REQUEST_ID --output json
+infercrane rollout inspect coder-runtime --output json
+infercrane rollout rollback coder-runtime PREVIOUS_REVISION_ID \
+  --reason "latency regression confirmed by persisted evidence" \
+  --wait
+infercrane observe coder-production
+```
+
+Rollback is valid only when `rollout inspect` identifies a retained prior revision. Otherwise keep
+the diagnosis and use a new immutable candidate; do not restart or delete capacity merely because a
+single request was slow. See [Release Guard recovery](/features/release-guard#recover-manually-and-preserve-evidence).
 
 <Tip>
 Use `infercrane ui` for a keyboard-driven operations workspace and the separately released [operations console](/features/dashboard) for the

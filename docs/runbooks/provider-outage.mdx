@@ -1,0 +1,79 @@
+---
+title: Provider outage and uncertain requests
+description: Recover durable work without replaying streams or duplicating provider resources.
+sidebarTitle: Provider outage
+---
+
+# Provider outage runbook
+
+Separate lifecycle operations from inference requests. Deploy, scale, rollout, and delete are
+durable operations; inference calls are not durable unless submitted through the async API.
+
+## 1. Freeze new mutation and capture handles
+
+Do not submit a replacement deployment, candidate, or provider resource. Preserve the original
+operation ID, idempotency key, deployment/revision, client request ID, and incident time window:
+
+```bash
+infercrane observe coder-production --window 1h --output json
+infercrane status coder-runtime
+infercrane inbox --output json
+infercrane logs coder-runtime --since 1h --output json
+infercrane orphans --output json
+```
+
+If an operation is active, reattach instead of recreating it:
+
+```bash
+infercrane operation inspect OPERATION_ID --output json
+infercrane operation watch OPERATION_ID --wait-timeout 15m --output json
+infercrane inspect coder-runtime --output json
+```
+
+An uncertain create is retried only with the identical desired state and original idempotency key.
+The adapter must discover and adopt the deterministic provider identity before another create.
+
+## 2. Classify inference requests
+
+| Request type | Recovery contract |
+| --- | --- |
+| Buffered, InferCrane-managed capacity | Only connection failure or final `502`, `503`, `504` may retry, within endpoint admission `retry_budget`; one request ID and attempt counter are retained. |
+| Streaming | Never replay automatically. Once bytes may have been sent, final outcome is uncertain unless the client observed terminal `[DONE]`. |
+| External paid binding | Never retry automatically; a reservation and provider transmission may already exist. |
+| Durable async, still queued | Cancellation prevents provider submission. |
+| Durable async, running | Fenced completion is durable, but cancellation cannot guarantee an already transmitted provider request stops. |
+
+Capture `X-Request-Id` at the client or ingress. For a known ID:
+
+```bash
+infercrane request inspect REQUEST_ID --output json
+```
+
+If it is missing, use the [missing-request-ID procedure](/features/adoption-diagnostics#when-the-request-id-is-missing)
+and report the individual outcome as unavailable. Do not infer success from provider recovery or
+retry a non-idempotent prompt merely because no record was found.
+
+## 3. Reconcile provider ownership
+
+Compare the persisted provider resource ID, intent digest, ownership labels/tags, revision, and
+replica ordinal with the provider's direct read-only inventory. Apply the
+[drift decision table](/features/lifecycle#decide-whether-provider-drift-is-recoverable).
+
+- exact identity: let the original operation resume and adopt;
+- proven absence: let the original replica intent recreate;
+- mismatch, incomplete inventory, or unknown state: stop mutation and resolve ownership manually;
+- delayed delete: keep the operation waiting until the provider proves absence.
+
+Never interpret an empty InferCrane orphan list as proof that stale or mis-scoped provider
+credentials can see the complete account.
+
+## 4. Resume deliberately
+
+Wait for fresh provider and runtime/model identity evidence. Buffered clients may retry only under
+their application idempotency semantics. Streams begin as new application requests and must not be
+presented as continuation. Async clients poll the original job ID; they do not submit a duplicate
+job with a new idempotency key.
+
+The incident is resolved only when every durable operation is terminal or safely waiting, each
+owned provider resource maps to one replica intent, request outcomes are labeled known or unknown,
+the active route is healthy, and direct provider inventory contains no unexplained resource.

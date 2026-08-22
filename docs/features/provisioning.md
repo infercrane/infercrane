@@ -1,79 +1,167 @@
 ---
 title: Provisioning and readiness
-description: Follow capacity allocation, artifact preparation, runtime startup, readiness, and metrics.
+description: Distinguish provider capacity, container startup, artifact preparation, runtime startup, and readiness without guessing.
 ---
 
-# Provisioning, runtimes and metrics
+# Know what a deployment is waiting for
 
-Status: Existing targets implemented; SkyPilot experimental
+Provisioning is a durable operation. The CLI can disconnect while the control plane continues to
+reconcile one deterministic provider identity per replica intent. Reconnect with the operation ID
+printed by `deploy`:
 
-## Entry points
+```bash
+infercrane operation watch OPERATION_ID
+infercrane status DEPLOYMENT --watch
+infercrane logs DEPLOYMENT --follow
+```
 
-- SkyPilot adapter: `internal/provision/skypilot.go`
-- Declarative specification: `internal/spec/spec.go`
-- vLLM runtime inspection: `internal/runtime/vllm.go`
-- vLLM Prometheus parsing: `internal/metrics/vllm.go`
-- Provider-neutral capacity contracts and placement: `internal/capacity`
-- Timestamped pricing contract: `internal/pricing`
+## Choose and check an adapter before provisioning
 
-## Contract
+```bash
+infercrane integrations --output json
+infercrane plan MODEL --cloud PROVIDER --gpu ACCELERATOR --output json
+```
 
-The support matrix and backend registry are deliberately separate. At process composition, an elastic backend binds a stable adapter
-name, cloud, runtime, and provider implementation; durable workflows select it without provider
-conditionals. Serverless and direct-target reconciliation follow the same pattern. Registering an
-adapter does not make it supported until its configuration, documentation, and real lifecycle
-acceptance are complete. See [ADR 0009](/adr/0009-qualified-support-and-backend-registration).
+`integrations` distinguishes registration, local evidence, and real-system qualification. `plan`
+validates the requested intent without allocating capacity. Follow the exact adapter guide for
+credentials, networking, immutable images, runtime contract, preflight, cleanup, and current limits:
 
-Provisioners return ordinary targets so routing and reconciliation remain provider-neutral.
-Provider resource IDs and non-secret details may be stored for inspection and cleanup. Worker API
-keys are injected as SkyPilot secrets and are never stored in provider detail JSON.
+- [RunPod elastic and Serverless](/integrations/runpod)
+- [AWS EC2 BYOC](/integrations/aws-ec2)
+- [GCP Compute BYOC](/integrations/gcp-compute)
+- [Kubernetes and KServe](/integrations/kubernetes)
+- [Exact-combination compatibility check](/compatibility#check-one-exact-serving-combination)
 
-The SkyPilot replica lifecycle is discovery-first and keyed by a stable external name. `Ensure`
-checks JSON cluster inventory before an asynchronous named launch, `Observe` refreshes cluster state
-and resolves the exposed endpoint, `Delete` treats an absent cluster as success, and `Inventory`
-returns owned clusters for leak reconciliation. Repeating ensure or delete does not create or
-destroy a second resource. The durable workflow persists the external key and deterministic
-cluster identity before calling these methods.
+InferCrane cannot safely choose a provider from an unspecified workload. Decide these inputs first:
+immutable model/artifact, runtime and version, compute mode, accelerator/topology, region/network,
+replica bounds, protocol needs, and required evidence. Then use this boundary:
 
-The `deployment.converge`/`replica.provision` workflow persists replica intent and that deterministic
-cluster identity before calling `sky launch`. Every retry re-runs discovery, provider observation,
-and vLLM readiness checks before registering a route. Its delete path re-observes asynchronous
-deletion and does not mark a replica deleted while it remains in provider inventory. These handlers
-are locally qualified with fault-injected providers; real RunPod qualification is still required.
+| Situation | Safest path |
+| --- | --- |
+| A compatible workload already exists | Adopt it observe-only; create no infrastructure |
+| RunPod is acceptable for a preview | Use the explicit RunPod guide; elastic and Serverless remain experimental pending exact real evidence |
+| Customer AWS or GCP is required | Use the narrow BYOC adapter guide; real identity, network, quota, GPU, and deletion qualification remain external |
+| A Kubernetes GPU cluster already exists | Use the namespace-scoped Deployment/KServe guide; Kind proves API behavior, not real GPU execution |
+| No exact combination has qualification evidence | Stop after `plan` or adopt an existing endpoint; do not infer support from registration |
 
-Capacity availability is an optional backend capability, not a provider conditional in the
-lifecycle state machine. Before the first create, the workflow discovers the deterministic
-resource. If it already exists, InferCrane adopts it without consulting mutable stock. If it is
-absent, the registered advisor may return `available`, `constrained`, `unavailable`, or `unknown`;
-the complete result is persisted in operation progress. Explicitly unavailable capacity defers
-creation with a retryable error. Constrained capacity proceeds with a warning because a stock query
-is a point-in-time signal, not a reservation. An unavailable advisory service does not make an
-otherwise healthy provider unusable.
+You do not need to read every provider guide. Select one only after the inputs above identify the
+operator-owned boundary:
 
-Provider observation details are also classified at the integration boundary. Known container
-bootstrap failures such as an interrupted image pull or exhausted host storage remain retryable
-while the provider retains the resource, but operation progress exposes the concrete boundary and
-an explicit cancel-before-replacement instruction. InferCrane does not create a second resource or
-silently select different hardware in response to these diagnostics.
+| Adapter | Operator must already control | Potentially billable objects | Current evidence boundary |
+| --- | --- | --- | --- |
+| RunPod | Project, scoped key, and optional immutable Serverless template | Pod or Serverless endpoint/workers | Experimental; exact real lifecycle evidence required |
+| AWS EC2 BYOC | Account, assumable role, private subnet/security group, AMI, instance profile, worker secret | EC2 instance and attached network/storage resources | Hermetic contract only; real AWS GPU/network evidence required |
+| GCP Compute BYOC | Project, attached identity, private network, immutable VM/container inputs | Compute instance and attached resources | Hermetic contract only; real GCP GPU/network evidence required |
+| Kubernetes/KServe | Existing cluster, kubeconfig context, namespace/RBAC, worker Secret, GPU nodes | Cluster workloads and the cluster's underlying capacity | Kind API evidence only; real GPU cluster evidence required |
 
-The RunPod advisor queries secure-cloud GPU stock without creating a Pod. A region-qualified
-request is clearly labeled as using a global signal because the provider response cannot prove
-availability in one requested region. Credentials are sent in an authorization header and are never
-written to URLs, checkpoints, or durable events.
+If these requirements do not select exactly one adapter, stop and collect workload, security,
+residency, capacity, and cost constraints; InferCrane will not silently choose infrastructure.
 
-The superseded synchronous `Deploy`/`Destroy` adapter and direct-running operation store APIs have
-been removed. Provider mutation is reachable only through leased workflow handlers.
+<Warning>
+`deploy` and `apply` can create billable provider resources. Do not execute either until provider
+credentials and read-only doctor checks pass, the plan is reviewed, current provider inventory is
+recorded, and the exact combination's qualification gap is accepted. Cost remains unknown when no
+trustworthy provider evidence exists.
+</Warning>
 
-Runtime inspection requires both a healthy endpoint and the expected served model. Metrics parsing
-normalizes supported vLLM metric aliases and ignores malformed or non-finite samples.
+`status` shows whether the deployment is serving and whether desired capacity is still converging.
+`operation watch` follows the blocking mutation. `logs` follows durable events and is the best view
+when you need the transition history rather than the latest snapshot.
 
-## Qualification
+## Read the current stage
 
-SkyPilot requires credentialed acceptance tests for each supported provider/region/GPU combination.
-The production image pins SkyPilot 0.13.0 with its RunPod extra; changing this pin requires repeating
-the real-cloud lifecycle and zero-leak acceptance gate.
-Development fake workers demonstrate behavior only and cannot support performance or reliability
-claims.
+| Reported stage | Grounded meaning | What to do |
+| --- | --- | --- |
+| Waiting for capacity | A provider stock observation is unavailable, constrained, or allocation is still pending | Keep watching; do not submit another deploy for the same intent |
+| Provider accepted | The provider has accepted the deterministic resource identity | Inspect provider state only if the operation stops making progress |
+| Preparing artifact | The worker is reachable but the expected model is not ready; download, cache materialization, or model load may still be in progress | Check runtime/container logs and disk/cache evidence |
+| Starting runtime | The container is reachable but the OpenAI-compatible runtime has not passed health and model identity checks | Check runtime logs, memory, model arguments, and served model identity |
+| Ready | Health succeeds and `/v1/models` reports the expected model | The worker may enter the published route generation |
+| Unknown boundary | The provider or runtime does not expose a narrower stage | Treat the combined boundary as unavailable; do not infer a made-up duration |
 
-Placement prefers eligible warm model caches before known lower prices and is deterministic for
-equal candidates. A missing or stale price is explicit and must never be represented as zero cost.
+Not every provider exposes container download, artifact transfer, model load, and runtime
+initialization separately. InferCrane reports the narrowest boundary supported by fresh evidence.
+For example, `provider_capacity_or_worker_initialization` means exactly that the product cannot
+separate those phases from the available observation.
+
+## Diagnose a long wait
+
+1. Copy the blocking operation ID from `status`.
+2. Run `operation watch` and note the last changed stage, provider message, attempt, and retry time.
+3. Run `logs --follow` in a second terminal to distinguish a repeated observation from a real state
+   transition.
+4. Run `infercrane inspect DEPLOYMENT --output json` for the persisted provider identity and
+   non-secret infrastructure details.
+5. If the provider retains a failed resource—for example after an interrupted image pull—cancel the
+   durable operation before replacing it. Do not start a second deploy with a different identity.
+
+Known bootstrap failures such as interrupted image pulls or exhausted host storage remain visible
+and retryable while the provider retains the resource. InferCrane does not silently select a
+different accelerator or create a second billable resource.
+
+## Capacity evidence is advisory
+
+Before the first create, InferCrane discovers the deterministic resource. An existing resource is
+adopted before mutable stock is consulted. If no resource exists, a provider adapter may report
+`available`, `constrained`, `unavailable`, or `unknown`:
+
+- `unavailable` defers creation with a retryable error;
+- `constrained` proceeds with an explicit warning because stock is not a reservation;
+- `unknown` permits the normal provider attempt but cannot support a capacity claim.
+
+The first stock advisor queries RunPod secure-cloud availability. A region-qualified request is
+still labeled global when the provider response cannot prove stock in the requested region.
+Credentials are sent in headers and are not persisted in progress or events.
+
+## Idempotency and cleanup
+
+The provider resource key is stored before any external create call. If the create succeeds but its
+response is lost, retry performs discovery and adopts the resource. Delete re-observes asynchronous
+provider removal and cannot mark the replica deleted while the resource remains visible.
+
+### Reconcile an interrupted create
+
+1. Do not create a new deployment, revision, or idempotency key.
+2. Reattach to the persisted operation and export the stored identities:
+
+   ```bash
+   infercrane operation watch OPERATION_ID --wait-timeout 15m
+   infercrane inspect DEPLOYMENT --output json
+   infercrane orphans --output json
+   ```
+
+3. In the provider's read-only inventory, locate the exact `provider_resource_id`, deterministic
+   external key, ownership tags/labels, revision, and replica ordinal from `inspect`. A same-name
+   resource with mismatched ownership is not adoptable.
+4. If the identities match, let the existing operation resume. Reissuing the original deploy/apply
+   request is safe only with its original idempotency key and identical intent. Replaying
+   `rollout provision DEPLOYMENT REVISION_ID --wait` is safe for the same persisted revision; do not
+   run `rollout create` again.
+5. If provider inventory is unavailable, incomplete, or mismatched, stop mutation and preserve
+   PostgreSQL. Resolve ownership manually before create or delete.
+
+Provider-specific inventory is intentionally outside one generic command: use the RunPod Pod/
+endpoint inventory, AWS EC2 tag-scoped inventory, GCP label-scoped instance inventory, or Kubernetes
+namespace/UID/managed-fields inventory described by that adapter. An empty InferCrane `orphans`
+response cannot prove a provider credential can see every external resource.
+
+After a paid qualification run, use both views:
+
+```bash
+infercrane orphans --output json
+infercrane deployments --output json
+```
+
+Then verify the provider account inventory directly. InferCrane inventory cannot prove the absence
+of resources hidden by stale, incomplete, or mis-scoped provider credentials.
+
+## Qualification boundary
+
+Existing targets are implemented. Provider adapters have independent evidence states. SkyPilot
+elastic lifecycle logic passes local lost-response, replay, and cleanup fixtures, but real RunPod
+provider/region/GPU qualification remains external. Runtime inspection requires both a healthy
+endpoint and the expected served model. Development fake workers prove control flow only; they do
+not prove GPU performance, model compatibility, or provider reliability.
+
+See [capability status](/project-status), [cold-start intelligence](/features/cold-starts), and the
+[provider contract](/architecture/provider-contract).

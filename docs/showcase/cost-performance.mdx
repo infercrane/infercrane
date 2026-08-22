@@ -21,6 +21,92 @@ The request view can report gateway-observed TTFT, latency, queueing, errors, fa
 usage when the upstream supplies it. FinOps accepts sourced cost observations only. Unknown price,
 currency, or coverage stays unavailable.
 
+### What can be compared today
+
+InferCrane can persist attributed self-hosted Kubernetes cost from OpenCost. It does **not** yet
+import provider invoices or fetch a model API price catalog. External-binding cost limits are
+worst-case authorization reservations, not observed spend. Therefore the current release cannot
+produce a trustworthy API-versus-self-hosted savings number by itself.
+
+For a defensible manual comparison, collect the same time window and currency from both sides:
+
+| Required input | Model API | Self-hosted |
+| --- | --- | --- |
+| Cost source | Settled provider invoice or billing export | Exact OpenCost allocation keys |
+| Coverage | Requests and tokens covered by that invoice window | Requests served by the selected revision in the same window |
+| Identity | Provider connection, model, and endpoint | Deployment, immutable revision, GPU/runtime plan |
+| Currency | Explicit ISO currency; no silent conversion | The same explicit ISO currency |
+| Workload | Request count, input/output tokens, latency/SLO window | The same request shape and SLO window |
+
+Import the self-hosted side when it is Kubernetes-backed:
+
+```bash
+infercrane finops collect opencost coder-production \
+  --url http://127.0.0.1:9003/allocation \
+  --window 168h \
+  --aggregate controller \
+  --allocation coder-production \
+  --currency USD
+
+infercrane finops coder-production --window 168h
+```
+
+Keep the API invoice comparison external until InferCrane has a qualified billing importer. If any
+required input, request coverage, or currency alignment is missing, the only correct answer is
+`unavailable`—not zero cost or estimated savings.
+
+## Bound a hybrid fallback before it can receive data
+
+Start with a self-hosted-only plan and follow the complete
+[privacy-preserving binding procedure](/integrations/overview#keep-sensitive-inputs-on-self-hosted-infrastructure).
+
+<Warning>
+Do not run the provider connection command unless your organization has approved the provider,
+data-processing terms, residency, credential-reference policy, current pricing/currency, and a
+worst-case spend envelope. Registration does not enable traffic or bill inference, but it is still
+an external integration and must not be created by an unapproved operator. If approval or a settled
+invoice/billing export is missing, keep the self-hosted-only plan and report cost comparison as
+`unavailable`.
+</Warning>
+
+After approval, register the provider without enabling traffic:
+
+```bash
+export MANAGED_MODEL_API_KEY='injected-by-your-secret-manager'
+infercrane provider connect emergency-model-api \
+  --adapter openai-compatible-external \
+  --url https://models.example.com/v1 \
+  --model provider/emergency-model \
+  --from-env MANAGED_MODEL_API_KEY
+
+infercrane provider list --output json
+```
+
+After the approved provider connection exists and a worst-case request reservation is grounded in
+its current contract, create a disabled-by-default bounded binding. `--enable-external` is the
+explicit traffic and data boundary:
+
+```bash
+infercrane endpoint bind coder-production \
+  --name emergency-fallback \
+  --connection emergency-model-api \
+  --request-limit 1000 \
+  --cost-limit-usd 25.00 \
+  --max-request-cost-usd 0.10 \
+  --acknowledge-external-data \
+  --enable-external
+
+infercrane endpoint plan coder-production \
+  --policy primary-fallback \
+  --bindings self-hosted,emergency-fallback
+infercrane endpoint inspect coder-production
+```
+
+The plan is staged as a candidate and does not move traffic until its Release Guard evidence passes
+and an operator promotes it. If price, currency, request coverage, residency, or provider terms are
+unknown, stop before `endpoint bind` and retain the self-hosted-only plan. The two USD flags reserve
+a hard worst-case authorization amount; they do not prove actual spend or savings.
+
 ## 2. Create a comparable candidate
 
 ```bash Evaluate a candidate
@@ -32,6 +118,22 @@ infercrane recommend coder-runtime
 
 A benchmark is measured evidence for its exact model artifact, runtime, configuration, provider,
 accelerator, and workload. It is not a universal price or performance claim.
+
+### Qualify a provider-backed scaling plan
+
+Provider-backed `deploy`, `apply`, benchmark load, autoscaling, and async execution may create
+capacity or paid inference. Use an isolated staging deployment, a reviewed `min`/`max`, and a hard
+request bound. Follow:
+
+1. [exact-combination compatibility](/compatibility#check-one-exact-serving-combination);
+2. [autoscaling `1 → N → 1`, streaming, and cleanup](/features/autoscaling#qualify-scale-up-streaming-drain-and-scale-down);
+3. [async deadlines, idempotency, encryption, and cancellation](/features/admission-async#durable-async-requests); and
+4. the selected [provider acceptance runbook](/testing/production-qualification-runbook).
+
+Approve the maximum provider cost and non-sensitive workload before the first mutation. Keep async
+request count, retention, retry, and deadline bounded; async protocol support still depends on the
+exact runtime/model profile. Missing provider inventory, price, quota, request accounting, stream
+integrity, or zero-resource cleanup makes the qualification failed or inconclusive.
 
 ## 3. Protect production
 

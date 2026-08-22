@@ -1,16 +1,25 @@
 ---
-title: Capability status
-description: The authoritative implementation and qualification state of every InferCrane capability.
-sidebarTitle: Project status
+title: Capability qualification
+description: Check which InferCrane capabilities are implemented, locally qualified, experimental, or awaiting real-infrastructure evidence.
+sidebarTitle: Capability qualification
 ---
 
-# Project status
+# Capability qualification
+
+Use this reference when deciding whether an exact InferCrane capability is suitable for your
+environment. It is intentionally linked from provider, runtime, and production guides rather than
+shown as a primary customer workflow.
 
 Status labels are strict: **implemented** is tested in this repository; **local-qualified** has
 passed the maintained hermetic/local gates; **in qualification** has an implemented surface with
 incomplete release evidence; **experimental** works but lacks production qualification; **planned**
 is not a product capability. None of these labels substitutes for real-provider evidence where the
 behavior depends on external infrastructure.
+
+For one exact provider/runtime/model/accelerator decision, follow the
+[compatibility check](/compatibility#check-one-exact-serving-combination). If the complete
+combination is absent from release evidence, it is unqualified even when each component has an
+implemented row below.
 
 | Capability | Status | Notes |
 |---|---|---|

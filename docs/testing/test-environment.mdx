@@ -41,7 +41,48 @@ release candidate
 | Real infrastructure | Explicit RC approval | Actual provider identity, networking, capacity, runtime, deletion, billing inventory | Other untested providers or configurations |
 | Human | RC review | Terminal/browser usability, hosted docs and operator comprehension | Distributed-system correctness |
 
-The machine-readable inventory is [`qualification/product-gates.json`](https://github.com/infercrane/infercrane/blob/main/qualification/product-gates.json).
+## Empty-database user lifecycle
+
+The ordinary development stack intentionally contains useful sample resources. It therefore cannot
+prove that a new installation has honest empty states or that the first user journey creates every
+required object through public contracts. The clean lifecycle qualification starts a unique Compose
+project and fresh PostgreSQL volume without development seeding, builds an isolated CLI, and drives:
+
+```text
+clean install
+  → empty deployments, endpoints, and operations
+  → explicit existing-capacity registration
+  → idempotent durable deployment
+  → stable endpoint
+  → buffered and streaming inference
+  → Request Inspector, Doctor, monitoring, admission, SLO, replay
+  → observe-only adoption
+  → explicit traffic ownership transfer
+  → rejected bad candidate
+  → plan-first deletion
+  → zero logical resources and zero orphans
+```
+
+Run it with:
+
+```bash
+make test-user-lifecycle
+```
+
+Evidence is written under `.infercrane/user-lifecycle/<run-id>` and records both the HEAD commit and
+a digest of the actual source snapshot. This keeps dirty-worktree development evidence honest
+without pretending it belongs to the base commit alone. Every stage executes in an errexit-enabled
+subshell; a failed assertion cannot be hidden by later successful cleanup. The Compose project and
+volume are removed on success, failure, or interruption.
+
+The separately versioned web workspace runs `npm run test:e2e:empty-control-plane`. That browser
+journey uses the same empty-stack overlay and a real control API to prove secure local sign-in,
+first-run empty states, server-side provider references, observe-only connection, explicit
+traffic-management promotion, inference, monitoring, governed fallback staging, accessibility,
+and cleanup. Fixture-only browser tests remain a faster UX boundary but are not substitutes for
+this PostgreSQL-backed journey.
+
+The machine-readable inventory is `qualification/product-gates.json` in the repository.
 Each result is bound to a Git commit and has its own status. Successful cleanup never overwrites a
 failed suite.
 

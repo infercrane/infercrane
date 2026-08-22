@@ -8,7 +8,7 @@ description: Dependency-ordered control-plane, data-plane, console, documentatio
 This is the delivery plan for making InferCrane the inference control and optimization platform from
 the first managed-model API call through customer-operated or InferCrane-managed compute. It is not
 a claim that every row is already production-qualified. Current evidence remains authoritative in
-[Project status](/project-status).
+[Capability qualification](/project-status).
 
 ## Product boundary
 

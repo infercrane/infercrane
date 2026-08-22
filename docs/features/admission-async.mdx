@@ -24,6 +24,252 @@ tokens and accepted priority classes. Rejections use OpenAI-compatible errors an
 upstream transmission. Tenant request/token limits and external-capacity budgets remain separate
 hard controls.
 
+<Warning>
+Endpoint concurrency and queue depth are shared by every tenant authorized to call that endpoint;
+this release has no per-tenant concurrency or per-tenant queue partition. A tenant request-per-minute
+quota limits admitted volume over a UTC window but cannot reserve an instantaneous capacity share.
+If strict noisy-neighbor isolation is mandatory, use separate tenant boundaries, stable endpoints,
+and dedicated backend capacity pools—or separate control-plane environments—then qualify each pool.
+Separate endpoint names backed by the same saturated deployment are not capacity isolation. Stop
+before onboarding another tenant if that boundary cannot be provided.
+</Warning>
+
+For external capacity, keep a distinct binding with its own hard request and worst-case cost
+reservations for each isolated endpoint. For self-hosted capacity, GPU billing continues while the
+dedicated replicas exist, including after one request is cancelled. InferCrane has no
+provider-neutral per-tenant GPU invoice or automatic refund claim.
+
+Inspect the effective endpoint policy after mutation:
+
+```bash
+infercrane admission get coder-production --output json
+infercrane observe coder-production --output json
+```
+
+## Set a distributed tenant request ceiling
+
+Tenant quotas are currently a control-API operation rather than a dedicated CLI command. Use an
+admin-scoped credential and set all three tenant ceilings explicitly; omitted JSON fields decode as
+zero and therefore block that resource:
+
+<Warning>
+Quota updates affect the entire active tenant and the API has no quota-read endpoint. Before this
+mutation, record the reviewed existing JSON outside InferCrane as `previous-quota.json`. Test only in
+a dedicated staging tenant; never guess deployment or replica ceilings, and restore exactly the
+recorded values afterward.
+</Warning>
+
+```bash
+curl -i -fsS -X PUT "$INFERCRANE_URL/api/v1/tenant/quota" \
+  -H "Authorization: Bearer $INFERCRANE_ADMIN_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "max_deployments": 20,
+    "max_replicas": 80,
+    "max_requests_per_minute": 600
+  }'
+
+curl -fsS "$INFERCRANE_URL/api/v1/audit-events?limit=20" \
+  -H "Authorization: Bearer $INFERCRANE_ADMIN_TOKEN"
+```
+
+The update is tenant-scoped and audited as `quota.update`. Request reservations are distributed per
+UTC minute and refresh into gateway memory within approximately one second. A configured zero
+request limit denies immediately after refresh; a lower nonzero limit is fully authoritative at the
+next UTC-minute boundary because already issued leases cannot be revoked. There is no token-per-minute
+tenant quota in this release: bound requested output tokens with endpoint admission and stop if a
+separate distributed token budget is mandatory.
+
+To qualify the request ceiling in staging, set a small nonzero limit immediately after a UTC-minute
+boundary, wait for policy refresh, issue exactly that many successful requests, then verify the next
+request returns OpenAI-compatible `429`. Inspect response request IDs and the `quota.update` audit
+event. Missing 429, negative/duplicate accounting, or unavailable audit evidence is a stop condition;
+do not open the endpoint to more tenants.
+
+Restore the externally recorded values rather than constructing a new guess:
+
+```bash
+curl -i -fsS -X PUT "$INFERCRANE_URL/api/v1/tenant/quota" \
+  -H "Authorization: Bearer $INFERCRANE_ADMIN_TOKEN" \
+  -H 'Content-Type: application/json' \
+  --data-binary @previous-quota.json
+```
+
+### Distinguish quota, admission, and backend failure
+
+| Client evidence | Meaning | Next evidence |
+| --- | --- | --- |
+| `429 rate_limit_error`, message `Tenant request-rate quota is exhausted` | Distributed tenant minute lease denied before upstream transmission | Confirm the UTC window and latest audited `quota.update`; restore only recorded policy. |
+| `429 admission_rejected` | Endpoint concurrency/queue full or queue timeout before request telemetry | Compare the error message with `admission get`; there is no Request Inspector row. |
+| `413 request_too_large` or `422 admission_policy_violation` | Endpoint size, output-token, or priority policy denied | Correct the client request or review policy; do not bypass it with another endpoint. |
+| `429 rate_limit_error`, external budget unavailable/exhausted | Managed external request/cost reservation denied before transmission | Inspect the immutable binding/plan and approved budget; provider spend is not inferred. |
+| final `502`, `503`, or `504` with a request ID | Managed runtime or route failed after admission; buffered retry may already have consumed its bounded attempts | `request inspect`, `observe`, deployment events, runtime health, and provider operation. |
+| stream interruption after chunks | Final result unknown; never replay automatically | Preserve chunks and request ID, then follow the provider-outage runbook. |
+
+```bash
+infercrane admission get coder-production --output json
+infercrane observe coder-production --window 1h --output json
+infercrane request inspect REQUEST_ID --output json
+infercrane status coder-runtime
+infercrane logs coder-runtime --since 1h --output json
+```
+
+Backend failure is supported by request status/error type, attempt count, route identity, runtime
+health, and durable provider events—not by weakening quota. If the request ID or provider outcome is
+unknown, keep the safety control in place and use the
+[provider outage runbook](/runbooks/provider-outage).
+
+## Qualify synchronous queue outcomes
+
+Admission overflow and queue timeout both return HTTP `429` with OpenAI-compatible JSON:
+
+```json
+{"error":{"message":"...","type":"admission_rejected","param":null,"code":null}}
+```
+
+The message distinguishes `endpoint concurrency and queue capacity are exhausted` from
+`endpoint admission queue timed out`. Request-size rejection is `413 request_too_large`; output-token
+or priority rejection is `422 admission_policy_violation`. Admission happens before request
+telemetry is created, so a rejected or timed-out request does not receive an InferCrane-generated
+request ID or Request Inspector record. Keep the client-side correlation ID and response body.
+
+Use a controllable staging runtime that can hold one request longer than the queue timeout. Do not
+try to create this state by overloading production:
+
+```json slow-request.json
+{"model":"coder-staging","messages":[{"role":"user","content":"Use the staging delay fixture."}],"max_tokens":512}
+```
+
+```json request.json
+{"model":"coder-staging","messages":[{"role":"user","content":"Return one word."}],"max_tokens":16}
+```
+
+```bash
+infercrane admission set coder-staging \
+  --max-concurrency 1 \
+  --max-queue 1 \
+  --queue-timeout-ms 1000 \
+  --max-output-tokens 512 \
+  --retry-budget 0
+infercrane admission get coder-staging --output json
+
+# Terminal 1: keep one qualified staging request active for more than one second.
+curl -fsS "$INFERCRANE_URL/v1/chat/completions" \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY" \
+  -H 'X-Request-ID: admission-running' \
+  -H 'Content-Type: application/json' \
+  -d @slow-request.json
+
+# Terminal 2: start one more request; it occupies the only queue slot and must time out with 429.
+curl -i -sS "$INFERCRANE_URL/v1/chat/completions" \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY" \
+  -H 'X-Request-ID: admission-waiting' \
+  -H 'Content-Type: application/json' \
+  -d @request.json
+
+# While Terminal 2 is waiting, this third request must be rejected immediately with 429.
+curl -i -sS "$INFERCRANE_URL/v1/chat/completions" \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY" \
+  -H 'X-Request-ID: admission-full' \
+  -H 'Content-Type: application/json' \
+  -d @request.json
+```
+
+After the running request finishes, a new request must complete normally. A synchronous queued
+request has no pollable intermediate object: it either acquires capacity and completes, its client
+cancels, or it returns the queue-timeout `429`. This is distinct from durable async execution, where
+`deadline_seconds` produces a persisted terminal job state retrievable with `async get`.
+
+Record policy JSON, client correlation IDs, response status/body, elapsed queue time, completed
+request evidence, and the exact staging runtime behavior. If the runtime cannot deterministically
+hold the first request, treat this procedure as inconclusive and use the maintained local fault test
+instead of making a production guarantee.
+
+## Protect an existing workload before taking traffic ownership
+
+Admission does not require InferCrane to own provider lifecycle. Connect an existing
+OpenAI-compatible workload without changing its current request path, inspect it, and configure the
+stable endpoint before any client migration:
+
+```bash
+infercrane connect https://vllm.internal.example/v1 \
+  --as coder-production \
+  --type vllm \
+  --model Qwen/Qwen3-32B
+infercrane doctor coder-production --window 1h
+infercrane observe coder-production --output json
+infercrane admission set coder-production \
+  --max-concurrency 32 \
+  --max-queue 64 \
+  --queue-timeout-ms 5000 \
+  --max-output-tokens 8192 \
+  --retry-budget 0
+infercrane admission get coder-production --output json
+```
+
+The connection remains `observe-only`; no traffic or provider lifecycle has transferred. Complete
+the [direct-versus-managed compatibility comparison](/showcase/connect-existing#compare-the-existing-and-managed-request-paths)
+before `adopt promote`. That promotion grants routing ownership only. If qualification fails, keep
+applications on the original upstream URL; InferCrane does not scale, update, or delete it. There is
+no automatic ownership rollback command in this release, so do not switch application clients until
+the managed path has passed. Delete the InferCrane endpoint only through its explicit dependency and
+plan-first lifecycle if you later choose to remove the observation record.
+
+## Qualify external spend exhaustion
+
+External budgets are binding-scoped, worst-case authorization reservations. They are separate from
+tenant request quota and do not replace provider billing.
+
+<Warning>
+This staging-only test transmits non-sensitive input to an external provider and may incur cost. Get
+data-processing approval, verify the provider/model credential and current worst-case price, and use
+a dedicated endpoint and request limit of one. Stop if price, currency, residency, or provider
+billing evidence is unavailable.
+</Warning>
+
+```bash
+export MANAGED_MODEL_API_KEY='injected-by-your-secret-manager'
+infercrane provider connect spend-test-provider \
+  --adapter openai-compatible-external \
+  --url https://models.example.com/v1 \
+  --model provider/test-model \
+  --from-env MANAGED_MODEL_API_KEY
+
+infercrane environment create staging
+infercrane logical-model create spend-test
+infercrane endpoint create spend-test-staging \
+  --model spend-test \
+  --environment staging
+infercrane endpoint bind spend-test-staging \
+  --name external \
+  --connection spend-test-provider \
+  --request-limit 1 \
+  --cost-limit-usd 0.01 \
+  --max-request-cost-usd 0.01 \
+  --acknowledge-external-data \
+  --enable-external
+infercrane endpoint plan spend-test-staging \
+  --policy manual \
+  --bindings external
+infercrane endpoint inspect spend-test-staging --output json
+```
+
+Send one approved request and inspect its request ID. A second request must return `429` with
+`external_budget_exhausted` evidence before upstream transmission. The persisted reservation must
+not exceed one request or USD 0.01. Compare actual provider usage/billing separately; the reservation
+is not proof that the first request cost USD 0.01.
+
+After collecting evidence, remove only the dedicated staging objects:
+
+```bash
+infercrane endpoint delete spend-test-staging --yes
+infercrane provider delete spend-test-provider
+```
+
+Do not reuse this tiny budget as a production price or mutate an existing binding to reset consumed
+reservations. Missing 429, more than one upstream request, absent provider billing evidence, or
+unknown data handling fails the qualification.
+
 ## Retry semantics
 
 Retries are intentionally narrow. InferCrane retries only buffered requests to InferCrane-managed
@@ -32,6 +278,24 @@ capacity, up to the persisted endpoint budget, for connection failures and HTTP 
 one request ID and expose `X-InferCrane-Attempt` to the runtime.
 
 ## Durable async requests
+
+<Note>
+Durable async inference is **local-qualified** for encrypted persistence, idempotent submission,
+fenced lease recovery, bounded retry, cancellation races, and webhook transport controls. Real
+provider execution, upstream cancellation behavior, secret-manager key rotation, and external
+webhook delivery remain separate environment-specific qualification. It is not a hosted queue or a
+general workflow service.
+</Note>
+
+<Warning>
+Before `async submit`, inspect the endpoint binding and provider/resource identity, obtain approval
+for the data boundary and worst-case spend, and use non-sensitive staging input. Submission may
+transmit work immediately. Cancelling after transmission may not stop upstream compute or billing;
+an external budget reservation is a worst-case authorization, not a refundable invoice, and a
+self-hosted GPU remains billable while its replica exists. If provider identity, maximum exposure,
+or cancellation behavior is unknown, do not submit. See
+[Cancellation and billing](#cancellation-and-billing).
+</Warning>
 
 Create a protocol-native request file:
 
@@ -48,20 +312,61 @@ Submit it and close the terminal safely:
 infercrane async submit coder-production \
   --file request.json \
   --protocol chat \
+  --deadline-seconds 900 \
+  --retention-seconds 86400 \
   --idempotency-key document-42
 ```
 
-The command returns a job ID immediately. Resume, poll or cancel from any configured client:
+The command returns a job ID immediately. Reading job state is non-mutating:
 
 ```bash
 infercrane async get JOB_ID
 infercrane async get JOB_ID --output json
+```
+
+<Warning>
+Before cancellation, inspect the JSON state. If the job is already `running`, assume the request may
+have reached the provider and that billing may continue. Cancellation makes InferCrane's job state
+terminal; it does not prove upstream work stopped or refund a prior external reservation.
+</Warning>
+
+```bash
 infercrane async cancel JOB_ID
 ```
 
 Async execution is one bounded inference request, not a workflow engine. Claims use PostgreSQL
 leases and fencing tokens. Another worker adopts an expired lease; a stale worker cannot commit the
-result. Deadlines, three execution attempts and encrypted-result retention are bounded.
+result. The default execution deadline is 900 seconds and default encrypted retention is 86,400
+seconds from submission. Retention must be longer than the deadline and cannot exceed 604,800
+seconds (seven days). Jobs have at most three execution attempts.
+
+Cancellation is terminal only while a job is `queued` or `running`. It prevents a leased worker
+from committing a later result because the fenced status update no longer matches. It does not
+promise that an already transmitted provider request stops instantly. If completion or cancellation
+won the state transition first, the later request returns the current terminal outcome rather than
+rewriting history. Inspect `status`, `completed_at`, `error_code`, and `expires_at` with
+`infercrane async get JOB_ID --output json`.
+
+### Cancellation and billing
+
+InferCrane does not claim that cancelling a job cancels provider billing:
+
+| Job state when cancellation wins | Provider work and accounting boundary |
+| --- | --- |
+| `queued`, never claimed | No inference was transmitted by InferCrane. Provider inference billing should be absent, but control-plane/database costs are outside request accounting. |
+| `running`, not yet transmitted | Fencing prevents later result commit; provider billing should be absent only if request evidence and provider logs prove no transmission. |
+| `running`, already transmitted | Cancellation is terminal in InferCrane but may not stop provider execution or billing. |
+| `succeeded` or `failed` before cancellation | The existing terminal outcome wins; cancellation does not reverse provider work. |
+
+For an external binding, the hard worst-case request/cost reservation is consumed before
+transmission and is not a settled invoice or refundable billing record. For self-hosted capacity,
+GPU cost continues while the replica exists regardless of one job's cancellation. Verify actual
+spend with the provider's authoritative billing/export for the same time window and resource/model
+identity. InferCrane currently has no provider-neutral per-job billing importer.
+
+Collect the job JSON, request ID when present, Request Inspector record, endpoint binding, provider
+operation/resource identity, cancellation timestamp, and provider usage/billing record. If
+transmission or billing cannot be proven, report it as unavailable; do not claim saved cost.
 
 ## Content and keys
 
@@ -101,3 +406,4 @@ authorized to receive that content.
 - Results are limited to 32 MiB.
 - Async streaming is not exposed; use synchronous streaming when incremental tokens matter.
 - Cross-key decryption and automatic key re-encryption are not currently implemented.
+- Tenant requests-per-minute is supported through the control API; tenant tokens-per-minute is not.

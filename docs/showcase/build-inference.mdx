@@ -10,8 +10,18 @@ InferCrane turns a model reference and a serving plan into a durable deployment.
 intent to the control plane and can disconnect safely while provider allocation, artifact transfer,
 runtime startup, readiness, and route publication continue.
 
+<Warning>
+`deploy` can create billable provider resources. Start with `plan`, complete the selected
+[provider setup and qualification review](/provider-setup).
+InferCrane does not fabricate a price when the provider has not supplied trustworthy cost evidence.
+</Warning>
+
+For the first real deployment, the selected adapter's setup path must include credential mounting,
+production control-plane startup, read-only preflight, durable reconnection, teardown, and direct
+provider-inventory verification. RunPod is only one independently qualified adapter.
+
 ```bash
-infercrane deploy Qwen/Qwen3-8B
+infercrane deploy Qwen/Qwen3-8B --name qwen-production
 ```
 
 If you want a reviewed immutable starting point first:
@@ -80,18 +90,27 @@ artifact and the evidence attached to its serving plan—not a marketing list of
 
 The short path uses configured defaults. Make infrastructure choices explicit when you need them:
 
+<Warning>
+The second command below creates provider capacity and can incur cost. The first command is the
+required side-effect-free review. For a deliberately small first qualification, keep exactly one
+replica with `--min 1 --max 1`, confirm the provider's own price/stock view, and record the returned
+operation ID before running `deploy`. A replica ceiling is not a monetary budget.
+</Warning>
+
 ```bash
 infercrane plan Qwen/Qwen3-8B \
+  --name qwen-production \
   --cloud runpod \
   --gpu L40S \
   --min 1 \
-  --max 4
+  --max 1
 
 infercrane deploy Qwen/Qwen3-8B \
+  --name qwen-production \
   --cloud runpod \
   --gpu L40S \
   --min 1 \
-  --max 4
+  --max 1
 ```
 
 `plan` is side-effect free. `deploy` returns a durable operation unless `--wait` is supplied. Closing
@@ -99,14 +118,197 @@ the terminal stops only the local watch; use the returned operation ID to reconn
 
 ```bash
 infercrane operation watch OPERATION_ID
-infercrane status qwen3-8b
-infercrane events qwen3-8b
+infercrane status qwen-production
+infercrane events qwen-production
 ```
 
+## Diagnose readiness before changing the plan
+
+Do not submit a second deployment when readiness fails. Preserve the operation and provider
+identity, then collect:
+
+```bash
+infercrane status qwen-production
+infercrane events qwen-production --output json
+infercrane logs qwen-production --since 1h
+infercrane inspect qwen-production --output json
+infercrane doctor qwen-production --window 1h
+infercrane operation inspect OPERATION_ID --output json
+```
+
+| Evidence | Safe action |
+| --- | --- |
+| Waiting for provider capacity with one persisted identity | Reattach to the original operation. Do not redeploy or change its idempotency key. |
+| Container or artifact still progressing | Inspect provider/runtime logs and fresh cache evidence; wait within the approved timeout and cost bound. |
+| Runtime unhealthy or expected model absent | Verify immutable model commit, runtime version/arguments, memory/topology, and artifact access. Correct it through a new reviewed spec, not an in-container edit. |
+| Candidate revision permanently unhealthy | Preserve operation and Guard evidence, then reject the exact candidate and confirm candidate-only cleanup. |
+| Initial deployment has no healthy active revision | Cancel the original operation only when intended so its cleanup handler can run; then use `delete --plan` and explicit deletion after ownership is unambiguous. |
+| Provider identity or inventory is missing/mismatched | Stop mutation. Resolve ownership manually; do not create, adopt, or delete by name alone. |
+
+Retry the same operation or desired state only with the original idempotency key. After a terminal
+failure, choose between an immutable corrected candidate and plan-first deletion. Never erase
+PostgreSQL to clear readiness state. Cleanup is complete only when InferCrane shows no deployment or
+orphan and direct provider inventory proves zero run-owned resources. An uncertain create or delete
+must keep the same persisted replica identity and operation; never submit a replacement by name.
+
+## Clean up the exact deployment
+
+Deletion can terminate billable provider capacity. First render the semantic plan, verify the
+deployment name and every persisted provider identity, then submit one durable delete operation:
+
+```bash
+infercrane delete qwen-production --plan
+
+infercrane delete qwen-production \
+  --yes \
+  --wait \
+  --idempotency-key qwen-production-cleanup-01
+
+infercrane deployments --output json
+infercrane orphans --output json
+```
+
+Do not guess a resource ID, retry with a different idempotency key, or delete by provider display
+name. `delete --plan` is side-effect free; `--yes` authorizes termination. InferCrane inventory is
+necessary but not sufficient: use the selected [provider guide](/provider-setup) to query its
+authoritative inventory read-only and prove that every run-owned pod, instance, endpoint, service,
+and attached billable resource reached zero. If provider deletion is eventually consistent, keep
+watching the same durable operation and inventory; do not create replacement capacity during
+cleanup. Unknown ownership is a stop condition: preserve durable state, retry only read-only
+observation, and never create, adopt, or delete until one authoritative identity or absence is
+proven.
+
+Capture canonical provider inventory before deployment and after deletion with the command for the
+selected adapter. In a shared account, require equality with the baseline rather than global zero;
+never delete another deployment's resource:
+
+<Tabs>
+  <Tab title="RunPod">
+    ```bash
+    runpod_key=$(tr -d '\r\n' < "$RUNPOD_KEY_FILE")
+    curl -fsS -H "Authorization: Bearer $runpod_key" \
+      https://rest.runpod.io/v1/pods |
+      jq -S '[.[] | select((.name // "") | startswith("infercrane-")) |
+        {id,name,desiredStatus}] | sort_by(.id)'
+    curl -fsS -H "Authorization: Bearer $runpod_key" \
+      'https://rest.runpod.io/v1/endpoints?includeWorkers=true' |
+      jq -S '[.[] | select((.name // "") | startswith("infercrane-")) |
+        {id,name,workersMin,workersMax}] | sort_by(.id)'
+    unset runpod_key
+    ```
+  </Tab>
+  <Tab title="AWS EC2">
+    ```bash
+    aws ec2 describe-instances --region "$INFERCRANE_AWS_REGION" \
+      --filters Name=tag:infercrane:managed,Values=true \
+        Name=instance-state-name,Values=pending,running,stopping \
+      --query 'Reservations[].Instances[].{id:InstanceId,state:State.Name}' \
+      --output json --no-cli-pager | jq -S 'sort_by(.id)'
+    ```
+
+    Run this with the same assumed-role identity validated by `doctor --aws`; an ambient account
+    identity is not equivalent.
+  </Tab>
+  <Tab title="GCP Compute">
+    ```bash
+    gcloud compute instances list \
+      --project "$INFERCRANE_GCP_PROJECT" \
+      --filter='labels.infercrane-managed=true' \
+      --format=json --quiet |
+      jq -S '[.[] | {id,name,status,zone}] | sort_by(.id)'
+    ```
+  </Tab>
+  <Tab title="Kubernetes or KServe">
+    ```bash
+    kubectl --context "$INFERCRANE_KUBERNETES_CONTEXT" \
+      --namespace "$INFERCRANE_KUBERNETES_NAMESPACE" \
+      get deployment,service \
+      -l app.kubernetes.io/managed-by=infercrane -o name
+
+    kubectl --context "$INFERCRANE_KUBERNETES_CONTEXT" \
+      --namespace "$INFERCRANE_KUBERNETES_NAMESPACE" \
+      get inferenceservices.serving.kserve.io \
+      -l app.kubernetes.io/managed-by=infercrane -o name
+    ```
+
+    Run the KServe query only when the CRD is installed; API absence is not an empty KServe
+    inventory.
+  </Tab>
+</Tabs>
+
+Any authentication, authorization, parsing, pagination, or API failure makes cleanup unproven. An
+empty successful result is distinct from a command that could not see inventory.
+
+## Before opening a shared endpoint
+
+A ready GPU is not the complete production boundary. Use a non-bootstrap, tenant-scoped credential,
+persist endpoint admission, set the distributed tenant request ceiling, and qualify only the
+protocols your exact runtime/model pair claims:
+
+1. [Authentication and secret boundaries](/security)
+2. [Admission and tenant quota procedure](/features/admission-async)
+3. [Protocol and cancellation qualification](/features/protocols#qualify-streaming-cancellation-quotas-and-retries-together)
+4. [Autoscaling and active-stream qualification](/features/autoscaling#qualify-scale-up-streaming-drain-and-scale-down)
+5. [Request Inspector evidence](/features/adoption-diagnostics#inspect-one-request)
+
+If authentication, quota exhaustion, request correlation, or a required protocol cannot be proven
+in the target environment, keep the endpoint private and the candidate unpromoted. Local fixture
+success does not upgrade an unqualified runtime/provider combination.
+
+## Send the first real request
+
+Wait until `status` reports the deployment ready before sending application traffic. The application
+uses the control-plane URL as its stable OpenAI-compatible base URL and the deployment name as
+`model`; provider worker addresses remain infrastructure details:
+
+<CodeGroup>
+```bash InferCrane CLI
+infercrane status qwen-production
+infercrane request qwen-production \
+  --message "Explain continuous batching in one sentence."
+```
+
+```bash cURL
+curl -i -fsS "$INFERCRANE_URL/v1/chat/completions" \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "qwen-production",
+    "messages": [{"role":"user","content":"Explain continuous batching in one sentence."}]
+  }'
+```
+
+```python Python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="https://infercrane.example/v1",
+    api_key="ISSUED_INFERCRANE_CREDENTIAL",
+)
+response = client.chat.completions.create(
+    model="qwen-production",
+    messages=[{"role": "user", "content": "Explain continuous batching."}],
+)
+print(response.choices[0].message.content)
+```
+</CodeGroup>
+
+Copy the `X-Request-Id` response header from cURL to prove which revision and target served it:
+
+```bash
+infercrane request inspect REQUEST_ID --output json
+```
+
+The real provider/runtime/model/GPU combination remains unqualified until its separate acceptance
+evidence passes; a successful single request is readiness evidence, not a production performance or
+reliability claim.
+
 <Note>
-RunPod is one currently qualified adapter, not the InferCrane domain model. AWS BYOC, Kubernetes,
-existing targets, and future providers implement the same provider contract with independent
-qualification evidence. Check the [capability matrix](/project-status) before selecting a backend.
+RunPod is the first real-infrastructure acceptance target, not the InferCrane domain model. Its
+elastic SkyPilot adapter remains **experimental** until the credentialed lifecycle and zero-leak
+gate is complete. AWS BYOC, Kubernetes, existing targets, and future providers implement the same
+provider contract with independent evidence. Check the [capability matrix](/project-status) before
+selecting a backend.
 </Note>
 
 ## Bring an immutable runtime when a model flag is not enough
@@ -174,7 +376,7 @@ Use the same declarative path for updates:
 ```bash
 infercrane plan deployment-v2.yaml
 infercrane apply deployment-v2.yaml --idempotency-key release-2026-08-13
-infercrane rollout inspect qwen-prod
+infercrane rollout inspect qwen-production
 ```
 
 InferCrane creates an immutable candidate and preserves the active revision until promotion policy is

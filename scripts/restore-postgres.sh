@@ -33,4 +33,4 @@ started=$(date -u +%s)
 pg_restore --clean --if-exists --no-owner --no-privileges --dbname="$INFERCRANE_DATABASE_URL" "$1"
 psql "$INFERCRANE_DATABASE_URL" -X -A -t -v ON_ERROR_STOP=1 -c 'SELECT count(*) FROM schema_migrations' >/dev/null
 finished=$(date -u +%s)
-echo "restore completed into $actual_database in $((finished-started))s; restart InferCrane and verify /readyz plus provider reconciliation"
+echo "restore completed into $actual_database in $((finished-started))s; keep InferCrane stopped until offline state and provider ownership reconcile"

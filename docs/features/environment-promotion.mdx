@@ -43,3 +43,8 @@ infercrane endpoint promote coder-production PLAN_ID
 
 The destination Release Guard remains the decision authority. A concurrent promotion, occupied
 candidate slot, different logical model, or missing source plan fails safely.
+
+When the serving-plan change also changes client or protocol behavior, follow the
+[client and protocol rollout runbook](/runbooks/protocol-rollout). Environment promotion stages
+immutable configuration; it does not itself prove buffered responses, SSE termination, error
+schemas, cancellation, or a particular SDK version.

@@ -5,7 +5,8 @@ neutral; SkyPilot cluster IDs and generated task details are retained only as in
 adapter metadata.
 
 ```bash
-go install github.com/infercrane/infercrane/cmd/infercrane@latest
+go build -o ./bin/infercrane ./cmd/infercrane
+export PATH="$PWD/bin:$PATH"
 # Install the supported SkyPilot and vLLM Router CLIs separately.
 sky check
 export INFERCRANE_API_KEY='<strong-random-value>'

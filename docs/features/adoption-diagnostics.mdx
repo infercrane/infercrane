@@ -8,23 +8,13 @@ replacing it. Adoption is incremental and does not silently transfer lifecycle o
 
 ## Adopt an existing workload
 
-<CodeGroup>
-```bash Observe only
+```bash
 infercrane adopt endpoint coder-production \
   --url https://vllm.internal.example/v1 \
   --model coder \
   --upstream-model Qwen/Qwen3-8B \
   --ownership observe-only
 ```
-
-```bash Traffic managed
-infercrane adopt endpoint coder-production \
-  --url https://vllm.internal.example/v1 \
-  --model coder \
-  --upstream-model Qwen/Qwen3-8B \
-  --ownership traffic-managed
-```
-</CodeGroup>
 
 `observe-only` records health and evidence but never publishes a route. `traffic-managed` may route
 through the existing target after its qualified runtime health check succeeds. Neither mode creates,
@@ -34,7 +24,42 @@ InferCrane Deployment binding.
 The URL, source, logical model and physical upstream model form an immutable adoption identity. A
 safe retry returns the same adoption; changing immutable identity fails with a conflict.
 
+## Diagnose an adapter qualification gap
+
+```bash
+infercrane integrations --output json
+infercrane models inspect MODEL_CATALOG_NAME --output json
+infercrane observe coder-production --output json
+infercrane doctor coder-production --window 1h
+```
+
+Read the evidence as an intersection, not a checklist of independently implemented parts:
+
+- `registered` means an adapter exists; it is not qualification.
+- `local-qualified` proves the maintained hermetic contract only.
+- `experimental` or `in qualification` requires the named real environment evidence.
+- a model recipe proves immutable configuration and license metadata, not GPU fit or protocol behavior.
+- `unknown` capability or missing exact-combination evidence fails closed.
+
+Use [compatibility](/compatibility#check-one-exact-serving-combination) to identify the missing
+provider/runtime/mode/model/accelerator evidence. If lifecycle qualification is absent but the
+existing endpoint is healthy, keep `observe-only`; move to `traffic-managed` only after direct
+protocol qualification. Do not choose `lifecycle-managed` for an externally owned workload.
+
+For a candidate revision that already exists, follow the
+[retry-safe provisioning and validation procedure](/features/release-guard#retry-provisioning-or-validation-safely).
+It reuses the persisted revision and provider identities, checks orphan inventory, and preserves the
+active route. Adoption is the fallback only when the workload is genuinely externally owned; it is
+not a way to hide a failed InferCrane lifecycle operation.
+
 Promote ownership explicitly after reviewing health evidence:
+
+<Warning>
+The next command publishes a route through InferCrane. Verify upstream model identity, every client
+protocol, authentication behavior, streaming termination, and the ownership boundary first. It does
+not transfer create, scale, update, or delete ownership and does not change the existing upstream
+URL; keep clients on that URL until the managed path passes qualification.
+</Warning>
 
 ```bash
 infercrane adopt promote coder-production --ownership traffic-managed
@@ -44,11 +69,58 @@ infercrane adopt promote coder-production --ownership traffic-managed
 
 ```bash
 infercrane request inspect req_fa098a6488ec2bedcf025844adda5f45
+infercrane request inspect req_fa098a6488ec2bedcf025844adda5f45 --output json
 ```
 
-The result identifies routing identity, timings, tokens, retries, fallback reason, status and error
-class. `content_recorded` is always `false`: prompts, outputs and authorization values are not part
-of request evidence.
+Use the `X-Request-Id` response header as the lookup key. The JSON result reconstructs one persisted
+request without reading prompt or output content:
+
+| Evidence | Fields |
+| --- | --- |
+| Stable application identity | `logical_model`, `endpoint`, `environment`, `serving_plan` |
+| Selected route | `binding`, `deployment`, `revision`, `target`, `provider`, `runtime`, `compute_mode` |
+| Timing | `queue_ms`, `ttft_ms`, `generation_ms`, `latency_ms` |
+| Usage | `input_tokens`, `output_tokens`, `streaming` |
+| Outcome | `status_code`, `retry_count`, `fallback_reason`, `error_type` |
+| Privacy | `content_recorded: false` |
+
+For standalone managed replicas, `target` identifies the selected registered replica target. Some
+provider-native Serverless and external APIs do not expose a worker identity; InferCrane leaves that
+boundary unavailable instead of inventing a replica ID. Missing upstream timing or token fields are
+also reported as unavailable.
+
+`content_recorded` is always `false`: prompts, outputs, tool arguments, embedding vectors, and
+authorization values are not part of request evidence. Request lookup is tenant-scoped; an ID from
+another tenant is returned as not found rather than disclosed.
+
+### When the request ID is missing
+
+InferCrane does not currently expose a broad request search endpoint. Without `X-Request-Id`, it
+cannot prove that one request record belongs to a particular client call. Do not infer an individual
+route from aggregate metrics.
+
+Preserve the incident window and inspect only evidence that can still be attributed safely:
+
+```bash
+infercrane observe coder-production --window 1h --output json
+infercrane endpoint inspect coder-production --output json
+infercrane rollout inspect coder-runtime --output json
+infercrane events coder-runtime --output json
+infercrane logs coder-runtime --since 1h
+curl -fsS "$INFERCRANE_URL/api/v1/audit-events?limit=100" \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY"
+```
+
+Record endpoint, active/candidate plan, revision, event timestamps, aggregate sample window, status,
+and explicitly unavailable request-level fields. Keep the current active plan and policy unchanged:
+do not run `endpoint promote`, `rollout promote`, `admission set`, or another mutation whose decision
+depends on the missing correlation. If policy requires request-level auditability, the correct
+outcome is an unauditable incident and a stopped change—not a reconstructed request ID. Capture
+`X-Request-Id` at the application or ingress boundary before retrying the qualification.
+
+For slow or unreachable providers, uncertain buffered/streaming outcomes, duplicate-submission
+prevention, and provider ownership reconciliation, use the
+[Provider outage runbook](/runbooks/provider-outage).
 
 ## Deterministic Doctor
 

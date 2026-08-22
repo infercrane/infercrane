@@ -56,6 +56,10 @@ if PATH="$bin:$PATH" RESTORE_CALLS="$temporary/restore.calls" FAKE_LIVE_INSTANCE
 fi
 test ! -s "$temporary/restore.calls"
 
-PATH="$bin:$PATH" RESTORE_CALLS="$temporary/restore.calls" INFERCRANE_DATABASE_URL=postgres://fixture INFERCRANE_ALLOW_RESTORE=yes INFERCRANE_RESTORE_TARGET_DATABASE=restore_target "$root/scripts/restore-postgres.sh" "$temporary/backup.dump" >/dev/null
+restore_output=$(PATH="$bin:$PATH" RESTORE_CALLS="$temporary/restore.calls" INFERCRANE_DATABASE_URL=postgres://fixture INFERCRANE_ALLOW_RESTORE=yes INFERCRANE_RESTORE_TARGET_DATABASE=restore_target "$root/scripts/restore-postgres.sh" "$temporary/backup.dump")
 test "$(wc -l <"$temporary/restore.calls" | tr -d ' ')" = 1
+case "$restore_output" in
+  *"keep InferCrane stopped until offline state and provider ownership reconcile"*) ;;
+  *) echo "restore completion message allowed an unsafe immediate restart" >&2; exit 1 ;;
+esac
 echo "Backup/restore approval, target identity, live-member, archive, and checksum safety passed."

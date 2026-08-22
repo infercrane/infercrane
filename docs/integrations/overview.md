@@ -13,6 +13,93 @@ SkyPilot, or vLLM. External systems enter through capability-specific contracts.
 infercrane integrations
 ```
 
+Before selecting an adapter, run the [exact-combination compatibility check](/compatibility#check-one-exact-serving-combination):
+
+```bash
+infercrane integrations --output json
+infercrane models inspect MODEL_CATALOG_NAME --output json
+infercrane plan MODEL_REPOSITORY --cloud PROVIDER --gpu ACCELERATOR --output json
+```
+
+All three commands are read-only. If the release evidence does not name the complete provider,
+runtime, compute mode, immutable model, accelerator, and environment combination, treat it as
+unqualified before committing money or a migration plan.
+
+## Keep sensitive inputs on self-hosted infrastructure
+
+Use a serving plan that contains only a self-hosted deployment or a directly adopted self-hosted
+target. Do not add an external provider connection or an external fallback binding.
+
+For a new InferCrane-managed deployment, qualify the exact combination before creating billable
+capacity. `plan` is read-only; `deploy` is not:
+
+```bash
+infercrane integrations --output json
+infercrane models inspect MODEL_CATALOG_NAME --output json
+infercrane plan MODEL_REPOSITORY \
+  --cloud PROVIDER \
+  --gpu ACCELERATOR \
+  --output json
+```
+
+Stop if those results do not identify the intended adapter, runtime, compute mode, immutable model,
+accelerator, environment, and required real-system evidence. Otherwise deploy and wait for the
+durable operation to reach readiness before binding it:
+
+```bash
+infercrane deploy MODEL_REPOSITORY \
+  --name private-coder-v1 \
+  --cloud PROVIDER \
+  --gpu ACCELERATOR
+
+infercrane status private-coder-v1 --watch
+
+infercrane logical-model create private-coder
+infercrane endpoint create private-coder-production \
+  --model private-coder \
+  --environment production
+
+infercrane endpoint bind private-coder-production \
+  --name self-hosted \
+  --deployment private-coder-v1 \
+  --ownership lifecycle-managed
+
+infercrane endpoint plan private-coder-production \
+  --policy manual \
+  --bindings self-hosted
+
+infercrane endpoint inspect private-coder-production
+```
+
+For a vLLM or SGLang endpoint you already operate, begin read-only and transfer traffic ownership
+only after inspection:
+
+```bash
+infercrane connect https://vllm.internal.example/v1 \
+  --as private-coder-production \
+  --type vllm \
+  --model company/private-coder
+
+infercrane observe private-coder-production
+infercrane doctor private-coder-production
+infercrane adopt promote private-coder-production --ownership traffic-managed
+```
+
+The first plan is a single manual binding, so there is no fallback destination that can receive
+request content. Prompt and output bodies are not recorded by default; verify network controls,
+runtime logging, and the adopted service itself according to your security policy.
+
+<Warning>
+Do not use a LiteLLM route with external upstreams for a strict self-hosted-only requirement.
+InferCrane can govern the connection to a user-managed LiteLLM gateway, but LiteLLM owns routing
+inside that gateway. InferCrane cannot prove that its internal routes keep data local. An endpoint
+binding that uses `--acknowledge-external-data --enable-external` explicitly permits request data to
+leave controlled infrastructure; request and cost limits bound usage, not data residency.
+</Warning>
+
+See [Stable endpoints and serving plans](/features/endpoints) for the binding model and
+[LiteLLM gateway](/integrations/litellm) for the responsibility boundary.
+
 This authenticated read returns the compiled Provider Contract, Runtime Contract, and Composition
 Contract versions, registered adapters, capabilities, ownership boundaries, and separate local
 versus real-system qualification states. It never upgrades registration or hermetic simulation into

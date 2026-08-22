@@ -38,7 +38,7 @@ Tokens live in `style.css`; `docs.json` contains the subset Mintlify owns. The i
 | Primary text | `#F3F1EA` | `#16181B` |
 | Secondary text | `#9CA3AD` | `#626A73` |
 | Border | `#242A31` | `#E5E2DC` |
-| Accent | `#60A5FA` | `#2563EB` |
+| Accent | `#60A5FA` | `#1E40AF` |
 | Healthy | `#44D7B6` | `#18A98C` |
 | Information | `#59A8FF` | `#297ED1` |
 | Warning | `#F5B942` | `#A66C00` |
@@ -46,7 +46,7 @@ Tokens live in `style.css`; `docs.json` contains the subset Mintlify owns. The i
 
 ## Typography
 
-Use Space Grotesk for headings and body until licensed Neue Alte Grotesk files are supplied. Use Geist Mono, then the system monospace fallback, for commands, code, identifiers, measurements, and compact system labels. Do not commit unlicensed fonts.
+Use Albert Sans for headings and body, followed by Avenir Next, Helvetica Neue, Arial, and the system sans-serif fallback. Use Geist Mono, then the system monospace fallback, for commands, code, identifiers, measurements, and compact system labels. Do not commit unlicensed fonts.
 
 Use regular body copy and medium or semibold headings. Keep paragraphs short. Avoid all-caps except short navigation groups, badges, and infrastructure labels.
 
