@@ -119,6 +119,12 @@ if INFERCRANE_V1_ACCEPTANCE_STATE_DIR="$temporary/portable-gcp" INFERCRANE_ACCEP
 fi
 grep -q 'portable provider acceptance requires --approve-paid-resources' "$temporary/unapproved-gcp.log"
 
+# Secret-file umask must not leak into the later bind-mounted DeploymentSpecs.
+# The production container runs as a distinct UID and must be able to read the
+# rendered non-secret specs on Linux hosts.
+grep -Fq '(umask 077; openssl rand -hex 24 >"$password_file")' "$root/scripts/portable-provider-acceptance.sh"
+grep -Fq 'chmod 0644 "$spec_dir/$output_name"' "$root/scripts/portable-provider-acceptance.sh"
+
 mkdir -p "$temporary/v1-report/stale/stages"
 for stage in runpod aws kubernetes; do
   printf '%s\n' stale-commit >"$temporary/v1-report/stale/stages/$stage.passed"

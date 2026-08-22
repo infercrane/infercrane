@@ -26,8 +26,7 @@ password_file="$state/postgres-password"
 key_file=${INFERCRANE_V1_API_KEY_FILE:?set INFERCRANE_V1_API_KEY_FILE to the credential also installed in the worker secret}
 [ -r "$key_file" ] || { echo "INFERCRANE_V1_API_KEY_FILE is not readable" >&2; exit 1; }
 if [ ! -s "$password_file" ]; then
-  umask 077
-  openssl rand -hex 24 >"$password_file"
+  (umask 077; openssl rand -hex 24 >"$password_file")
 fi
 api_key=$(tr -d '\r\n' <"$key_file")
 [ "${#api_key}" -ge 32 ] || { echo "qualification API key must contain at least 32 characters" >&2; exit 1; }
@@ -151,6 +150,10 @@ render_spec() {
     { print }
     END { if (!replaced) exit 2 }
   ' "$source_path" >"$spec_dir/$output_name"
+  # DeploymentSpecs contain references, not raw credentials, and the runtime
+  # container uses a different UID from the qualification host. Keep the
+  # rendered mount readable without weakening the password/key files above.
+  chmod 0644 "$spec_dir/$output_name"
 }
 
 smoke_openai() {
