@@ -47,7 +47,7 @@ jobs:
         run: |
           [[ "$VLLM_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.][A-Za-z0-9]+)*$ ]]
           [[ "$VLLM_BASE_IMAGE" =~ ^vllm/vllm-openai@sha256:[0-9a-f]{64}$ ]]
-      - uses: docker/metadata-action@v5
+      - uses: docker/metadata-action@v6
         id: meta
         with:
           images: ghcr.io/infercrane/vllm-runpod
