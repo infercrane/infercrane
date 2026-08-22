@@ -111,14 +111,25 @@ func (r *Reconciler) Once(ctx context.Context) error {
 	}
 	active := make(map[string]struct{}, len(deployments))
 	for _, d := range deployments {
+		if d.DesiredState == "deleted" {
+			continue
+		}
 		active[d.TenantID+"\x00"+d.Name] = struct{}{}
 	}
-	for _, stale := range r.Routes.List() {
+	for _, stale := range r.Routes.ConcreteRoutes() {
 		if _, ok := active[stale.TenantID+"\x00"+stale.Alias]; !ok {
 			r.Routes.RemoveForTenant(stale.TenantID, stale.Alias)
 		}
 	}
 	for _, d := range deployments {
+		// SubmitDeploymentDelete persists desired_state=deleted before the
+		// cleanup worker touches provider capacity. Withdraw the concrete route
+		// immediately and never let an ordinary reconciliation pass republish it;
+		// the delete worker uses this in-memory boundary as its drain fence.
+		if d.DesiredState == "deleted" {
+			r.Routes.RemoveForTenant(d.TenantID, d.Name)
+			continue
+		}
 		resolved, err := r.Store.ResolveForTenant(ctx, d.TenantID, d.Name)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -407,6 +418,9 @@ func (r *Reconciler) compileEndpoints(ctx context.Context, deployments []domain.
 	}
 	byTenant := make(map[string]map[string]domain.Deployment)
 	for _, deployment := range deployments {
+		if deployment.DesiredState == "deleted" {
+			continue
+		}
 		if byTenant[deployment.TenantID] == nil {
 			byTenant[deployment.TenantID] = make(map[string]domain.Deployment)
 		}

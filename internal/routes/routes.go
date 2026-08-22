@@ -257,6 +257,29 @@ func (d *Directory) ListForTenant(tenant string) []Snapshot {
 	return out
 }
 
+// ConcreteRoutes returns lifecycle-owned deployment routes without applying
+// endpoint alias precedence. Reconciliation must use this view when withdrawing
+// stale deployments: an endpoint with the same alias may otherwise hide the
+// concrete route that deletion is waiting to drain.
+func (d *Directory) ConcreteRoutes() []Snapshot {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	out := make([]Snapshot, 0, len(d.items))
+	for _, route := range d.items {
+		out = append(out, route)
+	}
+	slices.SortFunc(out, func(a, b Snapshot) int {
+		if a.Alias < b.Alias {
+			return -1
+		}
+		if a.Alias > b.Alias {
+			return 1
+		}
+		return 0
+	})
+	return out
+}
+
 func (d *Directory) Remove(alias string) {
 	d.RemoveForTenant("global", alias)
 }
