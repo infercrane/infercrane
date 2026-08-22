@@ -20,6 +20,17 @@ done
 grep -Fq 'step repository env -u INFERCRANE_TEST_DATABASE_URL make -C "$root" verify' \
   "$root/scripts/dev-check.sh"
 
+# The empty-database lifecycle harness must not invoke a stage function in an
+# `if` condition. POSIX shells suppress errexit inside that function and can
+# otherwise convert a failed assertion followed by cleanup into a green result.
+grep -Fq '(set -e; "$@")' "$root/scripts/qualify-user-lifecycle.sh"
+grep -Fq 'source_digest=' "$root/scripts/qualify-user-lifecycle.sh"
+if grep -Fq 'if "$@"' "$root/scripts/qualify-user-lifecycle.sh"; then
+  echo "user lifecycle stages can suppress errexit" >&2
+  exit 1
+fi
+grep -Fq 'entrypoint: ["infercrane", "serve"]' "$root/compose.acceptance-empty.yaml"
+
 state="$temporary/state"
 mkdir -p "$state/.paid.lock"
 printf '%s\n' "$$" >"$state/.paid.lock/pid"

@@ -61,6 +61,7 @@ make verify           # format check, generated-doc check, tests, vet, and build
 make dev-check        # fast repository and provider-contract feedback
 make dev-check-full   # isolated Docker, failure, production-config, and docs gates
 make test-product     # black-box first-value journey through public product surfaces
+make test-user-lifecycle # clean install and empty-PostgreSQL zero-to-operated journey
 make acceptance-product # all local black-box product journeys and release evidence
 make qualify-product  # resumable whole-product local qualification and evidence matrix
 make qualify-product-nightly # fuzz, shuffled race soak, and KWOK fleet simulation
