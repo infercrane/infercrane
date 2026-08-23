@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -150,6 +151,14 @@ func TestAWSEC2LifecycleIsIdempotentPrivateAndTagged(t *testing.T) {
 	if !strings.Contains(userData, `-e VLLM_API_KEY="$worker_key"`) || !strings.Contains(userData, "'Qwen/Qwen3-8B' '--port' '8000'") || strings.Contains(userData, "--api-key") || strings.Contains(userData, "--model") {
 		t.Fatalf("vLLM credential must be injected through a non-argv environment variable:\n%s", userData)
 	}
+	if !strings.Contains(userData, "infercrane_stage identity_start") || !strings.Contains(userData, "infercrane_stage identity_ready") || !strings.Contains(userData, "docker image inspect '") || !strings.Contains(userData, "infercrane_stage image_cache_hit") || !strings.Contains(userData, "infercrane_stage image_pull_complete") || !strings.Contains(userData, "infercrane_stage runtime_start") {
+		t.Fatalf("AWS bootstrap does not reuse prewarmed images or expose startup stages:\n%s", userData)
+	}
+	command := exec.Command("sh", "-n")
+	command.Stdin = strings.NewReader(userData)
+	if output, syntaxErr := command.CombinedOutput(); syntaxErr != nil {
+		t.Fatalf("AWS user data is not valid POSIX shell: %v: %s\n%s", syntaxErr, output, userData)
+	}
 	if err := provider.DeleteReplica(context.Background(), second); err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +180,7 @@ func TestAWSEC2PortableWorkloadUsesDigestArgvAndSecretEnvironment(t *testing.T) 
 			userData = runner.runInstanceArgs[i+1]
 		}
 	}
-	for _, want := range []string{"docker pull '" + spec.Workload.Image + "'", `-e INFERCRANE_WORKER_API_KEY="$worker_key"`, "'serve' '--model' 'Qwen/Qwen3-8B' '--label' 'two words' '--port' '9000'", `docker logs --follow "$container_id" >/dev/console 2>&1 &`} {
+	for _, want := range []string{"docker image inspect '" + spec.Workload.Image + "'", "docker pull '" + spec.Workload.Image + "'", "infercrane_stage image_cache_hit", `-e INFERCRANE_WORKER_API_KEY="$worker_key"`, "'serve' '--model' 'Qwen/Qwen3-8B' '--label' 'two words' '--port' '9000'", `docker logs --follow "$container_id" >/dev/console 2>&1 &`} {
 		if !strings.Contains(userData, want) {
 			t.Fatalf("user data missing %q:\n%s", want, userData)
 		}

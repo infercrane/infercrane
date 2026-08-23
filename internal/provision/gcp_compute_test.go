@@ -173,7 +173,7 @@ func TestGCPComputePortableWorkloadExpandsArgumentsSafely(t *testing.T) {
 func TestGCPComputeStartupUsesWorkloadIdentityWithoutWorkerGcloud(t *testing.T) {
 	provider := testGCPCompute(&fakeGCPRunner{})
 	script := provider.startup(ReplicaSpec{Model: "Qwen/Qwen3-8B", ModelRevision: strings.Repeat("a", 40)}, 8000)
-	for _, required := range []string{"metadata.google.internal", "Metadata-Flavor: Google", "secretmanager.googleapis.com", "base64 -d", "unset token_json access_token secret_json secret_data"} {
+	for _, required := range []string{"metadata.google.internal", "Metadata-Flavor: Google", "secretmanager.googleapis.com", "base64 -d", "unset token_json access_token secret_json secret_data", "infercrane_stage identity_start", "infercrane_stage identity_ready", "docker image inspect", "infercrane_stage image_cache_hit", "infercrane_stage image_pull_complete", "infercrane_stage runtime_start"} {
 		if !strings.Contains(script, required) {
 			t.Fatalf("startup script missing %q: %s", required, script)
 		}

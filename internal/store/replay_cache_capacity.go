@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
@@ -205,8 +206,19 @@ func (s *Store) ArtifactCacheState(ctx context.Context, tenant, artifactID strin
 }
 
 func (s *Store) RecordCapacityOperation(ctx context.Context, row domain.CapacityOperation) (domain.CapacityOperation, error) {
-	if row.TenantID == "" || row.Provider == "" || row.Runtime == "" || row.ComputeMode == "" || row.Operation == "" || row.ResourceKey == "" || row.StartedAt.IsZero() || row.CompletedAt.Before(row.StartedAt) {
+	if row.TenantID == "" || row.Provider == "" || row.Runtime == "" || row.ComputeMode == "" || row.Operation == "" || row.ResourceKey == "" || row.StartedAt.IsZero() {
 		return row, errors.New("complete capacity operation is required")
+	}
+	// Production callers omit completion so both ends of a multi-host duration
+	// stay in the PostgreSQL clock domain. Historical/test ingestion may supply
+	// an explicit completion timestamp.
+	if row.CompletedAt.IsZero() {
+		if err := s.QueryRowContext(ctx, `SELECT NOW()`).Scan(&row.CompletedAt); err != nil {
+			return row, fmt.Errorf("read capacity completion clock: %w", err)
+		}
+	}
+	if row.CompletedAt.Before(row.StartedAt) {
+		return row, errors.New("capacity completion precedes its durable start")
 	}
 	switch row.Outcome {
 	case "succeeded", "capacity_unavailable", "runtime_failed", "provider_failed", "pending":
@@ -229,9 +241,32 @@ func (s *Store) CapacityIntelligence(ctx context.Context, tenant string, window 
 	if window <= 0 || window > 365*24*time.Hour {
 		return nil, errors.New("capacity window must be positive and at most one year")
 	}
-	end := time.Now().UTC()
+	var end time.Time
+	if err := s.QueryRowContext(ctx, `SELECT NOW()`).Scan(&end); err != nil {
+		return nil, fmt.Errorf("read capacity window clock: %w", err)
+	}
+	end = end.UTC()
 	start := end.Add(-window)
-	rows, err := s.QueryContext(ctx, `SELECT provider,runtime,compute_mode,region,gpu,COUNT(*),COUNT(*) FILTER(WHERE outcome='succeeded'),COUNT(*) FILTER(WHERE outcome='capacity_unavailable'),COUNT(*) FILTER(WHERE outcome='runtime_failed'),AVG(CASE WHEN outcome='succeeded' THEN 1.0 ELSE 0.0 END),percentile_cont(0.5) WITHIN GROUP(ORDER BY duration_seconds),percentile_cont(0.95) WITHIN GROUP(ORDER BY duration_seconds) FROM capacity_operations WHERE tenant_id=? AND completed_at>=? AND completed_at<=? GROUP BY provider,runtime,compute_mode,region,gpu ORDER BY provider,runtime,compute_mode,region,gpu`, tenant, start, end)
+	rows, err := s.QueryContext(ctx, `WITH latest AS (
+		SELECT DISTINCT ON (provider,runtime,compute_mode,region,gpu,operation,resource_key)
+			provider,runtime,compute_mode,region,gpu,operation,resource_key,outcome,duration_seconds,completed_at,created_at,id
+		FROM capacity_operations
+		WHERE tenant_id=? AND completed_at>=? AND completed_at<=?
+		ORDER BY provider,runtime,compute_mode,region,gpu,operation,resource_key,completed_at DESC,created_at DESC,id DESC
+	)
+	SELECT provider,runtime,compute_mode,region,gpu,
+		COUNT(*),
+		COUNT(*) FILTER(WHERE outcome='succeeded'),
+		COUNT(*) FILTER(WHERE outcome='pending'),
+		COUNT(*) FILTER(WHERE outcome='capacity_unavailable'),
+		COUNT(*) FILTER(WHERE outcome='runtime_failed'),
+		COUNT(*) FILTER(WHERE outcome='provider_failed'),
+		COALESCE(COUNT(*) FILTER(WHERE outcome='succeeded')::double precision / NULLIF(COUNT(*) FILTER(WHERE outcome<>'pending'),0),0),
+		CASE WHEN COUNT(*) FILTER(WHERE outcome='succeeded') >= 3 THEN percentile_cont(0.5) WITHIN GROUP(ORDER BY duration_seconds) FILTER(WHERE outcome='succeeded') END,
+		CASE WHEN COUNT(*) FILTER(WHERE outcome='succeeded') >= 20 THEN percentile_cont(0.95) WITHIN GROUP(ORDER BY duration_seconds) FILTER(WHERE outcome='succeeded') END
+	FROM latest
+	GROUP BY provider,runtime,compute_mode,region,gpu
+	ORDER BY provider,runtime,compute_mode,region,gpu`, tenant, start, end)
 	if err != nil {
 		return nil, err
 	}
@@ -240,7 +275,7 @@ func (s *Store) CapacityIntelligence(ctx context.Context, tenant string, window 
 	for rows.Next() {
 		var row domain.CapacitySummary
 		var p50, p95 sql.NullFloat64
-		if err = rows.Scan(&row.Provider, &row.Runtime, &row.ComputeMode, &row.Region, &row.GPU, &row.Attempts, &row.Succeeded, &row.CapacityFailures, &row.RuntimeFailures, &row.SuccessRate, &p50, &p95); err != nil {
+		if err = rows.Scan(&row.Provider, &row.Runtime, &row.ComputeMode, &row.Region, &row.GPU, &row.Attempts, &row.Succeeded, &row.Pending, &row.CapacityFailures, &row.RuntimeFailures, &row.ProviderFailures, &row.SuccessRate, &p50, &p95); err != nil {
 			return nil, err
 		}
 		if p50.Valid {

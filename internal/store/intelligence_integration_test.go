@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -79,6 +80,13 @@ func TestReplayCacheCapacityFinOpsAndAutopilotPersistence(t *testing.T) {
 	if err != nil || updated.Status != "running" || updated.ProviderOperationID != "provider-operation-1" {
 		t.Fatalf("updated prefetch=%#v err=%v", updated, err)
 	}
+	clocked, err := s.RecordCapacityOperation(ctx, domain.CapacityOperation{TenantID: "global", Provider: fixtureProvider + "-clock", Runtime: "vllm", ComputeMode: "elastic", Region: "zone", GPU: "GPU", Operation: "ensure", ResourceKey: name + "-clock", Outcome: "succeeded", StartedAt: time.Now().UTC().Add(-3 * time.Second)})
+	if err != nil || clocked.CompletedAt.IsZero() || clocked.DurationSeconds < 2 || clocked.DurationSeconds > 10 {
+		t.Fatalf("database-clock capacity operation=%#v err=%v", clocked, err)
+	}
+	if _, err = s.RecordCapacityOperation(ctx, domain.CapacityOperation{TenantID: "global", Provider: fixtureProvider, Runtime: "vllm", ComputeMode: "elastic", Region: "zone", GPU: "GPU", Operation: "ensure", ResourceKey: name + "a", Outcome: "pending", StartedAt: now.Add(-20 * time.Second), CompletedAt: now.Add(-15 * time.Second)}); err != nil {
+		t.Fatal(err)
+	}
 	for index, outcome := range []string{"succeeded", "succeeded", "capacity_unavailable"} {
 		begin := now.Add(-10*time.Second + time.Duration(index)*time.Second)
 		if _, err = s.RecordCapacityOperation(ctx, domain.CapacityOperation{TenantID: "global", Provider: fixtureProvider, Runtime: "vllm", ComputeMode: "elastic", Region: "zone", GPU: "GPU", Operation: "ensure", ResourceKey: name + string(rune('a'+index)), Outcome: outcome, StartedAt: begin, CompletedAt: begin.Add(time.Duration(index+1) * time.Second)}); err != nil {
@@ -95,6 +103,27 @@ func TestReplayCacheCapacityFinOpsAndAutopilotPersistence(t *testing.T) {
 	}
 	if err != nil || summary == nil || summary.Attempts != 3 || summary.Succeeded != 2 || summary.CapacityFailures != 1 {
 		t.Fatalf("capacity=%#v err=%v", summaries, err)
+	}
+	if summary.Pending != 0 || summary.ProviderFailures != 0 || summary.DurationP50Seconds != nil || summary.DurationP95Seconds != nil {
+		t.Fatalf("capacity must deduplicate polling and withhold statistically weak predictions: %#v", summary)
+	}
+	stableProvider := fixtureProvider + "-stable"
+	for index := 1; index <= 20; index++ {
+		begin := now.Add(-time.Duration(100-index) * time.Second)
+		if _, err = s.RecordCapacityOperation(ctx, domain.CapacityOperation{TenantID: "global", Provider: stableProvider, Runtime: "vllm", ComputeMode: "elastic", Region: "zone", GPU: "GPU", Operation: "ensure", ResourceKey: fmt.Sprintf("%s-stable-%d", name, index), Outcome: "succeeded", StartedAt: begin, CompletedAt: begin.Add(time.Duration(index) * time.Second)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	summaries, err = s.CapacityIntelligence(ctx, "global", time.Hour)
+	var stable *domain.CapacitySummary
+	for index := range summaries {
+		if summaries[index].Provider == stableProvider {
+			stable = &summaries[index]
+			break
+		}
+	}
+	if err != nil || stable == nil || stable.DurationP50Seconds == nil || stable.DurationP95Seconds == nil || *stable.DurationP50Seconds != 10.5 || *stable.DurationP95Seconds < 19 || *stable.DurationP95Seconds > 19.1 {
+		t.Fatalf("stable readiness evidence=%#v err=%v", stable, err)
 	}
 	report, err := s.RecordFinOpsReport(ctx, domain.FinOpsReport{TenantID: "global", DeploymentID: deployment.ID, DeploymentName: name, WindowStart: now.Add(-time.Hour), WindowEnd: now, Currency: "USD", Status: "unavailable", SummaryJSON: `{"status":"unavailable"}`, EvidenceJSON: `[]`, InputDigest: strings.Repeat("b", 64)})
 	if err != nil || report.ID == "" {

@@ -391,7 +391,7 @@ func planCommand(ctx context.Context, cfg config.Config, args []string) error {
 		if *name != "" || *targets != "" || *cloud != "" || *gpu != "" || *region != "" {
 			return errors.New("deployment YAML cannot be combined with deployment flags")
 		}
-		in = planning.Input{Name: file.Name, Model: file.Model.ID, ComputeMode: file.Compute.Mode, Cloud: file.Provider.Cloud,
+		in = planning.Input{Name: file.Name, Model: file.Model.ID, ComputeMode: file.Compute.Mode, Cloud: file.Provider.Cloud, ProviderAdapter: file.Provider.Adapter,
 			GPU: file.Resources.GPU, Region: file.Provider.Region, Runtime: file.Runtime.Engine,
 			RuntimeArgs: file.Runtime.Args, Routing: file.Routing.Strategy,
 			MinReplicas: file.Scaling.MinReplicas, MaxReplicas: file.Scaling.MaxReplicas}
@@ -430,6 +430,18 @@ func planCommand(ctx context.Context, cfg config.Config, args []string) error {
 			return fmt.Errorf("read current deployment for plan: %w", lookupErr)
 		}
 	}
+	if p.Mode == "provisioned" {
+		var response struct {
+			Capacity []domain.CapacitySummary `json:"capacity"`
+		}
+		if evidenceErr := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/capacity/intelligence?window_seconds=2592000", "", nil, &response); evidenceErr == nil {
+			evidence := make([]planning.CapacityEvidence, 0, len(response.Capacity))
+			for _, row := range response.Capacity {
+				evidence = append(evidence, planning.CapacityEvidence{Provider: row.Provider, Runtime: row.Runtime, ComputeMode: row.ComputeMode, Region: row.Region, GPU: row.GPU, Attempts: row.Attempts, Succeeded: row.Succeeded, Pending: row.Pending, SuccessRate: row.SuccessRate, DurationP50Seconds: row.DurationP50Seconds, DurationP95Seconds: row.DurationP95Seconds})
+			}
+			p = planning.ApplyCapacityEvidence(p, evidence)
+		}
+	}
 	switch *output {
 	case "json":
 		encoded, err := json.MarshalIndent(p, "", "  ")
@@ -458,6 +470,14 @@ func planCommand(ctx context.Context, cfg config.Config, args []string) error {
 			fmt.Printf("\nWarning: %s\n", warning)
 		}
 		fmt.Printf("\nReadiness: %s — %s\n", p.Readiness.EstimateStatus, p.Readiness.Reason)
+		if p.Readiness.EstimateP50Seconds != nil {
+			fmt.Printf("Observed p50: %.0fs", *p.Readiness.EstimateP50Seconds)
+			if p.Readiness.EstimateP95Seconds != nil {
+				fmt.Printf(" · p95 %.0fs", *p.Readiness.EstimateP95Seconds)
+			}
+			fmt.Printf(" · %d successful samples\n", p.Readiness.SuccessfulSamples)
+			fmt.Printf("Boundary:      %s\n", p.Readiness.EvidenceBoundary)
+		}
 		fmt.Printf("Artifact cache: %s\nCapacity:       %s\n", p.Readiness.ArtifactCacheState, p.Readiness.CapacityState)
 		if len(p.Readiness.Stages) > 0 {
 			fmt.Printf("Startup stages: %s\n", strings.Join(p.Readiness.Stages, " -> "))

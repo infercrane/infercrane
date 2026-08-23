@@ -529,6 +529,19 @@ type fakeReplicaProvider struct {
 	requestIDSeen string
 }
 
+type capacityRecordingStore struct {
+	*fakeCloudStore
+	operations []domain.CapacityOperation
+}
+
+func (s *capacityRecordingStore) RecordCapacityOperation(_ context.Context, row domain.CapacityOperation) (domain.CapacityOperation, error) {
+	if row.CompletedAt.IsZero() {
+		row.CompletedAt = time.Now().UTC()
+	}
+	s.operations = append(s.operations, row)
+	return row, nil
+}
+
 func TestReplicaBackendsResolveByCloudRuntimeAndDurableName(t *testing.T) {
 	first, second := &fakeReplicaProvider{}, &fakeReplicaProvider{}
 	registry, err := NewReplicaBackends(
@@ -677,6 +690,22 @@ func TestEnsureCloudReplicaAdoptsExistingCapacityBeforeStockCheck(t *testing.T) 
 	_, _, _, err := ensureCloudReplica(context.Background(), store, ReplicaBackend{Name: "sky", Cloud: "runpod", Runtime: "vllm", Provider: provider, Capacity: advisor}, fakeInspector{ready: true}, domain.Operation{ID: "operation-1"}, CloudRequest{TenantID: "global", DeploymentID: "deployment-1", RevisionID: "revision-1", Name: "qwen", Model: "Qwen/Qwen3-8B", Cloud: "runpod", GPU: "L40S", Runtime: "vllm", Port: 8000}, 0)
 	if err != nil || provider.ensureCalls != 1 || advisor.calls != 0 {
 		t.Fatalf("ensure_calls=%d advisor_calls=%d err=%v", provider.ensureCalls, advisor.calls, err)
+	}
+}
+
+func TestEnsureCloudReplicaMeasuresReadinessFromDurableIntentAcrossRetries(t *testing.T) {
+	created := time.Now().UTC().Add(-10 * time.Minute).Truncate(time.Millisecond)
+	replica := domain.Replica{ID: "replica-1", TenantID: "global", DeploymentID: "deployment-1", RevisionID: "revision-1", Ordinal: 0, ExternalKey: "deployment-1-r0", Provider: "aws-ec2", LifecycleState: "pending", CreatedAt: created}
+	base := &fakeCloudStore{replica: replica, replicas: map[string]domain.Replica{replica.ID: replica}}
+	store := &capacityRecordingStore{fakeCloudStore: base}
+	provider := &fakeReplicaProvider{observation: provision.Observation{Exists: true, State: "ready", Endpoint: "http://gpu:8000", Details: `{}`}}
+	_, _, _, err := ensureCloudReplica(context.Background(), store, ReplicaBackend{Name: "aws-ec2", Cloud: "aws", Runtime: "vllm", Provider: provider}, fakeInspector{ready: true}, domain.Operation{ID: "operation-1"}, CloudRequest{TenantID: "global", DeploymentID: "deployment-1", RevisionID: "revision-1", Name: "qwen", Model: "Qwen/Qwen3-8B", Cloud: "aws", Region: "eu-central-1", GPU: "L40S", Runtime: "vllm", ComputeMode: "elastic", Port: 8000}, 0)
+	if err != nil || len(store.operations) != 1 {
+		t.Fatalf("operations=%#v err=%v", store.operations, err)
+	}
+	operation := store.operations[0]
+	if !operation.StartedAt.Equal(created) || operation.Outcome != "succeeded" || operation.CompletedAt.Sub(operation.StartedAt) < 10*time.Minute {
+		t.Fatalf("readiness duration did not preserve durable intent boundary: %#v", operation)
 	}
 }
 

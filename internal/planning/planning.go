@@ -13,9 +13,9 @@ import (
 var nonNameCharacter = regexp.MustCompile(`[^a-z0-9]+`)
 
 type Input struct {
-	Name, Model, ComputeMode, Cloud, GPU, Region, Runtime, Routing string
-	Targets, RuntimeArgs                                           []string
-	MinReplicas, MaxReplicas                                       int
+	Name, Model, ComputeMode, Cloud, ProviderAdapter, GPU, Region, Runtime, Routing string
+	Targets, RuntimeArgs                                                            []string
+	MinReplicas, MaxReplicas                                                        int
 }
 
 type Action struct {
@@ -29,16 +29,28 @@ type Cost struct {
 	Reason string `json:"reason"`
 }
 
-// Readiness describes only evidence available before a deployment starts. It
-// deliberately carries no duration estimate: provider capacity, image
-// locality, and artifact locality are eventually consistent observations and
-// must not be guessed from a static specification.
+// Readiness describes only evidence available before a deployment starts. A
+// duration is present only when enough tenant-scoped observations match the
+// exact serving plan; static specifications never manufacture one.
 type Readiness struct {
 	EstimateStatus     string   `json:"estimate_status"`
+	EstimateP50Seconds *float64 `json:"estimate_p50_seconds,omitempty"`
+	EstimateP95Seconds *float64 `json:"estimate_p95_seconds,omitempty"`
+	SuccessfulSamples  int      `json:"successful_samples,omitempty"`
 	ArtifactCacheState string   `json:"artifact_cache_state"`
 	CapacityState      string   `json:"capacity_state"`
+	EvidenceBoundary   string   `json:"evidence_boundary,omitempty"`
 	Stages             []string `json:"stages,omitempty"`
 	Reason             string   `json:"reason"`
+}
+
+// CapacityEvidence is the narrow, tenant-scoped observation boundary used to
+// annotate a static plan. It is historical evidence, not a provider promise.
+type CapacityEvidence struct {
+	Provider, Runtime, ComputeMode, Region, GPU string
+	Attempts, Succeeded, Pending                int
+	SuccessRate                                 float64
+	DurationP50Seconds, DurationP95Seconds      *float64
 }
 
 type Change struct {
@@ -54,23 +66,24 @@ type Current struct {
 }
 
 type Plan struct {
-	Version     int       `json:"version"`
-	Name        string    `json:"name"`
-	Model       string    `json:"model"`
-	Mode        string    `json:"mode"`
-	Cloud       string    `json:"cloud,omitempty"`
-	GPU         string    `json:"gpu,omitempty"`
-	Region      string    `json:"region,omitempty"`
-	Runtime     string    `json:"runtime"`
-	Routing     string    `json:"routing"`
-	Targets     []string  `json:"targets,omitempty"`
-	MinReplicas int       `json:"min_replicas"`
-	MaxReplicas int       `json:"max_replicas"`
-	Actions     []Action  `json:"actions"`
-	Changes     []Change  `json:"changes,omitempty"`
-	Warnings    []string  `json:"warnings,omitempty"`
-	Cost        Cost      `json:"cost"`
-	Readiness   Readiness `json:"readiness"`
+	Version         int       `json:"version"`
+	Name            string    `json:"name"`
+	Model           string    `json:"model"`
+	Mode            string    `json:"mode"`
+	Cloud           string    `json:"cloud,omitempty"`
+	ProviderAdapter string    `json:"provider_adapter,omitempty"`
+	GPU             string    `json:"gpu,omitempty"`
+	Region          string    `json:"region,omitempty"`
+	Runtime         string    `json:"runtime"`
+	Routing         string    `json:"routing"`
+	Targets         []string  `json:"targets,omitempty"`
+	MinReplicas     int       `json:"min_replicas"`
+	MaxReplicas     int       `json:"max_replicas"`
+	Actions         []Action  `json:"actions"`
+	Changes         []Change  `json:"changes,omitempty"`
+	Warnings        []string  `json:"warnings,omitempty"`
+	Cost            Cost      `json:"cost"`
+	Readiness       Readiness `json:"readiness"`
 }
 
 // Compare turns a creation plan into a deterministic revision rollout plan.
@@ -175,7 +188,7 @@ func Build(in Input) (Plan, error) {
 		}
 	}
 
-	p := Plan{Version: 1, Name: in.Name, Model: in.Model, Cloud: in.Cloud, GPU: in.GPU,
+	p := Plan{Version: 1, Name: in.Name, Model: in.Model, Cloud: in.Cloud, ProviderAdapter: in.ProviderAdapter, GPU: in.GPU,
 		Region: in.Region, Runtime: in.Runtime, Routing: in.Routing, Targets: in.Targets,
 		MinReplicas: in.MinReplicas, MaxReplicas: in.MaxReplicas,
 		Cost: Cost{Status: "unavailable", Reason: "live provider pricing is not configured; no estimate is fabricated"},
@@ -220,6 +233,54 @@ func Build(in Input) (Plan, error) {
 		add("autoscale", fmt.Sprintf("Enable bounded runtime-signal scaling from %d to %d replicas", in.MinReplicas, in.MaxReplicas))
 	}
 	return p, nil
+}
+
+// ApplyCapacityEvidence adds a readiness estimate only when at least three
+// successful, deduplicated observations match the exact serving plan. P95 is
+// accepted only when the store exposes it, which currently requires twenty
+// successes. Unknown or weak evidence remains explicit.
+func ApplyCapacityEvidence(p Plan, evidence []CapacityEvidence) Plan {
+	if p.Mode != "provisioned" {
+		return p
+	}
+	expectedProvider := p.ProviderAdapter
+	if expectedProvider == "" {
+		expectedProvider = defaultProviderAdapter(p.Cloud)
+	}
+	for _, row := range evidence {
+		if row.Provider != expectedProvider || row.Runtime != p.Runtime || row.ComputeMode != "elastic" || row.Region != p.Region || row.GPU != p.GPU {
+			continue
+		}
+		terminal := row.Attempts - row.Pending
+		p.Readiness.CapacityState = fmt.Sprintf("observed %.0f%% success across %d terminal placement(s); %d pending", row.SuccessRate*100, terminal, row.Pending)
+		if row.Succeeded < 3 || row.DurationP50Seconds == nil {
+			p.Readiness.Reason = fmt.Sprintf("only %d successful matching readiness observation(s); at least 3 are required before showing p50", row.Succeeded)
+			return p
+		}
+		p.Readiness.EstimateStatus = "observed"
+		p.Readiness.EstimateP50Seconds = row.DurationP50Seconds
+		p.Readiness.EstimateP95Seconds = row.DurationP95Seconds
+		p.Readiness.SuccessfulSamples = row.Succeeded
+		p.Readiness.EvidenceBoundary = "durable replica intent through runtime readiness"
+		p.Readiness.Reason = "tenant-scoped historical evidence for this exact provider, runtime, region, and GPU; not a capacity guarantee"
+		return p
+	}
+	return p
+}
+
+func defaultProviderAdapter(cloud string) string {
+	switch cloud {
+	case "aws":
+		return "aws-ec2"
+	case "gcp":
+		return "gcp-compute"
+	case "kubernetes":
+		return "kubernetes"
+	case "runpod":
+		return "skypilot"
+	default:
+		return cloud
+	}
 }
 
 func DefaultName(model string) string {

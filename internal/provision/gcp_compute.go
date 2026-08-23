@@ -249,6 +249,8 @@ func (g GCPCompute) startup(spec ReplicaSpec, port int) string {
 	}
 	secretURL := "https://secretmanager.googleapis.com/v1/projects/" + url.PathEscape(g.Project) + "/secrets/" + url.PathEscape(g.WorkerSecret) + "/versions/latest:access"
 	return "#!/bin/sh\nset -eu\n" +
+		"infercrane_stage() { printf 'infercrane_startup stage=%s at=%s\\n' \"$1\" \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" >/dev/console; }\n" +
+		"infercrane_stage identity_start\n" +
 		"token_json=$(curl -fsS -H 'Metadata-Flavor: Google' 'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token')\n" +
 		"access_token=$(printf '%s' \"$token_json\" | sed -n 's/.*\"access_token\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p')\n" +
 		"[ -n \"$access_token\" ] || { echo 'workload identity token unavailable' >&2; exit 1; }\n" +
@@ -257,7 +259,10 @@ func (g GCPCompute) startup(spec ReplicaSpec, port int) string {
 		"[ -n \"$secret_data\" ] || { echo 'worker secret payload unavailable' >&2; exit 1; }\n" +
 		"worker_key=$(printf '%s' \"$secret_data\" | base64 -d)\n" +
 		"unset token_json access_token secret_json secret_data\n" +
-		"docker pull " + shellQuote(image) + "\ndocker run -d --restart=unless-stopped --gpus all -e INFERCRANE_WORKER_API_KEY=\"$worker_key\" -e VLLM_API_KEY=\"$worker_key\" -p " + fmt.Sprintf("%d:%d", port, port) + " " + shellQuote(image) + " " + strings.Join(quoted, " ") + "\n"
+		"infercrane_stage identity_ready\n" +
+		cachedImageBootstrap(image) +
+		"infercrane_stage runtime_start\n" +
+		"docker run -d --restart=unless-stopped --gpus all -e INFERCRANE_WORKER_API_KEY=\"$worker_key\" -e VLLM_API_KEY=\"$worker_key\" -p " + fmt.Sprintf("%d:%d", port, port) + " " + shellQuote(image) + " " + strings.Join(quoted, " ") + "\n"
 }
 func metadataValue(instance gcpInstance, key string) string {
 	for _, item := range instance.Metadata.Items {

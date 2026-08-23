@@ -523,8 +523,10 @@ type CapacitySummary struct {
 	GPU                string    `json:"gpu"`
 	Attempts           int       `json:"attempts"`
 	Succeeded          int       `json:"succeeded"`
+	Pending            int       `json:"pending"`
 	CapacityFailures   int       `json:"capacity_failures"`
 	RuntimeFailures    int       `json:"runtime_failures"`
+	ProviderFailures   int       `json:"provider_failures"`
 	SuccessRate        float64   `json:"success_rate"`
 	DurationP50Seconds *float64  `json:"duration_p50_seconds,omitempty"`
 	DurationP95Seconds *float64  `json:"duration_p95_seconds,omitempty"`

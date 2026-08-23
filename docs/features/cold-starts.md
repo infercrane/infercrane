@@ -49,3 +49,16 @@ gateway time to first response byte and labels it accordingly. It reports the ma
 `provider_capacity_or_worker_initialization` and does not fabricate a more detailed waterfall.
 When a provider later exposes grounded boundaries, they can be added without changing the meaning
 of existing evidence.
+
+## Provisioned readiness history
+
+Elastic worker startup has a different evidence boundary from per-request Serverless cold starts.
+For provisioned workers, InferCrane records one outcome per durable replica identity and measures a
+successful observation from replica intent through runtime readiness. Reconciliation retries are
+deduplicated before capacity summaries are calculated.
+
+`infercrane plan` may show an **observed** p50 after three successful samples for the exact provider
+adapter, runtime, region, and GPU. It shows p95 only after twenty successful samples. The estimate
+is tenant-scoped history; it does not predict a provider stock change, prove an image or artifact
+cache hit, or guarantee the next deployment. With less evidence, the value stays unavailable and
+the sample deficiency is explicit.

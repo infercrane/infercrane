@@ -964,11 +964,17 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 				}
 			}
 		}
-		_, _ = evidenceStore.RecordCapacityOperation(context.WithoutCancel(ctx), domain.CapacityOperation{TenantID: request.TenantID, Provider: backend.Name, Runtime: request.Runtime, ComputeMode: request.ComputeMode, Region: request.Region, GPU: request.GPU, Operation: "replica.ensure", ResourceKey: externalKey, Outcome: outcome, ErrorCode: errorCode, StartedAt: started, CompletedAt: time.Now().UTC()})
+		_, _ = evidenceStore.RecordCapacityOperation(context.WithoutCancel(ctx), domain.CapacityOperation{TenantID: request.TenantID, Provider: backend.Name, Runtime: request.Runtime, ComputeMode: request.ComputeMode, Region: request.Region, GPU: request.GPU, Operation: "replica.ensure", ResourceKey: externalKey, Outcome: outcome, ErrorCode: errorCode, StartedAt: started})
 	}()
 	replica, _, err := store.EnsureReplicaIntent(ctx, domain.Replica{TenantID: request.TenantID, DeploymentID: request.DeploymentID, RevisionID: request.RevisionID, Ordinal: ordinal, ExternalKey: externalKey, Provider: backend.Name})
 	if err != nil {
 		return "", "", "", classify("replica_intent_failed", err)
+	}
+	// A reconcile attempt is not a new placement attempt. Measure successful
+	// readiness from the durable replica intent so retries and restarts do not
+	// turn a multi-minute cold start into the duration of its final poll.
+	if !replica.CreatedAt.IsZero() && replica.CreatedAt.Before(started) {
+		started = replica.CreatedAt
 	}
 	handle := provider.Handle(externalKey)
 	if err = store.SetReplicaProviderIdentity(ctx, replica.ID, handle.RequestID, handle.ResourceID); err != nil {

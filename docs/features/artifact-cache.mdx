@@ -68,3 +68,18 @@ prefetch request as a cache hit. An adapter may consume the durable intent using
 mechanism, but it must publish a bounded fresh observation before planning or placement can rely on
 locality. Until then, `infercrane plan` reports artifact cache and startup time as `unknown` and
 `unavailable`.
+
+## Container image prewarming is separate
+
+AWS and GCP bootstrap reuse an exact digest already present in a customer-maintained VM image and
+emit bounded startup-stage timestamps. This can remove a large container transfer, but it does not
+mean the model artifact is local. Keep these evidence boundaries separate:
+
+| Evidence | What it proves |
+| --- | --- |
+| `image_cache_hit` startup stage | The immutable runtime container image was already on the worker |
+| Fresh artifact observation with `state: present` | The provider-specific adapter observed the model artifact at its named location |
+| Runtime readiness plus expected `/v1/models` identity | The requested model is actually serving |
+
+InferCrane never converts the first row into the second or third. AWS Fast Snapshot Restore and
+similar paid acceleration remain explicit operator choices rather than silent defaults.

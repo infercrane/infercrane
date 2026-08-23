@@ -575,6 +575,11 @@ func TestDeployCLIOnlySubmitsControlPlaneRequest(t *testing.T) {
 
 func TestPlanMakesUnknownStartupEvidenceExplicit(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/capacity/intelligence" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"capacity":[]}`)
+			return
+		}
 		if r.Method != http.MethodGet || !strings.HasPrefix(r.URL.Path, "/api/v1/deployments/") {
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
 		}
@@ -608,6 +613,29 @@ func TestPlanMakesUnknownStartupEvidenceExplicit(t *testing.T) {
 	}
 	if err = json.Unmarshal([]byte(encoded), &output); err != nil || output.Readiness.EstimateStatus != "unavailable" || output.Readiness.ArtifactCacheState != "unknown" || output.Readiness.CapacityState != "unknown" || len(output.Readiness.Stages) != 5 {
 		t.Fatalf("output=%s parsed=%#v err=%v", encoded, output, err)
+	}
+}
+
+func TestPlanShowsOnlyQualifiedObservedReadinessHistory(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/capacity/intelligence" {
+			_, _ = io.WriteString(w, `{"capacity":[{"provider":"aws-ec2","runtime":"vllm","compute_mode":"elastic","region":"eu-central-1","gpu":"L40S","attempts":22,"succeeded":20,"pending":1,"success_rate":0.9523809524,"duration_p50_seconds":410,"duration_p95_seconds":720}]}`)
+			return
+		}
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/v1/deployments/") {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = io.WriteString(w, `{"error":{"code":"not_found","message":"deployment was not found"}}`)
+			return
+		}
+		t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+	output, err := captureStdout(t, func() error {
+		return planCommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, []string{"Qwen/Qwen3-8B", "--cloud", "aws", "--gpu", "L40S", "--region", "eu-central-1"})
+	})
+	if err != nil || !strings.Contains(output, "Readiness: observed") || !strings.Contains(output, "Observed p50: 410s · p95 720s · 20 successful samples") || !strings.Contains(output, "durable replica intent through runtime readiness") {
+		t.Fatalf("output=%q err=%v", output, err)
 	}
 }
 

@@ -364,7 +364,7 @@ func (a AWSEC2) userData(spec ReplicaSpec, port int) string {
 			}
 		}
 		image := spec.Workload.Image
-		return "#!/bin/sh\nset -eu\nworker_key=$(aws secretsmanager get-secret-value --region " + shellQuote(a.Region) + " --secret-id " + shellQuote(a.WorkerSecretARN) + " --query SecretString --output text)\ndocker pull " + shellQuote(image) + "\ncontainer_id=$(docker run -d --restart=unless-stopped --gpus all -e INFERCRANE_WORKER_API_KEY=\"$worker_key\" -e VLLM_API_KEY=\"$worker_key\" -p " + fmt.Sprintf("%d:%d", port, port) + " " + shellQuote(image) + " " + strings.Join(quoted, " ") + ")\ndocker logs --follow \"$container_id\" >/dev/console 2>&1 &\n"
+		return "#!/bin/sh\nset -eu\ninfercrane_stage() { printf 'infercrane_startup stage=%s at=%s\\n' \"$1\" \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" >/dev/console; }\ninfercrane_stage identity_start\nworker_key=$(aws secretsmanager get-secret-value --region " + shellQuote(a.Region) + " --secret-id " + shellQuote(a.WorkerSecretARN) + " --query SecretString --output text)\ninfercrane_stage identity_ready\n" + cachedImageBootstrap(image) + "infercrane_stage runtime_start\ncontainer_id=$(docker run -d --restart=unless-stopped --gpus all -e INFERCRANE_WORKER_API_KEY=\"$worker_key\" -e VLLM_API_KEY=\"$worker_key\" -p " + fmt.Sprintf("%d:%d", port, port) + " " + shellQuote(image) + " " + strings.Join(quoted, " ") + ")\ndocker logs --follow \"$container_id\" >/dev/console 2>&1 &\n"
 	}
 	// The vLLM OpenAI image entrypoint is `vllm serve`. Since v0.22 the model
 	// is a positional argument; keep generated startup compatible with the
@@ -378,7 +378,7 @@ func (a AWSEC2) userData(spec ReplicaSpec, port int) string {
 	for i, arg := range args {
 		quoted[i] = shellQuote(arg)
 	}
-	return "#!/bin/sh\nset -eu\nworker_key=$(aws secretsmanager get-secret-value --region " + shellQuote(a.Region) + " --secret-id " + shellQuote(a.WorkerSecretARN) + " --query SecretString --output text)\ndocker pull " + shellQuote(a.ImageDigest) + "\ncontainer_id=$(docker run -d --restart=unless-stopped --gpus all -e VLLM_API_KEY=\"$worker_key\" -p " + fmt.Sprintf("%d:%d", port, port) + " " + shellQuote(a.ImageDigest) + " " + strings.Join(quoted, " ") + ")\ndocker logs --follow \"$container_id\" >/dev/console 2>&1 &\n"
+	return "#!/bin/sh\nset -eu\ninfercrane_stage() { printf 'infercrane_startup stage=%s at=%s\\n' \"$1\" \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" >/dev/console; }\ninfercrane_stage identity_start\nworker_key=$(aws secretsmanager get-secret-value --region " + shellQuote(a.Region) + " --secret-id " + shellQuote(a.WorkerSecretARN) + " --query SecretString --output text)\ninfercrane_stage identity_ready\n" + cachedImageBootstrap(a.ImageDigest) + "infercrane_stage runtime_start\ncontainer_id=$(docker run -d --restart=unless-stopped --gpus all -e VLLM_API_KEY=\"$worker_key\" -p " + fmt.Sprintf("%d:%d", port, port) + " " + shellQuote(a.ImageDigest) + " " + strings.Join(quoted, " ") + ")\ndocker logs --follow \"$container_id\" >/dev/console 2>&1 &\n"
 }
 
 func normalizeAWSState(state string) string {

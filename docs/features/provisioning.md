@@ -23,7 +23,11 @@ infercrane plan MODEL --cloud PROVIDER --gpu ACCELERATOR --output json
 ```
 
 `integrations` distinguishes registration, local evidence, and real-system qualification. `plan`
-validates the requested intent without allocating capacity. Follow the exact adapter guide for
+validates the requested intent without allocating capacity. When at least three successful,
+tenant-scoped observations match the exact provider adapter, runtime, region, and accelerator,
+the plan also shows an observed p50 from durable replica intent through runtime readiness. P95 is
+withheld until twenty successes. These values are historical evidence, never a stock reservation
+or readiness guarantee. Follow the exact adapter guide for
 credentials, networking, immutable images, runtime contract, preflight, cleanup, and current limits:
 
 - [RunPod elastic and Serverless](/integrations/runpod)
@@ -112,6 +116,24 @@ adopted before mutable stock is consulted. If no resource exists, a provider ada
 The first stock advisor queries RunPod secure-cloud availability. A region-qualified request is
 still labeled global when the provider response cannot prove stock in the requested region.
 Credentials are sent in headers and are not persisted in progress or events.
+
+Capacity history deduplicates repeated reconciliation polls by logical resource identity. A
+multi-minute startup therefore counts as one placement, not dozens of failed attempts, and its
+successful duration begins at the durable replica intent rather than the final health-check poll.
+Pending placements are disclosed separately and excluded from the success-rate denominator.
+
+## Reuse prewarmed runtime images
+
+AWS and GCP worker bootstrap checks for the immutable runtime image locally before pulling it. A
+customer-maintained AMI or VM image may therefore prewarm the exact qualified digest and avoid
+retransferring those container layers. Startup logs expose `identity_start`, `identity_ready`,
+`image_check`, `image_cache_hit`, `image_pull_start`, `image_pull_complete`, and `runtime_start`
+timestamps without credentials.
+
+This optimization concerns container layers only. It does not prove model weights are cached.
+Model-artifact locality remains a separate, provider-native observation through the
+[artifact cache contract](/features/artifact-cache). InferCrane does not silently enable billed
+snapshot acceleration or accept a mutable image tag.
 
 ## Idempotency and cleanup
 

@@ -1,6 +1,9 @@
 package planning
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestBuildProvisionedPlan(t *testing.T) {
 	p, err := Build(Input{Model: "Qwen/Qwen3-8B", Cloud: "runpod", GPU: "L40S"})
@@ -53,6 +56,36 @@ func TestExistingTargetPlanDoesNotClaimProviderReadinessEvidence(t *testing.T) {
 	}
 	if p.Readiness.EstimateStatus != "externally-managed" || p.Readiness.ArtifactCacheState != "not-observed" || p.Readiness.CapacityState != "not-observed" || len(p.Readiness.Stages) != 0 {
 		t.Fatalf("unexpected readiness evidence: %#v", p.Readiness)
+	}
+}
+
+func TestApplyCapacityEvidenceRequiresMatchingStatisticalEvidence(t *testing.T) {
+	p, err := Build(Input{Model: "Qwen/Qwen3-8B", Cloud: "aws", GPU: "L40S", Region: "eu-central-1", Runtime: "vllm", MinReplicas: 1, MaxReplicas: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p50, p95 := 410.0, 720.0
+	p = ApplyCapacityEvidence(p, []CapacityEvidence{
+		{Provider: "aws-ec2", Runtime: "sglang", ComputeMode: "elastic", Region: "eu-central-1", GPU: "L40S", Attempts: 30, Succeeded: 30, SuccessRate: 1, DurationP50Seconds: &p50, DurationP95Seconds: &p95},
+		{Provider: "aws-ec2", Runtime: "vllm", ComputeMode: "elastic", Region: "eu-central-1", GPU: "L40S", Attempts: 23, Succeeded: 20, Pending: 1, SuccessRate: 20.0 / 22.0, DurationP50Seconds: &p50, DurationP95Seconds: &p95},
+	})
+	if p.Readiness.EstimateStatus != "observed" || p.Readiness.EstimateP50Seconds == nil || *p.Readiness.EstimateP50Seconds != p50 || p.Readiness.EstimateP95Seconds == nil || p.Readiness.SuccessfulSamples != 20 {
+		t.Fatalf("matching readiness evidence was not applied: %#v", p.Readiness)
+	}
+	if !strings.Contains(p.Readiness.CapacityState, "22 terminal") || p.Readiness.EvidenceBoundary == "" {
+		t.Fatalf("readiness provenance is incomplete: %#v", p.Readiness)
+	}
+}
+
+func TestApplyCapacityEvidenceWithholdsWeakPrediction(t *testing.T) {
+	p, err := Build(Input{Model: "Qwen/Qwen3-8B", Cloud: "aws", GPU: "L40S", Region: "eu-central-1", Runtime: "vllm", MinReplicas: 1, MaxReplicas: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p50 := 410.0
+	p = ApplyCapacityEvidence(p, []CapacityEvidence{{Provider: "aws-ec2", Runtime: "vllm", ComputeMode: "elastic", Region: "eu-central-1", GPU: "L40S", Attempts: 2, Succeeded: 2, SuccessRate: 1, DurationP50Seconds: &p50}})
+	if p.Readiness.EstimateStatus != "unavailable" || p.Readiness.EstimateP50Seconds != nil || !strings.Contains(p.Readiness.Reason, "at least 3") {
+		t.Fatalf("weak readiness evidence was presented as a prediction: %#v", p.Readiness)
 	}
 }
 
