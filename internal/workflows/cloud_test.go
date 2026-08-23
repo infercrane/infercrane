@@ -123,6 +123,13 @@ func (f *fakeCloudStore) CheckpointClaimedOperation(_ context.Context, _, _ stri
 	return nil
 }
 func (f *fakeCloudStore) AddTargetForTenant(_ context.Context, _ string, target domain.Target) (domain.Target, error) {
+	for i, name := range f.targetNames {
+		if name == target.Name {
+			target.ID = fmt.Sprintf("target-%d", i+1)
+			f.target = target
+			return target, nil
+		}
+	}
 	target.ID = fmt.Sprintf("target-%d", len(f.targetNames)+1)
 	f.target = target
 	f.targetNames = append(f.targetNames, target.Name)
@@ -159,6 +166,28 @@ func TestConvergeForwardsRequestIdentityWhenResourceIDIsAssignedAfterCreate(t *t
 	_, err := QualifiedV01CloudHandlers(store, provider, fakeInspector{ready: true})[ConvergeKind](context.Background(), operation)
 	if err != nil || provider.ensureCalls != 1 || provider.requestIDSeen != "request-before-create" || store.replica.ProviderResourceID != "resource-after-create" {
 		t.Fatalf("ensure_calls=%d request_id=%q replica=%#v err=%v", provider.ensureCalls, provider.requestIDSeen, store.replica, err)
+	}
+}
+
+func TestConvergeDoesNotCompleteBeforeStableEndpointIsCallable(t *testing.T) {
+	store := &fakeCloudStore{deployment: domain.Deployment{ID: "deployment-1", Name: "qwen", Model: "Qwen/Qwen3-8B", RoutingStrategy: "round-robin", MinReplicas: 1, MaxReplicas: 1}}
+	provider := &fakeReplicaProvider{observation: provision.Observation{Exists: true, State: "ready", Endpoint: "http://gpu:8000", Details: `{}`}}
+	backends, err := NewReplicaBackends(ReplicaBackend{Name: "skypilot", Cloud: "runpod", Runtime: "vllm", Profile: testElasticProfile("skypilot", "runpod"), Provider: provider})
+	if err != nil {
+		t.Fatal(err)
+	}
+	drain := &fakeDrainTracker{}
+	handler := CloudHandlersWithBackendsAndDrain(store, backends, testRuntimeBackends(t, fakeInspector{ready: true}), drain)[ConvergeKind]
+	operation := domain.Operation{ID: "operation-1", LeaseOwner: "worker", LeaseGeneration: 1, RequestJSON: `{"deployment_id":"deployment-1","name":"qwen","model":"Qwen/Qwen3-8B","cloud":"runpod","gpu":"L40S","tenant_id":"global","min_replicas":1,"max_replicas":1}`}
+
+	_, err = handler(context.Background(), operation)
+	var failure operations.Failure
+	if !errors.As(err, &failure) || failure.Code != "router_generation_pending" || !failure.Retryable || !store.applied {
+		t.Fatalf("failure=%+v applied=%t err=%v", failure, store.applied, err)
+	}
+	drain.current = true
+	if _, err = handler(context.Background(), operation); err != nil {
+		t.Fatalf("converge did not complete after route publication: %v", err)
 	}
 }
 
@@ -256,10 +285,13 @@ func TestGuardedPromotionCutsOverBeforeDeletingOldCapacity(t *testing.T) {
 	}
 }
 
-type fakeDrainTracker struct{ active int }
+type fakeDrainTracker struct {
+	active  int
+	current bool
+}
 
 func (f *fakeDrainTracker) RetiringInFlight(string) int      { return f.active }
-func (f *fakeDrainTracker) HasCurrentDeployment(string) bool { return false }
+func (f *fakeDrainTracker) HasCurrentDeployment(string) bool { return f.current }
 
 func TestGuardedPromotionWaitsForRetiringRequests(t *testing.T) {
 	spec := domain.DeploymentRevisionSpec{Model: "Qwen/Qwen3-8B", Runtime: "vllm", RoutingStrategy: "round-robin", MinReplicas: 1, MaxReplicas: 1, ComputeMode: "elastic", Cloud: "runpod", GPU: "H100"}

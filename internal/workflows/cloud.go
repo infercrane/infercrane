@@ -379,15 +379,29 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 				_ = store.ObserveReplica(ctx, replica.ID, "draining", replica.Endpoint, replica.Health, replica.ProviderDetails, time.Now())
 			}
 		}
-		if len(draining) > 0 {
-			matched, matchErr := store.RoutingGenerationMatches(ctx, request.DeploymentID, router.WorkerSetHash(resolved.Deployment.RoutingStrategy, targetURLs))
+		// Applying the desired target set and publishing a request-path router
+		// generation are separate durable boundaries. Production composition
+		// supplies a drain tracker backed by the live route directory; do not
+		// report success while the stable model alias can still return 404. A
+		// scale-down must also prove the reduced generation even in lower-level
+		// workflow tests that intentionally omit the live directory.
+		if drain != nil || len(draining) > 0 {
+			expectedWorkerSet := router.WorkerSetHash(resolved.Deployment.RoutingStrategy, targetURLs)
+			matched, matchErr := store.RoutingGenerationMatches(ctx, request.DeploymentID, expectedWorkerSet)
 			if matchErr != nil {
 				return "", operations.Retryable("router_generation_lookup_failed", matchErr)
 			}
-			if !matched {
-				_ = checkpoint(ctx, store, operation, "deployment.drain", "waiting", map[string]int{"replicas": len(draining)}, 80, "Waiting for router generation to withdraw draining replicas")
-				return "", operations.Retryable("router_drain_pending", errors.New("router has not published the reduced worker set"))
+			published := drain == nil || drain.HasCurrentDeployment(request.DeploymentID)
+			if !matched || !published {
+				if len(draining) > 0 {
+					_ = checkpoint(ctx, store, operation, "deployment.drain", "waiting", map[string]int{"replicas": len(draining)}, 80, "Waiting for router generation to withdraw draining replicas")
+					return "", operations.Retryable("router_drain_pending", errors.New("router has not published the reduced worker set"))
+				}
+				_ = checkpoint(ctx, store, operation, "deployment.route", "waiting", map[string]any{"targets": targetNames}, 95, "Waiting for the stable endpoint to publish healthy capacity")
+				return "", operations.Retryable("router_generation_pending", errors.New("stable endpoint has not published the healthy worker set"))
 			}
+		}
+		if len(draining) > 0 {
 			if drain != nil {
 				if active := drain.RetiringInFlight(resolved.Deployment.ID); active > 0 {
 					_ = checkpoint(ctx, store, operation, "deployment.drain", "waiting", map[string]int{"active_requests": active}, 85, "Waiting for active requests on the withdrawn router generation")
