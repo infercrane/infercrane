@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/runtimecontract"
+	"github.com/infercrane/infercrane/internal/servingcontract"
 )
 
 var ErrNotFound = errors.New("not found")
@@ -61,6 +62,7 @@ type DeploymentRevisionSpec struct {
 	Region             string                   `json:"region,omitempty"`
 	Port               int                      `json:"port,omitempty"`
 	Workload           runtimecontract.Workload `json:"workload,omitzero"`
+	Serving            servingcontract.Topology `json:"serving,omitzero"`
 }
 
 // ControlPlaneInstance is an ephemeral HA membership observation. PostgreSQL

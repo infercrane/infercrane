@@ -46,6 +46,7 @@ func (s *Store) EnsureCandidateRevision(ctx context.Context, tenant, deploymentN
 		}
 	}
 	normalized.Workload = support.NormalizeWorkload(normalized.Runtime, normalized.Workload)
+	normalized.Serving = normalized.Serving.Normalize()
 	if normalized.ComputeMode == "" {
 		if normalized.Cloud != "" || normalized.GPU != "" {
 			normalized.ComputeMode = "elastic"
@@ -90,6 +91,9 @@ func (s *Store) EnsureCandidateRevision(ctx context.Context, tenant, deploymentN
 	}
 	if normalized.MinReplicas < 1 || normalized.MaxReplicas < normalized.MinReplicas {
 		return domain.DeploymentRevision{}, errors.New("revision replica bounds are invalid")
+	}
+	if err := normalized.Serving.Validate(normalized.Runtime, normalized.Cloud, normalized.ProviderAdapter, normalized.MinReplicas, normalized.MaxReplicas); err != nil {
+		return domain.DeploymentRevision{}, fmt.Errorf("serving topology: %w", err)
 	}
 	if normalized.Runtime != support.DefaultRuntime && normalized.MaxReplicas > normalized.MinReplicas {
 		return domain.DeploymentRevision{}, errors.New("autoscaling is not yet qualified for this runtime; set min and max replicas equal")

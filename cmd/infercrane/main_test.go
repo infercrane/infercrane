@@ -573,6 +573,30 @@ func TestDeployCLIOnlySubmitsControlPlaneRequest(t *testing.T) {
 	}
 }
 
+func TestDynamoDeployConvenienceExpandsToSafeExplicitContract(t *testing.T) {
+	var body map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte(`{"operation":{"id":"op-dynamo","status":"pending"}}`))
+	}))
+	defer server.Close()
+
+	err := deployAPICommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, "deploy", []string{
+		"meta-llama/Llama-3.1-8B-Instruct", "--backend", "dynamo", "--gpu", "NVIDIA-L40S",
+		"--runtime", "sglang", "--idempotency-key", "dynamo-1",
+	})
+	serving, _ := body["serving"].(map[string]any)
+	worker, _ := serving["worker"].(map[string]any)
+	if err != nil || body["cloud"] != "kubernetes" || body["provider_adapter"] != "kubernetes-dynamo" || body["runtime"] != "sglang" || body["min_replicas"] != float64(1) || body["max_replicas"] != float64(1) || serving["backend"] != "dynamo" || serving["profile"] != "baseline" || worker["replicas"] != float64(1) {
+		t.Fatalf("body=%#v err=%v", body, err)
+	}
+	if err = deployAPICommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, "deploy", []string{"model", "--backend", "dynamo"}); err == nil || !strings.Contains(err.Error(), "requires --gpu") {
+		t.Fatalf("missing cluster GPU was accepted: %v", err)
+	}
+}
+
 func TestPlanMakesUnknownStartupEvidenceExplicit(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/capacity/intelligence" {
@@ -1140,9 +1164,9 @@ func TestBenchmarkProfileAppliesDefaultsAndPreservesExplicitOverrides(t *testing
 }
 
 func TestStartupEvidenceLinesExposeWaterfallWithoutRawConsole(t *testing.T) {
-	lines := startupEvidenceLines(json.RawMessage(`{"runtime_ready_at":"2026-08-23T10:01:10Z","startup_evidence":{"image_cache":"hit","current_stage":"runtime_container_started","stages":[{"name":"identity_start","at":"2026-08-23T10:00:00Z"},{"name":"image_cache_hit","at":"2026-08-23T10:00:03Z"},{"name":"runtime_container_started","at":"2026-08-23T10:00:05Z"}]}}`))
+	lines := startupEvidenceLines(json.RawMessage(`{"runtime_ready_at":"2026-08-23T10:01:10Z","startup_evidence":{"image_cache":"miss","current_stage":"runtime_container_started","stages":[{"name":"identity_start","at":"2026-08-23T10:00:00Z"},{"name":"identity_ready","at":"2026-08-23T10:00:02Z"},{"name":"image_pull_start","at":"2026-08-23T10:00:03Z"},{"name":"image_pull_complete","at":"2026-08-23T10:00:33Z"},{"name":"runtime_start","at":"2026-08-23T10:00:34Z"},{"name":"runtime_container_started","at":"2026-08-23T10:00:40Z"}]}}`))
 	joined := strings.Join(lines, "\n")
-	for _, expected := range []string{"Image      cache hit", "measured provider waterfall", "+3s", "image cache hit", "+5s", "container started", "+1m10s", "runtime ready"} {
+	for _, expected := range []string{"Image      cache miss", "measured provider waterfall", "+3s", "image pull", "+40s", "container started", "+1m10s", "runtime ready", "workload identity  2s", "container transfer 30s", "container launch   6s", "model + runtime ready 30s", "provider allocation unavailable", "model download      unavailable"} {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("lines=%q missing=%q", joined, expected)
 		}
@@ -1278,6 +1302,50 @@ func TestRolloutInspectFormatsPersistedGuardComparison(t *testing.T) {
 	})
 	if err != nil || !strings.Contains(output, "TTFT p95") || !strings.Contains(output, "221.0ms") || !strings.Contains(output, "317.0ms") || !strings.Contains(output, "Guard: REJECT") || !strings.Contains(output, "ttft_regression") || strings.Contains(output, `\"active\"`) {
 		t.Fatalf("output=%s err=%v", output, err)
+	}
+}
+
+func TestRolloutCreateFromFilePreservesAdvancedServingTopology(t *testing.T) {
+	filename := filepath.Join(t.TempDir(), "candidate.yaml")
+	body := `
+apiVersion: infercrane.dev/v1
+kind: Deployment
+name: llama-production
+model: {id: meta-llama/Llama-3.1-8B-Instruct, revision: immutable}
+runtime: {engine: vllm, version: qualified}
+compute: {mode: elastic}
+resources: {gpu: NVIDIA-L40S}
+provider: {cloud: kubernetes, adapter: kubernetes-dynamo}
+scaling: {min_replicas: 1, max_replicas: 1}
+routing: {strategy: round-robin}
+serving:
+  backend: dynamo
+  profile: custom
+  mode: disaggregated
+  routing: kv-aware
+  prefill: {replicas: 1, tensor_parallelism: 1}
+  decode: {replicas: 2, tensor_parallelism: 1}
+`
+	if err := os.WriteFile(filename, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var request map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte(`{"operation":{"id":"op-rollout","status":"pending"}}`))
+	}))
+	defer server.Close()
+	err := rolloutCommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, []string{"create", "llama-production", "--file", filename, "--idempotency-key", "rollout-file-1"})
+	revision, _ := request["spec"].(map[string]any)
+	serving, _ := revision["serving"].(map[string]any)
+	decode, _ := serving["decode"].(map[string]any)
+	if err != nil || revision["provider_adapter"] != "kubernetes-dynamo" || serving["backend"] != "dynamo" || serving["routing"] != "kv-aware" || decode["replicas"] != float64(2) {
+		t.Fatalf("request=%#v err=%v", request, err)
+	}
+	if err = rolloutCommand(context.Background(), config.Config{}, []string{"create", "llama-production", "--file", filename, "--model", "other"}); err == nil || !strings.Contains(err.Error(), "cannot be combined") {
+		t.Fatalf("mixed file/flags accepted: %v", err)
 	}
 }
 

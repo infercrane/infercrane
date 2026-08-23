@@ -43,6 +43,7 @@ type kubernetesObject struct {
 	} `json:"spec"`
 	Status struct {
 		ObservedGeneration int64  `json:"observedGeneration"`
+		State              string `json:"state"`
 		AvailableReplicas  int    `json:"availableReplicas"`
 		ReadyReplicas      int    `json:"readyReplicas"`
 		URL                string `json:"url"`
@@ -52,6 +53,13 @@ type kubernetesObject struct {
 		Conditions []struct {
 			Type, Status, Reason, Message string
 		} `json:"conditions"`
+		Components map[string]struct {
+			Replicas          int `json:"replicas"`
+			ReadyReplicas     int `json:"readyReplicas"`
+			AvailableReplicas int `json:"availableReplicas"`
+			UpdatedReplicas   int `json:"updatedReplicas"`
+			ScheduledReplicas int `json:"scheduledReplicas"`
+		} `json:"components"`
 	} `json:"status"`
 }
 

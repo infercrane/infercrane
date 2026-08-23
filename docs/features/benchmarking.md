@@ -41,6 +41,19 @@ validates failure bounds, and produces `.infercrane/performance/RUN_ID/matrix.js
 that satisfy every declared threshold. A zero threshold means no SLO was declared and goodput stays
 unavailable rather than being invented.
 
+The profile matrix deliberately changes workload shape by objective, so its rows are not a
+scaling curve. Use the separate same-workload campaign when comparing concurrency behavior:
+
+```console
+scripts/benchmark-concurrency-sweep.sh mistral-prod --approve-load
+```
+
+It holds request count, input tokens, output tokens, seed, streaming mode, revision, and SLOs
+constant while running concurrency `1`, `8`, `32`, and `128`. The resulting
+`.infercrane/performance/RUN_ID-concurrency-sweep/sweep.json` is the only one of these two artifacts
+that supports a concurrency scaling comparison. Override the bounded defaults with
+`INFERCRANE_BENCHMARK_SWEEP_*` variables; every override remains in persisted workload evidence.
+
 The CLI submits the benchmark through the authenticated control-plane API. The control plane resolves the active immutable revision, runs AIPerf against the logical InferCrane endpoint, and persists the result. A fixed dataset seed defaults to `17` and can be changed with `--random-seed`.
 
 Release Guard validation can benchmark an isolated candidate explicitly:
@@ -61,9 +74,11 @@ Each result records the immutable ModelArtifact, runtime and configuration, revi
 region, GPU type and grounded GPU count, compute mode, workload parameters, TTFT, TPOT, request
 latency, throughput, SLO goodput when declared, errors, timestamp, and exact reproduction command. The persisted command uses
 a portable local export prefix rather than the deleted temporary execution directory, and replaces
-the credential with its environment-variable reference. GPU telemetry remains explicit `null`, and
-goodput remains `null` without SLO thresholds. Cost metadata contains `available: false` and a reason
-when AIPerf or the provider did not measure it; none are fabricated.
+the credential with its environment-variable reference. GPU utilization is attached only when
+measured DCGM evidence for the exact immutable revision overlaps the complete benchmark window;
+provider-reported or stale samples remain `null`. Goodput remains `null` without SLO thresholds.
+Cost metadata becomes available only when fresh, revision-bound `deployment_hourly_rate` evidence
+covers the run; otherwise it contains `available: false` and a reason. None are fabricated.
 
 ## What “fast” means
 
@@ -123,7 +138,8 @@ scripts/aws-performance-qualification.sh deepseek --approve-paid-resources
 scripts/aws-performance-qualification.sh granite --approve-paid-resources
 ```
 
-Each run uses the same seven-profile matrix and independent zero-resource inventory. These are paid,
+Each run uses the same seven-profile matrix, the fixed-workload concurrency sweep, and an independent
+zero-resource inventory. These are paid,
 commit-bound qualification commands—not normal developer tests and not permission to publish a
 cross-model performance claim.
 

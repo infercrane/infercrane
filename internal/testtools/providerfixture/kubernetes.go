@@ -20,10 +20,11 @@ type KubernetesCLI struct {
 	FailAfterApplyOnce  bool
 	ApplyFailure        bool
 	KServeInstalled     bool
+	DynamoInstalled     bool
 }
 
 func NewKubernetesCLI() *KubernetesCLI {
-	return &KubernetesCLI{Objects: make(map[string]map[string]any), KServeInstalled: true}
+	return &KubernetesCLI{Objects: make(map[string]map[string]any), KServeInstalled: true, DynamoInstalled: true}
 }
 
 func (k *KubernetesCLI) Run(_ context.Context, _ []string, args ...string) ([]byte, error) {
@@ -37,6 +38,13 @@ func (k *KubernetesCLI) Run(_ context.Context, _ []string, args ...string) ([]by
 	case "version":
 		return []byte(`{"serverVersion":{"gitVersion":"v1.36.1"}}`), nil
 	case "api-resources":
+		joined := strings.Join(args, " ")
+		if strings.Contains(joined, "nvidia.com") {
+			if !k.DynamoInstalled {
+				return []byte(""), nil
+			}
+			return []byte("dynamographdeployments.nvidia.com\n"), nil
+		}
 		if !k.KServeInstalled {
 			return nil, errors.New("the server doesn't have a resource type")
 		}
@@ -87,6 +95,16 @@ func (k *KubernetesCLI) apply(args []string) ([]byte, error) {
 			item["status"] = map[string]any{"observedGeneration": 1, "availableReplicas": 1, "readyReplicas": 1, "conditions": []any{map[string]any{"type": "Available", "status": "True", "reason": "MinimumReplicasAvailable"}}}
 		case "InferenceService":
 			item["status"] = map[string]any{"observedGeneration": 1, "url": "http://" + name + ".example.test", "conditions": []any{map[string]any{"type": "Ready", "status": "True", "reason": "Ready"}}}
+		case "DynamoGraphDeployment":
+			item["status"] = map[string]any{
+				"observedGeneration": 1,
+				"state":              "successful",
+				"conditions":         []any{map[string]any{"type": "Ready", "status": "True", "reason": "ComponentsReady"}},
+				"components": map[string]any{
+					"Frontend": map[string]any{"replicas": 1, "readyReplicas": 1, "availableReplicas": 1, "updatedReplicas": 1, "scheduledReplicas": 1},
+					"Worker":   map[string]any{"replicas": 1, "readyReplicas": 1, "availableReplicas": 1, "updatedReplicas": 1, "scheduledReplicas": 1},
+				},
+			}
 		}
 		k.Objects[strings.ToLower(kind)+"/"+name] = item
 	}
@@ -178,6 +196,8 @@ func normalizeKubernetesKind(value string) string {
 		return "service"
 	case strings.HasPrefix(value, "inferenceservice"):
 		return "inferenceservice"
+	case strings.HasPrefix(value, "dynamographdeployment"):
+		return "dynamographdeployment"
 	default:
 		return value
 	}

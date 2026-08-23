@@ -20,8 +20,9 @@ matrix means unqualified, not incompatible.
 elastic/serverless, AWS EC2 elastic, GCP Compute elastic, and Kubernetes elastic are distinct provider profiles;
 OpenRouter is a governed external target profile. Local conformance and real-provider qualification
 are separate fields. AWS ASG/EKS/SageMaker/Bedrock, GCP MIG/GKE/Vertex, and CoreWeave CKS have
-independent registered boundaries but remain non-executable and deferred. Advanced KServe/llm-d/
-Dynamo topologies and unregistered external adapters remain unqualified.
+independent registered boundaries but remain non-executable and deferred. The optional Dynamo DGD
+adapter is locally API-qualified but not real-GPU qualified; llm-d and unregistered external
+adapters remain unqualified.
 
 ## Check one exact serving combination
 

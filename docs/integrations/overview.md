@@ -134,7 +134,7 @@ failure testing, real infrastructure acceptance, and zero leaked billable resour
 
 <Note>
 The current adapter registry includes RunPod elastic/serverless, narrow AWS EC2, GCP Compute, and
-Kubernetes elastic adapters; vLLM, SGLang, custom OCI, and governed external targets; plus LiteLLM,
+Kubernetes elastic and optional Dynamo serving-graph adapters; vLLM, SGLang, custom OCI, and governed external targets; plus LiteLLM,
 external-sandbox access, and signed-artifact-handoff composition profiles. The compatibility matrix
 qualifies only exact combinations; registration never implies real-system evidence.
 </Note>

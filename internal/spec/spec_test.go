@@ -81,6 +81,39 @@ provider: {cloud: kubernetes}
 	}
 }
 
+func TestLoadDynamoTopologyPreservesAdvancedIntentAndFailsClosed(t *testing.T) {
+	base := `
+name: llama-dynamo
+model: {id: meta-llama/Llama-3.1-8B-Instruct}
+runtime: {engine: vllm}
+compute: {mode: elastic}
+resources: {gpu: NVIDIA-L40S}
+provider: {cloud: kubernetes, adapter: kubernetes-dynamo}
+scaling: {min_replicas: 1, max_replicas: 1}
+serving:
+  backend: dynamo
+  profile: custom
+  mode: disaggregated
+  routing: kv-aware
+  prefill: {replicas: 1, tensor_parallelism: 1}
+  decode: {replicas: 2, tensor_parallelism: 1}
+  autoscaling: {owner: disabled}
+  cache: {backend: none}
+`
+	loaded, err := Load(writeSpec(t, base))
+	if err != nil || loaded.Serving.Backend != "dynamo" || loaded.Serving.Decode.Replicas != 2 || loaded.Serving.SchemaVersion == "" {
+		t.Fatalf("loaded=%+v err=%v", loaded, err)
+	}
+	_, err = Load(writeSpec(t, strings.Replace(base, "max_replicas: 1", "max_replicas: 2", 1)))
+	if err == nil || !strings.Contains(err.Error(), "outer replica bounds") {
+		t.Fatalf("competing autoscaling owner accepted: %v", err)
+	}
+	_, err = Load(writeSpec(t, strings.Replace(base, "cache: {backend: none}", "cache: {backend: lmcache, configuration_ref: production}", 1)))
+	if err == nil || !strings.Contains(err.Error(), "not executable") {
+		t.Fatalf("unqualified disaggregated cache combination accepted: %v", err)
+	}
+}
+
 func TestLoadRejectsNonzeroServerlessMinimum(t *testing.T) {
 	_, err := Load(writeSpec(t, `
 name: qwen

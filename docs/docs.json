@@ -188,6 +188,7 @@
               "integrations/aws-ec2",
               "integrations/gcp-compute",
               "integrations/kubernetes",
+              "integrations/dynamo",
               "integrations/provider-profiles",
               "architecture/provider-contract"
             ]

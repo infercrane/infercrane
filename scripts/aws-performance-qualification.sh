@@ -34,4 +34,5 @@ INFERCRANE_V1_SPEC_DIR="$root/examples" \
 INFERCRANE_V1_VLLM_SPEC="$spec" \
 INFERCRANE_V1_RUNTIMES=vllm \
 INFERCRANE_V1_VLLM_FEATURES="$features" \
+INFERCRANE_V1_CONCURRENCY_SWEEP=true \
   "$root/scripts/portable-provider-acceptance.sh" aws --approve-paid-resources

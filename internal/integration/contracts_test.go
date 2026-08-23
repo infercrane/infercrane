@@ -123,6 +123,26 @@ func TestV15CatalogSeparatesProviderProfilesWithoutFabricatingQualification(t *t
 	}
 }
 
+func TestV1CatalogPublishesDynamoAsSeparateLocallySimulatedBackend(t *testing.T) {
+	registry, err := V1Catalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile, err := registry.Provider("kubernetes-dynamo")
+	if err != nil || profile.Cloud != "kubernetes" {
+		t.Fatalf("profile=%#v err=%v", profile, err)
+	}
+	encoded, _ := json.Marshal(profile)
+	for _, required := range []string{`"dgd_parent_lifecycle","state":"supported"`, `"disaggregated_serving","state":"supported"`, `"dynamo_planner_autoscaling","state":"unsupported"`, `"environment":"real-dynamo-gpu-kubernetes","reason"`} {
+		if !strings.Contains(string(encoded), required) {
+			t.Fatalf("profile missing %s: %s", required, encoded)
+		}
+	}
+	if strings.Contains(string(encoded), `"state":"real-qualified"`) {
+		t.Fatalf("Dynamo profile fabricated real qualification: %s", encoded)
+	}
+}
+
 func TestSupportedCapabilityRequiresEvidence(t *testing.T) {
 	profile := ProviderProfile{Adapter: "provider", Cloud: "cloud", ContractVersion: ProviderContractV1, AdapterVersion: "1", Modes: []ComputeMode{ElasticMode}, Capabilities: []Capability{{Name: "adoption", State: CapabilitySupported}}}
 	if err := profile.Validate(); err == nil || !strings.Contains(err.Error(), "without evidence") {
@@ -176,7 +196,7 @@ func TestRuntimeBackendsRejectInvalidComposition(t *testing.T) {
 }
 
 func TestRegistryLooksUpProfilesWithoutExposingMutableMaps(t *testing.T) {
-	registry, err := V09Catalog()
+	registry, err := V1Catalog()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +248,7 @@ func TestProtocolCapabilitiesFailClosedAndProjectOnlySupportedClaims(t *testing.
 }
 
 func TestCapabilityEvidenceReferencesExistingTests(t *testing.T) {
-	registry, err := V09Catalog()
+	registry, err := V1Catalog()
 	if err != nil {
 		t.Fatal(err)
 	}

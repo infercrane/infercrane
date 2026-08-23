@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/infercrane/infercrane/internal/servingcontract"
 	"github.com/infercrane/infercrane/internal/support"
 )
 
@@ -16,6 +17,7 @@ type Input struct {
 	Name, Model, ComputeMode, Cloud, ProviderAdapter, GPU, Region, Runtime, Routing string
 	Targets, RuntimeArgs                                                            []string
 	MinReplicas, MaxReplicas                                                        int
+	Serving                                                                         servingcontract.Topology
 }
 
 type Action struct {
@@ -60,30 +62,32 @@ type Change struct {
 }
 
 type Current struct {
-	Model, Runtime, Routing, ActiveRevision        string
-	ComputeMode, Cloud, GPU, Region                string
-	MinReplicas, MaxReplicas, ActiveRevisionNumber int
+	Model, Runtime, Routing, ActiveRevision          string
+	ComputeMode, Cloud, ProviderAdapter, GPU, Region string
+	MinReplicas, MaxReplicas, ActiveRevisionNumber   int
+	Serving                                          servingcontract.Topology
 }
 
 type Plan struct {
-	Version         int       `json:"version"`
-	Name            string    `json:"name"`
-	Model           string    `json:"model"`
-	Mode            string    `json:"mode"`
-	Cloud           string    `json:"cloud,omitempty"`
-	ProviderAdapter string    `json:"provider_adapter,omitempty"`
-	GPU             string    `json:"gpu,omitempty"`
-	Region          string    `json:"region,omitempty"`
-	Runtime         string    `json:"runtime"`
-	Routing         string    `json:"routing"`
-	Targets         []string  `json:"targets,omitempty"`
-	MinReplicas     int       `json:"min_replicas"`
-	MaxReplicas     int       `json:"max_replicas"`
-	Actions         []Action  `json:"actions"`
-	Changes         []Change  `json:"changes,omitempty"`
-	Warnings        []string  `json:"warnings,omitempty"`
-	Cost            Cost      `json:"cost"`
-	Readiness       Readiness `json:"readiness"`
+	Version         int                      `json:"version"`
+	Name            string                   `json:"name"`
+	Model           string                   `json:"model"`
+	Mode            string                   `json:"mode"`
+	Cloud           string                   `json:"cloud,omitempty"`
+	ProviderAdapter string                   `json:"provider_adapter,omitempty"`
+	GPU             string                   `json:"gpu,omitempty"`
+	Region          string                   `json:"region,omitempty"`
+	Runtime         string                   `json:"runtime"`
+	Routing         string                   `json:"routing"`
+	Targets         []string                 `json:"targets,omitempty"`
+	MinReplicas     int                      `json:"min_replicas"`
+	MaxReplicas     int                      `json:"max_replicas"`
+	Actions         []Action                 `json:"actions"`
+	Changes         []Change                 `json:"changes,omitempty"`
+	Warnings        []string                 `json:"warnings,omitempty"`
+	Cost            Cost                     `json:"cost"`
+	Readiness       Readiness                `json:"readiness"`
+	Serving         servingcontract.Topology `json:"serving,omitzero"`
 }
 
 // Compare turns a creation plan into a deterministic revision rollout plan.
@@ -103,10 +107,14 @@ func Compare(p Plan, current Current) Plan {
 	addChange("runtime", current.Runtime, p.Runtime)
 	addChange("compute", current.ComputeMode, computeModeForPlan(p))
 	addChange("cloud", current.Cloud, p.Cloud)
+	addChange("provider adapter", current.ProviderAdapter, p.ProviderAdapter)
 	addChange("GPU", current.GPU, p.GPU)
 	addChange("region", current.Region, p.Region)
 	addChange("routing", current.Routing, p.Routing)
 	addChange("replicas", fmt.Sprintf("%d..%d", current.MinReplicas, current.MaxReplicas), fmt.Sprintf("%d..%d", p.MinReplicas, p.MaxReplicas))
+	currentServing, _ := current.Serving.Digest()
+	plannedServing, _ := p.Serving.Digest()
+	addChange("serving topology", currentServing, plannedServing)
 	if len(p.Changes) == 0 {
 		p.Actions = []Action{{Order: 1, Kind: "noop", Summary: "Persisted deployment already matches the requested specification"}}
 		return p
@@ -187,8 +195,12 @@ func Build(in Input) (Plan, error) {
 			return Plan{}, errors.New("AWS BYOC requires an explicit region")
 		}
 	}
+	in.Serving = in.Serving.Normalize()
+	if err := in.Serving.Validate(in.Runtime, in.Cloud, in.ProviderAdapter, in.MinReplicas, in.MaxReplicas); err != nil {
+		return Plan{}, fmt.Errorf("serving topology: %w", err)
+	}
 
-	p := Plan{Version: 1, Name: in.Name, Model: in.Model, Cloud: in.Cloud, ProviderAdapter: in.ProviderAdapter, GPU: in.GPU,
+	p := Plan{Version: 1, Name: in.Name, Model: in.Model, Cloud: in.Cloud, ProviderAdapter: in.ProviderAdapter, GPU: in.GPU, Serving: in.Serving,
 		Region: in.Region, Runtime: in.Runtime, Routing: in.Routing, Targets: in.Targets,
 		MinReplicas: in.MinReplicas, MaxReplicas: in.MaxReplicas,
 		Cost: Cost{Status: "unavailable", Reason: "live provider pricing is not configured; no estimate is fabricated"},

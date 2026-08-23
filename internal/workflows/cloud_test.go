@@ -13,6 +13,7 @@ import (
 	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/operations"
 	"github.com/infercrane/infercrane/internal/provision"
+	"github.com/infercrane/infercrane/internal/servingcontract"
 )
 
 type fakeCloudStore struct {
@@ -527,6 +528,7 @@ type fakeReplicaProvider struct {
 	deleteLingers int
 	deferredID    bool
 	requestIDSeen string
+	lastSpec      provision.ReplicaSpec
 }
 
 type capacityRecordingStore struct {
@@ -609,6 +611,7 @@ func (f *fakeReplicaProvider) Handle(key string) provision.ProviderHandle {
 func (f *fakeReplicaProvider) EnsureReplica(_ context.Context, spec provision.ReplicaSpec) (provision.ProviderHandle, error) {
 	f.ensureCalls++
 	f.requestIDSeen = spec.RequestID
+	f.lastSpec = spec
 	if f.ensureErr != nil {
 		return provision.ProviderHandle{}, f.ensureErr
 	}
@@ -616,6 +619,23 @@ func (f *fakeReplicaProvider) EnsureReplica(_ context.Context, spec provision.Re
 		return provision.ProviderHandle{ExternalKey: spec.ExternalKey, ResourceID: "resource-after-create", RequestID: spec.RequestID}, nil
 	}
 	return provision.ProviderHandle{ExternalKey: spec.ExternalKey, ResourceID: "infercrane-" + spec.ExternalKey, RequestID: "request-1"}, nil
+}
+
+func TestDynamoServingTopologyReachesProviderWithoutFlattening(t *testing.T) {
+	store := &fakeCloudStore{deployment: domain.Deployment{ID: "deployment-1", Name: "llama", Model: "meta-llama/Llama-3.1-8B-Instruct", Runtime: "vllm", RoutingStrategy: "round-robin", MinReplicas: 1, MaxReplicas: 1}}
+	provider := &fakeReplicaProvider{observation: provision.Observation{Exists: true, State: "ready", Endpoint: "http://dynamo:8000", Details: `{}`}}
+	topology := servingcontract.Topology{
+		Backend: servingcontract.BackendDynamo, Profile: "custom", Mode: servingcontract.ModeDisaggregated, Routing: servingcontract.RoutingKVAware,
+		Prefill: servingcontract.Pool{Replicas: 1, TensorParallelism: 1}, Decode: servingcontract.Pool{Replicas: 2, TensorParallelism: 1},
+	}
+	request := CloudRequest{TenantID: "global", DeploymentID: "deployment-1", RevisionID: "revision-1", Name: "llama", Model: "meta-llama/Llama-3.1-8B-Instruct", Cloud: "kubernetes", ProviderAdapter: "kubernetes-dynamo", GPU: "NVIDIA-L40S", Runtime: "vllm", ComputeMode: "elastic", Port: 8000, MinReplicas: 1, MaxReplicas: 1, Serving: topology}
+	if err := request.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	_, _, _, _ = ensureCloudReplica(context.Background(), store, ReplicaBackend{Name: "kubernetes-dynamo", Cloud: "kubernetes", Runtime: "vllm", Provider: provider}, fakeInspector{ready: true}, domain.Operation{ID: "operation-1"}, request, 0)
+	if provider.ensureCalls != 1 || provider.lastSpec.Serving.Normalize() != topology.Normalize() || provider.lastSpec.Runtime != "vllm" {
+		t.Fatalf("ensure_calls=%d spec=%#v", provider.ensureCalls, provider.lastSpec)
+	}
 }
 func (f *fakeReplicaProvider) ObserveReplica(context.Context, provision.ProviderHandle, int) (provision.Observation, error) {
 	return f.observation, nil

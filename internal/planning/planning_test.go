@@ -3,6 +3,8 @@ package planning
 import (
 	"strings"
 	"testing"
+
+	"github.com/infercrane/infercrane/internal/servingcontract"
 )
 
 func TestBuildProvisionedPlan(t *testing.T) {
@@ -39,6 +41,30 @@ func TestBuildKubernetesElasticPlan(t *testing.T) {
 	p, err := Build(Input{Model: "Qwen/Qwen3-8B", Cloud: "kubernetes", GPU: "NVIDIA-L40S"})
 	if err != nil || p.Mode != "provisioned" || p.Cloud != "kubernetes" {
 		t.Fatalf("plan=%#v err=%v", p, err)
+	}
+}
+
+func TestBuildDynamoPlanPreservesTopologyAndRejectsCompetingOuterScale(t *testing.T) {
+	topology := servingcontract.Topology{Backend: servingcontract.BackendDynamo, Profile: "baseline", Mode: servingcontract.ModeAggregated, Routing: servingcontract.RoutingDirect, Worker: servingcontract.Pool{Replicas: 1, TensorParallelism: 1}}
+	p, err := Build(Input{Model: "meta-llama/Llama-3.1-8B-Instruct", Runtime: "vllm", Cloud: "kubernetes", ProviderAdapter: "kubernetes-dynamo", GPU: "NVIDIA-L40S", MinReplicas: 1, MaxReplicas: 1, Serving: topology})
+	if err != nil || p.ProviderAdapter != "kubernetes-dynamo" || p.Serving.Normalize() != topology.Normalize() {
+		t.Fatalf("plan=%#v err=%v", p, err)
+	}
+	_, err = Build(Input{Model: "model", Runtime: "vllm", Cloud: "kubernetes", ProviderAdapter: "kubernetes-dynamo", GPU: "NVIDIA-L40S", MinReplicas: 1, MaxReplicas: 2, Serving: topology})
+	if err == nil || !strings.Contains(err.Error(), "outer replica bounds") {
+		t.Fatalf("competing scale ownership accepted: %v", err)
+	}
+}
+
+func TestCompareDetectsServingTopologyAndAdapterChanges(t *testing.T) {
+	topology := servingcontract.Topology{Backend: servingcontract.BackendDynamo, Profile: "baseline", Mode: servingcontract.ModeAggregated, Routing: servingcontract.RoutingDirect, Worker: servingcontract.Pool{Replicas: 1, TensorParallelism: 1}}
+	p, err := Build(Input{Model: "model", Runtime: "vllm", Cloud: "kubernetes", ProviderAdapter: "kubernetes-dynamo", GPU: "NVIDIA-L40S", MinReplicas: 1, MaxReplicas: 1, Serving: topology})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p = Compare(p, Current{Model: "model", Runtime: "vllm", Routing: "round-robin", ComputeMode: "elastic", Cloud: "kubernetes", ProviderAdapter: "kubernetes", GPU: "NVIDIA-L40S", MinReplicas: 1, MaxReplicas: 1, ActiveRevision: "rev-1", ActiveRevisionNumber: 1})
+	if len(p.Changes) != 3 || p.Changes[0].Field != "provider adapter" || p.Changes[1].Field != "serving topology" || p.Changes[2].Field != "revision" {
+		t.Fatalf("changes=%#v", p.Changes)
 	}
 }
 

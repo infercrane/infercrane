@@ -323,11 +323,34 @@ func V15Catalog() (*Registry, error) {
 			return nil, err
 		}
 	}
+	dynamo := ProviderProfile{
+		Adapter: "kubernetes-dynamo", Cloud: "kubernetes", ContractVersion: ProviderContractV1, AdapterVersion: "builtin-v2.0", Modes: []ComputeMode{ElasticMode},
+		Capabilities: []Capability{
+			{Name: "dgd_parent_lifecycle", State: CapabilitySupported, Detail: "InferCrane owns one DynamoGraphDeployment; the Dynamo operator owns children", Evidence: "go:test/internal/provision#TestKubernetesDynamoLifecycleIsReplaySafeAndOwnsOneParent"},
+			{Name: "lost_response_adoption", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestKubernetesDynamoAdoptsLostApplyResponseAndRejectsStaleReadiness"},
+			{Name: "aggregated_serving", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestKubernetesDynamoManifestMakesTopologyAndSecretsExplicit"},
+			{Name: "disaggregated_serving", State: CapabilitySupported, Detail: "manifest and ownership contract are locally qualified; GPU performance is not", Evidence: "go:test/internal/provision#TestKubernetesDynamoDisaggregatedVLLMAndSGLangAreExplicit"},
+			{Name: "kv_aware_routing", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestKubernetesDynamoManifestMakesTopologyAndSecretsExplicit"},
+			{Name: "kvbm_cache", State: CapabilitySupported, Detail: "aggregated vLLM only until additional combinations are qualified", Evidence: "go:test/internal/provision#TestKubernetesDynamoManifestMakesTopologyAndSecretsExplicit"},
+			{Name: "dynamo_planner_autoscaling", State: CapabilityUnsupported, Detail: "registered in the serving contract but fails closed until DGDSA ownership is qualified"},
+			{Name: "lmcache", State: CapabilityUnsupported, Detail: "registered in the serving contract but not emitted by this adapter"},
+			{Name: "hicache", State: CapabilityUnsupported, Detail: "registered in the serving contract but not emitted by this adapter"},
+		},
+		Qualification: []Qualification{
+			{State: QualificationLocal, Environment: "hermetic-kubectl", Evidence: "go:test/internal/provision#TestKubernetesDynamoLifecycleIsReplaySafeAndOwnsOneParent"},
+			{State: QualificationDeferred, Environment: "real-dynamo-gpu-kubernetes", Reason: "Dynamo operator, GPU runtime, NIXL, cache, and performance semantics require real infrastructure"},
+		},
+	}
+	if err = registry.RegisterProvider(dynamo); err != nil {
+		return nil, err
+	}
 	compatibility := append([]RuntimeCompatibility(nil), registry.Snapshot().Compatibility...)
 	compatibility = append(compatibility,
 		RuntimeCompatibility{Runtime: "vllm", Adapter: "gcp-compute", Cloud: "gcp", Mode: ElasticMode, State: QualificationLocal, Evidence: "go:test/internal/provision#TestGCPComputeLifecycleIsPrivateIdempotentAndAdoptable"},
 		RuntimeCompatibility{Runtime: "sglang", Adapter: "gcp-compute", Cloud: "gcp", Mode: ElasticMode, State: QualificationSimulated, Evidence: "go:test/internal/provision#TestGCPComputePortableWorkloadExpandsArgumentsSafely"},
 		RuntimeCompatibility{Runtime: "custom-oci", Adapter: "gcp-compute", Cloud: "gcp", Mode: ElasticMode, State: QualificationSimulated, Evidence: "go:test/internal/provision#TestGCPComputePortableWorkloadExpandsArgumentsSafely"},
+		RuntimeCompatibility{Runtime: "vllm", Adapter: "kubernetes-dynamo", Cloud: "kubernetes", Mode: ElasticMode, State: QualificationSimulated, Evidence: "go:test/internal/provision#TestKubernetesDynamoDisaggregatedVLLMAndSGLangAreExplicit"},
+		RuntimeCompatibility{Runtime: "sglang", Adapter: "kubernetes-dynamo", Cloud: "kubernetes", Mode: ElasticMode, State: QualificationSimulated, Evidence: "go:test/internal/provision#TestKubernetesDynamoDisaggregatedVLLMAndSGLangAreExplicit"},
 	)
 	for _, profile := range profiles {
 		if profile.Adapter == "gcp-compute" || profile.Adapter == "aws-bedrock" {

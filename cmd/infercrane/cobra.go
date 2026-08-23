@@ -80,6 +80,30 @@ var publicCommandSpecs = []commandSpec{
 	{use: "serve", short: "Run the control plane and gateway", group: "admin"},
 }
 
+var commandExamples = map[string]string{
+	"plan": `  # Common path: preview safe defaults
+  infercrane plan meta-llama/Llama-3.1-8B-Instruct
+
+  # Advanced path: preview a reviewable DeploymentSpec
+  infercrane plan infercrane.yaml`,
+	"deploy": `  # Common path: one durable deployment
+  infercrane deploy meta-llama/Llama-3.1-8B-Instruct --wait
+
+  # Attach existing registered capacity
+  infercrane deploy meta-llama/Llama-3.1-8B-Instruct --targets gpu-a,gpu-b
+
+  # Optional advanced serving backend
+  infercrane deploy meta-llama/Llama-3.1-8B-Instruct --backend dynamo --gpu NVIDIA-L40S
+
+  # Full reviewable configuration
+  infercrane deploy infercrane.yaml --idempotency-key production-r1`,
+	"rollout": `  # Create a candidate from a complete DeploymentSpec
+  infercrane rollout create production --file candidate.yaml --idempotency-key production-r2
+
+  # Follow its durable provisioning operation
+  infercrane rollout provision production REVISION_ID --wait`,
+}
+
 func isPublicCommand(name string) bool {
 	for _, spec := range publicCommandSpecs {
 		if strings.Fields(spec.use)[0] == name {
@@ -148,6 +172,7 @@ func newLegacyCommand(ctx context.Context, spec commandSpec) *cobra.Command {
 			return runLegacy(ctx, append([]string{name}, args...))
 		},
 	}
+	command.Example = commandExamples[name]
 	addHelpFlags(command, name)
 	return command
 }
@@ -315,8 +340,11 @@ func addHelpFlags(command *cobra.Command, name string) {
 		stringFlag("name", "", "logical deployment name")
 		stringFlag("targets", "", "comma-separated existing target names")
 		stringFlag("cloud", "", "provider cloud")
+		stringFlag("backend", "", "serving backend; use dynamo for a managed Dynamo graph")
+		stringFlag("provider-adapter", "", "exact provider adapter profile")
 		stringFlag("gpu", "", "GPU type")
 		stringFlag("region", "", "provider region")
+		stringFlag("runtime", "vllm", "runtime engine")
 		stringFlag("compute", "elastic", "compute mode: elastic or serverless")
 		intFlag("min", 1, "minimum replicas")
 		intFlag("max", 1, "maximum replicas")
@@ -425,12 +453,38 @@ func addHelpFlags(command *cobra.Command, name string) {
 	case "operation":
 		stringFlag("wait-timeout", "", "stop watching locally without cancelling the operation")
 	case "rollout":
+		stringFlag("file", "", "candidate DeploymentSpec YAML")
+		boolFlag("wait", "follow durable progress to completion")
+		stringFlag("wait-timeout", "", "stop watching locally without cancelling the operation")
+		stringFlag("idempotency-key", "", "stable safe-retry key")
+		stringFlag("reason", "", "persisted transition reason")
+		stringFlag("model", "", "candidate model")
+		stringFlag("runtime", "vllm", "candidate runtime")
+		stringFlag("routing", "round-robin", "candidate routing strategy")
+		intFlag("min", 1, "candidate minimum replicas")
+		intFlag("max", 1, "candidate maximum replicas")
+		stringFlag("cloud", "", "candidate provider cloud")
+		stringFlag("provider-adapter", "", "candidate provider adapter")
+		stringFlag("gpu", "", "candidate GPU")
+		stringFlag("region", "", "candidate region")
+		stringFlag("model-revision", "", "candidate model revision")
+		stringFlag("runtime-version", "", "candidate runtime version")
+		stringFlag("runtime-args", "", "comma-separated candidate runtime arguments")
 		intFlag("requests", 20, "bounded validation requests per revision")
 		intFlag("concurrency", 1, "bounded validation concurrency")
 		boolFlag("acknowledge-validation-cost", "confirm explicit validation traffic and provider cost")
+		boolFlag("enabled", "enable Release Guard")
+		boolFlag("require-compatibility", "require comparable model/runtime evidence")
+		boolFlag("require-synthetic", "require bounded AIPerf validation")
 		boolFlag("require-quality", "require signed comparable semantic quality evidence")
+		boolFlag("auto-rollback", "automatically roll back a rejected promoted revision")
+		intFlag("minimum-requests", 0, "minimum measured requests per revision")
+		stringFlag("max-cost-regression", "", "maximum sourced cost regression percent")
 		stringFlag("minimum-quality-score", "", "minimum candidate semantic quality score")
 		stringFlag("max-quality-regression", "", "maximum semantic quality regression percent")
+		intFlag("auto-rollback-window", 0, "post-promotion observation window seconds")
+		intFlag("validation-max-requests", 0, "hard validation request bound")
+		intFlag("validation-max-concurrency", 0, "hard validation concurrency bound")
 	}
 }
 
@@ -439,9 +493,9 @@ func completionFor(command string) func(*cobra.Command, []string, string) ([]str
 		"workload":    {"--model", "--recipe", "--profile", "--name", "--runtime", "--cloud", "--gpu", "--region", "--tag", "--file", "--platform", "--push", "--force", "--wait", "--detach", "--port", "--output"},
 		"evaluation":  {"--file", "--result", "--key", "--suite", "--suite-version", "--evaluator", "--evaluator-version", "--score", "--passed", "--samples", "--artifact-digest", "--evaluated-at", "--attach", "--output"},
 		"artifact":    {"--provider", "--region", "--location", "--state", "--source", "--ttl", "--idempotency-key", "--output"},
-		"deploy":      {"--name", "--cloud", "--gpu", "--region", "--compute", "--min", "--max", "--wait", "--wait-timeout", "--idempotency-key", "--output"},
-		"apply":       {"--name", "--cloud", "--gpu", "--region", "--compute", "--min", "--max", "--wait", "--wait-timeout", "--idempotency-key", "--output"},
-		"plan":        {"--name", "--targets", "--cloud", "--gpu", "--region", "--compute", "--min", "--max", "--output"},
+		"deploy":      {"--name", "--cloud", "--backend", "--provider-adapter", "--runtime", "--gpu", "--region", "--compute", "--min", "--max", "--wait", "--wait-timeout", "--idempotency-key", "--output"},
+		"apply":       {"--name", "--cloud", "--backend", "--provider-adapter", "--runtime", "--gpu", "--region", "--compute", "--min", "--max", "--wait", "--wait-timeout", "--idempotency-key", "--output"},
+		"plan":        {"--name", "--targets", "--cloud", "--backend", "--provider-adapter", "--runtime", "--gpu", "--region", "--compute", "--min", "--max", "--output"},
 		"request":     {"--message", "--stream", "--output"},
 		"status":      {"--watch", "--output"},
 		"logs":        {"--follow", "--since", "--type", "--output"},
@@ -460,7 +514,7 @@ func completionFor(command string) func(*cobra.Command, []string, string) ([]str
 		"operation":   {"--wait-timeout", "--output"},
 		"observe":     {"--watch", "--diagnose", "--events", "--window", "--output"},
 		"inbox":       {"--limit", "--output"},
-		"rollout":     {"--requests", "--concurrency", "--acknowledge-validation-cost", "--require-quality", "--minimum-quality-score", "--max-quality-regression", "--wait", "--wait-timeout", "--output"},
+		"rollout":     {"--file", "--model", "--model-revision", "--runtime", "--runtime-version", "--runtime-args", "--cloud", "--provider-adapter", "--gpu", "--region", "--routing", "--min", "--max", "--reason", "--requests", "--concurrency", "--acknowledge-validation-cost", "--enabled", "--require-compatibility", "--require-synthetic", "--require-quality", "--auto-rollback", "--minimum-requests", "--max-cost-regression", "--minimum-quality-score", "--max-quality-regression", "--auto-rollback-window", "--validation-max-requests", "--validation-max-concurrency", "--idempotency-key", "--wait", "--wait-timeout", "--output"},
 		"endpoint":    {"--model", "--environment", "--name", "--deployment", "--target", "--connection", "--ownership", "--policy", "--bindings", "--evaluate", "--window", "--disable", "--minimum-requests", "--max-ttft-regression", "--yes", "--output"},
 		"provider":    {"--adapter", "--url", "--model", "--secret-reference", "--from-env", "--output"},
 		"environment": {"--to", "--policy", "--idempotency-key", "--yes", "--output"},

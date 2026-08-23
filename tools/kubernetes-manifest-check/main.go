@@ -14,7 +14,7 @@ func main() {
 	if len(os.Args) < 2 {
 		fatal(errors.New("manifest paths are required"))
 	}
-	seenRoute, seenDeployment, seenService, seenKServeRole := false, false, false, false
+	seenRoute, seenDeployment, seenService, seenKServeRole, seenDynamoRole := false, false, false, false, false
 	for _, path := range os.Args[1:] {
 		file, err := os.Open(path)
 		if err != nil {
@@ -47,6 +47,7 @@ func main() {
 					seenDeployment = seenDeployment || resource == "deployments"
 					seenService = seenService || resource == "services"
 					seenKServeRole = seenKServeRole || resource == "inferenceservices"
+					seenDynamoRole = seenDynamoRole || resource == "dynamographdeployments"
 				}
 			case "HTTPRoute":
 				if err = checkHTTPRoute(document); err != nil {
@@ -63,8 +64,8 @@ func main() {
 			fatal(err)
 		}
 	}
-	if !seenRoute || !seenDeployment || !seenService || !seenKServeRole {
-		fatal(errors.New("manifests do not cover deployment RBAC, KServe RBAC, and Gateway API exposure"))
+	if !seenRoute || !seenDeployment || !seenService || !seenKServeRole || !seenDynamoRole {
+		fatal(errors.New("manifests do not cover deployment RBAC, KServe RBAC, Dynamo RBAC, and Gateway API exposure"))
 	}
 	fmt.Println("Kubernetes manifests are syntactically valid and preserve bounded ownership.")
 }

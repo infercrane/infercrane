@@ -142,6 +142,36 @@ func TestKubernetesConfigurationIsExplicitCompleteAndImmutable(t *testing.T) {
 	}
 }
 
+func TestDynamoConfigurationIsOptionalCompleteAndImmutable(t *testing.T) {
+	t.Setenv("INFERCRANE_API_KEY", "secret")
+	t.Setenv("INFERCRANE_DYNAMO_VLLM_IMAGE_DIGEST", "nvcr.io/nvidia/ai-dynamo/vllm-runtime:latest")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "Kubernetes") {
+		t.Fatalf("expected missing Kubernetes boundary, got %v", err)
+	}
+	for key, value := range map[string]string{
+		"INFERCRANE_KUBERNETES_CONTEXT":          "production",
+		"INFERCRANE_KUBERNETES_IMAGE_DIGEST":     "ghcr.io/infercrane/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"INFERCRANE_DYNAMO_VLLM_IMAGE_DIGEST":    "nvcr.io/nvidia/ai-dynamo/vllm-runtime@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		"INFERCRANE_DYNAMO_VLLM_RUNTIME_VERSION": "1.4.0",
+		"INFERCRANE_DYNAMO_MODEL_SECRET_NAME":    "huggingface-models",
+	} {
+		t.Setenv(key, value)
+	}
+	cfg, err := Load()
+	if err != nil || !cfg.KubernetesEnabled() || !cfg.DynamoEnabled() || cfg.DynamoModelSecretName != "huggingface-models" {
+		t.Fatalf("cfg=%#v err=%v", cfg, err)
+	}
+	t.Setenv("INFERCRANE_DYNAMO_MODEL_SECRET_NAME", "Bad_Secret")
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "DNS label") {
+		t.Fatalf("invalid secret name accepted: %v", err)
+	}
+	t.Setenv("INFERCRANE_DYNAMO_MODEL_SECRET_NAME", "huggingface-models")
+	t.Setenv("INFERCRANE_DYNAMO_VLLM_RUNTIME_VERSION", "latest")
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "MAJOR.MINOR.PATCH") {
+		t.Fatalf("unversioned Dynamo runtime accepted: %v", err)
+	}
+}
+
 func TestGCPBYOCConfigurationIsAllOrNothingAndImmutable(t *testing.T) {
 	t.Setenv("INFERCRANE_API_KEY", "secret")
 	t.Setenv("INFERCRANE_GCP_PROJECT", "acme-prod")

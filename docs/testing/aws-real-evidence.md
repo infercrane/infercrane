@@ -21,6 +21,11 @@ throughput-oriented runtime profile is faster than the interactive runtime profi
 requires two immutable candidate revisions to run the same workload digest before Inference Lab or
 Release Guard may rank them.
 
+They are also not a concurrency scaling curve because the profile shapes differ. The
+`scripts/benchmark-concurrency-sweep.sh` campaign holds request count, token shape, seed, streaming
+mode, revision, and SLOs constant at concurrency 1, 8, 32, and 128. Real AWS rows for that campaign
+remain pending and must not be inferred from this table.
+
 The deployment completed in 11 minutes 10 seconds. Closed startup markers measured approximately
 4 minutes 4 seconds for the immutable runtime-image pull and 45 seconds from runtime start to the
 container-start marker. The remaining time included AWS placement, model-artifact materialization,

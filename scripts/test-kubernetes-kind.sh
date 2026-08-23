@@ -29,8 +29,10 @@ trap cleanup EXIT INT TERM
 "$kind_bin" create cluster --name "$cluster_name" --image "$node_image" --wait 180s
 kubectl --context "$context_name" apply -f "$repo_dir/deploy/kubernetes/base/namespace.yaml"
 kubectl --context "$context_name" apply -f "$repo_dir/deploy/kubernetes/base/service-accounts.yaml"
+kubectl --context "$context_name" apply -f "$repo_dir/deploy/kubernetes/dynamo/provider-rbac.yaml"
+kubectl --context "$context_name" apply -f "$repo_dir/internal/testtools/manifests/dynamo-graph-deployment-crd.yaml"
 kubectl --context "$context_name" --namespace infercrane-system create secret generic infercrane-worker \
   --from-literal=api-key=kind-test-worker-key
 
 cd "$repo_dir"
-INFERCRANE_KIND_CONTEXT="$context_name" go test -count=1 -run '^TestKubernetesKindLifecycle$' ./internal/provision
+INFERCRANE_KIND_CONTEXT="$context_name" go test -count=1 -run '^TestKubernetes(KindLifecycle|DynamoKindLifecycle)$' ./internal/provision

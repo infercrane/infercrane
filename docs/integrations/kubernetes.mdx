@@ -21,6 +21,7 @@ real-cluster support claim.
 |---|---|---|
 | `deployment` | one `apps/v1 Deployment` and one `v1 Service` | You want the narrowest dependency set |
 | `kserve` | one standard `serving.kserve.io/v1beta1 InferenceService` | KServe Standard mode is already installed and operated by your platform team |
+| Dynamo adapter | one `nvidia.com/v1beta1 DynamoGraphDeployment` | You deliberately need aggregated/disaggregated worker topology; see [Dynamo](/integrations/dynamo) |
 
 InferCrane does not create child Pods directly. It does not install KServe, Gateway API, a GPU device
 plugin, model storage, or a Kubernetes distribution.
@@ -106,9 +107,9 @@ The provider verifies the `InferenceService` API and required permissions during
 owns generated Deployments, Services, and Pods; InferCrane inventories and deletes only the parent
 InferenceService. Raw KServe condition metadata remains available through `infercrane inspect`.
 
-KServe `LLMInferenceService`, llm-d, and Dynamo are not enabled because each can own routing,
-scheduling, or disaggregation. They require a future explicit ownership contract rather than a hidden
-second router.
+KServe `LLMInferenceService` and llm-d remain separate integration boundaries. Dynamo uses the
+explicit ownership contract in [ADR 0036](/adr/0036-dynamo-serving-topology-boundary) and a distinct
+`kubernetes-dynamo` adapter; it is never enabled implicitly by `workload_api`.
 
 ## Expose the logical endpoint
 

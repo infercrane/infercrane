@@ -54,6 +54,11 @@ SGLang uses a built-in immutable workload profile. Custom OCI images declare the
 `runtime.workload`; see [Custom OCI workloads](/features/custom-oci). Mutable image tags and
 underspecified probes are rejected before provisioning.
 
+An optional `serving` object describes an advanced backend topology without exposing provider CRD
+shape to the core schema. Today `backend: dynamo` requires one outer graph replica, Kubernetes, and
+the `kubernetes-dynamo` adapter. See [NVIDIA Dynamo](/integrations/dynamo) for the simple command and
+the complete reviewable YAML form.
+
 `compute.mode` defaults to `elastic`; elastic replica bounds default to `1..1`. Serverless requires
 `min_replicas: 0` and defaults `max_replicas` to one when omitted. Revisions are immutable; changing
 a field creates a candidate. `provider.adapter` persists the exact implementation when more than one

@@ -66,9 +66,54 @@
       "additionalProperties": false,
       "required": ["strategy"],
       "properties": { "strategy": { "enum": ["round-robin", "consistent-hash", "power-of-two", "cache-aware"] } }
-    }
+    },
+    "serving": { "$ref": "#/$defs/serving" }
   },
   "$defs": {
+	"pool": {
+	  "type": "object",
+	  "additionalProperties": false,
+	  "properties": {
+		"replicas": { "type": "integer", "minimum": 0, "maximum": 10000 },
+		"tensor_parallelism": { "type": "integer", "minimum": 0, "maximum": 1024 }
+	  }
+	},
+	"serving": {
+	  "type": "object",
+	  "additionalProperties": false,
+	  "properties": {
+		"schema_version": { "const": "infercrane.serving/v1" },
+		"backend": { "enum": ["dynamo"] },
+		"profile": { "enum": ["baseline", "custom"] },
+		"mode": { "enum": ["aggregated", "disaggregated"] },
+		"routing": { "enum": ["direct", "kv-aware"] },
+		"worker": { "$ref": "#/$defs/pool" },
+		"prefill": { "$ref": "#/$defs/pool" },
+		"decode": { "$ref": "#/$defs/pool" },
+		"autoscaling": {
+		  "type": "object",
+		  "additionalProperties": false,
+		  "properties": {
+			"owner": { "enum": ["disabled", "dynamo-planner", "external"] },
+			"min": { "type": "integer", "minimum": 0, "maximum": 10000 },
+			"max": { "type": "integer", "minimum": 0, "maximum": 10000 }
+		  }
+		},
+		"cache": {
+		  "type": "object",
+		  "additionalProperties": false,
+		  "properties": {
+			"backend": { "enum": ["none", "kvbm", "lmcache", "hicache"] },
+			"host_gib": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+			"disk_gib": { "type": "integer", "minimum": 0, "maximum": 10000000 },
+			"memory_gib": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+			"storage_claim": { "type": "string", "maxLength": 253 },
+			"configuration_ref": { "type": "string", "maxLength": 253 },
+			"metrics": { "type": "boolean" }
+		  }
+		}
+	  }
+	},
     "workload": {
       "type": "object",
       "additionalProperties": false,

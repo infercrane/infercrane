@@ -3,6 +3,7 @@ package doctor
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/infercrane/infercrane/internal/config"
@@ -100,6 +101,22 @@ func TestKubernetesCheckIsReadOnlyAndRequiredWhenRequested(t *testing.T) {
 	check = CheckKubernetes(context.Background(), config.Config{}, Dependencies{})
 	if check.Status != Fail || check.Remediation == "" {
 		t.Fatalf("unexpected unconfigured check: %#v", check)
+	}
+}
+
+func TestDynamoCheckIsReadOnlyAndSeparatelyConfigured(t *testing.T) {
+	cfg := config.Config{
+		KubernetesContext: "cluster", KubernetesNamespace: "infercrane-system", KubernetesServiceAccount: "infercrane-runtime",
+		KubernetesGPUResource: "nvidia.com/gpu", KubernetesGPUProductLabel: "nvidia.com/gpu.product",
+		DynamoVLLMImageDigest: "image@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", DynamoVLLMRuntimeVersion: "1.4.0",
+	}
+	check := CheckDynamo(context.Background(), cfg, Dependencies{DynamoCheck: func(context.Context) error { return nil }})
+	if check.Status != Pass {
+		t.Fatalf("check=%#v", check)
+	}
+	check = CheckDynamo(context.Background(), config.Config{}, Dependencies{})
+	if check.Status != Fail || !strings.Contains(check.Remediation, "digest-pinned") {
+		t.Fatalf("check=%#v", check)
 	}
 }
 

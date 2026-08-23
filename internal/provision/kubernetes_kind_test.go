@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/provision"
+	"github.com/infercrane/infercrane/internal/servingcontract"
 )
 
 func TestKubernetesKindLifecycle(t *testing.T) {
@@ -88,6 +89,53 @@ func TestKubernetesKindLifecycle(t *testing.T) {
 	}
 	if err = provider.DeleteReplica(context.Background(), handle); err != nil {
 		t.Fatalf("delete replay: %v", err)
+	}
+}
+
+func TestKubernetesDynamoKindLifecycle(t *testing.T) {
+	contextName := os.Getenv("INFERCRANE_KIND_CONTEXT")
+	if contextName == "" {
+		t.Skip("INFERCRANE_KIND_CONTEXT is not set")
+	}
+	provider := provision.KubernetesDynamo{
+		Context: contextName, Namespace: "infercrane-system", ServiceAccount: "infercrane-runtime",
+		VLLMImageDigest: testDynamoImage, VLLMRuntimeVersion: "1.4.0", GPUResource: "nvidia.com/gpu", GPUProductLabel: "nvidia.com/gpu.product",
+	}
+	if err := provider.Check(context.Background()); err != nil {
+		t.Fatalf("Dynamo API capability check: %v", err)
+	}
+	spec := provision.ReplicaSpec{
+		ExternalKey: "kind-dynamo-r0", Model: "meta-llama/Llama-3.1-8B-Instruct", ModelRevision: "immutable",
+		Cloud: "kubernetes", GPU: "NVIDIA-L40S", Runtime: "vllm", Port: 8000,
+		Serving: servingcontract.Topology{Backend: servingcontract.BackendDynamo, Profile: "baseline", Mode: servingcontract.ModeAggregated, Routing: servingcontract.RoutingDirect, Worker: servingcontract.Pool{Replicas: 1, TensorParallelism: 1}},
+	}
+	handle := provider.Handle(spec.ExternalKey)
+	_ = provider.DeleteReplica(context.Background(), handle)
+	created, err := provider.EnsureReplica(context.Background(), spec)
+	if err != nil || created != handle {
+		t.Fatalf("ensure handle=%#v err=%v", created, err)
+	}
+	observation, err := provider.ObserveReplica(context.Background(), handle, 8000)
+	if err != nil || !observation.Exists || observation.State != "provisioning" || observation.Endpoint != "" {
+		t.Fatalf("operator-free observation=%#v err=%v", observation, err)
+	}
+	resources, err := provider.Inventory(context.Background(), provision.InventoryFilter{Prefix: "kind-dynamo"})
+	if err != nil || len(resources) != 1 || resources[0].ExternalKey != spec.ExternalKey {
+		t.Fatalf("inventory=%#v err=%v", resources, err)
+	}
+	if err = provider.DeleteReplica(context.Background(), handle); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		remaining, listErr := provider.Inventory(context.Background(), provision.InventoryFilter{Prefix: "kind-dynamo"})
+		if listErr == nil && len(remaining) == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("Dynamo graph remains after delete: %#v err=%v", remaining, listErr)
+		}
+		time.Sleep(250 * time.Millisecond)
 	}
 }
 

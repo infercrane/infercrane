@@ -17,6 +17,7 @@ import (
 	"github.com/infercrane/infercrane/internal/overflow"
 	"github.com/infercrane/infercrane/internal/passport"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
+	"github.com/infercrane/infercrane/internal/servingcontract"
 	"github.com/infercrane/infercrane/internal/support"
 	"github.com/infercrane/infercrane/internal/workflows"
 )
@@ -162,6 +163,62 @@ func TestSubmitCloudDeploymentIsAtomicAndIdempotent(t *testing.T) {
 		domain.Operation{Kind: "deployment.converge", IdempotencyKey: "submit-" + name, RequestJSON: strings.Replace(request, `"gpu":"L40S"`, `"gpu":"H100"`, 1)},
 	); !errors.Is(err, ErrConflict) {
 		t.Fatalf("conflicting cloud submission reused idempotency key: %v", err)
+	}
+}
+
+func TestDynamoTopologyIsPreservedAcrossInitialAndCandidateRevisions(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	name := "dynamo-revisions-" + time.Now().UTC().Format("150405.000000000")
+	initialServing := servingcontract.Topology{
+		Backend: servingcontract.BackendDynamo, Profile: "baseline", Mode: servingcontract.ModeAggregated, Routing: servingcontract.RoutingDirect,
+		Worker: servingcontract.Pool{Replicas: 1, TensorParallelism: 1}, Autoscaling: servingcontract.Autoscaling{Owner: servingcontract.AutoscalingDisabled}, Cache: servingcontract.Cache{Backend: servingcontract.CacheNone},
+	}.Normalize()
+	requestBytes, err := json.Marshal(workflows.CloudRequest{Name: name, Model: "meta-llama/Llama-3.1-8B-Instruct", Runtime: "vllm", Cloud: "kubernetes", ProviderAdapter: "kubernetes-dynamo", GPU: "nvidia.com/gpu", MinReplicas: 1, MaxReplicas: 1, Serving: initialServing})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deployment, _, _, err := s.SubmitCloudDeployment(ctx, domain.Deployment{Name: name, Model: "meta-llama/Llama-3.1-8B-Instruct", Runtime: "vllm", MinReplicas: 1, MaxReplicas: 1}, domain.Operation{Kind: workflows.ConvergeKind, IdempotencyKey: "submit-" + name, RequestJSON: string(requestBytes)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, err := s.Revision(ctx, "global", name, deployment.ID+"-rev-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var activeSpec domain.DeploymentRevisionSpec
+	if err = json.Unmarshal([]byte(active.SpecJSON), &activeSpec); err != nil {
+		t.Fatal(err)
+	}
+	activeDigest, err := activeSpec.Serving.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantDigest, _ := initialServing.Digest()
+	if activeDigest != wantDigest || activeSpec.ProviderAdapter != "kubernetes-dynamo" {
+		t.Fatalf("active topology changed: spec=%s digest=%s want=%s", active.SpecJSON, activeDigest, wantDigest)
+	}
+
+	candidateTopology := initialServing
+	candidateTopology.Profile = "custom"
+	candidateTopology.Routing = servingcontract.RoutingKVAware
+	candidateTopology.Cache = servingcontract.Cache{Backend: servingcontract.CacheKVBM, HostGiB: 16, MemoryGiB: 64, Metrics: true}
+	candidateBytes, err := json.Marshal(domain.DeploymentRevisionSpec{Model: "meta-llama/Llama-3.1-8B-Instruct", Runtime: "vllm", RoutingStrategy: "round-robin", MinReplicas: 1, MaxReplicas: 1, ComputeMode: "elastic", Cloud: "kubernetes", ProviderAdapter: "kubernetes-dynamo", GPU: "nvidia.com/gpu", Serving: candidateTopology})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate, err := s.CreateCandidateRevision(ctx, "global", name, string(candidateBytes))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var candidateSpec domain.DeploymentRevisionSpec
+	if err = json.Unmarshal([]byte(candidate.SpecJSON), &candidateSpec); err != nil {
+		t.Fatal(err)
+	}
+	candidateDigest, _ := candidateSpec.Serving.Digest()
+	wantCandidateDigest, _ := candidateTopology.Digest()
+	if candidateDigest != wantCandidateDigest || candidateDigest == activeDigest {
+		t.Fatalf("candidate topology was not immutable and distinct: spec=%s", candidate.SpecJSON)
 	}
 }
 

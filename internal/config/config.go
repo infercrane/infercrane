@@ -31,6 +31,8 @@ type Config struct {
 	KubernetesContext, KubernetesNamespace, KubernetesWorkloadAPI, KubernetesServiceAccount                            string
 	KubernetesWorkerSecretName, KubernetesWorkerSecretKey, KubernetesImageDigest                                       string
 	KubernetesGPUResource, KubernetesGPUProductLabel                                                                   string
+	DynamoVLLMImageDigest, DynamoVLLMRuntimeVersion, DynamoSGLangImageDigest, DynamoSGLangRuntimeVersion               string
+	DynamoModelSecretName                                                                                              string
 	Port, RouterStartPort, DatabaseMaxOpen, DatabaseMaxIdle                                                            int
 	HealthInterval, UpstreamTimeout, ShutdownTimeout, RequestRetention                                                 time.Duration
 }
@@ -315,6 +317,11 @@ func load(requireAPIKey bool) (Config, error) {
 		KubernetesImageDigest:       env("INFERCRANE_KUBERNETES_IMAGE_DIGEST", ""),
 		KubernetesGPUResource:       env("INFERCRANE_KUBERNETES_GPU_RESOURCE", "nvidia.com/gpu"),
 		KubernetesGPUProductLabel:   env("INFERCRANE_KUBERNETES_GPU_PRODUCT_LABEL", "nvidia.com/gpu.product"),
+		DynamoVLLMImageDigest:       env("INFERCRANE_DYNAMO_VLLM_IMAGE_DIGEST", ""),
+		DynamoVLLMRuntimeVersion:    env("INFERCRANE_DYNAMO_VLLM_RUNTIME_VERSION", ""),
+		DynamoSGLangImageDigest:     env("INFERCRANE_DYNAMO_SGLANG_IMAGE_DIGEST", ""),
+		DynamoSGLangRuntimeVersion:  env("INFERCRANE_DYNAMO_SGLANG_RUNTIME_VERSION", ""),
+		DynamoModelSecretName:       env("INFERCRANE_DYNAMO_MODEL_SECRET_NAME", ""),
 		Port:                        port, RouterStartPort: routerPort, DatabaseMaxOpen: maxOpen, DatabaseMaxIdle: maxIdle,
 		HealthInterval: time.Duration(healthSeconds) * time.Second, UpstreamTimeout: time.Duration(upstreamSeconds) * time.Second,
 		ShutdownTimeout: time.Duration(shutdownSeconds) * time.Second, RequestRetention: time.Duration(retentionHours) * time.Hour,
@@ -366,6 +373,9 @@ func load(requireAPIKey bool) (Config, error) {
 	if err := validateKubernetes(config); err != nil {
 		return Config{}, err
 	}
+	if err := validateDynamo(config); err != nil {
+		return Config{}, err
+	}
 	if err := validateServerTLS(config); err != nil {
 		return Config{}, err
 	}
@@ -380,6 +390,20 @@ func (c Config) AWSEnabled() bool { return c.AWSRoleARN != "" }
 func (c Config) GCPEnabled() bool { return c.GCPProject != "" }
 
 func (c Config) KubernetesEnabled() bool { return c.KubernetesContext != "" }
+
+func (c Config) DynamoEnabled() bool {
+	return c.DynamoRuntimeEnabled("vllm") || c.DynamoRuntimeEnabled("sglang")
+}
+func (c Config) DynamoRuntimeEnabled(runtime string) bool {
+	switch runtime {
+	case "vllm":
+		return c.DynamoVLLMImageDigest != "" && c.DynamoVLLMRuntimeVersion != ""
+	case "sglang":
+		return c.DynamoSGLangImageDigest != "" && c.DynamoSGLangRuntimeVersion != ""
+	default:
+		return false
+	}
+}
 
 func (c Config) HostedAuthEnabled() bool { return c.HostedAuthJWTKeyFile != "" }
 
@@ -484,6 +508,68 @@ func validateKubernetes(config Config) error {
 		return errors.New("INFERCRANE_KUBERNETES_IMAGE_DIGEST must be pinned by sha256 digest")
 	}
 	return nil
+}
+
+func validateDynamo(config Config) error {
+	configured := config.DynamoVLLMImageDigest != "" || config.DynamoVLLMRuntimeVersion != "" || config.DynamoSGLangImageDigest != "" || config.DynamoSGLangRuntimeVersion != "" || config.DynamoModelSecretName != ""
+	if !configured {
+		return nil
+	}
+	if !config.KubernetesEnabled() {
+		return errors.New("Dynamo configuration requires the complete Kubernetes configuration")
+	}
+	if !config.DynamoEnabled() {
+		return errors.New("Dynamo configuration requires at least one complete vLLM or SGLang image digest and matching runtime version pair")
+	}
+	for _, runtime := range []struct{ name, image, version string }{
+		{"vLLM", config.DynamoVLLMImageDigest, config.DynamoVLLMRuntimeVersion},
+		{"SGLang", config.DynamoSGLangImageDigest, config.DynamoSGLangRuntimeVersion},
+	} {
+		if (runtime.image == "") != (runtime.version == "") {
+			return fmt.Errorf("Dynamo %s configuration requires both image digest and runtime version", runtime.name)
+		}
+		if runtime.image == "" {
+			continue
+		}
+		if runtimecontract.ValidateImage(runtime.image) != nil {
+			return fmt.Errorf("Dynamo %s image must be pinned by sha256 digest", runtime.name)
+		}
+		if !validDynamoRuntimeVersion(runtime.version) {
+			return fmt.Errorf("Dynamo %s runtime version must be numeric MAJOR.MINOR.PATCH and match its image", runtime.name)
+		}
+	}
+	if config.DynamoModelSecretName != "" && !validDNSLabel(config.DynamoModelSecretName) {
+		return errors.New("INFERCRANE_DYNAMO_MODEL_SECRET_NAME must be a valid Kubernetes DNS label")
+	}
+	return nil
+}
+
+func validDynamoRuntimeVersion(value string) bool {
+	parts := strings.Split(value, ".")
+	if len(parts) != 3 {
+		return false
+	}
+	for _, part := range parts {
+		if part == "" || (len(part) > 1 && part[0] == '0') {
+			return false
+		}
+		if _, err := strconv.ParseUint(part, 10, 16); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
+func validDNSLabel(value string) bool {
+	if value == "" || len(value) > 63 || value[0] == '-' || value[len(value)-1] == '-' {
+		return false
+	}
+	for _, char := range value {
+		if (char < 'a' || char > 'z') && (char < '0' || char > '9') && char != '-' {
+			return false
+		}
+	}
+	return true
 }
 
 func splitCSV(raw string) []string {

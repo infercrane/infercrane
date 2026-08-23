@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/infercrane/infercrane/internal/runtimecontract"
+	"github.com/infercrane/infercrane/internal/servingcontract"
 	"github.com/infercrane/infercrane/internal/support"
 	"gopkg.in/yaml.v3"
 )
@@ -42,6 +43,7 @@ type Deployment struct {
 	Routing struct {
 		Strategy string `yaml:"strategy"`
 	} `yaml:"routing"`
+	Serving servingcontract.Topology `yaml:"serving"`
 }
 
 func Load(path string) (Deployment, error) {
@@ -108,6 +110,10 @@ func Load(path string) (Deployment, error) {
 	}
 	if out.Compute.Mode == "serverless" && out.Scaling.MinReplicas != 0 {
 		return out, fmt.Errorf("serverless compute requires scaling.min_replicas 0")
+	}
+	out.Serving = out.Serving.Normalize()
+	if err := out.Serving.Validate(out.Runtime.Engine, out.Provider.Cloud, out.Provider.Adapter, out.Scaling.MinReplicas, out.Scaling.MaxReplicas); err != nil {
+		return out, fmt.Errorf("serving: %w", err)
 	}
 	return out, nil
 }

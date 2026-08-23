@@ -45,6 +45,7 @@ or link corrections. A changed decision gets a new ADR whose status supersedes t
 | [0033](/adr/0033-replaceable-external-composition-contracts) | Accepted | Make LiteLLM, sandbox access, and signed training lineage executable through a versioned composition contract while leaving execution external. |
 | [0034](/adr/0034-provider-connections-and-gateway-boundary) | Accepted | Make external APIs reusable provider connections while keeping gateway execution replaceable and spend fail-closed. |
 | [0035](/adr/0035-qualified-operational-evidence-collectors) | Accepted | Import bounded, revision-bound hardware and cost evidence through replaceable collectors. |
+| [0036](/adr/0036-dynamo-serving-topology-boundary) | Accepted | Delegate serving-graph topology to Dynamo while InferCrane retains endpoint, release, and evidence ownership. |
 
 Use the next sequential number. Include context, decision, consequences, alternatives, and
 verification. Link affected feature documents.

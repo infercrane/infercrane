@@ -129,6 +129,9 @@ type monitoringStore interface {
 type operationalMeasurementStore interface {
 	RecordOperationalMeasurements(context.Context, string, string, []domain.OperationalMeasurement) ([]domain.OperationalMeasurement, error)
 }
+type benchmarkOperationalEvidenceStore interface {
+	BenchmarkOperationalMeasurement(context.Context, string, string, string, string, time.Time, time.Time) (domain.MeasurementEvidence, error)
+}
 type costEvidenceStore interface {
 	RecordCostEvidence(context.Context, string, string, []domain.CostEvidence) ([]domain.CostEvidence, error)
 	CostEvidenceForDeployment(context.Context, string, string, time.Time, time.Time, int) ([]domain.CostEvidence, error)
@@ -2641,7 +2644,9 @@ func (a API) runBenchmark(w http.ResponseWriter, r *http.Request) {
 	if request.Streaming != nil {
 		streaming = *request.Streaming
 	}
+	benchmarkStartedAt := time.Now().UTC()
 	measured, err := a.BenchmarkRunner.Run(r.Context(), benchmark.Config{Binary: a.AIPerfBinary, Endpoint: endpoint, APIKey: credential, APIKeyEnv: apiKeyEnv, Model: model, Tokenizer: artifact.Repository, Requests: request.Requests, Concurrency: request.Concurrency, InputTokens: request.InputTokens, OutputTokens: request.OutputTokens, RandomSeed: request.RandomSeed, Streaming: &streaming, TTFTSLOMS: request.TTFTSLOMS, TPOTSLOMS: request.TPOTSLOMS, LatencySLOMS: request.LatencySLOMS})
+	benchmarkEndedAt := time.Now().UTC()
 	if err != nil {
 		writeError(w, 502, "benchmark_failed", err.Error())
 		return
@@ -2683,13 +2688,51 @@ func (a API) runBenchmark(w http.ResponseWriter, r *http.Request) {
 		count := 1
 		gpuCount = &count
 	}
-	costMetadata, _ := json.Marshal(map[string]any{"available": false, "reason": "provider cost was not measured by this benchmark"})
-	persisted, err := a.Store.RecordBenchmark(r.Context(), domain.BenchmarkResult{TenantID: principal.TenantID, DeploymentID: deployment.ID, DeploymentName: deployment.Name, RevisionID: revision.ID, ModelArtifactID: artifactID, ModelIdentity: modelIdentity, Runtime: revisionSpec.Runtime, RuntimeVersion: revisionSpec.RuntimeVersion, RuntimeConfigJSON: string(runtimeConfig), Provider: benchmarkProvider, Region: benchmarkRegion, GPU: revisionSpec.GPU, GPUCount: gpuCount, ComputeMode: revisionSpec.ComputeMode, Tool: measured.Tool, ToolVersion: measured.ToolVersion, WorkloadJSON: string(workload), ReproductionCommand: measured.Command, RequestCount: measured.Requests, Succeeded: measured.Succeeded, Failed: measured.Failed, DurationSeconds: measured.DurationSeconds, RequestThroughput: measured.RequestThroughput, OutputTokenThroughput: measured.OutputTokenThroughput, TTFTP50MS: measured.TTFTP50MS, TTFTP95MS: measured.TTFTP95MS, TPOTP50MS: measured.TPOTP50MS, TPOTP95MS: measured.TPOTP95MS, LatencyP50MS: measured.LatencyP50MS, LatencyP95MS: measured.LatencyP95MS, Goodput: measured.Goodput, CostMetadataJSON: string(costMetadata)})
+	var gpuUtilization *float64
+	if evidenceStore, ok := a.Store.(benchmarkOperationalEvidenceStore); ok {
+		gpuEvidence, evidenceErr := evidenceStore.BenchmarkOperationalMeasurement(r.Context(), principal.TenantID, deployment.ID, revision.ID, "gpu_utilization", benchmarkStartedAt, benchmarkEndedAt)
+		if evidenceErr == nil && gpuEvidence.Availability == "available" && gpuEvidence.Value != nil && gpuEvidence.EvidenceClass == "measured" {
+			gpuUtilization = gpuEvidence.Value
+		}
+	}
+	costMetadata := benchmarkCostMetadata(r.Context(), a.Store, principal.TenantID, deployment.ID, revision.ID, benchmarkStartedAt, benchmarkEndedAt)
+	persisted, err := a.Store.RecordBenchmark(r.Context(), domain.BenchmarkResult{TenantID: principal.TenantID, DeploymentID: deployment.ID, DeploymentName: deployment.Name, RevisionID: revision.ID, ModelArtifactID: artifactID, ModelIdentity: modelIdentity, Runtime: revisionSpec.Runtime, RuntimeVersion: revisionSpec.RuntimeVersion, RuntimeConfigJSON: string(runtimeConfig), Provider: benchmarkProvider, Region: benchmarkRegion, GPU: revisionSpec.GPU, GPUCount: gpuCount, ComputeMode: revisionSpec.ComputeMode, Tool: measured.Tool, ToolVersion: measured.ToolVersion, WorkloadJSON: string(workload), ReproductionCommand: measured.Command, RequestCount: measured.Requests, Succeeded: measured.Succeeded, Failed: measured.Failed, DurationSeconds: measured.DurationSeconds, RequestThroughput: measured.RequestThroughput, OutputTokenThroughput: measured.OutputTokenThroughput, TTFTP50MS: measured.TTFTP50MS, TTFTP95MS: measured.TTFTP95MS, TPOTP50MS: measured.TPOTP50MS, TPOTP95MS: measured.TPOTP95MS, LatencyP50MS: measured.LatencyP50MS, LatencyP95MS: measured.LatencyP95MS, Goodput: measured.Goodput, GPUUtilization: gpuUtilization, CostMetadataJSON: string(costMetadata)})
 	if err != nil {
 		writeError(w, 500, "internal", "benchmark result could not be persisted")
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"benchmark": benchmarkResponse(persisted)})
+}
+
+func benchmarkCostMetadata(ctx context.Context, candidate any, tenant, deploymentID, revisionID string, startedAt, endedAt time.Time) []byte {
+	unavailable := func(reason string) []byte {
+		encoded, _ := json.Marshal(map[string]any{"available": false, "reason": reason})
+		return encoded
+	}
+	costs, ok := candidate.(costEvidenceStore)
+	if !ok {
+		return unavailable("qualified provider cost evidence storage is not configured")
+	}
+	// Cost evidence carries a completed source window and a separate validity
+	// window. Search the bounded retention horizon, then require the rate to be
+	// valid for the entire benchmark and bound to this exact revision.
+	rows, err := costs.CostEvidenceForDeployment(ctx, tenant, deploymentID, startedAt.Add(-366*24*time.Hour), endedAt, 1000)
+	if err != nil {
+		return unavailable("qualified provider cost evidence lookup failed")
+	}
+	for _, row := range rows {
+		if row.RevisionID != revisionID || row.BillingUnit != "hour" || !strings.HasPrefix(row.Scope, "deployment_hourly_rate/") || row.ObservedAt.After(startedAt) || row.ValidUntil.Before(endedAt) {
+			continue
+		}
+		encoded, _ := json.Marshal(map[string]any{
+			"available": true, "hourly": row.Amount, "currency": row.Currency,
+			"billing_unit": row.BillingUnit, "source": row.Source, "resource": row.Resource,
+			"evidence_class": row.EvidenceClass, "observed_at": row.ObservedAt,
+			"valid_until": row.ValidUntil, "revision_id": row.RevisionID,
+		})
+		return encoded
+	}
+	return unavailable("no fresh revision-bound deployment hourly cost evidence covered this benchmark")
 }
 
 func regionFromProviderDetails(details string) string {

@@ -1194,6 +1194,25 @@ func TestProviderConnectionCompilesBindingWithoutBrowserCredentialMetadata(t *te
 
 type fakeBenchmarkRunner struct{ config benchmark.Config }
 
+type fakeBenchmarkEvidenceStore struct {
+	*fakeStore
+	measurement domain.MeasurementEvidence
+	costs       []domain.CostEvidence
+}
+
+func (f *fakeBenchmarkEvidenceStore) BenchmarkOperationalMeasurement(context.Context, string, string, string, string, time.Time, time.Time) (domain.MeasurementEvidence, error) {
+	if f.measurement.Value == nil {
+		return domain.MeasurementEvidence{}, domain.ErrNotFound
+	}
+	return f.measurement, nil
+}
+func (f *fakeBenchmarkEvidenceStore) RecordCostEvidence(_ context.Context, _, _ string, rows []domain.CostEvidence) ([]domain.CostEvidence, error) {
+	return rows, f.err
+}
+func (f *fakeBenchmarkEvidenceStore) CostEvidenceForDeployment(context.Context, string, string, time.Time, time.Time, int) ([]domain.CostEvidence, error) {
+	return f.costs, f.err
+}
+
 type fakePassportStore struct {
 	*fakeStore
 	payload   passport.Payload
@@ -1490,6 +1509,31 @@ func TestBenchmarkPersistsProfileSLOAndGoodputEvidence(t *testing.T) {
 	}
 }
 
+func TestBenchmarkAttachesOnlyFreshRevisionBoundOperationalAndCostEvidence(t *testing.T) {
+	now := time.Now().UTC()
+	gpu := 73.5
+	base := &fakeStore{resolved: domain.ResolvedDeployment{Deployment: domain.Deployment{ID: "dep", Name: "llama", ActiveRevisionID: "rev"}}, revisions: []domain.DeploymentRevision{{ID: "rev", SpecJSON: `{"model":"meta-llama/Llama-3.1-8B-Instruct","model_revision":"commit","runtime":"vllm","compute_mode":"elastic","cloud":"aws","gpu":"L40S"}`}}, artifact: domain.ModelArtifact{ID: "artifact", Repository: "meta-llama/Llama-3.1-8B-Instruct", ModelIdentity: "meta-llama/Llama-3.1-8B-Instruct@commit"}}
+	store := &fakeBenchmarkEvidenceStore{fakeStore: base, measurement: domain.MeasurementEvidence{Name: "gpu_utilization", Value: &gpu, Unit: "percent", Availability: "available", EvidenceClass: "measured", Source: "dcgm_exporter"}, costs: []domain.CostEvidence{{RevisionID: "rev", Source: "aws/price-list", Scope: "deployment_hourly_rate/llama", Resource: "g6e.xlarge", Currency: "USD", BillingUnit: "hour", EvidenceClass: "provider_reported", Amount: 1.86, WindowStart: now.Add(-time.Hour), WindowEnd: now.Add(-time.Minute), ObservedAt: now.Add(-time.Minute), ValidUntil: now.Add(time.Hour)}}}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments/llama/benchmarks", strings.NewReader(`{"requests":10,"concurrency":2}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret", BenchmarkRunner: &fakeBenchmarkRunner{}, GatewayURL: "http://gateway"}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || len(base.benchmarks) != 1 || base.benchmarks[0].GPUUtilization == nil || *base.benchmarks[0].GPUUtilization != gpu || !strings.Contains(base.benchmarks[0].CostMetadataJSON, `"available":true`) || !strings.Contains(base.benchmarks[0].CostMetadataJSON, `"source":"aws/price-list"`) || !strings.Contains(base.benchmarks[0].CostMetadataJSON, `"revision_id":"rev"`) {
+		t.Fatalf("response=%d %s benchmarks=%#v", response.Code, response.Body.String(), base.benchmarks)
+	}
+
+	store.measurement.EvidenceClass = "provider_reported"
+	store.costs[0].RevisionID = "stale-revision"
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/deployments/llama/benchmarks", strings.NewReader(`{"requests":10,"concurrency":2}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret", BenchmarkRunner: &fakeBenchmarkRunner{}, GatewayURL: "http://gateway"}).Handler().ServeHTTP(response, request)
+	latest := base.benchmarks[len(base.benchmarks)-1]
+	if response.Code != http.StatusCreated || latest.GPUUtilization != nil || !strings.Contains(latest.CostMetadataJSON, `"available":false`) {
+		t.Fatalf("unqualified evidence was attached: response=%d %s benchmark=%#v", response.Code, response.Body.String(), latest)
+	}
+}
+
 func TestBenchmarkRejectsUnknownOrVersionSkewedProfile(t *testing.T) {
 	for _, body := range []string{
 		`{"requests":10,"concurrency":1,"profile":"fastest","profile_version":"benchmark-profile-v1"}`,
@@ -1699,6 +1743,40 @@ func TestCloudDeployPersistsExactProviderAdapterIntent(t *testing.T) {
 	(API{Store: store, APIKey: "secret"}).Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusAccepted || !strings.Contains(store.operation.RequestJSON, `"provider_adapter":"gcp-compute"`) {
 		t.Fatalf("response=%d %s operation=%#v", response.Code, response.Body.String(), store.operation)
+	}
+}
+
+func TestDynamoDeployPersistsTopologyAndRejectsUnqualifiedModes(t *testing.T) {
+	valid := `{"name":"llama-dynamo","model":"meta-llama/Llama-3.1-8B-Instruct","runtime":"vllm","cloud":"kubernetes","provider_adapter":"kubernetes-dynamo","gpu":"nvidia.com/gpu","min_replicas":1,"max_replicas":1,"serving":{"schema_version":"infercrane.serving/v1","backend":"dynamo","profile":"baseline","mode":"aggregated","routing":"direct","worker":{"replicas":1,"tensor_parallelism":1},"autoscaling":{"owner":"disabled"},"cache":{"backend":"none"}}}`
+	store := &fakeStore{created: true}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments", strings.NewReader(valid))
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Idempotency-Key", "deploy-llama-dynamo")
+	response := httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret"}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted || store.operation.Kind != "deployment.converge" || !strings.Contains(store.operation.RequestJSON, `"backend":"dynamo"`) || !strings.Contains(store.operation.RequestJSON, `"provider_adapter":"kubernetes-dynamo"`) {
+		t.Fatalf("response=%d %s operation=%#v", response.Code, response.Body.String(), store.operation)
+	}
+
+	for _, test := range []struct {
+		name, body, contains string
+	}{
+		{"missing-topology", strings.Replace(valid, `,"serving":{"schema_version":"infercrane.serving/v1","backend":"dynamo","profile":"baseline","mode":"aggregated","routing":"direct","worker":{"replicas":1,"tensor_parallelism":1},"autoscaling":{"owner":"disabled"},"cache":{"backend":"none"}}`, "", 1), "explicit Dynamo serving topology"},
+		{"outer-autoscaling", strings.Replace(valid, `"max_replicas":1`, `"max_replicas":2`, 1), "outer replica bounds must both equal 1"},
+		{"dynamo-planner", strings.Replace(valid, `"owner":"disabled"`, `"owner":"dynamo-planner","min":1,"max":2`, 1), "registered but not executable"},
+		{"lmcache", strings.Replace(valid, `"backend":"none"`, `"backend":"lmcache"`, 1), "registered but not executable"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			invalidStore := &fakeStore{created: true}
+			request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments", strings.NewReader(test.body))
+			request.Header.Set("Authorization", "Bearer secret")
+			request.Header.Set("Idempotency-Key", "reject-"+test.name)
+			response := httptest.NewRecorder()
+			(API{Store: invalidStore, APIKey: "secret"}).Handler().ServeHTTP(response, request)
+			if response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), test.contains) || invalidStore.operation.ID != "" {
+				t.Fatalf("response=%d %s operation=%#v", response.Code, response.Body.String(), invalidStore.operation)
+			}
+		})
 	}
 }
 

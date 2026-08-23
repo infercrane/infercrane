@@ -14,6 +14,7 @@ import (
 	"github.com/infercrane/infercrane/internal/provision"
 	"github.com/infercrane/infercrane/internal/router"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
+	"github.com/infercrane/infercrane/internal/servingcontract"
 	"github.com/infercrane/infercrane/internal/support"
 )
 
@@ -51,6 +52,7 @@ type CloudRequest struct {
 	Actor                  string                   `json:"actor,omitempty"`
 	TenantID               string                   `json:"tenant_id,omitempty"`
 	Workload               runtimecontract.Workload `json:"workload,omitzero"`
+	Serving                servingcontract.Topology `json:"serving,omitzero"`
 }
 
 func (r *CloudRequest) Validate() error {
@@ -86,6 +88,10 @@ func (r *CloudRequest) Validate() error {
 	}
 	if r.ComputeMode == "serverless" && r.MinReplicas != 0 {
 		return errors.New("serverless compute requires min replicas 0")
+	}
+	r.Serving = r.Serving.Normalize()
+	if err := r.Serving.Validate(r.Runtime, r.Cloud, r.ProviderAdapter, r.MinReplicas, r.MaxReplicas); err != nil {
+		return fmt.Errorf("serving topology: %w", err)
 	}
 	if r.Runtime != "" && r.Runtime != support.DefaultRuntime && r.MaxReplicas > r.MinReplicas {
 		return errors.New("autoscaling is not yet qualified for this runtime; set min and max replicas equal")
@@ -553,7 +559,7 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 		if err != nil {
 			return "", operations.Permanent("deployment_missing", err)
 		}
-		request := CloudRequest{DeploymentID: resolved.Deployment.ID, Name: rollout.Name, Model: spec.Model, ModelRevision: spec.ModelRevision, RevisionID: revision.ID, Cloud: spec.Cloud, ProviderAdapter: spec.ProviderAdapter, GPU: spec.GPU, Region: spec.Region, RuntimeVersion: spec.RuntimeVersion, RuntimeArgs: spec.RuntimeArgs, Port: spec.Port, Workload: spec.Workload, MinReplicas: spec.MinReplicas, MaxReplicas: spec.MaxReplicas, DesiredReplicas: spec.MinReplicas, TenantID: rollout.TenantID, Actor: rollout.Actor, Candidate: true}
+		request := CloudRequest{DeploymentID: resolved.Deployment.ID, Name: rollout.Name, Model: spec.Model, ModelRevision: spec.ModelRevision, RevisionID: revision.ID, Cloud: spec.Cloud, ProviderAdapter: spec.ProviderAdapter, GPU: spec.GPU, Region: spec.Region, Runtime: spec.Runtime, RuntimeVersion: spec.RuntimeVersion, RuntimeArgs: spec.RuntimeArgs, Port: spec.Port, Workload: spec.Workload, Serving: spec.Serving, MinReplicas: spec.MinReplicas, MaxReplicas: spec.MaxReplicas, DesiredReplicas: spec.MinReplicas, TenantID: rollout.TenantID, Actor: rollout.Actor, Candidate: true}
 		request.Runtime = spec.Runtime
 		if request.Runtime == "" {
 			request.Runtime = support.DefaultRuntime
@@ -1015,7 +1021,7 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 			}
 		}
 	}
-	ensured, err := provider.EnsureReplica(ctx, provision.ReplicaSpec{ExternalKey: externalKey, RequestID: replica.ProviderRequestID, Name: fmt.Sprintf("%s-r%d", request.Name, ordinal), Model: request.Model, ModelRevision: request.ImmutableModelRevision, Cloud: request.Cloud, GPU: request.GPU, Region: request.Region, RuntimeVersion: request.RuntimeVersion, RuntimeArgs: request.RuntimeArgs, Port: request.Port, Workload: request.Workload})
+	ensured, err := provider.EnsureReplica(ctx, provision.ReplicaSpec{ExternalKey: externalKey, RequestID: replica.ProviderRequestID, Name: fmt.Sprintf("%s-r%d", request.Name, ordinal), Model: request.Model, ModelRevision: request.ImmutableModelRevision, Cloud: request.Cloud, GPU: request.GPU, Region: request.Region, Runtime: request.Runtime, RuntimeVersion: request.RuntimeVersion, RuntimeArgs: request.RuntimeArgs, Port: request.Port, Workload: request.Workload, Serving: request.Serving})
 	if err != nil {
 		if errors.Is(err, provision.ErrProviderAuthorization) {
 			return "", "", "", operations.Permanent("provider_authorization_failed", err)

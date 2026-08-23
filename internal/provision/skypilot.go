@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/infercrane/infercrane/internal/runtimecontract"
+	"github.com/infercrane/infercrane/internal/servingcontract"
 	"github.com/infercrane/infercrane/internal/support"
 	"gopkg.in/yaml.v3"
 )
@@ -36,12 +37,13 @@ const defaultVLLMImage = "vllm/vllm-openai@sha256:0fec7ec5f3e6bc168e54899935fb05
 const defaultRunPodVLLMImage = "ghcr.io/infercrane/vllm-runpod@sha256:c9d8303ad7c36e3b25a160c892626be8b0dde8f5954b11095c33d2bca31a9711"
 
 type ReplicaSpec struct {
-	ExternalKey                                                    string
-	Name, Model, ModelRevision, Cloud, GPU, Region, RuntimeVersion string
-	RequestID                                                      string
-	RuntimeArgs                                                    []string
-	Port                                                           int
-	Workload                                                       runtimecontract.Workload
+	ExternalKey                                                             string
+	Name, Model, ModelRevision, Cloud, GPU, Region, Runtime, RuntimeVersion string
+	RequestID                                                               string
+	RuntimeArgs                                                             []string
+	Port                                                                    int
+	Workload                                                                runtimecontract.Workload
+	Serving                                                                 servingcontract.Topology
 }
 type ProviderHandle struct{ RequestID, ResourceID, ExternalKey string }
 type Observation struct {

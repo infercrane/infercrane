@@ -683,6 +683,9 @@
           "runtime_version": {
             "type": "string"
           },
+          "serving": {
+            "$ref": "#/components/schemas/ServingTopology"
+          },
           "workload": {
             "$ref": "#/components/schemas/RuntimeWorkload"
           }
@@ -2426,6 +2429,130 @@
           "routing_policy",
           "bindings"
         ],
+        "type": "object"
+      },
+      "ServingPool": {
+        "additionalProperties": false,
+        "properties": {
+          "replicas": {
+            "maximum": 10000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "tensor_parallelism": {
+            "maximum": 1024,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ServingTopology": {
+        "additionalProperties": false,
+        "properties": {
+          "autoscaling": {
+            "additionalProperties": false,
+            "properties": {
+              "max": {
+                "maximum": 10000,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "min": {
+                "maximum": 10000,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "owner": {
+                "enum": [
+                  "disabled",
+                  "dynamo-planner",
+                  "external"
+                ],
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "backend": {
+            "enum": [
+              "dynamo"
+            ],
+            "type": "string"
+          },
+          "cache": {
+            "additionalProperties": false,
+            "properties": {
+              "backend": {
+                "enum": [
+                  "none",
+                  "kvbm",
+                  "lmcache",
+                  "hicache"
+                ],
+                "type": "string"
+              },
+              "configuration_ref": {
+                "type": "string"
+              },
+              "disk_gib": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "host_gib": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "memory_gib": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "metrics": {
+                "type": "boolean"
+              },
+              "storage_claim": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "decode": {
+            "$ref": "#/components/schemas/ServingPool"
+          },
+          "mode": {
+            "enum": [
+              "aggregated",
+              "disaggregated"
+            ],
+            "type": "string"
+          },
+          "prefill": {
+            "$ref": "#/components/schemas/ServingPool"
+          },
+          "profile": {
+            "enum": [
+              "baseline",
+              "custom"
+            ],
+            "type": "string"
+          },
+          "routing": {
+            "enum": [
+              "direct",
+              "kv-aware"
+            ],
+            "type": "string"
+          },
+          "schema_version": {
+            "enum": [
+              "infercrane.serving/v1"
+            ],
+            "type": "string"
+          },
+          "worker": {
+            "$ref": "#/components/schemas/ServingPool"
+          }
+        },
         "type": "object"
       },
       "SignedEvidenceEnvelope": {

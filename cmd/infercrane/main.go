@@ -55,6 +55,7 @@ import (
 	runtimeadapter "github.com/infercrane/infercrane/internal/runtime"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
 	"github.com/infercrane/infercrane/internal/secrets"
+	"github.com/infercrane/infercrane/internal/servingcontract"
 	"github.com/infercrane/infercrane/internal/spec"
 	"github.com/infercrane/infercrane/internal/store"
 	"github.com/infercrane/infercrane/internal/support"
@@ -362,8 +363,11 @@ func planCommand(ctx context.Context, cfg config.Config, args []string) error {
 	name := fs.String("name", "", "deployment name")
 	targets := fs.String("targets", "", "comma-separated existing targets")
 	cloud := fs.String("cloud", "", "provider cloud")
+	backend := fs.String("backend", "", "serving backend; use dynamo for a managed Dynamo graph")
+	providerAdapter := fs.String("provider-adapter", "", "provider adapter profile (advanced)")
 	gpu := fs.String("gpu", "", "GPU")
 	region := fs.String("region", "", "region")
+	runtimeEngine := fs.String("runtime", "vllm", "runtime engine: vllm or sglang")
 	computeMode := fs.String("compute", "elastic", "compute mode: elastic or serverless")
 	minReplicas := fs.Int("min", 1, "minimum replicas")
 	maxReplicas := fs.Int("max", 1, "maximum replicas")
@@ -383,24 +387,37 @@ func planCommand(ctx context.Context, cfg config.Config, args []string) error {
 	if *computeMode == "serverless" && !minExplicit {
 		*minReplicas = 0
 	}
-	in := planning.Input{Name: *name, Model: model, ComputeMode: *computeMode, Cloud: *cloud, GPU: *gpu, Region: *region, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas}
+	in := planning.Input{Name: *name, Model: model, Runtime: *runtimeEngine, ComputeMode: *computeMode, Cloud: *cloud, ProviderAdapter: *providerAdapter, GPU: *gpu, Region: *region, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas}
 	if ext := filepath.Ext(model); ext == ".yaml" || ext == ".yml" {
 		file, err := spec.Load(model)
 		if err != nil {
 			return err
 		}
-		if *name != "" || *targets != "" || *cloud != "" || *gpu != "" || *region != "" {
+		if *name != "" || *targets != "" || *cloud != "" || *backend != "" || *providerAdapter != "" || *gpu != "" || *region != "" || *runtimeEngine != "vllm" {
 			return errors.New("deployment YAML cannot be combined with deployment flags")
 		}
 		in = planning.Input{Name: file.Name, Model: file.Model.ID, ComputeMode: file.Compute.Mode, Cloud: file.Provider.Cloud, ProviderAdapter: file.Provider.Adapter,
 			GPU: file.Resources.GPU, Region: file.Provider.Region, Runtime: file.Runtime.Engine,
 			RuntimeArgs: file.Runtime.Args, Routing: file.Routing.Strategy,
-			MinReplicas: file.Scaling.MinReplicas, MaxReplicas: file.Scaling.MaxReplicas}
+			MinReplicas: file.Scaling.MinReplicas, MaxReplicas: file.Scaling.MaxReplicas, Serving: file.Serving}
 	} else if *targets != "" {
 		if *computeMode == "serverless" {
 			return errors.New("--compute serverless cannot be combined with --targets")
 		}
 		in.Targets = splitTargets(*targets)
+	}
+	if *backend != "" {
+		if *backend != servingcontract.BackendDynamo {
+			return errors.New("--backend currently supports dynamo; omit it for the standard provider path")
+		}
+		if *targets != "" || *computeMode != "elastic" || (*cloud != "" && *cloud != "kubernetes") || (*providerAdapter != "" && *providerAdapter != "kubernetes-dynamo") {
+			return errors.New("--backend dynamo requires elastic Kubernetes capacity and cannot be combined with targets or another provider adapter")
+		}
+		if *gpu == "" {
+			return errors.New("--backend dynamo requires --gpu; InferCrane will not guess cluster GPU labels")
+		}
+		in.Cloud, in.ProviderAdapter, in.MinReplicas, in.MaxReplicas = "kubernetes", "kubernetes-dynamo", 1, 1
+		in.Serving = servingcontract.Topology{Backend: servingcontract.BackendDynamo, Profile: "baseline", Mode: servingcontract.ModeAggregated, Routing: servingcontract.RoutingDirect, Worker: servingcontract.Pool{Replicas: 1, TensorParallelism: 1}}
 	}
 	if len(in.Targets) == 0 && in.Cloud == "" && in.GPU == "" {
 		in.Cloud, in.GPU = support.DefaultCloud, support.DefaultGPU
@@ -424,7 +441,7 @@ func planCommand(ctx context.Context, cfg config.Config, args []string) error {
 				break
 			}
 		}
-		p = planning.Compare(p, planning.Current{Model: current.Deployment.Model, Runtime: current.Deployment.Runtime, Routing: current.Deployment.RoutingStrategy, ComputeMode: activeSpec.ComputeMode, Cloud: activeSpec.Cloud, GPU: activeSpec.GPU, Region: activeSpec.Region, MinReplicas: current.Deployment.MinReplicas, MaxReplicas: current.Deployment.MaxReplicas, ActiveRevision: current.Deployment.ActiveRevisionID, ActiveRevisionNumber: activeNumber})
+		p = planning.Compare(p, planning.Current{Model: current.Deployment.Model, Runtime: current.Deployment.Runtime, Routing: current.Deployment.RoutingStrategy, ComputeMode: activeSpec.ComputeMode, Cloud: activeSpec.Cloud, ProviderAdapter: activeSpec.ProviderAdapter, GPU: activeSpec.GPU, Region: activeSpec.Region, MinReplicas: current.Deployment.MinReplicas, MaxReplicas: current.Deployment.MaxReplicas, ActiveRevision: current.Deployment.ActiveRevisionID, ActiveRevisionNumber: activeNumber, Serving: activeSpec.Serving})
 	} else {
 		var controlErr *ControlError
 		if !errors.As(lookupErr, &controlErr) || controlErr.Code != "not_found" {
@@ -1598,8 +1615,10 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 	targets := fs.String("targets", "", "comma-separated targets")
 	cloud := fs.String("cloud", "", "provider cloud")
 	providerAdapter := fs.String("provider-adapter", "", "provider adapter profile (advanced)")
+	backend := fs.String("backend", "", "serving backend; use dynamo for a managed Dynamo graph")
 	gpu := fs.String("gpu", "", "GPU")
 	region := fs.String("region", "", "region")
+	runtimeFlag := fs.String("runtime", "vllm", "runtime engine: vllm or sglang")
 	computeMode := fs.String("compute", "elastic", "compute mode: elastic or serverless")
 	minReplicas := fs.Int("min", 1, "minimum replicas")
 	maxReplicas := fs.Int("max", 1, "maximum replicas")
@@ -1625,7 +1644,8 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 	strategy := "round-robin"
 	runtimeArgs := []string{}
 	var runtimeWorkload runtimecontract.Workload
-	runtimeEngine := "vllm"
+	var servingTopology servingcontract.Topology
+	runtimeEngine := *runtimeFlag
 	modelRevision := ""
 	runtimeVersion := ""
 	if ext := filepath.Ext(model); ext == ".yaml" || ext == ".yml" {
@@ -1633,7 +1653,7 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 		if err != nil {
 			return err
 		}
-		if *name != "" || *targets != "" || *cloud != "" || *providerAdapter != "" || *gpu != "" || *region != "" {
+		if *name != "" || *targets != "" || *cloud != "" || *backend != "" || *providerAdapter != "" || *gpu != "" || *region != "" || *runtimeFlag != "vllm" {
 			return errors.New("deployment YAML cannot be combined with deployment flags")
 		}
 		*name = file.Name
@@ -1649,7 +1669,21 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 		strategy = file.Routing.Strategy
 		runtimeArgs = file.Runtime.Args
 		runtimeWorkload = file.Runtime.Workload
+		servingTopology = file.Serving
 		*minReplicas, *maxReplicas = file.Scaling.MinReplicas, file.Scaling.MaxReplicas
+	}
+	if *backend != "" {
+		if *backend != servingcontract.BackendDynamo {
+			return errors.New("--backend currently supports dynamo; omit it for the standard provider path")
+		}
+		if *targets != "" || *computeMode != "elastic" || (*cloud != "" && *cloud != "kubernetes") || (*providerAdapter != "" && *providerAdapter != "kubernetes-dynamo") {
+			return errors.New("--backend dynamo requires elastic Kubernetes capacity and cannot be combined with targets or another provider adapter")
+		}
+		if *gpu == "" {
+			return errors.New("--backend dynamo requires --gpu; InferCrane will not guess cluster GPU labels")
+		}
+		*cloud, *providerAdapter, *minReplicas, *maxReplicas = "kubernetes", "kubernetes-dynamo", 1, 1
+		servingTopology = servingcontract.Topology{Backend: servingcontract.BackendDynamo, Profile: "baseline", Mode: servingcontract.ModeAggregated, Routing: servingcontract.RoutingDirect, Worker: servingcontract.Pool{Replicas: 1, TensorParallelism: 1}}
 	}
 	if *name == "" {
 		*name = planning.DefaultName(model)
@@ -1689,7 +1723,7 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 		path = "/api/v1/deployments/apply"
 		request = workflows.ApplyExistingRequest{Name: *name, Model: model, Targets: splitTargets(*targets), RoutingStrategy: strategy, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas, AutoscalingEnabled: *maxReplicas > *minReplicas}
 	} else if *cloud != "" && *gpu != "" {
-		request = workflows.CloudRequest{Name: *name, Model: model, ModelRevision: modelRevision, Runtime: runtimeEngine, RuntimeVersion: runtimeVersion, ComputeMode: *computeMode, Cloud: *cloud, ProviderAdapter: *providerAdapter, GPU: *gpu, Region: *region, RuntimeArgs: runtimeArgs, Workload: runtimeWorkload, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas}
+		request = workflows.CloudRequest{Name: *name, Model: model, ModelRevision: modelRevision, Runtime: runtimeEngine, RuntimeVersion: runtimeVersion, ComputeMode: *computeMode, Cloud: *cloud, ProviderAdapter: *providerAdapter, GPU: *gpu, Region: *region, RuntimeArgs: runtimeArgs, Workload: runtimeWorkload, Serving: servingTopology, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas}
 	} else {
 		return errors.New("provide --targets or both --cloud and --gpu")
 	}
@@ -2797,6 +2831,28 @@ func startupEvidenceLines(raw json.RawMessage) []string {
 	if !details.RuntimeReadyAt.IsZero() && !start.IsZero() && !details.RuntimeReadyAt.Before(start) {
 		lines = append(lines, fmt.Sprintf("  +%-8s runtime ready", compactDuration(details.RuntimeReadyAt.Sub(start))))
 	}
+	stageAt := map[string]time.Time{}
+	for _, stage := range details.Startup.Stages {
+		stageAt[stage.Name] = stage.At
+	}
+	phase := func(name, from, to string) {
+		fromAt, fromOK := stageAt[from]
+		toAt, toOK := stageAt[to]
+		if fromOK && toOK && !toAt.Before(fromAt) {
+			lines = append(lines, fmt.Sprintf("  %-18s %s", name, compactDuration(toAt.Sub(fromAt))))
+		}
+	}
+	lines = append(lines, "Phases     measured boundaries")
+	phase("workload identity", "identity_start", "identity_ready")
+	phase("container transfer", "image_pull_start", "image_pull_complete")
+	phase("container launch", "runtime_start", "runtime_container_started")
+	if containerAt, ok := stageAt["runtime_container_started"]; ok && !details.RuntimeReadyAt.IsZero() && !details.RuntimeReadyAt.Before(containerAt) {
+		lines = append(lines, fmt.Sprintf("  %-18s %s", "model + runtime ready", compactDuration(details.RuntimeReadyAt.Sub(containerAt))))
+	}
+	lines = append(lines,
+		"  provider allocation unavailable (provider boundary precedes machine bootstrap)",
+		"  model download      unavailable (runtime does not expose a qualified artifact boundary)",
+	)
 	return lines
 }
 
@@ -3494,6 +3550,7 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 	key := fs.String("idempotency-key", "", "safe retry key")
 	reason := fs.String("reason", "", "persisted reason for the transition")
 	model := fs.String("model", "", "candidate model")
+	candidateFile := fs.String("file", "", "candidate DeploymentSpec YAML")
 	runtimeName := fs.String("runtime", "vllm", "candidate runtime")
 	routing := fs.String("routing", "round-robin", "candidate routing strategy")
 	minReplicas := fs.Int("min", 1, "candidate minimum replicas")
@@ -3574,25 +3631,58 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 	var request any = struct{}{}
 	switch action {
 	case "create":
-		if *model == "" {
-			return errors.New("--model is required")
-		}
-		if *minReplicas < 1 || *maxReplicas < *minReplicas {
-			return errors.New("replica bounds must satisfy 1 <= min <= max")
-		}
-		if (*cloud == "") != (*gpu == "") {
-			return errors.New("--cloud and --gpu must be provided together")
-		}
 		path = "/api/v1/deployments/" + url.PathEscape(name) + "/rollouts"
-		computeMode := "existing"
-		if *cloud != "" {
-			computeMode = "elastic"
+		var revisionSpec domain.DeploymentRevisionSpec
+		if *candidateFile != "" {
+			conflicting := ""
+			fs.Visit(func(item *flag.Flag) {
+				switch item.Name {
+				case "file", "output", "wait", "wait-timeout", "idempotency-key":
+				default:
+					conflicting = item.Name
+				}
+			})
+			if conflicting != "" {
+				return fmt.Errorf("--file cannot be combined with --%s", conflicting)
+			}
+			candidate, loadErr := spec.Load(*candidateFile)
+			if loadErr != nil {
+				return loadErr
+			}
+			if candidate.Name != name {
+				return fmt.Errorf("candidate DeploymentSpec name %q must match rollout deployment %q", candidate.Name, name)
+			}
+			if candidate.Compute.Mode != "elastic" {
+				return errors.New("candidate DeploymentSpec must use elastic compute")
+			}
+			revisionSpec = domain.DeploymentRevisionSpec{
+				Model: candidate.Model.ID, ModelRevision: candidate.Model.Revision,
+				Runtime: candidate.Runtime.Engine, RuntimeVersion: candidate.Runtime.Version, RuntimeArgs: candidate.Runtime.Args,
+				RoutingStrategy: candidate.Routing.Strategy, MinReplicas: candidate.Scaling.MinReplicas, MaxReplicas: candidate.Scaling.MaxReplicas,
+				AutoscalingEnabled: candidate.Scaling.MaxReplicas > candidate.Scaling.MinReplicas, ComputeMode: candidate.Compute.Mode,
+				Cloud: candidate.Provider.Cloud, ProviderAdapter: candidate.Provider.Adapter, GPU: candidate.Resources.GPU, Region: candidate.Provider.Region,
+				Workload: candidate.Runtime.Workload, Serving: candidate.Serving,
+			}
+		} else {
+			if *model == "" {
+				return errors.New("--model or --file is required")
+			}
+			if *minReplicas < 1 || *maxReplicas < *minReplicas {
+				return errors.New("replica bounds must satisfy 1 <= min <= max")
+			}
+			if (*cloud == "") != (*gpu == "") {
+				return errors.New("--cloud and --gpu must be provided together")
+			}
+			computeMode := "existing"
+			if *cloud != "" {
+				computeMode = "elastic"
+			}
+			revisionSpec = domain.DeploymentRevisionSpec{Model: *model, ModelRevision: *modelRevision, Runtime: *runtimeName, RuntimeVersion: *runtimeVersion, RoutingStrategy: *routing, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas, AutoscalingEnabled: *maxReplicas > *minReplicas, ComputeMode: computeMode, Cloud: *cloud, ProviderAdapter: *providerAdapter, GPU: *gpu, Region: *region}
+			if *runtimeArgs != "" {
+				revisionSpec.RuntimeArgs = splitTargets(*runtimeArgs)
+			}
 		}
-		spec := domain.DeploymentRevisionSpec{Model: *model, ModelRevision: *modelRevision, Runtime: *runtimeName, RuntimeVersion: *runtimeVersion, RoutingStrategy: *routing, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas, AutoscalingEnabled: *maxReplicas > *minReplicas, ComputeMode: computeMode, Cloud: *cloud, ProviderAdapter: *providerAdapter, GPU: *gpu, Region: *region}
-		if *runtimeArgs != "" {
-			spec.RuntimeArgs = splitTargets(*runtimeArgs)
-		}
-		request = map[string]any{"spec": spec}
+		request = map[string]any{"spec": revisionSpec}
 	case "provision":
 		path = "/api/v1/deployments/" + url.PathEscape(name) + "/rollouts/" + url.PathEscape(revisionID) + "/provision"
 	case "evaluate":
@@ -3781,6 +3871,13 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 				doctor.Capability{Adapter: "kubernetes", Name: "server_side_apply", State: "supported", Detail: "strict server-side validation and apply without force-conflicts"},
 				doctor.Capability{Adapter: "kubernetes", Name: "namespaced_ownership", State: "supported", Detail: "InferCrane owns a bounded Deployment/Service set or one KServe InferenceService"},
 			)
+			if cfg.DynamoEnabled() {
+				report.Add(doctor.CheckDynamo(checkCtx, cfg, doctor.Dependencies{}))
+				report.Capabilities = append(report.Capabilities,
+					doctor.Capability{Adapter: "kubernetes-dynamo", Name: "graph_ownership", State: "supported", Detail: "InferCrane owns one DGD parent; Dynamo owns the internal graph"},
+					doctor.Capability{Adapter: "kubernetes-dynamo", Name: "real_gpu_qualification", State: "unknown", Detail: "doctor proves API and RBAC only; GPU/runtime evidence remains separate"},
+				)
+			}
 		}
 		return report
 	}
@@ -3868,6 +3965,26 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		kubernetesProvider := provision.Kubernetes{Context: cfg.KubernetesContext, Namespace: cfg.KubernetesNamespace, WorkloadAPI: cfg.KubernetesWorkloadAPI, ServiceAccount: cfg.KubernetesServiceAccount, WorkerSecretName: cfg.KubernetesWorkerSecretName, WorkerSecretKey: cfg.KubernetesWorkerSecretKey, ImageDigest: cfg.KubernetesImageDigest, GPUResource: cfg.KubernetesGPUResource, GPUProductLabel: cfg.KubernetesGPUProductLabel}
 		for _, runtimeName := range []string{"vllm", "sglang", "custom-oci"} {
 			elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: "kubernetes", Cloud: "kubernetes", Runtime: runtimeName, Profile: kubernetesProfile, Provider: kubernetesProvider})
+		}
+	}
+	if cfg.DynamoEnabled() {
+		dynamoProfile, profileErr := integrationRegistry.Provider("kubernetes-dynamo")
+		if profileErr != nil {
+			return fmt.Errorf("configure Dynamo integration: %w", profileErr)
+		}
+		dynamoProvider := provision.KubernetesDynamo{
+			Context: cfg.KubernetesContext, Namespace: cfg.KubernetesNamespace,
+			ServiceAccount:  cfg.KubernetesServiceAccount,
+			VLLMImageDigest: cfg.DynamoVLLMImageDigest, VLLMRuntimeVersion: cfg.DynamoVLLMRuntimeVersion,
+			SGLangImageDigest: cfg.DynamoSGLangImageDigest, SGLangRuntimeVersion: cfg.DynamoSGLangRuntimeVersion,
+			ModelSecretName: cfg.DynamoModelSecretName, GPUResource: cfg.KubernetesGPUResource,
+			GPUProductLabel: cfg.KubernetesGPUProductLabel,
+		}
+		for _, runtimeName := range []string{"vllm", "sglang"} {
+			if !cfg.DynamoRuntimeEnabled(runtimeName) {
+				continue
+			}
+			elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: "kubernetes-dynamo", Cloud: "kubernetes", Runtime: runtimeName, Profile: dynamoProfile, Provider: dynamoProvider})
 		}
 	}
 	replicaBackends, err := workflows.NewReplicaBackends(elasticBackends...)

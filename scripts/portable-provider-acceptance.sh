@@ -239,6 +239,26 @@ qualify_spec() {
       ([.results[].workload.concurrency] | sort) == [1,4,4,8,8,32,128] and
       ([.results[].failed] | add) == 0
     ' "$matrix_dir/matrix.json" >/dev/null || return
+    if [ "${INFERCRANE_V1_CONCURRENCY_SWEEP:-false}" = true ]; then
+      sweep_dir="$state/concurrency-sweep"
+      INFERCRANE_BENCHMARK_CLI="$root/scripts/portable-provider-cli.sh" \
+      INFERCRANE_BENCHMARK_RUN_ID="$run_id-aws-vllm-sweep" \
+      INFERCRANE_PORTABLE_ROOT="$root" \
+      INFERCRANE_PORTABLE_PROJECT="$project" \
+      INFERCRANE_PORTABLE_ENV_FILE="$env_file" \
+      INFERCRANE_PORTABLE_PROVIDER_COMPOSE="$provider_compose" \
+      INFERCRANE_PORTABLE_SPEC_DIR="$spec_dir" \
+      INFERCRANE_PORTABLE_API_KEY_FILE="$key_file" \
+      INFERCRANE_PORTABLE_PASSWORD_FILE="$password_file" \
+      INFERCRANE_PORTABLE_IMAGE="$candidate_image" \
+      INFERCRANE_PORTABLE_PORT="$port" \
+        "$root/scripts/benchmark-concurrency-sweep.sh" "$deployment" --approve-load --output "$sweep_dir" || return
+      jq -e '
+        .campaign == "same-workload-concurrency-sweep" and
+        .evidence_class == "measured" and
+        [.results[].workload.concurrency] == [1,8,32,128]
+      ' "$sweep_dir/sweep.json" >/dev/null || return
+    fi
   fi
   cli delete "$deployment" --yes --wait --wait-timeout "${INFERCRANE_V1_DELETE_TIMEOUT:-15m}" \
     --idempotency-key "$run_id-$cloud-$runtime-delete" --output json | jq -e '.operation.status == "succeeded"' >/dev/null || return

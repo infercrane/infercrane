@@ -54,6 +54,30 @@ type Dependencies struct {
 	AWSCheck        func(context.Context) error
 	GCPCheck        func(context.Context) error
 	KubernetesCheck func(context.Context) error
+	DynamoCheck     func(context.Context) error
+}
+
+func CheckDynamo(ctx context.Context, cfg config.Config, deps Dependencies) Check {
+	if !cfg.DynamoEnabled() {
+		return Check{"NVIDIA Dynamo", Fail, "Dynamo serving backend is not configured", "Set at least one digest-pinned Dynamo runtime image and its matching runtime version after configuring Kubernetes and installing Dynamo."}
+	}
+	check := deps.DynamoCheck
+	if check == nil {
+		check = (provision.KubernetesDynamo{
+			Context: cfg.KubernetesContext, Namespace: cfg.KubernetesNamespace,
+			ServiceAccount:  cfg.KubernetesServiceAccount,
+			VLLMImageDigest: cfg.DynamoVLLMImageDigest, VLLMRuntimeVersion: cfg.DynamoVLLMRuntimeVersion,
+			SGLangImageDigest: cfg.DynamoSGLangImageDigest, SGLangRuntimeVersion: cfg.DynamoSGLangRuntimeVersion,
+			ModelSecretName: cfg.DynamoModelSecretName, GPUResource: cfg.KubernetesGPUResource,
+			GPUProductLabel: cfg.KubernetesGPUProductLabel,
+		}).Check
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	if err := check(checkCtx); err != nil {
+		return Check{"NVIDIA Dynamo", Fail, "Dynamo API or namespaced RBAC probe failed", "Verify the Dynamo operator and nvidia.com/v1beta1 DGD CRD, the bounded Role, runtime image digest, namespace, and kubeconfig identity."}
+	}
+	return Check{"NVIDIA Dynamo", Pass, "Dynamo graph API and namespaced provider permissions are ready", ""}
 }
 
 func CheckGCPBYOC(ctx context.Context, cfg config.Config, deps Dependencies) Check {

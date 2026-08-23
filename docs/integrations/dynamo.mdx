@@ -1,0 +1,146 @@
+---
+title: NVIDIA Dynamo
+description: Run an explicit Dynamo serving graph behind an InferCrane stable endpoint without creating competing lifecycle owners.
+---
+
+# NVIDIA Dynamo
+
+Use Dynamo when one model needs an internal serving topology—not when a normal vLLM or SGLang
+worker is enough. InferCrane keeps the application endpoint, revisions, durable operation, Release
+Guard, and evidence. The separately installed Dynamo operator owns the graph router, worker pools,
+and KV movement.
+
+```text
+application → InferCrane endpoint → Dynamo frontend → vLLM or SGLang workers
+                    │                       │
+           release and evidence      routing and topology
+```
+
+<Warning>
+The ownership and manifest path is locally qualified. A real Dynamo operator, NVIDIA GPU, NIXL,
+cache behavior, and performance are not proven by fixture or Kind tests. Disaggregated serving is
+not automatically faster; benchmark the exact model, workload, runtime, and GPU topology.
+</Warning>
+
+## Before you begin
+
+Install and operate a compatible Dynamo release in your Kubernetes cluster. InferCrane does not
+install the operator, GPU Operator, storage, or a Kubernetes distribution. Apply the bounded
+namespaced permission after reviewing it:
+
+```bash
+kubectl apply -f deploy/kubernetes/dynamo/provider-rbac.yaml
+```
+
+Configure the normal [Kubernetes provider](/integrations/kubernetes), then add:
+
+```bash
+export INFERCRANE_DYNAMO_VLLM_IMAGE_DIGEST='nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.4.0@sha256:REPLACE_WITH_QUALIFIED_DIGEST'
+export INFERCRANE_DYNAMO_VLLM_RUNTIME_VERSION='1.4.0'
+
+# Optional: configure SGLang independently. InferCrane registers only complete
+# runtime pairs, so a vLLM image is never used accidentally for SGLang.
+export INFERCRANE_DYNAMO_SGLANG_IMAGE_DIGEST='nvcr.io/nvidia/ai-dynamo/sglang-runtime:1.4.0@sha256:REPLACE_WITH_QUALIFIED_DIGEST'
+export INFERCRANE_DYNAMO_SGLANG_RUNTIME_VERSION='1.4.0'
+export INFERCRANE_DYNAMO_MODEL_SECRET_NAME='huggingface-models' # optional reference
+```
+
+The image must be immutable. The optional Secret already exists in the target namespace; InferCrane
+references it through `envFrom` and never reads its values.
+
+## Simple path
+
+Choose the backend and the cluster's exact GPU product-label value. The command expands to a
+one-worker aggregated graph with direct routing. It does not guess topology or GPU labels.
+
+```bash
+infercrane plan meta-llama/Llama-3.1-8B-Instruct \
+  --backend dynamo \
+  --gpu NVIDIA-L40S
+
+infercrane deploy meta-llama/Llama-3.1-8B-Instruct \
+  --name llama-production \
+  --backend dynamo \
+  --gpu NVIDIA-L40S \
+  --idempotency-key llama-production-initial
+```
+
+Use `--runtime sglang` to select the qualified manifest contract for SGLang. The application still
+calls the InferCrane `/v1` endpoint and keeps the same logical model identity across revisions.
+
+## Advanced topology
+
+Use a project file when you need reviewable topology. Every decision is immutable in the revision:
+
+```yaml
+apiVersion: infercrane.dev/v1
+kind: Deployment
+name: llama-production
+model:
+  id: meta-llama/Llama-3.1-8B-Instruct
+  revision: REPLACE_WITH_IMMUTABLE_COMMIT
+runtime:
+  engine: vllm
+  version: REPLACE_WITH_QUALIFIED_VERSION
+compute:
+  mode: elastic
+resources:
+  gpu: NVIDIA-L40S
+provider:
+  cloud: kubernetes
+  adapter: kubernetes-dynamo
+  region: ""
+scaling:
+  min_replicas: 1
+  max_replicas: 1
+routing:
+  strategy: round-robin
+serving:
+  schema_version: infercrane.serving/v1
+  backend: dynamo
+  profile: custom
+  mode: disaggregated
+  routing: kv-aware
+  prefill:
+    replicas: 1
+    tensor_parallelism: 1
+  decode:
+    replicas: 2
+    tensor_parallelism: 1
+  autoscaling:
+    owner: disabled
+  cache:
+    backend: none
+```
+
+```bash
+infercrane workload validate
+infercrane plan infercrane.yaml
+infercrane deploy infercrane.yaml --idempotency-key llama-disaggregated-r1
+```
+
+## Ownership matrix
+
+| Concern | Owner |
+|---|---|
+| Stable application endpoint and logical model | InferCrane |
+| Deployment/revision lifecycle and Release Guard | InferCrane |
+| Parent `DynamoGraphDeployment` desired state | InferCrane |
+| Child Pods, Services, router, planner, worker pools | Dynamo operator |
+| GPU placement and disruption | Kubernetes and installed schedulers |
+| KV transfer | Dynamo/runtime through NIXL or another qualified backend |
+| Prompt KV storage | Exactly one selected cache backend |
+
+## Capability boundaries
+
+| Configuration | Current local evidence |
+|---|---|
+| Aggregated vLLM/SGLang | Manifest and lifecycle qualified |
+| Disaggregated vLLM/SGLang | Manifest/ownership qualified; real GPU deferred |
+| KV-aware router | Manifest qualified; routing quality deferred |
+| KVBM | Aggregated vLLM manifest qualified; real memory/performance deferred |
+| Dynamo Planner / DGDSA | Registered, execution rejected |
+| LMCache / HiCache | Registered, execution rejected |
+
+Unsupported combinations are errors before provider mutation. InferCrane never silently replaces an
+advanced request with a baseline topology.

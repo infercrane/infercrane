@@ -185,7 +185,17 @@ func (s *Store) CreateDeploymentForTenant(ctx context.Context, tenant string, de
 	if err != nil {
 		return domain.Deployment{}, err
 	}
-	return deployment, tx.Commit()
+	if err = tx.Commit(); err != nil {
+		return domain.Deployment{}, err
+	}
+	// The initial revision is created by the database trigger in the same
+	// transaction. Return the persisted resource rather than the pre-insert
+	// struct so callers immediately receive its active revision identity.
+	resolved, err := s.ResolveForTenant(ctx, tenant, deployment.Name)
+	if err != nil {
+		return domain.Deployment{}, err
+	}
+	return resolved.Deployment, nil
 }
 
 func sameTargets(targets []domain.Target, names []string) bool {

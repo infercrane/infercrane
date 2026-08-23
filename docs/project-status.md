@@ -93,6 +93,7 @@ implemented row below.
 | GCP Compute BYOC | Experimental | Private-network, attached-identity, label-owned, immutable-image lifecycle passes hermetic adapter tests; real GCP GPU evidence is deferred. |
 | Managed provider profiles | Planned | AWS ASG/EKS/SageMaker/Bedrock, GCP MIG/GKE/Vertex, and CoreWeave CKS have explicit ownership/capability boundaries but are not executable or locally qualified. |
 | Kubernetes elastic | Experimental | Namespace-scoped Deployment/Service and optional standard KServe ownership pass hermetic and Kind lifecycle gates; real Kubernetes GPU/runtime evidence is deferred. |
+| NVIDIA Dynamo serving backend | Experimental | Immutable serving topology, one-parent DGD lifecycle, aggregated/disaggregated vLLM/SGLang manifests, KV-aware routing, and bounded aggregated-vLLM KVBM intent pass fixture and Kind API gates. Dynamo operator, GPU, NIXL, cache, and performance evidence remains deferred. Planner, LMCache, and HiCache execution fail closed. |
 | SkyPilot RunPod provisioning | Experimental | Requires credentialed elastic lifecycle acceptance and soak tests. |
 | Production performance claims | Planned | Must be backed by reproducible real-vLLM benchmarks. |
 

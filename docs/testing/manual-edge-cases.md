@@ -54,8 +54,9 @@ scripts/aws-performance-qualification.sh granite --approve-paid-resources
 
 Mistral qualifies the catalog-declared tool path plus structured decoding; DeepSeek Distill and
 Granite qualify chat, streaming, workload shapes, and lifecycle without inventing tool support. Each
-run must archive the seven-profile AIPerf matrix, immutable model/runtime/image identities, startup
-waterfall, and matching before/after EC2 and EBS inventory. Do not combine rows across different
+run must archive the seven-profile AIPerf matrix, the fixed-workload concurrency sweep, immutable
+model/runtime/image identities, startup waterfall, and matching before/after EC2 and EBS inventory.
+Do not combine rows across different
 model identities or workload digests into one ranking.
 
 ## GCP Compute BYOC — adoption, quota, IAM, networking, and delete
@@ -76,6 +77,16 @@ model identities or workload digests into one ranking.
 - Expected behavior: readiness requires matching UID/ownership and current `observedGeneration`; Pending/ImagePullBackOff/CrashLoop/Unknown never route; API conflicts retry without overwriting foreign fields; accepted deletion remains pending through the finalizer; removed/recreated UID is not confused with the old resource.
 - Evidence: YAML including UID/resourceVersion/generation/observedGeneration/conditions, InferCrane events, route snapshots, pod events/logs, finalizer lifecycle, and namespace inventory before/after.
 - Cleanup: remove only the test finalizer, run harness cleanup, and prove the namespace contains no run-owned resources.
+
+## NVIDIA Dynamo — graph ownership, transfer, cache, and performance
+
+- Sources: [Dynamo DGD reference](https://docs.nvidia.com/dynamo/reference/api/kubernetes/dynamo-graph-deployment), [model deployment](https://docs.nvidia.com/dynamo/dev/kubernetes/model-deployment/introduction), and [KV cache offloading](https://docs.nvidia.com/dynamo/dev/kubernetes/kv-cache-offloading/overview).
+- Why local simulation is insufficient: fixtures and the test-only Kind CRD prove InferCrane's parent ownership and API behavior, not the Dynamo operator, GPU scheduling, NIXL data movement, runtime compatibility, cache allocation, or workload performance.
+- Safe procedure: use an isolated GPU namespace and immutable qualified Dynamo/runtime image. Record empty run-owned DGD inventory, deploy the aggregated baseline, verify the stable endpoint and exact served model, then create a disaggregated candidate with KV-aware routing. Run the same AIPerf workload against both, confirm Release Guard uses only fresh comparable evidence, and promote only a passing candidate. Repeat with aggregated vLLM KVBM after verifying requested memory leaves runtime headroom and the named PVC has sufficient capacity. Kill one worker, restart the operator, interrupt the CLI after apply, and verify one parent is adopted without duplicate children. Delete through InferCrane and confirm zero run-owned DGD parents and provider children.
+- Evidence to collect: InferCrane operation/revision IDs, canonical topology digest, DGD YAML/status and observed generation, Dynamo/operator versions, runtime image digest, model commit, GPU topology, NIXL/cache configuration, AIPerf input digest/results, route generation, stream continuity, Release Guard decision, and final zero inventory.
+- Cost/risk: paid multi-GPU capacity; disaggregation may be slower for the selected workload; incorrectly sized host/disk cache can starve the runtime. Use bounded concurrency and a dedicated namespace/cluster.
+- Expected behavior: only the exact parent intent is adopted; stale or failed graph status never routes; the active stable endpoint does not move until comparable Release Guard evidence passes; rejected candidates and deleted graphs converge to zero owned resources.
+- Cleanup: delete through InferCrane, wait for the parent DGD to disappear, then independently verify that no run-owned DGD, DCD, Pod, Service, PVC, or scheduler child remains.
 
 ## vLLM — real protocol, overload, worker loss, and drain
 

@@ -34,6 +34,7 @@ credentials, networking, immutable images, runtime contract, preflight, cleanup,
 - [AWS EC2 BYOC](/integrations/aws-ec2)
 - [GCP Compute BYOC](/integrations/gcp-compute)
 - [Kubernetes and KServe](/integrations/kubernetes)
+- [NVIDIA Dynamo](/integrations/dynamo)
 - [Exact-combination compatibility check](/compatibility#check-one-exact-serving-combination)
 
 InferCrane cannot safely choose a provider from an unspecified workload. Decide these inputs first:

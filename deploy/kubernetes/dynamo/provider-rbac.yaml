@@ -1,0 +1,23 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: infercrane-provider-dynamo
+  namespace: infercrane-system
+rules:
+  - apiGroups: ["nvidia.com"]
+    resources: ["dynamographdeployments"]
+    verbs: ["get", "list", "create", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: infercrane-provider-dynamo
+  namespace: infercrane-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: infercrane-provider-dynamo
+subjects:
+  - kind: ServiceAccount
+    name: infercrane-control-plane
+    namespace: infercrane-system

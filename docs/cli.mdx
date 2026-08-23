@@ -289,6 +289,9 @@ infercrane apply examples/infercrane.yaml \
 | `--name` | derived from model | all | Logical deployment name |
 | `--targets` | none | existing | Comma-separated registered targets |
 | `--cloud` | `runpod` on primary path | elastic/serverless | Registered provider cloud; `runpod`, `aws`, and `kubernetes` have distinct qualification states |
+| `--backend` | standard provider path | elastic | `dynamo` expands to the safe aggregated Dynamo baseline; advanced topology uses YAML |
+| `--provider-adapter` | selected from cloud/runtime | provisioned | Exact adapter identity; advanced escape hatch, normally inferred by `--backend` or YAML |
+| `--runtime` | `vllm` | provisioned | `vllm` or `sglang` where the selected adapter has compatible evidence |
 | `--gpu` | `L40S` on primary path | elastic/serverless | Requested GPU |
 | `--region` | provider-selected | provisioned | Provider region; required for AWS BYOC and ignored by the namespace-scoped Kubernetes adapter |
 | `--compute` | `elastic` | provisioned | `elastic` or `serverless` |
@@ -300,8 +303,9 @@ infercrane apply examples/infercrane.yaml \
 | `--output` | `human` | all | `human` or `json` |
 
 A YAML path cannot be combined with deployment flags. See [DeploymentSpec](/deployment-spec).
-SGLang and custom OCI use the YAML form because their runtime contract is part of the immutable
-revision. See [SGLang](/integrations/sglang) and [Custom OCI workloads](/features/custom-oci).
+Custom OCI uses the YAML form because its runtime contract is part of the immutable revision.
+Advanced Dynamo topology also uses YAML. See [SGLang](/integrations/sglang),
+[NVIDIA Dynamo](/integrations/dynamo), and [Custom OCI workloads](/features/custom-oci).
 
 After submission, human output prints the exact commands to follow durable progress. A successful
 wait prints the command for the first inference request.
@@ -622,6 +626,11 @@ infercrane rollout create qwen-prod \
   --max 2 \
   --idempotency-key qwen-prod-rev-19
 
+# Preserve a complete advanced serving topology without flattening it to flags.
+infercrane rollout create llama-production \
+  --file infercrane-dynamo-candidate.yaml \
+  --idempotency-key llama-production-dynamo-r2
+
 infercrane rollout provision qwen-prod REVISION_ID --wait
 infercrane rollout validate qwen-prod --acknowledge-validation-cost --wait
 infercrane rollout promote qwen-prod REVISION_ID --reason 'guard accepted'
@@ -629,7 +638,7 @@ infercrane rollout reject qwen-prod REVISION_ID --reason 'TTFT regression'
 infercrane rollout rollback qwen-prod REVISION_ID --wait
 ```
 
-Candidate creation also accepts `--model-revision`, `--runtime`, `--runtime-version`, `--runtime-args`, `--routing`, and `--region`. Promotion remains policy-gated; no LLM decides the outcome.
+Candidate creation also accepts `--model-revision`, `--runtime`, `--runtime-version`, `--runtime-args`, `--routing`, and `--region`. `--file` preserves a complete validated DeploymentSpec, including advanced serving topology, and cannot be mixed with candidate override flags. Promotion remains policy-gated; no LLM decides the outcome.
 
 `rollout validate` is explicit synthetic traffic, not shadowing. It runs the existing AIPerf adapter
 against active and candidate revisions using the same workload and persisted hard bounds. The
