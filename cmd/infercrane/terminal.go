@@ -72,6 +72,9 @@ func operationProgressSignature(operation domain.Operation) string {
 
 func operationPhase(operation domain.Operation) string {
 	if operation.Status == "succeeded" {
+		if isDeleteOperation(operation) {
+			return "DELETED"
+		}
 		return "READY"
 	}
 	if operation.Status == "failed" || operation.Status == "cancelled" {
@@ -79,6 +82,8 @@ func operationPhase(operation domain.Operation) string {
 	}
 	message := strings.ToLower(operation.Message)
 	switch {
+	case isDeleteOperation(operation):
+		return "DELETING"
 	case strings.Contains(message, "runtime") || strings.Contains(message, "worker reachable") || strings.Contains(message, "provider endpoint is assigned") || strings.Contains(message, "restarting"):
 		return "STARTING RUNTIME"
 	case strings.Contains(message, "artifact") || strings.Contains(message, "model identity"):
@@ -92,6 +97,10 @@ func operationPhase(operation domain.Operation) string {
 	default:
 		return strings.ToUpper(operation.Status)
 	}
+}
+
+func isDeleteOperation(operation domain.Operation) bool {
+	return strings.HasSuffix(strings.ToLower(operation.Kind), ".delete")
 }
 
 func terminalStatus(value string) string {

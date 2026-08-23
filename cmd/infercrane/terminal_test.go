@@ -47,3 +47,21 @@ func TestOperationPhaseDoesNotMislabelAmbiguousRuntimeStartupAsArtifactPreparati
 		t.Fatalf("operation phase = %q, want STARTING RUNTIME", got)
 	}
 }
+
+func TestOperationPhaseDoesNotMislabelProviderDeletionAsCapacityWait(t *testing.T) {
+	operation := domain.Operation{
+		Kind:     "deployment.delete",
+		Status:   "waiting",
+		Progress: 0,
+		Message:  "provider resource deletion is pending",
+	}
+	if got := operationPhase(operation); got != "DELETING" {
+		t.Fatalf("operation phase = %q, want DELETING", got)
+	}
+	operation.Status = "succeeded"
+	operation.Progress = 100
+	operation.Message = "completed"
+	if got := operationPhase(operation); got != "DELETED" {
+		t.Fatalf("completed operation phase = %q, want DELETED", got)
+	}
+}
