@@ -21,5 +21,11 @@ inspect the exact digest locally before pulling and publish credential-free star
 Model-weight caching remains a separate provider-native boundary and is never inferred from image
 locality.
 
+The exact-commit AWS rerun at `292935f` proved the miss instrumentation against all three runtime
+paths. The vLLM image transferred in 4 minutes 4 seconds on both the first-class vLLM and custom-OCI
+workers; the qualified SGLang image transferred in 5 minutes 20 seconds. These are observations from
+one region and run, not forecasts. A customer-prewarmed AMI hit remains unqualified until a real
+worker emits `image_cache_hit` and completes the full runtime contract.
+
 The corresponding real request measurements and their intentionally narrow methodology are recorded
 in [AWS real-infrastructure evidence](./aws-real-evidence.md).

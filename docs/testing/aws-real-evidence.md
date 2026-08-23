@@ -3,6 +3,39 @@
 This evidence was captured on 2026-08-23 from the private AWS BYOC qualification in
 `eu-central-1`. It is release qualification, not a public performance comparison.
 
+## Final cache-aware implementation run
+
+The post-fix matrix passed again at InferCrane commit
+`292935f9899d61149d08d34232b6b50b0389e9e5` with run ID
+`20260823T053950Z-292935f-aws`. The commit-addressed acceptance image prevented a stale local image
+from being mistaken for the checked-out source. The AWS gate completed in 4,485 seconds and the
+retained qualification document reports `status: passed`.
+
+| Runtime path | Success | TTFT p50 | TTFT p95 | TPOT p95 | Latency p95 | Output tok/s |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| vLLM 0.22.0 | 5/5 | 49.0 ms | 56.4 ms | 21.8 ms | 718.5 ms | 44.3 |
+| SGLang 0.5.12 | 5/5 | 95.6 ms | 97.2 ms | 21.3 ms | 712.6 ms | 44.6 |
+| custom OCI using the qualified vLLM image | 5/5 | 52.9 ms | 56.8 ms | 21.7 ms | 717.4 ms | 44.5 |
+
+Every row used AIPerf 0.9.0 with five streaming chat requests, concurrency one, 128 input tokens,
+32 output tokens, and random seed 17. It remains qualification evidence rather than a throughput,
+cost, or runtime-comparison claim.
+
+The run also exercised the new cold-start boundaries. vLLM waited about six minutes for zonal AWS
+capacity and completed the full deploy in 17 minutes 6 seconds. Its immutable image miss took 4
+minutes 4 seconds. SGLang waited about 11.5 minutes for capacity, transferred its image in 5 minutes
+20 seconds, and completed in 23 minutes 50 seconds. The custom-OCI path obtained capacity
+immediately, transferred the same vLLM image in 4 minutes 4 seconds, and completed in 11 minutes 10
+seconds. SGLang and vLLM both served the exact model commit named below.
+
+All three managed instances reached `terminated`. The independent final AWS inventory returned no
+active InferCrane-managed instances and no active managed EBS volumes. The dedicated qualification
+runner remained intentionally available and is not tagged as a managed workload.
+
+These observations prove the miss path and the stage instrumentation. They do not prove an
+operator-prewarmed AMI image hit or provider-native model-artifact cache. Those remain distinct
+qualification boundaries.
+
 ## Identity and scope
 
 - InferCrane commit: `48d957d3e1014c038456d9b4ebd604921aaef792`
@@ -46,7 +79,8 @@ The qualification runner itself remained intentionally available and is not a wo
 The follow-up startup change at `e71b655` adds exact-digest image-cache reuse, credential-free stage
 timestamps, statistically guarded observed-readiness estimates, and corrected capacity accounting.
 That change passes the full local, PostgreSQL, Kind, container race, security-audit, and documentation
-matrix. Its real prewarmed-image hit path remains a separate qualification boundary.
+matrix. The final run above proves its real image-miss instrumentation; its prewarmed-image hit path
+remains a separate qualification boundary.
 
 A follow-up run at `429e466` exercised the smaller official SGLang 0.5.12 `runtime` image. The
 cache-aware stage evidence measured an image miss from 05:03:39Z through 05:08:47Z. The container
