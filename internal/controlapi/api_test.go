@@ -1609,7 +1609,7 @@ func TestPortableRuntimeDeployValidationAndPersistence(t *testing.T) {
 		status     int
 		contains   string
 	}{
-		{"sglang-default", `{"name":"sg","model":"org/model","runtime":"sglang","cloud":"aws","region":"eu-central-1","gpu":"L40S"}`, http.StatusAccepted, `"image":"lmsysorg/sglang:v0.5.12-runtime@sha256:`},
+		{"sglang-default", `{"name":"sg","model":"org/model","runtime":"sglang","cloud":"aws","region":"eu-central-1","gpu":"L40S"}`, http.StatusAccepted, `"image":"lmsysorg/sglang:v0.5.12@sha256:`},
 		{"kubernetes-vllm", `{"name":"kube","model":"org/model","runtime":"vllm","cloud":"kubernetes","gpu":"NVIDIA-L40S"}`, http.StatusAccepted, `"cloud":"kubernetes"`},
 		{"custom", `{"name":"custom","model":"org/model","runtime":"custom-oci","cloud":"aws","region":"eu-central-1","gpu":"L40S","workload":` + validWorkload + `}`, http.StatusAccepted, `"runtime":"custom-oci"`},
 		{"mutable", `{"name":"bad","model":"org/model","runtime":"custom-oci","cloud":"aws","region":"eu-central-1","gpu":"L40S","workload":` + strings.Replace(validWorkload, "@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ":latest", 1) + `}`, http.StatusUnprocessableEntity, `pinned by @sha256`},

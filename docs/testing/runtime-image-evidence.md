@@ -8,7 +8,7 @@ bytes; they are registry-transfer evidence, not extracted disk usage or startup 
 | --- | --- | ---: | ---: | --- |
 | vLLM 0.22.0 production digest | `sha256:69cf768308bad3a6fde6ffeffc8ba1f28433752c01e9cb53f57bfaf547cec2e1` | 9,219,894,117 | 31 | Real AWS vLLM and portable custom-OCI protocol, benchmark, and delete paths passed at InferCrane `48d957d` |
 | SGLang 0.5.12 default digest | `sha256:015f39a45844be5a7b35270c56dc4d9ebcfe9b0c21a3b4f877a4ee22e795bd7a` | 12,992,707,523 | 61 | Real AWS immutable-revision, protocol, benchmark, and delete path passed at InferCrane `48d957d` |
-| SGLang 0.5.12 `runtime` candidate | `sha256:7de5f60ce864919b15af674de1f1b0223121ee42e83bb58f4f3aee16fb18ccfd` | 11,896,018,638 | 26 | Selected as an exact-digest release candidate; real AWS runtime qualification pending |
+| SGLang 0.5.12 `runtime` candidate | `sha256:7de5f60ce864919b15af674de1f1b0223121ee42e83bb58f4f3aee16fb18ccfd` | 11,896,018,638 | 26 | Size-qualified only; not a production default |
 
 The SGLang runtime candidate is 1,096,688,885 compressed bytes (8.44%) smaller than the current
 default for this exact version. That is useful but not enough to bypass runtime qualification. It
