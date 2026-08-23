@@ -36,10 +36,12 @@ routing:
 ```
 
 The built-in profile declares the immutable image and argv, so normal users do not repeat them.
-It is simulated-qualified for readiness/model identity, buffered and streaming OpenAI transport,
-client cancellation, connection draining, the metrics endpoint and immutable launch intent.
+The full 0.5.12 image passed real AWS L40S readiness and model identity, buffered and streaming
+OpenAI transport, AIPerf qualification, immutable model-revision launch, and durable shutdown.
+Local conformance also covers client cancellation, connection draining, the metrics endpoint, and
+immutable launch intent.
 
-Real SGLang GPU behavior—including model compatibility, tool calling, structured output,
-performance and provider shutdown behavior—remains deferred until consolidated manual
-qualification. Autoscaling is rejected for SGLang because normalized SGLang scaling
-signals are not yet qualified.
+A smaller official `runtime` image was considered and then rejected by real AWS qualification
+because its published dependency set could not start the SGLang server. Tool calling, structured
+output, broader model compatibility, and other providers remain separate qualification surfaces.
+Autoscaling is rejected for SGLang because normalized SGLang scaling signals are not yet qualified.

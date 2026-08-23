@@ -47,3 +47,10 @@ The follow-up startup change at `e71b655` adds exact-digest image-cache reuse, c
 timestamps, statistically guarded observed-readiness estimates, and corrected capacity accounting.
 That change passes the full local, PostgreSQL, Kind, container race, security-audit, and documentation
 matrix. Its real prewarmed-image hit path remains a separate qualification boundary.
+
+A follow-up run at `429e466` exercised the smaller official SGLang 0.5.12 `runtime` image. The
+cache-aware stage evidence measured an image miss from 05:03:39Z through 05:08:47Z. The container
+then crash-looped before readiness because the published image lacked the Python `distro`
+dependency. The candidate was rejected and reverted; the qualified full SGLang image remains the
+default. This failed run is compatibility evidence, not a completed qualification or performance
+comparison.
