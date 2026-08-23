@@ -137,6 +137,8 @@ grep -Fq '(.reproduction_command | contains("${INFERCRANE_API_KEY}"))' "$root/sc
 grep -Fq 'Name=instance-state-name,Values=pending,running,stopping,shutting-down' "$root/scripts/portable-provider-acceptance.sh"
 grep -Fq 'Name=status,Values=creating,available,in-use,deleting,error' "$root/scripts/portable-provider-acceptance.sh"
 grep -Fq 's/^/volume:/' "$root/scripts/portable-provider-acceptance.sh"
+grep -Fq 'candidate_revision=$(git -C "$root" rev-parse --short=12 HEAD)' "$root/scripts/portable-provider-acceptance.sh"
+grep -Fq 'candidate_image=${INFERCRANE_V1_IMAGE:-infercrane:acceptance-$candidate_revision}' "$root/scripts/portable-provider-acceptance.sh"
 
 mkdir -p "$temporary/v1-report/stale/stages"
 for stage in runpod aws kubernetes; do

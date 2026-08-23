@@ -37,7 +37,11 @@ if [ -z "$port" ]; then
 fi
 base_url="http://127.0.0.1:$port"
 project=$(printf '%s' "infercrane-v1-$run_id-$cloud" | tr '[:upper:]._' '[:lower:]---' | cut -c1-63)
-candidate_image=${INFERCRANE_V1_IMAGE:-infercrane:v1.0.0-rc.1}
+candidate_revision=$(git -C "$root" rev-parse --short=12 HEAD)
+# A commit-bound qualification must execute a control-plane image built from
+# that commit. Reusing a mutable release-candidate tag can silently exercise an
+# older binary while the evidence names the current checkout.
+candidate_image=${INFERCRANE_V1_IMAGE:-infercrane:acceptance-$candidate_revision}
 name_suffix=$(printf '%s' "$run_id-$cloud" | cksum | awk '{print $1}')
 vllm_name="ic-v1-vllm-$name_suffix"
 sglang_name="ic-v1-sglang-$name_suffix"
