@@ -13,18 +13,19 @@ import (
 )
 
 type fakeAWSRunner struct {
-	instanceID         string
-	externalKey        string
-	state              string
-	failAfterCreate    bool
-	createCalls        int
-	deleteCalls        int
-	apiEnvironments    [][]string
-	runInstanceArgs    []string
-	roleFailurePayload string
-	instanceType       string
-	rootVolumeGiB      int
-	rootEncrypted      bool
+	instanceID           string
+	externalKey          string
+	state                string
+	failAfterCreate      bool
+	createCalls          int
+	deleteCalls          int
+	apiEnvironments      [][]string
+	runInstanceArgs      []string
+	roleFailurePayload   string
+	createFailurePayload string
+	instanceType         string
+	rootVolumeGiB        int
+	rootEncrypted        bool
 }
 
 func (f *fakeAWSRunner) Run(_ context.Context, environment []string, args ...string) ([]byte, error) {
@@ -56,6 +57,9 @@ func (f *fakeAWSRunner) Run(_ context.Context, environment []string, args ...str
 	case "run-instances":
 		f.createCalls++
 		f.runInstanceArgs = append([]string(nil), args...)
+		if f.createFailurePayload != "" {
+			return []byte(f.createFailurePayload), errors.New("AWS CLI failed")
+		}
 		f.instanceID, f.state = "i-fixture", "running"
 		f.externalKey = awsArgumentTagExternalKey(args)
 		f.rootVolumeGiB, f.rootEncrypted = awsArgumentRootVolume(args)
@@ -70,6 +74,30 @@ func (f *fakeAWSRunner) Run(_ context.Context, environment []string, args ...str
 		return []byte(`{"TerminatingInstances":[{"InstanceId":"i-fixture"}]}`), nil
 	default:
 		return nil, fmt.Errorf("unexpected EC2 command %q", args[1])
+	}
+}
+
+func TestAWSEC2NormalizesActionableFailuresWithoutRawProviderOutput(t *testing.T) {
+	tests := []struct {
+		name, payload, message string
+		kind                   error
+	}{
+		{"authorization", `UnauthorizedOperation: encoded authorization failure message SECRET`, "verify the assumed role", ErrProviderAuthorization},
+		{"quota", `VcpuLimitExceeded: account 123456789012 has a limit`, "compute quota is exhausted", ErrProviderQuota},
+		{"capacity", `InsufficientInstanceCapacity: g6e.xlarge unavailable`, "selected capacity boundary", ErrProviderCapacity},
+		{"configuration", `InvalidParameterValue: subnet-private is invalid`, "launch configuration", ErrInvalidReplicaSpec},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			runner := &fakeAWSRunner{createFailurePayload: test.payload}
+			_, err := testAWSEC2(runner).EnsureReplica(context.Background(), awsReplicaSpec())
+			if !errors.Is(err, test.kind) || !strings.Contains(err.Error(), test.message) {
+				t.Fatalf("error=%v kind=%v", err, test.kind)
+			}
+			if strings.Contains(err.Error(), "SECRET") || strings.Contains(err.Error(), "123456789012") || strings.Contains(err.Error(), "subnet-private") {
+				t.Fatalf("raw provider output escaped normalization: %v", err)
+			}
+		})
 	}
 }
 

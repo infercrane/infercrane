@@ -659,6 +659,32 @@ func TestEnsureCloudReplicaClassifiesFailedProviderRequest(t *testing.T) {
 	}
 }
 
+func TestEnsureCloudReplicaPreservesProviderAuthorizationQuotaAndCapacity(t *testing.T) {
+	tests := []struct {
+		name, code, outcome string
+		providerErr         error
+		retryable           bool
+	}{
+		{"authorization", "provider_authorization_failed", "provider_failed", provision.ErrProviderAuthorization, false},
+		{"quota", "provider_capacity_constrained", "capacity_unavailable", provision.ErrProviderQuota, true},
+		{"capacity", "provider_capacity_unavailable", "capacity_unavailable", provision.ErrProviderCapacity, true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			store := &capacityRecordingStore{fakeCloudStore: &fakeCloudStore{}}
+			provider := &fakeReplicaProvider{ensureErr: fmt.Errorf("provider: %w", test.providerErr)}
+			_, _, _, err := ensureCloudReplica(context.Background(), store, ReplicaBackend{Name: "aws-ec2", Cloud: "aws", Runtime: "vllm", Provider: provider}, fakeInspector{}, domain.Operation{ID: "operation-1"}, CloudRequest{TenantID: "global", DeploymentID: "deployment-1", RevisionID: "revision-1", Name: "qwen", Model: "Qwen/Qwen3-8B", Cloud: "aws", Region: "eu-central-1", GPU: "L40S", Runtime: "vllm", Port: 8000}, 0)
+			var failure operations.Failure
+			if !errors.As(err, &failure) || failure.Code != test.code || failure.Retryable != test.retryable {
+				t.Fatalf("failure=%+v err=%v", failure, err)
+			}
+			if len(store.operations) != 1 || store.operations[0].Outcome != test.outcome || store.operations[0].ErrorCode != test.code {
+				t.Fatalf("capacity evidence=%#v", store.operations)
+			}
+		})
+	}
+}
+
 func TestEnsureCloudReplicaDefersCreateWhenCapacityIsUnavailable(t *testing.T) {
 	store := &fakeCloudStore{}
 	provider := &fakeReplicaProvider{}

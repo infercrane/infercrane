@@ -22,8 +22,18 @@ bootstrap, or a general AWS abstraction.
 - an EC2 instance profile permitted to read exactly the worker API-key secret
 - an OCI runtime image pinned by `sha256` digest
 
-The assumed control-plane role needs the narrow EC2 describe, run, tag, and terminate permissions for
-InferCrane-owned instances. Restrict resources and tag conditions according to your AWS account policy.
+The assumed control-plane role needs a deliberately narrow permission set:
+
+- `ec2:DescribeInstances` and `ec2:DescribeVolumes` in the selected region;
+- `ec2:RunInstances` for the exact AMI, subnet, security group, network interface, volume, instance
+  type, and managed instance tag boundary;
+- `ec2:CreateTags` for both `instance/*` and `volume/*`, restricted to
+  `ec2:CreateAction=RunInstances` and `aws:RequestTag/infercrane:managed=true`;
+- `ec2:TerminateInstances` restricted to `ec2:ResourceTag/infercrane:managed=true`;
+- `iam:PassRole` for exactly the configured worker role and only to EC2.
+
+Volume tagging is required because a root volume can remain billable independently of its instance.
+Restrict account IDs, resources, regions, tags, and instance types according to your AWS policy.
 
 ## Control-plane configuration
 
@@ -66,13 +76,16 @@ Validate role assumption without creating a resource:
 infercrane doctor --aws
 ```
 
+This proves role assumption and caller identity. It intentionally does not call `RunInstances`, so
+resource-scoped `CreateTags`, quota, AMI/subnet, and capacity failures remain plan/deploy boundaries.
+
 ## Deploy
 
 <Warning>
 The `deploy` command below can create a billable EC2 instance. InferCrane currently reports AWS
-price as unknown, and the adapter has only hermetic contract evidence—not real AWS GPU
-qualification. Run `doctor` and `plan` first, obtain the required quota, and use a disposable test
-account or explicit cost approval before proceeding.
+price as unknown. The documented vLLM, SGLang, and portable custom-OCI L40S paths have narrow real
+qualification evidence, but that does not qualify another AMI, model, instance type, region, or
+network. Run `doctor` and `plan` first, obtain the required quota, and use explicit cost approval.
 </Warning>
 
 The requested region and GPU must exactly match the configured, qualified instance profile:
@@ -95,11 +108,11 @@ infercrane deploy Qwen/Qwen3-8B \
 Closing the terminal does not stop provisioning. Resume with the operation ID printed by `deploy`.
 Deletion terminates only instances carrying InferCrane ownership tags and the persisted replica key.
 
-For the simulated portable-runtime path, apply
+For the portable-runtime path, apply
 `examples/sglang.yaml` or
 replace the placeholder image in
 `examples/custom-oci.yaml` in the private-preview repository.
-Real GPU compatibility remains a deferred manual qualification gate.
+Every changed image/model/GPU combination remains its own real qualification gate.
 
 ## Security and accounting behavior
 
@@ -112,6 +125,8 @@ infer cost from an instance-type name.
 
 ## Qualification state
 
-Hermetic contract tests cover create-response loss, adoption, replay, deletion, tag-scoped inventory,
-private networking, immutable images, and credential redaction. Real AWS provisioning remains deferred
-until consolidated manual qualification; inspect `infercrane integrations` for the exact state.
+Hermetic contract tests cover create-response loss, adoption, replay, deletion, tag-scoped instance
+and volume inventory, private networking, immutable images, normalized provider failures, and
+credential redaction. The narrow real AWS evidence is recorded in
+[AWS real-infrastructure evidence](/testing/aws-real-evidence); inspect `infercrane integrations` for
+the current contract state.

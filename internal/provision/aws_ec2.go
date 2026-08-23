@@ -335,9 +335,32 @@ func (a AWSEC2) run(ctx context.Context, args ...string) ([]byte, error) {
 	environment := []string{"AWS_ACCESS_KEY_ID=" + credentials.Credentials.AccessKeyID, "AWS_SECRET_ACCESS_KEY=" + credentials.Credentials.SecretAccessKey, "AWS_SESSION_TOKEN=" + credentials.Credentials.SessionToken, "AWS_REGION=" + a.Region, "AWS_DEFAULT_REGION=" + a.Region}
 	output, err := runner.Run(ctx, environment, args...)
 	if err != nil {
-		return nil, errors.New("AWS API request failed")
+		return nil, normalizeAWSAPIError(output)
 	}
 	return output, nil
+}
+
+// normalizeAWSAPIError preserves actionable provider semantics without
+// persisting raw CLI output, account identifiers, resource ARNs, credentials,
+// or encoded authorization messages.
+func normalizeAWSAPIError(output []byte) error {
+	message := strings.ToLower(string(output))
+	switch {
+	case strings.Contains(message, "unauthorizedoperation"), strings.Contains(message, "accessdenied"), strings.Contains(message, "authfailure"):
+		return fmt.Errorf("%w: verify the assumed role and resource-scoped EC2 permissions", ErrProviderAuthorization)
+	case strings.Contains(message, "vcpulimitexceeded"), strings.Contains(message, "instancelimitexceeded"):
+		return fmt.Errorf("%w: EC2 compute quota is exhausted for the requested instance family", ErrProviderQuota)
+	case strings.Contains(message, "insufficientinstancecapacity"):
+		return fmt.Errorf("%w: the requested EC2 instance type is unavailable in the selected capacity boundary", ErrProviderCapacity)
+	case strings.Contains(message, "requestlimitexceeded"), strings.Contains(message, "throttl"):
+		return errors.New("AWS API request was rate limited")
+	case strings.Contains(message, "idempotentparametermismatch"):
+		return errors.New("AWS idempotency token conflicts with changed launch parameters")
+	case strings.Contains(message, "invalidparameter"), strings.Contains(message, "invalidamiid"):
+		return fmt.Errorf("%w: AWS rejected the EC2 launch configuration", ErrInvalidReplicaSpec)
+	default:
+		return errors.New("AWS API request failed")
+	}
 }
 
 func (a AWSEC2) clientToken(externalKey string) string {

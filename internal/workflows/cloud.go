@@ -1017,6 +1017,15 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 	}
 	ensured, err := provider.EnsureReplica(ctx, provision.ReplicaSpec{ExternalKey: externalKey, RequestID: replica.ProviderRequestID, Name: fmt.Sprintf("%s-r%d", request.Name, ordinal), Model: request.Model, ModelRevision: request.ImmutableModelRevision, Cloud: request.Cloud, GPU: request.GPU, Region: request.Region, RuntimeVersion: request.RuntimeVersion, RuntimeArgs: request.RuntimeArgs, Port: request.Port, Workload: request.Workload})
 	if err != nil {
+		if errors.Is(err, provision.ErrProviderAuthorization) {
+			return "", "", "", operations.Permanent("provider_authorization_failed", err)
+		}
+		if errors.Is(err, provision.ErrProviderQuota) {
+			return "", "", "", operations.Retryable("provider_capacity_constrained", err)
+		}
+		if errors.Is(err, provision.ErrProviderCapacity) {
+			return "", "", "", operations.Retryable("provider_capacity_unavailable", err)
+		}
 		if errors.Is(err, provision.ErrInvalidReplicaSpec) {
 			return "", "", "", operations.Permanent("provider_configuration_invalid", err)
 		}

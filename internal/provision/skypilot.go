@@ -20,6 +20,9 @@ import (
 var ErrUnavailable = errors.New("SkyPilot unavailable")
 var ErrRequestFailed = errors.New("SkyPilot launch request failed")
 var ErrInvalidReplicaSpec = errors.New("invalid provider replica specification")
+var ErrProviderAuthorization = errors.New("provider authorization denied")
+var ErrProviderQuota = errors.New("provider quota exceeded")
+var ErrProviderCapacity = errors.New("provider capacity unavailable")
 
 // The default image is pinned by digest so a revision always boots the tested
 // runtime bits. Using vLLM's provider-neutral image keeps provisioning portable
