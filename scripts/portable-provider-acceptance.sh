@@ -178,11 +178,11 @@ qualify_spec() {
   runtime=$3
   [ -r "$spec_dir/$spec" ] || { echo "required spec is missing: $spec_dir/$spec" >&2; return 1; }
   cli deploy "/qualification/$spec" --wait --wait-timeout "${INFERCRANE_V1_READY_TIMEOUT:-45m}" \
-    --idempotency-key "$run_id-$cloud-$runtime-deploy" --output json | jq -e '.operation.status == "succeeded"' >/dev/null
-  smoke_openai "$deployment" "$runtime"
-  cli benchmark "$deployment" --requests 5 --concurrency 1 --random-seed 17 --output json | jq -e '.id != null' >/dev/null
+    --idempotency-key "$run_id-$cloud-$runtime-deploy" --output json | jq -e '.operation.status == "succeeded"' >/dev/null || return
+  smoke_openai "$deployment" "$runtime" || return
+  cli benchmark "$deployment" --requests 5 --concurrency 1 --random-seed 17 --output json | jq -e '.id != null' >/dev/null || return
   cli delete "$deployment" --yes --wait --wait-timeout "${INFERCRANE_V1_DELETE_TIMEOUT:-15m}" \
-    --idempotency-key "$run_id-$cloud-$runtime-delete" --output json | jq -e '.operation.status == "succeeded"' >/dev/null
+    --idempotency-key "$run_id-$cloud-$runtime-delete" --output json | jq -e '.operation.status == "succeeded"' >/dev/null || return
 }
 
 cleanup() {

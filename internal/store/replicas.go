@@ -79,7 +79,8 @@ func (s *Store) ReplicasForDeployment(ctx context.Context, tenant, deploymentID 
 }
 
 func (s *Store) SetReplicaProviderIdentity(ctx context.Context, id, requestID, resourceID string) error {
-	result, err := s.ExecContext(ctx, `UPDATE replicas SET provider_request_id=COALESCE(?,provider_request_id),provider_resource_id=COALESCE(provider_resource_id,?),lifecycle_state=CASE WHEN lifecycle_state='pending' THEN 'provisioning' ELSE lifecycle_state END,updated_at=? WHERE id=? AND lifecycle_state!='deleted' AND (provider_resource_id IS NULL OR provider_resource_id=?)`, null(requestID), null(resourceID), now(), id, null(resourceID))
+	request, resource := null(requestID), null(resourceID)
+	result, err := s.ExecContext(ctx, `UPDATE replicas SET provider_request_id=COALESCE(?,provider_request_id),provider_resource_id=COALESCE(provider_resource_id,?),lifecycle_state=CASE WHEN lifecycle_state='pending' THEN 'provisioning' ELSE lifecycle_state END,updated_at=? WHERE id=? AND lifecycle_state!='deleted' AND (? IS NULL OR provider_resource_id IS NULL OR provider_resource_id=?)`, request, resource, now(), id, resource, resource)
 	if err != nil {
 		return err
 	}

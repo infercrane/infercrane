@@ -954,8 +954,14 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 		return "", "", "", classify("replica_intent_failed", err)
 	}
 	handle := provider.Handle(externalKey)
-	if err = store.SetReplicaProviderIdentity(ctx, replica.ID, "", handle.ResourceID); err != nil {
+	if err = store.SetReplicaProviderIdentity(ctx, replica.ID, handle.RequestID, handle.ResourceID); err != nil {
 		return "", "", "", classify("replica_identity_failed", err)
+	}
+	if handle.RequestID != "" {
+		replica.ProviderRequestID = handle.RequestID
+	}
+	if handle.ResourceID != "" {
+		replica.ProviderResourceID = handle.ResourceID
 	}
 	step := fmt.Sprintf("replica.%d", ordinal)
 	if err = checkpoint(ctx, store, operation, step+".intent", "succeeded", map[string]string{"replica_id": replica.ID, "external_key": externalKey, "resource_id": handle.ResourceID}, 15, "Replica identity persisted"); err != nil {

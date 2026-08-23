@@ -151,6 +151,17 @@ func TestConvergeCreatesExactlyOneResourcePerMinimumReplica(t *testing.T) {
 	}
 }
 
+func TestConvergeForwardsRequestIdentityWhenResourceIDIsAssignedAfterCreate(t *testing.T) {
+	store := &fakeCloudStore{deployment: domain.Deployment{ID: "deployment-1", Name: "qwen", Model: "Qwen/Qwen3-8B", RoutingStrategy: "round-robin", MinReplicas: 1, MaxReplicas: 1}}
+	provider := &fakeReplicaProvider{deferredID: true, observation: provision.Observation{Exists: true, State: "ready", Endpoint: "http://gpu:8000", Details: `{}`}}
+	operation := domain.Operation{ID: "operation-1", LeaseOwner: "worker", LeaseGeneration: 1, RequestJSON: `{"deployment_id":"deployment-1","name":"qwen","model":"Qwen/Qwen3-8B","cloud":"runpod","gpu":"L40S","tenant_id":"global","min_replicas":1,"max_replicas":1}`}
+
+	_, err := QualifiedV01CloudHandlers(store, provider, fakeInspector{ready: true})[ConvergeKind](context.Background(), operation)
+	if err != nil || provider.ensureCalls != 1 || provider.requestIDSeen != "request-before-create" || store.replica.ProviderResourceID != "resource-after-create" {
+		t.Fatalf("ensure_calls=%d request_id=%q replica=%#v err=%v", provider.ensureCalls, provider.requestIDSeen, store.replica, err)
+	}
+}
+
 func TestConvergeRejectsProviderWithoutMatchingRuntimeBackend(t *testing.T) {
 	store := &fakeCloudStore{deployment: domain.Deployment{ID: "deployment-1", Name: "qwen", Model: "Qwen/Qwen3-8B", MinReplicas: 1, MaxReplicas: 1}}
 	provider := &fakeReplicaProvider{}
@@ -456,6 +467,8 @@ type fakeReplicaProvider struct {
 	ensureCalls   int
 	deleteCalls   int
 	deleteLingers int
+	deferredID    bool
+	requestIDSeen string
 }
 
 func TestReplicaBackendsResolveByCloudRuntimeAndDurableName(t *testing.T) {
@@ -517,12 +530,19 @@ func TestReplicaBackendsRequireExplicitSelectionForAmbiguousRegistrations(t *tes
 }
 
 func (f *fakeReplicaProvider) Handle(key string) provision.ProviderHandle {
+	if f.deferredID {
+		return provision.ProviderHandle{ExternalKey: key, RequestID: "request-before-create"}
+	}
 	return provision.ProviderHandle{ExternalKey: key, ResourceID: "infercrane-" + key}
 }
 func (f *fakeReplicaProvider) EnsureReplica(_ context.Context, spec provision.ReplicaSpec) (provision.ProviderHandle, error) {
 	f.ensureCalls++
+	f.requestIDSeen = spec.RequestID
 	if f.ensureErr != nil {
 		return provision.ProviderHandle{}, f.ensureErr
+	}
+	if f.deferredID {
+		return provision.ProviderHandle{ExternalKey: spec.ExternalKey, ResourceID: "resource-after-create", RequestID: spec.RequestID}, nil
 	}
 	return provision.ProviderHandle{ExternalKey: spec.ExternalKey, ResourceID: "infercrane-" + spec.ExternalKey, RequestID: "request-1"}, nil
 }

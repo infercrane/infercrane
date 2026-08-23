@@ -125,6 +125,14 @@ grep -q 'portable provider acceptance requires --approve-paid-resources' "$tempo
 grep -Fq '(umask 077; openssl rand -hex 24 >"$password_file")' "$root/scripts/portable-provider-acceptance.sh"
 grep -Fq 'chmod 0644 "$spec_dir/$output_name"' "$root/scripts/portable-provider-acceptance.sh"
 
+# A function invoked as an `if` condition does not inherit POSIX errexit
+# semantics. Every paid lifecycle prerequisite must therefore return
+# explicitly, otherwise a failed deploy can run requests and benchmarks and a
+# successful cleanup can falsely mark the provider stage as passed.
+grep -Fq ".operation.status == \"succeeded\"' >/dev/null || return" "$root/scripts/portable-provider-acceptance.sh"
+grep -Fq 'smoke_openai "$deployment" "$runtime" || return' "$root/scripts/portable-provider-acceptance.sh"
+grep -Fq ".id != null' >/dev/null || return" "$root/scripts/portable-provider-acceptance.sh"
+
 mkdir -p "$temporary/v1-report/stale/stages"
 for stage in runpod aws kubernetes; do
   printf '%s\n' stale-commit >"$temporary/v1-report/stale/stages/$stage.passed"
