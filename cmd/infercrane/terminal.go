@@ -79,10 +79,10 @@ func operationPhase(operation domain.Operation) string {
 	}
 	message := strings.ToLower(operation.Message)
 	switch {
+	case strings.Contains(message, "runtime") || strings.Contains(message, "worker reachable") || strings.Contains(message, "provider endpoint is assigned") || strings.Contains(message, "restarting"):
+		return "STARTING RUNTIME"
 	case strings.Contains(message, "artifact") || strings.Contains(message, "model identity"):
 		return "PREPARING ARTIFACT"
-	case strings.Contains(message, "runtime") || strings.Contains(message, "worker reachable"):
-		return "STARTING RUNTIME"
 	case strings.Contains(message, "capacity") || strings.Contains(message, "allocat") || strings.Contains(message, "provider"):
 		return "WAITING FOR CAPACITY"
 	case strings.Contains(message, "replica identity"):

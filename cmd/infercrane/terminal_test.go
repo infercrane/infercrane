@@ -36,3 +36,14 @@ func TestProgressSuppressesGenericRetryLeaseButKeepsWaitingHeartbeat(t *testing.
 		t.Fatal("waiting heartbeat was suppressed")
 	}
 }
+
+func TestOperationPhaseDoesNotMislabelAmbiguousRuntimeStartupAsArtifactPreparation(t *testing.T) {
+	operation := domain.Operation{
+		Status:   "waiting",
+		Progress: 70,
+		Message:  "provider endpoint is assigned; vllm may be pulling artifacts, initializing, or restarting",
+	}
+	if got := operationPhase(operation); got != "STARTING RUNTIME" {
+		t.Fatalf("operation phase = %q, want STARTING RUNTIME", got)
+	}
+}
