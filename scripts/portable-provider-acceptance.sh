@@ -109,10 +109,17 @@ provider_inventory() {
     aws)
       compose exec -T infercrane sh -eu -c '
         set -- $(aws sts assume-role --role-arn "$INFERCRANE_AWS_ROLE_ARN" --role-session-name infercrane-v1-inventory --external-id "$INFERCRANE_AWS_EXTERNAL_ID" --query "Credentials.[AccessKeyId,SecretAccessKey,SessionToken]" --output text --no-cli-pager)
-        AWS_ACCESS_KEY_ID=$1 AWS_SECRET_ACCESS_KEY=$2 AWS_SESSION_TOKEN=$3 \
-          aws ec2 describe-instances --region "$INFERCRANE_AWS_REGION" \
-            --filters Name=tag:infercrane:managed,Values=true Name=instance-state-name,Values=pending,running,stopping \
-            --query "Reservations[].Instances[].InstanceId" --output text --no-cli-pager
+        AWS_ACCESS_KEY_ID=$1 AWS_SECRET_ACCESS_KEY=$2 AWS_SESSION_TOKEN=$3
+        export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+        aws ec2 describe-instances --region "$INFERCRANE_AWS_REGION" \
+          --filters Name=tag:infercrane:managed,Values=true Name=instance-state-name,Values=pending,running,stopping,shutting-down \
+          --query "Reservations[].Instances[].InstanceId" --output text --no-cli-pager |
+          tr "\t " "\n\n" | sed "/^$/d;s/^/instance:/"
+        aws ec2 describe-volumes --region "$INFERCRANE_AWS_REGION" \
+          --filters Name=tag:infercrane:managed,Values=true Name=status,Values=creating,available,in-use,deleting,error \
+          --query "Volumes[].VolumeId" --output text --no-cli-pager |
+          tr "\t " "\n\n" | sed "/^$/d;s/^/volume:/"
+        unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
       '
       ;;
     kubernetes)
@@ -176,11 +183,23 @@ qualify_spec() {
   spec=$1
   deployment=$2
   runtime=$3
+  benchmark_file="$state/$runtime-benchmark.json"
   [ -r "$spec_dir/$spec" ] || { echo "required spec is missing: $spec_dir/$spec" >&2; return 1; }
   cli deploy "/qualification/$spec" --wait --wait-timeout "${INFERCRANE_V1_READY_TIMEOUT:-45m}" \
     --idempotency-key "$run_id-$cloud-$runtime-deploy" --output json | jq -e '.operation.status == "succeeded"' >/dev/null || return
   smoke_openai "$deployment" "$runtime" || return
-  cli benchmark "$deployment" --requests 5 --concurrency 1 --random-seed 17 --output json | jq -e '.id != null' >/dev/null || return
+  cli benchmark "$deployment" --requests 5 --concurrency 1 --random-seed 17 --output json >"$benchmark_file" || return
+  chmod 0600 "$benchmark_file"
+  jq -e --arg runtime "$runtime" '
+    .id != null and
+    .runtime == $runtime and
+    .model_identity != "" and
+    .provider != "" and
+    .region != "" and
+    .request_count == 5 and
+    .failed == 0 and
+    (.reproduction_command | contains("${INFERCRANE_API_KEY}"))
+  ' "$benchmark_file" >/dev/null || return
   cli delete "$deployment" --yes --wait --wait-timeout "${INFERCRANE_V1_DELETE_TIMEOUT:-15m}" \
     --idempotency-key "$run_id-$cloud-$runtime-delete" --output json | jq -e '.operation.status == "succeeded"' >/dev/null || return
 }

@@ -201,7 +201,7 @@ never delete another deployment's resource:
     ```bash
     aws ec2 describe-instances --region "$INFERCRANE_AWS_REGION" \
       --filters Name=tag:infercrane:managed,Values=true \
-        Name=instance-state-name,Values=pending,running,stopping \
+        Name=instance-state-name,Values=pending,running,stopping,shutting-down \
       --query 'Reservations[].Instances[].{id:InstanceId,state:State.Name}' \
       --output json --no-cli-pager | jq -S 'sort_by(.id)'
     ```

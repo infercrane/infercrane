@@ -95,6 +95,26 @@ func awsArgumentTagExternalKey(args []string) string {
 	return ""
 }
 
+func awsArgumentTagResourceTypes(args []string) []string {
+	for i, arg := range args {
+		if arg != "--tag-specifications" || i+1 >= len(args) {
+			continue
+		}
+		var specifications []struct {
+			ResourceType string
+		}
+		if json.Unmarshal([]byte(args[i+1]), &specifications) != nil {
+			return nil
+		}
+		result := make([]string, 0, len(specifications))
+		for _, specification := range specifications {
+			result = append(result, specification.ResourceType)
+		}
+		return result
+	}
+	return nil
+}
+
 func awsArgumentRootVolume(args []string) (int, bool) {
 	for i, arg := range args {
 		if arg != "--block-device-mappings" || i+1 >= len(args) {
@@ -146,6 +166,10 @@ func TestAWSEC2LifecycleIsIdempotentPrivateAndTagged(t *testing.T) {
 	joined := strings.Join(runner.runInstanceArgs, " ")
 	if !strings.Contains(joined, `"AssociatePublicIpAddress":false`) || !strings.Contains(joined, "infercrane:external-key") || !strings.Contains(joined, "--client-token") || !strings.Contains(joined, "--count 1") || !strings.Contains(joined, `"VolumeSize":100`) || !strings.Contains(joined, `"VolumeType":"gp3"`) || !strings.Contains(joined, `"Encrypted":true`) || !strings.Contains(joined, `"DeleteOnTermination":true`) || strings.Contains(joined, "--min-count") || strings.Contains(joined, "--max-count") || strings.Contains(joined, "temporary-secret") {
 		t.Fatalf("unsafe or non-idempotent run-instances args: %s", joined)
+	}
+	resourceTypes := awsArgumentTagResourceTypes(runner.runInstanceArgs)
+	if len(resourceTypes) != 2 || resourceTypes[0] != "instance" || resourceTypes[1] != "volume" {
+		t.Fatalf("instance and billable root volume must share ownership tags: %#v", resourceTypes)
 	}
 	userData := awsUserData(runner.runInstanceArgs)
 	if !strings.Contains(userData, `-e VLLM_API_KEY="$worker_key"`) || !strings.Contains(userData, "'Qwen/Qwen3-8B' '--port' '8000'") || strings.Contains(userData, "--api-key") || strings.Contains(userData, "--model") {

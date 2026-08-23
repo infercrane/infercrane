@@ -97,7 +97,7 @@ region, and namespace as the deployment:
     ```bash
     aws ec2 describe-instances --region "$INFERCRANE_AWS_REGION" \
       --filters Name=tag:infercrane:managed,Values=true \
-        Name=instance-state-name,Values=pending,running,stopping \
+        Name=instance-state-name,Values=pending,running,stopping,shutting-down \
       --query 'Reservations[].Instances[].{id:InstanceId,state:State.Name,external_key:Tags[?Key==`infercrane:external-key`]|[0].Value}' \
       --output json --no-cli-pager | jq -S 'sort_by(.id)' \
       > "$evidence/provider-inventory.json"

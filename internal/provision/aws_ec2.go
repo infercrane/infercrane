@@ -125,7 +125,11 @@ func (a AWSEC2) EnsureReplica(ctx context.Context, spec ReplicaSpec) (ProviderHa
 	network := []map[string]any{{"DeviceIndex": 0, "SubnetId": a.SubnetID, "Groups": a.SecurityGroupIDs, "AssociatePublicIpAddress": false}}
 	networkJSON, _ := json.Marshal(network)
 	rootVolumeGiB := a.rootVolumeGiB()
-	tags := []map[string]any{{"ResourceType": "instance", "Tags": []map[string]string{{"Key": "infercrane:managed", "Value": "true"}, {"Key": "infercrane:external-key", "Value": spec.ExternalKey}, {"Key": "infercrane:root-volume-gib", "Value": fmt.Sprint(rootVolumeGiB)}, {"Key": "infercrane:root-volume-encrypted", "Value": "true"}, {"Key": "Name", "Value": "infercrane-" + spec.ExternalKey}}}}
+	resourceTags := []map[string]string{{"Key": "infercrane:managed", "Value": "true"}, {"Key": "infercrane:external-key", "Value": spec.ExternalKey}, {"Key": "infercrane:root-volume-gib", "Value": fmt.Sprint(rootVolumeGiB)}, {"Key": "infercrane:root-volume-encrypted", "Value": "true"}, {"Key": "Name", "Value": "infercrane-" + spec.ExternalKey}}
+	// Root volumes remain billable if provider-side termination fails to remove
+	// them. Give instances and volumes the same durable ownership identity so
+	// inventory and guarded cleanup can detect either resource independently.
+	tags := []map[string]any{{"ResourceType": "instance", "Tags": resourceTags}, {"ResourceType": "volume", "Tags": resourceTags}}
 	tagsJSON, _ := json.Marshal(tags)
 	blockDevices := []map[string]any{{"DeviceName": "/dev/xvda", "Ebs": map[string]any{"VolumeSize": rootVolumeGiB, "VolumeType": "gp3", "Encrypted": true, "DeleteOnTermination": true}}}
 	blockDevicesJSON, _ := json.Marshal(blockDevices)

@@ -131,7 +131,12 @@ grep -Fq 'chmod 0644 "$spec_dir/$output_name"' "$root/scripts/portable-provider-
 # successful cleanup can falsely mark the provider stage as passed.
 grep -Fq ".operation.status == \"succeeded\"' >/dev/null || return" "$root/scripts/portable-provider-acceptance.sh"
 grep -Fq 'smoke_openai "$deployment" "$runtime" || return' "$root/scripts/portable-provider-acceptance.sh"
-grep -Fq ".id != null' >/dev/null || return" "$root/scripts/portable-provider-acceptance.sh"
+grep -Fq 'benchmark_file="$state/$runtime-benchmark.json"' "$root/scripts/portable-provider-acceptance.sh"
+grep -Fq '.request_count == 5 and' "$root/scripts/portable-provider-acceptance.sh"
+grep -Fq '(.reproduction_command | contains("${INFERCRANE_API_KEY}"))' "$root/scripts/portable-provider-acceptance.sh"
+grep -Fq 'Name=instance-state-name,Values=pending,running,stopping,shutting-down' "$root/scripts/portable-provider-acceptance.sh"
+grep -Fq 'Name=status,Values=creating,available,in-use,deleting,error' "$root/scripts/portable-provider-acceptance.sh"
+grep -Fq 's/^/volume:/' "$root/scripts/portable-provider-acceptance.sh"
 
 mkdir -p "$temporary/v1-report/stale/stages"
 for stage in runpod aws kubernetes; do
