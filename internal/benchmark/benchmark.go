@@ -85,11 +85,15 @@ func run(ctx context.Context, cfg Config, commands commandRunner) (Result, error
 	if cfg.Streaming != nil {
 		streaming = *cfg.Streaming
 	}
-	streamingFlag := "--streaming"
-	if !streaming {
-		streamingFlag = "--no-streaming"
+	args := []string{"profile", "--model", cfg.Model, "--url", strings.TrimRight(cfg.Endpoint, "/"), "--endpoint-type", "chat"}
+	// AIPerf 0.9 exposes --streaming as an opt-in boolean flag. It does not
+	// expose a --no-streaming inverse; omitting --streaming is the buffered
+	// request mode. Keep this construction explicit so CLI compatibility is
+	// covered independently of the profile defaults.
+	if streaming {
+		args = append(args, "--streaming")
 	}
-	args := []string{"profile", "--model", cfg.Model, "--url", strings.TrimRight(cfg.Endpoint, "/"), "--endpoint-type", "chat", streamingFlag, "--use-server-token-count", "--request-count", strconv.Itoa(cfg.Requests), "--concurrency", strconv.Itoa(cfg.Concurrency), "--random-seed", strconv.FormatInt(cfg.RandomSeed, 10), "--prompt-input-tokens-mean", strconv.Itoa(cfg.InputTokens), "--prompt-input-tokens-stddev", "0", "--prompt-output-tokens-mean", strconv.Itoa(cfg.OutputTokens), "--prompt-output-tokens-stddev", "0", "--ui", "none", "--export-level", "records", "--output-artifact-dir", dir, "--profile-export-prefix", prefix, "--no-auto-plot", "--no-gpu-telemetry", "--no-server-metrics"}
+	args = append(args, "--use-server-token-count", "--request-count", strconv.Itoa(cfg.Requests), "--concurrency", strconv.Itoa(cfg.Concurrency), "--random-seed", strconv.FormatInt(cfg.RandomSeed, 10), "--prompt-input-tokens-mean", strconv.Itoa(cfg.InputTokens), "--prompt-input-tokens-stddev", "0", "--prompt-output-tokens-mean", strconv.Itoa(cfg.OutputTokens), "--prompt-output-tokens-stddev", "0", "--ui", "none", "--export-level", "records", "--output-artifact-dir", dir, "--profile-export-prefix", prefix, "--no-auto-plot", "--no-gpu-telemetry", "--no-server-metrics")
 	if cfg.Tokenizer != "" {
 		args = append(args, "--tokenizer", cfg.Tokenizer)
 	}

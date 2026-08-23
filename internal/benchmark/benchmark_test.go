@@ -108,20 +108,28 @@ func TestRunUsesIndependentServingModelAndTokenizer(t *testing.T) {
 
 func TestRunSelectsStreamingAndBufferedAIPerfModes(t *testing.T) {
 	for _, test := range []struct {
-		name string
-		mode *bool
-		want string
+		name          string
+		mode          *bool
+		wantStreaming bool
 	}{
-		{name: "default-streaming", want: "--streaming"},
-		{name: "streaming", mode: benchmarkBool(true), want: "--streaming"},
-		{name: "buffered", mode: benchmarkBool(false), want: "--no-streaming"},
+		{name: "default-streaming", wantStreaming: true},
+		{name: "streaming", mode: benchmarkBool(true), wantStreaming: true},
+		{name: "buffered", mode: benchmarkBool(false), wantStreaming: false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			runner := &capturingRunner{}
 			_, _ = run(context.Background(), Config{Endpoint: "http://example", Model: "m", Requests: 1, Concurrency: 1, Streaming: test.mode}, runner)
-			joined := strings.Join(runner.profileArgs, " ")
-			if !strings.Contains(joined, test.want) {
-				t.Fatalf("args=%v want=%s", runner.profileArgs, test.want)
+			hasStreaming := false
+			for _, arg := range runner.profileArgs {
+				if arg == "--streaming" {
+					hasStreaming = true
+				}
+				if arg == "--no-streaming" {
+					t.Fatalf("AIPerf 0.9 does not define --no-streaming: args=%v", runner.profileArgs)
+				}
+			}
+			if hasStreaming != test.wantStreaming {
+				t.Fatalf("args=%v hasStreaming=%t want=%t", runner.profileArgs, hasStreaming, test.wantStreaming)
 			}
 		})
 	}
