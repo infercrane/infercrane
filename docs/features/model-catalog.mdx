@@ -72,11 +72,45 @@ The current built-in catalog contains only **configuration-verified** entries. M
 tenant-scoped in benchmark history and immutable model recipes; InferCrane does not silently promote
 them into universal claims.
 
-## Current collections
+## Current market watch
 
-The catalog follows application tasks rather than a single popularity ranking. Selection considers
-current ecosystem adoption, an official upstream model card, license clarity, and compatibility with
-InferCrane's qualified runtime line.
+The public model story is intentionally broader than InferCrane's small regression fixtures. As of
+2026-08-23, three different signals point to the families teams are evaluating now:
+
+- [Artificial Analysis](https://artificialanalysis.ai/leaderboards/models) ranks Kimi K3, Qwen3.8
+  A95B, and DeepSeek V4 Pro among the leading open-weight models by its Intelligence Index;
+- [OpenRouter's usage ranking](https://openrouter.ai/rankings/) shows substantial current token
+  traffic for Kimi, DeepSeek, and MiniMax families;
+- official model cards and releases show active ecosystems around
+  [GLM-5.3](https://z.ai/blog/glm-5.3),
+  [gpt-oss](https://huggingface.co/collections/openai/gpt-oss),
+  [Gemma 4](https://huggingface.co/collections/google/gemma-4), and Meta Llama.
+
+| Market path | Current families to evaluate | InferCrane entry path |
+| --- | --- | --- |
+| Frontier open-weight reasoning | Kimi K3, Qwen3.8 A95B, DeepSeek V4 Pro | Connect a provider API or qualify an explicit multi-node artifact plan |
+| Coding and long-horizon agents | GLM-5.3, Kimi K3, Qwen3.8, DeepSeek V4 | Keep one endpoint; compare task, latency, and cost evidence before changing bindings |
+| High-volume API alternatives | Kimi, DeepSeek, MiniMax | Govern the external binding with budgets, request evidence, and fallback policy |
+| Deployable ecosystem anchors | gpt-oss, Gemma, Llama, Qwen compact variants | Start from an exact artifact, then qualify runtime, topology, and protocol |
+| Retrieval | BGE, Qwen Embedding, Jina embedding families | Qualify the embeddings protocol and workload-specific throughput |
+
+Popularity is a discovery signal, not a market-share percentage or compatibility proof. OpenRouter
+ranks token volume rather than users or spend, and model-hub downloads can include automation. The
+leaderboard date and exact model revision must remain visible whenever InferCrane publishes a
+comparison.
+
+Frontier families also expose the central reason InferCrane exists: Kimi K3, Qwen3.8 A95B, DeepSeek
+V4, and GLM-5.3 do not share one license, topology, runtime requirement, provider surface, or cost
+profile. The application can retain one stable model identity while each backend binding keeps its
+own qualification evidence.
+
+## Reviewed deployment collections
+
+The built-in catalog follows application tasks rather than chasing a weekly popularity ranking.
+Selection considers current ecosystem adoption, an official upstream model card, license clarity,
+and compatibility with InferCrane's qualified runtime line. Older compact models are useful here
+because they make frequent single-GPU lifecycle qualification affordable; they do not define the
+marketing story.
 
 | Collection | Reviewed starting points | Typical application |
 | --- | --- | --- |
@@ -98,9 +132,10 @@ used by [Replicate](https://replicate.com/collections) and
 copy their performance or availability claims.
 
 <Note>
-Popular models that require a newer, unqualified runtime are not presented as one-click templates.
-They remain available through the explicit-model path, and can enter the reviewed catalog after the
-runtime and protocol matrix is qualified.
+Popular models that require a newer runtime, a multi-node topology, unpublished weights, or custom
+license review are not presented as one-click templates. They remain available through an external
+binding or explicit-model path, and can enter the reviewed catalog after the exact runtime and
+protocol matrix is qualified.
 </Note>
 
 <Warning>

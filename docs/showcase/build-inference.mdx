@@ -46,41 +46,43 @@ portable input syntax; they do **not** claim that every model fits every GPU or 
 been production-qualified for it.
 
 <CodeGroup>
-```bash Qwen
-infercrane plan Qwen/Qwen3-8B --cloud runpod --gpu L40S
+```bash gpt-oss
+infercrane plan openai/gpt-oss-20b
 ```
 
-```bash Meta Llama
-infercrane plan meta-llama/Llama-4-Scout-17B-16E-Instruct \
-  --cloud aws \
-  --gpu H100
+```bash Google Gemma 4
+infercrane plan google/gemma-4-26B-A4B-it
 ```
 
-```bash Google Gemma
-infercrane plan google/gemma-3-4b-it \
-  --cloud runpod \
-  --gpu L40S
+```bash DeepSeek V4
+infercrane plan deepseek-ai/DeepSeek-V4-Pro-0813
 ```
 
-```bash Moonshot Kimi
-infercrane plan moonshotai/Kimi-K2-Instruct \
-  --cloud aws \
-  --gpu H100
+```bash Moonshot Kimi K3
+infercrane plan moonshotai/Kimi-K3
+```
+
+```bash Qwen3.8
+infercrane plan Qwen/Qwen3.8-2.4T-A95B
 ```
 </CodeGroup>
 
 `plan` validates InferCrane's serving intent without creating resources. Before `deploy`, confirm the
 model card license or access grant, total and active parameter memory, quantization, tensor-parallel
-topology, runtime version, multimodal requirements, and provider capacity. Large MoE models such as
-Llama 4 and Kimi generally require materially different topology from an 8B dense model; the example
-GPU flag alone is not a sizing recommendation.
+topology, runtime version, multimodal requirements, and provider capacity. Frontier MoE models such
+as Kimi K3, Qwen3.8 A95B, and DeepSeek V4 require materially different topology from a compact dense
+model. Omitting a GPU flag is deliberate: use Inference Lab or an explicit qualified serving plan
+rather than presenting one accelerator as a sizing recommendation.
 
 | Example family | Why teams use it | Qualification concern |
 | --- | --- | --- |
-| Qwen | Compact general and coding deployments | Exact chat template, tool calling, and quantization |
+| Kimi | Frontier long-context, reasoning, coding, and multimodal work | Custom license, very large MoE topology, and version-specific runtime support |
+| DeepSeek | High-adoption reasoning, agents, and cost-sensitive API workloads | Exact Pro/Flash artifact, serving framework, and multi-node plan |
+| Qwen | Frontier and compact variants across agents, coding, vision, and chat | Exact chat template, license, tool calling, quantization, and topology |
+| GLM | Coding and long-horizon agent workloads | Artifact availability, security policy, and exact runtime qualification |
+| gpt-oss | Widely adopted open-weight reasoning and agent workloads | 20B/120B GPU fit, reasoning protocol, and runtime version |
+| Google Gemma | Efficient multimodal open-weight family | Model terms, multimodal runtime support, and artifact access |
 | Meta Llama | Broad ecosystem and open-weight deployment | Meta license/access and multi-GPU topology for larger variants |
-| Google Gemma | Small-to-large open-weight family | Google terms, multimodal/runtime support, and artifact access |
-| Moonshot Kimi | Long-context, reasoning, coding, and multimodal variants | Very large MoE topology and version-specific runtime requirements |
 | Your fine-tune | Private or domain-specific behavior | Immutable artifact commit, tokenizer compatibility, and registry access |
 
 <Note>
