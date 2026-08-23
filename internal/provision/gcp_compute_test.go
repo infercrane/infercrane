@@ -181,6 +181,9 @@ func TestGCPComputeStartupUsesWorkloadIdentityWithoutWorkerGcloud(t *testing.T) 
 	if strings.Contains(script, "gcloud secrets") {
 		t.Fatalf("worker startup unexpectedly depends on gcloud: %s", script)
 	}
+	if !strings.Contains(script, "'Qwen/Qwen3-8B' '--port' '8000'") || strings.Contains(script, "--model") {
+		t.Fatalf("vLLM startup does not use the current positional model CLI: %s", script)
+	}
 	command := exec.Command("sh", "-n")
 	command.Stdin = strings.NewReader(script)
 	if output, err := command.CombinedOutput(); err != nil {

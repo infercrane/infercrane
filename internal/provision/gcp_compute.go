@@ -224,7 +224,9 @@ func (g GCPCompute) intentDigest(spec ReplicaSpec) string {
 }
 func (g GCPCompute) startup(spec ReplicaSpec, port int) string {
 	image := g.ContainerImage
-	args := []string{"--model", spec.Model, "--port", fmt.Sprint(port)}
+	// The vLLM OpenAI image entrypoint is `vllm serve`; the model is positional
+	// in current releases.
+	args := []string{spec.Model, "--port", fmt.Sprint(port)}
 	if !spec.Workload.Empty() {
 		image = spec.Workload.Image
 		args = append(append([]string(nil), spec.Workload.Command...), spec.RuntimeArgs...)

@@ -36,7 +36,7 @@ func TestKubernetesProviderAppliesValidatesAdoptsAndDeletesOwnerSet(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(manifest), `"name":"VLLM_API_KEY"`) || strings.Contains(string(manifest), `"--api-key"`) {
+	if !strings.Contains(string(manifest), `"name":"VLLM_API_KEY"`) || !strings.Contains(string(manifest), `"args":["serve","Qwen/Qwen3-8B"`) || strings.Contains(string(manifest), `"--api-key"`) || strings.Contains(string(manifest), `"--model"`) {
 		t.Fatalf("vLLM credential must be sourced from Secret-backed environment and absent from argv: %s", manifest)
 	}
 	observation, err := provider.ObserveReplica(context.Background(), second, 8000)

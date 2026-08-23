@@ -366,7 +366,10 @@ func (a AWSEC2) userData(spec ReplicaSpec, port int) string {
 		image := spec.Workload.Image
 		return "#!/bin/sh\nset -eu\nworker_key=$(aws secretsmanager get-secret-value --region " + shellQuote(a.Region) + " --secret-id " + shellQuote(a.WorkerSecretARN) + " --query SecretString --output text)\ndocker pull " + shellQuote(image) + "\ncontainer_id=$(docker run -d --restart=unless-stopped --gpus all -e INFERCRANE_WORKER_API_KEY=\"$worker_key\" -e VLLM_API_KEY=\"$worker_key\" -p " + fmt.Sprintf("%d:%d", port, port) + " " + shellQuote(image) + " " + strings.Join(quoted, " ") + ")\ndocker logs --follow \"$container_id\" >/dev/console 2>&1 &\n"
 	}
-	args := []string{"--model", spec.Model, "--port", fmt.Sprint(port)}
+	// The vLLM OpenAI image entrypoint is `vllm serve`. Since v0.22 the model
+	// is a positional argument; keep generated startup compatible with the
+	// current CLI instead of relying on its deprecated --model alias.
+	args := []string{spec.Model, "--port", fmt.Sprint(port)}
 	if spec.ModelRevision != "" {
 		args = append(args, "--revision", spec.ModelRevision)
 	}

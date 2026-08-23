@@ -281,7 +281,7 @@ func (k Kubernetes) manifest(spec ReplicaSpec) ([]byte, error) {
 	if port == 0 {
 		port = 8000
 	}
-	image, command, readinessPath, shutdown := k.ImageDigest, []string{"serve", "--model", spec.Model, "--host", "0.0.0.0", "--port", fmt.Sprint(port)}, "/health", 30
+	image, command, readinessPath, shutdown := k.ImageDigest, []string{"serve", spec.Model, "--host", "0.0.0.0", "--port", fmt.Sprint(port)}, "/health", 30
 	if spec.ModelRevision != "" {
 		command = append(command, "--revision", spec.ModelRevision)
 	}

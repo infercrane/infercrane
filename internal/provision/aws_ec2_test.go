@@ -147,7 +147,7 @@ func TestAWSEC2LifecycleIsIdempotentPrivateAndTagged(t *testing.T) {
 		t.Fatalf("unsafe or non-idempotent run-instances args: %s", joined)
 	}
 	userData := awsUserData(runner.runInstanceArgs)
-	if !strings.Contains(userData, `-e VLLM_API_KEY="$worker_key"`) || strings.Contains(userData, "--api-key") {
+	if !strings.Contains(userData, `-e VLLM_API_KEY="$worker_key"`) || !strings.Contains(userData, "'Qwen/Qwen3-8B' '--port' '8000'") || strings.Contains(userData, "--api-key") || strings.Contains(userData, "--model") {
 		t.Fatalf("vLLM credential must be injected through a non-argv environment variable:\n%s", userData)
 	}
 	if err := provider.DeleteReplica(context.Background(), second); err != nil {
