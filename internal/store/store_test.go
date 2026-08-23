@@ -1134,7 +1134,7 @@ func TestCandidateSGLangWorkloadIsCanonicalAndImmutable(t *testing.T) {
 		t.Fatalf("decode candidate spec: %v", err)
 	}
 	if persisted.RuntimeVersion != support.SGLangRuntimeVersion ||
-		!strings.HasPrefix(persisted.Workload.Image, "lmsysorg/sglang:v0.5.12@sha256:") ||
+		!strings.HasPrefix(persisted.Workload.Image, "lmsysorg/sglang:v0.5.12-runtime@sha256:") ||
 		persisted.Workload.ReadinessPath != "/health" {
 		t.Fatalf("candidate spec was not canonicalized: %#v", persisted)
 	}

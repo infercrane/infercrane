@@ -6,7 +6,7 @@ description: The second Runtime Contract V1 engine profile.
 # SGLang
 
 SGLang is InferCrane's second registered inference engine. The runtime profile pins the official
-`lmsysorg/sglang:v0.5.12` multi-platform manifest by digest and launches its OpenAI-compatible
+`lmsysorg/sglang:v0.5.12-runtime` multi-platform manifest by digest and launches its OpenAI-compatible
 server through the same provider-neutral workload contract used by custom OCI images.
 
 The image tag and launch form follow the [official SGLang release and Docker
@@ -35,11 +35,13 @@ routing:
   strategy: round-robin
 ```
 
-The built-in profile declares the immutable image and argv, so normal users do not repeat them.
-It is simulated-qualified for readiness/model identity, buffered and streaming OpenAI transport,
-client cancellation, connection draining, the metrics endpoint and immutable launch intent.
+The built-in profile declares the immutable image and argv, so normal users do not repeat them. The
+runtime image is 1,096,688,885 compressed bytes (8.44%) smaller than the corresponding full 0.5.12
+image in the measured Linux/amd64 manifest. InferCrane still requires the same real runtime
+qualification; size alone is not compatibility evidence.
 
-Real SGLang GPU behavior—including model compatibility, tool calling, structured output,
-performance and provider shutdown behavior—remains deferred until consolidated manual
-qualification. Autoscaling is rejected for SGLang because normalized SGLang scaling
-signals are not yet qualified.
+The full 0.5.12 image passed AWS L40S model identity, buffered and streaming OpenAI transport,
+AIPerf and shutdown. The smaller runtime image is a release candidate until it passes that same
+real boundary. Tool calling, structured output, broader model compatibility, and other providers
+remain separate qualification surfaces. Autoscaling is rejected for SGLang because normalized
+SGLang scaling signals are not yet qualified.

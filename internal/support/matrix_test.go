@@ -7,7 +7,11 @@ import (
 )
 
 func TestSGLangWorkloadPinsResolvedModelRevision(t *testing.T) {
-	command := SGLangWorkload().Command
+	workload := SGLangWorkload()
+	if workload.Image != "lmsysorg/sglang:v0.5.12-runtime@sha256:98223b99a77330dc4bc04cbfc8341e55d874ab911a57d2f508da5a7ef5fb8475" {
+		t.Fatalf("SGLang workload must pin the measured runtime-only image: %s", workload.Image)
+	}
+	command := workload.Command
 	for _, pair := range [][2]string{{"--model-path", "${MODEL}"}, {"--revision", "${MODEL_REVISION}"}} {
 		index := slices.Index(command, pair[0])
 		if index < 0 || index+1 >= len(command) || command[index+1] != pair[1] {
