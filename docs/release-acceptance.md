@@ -84,7 +84,7 @@ model:
   revision: REPLACE_WITH_IMMUTABLE_COMMIT
 runtime:
   engine: vllm
-  version: 0.8.5.post1
+  version: 0.22.0
 provider:
   cloud: aws
   region: eu-central-1

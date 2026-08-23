@@ -17,6 +17,7 @@ func TestWorkloadValidation(t *testing.T) {
 		func(w *Workload) { w.ReadinessPath = "health" },
 		func(w *Workload) { w.ReadinessPath = "/readyz" },
 		func(w *Workload) { w.ShutdownGraceSeconds = 0 },
+		func(w *Workload) { w.Command = append(w.Command, "--api-key", "${WORKER_API_KEY}") },
 	}
 	for i, mutate := range cases {
 		w := validWorkload()

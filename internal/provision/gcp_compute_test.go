@@ -113,6 +113,9 @@ func TestGCPComputeLifecycleIsPrivateIdempotentAndAdoptable(t *testing.T) {
 			t.Fatalf("create missing %q: %s", required, joined)
 		}
 	}
+	if !strings.Contains(joined, `-e VLLM_API_KEY="$worker_key"`) || strings.Contains(joined, "--api-key") {
+		t.Fatalf("vLLM credential must be injected through a non-argv environment variable: %s", joined)
+	}
 	observed, err := provider.ObserveReplica(context.Background(), adopted, 8000)
 	if err != nil || observed.State != "ready" || observed.Endpoint != "http://10.20.0.8:8000" {
 		t.Fatalf("observation=%#v err=%v", observed, err)

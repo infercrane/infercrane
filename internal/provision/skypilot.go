@@ -25,7 +25,7 @@ var ErrInvalidReplicaSpec = errors.New("invalid provider replica specification")
 // runtime bits. Using vLLM's provider-neutral image keeps provisioning portable
 // across every SkyPilot cloud and avoids installing the CUDA dependency stack
 // on each new GPU replica.
-const defaultVLLMImage = "vllm/vllm-openai@sha256:c48cf118e1e6e39d7790e174d6014f7af5d06f79c2d29d984d11cbe2e8d414e7"
+const defaultVLLMImage = "vllm/vllm-openai@sha256:0fec7ec5f3e6bc168e54899935fb0557da908a4832a1dbc88e2debcf2f889416"
 
 // The RunPod variant adds only the SSH bootstrap contract required by
 // SkyPilot. Pin it independently so a release never depends on a mutable GHCR
@@ -301,7 +301,7 @@ func runCommand(model, revision string, port int, runtimeArgs []string) string {
 	// Some RunPod base images still export the retired hf_transfer feature flag
 	// without installing that package. Disable it so huggingface_hub uses its
 	// supported hf_xet/HTTP transfer path instead of failing before model load.
-	return fmt.Sprintf(`unset HF_HUB_ENABLE_HF_TRANSFER; vllm serve %s --host 0.0.0.0 --port %d --served-model-name %s --api-key "$INFERCRANE_WORKER_API_KEY" %s`, shellQuote(model), port, shellQuote(model), strings.Join(args, " "))
+	return fmt.Sprintf(`unset HF_HUB_ENABLE_HF_TRANSFER; VLLM_API_KEY="$INFERCRANE_WORKER_API_KEY" exec vllm serve %s --host 0.0.0.0 --port %d --served-model-name %s %s`, shellQuote(model), port, shellQuote(model), strings.Join(args, " "))
 }
 func workloadCommand(command []string, model, revision string, port int, runtimeArgs []string) string {
 	values := append(append([]string(nil), command...), runtimeArgs...)

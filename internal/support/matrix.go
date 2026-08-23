@@ -14,7 +14,7 @@ import (
 const SGLangRuntimeVersion = "0.5.12"
 
 func SGLangWorkload() runtimecontract.Workload {
-	return runtimecontract.Workload{Image: "lmsysorg/sglang:v0.5.12@sha256:42194170546745092e74cd5f81ad32a7c6e944c7111fe7bf13588152277ff356", Command: []string{"python3", "-m", "sglang.launch_server", "--model-path", "${MODEL}", "--host", "0.0.0.0", "--port", "${PORT}", "--api-key", "${WORKER_API_KEY}"}, Protocol: "openai", Port: 8000, ReadinessPath: "/health", ModelsPath: "/v1/models", MetricsPath: "/metrics", Cancellation: "http-disconnect", Drain: "connection", ShutdownGraceSeconds: 30}
+	return runtimecontract.Workload{Image: "lmsysorg/sglang:v0.5.12@sha256:42194170546745092e74cd5f81ad32a7c6e944c7111fe7bf13588152277ff356", Command: []string{"python3", "-m", "sglang.launch_server", "--model-path", "${MODEL}", "--host", "0.0.0.0", "--port", "${PORT}"}, Protocol: "openai", Port: 8000, ReadinessPath: "/health", ModelsPath: "/v1/models", MetricsPath: "/metrics", Cancellation: "http-disconnect", Drain: "connection", ShutdownGraceSeconds: 30}
 }
 
 func NormalizeWorkload(runtime string, workload runtimecontract.Workload) runtimecontract.Workload {
@@ -29,7 +29,7 @@ const (
 	// DefaultRuntimeVersion is the default vLLM runtime qualified by the public
 	// support matrix. Persist it in every revision so benchmarks and
 	// explanations never depend on an implicit image default.
-	DefaultRuntimeVersion = "0.8.5.post1"
+	DefaultRuntimeVersion = "0.22.0"
 	DefaultCloud          = "runpod"
 	DefaultGPU            = "L40S"
 	ElasticMode           = "elastic"

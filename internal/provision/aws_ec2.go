@@ -364,22 +364,18 @@ func (a AWSEC2) userData(spec ReplicaSpec, port int) string {
 			}
 		}
 		image := spec.Workload.Image
-		return "#!/bin/sh\nset -eu\nworker_key=$(aws secretsmanager get-secret-value --region " + shellQuote(a.Region) + " --secret-id " + shellQuote(a.WorkerSecretARN) + " --query SecretString --output text)\ndocker pull " + shellQuote(image) + "\ncontainer_id=$(docker run -d --restart=unless-stopped --gpus all -e INFERCRANE_WORKER_API_KEY=\"$worker_key\" -p " + fmt.Sprintf("%d:%d", port, port) + " " + shellQuote(image) + " " + strings.Join(quoted, " ") + ")\ndocker logs --follow \"$container_id\" >/dev/console 2>&1 &\n"
+		return "#!/bin/sh\nset -eu\nworker_key=$(aws secretsmanager get-secret-value --region " + shellQuote(a.Region) + " --secret-id " + shellQuote(a.WorkerSecretARN) + " --query SecretString --output text)\ndocker pull " + shellQuote(image) + "\ncontainer_id=$(docker run -d --restart=unless-stopped --gpus all -e INFERCRANE_WORKER_API_KEY=\"$worker_key\" -e VLLM_API_KEY=\"$worker_key\" -p " + fmt.Sprintf("%d:%d", port, port) + " " + shellQuote(image) + " " + strings.Join(quoted, " ") + ")\ndocker logs --follow \"$container_id\" >/dev/console 2>&1 &\n"
 	}
-	args := []string{"--model", spec.Model, "--port", fmt.Sprint(port), "--api-key", "$worker_key"}
+	args := []string{"--model", spec.Model, "--port", fmt.Sprint(port)}
 	if spec.ModelRevision != "" {
 		args = append(args, "--revision", spec.ModelRevision)
 	}
 	args = append(args, spec.RuntimeArgs...)
 	quoted := make([]string, len(args))
 	for i, arg := range args {
-		if arg == "$worker_key" {
-			quoted[i] = `"$worker_key"`
-		} else {
-			quoted[i] = shellQuote(arg)
-		}
+		quoted[i] = shellQuote(arg)
 	}
-	return "#!/bin/sh\nset -eu\nworker_key=$(aws secretsmanager get-secret-value --region " + shellQuote(a.Region) + " --secret-id " + shellQuote(a.WorkerSecretARN) + " --query SecretString --output text)\ndocker pull " + shellQuote(a.ImageDigest) + "\ncontainer_id=$(docker run -d --restart=unless-stopped --gpus all -p " + fmt.Sprintf("%d:%d", port, port) + " " + shellQuote(a.ImageDigest) + " " + strings.Join(quoted, " ") + ")\ndocker logs --follow \"$container_id\" >/dev/console 2>&1 &\n"
+	return "#!/bin/sh\nset -eu\nworker_key=$(aws secretsmanager get-secret-value --region " + shellQuote(a.Region) + " --secret-id " + shellQuote(a.WorkerSecretARN) + " --query SecretString --output text)\ndocker pull " + shellQuote(a.ImageDigest) + "\ncontainer_id=$(docker run -d --restart=unless-stopped --gpus all -e VLLM_API_KEY=\"$worker_key\" -p " + fmt.Sprintf("%d:%d", port, port) + " " + shellQuote(a.ImageDigest) + " " + strings.Join(quoted, " ") + ")\ndocker logs --follow \"$container_id\" >/dev/console 2>&1 &\n"
 }
 
 func normalizeAWSState(state string) string {

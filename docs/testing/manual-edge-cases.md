@@ -137,11 +137,11 @@ Local fixtures prove InferCrane logic only. This document will contain the exact
 - Expected behavior: the stream remains pinned, receives no mixed-generation chunks, is never replayed, and capacity deletion starts only after release; a client cancellation is recorded once.
 - Evidence: timestamped SSE transcript, route/generation snapshots, active/retiring counters, provider resource timeline, cancellation telemetry, and cleanup inventory.
 
-## vLLM — oversized-header advisory and runtime upgrade
+## vLLM — security advisories and runtime upgrade
 
-- Source: [GHSA-rxc4-3w6r-4v47 / CVE-2025-48956](https://github.com/vllm-project/vllm/security/advisories/GHSA-rxc4-3w6r-4v47).
-- Why local simulation is insufficient: InferCrane currently qualifies vLLM 0.8.5.post1. The advisory is fixed in 0.10.1.1, but proving a replacement requires a real GPU, the pinned production image, model load, protocols, metrics, cancellation, and drain behavior. Do not send a memory-exhaustion payload to any shared or external worker.
-- Safe procedure: build and pin a patched vLLM image by digest; deploy one isolated, non-production replica with provider firewall rules allowing only the InferCrane data plane; verify readiness, model identity, buffered/streaming/tool/structured requests, cancellation, metrics, and deletion. Confirm the public InferCrane gateway returns 431 for an over-limit header using a bounded payload. Verify the provider worker is not directly reachable from an untrusted network.
+- Sources: [GHSA-rxc4-3w6r-4v47 / CVE-2025-48956](https://github.com/vllm-project/vllm/security/advisories/GHSA-rxc4-3w6r-4v47) and [GHSA-94f4-hr76-p5j6](https://github.com/vllm-project/vllm/security/advisories/GHSA-94f4-hr76-p5j6).
+- Why local simulation is insufficient: the candidate now pins vLLM 0.22.0, outside both affected ranges, but proving the replacement requires a real GPU, immutable image bytes, model load, protocols, metrics, cancellation, and drain behavior. Do not send an exploit or memory-exhaustion payload to any worker.
+- Safe procedure: deploy the pinned 0.22.0 image by digest to one isolated, non-production replica with provider firewall rules allowing only the InferCrane data plane; verify the version without printing credentials, readiness, model identity, buffered/streaming/tool/structured requests, cancellation, metrics, and deletion. Confirm the public InferCrane gateway returns 431 for a bounded over-limit header. Verify the provider worker is not directly reachable from an untrusted network and startup logs contain no credential value.
 - Risk/cost: one GPU replica and image/model transfer; no destructive or exploit-sized request is permitted.
 - Expected behavior: only the gateway is public, headers are bounded, runtime compatibility gates pass, and cleanup reaches zero owned resources.
 - Evidence: immutable image digest, vLLM version, network policy/security-group evidence, gateway response, protocol transcripts, operation events, and final provider inventory.

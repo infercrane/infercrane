@@ -191,7 +191,7 @@ func TestPortableRuntimeConformance(t *testing.T) {
 
 func TestAWSEC2ProviderContractConformance(t *testing.T) {
 	runner := &providerfixture.AWSCLI{}
-	provider := provision.AWSEC2{Runner: runner, RoleARN: "arn:aws:iam::123456789012:role/infercrane", Region: "eu-central-1", SubnetID: "subnet-private", SecurityGroupIDs: []string{"sg-worker"}, AMIID: "ami-gpu", InstanceType: "g6e.xlarge", GPU: "L40S", InstanceProfileARN: "arn:aws:iam::123456789012:instance-profile/worker", WorkerSecretARN: "arn:aws:secretsmanager:eu-central-1:123456789012:secret:worker", ImageDigest: "vllm/vllm-openai@sha256:c48cf118e1e6e39d7790e174d6014f7af5d06f79c2d29d984d11cbe2e8d414e7"}
+	provider := provision.AWSEC2{Runner: runner, RoleARN: "arn:aws:iam::123456789012:role/infercrane", Region: "eu-central-1", SubnetID: "subnet-private", SecurityGroupIDs: []string{"sg-worker"}, AMIID: "ami-gpu", InstanceType: "g6e.xlarge", GPU: "L40S", InstanceProfileARN: "arn:aws:iam::123456789012:instance-profile/worker", WorkerSecretARN: "arn:aws:secretsmanager:eu-central-1:123456789012:secret:worker", ImageDigest: "vllm/vllm-openai@sha256:0fec7ec5f3e6bc168e54899935fb0557da908a4832a1dbc88e2debcf2f889416"}
 	profile := integration.ProviderProfile{Adapter: "aws-ec2", Cloud: "aws", ContractVersion: integration.ProviderContractV1, AdapterVersion: "test", Modes: []integration.ComputeMode{integration.ElasticMode}, Qualification: []integration.Qualification{{State: integration.QualificationSimulated, Environment: "hermetic-aws-cli"}}}
 	spec := provision.ReplicaSpec{ExternalKey: "deployment-r0", Model: "Qwen/Qwen3-8B", ModelRevision: "immutable", Cloud: "aws", GPU: "L40S", Region: "eu-central-1", Port: 8000}
 	report := ElasticLifecycle(context.Background(), profile, provider, spec, 8000)
@@ -202,7 +202,7 @@ func TestAWSEC2ProviderContractConformance(t *testing.T) {
 
 func TestAWSEC2LostCreateResponseConformance(t *testing.T) {
 	runner := &providerfixture.AWSCLI{FailAfterCreateOnce: true}
-	provider := provision.AWSEC2{Runner: runner, RoleARN: "arn:aws:iam::123456789012:role/infercrane", Region: "eu-central-1", SubnetID: "subnet-private", SecurityGroupIDs: []string{"sg-worker"}, AMIID: "ami-gpu", InstanceType: "g6e.xlarge", GPU: "L40S", InstanceProfileARN: "arn:aws:iam::123456789012:instance-profile/worker", WorkerSecretARN: "arn:aws:secretsmanager:eu-central-1:123456789012:secret:worker", ImageDigest: "vllm/vllm-openai@sha256:c48cf118e1e6e39d7790e174d6014f7af5d06f79c2d29d984d11cbe2e8d414e7"}
+	provider := provision.AWSEC2{Runner: runner, RoleARN: "arn:aws:iam::123456789012:role/infercrane", Region: "eu-central-1", SubnetID: "subnet-private", SecurityGroupIDs: []string{"sg-worker"}, AMIID: "ami-gpu", InstanceType: "g6e.xlarge", GPU: "L40S", InstanceProfileARN: "arn:aws:iam::123456789012:instance-profile/worker", WorkerSecretARN: "arn:aws:secretsmanager:eu-central-1:123456789012:secret:worker", ImageDigest: "vllm/vllm-openai@sha256:0fec7ec5f3e6bc168e54899935fb0557da908a4832a1dbc88e2debcf2f889416"}
 	profile := integration.ProviderProfile{Adapter: "aws-ec2", Cloud: "aws", ContractVersion: integration.ProviderContractV1, AdapterVersion: "test", Modes: []integration.ComputeMode{integration.ElasticMode}, Qualification: []integration.Qualification{{State: integration.QualificationSimulated, Environment: "hermetic-aws-cli"}}}
 	spec := provision.ReplicaSpec{ExternalKey: "deployment-r0", Model: "Qwen/Qwen3-8B", ModelRevision: "immutable", Cloud: "aws", GPU: "L40S", Region: "eu-central-1", Port: 8000}
 	report := LostEnsureResponse(context.Background(), profile, provider, spec, 8000)
@@ -213,7 +213,7 @@ func TestAWSEC2LostCreateResponseConformance(t *testing.T) {
 
 func TestKubernetesProviderContractConformance(t *testing.T) {
 	runner := providerfixture.NewKubernetesCLI()
-	provider := provision.Kubernetes{Runner: runner, Context: "kind-infercrane", Namespace: "infercrane-system", WorkloadAPI: "deployment", ServiceAccount: "infercrane-runtime", WorkerSecretName: "infercrane-worker", WorkerSecretKey: "api-key", ImageDigest: "vllm/vllm-openai@sha256:c48cf118e1e6e39d7790e174d6014f7af5d06f79c2d29d984d11cbe2e8d414e7", GPUResource: "nvidia.com/gpu", GPUProductLabel: "nvidia.com/gpu.product"}
+	provider := provision.Kubernetes{Runner: runner, Context: "kind-infercrane", Namespace: "infercrane-system", WorkloadAPI: "deployment", ServiceAccount: "infercrane-runtime", WorkerSecretName: "infercrane-worker", WorkerSecretKey: "api-key", ImageDigest: "vllm/vllm-openai@sha256:0fec7ec5f3e6bc168e54899935fb0557da908a4832a1dbc88e2debcf2f889416", GPUResource: "nvidia.com/gpu", GPUProductLabel: "nvidia.com/gpu.product"}
 	profile := integration.ProviderProfile{Adapter: "kubernetes", Cloud: "kubernetes", ContractVersion: integration.ProviderContractV1, AdapterVersion: "test", Modes: []integration.ComputeMode{integration.ElasticMode}, Qualification: []integration.Qualification{{State: integration.QualificationSimulated, Environment: "hermetic-kubectl"}}}
 	spec := provision.ReplicaSpec{ExternalKey: "deployment-r0", Model: "Qwen/Qwen3-8B", ModelRevision: "immutable", Cloud: "kubernetes", GPU: "NVIDIA-L40S", Port: 8000}
 	report := ElasticLifecycle(context.Background(), profile, provider, spec, 8000)
@@ -225,7 +225,7 @@ func TestKubernetesProviderContractConformance(t *testing.T) {
 func TestKubernetesLostCreateResponseConformance(t *testing.T) {
 	runner := providerfixture.NewKubernetesCLI()
 	runner.FailAfterApplyOnce = true
-	provider := provision.Kubernetes{Runner: runner, Context: "kind-infercrane", Namespace: "infercrane-system", WorkloadAPI: "deployment", ServiceAccount: "infercrane-runtime", WorkerSecretName: "infercrane-worker", WorkerSecretKey: "api-key", ImageDigest: "vllm/vllm-openai@sha256:c48cf118e1e6e39d7790e174d6014f7af5d06f79c2d29d984d11cbe2e8d414e7", GPUResource: "nvidia.com/gpu", GPUProductLabel: "nvidia.com/gpu.product"}
+	provider := provision.Kubernetes{Runner: runner, Context: "kind-infercrane", Namespace: "infercrane-system", WorkloadAPI: "deployment", ServiceAccount: "infercrane-runtime", WorkerSecretName: "infercrane-worker", WorkerSecretKey: "api-key", ImageDigest: "vllm/vllm-openai@sha256:0fec7ec5f3e6bc168e54899935fb0557da908a4832a1dbc88e2debcf2f889416", GPUResource: "nvidia.com/gpu", GPUProductLabel: "nvidia.com/gpu.product"}
 	profile := integration.ProviderProfile{Adapter: "kubernetes", Cloud: "kubernetes", ContractVersion: integration.ProviderContractV1, AdapterVersion: "test", Modes: []integration.ComputeMode{integration.ElasticMode}, Qualification: []integration.Qualification{{State: integration.QualificationSimulated, Environment: "hermetic-kubectl"}}}
 	spec := provision.ReplicaSpec{ExternalKey: "deployment-r0", Model: "Qwen/Qwen3-8B", ModelRevision: "immutable", Cloud: "kubernetes", GPU: "NVIDIA-L40S", Port: 8000}
 	report := LostEnsureResponse(context.Background(), profile, provider, spec, 8000)

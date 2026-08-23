@@ -49,6 +49,9 @@ func (w Workload) Validate() error {
 		if strings.ContainsRune(arg, '\x00') {
 			return errors.New("workload.command cannot contain NUL bytes")
 		}
+		if strings.Contains(arg, "${WORKER_API_KEY}") {
+			return errors.New("workload.command cannot place worker credentials in process arguments; read INFERCRANE_WORKER_API_KEY from the environment")
+		}
 	}
 	if w.Protocol != OpenAIProtocol {
 		return fmt.Errorf("workload.protocol %q is unsupported; supported protocol: openai", w.Protocol)

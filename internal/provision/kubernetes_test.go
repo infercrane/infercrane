@@ -10,7 +10,7 @@ import (
 	"github.com/infercrane/infercrane/internal/testtools/providerfixture"
 )
 
-const testKubernetesImage = "vllm/vllm-openai@sha256:c48cf118e1e6e39d7790e174d6014f7af5d06f79c2d29d984d11cbe2e8d414e7"
+const testKubernetesImage = "vllm/vllm-openai@sha256:0fec7ec5f3e6bc168e54899935fb0557da908a4832a1dbc88e2debcf2f889416"
 
 func testKubernetesProvider(runner provision.CommandRunner, api string) provision.Kubernetes {
 	return provision.Kubernetes{Runner: runner, Context: "kind-infercrane", Namespace: "infercrane-system", WorkloadAPI: api, ServiceAccount: "infercrane-runtime", WorkerSecretName: "infercrane-worker", WorkerSecretKey: "api-key", ImageDigest: testKubernetesImage, GPUResource: "nvidia.com/gpu", GPUProductLabel: "nvidia.com/gpu.product"}
@@ -31,6 +31,13 @@ func TestKubernetesProviderAppliesValidatesAdoptsAndDeletesOwnerSet(t *testing.T
 	second, err := provider.EnsureReplica(context.Background(), spec)
 	if err != nil || first != second || fixture.ApplyCalls != 2 || len(fixture.Objects) != 2 {
 		t.Fatalf("replay handle=%#v apply=%d err=%v", second, fixture.ApplyCalls, err)
+	}
+	manifest, err := json.Marshal(fixture.Objects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(manifest), `"name":"VLLM_API_KEY"`) || strings.Contains(string(manifest), `"--api-key"`) {
+		t.Fatalf("vLLM credential must be sourced from Secret-backed environment and absent from argv: %s", manifest)
 	}
 	observation, err := provider.ObserveReplica(context.Background(), second, 8000)
 	if err != nil || !observation.Exists || observation.State != "ready" || !strings.Contains(observation.Endpoint, ".infercrane-system.svc:8000") || !strings.Contains(observation.Details, `"kind":"Deployment"`) {

@@ -224,7 +224,7 @@ func (g GCPCompute) intentDigest(spec ReplicaSpec) string {
 }
 func (g GCPCompute) startup(spec ReplicaSpec, port int) string {
 	image := g.ContainerImage
-	args := []string{"--model", spec.Model, "--port", fmt.Sprint(port), "--api-key", "${WORKER_API_KEY}"}
+	args := []string{"--model", spec.Model, "--port", fmt.Sprint(port)}
 	if !spec.Workload.Empty() {
 		image = spec.Workload.Image
 		args = append(append([]string(nil), spec.Workload.Command...), spec.RuntimeArgs...)
@@ -255,7 +255,7 @@ func (g GCPCompute) startup(spec ReplicaSpec, port int) string {
 		"[ -n \"$secret_data\" ] || { echo 'worker secret payload unavailable' >&2; exit 1; }\n" +
 		"worker_key=$(printf '%s' \"$secret_data\" | base64 -d)\n" +
 		"unset token_json access_token secret_json secret_data\n" +
-		"docker pull " + shellQuote(image) + "\ndocker run -d --restart=unless-stopped --gpus all -e INFERCRANE_WORKER_API_KEY=\"$worker_key\" -p " + fmt.Sprintf("%d:%d", port, port) + " " + shellQuote(image) + " " + strings.Join(quoted, " ") + "\n"
+		"docker pull " + shellQuote(image) + "\ndocker run -d --restart=unless-stopped --gpus all -e INFERCRANE_WORKER_API_KEY=\"$worker_key\" -e VLLM_API_KEY=\"$worker_key\" -p " + fmt.Sprintf("%d:%d", port, port) + " " + shellQuote(image) + " " + strings.Join(quoted, " ") + "\n"
 }
 func metadataValue(instance gcpInstance, key string) string {
 	for _, item := range instance.Metadata.Items {

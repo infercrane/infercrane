@@ -162,6 +162,9 @@ func TestRunCommandPinsImmutableModelRevision(t *testing.T) {
 	if !strings.Contains(command, "--revision '0123456789abcdef0123456789abcdef01234567'") {
 		t.Fatalf("command does not pin revision: %s", command)
 	}
+	if !strings.Contains(command, `VLLM_API_KEY="$INFERCRANE_WORKER_API_KEY"`) || strings.Contains(command, "--api-key") {
+		t.Fatalf("vLLM credential must not be exposed in argv: %s", command)
+	}
 }
 
 func TestEnsureRelaunchesMissingOrFailedRequest(t *testing.T) {

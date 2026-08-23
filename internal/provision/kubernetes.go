@@ -281,7 +281,7 @@ func (k Kubernetes) manifest(spec ReplicaSpec) ([]byte, error) {
 	if port == 0 {
 		port = 8000
 	}
-	image, command, readinessPath, shutdown := k.ImageDigest, []string{"serve", "--model", spec.Model, "--host", "0.0.0.0", "--port", fmt.Sprint(port), "--api-key", "$(INFERCRANE_WORKER_API_KEY)"}, "/health", 30
+	image, command, readinessPath, shutdown := k.ImageDigest, []string{"serve", "--model", spec.Model, "--host", "0.0.0.0", "--port", fmt.Sprint(port)}, "/health", 30
 	if spec.ModelRevision != "" {
 		command = append(command, "--revision", spec.ModelRevision)
 	}
@@ -295,7 +295,8 @@ func (k Kubernetes) manifest(spec ReplicaSpec) ([]byte, error) {
 		return nil, err
 	}
 	metadata := map[string]any{"name": name, "namespace": k.Namespace, "labels": labels, "annotations": map[string]any{"infercrane.dev/external-key": spec.ExternalKey, "infercrane.dev/provider-contract": "infercrane.provider/v1", "infercrane.dev/intent-hash": intentHash}}
-	container := map[string]any{"name": "runtime", "image": image, "imagePullPolicy": "IfNotPresent", "args": command, "ports": []any{map[string]any{"name": "http", "containerPort": port}}, "env": []any{map[string]any{"name": "INFERCRANE_WORKER_API_KEY", "valueFrom": map[string]any{"secretKeyRef": map[string]any{"name": k.WorkerSecretName, "key": k.WorkerSecretKey}}}}, "readinessProbe": map[string]any{"httpGet": map[string]any{"path": readinessPath, "port": "http"}, "periodSeconds": 5, "timeoutSeconds": 2, "failureThreshold": 12}, "resources": map[string]any{"limits": map[string]any{k.GPUResource: "1"}, "requests": map[string]any{k.GPUResource: "1"}}, "securityContext": map[string]any{"allowPrivilegeEscalation": false}}
+	workerSecret := map[string]any{"secretKeyRef": map[string]any{"name": k.WorkerSecretName, "key": k.WorkerSecretKey}}
+	container := map[string]any{"name": "runtime", "image": image, "imagePullPolicy": "IfNotPresent", "args": command, "ports": []any{map[string]any{"name": "http", "containerPort": port}}, "env": []any{map[string]any{"name": "INFERCRANE_WORKER_API_KEY", "valueFrom": workerSecret}, map[string]any{"name": "VLLM_API_KEY", "valueFrom": workerSecret}}, "readinessProbe": map[string]any{"httpGet": map[string]any{"path": readinessPath, "port": "http"}, "periodSeconds": 5, "timeoutSeconds": 2, "failureThreshold": 12}, "resources": map[string]any{"limits": map[string]any{k.GPUResource: "1"}, "requests": map[string]any{k.GPUResource: "1"}}, "securityContext": map[string]any{"allowPrivilegeEscalation": false}}
 	podSpec := map[string]any{"serviceAccountName": k.ServiceAccount, "terminationGracePeriodSeconds": shutdown, "containers": []any{container}, "nodeSelector": map[string]any{k.GPUProductLabel: spec.GPU}}
 	if k.WorkloadAPI == "kserve" {
 		metadata["annotations"].(map[string]any)["serving.kserve.io/deploymentMode"] = "Standard"

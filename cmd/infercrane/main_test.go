@@ -16,6 +16,7 @@ import (
 
 	"github.com/infercrane/infercrane/internal/config"
 	"github.com/infercrane/infercrane/internal/passport"
+	"github.com/infercrane/infercrane/internal/support"
 )
 
 func captureStdout(t *testing.T, run func() error) (string, error) {
@@ -678,7 +679,7 @@ func TestPrimaryDeployPathDefaultsToRunPodL40S(t *testing.T) {
 	defer server.Close()
 
 	err := deployAPICommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, "deploy", []string{"Qwen/Qwen3-8B", "--idempotency-key", "release-1"})
-	if err != nil || body["cloud"] != "runpod" || body["gpu"] != "L40S" || body["runtime_version"] != "0.8.5.post1" {
+	if err != nil || body["cloud"] != "runpod" || body["gpu"] != "L40S" || body["runtime_version"] != support.DefaultRuntimeVersion {
 		t.Fatalf("body=%#v err=%v", body, err)
 	}
 }

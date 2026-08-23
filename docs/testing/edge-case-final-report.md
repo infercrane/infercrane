@@ -3,13 +3,13 @@
 ## Executive Summary
 
 - Failure patterns researched: 16 production failure classes, covering distributed operations, PostgreSQL transactions, reconciliation, autoscaling, routing/streaming, releases, serverless, provider APIs, security, admission, Kubernetes, AWS, RunPod, runtimes, resource exhaustion, and upgrades.
-- Hypotheses investigated: 51 ledgered high-value hypotheses.
-- New tests added: 34 named regression, stress, and fuzz checks, plus a broad public module journey and an immutable runtime-publication contract.
-- Bugs reproduced: 33 locally reproducible defects.
-- Bugs fixed: 33, each retained in the regression suite.
+- Hypotheses investigated: 53 ledgered high-value hypotheses.
+- New tests added: 36 named regression, stress, and fuzz checks, plus a broad public module journey and an immutable runtime-publication contract.
+- Bugs reproduced: 34 locally reproducible defects plus one defect reproduced only on real AWS.
+- Bugs fixed: 35, each retained in the regression suite or pending exact real-runtime requalification where stated.
 - Critical bugs remaining: 0 known locally reproducible defects.
 - High bugs remaining: 0 known locally reproducible defects.
-- Real-infrastructure edge cases remaining: provider, GPU-runtime, network, multi-host, and long-duration behavior listed in [manual edge cases](/testing/manual-edge-cases). One directly applicable security qualification remains open: replacing or isolating the pinned vLLM 0.8.5.post1 runtime because of GHSA-rxc4-3w6r-4v47.
+- Real-infrastructure edge cases remaining: provider, GPU-runtime, network, multi-host, and long-duration behavior listed in [manual edge cases](/testing/manual-edge-cases). The vLLM 0.22.0 security upgrade remains unqualified until the exact pinned image passes the real GPU gate.
 
 These results prove the tested InferCrane logic against local, PostgreSQL, Docker, Kind, deterministic provider-fixture, race, stress, and fuzz conditions. They do not prove external-provider semantics or production readiness.
 

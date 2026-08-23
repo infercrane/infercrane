@@ -119,7 +119,7 @@ func testAWSEC2(runner CommandRunner) AWSEC2 {
 		SubnetID: "subnet-private", SecurityGroupIDs: []string{"sg-inference"}, AMIID: "ami-gpu",
 		InstanceType: "g6e.xlarge", GPU: "L40S", InstanceProfileARN: "arn:aws:iam::123456789012:instance-profile/infercrane-worker",
 		WorkerSecretARN: "arn:aws:secretsmanager:eu-central-1:123456789012:secret:worker-key",
-		ImageDigest:     "vllm/vllm-openai@sha256:c48cf118e1e6e39d7790e174d6014f7af5d06f79c2d29d984d11cbe2e8d414e7",
+		ImageDigest:     "vllm/vllm-openai@sha256:0fec7ec5f3e6bc168e54899935fb0557da908a4832a1dbc88e2debcf2f889416",
 	}
 }
 
@@ -146,6 +146,10 @@ func TestAWSEC2LifecycleIsIdempotentPrivateAndTagged(t *testing.T) {
 	if !strings.Contains(joined, `"AssociatePublicIpAddress":false`) || !strings.Contains(joined, "infercrane:external-key") || !strings.Contains(joined, "--client-token") || !strings.Contains(joined, "--count 1") || !strings.Contains(joined, `"VolumeSize":100`) || !strings.Contains(joined, `"VolumeType":"gp3"`) || !strings.Contains(joined, `"Encrypted":true`) || !strings.Contains(joined, `"DeleteOnTermination":true`) || strings.Contains(joined, "--min-count") || strings.Contains(joined, "--max-count") || strings.Contains(joined, "temporary-secret") {
 		t.Fatalf("unsafe or non-idempotent run-instances args: %s", joined)
 	}
+	userData := awsUserData(runner.runInstanceArgs)
+	if !strings.Contains(userData, `-e VLLM_API_KEY="$worker_key"`) || strings.Contains(userData, "--api-key") {
+		t.Fatalf("vLLM credential must be injected through a non-argv environment variable:\n%s", userData)
+	}
 	if err := provider.DeleteReplica(context.Background(), second); err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +161,7 @@ func TestAWSEC2LifecycleIsIdempotentPrivateAndTagged(t *testing.T) {
 func TestAWSEC2PortableWorkloadUsesDigestArgvAndSecretEnvironment(t *testing.T) {
 	runner := &fakeAWSRunner{}
 	spec := awsReplicaSpec()
-	spec.Workload = runtimecontract.Workload{Image: "registry.example/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Command: []string{"serve", "--model", "${MODEL}", "--label", "two words", "--api-key", "${WORKER_API_KEY}", "--port", "${PORT}"}, Protocol: "openai", Port: 9000, ReadinessPath: "/health", ModelsPath: "/v1/models", MetricsPath: "/metrics", Cancellation: "http-disconnect", Drain: "connection", ShutdownGraceSeconds: 30}
+	spec.Workload = runtimecontract.Workload{Image: "registry.example/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Command: []string{"serve", "--model", "${MODEL}", "--label", "two words", "--port", "${PORT}"}, Protocol: "openai", Port: 9000, ReadinessPath: "/health", ModelsPath: "/v1/models", MetricsPath: "/metrics", Cancellation: "http-disconnect", Drain: "connection", ShutdownGraceSeconds: 30}
 	if _, err := testAWSEC2(runner).EnsureReplica(context.Background(), spec); err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +171,7 @@ func TestAWSEC2PortableWorkloadUsesDigestArgvAndSecretEnvironment(t *testing.T) 
 			userData = runner.runInstanceArgs[i+1]
 		}
 	}
-	for _, want := range []string{"docker pull '" + spec.Workload.Image + "'", `-e INFERCRANE_WORKER_API_KEY="$worker_key"`, "'serve' '--model' 'Qwen/Qwen3-8B' '--label' 'two words' '--api-key' \"$worker_key\" '--port' '9000'", `docker logs --follow "$container_id" >/dev/console 2>&1 &`} {
+	for _, want := range []string{"docker pull '" + spec.Workload.Image + "'", `-e INFERCRANE_WORKER_API_KEY="$worker_key"`, "'serve' '--model' 'Qwen/Qwen3-8B' '--label' 'two words' '--port' '9000'", `docker logs --follow "$container_id" >/dev/console 2>&1 &`} {
 		if !strings.Contains(userData, want) {
 			t.Fatalf("user data missing %q:\n%s", want, userData)
 		}
@@ -175,6 +179,15 @@ func TestAWSEC2PortableWorkloadUsesDigestArgvAndSecretEnvironment(t *testing.T) 
 	if strings.Contains(userData, "temporary-secret") {
 		t.Fatal("temporary AWS credentials leaked into user data")
 	}
+}
+
+func awsUserData(args []string) string {
+	for i, arg := range args {
+		if arg == "--user-data" && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return ""
 }
 
 func TestAWSEC2AdoptsAfterLostCreateResponse(t *testing.T) {
