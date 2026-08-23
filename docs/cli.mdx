@@ -588,11 +588,13 @@ Compare persisted measured configurations without provisioning new capacity:
 
 ```bash
 infercrane lab 'mistralai/Mistral-7B-Instruct-v0.3@IMMUTABLE_COMMIT' \
-  --objective throughput \
-  --profile throughput
+  --objective interactive \
+  --profile interactive \
+  --max-ttft-p95-ms 200ms \
+  --max-hourly-cost 3
 ```
 
-The objective can be `latency`, `throughput`, or `cost-efficiency`. InferCrane recommends only across
+The objective can be `interactive`, `latency`, `throughput`, or `cost-efficiency`. InferCrane recommends only across
 an exact common workload digest; mixed shapes remain `UNRANKED`. See
 [Recipes and Inference Lab](/features/recipes-lab) for the provenance and missing-evidence contract.
 

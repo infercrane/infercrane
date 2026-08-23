@@ -2928,6 +2928,13 @@ func (a API) evaluateLab(w http.ResponseWriter, r *http.Request) {
 		Objective       string   `json:"objective,omitempty"`
 		WorkloadProfile string   `json:"workload_profile,omitempty"`
 		MaxTTFTP95MS    *float64 `json:"max_ttft_p95_ms,omitempty"`
+		MaxTPOTP95MS    *float64 `json:"max_tpot_p95_ms,omitempty"`
+		MaxErrorRate    *float64 `json:"max_error_rate,omitempty"`
+		MinGoodput      *float64 `json:"min_goodput,omitempty"`
+		MinOutputTPS    *float64 `json:"min_output_tokens_second,omitempty"`
+		MaxHourlyCost   *float64 `json:"max_hourly_cost,omitempty"`
+		Region          string   `json:"region,omitempty"`
+		MaxGPUCount     *int     `json:"max_gpu_count,omitempty"`
 		WorkloadDigest  string   `json:"workload_digest,omitempty"`
 	}
 	if !decodeMutationBody(w, r, &request) {
@@ -2936,14 +2943,17 @@ func (a API) evaluateLab(w http.ResponseWriter, r *http.Request) {
 	if request.Objective == "" {
 		request.Objective = lab.ObjectiveLatency
 	}
-	validObjective := request.Objective == lab.ObjectiveLatency || request.Objective == lab.ObjectiveThroughput || request.Objective == lab.ObjectiveCostEfficiency
+	validObjective := request.Objective == lab.ObjectiveLatency || request.Objective == lab.ObjectiveInteractive || request.Objective == lab.ObjectiveThroughput || request.Objective == lab.ObjectiveCostEfficiency
 	validProfile := true
 	if request.WorkloadProfile != "" {
 		_, profileErr := performanceprofile.Get(request.WorkloadProfile)
 		validProfile = profileErr == nil
 	}
-	if strings.TrimSpace(request.ModelIdentity) == "" || !validObjective || !validProfile || request.MaxTTFTP95MS != nil && (math.IsNaN(*request.MaxTTFTP95MS) || math.IsInf(*request.MaxTTFTP95MS, 0) || *request.MaxTTFTP95MS < 0 || *request.MaxTTFTP95MS > 86400000) || request.WorkloadDigest != "" && (len(request.WorkloadDigest) != 64 || strings.Trim(request.WorkloadDigest, "0123456789abcdef") != "") {
-		writeError(w, 422, "invalid_lab_input", "model identity, latency|throughput|cost-efficiency objective, optional workload profile, finite nonnegative SLO, and optional SHA-256 workload digest are required")
+	validNonnegative := func(value *float64, maximum float64) bool {
+		return value == nil || !math.IsNaN(*value) && !math.IsInf(*value, 0) && *value >= 0 && *value <= maximum
+	}
+	if strings.TrimSpace(request.ModelIdentity) == "" || !validObjective || !validProfile || !validNonnegative(request.MaxTTFTP95MS, 86400000) || !validNonnegative(request.MaxTPOTP95MS, 86400000) || !validNonnegative(request.MaxErrorRate, 1) || !validNonnegative(request.MinGoodput, math.MaxFloat64) || !validNonnegative(request.MinOutputTPS, math.MaxFloat64) || !validNonnegative(request.MaxHourlyCost, math.MaxFloat64) || request.MaxGPUCount != nil && (*request.MaxGPUCount < 1 || *request.MaxGPUCount > 1024) || len(request.Region) > 128 || request.WorkloadDigest != "" && (len(request.WorkloadDigest) != 64 || strings.Trim(request.WorkloadDigest, "0123456789abcdef") != "") {
+		writeError(w, 422, "invalid_lab_input", "model identity, a supported objective, bounded measured constraints, optional workload profile, and optional SHA-256 workload digest are required")
 		return
 	}
 	principal := r.Context().Value(identityKey{}).(domain.Principal)
@@ -2952,7 +2962,7 @@ func (a API) evaluateLab(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "internal", "lab evidence lookup failed")
 		return
 	}
-	value, err := lab.Evaluate(lab.Input{ModelIdentity: request.ModelIdentity, Objective: request.Objective, WorkloadProfile: request.WorkloadProfile, MaxTTFTP95MS: request.MaxTTFTP95MS, WorkloadDigest: request.WorkloadDigest}, evidence)
+	value, err := lab.Evaluate(lab.Input{ModelIdentity: request.ModelIdentity, Objective: request.Objective, WorkloadProfile: request.WorkloadProfile, MaxTTFTP95MS: request.MaxTTFTP95MS, MaxTPOTP95MS: request.MaxTPOTP95MS, MaxErrorRate: request.MaxErrorRate, MinGoodput: request.MinGoodput, MinOutputTPS: request.MinOutputTPS, MaxHourlyCost: request.MaxHourlyCost, Region: request.Region, MaxGPUCount: request.MaxGPUCount, WorkloadDigest: request.WorkloadDigest}, evidence)
 	if err != nil {
 		writeError(w, 500, "internal", "lab evidence could not be canonicalized")
 		return

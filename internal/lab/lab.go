@@ -11,10 +11,11 @@ import (
 	"github.com/infercrane/infercrane/internal/domain"
 )
 
-const AlgorithmVersion = "inference-lab-v2"
+const AlgorithmVersion = "inference-lab-v3"
 
 const (
 	ObjectiveLatency        = "latency"
+	ObjectiveInteractive    = "interactive"
 	ObjectiveThroughput     = "throughput"
 	ObjectiveCostEfficiency = "cost-efficiency"
 )
@@ -24,6 +25,13 @@ type Input struct {
 	Objective       string   `json:"objective"`
 	WorkloadProfile string   `json:"workload_profile,omitempty"`
 	MaxTTFTP95MS    *float64 `json:"max_ttft_p95_ms,omitempty"`
+	MaxTPOTP95MS    *float64 `json:"max_tpot_p95_ms,omitempty"`
+	MaxErrorRate    *float64 `json:"max_error_rate,omitempty"`
+	MinGoodput      *float64 `json:"min_goodput,omitempty"`
+	MinOutputTPS    *float64 `json:"min_output_tokens_second,omitempty"`
+	MaxHourlyCost   *float64 `json:"max_hourly_cost,omitempty"`
+	Region          string   `json:"region,omitempty"`
+	MaxGPUCount     *int     `json:"max_gpu_count,omitempty"`
 	WorkloadDigest  string   `json:"workload_digest,omitempty"`
 }
 
@@ -39,10 +47,14 @@ type Candidate struct {
 	GPU                string          `json:"gpu"`
 	GPUCount           *int            `json:"gpu_count,omitempty"`
 	ComputeMode        string          `json:"compute_mode"`
+	RequestCount       int             `json:"request_count"`
 	TTFTP95MS          *float64        `json:"ttft_p95_ms,omitempty"`
+	TPOTP95MS          *float64        `json:"tpot_p95_ms,omitempty"`
 	OutputTokensSecond *float64        `json:"output_tokens_second,omitempty"`
+	Goodput            *float64        `json:"goodput,omitempty"`
 	ErrorRate          float64         `json:"error_rate"`
 	MeetsSLO           *bool           `json:"meets_slo,omitempty"`
+	ConstraintReasons  []string        `json:"constraint_reasons,omitempty"`
 	Cost               json.RawMessage `json:"cost_metadata"`
 	WorkloadDigest     string          `json:"workload_digest"`
 	WorkloadProfile    string          `json:"workload_profile,omitempty"`
@@ -72,16 +84,12 @@ func Evaluate(input Input, evidence []domain.BenchmarkResult) (domain.LabEvaluat
 		if row.RequestCount > 0 {
 			errorRate = float64(row.Failed) / float64(row.RequestCount)
 		}
-		var meets *bool
-		if input.MaxTTFTP95MS != nil && row.TTFTP95MS != nil {
-			value := *row.TTFTP95MS <= *input.MaxTTFTP95MS
-			meets = &value
-		}
 		cost := json.RawMessage(row.CostMetadataJSON)
 		if !json.Valid(cost) {
 			cost = json.RawMessage(`{"available":false}`)
 		}
-		candidate := Candidate{EvidenceClass: "measured", EvidenceID: row.ID, Deployment: row.DeploymentName, Revision: row.RevisionID, Runtime: row.Runtime, RuntimeVersion: row.RuntimeVersion, Provider: row.Provider, Region: row.Region, GPU: row.GPU, GPUCount: row.GPUCount, ComputeMode: row.ComputeMode, TTFTP95MS: row.TTFTP95MS, OutputTokensSecond: row.OutputTokenThroughput, ErrorRate: errorRate, MeetsSLO: meets, Cost: cost, WorkloadDigest: workloadDigest, WorkloadProfile: workloadProfile}
+		candidate := Candidate{EvidenceClass: "measured", EvidenceID: row.ID, Deployment: row.DeploymentName, Revision: row.RevisionID, Runtime: row.Runtime, RuntimeVersion: row.RuntimeVersion, Provider: row.Provider, Region: row.Region, GPU: row.GPU, GPUCount: row.GPUCount, ComputeMode: row.ComputeMode, RequestCount: row.RequestCount, TTFTP95MS: row.TTFTP95MS, TPOTP95MS: row.TPOTP95MS, OutputTokensSecond: row.OutputTokenThroughput, Goodput: row.Goodput, ErrorRate: errorRate, Cost: cost, WorkloadDigest: workloadDigest, WorkloadProfile: workloadProfile}
+		candidate.MeetsSLO, candidate.ConstraintReasons = evaluateConstraints(input, candidate)
 		candidate.ObjectiveValue = objectiveValue(input.Objective, candidate)
 		candidates = append(candidates, candidate)
 	}
@@ -120,7 +128,7 @@ func Evaluate(input Input, evidence []domain.BenchmarkResult) (domain.LabEvaluat
 		if *a == *b {
 			return candidates[i].EvidenceID < candidates[j].EvidenceID
 		}
-		if input.Objective == ObjectiveLatency {
+		if input.Objective == ObjectiveLatency || input.Objective == ObjectiveInteractive {
 			return *a < *b
 		}
 		return *a > *b
@@ -141,9 +149,68 @@ func Evaluate(input Input, evidence []domain.BenchmarkResult) (domain.LabEvaluat
 	return domain.LabEvaluation{ModelIdentity: input.ModelIdentity, AlgorithmVersion: AlgorithmVersion, InputJSON: string(inputJSON), ResultsJSON: string(resultsJSON), InputDigest: hex.EncodeToString(digest[:])}, nil
 }
 
+func evaluateConstraints(input Input, candidate Candidate) (*bool, []string) {
+	hasConstraints := input.MaxTTFTP95MS != nil || input.MaxTPOTP95MS != nil || input.MaxErrorRate != nil || input.MinGoodput != nil || input.MinOutputTPS != nil || input.MaxHourlyCost != nil || input.Region != "" || input.MaxGPUCount != nil
+	if !hasConstraints {
+		return nil, nil
+	}
+	var reasons []string
+	requireMaximum := func(name string, actual, maximum *float64) {
+		if maximum == nil {
+			return
+		}
+		if !validMetric(actual) {
+			reasons = append(reasons, name+" evidence unavailable")
+			return
+		}
+		if *actual > *maximum {
+			reasons = append(reasons, name+" exceeds constraint")
+		}
+	}
+	requireMinimum := func(name string, actual, minimum *float64) {
+		if minimum == nil {
+			return
+		}
+		if !validMetric(actual) {
+			reasons = append(reasons, name+" evidence unavailable")
+			return
+		}
+		if *actual < *minimum {
+			reasons = append(reasons, name+" is below constraint")
+		}
+	}
+	requireMaximum("TTFT p95", candidate.TTFTP95MS, input.MaxTTFTP95MS)
+	requireMaximum("TPOT p95", candidate.TPOTP95MS, input.MaxTPOTP95MS)
+	if input.MaxErrorRate != nil {
+		if candidate.RequestCount <= 0 {
+			reasons = append(reasons, "error rate evidence unavailable")
+		} else if candidate.ErrorRate > *input.MaxErrorRate {
+			reasons = append(reasons, "error rate exceeds constraint")
+		}
+	}
+	requireMinimum("goodput", candidate.Goodput, input.MinGoodput)
+	requireMinimum("output throughput", candidate.OutputTokensSecond, input.MinOutputTPS)
+	if input.MaxHourlyCost != nil {
+		hourly := hourlyCost(candidate.Cost)
+		requireMaximum("hourly cost", hourly, input.MaxHourlyCost)
+	}
+	if input.Region != "" && candidate.Region != input.Region {
+		reasons = append(reasons, "region does not match constraint")
+	}
+	if input.MaxGPUCount != nil {
+		if candidate.GPUCount == nil || *candidate.GPUCount <= 0 {
+			reasons = append(reasons, "GPU count evidence unavailable")
+		} else if *candidate.GPUCount > *input.MaxGPUCount {
+			reasons = append(reasons, "GPU count exceeds constraint")
+		}
+	}
+	meets := len(reasons) == 0
+	return &meets, reasons
+}
+
 func objectiveValue(objective string, candidate Candidate) *float64 {
 	switch objective {
-	case ObjectiveLatency:
+	case ObjectiveLatency, ObjectiveInteractive:
 		if validMetric(candidate.TTFTP95MS) {
 			return candidate.TTFTP95MS
 		}
@@ -155,20 +222,28 @@ func objectiveValue(objective string, candidate Candidate) *float64 {
 		if !validMetric(candidate.OutputTokensSecond) {
 			return nil
 		}
-		var cost struct {
-			Available bool     `json:"available"`
-			Hourly    *float64 `json:"hourly"`
-			Source    string   `json:"source"`
-		}
-		if json.Unmarshal(candidate.Cost, &cost) != nil || !cost.Available || !validMetric(cost.Hourly) || *cost.Hourly <= 0 || cost.Source == "" {
+		hourly := hourlyCost(candidate.Cost)
+		if !validMetric(hourly) || *hourly <= 0 {
 			return nil
 		}
-		value := *candidate.OutputTokensSecond / *cost.Hourly
+		value := *candidate.OutputTokensSecond / *hourly
 		return &value
 	default:
 		return nil
 	}
 	return nil
+}
+
+func hourlyCost(raw json.RawMessage) *float64 {
+	var cost struct {
+		Available bool     `json:"available"`
+		Hourly    *float64 `json:"hourly"`
+		Source    string   `json:"source"`
+	}
+	if json.Unmarshal(raw, &cost) != nil || !cost.Available || !validMetric(cost.Hourly) || cost.Source == "" {
+		return nil
+	}
+	return cost.Hourly
 }
 
 func validMetric(value *float64) bool {

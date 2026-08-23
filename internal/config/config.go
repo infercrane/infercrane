@@ -24,7 +24,7 @@ type Config struct {
 	AWSRoleARN, AWSExternalID, AWSRegion, AWSSubnetID, AWSAMIID, AWSInstanceType, AWSGPU                               string
 	AWSInstanceProfileARN, AWSWorkerSecretARN, AWSImageDigest                                                          string
 	AWSImageCachePolicy                                                                                                string
-	AWSSecurityGroupIDs                                                                                                []string
+	AWSSubnetIDs, AWSSecurityGroupIDs                                                                                  []string
 	AWSRootVolumeGiB                                                                                                   int
 	GCPProject, GCPZone, GCPSubnet, GCPMachineType, GCPGPU, GCPServiceAccount                                          string
 	GCPVMImage, GCPContainerImage, GCPWorkerSecret                                                                     string
@@ -290,6 +290,7 @@ func load(requireAPIKey bool) (Config, error) {
 		AWSExternalID:               env("INFERCRANE_AWS_EXTERNAL_ID", ""),
 		AWSRegion:                   env("INFERCRANE_AWS_REGION", ""),
 		AWSSubnetID:                 env("INFERCRANE_AWS_SUBNET_ID", ""),
+		AWSSubnetIDs:                splitCSV(env("INFERCRANE_AWS_SUBNET_IDS", "")),
 		AWSSecurityGroupIDs:         splitCSV(env("INFERCRANE_AWS_SECURITY_GROUP_IDS", "")),
 		AWSAMIID:                    env("INFERCRANE_AWS_AMI_ID", ""),
 		AWSInstanceType:             env("INFERCRANE_AWS_INSTANCE_TYPE", ""),
@@ -429,8 +430,13 @@ func validateHostedAuth(config Config) error {
 }
 
 func validateAWS(config Config) error {
-	values := []string{config.AWSRoleARN, config.AWSRegion, config.AWSSubnetID, config.AWSAMIID, config.AWSInstanceType, config.AWSGPU, config.AWSInstanceProfileARN, config.AWSWorkerSecretARN, config.AWSImageDigest}
+	subnets := append([]string(nil), config.AWSSubnetIDs...)
+	if len(subnets) == 0 && config.AWSSubnetID != "" {
+		subnets = append(subnets, config.AWSSubnetID)
+	}
+	values := []string{config.AWSRoleARN, config.AWSRegion, config.AWSAMIID, config.AWSInstanceType, config.AWSGPU, config.AWSInstanceProfileARN, config.AWSWorkerSecretARN, config.AWSImageDigest}
 	configured := len(config.AWSSecurityGroupIDs) > 0
+	configured = configured || len(subnets) > 0
 	for _, value := range values {
 		configured = configured || value != ""
 	}
@@ -439,8 +445,11 @@ func validateAWS(config Config) error {
 	}
 	for _, value := range values {
 		if value == "" {
-			return errors.New("AWS BYOC configuration is partial; role ARN, region, subnet, security groups, AMI, instance type, GPU, instance profile, worker secret ARN, and immutable image digest are required")
+			return errors.New("AWS BYOC configuration is partial; role ARN, region, at least one subnet, security groups, AMI, instance type, GPU, instance profile, worker secret ARN, and immutable image digest are required")
 		}
+	}
+	if len(subnets) == 0 {
+		return errors.New("AWS BYOC configuration requires at least one subnet through INFERCRANE_AWS_SUBNET_IDS or INFERCRANE_AWS_SUBNET_ID")
 	}
 	if len(config.AWSSecurityGroupIDs) == 0 {
 		return errors.New("AWS BYOC configuration requires at least one security group")

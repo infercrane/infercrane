@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -1180,9 +1181,16 @@ func labCommand(ctx context.Context, cfg config.Config, args []string) error {
 	}
 	model := args[0]
 	fs := flag.NewFlagSet("lab", flag.ContinueOnError)
-	objective := fs.String("objective", "latency", "latency, throughput, or cost-efficiency")
+	objective := fs.String("objective", "latency", "interactive, latency, throughput, or cost-efficiency")
 	workloadProfile := fs.String("profile", "", "optional benchmark workload profile")
-	ttft := fs.String("max-ttft-p95-ms", "", "optional p95 TTFT SLO")
+	ttft := fs.String("max-ttft-p95-ms", "", "optional p95 TTFT constraint in milliseconds or duration form")
+	tpot := fs.String("max-tpot-p95-ms", "", "optional p95 time-per-output-token constraint")
+	maxErrorRate := fs.String("max-error-rate", "", "optional maximum failed-request ratio from 0 to 1")
+	minGoodput := fs.String("min-goodput", "", "optional minimum requests per second satisfying benchmark SLOs")
+	minOutputTPS := fs.String("min-output-tokens-second", "", "optional minimum output tokens per second")
+	maxHourlyCost := fs.String("max-hourly-cost", "", "optional maximum sourced hourly cost")
+	region := fs.String("region", "", "optional exact provider region constraint")
+	maxGPUCount := fs.Int("max-gpu-count", 0, "optional maximum measured GPU count")
 	workloadDigest := fs.String("workload-digest", "", "optional exact workload SHA-256")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args[1:]); err != nil {
@@ -1194,21 +1202,40 @@ func labCommand(ctx context.Context, cfg config.Config, args []string) error {
 	if err := validateOutput(*output); err != nil {
 		return err
 	}
-	if *objective != "latency" && *objective != "throughput" && *objective != "cost-efficiency" {
-		return errors.New("objective must be latency, throughput, or cost-efficiency")
+	if *objective != "interactive" && *objective != "latency" && *objective != "throughput" && *objective != "cost-efficiency" {
+		return errors.New("objective must be interactive, latency, throughput, or cost-efficiency")
 	}
 	if *workloadProfile != "" {
 		if _, err := performanceprofile.Get(*workloadProfile); err != nil {
 			return err
 		}
 	}
-	body := map[string]any{"model_identity": model, "objective": *objective, "workload_profile": *workloadProfile, "workload_digest": *workloadDigest}
-	if *ttft != "" {
-		value, err := strconv.ParseFloat(*ttft, 64)
-		if err != nil || value < 0 {
-			return errors.New("max TTFT p95 must be a nonnegative number")
+	body := map[string]any{"model_identity": model, "objective": *objective, "workload_profile": *workloadProfile, "workload_digest": *workloadDigest, "region": *region}
+	for key, value := range map[string]string{"max_error_rate": *maxErrorRate, "min_goodput": *minGoodput, "min_output_tokens_second": *minOutputTPS, "max_hourly_cost": *maxHourlyCost} {
+		if value == "" {
+			continue
 		}
-		body["max_ttft_p95_ms"] = value
+		parsed, err := strconv.ParseFloat(value, 64)
+		if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) || parsed < 0 || key == "max_error_rate" && parsed > 1 {
+			return fmt.Errorf("%s must be a bounded nonnegative number", strings.ReplaceAll(key, "_", " "))
+		}
+		body[key] = parsed
+	}
+	for key, value := range map[string]string{"max_ttft_p95_ms": *ttft, "max_tpot_p95_ms": *tpot} {
+		if value == "" {
+			continue
+		}
+		parsed, err := parseMilliseconds(value)
+		if err != nil {
+			return fmt.Errorf("%s must be a nonnegative millisecond value or duration: %w", strings.ReplaceAll(key, "_", " "), err)
+		}
+		body[key] = parsed
+	}
+	if *maxGPUCount < 0 {
+		return errors.New("max GPU count must be positive")
+	}
+	if *maxGPUCount > 0 {
+		body["max_gpu_count"] = *maxGPUCount
 	}
 	var response struct {
 		Evaluation struct {
@@ -1231,7 +1258,7 @@ func labCommand(ctx context.Context, cfg config.Config, args []string) error {
 		return nil
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "CHOICE\tCLASS\tCANDIDATE\tPROFILE\tTTFT P95\tOUTPUT TOK/S\tERRORS\tSLO\tCOST")
+	fmt.Fprintln(w, "CHOICE\tCLASS\tCANDIDATE\tPROFILE\tTTFT P95\tTPOT P95\tOUTPUT TOK/S\tGOODPUT\tERRORS\tCONSTRAINTS\tCOST/H")
 	for _, row := range response.Evaluation.Results {
 		candidate := fmt.Sprintf("%s / %s / %s", benchmarkValue(row["provider"]), benchmarkValue(row["runtime"]), benchmarkValue(row["gpu"]))
 		choice := ""
@@ -1240,7 +1267,7 @@ func labCommand(ctx context.Context, cfg config.Config, args []string) error {
 		} else if comparable, _ := row["comparable"].(bool); !comparable {
 			choice = "UNRANKED"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s ms\t%s\t%s\t%s\t%s\n", choice, strings.ToUpper(benchmarkValue(row["evidence_class"])), candidate, benchmarkValue(row["workload_profile"]), benchmarkValue(row["ttft_p95_ms"]), benchmarkValue(row["output_tokens_second"]), benchmarkValue(row["error_rate"]), benchmarkValue(row["meets_slo"]), nestedValue(row, "cost_metadata", "available"))
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s ms\t%s ms\t%s\t%s\t%s\t%s\t%s\n", choice, strings.ToUpper(benchmarkValue(row["evidence_class"])), candidate, benchmarkValue(row["workload_profile"]), benchmarkValue(row["ttft_p95_ms"]), benchmarkValue(row["tpot_p95_ms"]), benchmarkValue(row["output_tokens_second"]), benchmarkValue(row["goodput"]), benchmarkValue(row["error_rate"]), benchmarkValue(row["meets_slo"]), nestedValue(row, "cost_metadata", "hourly"))
 	}
 	if err := w.Flush(); err != nil {
 		return err
@@ -1252,6 +1279,21 @@ func labCommand(ctx context.Context, cfg config.Config, args []string) error {
 		}
 	}
 	return nil
+}
+
+func parseMilliseconds(value string) (float64, error) {
+	if strings.ContainsAny(value, "abcdefghijklmnopqrstuvwxyzµ") {
+		duration, err := time.ParseDuration(value)
+		if err != nil || duration < 0 {
+			return 0, errors.New("invalid duration")
+		}
+		return float64(duration) / float64(time.Millisecond), nil
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) || parsed < 0 {
+		return 0, errors.New("invalid number")
+	}
+	return parsed, nil
 }
 
 func nestedValue(row map[string]any, object, key string) string {
@@ -3936,7 +3978,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		}
 		awsProvider := provision.AWSEC2{
 			RoleARN: cfg.AWSRoleARN, ExternalID: cfg.AWSExternalID, Region: cfg.AWSRegion,
-			SubnetID: cfg.AWSSubnetID, SecurityGroupIDs: cfg.AWSSecurityGroupIDs,
+			SubnetID: cfg.AWSSubnetID, SubnetIDs: cfg.AWSSubnetIDs, SecurityGroupIDs: cfg.AWSSecurityGroupIDs,
 			AMIID: cfg.AWSAMIID, InstanceType: cfg.AWSInstanceType, GPU: cfg.AWSGPU,
 			InstanceProfileARN: cfg.AWSInstanceProfileARN, WorkerSecretARN: cfg.AWSWorkerSecretARN,
 			ImageDigest: cfg.AWSImageDigest, RootVolumeGiB: cfg.AWSRootVolumeGiB, ImageCachePolicy: cfg.AWSImageCachePolicy,

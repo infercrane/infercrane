@@ -2,6 +2,7 @@ package lab
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/infercrane/infercrane/internal/domain"
@@ -95,5 +96,48 @@ func TestEvaluateComparesActiveAndCandidateWithIdenticalLoad(t *testing.T) {
 		if row.Comparable || row.Selected {
 			t.Fatalf("changed concurrency was falsely compared: %#v", candidates)
 		}
+	}
+}
+
+func TestEvaluateSelectsOnlyMeasuredCandidateSatisfyingAllConstraints(t *testing.T) {
+	workload := `{"profile":"interactive","concurrency":1}`
+	maxTTFT, maxTPOT, maxErrors := 200.0, 25.0, 0.01
+	minGoodput, minThroughput, maxCost := 4.0, 80.0, 3.0
+	maxGPUs := 1
+	gpuCount := 1
+	rows := []domain.BenchmarkResult{
+		{ID: "fast-expensive", ModelIdentity: "model@commit", Provider: "aws", Region: "eu-central-1", GPU: "H100", GPUCount: &gpuCount, RequestCount: 100, TTFTP95MS: number(140), TPOTP95MS: number(18), Goodput: number(5), OutputTokenThroughput: number(100), WorkloadJSON: workload, CostMetadataJSON: `{"available":true,"hourly":4,"source":"aws-price"}`},
+		{ID: "qualified", ModelIdentity: "model@commit", Provider: "aws", Region: "eu-central-1", GPU: "L40S", GPUCount: &gpuCount, RequestCount: 100, TTFTP95MS: number(180), TPOTP95MS: number(20), Goodput: number(4.5), OutputTokenThroughput: number(90), WorkloadJSON: workload, CostMetadataJSON: `{"available":true,"hourly":2,"source":"aws-price"}`},
+		{ID: "missing-tpot", ModelIdentity: "model@commit", Provider: "aws", Region: "eu-central-1", GPU: "L4", GPUCount: &gpuCount, RequestCount: 100, TTFTP95MS: number(130), Goodput: number(6), OutputTokenThroughput: number(120), WorkloadJSON: workload, CostMetadataJSON: `{"available":true,"hourly":1,"source":"aws-price"}`},
+		{ID: "missing-error-sample", ModelIdentity: "model@commit", Provider: "aws", Region: "eu-central-1", GPU: "L4", GPUCount: &gpuCount, RequestCount: 0, TTFTP95MS: number(130), TPOTP95MS: number(19), Goodput: number(6), OutputTokenThroughput: number(120), WorkloadJSON: workload, CostMetadataJSON: `{"available":true,"hourly":1,"source":"aws-price"}`},
+	}
+	result, err := Evaluate(Input{ModelIdentity: "model@commit", Objective: ObjectiveInteractive, WorkloadProfile: "interactive", MaxTTFTP95MS: &maxTTFT, MaxTPOTP95MS: &maxTPOT, MaxErrorRate: &maxErrors, MinGoodput: &minGoodput, MinOutputTPS: &minThroughput, MaxHourlyCost: &maxCost, Region: "eu-central-1", MaxGPUCount: &maxGPUs}, rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var candidates []Candidate
+	if err = json.Unmarshal([]byte(result.ResultsJSON), &candidates); err != nil || len(candidates) != 4 {
+		t.Fatalf("candidates=%#v err=%v", candidates, err)
+	}
+	selected := 0
+	for _, candidate := range candidates {
+		if candidate.Selected {
+			selected++
+			if candidate.EvidenceID != "qualified" || candidate.MeetsSLO == nil || !*candidate.MeetsSLO {
+				t.Fatalf("unexpected selected candidate: %#v", candidate)
+			}
+		}
+		if candidate.EvidenceID == "fast-expensive" && (candidate.MeetsSLO == nil || *candidate.MeetsSLO || len(candidate.ConstraintReasons) == 0) {
+			t.Fatalf("cost constraint was not enforced: %#v", candidate)
+		}
+		if candidate.EvidenceID == "missing-tpot" && (candidate.MeetsSLO == nil || *candidate.MeetsSLO || len(candidate.ConstraintReasons) == 0) {
+			t.Fatalf("missing evidence did not fail closed: %#v", candidate)
+		}
+		if candidate.EvidenceID == "missing-error-sample" && (candidate.MeetsSLO == nil || *candidate.MeetsSLO || !strings.Contains(strings.Join(candidate.ConstraintReasons, " "), "error rate evidence unavailable")) {
+			t.Fatalf("missing error-rate sample did not fail closed: %#v", candidate)
+		}
+	}
+	if selected != 1 {
+		t.Fatalf("selected=%d candidates=%#v", selected, candidates)
 	}
 }

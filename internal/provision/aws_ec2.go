@@ -23,6 +23,7 @@ type AWSEC2 struct {
 	Runner                   CommandRunner
 	RoleARN, ExternalID      string
 	Region, SubnetID         string
+	SubnetIDs                []string
 	SecurityGroupIDs         []string
 	AMIID, InstanceType, GPU string
 	InstanceProfileARN       string
@@ -123,8 +124,6 @@ func (a AWSEC2) EnsureReplica(ctx context.Context, spec ReplicaSpec) (ProviderHa
 		port = 8000
 	}
 	userData := a.userData(spec, port)
-	network := []map[string]any{{"DeviceIndex": 0, "SubnetId": a.SubnetID, "Groups": a.SecurityGroupIDs, "AssociatePublicIpAddress": false}}
-	networkJSON, _ := json.Marshal(network)
 	rootVolumeGiB := a.rootVolumeGiB()
 	resourceTags := []map[string]string{{"Key": "infercrane:managed", "Value": "true"}, {"Key": "infercrane:external-key", "Value": spec.ExternalKey}, {"Key": "infercrane:root-volume-gib", "Value": fmt.Sprint(rootVolumeGiB)}, {"Key": "infercrane:root-volume-encrypted", "Value": "true"}, {"Key": "Name", "Value": "infercrane-" + spec.ExternalKey}}
 	// Root volumes remain billable if provider-side termination fails to remove
@@ -134,20 +133,33 @@ func (a AWSEC2) EnsureReplica(ctx context.Context, spec ReplicaSpec) (ProviderHa
 	tagsJSON, _ := json.Marshal(tags)
 	blockDevices := []map[string]any{{"DeviceName": "/dev/xvda", "Ebs": map[string]any{"VolumeSize": rootVolumeGiB, "VolumeType": "gp3", "Encrypted": true, "DeleteOnTermination": true}}}
 	blockDevicesJSON, _ := json.Marshal(blockDevices)
-	args := []string{"ec2", "run-instances", "--region", a.Region, "--image-id", a.AMIID, "--instance-type", a.InstanceType, "--count", "1", "--client-token", a.clientToken(spec.ExternalKey), "--iam-instance-profile", "Arn=" + a.InstanceProfileARN, "--network-interfaces", string(networkJSON), "--block-device-mappings", string(blockDevicesJSON), "--tag-specifications", string(tagsJSON), "--user-data", userData, "--output", "json", "--no-cli-pager"}
-	output, err := a.run(ctx, args...)
-	if err != nil {
-		return ProviderHandle{}, fmt.Errorf("launch AWS EC2 instance: %w", err)
+	var capacityErrors []string
+	for _, subnetID := range a.subnets() {
+		network := []map[string]any{{"DeviceIndex": 0, "SubnetId": subnetID, "Groups": a.SecurityGroupIDs, "AssociatePublicIpAddress": false}}
+		networkJSON, _ := json.Marshal(network)
+		args := []string{"ec2", "run-instances", "--region", a.Region, "--image-id", a.AMIID, "--instance-type", a.InstanceType, "--count", "1", "--client-token", a.placementClientToken(spec.ExternalKey, subnetID), "--iam-instance-profile", "Arn=" + a.InstanceProfileARN, "--network-interfaces", string(networkJSON), "--block-device-mappings", string(blockDevicesJSON), "--tag-specifications", string(tagsJSON), "--user-data", userData, "--output", "json", "--no-cli-pager"}
+		output, launchErr := a.run(ctx, args...)
+		if launchErr != nil {
+			if errors.Is(launchErr, ErrProviderCapacity) {
+				capacityErrors = append(capacityErrors, subnetID)
+				continue
+			}
+			// An authorization, timeout, or unknown response may have happened
+			// after AWS accepted the side effect. Never try another placement;
+			// the durable retry first adopts by ownership tag.
+			return ProviderHandle{}, fmt.Errorf("launch AWS EC2 instance: %w", launchErr)
+		}
+		var launched struct {
+			Instances []struct {
+				InstanceID string `json:"InstanceId"`
+			} `json:"Instances"`
+		}
+		if err := json.Unmarshal(output, &launched); err != nil || len(launched.Instances) != 1 || launched.Instances[0].InstanceID == "" {
+			return ProviderHandle{}, errors.New("AWS EC2 launch returned an invalid instance identity")
+		}
+		return ProviderHandle{RequestID: a.clientToken(spec.ExternalKey), ResourceID: launched.Instances[0].InstanceID, ExternalKey: spec.ExternalKey}, nil
 	}
-	var launched struct {
-		Instances []struct {
-			InstanceID string `json:"InstanceId"`
-		} `json:"Instances"`
-	}
-	if err := json.Unmarshal(output, &launched); err != nil || len(launched.Instances) != 1 || launched.Instances[0].InstanceID == "" {
-		return ProviderHandle{}, errors.New("AWS EC2 launch returned an invalid instance identity")
-	}
-	return ProviderHandle{RequestID: a.clientToken(spec.ExternalKey), ResourceID: launched.Instances[0].InstanceID, ExternalKey: spec.ExternalKey}, nil
+	return ProviderHandle{}, fmt.Errorf("launch AWS EC2 instance: %w: unavailable across %d configured capacity boundaries", ErrProviderCapacity, len(capacityErrors))
 }
 
 func (a AWSEC2) ObserveReplica(ctx context.Context, handle ProviderHandle, port int) (Observation, error) {
@@ -234,7 +246,7 @@ func (a AWSEC2) validate(spec ReplicaSpec) error {
 	if spec.ExternalKey == "" || spec.Model == "" || spec.Cloud != "aws" || spec.Region == "" || spec.Region != a.Region {
 		return errors.New("AWS replica requires external key, model, cloud aws, and configured region")
 	}
-	if a.RoleARN == "" || a.SubnetID == "" || len(a.SecurityGroupIDs) == 0 || a.AMIID == "" || a.InstanceType == "" || a.GPU == "" || a.InstanceProfileARN == "" || a.WorkerSecretARN == "" {
+	if a.RoleARN == "" || len(a.subnets()) == 0 || len(a.SecurityGroupIDs) == 0 || a.AMIID == "" || a.InstanceType == "" || a.GPU == "" || a.InstanceProfileARN == "" || a.WorkerSecretARN == "" {
 		return errors.New("AWS role, region, subnet, security groups, AMI, instance type, GPU, instance profile, and worker secret ARN are required")
 	}
 	if spec.GPU != a.GPU {
@@ -289,10 +301,45 @@ func (a AWSEC2) validateAdoptedInstance(instance awsInstance) error {
 	actualGroups := append([]string(nil), instance.SecurityGroupIDs...)
 	sort.Strings(expectedGroups)
 	sort.Strings(actualGroups)
-	if instance.ImageID != a.AMIID || instance.InstanceType != a.InstanceType || instance.SubnetID != a.SubnetID || instance.InstanceProfileARN != a.InstanceProfileARN || strings.Join(actualGroups, "\x00") != strings.Join(expectedGroups, "\x00") || instance.RootVolumeGiB != a.rootVolumeGiB() || !instance.RootVolumeEncrypted {
-		return fmt.Errorf("AWS EC2 instance %s with durable key %q does not match the configured AMI, instance type, subnet, instance profile, security groups, and encrypted root volume", instance.ID, instance.ExternalKey)
+	if instance.ImageID != a.AMIID || instance.InstanceType != a.InstanceType || !containsString(a.subnets(), instance.SubnetID) || instance.InstanceProfileARN != a.InstanceProfileARN || strings.Join(actualGroups, "\x00") != strings.Join(expectedGroups, "\x00") || instance.RootVolumeGiB != a.rootVolumeGiB() || !instance.RootVolumeEncrypted {
+		return fmt.Errorf("AWS EC2 instance %s with durable key %q does not match the configured AMI, instance type, approved subnets, instance profile, security groups, and encrypted root volume", instance.ID, instance.ExternalKey)
 	}
 	return nil
+}
+
+func (a AWSEC2) subnets() []string {
+	values := append([]string(nil), a.SubnetIDs...)
+	if len(values) == 0 && a.SubnetID != "" {
+		values = append(values, a.SubnetID)
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func containsString(values []string, expected string) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
+}
+
+func (a AWSEC2) placementClientToken(externalKey, subnetID string) string {
+	digest := sha256.Sum256([]byte(a.Region + "\x00" + externalKey + "\x00" + subnetID + "\x00" + a.InstanceType))
+	return "infercrane-" + hex.EncodeToString(digest[:16])
 }
 
 func (a AWSEC2) describe(ctx context.Context, filter string) ([]awsInstance, error) {

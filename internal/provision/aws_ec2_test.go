@@ -13,20 +13,23 @@ import (
 )
 
 type fakeAWSRunner struct {
-	instanceID           string
-	externalKey          string
-	state                string
-	failAfterCreate      bool
-	createCalls          int
-	deleteCalls          int
-	apiEnvironments      [][]string
-	runInstanceArgs      []string
-	roleFailurePayload   string
-	createFailurePayload string
-	instanceType         string
-	rootVolumeGiB        int
-	rootEncrypted        bool
-	consoleOutput        string
+	instanceID            string
+	externalKey           string
+	state                 string
+	failAfterCreate       bool
+	createCalls           int
+	deleteCalls           int
+	apiEnvironments       [][]string
+	runInstanceArgs       []string
+	runInstanceHistory    [][]string
+	roleFailurePayload    string
+	createFailurePayload  string
+	createFailureBySubnet map[string]string
+	instanceType          string
+	instanceSubnet        string
+	rootVolumeGiB         int
+	rootEncrypted         bool
+	consoleOutput         string
 }
 
 func (f *fakeAWSRunner) Run(_ context.Context, environment []string, args ...string) ([]byte, error) {
@@ -53,15 +56,25 @@ func (f *fakeAWSRunner) Run(_ context.Context, environment []string, args ...str
 		if rootVolumeGiB == 0 {
 			rootVolumeGiB, rootEncrypted = 100, true
 		}
-		response := map[string]any{"Reservations": []any{map[string]any{"Instances": []any{map[string]any{"InstanceId": f.instanceID, "ImageId": "ami-gpu", "InstanceType": instanceType, "SubnetId": "subnet-private", "PrivateIpAddress": "10.0.1.12", "IamInstanceProfile": map[string]string{"Arn": "arn:aws:iam::123456789012:instance-profile/infercrane-worker"}, "SecurityGroups": []map[string]string{{"GroupId": "sg-inference"}}, "State": map[string]string{"Name": f.state}, "Tags": []map[string]string{{"Key": "infercrane:external-key", "Value": f.externalKey}, {"Key": "infercrane:root-volume-gib", "Value": fmt.Sprint(rootVolumeGiB)}, {"Key": "infercrane:root-volume-encrypted", "Value": fmt.Sprint(rootEncrypted)}}}}}}}
+		instanceSubnet := f.instanceSubnet
+		if instanceSubnet == "" {
+			instanceSubnet = "subnet-private"
+		}
+		response := map[string]any{"Reservations": []any{map[string]any{"Instances": []any{map[string]any{"InstanceId": f.instanceID, "ImageId": "ami-gpu", "InstanceType": instanceType, "SubnetId": instanceSubnet, "PrivateIpAddress": "10.0.1.12", "IamInstanceProfile": map[string]string{"Arn": "arn:aws:iam::123456789012:instance-profile/infercrane-worker"}, "SecurityGroups": []map[string]string{{"GroupId": "sg-inference"}}, "State": map[string]string{"Name": f.state}, "Tags": []map[string]string{{"Key": "infercrane:external-key", "Value": f.externalKey}, {"Key": "infercrane:root-volume-gib", "Value": fmt.Sprint(rootVolumeGiB)}, {"Key": "infercrane:root-volume-encrypted", "Value": fmt.Sprint(rootEncrypted)}}}}}}}
 		return json.Marshal(response)
 	case "run-instances":
 		f.createCalls++
 		f.runInstanceArgs = append([]string(nil), args...)
+		f.runInstanceHistory = append(f.runInstanceHistory, append([]string(nil), args...))
+		subnet := awsArgumentSubnet(args)
+		if payload := f.createFailureBySubnet[subnet]; payload != "" {
+			return []byte(payload), errors.New("AWS CLI failed")
+		}
 		if f.createFailurePayload != "" {
 			return []byte(f.createFailurePayload), errors.New("AWS CLI failed")
 		}
 		f.instanceID, f.state = "i-fixture", "running"
+		f.instanceSubnet = subnet
 		f.externalKey = awsArgumentTagExternalKey(args)
 		f.rootVolumeGiB, f.rootEncrypted = awsArgumentRootVolume(args)
 		if f.failAfterCreate {
@@ -87,7 +100,7 @@ func TestAWSEC2NormalizesActionableFailuresWithoutRawProviderOutput(t *testing.T
 	}{
 		{"authorization", `UnauthorizedOperation: encoded authorization failure message SECRET`, "verify the assumed role", ErrProviderAuthorization},
 		{"quota", `VcpuLimitExceeded: account 123456789012 has a limit`, "compute quota is exhausted", ErrProviderQuota},
-		{"capacity", `InsufficientInstanceCapacity: g6e.xlarge unavailable`, "selected capacity boundary", ErrProviderCapacity},
+		{"capacity", `InsufficientInstanceCapacity: g6e.xlarge unavailable`, "configured capacity boundaries", ErrProviderCapacity},
 		{"configuration", `InvalidParameterValue: subnet-private is invalid`, "launch configuration", ErrInvalidReplicaSpec},
 	}
 	for _, test := range tests {
@@ -121,6 +134,30 @@ func awsArgumentTagExternalKey(args []string) string {
 					return tag.Value
 				}
 			}
+		}
+	}
+	return ""
+}
+
+func awsArgumentSubnet(args []string) string {
+	for i, arg := range args {
+		if arg != "--network-interfaces" || i+1 >= len(args) {
+			continue
+		}
+		var interfaces []struct {
+			SubnetID string `json:"SubnetId"`
+		}
+		if json.Unmarshal([]byte(args[i+1]), &interfaces) == nil && len(interfaces) == 1 {
+			return interfaces[0].SubnetID
+		}
+	}
+	return ""
+}
+
+func awsArgumentClientToken(args []string) string {
+	for i, arg := range args {
+		if arg == "--client-token" && i+1 < len(args) {
+			return args[i+1]
 		}
 	}
 	return ""
@@ -219,6 +256,64 @@ func TestAWSEC2LifecycleIsIdempotentPrivateAndTagged(t *testing.T) {
 	}
 	if err := provider.DeleteReplica(context.Background(), second); err != nil || runner.deleteCalls != 1 {
 		t.Fatalf("delete calls=%d err=%v", runner.deleteCalls, err)
+	}
+}
+
+func TestAWSEC2TriesOrderedCapacityBoundariesOnlyForDefinitiveCapacityFailure(t *testing.T) {
+	runner := &fakeAWSRunner{createFailureBySubnet: map[string]string{
+		"subnet-private-a": "InsufficientInstanceCapacity: no current stock",
+	}}
+	provider := testAWSEC2(runner)
+	provider.SubnetID = ""
+	provider.SubnetIDs = []string{"subnet-private-a", "subnet-private-b"}
+	handle, err := provider.EnsureReplica(context.Background(), awsReplicaSpec())
+	if err != nil || handle.ResourceID != "i-fixture" || runner.createCalls != 2 {
+		t.Fatalf("handle=%#v creates=%d err=%v", handle, runner.createCalls, err)
+	}
+	if len(runner.runInstanceHistory) != 2 || awsArgumentSubnet(runner.runInstanceHistory[0]) != "subnet-private-a" || awsArgumentSubnet(runner.runInstanceHistory[1]) != "subnet-private-b" {
+		t.Fatalf("capacity boundaries were not tried in order: %#v", runner.runInstanceHistory)
+	}
+	firstToken := awsArgumentClientToken(runner.runInstanceHistory[0])
+	secondToken := awsArgumentClientToken(runner.runInstanceHistory[1])
+	if firstToken == "" || secondToken == "" || firstToken == secondToken {
+		t.Fatalf("placement attempts require distinct idempotency tokens: %q %q", firstToken, secondToken)
+	}
+}
+
+func TestAWSEC2DoesNotTryAnotherBoundaryAfterAmbiguousFailure(t *testing.T) {
+	runner := &fakeAWSRunner{createFailureBySubnet: map[string]string{
+		"subnet-private-a": "RequestTimeout: the response was not received",
+	}}
+	provider := testAWSEC2(runner)
+	provider.SubnetID = ""
+	provider.SubnetIDs = []string{"subnet-private-a", "subnet-private-b"}
+	if _, err := provider.EnsureReplica(context.Background(), awsReplicaSpec()); err == nil || runner.createCalls != 1 {
+		t.Fatalf("ambiguous launch must stop before another placement: creates=%d err=%v", runner.createCalls, err)
+	}
+}
+
+func TestAWSEC2AdoptsOwnedInstanceFromAnyApprovedBoundary(t *testing.T) {
+	runner := &fakeAWSRunner{instanceID: "i-existing", externalKey: awsReplicaSpec().ExternalKey, state: "running", instanceSubnet: "subnet-private-b"}
+	provider := testAWSEC2(runner)
+	provider.SubnetID = ""
+	provider.SubnetIDs = []string{"subnet-private-a", "subnet-private-b"}
+	handle, err := provider.EnsureReplica(context.Background(), awsReplicaSpec())
+	if err != nil || handle.ResourceID != "i-existing" || runner.createCalls != 0 {
+		t.Fatalf("handle=%#v creates=%d err=%v", handle, runner.createCalls, err)
+	}
+}
+
+func TestAWSEC2ReportsAllCapacityBoundariesUnavailable(t *testing.T) {
+	runner := &fakeAWSRunner{createFailureBySubnet: map[string]string{
+		"subnet-private-a": "InsufficientInstanceCapacity: no current stock",
+		"subnet-private-b": "InsufficientInstanceCapacity: no current stock",
+	}}
+	provider := testAWSEC2(runner)
+	provider.SubnetID = ""
+	provider.SubnetIDs = []string{"subnet-private-a", "subnet-private-b"}
+	_, err := provider.EnsureReplica(context.Background(), awsReplicaSpec())
+	if !errors.Is(err, ErrProviderCapacity) || runner.createCalls != 2 || !strings.Contains(err.Error(), "across 2 configured capacity boundaries") {
+		t.Fatalf("creates=%d err=%v", runner.createCalls, err)
 	}
 }
 

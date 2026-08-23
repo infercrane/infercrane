@@ -110,6 +110,12 @@ func TestAWSBYOCConfigurationIsAllOrNothingAndImmutable(t *testing.T) {
 	if err != nil || !cfg.AWSEnabled() || len(cfg.AWSSecurityGroupIDs) != 2 || cfg.AWSRootVolumeGiB != 100 || cfg.AWSImageCachePolicy != "prefer" {
 		t.Fatalf("cfg=%#v err=%v", cfg, err)
 	}
+	t.Setenv("INFERCRANE_AWS_SUBNET_ID", "")
+	t.Setenv("INFERCRANE_AWS_SUBNET_IDS", "subnet-private-a, subnet-private-b,subnet-private-a")
+	cfg, err = Load()
+	if err != nil || len(cfg.AWSSubnetIDs) != 3 || cfg.AWSSubnetIDs[0] != "subnet-private-a" || cfg.AWSSubnetIDs[1] != "subnet-private-b" {
+		t.Fatalf("multi-subnet cfg=%#v err=%v", cfg.AWSSubnetIDs, err)
+	}
 	t.Setenv("INFERCRANE_AWS_IMAGE_CACHE_POLICY", "fastest")
 	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "IMAGE_CACHE_POLICY") {
 		t.Fatalf("expected invalid cache policy failure, got %v", err)

@@ -175,6 +175,7 @@ grep -Fq 'Name=status,Values=creating,available,in-use,deleting,error' "$root/sc
 grep -Fq 's/^/volume:/' "$root/scripts/portable-provider-acceptance.sh"
 grep -Fq 'candidate_revision=$(git -C "$root" rev-parse --short=12 HEAD)' "$root/scripts/portable-provider-acceptance.sh"
 grep -Fq 'candidate_image=${INFERCRANE_V1_IMAGE:-infercrane:acceptance-$candidate_revision}' "$root/scripts/portable-provider-acceptance.sh"
+grep -Fq 'compose down --volumes --remove-orphans >/dev/null 2>&1 || true' "$root/scripts/portable-provider-acceptance.sh"
 grep -Fq 'runtimes=${INFERCRANE_V1_RUNTIMES:-"vllm sglang custom-oci"}' "$root/scripts/portable-provider-acceptance.sh"
 grep -Fq 'features=${INFERCRANE_V1_VLLM_FEATURES:-"tools structured"}' "$root/scripts/portable-provider-acceptance.sh"
 if INFERCRANE_V1_PROVIDER_ENV_FILE=/unreadable INFERCRANE_V1_API_KEY_FILE=/unreadable \

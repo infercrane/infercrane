@@ -1283,7 +1283,33 @@
       "LabEvaluationRequest": {
         "additionalProperties": false,
         "properties": {
+          "max_error_rate": {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "max_gpu_count": {
+            "maximum": 1024,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_hourly_cost": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "max_tpot_p95_ms": {
+            "minimum": 0,
+            "type": "number"
+          },
           "max_ttft_p95_ms": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "min_goodput": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "min_output_tokens_second": {
             "minimum": 0,
             "type": "number"
           },
@@ -1294,10 +1320,15 @@
           "objective": {
             "default": "latency",
             "enum": [
+              "interactive",
               "latency",
               "throughput",
               "cost-efficiency"
             ],
+            "type": "string"
+          },
+          "region": {
+            "maxLength": 128,
             "type": "string"
           },
           "workload_digest": {

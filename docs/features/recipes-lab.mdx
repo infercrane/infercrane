@@ -32,20 +32,28 @@ See [Verified Models](/features/model-catalog) for the complete evidence boundar
 
 ## Compare evidence
 
-Inference Lab v2 compares existing benchmark history. It does not provision hardware or run another
+Inference Lab v3 compares existing benchmark history. It does not provision hardware or run another
 load generator:
 
 ```bash
 infercrane lab 'mistralai/Mistral-7B-Instruct-v0.3@IMMUTABLE_COMMIT' \
-  --objective latency \
+  --objective interactive \
   --profile interactive \
-  --max-ttft-p95-ms 250
+  --max-ttft-p95-ms 200ms \
+  --max-tpot-p95-ms 25ms \
+  --max-error-rate 0.01 \
+  --min-goodput 4 \
+  --max-hourly-cost 3 \
+  --region eu-central-1 \
+  --max-gpu-count 1
 ```
 
-Choose `latency`, `throughput`, or `cost-efficiency`. Latency minimizes measured p95 TTFT,
+Choose `interactive`, `latency`, `throughput`, or `cost-efficiency`. Interactive and latency minimize measured p95 TTFT,
 throughput maximizes output tokens per second, and cost efficiency maximizes measured output tokens
 per second per sourced hourly currency unit. Rows include runtime, provider, GPU, error rate,
-throughput, SLO result when measurable, and cost metadata exactly as persisted. Current Lab results
+TTFT, TPOT, goodput, throughput, constraint result, and cost metadata exactly as persisted. Region,
+GPU-count, error-rate, goodput, throughput, and sourced hourly-cost constraints fail closed when the
+required evidence is absent. Current Lab results
 emit only `MEASURED` rows.
 The schema reserves `modeled` and `heuristic` labels for future evidence sources, but InferCrane never
 substitutes them silently. With no comparable benchmark, the result is an empty persisted evaluation.

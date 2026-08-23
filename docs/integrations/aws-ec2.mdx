@@ -44,7 +44,7 @@ controls.
 export INFERCRANE_AWS_ROLE_ARN='arn:aws:iam::123456789012:role/infercrane-control-plane'
 export INFERCRANE_AWS_EXTERNAL_ID='organization-controlled-value'
 export INFERCRANE_AWS_REGION='eu-central-1'
-export INFERCRANE_AWS_SUBNET_ID='subnet-0123456789abcdef0'
+export INFERCRANE_AWS_SUBNET_IDS='subnet-private-a,subnet-private-b,subnet-private-c'
 export INFERCRANE_AWS_SECURITY_GROUP_IDS='sg-0123456789abcdef0'
 export INFERCRANE_AWS_AMI_ID='ami-0123456789abcdef0'
 export INFERCRANE_AWS_INSTANCE_TYPE='g6e.xlarge'
@@ -55,6 +55,12 @@ export INFERCRANE_AWS_IMAGE_DIGEST='vllm/vllm-openai@sha256:REPLACE_WITH_QUALIFI
 export INFERCRANE_AWS_IMAGE_CACHE_POLICY='prefer'
 export INFERCRANE_AWS_ROOT_VOLUME_GIB='100'
 ```
+
+`INFERCRANE_AWS_SUBNET_IDS` is an ordered list of approved private capacity boundaries. When AWS
+returns a definitive insufficient-capacity response, InferCrane tries the next subnet with a
+placement-specific idempotency token. It does not cross a boundary after timeouts, authentication
+failures, or ambiguous responses; the durable retry first discovers any owned instance by tag.
+`INFERCRANE_AWS_SUBNET_ID` remains supported for a single subnet.
 
 The Secrets Manager value referenced by `INFERCRANE_AWS_WORKER_SECRET_ARN` must contain the same
 worker credential configured as `INFERCRANE_API_KEY` on this self-hosted control plane. InferCrane

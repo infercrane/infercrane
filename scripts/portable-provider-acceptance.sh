@@ -269,6 +269,10 @@ cleanup() {
     cli delete "$name" --yes --wait --wait-timeout "${INFERCRANE_V1_DELETE_TIMEOUT:-15m}" \
       --idempotency-key "$run_id-$cloud-$name-cleanup" >/dev/null 2>&1 || true
   done
+	# A failed or interrupted paid suite must not leave its isolated control
+	# plane, PostgreSQL volume, or network running on the durable runner. Cloud
+	# deletion happens first because it needs the persisted operation state.
+	compose down --volumes --remove-orphans >/dev/null 2>&1 || true
 }
 trap 'cleanup' HUP INT TERM EXIT
 

@@ -661,6 +661,11 @@ func TestLabRejectsUnknownOptimizationObjectiveAndProfile(t *testing.T) {
 		`{"model_identity":"model@commit","objective":"magic"}`,
 		`{"model_identity":"model@commit","workload_profile":"not-a-profile"}`,
 		`{"model_identity":"model@commit","max_ttft_p95_ms":1e999}`,
+		`{"model_identity":"model@commit","max_tpot_p95_ms":-1}`,
+		`{"model_identity":"model@commit","max_error_rate":1.1}`,
+		`{"model_identity":"model@commit","min_goodput":-1}`,
+		`{"model_identity":"model@commit","max_hourly_cost":-1}`,
+		`{"model_identity":"model@commit","max_gpu_count":0}`,
 	} {
 		request := httptest.NewRequest(http.MethodPost, "/api/v1/lab/evaluations", strings.NewReader(body))
 		request.Header.Set("Authorization", "Bearer secret")

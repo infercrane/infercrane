@@ -1202,14 +1202,14 @@ func TestRecipeAndLabCommandsUseControlAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	if output, err := captureStdout(t, func() error {
-		return labCommand(context.Background(), cfg, []string{"model@commit", "--objective", "throughput", "--profile", "throughput", "--max-ttft-p95-ms", "250"})
+		return labCommand(context.Background(), cfg, []string{"model@commit", "--objective", "interactive", "--profile", "interactive", "--max-ttft-p95-ms", "250ms", "--max-tpot-p95-ms", "25", "--max-error-rate", "0.01", "--min-goodput", "4", "--min-output-tokens-second", "80", "--max-hourly-cost", "3", "--region", "eu-central-1", "--max-gpu-count", "1"})
 	}); err != nil || !strings.Contains(output, "MEASURED") {
 		t.Fatalf("output=%s err=%v", output, err)
 	}
 	if strings.Join(paths, ",") != "/api/v1/deployments/qwen prod/recipes,/api/v1/recipes,/api/v1/lab/evaluations" {
 		t.Fatalf("paths=%v", paths)
 	}
-	if labBody["objective"] != "throughput" || labBody["workload_profile"] != "throughput" {
+	if labBody["objective"] != "interactive" || labBody["workload_profile"] != "interactive" || labBody["max_ttft_p95_ms"] != float64(250) || labBody["max_tpot_p95_ms"] != float64(25) || labBody["max_error_rate"] != 0.01 || labBody["min_goodput"] != float64(4) || labBody["min_output_tokens_second"] != float64(80) || labBody["max_hourly_cost"] != float64(3) || labBody["region"] != "eu-central-1" || labBody["max_gpu_count"] != float64(1) {
 		t.Fatalf("lab body=%#v", labBody)
 	}
 }
@@ -1217,6 +1217,19 @@ func TestRecipeAndLabCommandsUseControlAPI(t *testing.T) {
 func TestLabRejectsUnknownObjectiveBeforeNetworkAccess(t *testing.T) {
 	if err := labCommand(context.Background(), config.Config{}, []string{"model@commit", "--objective", "fastest"}); err == nil || !strings.Contains(err.Error(), "objective") {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestLabRejectsInvalidConstraintsBeforeNetworkAccess(t *testing.T) {
+	for _, args := range [][]string{
+		{"model@commit", "--max-ttft-p95-ms", "later"},
+		{"model@commit", "--max-error-rate", "1.1"},
+		{"model@commit", "--min-goodput", "-1"},
+		{"model@commit", "--max-gpu-count", "-1"},
+	} {
+		if err := labCommand(context.Background(), config.Config{}, args); err == nil {
+			t.Fatalf("args=%v accepted", args)
+		}
 	}
 }
 

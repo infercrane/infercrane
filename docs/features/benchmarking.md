@@ -117,8 +117,10 @@ Compare multiple measured configurations with the same workload:
 
 ```console
 infercrane lab 'mistralai/Mistral-7B-Instruct-v0.3@IMMUTABLE_COMMIT' \
-  --objective latency \
-  --profile interactive
+  --objective interactive \
+  --profile interactive \
+  --max-ttft-p95-ms 200ms \
+  --max-hourly-cost 3
 
 infercrane lab 'mistralai/Mistral-7B-Instruct-v0.3@IMMUTABLE_COMMIT' \
   --objective cost-efficiency \
