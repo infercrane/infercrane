@@ -27,6 +27,7 @@ type fakeCloudStore struct {
 	applied        bool
 	rejectedReason string
 	capacity       domain.CapacityEvidence
+	appliedRuntime string
 }
 
 func (f *fakeCloudStore) RecordCapacityEvidence(_ context.Context, row domain.CapacityEvidence) (domain.CapacityEvidence, error) {
@@ -145,6 +146,7 @@ func (f *fakeCloudStore) ApplyDeploymentForTenant(_ context.Context, _ string, d
 	}
 	deployment.ID = f.deployment.ID
 	f.applied = true
+	f.appliedRuntime = deployment.Runtime
 	return deployment, nil
 }
 
@@ -155,6 +157,30 @@ func TestConvergeCreatesExactlyOneResourcePerMinimumReplica(t *testing.T) {
 	_, err := QualifiedV01CloudHandlers(store, provider, fakeInspector{ready: true})[ConvergeKind](context.Background(), operation)
 	if err != nil || provider.ensureCalls != 2 || len(store.replicas) != 2 || len(store.targetNames) != 2 {
 		t.Fatalf("ensure_calls=%d replicas=%d targets=%v err=%v", provider.ensureCalls, len(store.replicas), store.targetNames, err)
+	}
+}
+
+func TestConvergePreservesNonVLLMRuntimeWhenPublishingTargets(t *testing.T) {
+	store := &fakeCloudStore{deployment: domain.Deployment{ID: "deployment-1", Name: "qwen", Model: "Qwen/Qwen3-8B", Runtime: "sglang", RoutingStrategy: "round-robin", MinReplicas: 1, MaxReplicas: 1}}
+	provider := &fakeReplicaProvider{observation: provision.Observation{Exists: true, State: "ready", Endpoint: "http://gpu:8000", Details: `{}`}}
+	providers, err := NewReplicaBackends(ReplicaBackend{Name: "fixture", Cloud: "aws", Runtime: "sglang", Profile: testElasticProfile("fixture", "aws"), Provider: provider})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimes, err := integration.NewRuntimeBackends(integration.RuntimeBackend{
+		Profile:   integration.RuntimeProfile{Runtime: "sglang", ContractVersion: integration.RuntimeContractV1, AdapterVersion: "test", Protocol: "openai", Qualification: []integration.Qualification{{State: integration.QualificationSimulated, Environment: "hermetic"}}},
+		Inspector: fakeInspector{ready: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	operation := domain.Operation{ID: "operation-1", LeaseOwner: "worker", LeaseGeneration: 1, RequestJSON: `{"deployment_id":"deployment-1","name":"qwen","model":"Qwen/Qwen3-8B","cloud":"aws","region":"eu-central-1","gpu":"L40S","runtime":"sglang","tenant_id":"global","min_replicas":1,"max_replicas":1}`}
+
+	if _, err = CloudHandlersWithBackends(store, providers, runtimes)[ConvergeKind](context.Background(), operation); err != nil {
+		t.Fatalf("converge sglang deployment: %v", err)
+	}
+	if store.appliedRuntime != "sglang" || store.target.Runtime != "sglang" {
+		t.Fatalf("applied runtime=%q target runtime=%q", store.appliedRuntime, store.target.Runtime)
 	}
 }
 

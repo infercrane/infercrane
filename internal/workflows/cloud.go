@@ -313,7 +313,10 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 		}
 		request.DeploymentID = resolved.Deployment.ID
 		if request.Runtime == "" {
-			request.Runtime = support.DefaultRuntime
+			request.Runtime = resolved.Deployment.Runtime
+			if request.Runtime == "" {
+				request.Runtime = support.DefaultRuntime
+			}
 		}
 		backend, err := backends.ForAdapter(request.Cloud, request.Runtime, request.ProviderAdapter)
 		if err != nil {
@@ -364,7 +367,7 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 			targetURLs = append(targetURLs, targetURL)
 			resourceIDs = append(resourceIDs, resourceID)
 		}
-		deployment, err := store.ApplyDeploymentForTenant(ctx, request.TenantID, domain.Deployment{Name: request.Name, Model: request.Model, RoutingStrategy: resolved.Deployment.RoutingStrategy, MinReplicas: resolved.Deployment.MinReplicas, MaxReplicas: resolved.Deployment.MaxReplicas, AutoscalingEnabled: resolved.Deployment.AutoscalingEnabled}, targetNames)
+		deployment, err := store.ApplyDeploymentForTenant(ctx, request.TenantID, domain.Deployment{Name: request.Name, Model: request.Model, Runtime: request.Runtime, RoutingStrategy: resolved.Deployment.RoutingStrategy, MinReplicas: resolved.Deployment.MinReplicas, MaxReplicas: resolved.Deployment.MaxReplicas, AutoscalingEnabled: resolved.Deployment.AutoscalingEnabled}, targetNames)
 		if err != nil {
 			return "", classify("routing_registration_failed", err)
 		}
