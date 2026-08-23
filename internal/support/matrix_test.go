@@ -1,9 +1,20 @@
 package support
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
+
+func TestSGLangWorkloadPinsResolvedModelRevision(t *testing.T) {
+	command := SGLangWorkload().Command
+	for _, pair := range [][2]string{{"--model-path", "${MODEL}"}, {"--revision", "${MODEL_REVISION}"}} {
+		index := slices.Index(command, pair[0])
+		if index < 0 || index+1 >= len(command) || command[index+1] != pair[1] {
+			t.Fatalf("SGLang command does not preserve %s identity: %v", pair[0], command)
+		}
+	}
+}
 
 func TestV01QualificationIsExplicit(t *testing.T) {
 	matrix := V01()
