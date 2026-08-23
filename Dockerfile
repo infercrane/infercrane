@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-FROM golang:1.26.6-bookworm AS builder
+FROM golang:1.27.0-bookworm AS builder
 WORKDIR /build
 COPY go.mod go.sum ./
 # Keep the module cache in the builder layer. The same builder image is used as
