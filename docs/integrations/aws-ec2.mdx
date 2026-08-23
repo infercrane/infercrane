@@ -42,6 +42,7 @@ export INFERCRANE_AWS_GPU='L40S'
 export INFERCRANE_AWS_INSTANCE_PROFILE_ARN='arn:aws:iam::123456789012:instance-profile/infercrane-worker'
 export INFERCRANE_AWS_WORKER_SECRET_ARN='arn:aws:secretsmanager:eu-central-1:123456789012:secret:infercrane-worker-key'
 export INFERCRANE_AWS_IMAGE_DIGEST='vllm/vllm-openai@sha256:REPLACE_WITH_QUALIFIED_DIGEST'
+export INFERCRANE_AWS_ROOT_VOLUME_GIB='100'
 ```
 
 The Secrets Manager value referenced by `INFERCRANE_AWS_WORKER_SECRET_ARN` must contain the same
@@ -53,6 +54,11 @@ persists only the secret ARN in provider metadata.
 complete startup configuration. An SGLang or custom OCI revision supplies its own immutable image
 and argv; the EC2 adapter uses that revision workload instead of the vLLM default. It still uses the
 same private network, instance profile, worker secret and ownership tags.
+
+`INFERCRANE_AWS_ROOT_VOLUME_GIB` defaults to 100 GiB. InferCrane creates an encrypted `gp3` root
+volume that is deleted with the worker. Keep enough headroom for the GPU runtime image, model
+artifacts, tokenizer data, and temporary download files; values below 50 GiB are rejected before
+AWS mutation.
 
 Validate role assumption without creating a resource:
 

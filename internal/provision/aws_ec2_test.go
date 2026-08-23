@@ -22,6 +22,8 @@ type fakeAWSRunner struct {
 	runInstanceArgs    []string
 	roleFailurePayload string
 	instanceType       string
+	rootVolumeGiB      int
+	rootEncrypted      bool
 }
 
 func (f *fakeAWSRunner) Run(_ context.Context, environment []string, args ...string) ([]byte, error) {
@@ -44,13 +46,18 @@ func (f *fakeAWSRunner) Run(_ context.Context, environment []string, args ...str
 		if instanceType == "" {
 			instanceType = "g6e.xlarge"
 		}
-		response := map[string]any{"Reservations": []any{map[string]any{"Instances": []any{map[string]any{"InstanceId": f.instanceID, "ImageId": "ami-gpu", "InstanceType": instanceType, "SubnetId": "subnet-private", "PrivateIpAddress": "10.0.1.12", "IamInstanceProfile": map[string]string{"Arn": "arn:aws:iam::123456789012:instance-profile/infercrane-worker"}, "SecurityGroups": []map[string]string{{"GroupId": "sg-inference"}}, "State": map[string]string{"Name": f.state}, "Tags": []map[string]string{{"Key": "infercrane:external-key", "Value": f.externalKey}}}}}}}
+		rootVolumeGiB, rootEncrypted := f.rootVolumeGiB, f.rootEncrypted
+		if rootVolumeGiB == 0 {
+			rootVolumeGiB, rootEncrypted = 100, true
+		}
+		response := map[string]any{"Reservations": []any{map[string]any{"Instances": []any{map[string]any{"InstanceId": f.instanceID, "ImageId": "ami-gpu", "InstanceType": instanceType, "SubnetId": "subnet-private", "PrivateIpAddress": "10.0.1.12", "IamInstanceProfile": map[string]string{"Arn": "arn:aws:iam::123456789012:instance-profile/infercrane-worker"}, "SecurityGroups": []map[string]string{{"GroupId": "sg-inference"}}, "State": map[string]string{"Name": f.state}, "Tags": []map[string]string{{"Key": "infercrane:external-key", "Value": f.externalKey}, {"Key": "infercrane:root-volume-gib", "Value": fmt.Sprint(rootVolumeGiB)}, {"Key": "infercrane:root-volume-encrypted", "Value": fmt.Sprint(rootEncrypted)}}}}}}}
 		return json.Marshal(response)
 	case "run-instances":
 		f.createCalls++
 		f.runInstanceArgs = append([]string(nil), args...)
 		f.instanceID, f.state = "i-fixture", "running"
 		f.externalKey = awsArgumentTagExternalKey(args)
+		f.rootVolumeGiB, f.rootEncrypted = awsArgumentRootVolume(args)
 		if f.failAfterCreate {
 			f.failAfterCreate = false
 			return []byte("transport lost after create"), errors.New("transport lost")
@@ -87,6 +94,25 @@ func awsArgumentTagExternalKey(args []string) string {
 	return ""
 }
 
+func awsArgumentRootVolume(args []string) (int, bool) {
+	for i, arg := range args {
+		if arg != "--block-device-mappings" || i+1 >= len(args) {
+			continue
+		}
+		var mappings []struct {
+			DeviceName string
+			Ebs        struct {
+				VolumeSize int
+				Encrypted  bool
+			}
+		}
+		if json.Unmarshal([]byte(args[i+1]), &mappings) == nil && len(mappings) == 1 && mappings[0].DeviceName == "/dev/xvda" {
+			return mappings[0].Ebs.VolumeSize, mappings[0].Ebs.Encrypted
+		}
+	}
+	return 0, false
+}
+
 func testAWSEC2(runner CommandRunner) AWSEC2 {
 	return AWSEC2{
 		Runner: runner, RoleARN: "arn:aws:iam::123456789012:role/infercrane", Region: "eu-central-1",
@@ -117,7 +143,7 @@ func TestAWSEC2LifecycleIsIdempotentPrivateAndTagged(t *testing.T) {
 		t.Fatalf("observation=%#v err=%v", observation, err)
 	}
 	joined := strings.Join(runner.runInstanceArgs, " ")
-	if !strings.Contains(joined, `"AssociatePublicIpAddress":false`) || !strings.Contains(joined, "infercrane:external-key") || !strings.Contains(joined, "--client-token") || !strings.Contains(joined, "--count 1") || strings.Contains(joined, "--min-count") || strings.Contains(joined, "--max-count") || strings.Contains(joined, "temporary-secret") {
+	if !strings.Contains(joined, `"AssociatePublicIpAddress":false`) || !strings.Contains(joined, "infercrane:external-key") || !strings.Contains(joined, "--client-token") || !strings.Contains(joined, "--count 1") || !strings.Contains(joined, `"VolumeSize":100`) || !strings.Contains(joined, `"VolumeType":"gp3"`) || !strings.Contains(joined, `"Encrypted":true`) || !strings.Contains(joined, `"DeleteOnTermination":true`) || strings.Contains(joined, "--min-count") || strings.Contains(joined, "--max-count") || strings.Contains(joined, "temporary-secret") {
 		t.Fatalf("unsafe or non-idempotent run-instances args: %s", joined)
 	}
 	if err := provider.DeleteReplica(context.Background(), second); err != nil {
@@ -141,7 +167,7 @@ func TestAWSEC2PortableWorkloadUsesDigestArgvAndSecretEnvironment(t *testing.T) 
 			userData = runner.runInstanceArgs[i+1]
 		}
 	}
-	for _, want := range []string{"docker pull '" + spec.Workload.Image + "'", `-e INFERCRANE_WORKER_API_KEY="$worker_key"`, "'serve' '--model' 'Qwen/Qwen3-8B' '--label' 'two words' '--api-key' \"$worker_key\" '--port' '9000'"} {
+	for _, want := range []string{"docker pull '" + spec.Workload.Image + "'", `-e INFERCRANE_WORKER_API_KEY="$worker_key"`, "'serve' '--model' 'Qwen/Qwen3-8B' '--label' 'two words' '--api-key' \"$worker_key\" '--port' '9000'", `docker logs --follow "$container_id" >/dev/console 2>&1 &`} {
 		if !strings.Contains(userData, want) {
 			t.Fatalf("user data missing %q:\n%s", want, userData)
 		}
@@ -171,6 +197,23 @@ func TestAWSEC2RefusesMismatchedInstanceDuringAdoption(t *testing.T) {
 	}
 	if runner.createCalls != 0 {
 		t.Fatalf("provider created replacement while conflicting resource exists: %d", runner.createCalls)
+	}
+}
+
+func TestAWSEC2RefusesUnencryptedOrUndersizedRootVolumeDuringAdoption(t *testing.T) {
+	runner := &fakeAWSRunner{instanceID: "i-stale", externalKey: awsReplicaSpec().ExternalKey, state: "running", rootVolumeGiB: 30, rootEncrypted: false}
+	_, err := testAWSEC2(runner).EnsureReplica(context.Background(), awsReplicaSpec())
+	if err == nil || !strings.Contains(err.Error(), "encrypted root volume") || runner.createCalls != 0 {
+		t.Fatalf("unsafe root volume was adopted: creates=%d err=%v", runner.createCalls, err)
+	}
+}
+
+func TestAWSEC2RejectsUnsafeRootVolumeBeforeAWSCall(t *testing.T) {
+	runner := &fakeAWSRunner{}
+	provider := testAWSEC2(runner)
+	provider.RootVolumeGiB = 30
+	if _, err := provider.EnsureReplica(context.Background(), awsReplicaSpec()); err == nil || runner.createCalls != 0 {
+		t.Fatalf("unsafe root volume accepted: creates=%d err=%v", runner.createCalls, err)
 	}
 }
 

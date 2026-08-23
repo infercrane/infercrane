@@ -27,7 +27,7 @@ func (f *AWSCLI) Run(_ context.Context, _ []string, args ...string) ([]byte, err
 		if f.InstanceID == "" {
 			return []byte(`{"Reservations":[]}`), nil
 		}
-		response := map[string]any{"Reservations": []any{map[string]any{"Instances": []any{map[string]any{"InstanceId": f.InstanceID, "ImageId": "ami-gpu", "InstanceType": "g6e.xlarge", "SubnetId": "subnet-private", "PrivateIpAddress": "10.0.0.8", "IamInstanceProfile": map[string]string{"Arn": "arn:aws:iam::123456789012:instance-profile/worker"}, "SecurityGroups": []map[string]string{{"GroupId": "sg-worker"}}, "State": map[string]string{"Name": f.State}, "Tags": []map[string]string{{"Key": "infercrane:external-key", "Value": f.ExternalKey}}}}}}}
+		response := map[string]any{"Reservations": []any{map[string]any{"Instances": []any{map[string]any{"InstanceId": f.InstanceID, "ImageId": "ami-gpu", "InstanceType": "g6e.xlarge", "SubnetId": "subnet-private", "PrivateIpAddress": "10.0.0.8", "IamInstanceProfile": map[string]string{"Arn": "arn:aws:iam::123456789012:instance-profile/worker"}, "SecurityGroups": []map[string]string{{"GroupId": "sg-worker"}}, "State": map[string]string{"Name": f.State}, "Tags": []map[string]string{{"Key": "infercrane:external-key", "Value": f.ExternalKey}, {"Key": "infercrane:root-volume-gib", "Value": "100"}, {"Key": "infercrane:root-volume-encrypted", "Value": "true"}}}}}}}
 		return json.Marshal(response)
 	case "run-instances":
 		f.CreateCalls++

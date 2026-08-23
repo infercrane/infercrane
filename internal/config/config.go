@@ -24,6 +24,7 @@ type Config struct {
 	AWSRoleARN, AWSExternalID, AWSRegion, AWSSubnetID, AWSAMIID, AWSInstanceType, AWSGPU                               string
 	AWSInstanceProfileARN, AWSWorkerSecretARN, AWSImageDigest                                                          string
 	AWSSecurityGroupIDs                                                                                                []string
+	AWSRootVolumeGiB                                                                                                   int
 	GCPProject, GCPZone, GCPSubnet, GCPMachineType, GCPGPU, GCPServiceAccount                                          string
 	GCPVMImage, GCPContainerImage, GCPWorkerSecret                                                                     string
 	KubernetesContext, KubernetesNamespace, KubernetesWorkloadAPI, KubernetesServiceAccount                            string
@@ -256,6 +257,10 @@ func load(requireAPIKey bool) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	awsRootVolumeGiB, err := envInt("INFERCRANE_AWS_ROOT_VOLUME_GIB", 100)
+	if err != nil {
+		return Config{}, err
+	}
 	config := Config{
 		DatabaseURL:                 env("INFERCRANE_DATABASE_URL", "postgres://infercrane:infercrane@127.0.0.1:5432/infercrane?sslmode=disable"),
 		ControlURL:                  env("INFERCRANE_URL", "http://127.0.0.1:8080"),
@@ -289,6 +294,7 @@ func load(requireAPIKey bool) (Config, error) {
 		AWSInstanceProfileARN:       env("INFERCRANE_AWS_INSTANCE_PROFILE_ARN", ""),
 		AWSWorkerSecretARN:          env("INFERCRANE_AWS_WORKER_SECRET_ARN", ""),
 		AWSImageDigest:              env("INFERCRANE_AWS_IMAGE_DIGEST", ""),
+		AWSRootVolumeGiB:            awsRootVolumeGiB,
 		GCPProject:                  env("INFERCRANE_GCP_PROJECT", ""),
 		GCPZone:                     env("INFERCRANE_GCP_ZONE", ""),
 		GCPSubnet:                   env("INFERCRANE_GCP_SUBNET", ""),
@@ -415,6 +421,9 @@ func validateAWS(config Config) error {
 	}
 	if runtimecontract.ValidateImage(config.AWSImageDigest) != nil {
 		return errors.New("INFERCRANE_AWS_IMAGE_DIGEST must be pinned by sha256 digest")
+	}
+	if config.AWSRootVolumeGiB < 50 || config.AWSRootVolumeGiB > 16384 {
+		return errors.New("INFERCRANE_AWS_ROOT_VOLUME_GIB must be between 50 and 16384")
 	}
 	return nil
 }

@@ -3713,7 +3713,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 			SubnetID: cfg.AWSSubnetID, SecurityGroupIDs: cfg.AWSSecurityGroupIDs,
 			AMIID: cfg.AWSAMIID, InstanceType: cfg.AWSInstanceType, GPU: cfg.AWSGPU,
 			InstanceProfileARN: cfg.AWSInstanceProfileARN, WorkerSecretARN: cfg.AWSWorkerSecretARN,
-			ImageDigest: cfg.AWSImageDigest,
+			ImageDigest: cfg.AWSImageDigest, RootVolumeGiB: cfg.AWSRootVolumeGiB,
 		}
 		elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: "aws-ec2", Cloud: "aws", Runtime: "vllm", Default: true, Profile: awsProfile, Provider: awsProvider})
 		elasticBackends = append(elasticBackends,

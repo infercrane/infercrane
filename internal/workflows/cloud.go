@@ -1042,8 +1042,8 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 	}
 	if !ready {
 		_ = store.ObserveReplica(ctx, replica.ID, "starting", observation.Endpoint, "starting", observation.Details, time.Now())
-		_ = checkpoint(ctx, store, operation, step+".runtime", "waiting", observation, 70, "Worker reachable; waiting for model artifact and runtime readiness")
-		return "", "", "", operations.Retryable("runtime_starting", fmt.Errorf("worker is reachable; %s is downloading the model artifact or initializing the runtime", backend.Runtime))
+		_ = checkpoint(ctx, store, operation, step+".runtime", "waiting", observation, 70, "Provider endpoint assigned; waiting for runtime readiness")
+		return "", "", "", operations.Retryable("runtime_starting", fmt.Errorf("provider endpoint is assigned; %s may be pulling artifacts, initializing, or restarting", backend.Runtime))
 	}
 	if err = store.ObserveReplica(ctx, replica.ID, "ready", observation.Endpoint, "healthy", observation.Details, time.Now()); err != nil {
 		return "", "", "", classify("observation_failed", err)

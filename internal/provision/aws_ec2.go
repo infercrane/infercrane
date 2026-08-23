@@ -10,6 +10,7 @@ import (
 	"net"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -30,6 +31,7 @@ type AWSEC2 struct {
 	CostSource               string
 	CostObservedAt           time.Time
 	HourlyCostMicrousd       int64
+	RootVolumeGiB            int
 }
 
 type awsCredentials struct {
@@ -69,6 +71,8 @@ type awsInstance struct {
 	ImageID, InstanceType, SubnetID   string
 	InstanceProfileARN                string
 	SecurityGroupIDs                  []string
+	RootVolumeGiB                     int
+	RootVolumeEncrypted               bool
 }
 
 // Check performs a read-only role-assumption and identity probe. It validates
@@ -120,9 +124,12 @@ func (a AWSEC2) EnsureReplica(ctx context.Context, spec ReplicaSpec) (ProviderHa
 	userData := a.userData(spec, port)
 	network := []map[string]any{{"DeviceIndex": 0, "SubnetId": a.SubnetID, "Groups": a.SecurityGroupIDs, "AssociatePublicIpAddress": false}}
 	networkJSON, _ := json.Marshal(network)
-	tags := []map[string]any{{"ResourceType": "instance", "Tags": []map[string]string{{"Key": "infercrane:managed", "Value": "true"}, {"Key": "infercrane:external-key", "Value": spec.ExternalKey}, {"Key": "Name", "Value": "infercrane-" + spec.ExternalKey}}}}
+	rootVolumeGiB := a.rootVolumeGiB()
+	tags := []map[string]any{{"ResourceType": "instance", "Tags": []map[string]string{{"Key": "infercrane:managed", "Value": "true"}, {"Key": "infercrane:external-key", "Value": spec.ExternalKey}, {"Key": "infercrane:root-volume-gib", "Value": fmt.Sprint(rootVolumeGiB)}, {"Key": "infercrane:root-volume-encrypted", "Value": "true"}, {"Key": "Name", "Value": "infercrane-" + spec.ExternalKey}}}}
 	tagsJSON, _ := json.Marshal(tags)
-	args := []string{"ec2", "run-instances", "--region", a.Region, "--image-id", a.AMIID, "--instance-type", a.InstanceType, "--count", "1", "--client-token", a.clientToken(spec.ExternalKey), "--iam-instance-profile", "Arn=" + a.InstanceProfileARN, "--network-interfaces", string(networkJSON), "--tag-specifications", string(tagsJSON), "--user-data", userData, "--output", "json", "--no-cli-pager"}
+	blockDevices := []map[string]any{{"DeviceName": "/dev/xvda", "Ebs": map[string]any{"VolumeSize": rootVolumeGiB, "VolumeType": "gp3", "Encrypted": true, "DeleteOnTermination": true}}}
+	blockDevicesJSON, _ := json.Marshal(blockDevices)
+	args := []string{"ec2", "run-instances", "--region", a.Region, "--image-id", a.AMIID, "--instance-type", a.InstanceType, "--count", "1", "--client-token", a.clientToken(spec.ExternalKey), "--iam-instance-profile", "Arn=" + a.InstanceProfileARN, "--network-interfaces", string(networkJSON), "--block-device-mappings", string(blockDevicesJSON), "--tag-specifications", string(tagsJSON), "--user-data", userData, "--output", "json", "--no-cli-pager"}
 	output, err := a.run(ctx, args...)
 	if err != nil {
 		return ProviderHandle{}, fmt.Errorf("launch AWS EC2 instance: %w", err)
@@ -210,6 +217,9 @@ func (a AWSEC2) validate(spec ReplicaSpec) error {
 	if spec.GPU != a.GPU {
 		return fmt.Errorf("configured AWS instance type %s is qualified for GPU %s, not %s", a.InstanceType, a.GPU, spec.GPU)
 	}
+	if a.rootVolumeGiB() < 50 || a.rootVolumeGiB() > 16384 {
+		return errors.New("AWS root volume must be between 50 and 16384 GiB")
+	}
 	if !spec.Workload.Empty() {
 		if err := spec.Workload.Validate(); err != nil {
 			return fmt.Errorf("portable workload: %w", err)
@@ -256,8 +266,8 @@ func (a AWSEC2) validateAdoptedInstance(instance awsInstance) error {
 	actualGroups := append([]string(nil), instance.SecurityGroupIDs...)
 	sort.Strings(expectedGroups)
 	sort.Strings(actualGroups)
-	if instance.ImageID != a.AMIID || instance.InstanceType != a.InstanceType || instance.SubnetID != a.SubnetID || instance.InstanceProfileARN != a.InstanceProfileARN || strings.Join(actualGroups, "\x00") != strings.Join(expectedGroups, "\x00") {
-		return fmt.Errorf("AWS EC2 instance %s with durable key %q does not match the configured AMI, instance type, subnet, instance profile, and security groups", instance.ID, instance.ExternalKey)
+	if instance.ImageID != a.AMIID || instance.InstanceType != a.InstanceType || instance.SubnetID != a.SubnetID || instance.InstanceProfileARN != a.InstanceProfileARN || strings.Join(actualGroups, "\x00") != strings.Join(expectedGroups, "\x00") || instance.RootVolumeGiB != a.rootVolumeGiB() || !instance.RootVolumeEncrypted {
+		return fmt.Errorf("AWS EC2 instance %s with durable key %q does not match the configured AMI, instance type, subnet, instance profile, security groups, and encrypted root volume", instance.ID, instance.ExternalKey)
 	}
 	return nil
 }
@@ -279,8 +289,13 @@ func (a AWSEC2) describe(ctx context.Context, filter string) ([]awsInstance, err
 				item.SecurityGroupIDs = append(item.SecurityGroupIDs, group.GroupID)
 			}
 			for _, tag := range instance.Tags {
-				if tag.Key == "infercrane:external-key" {
+				switch tag.Key {
+				case "infercrane:external-key":
 					item.ExternalKey = tag.Value
+				case "infercrane:root-volume-gib":
+					item.RootVolumeGiB, _ = strconv.Atoi(tag.Value)
+				case "infercrane:root-volume-encrypted":
+					item.RootVolumeEncrypted = tag.Value == "true"
 				}
 			}
 			out = append(out, item)
@@ -326,6 +341,13 @@ func (a AWSEC2) clientToken(externalKey string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+func (a AWSEC2) rootVolumeGiB() int {
+	if a.RootVolumeGiB > 0 {
+		return a.RootVolumeGiB
+	}
+	return 100
+}
+
 func (a AWSEC2) userData(spec ReplicaSpec, port int) string {
 	if !spec.Workload.Empty() {
 		args := append(append([]string(nil), spec.Workload.Command...), spec.RuntimeArgs...)
@@ -342,7 +364,7 @@ func (a AWSEC2) userData(spec ReplicaSpec, port int) string {
 			}
 		}
 		image := spec.Workload.Image
-		return "#!/bin/sh\nset -eu\nworker_key=$(aws secretsmanager get-secret-value --region " + shellQuote(a.Region) + " --secret-id " + shellQuote(a.WorkerSecretARN) + " --query SecretString --output text)\ndocker pull " + shellQuote(image) + "\ndocker run -d --restart=unless-stopped --gpus all -e INFERCRANE_WORKER_API_KEY=\"$worker_key\" -p " + fmt.Sprintf("%d:%d", port, port) + " " + shellQuote(image) + " " + strings.Join(quoted, " ") + "\n"
+		return "#!/bin/sh\nset -eu\nworker_key=$(aws secretsmanager get-secret-value --region " + shellQuote(a.Region) + " --secret-id " + shellQuote(a.WorkerSecretARN) + " --query SecretString --output text)\ndocker pull " + shellQuote(image) + "\ncontainer_id=$(docker run -d --restart=unless-stopped --gpus all -e INFERCRANE_WORKER_API_KEY=\"$worker_key\" -p " + fmt.Sprintf("%d:%d", port, port) + " " + shellQuote(image) + " " + strings.Join(quoted, " ") + ")\ndocker logs --follow \"$container_id\" >/dev/console 2>&1 &\n"
 	}
 	args := []string{"--model", spec.Model, "--port", fmt.Sprint(port), "--api-key", "$worker_key"}
 	if spec.ModelRevision != "" {
@@ -357,7 +379,7 @@ func (a AWSEC2) userData(spec ReplicaSpec, port int) string {
 			quoted[i] = shellQuote(arg)
 		}
 	}
-	return "#!/bin/sh\nset -eu\nworker_key=$(aws secretsmanager get-secret-value --region " + shellQuote(a.Region) + " --secret-id " + shellQuote(a.WorkerSecretARN) + " --query SecretString --output text)\ndocker pull " + shellQuote(a.ImageDigest) + "\ndocker run -d --restart=unless-stopped --gpus all -p " + fmt.Sprintf("%d:%d", port, port) + " " + shellQuote(a.ImageDigest) + " " + strings.Join(quoted, " ") + "\n"
+	return "#!/bin/sh\nset -eu\nworker_key=$(aws secretsmanager get-secret-value --region " + shellQuote(a.Region) + " --secret-id " + shellQuote(a.WorkerSecretARN) + " --query SecretString --output text)\ndocker pull " + shellQuote(a.ImageDigest) + "\ncontainer_id=$(docker run -d --restart=unless-stopped --gpus all -p " + fmt.Sprintf("%d:%d", port, port) + " " + shellQuote(a.ImageDigest) + " " + strings.Join(quoted, " ") + ")\ndocker logs --follow \"$container_id\" >/dev/console 2>&1 &\n"
 }
 
 func normalizeAWSState(state string) string {

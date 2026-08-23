@@ -107,8 +107,12 @@ func TestAWSBYOCConfigurationIsAllOrNothingAndImmutable(t *testing.T) {
 	}
 	t.Setenv("INFERCRANE_AWS_IMAGE_DIGEST", "ghcr.io/infercrane/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	cfg, err := Load()
-	if err != nil || !cfg.AWSEnabled() || len(cfg.AWSSecurityGroupIDs) != 2 {
+	if err != nil || !cfg.AWSEnabled() || len(cfg.AWSSecurityGroupIDs) != 2 || cfg.AWSRootVolumeGiB != 100 {
 		t.Fatalf("cfg=%#v err=%v", cfg, err)
+	}
+	t.Setenv("INFERCRANE_AWS_ROOT_VOLUME_GIB", "30")
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "ROOT_VOLUME_GIB") {
+		t.Fatalf("expected unsafe AWS root volume failure, got %v", err)
 	}
 }
 

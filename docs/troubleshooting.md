@@ -7,7 +7,7 @@ description: Diagnose configuration, provisioning, readiness, routing, rollout, 
 
 Start with `infercrane doctor`, then `status`, `events`, `inspect`, and `explain`. Use `operation ID` when a lifecycle operation is retrying. `inspect` exposes provider request/resource IDs needed to reconcile external inventory.
 
-- **Provisioning appears stuck:** read the durable progress message before changing anything. `provider is allocating capacity` and `provider capacity and secure worker bootstrap` mean the runtime is not reachable yet; `model artifact and runtime readiness` means the worker is reachable but its model is still loading. Check `operation ID`, `inspect`, and provider inventory. Do not submit another deployment with a different idempotency key.
+- **Provisioning appears stuck:** read the durable progress message before changing anything. `provider is allocating capacity` means no provider endpoint exists yet. `provider endpoint assigned; waiting for runtime readiness` means the runtime may be pulling artifacts, initializing, or restarting; it does not prove that a process is listening. Check `operation ID`, `inspect`, provider inventory, and provider boot logs. Do not submit another deployment with a different idempotency key.
 - **Deployment is degraded:** run the general explanation and verify expected model readiness on each replica.
 - **Not scaling:** use `explain scaling`; check thresholds, consecutive intervals, bounds, and cooldown.
 - **Candidate rejected:** use `explain rollout`; compare persisted metrics and policy rather than retrying promotion blindly.
@@ -15,7 +15,7 @@ Start with `infercrane doctor`, then `status`, `events`, `inspect`, and `explain
 - **Delete interrupted:** reconnect and inspect the same durable operation. Confirm provider inventory is empty before considering cleanup complete.
 - **AWS deployment is rejected before provisioning:** run `infercrane doctor --aws`; verify the
   complete `INFERCRANE_AWS_*` set, exact requested region/GPU, immutable image digest, role trust,
-  private subnet reachability, and instance-profile access to the worker secret. Retrying a
+  encrypted root-volume size, private subnet reachability, and instance-profile access to the worker secret. Retrying a
   configuration error does not create capacity.
 - **Kubernetes deployment is rejected before provisioning:** run `infercrane doctor --kubernetes`;
   verify the explicit context, namespace RoleBinding, immutable image, GPU label/resource, worker
