@@ -3,6 +3,48 @@
 This evidence was captured on 2026-08-23 from the private AWS BYOC qualification in
 `eu-central-1`. It is release qualification, not a public performance comparison.
 
+## Model-diverse workload matrix — partial Mistral qualification
+
+Run `20260823T092044Z-c310780-mistral-final` exercised the pinned
+`mistralai/Mistral-7B-Instruct-v0.3` revision at InferCrane commit `c310780` using vLLM 0.22.0 on
+one AWS L40S (`g6e.xlarge`). The three completed profiles persisted 1,024 successful requests with
+no failed requests:
+
+| Workload profile | Concurrency | Requests | TTFT p95 | TPOT p95 | Latency p95 | Output tok/s |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| interactive | 1 | 256 | 59.7 ms | 20.23 ms | 2,623.9 ms | 48.65 |
+| balanced | 8 | 256 | 130.3 ms | 21.97 ms | 2,891.2 ms | 355.54 |
+| throughput | 32 | 512 | 199.0 ms | 29.64 ms | 7,666.8 ms | 1,103.55 |
+
+These rows compare workload shapes on one runtime configuration. They do not prove that the
+throughput-oriented runtime profile is faster than the interactive runtime profile. That claim
+requires two immutable candidate revisions to run the same workload digest before Inference Lab or
+Release Guard may rank them.
+
+The deployment completed in 11 minutes 10 seconds. Closed startup markers measured approximately
+4 minutes 4 seconds for the immutable runtime-image pull and 45 seconds from runtime start to the
+container-start marker. The remaining time included AWS placement, model-artifact materialization,
+vLLM initialization, health, and stable-route publication. This is a measured cold miss, not a
+prewarmed startup claim.
+
+The subsequent buffered profile exposed a real AIPerf 0.9 integration defect: InferCrane emitted
+the unsupported `--no-streaming` option. Commit `c5f8987` fixes buffered mode by omitting the
+opt-in `--streaming` flag and adds a regression test that rejects the nonexistent inverse flag.
+Repository verification and the focused race test pass after the fix. A paid retry was attempted
+in each existing qualification subnet across `eu-central-1a`, `eu-central-1b`, and
+`eu-central-1c`; AWS reported insufficient `g6e.xlarge` capacity before creating an instance.
+
+Therefore the real-AWS qualification state is deliberately split:
+
+- `interactive`, `balanced`, and `throughput`: passed for the exact Mistral/vLLM/L40S tuple above;
+- `buffered`: implementation fixed and locally regression-tested, real-GPU requalification pending;
+- `long-context`, `long-generation`, and `overload`: real-GPU qualification pending;
+- DeepSeek R1 Distill 7B and Granite 3.3 8B: pinned qualification paths prepared, real runs pending.
+
+The failed matrix run deleted its workload instance and root volume. Every capacity retry created
+zero workload resources. Direct final inventory returned zero active InferCrane-managed instances
+and zero active managed EBS volumes, and the reusable qualification runner was stopped.
+
 ## Final cache-aware implementation run
 
 The post-fix matrix passed again at InferCrane commit
