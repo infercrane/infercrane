@@ -28,7 +28,8 @@ Create a project from one reviewed entry:
 
 ```bash
 infercrane workload init ./support-model \
-  --recipe mistral-7b-instruct
+  --recipe mistral-7b-instruct \
+  --profile vllm-interactive
 
 cd ./support-model
 infercrane workload validate
@@ -38,6 +39,25 @@ infercrane workload deploy --wait
 
 The browser console exposes the same control-plane catalog under **Models**. A model detail page
 shows the immutable identity and qualification scope before the deployment form is populated.
+
+## Pick an operating objective, then measure it
+
+Generation recipes may expose three reviewed vLLM candidate profiles:
+
+| Serving profile | Intended trade-off | Immutable runtime arguments |
+| --- | --- | --- |
+| `vllm-balanced` | General production starting point with repeated-prefix reuse | `--enable-prefix-caching` |
+| `vllm-interactive` | Favor decode responsiveness | Prefix caching and `--max-num-batched-tokens 2048` |
+| `vllm-throughput` | Favor aggregate token throughput | Prefix caching and `--max-num-batched-tokens 16384` |
+
+These are configuration-verified candidates, not performance claims. The selected profile is written
+into `infercrane.yaml`, including immutable runtime arguments, accelerator hint, replica bounds, and
+cache-aware routing. Review or edit that ordinary DeploymentSpec before `plan`.
+
+The candidates follow upstream [vLLM optimization guidance](https://docs.vllm.ai/en/latest/configuration/optimization/),
+which explicitly describes latency/throughput trade-offs for chunked prefill and requires workload-
+specific measurement. Benchmark the exact model, GPU, runtime version, and traffic shape before
+promotion; a value that helps one workload can hurt another or increase memory pressure.
 
 ## Evidence levels
 

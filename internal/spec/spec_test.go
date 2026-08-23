@@ -120,6 +120,18 @@ func TestLoadPortableRuntimeContracts(t *testing.T) {
 	}
 }
 
+func TestLoadPinnedAWSModelQualificationExamples(t *testing.T) {
+	for _, name := range []string{"aws-mistral-7b.yaml", "aws-deepseek-r1-distill-7b.yaml", "aws-granite-8b.yaml"} {
+		deployment, err := Load("../../examples/" + name)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if deployment.Provider.Cloud != "aws" || deployment.Provider.Region == "" || deployment.Model.Revision == "" || deployment.Model.Revision == "main" || deployment.Runtime.Engine != "vllm" || deployment.Resources.GPU != "L40S" {
+			t.Fatalf("%s is not an immutable AWS qualification intent: %#v", name, deployment)
+		}
+	}
+}
+
 func TestLoadRejectsUnknownPortableWorkloadField(t *testing.T) {
 	_, err := Load(writeSpec(t, `
 name: custom

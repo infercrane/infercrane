@@ -1,0 +1,15 @@
+apiVersion: infercrane.dev/v1
+kind: Deployment
+name: mistral-aws
+model:
+  id: mistralai/Mistral-7B-Instruct-v0.3
+  revision: c170c708c41dac9275d15a8fff4eca08d52bab71
+runtime:
+  engine: vllm
+  version: 0.22.0
+  args: [--enable-prefix-caching]
+compute: {mode: elastic}
+provider: {cloud: aws, region: eu-central-1}
+resources: {gpu: L40S}
+scaling: {min_replicas: 1, max_replicas: 1}
+routing: {strategy: cache-aware}

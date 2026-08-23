@@ -1077,7 +1077,9 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 		_ = checkpoint(ctx, store, operation, step+".runtime", "waiting", observation, 70, "Provider endpoint assigned; waiting for runtime readiness")
 		return "", "", "", operations.Retryable("runtime_starting", fmt.Errorf("provider endpoint is assigned; %s may be pulling artifacts, initializing, or restarting", backend.Runtime))
 	}
-	if err = store.ObserveReplica(ctx, replica.ID, "ready", observation.Endpoint, "healthy", observation.Details, time.Now()); err != nil {
+	readyAt := time.Now().UTC()
+	readyDetails := withRuntimeReadyEvidence(observation.Details, readyAt)
+	if err = store.ObserveReplica(ctx, replica.ID, "ready", observation.Endpoint, "healthy", readyDetails, readyAt); err != nil {
 		return "", "", "", classify("observation_failed", err)
 	}
 	targetName = fmt.Sprintf("%s-r%d", request.Name, ordinal)
@@ -1088,17 +1090,30 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 	if err != nil {
 		return "", "", "", classify("target_registration_failed", err)
 	}
-	if err = store.UpdateProvisionedTarget(ctx, target.ID, ensured.ResourceID, observation.Details); err != nil {
+	if err = store.UpdateProvisionedTarget(ctx, target.ID, ensured.ResourceID, readyDetails); err != nil {
 		return "", "", "", classify("target_metadata_failed", err)
 	}
 	lifecycle := "active"
 	if request.Candidate {
 		lifecycle = "ready"
 	}
-	if err = store.ObserveReplica(ctx, replica.ID, lifecycle, observation.Endpoint, "healthy", observation.Details, time.Now()); err != nil {
+	if err = store.ObserveReplica(ctx, replica.ID, lifecycle, observation.Endpoint, "healthy", readyDetails, readyAt); err != nil {
 		return "", "", "", classify("activation_failed", err)
 	}
 	return targetName, observation.Endpoint, ensured.ResourceID, nil
+}
+
+func withRuntimeReadyEvidence(details string, readyAt time.Time) string {
+	value := map[string]any{}
+	if json.Unmarshal([]byte(details), &value) != nil {
+		value = map[string]any{}
+	}
+	value["runtime_ready_at"] = readyAt.UTC()
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return `{}`
+	}
+	return string(encoded)
 }
 
 // providerCapacityMessage exposes only boundaries reported by the provider. It

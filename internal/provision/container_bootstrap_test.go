@@ -42,3 +42,23 @@ func TestCachedImageBootstrapUsesPresentDigestBeforePull(t *testing.T) {
 		t.Fatalf("missing image was not pulled: %q", logged)
 	}
 }
+
+func TestRequiredImageCachePolicyFailsBeforeNetworkPull(t *testing.T) {
+	binDir := t.TempDir()
+	logFile := filepath.Join(binDir, "docker.log")
+	fakeDocker := filepath.Join(binDir, "docker")
+	if err := os.WriteFile(fakeDocker, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >>\"$DOCKER_LOG\"\nexit 1\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	image := "registry.example/runtime@sha256:" + strings.Repeat("b", 64)
+	command := exec.Command("sh", "-c", "infercrane_stage() { printf '%s\\n' \"$1\"; };\n"+cachedImageBootstrapWithPolicy(image, "required"))
+	command.Env = append(os.Environ(), "PATH="+binDir+":"+os.Getenv("PATH"), "DOCKER_LOG="+logFile)
+	output, err := command.CombinedOutput()
+	if err == nil || !strings.Contains(string(output), "image_cache_miss_required") {
+		t.Fatalf("output=%s err=%v", output, err)
+	}
+	logged, readErr := os.ReadFile(logFile)
+	if readErr != nil || strings.Contains(string(logged), "pull") {
+		t.Fatalf("required-cache miss attempted network pull: %q err=%v", logged, readErr)
+	}
+}

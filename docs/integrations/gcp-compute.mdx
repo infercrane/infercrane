@@ -22,6 +22,9 @@ intended project resources. For Docker Compose, set `GCLOUD_CONFIG_DIR` to a rea
 configuration directory. Prefer workload identity when the control plane runs on GCP; do not put a
 service-account key in a DeploymentSpec. Configure all fields together:
 
+Allow read-only serial-port output if startup waterfall evidence is required. InferCrane retains
+only its closed `infercrane_startup` markers and discards every other console line.
+
 ```bash
 export INFERCRANE_GCP_PROJECT='acme-production'
 export INFERCRANE_GCP_ZONE='europe-west4-a'

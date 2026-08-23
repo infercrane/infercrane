@@ -11,6 +11,36 @@ InferCrane delegates load generation and measurement to [AIPerf](https://github.
 infercrane benchmark qwen-prod --requests 1000 --concurrency 32
 ```
 
+Use a versioned workload profile when you want comparable evidence for a specific operating goal:
+
+```console
+infercrane benchmark mistral-prod --profile interactive \
+  --ttft-slo-ms 250 --tpot-slo-ms 25
+
+infercrane benchmark mistral-prod --profile throughput
+infercrane benchmark mistral-prod --profile long-context
+infercrane benchmark mistral-prod --profile buffered
+```
+
+Profiles define load shape, not runtime tuning claims. `interactive`, `balanced`, `throughput`,
+`buffered`, `long-context`, `long-generation`, and `overload` record their immutable
+`benchmark-profile-v1` identity inside the workload evidence. Explicit token or concurrency flags
+override profile defaults and remain visible in the result.
+
+For a bounded qualification sweep across concurrency 1, 8, 32, and 128 plus long prompt,
+long-generation, streaming, buffered, and overload shapes:
+
+```console
+scripts/benchmark-matrix.sh mistral-prod --approve-load
+```
+
+The script refuses to send load without explicit approval, archives each control-plane result,
+validates failure bounds, and produces `.infercrane/performance/RUN_ID/matrix.json`. Set
+`INFERCRANE_BENCHMARK_TTFT_SLO_MS`, `INFERCRANE_BENCHMARK_TPOT_SLO_MS`, and/or
+`INFERCRANE_BENCHMARK_LATENCY_SLO_MS` to compute measured goodput: successful requests per second
+that satisfy every declared threshold. A zero threshold means no SLO was declared and goodput stays
+unavailable rather than being invented.
+
 The CLI submits the benchmark through the authenticated control-plane API. The control plane resolves the active immutable revision, runs AIPerf against the logical InferCrane endpoint, and persists the result. A fixed dataset seed defaults to `17` and can be changed with `--random-seed`.
 
 Release Guard validation can benchmark an isolated candidate explicitly:
@@ -29,11 +59,73 @@ version and workload parameters match exactly.
 
 Each result records the immutable ModelArtifact, runtime and configuration, revision, provider,
 region, GPU type and grounded GPU count, compute mode, workload parameters, TTFT, TPOT, request
-latency, throughput, errors, timestamp, and exact reproduction command. The persisted command uses
+latency, throughput, SLO goodput when declared, errors, timestamp, and exact reproduction command. The persisted command uses
 a portable local export prefix rather than the deleted temporary execution directory, and replaces
-the credential with its environment-variable reference. Goodput and GPU telemetry remain explicit
-`null` values, while cost metadata contains `available: false` and a reason when AIPerf or the
-provider did not measure them; none are fabricated.
+the credential with its environment-variable reference. GPU telemetry remains explicit `null`, and
+goodput remains `null` without SLO thresholds. Cost metadata contains `available: false` and a reason
+when AIPerf or the provider did not measure it; none are fabricated.
+
+## What “fast” means
+
+InferCrane does not promise one globally fastest configuration. It measures the exact combination
+and lets the operator choose the objective:
+
+| Objective | Primary evidence |
+| --- | --- |
+| Interactive latency | TTFT and TPOT percentiles under the declared concurrency |
+| Throughput | Output tokens/second and requests/second with bounded errors |
+| Cost efficiency | Measured tokens per sourced currency unit; unavailable until cost evidence exists |
+| Long context | TTFT, total latency, memory safety, and errors at the declared prompt shape |
+| Fast startup | Time-to-ready waterfall and verified image/artifact cache state |
+| Reliability | Goodput under explicit SLOs, rollout evidence, and active-stream safety |
+
+Runtime arguments are immutable revision data. Tune a candidate, run the same profile against active
+and candidate revisions, and let Release Guard compare matching evidence before promotion. This is
+how InferCrane can provide a fast qualified default without turning an upstream vLLM or SGLang flag
+into an unsupported universal claim.
+
+For reviewed generation models, scaffold two candidate projects and preserve their different runtime
+arguments explicitly:
+
+```console
+infercrane workload init ./mistral-interactive \
+  --recipe mistral-7b-instruct --profile vllm-interactive
+infercrane workload init ./mistral-throughput \
+  --recipe mistral-7b-instruct --profile vllm-throughput
+```
+
+Deploy them as isolated candidates, benchmark both with the *same* workload profile, then use Lab or
+Release Guard. Serving-profile names describe runtime configuration; benchmark-profile names describe
+load. Neither is evidence until the resulting measurements are persisted.
+
+Compare multiple measured configurations with the same workload:
+
+```console
+infercrane lab 'mistralai/Mistral-7B-Instruct-v0.3@IMMUTABLE_COMMIT' \
+  --objective latency \
+  --profile interactive
+
+infercrane lab 'mistralai/Mistral-7B-Instruct-v0.3@IMMUTABLE_COMMIT' \
+  --objective cost-efficiency \
+  --profile throughput
+```
+
+Lab emits `RECOMMENDED` only when candidates share one exact workload digest and the required
+metric—and sourced hourly cost for cost efficiency—is present. Unlike workload shapes remain
+`UNRANKED`.
+
+Maintainers can qualify one pinned AWS model family at a time without rerunning unrelated runtime
+paths:
+
+```console
+scripts/aws-performance-qualification.sh mistral --approve-paid-resources
+scripts/aws-performance-qualification.sh deepseek --approve-paid-resources
+scripts/aws-performance-qualification.sh granite --approve-paid-resources
+```
+
+Each run uses the same seven-profile matrix and independent zero-resource inventory. These are paid,
+commit-bound qualification commands—not normal developer tests and not permission to publish a
+cross-model performance claim.
 
 InferCrane normalizes the unit carried by each AIPerf latency record to milliseconds and rejects
 unknown units instead of silently mislabeling evidence. Percentiles reconstructed from those records

@@ -224,13 +224,16 @@ DeploymentSpec for build, plan, and deployment:
 
 ```bash
 infercrane workload init ./fraud-explainer \
-  --model mistralai/Mistral-7B-Instruct-v0.3
+  --recipe mistral-7b-instruct \
+  --profile vllm-interactive
 infercrane workload validate ./fraud-explainer
 infercrane workload plan ./fraud-explainer
 infercrane workload deploy ./fraud-explainer --wait
 ```
 
-`workload init --recipe NAME` pins a reviewed model commit. `workload build --tag IMAGE` performs a
+`workload init --recipe NAME --profile PROFILE` pins a reviewed model commit and writes the selected
+candidate's runtime arguments, GPU hint, replica bounds, and routing policy. The default profile is
+the recipe's general starting point; profiles are not benchmark claims. `workload build --tag IMAGE` performs a
 local Docker Buildx build for custom OCI projects; add `--push` to record a registry-confirmed
 immutable digest. `workload dev` binds a custom OCI workload only to loopback. See
 [Inference projects](/features/inference-projects).
@@ -557,29 +560,37 @@ universal GPU-fit claims. See [Verified Models](/features/model-catalog).
 Run AIPerf and persist the exact reproduction metadata.
 
 ```bash
-infercrane benchmark qwen-prod \
-  --requests 1000 \
-  --concurrency 32 \
-  --random-seed 17 \
+infercrane benchmark mistral-prod \
+  --profile interactive \
+  --ttft-slo-ms 250 \
+  --tpot-slo-ms 25 \
   --revision active
 ```
 
-`--revision` accepts `active`, `candidate`, or an explicit revision ID. Defaults are 100 requests, concurrency 10, and seed 17.
+`--profile` accepts `balanced`, `buffered`, `interactive`, `long-context`, `long-generation`,
+`overload`, or `throughput`. Profiles are immutable workload shapes; explicit request,
+concurrency, token, and streaming flags override their defaults. `--revision` accepts `active`,
+`candidate`, or an explicit revision ID. Without a profile, defaults remain 100 requests,
+concurrency 10, and seed 17. Declared TTFT, TPOT, or total-latency SLOs produce measured goodput.
 
 Capture and search immutable recipes only after a matching benchmark exists:
 
 ```bash
-infercrane recipe create qwen-prod --name qwen3-balanced --version 1.0.0
-infercrane recipes qwen3 --limit 20
+infercrane recipe create mistral-prod --name mistral-balanced --version 1.0.0
+infercrane recipes mistral --limit 20
 ```
 
 Compare persisted measured configurations without provisioning new capacity:
 
 ```bash
-infercrane lab 'Qwen/Qwen3-8B@IMMUTABLE_COMMIT' --max-ttft-p95-ms 250
+infercrane lab 'mistralai/Mistral-7B-Instruct-v0.3@IMMUTABLE_COMMIT' \
+  --objective throughput \
+  --profile throughput
 ```
 
-See [Recipes and Inference Lab](/features/recipes-lab) for the provenance and missing-evidence contract.
+The objective can be `latency`, `throughput`, or `cost-efficiency`. InferCrane recommends only across
+an exact common workload digest; mixed shapes remain `UNRANKED`. See
+[Recipes and Inference Lab](/features/recipes-lab) for the provenance and missing-evidence contract.
 
 ## Replay and capacity
 

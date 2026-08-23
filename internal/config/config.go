@@ -23,6 +23,7 @@ type Config struct {
 	RunPodAPIKey, RunPodServerlessTemplateID, RunPodRESTURL                                                            string
 	AWSRoleARN, AWSExternalID, AWSRegion, AWSSubnetID, AWSAMIID, AWSInstanceType, AWSGPU                               string
 	AWSInstanceProfileARN, AWSWorkerSecretARN, AWSImageDigest                                                          string
+	AWSImageCachePolicy                                                                                                string
 	AWSSecurityGroupIDs                                                                                                []string
 	AWSRootVolumeGiB                                                                                                   int
 	GCPProject, GCPZone, GCPSubnet, GCPMachineType, GCPGPU, GCPServiceAccount                                          string
@@ -294,6 +295,7 @@ func load(requireAPIKey bool) (Config, error) {
 		AWSInstanceProfileARN:       env("INFERCRANE_AWS_INSTANCE_PROFILE_ARN", ""),
 		AWSWorkerSecretARN:          env("INFERCRANE_AWS_WORKER_SECRET_ARN", ""),
 		AWSImageDigest:              env("INFERCRANE_AWS_IMAGE_DIGEST", ""),
+		AWSImageCachePolicy:         env("INFERCRANE_AWS_IMAGE_CACHE_POLICY", "prefer"),
 		AWSRootVolumeGiB:            awsRootVolumeGiB,
 		GCPProject:                  env("INFERCRANE_GCP_PROJECT", ""),
 		GCPZone:                     env("INFERCRANE_GCP_ZONE", ""),
@@ -424,6 +426,9 @@ func validateAWS(config Config) error {
 	}
 	if config.AWSRootVolumeGiB < 50 || config.AWSRootVolumeGiB > 16384 {
 		return errors.New("INFERCRANE_AWS_ROOT_VOLUME_GIB must be between 50 and 16384")
+	}
+	if config.AWSImageCachePolicy != "prefer" && config.AWSImageCachePolicy != "required" {
+		return errors.New("INFERCRANE_AWS_IMAGE_CACHE_POLICY must be prefer or required")
 	}
 	return nil
 }

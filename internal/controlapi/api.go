@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -32,6 +33,7 @@ import (
 	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/lab"
 	"github.com/infercrane/infercrane/internal/passport"
+	"github.com/infercrane/infercrane/internal/performanceprofile"
 	"github.com/infercrane/infercrane/internal/qualityevidence"
 	"github.com/infercrane/infercrane/internal/recipe"
 	"github.com/infercrane/infercrane/internal/support"
@@ -2504,12 +2506,18 @@ func (a API) runBenchmark(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var request struct {
-		Requests     int    `json:"requests"`
-		Concurrency  int    `json:"concurrency"`
-		InputTokens  int    `json:"input_tokens"`
-		OutputTokens int    `json:"output_tokens"`
-		RandomSeed   int64  `json:"random_seed"`
-		Revision     string `json:"revision"`
+		Requests       int     `json:"requests"`
+		Concurrency    int     `json:"concurrency"`
+		InputTokens    int     `json:"input_tokens"`
+		OutputTokens   int     `json:"output_tokens"`
+		RandomSeed     int64   `json:"random_seed"`
+		Revision       string  `json:"revision"`
+		Streaming      *bool   `json:"streaming"`
+		TTFTSLOMS      float64 `json:"ttft_slo_ms"`
+		TPOTSLOMS      float64 `json:"tpot_slo_ms"`
+		LatencySLOMS   float64 `json:"latency_slo_ms"`
+		Profile        string  `json:"profile"`
+		ProfileVersion string  `json:"profile_version"`
 	}
 	if !decodeMutationBody(w, r, &request) {
 		return
@@ -2530,6 +2538,16 @@ func (a API) runBenchmark(w http.ResponseWriter, r *http.Request) {
 	if request.InputTokens < 1 || request.InputTokens > 1000000 || request.OutputTokens < 1 || request.OutputTokens > 1000000 {
 		writeError(w, http.StatusUnprocessableEntity, "validation_failed", "input_tokens and output_tokens must be 1..1000000")
 		return
+	}
+	if request.TTFTSLOMS < 0 || request.TPOTSLOMS < 0 || request.LatencySLOMS < 0 {
+		writeError(w, http.StatusUnprocessableEntity, "validation_failed", "benchmark SLO thresholds cannot be negative")
+		return
+	}
+	if request.Profile != "" {
+		if _, profileErr := performanceprofile.Get(request.Profile); profileErr != nil || request.ProfileVersion != performanceprofile.Version {
+			writeError(w, http.StatusUnprocessableEntity, "validation_failed", "benchmark profile and version must identify a supported immutable workload profile")
+			return
+		}
 	}
 	principal := r.Context().Value(identityKey{}).(domain.Principal)
 	resolved, err := a.Store.ResolveForTenant(r.Context(), principal.TenantID, r.PathValue("name"))
@@ -2619,7 +2637,11 @@ func (a API) runBenchmark(w http.ResponseWriter, r *http.Request) {
 			apiKeyEnv = backend.APIKeyEnv
 		}
 	}
-	measured, err := a.BenchmarkRunner.Run(r.Context(), benchmark.Config{Binary: a.AIPerfBinary, Endpoint: endpoint, APIKey: credential, APIKeyEnv: apiKeyEnv, Model: model, Tokenizer: artifact.Repository, Requests: request.Requests, Concurrency: request.Concurrency, InputTokens: request.InputTokens, OutputTokens: request.OutputTokens, RandomSeed: request.RandomSeed})
+	streaming := true
+	if request.Streaming != nil {
+		streaming = *request.Streaming
+	}
+	measured, err := a.BenchmarkRunner.Run(r.Context(), benchmark.Config{Binary: a.AIPerfBinary, Endpoint: endpoint, APIKey: credential, APIKeyEnv: apiKeyEnv, Model: model, Tokenizer: artifact.Repository, Requests: request.Requests, Concurrency: request.Concurrency, InputTokens: request.InputTokens, OutputTokens: request.OutputTokens, RandomSeed: request.RandomSeed, Streaming: &streaming, TTFTSLOMS: request.TTFTSLOMS, TPOTSLOMS: request.TPOTSLOMS, LatencySLOMS: request.LatencySLOMS})
 	if err != nil {
 		writeError(w, 502, "benchmark_failed", err.Error())
 		return
@@ -2654,7 +2676,7 @@ func (a API) runBenchmark(w http.ResponseWriter, r *http.Request) {
 	if revisionSpec.ComputeMode == "" {
 		revisionSpec.ComputeMode = "elastic"
 	}
-	workload, _ := json.Marshal(map[string]any{"endpoint_type": "chat", "streaming": true, "request_count": request.Requests, "concurrency": request.Concurrency, "random_seed": request.RandomSeed, "input_tokens": request.InputTokens, "output_tokens": request.OutputTokens, "server_token_count": true, "revision_selector": selector, "direct_revision_validation": selectedRevisionID != deployment.ActiveRevisionID})
+	workload, _ := json.Marshal(map[string]any{"endpoint_type": "chat", "streaming": streaming, "request_count": request.Requests, "concurrency": request.Concurrency, "random_seed": request.RandomSeed, "input_tokens": request.InputTokens, "output_tokens": request.OutputTokens, "profile": request.Profile, "profile_version": request.ProfileVersion, "ttft_slo_ms": request.TTFTSLOMS, "tpot_slo_ms": request.TPOTSLOMS, "latency_slo_ms": request.LatencySLOMS, "server_token_count": true, "revision_selector": selector, "direct_revision_validation": selectedRevisionID != deployment.ActiveRevisionID})
 	runtimeConfig, _ := json.Marshal(map[string]any{"args": revisionSpec.RuntimeArgs})
 	var gpuCount *int
 	if revisionSpec.GPU != "" {
@@ -2662,7 +2684,7 @@ func (a API) runBenchmark(w http.ResponseWriter, r *http.Request) {
 		gpuCount = &count
 	}
 	costMetadata, _ := json.Marshal(map[string]any{"available": false, "reason": "provider cost was not measured by this benchmark"})
-	persisted, err := a.Store.RecordBenchmark(r.Context(), domain.BenchmarkResult{TenantID: principal.TenantID, DeploymentID: deployment.ID, DeploymentName: deployment.Name, RevisionID: revision.ID, ModelArtifactID: artifactID, ModelIdentity: modelIdentity, Runtime: revisionSpec.Runtime, RuntimeVersion: revisionSpec.RuntimeVersion, RuntimeConfigJSON: string(runtimeConfig), Provider: benchmarkProvider, Region: benchmarkRegion, GPU: revisionSpec.GPU, GPUCount: gpuCount, ComputeMode: revisionSpec.ComputeMode, Tool: measured.Tool, ToolVersion: measured.ToolVersion, WorkloadJSON: string(workload), ReproductionCommand: measured.Command, RequestCount: measured.Requests, Succeeded: measured.Succeeded, Failed: measured.Failed, DurationSeconds: measured.DurationSeconds, RequestThroughput: measured.RequestThroughput, OutputTokenThroughput: measured.OutputTokenThroughput, TTFTP50MS: measured.TTFTP50MS, TTFTP95MS: measured.TTFTP95MS, TPOTP50MS: measured.TPOTP50MS, TPOTP95MS: measured.TPOTP95MS, LatencyP50MS: measured.LatencyP50MS, LatencyP95MS: measured.LatencyP95MS, CostMetadataJSON: string(costMetadata)})
+	persisted, err := a.Store.RecordBenchmark(r.Context(), domain.BenchmarkResult{TenantID: principal.TenantID, DeploymentID: deployment.ID, DeploymentName: deployment.Name, RevisionID: revision.ID, ModelArtifactID: artifactID, ModelIdentity: modelIdentity, Runtime: revisionSpec.Runtime, RuntimeVersion: revisionSpec.RuntimeVersion, RuntimeConfigJSON: string(runtimeConfig), Provider: benchmarkProvider, Region: benchmarkRegion, GPU: revisionSpec.GPU, GPUCount: gpuCount, ComputeMode: revisionSpec.ComputeMode, Tool: measured.Tool, ToolVersion: measured.ToolVersion, WorkloadJSON: string(workload), ReproductionCommand: measured.Command, RequestCount: measured.Requests, Succeeded: measured.Succeeded, Failed: measured.Failed, DurationSeconds: measured.DurationSeconds, RequestThroughput: measured.RequestThroughput, OutputTokenThroughput: measured.OutputTokenThroughput, TTFTP50MS: measured.TTFTP50MS, TTFTP95MS: measured.TTFTP95MS, TPOTP50MS: measured.TPOTP50MS, TPOTP95MS: measured.TPOTP95MS, LatencyP50MS: measured.LatencyP50MS, LatencyP95MS: measured.LatencyP95MS, Goodput: measured.Goodput, CostMetadataJSON: string(costMetadata)})
 	if err != nil {
 		writeError(w, 500, "internal", "benchmark result could not be persisted")
 		return
@@ -2859,15 +2881,26 @@ func (a API) evaluateLab(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var request struct {
-		ModelIdentity  string   `json:"model_identity"`
-		MaxTTFTP95MS   *float64 `json:"max_ttft_p95_ms,omitempty"`
-		WorkloadDigest string   `json:"workload_digest,omitempty"`
+		ModelIdentity   string   `json:"model_identity"`
+		Objective       string   `json:"objective,omitempty"`
+		WorkloadProfile string   `json:"workload_profile,omitempty"`
+		MaxTTFTP95MS    *float64 `json:"max_ttft_p95_ms,omitempty"`
+		WorkloadDigest  string   `json:"workload_digest,omitempty"`
 	}
 	if !decodeMutationBody(w, r, &request) {
 		return
 	}
-	if strings.TrimSpace(request.ModelIdentity) == "" || request.MaxTTFTP95MS != nil && (*request.MaxTTFTP95MS < 0 || *request.MaxTTFTP95MS > 86400000) || request.WorkloadDigest != "" && (len(request.WorkloadDigest) != 64 || strings.Trim(request.WorkloadDigest, "0123456789abcdef") != "") {
-		writeError(w, 422, "invalid_lab_input", "model identity, finite nonnegative SLO, and optional SHA-256 workload digest are required")
+	if request.Objective == "" {
+		request.Objective = lab.ObjectiveLatency
+	}
+	validObjective := request.Objective == lab.ObjectiveLatency || request.Objective == lab.ObjectiveThroughput || request.Objective == lab.ObjectiveCostEfficiency
+	validProfile := true
+	if request.WorkloadProfile != "" {
+		_, profileErr := performanceprofile.Get(request.WorkloadProfile)
+		validProfile = profileErr == nil
+	}
+	if strings.TrimSpace(request.ModelIdentity) == "" || !validObjective || !validProfile || request.MaxTTFTP95MS != nil && (math.IsNaN(*request.MaxTTFTP95MS) || math.IsInf(*request.MaxTTFTP95MS, 0) || *request.MaxTTFTP95MS < 0 || *request.MaxTTFTP95MS > 86400000) || request.WorkloadDigest != "" && (len(request.WorkloadDigest) != 64 || strings.Trim(request.WorkloadDigest, "0123456789abcdef") != "") {
+		writeError(w, 422, "invalid_lab_input", "model identity, latency|throughput|cost-efficiency objective, optional workload profile, finite nonnegative SLO, and optional SHA-256 workload digest are required")
 		return
 	}
 	principal := r.Context().Value(identityKey{}).(domain.Principal)
@@ -2876,7 +2909,7 @@ func (a API) evaluateLab(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "internal", "lab evidence lookup failed")
 		return
 	}
-	value, err := lab.Evaluate(lab.Input{ModelIdentity: request.ModelIdentity, MaxTTFTP95MS: request.MaxTTFTP95MS, WorkloadDigest: request.WorkloadDigest}, evidence)
+	value, err := lab.Evaluate(lab.Input{ModelIdentity: request.ModelIdentity, Objective: request.Objective, WorkloadProfile: request.WorkloadProfile, MaxTTFTP95MS: request.MaxTTFTP95MS, WorkloadDigest: request.WorkloadDigest}, evidence)
 	if err != nil {
 		writeError(w, 500, "internal", "lab evidence could not be canonicalized")
 		return

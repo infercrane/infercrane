@@ -47,6 +47,10 @@ vllm_name="ic-v1-vllm-$name_suffix"
 sglang_name="ic-v1-sglang-$name_suffix"
 custom_name="ic-v1-custom-$name_suffix"
 baseline_inventory="$state/provider-inventory.before"
+runtimes=${INFERCRANE_V1_RUNTIMES:-"vllm sglang custom-oci"}
+for runtime in $runtimes; do
+  case "$runtime" in vllm|sglang|custom-oci) ;; *) echo "unsupported qualification runtime: $runtime" >&2; exit 2;; esac
+done
 
 case "$cloud" in
   aws) provider_compose="$root/compose.production.aws.yaml"; doctor_flag=--aws ;;
@@ -174,12 +178,23 @@ smoke_openai() {
   streamed=$(cli request "$deployment" --message 'InferCrane streaming acceptance' --stream)
   [ -n "$streamed" ]
   if [ "$runtime" = vllm ]; then
-    curl -fsS -H "Authorization: Bearer $api_key" -H 'Content-Type: application/json' \
-      -d "{\"model\":\"$deployment\",\"messages\":[{\"role\":\"user\",\"content\":\"weather\"}],\"tool_choice\":{\"type\":\"function\",\"function\":{\"name\":\"weather\"}},\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"weather\",\"parameters\":{\"type\":\"object\"}}}]}" \
-      "$base_url/v1/chat/completions" | jq -e '.choices[0].message.tool_calls[0].function.name == "weather"' >/dev/null
-    curl -fsS -H "Authorization: Bearer $api_key" -H 'Content-Type: application/json' \
-      -d "{\"model\":\"$deployment\",\"messages\":[{\"role\":\"user\",\"content\":\"answer with JSON\"}],\"response_format\":{\"type\":\"json_schema\",\"json_schema\":{\"name\":\"answer\",\"schema\":{\"type\":\"object\",\"properties\":{\"answer\":{\"type\":\"string\"}},\"required\":[\"answer\"]}}}}" \
-      "$base_url/v1/chat/completions" | jq -e '.choices[0].message.content | fromjson | has("answer")' >/dev/null
+    features=${INFERCRANE_V1_VLLM_FEATURES:-"tools structured"}
+    for feature in $features; do
+      case "$feature" in
+        tools)
+          curl -fsS -H "Authorization: Bearer $api_key" -H 'Content-Type: application/json' \
+            -d "{\"model\":\"$deployment\",\"messages\":[{\"role\":\"user\",\"content\":\"weather\"}],\"tool_choice\":{\"type\":\"function\",\"function\":{\"name\":\"weather\"}},\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"weather\",\"parameters\":{\"type\":\"object\"}}}]}" \
+            "$base_url/v1/chat/completions" | jq -e '.choices[0].message.tool_calls[0].function.name == "weather"' >/dev/null
+          ;;
+        structured)
+          curl -fsS -H "Authorization: Bearer $api_key" -H 'Content-Type: application/json' \
+            -d "{\"model\":\"$deployment\",\"messages\":[{\"role\":\"user\",\"content\":\"answer with JSON\"}],\"response_format\":{\"type\":\"json_schema\",\"json_schema\":{\"name\":\"answer\",\"schema\":{\"type\":\"object\",\"properties\":{\"answer\":{\"type\":\"string\"}},\"required\":[\"answer\"]}}}}" \
+            "$base_url/v1/chat/completions" | jq -e '.choices[0].message.content | fromjson | has("answer")' >/dev/null
+          ;;
+        none) ;;
+        *) echo "unsupported vLLM feature qualification: $feature" >&2; return 2 ;;
+      esac
+    done
   fi
 }
 
@@ -204,6 +219,27 @@ qualify_spec() {
     .failed == 0 and
     (.reproduction_command | contains("${INFERCRANE_API_KEY}"))
   ' "$benchmark_file" >/dev/null || return
+  if [ "$cloud" = aws ] && [ "$runtime" = vllm ]; then
+    matrix_dir="$state/performance-matrix"
+    INFERCRANE_BENCHMARK_CLI="$root/scripts/portable-provider-cli.sh" \
+    INFERCRANE_BENCHMARK_RUN_ID="$run_id-aws-vllm" \
+    INFERCRANE_PORTABLE_ROOT="$root" \
+    INFERCRANE_PORTABLE_PROJECT="$project" \
+    INFERCRANE_PORTABLE_ENV_FILE="$env_file" \
+    INFERCRANE_PORTABLE_PROVIDER_COMPOSE="$provider_compose" \
+    INFERCRANE_PORTABLE_SPEC_DIR="$spec_dir" \
+    INFERCRANE_PORTABLE_API_KEY_FILE="$key_file" \
+    INFERCRANE_PORTABLE_PASSWORD_FILE="$password_file" \
+    INFERCRANE_PORTABLE_IMAGE="$candidate_image" \
+    INFERCRANE_PORTABLE_PORT="$port" \
+      "$root/scripts/benchmark-matrix.sh" "$deployment" --approve-load --output "$matrix_dir" || return
+    jq -e '
+      .evidence_class == "measured" and
+      .profile_version == "benchmark-profile-v1" and
+      ([.results[].workload.concurrency] | sort) == [1,4,4,8,8,32,128] and
+      ([.results[].failed] | add) == 0
+    ' "$matrix_dir/matrix.json" >/dev/null || return
+  fi
   cli delete "$deployment" --yes --wait --wait-timeout "${INFERCRANE_V1_DELETE_TIMEOUT:-15m}" \
     --idempotency-key "$run_id-$cloud-$runtime-delete" --output json | jq -e '.operation.status == "succeeded"' >/dev/null || return
 }
@@ -219,18 +255,26 @@ trap 'cleanup' HUP INT TERM EXIT
 if ! docker image inspect "$candidate_image" >/dev/null 2>&1; then
   docker build --target runtime -t "$candidate_image" "$root"
 fi
-render_spec "${INFERCRANE_V1_VLLM_SPEC:-vllm.yaml}" vllm.yaml "$vllm_name"
-render_spec "${INFERCRANE_V1_SGLANG_SPEC:-sglang.yaml}" sglang.yaml "$sglang_name"
-render_spec "${INFERCRANE_V1_CUSTOM_SPEC:-custom-oci.yaml}" custom-oci.yaml "$custom_name"
+for runtime in $runtimes; do
+  case "$runtime" in
+    vllm) render_spec "${INFERCRANE_V1_VLLM_SPEC:-vllm.yaml}" vllm.yaml "$vllm_name" ;;
+    sglang) render_spec "${INFERCRANE_V1_SGLANG_SPEC:-sglang.yaml}" sglang.yaml "$sglang_name" ;;
+    custom-oci) render_spec "${INFERCRANE_V1_CUSTOM_SPEC:-custom-oci.yaml}" custom-oci.yaml "$custom_name" ;;
+  esac
+done
 echo "==> $cloud/control-plane"
 compose up -d
 wait_ready
 echo "<== $cloud/control-plane (ready)"
 stage doctor cli doctor "$doctor_flag" --output json
 [ -f "$baseline_inventory" ] || provider_inventory >"$baseline_inventory"
-stage vllm qualify_spec vllm.yaml "$vllm_name" vllm
-stage sglang qualify_spec sglang.yaml "$sglang_name" sglang
-stage custom-oci qualify_spec custom-oci.yaml "$custom_name" custom-oci
+for runtime in $runtimes; do
+  case "$runtime" in
+    vllm) stage vllm qualify_spec vllm.yaml "$vllm_name" vllm ;;
+    sglang) stage sglang qualify_spec sglang.yaml "$sglang_name" sglang ;;
+    custom-oci) stage custom-oci qualify_spec custom-oci.yaml "$custom_name" custom-oci ;;
+  esac
+done
 stage zero-provider-inventory inventory_clean
 trap - HUP INT TERM EXIT
 compose down --volumes --remove-orphans

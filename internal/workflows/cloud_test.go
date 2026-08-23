@@ -817,3 +817,15 @@ func TestConvergeCancellationWaitsForEventuallyConsistentProviderDelete(t *testi
 		t.Fatalf("delete did not converge after provider absence: replica=%#v deleted=%t err=%v", store.replica, store.deleted, err)
 	}
 }
+
+func TestRuntimeReadyEvidencePreservesStructuredProviderDetails(t *testing.T) {
+	readyAt := time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC)
+	details := withRuntimeReadyEvidence(`{"instance_id":"i-1","startup_evidence":{"current_stage":"runtime_container_started"}}`, readyAt)
+	if !strings.Contains(details, `"instance_id":"i-1"`) || !strings.Contains(details, `"current_stage":"runtime_container_started"`) || !strings.Contains(details, `"runtime_ready_at":"2026-08-23T12:00:00Z"`) {
+		t.Fatalf("details=%s", details)
+	}
+	malformed := withRuntimeReadyEvidence("not-json", readyAt)
+	if strings.Contains(malformed, "not-json") || !strings.Contains(malformed, `"runtime_ready_at"`) {
+		t.Fatalf("malformed provider data was retained: %s", malformed)
+	}
+}

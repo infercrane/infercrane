@@ -41,6 +41,7 @@ func workloadInitCommand(args []string) error {
 	fs := flag.NewFlagSet("workload init", flag.ContinueOnError)
 	model := fs.String("model", "", "Hugging Face model identity")
 	recipeName := fs.String("recipe", "", "reviewed curated recipe name")
+	profileName := fs.String("profile", "", "reviewed serving profile from the selected recipe")
 	name := fs.String("name", "", "deployment name")
 	runtimeName := fs.String("runtime", "vllm", "vllm or sglang")
 	cloud := fs.String("cloud", "runpod", "infrastructure provider")
@@ -54,6 +55,8 @@ func workloadInitCommand(args []string) error {
 	if err := validateOutput(*output); err != nil {
 		return err
 	}
+	explicit := map[string]bool{}
+	fs.Visit(func(value *flag.Flag) { explicit[value.Name] = true })
 	if fs.NArg() > 1 || (leadingPath != "" && fs.NArg() != 0) {
 		return errors.New("workload init accepts at most one project directory")
 	}
@@ -68,6 +71,8 @@ func workloadInitCommand(args []string) error {
 		return errors.New("workload init requires --model MODEL or --recipe NAME; list reviewed recipes with `infercrane recipes curated`")
 	}
 	modelRevision := ""
+	selectedProfile := curatedrecipe.ServingProfile{}
+	routing := "round-robin"
 	if *recipeName != "" {
 		if *model != "" {
 			return errors.New("use either --recipe or --model")
@@ -76,16 +81,41 @@ func workloadInitCommand(args []string) error {
 		if !found {
 			return fmt.Errorf("curated recipe %q was not found; list with `infercrane recipes curated`", *recipeName)
 		}
-		*model, modelRevision, *runtimeName = entry.Model, entry.Revision, entry.Runtime
+		if len(entry.Profiles) == 0 {
+			return fmt.Errorf("curated recipe %q has no serving profiles", *recipeName)
+		}
+		if *profileName == "" {
+			selectedProfile = entry.Profiles[0]
+		} else {
+			for _, profile := range entry.Profiles {
+				if profile.Name == *profileName {
+					selectedProfile = profile
+					break
+				}
+			}
+			if selectedProfile.Name == "" {
+				return fmt.Errorf("serving profile %q is not available for recipe %q", *profileName, *recipeName)
+			}
+		}
+		if explicit["runtime"] && *runtimeName != selectedProfile.Runtime {
+			return fmt.Errorf("serving profile %q requires runtime %q; edit the generated DeploymentSpec for an unreviewed combination", selectedProfile.Name, selectedProfile.Runtime)
+		}
+		*model, modelRevision, *runtimeName = entry.Model, entry.Revision, selectedProfile.Runtime
+		if !explicit["gpu"] && selectedProfile.GPUHint != "" {
+			*gpu = selectedProfile.GPUHint
+		}
+		routing = "cache-aware"
 		if entry.Gated {
 			fmt.Fprintln(os.Stderr, "Notice: this model is gated. Confirm repository access and accept its model license before deployment.")
 		}
+	} else if *profileName != "" {
+		return errors.New("--profile requires --recipe")
 	}
-	path, err := workloadproject.Init(workloadproject.InitOptions{Directory: directory, Name: *name, Model: *model, ModelRevision: modelRevision, Runtime: *runtimeName, Cloud: *cloud, GPU: *gpu, Region: *region, Force: *force})
+	path, err := workloadproject.Init(workloadproject.InitOptions{Directory: directory, Name: *name, Model: *model, ModelRevision: modelRevision, Runtime: *runtimeName, Cloud: *cloud, GPU: *gpu, Region: *region, ComputeMode: selectedProfile.ComputeMode, Routing: routing, RuntimeArgs: selectedProfile.RuntimeArgs, MinReplicas: selectedProfile.MinReplicas, MaxReplicas: selectedProfile.MaxReplicas, Force: *force})
 	if err != nil {
 		return err
 	}
-	result := map[string]any{"project": filepath.Dir(path), "spec": path, "model": *model, "model_revision": modelRevision, "runtime": *runtimeName, "provider": *cloud, "curated_recipe": *recipeName}
+	result := map[string]any{"project": filepath.Dir(path), "spec": path, "model": *model, "model_revision": modelRevision, "runtime": *runtimeName, "provider": *cloud, "curated_recipe": *recipeName, "serving_profile": selectedProfile.Name}
 	if *output == "json" {
 		return printJSON(result)
 	}

@@ -134,11 +134,57 @@ grep -Fq 'smoke_openai "$deployment" "$runtime" || return' "$root/scripts/portab
 grep -Fq 'benchmark_file="$state/$runtime-benchmark.json"' "$root/scripts/portable-provider-acceptance.sh"
 grep -Fq '.request_count == 5 and' "$root/scripts/portable-provider-acceptance.sh"
 grep -Fq '(.reproduction_command | contains("${INFERCRANE_API_KEY}"))' "$root/scripts/portable-provider-acceptance.sh"
+grep -Fq 'INFERCRANE_BENCHMARK_CLI="$root/scripts/portable-provider-cli.sh"' "$root/scripts/portable-provider-acceptance.sh"
+grep -Fq '"$root/scripts/benchmark-matrix.sh" "$deployment" --approve-load' "$root/scripts/portable-provider-acceptance.sh"
+if rg -q 'INFERCRANE_CONFIG="\$config_file"|INFERCRANE_BENCHMARK_CLI="\$cli"' "$root/scripts/portable-provider-acceptance.sh"; then
+  echo "portable provider benchmark matrix still references a shell function or undefined client config" >&2
+  exit 1
+fi
+test -x "$root/scripts/portable-provider-cli.sh"
+mkdir -p "$temporary/portable-cli-bin"
+cat >"$temporary/portable-cli-bin/docker" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$INFERCRANE_API_KEY" >"$INFERCRANE_PORTABLE_CAPTURE.secret"
+printf '%s\n' "$INFERCRANE_POSTGRES_PASSWORD" >>"$INFERCRANE_PORTABLE_CAPTURE.secret"
+printf '%s\n' "$@" >"$INFERCRANE_PORTABLE_CAPTURE.args"
+EOF
+chmod +x "$temporary/portable-cli-bin/docker"
+printf '%s\n' api-key-from-file >"$temporary/portable-api-key"
+printf '%s\n' password-from-file >"$temporary/portable-password"
+: >"$temporary/portable.env"
+PATH="$temporary/portable-cli-bin:$PATH" \
+INFERCRANE_PORTABLE_ROOT="$root" \
+INFERCRANE_PORTABLE_PROJECT=qualification-project \
+INFERCRANE_PORTABLE_ENV_FILE="$temporary/portable.env" \
+INFERCRANE_PORTABLE_PROVIDER_COMPOSE="$root/compose.production.aws.yaml" \
+INFERCRANE_PORTABLE_SPEC_DIR="$temporary" \
+INFERCRANE_PORTABLE_API_KEY_FILE="$temporary/portable-api-key" \
+INFERCRANE_PORTABLE_PASSWORD_FILE="$temporary/portable-password" \
+INFERCRANE_PORTABLE_IMAGE=infercrane:qualification \
+INFERCRANE_PORTABLE_PORT=18000 \
+INFERCRANE_PORTABLE_CAPTURE="$temporary/portable-capture" \
+  "$root/scripts/portable-provider-cli.sh" benchmark production --output json
+grep -Fxq api-key-from-file "$temporary/portable-capture.secret"
+grep -Fxq password-from-file "$temporary/portable-capture.secret"
+grep -Fxq qualification-project "$temporary/portable-capture.args"
+grep -Fxq benchmark "$temporary/portable-capture.args"
+grep -Fxq production "$temporary/portable-capture.args"
+grep -Fq '([.results[].workload.concurrency] | sort) == [1,4,4,8,8,32,128]' "$root/scripts/portable-provider-acceptance.sh"
 grep -Fq 'Name=instance-state-name,Values=pending,running,stopping,shutting-down' "$root/scripts/portable-provider-acceptance.sh"
 grep -Fq 'Name=status,Values=creating,available,in-use,deleting,error' "$root/scripts/portable-provider-acceptance.sh"
 grep -Fq 's/^/volume:/' "$root/scripts/portable-provider-acceptance.sh"
 grep -Fq 'candidate_revision=$(git -C "$root" rev-parse --short=12 HEAD)' "$root/scripts/portable-provider-acceptance.sh"
 grep -Fq 'candidate_image=${INFERCRANE_V1_IMAGE:-infercrane:acceptance-$candidate_revision}' "$root/scripts/portable-provider-acceptance.sh"
+grep -Fq 'runtimes=${INFERCRANE_V1_RUNTIMES:-"vllm sglang custom-oci"}' "$root/scripts/portable-provider-acceptance.sh"
+grep -Fq 'features=${INFERCRANE_V1_VLLM_FEATURES:-"tools structured"}' "$root/scripts/portable-provider-acceptance.sh"
+if INFERCRANE_V1_PROVIDER_ENV_FILE=/unreadable INFERCRANE_V1_API_KEY_FILE=/unreadable \
+  "$root/scripts/aws-performance-qualification.sh" mistral >"$temporary/unapproved-aws-performance.log" 2>&1; then
+  echo "unapproved AWS performance qualification unexpectedly started" >&2
+  exit 1
+fi
+grep -Fq 'pass --approve-paid-resources' "$temporary/unapproved-aws-performance.log"
+grep -Fq 'INFERCRANE_V1_RUNTIMES=vllm' "$root/scripts/aws-performance-qualification.sh"
+grep -Fq 'INFERCRANE_V1_VLLM_FEATURES="$features"' "$root/scripts/aws-performance-qualification.sh"
 
 mkdir -p "$temporary/v1-report/stale/stages"
 for stage in runpod aws kubernetes; do

@@ -103,7 +103,17 @@ func (g GCPCompute) ObserveReplica(ctx context.Context, handle ProviderHandle, p
 		}
 		endpoint = fmt.Sprintf("http://%s:%d", ip, port)
 	}
-	details, _ := json.Marshal(map[string]any{"project": g.Project, "zone": g.Zone, "instance": instance.Name, "network": "private", "identity": "attached-service-account", "cost_state": "unknown"})
+	detailFields := map[string]any{"project": g.Project, "zone": g.Zone, "instance": instance.Name, "network": "private", "identity": "attached-service-account", "cost_state": "unknown"}
+	if state == "ready" {
+		// Serial console evidence is optional and secret-safe for the same reason
+		// as EC2 console evidence: retain only the closed InferCrane marker grammar.
+		if serial, serialErr := g.run(ctx, "compute", "instances", "get-serial-port-output", instance.Name, "--project", g.Project, "--zone", g.Zone, "--port", "1", "--start", "0"); serialErr == nil {
+			if evidence, ok := parseStartupEvidence(string(serial)); ok {
+				detailFields["startup_evidence"] = evidence
+			}
+		}
+	}
+	details, _ := json.Marshal(detailFields)
 	return Observation{Exists: true, State: state, Endpoint: endpoint, Details: string(details)}, nil
 }
 func (g GCPCompute) DeleteReplica(ctx context.Context, handle ProviderHandle) error {
@@ -262,7 +272,8 @@ func (g GCPCompute) startup(spec ReplicaSpec, port int) string {
 		"infercrane_stage identity_ready\n" +
 		cachedImageBootstrap(image) +
 		"infercrane_stage runtime_start\n" +
-		"docker run -d --restart=unless-stopped --gpus all -e INFERCRANE_WORKER_API_KEY=\"$worker_key\" -e VLLM_API_KEY=\"$worker_key\" -p " + fmt.Sprintf("%d:%d", port, port) + " " + shellQuote(image) + " " + strings.Join(quoted, " ") + "\n"
+		"docker run -d --restart=unless-stopped --gpus all -e INFERCRANE_WORKER_API_KEY=\"$worker_key\" -e VLLM_API_KEY=\"$worker_key\" -p " + fmt.Sprintf("%d:%d", port, port) + " " + shellQuote(image) + " " + strings.Join(quoted, " ") + "\n" +
+		"infercrane_stage runtime_container_started\n"
 }
 func metadataValue(instance gcpInstance, key string) string {
 	for _, item := range instance.Metadata.Items {

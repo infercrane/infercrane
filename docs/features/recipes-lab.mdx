@@ -10,11 +10,11 @@ will only capture a recipe when the active revision has an immutable ModelArtifa
 runtime version, and a matching persisted AIPerf benchmark.
 
 ```bash
-infercrane benchmark qwen-prod --requests 100 --concurrency 10
-infercrane recipe create qwen-prod \
-  --name qwen3-8b-balanced \
+infercrane benchmark mistral-prod --profile balanced
+infercrane recipe create mistral-prod \
+  --name mistral-7b-balanced \
   --version 1.0.0
-infercrane recipes qwen3
+infercrane recipes mistral
 ```
 
 The recipe payload records the immutable model commit, runtime/version/arguments, provider adapter,
@@ -25,28 +25,36 @@ for identical content; different content is rejected.
 
 The CLI and private browser console expose the reviewed catalog through `infercrane models` and
 **Models**. Selecting a serving profile prefills the model, immutable revision, and runtime while
-leaving infrastructure, accelerator, compute mode, region, and replica bounds explicit. A catalog
+writing its candidate runtime arguments, accelerator hint, compute mode, replica bounds, and routing
+strategy into an editable DeploymentSpec. Provider and region remain operator choices. A catalog
 entry remains configuration-verified until that exact serving plan has measured benchmark evidence.
 See [Verified Models](/features/model-catalog) for the complete evidence boundary.
 
 ## Compare evidence
 
-Inference Lab v1 compares existing benchmark history. It does not provision hardware or run another
+Inference Lab v2 compares existing benchmark history. It does not provision hardware or run another
 load generator:
 
 ```bash
-infercrane lab 'Qwen/Qwen3-8B@IMMUTABLE_COMMIT' \
+infercrane lab 'mistralai/Mistral-7B-Instruct-v0.3@IMMUTABLE_COMMIT' \
+  --objective latency \
+  --profile interactive \
   --max-ttft-p95-ms 250
 ```
 
-Rows are ordered by measured p95 TTFT and include runtime, provider, GPU, error rate, throughput, SLO
-result when measurable, and cost metadata exactly as persisted. Current Lab results emit only
-`MEASURED` rows.
+Choose `latency`, `throughput`, or `cost-efficiency`. Latency minimizes measured p95 TTFT,
+throughput maximizes output tokens per second, and cost efficiency maximizes measured output tokens
+per second per sourced hourly currency unit. Rows include runtime, provider, GPU, error rate,
+throughput, SLO result when measurable, and cost metadata exactly as persisted. Current Lab results
+emit only `MEASURED` rows.
 The schema reserves `modeled` and `heuristic` labels for future evidence sources, but InferCrane never
 substitutes them silently. With no comparable benchmark, the result is an empty persisted evaluation.
 
-Use `--workload-digest` to require an exact canonical benchmark workload. Prompt and output content
-are not part of recipes, benchmark history, or Lab evaluations.
+Lab recommends a candidate only when every displayed candidate has the same exact canonical workload
+digest. Mixed concurrency or token shapes are shown as `UNRANKED`; filter with `--profile` and, when
+needed, `--workload-digest`. A profile is a convenient filter, while the digest is the final
+comparability boundary. Prompt and output content are not part of recipes, benchmark history, or Lab
+evaluations.
 
 ## Qualification boundary
 

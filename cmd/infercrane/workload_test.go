@@ -34,3 +34,45 @@ func TestWorkloadInitMissingServingSourceIsActionable(t *testing.T) {
 		}
 	}
 }
+
+func TestWorkloadInitAppliesSelectedServingProfile(t *testing.T) {
+	project := filepath.Join(t.TempDir(), "mistral-interactive")
+	if err := workloadInitCommand([]string{project, "--recipe", "mistral-7b-instruct", "--profile", "vllm-interactive", "--cloud", "aws", "--region", "eu-central-1", "--output", "json"}); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(filepath.Join(project, "infercrane.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"c170c708c41dac9275d15a8fff4eca08d52bab71", `args: ["--enable-prefix-caching","--max-num-batched-tokens","2048"]`, "strategy: cache-aware", "max_replicas: 2"} {
+		if !strings.Contains(string(content), expected) {
+			t.Fatalf("generated profile missing %q:\n%s", expected, content)
+		}
+	}
+	if err := workloadValidateCommand([]string{project}); err != nil {
+		t.Fatalf("generated profile is not valid: %v", err)
+	}
+}
+
+func TestWorkloadInitRejectsUnknownOrUnboundProfile(t *testing.T) {
+	if err := workloadInitCommand([]string{filepath.Join(t.TempDir(), "unknown"), "--recipe", "mistral-7b-instruct", "--profile", "fastest"}); err == nil || !strings.Contains(err.Error(), "not available") {
+		t.Fatalf("expected unknown-profile rejection, got %v", err)
+	}
+	if err := workloadInitCommand([]string{filepath.Join(t.TempDir(), "unbound"), "--model", "acme/model", "--profile", "vllm-balanced"}); err == nil || !strings.Contains(err.Error(), "requires --recipe") {
+		t.Fatalf("expected unbound-profile rejection, got %v", err)
+	}
+	if err := workloadInitCommand([]string{filepath.Join(t.TempDir(), "runtime"), "--recipe", "mistral-7b-instruct", "--profile", "vllm-balanced", "--runtime", "sglang"}); err == nil || !strings.Contains(err.Error(), "requires runtime") {
+		t.Fatalf("expected profile/runtime rejection, got %v", err)
+	}
+}
+
+func TestWorkloadInitAllowsExplicitGPUOverrideOfProfileHint(t *testing.T) {
+	project := filepath.Join(t.TempDir(), "mistral-h100")
+	if err := workloadInitCommand([]string{project, "--recipe", "mistral-7b-instruct", "--profile", "vllm-throughput", "--gpu", "H100"}); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(filepath.Join(project, "infercrane.yaml"))
+	if err != nil || !strings.Contains(string(content), "gpu: H100") {
+		t.Fatalf("explicit GPU override was lost: err=%v spec=%s", err, content)
+	}
+}

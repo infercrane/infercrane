@@ -36,6 +36,18 @@ These observations prove the miss path and the stage instrumentation. They do no
 operator-prewarmed AMI image hit or provider-native model-artifact cache. Those remain distinct
 qualification boundaries.
 
+## Model-diverse performance qualification
+
+The portable harness defaults to all qualified runtime paths. A focused model run can set
+`INFERCRANE_V1_RUNTIMES=vllm` and point `INFERCRANE_V1_VLLM_SPEC` at one pinned model spec. This
+reduces paid repetition while preserving the complete vLLM protocol smoke, performance matrix,
+durable deletion, and independent inventory checks. The next model-diverse sequence uses the pinned
+Mistral 7B, DeepSeek R1 Distill 7B, and Granite 3.3 8B examples separately. One passing model does
+not imply that another model family, tokenizer, or architecture is qualified. Set
+`INFERCRANE_V1_VLLM_FEATURES` to the capabilities claimed by that model profile; chat and streaming
+remain mandatory, while `tools` and `structured` must not be claimed from a model that was not
+actually tested for them.
+
 ## Identity and scope
 
 - InferCrane commit: `48d957d3e1014c038456d9b4ebd604921aaef792`

@@ -67,6 +67,37 @@ func TestCatalogCoversCommonApplicationWorkloads(t *testing.T) {
 	}
 }
 
+func TestGenerationRecipesExposeUnclaimedPerformanceCandidates(t *testing.T) {
+	entry, ok := Get("mistral-7b-instruct")
+	if !ok {
+		t.Fatal("mistral recipe missing")
+	}
+	wanted := map[string]string{
+		"vllm-balanced":    "",
+		"vllm-interactive": "2048",
+		"vllm-throughput":  "16384",
+	}
+	if len(entry.Profiles) != len(wanted) {
+		t.Fatalf("profiles=%d, want %d: %+v", len(entry.Profiles), len(wanted), entry.Profiles)
+	}
+	for _, profile := range entry.Profiles {
+		expected, found := wanted[profile.Name]
+		if !found || profile.EvidenceClass != configurationEvidence || profile.QualificationScope == "" {
+			t.Fatalf("unexpected profile: %+v", profile)
+		}
+		if !contains(profile.RuntimeArgs, "--enable-prefix-caching") {
+			t.Fatalf("profile does not preserve prefix-cache candidate: %+v", profile)
+		}
+		if expected != "" && !contains(profile.RuntimeArgs, expected) {
+			t.Fatalf("profile %s missing token budget %s: %v", profile.Name, expected, profile.RuntimeArgs)
+		}
+	}
+	embeddings, _ := Get("bge-m3-embeddings")
+	if len(embeddings.Profiles) != 1 || contains(embeddings.Profiles[0].RuntimeArgs, "--enable-prefix-caching") {
+		t.Fatalf("generation tuning leaked into embedding recipe: %+v", embeddings.Profiles)
+	}
+}
+
 func contains(values []string, expected string) bool {
 	for _, value := range values {
 		if value == expected {

@@ -127,8 +127,15 @@ Pending placements are disclosed separately and excluded from the success-rate d
 AWS and GCP worker bootstrap checks for the immutable runtime image locally before pulling it. A
 customer-maintained AMI or VM image may therefore prewarm the exact qualified digest and avoid
 retransferring those container layers. Startup logs expose `identity_start`, `identity_ready`,
-`image_check`, `image_cache_hit`, `image_pull_start`, `image_pull_complete`, and `runtime_start`
-timestamps without credentials.
+`image_check`, `image_cache_hit`, `image_pull_start`, `image_pull_complete`, `runtime_start`, and
+`runtime_container_started` timestamps without credentials. AWS observations parse only this
+closed marker grammar, discard all other console output, and persist it with the independently
+observed `runtime_ready_at` timestamp. `infercrane inspect DEPLOYMENT` renders the measured
+waterfall.
+
+AWS can additionally enforce `INFERCRANE_AWS_IMAGE_CACHE_POLICY=required`. A miss then fails before
+the registry pull instead of silently violating a fast-start pool's contract. The default `prefer`
+policy retains the safe fallback to an immutable pull.
 
 This optimization concerns container layers only. It does not prove model weights are cached.
 Model-artifact locality remains a separate, provider-native observation through the

@@ -62,6 +62,51 @@ func TestInitRejectsUnsafeOrUnsupportedInputs(t *testing.T) {
 	}
 }
 
+func TestInitPersistsReviewedServingProfile(t *testing.T) {
+	root := t.TempDir()
+	path, err := Init(InitOptions{
+		Directory:     root,
+		Model:         "mistralai/Mistral-7B-Instruct-v0.3",
+		ModelRevision: "c170c708c41dac9275d15a8fff4eca08d52bab71",
+		Runtime:       "vllm",
+		Cloud:         "aws",
+		GPU:           "L40S",
+		Region:        "eu-central-1",
+		ComputeMode:   "elastic",
+		Routing:       "cache-aware",
+		RuntimeArgs:   []string{"--enable-prefix-caching", "--max-num-batched-tokens", "2048"},
+		MinReplicas:   1,
+		MaxReplicas:   2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		`args: ["--enable-prefix-caching","--max-num-batched-tokens","2048"]`,
+		"min_replicas: 1", "max_replicas: 2", "strategy: cache-aware",
+	} {
+		if !strings.Contains(string(content), expected) {
+			t.Fatalf("profile spec missing %q:\n%s", expected, content)
+		}
+	}
+	if _, deployment, err := Validate(root); err != nil {
+		t.Fatalf("profile spec is invalid: %v", err)
+	} else if len(deployment.Runtime.Args) != 3 || deployment.Routing.Strategy != "cache-aware" || deployment.Scaling.MaxReplicas != 2 {
+		t.Fatalf("profile intent was not preserved: %+v", deployment)
+	}
+}
+
+func TestInitRejectsInvalidReplicaBounds(t *testing.T) {
+	_, err := Init(InitOptions{Directory: t.TempDir(), Model: "acme/model", MinReplicas: 2, MaxReplicas: 1})
+	if err == nil || !strings.Contains(err.Error(), "0 <= min <= max") {
+		t.Fatalf("expected replica-bound rejection, got %v", err)
+	}
+}
+
 func TestPlanBuildUsesArgumentBoundariesAndRejectsEscape(t *testing.T) {
 	root := t.TempDir()
 	if _, err := Init(InitOptions{Directory: root, Model: "acme/model"}); err != nil {

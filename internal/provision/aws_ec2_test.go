@@ -26,6 +26,7 @@ type fakeAWSRunner struct {
 	instanceType         string
 	rootVolumeGiB        int
 	rootEncrypted        bool
+	consoleOutput        string
 }
 
 func (f *fakeAWSRunner) Run(_ context.Context, environment []string, args ...string) ([]byte, error) {
@@ -72,6 +73,8 @@ func (f *fakeAWSRunner) Run(_ context.Context, environment []string, args ...str
 		f.deleteCalls++
 		f.state = "terminated"
 		return []byte(`{"TerminatingInstances":[{"InstanceId":"i-fixture"}]}`), nil
+	case "get-console-output":
+		return json.Marshal(map[string]string{"Output": f.consoleOutput})
 	default:
 		return nil, fmt.Errorf("unexpected EC2 command %q", args[1])
 	}
@@ -203,7 +206,7 @@ func TestAWSEC2LifecycleIsIdempotentPrivateAndTagged(t *testing.T) {
 	if !strings.Contains(userData, `-e VLLM_API_KEY="$worker_key"`) || !strings.Contains(userData, "'Qwen/Qwen3-8B' '--port' '8000'") || strings.Contains(userData, "--api-key") || strings.Contains(userData, "--model") {
 		t.Fatalf("vLLM credential must be injected through a non-argv environment variable:\n%s", userData)
 	}
-	if !strings.Contains(userData, "infercrane_stage identity_start") || !strings.Contains(userData, "infercrane_stage identity_ready") || !strings.Contains(userData, "docker image inspect '") || !strings.Contains(userData, "infercrane_stage image_cache_hit") || !strings.Contains(userData, "infercrane_stage image_pull_complete") || !strings.Contains(userData, "infercrane_stage runtime_start") {
+	if !strings.Contains(userData, "infercrane_stage identity_start") || !strings.Contains(userData, "infercrane_stage identity_ready") || !strings.Contains(userData, "docker image inspect '") || !strings.Contains(userData, "infercrane_stage image_cache_hit") || !strings.Contains(userData, "infercrane_stage image_pull_complete") || !strings.Contains(userData, "infercrane_stage runtime_start") || !strings.Contains(userData, "infercrane_stage runtime_container_started") {
 		t.Fatalf("AWS bootstrap does not reuse prewarmed images or expose startup stages:\n%s", userData)
 	}
 	command := exec.Command("sh", "-n")
@@ -216,6 +219,48 @@ func TestAWSEC2LifecycleIsIdempotentPrivateAndTagged(t *testing.T) {
 	}
 	if err := provider.DeleteReplica(context.Background(), second); err != nil || runner.deleteCalls != 1 {
 		t.Fatalf("delete calls=%d err=%v", runner.deleteCalls, err)
+	}
+}
+
+func TestAWSEC2PersistsOnlyStructuredStartupEvidence(t *testing.T) {
+	runner := &fakeAWSRunner{
+		instanceID: "i-fixture", externalKey: awsReplicaSpec().ExternalKey, state: "running",
+		consoleOutput: "authorization=secret-value\n" +
+			"infercrane_startup stage=identity_start at=2026-08-23T10:00:00Z\n" +
+			"infercrane_startup stage=image_check at=2026-08-23T10:00:02Z\n" +
+			"infercrane_startup stage=image_cache_hit at=2026-08-23T10:00:03Z\n" +
+			"infercrane_startup stage=runtime_start at=2026-08-23T10:00:04Z\n",
+	}
+	observation, err := testAWSEC2(runner).ObserveReplica(context.Background(), ProviderHandle{ResourceID: runner.instanceID}, 8000)
+	if err != nil || !strings.Contains(observation.Details, `"current_stage":"runtime_start"`) || !strings.Contains(observation.Details, `"image_cache":"hit"`) {
+		t.Fatalf("observation=%#v err=%v", observation, err)
+	}
+	if strings.Contains(observation.Details, "secret-value") || strings.Contains(observation.Details, "authorization") {
+		t.Fatalf("raw console output leaked into provider details: %s", observation.Details)
+	}
+}
+
+func TestAWSEC2RequiredImageCacheMissFailsClosed(t *testing.T) {
+	runner := &fakeAWSRunner{
+		instanceID: "i-fixture", externalKey: awsReplicaSpec().ExternalKey, state: "running",
+		consoleOutput: "infercrane_startup stage=identity_start at=2026-08-23T10:00:00Z\n" +
+			"infercrane_startup stage=image_check at=2026-08-23T10:00:01Z\n" +
+			"infercrane_startup stage=image_cache_miss_required at=2026-08-23T10:00:02Z\n",
+	}
+	provider := testAWSEC2(runner)
+	provider.ImageCachePolicy = "required"
+	observation, err := provider.ObserveReplica(context.Background(), ProviderHandle{ResourceID: runner.instanceID}, 8000)
+	if err != nil || observation.State != "failed" || observation.Endpoint != "" || !strings.Contains(observation.Details, `"image_cache":"required_miss"`) {
+		t.Fatalf("observation=%#v err=%v", observation, err)
+	}
+	spec := awsReplicaSpec()
+	runner.instanceID = ""
+	if _, err = provider.EnsureReplica(context.Background(), spec); err != nil {
+		t.Fatal(err)
+	}
+	userData := awsUserData(runner.runInstanceArgs)
+	if !strings.Contains(userData, "image_cache_miss_required") || strings.Contains(userData, "docker pull") {
+		t.Fatalf("required cache policy did not fail before pull:\n%s", userData)
 	}
 }
 

@@ -32,6 +32,7 @@ type AWSEC2 struct {
 	CostObservedAt           time.Time
 	HourlyCostMicrousd       int64
 	RootVolumeGiB            int
+	ImageCachePolicy         string
 }
 
 type awsCredentials struct {
@@ -166,6 +167,24 @@ func (a AWSEC2) ObserveReplica(ctx context.Context, handle ProviderHandle, port 
 		endpoint = fmt.Sprintf("http://%s:%d", instance.PrivateIP, port)
 	}
 	details := map[string]any{"instance_id": instance.ID, "region": a.Region, "state": instance.State, "network": "private"}
+	if state == "ready" {
+		// Console startup evidence is best-effort. Existing AWS roles that have
+		// not yet granted GetConsoleOutput must continue to reconcile safely.
+		// Never persist the raw console: it may contain runtime or model output.
+		if output, consoleErr := a.run(ctx, "ec2", "get-console-output", "--region", a.Region, "--instance-id", instance.ID, "--latest", "--output", "json", "--no-cli-pager"); consoleErr == nil {
+			var response struct {
+				Output string `json:"Output"`
+			}
+			if json.Unmarshal(output, &response) == nil {
+				if evidence, ok := parseStartupEvidence(response.Output); ok {
+					details["startup_evidence"] = evidence
+					if evidence.CurrentStage == "image_cache_miss_required" {
+						state, endpoint = "failed", ""
+					}
+				}
+			}
+		}
+	}
 	if a.HourlyCostMicrousd > 0 && a.CostSource != "" && !a.CostObservedAt.IsZero() {
 		details["hourly_cost_microusd"], details["cost_source"], details["cost_observed_at"] = a.HourlyCostMicrousd, a.CostSource, a.CostObservedAt.UTC()
 	} else {
@@ -391,7 +410,7 @@ func (a AWSEC2) userData(spec ReplicaSpec, port int) string {
 			}
 		}
 		image := spec.Workload.Image
-		return "#!/bin/sh\nset -eu\ninfercrane_stage() { printf 'infercrane_startup stage=%s at=%s\\n' \"$1\" \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" >/dev/console; }\ninfercrane_stage identity_start\nworker_key=$(aws secretsmanager get-secret-value --region " + shellQuote(a.Region) + " --secret-id " + shellQuote(a.WorkerSecretARN) + " --query SecretString --output text)\ninfercrane_stage identity_ready\n" + cachedImageBootstrap(image) + "infercrane_stage runtime_start\ncontainer_id=$(docker run -d --restart=unless-stopped --gpus all -e INFERCRANE_WORKER_API_KEY=\"$worker_key\" -e VLLM_API_KEY=\"$worker_key\" -p " + fmt.Sprintf("%d:%d", port, port) + " " + shellQuote(image) + " " + strings.Join(quoted, " ") + ")\ndocker logs --follow \"$container_id\" >/dev/console 2>&1 &\n"
+		return "#!/bin/sh\nset -eu\ninfercrane_stage() { printf 'infercrane_startup stage=%s at=%s\\n' \"$1\" \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" >/dev/console; }\ninfercrane_stage identity_start\nworker_key=$(aws secretsmanager get-secret-value --region " + shellQuote(a.Region) + " --secret-id " + shellQuote(a.WorkerSecretARN) + " --query SecretString --output text)\ninfercrane_stage identity_ready\n" + cachedImageBootstrapWithPolicy(image, a.imageCachePolicy()) + "infercrane_stage runtime_start\ncontainer_id=$(docker run -d --restart=unless-stopped --gpus all -e INFERCRANE_WORKER_API_KEY=\"$worker_key\" -e VLLM_API_KEY=\"$worker_key\" -p " + fmt.Sprintf("%d:%d", port, port) + " " + shellQuote(image) + " " + strings.Join(quoted, " ") + ")\ninfercrane_stage runtime_container_started\ndocker logs --follow \"$container_id\" >/dev/console 2>&1 &\n"
 	}
 	// The vLLM OpenAI image entrypoint is `vllm serve`. Since v0.22 the model
 	// is a positional argument; keep generated startup compatible with the
@@ -405,7 +424,14 @@ func (a AWSEC2) userData(spec ReplicaSpec, port int) string {
 	for i, arg := range args {
 		quoted[i] = shellQuote(arg)
 	}
-	return "#!/bin/sh\nset -eu\ninfercrane_stage() { printf 'infercrane_startup stage=%s at=%s\\n' \"$1\" \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" >/dev/console; }\ninfercrane_stage identity_start\nworker_key=$(aws secretsmanager get-secret-value --region " + shellQuote(a.Region) + " --secret-id " + shellQuote(a.WorkerSecretARN) + " --query SecretString --output text)\ninfercrane_stage identity_ready\n" + cachedImageBootstrap(a.ImageDigest) + "infercrane_stage runtime_start\ncontainer_id=$(docker run -d --restart=unless-stopped --gpus all -e VLLM_API_KEY=\"$worker_key\" -p " + fmt.Sprintf("%d:%d", port, port) + " " + shellQuote(a.ImageDigest) + " " + strings.Join(quoted, " ") + ")\ndocker logs --follow \"$container_id\" >/dev/console 2>&1 &\n"
+	return "#!/bin/sh\nset -eu\ninfercrane_stage() { printf 'infercrane_startup stage=%s at=%s\\n' \"$1\" \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" >/dev/console; }\ninfercrane_stage identity_start\nworker_key=$(aws secretsmanager get-secret-value --region " + shellQuote(a.Region) + " --secret-id " + shellQuote(a.WorkerSecretARN) + " --query SecretString --output text)\ninfercrane_stage identity_ready\n" + cachedImageBootstrapWithPolicy(a.ImageDigest, a.imageCachePolicy()) + "infercrane_stage runtime_start\ncontainer_id=$(docker run -d --restart=unless-stopped --gpus all -e VLLM_API_KEY=\"$worker_key\" -p " + fmt.Sprintf("%d:%d", port, port) + " " + shellQuote(a.ImageDigest) + " " + strings.Join(quoted, " ") + ")\ninfercrane_stage runtime_container_started\ndocker logs --follow \"$container_id\" >/dev/console 2>&1 &\n"
+}
+
+func (a AWSEC2) imageCachePolicy() string {
+	if a.ImageCachePolicy == "required" {
+		return "required"
+	}
+	return "prefer"
 }
 
 func normalizeAWSState(state string) string {

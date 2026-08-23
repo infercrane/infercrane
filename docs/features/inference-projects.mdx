@@ -25,12 +25,18 @@ infercrane workload deploy --wait
 infercrane recipes curated mistral
 infercrane workload init ./fraud-explainer \
   --recipe mistral-7b-instruct \
+  --profile vllm-interactive \
   --name fraud-explainer
 ```
 </CodeGroup>
 
 `workload init` requires one serving source: either `--model MODEL` or `--recipe NAME`. If you have
 not selected one yet, run `infercrane recipes curated` to inspect the reviewed starting points.
+
+`--profile` must name a serving profile belonging to the selected recipe. When omitted, the first
+balanced/general profile is used. A profile is a reviewed candidate configuration: it writes its
+runtime, runtime arguments, accelerator hint, replica bounds, and routing strategy into the project,
+but it does not claim that those choices are fastest on the selected provider.
 
 `workload init` writes a valid DeploymentSpec with a JSON Schema directive understood by YAML
 language servers in VS Code, JetBrains editors, and other schema-aware tools. Fields, enums, and

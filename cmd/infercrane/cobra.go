@@ -172,6 +172,7 @@ func addHelpFlags(command *cobra.Command, name string) {
 	case "workload":
 		stringFlag("model", "", "Hugging Face model identity")
 		stringFlag("recipe", "", "reviewed curated recipe name")
+		stringFlag("profile", "", "reviewed serving profile")
 		stringFlag("name", "", "deployment name")
 		stringFlag("runtime", "vllm", "vllm or sglang")
 		stringFlag("cloud", "runpod", "infrastructure provider")
@@ -345,7 +346,12 @@ func addHelpFlags(command *cobra.Command, name string) {
 		intFlag("input-tokens", 128, "mean input tokens")
 		intFlag("output-tokens", 32, "maximum output tokens")
 		intFlag("random-seed", 17, "reproduction seed")
+		stringFlag("profile", "", "versioned benchmark workload profile")
 		stringFlag("revision", "active", "active, candidate, or revision ID")
+		command.Flags().Bool("streaming", true, "measure streaming responses; set false for buffered responses")
+		stringFlag("ttft-slo-ms", "", "optional TTFT goodput threshold")
+		stringFlag("tpot-slo-ms", "", "optional TPOT goodput threshold")
+		stringFlag("latency-slo-ms", "", "optional end-to-end goodput threshold")
 	case "replay":
 		stringFlag("window", "24h", "production-shape capture window")
 		intFlag("max-requests", 1000, "maximum persisted request observations")
@@ -430,7 +436,7 @@ func addHelpFlags(command *cobra.Command, name string) {
 
 func completionFor(command string) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 	flags := map[string][]string{
-		"workload":    {"--model", "--recipe", "--name", "--runtime", "--cloud", "--gpu", "--region", "--tag", "--file", "--platform", "--push", "--force", "--wait", "--detach", "--port", "--output"},
+		"workload":    {"--model", "--recipe", "--profile", "--name", "--runtime", "--cloud", "--gpu", "--region", "--tag", "--file", "--platform", "--push", "--force", "--wait", "--detach", "--port", "--output"},
 		"evaluation":  {"--file", "--result", "--key", "--suite", "--suite-version", "--evaluator", "--evaluator-version", "--score", "--passed", "--samples", "--artifact-digest", "--evaluated-at", "--attach", "--output"},
 		"artifact":    {"--provider", "--region", "--location", "--state", "--source", "--ttl", "--idempotency-key", "--output"},
 		"deploy":      {"--name", "--cloud", "--gpu", "--region", "--compute", "--min", "--max", "--wait", "--wait-timeout", "--idempotency-key", "--output"},
@@ -441,11 +447,11 @@ func completionFor(command string) func(*cobra.Command, []string, string) ([]str
 		"logs":        {"--follow", "--since", "--type", "--output"},
 		"events":      {"--output"},
 		"delete":      {"--plan", "--yes", "--wait", "--idempotency-key", "--output"},
-		"benchmark":   {"--requests", "--concurrency", "--input-tokens", "--output-tokens", "--random-seed", "--revision", "--output"},
+		"benchmark":   {"--requests", "--concurrency", "--input-tokens", "--output-tokens", "--random-seed", "--profile", "--revision", "--streaming", "--ttft-slo-ms", "--tpot-slo-ms", "--latency-slo-ms", "--output"},
 		"recipe":      {"--name", "--version", "--benchmark", "--output"},
 		"recipes":     {"--limit", "--output"},
 		"models":      {"--output"},
-		"lab":         {"--max-ttft-p95-ms", "--workload-digest", "--output"},
+		"lab":         {"--objective", "--profile", "--max-ttft-p95-ms", "--workload-digest", "--output"},
 		"passport":    {"--revision", "--file", "--output"},
 		"recommend":   {"--history", "--output"},
 		"slo":         {"--ttft-p95", "--latency-p95", "--error-rate", "--output-tokens-second", "--hourly-cost", "--output"},

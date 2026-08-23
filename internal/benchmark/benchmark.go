@@ -22,6 +22,10 @@ type Config struct {
 	Requests, Concurrency, InputTokens, OutputTokens      int
 	RandomSeed                                            int64
 	Timeout                                               time.Duration
+	// Streaming is a pointer so callers that predate buffered qualification
+	// retain the safe historical default (streaming enabled).
+	Streaming                          *bool
+	TTFTSLOMS, TPOTSLOMS, LatencySLOMS float64
 }
 
 type Result struct {
@@ -30,6 +34,7 @@ type Result struct {
 	DurationSeconds             float64
 	RequestThroughput           *float64
 	OutputTokenThroughput       *float64
+	Goodput                     *float64
 	TTFTP50MS, TTFTP95MS        *float64
 	TPOTP50MS, TPOTP95MS        *float64
 	LatencyP50MS, LatencyP95MS  *float64
@@ -76,7 +81,15 @@ func run(ctx context.Context, cfg Config, commands commandRunner) (Result, error
 	}
 	defer os.RemoveAll(dir)
 	prefix := "infercrane"
-	args := []string{"profile", "--model", cfg.Model, "--url", strings.TrimRight(cfg.Endpoint, "/"), "--endpoint-type", "chat", "--streaming", "--use-server-token-count", "--request-count", strconv.Itoa(cfg.Requests), "--concurrency", strconv.Itoa(cfg.Concurrency), "--random-seed", strconv.FormatInt(cfg.RandomSeed, 10), "--prompt-input-tokens-mean", strconv.Itoa(cfg.InputTokens), "--prompt-input-tokens-stddev", "0", "--prompt-output-tokens-mean", strconv.Itoa(cfg.OutputTokens), "--prompt-output-tokens-stddev", "0", "--ui", "none", "--export-level", "records", "--output-artifact-dir", dir, "--profile-export-prefix", prefix, "--no-auto-plot", "--no-gpu-telemetry", "--no-server-metrics"}
+	streaming := true
+	if cfg.Streaming != nil {
+		streaming = *cfg.Streaming
+	}
+	streamingFlag := "--streaming"
+	if !streaming {
+		streamingFlag = "--no-streaming"
+	}
+	args := []string{"profile", "--model", cfg.Model, "--url", strings.TrimRight(cfg.Endpoint, "/"), "--endpoint-type", "chat", streamingFlag, "--use-server-token-count", "--request-count", strconv.Itoa(cfg.Requests), "--concurrency", strconv.Itoa(cfg.Concurrency), "--random-seed", strconv.FormatInt(cfg.RandomSeed, 10), "--prompt-input-tokens-mean", strconv.Itoa(cfg.InputTokens), "--prompt-input-tokens-stddev", "0", "--prompt-output-tokens-mean", strconv.Itoa(cfg.OutputTokens), "--prompt-output-tokens-stddev", "0", "--ui", "none", "--export-level", "records", "--output-artifact-dir", dir, "--profile-export-prefix", prefix, "--no-auto-plot", "--no-gpu-telemetry", "--no-server-metrics"}
 	if cfg.Tokenizer != "" {
 		args = append(args, "--tokenizer", cfg.Tokenizer)
 	}
@@ -97,7 +110,7 @@ func run(ctx context.Context, cfg Config, commands commandRunner) (Result, error
 	if err != nil {
 		return Result{}, fmt.Errorf("AIPerf failed: %w: %s", err, strings.TrimSpace(string(output)))
 	}
-	result, err := parseRecords(filepath.Join(dir, prefix+".jsonl"))
+	result, err := parseRecordsWithSLO(filepath.Join(dir, prefix+".jsonl"), cfg)
 	if err != nil {
 		return Result{}, err
 	}
@@ -140,6 +153,10 @@ type record struct {
 }
 
 func parseRecords(path string) (Result, error) {
+	return parseRecordsWithSLO(path, Config{})
+}
+
+func parseRecordsWithSLO(path string, cfg Config) (Result, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return Result{}, fmt.Errorf("read AIPerf records: %w", err)
@@ -148,6 +165,8 @@ func parseRecords(path string) (Result, error) {
 	var ttft, tpot, latency, outputTokens []float64
 	var result Result
 	var earliest, latest int64
+	goodRequests := 0
+	hasSLO := cfg.TTFTSLOMS > 0 || cfg.TPOTSLOMS > 0 || cfg.LatencySLOMS > 0
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 64*1024), 4<<20)
 	for scanner.Scan() {
@@ -164,6 +183,8 @@ func parseRecords(path string) (Result, error) {
 			continue
 		}
 		result.Succeeded++
+		requestGood := hasSLO
+		observedSLOMetrics := map[string]bool{}
 		appendMetric := func(name string, destination *[]float64) error {
 			if metric, ok := row.Metrics[name]; ok {
 				var value float64
@@ -188,6 +209,21 @@ func parseRecords(path string) (Result, error) {
 				return fmt.Errorf("AIPerf metric %q: %w", name, err)
 			}
 			*destination = append(*destination, value)
+			observedSLOMetrics[name] = true
+			switch name {
+			case "time_to_first_token":
+				if cfg.TTFTSLOMS > 0 && value > cfg.TTFTSLOMS {
+					requestGood = false
+				}
+			case "request_latency":
+				if cfg.LatencySLOMS > 0 && value > cfg.LatencySLOMS {
+					requestGood = false
+				}
+			case "time_per_output_token", "inter_token_latency":
+				if cfg.TPOTSLOMS > 0 && value > cfg.TPOTSLOMS {
+					requestGood = false
+				}
+			}
 			return nil
 		}
 		if err := appendLatencyMetric("time_to_first_token", &ttft); err != nil {
@@ -214,6 +250,18 @@ func parseRecords(path string) (Result, error) {
 		if row.Metadata.RequestEndNS > latest {
 			latest = row.Metadata.RequestEndNS
 		}
+		if cfg.TTFTSLOMS > 0 && !observedSLOMetrics["time_to_first_token"] {
+			requestGood = false
+		}
+		if cfg.LatencySLOMS > 0 && !observedSLOMetrics["request_latency"] {
+			requestGood = false
+		}
+		if cfg.TPOTSLOMS > 0 && !observedSLOMetrics["time_per_output_token"] && !observedSLOMetrics["inter_token_latency"] {
+			requestGood = false
+		}
+		if requestGood {
+			goodRequests++
+		}
 	}
 	if err := scanner.Err(); err != nil {
 		return Result{}, err
@@ -236,6 +284,10 @@ func parseRecords(path string) (Result, error) {
 		}
 		tokenThroughput := tokens / result.DurationSeconds
 		result.OutputTokenThroughput = &tokenThroughput
+		if hasSLO {
+			goodput := float64(goodRequests) / result.DurationSeconds
+			result.Goodput = &goodput
+		}
 	}
 	return result, nil
 }

@@ -265,11 +265,33 @@
             "minimum": 1,
             "type": "integer"
           },
+          "latency_slo_ms": {
+            "minimum": 0,
+            "type": "number"
+          },
           "output_tokens": {
             "default": 32,
             "maximum": 1000000,
             "minimum": 1,
             "type": "integer"
+          },
+          "profile": {
+            "enum": [
+              "balanced",
+              "buffered",
+              "interactive",
+              "long-context",
+              "long-generation",
+              "overload",
+              "throughput"
+            ],
+            "type": "string"
+          },
+          "profile_version": {
+            "enum": [
+              "benchmark-profile-v1"
+            ],
+            "type": "string"
           },
           "random_seed": {
             "default": 17,
@@ -282,6 +304,18 @@
           },
           "revision": {
             "type": "string"
+          },
+          "streaming": {
+            "default": true,
+            "type": "boolean"
+          },
+          "tpot_slo_ms": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "ttft_slo_ms": {
+            "minimum": 0,
+            "type": "number"
           }
         },
         "required": [
@@ -1254,8 +1288,29 @@
             "minLength": 1,
             "type": "string"
           },
+          "objective": {
+            "default": "latency",
+            "enum": [
+              "latency",
+              "throughput",
+              "cost-efficiency"
+            ],
+            "type": "string"
+          },
           "workload_digest": {
             "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "workload_profile": {
+            "enum": [
+              "balanced",
+              "buffered",
+              "interactive",
+              "long-context",
+              "long-generation",
+              "overload",
+              "throughput"
+            ],
             "type": "string"
           }
         },

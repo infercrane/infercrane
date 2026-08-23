@@ -45,6 +45,7 @@ import (
 	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/operations"
 	"github.com/infercrane/infercrane/internal/passport"
+	"github.com/infercrane/infercrane/internal/performanceprofile"
 	"github.com/infercrane/infercrane/internal/planning"
 	"github.com/infercrane/infercrane/internal/provision"
 	"github.com/infercrane/infercrane/internal/reconcile"
@@ -607,7 +608,12 @@ func benchmarkCommand(ctx context.Context, cfg config.Config, args []string) err
 	inputTokens := fs.Int("input-tokens", 128, "mean input token count")
 	outputTokens := fs.Int("output-tokens", 32, "maximum output token count")
 	randomSeed := fs.Int64("random-seed", 17, "deterministic AIPerf dataset seed")
+	profileName := fs.String("profile", "", "versioned workload profile: "+strings.Join(performanceprofile.Names(), ", "))
 	revision := fs.String("revision", "active", "revision to benchmark: active, candidate, or revision ID")
+	streaming := fs.Bool("streaming", true, "measure streaming responses; set false for buffered responses")
+	ttftSLO := fs.Float64("ttft-slo-ms", 0, "optional TTFT SLO used to compute goodput")
+	tPotSLO := fs.Float64("tpot-slo-ms", 0, "optional time-per-output-token SLO used to compute goodput")
+	latencySLO := fs.Float64("latency-slo-ms", 0, "optional end-to-end latency SLO used to compute goodput")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
@@ -615,13 +621,39 @@ func benchmarkCommand(ctx context.Context, cfg config.Config, args []string) err
 	if fs.NArg() != 0 {
 		return errors.New("usage: infercrane benchmark DEPLOYMENT [flags]")
 	}
+	if *profileName != "" {
+		profile, profileErr := performanceprofile.Get(*profileName)
+		if profileErr != nil {
+			return profileErr
+		}
+		explicit := map[string]bool{}
+		fs.Visit(func(value *flag.Flag) { explicit[value.Name] = true })
+		if !explicit["requests"] {
+			*requests = profile.Requests
+		}
+		if !explicit["concurrency"] {
+			*concurrency = profile.Concurrency
+		}
+		if !explicit["input-tokens"] {
+			*inputTokens = profile.InputTokens
+		}
+		if !explicit["output-tokens"] {
+			*outputTokens = profile.OutputTokens
+		}
+		if !explicit["streaming"] {
+			*streaming = profile.Streaming
+		}
+	}
 	if err := validateOutput(*output); err != nil {
 		return err
 	}
 	var response struct {
 		Benchmark map[string]any `json:"benchmark"`
 	}
-	request := map[string]any{"requests": *requests, "concurrency": *concurrency, "input_tokens": *inputTokens, "output_tokens": *outputTokens, "random_seed": *randomSeed, "revision": *revision}
+	if *ttftSLO < 0 || *tPotSLO < 0 || *latencySLO < 0 {
+		return errors.New("benchmark SLO thresholds cannot be negative")
+	}
+	request := map[string]any{"requests": *requests, "concurrency": *concurrency, "input_tokens": *inputTokens, "output_tokens": *outputTokens, "random_seed": *randomSeed, "revision": *revision, "streaming": *streaming, "profile": *profileName, "profile_version": performanceprofile.Version, "ttft_slo_ms": *ttftSLO, "tpot_slo_ms": *tPotSLO, "latency_slo_ms": *latencySLO}
 	if *revision != "active" {
 		fmt.Fprintln(os.Stderr, "Notice: selected-revision validation sends an explicit AIPerf workload directly to revision capacity and may incur provider inference cost; it does not duplicate user traffic.")
 	}
@@ -1092,9 +1124,13 @@ func modelsCommand(args []string) error {
 		}
 		fmt.Printf("%s\n\nModel       %s@%s\nPublisher   %s\nTasks       %s\nProtocol    %s\nCapabilities %s\nLicense     %s · %s\nAccess      %s\nEvidence    %s\nReviewed    %s\n\nServing profiles\n", entry.DisplayName, entry.Model, entry.Revision, entry.Publisher, strings.Join(entry.Tasks, ", "), entry.Protocol, strings.Join(entry.Capabilities, ", "), entry.License, entry.LicenseURL, access, entry.EvidenceClass, entry.ReviewedAt)
 		for _, profile := range entry.Profiles {
-			fmt.Printf("  %s  %s · %s · %s · replicas %d–%d\n    %s\n", profile.Name, profile.Runtime, profile.ComputeMode, profile.GPUHint, profile.MinReplicas, profile.MaxReplicas, profile.QualificationScope)
+			args := "runtime defaults"
+			if len(profile.RuntimeArgs) > 0 {
+				args = strings.Join(profile.RuntimeArgs, " ")
+			}
+			fmt.Printf("  %s  %s · %s · %s · replicas %d–%d\n    %s\n    Evidence: %s\n    Args: %s\n", profile.Name, profile.Runtime, profile.ComputeMode, profile.GPUHint, profile.MinReplicas, profile.MaxReplicas, profile.Description, profile.QualificationScope, args)
 		}
-		fmt.Printf("\nCreate a project:\n  infercrane workload init --recipe %s\n", entry.Name)
+		fmt.Printf("\nCreate a project:\n  infercrane workload init --recipe %s --profile %s\n", entry.Name, entry.Profiles[0].Name)
 		return nil
 	}
 	entries := curatedrecipe.Search(query)
@@ -1127,6 +1163,8 @@ func labCommand(ctx context.Context, cfg config.Config, args []string) error {
 	}
 	model := args[0]
 	fs := flag.NewFlagSet("lab", flag.ContinueOnError)
+	objective := fs.String("objective", "latency", "latency, throughput, or cost-efficiency")
+	workloadProfile := fs.String("profile", "", "optional benchmark workload profile")
 	ttft := fs.String("max-ttft-p95-ms", "", "optional p95 TTFT SLO")
 	workloadDigest := fs.String("workload-digest", "", "optional exact workload SHA-256")
 	output := fs.String("output", "human", "human or json")
@@ -1139,7 +1177,15 @@ func labCommand(ctx context.Context, cfg config.Config, args []string) error {
 	if err := validateOutput(*output); err != nil {
 		return err
 	}
-	body := map[string]any{"model_identity": model, "workload_digest": *workloadDigest}
+	if *objective != "latency" && *objective != "throughput" && *objective != "cost-efficiency" {
+		return errors.New("objective must be latency, throughput, or cost-efficiency")
+	}
+	if *workloadProfile != "" {
+		if _, err := performanceprofile.Get(*workloadProfile); err != nil {
+			return err
+		}
+	}
+	body := map[string]any{"model_identity": model, "objective": *objective, "workload_profile": *workloadProfile, "workload_digest": *workloadDigest}
 	if *ttft != "" {
 		value, err := strconv.ParseFloat(*ttft, 64)
 		if err != nil || value < 0 {
@@ -1162,18 +1208,33 @@ func labCommand(ctx context.Context, cfg config.Config, args []string) error {
 		fmt.Println(string(encoded))
 		return nil
 	}
-	fmt.Printf("Inference Lab · %s\nEvidence %s · persisted comparison %s\n\n", model, shortID(response.Evaluation.InputDigest), response.Evaluation.ID)
+	fmt.Printf("Inference Lab · %s · optimize %s\nEvidence %s · persisted comparison %s\n\n", model, *objective, shortID(response.Evaluation.InputDigest), response.Evaluation.ID)
 	if len(response.Evaluation.Results) == 0 {
 		fmt.Println("No comparable measured benchmark evidence. InferCrane did not model or invent a result.")
 		return nil
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "CLASS\tCANDIDATE\tTTFT P95\tOUTPUT TOK/S\tERRORS\tSLO\tCOST")
+	fmt.Fprintln(w, "CHOICE\tCLASS\tCANDIDATE\tPROFILE\tTTFT P95\tOUTPUT TOK/S\tERRORS\tSLO\tCOST")
 	for _, row := range response.Evaluation.Results {
 		candidate := fmt.Sprintf("%s / %s / %s", benchmarkValue(row["provider"]), benchmarkValue(row["runtime"]), benchmarkValue(row["gpu"]))
-		fmt.Fprintf(w, "%s\t%s\t%s ms\t%s\t%s\t%s\t%s\n", strings.ToUpper(benchmarkValue(row["evidence_class"])), candidate, benchmarkValue(row["ttft_p95_ms"]), benchmarkValue(row["output_tokens_second"]), benchmarkValue(row["error_rate"]), benchmarkValue(row["meets_slo"]), nestedValue(row, "cost_metadata", "available"))
+		choice := ""
+		if selected, _ := row["selected"].(bool); selected {
+			choice = "RECOMMENDED"
+		} else if comparable, _ := row["comparable"].(bool); !comparable {
+			choice = "UNRANKED"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s ms\t%s\t%s\t%s\t%s\n", choice, strings.ToUpper(benchmarkValue(row["evidence_class"])), candidate, benchmarkValue(row["workload_profile"]), benchmarkValue(row["ttft_p95_ms"]), benchmarkValue(row["output_tokens_second"]), benchmarkValue(row["error_rate"]), benchmarkValue(row["meets_slo"]), nestedValue(row, "cost_metadata", "available"))
 	}
-	return w.Flush()
+	if err := w.Flush(); err != nil {
+		return err
+	}
+	for _, row := range response.Evaluation.Results {
+		if comparable, _ := row["comparable"].(bool); !comparable {
+			fmt.Println("\nNo recommendation: results contain unlike workload shapes. Filter with --profile or --workload-digest.")
+			break
+		}
+	}
+	return nil
 }
 
 func nestedValue(row map[string]any, object, key string) string {
@@ -2695,10 +2756,58 @@ func inspectCommand(ctx context.Context, cfg config.Config, args []string) error
 	for _, replica := range view.Replicas {
 		fmt.Printf("\nReplica    %s\nProvider   %s\nRequest    %s\nResource   %s\nEndpoint   %s\nState      %s/%s\n", replica.ID, replica.Provider, emptyAs(replica.ProviderRequestID, "none"), emptyAs(replica.ProviderResourceID, "none"), emptyAs(replica.Endpoint, "pending"), replica.LifecycleState, replica.Health)
 		if len(replica.ProviderDetails) > 0 && string(replica.ProviderDetails) != "{}" {
+			for _, line := range startupEvidenceLines(replica.ProviderDetails) {
+				fmt.Println(line)
+			}
 			fmt.Printf("Details    %s\n", replica.ProviderDetails)
 		}
 	}
 	return nil
+}
+
+func startupEvidenceLines(raw json.RawMessage) []string {
+	var details struct {
+		RuntimeReadyAt time.Time `json:"runtime_ready_at"`
+		Startup        struct {
+			CurrentStage string `json:"current_stage"`
+			ImageCache   string `json:"image_cache"`
+			Stages       []struct {
+				Name string    `json:"name"`
+				At   time.Time `json:"at"`
+			} `json:"stages"`
+		} `json:"startup_evidence"`
+	}
+	if json.Unmarshal(raw, &details) != nil || len(details.Startup.Stages) == 0 {
+		return nil
+	}
+	labels := map[string]string{
+		"identity_start": "machine bootstrap", "identity_ready": "workload identity", "image_check": "image check",
+		"image_cache_hit": "image cache hit", "image_cache_miss_required": "required image cache miss", "image_pull_start": "image pull", "image_pull_complete": "image pulled",
+		"runtime_start": "runtime start", "runtime_container_started": "container started",
+	}
+	start := details.Startup.Stages[0].At
+	lines := []string{fmt.Sprintf("Image      cache %s", emptyAs(details.Startup.ImageCache, "unknown")), "Startup    measured provider waterfall"}
+	for _, stage := range details.Startup.Stages {
+		label := labels[stage.Name]
+		if label == "" {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("  +%-8s %s", compactDuration(stage.At.Sub(start)), label))
+	}
+	if !details.RuntimeReadyAt.IsZero() && !start.IsZero() && !details.RuntimeReadyAt.Before(start) {
+		lines = append(lines, fmt.Sprintf("  +%-8s runtime ready", compactDuration(details.RuntimeReadyAt.Sub(start))))
+	}
+	return lines
+}
+
+func compactDuration(value time.Duration) string {
+	if value < 0 {
+		return "unknown"
+	}
+	if value < time.Second {
+		return value.Round(time.Millisecond).String()
+	}
+	return value.Round(time.Second).String()
 }
 
 type cliEvent struct {
@@ -3733,7 +3842,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 			SubnetID: cfg.AWSSubnetID, SecurityGroupIDs: cfg.AWSSecurityGroupIDs,
 			AMIID: cfg.AWSAMIID, InstanceType: cfg.AWSInstanceType, GPU: cfg.AWSGPU,
 			InstanceProfileARN: cfg.AWSInstanceProfileARN, WorkerSecretARN: cfg.AWSWorkerSecretARN,
-			ImageDigest: cfg.AWSImageDigest, RootVolumeGiB: cfg.AWSRootVolumeGiB,
+			ImageDigest: cfg.AWSImageDigest, RootVolumeGiB: cfg.AWSRootVolumeGiB, ImageCachePolicy: cfg.AWSImageCachePolicy,
 		}
 		elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: "aws-ec2", Cloud: "aws", Runtime: "vllm", Default: true, Profile: awsProfile, Provider: awsProvider})
 		elasticBackends = append(elasticBackends,

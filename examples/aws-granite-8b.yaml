@@ -1,0 +1,15 @@
+apiVersion: infercrane.dev/v1
+kind: Deployment
+name: granite-aws
+model:
+  id: ibm-granite/granite-3.3-8b-instruct
+  revision: 51dd4bc2ade4059a6bd87649d68aa11e4fb2529b
+runtime:
+  engine: vllm
+  version: 0.22.0
+  args: [--enable-prefix-caching]
+compute: {mode: elastic}
+provider: {cloud: aws, region: eu-central-1}
+resources: {gpu: L40S}
+scaling: {min_replicas: 1, max_replicas: 1}
+routing: {strategy: cache-aware}

@@ -29,6 +29,21 @@ func TestParseRecordsMeasuresAIPerfMetrics(t *testing.T) {
 	}
 }
 
+func TestParseRecordsComputesSLOGoodputWithoutTreatingMissingMetricsAsPassing(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "records.jsonl")
+	data := `{"metadata":{"benchmark_phase":"profiling","request_start_ns":1000000000,"request_end_ns":2000000000},"metrics":{"time_to_first_token":{"value":100},"request_latency":{"value":500},"inter_token_latency":{"value":10}}}
+{"metadata":{"benchmark_phase":"profiling","request_start_ns":1000000000,"request_end_ns":3000000000},"metrics":{"time_to_first_token":{"value":400},"request_latency":{"value":900},"inter_token_latency":{"value":20}}}
+{"metadata":{"benchmark_phase":"profiling","request_start_ns":1000000000,"request_end_ns":3000000000},"metrics":{"time_to_first_token":{"value":100},"request_latency":{"value":500}}}
+`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := parseRecordsWithSLO(path, Config{TTFTSLOMS: 250, TPOTSLOMS: 15, LatencySLOMS: 700})
+	if err != nil || result.Goodput == nil || *result.Goodput != .5 {
+		t.Fatalf("result=%#v err=%v", result, err)
+	}
+}
+
 func TestPercentileUsesNearestRankWithoutHidingTail(t *testing.T) {
 	values := []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 100}
 	if got := percentile(values, .95); got != 100 {
@@ -90,6 +105,29 @@ func TestRunUsesIndependentServingModelAndTokenizer(t *testing.T) {
 		t.Fatalf("args=%v", runner.profileArgs)
 	}
 }
+
+func TestRunSelectsStreamingAndBufferedAIPerfModes(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		mode *bool
+		want string
+	}{
+		{name: "default-streaming", want: "--streaming"},
+		{name: "streaming", mode: benchmarkBool(true), want: "--streaming"},
+		{name: "buffered", mode: benchmarkBool(false), want: "--no-streaming"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			runner := &capturingRunner{}
+			_, _ = run(context.Background(), Config{Endpoint: "http://example", Model: "m", Requests: 1, Concurrency: 1, Streaming: test.mode}, runner)
+			joined := strings.Join(runner.profileArgs, " ")
+			if !strings.Contains(joined, test.want) {
+				t.Fatalf("args=%v want=%s", runner.profileArgs, test.want)
+			}
+		})
+	}
+}
+
+func benchmarkBool(value bool) *bool { return &value }
 
 type capturingRunner struct{ profileArgs []string }
 

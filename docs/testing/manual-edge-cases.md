@@ -39,6 +39,25 @@ Local fixtures prove InferCrane logic only. This document will contain the exact
 - Evidence: CloudTrail request/client token, instance tags and immutable configuration, operation attempts, runtime readiness transcript, VPC reachability evidence, termination observations, cost tags, and exact pre/post inventory.
 - Cleanup: use the portable harness cleanup and independently query run-owned EC2 instances, volumes, ENIs, and any harness-created security objects.
 
+### Model-diverse AWS performance evidence
+
+Run model families independently so a failure or cost boundary remains attributable:
+
+```bash
+export INFERCRANE_V1_PROVIDER_ENV_FILE=/secure/path/aws.env
+export INFERCRANE_V1_API_KEY_FILE=/secure/path/worker-key
+
+scripts/aws-performance-qualification.sh mistral --approve-paid-resources
+scripts/aws-performance-qualification.sh deepseek --approve-paid-resources
+scripts/aws-performance-qualification.sh granite --approve-paid-resources
+```
+
+Mistral qualifies the catalog-declared tool path plus structured decoding; DeepSeek Distill and
+Granite qualify chat, streaming, workload shapes, and lifecycle without inventing tool support. Each
+run must archive the seven-profile AIPerf matrix, immutable model/runtime/image identities, startup
+waterfall, and matching before/after EC2 and EBS inventory. Do not combine rows across different
+model identities or workload digests into one ranking.
+
 ## GCP Compute BYOC — adoption, quota, IAM, networking, and delete
 
 - Why local simulation is insufficient: the fixture proves intent-digest adoption and bounded command handling, but Compute Engine name reuse, regional quota, service-account propagation, VPC/firewall behavior, operation polling, and eventual deletion are controlled by GCP.

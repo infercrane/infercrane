@@ -645,12 +645,30 @@ func TestRecipeCaptureAndLabUseImmutableMeasuredEvidence(t *testing.T) {
 	if response.Code != http.StatusCreated || len(store.recipes) != 1 || store.recipes[0].Digest == "" || !strings.Contains(response.Body.String(), `"evidence_class":"measured"`) {
 		t.Fatalf("status=%d recipes=%#v body=%s", response.Code, store.recipes, response.Body.String())
 	}
-	request = httptest.NewRequest(http.MethodPost, "/api/v1/lab/evaluations", strings.NewReader(`{"model_identity":"`+identity+`","max_ttft_p95_ms":250}`))
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/lab/evaluations", strings.NewReader(`{"model_identity":"`+identity+`","objective":"latency","max_ttft_p95_ms":250}`))
 	request.Header.Set("Authorization", "Bearer secret")
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusCreated || store.lab.ID != "lab-1" || !strings.Contains(response.Body.String(), `"evidence_class":"measured"`) {
 		t.Fatalf("status=%d lab=%#v body=%s", response.Code, store.lab, response.Body.String())
+	}
+}
+
+func TestLabRejectsUnknownOptimizationObjectiveAndProfile(t *testing.T) {
+	store := &fakeRecipeLabStore{fakeStore: &fakeStore{}}
+	handler := (API{Store: store, APIKey: "secret"}).Handler()
+	for _, body := range []string{
+		`{"model_identity":"model@commit","objective":"magic"}`,
+		`{"model_identity":"model@commit","workload_profile":"not-a-profile"}`,
+		`{"model_identity":"model@commit","max_ttft_p95_ms":1e999}`,
+	} {
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/lab/evaluations", strings.NewReader(body))
+		request.Header.Set("Authorization", "Bearer secret")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code < 400 || response.Code >= 500 {
+			t.Fatalf("body=%s status=%d response=%s", body, response.Code, response.Body.String())
+		}
 	}
 }
 
@@ -1198,7 +1216,8 @@ func (f *fakePassportStore) InferencePassports(context.Context, string, string, 
 func (f *fakeBenchmarkRunner) Run(_ context.Context, cfg benchmark.Config) (benchmark.Result, error) {
 	f.config = cfg
 	value := 12.5
-	return benchmark.Result{Tool: "aiperf", ToolVersion: "0.9.0", Command: "aiperf profile --api-key ${INFERCRANE_API_KEY}", Requests: 10, Succeeded: 10, TTFTP95MS: &value}, nil
+	goodput := 4.25
+	return benchmark.Result{Tool: "aiperf", ToolVersion: "0.9.0", Command: "aiperf profile --api-key ${INFERCRANE_API_KEY}", Requests: 10, Succeeded: 10, TTFTP95MS: &value, Goodput: &goodput}, nil
 }
 func TestOperationAPIAuthenticationAndResponse(t *testing.T) {
 	store := &fakeStore{operation: domain.Operation{ID: "op", TenantID: "global", Status: "failed", ErrorCode: "provider_denied", MaxAttempts: 5}}
@@ -1455,6 +1474,34 @@ func TestBenchmarkRunsThroughControlPlaneAndPersistsIdentity(t *testing.T) {
 	}
 	if runner.config.APIKey != "secret" || runner.config.RandomSeed != 42 || runner.config.Model != "qwen" || runner.config.Tokenizer != "Qwen/Qwen3-8B" || len(store.benchmarks) != 1 || store.benchmarks[0].GPU != "L40S" || store.benchmarks[0].GPUCount == nil || *store.benchmarks[0].GPUCount != 1 || !strings.Contains(store.benchmarks[0].CostMetadataJSON, `"available":false`) {
 		t.Fatalf("config=%#v benchmarks=%#v", runner.config, store.benchmarks)
+	}
+}
+
+func TestBenchmarkPersistsProfileSLOAndGoodputEvidence(t *testing.T) {
+	spec := `{"model":"mistralai/Mistral-7B-Instruct-v0.3","model_revision":"commit","runtime":"vllm","compute_mode":"elastic","gpu":"L40S"}`
+	store := &fakeStore{resolved: domain.ResolvedDeployment{Deployment: domain.Deployment{ID: "dep", Name: "mistral", ActiveRevisionID: "rev"}}, revisions: []domain.DeploymentRevision{{ID: "rev", SpecJSON: spec}}, artifact: domain.ModelArtifact{ID: "artifact", Repository: "mistralai/Mistral-7B-Instruct-v0.3", ModelIdentity: "mistralai/Mistral-7B-Instruct-v0.3@commit"}}
+	runner := &fakeBenchmarkRunner{}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments/mistral/benchmarks", strings.NewReader(`{"requests":256,"concurrency":1,"input_tokens":512,"output_tokens":128,"streaming":true,"profile":"interactive","profile_version":"benchmark-profile-v1","ttft_slo_ms":250,"tpot_slo_ms":20}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret", BenchmarkRunner: runner, GatewayURL: "http://gateway"}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || len(store.benchmarks) != 1 || !strings.Contains(store.benchmarks[0].WorkloadJSON, `"profile":"interactive"`) || runner.config.TTFTSLOMS != 250 || runner.config.TPOTSLOMS != 20 || store.benchmarks[0].Goodput == nil || *store.benchmarks[0].Goodput != 4.25 {
+		t.Fatalf("response=%d %s config=%#v benchmarks=%#v", response.Code, response.Body.String(), runner.config, store.benchmarks)
+	}
+}
+
+func TestBenchmarkRejectsUnknownOrVersionSkewedProfile(t *testing.T) {
+	for _, body := range []string{
+		`{"requests":10,"concurrency":1,"profile":"fastest","profile_version":"benchmark-profile-v1"}`,
+		`{"requests":10,"concurrency":1,"profile":"interactive","profile_version":"benchmark-profile-v0"}`,
+	} {
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments/m/benchmarks", strings.NewReader(body))
+		request.Header.Set("Authorization", "Bearer secret")
+		response := httptest.NewRecorder()
+		(API{Store: &fakeStore{}, APIKey: "secret", BenchmarkRunner: &fakeBenchmarkRunner{}, GatewayURL: "http://gateway"}).Handler().ServeHTTP(response, request)
+		if response.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("body=%s response=%d %s", body, response.Code, response.Body.String())
+		}
 	}
 }
 

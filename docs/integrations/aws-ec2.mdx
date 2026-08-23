@@ -24,7 +24,7 @@ bootstrap, or a general AWS abstraction.
 
 The assumed control-plane role needs a deliberately narrow permission set:
 
-- `ec2:DescribeInstances` and `ec2:DescribeVolumes` in the selected region;
+- `ec2:DescribeInstances`, `ec2:DescribeVolumes`, and `ec2:GetConsoleOutput` in the selected region;
 - `ec2:RunInstances` for the exact AMI, subnet, security group, network interface, volume, instance
   type, and managed instance tag boundary;
 - `ec2:CreateTags` for both `instance/*` and `volume/*`, restricted to
@@ -52,6 +52,7 @@ export INFERCRANE_AWS_GPU='L40S'
 export INFERCRANE_AWS_INSTANCE_PROFILE_ARN='arn:aws:iam::123456789012:instance-profile/infercrane-worker'
 export INFERCRANE_AWS_WORKER_SECRET_ARN='arn:aws:secretsmanager:eu-central-1:123456789012:secret:infercrane-worker-key'
 export INFERCRANE_AWS_IMAGE_DIGEST='vllm/vllm-openai@sha256:REPLACE_WITH_QUALIFIED_DIGEST'
+export INFERCRANE_AWS_IMAGE_CACHE_POLICY='prefer'
 export INFERCRANE_AWS_ROOT_VOLUME_GIB='100'
 ```
 
@@ -69,6 +70,13 @@ same private network, instance profile, worker secret and ownership tags.
 volume that is deleted with the worker. Keep enough headroom for the GPU runtime image, model
 artifacts, tokenizer data, and temporary download files; values below 50 GiB are rejected before
 AWS mutation.
+
+`INFERCRANE_AWS_IMAGE_CACHE_POLICY` defaults to `prefer`: a prewarmed exact digest is reused and a
+missing digest is pulled. Set it to `required` for a qualification or production pool whose AMI is
+contractually prewarmed. A required-cache miss fails the replica before any registry pull, is
+visible as `image_cache_miss_required`, and is cleaned up by the durable operation. This prevents a
+supposedly fast-start pool from silently becoming a long image pull; it does not claim that model
+weights are cached.
 
 Validate role assumption without creating a resource:
 
@@ -108,11 +116,33 @@ infercrane deploy Qwen/Qwen3-8B \
 Closing the terminal does not stop provisioning. Resume with the operation ID printed by `deploy`.
 Deletion terminates only instances carrying InferCrane ownership tags and the persisted replica key.
 
+Inspect the measured startup waterfall after provisioning:
+
+```bash
+infercrane inspect qwen-aws
+```
+
+When `ec2:GetConsoleOutput` is permitted, InferCrane extracts only its closed startup markers and
+persists their timestamps plus the runtime-ready time. Arbitrary EC2 console output is discarded;
+runtime logs, model output, and credentials are never copied into provider metadata.
+
 For the portable-runtime path, apply
 `examples/sglang.yaml` or
 replace the placeholder image in
 `examples/custom-oci.yaml` in the private-preview repository.
 Every changed image/model/GPU combination remains its own real qualification gate.
+
+Do not treat Qwen as the only supported or tested workload. The repository includes immutable AWS
+qualification intents for three permissively licensed chat/reasoning families:
+
+- `examples/aws-mistral-7b.yaml` — Mistral 7B Instruct, Apache-2.0;
+- `examples/aws-deepseek-r1-distill-7b.yaml` — DeepSeek R1 Distill Qwen 7B, MIT;
+- `examples/aws-granite-8b.yaml` — IBM Granite 3.3 8B Instruct, Apache-2.0.
+
+Qwen3-8B remains the cross-runtime tool-calling and structured-output regression fixture. BGE-M3 is
+the embedding protocol fixture, while gated Llama and Gemma recipes require the operator to accept
+their upstream terms. Each real run must archive the exact model revision and must not transfer a
+benchmark claim from one model family to another.
 
 ## Security and accounting behavior
 

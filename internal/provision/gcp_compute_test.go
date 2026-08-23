@@ -17,6 +17,7 @@ type fakeGCPRunner struct {
 	creates, deletes int
 	loseCreate       bool
 	lastCreate       []string
+	serialOutput     string
 }
 
 type gcpCheckRunner struct{ calls [][]string }
@@ -72,8 +73,21 @@ func (f *fakeGCPRunner) Run(_ context.Context, _ []string, args ...string) ([]by
 			return []byte(`[]`), nil
 		}
 		return json.Marshal([]gcpInstance{f.instance})
+	case "get-serial-port-output":
+		return []byte(f.serialOutput), nil
 	default:
 		return nil, errors.New("unexpected instances command")
+	}
+}
+
+func TestGCPComputePersistsClosedStartupEvidence(t *testing.T) {
+	runner := &fakeGCPRunner{instance: gcpInstance{Name: "infercrane-worker", Status: "RUNNING"}, serialOutput: "token=do-not-retain\ninfercrane_startup stage=identity_start at=2026-08-23T10:00:00Z\ninfercrane_startup stage=image_cache_hit at=2026-08-23T10:00:02Z\ninfercrane_startup stage=runtime_container_started at=2026-08-23T10:00:04Z\n"}
+	runner.instance.NetworkInterfaces = append(runner.instance.NetworkInterfaces, struct {
+		NetworkIP string `json:"networkIP"`
+	}{NetworkIP: "10.20.0.8"})
+	observed, err := testGCPCompute(runner).ObserveReplica(context.Background(), ProviderHandle{ResourceID: runner.instance.Name}, 8000)
+	if err != nil || !strings.Contains(observed.Details, `"current_stage":"runtime_container_started"`) || !strings.Contains(observed.Details, `"image_cache":"hit"`) || strings.Contains(observed.Details, "do-not-retain") {
+		t.Fatalf("observation=%#v err=%v", observed, err)
 	}
 }
 
@@ -173,7 +187,7 @@ func TestGCPComputePortableWorkloadExpandsArgumentsSafely(t *testing.T) {
 func TestGCPComputeStartupUsesWorkloadIdentityWithoutWorkerGcloud(t *testing.T) {
 	provider := testGCPCompute(&fakeGCPRunner{})
 	script := provider.startup(ReplicaSpec{Model: "Qwen/Qwen3-8B", ModelRevision: strings.Repeat("a", 40)}, 8000)
-	for _, required := range []string{"metadata.google.internal", "Metadata-Flavor: Google", "secretmanager.googleapis.com", "base64 -d", "unset token_json access_token secret_json secret_data", "infercrane_stage identity_start", "infercrane_stage identity_ready", "docker image inspect", "infercrane_stage image_cache_hit", "infercrane_stage image_pull_complete", "infercrane_stage runtime_start"} {
+	for _, required := range []string{"metadata.google.internal", "Metadata-Flavor: Google", "secretmanager.googleapis.com", "base64 -d", "unset token_json access_token secret_json secret_data", "infercrane_stage identity_start", "infercrane_stage identity_ready", "docker image inspect", "infercrane_stage image_cache_hit", "infercrane_stage image_pull_complete", "infercrane_stage runtime_start", "infercrane_stage runtime_container_started"} {
 		if !strings.Contains(script, required) {
 			t.Fatalf("startup script missing %q: %s", required, script)
 		}

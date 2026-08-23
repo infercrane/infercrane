@@ -1120,8 +1120,38 @@ func TestBenchmarkParsesFlagsAfterDeploymentName(t *testing.T) {
 	}
 }
 
+func TestBenchmarkProfileAppliesDefaultsAndPreservesExplicitOverrides(t *testing.T) {
+	var body map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"benchmark":{"id":"benchmark-1"}}`))
+	}))
+	defer server.Close()
+
+	_, err := captureStdout(t, func() error {
+		return benchmarkCommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, []string{"coder", "--profile", "long-context", "--concurrency", "2", "--output", "json"})
+	})
+	if err != nil || body["requests"] != float64(64) || body["concurrency"] != float64(2) || body["input_tokens"] != float64(8192) || body["output_tokens"] != float64(256) || body["profile"] != "long-context" || body["profile_version"] != "benchmark-profile-v1" {
+		t.Fatalf("body=%#v err=%v", body, err)
+	}
+}
+
+func TestStartupEvidenceLinesExposeWaterfallWithoutRawConsole(t *testing.T) {
+	lines := startupEvidenceLines(json.RawMessage(`{"runtime_ready_at":"2026-08-23T10:01:10Z","startup_evidence":{"image_cache":"hit","current_stage":"runtime_container_started","stages":[{"name":"identity_start","at":"2026-08-23T10:00:00Z"},{"name":"image_cache_hit","at":"2026-08-23T10:00:03Z"},{"name":"runtime_container_started","at":"2026-08-23T10:00:05Z"}]}}`))
+	joined := strings.Join(lines, "\n")
+	for _, expected := range []string{"Image      cache hit", "measured provider waterfall", "+3s", "image cache hit", "+5s", "container started", "+1m10s", "runtime ready"} {
+		if !strings.Contains(joined, expected) {
+			t.Fatalf("lines=%q missing=%q", joined, expected)
+		}
+	}
+}
+
 func TestRecipeAndLabCommandsUseControlAPI(t *testing.T) {
 	var paths []string
+	var labBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		paths = append(paths, r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
@@ -1131,6 +1161,9 @@ func TestRecipeAndLabCommandsUseControlAPI(t *testing.T) {
 		case r.URL.Path == "/api/v1/recipes":
 			_ = json.NewEncoder(w).Encode(map[string]any{"data": []any{}})
 		default:
+			if err := json.NewDecoder(r.Body).Decode(&labBody); err != nil {
+				t.Fatal(err)
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"evaluation": map[string]any{"id": "lab-1", "input_digest": strings.Repeat("b", 64), "results": []any{map[string]any{"evidence_class": "measured", "provider": "aws", "runtime": "vllm", "gpu": "H100", "ttft_p95_ms": 200, "error_rate": 0, "cost_metadata": map[string]any{"available": false}}}}})
 		}
 	}))
@@ -1145,12 +1178,21 @@ func TestRecipeAndLabCommandsUseControlAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	if output, err := captureStdout(t, func() error {
-		return labCommand(context.Background(), cfg, []string{"model@commit", "--max-ttft-p95-ms", "250"})
+		return labCommand(context.Background(), cfg, []string{"model@commit", "--objective", "throughput", "--profile", "throughput", "--max-ttft-p95-ms", "250"})
 	}); err != nil || !strings.Contains(output, "MEASURED") {
 		t.Fatalf("output=%s err=%v", output, err)
 	}
 	if strings.Join(paths, ",") != "/api/v1/deployments/qwen prod/recipes,/api/v1/recipes,/api/v1/lab/evaluations" {
 		t.Fatalf("paths=%v", paths)
+	}
+	if labBody["objective"] != "throughput" || labBody["workload_profile"] != "throughput" {
+		t.Fatalf("lab body=%#v", labBody)
+	}
+}
+
+func TestLabRejectsUnknownObjectiveBeforeNetworkAccess(t *testing.T) {
+	if err := labCommand(context.Background(), config.Config{}, []string{"model@commit", "--objective", "fastest"}); err == nil || !strings.Contains(err.Error(), "objective") {
+		t.Fatalf("err=%v", err)
 	}
 }
 

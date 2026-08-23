@@ -35,6 +35,11 @@ type InitOptions struct {
 	Cloud         string
 	GPU           string
 	Region        string
+	ComputeMode   string
+	Routing       string
+	RuntimeArgs   []string
+	MinReplicas   int
+	MaxReplicas   int
 	Force         bool
 }
 
@@ -94,7 +99,16 @@ func Init(options InitOptions) (string, error) {
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return "", fmt.Errorf("inspect project spec: %w", err)
 	}
-	content := renderSpec(name, options.Model, options.ModelRevision, runtimeName, cloud, gpu, options.Region)
+	computeMode := defaultValue(options.ComputeMode, "elastic")
+	routing := defaultValue(options.Routing, "round-robin")
+	minReplicas, maxReplicas := options.MinReplicas, options.MaxReplicas
+	if minReplicas == 0 && maxReplicas == 0 {
+		minReplicas, maxReplicas = 1, 1
+	}
+	if minReplicas < 0 || maxReplicas < minReplicas {
+		return "", errors.New("project replica bounds must satisfy 0 <= min <= max")
+	}
+	content := renderSpec(name, options.Model, options.ModelRevision, runtimeName, cloud, gpu, options.Region, computeMode, routing, options.RuntimeArgs, minReplicas, maxReplicas)
 	if err = os.WriteFile(path, []byte(content), 0o644); err != nil {
 		return "", fmt.Errorf("write project spec: %w", err)
 	}
@@ -293,7 +307,7 @@ func defaultValue(value, fallback string) string {
 	return strings.TrimSpace(value)
 }
 
-func renderSpec(name, model, modelRevision, runtimeName, cloud, gpu, region string) string {
+func renderSpec(name, model, modelRevision, runtimeName, cloud, gpu, region, computeMode, routing string, runtimeArgs []string, minReplicas, maxReplicas int) string {
 	regionLine := ""
 	if strings.TrimSpace(region) != "" {
 		regionLine = "\n  region: " + region
@@ -301,6 +315,11 @@ func renderSpec(name, model, modelRevision, runtimeName, cloud, gpu, region stri
 	revisionLine := ""
 	if strings.TrimSpace(modelRevision) != "" {
 		revisionLine = "\n  revision: " + modelRevision
+	}
+	argsLine := ""
+	if len(runtimeArgs) > 0 {
+		encoded, _ := json.Marshal(runtimeArgs)
+		argsLine = "\n  args: " + string(encoded)
 	}
 	return fmt.Sprintf(`# yaml-language-server: $schema=https://raw.githubusercontent.com/infercrane/infercrane/main/schemas/deployment-v1.schema.json
 apiVersion: infercrane.dev/v1
@@ -311,10 +330,10 @@ model:
   id: %s%s
 
 runtime:
-  engine: %s
+  engine: %s%s
 
 compute:
-  mode: elastic
+  mode: %s
 
 resources:
   gpu: %s
@@ -323,10 +342,10 @@ provider:
   cloud: %s%s
 
 scaling:
-  min_replicas: 1
-  max_replicas: 1
+  min_replicas: %d
+  max_replicas: %d
 
 routing:
-  strategy: round-robin
-`, name, model, revisionLine, runtimeName, gpu, cloud, regionLine)
+  strategy: %s
+`, name, model, revisionLine, runtimeName, argsLine, computeMode, gpu, cloud, regionLine, minReplicas, maxReplicas, routing)
 }

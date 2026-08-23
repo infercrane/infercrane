@@ -1,0 +1,15 @@
+apiVersion: infercrane.dev/v1
+kind: Deployment
+name: deepseek-distill-aws
+model:
+  id: deepseek-ai/DeepSeek-R1-Distill-Qwen-7B
+  revision: 916b56a44061fd5cd7d6a8fb632557ed4f724f60
+runtime:
+  engine: vllm
+  version: 0.22.0
+  args: [--enable-prefix-caching]
+compute: {mode: elastic}
+provider: {cloud: aws, region: eu-central-1}
+resources: {gpu: L40S}
+scaling: {min_replicas: 1, max_replicas: 1}
+routing: {strategy: cache-aware}
