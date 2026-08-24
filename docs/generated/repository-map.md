@@ -333,6 +333,7 @@ Regenerate with `make context`. Design authority remains in ADRs and feature doc
 - `POST /api/v1/optimization/campaigns/{id}/activate`
 - `POST /api/v1/optimization/campaigns/{id}/approve`
 - `POST /api/v1/optimization/campaigns/{id}/cancel`
+- `POST /api/v1/optimization/proposals`
 - `POST /api/v1/optimized-artifacts`
 - `POST /api/v1/optimized-artifacts/{id}/attest`
 - `POST /api/v1/optimized-artifacts/{id}/build`

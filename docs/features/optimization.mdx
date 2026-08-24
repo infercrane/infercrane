@@ -91,6 +91,19 @@ off by default and requires `--allow-model-metadata-network`.
 
 ## Create a durable campaign
 
+The authenticated console exposes the same boundaries under **Optimize**:
+
+1. choose a reviewed model, objective, infrastructure target, and optional SLO;
+2. review the candidate boundary without allocating provider resources;
+3. create an immutable campaign;
+4. grant a hard spend cap with a maximum 24-hour expiry;
+5. follow durable execution from Activity, even after closing the browser;
+6. inspect modeled and measured evidence separately;
+7. explicitly publish a qualified new endpoint or promote a Release Guard-approved evolution.
+
+Cancellation is durable too: it persists the decision and links to the cleanup operation. The
+console never treats a proposed endpoint name as published until activation completes.
+
 Use `propose` for a completely offline preview. Use `create` to persist the same immutable proposal
 without provisioning anything:
 
@@ -162,6 +175,12 @@ The rate is the total hourly cost of that exact maximum-replica tuple. A missing
 source window, absent AIPerf binary, or approval below the worst-case execution cost is rejected
 before provider mutation. Operators must refresh price evidence rather than treating this static
 example as current pricing.
+
+Automation clients can request the same non-mutating candidate set with
+`POST /api/v1/optimization/proposals`. This endpoint performs no provider mutation and makes no
+performance claim. Pass the returned immutable proposal to
+`POST /api/v1/optimization/campaigns` when you are ready to persist the review boundary. Paid
+execution still requires the separate approval endpoint.
 
 The restart-safe execution path is locally qualified for lost child-operation responses,
 cancellation, expired authority, evidence identity, cleanup, and the human promotion boundary.

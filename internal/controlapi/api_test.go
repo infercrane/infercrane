@@ -465,19 +465,27 @@ func TestOptimizationCampaignRequiresImmutableProposalAndExplicitBoundedApproval
 	}
 	body, _ := json.Marshal(map[string]any{"proposal": proposal})
 	store := &fakeOptimizationCampaignStore{fakeStore: &fakeStore{}}
-	handler := (API{Store: store, APIKey: "secret", OptimizationCosts: fakeOptimizationCosts{}}).Handler()
+	handler := (API{Store: store, APIKey: "secret", OptimizationCosts: fakeOptimizationCosts{}, Integrations: registry.Snapshot()}).Handler()
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/optimization/proposals", strings.NewReader(`{"model_identity":"llama-3.1-8b-instruct","provider":"aws","region":"eu-central-1","gpu":"L40S","objective":"interactive","max_candidates":2}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"provider_mutation":false`) || !strings.Contains(response.Body.String(), `"performance_claims":false`) || !strings.Contains(response.Body.String(), `"input_digest"`) || !strings.Contains(response.Body.String(), `"candidates":[`) {
+		t.Fatalf("proposal status=%d body=%s", response.Code, response.Body.String())
+	}
 
 	create := httptest.NewRequest(http.MethodPost, "/api/v1/optimization/campaigns", strings.NewReader(string(body)))
 	create.Header.Set("Authorization", "Bearer secret")
 	create.Header.Set("Idempotency-Key", "campaign-create-1")
-	response := httptest.NewRecorder()
+	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, create)
 	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"provider_mutation":false`) || store.campaign.State != optimizationcampaign.CampaignAwaitingApproval || store.campaign.Intent != optimizationcampaign.IntentNewEndpoint {
 		t.Fatalf("create status=%d body=%s campaign=%+v", response.Code, response.Body.String(), store.campaign)
 	}
 
 	invalidIntentBody, _ := json.Marshal(map[string]any{"proposal": proposal, "intent": "evolve_endpoint"})
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/optimization/campaigns", strings.NewReader(string(invalidIntentBody)))
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/optimization/campaigns", strings.NewReader(string(invalidIntentBody)))
 	request.Header.Set("Authorization", "Bearer secret")
 	request.Header.Set("Idempotency-Key", "campaign-create-missing-target")
 	response = httptest.NewRecorder()

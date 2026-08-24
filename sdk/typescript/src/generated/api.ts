@@ -333,6 +333,11 @@ export class ControlApi {
     return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
   }
 
+  proposeOptimization(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = '/optimization/proposals';
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
   listOptimizationCampaigns(): Promise<ObjectList> {
     const path = '/optimization/campaigns';
     return this.transport.request('GET', path) as Promise<ObjectList>;

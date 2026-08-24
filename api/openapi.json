@@ -2113,6 +2113,111 @@
         ],
         "type": "object"
       },
+      "OptimizationProposalRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "gpu": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "include_simulated": {
+            "default": false,
+            "type": "boolean"
+          },
+          "max_candidates": {
+            "default": 10,
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_error_rate": {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "max_hourly_cost": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "max_tpot_p95_ms": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "max_ttft_p95_ms": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "min_goodput": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "min_output_tokens_second": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "model_identity": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "objective": {
+            "default": "interactive",
+            "enum": [
+              "interactive",
+              "latency",
+              "throughput",
+              "cost-efficiency"
+            ],
+            "type": "string"
+          },
+          "provider": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "region": {
+            "maxLength": 128,
+            "type": "string"
+          },
+          "runtimes": {
+            "items": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "target_concurrency": {
+            "exclusiveMinimum": 0,
+            "type": "number"
+          },
+          "workload_fingerprint": {
+            "maxLength": 256,
+            "type": "string"
+          },
+          "workload_profile": {
+            "enum": [
+              "balanced",
+              "buffered",
+              "interactive",
+              "long-context",
+              "long-generation",
+              "overload",
+              "throughput"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_identity",
+          "provider",
+          "gpu"
+        ],
+        "type": "object"
+      },
       "OptimizedArtifactAttestation": {
         "additionalProperties": false,
         "properties": {
@@ -7827,6 +7932,52 @@
           }
         ],
         "summary": "Cancel future campaign work and require cleanup",
+        "tags": [
+          "Inference optimization"
+        ]
+      }
+    },
+    "/api/v1/optimization/proposals": {
+      "post": {
+        "operationId": "proposeOptimization",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OptimizationProposalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Generate bounded reviewed configuration candidates without provider mutation or performance claims",
         "tags": [
           "Inference optimization"
         ]

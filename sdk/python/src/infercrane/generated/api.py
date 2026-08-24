@@ -275,6 +275,10 @@ class ControlAPI:
         path = f"/artifacts/{quote(id, safe='')}/cache"
         return cast(dict[str, Any], self._transport.request("GET", path))
 
+    def propose_optimization(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = "/optimization/proposals"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
     def list_optimization_campaigns(self) -> ObjectList:
         path = "/optimization/campaigns"
         return cast(ObjectList, self._transport.request("GET", path))

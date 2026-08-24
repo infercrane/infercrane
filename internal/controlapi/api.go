@@ -325,6 +325,7 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/deployments/{name}/autopilot/plans", a.auth(authz.Deploy, a.createAutopilotPlan))
 	mux.HandleFunc("GET /api/v1/autopilot/plans/{id}", a.auth(authz.Read, a.getAutopilotPlan))
 	mux.HandleFunc("POST /api/v1/autopilot/plans/{id}/approve", a.auth(authz.Deploy, a.approveAutopilotPlan))
+	mux.HandleFunc("POST /api/v1/optimization/proposals", a.auth(authz.Read, a.proposeOptimization))
 	mux.HandleFunc("GET /api/v1/optimization/campaigns", a.auth(authz.Read, a.optimizationCampaigns))
 	mux.HandleFunc("POST /api/v1/optimization/campaigns", a.auth(authz.Deploy, a.createOptimizationCampaign))
 	mux.HandleFunc("GET /api/v1/optimization/campaigns/{id}", a.auth(authz.Read, a.optimizationCampaign))
@@ -515,6 +516,24 @@ func (a API) catalogModel(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"model":              entry,
 		"performance_claims": false,
+	})
+}
+
+func (a API) proposeOptimization(w http.ResponseWriter, r *http.Request) {
+	var request optimizer.Request
+	if !decodeMutationBody(w, r, &request) {
+		return
+	}
+	proposal, err := optimizer.NewCatalogSource(curatedrecipe.All(), a.Integrations).Propose(r.Context(), request)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_optimization_request", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"proposal":             proposal,
+		"provider_mutation":    false,
+		"performance_claims":   false,
+		"qualification_needed": []string{"benchmark", "quality", "cost", "release_guard"},
 	})
 }
 
