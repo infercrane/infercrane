@@ -5,17 +5,111 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/operations"
+	"github.com/infercrane/infercrane/internal/workflows"
 )
 
-const ExecuteKind = "optimization.campaign.execute"
+const (
+	ExecuteKind  = "optimization.campaign.execute"
+	CleanupKind  = "optimization.campaign.cleanup"
+	ActivateKind = "optimization.campaign.activate"
+)
 
 type ExecuteRequest struct {
 	TenantID   string   `json:"tenant_id"`
 	CampaignID string   `json:"campaign_id"`
 	Candidates []string `json:"candidates"`
+}
+
+type ActivateRequest struct {
+	TenantID    string `json:"tenant_id"`
+	CampaignID  string `json:"campaign_id"`
+	CandidateID string `json:"candidate_id"`
+	Actor       string `json:"actor"`
+}
+
+func (r ActivateRequest) Validate() error {
+	if r.TenantID == "" || r.CampaignID == "" || r.CandidateID == "" || r.Actor == "" {
+		return errors.New("optimization activation requires tenant, campaign, candidate, and actor")
+	}
+	return nil
+}
+
+type ActivationStore interface {
+	Repository
+	EnqueueOperation(context.Context, domain.Operation) (domain.Operation, bool, error)
+}
+
+// ActivationHandlers owns the explicit human boundary after qualification.
+// New-endpoint candidates are marked active without a rollout baseline;
+// evolution candidates delegate traffic mutation to the existing guarded
+// rollout operation and only then persist campaign promotion.
+func ActivationHandlers(store ActivationStore, now func() time.Time) map[string]operations.Handler {
+	return map[string]operations.Handler{ActivateKind: func(ctx context.Context, operation domain.Operation) (string, error) {
+		var request ActivateRequest
+		if err := json.Unmarshal([]byte(operation.RequestJSON), &request); err != nil {
+			return "", operations.Permanent("invalid_request", fmt.Errorf("decode optimization activation: %w", err))
+		}
+		if err := request.Validate(); err != nil {
+			return "", operations.Permanent("invalid_request", err)
+		}
+		campaign, err := store.OptimizationCampaign(ctx, request.TenantID, request.CampaignID)
+		if err != nil {
+			return "", executionFailure(err)
+		}
+		candidate, ok := candidateByID(campaign.Candidates, request.CandidateID)
+		if !ok {
+			return "", operations.Permanent("optimization_candidate_not_found", domain.ErrNotFound)
+		}
+		if candidate.State == CandidatePromoted || candidate.State == CandidateObserved {
+			return activationResult(campaign, candidate), nil
+		}
+		stamp := time.Now().UTC()
+		if now != nil {
+			stamp = now().UTC()
+		}
+		if campaign.ApprovalExpiresAt == nil || !campaign.ApprovalExpiresAt.After(stamp) {
+			return "", operations.Permanent("optimization_approval_expired", ErrApprovalExpired)
+		}
+		expected := CandidateQualified
+		if campaign.Intent == IntentEvolveEndpoint {
+			expected = CandidateGuardPassed
+		}
+		if candidate.State != expected {
+			return "", operations.Permanent("optimization_candidate_not_qualified", fmt.Errorf("candidate state %s requires %s", candidate.State, expected))
+		}
+		if campaign.Intent == IntentEvolveEndpoint {
+			payload, _ := json.Marshal(workflows.RolloutRequest{Name: campaign.TargetDeployment, CandidateID: candidate.RevisionID, TenantID: request.TenantID, Actor: request.Actor})
+			child, _, enqueueErr := store.EnqueueOperation(ctx, domain.Operation{TenantID: request.TenantID, Kind: workflows.RolloutPromoteKind, ResourceType: "deployment", ResourceName: campaign.TargetDeployment, IdempotencyKey: childKey(candidate.ID, "activate"), RequestJSON: string(payload), MaxAttempts: 120})
+			if enqueueErr != nil {
+				return "", operations.Retryable("optimization_activation_enqueue_failed", enqueueErr)
+			}
+			if childErr := childComplete(child, "guarded candidate promotion"); childErr != nil {
+				return "", childErr
+			}
+		}
+		promoted, err := store.TransitionOptimizationCandidate(ctx, request.TenantID, campaign.ID, candidate.ID, candidate.State, CandidatePromoted, domain.OptimizationCandidateRun{})
+		if errors.Is(err, domain.ErrConflict) {
+			reloaded, reloadErr := store.OptimizationCampaign(ctx, request.TenantID, campaign.ID)
+			if reloadErr == nil {
+				if current, found := candidateByID(reloaded.Candidates, candidate.ID); found && (current.State == CandidatePromoted || current.State == CandidateObserved) {
+					return activationResult(reloaded, current), nil
+				}
+			}
+		}
+		if err != nil {
+			return "", executionFailure(err)
+		}
+		return activationResult(campaign, promoted), nil
+	}}
+}
+
+func activationResult(campaign domain.OptimizationCampaign, candidate domain.OptimizationCandidateRun) string {
+	encoded, _ := json.Marshal(map[string]any{"campaign_id": campaign.ID, "candidate_id": candidate.ID, "deployment": candidate.DeploymentName, "revision_id": candidate.RevisionID, "state": candidate.State, "automatic_promotion": false})
+	return string(encoded)
 }
 
 func (r ExecuteRequest) Validate() error {
@@ -72,7 +166,7 @@ func Handlers(coordinator Coordinator) map[string]operations.Handler {
 			// Phase two ranks the complete measured set, rejects non-selected
 			// candidates, and evaluates Release Guard only for the winner.
 			for _, candidateID := range request.Candidates {
-				for boundary := 0; boundary < 2; boundary++ {
+				for boundary := 0; boundary < 3; boundary++ {
 					result, err := coordinator.Step(ctx, request.TenantID, request.CampaignID, candidateID)
 					if err != nil {
 						return "", executionFailure(err)
@@ -81,11 +175,11 @@ func Handlers(coordinator Coordinator) map[string]operations.Handler {
 						waiting = append(waiting, candidateID)
 						break
 					}
-					if !result.Progressed || result.To == CandidateRejected || result.To == CandidateInconclusive || result.To == CandidateFailed || result.To == CandidateCancelled || result.To == CandidateCleaned {
+					if !result.Progressed || result.To == CandidateCleaned {
 						break
 					}
-					if boundary == 1 {
-						return "", operations.Permanent("optimization_state_loop", errors.New("candidate exceeded the bounded ranking and guard transition count"))
+					if boundary == 2 {
+						return "", operations.Permanent("optimization_state_loop", errors.New("candidate exceeded the bounded ranking, guard, and cleanup transition count"))
 					}
 				}
 			}
@@ -94,30 +188,38 @@ func Handlers(coordinator Coordinator) map[string]operations.Handler {
 				"waiting_for_human": waiting,
 				"promotion":         "not_performed",
 			})
+			if len(waiting) > 0 {
+				return "", operations.Retryable("optimization_waiting_for_human", fmt.Errorf("campaign %s is qualified and waiting for explicit activation or promotion before authority expires", request.CampaignID))
+			}
 			return string(encoded), nil
 		},
-		ExecuteKind + ".cancel": func(ctx context.Context, operation domain.Operation) (string, error) {
-			var request ExecuteRequest
-			if err := json.Unmarshal([]byte(operation.RequestJSON), &request); err != nil {
-				return "", operations.Permanent("invalid_request", fmt.Errorf("decode optimization cancellation: %w", err))
-			}
-			if err := request.Validate(); err != nil {
-				return "", operations.Permanent("invalid_request", err)
-			}
-			for _, candidateID := range request.Candidates {
-				for boundary := 0; boundary < 2; boundary++ {
-					result, err := coordinator.CancelCandidate(ctx, request.TenantID, request.CampaignID, candidateID)
-					if err != nil {
-						return "", executionFailure(err)
-					}
-					if !result.Progressed || result.To == CandidateCleaned {
-						break
-					}
+		ExecuteKind + ".cancel": cleanupHandler(coordinator),
+		CleanupKind:             cleanupHandler(coordinator),
+	}
+}
+
+func cleanupHandler(coordinator Coordinator) operations.Handler {
+	return func(ctx context.Context, operation domain.Operation) (string, error) {
+		var request ExecuteRequest
+		if err := json.Unmarshal([]byte(operation.RequestJSON), &request); err != nil {
+			return "", operations.Permanent("invalid_request", fmt.Errorf("decode optimization cancellation: %w", err))
+		}
+		if err := request.Validate(); err != nil {
+			return "", operations.Permanent("invalid_request", err)
+		}
+		for _, candidateID := range request.Candidates {
+			for boundary := 0; boundary < 2; boundary++ {
+				result, err := coordinator.CancelCandidate(ctx, request.TenantID, request.CampaignID, candidateID)
+				if err != nil {
+					return "", executionFailure(err)
+				}
+				if !result.Progressed || result.To == CandidateCleaned {
+					break
 				}
 			}
-			encoded, _ := json.Marshal(map[string]any{"campaign_id": request.CampaignID, "cleanup": "completed", "promotion": "not_performed"})
-			return string(encoded), nil
-		},
+		}
+		encoded, _ := json.Marshal(map[string]any{"campaign_id": request.CampaignID, "cleanup": "completed", "promotion": "not_performed"})
+		return string(encoded), nil
 	}
 }
 

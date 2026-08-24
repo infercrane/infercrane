@@ -7,6 +7,18 @@ import (
 	"testing"
 )
 
+func TestLoadOptimizationPricesRequiresExactSourcedEvidence(t *testing.T) {
+	t.Setenv("INFERCRANE_OPTIMIZATION_PRICES_JSON", `[{"cloud":"aws","region":"eu-central-1","gpu":"L40S","replicas":1,"hourly_usd":2.1,"currency":"USD","source":"aws-price-list/2026-08-24","observed_at":"2026-08-24T10:00:00Z","valid_until":"2026-08-25T10:00:00Z"}]`)
+	prices, err := envOptimizationPrices("INFERCRANE_OPTIMIZATION_PRICES_JSON")
+	if err != nil || len(prices) != 1 || prices[0].HourlyUSD != 2.1 || prices[0].Replicas != 1 {
+		t.Fatalf("prices=%+v err=%v", prices, err)
+	}
+	t.Setenv("INFERCRANE_OPTIMIZATION_PRICES_JSON", `[{"cloud":"aws","gpu":"L40S","replicas":1,"hourly_usd":2.1,"currency":"USD","source":"catalog","observed_at":"2026-08-25T10:00:00Z","valid_until":"2026-08-24T10:00:00Z"}]`)
+	if _, err = envOptimizationPrices("INFERCRANE_OPTIMIZATION_PRICES_JSON"); err == nil {
+		t.Fatal("reversed price evidence window was accepted")
+	}
+}
+
 func TestLoadRejectsInvalidInteger(t *testing.T) {
 	t.Setenv("INFERCRANE_API_KEY", "secret")
 	t.Setenv("INFERCRANE_PORT", "not-a-number")

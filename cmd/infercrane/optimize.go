@@ -18,6 +18,7 @@ import (
 
 	"github.com/infercrane/infercrane/internal/config"
 	"github.com/infercrane/infercrane/internal/curatedrecipe"
+	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/optimizer"
 	"gopkg.in/yaml.v3"
@@ -27,11 +28,11 @@ func optimizeCommand(ctx context.Context, args []string) error {
 	if len(args) > 0 && args[0] == "doctor" {
 		return optimizeDoctorCommand(ctx, args[1:])
 	}
-	if len(args) > 0 && (args[0] == "list" || args[0] == "inspect" || args[0] == "results" || args[0] == "approve" || args[0] == "cancel") {
+	if len(args) > 0 && (args[0] == "list" || args[0] == "inspect" || args[0] == "results" || args[0] == "approve" || args[0] == "activate" || args[0] == "cancel") {
 		return optimizeCampaignCommand(ctx, args)
 	}
 	if len(args) < 2 || (args[0] != "propose" && args[0] != "create") {
-		return errors.New("usage: infercrane optimize propose|create MODEL --provider CLOUD_OR_ADAPTER --gpu GPU [flags] | infercrane optimize list|inspect|results|approve|cancel | infercrane optimize doctor")
+		return errors.New("usage: infercrane optimize propose|create MODEL --provider CLOUD_OR_ADAPTER --gpu GPU [flags] | infercrane optimize list|inspect|results|approve|activate|cancel | infercrane optimize doctor")
 	}
 	action := args[0]
 	model := args[1]
@@ -207,6 +208,7 @@ func optimizeCampaignCommand(ctx context.Context, args []string) error {
 	limit := fs.Int("limit", 20, "maximum campaigns")
 	maxCost := fs.Float64("max-cost-usd", 0, "hard maximum campaign spend")
 	expiresIn := fs.Duration("expires-in", time.Hour, "approval expiry, from 1m through 24h")
+	candidateID := fs.String("candidate", "", "exact qualified candidate ID to activate or promote")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(flagArgs); err != nil {
 		return err
@@ -244,7 +246,10 @@ func optimizeCampaignCommand(ctx context.Context, args []string) error {
 	}
 	path := "/api/v1/optimization/campaigns/" + url.PathEscape(id)
 	var response struct {
-		Campaign optimizationCampaignView `json:"campaign"`
+		Campaign         optimizationCampaignView `json:"campaign"`
+		Operation        *domain.Operation        `json:"operation,omitempty"`
+		Activation       *domain.Operation        `json:"activation_operation,omitempty"`
+		CleanupOperation *domain.Operation        `json:"cleanup_operation,omitempty"`
 	}
 	switch action {
 	case "inspect", "results":
@@ -254,6 +259,11 @@ func optimizeCampaignCommand(ctx context.Context, args []string) error {
 			return errors.New("approve requires --max-cost-usd greater than zero and --expires-in between 1m and 24h")
 		}
 		err = controlJSON(ctx, cfg, http.MethodPost, path+"/approve", "", map[string]any{"max_cost_usd": *maxCost, "expires_in_seconds": int(expiresIn.Seconds())}, &response)
+	case "activate":
+		if strings.TrimSpace(*candidateID) == "" {
+			return errors.New("activate requires --candidate CANDIDATE_ID")
+		}
+		err = controlJSON(ctx, cfg, http.MethodPost, path+"/activate", "", map[string]any{"candidate_id": strings.TrimSpace(*candidateID)}, &response)
 	case "cancel":
 		err = controlJSON(ctx, cfg, http.MethodPost, path+"/cancel", "", map[string]any{}, &response)
 	default:
@@ -273,6 +283,15 @@ func optimizeCampaignCommand(ctx context.Context, args []string) error {
 	}
 	if view.ApprovedMaxCostUSD != nil {
 		fmt.Printf("Cost cap   $%.2f\n", *view.ApprovedMaxCostUSD)
+	}
+	if response.Operation != nil {
+		fmt.Printf("Execution  %s · %s\n", response.Operation.ID, response.Operation.Status)
+	}
+	if response.Activation != nil {
+		fmt.Printf("Activation %s · %s\n", response.Activation.ID, response.Activation.Status)
+	}
+	if response.CleanupOperation != nil {
+		fmt.Printf("Cleanup    %s · %s\n", response.CleanupOperation.ID, response.CleanupOperation.Status)
 	}
 	if len(view.Candidates) > 0 {
 		fmt.Println("\nCANDIDATES")

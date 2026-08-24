@@ -30,6 +30,17 @@ their objects into the core domain would create version coupling and overlapping
   fabricate a guard comparison for a new endpoint or omit it for an evolution.
 - Require an actor, hard maximum spend, and expiry before an execution worker may claim paid work.
   Retrying approval never extends the first persisted authority.
+- Require a fresh sourced USD price for every exact cloud, region, accelerator, and maximum-replica
+  tuple through the complete approval window. Repeat the check immediately before provider mutation.
+- Queue a durable campaign operation on approval. It composes existing lifecycle operations through
+  stable child idempotency keys, adopts lost responses, measures the exact revision directly, and
+  queues cleanup on cancellation. It never becomes a second provider mutation owner.
+- Keep the parent operation retryable while a qualified candidate waits for explicit human action.
+  Expired authority transitions the candidate to failure and cleanup; qualification cannot leave
+  paid capacity running indefinitely.
+- Queue activation as a separate durable, idempotent operation. New-endpoint activation may cross
+  only the qualified boundary. Evolution activation delegates to the existing guarded rollout
+  operation and may cross only `guard_passed`. Validate these states before any child mutation.
 - Keep predicted evidence separate from actual evidence. Candidate transitions are fenced by the
   state observed by the worker; stale workers cannot overwrite newer evidence.
 - Derive campaign state from candidate truth. API handlers, CLI clients, and future workers do not
@@ -56,7 +67,7 @@ later worker can resume from durable state after a process or client restart. Ad
 provide a complete builder plan, while the common CLI offers small presets that remain exact,
 digest-pinned, externally executed, and quality-gated.
 
-This foundation does not make an optimization executable or fast by itself. Real quantization,
+This durable execution path does not make an optimization fast by itself. Real quantization,
 speculative decoding, LMCache, NIXL, TensorRT-LLM, llm-d, and AIBrix claims remain deferred until the
 exact software/model/artifact/hardware/workload tuple passes its qualification gate.
 
@@ -77,6 +88,10 @@ exact software/model/artifact/hardware/workload tuple passes its qualification g
 - PostgreSQL integration tests cover duplicate creation, bounded approval, cancellation, stale
   transitions, partial candidate outcomes, exact artifact/candidate/revision/quality binding, and
   deterministic cleanup.
+- Composite-driver tests cover exact price authority, lost child-operation adoption, direct
+  revision benchmarking, evidence provenance, new-versus-evolution boundaries, and explicit cleanup.
+- Activation tests cover no-mutation rejection, approval expiry, idempotent completed retries, and
+  adoption of the exact guarded rollout child operation.
 - The integration catalog test verifies that every supported composition capability references an
   existing regression test and that unqualified execution remains unsupported.
 - The OpenAPI route-coverage test includes campaign and optimized-artifact endpoints.

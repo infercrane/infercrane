@@ -10,7 +10,26 @@ import (
 
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/operations"
+	"github.com/infercrane/infercrane/internal/workflows"
 )
+
+type activationStoreFixture struct {
+	*coordinatorRepository
+	operations map[string]domain.Operation
+}
+
+func (f *activationStoreFixture) EnqueueOperation(_ context.Context, operation domain.Operation) (domain.Operation, bool, error) {
+	if f.operations == nil {
+		f.operations = map[string]domain.Operation{}
+	}
+	if existing, found := f.operations[operation.IdempotencyKey]; found {
+		return existing, false, nil
+	}
+	operation.ID = "operation-" + operation.IdempotencyKey
+	operation.Status = "pending"
+	f.operations[operation.IdempotencyKey] = operation
+	return operation, true, nil
+}
 
 func TestExecutionHandlerRunsProofLoopAndNeverPromotes(t *testing.T) {
 	now := time.Now().UTC()
@@ -18,12 +37,7 @@ func TestExecutionHandlerRunsProofLoopAndNeverPromotes(t *testing.T) {
 	request, _ := json.Marshal(ExecuteRequest{TenantID: "tenant", CampaignID: "campaign", Candidates: []string{"candidate-a"}})
 	handler := Handlers(coordinator)[ExecuteKind]
 	result, err := handler(context.Background(), domain.Operation{RequestJSON: string(request)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(result, `"waiting_for_human":["candidate-a"]`) || !strings.Contains(result, `"promotion":"not_performed"`) {
-		t.Fatalf("unexpected execution result %s", result)
-	}
+	assertWaitingForHuman(t, result, err)
 	if repository.campaign.Candidates[0].State != CandidateGuardPassed || driver.provisionCalls != 1 || driver.measureCalls != 1 || driver.validateCalls != 1 || driver.rankCalls != 1 || driver.guardCalls != 1 {
 		t.Fatalf("proof loop incomplete: campaign=%+v driver=%+v", repository.campaign, driver)
 	}
@@ -37,10 +51,8 @@ func TestNewEndpointExecutionStopsQualifiedWithoutFakeReleaseGuard(t *testing.T)
 	driver.rankDecisions = map[string]string{"candidate-a": RankSelect, "candidate-b": RankSupersede}
 	request, _ := json.Marshal(ExecuteRequest{TenantID: "tenant", CampaignID: "campaign", Candidates: []string{"candidate-a", "candidate-b"}})
 	result, err := Handlers(coordinator)[ExecuteKind](context.Background(), domain.Operation{RequestJSON: string(request)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(result, `"waiting_for_human":["candidate-a"]`) || repository.campaign.Candidates[0].State != CandidateQualified || repository.campaign.Candidates[1].State != CandidateRejected {
+	assertWaitingForHuman(t, result, err)
+	if repository.campaign.Candidates[0].State != CandidateQualified || repository.campaign.Candidates[1].State != CandidateCleaned || driver.cleanupCalls != 1 {
 		t.Fatalf("new endpoint did not stop at human activation: result=%s campaign=%+v", result, repository.campaign)
 	}
 	if driver.guardCalls != 0 {
@@ -54,17 +66,20 @@ func TestExecutionHandlerMeasuresEveryCandidateBeforeRanking(t *testing.T) {
 	driver.rankDecisions = map[string]string{"candidate-a": RankSupersede, "candidate-b": RankSelect}
 	request, _ := json.Marshal(ExecuteRequest{TenantID: "tenant", CampaignID: "campaign", Candidates: []string{"candidate-a", "candidate-b"}})
 	result, err := Handlers(coordinator)[ExecuteKind](context.Background(), domain.Operation{RequestJSON: string(request)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(result, `"waiting_for_human":["candidate-b"]`) {
-		t.Fatalf("unexpected execution result %s", result)
-	}
-	if repository.campaign.Candidates[0].State != CandidateRejected || repository.campaign.Candidates[1].State != CandidateGuardPassed {
+	assertWaitingForHuman(t, result, err)
+	if repository.campaign.Candidates[0].State != CandidateCleaned || repository.campaign.Candidates[1].State != CandidateGuardPassed || driver.cleanupCalls != 1 {
 		t.Fatalf("measured rank was not enforced: %+v", repository.campaign.Candidates)
 	}
 	if driver.measureCalls != 2 || driver.validateCalls != 2 || driver.rankCalls != 2 || driver.guardCalls != 1 {
 		t.Fatalf("ranking crossed the phase barrier incorrectly: %+v", driver)
+	}
+}
+
+func assertWaitingForHuman(t *testing.T, result string, err error) {
+	t.Helper()
+	var failure operations.Failure
+	if result != "" || !errors.As(err, &failure) || !failure.Retryable || failure.Code != "optimization_waiting_for_human" {
+		t.Fatalf("result=%q err=%v, want durable human-approval wait", result, err)
 	}
 }
 
@@ -103,6 +118,18 @@ func TestExecutionCancellationFencesThenCleansWithoutPromotion(t *testing.T) {
 	}
 }
 
+func TestExplicitCleanupOperationCleansCampaignAfterExecutionFinished(t *testing.T) {
+	now := time.Now().UTC()
+	repository, driver, coordinator := approvedCoordinatorFixture(now, 1)
+	repository.campaign.Candidates[0].State = CandidateCancelled
+	repository.campaign.State = CampaignCancelled
+	request, _ := json.Marshal(ExecuteRequest{TenantID: "tenant", CampaignID: "campaign", Candidates: []string{"candidate-a"}})
+	result, err := Handlers(coordinator)[CleanupKind](context.Background(), domain.Operation{RequestJSON: string(request)})
+	if err != nil || repository.campaign.Candidates[0].State != CandidateCleaned || driver.cleanupCalls != 1 || !strings.Contains(result, `"cleanup":"completed"`) {
+		t.Fatalf("explicit cleanup did not converge: result=%s err=%v campaign=%+v driver=%+v", result, err, repository.campaign, driver)
+	}
+}
+
 func TestExecutionHandlerPreservesPermanentDriverFailure(t *testing.T) {
 	now := time.Now().UTC()
 	repository, driver, coordinator := approvedCoordinatorFixture(now, 1)
@@ -114,5 +141,87 @@ func TestExecutionHandlerPreservesPermanentDriverFailure(t *testing.T) {
 	var failure operations.Failure
 	if !errors.As(err, &failure) || failure.Retryable || failure.Code != "unsupported_tuple" {
 		t.Fatalf("permanent driver failure was converted into retries: %#v", err)
+	}
+}
+
+func TestActivationHandlerActivatesQualifiedNewEndpointIdempotently(t *testing.T) {
+	now := time.Now().UTC()
+	repository, _, _ := approvedCoordinatorFixture(now, 1)
+	repository.campaign.Intent = IntentNewEndpoint
+	repository.campaign.TargetDeployment = ""
+	repository.campaign.State = CampaignQualified
+	repository.campaign.Candidates[0].State = CandidateQualified
+	repository.campaign.Candidates[0].DeploymentName = "llama-production-candidate"
+	repository.campaign.Candidates[0].RevisionID = "revision-qualified"
+	store := &activationStoreFixture{coordinatorRepository: repository}
+	payload, _ := json.Marshal(ActivateRequest{TenantID: "tenant", CampaignID: "campaign", CandidateID: "candidate-a", Actor: "operator"})
+	handler := ActivationHandlers(store, func() time.Time { return now })[ActivateKind]
+
+	result, err := handler(context.Background(), domain.Operation{RequestJSON: string(payload)})
+	if err != nil || !strings.Contains(result, `"state":"promoted"`) || repository.campaign.Candidates[0].State != CandidatePromoted || len(store.operations) != 0 {
+		t.Fatalf("new endpoint activation result=%s err=%v campaign=%+v operations=%+v", result, err, repository.campaign, store.operations)
+	}
+	result, err = handler(context.Background(), domain.Operation{RequestJSON: string(payload)})
+	if err != nil || !strings.Contains(result, `"state":"promoted"`) || repository.transitions != 1 {
+		t.Fatalf("idempotent activation result=%s err=%v transitions=%d", result, err, repository.transitions)
+	}
+}
+
+func TestActivationHandlerDelegatesEvolutionToGuardedRolloutAndAdoptsResult(t *testing.T) {
+	now := time.Now().UTC()
+	repository, _, _ := approvedCoordinatorFixture(now, 1)
+	repository.campaign.State = CampaignQualified
+	repository.campaign.Candidates[0].State = CandidateGuardPassed
+	repository.campaign.Candidates[0].DeploymentName = "llama-production"
+	repository.campaign.Candidates[0].RevisionID = "revision-candidate"
+	store := &activationStoreFixture{coordinatorRepository: repository}
+	payload, _ := json.Marshal(ActivateRequest{TenantID: "tenant", CampaignID: "campaign", CandidateID: "candidate-a", Actor: "operator"})
+	handler := ActivationHandlers(store, func() time.Time { return now })[ActivateKind]
+
+	_, err := handler(context.Background(), domain.Operation{RequestJSON: string(payload)})
+	var failure operations.Failure
+	if !errors.As(err, &failure) || !failure.Retryable || failure.Code != "optimization_child_pending" || repository.transitions != 0 {
+		t.Fatalf("pending rollout was not awaited safely: err=%v transitions=%d", err, repository.transitions)
+	}
+	key := childKey("candidate-a", "activate")
+	child := store.operations[key]
+	if child.Kind != workflows.RolloutPromoteKind || child.ResourceName != "production" {
+		t.Fatalf("unexpected guarded rollout child: %+v", child)
+	}
+	var rollout workflows.RolloutRequest
+	if json.Unmarshal([]byte(child.RequestJSON), &rollout) != nil || rollout.CandidateID != "revision-candidate" || rollout.Name != "production" || rollout.Actor != "operator" {
+		t.Fatalf("guarded rollout lost exact activation identity: %+v", child)
+	}
+	child.Status = "succeeded"
+	store.operations[key] = child
+	result, err := handler(context.Background(), domain.Operation{RequestJSON: string(payload)})
+	if err != nil || !strings.Contains(result, `"state":"promoted"`) || repository.campaign.Candidates[0].State != CandidatePromoted || len(store.operations) != 1 {
+		t.Fatalf("completed rollout was not adopted: result=%s err=%v campaign=%+v operations=%+v", result, err, repository.campaign, store.operations)
+	}
+}
+
+func TestActivationHandlerRejectsExpiredOrUnqualifiedCandidateBeforeMutation(t *testing.T) {
+	now := time.Now().UTC()
+	for name, testCase := range map[string]struct {
+		state    string
+		expiry   time.Time
+		wantCode string
+	}{
+		"unqualified": {state: CandidateRanked, expiry: now.Add(time.Hour), wantCode: "optimization_candidate_not_qualified"},
+		"expired":     {state: CandidateGuardPassed, expiry: now.Add(-time.Second), wantCode: "optimization_approval_expired"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			repository, _, _ := approvedCoordinatorFixture(now, 1)
+			repository.campaign.Candidates[0].State = testCase.state
+			repository.campaign.Candidates[0].RevisionID = "revision-candidate"
+			repository.campaign.ApprovalExpiresAt = &testCase.expiry
+			store := &activationStoreFixture{coordinatorRepository: repository}
+			payload, _ := json.Marshal(ActivateRequest{TenantID: "tenant", CampaignID: "campaign", CandidateID: "candidate-a", Actor: "operator"})
+			_, err := ActivationHandlers(store, func() time.Time { return now })[ActivateKind](context.Background(), domain.Operation{RequestJSON: string(payload)})
+			var failure operations.Failure
+			if !errors.As(err, &failure) || failure.Retryable || failure.Code != testCase.wantCode || len(store.operations) != 0 || repository.transitions != 0 {
+				t.Fatalf("unsafe activation err=%v operations=%+v transitions=%d", err, store.operations, repository.transitions)
+			}
+		})
 	}
 }

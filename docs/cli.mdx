@@ -268,13 +268,17 @@ infercrane optimize create llama-3.1-8b-instruct \
 infercrane optimize inspect CAMPAIGN_ID
 infercrane optimize approve CAMPAIGN_ID --max-cost-usd 20 --expires-in 1h
 infercrane optimize results CAMPAIGN_ID
+infercrane optimize activate CAMPAIGN_ID --candidate CANDIDATE_ID
+infercrane operation watch ACTIVATION_OPERATION_ID
 infercrane optimize cancel CAMPAIGN_ID
 ```
 
 Approval retries do not extend the first persisted expiry. Creation and inspection allocate no
 infrastructure. The default `new_endpoint` intent stops at human activation after qualification.
 `--target-deployment` selects `evolve_endpoint`, which must stop at Release Guard and human
-promotion.
+promotion. `optimize activate` is the explicit boundary in both cases: it marks the qualified new
+deployment active, or delegates an evolution to the existing guarded rollout operation. Retrying
+the command adopts the same durable operation; InferCrane never promotes from the optimizer loop.
 
 ### `artifact optimize`
 

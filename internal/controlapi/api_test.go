@@ -53,6 +53,12 @@ type fakeStore struct {
 	trainingRows    []domain.TrainingArtifactHandoff
 }
 
+type fakeOptimizationCosts struct{}
+
+func (fakeOptimizationCosts) Quote(_ context.Context, _ optimizer.DeploymentDraft, requiredUntil time.Time) (optimizationcampaign.CostQuote, error) {
+	return optimizationcampaign.CostQuote{HourlyUSD: 2, Source: "test-price-list", ObservedAt: requiredUntil.Add(-time.Hour), ValidUntil: requiredUntil.Add(time.Hour)}, nil
+}
+
 type fakeMembershipStore struct {
 	*fakeStore
 	instances []domain.ControlPlaneInstance
@@ -459,7 +465,7 @@ func TestOptimizationCampaignRequiresImmutableProposalAndExplicitBoundedApproval
 	}
 	body, _ := json.Marshal(map[string]any{"proposal": proposal})
 	store := &fakeOptimizationCampaignStore{fakeStore: &fakeStore{}}
-	handler := (API{Store: store, APIKey: "secret"}).Handler()
+	handler := (API{Store: store, APIKey: "secret", OptimizationCosts: fakeOptimizationCosts{}}).Handler()
 
 	create := httptest.NewRequest(http.MethodPost, "/api/v1/optimization/campaigns", strings.NewReader(string(body)))
 	create.Header.Set("Authorization", "Bearer secret")
@@ -496,8 +502,37 @@ func TestOptimizationCampaignRequiresImmutableProposalAndExplicitBoundedApproval
 	request.Header.Set("Authorization", "Bearer secret")
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || store.campaign.State != optimizationcampaign.CampaignApproved || !strings.Contains(response.Body.String(), `"execution":"approved_not_started"`) {
+	if response.Code != http.StatusAccepted || store.campaign.State != optimizationcampaign.CampaignApproved || !strings.Contains(response.Body.String(), `"execution":"queued"`) || store.operation.Kind != optimizationcampaign.ExecuteKind {
 		t.Fatalf("approval status=%d body=%s campaign=%+v", response.Code, response.Body.String(), store.campaign)
+	}
+
+	store.campaign.State = optimizationcampaign.CampaignQualified
+	store.campaign.Candidates[0].State = optimizationcampaign.CandidateQualified
+	store.campaign.Candidates[0].DeploymentName = "llama-production-candidate"
+	store.campaign.Candidates[0].RevisionID = "revision-qualified"
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/optimization/campaigns/campaign-1/activate", strings.NewReader(`{"candidate_id":"candidate-1"}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted || store.operation.Kind != optimizationcampaign.ActivateKind || !strings.Contains(response.Body.String(), `"automatic_promotion":false`) {
+		t.Fatalf("activation status=%d body=%s operation=%+v", response.Code, response.Body.String(), store.operation)
+	}
+	var activation optimizationcampaign.ActivateRequest
+	if json.Unmarshal([]byte(store.operation.RequestJSON), &activation) != nil || activation.TenantID != store.campaign.TenantID || activation.CampaignID != "campaign-1" || activation.CandidateID != "candidate-1" || activation.Actor == "" {
+		t.Fatalf("activation operation lost identity: %+v", store.operation)
+	}
+
+	// A client retry after the durable activation completed remains successful
+	// even when the original bounded approval has subsequently expired.
+	store.campaign.Candidates[0].State = optimizationcampaign.CandidatePromoted
+	expired := time.Now().UTC().Add(-time.Minute)
+	store.campaign.ApprovalExpiresAt = &expired
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/optimization/campaigns/campaign-1/activate", strings.NewReader(`{"candidate_id":"candidate-1"}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"activation":"already_completed"`) {
+		t.Fatalf("completed activation retry status=%d body=%s", response.Code, response.Body.String())
 	}
 
 	request = httptest.NewRequest(http.MethodGet, "/api/v1/optimization/campaigns/campaign-1", nil)

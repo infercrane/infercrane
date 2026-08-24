@@ -19,7 +19,7 @@ control-plane outcome; it cannot qualify a cloud, GPU, runtime, performance, or 
 | --- | --- | --- | --- | --- |
 | Model to endpoint | One model command creates a durable deployment and stable OpenAI-compatible endpoint, then serves buffered and streaming requests | `first-value` and clean-database lifecycle journeys | Exact provider/runtime/model/GPU lifecycle | Local-qualified; each external tuple remains separate |
 | Operate | Restart, retry, overload, cancellation, observation, Doctor, alerts, autoscaling, and cleanup preserve ownership and bounded behavior | full developer environment, reliability journey, fault fixtures, PostgreSQL and race gates | Provider disruption, real stream draining, final direct inventory zero | Local-qualified; provider semantics remain separate |
-| Optimize | Model, workload, SLO, and cost produce candidates; only measured compatible evidence can rank; quality and Release Guard can reject | proposal, capability compiler, campaign state machine, AIPerf/Lab/quality/guard tests | One approved campaign provisions, measures, ranks, guards, cleans, and stops before human promotion | **Incomplete**: the production composite campaign driver is not registered |
+| Optimize | Model, workload, SLO, and cost produce candidates; only measured compatible evidence can rank; quality and Release Guard can reject | proposal, capability compiler, durable composite driver, exact direct-revision AIPerf/Lab/quality/guard tests | One approved campaign provisions, measures, ranks, guards, cleans, and stops before human promotion | Locally complete; real provider/GPU campaign qualification remains required |
 | Safely evolve | Candidate never replaces active traffic without fresh compatible evidence; rejection, promotion, post-promotion observation, and rollback are durable | release, routing-generation, stream-fencing, passport, and rollback gates | Real active → candidate → reject and promote → degrade → rollback | Local-qualified; real GPU release evidence remains separate |
 | Portable execution | The same desired state can compile to replaceable provider/runtime contracts without moving PostgreSQL into the request path | provider/runtime conformance, simulated clouds, Kind, cache adapters | AWS, GCP, GPU Kubernetes/KServe, Dynamo and exact runtime tuples | AWS/GCP/Kubernetes cache semantics are local-qualified; external execution remains tuple-specific |
 
@@ -48,15 +48,15 @@ make qualify-product
 
 ## Next closure order
 
-1. Register a production optimization driver that composes existing durable deployment, benchmark,
-   semantic-quality, Lab, Release Guard, and cleanup primitives under the campaign's cost and expiry
-   authority. It must never promote automatically.
-2. Prove that driver end to end with a no-cost fault fixture, PostgreSQL restart, duplicate approval,
-   lost child-operation response, cancellation, partial candidate failure, and cleanup-to-zero.
-3. Run one explicitly approved real campaign on an already qualified GPU tuple and archive exact
+1. Run one explicitly approved real campaign on an already qualified GPU tuple and archive exact
    benchmark, quality, cost, guard, cache, and cleanup evidence.
-4. Repeat the provider qualification for GCP and GPU Kubernetes when quota and infrastructure are
+2. Repeat the provider qualification for GCP and GPU Kubernetes when quota and infrastructure are
    available. Do not block local correctness work or manufacture substitute evidence while waiting.
+
+The production composite driver, bounded exact-price authority, direct-revision AIPerf executor,
+PostgreSQL restart/adoption path, cancellation cleanup, and explicit durable activation/promotion
+boundary are locally complete. That is control-plane evidence, not a substitute for real GPU or
+provider qualification.
 
 Managed InferCrane compute is a later commercial capacity boundary. BYOC conformance must remain
 complete on its own; adding vendor-owned capacity cannot weaken tenant isolation, spend authority,

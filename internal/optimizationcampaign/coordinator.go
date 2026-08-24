@@ -97,7 +97,15 @@ func (c Coordinator) Step(ctx context.Context, tenant, campaignID, candidateID s
 		return StepResult{}, domain.ErrNotFound
 	}
 	result := StepResult{CampaignID: campaign.ID, CandidateID: candidate.ID, From: candidate.State, To: candidate.State}
+	if candidate.State == CandidateCleaned || candidate.State == CandidatePromoted || candidate.State == CandidateObserved {
+		return result, nil
+	}
 	if candidate.State == CandidateQualified || candidate.State == CandidateGuardPassed {
+		if _, budgetErr := c.budget(campaign); errors.Is(budgetErr, ErrApprovalExpired) {
+			return c.transition(ctx, campaign, candidate, CandidateFailed, domain.OptimizationCandidateRun{FailureCode: "approval_expired_before_activation"})
+		} else if budgetErr != nil {
+			return result, budgetErr
+		}
 		result.WaitingForHuman = true
 		return result, nil
 	}

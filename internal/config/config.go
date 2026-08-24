@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -40,6 +41,14 @@ type Config struct {
 	DynamoModelSecretName                                                                                              string
 	Port, RouterStartPort, DatabaseMaxOpen, DatabaseMaxIdle                                                            int
 	HealthInterval, UpstreamTimeout, ShutdownTimeout, RequestRetention                                                 time.Duration
+	OptimizationPrices                                                                                                 []OptimizationPrice
+}
+
+type OptimizationPrice struct {
+	Cloud, Region, GPU, Currency, Source string
+	Replicas                             int
+	HourlyUSD                            float64
+	ObservedAt, ValidUntil               time.Time
 }
 
 type ClientContext struct {
@@ -289,6 +298,10 @@ func load(requireAPIKey bool) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	optimizationPrices, err := envOptimizationPrices("INFERCRANE_OPTIMIZATION_PRICES_JSON")
+	if err != nil {
+		return Config{}, err
+	}
 	config := Config{
 		DatabaseURL:                         env("INFERCRANE_DATABASE_URL", "postgres://infercrane:infercrane@127.0.0.1:5432/infercrane?sslmode=disable"),
 		ControlURL:                          env("INFERCRANE_URL", "http://127.0.0.1:8080"),
@@ -356,6 +369,7 @@ func load(requireAPIKey bool) (Config, error) {
 		DynamoSGLangImageDigest:             env("INFERCRANE_DYNAMO_SGLANG_IMAGE_DIGEST", ""),
 		DynamoSGLangRuntimeVersion:          env("INFERCRANE_DYNAMO_SGLANG_RUNTIME_VERSION", ""),
 		DynamoModelSecretName:               env("INFERCRANE_DYNAMO_MODEL_SECRET_NAME", ""),
+		OptimizationPrices:                  optimizationPrices,
 		Port:                                port, RouterStartPort: routerPort, DatabaseMaxOpen: maxOpen, DatabaseMaxIdle: maxIdle,
 		HealthInterval: time.Duration(healthSeconds) * time.Second, UpstreamTimeout: time.Duration(upstreamSeconds) * time.Second,
 		ShutdownTimeout: time.Duration(shutdownSeconds) * time.Second, RequestRetention: time.Duration(retentionHours) * time.Hour,
@@ -748,4 +762,45 @@ func envStringMap(key string) (map[string]string, error) {
 		return nil, fmt.Errorf("%s must contain exactly one JSON object", key)
 	}
 	return values, nil
+}
+
+func envOptimizationPrices(key string) ([]OptimizationPrice, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return nil, nil
+	}
+	type encodedPrice struct {
+		Cloud, Region, GPU, Currency, Source string
+		Replicas                             int
+		HourlyUSD                            float64 `json:"hourly_usd"`
+		ObservedAt                           string  `json:"observed_at"`
+		ValidUntil                           string  `json:"valid_until"`
+	}
+	var encoded []encodedPrice
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&encoded); err != nil {
+		return nil, fmt.Errorf("%s must be a JSON array of exact sourced prices: %w", key, err)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("%s must contain exactly one JSON array", key)
+	}
+	if len(encoded) > 1000 {
+		return nil, fmt.Errorf("%s supports at most 1000 exact price tuples", key)
+	}
+	prices := make([]OptimizationPrice, 0, len(encoded))
+	seen := map[string]struct{}{}
+	for index, row := range encoded {
+		observedAt, observedErr := time.Parse(time.RFC3339, row.ObservedAt)
+		validUntil, validErr := time.Parse(time.RFC3339, row.ValidUntil)
+		identity := strings.Join([]string{row.Cloud, row.Region, row.GPU, strconv.Itoa(row.Replicas)}, "\x00")
+		_, duplicate := seen[identity]
+		if strings.TrimSpace(row.Cloud) == "" || strings.TrimSpace(row.GPU) == "" || strings.TrimSpace(row.Source) == "" || row.Currency != "USD" || row.Replicas < 1 || row.Replicas > 100 || row.HourlyUSD <= 0 || math.IsNaN(row.HourlyUSD) || math.IsInf(row.HourlyUSD, 0) || observedErr != nil || validErr != nil || !validUntil.After(observedAt) || duplicate {
+			return nil, fmt.Errorf("%s[%d] must contain a unique cloud/region/GPU/replicas tuple, positive finite USD rate, source, and increasing RFC3339 evidence window", key, index)
+		}
+		seen[identity] = struct{}{}
+		prices = append(prices, OptimizationPrice{Cloud: row.Cloud, Region: row.Region, GPU: row.GPU, Replicas: row.Replicas, HourlyUSD: row.HourlyUSD, Currency: row.Currency, Source: row.Source, ObservedAt: observedAt.UTC(), ValidUntil: validUntil.UTC()})
+	}
+	return prices, nil
 }

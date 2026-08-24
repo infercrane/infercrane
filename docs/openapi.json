@@ -2055,6 +2055,19 @@
         ],
         "type": "object"
       },
+      "OptimizationCampaignActivation": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "candidate_id"
+        ],
+        "type": "object"
+      },
       "OptimizationCampaignApproval": {
         "additionalProperties": false,
         "properties": {
@@ -7648,6 +7661,63 @@
         ]
       }
     },
+    "/api/v1/optimization/campaigns/{id}/activate": {
+      "post": {
+        "operationId": "activateOptimizationCampaign",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OptimizationCampaignActivation"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Durable operation accepted"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Queue explicit activation or guarded promotion for a qualified candidate",
+        "tags": [
+          "Inference optimization"
+        ]
+      }
+    },
     "/api/v1/optimization/campaigns/{id}/approve": {
       "post": {
         "operationId": "approveOptimizationCampaign",
@@ -7673,7 +7743,7 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "202": {
             "content": {
               "application/json": {
                 "schema": {
@@ -7681,7 +7751,7 @@
                 }
               }
             },
-            "description": "Success"
+            "description": "Durable operation accepted"
           },
           "default": {
             "content": {
@@ -7699,7 +7769,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Grant bounded expiring paid-resource authority without starting execution",
+        "summary": "Validate bounded cost authority and queue durable optimization execution",
         "tags": [
           "Inference optimization"
         ]
@@ -7730,7 +7800,7 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "202": {
             "content": {
               "application/json": {
                 "schema": {
@@ -7738,7 +7808,7 @@
                 }
               }
             },
-            "description": "Success"
+            "description": "Durable operation accepted"
           },
           "default": {
             "content": {

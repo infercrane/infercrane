@@ -14,6 +14,7 @@ import (
 
 	"github.com/infercrane/infercrane/internal/authz"
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/operations"
 	"github.com/infercrane/infercrane/internal/optimizationcampaign"
 	"github.com/infercrane/infercrane/internal/optimizedartifact"
 	"github.com/infercrane/infercrane/internal/overflow"
@@ -23,6 +24,29 @@ import (
 	"github.com/infercrane/infercrane/internal/support"
 	"github.com/infercrane/infercrane/internal/workflows"
 )
+
+type storeCampaignDriver struct {
+	deployment, revision, quality, lab string
+}
+
+func (d storeCampaignDriver) Provision(context.Context, string, domain.OptimizationCandidateRun, optimizationcampaign.Budget) (optimizationcampaign.ProvisionResult, error) {
+	return optimizationcampaign.ProvisionResult{DeploymentName: d.deployment, RevisionID: d.revision}, nil
+}
+func (d storeCampaignDriver) Measure(context.Context, string, domain.OptimizationCandidateRun, optimizationcampaign.Budget) (optimizationcampaign.MeasurementResult, error) {
+	return optimizationcampaign.MeasurementResult{BenchmarkID: "benchmark-fixture", ActualEvidenceJSON: `{"fixture":"measured"}`}, nil
+}
+func (d storeCampaignDriver) Validate(context.Context, string, domain.OptimizationCandidateRun) (optimizationcampaign.ValidationResult, error) {
+	return optimizationcampaign.ValidationResult{QualityEvidenceID: d.quality, Passed: true}, nil
+}
+func (d storeCampaignDriver) Rank(context.Context, string, domain.OptimizationCandidateRun) (optimizationcampaign.RankingResult, error) {
+	return optimizationcampaign.RankingResult{LabEvaluationID: d.lab, Decision: optimizationcampaign.RankSelect}, nil
+}
+func (storeCampaignDriver) Guard(context.Context, string, domain.OptimizationCandidateRun) (optimizationcampaign.GuardResult, error) {
+	return optimizationcampaign.GuardResult{}, errors.New("new endpoint must not call Release Guard")
+}
+func (storeCampaignDriver) Cleanup(context.Context, string, domain.OptimizationCandidateRun) error {
+	return nil
+}
 
 func TestTargetAndDeploymentLifecycle(t *testing.T) {
 	ctx := context.Background()
@@ -224,6 +248,76 @@ func TestOptimizationCampaignIntentSeparatesNewEndpointQualificationFromEvolutio
 	}
 	if _, err = s.TransitionOptimizationCandidate(ctx, "global", campaign.ID, candidateID, optimizationcampaign.CandidateQualified, optimizationcampaign.CandidatePromoted, domain.OptimizationCandidateRun{}); err != nil {
 		t.Fatalf("explicit new endpoint activation was rejected: %v", err)
+	}
+}
+
+func TestOptimizationCampaignDurableOperationRunsAndCleansThroughPostgres(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	suffix := time.Now().UTC().Format("150405.000000000")
+	model := "Qwen/Qwen3-8B"
+	target, err := s.AddTarget(ctx, domain.Target{Name: "campaign-worker-target-" + suffix, URL: "http://campaign-worker-" + suffix, Provider: "existing", Runtime: "vllm", UpstreamModel: model})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deployment, err := s.ApplyDeployment(ctx, domain.Deployment{Name: "campaign-worker-" + suffix, Model: model}, []string{target.Name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := s.ResolveForTenant(ctx, "global", deployment.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	quality, _, err := s.RecordQualityEvidence(ctx, "global", deployment.Name, domain.QualityEvidence{RevisionID: resolved.Deployment.ActiveRevisionID, Suite: "campaign-worker", SuiteVersion: "git:abc", Evaluator: "offline-evaluator", EvaluatorVersion: "1.0.0", Score: .99, Passed: true, SampleCount: 50, ArtifactDigest: "sha256:" + strings.Repeat("6", 64), PayloadDigest: "sha256:" + strings.Repeat("7", 64), Signature: "signature", PublicKey: "public-key", Algorithm: "Ed25519-SHA256", KeyID: "sha256:key", EvaluatedAt: time.Now().UTC()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lab, err := s.RecordLabEvaluation(ctx, "global", domain.LabEvaluation{ModelIdentity: model, AlgorithmVersion: "inference-lab-v3", InputJSON: `{"objective":"interactive"}`, ResultsJSON: `[{"selected":true}]`, InputDigest: strings.Repeat("8", 64)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	campaign, _, err := s.CreateOptimizationCampaign(ctx, domain.OptimizationCampaign{TenantID: "global", IdempotencyKey: "campaign-worker-" + suffix, InputDigest: strings.Repeat("9", 64), ModelIdentity: model, Objective: "interactive", Source: "fixture", Intent: optimizationcampaign.IntentNewEndpoint, ProposalJSON: `{"schema_version":"infercrane.optimizer.proposal/v1"}`}, []domain.OptimizationCandidateRun{{ProposalCandidateID: strings.Repeat("a", 64), Rank: 1, EvidenceState: "unmeasured", DeploymentSpecJSON: `{"name":"candidate"}`, PredictedEvidenceJSON: `{}`, ActualEvidenceJSON: `{}`}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	campaign, err = s.ApproveOptimizationCampaign(ctx, "global", campaign.ID, "operator", 1, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, _ := json.Marshal(optimizationcampaign.ExecuteRequest{TenantID: "global", CampaignID: campaign.ID, Candidates: []string{campaign.Candidates[0].ID}})
+	op, created, err := s.EnqueueOperation(ctx, domain.Operation{TenantID: "global", Kind: optimizationcampaign.ExecuteKind, ResourceType: "optimization_campaign", ResourceName: campaign.ID, IdempotencyKey: "execute:" + campaign.ID, RequestJSON: string(request), MaxAttempts: 10})
+	if err != nil || !created {
+		t.Fatalf("enqueue=%+v created=%t err=%v", op, created, err)
+	}
+	driver := storeCampaignDriver{deployment: deployment.Name, revision: resolved.Deployment.ActiveRevisionID, quality: quality.ID, lab: lab.ID}
+	worker := operations.Worker{Repository: s, Handlers: optimizationcampaign.Handlers(optimizationcampaign.Coordinator{Repository: s, Driver: driver}), Owner: "campaign-worker-a", Lease: 3 * time.Second, BaseBackoff: time.Hour, MaxBackoff: time.Hour, Jitter: func(delay time.Duration) time.Duration { return delay }}
+	if worked, workerErr := worker.Once(ctx); workerErr != nil || !worked {
+		t.Fatalf("worker worked=%t err=%v", worked, workerErr)
+	}
+	op, err = s.Operation(ctx, op.ID)
+	campaign, campaignErr := s.OptimizationCampaign(ctx, "global", campaign.ID)
+	if err != nil || campaignErr != nil || op.Status != "waiting" || !op.Retryable || campaign.State != optimizationcampaign.CampaignQualified || campaign.Candidates[0].State != optimizationcampaign.CandidateQualified {
+		t.Fatalf("operation=%+v campaign=%+v err=%v campaign_err=%v", op, campaign, err, campaignErr)
+	}
+	if _, duplicate, enqueueErr := s.EnqueueOperation(ctx, domain.Operation{TenantID: "global", Kind: optimizationcampaign.ExecuteKind, ResourceType: "optimization_campaign", ResourceName: campaign.ID, IdempotencyKey: "execute:" + campaign.ID, RequestJSON: string(request), MaxAttempts: 10}); enqueueErr != nil || duplicate {
+		t.Fatalf("duplicate execution created=%t err=%v", duplicate, enqueueErr)
+	}
+	campaign, err = s.CancelOptimizationCampaign(ctx, "global", campaign.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanup, _, err := s.EnqueueOperation(ctx, domain.Operation{TenantID: "global", Kind: optimizationcampaign.CleanupKind, ResourceType: "optimization_campaign", ResourceName: campaign.ID, IdempotencyKey: "cleanup:" + campaign.ID, RequestJSON: string(request), MaxAttempts: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker.Owner = "campaign-worker-b"
+	if worked, workerErr := worker.Once(ctx); workerErr != nil || !worked {
+		t.Fatalf("cleanup worker worked=%t err=%v", worked, workerErr)
+	}
+	cleanup, _ = s.Operation(ctx, cleanup.ID)
+	campaign, _ = s.OptimizationCampaign(ctx, "global", campaign.ID)
+	if cleanup.Status != "succeeded" || campaign.State != optimizationcampaign.CampaignCleaned || campaign.Candidates[0].State != optimizationcampaign.CandidateCleaned {
+		t.Fatalf("cleanup=%+v campaign=%+v", cleanup, campaign)
 	}
 }
 

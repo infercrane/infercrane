@@ -132,6 +132,13 @@ func TestOptimizeCampaignActionsAcceptSubjectBeforeFlags(t *testing.T) {
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.MaxCostUSD != 1 || body.ExpiresInSecond != 600 {
 				t.Fatalf("approve body=%+v err=%v", body, err)
 			}
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/optimization/campaigns/campaign-1/activate":
+			var body struct {
+				CandidateID string `json:"candidate_id"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.CandidateID != "candidate-1" {
+				t.Fatalf("activate body=%+v err=%v", body, err)
+			}
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/optimization/campaigns/campaign-1/cancel":
 		default:
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
@@ -147,6 +154,7 @@ func TestOptimizeCampaignActionsAcceptSubjectBeforeFlags(t *testing.T) {
 	for _, args := range [][]string{
 		{"inspect", "campaign-1", "--output", "json"},
 		{"approve", "campaign-1", "--max-cost-usd", "1", "--expires-in", "10m", "--output", "json"},
+		{"activate", "campaign-1", "--candidate", "candidate-1", "--output", "json"},
 		{"cancel", "campaign-1", "--output", "json"},
 	} {
 		output, err := captureStdout(t, func() error { return optimizeCampaignCommand(context.Background(), args) })

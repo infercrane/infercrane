@@ -101,6 +101,10 @@ infercrane optimize create llama-3.1-8b-instruct \
 
 infercrane optimize inspect CAMPAIGN_ID
 infercrane optimize approve CAMPAIGN_ID --max-cost-usd 20 --expires-in 1h
+infercrane operation watch OPERATION_ID
+infercrane optimize results CAMPAIGN_ID
+infercrane optimize activate CAMPAIGN_ID --candidate CANDIDATE_ID
+infercrane operation watch ACTIVATION_OPERATION_ID
 ```
 
 That default creates a `new_endpoint` campaign. To optimize a candidate revision for an endpoint
@@ -120,12 +124,49 @@ create a candidate revision against the named deployment, compare it with active
 Release Guard, and wait for explicit human promotion. InferCrane never invents a baseline for a new
 endpoint and never lets an evolution bypass Release Guard.
 
-Approval records a bounded authority window. It does not automatically promote a candidate. The
-restart-safe execution coordinator is locally qualified, including lost responses, cancellation,
-expired authority, cleanup, and the human promotion boundary. A production provider/benchmark driver
-is deliberately not registered until its exact runtime and hardware path is qualified. Canceling a
-campaign prevents future work and marks unfinished candidates stale. Closing the CLI does not remove
-persisted campaign state.
+Activation is itself a durable, idempotent operation. A new-endpoint campaign may activate only a
+`qualified` candidate. An evolution campaign may promote only a `guard_passed` candidate and
+delegates the traffic mutation to the normal guarded rollout workflow. Approval expiry is checked
+before mutation, while a retry after a completed activation remains a successful no-op.
+
+Approval first verifies every candidate against a fresh sourced price for its exact cloud, region,
+GPU, and maximum replica count. It then records a bounded authority window and queues one durable
+execution operation. The worker composes the existing deployment/rollout lifecycle, sends the
+versioned AIPerf workload directly to the exact candidate revision, adopts revision-bound signed
+quality evidence, ranks persisted results, evaluates Release Guard for evolution campaigns, and
+cleans rejected candidates. It never promotes automatically.
+
+The execution capability is fail-closed. The control plane must find AIPerf and must have an exact
+price snapshot valid for the entire approval window. Configure price evidence before approving:
+
+```bash
+export INFERCRANE_OPTIMIZATION_PRICES_JSON='[
+  {
+    "cloud":"aws",
+    "region":"eu-central-1",
+    "gpu":"L40S",
+    "replicas":2,
+    "hourly_usd":3.72,
+    "currency":"USD",
+    "source":"aws-price-list/2026-08-24",
+    "observed_at":"2026-08-24T18:00:00Z",
+    "valid_until":"2026-08-25T18:00:00Z"
+  }
+]'
+```
+
+The rate is the total hourly cost of that exact maximum-replica tuple. A missing tuple, expired
+source window, absent AIPerf binary, or approval below the worst-case execution cost is rejected
+before provider mutation. Operators must refresh price evidence rather than treating this static
+example as current pricing.
+
+The restart-safe execution path is locally qualified for lost child-operation responses,
+cancellation, expired authority, evidence identity, cleanup, and the human promotion boundary.
+Canceling a campaign queues durable cleanup even when its execution operation already finished.
+Closing the CLI does not stop the control-plane operation; reattach with `infercrane operation
+watch`. A qualified candidate keeps that parent operation in a bounded waiting state. If explicit
+activation or promotion does not happen before authority expires, InferCrane marks the candidate
+failed and cleans its resources rather than allowing an unbounded GPU bill.
 
 Execution uses a measured-evidence barrier: all viable candidates reach AIPerf measurement and
 revision-bound quality validation before ranking begins. Inference Lab then compares only the exact

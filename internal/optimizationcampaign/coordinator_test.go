@@ -299,6 +299,25 @@ func TestCoordinatorExpiresAuthorityAndCleansAnAllocatedCandidate(t *testing.T) 
 	}
 }
 
+func TestCoordinatorExpiresQualifiedCandidateWaitingForHumanAndCleansIt(t *testing.T) {
+	now := time.Now().UTC()
+	repository, driver, coordinator := approvedCoordinatorFixture(now, 1)
+	repository.campaign.Candidates[0].State = CandidateQualified
+	repository.campaign.State = CampaignQualified
+	expired := now.Add(-time.Second)
+	repository.campaign.ApprovalExpiresAt = &expired
+	result, err := coordinator.Step(context.Background(), "tenant", "campaign", "candidate-a")
+	if err != nil || result.To != CandidateFailed || repository.campaign.Candidates[0].FailureCode != "approval_expired_before_activation" {
+		t.Fatalf("qualified candidate escaped expired authority: result=%+v err=%v candidate=%+v", result, err, repository.campaign.Candidates[0])
+	}
+	if _, err = coordinator.Step(context.Background(), "tenant", "campaign", "candidate-a"); err != nil {
+		t.Fatal(err)
+	}
+	if repository.campaign.Candidates[0].State != CandidateCleaned || driver.cleanupCalls != 1 {
+		t.Fatalf("expired qualified candidate was not cleaned: candidate=%+v cleanup=%d", repository.campaign.Candidates[0], driver.cleanupCalls)
+	}
+}
+
 func TestCoordinatorCancellationNeverRemovesPromotedProduction(t *testing.T) {
 	now := time.Now().UTC()
 	repository, driver, coordinator := approvedCoordinatorFixture(now, 1)

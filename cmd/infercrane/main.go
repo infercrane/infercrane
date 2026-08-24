@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"sort"
@@ -46,9 +47,11 @@ import (
 	"github.com/infercrane/infercrane/internal/gateway"
 	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/operations"
+	"github.com/infercrane/infercrane/internal/optimizationcampaign"
 	"github.com/infercrane/infercrane/internal/passport"
 	"github.com/infercrane/infercrane/internal/performanceprofile"
 	"github.com/infercrane/infercrane/internal/planning"
+	"github.com/infercrane/infercrane/internal/pricing"
 	"github.com/infercrane/infercrane/internal/provision"
 	"github.com/infercrane/infercrane/internal/reconcile"
 	"github.com/infercrane/infercrane/internal/requestquota"
@@ -3952,6 +3955,16 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	if cfg.KubernetesEnabled() {
 		benchmarkBackends["kubernetes"] = controlapi.BackendMetadata{APIKey: cfg.APIKey, APIKeyEnv: "INFERCRANE_WORKER_API_KEY"}
 	}
+	priceCatalog := pricing.Catalog{Prices: map[pricing.Request]pricing.Estimate{}}
+	for _, row := range cfg.OptimizationPrices {
+		priceCatalog.Prices[pricing.Request{Cloud: row.Cloud, Region: row.Region, GPU: row.GPU, Replicas: row.Replicas}] = pricing.Estimate{Currency: row.Currency, Source: row.Source, Hourly: row.HourlyUSD, ObservedAt: row.ObservedAt, StaleAfter: row.ValidUntil.Sub(row.ObservedAt)}
+	}
+	_, aiperfErr := exec.LookPath(cfg.AIPerfBinary)
+	optimizationExecutionEnabled := len(priceCatalog.Prices) > 0 && aiperfErr == nil
+	var optimizationCosts optimizationcampaign.CostAuthority
+	if optimizationExecutionEnabled {
+		optimizationCosts = optimizationcampaign.PricingAuthority{Provider: priceCatalog}
+	}
 	var asyncService *asyncinference.Service
 	if cfg.AsyncEncryptionKey != "" {
 		cipher, cipherErr := asyncinference.NewCipher(cfg.AsyncEncryptionKey)
@@ -3961,14 +3974,13 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		asyncService = &asyncinference.Service{Store: s, Cipher: cipher, KeyReference: cfg.AsyncEncryptionKeyReference, GatewayURL: cfg.ControlURL, APIKey: cfg.APIKey, Owner: cfg.InstanceID + ":async", Lease: time.Minute, Secrets: secrets.Environment{}}
 	}
 	artifactCacheAdapters := map[string]artifactcache.Adapter{}
-	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool}
+	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool, OptimizationCosts: optimizationCosts}
 	// Assign the optional service only when it exists. A nil *Service stored in
 	// an interface is non-nil and would otherwise turn the intended capability
 	// error into a panic when async encryption is not configured.
 	if asyncService != nil {
 		controlAPI.AsyncInference = asyncService
 	}
-	control := controlAPI.Handler()
 	operationTelemetry := &operations.Telemetry{}
 	handlers := workflows.DeploymentHandlers(s)
 	for kind, handler := range workflows.RolloutHandlers(s) {
@@ -4062,6 +4074,19 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	for kind, handler := range workflows.ServerlessHandlers(s, serverlessBackend, artifact.HuggingFace{}) {
 		handlers[kind] = handler
 	}
+	candidateBackends := make(map[string]optimizationcampaign.BenchmarkBackend, len(benchmarkBackends))
+	for name, backend := range benchmarkBackends {
+		candidateBackends[name] = optimizationcampaign.BenchmarkBackend{APIKey: backend.APIKey, APIKeyEnv: backend.APIKeyEnv}
+	}
+	candidateBenchmark := optimizationcampaign.BenchmarkExecutor{Store: s, Runner: benchmark.Runner{}, Costs: optimizationCosts, Backends: candidateBackends, AIPerfBinary: cfg.AIPerfBinary}
+	driver := optimizationcampaign.CompositeDriver{Store: s, Costs: optimizationCosts, Benchmark: candidateBenchmark, Ranker: optimizationcampaign.PersistedRanker{Store: s}}
+	for kind, handler := range optimizationcampaign.Handlers(optimizationcampaign.Coordinator{Repository: s, Driver: driver}) {
+		handlers[kind] = handler
+	}
+	for kind, handler := range optimizationcampaign.ActivationHandlers(s, nil) {
+		handlers[kind] = handler
+	}
+	control := controlAPI.Handler()
 	operationWorker := operations.Worker{Repository: s, Handlers: handlers, Owner: cfg.InstanceID, Lease: 30 * time.Second, PollInterval: time.Second, BaseBackoff: 2 * time.Second, MaxBackoff: time.Minute, Telemetry: operationTelemetry}
 	go func() {
 		if err := operationWorker.Run(ctx); err != nil && ctx.Err() == nil {

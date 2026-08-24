@@ -353,6 +353,11 @@ export class ControlApi {
     return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
   }
 
+  activateOptimizationCampaign(id: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = `/optimization/campaigns/${encodeURIComponent(id)}/activate`;
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
   cancelOptimizationCampaign(id: string, body: JsonValue): Promise<Record<string, JsonValue>> {
     const path = `/optimization/campaigns/${encodeURIComponent(id)}/cancel`;
     return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
