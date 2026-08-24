@@ -18,6 +18,7 @@ type commandSpec struct {
 var publicCommandSpecs = []commandSpec{
 	{use: "init [flags]", short: "Connect this CLI to a control plane", group: "start"},
 	{use: "doctor [flags]", short: "Validate configuration and dependencies", group: "start"},
+	{use: "discover local [flags]", short: "Inspect local GPUs without changing the host", group: "start"},
 	{use: "plan MODEL [flags]", short: "Preview deployment changes without side effects", group: "start"},
 	{use: "deploy MODEL [flags]", short: "Create a durable inference deployment", group: "start"},
 	{use: "workload ACTION [PATH] [flags]", short: "Initialize, validate, build, develop, and deploy inference projects", group: "start"},

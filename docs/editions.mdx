@@ -1,0 +1,109 @@
+---
+title: Community, Cloud, and Enterprise
+description: Understand the open-source product, hosted direction, managed-compute boundary, and commercial enterprise capabilities.
+sidebarTitle: Product editions
+---
+
+# One product model, three operating choices
+
+InferCrane's domain model does not change depending on who operates the control plane or supplies
+compute. Applications keep the same logical endpoint, deployments remain durable, and release
+evidence keeps the same meaning.
+
+```text
+                         InferCrane product model
+       endpoint · deployment · revision · operation · evidence
+                                      │
+             ┌────────────────────────┼────────────────────────┐
+             │                        │                        │
+             ▼                        ▼                        ▼
+        Community                 Cloud direction         Enterprise
+        self-operated             operated service        governed deployment
+```
+
+## InferCrane Community
+
+The public repository is the complete self-operated product and is licensed under Apache 2.0. It
+contains the control plane, gateway, provider and runtime contracts, CLI, SDKs, Terraform provider,
+monitoring, durable operations, Release Guard, Replay, benchmarking, optimization evidence, and
+local console boundary.
+
+Community users can:
+
+- deploy a compatible model through vLLM, SGLang, or an immutable custom OCI workload;
+- operate capacity in AWS, GCP, Kubernetes, RunPod, or another implemented adapter;
+- connect existing OpenAI-compatible inference without migrating it first;
+- keep one stable application endpoint while serving plans change;
+- inspect requests, diagnose production behavior, and gate releases with evidence.
+
+The catalog is not an allowlist. A model accepted by the selected runtime can enter the same
+planning and lifecycle flow. Hardware fit, model terms, runtime capabilities, and performance remain
+properties of the exact serving plan.
+
+## InferCrane Cloud direction
+
+InferCrane Cloud is the planned operated form of the same product. It is intended to provide a
+hosted control plane, hosted console, upgrades, backups, longer evidence retention, billing, and an
+InferCrane-supplied compute option. It does not exist as a generally available public service yet.
+The current hosted console is deny-by-default private preview and current real compute uses the
+customer's provider account.
+
+The portability rule is:
+
+```text
+InferCrane Compute ─┐
+Customer cloud ─────┼──> the same endpoint, operations, evidence, and releases
+Existing inference ─┘
+```
+
+Hosted supplier credentials, payment systems, abuse controls, rate cards, and warm-pool operations
+belong outside the open-source process. Cloud code may consume public InferCrane APIs and extension
+contracts; the open-source core must never depend on a proprietary package.
+
+## InferCrane Enterprise direction
+
+Enterprise packaging is for contractual operation and organization-wide governance, not a second
+inference engine. Expected commercial capabilities include SSO and SCIM, fine-grained access
+control, audit export, private connectivity, residency policy, customer-managed encryption,
+multi-region recovery, approval workflows, support, and SLAs.
+
+Basic deployment, monitoring, autoscaling, release safety, and provider/runtime extensibility stay
+in Community. Commercial value comes from operating InferCrane, providing governed capacity,
+reducing organizational risk, and accepting contractual responsibility.
+
+## Repository and license boundary
+
+| Surface | Distribution | License boundary |
+| --- | --- | --- |
+| Core control plane, gateway, CLI, SDKs, adapters, and self-hosted workflows | Public | Apache 2.0 |
+| Documentation and examples in this repository | Public | Apache 2.0 unless a file states otherwise |
+| Hosted tenancy, supplier credentials, billing, payments, and warm-pool operations | Private service | Proprietary |
+| Enterprise identity, compliance, support, and contractual automation | Commercial | Proprietary |
+| Marketing site and hosted account experience | Company-operated | Proprietary |
+
+Apache 2.0 is deliberately retained for the core. It is permissive for commercial use and includes
+an explicit patent grant. A proprietary service does not change the license of the public core, and
+mixing proprietary source into this repository is not required for Cloud or Enterprise operation.
+
+## Existing orchestration systems
+
+An existing OpenAI-compatible serving system can be connected through InferCrane's generic adoption
+path without transferring lifecycle ownership. The existing system remains responsible for its own
+GPU scheduling, engine configuration, workers, and replica mutation. InferCrane can own stable
+endpoint identity, higher-level revisions, release policy, and evidence only after the operator
+chooses the corresponding ownership mode.
+
+This boundary prevents two controllers from scaling the same replicas. InferCrane will not add a
+native lifecycle adapter for another orchestration system unless repeated user demand justifies the
+extra controller and qualification surface.
+
+## Current availability
+
+<Warning>
+  Product direction is not current availability. Review [Capability qualification](/project-status)
+  before relying on a provider, runtime, hosted surface, or exact model and accelerator combination.
+</Warning>
+
+Today, InferCrane is distributed as the self-operated Community control plane with a private-preview
+console. Hosted control-plane operation, InferCrane-supplied compute, public billing, and enterprise
+SLAs remain future commercial milestones.

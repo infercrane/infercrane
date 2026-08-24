@@ -680,7 +680,7 @@ func (a API) cancelOptimizationCampaign(w http.ResponseWriter, r *http.Request) 
 func optimizationCampaignResponse(campaign domain.OptimizationCampaign) map[string]any {
 	candidates := make([]map[string]any, 0, len(campaign.Candidates))
 	for _, candidate := range campaign.Candidates {
-		candidates = append(candidates, map[string]any{"id": candidate.ID, "proposal_candidate_id": candidate.ProposalCandidateID, "rank": candidate.Rank, "state": candidate.State, "evidence_state": candidate.EvidenceState, "deployment_spec": json.RawMessage(candidate.DeploymentSpecJSON), "predicted_evidence": json.RawMessage(candidate.PredictedEvidenceJSON), "actual_evidence": json.RawMessage(candidate.ActualEvidenceJSON), "deployment_name": candidate.DeploymentName, "revision_id": candidate.RevisionID, "benchmark_id": candidate.BenchmarkID, "quality_evidence_id": candidate.QualityEvidenceID, "release_guard_evaluation_id": candidate.ReleaseGuardEvaluationID, "optimized_artifact_id": candidate.OptimizedArtifactID, "failure_code": candidate.FailureCode, "created_at": candidate.CreatedAt, "updated_at": candidate.UpdatedAt})
+		candidates = append(candidates, map[string]any{"id": candidate.ID, "proposal_candidate_id": candidate.ProposalCandidateID, "rank": candidate.Rank, "state": candidate.State, "evidence_state": candidate.EvidenceState, "deployment_spec": json.RawMessage(candidate.DeploymentSpecJSON), "predicted_evidence": json.RawMessage(candidate.PredictedEvidenceJSON), "actual_evidence": json.RawMessage(candidate.ActualEvidenceJSON), "deployment_name": candidate.DeploymentName, "revision_id": candidate.RevisionID, "benchmark_id": candidate.BenchmarkID, "quality_evidence_id": candidate.QualityEvidenceID, "lab_evaluation_id": candidate.LabEvaluationID, "release_guard_evaluation_id": candidate.ReleaseGuardEvaluationID, "optimized_artifact_id": candidate.OptimizedArtifactID, "failure_code": candidate.FailureCode, "created_at": candidate.CreatedAt, "updated_at": candidate.UpdatedAt})
 	}
 	return map[string]any{"id": campaign.ID, "input_digest": campaign.InputDigest, "model_identity": campaign.ModelIdentity, "objective": campaign.Objective, "source": campaign.Source, "state": campaign.State, "max_candidates": campaign.MaxCandidates, "approved_max_cost_usd": campaign.ApprovedMaxCostUSD, "approval_expires_at": campaign.ApprovalExpiresAt, "approved_by": campaign.ApprovedBy, "approved_at": campaign.ApprovedAt, "cancel_requested": campaign.CancelRequested, "failure_code": campaign.FailureCode, "created_at": campaign.CreatedAt, "updated_at": campaign.UpdatedAt, "candidates": candidates, "proof_boundary": "modeled evidence cannot qualify; measured benchmark, quality, cost, and Release Guard evidence are required"}
 }
@@ -2830,14 +2830,20 @@ func (a API) requestPrefetch(w http.ResponseWriter, r *http.Request) {
 				operation, adapterErr := adapter.Prefetch(adapterContext, cacheRequest)
 				cancel()
 				if adapterErr != nil {
-					// The provider may have accepted the side effect before the response was
-					// lost. Keep the durable request replayable under the same key.
-					row, adapterErr = executionStore.UpdateArtifactPrefetch(durableContext, principal.TenantID, row.ID, "requested", "", "provider_result_unknown")
+					failureCode, outcomeUnknown := artifactcache.Classify(adapterErr)
+					status := "failed"
+					execution = "provider_rejected"
+					if outcomeUnknown {
+						// The provider may have accepted the side effect before the response
+						// was lost. Keep the request replayable under the same identity.
+						status = "requested"
+						execution = "provider_result_unknown"
+					}
+					row, adapterErr = executionStore.UpdateArtifactPrefetch(durableContext, principal.TenantID, row.ID, status, "", failureCode)
 					if adapterErr != nil {
 						writeError(w, http.StatusInternalServerError, "prefetch_checkpoint_failed", "provider prefetch result was unknown and its durable checkpoint could not be updated")
 						return
 					}
-					execution = "provider_result_unknown"
 				} else {
 					operationStatus := operation.Status
 					if operationStatus == "" || operationStatus == "requested" {

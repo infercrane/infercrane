@@ -14,7 +14,7 @@ var reviewedModels = []string{
 	"mistralai/Mistral-7B-Instruct-v0.3",
 }
 
-var commonAccelerators = []string{"A10G", "H100", "H200", "L4", "L40S", "NVIDIA-L4", "NVIDIA.COM/GPU"}
+var commonAccelerators = []string{"A10G", "H100", "H200", "L4", "L40S"}
 
 // V1 returns only reviewed exact-version facts. Registered/deferred entries
 // are visible to planning and diagnostics, but Compile refuses to emit them.

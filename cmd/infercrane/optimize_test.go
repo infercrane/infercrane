@@ -18,7 +18,7 @@ func TestOptimizeProposeRunsOfflineAndEmitsUnmeasuredJSON(t *testing.T) {
 	t.Setenv("INFERCRANE_API_KEY", "")
 	t.Setenv("INFERCRANE_CONFIG", filepath.Join(t.TempDir(), "missing.json"))
 	output, err := captureStdout(t, func() error {
-		return run(context.Background(), []string{"optimize", "propose", "mistral-7b-instruct", "--provider", "aws", "--region", "eu-central-1", "--gpu", "L40S", "--objective", "interactive", "--source", "catalog", "--output", "json"})
+		return run(context.Background(), []string{"optimize", "propose", "mistral-7b-instruct", "--provider", "aws", "--region", "eu-central-1", "--gpu", "L40S", "--objective", "interactive", "--max-error-rate", "0.01", "--min-goodput", "4", "--source", "catalog", "--output", "json"})
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -29,6 +29,16 @@ func TestOptimizeProposeRunsOfflineAndEmitsUnmeasuredJSON(t *testing.T) {
 	}
 	if proposal.Mutation != "none" || len(proposal.Candidates) != 3 || proposal.Candidates[0].Status != "proposed-unmeasured" || proposal.Candidates[0].ConfigurationProfile != "vllm-interactive" {
 		t.Fatalf("proposal=%#v", proposal)
+	}
+	if proposal.Input.MaxErrorRate == nil || *proposal.Input.MaxErrorRate != 0.01 || proposal.Input.MinGoodput == nil || *proposal.Input.MinGoodput != 4 {
+		t.Fatalf("full-path SLO evidence requirements were lost: %+v", proposal.Input)
+	}
+}
+
+func TestOptimizeProposeRejectsInvalidErrorRate(t *testing.T) {
+	err := optimizeCommand(context.Background(), []string{"propose", "qwen3-8b", "--provider", "aws", "--region", "eu-central-1", "--gpu", "L40S", "--max-error-rate", "1.1", "--source", "catalog"})
+	if err == nil || !strings.Contains(err.Error(), "between zero and one") {
+		t.Fatalf("invalid error-rate policy was accepted: %v", err)
 	}
 }
 

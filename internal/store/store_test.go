@@ -95,8 +95,16 @@ func TestOptimizationCampaignIsBoundedDurableFencedAndCleansRejectedCandidate(t 
 	ctx := context.Background()
 	s := openStore(t, ctx)
 	suffix := time.Now().UTC().Format("150405.000000000")
+	target, err := s.AddTarget(ctx, domain.Target{Name: "optimization-target-" + suffix, URL: "http://optimization-" + suffix, Provider: "existing", Runtime: "vllm", UpstreamModel: "meta-llama/Llama-3.1-8B-Instruct"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deployment, err := s.ApplyDeployment(ctx, domain.Deployment{Name: "llama-interactive-" + suffix, Model: target.UpstreamModel}, []string{target.Name})
+	if err != nil {
+		t.Fatal(err)
+	}
 	campaign := domain.OptimizationCampaign{TenantID: "global", IdempotencyKey: "optimize-" + suffix, InputDigest: strings.Repeat("a", 64), ModelIdentity: "meta-llama/Llama-3.1-8B-Instruct", Objective: "interactive", Source: "catalog-candidate-planner-v1", ProposalJSON: `{"schema_version":"infercrane.optimizer.proposal/v1"}`}
-	candidates := []domain.OptimizationCandidateRun{{ProposalCandidateID: strings.Repeat("b", 64), Rank: 1, EvidenceState: "unmeasured", DeploymentSpecJSON: `{"name":"llama-interactive"}`, PredictedEvidenceJSON: `{}`, ActualEvidenceJSON: `{}`}}
+	candidates := []domain.OptimizationCandidateRun{{ProposalCandidateID: strings.Repeat("b", 64), Rank: 1, EvidenceState: "unmeasured", DeploymentSpecJSON: `{"name":"` + deployment.Name + `"}`, PredictedEvidenceJSON: `{}`, ActualEvidenceJSON: `{}`}}
 	created, fresh, err := s.CreateOptimizationCampaign(ctx, campaign, candidates)
 	if err != nil || !fresh || created.State != optimizationcampaign.CampaignAwaitingApproval || len(created.Candidates) != 1 {
 		t.Fatalf("create=%+v fresh=%t err=%v", created, fresh, err)
@@ -123,17 +131,25 @@ func TestOptimizationCampaignIsBoundedDurableFencedAndCleansRejectedCandidate(t 
 	if _, err = s.TransitionOptimizationCandidate(ctx, "global", approved.ID, candidateID, optimizationcampaign.CandidateProposed, optimizationcampaign.CandidateGuardPassed, domain.OptimizationCandidateRun{ReleaseGuardEvaluationID: "guard"}); err == nil {
 		t.Fatal("worker skipped measurement and validation boundaries")
 	}
+	quality, _, err := s.RecordQualityEvidence(ctx, "global", deployment.Name, domain.QualityEvidence{RevisionID: deployment.ActiveRevisionID, Suite: "campaign-output", SuiteVersion: "git:abc", Evaluator: "offline-evaluator", EvaluatorVersion: "1.0.0", Score: .98, Passed: true, SampleCount: 100, ArtifactDigest: "sha256:" + strings.Repeat("a", 64), PayloadDigest: "sha256:" + strings.Repeat("b", 64), Signature: "signature", PublicKey: "public-key", Algorithm: "Ed25519-SHA256", KeyID: "sha256:key", EvaluatedAt: time.Now().UTC()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	labRow, err := s.RecordLabEvaluation(ctx, "global", domain.LabEvaluation{ModelIdentity: campaign.ModelIdentity, AlgorithmVersion: "inference-lab-v3", InputJSON: `{"objective":"interactive"}`, ResultsJSON: `[{"selected":false}]`, InputDigest: strings.Repeat("c", 64)})
+	if err != nil {
+		t.Fatal(err)
+	}
 	state := optimizationcampaign.CandidateProposed
 	steps := []struct {
 		to      string
 		updates domain.OptimizationCandidateRun
 	}{
 		{optimizationcampaign.CandidateProvisioning, domain.OptimizationCandidateRun{}},
-		{optimizationcampaign.CandidateReady, domain.OptimizationCandidateRun{DeploymentName: "llama-interactive", RevisionID: "rev-1"}},
+		{optimizationcampaign.CandidateReady, domain.OptimizationCandidateRun{DeploymentName: deployment.Name, RevisionID: deployment.ActiveRevisionID}},
 		{optimizationcampaign.CandidateMeasuring, domain.OptimizationCandidateRun{}},
 		{optimizationcampaign.CandidateValidating, domain.OptimizationCandidateRun{BenchmarkID: "bench-1", ActualEvidenceJSON: `{"ttft_p95_ms":210}`}},
-		{optimizationcampaign.CandidateRanked, domain.OptimizationCandidateRun{BenchmarkID: "bench-1"}},
-		{optimizationcampaign.CandidateRejected, domain.OptimizationCandidateRun{FailureCode: "slo_regression"}},
+		{optimizationcampaign.CandidateRanked, domain.OptimizationCandidateRun{BenchmarkID: "bench-1", QualityEvidenceID: quality.ID}},
+		{optimizationcampaign.CandidateRejected, domain.OptimizationCandidateRun{LabEvaluationID: labRow.ID, FailureCode: "slo_regression"}},
 		{optimizationcampaign.CandidateCleaned, domain.OptimizationCandidateRun{}},
 	}
 	for _, step := range steps {
@@ -152,6 +168,29 @@ func TestOptimizationCampaignIsBoundedDurableFencedAndCleansRejectedCandidate(t 
 	}
 	if _, err = s.CancelOptimizationCampaign(ctx, "global", "missing-campaign"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("missing cancellation error=%v", err)
+	}
+}
+
+func TestLabEvaluationDeterministicIdentityIsReplaySafe(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	suffix := time.Now().UTC().Format("150405.000000000")
+	value := domain.LabEvaluation{ID: "lab-deterministic-" + suffix, ModelIdentity: "Qwen/Qwen3-8B@commit", AlgorithmVersion: "inference-lab-v3", InputJSON: `{"objective":"interactive"}`, ResultsJSON: `[{"selected":true}]`, InputDigest: strings.Repeat("8", 64)}
+	created, err := s.RecordLabEvaluation(ctx, "global", value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayed, err := s.RecordLabEvaluation(ctx, "global", value)
+	if err != nil || replayed.ID != created.ID || !replayed.CreatedAt.Equal(created.CreatedAt) {
+		t.Fatalf("deterministic Lab replay changed evidence: created=%+v replayed=%+v err=%v", created, replayed, err)
+	}
+	conflict := value
+	conflict.ResultsJSON = `[{"selected":false}]`
+	if _, err = s.RecordLabEvaluation(ctx, "global", conflict); !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("conflicting deterministic Lab evidence was accepted: %v", err)
+	}
+	if _, err = s.RecordLabEvaluation(ctx, "another-tenant", value); !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("cross-tenant deterministic Lab identity was not hidden as conflict: %v", err)
 	}
 }
 
@@ -204,12 +243,33 @@ func TestOptimizedArtifactRequiresExactBuilderCandidateRevisionAndQualityEvidenc
 	if _, err = s.TransitionOptimizationCandidate(ctx, "global", campaign.ID, candidateID, optimizationcampaign.CandidateProposed, optimizationcampaign.CandidateProvisioning, domain.OptimizationCandidateRun{}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err = s.TransitionOptimizationCandidate(ctx, "global", campaign.ID, candidateID, optimizationcampaign.CandidateProvisioning, optimizationcampaign.CandidateReady, domain.OptimizationCandidateRun{DeploymentName: "wrong-deployment", RevisionID: deployment.ActiveRevisionID, OptimizedArtifactID: optimized.ID}); err == nil {
+		t.Fatal("candidate accepted a revision belonging to another deployment identity")
+	}
+	otherTarget, err := s.AddTarget(ctx, domain.Target{Name: name + "-other-target", URL: "http://" + name + "-other", Provider: "existing", Runtime: "vllm", UpstreamModel: "Qwen/Qwen3-8B"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherDeployment, err := s.ApplyDeployment(ctx, domain.Deployment{Name: name + "-other", Model: otherTarget.UpstreamModel}, []string{otherTarget.Name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.AttachModelArtifact(ctx, "global", otherDeployment.ActiveRevisionID, domain.ModelArtifact{Source: "huggingface", Repository: otherTarget.UpstreamModel, RequestedRevision: "main", ImmutableRevision: strings.Repeat("3", 40), ModelIdentity: otherTarget.UpstreamModel + "@" + strings.Repeat("3", 40), CacheState: "unknown", RuntimeCompatibilityJSON: `{}`}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.TransitionOptimizationCandidate(ctx, "global", campaign.ID, candidateID, optimizationcampaign.CandidateProvisioning, optimizationcampaign.CandidateReady, domain.OptimizationCandidateRun{DeploymentName: otherDeployment.Name, RevisionID: otherDeployment.ActiveRevisionID, OptimizedArtifactID: optimized.ID}); err == nil {
+		t.Fatal("candidate accepted an optimized artifact built from a different base model")
+	}
 	if _, err = s.TransitionOptimizationCandidate(ctx, "global", campaign.ID, candidateID, optimizationcampaign.CandidateProvisioning, optimizationcampaign.CandidateReady, domain.OptimizationCandidateRun{DeploymentName: name, RevisionID: deployment.ActiveRevisionID, OptimizedArtifactID: optimized.ID}); err != nil {
 		t.Fatal(err)
 	}
 
 	evidence := domain.QualityEvidence{RevisionID: deployment.ActiveRevisionID, Suite: "output-regression", SuiteVersion: "git:abc", Evaluator: "offline-evaluator", EvaluatorVersion: "1.0.0", Score: .98, Passed: true, SampleCount: 100, ArtifactDigest: "sha256:" + strings.Repeat("f", 64), PayloadDigest: "sha256:" + strings.Repeat("0", 64), Signature: "signature", PublicKey: "public-key", Algorithm: "Ed25519-SHA256", KeyID: "sha256:key", EvaluatedAt: time.Now().UTC()}
 	quality, _, err := s.RecordQualityEvidence(ctx, "global", name, evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	labRow, err := s.RecordLabEvaluation(ctx, "global", domain.LabEvaluation{ModelIdentity: target.UpstreamModel, AlgorithmVersion: "inference-lab-v3", InputJSON: `{"objective":"interactive"}`, ResultsJSON: `[{"selected":true}]`, InputDigest: strings.Repeat("9", 64)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,8 +287,9 @@ func TestOptimizedArtifactRequiresExactBuilderCandidateRevisionAndQualityEvidenc
 	}{
 		{optimizationcampaign.CandidateReady, optimizationcampaign.CandidateMeasuring, domain.OptimizationCandidateRun{}},
 		{optimizationcampaign.CandidateMeasuring, optimizationcampaign.CandidateValidating, domain.OptimizationCandidateRun{BenchmarkID: "bench-fp8", QualityEvidenceID: quality.ID}},
-		{optimizationcampaign.CandidateValidating, optimizationcampaign.CandidateRanked, domain.OptimizationCandidateRun{BenchmarkID: "bench-fp8"}},
-		{optimizationcampaign.CandidateRanked, optimizationcampaign.CandidateGuardPassed, domain.OptimizationCandidateRun{ReleaseGuardEvaluationID: "guard-fp8"}},
+		{optimizationcampaign.CandidateValidating, optimizationcampaign.CandidateRanked, domain.OptimizationCandidateRun{BenchmarkID: "bench-fp8", QualityEvidenceID: quality.ID}},
+		{optimizationcampaign.CandidateRanked, optimizationcampaign.CandidateGuarding, domain.OptimizationCandidateRun{LabEvaluationID: labRow.ID}},
+		{optimizationcampaign.CandidateGuarding, optimizationcampaign.CandidateGuardPassed, domain.OptimizationCandidateRun{ReleaseGuardEvaluationID: "guard-fp8"}},
 	}
 	for _, step := range steps {
 		if _, err = s.TransitionOptimizationCandidate(ctx, "global", campaign.ID, candidateID, step.from, step.to, step.updates); err != nil {

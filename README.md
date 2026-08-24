@@ -1,15 +1,36 @@
 # InferCrane
 
-Production inference without building the platform first.
+Give InferCrane a model. Get a production endpoint.
 
-Deploy, autoscale, monitor, benchmark, and safely update inference workloads on GPU infrastructure you control. Already running inference? Connect it without migrating first.
+InferCrane deploys, operates, observes, optimizes, and safely evolves open-weight and custom-model
+inference. Keep one OpenAI-compatible application endpoint while models, runtimes, accelerators,
+providers, and revisions change underneath it. Start in your cloud, connect infrastructure you
+already run, or compose a governed model API without rebuilding the application.
 
-Explore reviewed, immutable starting points without treating them as benchmark claims:
+```text
+Application / agent
+        ↓
+stable OpenAI-compatible endpoint
+        ↓
+InferCrane · deploy · observe · optimize · release
+        ↓
+Qwen · Kimi · DeepSeek · GLM · gpt-oss · Llama · any compatible model
+        ↓
+vLLM · SGLang · TensorRT-LLM · custom OCI
+        ↓
+AWS · GCP · Kubernetes · RunPod · read-only bare-metal discovery · existing inference
+```
+
+<p align="center">
+  <img alt="InferCrane endpoint monitoring console" src="https://infercrane.com/product/endpoint-monitoring.jpg" width="100%" />
+</p>
+
+Start from a model family people already use, or pass any compatible Hugging Face identity:
 
 ```bash
 infercrane models
-infercrane models inspect mistral-7b-instruct
-infercrane workload init ./support-model --recipe mistral-7b-instruct
+infercrane models inspect qwen3-8b
+infercrane workload init ./support-model --recipe qwen3-8b
 infercrane optimize propose llama-3.1-8b-instruct \
   --provider aws --region eu-central-1 --gpu L40S \
   --objective interactive --write-dir .infercrane/candidates
@@ -19,19 +40,18 @@ Optimization proposals are immutable configuration candidates, not benchmark cla
 ranks a serving plan only after comparable measured performance, quality, and sourced cost evidence.
 
 ```bash
-infercrane workload init ./fraud-explainer \
-  --model mistralai/Mistral-7B-Instruct-v0.3
-cd fraud-explainer
+infercrane workload init ./agent-model \
+  --model moonshotai/Kimi-K3
+cd agent-model
 infercrane workload plan
 infercrane workload deploy --wait
 ```
 
-The model is not hard-coded and no single benchmark is presented as universal evidence. The local
+The catalog is not an allowlist and the model is not hard-coded. The local
 qualification corpus spans dense instruction, coding, reasoning/distilled, embedding, and
 multimodal families; real performance remains bound to the exact model commit, runtime, accelerator,
 provider, cache state, and workload. InferCrane also accepts other Hugging Face model identities and
-custom OCI workloads, but unqualified combinations fail closed instead of inheriting another
-model's claims.
+custom OCI workloads. Evidence from one serving plan is never silently reused for another.
 
 - No Kubernetes required
 - Deterministic Release Guard
@@ -47,14 +67,22 @@ model's claims.
 The common path stays intentionally small:
 
 ```bash
-infercrane workload init ./support --recipe llama-3.1-8b-instruct
+infercrane workload init ./support --recipe qwen3-8b
 cd support
 infercrane workload deploy --wait
 ```
 
 Advanced operators can keep the same project and add an exact provider/runtime/GPU tuple, workload
 fingerprint, SLO, cost boundary, cache policy, candidate campaign, and Release Guard evidence. The
-simple path is a reviewed default—not a separate product or a hidden loss of control.
+simple path is an opinionated default—not a separate product or a hidden loss of control.
+
+Already running a model server on a GPU host? Inspect the local hardware without mutation, then
+connect the runtime in observe-only mode:
+
+```bash
+infercrane discover local
+infercrane connect http://gpu-host.internal:8000/v1 --as support-production
+```
 
 Read the [InferCrane documentation](https://docs.infercrane.com) for the five-minute local quickstart, product concepts, operations, integrations, and references. The Mintlify source lives in [`docs/`](docs/index.mdx); run `npm install && npm run dev` there to preview documentation changes locally.
 

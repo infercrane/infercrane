@@ -17,7 +17,7 @@ from scratch.
 | Hosted model API | You want an API call and no model-serving operations | Model weights, runtime, infrastructure, and capacity | Application and provider selection |
 | AI gateway | You need one API across managed model providers | Protocol translation, provider routing, and accounting | Provider accounts and workload deployment |
 | Kubernetes-native serving | Your platform team already operates Kubernetes and wants native resources | Cluster reconciliation primitives | Cluster, networking, storage, GPU scheduling, and serving stack |
-| InferCrane | You want a stable endpoint and evidence-driven lifecycle across infrastructure you control | Durable operations, revisions, rollout policy, explanations, and adapter contracts | Provider accounts, runtime choice, infrastructure visibility, and data boundary |
+| InferCrane Community | You want a stable endpoint and evidence-driven lifecycle across infrastructure you control | Durable operations, revisions, rollout policy, explanations, and adapter contracts | Provider accounts, runtime choice, infrastructure visibility, and data boundary |
 
 ## InferCrane and managed platforms
 
@@ -25,9 +25,11 @@ from scratch.
 compute and highly integrated hosted experiences. They are usually a better fit when the team wants
 the vendor to own infrastructure and capacity from day one.
 
-InferCrane is differentiated by customer-controlled infrastructure, incremental adoption of existing
+InferCrane Community is differentiated by customer-controlled infrastructure, incremental adoption of existing
 endpoints, replaceable provider/runtime contracts, persisted operational decisions, and explicit
-qualification boundaries. It is not currently a managed-compute substitute.
+qualification boundaries. InferCrane Cloud is the planned operated form of the same product,
+including an InferCrane-supplied compute option; it is not generally available today. See
+[Product editions](/editions).
 
 ## InferCrane and gateways
 
@@ -60,7 +62,7 @@ operator or reimplement distributed serving.
   <Card title="Choose Kubernetes-native" icon="dharmachakra" href="https://kserve.github.io/website/">
     You already have a platform team and want cluster-native serving resources.
   </Card>
-  <Card title="Choose InferCrane" icon="route" href="/quickstart">
+  <Card title="Choose InferCrane Community" icon="route" href="/quickstart">
     You want to build or connect inference on your infrastructure with durable operations and evidence.
   </Card>
 </CardGroup>
@@ -69,4 +71,3 @@ operator or reimplement distributed serving.
 This comparison describes product categories, not a benchmark. Verify current vendor capabilities,
 pricing, support, and deployment boundaries directly with each provider.
 </Note>
-

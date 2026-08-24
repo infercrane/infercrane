@@ -48,10 +48,12 @@ Already implemented and verified:
 - advisory Serving Plans, Release Guard, promotion, rejection, rollback, and Inference Passports;
 - experimental Dynamo aggregated/disaggregated topology, KV-aware routing, and bounded KVBM intent.
 
-The optimizer now also persists a bounded durable campaign, compiles qualified mechanisms through an
-exact capability registry, and records immutable external-builder provenance for quantized,
-speculator, and TensorRT engine artifacts. It does not yet orchestrate the complete paid campaign or
-execute quantization, speculative decoding, LMCache, NIXL, or TensorRT-LLM.
+The optimizer now also persists a bounded durable campaign, advances candidates through a fenced
+restart-safe proof coordinator, compiles qualified mechanisms through an exact capability registry,
+and records immutable external-builder provenance for quantized, speculator, and TensorRT engine
+artifacts. The coordinator has a local fixture driver and operation contract; no production driver is
+registered until its deployment, benchmark, quality, guard, and cleanup composition is qualified.
+InferCrane does not yet execute quantization, speculative decoding, LMCache, NIXL, or TensorRT-LLM.
 
 ## AISimulate decision
 
@@ -145,13 +147,19 @@ Delivered:
 
 Priority: P0. Impact: highest. Effort: medium.
 
-Status: foundation complete; automated execution coordinator pending.
+Status: local coordinator complete; production driver and real-GPU qualification pending.
 
 Delivered locally: immutable idempotent campaigns, ordered candidates, bounded expiring approval,
 fenced transitions, separate predicted/actual evidence, deterministic aggregate state, cancellation,
-cleanup, tenant isolation, REST/CLI inspection, and PostgreSQL restart-safe persistence. The future
-worker must reuse durable deployment, benchmark, quality, and Release Guard operations; approval
-currently records authority but intentionally starts no provider mutation.
+cleanup, tenant isolation, REST/CLI inspection, PostgreSQL restart-safe persistence, and a bounded
+durable operation handler. The coordinator persists each boundary before side effects, measures all
+viable candidates before ranking, ignores proposal order once measurements exist, and links separate
+benchmark, revision-bound quality, Lab-ranking, and Release Guard evidence. Exact-workload Lab
+ranking fails closed on missing cost or incompatible evidence, while explicit SLO violations reject.
+The coordinator preserves retryable lost-response adoption, fails expired authority into cleanup,
+preserves permanent driver failures, treats unknown rank or guard results as inconclusive, and stops
+at human promotion. Approval still starts no provider mutation because a production composite driver
+is not registered.
 
 Add `OptimizationCampaign` and `CandidateRun` durable state without introducing a workflow engine.
 Reuse InferCrane operations, leases, revisions, benchmark evidence, quality evidence, Lab, and Release
@@ -161,7 +169,7 @@ States:
 
 ```text
 proposed → awaiting_approval → provisioning → ready → measuring
-         → validating → ranked → guard_passed | rejected | inconclusive
+         → validating → ranked → guarding → guard_passed | rejected | inconclusive
          → approved → promoted → observed
          → cleaned
 ```
@@ -189,6 +197,8 @@ Required behavior:
 - cancellation stops future work and deterministically cleans run-owned resources;
 - promotion remains a separate human-authorized Release Guard action;
 - predicted and actual outcomes are recorded separately.
+- the selected Lab ranking identity is persisted before Release Guard runs, so a crash cannot merge
+  ranking and release evidence into one ambiguous boundary;
 
 Exit gate:
 
@@ -197,6 +207,10 @@ Exit gate:
 - one local fixture campaign completes from proposal through rejected bad candidate and cleanup;
 - no unapproved provider mutation is reachable.
 
+Local exit gate: passed with the in-memory fault driver. Real provider cleanup, actual builder and
+benchmark execution, and operation registration remain qualification boundaries rather than implied
+capabilities.
+
 ### M2 — Versioned optimization capability registry
 
 Priority: P0. Impact: high. Effort: medium.
@@ -204,9 +218,12 @@ Priority: P0. Impact: high. Effort: medium.
 Status: local foundation complete; mechanism-by-mechanism GPU qualification ongoing.
 
 Delivered locally: exact version/model/precision/accelerator descriptors, fail-closed conflict and
-downgrade behavior, and compilers for runtime-owned continuous batching, qualified vLLM prefix
-caching, and bounded scheduler token budgets. Attention backend, quantization, speculative decoding,
-LMCache, and distributed topology descriptors remain deferred until their exact tuples qualify.
+downgrade behavior, concrete NVIDIA accelerator alias normalization, generic Kubernetes GPU-resource
+rejection, compilers for runtime-owned continuous batching, qualified vLLM prefix caching, bounded
+scheduler token budgets, and one-owner Dynamo proposal compilation, plus a PostgreSQL-enforced
+binding between candidate deployment, immutable revision, base model artifact, and optimized artifact provenance. Attention backend,
+quantization, speculative decoding, LMCache, and distributed topology descriptors remain deferred
+until their exact tuples qualify.
 
 Represent mechanisms as compatibility facts, not arbitrary flags:
 

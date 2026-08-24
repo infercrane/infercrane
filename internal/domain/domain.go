@@ -826,7 +826,7 @@ type OptimizationCandidateRun struct {
 	ID, TenantID, CampaignID, ProposalCandidateID, State, EvidenceState string
 	DeploymentSpecJSON, PredictedEvidenceJSON, ActualEvidenceJSON       string
 	DeploymentName, RevisionID, BenchmarkID, QualityEvidenceID          string
-	ReleaseGuardEvaluationID, FailureCode                               string
+	LabEvaluationID, ReleaseGuardEvaluationID, FailureCode              string
 	OptimizedArtifactID                                                 string
 	Rank                                                                int
 	CreatedAt, UpdatedAt                                                time.Time

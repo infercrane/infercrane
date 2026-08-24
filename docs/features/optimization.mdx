@@ -43,6 +43,8 @@ infercrane optimize propose mistral-7b-instruct \
   --workload-fingerprint sha256:CONTENT_FREE_REPLAY_DIGEST \
   --max-ttft-p95-ms 200 \
   --max-tpot-p95-ms 25 \
+  --max-error-rate 0.01 \
+  --min-goodput 4 \
   --max-hourly-cost 3 \
   --write-dir .infercrane/candidates/mistral-interactive
 ```
@@ -77,6 +79,8 @@ infercrane optimize propose Qwen/Qwen3-8B \
   --provider aws --region eu-central-1 --gpu L40S \
   --objective interactive \
   --max-ttft-p95-ms 200 \
+  --max-error-rate 0.01 \
+  --min-goodput 4 \
   --max-hourly-cost 3
 ```
 
@@ -99,9 +103,20 @@ infercrane optimize inspect CAMPAIGN_ID
 infercrane optimize approve CAMPAIGN_ID --max-cost-usd 20 --expires-in 1h
 ```
 
-Approval records a bounded authority window. It does not automatically promote a candidate. Campaign
-execution remains separately qualification-gated; canceling a campaign prevents future work and
-marks unfinished candidates stale. Closing the CLI does not remove persisted campaign state.
+Approval records a bounded authority window. It does not automatically promote a candidate. The
+restart-safe execution coordinator is locally qualified, including lost responses, cancellation,
+expired authority, cleanup, and the human promotion boundary. A production provider/benchmark driver
+is deliberately not registered until its exact runtime and hardware path is qualified. Canceling a
+campaign prevents future work and marks unfinished candidates stale. Closing the CLI does not remove
+persisted campaign state.
+
+Execution uses a measured-evidence barrier: all viable candidates reach AIPerf measurement and
+revision-bound quality validation before ranking begins. Inference Lab then compares only the exact
+same workload shape. Proposal order cannot choose the winner. Missing sourced cost, mismatched
+workloads, or incomplete metrics produce `inconclusive`; explicit SLO or cost violations produce
+`rejected`. The selected candidate still has to pass active-versus-candidate Release Guard and wait
+for human promotion. The persisted campaign links benchmark, quality, Lab, and Release Guard evidence
+separately.
 
 ## Plan an optimized artifact
 
@@ -144,6 +159,8 @@ infercrane lab 'mistralai/Mistral-7B-Instruct-v0.3@IMMUTABLE_COMMIT' \
   --profile interactive \
   --max-ttft-p95-ms 200ms \
   --max-tpot-p95-ms 25ms \
+  --max-error-rate 0.01 \
+  --min-goodput 4 \
   --max-hourly-cost 3
 
 # Apply normal candidate and Release Guard policy before promotion.
@@ -162,6 +179,12 @@ The first source composes:
 - the executable [integration compatibility inventory](/compatibility);
 - reviewed vLLM configuration profiles for balanced, interactive, and throughput workloads;
 - exact runtime versions and provider adapters.
+
+Accelerator matching uses concrete hardware identity. Generic Kubernetes resource names such as
+`nvidia.com/gpu` are capacity resources, not GPU models, and cannot qualify a mechanism. Explicit
+aliases such as `NVIDIA-L40S` normalize to the exact hardware family. Dynamo candidates compile to
+one InferCrane-owned parent graph with outer autoscaling fixed at one; Dynamo owns its internal
+workers. This prevents two controllers from scaling the same serving graph.
 
 It does not infer that a model fits an accelerator. It does not automatically enable quantization,
 speculative decoding, LMCache, disaggregated serving, FlashInfer, or TensorRT-LLM. Those mechanisms

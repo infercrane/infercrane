@@ -10,6 +10,7 @@ import (
 
 	"github.com/infercrane/infercrane/internal/curatedrecipe"
 	"github.com/infercrane/infercrane/internal/integration"
+	"github.com/infercrane/infercrane/internal/servingcontract"
 )
 
 func TestCatalogProposalCoversDistinctModelAndWorkloadFamilies(t *testing.T) {
@@ -124,6 +125,29 @@ func TestSimulatedRuntimeRequiresExplicitOptIn(t *testing.T) {
 	}
 }
 
+func TestCatalogSourceCompilesDynamoAsOneExplicitMutationOwner(t *testing.T) {
+	proposal, err := catalogSource(t).Propose(context.Background(), Request{ModelIdentity: "Qwen/Qwen3-8B", Provider: "kubernetes-dynamo", GPU: "NVIDIA-L40S", Runtimes: []string{"vllm"}, Objective: "interactive", IncludeSimulated: true, MaxCandidates: 1})
+	if err != nil || len(proposal.Candidates) != 1 {
+		t.Fatalf("proposal=%+v err=%v", proposal, err)
+	}
+	candidate := proposal.Candidates[0]
+	if candidate.Deployment.Provider.Adapter != "kubernetes-dynamo" || candidate.Deployment.Scaling.MinReplicas != 1 || candidate.Deployment.Scaling.MaxReplicas != 1 || candidate.Deployment.Serving.Backend != servingcontract.BackendDynamo || candidate.Deployment.Serving.Mode != servingcontract.ModeAggregated || candidate.Deployment.Serving.Worker.Replicas != 1 {
+		t.Fatalf("Dynamo candidate has conflicting or implicit ownership: %+v", candidate.Deployment)
+	}
+	if candidate.Deployment.Resources.GPU != "NVIDIA-L40S" || !hasFeature(candidate.Features, "dynamo_graph", "single-mutation-owner") {
+		t.Fatalf("Dynamo candidate lost explicit hardware or ownership evidence: %+v", candidate)
+	}
+}
+
+func hasFeature(features []Feature, name, state string) bool {
+	for _, feature := range features {
+		if feature.Name == name && feature.State == state {
+			return true
+		}
+	}
+	return false
+}
+
 func TestCatalogProposalLinksRuntimeArgumentsToExactCapabilityEvidence(t *testing.T) {
 	proposal, err := catalogSource(t).Propose(context.Background(), Request{ModelIdentity: "Qwen/Qwen3-8B", Provider: "aws", Region: "eu-central-1", GPU: "L40S", Objective: "interactive"})
 	if err != nil {
@@ -156,6 +180,21 @@ func TestValidateProposalRejectsTamperingAndQualifiedClaims(t *testing.T) {
 	proposal.Candidates[0].EvidenceState = EvidenceQualified
 	if err = ValidateProposal(proposal); err == nil {
 		t.Fatal("unproven qualified candidate was accepted")
+	}
+}
+
+func TestCatalogProposalCarriesFullMeasuredSLOBoundary(t *testing.T) {
+	errorRate, goodput := 0.01, 4.0
+	proposal, err := catalogSource(t).Propose(context.Background(), Request{ModelIdentity: "qwen3-8b", Provider: "aws", Region: "eu-central-1", GPU: "L40S", Objective: "interactive", MaxErrorRate: &errorRate, MinGoodput: &goodput})
+	if err != nil || len(proposal.Candidates) == 0 {
+		t.Fatalf("proposal=%+v err=%v", proposal, err)
+	}
+	if !contains(proposal.Candidates[0].RequiredEvidence, "measured SLO metrics") {
+		t.Fatalf("candidate lost measured SLO boundary: %+v", proposal.Candidates[0].RequiredEvidence)
+	}
+	invalid := 1.01
+	if _, err = catalogSource(t).Propose(context.Background(), Request{ModelIdentity: "qwen3-8b", Provider: "aws", Region: "eu-central-1", GPU: "L40S", Objective: "interactive", MaxErrorRate: &invalid}); err == nil {
+		t.Fatal("invalid error-rate boundary was accepted")
 	}
 }
 

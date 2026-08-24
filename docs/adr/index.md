@@ -50,6 +50,7 @@ or link corrections. A changed decision gets a new ADR whose status supersedes t
 | [0038](/adr/0038-replaceable-evidence-gated-optimization) | Accepted | Generate serving candidates through replaceable sources and require measured evidence before qualification. |
 | [0039](/adr/0039-pinned-aiconfigurator-candidate-source) | Accepted | Use AIConfigurator through a pinned, replaceable candidate-source adapter. |
 | [0040](/adr/0040-durable-evidence-gated-optimization-campaigns) | Accepted | Persist bounded optimization authority and immutable optimized-artifact provenance while external systems retain execution ownership. |
+| [0041](/adr/0041-open-core-hosted-compute-boundary) | Accepted | Keep the self-operated product complete while hosted tenancy, billing, and supplied capacity remain independently operated and qualification-gated. |
 
 Use the next sequential number. Include context, decision, consequences, alternatives, and
 verification. Link affected feature documents.

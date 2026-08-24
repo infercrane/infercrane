@@ -101,7 +101,7 @@ func (r Registry) Compile(request Request) (Compiled, error) {
 	if request.ArtifactPrecision == "" {
 		request.ArtifactPrecision = "bf16"
 	}
-	request.Accelerator = strings.ToUpper(strings.TrimSpace(request.Accelerator))
+	request.Accelerator = normalizeAccelerator(request.Accelerator)
 	if request.Mechanism == "" || request.Runtime == "" || request.RuntimeVersion == "" || request.Model == "" || request.Accelerator == "" {
 		return Compiled{}, errors.New("mechanism, exact runtime/version, model, and accelerator are required")
 	}
@@ -170,8 +170,39 @@ func normalize(descriptor Descriptor) Descriptor {
 	descriptor.License = strings.TrimSpace(descriptor.License)
 	descriptor.Models = normalizedSet(descriptor.Models, false)
 	descriptor.ArtifactPrecisions = normalizedSet(descriptor.ArtifactPrecisions, true)
-	descriptor.Accelerators = normalizedSet(descriptor.Accelerators, true)
+	descriptor.Accelerators = normalizedAccelerators(descriptor.Accelerators)
 	return descriptor
+}
+
+func normalizedAccelerators(values []string) []string {
+	seen := map[string]struct{}{}
+	var out []string
+	for _, value := range values {
+		value = normalizeAccelerator(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; !ok {
+			seen[value] = struct{}{}
+			out = append(out, value)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// Provider resource labels are not hardware identities. Normalize only
+// explicit NVIDIA family aliases; a generic kubernetes resource such as
+// nvidia.com/gpu remains unknown and cannot satisfy an exact tuple.
+func normalizeAccelerator(value string) string {
+	value = strings.ToUpper(strings.TrimSpace(value))
+	for _, prefix := range []string{"NVIDIA-", "NVIDIA_"} {
+		if strings.HasPrefix(value, prefix) {
+			value = strings.TrimPrefix(value, prefix)
+			break
+		}
+	}
+	return value
 }
 
 func validateDescriptor(descriptor Descriptor) error {

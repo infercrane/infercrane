@@ -1,18 +1,18 @@
 ---
-title: Deploy and operate AI models across your infrastructure.
-description: Build or connect inference with durable operations, autoscaling, safe releases, and evidence you can inspect.
+title: Give InferCrane a model. Get a production endpoint.
+description: Deploy, operate, optimize, and safely evolve inference while your application keeps one stable interface.
 sidebarTitle: Introduction
 mode: wide
 ---
 
 <div className="ic-hero not-prose">
-  <div className="ic-kicker"><span className="ic-status-dot"></span> Private-preview inference control plane</div>
+  <div className="ic-kicker"><span className="ic-status-dot"></span> Open-source production inference</div>
   <div className="ic-actions">
     <a className="ic-button ic-button-primary" href="/quickstart">Start the local tour <span aria-hidden="true">→</span></a>
     <a className="ic-button ic-button-secondary" href="https://infercrane.com/#private-preview">Join private preview <span aria-hidden="true">↗</span></a>
   </div>
   <div className="ic-proof">
-    <span>Model to endpoint</span>
+    <span>Any compatible model</span>
     <span>Safe releases</span>
     <span>Explainable operations</span>
     <span>No Kubernetes required</span>
@@ -20,14 +20,14 @@ mode: wide
 </div>
 
 ```bash Deploy a model
-infercrane deploy mistralai/Mistral-7B-Instruct-v0.3 \
-  --name support-production
+infercrane deploy moonshotai/Kimi-K3 \
+  --name agent-production
 
 # Safe to close: the operation is persisted by the control plane.
-infercrane status support-production --watch
+infercrane status agent-production --watch
 ```
 
-InferCrane turns a model or immutable OCI workload into one OpenAI-compatible logical endpoint.
+InferCrane turns a compatible model or immutable OCI workload into one OpenAI-compatible logical endpoint.
 Durable operations provision, reconcile, scale, and safely replace workers behind it. Already
 running inference? Connect it in observe-only mode without migrating or transferring ownership.
 
@@ -45,7 +45,7 @@ running inference? Connect it in observe-only mode without migrating or transfer
 
 <CardGroup cols={2}>
   <Card title="Deploy a model" icon="server" href="/showcase/build-inference">
-    Start from a reviewed model configuration or explicit serving plan. One durable operation owns the lifecycle.
+    Bring a Hugging Face model or explicit serving plan. One durable operation owns the lifecycle.
   </Card>
   <Card title="Connect existing inference" icon="plug" href="/showcase/connect-existing">
     Discover vLLM, SGLang, LiteLLM, or another OpenAI-compatible endpoint before transferring ownership.
@@ -87,6 +87,9 @@ exact provider, runtime, model, and accelerator combination.
   </Card>
   <Card title="Inspect the CLI" icon="terminal" href="/cli">
     Browse current commands, durable operation behavior, and machine-readable output.
+  </Card>
+  <Card title="Choose an operating model" icon="building" href="/editions">
+    Understand Community, the hosted Cloud direction, and the Enterprise boundary.
   </Card>
   <Card title="Release and upgrade safely" icon="arrow-up-from-bracket" href="/upgrade">
     Qualify client, protocol, runtime, and control-plane changes with explicit restoration paths.

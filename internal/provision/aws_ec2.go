@@ -447,23 +447,23 @@ func artifactDeviceName(image awsImage) (string, error) {
 // billed snapshot acceleration implicitly.
 func (a AWSEC2) Prefetch(ctx context.Context, request artifactcache.Request) (artifactcache.Operation, error) {
 	if err := request.Validate(); err != nil {
-		return artifactcache.Operation{}, err
+		return artifactcache.Operation{}, artifactcache.Definitive("invalid_prefetch_request", err)
 	}
 	if a.artifactCachePolicy() == "disabled" {
-		return artifactcache.Operation{}, errors.New("AWS artifact cache adapter is disabled")
+		return artifactcache.Operation{}, artifactcache.Definitive("artifact_cache_disabled", errors.New("AWS artifact cache adapter is disabled"))
 	}
 	if request.Provider != "aws" || request.Region != a.Region {
-		return artifactcache.Operation{}, errors.New("AWS artifact prefetch provider and region must match the configured adapter")
+		return artifactcache.Operation{}, artifactcache.Definitive("invalid_provider_boundary", errors.New("AWS artifact prefetch provider and region must match the configured adapter"))
 	}
 	snapshotID, err := awsSnapshotLocation(request.Location)
 	if err != nil {
-		return artifactcache.Operation{}, err
+		return artifactcache.Operation{}, artifactcache.Definitive("invalid_cache_location", err)
 	}
 	if configured := a.ArtifactSnapshots[request.ModelIdentity]; configured == "" || configured != snapshotID {
-		return artifactcache.Operation{}, errors.New("AWS artifact snapshot location is not configured for this immutable model identity")
+		return artifactcache.Operation{}, artifactcache.Definitive("artifact_cache_not_configured", errors.New("AWS artifact snapshot location is not configured for this immutable model identity"))
 	}
 	if _, err = a.verifyArtifactSnapshot(ctx, request.ModelIdentity, snapshotID); err != nil {
-		return artifactcache.Operation{}, err
+		return artifactcache.Operation{}, artifactcache.Definitive("artifact_snapshot_verification_failed", err)
 	}
 	return artifactcache.Operation{ProviderOperationID: snapshotID, Status: "succeeded"}, nil
 }

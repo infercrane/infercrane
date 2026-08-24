@@ -692,6 +692,40 @@ type uncertainArtifactCacheAdapter struct{ keys []string }
 func (f *uncertainArtifactCacheAdapter) Observe(context.Context, artifactcache.Request) (artifactcache.Observation, error) {
 	return artifactcache.Observation{}, nil
 }
+
+type rejectingArtifactCacheAdapter struct{ calls int }
+
+func (*rejectingArtifactCacheAdapter) Observe(context.Context, artifactcache.Request) (artifactcache.Observation, error) {
+	return artifactcache.Observation{}, nil
+}
+func (f *rejectingArtifactCacheAdapter) Prefetch(context.Context, artifactcache.Request) (artifactcache.Operation, error) {
+	f.calls++
+	return artifactcache.Operation{}, artifactcache.Definitive("cache_not_configured", errors.New("no immutable cache mapping"))
+}
+
+func TestArtifactPrefetchDoesNotRetryDefiniteProviderRejection(t *testing.T) {
+	store := &fakeIntelligenceStore{fakeStore: &fakeStore{}, artifact: domain.ModelArtifact{ID: "artifact-1", ModelIdentity: "org/model@commit"}}
+	adapter := &rejectingArtifactCacheAdapter{}
+	handler := (API{Store: store, APIKey: "secret", ArtifactCacheAdapters: map[string]artifactcache.Adapter{"fixture": adapter}}).Handler()
+	for attempt := 0; attempt < 2; attempt++ {
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/artifacts/artifact-1/prefetches", strings.NewReader(`{"provider":"fixture","location":"cache://missing","idempotency_key":"rejected-prefetch"}`))
+		request.Header.Set("Authorization", "Bearer secret")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code < 200 || response.Code >= 300 {
+			t.Fatalf("attempt=%d status=%d body=%s", attempt, response.Code, response.Body.String())
+		}
+		if attempt == 0 && (!strings.Contains(response.Body.String(), `"execution":"provider_rejected"`) || !strings.Contains(response.Body.String(), `"error_code":"cache_not_configured"`)) {
+			t.Fatalf("definite rejection was not explained: %s", response.Body.String())
+		}
+		if attempt == 1 && !strings.Contains(response.Body.String(), `"execution":"already_requested"`) {
+			t.Fatalf("definite rejection was retried: %s", response.Body.String())
+		}
+	}
+	if adapter.calls != 1 || store.prefetch.Status != "failed" {
+		t.Fatalf("definite rejection calls=%d state=%#v", adapter.calls, store.prefetch)
+	}
+}
 func (f *uncertainArtifactCacheAdapter) Prefetch(_ context.Context, request artifactcache.Request) (artifactcache.Operation, error) {
 	f.keys = append(f.keys, request.IdempotencyKey)
 	if len(f.keys) == 1 {

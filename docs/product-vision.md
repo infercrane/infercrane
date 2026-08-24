@@ -6,7 +6,7 @@ observable all the way down.
 
 ## Product promise
 
-Developers choose a model and an infrastructure intent. InferCrane explains the resulting plan,
+Developers give InferCrane a model and an operating objective. InferCrane explains the resulting plan,
 validates the environment, provisions or adopts capacity, exposes an OpenAI-compatible endpoint,
 and continuously reconciles the deployment. It does not conceal the provider resources, routing
 policy, runtime configuration, cost uncertainty, or failure state.
@@ -26,7 +26,7 @@ The experience is guided by five principles:
 
 ```text
 infercrane doctor
-infercrane workload init my-model --model mistralai/Mistral-7B-Instruct-v0.3
+infercrane workload init my-model --model moonshotai/Kimi-K3
 cd my-model
 infercrane workload validate
 infercrane workload plan
@@ -40,6 +40,22 @@ of rebuilding it. Both paths converge on the same endpoint, revision, evidence, 
 Plans are available as JSON for CI, user interfaces, and coding agents. A plan must be side-effect
 free. Build publication, deployment, diagnosis, promotion, and cache prefetch remain explicit mutation
 boundaries.
+
+The model catalog is discovery, not an allowlist. Compact Qwen, gpt-oss, embedding, and multimodal
+artifacts and frontier Kimi, DeepSeek, GLM, Qwen, and Llama families all enter the same domain model.
+InferCrane derives compatibility and evidence from the exact artifact, runtime, hardware, provider,
+and workload instead of encoding one favored model into the product.
+
+## Product and commercial boundary
+
+The Apache-2.0 Community product remains capable of self-operated production inference. The hosted
+direction adds operation rather than removing core capability: managed control-plane availability,
+InferCrane-supplied compute, billing, warm capacity, and support. Enterprise packaging adds
+organization-wide security, governance, private connectivity, recovery, and contractual guarantees.
+
+All editions consume the same endpoint, operation, revision, evidence, and release semantics. Cloud
+and Enterprise implementations depend on public extension contracts; the public core never imports
+proprietary packages. See [Product editions](editions.mdx).
 
 ## Roadmap
 

@@ -15,6 +15,7 @@ boundary that proves value:
 | Goal | Start here | Cloud changes |
 | --- | --- | --- |
 | Inspect an existing vLLM, SGLang, LiteLLM, or OpenAI-compatible service | Connect it in observe-only mode | None |
+| Inspect the NVIDIA GPUs on the current bare-metal host | Run `infercrane discover local` | None; local read-only process execution |
 | Put stable routing in front of an existing service | Move the connection to traffic-managed ownership | InferCrane gateway only |
 | Let InferCrane create and delete GPU workers in your account | Configure one BYOC adapter below | One-time identity, network, secret, quota, and runtime-image setup |
 | Operate an existing Kubernetes cluster | Configure the namespace-scoped Kubernetes adapter | Namespace, service account, RBAC, worker Secret, and GPU node capacity |

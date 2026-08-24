@@ -113,8 +113,26 @@ func (s *Store) RecordLabEvaluation(ctx context.Context, tenant string, value do
 		}
 	}
 	stamp := now()
-	_, err := s.ExecContext(ctx, `INSERT INTO lab_evaluations(id,tenant_id,model_identity,algorithm_version,input_json,results_json,input_digest,created_at) VALUES(?,?,?,?,?::jsonb,?::jsonb,?,?)`, value.ID, tenant, value.ModelIdentity, value.AlgorithmVersion, value.InputJSON, value.ResultsJSON, value.InputDigest, stamp)
-	value.TenantID = tenant
-	value.CreatedAt = parseTime(stamp)
-	return value, err
+	result, err := s.ExecContext(ctx, `INSERT INTO lab_evaluations(id,tenant_id,model_identity,algorithm_version,input_json,results_json,input_digest,created_at) VALUES(?,?,?,?,?::jsonb,?::jsonb,?,?) ON CONFLICT(id) DO NOTHING`, value.ID, tenant, value.ModelIdentity, value.AlgorithmVersion, value.InputJSON, value.ResultsJSON, value.InputDigest, stamp)
+	if err != nil {
+		return value, err
+	}
+	inserted, _ := result.RowsAffected()
+	var existing domain.LabEvaluation
+	var created string
+	lookupErr := s.QueryRowContext(ctx, `SELECT id,tenant_id,model_identity,algorithm_version,input_json::text,results_json::text,input_digest,created_at FROM lab_evaluations WHERE tenant_id=? AND id=?`, tenant, value.ID).Scan(&existing.ID, &existing.TenantID, &existing.ModelIdentity, &existing.AlgorithmVersion, &existing.InputJSON, &existing.ResultsJSON, &existing.InputDigest, &created)
+	if errors.Is(lookupErr, sql.ErrNoRows) {
+		return value, domain.ErrConflict
+	}
+	if lookupErr != nil {
+		return value, lookupErr
+	}
+	existing.CreatedAt = parseTime(created)
+	if existing.ModelIdentity != value.ModelIdentity || existing.AlgorithmVersion != value.AlgorithmVersion || existing.InputDigest != value.InputDigest || !sameJSON(existing.InputJSON, value.InputJSON) || !sameJSON(existing.ResultsJSON, value.ResultsJSON) {
+		return existing, domain.ErrConflict
+	}
+	if inserted != 0 && existing.ID == "" {
+		return value, errors.New("persisted Lab evaluation could not be read after insert")
+	}
+	return existing, nil
 }

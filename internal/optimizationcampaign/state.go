@@ -27,6 +27,7 @@ const (
 	CandidateMeasuring    = "measuring"
 	CandidateValidating   = "validating"
 	CandidateRanked       = "ranked"
+	CandidateGuarding     = "guarding"
 	CandidateGuardPassed  = "guard_passed"
 	CandidateRejected     = "rejected"
 	CandidateInconclusive = "inconclusive"
@@ -43,7 +44,8 @@ var candidateTransitions = map[string]map[string]struct{}{
 	CandidateReady:        set(CandidateMeasuring, CandidateRejected, CandidateCancelled, CandidateFailed),
 	CandidateMeasuring:    set(CandidateValidating, CandidateInconclusive, CandidateRejected, CandidateCancelled, CandidateFailed),
 	CandidateValidating:   set(CandidateRanked, CandidateRejected, CandidateInconclusive, CandidateCancelled, CandidateFailed),
-	CandidateRanked:       set(CandidateGuardPassed, CandidateRejected, CandidateInconclusive, CandidateCancelled, CandidateFailed),
+	CandidateRanked:       set(CandidateGuarding, CandidateRejected, CandidateInconclusive, CandidateCancelled, CandidateFailed),
+	CandidateGuarding:     set(CandidateGuardPassed, CandidateRejected, CandidateInconclusive, CandidateCancelled, CandidateFailed),
 	CandidateGuardPassed:  set(CandidatePromoted, CandidateRejected, CandidateCancelled, CandidateFailed),
 	CandidatePromoted:     set(CandidateObserved, CandidateFailed),
 	CandidateObserved:     set(CandidateCleaned),
@@ -74,7 +76,7 @@ func EvidenceForState(state string) (string, error) {
 		return "unmeasured", nil
 	case CandidateMeasuring:
 		return "unmeasured", nil
-	case CandidateValidating, CandidateRanked:
+	case CandidateValidating, CandidateRanked, CandidateGuarding:
 		return "measured", nil
 	case CandidateGuardPassed, CandidatePromoted, CandidateObserved:
 		return "qualified", nil
@@ -119,7 +121,7 @@ func AggregateState(states []string) (string, error) {
 	if counts[CandidateGuardPassed] > 0 {
 		return CampaignGuardPassed, nil
 	}
-	if counts[CandidateRanked] > 0 {
+	if counts[CandidateRanked] > 0 || counts[CandidateGuarding] > 0 {
 		return CampaignRanked, nil
 	}
 	if counts[CandidateCleaned] == len(states) {

@@ -65,6 +65,8 @@ type Request struct {
 	WorkloadProfile       string   `json:"workload_profile"`
 	MaxTTFTP95MS          *float64 `json:"max_ttft_p95_ms,omitempty"`
 	MaxTPOTP95MS          *float64 `json:"max_tpot_p95_ms,omitempty"`
+	MaxErrorRate          *float64 `json:"max_error_rate,omitempty"`
+	MinGoodput            *float64 `json:"min_goodput,omitempty"`
 	MinOutputTokensSecond *float64 `json:"min_output_tokens_second,omitempty"`
 	MaxHourlyCost         *float64 `json:"max_hourly_cost,omitempty"`
 	IncludeSimulated      bool     `json:"include_simulated,omitempty"`
@@ -355,10 +357,13 @@ func validateRequest(request Request) error {
 	if (request.Provider == "aws" || request.Provider == "aws-ec2" || request.Provider == "gcp" || request.Provider == "gcp-compute") && request.Region == "" {
 		return errors.New("AWS and GCP candidates require an explicit region")
 	}
-	for name, value := range map[string]*float64{"max_ttft_p95_ms": request.MaxTTFTP95MS, "max_tpot_p95_ms": request.MaxTPOTP95MS, "min_output_tokens_second": request.MinOutputTokensSecond, "max_hourly_cost": request.MaxHourlyCost} {
+	for name, value := range map[string]*float64{"max_ttft_p95_ms": request.MaxTTFTP95MS, "max_tpot_p95_ms": request.MaxTPOTP95MS, "max_error_rate": request.MaxErrorRate, "min_goodput": request.MinGoodput, "min_output_tokens_second": request.MinOutputTokensSecond, "max_hourly_cost": request.MaxHourlyCost} {
 		if value != nil && (*value < 0 || math.IsNaN(*value) || math.IsInf(*value, 0)) {
 			return fmt.Errorf("%s must be a finite nonnegative value", name)
 		}
+	}
+	if request.MaxErrorRate != nil && *request.MaxErrorRate > 1 {
+		return errors.New("max_error_rate must be between zero and one")
 	}
 	return nil
 }
@@ -425,6 +430,18 @@ func buildCandidate(entry curatedrecipe.Entry, profile curatedrecipe.ServingProf
 	draft.Provider.Cloud, draft.Provider.Adapter, draft.Provider.Region = compatible.Cloud, compatible.Adapter, request.Region
 	draft.Scaling.MinReplicas, draft.Scaling.MaxReplicas = profile.MinReplicas, profile.MaxReplicas
 	draft.Routing.Strategy = "round-robin"
+	if compatible.Adapter == "kubernetes-dynamo" {
+		// InferCrane owns exactly one DGD parent. Dynamo owns the worker graph;
+		// an outer replica autoscaler would create two mutation owners.
+		draft.Scaling.MinReplicas, draft.Scaling.MaxReplicas = 1, 1
+		draft.Serving = servingcontract.Topology{
+			Backend: servingcontract.BackendDynamo,
+			Profile: "baseline",
+			Mode:    servingcontract.ModeAggregated,
+			Routing: servingcontract.RoutingDirect,
+			Worker:  servingcontract.Pool{Replicas: 1, TensorParallelism: 1},
+		}
+	}
 	capabilities, err := optimizationcapability.V1()
 	if err != nil {
 		return Candidate{}, err
@@ -435,6 +452,9 @@ func buildCandidate(entry curatedrecipe.Entry, profile curatedrecipe.ServingProf
 		return Candidate{}, err
 	}
 	features := []Feature{{Name: "continuous_batching", State: "runtime-owned", Source: continuous.DescriptorID}}
+	if compatible.Adapter == "kubernetes-dynamo" {
+		features = append(features, Feature{Name: "dynamo_graph", State: "single-mutation-owner", Source: compatible.Evidence})
+	}
 	if contains(profile.RuntimeArgs, "--enable-prefix-caching") {
 		compiled, compileErr := capabilities.Compile(withMechanism(base, optimizationcapability.PrefixCaching, nil))
 		if compileErr != nil {
@@ -462,11 +482,14 @@ func buildCandidate(entry curatedrecipe.Entry, profile curatedrecipe.ServingProf
 	if request.MaxHourlyCost != nil || request.Objective == "cost-efficiency" {
 		required = append(required, "sourced hourly cost")
 	}
-	if request.MaxTTFTP95MS != nil || request.MaxTPOTP95MS != nil || request.MinOutputTokensSecond != nil {
+	if request.MaxTTFTP95MS != nil || request.MaxTPOTP95MS != nil || request.MaxErrorRate != nil || request.MinGoodput != nil || request.MinOutputTokensSecond != nil {
 		required = append(required, "measured SLO metrics")
 	}
 	required = append(required, "semantic quality evidence when model precision or artifact changes")
 	limitations := append([]string(nil), profile.Limitations...)
+	if compatible.Adapter == "kubernetes-dynamo" {
+		limitations = append(limitations, "InferCrane owns one DGD parent and Dynamo owns the internal worker graph; outer replica autoscaling is disabled until an exact Dynamo scaling owner is qualified.")
+	}
 	limitations = append(limitations, "GPU fit for "+request.GPU+" is not inferred from the reviewed profile hint "+profile.GPUHint+".")
 	if profile.Name != preferredProfile && !strings.HasSuffix(profile.Name, "-"+preferredProfile) {
 		limitations = append(limitations, "This profile is an alternative candidate; it is not ranked by unmeasured performance.")

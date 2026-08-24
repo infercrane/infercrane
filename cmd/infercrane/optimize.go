@@ -44,6 +44,8 @@ func optimizeCommand(ctx context.Context, args []string) error {
 	profile := fs.String("profile", "", "benchmark workload profile; defaults from objective")
 	maxTTFT := fs.String("max-ttft-p95-ms", "", "required measured p95 TTFT")
 	maxTPOT := fs.String("max-tpot-p95-ms", "", "required measured p95 TPOT")
+	maxErrorRate := fs.String("max-error-rate", "", "maximum measured failed-request ratio")
+	minGoodput := fs.String("min-goodput", "", "minimum measured requests per second satisfying the SLO")
 	minOutputTPS := fs.String("min-output-tokens-second", "", "required measured output throughput")
 	maxHourlyCost := fs.String("max-hourly-cost", "", "required sourced hourly cost")
 	includeSimulated := fs.Bool("include-simulated", false, "include locally simulated compatibility candidates")
@@ -72,6 +74,12 @@ func optimizeCommand(ctx context.Context, args []string) error {
 	}
 	if request.MaxTPOTP95MS, err = optionalMilliseconds(*maxTPOT); err != nil {
 		return fmt.Errorf("max TPOT p95: %w", err)
+	}
+	if request.MaxErrorRate, err = optionalNumber(*maxErrorRate); err != nil || request.MaxErrorRate != nil && *request.MaxErrorRate > 1 {
+		return errors.New("maximum error rate must be a number between zero and one")
+	}
+	if request.MinGoodput, err = optionalNumber(*minGoodput); err != nil {
+		return fmt.Errorf("minimum goodput: %w", err)
 	}
 	if request.MinOutputTokensSecond, err = optionalNumber(*minOutputTPS); err != nil {
 		return fmt.Errorf("minimum output tokens per second: %w", err)

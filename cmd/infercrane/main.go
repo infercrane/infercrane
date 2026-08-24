@@ -181,6 +181,9 @@ func runLegacy(ctx context.Context, args []string) error {
 	if args[0] == "optimize" {
 		return optimizeCommand(ctx, args[1:])
 	}
+	if args[0] == "discover" {
+		return discoverCommand(ctx, args[1:])
+	}
 	if !isPublicCommand(args[0]) {
 		return fmt.Errorf("unknown command %q", args[0])
 	}

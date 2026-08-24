@@ -6,11 +6,11 @@ on:
       vllm_version:
         description: Pinned vLLM version
         required: true
-        default: 0.8.5.post1
+        default: 0.22.0
       vllm_base_image:
         description: Immutable vllm/vllm-openai base image including sha256 digest
         required: true
-        default: vllm/vllm-openai@sha256:c48cf118e1e6e39d7790e174d6014f7af5d06f79c2d29d984d11cbe2e8d414e7
+        default: vllm/vllm-openai@sha256:0fec7ec5f3e6bc168e54899935fb0557da908a4832a1dbc88e2debcf2f889416
   push:
     branches: [main]
     paths:
@@ -52,7 +52,7 @@ jobs:
         with:
           images: ghcr.io/infercrane/vllm-runpod
           tags: |
-            type=raw,value=v${{ inputs.vllm_version || '0.8.5.post1' }}
+            type=raw,value=v${{ inputs.vllm_version || '0.22.0' }}
             type=sha
       - uses: docker/build-push-action@v7
         with:

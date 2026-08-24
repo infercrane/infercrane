@@ -20,11 +20,16 @@ func TestV1CompilesOnlyQualifiedExactTuples(t *testing.T) {
 	if err != nil || strings.Join(budget.Arguments, " ") != "--max-num-batched-tokens 2048" {
 		t.Fatalf("budget=%+v err=%v", budget, err)
 	}
+	kubernetesAlias, err := registry.Compile(Request{Mechanism: PrefixCaching, Runtime: "vllm", RuntimeVersion: support.DefaultRuntimeVersion, Model: "Qwen/Qwen3-8B", ArtifactPrecision: "bf16", Accelerator: "NVIDIA-L40S"})
+	if err != nil || kubernetesAlias.DescriptorID == "" {
+		t.Fatalf("explicit Kubernetes GPU family alias did not normalize: compiled=%+v err=%v", kubernetesAlias, err)
+	}
 	for _, request := range []Request{
 		{Mechanism: PrefixCaching, Runtime: "vllm", RuntimeVersion: "0.21.0", Model: "Qwen/Qwen3-8B", Accelerator: "L40S"},
 		{Mechanism: PrefixCaching, Runtime: "vllm", RuntimeVersion: support.DefaultRuntimeVersion, Model: "unknown/model", Accelerator: "L40S"},
 		{Mechanism: AttentionBackend, Runtime: "vllm", RuntimeVersion: support.DefaultRuntimeVersion, Model: "Qwen/Qwen3-8B", Accelerator: "L40S", Parameters: map[string]string{"backend": "flashinfer"}},
 		{Mechanism: ChunkedPrefill, Runtime: "vllm", RuntimeVersion: support.DefaultRuntimeVersion, Model: "Qwen/Qwen3-8B", Accelerator: "L40S", Parameters: map[string]string{"max_num_batched_tokens": "64"}},
+		{Mechanism: PrefixCaching, Runtime: "vllm", RuntimeVersion: support.DefaultRuntimeVersion, Model: "Qwen/Qwen3-8B", Accelerator: "nvidia.com/gpu"},
 	} {
 		if _, err = registry.Compile(request); err == nil {
 			t.Fatalf("expected fail-closed rejection for %+v", request)

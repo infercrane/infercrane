@@ -10,6 +10,7 @@ func TestAggregateStateIsDeterministicAcrossMixedCandidates(t *testing.T) {
 	}{
 		{"work remains", []string{CandidateRejected, CandidateMeasuring}, CampaignRunning},
 		{"ranked evidence", []string{CandidateRejected, CandidateRanked}, CampaignRanked},
+		{"ranking persisted before guard", []string{CandidateRejected, CandidateGuarding}, CampaignRanked},
 		{"qualified candidate", []string{CandidateRejected, CandidateGuardPassed}, CampaignGuardPassed},
 		{"promotion wins", []string{CandidateObserved, CandidatePromoted}, CampaignPromoted},
 		{"observed result", []string{CandidateRejected, CandidateObserved}, CampaignObserved},
@@ -36,7 +37,7 @@ func TestAggregateStateIsDeterministicAcrossMixedCandidates(t *testing.T) {
 }
 
 func TestCandidateStateMachineRejectsSkippingProofBoundaries(t *testing.T) {
-	valid := []string{CandidateProposed, CandidateProvisioning, CandidateReady, CandidateMeasuring, CandidateValidating, CandidateRanked, CandidateGuardPassed, CandidatePromoted, CandidateObserved, CandidateCleaned}
+	valid := []string{CandidateProposed, CandidateProvisioning, CandidateReady, CandidateMeasuring, CandidateValidating, CandidateRanked, CandidateGuarding, CandidateGuardPassed, CandidatePromoted, CandidateObserved, CandidateCleaned}
 	for index := 0; index < len(valid)-1; index++ {
 		if err := ValidateCandidateTransition(valid[index], valid[index+1]); err != nil {
 			t.Fatalf("valid transition rejected: %v", err)

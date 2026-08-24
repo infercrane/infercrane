@@ -168,7 +168,7 @@ func (s *Store) OptimizationCampaigns(ctx context.Context, tenant string, limit 
 }
 
 func (s *Store) optimizationCandidates(ctx context.Context, tenant, campaignID string) ([]domain.OptimizationCandidateRun, error) {
-	rows, err := s.QueryContext(ctx, `SELECT id,tenant_id,campaign_id,proposal_candidate_id,rank,state,evidence_state,deployment_spec_json::text,predicted_evidence_json::text,actual_evidence_json::text,COALESCE(deployment_name,''),COALESCE(revision_id,''),COALESCE(benchmark_id,''),COALESCE(quality_evidence_id,''),COALESCE(release_guard_evaluation_id,''),COALESCE(optimized_artifact_id,''),COALESCE(failure_code,''),created_at,updated_at FROM optimization_candidate_runs WHERE tenant_id=? AND campaign_id=? ORDER BY rank`, tenant, campaignID)
+	rows, err := s.QueryContext(ctx, `SELECT id,tenant_id,campaign_id,proposal_candidate_id,rank,state,evidence_state,deployment_spec_json::text,predicted_evidence_json::text,actual_evidence_json::text,COALESCE(deployment_name,''),COALESCE(revision_id,''),COALESCE(benchmark_id,''),COALESCE(quality_evidence_id,''),COALESCE(lab_evaluation_id,''),COALESCE(release_guard_evaluation_id,''),COALESCE(optimized_artifact_id,''),COALESCE(failure_code,''),created_at,updated_at FROM optimization_candidate_runs WHERE tenant_id=? AND campaign_id=? ORDER BY rank`, tenant, campaignID)
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +177,7 @@ func (s *Store) optimizationCandidates(ctx context.Context, tenant, campaignID s
 	for rows.Next() {
 		var row domain.OptimizationCandidateRun
 		var created, updated string
-		if err = rows.Scan(&row.ID, &row.TenantID, &row.CampaignID, &row.ProposalCandidateID, &row.Rank, &row.State, &row.EvidenceState, &row.DeploymentSpecJSON, &row.PredictedEvidenceJSON, &row.ActualEvidenceJSON, &row.DeploymentName, &row.RevisionID, &row.BenchmarkID, &row.QualityEvidenceID, &row.ReleaseGuardEvaluationID, &row.OptimizedArtifactID, &row.FailureCode, &created, &updated); err != nil {
+		if err = rows.Scan(&row.ID, &row.TenantID, &row.CampaignID, &row.ProposalCandidateID, &row.Rank, &row.State, &row.EvidenceState, &row.DeploymentSpecJSON, &row.PredictedEvidenceJSON, &row.ActualEvidenceJSON, &row.DeploymentName, &row.RevisionID, &row.BenchmarkID, &row.QualityEvidenceID, &row.LabEvaluationID, &row.ReleaseGuardEvaluationID, &row.OptimizedArtifactID, &row.FailureCode, &created, &updated); err != nil {
 			return nil, err
 		}
 		row.CreatedAt, row.UpdatedAt = parseTime(created), parseTime(updated)
@@ -242,7 +242,7 @@ func (s *Store) CancelOptimizationCampaign(ctx context.Context, tenant, id strin
 		}
 		return domain.OptimizationCampaign{}, domain.ErrConflict
 	}
-	if _, err = tx.ExecContext(ctx, `UPDATE optimization_candidate_runs SET state=?,evidence_state='stale',updated_at=? WHERE tenant_id=? AND campaign_id=? AND state IN ('proposed','provisioning','ready','measuring','validating','ranked','guard_passed')`, optimizationcampaign.CandidateCancelled, stamp, tenant, id); err != nil {
+	if _, err = tx.ExecContext(ctx, `UPDATE optimization_candidate_runs SET state=?,evidence_state='stale',updated_at=? WHERE tenant_id=? AND campaign_id=? AND state IN ('proposed','provisioning','ready','measuring','validating','ranked','guarding','guard_passed')`, optimizationcampaign.CandidateCancelled, stamp, tenant, id); err != nil {
 		return domain.OptimizationCampaign{}, err
 	}
 	if err = tx.Commit(); err != nil {
@@ -272,6 +272,12 @@ func (s *Store) TransitionOptimizationCandidate(ctx context.Context, tenant, cam
 	if (to == optimizationcampaign.CandidateValidating || to == optimizationcampaign.CandidateRanked) && updates.BenchmarkID == "" {
 		return domain.OptimizationCandidateRun{}, errors.New("measured candidate requires benchmark evidence")
 	}
+	if to == optimizationcampaign.CandidateRanked && updates.QualityEvidenceID == "" {
+		return domain.OptimizationCandidateRun{}, errors.New("ranked candidate requires quality evidence")
+	}
+	if (to == optimizationcampaign.CandidateGuarding || to == optimizationcampaign.CandidateRejected || to == optimizationcampaign.CandidateInconclusive) && from == optimizationcampaign.CandidateRanked && updates.LabEvaluationID == "" {
+		return domain.OptimizationCandidateRun{}, errors.New("rank decision requires persisted Lab evaluation evidence")
+	}
 	if (to == optimizationcampaign.CandidateGuardPassed || to == optimizationcampaign.CandidatePromoted) && updates.ReleaseGuardEvaluationID == "" {
 		return domain.OptimizationCandidateRun{}, errors.New("qualified candidate requires Release Guard evidence")
 	}
@@ -298,12 +304,36 @@ func (s *Store) TransitionOptimizationCandidate(ctx context.Context, tenant, cam
 	if current.QualityEvidenceID != "" && updates.QualityEvidenceID != "" && current.QualityEvidenceID != updates.QualityEvidenceID {
 		return current, errors.New("quality evidence identity is immutable once attached to a candidate")
 	}
+	if current.LabEvaluationID != "" && updates.LabEvaluationID != "" && current.LabEvaluationID != updates.LabEvaluationID {
+		return current, errors.New("Lab evaluation identity is immutable once attached to a candidate")
+	}
 	effectiveArtifactID, effectiveQualityID := current.OptimizedArtifactID, current.QualityEvidenceID
+	effectiveDeploymentName, effectiveRevisionID := current.DeploymentName, current.RevisionID
 	if updates.OptimizedArtifactID != "" {
 		effectiveArtifactID = updates.OptimizedArtifactID
 	}
 	if updates.QualityEvidenceID != "" {
 		effectiveQualityID = updates.QualityEvidenceID
+	}
+	if updates.DeploymentName != "" {
+		effectiveDeploymentName = updates.DeploymentName
+	}
+	if updates.RevisionID != "" {
+		effectiveRevisionID = updates.RevisionID
+	}
+	var revisionArtifactID string
+	if to == optimizationcampaign.CandidateReady {
+		var revisionDeploymentName string
+		lookupErr := s.QueryRowContext(ctx, `SELECT d.name,COALESCE(r.model_artifact_id,'') FROM deployment_revisions r JOIN deployments d ON d.id=r.deployment_id WHERE d.tenant_id=? AND r.id=?`, tenant, effectiveRevisionID).Scan(&revisionDeploymentName, &revisionArtifactID)
+		if errors.Is(lookupErr, sql.ErrNoRows) {
+			return current, fmt.Errorf("%w: candidate revision", domain.ErrNotFound)
+		}
+		if lookupErr != nil {
+			return current, lookupErr
+		}
+		if revisionDeploymentName != effectiveDeploymentName {
+			return current, errors.New("candidate deployment and revision identity do not match")
+		}
 	}
 	if effectiveArtifactID != "" {
 		artifact, _, lookupErr := s.OptimizedArtifact(ctx, tenant, effectiveArtifactID)
@@ -313,13 +343,16 @@ func (s *Store) TransitionOptimizationCandidate(ctx context.Context, tenant, cam
 		if artifact.State != "ready" {
 			return current, errors.New("candidate optimized artifact must have an immutable ready build attestation")
 		}
+		if to == optimizationcampaign.CandidateReady && (revisionArtifactID == "" || artifact.BaseModelArtifactID != revisionArtifactID) {
+			return current, errors.New("candidate optimized artifact base model does not match the immutable deployment revision artifact")
+		}
 		if (to == optimizationcampaign.CandidateGuardPassed || to == optimizationcampaign.CandidatePromoted) && (effectiveQualityID == "" || artifact.EvidenceState != "qualified" || artifact.QualityEvidenceID != effectiveQualityID) {
 			return current, errors.New("optimized artifact candidate requires matching qualified semantic evidence before Release Guard can pass")
 		}
 	}
 	stamp := now()
 	cleanup := to == optimizationcampaign.CandidateCleaned
-	result, err := s.ExecContext(ctx, `UPDATE optimization_candidate_runs c SET state=?,evidence_state=CASE WHEN c.evidence_state='modeled' AND ?='unmeasured' THEN 'modeled' ELSE ? END,actual_evidence_json=COALESCE(NULLIF(?,'')::jsonb,c.actual_evidence_json),deployment_name=COALESCE(NULLIF(?,''),c.deployment_name),revision_id=COALESCE(NULLIF(?,''),c.revision_id),benchmark_id=COALESCE(NULLIF(?,''),c.benchmark_id),quality_evidence_id=COALESCE(NULLIF(?,''),c.quality_evidence_id),release_guard_evaluation_id=COALESCE(NULLIF(?,''),c.release_guard_evaluation_id),optimized_artifact_id=COALESCE(NULLIF(?,''),c.optimized_artifact_id),failure_code=COALESCE(NULLIF(?,''),c.failure_code),updated_at=? FROM optimization_campaigns campaign WHERE c.tenant_id=? AND c.campaign_id=? AND c.id=? AND c.state=? AND campaign.id=c.campaign_id AND campaign.tenant_id=c.tenant_id AND ((? AND campaign.state IN ('running','ranked','guard_passed','rejected','inconclusive','promoted','observed','cancelled','failed','cleaned')) OR (NOT ? AND campaign.state IN ('approved','running','ranked','guard_passed','rejected','inconclusive','promoted','observed') AND campaign.cancel_requested=FALSE AND campaign.approval_expires_at>NOW()))`, to, evidence, evidence, updates.ActualEvidenceJSON, updates.DeploymentName, updates.RevisionID, updates.BenchmarkID, updates.QualityEvidenceID, updates.ReleaseGuardEvaluationID, updates.OptimizedArtifactID, updates.FailureCode, stamp, tenant, campaignID, candidateID, from, cleanup, cleanup)
+	result, err := s.ExecContext(ctx, `UPDATE optimization_candidate_runs c SET state=?,evidence_state=CASE WHEN c.evidence_state='modeled' AND ?='unmeasured' THEN 'modeled' ELSE ? END,actual_evidence_json=COALESCE(NULLIF(?,'')::jsonb,c.actual_evidence_json),deployment_name=COALESCE(NULLIF(?,''),c.deployment_name),revision_id=COALESCE(NULLIF(?,''),c.revision_id),benchmark_id=COALESCE(NULLIF(?,''),c.benchmark_id),quality_evidence_id=COALESCE(NULLIF(?,''),c.quality_evidence_id),lab_evaluation_id=COALESCE(NULLIF(?,''),c.lab_evaluation_id),release_guard_evaluation_id=COALESCE(NULLIF(?,''),c.release_guard_evaluation_id),optimized_artifact_id=COALESCE(NULLIF(?,''),c.optimized_artifact_id),failure_code=COALESCE(NULLIF(?,''),c.failure_code),updated_at=? FROM optimization_campaigns campaign WHERE c.tenant_id=? AND c.campaign_id=? AND c.id=? AND c.state=? AND campaign.id=c.campaign_id AND campaign.tenant_id=c.tenant_id AND ((? AND campaign.state IN ('running','ranked','guard_passed','rejected','inconclusive','promoted','observed','cancelled','failed','cleaned')) OR (NOT ? AND campaign.state IN ('approved','running','ranked','guard_passed','rejected','inconclusive','promoted','observed') AND campaign.cancel_requested=FALSE AND campaign.approval_expires_at>NOW()))`, to, evidence, evidence, updates.ActualEvidenceJSON, updates.DeploymentName, updates.RevisionID, updates.BenchmarkID, updates.QualityEvidenceID, updates.LabEvaluationID, updates.ReleaseGuardEvaluationID, updates.OptimizedArtifactID, updates.FailureCode, stamp, tenant, campaignID, candidateID, from, cleanup, cleanup)
 	if err != nil {
 		return domain.OptimizationCandidateRun{}, err
 	}

@@ -1,0 +1,48 @@
+---
+title: Existing bare-metal GPUs
+description: Inspect local NVIDIA hardware and connect an existing runtime without transferring lifecycle ownership.
+---
+
+# Existing bare-metal GPUs
+
+InferCrane does not install a node agent or take over a bare-metal scheduler. It can perform a
+bounded, read-only inventory of the machine where the CLI runs:
+
+```bash
+infercrane discover local
+```
+
+Machine-readable output is available for setup scripts:
+
+```bash
+infercrane discover local --output json
+```
+
+The v1 probe invokes `nvidia-smi` directly without a shell and records concrete GPU index, UUID,
+model name, total memory, and driver version. It has a five-second deadline, bounded output, and a
+256-GPU limit. It does not inspect prompt data, install software, open a port, change GPU state, or
+send inventory to the control plane.
+
+<Warning>
+  Hardware discovery is not compatibility or performance evidence. GPU presence does not prove
+  model fit, runtime/CUDA compatibility, network reachability, health, cost, or a production SLO.
+  AMD/ROCm inventory and remote host discovery are not implemented by this contract.
+</Warning>
+
+## Connect the runtime already serving the host
+
+Start or retain vLLM, SGLang, LiteLLM, or another OpenAI-compatible runtime under your existing
+process manager. Then connect the service without transferring lifecycle ownership:
+
+```bash
+infercrane connect http://gpu-host.internal:8000/v1 --as support-production
+```
+
+The connection begins `observe-only`. InferCrane may discover the served model and record health,
+but it does not SSH to the host, restart the process, change GPU allocation, scale replicas, or
+delete the external service. Explicitly move to `traffic-managed` only after reviewing the route and
+credential boundary.
+
+Use a lifecycle provider adapter only when you want InferCrane to create and delete capacity. A
+future bare-metal lifecycle adapter would require a qualified external scheduler or agent and a
+separate ownership-transfer design; read-only discovery does not imply that capability.
