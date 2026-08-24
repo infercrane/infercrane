@@ -8,10 +8,14 @@ import (
 )
 
 const (
+	IntentNewEndpoint    = "new_endpoint"
+	IntentEvolveEndpoint = "evolve_endpoint"
+
 	CampaignAwaitingApproval = "awaiting_approval"
 	CampaignApproved         = "approved"
 	CampaignRunning          = "running"
 	CampaignRanked           = "ranked"
+	CampaignQualified        = "qualified"
 	CampaignGuardPassed      = "guard_passed"
 	CampaignRejected         = "rejected"
 	CampaignInconclusive     = "inconclusive"
@@ -27,6 +31,7 @@ const (
 	CandidateMeasuring    = "measuring"
 	CandidateValidating   = "validating"
 	CandidateRanked       = "ranked"
+	CandidateQualified    = "qualified"
 	CandidateGuarding     = "guarding"
 	CandidateGuardPassed  = "guard_passed"
 	CandidateRejected     = "rejected"
@@ -44,7 +49,8 @@ var candidateTransitions = map[string]map[string]struct{}{
 	CandidateReady:        set(CandidateMeasuring, CandidateRejected, CandidateCancelled, CandidateFailed),
 	CandidateMeasuring:    set(CandidateValidating, CandidateInconclusive, CandidateRejected, CandidateCancelled, CandidateFailed),
 	CandidateValidating:   set(CandidateRanked, CandidateRejected, CandidateInconclusive, CandidateCancelled, CandidateFailed),
-	CandidateRanked:       set(CandidateGuarding, CandidateRejected, CandidateInconclusive, CandidateCancelled, CandidateFailed),
+	CandidateRanked:       set(CandidateQualified, CandidateGuarding, CandidateRejected, CandidateInconclusive, CandidateCancelled, CandidateFailed),
+	CandidateQualified:    set(CandidatePromoted, CandidateRejected, CandidateCancelled, CandidateFailed),
 	CandidateGuarding:     set(CandidateGuardPassed, CandidateRejected, CandidateInconclusive, CandidateCancelled, CandidateFailed),
 	CandidateGuardPassed:  set(CandidatePromoted, CandidateRejected, CandidateCancelled, CandidateFailed),
 	CandidatePromoted:     set(CandidateObserved, CandidateFailed),
@@ -78,7 +84,7 @@ func EvidenceForState(state string) (string, error) {
 		return "unmeasured", nil
 	case CandidateValidating, CandidateRanked, CandidateGuarding:
 		return "measured", nil
-	case CandidateGuardPassed, CandidatePromoted, CandidateObserved:
+	case CandidateQualified, CandidateGuardPassed, CandidatePromoted, CandidateObserved:
 		return "qualified", nil
 	case CandidateRejected:
 		return "rejected", nil
@@ -120,6 +126,9 @@ func AggregateState(states []string) (string, error) {
 	}
 	if counts[CandidateGuardPassed] > 0 {
 		return CampaignGuardPassed, nil
+	}
+	if counts[CandidateQualified] > 0 {
+		return CampaignQualified, nil
 	}
 	if counts[CandidateRanked] > 0 || counts[CandidateGuarding] > 0 {
 		return CampaignRanked, nil

@@ -813,7 +813,8 @@ type OperationEvent struct {
 // CandidateRun so modeled and actual evidence cannot overwrite one another.
 type OptimizationCampaign struct {
 	ID, TenantID, IdempotencyKey, InputDigest, ModelIdentity, Objective string
-	Source, State, ProposalJSON, ApprovedBy, FailureCode                string
+	Source, Intent, TargetDeployment, State, ProposalJSON               string
+	ApprovedBy, FailureCode                                             string
 	MaxCandidates                                                       int
 	ApprovedMaxCostUSD                                                  *float64
 	ApprovalExpiresAt, ApprovedAt                                       *time.Time

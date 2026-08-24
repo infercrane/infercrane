@@ -466,14 +466,24 @@ func TestOptimizationCampaignRequiresImmutableProposalAndExplicitBoundedApproval
 	create.Header.Set("Idempotency-Key", "campaign-create-1")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, create)
-	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"provider_mutation":false`) || store.campaign.State != optimizationcampaign.CampaignAwaitingApproval {
+	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"provider_mutation":false`) || store.campaign.State != optimizationcampaign.CampaignAwaitingApproval || store.campaign.Intent != optimizationcampaign.IntentNewEndpoint {
 		t.Fatalf("create status=%d body=%s campaign=%+v", response.Code, response.Body.String(), store.campaign)
+	}
+
+	invalidIntentBody, _ := json.Marshal(map[string]any{"proposal": proposal, "intent": "evolve_endpoint"})
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/optimization/campaigns", strings.NewReader(string(invalidIntentBody)))
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Idempotency-Key", "campaign-create-missing-target")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), "target_deployment") {
+		t.Fatalf("missing evolution target status=%d body=%s", response.Code, response.Body.String())
 	}
 
 	tampered := proposal
 	tampered.Input.GPU = "H100"
 	tamperedBody, _ := json.Marshal(map[string]any{"proposal": tampered})
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/optimization/campaigns", strings.NewReader(string(tamperedBody)))
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/optimization/campaigns", strings.NewReader(string(tamperedBody)))
 	request.Header.Set("Authorization", "Bearer secret")
 	request.Header.Set("Idempotency-Key", "campaign-create-2")
 	response = httptest.NewRecorder()

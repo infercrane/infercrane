@@ -169,7 +169,10 @@ States:
 
 ```text
 proposed → awaiting_approval → provisioning → ready → measuring
-         → validating → ranked → guarding → guard_passed | rejected | inconclusive
+         → validating → ranked
+             ├─ new_endpoint → qualified → explicit human activation
+             └─ evolve_endpoint → guarding → guard_passed → explicit human promotion
+         → rejected | inconclusive
          → approved → promoted → observed
          → cleaned
 ```
@@ -179,6 +182,11 @@ CLI:
 ```bash
 infercrane optimize create MODEL --objective interactive --profile interactive \
   --max-ttft-p95-ms 200 --max-hourly-cost 3 --max-candidates 3
+
+# Existing production baseline: Release Guard is mandatory.
+infercrane optimize create MODEL --objective interactive --profile interactive \
+  --max-ttft-p95-ms 200 --max-hourly-cost 3 --max-candidates 3 \
+  --target-deployment production-name
 infercrane optimize inspect CAMPAIGN
 infercrane optimize approve CAMPAIGN --max-cost-usd 20
 infercrane optimize watch CAMPAIGN

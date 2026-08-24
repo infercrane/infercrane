@@ -141,7 +141,7 @@ func approvedCoordinatorFixture(now time.Time, candidates int) (*coordinatorRepo
 	for index := range runs {
 		runs[index] = domain.OptimizationCandidateRun{ID: "candidate-" + string(rune('a'+index)), TenantID: "tenant", CampaignID: "campaign", State: CandidateProposed, EvidenceState: "unmeasured", BenchmarkID: ""}
 	}
-	repository := &coordinatorRepository{campaign: domain.OptimizationCampaign{ID: "campaign", TenantID: "tenant", State: CampaignApproved, ApprovedMaxCostUSD: &cost, ApprovalExpiresAt: &expiry, MaxCandidates: candidates, Candidates: runs}}
+	repository := &coordinatorRepository{campaign: domain.OptimizationCampaign{ID: "campaign", TenantID: "tenant", Intent: IntentEvolveEndpoint, TargetDeployment: "production", State: CampaignApproved, ApprovedMaxCostUSD: &cost, ApprovalExpiresAt: &expiry, MaxCandidates: candidates, Candidates: runs}}
 	driver := &coordinatorDriver{qualityPass: true, rankDecision: RankSelect, guardDecision: "PASS"}
 	coordinator := Coordinator{Repository: repository, Driver: driver, Now: func() time.Time { return now }}
 	return repository, driver, coordinator

@@ -33,6 +33,7 @@ import (
 	"github.com/infercrane/infercrane/internal/finops"
 	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/lab"
+	"github.com/infercrane/infercrane/internal/optimizationcampaign"
 	"github.com/infercrane/infercrane/internal/optimizedartifact"
 	"github.com/infercrane/infercrane/internal/optimizer"
 	"github.com/infercrane/infercrane/internal/passport"
@@ -527,7 +528,9 @@ func (a API) createOptimizationCampaign(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	var request struct {
-		Proposal optimizer.Proposal `json:"proposal"`
+		Proposal         optimizer.Proposal `json:"proposal"`
+		Intent           string             `json:"intent"`
+		TargetDeployment string             `json:"target_deployment,omitempty"`
 	}
 	if !decodeMutationBody(w, r, &request) {
 		return
@@ -536,13 +539,25 @@ func (a API) createOptimizationCampaign(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusUnprocessableEntity, "invalid_optimization_proposal", err.Error())
 		return
 	}
+	if request.Intent == "" {
+		request.Intent = optimizationcampaign.IntentNewEndpoint
+	}
+	if request.Intent != optimizationcampaign.IntentNewEndpoint && request.Intent != optimizationcampaign.IntentEvolveEndpoint {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_optimization_intent", "intent must be new_endpoint or evolve_endpoint")
+		return
+	}
+	request.TargetDeployment = strings.TrimSpace(request.TargetDeployment)
+	if request.Intent == optimizationcampaign.IntentNewEndpoint && request.TargetDeployment != "" || request.Intent == optimizationcampaign.IntentEvolveEndpoint && request.TargetDeployment == "" {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_optimization_intent", "new_endpoint cannot name a target; evolve_endpoint requires target_deployment")
+		return
+	}
 	proposalJSON, err := json.Marshal(request.Proposal)
 	if err != nil || len(proposalJSON) > 1<<20 {
 		writeError(w, http.StatusRequestEntityTooLarge, "proposal_too_large", "optimization proposal exceeds the one MiB storage boundary")
 		return
 	}
 	actor := r.Context().Value(identityKey{}).(domain.Principal)
-	campaign := domain.OptimizationCampaign{TenantID: actor.TenantID, IdempotencyKey: key, InputDigest: request.Proposal.InputDigest, ModelIdentity: request.Proposal.Input.ModelIdentity, Objective: request.Proposal.Input.Objective, Source: request.Proposal.AlgorithmVersion, ProposalJSON: string(proposalJSON)}
+	campaign := domain.OptimizationCampaign{TenantID: actor.TenantID, IdempotencyKey: key, InputDigest: request.Proposal.InputDigest, ModelIdentity: request.Proposal.Input.ModelIdentity, Objective: request.Proposal.Input.Objective, Source: request.Proposal.AlgorithmVersion, Intent: request.Intent, TargetDeployment: request.TargetDeployment, ProposalJSON: string(proposalJSON)}
 	candidates := make([]domain.OptimizationCandidateRun, 0, len(request.Proposal.Candidates))
 	for _, candidate := range request.Proposal.Candidates {
 		deployment, marshalErr := json.Marshal(candidate.Deployment)
@@ -682,7 +697,11 @@ func optimizationCampaignResponse(campaign domain.OptimizationCampaign) map[stri
 	for _, candidate := range campaign.Candidates {
 		candidates = append(candidates, map[string]any{"id": candidate.ID, "proposal_candidate_id": candidate.ProposalCandidateID, "rank": candidate.Rank, "state": candidate.State, "evidence_state": candidate.EvidenceState, "deployment_spec": json.RawMessage(candidate.DeploymentSpecJSON), "predicted_evidence": json.RawMessage(candidate.PredictedEvidenceJSON), "actual_evidence": json.RawMessage(candidate.ActualEvidenceJSON), "deployment_name": candidate.DeploymentName, "revision_id": candidate.RevisionID, "benchmark_id": candidate.BenchmarkID, "quality_evidence_id": candidate.QualityEvidenceID, "lab_evaluation_id": candidate.LabEvaluationID, "release_guard_evaluation_id": candidate.ReleaseGuardEvaluationID, "optimized_artifact_id": candidate.OptimizedArtifactID, "failure_code": candidate.FailureCode, "created_at": candidate.CreatedAt, "updated_at": candidate.UpdatedAt})
 	}
-	return map[string]any{"id": campaign.ID, "input_digest": campaign.InputDigest, "model_identity": campaign.ModelIdentity, "objective": campaign.Objective, "source": campaign.Source, "state": campaign.State, "max_candidates": campaign.MaxCandidates, "approved_max_cost_usd": campaign.ApprovedMaxCostUSD, "approval_expires_at": campaign.ApprovalExpiresAt, "approved_by": campaign.ApprovedBy, "approved_at": campaign.ApprovedAt, "cancel_requested": campaign.CancelRequested, "failure_code": campaign.FailureCode, "created_at": campaign.CreatedAt, "updated_at": campaign.UpdatedAt, "candidates": candidates, "proof_boundary": "modeled evidence cannot qualify; measured benchmark, quality, cost, and Release Guard evidence are required"}
+	proofBoundary := "modeled evidence cannot qualify; measured benchmark, quality, and cost evidence are required before human activation"
+	if campaign.Intent == optimizationcampaign.IntentEvolveEndpoint {
+		proofBoundary = "modeled evidence cannot qualify; measured benchmark, quality, cost, and Release Guard evidence are required before human promotion"
+	}
+	return map[string]any{"id": campaign.ID, "input_digest": campaign.InputDigest, "model_identity": campaign.ModelIdentity, "objective": campaign.Objective, "source": campaign.Source, "intent": campaign.Intent, "target_deployment": campaign.TargetDeployment, "state": campaign.State, "max_candidates": campaign.MaxCandidates, "approved_max_cost_usd": campaign.ApprovedMaxCostUSD, "approval_expires_at": campaign.ApprovalExpiresAt, "approved_by": campaign.ApprovedBy, "approved_at": campaign.ApprovedAt, "cancel_requested": campaign.CancelRequested, "failure_code": campaign.FailureCode, "created_at": campaign.CreatedAt, "updated_at": campaign.UpdatedAt, "candidates": candidates, "proof_boundary": proofBoundary}
 }
 
 func (a API) createOptimizedArtifact(w http.ResponseWriter, r *http.Request) {

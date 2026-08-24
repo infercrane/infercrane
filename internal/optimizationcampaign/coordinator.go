@@ -97,7 +97,7 @@ func (c Coordinator) Step(ctx context.Context, tenant, campaignID, candidateID s
 		return StepResult{}, domain.ErrNotFound
 	}
 	result := StepResult{CampaignID: campaign.ID, CandidateID: candidate.ID, From: candidate.State, To: candidate.State}
-	if candidate.State == CandidateGuardPassed {
+	if candidate.State == CandidateQualified || candidate.State == CandidateGuardPassed {
 		result.WaitingForHuman = true
 		return result, nil
 	}
@@ -174,6 +174,9 @@ func (c Coordinator) Step(ctx context.Context, tenant, campaignID, candidateID s
 		case RankSelect:
 			// Persist the Lab decision before Release Guard. The next durable
 			// step receives a candidate that already carries this identity.
+			if campaign.Intent == IntentNewEndpoint {
+				return c.transition(ctx, campaign, candidate, CandidateQualified, updates)
+			}
 			return c.transition(ctx, campaign, candidate, CandidateGuarding, updates)
 		default:
 			updates.FailureCode = "measured_ranking_unknown_decision"
@@ -246,7 +249,7 @@ func (c Coordinator) transition(ctx context.Context, campaign domain.Optimizatio
 	if err != nil {
 		return StepResult{CampaignID: campaign.ID, CandidateID: candidate.ID, From: candidate.State, To: candidate.State}, err
 	}
-	return StepResult{CampaignID: campaign.ID, CandidateID: candidate.ID, From: candidate.State, To: row.State, Progressed: row.State != candidate.State, WaitingForHuman: row.State == CandidateGuardPassed}, nil
+	return StepResult{CampaignID: campaign.ID, CandidateID: candidate.ID, From: candidate.State, To: row.State, Progressed: row.State != candidate.State, WaitingForHuman: row.State == CandidateQualified || row.State == CandidateGuardPassed}, nil
 }
 
 func (c Coordinator) budget(campaign domain.OptimizationCampaign) (Budget, error) {
@@ -254,7 +257,7 @@ func (c Coordinator) budget(campaign domain.OptimizationCampaign) (Budget, error
 	if c.Now != nil {
 		now = c.Now().UTC()
 	}
-	if campaign.CancelRequested || (campaign.State != CampaignApproved && campaign.State != CampaignRunning && campaign.State != CampaignRanked) {
+	if campaign.CancelRequested || (campaign.State != CampaignApproved && campaign.State != CampaignRunning && campaign.State != CampaignRanked && campaign.State != CampaignQualified && campaign.State != CampaignGuardPassed) {
 		return Budget{}, ErrExecutionAuthority
 	}
 	if campaign.ApprovedMaxCostUSD == nil || *campaign.ApprovedMaxCostUSD <= 0 || campaign.ApprovalExpiresAt == nil {

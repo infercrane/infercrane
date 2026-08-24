@@ -103,7 +103,7 @@ func TestOptimizationCampaignIsBoundedDurableFencedAndCleansRejectedCandidate(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	campaign := domain.OptimizationCampaign{TenantID: "global", IdempotencyKey: "optimize-" + suffix, InputDigest: strings.Repeat("a", 64), ModelIdentity: "meta-llama/Llama-3.1-8B-Instruct", Objective: "interactive", Source: "catalog-candidate-planner-v1", ProposalJSON: `{"schema_version":"infercrane.optimizer.proposal/v1"}`}
+	campaign := domain.OptimizationCampaign{TenantID: "global", IdempotencyKey: "optimize-" + suffix, InputDigest: strings.Repeat("a", 64), ModelIdentity: "meta-llama/Llama-3.1-8B-Instruct", Objective: "interactive", Source: "catalog-candidate-planner-v1", Intent: optimizationcampaign.IntentEvolveEndpoint, TargetDeployment: deployment.Name, ProposalJSON: `{"schema_version":"infercrane.optimizer.proposal/v1"}`}
 	candidates := []domain.OptimizationCandidateRun{{ProposalCandidateID: strings.Repeat("b", 64), Rank: 1, EvidenceState: "unmeasured", DeploymentSpecJSON: `{"name":"` + deployment.Name + `"}`, PredictedEvidenceJSON: `{}`, ActualEvidenceJSON: `{}`}}
 	created, fresh, err := s.CreateOptimizationCampaign(ctx, campaign, candidates)
 	if err != nil || !fresh || created.State != optimizationcampaign.CampaignAwaitingApproval || len(created.Candidates) != 1 {
@@ -171,6 +171,62 @@ func TestOptimizationCampaignIsBoundedDurableFencedAndCleansRejectedCandidate(t 
 	}
 }
 
+func TestOptimizationCampaignIntentSeparatesNewEndpointQualificationFromEvolutionGuard(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	suffix := time.Now().UTC().Format("150405.000000000")
+	model := "Qwen/Qwen3-8B"
+	target, err := s.AddTarget(ctx, domain.Target{Name: "new-endpoint-target-" + suffix, URL: "http://new-endpoint-" + suffix, Provider: "existing", Runtime: "vllm", UpstreamModel: model})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deployment, err := s.ApplyDeployment(ctx, domain.Deployment{Name: "new-endpoint-" + suffix, Model: model}, []string{target.Name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	campaign, _, err := s.CreateOptimizationCampaign(ctx, domain.OptimizationCampaign{TenantID: "global", IdempotencyKey: "new-endpoint-campaign-" + suffix, InputDigest: strings.Repeat("1", 64), ModelIdentity: model, Objective: "interactive", Source: "catalog-candidate-planner-v1", Intent: optimizationcampaign.IntentNewEndpoint, ProposalJSON: `{"schema_version":"infercrane.optimizer.proposal/v1"}`}, []domain.OptimizationCandidateRun{{ProposalCandidateID: strings.Repeat("2", 64), Rank: 1, EvidenceState: "unmeasured", DeploymentSpecJSON: `{"name":"candidate"}`, PredictedEvidenceJSON: `{}`, ActualEvidenceJSON: `{}`}})
+	if err != nil || campaign.Intent != optimizationcampaign.IntentNewEndpoint || campaign.TargetDeployment != "" {
+		t.Fatalf("new endpoint campaign=%+v err=%v", campaign, err)
+	}
+	campaign, err = s.ApproveOptimizationCampaign(ctx, "global", campaign.ID, "operator", 5, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	quality, _, err := s.RecordQualityEvidence(ctx, "global", deployment.Name, domain.QualityEvidence{RevisionID: deployment.ActiveRevisionID, Suite: "new-endpoint", SuiteVersion: "git:abc", Evaluator: "offline-evaluator", EvaluatorVersion: "1.0.0", Score: .99, Passed: true, SampleCount: 50, ArtifactDigest: "sha256:" + strings.Repeat("3", 64), PayloadDigest: "sha256:" + strings.Repeat("4", 64), Signature: "signature", PublicKey: "public-key", Algorithm: "Ed25519-SHA256", KeyID: "sha256:key", EvaluatedAt: time.Now().UTC()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	labRow, err := s.RecordLabEvaluation(ctx, "global", domain.LabEvaluation{ModelIdentity: model, AlgorithmVersion: "inference-lab-v3", InputJSON: `{"objective":"interactive"}`, ResultsJSON: `[{"selected":true}]`, InputDigest: strings.Repeat("5", 64)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidateID, state := campaign.Candidates[0].ID, optimizationcampaign.CandidateProposed
+	steps := []struct {
+		to      string
+		updates domain.OptimizationCandidateRun
+	}{
+		{optimizationcampaign.CandidateProvisioning, domain.OptimizationCandidateRun{}},
+		{optimizationcampaign.CandidateReady, domain.OptimizationCandidateRun{DeploymentName: deployment.Name, RevisionID: deployment.ActiveRevisionID}},
+		{optimizationcampaign.CandidateMeasuring, domain.OptimizationCandidateRun{}},
+		{optimizationcampaign.CandidateValidating, domain.OptimizationCandidateRun{BenchmarkID: "bench-new"}},
+		{optimizationcampaign.CandidateRanked, domain.OptimizationCandidateRun{BenchmarkID: "bench-new", QualityEvidenceID: quality.ID}},
+		{optimizationcampaign.CandidateQualified, domain.OptimizationCandidateRun{LabEvaluationID: labRow.ID}},
+	}
+	for _, step := range steps {
+		if _, err = s.TransitionOptimizationCandidate(ctx, "global", campaign.ID, candidateID, state, step.to, step.updates); err != nil {
+			t.Fatalf("new endpoint transition %s -> %s: %v", state, step.to, err)
+		}
+		state = step.to
+	}
+	loaded, err := s.OptimizationCampaign(ctx, "global", campaign.ID)
+	if err != nil || loaded.State != optimizationcampaign.CampaignQualified || loaded.Candidates[0].ReleaseGuardEvaluationID != "" {
+		t.Fatalf("new endpoint invented a guard boundary: %+v err=%v", loaded, err)
+	}
+	if _, err = s.TransitionOptimizationCandidate(ctx, "global", campaign.ID, candidateID, optimizationcampaign.CandidateQualified, optimizationcampaign.CandidatePromoted, domain.OptimizationCandidateRun{}); err != nil {
+		t.Fatalf("explicit new endpoint activation was rejected: %v", err)
+	}
+}
+
 func TestLabEvaluationDeterministicIdentityIsReplaySafe(t *testing.T) {
 	ctx := context.Background()
 	s := openStore(t, ctx)
@@ -229,7 +285,7 @@ func TestOptimizedArtifactRequiresExactBuilderCandidateRevisionAndQualityEvidenc
 		t.Fatalf("attest=%+v err=%v", optimized, err)
 	}
 
-	campaignInput := domain.OptimizationCampaign{TenantID: "global", IdempotencyKey: "optimized-campaign-" + suffix, InputDigest: strings.Repeat("d", 64), ModelIdentity: target.UpstreamModel, Objective: "interactive", Source: "catalog-candidate-planner-v1", ProposalJSON: `{"schema_version":"infercrane.optimizer.proposal/v1"}`}
+	campaignInput := domain.OptimizationCampaign{TenantID: "global", IdempotencyKey: "optimized-campaign-" + suffix, InputDigest: strings.Repeat("d", 64), ModelIdentity: target.UpstreamModel, Objective: "interactive", Source: "catalog-candidate-planner-v1", Intent: optimizationcampaign.IntentEvolveEndpoint, TargetDeployment: deployment.Name, ProposalJSON: `{"schema_version":"infercrane.optimizer.proposal/v1"}`}
 	candidateInput := []domain.OptimizationCandidateRun{{ProposalCandidateID: strings.Repeat("e", 64), Rank: 1, EvidenceState: "unmeasured", DeploymentSpecJSON: `{"name":"llama-fp8"}`, PredictedEvidenceJSON: `{}`, ActualEvidenceJSON: `{}`}}
 	campaign, _, err := s.CreateOptimizationCampaign(ctx, campaignInput, candidateInput)
 	if err != nil {

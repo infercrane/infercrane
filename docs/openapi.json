@@ -2078,9 +2078,21 @@
       "OptimizationCampaignCreate": {
         "additionalProperties": false,
         "properties": {
+          "intent": {
+            "default": "new_endpoint",
+            "enum": [
+              "new_endpoint",
+              "evolve_endpoint"
+            ],
+            "type": "string"
+          },
           "proposal": {
             "description": "A complete infercrane.optimizer.proposal/v1 document whose normalized digest is revalidated by the server.",
             "type": "object"
+          },
+          "target_deployment": {
+            "description": "Required only for evolve_endpoint campaigns; names the stable deployment whose candidate revision will be compared.",
+            "type": "string"
           }
         },
         "required": [

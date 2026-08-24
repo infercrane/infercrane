@@ -29,6 +29,25 @@ func TestExecutionHandlerRunsProofLoopAndNeverPromotes(t *testing.T) {
 	}
 }
 
+func TestNewEndpointExecutionStopsQualifiedWithoutFakeReleaseGuard(t *testing.T) {
+	now := time.Now().UTC()
+	repository, driver, coordinator := approvedCoordinatorFixture(now, 2)
+	repository.campaign.Intent = IntentNewEndpoint
+	repository.campaign.TargetDeployment = ""
+	driver.rankDecisions = map[string]string{"candidate-a": RankSelect, "candidate-b": RankSupersede}
+	request, _ := json.Marshal(ExecuteRequest{TenantID: "tenant", CampaignID: "campaign", Candidates: []string{"candidate-a", "candidate-b"}})
+	result, err := Handlers(coordinator)[ExecuteKind](context.Background(), domain.Operation{RequestJSON: string(request)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, `"waiting_for_human":["candidate-a"]`) || repository.campaign.Candidates[0].State != CandidateQualified || repository.campaign.Candidates[1].State != CandidateRejected {
+		t.Fatalf("new endpoint did not stop at human activation: result=%s campaign=%+v", result, repository.campaign)
+	}
+	if driver.guardCalls != 0 {
+		t.Fatal("new endpoint campaign invented a Release Guard comparison without a production baseline")
+	}
+}
+
 func TestExecutionHandlerMeasuresEveryCandidateBeforeRanking(t *testing.T) {
 	now := time.Now().UTC()
 	repository, driver, coordinator := approvedCoordinatorFixture(now, 2)

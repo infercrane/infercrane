@@ -24,6 +24,10 @@ their objects into the core domain would create version coupling and overlapping
 
 - Persist an immutable `OptimizationCampaign` and ordered candidate runs before any provider
   mutation. Creation is idempotent and free of infrastructure side effects.
+- Persist whether the campaign qualifies a `new_endpoint` or evolves a named existing deployment.
+  New endpoints have no active baseline and stop at measured/quality qualification plus human
+  activation. Evolution campaigns require Release Guard and human promotion. A worker must never
+  fabricate a guard comparison for a new endpoint or omit it for an evolution.
 - Require an actor, hard maximum spend, and expiry before an execution worker may claim paid work.
   Retrying approval never extends the first persisted authority.
 - Keep predicted evidence separate from actual evidence. Candidate transitions are fenced by the

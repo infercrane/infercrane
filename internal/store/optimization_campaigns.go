@@ -32,7 +32,20 @@ func (s *Store) CreateOptimizationCampaign(ctx context.Context, campaign domain.
 		}
 	}
 	stamp := now()
-	result, err := tx.ExecContext(ctx, `INSERT INTO optimization_campaigns(id,tenant_id,idempotency_key,input_digest,model_identity,objective,source,state,proposal_json,max_candidates,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?::jsonb,?,?,?) ON CONFLICT(tenant_id,idempotency_key) DO NOTHING`, campaign.ID, campaign.TenantID, campaign.IdempotencyKey, campaign.InputDigest, campaign.ModelIdentity, campaign.Objective, campaign.Source, optimizationcampaign.CampaignAwaitingApproval, campaign.ProposalJSON, len(candidates), stamp, stamp)
+	if campaign.Intent == optimizationcampaign.IntentEvolveEndpoint {
+		var deploymentModel string
+		lookupErr := tx.QueryRowContext(ctx, `SELECT model FROM deployments WHERE tenant_id=? AND name=? AND desired_state!='deleted'`, campaign.TenantID, campaign.TargetDeployment).Scan(&deploymentModel)
+		if errors.Is(lookupErr, sql.ErrNoRows) {
+			return campaign, false, fmt.Errorf("%w: target deployment", domain.ErrNotFound)
+		}
+		if lookupErr != nil {
+			return campaign, false, lookupErr
+		}
+		if deploymentModel != campaign.ModelIdentity {
+			return campaign, false, errors.New("optimization campaign model must match the target deployment")
+		}
+	}
+	result, err := tx.ExecContext(ctx, `INSERT INTO optimization_campaigns(id,tenant_id,idempotency_key,input_digest,model_identity,objective,source,intent,target_deployment_name,state,proposal_json,max_candidates,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,NULLIF(?,''),?,?::jsonb,?,?,?) ON CONFLICT(tenant_id,idempotency_key) DO NOTHING`, campaign.ID, campaign.TenantID, campaign.IdempotencyKey, campaign.InputDigest, campaign.ModelIdentity, campaign.Objective, campaign.Source, campaign.Intent, campaign.TargetDeployment, optimizationcampaign.CampaignAwaitingApproval, campaign.ProposalJSON, len(candidates), stamp, stamp)
 	if err != nil {
 		return campaign, false, err
 	}
@@ -45,7 +58,7 @@ func (s *Store) CreateOptimizationCampaign(ctx context.Context, campaign domain.
 		if lookupErr != nil {
 			return campaign, false, lookupErr
 		}
-		if existing.InputDigest != requested.InputDigest || existing.ModelIdentity != requested.ModelIdentity || existing.Objective != requested.Objective || existing.Source != requested.Source || !semanticJSONEqual(existing.ProposalJSON, requested.ProposalJSON) || len(existing.Candidates) != len(candidates) {
+		if existing.InputDigest != requested.InputDigest || existing.ModelIdentity != requested.ModelIdentity || existing.Objective != requested.Objective || existing.Source != requested.Source || existing.Intent != requested.Intent || existing.TargetDeployment != requested.TargetDeployment || !semanticJSONEqual(existing.ProposalJSON, requested.ProposalJSON) || len(existing.Candidates) != len(candidates) {
 			return existing, false, domain.ErrConflict
 		}
 		return existing, false, nil
@@ -71,6 +84,12 @@ func (s *Store) CreateOptimizationCampaign(ctx context.Context, campaign domain.
 func validateOptimizationCampaign(campaign domain.OptimizationCampaign, candidates []domain.OptimizationCandidateRun) error {
 	if campaign.TenantID == "" || campaign.IdempotencyKey == "" || len(campaign.IdempotencyKey) > 128 || len(campaign.InputDigest) != 64 || campaign.ModelIdentity == "" || campaign.Objective == "" || campaign.Source == "" || !boundedJSON(campaign.ProposalJSON) {
 		return errors.New("complete immutable optimization campaign identity and proposal are required")
+	}
+	if campaign.Intent != optimizationcampaign.IntentNewEndpoint && campaign.Intent != optimizationcampaign.IntentEvolveEndpoint {
+		return errors.New("optimization campaign intent must be new_endpoint or evolve_endpoint")
+	}
+	if campaign.Intent == optimizationcampaign.IntentNewEndpoint && campaign.TargetDeployment != "" || campaign.Intent == optimizationcampaign.IntentEvolveEndpoint && campaign.TargetDeployment == "" {
+		return errors.New("new_endpoint cannot name a target; evolve_endpoint requires one")
 	}
 	if len(candidates) < 1 || len(candidates) > 100 {
 		return errors.New("optimization campaign requires between 1 and 100 candidates")
@@ -111,8 +130,8 @@ func (s *Store) optimizationCampaign(ctx context.Context, predicate string, valu
 	var cost sql.NullFloat64
 	var expiry, approvedAt, approvedBy, failure sql.NullString
 	var created, updated string
-	query := `SELECT id,tenant_id,idempotency_key,input_digest,model_identity,objective,source,state,proposal_json::text,max_candidates,approved_max_cost_usd,approval_expires_at,approved_by,approved_at,cancel_requested,failure_code,created_at,updated_at FROM optimization_campaigns WHERE ` + predicate
-	err := s.QueryRowContext(ctx, query, values...).Scan(&row.ID, &row.TenantID, &row.IdempotencyKey, &row.InputDigest, &row.ModelIdentity, &row.Objective, &row.Source, &row.State, &row.ProposalJSON, &row.MaxCandidates, &cost, &expiry, &approvedBy, &approvedAt, &row.CancelRequested, &failure, &created, &updated)
+	query := `SELECT id,tenant_id,idempotency_key,input_digest,model_identity,objective,source,intent,COALESCE(target_deployment_name,''),state,proposal_json::text,max_candidates,approved_max_cost_usd,approval_expires_at,approved_by,approved_at,cancel_requested,failure_code,created_at,updated_at FROM optimization_campaigns WHERE ` + predicate
+	err := s.QueryRowContext(ctx, query, values...).Scan(&row.ID, &row.TenantID, &row.IdempotencyKey, &row.InputDigest, &row.ModelIdentity, &row.Objective, &row.Source, &row.Intent, &row.TargetDeployment, &row.State, &row.ProposalJSON, &row.MaxCandidates, &cost, &expiry, &approvedBy, &approvedAt, &row.CancelRequested, &failure, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return row, domain.ErrNotFound
 	}
@@ -242,7 +261,7 @@ func (s *Store) CancelOptimizationCampaign(ctx context.Context, tenant, id strin
 		}
 		return domain.OptimizationCampaign{}, domain.ErrConflict
 	}
-	if _, err = tx.ExecContext(ctx, `UPDATE optimization_candidate_runs SET state=?,evidence_state='stale',updated_at=? WHERE tenant_id=? AND campaign_id=? AND state IN ('proposed','provisioning','ready','measuring','validating','ranked','guarding','guard_passed')`, optimizationcampaign.CandidateCancelled, stamp, tenant, id); err != nil {
+	if _, err = tx.ExecContext(ctx, `UPDATE optimization_candidate_runs SET state=?,evidence_state='stale',updated_at=? WHERE tenant_id=? AND campaign_id=? AND state IN ('proposed','provisioning','ready','measuring','validating','ranked','qualified','guarding','guard_passed')`, optimizationcampaign.CandidateCancelled, stamp, tenant, id); err != nil {
 		return domain.OptimizationCampaign{}, err
 	}
 	if err = tx.Commit(); err != nil {
@@ -275,10 +294,10 @@ func (s *Store) TransitionOptimizationCandidate(ctx context.Context, tenant, cam
 	if to == optimizationcampaign.CandidateRanked && updates.QualityEvidenceID == "" {
 		return domain.OptimizationCandidateRun{}, errors.New("ranked candidate requires quality evidence")
 	}
-	if (to == optimizationcampaign.CandidateGuarding || to == optimizationcampaign.CandidateRejected || to == optimizationcampaign.CandidateInconclusive) && from == optimizationcampaign.CandidateRanked && updates.LabEvaluationID == "" {
+	if (to == optimizationcampaign.CandidateQualified || to == optimizationcampaign.CandidateGuarding || to == optimizationcampaign.CandidateRejected || to == optimizationcampaign.CandidateInconclusive) && from == optimizationcampaign.CandidateRanked && updates.LabEvaluationID == "" {
 		return domain.OptimizationCandidateRun{}, errors.New("rank decision requires persisted Lab evaluation evidence")
 	}
-	if (to == optimizationcampaign.CandidateGuardPassed || to == optimizationcampaign.CandidatePromoted) && updates.ReleaseGuardEvaluationID == "" {
+	if to == optimizationcampaign.CandidateGuardPassed && updates.ReleaseGuardEvaluationID == "" {
 		return domain.OptimizationCandidateRun{}, errors.New("qualified candidate requires Release Guard evidence")
 	}
 	currentRows, err := s.optimizationCandidates(ctx, tenant, campaignID)
@@ -297,6 +316,16 @@ func (s *Store) TransitionOptimizationCandidate(ctx context.Context, tenant, cam
 	}
 	if current.State != from {
 		return current, domain.ErrConflict
+	}
+	var campaignIntent string
+	if err = s.QueryRowContext(ctx, `SELECT intent FROM optimization_campaigns WHERE tenant_id=? AND id=?`, tenant, campaignID).Scan(&campaignIntent); err != nil {
+		return current, err
+	}
+	if to == optimizationcampaign.CandidateQualified && campaignIntent != optimizationcampaign.IntentNewEndpoint {
+		return current, errors.New("only a new-endpoint campaign may qualify without Release Guard")
+	}
+	if to == optimizationcampaign.CandidateGuarding && campaignIntent != optimizationcampaign.IntentEvolveEndpoint {
+		return current, errors.New("only an evolve-endpoint campaign may enter Release Guard")
 	}
 	if current.OptimizedArtifactID != "" && updates.OptimizedArtifactID != "" && current.OptimizedArtifactID != updates.OptimizedArtifactID {
 		return current, errors.New("optimized artifact identity is immutable once attached to a candidate")
@@ -320,6 +349,9 @@ func (s *Store) TransitionOptimizationCandidate(ctx context.Context, tenant, cam
 	}
 	if updates.RevisionID != "" {
 		effectiveRevisionID = updates.RevisionID
+	}
+	if to == optimizationcampaign.CandidateQualified && effectiveQualityID == "" {
+		return current, errors.New("qualified new-endpoint candidate requires quality evidence")
 	}
 	var revisionArtifactID string
 	if to == optimizationcampaign.CandidateReady {
@@ -346,13 +378,13 @@ func (s *Store) TransitionOptimizationCandidate(ctx context.Context, tenant, cam
 		if to == optimizationcampaign.CandidateReady && (revisionArtifactID == "" || artifact.BaseModelArtifactID != revisionArtifactID) {
 			return current, errors.New("candidate optimized artifact base model does not match the immutable deployment revision artifact")
 		}
-		if (to == optimizationcampaign.CandidateGuardPassed || to == optimizationcampaign.CandidatePromoted) && (effectiveQualityID == "" || artifact.EvidenceState != "qualified" || artifact.QualityEvidenceID != effectiveQualityID) {
+		if (to == optimizationcampaign.CandidateQualified || to == optimizationcampaign.CandidateGuardPassed || to == optimizationcampaign.CandidatePromoted) && (effectiveQualityID == "" || artifact.EvidenceState != "qualified" || artifact.QualityEvidenceID != effectiveQualityID) {
 			return current, errors.New("optimized artifact candidate requires matching qualified semantic evidence before Release Guard can pass")
 		}
 	}
 	stamp := now()
 	cleanup := to == optimizationcampaign.CandidateCleaned
-	result, err := s.ExecContext(ctx, `UPDATE optimization_candidate_runs c SET state=?,evidence_state=CASE WHEN c.evidence_state='modeled' AND ?='unmeasured' THEN 'modeled' ELSE ? END,actual_evidence_json=COALESCE(NULLIF(?,'')::jsonb,c.actual_evidence_json),deployment_name=COALESCE(NULLIF(?,''),c.deployment_name),revision_id=COALESCE(NULLIF(?,''),c.revision_id),benchmark_id=COALESCE(NULLIF(?,''),c.benchmark_id),quality_evidence_id=COALESCE(NULLIF(?,''),c.quality_evidence_id),lab_evaluation_id=COALESCE(NULLIF(?,''),c.lab_evaluation_id),release_guard_evaluation_id=COALESCE(NULLIF(?,''),c.release_guard_evaluation_id),optimized_artifact_id=COALESCE(NULLIF(?,''),c.optimized_artifact_id),failure_code=COALESCE(NULLIF(?,''),c.failure_code),updated_at=? FROM optimization_campaigns campaign WHERE c.tenant_id=? AND c.campaign_id=? AND c.id=? AND c.state=? AND campaign.id=c.campaign_id AND campaign.tenant_id=c.tenant_id AND ((? AND campaign.state IN ('running','ranked','guard_passed','rejected','inconclusive','promoted','observed','cancelled','failed','cleaned')) OR (NOT ? AND campaign.state IN ('approved','running','ranked','guard_passed','rejected','inconclusive','promoted','observed') AND campaign.cancel_requested=FALSE AND campaign.approval_expires_at>NOW()))`, to, evidence, evidence, updates.ActualEvidenceJSON, updates.DeploymentName, updates.RevisionID, updates.BenchmarkID, updates.QualityEvidenceID, updates.LabEvaluationID, updates.ReleaseGuardEvaluationID, updates.OptimizedArtifactID, updates.FailureCode, stamp, tenant, campaignID, candidateID, from, cleanup, cleanup)
+	result, err := s.ExecContext(ctx, `UPDATE optimization_candidate_runs c SET state=?,evidence_state=CASE WHEN c.evidence_state='modeled' AND ?='unmeasured' THEN 'modeled' ELSE ? END,actual_evidence_json=COALESCE(NULLIF(?,'')::jsonb,c.actual_evidence_json),deployment_name=COALESCE(NULLIF(?,''),c.deployment_name),revision_id=COALESCE(NULLIF(?,''),c.revision_id),benchmark_id=COALESCE(NULLIF(?,''),c.benchmark_id),quality_evidence_id=COALESCE(NULLIF(?,''),c.quality_evidence_id),lab_evaluation_id=COALESCE(NULLIF(?,''),c.lab_evaluation_id),release_guard_evaluation_id=COALESCE(NULLIF(?,''),c.release_guard_evaluation_id),optimized_artifact_id=COALESCE(NULLIF(?,''),c.optimized_artifact_id),failure_code=COALESCE(NULLIF(?,''),c.failure_code),updated_at=? FROM optimization_campaigns campaign WHERE c.tenant_id=? AND c.campaign_id=? AND c.id=? AND c.state=? AND campaign.id=c.campaign_id AND campaign.tenant_id=c.tenant_id AND ((? AND campaign.state IN ('running','ranked','qualified','guard_passed','rejected','inconclusive','promoted','observed','cancelled','failed','cleaned')) OR (NOT ? AND campaign.state IN ('approved','running','ranked','qualified','guard_passed','rejected','inconclusive','promoted','observed') AND campaign.cancel_requested=FALSE AND campaign.approval_expires_at>NOW()))`, to, evidence, evidence, updates.ActualEvidenceJSON, updates.DeploymentName, updates.RevisionID, updates.BenchmarkID, updates.QualityEvidenceID, updates.LabEvaluationID, updates.ReleaseGuardEvaluationID, updates.OptimizedArtifactID, updates.FailureCode, stamp, tenant, campaignID, candidateID, from, cleanup, cleanup)
 	if err != nil {
 		return domain.OptimizationCandidateRun{}, err
 	}

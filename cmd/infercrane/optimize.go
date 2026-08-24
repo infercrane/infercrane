@@ -57,6 +57,7 @@ func optimizeCommand(ctx context.Context, args []string) error {
 	allowMetadataNetwork := fs.Bool("allow-model-metadata-network", false, "allow the isolated estimator to fetch public model metadata")
 	writeDir := fs.String("write-dir", "", "write candidate DeploymentSpecs into a new or empty directory")
 	idempotencyKey := fs.String("idempotency-key", "", "stable safe-retry key for campaign creation")
+	targetDeployment := fs.String("target-deployment", "", "existing deployment to evolve; omit when qualifying a new endpoint")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args[2:]); err != nil {
 		return err
@@ -116,14 +117,22 @@ func optimizeCommand(ctx context.Context, args []string) error {
 			Campaign optimizationCampaignView `json:"campaign"`
 			Created  bool                     `json:"created"`
 		}
-		if err = controlJSON(ctx, cfg, http.MethodPost, "/api/v1/optimization/campaigns", *idempotencyKey, map[string]any{"proposal": proposal}, &response); err != nil {
+		intent := "new_endpoint"
+		if strings.TrimSpace(*targetDeployment) != "" {
+			intent = "evolve_endpoint"
+		}
+		if err = controlJSON(ctx, cfg, http.MethodPost, "/api/v1/optimization/campaigns", *idempotencyKey, map[string]any{"proposal": proposal, "intent": intent, "target_deployment": strings.TrimSpace(*targetDeployment)}, &response); err != nil {
 			return err
 		}
 		if *output == "json" {
 			return printJSON(response)
 		}
 		fmt.Printf("Optimization campaign %s · %s\n", response.Campaign.ID, response.Campaign.State)
-		fmt.Printf("Model       %s\nObjective   %s\nCandidates  %d\nMutation    none\n\n", response.Campaign.ModelIdentity, response.Campaign.Objective, len(response.Campaign.Candidates))
+		fmt.Printf("Model       %s\nObjective   %s\nIntent      %s\nCandidates  %d\nMutation    none\n", response.Campaign.ModelIdentity, response.Campaign.Objective, response.Campaign.Intent, len(response.Campaign.Candidates))
+		if response.Campaign.TargetDeployment != "" {
+			fmt.Printf("Target      %s\n", response.Campaign.TargetDeployment)
+		}
+		fmt.Println()
 		fmt.Printf("Next: infercrane optimize approve %s --max-cost-usd AMOUNT --expires-in 1h\n", response.Campaign.ID)
 		return nil
 	}
@@ -165,6 +174,8 @@ type optimizationCampaignView struct {
 	ModelIdentity      string     `json:"model_identity"`
 	Objective          string     `json:"objective"`
 	Source             string     `json:"source"`
+	Intent             string     `json:"intent"`
+	TargetDeployment   string     `json:"target_deployment"`
 	State              string     `json:"state"`
 	ApprovedMaxCostUSD *float64   `json:"approved_max_cost_usd"`
 	ApprovalExpiresAt  *time.Time `json:"approval_expires_at"`
@@ -256,7 +267,10 @@ func optimizeCampaignCommand(ctx context.Context, args []string) error {
 	}
 	view := response.Campaign
 	fmt.Printf("Optimization campaign %s · %s\n", view.ID, view.State)
-	fmt.Printf("Model      %s\nObjective  %s\nSource     %s\n", view.ModelIdentity, view.Objective, view.Source)
+	fmt.Printf("Model      %s\nObjective  %s\nIntent     %s\nSource     %s\n", view.ModelIdentity, view.Objective, view.Intent, view.Source)
+	if view.TargetDeployment != "" {
+		fmt.Printf("Target     %s\n", view.TargetDeployment)
+	}
 	if view.ApprovedMaxCostUSD != nil {
 		fmt.Printf("Cost cap   $%.2f\n", *view.ApprovedMaxCostUSD)
 	}

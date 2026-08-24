@@ -12,6 +12,7 @@ func TestAggregateStateIsDeterministicAcrossMixedCandidates(t *testing.T) {
 		{"ranked evidence", []string{CandidateRejected, CandidateRanked}, CampaignRanked},
 		{"ranking persisted before guard", []string{CandidateRejected, CandidateGuarding}, CampaignRanked},
 		{"qualified candidate", []string{CandidateRejected, CandidateGuardPassed}, CampaignGuardPassed},
+		{"qualified new endpoint", []string{CandidateRejected, CandidateQualified}, CampaignQualified},
 		{"promotion wins", []string{CandidateObserved, CandidatePromoted}, CampaignPromoted},
 		{"observed result", []string{CandidateRejected, CandidateObserved}, CampaignObserved},
 		{"failed terminal set", []string{CandidateRejected, CandidateFailed}, CampaignFailed},
@@ -33,6 +34,18 @@ func TestAggregateStateIsDeterministicAcrossMixedCandidates(t *testing.T) {
 	}
 	if _, err := AggregateState([]string{"future_state"}); err == nil {
 		t.Fatal("unknown candidate state should fail closed")
+	}
+}
+
+func TestNewEndpointCanQualifyWithoutInventingReleaseGuardBaseline(t *testing.T) {
+	if err := ValidateCandidateTransition(CandidateRanked, CandidateQualified); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateCandidateTransition(CandidateQualified, CandidatePromoted); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateCandidateTransition(CandidateProposed, CandidateQualified); err == nil {
+		t.Fatal("new endpoint skipped measured and quality proof boundaries")
 	}
 }
 

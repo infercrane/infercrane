@@ -259,6 +259,12 @@ authority explicitly:
 infercrane optimize create llama-3.1-8b-instruct \
   --provider aws --region eu-central-1 --gpu L40S \
   --objective interactive --max-candidates 3
+
+# Safely evolve an existing production deployment instead.
+infercrane optimize create llama-3.1-8b-instruct \
+  --provider aws --region eu-central-1 --gpu L40S \
+  --objective interactive --max-candidates 3 \
+  --target-deployment llama-production
 infercrane optimize inspect CAMPAIGN_ID
 infercrane optimize approve CAMPAIGN_ID --max-cost-usd 20 --expires-in 1h
 infercrane optimize results CAMPAIGN_ID
@@ -266,7 +272,9 @@ infercrane optimize cancel CAMPAIGN_ID
 ```
 
 Approval retries do not extend the first persisted expiry. Creation and inspection allocate no
-infrastructure. Promotion remains a separate Release Guard action.
+infrastructure. The default `new_endpoint` intent stops at human activation after qualification.
+`--target-deployment` selects `evolve_endpoint`, which must stop at Release Guard and human
+promotion.
 
 ### `artifact optimize`
 
