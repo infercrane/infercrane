@@ -1,6 +1,6 @@
 # v2 world-class closure plan
 
-Status: local closure completed; real-infrastructure and clean-release gates remain.
+Status: local and clean-release closure completed; real-infrastructure and human gates remain.
 
 Updated: 2026-08-24.
 
@@ -110,7 +110,15 @@ Retained local evidence:
 - developer environment: `.infercrane/dev-check/20260824T121412Z-1789`;
 - black-box product acceptance: `.infercrane/product-acceptance/20260824T122147Z-world-class-local`.
 
-This does **not** close the release gate. The worktree must be reviewed and committed before a
-commit-addressed artifact can pass release packaging. Real AWS disruption/cache-hit, GCP GPU,
-real-GPU Kubernetes/KServe, Dynamo/NIXL/LMCache, and optimized-artifact builds remain explicit
-external qualification.
+The clean commit-addressed local and scheduled gates now pass, including release packaging. The
+authoritative evidence is generated under `.infercrane/product-qualification/<commit>` by:
+
+```bash
+make qualify-product
+make qualify-product-nightly
+make qualify-product-status
+```
+
+This closes local proof only. Real AWS disruption/cache-hit, GCP GPU, real-GPU
+Kubernetes/KServe, Dynamo/NIXL/LMCache, optimized-artifact builds, and human product review remain
+explicit external qualification boundaries.

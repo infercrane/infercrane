@@ -27,8 +27,9 @@ control-plane outcome; it cannot qualify a cloud, GPU, runtime, performance, or 
 
 There are two independent verdicts:
 
-- **Local vision closure** requires every locally provable outcome above and every local gate in
-  `make qualify-product` to pass for a clean commit.
+- **Local vision closure** requires every locally provable outcome above, every local gate in
+  `make qualify-product`, and every scheduled adversarial gate in `make qualify-product-nightly`
+  to pass for one clean commit.
 - **Production vision closure** is never global. It requires a named provider/runtime/model/GPU
   tuple to pass lifecycle, request, overload, disruption, performance, release, deletion, and direct
   inventory checks. Evidence from one tuple does not transfer to another.
@@ -44,6 +45,8 @@ Run all locally automatable product evidence from a clean commit with:
 
 ```bash
 make qualify-product
+make qualify-product-nightly
+make qualify-product-status
 ```
 
 ## Next closure order
