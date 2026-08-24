@@ -22,6 +22,7 @@ func admissionCommand(ctx context.Context, cfg config.Config, args []string) err
 	maxConcurrency := fs.Int("max-concurrency", 32, "maximum concurrently executing requests")
 	maxQueue := fs.Int("max-queue", 64, "maximum queued requests")
 	queueTimeout := fs.Int("queue-timeout-ms", 5000, "maximum queue wait in milliseconds")
+	requestTimeout := fs.Int("request-timeout-ms", 300000, "end-to-end request deadline from gateway arrival through streaming")
 	maxRequestBytes := fs.Int("max-request-bytes", 16<<20, "maximum encoded request size")
 	maxOutputTokens := fs.Int("max-output-tokens", 8192, "maximum requested output tokens")
 	priorities := fs.String("priorities", "normal", "comma-separated allowed priorities: low,normal,high")
@@ -49,7 +50,7 @@ func admissionCommand(ctx context.Context, cfg config.Config, args []string) err
 				allowed = append(allowed, priority)
 			}
 		}
-		request := map[string]any{"max_concurrency": *maxConcurrency, "max_queue_depth": *maxQueue, "queue_timeout_ms": *queueTimeout, "max_request_bytes": *maxRequestBytes, "max_output_tokens": *maxOutputTokens, "allowed_priorities": allowed, "retry_budget": *retryBudget, "enabled": !*disabled}
+		request := map[string]any{"max_concurrency": *maxConcurrency, "max_queue_depth": *maxQueue, "queue_timeout_ms": *queueTimeout, "request_timeout_ms": *requestTimeout, "max_request_bytes": *maxRequestBytes, "max_output_tokens": *maxOutputTokens, "allowed_priorities": allowed, "retry_budget": *retryBudget, "enabled": !*disabled}
 		if err := controlJSON(ctx, cfg, http.MethodPut, path, "", request, &response); err != nil {
 			return err
 		}

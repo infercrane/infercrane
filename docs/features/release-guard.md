@@ -96,6 +96,12 @@ an LLM judge, retain evaluation prompts or outputs, or let an evaluator promote 
 Because a candidate is deliberately absent from the logical route, operators gather bounded
 candidate evidence explicitly with AIPerf rather than duplicating production requests:
 
+This implements **candidate → measure → gate → active** without silently replaying live prompts.
+Teams that require production-shape validation can use content-free Inference Replay fingerprints or
+run their own reviewed evaluator dataset against the isolated candidate. InferCrane does not make
+silent shadowing the default: raw prompts may be sensitive, duplicate calls add cost, and tool calls
+may have side effects.
+
 <Warning>
 `rollout create` and `provision` may create billable candidate resources; `validate` sends the
 approved fixture to both revisions; `promote` changes production traffic. Record provider inventory,

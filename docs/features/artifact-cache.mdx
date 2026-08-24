@@ -22,7 +22,7 @@ fresh.
 infercrane artifact prefetch ARTIFACT_ID \
   --provider aws \
   --region eu-central-1 \
-  --location cache://production-models \
+  --location aws-ebs://snap-0123456789abcdef0 \
   --idempotency-key release-42-prefetch
 ```
 
@@ -56,6 +56,12 @@ state from becoming a permanent planning assumption.
   observation describes locality.
 </Note>
 
+For AWS, the configured adapter verifies and adopts an existing encrypted EBS snapshot whose tags
+bind it to the exact immutable model identity. A completed provider operation triggers a fresh
+adapter observation automatically. Snapshot creation remains an explicit operator build boundary;
+the included bounded builder prepares it on a temporary CPU instance. The word `prefetch` still does
+not imply that the control API copied model bytes.
+
 ## Why prefetch is not a universal download command
 
 Providers expose different ownership boundaries. For example, RunPod Serverless configures one
@@ -78,6 +84,7 @@ mean the model artifact is local. Keep these evidence boundaries separate:
 | Evidence | What it proves |
 | --- | --- |
 | `image_cache_hit` startup stage | The immutable runtime container image was already on the worker |
+| `artifact_cache_hit` startup stage | The verified provider-native model cache mounted successfully |
 | Fresh artifact observation with `state: present` | The provider-specific adapter observed the model artifact at its named location |
 | Runtime readiness plus expected `/v1/models` identity | The requested model is actually serving |
 

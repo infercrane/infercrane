@@ -22,6 +22,7 @@ type GCPCompute struct {
 	Binary                                                                                             string
 	Runner                                                                                             CommandRunner
 	Project, Zone, Subnet, MachineType, GPUType, ServiceAccount, VMImage, ContainerImage, WorkerSecret string
+	BootDiskGiB                                                                                        int
 }
 
 type gcpInstance struct {
@@ -35,14 +36,47 @@ type gcpInstance struct {
 // Check performs a read-only identity and Compute API probe. It deliberately
 // does not create capacity: doctor must be safe to run in production.
 func (g GCPCompute) Check(ctx context.Context) error {
-	if g.Project == "" || g.Zone == "" {
-		return errors.New("GCP project and zone are required")
+	if g.Project == "" || g.Zone == "" || g.Subnet == "" || g.MachineType == "" || g.GPUType == "" || g.ServiceAccount == "" || g.VMImage == "" || g.ContainerImage == "" || g.WorkerSecret == "" {
+		return errors.New("GCP project, zone, subnet, machine type, GPU, service account, VM image, container digest, and worker secret are required")
+	}
+	if !strings.Contains(g.ContainerImage, "@sha256:") {
+		return errors.New("GCP container image must be pinned by sha256 digest")
+	}
+	if g.BootDiskGiB < 50 || g.BootDiskGiB > 65536 {
+		return errors.New("GCP boot disk must be between 50 and 65536 GiB")
+	}
+	region, ok := gcpRegionFromZone(g.Zone)
+	if !ok {
+		return errors.New("GCP zone must end in a single-letter zone suffix")
+	}
+	imageProject, imageName, ok := gcpImageIdentity(g.VMImage)
+	if !ok {
+		return errors.New("GCP VM image must use projects/PROJECT/global/images/IMAGE immutable identity")
 	}
 	if _, err := g.run(ctx, "auth", "print-access-token", "--quiet"); err != nil {
-		return err
+		return fmt.Errorf("authenticate GCP control identity: %w", err)
 	}
-	_, err := g.run(ctx, "compute", "zones", "describe", g.Zone, "--project", g.Project, "--format", "value(name)")
-	return err
+	checks := [][]string{
+		{"compute", "zones", "describe", g.Zone, "--project", g.Project, "--format", "value(name)"},
+		{"compute", "machine-types", "describe", g.MachineType, "--zone", g.Zone, "--project", g.Project, "--format", "value(name)"},
+		{"compute", "accelerator-types", "describe", g.GPUType, "--zone", g.Zone, "--project", g.Project, "--format", "value(name)"},
+		{"iam", "service-accounts", "describe", g.ServiceAccount, "--project", g.Project, "--format", "value(email)"},
+		{"secrets", "describe", g.WorkerSecret, "--project", g.Project, "--format", "value(name)"},
+	}
+	privateGoogleAccess, err := g.run(ctx, "compute", "networks", "subnets", "describe", g.Subnet, "--region", region, "--project", g.Project, "--format", "value(privateIpGoogleAccess)")
+	if err != nil {
+		return fmt.Errorf("verify GCP dependency compute networks: %w", err)
+	}
+	if !strings.EqualFold(strings.TrimSpace(string(privateGoogleAccess)), "true") {
+		return errors.New("GCP subnet must enable Private Google Access because inference workers have no public IP")
+	}
+	checks = append(checks, []string{"compute", "images", "describe", imageName, "--project", imageProject, "--format", "value(name,status)"})
+	for _, args := range checks {
+		if _, err := g.run(ctx, args...); err != nil {
+			return fmt.Errorf("verify GCP dependency %s: %w", strings.Join(args[:2], " "), err)
+		}
+	}
+	return nil
 }
 
 func (g GCPCompute) Handle(externalKey string) ProviderHandle {
@@ -72,7 +106,7 @@ func (g GCPCompute) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provid
 	}
 	startup := g.startup(spec, port)
 	metadata := "^|||^infercrane-external-key=" + spec.ExternalKey + "|||infercrane-intent-digest=" + g.intentDigest(spec) + "|||startup-script=" + startup
-	args := []string{"compute", "instances", "create", handle.ResourceID, "--project", g.Project, "--zone", g.Zone, "--machine-type", g.MachineType, "--accelerator", "type=" + g.GPUType + ",count=1", "--subnet", g.Subnet, "--no-address", "--service-account", g.ServiceAccount, "--scopes", "cloud-platform", "--image", g.VMImage, "--maintenance-policy", "TERMINATE", "--metadata", metadata, "--labels", "infercrane-managed=true", "--format", "json", "--quiet"}
+	args := []string{"compute", "instances", "create", handle.ResourceID, "--project", g.Project, "--zone", g.Zone, "--machine-type", g.MachineType, "--accelerator", "type=" + g.GPUType + ",count=1", "--subnet", g.Subnet, "--no-address", "--service-account", g.ServiceAccount, "--scopes", "cloud-platform", "--image", g.VMImage, "--boot-disk-size", fmt.Sprintf("%dGB", g.BootDiskGiB), "--boot-disk-type", "pd-balanced", "--boot-disk-auto-delete", "--maintenance-policy", "TERMINATE", "--metadata", metadata, "--labels", "infercrane-managed=true", "--format", "json", "--quiet"}
 	output, err := g.run(ctx, args...)
 	if err != nil {
 		return ProviderHandle{}, fmt.Errorf("create GCP Compute instance: %w", err)
@@ -172,6 +206,9 @@ func (g GCPCompute) validate(spec ReplicaSpec) error {
 	if !strings.Contains(g.ContainerImage, "@sha256:") {
 		return errors.New("GCP container image must be pinned by sha256 digest")
 	}
+	if g.BootDiskGiB < 50 || g.BootDiskGiB > 65536 {
+		return errors.New("GCP boot disk must be between 50 and 65536 GiB")
+	}
 	if !spec.Workload.Empty() {
 		if err := spec.Workload.Validate(); err != nil {
 			return err
@@ -205,12 +242,37 @@ func (g GCPCompute) run(ctx context.Context, args ...string) ([]byte, error) {
 	output, err := runner.Run(ctx, nil, args...)
 	if err != nil {
 		message := strings.ToLower(string(output) + " " + err.Error())
-		if strings.Contains(message, "was not found") || strings.Contains(message, "could not fetch resource") {
+		if gcpNotFoundProbe(args) && (strings.Contains(message, "was not found") || strings.Contains(message, "could not fetch resource") || strings.Contains(message, "notfound")) {
 			return nil, errGCPResourceNotFound
 		}
-		return nil, errors.New("GCP API request failed")
+		return nil, normalizeGCPAPIError(output)
 	}
 	return output, nil
+}
+
+func gcpNotFoundProbe(args []string) bool {
+	return len(args) >= 3 && args[0] == "compute" && args[1] == "instances" && (args[2] == "describe" || args[2] == "delete")
+}
+
+// normalizeGCPAPIError retains only the provider error class and bounded
+// remediation. Raw gcloud output can contain project, principal, resource, or
+// policy details and must not be persisted in operations or public evidence.
+func normalizeGCPAPIError(output []byte) error {
+	message := strings.ToLower(string(output))
+	switch {
+	case strings.Contains(message, "permission_denied"), strings.Contains(message, "permission denied"), strings.Contains(message, "forbidden"), strings.Contains(message, "required permission"), strings.Contains(message, "unauthenticated"):
+		return fmt.Errorf("%w: verify the control identity and resource-scoped Compute permissions", ErrProviderAuthorization)
+	case strings.Contains(message, "quota_exceeded"), strings.Contains(message, "quota exceeded"), strings.Contains(message, "quota '"), strings.Contains(message, "exceeds quota"):
+		return fmt.Errorf("%w: GCP compute or accelerator quota is exhausted for the requested placement", ErrProviderQuota)
+	case strings.Contains(message, "zone_resource_pool_exhausted"), strings.Contains(message, "resource pool exhausted"), strings.Contains(message, "does not have enough resources"), strings.Contains(message, "stockout"):
+		return fmt.Errorf("%w: the requested GCP machine or accelerator is unavailable in the selected zone", ErrProviderCapacity)
+	case strings.Contains(message, "rate limit"), strings.Contains(message, "too many requests"), strings.Contains(message, "http 429"), strings.Contains(message, "resource_exhausted"):
+		return errors.New("GCP API request was rate limited")
+	case strings.Contains(message, "invalid_argument"), strings.Contains(message, "invalid value"), strings.Contains(message, "invalid resource usage"):
+		return fmt.Errorf("%w: GCP rejected the Compute launch configuration", ErrInvalidReplicaSpec)
+	default:
+		return errors.New("GCP API request failed")
+	}
 }
 func (g GCPCompute) name(key string) string {
 	sum := sha256.Sum256([]byte(key))
@@ -228,7 +290,7 @@ func (g GCPCompute) intentDigest(spec ReplicaSpec) string {
 	if port == 0 {
 		port = 8000
 	}
-	canonical := strings.Join([]string{g.Project, g.Zone, g.Subnet, g.MachineType, g.GPUType, g.ServiceAccount, g.VMImage, g.startup(spec, port)}, "\x00")
+	canonical := strings.Join([]string{g.Project, g.Zone, g.Subnet, g.MachineType, g.GPUType, g.ServiceAccount, g.VMImage, fmt.Sprint(g.BootDiskGiB), g.startup(spec, port)}, "\x00")
 	sum := sha256.Sum256([]byte(canonical))
 	return hex.EncodeToString(sum[:])
 }
@@ -270,9 +332,21 @@ func (g GCPCompute) startup(spec ReplicaSpec, port int) string {
 		"worker_key=$(printf '%s' \"$secret_data\" | base64 -d)\n" +
 		"unset token_json access_token secret_json secret_data\n" +
 		"infercrane_stage identity_ready\n" +
+		"infercrane_stage gpu_driver_start\n" +
+		"gpu_run_args='--gpus all'\n" +
+		"if command -v cos-extensions >/dev/null 2>&1; then\n" +
+		"  systemctl is-active --quiet docker.socket || systemctl start docker.socket\n" +
+		"  systemctl is-active --quiet gcr-online.target || systemctl start gcr-online.target\n" +
+		"  cos-extensions install gpu\n" +
+		"  [ -e /dev/nvidia0 ] && [ -e /dev/nvidia-uvm ] && [ -e /dev/nvidiactl ]\n" +
+		"  gpu_run_args='--volume /var/lib/nvidia/lib64:/usr/local/nvidia/lib64:ro --volume /var/lib/nvidia/bin:/usr/local/nvidia/bin:ro --device /dev/nvidia0:/dev/nvidia0 --device /dev/nvidia-uvm:/dev/nvidia-uvm --device /dev/nvidiactl:/dev/nvidiactl --env LD_LIBRARY_PATH=/usr/local/nvidia/lib64'\n" +
+		"else\n" +
+		"  nvidia-smi >/dev/null\n" +
+		"fi\n" +
+		"infercrane_stage gpu_driver_ready\n" +
 		cachedImageBootstrap(image) +
 		"infercrane_stage runtime_start\n" +
-		"docker run -d --restart=unless-stopped --gpus all -e INFERCRANE_WORKER_API_KEY=\"$worker_key\" -e VLLM_API_KEY=\"$worker_key\" -p " + fmt.Sprintf("%d:%d", port, port) + " " + shellQuote(image) + " " + strings.Join(quoted, " ") + "\n" +
+		"docker run -d --restart=unless-stopped $gpu_run_args -e INFERCRANE_WORKER_API_KEY=\"$worker_key\" -e VLLM_API_KEY=\"$worker_key\" -p " + fmt.Sprintf("%d:%d", port, port) + " " + shellQuote(image) + " " + strings.Join(quoted, " ") + "\n" +
 		"infercrane_stage runtime_container_started\n"
 }
 func metadataValue(instance gcpInstance, key string) string {
@@ -302,4 +376,20 @@ func normalizeGCPState(state string) string {
 	default:
 		return "unknown"
 	}
+}
+
+func gcpRegionFromZone(zone string) (string, bool) {
+	last := strings.LastIndexByte(zone, '-')
+	if last < 1 || last != len(zone)-2 || zone[last+1] < 'a' || zone[last+1] > 'z' {
+		return "", false
+	}
+	return zone[:last], true
+}
+
+func gcpImageIdentity(value string) (string, string, bool) {
+	parts := strings.Split(value, "/")
+	if len(parts) != 5 || parts[0] != "projects" || parts[1] == "" || parts[2] != "global" || parts[3] != "images" || parts[4] == "" || parts[4] == "family" {
+		return "", "", false
+	}
+	return parts[1], parts[4], true
 }

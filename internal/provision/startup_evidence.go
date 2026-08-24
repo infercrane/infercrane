@@ -13,15 +13,19 @@ const maxStartupConsoleBytes = 128 << 10
 var startupMarker = regexp.MustCompile(`(?m)^infercrane_startup stage=([a-z_]+) at=([^\r\n ]+)[\r]?$`)
 
 var startupStageOrder = map[string]int{
-	"identity_start":            0,
-	"identity_ready":            1,
-	"image_check":               2,
-	"image_cache_hit":           3,
-	"image_pull_start":          3,
-	"image_cache_miss_required": 3,
-	"image_pull_complete":       4,
-	"runtime_start":             5,
-	"runtime_container_started": 6,
+	"identity_start":              0,
+	"identity_ready":              1,
+	"image_check":                 2,
+	"image_cache_hit":             3,
+	"image_pull_start":            3,
+	"image_cache_miss_required":   3,
+	"image_pull_complete":         4,
+	"artifact_check":              5,
+	"artifact_cache_unconfigured": 6,
+	"artifact_cache_hit":          6,
+	"artifact_cache_mount_failed": 6,
+	"runtime_start":               7,
+	"runtime_container_started":   8,
 }
 
 // startupEvidence is the closed, provider-neutral subset of machine startup
@@ -33,6 +37,7 @@ type startupEvidence struct {
 	Source        string         `json:"source"`
 	CurrentStage  string         `json:"current_stage"`
 	ImageCache    string         `json:"image_cache"`
+	ArtifactCache string         `json:"artifact_cache"`
 	Stages        []startupStage `json:"stages"`
 }
 
@@ -115,5 +120,13 @@ func parseStartupEvidence(raw string) (startupEvidence, bool) {
 	} else if _, ok := stages["image_pull_start"]; ok {
 		imageCache = "miss"
 	}
-	return startupEvidence{SchemaVersion: 1, Source: "provider_console", CurrentStage: coherent[len(coherent)-1].Name, ImageCache: imageCache, Stages: coherent}, true
+	artifactCache := "unknown"
+	if _, ok := stages["artifact_cache_hit"]; ok {
+		artifactCache = "hit"
+	} else if _, ok := stages["artifact_cache_mount_failed"]; ok {
+		artifactCache = "mount_failed"
+	} else if _, ok := stages["artifact_cache_unconfigured"]; ok {
+		artifactCache = "unconfigured"
+	}
+	return startupEvidence{SchemaVersion: 2, Source: "provider_console", CurrentStage: coherent[len(coherent)-1].Name, ImageCache: imageCache, ArtifactCache: artifactCache, Stages: coherent}, true
 }

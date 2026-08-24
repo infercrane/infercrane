@@ -44,6 +44,22 @@ unknown keys are checked while you type. A curated recipe also pins the model co
 reviewed configuration starting points, not performance claims; use benchmark or replay evidence
 for serving decisions.
 
+The command prints one provider-specific path from validation to first request. For AWS that path is:
+
+```bash
+infercrane workload validate
+infercrane doctor --aws        # read-only identity and API preflight
+infercrane workload plan       # no provider mutation
+infercrane workload deploy --wait
+infercrane request fraud-explainer
+infercrane doctor fraud-explainer
+```
+
+`deploy --wait` prints and persists the durable operation identity. Closing the terminal does not
+cancel the operation; reattach with `infercrane operation watch OPERATION_ID`. The application keeps
+using `model="fraud-explainer"` while future revisions, runtimes, or infrastructure change behind the
+stable endpoint.
+
 ## Local validation before GPU allocation
 
 ```bash

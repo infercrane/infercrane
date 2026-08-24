@@ -175,6 +175,8 @@ grep -Fq 'Name=status,Values=creating,available,in-use,deleting,error' "$root/sc
 grep -Fq 's/^/volume:/' "$root/scripts/portable-provider-acceptance.sh"
 grep -Fq 'candidate_revision=$(git -C "$root" rev-parse --short=12 HEAD)' "$root/scripts/portable-provider-acceptance.sh"
 grep -Fq 'candidate_image=${INFERCRANE_V1_IMAGE:-infercrane:acceptance-$candidate_revision}' "$root/scripts/portable-provider-acceptance.sh"
+grep -Fq 'docker buildx version >/dev/null 2>&1' "$root/scripts/portable-provider-acceptance.sh"
+grep -Fq 'DOCKER_BUILDKIT=1 docker build --target runtime' "$root/scripts/portable-provider-acceptance.sh"
 grep -Fq 'compose down --volumes --remove-orphans >/dev/null 2>&1 || true' "$root/scripts/portable-provider-acceptance.sh"
 grep -Fq 'runtimes=${INFERCRANE_V1_RUNTIMES:-"vllm sglang custom-oci"}' "$root/scripts/portable-provider-acceptance.sh"
 grep -Fq 'features=${INFERCRANE_V1_VLLM_FEATURES:-"tools structured"}' "$root/scripts/portable-provider-acceptance.sh"
@@ -186,6 +188,45 @@ fi
 grep -Fq 'pass --approve-paid-resources' "$temporary/unapproved-aws-performance.log"
 grep -Fq 'INFERCRANE_V1_RUNTIMES=vllm' "$root/scripts/aws-performance-qualification.sh"
 grep -Fq 'INFERCRANE_V1_VLLM_FEATURES="$features"' "$root/scripts/aws-performance-qualification.sh"
+grep -Fq 'case "$cloud" in aws|gcp) performance_matrix=true' "$root/scripts/portable-provider-acceptance.sh"
+for resource in disks addresses forwarding-rules; do
+  grep -Fq "gcloud compute $resource list" "$root/scripts/portable-provider-acceptance.sh"
+done
+
+# Building an immutable AWS artifact snapshot is a distinct paid operation. It
+# must require explicit approval before credentials, networking, or EC2 are
+# inspected, and cleanup must use only IDs persisted under the selected run.
+if INFERCRANE_AWS_ARTIFACT_BUILD_RUN_ID=unapproved \
+  "$root/scripts/aws-artifact-cache-build.sh" build >"$temporary/unapproved-artifact-build.log" 2>&1; then
+  echo "unapproved AWS artifact-cache build unexpectedly started" >&2
+  exit 1
+fi
+grep -Fq 'pass --approve-paid-resources' "$temporary/unapproved-artifact-build.log"
+grep -Fq 'infercrane:artifact-cache' "$root/scripts/aws-artifact-cache-build.sh"
+grep -Fq 'infercrane:model-identity-digest' "$root/scripts/aws-artifact-cache-build.sh"
+grep -Fq 'DeleteOnTermination:false' "$root/scripts/aws-artifact-cache-build.sh"
+grep -Fq 'huggingface_hub==0.36.0' "$root/scripts/aws-artifact-cache-build.sh"
+grep -Fq 'snapshot_download(' "$root/scripts/aws-artifact-cache-build.sh"
+grep -Fq 'approve-snapshot-deletion' "$root/scripts/aws-artifact-cache-build.sh"
+if grep -Eq 'enable-fast-snapshot-restores|VolumeInitializationRate' "$root/scripts/aws-artifact-cache-build.sh"; then
+  echo "artifact-cache builder silently enables a paid snapshot acceleration path" >&2
+  exit 1
+fi
+if INFERCRANE_AWS_ARTIFACT_BUILD_RUN_ID=unapproved INFERCRANE_AWS_REGION=eu-central-1 \
+  "$root/scripts/aws-artifact-cache-build.sh" delete-snapshot >"$temporary/unapproved-snapshot-delete.log" 2>&1; then
+  echo "unapproved AWS artifact snapshot deletion unexpectedly started" >&2
+  exit 1
+fi
+grep -Fq 'pass --approve-snapshot-deletion' "$temporary/unapproved-snapshot-delete.log"
+if INFERCRANE_V1_PROVIDER_ENV_FILE=/unreadable INFERCRANE_AWS_ARTIFACT_SNAPSHOT_MAPPING_FILE=/unreadable \
+  "$root/scripts/aws-artifact-cache-qualification.sh" mistral >"$temporary/unapproved-cache-qualification.log" 2>&1; then
+  echo "unapproved AWS cache qualification unexpectedly started" >&2
+  exit 1
+fi
+grep -Fq 'pass --approve-paid-resources' "$temporary/unapproved-cache-qualification.log"
+grep -Fq 'INFERCRANE_V1_EXPECT_ARTIFACT_CACHE=hit' "$root/scripts/aws-artifact-cache-qualification.sh"
+grep -Fq 'INFERCRANE_V1_PERFORMANCE_MATRIX=false' "$root/scripts/aws-artifact-cache-qualification.sh"
+grep -Fq '.provider_details.startup_evidence.artifact_cache == $expected' "$root/scripts/portable-provider-acceptance.sh"
 
 mkdir -p "$temporary/v1-report/stale/stages"
 for stage in runpod aws kubernetes; do
@@ -286,5 +327,6 @@ done
 # The whole-product verdict is independently regression-tested: local passes,
 # cloud access gaps, human review, and cleanup evidence must remain distinct.
 "$root/scripts/test-product-qualification.sh"
+"$root/scripts/test-aws-artifact-cache-build.sh"
 
 echo "acceptance paid-run locks and approval boundaries passed"

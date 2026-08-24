@@ -1,6 +1,21 @@
 #!/bin/sh
 set -eu
 
+if [ -n "${INFERCRANE_GCLOUD_CONFIG_SOURCE:-}" ]; then
+  [ -d "$INFERCRANE_GCLOUD_CONFIG_SOURCE" ] || {
+    echo "INFERCRANE_GCLOUD_CONFIG_SOURCE is not a readable directory" >&2
+    exit 1
+  }
+  : "${CLOUDSDK_CONFIG:?set CLOUDSDK_CONFIG with INFERCRANE_GCLOUD_CONFIG_SOURCE}"
+  case "$CLOUDSDK_CONFIG" in
+    /tmp/*) ;;
+    *) echo "CLOUDSDK_CONFIG must use container-local /tmp storage" >&2; exit 1 ;;
+  esac
+  mkdir -p "$CLOUDSDK_CONFIG"
+  cp -R "$INFERCRANE_GCLOUD_CONFIG_SOURCE"/. "$CLOUDSDK_CONFIG"/
+  chmod -R u+rwX,go-rwx "$CLOUDSDK_CONFIG"
+fi
+
 runpod_key=${RUNPOD_API_KEY:-}
 if [ -z "$runpod_key" ] && [ -n "${RUNPOD_API_KEY_FILE:-}" ]; then
   [ -r "$RUNPOD_API_KEY_FILE" ] || {

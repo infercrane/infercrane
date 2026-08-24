@@ -20,10 +20,19 @@ type fakeGCPRunner struct {
 	serialOutput     string
 }
 
-type gcpCheckRunner struct{ calls [][]string }
+type gcpCheckRunner struct {
+	calls               [][]string
+	privateGoogleAccess string
+}
 
 func (r *gcpCheckRunner) Run(_ context.Context, _ []string, args ...string) ([]byte, error) {
 	r.calls = append(r.calls, append([]string(nil), args...))
+	if len(args) > 2 && args[0] == "compute" && args[1] == "networks" && args[2] == "subnets" {
+		if r.privateGoogleAccess == "" {
+			return []byte("true"), nil
+		}
+		return []byte(r.privateGoogleAccess), nil
+	}
 	return []byte("ok"), nil
 }
 
@@ -92,17 +101,30 @@ func TestGCPComputePersistsClosedStartupEvidence(t *testing.T) {
 }
 
 func testGCPCompute(runner CommandRunner) GCPCompute {
-	return GCPCompute{Runner: runner, Project: "project", Zone: "europe-west4-a", Subnet: "private-inference", MachineType: "g2-standard-4", GPUType: "nvidia-l4", ServiceAccount: "runtime@project.iam.gserviceaccount.com", VMImage: "projects/cos-cloud/global/images/cos-immutable", ContainerImage: "vllm/vllm-openai@sha256:" + strings.Repeat("a", 64), WorkerSecret: "infercrane-worker"}
+	return GCPCompute{Runner: runner, Project: "project", Zone: "europe-west4-a", Subnet: "private-inference", MachineType: "g2-standard-4", GPUType: "nvidia-l4", ServiceAccount: "runtime@project.iam.gserviceaccount.com", VMImage: "projects/cos-cloud/global/images/cos-immutable", ContainerImage: "vllm/vllm-openai@sha256:" + strings.Repeat("a", 64), WorkerSecret: "infercrane-worker", BootDiskGiB: 200}
 }
 
 func TestGCPComputeCheckIsReadOnly(t *testing.T) {
 	runner := &gcpCheckRunner{}
-	provider := GCPCompute{Runner: runner, Project: "project", Zone: "europe-west4-a"}
+	provider := testGCPCompute(runner)
 	if err := provider.Check(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if len(runner.calls) != 2 || runner.calls[0][0] != "auth" || runner.calls[1][1] != "zones" {
+	if len(runner.calls) != 8 || runner.calls[0][0] != "auth" || runner.calls[1][2] != "subnets" || runner.calls[2][1] != "zones" || runner.calls[3][1] != "machine-types" || runner.calls[4][1] != "accelerator-types" || runner.calls[5][0] != "iam" || runner.calls[6][0] != "secrets" || runner.calls[7][1] != "images" {
 		t.Fatalf("unexpected read-only calls: %#v", runner.calls)
+	}
+}
+
+func TestGCPComputeCheckRequiresPrivateGoogleAccess(t *testing.T) {
+	runner := &gcpCheckRunner{privateGoogleAccess: "False"}
+	err := testGCPCompute(runner).Check(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "Private Google Access") {
+		t.Fatalf("private worker subnet without Google API access accepted: %v", err)
+	}
+	for _, call := range runner.calls {
+		if len(call) > 2 && call[0] == "compute" && call[1] == "instances" && call[2] == "create" {
+			t.Fatalf("preflight created paid capacity: %#v", runner.calls)
+		}
 	}
 }
 
@@ -122,7 +144,7 @@ func TestGCPComputeLifecycleIsPrivateIdempotentAndAdoptable(t *testing.T) {
 		t.Fatalf("adopted=%#v creates=%d err=%v", adopted, runner.creates, err)
 	}
 	joined := strings.Join(runner.lastCreate, " ")
-	for _, required := range []string{"--no-address", "--service-account runtime@project.iam.gserviceaccount.com", "--labels infercrane-managed=true"} {
+	for _, required := range []string{"--no-address", "--boot-disk-size 200GB", "--boot-disk-type pd-balanced", "--boot-disk-auto-delete", "--service-account runtime@project.iam.gserviceaccount.com", "--labels infercrane-managed=true"} {
 		if !strings.Contains(joined, required) {
 			t.Fatalf("create missing %q: %s", required, joined)
 		}
@@ -146,6 +168,40 @@ func TestGCPComputeLifecycleIsPrivateIdempotentAndAdoptable(t *testing.T) {
 	}
 }
 
+func TestGCPComputeCheckRejectsIncompleteOrMutableDependenciesBeforeNetwork(t *testing.T) {
+	runner := &gcpCheckRunner{}
+	provider := testGCPCompute(runner)
+	provider.ContainerImage = "mutable:latest"
+	if err := provider.Check(context.Background()); err == nil || len(runner.calls) != 0 {
+		t.Fatalf("mutable dependency reached GCP: calls=%#v err=%v", runner.calls, err)
+	}
+	provider = testGCPCompute(runner)
+	provider.VMImage = "projects/cos-cloud/global/images/family/cos-stable"
+	if err := provider.Check(context.Background()); err == nil || len(runner.calls) != 0 {
+		t.Fatalf("image family was accepted: calls=%#v err=%v", runner.calls, err)
+	}
+}
+
+func TestGCPIdentityParsersFailClosed(t *testing.T) {
+	if region, ok := gcpRegionFromZone("europe-west4-a"); !ok || region != "europe-west4" {
+		t.Fatalf("region=%q ok=%t", region, ok)
+	}
+	for _, invalid := range []string{"europe-west4", "europe-west4-aa", "", "-a"} {
+		if _, ok := gcpRegionFromZone(invalid); ok {
+			t.Fatalf("invalid zone accepted: %q", invalid)
+		}
+	}
+	project, image, ok := gcpImageIdentity("projects/cos-cloud/global/images/cos-immutable")
+	if !ok || project != "cos-cloud" || image != "cos-immutable" {
+		t.Fatalf("project=%q image=%q ok=%t", project, image, ok)
+	}
+	for _, invalid := range []string{"cos-immutable", "projects/cos-cloud/global/images/family/cos-stable", "projects//global/images/image"} {
+		if _, _, ok := gcpImageIdentity(invalid); ok {
+			t.Fatalf("invalid image accepted: %q", invalid)
+		}
+	}
+}
+
 func TestGCPComputeRejectsMutableContainerBeforeProviderCall(t *testing.T) {
 	runner := &fakeGCPRunner{}
 	provider := testGCPCompute(runner)
@@ -153,6 +209,40 @@ func TestGCPComputeRejectsMutableContainerBeforeProviderCall(t *testing.T) {
 	_, err := provider.EnsureReplica(context.Background(), ReplicaSpec{ExternalKey: "r0", Model: "model", Cloud: "gcp", Region: "europe-west4", GPU: "nvidia-l4"})
 	if err == nil || runner.creates != 0 {
 		t.Fatalf("mutable image accepted err=%v creates=%d", err, runner.creates)
+	}
+}
+
+func TestGCPComputeNormalizesProviderFailuresWithoutLeakingRawOutput(t *testing.T) {
+	tests := []struct {
+		name, output, remediation string
+		target                    error
+	}{
+		{"authorization", `PERMISSION_DENIED principal user@example.com lacks compute.instances.create`, "control identity", ErrProviderAuthorization},
+		{"global GPU quota", `QUOTA_EXCEEDED: Quota 'GPUS_ALL_REGIONS' exceeded. Limit: 0.0 globally. project=secret-project`, "accelerator quota", ErrProviderQuota},
+		{"zonal capacity", `ZONE_RESOURCE_POOL_EXHAUSTED: The zone does not have enough resources`, "selected zone", ErrProviderCapacity},
+		{"invalid launch", `INVALID_ARGUMENT: Invalid value for field resource.machineType`, "launch configuration", ErrInvalidReplicaSpec},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := normalizeGCPAPIError([]byte(test.output))
+			if !errors.Is(err, test.target) || !strings.Contains(err.Error(), test.remediation) {
+				t.Fatalf("normalized error=%v", err)
+			}
+			for _, secret := range []string{"user@example.com", "secret-project", "GPUS_ALL_REGIONS"} {
+				if strings.Contains(err.Error(), secret) {
+					t.Fatalf("normalized error leaked provider output: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestGCPNotFoundClassificationIsLimitedToObservationCommands(t *testing.T) {
+	if !gcpNotFoundProbe([]string{"compute", "instances", "describe", "worker"}) || !gcpNotFoundProbe([]string{"compute", "instances", "delete", "worker"}) {
+		t.Fatal("observation and idempotent deletion must recognize missing resources")
+	}
+	if gcpNotFoundProbe([]string{"compute", "instances", "create", "worker"}) || gcpNotFoundProbe([]string{"compute", "images", "describe", "image"}) {
+		t.Fatal("unrelated provider failures must not be converted to missing instances")
 	}
 }
 
@@ -202,5 +292,28 @@ func TestGCPComputeStartupUsesWorkloadIdentityWithoutWorkerGcloud(t *testing.T) 
 	command.Stdin = strings.NewReader(script)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("startup script is not valid POSIX shell: %v: %s\n%s", err, output, script)
+	}
+}
+
+func TestGCPComputeStartupInstallsAndExposesGPUOnContainerOptimizedOS(t *testing.T) {
+	provider := testGCPCompute(&fakeGCPRunner{})
+	script := provider.startup(ReplicaSpec{Model: "Qwen/Qwen3-8B"}, 8000)
+	for _, required := range []string{
+		"infercrane_stage gpu_driver_start",
+		"systemctl is-active --quiet gcr-online.target",
+		"cos-extensions install gpu",
+		"[ -e /dev/nvidia0 ]",
+		"--volume /var/lib/nvidia/lib64:/usr/local/nvidia/lib64:ro",
+		"--device /dev/nvidia-uvm:/dev/nvidia-uvm",
+		"--env LD_LIBRARY_PATH=/usr/local/nvidia/lib64",
+		"infercrane_stage gpu_driver_ready",
+		"docker run -d --restart=unless-stopped $gpu_run_args",
+	} {
+		if !strings.Contains(script, required) {
+			t.Fatalf("startup script missing GPU prerequisite %q: %s", required, script)
+		}
+	}
+	if strings.Index(script, "infercrane_stage gpu_driver_ready") > strings.Index(script, "infercrane_stage runtime_start") {
+		t.Fatalf("runtime can start before GPU driver readiness: %s", script)
 	}
 }

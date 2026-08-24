@@ -9,27 +9,42 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/infercrane/infercrane/internal/artifactcache"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
 )
 
 type fakeAWSRunner struct {
-	instanceID            string
-	externalKey           string
-	state                 string
-	failAfterCreate       bool
-	createCalls           int
-	deleteCalls           int
-	apiEnvironments       [][]string
-	runInstanceArgs       []string
-	runInstanceHistory    [][]string
-	roleFailurePayload    string
-	createFailurePayload  string
-	createFailureBySubnet map[string]string
-	instanceType          string
-	instanceSubnet        string
-	rootVolumeGiB         int
-	rootEncrypted         bool
-	consoleOutput         string
+	instanceID             string
+	externalKey            string
+	state                  string
+	failAfterCreate        bool
+	createCalls            int
+	deleteCalls            int
+	apiEnvironments        [][]string
+	runInstanceArgs        []string
+	runInstanceHistory     [][]string
+	roleFailurePayload     string
+	createFailurePayload   string
+	createFailureBySubnet  map[string]string
+	instanceType           string
+	instanceSubnet         string
+	rootVolumeGiB          int
+	rootEncrypted          bool
+	rootDeviceName         string
+	tagRootVolumeGiB       int
+	tagRootEncrypted       *bool
+	tagRootDeviceName      string
+	amiRootDeviceName      string
+	amiRootVolumeGiB       int
+	amiOccupiedDevices     []string
+	consoleOutput          string
+	snapshotID             string
+	snapshotState          string
+	snapshotEncrypted      bool
+	snapshotVolumeGiB      int
+	snapshotIdentityDigest string
+	artifactSnapshotID     string
+	artifactIdentityDigest string
 }
 
 func (f *fakeAWSRunner) Run(_ context.Context, environment []string, args ...string) ([]byte, error) {
@@ -44,6 +59,22 @@ func (f *fakeAWSRunner) Run(_ context.Context, environment []string, args ...str
 		return nil, errors.New("unexpected AWS command")
 	}
 	switch args[1] {
+	case "describe-images":
+		rootDevice := f.amiRootDeviceName
+		if rootDevice == "" {
+			rootDevice = "/dev/xvda"
+		}
+		rootGiB := f.amiRootVolumeGiB
+		if rootGiB == 0 {
+			rootGiB = 30
+		}
+		mappings := []map[string]any{{"DeviceName": rootDevice, "Ebs": map[string]any{"VolumeSize": rootGiB}}}
+		for _, device := range f.amiOccupiedDevices {
+			if device != rootDevice {
+				mappings = append(mappings, map[string]any{"DeviceName": device, "Ebs": map[string]any{"VolumeSize": 10}})
+			}
+		}
+		return json.Marshal(map[string]any{"Images": []any{map[string]any{"ImageId": "ami-gpu", "RootDeviceName": rootDevice, "BlockDeviceMappings": mappings}}})
 	case "describe-instances":
 		if f.instanceID == "" {
 			return []byte(`{"Reservations":[]}`), nil
@@ -54,14 +85,57 @@ func (f *fakeAWSRunner) Run(_ context.Context, environment []string, args ...str
 		}
 		rootVolumeGiB, rootEncrypted := f.rootVolumeGiB, f.rootEncrypted
 		if rootVolumeGiB == 0 {
-			rootVolumeGiB, rootEncrypted = 100, true
+			rootVolumeGiB, rootEncrypted = 200, true
+		}
+		rootDevice := f.rootDeviceName
+		if rootDevice == "" {
+			rootDevice = f.amiRootDeviceName
+		}
+		if rootDevice == "" {
+			rootDevice = "/dev/xvda"
 		}
 		instanceSubnet := f.instanceSubnet
 		if instanceSubnet == "" {
 			instanceSubnet = "subnet-private"
 		}
-		response := map[string]any{"Reservations": []any{map[string]any{"Instances": []any{map[string]any{"InstanceId": f.instanceID, "ImageId": "ami-gpu", "InstanceType": instanceType, "SubnetId": instanceSubnet, "PrivateIpAddress": "10.0.1.12", "IamInstanceProfile": map[string]string{"Arn": "arn:aws:iam::123456789012:instance-profile/infercrane-worker"}, "SecurityGroups": []map[string]string{{"GroupId": "sg-inference"}}, "State": map[string]string{"Name": f.state}, "Tags": []map[string]string{{"Key": "infercrane:external-key", "Value": f.externalKey}, {"Key": "infercrane:root-volume-gib", "Value": fmt.Sprint(rootVolumeGiB)}, {"Key": "infercrane:root-volume-encrypted", "Value": fmt.Sprint(rootEncrypted)}}}}}}}
+		tagDevice := f.tagRootDeviceName
+		if tagDevice == "" {
+			tagDevice = rootDevice
+		}
+		tagGiB := f.tagRootVolumeGiB
+		if tagGiB == 0 {
+			tagGiB = rootVolumeGiB
+		}
+		tagEncrypted := rootEncrypted
+		if f.tagRootEncrypted != nil {
+			tagEncrypted = *f.tagRootEncrypted
+		}
+		tags := []map[string]string{{"Key": "infercrane:external-key", "Value": f.externalKey}, {"Key": "infercrane:root-device-name", "Value": tagDevice}, {"Key": "infercrane:root-volume-gib", "Value": fmt.Sprint(tagGiB)}, {"Key": "infercrane:root-volume-encrypted", "Value": fmt.Sprint(tagEncrypted)}}
+		if f.artifactSnapshotID != "" {
+			tags = append(tags, map[string]string{"Key": "infercrane:artifact-snapshot-id", "Value": f.artifactSnapshotID}, map[string]string{"Key": "infercrane:artifact-identity-digest", "Value": f.artifactIdentityDigest})
+		}
+		response := map[string]any{"Reservations": []any{map[string]any{"Instances": []any{map[string]any{"InstanceId": f.instanceID, "ImageId": "ami-gpu", "InstanceType": instanceType, "SubnetId": instanceSubnet, "PrivateIpAddress": "10.0.1.12", "RootDeviceName": rootDevice, "BlockDeviceMappings": []map[string]any{{"DeviceName": rootDevice, "Ebs": map[string]string{"VolumeId": "vol-root"}}}, "IamInstanceProfile": map[string]string{"Arn": "arn:aws:iam::123456789012:instance-profile/infercrane-worker"}, "SecurityGroups": []map[string]string{{"GroupId": "sg-inference"}}, "State": map[string]string{"Name": f.state}, "Tags": tags}}}}}
 		return json.Marshal(response)
+	case "describe-volumes":
+		rootVolumeGiB, rootEncrypted := f.rootVolumeGiB, f.rootEncrypted
+		if rootVolumeGiB == 0 {
+			rootVolumeGiB, rootEncrypted = 200, true
+		}
+		return json.Marshal(map[string]any{"Volumes": []any{map[string]any{"VolumeId": "vol-root", "Size": rootVolumeGiB, "Encrypted": rootEncrypted}}})
+	case "describe-snapshots":
+		state := f.snapshotState
+		if state == "" {
+			state = "completed"
+		}
+		volumeGiB := f.snapshotVolumeGiB
+		if volumeGiB == 0 {
+			volumeGiB = 100
+		}
+		encrypted := f.snapshotEncrypted
+		if f.snapshotState == "" && !f.snapshotEncrypted {
+			encrypted = true
+		}
+		return json.Marshal(map[string]any{"Snapshots": []any{map[string]any{"SnapshotId": f.snapshotID, "State": state, "Encrypted": encrypted, "VolumeSize": volumeGiB, "Tags": []map[string]string{{"Key": "infercrane:artifact-cache", "Value": "true"}, {"Key": "infercrane:model-identity-digest", "Value": f.snapshotIdentityDigest}}}}})
 	case "run-instances":
 		f.createCalls++
 		f.runInstanceArgs = append([]string(nil), args...)
@@ -77,6 +151,9 @@ func (f *fakeAWSRunner) Run(_ context.Context, environment []string, args ...str
 		f.instanceSubnet = subnet
 		f.externalKey = awsArgumentTagExternalKey(args)
 		f.rootVolumeGiB, f.rootEncrypted = awsArgumentRootVolume(args)
+		f.rootDeviceName = awsArgumentRootDevice(args)
+		f.artifactSnapshotID = awsArgumentTag(args, "infercrane:artifact-snapshot-id")
+		f.artifactIdentityDigest = awsArgumentTag(args, "infercrane:artifact-identity-digest")
 		if f.failAfterCreate {
 			f.failAfterCreate = false
 			return []byte("transport lost after create"), errors.New("transport lost")
@@ -118,6 +195,10 @@ func TestAWSEC2NormalizesActionableFailuresWithoutRawProviderOutput(t *testing.T
 }
 
 func awsArgumentTagExternalKey(args []string) string {
+	return awsArgumentTag(args, "infercrane:external-key")
+}
+
+func awsArgumentTag(args []string, key string) string {
 	for i, arg := range args {
 		if arg != "--tag-specifications" || i+1 >= len(args) {
 			continue
@@ -130,7 +211,7 @@ func awsArgumentTagExternalKey(args []string) string {
 		_ = json.Unmarshal([]byte(args[i+1]), &specifications)
 		for _, specification := range specifications {
 			for _, tag := range specification.Tags {
-				if tag.Key == "infercrane:external-key" {
+				if tag.Key == key {
 					return tag.Value
 				}
 			}
@@ -193,13 +274,66 @@ func awsArgumentRootVolume(args []string) (int, bool) {
 			Ebs        struct {
 				VolumeSize int
 				Encrypted  bool
+				SnapshotID string `json:"SnapshotId"`
 			}
 		}
-		if json.Unmarshal([]byte(args[i+1]), &mappings) == nil && len(mappings) == 1 && mappings[0].DeviceName == "/dev/xvda" {
-			return mappings[0].Ebs.VolumeSize, mappings[0].Ebs.Encrypted
+		if json.Unmarshal([]byte(args[i+1]), &mappings) == nil {
+			for _, mapping := range mappings {
+				if mapping.Ebs.SnapshotID == "" {
+					return mapping.Ebs.VolumeSize, mapping.Ebs.Encrypted
+				}
+			}
 		}
 	}
 	return 0, false
+}
+
+func awsArgumentRootDevice(args []string) string {
+	for i, arg := range args {
+		if arg != "--block-device-mappings" || i+1 >= len(args) {
+			continue
+		}
+		var mappings []struct {
+			DeviceName string
+			EBS        struct {
+				SnapshotID string `json:"SnapshotId"`
+			} `json:"Ebs"`
+		}
+		if json.Unmarshal([]byte(args[i+1]), &mappings) == nil {
+			for _, mapping := range mappings {
+				if mapping.EBS.SnapshotID == "" {
+					return mapping.DeviceName
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func awsArgumentArtifactVolume(args []string) (snapshotID string, encrypted, deleteOnTermination bool, initializationRate int) {
+	for i, arg := range args {
+		if arg != "--block-device-mappings" || i+1 >= len(args) {
+			continue
+		}
+		var mappings []struct {
+			DeviceName string
+			Ebs        struct {
+				SnapshotID               string `json:"SnapshotId"`
+				Encrypted                bool
+				DeleteOnTermination      bool
+				VolumeInitializationRate int
+			}
+		}
+		if json.Unmarshal([]byte(args[i+1]), &mappings) != nil {
+			return "", false, false, 0
+		}
+		for _, mapping := range mappings {
+			if mapping.DeviceName == "/dev/sdf" {
+				return mapping.Ebs.SnapshotID, mapping.Ebs.Encrypted, mapping.Ebs.DeleteOnTermination, mapping.Ebs.VolumeInitializationRate
+			}
+		}
+	}
+	return "", false, false, 0
 }
 
 func testAWSEC2(runner CommandRunner) AWSEC2 {
@@ -214,6 +348,111 @@ func testAWSEC2(runner CommandRunner) AWSEC2 {
 
 func awsReplicaSpec() ReplicaSpec {
 	return ReplicaSpec{ExternalKey: "deployment-r0", Model: "Qwen/Qwen3-8B", ModelRevision: "immutable", Cloud: "aws", GPU: "L40S", Region: "eu-central-1", Port: 8000}
+}
+
+func configureAWSArtifactSnapshot(provider *AWSEC2, runner *fakeAWSRunner) {
+	identity := modelIdentity(awsReplicaSpec())
+	runner.snapshotID = "snap-0123456789abcdef0"
+	runner.snapshotIdentityDigest = modelIdentityDigest(identity)
+	provider.ArtifactCachePolicy = "required"
+	provider.ArtifactSnapshots = map[string]string{identity: runner.snapshotID}
+	provider.ArtifactVolumeInitializationRate = 200
+}
+
+func TestAWSEC2LaunchesWithVerifiedImmutableArtifactSnapshot(t *testing.T) {
+	runner := &fakeAWSRunner{}
+	provider := testAWSEC2(runner)
+	configureAWSArtifactSnapshot(&provider, runner)
+	if _, err := provider.EnsureReplica(context.Background(), awsReplicaSpec()); err != nil {
+		t.Fatal(err)
+	}
+	snapshotID, encrypted, deleteOnTermination, rate := awsArgumentArtifactVolume(runner.runInstanceArgs)
+	if snapshotID != runner.snapshotID || !encrypted || !deleteOnTermination || rate != 200 {
+		t.Fatalf("artifact mapping snapshot=%q encrypted=%v delete=%v rate=%d", snapshotID, encrypted, deleteOnTermination, rate)
+	}
+	if awsArgumentTag(runner.runInstanceArgs, "infercrane:artifact-snapshot-id") != runner.snapshotID || awsArgumentTag(runner.runInstanceArgs, "infercrane:artifact-identity-digest") != runner.snapshotIdentityDigest {
+		t.Fatalf("immutable cache identity tags missing: %v", runner.runInstanceArgs)
+	}
+	userData := awsUserData(runner.runInstanceArgs)
+	for _, expected := range []string{"blkid -L INFERCRANE_ART", "mount -o ro,nosuid,nodev", "infercrane_stage artifact_cache_hit", "HF_HUB_OFFLINE=1", "/root/.cache/huggingface:ro"} {
+		if !strings.Contains(userData, expected) {
+			t.Fatalf("artifact cache bootstrap missing %q:\n%s", expected, userData)
+		}
+	}
+	command := exec.Command("sh", "-n")
+	command.Stdin = strings.NewReader(userData)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("artifact bootstrap is invalid POSIX shell: %v: %s", err, output)
+	}
+}
+
+func TestAWSEC2ArtifactSnapshotValidationFailsBeforeLaunch(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*fakeAWSRunner)
+	}{
+		{name: "unencrypted", mutate: func(r *fakeAWSRunner) { r.snapshotState = "completed"; r.snapshotEncrypted = false }},
+		{name: "incomplete", mutate: func(r *fakeAWSRunner) { r.snapshotState = "pending"; r.snapshotEncrypted = true }},
+		{name: "wrong identity", mutate: func(r *fakeAWSRunner) { r.snapshotIdentityDigest = "sha256:" + strings.Repeat("0", 64) }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			runner := &fakeAWSRunner{}
+			provider := testAWSEC2(runner)
+			configureAWSArtifactSnapshot(&provider, runner)
+			test.mutate(runner)
+			if _, err := provider.EnsureReplica(context.Background(), awsReplicaSpec()); err == nil || runner.createCalls != 0 {
+				t.Fatalf("invalid snapshot launched: creates=%d err=%v", runner.createCalls, err)
+			}
+		})
+	}
+}
+
+func TestAWSEC2RequiredArtifactSnapshotMustExistAndBeRuntimeCompatible(t *testing.T) {
+	runner := &fakeAWSRunner{}
+	provider := testAWSEC2(runner)
+	provider.ArtifactCachePolicy = "required"
+	if _, err := provider.EnsureReplica(context.Background(), awsReplicaSpec()); err == nil || runner.createCalls != 0 {
+		t.Fatalf("required cache without mapping launched: creates=%d err=%v", runner.createCalls, err)
+	}
+	spec := awsReplicaSpec()
+	spec.Runtime = "custom-oci"
+	spec.Workload = runtimecontract.Workload{Image: provider.ImageDigest, Command: []string{"serve"}, Protocol: "openai", Port: 8000, ReadinessPath: "/health", ModelsPath: "/v1/models", MetricsPath: "/metrics", Cancellation: "http-disconnect", Drain: "connection", ShutdownGraceSeconds: 30}
+	if _, err := provider.EnsureReplica(context.Background(), spec); err == nil || !strings.Contains(err.Error(), "qualified only") || runner.createCalls != 0 {
+		t.Fatalf("unqualified runtime accepted required cache: creates=%d err=%v", runner.createCalls, err)
+	}
+}
+
+func TestAWSEC2ArtifactSnapshotSurvivesLostCreateResponseAdoption(t *testing.T) {
+	runner := &fakeAWSRunner{failAfterCreate: true}
+	provider := testAWSEC2(runner)
+	configureAWSArtifactSnapshot(&provider, runner)
+	if _, err := provider.EnsureReplica(context.Background(), awsReplicaSpec()); err == nil {
+		t.Fatal("lost response was not surfaced")
+	}
+	handle, err := provider.EnsureReplica(context.Background(), awsReplicaSpec())
+	if err != nil || handle.ResourceID != "i-fixture" || runner.createCalls != 1 {
+		t.Fatalf("handle=%#v creates=%d err=%v", handle, runner.createCalls, err)
+	}
+}
+
+func TestAWSEC2ArtifactAdapterAdoptsOnlyConfiguredVerifiedSnapshot(t *testing.T) {
+	runner := &fakeAWSRunner{}
+	provider := testAWSEC2(runner)
+	configureAWSArtifactSnapshot(&provider, runner)
+	request := artifactcache.Request{ArtifactID: "artifact-1", ModelIdentity: modelIdentity(awsReplicaSpec()), Provider: "aws", Region: provider.Region, Location: "aws-ebs://" + runner.snapshotID, IdempotencyKey: "release-42"}
+	operation, err := provider.Prefetch(context.Background(), request)
+	if err != nil || operation.Status != "succeeded" || operation.ProviderOperationID != runner.snapshotID {
+		t.Fatalf("operation=%#v err=%v", operation, err)
+	}
+	observation, err := provider.Observe(context.Background(), request)
+	if err != nil || observation.State != "present" || observation.Source != "aws-ebs-snapshot" || !strings.Contains(observation.EvidenceJSON, runner.snapshotID) || !observation.ExpiresAt.After(observation.ObservedAt) {
+		t.Fatalf("observation=%#v err=%v", observation, err)
+	}
+	request.Location = "aws-ebs://snap-deadbeef"
+	if _, err = provider.Prefetch(context.Background(), request); err == nil {
+		t.Fatal("unconfigured snapshot was adopted")
+	}
 }
 
 func TestAWSEC2LifecycleIsIdempotentPrivateAndTagged(t *testing.T) {
@@ -232,7 +471,7 @@ func TestAWSEC2LifecycleIsIdempotentPrivateAndTagged(t *testing.T) {
 		t.Fatalf("observation=%#v err=%v", observation, err)
 	}
 	joined := strings.Join(runner.runInstanceArgs, " ")
-	if !strings.Contains(joined, `"AssociatePublicIpAddress":false`) || !strings.Contains(joined, "infercrane:external-key") || !strings.Contains(joined, "--client-token") || !strings.Contains(joined, "--count 1") || !strings.Contains(joined, `"VolumeSize":100`) || !strings.Contains(joined, `"VolumeType":"gp3"`) || !strings.Contains(joined, `"Encrypted":true`) || !strings.Contains(joined, `"DeleteOnTermination":true`) || strings.Contains(joined, "--min-count") || strings.Contains(joined, "--max-count") || strings.Contains(joined, "temporary-secret") {
+	if !strings.Contains(joined, `"AssociatePublicIpAddress":false`) || !strings.Contains(joined, "infercrane:external-key") || !strings.Contains(joined, "infercrane:root-device-name") || !strings.Contains(joined, "--client-token") || !strings.Contains(joined, "--count 1") || !strings.Contains(joined, `"VolumeSize":200`) || !strings.Contains(joined, `"VolumeType":"gp3"`) || !strings.Contains(joined, `"Encrypted":true`) || !strings.Contains(joined, `"DeleteOnTermination":true`) || strings.Contains(joined, "--min-count") || strings.Contains(joined, "--max-count") || strings.Contains(joined, "temporary-secret") {
 		t.Fatalf("unsafe or non-idempotent run-instances args: %s", joined)
 	}
 	resourceTypes := awsArgumentTagResourceTypes(runner.runInstanceArgs)
@@ -256,6 +495,51 @@ func TestAWSEC2LifecycleIsIdempotentPrivateAndTagged(t *testing.T) {
 	}
 	if err := provider.DeleteReplica(context.Background(), second); err != nil || runner.deleteCalls != 1 {
 		t.Fatalf("delete calls=%d err=%v", runner.deleteCalls, err)
+	}
+}
+
+func TestAWSEC2DiscoversAndOverridesTheActualAMIRootDevice(t *testing.T) {
+	runner := &fakeAWSRunner{amiRootDeviceName: "/dev/sda1", amiRootVolumeGiB: 75, amiOccupiedDevices: []string{"/dev/sdf"}}
+	provider := testAWSEC2(runner)
+	configureAWSArtifactSnapshot(&provider, runner)
+	if _, err := provider.EnsureReplica(context.Background(), awsReplicaSpec()); err != nil {
+		t.Fatal(err)
+	}
+	if got := awsArgumentRootDevice(runner.runInstanceArgs); got != "/dev/sda1" {
+		t.Fatalf("root device=%q want /dev/sda1; args=%v", got, runner.runInstanceArgs)
+	}
+	if got := awsArgumentTag(runner.runInstanceArgs, "infercrane:root-device-name"); got != "/dev/sda1" {
+		t.Fatalf("root-device adoption tag=%q", got)
+	}
+	artifactDevice := ""
+	for i, arg := range runner.runInstanceArgs {
+		if arg != "--block-device-mappings" || i+1 >= len(runner.runInstanceArgs) {
+			continue
+		}
+		var mappings []struct {
+			DeviceName string
+			EBS        struct {
+				SnapshotID string `json:"SnapshotId"`
+			} `json:"Ebs"`
+		}
+		_ = json.Unmarshal([]byte(runner.runInstanceArgs[i+1]), &mappings)
+		for _, mapping := range mappings {
+			if mapping.EBS.SnapshotID != "" {
+				artifactDevice = mapping.DeviceName
+			}
+		}
+	}
+	if artifactDevice != "/dev/sdg" {
+		t.Fatalf("artifact device=%q want first unoccupied /dev/sdg", artifactDevice)
+	}
+}
+
+func TestAWSEC2RejectsRootVolumeSmallerThanAMISnapshotBeforeLaunch(t *testing.T) {
+	runner := &fakeAWSRunner{amiRootDeviceName: "/dev/sda1", amiRootVolumeGiB: 250}
+	provider := testAWSEC2(runner)
+	provider.RootVolumeGiB = 200
+	if _, err := provider.EnsureReplica(context.Background(), awsReplicaSpec()); err == nil || !strings.Contains(err.Error(), "smaller than AMI root snapshot") || runner.createCalls != 0 {
+		t.Fatalf("undersized root launched: creates=%d err=%v", runner.createCalls, err)
 	}
 }
 
@@ -419,6 +703,26 @@ func TestAWSEC2RefusesUnencryptedOrUndersizedRootVolumeDuringAdoption(t *testing
 	_, err := testAWSEC2(runner).EnsureReplica(context.Background(), awsReplicaSpec())
 	if err == nil || !strings.Contains(err.Error(), "encrypted root volume") || runner.createCalls != 0 {
 		t.Fatalf("unsafe root volume was adopted: creates=%d err=%v", runner.createCalls, err)
+	}
+}
+
+func TestAWSEC2RefusesAdoptionWhenRootIntentTagsLieAboutActualStorage(t *testing.T) {
+	claimedEncrypted := true
+	runner := &fakeAWSRunner{
+		instanceID:        "i-stale",
+		externalKey:       awsReplicaSpec().ExternalKey,
+		state:             "running",
+		rootVolumeGiB:     75,
+		rootEncrypted:     false,
+		tagRootVolumeGiB:  200,
+		tagRootEncrypted:  &claimedEncrypted,
+		tagRootDeviceName: "/dev/sda1",
+		amiRootDeviceName: "/dev/sda1",
+		amiRootVolumeGiB:  75,
+	}
+	_, err := testAWSEC2(runner).EnsureReplica(context.Background(), awsReplicaSpec())
+	if err == nil || !strings.Contains(err.Error(), "encrypted root volume") || runner.createCalls != 0 {
+		t.Fatalf("lying storage tags were trusted: creates=%d err=%v", runner.createCalls, err)
 	}
 }
 

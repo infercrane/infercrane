@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/infercrane/infercrane/internal/admission"
 	"github.com/infercrane/infercrane/internal/artifactcache"
 	"github.com/infercrane/infercrane/internal/asyncinference"
 	"github.com/infercrane/infercrane/internal/authz"
@@ -32,6 +33,8 @@ import (
 	"github.com/infercrane/infercrane/internal/finops"
 	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/lab"
+	"github.com/infercrane/infercrane/internal/optimizedartifact"
+	"github.com/infercrane/infercrane/internal/optimizer"
 	"github.com/infercrane/infercrane/internal/passport"
 	"github.com/infercrane/infercrane/internal/performanceprofile"
 	"github.com/infercrane/infercrane/internal/qualityevidence"
@@ -160,6 +163,21 @@ type optimizationStore interface {
 	AutopilotPlan(context.Context, string, string, string, string) (domain.AutopilotPlan, error)
 	ApproveAutopilotPlan(context.Context, string, string, string) (domain.AutopilotPlan, error)
 }
+type optimizationCampaignStore interface {
+	CreateOptimizationCampaign(context.Context, domain.OptimizationCampaign, []domain.OptimizationCandidateRun) (domain.OptimizationCampaign, bool, error)
+	OptimizationCampaign(context.Context, string, string) (domain.OptimizationCampaign, error)
+	OptimizationCampaigns(context.Context, string, int) ([]domain.OptimizationCampaign, error)
+	ApproveOptimizationCampaign(context.Context, string, string, string, float64, time.Time) (domain.OptimizationCampaign, error)
+	CancelOptimizationCampaign(context.Context, string, string) (domain.OptimizationCampaign, error)
+}
+type optimizedArtifactStore interface {
+	CreateOptimizedArtifact(context.Context, string, string, optimizedartifact.Plan) (domain.OptimizedArtifact, bool, error)
+	OptimizedArtifact(context.Context, string, string) (domain.OptimizedArtifact, bool, error)
+	OptimizedArtifacts(context.Context, string, int) ([]domain.OptimizedArtifact, error)
+	BeginOptimizedArtifactBuild(context.Context, string, string) (domain.OptimizedArtifact, error)
+	AttestOptimizedArtifact(context.Context, string, string, string, optimizedartifact.Attestation) (domain.OptimizedArtifact, error)
+	QualifyOptimizedArtifact(context.Context, string, string, string, string) (domain.OptimizedArtifact, error)
+}
 type contextBurstStore interface {
 	CreateContextPassport(context.Context, string, string, domain.ContextPassport) (domain.ContextPassport, error)
 	ContextPassport(context.Context, string, string) (domain.ContextPassport, error)
@@ -243,6 +261,10 @@ type API struct {
 	ArtifactCacheAdapters map[string]artifactcache.Adapter
 	ContextPassports      interface{ Put(contextpassport.Hint) }
 	ProductVersion        string
+	GatewayInstanceID     string
+	AdmissionState        interface {
+		State(string) (admission.State, bool)
+	}
 }
 
 type BackendMetadata struct {
@@ -301,6 +323,17 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/deployments/{name}/autopilot/plans", a.auth(authz.Deploy, a.createAutopilotPlan))
 	mux.HandleFunc("GET /api/v1/autopilot/plans/{id}", a.auth(authz.Read, a.getAutopilotPlan))
 	mux.HandleFunc("POST /api/v1/autopilot/plans/{id}/approve", a.auth(authz.Deploy, a.approveAutopilotPlan))
+	mux.HandleFunc("GET /api/v1/optimization/campaigns", a.auth(authz.Read, a.optimizationCampaigns))
+	mux.HandleFunc("POST /api/v1/optimization/campaigns", a.auth(authz.Deploy, a.createOptimizationCampaign))
+	mux.HandleFunc("GET /api/v1/optimization/campaigns/{id}", a.auth(authz.Read, a.optimizationCampaign))
+	mux.HandleFunc("POST /api/v1/optimization/campaigns/{id}/approve", a.auth(authz.Deploy, a.approveOptimizationCampaign))
+	mux.HandleFunc("POST /api/v1/optimization/campaigns/{id}/cancel", a.auth(authz.Deploy, a.cancelOptimizationCampaign))
+	mux.HandleFunc("GET /api/v1/optimized-artifacts", a.auth(authz.Read, a.optimizedArtifacts))
+	mux.HandleFunc("POST /api/v1/optimized-artifacts", a.auth(authz.Deploy, a.createOptimizedArtifact))
+	mux.HandleFunc("GET /api/v1/optimized-artifacts/{id}", a.auth(authz.Read, a.getOptimizedArtifact))
+	mux.HandleFunc("POST /api/v1/optimized-artifacts/{id}/build", a.auth(authz.Deploy, a.beginOptimizedArtifactBuild))
+	mux.HandleFunc("POST /api/v1/optimized-artifacts/{id}/attest", a.auth(authz.Deploy, a.attestOptimizedArtifact))
+	mux.HandleFunc("POST /api/v1/optimized-artifacts/{id}/qualify", a.auth(authz.Deploy, a.qualifyOptimizedArtifact))
 	mux.HandleFunc("POST /api/v1/context-passports", a.auth(authz.Deploy, a.createContextPassport))
 	mux.HandleFunc("GET /api/v1/context-passports/{id}", a.auth(authz.Read, a.getContextPassport))
 	mux.HandleFunc("POST /api/v1/deployments/{name}/burst-guard/evaluate", a.auth(authz.Deploy, a.evaluateBurstGuard))
@@ -480,6 +513,328 @@ func (a API) catalogModel(w http.ResponseWriter, r *http.Request) {
 		"model":              entry,
 		"performance_claims": false,
 	})
+}
+
+func (a API) createOptimizationCampaign(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(optimizationCampaignStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "optimization campaign storage is not configured")
+		return
+	}
+	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if key == "" || len(key) > 128 {
+		writeError(w, http.StatusBadRequest, "invalid_idempotency_key", "Idempotency-Key is required and must not exceed 128 characters")
+		return
+	}
+	var request struct {
+		Proposal optimizer.Proposal `json:"proposal"`
+	}
+	if !decodeMutationBody(w, r, &request) {
+		return
+	}
+	if err := optimizer.ValidateProposal(request.Proposal); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_optimization_proposal", err.Error())
+		return
+	}
+	proposalJSON, err := json.Marshal(request.Proposal)
+	if err != nil || len(proposalJSON) > 1<<20 {
+		writeError(w, http.StatusRequestEntityTooLarge, "proposal_too_large", "optimization proposal exceeds the one MiB storage boundary")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	campaign := domain.OptimizationCampaign{TenantID: actor.TenantID, IdempotencyKey: key, InputDigest: request.Proposal.InputDigest, ModelIdentity: request.Proposal.Input.ModelIdentity, Objective: request.Proposal.Input.Objective, Source: request.Proposal.AlgorithmVersion, ProposalJSON: string(proposalJSON)}
+	candidates := make([]domain.OptimizationCandidateRun, 0, len(request.Proposal.Candidates))
+	for _, candidate := range request.Proposal.Candidates {
+		deployment, marshalErr := json.Marshal(candidate.Deployment)
+		if marshalErr != nil {
+			writeError(w, http.StatusUnprocessableEntity, "invalid_optimization_proposal", "candidate deployment could not be encoded")
+			return
+		}
+		predicted := []byte(`{}`)
+		if candidate.ModeledEvidence != nil {
+			predicted, marshalErr = json.Marshal(candidate.ModeledEvidence)
+			if marshalErr != nil {
+				writeError(w, http.StatusUnprocessableEntity, "invalid_optimization_proposal", "modeled evidence could not be encoded")
+				return
+			}
+		}
+		candidates = append(candidates, domain.OptimizationCandidateRun{ProposalCandidateID: candidate.ID, Rank: candidate.Rank, EvidenceState: string(candidate.EvidenceState), DeploymentSpecJSON: string(deployment), PredictedEvidenceJSON: string(predicted), ActualEvidenceJSON: `{}`})
+	}
+	campaign, created, err := store.CreateOptimizationCampaign(r.Context(), campaign, candidates)
+	if errors.Is(err, domain.ErrConflict) {
+		writeError(w, http.StatusConflict, "idempotency_conflict", "idempotency key belongs to a different optimization proposal")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "optimization campaign could not be persisted")
+		return
+	}
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "optimization_campaign.create", ResourceType: "optimization_campaign", ResourceName: campaign.ID, Outcome: "succeeded"})
+	status := http.StatusOK
+	if created {
+		status = http.StatusCreated
+	}
+	w.Header().Set("Location", "/api/v1/optimization/campaigns/"+campaign.ID)
+	writeJSON(w, status, map[string]any{"campaign": optimizationCampaignResponse(campaign), "created": created, "provider_mutation": false})
+}
+
+func (a API) optimizationCampaign(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(optimizationCampaignStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "optimization campaign storage is not configured")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	campaign, err := store.OptimizationCampaign(r.Context(), actor.TenantID, r.PathValue("id"))
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "optimization campaign was not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "optimization campaign could not be loaded")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"campaign": optimizationCampaignResponse(campaign)})
+}
+
+func (a API) optimizationCampaigns(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(optimizationCampaignStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "optimization campaign storage is not configured")
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	campaigns, err := store.OptimizationCampaigns(r.Context(), actor.TenantID, limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "optimization campaigns could not be listed")
+		return
+	}
+	data := make([]map[string]any, 0, len(campaigns))
+	for _, campaign := range campaigns {
+		data = append(data, optimizationCampaignResponse(campaign))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": data})
+}
+
+func (a API) approveOptimizationCampaign(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(optimizationCampaignStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "optimization campaign storage is not configured")
+		return
+	}
+	var request struct {
+		MaxCostUSD       float64 `json:"max_cost_usd"`
+		ExpiresInSeconds int     `json:"expires_in_seconds"`
+	}
+	if !decodeMutationBody(w, r, &request) {
+		return
+	}
+	if request.ExpiresInSeconds < 60 || request.ExpiresInSeconds > 86400 {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_approval", "expires_in_seconds must be between 60 and 86400")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	expiresAt := time.Now().UTC().Add(time.Duration(request.ExpiresInSeconds) * time.Second).Truncate(time.Second)
+	campaign, err := store.ApproveOptimizationCampaign(r.Context(), actor.TenantID, r.PathValue("id"), actor.Name, request.MaxCostUSD, expiresAt)
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "optimization campaign was not found")
+		return
+	}
+	if errors.Is(err, domain.ErrConflict) {
+		writeError(w, http.StatusConflict, "campaign_state_conflict", "optimization campaign cannot be approved from its current state")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_approval", err.Error())
+		return
+	}
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "optimization_campaign.approve", ResourceType: "optimization_campaign", ResourceName: campaign.ID, Outcome: "succeeded"})
+	writeJSON(w, http.StatusOK, map[string]any{"campaign": optimizationCampaignResponse(campaign), "execution": "approved_not_started", "provider_mutation": false})
+}
+
+func (a API) cancelOptimizationCampaign(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(optimizationCampaignStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "optimization campaign storage is not configured")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	campaign, err := store.CancelOptimizationCampaign(r.Context(), actor.TenantID, r.PathValue("id"))
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "optimization campaign was not found")
+		return
+	}
+	if errors.Is(err, domain.ErrConflict) {
+		writeError(w, http.StatusConflict, "campaign_state_conflict", "promoted, observed, or cleaned campaigns cannot be cancelled")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "optimization campaign could not be cancelled")
+		return
+	}
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "optimization_campaign.cancel", ResourceType: "optimization_campaign", ResourceName: campaign.ID, Outcome: "succeeded"})
+	writeJSON(w, http.StatusOK, map[string]any{"campaign": optimizationCampaignResponse(campaign)})
+}
+
+func optimizationCampaignResponse(campaign domain.OptimizationCampaign) map[string]any {
+	candidates := make([]map[string]any, 0, len(campaign.Candidates))
+	for _, candidate := range campaign.Candidates {
+		candidates = append(candidates, map[string]any{"id": candidate.ID, "proposal_candidate_id": candidate.ProposalCandidateID, "rank": candidate.Rank, "state": candidate.State, "evidence_state": candidate.EvidenceState, "deployment_spec": json.RawMessage(candidate.DeploymentSpecJSON), "predicted_evidence": json.RawMessage(candidate.PredictedEvidenceJSON), "actual_evidence": json.RawMessage(candidate.ActualEvidenceJSON), "deployment_name": candidate.DeploymentName, "revision_id": candidate.RevisionID, "benchmark_id": candidate.BenchmarkID, "quality_evidence_id": candidate.QualityEvidenceID, "release_guard_evaluation_id": candidate.ReleaseGuardEvaluationID, "optimized_artifact_id": candidate.OptimizedArtifactID, "failure_code": candidate.FailureCode, "created_at": candidate.CreatedAt, "updated_at": candidate.UpdatedAt})
+	}
+	return map[string]any{"id": campaign.ID, "input_digest": campaign.InputDigest, "model_identity": campaign.ModelIdentity, "objective": campaign.Objective, "source": campaign.Source, "state": campaign.State, "max_candidates": campaign.MaxCandidates, "approved_max_cost_usd": campaign.ApprovedMaxCostUSD, "approval_expires_at": campaign.ApprovalExpiresAt, "approved_by": campaign.ApprovedBy, "approved_at": campaign.ApprovedAt, "cancel_requested": campaign.CancelRequested, "failure_code": campaign.FailureCode, "created_at": campaign.CreatedAt, "updated_at": campaign.UpdatedAt, "candidates": candidates, "proof_boundary": "modeled evidence cannot qualify; measured benchmark, quality, cost, and Release Guard evidence are required"}
+}
+
+func (a API) createOptimizedArtifact(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(optimizedArtifactStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "optimized artifact storage is not configured")
+		return
+	}
+	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if key == "" || len(key) > 128 {
+		writeError(w, http.StatusBadRequest, "invalid_idempotency_key", "Idempotency-Key is required and must not exceed 128 characters")
+		return
+	}
+	var plan optimizedartifact.Plan
+	if !decodeMutationBody(w, r, &plan) {
+		return
+	}
+	if err := optimizedartifact.ValidatePlan(plan); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_optimized_artifact_plan", err.Error())
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	artifact, created, err := store.CreateOptimizedArtifact(r.Context(), actor.TenantID, key, plan)
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "base_artifact_not_found", "base model artifact was not found")
+		return
+	}
+	if errors.Is(err, domain.ErrConflict) {
+		writeError(w, http.StatusConflict, "idempotency_conflict", "idempotency key belongs to another optimized artifact plan")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "optimized artifact plan could not be persisted")
+		return
+	}
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "optimized_artifact.plan", ResourceType: "optimized_artifact", ResourceName: artifact.ID, Outcome: "succeeded"})
+	status := http.StatusOK
+	if created {
+		status = http.StatusCreated
+	}
+	w.Header().Set("Location", "/api/v1/optimized-artifacts/"+artifact.ID)
+	writeJSON(w, status, map[string]any{"artifact": optimizedArtifactResponse(artifact), "created": created, "builder_execution": "external_not_started"})
+}
+
+func (a API) optimizedArtifacts(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(optimizedArtifactStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "optimized artifact storage is not configured")
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	rows, err := store.OptimizedArtifacts(r.Context(), actor.TenantID, limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "optimized artifacts could not be listed")
+		return
+	}
+	data := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		data = append(data, optimizedArtifactResponse(row))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": data})
+}
+
+func (a API) getOptimizedArtifact(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(optimizedArtifactStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "optimized artifact storage is not configured")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	row, _, err := store.OptimizedArtifact(r.Context(), actor.TenantID, r.PathValue("id"))
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "optimized artifact was not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "optimized artifact could not be loaded")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"artifact": optimizedArtifactResponse(row)})
+}
+
+func (a API) beginOptimizedArtifactBuild(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(optimizedArtifactStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "optimized artifact storage is not configured")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	row, err := store.BeginOptimizedArtifactBuild(r.Context(), actor.TenantID, r.PathValue("id"))
+	writeOptimizedArtifactMutation(w, row, err)
+}
+
+func (a API) attestOptimizedArtifact(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(optimizedArtifactStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "optimized artifact storage is not configured")
+		return
+	}
+	var request struct {
+		State       string                        `json:"state"`
+		Attestation optimizedartifact.Attestation `json:"attestation"`
+	}
+	if !decodeMutationBody(w, r, &request) {
+		return
+	}
+	if err := optimizedartifact.ValidateAttestation(request.State, request.Attestation); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_build_attestation", err.Error())
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	row, err := store.AttestOptimizedArtifact(r.Context(), actor.TenantID, r.PathValue("id"), request.State, request.Attestation)
+	writeOptimizedArtifactMutation(w, row, err)
+}
+
+func (a API) qualifyOptimizedArtifact(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(optimizedArtifactStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "optimized artifact storage is not configured")
+		return
+	}
+	var request struct {
+		QualityEvidenceID string `json:"quality_evidence_id"`
+		CandidateRunID    string `json:"candidate_run_id"`
+	}
+	if !decodeMutationBody(w, r, &request) {
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	row, err := store.QualifyOptimizedArtifact(r.Context(), actor.TenantID, r.PathValue("id"), request.CandidateRunID, request.QualityEvidenceID)
+	writeOptimizedArtifactMutation(w, row, err)
+}
+
+func writeOptimizedArtifactMutation(w http.ResponseWriter, row domain.OptimizedArtifact, err error) {
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "optimized artifact or evidence was not found")
+		return
+	}
+	if errors.Is(err, domain.ErrConflict) {
+		writeError(w, http.StatusConflict, "optimized_artifact_state_conflict", "optimized artifact cannot transition from its current state or evidence is not passing")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_optimized_artifact_transition", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"artifact": optimizedArtifactResponse(row)})
+}
+
+func optimizedArtifactResponse(row domain.OptimizedArtifact) map[string]any {
+	return map[string]any{"id": row.ID, "input_digest": row.InputDigest, "base_model_artifact_id": row.BaseModelArtifactID, "kind": row.Kind, "format": row.Format, "tool": row.Tool, "tool_version": row.ToolVersion, "algorithm": row.Algorithm, "builder_image_digest": row.BuilderImageDigest, "calibration_digest": row.CalibrationDigest, "license_spdx": row.LicenseSPDX, "configuration": json.RawMessage(row.ConfigurationJSON), "hardware_constraints": json.RawMessage(row.HardwareConstraintsJSON), "requires_quality_review": row.RequiresQualityReview, "state": row.State, "evidence_state": row.EvidenceState, "output_repository": row.OutputRepository, "output_immutable_revision": row.OutputImmutableRevision, "output_digest": row.OutputDigest, "build_evidence": json.RawMessage(row.BuildEvidenceJSON), "quality_evidence_id": row.QualityEvidenceID, "failure_code": row.FailureCode, "created_at": row.CreatedAt, "updated_at": row.UpdatedAt, "execution_boundary": "builder runs outside the InferCrane control-plane process"}
 }
 
 func (a API) environments(w http.ResponseWriter, r *http.Request) {
@@ -898,6 +1253,7 @@ func (a API) setAdmissionPolicy(w http.ResponseWriter, r *http.Request) {
 		MaxConcurrency    int      `json:"max_concurrency"`
 		MaxQueueDepth     int      `json:"max_queue_depth"`
 		QueueTimeoutMS    int      `json:"queue_timeout_ms"`
+		RequestTimeoutMS  int      `json:"request_timeout_ms"`
 		MaxRequestBytes   int      `json:"max_request_bytes"`
 		MaxOutputTokens   int      `json:"max_output_tokens"`
 		AllowedPriorities []string `json:"allowed_priorities"`
@@ -913,7 +1269,7 @@ func (a API) setAdmissionPolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	priorities, _ := json.Marshal(request.AllowedPriorities)
 	actor := r.Context().Value(identityKey{}).(domain.Principal)
-	policy, err := store.SetAdmissionPolicy(r.Context(), actor.TenantID, r.PathValue("name"), domain.AdmissionPolicy{MaxConcurrency: request.MaxConcurrency, MaxQueueDepth: request.MaxQueueDepth, QueueTimeoutMS: request.QueueTimeoutMS, MaxRequestBytes: request.MaxRequestBytes, MaxOutputTokens: request.MaxOutputTokens, AllowedPrioritiesJSON: string(priorities), RetryBudget: request.RetryBudget, Enabled: enabled})
+	policy, err := store.SetAdmissionPolicy(r.Context(), actor.TenantID, r.PathValue("name"), domain.AdmissionPolicy{MaxConcurrency: request.MaxConcurrency, MaxQueueDepth: request.MaxQueueDepth, QueueTimeoutMS: request.QueueTimeoutMS, RequestTimeoutMS: request.RequestTimeoutMS, MaxRequestBytes: request.MaxRequestBytes, MaxOutputTokens: request.MaxOutputTokens, AllowedPrioritiesJSON: string(priorities), RetryBudget: request.RetryBudget, Enabled: enabled})
 	if writeEndpointMutationError(w, err) {
 		return
 	}
@@ -1040,7 +1396,7 @@ func asyncJobResponse(job domain.AsyncInferenceJob) map[string]any {
 func admissionPolicyResponse(policy domain.AdmissionPolicy) map[string]any {
 	var priorities any
 	_ = json.Unmarshal([]byte(policy.AllowedPrioritiesJSON), &priorities)
-	return map[string]any{"endpoint_id": policy.EndpointID, "max_concurrency": policy.MaxConcurrency, "max_queue_depth": policy.MaxQueueDepth, "queue_timeout_ms": policy.QueueTimeoutMS, "max_request_bytes": policy.MaxRequestBytes, "max_output_tokens": policy.MaxOutputTokens, "allowed_priorities": priorities, "retry_budget": policy.RetryBudget, "enabled": policy.Enabled, "created_at": policy.CreatedAt, "updated_at": policy.UpdatedAt}
+	return map[string]any{"endpoint_id": policy.EndpointID, "max_concurrency": policy.MaxConcurrency, "max_queue_depth": policy.MaxQueueDepth, "queue_timeout_ms": policy.QueueTimeoutMS, "request_timeout_ms": policy.RequestTimeoutMS, "max_request_bytes": policy.MaxRequestBytes, "max_output_tokens": policy.MaxOutputTokens, "allowed_priorities": priorities, "retry_budget": policy.RetryBudget, "enabled": policy.Enabled, "created_at": policy.CreatedAt, "updated_at": policy.UpdatedAt}
 }
 
 func (a API) endpoint(w http.ResponseWriter, r *http.Request) {
@@ -1106,6 +1462,11 @@ func (a API) endpointMonitoring(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "endpoint monitoring evidence could not be read")
 		return
+	}
+	if a.AdmissionState != nil {
+		if state, found := a.AdmissionState.State(actor.TenantID + "\x00" + snapshot.Endpoint); found {
+			snapshot.Admission = &domain.AdmissionMonitoring{CapacityState: state.CapacityState, Scope: state.Scope, InstanceID: a.GatewayInstanceID, Active: state.Active, Waiting: state.Waiting, MaxConcurrent: state.MaxConcurrent, MaxQueueDepth: state.MaxQueueDepth, Rejected: state.Rejected, QueueTimeouts: state.QueueTimeouts, ObservedAt: time.Now().UTC()}
+		}
 	}
 	writeJSON(w, http.StatusOK, snapshot)
 }
@@ -2443,7 +2804,7 @@ func (a API) requestPrefetch(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusCreated
 	}
 	execution := "already_requested"
-	if row.Status == "requested" {
+	if row.Status == "requested" || row.Status == "succeeded" && row.ErrorCode == "observation_pending" {
 		execution = "not_configured"
 		adapter := a.ArtifactCacheAdapters[row.Provider]
 		executionStore, canExecute := a.Store.(artifactPrefetchExecutionStore)
@@ -2482,12 +2843,36 @@ func (a API) requestPrefetch(w http.ResponseWriter, r *http.Request) {
 					if operationStatus == "" || operationStatus == "requested" {
 						operationStatus = "running"
 					}
-					row, adapterErr = executionStore.UpdateArtifactPrefetch(durableContext, principal.TenantID, row.ID, operationStatus, operation.ProviderOperationID, operation.ErrorCode)
+					checkpointErrorCode := operation.ErrorCode
+					if operationStatus == "succeeded" && checkpointErrorCode == "" {
+						checkpointErrorCode = "observation_pending"
+					}
+					row, adapterErr = executionStore.UpdateArtifactPrefetch(durableContext, principal.TenantID, row.ID, operationStatus, operation.ProviderOperationID, checkpointErrorCode)
 					if adapterErr != nil {
 						writeError(w, http.StatusInternalServerError, "prefetch_checkpoint_failed", "provider accepted prefetch but its operation could not be checkpointed")
 						return
 					}
 					execution = "provider_accepted"
+					if operationStatus == "succeeded" {
+						observeContext, observeCancel := context.WithTimeout(durableContext, 10*time.Second)
+						observation, observeErr := adapter.Observe(observeContext, cacheRequest)
+						observeCancel()
+						observationValid := (observation.State == "present" || observation.State == "prefetching" || observation.State == "missing" || observation.State == "unknown") && json.Valid([]byte(observation.EvidenceJSON)) && !observation.ObservedAt.IsZero() && observation.ExpiresAt.After(observation.ObservedAt)
+						if observeErr == nil && observationValid {
+							_, observeErr = store.RecordArtifactCacheObservation(durableContext, principal.TenantID, domain.ArtifactCacheObservation{ModelArtifactID: artifact.ID, Provider: row.Provider, Region: row.Region, Location: row.Location, State: observation.State, Source: observation.Source, EvidenceJSON: observation.EvidenceJSON, ObservedAt: observation.ObservedAt, ExpiresAt: observation.ExpiresAt})
+						}
+						if observeErr != nil || !observationValid {
+							execution = "provider_completed_observation_pending"
+						} else {
+							cleared, clearErr := executionStore.UpdateArtifactPrefetch(durableContext, principal.TenantID, row.ID, "succeeded", operation.ProviderOperationID, operation.ErrorCode)
+							if clearErr != nil {
+								execution = "provider_completed_observation_pending"
+							} else {
+								row = cleared
+								execution = "provider_completed"
+							}
+						}
+					}
 				}
 			}
 		}

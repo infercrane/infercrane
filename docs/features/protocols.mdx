@@ -184,6 +184,7 @@ infercrane admission set coder-staging \
   --max-concurrency 2 \
   --max-queue 2 \
   --queue-timeout-ms 1000 \
+  --request-timeout-ms 30000 \
   --max-output-tokens 512 \
   --retry-budget 1
 infercrane admission get coder-staging --output json
@@ -197,7 +198,8 @@ quota. Then perform four independent checks:
 
 1. Send a successful buffered request and verify `X-InferCrane-Attempt` never exceeds the configured
    retry budget. Only connection failures and `502`, `503`, or `504` on InferCrane-managed capacity
-   are retryable.
+   are retryable. Queue wait, retry backoff, every attempt, and response delivery must all fit inside
+   the single endpoint `request_timeout_ms`; retries never receive a fresh deadline.
 2. Start the `curl -N` streaming request above, capture its response headers, and terminate the
    client while chunks are arriving. Inspect its `X-Request-Id`. The recorded request must remain one
    request, and no second stream may appear. Client cancellation propagation to the exact runtime is
@@ -216,6 +218,7 @@ and request evidence. Passing local fixture tests proves admission and accountin
 only the same procedure against the real runtime proves cancellation after upstream transmission.
 
 If any request cannot be correlated, a partial stream is replayed, the retry ceiling is exceeded,
+the endpoint deadline is reset between attempts,
 quota accounting cannot be demonstrated, or required real-runtime evidence is absent, do not run
 `endpoint promote` or `rollout promote`. Preserve the candidate and persisted evidence and leave
 Release Guard `INCONCLUSIVE`.

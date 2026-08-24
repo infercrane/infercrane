@@ -1,6 +1,6 @@
 # InferCrane
 
-Production inference without the platform engineering.
+Production inference without building the platform first.
 
 Deploy, autoscale, monitor, benchmark, and safely update inference workloads on GPU infrastructure you control. Already running inference? Connect it without migrating first.
 
@@ -10,7 +10,13 @@ Explore reviewed, immutable starting points without treating them as benchmark c
 infercrane models
 infercrane models inspect mistral-7b-instruct
 infercrane workload init ./support-model --recipe mistral-7b-instruct
+infercrane optimize propose llama-3.1-8b-instruct \
+  --provider aws --region eu-central-1 --gpu L40S \
+  --objective interactive --write-dir .infercrane/candidates
 ```
+
+Optimization proposals are immutable configuration candidates, not benchmark claims. InferCrane
+ranks a serving plan only after comparable measured performance, quality, and sourced cost evidence.
 
 ```bash
 infercrane workload init ./fraud-explainer \
@@ -20,10 +26,12 @@ infercrane workload plan
 infercrane workload deploy --wait
 ```
 
-The model is not hard-coded. Qwen3-8B is the release acceptance baseline because it is practical to
-qualify repeatedly on a single GPU. InferCrane also accepts other Hugging Face model identities and
-custom OCI workloads; runtime, accelerator, memory, license, and protocol compatibility must be
-qualified for the exact serving plan.
+The model is not hard-coded and no single benchmark is presented as universal evidence. The local
+qualification corpus spans dense instruction, coding, reasoning/distilled, embedding, and
+multimodal families; real performance remains bound to the exact model commit, runtime, accelerator,
+provider, cache state, and workload. InferCrane also accepts other Hugging Face model identities and
+custom OCI workloads, but unqualified combinations fail closed instead of inheriting another
+model's claims.
 
 - No Kubernetes required
 - Deterministic Release Guard
@@ -36,7 +44,19 @@ qualified for the exact serving plan.
 - Safe staging-to-production candidate promotion
 - Elastic and provider-native serverless compute
 
-Read the [InferCrane documentation](https://infercrane.mintlify.site) for the five-minute local quickstart, product concepts, operations, integrations, and references. The Mintlify source lives in [`docs/`](docs/index.mdx); run `npm install && npm run dev` there to preview documentation changes locally.
+The common path stays intentionally small:
+
+```bash
+infercrane workload init ./support --recipe llama-3.1-8b-instruct
+cd support
+infercrane workload deploy --wait
+```
+
+Advanced operators can keep the same project and add an exact provider/runtime/GPU tuple, workload
+fingerprint, SLO, cost boundary, cache policy, candidate campaign, and Release Guard evidence. The
+simple path is a reviewed default—not a separate product or a hidden loss of control.
+
+Read the [InferCrane documentation](https://docs.infercrane.com) for the five-minute local quickstart, product concepts, operations, integrations, and references. The Mintlify source lives in [`docs/`](docs/index.mdx); run `npm install && npm run dev` there to preview documentation changes locally.
 
 See the complete safety loop locally with one hermetic command:
 
@@ -50,8 +70,8 @@ revision did not change, and removes the isolated stack. It uses fixtures and cr
 resources.
 
 For coding agents and LLM indexing, Mintlify continuously generates
-[`llms.txt`](https://infercrane.mintlify.site/llms.txt) and
-[`llms-full.txt`](https://infercrane.mintlify.site/llms-full.txt) from the current public navigation.
+[`llms.txt`](https://docs.infercrane.com/llms.txt) and
+[`llms-full.txt`](https://docs.infercrane.com/llms-full.txt) from the current public navigation.
 Every public page is also available as Markdown by appending `.md` to its documentation URL.
 `infercrane mcp` exposes six read-only operational-evidence tools over stdio; it cannot deploy,
 scale, promote, delete, change budgets, or read secrets.
@@ -82,7 +102,7 @@ InferCrane does not fork LiteLLM, execute sandbox commands, or schedule training
 systems through replaceable, versioned composition contracts and stores no sandbox commands, files,
 prompts, outputs, or training data.
 
-See the [production showcase](https://infercrane.mintlify.site/showcase) for model-to-endpoint deployment,
+See the [production showcase](https://docs.infercrane.com/showcase) for model-to-endpoint deployment,
 existing-workload adoption, LiteLLM and OpenRouter composition, agent sandbox integration, safe
 rollouts, and cold-start evidence.
 
@@ -97,6 +117,9 @@ while workers are replaced, recovered, or reconfigured.
   credential references, explicit privacy consent, and hard request/cost reservations.
 - Persistent desired and observed state in PostgreSQL.
 - Runtime health and served-model reconciliation through an adapter contract.
+- Bounded in-memory admission with explicit `429`/`Retry-After`, one end-to-end request deadline,
+  bounded retries, end-to-end queue timing, and a live
+  instance-scoped saturation signal that remains separate from liveness and runtime health.
 - Supervised replica routing with deterministic generation safety.
 - Streaming chat completions without database reads on the request-routing path.
 - Existing-worker registration plus registered elastic and provider-native serverless backends.

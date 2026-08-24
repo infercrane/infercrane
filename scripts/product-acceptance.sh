@@ -188,8 +188,9 @@ PY
 
   cli admission set "$endpoint" --max-concurrency 2 --max-queue 3 --queue-timeout-ms 250 \
     --max-output-tokens 64 --priorities normal,high --output json |
-    jq -e '.policy.max_concurrency == 2 and .policy.max_queue_depth == 3' >/dev/null || return
-  cli admission get "$endpoint" --output json | jq -e '.policy.max_output_tokens == 64' >/dev/null || return
+    jq -e '.policy.max_concurrency == 2 and .policy.max_queue_depth == 3 and .policy.request_timeout_ms == 300000' >/dev/null || return
+  cli admission get "$endpoint" --output json |
+    jq -e '.policy.max_output_tokens == 64 and .policy.request_timeout_ms == 300000' >/dev/null || return
 
   provider_connection="model-api-$suffix"
   provider=$(cli provider connect "$provider_connection" --adapter openrouter \
@@ -271,6 +272,24 @@ PY
     jq -e '.decision.action != null and .decision.reason != null' >/dev/null || return
   cli lab nonexistent-model@immutable --output json | jq -e '.evaluation.results | type == "array" and length == 0' >/dev/null || return
   cli doctor "$endpoint" --output json | jq -e 'type == "array" and length > 0' >/dev/null || return
+
+  # Optimization starts as a free, immutable proposal. Persisting and approving
+  # a campaign must remain separate from provider mutation and promotion.
+  optimization=$(cli optimize create llama-3.1-8b-instruct \
+    --provider aws --region eu-central-1 --gpu L40S --source catalog \
+    --objective interactive --max-candidates 2 --output json) || return
+  printf '%s\n' "$optimization" >"$run_dir/optimization-campaign.json" || return
+  campaign_id=$(printf '%s\n' "$optimization" | jq -er \
+    '.campaign.id | select(type == "string" and length == 32)') || return
+  printf '%s\n' "$optimization" |
+    jq -e '.created == true and .campaign.state == "awaiting_approval" and (.campaign.candidates | length) == 2' >/dev/null || return
+  cli optimize inspect "$campaign_id" --output json |
+    jq -e --arg id "$campaign_id" '.campaign.id == $id and .campaign.state == "awaiting_approval"' >/dev/null || return
+  cli optimize approve "$campaign_id" --max-cost-usd 1 --expires-in 10m --output json |
+    jq -e '.campaign.state == "approved" and .campaign.approved_max_cost_usd == 1' >/dev/null || return
+  cli optimize cancel "$campaign_id" --output json |
+    jq -e '.campaign.state == "cancelled" and all(.campaign.candidates[]; .state == "cancelled" and .evidence_state == "stale")' >/dev/null || return
+  cli orphans --output json | jq -e '.data | length == 0' >/dev/null || return
 
   sandbox=$(cli sandbox connect --provider e2b --external-id "acceptance-$suffix" \
     --external-revision template-v1 --endpoint "$endpoint" --ttl 10m --output json) || return

@@ -144,6 +144,8 @@
           {
             "group": "Evidence and decisions",
             "pages": [
+              "features/optimization",
+              "testing/competitive-benchmark-methodology",
               "features/recipes-lab",
               "features/replay-capacity",
               "showcase/cost-performance",

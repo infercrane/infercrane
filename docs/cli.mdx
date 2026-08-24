@@ -87,10 +87,10 @@ infercrane doctor coder-production --window 1h
 
 `--cloud` adds SkyPilot credentials and RunPod advisory accelerator availability; `--serverless`
 adds RunPod Serverless credentials and template validation; `--aws` performs a read-only role
-assumption and identity probe for the configured AWS BYOC adapter; `--gcp` checks Application
-Default Credentials plus read-only Compute zone access; `--kubernetes` checks the explicit context,
-optional KServe CRD, and required namespaced permissions. Diagnostics are read-only and do not
-create provider resources.
+assumption and dependency probe for the configured AWS BYOC adapter; `--gcp` checks Application
+Default Credentials, every configured Compute dependency, immutable images, and Private Google
+Access; `--kubernetes` checks the explicit context, optional KServe CRD, and required namespaced
+permissions. Diagnostics are read-only and do not create provider resources.
 The capability table distinguishes `supported`, `unsupported`, and `unknown`. InferCrane never
 silently changes hardware, and never claims cache or fast-resume behavior that an adapter cannot
 observe.
@@ -216,6 +216,79 @@ read-only with `infercrane ui --read-only`. It requires an interactive terminal 
 for persistence. See [Terminal operations workspace](/features/terminal-ui).
 
 ## Plan and deploy
+
+### `optimize propose`
+
+Generate inspectable candidate DeploymentSpecs without contacting a control plane or provider.
+Check the optional modeled-candidate source first:
+
+```bash
+infercrane optimize doctor
+```
+
+The default `--source auto` uses the pinned AIConfigurator adapter only when its exact supported
+Python tuple is available and visibly falls back to the reviewed catalog otherwise. Use `--source
+catalog` for a deterministic offline proposal, or `--source aiconfigurator` to require the estimator
+and fail rather than falling back.
+
+```bash
+infercrane optimize propose mistral-7b-instruct \
+  --provider aws --region eu-central-1 --gpu L40S \
+  --objective interactive --profile interactive \
+  --source auto --target-concurrency 8 \
+  --max-ttft-p95-ms 200 --max-tpot-p95-ms 25 \
+  --write-dir .infercrane/candidates/mistral-interactive
+```
+
+Catalog output is `unmeasured`; AIConfigurator output is `modeled`. Neither is qualified. Use
+`--output json` to retain the input digest, source version, modeled-result digest, compatibility
+evidence, missing evidence, and limitations. `--workload-fingerprint` can bind a content-free
+observed workload identity to the proposal. Simulated compatibility is excluded unless
+`--include-simulated` is explicit. The command refuses to overwrite a non-empty output directory.
+
+The reviewed catalog spans instruction, reasoning, coding, embeddings, multimodal, and
+enterprise-text workloads. A profile for one model is never evidence for another model, precision,
+GPU, runtime, or topology. See [Evidence-gated optimization](/features/optimization).
+
+### `optimize create`
+
+Persist the proposal and candidate identities without provider mutation, then grant bounded paid
+authority explicitly:
+
+```bash
+infercrane optimize create llama-3.1-8b-instruct \
+  --provider aws --region eu-central-1 --gpu L40S \
+  --objective interactive --max-candidates 3
+infercrane optimize inspect CAMPAIGN_ID
+infercrane optimize approve CAMPAIGN_ID --max-cost-usd 20 --expires-in 1h
+infercrane optimize results CAMPAIGN_ID
+infercrane optimize cancel CAMPAIGN_ID
+```
+
+Approval retries do not extend the first persisted expiry. Creation and inspection allocate no
+infrastructure. Promotion remains a separate Release Guard action.
+
+### `artifact optimize`
+
+Plan and attest an externally built optimized checkpoint, speculator, or TensorRT engine:
+
+```bash
+infercrane artifact optimize plan BASE_ARTIFACT_ID \
+  --preset eagle3 --tool-version 0.6.0 \
+  --builder-image-digest sha256:BUILDER_DIGEST \
+  --license-spdx Apache-2.0
+infercrane artifact optimize start OPTIMIZED_ARTIFACT_ID
+infercrane artifact optimize attest OPTIMIZED_ARTIFACT_ID \
+  --state ready --output-repository hf://ORG/MODEL \
+  --output-revision IMMUTABLE_COMMIT --output-digest sha256:OUTPUT_DIGEST \
+  --evidence-file build-evidence.json
+infercrane artifact optimize qualify OPTIMIZED_ARTIFACT_ID \
+  --candidate-run CANDIDATE_RUN_ID --quality-evidence QUALITY_EVIDENCE_ID
+```
+
+Presets are `fp8`, `awq`, `gptq`, `nvfp4`, `eagle3`, `mtp`, `dflash`, and `tensorrt`. Builders are
+never executed inside the InferCrane API process, and no optimized artifact qualifies without exact
+candidate, revision, digest, and semantic-quality evidence.
 
 ### `workload`
 

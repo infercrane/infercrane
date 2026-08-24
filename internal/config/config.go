@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -23,11 +24,13 @@ type Config struct {
 	RunPodAPIKey, RunPodServerlessTemplateID, RunPodRESTURL                                                            string
 	AWSRoleARN, AWSExternalID, AWSRegion, AWSSubnetID, AWSAMIID, AWSInstanceType, AWSGPU                               string
 	AWSInstanceProfileARN, AWSWorkerSecretARN, AWSImageDigest                                                          string
-	AWSImageCachePolicy                                                                                                string
+	AWSImageCachePolicy, AWSArtifactCachePolicy                                                                        string
 	AWSSubnetIDs, AWSSecurityGroupIDs                                                                                  []string
-	AWSRootVolumeGiB                                                                                                   int
+	AWSArtifactSnapshots                                                                                               map[string]string
+	AWSRootVolumeGiB, AWSArtifactVolumeInitializationRate                                                              int
 	GCPProject, GCPZone, GCPSubnet, GCPMachineType, GCPGPU, GCPServiceAccount                                          string
 	GCPVMImage, GCPContainerImage, GCPWorkerSecret                                                                     string
+	GCPBootDiskGiB                                                                                                     int
 	KubernetesContext, KubernetesNamespace, KubernetesWorkloadAPI, KubernetesServiceAccount                            string
 	KubernetesWorkerSecretName, KubernetesWorkerSecretKey, KubernetesImageDigest                                       string
 	KubernetesGPUResource, KubernetesGPUProductLabel                                                                   string
@@ -260,70 +263,86 @@ func load(requireAPIKey bool) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	awsRootVolumeGiB, err := envInt("INFERCRANE_AWS_ROOT_VOLUME_GIB", 100)
+	awsRootVolumeGiB, err := envInt("INFERCRANE_AWS_ROOT_VOLUME_GIB", 200)
+	if err != nil {
+		return Config{}, err
+	}
+	awsArtifactVolumeInitializationRate, err := envInt("INFERCRANE_AWS_ARTIFACT_VOLUME_INITIALIZATION_RATE_MIBPS", 0)
+	if err != nil {
+		return Config{}, err
+	}
+	gcpBootDiskGiB, err := envInt("INFERCRANE_GCP_BOOT_DISK_GIB", 200)
+	if err != nil {
+		return Config{}, err
+	}
+	awsArtifactSnapshots, err := envStringMap("INFERCRANE_AWS_ARTIFACT_SNAPSHOTS_JSON")
 	if err != nil {
 		return Config{}, err
 	}
 	config := Config{
-		DatabaseURL:                 env("INFERCRANE_DATABASE_URL", "postgres://infercrane:infercrane@127.0.0.1:5432/infercrane?sslmode=disable"),
-		ControlURL:                  env("INFERCRANE_URL", "http://127.0.0.1:8080"),
-		Host:                        env("INFERCRANE_HOST", "127.0.0.1"),
-		APIKey:                      env("INFERCRANE_API_KEY", ""),
-		RouterBinary:                env("INFERCRANE_ROUTER_BINARY", "vllm-router"),
-		AIPerfBinary:                env("INFERCRANE_AIPERF_BINARY", "aiperf"),
-		PassportSigningKeyFile:      env("INFERCRANE_PASSPORT_SIGNING_KEY_FILE", ""),
-		InstanceID:                  env("INFERCRANE_INSTANCE_ID", hostname),
-		Environment:                 env("INFERCRANE_ENV", "development"),
-		TLSCertFile:                 env("INFERCRANE_TLS_CERT_FILE", ""),
-		TLSKeyFile:                  env("INFERCRANE_TLS_KEY_FILE", ""),
-		TLSClientCAFile:             env("INFERCRANE_TLS_CLIENT_CA_FILE", ""),
-		AsyncEncryptionKey:          env("INFERCRANE_ASYNC_ENCRYPTION_KEY", ""),
-		AsyncEncryptionKeyReference: env("INFERCRANE_ASYNC_ENCRYPTION_KEY_REFERENCE", "environment:INFERCRANE_ASYNC_ENCRYPTION_KEY"),
-		HostedAuthIssuer:            env("INFERCRANE_HOSTED_AUTH_ISSUER", ""),
-		HostedAuthAudience:          env("INFERCRANE_HOSTED_AUTH_AUDIENCE", ""),
-		HostedAuthJWTKeyFile:        env("INFERCRANE_HOSTED_AUTH_JWT_KEY_FILE", ""),
-		HostedAuthAuthorizedParties: splitCSV(env("INFERCRANE_HOSTED_AUTH_AUTHORIZED_PARTIES", "")),
-		RunPodAPIKey:                env("RUNPOD_API_KEY", ""),
-		RunPodServerlessTemplateID:  env("INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID", ""),
-		RunPodRESTURL:               env("INFERCRANE_RUNPOD_REST_URL", "https://rest.runpod.io/v1"),
-		AWSRoleARN:                  env("INFERCRANE_AWS_ROLE_ARN", ""),
-		AWSExternalID:               env("INFERCRANE_AWS_EXTERNAL_ID", ""),
-		AWSRegion:                   env("INFERCRANE_AWS_REGION", ""),
-		AWSSubnetID:                 env("INFERCRANE_AWS_SUBNET_ID", ""),
-		AWSSubnetIDs:                splitCSV(env("INFERCRANE_AWS_SUBNET_IDS", "")),
-		AWSSecurityGroupIDs:         splitCSV(env("INFERCRANE_AWS_SECURITY_GROUP_IDS", "")),
-		AWSAMIID:                    env("INFERCRANE_AWS_AMI_ID", ""),
-		AWSInstanceType:             env("INFERCRANE_AWS_INSTANCE_TYPE", ""),
-		AWSGPU:                      env("INFERCRANE_AWS_GPU", ""),
-		AWSInstanceProfileARN:       env("INFERCRANE_AWS_INSTANCE_PROFILE_ARN", ""),
-		AWSWorkerSecretARN:          env("INFERCRANE_AWS_WORKER_SECRET_ARN", ""),
-		AWSImageDigest:              env("INFERCRANE_AWS_IMAGE_DIGEST", ""),
-		AWSImageCachePolicy:         env("INFERCRANE_AWS_IMAGE_CACHE_POLICY", "prefer"),
-		AWSRootVolumeGiB:            awsRootVolumeGiB,
-		GCPProject:                  env("INFERCRANE_GCP_PROJECT", ""),
-		GCPZone:                     env("INFERCRANE_GCP_ZONE", ""),
-		GCPSubnet:                   env("INFERCRANE_GCP_SUBNET", ""),
-		GCPMachineType:              env("INFERCRANE_GCP_MACHINE_TYPE", ""),
-		GCPGPU:                      env("INFERCRANE_GCP_GPU", ""),
-		GCPServiceAccount:           env("INFERCRANE_GCP_SERVICE_ACCOUNT", ""),
-		GCPVMImage:                  env("INFERCRANE_GCP_VM_IMAGE", ""),
-		GCPContainerImage:           env("INFERCRANE_GCP_CONTAINER_IMAGE", ""),
-		GCPWorkerSecret:             env("INFERCRANE_GCP_WORKER_SECRET", ""),
-		KubernetesContext:           env("INFERCRANE_KUBERNETES_CONTEXT", ""),
-		KubernetesNamespace:         env("INFERCRANE_KUBERNETES_NAMESPACE", "infercrane-system"),
-		KubernetesWorkloadAPI:       env("INFERCRANE_KUBERNETES_WORKLOAD_API", "deployment"),
-		KubernetesServiceAccount:    env("INFERCRANE_KUBERNETES_SERVICE_ACCOUNT", "infercrane-runtime"),
-		KubernetesWorkerSecretName:  env("INFERCRANE_KUBERNETES_WORKER_SECRET_NAME", "infercrane-worker"),
-		KubernetesWorkerSecretKey:   env("INFERCRANE_KUBERNETES_WORKER_SECRET_KEY", "api-key"),
-		KubernetesImageDigest:       env("INFERCRANE_KUBERNETES_IMAGE_DIGEST", ""),
-		KubernetesGPUResource:       env("INFERCRANE_KUBERNETES_GPU_RESOURCE", "nvidia.com/gpu"),
-		KubernetesGPUProductLabel:   env("INFERCRANE_KUBERNETES_GPU_PRODUCT_LABEL", "nvidia.com/gpu.product"),
-		DynamoVLLMImageDigest:       env("INFERCRANE_DYNAMO_VLLM_IMAGE_DIGEST", ""),
-		DynamoVLLMRuntimeVersion:    env("INFERCRANE_DYNAMO_VLLM_RUNTIME_VERSION", ""),
-		DynamoSGLangImageDigest:     env("INFERCRANE_DYNAMO_SGLANG_IMAGE_DIGEST", ""),
-		DynamoSGLangRuntimeVersion:  env("INFERCRANE_DYNAMO_SGLANG_RUNTIME_VERSION", ""),
-		DynamoModelSecretName:       env("INFERCRANE_DYNAMO_MODEL_SECRET_NAME", ""),
-		Port:                        port, RouterStartPort: routerPort, DatabaseMaxOpen: maxOpen, DatabaseMaxIdle: maxIdle,
+		DatabaseURL:                         env("INFERCRANE_DATABASE_URL", "postgres://infercrane:infercrane@127.0.0.1:5432/infercrane?sslmode=disable"),
+		ControlURL:                          env("INFERCRANE_URL", "http://127.0.0.1:8080"),
+		Host:                                env("INFERCRANE_HOST", "127.0.0.1"),
+		APIKey:                              env("INFERCRANE_API_KEY", ""),
+		RouterBinary:                        env("INFERCRANE_ROUTER_BINARY", "vllm-router"),
+		AIPerfBinary:                        env("INFERCRANE_AIPERF_BINARY", "aiperf"),
+		PassportSigningKeyFile:              env("INFERCRANE_PASSPORT_SIGNING_KEY_FILE", ""),
+		InstanceID:                          env("INFERCRANE_INSTANCE_ID", hostname),
+		Environment:                         env("INFERCRANE_ENV", "development"),
+		TLSCertFile:                         env("INFERCRANE_TLS_CERT_FILE", ""),
+		TLSKeyFile:                          env("INFERCRANE_TLS_KEY_FILE", ""),
+		TLSClientCAFile:                     env("INFERCRANE_TLS_CLIENT_CA_FILE", ""),
+		AsyncEncryptionKey:                  env("INFERCRANE_ASYNC_ENCRYPTION_KEY", ""),
+		AsyncEncryptionKeyReference:         env("INFERCRANE_ASYNC_ENCRYPTION_KEY_REFERENCE", "environment:INFERCRANE_ASYNC_ENCRYPTION_KEY"),
+		HostedAuthIssuer:                    env("INFERCRANE_HOSTED_AUTH_ISSUER", ""),
+		HostedAuthAudience:                  env("INFERCRANE_HOSTED_AUTH_AUDIENCE", ""),
+		HostedAuthJWTKeyFile:                env("INFERCRANE_HOSTED_AUTH_JWT_KEY_FILE", ""),
+		HostedAuthAuthorizedParties:         splitCSV(env("INFERCRANE_HOSTED_AUTH_AUTHORIZED_PARTIES", "")),
+		RunPodAPIKey:                        env("RUNPOD_API_KEY", ""),
+		RunPodServerlessTemplateID:          env("INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID", ""),
+		RunPodRESTURL:                       env("INFERCRANE_RUNPOD_REST_URL", "https://rest.runpod.io/v1"),
+		AWSRoleARN:                          env("INFERCRANE_AWS_ROLE_ARN", ""),
+		AWSExternalID:                       env("INFERCRANE_AWS_EXTERNAL_ID", ""),
+		AWSRegion:                           env("INFERCRANE_AWS_REGION", ""),
+		AWSSubnetID:                         env("INFERCRANE_AWS_SUBNET_ID", ""),
+		AWSSubnetIDs:                        splitCSV(env("INFERCRANE_AWS_SUBNET_IDS", "")),
+		AWSSecurityGroupIDs:                 splitCSV(env("INFERCRANE_AWS_SECURITY_GROUP_IDS", "")),
+		AWSAMIID:                            env("INFERCRANE_AWS_AMI_ID", ""),
+		AWSInstanceType:                     env("INFERCRANE_AWS_INSTANCE_TYPE", ""),
+		AWSGPU:                              env("INFERCRANE_AWS_GPU", ""),
+		AWSInstanceProfileARN:               env("INFERCRANE_AWS_INSTANCE_PROFILE_ARN", ""),
+		AWSWorkerSecretARN:                  env("INFERCRANE_AWS_WORKER_SECRET_ARN", ""),
+		AWSImageDigest:                      env("INFERCRANE_AWS_IMAGE_DIGEST", ""),
+		AWSImageCachePolicy:                 env("INFERCRANE_AWS_IMAGE_CACHE_POLICY", "prefer"),
+		AWSArtifactCachePolicy:              env("INFERCRANE_AWS_ARTIFACT_CACHE_POLICY", "prefer"),
+		AWSArtifactSnapshots:                awsArtifactSnapshots,
+		AWSArtifactVolumeInitializationRate: awsArtifactVolumeInitializationRate,
+		AWSRootVolumeGiB:                    awsRootVolumeGiB,
+		GCPProject:                          env("INFERCRANE_GCP_PROJECT", ""),
+		GCPZone:                             env("INFERCRANE_GCP_ZONE", ""),
+		GCPSubnet:                           env("INFERCRANE_GCP_SUBNET", ""),
+		GCPMachineType:                      env("INFERCRANE_GCP_MACHINE_TYPE", ""),
+		GCPGPU:                              env("INFERCRANE_GCP_GPU", ""),
+		GCPServiceAccount:                   env("INFERCRANE_GCP_SERVICE_ACCOUNT", ""),
+		GCPVMImage:                          env("INFERCRANE_GCP_VM_IMAGE", ""),
+		GCPContainerImage:                   env("INFERCRANE_GCP_CONTAINER_IMAGE", ""),
+		GCPWorkerSecret:                     env("INFERCRANE_GCP_WORKER_SECRET", ""),
+		GCPBootDiskGiB:                      gcpBootDiskGiB,
+		KubernetesContext:                   env("INFERCRANE_KUBERNETES_CONTEXT", ""),
+		KubernetesNamespace:                 env("INFERCRANE_KUBERNETES_NAMESPACE", "infercrane-system"),
+		KubernetesWorkloadAPI:               env("INFERCRANE_KUBERNETES_WORKLOAD_API", "deployment"),
+		KubernetesServiceAccount:            env("INFERCRANE_KUBERNETES_SERVICE_ACCOUNT", "infercrane-runtime"),
+		KubernetesWorkerSecretName:          env("INFERCRANE_KUBERNETES_WORKER_SECRET_NAME", "infercrane-worker"),
+		KubernetesWorkerSecretKey:           env("INFERCRANE_KUBERNETES_WORKER_SECRET_KEY", "api-key"),
+		KubernetesImageDigest:               env("INFERCRANE_KUBERNETES_IMAGE_DIGEST", ""),
+		KubernetesGPUResource:               env("INFERCRANE_KUBERNETES_GPU_RESOURCE", "nvidia.com/gpu"),
+		KubernetesGPUProductLabel:           env("INFERCRANE_KUBERNETES_GPU_PRODUCT_LABEL", "nvidia.com/gpu.product"),
+		DynamoVLLMImageDigest:               env("INFERCRANE_DYNAMO_VLLM_IMAGE_DIGEST", ""),
+		DynamoVLLMRuntimeVersion:            env("INFERCRANE_DYNAMO_VLLM_RUNTIME_VERSION", ""),
+		DynamoSGLangImageDigest:             env("INFERCRANE_DYNAMO_SGLANG_IMAGE_DIGEST", ""),
+		DynamoSGLangRuntimeVersion:          env("INFERCRANE_DYNAMO_SGLANG_RUNTIME_VERSION", ""),
+		DynamoModelSecretName:               env("INFERCRANE_DYNAMO_MODEL_SECRET_NAME", ""),
+		Port:                                port, RouterStartPort: routerPort, DatabaseMaxOpen: maxOpen, DatabaseMaxIdle: maxIdle,
 		HealthInterval: time.Duration(healthSeconds) * time.Second, UpstreamTimeout: time.Duration(upstreamSeconds) * time.Second,
 		ShutdownTimeout: time.Duration(shutdownSeconds) * time.Second, RequestRetention: time.Duration(retentionHours) * time.Hour,
 	}
@@ -435,7 +454,7 @@ func validateAWS(config Config) error {
 		subnets = append(subnets, config.AWSSubnetID)
 	}
 	values := []string{config.AWSRoleARN, config.AWSRegion, config.AWSAMIID, config.AWSInstanceType, config.AWSGPU, config.AWSInstanceProfileARN, config.AWSWorkerSecretARN, config.AWSImageDigest}
-	configured := len(config.AWSSecurityGroupIDs) > 0
+	configured := len(config.AWSSecurityGroupIDs) > 0 || len(config.AWSArtifactSnapshots) > 0 || config.AWSArtifactCachePolicy == "required" || config.AWSArtifactVolumeInitializationRate != 0
 	configured = configured || len(subnets) > 0
 	for _, value := range values {
 		configured = configured || value != ""
@@ -463,7 +482,53 @@ func validateAWS(config Config) error {
 	if config.AWSImageCachePolicy != "prefer" && config.AWSImageCachePolicy != "required" {
 		return errors.New("INFERCRANE_AWS_IMAGE_CACHE_POLICY must be prefer or required")
 	}
+	if config.AWSArtifactCachePolicy != "disabled" && config.AWSArtifactCachePolicy != "prefer" && config.AWSArtifactCachePolicy != "required" {
+		return errors.New("INFERCRANE_AWS_ARTIFACT_CACHE_POLICY must be disabled, prefer, or required")
+	}
+	if config.AWSArtifactCachePolicy == "required" && len(config.AWSArtifactSnapshots) == 0 {
+		return errors.New("INFERCRANE_AWS_ARTIFACT_CACHE_POLICY=required needs at least one immutable model-to-snapshot mapping")
+	}
+	if config.AWSArtifactCachePolicy == "disabled" && len(config.AWSArtifactSnapshots) > 0 {
+		return errors.New("INFERCRANE_AWS_ARTIFACT_SNAPSHOTS_JSON cannot be set while artifact caching is disabled")
+	}
+	for modelIdentity, snapshotID := range config.AWSArtifactSnapshots {
+		if !validImmutableModelIdentity(modelIdentity) || !validAWSSnapshotID(snapshotID) {
+			return errors.New("INFERCRANE_AWS_ARTIFACT_SNAPSHOTS_JSON must map non-empty immutable model identities to AWS snapshot IDs")
+		}
+	}
+	if rate := config.AWSArtifactVolumeInitializationRate; rate != 0 && (rate < 100 || rate > 300) {
+		return errors.New("INFERCRANE_AWS_ARTIFACT_VOLUME_INITIALIZATION_RATE_MIBPS must be 0 or between 100 and 300")
+	}
 	return nil
+}
+
+func validImmutableModelIdentity(value string) bool {
+	separator := strings.LastIndex(value, "@")
+	if separator <= 0 || strings.TrimSpace(value) != value {
+		return false
+	}
+	revision := value[separator+1:]
+	if len(revision) != 40 {
+		return false
+	}
+	for _, char := range revision {
+		if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+func validAWSSnapshotID(value string) bool {
+	if !strings.HasPrefix(value, "snap-") || len(value) < len("snap-")+8 {
+		return false
+	}
+	for _, char := range value[len("snap-"):] {
+		if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func validateGCP(config Config) error {
@@ -485,6 +550,9 @@ func validateGCP(config Config) error {
 	}
 	if strings.Contains(config.GCPVMImage, "/family/") {
 		return errors.New("INFERCRANE_GCP_VM_IMAGE must identify an immutable image, not an image family")
+	}
+	if config.GCPBootDiskGiB < 50 || config.GCPBootDiskGiB > 65536 {
+		return errors.New("INFERCRANE_GCP_BOOT_DISK_GIB must be between 50 and 65536")
 	}
 	return nil
 }
@@ -607,4 +675,22 @@ func envInt(key string, fallback int) (int, error) {
 		return 0, fmt.Errorf("%s must be an integer: %w", key, err)
 	}
 	return value, nil
+}
+
+func envStringMap(key string) (map[string]string, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return nil, nil
+	}
+	values := map[string]string{}
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&values); err != nil {
+		return nil, fmt.Errorf("%s must be a JSON object of string keys and values: %w", key, err)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("%s must contain exactly one JSON object", key)
+	}
+	return values, nil
 }

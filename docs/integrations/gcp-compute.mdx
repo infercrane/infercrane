@@ -19,8 +19,46 @@ InferCrane does not store a service-account key, assign a public IP, or infer pr
 The production image contains a checksum-pinned `gcloud` client. Authenticate with Application
 Default Credentials using an identity allowed to create, describe, list, and delete only the
 intended project resources. For Docker Compose, set `GCLOUD_CONFIG_DIR` to a read-only gcloud
-configuration directory. Prefer workload identity when the control plane runs on GCP; do not put a
-service-account key in a DeploymentSpec. Configure all fields together:
+configuration directory. The entrypoint copies that bootstrap profile into container-local `/tmp`
+storage because `gcloud` requires a writable credential database; refreshed tokens are therefore
+never persisted back to the host mount. Prefer workload identity when the control plane runs on GCP;
+do not put a service-account key in a DeploymentSpec. Configure all fields together:
+
+### One-time administrator handoff
+
+Keep the control plane and worker identities separate:
+
+| Identity | Required boundary | Purpose |
+| --- | --- | --- |
+| Human bootstrap identity | The dedicated project during initial setup only | Enable Compute Engine, Secret Manager, and IAM Credentials; create the two service accounts, network, firewall rule, and worker secret |
+| InferCrane control identity | VM lifecycle in the selected project and `serviceAccountUser` on the exact worker service account | Describe, create, adopt, list, and delete InferCrane-labeled workers |
+| Worker service account | `secretAccessor` on the exact worker secret | Read its API credential at boot without a service-account key |
+
+For a self-hosted control plane outside Google Cloud, use service-account impersonation or Workload
+Identity Federation. For a control plane running on Google Cloud, attach the control identity to the
+runner. Do not download a service-account JSON key for either path.
+
+Prepare one private subnet with Private Google Access and allow TCP `8000` only from the
+control-plane network or identity boundary to the worker service account. A GPU worker has no public
+address, so the control plane must have a real private route into that subnet. Enabling an API or
+passing `doctor` does not create that route.
+
+Before configuring InferCrane, verify these non-mutating boundaries with the same effective control
+identity:
+
+```bash
+gcloud auth list
+gcloud config get-value project
+gcloud compute zones describe europe-west4-a --project acme-production
+gcloud compute regions describe europe-west4 --project acme-production
+gcloud compute instances list \
+  --project acme-production \
+  --filter='labels.infercrane-managed=true'
+```
+
+The final command should be empty for a new boundary. GPU quota, current zone availability, and a
+billing budget alert must be checked separately. Budget alerts notify; they do not stop Compute
+Engine spend.
 
 Allow read-only serial-port output if startup waterfall evidence is required. InferCrane retains
 only its closed `infercrane_startup` markers and discards every other console line.
@@ -35,18 +73,35 @@ export INFERCRANE_GCP_SERVICE_ACCOUNT='runtime@acme-production.iam.gserviceaccou
 export INFERCRANE_GCP_VM_IMAGE='projects/cos-cloud/global/images/cos-stable-QUALIFIED_VERSION'
 export INFERCRANE_GCP_WORKER_SECRET='infercrane-worker-key'
 export INFERCRANE_GCP_CONTAINER_IMAGE='REGISTRY/IMAGE@sha256:QUALIFIED_DIGEST'
+export INFERCRANE_GCP_BOOT_DISK_GIB=200
 export GCLOUD_CONFIG_DIR="$HOME/.config/gcloud"
 ```
 
-Validate identity, Compute API access, and the configured zone without creating capacity:
+Validate identity and every configured dependency without creating capacity:
 
 ```bash
 infercrane doctor --gcp
 ```
 
+The preflight describes the zone, machine type, accelerator type, private subnet, attached worker
+service account, worker secret, and immutable VM image. It fails when Private Google Access is not
+enabled because workers intentionally have no public IP. It does not prove GPU stock, quota, the
+private route from the control plane, or runtime readiness; those remain real-infrastructure checks.
+
 The attached service account reads the worker credential from Secret Manager at startup. Grant it
 only secret-version access to that secret. The subnet must allow the control plane to reach the
 runtime port over private addressing.
+
+The boot disk defaults to 200 GiB and is created as `pd-balanced`. Do not reduce it below the
+measured sum of the immutable runtime image, model artifacts, temporary download space, and safety
+headroom. InferCrane refuses values below 50 GiB; the small default disk inherited from a base VM
+image is not sufficient evidence that an inference runtime can materialize successfully.
+
+For Container-Optimized OS, worker startup installs the image-compatible NVIDIA driver with
+`cos-extensions`, verifies the GPU device nodes, and mounts the driver libraries and devices into
+the runtime container before it can be marked started. A custom immutable VM image may provide a
+preinstalled driver instead, but `nvidia-smi` must pass before the container is launched. This
+driver stage is part of startup evidence; a running VM is not treated as runtime readiness.
 
 ## Deploy
 
@@ -82,7 +137,10 @@ The operation remains durable if the terminal disconnects. Inventory and deletio
 resources labeled `infercrane-managed=true`; real cleanup must still be confirmed during manual
 qualification.
 
-The guarded real-provider harness is available when an isolated paid project is ready:
+The guarded real-provider harness is available when an isolated paid project is ready. The default
+GCP path includes the generic buffered, streaming, long-context, long-generation, and overload
+performance matrix; the larger concurrency sweep remains explicit. Final inventory compares the
+baseline and after-state for InferCrane-owned VMs, boot disks, addresses, and forwarding rules.
 
 ```bash
 ./scripts/portable-provider-acceptance.sh gcp --approve-paid-resources

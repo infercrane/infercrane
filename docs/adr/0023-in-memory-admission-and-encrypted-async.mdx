@@ -17,6 +17,10 @@ gateway rather than duplicating authentication, routing, admission, protocol or 
 
 - A database outage cannot add synchronous latency to an already-running inference request path.
 - A policy update converges within the refresh interval rather than atomically across every gateway.
+- Live admission pressure is reported as an explicitly instance-local snapshot; saturation does not
+  change gateway liveness, database readiness, runtime health, or served-model identity.
+- Request IDs are assigned before admission. Queue wait is part of end-to-end request latency and
+  overload outcomes persist content-free evidence with a bounded retry hint.
 - Control-plane restart and worker loss do not lose queued work.
 - Duplicate submissions converge by tenant-scoped idempotency key.
 - Prompt/result retention is explicit and encrypted; synchronous requests remain content-free by

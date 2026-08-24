@@ -275,6 +275,50 @@ class ControlAPI:
         path = f"/artifacts/{quote(id, safe='')}/cache"
         return cast(dict[str, Any], self._transport.request("GET", path))
 
+    def list_optimization_campaigns(self) -> ObjectList:
+        path = "/optimization/campaigns"
+        return cast(ObjectList, self._transport.request("GET", path))
+
+    def create_optimization_campaign(self, *, body: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
+        path = "/optimization/campaigns"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body, idempotency_key=idempotency_key))
+
+    def get_optimization_campaign(self, id: str) -> dict[str, Any]:
+        path = f"/optimization/campaigns/{quote(id, safe='')}"
+        return cast(dict[str, Any], self._transport.request("GET", path))
+
+    def approve_optimization_campaign(self, id: str, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = f"/optimization/campaigns/{quote(id, safe='')}/approve"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
+    def cancel_optimization_campaign(self, id: str, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = f"/optimization/campaigns/{quote(id, safe='')}/cancel"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
+    def list_optimized_artifacts(self) -> ObjectList:
+        path = "/optimized-artifacts"
+        return cast(ObjectList, self._transport.request("GET", path))
+
+    def create_optimized_artifact(self, *, body: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
+        path = "/optimized-artifacts"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body, idempotency_key=idempotency_key))
+
+    def get_optimized_artifact(self, id: str) -> dict[str, Any]:
+        path = f"/optimized-artifacts/{quote(id, safe='')}"
+        return cast(dict[str, Any], self._transport.request("GET", path))
+
+    def begin_optimized_artifact_build(self, id: str, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = f"/optimized-artifacts/{quote(id, safe='')}/build"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
+    def attest_optimized_artifact_build(self, id: str, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = f"/optimized-artifacts/{quote(id, safe='')}/attest"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
+    def qualify_optimized_artifact(self, id: str, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = f"/optimized-artifacts/{quote(id, safe='')}/qualify"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
     def create_sandbox_reference(self, *, body: dict[str, Any]) -> dict[str, Any]:
         path = "/sandboxes/references"
         return cast(dict[str, Any], self._transport.request("POST", path, body=body))

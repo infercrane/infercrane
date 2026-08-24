@@ -1,6 +1,7 @@
 package admission
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"sync"
@@ -10,7 +11,19 @@ import (
 )
 
 func testPolicy() Policy {
-	return Policy{Key: "tenant/endpoint", MaxConcurrency: 1, MaxQueueDepth: 1, QueueTimeout: 30 * time.Millisecond, MaxRequestBytes: 100, MaxOutputTokens: 10, AllowedPriorities: map[string]struct{}{"normal": {}, "high": {}}, Enabled: true}
+	return Policy{Key: "tenant/endpoint", MaxConcurrency: 1, MaxQueueDepth: 1, QueueTimeout: 30 * time.Millisecond, RequestTimeout: 45 * time.Second, MaxRequestBytes: 100, MaxOutputTokens: 10, AllowedPriorities: map[string]struct{}{"normal": {}, "high": {}}, Enabled: true}
+}
+
+func TestPoolPublishesRequestTimeoutWithoutIO(t *testing.T) {
+	pool := New()
+	policy := testPolicy()
+	pool.Replace([]Policy{policy})
+	if got := pool.RequestTimeout(policy.Key); got != policy.RequestTimeout {
+		t.Fatalf("request timeout=%s want=%s", got, policy.RequestTimeout)
+	}
+	if got := pool.RequestTimeout("missing"); got != 0 {
+		t.Fatalf("missing request timeout=%s", got)
+	}
 }
 
 func TestPoolConcurrentAcquireNeverExceedsLimitAndReleaseIsExactlyOnce(t *testing.T) {
@@ -136,5 +149,55 @@ func TestPoolBoundsRequestOutputPriorityAndWait(t *testing.T) {
 	defer release()
 	if _, err := pool.Acquire(context.Background(), Request{Key: "tenant/endpoint", RequestBytes: 10}); !errors.Is(err, ErrQueueTimeout) {
 		t.Fatalf("timeout error=%v", err)
+	}
+}
+
+func TestPoolReportsSaturationWithoutChangingHealthSemantics(t *testing.T) {
+	pool := New()
+	policy := testPolicy()
+	pool.Replace([]Policy{policy})
+	release, err := pool.Acquire(context.Background(), Request{Key: policy.Key, RequestBytes: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+
+	waiterStarted := make(chan struct{})
+	waiterDone := make(chan error, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		close(waiterStarted)
+		_, acquireErr := pool.Acquire(ctx, Request{Key: policy.Key, RequestBytes: 10})
+		waiterDone <- acquireErr
+	}()
+	<-waiterStarted
+	deadline := time.Now().Add(time.Second)
+	for {
+		state, found := pool.State(policy.Key)
+		if found && state.CapacityState == "saturated" && state.Active == 1 && state.Waiting == 1 && state.Scope == "gateway_instance" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("admission never reported saturation: %#v found=%t", state, found)
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	if _, err := pool.Acquire(context.Background(), Request{Key: policy.Key, RequestBytes: 10}); !errors.Is(err, ErrConcurrency) {
+		t.Fatalf("overflow error=%v", err)
+	}
+	state, _ := pool.State(policy.Key)
+	if state.Rejected != 1 {
+		t.Fatalf("rejected=%d", state.Rejected)
+	}
+	var metrics bytes.Buffer
+	pool.WritePrometheus(&metrics)
+	if !bytes.Contains(metrics.Bytes(), []byte("infercrane_admission_waiting 1")) || !bytes.Contains(metrics.Bytes(), []byte("infercrane_admission_rejected_total 1")) {
+		t.Fatalf("metrics=%s", metrics.String())
+	}
+	cancel()
+	if err := <-waiterDone; !errors.Is(err, context.Canceled) {
+		t.Fatalf("waiter error=%v", err)
 	}
 }

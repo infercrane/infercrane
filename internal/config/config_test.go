@@ -107,7 +107,7 @@ func TestAWSBYOCConfigurationIsAllOrNothingAndImmutable(t *testing.T) {
 	}
 	t.Setenv("INFERCRANE_AWS_IMAGE_DIGEST", "ghcr.io/infercrane/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	cfg, err := Load()
-	if err != nil || !cfg.AWSEnabled() || len(cfg.AWSSecurityGroupIDs) != 2 || cfg.AWSRootVolumeGiB != 100 || cfg.AWSImageCachePolicy != "prefer" {
+	if err != nil || !cfg.AWSEnabled() || len(cfg.AWSSecurityGroupIDs) != 2 || cfg.AWSRootVolumeGiB != 200 || cfg.AWSImageCachePolicy != "prefer" {
 		t.Fatalf("cfg=%#v err=%v", cfg, err)
 	}
 	t.Setenv("INFERCRANE_AWS_SUBNET_ID", "")
@@ -124,6 +124,54 @@ func TestAWSBYOCConfigurationIsAllOrNothingAndImmutable(t *testing.T) {
 	t.Setenv("INFERCRANE_AWS_ROOT_VOLUME_GIB", "30")
 	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "ROOT_VOLUME_GIB") {
 		t.Fatalf("expected unsafe AWS root volume failure, got %v", err)
+	}
+}
+
+func TestAWSArtifactSnapshotConfigurationIsExactAndBounded(t *testing.T) {
+	t.Setenv("INFERCRANE_API_KEY", "secret")
+	for key, value := range map[string]string{
+		"INFERCRANE_AWS_ROLE_ARN":                                  "arn:aws:iam::123456789012:role/infercrane",
+		"INFERCRANE_AWS_REGION":                                    "eu-central-1",
+		"INFERCRANE_AWS_SUBNET_ID":                                 "subnet-private",
+		"INFERCRANE_AWS_SECURITY_GROUP_IDS":                        "sg-runtime",
+		"INFERCRANE_AWS_AMI_ID":                                    "ami-gpu",
+		"INFERCRANE_AWS_INSTANCE_TYPE":                             "g6e.xlarge",
+		"INFERCRANE_AWS_GPU":                                       "L40S",
+		"INFERCRANE_AWS_INSTANCE_PROFILE_ARN":                      "arn:aws:iam::123456789012:instance-profile/infercrane-worker",
+		"INFERCRANE_AWS_WORKER_SECRET_ARN":                         "arn:aws:secretsmanager:eu-central-1:123456789012:secret:worker",
+		"INFERCRANE_AWS_IMAGE_DIGEST":                              "ghcr.io/infercrane/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"INFERCRANE_AWS_ARTIFACT_CACHE_POLICY":                     "required",
+		"INFERCRANE_AWS_ARTIFACT_SNAPSHOTS_JSON":                   `{"mistralai/Mistral-7B-Instruct-v0.3@0123456789abcdef0123456789abcdef01234567":"snap-0123456789abcdef0"}`,
+		"INFERCRANE_AWS_ARTIFACT_VOLUME_INITIALIZATION_RATE_MIBPS": "200",
+	} {
+		t.Setenv(key, value)
+	}
+	cfg, err := Load()
+	if err != nil || cfg.AWSArtifactCachePolicy != "required" || cfg.AWSArtifactSnapshots["mistralai/Mistral-7B-Instruct-v0.3@0123456789abcdef0123456789abcdef01234567"] != "snap-0123456789abcdef0" || cfg.AWSArtifactVolumeInitializationRate != 200 {
+		t.Fatalf("cfg=%#v err=%v", cfg, err)
+	}
+
+	t.Setenv("INFERCRANE_AWS_ARTIFACT_SNAPSHOTS_JSON", `{"mutable-model":"snap-0123456789abcdef0"}`)
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "model identities") {
+		t.Fatalf("mutable identity accepted: %v", err)
+	}
+	t.Setenv("INFERCRANE_AWS_ARTIFACT_SNAPSHOTS_JSON", `{"model@0123456789abcdef0123456789abcdef01234567":"snapshot-latest"}`)
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "snapshot IDs") {
+		t.Fatalf("invalid snapshot accepted: %v", err)
+	}
+	t.Setenv("INFERCRANE_AWS_ARTIFACT_SNAPSHOTS_JSON", `{"model@0123456789abcdef0123456789abcdef01234567":"snap-0123456789abcdef0"} trailing`)
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "exactly one JSON object") {
+		t.Fatalf("trailing JSON accepted: %v", err)
+	}
+	t.Setenv("INFERCRANE_AWS_ARTIFACT_SNAPSHOTS_JSON", `{"model@0123456789abcdef0123456789abcdef01234567":"snap-0123456789abcdef0"}`)
+	t.Setenv("INFERCRANE_AWS_ARTIFACT_VOLUME_INITIALIZATION_RATE_MIBPS", "99")
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "INITIALIZATION_RATE") {
+		t.Fatalf("unsafe initialization rate accepted: %v", err)
+	}
+	t.Setenv("INFERCRANE_AWS_ARTIFACT_VOLUME_INITIALIZATION_RATE_MIBPS", "0")
+	t.Setenv("INFERCRANE_AWS_ARTIFACT_CACHE_POLICY", "disabled")
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "cannot be set") {
+		t.Fatalf("disabled policy accepted snapshot mapping: %v", err)
 	}
 }
 
@@ -202,6 +250,14 @@ func TestGCPBYOCConfigurationIsAllOrNothingAndImmutable(t *testing.T) {
 	if err != nil || !cfg.GCPEnabled() || cfg.GCPZone != "europe-west4-a" {
 		t.Fatalf("cfg=%#v err=%v", cfg, err)
 	}
+	if cfg.GCPBootDiskGiB != 200 {
+		t.Fatalf("unexpected safe GCP boot disk default: %d", cfg.GCPBootDiskGiB)
+	}
+	t.Setenv("INFERCRANE_GCP_BOOT_DISK_GIB", "10")
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "BOOT_DISK_GIB") {
+		t.Fatalf("undersized GCP boot disk accepted: %v", err)
+	}
+	t.Setenv("INFERCRANE_GCP_BOOT_DISK_GIB", "200")
 	t.Setenv("INFERCRANE_GCP_VM_IMAGE", "projects/cos-cloud/global/images/family/cos-stable")
 	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "image family") {
 		t.Fatalf("expected mutable VM image family failure, got %v", err)

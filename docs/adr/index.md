@@ -46,6 +46,10 @@ or link corrections. A changed decision gets a new ADR whose status supersedes t
 | [0034](/adr/0034-provider-connections-and-gateway-boundary) | Accepted | Make external APIs reusable provider connections while keeping gateway execution replaceable and spend fail-closed. |
 | [0035](/adr/0035-qualified-operational-evidence-collectors) | Accepted | Import bounded, revision-bound hardware and cost evidence through replaceable collectors. |
 | [0036](/adr/0036-dynamo-serving-topology-boundary) | Accepted | Delegate serving-graph topology to Dynamo while InferCrane retains endpoint, release, and evidence ownership. |
+| [0037](/adr/0037-verified-model-artifact-snapshot-cache) | Accepted | Attach verified immutable provider-native model caches without collapsing evidence or billing boundaries. |
+| [0038](/adr/0038-replaceable-evidence-gated-optimization) | Accepted | Generate serving candidates through replaceable sources and require measured evidence before qualification. |
+| [0039](/adr/0039-pinned-aiconfigurator-candidate-source) | Accepted | Use AIConfigurator through a pinned, replaceable candidate-source adapter. |
+| [0040](/adr/0040-durable-evidence-gated-optimization-campaigns) | Accepted | Persist bounded optimization authority and immutable optimized-artifact provenance while external systems retain execution ownership. |
 
 Use the next sequential number. Include context, decision, consequences, alternatives, and
 verification. Link affected feature documents.

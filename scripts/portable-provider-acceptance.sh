@@ -142,7 +142,13 @@ provider_inventory() {
       compose exec -T infercrane sh -eu -c '
         gcloud compute instances list --project "$INFERCRANE_GCP_PROJECT" \
           --filter="labels.infercrane-managed=true AND (status=PROVISIONING OR status=STAGING OR status=RUNNING OR status=STOPPING)" \
-          --format="value(name)" --quiet
+          --format="value(name)" --quiet | sed "s/^/instance:/"
+        gcloud compute disks list --project "$INFERCRANE_GCP_PROJECT" \
+          --filter="name~^infercrane-" --format="value(name)" --quiet | sed "s/^/disk:/"
+        gcloud compute addresses list --project "$INFERCRANE_GCP_PROJECT" \
+          --filter="name~^infercrane-" --format="value(name)" --quiet | sed "s/^/address:/"
+        gcloud compute forwarding-rules list --project "$INFERCRANE_GCP_PROJECT" \
+          --filter="name~^infercrane-" --format="value(name)" --quiet | sed "s/^/forwarding-rule:/"
       '
       ;;
   esac | tr '\t ' '\n\n' | sed '/^$/d' | sort -u
@@ -206,6 +212,15 @@ qualify_spec() {
   [ -r "$spec_dir/$spec" ] || { echo "required spec is missing: $spec_dir/$spec" >&2; return 1; }
   cli deploy "/qualification/$spec" --wait --wait-timeout "${INFERCRANE_V1_READY_TIMEOUT:-45m}" \
     --idempotency-key "$run_id-$cloud-$runtime-deploy" --output json | jq -e '.operation.status == "succeeded"' >/dev/null || return
+  inspect_file="$state/$runtime-inspect.json"
+  cli inspect "$deployment" --output json >"$inspect_file" || return
+  chmod 0600 "$inspect_file"
+  expected_artifact_cache=${INFERCRANE_V1_EXPECT_ARTIFACT_CACHE:-}
+  if [ -n "$expected_artifact_cache" ]; then
+    jq -e --arg expected "$expected_artifact_cache" \
+      'any(.replicas[]; .provider_details.startup_evidence.artifact_cache == $expected)' \
+      "$inspect_file" >/dev/null || return
+  fi
   smoke_openai "$deployment" "$runtime" || return
   cli benchmark "$deployment" --requests 5 --concurrency 1 --random-seed 17 --output json >"$benchmark_file" || return
   chmod 0600 "$benchmark_file"
@@ -219,10 +234,14 @@ qualify_spec() {
     .failed == 0 and
     (.reproduction_command | contains("${INFERCRANE_API_KEY}"))
   ' "$benchmark_file" >/dev/null || return
-  if [ "$cloud" = aws ] && [ "$runtime" = vllm ]; then
+  performance_matrix=${INFERCRANE_V1_PERFORMANCE_MATRIX:-}
+  if [ -z "$performance_matrix" ]; then
+    case "$cloud" in aws|gcp) performance_matrix=true;; *) performance_matrix=false;; esac
+  fi
+  if [ "$runtime" = vllm ] && [ "$performance_matrix" = true ]; then
     matrix_dir="$state/performance-matrix"
     INFERCRANE_BENCHMARK_CLI="$root/scripts/portable-provider-cli.sh" \
-    INFERCRANE_BENCHMARK_RUN_ID="$run_id-aws-vllm" \
+    INFERCRANE_BENCHMARK_RUN_ID="$run_id-$cloud-vllm" \
     INFERCRANE_PORTABLE_ROOT="$root" \
     INFERCRANE_PORTABLE_PROJECT="$project" \
     INFERCRANE_PORTABLE_ENV_FILE="$env_file" \
@@ -242,7 +261,7 @@ qualify_spec() {
     if [ "${INFERCRANE_V1_CONCURRENCY_SWEEP:-false}" = true ]; then
       sweep_dir="$state/concurrency-sweep"
       INFERCRANE_BENCHMARK_CLI="$root/scripts/portable-provider-cli.sh" \
-      INFERCRANE_BENCHMARK_RUN_ID="$run_id-aws-vllm-sweep" \
+      INFERCRANE_BENCHMARK_RUN_ID="$run_id-$cloud-vllm-sweep" \
       INFERCRANE_PORTABLE_ROOT="$root" \
       INFERCRANE_PORTABLE_PROJECT="$project" \
       INFERCRANE_PORTABLE_ENV_FILE="$env_file" \
@@ -277,7 +296,11 @@ cleanup() {
 trap 'cleanup' HUP INT TERM EXIT
 
 if ! docker image inspect "$candidate_image" >/dev/null 2>&1; then
-  docker build --target runtime -t "$candidate_image" "$root"
+  docker buildx version >/dev/null 2>&1 || {
+    echo "portable qualification requires the Docker Buildx plugin" >&2
+    exit 1
+  }
+  DOCKER_BUILDKIT=1 docker build --target runtime -t "$candidate_image" "$root"
 fi
 for runtime in $runtimes; do
   case "$runtime" in

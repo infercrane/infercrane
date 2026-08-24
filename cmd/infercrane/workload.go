@@ -115,12 +115,51 @@ func workloadInitCommand(args []string) error {
 	if err != nil {
 		return err
 	}
-	result := map[string]any{"project": filepath.Dir(path), "spec": path, "model": *model, "model_revision": modelRevision, "runtime": *runtimeName, "provider": *cloud, "curated_recipe": *recipeName, "serving_profile": selectedProfile.Name}
+	_, initializedDeployment, err := workloadproject.Validate(path)
+	if err != nil {
+		return fmt.Errorf("validate generated project: %w", err)
+	}
+	endpointName := initializedDeployment.Name
+	nextSteps := []string{
+		"cd " + shellDisplay(filepath.Dir(path)),
+		"infercrane workload validate",
+	}
+	if preflight := providerPreflightCommand(*cloud); preflight != "" {
+		nextSteps = append(nextSteps, preflight)
+	}
+	nextSteps = append(nextSteps,
+		"infercrane workload plan",
+		"infercrane workload deploy --wait",
+		"infercrane request "+endpointName,
+		"infercrane doctor "+endpointName,
+	)
+	result := map[string]any{"project": filepath.Dir(path), "spec": path, "endpoint": endpointName, "model": *model, "model_revision": modelRevision, "runtime": *runtimeName, "provider": *cloud, "curated_recipe": *recipeName, "serving_profile": selectedProfile.Name, "next_steps": nextSteps}
 	if *output == "json" {
 		return printJSON(result)
 	}
-	fmt.Printf("Inference project created\nProject  %s\nSpec     %s\n\nNext:\n  cd %s\n  infercrane workload validate\n  infercrane workload plan\n  infercrane workload deploy --wait\n", filepath.Dir(path), path, shellDisplay(filepath.Dir(path)))
+	fmt.Printf("Inference project created\nProject  %s\nSpec     %s\nModel    %s\nRuntime  %s\nProvider %s\n\nNext:\n", filepath.Dir(path), path, *model, *runtimeName, *cloud)
+	for _, step := range nextSteps {
+		fmt.Printf("  %s\n", step)
+	}
+	fmt.Printf("\nThe application keeps using model=%q while InferCrane operates the serving plan behind it.\n", endpointName)
 	return nil
+}
+
+func providerPreflightCommand(cloud string) string {
+	switch strings.ToLower(strings.TrimSpace(cloud)) {
+	case "aws", "aws-ec2":
+		return "infercrane doctor --aws"
+	case "gcp", "gcp-compute":
+		return "infercrane doctor --gcp"
+	case "kubernetes", "k8s", "kserve", "kubernetes-dynamo":
+		return "infercrane doctor --kubernetes"
+	case "runpod-serverless":
+		return "infercrane doctor --serverless"
+	case "runpod", "skypilot":
+		return "infercrane doctor --cloud"
+	default:
+		return "infercrane doctor"
+	}
 }
 
 func workloadValidateCommand(args []string) error {

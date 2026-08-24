@@ -97,6 +97,18 @@ func TestProfilesRejectInvalidOrUnsupportedClaims(t *testing.T) {
 	}
 }
 
+func TestCompositionProfilesRequireEvidenceAndKnownKinds(t *testing.T) {
+	profile := CompositionProfile{Adapter: "unsafe", Kind: CompositionCache, ContractVersion: CompositionV1, Ownership: "external", Capabilities: []Capability{{Name: "cache", State: CapabilitySupported}}, Qualification: []Qualification{{State: QualificationRegistered}}}
+	if err := profile.Validate(); err == nil || !strings.Contains(err.Error(), "supported without evidence") {
+		t.Fatalf("unsupported composition claim accepted: %v", err)
+	}
+	profile.Kind = "magic"
+	profile.Capabilities[0].Evidence = "test"
+	if err := profile.Validate(); err == nil || !strings.Contains(err.Error(), "composition kind") {
+		t.Fatalf("unknown composition kind accepted: %v", err)
+	}
+}
+
 func TestV15CatalogSeparatesProviderProfilesWithoutFabricatingQualification(t *testing.T) {
 	registry, err := V15Catalog()
 	if err != nil {
@@ -140,6 +152,31 @@ func TestV1CatalogPublishesDynamoAsSeparateLocallySimulatedBackend(t *testing.T)
 	}
 	if strings.Contains(string(encoded), `"state":"real-qualified"`) {
 		t.Fatalf("Dynamo profile fabricated real qualification: %s", encoded)
+	}
+}
+
+func TestV1CatalogPublishesReplaceableOptimizationBoundariesWithoutExecutionClaims(t *testing.T) {
+	registry, err := V1Catalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, _ := json.Marshal(registry.Snapshot())
+	text := string(encoded)
+	for _, required := range []string{
+		`"adapter":"llm-compressor","kind":"artifact-builder"`,
+		`"adapter":"modelopt","kind":"artifact-builder"`,
+		`"adapter":"vllm-speculators","kind":"artifact-builder"`,
+		`"adapter":"tensorrt-llm","kind":"artifact-builder"`,
+		`"adapter":"lmcache","kind":"cache"`,
+		`"adapter":"llm-d","kind":"orchestrator"`,
+		`"adapter":"aibrix","kind":"orchestrator"`,
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("catalog missing %s", required)
+		}
+	}
+	if strings.Contains(text, `"runtime_execution","state":"supported"`) || strings.Contains(text, `"executable_lifecycle","state":"supported"`) {
+		t.Fatalf("catalog fabricated executable optimization support: %s", text)
 	}
 }
 
@@ -258,6 +295,9 @@ func TestCapabilityEvidenceReferencesExistingTests(t *testing.T) {
 	}
 	for _, runtime := range registry.Snapshot().Runtimes {
 		capabilities = append(capabilities, runtime.Capabilities...)
+	}
+	for _, composition := range registry.Snapshot().Compositions {
+		capabilities = append(capabilities, composition.Capabilities...)
 	}
 	for _, capability := range capabilities {
 		if capability.State != CapabilitySupported {

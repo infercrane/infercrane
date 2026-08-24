@@ -42,6 +42,7 @@ type RequestAuthorizer interface {
 type AdmissionAuthorizer interface {
 	Acquire(context.Context, admission.Request) (func(), error)
 	RetryBudget(string) int
+	RequestTimeout(string) time.Duration
 }
 type ContextPassportResolver interface {
 	Resolve(tenant, id, subject string, now time.Time) (contextpassport.Hint, bool)
@@ -159,6 +160,17 @@ func (g *Gateway) legacyCompletions(w http.ResponseWriter, r *http.Request) {
 	g.proxyInference(w, r, "completions", "completions")
 }
 func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operation, resource string) {
+	started := time.Now()
+	requestID := r.Header.Get("X-Request-ID")
+	if requestID == "" || len(requestID) > 128 {
+		requestID = "req_" + randomID()
+	}
+	traceParent := r.Header.Get("traceparent")
+	if !validTraceParent.MatchString(traceParent) {
+		traceParent = "00-" + randomHex(16) + "-" + randomHex(8) + "-01"
+	}
+	w.Header().Set("X-Request-ID", requestID)
+	w.Header().Set("traceparent", traceParent)
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 16<<20))
 	if err != nil {
 		openAIError(w, "Invalid JSON body", http.StatusBadRequest, "invalid_request_error")
@@ -216,41 +228,50 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 	if maxOutputTokens == 0 {
 		maxOutputTokens = integerField(payload, "max_tokens")
 	}
+	admissionKey := principal.TenantID + "\x00" + alias
 	if g.AdmissionAuthorizer != nil {
-		releaseAdmission, admissionErr := g.AdmissionAuthorizer.Acquire(r.Context(), admission.Request{Key: principal.TenantID + "\x00" + alias, Priority: r.Header.Get("X-InferCrane-Priority"), RequestBytes: len(body), OutputTokens: maxOutputTokens})
+		if timeout := g.AdmissionAuthorizer.RequestTimeout(admissionKey); timeout > 0 {
+			deadlineContext, cancel := context.WithDeadline(r.Context(), started.Add(timeout))
+			defer cancel()
+			r = r.WithContext(deadlineContext)
+		}
+	}
+	admissionStarted := time.Now()
+	if g.AdmissionAuthorizer != nil {
+		releaseAdmission, admissionErr := g.AdmissionAuthorizer.Acquire(r.Context(), admission.Request{Key: admissionKey, Priority: r.Header.Get("X-InferCrane-Priority"), RequestBytes: len(body), OutputTokens: maxOutputTokens})
 		if admissionErr != nil {
 			status, errorType := http.StatusTooManyRequests, "admission_rejected"
-			if errors.Is(admissionErr, admission.ErrRequestSize) {
+			if errors.Is(admissionErr, context.DeadlineExceeded) {
+				status, errorType = http.StatusGatewayTimeout, "request_deadline_exceeded"
+			} else if errors.Is(admissionErr, admission.ErrRequestSize) {
 				status, errorType = http.StatusRequestEntityTooLarge, "request_too_large"
 			} else if errors.Is(admissionErr, admission.ErrOutputLimit) || errors.Is(admissionErr, admission.ErrPriority) {
 				status, errorType = http.StatusUnprocessableEntity, "admission_policy_violation"
 			}
+			if status == http.StatusTooManyRequests {
+				w.Header().Set("Retry-After", "1")
+			}
+			queueMS := float64(time.Since(admissionStarted).Microseconds()) / 1000
+			g.record(context.WithoutCancel(r.Context()), requestID, route, alias, operation, started, status, errorType, streaming, responseObservation{}, capacityEvidence{}, replay, &queueMS, 0)
 			openAIError(w, admissionErr.Error(), status, errorType)
 			return
 		}
 		defer releaseAdmission()
 	}
+	queueMS := float64(time.Since(admissionStarted).Microseconds()) / 1000
 	retryBudget := 0
 	if g.AdmissionAuthorizer != nil && !streaming && route.ExternalPolicyID == "" {
-		retryBudget = g.AdmissionAuthorizer.RetryBudget(principal.TenantID + "\x00" + alias)
+		retryBudget = g.AdmissionAuthorizer.RetryBudget(admissionKey)
 	}
 	body, err = json.Marshal(payload)
 	if err != nil {
 		openAIError(w, "Invalid JSON body", http.StatusBadRequest, "invalid_request_error")
 		return
 	}
-	requestID := r.Header.Get("X-Request-ID")
-	if requestID == "" || len(requestID) > 128 {
-		requestID = "req_" + randomID()
-	}
-	traceParent := r.Header.Get("traceparent")
-	if !validTraceParent.MatchString(traceParent) {
-		traceParent = "00-" + randomHex(16) + "-" + randomHex(8) + "-01"
-	}
-	started := time.Now()
 	if g.RequestAuthorizer != nil {
 		if err := g.RequestAuthorizer.Authorize(principal.TenantID); err != nil {
-			g.record(r.Context(), requestID, route, alias, operation, started, http.StatusTooManyRequests, "tenant_request_quota_exhausted", streaming, responseObservation{}, capacityEvidence{}, replay)
+			w.Header().Set("Retry-After", "1")
+			g.record(context.WithoutCancel(r.Context()), requestID, route, alias, operation, started, http.StatusTooManyRequests, "tenant_request_quota_exhausted", streaming, responseObservation{}, capacityEvidence{}, replay, &queueMS, 0)
 			openAIError(w, "Tenant request-rate quota is exhausted", http.StatusTooManyRequests, "rate_limit_error")
 			return
 		}
@@ -258,12 +279,12 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 	evidenceResult := g.observeCapacity(r.Context(), route, started)
 	if route.ExternalPolicyID != "" {
 		if g.ExternalAuthorizer == nil {
-			g.record(r.Context(), requestID, route, alias, operation, started, http.StatusTooManyRequests, "external_budget_unavailable", streaming, responseObservation{}, <-evidenceResult, replay)
+			g.record(context.WithoutCancel(r.Context()), requestID, route, alias, operation, started, http.StatusTooManyRequests, "external_budget_unavailable", streaming, responseObservation{}, <-evidenceResult, replay, &queueMS, 0)
 			openAIError(w, "External fallback budget is unavailable", http.StatusTooManyRequests, "rate_limit_error")
 			return
 		}
 		if _, err := g.ExternalAuthorizer.Authorize(route.ExternalPolicyID); err != nil {
-			g.record(r.Context(), requestID, route, alias, operation, started, http.StatusTooManyRequests, "external_budget_exhausted", streaming, responseObservation{}, <-evidenceResult, replay)
+			g.record(context.WithoutCancel(r.Context()), requestID, route, alias, operation, started, http.StatusTooManyRequests, "external_budget_exhausted", streaming, responseObservation{}, <-evidenceResult, replay, &queueMS, 0)
 			openAIError(w, "External fallback hard budget is exhausted", http.StatusTooManyRequests, "rate_limit_error")
 			return
 		}
@@ -292,7 +313,9 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 		client = &http.Client{Transport: &http.Transport{MaxIdleConns: 512, MaxIdleConnsPerHost: 128, IdleConnTimeout: 90 * time.Second, ResponseHeaderTimeout: 5 * time.Minute}}
 	}
 	var resp *http.Response
+	attemptCount := 0
 	for attempt := 0; attempt <= retryBudget; attempt++ {
+		attemptCount++
 		req, requestErr := http.NewRequestWithContext(r.Context(), http.MethodPost, target, bytes.NewReader(body))
 		if requestErr != nil {
 			err = requestErr
@@ -327,14 +350,14 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 	if err != nil {
 		status, errorType, message := http.StatusServiceUnavailable, "upstream_unavailable", "Inference upstream is unavailable"
 		if errors.Is(err, context.DeadlineExceeded) {
-			status, errorType, message = http.StatusGatewayTimeout, "timeout", "Inference upstream timed out"
+			status, errorType, message = http.StatusGatewayTimeout, "request_deadline_exceeded", "Inference request exceeded its endpoint deadline"
 		}
-		g.record(r.Context(), requestID, route, alias, operation, started, status, errorType, streaming, responseObservation{}, <-evidenceResult, replay)
+		g.record(context.WithoutCancel(r.Context()), requestID, route, alias, operation, started, status, errorType, streaming, responseObservation{}, <-evidenceResult, replay, &queueMS, max(0, attemptCount-1))
 		openAIError(w, message, status, "server_error")
 		return
 	}
 	if resp == nil {
-		g.record(r.Context(), requestID, route, alias, operation, started, http.StatusServiceUnavailable, "upstream_unavailable", streaming, responseObservation{}, <-evidenceResult, replay)
+		g.record(context.WithoutCancel(r.Context()), requestID, route, alias, operation, started, http.StatusServiceUnavailable, "upstream_unavailable", streaming, responseObservation{}, <-evidenceResult, replay, &queueMS, max(0, attemptCount-1))
 		openAIError(w, "Inference upstream is unavailable", http.StatusServiceUnavailable, "server_error")
 		return
 	}
@@ -347,13 +370,15 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 	copyErr := copyResponse(w, resp, &observation)
 	errorType := ""
 	if copyErr != nil {
-		if r.Context().Err() != nil {
+		if errors.Is(r.Context().Err(), context.DeadlineExceeded) {
+			errorType = "request_deadline_exceeded"
+		} else if r.Context().Err() != nil {
 			errorType = "client_cancelled"
 		} else {
 			errorType = "upstream_disconnect"
 		}
 	}
-	g.record(context.WithoutCancel(r.Context()), requestID, route, alias, operation, started, resp.StatusCode, errorType, streaming, observation, <-evidenceResult, replay)
+	g.record(context.WithoutCancel(r.Context()), requestID, route, alias, operation, started, resp.StatusCode, errorType, streaming, observation, <-evidenceResult, replay, &queueMS, max(0, attemptCount-1))
 	if g.Logger != nil {
 		g.Logger.Info("inference request", "request_id", requestID, "traceparent", traceParent, "tenant_id", principal.TenantID, "deployment_id", route.DeploymentID, "status", resp.StatusCode, "duration_ms", float64(time.Since(started).Microseconds())/1000)
 	}
@@ -452,7 +477,7 @@ func (g *Gateway) replayShape(payload map[string]any, headers http.Header) repla
 	return shape
 }
 
-func (g *Gateway) record(ctx context.Context, id string, route routes.Snapshot, requestModel, operation string, started time.Time, status int, errorType string, streaming bool, observation responseObservation, evidence capacityEvidence, replay replayShape) {
+func (g *Gateway) record(ctx context.Context, id string, route routes.Snapshot, requestModel, operation string, started time.Time, status int, errorType string, streaming bool, observation responseObservation, evidence capacityEvidence, replay replayShape, queueMS *float64, retryCount int) {
 	if g.Recorder == nil {
 		return
 	}
@@ -463,7 +488,14 @@ func (g *Gateway) record(ctx context.Context, id string, route routes.Snapshot, 
 		ttft = &value
 	}
 	responseModel, inputTokens, outputTokens := observation.usage()
-	record := domain.InferenceRecord{RequestID: id, TenantID: route.TenantID, DeploymentID: route.DeploymentID, RevisionID: route.RevisionID, TargetID: route.TargetID, LogicalModelID: route.LogicalModelID, EnvironmentID: route.EnvironmentID, EndpointID: route.EndpointID, ServingPlanID: route.ServingPlanID, BindingID: route.BindingID, Provider: route.Provider, Runtime: route.Runtime, ComputeMode: route.ComputeMode, OperationName: operation, RequestModel: requestModel, ResponseModel: responseModel, SemanticConventionSchema: "https://opentelemetry.io/schemas/gen-ai/1.42.0", StartedAt: started, StatusCode: status, LatencyMS: latency, TTFTMS: ttft, InputTokens: inputTokens, OutputTokens: outputTokens, Streaming: streaming, ErrorType: errorType, ColdStart: evidence.coldStart, ProviderWorkersAtArrival: evidence.workers, ProviderCapacityObservedAt: evidence.observedAt, SessionIDHash: replay.sessionIDHash, ParentSessionIDHash: replay.parentSessionIDHash, SharedPrefixHash: replay.sharedPrefixHash, ToolPauseMS: replay.toolPauseMS}
+	var generationMS *float64
+	if streaming && ttft != nil {
+		value := latency - *ttft
+		if value >= 0 {
+			generationMS = &value
+		}
+	}
+	record := domain.InferenceRecord{RequestID: id, TenantID: route.TenantID, DeploymentID: route.DeploymentID, RevisionID: route.RevisionID, TargetID: route.TargetID, LogicalModelID: route.LogicalModelID, EnvironmentID: route.EnvironmentID, EndpointID: route.EndpointID, ServingPlanID: route.ServingPlanID, BindingID: route.BindingID, Provider: route.Provider, Runtime: route.Runtime, ComputeMode: route.ComputeMode, OperationName: operation, RequestModel: requestModel, ResponseModel: responseModel, SemanticConventionSchema: "https://opentelemetry.io/schemas/gen-ai/1.42.0", StartedAt: started, StatusCode: status, LatencyMS: latency, QueueMS: queueMS, TTFTMS: ttft, GenerationMS: generationMS, InputTokens: inputTokens, OutputTokens: outputTokens, Streaming: streaming, RetryCount: retryCount, ErrorType: errorType, ColdStart: evidence.coldStart, ProviderWorkersAtArrival: evidence.workers, ProviderCapacityObservedAt: evidence.observedAt, SessionIDHash: replay.sessionIDHash, ParentSessionIDHash: replay.parentSessionIDHash, SharedPrefixHash: replay.sharedPrefixHash, ToolPauseMS: replay.toolPauseMS}
 	if err := g.Recorder.RecordRequest(ctx, record); err != nil && g.Logger != nil {
 		g.Logger.Error("record request", "error", err, "request_id", id)
 	}

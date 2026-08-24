@@ -46,15 +46,33 @@ func (d *denyRequestQuota) Authorize(tenant string) error {
 	return errors.New("exhausted")
 }
 
-type captureRecorder struct {
-	mu     sync.Mutex
-	record domain.InferenceRecord
+type delayedAdmission struct{ delay time.Duration }
+
+func (d delayedAdmission) Acquire(ctx context.Context, _ admission.Request) (func(), error) {
+	timer := time.NewTimer(d.delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-timer.C:
+		return func() {}, nil
+	}
 }
 
-func (c *captureRecorder) RecordRequest(_ context.Context, record domain.InferenceRecord) error {
+func (delayedAdmission) RetryBudget(string) int              { return 0 }
+func (delayedAdmission) RequestTimeout(string) time.Duration { return 0 }
+
+type captureRecorder struct {
+	mu         sync.Mutex
+	record     domain.InferenceRecord
+	contextErr error
+}
+
+func (c *captureRecorder) RecordRequest(ctx context.Context, record domain.InferenceRecord) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.record = record
+	c.contextErr = ctx.Err()
 	return nil
 }
 
@@ -195,13 +213,17 @@ func TestCompletionEnforcesTenantQuotaBeforeUpstream(t *testing.T) {
 	directory := routes.New()
 	directory.Put(routes.Snapshot{TenantID: "team", DeploymentID: "d1", Alias: "alias", UpstreamModel: "model", RouterURL: "http://router"})
 	quota := &denyRequestQuota{}
-	handler := (&Gateway{Routes: directory, Authenticator: fakeAuthenticator{principal: domain.Principal{ID: "p1", TenantID: "team", Role: "viewer", Scopes: []string{"read"}}}, Client: client, RequestAuthorizer: quota}).Handler()
+	captured := &captureRecorder{}
+	handler := (&Gateway{Routes: directory, Authenticator: fakeAuthenticator{principal: domain.Principal{ID: "p1", TenantID: "team", Role: "viewer", Scopes: []string{"read"}}}, Client: client, RequestAuthorizer: quota, Recorder: captured}).Handler()
 	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"alias","messages":[]}`))
 	request.Header.Set("Authorization", "Bearer tenant-token")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusTooManyRequests || quota.tenant != "team" || upstreamCalled {
 		t.Fatalf("status=%d tenant=%q upstream_called=%t body=%s", response.Code, quota.tenant, upstreamCalled, response.Body.String())
+	}
+	if response.Header().Get("Retry-After") != "1" || !strings.HasPrefix(response.Header().Get("X-Request-ID"), "req_") || captured.record.QueueMS == nil {
+		t.Fatalf("headers=%v record=%#v", response.Header(), captured.record)
 	}
 }
 
@@ -334,6 +356,47 @@ func TestAdmissionRejectsBeforeUpstream(t *testing.T) {
 	}
 }
 
+func TestSaturationReturnsCorrelated429WhileGatewayRemainsLive(t *testing.T) {
+	upstreamStarted := make(chan struct{})
+	releaseUpstream := make(chan struct{})
+	client := &http.Client{Transport: roundTripper(func(*http.Request) (*http.Response, error) {
+		close(upstreamStarted)
+		<-releaseUpstream
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"model":"model","choices":[]}`))}, nil
+	})}
+	pool := admission.New()
+	pool.Replace([]admission.Policy{{Key: "global\x00alias", MaxConcurrency: 1, MaxQueueDepth: 0, QueueTimeout: time.Second, MaxRequestBytes: 4096, MaxOutputTokens: 4096, AllowedPriorities: map[string]struct{}{"normal": {}}, Enabled: true}})
+	directory := routes.New()
+	directory.Put(routes.Snapshot{TenantID: "global", Alias: "alias", UpstreamModel: "model", RouterURL: "http://runtime", ProtocolCapabilities: runtimecontract.ProtocolCapabilities{ChatCompletions: true}})
+	handler := (&Gateway{Routes: directory, APIKey: "secret", Client: client, AdmissionAuthorizer: pool}).Handler()
+	firstDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"alias","messages":[]}`))
+		request.Header.Set("Authorization", "Bearer secret")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		firstDone <- response
+	}()
+	<-upstreamStarted
+
+	live := httptest.NewRecorder()
+	handler.ServeHTTP(live, httptest.NewRequest(http.MethodGet, "/livez", nil))
+	if live.Code != http.StatusOK {
+		t.Fatalf("saturation changed liveness: status=%d body=%s", live.Code, live.Body.String())
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"alias","messages":[]}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusTooManyRequests || response.Header().Get("Retry-After") != "1" || !strings.HasPrefix(response.Header().Get("X-Request-ID"), "req_") {
+		t.Fatalf("status=%d headers=%v body=%s", response.Code, response.Header(), response.Body.String())
+	}
+	close(releaseUpstream)
+	if first := <-firstDone; first.Code != http.StatusOK {
+		t.Fatalf("first request status=%d body=%s", first.Code, first.Body.String())
+	}
+}
+
 func TestAdmissionRetryBudgetRetriesOnlyBufferedInternalRequest(t *testing.T) {
 	attempts := 0
 	client := &http.Client{Transport: roundTripper(func(request *http.Request) (*http.Response, error) {
@@ -350,13 +413,92 @@ func TestAdmissionRetryBudgetRetriesOnlyBufferedInternalRequest(t *testing.T) {
 	pool.Replace([]admission.Policy{{Key: "global\x00alias", MaxConcurrency: 1, MaxQueueDepth: 0, QueueTimeout: time.Second, MaxRequestBytes: 4096, MaxOutputTokens: 4096, AllowedPriorities: map[string]struct{}{"normal": {}}, RetryBudget: 2, Enabled: true}})
 	directory := routes.New()
 	directory.Put(routes.Snapshot{TenantID: "global", Alias: "alias", UpstreamModel: "model", RouterURL: "http://runtime", ProtocolCapabilities: runtimecontract.ProtocolCapabilities{ChatCompletions: true}})
-	handler := (&Gateway{Routes: directory, APIKey: "secret", Client: client, AdmissionAuthorizer: pool}).Handler()
+	captured := &captureRecorder{}
+	handler := (&Gateway{Routes: directory, APIKey: "secret", Client: client, AdmissionAuthorizer: pool, Recorder: captured}).Handler()
 	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"alias","messages":[]}`))
 	request.Header.Set("Authorization", "Bearer secret")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || attempts != 3 {
 		t.Fatalf("status=%d attempts=%d body=%s", response.Code, attempts, response.Body.String())
+	}
+	if captured.record.RetryCount != 2 || captured.record.QueueMS == nil || captured.record.LatencyMS < *captured.record.QueueMS {
+		t.Fatalf("record=%#v", captured.record)
+	}
+}
+
+func TestEndpointDeadlineBoundsQueueRetriesAndUpstreamTogether(t *testing.T) {
+	attempts := 0
+	client := &http.Client{Transport: roundTripper(func(request *http.Request) (*http.Response, error) {
+		attempts++
+		select {
+		case <-request.Context().Done():
+			return nil, request.Context().Err()
+		case <-time.After(5 * time.Millisecond):
+			return &http.Response{StatusCode: http.StatusServiceUnavailable, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":"starting"}`))}, nil
+		}
+	})}
+	pool := admission.New()
+	pool.Replace([]admission.Policy{{Key: "global\x00alias", MaxConcurrency: 1, MaxQueueDepth: 1, QueueTimeout: time.Second, RequestTimeout: 35 * time.Millisecond, MaxRequestBytes: 4096, MaxOutputTokens: 4096, AllowedPriorities: map[string]struct{}{"normal": {}}, RetryBudget: 3, Enabled: true}})
+	directory := routes.New()
+	directory.Put(routes.Snapshot{TenantID: "global", Alias: "alias", UpstreamModel: "model", RouterURL: "http://runtime", ProtocolCapabilities: runtimecontract.ProtocolCapabilities{ChatCompletions: true}})
+	captured := &captureRecorder{}
+	handler := (&Gateway{Routes: directory, APIKey: "secret", Client: client, AdmissionAuthorizer: pool, Recorder: captured}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"alias","messages":[]}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	started := time.Now()
+	handler.ServeHTTP(response, request)
+	elapsed := time.Since(started)
+	if response.Code != http.StatusGatewayTimeout || attempts != 2 || elapsed > 150*time.Millisecond {
+		t.Fatalf("status=%d attempts=%d elapsed=%s body=%s", response.Code, attempts, elapsed, response.Body.String())
+	}
+	if captured.record.ErrorType != "request_deadline_exceeded" || captured.record.RetryCount != 1 || captured.record.LatencyMS < 30 || captured.contextErr != nil {
+		t.Fatalf("record=%#v", captured.record)
+	}
+}
+
+func TestEndpointDeadlineExpiresWhileWaitingWithoutCallingUpstream(t *testing.T) {
+	called := false
+	client := &http.Client{Transport: roundTripper(func(*http.Request) (*http.Response, error) {
+		called = true
+		return nil, errors.New("unexpected upstream request")
+	})}
+	pool := admission.New()
+	policy := admission.Policy{Key: "global\x00alias", MaxConcurrency: 1, MaxQueueDepth: 1, QueueTimeout: time.Second, RequestTimeout: 25 * time.Millisecond, MaxRequestBytes: 4096, MaxOutputTokens: 4096, AllowedPriorities: map[string]struct{}{"normal": {}}, Enabled: true}
+	pool.Replace([]admission.Policy{policy})
+	release, err := pool.Acquire(context.Background(), admission.Request{Key: policy.Key, RequestBytes: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	directory := routes.New()
+	directory.Put(routes.Snapshot{TenantID: "global", Alias: "alias", UpstreamModel: "model", RouterURL: "http://runtime", ProtocolCapabilities: runtimecontract.ProtocolCapabilities{ChatCompletions: true}})
+	captured := &captureRecorder{}
+	handler := (&Gateway{Routes: directory, APIKey: "secret", Client: client, AdmissionAuthorizer: pool, Recorder: captured}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"alias","messages":[]}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusGatewayTimeout || called || captured.record.ErrorType != "request_deadline_exceeded" || captured.contextErr != nil {
+		t.Fatalf("status=%d called=%t record=%#v body=%s", response.Code, called, captured.record, response.Body.String())
+	}
+}
+
+func TestAdmissionWaitIsIncludedInEndToEndRequestEvidence(t *testing.T) {
+	client := &http.Client{Transport: roundTripper(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"model":"model","choices":[]}`))}, nil
+	})}
+	directory := routes.New()
+	directory.Put(routes.Snapshot{TenantID: "global", EndpointID: "endpoint", Alias: "alias", UpstreamModel: "model", RouterURL: "http://runtime", ProtocolCapabilities: runtimecontract.ProtocolCapabilities{ChatCompletions: true}})
+	captured := &captureRecorder{}
+	handler := (&Gateway{Routes: directory, APIKey: "secret", Client: client, AdmissionAuthorizer: delayedAdmission{delay: 20 * time.Millisecond}, Recorder: captured}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"alias","messages":[]}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || captured.record.QueueMS == nil || *captured.record.QueueMS < 15 || captured.record.LatencyMS < *captured.record.QueueMS {
+		t.Fatalf("status=%d record=%#v", response.Code, captured.record)
 	}
 }
 
@@ -410,7 +552,7 @@ func TestCompletionRecordsStreamingTelemetry(t *testing.T) {
 	if record.LogicalModelID != "model-1" || record.EnvironmentID != "environment-1" || record.EndpointID != "endpoint-1" || record.ServingPlanID != "plan-1" || record.BindingID != "binding-1" {
 		t.Fatalf("endpoint metadata=%+v", record)
 	}
-	if !record.Streaming || record.TTFTMS == nil || *record.TTFTMS < 0 || record.LatencyMS < *record.TTFTMS {
+	if !record.Streaming || record.QueueMS == nil || record.TTFTMS == nil || record.GenerationMS == nil || *record.TTFTMS < 0 || *record.GenerationMS < 0 || record.LatencyMS < *record.TTFTMS {
 		t.Fatalf("timings=%+v", record)
 	}
 	if record.InputTokens == nil || *record.InputTokens != 12 || record.OutputTokens == nil || *record.OutputTokens != 7 || record.ResponseModel != "Qwen/Qwen3-8B" {

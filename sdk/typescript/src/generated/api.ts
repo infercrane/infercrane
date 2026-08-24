@@ -333,6 +333,61 @@ export class ControlApi {
     return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
   }
 
+  listOptimizationCampaigns(): Promise<ObjectList> {
+    const path = '/optimization/campaigns';
+    return this.transport.request('GET', path) as Promise<ObjectList>;
+  }
+
+  createOptimizationCampaign(body: JsonValue, idempotencyKey: string): Promise<Record<string, JsonValue>> {
+    const path = '/optimization/campaigns';
+    return this.transport.request('POST', path, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
+  }
+
+  getOptimizationCampaign(id: string): Promise<Record<string, JsonValue>> {
+    const path = `/optimization/campaigns/${encodeURIComponent(id)}`;
+    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+  }
+
+  approveOptimizationCampaign(id: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = `/optimization/campaigns/${encodeURIComponent(id)}/approve`;
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  cancelOptimizationCampaign(id: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = `/optimization/campaigns/${encodeURIComponent(id)}/cancel`;
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  listOptimizedArtifacts(): Promise<ObjectList> {
+    const path = '/optimized-artifacts';
+    return this.transport.request('GET', path) as Promise<ObjectList>;
+  }
+
+  createOptimizedArtifact(body: JsonValue, idempotencyKey: string): Promise<Record<string, JsonValue>> {
+    const path = '/optimized-artifacts';
+    return this.transport.request('POST', path, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
+  }
+
+  getOptimizedArtifact(id: string): Promise<Record<string, JsonValue>> {
+    const path = `/optimized-artifacts/${encodeURIComponent(id)}`;
+    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+  }
+
+  beginOptimizedArtifactBuild(id: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = `/optimized-artifacts/${encodeURIComponent(id)}/build`;
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  attestOptimizedArtifactBuild(id: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = `/optimized-artifacts/${encodeURIComponent(id)}/attest`;
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  qualifyOptimizedArtifact(id: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = `/optimized-artifacts/${encodeURIComponent(id)}/qualify`;
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
   createSandboxReference(body: JsonValue): Promise<Record<string, JsonValue>> {
     const path = '/sandboxes/references';
     return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;

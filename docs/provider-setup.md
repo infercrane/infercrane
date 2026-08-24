@@ -7,6 +7,52 @@ description: Configure credentials and prerequisites for qualified infrastructur
 
 Provider integrations are registered control-plane adapters. Each provider owns its credentials, infrastructure semantics, and billable resources; InferCrane owns durable intent, reconciliation, and cleanup. A provider is supported only after its adapter combination appears in the release qualification matrix.
 
+## Choose the least disruptive path
+
+You do not need cloud-administrator access to evaluate InferCrane. Start with the smallest ownership
+boundary that proves value:
+
+| Goal | Start here | Cloud changes |
+| --- | --- | --- |
+| Inspect an existing vLLM, SGLang, LiteLLM, or OpenAI-compatible service | Connect it in observe-only mode | None |
+| Put stable routing in front of an existing service | Move the connection to traffic-managed ownership | InferCrane gateway only |
+| Let InferCrane create and delete GPU workers in your account | Configure one BYOC adapter below | One-time identity, network, secret, quota, and runtime-image setup |
+| Operate an existing Kubernetes cluster | Configure the namespace-scoped Kubernetes adapter | Namespace, service account, RBAC, worker Secret, and GPU node capacity |
+
+For BYOC, a cloud administrator prepares the boundary once. Day-to-day operators then use a
+short-lived control-plane identity; deployment specifications never contain provider credentials.
+
+## Common onboarding sequence
+
+The provider-specific pages contain the exact prerequisites and configuration fields. The safe
+sequence is the same across providers:
+
+1. **Choose a boundary.** Select one account or project, region, private network, runtime image, and
+   GPU profile. Do not start with account-wide administrator credentials.
+2. **Create workload identity.** Give the InferCrane control plane only the lifecycle permissions it
+   needs. Give workers a separate identity that can read only their worker secret and required
+   artifacts.
+3. **Confirm quota and cost controls.** Check GPU quota and regional availability. Configure a
+   provider budget alert, while remembering that an alert does not stop spend.
+4. **Configure InferCrane.** Store provider settings outside deployment YAML and keep private files
+   mode `0600`.
+5. **Run a read-only preflight.** `infercrane doctor --aws`, `infercrane doctor --gcp`, or
+   `infercrane doctor --kubernetes` validates identity and required API reads without provisioning a
+   GPU.
+6. **Plan before mutation.** Review `infercrane plan` output, the exact model revision, immutable
+   runtime digest, GPU, region, and cache policy.
+7. **Deploy with a recovery handle.** Use an idempotency key and retain the operation ID. Closing the
+   terminal does not cancel the durable operation.
+8. **Prove cleanup.** Delete through InferCrane, check `infercrane orphans`, and confirm provider
+   inventory returns to the recorded baseline.
+
+<Note>
+`doctor` proves configuration and identity reads. It cannot prove GPU stock, IAM propagation,
+private routing, driver compatibility, model fit, or deletion semantics. Those boundaries are
+qualified by the first guarded deployment and remain specific to the exact provider/runtime/model
+combination.
+</Note>
+
 ## Data residency and production qualification
 
 A region flag is placement intent, not a residency guarantee. InferCrane cannot prove where a
@@ -33,11 +79,13 @@ artifact location, telemetry destination, backup location, and external-fallback
 [security boundary](/security).
 
 <Warning>
-The private preview currently has no generally production-qualified AWS, GCP, RunPod, or real-GPU
-Kubernetes combination and makes no data-residency guarantee. The safest supported choice for a
-strict production residency requirement is to stop after `plan`, or connect a customer-owned
-in-region endpoint in observe-only mode while keeping routing and lifecycle ownership unchanged.
-Do not approve a configuration from a region name or hermetic adapter test alone.
+The private preview has narrow real-AWS evidence for the exact model, runtime, accelerator, region,
+image, and workload tuples recorded in [AWS real-infrastructure evidence](/testing/aws-real-evidence).
+That evidence does not qualify a different AWS tuple, GCP, RunPod, real-GPU Kubernetes, or any data-
+residency guarantee. For an unqualified or residency-constrained path, stop after `plan`, or connect
+a customer-owned in-region endpoint in observe-only mode while keeping routing and lifecycle
+ownership unchanged. Never infer qualification from a provider name, region flag, or hermetic
+adapter test alone.
 </Warning>
 
 ## RunPod

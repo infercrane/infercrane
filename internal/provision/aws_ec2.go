@@ -13,27 +13,32 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/infercrane/infercrane/internal/artifactcache"
 )
 
 // AWSEC2 is a narrow BYOC adapter. It delegates AWS authentication and API
 // compatibility to AWS CLI v2 while retaining deterministic lifecycle policy
 // in InferCrane. It never persists or logs AssumeRole credentials.
 type AWSEC2 struct {
-	Binary                   string
-	Runner                   CommandRunner
-	RoleARN, ExternalID      string
-	Region, SubnetID         string
-	SubnetIDs                []string
-	SecurityGroupIDs         []string
-	AMIID, InstanceType, GPU string
-	InstanceProfileARN       string
-	WorkerSecretARN          string
-	ImageDigest              string
-	CostSource               string
-	CostObservedAt           time.Time
-	HourlyCostMicrousd       int64
-	RootVolumeGiB            int
-	ImageCachePolicy         string
+	Binary                           string
+	Runner                           CommandRunner
+	RoleARN, ExternalID              string
+	Region, SubnetID                 string
+	SubnetIDs                        []string
+	SecurityGroupIDs                 []string
+	AMIID, InstanceType, GPU         string
+	InstanceProfileARN               string
+	WorkerSecretARN                  string
+	ImageDigest                      string
+	CostSource                       string
+	CostObservedAt                   time.Time
+	HourlyCostMicrousd               int64
+	RootVolumeGiB                    int
+	ImageCachePolicy                 string
+	ArtifactCachePolicy              string
+	ArtifactSnapshots                map[string]string
+	ArtifactVolumeInitializationRate int
 }
 
 type awsCredentials struct {
@@ -52,7 +57,14 @@ type awsDescribe struct {
 			InstanceType     string `json:"InstanceType"`
 			SubnetID         string `json:"SubnetId"`
 			PrivateIPAddress string `json:"PrivateIpAddress"`
-			IAMProfile       struct {
+			RootDeviceName   string `json:"RootDeviceName"`
+			BlockDevices     []struct {
+				DeviceName string `json:"DeviceName"`
+				EBS        struct {
+					VolumeID string `json:"VolumeId"`
+				} `json:"Ebs"`
+			} `json:"BlockDeviceMappings"`
+			IAMProfile struct {
 				ARN string `json:"Arn"`
 			} `json:"IamInstanceProfile"`
 			SecurityGroups []struct {
@@ -73,8 +85,28 @@ type awsInstance struct {
 	ImageID, InstanceType, SubnetID   string
 	InstanceProfileARN                string
 	SecurityGroupIDs                  []string
+	RootDeviceName                    string
 	RootVolumeGiB                     int
 	RootVolumeEncrypted               bool
+	RootDeviceNameIntent              string
+	RootVolumeGiBIntent               int
+	RootVolumeEncryptedIntent         bool
+	ArtifactSnapshotID                string
+	ArtifactIdentityDigest            string
+}
+
+type awsImage struct {
+	ImageID         string
+	RootDeviceName  string
+	RootVolumeGiB   int
+	OccupiedDevices map[string]struct{}
+}
+
+type awsSnapshot struct {
+	SnapshotID, State string
+	Encrypted         bool
+	VolumeSize        int
+	Tags              map[string]string
 }
 
 // Check performs a read-only role-assumption and identity probe. It validates
@@ -95,6 +127,11 @@ func (a AWSEC2) Check(ctx context.Context) error {
 	if json.Unmarshal(output, &identity) != nil || identity.Account == "" || identity.ARN == "" {
 		return errors.New("AWS identity probe returned invalid output")
 	}
+	if a.AMIID != "" {
+		if _, err = a.resolveImage(ctx); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -109,12 +146,16 @@ func (a AWSEC2) EnsureReplica(ctx context.Context, spec ReplicaSpec) (ProviderHa
 	if err := a.validate(spec); err != nil {
 		return ProviderHandle{}, fmt.Errorf("%w: %v", ErrInvalidReplicaSpec, err)
 	}
+	image, err := a.resolveImage(ctx)
+	if err != nil {
+		return ProviderHandle{}, err
+	}
 	existing, err := a.find(ctx, spec.ExternalKey)
 	if err != nil {
 		return ProviderHandle{}, err
 	}
 	if existing.ID != "" {
-		if err := a.validateAdoptedInstance(existing); err != nil {
+		if err := a.validateAdoptedInstance(existing, spec, image); err != nil {
 			return ProviderHandle{}, err
 		}
 		return ProviderHandle{RequestID: a.clientToken(spec.ExternalKey), ResourceID: existing.ID, ExternalKey: spec.ExternalKey}, nil
@@ -123,15 +164,39 @@ func (a AWSEC2) EnsureReplica(ctx context.Context, spec ReplicaSpec) (ProviderHa
 	if port == 0 {
 		port = 8000
 	}
-	userData := a.userData(spec, port)
+	artifactSnapshot, err := a.resolveArtifactSnapshot(ctx, spec)
+	if err != nil {
+		return ProviderHandle{}, err
+	}
+	userData := a.userData(spec, port, artifactSnapshot.SnapshotID)
 	rootVolumeGiB := a.rootVolumeGiB()
-	resourceTags := []map[string]string{{"Key": "infercrane:managed", "Value": "true"}, {"Key": "infercrane:external-key", "Value": spec.ExternalKey}, {"Key": "infercrane:root-volume-gib", "Value": fmt.Sprint(rootVolumeGiB)}, {"Key": "infercrane:root-volume-encrypted", "Value": "true"}, {"Key": "Name", "Value": "infercrane-" + spec.ExternalKey}}
+	instanceTags := []map[string]string{{"Key": "infercrane:managed", "Value": "true"}, {"Key": "infercrane:external-key", "Value": spec.ExternalKey}, {"Key": "infercrane:root-device-name", "Value": image.RootDeviceName}, {"Key": "infercrane:root-volume-gib", "Value": fmt.Sprint(rootVolumeGiB)}, {"Key": "infercrane:root-volume-encrypted", "Value": "true"}, {"Key": "Name", "Value": "infercrane-" + spec.ExternalKey}}
+	volumeTags := []map[string]string{{"Key": "infercrane:managed", "Value": "true"}, {"Key": "infercrane:external-key", "Value": spec.ExternalKey}, {"Key": "Name", "Value": "infercrane-" + spec.ExternalKey}}
+	if artifactSnapshot.SnapshotID != "" {
+		cacheTags := []map[string]string{
+			{"Key": "infercrane:artifact-snapshot-id", "Value": artifactSnapshot.SnapshotID},
+			{"Key": "infercrane:artifact-identity-digest", "Value": modelIdentityDigest(modelIdentity(spec))},
+		}
+		instanceTags = append(instanceTags, cacheTags...)
+		volumeTags = append(volumeTags, cacheTags...)
+	}
 	// Root volumes remain billable if provider-side termination fails to remove
 	// them. Give instances and volumes the same durable ownership identity so
 	// inventory and guarded cleanup can detect either resource independently.
-	tags := []map[string]any{{"ResourceType": "instance", "Tags": resourceTags}, {"ResourceType": "volume", "Tags": resourceTags}}
+	tags := []map[string]any{{"ResourceType": "instance", "Tags": instanceTags}, {"ResourceType": "volume", "Tags": volumeTags}}
 	tagsJSON, _ := json.Marshal(tags)
-	blockDevices := []map[string]any{{"DeviceName": "/dev/xvda", "Ebs": map[string]any{"VolumeSize": rootVolumeGiB, "VolumeType": "gp3", "Encrypted": true, "DeleteOnTermination": true}}}
+	blockDevices := []map[string]any{{"DeviceName": image.RootDeviceName, "Ebs": map[string]any{"VolumeSize": rootVolumeGiB, "VolumeType": "gp3", "Encrypted": true, "DeleteOnTermination": true}}}
+	if artifactSnapshot.SnapshotID != "" {
+		artifactDevice, deviceErr := artifactDeviceName(image)
+		if deviceErr != nil {
+			return ProviderHandle{}, deviceErr
+		}
+		ebs := map[string]any{"SnapshotId": artifactSnapshot.SnapshotID, "VolumeType": "gp3", "Encrypted": true, "DeleteOnTermination": true}
+		if a.ArtifactVolumeInitializationRate > 0 {
+			ebs["VolumeInitializationRate"] = a.ArtifactVolumeInitializationRate
+		}
+		blockDevices = append(blockDevices, map[string]any{"DeviceName": artifactDevice, "Ebs": ebs})
+	}
 	blockDevicesJSON, _ := json.Marshal(blockDevices)
 	var capacityErrors []string
 	for _, subnetID := range a.subnets() {
@@ -190,7 +255,7 @@ func (a AWSEC2) ObserveReplica(ctx context.Context, handle ProviderHandle, port 
 			if json.Unmarshal(output, &response) == nil {
 				if evidence, ok := parseStartupEvidence(response.Output); ok {
 					details["startup_evidence"] = evidence
-					if evidence.CurrentStage == "image_cache_miss_required" {
+					if evidence.CurrentStage == "image_cache_miss_required" || evidence.CurrentStage == "artifact_cache_mount_failed" {
 						state, endpoint = "failed", ""
 					}
 				}
@@ -255,6 +320,15 @@ func (a AWSEC2) validate(spec ReplicaSpec) error {
 	if a.rootVolumeGiB() < 50 || a.rootVolumeGiB() > 16384 {
 		return errors.New("AWS root volume must be between 50 and 16384 GiB")
 	}
+	if policy := a.artifactCachePolicy(); policy != "disabled" && policy != "prefer" && policy != "required" {
+		return errors.New("AWS artifact cache policy must be disabled, prefer, or required")
+	}
+	if rate := a.ArtifactVolumeInitializationRate; rate != 0 && (rate < 100 || rate > 300) {
+		return errors.New("AWS artifact volume initialization rate must be 0 or between 100 and 300 MiB/s")
+	}
+	if a.artifactCachePolicy() == "required" && !artifactCacheRuntimeSupported(spec) {
+		return errors.New("AWS artifact cache is qualified only for vLLM and SGLang workloads")
+	}
 	if !spec.Workload.Empty() {
 		if err := spec.Workload.Validate(); err != nil {
 			return fmt.Errorf("portable workload: %w", err)
@@ -263,6 +337,203 @@ func (a AWSEC2) validate(spec ReplicaSpec) error {
 		return errors.New("AWS workload image must be pinned by sha256 digest")
 	}
 	return nil
+}
+
+func (a AWSEC2) resolveArtifactSnapshot(ctx context.Context, spec ReplicaSpec) (awsSnapshot, error) {
+	policy := a.artifactCachePolicy()
+	if policy == "disabled" || !artifactCacheRuntimeSupported(spec) {
+		return awsSnapshot{}, nil
+	}
+	identity := modelIdentity(spec)
+	snapshotID := a.ArtifactSnapshots[identity]
+	if snapshotID == "" {
+		if policy == "required" {
+			return awsSnapshot{}, fmt.Errorf("AWS artifact cache requires a verified snapshot for immutable model %q", identity)
+		}
+		return awsSnapshot{}, nil
+	}
+	return a.verifyArtifactSnapshot(ctx, identity, snapshotID)
+}
+
+func (a AWSEC2) verifyArtifactSnapshot(ctx context.Context, identity, snapshotID string) (awsSnapshot, error) {
+	output, err := a.run(ctx, "ec2", "describe-snapshots", "--region", a.Region, "--snapshot-ids", snapshotID, "--output", "json", "--no-cli-pager")
+	if err != nil {
+		return awsSnapshot{}, fmt.Errorf("verify AWS artifact snapshot: %w", err)
+	}
+	var response struct {
+		Snapshots []struct {
+			SnapshotID string `json:"SnapshotId"`
+			State      string `json:"State"`
+			Encrypted  bool   `json:"Encrypted"`
+			VolumeSize int    `json:"VolumeSize"`
+			Tags       []struct {
+				Key, Value string
+			} `json:"Tags"`
+		} `json:"Snapshots"`
+	}
+	if json.Unmarshal(output, &response) != nil || len(response.Snapshots) != 1 || response.Snapshots[0].SnapshotID != snapshotID {
+		return awsSnapshot{}, errors.New("AWS artifact snapshot verification returned invalid output")
+	}
+	raw := response.Snapshots[0]
+	result := awsSnapshot{SnapshotID: raw.SnapshotID, State: raw.State, Encrypted: raw.Encrypted, VolumeSize: raw.VolumeSize, Tags: map[string]string{}}
+	for _, tag := range raw.Tags {
+		result.Tags[tag.Key] = tag.Value
+	}
+	expectedDigest := modelIdentityDigest(identity)
+	if result.State != "completed" || !result.Encrypted || result.VolumeSize < 1 || result.Tags["infercrane:artifact-cache"] != "true" || result.Tags["infercrane:model-identity-digest"] != expectedDigest {
+		return awsSnapshot{}, fmt.Errorf("AWS artifact snapshot %s is not completed, encrypted, and tagged for immutable model identity digest %s", snapshotID, expectedDigest)
+	}
+	return result, nil
+}
+
+// resolveImage discovers the AMI root device before RunInstances. AWS AMIs do
+// not share one universal root-device name: treating /dev/xvda as a constant
+// can attach a second empty volume while leaving the real image root small or
+// unencrypted. The image lookup is read-only and the returned root mapping is
+// used for both launch and adoption validation.
+func (a AWSEC2) resolveImage(ctx context.Context) (awsImage, error) {
+	output, err := a.run(ctx, "ec2", "describe-images", "--region", a.Region, "--image-ids", a.AMIID, "--output", "json", "--no-cli-pager")
+	if err != nil {
+		return awsImage{}, fmt.Errorf("inspect AWS AMI root device: %w", err)
+	}
+	var response struct {
+		Images []struct {
+			ImageID             string `json:"ImageId"`
+			RootDeviceName      string `json:"RootDeviceName"`
+			BlockDeviceMappings []struct {
+				DeviceName string `json:"DeviceName"`
+				EBS        *struct {
+					VolumeSize int `json:"VolumeSize"`
+				} `json:"Ebs"`
+			} `json:"BlockDeviceMappings"`
+		} `json:"Images"`
+	}
+	if json.Unmarshal(output, &response) != nil || len(response.Images) != 1 || response.Images[0].ImageID != a.AMIID {
+		return awsImage{}, errors.New("AWS AMI inspection returned invalid output")
+	}
+	raw := response.Images[0]
+	if !strings.HasPrefix(raw.RootDeviceName, "/dev/") {
+		return awsImage{}, errors.New("AWS AMI does not declare a valid root device")
+	}
+	result := awsImage{ImageID: raw.ImageID, RootDeviceName: raw.RootDeviceName, OccupiedDevices: map[string]struct{}{}}
+	for _, mapping := range raw.BlockDeviceMappings {
+		if mapping.DeviceName != "" {
+			result.OccupiedDevices[mapping.DeviceName] = struct{}{}
+		}
+		if mapping.DeviceName == raw.RootDeviceName && mapping.EBS != nil {
+			result.RootVolumeGiB = mapping.EBS.VolumeSize
+		}
+	}
+	if result.RootVolumeGiB < 1 {
+		return awsImage{}, errors.New("AWS AMI root device is not backed by a valid EBS volume")
+	}
+	if a.rootVolumeGiB() < result.RootVolumeGiB {
+		return awsImage{}, fmt.Errorf("AWS root volume %d GiB is smaller than AMI root snapshot %d GiB", a.rootVolumeGiB(), result.RootVolumeGiB)
+	}
+	return result, nil
+}
+
+func artifactDeviceName(image awsImage) (string, error) {
+	for _, candidate := range []string{"/dev/sdf", "/dev/sdg", "/dev/sdh", "/dev/sdi", "/dev/sdj", "/dev/sdk", "/dev/sdl", "/dev/sdm", "/dev/sdn", "/dev/sdo", "/dev/sdp"} {
+		if _, occupied := image.OccupiedDevices[candidate]; !occupied && candidate != image.RootDeviceName {
+			return candidate, nil
+		}
+	}
+	return "", errors.New("AWS AMI leaves no supported device name for the artifact-cache volume")
+}
+
+// Prefetch adopts a customer-prepared immutable EBS snapshot after validating
+// its closed identity contract. InferCrane does not copy model bytes or enable
+// billed snapshot acceleration implicitly.
+func (a AWSEC2) Prefetch(ctx context.Context, request artifactcache.Request) (artifactcache.Operation, error) {
+	if err := request.Validate(); err != nil {
+		return artifactcache.Operation{}, err
+	}
+	if a.artifactCachePolicy() == "disabled" {
+		return artifactcache.Operation{}, errors.New("AWS artifact cache adapter is disabled")
+	}
+	if request.Provider != "aws" || request.Region != a.Region {
+		return artifactcache.Operation{}, errors.New("AWS artifact prefetch provider and region must match the configured adapter")
+	}
+	snapshotID, err := awsSnapshotLocation(request.Location)
+	if err != nil {
+		return artifactcache.Operation{}, err
+	}
+	if configured := a.ArtifactSnapshots[request.ModelIdentity]; configured == "" || configured != snapshotID {
+		return artifactcache.Operation{}, errors.New("AWS artifact snapshot location is not configured for this immutable model identity")
+	}
+	if _, err = a.verifyArtifactSnapshot(ctx, request.ModelIdentity, snapshotID); err != nil {
+		return artifactcache.Operation{}, err
+	}
+	return artifactcache.Operation{ProviderOperationID: snapshotID, Status: "succeeded"}, nil
+}
+
+// Observe returns bounded, expiring evidence for the same verified snapshot.
+func (a AWSEC2) Observe(ctx context.Context, request artifactcache.Request) (artifactcache.Observation, error) {
+	if err := request.Validate(); err != nil {
+		return artifactcache.Observation{}, err
+	}
+	if a.artifactCachePolicy() == "disabled" || request.Provider != "aws" || request.Region != a.Region {
+		return artifactcache.Observation{}, errors.New("AWS artifact cache adapter, provider, and region must match the configured boundary")
+	}
+	snapshotID, err := awsSnapshotLocation(request.Location)
+	if err != nil {
+		return artifactcache.Observation{}, err
+	}
+	if configured := a.ArtifactSnapshots[request.ModelIdentity]; configured == "" || configured != snapshotID {
+		return artifactcache.Observation{}, errors.New("AWS artifact snapshot location is not configured for this immutable model identity")
+	}
+	snapshot, err := a.verifyArtifactSnapshot(ctx, request.ModelIdentity, snapshotID)
+	if err != nil {
+		return artifactcache.Observation{}, err
+	}
+	observed := time.Now().UTC()
+	evidence, _ := json.Marshal(map[string]any{"snapshot_id": snapshot.SnapshotID, "encrypted": snapshot.Encrypted, "volume_size_gib": snapshot.VolumeSize, "model_identity_digest": modelIdentityDigest(request.ModelIdentity)})
+	return artifactcache.Observation{State: "present", Source: "aws-ebs-snapshot", EvidenceJSON: string(evidence), ObservedAt: observed, ExpiresAt: observed.Add(10 * time.Minute)}, nil
+}
+
+func awsSnapshotLocation(location string) (string, error) {
+	const prefix = "aws-ebs://"
+	if !strings.HasPrefix(location, prefix) {
+		return "", errors.New("AWS artifact cache location must use aws-ebs://snap-ID")
+	}
+	snapshotID := strings.TrimPrefix(location, prefix)
+	if !validAWSSnapshotID(snapshotID) {
+		return "", errors.New("AWS artifact cache location contains an invalid snapshot ID")
+	}
+	return snapshotID, nil
+}
+
+func validAWSSnapshotID(value string) bool {
+	if !strings.HasPrefix(value, "snap-") || len(value) < len("snap-")+8 {
+		return false
+	}
+	for _, char := range value[len("snap-"):] {
+		if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+func artifactCacheRuntimeSupported(spec ReplicaSpec) bool {
+	runtimeName := spec.Runtime
+	if runtimeName == "" && spec.Workload.Empty() {
+		runtimeName = "vllm"
+	}
+	return runtimeName == "vllm" || runtimeName == "sglang"
+}
+
+func modelIdentity(spec ReplicaSpec) string {
+	if spec.ModelRevision == "" {
+		return spec.Model
+	}
+	return spec.Model + "@" + spec.ModelRevision
+}
+
+func modelIdentityDigest(identity string) string {
+	digest := sha256.Sum256([]byte(identity))
+	return "sha256:" + hex.EncodeToString(digest[:])
 }
 
 func (a AWSEC2) findHandle(ctx context.Context, handle ProviderHandle) (awsInstance, error) {
@@ -296,13 +567,23 @@ func (a AWSEC2) find(ctx context.Context, externalKey string) (awsInstance, erro
 	return active[0], nil
 }
 
-func (a AWSEC2) validateAdoptedInstance(instance awsInstance) error {
+func (a AWSEC2) validateAdoptedInstance(instance awsInstance, spec ReplicaSpec, image awsImage) error {
 	expectedGroups := append([]string(nil), a.SecurityGroupIDs...)
 	actualGroups := append([]string(nil), instance.SecurityGroupIDs...)
 	sort.Strings(expectedGroups)
 	sort.Strings(actualGroups)
-	if instance.ImageID != a.AMIID || instance.InstanceType != a.InstanceType || !containsString(a.subnets(), instance.SubnetID) || instance.InstanceProfileARN != a.InstanceProfileARN || strings.Join(actualGroups, "\x00") != strings.Join(expectedGroups, "\x00") || instance.RootVolumeGiB != a.rootVolumeGiB() || !instance.RootVolumeEncrypted {
+	if instance.ImageID != a.AMIID || instance.InstanceType != a.InstanceType || !containsString(a.subnets(), instance.SubnetID) || instance.InstanceProfileARN != a.InstanceProfileARN || strings.Join(actualGroups, "\x00") != strings.Join(expectedGroups, "\x00") || instance.RootDeviceName != image.RootDeviceName || instance.RootDeviceNameIntent != image.RootDeviceName || instance.RootVolumeGiB != a.rootVolumeGiB() || instance.RootVolumeGiBIntent != a.rootVolumeGiB() || !instance.RootVolumeEncrypted || !instance.RootVolumeEncryptedIntent {
 		return fmt.Errorf("AWS EC2 instance %s with durable key %q does not match the configured AMI, instance type, approved subnets, instance profile, security groups, and encrypted root volume", instance.ID, instance.ExternalKey)
+	}
+	configuredSnapshot := ""
+	if artifactCacheRuntimeSupported(spec) && a.artifactCachePolicy() != "disabled" {
+		configuredSnapshot = a.ArtifactSnapshots[modelIdentity(spec)]
+	}
+	if configuredSnapshot != instance.ArtifactSnapshotID || configuredSnapshot != "" && instance.ArtifactIdentityDigest != modelIdentityDigest(modelIdentity(spec)) {
+		return fmt.Errorf("AWS EC2 instance %s with durable key %q does not match the configured immutable artifact snapshot", instance.ID, instance.ExternalKey)
+	}
+	if a.artifactCachePolicy() == "required" && configuredSnapshot == "" {
+		return fmt.Errorf("AWS artifact cache requires a verified snapshot for immutable model %q", modelIdentity(spec))
 	}
 	return nil
 }
@@ -354,7 +635,14 @@ func (a AWSEC2) describe(ctx context.Context, filter string) ([]awsInstance, err
 	var out []awsInstance
 	for _, reservation := range response.Reservations {
 		for _, instance := range reservation.Instances {
-			item := awsInstance{ID: instance.InstanceID, State: instance.State.Name, PrivateIP: instance.PrivateIPAddress, ImageID: instance.ImageID, InstanceType: instance.InstanceType, SubnetID: instance.SubnetID, InstanceProfileARN: instance.IAMProfile.ARN}
+			item := awsInstance{ID: instance.InstanceID, State: instance.State.Name, PrivateIP: instance.PrivateIPAddress, ImageID: instance.ImageID, InstanceType: instance.InstanceType, SubnetID: instance.SubnetID, InstanceProfileARN: instance.IAMProfile.ARN, RootDeviceName: instance.RootDeviceName}
+			rootVolumeID := ""
+			for _, device := range instance.BlockDevices {
+				if device.DeviceName == instance.RootDeviceName {
+					rootVolumeID = device.EBS.VolumeID
+					break
+				}
+			}
 			for _, group := range instance.SecurityGroups {
 				item.SecurityGroupIDs = append(item.SecurityGroupIDs, group.GroupID)
 			}
@@ -362,16 +650,60 @@ func (a AWSEC2) describe(ctx context.Context, filter string) ([]awsInstance, err
 				switch tag.Key {
 				case "infercrane:external-key":
 					item.ExternalKey = tag.Value
+				case "infercrane:root-device-name":
+					item.RootDeviceNameIntent = tag.Value
 				case "infercrane:root-volume-gib":
-					item.RootVolumeGiB, _ = strconv.Atoi(tag.Value)
+					item.RootVolumeGiBIntent, _ = strconv.Atoi(tag.Value)
 				case "infercrane:root-volume-encrypted":
-					item.RootVolumeEncrypted = tag.Value == "true"
+					item.RootVolumeEncryptedIntent = tag.Value == "true"
+				case "infercrane:artifact-snapshot-id":
+					item.ArtifactSnapshotID = tag.Value
+				case "infercrane:artifact-identity-digest":
+					item.ArtifactIdentityDigest = tag.Value
 				}
+			}
+			if normalizeAWSState(instance.State.Name) != "absent" {
+				if rootVolumeID == "" {
+					return nil, fmt.Errorf("AWS EC2 instance %s has no EBS mapping for declared root device", instance.InstanceID)
+				}
+				volume, volumeErr := a.describeVolume(ctx, rootVolumeID)
+				if volumeErr != nil {
+					return nil, volumeErr
+				}
+				item.RootVolumeGiB = volume.Size
+				item.RootVolumeEncrypted = volume.Encrypted
 			}
 			out = append(out, item)
 		}
 	}
 	return out, nil
+}
+
+func (a AWSEC2) describeVolume(ctx context.Context, volumeID string) (struct {
+	Size      int
+	Encrypted bool
+}, error) {
+	var result struct {
+		Size      int
+		Encrypted bool
+	}
+	output, err := a.run(ctx, "ec2", "describe-volumes", "--region", a.Region, "--volume-ids", volumeID, "--output", "json", "--no-cli-pager")
+	if err != nil {
+		return result, fmt.Errorf("inspect AWS root volume: %w", err)
+	}
+	var response struct {
+		Volumes []struct {
+			VolumeID  string `json:"VolumeId"`
+			Size      int    `json:"Size"`
+			Encrypted bool   `json:"Encrypted"`
+		} `json:"Volumes"`
+	}
+	if json.Unmarshal(output, &response) != nil || len(response.Volumes) != 1 || response.Volumes[0].VolumeID != volumeID || response.Volumes[0].Size < 1 {
+		return result, errors.New("AWS root volume inspection returned invalid output")
+	}
+	result.Size = response.Volumes[0].Size
+	result.Encrypted = response.Volumes[0].Encrypted
+	return result, nil
 }
 
 func (a AWSEC2) run(ctx context.Context, args ...string) ([]byte, error) {
@@ -438,10 +770,11 @@ func (a AWSEC2) rootVolumeGiB() int {
 	if a.RootVolumeGiB > 0 {
 		return a.RootVolumeGiB
 	}
-	return 100
+	return 200
 }
 
-func (a AWSEC2) userData(spec ReplicaSpec, port int) string {
+func (a AWSEC2) userData(spec ReplicaSpec, port int, artifactSnapshotID string) string {
+	artifactBootstrap, artifactContainerArgs := awsArtifactCacheBootstrap(artifactSnapshotID)
 	if !spec.Workload.Empty() {
 		args := append(append([]string(nil), spec.Workload.Command...), spec.RuntimeArgs...)
 		quoted := make([]string, len(args))
@@ -457,7 +790,7 @@ func (a AWSEC2) userData(spec ReplicaSpec, port int) string {
 			}
 		}
 		image := spec.Workload.Image
-		return "#!/bin/sh\nset -eu\ninfercrane_stage() { printf 'infercrane_startup stage=%s at=%s\\n' \"$1\" \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" >/dev/console; }\ninfercrane_stage identity_start\nworker_key=$(aws secretsmanager get-secret-value --region " + shellQuote(a.Region) + " --secret-id " + shellQuote(a.WorkerSecretARN) + " --query SecretString --output text)\ninfercrane_stage identity_ready\n" + cachedImageBootstrapWithPolicy(image, a.imageCachePolicy()) + "infercrane_stage runtime_start\ncontainer_id=$(docker run -d --restart=unless-stopped --gpus all -e INFERCRANE_WORKER_API_KEY=\"$worker_key\" -e VLLM_API_KEY=\"$worker_key\" -p " + fmt.Sprintf("%d:%d", port, port) + " " + shellQuote(image) + " " + strings.Join(quoted, " ") + ")\ninfercrane_stage runtime_container_started\ndocker logs --follow \"$container_id\" >/dev/console 2>&1 &\n"
+		return "#!/bin/sh\nset -eu\ninfercrane_stage() { printf 'infercrane_startup stage=%s at=%s\\n' \"$1\" \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" >/dev/console; }\ninfercrane_stage identity_start\nworker_key=$(aws secretsmanager get-secret-value --region " + shellQuote(a.Region) + " --secret-id " + shellQuote(a.WorkerSecretARN) + " --query SecretString --output text)\ninfercrane_stage identity_ready\n" + cachedImageBootstrapWithPolicy(image, a.imageCachePolicy()) + artifactBootstrap + "infercrane_stage runtime_start\ncontainer_id=$(docker run -d --restart=unless-stopped --gpus all " + artifactContainerArgs + "-e INFERCRANE_WORKER_API_KEY=\"$worker_key\" -e VLLM_API_KEY=\"$worker_key\" -p " + fmt.Sprintf("%d:%d", port, port) + " " + shellQuote(image) + " " + strings.Join(quoted, " ") + ")\ninfercrane_stage runtime_container_started\ndocker logs --follow \"$container_id\" >/dev/console 2>&1 &\n"
 	}
 	// The vLLM OpenAI image entrypoint is `vllm serve`. Since v0.22 the model
 	// is a positional argument; keep generated startup compatible with the
@@ -471,12 +804,40 @@ func (a AWSEC2) userData(spec ReplicaSpec, port int) string {
 	for i, arg := range args {
 		quoted[i] = shellQuote(arg)
 	}
-	return "#!/bin/sh\nset -eu\ninfercrane_stage() { printf 'infercrane_startup stage=%s at=%s\\n' \"$1\" \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" >/dev/console; }\ninfercrane_stage identity_start\nworker_key=$(aws secretsmanager get-secret-value --region " + shellQuote(a.Region) + " --secret-id " + shellQuote(a.WorkerSecretARN) + " --query SecretString --output text)\ninfercrane_stage identity_ready\n" + cachedImageBootstrapWithPolicy(a.ImageDigest, a.imageCachePolicy()) + "infercrane_stage runtime_start\ncontainer_id=$(docker run -d --restart=unless-stopped --gpus all -e VLLM_API_KEY=\"$worker_key\" -p " + fmt.Sprintf("%d:%d", port, port) + " " + shellQuote(a.ImageDigest) + " " + strings.Join(quoted, " ") + ")\ninfercrane_stage runtime_container_started\ndocker logs --follow \"$container_id\" >/dev/console 2>&1 &\n"
+	return "#!/bin/sh\nset -eu\ninfercrane_stage() { printf 'infercrane_startup stage=%s at=%s\\n' \"$1\" \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" >/dev/console; }\ninfercrane_stage identity_start\nworker_key=$(aws secretsmanager get-secret-value --region " + shellQuote(a.Region) + " --secret-id " + shellQuote(a.WorkerSecretARN) + " --query SecretString --output text)\ninfercrane_stage identity_ready\n" + cachedImageBootstrapWithPolicy(a.ImageDigest, a.imageCachePolicy()) + artifactBootstrap + "infercrane_stage runtime_start\ncontainer_id=$(docker run -d --restart=unless-stopped --gpus all " + artifactContainerArgs + "-e VLLM_API_KEY=\"$worker_key\" -p " + fmt.Sprintf("%d:%d", port, port) + " " + shellQuote(a.ImageDigest) + " " + strings.Join(quoted, " ") + ")\ninfercrane_stage runtime_container_started\ndocker logs --follow \"$container_id\" >/dev/console 2>&1 &\n"
+}
+
+func awsArtifactCacheBootstrap(snapshotID string) (string, string) {
+	if snapshotID == "" {
+		return "infercrane_stage artifact_check\ninfercrane_stage artifact_cache_unconfigured\n", ""
+	}
+	bootstrap := "infercrane_stage artifact_check\n" +
+		"artifact_device=''\n" +
+		"attempt=0\n" +
+		"while [ \"$attempt\" -lt 60 ]; do\n" +
+		"  artifact_device=$(blkid -L INFERCRANE_ART 2>/dev/null || true)\n" +
+		"  [ -n \"$artifact_device\" ] && break\n" +
+		"  attempt=$((attempt + 1))\n" +
+		"  sleep 5\n" +
+		"done\n" +
+		"if [ -z \"$artifact_device\" ]; then infercrane_stage artifact_cache_mount_failed; exit 1; fi\n" +
+		"mkdir -p /var/lib/infercrane/huggingface\n" +
+		"mount -o ro,nosuid,nodev \"$artifact_device\" /var/lib/infercrane/huggingface || { infercrane_stage artifact_cache_mount_failed; exit 1; }\n" +
+		"infercrane_stage artifact_cache_hit\n"
+	containerArgs := "-e HF_HOME=/root/.cache/huggingface -e HF_HUB_OFFLINE=1 -e TRANSFORMERS_OFFLINE=1 -v /var/lib/infercrane/huggingface:/root/.cache/huggingface:ro "
+	return bootstrap, containerArgs
 }
 
 func (a AWSEC2) imageCachePolicy() string {
 	if a.ImageCachePolicy == "required" {
 		return "required"
+	}
+	return "prefer"
+}
+
+func (a AWSEC2) artifactCachePolicy() string {
+	if a.ArtifactCachePolicy == "disabled" || a.ArtifactCachePolicy == "required" {
+		return a.ArtifactCachePolicy
 	}
 	return "prefer"
 }

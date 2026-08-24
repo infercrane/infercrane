@@ -86,7 +86,7 @@ func CheckGCPBYOC(ctx context.Context, cfg config.Config, deps Dependencies) Che
 	}
 	check := deps.GCPCheck
 	if check == nil {
-		check = (provision.GCPCompute{Project: cfg.GCPProject, Zone: cfg.GCPZone}).Check
+		check = gcpComputeFromConfig(cfg).Check
 	}
 	checkCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
@@ -94,6 +94,24 @@ func CheckGCPBYOC(ctx context.Context, cfg config.Config, deps Dependencies) Che
 		return Check{"GCP BYOC", Fail, "GCP identity or Compute API probe failed", "Verify Application Default Credentials, project access, zone, Compute API enablement, and the gcloud installation."}
 	}
 	return Check{"GCP BYOC", Pass, "GCP identity and Compute API probe succeeded", ""}
+}
+
+// gcpComputeFromConfig must stay aligned with the provider constructed by the
+// control plane. Doctor is a read-only qualification of that exact provider
+// configuration, not a reduced identity-only probe.
+func gcpComputeFromConfig(cfg config.Config) provision.GCPCompute {
+	return provision.GCPCompute{
+		Project:        cfg.GCPProject,
+		Zone:           cfg.GCPZone,
+		Subnet:         cfg.GCPSubnet,
+		MachineType:    cfg.GCPMachineType,
+		GPUType:        cfg.GCPGPU,
+		ServiceAccount: cfg.GCPServiceAccount,
+		VMImage:        cfg.GCPVMImage,
+		ContainerImage: cfg.GCPContainerImage,
+		WorkerSecret:   cfg.GCPWorkerSecret,
+		BootDiskGiB:    cfg.GCPBootDiskGiB,
+	}
 }
 
 func CheckKubernetes(ctx context.Context, cfg config.Config, deps Dependencies) Check {
@@ -118,14 +136,14 @@ func CheckAWSBYOC(ctx context.Context, cfg config.Config, deps Dependencies) Che
 	}
 	check := deps.AWSCheck
 	if check == nil {
-		check = (provision.AWSEC2{RoleARN: cfg.AWSRoleARN, ExternalID: cfg.AWSExternalID, Region: cfg.AWSRegion}).Check
+		check = (provision.AWSEC2{RoleARN: cfg.AWSRoleARN, ExternalID: cfg.AWSExternalID, Region: cfg.AWSRegion, AMIID: cfg.AWSAMIID, RootVolumeGiB: cfg.AWSRootVolumeGiB}).Check
 	}
 	checkCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	if err := check(checkCtx); err != nil {
 		return Check{"AWS BYOC", Fail, "AWS role assumption or identity probe failed", "Verify the control-plane source identity, trust policy, external ID, region, and AWS CLI v2 installation."}
 	}
-	return Check{"AWS BYOC", Pass, "AWS role assumption and identity probe succeeded", ""}
+	return Check{"AWS BYOC", Pass, "AWS role assumption, identity, and AMI root-volume probe succeeded", ""}
 }
 
 type CapacityAdvisor interface {

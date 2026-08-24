@@ -31,6 +31,7 @@ import (
 	"github.com/infercrane/infercrane/internal/admission"
 	"github.com/infercrane/infercrane/internal/alert"
 	"github.com/infercrane/infercrane/internal/artifact"
+	"github.com/infercrane/infercrane/internal/artifactcache"
 	"github.com/infercrane/infercrane/internal/asyncinference"
 	"github.com/infercrane/infercrane/internal/authn"
 	"github.com/infercrane/infercrane/internal/autoscale"
@@ -176,6 +177,9 @@ func runLegacy(ctx context.Context, args []string) error {
 	}
 	if args[0] == "passport" && len(args) > 1 && (args[1] == "keygen" || args[1] == "verify") {
 		return passportCommand(ctx, config.Config{}, args[1:])
+	}
+	if args[0] == "optimize" {
+		return optimizeCommand(ctx, args[1:])
 	}
 	if !isPublicCommand(args[0]) {
 		return fmt.Errorf("unknown command %q", args[0])
@@ -2845,9 +2849,10 @@ func startupEvidenceLines(raw json.RawMessage) []string {
 	var details struct {
 		RuntimeReadyAt time.Time `json:"runtime_ready_at"`
 		Startup        struct {
-			CurrentStage string `json:"current_stage"`
-			ImageCache   string `json:"image_cache"`
-			Stages       []struct {
+			CurrentStage  string `json:"current_stage"`
+			ImageCache    string `json:"image_cache"`
+			ArtifactCache string `json:"artifact_cache"`
+			Stages        []struct {
 				Name string    `json:"name"`
 				At   time.Time `json:"at"`
 			} `json:"stages"`
@@ -2859,10 +2864,11 @@ func startupEvidenceLines(raw json.RawMessage) []string {
 	labels := map[string]string{
 		"identity_start": "machine bootstrap", "identity_ready": "workload identity", "image_check": "image check",
 		"image_cache_hit": "image cache hit", "image_cache_miss_required": "required image cache miss", "image_pull_start": "image pull", "image_pull_complete": "image pulled",
+		"artifact_check": "artifact check", "artifact_cache_unconfigured": "artifact cache unavailable", "artifact_cache_hit": "artifact cache hit", "artifact_cache_mount_failed": "artifact cache mount failed",
 		"runtime_start": "runtime start", "runtime_container_started": "container started",
 	}
 	start := details.Startup.Stages[0].At
-	lines := []string{fmt.Sprintf("Image      cache %s", emptyAs(details.Startup.ImageCache, "unknown")), "Startup    measured provider waterfall"}
+	lines := []string{fmt.Sprintf("Image      cache %s", emptyAs(details.Startup.ImageCache, "unknown")), fmt.Sprintf("Artifact   cache %s", emptyAs(details.Startup.ArtifactCache, "unknown")), "Startup    measured provider waterfall"}
 	for _, stage := range details.Startup.Stages {
 		label := labels[stage.Name]
 		if label == "" {
@@ -2887,14 +2893,17 @@ func startupEvidenceLines(raw json.RawMessage) []string {
 	lines = append(lines, "Phases     measured boundaries")
 	phase("workload identity", "identity_start", "identity_ready")
 	phase("container transfer", "image_pull_start", "image_pull_complete")
+	phase("artifact attach", "artifact_check", "artifact_cache_hit")
 	phase("container launch", "runtime_start", "runtime_container_started")
 	if containerAt, ok := stageAt["runtime_container_started"]; ok && !details.RuntimeReadyAt.IsZero() && !details.RuntimeReadyAt.Before(containerAt) {
 		lines = append(lines, fmt.Sprintf("  %-18s %s", "model + runtime ready", compactDuration(details.RuntimeReadyAt.Sub(containerAt))))
 	}
-	lines = append(lines,
-		"  provider allocation unavailable (provider boundary precedes machine bootstrap)",
-		"  model download      unavailable (runtime does not expose a qualified artifact boundary)",
-	)
+	lines = append(lines, "  provider allocation unavailable (provider boundary precedes machine bootstrap)")
+	if details.Startup.ArtifactCache != "hit" {
+		lines = append(lines, "  model download      unavailable (runtime does not expose a qualified artifact boundary)")
+	} else {
+		lines = append(lines, "  model materialize   included in model + runtime ready")
+	}
 	return lines
 }
 
@@ -3948,7 +3957,8 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		}
 		asyncService = &asyncinference.Service{Store: s, Cipher: cipher, KeyReference: cfg.AsyncEncryptionKeyReference, GatewayURL: cfg.ControlURL, APIKey: cfg.APIKey, Owner: cfg.InstanceID + ":async", Lease: time.Minute, Secrets: secrets.Environment{}}
 	}
-	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ProductVersion: version}
+	artifactCacheAdapters := map[string]artifactcache.Adapter{}
+	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool}
 	// Assign the optional service only when it exists. A nil *Service stored in
 	// an interface is non-nil and would otherwise turn the intended capability
 	// error into a panic when async encryption is not configured.
@@ -3982,7 +3992,10 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 			AMIID: cfg.AWSAMIID, InstanceType: cfg.AWSInstanceType, GPU: cfg.AWSGPU,
 			InstanceProfileARN: cfg.AWSInstanceProfileARN, WorkerSecretARN: cfg.AWSWorkerSecretARN,
 			ImageDigest: cfg.AWSImageDigest, RootVolumeGiB: cfg.AWSRootVolumeGiB, ImageCachePolicy: cfg.AWSImageCachePolicy,
+			ArtifactCachePolicy: cfg.AWSArtifactCachePolicy, ArtifactSnapshots: cfg.AWSArtifactSnapshots,
+			ArtifactVolumeInitializationRate: cfg.AWSArtifactVolumeInitializationRate,
 		}
+		artifactCacheAdapters["aws"] = awsProvider
 		elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: "aws-ec2", Cloud: "aws", Runtime: "vllm", Default: true, Profile: awsProfile, Provider: awsProvider})
 		elasticBackends = append(elasticBackends,
 			workflows.ReplicaBackend{Name: "aws-ec2", Cloud: "aws", Runtime: "sglang", Default: true, Profile: awsProfile, Provider: awsProvider},
@@ -3994,7 +4007,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		if profileErr != nil {
 			return fmt.Errorf("configure GCP integration: %w", profileErr)
 		}
-		gcpProvider := provision.GCPCompute{Project: cfg.GCPProject, Zone: cfg.GCPZone, Subnet: cfg.GCPSubnet, MachineType: cfg.GCPMachineType, GPUType: cfg.GCPGPU, ServiceAccount: cfg.GCPServiceAccount, VMImage: cfg.GCPVMImage, ContainerImage: cfg.GCPContainerImage, WorkerSecret: cfg.GCPWorkerSecret}
+		gcpProvider := provision.GCPCompute{Project: cfg.GCPProject, Zone: cfg.GCPZone, Subnet: cfg.GCPSubnet, MachineType: cfg.GCPMachineType, GPUType: cfg.GCPGPU, ServiceAccount: cfg.GCPServiceAccount, VMImage: cfg.GCPVMImage, ContainerImage: cfg.GCPContainerImage, WorkerSecret: cfg.GCPWorkerSecret, BootDiskGiB: cfg.GCPBootDiskGiB}
 		for _, runtimeName := range []string{"vllm", "sglang", "custom-oci"} {
 			elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: "gcp-compute", Cloud: "gcp", Runtime: runtimeName, Default: true, Profile: gcpProfile, Provider: gcpProvider})
 		}
@@ -4062,6 +4075,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	gatewayTelemetry := &gateway.Telemetry{Extra: func(w io.Writer) {
 		operationTelemetry.WritePrometheus(w)
 		recorder.WritePrometheus(w)
+		admissionPool.WritePrometheus(w)
 	}}
 	serverTLS, err := serverTLSConfig(cfg)
 	if err != nil {

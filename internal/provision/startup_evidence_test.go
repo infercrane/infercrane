@@ -26,6 +26,28 @@ func TestParseStartupEvidenceKeepsOnlyClosedMarkers(t *testing.T) {
 	}
 }
 
+func TestParseStartupEvidenceSeparatesImageAndArtifactCache(t *testing.T) {
+	raw := "infercrane_startup stage=identity_start at=2026-08-23T10:00:00Z\n" +
+		"infercrane_startup stage=identity_ready at=2026-08-23T10:00:01Z\n" +
+		"infercrane_startup stage=image_check at=2026-08-23T10:00:02Z\n" +
+		"infercrane_startup stage=image_cache_hit at=2026-08-23T10:00:03Z\n" +
+		"infercrane_startup stage=artifact_check at=2026-08-23T10:00:04Z\n" +
+		"infercrane_startup stage=artifact_cache_hit at=2026-08-23T10:00:05Z\n" +
+		"infercrane_startup stage=runtime_start at=2026-08-23T10:00:06Z\n"
+	evidence, ok := parseStartupEvidence(raw)
+	if !ok || evidence.SchemaVersion != 2 || evidence.ImageCache != "hit" || evidence.ArtifactCache != "hit" || evidence.CurrentStage != "runtime_start" {
+		t.Fatalf("evidence=%#v ok=%v", evidence, ok)
+	}
+
+	raw = "infercrane_startup stage=identity_start at=2026-08-23T10:00:00Z\n" +
+		"infercrane_startup stage=artifact_check at=2026-08-23T10:00:01Z\n" +
+		"infercrane_startup stage=artifact_cache_mount_failed at=2026-08-23T10:00:02Z\n"
+	evidence, ok = parseStartupEvidence(raw)
+	if !ok || evidence.ArtifactCache != "mount_failed" || evidence.CurrentStage != "artifact_cache_mount_failed" {
+		t.Fatalf("failed evidence=%#v ok=%v", evidence, ok)
+	}
+}
+
 func TestParseStartupEvidenceDecodesAWSBase64AndSelectsLatestBoot(t *testing.T) {
 	raw := "infercrane_startup stage=identity_start at=2026-08-23T09:00:00Z\n" +
 		"infercrane_startup stage=runtime_start at=2026-08-23T09:01:00Z\n" +

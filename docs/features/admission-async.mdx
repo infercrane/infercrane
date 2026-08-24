@@ -100,7 +100,7 @@ curl -i -fsS -X PUT "$INFERCRANE_URL/api/v1/tenant/quota" \
 | Client evidence | Meaning | Next evidence |
 | --- | --- | --- |
 | `429 rate_limit_error`, message `Tenant request-rate quota is exhausted` | Distributed tenant minute lease denied before upstream transmission | Confirm the UTC window and latest audited `quota.update`; restore only recorded policy. |
-| `429 admission_rejected` | Endpoint concurrency/queue full or queue timeout before request telemetry | Compare the error message with `admission get`; there is no Request Inspector row. |
+| `429 admission_rejected` | Endpoint concurrency/queue full or queue timeout before upstream transmission | Preserve `X-Request-ID`, honor `Retry-After`, compare the error message with `admission get`, and inspect the rejection row. |
 | `413 request_too_large` or `422 admission_policy_violation` | Endpoint size, output-token, or priority policy denied | Correct the client request or review policy; do not bypass it with another endpoint. |
 | `429 rate_limit_error`, external budget unavailable/exhausted | Managed external request/cost reservation denied before transmission | Inspect the immutable binding/plan and approved budget; provider spend is not inferred. |
 | final `502`, `503`, or `504` with a request ID | Managed runtime or route failed after admission; buffered retry may already have consumed its bounded attempts | `request inspect`, `observe`, deployment events, runtime health, and provider operation. |
@@ -128,10 +128,22 @@ Admission overflow and queue timeout both return HTTP `429` with OpenAI-compatib
 ```
 
 The message distinguishes `endpoint concurrency and queue capacity are exhausted` from
-`endpoint admission queue timed out`. Request-size rejection is `413 request_too_large`; output-token
-or priority rejection is `422 admission_policy_violation`. Admission happens before request
-telemetry is created, so a rejected or timed-out request does not receive an InferCrane-generated
-request ID or Request Inspector record. Keep the client-side correlation ID and response body.
+`endpoint admission queue timed out`. Both overload outcomes include `Retry-After: 1` and preserve a
+caller-supplied request ID or create one before admission. Request-size rejection is
+`413 request_too_large`; output-token or priority rejection is `422 admission_policy_violation`.
+An endpoint's `request_timeout_ms` is one absolute deadline measured from gateway arrival through
+admission, all buffered retry attempts, and response streaming. Expiry before response headers
+returns `504 request_deadline_exceeded`; expiry after a stream begins terminates the stream and
+records the same error type without replaying any partial output.
+Rejected and timed-out requests persist content-free Request Inspector evidence. Successful request
+latency starts at gateway ingress, `queue_ms` records the bounded admission wait, and buffered retry
+attempts are counted. For streaming responses, `generation_ms` is the measured interval from first
+response bytes to completion; it remains unavailable when that boundary cannot be observed.
+
+The endpoint monitoring response can also include a live `admission` snapshot with `accepting`,
+`queueing`, or `saturated` capacity state. Its scope is explicitly `gateway_instance`: it is useful
+for distinguishing a busy gateway from a dead runtime, but it is not a cluster-global concurrency
+claim. `/livez`, `/readyz`, runtime health, and served-model identity remain separate signals.
 
 Use a controllable staging runtime that can hold one request longer than the queue timeout. Do not
 try to create this state by overloading production:
@@ -149,6 +161,7 @@ infercrane admission set coder-staging \
   --max-concurrency 1 \
   --max-queue 1 \
   --queue-timeout-ms 1000 \
+  --request-timeout-ms 30000 \
   --max-output-tokens 512 \
   --retry-budget 0
 infercrane admission get coder-staging --output json

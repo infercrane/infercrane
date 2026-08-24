@@ -214,6 +214,10 @@ The portable runner executes the InferCrane control plane in Docker on the quali
 private EC2 address is useful only when that host can reach the VPC through VPN, peering, a private
 runner, or an equivalent controlled path. Credentials alone cannot satisfy this requirement.
 
+The qualification host must provide Docker Engine, Docker Compose v2, and the Docker Buildx plugin.
+The harness enables BuildKit explicitly because the release Dockerfile uses cache mounts; a host
+that silently falls back to Docker's legacy builder is rejected before paid capacity is created.
+
 Prefer AWS federation and temporary role credentials; do not create a long-lived administrator
 access key for qualification.
 
@@ -268,7 +272,10 @@ Google Cloud alerts-only budgets do not stop ordinary Compute Engine spending. T
 quota limits as the hard controls.
 
 The portable runner invokes `gcloud` from the InferCrane container and mounts
-`GCLOUD_CONFIG_DIR` read-only. Confirm the selected configuration is active before starting.
+`GCLOUD_CONFIG_DIR` read-only. At container startup the profile is copied to ephemeral writable
+storage so `gcloud` can create its credential database without modifying the host profile. Confirm
+the selected configuration is active before starting. An in-GCP runner may supply only project
+configuration and obtain its short-lived identity from the attached service account.
 
 ### Private files and run
 

@@ -12,6 +12,11 @@ documentation, supply-chain, and real-provider suites. It does not replace those
 their logs. Overlapping release work runs once: the black-box gate runs user journeys, while the
 supply-chain gate owns archive, checksum, SBOM, and Homebrew verification.
 
+The module journey includes the evidence-gated optimizer's no-mutation boundary: it creates an
+immutable multi-candidate campaign, grants a short-lived one-dollar authority cap, cancels it, and
+confirms the isolated provider inventory remains empty. Real benchmark execution stays in the
+explicitly approved provider gates.
+
 ```bash
 make qualify-product
 ```

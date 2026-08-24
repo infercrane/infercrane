@@ -76,3 +76,42 @@ func TestWorkloadInitAllowsExplicitGPUOverrideOfProfileHint(t *testing.T) {
 		t.Fatalf("explicit GPU override was lost: err=%v spec=%s", err, content)
 	}
 }
+
+func TestProviderPreflightCommandGuidesEachOwnershipBoundary(t *testing.T) {
+	tests := map[string]string{
+		"aws":               "infercrane doctor --aws",
+		"gcp-compute":       "infercrane doctor --gcp",
+		"kubernetes-dynamo": "infercrane doctor --kubernetes",
+		"runpod-serverless": "infercrane doctor --serverless",
+		"runpod":            "infercrane doctor --cloud",
+		"custom-provider":   "infercrane doctor",
+	}
+	for provider, expected := range tests {
+		if actual := providerPreflightCommand(provider); actual != expected {
+			t.Fatalf("provider %q preflight=%q, want %q", provider, actual, expected)
+		}
+	}
+}
+
+func TestWorkloadInitPrintsZeroToInspectionJourney(t *testing.T) {
+	project := filepath.Join(t.TempDir(), "aws-model")
+	output, err := captureStdout(t, func() error {
+		return workloadInitCommand([]string{project, "--recipe", "mistral-7b-instruct", "--name", "support-production", "--cloud", "aws", "--region", "eu-central-1"})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		"infercrane workload validate",
+		"infercrane doctor --aws",
+		"infercrane workload plan",
+		"infercrane workload deploy --wait",
+		"infercrane request support-production",
+		"infercrane doctor support-production",
+		`model="support-production"`,
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("output missing %q:\n%s", expected, output)
+		}
+	}
+}

@@ -1,6 +1,69 @@
 {
   "components": {
     "schemas": {
+      "AdmissionMonitoring": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "capacity_state": {
+            "enum": [
+              "accepting",
+              "queueing",
+              "saturated"
+            ],
+            "type": "string"
+          },
+          "instance_id": {
+            "type": "string"
+          },
+          "max_concurrent": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_queue_depth": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "observed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "queue_timeouts": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "rejected": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "scope": {
+            "enum": [
+              "gateway_instance"
+            ],
+            "type": "string"
+          },
+          "waiting": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "capacity_state",
+          "scope",
+          "instance_id",
+          "active",
+          "waiting",
+          "max_concurrent",
+          "max_queue_depth",
+          "rejected",
+          "queue_timeouts",
+          "observed_at"
+        ],
+        "type": "object"
+      },
       "AdmissionPolicy": {
         "additionalProperties": false,
         "properties": {
@@ -46,6 +109,12 @@
             "minimum": 1,
             "type": "integer"
           },
+          "request_timeout_ms": {
+            "description": "Absolute end-to-end deadline from gateway arrival through admission, retries, and response streaming.",
+            "maximum": 3600000,
+            "minimum": 1000,
+            "type": "integer"
+          },
           "retry_budget": {
             "maximum": 3,
             "minimum": 0,
@@ -56,6 +125,7 @@
           "max_concurrency",
           "max_queue_depth",
           "queue_timeout_ms",
+          "request_timeout_ms",
           "max_request_bytes",
           "max_output_tokens",
           "allowed_priorities",
@@ -905,6 +975,9 @@
       "EndpointMonitoring": {
         "additionalProperties": false,
         "properties": {
+          "admission": {
+            "$ref": "#/components/schemas/AdmissionMonitoring"
+          },
           "breakdowns": {
             "items": {
               "$ref": "#/components/schemas/MonitoringBreakdown"
@@ -1979,6 +2052,173 @@
           "value",
           "unit",
           "sample_count"
+        ],
+        "type": "object"
+      },
+      "OptimizationCampaignApproval": {
+        "additionalProperties": false,
+        "properties": {
+          "expires_in_seconds": {
+            "maximum": 86400,
+            "minimum": 60,
+            "type": "integer"
+          },
+          "max_cost_usd": {
+            "exclusiveMinimum": 0,
+            "maximum": 1000000,
+            "type": "number"
+          }
+        },
+        "required": [
+          "max_cost_usd",
+          "expires_in_seconds"
+        ],
+        "type": "object"
+      },
+      "OptimizationCampaignCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "proposal": {
+            "description": "A complete infercrane.optimizer.proposal/v1 document whose normalized digest is revalidated by the server.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "proposal"
+        ],
+        "type": "object"
+      },
+      "OptimizedArtifactAttestation": {
+        "additionalProperties": false,
+        "properties": {
+          "attestation": {
+            "additionalProperties": false,
+            "properties": {
+              "build_evidence": {
+                "type": "object"
+              },
+              "failure_code": {
+                "type": "string"
+              },
+              "output_digest": {
+                "pattern": "^sha256:[a-fA-F0-9]{64}$",
+                "type": "string"
+              },
+              "output_immutable_revision": {
+                "type": "string"
+              },
+              "output_repository": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "build_evidence"
+            ],
+            "type": "object"
+          },
+          "state": {
+            "enum": [
+              "ready",
+              "failed"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "attestation"
+        ],
+        "type": "object"
+      },
+      "OptimizedArtifactPlan": {
+        "additionalProperties": false,
+        "properties": {
+          "algorithm": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "base_model_artifact_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "builder_image_digest": {
+            "pattern": "^sha256:[a-fA-F0-9]{64}$",
+            "type": "string"
+          },
+          "calibration_digest": {
+            "pattern": "^sha256:[a-fA-F0-9]{64}$",
+            "type": "string"
+          },
+          "configuration": {
+            "type": "object"
+          },
+          "format": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "hardware_constraints": {
+            "type": "object"
+          },
+          "kind": {
+            "enum": [
+              "quantized_checkpoint",
+              "speculator_checkpoint",
+              "tensorrt_engine"
+            ],
+            "type": "string"
+          },
+          "license_spdx": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "requires_quality_review": {
+            "const": true,
+            "type": "boolean"
+          },
+          "tool": {
+            "enum": [
+              "llm-compressor",
+              "modelopt",
+              "vllm-speculators",
+              "tensorrt-llm"
+            ],
+            "type": "string"
+          },
+          "tool_version": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "base_model_artifact_id",
+          "kind",
+          "format",
+          "tool",
+          "tool_version",
+          "algorithm",
+          "builder_image_digest",
+          "license_spdx",
+          "configuration",
+          "hardware_constraints",
+          "requires_quality_review"
+        ],
+        "type": "object"
+      },
+      "OptimizedArtifactQualification": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate_run_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "quality_evidence_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "candidate_run_id",
+          "quality_evidence_id"
         ],
         "type": "object"
       },
@@ -7257,6 +7497,569 @@
         ]
       }
     },
+    "/api/v1/optimization/campaigns": {
+      "get": {
+        "operationId": "listOptimizationCampaigns",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List durable evidence-gated optimization campaigns",
+        "tags": [
+          "Inference optimization"
+        ]
+      },
+      "post": {
+        "operationId": "createOptimizationCampaign",
+        "parameters": [
+          {
+            "description": "Stable key used to adopt the original durable operation after retries or disconnects.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OptimizationCampaignCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Persist a bounded immutable proposal without mutating provider infrastructure",
+        "tags": [
+          "Inference optimization"
+        ]
+      }
+    },
+    "/api/v1/optimization/campaigns/{id}": {
+      "get": {
+        "operationId": "getOptimizationCampaign",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Inspect predicted and measured campaign evidence",
+        "tags": [
+          "Inference optimization"
+        ]
+      }
+    },
+    "/api/v1/optimization/campaigns/{id}/approve": {
+      "post": {
+        "operationId": "approveOptimizationCampaign",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OptimizationCampaignApproval"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Grant bounded expiring paid-resource authority without starting execution",
+        "tags": [
+          "Inference optimization"
+        ]
+      }
+    },
+    "/api/v1/optimization/campaigns/{id}/cancel": {
+      "post": {
+        "operationId": "cancelOptimizationCampaign",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Cancel future campaign work and require cleanup",
+        "tags": [
+          "Inference optimization"
+        ]
+      }
+    },
+    "/api/v1/optimized-artifacts": {
+      "get": {
+        "operationId": "listOptimizedArtifacts",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List immutable optimized artifact provenance",
+        "tags": [
+          "Inference optimization"
+        ]
+      },
+      "post": {
+        "operationId": "createOptimizedArtifact",
+        "parameters": [
+          {
+            "description": "Stable key used to adopt the original durable operation after retries or disconnects.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OptimizedArtifactPlan"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Plan a digest-pinned external artifact build",
+        "tags": [
+          "Inference optimization"
+        ]
+      }
+    },
+    "/api/v1/optimized-artifacts/{id}": {
+      "get": {
+        "operationId": "getOptimizedArtifact",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Inspect optimized artifact provenance and evidence state",
+        "tags": [
+          "Inference optimization"
+        ]
+      }
+    },
+    "/api/v1/optimized-artifacts/{id}/attest": {
+      "post": {
+        "operationId": "attestOptimizedArtifactBuild",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OptimizedArtifactAttestation"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Attach immutable output identity or a stable external builder failure",
+        "tags": [
+          "Inference optimization"
+        ]
+      }
+    },
+    "/api/v1/optimized-artifacts/{id}/build": {
+      "post": {
+        "operationId": "beginOptimizedArtifactBuild",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Record that the external digest-pinned builder started",
+        "tags": [
+          "Inference optimization"
+        ]
+      }
+    },
+    "/api/v1/optimized-artifacts/{id}/qualify": {
+      "post": {
+        "operationId": "qualifyOptimizedArtifact",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OptimizedArtifactQualification"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Bind passing signed quality evidence from the exact candidate revision",
+        "tags": [
+          "Inference optimization"
+        ]
+      }
+    },
     "/api/v1/orphans": {
       "get": {
         "operationId": "listOrphans",
@@ -8705,6 +9508,9 @@
     },
     {
       "name": "Inference decisions"
+    },
+    {
+      "name": "Inference optimization"
     },
     {
       "name": "Infrastructure"

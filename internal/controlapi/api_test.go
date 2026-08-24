@@ -10,14 +10,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/infercrane/infercrane/internal/admission"
 	"github.com/infercrane/infercrane/internal/artifactcache"
 	"github.com/infercrane/infercrane/internal/asyncinference"
 	"github.com/infercrane/infercrane/internal/authz"
 	"github.com/infercrane/infercrane/internal/benchmark"
 	"github.com/infercrane/infercrane/internal/contextpassport"
+	"github.com/infercrane/infercrane/internal/curatedrecipe"
 	"github.com/infercrane/infercrane/internal/doctor"
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/integration"
+	"github.com/infercrane/infercrane/internal/optimizationcampaign"
+	"github.com/infercrane/infercrane/internal/optimizedartifact"
+	"github.com/infercrane/infercrane/internal/optimizer"
 	"github.com/infercrane/infercrane/internal/passport"
 	"github.com/infercrane/infercrane/internal/qualityevidence"
 	"github.com/infercrane/infercrane/internal/support"
@@ -172,13 +177,103 @@ type fakeOptimizationStore struct {
 	report domain.FinOpsReport
 }
 
+type fakeOptimizationCampaignStore struct {
+	*fakeStore
+	campaign domain.OptimizationCampaign
+}
+
+type fakeOptimizedArtifactStore struct {
+	*fakeStore
+	artifact domain.OptimizedArtifact
+}
+
+func (f *fakeOptimizedArtifactStore) CreateOptimizedArtifact(_ context.Context, tenant, key string, plan optimizedartifact.Plan) (domain.OptimizedArtifact, bool, error) {
+	digest, err := optimizedartifact.InputDigest(plan)
+	if err != nil {
+		return domain.OptimizedArtifact{}, false, err
+	}
+	if f.artifact.ID != "" {
+		return f.artifact, false, f.err
+	}
+	f.artifact = domain.OptimizedArtifact{ID: "optimized-1", TenantID: tenant, IdempotencyKey: key, InputDigest: digest, BaseModelArtifactID: plan.BaseModelArtifactID, Kind: plan.Kind, Format: plan.Format, Tool: plan.Tool, ToolVersion: plan.ToolVersion, Algorithm: plan.Algorithm, BuilderImageDigest: plan.BuilderImageDigest, CalibrationDigest: plan.CalibrationDigest, LicenseSPDX: plan.LicenseSPDX, ConfigurationJSON: string(plan.Configuration), HardwareConstraintsJSON: string(plan.HardwareConstraints), RequiresQualityReview: plan.RequiresQualityReview, State: optimizedartifact.StatePlanned, EvidenceState: "unmeasured", BuildEvidenceJSON: `{}`}
+	return f.artifact, true, f.err
+}
+func (f *fakeOptimizedArtifactStore) OptimizedArtifact(context.Context, string, string) (domain.OptimizedArtifact, bool, error) {
+	if f.artifact.ID == "" {
+		return domain.OptimizedArtifact{}, false, domain.ErrNotFound
+	}
+	return f.artifact, true, f.err
+}
+func (f *fakeOptimizedArtifactStore) OptimizedArtifacts(context.Context, string, int) ([]domain.OptimizedArtifact, error) {
+	if f.artifact.ID == "" {
+		return nil, f.err
+	}
+	return []domain.OptimizedArtifact{f.artifact}, f.err
+}
+func (f *fakeOptimizedArtifactStore) BeginOptimizedArtifactBuild(context.Context, string, string) (domain.OptimizedArtifact, error) {
+	f.artifact.State = optimizedartifact.StateBuilding
+	return f.artifact, f.err
+}
+func (f *fakeOptimizedArtifactStore) AttestOptimizedArtifact(_ context.Context, _, _ string, state string, attestation optimizedartifact.Attestation) (domain.OptimizedArtifact, error) {
+	f.artifact.State, f.artifact.OutputRepository, f.artifact.OutputImmutableRevision, f.artifact.OutputDigest, f.artifact.FailureCode = state, attestation.OutputRepository, attestation.OutputImmutableRevision, attestation.OutputDigest, attestation.FailureCode
+	f.artifact.BuildEvidenceJSON = string(attestation.BuildEvidence)
+	if state == optimizedartifact.StateReady {
+		f.artifact.EvidenceState = "measured"
+	} else {
+		f.artifact.EvidenceState = "rejected"
+	}
+	return f.artifact, f.err
+}
+func (f *fakeOptimizedArtifactStore) QualifyOptimizedArtifact(_ context.Context, _, _, _, qualityID string) (domain.OptimizedArtifact, error) {
+	f.artifact.EvidenceState, f.artifact.QualityEvidenceID = "qualified", qualityID
+	return f.artifact, f.err
+}
+
+func (f *fakeOptimizationCampaignStore) CreateOptimizationCampaign(_ context.Context, campaign domain.OptimizationCampaign, candidates []domain.OptimizationCandidateRun) (domain.OptimizationCampaign, bool, error) {
+	if f.campaign.ID != "" {
+		return f.campaign, false, f.err
+	}
+	campaign.ID, campaign.State, campaign.MaxCandidates = "campaign-1", optimizationcampaign.CampaignAwaitingApproval, len(candidates)
+	campaign.CreatedAt, campaign.UpdatedAt = time.Now().UTC(), time.Now().UTC()
+	for index := range candidates {
+		candidates[index].ID, candidates[index].CampaignID, candidates[index].TenantID, candidates[index].State = "candidate-"+string(rune('1'+index)), campaign.ID, campaign.TenantID, optimizationcampaign.CandidateProposed
+		candidates[index].CreatedAt, candidates[index].UpdatedAt = campaign.CreatedAt, campaign.UpdatedAt
+	}
+	campaign.Candidates = candidates
+	f.campaign = campaign
+	return campaign, true, f.err
+}
+func (f *fakeOptimizationCampaignStore) OptimizationCampaign(context.Context, string, string) (domain.OptimizationCampaign, error) {
+	if f.campaign.ID == "" {
+		return domain.OptimizationCampaign{}, domain.ErrNotFound
+	}
+	return f.campaign, f.err
+}
+func (f *fakeOptimizationCampaignStore) OptimizationCampaigns(context.Context, string, int) ([]domain.OptimizationCampaign, error) {
+	if f.campaign.ID == "" {
+		return []domain.OptimizationCampaign{}, f.err
+	}
+	return []domain.OptimizationCampaign{f.campaign}, f.err
+}
+func (f *fakeOptimizationCampaignStore) ApproveOptimizationCampaign(_ context.Context, _, _ string, actor string, cost float64, expires time.Time) (domain.OptimizationCampaign, error) {
+	f.campaign.State, f.campaign.ApprovedBy, f.campaign.ApprovedMaxCostUSD, f.campaign.ApprovalExpiresAt = optimizationcampaign.CampaignApproved, actor, &cost, &expires
+	now := time.Now().UTC()
+	f.campaign.ApprovedAt = &now
+	return f.campaign, f.err
+}
+func (f *fakeOptimizationCampaignStore) CancelOptimizationCampaign(context.Context, string, string) (domain.OptimizationCampaign, error) {
+	f.campaign.State, f.campaign.CancelRequested = optimizationcampaign.CampaignCancelled, true
+	return f.campaign, f.err
+}
+
 type fakeIntelligenceStore struct {
 	*fakeStore
-	trace       domain.ReplayTrace
-	artifact    domain.ModelArtifact
-	artifactErr error
-	prefetch    domain.ArtifactPrefetch
-	updateErr   error
+	trace             domain.ReplayTrace
+	artifact          domain.ModelArtifact
+	artifactErr       error
+	prefetch          domain.ArtifactPrefetch
+	updateErr         error
+	cacheObservations []domain.ArtifactCacheObservation
 }
 
 type fakeQualityEvidenceStore struct {
@@ -247,12 +342,14 @@ func TestEndpointMonitoringIsAuthenticatedBoundedAndContentFree(t *testing.T) {
 	now := time.Now().UTC()
 	value := .02
 	store := &fakeMonitoringStore{fakeStore: &fakeStore{}, snapshot: domain.EndpointMonitoringSnapshot{Endpoint: "coder-production", LogicalModel: "coder", Environment: "production", WindowStart: now.Add(-time.Hour), WindowEnd: now, BucketSeconds: 60, Summary: domain.MonitoringSummary{Requests: 20, ErrorRate: &value}, Series: []domain.MonitoringBucket{}, Breakdowns: []domain.MonitoringBreakdown{}, Events: []domain.MonitoringEvent{}, Evidence: domain.MonitoringEvidence{Source: "infercrane_gateway_request_records", SampleCount: 20, Fresh: true, ContentRecorded: false, Available: []string{}, Unavailable: []string{}}}}
-	handler := (API{Store: store, APIKey: "secret"}).Handler()
+	pool := admission.New()
+	pool.Replace([]admission.Policy{{Key: "global\x00coder-production", MaxConcurrency: 4, MaxQueueDepth: 8, QueueTimeout: time.Second, MaxRequestBytes: 4096, MaxOutputTokens: 4096, AllowedPriorities: map[string]struct{}{"normal": {}}, Enabled: true}})
+	handler := (API{Store: store, APIKey: "secret", AdmissionState: pool, GatewayInstanceID: "gateway-a"}).Handler()
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/endpoints/coder-production/monitoring?window_seconds=3600&bucket_seconds=60", nil)
 	request.Header.Set("Authorization", "Bearer secret")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"endpoint":"coder-production"`) || !strings.Contains(response.Body.String(), `"content_recorded":false`) || strings.Contains(response.Body.String(), "prompt") {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"endpoint":"coder-production"`) || !strings.Contains(response.Body.String(), `"content_recorded":false`) || !strings.Contains(response.Body.String(), `"capacity_state":"accepting"`) || !strings.Contains(response.Body.String(), `"scope":"gateway_instance"`) || !strings.Contains(response.Body.String(), `"instance_id":"gateway-a"`) || strings.Contains(response.Body.String(), "prompt") {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 	request = httptest.NewRequest(http.MethodGet, "/api/v1/endpoints/coder-production/monitoring?window_seconds=2592000&bucket_seconds=60", nil)
@@ -351,6 +448,96 @@ func TestModelCatalogIsAuthenticatedSearchableAndTruthful(t *testing.T) {
 	}
 }
 
+func TestOptimizationCampaignRequiresImmutableProposalAndExplicitBoundedApproval(t *testing.T) {
+	registry, err := integration.V1Catalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal, err := optimizer.NewCatalogSource(curatedrecipe.All(), registry.Snapshot()).Propose(context.Background(), optimizer.Request{ModelIdentity: "llama-3.1-8b-instruct", Provider: "aws", Region: "eu-central-1", GPU: "L40S", Objective: "interactive", MaxCandidates: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(map[string]any{"proposal": proposal})
+	store := &fakeOptimizationCampaignStore{fakeStore: &fakeStore{}}
+	handler := (API{Store: store, APIKey: "secret"}).Handler()
+
+	create := httptest.NewRequest(http.MethodPost, "/api/v1/optimization/campaigns", strings.NewReader(string(body)))
+	create.Header.Set("Authorization", "Bearer secret")
+	create.Header.Set("Idempotency-Key", "campaign-create-1")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, create)
+	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"provider_mutation":false`) || store.campaign.State != optimizationcampaign.CampaignAwaitingApproval {
+		t.Fatalf("create status=%d body=%s campaign=%+v", response.Code, response.Body.String(), store.campaign)
+	}
+
+	tampered := proposal
+	tampered.Input.GPU = "H100"
+	tamperedBody, _ := json.Marshal(map[string]any{"proposal": tampered})
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/optimization/campaigns", strings.NewReader(string(tamperedBody)))
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Idempotency-Key", "campaign-create-2")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("tampered proposal status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/optimization/campaigns/campaign-1/approve", strings.NewReader(`{"max_cost_usd":20,"expires_in_seconds":3600}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || store.campaign.State != optimizationcampaign.CampaignApproved || !strings.Contains(response.Body.String(), `"execution":"approved_not_started"`) {
+		t.Fatalf("approval status=%d body=%s campaign=%+v", response.Code, response.Body.String(), store.campaign)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/optimization/campaigns/campaign-1", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"modeled evidence cannot qualify`) {
+		t.Fatalf("inspect status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestOptimizedArtifactLifecycleKeepsExternalBuilderAndQualityBoundariesExplicit(t *testing.T) {
+	store := &fakeOptimizedArtifactStore{fakeStore: &fakeStore{}}
+	handler := (API{Store: store, APIKey: "secret"}).Handler()
+	plan := `{"base_model_artifact_id":"base-1","kind":"quantized_checkpoint","format":"safetensors","tool":"llm-compressor","tool_version":"0.9.0","algorithm":"w8a8-fp8","builder_image_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","calibration_digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","license_spdx":"Apache-2.0","configuration":{"scheme":"FP8"},"hardware_constraints":{"minimum_compute_capability":"8.9"},"requires_quality_review":true}`
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/optimized-artifacts", strings.NewReader(plan))
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Idempotency-Key", "fp8-build-1")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"builder_execution":"external_not_started"`) || store.artifact.State != optimizedartifact.StatePlanned {
+		t.Fatalf("plan status=%d body=%s artifact=%+v", response.Code, response.Body.String(), store.artifact)
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/optimized-artifacts/optimized-1/build", strings.NewReader(`{}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || store.artifact.State != optimizedartifact.StateBuilding {
+		t.Fatalf("build status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	attestation := `{"state":"ready","attestation":{"output_repository":"acme/model-fp8","output_immutable_revision":"commit-1","output_digest":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","build_evidence":{"builder_job":"job-1"}}}`
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/optimized-artifacts/optimized-1/attest", strings.NewReader(attestation))
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || store.artifact.EvidenceState != "measured" || strings.Contains(response.Body.String(), `"evidence_state":"qualified"`) {
+		t.Fatalf("attest status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/optimized-artifacts/optimized-1/qualify", strings.NewReader(`{"candidate_run_id":"candidate-1","quality_evidence_id":"quality-1"}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || store.artifact.EvidenceState != "qualified" || !strings.Contains(response.Body.String(), `"quality_evidence_id":"quality-1"`) {
+		t.Fatalf("qualify status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func (f *fakeQualityEvidenceStore) RecordQualityEvidence(_ context.Context, tenant, _ string, item domain.QualityEvidence) (domain.QualityEvidence, bool, error) {
 	item.ID, item.TenantID, item.DeploymentID = "quality-1", tenant, "deployment-1"
 	item.CreatedAt = time.Now().UTC()
@@ -368,8 +555,10 @@ func (f *fakeIntelligenceStore) CaptureReplayTrace(context.Context, string, stri
 func (f *fakeIntelligenceStore) ReplayTrace(context.Context, string, string) (domain.ReplayTrace, error) {
 	return f.trace, nil
 }
-func (f *fakeIntelligenceStore) RecordArtifactCacheObservation(context.Context, string, domain.ArtifactCacheObservation) (domain.ArtifactCacheObservation, error) {
-	return domain.ArtifactCacheObservation{}, nil
+func (f *fakeIntelligenceStore) RecordArtifactCacheObservation(_ context.Context, tenant string, row domain.ArtifactCacheObservation) (domain.ArtifactCacheObservation, error) {
+	row.ID, row.TenantID = "cache-observation-1", tenant
+	f.cacheObservations = append(f.cacheObservations, row)
+	return row, nil
 }
 func (f *fakeIntelligenceStore) RequestArtifactPrefetch(_ context.Context, tenant string, row domain.ArtifactPrefetch) (domain.ArtifactPrefetch, bool, error) {
 	if f.prefetch.ID != "" {
@@ -438,6 +627,63 @@ func TestArtifactPrefetchExecutesConfiguredProviderWithoutDuplicateResource(t *t
 	}
 	if adapter.calls != 1 || len(adapter.resourceKeys) != 1 {
 		t.Fatalf("provider calls=%d resources=%d, want one accepted resource", adapter.calls, len(adapter.resourceKeys))
+	}
+}
+
+type completedArtifactCacheAdapter struct{}
+
+func (completedArtifactCacheAdapter) Prefetch(context.Context, artifactcache.Request) (artifactcache.Operation, error) {
+	return artifactcache.Operation{ProviderOperationID: "snap-verified", Status: "succeeded"}, nil
+}
+func (completedArtifactCacheAdapter) Observe(_ context.Context, _ artifactcache.Request) (artifactcache.Observation, error) {
+	now := time.Now().UTC()
+	return artifactcache.Observation{State: "present", Source: "aws-ebs-snapshot", EvidenceJSON: `{"encrypted":true}`, ObservedAt: now, ExpiresAt: now.Add(10 * time.Minute)}, nil
+}
+
+func TestCompletedArtifactPrefetchPersistsFreshProviderObservation(t *testing.T) {
+	store := &fakeIntelligenceStore{fakeStore: &fakeStore{}, artifact: domain.ModelArtifact{ID: "artifact-1", ModelIdentity: "org/model@commit"}}
+	handler := (API{Store: store, APIKey: "secret", ArtifactCacheAdapters: map[string]artifactcache.Adapter{"aws": completedArtifactCacheAdapter{}}}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/artifacts/artifact-1/prefetches", strings.NewReader(`{"provider":"aws","region":"eu-central-1","location":"aws-ebs://snap-verified","idempotency_key":"warm-release-1"}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"execution":"provider_completed"`) || len(store.cacheObservations) != 1 || store.cacheObservations[0].State != "present" {
+		t.Fatalf("status=%d body=%s observations=%#v", response.Code, response.Body.String(), store.cacheObservations)
+	}
+}
+
+type recoveringCompletedArtifactCacheAdapter struct{ observes int }
+
+func (*recoveringCompletedArtifactCacheAdapter) Prefetch(context.Context, artifactcache.Request) (artifactcache.Operation, error) {
+	return artifactcache.Operation{ProviderOperationID: "snap-verified", Status: "succeeded"}, nil
+}
+func (a *recoveringCompletedArtifactCacheAdapter) Observe(_ context.Context, _ artifactcache.Request) (artifactcache.Observation, error) {
+	a.observes++
+	if a.observes == 1 {
+		return artifactcache.Observation{}, errors.New("observation temporarily unavailable")
+	}
+	now := time.Now().UTC()
+	return artifactcache.Observation{State: "present", Source: "aws-ebs-snapshot", EvidenceJSON: `{}`, ObservedAt: now, ExpiresAt: now.Add(time.Minute)}, nil
+}
+
+func TestCompletedArtifactPrefetchRecoversPendingObservation(t *testing.T) {
+	store := &fakeIntelligenceStore{fakeStore: &fakeStore{}, artifact: domain.ModelArtifact{ID: "artifact-1", ModelIdentity: "org/model@commit"}}
+	adapter := &recoveringCompletedArtifactCacheAdapter{}
+	handler := (API{Store: store, APIKey: "secret", ArtifactCacheAdapters: map[string]artifactcache.Adapter{"aws": adapter}}).Handler()
+	for attempt := 0; attempt < 2; attempt++ {
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/artifacts/artifact-1/prefetches", strings.NewReader(`{"provider":"aws","region":"eu-central-1","location":"aws-ebs://snap-verified","idempotency_key":"warm-release-1"}`))
+		request.Header.Set("Authorization", "Bearer secret")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code < 200 || response.Code >= 300 {
+			t.Fatalf("attempt=%d status=%d body=%s", attempt, response.Code, response.Body.String())
+		}
+		if attempt == 0 && (!strings.Contains(response.Body.String(), `"execution":"provider_completed_observation_pending"`) || store.prefetch.ErrorCode != "observation_pending") {
+			t.Fatalf("pending observation was not durable: body=%s row=%#v", response.Body.String(), store.prefetch)
+		}
+	}
+	if adapter.observes != 2 || len(store.cacheObservations) != 1 || store.prefetch.ErrorCode != "" {
+		t.Fatalf("observes=%d observations=%d prefetch=%#v", adapter.observes, len(store.cacheObservations), store.prefetch)
 	}
 }
 

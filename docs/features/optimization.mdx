@@ -1,0 +1,203 @@
+---
+title: Evidence-gated optimization
+description: Turn a model, workload, infrastructure boundary, and objective into inspectable candidates that InferCrane can measure and prove.
+---
+
+# Evidence-gated optimization
+
+InferCrane separates proposing a configuration from proving it. The optimizer starts with reviewed
+model metadata and locally or really qualified provider/runtime compatibility. When the exact
+optional estimator toolchain is available, it uses AIConfigurator to reduce the candidate space.
+Otherwise it creates conservative reviewed catalog candidates. Neither path contacts a control
+plane or provisions paid capacity.
+
+Check the optional estimator once:
+
+```bash
+infercrane optimize doctor
+```
+
+Install its exact compatible tuple in an isolated Python 3.11–3.13 environment:
+
+```bash
+python3.12 -m venv .infercrane/tools/aiconfigurator-0.11.0
+.infercrane/tools/aiconfigurator-0.11.0/bin/python -m pip install \
+  aiconfigurator==0.11.0 plotext==5.3.2
+
+infercrane optimize doctor \
+  --aiconfigurator-python .infercrane/tools/aiconfigurator-0.11.0/bin/python
+```
+
+The `plotext` pin is required: AIConfigurator `0.11.0` is not compatible with `plotext 6.0.0` even
+though its published dependency range permits it. `optimize doctor` validates the complete tuple,
+not just the top-level package.
+
+```bash
+infercrane optimize propose mistral-7b-instruct \
+  --provider aws \
+  --region eu-central-1 \
+  --gpu L40S \
+  --objective interactive \
+  --profile interactive \
+  --target-concurrency 8 \
+  --workload-fingerprint sha256:CONTENT_FREE_REPLAY_DIGEST \
+  --max-ttft-p95-ms 200 \
+  --max-tpot-p95-ms 25 \
+  --max-hourly-cost 3 \
+  --write-dir .infercrane/candidates/mistral-interactive
+```
+
+The default `--source auto` tries the pinned AIConfigurator adapter and visibly falls back to the
+reviewed catalog when the optional tool is unavailable. Use `--source aiconfigurator` to require the
+estimator or `--source catalog` for deterministic reviewed starting profiles only.
+
+The result is a bounded candidate set. Each spec pins:
+
+- the exact model revision;
+- runtime engine and version;
+- provider adapter, region, and accelerator;
+- reviewed runtime arguments;
+- compute mode, scale bounds, and routing strategy.
+
+The command refuses to overwrite a non-empty candidate directory. Use `--output json` to archive the
+input digest, source, compatibility evidence, required evidence, and limitations with the specs.
+
+<Warning>
+  A proposal is not a benchmark result or recommendation. AIConfigurator rows are marked `modeled`
+  and `proposed-modeled-unqualified`; catalog rows are marked `unmeasured` and
+  `proposed-unmeasured`. InferCrane never presents an estimate as measured or qualified evidence.
+</Warning>
+
+## The simple and advanced paths
+
+The common path needs an objective, not a collection of runtime flags:
+
+```bash
+infercrane optimize propose Qwen/Qwen3-8B \
+  --provider aws --region eu-central-1 --gpu L40S \
+  --objective interactive \
+  --max-ttft-p95-ms 200 \
+  --max-hourly-cost 3
+```
+
+Advanced users can bind the search to an observed content-free Replay digest, choose runtimes,
+control the workload profile and concurrency, require the estimator, and inspect the complete JSON
+provenance. Provider credentials are not passed to the estimator. Model metadata network access is
+off by default and requires `--allow-model-metadata-network`.
+
+## Create a durable campaign
+
+Use `propose` for a completely offline preview. Use `create` to persist the same immutable proposal
+without provisioning anything:
+
+```bash
+infercrane optimize create llama-3.1-8b-instruct \
+  --provider aws --region eu-central-1 --gpu L40S \
+  --objective interactive --max-candidates 3
+
+infercrane optimize inspect CAMPAIGN_ID
+infercrane optimize approve CAMPAIGN_ID --max-cost-usd 20 --expires-in 1h
+```
+
+Approval records a bounded authority window. It does not automatically promote a candidate. Campaign
+execution remains separately qualification-gated; canceling a campaign prevents future work and
+marks unfinished candidates stale. Closing the CLI does not remove persisted campaign state.
+
+## Plan an optimized artifact
+
+Builders run outside InferCrane. The common path produces a strict immutable plan:
+
+```bash
+infercrane artifact optimize plan BASE_ARTIFACT_ID \
+  --preset fp8 \
+  --tool-version 0.12.0 \
+  --builder-image-digest sha256:BUILDER_DIGEST \
+  --calibration-digest sha256:CONTENT_FREE_DATASET_DIGEST \
+  --license-spdx Apache-2.0
+```
+
+Available plan presets cover FP8, AWQ, GPTQ, NVIDIA-specific NVFP4, EAGLE-3, MTP, DFlash, and
+TensorRT engine builds. A preset is not a compatibility or speed claim. Every plan requires an exact
+tool version, digest-pinned builder, hardware constraints, immutable output attestation, exact
+candidate binding, and passing semantic quality evidence before qualification. Advanced users can
+provide the complete JSON plan with `--plan-file`.
+
+## Propose, prove, release
+
+Use the generated files through the existing lifecycle:
+
+```bash
+# Review without mutation.
+infercrane plan .infercrane/candidates/mistral-interactive/01-*.yaml
+
+# Deploy one explicitly selected candidate.
+infercrane deploy .infercrane/candidates/mistral-interactive/01-*.yaml \
+  --idempotency-key mistral-interactive-candidate-1 \
+  --wait
+
+# Measure the same workload shape.
+infercrane benchmark DEPLOYMENT --profile interactive
+
+# Compare only persisted, comparable measurements.
+infercrane lab 'mistralai/Mistral-7B-Instruct-v0.3@IMMUTABLE_COMMIT' \
+  --objective interactive \
+  --profile interactive \
+  --max-ttft-p95-ms 200ms \
+  --max-tpot-p95-ms 25ms \
+  --max-hourly-cost 3
+
+# Apply normal candidate and Release Guard policy before promotion.
+infercrane rollout inspect DEPLOYMENT
+```
+
+When model precision or model artifacts differ, attach signed semantic evaluation evidence before
+promotion. When cost is part of the objective, attach sourced, dated cost evidence. Only an exact
+model, runtime, accelerator, provider, and canonical workload result supports a measured recipe.
+
+## What the first planner knows
+
+The first source composes:
+
+- [reviewed model recipes](/features/model-catalog);
+- the executable [integration compatibility inventory](/compatibility);
+- reviewed vLLM configuration profiles for balanced, interactive, and throughput workloads;
+- exact runtime versions and provider adapters.
+
+It does not infer that a model fits an accelerator. It does not automatically enable quantization,
+speculative decoding, LMCache, disaggregated serving, FlashInfer, or TensorRT-LLM. Those mechanisms
+are version- and workload-specific and require their own compatibility and qualification evidence.
+Use `--include-simulated` only for development exploration; simulated candidates are excluded by
+default.
+
+## Upstream composition roadmap
+
+InferCrane will reuse upstream execution and optimization work behind replaceable adapters:
+
+| Upstream | InferCrane boundary | Current status |
+|---|---|---|
+| vLLM | Runtime execution, continuous batching, attention, prefix caching, and qualified engine flags | Active runtime; reviewed starting profiles are locally qualified |
+| SGLang | Alternative runtime and prefix-aware execution | Runtime contract exists; each provider/model path needs qualification |
+| AIConfigurator | GPU-free modeled candidate reduction | Active optional adapter pinned to `0.11.0` plus `plotext 5.3.2`; Linux x86_64 real-package contract verified |
+| AISimulate | Future GPU-free simulation and recommendation source | Planned adapter replacement after stable package, schema, support, parity, and rollback gates pass |
+| LLM Compressor / ModelOpt | Produce immutable quantized artifacts | Replaceable external-builder plans and provenance are local-qualified; transformation and GPU compatibility remain external qualification |
+| vLLM Speculators | Model-specific EAGLE, MTP, DFlash, and related speculative candidates | Replaceable artifact plans and exact verifier provenance are local-qualified; acceptance rate and output correctness require real measurement |
+| LMCache | KV reuse and offload for qualified repeated-prefix workloads | Registered cache composition and exact capability boundary; executable lifecycle remains fail-closed |
+| Dynamo / NIXL | KV-aware routing and prefill/decode serving graph | Experimental Kubernetes adapter; real GPU/NIXL evidence required |
+| TensorRT-LLM | Narrow optimized runtime for supported model/GPU tuples | Immutable engine-build provenance exists; runtime execution remains unsupported until an exact tuple is qualified |
+| llm-d / AIBrix | Kubernetes routing, scheduling, and heterogeneous fleet patterns | Registered single-owner composition boundaries; no executable lifecycle support claim |
+
+The durable rule is: **the optimizer proposes; InferCrane proves**. See
+[ADR 0038](/adr/0038-replaceable-evidence-gated-optimization) for the ownership and evidence boundary.
+The pinned adapter and migration decision is recorded in
+[ADR 0039](/adr/0039-pinned-aiconfigurator-candidate-source).
+Durable authority and artifact provenance are recorded in
+[ADR 0040](/adr/0040-durable-evidence-gated-optimization-campaigns).
+
+## Benchmarks and competitor comparisons
+
+AIConfigurator estimates help decide what to test; they are not publishable performance claims.
+Use the [competitive benchmark methodology](/testing/competitive-benchmark-methodology) to compare
+InferCrane-managed serving with Baseten, Fireworks, or another provider on the same model artifact,
+precision, request dataset, protocol, concurrency, region class, warm/cold definition, and output
+token accounting. If an external provider does not expose the same artifact or configuration, label
+the result as a product comparison rather than an engine comparison.

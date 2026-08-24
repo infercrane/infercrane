@@ -18,6 +18,13 @@ const (
 	ProviderContractV1 = "infercrane.provider/v1"
 	RuntimeContractV1  = "infercrane.runtime/v1"
 	CompositionV1      = "infercrane.composition/v1"
+
+	CompositionGateway         = "gateway"
+	CompositionSandbox         = "sandbox"
+	CompositionTraining        = "training"
+	CompositionArtifactBuilder = "artifact-builder"
+	CompositionCache           = "cache"
+	CompositionOrchestrator    = "orchestrator"
 )
 
 type ComputeMode string
@@ -154,8 +161,10 @@ func (p CompositionProfile) Validate() error {
 	if p.Adapter == "" || p.ContractVersion != CompositionV1 {
 		return errors.New("composition adapter and current contract version are required")
 	}
-	if p.Kind != "gateway" && p.Kind != "sandbox" && p.Kind != "training" {
-		return errors.New("composition kind must be gateway, sandbox, or training")
+	switch p.Kind {
+	case CompositionGateway, CompositionSandbox, CompositionTraining, CompositionArtifactBuilder, CompositionCache, CompositionOrchestrator:
+	default:
+		return errors.New("composition kind must be gateway, sandbox, training, artifact-builder, cache, or orchestrator")
 	}
 	if p.Ownership == "" || len(p.Capabilities) == 0 || len(p.Qualification) == 0 {
 		return errors.New("composition ownership, capabilities, and qualification are required")
@@ -163,6 +172,22 @@ func (p CompositionProfile) Validate() error {
 	for _, capability := range p.Capabilities {
 		if capability.Name == "" || (capability.State != CapabilitySupported && capability.State != CapabilityUnsupported && capability.State != CapabilityUnknown) {
 			return errors.New("composition capability is invalid")
+		}
+		if capability.State == CapabilitySupported && capability.Evidence == "" {
+			return fmt.Errorf("composition capability %q is supported without evidence", capability.Name)
+		}
+	}
+	for _, qualification := range p.Qualification {
+		switch qualification.State {
+		case QualificationRegistered, QualificationSimulated, QualificationLocal, QualificationReal, QualificationDeferred, QualificationFailed:
+		default:
+			return fmt.Errorf("composition qualification has invalid state %q", qualification.State)
+		}
+		if (qualification.State == QualificationSimulated || qualification.State == QualificationLocal || qualification.State == QualificationReal) && qualification.Evidence == "" {
+			return errors.New("qualified composition requires evidence")
+		}
+		if qualification.State == QualificationDeferred && qualification.Reason == "" {
+			return errors.New("deferred composition qualification requires a reason")
 		}
 	}
 	return nil

@@ -62,6 +62,7 @@ var publicCommandSpecs = []commandSpec{
 	{use: "recipes [QUERY] [flags]", short: "Search immutable model recipes", group: "understand"},
 	{use: "models [QUERY] | models inspect NAME [flags]", short: "Explore reviewed model starting points", group: "start"},
 	{use: "lab MODEL_IDENTITY [flags]", short: "Compare persisted measured serving evidence", group: "understand"},
+	{use: "optimize propose|create MODEL [flags] | optimize list|inspect|results|approve|cancel | optimize doctor", short: "Propose and govern evidence-gated serving optimization campaigns", group: "understand"},
 	{use: "passport ACTION [arguments]", short: "Issue, inspect, or verify signed release evidence", group: "understand"},
 	{use: "recommend DEPLOYMENT [flags]", short: "Recommend a qualified configuration from persisted evidence", group: "understand"},
 	{use: "slo ACTION DEPLOYMENT [flags]", short: "Inspect or set deterministic inference SLO policy", group: "operate"},
@@ -102,6 +103,14 @@ var commandExamples = map[string]string{
 
   # Follow its durable provisioning operation
   infercrane rollout provision production REVISION_ID --wait`,
+	"optimize": `  # One command: use pinned AIConfigurator when available, otherwise safe reviewed candidates
+  infercrane optimize propose mistral-7b-instruct --provider aws --region eu-central-1 --gpu L40S --objective interactive
+
+  # Check the optional estimator toolchain without provisioning a GPU
+  infercrane optimize doctor
+
+  # Advanced: bind the proposal to an observed content-free workload shape
+  infercrane optimize propose Qwen/Qwen3-8B --provider kubernetes-dynamo --gpu NVIDIA-L40S --workload-fingerprint sha256:WORKLOAD_DIGEST --source aiconfigurator`,
 }
 
 func isPublicCommand(name string) bool {
@@ -182,7 +191,7 @@ func addHelpFlags(command *cobra.Command, name string) {
 	boolFlag := func(flag, help string) { command.Flags().Bool(flag, false, help) }
 	intFlag := func(flag string, value int, help string) { command.Flags().Int(flag, value, help) }
 	switch name {
-	case "init", "workload", "evaluation", "doctor", "connect", "adopt", "alert", "admission", "async", "plan", "deploy", "apply", "request", "deployments", "endpoints", "endpoint", "environment", "logical-model", "status", "logs", "events", "inspect", "explain", "benchmark", "replay", "capacity", "artifact", "sandbox", "training", "finops", "autopilot", "session", "burst", "recipe", "recipes", "models", "lab", "passport", "recommend", "slo", "delete", "orphans", "operation", "integrations", "observe", "telemetry", "inbox", "target", "provider", "auth", "system", "secret", "external", "rollout":
+	case "init", "workload", "evaluation", "doctor", "connect", "adopt", "alert", "admission", "async", "plan", "deploy", "apply", "request", "deployments", "endpoints", "endpoint", "environment", "logical-model", "status", "logs", "events", "inspect", "explain", "benchmark", "replay", "capacity", "artifact", "sandbox", "training", "finops", "autopilot", "session", "burst", "recipe", "recipes", "models", "lab", "optimize", "passport", "recommend", "slo", "delete", "orphans", "operation", "integrations", "observe", "telemetry", "inbox", "target", "provider", "auth", "system", "secret", "external", "rollout":
 		stringFlag("output", "human", "output format: human or json")
 	}
 	switch name {
@@ -418,6 +427,29 @@ func addHelpFlags(command *cobra.Command, name string) {
 	case "lab":
 		stringFlag("max-ttft-p95-ms", "", "optional p95 TTFT SLO")
 		stringFlag("workload-digest", "", "optional exact benchmark workload SHA-256")
+	case "optimize":
+		stringFlag("provider", "", "provider cloud or exact adapter")
+		stringFlag("region", "", "exact provider region")
+		stringFlag("gpu", "", "exact accelerator identity")
+		stringFlag("runtimes", "", "comma-separated runtime allowlist")
+		stringFlag("objective", "interactive", "interactive, latency, throughput, or cost-efficiency")
+		stringFlag("profile", "", "benchmark workload profile")
+		stringFlag("source", "auto", "auto, catalog, or aiconfigurator")
+		stringFlag("target-concurrency", "", "observed or expected concurrent requests")
+		stringFlag("workload-fingerprint", "", "content-free observed workload fingerprint")
+		stringFlag("aiconfigurator-python", "python3", "Python executable containing the pinned estimator tuple")
+		stringFlag("max-ttft-p95-ms", "", "required measured p95 TTFT")
+		stringFlag("max-tpot-p95-ms", "", "required measured p95 TPOT")
+		stringFlag("min-output-tokens-second", "", "required measured output throughput")
+		stringFlag("max-hourly-cost", "", "required sourced hourly cost")
+		stringFlag("write-dir", "", "write candidate DeploymentSpecs")
+		stringFlag("idempotency-key", "", "stable safe-retry key for campaign creation")
+		stringFlag("max-cost-usd", "", "hard maximum campaign spend for approval")
+		stringFlag("expires-in", "1h", "paid-resource approval validity")
+		intFlag("max-candidates", 10, "maximum candidates")
+		intFlag("limit", 20, "maximum campaigns to list")
+		boolFlag("include-simulated", "include simulated compatibility")
+		boolFlag("allow-model-metadata-network", "allow public model metadata lookup")
 	case "passport":
 		stringFlag("revision", "", "revision ID; defaults to active")
 		stringFlag("file", "", "write the issued passport JSON to a file")
@@ -506,6 +538,7 @@ func completionFor(command string) func(*cobra.Command, []string, string) ([]str
 		"recipes":     {"--limit", "--output"},
 		"models":      {"--output"},
 		"lab":         {"--objective", "--profile", "--max-ttft-p95-ms", "--workload-digest", "--output"},
+		"optimize":    {"--provider", "--region", "--gpu", "--runtimes", "--objective", "--profile", "--source", "--target-concurrency", "--workload-fingerprint", "--aiconfigurator-python", "--allow-model-metadata-network", "--max-ttft-p95-ms", "--max-tpot-p95-ms", "--min-output-tokens-second", "--max-hourly-cost", "--include-simulated", "--max-candidates", "--write-dir", "--output"},
 		"passport":    {"--revision", "--file", "--output"},
 		"recommend":   {"--history", "--output"},
 		"slo":         {"--ttft-p95", "--latency-p95", "--error-rate", "--output-tokens-second", "--hourly-cost", "--output"},

@@ -1,0 +1,90 @@
+---
+title: "ADR 0039: Use AIConfigurator through a pinned, replaceable candidate-source adapter"
+description: Adopt useful GPU-free modeling now without making an upstream estimator authoritative for deployment or qualification.
+---
+
+## Status
+
+Accepted on 2026-08-24. This decision extends [ADR 0038](/adr/0038-replaceable-evidence-gated-optimization); it does not change the evidence boundary established there.
+
+## Context
+
+AIConfigurator can search model, accelerator, runtime, concurrency, and latency constraints without
+provisioning every candidate. Upstream has also accepted a transition toward AISimulate. Waiting for
+that transition would delay useful candidate reduction, while importing AIConfigurator objects into
+InferCrane would turn the upstream migration into a domain and database migration.
+
+Real package validation found an additional compatibility boundary. AIConfigurator `0.11.0`
+declares `plotext>=5.3.2`, but its reporting path calls `plotext.plot_size`, which is absent from
+`plotext 6.0.0`. AIConfigurator's own lockfile resolves `plotext 5.3.2`. Installing only the top-level
+package can therefore succeed while execution fails.
+
+## Decision
+
+InferCrane uses AIConfigurator through the existing `optimizer.Source` boundary with this exact
+tool tuple:
+
+- `aiconfigurator==0.11.0`;
+- `plotext==5.3.2`;
+- Python 3.11–3.13 on a platform supported by upstream wheels.
+
+The adapter:
+
+- communicates through InferCrane-owned versioned JSON input and output schemas;
+- runs out of process with bounded time, stdout, and stderr;
+- receives a scrubbed environment without AWS, GCP, Kubernetes, RunPod, registry, or model-provider
+  credentials;
+- defaults Hugging Face and Transformers metadata access to offline mode;
+- accepts network metadata lookup only through an explicit operator flag;
+- records the upstream version and result digest;
+- maps only topologies the selected InferCrane provider adapter can execute without guessing;
+- labels every result `modeled` and `proposed-modeled-unqualified`;
+- never provisions, benchmarks, promotes, routes, or scales infrastructure.
+
+The default `auto` experience uses the estimator when the exact tuple is present and otherwise
+falls back to reviewed catalog candidates with a visible warning. Explicit `--source
+aiconfigurator` fails instead of falling back.
+
+AIConfigurator estimates do not satisfy AIPerf, Replay, semantic quality, sourced cost, Release
+Guard, or Inference Passport requirements. Only InferCrane's measured evidence and deterministic
+policy can qualify a Serving Plan.
+
+## AISimulate migration
+
+AISimulate will implement the same `optimizer.Source` and estimator JSON boundary after its stable
+package, public schema, support matrix, parity evidence, and rollback documentation pass the gates
+in the [optimization execution plan](../workplans/inference-optimization-execution-plan.md).
+
+Migration is performed as a source replacement:
+
+1. run AIConfigurator and AISimulate on the maintained calibration corpus;
+2. compare supported tuples, top-k candidates, modeled metrics, and errors;
+3. preserve prior AIConfigurator provenance and result digests;
+4. enable AISimulate for new campaigns only;
+5. retain AIConfigurator rollback until measured calibration passes;
+6. remove the old adapter in a later release without rewriting candidate or benchmark history.
+
+## Consequences
+
+Users can reduce a large configuration space before paying for GPU experiments, including current
+L40S, L4, H100, H200, B200, and supported backend models. The result remains portable because the
+estimator is not the durable domain.
+
+The exact Python tuple is an optional tool, not a control-plane runtime dependency. Unsupported
+hosts retain reviewed catalog proposals. This preserves the single-binary core at the cost of a
+separate optional estimator environment.
+
+## Verification
+
+- Go fixture tests validate schema, version, topology, credential scrubbing, output bounds, and
+  fallback behavior.
+- A Linux x86_64 container test executes the real pinned packages against `Qwen/Qwen3-8B` on the
+  modeled L40S system.
+- Candidate DeploymentSpecs must pass strict InferCrane schema loading.
+- No modeled candidate may be described as measured, qualified, or recommended.
+
+## References
+
+- [AIConfigurator](https://github.com/ai-dynamo/aiconfigurator)
+- [AIConfigurator to AISimulate transition](https://github.com/ai-dynamo/aiconfigurator/issues/1517)
+- [Dynamo planner configuration](https://github.com/ai-dynamo/dynamo/blob/main/docs/fern/pages/reference/components/planner-configuration.mdx)

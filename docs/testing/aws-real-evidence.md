@@ -3,6 +3,52 @@
 This evidence was captured on 2026-08-23 from the private AWS BYOC qualification in
 `eu-central-1`. It is release qualification, not a public performance comparison.
 
+## Complete Mistral matrix and bounded concurrency sweep on A10G
+
+Run `20260823T195259Z-07efd96-aws-mistral-a10g` exercised the pinned
+`mistralai/Mistral-7B-Instruct-v0.3` revision at InferCrane commit `07efd96` using vLLM 0.22.0 on
+one AWS A10G (`g5.xlarge`). AWS had reported definitive `InsufficientInstanceCapacity` for the
+requested L40S in each configured Frankfurt availability zone, so the operator explicitly selected
+the separately qualified A10G path; InferCrane did not silently change accelerator class.
+
+The seven-profile matrix completed 1,920 requests with zero HTTP failures:
+
+| Workload profile | Concurrency | Requests | TTFT p95 | TPOT p95 | Latency p95 | Output tok/s |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| interactive | 1 | 256 | 164.3 ms | 31.86 ms | 4,208.7 ms | 30.36 |
+| balanced | 8 | 256 | 915.5 ms | 41.95 ms | 5,584.0 ms | 184.44 |
+| throughput | 32 | 512 | 1,350.8 ms | 58.13 ms | 15,377.8 ms | 544.95 |
+| buffered | 8 | 256 | unavailable | unavailable | 5,550.6 ms | 184.77 |
+| long-context (8,192 input tokens) | 4 | 64 | 4,467.1 ms | 75.29 ms | 21,627.7 ms | 51.04 |
+| long-generation (1,024 output tokens) | 4 | 64 | 315.6 ms | 35.97 ms | 18,828.0 ms | 108.31 |
+| overload | 128 | 512 | 26,875.4 ms | 147.83 ms | 52,242.6 ms | 726.63 |
+
+Buffered TTFT and TPOT remain unavailable by protocol rather than being fabricated as zero. The
+overload row proves completion under the bounded campaign; its 26.9-second TTFT p95 is evidence that
+admission policy must bound concurrency for latency-sensitive workloads, not evidence that 128-way
+concurrency is an acceptable interactive configuration.
+
+A second campaign held request count, token shape, random seed, streaming mode, revision, and
+runtime configuration constant while changing only concurrency. All 512 requests succeeded:
+
+| Concurrency | Requests | TTFT p95 | TPOT p95 | Latency p95 | Output tok/s |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 128 | 168.6 ms | 31.83 ms | 2,170.9 ms | 29.42 |
+| 8 | 128 | 1,000.7 ms | 48.26 ms | 3,339.3 ms | 156.58 |
+| 32 | 128 | 3,312.4 ms | 90.87 ms | 7,560.2 ms | 322.07 |
+| 128 | 128 | 19,017.0 ms | 204.92 ms | 22,298.6 ms | 363.94 |
+
+The deployment reached the stable route in 12 minutes 19 seconds. Closed startup markers measured
+4 minutes 50 seconds for the immutable runtime-image miss. The vLLM container started 23 seconds
+later; model materialization, runtime initialization, health, and stable-route publication accounted
+for the remaining interval. This is a cold-miss baseline, not a prewarmed-startup claim.
+
+Durable deletion completed in 4 minutes 45 seconds. The retained local archive has SHA-256
+`24ad89818f758b70f5c29e4587eb50fbe8b4393bdcce8162c6b95432217bb52b` and excludes credentials.
+Independent final inventory returned zero active InferCrane-managed instances and volumes. The
+qualification runner, its root volume, NAT gateway, Elastic IP, three private test subnets, route
+table, security groups, IAM roles/profiles, artifact bucket, and test secret were then deleted.
+
 ## Model-diverse workload matrix — partial Mistral qualification
 
 Run `20260823T092044Z-c310780-mistral-final` exercised the pinned
@@ -82,6 +128,29 @@ runner remained intentionally available and is not tagged as a managed workload.
 These observations prove the miss path and the stage instrumentation. They do not prove an
 operator-prewarmed AMI image hit or provider-native model-artifact cache. Those remain distinct
 qualification boundaries.
+
+## Artifact-snapshot qualification discovery
+
+Run `20260824T232100Z-aws-mistral-cache-hit` attempted the first exact-identity EBS artifact-cache
+qualification for
+`mistralai/Mistral-7B-Instruct-v0.3@c170c708c41dac9275d15a8fff4eca08d52bab71`. The encrypted,
+tagged 40 GiB snapshot passed all pre-launch validation and exactly one private `g6e.xlarge` worker
+was created. Before the artifact volume could be mounted, Docker exhausted the worker's explicit
+100 GiB root filesystem while extracting a current vLLM FlashInfer layer. Provider console evidence
+ended at `image_pull_start` with `no space left on device`; InferCrane never reported an artifact
+cache hit or runtime readiness.
+
+The operation was cancelled and direct final inventory confirmed that the instance and all three
+attached volumes were absent. The first 200 GiB retry then exposed the root cause: the AMI declared
+`/dev/sda1`, while the adapter had hard-coded `/dev/xvda`; AWS kept the 75 GiB AMI root and attached
+the larger encrypted disk as an unused secondary volume. That worker was also cancelled and removed.
+The adapter now discovers the AMI root device, validates the source snapshot size, overrides that
+exact mapping, records the device in its adoption identity, and keeps the conservative 200 GiB
+default.
+This failed attempt is storage-sizing and startup-diagnosis evidence only. It is not cache-hit,
+latency, runtime, or model-serving evidence. A clean 200 GiB retry must still prove
+`startup_evidence.artifact_cache: hit`, serve buffered and streaming requests, persist the bounded
+benchmark row, and restore provider inventory to baseline.
 
 ## Model-diverse performance qualification
 

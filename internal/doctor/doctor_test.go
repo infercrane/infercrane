@@ -92,6 +92,25 @@ func TestGCPBYOCCheckIsReadOnlyAndRequiredWhenRequested(t *testing.T) {
 	}
 }
 
+func TestGCPDoctorUsesTheCompleteConfiguredProvider(t *testing.T) {
+	cfg := config.Config{
+		GCPProject: "acme-prod", GCPZone: "europe-west4-a", GCPSubnet: "workers",
+		GCPMachineType: "g2-standard-4", GCPGPU: "nvidia-l4",
+		GCPServiceAccount: "worker@acme-prod.iam.gserviceaccount.com",
+		GCPVMImage:        "projects/cos-cloud/global/images/cos-immutable",
+		GCPContainerImage: "registry.example/vllm@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		GCPWorkerSecret:   "infercrane-worker-key", GCPBootDiskGiB: 200,
+	}
+	provider := gcpComputeFromConfig(cfg)
+	if provider.Project != cfg.GCPProject || provider.Zone != cfg.GCPZone || provider.Subnet != cfg.GCPSubnet ||
+		provider.MachineType != cfg.GCPMachineType || provider.GPUType != cfg.GCPGPU ||
+		provider.ServiceAccount != cfg.GCPServiceAccount || provider.VMImage != cfg.GCPVMImage ||
+		provider.ContainerImage != cfg.GCPContainerImage || provider.WorkerSecret != cfg.GCPWorkerSecret ||
+		provider.BootDiskGiB != cfg.GCPBootDiskGiB {
+		t.Fatalf("doctor provider does not match configured provider: %#v", provider)
+	}
+}
+
 func TestKubernetesCheckIsReadOnlyAndRequiredWhenRequested(t *testing.T) {
 	cfg := config.Config{KubernetesContext: "cluster", KubernetesNamespace: "infercrane-system", KubernetesWorkloadAPI: "deployment", KubernetesServiceAccount: "infercrane-runtime", KubernetesWorkerSecretName: "infercrane-worker", KubernetesWorkerSecretKey: "api-key", KubernetesImageDigest: "image@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", KubernetesGPUResource: "nvidia.com/gpu", KubernetesGPUProductLabel: "nvidia.com/gpu.product"}
 	check := CheckKubernetes(context.Background(), cfg, Dependencies{KubernetesCheck: func(context.Context) error { return nil }})

@@ -86,6 +86,20 @@ type ModelArtifact struct {
 	ResolvedAt                                          time.Time
 }
 
+// OptimizedArtifact is immutable provenance for an externally built
+// quantized checkpoint, speculative decoder, or TensorRT engine. InferCrane
+// never executes builder code in the control-plane process.
+type OptimizedArtifact struct {
+	ID, TenantID, IdempotencyKey, InputDigest, BaseModelArtifactID string
+	Kind, Format, Tool, ToolVersion, Algorithm, BuilderImageDigest string
+	CalibrationDigest, LicenseSPDX, ConfigurationJSON              string
+	HardwareConstraintsJSON, State, EvidenceState                  string
+	OutputRepository, OutputImmutableRevision, OutputDigest        string
+	BuildEvidenceJSON, QualityEvidenceID, FailureCode              string
+	RequiresQualityReview                                          bool
+	CreatedAt, UpdatedAt                                           time.Time
+}
+
 // SandboxReference records composition with an externally owned execution
 // sandbox. InferCrane never stores commands, files, prompts, or outputs here.
 type SandboxReference struct {
@@ -234,6 +248,22 @@ type EndpointMonitoringSnapshot struct {
 	Breakdowns    []MonitoringBreakdown `json:"breakdowns"`
 	Events        []MonitoringEvent     `json:"events"`
 	Evidence      MonitoringEvidence    `json:"evidence"`
+	Admission     *AdmissionMonitoring  `json:"admission,omitempty"`
+}
+
+// AdmissionMonitoring is a live, instance-local pressure signal. It must not
+// be interpreted as global capacity in a multi-gateway deployment.
+type AdmissionMonitoring struct {
+	CapacityState string    `json:"capacity_state"`
+	Scope         string    `json:"scope"`
+	InstanceID    string    `json:"instance_id"`
+	Active        int       `json:"active"`
+	Waiting       int       `json:"waiting"`
+	MaxConcurrent int       `json:"max_concurrent"`
+	MaxQueueDepth int       `json:"max_queue_depth"`
+	Rejected      uint64    `json:"rejected"`
+	QueueTimeouts uint64    `json:"queue_timeouts"`
+	ObservedAt    time.Time `json:"observed_at"`
 }
 
 type MonitoringSummary struct {
@@ -615,6 +645,7 @@ type AlertDelivery struct {
 type AdmissionPolicy struct {
 	EndpointID, TenantID                          string
 	MaxConcurrency, MaxQueueDepth, QueueTimeoutMS int
+	RequestTimeoutMS                              int
 	MaxRequestBytes, MaxOutputTokens, RetryBudget int
 	AllowedPrioritiesJSON                         string
 	Enabled                                       bool
@@ -775,6 +806,30 @@ type OperationEvent struct {
 	OperationID, Level, Type, Message, Payload string
 	Sequence                                   int64
 	CreatedAt                                  time.Time
+}
+
+// OptimizationCampaign persists the proof lifecycle around a bounded set of
+// candidates. ProposalJSON is immutable; measured results are stored on
+// CandidateRun so modeled and actual evidence cannot overwrite one another.
+type OptimizationCampaign struct {
+	ID, TenantID, IdempotencyKey, InputDigest, ModelIdentity, Objective string
+	Source, State, ProposalJSON, ApprovedBy, FailureCode                string
+	MaxCandidates                                                       int
+	ApprovedMaxCostUSD                                                  *float64
+	ApprovalExpiresAt, ApprovedAt                                       *time.Time
+	CancelRequested                                                     bool
+	CreatedAt, UpdatedAt                                                time.Time
+	Candidates                                                          []OptimizationCandidateRun `json:"candidates,omitempty"`
+}
+
+type OptimizationCandidateRun struct {
+	ID, TenantID, CampaignID, ProposalCandidateID, State, EvidenceState string
+	DeploymentSpecJSON, PredictedEvidenceJSON, ActualEvidenceJSON       string
+	DeploymentName, RevisionID, BenchmarkID, QualityEvidenceID          string
+	ReleaseGuardEvaluationID, FailureCode                               string
+	OptimizedArtifactID                                                 string
+	Rank                                                                int
+	CreatedAt, UpdatedAt                                                time.Time
 }
 
 type Orphan struct {

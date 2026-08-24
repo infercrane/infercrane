@@ -5,6 +5,10 @@ description: Capture immutable serving evidence and compare measured candidates 
 
 # Recipes and Inference Lab
 
+Need candidate configurations before measuring? Start with
+[Evidence-gated optimization](/features/optimization). The optimizer proposes immutable, explicitly
+unmeasured DeploymentSpecs; this page covers the measured evidence and comparison stages that follow.
+
 Recipes turn one real deployment revision into a content-addressed, reproducible record. InferCrane
 will only capture a recipe when the active revision has an immutable ModelArtifact, an explicit
 runtime version, and a matching persisted AIPerf benchmark.

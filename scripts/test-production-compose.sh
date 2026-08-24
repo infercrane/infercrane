@@ -103,8 +103,13 @@ INFERCRANE_AWS_GPU=L40S \
 INFERCRANE_AWS_INSTANCE_PROFILE_ARN=arn:aws:iam::123456789012:instance-profile/test \
 INFERCRANE_AWS_WORKER_SECRET_ARN=arn:aws:secretsmanager:eu-central-1:123456789012:secret:test \
 INFERCRANE_AWS_IMAGE_DIGEST=example.invalid/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+INFERCRANE_AWS_ARTIFACT_CACHE_POLICY=required \
+INFERCRANE_AWS_ARTIFACT_SNAPSHOTS_JSON='{"model@commit":"snap-0123456789abcdef0"}' \
+INFERCRANE_AWS_ARTIFACT_VOLUME_INITIALIZATION_RATE_MIBPS=200 \
   docker compose -f "$compose_file" -f "$aws_compose_file" config >"$aws_rendered"
 grep -q 'INFERCRANE_AWS_ROLE_ARN: arn:aws:iam::123456789012:role/test' "$aws_rendered"
+grep -q 'INFERCRANE_AWS_ARTIFACT_CACHE_POLICY: required' "$aws_rendered"
+grep -q 'INFERCRANE_AWS_ARTIFACT_VOLUME_INITIALIZATION_RATE_MIBPS: "200"' "$aws_rendered"
 grep -q 'target: /home/app/.aws' "$aws_rendered"
 if grep -Eqi 'runpod|skypilot' "$aws_rendered"; then
   echo 'AWS production overlay is coupled to RunPod or SkyPilot' >&2
@@ -124,10 +129,15 @@ INFERCRANE_GCP_GPU=nvidia-l4 \
 INFERCRANE_GCP_SERVICE_ACCOUNT=runtime@acme-test.iam.gserviceaccount.com \
 INFERCRANE_GCP_VM_IMAGE=projects/cos-cloud/global/images/cos-stable-test \
 INFERCRANE_GCP_WORKER_SECRET=infercrane-worker-key \
+INFERCRANE_GCP_BOOT_DISK_GIB=200 \
 INFERCRANE_GCP_CONTAINER_IMAGE=example.invalid/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
   docker compose -f "$compose_file" -f "$gcp_compose_file" config >"$gcp_rendered"
 grep -q 'INFERCRANE_GCP_PROJECT: acme-test' "$gcp_rendered"
-grep -q 'target: /home/app/.config/gcloud' "$gcp_rendered"
+grep -q 'INFERCRANE_GCP_BOOT_DISK_GIB: "200"' "$gcp_rendered"
+grep -q 'CLOUDSDK_CONFIG: /tmp/infercrane-gcloud' "$gcp_rendered"
+grep -q 'INFERCRANE_GCLOUD_CONFIG_SOURCE: /run/infercrane/gcloud-bootstrap' "$gcp_rendered"
+grep -q 'target: /run/infercrane/gcloud-bootstrap' "$gcp_rendered"
+grep -q 'read_only: true' "$gcp_rendered"
 if grep -Eqi 'runpod|skypilot|INFERCRANE_AWS_' "$gcp_rendered"; then
   echo 'GCP production overlay is coupled to another provider' >&2
   exit 1

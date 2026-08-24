@@ -1173,6 +1173,19 @@ func TestStartupEvidenceLinesExposeWaterfallWithoutRawConsole(t *testing.T) {
 	}
 }
 
+func TestStartupEvidenceLinesExposeVerifiedArtifactCacheBoundary(t *testing.T) {
+	lines := startupEvidenceLines(json.RawMessage(`{"runtime_ready_at":"2026-08-23T10:00:50Z","startup_evidence":{"image_cache":"hit","artifact_cache":"hit","current_stage":"runtime_container_started","stages":[{"name":"identity_start","at":"2026-08-23T10:00:00Z"},{"name":"image_check","at":"2026-08-23T10:00:02Z"},{"name":"image_cache_hit","at":"2026-08-23T10:00:03Z"},{"name":"artifact_check","at":"2026-08-23T10:00:04Z"},{"name":"artifact_cache_hit","at":"2026-08-23T10:00:09Z"},{"name":"runtime_start","at":"2026-08-23T10:00:10Z"},{"name":"runtime_container_started","at":"2026-08-23T10:00:20Z"}]}}`))
+	joined := strings.Join(lines, "\n")
+	for _, expected := range []string{"Image      cache hit", "Artifact   cache hit", "artifact attach    5s", "model materialize   included in model + runtime ready"} {
+		if !strings.Contains(joined, expected) {
+			t.Fatalf("lines=%q missing=%q", joined, expected)
+		}
+	}
+	if strings.Contains(joined, "model download      unavailable") {
+		t.Fatalf("verified artifact hit was still rendered unavailable: %q", joined)
+	}
+}
+
 func TestRecipeAndLabCommandsUseControlAPI(t *testing.T) {
 	var paths []string
 	var labBody map[string]any

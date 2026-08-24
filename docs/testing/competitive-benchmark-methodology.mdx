@@ -1,0 +1,163 @@
+---
+title: "Competitive benchmark methodology"
+description: "Reproducible, model-diverse performance evidence without turning estimates into marketing claims."
+---
+
+InferCrane compares serving systems only when the workload and evidence boundary make the result
+meaningful. The rule is simple:
+
+> Optimizers propose. Real execution measures. InferCrane qualifies or rejects.
+
+AIConfigurator output reduces a large search space. It is `modeled` evidence, not a benchmark.
+Catalog profiles are `unmeasured`. A result becomes `measured` only after AIPerf or Replay executes
+against the exact serving tuple. Release Guard may then mark that tuple `qualified` or `rejected`;
+changing an identity-defining input makes the evidence `stale`.
+
+## Exact comparison identity
+
+Every published row must bind all of these dimensions:
+
+| Dimension | Required identity |
+| --- | --- |
+| Model | Repository, immutable revision, architecture, task, license/access state |
+| Artifact | Original or derived digest, precision/quantization, transformation tool and version |
+| Runtime | Engine, version, image digest, launch arguments, attention backend and scheduler settings |
+| Hardware | Accelerator model/count, memory, CPU/RAM, interconnect, provider and region |
+| Serving | Aggregated or disaggregated topology, parallelism, cache and routing owner |
+| Workload | Request count, arrival/concurrency, token shape, protocol, streaming, prefix ratio and seed |
+| Cost | Source, currency, timestamp, included resources and billing assumptions |
+| Software | InferCrane commit/version plus benchmark tool/version |
+
+A result for Mistral 7B on one L40S does not transfer to Qwen, Llama, DeepSeek, an embedding model,
+another precision, another runtime, or another provider.
+
+## Model-diverse qualification corpus
+
+The initial corpus represents materially different execution behavior:
+
+| Workload family | Initial model examples | What it exercises |
+| --- | --- | --- |
+| Dense instruction | Mistral 7B, Llama 3.1 8B | Baseline prefill/decode, streaming and tools |
+| Compact reasoning | DeepSeek R1 Distill Qwen 7B, Qwen3 8B | Longer outputs and reasoning templates |
+| Coding | Qwen2.5 Coder 7B | Long prompts, code-shaped generation and prefix reuse |
+| Embeddings/retrieval | BGE-M3 | Non-generation protocol and batch throughput |
+| Multimodal | Gemma 3 4B, Qwen2.5-VL 7B | Media preprocessing and memory-sensitive requests |
+| Enterprise text | Granite 3.3 8B | Extraction and summarization workloads |
+| Frontier multi-GPU MoE | A currently runtime-qualified Kimi, DeepSeek, GLM, or Qwen family | Expert parallelism, networking, distributed KV and failure behavior |
+
+Frontier MoE entries are admitted only after the exact artifact, license, engine release, GPU
+topology and upstream support are verified. InferCrane must not synthesize a deployable single-GPU
+recipe merely because a model is popular.
+
+## Workload matrix
+
+For generation runtimes, run the same immutable candidate through:
+
+- interactive streaming at concurrency 1;
+- balanced streaming at concurrency 8;
+- sustained throughput at concurrency 32;
+- bounded overload at concurrency 128;
+- buffered responses;
+- 8,192-token long-context requests;
+- 1,024-token long generations;
+- a repeated-prefix trace when prefix/KV reuse is claimed;
+- tool and structured-output conformance when the model/runtime pair claims them.
+
+For embeddings and multimodal models, use protocol-specific payloads rather than forcing chat-shaped
+traffic into a false universal workload.
+
+Record TTFT, TPOT, end-to-end latency, request throughput, output-token throughput, SLO goodput,
+failures, GPU utilization and memory headroom. When cost is sourced, report goodput per currency unit.
+Cold readiness is a separate lifecycle metric and must identify image-cache and artifact-cache state.
+
+## Repetition and statistics
+
+For a publishable performance row:
+
+1. Warm the exact runtime according to the declared protocol.
+2. Execute at least three independent measured campaigns.
+3. Use at least 256 requests for ordinary generation rows unless the long-context cost is explicitly
+   bounded and disclosed.
+4. Publish p50, p95 and p99 when sample size permits, plus median and range across campaigns.
+5. Retain raw, content-safe AIPerf output and an immutable reproduction command.
+6. Treat any changed model, artifact, runtime, topology, hardware, workload or cache state as a new row.
+
+## Three different comparisons
+
+Do not collapse these into one leaderboard.
+
+### Engine comparison
+
+Run vLLM, SGLang, TensorRT-LLM, or a Dynamo topology on the same owned hardware with the same model,
+precision and workload. This isolates serving-engine and configuration effects.
+
+### Hosted-provider comparison
+
+Call the public endpoint exposed by a provider such as Baseten or Fireworks using the same available
+model and request corpus. Report the product as observed: latency, throughput, errors, billed or
+advertised price, region visibility and API behavior. Do not claim identical hidden hardware or
+runtime configuration.
+
+### Operational comparison
+
+Measure deployment readiness, update availability, rollback, failure recovery, scale convergence and
+cleanup. These are control-plane/product properties and should not be mixed into token throughput.
+
+## Current evidence boundary
+
+The repository currently archives a real AWS Mistral 7B baseline on A10G and a partial L40S matrix in
+[AWS real-infrastructure evidence](/testing/aws-real-evidence). Those rows are useful calibration
+points, not a Baseten or Fireworks comparison and not proof for another model.
+
+The model-diverse catalog and qualification paths cover Qwen, Llama, DeepSeek Distill, Qwen Coder,
+BGE, Gemma/Qwen vision and Granite. Real hardware results remain pending until each exact tuple is
+executed. No competitor number is copied from a marketing page into InferCrane evidence.
+
+## Commands
+
+Generate candidates without provisioning:
+
+```bash
+infercrane optimize doctor
+
+infercrane optimize propose qwen3-8b \
+  --provider aws \
+  --region eu-central-1 \
+  --gpu L40S \
+  --objective interactive \
+  --target-concurrency 8 \
+  --write-dir ./candidates
+```
+
+Measure one deployed revision and compare only matching workload digests:
+
+```bash
+infercrane benchmark qwen-production --profile interactive --revision candidate
+infercrane benchmark qwen-production --profile throughput --revision candidate
+
+infercrane lab 'Qwen/Qwen3-8B@IMMUTABLE_COMMIT' \
+  --objective interactive \
+  --profile interactive \
+  --max-ttft-p95-ms 200ms
+```
+
+The optional upstream adapter contract is reproducible with:
+
+```bash
+make test-aiconfigurator-upstream
+```
+
+That command validates the real pinned AIConfigurator package using Qwen3-8B on a modeled L40S/vLLM
+boundary. It does not allocate a GPU and does not turn modeled estimates into performance claims.
+
+## Upstream tools
+
+- [AIConfigurator](https://github.com/ai-dynamo/aiconfigurator) proposes modeled configurations.
+- [AIPerf](https://docs.nvidia.com/aiperf/) executes model and trace workloads.
+- [Dynamo deployment guidance](https://github.com/ai-dynamo/aiconfigurator/blob/main/docs/dynamo_deployment_guide.md)
+  demonstrates why configuration, deployment and benchmark stages must remain distinct.
+- [AIConfigurator to AISimulate transition](https://github.com/ai-dynamo/aiconfigurator/issues/1517)
+  defines the migration gates InferCrane will enforce before changing estimator adapters.
+
+These upstream projects help propose or execute candidates. InferCrane owns durable identity,
+evidence provenance, qualification, rollout and rollback.

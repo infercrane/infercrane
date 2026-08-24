@@ -1,0 +1,93 @@
+---
+title: "ADR 0038: Replaceable evidence-gated optimization"
+description: Generate serving candidates through replaceable sources, then qualify them with measured performance, quality, cost, and release evidence.
+---
+
+# ADR 0038: Replaceable evidence-gated optimization
+
+Status: accepted.
+
+## Context
+
+InferCrane already has reviewed model recipes, immutable revisions, AIPerf benchmarks, exact-workload
+Lab comparisons, SLO policy, Release Guard, and advisory Serving Plans. It lacked the safe link between
+an operator's objective and the set of configurations worth measuring.
+
+Several upstream projects can help produce candidates, but none should become InferCrane's domain
+model. AIConfigurator currently searches model, hardware, backend, and SLO combinations and can emit
+AIPerf inputs. Its maintainers have also accepted a transition to AISimulate. vLLM, SGLang, and
+TensorRT-LLM expose different and rapidly evolving capability surfaces. Quantization, speculative
+decoding, KV reuse, and disaggregated serving are model-, engine-, accelerator-, and version-specific.
+
+A configuration estimate is not proof. A performance claim without hardware, software, workload,
+precision, baseline, and correctness evidence is not publishable evidence.
+
+## Decision
+
+- InferCrane owns a provider-neutral optimization intent: immutable model identity, provider, region,
+  accelerator, runtime allowlist, workload profile, objective, SLO constraints, and cost ceiling.
+- Candidate generation uses a replaceable `optimizer.Source` contract. Source-specific types never
+  enter DeploymentSpec, Serving Plan, benchmark, or Release Guard schemas.
+- The baseline source composes InferCrane's reviewed model catalog and executable provider/runtime
+  compatibility inventory. An optional pinned AIConfigurator source may add modeled candidates
+  through the same replaceable boundary. Both perform no provider mutation.
+- Every generated candidate pins the model revision, runtime version, provider adapter, region,
+  accelerator, runtime arguments, scale bounds, and routing strategy.
+- Catalog candidates are `unmeasured`; estimator candidates are explicitly `modeled`. InferCrane
+  does not present modeled latency or throughput as measurements and never labels a proposal
+  recommended or qualified.
+- Simulated compatibility is excluded unless the operator explicitly requests it. Deferred or
+  registered-only boundaries cannot produce executable candidates.
+- Qualification requires runtime readiness and exact served-model identity, a canonical AIPerf
+  workload, fresh provider observations, sourced cost when cost is constrained, and external semantic
+  quality evidence whenever the model artifact or precision changes.
+- Inference Lab ranks only comparable measured evidence. Release Guard governs the candidate before
+  promotion. A qualified measured result may then be captured as an immutable recipe or Serving Plan.
+- Future AIConfigurator/AISimulate, quantization, speculative-decoding, LMCache, Dynamo, llm-d,
+  AIBrix, or TensorRT-LLM integrations must implement versioned adapters and declare exact upstream
+  compatibility. They do not gain a support claim merely by exposing a flag.
+- InferCrane does not implement custom CUDA kernels, another inference engine, or another distributed
+  GPU scheduler. Engine and kernel work remains delegated to qualified upstream systems.
+
+## Consequences
+
+Users get a small, inspectable candidate set rather than a large collection of unexplained tuning
+flags. A candidate directory is never overwritten, so its input can be archived with later benchmark
+evidence. The initial planner is intentionally conservative: an unreviewed model or unqualified
+provider/runtime boundary returns a precise missing-evidence reason instead of guessing.
+
+External estimator adoption is now low-risk because replacing or removing a source does not change
+the durable domain. The tradeoff is that InferCrane cannot promise an automatic optimum until real
+hardware, representative workload, correctness, and cost evidence exist.
+
+## Alternatives rejected
+
+- **Bind the domain directly to AIConfigurator:** its accepted AISimulate transition would make an
+  upstream migration an InferCrane schema migration.
+- **Copy every engine flag into DeploymentSpec:** exposes unstable implementation detail without
+  explaining compatibility or measuring the result.
+- **Rank estimates as if measured:** creates untrustworthy performance and cost claims.
+- **Write custom kernels:** duplicates fast-moving engine work and conflicts with InferCrane's
+  control-and-evidence-plane ownership.
+- **Automatically deploy every proposal:** creates unapproved cost and mutation before qualification.
+
+## Verification
+
+- `go test ./internal/optimizer ./cmd/infercrane`
+- `infercrane optimize propose` runs without a control-plane credential or provider API access.
+- Repeated equal inputs produce byte-equivalent candidate identities and ordering.
+- Written candidate DeploymentSpecs pass strict schema loading and refuse a non-empty output directory.
+- Unknown models and unqualified compatibility boundaries fail closed without provisioning.
+- Catalog proposal JSON contains no recommended, qualified, estimated-cost, or
+  estimated-throughput claim. AIConfigurator proposal JSON labels estimates `modeled` and retains
+  their source/version/digest.
+
+## References
+
+- [AIConfigurator](https://github.com/ai-dynamo/aiconfigurator)
+- [AIConfigurator to AISimulate transition](https://github.com/ai-dynamo/aiconfigurator/issues/1517)
+- [vLLM quantization](https://github.com/vllm-project/vllm/blob/main/docs/features/quantization/README.md)
+- [vLLM Speculators](https://github.com/vllm-project/speculators)
+- [LMCache](https://github.com/LMCache/LMCache)
+- [TensorRT-LLM supported models](https://nvidia.github.io/TensorRT-LLM/models/supported-models.html)
+- [Wafer AI Performance Engineering resources](https://github.com/wafer-ai/gpu-perf-engineering-resources)

@@ -15,8 +15,11 @@ import (
 )
 
 func artifactCommand(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) > 0 && args[0] == "optimize" {
+		return optimizedArtifactCommand(ctx, cfg, args[1:])
+	}
 	if len(args) < 2 {
-		return errors.New("usage: infercrane artifact inspect|observe|prefetch ARTIFACT_ID [flags]")
+		return errors.New("usage: infercrane artifact inspect|observe|prefetch ARTIFACT_ID [flags] | artifact optimize plan|list|inspect|start|attest|qualify")
 	}
 	action, artifactID := args[0], args[1]
 	fs := flag.NewFlagSet("artifact "+action, flag.ContinueOnError)

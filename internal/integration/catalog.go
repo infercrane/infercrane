@@ -238,7 +238,7 @@ func V15Catalog() (*Registry, error) {
 			Ownership: "LiteLLM owns provider protocol translation and credentials; InferCrane owns stable endpoint identity, policy, evidence, and release semantics.",
 			Capabilities: []Capability{
 				{Name: "connect_existing", State: CapabilitySupported, Evidence: "go:test/internal/controlapi#TestDiscoverEndpointNamesLiteLLMOnlyFromEvidence"},
-				{Name: "provider_translation", State: CapabilitySupported, Detail: "executed by the separately operated LiteLLM deployment"},
+				{Name: "provider_translation", State: CapabilitySupported, Detail: "executed by the separately operated LiteLLM deployment", Evidence: "go:test/internal/gateway#TestQualifiedProtocolSurfacesPreservePayloads"},
 				{Name: "gateway_lifecycle", State: CapabilityUnsupported, Detail: "InferCrane does not install, fork, or upgrade LiteLLM"},
 			},
 			Qualification: []Qualification{{State: QualificationLocal, Environment: "hermetic-openai-compatible", Evidence: "go:test/internal/controlapi#TestDiscoverEndpointNamesLiteLLMOnlyFromEvidence"}, {State: QualificationDeferred, Environment: "real-litellm", Reason: "operator-managed gateway requires target-specific protocol qualification"}},
@@ -262,6 +262,69 @@ func V15Catalog() (*Registry, error) {
 				{Name: "training_execution", State: CapabilityUnsupported, Detail: "training remains in MLflow-connected pipelines, SkyPilot, Kubeflow, or another external system"},
 			},
 			Qualification: []Qualification{{State: QualificationLocal, Environment: "signed-fixture-and-postgres", Evidence: "go:test/internal/store#TestTrainingHandoffIsRevisionBoundImmutableAndTenantSafe"}, {State: QualificationDeferred, Environment: "real-training-platform", Reason: "registry identity and checkpoint availability require system-specific qualification"}},
+		},
+		{
+			Adapter: "llm-compressor", Kind: CompositionArtifactBuilder, ContractVersion: CompositionV1,
+			Ownership: "LLM Compressor owns quantization execution; InferCrane owns the immutable build plan, digest attestation, semantic quality evidence, candidate binding, and release decision.",
+			Capabilities: []Capability{
+				{Name: "quantized_checkpoint_provenance", State: CapabilitySupported, Evidence: "go:test/internal/store#TestOptimizedArtifactRequiresExactBuilderCandidateRevisionAndQualityEvidence"},
+				{Name: "builder_execution", State: CapabilityUnsupported, Detail: "the control plane never imports or executes the Python builder in-process"},
+			},
+			Qualification: []Qualification{{State: QualificationLocal, Environment: "immutable-plan-and-attestation", Evidence: "go:test/internal/store#TestOptimizedArtifactRequiresExactBuilderCandidateRevisionAndQualityEvidence"}, {State: QualificationDeferred, Environment: "real-llm-compressor-gpu", Reason: "model-specific quantization, kernel compatibility, and semantic quality require a real builder and target GPU"}},
+		},
+		{
+			Adapter: "modelopt", Kind: CompositionArtifactBuilder, ContractVersion: CompositionV1,
+			Ownership: "NVIDIA ModelOpt owns quantization and export execution; InferCrane owns the immutable plan, artifact provenance, quality gate, and rollout evidence.",
+			Capabilities: []Capability{
+				{Name: "quantized_checkpoint_provenance", State: CapabilitySupported, Evidence: "go:test/internal/store#TestOptimizedArtifactRequiresExactBuilderCandidateRevisionAndQualityEvidence"},
+				{Name: "builder_execution", State: CapabilityUnsupported, Detail: "execution stays in an isolated, digest-pinned external builder"},
+			},
+			Qualification: []Qualification{{State: QualificationLocal, Environment: "immutable-plan-and-attestation", Evidence: "go:test/internal/store#TestOptimizedArtifactRequiresExactBuilderCandidateRevisionAndQualityEvidence"}, {State: QualificationDeferred, Environment: "real-modelopt-gpu", Reason: "hardware-specific formats and exported runtime compatibility require real GPU qualification"}},
+		},
+		{
+			Adapter: "vllm-speculators", Kind: CompositionArtifactBuilder, ContractVersion: CompositionV1,
+			Ownership: "vLLM Speculators owns draft-model training and conversion; InferCrane owns verifier compatibility, immutable artifact lineage, performance and semantic qualification, and rollout.",
+			Capabilities: []Capability{
+				{Name: "speculator_checkpoint_provenance", State: CapabilitySupported, Evidence: "go:test/internal/store#TestOptimizedArtifactRequiresExactBuilderCandidateRevisionAndQualityEvidence"},
+				{Name: "speculator_training", State: CapabilityUnsupported, Detail: "training remains an external GPU job and is never run in the control-plane process"},
+			},
+			Qualification: []Qualification{{State: QualificationLocal, Environment: "immutable-plan-and-attestation", Evidence: "go:test/internal/store#TestOptimizedArtifactRequiresExactBuilderCandidateRevisionAndQualityEvidence"}, {State: QualificationDeferred, Environment: "real-vllm-speculator-gpu", Reason: "verifier pairing, acceptance rate, latency, and output equivalence require model-specific GPU evidence"}},
+		},
+		{
+			Adapter: "tensorrt-llm", Kind: CompositionArtifactBuilder, ContractVersion: CompositionV1,
+			Ownership: "TensorRT-LLM owns engine build and GPU execution; InferCrane owns exact hardware constraints, immutable engine provenance, qualification, and release policy.",
+			Capabilities: []Capability{
+				{Name: "engine_artifact_provenance", State: CapabilitySupported, Evidence: "go:test/internal/store#TestOptimizedArtifactRequiresExactBuilderCandidateRevisionAndQualityEvidence"},
+				{Name: "runtime_execution", State: CapabilityUnsupported, Detail: "no TensorRT-LLM runtime adapter is locally or GPU qualified yet"},
+			},
+			Qualification: []Qualification{{State: QualificationLocal, Environment: "immutable-plan-and-attestation", Evidence: "go:test/internal/store#TestOptimizedArtifactRequiresExactBuilderCandidateRevisionAndQualityEvidence"}, {State: QualificationDeferred, Environment: "real-tensorrt-llm-gpu", Reason: "engine build and execution are model, GPU architecture, CUDA, and TensorRT version specific"}},
+		},
+		{
+			Adapter: "lmcache", Kind: CompositionCache, ContractVersion: CompositionV1,
+			Ownership: "LMCache owns KV storage, eviction, and transfer; the serving backend owns cache-aware request execution; InferCrane owns the selected immutable topology and qualification evidence.",
+			Capabilities: []Capability{
+				{Name: "configuration_registration", State: CapabilitySupported, Evidence: "go:test/internal/optimizationcapability#TestV1CompilesOnlyQualifiedExactTuples"},
+				{Name: "executable_lifecycle", State: CapabilityUnsupported, Detail: "registered combinations fail closed until an exact runtime and cache-service lifecycle are qualified"},
+			},
+			Qualification: []Qualification{{State: QualificationRegistered, Environment: "serving-contract"}, {State: QualificationDeferred, Environment: "real-lmcache-gpu", Reason: "cache protocol, process lifecycle, hit-rate, memory pressure, and failure behavior need real runtime evidence"}},
+		},
+		{
+			Adapter: "llm-d", Kind: CompositionOrchestrator, ContractVersion: CompositionV1,
+			Ownership: "llm-d owns Kubernetes scheduling and data-plane routing for its deployment; InferCrane may own only the outer immutable serving plan, evidence, and release decision.",
+			Capabilities: []Capability{
+				{Name: "outer_plan_registration", State: CapabilitySupported, Evidence: "go:test/internal/servingcontract#TestDynamoTopologyRejectsConflictingOwnershipAndCacheCombinations"},
+				{Name: "mutation_ownership", State: CapabilityUnsupported, Detail: "no shared scaling or routing mutation owner is permitted"},
+			},
+			Qualification: []Qualification{{State: QualificationRegistered, Environment: "ownership-contract"}, {State: QualificationDeferred, Environment: "real-llm-d-kubernetes", Reason: "Gateway API routing, scheduler ownership, drain, and GPU behavior require a dedicated adapter and cluster evidence"}},
+		},
+		{
+			Adapter: "aibrix", Kind: CompositionOrchestrator, ContractVersion: CompositionV1,
+			Ownership: "AIBrix owns its Kubernetes autoscaling, routing, and cache components; InferCrane may own only an outer plan and evidence when an explicit single-writer adapter exists.",
+			Capabilities: []Capability{
+				{Name: "outer_plan_registration", State: CapabilitySupported, Evidence: "go:test/internal/servingcontract#TestDynamoTopologyRejectsConflictingOwnershipAndCacheCombinations"},
+				{Name: "mutation_ownership", State: CapabilityUnsupported, Detail: "the current adapter intentionally refuses overlapping controllers"},
+			},
+			Qualification: []Qualification{{State: QualificationRegistered, Environment: "ownership-contract"}, {State: QualificationDeferred, Environment: "real-aibrix-kubernetes", Reason: "routing, autoscaling, cache and model-adapter APIs require a dedicated version-pinned cluster qualification"}},
 		},
 	} {
 		if err = registry.RegisterComposition(profile); err != nil {

@@ -1,0 +1,81 @@
+---
+title: "ADR 0037: Verified model-artifact snapshot cache"
+description: Attach immutable provider-native model caches at worker creation while preserving evidence and billing boundaries.
+---
+
+# ADR 0037: Verified model-artifact snapshot cache
+
+Status: accepted.
+
+## Context
+
+The AWS qualification waterfall showed that container transfer and model materialization can dominate
+cold readiness. A mutable shared directory would improve some starts but would weaken revision
+reproducibility, permit cross-model contamination, and make lost-response adoption ambiguous.
+InferCrane also cannot treat an image cache hit as proof that model weights are local.
+
+AWS volumes created from snapshots are available only in the selected Availability Zone and may
+load blocks lazily. Fast Snapshot Restore and provisioned volume initialization can reduce first-read
+latency, but both are explicit provider billing decisions.
+
+## Decision
+
+- The cache key is the exact `model@immutable-revision` identity.
+- AWS maps that identity to an encrypted, completed EBS snapshot prepared by the operator.
+- InferCrane verifies the snapshot state, encryption, non-zero size, and closed ownership tags before
+  calling `RunInstances`.
+- The snapshot must carry `infercrane:artifact-cache=true` and the SHA-256 digest of the immutable
+  model identity. The raw model identity is not placed in provider tags.
+- The snapshot is attached during `RunInstances` as a separate encrypted `gp3` volume with
+  `DeleteOnTermination=true`. This avoids a post-launch attach race and preserves durable adoption.
+- The filesystem label is `INFERCRANE_ART`; workers discover by label rather than relying on a Nitro
+  NVMe device name. The cache is mounted read-only into the runtime and Hugging Face offline mode is
+  enabled.
+- `prefer` uses a verified snapshot when mapped and otherwise downloads through the runtime.
+  `required` fails before creating a worker when no exact mapping exists. A configured snapshot that
+  cannot be verified or mounted always fails closed.
+- Image cache and model-artifact cache remain separate startup evidence fields.
+- InferCrane never enables Fast Snapshot Restore or a provisioned initialization rate silently.
+  The latter is accepted only as an explicit bounded operator setting.
+- The durable prefetch API adopts and verifies an existing snapshot. Initial cache population remains
+  an explicit provider-specific build step; the bounded AWS builder uses a temporary CPU instance and
+  encrypted EBS volume, while the API never pretends that validation copied bytes.
+
+## Consequences
+
+A cache-hit worker avoids downloading model bytes from the model registry and can reuse an immutable
+artifact across replicas. It still pays for EBS attachment, lazy block initialization unless the
+operator selected acceleration, and runtime/GPU model loading. Therefore InferCrane reports measured
+startup stages and does not promise a universal cold-start duration.
+
+KMS policy, regional replication, lifecycle retention, and optional acceleration remain operator
+responsibilities. The repository's AWS builder is resumable by run ID, requires paid-resource approval,
+records every resource ID, and separates snapshot deletion from temporary-resource cleanup. The first
+implementation is qualified for vLLM and SGLang cache layouts; arbitrary custom OCI workloads fail
+closed under a required cache policy.
+
+## Alternatives rejected
+
+- **Bake every model into the runtime image:** couples runtime releases to large model artifacts and
+  invalidates image reuse on model changes.
+- **Download to the root volume on every boot:** retains the observed cold-start bottleneck.
+- **Attach a mutable shared volume:** weakens immutable revision identity and failure isolation.
+- **Attach after instance creation:** introduces an additional side effect and crash/adoption boundary.
+- **Automatically enable FSR:** creates an unapproved, regional billable resource.
+
+## Verification
+
+- `go test ./internal/artifactcache ./internal/config ./internal/provision ./internal/controlapi`
+- `infercrane artifact prefetch` returns a completed provider operation only after snapshot verification.
+- `scripts/aws-artifact-cache-build.sh` refuses mutation without explicit approval and creates only a
+  tag-bound snapshot from an exact model commit.
+- Startup evidence distinguishes image cache, artifact cache, container launch, and runtime readiness.
+- Real AWS cache-hit performance remains a separate paid qualification boundary.
+
+## References
+
+- [Create EBS volumes from snapshots](https://docs.aws.amazon.com/ebs/latest/userguide/ebs-creating-volume.html)
+- [Initialize EBS volumes](https://docs.aws.amazon.com/ebs/latest/userguide/initalize-volume.html)
+- [Identify EBS NVMe devices](https://docs.aws.amazon.com/ebs/latest/userguide/identify-nvme-ebs-device.html)
+- [Enable Fast Snapshot Restore](https://docs.aws.amazon.com/ebs/latest/userguide/manage-fsr-enable.html)
+- [EC2 EBS block-device API](https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_EbsBlockDevice.html)

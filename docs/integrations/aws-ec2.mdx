@@ -24,7 +24,8 @@ bootstrap, or a general AWS abstraction.
 
 The assumed control-plane role needs a deliberately narrow permission set:
 
-- `ec2:DescribeInstances`, `ec2:DescribeVolumes`, and `ec2:GetConsoleOutput` in the selected region;
+- `ec2:DescribeInstances`, `ec2:DescribeImages`, `ec2:DescribeVolumes`, `ec2:DescribeSnapshots`, and
+  `ec2:GetConsoleOutput` in the selected region;
 - `ec2:RunInstances` for the exact AMI, subnet, security group, network interface, volume, instance
   type, and managed instance tag boundary;
 - `ec2:CreateTags` for both `instance/*` and `volume/*`, restricted to
@@ -53,7 +54,12 @@ export INFERCRANE_AWS_INSTANCE_PROFILE_ARN='arn:aws:iam::123456789012:instance-p
 export INFERCRANE_AWS_WORKER_SECRET_ARN='arn:aws:secretsmanager:eu-central-1:123456789012:secret:infercrane-worker-key'
 export INFERCRANE_AWS_IMAGE_DIGEST='vllm/vllm-openai@sha256:REPLACE_WITH_QUALIFIED_DIGEST'
 export INFERCRANE_AWS_IMAGE_CACHE_POLICY='prefer'
-export INFERCRANE_AWS_ROOT_VOLUME_GIB='100'
+export INFERCRANE_AWS_ROOT_VOLUME_GIB='200'
+# Optional model cache. Keys must be exact model@immutable-commit identities.
+export INFERCRANE_AWS_ARTIFACT_CACHE_POLICY='prefer'
+export INFERCRANE_AWS_ARTIFACT_SNAPSHOTS_JSON='{"mistralai/Mistral-7B-Instruct-v0.3@COMMIT":"snap-0123456789abcdef0"}'
+# Optional AWS-billed initialization acceleration; 0 keeps the provider default.
+export INFERCRANE_AWS_ARTIFACT_VOLUME_INITIALIZATION_RATE_MIBPS='0'
 ```
 
 `INFERCRANE_AWS_SUBNET_IDS` is an ordered list of approved private capacity boundaries. When AWS
@@ -72,10 +78,19 @@ complete startup configuration. An SGLang or custom OCI revision supplies its ow
 and argv; the EC2 adapter uses that revision workload instead of the vLLM default. It still uses the
 same private network, instance profile, worker secret and ownership tags.
 
-`INFERCRANE_AWS_ROOT_VOLUME_GIB` defaults to 100 GiB. InferCrane creates an encrypted `gp3` root
+`INFERCRANE_AWS_ROOT_VOLUME_GIB` defaults to 200 GiB. InferCrane creates an encrypted `gp3` root
 volume that is deleted with the worker. Keep enough headroom for the GPU runtime image, model
 artifacts, tokenizer data, and temporary download files; values below 50 GiB are rejected before
-AWS mutation.
+AWS mutation. The 200 GiB default follows a real failure in which a current vLLM CUDA image exhausted
+a 100 GiB Deep Learning AMI root filesystem while Docker was extracting its FlashInfer layer. A
+smaller explicit value remains available for a qualified slim image, but must not inherit evidence
+from the default vLLM profile.
+
+InferCrane reads the AMI metadata before every create or adoption and overrides the AMI's declared
+root device—not a hard-coded Linux device name. It rejects an invalid root mapping or a configured
+volume smaller than the source snapshot before `RunInstances`. The actual root-device name, size,
+and encrypted intent are included in the durable ownership tags so a retry cannot adopt an instance
+whose large disk was accidentally attached as an unused secondary volume.
 
 `INFERCRANE_AWS_IMAGE_CACHE_POLICY` defaults to `prefer`: a prewarmed exact digest is reused and a
 missing digest is pulled. Set it to `required` for a qualification or production pool whose AMI is
@@ -83,6 +98,98 @@ contractually prewarmed. A required-cache miss fails the replica before any regi
 visible as `image_cache_miss_required`, and is cleaned up by the durable operation. This prevents a
 supposedly fast-start pool from silently becoming a long image pull; it does not claim that model
 weights are cached.
+
+## Reuse an immutable model-artifact snapshot
+
+An operator-prepared encrypted EBS snapshot can remove the registry download from each replica boot.
+Its filesystem root must contain the qualified Hugging Face cache tree and the ext4 filesystem label
+must be `INFERCRANE_ART`. Tag the completed snapshot with:
+
+```text
+infercrane:artifact-cache=true
+infercrane:model-identity-digest=sha256:<SHA-256 of exact model@commit>
+```
+
+InferCrane validates the configured snapshot before creating a worker, attaches it as an encrypted
+`gp3` volume during `RunInstances`, discovers it by filesystem label, mounts it read-only, and starts
+vLLM or SGLang in offline artifact mode. The instance and volume carry the snapshot ID plus identity
+digest, allowing a retry after a lost create response to adopt only the same immutable cache.
+
+Use the durable artifact API to verify and record a fresh provider observation:
+
+```bash
+infercrane artifact prefetch ARTIFACT_ID \
+  --provider aws \
+  --region eu-central-1 \
+  --location aws-ebs://snap-0123456789abcdef0 \
+  --idempotency-key release-42-artifact
+```
+
+This command adopts and validates an existing snapshot; it does not build one. Cache population,
+regional copy, KMS policy, and retention remain explicit operator steps. `required` prevents a worker
+from launching without an exact mapping. `prefer` retains ordinary immutable model download when no
+mapping exists. A mapped snapshot that is incomplete, unencrypted, incorrectly tagged, or not
+mountable fails closed under either policy.
+
+### Build a cache snapshot without GPU billing
+
+The repository includes a bounded AWS builder. It launches a temporary CPU instance, downloads one
+exact model commit into an encrypted EBS volume, stops the instance, creates the tagged snapshot, and
+deletes the temporary instance and volume. It never enables Fast Snapshot Restore or a provisioned
+initialization rate.
+
+```bash
+export INFERCRANE_AWS_ARTIFACT_BUILD_RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-mistral-cache"
+export INFERCRANE_AWS_ARTIFACT_MODEL=mistralai/Mistral-7B-Instruct-v0.3
+export INFERCRANE_AWS_ARTIFACT_REVISION=c170c708c41dac9275d15a8fff4eca08d52bab71
+export INFERCRANE_AWS_ARTIFACT_BUILDER_AMI_ID=ami-REPLACE
+export INFERCRANE_AWS_ARTIFACT_BUILDER_SUBNET_ID=subnet-REPLACE
+export INFERCRANE_AWS_ARTIFACT_BUILDER_SECURITY_GROUP_IDS=sg-REPLACE
+
+./scripts/aws-artifact-cache-build.sh build --approve-paid-resources
+```
+
+Use a current x86-64 Linux AMI with cloud-init, Python 3, and outbound HTTPS through the selected
+subnet. Public models need no Hugging Face token. For a repository that contains redundant weight
+formats, an operator may set a reviewed JSON ignore list; do not exclude files without qualifying the
+resulting runtime. The output `snapshot-mapping.json` is the exact value for
+`INFERCRANE_AWS_ARTIFACT_SNAPSHOTS_JSON`.
+
+The run ID is the recovery handle. A terminal or network interruption initiates best-effort cleanup;
+after a laptop power loss, repeat:
+
+```bash
+./scripts/aws-artifact-cache-build.sh cleanup
+```
+
+The immutable snapshot intentionally survives builder cleanup and remains billable. Delete it only
+after it is no longer referenced:
+
+```bash
+./scripts/aws-artifact-cache-build.sh delete-snapshot --approve-snapshot-deletion
+```
+
+### Prove a real cache hit
+
+The cache qualification uses `required`, verifies the startup marker, sends real buffered and
+streaming requests, stores a measured benchmark row, deletes the GPU worker, and checks provider
+inventory against the pre-run baseline. It skips the already-completed full load matrix because this
+gate proves startup locality rather than throughput.
+
+```bash
+export INFERCRANE_AWS_ARTIFACT_SNAPSHOT_MAPPING_FILE=.infercrane/aws-artifact-cache-build/$INFERCRANE_AWS_ARTIFACT_BUILD_RUN_ID/snapshot-mapping.json
+export INFERCRANE_ACCEPTANCE_RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-mistral-cache-hit"
+
+./scripts/aws-artifact-cache-qualification.sh mistral --approve-paid-resources
+```
+
+Do not describe a snapshot-backed deployment as a cache hit unless the archived `inspect` payload
+contains `startup_evidence.artifact_cache: hit` and final provider inventory is unchanged.
+
+Volumes created from EBS snapshots may initialize lazily. Set
+`INFERCRANE_AWS_ARTIFACT_VOLUME_INITIALIZATION_RATE_MIBPS` to an explicit value from 100 through 300
+only when you accept AWS provisioned initialization charges. Fast Snapshot Restore is never enabled
+by InferCrane. Both options need separate cost and latency evidence.
 
 Validate role assumption without creating a resource:
 
@@ -131,6 +238,8 @@ infercrane inspect qwen-aws
 When `ec2:GetConsoleOutput` is permitted, InferCrane extracts only its closed startup markers and
 persists their timestamps plus the runtime-ready time. Arbitrary EC2 console output is discarded;
 runtime logs, model output, and credentials are never copied into provider metadata.
+`inspect` reports image cache and artifact cache separately; an artifact hit still does not prove the
+runtime is ready until health and served-model identity checks pass.
 
 For the portable-runtime path, apply
 `examples/sglang.yaml` or
