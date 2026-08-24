@@ -41,13 +41,15 @@ func (r ActivateRequest) Validate() error {
 type ActivationStore interface {
 	Repository
 	EnqueueOperation(context.Context, domain.Operation) (domain.Operation, bool, error)
+	PublishDeploymentEndpoint(context.Context, string, string, string) (domain.ResolvedEndpoint, error)
 }
 
 // ActivationHandlers owns the explicit human boundary after qualification.
-// New-endpoint candidates are marked active without a rollout baseline;
-// evolution candidates delegate traffic mutation to the existing guarded
-// rollout operation and only then persist campaign promotion.
-func ActivationHandlers(store ActivationStore, now func() time.Time) map[string]operations.Handler {
+// New-endpoint candidates publish the requested stable alias without a fake
+// rollout baseline; evolution candidates delegate traffic mutation to the
+// existing guarded rollout operation. Both publish the request-path generation
+// before persisting campaign promotion.
+func ActivationHandlers(store ActivationStore, refresh func(context.Context) error, now func() time.Time) map[string]operations.Handler {
 	return map[string]operations.Handler{ActivateKind: func(ctx context.Context, operation domain.Operation) (string, error) {
 		var request ActivateRequest
 		if err := json.Unmarshal([]byte(operation.RequestJSON), &request); err != nil {
@@ -65,7 +67,7 @@ func ActivationHandlers(store ActivationStore, now func() time.Time) map[string]
 			return "", operations.Permanent("optimization_candidate_not_found", domain.ErrNotFound)
 		}
 		if candidate.State == CandidatePromoted || candidate.State == CandidateObserved {
-			return activationResult(campaign, candidate), nil
+			return activationResult(campaign, candidate, activationEndpoint(campaign, candidate)), nil
 		}
 		stamp := time.Now().UTC()
 		if now != nil {
@@ -90,25 +92,57 @@ func ActivationHandlers(store ActivationStore, now func() time.Time) map[string]
 			if childErr := childComplete(child, "guarded candidate promotion"); childErr != nil {
 				return "", childErr
 			}
+		} else {
+			draft, draftErr := candidateDraft(candidate)
+			if draftErr != nil {
+				return "", operations.Permanent("optimization_candidate_spec_invalid", draftErr)
+			}
+			published, publishErr := store.PublishDeploymentEndpoint(ctx, request.TenantID, draft.Name, candidate.DeploymentName)
+			if errors.Is(publishErr, domain.ErrConflict) {
+				return "", operations.Permanent("optimization_endpoint_alias_conflict", publishErr)
+			}
+			if publishErr != nil {
+				return "", operations.Retryable("optimization_endpoint_publish_failed", publishErr)
+			}
+			if published.Endpoint.Name != draft.Name {
+				return "", operations.Permanent("optimization_endpoint_identity_mismatch", errors.New("published endpoint does not match the qualified candidate request"))
+			}
+		}
+		if refresh == nil {
+			return "", operations.Permanent("optimization_route_publisher_unavailable", errors.New("endpoint route publisher is not configured"))
+		}
+		if refreshErr := refresh(ctx); refreshErr != nil {
+			return "", operations.Retryable("optimization_route_publish_pending", refreshErr)
 		}
 		promoted, err := store.TransitionOptimizationCandidate(ctx, request.TenantID, campaign.ID, candidate.ID, candidate.State, CandidatePromoted, domain.OptimizationCandidateRun{})
 		if errors.Is(err, domain.ErrConflict) {
 			reloaded, reloadErr := store.OptimizationCampaign(ctx, request.TenantID, campaign.ID)
 			if reloadErr == nil {
 				if current, found := candidateByID(reloaded.Candidates, candidate.ID); found && (current.State == CandidatePromoted || current.State == CandidateObserved) {
-					return activationResult(reloaded, current), nil
+					return activationResult(reloaded, current, activationEndpoint(reloaded, current)), nil
 				}
 			}
 		}
 		if err != nil {
 			return "", executionFailure(err)
 		}
-		return activationResult(campaign, promoted), nil
+		return activationResult(campaign, promoted, activationEndpoint(campaign, promoted)), nil
 	}}
 }
 
-func activationResult(campaign domain.OptimizationCampaign, candidate domain.OptimizationCandidateRun) string {
-	encoded, _ := json.Marshal(map[string]any{"campaign_id": campaign.ID, "candidate_id": candidate.ID, "deployment": candidate.DeploymentName, "revision_id": candidate.RevisionID, "state": candidate.State, "automatic_promotion": false})
+func activationEndpoint(campaign domain.OptimizationCampaign, candidate domain.OptimizationCandidateRun) string {
+	if campaign.Intent == IntentEvolveEndpoint {
+		return campaign.TargetDeployment
+	}
+	draft, err := candidateDraft(candidate)
+	if err != nil {
+		return ""
+	}
+	return draft.Name
+}
+
+func activationResult(campaign domain.OptimizationCampaign, candidate domain.OptimizationCandidateRun, endpoint string) string {
+	encoded, _ := json.Marshal(map[string]any{"campaign_id": campaign.ID, "candidate_id": candidate.ID, "endpoint": endpoint, "deployment": candidate.DeploymentName, "revision_id": candidate.RevisionID, "state": candidate.State, "automatic_promotion": false})
 	return string(encoded)
 }
 

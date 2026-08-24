@@ -573,3 +573,71 @@ func TestAdoptInspectDiagnoseAndAlertPolicyAreTenantScoped(t *testing.T) {
 		t.Fatalf("adopted target was deleted: %v", err)
 	}
 }
+
+func TestPublishDeploymentEndpointIsAtomicIdempotentAndNeverRebinds(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	suffix := time.Now().UTC().Format("150405.000000000")
+	createDeployment := func(name string) domain.Deployment {
+		t.Helper()
+		target, err := s.AddTarget(ctx, domain.Target{Name: name + "-target", URL: "http://" + name, Provider: "existing", Runtime: "vllm", UpstreamModel: "meta-llama/Llama-3.1-8B-Instruct"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		deployment, err := s.CreateDeployment(ctx, domain.Deployment{Name: name, Model: "meta-llama/Llama-3.1-8B-Instruct"}, []string{target.Name})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return deployment
+	}
+	selected := createDeployment("candidate-a-" + suffix)
+	other := createDeployment("candidate-b-" + suffix)
+	alias := "llama-production-" + suffix
+
+	published, err := s.PublishDeploymentEndpoint(ctx, "global", alias, selected.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if published.Endpoint.Name != alias || published.Environment.Name != "production" || published.LogicalModel.Name != alias || published.ActivePlan.RoutingPolicy != "manual" || len(published.Bindings) != 1 || published.Bindings[0].DeploymentID != selected.ID || published.Bindings[0].OwnershipMode != "lifecycle-managed" {
+		t.Fatalf("unexpected published endpoint: %#v", published)
+	}
+	repeated, err := s.PublishDeploymentEndpoint(ctx, "global", alias, selected.Name)
+	if err != nil || repeated.Endpoint.ID != published.Endpoint.ID || repeated.ActivePlan.ID != published.ActivePlan.ID {
+		t.Fatalf("idempotent publication changed identity: first=%#v repeated=%#v err=%v", published, repeated, err)
+	}
+	concurrentAlias := "llama-concurrent-" + suffix
+	type publicationResult struct {
+		endpoint domain.ResolvedEndpoint
+		err      error
+	}
+	results := make(chan publicationResult, 2)
+	var publishers sync.WaitGroup
+	for range 2 {
+		publishers.Add(1)
+		go func() {
+			defer publishers.Done()
+			endpoint, publishErr := s.PublishDeploymentEndpoint(ctx, "global", concurrentAlias, selected.Name)
+			results <- publicationResult{endpoint: endpoint, err: publishErr}
+		}()
+	}
+	publishers.Wait()
+	close(results)
+	concurrentEndpointID := ""
+	for result := range results {
+		if result.err != nil {
+			t.Fatalf("concurrent identical publication failed: %v", result.err)
+		}
+		if concurrentEndpointID == "" {
+			concurrentEndpointID = result.endpoint.Endpoint.ID
+		} else if result.endpoint.Endpoint.ID != concurrentEndpointID {
+			t.Fatalf("concurrent publication created two endpoint identities: %s and %s", concurrentEndpointID, result.endpoint.Endpoint.ID)
+		}
+	}
+	if _, err = s.PublishDeploymentEndpoint(ctx, "global", alias, other.Name); !errors.Is(err, ErrConflict) {
+		t.Fatalf("existing endpoint alias was rebound: %v", err)
+	}
+	crossTenant, err := s.PublishDeploymentEndpoint(ctx, "other-tenant", alias, selected.Name)
+	if !errors.Is(err, ErrNotFound) || crossTenant.Endpoint.ID != "" {
+		t.Fatalf("cross-tenant deployment was published: endpoint=%#v err=%v", crossTenant, err)
+	}
+}

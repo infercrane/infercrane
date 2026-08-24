@@ -125,9 +125,12 @@ Release Guard, and wait for explicit human promotion. InferCrane never invents a
 endpoint and never lets an evolution bypass Release Guard.
 
 Activation is itself a durable, idempotent operation. A new-endpoint campaign may activate only a
-`qualified` candidate. An evolution campaign may promote only a `guard_passed` candidate and
-delegates the traffic mutation to the normal guarded rollout workflow. Approval expiry is checked
-before mutation, while a retry after a completed activation remains a successful no-op.
+`qualified` candidate. It atomically publishes the endpoint name from the immutable proposal and
+binds it to the selected isolated candidate deployment; an existing alias is never silently rebound.
+The activation operation waits until the request-path route generation is published. An evolution
+campaign may promote only a `guard_passed` candidate and delegates the traffic mutation to the
+normal guarded rollout workflow. Approval expiry is checked before mutation, while a retry after a
+completed activation remains a successful no-op.
 
 Approval first verifies every candidate against a fresh sourced price for its exact cloud, region,
 GPU, and maximum replica count. It then records a bounded authority window and queues one durable

@@ -15,7 +15,9 @@ import (
 
 type activationStoreFixture struct {
 	*coordinatorRepository
-	operations map[string]domain.Operation
+	operations          map[string]domain.Operation
+	publishedEndpoint   string
+	publishedDeployment string
 }
 
 func (f *activationStoreFixture) EnqueueOperation(_ context.Context, operation domain.Operation) (domain.Operation, bool, error) {
@@ -29,6 +31,14 @@ func (f *activationStoreFixture) EnqueueOperation(_ context.Context, operation d
 	operation.Status = "pending"
 	f.operations[operation.IdempotencyKey] = operation
 	return operation, true, nil
+}
+
+func (f *activationStoreFixture) PublishDeploymentEndpoint(_ context.Context, tenant, endpoint, deployment string) (domain.ResolvedEndpoint, error) {
+	if tenant != f.campaign.TenantID {
+		return domain.ResolvedEndpoint{}, domain.ErrNotFound
+	}
+	f.publishedEndpoint, f.publishedDeployment = endpoint, deployment
+	return domain.ResolvedEndpoint{Endpoint: domain.Endpoint{Name: endpoint, TenantID: tenant}}, nil
 }
 
 func TestExecutionHandlerRunsProofLoopAndNeverPromotes(t *testing.T) {
@@ -153,12 +163,14 @@ func TestActivationHandlerActivatesQualifiedNewEndpointIdempotently(t *testing.T
 	repository.campaign.Candidates[0].State = CandidateQualified
 	repository.campaign.Candidates[0].DeploymentName = "llama-production-candidate"
 	repository.campaign.Candidates[0].RevisionID = "revision-qualified"
+	repository.campaign.Candidates[0].DeploymentSpecJSON = `{"name":"llama-production","model":{"id":"meta-llama/Llama-3.1-8B-Instruct"}}`
 	store := &activationStoreFixture{coordinatorRepository: repository}
 	payload, _ := json.Marshal(ActivateRequest{TenantID: "tenant", CampaignID: "campaign", CandidateID: "candidate-a", Actor: "operator"})
-	handler := ActivationHandlers(store, func() time.Time { return now })[ActivateKind]
+	refreshes := 0
+	handler := ActivationHandlers(store, func(context.Context) error { refreshes++; return nil }, func() time.Time { return now })[ActivateKind]
 
 	result, err := handler(context.Background(), domain.Operation{RequestJSON: string(payload)})
-	if err != nil || !strings.Contains(result, `"state":"promoted"`) || repository.campaign.Candidates[0].State != CandidatePromoted || len(store.operations) != 0 {
+	if err != nil || !strings.Contains(result, `"state":"promoted"`) || !strings.Contains(result, `"endpoint":"llama-production"`) || repository.campaign.Candidates[0].State != CandidatePromoted || len(store.operations) != 0 || store.publishedEndpoint != "llama-production" || store.publishedDeployment != "llama-production-candidate" || refreshes != 1 {
 		t.Fatalf("new endpoint activation result=%s err=%v campaign=%+v operations=%+v", result, err, repository.campaign, store.operations)
 	}
 	result, err = handler(context.Background(), domain.Operation{RequestJSON: string(payload)})
@@ -176,7 +188,8 @@ func TestActivationHandlerDelegatesEvolutionToGuardedRolloutAndAdoptsResult(t *t
 	repository.campaign.Candidates[0].RevisionID = "revision-candidate"
 	store := &activationStoreFixture{coordinatorRepository: repository}
 	payload, _ := json.Marshal(ActivateRequest{TenantID: "tenant", CampaignID: "campaign", CandidateID: "candidate-a", Actor: "operator"})
-	handler := ActivationHandlers(store, func() time.Time { return now })[ActivateKind]
+	refreshes := 0
+	handler := ActivationHandlers(store, func(context.Context) error { refreshes++; return nil }, func() time.Time { return now })[ActivateKind]
 
 	_, err := handler(context.Background(), domain.Operation{RequestJSON: string(payload)})
 	var failure operations.Failure
@@ -195,8 +208,40 @@ func TestActivationHandlerDelegatesEvolutionToGuardedRolloutAndAdoptsResult(t *t
 	child.Status = "succeeded"
 	store.operations[key] = child
 	result, err := handler(context.Background(), domain.Operation{RequestJSON: string(payload)})
-	if err != nil || !strings.Contains(result, `"state":"promoted"`) || repository.campaign.Candidates[0].State != CandidatePromoted || len(store.operations) != 1 {
+	if err != nil || !strings.Contains(result, `"state":"promoted"`) || repository.campaign.Candidates[0].State != CandidatePromoted || len(store.operations) != 1 || refreshes != 1 {
 		t.Fatalf("completed rollout was not adopted: result=%s err=%v campaign=%+v operations=%+v", result, err, repository.campaign, store.operations)
+	}
+}
+
+func TestNewEndpointActivationWaitsForRoutePublicationBeforePromotion(t *testing.T) {
+	now := time.Now().UTC()
+	repository, _, _ := approvedCoordinatorFixture(now, 1)
+	repository.campaign.Intent = IntentNewEndpoint
+	repository.campaign.TargetDeployment = ""
+	repository.campaign.State = CampaignQualified
+	repository.campaign.Candidates[0].State = CandidateQualified
+	repository.campaign.Candidates[0].DeploymentName = "coder-candidate"
+	repository.campaign.Candidates[0].RevisionID = "revision-qualified"
+	repository.campaign.Candidates[0].DeploymentSpecJSON = `{"name":"coder-production","model":{"id":"Qwen/Qwen3-8B"}}`
+	store := &activationStoreFixture{coordinatorRepository: repository}
+	payload, _ := json.Marshal(ActivateRequest{TenantID: "tenant", CampaignID: "campaign", CandidateID: "candidate-a", Actor: "operator"})
+	refreshes := 0
+	handler := ActivationHandlers(store, func(context.Context) error {
+		refreshes++
+		if refreshes == 1 {
+			return errors.New("route generation not published")
+		}
+		return nil
+	}, func() time.Time { return now })[ActivateKind]
+
+	_, err := handler(context.Background(), domain.Operation{RequestJSON: string(payload)})
+	var failure operations.Failure
+	if !errors.As(err, &failure) || !failure.Retryable || failure.Code != "optimization_route_publish_pending" || repository.campaign.Candidates[0].State != CandidateQualified || repository.transitions != 0 {
+		t.Fatalf("candidate promoted before route publication: err=%v campaign=%+v", err, repository.campaign)
+	}
+	result, err := handler(context.Background(), domain.Operation{RequestJSON: string(payload)})
+	if err != nil || !strings.Contains(result, `"endpoint":"coder-production"`) || repository.campaign.Candidates[0].State != CandidatePromoted || refreshes != 2 {
+		t.Fatalf("route publication retry did not converge: result=%s err=%v campaign=%+v", result, err, repository.campaign)
 	}
 }
 
@@ -217,7 +262,7 @@ func TestActivationHandlerRejectsExpiredOrUnqualifiedCandidateBeforeMutation(t *
 			repository.campaign.ApprovalExpiresAt = &testCase.expiry
 			store := &activationStoreFixture{coordinatorRepository: repository}
 			payload, _ := json.Marshal(ActivateRequest{TenantID: "tenant", CampaignID: "campaign", CandidateID: "candidate-a", Actor: "operator"})
-			_, err := ActivationHandlers(store, func() time.Time { return now })[ActivateKind](context.Background(), domain.Operation{RequestJSON: string(payload)})
+			_, err := ActivationHandlers(store, func(context.Context) error { return nil }, func() time.Time { return now })[ActivateKind](context.Background(), domain.Operation{RequestJSON: string(payload)})
 			var failure operations.Failure
 			if !errors.As(err, &failure) || failure.Retryable || failure.Code != testCase.wantCode || len(store.operations) != 0 || repository.transitions != 0 {
 				t.Fatalf("unsafe activation err=%v operations=%+v transitions=%d", err, store.operations, repository.transitions)

@@ -4083,7 +4083,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	for kind, handler := range optimizationcampaign.Handlers(optimizationcampaign.Coordinator{Repository: s, Driver: driver}) {
 		handlers[kind] = handler
 	}
-	for kind, handler := range optimizationcampaign.ActivationHandlers(s, nil) {
+	for kind, handler := range optimizationcampaign.ActivationHandlers(s, rec.RefreshEndpoints, nil) {
 		handlers[kind] = handler
 	}
 	control := controlAPI.Handler()

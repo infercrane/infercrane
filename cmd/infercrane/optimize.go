@@ -185,6 +185,7 @@ type optimizationCampaignView struct {
 		ProposalCandidateID string `json:"proposal_candidate_id"`
 		State               string `json:"state"`
 		EvidenceState       string `json:"evidence_state"`
+		TargetEndpoint      string `json:"target_endpoint"`
 		DeploymentName      string `json:"deployment_name"`
 		RevisionID          string `json:"revision_id"`
 		BenchmarkID         string `json:"benchmark_id"`
@@ -297,6 +298,9 @@ func optimizeCampaignCommand(ctx context.Context, args []string) error {
 		fmt.Println("\nCANDIDATES")
 		for _, candidate := range view.Candidates {
 			fmt.Printf("  %d  %-16s  %-11s  %s", candidate.Rank, candidate.State, candidate.EvidenceState, candidate.ID)
+			if candidate.TargetEndpoint != "" {
+				fmt.Printf(" · endpoint %s", candidate.TargetEndpoint)
+			}
 			if candidate.FailureCode != "" {
 				fmt.Printf(" · %s", candidate.FailureCode)
 			}

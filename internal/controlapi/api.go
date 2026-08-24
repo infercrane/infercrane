@@ -805,7 +805,14 @@ func (a API) activateOptimizationCampaign(w http.ResponseWriter, r *http.Request
 func optimizationCampaignResponse(campaign domain.OptimizationCampaign) map[string]any {
 	candidates := make([]map[string]any, 0, len(campaign.Candidates))
 	for _, candidate := range campaign.Candidates {
-		candidates = append(candidates, map[string]any{"id": candidate.ID, "proposal_candidate_id": candidate.ProposalCandidateID, "rank": candidate.Rank, "state": candidate.State, "evidence_state": candidate.EvidenceState, "deployment_spec": json.RawMessage(candidate.DeploymentSpecJSON), "predicted_evidence": json.RawMessage(candidate.PredictedEvidenceJSON), "actual_evidence": json.RawMessage(candidate.ActualEvidenceJSON), "deployment_name": candidate.DeploymentName, "revision_id": candidate.RevisionID, "benchmark_id": candidate.BenchmarkID, "quality_evidence_id": candidate.QualityEvidenceID, "lab_evaluation_id": candidate.LabEvaluationID, "release_guard_evaluation_id": candidate.ReleaseGuardEvaluationID, "optimized_artifact_id": candidate.OptimizedArtifactID, "failure_code": candidate.FailureCode, "created_at": candidate.CreatedAt, "updated_at": candidate.UpdatedAt})
+		targetEndpoint := campaign.TargetDeployment
+		if campaign.Intent == optimizationcampaign.IntentNewEndpoint {
+			var draft optimizer.DeploymentDraft
+			if json.Unmarshal([]byte(candidate.DeploymentSpecJSON), &draft) == nil {
+				targetEndpoint = draft.Name
+			}
+		}
+		candidates = append(candidates, map[string]any{"id": candidate.ID, "proposal_candidate_id": candidate.ProposalCandidateID, "rank": candidate.Rank, "state": candidate.State, "evidence_state": candidate.EvidenceState, "target_endpoint": targetEndpoint, "deployment_spec": json.RawMessage(candidate.DeploymentSpecJSON), "predicted_evidence": json.RawMessage(candidate.PredictedEvidenceJSON), "actual_evidence": json.RawMessage(candidate.ActualEvidenceJSON), "deployment_name": candidate.DeploymentName, "revision_id": candidate.RevisionID, "benchmark_id": candidate.BenchmarkID, "quality_evidence_id": candidate.QualityEvidenceID, "lab_evaluation_id": candidate.LabEvaluationID, "release_guard_evaluation_id": candidate.ReleaseGuardEvaluationID, "optimized_artifact_id": candidate.OptimizedArtifactID, "failure_code": candidate.FailureCode, "created_at": candidate.CreatedAt, "updated_at": candidate.UpdatedAt})
 	}
 	proofBoundary := "modeled evidence cannot qualify; measured benchmark, quality, and cost evidence are required before human activation"
 	if campaign.Intent == optimizationcampaign.IntentEvolveEndpoint {

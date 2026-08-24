@@ -539,7 +539,7 @@ func TestOptimizationCampaignRequiresImmutableProposalAndExplicitBoundedApproval
 	request.Header.Set("Authorization", "Bearer secret")
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"modeled evidence cannot qualify`) {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"modeled evidence cannot qualify`) || !strings.Contains(response.Body.String(), `"target_endpoint":`) {
 		t.Fatalf("inspect status=%d body=%s", response.Code, response.Body.String())
 	}
 }

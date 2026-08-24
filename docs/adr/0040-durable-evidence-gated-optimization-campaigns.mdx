@@ -39,8 +39,10 @@ their objects into the core domain would create version coupling and overlapping
   Expired authority transitions the candidate to failure and cleanup; qualification cannot leave
   paid capacity running indefinitely.
 - Queue activation as a separate durable, idempotent operation. New-endpoint activation may cross
-  only the qualified boundary. Evolution activation delegates to the existing guarded rollout
-  operation and may cross only `guard_passed`. Validate these states before any child mutation.
+  only the qualified boundary and atomically publishes the proposal's stable endpoint alias without
+  rebinding an existing alias. Evolution activation delegates to the existing guarded rollout
+  operation and may cross only `guard_passed`. Validate these states before any child mutation and
+  publish the request-path route generation before recording campaign promotion.
 - Keep predicted evidence separate from actual evidence. Candidate transitions are fenced by the
   state observed by the worker; stale workers cannot overwrite newer evidence.
 - Derive campaign state from candidate truth. API handlers, CLI clients, and future workers do not
