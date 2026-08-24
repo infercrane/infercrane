@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/infercrane/infercrane/internal/artifactcache"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
 )
 
@@ -18,11 +19,13 @@ type fakeGCPRunner struct {
 	loseCreate       bool
 	lastCreate       []string
 	serialOutput     string
+	disk             gcpDisk
 }
 
 type gcpCheckRunner struct {
 	calls               [][]string
 	privateGoogleAccess string
+	disk                gcpDisk
 }
 
 func (r *gcpCheckRunner) Run(_ context.Context, _ []string, args ...string) ([]byte, error) {
@@ -33,10 +36,19 @@ func (r *gcpCheckRunner) Run(_ context.Context, _ []string, args ...string) ([]b
 		}
 		return []byte(r.privateGoogleAccess), nil
 	}
+	if len(args) > 2 && args[0] == "compute" && args[1] == "disks" && args[2] == "describe" {
+		return json.Marshal(r.disk)
+	}
 	return []byte("ok"), nil
 }
 
 func (f *fakeGCPRunner) Run(_ context.Context, _ []string, args ...string) ([]byte, error) {
+	if len(args) >= 3 && args[0] == "compute" && args[1] == "disks" && args[2] == "describe" {
+		if f.disk.Name == "" {
+			return []byte("was not found"), errors.New("exit 1")
+		}
+		return json.Marshal(f.disk)
+	}
 	if len(args) < 3 || args[0] != "compute" || args[1] != "instances" {
 		return nil, errors.New("unexpected gcloud command")
 	}
@@ -128,6 +140,32 @@ func TestGCPComputeCheckRequiresPrivateGoogleAccess(t *testing.T) {
 	}
 }
 
+func TestGCPComputeCheckVerifiesConfiguredArtifactDiskWithoutMutation(t *testing.T) {
+	const identity = "Qwen/Qwen3-8B@0123456789abcdef0123456789abcdef01234567"
+	runner := &gcpCheckRunner{disk: gcpDisk{
+		Name: "qwen3-8b-cache", Status: "READY", SizeGB: "200",
+		Zone:        "https://www.googleapis.com/compute/v1/projects/project/zones/europe-west4-a",
+		Description: "infercrane-model-identity-digest=sha256:b89562e9fdfc74f318d6870cc672993f6ededab8985a0689bc2c9f97b7414977",
+	}}
+	provider := testGCPCompute(runner)
+	provider.ArtifactDisks = map[string]string{identity: "qwen3-8b-cache"}
+	if err := provider.Check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, call := range runner.calls {
+		if len(call) > 2 && call[0] == "compute" && call[1] == "disks" && call[2] == "describe" {
+			found = true
+		}
+		if len(call) > 2 && call[2] == "create" {
+			t.Fatalf("doctor mutated provider state: %#v", runner.calls)
+		}
+	}
+	if !found {
+		t.Fatalf("doctor omitted artifact disk verification: %#v", runner.calls)
+	}
+}
+
 func TestGCPComputeLifecycleIsPrivateIdempotentAndAdoptable(t *testing.T) {
 	runner := &fakeGCPRunner{loseCreate: true}
 	provider := testGCPCompute(runner)
@@ -165,6 +203,70 @@ func TestGCPComputeLifecycleIsPrivateIdempotentAndAdoptable(t *testing.T) {
 	}
 	if err = provider.DeleteReplica(context.Background(), adopted); err != nil || runner.deletes != 1 {
 		t.Fatalf("delete replay calls=%d err=%v", runner.deletes, err)
+	}
+}
+
+func TestGCPArtifactDiskIsVerifiedAttachedReadOnlyAndObservable(t *testing.T) {
+	const identity = "Qwen/Qwen3-8B@0123456789abcdef0123456789abcdef01234567"
+	const diskName = "qwen3-8b-cache"
+	runner := &fakeGCPRunner{disk: gcpDisk{
+		Name: diskName, Status: "READY", SizeGB: "200",
+		Zone:        "https://www.googleapis.com/compute/v1/projects/project/zones/europe-west4-a",
+		Description: "infercrane-model-identity-digest=sha256:b89562e9fdfc74f318d6870cc672993f6ededab8985a0689bc2c9f97b7414977",
+		Type:        "https://www.googleapis.com/compute/v1/projects/project/zones/europe-west4-a/diskTypes/pd-balanced",
+	}}
+	provider := testGCPCompute(runner)
+	provider.ArtifactCachePolicy = "required"
+	provider.ArtifactDisks = map[string]string{identity: diskName}
+	spec := ReplicaSpec{ExternalKey: "prod-r0", Model: "Qwen/Qwen3-8B", ModelRevision: "0123456789abcdef0123456789abcdef01234567", Cloud: "gcp", Region: "europe-west4", GPU: "nvidia-l4"}
+	if _, err := provider.EnsureReplica(context.Background(), spec); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(runner.lastCreate, " ")
+	for _, required := range []string{
+		"--disk name=qwen3-8b-cache,device-name=infercrane-model-cache,mode=ro,auto-delete=no",
+		"/dev/disk/by-id/google-infercrane-model-cache",
+		"mount -o ro,nosuid,nodev",
+		"HF_HUB_OFFLINE=1",
+		"-v /var/lib/infercrane/huggingface:/root/.cache/huggingface:ro",
+	} {
+		if !strings.Contains(joined, required) {
+			t.Fatalf("cached create omitted %q: %s", required, joined)
+		}
+	}
+	request := artifactcache.Request{ArtifactID: "artifact-1", ModelIdentity: identity, Provider: "gcp", Region: "europe-west4-a", Location: "gcp-pd://" + diskName, IdempotencyKey: "prefetch-1"}
+	operation, err := provider.Prefetch(context.Background(), request)
+	if err != nil || operation.Status != "succeeded" || operation.ProviderOperationID != diskName {
+		t.Fatalf("operation=%#v err=%v", operation, err)
+	}
+	observation, err := provider.Observe(context.Background(), request)
+	if err != nil || observation.State != "present" || observation.Source != "gcp-persistent-disk" || !strings.Contains(observation.EvidenceJSON, `"attachment":"read-only"`) {
+		t.Fatalf("observation=%#v err=%v", observation, err)
+	}
+}
+
+func TestGCPArtifactDiskFailsClosedBeforeInstanceMutation(t *testing.T) {
+	const identity = "Qwen/Qwen3-8B@0123456789abcdef0123456789abcdef01234567"
+	runner := &fakeGCPRunner{disk: gcpDisk{Name: "qwen3-8b-cache", Status: "READY", SizeGB: "200", Zone: "https://www.googleapis.com/compute/v1/projects/project/zones/us-central1-a", Description: "wrong"}}
+	provider := testGCPCompute(runner)
+	provider.ArtifactCachePolicy = "required"
+	provider.ArtifactDisks = map[string]string{identity: "qwen3-8b-cache"}
+	_, err := provider.EnsureReplica(context.Background(), ReplicaSpec{ExternalKey: "prod-r0", Model: "Qwen/Qwen3-8B", ModelRevision: "0123456789abcdef0123456789abcdef01234567", Cloud: "gcp", Region: "europe-west4", GPU: "nvidia-l4"})
+	if err == nil || runner.creates != 0 || !strings.Contains(err.Error(), "immutable model identity") {
+		t.Fatalf("unverified disk reached instance mutation: creates=%d err=%v", runner.creates, err)
+	}
+}
+
+func TestGCPArtifactConfigurationCannotBypassProviderValidation(t *testing.T) {
+	provider := testGCPCompute(&fakeGCPRunner{})
+	provider.ArtifactCachePolicy = "sometimes"
+	if err := provider.Check(context.Background()); err == nil || !strings.Contains(err.Error(), "disabled, prefer, or required") {
+		t.Fatalf("invalid direct provider policy accepted: %v", err)
+	}
+	provider = testGCPCompute(&fakeGCPRunner{})
+	provider.ArtifactDisks = map[string]string{"Qwen/Qwen3-8B": "qwen-cache"}
+	if err := provider.Check(context.Background()); err == nil || !strings.Contains(err.Error(), "immutable model identities") {
+		t.Fatalf("mutable direct provider mapping accepted: %v", err)
 	}
 }
 

@@ -74,6 +74,7 @@ export INFERCRANE_GCP_VM_IMAGE='projects/cos-cloud/global/images/cos-stable-QUAL
 export INFERCRANE_GCP_WORKER_SECRET='infercrane-worker-key'
 export INFERCRANE_GCP_CONTAINER_IMAGE='REGISTRY/IMAGE@sha256:QUALIFIED_DIGEST'
 export INFERCRANE_GCP_BOOT_DISK_GIB=200
+export INFERCRANE_GCP_ARTIFACT_CACHE_POLICY='prefer'
 export GCLOUD_CONFIG_DIR="$HOME/.config/gcloud"
 ```
 
@@ -102,6 +103,46 @@ For Container-Optimized OS, worker startup installs the image-compatible NVIDIA 
 the runtime container before it can be marked started. A custom immutable VM image may provide a
 preinstalled driver instead, but `nvidia-smi` must pass before the container is launched. This
 driver stage is part of startup evidence; a running VM is not treated as runtime readiness.
+
+## Reuse an immutable model cache
+
+For vLLM and SGLang, InferCrane can adopt a pre-populated zonal Persistent Disk rather than
+downloading the same immutable model on every VM. Storage creation and population remain an
+administrator-controlled build step. InferCrane verifies the disk, attaches it read-only, keeps it
+when a worker is deleted, mounts it at the Hugging Face cache root, and runs the container in
+offline artifact mode.
+
+Prepare a filesystem containing the Hugging Face cache for one exact `model@commit`. The disk must
+be in the configured VM zone and its description must contain only the exact identity binding:
+
+```bash
+MODEL_IDENTITY='Qwen/Qwen3-8B@0123456789abcdef0123456789abcdef01234567'
+MODEL_DIGEST="$(printf %s "$MODEL_IDENTITY" | shasum -a 256 | awk '{print $1}')"
+
+gcloud compute disks update qwen3-8b-cache \
+  --project acme-production \
+  --zone europe-west4-a \
+  --description "infercrane-model-identity-digest=sha256:${MODEL_DIGEST}"
+
+export INFERCRANE_GCP_ARTIFACT_CACHE_POLICY='required'
+export INFERCRANE_GCP_ARTIFACT_DISKS_JSON="{\"${MODEL_IDENTITY}\":\"qwen3-8b-cache\"}"
+```
+
+Then adopt and observe the cache through the same provider-neutral operation surface:
+
+```bash
+infercrane artifact prefetch ARTIFACT_ID \
+  --provider gcp \
+  --region europe-west4-a \
+  --location gcp-pd://qwen3-8b-cache \
+  --idempotency-key qwen3-8b-gcp-cache
+```
+
+`prefer` falls back to normal artifact materialization only when no disk is mapped. A configured
+disk that is missing, in another zone, not `READY`, or bound to a different digest always fails
+before VM creation. `required` also rejects an unmapped model. InferCrane never creates or deletes
+the shared disk implicitly, and it does not claim a cache hit until the verified disk mounts on the
+worker. Real attach, mount, and startup-time improvement still require paid GCP qualification.
 
 ## Deploy
 
@@ -135,7 +176,8 @@ infercrane deploy deployment.yaml --idempotency-key qwen-gcp-initial
 
 The operation remains durable if the terminal disconnects. Inventory and deletion are restricted to
 resources labeled `infercrane-managed=true`; real cleanup must still be confirmed during manual
-qualification.
+qualification. Artifact cache disks are deliberately excluded from that ownership label and remain
+after worker deletion.
 
 The guarded real-provider harness is available when an isolated paid project is ready. The default
 GCP path includes the generic buffered, streaming, long-context, long-generation, and overload

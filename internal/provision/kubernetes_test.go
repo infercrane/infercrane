@@ -6,7 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/infercrane/infercrane/internal/artifactcache"
 	"github.com/infercrane/infercrane/internal/provision"
+	"github.com/infercrane/infercrane/internal/runtimecontract"
 	"github.com/infercrane/infercrane/internal/testtools/providerfixture"
 )
 
@@ -170,6 +172,72 @@ func TestKubernetesConfigurationAndManifestFailClosed(t *testing.T) {
 	}
 	if strings.Contains(encoded, "credential-value") {
 		t.Fatalf("manifest contains secret value: %s", encoded)
+	}
+}
+
+func TestKubernetesArtifactPVCIsVerifiedMountedAndObservable(t *testing.T) {
+	fixture := providerfixture.NewKubernetesCLI()
+	provider := testKubernetesProvider(fixture, "deployment")
+	spec := testKubernetesSpec()
+	spec.ModelRevision = "0123456789abcdef0123456789abcdef01234567"
+	identity := spec.Model + "@" + spec.ModelRevision
+	claim := "qwen3-immutable-cache"
+	provider.ArtifactCachePolicy = "required"
+	provider.ArtifactPVCs = map[string]string{identity: claim}
+	fixture.Objects["persistentvolumeclaim/"+claim] = map[string]any{
+		"apiVersion": "v1", "kind": "PersistentVolumeClaim",
+		"metadata": map[string]any{"name": claim, "namespace": "infercrane-system", "annotations": map[string]any{"infercrane.dev/model-identity-digest": "sha256:b89562e9fdfc74f318d6870cc672993f6ededab8985a0689bc2c9f97b7414977"}},
+		"spec":     map[string]any{"accessModes": []any{"ReadOnlyMany"}, "volumeName": "pvc-volume-qwen3"},
+		"status":   map[string]any{"phase": "Bound", "capacity": map[string]any{"storage": "40Gi"}},
+	}
+	request := artifactcache.Request{ArtifactID: "artifact-qwen3", ModelIdentity: identity, Provider: "kubernetes", Region: provider.Context, Location: "kubernetes-pvc://" + claim, IdempotencyKey: "prefetch-qwen3"}
+	operation, err := provider.Prefetch(context.Background(), request)
+	if err != nil || operation.Status != "succeeded" || operation.ProviderOperationID != "infercrane-system/"+claim {
+		t.Fatalf("operation=%#v err=%v", operation, err)
+	}
+	observation, err := provider.Observe(context.Background(), request)
+	if err != nil || observation.State != "present" || observation.Source != "kubernetes-pvc" || !strings.Contains(observation.EvidenceJSON, `"mount":"read-only"`) {
+		t.Fatalf("observation=%#v err=%v", observation, err)
+	}
+	if _, err = provider.EnsureReplica(context.Background(), spec); err != nil {
+		t.Fatal(err)
+	}
+	encoded, _ := jsonMarshalFixtureObjects(fixture.Objects)
+	for _, required := range []string{`"claimName":"qwen3-immutable-cache"`, `"mountPath":"/models"`, `"readOnly":true`, `"name":"HF_HOME"`, `"value":"/models/huggingface"`} {
+		if !strings.Contains(encoded, required) {
+			t.Fatalf("cache mount missing %s: %s", required, encoded)
+		}
+	}
+}
+
+func TestKubernetesArtifactPVCFailsClosedBeforeWorkloadMutation(t *testing.T) {
+	fixture := providerfixture.NewKubernetesCLI()
+	provider := testKubernetesProvider(fixture, "deployment")
+	spec := testKubernetesSpec()
+	spec.ModelRevision = "0123456789abcdef0123456789abcdef01234567"
+	provider.ArtifactCachePolicy = "required"
+	provider.ArtifactPVCs = map[string]string{spec.Model + "@" + spec.ModelRevision: "missing-cache"}
+	if _, err := provider.EnsureReplica(context.Background(), spec); err == nil || fixture.ApplyCalls != 0 {
+		t.Fatalf("missing required PVC reached apply: calls=%d err=%v", fixture.ApplyCalls, err)
+	}
+	request := artifactcache.Request{ArtifactID: "artifact", ModelIdentity: spec.Model + "@" + spec.ModelRevision, Provider: "kubernetes", Region: provider.Context, Location: "kubernetes-pvc://other-cache", IdempotencyKey: "prefetch"}
+	if _, err := provider.Prefetch(context.Background(), request); err == nil {
+		t.Fatal("unconfigured cache location was adopted")
+	} else if code, unknown := artifactcache.Classify(err); code != "artifact_cache_not_configured" || unknown {
+		t.Fatalf("cache failure classification code=%q unknown=%t err=%v", code, unknown, err)
+	}
+}
+
+func TestKubernetesRequiredArtifactCacheRejectsUnqualifiedCustomRuntime(t *testing.T) {
+	provider := testKubernetesProvider(providerfixture.NewKubernetesCLI(), "deployment")
+	provider.ArtifactCachePolicy = "required"
+	provider.ArtifactPVCs = map[string]string{"Qwen/Qwen3-8B@0123456789abcdef0123456789abcdef01234567": "qwen3-cache"}
+	spec := testKubernetesSpec()
+	spec.ModelRevision = "0123456789abcdef0123456789abcdef01234567"
+	spec.Runtime = "custom-oci"
+	spec.Workload = runtimecontract.Workload{Image: "registry.example/runtime@sha256:" + strings.Repeat("b", 64), Command: []string{"serve", "${MODEL}"}, Port: 8000, ReadinessPath: "/health", ShutdownGraceSeconds: 30}
+	if _, err := provider.EnsureReplica(context.Background(), spec); err == nil || !strings.Contains(err.Error(), "qualified only for vLLM and SGLang") {
+		t.Fatalf("required cache accepted an unqualified custom runtime: %v", err)
 	}
 }
 

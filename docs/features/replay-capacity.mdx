@@ -40,6 +40,12 @@ The artifact cache contract records short-lived provider-native observations (`p
 `missing`, or `unknown`). Prefetch requests are durable and idempotent, but execution belongs to the
 selected infrastructure adapter. InferCrane does not implement a model CDN or download protocol.
 
+The AWS adapter verifies immutable encrypted EBS snapshots. The GCP adapter verifies zonal
+Persistent Disks whose description binds the exact model-identity digest. The Kubernetes adapter
+verifies bound, multi-reader PVCs with the same identity binding. All three attach or mount storage
+read-only; real provider cache-hit timing and node-local Kubernetes cache execution remain separate
+qualification work.
+
 <Warning>
 Cache observations expire after at most 24 hours. Missing or stale evidence must never be treated as a
 cache hit or a readiness guarantee.

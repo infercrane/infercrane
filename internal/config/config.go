@@ -29,11 +29,13 @@ type Config struct {
 	AWSArtifactSnapshots                                                                                               map[string]string
 	AWSRootVolumeGiB, AWSArtifactVolumeInitializationRate                                                              int
 	GCPProject, GCPZone, GCPSubnet, GCPMachineType, GCPGPU, GCPServiceAccount                                          string
-	GCPVMImage, GCPContainerImage, GCPWorkerSecret                                                                     string
+	GCPVMImage, GCPContainerImage, GCPWorkerSecret, GCPArtifactCachePolicy                                             string
+	GCPArtifactDisks                                                                                                   map[string]string
 	GCPBootDiskGiB                                                                                                     int
 	KubernetesContext, KubernetesNamespace, KubernetesWorkloadAPI, KubernetesServiceAccount                            string
 	KubernetesWorkerSecretName, KubernetesWorkerSecretKey, KubernetesImageDigest                                       string
-	KubernetesGPUResource, KubernetesGPUProductLabel                                                                   string
+	KubernetesGPUResource, KubernetesGPUProductLabel, KubernetesArtifactCachePolicy                                    string
+	KubernetesArtifactPVCs                                                                                             map[string]string
 	DynamoVLLMImageDigest, DynamoVLLMRuntimeVersion, DynamoSGLangImageDigest, DynamoSGLangRuntimeVersion               string
 	DynamoModelSecretName                                                                                              string
 	Port, RouterStartPort, DatabaseMaxOpen, DatabaseMaxIdle                                                            int
@@ -279,6 +281,14 @@ func load(requireAPIKey bool) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	gcpArtifactDisks, err := envStringMap("INFERCRANE_GCP_ARTIFACT_DISKS_JSON")
+	if err != nil {
+		return Config{}, err
+	}
+	kubernetesArtifactPVCs, err := envStringMap("INFERCRANE_KUBERNETES_ARTIFACT_PVCS_JSON")
+	if err != nil {
+		return Config{}, err
+	}
 	config := Config{
 		DatabaseURL:                         env("INFERCRANE_DATABASE_URL", "postgres://infercrane:infercrane@127.0.0.1:5432/infercrane?sslmode=disable"),
 		ControlURL:                          env("INFERCRANE_URL", "http://127.0.0.1:8080"),
@@ -327,6 +337,8 @@ func load(requireAPIKey bool) (Config, error) {
 		GCPVMImage:                          env("INFERCRANE_GCP_VM_IMAGE", ""),
 		GCPContainerImage:                   env("INFERCRANE_GCP_CONTAINER_IMAGE", ""),
 		GCPWorkerSecret:                     env("INFERCRANE_GCP_WORKER_SECRET", ""),
+		GCPArtifactCachePolicy:              env("INFERCRANE_GCP_ARTIFACT_CACHE_POLICY", "prefer"),
+		GCPArtifactDisks:                    gcpArtifactDisks,
 		GCPBootDiskGiB:                      gcpBootDiskGiB,
 		KubernetesContext:                   env("INFERCRANE_KUBERNETES_CONTEXT", ""),
 		KubernetesNamespace:                 env("INFERCRANE_KUBERNETES_NAMESPACE", "infercrane-system"),
@@ -337,6 +349,8 @@ func load(requireAPIKey bool) (Config, error) {
 		KubernetesImageDigest:               env("INFERCRANE_KUBERNETES_IMAGE_DIGEST", ""),
 		KubernetesGPUResource:               env("INFERCRANE_KUBERNETES_GPU_RESOURCE", "nvidia.com/gpu"),
 		KubernetesGPUProductLabel:           env("INFERCRANE_KUBERNETES_GPU_PRODUCT_LABEL", "nvidia.com/gpu.product"),
+		KubernetesArtifactCachePolicy:       env("INFERCRANE_KUBERNETES_ARTIFACT_CACHE_POLICY", "prefer"),
+		KubernetesArtifactPVCs:              kubernetesArtifactPVCs,
 		DynamoVLLMImageDigest:               env("INFERCRANE_DYNAMO_VLLM_IMAGE_DIGEST", ""),
 		DynamoVLLMRuntimeVersion:            env("INFERCRANE_DYNAMO_VLLM_RUNTIME_VERSION", ""),
 		DynamoSGLangImageDigest:             env("INFERCRANE_DYNAMO_SGLANG_IMAGE_DIGEST", ""),
@@ -533,7 +547,7 @@ func validAWSSnapshotID(value string) bool {
 
 func validateGCP(config Config) error {
 	values := []string{config.GCPProject, config.GCPZone, config.GCPSubnet, config.GCPMachineType, config.GCPGPU, config.GCPServiceAccount, config.GCPVMImage, config.GCPContainerImage, config.GCPWorkerSecret}
-	configured := false
+	configured := len(config.GCPArtifactDisks) > 0 || config.GCPArtifactCachePolicy == "required"
 	for _, value := range values {
 		configured = configured || value != ""
 	}
@@ -554,6 +568,20 @@ func validateGCP(config Config) error {
 	if config.GCPBootDiskGiB < 50 || config.GCPBootDiskGiB > 65536 {
 		return errors.New("INFERCRANE_GCP_BOOT_DISK_GIB must be between 50 and 65536")
 	}
+	if config.GCPArtifactCachePolicy != "disabled" && config.GCPArtifactCachePolicy != "prefer" && config.GCPArtifactCachePolicy != "required" {
+		return errors.New("INFERCRANE_GCP_ARTIFACT_CACHE_POLICY must be disabled, prefer, or required")
+	}
+	if config.GCPArtifactCachePolicy == "required" && len(config.GCPArtifactDisks) == 0 {
+		return errors.New("required GCP artifact caching needs INFERCRANE_GCP_ARTIFACT_DISKS_JSON")
+	}
+	if config.GCPArtifactCachePolicy == "disabled" && len(config.GCPArtifactDisks) > 0 {
+		return errors.New("disabled GCP artifact caching cannot configure persistent disk mappings")
+	}
+	for modelIdentity, disk := range config.GCPArtifactDisks {
+		if !validImmutableModelIdentity(modelIdentity) || !validKubernetesConfigName(disk) {
+			return errors.New("GCP artifact disk mappings require immutable model identities and valid zonal disk names")
+		}
+	}
 	return nil
 }
 
@@ -568,7 +596,7 @@ func validateServerTLS(config Config) error {
 }
 
 func validateKubernetes(config Config) error {
-	configured := config.KubernetesContext != "" || config.KubernetesImageDigest != ""
+	configured := config.KubernetesContext != "" || config.KubernetesImageDigest != "" || len(config.KubernetesArtifactPVCs) > 0 || config.KubernetesArtifactCachePolicy == "required"
 	if !configured {
 		return nil
 	}
@@ -584,7 +612,34 @@ func validateKubernetes(config Config) error {
 	if runtimecontract.ValidateImage(config.KubernetesImageDigest) != nil {
 		return errors.New("INFERCRANE_KUBERNETES_IMAGE_DIGEST must be pinned by sha256 digest")
 	}
+	if config.KubernetesArtifactCachePolicy != "disabled" && config.KubernetesArtifactCachePolicy != "prefer" && config.KubernetesArtifactCachePolicy != "required" {
+		return errors.New("INFERCRANE_KUBERNETES_ARTIFACT_CACHE_POLICY must be disabled, prefer, or required")
+	}
+	if config.KubernetesArtifactCachePolicy == "required" && len(config.KubernetesArtifactPVCs) == 0 {
+		return errors.New("required Kubernetes artifact caching needs INFERCRANE_KUBERNETES_ARTIFACT_PVCS_JSON")
+	}
+	if config.KubernetesArtifactCachePolicy == "disabled" && len(config.KubernetesArtifactPVCs) > 0 {
+		return errors.New("disabled Kubernetes artifact caching cannot configure PVC mappings")
+	}
+	for modelIdentity, claim := range config.KubernetesArtifactPVCs {
+		if !validImmutableModelIdentity(modelIdentity) || !validKubernetesConfigName(claim) {
+			return errors.New("Kubernetes artifact PVC mappings require immutable model identities and DNS-label claim names")
+		}
+	}
 	return nil
+}
+
+func validKubernetesConfigName(value string) bool {
+	if value == "" || len(value) > 63 || value[0] < 'a' || value[0] > 'z' {
+		return false
+	}
+	for index, char := range value {
+		if (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') || (char == '-' && index > 0 && index < len(value)-1) {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func validateDynamo(config Config) error {

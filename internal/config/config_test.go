@@ -196,6 +196,32 @@ func TestKubernetesConfigurationIsExplicitCompleteAndImmutable(t *testing.T) {
 	}
 }
 
+func TestKubernetesArtifactPVCConfigurationIsExactAndBounded(t *testing.T) {
+	t.Setenv("INFERCRANE_API_KEY", "secret")
+	t.Setenv("INFERCRANE_KUBERNETES_CONTEXT", "production")
+	t.Setenv("INFERCRANE_KUBERNETES_IMAGE_DIGEST", "ghcr.io/infercrane/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	identity := "Qwen/Qwen3-8B@0123456789abcdef0123456789abcdef01234567"
+	t.Setenv("INFERCRANE_KUBERNETES_ARTIFACT_CACHE_POLICY", "required")
+	t.Setenv("INFERCRANE_KUBERNETES_ARTIFACT_PVCS_JSON", `{"`+identity+`":"qwen3-immutable-cache"}`)
+	cfg, err := Load()
+	if err != nil || cfg.KubernetesArtifactCachePolicy != "required" || cfg.KubernetesArtifactPVCs[identity] != "qwen3-immutable-cache" {
+		t.Fatalf("cfg=%#v err=%v", cfg, err)
+	}
+	t.Setenv("INFERCRANE_KUBERNETES_ARTIFACT_PVCS_JSON", `{"Qwen/Qwen3-8B":"qwen3-cache"}`)
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "immutable model identities") {
+		t.Fatalf("mutable model cache identity accepted: %v", err)
+	}
+	t.Setenv("INFERCRANE_KUBERNETES_ARTIFACT_PVCS_JSON", `{"`+identity+`":"Bad_Claim"}`)
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "claim names") {
+		t.Fatalf("invalid PVC name accepted: %v", err)
+	}
+	t.Setenv("INFERCRANE_KUBERNETES_ARTIFACT_PVCS_JSON", `{"`+identity+`":"qwen3-cache"}`)
+	t.Setenv("INFERCRANE_KUBERNETES_ARTIFACT_CACHE_POLICY", "disabled")
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "cannot configure") {
+		t.Fatalf("disabled cache policy accepted PVC mapping: %v", err)
+	}
+}
+
 func TestDynamoConfigurationIsOptionalCompleteAndImmutable(t *testing.T) {
 	t.Setenv("INFERCRANE_API_KEY", "secret")
 	t.Setenv("INFERCRANE_DYNAMO_VLLM_IMAGE_DIGEST", "nvcr.io/nvidia/ai-dynamo/vllm-runtime:latest")
@@ -261,6 +287,41 @@ func TestGCPBYOCConfigurationIsAllOrNothingAndImmutable(t *testing.T) {
 	t.Setenv("INFERCRANE_GCP_VM_IMAGE", "projects/cos-cloud/global/images/family/cos-stable")
 	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "image family") {
 		t.Fatalf("expected mutable VM image family failure, got %v", err)
+	}
+}
+
+func TestGCPArtifactDiskConfigurationIsExactAndBounded(t *testing.T) {
+	t.Setenv("INFERCRANE_API_KEY", "secret")
+	for key, value := range map[string]string{
+		"INFERCRANE_GCP_PROJECT":               "acme-prod",
+		"INFERCRANE_GCP_ZONE":                  "europe-west4-a",
+		"INFERCRANE_GCP_SUBNET":                "private-runtime",
+		"INFERCRANE_GCP_MACHINE_TYPE":          "g2-standard-4",
+		"INFERCRANE_GCP_GPU":                   "nvidia-l4",
+		"INFERCRANE_GCP_SERVICE_ACCOUNT":       "runtime@acme-prod.iam.gserviceaccount.com",
+		"INFERCRANE_GCP_VM_IMAGE":              "projects/cos-cloud/global/images/cos-stable-20260801",
+		"INFERCRANE_GCP_WORKER_SECRET":         "infercrane-worker-key",
+		"INFERCRANE_GCP_CONTAINER_IMAGE":       "europe-docker.pkg.dev/acme/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"INFERCRANE_GCP_ARTIFACT_CACHE_POLICY": "required",
+		"INFERCRANE_GCP_ARTIFACT_DISKS_JSON":   `{"Qwen/Qwen3-8B@0123456789abcdef0123456789abcdef01234567":"qwen3-8b-cache"}`,
+	} {
+		t.Setenv(key, value)
+	}
+	cfg, err := Load()
+	if err != nil || cfg.GCPArtifactDisks["Qwen/Qwen3-8B@0123456789abcdef0123456789abcdef01234567"] != "qwen3-8b-cache" {
+		t.Fatalf("cfg=%#v err=%v", cfg, err)
+	}
+	t.Setenv("INFERCRANE_GCP_ARTIFACT_DISKS_JSON", `{"Qwen/Qwen3-8B":"qwen-cache"}`)
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "immutable model identities") {
+		t.Fatalf("mutable model identity accepted: %v", err)
+	}
+	t.Setenv("INFERCRANE_GCP_ARTIFACT_DISKS_JSON", `{"Qwen/Qwen3-8B@0123456789abcdef0123456789abcdef01234567":"Bad_Disk"}`)
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "disk names") {
+		t.Fatalf("invalid disk name accepted: %v", err)
+	}
+	t.Setenv("INFERCRANE_GCP_ARTIFACT_DISKS_JSON", `{}`)
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "needs INFERCRANE_GCP_ARTIFACT_DISKS_JSON") {
+		t.Fatalf("required empty mapping accepted: %v", err)
 	}
 }
 

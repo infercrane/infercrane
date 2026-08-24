@@ -11,7 +11,9 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/infercrane/infercrane/internal/artifactcache"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
 )
 
@@ -24,6 +26,8 @@ type Kubernetes struct {
 	Binary, Context, Namespace, WorkloadAPI           string
 	ServiceAccount, WorkerSecretName, WorkerSecretKey string
 	ImageDigest, GPUResource, GPUProductLabel         string
+	ArtifactCachePolicy                               string
+	ArtifactPVCs                                      map[string]string
 	Runner                                            CommandRunner
 }
 
@@ -39,7 +43,9 @@ type kubernetesObject struct {
 		Annotations map[string]string `json:"annotations"`
 	} `json:"metadata"`
 	Spec struct {
-		ClusterIP string `json:"clusterIP"`
+		ClusterIP   string   `json:"clusterIP"`
+		AccessModes []string `json:"accessModes"`
+		VolumeName  string   `json:"volumeName"`
 	} `json:"spec"`
 	Status struct {
 		ObservedGeneration int64  `json:"observedGeneration"`
@@ -60,6 +66,8 @@ type kubernetesObject struct {
 			UpdatedReplicas   int `json:"updatedReplicas"`
 			ScheduledReplicas int `json:"scheduledReplicas"`
 		} `json:"components"`
+		Phase    string            `json:"phase"`
+		Capacity map[string]string `json:"capacity"`
 	} `json:"status"`
 }
 
@@ -93,6 +101,14 @@ func (k Kubernetes) Check(ctx context.Context) error {
 			}
 		}
 	}
+	if len(k.ArtifactPVCs) > 0 {
+		for _, verb := range []string{"get", "list"} {
+			output, err := k.run(ctx, true, "auth", "can-i", verb, "persistentvolumeclaims")
+			if err != nil || strings.TrimSpace(string(output)) != "yes" {
+				return fmt.Errorf("Kubernetes RBAC denies %s persistentvolumeclaims in namespace %s", verb, k.Namespace)
+			}
+		}
+	}
 	if _, err := k.run(ctx, true, "get", resources[0], "--chunk-size=1", "-o", "name"); err != nil {
 		return fmt.Errorf("list Kubernetes workload API in namespace %s: %w", k.Namespace, err)
 	}
@@ -103,11 +119,15 @@ func (k Kubernetes) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provid
 	if err := k.validate(spec); err != nil {
 		return ProviderHandle{}, fmt.Errorf("%w: %v", ErrInvalidReplicaSpec, err)
 	}
+	claim, err := k.resolveArtifactPVC(ctx, spec)
+	if err != nil {
+		return ProviderHandle{}, fmt.Errorf("%w: %v", ErrInvalidReplicaSpec, err)
+	}
 	handle := k.Handle(spec.ExternalKey)
-	if _, err := k.objects(ctx, spec.ExternalKey); err != nil {
+	if _, err = k.objects(ctx, spec.ExternalKey); err != nil {
 		return ProviderHandle{}, err
 	}
-	manifest, err := k.manifest(spec)
+	manifest, err := k.manifest(spec, claim)
 	if err != nil {
 		return ProviderHandle{}, err
 	}
@@ -284,7 +304,7 @@ func (k Kubernetes) objects(ctx context.Context, externalKey string) ([]kubernet
 	return objects, nil
 }
 
-func (k Kubernetes) manifest(spec ReplicaSpec) ([]byte, error) {
+func (k Kubernetes) manifest(spec ReplicaSpec, artifactClaim string) ([]byte, error) {
 	name, port := k.resourceName(spec.ExternalKey), spec.Port
 	if port == 0 {
 		port = 8000
@@ -304,11 +324,23 @@ func (k Kubernetes) manifest(spec ReplicaSpec) ([]byte, error) {
 	}
 	metadata := map[string]any{"name": name, "namespace": k.Namespace, "labels": labels, "annotations": map[string]any{"infercrane.dev/external-key": spec.ExternalKey, "infercrane.dev/provider-contract": "infercrane.provider/v1", "infercrane.dev/intent-hash": intentHash}}
 	workerSecret := map[string]any{"secretKeyRef": map[string]any{"name": k.WorkerSecretName, "key": k.WorkerSecretKey}}
-	container := map[string]any{"name": "runtime", "image": image, "imagePullPolicy": "IfNotPresent", "args": command, "ports": []any{map[string]any{"name": "http", "containerPort": port}}, "env": []any{map[string]any{"name": "INFERCRANE_WORKER_API_KEY", "valueFrom": workerSecret}, map[string]any{"name": "VLLM_API_KEY", "valueFrom": workerSecret}}, "readinessProbe": map[string]any{"httpGet": map[string]any{"path": readinessPath, "port": "http"}, "periodSeconds": 5, "timeoutSeconds": 2, "failureThreshold": 12}, "resources": map[string]any{"limits": map[string]any{k.GPUResource: "1"}, "requests": map[string]any{k.GPUResource: "1"}}, "securityContext": map[string]any{"allowPrivilegeEscalation": false}}
+	environment := []any{map[string]any{"name": "INFERCRANE_WORKER_API_KEY", "valueFrom": workerSecret}, map[string]any{"name": "VLLM_API_KEY", "valueFrom": workerSecret}}
+	container := map[string]any{"name": "runtime", "image": image, "imagePullPolicy": "IfNotPresent", "args": command, "ports": []any{map[string]any{"name": "http", "containerPort": port}}, "env": environment, "readinessProbe": map[string]any{"httpGet": map[string]any{"path": readinessPath, "port": "http"}, "periodSeconds": 5, "timeoutSeconds": 2, "failureThreshold": 12}, "resources": map[string]any{"limits": map[string]any{k.GPUResource: "1"}, "requests": map[string]any{k.GPUResource: "1"}}, "securityContext": map[string]any{"allowPrivilegeEscalation": false}}
 	podSpec := map[string]any{"serviceAccountName": k.ServiceAccount, "terminationGracePeriodSeconds": shutdown, "containers": []any{container}, "nodeSelector": map[string]any{k.GPUProductLabel: spec.GPU}}
+	if artifactClaim != "" {
+		container["volumeMounts"] = []any{map[string]any{"name": "model-cache", "mountPath": "/models", "readOnly": true}}
+		container["env"] = append(environment,
+			map[string]any{"name": "HF_HOME", "value": "/models/huggingface"},
+			map[string]any{"name": "HUGGINGFACE_HUB_CACHE", "value": "/models/huggingface/hub"},
+		)
+		podSpec["volumes"] = []any{map[string]any{"name": "model-cache", "persistentVolumeClaim": map[string]any{"claimName": artifactClaim, "readOnly": true}}}
+	}
 	if k.WorkloadAPI == "kserve" {
 		metadata["annotations"].(map[string]any)["serving.kserve.io/deploymentMode"] = "Standard"
 		predictor := map[string]any{"minReplicas": 1, "maxReplicas": 1, "serviceAccountName": k.ServiceAccount, "nodeSelector": map[string]any{k.GPUProductLabel: spec.GPU}, "containers": []any{container}}
+		if artifactClaim != "" {
+			predictor["volumes"] = podSpec["volumes"]
+		}
 		return json.Marshal(map[string]any{"apiVersion": "serving.kserve.io/v1beta1", "kind": "InferenceService", "metadata": metadata, "spec": map[string]any{"predictor": predictor}})
 	}
 	deployment := map[string]any{"apiVersion": "apps/v1", "kind": "Deployment", "metadata": metadata, "spec": map[string]any{"replicas": 1, "strategy": map[string]any{"type": "Recreate"}, "progressDeadlineSeconds": 1800, "selector": map[string]any{"matchLabels": map[string]any{"app.kubernetes.io/instance": name}}, "template": map[string]any{"metadata": map[string]any{"labels": labels}, "spec": podSpec}}}
@@ -334,6 +366,9 @@ func (k Kubernetes) validate(spec ReplicaSpec) error {
 	if spec.ExternalKey == "" || len(spec.ExternalKey) > 253 || spec.Model == "" || spec.Cloud != "kubernetes" || spec.GPU == "" {
 		return errors.New("Kubernetes replica requires bounded external key, model, cloud kubernetes, and GPU")
 	}
+	if k.artifactPolicy() == "required" && !artifactCacheRuntimeSupported(spec) {
+		return errors.New("Kubernetes artifact cache is qualified only for vLLM and SGLang workloads")
+	}
 	if !spec.Workload.Empty() {
 		if err := spec.Workload.Validate(); err != nil {
 			return fmt.Errorf("portable workload: %w", err)
@@ -351,6 +386,20 @@ func (k Kubernetes) validateConfig() error {
 	if k.WorkloadAPI != "deployment" && k.WorkloadAPI != "kserve" {
 		return errors.New("Kubernetes workload API must be deployment or kserve")
 	}
+	if policy := k.artifactPolicy(); policy != "disabled" && policy != "prefer" && policy != "required" {
+		return errors.New("Kubernetes artifact cache policy must be disabled, prefer, or required")
+	}
+	if k.artifactPolicy() == "required" && len(k.ArtifactPVCs) == 0 {
+		return errors.New("required Kubernetes artifact caching needs an immutable model-to-PVC mapping")
+	}
+	if k.artifactPolicy() == "disabled" && len(k.ArtifactPVCs) > 0 {
+		return errors.New("disabled Kubernetes artifact caching cannot configure PVC mappings")
+	}
+	for identity, claim := range k.ArtifactPVCs {
+		if !validArtifactModelIdentity(identity) || !validKubernetesDNSLabel(claim) {
+			return errors.New("Kubernetes artifact PVC mappings require immutable model identities and DNS-label claim names")
+		}
+	}
 	for _, value := range []string{k.Namespace, k.ServiceAccount, k.WorkerSecretName} {
 		if !validKubernetesDNSLabel(value) {
 			return fmt.Errorf("invalid Kubernetes identifier %q", value)
@@ -360,6 +409,116 @@ func (k Kubernetes) validateConfig() error {
 		return fmt.Errorf("invalid Kubernetes Secret key %q", k.WorkerSecretKey)
 	}
 	return nil
+}
+
+func (k Kubernetes) artifactPolicy() string {
+	if k.ArtifactCachePolicy == "" {
+		return "prefer"
+	}
+	return k.ArtifactCachePolicy
+}
+
+func (k Kubernetes) resolveArtifactPVC(ctx context.Context, spec ReplicaSpec) (string, error) {
+	if k.artifactPolicy() == "disabled" || !artifactCacheRuntimeSupported(spec) {
+		return "", nil
+	}
+	identity := modelIdentity(spec)
+	claim := k.ArtifactPVCs[identity]
+	if claim == "" {
+		if k.artifactPolicy() == "required" {
+			return "", fmt.Errorf("required Kubernetes artifact cache is missing for %s", identity)
+		}
+		return "", nil
+	}
+	if _, err := k.verifyArtifactPVC(ctx, identity, claim); err != nil {
+		return "", err
+	}
+	return claim, nil
+}
+
+func (k Kubernetes) verifyArtifactPVC(ctx context.Context, identity, claim string) (kubernetesObject, error) {
+	if !validKubernetesDNSLabel(claim) {
+		return kubernetesObject{}, errors.New("artifact cache PVC has an invalid name")
+	}
+	output, err := k.run(ctx, true, "get", "persistentvolumeclaim/"+claim, "-o", "json")
+	if err != nil {
+		return kubernetesObject{}, errors.New("inspect Kubernetes artifact cache PVC")
+	}
+	objects, err := decodeKubernetesObjects(output)
+	if err != nil || len(objects) != 1 || objects[0].Kind != "PersistentVolumeClaim" {
+		return kubernetesObject{}, errors.New("Kubernetes artifact cache PVC was not found")
+	}
+	pvc := objects[0]
+	if pvc.Metadata.Namespace != k.Namespace || pvc.Status.Phase != "Bound" || pvc.Spec.VolumeName == "" {
+		return kubernetesObject{}, errors.New("Kubernetes artifact cache PVC must be bound in the configured namespace")
+	}
+	if pvc.Metadata.Annotations["infercrane.dev/model-identity-digest"] != modelIdentityDigest(identity) {
+		return kubernetesObject{}, errors.New("Kubernetes artifact cache PVC does not match the immutable model identity")
+	}
+	readMany := false
+	for _, mode := range pvc.Spec.AccessModes {
+		if mode == "ReadOnlyMany" || mode == "ReadWriteMany" {
+			readMany = true
+		}
+	}
+	if !readMany {
+		return kubernetesObject{}, errors.New("Kubernetes artifact cache PVC must support ReadOnlyMany or ReadWriteMany")
+	}
+	return pvc, nil
+}
+
+// Prefetch adopts an administrator-prepared immutable PVC. It never creates
+// storage or copies model bytes implicitly.
+func (k Kubernetes) Prefetch(ctx context.Context, request artifactcache.Request) (artifactcache.Operation, error) {
+	if err := request.Validate(); err != nil {
+		return artifactcache.Operation{}, artifactcache.Definitive("invalid_prefetch_request", err)
+	}
+	if k.artifactPolicy() == "disabled" {
+		return artifactcache.Operation{}, artifactcache.Definitive("artifact_cache_disabled", errors.New("Kubernetes artifact cache adapter is disabled"))
+	}
+	if request.Provider != "kubernetes" || request.Region != "" && request.Region != k.Context {
+		return artifactcache.Operation{}, artifactcache.Definitive("invalid_provider_boundary", errors.New("Kubernetes artifact prefetch boundary does not match the configured context"))
+	}
+	claim, err := kubernetesPVCLocation(request.Location)
+	if err != nil {
+		return artifactcache.Operation{}, artifactcache.Definitive("invalid_cache_location", err)
+	}
+	if configured := k.ArtifactPVCs[request.ModelIdentity]; configured == "" || configured != claim {
+		return artifactcache.Operation{}, artifactcache.Definitive("artifact_cache_not_configured", errors.New("Kubernetes artifact PVC is not configured for this immutable model identity"))
+	}
+	if _, err = k.verifyArtifactPVC(ctx, request.ModelIdentity, claim); err != nil {
+		return artifactcache.Operation{}, artifactcache.Definitive("artifact_pvc_verification_failed", err)
+	}
+	return artifactcache.Operation{ProviderOperationID: k.Namespace + "/" + claim, Status: "succeeded"}, nil
+}
+
+func (k Kubernetes) Observe(ctx context.Context, request artifactcache.Request) (artifactcache.Observation, error) {
+	if err := request.Validate(); err != nil {
+		return artifactcache.Observation{}, err
+	}
+	claim, err := kubernetesPVCLocation(request.Location)
+	if err != nil || request.Provider != "kubernetes" || k.ArtifactPVCs[request.ModelIdentity] != claim {
+		return artifactcache.Observation{}, errors.New("Kubernetes artifact cache request does not match the configured boundary")
+	}
+	pvc, err := k.verifyArtifactPVC(ctx, request.ModelIdentity, claim)
+	if err != nil {
+		return artifactcache.Observation{}, err
+	}
+	observed := time.Now().UTC()
+	evidence, _ := json.Marshal(map[string]any{"namespace": k.Namespace, "claim": claim, "volume": pvc.Spec.VolumeName, "capacity": pvc.Status.Capacity["storage"], "model_identity_digest": modelIdentityDigest(request.ModelIdentity), "mount": "read-only"})
+	return artifactcache.Observation{State: "present", Source: "kubernetes-pvc", EvidenceJSON: string(evidence), ObservedAt: observed, ExpiresAt: observed.Add(5 * time.Minute)}, nil
+}
+
+func kubernetesPVCLocation(location string) (string, error) {
+	const prefix = "kubernetes-pvc://"
+	if !strings.HasPrefix(location, prefix) {
+		return "", errors.New("Kubernetes artifact cache location must use kubernetes-pvc://CLAIM")
+	}
+	claim := strings.TrimPrefix(location, prefix)
+	if !validKubernetesDNSLabel(claim) {
+		return "", errors.New("Kubernetes artifact cache location contains an invalid claim name")
+	}
+	return claim, nil
 }
 
 func (k Kubernetes) ownerSetComplete(objects []kubernetesObject) bool {

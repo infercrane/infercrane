@@ -37,7 +37,7 @@ kubectl apply -f deploy/kubernetes/base/provider-rbac.yaml
 ```
 
 The included Role is namespace-scoped and contains no wildcard, Secret, Pod, cluster-wide, or RBAC
-mutation permission. If the control plane runs outside the cluster, bind the same Role to the user or
+mutation permission. It has read-only `get`/`list` access to PVC metadata for cache verification. If the control plane runs outside the cluster, bind the same Role to the user or
 identity in its kubeconfig instead of the included service account subject.
 
 Create the worker credential without putting it in Git or shell history. Its value must equal the
@@ -60,10 +60,50 @@ export INFERCRANE_KUBERNETES_WORKER_SECRET_KEY='api-key'
 export INFERCRANE_KUBERNETES_IMAGE_DIGEST='vllm/vllm-openai@sha256:REPLACE_WITH_QUALIFIED_DIGEST'
 export INFERCRANE_KUBERNETES_GPU_RESOURCE='nvidia.com/gpu'
 export INFERCRANE_KUBERNETES_GPU_PRODUCT_LABEL='nvidia.com/gpu.product'
+export INFERCRANE_KUBERNETES_ARTIFACT_CACHE_POLICY='prefer'
 ```
 
 Configuration is all-or-nothing. The image must be immutable. The adapter always passes an explicit
 context and namespace to `kubectl`; it never relies on or changes the current context.
+
+## Reuse an immutable model cache
+
+For clusters with a shared filesystem or CSI driver that supports multi-reader claims, an
+administrator can prepare one PVC containing the Hugging Face cache tree. InferCrane adopts the
+claim; it does not create storage or download model bytes through the control API.
+
+The claim must be `Bound`, support `ReadOnlyMany` or `ReadWriteMany`, and carry the exact model
+identity digest:
+
+```bash
+MODEL_IDENTITY='Qwen/Qwen3-8B@0123456789abcdef0123456789abcdef01234567'
+MODEL_DIGEST="sha256:$(printf %s "$MODEL_IDENTITY" | shasum -a 256 | awk '{print $1}')"
+
+kubectl --context production-cluster --namespace infercrane-system annotate pvc/qwen3-cache \
+  "infercrane.dev/model-identity-digest=$MODEL_DIGEST"
+
+export INFERCRANE_KUBERNETES_ARTIFACT_CACHE_POLICY='required'
+export INFERCRANE_KUBERNETES_ARTIFACT_PVCS_JSON="{\"$MODEL_IDENTITY\":\"qwen3-cache\"}"
+```
+
+At launch, the provider verifies the claim before server-side apply, mounts it at `/models`
+read-only, and points the Hugging Face cache environment at `/models/huggingface`. A missing,
+unbound, single-node-only, or wrongly annotated required claim fails before workload mutation.
+`prefer` falls back to the runtime's ordinary immutable download only when no claim is mapped; a
+configured but invalid claim never silently falls back.
+
+Record the verified locality through the common artifact API:
+
+```bash
+infercrane artifact prefetch ARTIFACT_ID \
+  --provider kubernetes \
+  --region production-cluster \
+  --location kubernetes-pvc://qwen3-cache \
+  --idempotency-key qwen3-cache-v1
+```
+
+This is a shared-volume path, not a node-local cache or image-streaming claim. CSI performance,
+mount propagation, model-read throughput, and real GPU startup remain cluster-specific evidence.
 
 Validate the Kubernetes API, optional KServe CRD, and every required namespaced permission without
 creating a workload:

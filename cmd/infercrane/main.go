@@ -4010,7 +4010,8 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		if profileErr != nil {
 			return fmt.Errorf("configure GCP integration: %w", profileErr)
 		}
-		gcpProvider := provision.GCPCompute{Project: cfg.GCPProject, Zone: cfg.GCPZone, Subnet: cfg.GCPSubnet, MachineType: cfg.GCPMachineType, GPUType: cfg.GCPGPU, ServiceAccount: cfg.GCPServiceAccount, VMImage: cfg.GCPVMImage, ContainerImage: cfg.GCPContainerImage, WorkerSecret: cfg.GCPWorkerSecret, BootDiskGiB: cfg.GCPBootDiskGiB}
+		gcpProvider := provision.GCPCompute{Project: cfg.GCPProject, Zone: cfg.GCPZone, Subnet: cfg.GCPSubnet, MachineType: cfg.GCPMachineType, GPUType: cfg.GCPGPU, ServiceAccount: cfg.GCPServiceAccount, VMImage: cfg.GCPVMImage, ContainerImage: cfg.GCPContainerImage, WorkerSecret: cfg.GCPWorkerSecret, BootDiskGiB: cfg.GCPBootDiskGiB, ArtifactCachePolicy: cfg.GCPArtifactCachePolicy, ArtifactDisks: cfg.GCPArtifactDisks}
+		artifactCacheAdapters["gcp"] = gcpProvider
 		for _, runtimeName := range []string{"vllm", "sglang", "custom-oci"} {
 			elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: "gcp-compute", Cloud: "gcp", Runtime: runtimeName, Default: true, Profile: gcpProfile, Provider: gcpProvider})
 		}
@@ -4020,7 +4021,8 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		if profileErr != nil {
 			return fmt.Errorf("configure Kubernetes integration: %w", profileErr)
 		}
-		kubernetesProvider := provision.Kubernetes{Context: cfg.KubernetesContext, Namespace: cfg.KubernetesNamespace, WorkloadAPI: cfg.KubernetesWorkloadAPI, ServiceAccount: cfg.KubernetesServiceAccount, WorkerSecretName: cfg.KubernetesWorkerSecretName, WorkerSecretKey: cfg.KubernetesWorkerSecretKey, ImageDigest: cfg.KubernetesImageDigest, GPUResource: cfg.KubernetesGPUResource, GPUProductLabel: cfg.KubernetesGPUProductLabel}
+		kubernetesProvider := provision.Kubernetes{Context: cfg.KubernetesContext, Namespace: cfg.KubernetesNamespace, WorkloadAPI: cfg.KubernetesWorkloadAPI, ServiceAccount: cfg.KubernetesServiceAccount, WorkerSecretName: cfg.KubernetesWorkerSecretName, WorkerSecretKey: cfg.KubernetesWorkerSecretKey, ImageDigest: cfg.KubernetesImageDigest, GPUResource: cfg.KubernetesGPUResource, GPUProductLabel: cfg.KubernetesGPUProductLabel, ArtifactCachePolicy: cfg.KubernetesArtifactCachePolicy, ArtifactPVCs: cfg.KubernetesArtifactPVCs}
+		artifactCacheAdapters["kubernetes"] = kubernetesProvider
 		for _, runtimeName := range []string{"vllm", "sglang", "custom-oci"} {
 			elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: "kubernetes", Cloud: "kubernetes", Runtime: runtimeName, Profile: kubernetesProfile, Provider: kubernetesProvider})
 		}

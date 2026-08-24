@@ -14,7 +14,7 @@ func main() {
 	if len(os.Args) < 2 {
 		fatal(errors.New("manifest paths are required"))
 	}
-	seenRoute, seenDeployment, seenService, seenKServeRole, seenDynamoRole := false, false, false, false, false
+	seenRoute, seenDeployment, seenService, seenPVCRead, seenKServeRole, seenDynamoRole := false, false, false, false, false, false
 	for _, path := range os.Args[1:] {
 		file, err := os.Open(path)
 		if err != nil {
@@ -46,6 +46,7 @@ func main() {
 				for _, resource := range resources {
 					seenDeployment = seenDeployment || resource == "deployments"
 					seenService = seenService || resource == "services"
+					seenPVCRead = seenPVCRead || resource == "persistentvolumeclaims"
 					seenKServeRole = seenKServeRole || resource == "inferenceservices"
 					seenDynamoRole = seenDynamoRole || resource == "dynamographdeployments"
 				}
@@ -64,8 +65,8 @@ func main() {
 			fatal(err)
 		}
 	}
-	if !seenRoute || !seenDeployment || !seenService || !seenKServeRole || !seenDynamoRole {
-		fatal(errors.New("manifests do not cover deployment RBAC, KServe RBAC, Dynamo RBAC, and Gateway API exposure"))
+	if !seenRoute || !seenDeployment || !seenService || !seenPVCRead || !seenKServeRole || !seenDynamoRole {
+		fatal(errors.New("manifests do not cover deployment RBAC, read-only PVC evidence, KServe RBAC, Dynamo RBAC, and Gateway API exposure"))
 	}
 	fmt.Println("Kubernetes manifests are syntactically valid and preserve bounded ownership.")
 }
@@ -91,7 +92,16 @@ func checkRole(document map[string]any) ([]string, error) {
 			}
 			out = append(out, resource)
 		}
-		for _, required := range []string{"get", "list", "create", "patch", "delete"} {
+		requiredVerbs := []string{"get", "list", "create", "patch", "delete"}
+		if len(resources) == 1 && resources[0] == "persistentvolumeclaims" {
+			requiredVerbs = []string{"get", "list"}
+			for _, forbidden := range []string{"create", "patch", "update", "delete", "deletecollection"} {
+				if contains(verbs, forbidden) {
+					return nil, fmt.Errorf("PVC evidence RBAC must not include %s", forbidden)
+				}
+			}
+		}
+		for _, required := range requiredVerbs {
 			if !contains(verbs, required) {
 				return nil, fmt.Errorf("Role is missing %s", required)
 			}

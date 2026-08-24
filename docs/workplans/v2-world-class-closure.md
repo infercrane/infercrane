@@ -4,6 +4,10 @@ Status: local closure completed; real-infrastructure and clean-release gates rem
 
 Updated: 2026-08-24.
 
+The binary product outcomes and remaining optimization-driver gap are tracked in
+[Vision conformance](/testing/vision-conformance). "Local closure" here refers to the maintained
+test environment, not completion of the full product vision.
+
 ## Product standard
 
 InferCrane is world class only when a new team can reach one stable endpoint with less operational
@@ -24,7 +28,7 @@ Vendor capabilities change; the linked primary documentation is authoritative fo
 | Stable environments and release | Baseten environments provide stable URLs, canary/shadow options, autoscaling inheritance, and rollback | Stable endpoint identity, immutable serving plans, signed evidence, Release Guard, stream pinning, drain, and automatic post-promotion rollback pass local gates | Repeat active → candidate → reject and active → candidate → promote → degrade → rollback on a real GPU path |
 | Overload | Fireworks documents token rate limits plus explicit `429` and overloaded `503`; Baseten exposes autoscaling and request lifecycle | Bounded concurrency/queueing, distributed quotas, explicit `429`, instance-local pressure, no streaming replay, bounded buffered retries, and one end-to-end request deadline | Run the exact overload matrix at concurrency 1/8/32/128 and prove bounded tail latency and correlation |
 | Health | Baseten distinguishes deployment lifecycle/health states | InferCrane separates process liveness, control-plane readiness, admission saturation, runtime readiness, and served-model identity | Present the distinction consistently in CLI, console, alerts, and real disruption evidence |
-| Cold start | Baseten documents multi-tier weight delivery, node/cluster reuse, file deduplication, and image streaming | Provider-neutral artifact cache, durable prefetch, AWS encrypted snapshot attachment, startup waterfall, and ETA evidence exist | Measure cache miss versus exact-model snapshot hit and prewarmed runtime image; add equivalent GCP disk and Kubernetes PVC/node-cache adapters |
+| Cold start | Baseten documents multi-tier weight delivery, node/cluster reuse, file deduplication, and image streaming | Provider-neutral artifact cache, durable prefetch, AWS encrypted snapshot attachment, GCP zonal Persistent Disk attachment, verified read-only Kubernetes PVC attachment, startup waterfall, and ETA evidence exist | Measure cache misses versus exact-model cache hits; add Kubernetes node-cache and provider-native cache adapters only where evidence justifies them |
 | Runtime performance | Managed providers control images, caches, kernels, fleet topology, and qualified engine configurations | AIConfigurator/catalog proposals, capability registry, AIPerf, Replay, quality/cost evidence, and optimized-artifact provenance exist | Execute and qualify exact FP8/AWQ/speculative/LMCache/Dynamo/TensorRT tuples; rank only measured SLO goodput per sourced currency unit |
 | Distributed serving | NVIDIA Dynamo provides KV-aware routing and independent prefill/decode pools; KServe provides Kubernetes-native lifecycle/canary primitives | InferCrane has a single-owner experimental Dynamo DGD adapter and Kind API evidence | Qualify real Dynamo operator, NIXL, cache events, worker loss, topology downgrade, and performance before enabling execution claims |
 | Operational evidence | Managed dashboards expose vendor-owned telemetry | Request Inspector, Doctor, Replay, monitoring, capacity, FinOps, quality evidence, Release Guard, and Passports share stable endpoint/revision identity | Prove freshness, partial-state, retention, and scale behavior on a real fleet; add continuous evaluator adapters only with explicit sampling/privacy policy |
@@ -95,6 +99,8 @@ Completed without paid-provider mutation:
 - project scaffolding prints the provider-specific preflight, plan, durable deploy, first request, and
   deterministic Doctor journey using the actual generated endpoint name;
 - provider documentation now distinguishes narrow archived AWS evidence from unqualified tuples;
+- AWS, GCP, and Kubernetes now share one fail-closed artifact-cache evidence contract while each
+  retains its native storage and ownership semantics;
 - host, rebuilt-container race, PostgreSQL migration/contention, failure recovery, HA, backup/restore,
   network-partition, simulated-cloud, Kind, KWOK, Kubernetes-version, browser, empty-control-plane,
   docs, SDK, Terraform, fuzz, dead-code, and vulnerability gates pass.

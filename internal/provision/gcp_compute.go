@@ -11,6 +11,9 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"time"
+
+	"github.com/infercrane/infercrane/internal/artifactcache"
 )
 
 var errGCPResourceNotFound = errors.New("GCP resource not found")
@@ -23,6 +26,8 @@ type GCPCompute struct {
 	Runner                                                                                             CommandRunner
 	Project, Zone, Subnet, MachineType, GPUType, ServiceAccount, VMImage, ContainerImage, WorkerSecret string
 	BootDiskGiB                                                                                        int
+	ArtifactCachePolicy                                                                                string
+	ArtifactDisks                                                                                      map[string]string
 }
 
 type gcpInstance struct {
@@ -31,6 +36,15 @@ type gcpInstance struct {
 		NetworkIP string `json:"networkIP"`
 	} `json:"networkInterfaces"`
 	Metadata struct{ Items []struct{ Key, Value string } }
+}
+
+type gcpDisk struct {
+	Name        string `json:"name"`
+	Status      string `json:"status"`
+	SizeGB      string `json:"sizeGb"`
+	Zone        string `json:"zone"`
+	Description string `json:"description"`
+	Type        string `json:"type"`
 }
 
 // Check performs a read-only identity and Compute API probe. It deliberately
@@ -44,6 +58,9 @@ func (g GCPCompute) Check(ctx context.Context) error {
 	}
 	if g.BootDiskGiB < 50 || g.BootDiskGiB > 65536 {
 		return errors.New("GCP boot disk must be between 50 and 65536 GiB")
+	}
+	if err := g.validateArtifactConfig(); err != nil {
+		return err
 	}
 	region, ok := gcpRegionFromZone(g.Zone)
 	if !ok {
@@ -76,6 +93,16 @@ func (g GCPCompute) Check(ctx context.Context) error {
 			return fmt.Errorf("verify GCP dependency %s: %w", strings.Join(args[:2], " "), err)
 		}
 	}
+	identities := make([]string, 0, len(g.ArtifactDisks))
+	for identity := range g.ArtifactDisks {
+		identities = append(identities, identity)
+	}
+	sort.Strings(identities)
+	for _, identity := range identities {
+		if _, err := g.verifyArtifactDisk(ctx, identity, g.ArtifactDisks[identity]); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -84,6 +111,10 @@ func (g GCPCompute) Handle(externalKey string) ProviderHandle {
 }
 func (g GCPCompute) EnsureReplica(ctx context.Context, spec ReplicaSpec) (ProviderHandle, error) {
 	if err := g.validate(spec); err != nil {
+		return ProviderHandle{}, fmt.Errorf("%w: %v", ErrInvalidReplicaSpec, err)
+	}
+	artifactDisk, err := g.resolveArtifactDisk(ctx, spec)
+	if err != nil {
 		return ProviderHandle{}, fmt.Errorf("%w: %v", ErrInvalidReplicaSpec, err)
 	}
 	handle := g.Handle(spec.ExternalKey)
@@ -107,6 +138,9 @@ func (g GCPCompute) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provid
 	startup := g.startup(spec, port)
 	metadata := "^|||^infercrane-external-key=" + spec.ExternalKey + "|||infercrane-intent-digest=" + g.intentDigest(spec) + "|||startup-script=" + startup
 	args := []string{"compute", "instances", "create", handle.ResourceID, "--project", g.Project, "--zone", g.Zone, "--machine-type", g.MachineType, "--accelerator", "type=" + g.GPUType + ",count=1", "--subnet", g.Subnet, "--no-address", "--service-account", g.ServiceAccount, "--scopes", "cloud-platform", "--image", g.VMImage, "--boot-disk-size", fmt.Sprintf("%dGB", g.BootDiskGiB), "--boot-disk-type", "pd-balanced", "--boot-disk-auto-delete", "--maintenance-policy", "TERMINATE", "--metadata", metadata, "--labels", "infercrane-managed=true", "--format", "json", "--quiet"}
+	if artifactDisk.Name != "" {
+		args = append(args, "--disk", "name="+artifactDisk.Name+",device-name=infercrane-model-cache,mode=ro,auto-delete=no")
+	}
 	output, err := g.run(ctx, args...)
 	if err != nil {
 		return ProviderHandle{}, fmt.Errorf("create GCP Compute instance: %w", err)
@@ -209,6 +243,12 @@ func (g GCPCompute) validate(spec ReplicaSpec) error {
 	if g.BootDiskGiB < 50 || g.BootDiskGiB > 65536 {
 		return errors.New("GCP boot disk must be between 50 and 65536 GiB")
 	}
+	if err := g.validateArtifactConfig(); err != nil {
+		return err
+	}
+	if g.artifactCachePolicy() == "required" && !artifactCacheRuntimeSupported(spec) {
+		return errors.New("GCP artifact cache is qualified only for vLLM and SGLang workloads")
+	}
 	if !spec.Workload.Empty() {
 		if err := spec.Workload.Validate(); err != nil {
 			return err
@@ -216,6 +256,138 @@ func (g GCPCompute) validate(spec ReplicaSpec) error {
 	}
 	return nil
 }
+
+func (g GCPCompute) validateArtifactConfig() error {
+	policy := g.ArtifactCachePolicy
+	if policy == "" {
+		policy = "prefer"
+	}
+	if policy != "disabled" && policy != "prefer" && policy != "required" {
+		return errors.New("GCP artifact cache policy must be disabled, prefer, or required")
+	}
+	if policy == "required" && len(g.ArtifactDisks) == 0 {
+		return errors.New("required GCP artifact caching needs an immutable model-to-disk mapping")
+	}
+	if policy == "disabled" && len(g.ArtifactDisks) > 0 {
+		return errors.New("disabled GCP artifact caching cannot configure persistent disks")
+	}
+	for identity, diskName := range g.ArtifactDisks {
+		if !validArtifactModelIdentity(identity) || !validGCPResourceName(diskName) {
+			return errors.New("GCP artifact disk mappings require immutable model identities and valid zonal disk names")
+		}
+	}
+	return nil
+}
+
+func (g GCPCompute) artifactCachePolicy() string {
+	if g.ArtifactCachePolicy == "disabled" || g.ArtifactCachePolicy == "required" {
+		return g.ArtifactCachePolicy
+	}
+	return "prefer"
+}
+
+func (g GCPCompute) resolveArtifactDisk(ctx context.Context, spec ReplicaSpec) (gcpDisk, error) {
+	if g.artifactCachePolicy() == "disabled" || !artifactCacheRuntimeSupported(spec) {
+		return gcpDisk{}, nil
+	}
+	identity := modelIdentity(spec)
+	diskName := g.ArtifactDisks[identity]
+	if diskName == "" {
+		if g.artifactCachePolicy() == "required" {
+			return gcpDisk{}, fmt.Errorf("GCP artifact cache requires a verified persistent disk for immutable model %q", identity)
+		}
+		return gcpDisk{}, nil
+	}
+	return g.verifyArtifactDisk(ctx, identity, diskName)
+}
+
+func (g GCPCompute) verifyArtifactDisk(ctx context.Context, identity, diskName string) (gcpDisk, error) {
+	if !validGCPResourceName(diskName) {
+		return gcpDisk{}, errors.New("GCP artifact cache disk has an invalid name")
+	}
+	output, err := g.run(ctx, "compute", "disks", "describe", diskName, "--project", g.Project, "--zone", g.Zone, "--format", "json")
+	if err != nil {
+		return gcpDisk{}, fmt.Errorf("verify GCP artifact disk: %w", err)
+	}
+	var disk gcpDisk
+	if json.Unmarshal(output, &disk) != nil || disk.Name != diskName {
+		return gcpDisk{}, errors.New("GCP artifact disk verification returned invalid output")
+	}
+	expected := "infercrane-model-identity-digest=" + modelIdentityDigest(identity)
+	if disk.Status != "READY" || disk.SizeGB == "" || !strings.HasSuffix(disk.Zone, "/zones/"+g.Zone) || disk.Description != expected {
+		return gcpDisk{}, fmt.Errorf("GCP artifact disk %s is not ready, zonal, and bound to immutable model identity digest %s", diskName, modelIdentityDigest(identity))
+	}
+	return disk, nil
+}
+
+func validGCPResourceName(value string) bool {
+	if value == "" || len(value) > 63 || value[0] < 'a' || value[0] > 'z' {
+		return false
+	}
+	for index, char := range value {
+		if char >= 'a' && char <= 'z' || char >= '0' && char <= '9' || char == '-' && index > 0 && index < len(value)-1 {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// Prefetch adopts a customer-prepared immutable zonal Persistent Disk. It
+// never creates billable storage or copies model bytes implicitly.
+func (g GCPCompute) Prefetch(ctx context.Context, request artifactcache.Request) (artifactcache.Operation, error) {
+	if err := request.Validate(); err != nil {
+		return artifactcache.Operation{}, artifactcache.Definitive("invalid_prefetch_request", err)
+	}
+	if g.artifactCachePolicy() == "disabled" {
+		return artifactcache.Operation{}, artifactcache.Definitive("artifact_cache_disabled", errors.New("GCP artifact cache adapter is disabled"))
+	}
+	if request.Provider != "gcp" || request.Region != g.Zone {
+		return artifactcache.Operation{}, artifactcache.Definitive("invalid_provider_boundary", errors.New("GCP artifact prefetch zone does not match the configured adapter"))
+	}
+	diskName, err := gcpDiskLocation(request.Location)
+	if err != nil {
+		return artifactcache.Operation{}, artifactcache.Definitive("invalid_cache_location", err)
+	}
+	if configured := g.ArtifactDisks[request.ModelIdentity]; configured == "" || configured != diskName {
+		return artifactcache.Operation{}, artifactcache.Definitive("artifact_cache_not_configured", errors.New("GCP artifact disk is not configured for this immutable model identity"))
+	}
+	if _, err = g.verifyArtifactDisk(ctx, request.ModelIdentity, diskName); err != nil {
+		return artifactcache.Operation{}, artifactcache.Definitive("artifact_disk_verification_failed", err)
+	}
+	return artifactcache.Operation{ProviderOperationID: diskName, Status: "succeeded"}, nil
+}
+
+// Observe emits short-lived evidence for the same verified disk boundary.
+func (g GCPCompute) Observe(ctx context.Context, request artifactcache.Request) (artifactcache.Observation, error) {
+	if err := request.Validate(); err != nil {
+		return artifactcache.Observation{}, err
+	}
+	diskName, err := gcpDiskLocation(request.Location)
+	if err != nil || g.artifactCachePolicy() == "disabled" || request.Provider != "gcp" || request.Region != g.Zone || g.ArtifactDisks[request.ModelIdentity] != diskName {
+		return artifactcache.Observation{}, errors.New("GCP artifact cache request does not match the configured boundary")
+	}
+	disk, err := g.verifyArtifactDisk(ctx, request.ModelIdentity, diskName)
+	if err != nil {
+		return artifactcache.Observation{}, err
+	}
+	observed := time.Now().UTC()
+	evidence, _ := json.Marshal(map[string]any{"disk": disk.Name, "zone": g.Zone, "size_gib": disk.SizeGB, "type": disk.Type, "model_identity_digest": modelIdentityDigest(request.ModelIdentity), "attachment": "read-only"})
+	return artifactcache.Observation{State: "present", Source: "gcp-persistent-disk", EvidenceJSON: string(evidence), ObservedAt: observed, ExpiresAt: observed.Add(10 * time.Minute)}, nil
+}
+
+func gcpDiskLocation(location string) (string, error) {
+	const prefix = "gcp-pd://"
+	if !strings.HasPrefix(location, prefix) {
+		return "", errors.New("GCP artifact cache location must use gcp-pd://DISK")
+	}
+	diskName := strings.TrimPrefix(location, prefix)
+	if !validGCPResourceName(diskName) {
+		return "", errors.New("GCP artifact cache location contains an invalid disk name")
+	}
+	return diskName, nil
+}
+
 func (g GCPCompute) describe(ctx context.Context, name string) (gcpInstance, error) {
 	output, err := g.run(ctx, "compute", "instances", "describe", name, "--project", g.Project, "--zone", g.Zone, "--format", "json")
 	if err != nil {
@@ -251,7 +423,7 @@ func (g GCPCompute) run(ctx context.Context, args ...string) ([]byte, error) {
 }
 
 func gcpNotFoundProbe(args []string) bool {
-	return len(args) >= 3 && args[0] == "compute" && args[1] == "instances" && (args[2] == "describe" || args[2] == "delete")
+	return len(args) >= 3 && args[0] == "compute" && ((args[1] == "instances" && (args[2] == "describe" || args[2] == "delete")) || (args[1] == "disks" && args[2] == "describe"))
 }
 
 // normalizeGCPAPIError retains only the provider error class and bounded
@@ -320,6 +492,7 @@ func (g GCPCompute) startup(spec ReplicaSpec, port int) string {
 		quoted[i] = shellQuote(arg)
 	}
 	secretURL := "https://secretmanager.googleapis.com/v1/projects/" + url.PathEscape(g.Project) + "/secrets/" + url.PathEscape(g.WorkerSecret) + "/versions/latest:access"
+	artifactBootstrap, artifactContainerArgs := gcpArtifactCacheBootstrap(g.ArtifactDisks[modelIdentity(spec)])
 	return "#!/bin/sh\nset -eu\n" +
 		"infercrane_stage() { printf 'infercrane_startup stage=%s at=%s\\n' \"$1\" \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" >/dev/console; }\n" +
 		"infercrane_stage identity_start\n" +
@@ -344,10 +517,26 @@ func (g GCPCompute) startup(spec ReplicaSpec, port int) string {
 		"  nvidia-smi >/dev/null\n" +
 		"fi\n" +
 		"infercrane_stage gpu_driver_ready\n" +
-		cachedImageBootstrap(image) +
+		cachedImageBootstrap(image) + artifactBootstrap +
 		"infercrane_stage runtime_start\n" +
-		"docker run -d --restart=unless-stopped $gpu_run_args -e INFERCRANE_WORKER_API_KEY=\"$worker_key\" -e VLLM_API_KEY=\"$worker_key\" -p " + fmt.Sprintf("%d:%d", port, port) + " " + shellQuote(image) + " " + strings.Join(quoted, " ") + "\n" +
+		"docker run -d --restart=unless-stopped $gpu_run_args " + artifactContainerArgs + "-e INFERCRANE_WORKER_API_KEY=\"$worker_key\" -e VLLM_API_KEY=\"$worker_key\" -p " + fmt.Sprintf("%d:%d", port, port) + " " + shellQuote(image) + " " + strings.Join(quoted, " ") + "\n" +
 		"infercrane_stage runtime_container_started\n"
+}
+
+func gcpArtifactCacheBootstrap(diskName string) (string, string) {
+	if diskName == "" {
+		return "infercrane_stage artifact_check\ninfercrane_stage artifact_cache_unconfigured\n", ""
+	}
+	bootstrap := "infercrane_stage artifact_check\n" +
+		"artifact_device=/dev/disk/by-id/google-infercrane-model-cache\n" +
+		"attempt=0\n" +
+		"while [ ! -b \"$artifact_device\" ] && [ \"$attempt\" -lt 60 ]; do attempt=$((attempt + 1)); sleep 5; done\n" +
+		"[ -b \"$artifact_device\" ] || { infercrane_stage artifact_cache_mount_failed; exit 1; }\n" +
+		"mkdir -p /var/lib/infercrane/huggingface\n" +
+		"mount -o ro,nosuid,nodev \"$artifact_device\" /var/lib/infercrane/huggingface || { infercrane_stage artifact_cache_mount_failed; exit 1; }\n" +
+		"infercrane_stage artifact_cache_hit\n"
+	containerArgs := "-e HF_HOME=/root/.cache/huggingface -e HF_HUB_OFFLINE=1 -e TRANSFORMERS_OFFLINE=1 -v /var/lib/infercrane/huggingface:/root/.cache/huggingface:ro "
+	return bootstrap, containerArgs
 }
 func metadataValue(instance gcpInstance, key string) string {
 	for _, item := range instance.Metadata.Items {

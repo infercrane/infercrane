@@ -62,6 +62,16 @@ adapter observation automatically. Snapshot creation remains an explicit operato
 the included bounded builder prepares it on a temporary CPU instance. The word `prefetch` still does
 not imply that the control API copied model bytes.
 
+For Kubernetes, the adapter can verify and adopt an administrator-prepared PVC bound to one exact
+`model@commit` digest. The claim must support multi-reader access. InferCrane mounts it read-only and
+sets the runtime's Hugging Face cache root, while Kubernetes and the CSI driver retain storage
+ownership. See the [Kubernetes cache setup](/integrations/kubernetes#reuse-an-immutable-model-cache).
+
+For GCP Compute, the adapter verifies an administrator-prepared zonal Persistent Disk whose exact
+description binds it to one immutable `model@commit` digest. InferCrane attaches it read-only with
+deletion disabled, mounts it as the runtime's Hugging Face cache, and leaves its lifecycle with the
+customer. See the [GCP cache setup](/integrations/gcp-compute#reuse-an-immutable-model-cache).
+
 ## Why prefetch is not a universal download command
 
 Providers expose different ownership boundaries. For example, RunPod Serverless configures one

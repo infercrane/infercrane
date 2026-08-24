@@ -536,6 +536,25 @@ func modelIdentityDigest(identity string) string {
 	return "sha256:" + hex.EncodeToString(digest[:])
 }
 
+func validArtifactModelIdentity(identity string) bool {
+	separator := strings.LastIndex(identity, "@")
+	if separator <= 0 || strings.TrimSpace(identity) != identity {
+		return false
+	}
+	revision := identity[separator+1:]
+	if len(revision) != 40 {
+		return false
+	}
+	for _, char := range revision {
+		if char < '0' || char > '9' {
+			if char < 'a' || char > 'f' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func (a AWSEC2) findHandle(ctx context.Context, handle ProviderHandle) (awsInstance, error) {
 	if handle.ResourceID != "" {
 		instances, err := a.describe(ctx, "Name=instance-id,Values="+handle.ResourceID)

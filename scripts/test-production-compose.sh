@@ -130,10 +130,14 @@ INFERCRANE_GCP_SERVICE_ACCOUNT=runtime@acme-test.iam.gserviceaccount.com \
 INFERCRANE_GCP_VM_IMAGE=projects/cos-cloud/global/images/cos-stable-test \
 INFERCRANE_GCP_WORKER_SECRET=infercrane-worker-key \
 INFERCRANE_GCP_BOOT_DISK_GIB=200 \
+INFERCRANE_GCP_ARTIFACT_CACHE_POLICY=required \
+INFERCRANE_GCP_ARTIFACT_DISKS_JSON='{"Qwen/Qwen3-8B@0123456789abcdef0123456789abcdef01234567":"qwen3-8b-cache"}' \
 INFERCRANE_GCP_CONTAINER_IMAGE=example.invalid/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
   docker compose -f "$compose_file" -f "$gcp_compose_file" config >"$gcp_rendered"
 grep -q 'INFERCRANE_GCP_PROJECT: acme-test' "$gcp_rendered"
 grep -q 'INFERCRANE_GCP_BOOT_DISK_GIB: "200"' "$gcp_rendered"
+grep -q 'INFERCRANE_GCP_ARTIFACT_CACHE_POLICY: required' "$gcp_rendered"
+grep -q 'qwen3-8b-cache' "$gcp_rendered"
 grep -q 'CLOUDSDK_CONFIG: /tmp/infercrane-gcloud' "$gcp_rendered"
 grep -q 'INFERCRANE_GCLOUD_CONFIG_SOURCE: /run/infercrane/gcloud-bootstrap' "$gcp_rendered"
 grep -q 'target: /run/infercrane/gcloud-bootstrap' "$gcp_rendered"
