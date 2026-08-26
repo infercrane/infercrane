@@ -34,6 +34,10 @@
   "bugs": {
     "url": "https://github.com/infercrane/infercrane/issues"
   },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "devDependencies": {
     "@types/node": "24.10.1",
     "typescript": "5.9.3"

@@ -1,0 +1,7 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Documented synthetic bearer used only by the paid RunPod acceptance harness"
+regexTarget = "secret"
+regexes = ['''^infercrane-runpod-acceptance-key$''']

@@ -18,6 +18,7 @@ done
 go mod verify
 ./scripts/check-repository-hygiene.sh
 ./scripts/check-license-boundaries.sh
+./scripts/check-publication-contract.sh
 ./scripts/test-release-tag.sh
 go run ./tools/openapi-codegen -check
 go test -race -count=1 ./...
