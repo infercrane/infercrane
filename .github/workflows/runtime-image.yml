@@ -1,6 +1,11 @@
 name: Runtime image
 
 on:
+  pull_request:
+    paths:
+      - images/vllm-runpod/Dockerfile
+      - images/vllm-runpod/start-ssh.sh
+      - images/vllm-runpod/THIRD_PARTY_COMPONENTS.md
   workflow_dispatch:
     inputs:
       vllm_version:
@@ -29,6 +34,7 @@ concurrency:
 
 jobs:
   publish-runpod-vllm:
+    name: ${{ github.event_name == 'pull_request' && 'validate-runpod-vllm' || 'publish-runpod-vllm' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -38,6 +44,7 @@ jobs:
           docker system prune --all --force
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        if: github.event_name != 'pull_request'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -62,17 +69,18 @@ jobs:
           context: .
           file: images/vllm-runpod/Dockerfile
           platforms: linux/amd64
-          push: true
+          push: ${{ github.event_name != 'pull_request' }}
           build-args: |
             VLLM_VERSION=${{ inputs.vllm_version || '0.22.0' }}
             VLLM_BASE_IMAGE=${{ inputs.vllm_base_image || 'vllm/vllm-openai@sha256:0fec7ec5f3e6bc168e54899935fb0557da908a4832a1dbc88e2debcf2f889416' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: ${{ github.event_name != 'pull_request' && 'type=gha,mode=max' || '' }}
           provenance: mode=max
           sbom: true
       - name: Scan the published runtime image by digest
+        if: github.event_name != 'pull_request'
         uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7
         with:
           image: ghcr.io/infercrane/vllm-runpod@${{ steps.build.outputs.digest }}
@@ -82,12 +90,14 @@ jobs:
           severity-cutoff: critical
           output-format: table
       - name: Attest the runtime image digest
+        if: github.event_name != 'pull_request'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
           subject-name: ghcr.io/infercrane/vllm-runpod
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
       - name: Make runtime image public
+        if: github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -96,7 +106,7 @@ jobs:
             -f visibility=public
           test "$(gh api /orgs/infercrane/packages/container/vllm-runpod --jq .visibility)" = public
       - name: Record publication instructions
-        if: always()
+        if: always() && github.event_name != 'pull_request'
         run: |
           cat >>"$GITHUB_STEP_SUMMARY" <<'EOF'
           The image was built and pushed with immutable provenance. GitHub may
