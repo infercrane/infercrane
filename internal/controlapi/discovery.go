@@ -38,6 +38,9 @@ func discoverEndpoint(ctx context.Context, supplied *http.Client, baseURL, reque
 	if err != nil {
 		return endpointDiscovery{}, err
 	}
+	// Endpoint discovery is the intended network boundary. restrictedDiscoveryClient
+	// removes ambient authority and validates every resolved address before dialing.
+	// codeql[go/request-forgery]
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
 	if err != nil {
 		return endpointDiscovery{}, err
@@ -45,7 +48,7 @@ func discoverEndpoint(ctx context.Context, supplied *http.Client, baseURL, reque
 	// The URL is an authenticated user's explicit inference endpoint. The
 	// restricted client below disables proxies, redirects, cookies, and dials
 	// only the IP addresses that passed the discovery address policy.
-	resp, err := client.Do(req) // lgtm[go/request-forgery]
+	resp, err := client.Do(req)
 	if err != nil {
 		return endpointDiscovery{}, fmt.Errorf("could not reach %s: %w", modelsURL, err)
 	}
