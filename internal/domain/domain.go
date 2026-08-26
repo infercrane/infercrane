@@ -59,6 +59,7 @@ type DeploymentRevisionSpec struct {
 	Cloud              string                   `json:"cloud,omitempty"`
 	ProviderAdapter    string                   `json:"provider_adapter,omitempty"`
 	GPU                string                   `json:"gpu,omitempty"`
+	GPUCount           int                      `json:"gpu_count,omitempty"`
 	Region             string                   `json:"region,omitempty"`
 	Port               int                      `json:"port,omitempty"`
 	Workload           runtimecontract.Workload `json:"workload,omitzero"`
@@ -484,6 +485,7 @@ type InferenceRecommendation struct {
 
 type CapacityEvidence struct {
 	ID, TenantID, Provider, Runtime, ComputeMode, Region, GPU string
+	GPUCount                                                  int
 	State, Source, EvidenceJSON                               string
 	ObservedAt, ExpiresAt, CreatedAt                          time.Time
 }
@@ -543,6 +545,7 @@ type ArtifactPrefetch struct {
 
 type CapacityOperation struct {
 	ID, TenantID, Provider, Runtime, ComputeMode, Region, GPU string
+	GPUCount                                                  int
 	Operation, ResourceKey, Outcome, ErrorCode                string
 	StartedAt, CompletedAt, CreatedAt                         time.Time
 	DurationSeconds                                           float64
@@ -554,6 +557,7 @@ type CapacitySummary struct {
 	ComputeMode        string    `json:"compute_mode"`
 	Region             string    `json:"region"`
 	GPU                string    `json:"gpu"`
+	GPUCount           int       `json:"gpu_count"`
 	Attempts           int       `json:"attempts"`
 	Succeeded          int       `json:"succeeded"`
 	Pending            int       `json:"pending"`

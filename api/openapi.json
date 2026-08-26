@@ -717,6 +717,13 @@
           "gpu": {
             "type": "string"
           },
+          "gpu_count": {
+            "default": 1,
+            "description": "Accelerators allocated to each runtime replica.",
+            "maximum": 1024,
+            "minimum": 1,
+            "type": "integer"
+          },
           "max_replicas": {
             "minimum": 0,
             "type": "integer"

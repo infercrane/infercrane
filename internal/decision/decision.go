@@ -52,6 +52,7 @@ type Evidence struct {
 	Provider           string     `json:"provider"`
 	Region             string     `json:"region"`
 	GPU                string     `json:"gpu"`
+	GPUCount           int        `json:"gpu_count"`
 	ComputeMode        string     `json:"compute_mode"`
 	QualificationState string     `json:"qualification_state"`
 	CapacityState      string     `json:"capacity_state"`
@@ -140,7 +141,11 @@ func Recommend(policy SLOPolicy, evidence []Evidence) Result {
 }
 
 func evaluate(policy SLOPolicy, row Evidence) Candidate {
-	c := Candidate{EvidenceID: row.ID, Configuration: fmt.Sprintf("%s/%s/%s/%s/%s", row.Provider, row.Region, row.GPU, row.Runtime, row.ComputeMode), Qualification: row.QualificationState, CapacityState: row.CapacityState, CapacitySource: row.CapacitySource, CapacityObserved: row.CapacityObservedAt, CapacityExpires: row.CapacityExpiresAt}
+	gpuCount := row.GPUCount
+	if gpuCount == 0 {
+		gpuCount = 1
+	}
+	c := Candidate{EvidenceID: row.ID, Configuration: fmt.Sprintf("%s/%s/%sx%d/%s/%s", row.Provider, row.Region, row.GPU, gpuCount, row.Runtime, row.ComputeMode), Qualification: row.QualificationState, CapacityState: row.CapacityState, CapacitySource: row.CapacitySource, CapacityObserved: row.CapacityObservedAt, CapacityExpires: row.CapacityExpiresAt}
 	if !row.Qualified {
 		c.Missing = append(c.Missing, "qualified_runtime_provider_mode")
 	}

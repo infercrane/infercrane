@@ -45,7 +45,10 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["gpu"],
-      "properties": { "gpu": { "type": "string", "minLength": 1, "maxLength": 128 } }
+      "properties": {
+        "gpu": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "gpu_count": { "type": "integer", "minimum": 1, "maximum": 1024, "default": 1 }
+      }
     },
     "provider": {
       "type": "object",

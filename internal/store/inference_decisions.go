@@ -105,7 +105,10 @@ func (s *Store) InferenceRecommendations(ctx context.Context, tenant, deployment
 }
 
 func (s *Store) RecordCapacityEvidence(ctx context.Context, row domain.CapacityEvidence) (domain.CapacityEvidence, error) {
-	if row.TenantID == "" || row.Provider == "" || row.Runtime == "" || row.ComputeMode == "" || row.Source == "" || row.ObservedAt.IsZero() || !row.ExpiresAt.After(row.ObservedAt) || row.ExpiresAt.Sub(row.ObservedAt) > 24*time.Hour {
+	if row.GPUCount == 0 {
+		row.GPUCount = 1
+	}
+	if row.TenantID == "" || row.Provider == "" || row.Runtime == "" || row.ComputeMode == "" || row.GPUCount < 1 || row.GPUCount > 1024 || row.Source == "" || row.ObservedAt.IsZero() || !row.ExpiresAt.After(row.ObservedAt) || row.ExpiresAt.Sub(row.ObservedAt) > 24*time.Hour {
 		return domain.CapacityEvidence{}, errors.New("complete bounded capacity evidence is required")
 	}
 	if len(row.Source) > 256 || len(row.EvidenceJSON) > 64<<10 || !json.Valid([]byte(row.EvidenceJSON)) {
@@ -124,7 +127,7 @@ func (s *Store) RecordCapacityEvidence(ctx context.Context, row domain.CapacityE
 		}
 	}
 	stamp := now()
-	_, err := s.ExecContext(ctx, `INSERT INTO capacity_evidence(id,tenant_id,provider,runtime,compute_mode,region,gpu,state,source,evidence_json,observed_at,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?::jsonb,?,?,?)`, row.ID, row.TenantID, row.Provider, row.Runtime, row.ComputeMode, row.Region, row.GPU, row.State, row.Source, nullJSON(row.EvidenceJSON), row.ObservedAt.UTC().Format(time.RFC3339Nano), row.ExpiresAt.UTC().Format(time.RFC3339Nano), stamp)
+	_, err := s.ExecContext(ctx, `INSERT INTO capacity_evidence(id,tenant_id,provider,runtime,compute_mode,region,gpu,gpu_count,state,source,evidence_json,observed_at,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?::jsonb,?,?,?)`, row.ID, row.TenantID, row.Provider, row.Runtime, row.ComputeMode, row.Region, row.GPU, row.GPUCount, row.State, row.Source, nullJSON(row.EvidenceJSON), row.ObservedAt.UTC().Format(time.RFC3339Nano), row.ExpiresAt.UTC().Format(time.RFC3339Nano), stamp)
 	if err != nil {
 		return domain.CapacityEvidence{}, err
 	}
@@ -132,10 +135,13 @@ func (s *Store) RecordCapacityEvidence(ctx context.Context, row domain.CapacityE
 	return row, nil
 }
 
-func (s *Store) LatestCapacityEvidence(ctx context.Context, tenant, provider, runtime, mode, region, gpu string) (domain.CapacityEvidence, error) {
+func (s *Store) LatestCapacityEvidence(ctx context.Context, tenant, provider, runtime, mode, region, gpu string, gpuCount int) (domain.CapacityEvidence, error) {
+	if gpuCount == 0 {
+		gpuCount = 1
+	}
 	var row domain.CapacityEvidence
 	var observed, expires, created string
-	err := s.QueryRowContext(ctx, `SELECT id,tenant_id,provider,runtime,compute_mode,region,gpu,state,source,evidence_json::text,observed_at,expires_at,created_at FROM capacity_evidence WHERE tenant_id=? AND provider=? AND runtime=? AND compute_mode=? AND region=? AND gpu=? ORDER BY observed_at DESC,id DESC LIMIT 1`, tenant, provider, runtime, mode, region, gpu).Scan(&row.ID, &row.TenantID, &row.Provider, &row.Runtime, &row.ComputeMode, &row.Region, &row.GPU, &row.State, &row.Source, &row.EvidenceJSON, &observed, &expires, &created)
+	err := s.QueryRowContext(ctx, `SELECT id,tenant_id,provider,runtime,compute_mode,region,gpu,gpu_count,state,source,evidence_json::text,observed_at,expires_at,created_at FROM capacity_evidence WHERE tenant_id=? AND provider=? AND runtime=? AND compute_mode=? AND region=? AND gpu=? AND gpu_count=? ORDER BY observed_at DESC,id DESC LIMIT 1`, tenant, provider, runtime, mode, region, gpu, gpuCount).Scan(&row.ID, &row.TenantID, &row.Provider, &row.Runtime, &row.ComputeMode, &row.Region, &row.GPU, &row.GPUCount, &row.State, &row.Source, &row.EvidenceJSON, &observed, &expires, &created)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.CapacityEvidence{}, ErrNotFound
 	}

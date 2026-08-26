@@ -656,13 +656,38 @@ func TestAWSEC2PortableWorkloadUsesDigestArgvAndSecretEnvironment(t *testing.T) 
 			userData = runner.runInstanceArgs[i+1]
 		}
 	}
-	for _, want := range []string{"docker image inspect '" + spec.Workload.Image + "'", "docker pull '" + spec.Workload.Image + "'", "infercrane_stage image_cache_hit", `-e INFERCRANE_WORKER_API_KEY="$worker_key"`, "'serve' '--model' 'Qwen/Qwen3-8B' '--label' 'two words' '--port' '9000'", `docker logs --follow "$container_id" >/dev/console 2>&1 &`} {
+	for _, want := range []string{"docker image inspect '" + spec.Workload.Image + "'", "docker pull '" + spec.Workload.Image + "'", "infercrane_stage image_cache_hit", `-e INFERCRANE_WORKER_API_KEY="$worker_key"`, "--entrypoint 'serve' '" + spec.Workload.Image + "' '--model' 'Qwen/Qwen3-8B' '--label' 'two words' '--port' '9000'", `docker logs --follow "$container_id" >/dev/console 2>&1 &`} {
 		if !strings.Contains(userData, want) {
 			t.Fatalf("user data missing %q:\n%s", want, userData)
 		}
 	}
 	if strings.Contains(userData, "temporary-secret") {
 		t.Fatal("temporary AWS credentials leaked into user data")
+	}
+}
+
+func TestAWSEC2FailsBeforeMutationWhenInstanceTopologyDoesNotMatch(t *testing.T) {
+	runner := &fakeAWSRunner{}
+	provider := testAWSEC2(runner)
+	provider.GPUCount = 1
+	spec := awsReplicaSpec()
+	spec.GPUCount = 4
+	if _, err := provider.EnsureReplica(context.Background(), spec); !errors.Is(err, ErrInvalidReplicaSpec) || runner.createCalls != 0 {
+		t.Fatalf("createCalls=%d err=%v", runner.createCalls, err)
+	}
+}
+
+func TestAWSEC2PortableWorkloadOverridesEntrypointAndChecksExactTopology(t *testing.T) {
+	provider := testAWSEC2(&fakeAWSRunner{})
+	provider.GPUCount = 4
+	spec := awsReplicaSpec()
+	spec.GPUCount = 4
+	spec.Workload = runtimecontract.Workload{Image: "registry.example/runtime@sha256:" + strings.Repeat("b", 64), Command: []string{"vllm", "serve", "${MODEL}"}, Protocol: "openai", Port: 8000, ReadinessPath: "/health", ModelsPath: "/v1/models", MetricsPath: "/metrics", Cancellation: "http-disconnect", Drain: "connection", ShutdownGraceSeconds: 30}
+	startup := provider.userData(spec, 8000, "")
+	for _, expected := range []string{`[ "$actual_gpu_count" -eq 4 ]`, "--entrypoint 'vllm' '" + spec.Workload.Image + "' 'serve' 'Qwen/Qwen3-8B'"} {
+		if !strings.Contains(startup, expected) {
+			t.Fatalf("startup missing %q:\n%s", expected, startup)
+		}
 	}
 }
 

@@ -325,7 +325,15 @@ func (k Kubernetes) manifest(spec ReplicaSpec, artifactClaim string) ([]byte, er
 	metadata := map[string]any{"name": name, "namespace": k.Namespace, "labels": labels, "annotations": map[string]any{"infercrane.dev/external-key": spec.ExternalKey, "infercrane.dev/provider-contract": "infercrane.provider/v1", "infercrane.dev/intent-hash": intentHash}}
 	workerSecret := map[string]any{"secretKeyRef": map[string]any{"name": k.WorkerSecretName, "key": k.WorkerSecretKey}}
 	environment := []any{map[string]any{"name": "INFERCRANE_WORKER_API_KEY", "valueFrom": workerSecret}, map[string]any{"name": "VLLM_API_KEY", "valueFrom": workerSecret}}
-	container := map[string]any{"name": "runtime", "image": image, "imagePullPolicy": "IfNotPresent", "args": command, "ports": []any{map[string]any{"name": "http", "containerPort": port}}, "env": environment, "readinessProbe": map[string]any{"httpGet": map[string]any{"path": readinessPath, "port": "http"}, "periodSeconds": 5, "timeoutSeconds": 2, "failureThreshold": 12}, "resources": map[string]any{"limits": map[string]any{k.GPUResource: "1"}, "requests": map[string]any{k.GPUResource: "1"}}, "securityContext": map[string]any{"allowPrivilegeEscalation": false}}
+	gpuCount := spec.GPUCount
+	if gpuCount == 0 {
+		gpuCount = 1
+	}
+	container := map[string]any{"name": "runtime", "image": image, "imagePullPolicy": "IfNotPresent", "args": command, "ports": []any{map[string]any{"name": "http", "containerPort": port}}, "env": environment, "readinessProbe": map[string]any{"httpGet": map[string]any{"path": readinessPath, "port": "http"}, "periodSeconds": 5, "timeoutSeconds": 2, "failureThreshold": 12}, "resources": map[string]any{"limits": map[string]any{k.GPUResource: fmt.Sprint(gpuCount)}, "requests": map[string]any{k.GPUResource: fmt.Sprint(gpuCount)}}, "securityContext": map[string]any{"allowPrivilegeEscalation": false}}
+	if !spec.Workload.Empty() {
+		container["command"] = command[:1]
+		container["args"] = command[1:]
+	}
 	podSpec := map[string]any{"serviceAccountName": k.ServiceAccount, "terminationGracePeriodSeconds": shutdown, "containers": []any{container}, "nodeSelector": map[string]any{k.GPUProductLabel: spec.GPU}}
 	if artifactClaim != "" {
 		container["volumeMounts"] = []any{map[string]any{"name": "model-cache", "mountPath": "/models", "readOnly": true}}
@@ -365,6 +373,9 @@ func (k Kubernetes) validate(spec ReplicaSpec) error {
 	}
 	if spec.ExternalKey == "" || len(spec.ExternalKey) > 253 || spec.Model == "" || spec.Cloud != "kubernetes" || spec.GPU == "" {
 		return errors.New("Kubernetes replica requires bounded external key, model, cloud kubernetes, and GPU")
+	}
+	if spec.GPUCount < 0 || spec.GPUCount > 1024 {
+		return errors.New("Kubernetes GPU count must be between 1 and 1024")
 	}
 	if k.artifactPolicy() == "required" && !artifactCacheRuntimeSupported(spec) {
 		return errors.New("Kubernetes artifact cache is qualified only for vLLM and SGLang workloads")

@@ -160,15 +160,12 @@ jobs:
           subject-name: ghcr.io/infercrane/vllm-runpod
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
-      - name: Make runtime image public
+      - name: Verify the runtime image is publicly pullable
         if: github.event_name != 'pull_request'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh api --method PATCH \
-            /orgs/infercrane/packages/container/vllm-runpod \
-            -f visibility=public
-          test "$(gh api /orgs/infercrane/packages/container/vllm-runpod --jq .visibility)" = public
+          docker logout ghcr.io
+          docker buildx imagetools inspect \
+            "ghcr.io/infercrane/vllm-runpod:v${{ inputs.vllm_version || '0.22.1' }}"
       - name: Remove the superseded vulnerable v0.22.0 package version
         if: github.event_name != 'pull_request'
         env:
@@ -186,9 +183,9 @@ jobs:
         if: always() && github.event_name != 'pull_request'
         run: |
           cat >>"$GITHUB_STEP_SUMMARY" <<'EOF'
-          The image was built and pushed with immutable provenance. GitHub may
-          require an organization package administrator to set the package to
-          public once at:
+          The image was built, scanned by immutable digest, tagged, attested,
+          and verified through an anonymous registry pull. Package visibility
+          is a one-time organization setting at:
 
           https://github.com/orgs/infercrane/packages/container/package/vllm-runpod/settings
           EOF

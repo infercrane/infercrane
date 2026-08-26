@@ -85,6 +85,26 @@ func TestCatalogProposalIsDeterministicUnmeasuredAndDeployable(t *testing.T) {
 	}
 }
 
+func TestCatalogProposalCarriesGeneralImmutableMultiGPUProfile(t *testing.T) {
+	request := Request{ModelIdentity: "glm-5.3-flash", Provider: "kubernetes", GPU: "H200", Runtimes: []string{"custom-oci"}, Objective: "throughput", IncludeSimulated: true, MaxCandidates: 1}
+	proposal, err := catalogSource(t).Propose(context.Background(), request)
+	if err != nil || len(proposal.Candidates) != 1 {
+		t.Fatalf("proposal=%+v err=%v", proposal, err)
+	}
+	candidate := proposal.Candidates[0]
+	if candidate.Deployment.Resources.GPUCount != 4 || candidate.Deployment.Runtime.Workload.Image == "" || candidate.Deployment.Runtime.Version == "" || !hasFeature(candidate.Features, "immutable_runtime_artifact", "pinned") {
+		t.Fatalf("portable serving profile was flattened: %+v", candidate)
+	}
+	if err = ValidateProposal(proposal); err != nil {
+		t.Fatalf("portable serving proposal failed validation: %v", err)
+	}
+	request.GPU = "L40S"
+	wrongGPU, err := catalogSource(t).Propose(context.Background(), request)
+	if err != nil || len(wrongGPU.Candidates) != 0 || !reflect.DeepEqual(wrongGPU.Missing, []string{"reviewed_runtime_profile"}) {
+		t.Fatalf("hardware-specific profile crossed its reviewed GPU boundary: %+v err=%v", wrongGPU, err)
+	}
+}
+
 func TestCatalogProposalFailsClosedForUnknownOrUnqualifiedBoundary(t *testing.T) {
 	unknown, err := catalogSource(t).Propose(context.Background(), Request{ModelIdentity: "unknown/model", Provider: "gcp", Region: "europe-west4", GPU: "nvidia-l4", Objective: "latency"})
 	if err != nil || !reflect.DeepEqual(unknown.Missing, []string{"reviewed_model_recipe"}) || len(unknown.Candidates) != 0 {

@@ -113,6 +113,14 @@ func TestEnsureUsesProviderNeutralImageOutsideRunPod(t *testing.T) {
 	}
 }
 
+func TestEnsureCompilesExactAcceleratorCount(t *testing.T) {
+	runner := &fakeSkyRunner{}
+	_, err := (SkyPilot{APIKey: "secret", Runner: runner}).EnsureReplica(context.Background(), ReplicaSpec{ExternalKey: "prod-r0", Model: "model", Cloud: "kubernetes", GPU: "H200", GPUCount: 4})
+	if err != nil || !strings.Contains(runner.launchTask, "accelerators: H200:4") {
+		t.Fatalf("task=%s err=%v", runner.launchTask, err)
+	}
+}
+
 func TestEnsureUsesVersionedImageForExplicitRuntime(t *testing.T) {
 	runner := &fakeSkyRunner{}
 	provider := SkyPilot{APIKey: "secret", Runner: runner}

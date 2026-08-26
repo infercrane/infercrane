@@ -135,6 +135,31 @@ func TestIntelligenceCommandsRejectUnsupportedOutputBeforeNetworkAccess(t *testi
 	}
 }
 
+func TestGPUCountIsNeverSilentlyIgnoredForExistingCapacity(t *testing.T) {
+	cfg := config.Config{ControlURL: "http://127.0.0.1:1", APIKey: "secret"}
+	tests := []struct {
+		name string
+		run  func() error
+	}{
+		{"plan", func() error {
+			return planCommand(context.Background(), cfg, []string{"model", "--targets", "worker-a", "--gpu-count", "4"})
+		}},
+		{"deploy", func() error {
+			return deployAPICommand(context.Background(), cfg, "deploy", []string{"model", "--targets", "worker-a", "--gpu-count", "4"})
+		}},
+		{"rollout", func() error {
+			return rolloutCommand(context.Background(), cfg, []string{"create", "production", "--model", "model", "--gpu-count", "4"})
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if err := test.run(); err == nil || !strings.Contains(err.Error(), "applies only to provisioned") {
+				t.Fatalf("err=%v", err)
+			}
+		})
+	}
+}
+
 func TestCapacityRejectsUnexpectedPositionalArgument(t *testing.T) {
 	err := capacityCommand(context.Background(), config.Config{ControlURL: "http://127.0.0.1:1", APIKey: "secret"}, []string{"deployment-name"})
 	if err == nil || !strings.Contains(err.Error(), "usage: infercrane capacity") {

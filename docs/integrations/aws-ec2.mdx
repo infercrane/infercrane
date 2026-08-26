@@ -50,6 +50,7 @@ export INFERCRANE_AWS_SECURITY_GROUP_IDS='sg-0123456789abcdef0'
 export INFERCRANE_AWS_AMI_ID='ami-0123456789abcdef0'
 export INFERCRANE_AWS_INSTANCE_TYPE='g6e.xlarge'
 export INFERCRANE_AWS_GPU='L40S'
+export INFERCRANE_AWS_GPU_COUNT='1'
 export INFERCRANE_AWS_INSTANCE_PROFILE_ARN='arn:aws:iam::123456789012:instance-profile/infercrane-worker'
 export INFERCRANE_AWS_WORKER_SECRET_ARN='arn:aws:secretsmanager:eu-central-1:123456789012:secret:infercrane-worker-key'
 export INFERCRANE_AWS_IMAGE_DIGEST='vllm/vllm-openai@sha256:REPLACE_WITH_QUALIFIED_DIGEST'
@@ -67,6 +68,11 @@ returns a definitive insufficient-capacity response, InferCrane tries the next s
 placement-specific idempotency token. It does not cross a boundary after timeouts, authentication
 failures, or ambiguous responses; the durable retry first discovers any owned instance by tag.
 `INFERCRANE_AWS_SUBNET_ID` remains supported for a single subnet.
+
+`INFERCRANE_AWS_GPU` and `INFERCRANE_AWS_GPU_COUNT` describe the exact accelerator topology of the
+configured instance type. A DeploymentSpec requesting another type or count fails before the EC2
+create call. Configure a separate control-plane/provider profile when you need a different instance
+topology; InferCrane does not guess instance-family GPU counts.
 
 The Secrets Manager value referenced by `INFERCRANE_AWS_WORKER_SECRET_ARN` must contain the same
 worker credential configured as `INFERCRANE_API_KEY` on this self-hosted control plane. InferCrane

@@ -55,8 +55,21 @@ provider: {cloud: runpod}
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.APIVersion != "infercrane.dev/v1" || loaded.Kind != "Deployment" || loaded.Compute.Mode != "elastic" || loaded.Runtime.Engine != "vllm" || loaded.Scaling.MinReplicas != 1 || loaded.Scaling.MaxReplicas != 1 || loaded.Routing.Strategy != "round-robin" {
+	if loaded.APIVersion != "infercrane.dev/v1" || loaded.Kind != "Deployment" || loaded.Compute.Mode != "elastic" || loaded.Runtime.Engine != "vllm" || loaded.Resources.GPUCount != 1 || loaded.Scaling.MinReplicas != 1 || loaded.Scaling.MaxReplicas != 1 || loaded.Routing.Strategy != "round-robin" {
 		t.Fatalf("loaded=%+v", loaded)
+	}
+}
+
+func TestLoadPreservesExactAcceleratorTopology(t *testing.T) {
+	loaded, err := Load(writeSpec(t, `
+name: multi-gpu
+model: {id: acme/model}
+runtime: {engine: custom-oci, workload: {image: "registry.example/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", command: [serve], protocol: openai, port: 8000, readiness_path: /health, models_path: /v1/models, metrics_path: /metrics, cancellation: http-disconnect, drain: connection, shutdown_grace_seconds: 30}}
+resources: {gpu: H200, gpu_count: 4}
+provider: {cloud: kubernetes}
+`))
+	if err != nil || loaded.Resources.GPUCount != 4 {
+		t.Fatalf("loaded=%+v err=%v", loaded, err)
 	}
 }
 

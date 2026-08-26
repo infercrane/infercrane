@@ -60,6 +60,15 @@ func (s *Store) EnsureCandidateRevision(ctx context.Context, tenant, deploymentN
 	if normalized.ComputeMode == "elastic" && (normalized.Cloud == "" || normalized.GPU == "") {
 		return domain.DeploymentRevision{}, errors.New("elastic revision requires cloud and gpu")
 	}
+	if normalized.ComputeMode != "existing" && normalized.GPUCount == 0 {
+		normalized.GPUCount = 1
+	}
+	if normalized.ComputeMode != "existing" && (normalized.GPUCount < 1 || normalized.GPUCount > 1024) {
+		return domain.DeploymentRevision{}, errors.New("revision gpu_count must be between 1 and 1024")
+	}
+	if normalized.ComputeMode == "serverless" && normalized.GPUCount != 1 {
+		return domain.DeploymentRevision{}, errors.New("serverless revision currently requires gpu_count 1")
+	}
 	if normalized.ComputeMode != "existing" {
 		if err := support.V1().Validate(normalized.Runtime, normalized.Cloud, normalized.ComputeMode); err != nil {
 			return domain.DeploymentRevision{}, fmt.Errorf("support policy: %w", err)

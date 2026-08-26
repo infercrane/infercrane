@@ -16,7 +16,7 @@ var nonNameCharacter = regexp.MustCompile(`[^a-z0-9]+`)
 type Input struct {
 	Name, Model, ComputeMode, Cloud, ProviderAdapter, GPU, Region, Runtime, Routing string
 	Targets, RuntimeArgs                                                            []string
-	MinReplicas, MaxReplicas                                                        int
+	GPUCount, MinReplicas, MaxReplicas                                              int
 	Serving                                                                         servingcontract.Topology
 }
 
@@ -50,7 +50,7 @@ type Readiness struct {
 // annotate a static plan. It is historical evidence, not a provider promise.
 type CapacityEvidence struct {
 	Provider, Runtime, ComputeMode, Region, GPU string
-	Attempts, Succeeded, Pending                int
+	GPUCount, Attempts, Succeeded, Pending      int
 	SuccessRate                                 float64
 	DurationP50Seconds, DurationP95Seconds      *float64
 }
@@ -62,10 +62,10 @@ type Change struct {
 }
 
 type Current struct {
-	Model, Runtime, Routing, ActiveRevision          string
-	ComputeMode, Cloud, ProviderAdapter, GPU, Region string
-	MinReplicas, MaxReplicas, ActiveRevisionNumber   int
-	Serving                                          servingcontract.Topology
+	Model, Runtime, Routing, ActiveRevision                  string
+	ComputeMode, Cloud, ProviderAdapter, GPU, Region         string
+	GPUCount, MinReplicas, MaxReplicas, ActiveRevisionNumber int
+	Serving                                                  servingcontract.Topology
 }
 
 type Plan struct {
@@ -76,6 +76,7 @@ type Plan struct {
 	Cloud           string                   `json:"cloud,omitempty"`
 	ProviderAdapter string                   `json:"provider_adapter,omitempty"`
 	GPU             string                   `json:"gpu,omitempty"`
+	GPUCount        int                      `json:"gpu_count,omitempty"`
 	Region          string                   `json:"region,omitempty"`
 	Runtime         string                   `json:"runtime"`
 	Routing         string                   `json:"routing"`
@@ -98,6 +99,12 @@ func Compare(p Plan, current Current) Plan {
 			current.ComputeMode = "elastic"
 		}
 	}
+	if current.GPU != "" && current.GPUCount == 0 {
+		current.GPUCount = 1
+	}
+	if p.GPU != "" && p.GPUCount == 0 {
+		p.GPUCount = 1
+	}
 	addChange := func(field, before, after string) {
 		if before != after {
 			p.Changes = append(p.Changes, Change{Field: field, Before: before, After: after})
@@ -109,6 +116,7 @@ func Compare(p Plan, current Current) Plan {
 	addChange("cloud", current.Cloud, p.Cloud)
 	addChange("provider adapter", current.ProviderAdapter, p.ProviderAdapter)
 	addChange("GPU", current.GPU, p.GPU)
+	addChange("GPU count", fmt.Sprint(current.GPUCount), fmt.Sprint(p.GPUCount))
 	addChange("region", current.Region, p.Region)
 	addChange("routing", current.Routing, p.Routing)
 	addChange("replicas", fmt.Sprintf("%d..%d", current.MinReplicas, current.MaxReplicas), fmt.Sprintf("%d..%d", p.MinReplicas, p.MaxReplicas))
@@ -178,6 +186,19 @@ func Build(in Input) (Plan, error) {
 	if in.ComputeMode != "elastic" && in.ComputeMode != "serverless" {
 		return Plan{}, errors.New("compute mode must be elastic or serverless")
 	}
+	if in.GPU == "" {
+		in.GPUCount = 0
+	} else {
+		if in.GPUCount == 0 {
+			in.GPUCount = 1
+		}
+		if in.GPUCount < 1 || in.GPUCount > 1024 {
+			return Plan{}, errors.New("GPU count must be between 1 and 1024")
+		}
+	}
+	if in.ComputeMode == "serverless" && in.GPU != "" && in.GPUCount != 1 {
+		return Plan{}, errors.New("serverless compute currently requires GPU count 1")
+	}
 	if in.ComputeMode == "elastic" && in.MinReplicas == 0 {
 		in.MinReplicas = 1
 	}
@@ -200,7 +221,7 @@ func Build(in Input) (Plan, error) {
 		return Plan{}, fmt.Errorf("serving topology: %w", err)
 	}
 
-	p := Plan{Version: 1, Name: in.Name, Model: in.Model, Cloud: in.Cloud, ProviderAdapter: in.ProviderAdapter, GPU: in.GPU, Serving: in.Serving,
+	p := Plan{Version: 1, Name: in.Name, Model: in.Model, Cloud: in.Cloud, ProviderAdapter: in.ProviderAdapter, GPU: in.GPU, GPUCount: in.GPUCount, Serving: in.Serving,
 		Region: in.Region, Runtime: in.Runtime, Routing: in.Routing, Targets: in.Targets,
 		MinReplicas: in.MinReplicas, MaxReplicas: in.MaxReplicas,
 		Cost: Cost{Status: "unavailable", Reason: "live provider pricing is not configured; no estimate is fabricated"},
@@ -228,7 +249,7 @@ func Build(in Input) (Plan, error) {
 		add("register", "Register the provider-native OpenAI-compatible endpoint")
 	case in.Cloud != "":
 		p.Mode = "provisioned"
-		add("provision", fmt.Sprintf("Provision %s on %s", in.GPU, in.Cloud))
+		add("provision", fmt.Sprintf("Provision %d x %s per replica on %s", in.GPUCount, in.GPU, in.Cloud))
 		add("bootstrap", fmt.Sprintf("Start %s and wait for model readiness", in.Runtime))
 		add("register", "Register the provisioned target")
 	default:
@@ -260,7 +281,11 @@ func ApplyCapacityEvidence(p Plan, evidence []CapacityEvidence) Plan {
 		expectedProvider = defaultProviderAdapter(p.Cloud)
 	}
 	for _, row := range evidence {
-		if row.Provider != expectedProvider || row.Runtime != p.Runtime || row.ComputeMode != "elastic" || row.Region != p.Region || row.GPU != p.GPU {
+		gpuCount := row.GPUCount
+		if gpuCount == 0 {
+			gpuCount = 1
+		}
+		if row.Provider != expectedProvider || row.Runtime != p.Runtime || row.ComputeMode != "elastic" || row.Region != p.Region || row.GPU != p.GPU || gpuCount != p.GPUCount {
 			continue
 		}
 		terminal := row.Attempts - row.Pending
@@ -274,7 +299,7 @@ func ApplyCapacityEvidence(p Plan, evidence []CapacityEvidence) Plan {
 		p.Readiness.EstimateP95Seconds = row.DurationP95Seconds
 		p.Readiness.SuccessfulSamples = row.Succeeded
 		p.Readiness.EvidenceBoundary = "durable replica intent through runtime readiness"
-		p.Readiness.Reason = "tenant-scoped historical evidence for this exact provider, runtime, region, and GPU; not a capacity guarantee"
+		p.Readiness.Reason = "tenant-scoped historical evidence for this exact provider, runtime, region, GPU type, and GPU count; not a capacity guarantee"
 		return p
 	}
 	return p

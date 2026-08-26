@@ -103,6 +103,18 @@ func TestApplyCapacityEvidenceRequiresMatchingStatisticalEvidence(t *testing.T) 
 	}
 }
 
+func TestApplyCapacityEvidenceDoesNotCrossAcceleratorCounts(t *testing.T) {
+	p, err := Build(Input{Model: "model", Cloud: "aws", GPU: "H200", GPUCount: 4, Region: "eu-central-1", Runtime: "vllm", MinReplicas: 1, MaxReplicas: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p50 := 100.0
+	p = ApplyCapacityEvidence(p, []CapacityEvidence{{Provider: "aws-ec2", Runtime: "vllm", ComputeMode: "elastic", Region: "eu-central-1", GPU: "H200", GPUCount: 1, Attempts: 10, Succeeded: 10, SuccessRate: 1, DurationP50Seconds: &p50}})
+	if p.Readiness.EstimateP50Seconds != nil || p.Readiness.EstimateStatus != "unavailable" {
+		t.Fatalf("single-GPU evidence leaked into a four-GPU plan: %+v", p.Readiness)
+	}
+}
+
 func TestApplyCapacityEvidenceWithholdsWeakPrediction(t *testing.T) {
 	p, err := Build(Input{Model: "Qwen/Qwen3-8B", Cloud: "aws", GPU: "L40S", Region: "eu-central-1", Runtime: "vllm", MinReplicas: 1, MaxReplicas: 1})
 	if err != nil {

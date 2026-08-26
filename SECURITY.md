@@ -1,7 +1,8 @@
 # Security policy
 
 Do not report suspected vulnerabilities in public issues. Use the repository's **Security** tab
-and choose **Report a vulnerability** to open a private GitHub security advisory. Include the
+and choose **Report a vulnerability** to open a private GitHub security advisory, or email
+[security@infercrane.com](mailto:security@infercrane.com). Include the
 affected version, impact, reproduction, and any suggested mitigation. Do not include live
 credentials or customer prompt/output content.
 

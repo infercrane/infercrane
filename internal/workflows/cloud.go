@@ -39,6 +39,7 @@ type CloudRequest struct {
 	ProviderAdapter        string                   `json:"provider_adapter,omitempty"`
 	ComputeMode            string                   `json:"compute_mode,omitempty"`
 	GPU                    string                   `json:"gpu"`
+	GPUCount               int                      `json:"gpu_count,omitempty"`
 	Region                 string                   `json:"region,omitempty"`
 	RuntimeVersion         string                   `json:"runtime_version,omitempty"`
 	ModelRevision          string                   `json:"model_revision,omitempty"`
@@ -80,6 +81,15 @@ func (r *CloudRequest) Validate() error {
 	}
 	if r.Name == "" || r.Model == "" || r.Cloud == "" || r.GPU == "" {
 		return errors.New("name, model, cloud, and gpu are required")
+	}
+	if r.GPUCount == 0 {
+		r.GPUCount = 1
+	}
+	if r.GPUCount < 1 || r.GPUCount > 1024 {
+		return errors.New("gpu_count must be between 1 and 1024")
+	}
+	if r.ComputeMode == "serverless" && r.GPUCount != 1 {
+		return errors.New("serverless compute currently requires gpu_count 1")
 	}
 	if r.EndpointName == "" {
 		r.EndpointName = r.Name
@@ -574,7 +584,7 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 		if err != nil {
 			return "", operations.Permanent("deployment_missing", err)
 		}
-		request := CloudRequest{DeploymentID: resolved.Deployment.ID, Name: rollout.Name, Model: spec.Model, ModelRevision: spec.ModelRevision, RevisionID: revision.ID, Cloud: spec.Cloud, ProviderAdapter: spec.ProviderAdapter, GPU: spec.GPU, Region: spec.Region, Runtime: spec.Runtime, RuntimeVersion: spec.RuntimeVersion, RuntimeArgs: spec.RuntimeArgs, Port: spec.Port, Workload: spec.Workload, Serving: spec.Serving, MinReplicas: spec.MinReplicas, MaxReplicas: spec.MaxReplicas, DesiredReplicas: spec.MinReplicas, TenantID: rollout.TenantID, Actor: rollout.Actor, Candidate: true}
+		request := CloudRequest{DeploymentID: resolved.Deployment.ID, Name: rollout.Name, Model: spec.Model, ModelRevision: spec.ModelRevision, RevisionID: revision.ID, Cloud: spec.Cloud, ProviderAdapter: spec.ProviderAdapter, GPU: spec.GPU, GPUCount: spec.GPUCount, Region: spec.Region, Runtime: spec.Runtime, RuntimeVersion: spec.RuntimeVersion, RuntimeArgs: spec.RuntimeArgs, Port: spec.Port, Workload: spec.Workload, Serving: spec.Serving, MinReplicas: spec.MinReplicas, MaxReplicas: spec.MaxReplicas, DesiredReplicas: spec.MinReplicas, TenantID: rollout.TenantID, Actor: rollout.Actor, Candidate: true}
 		request.Runtime = spec.Runtime
 		if request.Runtime == "" {
 			request.Runtime = support.DefaultRuntime
@@ -985,7 +995,7 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 				}
 			}
 		}
-		_, _ = evidenceStore.RecordCapacityOperation(context.WithoutCancel(ctx), domain.CapacityOperation{TenantID: request.TenantID, Provider: backend.Name, Runtime: request.Runtime, ComputeMode: request.ComputeMode, Region: request.Region, GPU: request.GPU, Operation: "replica.ensure", ResourceKey: externalKey, Outcome: outcome, ErrorCode: errorCode, StartedAt: started})
+		_, _ = evidenceStore.RecordCapacityOperation(context.WithoutCancel(ctx), domain.CapacityOperation{TenantID: request.TenantID, Provider: backend.Name, Runtime: request.Runtime, ComputeMode: request.ComputeMode, Region: request.Region, GPU: request.GPU, GPUCount: request.GPUCount, Operation: "replica.ensure", ResourceKey: externalKey, Outcome: outcome, ErrorCode: errorCode, StartedAt: started})
 	}()
 	replica, _, err := store.EnsureReplicaIntent(ctx, domain.Replica{TenantID: request.TenantID, DeploymentID: request.DeploymentID, RevisionID: request.RevisionID, Ordinal: ordinal, ExternalKey: externalKey, Provider: backend.Name})
 	if err != nil {
@@ -1019,14 +1029,14 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 			return "", "", "", operations.Retryable("provider_discovery_failed", fmt.Errorf("discover capacity before availability check: %w", observeErr))
 		}
 		if !existing.Exists {
-			availability, availabilityErr := backend.Capacity.Availability(ctx, provision.AvailabilityRequest{Cloud: request.Cloud, GPU: request.GPU, Region: request.Region, Count: 1})
+			availability, availabilityErr := backend.Capacity.Availability(ctx, provision.AvailabilityRequest{Cloud: request.Cloud, GPU: request.GPU, Region: request.Region, Count: request.GPUCount})
 			if availabilityErr != nil {
 				availability = provision.Availability{State: "unknown", Message: "Provider availability check failed; continuing because stock signals are advisory", Details: availabilityErr.Error()}
 			}
 			if evidenceStore, ok := store.(CapacityEvidenceStore); ok {
 				observed := time.Now().UTC()
 				details, _ := json.Marshal(map[string]string{"message": availability.Message, "details": availability.Details})
-				_, _ = evidenceStore.RecordCapacityEvidence(ctx, domain.CapacityEvidence{TenantID: request.TenantID, Provider: request.Cloud, Runtime: request.Runtime, ComputeMode: request.ComputeMode, Region: request.Region, GPU: request.GPU, State: availability.State, Source: backend.Name + ".availability", EvidenceJSON: string(details), ObservedAt: observed, ExpiresAt: observed.Add(30 * time.Second)})
+				_, _ = evidenceStore.RecordCapacityEvidence(ctx, domain.CapacityEvidence{TenantID: request.TenantID, Provider: request.Cloud, Runtime: request.Runtime, ComputeMode: request.ComputeMode, Region: request.Region, GPU: request.GPU, GPUCount: request.GPUCount, State: availability.State, Source: backend.Name + ".availability", EvidenceJSON: string(details), ObservedAt: observed, ExpiresAt: observed.Add(30 * time.Second)})
 			}
 			if err = checkpoint(ctx, store, operation, step+".availability", availabilityCheckpointStatus(availability.State), availability, 25, availability.Message); err != nil {
 				return "", "", "", err
@@ -1036,7 +1046,7 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 			}
 		}
 	}
-	ensured, err := provider.EnsureReplica(ctx, provision.ReplicaSpec{ExternalKey: externalKey, RequestID: replica.ProviderRequestID, Name: fmt.Sprintf("%s-r%d", request.Name, ordinal), Model: request.Model, ModelRevision: request.ImmutableModelRevision, Cloud: request.Cloud, GPU: request.GPU, Region: request.Region, Runtime: request.Runtime, RuntimeVersion: request.RuntimeVersion, RuntimeArgs: request.RuntimeArgs, Port: request.Port, Workload: request.Workload, Serving: request.Serving})
+	ensured, err := provider.EnsureReplica(ctx, provision.ReplicaSpec{ExternalKey: externalKey, RequestID: replica.ProviderRequestID, Name: fmt.Sprintf("%s-r%d", request.Name, ordinal), Model: request.Model, ModelRevision: request.ImmutableModelRevision, Cloud: request.Cloud, GPU: request.GPU, GPUCount: request.GPUCount, Region: request.Region, Runtime: request.Runtime, RuntimeVersion: request.RuntimeVersion, RuntimeArgs: request.RuntimeArgs, Port: request.Port, Workload: request.Workload, Serving: request.Serving})
 	if err != nil {
 		if errors.Is(err, provision.ErrProviderAuthorization) {
 			return "", "", "", operations.Permanent("provider_authorization_failed", err)

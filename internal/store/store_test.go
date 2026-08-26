@@ -669,9 +669,12 @@ func TestInferenceDecisionPolicyEvidenceAndRecommendationsAreTenantSafe(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	latest, err := s.LatestCapacityEvidence(ctx, "global", "runpod", "vllm", "elastic", "", "L40S")
+	latest, err := s.LatestCapacityEvidence(ctx, "global", "runpod", "vllm", "elastic", "", "L40S", 1)
 	if err != nil || latest.ID != evidence.ID || latest.State != "available" {
 		t.Fatalf("capacity=%#v err=%v", latest, err)
+	}
+	if _, err = s.LatestCapacityEvidence(ctx, "global", "runpod", "vllm", "elastic", "", "L40S", 4); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("capacity evidence crossed GPU-count boundary: %v", err)
 	}
 	if _, err = s.RecordCapacityEvidence(ctx, domain.CapacityEvidence{TenantID: "global", Provider: "runpod", Runtime: "vllm", ComputeMode: "elastic", State: "available", Source: "provider-api", EvidenceJSON: `{}`, ObservedAt: observed, ExpiresAt: observed.Add(25 * time.Hour)}); err == nil {
 		t.Fatal("unbounded capacity evidence was persisted")
@@ -679,7 +682,7 @@ func TestInferenceDecisionPolicyEvidenceAndRecommendationsAreTenantSafe(t *testi
 	if _, err = s.ExecContext(ctx, `UPDATE capacity_evidence SET expires_at=? WHERE id=?`, time.Now().UTC().Add(-time.Second).Format(time.RFC3339Nano), evidence.ID); err != nil {
 		t.Fatal(err)
 	}
-	latest, err = s.LatestCapacityEvidence(ctx, "global", "runpod", "vllm", "elastic", "", "L40S")
+	latest, err = s.LatestCapacityEvidence(ctx, "global", "runpod", "vllm", "elastic", "", "L40S", 1)
 	if err != nil || latest.State != "unknown" {
 		t.Fatalf("expired capacity remained live: %#v err=%v", latest, err)
 	}

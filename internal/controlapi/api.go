@@ -92,7 +92,7 @@ type decisionStore interface {
 	DeleteSLOPolicy(context.Context, string, string) error
 	RecordInferenceRecommendation(context.Context, domain.InferenceRecommendation) (domain.InferenceRecommendation, error)
 	InferenceRecommendations(context.Context, string, string, int) ([]domain.InferenceRecommendation, error)
-	LatestCapacityEvidence(context.Context, string, string, string, string, string, string) (domain.CapacityEvidence, error)
+	LatestCapacityEvidence(context.Context, string, string, string, string, string, string, int) (domain.CapacityEvidence, error)
 }
 type passportStore interface {
 	InferencePassportPayload(context.Context, string, string, string) (passport.Payload, error)
@@ -3231,7 +3231,10 @@ func (a API) runBenchmark(w http.ResponseWriter, r *http.Request) {
 	runtimeConfig, _ := json.Marshal(map[string]any{"args": revisionSpec.RuntimeArgs})
 	var gpuCount *int
 	if revisionSpec.GPU != "" {
-		count := 1
+		count := revisionSpec.GPUCount
+		if count == 0 {
+			count = 1
+		}
 		gpuCount = &count
 	}
 	var gpuUtilization *float64
@@ -3723,7 +3726,11 @@ func (a API) recommendDeployment(w http.ResponseWriter, r *http.Request) {
 	evidence := make([]decision.Evidence, 0, len(benchmarks))
 	for _, benchmark := range benchmarks {
 		workload := canonicalJSON(benchmark.WorkloadJSON)
-		row := decision.Evidence{ID: benchmark.ID, ModelIdentity: benchmark.ModelIdentity, Runtime: benchmark.Runtime, RuntimeVersion: benchmark.RuntimeVersion, Provider: benchmark.Provider, Region: benchmark.Region, GPU: benchmark.GPU, ComputeMode: benchmark.ComputeMode, ComparableModel: activeModelIdentity != "" && benchmark.ModelIdentity == activeModelIdentity, ComparableWorkload: baselineWorkload != "" && workload == baselineWorkload, Requests: benchmark.RequestCount, Failed: benchmark.Failed, TTFTP95MS: benchmark.TTFTP95MS, LatencyP95MS: benchmark.LatencyP95MS, OutputTokensSecond: benchmark.OutputTokenThroughput, CreatedAt: benchmark.CreatedAt}
+		gpuCount := 1
+		if benchmark.GPUCount != nil {
+			gpuCount = *benchmark.GPUCount
+		}
+		row := decision.Evidence{ID: benchmark.ID, ModelIdentity: benchmark.ModelIdentity, Runtime: benchmark.Runtime, RuntimeVersion: benchmark.RuntimeVersion, Provider: benchmark.Provider, Region: benchmark.Region, GPU: benchmark.GPU, GPUCount: gpuCount, ComputeMode: benchmark.ComputeMode, ComparableModel: activeModelIdentity != "" && benchmark.ModelIdentity == activeModelIdentity, ComparableWorkload: baselineWorkload != "" && workload == baselineWorkload, Requests: benchmark.RequestCount, Failed: benchmark.Failed, TTFTP95MS: benchmark.TTFTP95MS, LatencyP95MS: benchmark.LatencyP95MS, OutputTokensSecond: benchmark.OutputTokenThroughput, CreatedAt: benchmark.CreatedAt}
 		runtimeVersionQualified := false
 		for _, runtimeProfile := range a.Integrations.Runtimes {
 			if runtimeProfile.Runtime == row.Runtime && (runtimeProfile.EngineVersion == "" || runtimeProfile.EngineVersion == row.RuntimeVersion) {
@@ -3741,7 +3748,7 @@ func (a API) recommendDeployment(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 		}
-		if capacity, capacityErr := store.LatestCapacityEvidence(r.Context(), principal.TenantID, row.Provider, row.Runtime, row.ComputeMode, row.Region, row.GPU); capacityErr == nil {
+		if capacity, capacityErr := store.LatestCapacityEvidence(r.Context(), principal.TenantID, row.Provider, row.Runtime, row.ComputeMode, row.Region, row.GPU, row.GPUCount); capacityErr == nil {
 			row.CapacityState, row.CapacitySource = capacity.State, capacity.Source
 			row.CapacityObservedAt, row.CapacityExpiresAt = &capacity.ObservedAt, &capacity.ExpiresAt
 		}

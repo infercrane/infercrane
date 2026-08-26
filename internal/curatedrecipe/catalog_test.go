@@ -14,15 +14,40 @@ func TestCatalogIsPinnedDistinctAndTruthful(t *testing.T) {
 		}
 		profiles := map[string]bool{}
 		for _, profile := range entry.Profiles {
-			if profile.Name == "" || profiles[profile.Name] || profile.Runtime == "" || profile.ComputeMode == "" || profile.MinReplicas < 0 || profile.MaxReplicas < max(1, profile.MinReplicas) || profile.EvidenceClass != configurationEvidence || profile.QualificationScope == "" {
+			if profile.Name == "" || profiles[profile.Name] || profile.Runtime == "" || profile.ComputeMode == "" || profile.GPUCount < 1 || profile.GPUCount > 1024 || profile.MinReplicas < 0 || profile.MaxReplicas < max(1, profile.MinReplicas) || profile.EvidenceClass != configurationEvidence || profile.QualificationScope == "" {
 				t.Fatalf("invalid profile for %s: %+v", entry.Name, profile)
+			}
+			if len(profile.CompatibleGPUs) > 0 && !contains(profile.CompatibleGPUs, profile.GPUHint) {
+				t.Fatalf("profile GPU hint is outside its reviewed compatibility set: %+v", profile)
+			}
+			if !profile.Workload.Empty() {
+				if err := profile.Workload.Validate(); err != nil {
+					t.Fatalf("invalid workload for %s/%s: %v", entry.Name, profile.Name, err)
+				}
+				if profile.Runtime != "custom-oci" || profile.RuntimeVersion == "" {
+					t.Fatalf("portable workload must declare a custom-oci runtime version: %+v", profile)
+				}
 			}
 			profiles[profile.Name] = true
 		}
 		seen[entry.Name] = true
 	}
-	if len(Search("embeddings")) != 1 || len(Search("vllm")) != len(All()) || len(Search("Mistral AI")) != 1 {
+	if len(Search("embeddings")) != 1 || len(Search("vllm")) == 0 || len(Search("Mistral AI")) != 1 {
 		t.Fatal("catalog search is not deterministic")
+	}
+}
+
+func TestGLMProfileUsesTheGeneralImmutableWorkloadContract(t *testing.T) {
+	entry, ok := Get("glm-5.3-flash")
+	if !ok || entry.Revision != "3f1971b7b5f7a528c9c4ef6212c8785298a8c24a" || len(entry.Profiles) != 1 {
+		t.Fatalf("GLM recipe identity is not pinned: %+v", entry)
+	}
+	profile := entry.Profiles[0]
+	if profile.Runtime != "custom-oci" || profile.GPUCount != 4 || profile.CloudHint != "kubernetes" || profile.Workload.Image != "vllm/vllm-openai@sha256:2c6da6c6f16ed15c91e412d896dba13701f25fe1861eaec9ddaa4db34d1d21c4" {
+		t.Fatalf("GLM profile does not use the portable serving contract: %+v", profile)
+	}
+	if err := profile.Workload.Validate(); err != nil {
+		t.Fatalf("GLM workload is invalid: %v", err)
 	}
 }
 

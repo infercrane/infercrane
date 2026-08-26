@@ -35,8 +35,10 @@ not selected one yet, run `infercrane recipes curated` to inspect the reviewed s
 
 `--profile` must name a serving profile belonging to the selected recipe. When omitted, the first
 balanced/general profile is used. A profile is a reviewed candidate configuration: it writes its
-runtime, runtime arguments, accelerator hint, replica bounds, and routing strategy into the project,
-but it does not claim that those choices are fastest on the selected provider.
+runtime and version, immutable workload image/argv when present, accelerator type and count, provider
+hint, replica bounds, and routing strategy into the project. A profile can restrict accelerator
+types when its runtime configuration is hardware-specific. It does not claim that those choices are
+fastest or currently available on the selected provider.
 
 `workload init` writes a valid DeploymentSpec with a JSON Schema directive understood by YAML
 language servers in VS Code, JetBrains editors, and other schema-aware tools. Fields, enums, and

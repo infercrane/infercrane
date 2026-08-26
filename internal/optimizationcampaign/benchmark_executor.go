@@ -104,7 +104,10 @@ func (e BenchmarkExecutor) Run(ctx context.Context, campaign domain.Optimization
 	workload, _ := json.Marshal(map[string]any{"endpoint_type": "chat", "streaming": profile.Streaming, "request_count": profile.Requests, "concurrency": profile.Concurrency, "random_seed": 17, "input_tokens": profile.InputTokens, "output_tokens": profile.OutputTokens, "profile": profile.Name, "profile_version": performanceprofile.Version, "ttft_slo_ms": campaignTTFTSLO(campaign), "tpot_slo_ms": campaignTPOTSLO(campaign), "server_token_count": true, "revision_selector": revision.ID, "direct_revision_validation": true})
 	runtimeConfig, _ := json.Marshal(map[string]any{"args": draft.Runtime.Args})
 	costMetadata, _ := json.Marshal(map[string]any{"available": true, "hourly": quote.HourlyUSD, "currency": "USD", "billing_unit": "hour", "source": quote.Source, "evidence_class": "provider_reported", "observed_at": quote.ObservedAt, "valid_until": quote.ValidUntil, "revision_id": revision.ID})
-	gpuCount := 1
+	gpuCount := draft.Resources.GPUCount
+	if gpuCount == 0 {
+		gpuCount = 1
+	}
 	row := domain.BenchmarkResult{TenantID: candidate.TenantID, DeploymentID: resolved.Deployment.ID, DeploymentName: candidate.DeploymentName, RevisionID: revision.ID, ModelArtifactID: artifact.ID, ModelIdentity: artifact.ModelIdentity, Runtime: draft.Runtime.Engine, RuntimeVersion: draft.Runtime.Version, RuntimeConfigJSON: string(runtimeConfig), Provider: draft.Provider.Cloud, Region: draft.Provider.Region, GPU: draft.Resources.GPU, GPUCount: &gpuCount, ComputeMode: draft.Compute.Mode, Tool: measured.Tool, ToolVersion: measured.ToolVersion, WorkloadJSON: string(workload), ReproductionCommand: measured.Command, RequestCount: measured.Requests, Succeeded: measured.Succeeded, Failed: measured.Failed, DurationSeconds: measured.DurationSeconds, RequestThroughput: measured.RequestThroughput, OutputTokenThroughput: measured.OutputTokenThroughput, TTFTP50MS: measured.TTFTP50MS, TTFTP95MS: measured.TTFTP95MS, TPOTP50MS: measured.TPOTP50MS, TPOTP95MS: measured.TPOTP95MS, LatencyP50MS: measured.LatencyP50MS, LatencyP95MS: measured.LatencyP95MS, Goodput: measured.Goodput, CostMetadataJSON: string(costMetadata), CreatedAt: ended}
 	if row.Provider == "" {
 		row.Provider = provider

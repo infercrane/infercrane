@@ -27,7 +27,11 @@ func (a PricingAuthority) Quote(ctx context.Context, draft optimizer.DeploymentD
 	if replicas < 1 {
 		replicas = 1
 	}
-	estimate, err := a.Provider.Estimate(ctx, pricing.Request{Cloud: draft.Provider.Cloud, Region: draft.Provider.Region, GPU: draft.Resources.GPU, Replicas: replicas})
+	gpuCount := draft.Resources.GPUCount
+	if gpuCount == 0 {
+		gpuCount = 1
+	}
+	estimate, err := a.Provider.Estimate(ctx, pricing.Request{Cloud: draft.Provider.Cloud, Region: draft.Provider.Region, GPU: draft.Resources.GPU, GPUCount: gpuCount, Replicas: replicas})
 	if err != nil {
 		return CostQuote{}, err
 	}
