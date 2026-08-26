@@ -35,31 +35,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  scan-upstream-vllm:
-    name: scan-upstream-vllm
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-    steps:
-      - name: Reclaim runner disk
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup
-          docker system prune --all --force
-      - name: Validate immutable upstream candidate
-        env:
-          VLLM_BASE_IMAGE: ${{ inputs.vllm_base_image || 'vllm/vllm-openai@sha256:953d3a06d5e64ab582985cd7401289d3abf2a2c14ef2158e9a84313daeec77d7' }}
-        run: '[[ "$VLLM_BASE_IMAGE" =~ ^vllm/vllm-openai@sha256:[0-9a-f]{64}$ ]]'
-      - name: Reject critical vulnerabilities in the upstream image
-        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7
-        with:
-          image: ${{ inputs.vllm_base_image || 'vllm/vllm-openai@sha256:953d3a06d5e64ab582985cd7401289d3abf2a2c14ef2158e9a84313daeec77d7' }}
-          fail-build: true
-          severity-cutoff: critical
-          output-format: table
-
   publish-runpod-vllm:
     name: ${{ github.event_name == 'pull_request' && 'validate-runpod-vllm' || 'publish-runpod-vllm' }}
-    needs: scan-upstream-vllm
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -96,6 +73,7 @@ jobs:
           file: images/vllm-runpod/Dockerfile
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
+          load: ${{ github.event_name == 'pull_request' }}
           build-args: |
             VLLM_VERSION=${{ inputs.vllm_version || '0.22.1' }}
             VLLM_BASE_IMAGE=${{ inputs.vllm_base_image || 'vllm/vllm-openai@sha256:953d3a06d5e64ab582985cd7401289d3abf2a2c14ef2158e9a84313daeec77d7' }}
@@ -103,8 +81,16 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: ${{ github.event_name != 'pull_request' && 'type=gha,mode=max' || '' }}
-          provenance: mode=max
-          sbom: true
+          provenance: ${{ github.event_name != 'pull_request' && 'mode=max' || 'false' }}
+          sbom: ${{ github.event_name != 'pull_request' }}
+      - name: Scan the validated PR runtime image
+        if: github.event_name == 'pull_request'
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7
+        with:
+          image: ${{ steps.meta.outputs.tags }}
+          fail-build: true
+          severity-cutoff: critical
+          output-format: table
       - name: Scan the published runtime image by digest
         if: github.event_name != 'pull_request'
         uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7
@@ -113,6 +99,21 @@ jobs:
           fail-build: true
           severity-cutoff: critical
           output-format: table
+      - name: Remove a rejected candidate package version
+        if: failure() && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CANDIDATE_TAG: ${{ steps.meta.outputs.version }}
+        run: |
+          mapfile -t version_ids < <(gh api --paginate \
+            /orgs/infercrane/packages/container/vllm-runpod/versions | \
+            jq -r --arg tag "$CANDIDATE_TAG" \
+              '.[] | select(.metadata.container.tags | index($tag)) | .id')
+          test "${#version_ids[@]}" -le 1
+          if [[ "${#version_ids[@]}" -eq 1 ]]; then
+            gh api --method DELETE \
+              "/orgs/infercrane/packages/container/vllm-runpod/versions/${version_ids[0]}"
+          fi
       - name: Publish the scanned semantic version tag
         if: github.event_name != 'pull_request'
         env:

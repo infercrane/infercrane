@@ -18,6 +18,14 @@ RUN apt-get update \
     && mkdir -p /run/sshd /root/.ssh \
     && chmod 700 /root/.ssh
 
+# The upstream Python dependency graph contains redundant statically linked
+# ffmpeg executables. Force every media consumer through Ubuntu's maintained
+# system package and remove the bundled copies from the final filesystem.
+RUN find /usr/local /opt -xdev -type f -name 'ffmpeg*' -perm /111 -delete \
+    && test -x /usr/bin/ffmpeg \
+    && /usr/bin/ffmpeg -version | grep -q '^ffmpeg version '
+ENV IMAGEIO_FFMPEG_EXE=/usr/bin/ffmpeg
+
 COPY images/vllm-runpod/start-ssh.sh /usr/local/bin/infercrane-start-ssh
 COPY LICENSE NOTICE images/vllm-runpod/THIRD_PARTY_COMPONENTS.md /usr/share/licenses/infercrane/
 RUN chmod 755 /usr/local/bin/infercrane-start-ssh
