@@ -18,10 +18,19 @@ RUN apt-get update \
     && mkdir -p /run/sshd /root/.ssh \
     && chmod 700 /root/.ssh
 
-# The upstream Python dependency graph contains redundant statically linked
-# ffmpeg executables in both installed packages and package-manager caches.
-# Force every media consumer through Ubuntu's maintained system package and
-# remove every bundled copy from the final root filesystem.
+# vLLM permits OpenCV >=4.13, so the upstream image can resolve to 5.0.0.93,
+# whose wheel bundles vulnerable FFmpeg 8.0.1 libraries. OpenCV 4.14.0.94 is
+# requirement-compatible and was built after the 4.x FFmpeg 8.1.2 security
+# bump. Install its exact amd64 wheel by hash so the derived image is
+# reproducible and retains OpenCV video support.
+RUN python3 -m pip install --no-cache-dir --no-deps --force-reinstall \
+      'opencv-python-headless @ https://files.pythonhosted.org/packages/ae/ce/7f538891722a4f06921419d55bac6f41729258d54442861edb2de0dbdf5e/opencv_python_headless-4.14.0.94-cp37-abi3-manylinux_2_28_x86_64.whl#sha256=211e581f5a4670acbbe08fff36a35e9946039d2eea28b80394632d036d1be527' \
+    && python3 -c 'import cv2, importlib.metadata; assert importlib.metadata.version("opencv-python-headless") == "4.14.0.94"; assert cv2.__version__ == "4.14.0"'
+
+# The upstream Python dependency graph also contains redundant standalone
+# ffmpeg executables in installed packages and package-manager caches. Force
+# those consumers through Ubuntu's maintained system package and remove every
+# standalone bundled copy from the final root filesystem.
 RUN find / -xdev -type f -name 'ffmpeg*' ! -path /usr/bin/ffmpeg -delete \
     && test -x /usr/bin/ffmpeg \
     && /usr/bin/ffmpeg -version | grep -q '^ffmpeg version '
