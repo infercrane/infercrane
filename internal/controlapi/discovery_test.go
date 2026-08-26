@@ -2,12 +2,21 @@ package controlapi
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
+
+type opaqueRoundTripper struct{}
+
+func (opaqueRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, errors.New("must not be called")
+}
 
 func TestDiscoverEndpointSelectsSingleModelAndConservativelyClassifiesRuntime(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -89,3 +98,39 @@ func TestDiscoveryRejectsCloudMetadataAddressClasses(t *testing.T) {
 		}
 	}
 }
+
+func TestDiscoveryRejectsClientThatCouldBypassAddressPolicy(t *testing.T) {
+	client := &http.Client{Transport: opaqueRoundTripper{}}
+	_, err := discoverEndpoint(context.Background(), client, "http://inference.example", "coder", "auto")
+	if err == nil || !strings.Contains(err.Error(), "inspectable HTTP transport") {
+		t.Fatalf("custom transport was accepted: %v", err)
+	}
+}
+
+func TestRestrictedDiscoveryClientDropsAmbientRequestAuthority(t *testing.T) {
+	baseTransport := http.DefaultTransport.(*http.Transport).Clone()
+	baseTransport.DialTLSContext = func(context.Context, string, string) (net.Conn, error) {
+		return nil, errors.New("must not be called")
+	}
+	client, err := restrictedDiscoveryClient(&http.Client{
+		Timeout:       time.Minute,
+		Jar:           staticCookieJar{},
+		CheckRedirect: func(*http.Request, []*http.Request) error { return nil },
+		Transport:     baseTransport,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok || transport.Proxy != nil || transport.DialTLSContext != nil || client.Jar != nil || client.Timeout != 5*time.Second {
+		t.Fatalf("client retained ambient authority: %#v", client)
+	}
+	if err = client.CheckRedirect(nil, nil); !errors.Is(err, http.ErrUseLastResponse) {
+		t.Fatalf("redirect policy = %v", err)
+	}
+}
+
+type staticCookieJar struct{}
+
+func (staticCookieJar) SetCookies(*url.URL, []*http.Cookie) {}
+func (staticCookieJar) Cookies(*url.URL) []*http.Cookie     { return nil }

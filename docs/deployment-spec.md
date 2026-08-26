@@ -33,7 +33,7 @@ model:
   revision: main
 runtime:
   engine: vllm
-  version: 0.22.0
+  version: 0.22.1
   args:
     - --enable-prefix-caching
 compute:

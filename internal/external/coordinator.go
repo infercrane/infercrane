@@ -2,6 +2,8 @@ package external
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -43,6 +45,7 @@ type Coordinator struct {
 
 	HealthCacheTTL time.Duration
 	healthMu       sync.Mutex
+	healthCacheKey [32]byte
 	healthUntil    map[[32]byte]time.Time
 }
 
@@ -206,9 +209,18 @@ func (c *Coordinator) OverflowMode(ctx context.Context, deployment domain.Deploy
 }
 
 func (c *Coordinator) healthy(ctx context.Context, target domain.Target, apiKey string) error {
-	cacheKey := sha256.Sum256([]byte(target.ID + "\x00" + target.URL + "\x00" + target.UpstreamModel + "\x00" + apiKey))
 	now := time.Now()
 	c.healthMu.Lock()
+	if c.healthCacheKey == ([32]byte{}) {
+		if _, err := rand.Read(c.healthCacheKey[:]); err != nil {
+			c.healthMu.Unlock()
+			return errors.New("initialize external health cache: secure randomness is unavailable")
+		}
+	}
+	mac := hmac.New(sha256.New, c.healthCacheKey[:])
+	_, _ = io.WriteString(mac, target.ID+"\x00"+target.URL+"\x00"+target.UpstreamModel+"\x00"+apiKey)
+	var cacheKey [32]byte
+	copy(cacheKey[:], mac.Sum(nil))
 	if until := c.healthUntil[cacheKey]; until.After(now) {
 		c.healthMu.Unlock()
 		return nil

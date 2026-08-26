@@ -157,7 +157,7 @@ func TestCatalogProposalLinksRuntimeArgumentsToExactCapabilityEvidence(t *testin
 	for _, candidate := range proposal.Candidates {
 		foundArguments = foundArguments || len(candidate.Deployment.Runtime.Args) > 0
 		for _, feature := range candidate.Features {
-			if feature.Name != "continuous_batching" && !strings.Contains(feature.Source, "vllm-0.22.0-") {
+			if feature.Name != "continuous_batching" && !strings.Contains(feature.Source, "vllm-0.22.1-") {
 				t.Fatalf("runtime feature lacks exact capability descriptor: %+v", feature)
 			}
 		}

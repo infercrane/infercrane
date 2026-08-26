@@ -3,6 +3,7 @@ name: Runtime image
 on:
   pull_request:
     paths:
+      - .github/workflows/runtime-image.yml
       - images/vllm-runpod/Dockerfile
       - images/vllm-runpod/start-ssh.sh
       - images/vllm-runpod/THIRD_PARTY_COMPONENTS.md
@@ -11,14 +12,15 @@ on:
       vllm_version:
         description: Pinned vLLM version
         required: true
-        default: 0.22.0
+        default: 0.22.1
       vllm_base_image:
         description: Immutable vllm/vllm-openai base image including sha256 digest
         required: true
-        default: vllm/vllm-openai@sha256:0fec7ec5f3e6bc168e54899935fb0557da908a4832a1dbc88e2debcf2f889416
+        default: vllm/vllm-openai@sha256:953d3a06d5e64ab582985cd7401289d3abf2a2c14ef2158e9a84313daeec77d7
   push:
     branches: [main]
     paths:
+      - .github/workflows/runtime-image.yml
       - images/vllm-runpod/Dockerfile
       - images/vllm-runpod/start-ssh.sh
 
@@ -51,8 +53,8 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Validate immutable runtime candidate
         env:
-          VLLM_VERSION: ${{ inputs.vllm_version || '0.22.0' }}
-          VLLM_BASE_IMAGE: ${{ inputs.vllm_base_image || 'vllm/vllm-openai@sha256:0fec7ec5f3e6bc168e54899935fb0557da908a4832a1dbc88e2debcf2f889416' }}
+          VLLM_VERSION: ${{ inputs.vllm_version || '0.22.1' }}
+          VLLM_BASE_IMAGE: ${{ inputs.vllm_base_image || 'vllm/vllm-openai@sha256:953d3a06d5e64ab582985cd7401289d3abf2a2c14ef2158e9a84313daeec77d7' }}
         run: |
           [[ "$VLLM_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.][A-Za-z0-9]+)*$ ]]
           [[ "$VLLM_BASE_IMAGE" =~ ^vllm/vllm-openai@sha256:[0-9a-f]{64}$ ]]
@@ -61,8 +63,9 @@ jobs:
         with:
           images: ghcr.io/infercrane/vllm-runpod
           tags: |
-            type=raw,value=v${{ inputs.vllm_version || '0.22.0' }}
-            type=sha
+            type=sha,prefix=candidate-sha-
+          labels: |
+            org.opencontainers.image.version=v${{ inputs.vllm_version || '0.22.1' }}
       - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         id: build
         with:
@@ -70,25 +73,86 @@ jobs:
           file: images/vllm-runpod/Dockerfile
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
+          load: ${{ github.event_name == 'pull_request' }}
           build-args: |
-            VLLM_VERSION=${{ inputs.vllm_version || '0.22.0' }}
-            VLLM_BASE_IMAGE=${{ inputs.vllm_base_image || 'vllm/vllm-openai@sha256:0fec7ec5f3e6bc168e54899935fb0557da908a4832a1dbc88e2debcf2f889416' }}
+            VLLM_VERSION=${{ inputs.vllm_version || '0.22.1' }}
+            VLLM_BASE_IMAGE=${{ inputs.vllm_base_image || 'vllm/vllm-openai@sha256:953d3a06d5e64ab582985cd7401289d3abf2a2c14ef2158e9a84313daeec77d7' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: ${{ github.event_name != 'pull_request' && 'type=gha,mode=max' || '' }}
-          provenance: mode=max
-          sbom: true
+          provenance: ${{ github.event_name != 'pull_request' && 'mode=max' || 'false' }}
+          sbom: ${{ github.event_name != 'pull_request' }}
+      - name: Scan the validated PR runtime image
+        if: github.event_name == 'pull_request'
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7
+        with:
+          image: ${{ steps.meta.outputs.tags }}
+          fail-build: false
+          severity-cutoff: critical
+          output-format: json
+          output-file: grype-pr.json
+      - name: Enforce the PR runtime vulnerability threshold
+        if: github.event_name == 'pull_request'
+        run: |
+          jq -r '
+            .matches[] |
+            select(.vulnerability.severity == "Critical") |
+            [
+              .vulnerability.id,
+              .artifact.name,
+              .artifact.version,
+              ([.artifact.locations[].path] | unique | join(","))
+            ] | @tsv
+          ' grype-pr.json
+          test "$(jq '[.matches[] | select(.vulnerability.severity == "Critical")] | length' grype-pr.json)" -eq 0
       - name: Scan the published runtime image by digest
         if: github.event_name != 'pull_request'
         uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7
         with:
           image: ghcr.io/infercrane/vllm-runpod@${{ steps.build.outputs.digest }}
-          registry-username: ${{ github.actor }}
-          registry-password: ${{ secrets.GITHUB_TOKEN }}
-          fail-build: true
+          fail-build: false
           severity-cutoff: critical
-          output-format: table
+          output-format: json
+          output-file: grype-published.json
+      - name: Enforce the published runtime vulnerability threshold
+        if: github.event_name != 'pull_request'
+        run: |
+          jq -r '
+            .matches[] |
+            select(.vulnerability.severity == "Critical") |
+            [
+              .vulnerability.id,
+              .artifact.name,
+              .artifact.version,
+              ([.artifact.locations[].path] | unique | join(","))
+            ] | @tsv
+          ' grype-published.json
+          test "$(jq '[.matches[] | select(.vulnerability.severity == "Critical")] | length' grype-published.json)" -eq 0
+      - name: Remove a rejected candidate package version
+        if: failure() && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CANDIDATE_TAG: ${{ steps.meta.outputs.version }}
+        run: |
+          mapfile -t version_ids < <(gh api --paginate \
+            /orgs/infercrane/packages/container/vllm-runpod/versions | \
+            jq -r --arg tag "$CANDIDATE_TAG" \
+              '.[] | select(.metadata.container.tags | index($tag)) | .id')
+          test "${#version_ids[@]}" -le 1
+          if [[ "${#version_ids[@]}" -eq 1 ]]; then
+            gh api --method DELETE \
+              "/orgs/infercrane/packages/container/vllm-runpod/versions/${version_ids[0]}"
+          fi
+      - name: Publish the scanned semantic version tag
+        if: github.event_name != 'pull_request'
+        env:
+          VLLM_VERSION: ${{ inputs.vllm_version || '0.22.1' }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          docker buildx imagetools create \
+            --tag "ghcr.io/infercrane/vllm-runpod:v${VLLM_VERSION}" \
+            "ghcr.io/infercrane/vllm-runpod@${IMAGE_DIGEST}"
       - name: Attest the runtime image digest
         if: github.event_name != 'pull_request'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
@@ -105,6 +169,19 @@ jobs:
             /orgs/infercrane/packages/container/vllm-runpod \
             -f visibility=public
           test "$(gh api /orgs/infercrane/packages/container/vllm-runpod --jq .visibility)" = public
+      - name: Remove the superseded vulnerable v0.22.0 package version
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mapfile -t version_ids < <(gh api --paginate \
+            /orgs/infercrane/packages/container/vllm-runpod/versions \
+            --jq '.[] | select(.metadata.container.tags | index("v0.22.0")) | .id')
+          test "${#version_ids[@]}" -le 1
+          if [[ "${#version_ids[@]}" -eq 1 ]]; then
+            gh api --method DELETE \
+              "/orgs/infercrane/packages/container/vllm-runpod/versions/${version_ids[0]}"
+          fi
       - name: Record publication instructions
         if: always() && github.event_name != 'pull_request'
         run: |

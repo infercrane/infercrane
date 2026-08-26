@@ -29,7 +29,7 @@ var ErrProviderCapacity = errors.New("provider capacity unavailable")
 // runtime bits. Using vLLM's provider-neutral image keeps provisioning portable
 // across every SkyPilot cloud and avoids installing the CUDA dependency stack
 // on each new GPU replica.
-const defaultVLLMImage = "vllm/vllm-openai@sha256:0fec7ec5f3e6bc168e54899935fb0557da908a4832a1dbc88e2debcf2f889416"
+const defaultVLLMImage = "vllm/vllm-openai@sha256:953d3a06d5e64ab582985cd7401289d3abf2a2c14ef2158e9a84313daeec77d7"
 
 // The RunPod variant adds only the SSH bootstrap contract required by
 // SkyPilot. Pin it independently so a release never depends on a mutable GHCR

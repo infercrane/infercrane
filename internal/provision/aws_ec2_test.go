@@ -342,7 +342,7 @@ func testAWSEC2(runner CommandRunner) AWSEC2 {
 		SubnetID: "subnet-private", SecurityGroupIDs: []string{"sg-inference"}, AMIID: "ami-gpu",
 		InstanceType: "g6e.xlarge", GPU: "L40S", InstanceProfileARN: "arn:aws:iam::123456789012:instance-profile/infercrane-worker",
 		WorkerSecretARN: "arn:aws:secretsmanager:eu-central-1:123456789012:secret:worker-key",
-		ImageDigest:     "vllm/vllm-openai@sha256:0fec7ec5f3e6bc168e54899935fb0557da908a4832a1dbc88e2debcf2f889416",
+		ImageDigest:     "vllm/vllm-openai@sha256:953d3a06d5e64ab582985cd7401289d3abf2a2c14ef2158e9a84313daeec77d7",
 	}
 }
 
