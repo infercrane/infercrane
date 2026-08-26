@@ -8,6 +8,7 @@ workflow="$root/.github/workflows/runtime-image.yml"
 grep -Fq 'ARG VLLM_BASE_IMAGE=' "$dockerfile"
 grep -Fq 'FROM ${VLLM_BASE_IMAGE}' "$dockerfile"
 grep -Fq 'ARG VLLM_VERSION=' "$dockerfile"
+grep -Fq 'RUN python3 -c' "$dockerfile"
 grep -Fq 'importlib.metadata.version("vllm")' "$dockerfile"
 
 grep -Fq 'vllm_base_image:' "$workflow"
