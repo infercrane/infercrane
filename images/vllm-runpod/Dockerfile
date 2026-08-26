@@ -3,9 +3,9 @@
 # Keep the tested runtime byte-for-byte and add only RunPod's SSH bootstrap
 # contract. SkyPilot connects over the managed TCP mapping and starts vLLM as
 # its durable task; no Python or CUDA dependency is installed on the Pod.
-ARG VLLM_BASE_IMAGE="vllm/vllm-openai@sha256:0fec7ec5f3e6bc168e54899935fb0557da908a4832a1dbc88e2debcf2f889416"
+ARG VLLM_BASE_IMAGE="vllm/vllm-openai@sha256:953d3a06d5e64ab582985cd7401289d3abf2a2c14ef2158e9a84313daeec77d7"
 FROM ${VLLM_BASE_IMAGE}
-ARG VLLM_VERSION="0.22.0"
+ARG VLLM_VERSION="0.22.1"
 
 # Never allow the publication workflow to attach a requested version tag to
 # different runtime bytes. A patched candidate supplies both an immutable base

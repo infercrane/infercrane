@@ -12,7 +12,7 @@ import (
 	"github.com/infercrane/infercrane/internal/testtools/providerfixture"
 )
 
-const testKubernetesImage = "vllm/vllm-openai@sha256:0fec7ec5f3e6bc168e54899935fb0557da908a4832a1dbc88e2debcf2f889416"
+const testKubernetesImage = "vllm/vllm-openai@sha256:953d3a06d5e64ab582985cd7401289d3abf2a2c14ef2158e9a84313daeec77d7"
 
 func testKubernetesProvider(runner provision.CommandRunner, api string) provision.Kubernetes {
 	return provision.Kubernetes{Runner: runner, Context: "kind-infercrane", Namespace: "infercrane-system", WorkloadAPI: api, ServiceAccount: "infercrane-runtime", WorkerSecretName: "infercrane-worker", WorkerSecretKey: "api-key", ImageDigest: testKubernetesImage, GPUResource: "nvidia.com/gpu", GPUProductLabel: "nvidia.com/gpu.product"}

@@ -29,7 +29,7 @@ const (
 	// DefaultRuntimeVersion is the default vLLM runtime qualified by the public
 	// support matrix. Persist it in every revision so benchmarks and
 	// explanations never depend on an implicit image default.
-	DefaultRuntimeVersion = "0.22.0"
+	DefaultRuntimeVersion = "0.22.1"
 	DefaultCloud          = "runpod"
 	DefaultGPU            = "L40S"
 	ElasticMode           = "elastic"

@@ -6,7 +6,7 @@ model:
   revision: c170c708c41dac9275d15a8fff4eca08d52bab71
 runtime:
   engine: vllm
-  version: 0.22.0
+  version: 0.22.1
   args: [--enable-prefix-caching]
 compute: {mode: elastic}
 provider: {cloud: aws, region: eu-central-1}
