@@ -1,15 +1,29 @@
 # Benchmarks
 
-The original benchmark and ThunderAgent evidence remains intact in the sibling `relay-poc`
-repository. It is not imported into the InferCrane product package.
+InferCrane qualifies serving plans with measured workload evidence. The benchmark path uses
+[AIPerf](https://github.com/ai-dynamo/aiperf) and records the exact model artifact, runtime,
+runtime configuration, accelerator, provider, region, workload shape, and evidence timestamp.
 
-The reusable assets identified for migration are the deterministic workload generator, fake
-OpenAI backend behaviors, reliability/completion gates, vLLM metric fixtures, result models,
-statistics, and terminal/Markdown reporting. ThunderAgent launch code and the custom routing
-implementations remain experiments rather than product dependencies.
+Run a benchmark through the CLI:
 
-Migration is intentionally deferred until the product request path is stable so benchmark
-history and measured results are not silently rewritten. Future InferCrane benchmarks will
-separate router/control-plane overhead from inference-engine performance and will report
-completion rate alongside throughput and latency.
+```bash
+infercrane benchmark DEPLOYMENT --profile interactive
+```
 
+Run the maintained qualification matrix only when the required infrastructure and spend are
+explicitly approved:
+
+```bash
+scripts/benchmark-matrix.sh DEPLOYMENT --approve-load
+```
+
+Local benchmark output belongs under the ignored `.infercrane/performance/` directory. Reports
+must not contain raw prompts, model outputs, credentials, or provider secrets.
+
+Results are comparable only when the full workload tuple matches. InferCrane reports completion
+rate, queue latency, time to first token, inter-token latency, output throughput, errors, and
+sourced cost when those signals are available. Modeled results are never presented as measured
+or qualified evidence.
+
+See [product qualification](../docs/testing/product-qualification.mdx) and
+[Release Guard](../docs/features/release-guard.md) for the evidence and promotion contracts.
