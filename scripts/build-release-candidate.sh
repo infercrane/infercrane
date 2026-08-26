@@ -2,7 +2,7 @@
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-tag=${1:-v1.0.0-rc.1}
+tag=${1:-$(jq -er '.candidate_tag' "$root/.release/version.json")}
 goreleaser_version=${2:-v2.12.7}
 goreleaser_bin=${INFERCRANE_GORELEASER_BIN:-}
 

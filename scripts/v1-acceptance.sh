@@ -146,8 +146,9 @@ case "$mode" in
     [ "$approval" = true ] || { echo "qualification requires --approve-paid-resources" >&2; exit 1; }
     acquire_lock
     [ -z "$(git -C "$root" status --porcelain)" ] || { echo "qualification requires a clean worktree" >&2; exit 1; }
-    [ "$(git -C "$root" describe --tags --exact-match HEAD 2>/dev/null || true)" = v1.0.0-rc.1 ] || {
-      echo "qualification requires HEAD at local tag v1.0.0-rc.1" >&2
+    release_candidate=$(jq -er '.candidate_tag' "$root/.release/version.json") || exit
+    [ "$(git -C "$root" describe --tags --exact-match HEAD 2>/dev/null || true)" = "$release_candidate" ] || {
+      echo "qualification requires HEAD at local tag $release_candidate" >&2
       exit 1
     }
     stage provider-preflight preflight

@@ -1,8 +1,8 @@
 GORELEASER_VERSION := v2.12.7
 GORELEASER ?= go run github.com/goreleaser/goreleaser/v2@$(GORELEASER_VERSION)
-RELEASE_CANDIDATE_TAG ?= v1.0.0-rc.1
+RELEASE_CANDIDATE_TAG ?= $(shell jq -r '.candidate_tag' .release/version.json)
 
-.PHONY: build generate-api generate-api-check hygiene-check license-check test-automation test-automation-full docs-dev docs-check demo demo-connect demo-record test test-container test-stack test-failure test-ha test-backup-restore test-store test-production-config test-provider-contracts test-simulated-clouds test-network-chaos test-kubernetes-manifests test-kubernetes-kind test-kubernetes-kwok test-kubernetes-versions test-fuzz test-reliability-soak test-acceptance-safety test-benchmark-matrix test-benchmark-concurrency-sweep test-aiconfigurator-upstream test-product test-product-qualification test-user-lifecycle acceptance-product verify audit deadcode release-check snapshot candidate-artifacts release-artifacts acceptance-local acceptance-preflight acceptance-cleanup qualify-local qualify-product qualify-product-nightly qualify-product-status qualify-rc qualify-v1 qualify-contracts qualify-aws-performance build-aws-artifact-cache qualify-aws-artifact-cache cleanup-aws-artifact-cache delete-aws-artifact-cache dev-check dev-check-full dev-up dev-down
+.PHONY: build generate-api generate-api-check hygiene-check license-check test-automation test-automation-full docs-dev docs-check demo demo-connect demo-record test test-container test-stack test-failure test-ha test-backup-restore test-store test-production-config test-provider-contracts test-simulated-clouds test-network-chaos test-kubernetes-manifests test-kubernetes-kind test-kubernetes-kwok test-kubernetes-versions test-fuzz test-reliability-soak test-acceptance-safety test-benchmark-matrix test-benchmark-concurrency-sweep test-aiconfigurator-upstream test-release-tag test-product test-product-qualification test-user-lifecycle acceptance-product verify audit deadcode release-check release-tag-check release-tag-candidate release-tag-stable snapshot candidate-artifacts release-artifacts acceptance-local acceptance-preflight acceptance-cleanup qualify-local qualify-product qualify-product-nightly qualify-product-status qualify-rc qualify-v1 qualify-contracts qualify-aws-performance build-aws-artifact-cache qualify-aws-artifact-cache cleanup-aws-artifact-cache delete-aws-artifact-cache dev-check dev-check-full dev-up dev-down
 
 build:
 	go build ./cmd/infercrane
@@ -104,6 +104,9 @@ test-benchmark-concurrency-sweep:
 test-aiconfigurator-upstream:
 	./scripts/test-aiconfigurator-upstream.sh
 
+test-release-tag:
+	./scripts/test-release-tag.sh
+
 qualify-aws-performance:
 	./scripts/aws-performance-qualification.sh $(MODEL) --approve-paid-resources
 
@@ -143,6 +146,15 @@ deadcode:
 release-check:
 	$(GORELEASER) check
 	ruby -c packaging/homebrew/infercrane.rb
+
+release-tag-check:
+	./scripts/release-tag.sh check
+
+release-tag-candidate:
+	./scripts/release-tag.sh candidate
+
+release-tag-stable:
+	./scripts/release-tag.sh stable
 
 snapshot: release-check
 	@command -v syft >/dev/null || { echo "syft is required to generate archive SBOMs; install it from https://github.com/anchore/syft" >&2; exit 1; }

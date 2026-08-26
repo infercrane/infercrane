@@ -49,21 +49,37 @@ remain pending until the tag is explicitly pushed.
 For a fully qualified release, wait until the consolidated manual report says
 `real_infrastructure: passed` and cleanup inventory is verified. An early-project release may instead
 ship with those limitations explicitly documented when the maintainer accepts that risk. From the
-clean release commit:
+clean release commit, first freeze the configured candidate locally:
 
 ```bash
-make release-artifacts RELEASE_TAG=v1.0.0
-git tag -a v1.0.0 -m "InferCrane v1.0.0"
+git fetch --prune --tags origin
+make release-tag-check
+make release-tag-candidate
+```
+
+The tag command requires a clean `main` checkout at exactly `origin/main`. It never pushes, publishes,
+or moves a tag. Run the complete release qualification against that immutable candidate. If the
+candidate fails, fix the defect on `main`, increment `candidate_tag` in `.release/version.json`, and
+qualify the new candidate. Never reuse or move a candidate tag.
+
+After the candidate passes, create the stable tag at the exact same commit and publish it explicitly:
+
+```bash
+stable_tag=$(jq -r '.stable_tag' .release/version.json)
+release_notes="docs/release-notes-${stable_tag}.md"
+test -f "$release_notes"
+make release-artifacts RELEASE_TAG="$stable_tag"
+make release-tag-stable
 git push origin main
-git push origin v1.0.0
-release_sha=$(git rev-list -n 1 v1.0.0)
+git push origin "$stable_tag"
+release_sha=$(git rev-list -n 1 "$stable_tag")
 run_id=$(gh run list --workflow release.yml --limit 20 --json databaseId,headSha \
   --jq ".[] | select(.headSha == \"$release_sha\") | .databaseId" | head -n 1)
 test -n "$run_id"
 gh run watch "$run_id" --exit-status
-gh release edit v1.0.0 \
-  --title "InferCrane v1.0.0" \
-  --notes-file docs/release-notes-v1.0.0.md \
+gh release edit "$stable_tag" \
+  --title "InferCrane $stable_tag" \
+  --notes-file "$release_notes" \
   --draft=false
 ```
 
@@ -73,3 +89,44 @@ draft only after every workflow job passes. Keep deferred real-provider evidence
 release notes. Upload the generated Homebrew formula only after its URLs resolve and a clean-machine
 installation passes. The commands intentionally push only `main` and the stable tag; RC tags remain
 local unless separately approved for publication.
+
+## Tag and support policy
+
+InferCrane uses semantic version tags:
+
+- `vMAJOR.MINOR.PATCH-rc.N` identifies an immutable release candidate.
+- `vMAJOR.MINOR.PATCH` identifies an immutable public stable release.
+- patch releases contain compatible fixes;
+- minor releases add backward-compatible capability;
+- major releases may change public API, configuration, or storage compatibility.
+
+`main` is the only development line and should remain releasable. Do not create milestone tags,
+progress tags, or speculative version sequences. Do not force-push, delete, or retarget a published
+stable tag. Container deployments should record the immutable image digest produced by the release
+workflow rather than relying on a mutable `latest` alias.
+
+For a production hotfix, branch from the affected stable tag, apply the smallest reviewed fix, merge
+it back to `main`, prepare the next patch candidate, repeat qualification, and publish a new patch
+tag. Roll production back through InferCrane revisions while the patch is being prepared; never move
+the old Git tag to represent different source.
+
+## Production operating rules
+
+Once external users depend on InferCrane, use this sequence for every release:
+
+1. Merge reviewed changes into `main`; never release a feature branch or dirty checkout.
+2. Freeze an RC tag and run local, simulated-provider, real-provider, upgrade, rollback, and cleanup
+   gates against that exact commit. A failed RC is abandoned, never retargeted.
+3. Record the known limitations and qualification boundary in the release notes. Claims without
+   archived evidence remain explicitly pending.
+4. Create the stable tag only at the qualified RC commit. Let the tag workflow create a draft, then
+   inspect checksums, SBOMs, provenance, scans, SDK artifacts, and the image digest before publishing.
+5. Deploy the immutable digest to an internal environment, then a bounded canary. Promote only while
+   service, request-budget, quality, cost, and cleanup signals remain inside policy.
+6. Keep the previous revision and database backup available through the observation window. Roll
+   runtime traffic back first; investigate and publish a new patch rather than changing an old tag.
+
+Protect `main` from force pushes and deletion. Require the quality, security, and documentation
+workflows before merge. Protect `v*` tags so only the release maintainer can create them and nobody
+can update or delete them. As a solo maintainer, keep emergency bypass narrow and record why it was
+used; add an independent approval requirement when another maintainer joins.

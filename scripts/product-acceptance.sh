@@ -394,7 +394,8 @@ reliability() {
 }
 
 release_check() {
-  INFERCRANE_RELEASE_CANDIDATE_TAG=${INFERCRANE_RELEASE_CANDIDATE_TAG:-v1.0.0-rc.1} \
+  release_candidate=$(jq -er '.candidate_tag' "$root/.release/version.json") || return
+  INFERCRANE_RELEASE_CANDIDATE_TAG=${INFERCRANE_RELEASE_CANDIDATE_TAG:-$release_candidate} \
     "$root/scripts/qualify-release.sh" local
 }
 

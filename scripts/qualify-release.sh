@@ -2,6 +2,7 @@
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+release_candidate=$(jq -er '.candidate_tag' "$root/.release/version.json")
 mode=${1:-local}
 approval=false
 shift || true
@@ -61,7 +62,7 @@ run_local_gates() {
   step developer-environment make -C "$root" dev-check-full
   step dead-code make -C "$root" deadcode
   step vulnerability-audit make -C "$root" audit
-  step release-package make -C "$root" candidate-artifacts RELEASE_CANDIDATE_TAG="${INFERCRANE_RELEASE_CANDIDATE_TAG:-v1.0.0-rc.1}"
+  step release-package make -C "$root" candidate-artifacts RELEASE_CANDIDATE_TAG="${INFERCRANE_RELEASE_CANDIDATE_TAG:-$release_candidate}"
 }
 
 run_provider_stage() {

@@ -18,7 +18,8 @@ case "$release_version" in
   *) python_version=$release_version ;;
 esac
 test "$public_version" = "$release_version"
-test "$release_candidate" = "v$release_version-rc.1"
+release_version_pattern=$(printf '%s' "$release_version" | sed 's/\./\\./g')
+printf '%s\n' "$release_candidate" | grep -Eq "^v${release_version_pattern}-rc\.[1-9][0-9]*$"
 test "$stable_tag" = "v$release_version"
 jq -e --arg version "$release_version" '.info.version == $version' "$root/api/openapi.json" >/dev/null
 jq -e --arg version "$release_version" '.info.version == $version' "$root/docs/openapi.json" >/dev/null
@@ -29,14 +30,15 @@ node -e 'const p=require(process.argv[1]); if(p.version!==process.argv[2] || p.p
 grep -Fq "infercrane-typescript/$release_version" "$root/sdk/typescript/src/client.ts"
 grep -Fq "default: v$release_version" "$root/actions/infercrane/action.yml"
 grep -Fq 'using: node24' "$root/actions/infercrane/action.yml"
-grep -Fq "input('version', 'v$release_version')" "$root/actions/infercrane/index.js"
+grep -Fq "input(\"version\", \"v$release_version\")" "$root/actions/infercrane/index.js"
 grep -Fq "infercrane:v$release_version" "$root/compose.production.yaml"
 grep -Fq "version = \"$release_version\"" "$root/examples/terraform/main.tf"
 grep -Fq 'version: 0.22.0' "$root/examples/infercrane.yaml"
-grep -Fq "RELEASE_CANDIDATE_TAG ?= $release_candidate" "$root/Makefile"
+grep -Fq "RELEASE_CANDIDATE_TAG ?= \$(shell jq -r '.candidate_tag' .release/version.json)" "$root/Makefile"
 grep -Fq 'GORELEASER_CURRENT_TAG=$(RELEASE_CANDIDATE_TAG)' "$root/Makefile"
 test -f "$root/docs/release-notes-v$release_version.md"
-grep -Fq "RELEASE_TAG=v$release_version" "$root/docs/release-packaging.mdx"
+grep -Fq 'stable_tag=$(jq -r' "$root/docs/release-packaging.mdx"
+grep -Fq 'release_notes="docs/release-notes-${stable_tag}.md"' "$root/docs/release-packaging.mdx"
 
 go run ./tools/openapi-codegen -check
 PYTHONPATH="$root/sdk/python/src" python3 -m unittest discover -s "$root/sdk/python/tests"

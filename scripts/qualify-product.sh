@@ -2,6 +2,7 @@
 set -u
 
 root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+release_candidate=$(jq -er '.candidate_tag' "$root/.release/version.json") || exit
 command_name=${1:-status}
 shift || true
 approval=false
@@ -62,7 +63,7 @@ run_contracts() {
 run_supply_chain() {
   make -C "$root" deadcode
   make -C "$root" audit
-  make -C "$root" candidate-artifacts RELEASE_CANDIDATE_TAG="${INFERCRANE_RELEASE_CANDIDATE_TAG:-v1.0.0-rc.1}"
+  make -C "$root" candidate-artifacts RELEASE_CANDIDATE_TAG="${INFERCRANE_RELEASE_CANDIDATE_TAG:-$release_candidate}"
 }
 
 run_product_journeys() {

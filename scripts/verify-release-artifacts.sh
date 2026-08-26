@@ -1,8 +1,9 @@
 #!/bin/sh
 set -eu
 
+root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 dist=${1:-dist}
-tag=${2:-v1.0.0-rc.1}
+tag=${2:-$(jq -er '.candidate_tag' "$root/.release/version.json")}
 version=${tag#v}
 
 printf '%s\n' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$' || {
