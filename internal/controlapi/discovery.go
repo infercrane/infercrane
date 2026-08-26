@@ -47,7 +47,7 @@ func discoverEndpoint(ctx context.Context, supplied *http.Client, baseURL, reque
 	// The URL is an authenticated user's explicit inference endpoint. The
 	// restricted client below disables proxies, redirects, cookies, and dials
 	// only the IP addresses that passed the discovery address policy.
-	// codeql[go/request-forgery]
+	// lgtm[go/request-forgery]
 	resp, err := client.Do(req)
 	if err != nil {
 		return endpointDiscovery{}, fmt.Errorf("could not reach %s: %w", modelsURL, err)
