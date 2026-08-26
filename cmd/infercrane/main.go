@@ -1159,11 +1159,18 @@ func modelsCommand(args []string) error {
 		}
 		fmt.Printf("%s\n\nModel       %s@%s\nPublisher   %s\nTasks       %s\nProtocol    %s\nCapabilities %s\nLicense     %s · %s\nAccess      %s\nEvidence    %s\nReviewed    %s\n\nServing profiles\n", entry.DisplayName, entry.Model, entry.Revision, entry.Publisher, strings.Join(entry.Tasks, ", "), entry.Protocol, strings.Join(entry.Capabilities, ", "), entry.License, entry.LicenseURL, access, entry.EvidenceClass, entry.ReviewedAt)
 		for _, profile := range entry.Profiles {
-			args := "runtime defaults"
-			if len(profile.RuntimeArgs) > 0 {
-				args = strings.Join(profile.RuntimeArgs, " ")
+			gpu := fmt.Sprintf("%d×%s", profile.GPUCount, profile.GPUHint)
+			fmt.Printf("  %s  %s · %s · %s · replicas %d–%d\n    %s\n    Evidence: %s\n", profile.Name, profile.Runtime, profile.ComputeMode, gpu, profile.MinReplicas, profile.MaxReplicas, profile.Description, profile.QualificationScope)
+			if !profile.Workload.Empty() {
+				fmt.Printf("    Image: %s\n    Command: %s\n", profile.Workload.Image, strings.Join(profile.Workload.Command, " "))
+			} else if len(profile.RuntimeArgs) > 0 {
+				fmt.Printf("    Args: %s\n", strings.Join(profile.RuntimeArgs, " "))
+			} else {
+				fmt.Println("    Args: runtime defaults")
 			}
-			fmt.Printf("  %s  %s · %s · %s · replicas %d–%d\n    %s\n    Evidence: %s\n    Args: %s\n", profile.Name, profile.Runtime, profile.ComputeMode, profile.GPUHint, profile.MinReplicas, profile.MaxReplicas, profile.Description, profile.QualificationScope, args)
+			for _, limitation := range profile.Limitations {
+				fmt.Printf("    Limitation: %s\n", limitation)
+			}
 		}
 		fmt.Printf("\nCreate a project:\n  infercrane workload init --recipe %s --profile %s\n", entry.Name, entry.Profiles[0].Name)
 		return nil

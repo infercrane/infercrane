@@ -1134,6 +1134,15 @@ func TestModelsCommandExploresReviewedCatalogWithoutControlPlane(t *testing.T) {
 			t.Fatalf("detail missing %q: %s", expected, detail)
 		}
 	}
+	frontier, err := captureStdout(t, func() error { return modelsCommand([]string{"inspect", "qwen3.8-flash-next"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"8×H200", "vllm/vllm-openai@sha256:fc120ece", "Command: vllm serve", "--enable-expert-parallel", "qwen-community-1.0", "separate Qwen license"} {
+		if !strings.Contains(frontier, expected) {
+			t.Fatalf("frontier detail missing %q: %s", expected, frontier)
+		}
+	}
 }
 
 func TestIntegrationsCommandShowsContractsAndDeferredEvidence(t *testing.T) {
