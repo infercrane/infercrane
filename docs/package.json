@@ -12,7 +12,14 @@
     "check": "npm run validate && npm run check:links"
   },
   "devDependencies": {
-    "mint": "4.2.788"
+    "mint": "4.2.827"
+  },
+  "overrides": {
+    "@puppeteer/browsers": "3.2.1",
+    "puppeteer": "25.9.0",
+    "puppeteer-core": "25.9.0",
+    "qs": "6.15.3",
+    "sharp": "0.35.0"
   },
   "engines": {
     "node": ">=20"
