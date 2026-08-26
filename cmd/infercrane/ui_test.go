@@ -151,7 +151,7 @@ func TestUIPromoteRequiresCurrentPersistedAcceptance(t *testing.T) {
 	}
 }
 
-func TestUIV01CapabilityContractIsComplete(t *testing.T) {
+func TestUICapabilityContractIsComplete(t *testing.T) {
 	want := []string{"deployment", "operation", "Release Guard", "benchmark", "cold starts", "infrastructure", "autoscaling", "event", "deletion", "administration"}
 	all := ""
 	for _, capability := range uiCapabilities {
@@ -160,7 +160,7 @@ func TestUIV01CapabilityContractIsComplete(t *testing.T) {
 	all = strings.ToLower(all)
 	for _, term := range want {
 		if !strings.Contains(all, strings.ToLower(term)) {
-			t.Fatalf("v0.1 capability contract does not cover %q", term)
+			t.Fatalf("capability contract does not cover %q", term)
 		}
 	}
 }

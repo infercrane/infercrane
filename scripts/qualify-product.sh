@@ -62,7 +62,7 @@ run_contracts() {
 run_supply_chain() {
   make -C "$root" deadcode
   make -C "$root" audit
-  make -C "$root" candidate-artifacts RELEASE_CANDIDATE_TAG="${INFERCRANE_RELEASE_CANDIDATE_TAG:-v2.0.0-rc.1}"
+  make -C "$root" candidate-artifacts RELEASE_CANDIDATE_TAG="${INFERCRANE_RELEASE_CANDIDATE_TAG:-v1.0.0-rc.1}"
 }
 
 run_product_journeys() {
@@ -113,7 +113,7 @@ run_runpod() {
     record runpod-serverless-real BLOCKED_ACCESS "serverless template ID is missing"
     record runpod-serverless-faults-real BLOCKED_ACCESS "serverless template ID is missing"
   fi
-  run_id=${INFERCRANE_V2_QUALIFICATION_RUN_ID:-"$(date -u +%Y%m%dT%H%M%SZ)-$short"}
+  run_id=${INFERCRANE_QUALIFICATION_RUN_ID:-"$(date -u +%Y%m%dT%H%M%SZ)-$short"}
   failed=0
   if [ -n "${INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID:-}" ]; then
     INFERCRANE_ACCEPTANCE_RUN_ID="$run_id-serverless" run_gate runpod-serverless-real \

@@ -15,6 +15,7 @@ type Deployment struct {
 	APIVersion string `yaml:"apiVersion,omitempty"`
 	Kind       string `yaml:"kind,omitempty"`
 	Name       string `yaml:"name"`
+	Endpoint   string `yaml:"endpoint,omitempty"`
 	Model      struct {
 		ID       string `yaml:"id"`
 		Revision string `yaml:"revision"`
@@ -87,6 +88,9 @@ func Load(path string) (Deployment, error) {
 	}
 	if out.Name == "" || out.Model.ID == "" || out.Resources.GPU == "" || out.Provider.Cloud == "" {
 		return out, fmt.Errorf("name, model.id, resources.gpu, and provider.cloud are required")
+	}
+	if out.Endpoint == "" {
+		out.Endpoint = out.Name
 	}
 	if err := support.V1().Validate(out.Runtime.Engine, out.Provider.Cloud, out.Compute.Mode); err != nil {
 		return out, fmt.Errorf("support policy: %w", err)

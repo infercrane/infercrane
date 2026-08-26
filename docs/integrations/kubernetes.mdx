@@ -147,15 +147,15 @@ The provider verifies the `InferenceService` API and required permissions during
 owns generated Deployments, Services, and Pods; InferCrane inventories and deletes only the parent
 InferenceService. Raw KServe condition metadata remains available through `infercrane inspect`.
 
-KServe `LLMInferenceService` and llm-d remain separate integration boundaries. Dynamo uses the
-explicit ownership contract in [ADR 0036](/adr/0036-dynamo-serving-topology-boundary) and a distinct
-`kubernetes-dynamo` adapter; it is never enabled implicitly by `workload_api`.
+KServe `LLMInferenceService` and llm-d remain separate integration boundaries. Dynamo uses a
+distinct `kubernetes-dynamo` adapter with one explicit mutation owner; it is never enabled
+implicitly by `workload_api`.
 
 ## Expose the logical endpoint
 
 `deploy/kubernetes/gateway-api/httproute.yaml` is an optional placeholder. Replace the Gateway and
 hostname, then apply it only if your cluster already has Gateway API and a controller. It routes to
-the InferCrane gateway—not directly to revisions or workers—so safe rollout ownership stays singular.
+the InferCrane gateway, not directly to revisions or workers - so safe rollout ownership stays singular.
 
 ## Local conformance
 

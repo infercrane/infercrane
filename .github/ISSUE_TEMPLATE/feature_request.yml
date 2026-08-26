@@ -1,11 +1,32 @@
 name: Feature request
 description: Propose a scoped InferCrane capability
+title: "[Feature]: "
 body:
   - type: textarea
     id: outcome
-    attributes: {label: Operator outcome, description: What production inference outcome should become easier?}
-    validations: {required: true}
+    attributes:
+      label: Operator outcome
+      description: What production inference outcome should become easier or safer?
+    validations:
+      required: true
+  - type: textarea
+    id: current
+    attributes:
+      label: Current workflow
+      description: How do teams solve this today, and where does that workflow fail?
+    validations:
+      required: true
   - type: textarea
     id: ownership
-    attributes: {label: Ownership boundary, description: Why should InferCrane own this instead of vLLM, SkyPilot, RunPod, or AIPerf?}
-    validations: {required: true}
+    attributes:
+      label: Ownership boundary
+      description: Why should InferCrane own this instead of the inference runtime, cloud, scheduler, gateway, evaluator, or another specialist system?
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Acceptance evidence
+      description: What observable behavior or qualification evidence would prove the capability works?
+    validations:
+      required: true

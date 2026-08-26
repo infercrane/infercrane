@@ -1,0 +1,51 @@
+---
+title: Integration ownership and licenses
+description: Understand what InferCrane owns, what specialist systems retain, and how new adapters qualify.
+sidebarTitle: Ownership and licenses
+---
+
+# Compose specialist systems without blurring ownership
+
+InferCrane integrates with established infrastructure and inference projects through narrow,
+replaceable contracts. A compatible license is necessary but not sufficient. Every integration also
+needs a pinned version, a security review, conformance tests, explicit mutation ownership, and
+real-system qualification before it can be advertised as supported.
+
+| System category | Integration model | Candidate upstreams | License boundary | InferCrane owns | Specialist system retains |
+|---|---|---|---|---|---|
+| LLM gateway | OpenAI-compatible target or replaceable gateway adapter | [LiteLLM](https://github.com/BerriAI/litellm), [Envoy AI Gateway](https://github.com/envoyproxy/ai-gateway) | Review exact distributed paths; no fork is bundled | Endpoint identity, budgets, evidence, releases | Provider translation catalog and upstream credentials |
+| Training | Signed checkpoint handoff; job adapter only after demand | [Kubeflow Trainer](https://github.com/kubeflow/trainer), [MLflow](https://github.com/mlflow/mlflow), SkyPilot jobs | External service and artifact terms remain operator-owned | Artifact lineage, qualification, deployment handoff | Training data, execution, storage, and scheduling |
+| Vector database | Dependency identity and health evidence only | [Qdrant](https://github.com/qdrant/qdrant), [Milvus](https://github.com/milvus-io/milvus) | External service; not redistributed | Endpoint linkage and evidence references | Vector storage, indexing, and retrieval |
+| Agent framework | Stable endpoint, SDK examples, telemetry, and request identity | [LangGraph](https://github.com/langchain-ai/langgraph), [Google ADK](https://github.com/google/adk-python) | External application dependency | Inference identity and operational evidence | Planning loop, tools, and application state |
+| Sandbox | External identity plus scoped, expiring inference access | [E2B](https://github.com/e2b-dev/E2B), [Kubernetes Agent Sandbox](https://github.com/kubernetes-sigs/agent-sandbox) | External runtime and credentials | Endpoint access policy and evidence references | Isolation, commands, files, snapshots, and networking |
+| Inference engine | Runtime Contract adapter and conformance | [Ollama](https://github.com/ollama/ollama), [llama.cpp](https://github.com/ggml-org/llama.cpp), [TensorRT-LLM](https://github.com/NVIDIA/TensorRT-LLM) | Audit the exact engine and redistribution path | Capability truth, lifecycle intent, and evidence | Engine internals, kernels, decoding, and distributed KV |
+| Kubernetes | Standard APIs against an operator-owned cluster | Kubernetes, KServe, Kind for tests | InferCrane does not distribute a cluster | Workload intent, manifests, lifecycle, and evidence | Cluster, networking, storage, devices, and scheduling |
+| GPU scheduler | CRD or API selected by the cluster owner | [Kueue](https://github.com/kubernetes-sigs/kueue), [Volcano](https://github.com/volcano-sh/volcano) | External cluster component | Serving intent and scheduling evidence | Queueing, placement, and device allocation |
+| Workflow engine | Events, webhooks, SDK steps, and bounded async inference | [Argo Workflows](https://github.com/argoproj/argo-workflows), [Temporal](https://github.com/temporalio/temporal) | External application service | Inference operations and inference idempotency | Generic DAG and workflow execution |
+
+## Build, integrate, or reject
+
+Build a capability only when it belongs to InferCrane's durable inference contract and no specialist
+system already owns it. Integrate when a mature upstream project owns the concern. A fork is
+acceptable only when all of these conditions are true:
+
+1. The license permits the exact distribution model.
+2. An adapter cannot produce the required user outcome.
+3. The divergence is deliberately small and bounded.
+4. A named maintainer owns upstream security merges.
+5. A removal or upstreaming plan exists.
+
+No candidate listed above currently meets that fork threshold.
+
+## Qualification ladder
+
+Each adapter advances independently:
+
+```text
+REGISTERED → CONTRACT_TESTED → LOCAL_QUALIFIED → REAL_SYSTEM_QUALIFIED
+```
+
+Registration means a capability is discoverable. It does not prove credentials, networking,
+capacity, runtime behavior, performance, billing, cleanup, or recovery on a real system. The CLI,
+API, console, and documentation must display the achieved tier rather than infer support from the
+presence of an adapter.

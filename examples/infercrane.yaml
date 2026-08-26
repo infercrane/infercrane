@@ -1,6 +1,7 @@
 apiVersion: infercrane.dev/v1
 kind: Deployment
 name: qwen-prod
+endpoint: support-production
 
 model:
   id: Qwen/Qwen3-8B
@@ -8,7 +9,7 @@ model:
 
 runtime:
   engine: vllm
-  version: 0.10.2
+  version: 0.22.0
   args:
     - --enable-prefix-caching
 

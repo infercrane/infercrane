@@ -51,8 +51,8 @@ make qualify-product-nightly
 See [Reliability test environment](/testing/test-environment) for the evidence ladder, provider
 simulation boundaries, version matrix, and scheduled workflow.
 
-For the complete operator procedure—including credential handoff, network prerequisites, provider
-setup, resume behavior, cleanup, and final human review—follow the
+For the complete operator procedure, including credential handoff, network prerequisites, provider
+setup, resume behavior, cleanup, and final human review - follow the
 [Production qualification runbook](/testing/production-qualification-runbook).
 
 The verdict vocabulary is intentionally strict:
@@ -79,7 +79,7 @@ disconnect; durable operations and stage evidence allow the workflow to resume.
 ```bash
 export RUNPOD_KEY_FILE="$HOME/.config/infercrane/runpod-key"
 export INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID="<immutable-template-id>"
-export INFERCRANE_V2_QUALIFICATION_RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short HEAD)"
+export INFERCRANE_QUALIFICATION_RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short HEAD)"
 
 ./scripts/qualify-product.sh runpod --approve-paid-resources
 ```

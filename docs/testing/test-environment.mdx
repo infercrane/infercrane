@@ -159,8 +159,8 @@ control-plane replicas, and PostgreSQL connections; provider fault proxies injec
 responses. The scheduled Toxiproxy gate cuts every PostgreSQL connection in a full Docker stack and
 proves that readiness fails closed, an already-published inference route remains available without a
 database lookup, and the control plane recovers after connectivity returns. Future latency, reset,
-bandwidth, partial-transfer, and slow-close cases belong in the same boundary; this complements—not
-replaces—assertions about durable state and ownership.
+bandwidth, partial-transfer, and slow-close cases belong in the same boundary; this complements, not
+replaces - assertions about durable state and ownership.
 
 ```bash
 make test-network-chaos

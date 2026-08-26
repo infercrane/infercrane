@@ -15,10 +15,12 @@ const ApplyExistingKind = "deployment.apply-existing"
 
 type DeploymentStore interface {
 	ApplyDeploymentForTenant(context.Context, string, domain.Deployment, []string) (domain.Deployment, error)
+	PublishDeploymentEndpoint(context.Context, string, string, string) (domain.ResolvedEndpoint, error)
 	Audit(context.Context, domain.AuditEvent) error
 }
 type ApplyExistingRequest struct {
 	Name               string   `json:"name"`
+	EndpointName       string   `json:"endpoint_name,omitempty"`
 	Model              string   `json:"model"`
 	Targets            []string `json:"targets"`
 	RoutingStrategy    string   `json:"routing_strategy,omitempty"`
@@ -29,9 +31,15 @@ type ApplyExistingRequest struct {
 	TenantID           string   `json:"tenant_id,omitempty"`
 }
 
-func (r ApplyExistingRequest) Validate() error {
+func (r *ApplyExistingRequest) Validate() error {
 	if r.Name == "" || r.Model == "" || len(r.Targets) == 0 {
 		return errors.New("name, model, and at least one target are required")
+	}
+	if r.EndpointName == "" {
+		r.EndpointName = r.Name
+	}
+	if !endpointNamePattern.MatchString(r.EndpointName) {
+		return errors.New("endpoint_name must contain 1 to 64 lowercase letters, numbers, dots, underscores, or dashes and must start and end with a letter or number")
 	}
 	return nil
 }
@@ -52,7 +60,14 @@ func DeploymentHandlers(store DeploymentStore) map[string]operations.Handler {
 			}
 			return "", operations.Retryable("apply_failed", err)
 		}
-		result, _ := json.Marshal(map[string]string{"deployment_id": deployment.ID, "name": deployment.Name})
+		published, err := store.PublishDeploymentEndpoint(ctx, request.TenantID, request.EndpointName, deployment.Name)
+		if err != nil {
+			if errors.Is(err, domain.ErrNotFound) || errors.Is(err, domain.ErrConflict) {
+				return "", operations.Permanent("endpoint_publish_rejected", err)
+			}
+			return "", operations.Retryable("endpoint_publish_failed", err)
+		}
+		result, _ := json.Marshal(map[string]string{"deployment_id": deployment.ID, "name": deployment.Name, "endpoint_name": published.Endpoint.Name})
 		_ = store.Audit(context.WithoutCancel(ctx), domain.AuditEvent{TenantID: request.TenantID, Actor: request.Actor, Action: "deployment.apply", ResourceType: "deployment", ResourceName: request.Name, Outcome: "succeeded", Payload: operation.RequestJSON})
 		return string(result), nil
 	}}

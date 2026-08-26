@@ -29,7 +29,7 @@ Endpoint concurrency and queue depth are shared by every tenant authorized to ca
 this release has no per-tenant concurrency or per-tenant queue partition. A tenant request-per-minute
 quota limits admitted volume over a UTC window but cannot reserve an instantaneous capacity share.
 If strict noisy-neighbor isolation is mandatory, use separate tenant boundaries, stable endpoints,
-and dedicated backend capacity pools—or separate control-plane environments—then qualify each pool.
+and dedicated backend capacity pools - or separate control-plane environments - then qualify each pool.
 Separate endpoint names backed by the same saturated deployment are not capacity isolation. Stop
 before onboarding another tenant if that boundary cannot be provided.
 </Warning>
@@ -115,7 +115,7 @@ infercrane logs coder-runtime --since 1h --output json
 ```
 
 Backend failure is supported by request status/error type, attempt count, route identity, runtime
-health, and durable provider events—not by weakening quota. If the request ID or provider outcome is
+health, and durable provider events, not by weakening quota. If the request ID or provider outcome is
 unknown, keep the safety control in place and use the
 [provider outage runbook](/runbooks/provider-outage).
 

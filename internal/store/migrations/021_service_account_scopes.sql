@@ -6,7 +6,7 @@ ALTER TABLE principals
 ALTER TABLE principals
   ADD CONSTRAINT principals_scopes_array CHECK(jsonb_typeof(scopes_json) = 'array');
 
--- Freeze the pre-v0.3 permissions of existing credentials. In particular,
+-- Freeze the legacy permissions of existing credentials. In particular,
 -- introducing manage_secrets/manage_external must not silently escalate an
 -- existing operator or administrator.
 UPDATE principals

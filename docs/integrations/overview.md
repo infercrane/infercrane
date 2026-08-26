@@ -5,9 +5,10 @@ description: How providers, runtimes, artifacts, routers, metrics, and benchmark
 
 # Integration model
 
-InferCrane is a durable inference control plane, not a wrapper around one cloud. Its deployment,
-revision, operation, Release Guard, explanation, and telemetry models do not belong to RunPod,
-SkyPilot, or vLLM. External systems enter through capability-specific contracts.
+InferCrane is a portable production inference platform, not a wrapper around one cloud. Its durable
+control plane owns deployment, revision, operation, Release Guard, explanation, and telemetry
+semantics. Those semantics do not belong to RunPod, SkyPilot, or vLLM. External systems enter
+through capability-specific contracts.
 
 ```bash
 infercrane integrations
@@ -149,12 +150,12 @@ qualifies only exact combinations; registration never implies real-system eviden
 
 The versioned contract details are documented in [Provider Contract V1](/architecture/provider-contract),
 [Runtime Contract V1](/architecture/runtime-contract), and
-[ADR 0033](/adr/0033-replaceable-external-composition-contracts).
+[Integration ownership](/integrations/ownership).
 
 See [Ecosystem compatibility](/integrations/ecosystem) for the exact user path and maturity of
 model APIs, gateways, agents, vector databases, workflow engines, training systems, sandboxes,
 runtimes, Kubernetes, and GPU schedulers.
 
 Do not add a provider conditional to a generic workflow, expose registration as support, build a
-second scheduler, or silently fabricate unavailable provider data. See
-[ADR 0009](/adr/0009-qualified-support-and-backend-registration) for the accepted boundary.
+second scheduler, or silently fabricate unavailable provider data. Registration and qualification
+remain separate states throughout the API, CLI, console, and documentation.

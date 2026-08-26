@@ -1577,7 +1577,7 @@ func (f *fakeBenchmarkRunner) Run(_ context.Context, cfg benchmark.Config) (benc
 	return benchmark.Result{Tool: "aiperf", ToolVersion: "0.9.0", Command: "aiperf profile --api-key ${INFERCRANE_API_KEY}", Requests: 10, Succeeded: 10, TTFTP95MS: &value, Goodput: &goodput}, nil
 }
 func TestOperationAPIAuthenticationAndResponse(t *testing.T) {
-	store := &fakeStore{operation: domain.Operation{ID: "op", TenantID: "global", Status: "failed", ErrorCode: "provider_denied", MaxAttempts: 5}}
+	store := &fakeStore{operation: domain.Operation{ID: "op", TenantID: "global", Status: "succeeded", ResultJSON: `{"endpoint_name":"coder-production"}`, MaxAttempts: 5}}
 	handler := (API{Store: store, APIKey: "secret"}).Handler()
 	unauthorized := httptest.NewRecorder()
 	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/api/v1/operations/op", nil))
@@ -1588,7 +1588,7 @@ func TestOperationAPIAuthenticationAndResponse(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer secret")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"max_attempts":5`) || !strings.Contains(response.Body.String(), `"error_code":"provider_denied"`) {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"max_attempts":5`) || !strings.Contains(response.Body.String(), `"result":{"endpoint_name":"coder-production"}`) {
 		t.Fatalf("response=%d %s", response.Code, response.Body.String())
 	}
 	if response.Header().Get("Cache-Control") != "no-store" {
@@ -1597,7 +1597,7 @@ func TestOperationAPIAuthenticationAndResponse(t *testing.T) {
 }
 
 func TestIntegrationsReturnsVersionedCapabilityEvidence(t *testing.T) {
-	registry, err := integration.V02Catalog()
+	registry, err := integration.BaseCatalog()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1620,7 +1620,7 @@ func TestRecommendationAPIUsesPersistedQualifiedEvidenceAndDisclosesCapacity(t *
 	maxTTFT, measured := 250.0, 200.0
 	observed := time.Now().UTC()
 	store := &fakeStore{resolved: domain.ResolvedDeployment{Deployment: domain.Deployment{ID: "deployment-1", TenantID: "global", Name: "qwen", ActiveRevisionID: "revision-1"}}, artifact: domain.ModelArtifact{ID: "artifact-1", ModelIdentity: "Qwen/Qwen3-8B@commit"}, capacity: domain.CapacityEvidence{ID: "capacity-1", State: "available", Source: "provider.stock", ObservedAt: observed, ExpiresAt: observed.Add(time.Minute)}, sloPolicy: domain.SLOPolicy{DeploymentID: "deployment-1", MaxTTFTP95MS: &maxTTFT}, benchmarks: []domain.BenchmarkResult{{ID: "benchmark-1", DeploymentID: "deployment-1", ModelIdentity: "Qwen/Qwen3-8B@commit", Runtime: "vllm", RuntimeVersion: support.DefaultRuntimeVersion, Provider: "runpod", GPU: "L40S", ComputeMode: "elastic", WorkloadJSON: `{"requests":100,"concurrency":1}`, RequestCount: 100, Succeeded: 100, TTFTP95MS: &measured, CostMetadataJSON: `{"available":false}`}}}
-	registry, err := integration.V06Catalog()
+	registry, err := integration.PortableCatalog()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1639,7 +1639,7 @@ func TestRecommendationAPIUsesPersistedQualifiedEvidenceAndDisclosesCapacity(t *
 func TestRecommendationAPIRejectsInputAndUnlikeEvidence(t *testing.T) {
 	maxTTFT, measured := 250.0, 100.0
 	store := &fakeStore{resolved: domain.ResolvedDeployment{Deployment: domain.Deployment{ID: "deployment-1", Name: "qwen", ActiveRevisionID: "revision-1"}}, artifact: domain.ModelArtifact{ID: "artifact-1", ModelIdentity: "model@active"}, sloPolicy: domain.SLOPolicy{DeploymentID: "deployment-1", MaxTTFTP95MS: &maxTTFT}, benchmarks: []domain.BenchmarkResult{{ID: "benchmark-1", ModelIdentity: "model@other", Runtime: "vllm", Provider: "runpod", ComputeMode: "elastic", WorkloadJSON: `{}`, RequestCount: 10, TTFTP95MS: &measured}}}
-	registry, _ := integration.V06Catalog()
+	registry, _ := integration.PortableCatalog()
 	for _, body := range []string{`{"unexpected":true}`, `{}`, "{} {}"} {
 		request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments/qwen/recommendations", strings.NewReader(body))
 		request.Header.Set("Authorization", "Bearer secret")
@@ -1986,7 +1986,7 @@ func TestApplyQueuesIdempotentOperation(t *testing.T) {
 	request.Header.Set("Idempotency-Key", "release-1")
 	response := httptest.NewRecorder()
 	(API{Store: store, APIKey: "secret"}).Handler().ServeHTTP(response, request)
-	if response.Code != http.StatusAccepted || response.Header().Get("Location") != "/api/v1/operations/queued" || store.operation.Kind != "deployment.apply-existing" {
+	if response.Code != http.StatusAccepted || response.Header().Get("Location") != "/api/v1/operations/queued" || store.operation.Kind != "deployment.apply-existing" || !strings.Contains(store.operation.RequestJSON, `"endpoint_name":"prod"`) {
 		t.Fatalf("response=%d %s operation=%#v", response.Code, response.Body.String(), store.operation)
 	}
 }
@@ -2026,7 +2026,7 @@ func TestCloudDeployPersistsAndQueuesConverge(t *testing.T) {
 	if response.Code != http.StatusAccepted || response.Header().Get("Location") != "/api/v1/operations/queued" || store.operation.Kind != "deployment.converge" || store.operation.ResourceName != "qwen" {
 		t.Fatalf("response=%d %s operation=%#v", response.Code, response.Body.String(), store.operation)
 	}
-	if !strings.Contains(store.operation.RequestJSON, `"tenant_id":"global"`) {
+	if !strings.Contains(store.operation.RequestJSON, `"tenant_id":"global"`) || !strings.Contains(store.operation.RequestJSON, `"endpoint_name":"qwen"`) {
 		t.Fatalf("request=%s", store.operation.RequestJSON)
 	}
 }

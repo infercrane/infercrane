@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and support
+    url: https://github.com/infercrane/infercrane/discussions
+    about: Ask installation, configuration, and usage questions.
+  - name: Report a security vulnerability
+    url: https://github.com/infercrane/infercrane/security/advisories/new
+    about: Report security issues privately. Never disclose credentials or customer data publicly.

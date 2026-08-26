@@ -1,14 +1,28 @@
 # Contributing to InferCrane
 
-Start with [AGENTS.md](AGENTS.md) and [docs/index.mdx](docs/index.mdx). Humans and coding agents use
-the same workflow and quality gates.
+Start with [docs/index.mdx](docs/index.mdx), [docs/compatibility.md](docs/compatibility.md), and
+the relevant feature documentation. Implementation and tests are authoritative when prose and
+behavior disagree.
+
+## Engineering contract
+
+InferCrane is a production-oriented Go control plane and OpenAI-compatible gateway. PostgreSQL is
+the source of truth for control-plane state, but the inference request path must never query it.
+Each gateway owns its loopback router processes, streaming responses have no server write timeout,
+schema migrations are forward-only and immutable after release, and production secrets never have
+defaults or enter provider metadata. Development fakes remain under `internal/testtools` and are
+excluded from production images.
+
+Behavior changes require tests and relevant feature documentation. Architecture, security,
+storage, and dependency changes must update the authoritative architecture, security, ownership,
+or integration page in the same pull request. Remove replaced code in the same change and validate
+new configuration before review.
 
 ## Development
 
 ```bash
 asdf install
 go mod download
-make context
 make dev-check
 ```
 
@@ -33,10 +47,19 @@ Keep changes cohesive and explain the operational consequences. A pull request i
 - `make verify` passes.
 - CI dead-code and vulnerability analysis passes; reported code is reviewed before removal.
 - Relevant feature documentation is updated.
-- A new ADR records any durable architectural or security decision.
-- `docs/generated/repository-map.md` is regenerated and committed.
+- Architecture, security, ownership, and integration documentation reflects the resulting design.
 - Migrations are forward-only, immutable after merge, and safe for rolling deployment.
 - New dependencies have a clear purpose, compatible license, and security review.
 - Removed behavior has no remaining references, configuration, documentation, or deployment assets.
+- Every commit includes a `Signed-off-by` line certifying the
+  [Developer Certificate of Origin](https://developercertificate.org/).
 
 Generated artifacts are review aids, not substitutes for understanding the implementation.
+
+Sign commits with:
+
+```bash
+git commit -s
+```
+
+By contributing, you agree that your contribution is licensed under the repository's MIT License.

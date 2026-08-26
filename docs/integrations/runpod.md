@@ -7,7 +7,7 @@ description: Configure the RunPod elastic and provider-native Serverless adapter
 
 RunPod is one registered infrastructure adapter. Elastic deployments use SkyPilot to provision
 RunPod Pods; Serverless deployments use RunPod's native endpoint lifecycle. InferCrane's base
-production stack does not require RunPod—enable it explicitly with
+production stack does not require RunPod; enable it explicitly with
 `compose.production.runpod.yaml`.
 
 <Warning>

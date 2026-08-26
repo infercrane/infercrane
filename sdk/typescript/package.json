@@ -1,19 +1,41 @@
 {
   "name": "@infercrane/sdk",
-  "version": "2.0.0",
+  "version": "1.0.0",
   "description": "Typed TypeScript client for the InferCrane inference control plane",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "exports": {".": {"types": "./dist/index.d.ts", "import": "./dist/index.js"}},
-  "files": ["dist", "README.md"],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "npm run build && node --test test/*.test.mjs",
     "check": "tsc -p tsconfig.json --noEmit"
   },
-  "engines": {"node": ">=20"},
-  "license": "Apache-2.0",
-  "repository": {"type": "git", "url": "https://github.com/infercrane/infercrane.git", "directory": "sdk/typescript"},
-  "devDependencies": {"@types/node": "24.10.1", "typescript": "5.9.3"}
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "homepage": "https://docs.infercrane.com/integrations/typescript",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/infercrane/infercrane.git",
+    "directory": "sdk/typescript"
+  },
+  "bugs": {
+    "url": "https://github.com/infercrane/infercrane/issues"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "typescript": "5.9.3"
+  }
 }

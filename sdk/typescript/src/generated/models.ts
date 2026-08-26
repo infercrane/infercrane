@@ -16,6 +16,7 @@ export interface Operation {
   cancel_requested?: boolean;
   attempt?: number;
   max_attempts?: number;
+  result?: Record<string, JsonValue>;
 }
 
 export interface Deployment {

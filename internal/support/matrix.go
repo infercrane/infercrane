@@ -87,45 +87,9 @@ func New(runtimes []string, clouds map[string][]string) Matrix {
 	return matrix
 }
 
-func V01() Matrix {
-	return New([]string{DefaultRuntime}, map[string][]string{DefaultCloud: {ElasticMode, ServerlessMode}})
-}
-
-// V03 is the public qualification policy for the v0.3 release. Provider
-// adapters remain registered separately; adding one to the integration
-// catalog does not expose it until this policy is intentionally expanded.
-func V03() Matrix {
-	return New([]string{DefaultRuntime}, map[string][]string{
-		DefaultCloud: {ElasticMode, ServerlessMode},
-		"aws":        {ElasticMode},
-	})
-}
-
-// V06 is the local qualification policy for portable runtimes. SGLang and
-// custom OCI are deliberately limited to the SkyPilot elastic path until each
-// additional provider proves the workload contract independently.
-func V06() Matrix {
-	return Qualified(map[string]map[string][]string{
-		DefaultCloud: {ElasticMode: {DefaultRuntime}, ServerlessMode: {DefaultRuntime}},
-		"aws":        {ElasticMode: {DefaultRuntime, "sglang", "custom-oci"}},
-	})
-}
-
-// V09 adds the Kubernetes elastic adapter to the executable pre-release
-// matrix. Its runtime combinations are simulated/Kind-qualified; callers must
-// still inspect the integration qualification state before production use.
-func V09() Matrix {
-	return Qualified(map[string]map[string][]string{
-		DefaultCloud: {ElasticMode: {DefaultRuntime}, ServerlessMode: {DefaultRuntime}},
-		"aws":        {ElasticMode: {DefaultRuntime, "sglang", "custom-oci"}},
-		"kubernetes": {ElasticMode: {DefaultRuntime, "sglang", "custom-oci"}},
-	})
-}
-
-// V1 is the public v1 runtime/provider/compute qualification policy. Keep the
-// historical milestone functions so old qualification evidence remains
-// reproducible while current composition has a version-appropriate owner.
-func V15() Matrix {
+// V1 is the public runtime/provider/compute qualification policy. Registered
+// adapters remain private until their exact combination appears here.
+func V1() Matrix {
 	return Qualified(map[string]map[string][]string{
 		DefaultCloud: {ElasticMode: {DefaultRuntime}, ServerlessMode: {DefaultRuntime}},
 		"aws":        {ElasticMode: {DefaultRuntime, "sglang", "custom-oci"}},
@@ -133,8 +97,6 @@ func V15() Matrix {
 		"kubernetes": {ElasticMode: {DefaultRuntime, "sglang", "custom-oci"}},
 	})
 }
-
-func V1() Matrix { return V15() }
 
 func (m Matrix) Validate(runtime, cloud, mode string) error {
 	if err := m.ValidateRuntime(runtime); err != nil {

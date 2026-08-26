@@ -10,7 +10,7 @@ import (
 )
 
 func TestRegistryProducesDeterministicHonestSnapshot(t *testing.T) {
-	registry, err := V02Catalog()
+	registry, err := BaseCatalog()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,8 +42,8 @@ func TestRequestSurvivalRequiresDelegationAndQualification(t *testing.T) {
 	}
 }
 
-func TestV06CatalogPublishesExactRuntimeCompatibility(t *testing.T) {
-	registry, err := V06Catalog()
+func TestPortableCatalogPublishesExactRuntimeCompatibility(t *testing.T) {
+	registry, err := PortableCatalog()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,8 +62,8 @@ func TestV06CatalogPublishesExactRuntimeCompatibility(t *testing.T) {
 	}
 }
 
-func TestV09CatalogPublishesKubernetesWithoutAdvancedRoutingClaims(t *testing.T) {
-	registry, err := V09Catalog()
+func TestKubernetesCatalogPublishesKubernetesWithoutAdvancedRoutingClaims(t *testing.T) {
+	registry, err := KubernetesCatalog()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,8 +109,8 @@ func TestCompositionProfilesRequireEvidenceAndKnownKinds(t *testing.T) {
 	}
 }
 
-func TestV15CatalogSeparatesProviderProfilesWithoutFabricatingQualification(t *testing.T) {
-	registry, err := V15Catalog()
+func TestV1CatalogSeparatesProviderProfilesWithoutFabricatingQualification(t *testing.T) {
+	registry, err := V1Catalog()
 	if err != nil {
 		t.Fatal(err)
 	}

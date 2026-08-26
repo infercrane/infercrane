@@ -4916,7 +4916,14 @@ func (a API) cancel(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]string{"operation_id": r.PathValue("id"), "status": "cancellation_requested"})
 }
 func operationResponse(op domain.Operation) map[string]any {
-	return map[string]any{"id": op.ID, "tenant_id": op.TenantID, "kind": op.Kind, "resource_type": op.ResourceType, "resource_name": op.ResourceName, "status": op.Status, "progress": op.Progress, "message": op.Message, "error_code": op.ErrorCode, "attempt": op.Attempt, "max_attempts": op.MaxAttempts, "retryable": op.Retryable, "cancel_requested": op.CancelRequested, "created_at": op.CreatedAt, "updated_at": op.UpdatedAt, "completed_at": op.CompletedAt, "next_attempt_at": op.NextAttemptAt}
+	response := map[string]any{"id": op.ID, "tenant_id": op.TenantID, "kind": op.Kind, "resource_type": op.ResourceType, "resource_name": op.ResourceName, "status": op.Status, "progress": op.Progress, "message": op.Message, "error_code": op.ErrorCode, "attempt": op.Attempt, "max_attempts": op.MaxAttempts, "retryable": op.Retryable, "cancel_requested": op.CancelRequested, "created_at": op.CreatedAt, "updated_at": op.UpdatedAt, "completed_at": op.CompletedAt, "next_attempt_at": op.NextAttemptAt}
+	if op.ResultJSON != "" {
+		var result map[string]any
+		if json.Unmarshal([]byte(op.ResultJSON), &result) == nil && len(result) > 0 {
+			response["result"] = result
+		}
+	}
+	return response
 }
 func writeError(w http.ResponseWriter, status int, code, message string) {
 	category, retryable, remediation := classifyError(status, code)

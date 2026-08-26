@@ -9,11 +9,16 @@ if [ -n "$unformatted" ]; then
 fi
 
 go mod verify
-go run ./tools/repo-context -check
+./scripts/check-repository-hygiene.sh
+./scripts/check-license-boundaries.sh
 go run ./tools/openapi-codegen -check
 go test -race -count=1 ./...
 ./scripts/test-automation-clients.sh quick
 go vet ./...
 go build ./cmd/infercrane
+release_version=$(jq -r '.version' .release/version.json)
+grep -Fq "ARG INFERCRANE_VERSION=$release_version" Dockerfile
+grep -Fq 'main.version=${version}' Dockerfile
+grep -Fq 'INFERCRANE_VERSION=${{ github.ref_name }}' .github/workflows/release.yml
 docker compose config --quiet
 ./scripts/test-runtime-image-contract.sh

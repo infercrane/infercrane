@@ -78,7 +78,7 @@ read-only; each provider call still assumes the configured role and keeps tempor
 in the child process. The GCP overlay mounts Application Default Credentials read-only. The
 Kubernetes overlay mounts one kubeconfig read-only and preserves the explicit
 context/namespace/RBAC boundary. Never combine overlays merely because their clients are present in
-the image—enable only providers this control-plane instance is intended to operate.
+the image; enable only providers this control-plane instance is intended to operate.
 
 The real RunPod qualification stack is isolated from the development Compose stack. It persists
 PostgreSQL, RunPod configuration, and SkyPilot state across control-plane restarts:
@@ -118,7 +118,7 @@ Health and telemetry endpoints:
 - `/metrics`: Prometheus-format gateway request, failure, active request, byte, duration histogram,
   and operation claim, completion, failure, retry, and cancellation counters.
 
-Import the baseline rules at `deploy/prometheus-rules.yaml` from the private-preview repository, then tune thresholds
+Import the baseline rules at `deploy/prometheus-rules.yaml` from the repository, then tune thresholds
 from real model latency and traffic. Follow the [compatibility policy](compatibility.md) and perform
 the [backup/restore drill](runbooks/backup-restore.md) for every release containing migrations.
 
@@ -146,7 +146,7 @@ with sustained load, streaming cancellation, worker loss, database failover, pod
 and soak tests. Capacity limits must be based on those measurements rather than defaults.
 
 Release maintainers can validate packaging metadata without publishing with `make release-check`.
-With `syft` installed, `make release-artifacts RELEASE_TAG=v2.0.0` creates and
+With `syft` installed, `make release-artifacts RELEASE_TAG=v1.0.0` creates and
 verifies four exact-version archives, checksums, archive SBOMs, and a generated Homebrew formula
 under `dist/`. It pushes no tag, image, package, or release. See [Release packaging](/release-packaging).
 

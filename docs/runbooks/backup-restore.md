@@ -179,7 +179,7 @@ active runtime and provider capacity intact while all InferCrane application rep
 1. Retain the failed/migrated database read-only and export the available post-upgrade evidence using
    the [evidence-preserving rollback procedure](/upgrade#roll-back-without-erasing-evidence).
 2. Have the database operator create a separate empty rollback database. Set the TLS-protected
-   `INFERCRANE_DATABASE_URL` to that database—not to the failed database—and verify its name before
+   `INFERCRANE_DATABASE_URL` to that database, not to the failed database - and verify its name before
    restore.
 3. Restore the pre-upgrade dump:
 

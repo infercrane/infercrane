@@ -1,5 +1,11 @@
 from .client import AsyncInferCrane, InferCrane
-from .errors import APIError, OperationCancelled, OperationFailed, OperationTimeout, StreamError
+from .errors import (
+    APIError,
+    OperationCancelled,
+    OperationFailed,
+    OperationTimeout,
+    StreamError,
+)
 from .generated.models import Deployment, Operation
 
 __all__ = [

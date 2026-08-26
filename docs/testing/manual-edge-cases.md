@@ -1,6 +1,6 @@
 # Manual edge-case qualification
 
-Local fixtures prove InferCrane logic only. This document will contain the exact paid or external-system procedures that remain after local hardening. Do not execute these procedures as part of the local edge-case goal.
+Local fixtures prove InferCrane logic only. This document defines the paid or external-system procedures required for provider, GPU, and runtime qualification. Do not execute these procedures during ordinary local development.
 
 ## Evidence requirements for every run
 
@@ -9,27 +9,27 @@ Local fixtures prove InferCrane logic only. This document will contain the exact
 - Abort if ownership labels are missing or the cleanup target cannot be resolved exactly.
 - Finish with both InferCrane and provider-native inventories proving zero run-owned billable resources.
 
-## RunPod — elastic lifecycle and disruption
+## RunPod: elastic lifecycle and disruption
 
 - Sources: [RunPod Pod management](https://docs.runpod.io/sdks/graphql/manage-pods) and the repository's `scripts/release-acceptance.sh` fault stages.
 - Why local simulation is insufficient: stock, image transfer, provider create/delete visibility, network publication, and GPU/runtime readiness are provider behavior.
-- Safe procedure: configure the key file and immutable serverless template, choose a unique run ID, then run `scripts/qualify-v2-manual.sh run --approve-paid-resources`. Reuse the same run ID after a terminal or control-plane interruption. The orchestrator runs baseline qualification, elastic disconnect/restart/lost-response/generation-drain/delete-boundary faults, serverless faults, and guarded cleanup.
+- Safe procedure: configure the key file and immutable serverless template, choose a unique run ID, then run `scripts/qualify-provider-manual.sh run --approve-paid-resources`. Reuse the same run ID after a terminal or control-plane interruption. The orchestrator runs baseline qualification, elastic disconnect/restart/lost-response/generation-drain/delete-boundary faults, serverless faults, and guarded cleanup.
 - Risk/cost: paid GPU Pods and Serverless workers. Run only in an isolated RunPod project with a defined spend ceiling.
 - Expected behavior: one Pod per replica intent; a lost create response is adopted; CLI/control-plane loss does not duplicate capacity; the old revision remains routed until candidate readiness; active streams fence drain; delete converges despite restart/eventual visibility.
 - Evidence: all generated acceptance reports, operation/event exports, request transcripts, immutable image/model identity, before/after RunPod inventory, and a direct console/API confirmation of zero run-owned Pods/endpoints.
-- Cleanup: `scripts/qualify-v2-manual.sh cleanup`, followed by direct provider inventory. Never delete an unlabelled or non-run-owned resource.
+- Cleanup: `scripts/qualify-provider-manual.sh cleanup`, followed by direct provider inventory. Never delete an unlabelled or non-run-owned resource.
 
-## RunPod Serverless — cold/warm/zero/cancellation/adoption
+## RunPod Serverless: cold/warm/zero/cancellation/adoption
 
 - Sources: [RunPod Serverless endpoint operations](https://docs.runpod.io/serverless/endpoints/operation-reference) and [endpoint overview](https://docs.runpod.io/serverless/endpoints/overview).
 - Why local simulation is insufficient: endpoint existence, worker readiness, queue state, FlashBoot/cache behavior, scale-to-zero delay, and eventual deletion are controlled by RunPod.
-- Safe procedure: use the `serverless-faults` stage through the v2 orchestrator above, or a fresh run ID with `scripts/release-acceptance.sh serverless-faults --approve-paid-resources`. Send one cold request, one warm request, wait for provider-confirmed zero workers, send a second cold request, and cancel one bounded stream from the client. Exercise the fault proxy's lost-create-response checkpoint only against the run-owned endpoint.
+- Safe procedure: use the `serverless-faults` stage through the qualification orchestrator above, or a fresh run ID with `scripts/release-acceptance.sh serverless-faults --approve-paid-resources`. Send one cold request, one warm request, wait for provider-confirmed zero workers, send a second cold request, and cancel one bounded stream from the client. Exercise the fault proxy's lost-create-response checkpoint only against the run-owned endpoint.
 - Risk/cost: endpoint and transient worker billing; cancellation must use a normal bounded request, never an exhaustion payload.
 - Expected behavior: one durable endpoint is adopted after the lost response, no duplicate endpoint appears, both cold cycles succeed, warm latency is separately recorded, cancellation reaches the upstream context and durable telemetry, and delete remains pending until provider absence is observed.
 - Evidence: endpoint ID/template/GPU/worker bounds, worker counts with observation timestamps, cold-start boundaries actually exposed, request/cancellation IDs, accounting records, deletion polling, and final zero inventory.
 - Cleanup: run the matching acceptance cleanup with the same run ID, then independently verify no run-owned endpoint remains.
 
-## AWS EC2 BYOC — ambiguous create, capacity, IAM, networking, and delete
+## AWS EC2 BYOC: ambiguous create, capacity, IAM, networking, and delete
 
 - Source: [EC2 API idempotency](https://docs.aws.amazon.com/ec2/latest/devguide/ec2-api-idempotency.html) and the repository's portable-provider acceptance harness.
 - Why local simulation is insufficient: `RunInstances` client-token semantics, IAM propagation, EC2 eventual consistency, subnet/ENI exhaustion, capacity errors, security groups, and termination timing require an AWS account.
@@ -59,7 +59,7 @@ model/runtime/image identities, startup waterfall, and matching before/after EC2
 Do not combine rows across different
 model identities or workload digests into one ranking.
 
-## GCP Compute BYOC — adoption, quota, IAM, networking, and delete
+## GCP Compute BYOC: adoption, quota, IAM, networking, and delete
 
 - Why local simulation is insufficient: the fixture proves intent-digest adoption and bounded command handling, but Compute Engine name reuse, regional quota, service-account propagation, VPC/firewall behavior, operation polling, and eventual deletion are controlled by GCP.
 - Safe procedure: use a dedicated GCP project with a budget alert, isolated VPC/subnet, least-privilege service account, immutable image, and unique acceptance run ID. Run `scripts/portable-provider-acceptance.sh gcp --approve-paid-resources`. Interrupt the client after instance insertion, resume the same operation, and verify the existing same-intent VM is adopted. Separately pre-create a same-name VM with a different InferCrane intent digest and verify adoption fails closed. Restart the control plane during deletion and poll both the zonal operation and instance inventory until absence is proven.
@@ -68,7 +68,7 @@ model identities or workload digests into one ranking.
 - Evidence: project/zone, machine and accelerator type, image digest, service account, labels and intent digest, operation IDs, readiness transcript, restart timeline, billing labels, and before/after instance/disk/address inventory.
 - Cleanup: delete only resources carrying the exact run ownership labels, then independently verify zero run-owned VMs, disks, addresses, and forwarding rules.
 
-## Kubernetes/KServe — controller staleness, UID reuse, finalizers, eviction
+## Kubernetes/KServe: controller staleness, UID reuse, finalizers, eviction
 
 - Sources: [Kubernetes API concepts](https://kubernetes.io/docs/reference/using-api/api-concepts), [finalizers](https://kubernetes.io/docs/concepts/overview/working-with-objects/finalizers/), [Deployment status](https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/deployment-v1/), and [KServe CRD API](https://kserve.github.io/website/docs/reference/crd-api).
 - Why local simulation is insufficient: the Kind gate proves API semantics without GPU scheduling, real KServe storage initialization, node eviction, CNI/service propagation, or a production ingress.
@@ -78,7 +78,7 @@ model identities or workload digests into one ranking.
 - Evidence: YAML including UID/resourceVersion/generation/observedGeneration/conditions, InferCrane events, route snapshots, pod events/logs, finalizer lifecycle, and namespace inventory before/after.
 - Cleanup: remove only the test finalizer, run harness cleanup, and prove the namespace contains no run-owned resources.
 
-## NVIDIA Dynamo — graph ownership, transfer, cache, and performance
+## NVIDIA Dynamo: graph ownership, transfer, cache, and performance
 
 - Sources: [Dynamo DGD reference](https://docs.nvidia.com/dynamo/reference/api/kubernetes/dynamo-graph-deployment), [model deployment](https://docs.nvidia.com/dynamo/dev/kubernetes/model-deployment/introduction), and [KV cache offloading](https://docs.nvidia.com/dynamo/dev/kubernetes/kv-cache-offloading/overview).
 - Why local simulation is insufficient: fixtures and the test-only Kind CRD prove InferCrane's parent ownership and API behavior, not the Dynamo operator, GPU scheduling, NIXL data movement, runtime compatibility, cache allocation, or workload performance.
@@ -88,7 +88,7 @@ model identities or workload digests into one ranking.
 - Expected behavior: only the exact parent intent is adopted; stale or failed graph status never routes; the active stable endpoint does not move until comparable Release Guard evidence passes; rejected candidates and deleted graphs converge to zero owned resources.
 - Cleanup: delete through InferCrane, wait for the parent DGD to disappear, then independently verify that no run-owned DGD, DCD, Pod, Service, PVC, or scheduler child remains.
 
-## vLLM — real protocol, overload, worker loss, and drain
+## vLLM: real protocol, overload, worker loss, and drain
 
 - Why local simulation is insufficient: CUDA OOM, NCCL/startup, tokenizer/model compatibility, runtime response conformance, tool/structured behavior, and disconnect handling require the real pinned image/model on GPU.
 - Safe procedure: through RunPod, AWS, or Kubernetes qualification, verify `/health` and `/v1/models` identity; buffered Chat, SSE Chat, Responses, Embeddings, tool calling, and structured output only where the runtime profile claims them; AIPerf under bounded concurrency; a slow client; client disconnect; runtime process restart; and candidate promotion while a long stream remains active.
@@ -97,7 +97,7 @@ model identities or workload digests into one ranking.
 - Evidence: runtime/image/model digests, protocol transcripts, request IDs, vLLM logs/metrics, generation counters, drain timing, and resource cleanup.
 - Cleanup: delete the owning deployment and prove provider/cluster absence.
 
-## NVIDIA DCGM — real hardware telemetry
+## NVIDIA DCGM: real hardware telemetry
 
 - Source: [NVIDIA DCGM Exporter metrics](https://docs.nvidia.com/datacenter/dcgm/latest/reference/dcgm-exporter-metrics.html).
 - Why local simulation is insufficient: the parser and evidence lifecycle can be proven from
@@ -116,7 +116,7 @@ model identities or workload digests into one ranking.
   API response, monitoring response before and after expiry, and confirmation that prompt/output
   content and credentials are absent.
 
-## OpenCost — real Kubernetes allocation and billing reconciliation
+## OpenCost: real Kubernetes allocation and billing reconciliation
 
 - Source: [OpenCost Allocation API](https://opencost.io/docs/integrations/api/) and
   [OpenCost specification](https://opencost.io/docs/specification/).
@@ -133,7 +133,7 @@ model identities or workload digests into one ranking.
 - Evidence: OpenCost version/configuration, query parameters, exact allocation key, response digest,
   InferCrane revision/evidence IDs, report digest, and provider invoice comparison when available.
 
-## Model revisions — semantic output quality
+## Model revisions: semantic output quality
 
 - Research signal: production operators report that an infrastructure-healthy model or runtime
   rollout can still regress correctness, groundedness, hallucination rate, or task success.
@@ -150,7 +150,7 @@ model identities or workload digests into one ranking.
 - Evidence: immutable model/runtime identities, evaluation dataset and evaluator versions, aggregate
   results, privacy approval if production content was used, and the human promotion decision.
 
-## SGLang and custom OCI — Runtime Contract V1
+## SGLang and custom OCI: Runtime Contract V1
 
 - Why local simulation is insufficient: the hermetic contract cannot prove GPU model compatibility, production probe semantics, metrics, cancellation, or graceful shutdown for the exact image.
 - Safe procedure: use the AWS or Kubernetes portable harness with the immutable SGLang example and one customer-controlled digest-pinned custom OCI image. Verify the declared health/models/metrics paths, expected model, every claimed protocol, disconnect cancellation, SIGTERM/shutdown grace, and generation drain. Keep min=max because SGLang autoscaling is not qualified.
@@ -159,7 +159,7 @@ model identities or workload digests into one ranking.
 - Evidence: OCI digest, normalized workload contract, probe/protocol transcripts, process logs, termination timing, and final provider inventory.
 - Cleanup: portable harness cleanup followed by provider and namespace inventory.
 
-## Streaming/draining — generation safety under real latency
+## Streaming/draining: generation safety under real latency
 
 - Why local simulation is insufficient: real proxy buffering, client TCP behavior, runtime disconnect propagation, and long-token generation timing differ from fixtures.
 - Safe procedure: start one bounded long-running SSE request and record its first chunk; promote a healthy candidate or scale down its worker; prove the old provider resource remains while the stream is active; cancel or allow completion; prove the route generation retires only afterward. Repeat with control-plane and router restart during the stream.
@@ -167,7 +167,7 @@ model identities or workload digests into one ranking.
 - Expected behavior: the stream remains pinned, receives no mixed-generation chunks, is never replayed, and capacity deletion starts only after release; a client cancellation is recorded once.
 - Evidence: timestamped SSE transcript, route/generation snapshots, active/retiring counters, provider resource timeline, cancellation telemetry, and cleanup inventory.
 
-## vLLM — security advisories and runtime upgrade
+## vLLM: security advisories and runtime upgrade
 
 - Sources: [GHSA-rxc4-3w6r-4v47 / CVE-2025-48956](https://github.com/vllm-project/vllm/security/advisories/GHSA-rxc4-3w6r-4v47) and [GHSA-94f4-hr76-p5j6](https://github.com/vllm-project/vllm/security/advisories/GHSA-94f4-hr76-p5j6).
 - Why local simulation is insufficient: the candidate now pins vLLM 0.22.0, outside both affected ranges, but proving the replacement requires a real GPU, immutable image bytes, model load, protocols, metrics, cancellation, and drain behavior. Do not send an exploit or memory-exhaustion payload to any worker.

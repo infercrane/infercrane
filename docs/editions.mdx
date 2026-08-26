@@ -23,7 +23,7 @@ evidence keeps the same meaning.
 
 ## InferCrane Community
 
-The public repository is the complete self-operated product and is licensed under Apache 2.0. It
+The public repository is the complete self-operated product and is licensed under MIT. It
 contains the control plane, gateway, provider and runtime contracts, CLI, SDKs, Terraform provider,
 monitoring, durable operations, Release Guard, Replay, benchmarking, optimization evidence, and
 local console boundary.
@@ -75,15 +75,16 @@ reducing organizational risk, and accepting contractual responsibility.
 
 | Surface | Distribution | License boundary |
 | --- | --- | --- |
-| Core control plane, gateway, CLI, SDKs, adapters, and self-hosted workflows | Public | Apache 2.0 |
-| Documentation and examples in this repository | Public | Apache 2.0 unless a file states otherwise |
+| Core control plane, gateway, CLI, SDKs, adapters, and self-hosted workflows | Public | MIT |
+| Documentation and examples in this repository | Public | MIT unless a file states otherwise |
 | Hosted tenancy, supplier credentials, billing, payments, and warm-pool operations | Private service | Proprietary |
 | Enterprise identity, compliance, support, and contractual automation | Commercial | Proprietary |
 | Marketing site and hosted account experience | Company-operated | Proprietary |
 
-Apache 2.0 is deliberately retained for the core. It is permissive for commercial use and includes
-an explicit patent grant. A proprietary service does not change the license of the public core, and
-mixing proprietary source into this repository is not required for Cloud or Enterprise operation.
+MIT is deliberately used for the core so individuals and organizations can inspect, modify, and
+self-operate the product with a simple permissive license. A proprietary service does not change
+the license of the public core, and mixing proprietary source into this repository is not required
+for Cloud or Enterprise operation.
 
 ## Existing orchestration systems
 
@@ -100,10 +101,11 @@ extra controller and qualification surface.
 ## Current availability
 
 <Warning>
-  Product direction is not current availability. Review [Capability qualification](/project-status)
+  Product direction is not current availability. Review [compatibility and qualification](/compatibility)
   before relying on a provider, runtime, hosted surface, or exact model and accelerator combination.
 </Warning>
 
-Today, InferCrane is distributed as the self-operated Community control plane with a private-preview
-console. Hosted control-plane operation, InferCrane-supplied compute, public billing, and enterprise
-SLAs remain future commercial milestones.
+Today, InferCrane is distributed as the self-operated Community production inference platform with a
+private-preview console. Its architecture includes the control plane, gateway, and provider/runtime
+adapters. Hosted operation, InferCrane-supplied compute, public billing, and enterprise SLAs remain
+future commercial milestones.

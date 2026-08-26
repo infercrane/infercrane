@@ -49,7 +49,7 @@ Independent final inventory returned zero active InferCrane-managed instances an
 qualification runner, its root volume, NAT gateway, Elastic IP, three private test subnets, route
 table, security groups, IAM roles/profiles, artifact bucket, and test secret were then deleted.
 
-## Model-diverse workload matrix — partial Mistral qualification
+## Model-diverse workload matrix: partial Mistral qualification
 
 Run `20260823T092044Z-c310780-mistral-final` exercised the pinned
 `mistralai/Mistral-7B-Instruct-v0.3` revision at InferCrane commit `c310780` using vLLM 0.22.0 on

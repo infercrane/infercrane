@@ -2,13 +2,14 @@ package integration
 
 import "github.com/infercrane/infercrane/internal/support"
 
-// V02Catalog is the compiled integration inventory. It describes registered
-// adapters and honest evidence states; public support remains owned by support.Matrix.
-func V02Catalog() (*Registry, error) {
+// BaseCatalog is the smallest compiled integration inventory. It describes
+// the core runtime and adoption boundaries used by focused contract tests.
+// Public support remains owned by support.Matrix.
+func BaseCatalog() (*Registry, error) {
 	registry := NewRegistry()
 	profiles := []ProviderProfile{
 		{
-			Adapter: "skypilot", Cloud: "runpod", ContractVersion: ProviderContractV1, AdapterVersion: "builtin-v0.2", Modes: []ComputeMode{ElasticMode},
+			Adapter: "skypilot", Cloud: "runpod", ContractVersion: ProviderContractV1, AdapterVersion: "builtin-v1", Modes: []ComputeMode{ElasticMode},
 			Capabilities: []Capability{
 				{Name: "adoption", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestProviderContractSkyPilotLifecycle"},
 				{Name: "capacity_preflight", State: CapabilitySupported, Detail: "advisory provider stock; not a reservation", Evidence: "go:test/internal/provision#TestRunPodAvailabilityAggregatesCompatibleGPUStock"},
@@ -17,11 +18,11 @@ func V02Catalog() (*Registry, error) {
 			},
 			Qualification: []Qualification{
 				{State: QualificationLocal, Environment: "hermetic-provider-contract", Evidence: "go:test/internal/provision#TestProviderContractSkyPilotLifecycle"},
-				{State: QualificationDeferred, Environment: "real-runpod-elastic", Reason: "awaiting consolidated v1 manual qualification"},
+				{State: QualificationDeferred, Environment: "real-runpod-elastic", Reason: "real-provider qualification has not been completed"},
 			},
 		},
 		{
-			Adapter: "runpod-serverless", Cloud: "runpod", ContractVersion: ProviderContractV1, AdapterVersion: "builtin-v0.2", Modes: []ComputeMode{ServerlessMode},
+			Adapter: "runpod-serverless", Cloud: "runpod", ContractVersion: ProviderContractV1, AdapterVersion: "builtin-v1", Modes: []ComputeMode{ServerlessMode},
 			Capabilities: []Capability{
 				{Name: "adoption", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestProviderContractRunPodServerlessLifecycleAndLostResponseAdoption"},
 				{Name: "provider_native_scale_to_zero", State: CapabilitySupported, Evidence: "go:test/internal/workflows#TestServerlessConvergeRegistersScaleToZeroEndpointWithoutWarmingWorker"},
@@ -30,11 +31,11 @@ func V02Catalog() (*Registry, error) {
 			},
 			Qualification: []Qualification{
 				{State: QualificationLocal, Environment: "hermetic-provider-contract", Evidence: "go:test/internal/provision#TestProviderContractRunPodServerlessLifecycleAndLostResponseAdoption"},
-				{State: QualificationDeferred, Environment: "real-runpod-serverless", Reason: "awaiting consolidated v1 manual qualification"},
+				{State: QualificationDeferred, Environment: "real-runpod-serverless", Reason: "real-provider qualification has not been completed"},
 			},
 		},
 		{
-			Adapter: "openai-compatible-external", Cloud: "external", ContractVersion: ProviderContractV1, AdapterVersion: "boundary-v0.2", Modes: []ComputeMode{ExternalMode},
+			Adapter: "openai-compatible-external", Cloud: "external", ContractVersion: ProviderContractV1, AdapterVersion: "boundary-v1", Modes: []ComputeMode{ExternalMode},
 			Capabilities: []Capability{
 				{Name: "hard_budget", State: CapabilitySupported, Evidence: "go:test/internal/store#TestManagedExternalBindingIsImmutableTenantSafeAndHardBudgeted"},
 				{Name: "provisioning", State: CapabilityUnsupported, Detail: "external targets are registered, not provisioned"},
@@ -54,7 +55,7 @@ func V02Catalog() (*Registry, error) {
 		}
 	}
 	if err := registry.RegisterRuntime(RuntimeProfile{
-		Runtime: support.DefaultRuntime, ContractVersion: RuntimeContractV1, AdapterVersion: "builtin-v0.2", EngineVersion: support.DefaultRuntimeVersion, Protocol: "openai",
+		Runtime: support.DefaultRuntime, ContractVersion: RuntimeContractV1, AdapterVersion: "builtin-v1", EngineVersion: support.DefaultRuntimeVersion, Protocol: "openai",
 		Capabilities: []Capability{
 			{Name: "buffered_chat", State: CapabilitySupported, Evidence: "go:test/internal/gateway#TestCompletionRewritesAlias"},
 			{Name: "completions", State: CapabilitySupported, Evidence: "go:test/internal/gateway#TestQualifiedProtocolSurfacesPreservePayloads"},
@@ -71,7 +72,7 @@ func V02Catalog() (*Registry, error) {
 		},
 		Qualification: []Qualification{
 			{State: QualificationLocal, Environment: "docker-fake-vllm", Evidence: "make:dev-check-full"},
-			{State: QualificationDeferred, Environment: "real-vllm-gpu", Reason: "awaiting consolidated v1 manual qualification"},
+			{State: QualificationDeferred, Environment: "real-vllm-gpu", Reason: "real GPU evidence remains bound to exact model, accelerator, provider, and workload tuples"},
 		},
 	}); err != nil {
 		return nil, err
@@ -79,17 +80,17 @@ func V02Catalog() (*Registry, error) {
 	return registry, nil
 }
 
-// V03Catalog extends the stable V1 contracts with governed external capacity
-// and the narrow AWS EC2 BYOC adapter. Real-provider qualification remains
-// explicitly deferred until the consolidated v1 manual gate.
-func V03Catalog() (*Registry, error) {
-	registry, err := V02Catalog()
+// providerCatalog adds governed external capacity and the AWS EC2 BYOC adapter.
+// Real-provider qualification remains explicit evidence, never an implication
+// of registration.
+func providerCatalog() (*Registry, error) {
+	registry, err := BaseCatalog()
 	if err != nil {
 		return nil, err
 	}
 	profiles := []ProviderProfile{
 		{
-			Adapter: "openrouter", Cloud: "external", ContractVersion: ProviderContractV1, AdapterVersion: "builtin-v0.3", Modes: []ComputeMode{ExternalMode},
+			Adapter: "openrouter", Cloud: "external", ContractVersion: ProviderContractV1, AdapterVersion: "builtin-v1", Modes: []ComputeMode{ExternalMode},
 			Capabilities: []Capability{
 				{Name: "explicit_health_fallback", State: CapabilitySupported, Evidence: "go:test/internal/reconcile#TestExternalFallbackPublishesOnlyWhenNoPrimaryTargetIsHealthy"},
 				{Name: "hard_budget", State: CapabilitySupported, Evidence: "go:test/internal/external#TestBudgetPoolNeverAuthorizesBeyondLease"},
@@ -101,11 +102,11 @@ func V03Catalog() (*Registry, error) {
 			},
 			Qualification: []Qualification{
 				{State: QualificationLocal, Environment: "hermetic-external-target", Evidence: "go:test/internal/external#TestCoordinatorSelectsOnlyHealthyExplicitBudgetedFallback"},
-				{State: QualificationDeferred, Environment: "real-openrouter", Reason: "awaiting consolidated v1 manual qualification"},
+				{State: QualificationDeferred, Environment: "real-openrouter", Reason: "real-provider qualification has not been completed"},
 			},
 		},
 		{
-			Adapter: "aws-ec2", Cloud: "aws", ContractVersion: ProviderContractV1, AdapterVersion: "builtin-v0.3", Modes: []ComputeMode{ElasticMode},
+			Adapter: "aws-ec2", Cloud: "aws", ContractVersion: ProviderContractV1, AdapterVersion: "builtin-v1", Modes: []ComputeMode{ElasticMode},
 			Capabilities: []Capability{
 				{Name: "adoption", State: CapabilitySupported, Evidence: "go:test/internal/conformance#TestAWSEC2LostCreateResponseConformance"},
 				{Name: "idempotent_delete", State: CapabilitySupported, Evidence: "go:test/internal/conformance#TestAWSEC2ProviderContractConformance"},
@@ -116,7 +117,7 @@ func V03Catalog() (*Registry, error) {
 			},
 			Qualification: []Qualification{
 				{State: QualificationLocal, Environment: "hermetic-aws-cli", Evidence: "go:test/internal/conformance#TestAWSEC2ProviderContractConformance"},
-				{State: QualificationDeferred, Environment: "real-aws-ec2", Reason: "awaiting consolidated v1 manual qualification"},
+				{State: QualificationDeferred, Environment: "real-aws-ec2", Reason: "real AWS evidence remains bound to exact region, instance, runtime, model, and workload tuples"},
 			},
 		},
 	}
@@ -128,15 +129,15 @@ func V03Catalog() (*Registry, error) {
 	return registry, nil
 }
 
-// V06Catalog adds portable OCI and SGLang profiles without changing the V1
-// contract version. Real GPU qualification remains explicitly deferred.
-func V06Catalog() (*Registry, error) {
-	registry, err := V03Catalog()
+// PortableCatalog adds portable OCI and SGLang profiles without changing the
+// V1 contract. Real GPU qualification remains explicitly evidence-gated.
+func PortableCatalog() (*Registry, error) {
+	registry, err := providerCatalog()
 	if err != nil {
 		return nil, err
 	}
 	common := []Capability{
-		{Name: "autoscaling_signals", State: CapabilityUnsupported, Detail: "v0.6 portable runtimes require fixed replica bounds until normalized runtime metrics are qualified"},
+		{Name: "autoscaling_signals", State: CapabilityUnsupported, Detail: "portable runtimes require fixed replica bounds until normalized runtime metrics are qualified"},
 		{Name: "buffered_chat", State: CapabilitySupported, Evidence: "go:test/internal/gateway#TestCompletionRewritesAlias"},
 		{Name: "cancellation", State: CapabilitySupported, Evidence: "go:test/internal/gateway#TestClientCancellationPropagatesToRuntime"},
 		{Name: "graceful_drain", State: CapabilitySupported, Evidence: "go:test/internal/reconcile#TestRouterRetirementWaitsForPinnedRequest"},
@@ -146,11 +147,11 @@ func V06Catalog() (*Registry, error) {
 		{Name: "telemetry", State: CapabilitySupported, Evidence: "go:test/internal/conformance#TestPortableRuntimeConformance"},
 	}
 	sglang := RuntimeProfile{
-		Runtime: "sglang", ContractVersion: RuntimeContractV1, AdapterVersion: "builtin-v0.6", EngineVersion: support.SGLangRuntimeVersion, Protocol: "openai", Capabilities: common,
+		Runtime: "sglang", ContractVersion: RuntimeContractV1, AdapterVersion: "builtin-v1", EngineVersion: support.SGLangRuntimeVersion, Protocol: "openai", Capabilities: common,
 		DefaultWorkload: support.SGLangWorkload(),
-		Qualification:   []Qualification{{State: QualificationSimulated, Environment: "hermetic-runtime-contract", Evidence: "go:test/internal/conformance#TestPortableRuntimeConformance"}, {State: QualificationDeferred, Environment: "real-sglang-gpu", Reason: "awaiting consolidated v1 manual qualification"}},
+		Qualification:   []Qualification{{State: QualificationSimulated, Environment: "hermetic-runtime-contract", Evidence: "go:test/internal/conformance#TestPortableRuntimeConformance"}, {State: QualificationDeferred, Environment: "real-sglang-gpu", Reason: "real GPU evidence remains bound to exact model, accelerator, provider, and workload tuples"}},
 	}
-	custom := RuntimeProfile{Runtime: "custom-oci", ContractVersion: RuntimeContractV1, AdapterVersion: "declarative-v0.6", Protocol: "openai", Capabilities: common, Qualification: []Qualification{{State: QualificationSimulated, Environment: "hermetic-runtime-contract", Evidence: "go:test/internal/conformance#TestPortableRuntimeConformance"}, {State: QualificationDeferred, Environment: "real-custom-oci-gpu", Reason: "awaiting consolidated v1 manual qualification"}}}
+	custom := RuntimeProfile{Runtime: "custom-oci", ContractVersion: RuntimeContractV1, AdapterVersion: "declarative-v1", Protocol: "openai", Capabilities: common, Qualification: []Qualification{{State: QualificationSimulated, Environment: "hermetic-runtime-contract", Evidence: "go:test/internal/conformance#TestPortableRuntimeConformance"}, {State: QualificationDeferred, Environment: "real-custom-oci-gpu", Reason: "real GPU evidence remains bound to exact image, model, accelerator, provider, and workload tuples"}}}
 	for _, profile := range []RuntimeProfile{sglang, custom} {
 		if err = registry.RegisterRuntime(profile); err != nil {
 			return nil, err
@@ -168,16 +169,16 @@ func V06Catalog() (*Registry, error) {
 	return registry, nil
 }
 
-// V09Catalog adds the namespaced Kubernetes provider boundary. Kind proves
-// Kubernetes API lifecycle semantics; real GPU/runtime compatibility remains
-// deferred until the consolidated v1 manual qualification.
-func V09Catalog() (*Registry, error) {
-	registry, err := V06Catalog()
+// KubernetesCatalog adds the namespaced Kubernetes provider boundary. Kind
+// proves Kubernetes API lifecycle semantics; real GPU/runtime compatibility
+// remains evidence-gated.
+func KubernetesCatalog() (*Registry, error) {
+	registry, err := PortableCatalog()
 	if err != nil {
 		return nil, err
 	}
 	if err = registry.RegisterProvider(ProviderProfile{
-		Adapter: "kubernetes", Cloud: "kubernetes", ContractVersion: ProviderContractV1, AdapterVersion: "builtin-v0.9", Modes: []ComputeMode{ElasticMode},
+		Adapter: "kubernetes", Cloud: "kubernetes", ContractVersion: ProviderContractV1, AdapterVersion: "builtin-v1", Modes: []ComputeMode{ElasticMode},
 		Capabilities: []Capability{
 			{Name: "adoption", State: CapabilitySupported, Evidence: "go:test/internal/conformance#TestKubernetesLostCreateResponseConformance"},
 			{Name: "idempotent_delete", State: CapabilitySupported, Evidence: "go:test/internal/conformance#TestKubernetesProviderContractConformance"},
@@ -191,7 +192,7 @@ func V09Catalog() (*Registry, error) {
 		},
 		Qualification: []Qualification{
 			{State: QualificationLocal, Environment: "kind-and-hermetic-kubectl", Evidence: "script:scripts/test-kubernetes-kind.sh"},
-			{State: QualificationDeferred, Environment: "real-kubernetes-gpu", Reason: "awaiting consolidated v1 manual qualification"},
+			{State: QualificationDeferred, Environment: "real-kubernetes-gpu", Reason: "real GPU Kubernetes and KServe qualification has not been completed"},
 		},
 	}); err != nil {
 		return nil, err
@@ -207,12 +208,12 @@ func V09Catalog() (*Registry, error) {
 	return registry, nil
 }
 
-// V15Catalog introduces independently identified provider profiles. Registration
-// is not qualification: mutation profiles become local-qualified only after an
-// executable adapter passes Provider Contract V1, while real environments stay
-// deferred until the approval-locked manual gate.
-func V15Catalog() (*Registry, error) {
-	registry, err := V09Catalog()
+// V1Catalog is the current public integration inventory. Registration is not
+// qualification: mutation profiles become local-qualified only after an
+// executable adapter passes Provider Contract V1, while real environments
+// remain explicit evidence boundaries.
+func V1Catalog() (*Registry, error) {
+	registry, err := KubernetesCatalog()
 	if err != nil {
 		return nil, err
 	}
@@ -228,7 +229,7 @@ func V15Catalog() (*Registry, error) {
 		{Name: "cancellation", State: CapabilitySupported, Evidence: "go:test/internal/gateway#TestClientCancellationPropagatesToRuntime"},
 	}
 	for _, runtimeName := range []string{"openai-compatible", "litellm"} {
-		if err = registry.RegisterRuntime(RuntimeProfile{Runtime: runtimeName, ContractVersion: RuntimeContractV1, AdapterVersion: "external-v2.1", Protocol: "openai", Capabilities: externalCapabilities, Qualification: []Qualification{{State: QualificationLocal, Environment: "hermetic-openai-compatible", Evidence: "go:test/internal/controlapi#TestDiscoverEndpointSelectsSingleModelAndConservativelyClassifiesRuntime"}, {State: QualificationDeferred, Environment: "real-" + runtimeName, Reason: "operator-managed gateway requires target-specific qualification"}}}); err != nil {
+		if err = registry.RegisterRuntime(RuntimeProfile{Runtime: runtimeName, ContractVersion: RuntimeContractV1, AdapterVersion: "external-v1", Protocol: "openai", Capabilities: externalCapabilities, Qualification: []Qualification{{State: QualificationLocal, Environment: "hermetic-openai-compatible", Evidence: "go:test/internal/controlapi#TestDiscoverEndpointSelectsSingleModelAndConservativelyClassifiesRuntime"}, {State: QualificationDeferred, Environment: "real-" + runtimeName, Reason: "operator-managed gateway requires target-specific qualification"}}}); err != nil {
 			return nil, err
 		}
 	}
@@ -378,7 +379,7 @@ func V15Catalog() (*Registry, error) {
 	}
 	for _, profile := range profiles {
 		if profile.Adapter == "gcp-compute" {
-			profile.AdapterVersion = "builtin-v1.5"
+			profile.AdapterVersion = "builtin-v1"
 			profile.Capabilities = []Capability{{Name: "adoption", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestGCPComputeLifecycleIsPrivateIdempotentAndAdoptable"}, {Name: "idempotent_delete", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestGCPComputeLifecycleIsPrivateIdempotentAndAdoptable"}, {Name: "immutable_workload", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestGCPComputeRejectsMutableContainerBeforeProviderCall"}, {Name: "orphan_inventory", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestGCPComputeLifecycleIsPrivateIdempotentAndAdoptable"}, {Name: "private_network", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestGCPComputeLifecycleIsPrivateIdempotentAndAdoptable"}, {Name: "workload_identity", State: CapabilitySupported, Detail: "attached service account; no static service-account key", Evidence: "go:test/internal/provision#TestGCPComputeLifecycleIsPrivateIdempotentAndAdoptable"}}
 			profile.Qualification = []Qualification{{State: QualificationLocal, Environment: "hermetic-gcloud", Evidence: "go:test/internal/provision#TestGCPComputeLifecycleIsPrivateIdempotentAndAdoptable"}, {State: QualificationDeferred, Environment: "real-gcp-compute", Reason: "awaiting consolidated manual qualification"}}
 		}
@@ -387,7 +388,7 @@ func V15Catalog() (*Registry, error) {
 		}
 	}
 	dynamo := ProviderProfile{
-		Adapter: "kubernetes-dynamo", Cloud: "kubernetes", ContractVersion: ProviderContractV1, AdapterVersion: "builtin-v2.0", Modes: []ComputeMode{ElasticMode},
+		Adapter: "kubernetes-dynamo", Cloud: "kubernetes", ContractVersion: ProviderContractV1, AdapterVersion: "builtin-v1", Modes: []ComputeMode{ElasticMode},
 		Capabilities: []Capability{
 			{Name: "dgd_parent_lifecycle", State: CapabilitySupported, Detail: "InferCrane owns one DynamoGraphDeployment; the Dynamo operator owns children", Evidence: "go:test/internal/provision#TestKubernetesDynamoLifecycleIsReplaySafeAndOwnsOneParent"},
 			{Name: "lost_response_adoption", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestKubernetesDynamoAdoptsLostApplyResponseAndRejectsStaleReadiness"},
@@ -428,9 +429,5 @@ func V15Catalog() (*Registry, error) {
 }
 
 func providerBoundary(adapter, cloud string, mode ComputeMode, capabilities []Capability) ProviderProfile {
-	return ProviderProfile{Adapter: adapter, Cloud: cloud, ContractVersion: ProviderContractV1, AdapterVersion: "boundary-v1.5", Modes: []ComputeMode{mode}, Capabilities: capabilities, Qualification: []Qualification{{State: QualificationRegistered, Environment: "contract-boundary"}, {State: QualificationDeferred, Environment: "real-" + adapter, Reason: "awaiting executable local adapter and consolidated manual qualification"}}}
+	return ProviderProfile{Adapter: adapter, Cloud: cloud, ContractVersion: ProviderContractV1, AdapterVersion: "boundary-v1", Modes: []ComputeMode{mode}, Capabilities: capabilities, Qualification: []Qualification{{State: QualificationRegistered, Environment: "contract-boundary"}, {State: QualificationDeferred, Environment: "real-" + adapter, Reason: "awaiting executable local adapter and consolidated manual qualification"}}}
 }
-
-// V1Catalog is the current public v1 integration catalog. Historical catalog
-// functions remain stable so prior release evidence is reproducible.
-func V1Catalog() (*Registry, error) { return V15Catalog() }

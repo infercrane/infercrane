@@ -1,6 +1,7 @@
 # System invariants
 
-Changes that violate an invariant require an explicit superseding ADR and coordinated migration.
+Changes that violate an invariant require maintainer review, an explicit migration and rollback
+plan, and an update to this document in the same pull request.
 
 ## Data plane
 

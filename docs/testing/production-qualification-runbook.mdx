@@ -43,7 +43,7 @@ the repository and provide only their paths and non-secret resource identifiers.
 those files from the authorized workstation, but evidence and terminal summaries must never print
 their contents.
 
-## Phase 0 — Freeze one candidate
+## Phase 0: Freeze one candidate
 
 Start from a clean worktree. Qualification evidence is commit-addressed and cannot be reused after a
 source change.
@@ -74,7 +74,7 @@ For portable AWS, GCP, and Kubernetes runs, the same worker key must be installe
 worker secret and supplied through `INFERCRANE_V1_API_KEY_FILE`. Do not reuse a personal API key or
 a production application key.
 
-## Phase 1 — Complete all non-paid evidence
+## Phase 1: Complete all non-paid evidence
 
 Run the commit-bound local product gate first:
 
@@ -101,7 +101,7 @@ Kind, KWOK, public CLI/API journeys, SDKs, Terraform, packaging, fuzzing, and ne
 manually repeat locally qualified feature cases unless a real-provider boundary changes their
 semantics.
 
-## Phase 2 — Prepare immutable runtime specifications
+## Phase 2: Prepare immutable runtime specifications
 
 AWS, GCP, and Kubernetes use the portable provider runner. Prepare a private directory containing:
 
@@ -135,7 +135,7 @@ The runner builds that image from the frozen source when it is not already prese
 compatibility-prefixed `INFERCRANE_V1_*` variables name the portable harness contract; they do not
 select an old InferCrane release.
 
-## Phase 3 — RunPod qualification
+## Phase 3: RunPod qualification
 
 ### Prepare
 
@@ -170,7 +170,7 @@ creating paid capacity.
 ### Paid qualification
 
 ```bash
-export INFERCRANE_V2_QUALIFICATION_RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short HEAD)-runpod"
+export INFERCRANE_QUALIFICATION_RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short HEAD)-runpod"
 
 ./scripts/qualify-product.sh runpod --approve-paid-resources
 ./scripts/qualify-product.sh report
@@ -182,20 +182,20 @@ protocols, AIPerf, autoscaling, Release Guard, disconnect/restart behavior, gene
 deletion, and direct inventory.
 
 If the terminal disconnects, rerun the same command with the same
-`INFERCRANE_V2_QUALIFICATION_RUN_ID`. Do not generate another ID.
+`INFERCRANE_QUALIFICATION_RUN_ID`. Do not generate another ID.
 
 If cleanup must be invoked explicitly, retain the parent ID and clean each child run:
 
 ```bash
 for suffix in serverless serverless-faults elastic elastic-faults; do
-  INFERCRANE_ACCEPTANCE_RUN_ID="$INFERCRANE_V2_QUALIFICATION_RUN_ID-$suffix" \
+  INFERCRANE_ACCEPTANCE_RUN_ID="$INFERCRANE_QUALIFICATION_RUN_ID-$suffix" \
     ./scripts/release-acceptance.sh cleanup
 done
 ```
 
 Finally, confirm in the RunPod console that the run owns zero Pods and zero Serverless endpoints.
 
-## Phase 4 — AWS EC2 BYOC qualification
+## Phase 4: AWS EC2 BYOC qualification
 
 ### Infrastructure you must prepare
 
@@ -253,7 +253,7 @@ inventory equality.
 Afterward, independently inspect EC2 instances, root/data volumes, ENIs, addresses, and run tags.
 There must be no additional run-owned resource relative to the recorded baseline.
 
-## Phase 5 — GCP Compute BYOC qualification
+## Phase 5: GCP Compute BYOC qualification
 
 ### Infrastructure you must prepare
 
@@ -298,7 +298,7 @@ If authentication expires, refresh the same gcloud configuration and rerun with 
 Afterward, inspect run-labeled VMs, disks, addresses, forwarding rules, and provider operations.
 The before/after managed inventory must match and no run-owned resource may remain.
 
-## Phase 6 — GPU Kubernetes or KServe qualification
+## Phase 6: GPU Kubernetes or KServe qualification
 
 ### Start with the local API boundaries
 

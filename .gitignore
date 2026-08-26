@@ -13,6 +13,5 @@ build/
 bin/
 node_modules/
 .mintlify/
-.infercrane/
 /infercrane
 coverage.out

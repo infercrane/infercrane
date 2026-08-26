@@ -4,12 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "infercrane"
-version = "2.0.0"
+version = "1.0.0"
 description = "Typed Python client for the InferCrane inference control plane"
 readme = "README.md"
 requires-python = ">=3.10"
-license = "Apache-2.0"
-authors = [{name = "InferCrane contributors"}]
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{name = "Yasin Toy and InferCrane contributors"}]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Programming Language :: Python :: 3",
@@ -18,8 +19,9 @@ classifiers = [
 dependencies = []
 
 [project.urls]
-Documentation = "https://infercrane.mintlify.site"
+Documentation = "https://docs.infercrane.com"
 Repository = "https://github.com/infercrane/infercrane"
+Issues = "https://github.com/infercrane/infercrane/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/infercrane"]

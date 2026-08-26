@@ -2,7 +2,7 @@
 set -eu
 
 dist=${1:-dist}
-tag=${2:-v2.0.0-rc.1}
+tag=${2:-v1.0.0-rc.1}
 version=${tag#v}
 
 printf '%s\n' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$' || {
@@ -20,6 +20,7 @@ for target in $expected; do
   listing=$(tar -tzf "$archive" | sort)
   test "$listing" = "LICENSE
 README.md
+THIRD_PARTY_NOTICES.md
 infercrane" || { echo "unexpected archive contents: $archive" >&2; printf '%s\n' "$listing" >&2; exit 1; }
   jq -e '.spdxVersion | startswith("SPDX-")' "$sbom" >/dev/null
 done

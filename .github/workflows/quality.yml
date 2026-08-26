@@ -13,6 +13,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  dco:
+    if: github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with: {fetch-depth: 0}
+      - name: Verify Developer Certificate of Origin sign-offs
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: ./scripts/check-dco.sh "$BASE_SHA..$HEAD_SHA"
+
   verify:
     runs-on: ubuntu-latest
     services:
@@ -43,6 +55,15 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: sdk/typescript/package-lock.json
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install pinned Python SDK quality tool
+        run: python -m pip install --disable-pip-version-check ruff==0.12.0
+      - name: Check Python SDK formatting and lint
+        run: |
+          ruff format --check sdk/python/src/infercrane/client.py sdk/python/src/infercrane/errors.py sdk/python/src/infercrane/__init__.py sdk/python/tests
+          ruff check sdk/python/src/infercrane/client.py sdk/python/src/infercrane/errors.py sdk/python/src/infercrane/__init__.py sdk/python/tests
       - run: go mod download
       - run: make verify
       - run: go test -coverprofile=coverage.out ./...

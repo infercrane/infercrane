@@ -27,13 +27,13 @@ inputs:
     required: false
     default: 30m
   cli-path:
-    description: Existing InferCrane binary path, or auto to install the pinned version
+    description: Explicit InferCrane binary path, or auto to download and checksum the pinned version
     required: false
     default: auto
   version:
     description: Exact InferCrane release tag used when auto-installing
     required: false
-    default: v2.0.0
+    default: v1.0.0
   output-path:
     description: Machine-readable plan or evidence path
     required: false
@@ -43,10 +43,12 @@ outputs:
     description: pass or fail
   operation-id:
     description: Durable operation submitted by apply
+  endpoint:
+    description: Stable application endpoint published by apply
   revision:
     description: Planned or verified revision identity
   passport-digest:
     description: Verified Inference Passport digest used by release-check
 runs:
-  using: node20
+  using: node24
   main: index.js

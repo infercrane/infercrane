@@ -49,8 +49,8 @@ grep -Fq 'for journey in offline first-value modules adoption reliability' "$roo
 # Every release path must default to the candidate named by the authoritative
 # release manifest. Otherwise separately green suites can certify different
 # archives while appearing to qualify the same source commit.
-release_candidate=$(jq -r '.current_milestone' "$root/.release/current.json")
-case "$release_candidate" in v*-rc.*) ;; *) echo "current milestone is not an RC tag: $release_candidate" >&2; exit 1;; esac
+release_candidate=$(jq -r '.candidate_tag' "$root/.release/version.json")
+case "$release_candidate" in v*-rc.*) ;; *) echo "release candidate is not an RC tag: $release_candidate" >&2; exit 1;; esac
 grep -Fq "RELEASE_CANDIDATE_TAG ?= $release_candidate" "$root/Makefile"
 grep -Fq "INFERCRANE_RELEASE_CANDIDATE_TAG:-$release_candidate" "$root/scripts/product-acceptance.sh"
 grep -Fq "INFERCRANE_RELEASE_CANDIDATE_TAG:-$release_candidate" "$root/scripts/qualify-product.sh"

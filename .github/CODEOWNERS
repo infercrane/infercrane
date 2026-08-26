@@ -1,0 +1,12 @@
+# The project maintainer reviews all public repository changes.
+* @yasintoy
+
+# Security and release surfaces always require maintainer review.
+/internal/authn/ @yasintoy
+/internal/authz/ @yasintoy
+/internal/gateway/ @yasintoy
+/internal/secrets/ @yasintoy
+/internal/store/ @yasintoy
+/.github/ @yasintoy
+/Dockerfile @yasintoy
+/LICENSE @yasintoy

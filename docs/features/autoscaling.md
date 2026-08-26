@@ -206,7 +206,7 @@ fixture claim.
 Acceptance requires observed `1 → N → 1`, no duplicate provider identity, no capacity above `max`,
 no new request on a draining generation, an intact active stream, and zero leaked resources. Missing
 queue metrics, an unclassified provider delay, a stream without `[DONE]`, capacity that never returns
-to `min`, or unavailable provider inventory is a failed or inconclusive qualification—not permission
+to `min`, or unavailable provider inventory is a failed or inconclusive qualification, not permission
 to claim autoscaling support. See [production qualification](/testing/production-qualification-runbook)
 for provider-specific evidence and cleanup.
 
@@ -252,7 +252,7 @@ replica. A later scale-down decision still follows generation withdrawal and bou
 <Note>
 Generation-safe drain and the 1→N→1 controller pass local fault tests. Exact provider capacity,
 cold-start time, GPU behavior, and real long-stream drain remain independent real-infrastructure
-qualification evidence; see [capability status](/project-status).
+qualification evidence; see [compatibility and qualification](/compatibility).
 </Note>
 
 Serverless deployments delegate zero-to-N worker scheduling to the registered provider-native

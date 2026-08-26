@@ -87,7 +87,7 @@ smaller explicit value remains available for a qualified slim image, but must no
 from the default vLLM profile.
 
 InferCrane reads the AMI metadata before every create or adoption and overrides the AMI's declared
-root device—not a hard-coded Linux device name. It rejects an invalid root mapping or a configured
+root device, not a hard-coded Linux device name. It rejects an invalid root mapping or a configured
 volume smaller than the source snapshot before `RunInstances`. The actual root-device name, size,
 and encrypted intent are included in the durable ownership tags so a retry cannot adopt an instance
 whose large disk was accidentally attached as an unused secondary volume.
@@ -244,15 +244,15 @@ runtime is ready until health and served-model identity checks pass.
 For the portable-runtime path, apply
 `examples/sglang.yaml` or
 replace the placeholder image in
-`examples/custom-oci.yaml` in the private-preview repository.
+`examples/custom-oci.yaml` in this repository.
 Every changed image/model/GPU combination remains its own real qualification gate.
 
 Do not treat Qwen as the only supported or tested workload. The repository includes immutable AWS
 qualification intents for three permissively licensed chat/reasoning families:
 
-- `examples/aws-mistral-7b.yaml` — Mistral 7B Instruct, Apache-2.0;
-- `examples/aws-deepseek-r1-distill-7b.yaml` — DeepSeek R1 Distill Qwen 7B, MIT;
-- `examples/aws-granite-8b.yaml` — IBM Granite 3.3 8B Instruct, Apache-2.0.
+- `examples/aws-mistral-7b.yaml`: Mistral 7B Instruct, Apache-2.0;
+- `examples/aws-deepseek-r1-distill-7b.yaml`: DeepSeek R1 Distill Qwen 7B, MIT;
+- `examples/aws-granite-8b.yaml`: IBM Granite 3.3 8B Instruct, Apache-2.0.
 
 Qwen3-8B remains the cross-runtime tool-calling and structured-output regression fixture. BGE-M3 is
 the embedding protocol fixture, while gated Llama and Gemma recipes require the operator to accept

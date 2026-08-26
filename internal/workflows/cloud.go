@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -31,6 +32,7 @@ const (
 type CloudRequest struct {
 	DeploymentID           string                   `json:"deployment_id"`
 	Name                   string                   `json:"name"`
+	EndpointName           string                   `json:"endpoint_name,omitempty"`
 	Model                  string                   `json:"model"`
 	Runtime                string                   `json:"runtime,omitempty"`
 	Cloud                  string                   `json:"cloud"`
@@ -55,6 +57,8 @@ type CloudRequest struct {
 	Serving                servingcontract.Topology `json:"serving,omitzero"`
 }
 
+var endpointNamePattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$`)
+
 func (r *CloudRequest) Validate() error {
 	providedPort := r.Port
 	if r.Runtime == "" {
@@ -76,6 +80,12 @@ func (r *CloudRequest) Validate() error {
 	}
 	if r.Name == "" || r.Model == "" || r.Cloud == "" || r.GPU == "" {
 		return errors.New("name, model, cloud, and gpu are required")
+	}
+	if r.EndpointName == "" {
+		r.EndpointName = r.Name
+	}
+	if !endpointNamePattern.MatchString(r.EndpointName) {
+		return errors.New("endpoint_name must contain 1 to 64 lowercase letters, numbers, dots, underscores, or dashes and must start and end with a letter or number")
 	}
 	if r.ComputeMode == "" {
 		r.ComputeMode = "elastic"
@@ -134,6 +144,7 @@ type CloudStore interface {
 	AddTargetForTenant(context.Context, string, domain.Target) (domain.Target, error)
 	UpdateProvisionedTarget(context.Context, string, string, string) error
 	ApplyDeploymentForTenant(context.Context, string, domain.Deployment, []string) (domain.Deployment, error)
+	PublishDeploymentEndpoint(context.Context, string, string, string) (domain.ResolvedEndpoint, error)
 	DeleteDeploymentForTenant(context.Context, string, string) error
 	RoutingGenerationMatches(context.Context, string, string) (bool, error)
 	DeleteProvisionedTarget(context.Context, string, string, string) error
@@ -146,7 +157,7 @@ type CloudStore interface {
 	Audit(context.Context, domain.AuditEvent) error
 }
 
-type releaseGuardV2Store interface {
+type releaseGuardMonitoringStore interface {
 	ReleaseGuardPolicy(context.Context, string, string) (domain.ReleaseGuardPolicy, error)
 	EnsureReleaseGuardMonitor(context.Context, string, string, string, string, time.Duration) (domain.ReleaseGuardMonitor, error)
 	ReleaseGuardMonitor(context.Context, string, string, string) (domain.ReleaseGuardMonitor, error)
@@ -276,10 +287,9 @@ type DrainTracker interface {
 	HasCurrentDeployment(string) bool
 }
 
-// QualifiedV01CloudHandlers is a compatibility constructor for the single
-// backend qualified by v0.1. Production composition and future integrations
-// use CloudHandlersWithBackends directly.
-func QualifiedV01CloudHandlers(store CloudStore, provider ReplicaProvider, runtime RuntimeInspector, artifactResolvers ...ArtifactResolver) map[string]operations.Handler {
+// QualifiedCloudHandlers is a compatibility constructor for a single backend.
+// Production composition uses CloudHandlersWithBackends directly.
+func QualifiedCloudHandlers(store CloudStore, provider ReplicaProvider, runtime RuntimeInspector, artifactResolvers ...ArtifactResolver) map[string]operations.Handler {
 	backends, err := NewReplicaBackends(ReplicaBackend{Name: "skypilot", Cloud: "runpod", Runtime: support.DefaultRuntime, Profile: builtinElasticProfile("skypilot", "runpod"), Provider: provider})
 	if err != nil {
 		panic(err)
@@ -444,7 +454,12 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 			}
 		}
 		_ = checkpoint(ctx, store, operation, "deployment.route", "succeeded", map[string]any{"targets": targetNames}, 95, "Healthy capacity published")
-		result, _ := json.Marshal(map[string]any{"deployment_id": deployment.ID, "resource_ids": resourceIDs, "replicas": len(targetNames)})
+		published, err := store.PublishDeploymentEndpoint(ctx, request.TenantID, request.EndpointName, request.Name)
+		if err != nil {
+			return "", classify("endpoint_publication_failed", err)
+		}
+		_ = checkpoint(ctx, store, operation, "endpoint.publish", "succeeded", map[string]any{"endpoint_name": published.Endpoint.Name}, 100, "Stable application endpoint published")
+		result, _ := json.Marshal(map[string]any{"deployment_id": deployment.ID, "endpoint_name": published.Endpoint.Name, "resource_ids": resourceIDs, "replicas": len(targetNames)})
 		return string(result), nil
 	}
 
@@ -691,12 +706,12 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 		if err != nil {
 			return "", operations.Permanent("candidate_not_found", err)
 		}
-		v2, hasV2 := store.(releaseGuardV2Store)
+		guardedStore, hasGuardedStore := store.(releaseGuardMonitoringStore)
 		var recoveryMonitor domain.ReleaseGuardMonitor
 		recoveringRollback := false
 		if revision.Status != "candidate" && resolved.Deployment.ActiveRevisionID != rollout.CandidateID {
-			if hasV2 {
-				recoveryMonitor, err = v2.ReleaseGuardMonitor(ctx, rollout.TenantID, rollout.Name, rollout.CandidateID)
+			if hasGuardedStore {
+				recoveryMonitor, err = guardedStore.ReleaseGuardMonitor(ctx, rollout.TenantID, rollout.Name, rollout.CandidateID)
 				recoveringRollback = err == nil && resolved.Deployment.ActiveRevisionID == recoveryMonitor.RollbackRevisionID
 			}
 			if !recoveringRollback {
@@ -755,16 +770,16 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 		autoRolledBack := false
 		if recoveringRollback {
 			keepRevisionID, autoRolledBack = recoveryMonitor.RollbackRevisionID, true
-			if err = v2.MarkReleaseGuardMonitorRolledBack(ctx, rollout.TenantID, rollout.Name, rollout.CandidateID); err != nil {
+			if err = guardedStore.MarkReleaseGuardMonitorRolledBack(ctx, rollout.TenantID, rollout.Name, rollout.CandidateID); err != nil {
 				return "", operations.Retryable("release_monitor_finalize_failed", err)
 			}
 		}
-		if hasV2 && !recoveringRollback {
-			policy, policyErr := v2.ReleaseGuardPolicy(ctx, rollout.TenantID, rollout.Name)
+		if hasGuardedStore && !recoveringRollback {
+			policy, policyErr := guardedStore.ReleaseGuardPolicy(ctx, rollout.TenantID, rollout.Name)
 			if policyErr != nil {
 				return "", operations.Retryable("release_guard_policy_lookup_failed", policyErr)
 			}
-			existing, monitorErr := v2.ReleaseGuardMonitor(ctx, rollout.TenantID, rollout.Name, rollout.CandidateID)
+			existing, monitorErr := guardedStore.ReleaseGuardMonitor(ctx, rollout.TenantID, rollout.Name, rollout.CandidateID)
 			monitorExists := monitorErr == nil
 			if monitorErr != nil && !errors.Is(monitorErr, domain.ErrNotFound) {
 				return "", operations.Retryable("release_monitor_lookup_failed", monitorErr)
@@ -773,16 +788,16 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 				if monitorExists {
 					previousRevisionID = existing.RollbackRevisionID
 				} else if errors.Is(monitorErr, domain.ErrNotFound) && previousRevisionID == rollout.CandidateID {
-					previousRevisionID, monitorErr = v2.PreviousRevisionID(ctx, rollout.TenantID, rollout.Name, rollout.CandidateID)
+					previousRevisionID, monitorErr = guardedStore.PreviousRevisionID(ctx, rollout.TenantID, rollout.Name, rollout.CandidateID)
 					if monitorErr != nil {
 						return "", operations.Retryable("rollback_revision_lookup_failed", monitorErr)
 					}
 				}
-				monitor, monitorErr := v2.EnsureReleaseGuardMonitor(ctx, rollout.TenantID, rollout.Name, rollout.CandidateID, previousRevisionID, time.Duration(policy.AutoRollbackWindowSeconds)*time.Second)
+				monitor, monitorErr := guardedStore.EnsureReleaseGuardMonitor(ctx, rollout.TenantID, rollout.Name, rollout.CandidateID, previousRevisionID, time.Duration(policy.AutoRollbackWindowSeconds)*time.Second)
 				if monitorErr != nil {
 					return "", classify("release_monitor_create_failed", monitorErr)
 				}
-				evaluation, evaluationErr := v2.EvaluateReleaseGuardMonitor(ctx, rollout.TenantID, rollout.Name, rollout.CandidateID, time.Duration(policy.AutoRollbackWindowSeconds)*time.Second)
+				evaluation, evaluationErr := guardedStore.EvaluateReleaseGuardMonitor(ctx, rollout.TenantID, rollout.Name, rollout.CandidateID, time.Duration(policy.AutoRollbackWindowSeconds)*time.Second)
 				if evaluationErr != nil {
 					return "", operations.Retryable("release_monitor_evaluation_failed", evaluationErr)
 				}
@@ -798,7 +813,7 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 							rollbackURLs = append(rollbackURLs, replica.Endpoint)
 						}
 					}
-					if err = v2.RollbackGuardedPromotion(ctx, rollout.TenantID, rollout.Name, rollout.CandidateID, previousRevisionID, "automatic rollback after Release Guard rejection", rollbackTargets); err != nil {
+					if err = guardedStore.RollbackGuardedPromotion(ctx, rollout.TenantID, rollout.Name, rollout.CandidateID, previousRevisionID, "automatic rollback after Release Guard rejection", rollbackTargets); err != nil {
 						return "", classify("automatic_rollback_failed", err)
 					}
 					rollbackRevision, revisionErr := store.Revision(ctx, rollout.TenantID, rollout.Name, previousRevisionID)
@@ -818,7 +833,7 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 						_ = checkpoint(ctx, store, operation, "candidate.rollback.route", "waiting", map[string]any{"worker_set_hash": rollbackHash}, 92, "Waiting for rollback router generation")
 						return "", operations.Retryable("rollback_router_cutover_pending", errors.New("rollback router generation is not active yet"))
 					}
-					if err = v2.MarkReleaseGuardMonitorRolledBack(ctx, rollout.TenantID, rollout.Name, rollout.CandidateID); err != nil {
+					if err = guardedStore.MarkReleaseGuardMonitorRolledBack(ctx, rollout.TenantID, rollout.Name, rollout.CandidateID); err != nil {
 						return "", operations.Retryable("release_monitor_finalize_failed", err)
 					}
 					keepRevisionID, autoRolledBack = previousRevisionID, true
@@ -876,8 +891,8 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 		if err != nil {
 			return "", operations.Permanent("deployment_missing", err)
 		}
-		if v2, ok := store.(releaseGuardV2Store); ok {
-			if monitor, monitorErr := v2.ReleaseGuardMonitor(ctx, rollout.TenantID, rollout.Name, rollout.CandidateID); monitorErr == nil {
+		if guardedStore, ok := store.(releaseGuardMonitoringStore); ok {
+			if monitor, monitorErr := guardedStore.ReleaseGuardMonitor(ctx, rollout.TenantID, rollout.Name, rollout.CandidateID); monitorErr == nil {
 				if resolved.Deployment.ActiveRevisionID == monitor.RollbackRevisionID {
 					return candidatePromote(ctx, operation)
 				}
@@ -901,7 +916,7 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 							urls = append(urls, replica.Endpoint)
 						}
 					}
-					if err = v2.RollbackGuardedPromotion(ctx, rollout.TenantID, rollout.Name, rollout.CandidateID, monitor.RollbackRevisionID, "automatic rollback after operator cancelled observation", names); err != nil {
+					if err = guardedStore.RollbackGuardedPromotion(ctx, rollout.TenantID, rollout.Name, rollout.CandidateID, monitor.RollbackRevisionID, "automatic rollback after operator cancelled observation", names); err != nil {
 						return "", classify("automatic_rollback_failed", err)
 					}
 					hash := router.WorkerSetHash(rollbackSpec.RoutingStrategy, urls)
@@ -912,7 +927,7 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 					if !matched {
 						return "", operations.Retryable("rollback_router_cutover_pending", errors.New("rollback router generation is not active yet"))
 					}
-					if err = v2.MarkReleaseGuardMonitorRolledBack(ctx, rollout.TenantID, rollout.Name, rollout.CandidateID); err != nil {
+					if err = guardedStore.MarkReleaseGuardMonitorRolledBack(ctx, rollout.TenantID, rollout.Name, rollout.CandidateID); err != nil {
 						return "", operations.Retryable("release_monitor_finalize_failed", err)
 					}
 				}

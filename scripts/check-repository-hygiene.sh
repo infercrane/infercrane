@@ -1,0 +1,34 @@
+#!/usr/bin/env sh
+set -eu
+
+root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+cd "$root"
+
+for path in \
+  AGENTS.md \
+  CLAUDE.md \
+  docs/adr \
+  docs/roadmap \
+  docs/workplans \
+  docs/project-status.md \
+  docs/generated/repository-map.md \
+  tools/repo-context
+do
+  if [ -e "$path" ]; then
+    echo "obsolete internal artifact must not ship: $path" >&2
+    exit 1
+  fi
+done
+
+if find docs -type f \( -name '*goal-progress*' -o -name '*edge-case-progress*' \) | grep -q .; then
+  echo 'temporary progress reports must not ship in public documentation' >&2
+  exit 1
+fi
+
+if find . -path './.git' -prune -o -path './docs/node_modules' -prune -o -type f \
+  \( -name '*.bak' -o -name '*.orig' -o -name '*~' \) -print | grep -q .; then
+  echo 'backup or editor-temporary files are present' >&2
+  exit 1
+fi
+
+echo 'Repository hygiene boundaries verified.'

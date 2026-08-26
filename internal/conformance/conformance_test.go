@@ -127,7 +127,7 @@ func TestRuntimeReadinessConformance(t *testing.T) {
 }
 
 func TestRuntimeCapabilityConformance(t *testing.T) {
-	registry, err := integration.V02Catalog()
+	registry, err := integration.BaseCatalog()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func TestPortableRuntimeConformance(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	registry, err := integration.V06Catalog()
+	registry, err := integration.PortableCatalog()
 	if err != nil {
 		t.Fatal(err)
 	}

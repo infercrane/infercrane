@@ -29,6 +29,9 @@ type fakeCloudStore struct {
 	rejectedReason string
 	capacity       domain.CapacityEvidence
 	appliedRuntime string
+	published      domain.ResolvedEndpoint
+	publishCalls   int
+	publishErr     error
 }
 
 func (f *fakeCloudStore) RecordCapacityEvidence(_ context.Context, row domain.CapacityEvidence) (domain.CapacityEvidence, error) {
@@ -150,14 +153,30 @@ func (f *fakeCloudStore) ApplyDeploymentForTenant(_ context.Context, _ string, d
 	f.appliedRuntime = deployment.Runtime
 	return deployment, nil
 }
+func (f *fakeCloudStore) PublishDeploymentEndpoint(_ context.Context, _, endpointName, deploymentName string) (domain.ResolvedEndpoint, error) {
+	f.publishCalls++
+	if f.publishErr != nil {
+		return domain.ResolvedEndpoint{}, f.publishErr
+	}
+	if f.published.Endpoint.ID != "" && (f.published.Endpoint.Name != endpointName || len(f.published.Bindings) != 1 || f.published.Bindings[0].DeploymentID != f.deployment.ID) {
+		return domain.ResolvedEndpoint{}, domain.ErrConflict
+	}
+	if f.published.Endpoint.ID == "" {
+		f.published = domain.ResolvedEndpoint{
+			Endpoint: domain.Endpoint{ID: "endpoint-1", Name: endpointName},
+			Bindings: []domain.BackendBinding{{ID: "binding-1", DeploymentID: f.deployment.ID, Name: deploymentName}},
+		}
+	}
+	return f.published, nil
+}
 
 func TestConvergeCreatesExactlyOneResourcePerMinimumReplica(t *testing.T) {
 	store := &fakeCloudStore{deployment: domain.Deployment{ID: "deployment-1", Name: "qwen", Model: "Qwen/Qwen3-8B", RoutingStrategy: "round-robin", MinReplicas: 2, MaxReplicas: 4}}
 	provider := &fakeReplicaProvider{observation: provision.Observation{Exists: true, State: "ready", Endpoint: "http://gpu:8000", Details: `{}`}}
 	operation := domain.Operation{ID: "operation-1", LeaseOwner: "worker", LeaseGeneration: 1, RequestJSON: `{"deployment_id":"deployment-1","name":"qwen","model":"Qwen/Qwen3-8B","cloud":"runpod","gpu":"L40S","tenant_id":"global","min_replicas":2,"max_replicas":4}`}
-	_, err := QualifiedV01CloudHandlers(store, provider, fakeInspector{ready: true})[ConvergeKind](context.Background(), operation)
-	if err != nil || provider.ensureCalls != 2 || len(store.replicas) != 2 || len(store.targetNames) != 2 {
-		t.Fatalf("ensure_calls=%d replicas=%d targets=%v err=%v", provider.ensureCalls, len(store.replicas), store.targetNames, err)
+	_, err := QualifiedCloudHandlers(store, provider, fakeInspector{ready: true})[ConvergeKind](context.Background(), operation)
+	if err != nil || provider.ensureCalls != 2 || len(store.replicas) != 2 || len(store.targetNames) != 2 || store.publishCalls != 1 || store.published.Endpoint.Name != "qwen" {
+		t.Fatalf("ensure_calls=%d replicas=%d targets=%v publish_calls=%d endpoint=%q err=%v", provider.ensureCalls, len(store.replicas), store.targetNames, store.publishCalls, store.published.Endpoint.Name, err)
 	}
 }
 
@@ -190,7 +209,7 @@ func TestConvergeForwardsRequestIdentityWhenResourceIDIsAssignedAfterCreate(t *t
 	provider := &fakeReplicaProvider{deferredID: true, observation: provision.Observation{Exists: true, State: "ready", Endpoint: "http://gpu:8000", Details: `{}`}}
 	operation := domain.Operation{ID: "operation-1", LeaseOwner: "worker", LeaseGeneration: 1, RequestJSON: `{"deployment_id":"deployment-1","name":"qwen","model":"Qwen/Qwen3-8B","cloud":"runpod","gpu":"L40S","tenant_id":"global","min_replicas":1,"max_replicas":1}`}
 
-	_, err := QualifiedV01CloudHandlers(store, provider, fakeInspector{ready: true})[ConvergeKind](context.Background(), operation)
+	_, err := QualifiedCloudHandlers(store, provider, fakeInspector{ready: true})[ConvergeKind](context.Background(), operation)
 	if err != nil || provider.ensureCalls != 1 || provider.requestIDSeen != "request-before-create" || store.replica.ProviderResourceID != "resource-after-create" {
 		t.Fatalf("ensure_calls=%d request_id=%q replica=%#v err=%v", provider.ensureCalls, provider.requestIDSeen, store.replica, err)
 	}
@@ -243,7 +262,7 @@ func TestCandidateProvisioningCreatesIsolatedRevisionCapacity(t *testing.T) {
 	store := &fakeCloudStore{deployment: domain.Deployment{ID: "deployment-1", Name: "qwen", ActiveRevisionID: "rev-1"}, revision: domain.DeploymentRevision{ID: "rev-2", Status: "candidate", SpecJSON: string(encoded)}}
 	provider := &fakeReplicaProvider{observation: provision.Observation{Exists: true, State: "ready", Endpoint: "http://candidate:8000", Details: `{}`}}
 	operation := domain.Operation{ID: "operation-candidate", LeaseOwner: "worker", LeaseGeneration: 1, RequestJSON: `{"name":"qwen","candidate_id":"rev-2","tenant_id":"global"}`}
-	result, err := QualifiedV01CloudHandlers(store, provider, fakeInspector{ready: true})[RolloutProvisionKind](context.Background(), operation)
+	result, err := QualifiedCloudHandlers(store, provider, fakeInspector{ready: true})[RolloutProvisionKind](context.Background(), operation)
 	if err != nil || result == "" || provider.ensureCalls != 1 || store.replica.RevisionID != "rev-2" || store.replica.LifecycleState != "ready" || store.applied {
 		t.Fatalf("result=%s replica=%#v applied=%t ensure_calls=%d err=%v", result, store.replica, store.applied, provider.ensureCalls, err)
 	}
@@ -258,7 +277,7 @@ func TestBadCandidateIsRejectedAndCapacityIsDeleted(t *testing.T) {
 	store := &fakeCloudStore{deployment: domain.Deployment{ID: "deployment-1", Name: "qwen", ActiveRevisionID: "rev-1", CandidateRevisionID: "rev-bad"}, revision: domain.DeploymentRevision{ID: "rev-bad", Status: "candidate", SpecJSON: string(encoded)}}
 	provider := &fakeReplicaProvider{observation: provision.Observation{Exists: true, State: "ready", Endpoint: "http://bad:8000", Details: `{}`}}
 	operation := domain.Operation{ID: "operation-bad", LeaseOwner: "worker", LeaseGeneration: 1, RequestJSON: `{"name":"qwen","candidate_id":"rev-bad","tenant_id":"global"}`}
-	_, err := QualifiedV01CloudHandlers(store, provider, fakeInspector{ready: true})[RolloutProvisionKind](context.Background(), operation)
+	_, err := QualifiedCloudHandlers(store, provider, fakeInspector{ready: true})[RolloutProvisionKind](context.Background(), operation)
 	var failure operations.Failure
 	if !errors.As(err, &failure) || failure.Code != "runtime_model_mismatch" || failure.Retryable || provider.deleteCalls != 1 || store.replica.LifecycleState != "deleted" || store.revision.Status != "rejected" || store.rejectedReason == "" || store.deployment.ActiveRevisionID != "rev-1" {
 		t.Fatalf("failure=%+v delete_calls=%d replica=%#v revision=%#v reason=%q active=%s err=%v", failure, provider.deleteCalls, store.replica, store.revision, store.rejectedReason, store.deployment.ActiveRevisionID, err)
@@ -275,7 +294,7 @@ func TestRejectedCandidateProvisionRetryOnlyResumesCleanup(t *testing.T) {
 	}
 	provider := &fakeReplicaProvider{observation: provision.Observation{Exists: true, State: "ready"}}
 	operation := domain.Operation{ID: "operation-bad", LeaseOwner: "worker", LeaseGeneration: 2, RequestJSON: `{"name":"qwen","candidate_id":"rev-bad","tenant_id":"global"}`}
-	_, err := QualifiedV01CloudHandlers(store, provider, fakeInspector{ready: true})[RolloutProvisionKind](context.Background(), operation)
+	_, err := QualifiedCloudHandlers(store, provider, fakeInspector{ready: true})[RolloutProvisionKind](context.Background(), operation)
 	var failure operations.Failure
 	if !errors.As(err, &failure) || failure.Code != "candidate_rejected" || failure.Retryable || provider.ensureCalls != 0 || provider.deleteCalls != 1 || store.replicas["candidate"].LifecycleState != "deleted" {
 		t.Fatalf("failure=%+v ensure_calls=%d delete_calls=%d replicas=%#v err=%v", failure, provider.ensureCalls, provider.deleteCalls, store.replicas, err)
@@ -290,7 +309,7 @@ func TestCandidateCancellationDeletesOnlyCandidateCapacity(t *testing.T) {
 	store := &fakeCloudStore{deployment: domain.Deployment{ID: "deployment-1", Name: "qwen", ActiveRevisionID: "rev-1", CandidateRevisionID: "rev-2"}, replicas: replicas}
 	provider := &fakeReplicaProvider{observation: provision.Observation{Exists: true, State: "ready"}}
 	operation := domain.Operation{RequestJSON: `{"name":"qwen","candidate_id":"rev-2","tenant_id":"global"}`}
-	_, err := QualifiedV01CloudHandlers(store, provider, fakeInspector{})[RolloutProvisionKind+".cancel"](context.Background(), operation)
+	_, err := QualifiedCloudHandlers(store, provider, fakeInspector{})[RolloutProvisionKind+".cancel"](context.Background(), operation)
 	if err != nil || provider.deleteCalls != 1 || store.replicas["candidate"].LifecycleState != "deleted" || store.replicas["active"].LifecycleState != "active" || store.deleted {
 		t.Fatalf("replicas=%#v delete_calls=%d deployment_deleted=%t err=%v", store.replicas, provider.deleteCalls, store.deleted, err)
 	}
@@ -306,7 +325,7 @@ func TestGuardedPromotionCutsOverBeforeDeletingOldCapacity(t *testing.T) {
 	store := &fakeCloudStore{deployment: domain.Deployment{ID: "deployment-1", Name: "qwen", ActiveRevisionID: "rev-1", CandidateRevisionID: "rev-2"}, revision: domain.DeploymentRevision{ID: "rev-2", Status: "candidate", SpecJSON: string(encoded)}, replicas: replicas}
 	provider := &fakeReplicaProvider{observation: provision.Observation{Exists: true, State: "ready"}}
 	operation := domain.Operation{ID: "promote", LeaseOwner: "worker", LeaseGeneration: 1, RequestJSON: `{"name":"qwen","candidate_id":"rev-2","tenant_id":"global"}`}
-	result, err := QualifiedV01CloudHandlers(store, provider, fakeInspector{})[RolloutPromoteKind](context.Background(), operation)
+	result, err := QualifiedCloudHandlers(store, provider, fakeInspector{})[RolloutPromoteKind](context.Background(), operation)
 	if err != nil || result == "" || store.deployment.ActiveRevisionID != "rev-2" || store.replicas["new"].LifecycleState != "active" || store.replicas["old"].LifecycleState != "deleted" || provider.deleteCalls != 1 {
 		t.Fatalf("result=%s deployment=%#v replicas=%#v delete_calls=%d err=%v", result, store.deployment, store.replicas, provider.deleteCalls, err)
 	}
@@ -414,7 +433,7 @@ func TestPostPromotionGuardAutomaticallyRollsBackBeforeDeletingRetainedCapacity(
 	store := &fakeReleaseV2Store{fakeCloudStore: base, evaluation: domain.ReleaseGuardEvaluation{ID: "evaluation", Decision: "REJECT"}}
 	provider := &fakeReplicaProvider{observation: provision.Observation{Exists: true, State: "ready"}}
 	operation := domain.Operation{ID: "promote", LeaseOwner: "worker", LeaseGeneration: 1, RequestJSON: `{"name":"qwen","candidate_id":"rev-2","tenant_id":"global"}`}
-	result, err := QualifiedV01CloudHandlers(store, provider, fakeInspector{})[RolloutPromoteKind](context.Background(), operation)
+	result, err := QualifiedCloudHandlers(store, provider, fakeInspector{})[RolloutPromoteKind](context.Background(), operation)
 	if err != nil || !store.rolledBack || store.deployment.ActiveRevisionID != "rev-1" || store.replicas["old"].LifecycleState != "active" || store.replicas["new"].LifecycleState != "deleted" || provider.deleteCalls != 1 || !strings.Contains(result, `"auto_rolled_back":true`) {
 		t.Fatalf("result=%s deployment=%#v replicas=%#v deletes=%d rollback=%t err=%v", result, store.deployment, store.replicas, provider.deleteCalls, store.rolledBack, err)
 	}
@@ -426,7 +445,7 @@ func TestAutomaticRollbackResumesCleanupAfterRouterRestartBoundary(t *testing.T)
 	base := &fakeCloudStore{deployment: domain.Deployment{ID: "deployment-1", Name: "prod", ActiveRevisionID: "rev-1", CandidateRevisionID: "rev-2"}, revision: domain.DeploymentRevision{ID: "rev-2", Status: "candidate", SpecJSON: string(encoded)}, replicas: map[string]domain.Replica{"old": {ID: "old", DeploymentID: "deployment-1", RevisionID: "rev-1", ExternalKey: "old", Provider: "skypilot", LifecycleState: "active", Endpoint: "http://old", Health: "healthy"}, "new": {ID: "new", DeploymentID: "deployment-1", RevisionID: "rev-2", ExternalKey: "new", Provider: "skypilot", LifecycleState: "ready", Endpoint: "http://new", Health: "healthy"}}}
 	store := &fakeReleaseV2Store{fakeCloudStore: base, evaluation: domain.ReleaseGuardEvaluation{Decision: "REJECT"}, routeMatches: []bool{true, false}}
 	provider := &fakeReplicaProvider{observation: provision.Observation{Exists: true, State: "ready"}}
-	handler := QualifiedV01CloudHandlers(store, provider, fakeInspector{})[RolloutPromoteKind]
+	handler := QualifiedCloudHandlers(store, provider, fakeInspector{})[RolloutPromoteKind]
 	op := domain.Operation{ID: "promote", LeaseOwner: "worker", LeaseGeneration: 1, RequestJSON: `{"name":"prod","candidate_id":"rev-2","tenant_id":"global"}`}
 	if _, err := handler(context.Background(), op); err == nil || store.deployment.ActiveRevisionID != "rev-1" || provider.deleteCalls != 0 {
 		t.Fatalf("first err=%v active=%s deletes=%d", err, store.deployment.ActiveRevisionID, provider.deleteCalls)
@@ -448,7 +467,7 @@ func TestCanceledObservationResumesRollbackBeforeDeletingCandidate(t *testing.T)
 	}}
 	store := &fakeReleaseV2Store{fakeCloudStore: base, monitor: domain.ReleaseGuardMonitor{ID: "monitor", PromotedRevisionID: "rev-2", RollbackRevisionID: "rev-1", Status: "observing"}, routeMatches: []bool{false}}
 	provider := &fakeReplicaProvider{observation: provision.Observation{Exists: true, State: "ready"}}
-	handler := QualifiedV01CloudHandlers(store, provider, fakeInspector{})[RolloutPromoteKind+".cancel"]
+	handler := QualifiedCloudHandlers(store, provider, fakeInspector{})[RolloutPromoteKind+".cancel"]
 	op := domain.Operation{ID: "promote", LeaseOwner: "worker", LeaseGeneration: 1, RequestJSON: `{"name":"prod","candidate_id":"rev-2","tenant_id":"global"}`}
 	if _, err := handler(context.Background(), op); err == nil || store.deployment.ActiveRevisionID != "rev-1" || provider.deleteCalls != 0 {
 		t.Fatalf("first err=%v active=%s deletes=%d", err, store.deployment.ActiveRevisionID, provider.deleteCalls)
@@ -468,7 +487,7 @@ func TestScaleDownWithdrawsRouterBeforeDeletingReplica(t *testing.T) {
 	store := &fakeCloudStore{deployment: domain.Deployment{ID: "deployment-1", Name: "qwen", Model: "Qwen/Qwen3-8B", RoutingStrategy: "round-robin", MinReplicas: 1, MaxReplicas: 2}, replicas: replicas}
 	provider := &fakeReplicaProvider{observation: provision.Observation{Exists: true, State: "ready", Endpoint: "http://gpu:8000", Details: `{}`}}
 	operation := domain.Operation{ID: "operation-1", LeaseOwner: "worker", LeaseGeneration: 1, RequestJSON: `{"deployment_id":"deployment-1","name":"qwen","model":"Qwen/Qwen3-8B","cloud":"runpod","gpu":"L40S","tenant_id":"global","desired_replicas":1}`}
-	_, err := QualifiedV01CloudHandlers(store, provider, fakeInspector{ready: true})[ReplicaDeleteKind](context.Background(), operation)
+	_, err := QualifiedCloudHandlers(store, provider, fakeInspector{ready: true})[ReplicaDeleteKind](context.Background(), operation)
 	if err != nil || provider.deleteCalls != 1 || store.replicas["replica-2"].LifecycleState != "deleted" {
 		t.Fatalf("delete_calls=%d replica=%#v err=%v", provider.deleteCalls, store.replicas["replica-2"], err)
 	}
@@ -796,20 +815,31 @@ func TestConvergeResumesAfterProviderCheckpoint(t *testing.T) {
 	store := &fakeCloudStore{deployment: domain.Deployment{ID: "deployment-1", Name: "qwen", Model: "Qwen/Qwen3-8B", RoutingStrategy: "round-robin", MinReplicas: 1, MaxReplicas: 1}}
 	provider := &fakeReplicaProvider{observation: provision.Observation{Exists: true, State: "starting"}}
 	operation := domain.Operation{ID: "operation-1", LeaseOwner: "worker", LeaseGeneration: 1, RequestJSON: `{"deployment_id":"deployment-1","name":"qwen","model":"Qwen/Qwen3-8B","cloud":"runpod","gpu":"L40S","tenant_id":"global"}`}
-	handler := QualifiedV01CloudHandlers(store, provider, fakeInspector{ready: true})[ConvergeKind]
+	handler := QualifiedCloudHandlers(store, provider, fakeInspector{ready: true})[ConvergeKind]
 	if _, err := handler(context.Background(), operation); err == nil {
 		t.Fatal("starting replica should return retryable wait")
 	}
-	if store.replica.ProviderResourceID == "" || provider.ensureCalls != 1 {
-		t.Fatalf("identity=%q ensure_calls=%d", store.replica.ProviderResourceID, provider.ensureCalls)
+	if store.replica.ProviderResourceID == "" || provider.ensureCalls != 1 || store.publishCalls != 0 {
+		t.Fatalf("identity=%q ensure_calls=%d publish_calls=%d", store.replica.ProviderResourceID, provider.ensureCalls, store.publishCalls)
 	}
 
 	// Simulate process restart: a fresh handler receives only durable store and
 	// provider state, reuses the same external identity, and finishes.
 	provider.observation = provision.Observation{Exists: true, State: "ready", Endpoint: "http://gpu:8000", Details: `{}`}
-	result, err := QualifiedV01CloudHandlers(store, provider, fakeInspector{ready: true})[ConvergeKind](context.Background(), operation)
-	if err != nil || result == "" || provider.ensureCalls != 2 || store.replica.LifecycleState != "active" || store.target.URL != "http://gpu:8000" {
-		t.Fatalf("result=%s replica=%#v target=%#v ensure_calls=%d err=%v", result, store.replica, store.target, provider.ensureCalls, err)
+	result, err := QualifiedCloudHandlers(store, provider, fakeInspector{ready: true})[ConvergeKind](context.Background(), operation)
+	if err != nil || !strings.Contains(result, `"endpoint_name":"qwen"`) || provider.ensureCalls != 2 || store.replica.LifecycleState != "active" || store.target.URL != "http://gpu:8000" || store.publishCalls != 1 {
+		t.Fatalf("result=%s replica=%#v target=%#v ensure_calls=%d publish_calls=%d err=%v", result, store.replica, store.target, provider.ensureCalls, store.publishCalls, err)
+	}
+}
+
+func TestCloudRequestDefaultsAndValidatesStableEndpointName(t *testing.T) {
+	request := CloudRequest{Name: "coder-production", Model: "openai/gpt-oss-20b", Cloud: "runpod", GPU: "L40S", MinReplicas: 1, MaxReplicas: 1}
+	if err := request.Validate(); err != nil || request.EndpointName != request.Name {
+		t.Fatalf("request=%#v err=%v", request, err)
+	}
+	request.EndpointName = "Customer Endpoint"
+	if err := request.Validate(); err == nil || !strings.Contains(err.Error(), "endpoint_name") {
+		t.Fatalf("invalid endpoint name was accepted: %v", err)
 	}
 }
 
@@ -817,7 +847,7 @@ func TestConvergeCancellationDeletesProviderResource(t *testing.T) {
 	store := &fakeCloudStore{deployment: domain.Deployment{ID: "deployment-1", Name: "qwen"}, replica: domain.Replica{ID: "replica-1", DeploymentID: "deployment-1", ExternalKey: "deployment-1-r0", ProviderResourceID: "infercrane-deployment-1-r0", LifecycleState: "starting"}}
 	provider := &fakeReplicaProvider{observation: provision.Observation{Exists: true, State: "starting"}}
 	operation := domain.Operation{ID: "operation-1", LeaseOwner: "worker", LeaseGeneration: 1, RequestJSON: `{"deployment_id":"deployment-1","name":"qwen","model":"Qwen/Qwen3-8B","cloud":"runpod","gpu":"L40S","tenant_id":"global"}`}
-	_, err := QualifiedV01CloudHandlers(store, provider, fakeInspector{})[ConvergeKind+".cancel"](context.Background(), operation)
+	_, err := QualifiedCloudHandlers(store, provider, fakeInspector{})[ConvergeKind+".cancel"](context.Background(), operation)
 	if err != nil || provider.deleteCalls != 1 || store.replica.LifecycleState != "deleted" || !store.deleted {
 		t.Fatalf("delete_calls=%d replica=%#v deleted=%t err=%v", provider.deleteCalls, store.replica, store.deleted, err)
 	}
@@ -827,7 +857,7 @@ func TestConvergeCancellationWaitsForEventuallyConsistentProviderDelete(t *testi
 	store := &fakeCloudStore{deployment: domain.Deployment{ID: "deployment-1", Name: "qwen"}, replica: domain.Replica{ID: "replica-1", DeploymentID: "deployment-1", ExternalKey: "deployment-1-r0", ProviderResourceID: "infercrane-deployment-1-r0", LifecycleState: "starting"}}
 	provider := &fakeReplicaProvider{observation: provision.Observation{Exists: true, State: "deleting"}, deleteLingers: 1}
 	operation := domain.Operation{ID: "operation-1", LeaseOwner: "worker", LeaseGeneration: 1, RequestJSON: `{"deployment_id":"deployment-1","name":"qwen","model":"Qwen/Qwen3-8B","cloud":"runpod","gpu":"L40S","tenant_id":"global"}`}
-	handler := QualifiedV01CloudHandlers(store, provider, fakeInspector{})[ConvergeKind+".cancel"]
+	handler := QualifiedCloudHandlers(store, provider, fakeInspector{})[ConvergeKind+".cancel"]
 	_, err := handler(context.Background(), operation)
 	var failure operations.Failure
 	if !errors.As(err, &failure) || failure.Code != "provider_delete_pending" || !failure.Retryable || store.replica.LifecycleState == "deleted" || store.deleted {

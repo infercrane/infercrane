@@ -11,8 +11,10 @@ Getting one model to answer one request is straightforward. Keeping a stable end
 capacity is scarce, models take minutes to load, traffic changes, and revisions behave differently is
 the hard part.
 
-InferCrane gives teams one durable control plane for that operational gap. It builds or connects
-inference, preserves application identity, records what happened, and makes risky changes explicit.
+InferCrane gives teams one production inference platform for that operational gap. It builds or
+connects inference, preserves application identity, records what happened, and makes risky changes
+explicit. A durable control plane coordinates lifecycle work, while the request data plane keeps the
+application endpoint independent from PostgreSQL and provider APIs.
 
 ## Problems teams repeatedly encounter
 
@@ -42,7 +44,7 @@ makes them observable and governable.
   Community discussions are product-discovery signals, not proof of InferCrane performance.
 </Accordion>
 
-## What InferCrane replaces—and what it keeps
+## What InferCrane replaces - and what it keeps
 
 ```mermaid
 flowchart LR
@@ -76,7 +78,8 @@ rollout policy, evidence, explanations, and adapter qualification.
 
 ## Do not choose InferCrane when
 
-- You want a hosted model API with no infrastructure account or control plane to operate.
+- You want supplier-owned GPU capacity with no infrastructure account. That is part of the planned
+  InferCrane Cloud direction, not the current Community product.
 - You need training, fine-tuning orchestration, a generic workflow engine, or an agent framework.
 - You expect every model/runtime/provider combination to be supported without qualification.
 - You require InferCrane-managed sandbox execution; sandboxes are currently application-managed.
@@ -89,7 +92,7 @@ rollout policy, evidence, explanations, and adapter qualification.
   <Card title="Connect what runs" icon="plug" href="/showcase/connect-existing">
     Gain evidence without transferring lifecycle ownership.
   </Card>
-  <Card title="Check capability evidence" icon="clipboard-check" href="/project-status">
+  <Card title="Check compatibility evidence" icon="clipboard-check" href="/compatibility">
     See exactly what is implemented, qualified, experimental, or planned.
   </Card>
 </CardGroup>

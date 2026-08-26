@@ -33,7 +33,7 @@ var publicCommandSpecs = []commandSpec{
 	{use: "observe ENDPOINT_OR_DEPLOYMENT [flags]", short: "See health, traffic, operations, Guard evidence, and recent events", group: "operate"},
 	{use: "telemetry collect dcgm DEPLOYMENT [flags]", short: "Collect bounded hardware evidence through the control plane", group: "understand"},
 	{use: "inbox [flags]", short: "Rank fleet state that needs operator attention", group: "operate"},
-	{use: "request DEPLOYMENT [flags]", short: "Send a buffered or streaming inference request", group: "start"},
+	{use: "request ENDPOINT [flags]", short: "Send a buffered or streaming inference request", group: "start"},
 	{use: "version", short: "Print the InferCrane version", group: "start"},
 	{use: "apply MODEL_OR_SPEC [flags]", short: "Declaratively converge a deployment", group: "operate"},
 	{use: "deployments [flags]", short: "List logical deployments", group: "operate", aliases: []string{"ls"}},
@@ -348,6 +348,9 @@ func addHelpFlags(command *cobra.Command, name string) {
 		stringFlag("window", "1h", "persisted endpoint evidence window")
 	case "plan", "deploy", "apply":
 		stringFlag("name", "", "logical deployment name")
+		if name != "plan" {
+			stringFlag("endpoint", "", "stable application endpoint name")
+		}
 		stringFlag("targets", "", "comma-separated existing target names")
 		stringFlag("cloud", "", "provider cloud")
 		stringFlag("backend", "", "serving backend; use dynamo for a managed Dynamo graph")

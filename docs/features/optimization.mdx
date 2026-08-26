@@ -272,7 +272,7 @@ are version- and workload-specific and require their own compatibility and quali
 Use `--include-simulated` only for development exploration; simulated candidates are excluded by
 default.
 
-## Upstream composition roadmap
+## Upstream composition boundaries
 
 InferCrane will reuse upstream execution and optimization work behind replaceable adapters:
 
@@ -281,7 +281,7 @@ InferCrane will reuse upstream execution and optimization work behind replaceabl
 | vLLM | Runtime execution, continuous batching, attention, prefix caching, and qualified engine flags | Active runtime; reviewed starting profiles are locally qualified |
 | SGLang | Alternative runtime and prefix-aware execution | Runtime contract exists; each provider/model path needs qualification |
 | AIConfigurator | GPU-free modeled candidate reduction | Active optional adapter pinned to `0.11.0` plus `plotext 5.3.2`; Linux x86_64 real-package contract verified |
-| AISimulate | Future GPU-free simulation and recommendation source | Planned adapter replacement after stable package, schema, support, parity, and rollback gates pass |
+| AISimulate | GPU-free simulation and recommendation source | Not integrated; adoption requires a stable package, schema, support, parity, and rollback contract |
 | LLM Compressor / ModelOpt | Produce immutable quantized artifacts | Replaceable external-builder plans and provenance are local-qualified; transformation and GPU compatibility remain external qualification |
 | vLLM Speculators | Model-specific EAGLE, MTP, DFlash, and related speculative candidates | Replaceable artifact plans and exact verifier provenance are local-qualified; acceptance rate and output correctness require real measurement |
 | LMCache | KV reuse and offload for qualified repeated-prefix workloads | Registered cache composition and exact capability boundary; executable lifecycle remains fail-closed |
@@ -289,12 +289,10 @@ InferCrane will reuse upstream execution and optimization work behind replaceabl
 | TensorRT-LLM | Narrow optimized runtime for supported model/GPU tuples | Immutable engine-build provenance exists; runtime execution remains unsupported until an exact tuple is qualified |
 | llm-d / AIBrix | Kubernetes routing, scheduling, and heterogeneous fleet patterns | Registered single-owner composition boundaries; no executable lifecycle support claim |
 
-The durable rule is: **the optimizer proposes; InferCrane proves**. See
-[ADR 0038](/adr/0038-replaceable-evidence-gated-optimization) for the ownership and evidence boundary.
-The pinned adapter and migration decision is recorded in
-[ADR 0039](/adr/0039-pinned-aiconfigurator-candidate-source).
-Durable authority and artifact provenance are recorded in
-[ADR 0040](/adr/0040-durable-evidence-gated-optimization-campaigns).
+The durable rule is: **the optimizer proposes; InferCrane proves**. Candidate sources, builders, and
+execution systems remain replaceable. Modeled results cannot satisfy a measured gate, provider
+mutation requires bounded approval, optimized artifacts retain immutable provenance, and activation
+or promotion remains an explicit action.
 
 ## Benchmarks and competitor comparisons
 

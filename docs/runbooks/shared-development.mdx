@@ -82,7 +82,7 @@ is the upstream actually qualified. Keep applications on the original URL while 
 ## 4. Create a least-privilege teammate credential
 
 Create a read-only service principal. The credential is printed once; capture the principal ID in
-the team's access record and transfer the credential through the existing secret manager—not chat,
+the team's access record and transfer the credential through the existing secret manager, not chat,
 email, a shell transcript, or a ticket:
 
 ```bash
@@ -153,6 +153,6 @@ ownership. Review the principal creation and revocation in the audit log.
 - control-plane `/readyz` response over the trusted CA
 - upstream URL, runtime, model identity, and ownership mode
 - direct-versus-managed protocol results
-- principal ID, role, scopes, issuer, and revocation time—never the credential
+- principal ID, role, scopes, issuer, and revocation time, never the credential
 - stable-endpoint request ID and Request Inspector attribution
 - explicit statement that no provider resource was created by this runbook

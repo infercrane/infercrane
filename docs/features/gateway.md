@@ -33,5 +33,5 @@ degraded observability condition.
 alias rewriting, proxying, ordering, and removal. Add streaming fragmentation, cancellation,
 header filtering, and telemetry assertions as the public API expands.
 
-Related: [ADR 0001](../adr/0001-control-data-plane.md),
+Related: [system architecture](../architecture/system.mdx) and
 [system invariants](../architecture/invariants.md).

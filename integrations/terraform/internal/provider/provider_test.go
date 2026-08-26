@@ -91,6 +91,7 @@ provider "infercrane" {
 }
 resource "infercrane_deployment" "qwen" {
   name = "qwen-prod"
+  endpoint_name = "support-production"
   model = %q
   cloud = "fixture"
   compute_mode = "elastic"

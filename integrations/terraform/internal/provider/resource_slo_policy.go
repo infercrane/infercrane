@@ -6,11 +6,13 @@ import (
 	"net/http"
 	"net/url"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/float64validator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/infercrane/infercrane/internal/controlclient"
 )
@@ -50,7 +52,8 @@ func (r *sloPolicyResource) Configure(_ context.Context, request resource.Config
 }
 
 func (r *sloPolicyResource) schema(response *resource.SchemaResponse) {
-	response.Schema = schema.Schema{Description: "Deterministic fail-closed SLO policy for evidence-based inference recommendations.", Attributes: map[string]schema.Attribute{"id": schema.StringAttribute{Computed: true}, "deployment": schema.StringAttribute{Required: true, PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()}}, "max_ttft_p95_ms": schema.Float64Attribute{Optional: true}, "max_latency_p95_ms": schema.Float64Attribute{Optional: true}, "max_error_rate": schema.Float64Attribute{Optional: true}, "min_output_tokens_second": schema.Float64Attribute{Optional: true}, "max_hourly_cost": schema.Float64Attribute{Optional: true}}}
+	nonnegative := []validator.Float64{float64validator.AtLeast(0)}
+	response.Schema = schema.Schema{Description: "Deterministic fail-closed SLO policy for evidence-based inference recommendations.", Attributes: map[string]schema.Attribute{"id": schema.StringAttribute{Computed: true}, "deployment": schema.StringAttribute{Required: true, PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()}}, "max_ttft_p95_ms": schema.Float64Attribute{Optional: true, Validators: nonnegative}, "max_latency_p95_ms": schema.Float64Attribute{Optional: true, Validators: nonnegative}, "max_error_rate": schema.Float64Attribute{Optional: true, Validators: []validator.Float64{float64validator.Between(0, 1)}}, "min_output_tokens_second": schema.Float64Attribute{Optional: true, Validators: nonnegative}, "max_hourly_cost": schema.Float64Attribute{Optional: true, Validators: nonnegative}}}
 }
 
 func (r *sloPolicyResource) body(model sloPolicyModel) map[string]any {
@@ -63,10 +66,17 @@ func (r *sloPolicyResource) body(model sloPolicyModel) map[string]any {
 	return out
 }
 func (r *sloPolicyResource) write(ctx context.Context, model *sloPolicyModel) error {
+	if r.client == nil {
+		return errors.New("provider is not configured")
+	}
+	body := r.body(*model)
+	if len(body) == 0 {
+		return errors.New("at least one SLO threshold is required")
+	}
 	var response struct {
 		Policy map[string]any `json:"policy"`
 	}
-	if err := r.client.Do(ctx, http.MethodPut, "/deployments/"+url.PathEscape(model.Deployment.ValueString())+"/slo-policy", "", r.body(*model), &response); err != nil {
+	if err := r.client.Do(ctx, http.MethodPut, "/deployments/"+url.PathEscape(model.Deployment.ValueString())+"/slo-policy", "", body, &response); err != nil {
 		return err
 	}
 	model.ID = types.StringValue(model.Deployment.ValueString())
@@ -85,6 +95,10 @@ func (r *sloPolicyResource) Create(ctx context.Context, request resource.CreateR
 	response.Diagnostics.Append(response.State.Set(ctx, &model)...)
 }
 func (r *sloPolicyResource) Read(ctx context.Context, request resource.ReadRequest, response *resource.ReadResponse) {
+	if r.client == nil {
+		response.Diagnostics.Append(invalidClientDiagnostic())
+		return
+	}
 	var model sloPolicyModel
 	response.Diagnostics.Append(request.State.Get(ctx, &model)...)
 	if response.Diagnostics.HasError() {
@@ -136,6 +150,10 @@ func (r *sloPolicyResource) Update(ctx context.Context, request resource.UpdateR
 	response.Diagnostics.Append(response.State.Set(ctx, &model)...)
 }
 func (r *sloPolicyResource) Delete(ctx context.Context, request resource.DeleteRequest, response *resource.DeleteResponse) {
+	if r.client == nil {
+		response.Diagnostics.Append(invalidClientDiagnostic())
+		return
+	}
 	var model sloPolicyModel
 	response.Diagnostics.Append(request.State.Get(ctx, &model)...)
 	if response.Diagnostics.HasError() {

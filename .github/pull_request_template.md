@@ -12,12 +12,12 @@
 - [ ] PostgreSQL-backed tests ran
 - [ ] Failure and rollback behavior was exercised where relevant
 
-## Repository memory
+## Documentation and contribution
 
 - [ ] Relevant feature documentation updated
-- [ ] ADR added or superseded for a durable architectural decision, or not applicable
-- [ ] `make context` run and generated map committed
-- [ ] Project status and production operations updated if maturity or operations changed
+- [ ] Architecture, security, ownership, or integration documentation updated where relevant
+- [ ] Compatibility and production operations docs updated if support boundaries changed
+- [ ] Every commit includes a `Signed-off-by` line (`git commit -s`)
 
 ## Risk
 

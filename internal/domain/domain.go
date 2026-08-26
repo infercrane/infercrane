@@ -455,8 +455,8 @@ type ModelRecipe struct {
 }
 
 // LabEvaluation is an immutable comparison of persisted evidence. Results
-// label every row measured, modeled, or heuristic; v1.7 emits measured rows
-// only and never synthesizes missing performance or cost.
+// label every row measured, modeled, or heuristic. Current evaluation emits
+// measured rows only and never synthesizes missing performance or cost.
 type LabEvaluation struct {
 	ID, TenantID, ModelIdentity, AlgorithmVersion string
 	InputJSON, ResultsJSON, InputDigest           string

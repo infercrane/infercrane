@@ -98,8 +98,13 @@ func ServerlessHandlers(store CloudStore, backend ServerlessBackend, artifactRes
 		if _, err = store.ApplyDeploymentForTenant(ctx, request.TenantID, domain.Deployment{Name: request.Name, Model: request.Model, ComputeMode: "serverless", RoutingStrategy: resolved.Deployment.RoutingStrategy, MinReplicas: 0, MaxReplicas: request.MaxReplicas, AutoscalingEnabled: false}, []string{target.Name}); err != nil {
 			return "", classify("serverless_routing_failed", err)
 		}
-		_ = checkpoint(ctx, store, operation, "serverless.endpoint", "succeeded", map[string]any{"backend": backend.Name, "endpoint_id": endpoint.ID, "workers_min": 0, "workers_max": request.MaxReplicas}, 100, "Serverless endpoint registered; workers scale from zero on demand")
-		result, _ := json.Marshal(map[string]any{"deployment_id": request.DeploymentID, "endpoint_id": endpoint.ID, "endpoint": endpointURL, "workers_min": 0, "workers_max": request.MaxReplicas})
+		_ = checkpoint(ctx, store, operation, "serverless.endpoint", "succeeded", map[string]any{"backend": backend.Name, "endpoint_id": endpoint.ID, "workers_min": 0, "workers_max": request.MaxReplicas}, 95, "Serverless capacity registered; workers scale from zero on demand")
+		published, err := store.PublishDeploymentEndpoint(ctx, request.TenantID, request.EndpointName, request.Name)
+		if err != nil {
+			return "", classify("endpoint_publication_failed", err)
+		}
+		_ = checkpoint(ctx, store, operation, "endpoint.publish", "succeeded", map[string]any{"endpoint_name": published.Endpoint.Name}, 100, "Stable application endpoint published")
+		result, _ := json.Marshal(map[string]any{"deployment_id": request.DeploymentID, "endpoint_id": endpoint.ID, "endpoint": endpointURL, "endpoint_name": published.Endpoint.Name, "workers_min": 0, "workers_max": request.MaxReplicas})
 		return string(result), nil
 	}
 

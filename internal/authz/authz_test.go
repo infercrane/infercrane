@@ -28,6 +28,6 @@ func TestExplicitScopesCannotEscalateRole(t *testing.T) {
 		t.Fatal("unknown role was allowed")
 	}
 	if AllowedScoped(Operator, nil, ManageExternal) || AllowedScoped(Admin, nil, ManageSecrets) {
-		t.Fatal("legacy empty scopes gained a post-v0.2 sensitive permission")
+		t.Fatal("legacy empty scopes gained a sensitive permission")
 	}
 }

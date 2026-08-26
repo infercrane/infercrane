@@ -3,6 +3,12 @@
   "theme": "maple",
   "name": "InferCrane",
   "description": "Deploy and operate AI models across your infrastructure. Build or connect inference with durable operations, safe releases, and inspectable evidence.",
+  "logo": {
+    "light": "/assets/infercrane-logo-light.svg",
+    "dark": "/assets/infercrane-logo-dark.svg",
+    "href": "https://infercrane.com"
+  },
+  "favicon": "/assets/infercrane-favicon.svg",
   "colors": {
     "primary": "#1E40AF",
     "light": "#60A5FA",
@@ -163,7 +169,12 @@
         "groups": [
           {
             "group": "Start here",
-            "pages": ["integrations/overview", "integrations/ecosystem", "showcase/gateways-and-sandboxes"]
+            "pages": [
+              "integrations/overview",
+              "integrations/ecosystem",
+              "integrations/ownership",
+              "showcase/gateways-and-sandboxes"
+            ]
           },
           {
             "group": "Gateways and external systems",

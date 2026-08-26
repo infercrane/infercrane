@@ -7,11 +7,17 @@ description: Build and verify release archives, checksums, SPDX SBOMs, Homebrew 
 
 Release construction is local and non-publishing by default. The stable gate produces four
 archives, SHA-256 checksums, one SPDX SBOM per archive, a generated Homebrew formula, and a native CLI
-install smoke test.
+install smoke test. Every archive carries the MIT license, README, and third-party notices. The
+release-specific SPDX SBOM remains the authoritative machine-readable dependency inventory.
 
 ```bash
-make release-artifacts RELEASE_TAG=v2.0.0
+make release-artifacts RELEASE_TAG=v1.0.0
 ```
+
+By default, the build runs the pinned GoReleaser module version. An offline maintainer with the same
+version installed can set `GORELEASER=/path/to/goreleaser` for `release-check` and
+`INFERCRANE_GORELEASER_BIN=/path/to/goreleaser` for artifact construction. The version must still
+match `GORELEASER_VERSION` in the Makefile.
 
 GoReleaser runs inside an isolated local clone with a temporary annotated tag, then copies only the
 resulting `dist/` output back. It skips announce and publish pipes. It does not change a source
@@ -20,7 +26,7 @@ repository ref or create a GitHub release, package, or image.
 Verify an existing artifact directory independently:
 
 ```bash
-./scripts/verify-release-artifacts.sh dist v2.0.0
+./scripts/verify-release-artifacts.sh dist v1.0.0
 ```
 
 The verifier checks the exact four-platform matrix, archive contents, checksums, SPDX documents,
@@ -30,10 +36,13 @@ The source Homebrew file is a strict template. Candidate construction resolves i
 checksums into `dist/homebrew/infercrane.rb`. Publish that generated formula to the Homebrew tap only
 after the matching immutable GitHub assets exist.
 
-The tag-triggered GitHub workflow creates a draft prerelease, multi-architecture container image,
+The tag-triggered GitHub workflow creates a draft release, multi-architecture container image,
 BuildKit SBOM/provenance attestations, immutable image digest artifact, and critical-severity scans.
-Those external outputs cannot be claimed from local construction and remain pending until the tag is
-explicitly pushed.
+Stable tags also test, build, preserve, and attach the version-matched Python wheel and TypeScript
+package to the draft GitHub release. Release-candidate tags omit SDK packages because the source
+package versions remain on the stable version line. PyPI and npm publication remain separate,
+explicit maintainer actions. These external outputs cannot be claimed from local construction and
+remain pending until the tag is explicitly pushed.
 
 ## Stable release after manual qualification
 
@@ -43,18 +52,24 @@ ship with those limitations explicitly documented when the maintainer accepts th
 clean release commit:
 
 ```bash
-make release-artifacts RELEASE_TAG=v2.0.0
-git tag -a v2.0.0 -m "InferCrane v2.0.0"
+make release-artifacts RELEASE_TAG=v1.0.0
+git tag -a v1.0.0 -m "InferCrane v1.0.0"
 git push origin main
-git push origin v2.0.0
-gh release create v2.0.0 \
-  dist/infercrane_2.0.0_*.tar.gz \
-  dist/infercrane_2.0.0_*.tar.gz.sbom.json \
-  dist/checksums.txt \
-  --title "InferCrane v2.0.0" \
-  --notes-file docs/release-notes-v2.0.0.md
+git push origin v1.0.0
+release_sha=$(git rev-list -n 1 v1.0.0)
+run_id=$(gh run list --workflow release.yml --limit 20 --json databaseId,headSha \
+  --jq ".[] | select(.headSha == \"$release_sha\") | .databaseId" | head -n 1)
+test -n "$run_id"
+gh run watch "$run_id" --exit-status
+gh release edit v1.0.0 \
+  --title "InferCrane v1.0.0" \
+  --notes-file docs/release-notes-v1.0.0.md \
+  --draft=false
 ```
 
-Keep deferred real-provider evidence explicit in the release notes. Upload the generated Homebrew formula only after its URLs resolve and
-a clean-machine installation passes. The commands intentionally push only `main` and the stable
-tag; RC tags remain local unless separately approved for publication.
+The tag workflow creates the draft release, attaches GoReleaser and SDK artifacts, publishes the
+digest-addressable container image, and records SBOM and provenance outputs. Publish the existing
+draft only after every workflow job passes. Keep deferred real-provider evidence explicit in the
+release notes. Upload the generated Homebrew formula only after its URLs resolve and a clean-machine
+installation passes. The commands intentionally push only `main` and the stable tag; RC tags remain
+local unless separately approved for publication.

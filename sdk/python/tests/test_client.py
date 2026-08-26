@@ -11,7 +11,13 @@ from urllib.error import HTTPError
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from infercrane import APIError, AsyncInferCrane, InferCrane, OperationFailed, OperationTimeout, StreamError
+from infercrane import (
+    APIError,
+    AsyncInferCrane,
+    InferCrane,
+    OperationFailed,
+    OperationTimeout,
+)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -31,38 +37,122 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/api/v1/operations/op-1":
-            value = self.operations.pop(0) if len(self.operations) > 1 else self.operations[0]
+            value = (
+                self.operations.pop(0)
+                if len(self.operations) > 1
+                else self.operations[0]
+            )
             self._json(200, value)
         elif self.path == "/api/v1/operations/fail":
-            self._json(200, {"id": "fail", "kind": "deployment.converge", "status": "failed", "progress": 55, "message": "capacity denied", "error_code": "provider_denied"})
+            self._json(
+                200,
+                {
+                    "id": "fail",
+                    "kind": "deployment.converge",
+                    "status": "failed",
+                    "progress": 55,
+                    "message": "capacity denied",
+                    "error_code": "provider_denied",
+                },
+            )
         elif self.path.endswith("/slo-policy"):
             self._json(200, {"policy": {"max_ttft_p95_ms": 250}})
         elif "/recommendations?" in self.path:
             self._json(200, {"data": [{"status": "recommended"}]})
         elif self.path == "/api/v1/system/instances":
-            self._json(200, {"data": [{"id": "node-a", "binary_version": "1.6.0", "protocol_min": 1, "protocol_max": 2}]})
+            self._json(
+                200,
+                {
+                    "data": [
+                        {
+                            "id": "node-a",
+                            "binary_version": "1.6.0",
+                            "protocol_min": 1,
+                            "protocol_max": 2,
+                        }
+                    ]
+                },
+            )
         elif self.path.startswith("/api/v1/recipes?"):
             self._json(200, {"data": [{"name": "balanced", "version": "1.0.0"}]})
+        elif self.path == "/api/v1/deployments/qwen":
+            self._json(
+                200,
+                {
+                    "deployment": {
+                        "id": "deployment-1",
+                        "name": "qwen",
+                        "status": "ready",
+                    }
+                },
+            )
         else:
-            self._json(404, {"error": {"code": "not_found", "message": "missing", "retryable": False, "remediation": "check the name"}})
+            self._json(
+                404,
+                {
+                    "error": {
+                        "code": "not_found",
+                        "message": "missing",
+                        "retryable": False,
+                        "remediation": "check the name",
+                    }
+                },
+            )
 
     def do_POST(self):
         length = int(self.headers.get("Content-Length", "0"))
         body = json.loads(self.rfile.read(length) or b"{}")
         self.requests.append((self.path, self.headers.get("Idempotency-Key"), body))
         if self.path == "/api/v1/deployments":
-            self._json(202, {"operation": {"id": "op-1", "kind": "deployment.converge", "status": "pending", "progress": 0}})
+            self._json(
+                202,
+                {
+                    "operation": {
+                        "id": "op-1",
+                        "kind": "deployment.converge",
+                        "status": "pending",
+                        "progress": 0,
+                    }
+                },
+            )
         elif self.path.endswith("/recommendations"):
-            self._json(201, {"recommendation": {"status": "recommended", "selected_evidence_id": "bench-1"}})
+            self._json(
+                201,
+                {
+                    "recommendation": {
+                        "status": "recommended",
+                        "selected_evidence_id": "bench-1",
+                    }
+                },
+            )
         elif self.path == "/v1/chat/completions":
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.end_headers()
-            self.wfile.write(b'data: {"choices":[{"delta":{"content":"hello"}}]}\n\ndata: [DONE]\n\n')
+            self.wfile.write(
+                b'data: {"choices":[{"delta":{"content":"hello"}}]}\n\ndata: [DONE]\n\n'
+            )
         elif self.path.endswith("/recipes"):
-            self._json(201, {"recipe": {"name": body["name"], "version": body["version"], "digest": "a" * 64}})
+            self._json(
+                201,
+                {
+                    "recipe": {
+                        "name": body["name"],
+                        "version": body["version"],
+                        "digest": "a" * 64,
+                    }
+                },
+            )
         elif self.path == "/api/v1/lab/evaluations":
-            self._json(201, {"evaluation": {"id": "lab-1", "results": [{"evidence_class": "measured"}]}})
+            self._json(
+                201,
+                {
+                    "evaluation": {
+                        "id": "lab-1",
+                        "results": [{"evidence_class": "measured"}],
+                    }
+                },
+            )
         else:
             self._json(202, {"status": "cancellation_requested"})
 
@@ -73,7 +163,7 @@ class Handler(BaseHTTPRequestHandler):
         self._json(200, {"policy": body})
 
     def do_DELETE(self):
-        self.requests.append((self.path, None, None))
+        self.requests.append((self.path, self.headers.get("Idempotency-Key"), None))
         self.send_response(204)
         self.end_headers()
 
@@ -94,26 +184,79 @@ class ClientTest(unittest.TestCase):
 
     def setUp(self):
         Handler.requests = []
-        Handler.operations = [{"id": "op-1", "kind": "deployment.converge", "status": "running", "progress": 40}, {"id": "op-1", "kind": "deployment.converge", "status": "succeeded", "progress": 100}]
-        self.client = InferCrane(api_key="test-secret", base_url=self.url, timeout=1, poll_interval=0.001)
+        Handler.operations = [
+            {
+                "id": "op-1",
+                "kind": "deployment.converge",
+                "status": "running",
+                "progress": 40,
+            },
+            {
+                "id": "op-1",
+                "kind": "deployment.converge",
+                "status": "succeeded",
+                "progress": 100,
+                "result": {"endpoint_name": "support-production"},
+            },
+        ]
+        self.client = InferCrane(
+            api_key="test-secret", base_url=self.url, timeout=1, poll_interval=0.001
+        )
 
     def test_deploy_uses_explicit_idempotency_and_waits(self):
-        operation = self.client.deploy(model="Qwen/Qwen3-8B", name="qwen", cloud="runpod", gpu="L40S", provider_adapter="skypilot", idempotency_key="stable-key")
+        operation = self.client.deploy(
+            model="Qwen/Qwen3-8B",
+            name="qwen",
+            endpoint_name="support-production",
+            cloud="runpod",
+            gpu="L40S",
+            provider_adapter="skypilot",
+            idempotency_key="stable-key",
+        )
         self.assertEqual(operation.id, "op-1")
         self.assertEqual(Handler.requests[0][1], "stable-key")
         self.assertEqual(Handler.requests[0][2]["provider_adapter"], "skypilot")
-        self.assertEqual(self.client.wait(operation.id).status, "succeeded")
+        self.assertEqual(Handler.requests[0][2]["endpoint_name"], "support-production")
+        completed = self.client.wait(operation.id)
+        self.assertEqual(completed.status, "succeeded")
+        self.assertEqual(completed.result["endpoint_name"], "support-production")
 
     def test_deploy_preserves_portable_runtime_workload(self):
-        workload = {"image": "registry.example/runtime@sha256:" + "a" * 64, "command": ["serve", "--model", "${MODEL}"], "protocol": "openai", "port": 8000, "readiness_path": "/health", "models_path": "/v1/models", "metrics_path": "/metrics", "cancellation": "http-disconnect", "drain": "connection", "shutdown_grace_seconds": 30}
-        self.client.deploy(model="org/model", cloud="runpod", gpu="L40S", runtime="custom-oci", runtime_version="1", runtime_args=["--safe"], workload=workload)
+        workload = {
+            "image": "registry.example/runtime@sha256:" + "a" * 64,
+            "command": ["serve", "--model", "${MODEL}"],
+            "protocol": "openai",
+            "port": 8000,
+            "readiness_path": "/health",
+            "models_path": "/v1/models",
+            "metrics_path": "/metrics",
+            "cancellation": "http-disconnect",
+            "drain": "connection",
+            "shutdown_grace_seconds": 30,
+        }
+        self.client.deploy(
+            model="org/model",
+            cloud="runpod",
+            gpu="L40S",
+            runtime="custom-oci",
+            runtime_version="1",
+            runtime_args=["--safe"],
+            workload=workload,
+        )
         body = Handler.requests[0][2]
         self.assertEqual(body["workload"], workload)
         self.assertEqual(body["runtime_args"], ["--safe"])
         self.assertEqual(body["runtime_version"], "1")
 
     def test_timeout_does_not_cancel_operation(self):
-        Handler.operations = [{"id": "op-1", "kind": "deployment.converge", "status": "waiting", "progress": 55}]
+        Handler.operations = [
+            {
+                "id": "op-1",
+                "kind": "deployment.converge",
+                "status": "waiting",
+                "progress": 55,
+            }
+        ]
         with self.assertRaises(OperationTimeout) as caught:
             self.client.wait("op-1", timeout=0.003)
         self.assertEqual(caught.exception.operation_id, "op-1")
@@ -122,13 +265,22 @@ class ClientTest(unittest.TestCase):
         instances = self.client.control_plane_instances()
         self.assertEqual(instances[0]["id"], "node-a")
         self.assertEqual(instances[0]["protocol_max"], 2)
-        self.assertFalse(any(path.endswith("/cancel") for path, _, _ in Handler.requests))
+        self.assertFalse(
+            any(path.endswith("/cancel") for path, _, _ in Handler.requests)
+        )
 
     def test_recipe_and_lab_helpers_preserve_evidence_labels(self):
-        recipe = self.client.capture_recipe("qwen prod", name="balanced", version="1.0.0", benchmark_id="bench-1")
+        recipe = self.client.capture_recipe(
+            "qwen prod", name="balanced", version="1.0.0", benchmark_id="bench-1"
+        )
         self.assertEqual(recipe["digest"], "a" * 64)
         self.assertEqual(self.client.recipes("bal", limit=1)[0]["name"], "balanced")
-        self.assertEqual(self.client.lab("org/model@commit", max_ttft_p95_ms=250)["results"][0]["evidence_class"], "measured")
+        self.assertEqual(
+            self.client.lab("org/model@commit", max_ttft_p95_ms=250)["results"][0][
+                "evidence_class"
+            ],
+            "measured",
+        )
 
     def test_terminal_failure_is_typed(self):
         with self.assertRaises(OperationFailed) as caught:
@@ -150,24 +302,48 @@ class ClientTest(unittest.TestCase):
         self.assertTrue(payload.closed)
 
     def test_stream_is_incremental_and_requires_done(self):
-        chunks = list(self.client.stream_chat("qwen", [{"role": "user", "content": "hello"}]))
+        chunks = list(
+            self.client.stream_chat("qwen", [{"role": "user", "content": "hello"}])
+        )
         self.assertEqual(chunks[0]["choices"][0]["delta"]["content"], "hello")
 
-    def test_async_wait(self):
+    def test_async_surface_matches_lifecycle_helpers(self):
         async def run():
-            client = AsyncInferCrane(api_key="test-secret", base_url=self.url, timeout=1, poll_interval=0.001)
-            return await client.wait("op-1")
-        self.assertEqual(asyncio.run(run()).status, "succeeded")
+            client = AsyncInferCrane(
+                api_key="test-secret", base_url=self.url, timeout=1, poll_interval=0.001
+            )
+            instances = await client.control_plane_instances()
+            deployment = await client.get_deployment("qwen")
+            operation = await client.wait("op-1")
+            await client.delete("qwen", idempotency_key="async-delete")
+            return instances, deployment, operation
+
+        instances, deployment, operation = asyncio.run(run())
+        self.assertEqual(instances[0]["id"], "node-a")
+        self.assertEqual(deployment.name, "qwen")
+        self.assertEqual(operation.status, "succeeded")
+        self.assertEqual(
+            Handler.requests[-1][:2], ("/api/v1/deployments/qwen", "async-delete")
+        )
 
     def test_slo_and_recommendation_helpers_preserve_explicit_evidence_contract(self):
-        policy = self.client.set_slo_policy("qwen prod", max_ttft_p95_ms=250, max_error_rate=0.01)
+        policy = self.client.set_slo_policy(
+            "qwen prod", max_ttft_p95_ms=250, max_error_rate=0.01
+        )
         self.assertEqual(policy["max_ttft_p95_ms"], 250)
-        self.assertEqual(self.client.get_slo_policy("qwen prod")["max_ttft_p95_ms"], 250)
+        self.assertEqual(
+            self.client.get_slo_policy("qwen prod")["max_ttft_p95_ms"], 250
+        )
         recommendation = self.client.recommend("qwen prod")
         self.assertEqual(recommendation["selected_evidence_id"], "bench-1")
-        self.assertEqual(self.client.recommendations("qwen prod", limit=1)[0]["status"], "recommended")
+        self.assertEqual(
+            self.client.recommendations("qwen prod", limit=1)[0]["status"],
+            "recommended",
+        )
         self.client.delete_slo_policy("qwen prod")
-        self.assertEqual(Handler.requests[0][0], "/api/v1/deployments/qwen%20prod/slo-policy")
+        self.assertEqual(
+            Handler.requests[0][0], "/api/v1/deployments/qwen%20prod/slo-policy"
+        )
         with self.assertRaises(ValueError):
             self.client.set_slo_policy("qwen", max_ttft_p95_ms=float("nan"))
 

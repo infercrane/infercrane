@@ -67,7 +67,7 @@ import (
 	"github.com/infercrane/infercrane/internal/workflows"
 )
 
-var version = "2.0.0"
+var version = "1.0.0"
 
 const controlPlaneProtocolMin, controlPlaneProtocolMax = 1, 2
 
@@ -320,7 +320,7 @@ func runLegacy(ctx context.Context, args []string) error {
 	case "slo":
 		return sloCommand(ctx, cfg, args[1:])
 	}
-	return fmt.Errorf("%s has not yet been migrated to the control-plane API", args[0])
+	return fmt.Errorf("command %q is unavailable in this build", args[0])
 }
 func initCommand(args []string) error {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
@@ -1664,6 +1664,7 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 	model := args[0]
 	fs := flag.NewFlagSet("deploy", flag.ContinueOnError)
 	name := fs.String("name", "", "deployment name")
+	endpointName := fs.String("endpoint", "", "stable application endpoint name (defaults to deployment name)")
 	targets := fs.String("targets", "", "comma-separated targets")
 	cloud := fs.String("cloud", "", "provider cloud")
 	providerAdapter := fs.String("provider-adapter", "", "provider adapter profile (advanced)")
@@ -1705,10 +1706,11 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 		if err != nil {
 			return err
 		}
-		if *name != "" || *targets != "" || *cloud != "" || *backend != "" || *providerAdapter != "" || *gpu != "" || *region != "" || *runtimeFlag != "vllm" {
+		if *name != "" || *endpointName != "" || *targets != "" || *cloud != "" || *backend != "" || *providerAdapter != "" || *gpu != "" || *region != "" || *runtimeFlag != "vllm" {
 			return errors.New("deployment YAML cannot be combined with deployment flags")
 		}
 		*name = file.Name
+		*endpointName = file.Endpoint
 		model = file.Model.ID
 		modelRevision = file.Model.Revision
 		runtimeVersion = file.Runtime.Version
@@ -1739,6 +1741,9 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 	}
 	if *name == "" {
 		*name = planning.DefaultName(model)
+	}
+	if *endpointName == "" {
+		*endpointName = *name
 	}
 	if runtimeVersion == "" {
 		switch runtimeEngine {
@@ -1773,9 +1778,9 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 			return errors.New("use either --targets or --cloud/--gpu")
 		}
 		path = "/api/v1/deployments/apply"
-		request = workflows.ApplyExistingRequest{Name: *name, Model: model, Targets: splitTargets(*targets), RoutingStrategy: strategy, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas, AutoscalingEnabled: *maxReplicas > *minReplicas}
+		request = workflows.ApplyExistingRequest{Name: *name, EndpointName: *endpointName, Model: model, Targets: splitTargets(*targets), RoutingStrategy: strategy, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas, AutoscalingEnabled: *maxReplicas > *minReplicas}
 	} else if *cloud != "" && *gpu != "" {
-		request = workflows.CloudRequest{Name: *name, Model: model, ModelRevision: modelRevision, Runtime: runtimeEngine, RuntimeVersion: runtimeVersion, ComputeMode: *computeMode, Cloud: *cloud, ProviderAdapter: *providerAdapter, GPU: *gpu, Region: *region, RuntimeArgs: runtimeArgs, Workload: runtimeWorkload, Serving: servingTopology, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas}
+		request = workflows.CloudRequest{Name: *name, EndpointName: *endpointName, Model: model, ModelRevision: modelRevision, Runtime: runtimeEngine, RuntimeVersion: runtimeVersion, ComputeMode: *computeMode, Cloud: *cloud, ProviderAdapter: *providerAdapter, GPU: *gpu, Region: *region, RuntimeArgs: runtimeArgs, Workload: runtimeWorkload, Serving: servingTopology, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas}
 	} else {
 		return errors.New("provide --targets or both --cloud and --gpu")
 	}
@@ -1797,12 +1802,12 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 	}
 	logicalEndpoint := strings.TrimRight(cfg.ControlURL, "/") + "/v1"
 	if *output == "json" {
-		encoded, _ := json.MarshalIndent(map[string]any{"deployment": *name, "endpoint": logicalEndpoint, "model": model, "runtime": runtimeEngine, "provider": *cloud, "compute_mode": *computeMode, "idempotency_key": *idempotencyKey, "operation": response.Operation}, "", "  ")
+		encoded, _ := json.MarshalIndent(map[string]any{"deployment": *name, "endpoint": *endpointName, "base_url": logicalEndpoint, "model": model, "runtime": runtimeEngine, "provider": *cloud, "compute_mode": *computeMode, "idempotency_key": *idempotencyKey, "operation": response.Operation}, "", "  ")
 		fmt.Println(string(encoded))
 	} else if *output == "human" {
-		fmt.Printf("Deployment  %s\nEndpoint    %s\nModel       %s\nRuntime     %s\nProvider    %s\nCompute     %s\nOperation   %s\nStatus      %s\nRetry key   %s\n", *name, logicalEndpoint, model, runtimeEngine, displayValue(*cloud, "existing targets"), *computeMode, response.Operation.ID, terminalStatus(response.Operation.Status), *idempotencyKey)
+		fmt.Printf("Deployment       %s\nStable endpoint  %s\nBase URL         %s\nModel            %s\nRuntime          %s\nProvider         %s\nCompute          %s\nOperation        %s\nStatus           %s\nRetry key        %s\n", *name, *endpointName, logicalEndpoint, model, runtimeEngine, displayValue(*cloud, "existing targets"), *computeMode, response.Operation.ID, terminalStatus(response.Operation.Status), *idempotencyKey)
 		if response.Operation.Status == "succeeded" {
-			fmt.Printf("\nNext\n  infercrane request %s --message \"Hello\"\n  infercrane status %s\n", *name, *name)
+			fmt.Printf("\nNext\n  infercrane request %s --message \"Hello\"\n  infercrane status %s\n", *endpointName, *name)
 		} else {
 			fmt.Printf("\nFollow progress\n  infercrane operation watch %s\n  infercrane status %s --watch\n  infercrane events %s\n", response.Operation.ID, *name, *name)
 		}

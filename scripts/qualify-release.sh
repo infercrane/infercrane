@@ -61,7 +61,7 @@ run_local_gates() {
   step developer-environment make -C "$root" dev-check-full
   step dead-code make -C "$root" deadcode
   step vulnerability-audit make -C "$root" audit
-  step release-package make -C "$root" candidate-artifacts RELEASE_CANDIDATE_TAG="${INFERCRANE_RELEASE_CANDIDATE_TAG:-v2.0.0-rc.1}"
+  step release-package make -C "$root" candidate-artifacts RELEASE_CANDIDATE_TAG="${INFERCRANE_RELEASE_CANDIDATE_TAG:-v1.0.0-rc.1}"
 }
 
 run_provider_stage() {

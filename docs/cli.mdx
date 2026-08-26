@@ -95,6 +95,29 @@ The capability table distinguishes `supported`, `unsupported`, and `unknown`. In
 silently changes hardware, and never claims cache or fast-resume behavior that an adapter cannot
 observe.
 
+### Local accelerator discovery
+
+Inspect NVIDIA GPU inventory without installing a runtime or changing the host:
+
+```bash
+infercrane discover local
+infercrane discover local --output json
+```
+
+Discovery reports its evidence source and limitations. It does not infer runtime compatibility,
+model fit, or performance from a device name alone.
+
+### Run the control plane
+
+```bash
+infercrane serve
+```
+
+`serve` starts the control plane and inference gateway from validated environment configuration.
+Production deployments should use the container and service guidance in
+[Production operations](/production), including PostgreSQL, TLS, bootstrap authentication,
+stable instance identity, and graceful shutdown.
+
 ## Operations workspaces
 
 ### `inbox`
@@ -339,7 +362,7 @@ infercrane plan Qwen/Qwen3-8B \
 Provisioned and serverless plans include an explicit readiness-evidence boundary:
 
 ```text
-Readiness: unavailable — fresh provider capacity and artifact-cache observations are not available during this static plan; no startup time is fabricated
+Readiness: unavailable: fresh provider capacity and artifact-cache observations are not available during this static plan; no startup time is fabricated
 Artifact cache: unknown
 Capacity:       unknown
 Startup stages: capacity -> container -> artifact -> runtime -> readiness
@@ -641,7 +664,7 @@ infercrane models --output json
 
 `models inspect` prints the immutable revision, license URL, protocol capabilities, serving
 profiles, and the exact qualification boundary. Create a project with `infercrane workload init
---recipe NAME`. Catalog profiles are configuration-verified—not benchmark, price, capacity, or
+--recipe NAME`. Catalog profiles are configuration-verified, not benchmark, price, capacity, or
 universal GPU-fit claims. See [Verified Models](/features/model-catalog).
 
 ## Benchmark
@@ -692,6 +715,16 @@ infercrane capacity --window 720h
 
 Replay captures content-free production shape by default. Running an AIPerf approximation requires both
 `--execute` and `--acknowledge-cost`. See [Replay and capacity intelligence](/features/replay-capacity).
+
+Create or inspect a best-effort logical session hint when an application benefits from affinity:
+
+```bash
+infercrane session create qwen-prod --ttl 1h
+infercrane session inspect CONTEXT_PASSPORT_ID
+```
+
+The returned Context Passport is an opaque, expiring routing hint. It never promises durable KV
+state, and health always overrides a stale preferred target or binding.
 
 ## Revisions and Release Guard
 
@@ -822,6 +855,20 @@ infercrane external inspect qwen-prod --output json
 See [Governed external capacity](/features/external-capacity) for transmission and reservation
 semantics.
 
+Evaluate a bounded overflow decision without allowing a second controller to mutate replicas:
+
+```bash
+infercrane burst qwen-prod \
+  --queue-depth 8 \
+  --breaches 3 \
+  --external-healthy \
+  --incremental-cost-microusd-hour 2500000 \
+  --max-incremental-cost-microusd-hour 3000000
+```
+
+Burst Guard requires fresh health, repeated pressure, and sourced cost within the hard limit. Its
+result is a policy decision; the configured mutation owner remains responsible for execution.
+
 ## SLO policy and recommendations
 
 Define explicit fail-closed thresholds, then evaluate persisted benchmark evidence. Recommendations
@@ -838,3 +885,14 @@ infercrane slo delete qwen-prod
 `recommended` identifies a qualified candidate satisfying the policy. `no_match` means measured
 candidates violate it. `unknown` means required evidence is missing. See
 [Inference decisions](/features/inference-decisions).
+
+Advisory Autopilot turns that evidence into a reviewable plan without mutating production:
+
+```bash
+infercrane autopilot plan qwen-prod --objective minimize_cost
+infercrane autopilot inspect PLAN_ID
+infercrane autopilot approve PLAN_ID
+```
+
+Approval records human intent. It does not bypass Release Guard, evidence requirements, hard
+budgets, or the single mutation-owner boundary.

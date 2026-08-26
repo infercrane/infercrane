@@ -23,7 +23,7 @@ infercrane rollout policy get qwen-prod
 
 Inspect the persisted policy before gathering evidence. Deployment policy includes the current
 TTFT, latency, error-rate, throughput, compatibility, validation, cost, quality, and rollback
-thresholds. The current CLI can change the V2 compatibility, validation, cost, quality, and
+thresholds. The current CLI can change the extended compatibility, validation, cost, quality, and
 rollback fields; it preserves the existing core performance thresholds.
 
 For a stable endpoint serving-plan comparison, set an explicit TTFT regression limit and minimum
@@ -59,8 +59,8 @@ infercrane rollout promote qwen-prod REVISION_ID \
 
 `promote` atomically changes the active revision and target generation, then drains the old
 generation. Validation traffic may incur the explicit cost and privacy impact acknowledged by
-`rollout validate`; promotion itself does not duplicate requests. Release Guard V2 is experimental
-and still requires real active/candidate evidence for the exact environment.
+`rollout validate`; promotion itself does not duplicate requests. Release Guard still requires real
+active/candidate evidence for the exact environment.
 
 An evaluation returns one of three decisions:
 
@@ -69,7 +69,7 @@ An evaluation returns one of three decisions:
   policy.
 - `WAIT`: the candidate is ready but there is not enough trustworthy evidence yet.
 
-Release Guard V2 also supports exact model/runtime compatibility evidence, explicit synthetic
+Release Guard also supports exact model/runtime compatibility evidence, explicit synthetic
 validation, sourced cost regression, and a bounded post-promotion automatic rollback window. Each
 evaluation snapshots the exact policy, active and candidate metrics, reason codes, and revision
 identities. Repeating an explanation therefore produces the same answer from stored evidence.
@@ -253,7 +253,7 @@ infercrane rollout validate qwen-prod \
 ```
 
 A permanent model-health or compatibility failure should be recorded as `REJECT`, followed by
-candidate rejection and candidate-only cleanup—not a loop that creates new capacity. Preserve the
+candidate rejection and candidate-only cleanup, not a loop that creates new capacity. Preserve the
 Guard evaluation, operation timeline, and provider identities until direct inventory confirms no
 orphan.
 

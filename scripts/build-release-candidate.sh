@@ -2,8 +2,9 @@
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-tag=${1:-v2.0.0-rc.1}
+tag=${1:-v1.0.0-rc.1}
 goreleaser_version=${2:-v2.12.7}
+goreleaser_bin=${INFERCRANE_GORELEASER_BIN:-}
 
 printf '%s\n' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$' || {
   echo "invalid release tag: $tag" >&2
@@ -27,7 +28,15 @@ fi
 git -C "$build_root/source" tag -a "$tag" -m "temporary isolated build tag $tag" HEAD
 (
   cd "$build_root/source"
-  go run "github.com/goreleaser/goreleaser/v2@$goreleaser_version" release --clean --skip=announce --skip=publish
+  if [ -n "$goreleaser_bin" ]; then
+    [ -x "$goreleaser_bin" ] || {
+      echo "INFERCRANE_GORELEASER_BIN is not executable: $goreleaser_bin" >&2
+      exit 1
+    }
+    "$goreleaser_bin" release --clean --skip=announce --skip=publish
+  else
+    go run "github.com/goreleaser/goreleaser/v2@$goreleaser_version" release --clean --skip=announce --skip=publish
+  fi
 )
 
 rm -rf "$root/dist"

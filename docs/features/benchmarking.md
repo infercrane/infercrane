@@ -128,7 +128,7 @@ infercrane lab 'mistralai/Mistral-7B-Instruct-v0.3@IMMUTABLE_COMMIT' \
 ```
 
 Lab emits `RECOMMENDED` only when candidates share one exact workload digest and the required
-metric—and sourced hourly cost for cost efficiency—is present. Unlike workload shapes remain
+metric - and sourced hourly cost for cost efficiency - is present. Unlike workload shapes remain
 `UNRANKED`.
 
 Maintainers can qualify one pinned AWS model family at a time without rerunning unrelated runtime
@@ -142,7 +142,7 @@ scripts/aws-performance-qualification.sh granite --approve-paid-resources
 
 Each run uses the same seven-profile matrix, the fixed-workload concurrency sweep, and an independent
 zero-resource inventory. These are paid,
-commit-bound qualification commands—not normal developer tests and not permission to publish a
+commit-bound qualification commands, not normal developer tests and not permission to publish a
 cross-model performance claim.
 
 InferCrane normalizes the unit carried by each AIPerf latency record to milliseconds and rejects

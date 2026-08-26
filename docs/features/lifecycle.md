@@ -70,7 +70,7 @@ ordinal from `inspect` with a read-only provider inventory before allowing recon
 
 An empty `infercrane orphans` result is not enough when provider credentials cannot see the full
 account or namespace. Manual intervention ends only when one authoritative provider identity can be
-matched to one durable replica intent—or absence is proven by the owning provider boundary.
+matched to one durable replica intent - or absence is proven by the owning provider boundary.
 
 Delete first withdraws desired routing, then drains and removes external resources. Restarting midway resumes cleanup. Completion requires provider absence, removed targets and replicas, and a deployment tombstone. Operators should still verify provider inventory after paid acceptance tests.
 

@@ -27,12 +27,13 @@ before provisioning.
 
 ```yaml
 name: qwen-prod
+endpoint: support-production
 model:
   id: Qwen/Qwen3-8B
   revision: main
 runtime:
   engine: vllm
-  version: 0.10.2
+  version: 0.22.0
   args:
     - --enable-prefix-caching
 compute:
@@ -49,6 +50,10 @@ scaling:
 routing:
   strategy: round-robin
 ```
+
+`name` identifies the deployment lifecycle. `endpoint` identifies the stable application-facing
+route and defaults to `name` when omitted. A new deployment revision can therefore replace the
+serving plan underneath `support-production` without changing application configuration.
 
 SGLang uses a built-in immutable workload profile. Custom OCI images declare the full contract in
 `runtime.workload`; see [Custom OCI workloads](/features/custom-oci). Mutable image tags and

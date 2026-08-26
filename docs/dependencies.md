@@ -21,8 +21,8 @@ The Python SDK has no runtime dependency. The TypeScript SDK has no runtime depe
 and Node type declarations are development-only build dependencies.
 No AGPL, SSPL, BSL, Commons Clause, or other source-available dependency is approved for the
 core. The current Terraform CLI is a separately executed, development-only qualification tool;
-InferCrane does not redistribute it. Operators may use an OpenTofu-compatible workflow when that
-integration has been independently qualified in a later milestone.
+InferCrane does not redistribute it. Operators may use an OpenTofu-compatible workflow after that
+integration has been independently qualified.
 
 OpenRouter and generic OpenAI-compatible APIs are remote integrations, not linked dependencies or
 resold services. Their terms, data handling, and charges remain between the operator and provider.
@@ -36,5 +36,5 @@ than InferCrane dependencies. Their licenses, credentials, isolation, data handl
 charges remain with the operator and the chosen system.
 
 Candidate integration licenses and ownership decisions are tracked in
-[Integration ownership and license matrix](/roadmap/integration-ownership-matrix). Listing a
+[Integration ownership and license matrix](/integrations/ownership). Listing a
 candidate there does not register or qualify it as a supported dependency.

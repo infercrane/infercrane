@@ -1,6 +1,6 @@
 package main
 
-// uiCapabilities is the v0.1 contract between public product capabilities and
+// uiCapabilities is the contract between public product capabilities and
 // their terminal workspace representation. Explicit CLI handoffs are deliberate:
 // complex authoring and administrative workflows are clearer as reviewable
 // commands/specs than as cramped terminal forms.

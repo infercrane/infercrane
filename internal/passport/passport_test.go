@@ -61,7 +61,7 @@ func TestSignedPassportSurvivesPresentationFormatting(t *testing.T) {
 }
 
 func TestQualificationSelectionIsExactAndDoesNotPromoteDeferredEvidence(t *testing.T) {
-	registry, err := integration.V06Catalog()
+	registry, err := integration.PortableCatalog()
 	if err != nil {
 		t.Fatal(err)
 	}

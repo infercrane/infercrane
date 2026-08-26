@@ -29,6 +29,7 @@ type deploymentResource struct{ client *controlclient.Client }
 type deploymentModel struct {
 	ID                      types.String `tfsdk:"id"`
 	Name                    types.String `tfsdk:"name"`
+	EndpointName            types.String `tfsdk:"endpoint_name"`
 	Model                   types.String `tfsdk:"model"`
 	Runtime                 types.String `tfsdk:"runtime"`
 	Cloud                   types.String `tfsdk:"cloud"`
@@ -53,8 +54,9 @@ func (r *deploymentResource) Schema(_ context.Context, _ resource.SchemaRequest,
 	response.Schema = schema.Schema{Description: "A logical InferCrane deployment. InferCrane, not Terraform, owns provider replicas and rollout execution.", Attributes: map[string]schema.Attribute{
 		"id":                        schema.StringAttribute{Computed: true, Description: "Stable logical deployment identity."},
 		"name":                      schema.StringAttribute{Required: true, Description: "Logical deployment name and import identifier.", PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()}},
+		"endpoint_name":             schema.StringAttribute{Optional: true, Computed: true, Description: "Stable application endpoint alias. Defaults to name.", PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()}},
 		"model":                     schema.StringAttribute{Required: true, Description: "Model repository identity."},
-		"runtime":                   schema.StringAttribute{Optional: true, Computed: true, Description: "Qualified inference runtime. Custom OCI workload details use the API or DeploymentSpec in v0.6.", Validators: []validator.String{stringvalidator.OneOf("vllm", "sglang")}},
+		"runtime":                   schema.StringAttribute{Optional: true, Computed: true, Description: "Qualified inference runtime. Custom OCI workload details use the API or DeploymentSpec.", Validators: []validator.String{stringvalidator.OneOf("vllm", "sglang")}},
 		"cloud":                     schema.StringAttribute{Required: true, Description: "Registered provider cloud adapter."},
 		"compute_mode":              schema.StringAttribute{Optional: true, Computed: true, Description: "Provider compute mode.", Validators: []validator.String{stringvalidator.OneOf("elastic", "serverless")}},
 		"gpu":                       schema.StringAttribute{Required: true, Description: "Explicit provider GPU selector."},
@@ -85,6 +87,9 @@ func defaults(model *deploymentModel) {
 	if model.Runtime.IsNull() || model.Runtime.IsUnknown() || model.Runtime.ValueString() == "" {
 		model.Runtime = types.StringValue("vllm")
 	}
+	if model.EndpointName.IsNull() || model.EndpointName.IsUnknown() || model.EndpointName.ValueString() == "" {
+		model.EndpointName = model.Name
+	}
 	if model.ComputeMode.IsNull() || model.ComputeMode.IsUnknown() || model.ComputeMode.ValueString() == "" {
 		model.ComputeMode = types.StringValue("elastic")
 	}
@@ -103,7 +108,7 @@ func defaults(model *deploymentModel) {
 	}
 }
 func requestFor(model deploymentModel) map[string]any {
-	return map[string]any{"name": model.Name.ValueString(), "model": model.Model.ValueString(), "runtime": model.Runtime.ValueString(), "cloud": model.Cloud.ValueString(), "compute_mode": model.ComputeMode.ValueString(), "gpu": model.GPU.ValueString(), "region": model.Region.ValueString(), "model_revision": model.ModelRevision.ValueString(), "min_replicas": model.MinReplicas.ValueInt32(), "max_replicas": model.MaxReplicas.ValueInt32()}
+	return map[string]any{"name": model.Name.ValueString(), "endpoint_name": model.EndpointName.ValueString(), "model": model.Model.ValueString(), "runtime": model.Runtime.ValueString(), "cloud": model.Cloud.ValueString(), "compute_mode": model.ComputeMode.ValueString(), "gpu": model.GPU.ValueString(), "region": model.Region.ValueString(), "model_revision": model.ModelRevision.ValueString(), "min_replicas": model.MinReplicas.ValueInt32(), "max_replicas": model.MaxReplicas.ValueInt32()}
 }
 func operationKey(action string, request any) string {
 	encoded, _ := json.Marshal(request)
@@ -261,6 +266,9 @@ func (r *deploymentResource) refresh(ctx context.Context, model *deploymentModel
 		return err
 	}
 	model.ID, model.Model, model.Runtime = types.StringValue(row.ID), types.StringValue(row.Model), types.StringValue(row.Runtime)
+	if model.EndpointName.IsNull() || model.EndpointName.IsUnknown() || model.EndpointName.ValueString() == "" {
+		model.EndpointName = types.StringValue(row.Name)
+	}
 	model.MinReplicas, model.MaxReplicas = types.Int32Value(int32(row.MinReplicas)), types.Int32Value(int32(row.MaxReplicas))
 	model.Cloud, model.ComputeMode, model.GPU = types.StringValue(row.Cloud), types.StringValue(row.ComputeMode), types.StringValue(row.GPU)
 	if row.Region == "" {

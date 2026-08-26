@@ -703,6 +703,11 @@
             ],
             "type": "string"
           },
+          "endpoint_name": {
+            "description": "Stable application endpoint alias. Defaults to the deployment name.",
+            "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$",
+            "type": "string"
+          },
           "gpu": {
             "type": "string"
           },
@@ -796,7 +801,46 @@
         ]
       },
       "DeploymentSpec": {
-        "additionalProperties": true,
+        "additionalProperties": false,
+        "properties": {
+          "autoscaling_enabled": {
+            "type": "boolean"
+          },
+          "endpoint_name": {
+            "description": "Stable application endpoint alias. Defaults to the deployment name.",
+            "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$",
+            "type": "string"
+          },
+          "max_replicas": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "min_replicas": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "model": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "routing_strategy": {
+            "type": "string"
+          },
+          "targets": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "model",
+          "targets"
+        ],
         "type": "object"
       },
       "DeploymentView": {
@@ -1940,6 +1984,10 @@
           "resource_type": {
             "type": "string"
           },
+          "result": {
+            "additionalProperties": true,
+            "type": "object"
+          },
           "retryable": {
             "type": "boolean"
           },
@@ -3030,7 +3078,7 @@
   "info": {
     "description": "Durable, authenticated control-plane operations. Mutation responses may outlive the requesting client.",
     "title": "InferCrane Control API",
-    "version": "2.0.0"
+    "version": "1.0.0"
   },
   "openapi": "3.1.0",
   "paths": {

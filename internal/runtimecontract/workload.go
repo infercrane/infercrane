@@ -65,7 +65,7 @@ func (w Workload) Validate() error {
 		}
 	}
 	if w.ReadinessPath != "/health" || w.ModelsPath != "/v1/models" || w.MetricsPath != "/metrics" {
-		return errors.New("v0.6 workload paths must be /health, /v1/models, and /metrics")
+		return errors.New("workload paths must be /health, /v1/models, and /metrics")
 	}
 	if w.Cancellation != "http-disconnect" {
 		return errors.New("workload.cancellation must be http-disconnect")

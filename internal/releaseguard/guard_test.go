@@ -32,7 +32,7 @@ func TestEvaluateIsDeterministicAndConservative(t *testing.T) {
 	}
 }
 
-func TestEvaluateV2FailsClosedOnCompatibilitySyntheticAndCost(t *testing.T) {
+func TestEvaluateFailsClosedOnCompatibilitySyntheticAndCost(t *testing.T) {
 	compatible := true
 	costLimit := 10.0
 	policy := domain.ReleaseGuardPolicy{Enabled: true, MinimumRequests: 1, RequireCompatibilityEvidence: true, RequireSyntheticEvidence: true, MaxCostRegressionPercent: &costLimit}
@@ -62,7 +62,7 @@ func TestEvaluateV2FailsClosedOnCompatibilitySyntheticAndCost(t *testing.T) {
 	}
 }
 
-func TestEvaluateV2WaitsWhenRequiredCostIsUnavailable(t *testing.T) {
+func TestEvaluateWaitsWhenRequiredCostIsUnavailable(t *testing.T) {
 	limit := 10.0
 	policy := domain.ReleaseGuardPolicy{Enabled: true, MinimumRequests: 1, MaxCostRegressionPercent: &limit}
 	ttft := 100.0

@@ -31,7 +31,7 @@ terraform {
   required_providers {
     infercrane = {
       source  = "infercrane/infercrane"
-      version = "2.0.0"
+      version = "1.0.0"
     }
   }
 }
@@ -42,18 +42,22 @@ provider "infercrane" {
 }
 
 resource "infercrane_deployment" "qwen" {
-  name         = "qwen-prod"
-  model        = "Qwen/Qwen3-8B"
-  runtime      = "vllm"
-  cloud        = "runpod"
-  compute_mode = "elastic"
-  gpu          = "L40S"
-  min_replicas = 1
-  max_replicas = 4
+  name          = "qwen-prod"
+  endpoint_name = "support-production"
+  model         = "Qwen/Qwen3-8B"
+  runtime       = "vllm"
+  cloud         = "runpod"
+  compute_mode  = "elastic"
+  gpu           = "L40S"
+  min_replicas  = 1
+  max_replicas  = 4
 
   operation_timeout_seconds = 900
 }
 ```
+
+`name` owns deployment lifecycle state. `endpoint_name` is the stable alias used by applications
+and defaults to `name` when omitted.
 
 ## Lifecycle behavior
 

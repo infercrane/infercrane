@@ -32,9 +32,9 @@ func Allowed(role Role, action Action) bool {
 }
 
 // AllowedScoped applies a role ceiling and then an optional explicit scope
-// restriction. Empty scopes preserve only the pre-v0.3 action set and never
-// grant newly introduced sensitive actions. Newly created service accounts
-// always persist explicit scopes.
+// restriction. Empty scopes preserve only the legacy non-sensitive action set
+// and never grant secret or external-target management. Newly created service
+// accounts always persist explicit scopes.
 func AllowedScoped(role Role, scopes []string, action Action) bool {
 	if !Allowed(role, action) {
 		return false

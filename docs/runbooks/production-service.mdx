@@ -149,7 +149,7 @@ active revision remains unchanged, and cleans local fixture state. It does not p
 provider behavior.
 
 For real-environment evidence, create a separate `coder-staging-runtime` deployment and bind it only
-to `coder-staging`. Use a deliberately invalid **candidate revision** there—never invalid production
+to `coder-staging`. Use a deliberately invalid **candidate revision** there, never invalid production
 configuration and never a second deployment after an uncertain response:
 
 <Warning>
@@ -223,7 +223,7 @@ Acceptance requires observed `1 → 2 → 1`, fresh vLLM signals, no capacity ab
 persisted provider identity per replica intent, an intact stream with terminal `data: [DONE]`, one
 request ID with no replay, generation-safe drain, full cooldown/recovery, and canonical direct
 provider inventory returning to baseline after staging cleanup. Missing metrics or real capacity is
-`INCONCLUSIVE`—not permission to promote. The stream/list behavior and provider timing must be
+`INCONCLUSIVE`, not permission to promote. The stream/list behavior and provider timing must be
 proven in the exact environment; local fake workers do not qualify it.
 
 ## 7. Open production only after real qualification
@@ -233,7 +233,7 @@ least-privilege credentials, a fixed run ID, explicit paid-resource approval, an
 canonical inventory baseline:
 
 ```bash
-export INFERCRANE_V2_QUALIFICATION_RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short HEAD)-PROVIDER"
+export INFERCRANE_QUALIFICATION_RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short HEAD)-PROVIDER"
 ./scripts/qualify-product.sh PROVIDER --approve-paid-resources
 ./scripts/qualify-product.sh report
 ```

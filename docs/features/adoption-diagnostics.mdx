@@ -115,7 +115,7 @@ Record endpoint, active/candidate plan, revision, event timestamps, aggregate sa
 and explicitly unavailable request-level fields. Keep the current active plan and policy unchanged:
 do not run `endpoint promote`, `rollout promote`, `admission set`, or another mutation whose decision
 depends on the missing correlation. If policy requires request-level auditability, the correct
-outcome is an unauditable incident and a stopped change—not a reconstructed request ID. Capture
+outcome is an unauditable incident and a stopped change, not a reconstructed request ID. Capture
 `X-Request-Id` at the application or ingress boundary before retrying the qualification.
 
 For slow or unreachable providers, uncertain buffered/streaming outcomes, duplicate-submission

@@ -101,4 +101,4 @@ through their service account; the control plane stores only its name and key. S
 apply preserves field ownership and never force-steals conflicts. InferCrane deletes only exact names
 with matching durable ownership labels and annotations.
 
-Run the container as its non-root user, pin immutable image tags, restrict network access, and protect `/metrics` according to your environment. Report vulnerabilities privately to `security@infercrane.com`; do not open a public issue.
+Run the container as its non-root user, pin immutable image tags, restrict network access, and protect `/metrics` according to your environment. Report vulnerabilities through the repository's private GitHub security-advisory flow; do not open a public issue.

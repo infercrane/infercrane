@@ -10,16 +10,32 @@ package_dir=$(mktemp -d)
 trap 'rm -rf "$package_dir"' EXIT HUP INT TERM
 
 release_version=$(go run ./cmd/infercrane version)
+release_candidate=$(jq -r '.candidate_tag' "$root/.release/version.json")
+public_version=$(jq -r '.version' "$root/.release/version.json")
+stable_tag=$(jq -r '.stable_tag' "$root/.release/version.json")
 case "$release_version" in
   *-rc.*) python_version=${release_version%-rc.*}rc${release_version##*.} ;;
   *) python_version=$release_version ;;
 esac
+test "$public_version" = "$release_version"
+test "$release_candidate" = "v$release_version-rc.1"
+test "$stable_tag" = "v$release_version"
+jq -e --arg version "$release_version" '.info.version == $version' "$root/api/openapi.json" >/dev/null
+jq -e --arg version "$release_version" '.info.version == $version' "$root/docs/openapi.json" >/dev/null
 grep -Fq "version = \"$python_version\"" "$root/sdk/python/pyproject.toml"
 grep -Fq "infercrane-python/$python_version" "$root/sdk/python/src/infercrane/client.py"
 node -e 'const p=require(process.argv[1]); if(p.version!==process.argv[2]) process.exit(1)' "$root/sdk/typescript/package.json" "$release_version"
+node -e 'const p=require(process.argv[1]); if(p.version!==process.argv[2] || p.packages[""].version!==process.argv[2]) process.exit(1)' "$root/sdk/typescript/package-lock.json" "$release_version"
 grep -Fq "infercrane-typescript/$release_version" "$root/sdk/typescript/src/client.ts"
 grep -Fq "default: v$release_version" "$root/actions/infercrane/action.yml"
+grep -Fq 'using: node24' "$root/actions/infercrane/action.yml"
+grep -Fq "input('version', 'v$release_version')" "$root/actions/infercrane/index.js"
 grep -Fq "infercrane:v$release_version" "$root/compose.production.yaml"
+grep -Fq "version = \"$release_version\"" "$root/examples/terraform/main.tf"
+grep -Fq 'version: 0.22.0' "$root/examples/infercrane.yaml"
+grep -Fq "RELEASE_CANDIDATE_TAG ?= $release_candidate" "$root/Makefile"
+test -f "$root/docs/release-notes-v$release_version.md"
+grep -Fq "RELEASE_TAG=v$release_version" "$root/docs/release-packaging.mdx"
 
 go run ./tools/openapi-codegen -check
 PYTHONPATH="$root/sdk/python/src" python3 -m unittest discover -s "$root/sdk/python/tests"

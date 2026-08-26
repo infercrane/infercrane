@@ -10,6 +10,11 @@
     "apiVersion": { "const": "infercrane.dev/v1" },
     "kind": { "const": "Deployment" },
     "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,62}$" },
+    "endpoint": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,62}$",
+      "description": "Stable application-facing endpoint name. Defaults to name when omitted."
+    },
     "model": {
       "type": "object",
       "additionalProperties": false,

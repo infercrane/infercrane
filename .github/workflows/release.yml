@@ -10,7 +10,67 @@ permissions:
   id-token: write
 
 jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: infercrane_test
+          POSTGRES_USER: infercrane
+          POSTGRES_PASSWORD: infercrane
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U infercrane -d infercrane_test"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 20
+    env:
+      INFERCRANE_TEST_DATABASE_URL: postgres://infercrane:infercrane@127.0.0.1:5432/infercrane_test?sslmode=disable
+      INFERCRANE_API_KEY: release-ci-only
+      INFERCRANE_INSTANCE_ID: release-ci
+    steps:
+      - uses: actions/checkout@v7
+        with: {fetch-depth: 0}
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            docs/package-lock.json
+            sdk/typescript/package-lock.json
+      - name: Install documentation dependencies
+        run: npm ci --prefix docs --no-audit --no-fund
+      - name: Check Python SDK formatting and lint
+        run: |
+          python -m pip install --disable-pip-version-check ruff==0.12.0
+          ruff format --check sdk/python/src/infercrane/client.py sdk/python/src/infercrane/errors.py sdk/python/src/infercrane/__init__.py sdk/python/tests
+          ruff check sdk/python/src/infercrane/client.py sdk/python/src/infercrane/errors.py sdk/python/src/infercrane/__init__.py sdk/python/tests
+      - name: Verify the release tag matches the source contract
+        run: |
+          candidate_tag=$(jq -r '.candidate_tag' .release/version.json)
+          stable_tag=$(jq -r '.stable_tag' .release/version.json)
+          case "$GITHUB_REF_NAME" in
+            "$candidate_tag"|"$stable_tag") ;;
+            *)
+              echo "release tag $GITHUB_REF_NAME does not match $candidate_tag or $stable_tag" >&2
+              exit 1
+              ;;
+          esac
+      - name: Verify repository and automation packages
+        run: ./scripts/verify-repository.sh
+      - name: Validate documentation and links
+        run: npm run check --prefix docs
+
   artifacts:
+    needs: preflight
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -35,7 +95,46 @@ jobs:
           severity-cutoff: critical
           output-format: table
 
+  sdk-packages:
+    if: ${{ !contains(github.ref_name, '-rc.') }}
+    needs: [preflight, artifacts]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: sdk/typescript/package-lock.json
+      - name: Verify generated clients and package contracts
+        run: ./scripts/test-automation-clients.sh quick
+      - name: Build Python wheel
+        run: python -m pip wheel --disable-pip-version-check --no-deps --wheel-dir "$RUNNER_TEMP/sdk-dist" ./sdk/python
+      - name: Build TypeScript package
+        run: |
+          npm --prefix sdk/typescript ci --no-audit --no-fund
+          npm --prefix sdk/typescript test
+          cd sdk/typescript
+          npm pack --pack-destination "$RUNNER_TEMP/sdk-dist"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sdk-packages-${{ github.ref_name }}
+          path: ${{ runner.temp }}/sdk-dist/*
+          if-no-files-found: error
+      - name: Attach SDK packages to draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP/sdk-dist/"* --clobber
+
   image:
+    needs: [preflight, artifacts]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -51,6 +150,8 @@ jobs:
           context: .
           target: runtime
           platforms: linux/amd64,linux/arm64
+          build-args: |
+            INFERCRANE_VERSION=${{ github.ref_name }}
           push: true
           tags: ghcr.io/infercrane/infercrane:${{ github.ref_name }}
           provenance: mode=max

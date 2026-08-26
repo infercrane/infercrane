@@ -97,7 +97,7 @@ separate those phases from the available observation.
    transition.
 4. Run `infercrane inspect DEPLOYMENT --output json` for the persisted provider identity and
    non-secret infrastructure details.
-5. If the provider retains a failed resource—for example after an interrupted image pull—cancel the
+5. If the provider retains a failed resource - for example after an interrupted image pull - cancel the
    durable operation before replacing it. Do not start a second deploy with a different identity.
 
 Known bootstrap failures such as interrupted image pulls or exhausted host storage remain visible
@@ -193,5 +193,5 @@ provider/region/GPU qualification remains external. Runtime inspection requires 
 endpoint and the expected served model. Development fake workers prove control flow only; they do
 not prove GPU performance, model compatibility, or provider reliability.
 
-See [capability status](/project-status), [cold-start intelligence](/features/cold-starts), and the
+See [compatibility and qualification](/compatibility), [cold-start intelligence](/features/cold-starts), and the
 [provider contract](/architecture/provider-contract).

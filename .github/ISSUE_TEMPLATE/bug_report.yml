@@ -1,18 +1,45 @@
 name: Bug report
 description: Report reproducible InferCrane behavior
+title: "[Bug]: "
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for helping improve InferCrane. Remove credentials, prompts, model responses,
+        private endpoint URLs, and customer data before submitting this form.
+  - type: input
+    id: version
+    attributes:
+      label: InferCrane version
+      description: Run `infercrane version` or provide the exact commit.
+      placeholder: v1.0.0 or commit SHA
+    validations:
+      required: true
   - type: textarea
     id: problem
-    attributes: {label: Problem, description: What happened and what did you expect?}
-    validations: {required: true}
+    attributes:
+      label: Problem
+      description: What happened, and what did you expect instead?
+    validations:
+      required: true
   - type: textarea
     id: reproduce
-    attributes: {label: Reproduction, description: Include commands, version, provider, compute mode, and sanitized events.}
-    validations: {required: true}
-  - type: checkboxes
-    id: security
     attributes:
-      label: Security
+      label: Reproduction
+      description: Include sanitized commands, provider, runtime, compute mode, and the smallest reproducible sequence.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Sanitized operational evidence
+      description: Include content-free operation events, status output, or logs when available.
+      render: text
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
       options:
-        - label: This report does not disclose a vulnerability or credential.
+        - label: This report contains no vulnerability, credential, prompt, model response, private endpoint, or customer data.
           required: true

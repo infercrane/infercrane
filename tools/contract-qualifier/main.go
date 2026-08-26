@@ -75,7 +75,7 @@ func main() {
 		SchemaVersion: 1, Status: "passed", Commit: commit, Dirty: dirty,
 		Environment: "hermetic-local", StartedAt: started, FinishedAt: time.Now().UTC(),
 		Command: command, OutputSHA256: hex.EncodeToString(digest[:]), Integrations: registry.Snapshot(),
-		RealProvider: "deferred", RealProviderReason: "awaiting consolidated v1 manual qualification",
+		RealProvider: "deferred", RealProviderReason: "this hermetic contract run does not contact or qualify a real provider",
 	}
 	if testErr != nil {
 		result.Status = "failed"

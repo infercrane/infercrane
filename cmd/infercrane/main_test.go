@@ -568,8 +568,24 @@ func TestDeployCLIOnlySubmitsControlPlaneRequest(t *testing.T) {
 	defer server.Close()
 
 	err := deployAPICommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, "deploy", []string{"Qwen/Qwen3-8B", "--cloud", "runpod", "--gpu", "L40S", "--min", "1", "--max", "4", "--idempotency-key", "release-1"})
-	if err != nil || path != "/api/v1/deployments" || key != "release-1" || body["cloud"] != "runpod" || body["max_replicas"] != float64(4) {
+	if err != nil || path != "/api/v1/deployments" || key != "release-1" || body["cloud"] != "runpod" || body["endpoint_name"] != "qwen3-8b" || body["max_replicas"] != float64(4) {
 		t.Fatalf("path=%s key=%s body=%#v err=%v", path, key, body, err)
+	}
+}
+
+func TestDeployCLISeparatesDeploymentFromStableEndpointIdentity(t *testing.T) {
+	var body map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte(`{"operation":{"id":"op-1","status":"pending"}}`))
+	}))
+	defer server.Close()
+
+	err := deployAPICommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, "deploy", []string{"Qwen/Qwen3-8B", "--name", "qwen-rev-1", "--endpoint", "support-production", "--idempotency-key", "release-1"})
+	if err != nil || body["name"] != "qwen-rev-1" || body["endpoint_name"] != "support-production" {
+		t.Fatalf("body=%#v err=%v", body, err)
 	}
 }
 
@@ -757,6 +773,7 @@ func TestDeployYAMLPreservesArtifactRuntimeAndServerlessFields(t *testing.T) {
 	filename := filepath.Join(t.TempDir(), "deployment.yaml")
 	if err := os.WriteFile(filename, []byte(`
 name: qwen-serverless
+endpoint: support-production
 model:
   id: Qwen/Qwen3-8B
   revision: 0123456789abcdef0123456789abcdef01234567
@@ -781,7 +798,7 @@ scaling: {min_replicas: 0, max_replicas: 4}
 	defer server.Close()
 
 	err := deployAPICommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, "deploy", []string{filename, "--idempotency-key", "yaml-1"})
-	if err != nil || body["compute_mode"] != "serverless" || body["min_replicas"] != nil || body["max_replicas"] != float64(4) || body["model_revision"] == nil || body["runtime_version"] != "0.10.2" || body["region"] != "EU-RO-1" {
+	if err != nil || body["endpoint_name"] != "support-production" || body["compute_mode"] != "serverless" || body["min_replicas"] != nil || body["max_replicas"] != float64(4) || body["model_revision"] == nil || body["runtime_version"] != "0.10.2" || body["region"] != "EU-RO-1" {
 		t.Fatalf("body=%#v err=%v", body, err)
 	}
 	args, _ := body["runtime_args"].([]any)

@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: infercrane/infercrane/actions/infercrane@v2.0.0
+      - uses: infercrane/infercrane/actions/infercrane@v1.0.0
         with:
           mode: plan
           spec: deploy/qwen.yaml
@@ -45,7 +45,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: infercrane/infercrane/actions/infercrane@v2.0.0
+      - id: apply
+        uses: infercrane/infercrane/actions/infercrane@v1.0.0
         with:
           mode: apply
           confirm-apply: "true"
@@ -57,12 +58,17 @@ jobs:
 ```
 
 Closing or cancelling the job stops only its waiter. The action reports the durable operation ID so
-an operator can resume with `infercrane operation watch`.
+an operator can resume with `infercrane operation watch`. A successful apply also exposes the
+stable application alias as the `endpoint` action output:
+
+```yaml
+- run: echo "Endpoint: ${{ steps.apply.outputs.endpoint }}"
+```
 
 ## Exact release check
 
 ```yaml
-- uses: infercrane/infercrane/actions/infercrane@v2.0.0
+- uses: infercrane/infercrane/actions/infercrane@v1.0.0
   with:
     mode: release-check
     deployment: qwen-prod

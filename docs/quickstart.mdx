@@ -51,17 +51,13 @@ isolated stack, exercises the workflow, and tears that stack down; you do not ne
 - Port `18000` available
 
 <Steps>
-  <Step title="Open the private-preview repository">
-    InferCrane is currently distributed to approved preview users. Authenticate GitHub CLI with the
-    invited account, then clone the repository:
+  <Step title="Clone InferCrane">
+    Clone the public repository and enter the checkout:
 
     ```bash
-    gh auth status
     gh repo clone infercrane/infercrane
     cd infercrane
     ```
-
-    If you have not received repository access, [join the private preview](https://infercrane.com/#private-preview).
   </Step>
 
   <Step title="Start the local stack">
@@ -266,6 +262,6 @@ export INFERCRANE_API_KEY='ISSUED_CONTROL_PLANE_CREDENTIAL'
 ```
 
 `plan` is side-effect free. A real `deploy` can create billable resources, so check
-[provider setup](/provider-setup) and the [capability matrix](/project-status) first. Adapter
+[provider setup](/provider-setup) and [compatibility and qualification](/compatibility) first. Adapter
 registration does not prove that an exact model, runtime, GPU, and provider combination has passed
 real-infrastructure qualification.

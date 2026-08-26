@@ -4,16 +4,16 @@
 
 Public navigation follows a user journey:
 
-1. **Get started** — understand the problem, evaluate fit, run one request.
-2. **Build** — create or connect a stable endpoint.
-3. **Operate** — keep it healthy, scalable, explainable, and safe to change.
-4. **Intelligence** — benchmark, compare, recommend, and verify decisions.
-5. **Integrate** — connect providers, runtimes, SDKs, and delivery tools.
-6. **Reference** — exact commands, APIs, setup, runbooks, and troubleshooting.
+1. **Get started**: understand the problem, evaluate fit, run one request.
+2. **Build**: create or connect a stable endpoint.
+3. **Operate**: keep it healthy, scalable, explainable, and safe to change.
+4. **Intelligence**: benchmark, compare, recommend, and verify decisions.
+5. **Integrate**: connect providers, runtimes, SDKs, and delivery tools.
+6. **Reference**: exact commands, APIs, setup, runbooks, and troubleshooting.
 
-Release notes, milestone specifications, testing ledgers, ADRs, security reviews, and qualification
-procedures remain linkable repository documentation but do not belong in the primary user sidebar.
-Promote one only when a user needs it to complete a product task.
+Release notes, testing evidence, security reviews, and qualification procedures remain linkable
+repository documentation but do not belong in the primary user sidebar. Promote one only when a
+user needs it to complete a product task.
 
 Every public page needs frontmatter with a specific `title` and outcome-oriented `description`. Begin
 with the result or problem, put a working example near the top, state destructive/billable boundaries
@@ -24,7 +24,7 @@ from public navigation and frontmatter. Do not commit a custom `llms.txt` unless
 cannot express a required agent directive: a custom file replaces automatic generation and must then
 be maintained manually.
 
-This guide keeps the public documentation precise, consistent, and maintainable. Baseten, Linear, and Vercel are quality references—not templates. Do not copy their branding, assets, copy, or component arrangements. InferCrane uses Mintlify's Maple theme for its compact documentation shell and upper-left appearance controls, with repository-owned tokens and infrastructure components layered on top.
+This guide keeps the public documentation precise, consistent, and maintainable. Baseten, Linear, and Vercel are quality references, not templates. Do not copy their branding, assets, copy, or component arrangements. InferCrane uses Mintlify's Maple theme for its compact documentation shell and upper-left appearance controls, with repository-owned tokens and infrastructure components layered on top.
 
 ## Visual tokens
 
