@@ -19,9 +19,10 @@ RUN apt-get update \
     && chmod 700 /root/.ssh
 
 # The upstream Python dependency graph contains redundant statically linked
-# ffmpeg executables. Force every media consumer through Ubuntu's maintained
-# system package and remove the bundled copies from the final filesystem.
-RUN find /usr/local /opt -xdev -type f -name 'ffmpeg*' -perm /111 -delete \
+# ffmpeg executables in both installed packages and package-manager caches.
+# Force every media consumer through Ubuntu's maintained system package and
+# remove every bundled copy from the final root filesystem.
+RUN find / -xdev -type f -name 'ffmpeg*' ! -path /usr/bin/ffmpeg -delete \
     && test -x /usr/bin/ffmpeg \
     && /usr/bin/ffmpeg -version | grep -q '^ffmpeg version '
 ENV IMAGEIO_FFMPEG_EXE=/usr/bin/ffmpeg
