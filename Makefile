@@ -146,7 +146,7 @@ release-check:
 
 snapshot: release-check
 	@command -v syft >/dev/null || { echo "syft is required to generate archive SBOMs; install it from https://github.com/anchore/syft" >&2; exit 1; }
-	$(GORELEASER) release --snapshot --clean
+	GORELEASER_CURRENT_TAG=$(RELEASE_CANDIDATE_TAG) $(GORELEASER) release --snapshot --clean
 
 candidate-artifacts: release-check
 	@command -v syft >/dev/null || { echo "syft is required to generate archive SBOMs; install it from https://github.com/anchore/syft" >&2; exit 1; }

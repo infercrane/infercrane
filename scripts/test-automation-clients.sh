@@ -34,6 +34,7 @@ grep -Fq "infercrane:v$release_version" "$root/compose.production.yaml"
 grep -Fq "version = \"$release_version\"" "$root/examples/terraform/main.tf"
 grep -Fq 'version: 0.22.0' "$root/examples/infercrane.yaml"
 grep -Fq "RELEASE_CANDIDATE_TAG ?= $release_candidate" "$root/Makefile"
+grep -Fq 'GORELEASER_CURRENT_TAG=$(RELEASE_CANDIDATE_TAG)' "$root/Makefile"
 test -f "$root/docs/release-notes-v$release_version.md"
 grep -Fq "RELEASE_TAG=v$release_version" "$root/docs/release-packaging.mdx"
 

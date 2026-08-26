@@ -8,6 +8,13 @@ if [ -n "$unformatted" ]; then
   exit 1
 fi
 
+find scripts images -type f -name '*.sh' -print | sort | while IFS= read -r script; do
+  case $(head -n 1 "$script") in
+    *bash*) bash -n "$script" ;;
+    *) sh -n "$script" ;;
+  esac
+done
+
 go mod verify
 ./scripts/check-repository-hygiene.sh
 ./scripts/check-license-boundaries.sh
