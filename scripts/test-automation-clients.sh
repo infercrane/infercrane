@@ -37,8 +37,6 @@ grep -Fq 'version: 0.22.0' "$root/examples/infercrane.yaml"
 grep -Fq "RELEASE_CANDIDATE_TAG ?= \$(shell jq -r '.candidate_tag' .release/version.json)" "$root/Makefile"
 grep -Fq 'GORELEASER_CURRENT_TAG=$(RELEASE_CANDIDATE_TAG)' "$root/Makefile"
 test -f "$root/docs/release-notes-v$release_version.md"
-grep -Fq 'stable_tag=$(jq -r' "$root/docs/release-packaging.mdx"
-grep -Fq 'release_notes="docs/release-notes-${stable_tag}.md"' "$root/docs/release-packaging.mdx"
 
 go run ./tools/openapi-codegen -check
 PYTHONPATH="$root/sdk/python/src" python3 -m unittest discover -s "$root/sdk/python/tests"

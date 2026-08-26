@@ -12,6 +12,5 @@
 /scripts/release-tag.sh @yasintoy
 /scripts/build-release-candidate.sh @yasintoy
 /scripts/verify-release-artifacts.sh @yasintoy
-/docs/release-packaging.mdx @yasintoy
 /Dockerfile @yasintoy
 /LICENSE @yasintoy
