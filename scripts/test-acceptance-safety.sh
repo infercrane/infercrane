@@ -136,7 +136,7 @@ grep -Fq '.request_count == 5 and' "$root/scripts/portable-provider-acceptance.s
 grep -Fq '(.reproduction_command | contains("${INFERCRANE_API_KEY}"))' "$root/scripts/portable-provider-acceptance.sh"
 grep -Fq 'INFERCRANE_BENCHMARK_CLI="$root/scripts/portable-provider-cli.sh"' "$root/scripts/portable-provider-acceptance.sh"
 grep -Fq '"$root/scripts/benchmark-matrix.sh" "$deployment" --approve-load' "$root/scripts/portable-provider-acceptance.sh"
-if rg -q 'INFERCRANE_CONFIG="\$config_file"|INFERCRANE_BENCHMARK_CLI="\$cli"' "$root/scripts/portable-provider-acceptance.sh"; then
+if grep -Eq 'INFERCRANE_CONFIG="\$config_file"|INFERCRANE_BENCHMARK_CLI="\$cli"' "$root/scripts/portable-provider-acceptance.sh"; then
   echo "portable provider benchmark matrix still references a shell function or undefined client config" >&2
   exit 1
 fi

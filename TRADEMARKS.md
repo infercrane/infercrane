@@ -1,6 +1,6 @@
 # InferCrane trademark policy
 
-The InferCrane source code is available under the [MIT License](LICENSE). That license does not
+The InferCrane source code is available under the [Apache License 2.0](LICENSE). That license does not
 grant permission to use the InferCrane name, crane logo, or other source-identifying marks in ways
 that imply sponsorship, endorsement, or that a modified distribution is the official InferCrane
 product.

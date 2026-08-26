@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/int32validator"
@@ -257,7 +258,15 @@ func (r *deploymentResource) Delete(ctx context.Context, request resource.Delete
 }
 
 func (r *deploymentResource) ImportState(ctx context.Context, request resource.ImportStateRequest, response *resource.ImportStateResponse) {
-	resource.ImportStatePassthroughID(ctx, path.Root("name"), request, response)
+	parts := strings.Split(request.ID, "/")
+	if len(parts) < 1 || len(parts) > 2 || parts[0] == "" || len(parts) == 2 && parts[1] == "" {
+		response.Diagnostics.AddError("Invalid deployment import identity", "Use deployment-name for its default endpoint or deployment-name/endpoint-name for an explicit stable endpoint.")
+		return
+	}
+	response.Diagnostics.Append(response.State.SetAttribute(ctx, path.Root("name"), parts[0])...)
+	if len(parts) == 2 {
+		response.Diagnostics.Append(response.State.SetAttribute(ctx, path.Root("endpoint_name"), parts[1])...)
+	}
 }
 
 func (r *deploymentResource) refresh(ctx context.Context, model *deploymentModel) error {
@@ -266,8 +275,36 @@ func (r *deploymentResource) refresh(ctx context.Context, model *deploymentModel
 		return err
 	}
 	model.ID, model.Model, model.Runtime = types.StringValue(row.ID), types.StringValue(row.Model), types.StringValue(row.Runtime)
-	if model.EndpointName.IsNull() || model.EndpointName.IsUnknown() || model.EndpointName.ValueString() == "" {
-		model.EndpointName = types.StringValue(row.Name)
+	endpointKnown := !model.EndpointName.IsNull() && !model.EndpointName.IsUnknown() && model.EndpointName.ValueString() != ""
+	if endpointKnown {
+		if len(row.EndpointNames) > 0 {
+			matched := false
+			for _, endpointName := range row.EndpointNames {
+				matched = matched || endpointName == model.EndpointName.ValueString()
+			}
+			if !matched {
+				return fmt.Errorf("configured endpoint_name %q is not bound to deployment %q", model.EndpointName.ValueString(), row.Name)
+			}
+		}
+	} else {
+		switch len(row.EndpointNames) {
+		case 0:
+			model.EndpointName = types.StringValue(row.Name)
+		case 1:
+			model.EndpointName = types.StringValue(row.EndpointNames[0])
+		default:
+			matchedDefault := false
+			for _, endpointName := range row.EndpointNames {
+				if endpointName == row.Name {
+					model.EndpointName = types.StringValue(endpointName)
+					matchedDefault = true
+					break
+				}
+			}
+			if !matchedDefault {
+				return fmt.Errorf("deployment %q has multiple stable endpoints; import with deployment-name/endpoint-name", row.Name)
+			}
+		}
 	}
 	model.MinReplicas, model.MaxReplicas = types.Int32Value(int32(row.MinReplicas)), types.Int32Value(int32(row.MaxReplicas))
 	model.Cloud, model.ComputeMode, model.GPU = types.StringValue(row.Cloud), types.StringValue(row.ComputeMode), types.StringValue(row.GPU)

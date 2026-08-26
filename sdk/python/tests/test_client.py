@@ -82,7 +82,9 @@ class Handler(BaseHTTPRequestHandler):
                     "deployment": {
                         "id": "deployment-1",
                         "name": "qwen",
-                        "status": "ready",
+                        "model": "Qwen/Qwen3-8B",
+                        "runtime": "vllm",
+                        "observed_state": "healthy",
                     }
                 },
             )
@@ -164,6 +166,19 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         self.requests.append((self.path, self.headers.get("Idempotency-Key"), None))
+        if self.path == "/api/v1/deployments/qwen":
+            self._json(
+                202,
+                {
+                    "operation": {
+                        "id": "delete-op",
+                        "kind": "deployment.delete",
+                        "status": "pending",
+                        "progress": 0,
+                    }
+                },
+            )
+            return
         self.send_response(204)
         self.end_headers()
 

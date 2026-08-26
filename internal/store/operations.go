@@ -278,7 +278,26 @@ func (s *Store) ResolveForTenant(ctx context.Context, tenant, name string) (doma
 		t.CreatedAt, t.UpdatedAt = parseTime(targetCreated), parseTime(targetUpdated)
 		out.Targets = append(out.Targets, t)
 	}
-	return out, rows.Err()
+	if err = rows.Err(); err != nil {
+		return out, err
+	}
+	endpointRows, err := s.QueryContext(ctx, `SELECT DISTINCT e.name
+		FROM endpoints e
+		JOIN backend_bindings b ON b.endpoint_id=e.id AND b.tenant_id=e.tenant_id
+		WHERE e.tenant_id=? AND e.desired_state<>'deleted' AND b.deployment_id=? AND b.kind='deployment' AND b.ownership_mode='lifecycle-managed'
+		ORDER BY e.name`, tenant, out.Deployment.ID)
+	if err != nil {
+		return out, err
+	}
+	defer endpointRows.Close()
+	for endpointRows.Next() {
+		var endpointName string
+		if err = endpointRows.Scan(&endpointName); err != nil {
+			return out, err
+		}
+		out.EndpointNames = append(out.EndpointNames, endpointName)
+	}
+	return out, endpointRows.Err()
 }
 
 func (s *Store) SetRoute(ctx context.Context, name, strategy string) error {

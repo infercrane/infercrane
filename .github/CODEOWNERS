@@ -12,6 +12,11 @@
 /scripts/release-tag.sh @yasintoy
 /scripts/build-release-candidate.sh @yasintoy
 /scripts/verify-release-artifacts.sh @yasintoy
-/docs/release-packaging.mdx @yasintoy
+/scripts/check-license-boundaries.sh @yasintoy
+/scripts/generate-go-license-bundle.sh @yasintoy
+/.goreleaser.yaml @yasintoy
 /Dockerfile @yasintoy
 /LICENSE @yasintoy
+/NOTICE @yasintoy
+/THIRD_PARTY_NOTICES.md @yasintoy
+/packaging/container/ @yasintoy

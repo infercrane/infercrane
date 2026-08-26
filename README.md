@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-111111.svg"></a>
+  <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-111111.svg"></a>
   <a href="https://docs.infercrane.com"><img alt="Documentation" src="https://img.shields.io/badge/docs-infercrane.com-235ee7.svg"></a>
 </p>
 
@@ -178,7 +178,7 @@ Read the [architecture](https://docs.infercrane.com/architecture/system),
 | Interface | Status and purpose |
 |---|---|
 | CLI and control API | Primary deployment, operation, evidence, and administration interfaces. |
-| OpenAI-compatible gateway | Chat, Completions, Embeddings, Responses, and qualified online batch paths. |
+| OpenAI-compatible gateway | Capability-gated Chat, Completions, Embeddings, Responses, and online batch paths. The pinned vLLM profile currently qualifies Chat plus model-compatible Completions and Embeddings; unsupported capabilities fail before upstream transmission. |
 | Python and TypeScript SDKs | Generated from the checked OpenAPI contract and built in CI. Public package publication is pending. |
 | Terraform provider | Logical deployment lifecycle with guarded updates and import. Registry publication is pending. |
 | Terminal workspace | Fleet attention, evidence inspection, and state-valid guarded actions. |
@@ -237,7 +237,7 @@ Questions and reproducible defects follow [SUPPORT.md](SUPPORT.md).
 
 ## License
 
-InferCrane Community is available under the [MIT License](LICENSE). Hosted and enterprise products
+InferCrane Community is available under the [Apache License 2.0](LICENSE). Hosted and enterprise products
 are separate distributions and are not licensed by this repository. Release archives also include
 [third-party notices](THIRD_PARTY_NOTICES.md) and a release-specific SPDX SBOM. The InferCrane name
 and crane logo remain subject to the [trademark policy](TRADEMARKS.md).

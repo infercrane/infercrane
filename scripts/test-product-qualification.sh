@@ -51,13 +51,15 @@ grep -Fq 'for journey in offline first-value modules adoption reliability' "$roo
 # archives while appearing to qualify the same source commit.
 release_candidate=$(jq -r '.candidate_tag' "$root/.release/version.json")
 case "$release_candidate" in v*-rc.*) ;; *) echo "release candidate is not an RC tag: $release_candidate" >&2; exit 1;; esac
-grep -Fq "RELEASE_CANDIDATE_TAG ?= $release_candidate" "$root/Makefile"
-grep -Fq "INFERCRANE_RELEASE_CANDIDATE_TAG:-$release_candidate" "$root/scripts/product-acceptance.sh"
-grep -Fq "INFERCRANE_RELEASE_CANDIDATE_TAG:-$release_candidate" "$root/scripts/qualify-product.sh"
-grep -Fq "INFERCRANE_RELEASE_CANDIDATE_TAG:-$release_candidate" "$root/scripts/qualify-release.sh"
-grep -Fq "tag=\${1:-$release_candidate}" "$root/scripts/build-release-candidate.sh"
-grep -Fq "tag=\${2:-$release_candidate}" "$root/scripts/verify-release-artifacts.sh"
-grep -Fq "tag=\${2:-$release_candidate}" "$root/scripts/generate-homebrew-formula.sh"
+grep -Fq 'RELEASE_CANDIDATE_TAG ?= $(shell jq -r '\''.candidate_tag'\'' .release/version.json)' "$root/Makefile"
+for script in product-acceptance.sh qualify-product.sh qualify-release.sh; do
+  grep -Fq 'release_candidate=$(jq -er '\''.candidate_tag'\''' "$root/scripts/$script"
+  grep -Fq 'INFERCRANE_RELEASE_CANDIDATE_TAG:-$release_candidate' "$root/scripts/$script"
+done
+grep -Fq 'tag=${1:-$(jq -er '\''.candidate_tag'\''' "$root/scripts/build-release-candidate.sh"
+for script in verify-release-artifacts.sh generate-homebrew-formula.sh; do
+  grep -Fq 'tag=${2:-$(jq -er '\''.candidate_tag'\''' "$root/scripts/$script"
+done
 
 if INFERCRANE_PRODUCT_QUALIFICATION_DIR="$temporary" "$root/scripts/qualify-product.sh" runpod >"$temporary/unapproved.log" 2>&1; then
   echo "paid qualification ran without approval" >&2; exit 1

@@ -37,15 +37,28 @@ grep -Fq 'version: 0.22.0' "$root/examples/infercrane.yaml"
 grep -Fq "RELEASE_CANDIDATE_TAG ?= \$(shell jq -r '.candidate_tag' .release/version.json)" "$root/Makefile"
 grep -Fq 'GORELEASER_CURRENT_TAG=$(RELEASE_CANDIDATE_TAG)' "$root/Makefile"
 test -f "$root/docs/release-notes-v$release_version.md"
-grep -Fq 'stable_tag=$(jq -r' "$root/docs/release-packaging.mdx"
-grep -Fq 'release_notes="docs/release-notes-${stable_tag}.md"' "$root/docs/release-packaging.mdx"
 
 go run ./tools/openapi-codegen -check
 PYTHONPATH="$root/sdk/python/src" python3 -m unittest discover -s "$root/sdk/python/tests"
 python3 -m pip wheel --disable-pip-version-check --no-deps --wheel-dir "$package_dir" "$root/sdk/python"
+python_wheel=$(find "$package_dir" -maxdepth 1 -name 'infercrane-*.whl' -print -quit)
+python3 - "$python_wheel" <<'PY'
+import sys
+import zipfile
+
+with zipfile.ZipFile(sys.argv[1]) as archive:
+    names = archive.namelist()
+    assert any(name.endswith(".dist-info/licenses/LICENSE") for name in names), names
+    assert any(name.endswith(".dist-info/licenses/NOTICE") for name in names), names
+    metadata_name = next(name for name in names if name.endswith(".dist-info/METADATA"))
+    metadata = archive.read(metadata_name).decode()
+    assert "License-Expression: Apache-2.0\n" in metadata, metadata
+PY
 npm --prefix "$root/sdk/typescript" ci --no-audit --no-fund
 npm --prefix "$root/sdk/typescript" test
-(cd "$root/sdk/typescript" && npm pack --dry-run >/dev/null)
+(cd "$root/sdk/typescript" && npm pack --dry-run --json) >"$package_dir/npm-pack.json"
+jq -e '.[0].files | map(.path) | index("LICENSE") != null and index("NOTICE") != null' \
+  "$package_dir/npm-pack.json" >/dev/null
 node --test "$root"/actions/infercrane/test/*.test.js
 
 (
@@ -56,14 +69,14 @@ node --test "$root"/actions/infercrane/test/*.test.js
 
 if [ "$mode" = full ]; then
   terraform_bin=$(command -v terraform 2>/dev/null || true)
-  if [ -z "$terraform_bin" ] && [ -x "$root/.infercrane/tools/terraform" ]; then
-    terraform_bin="$root/.infercrane/tools/terraform"
+  if [ -n "$terraform_bin" ]; then
+    terraform_version=$("$terraform_bin" version -json 2>/dev/null | jq -er '.terraform_version' 2>/dev/null || true)
+    [ "$terraform_version" = 1.15.8 ] || terraform_bin=
   fi
   if [ -z "$terraform_bin" ]; then
-    echo "Terraform CLI is required for full automation qualification." >&2
-    echo "Install the pinned version or place it at .infercrane/tools/terraform." >&2
-    exit 1
+    terraform_bin=$("$root/scripts/install-terraform.sh")
   fi
+  test "$("$terraform_bin" version -json | jq -r '.terraform_version')" = 1.15.8
   (
     cd "$root/integrations/terraform"
     PATH="$(dirname "$terraform_bin"):$PATH" TF_ACC=1 go test -count=1 -run TestAcc -v ./internal/provider

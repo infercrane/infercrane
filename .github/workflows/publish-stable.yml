@@ -1,0 +1,135 @@
+name: publish stable release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Exact stable tag already built as a draft release
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stable-publication
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+      - name: Refuse an unprotected or mismatched publication
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          test "$RELEASE_TAG" = "$(jq -er '.stable_tag' .release/version.json)"
+          test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$(git rev-parse HEAD)"
+          test "$(gh api "repos/$GITHUB_REPOSITORY" --jq .visibility)" = public
+          test "$(gh api "orgs/$GITHUB_REPOSITORY_OWNER" --jq .two_factor_requirement_enabled)" = true
+          gh api "repos/$GITHUB_REPOSITORY/environments/stable-publication" \
+            --jq 'select((.protection_rules | length) > 0)' >/dev/null
+          gh release view "$RELEASE_TAG" \
+            --json isDraft,isPrerelease,tagName \
+            --jq 'select(.isDraft == true and .isPrerelease == false and .tagName == env.RELEASE_TAG)' >/dev/null
+      - name: Download and verify the exact draft assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          mkdir publication-assets
+          gh release download "$RELEASE_TAG" --dir publication-assets
+          ./scripts/verify-release-artifacts.sh publication-assets "$RELEASE_TAG"
+          test -f publication-assets/infercrane.rb
+          test "$(find publication-assets -maxdepth 1 -name 'infercrane-*.whl' | wc -l)" -eq 1
+          test "$(find publication-assets -maxdepth 1 -name 'infercrane-sdk-*.tgz' | wc -l)" -eq 1
+          mkdir -p publication-assets/python publication-assets/npm publication-assets/homebrew
+          cp publication-assets/infercrane-*.whl publication-assets/python/
+          cp publication-assets/infercrane-sdk-*.tgz publication-assets/npm/
+          cp publication-assets/infercrane.rb publication-assets/homebrew/
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: stable-publication-assets
+          path: publication-assets
+          if-no-files-found: error
+
+  pypi:
+    needs: preflight
+    runs-on: ubuntu-latest
+    environment: stable-publication
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: stable-publication-assets
+          path: publication-assets
+      - name: Publish the exact wheel with PyPI Trusted Publishing
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
+        with:
+          packages-dir: publication-assets/python
+          attestations: true
+
+  npm:
+    needs: preflight
+    runs-on: ubuntu-latest
+    environment: stable-publication
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: stable-publication-assets
+          path: publication-assets
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Publish the exact package with npm Trusted Publishing
+        run: npm publish publication-assets/npm/infercrane-sdk-*.tgz --access public
+
+  homebrew:
+    needs: preflight
+    runs-on: ubuntu-latest
+    environment: stable-publication
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: stable-publication-assets
+          path: publication-assets
+      - name: Update the InferCrane Homebrew tap
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          gh repo clone infercrane/homebrew-tap "$RUNNER_TEMP/homebrew-tap"
+          mkdir -p "$RUNNER_TEMP/homebrew-tap/Formula"
+          cp publication-assets/homebrew/infercrane.rb "$RUNNER_TEMP/homebrew-tap/Formula/infercrane.rb"
+          cd "$RUNNER_TEMP/homebrew-tap"
+          ruby -c Formula/infercrane.rb
+          git diff --exit-code -- Formula/infercrane.rb && exit 0
+          git config user.name infercrane-release[bot]
+          git config user.email 226962259+infercrane-release[bot]@users.noreply.github.com
+          git add Formula/infercrane.rb
+          git commit -s -m "infercrane: ${RELEASE_TAG}"
+          git push origin HEAD:main
+
+  finalize:
+    needs: [pypi, npm, homebrew]
+    runs-on: ubuntu-latest
+    environment: stable-publication
+    permissions:
+      contents: write
+    steps:
+      - name: Publish the already-verified GitHub draft last
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: gh release edit "$RELEASE_TAG" --draft=false --latest

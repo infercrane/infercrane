@@ -71,4 +71,4 @@ environment guidance, output contracts, and failure behavior.
 ## License
 
 This action is part of the InferCrane open-source core and is available under the repository's
-[MIT License](../../LICENSE).
+[Apache License 2.0](../../LICENSE).

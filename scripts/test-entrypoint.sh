@@ -4,7 +4,8 @@ set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 fixture=$(mktemp -d)
 gcloud_runtime=$(mktemp -d /tmp/infercrane-gcloud-entrypoint.XXXXXX)
-trap 'rm -rf "$fixture" "$gcloud_runtime"' EXIT HUP INT TERM
+persistent_gcloud=$(mktemp -d "$root/.infercrane-gcloud-entrypoint.XXXXXX")
+trap 'rm -rf "$fixture" "$gcloud_runtime" "$persistent_gcloud"' EXIT HUP INT TERM
 mkdir -p "$fixture/bin" "$fixture/home"
 
 cat >"$fixture/bin/infercrane" <<'EOF'
@@ -68,7 +69,7 @@ printf '%s\n' ephemeral >"$gcloud_runtime/credentials.db"
   echo 'entrypoint persisted an ephemeral gcloud credential database into the bootstrap profile' >&2
   exit 1
 }
-if INFERCRANE_GCLOUD_CONFIG_SOURCE="$fixture/gcloud-source" CLOUDSDK_CONFIG="$fixture/persistent-gcloud" \
+if INFERCRANE_GCLOUD_CONFIG_SOURCE="$fixture/gcloud-source" CLOUDSDK_CONFIG="$persistent_gcloud" \
   sh "$root/scripts/entrypoint.sh" infercrane version >"$fixture/out" 2>"$fixture/error"; then
   echo 'entrypoint accepted a persistent writable gcloud runtime path' >&2
   exit 1

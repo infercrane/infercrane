@@ -702,6 +702,19 @@ func TestAuthentication(t *testing.T) {
 	}
 }
 
+func TestInferenceRejectsOversizedBodyWithRequestTooLargeContract(t *testing.T) {
+	handler := (&Gateway{Routes: routes.New(), APIKey: "secret"}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(strings.Repeat("x", (16<<20)+1)))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusRequestEntityTooLarge || !strings.Contains(response.Body.String(), `"type":"request_too_large"`) {
+		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+}
+
 func TestModelsAreTenantScoped(t *testing.T) {
 	directory := routes.New()
 	directory.Put(routes.Snapshot{TenantID: "tenant-a", Alias: "shared"})

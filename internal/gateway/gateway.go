@@ -173,6 +173,11 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 	w.Header().Set("traceparent", traceParent)
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 16<<20))
 	if err != nil {
+		var maxBytesError *http.MaxBytesError
+		if errors.As(err, &maxBytesError) {
+			openAIError(w, "Request body exceeds the 16 MiB gateway limit", http.StatusRequestEntityTooLarge, "request_too_large")
+			return
+		}
 		openAIError(w, "Invalid JSON body", http.StatusBadRequest, "invalid_request_error")
 		return
 	}

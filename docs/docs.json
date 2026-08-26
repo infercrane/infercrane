@@ -103,7 +103,7 @@
           {
             "group": "Start here",
             "boost": 2,
-            "pages": ["index", "quickstart", "why-infercrane", "compare", "editions", "concepts", "architecture/system"]
+            "pages": ["index", "quickstart", "why-infercrane", "compare", "editions", "concepts", "architecture/system", "architecture/invariants", "architecture/data-flows"]
           },
           {
             "group": "Deploy and connect",
@@ -118,6 +118,7 @@
               "features/endpoints",
               "deployment-spec",
               "features/protocols",
+              "features/gateway",
               "features/model-artifacts",
               "features/custom-oci",
               "features/provisioning",
@@ -129,6 +130,7 @@
             "pages": [
               "features/lifecycle",
               "features/observe",
+              "features/adoption-diagnostics",
               "features/autoscaling",
               "features/release-guard",
               "features/explanations",
@@ -152,6 +154,8 @@
             "pages": [
               "features/optimization",
               "testing/competitive-benchmark-methodology",
+              "testing/aws-real-evidence",
+              "testing/feature-qualification-matrix",
               "features/recipes-lab",
               "features/replay-capacity",
               "showcase/cost-performance",
@@ -240,6 +244,7 @@
           {
           "group": "Operate the control plane",
           "pages": [
+            "production",
             "runbooks/backup-restore",
             "runbooks/production-service",
             "runbooks/provider-outage",

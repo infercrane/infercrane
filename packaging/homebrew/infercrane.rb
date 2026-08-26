@@ -3,7 +3,7 @@ class Infercrane < Formula
   homepage "https://github.com/infercrane/infercrane"
   # Generated release formulae substitute these template values from checksums.txt.
   version "RELEASE_VERSION"
-  license "MIT"
+  license "Apache-2.0"
 
   on_macos do
     if Hardware::CPU.arm?

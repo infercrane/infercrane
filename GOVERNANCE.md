@@ -16,5 +16,5 @@ Security reports follow [SECURITY.md](SECURITY.md), support requests follow
 
 Contributions use the [Developer Certificate of Origin](https://developercertificate.org/) and must
 include a `Signed-off-by` line. Merging a pull request records acceptance of its contribution under
-the repository's MIT License. Maintainers may decline changes that weaken product boundaries,
+the repository's Apache License 2.0. Maintainers may decline changes that weaken product boundaries,
 qualification evidence, operational safety, or long-term maintainability even when tests pass.

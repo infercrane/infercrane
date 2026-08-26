@@ -19,7 +19,9 @@ RUN apt-get update \
     && chmod 700 /root/.ssh
 
 COPY images/vllm-runpod/start-ssh.sh /usr/local/bin/infercrane-start-ssh
+COPY LICENSE NOTICE images/vllm-runpod/THIRD_PARTY_COMPONENTS.md /usr/share/licenses/infercrane/
 RUN chmod 755 /usr/local/bin/infercrane-start-ssh
+LABEL org.opencontainers.image.licenses="Apache-2.0"
 
 EXPOSE 22
 ENTRYPOINT ["/usr/local/bin/infercrane-start-ssh"]

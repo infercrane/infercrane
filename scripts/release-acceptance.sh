@@ -475,7 +475,7 @@ run_elastic() {
   record elastic-events ic events "$ELASTIC_NAME" --output json
   record elastic-explain-scaling ic explain scaling "$ELASTIC_NAME" --output json
   record elastic-explain-cold-start ic explain cold-start "$ELASTIC_NAME" --output json
-  echo "Elastic smoke completed. Full RC qualification still requires the controlled disconnect, restart, drain, and bad-candidate checkpoints in docs/release-acceptance.md."
+  echo "Elastic smoke completed. Full RC qualification still requires the controlled disconnect, restart, drain, and bad-candidate checkpoints in the release acceptance procedure."
 }
 
 run_serverless() {

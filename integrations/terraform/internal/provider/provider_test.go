@@ -40,7 +40,7 @@ func TestAccDeploymentCRUDImportAndInterruptedAdoption(t *testing.T) {
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){"infercrane": providerserver.NewProtocol6WithError(New("test"))},
 		Steps: []resource.TestStep{
 			{Config: terraformConfig(fixture.URL, "Qwen/Qwen3-8B", 1), Check: resource.ComposeTestCheckFunc(resource.TestCheckResourceAttr("infercrane_deployment.qwen", "observed_state", "healthy"), resource.TestCheckResourceAttrSet("infercrane_deployment.qwen", "active_revision_id"))},
-			{ResourceName: "infercrane_deployment.qwen", ImportState: true, ImportStateId: "qwen-prod", ImportStateVerify: true, ImportStateVerifyIgnore: []string{"operation_id", "operation_timeout_seconds"}},
+			{ResourceName: "infercrane_deployment.qwen", ImportState: true, ImportStateId: "qwen-prod/support-production", ImportStateVerify: true, ImportStateVerifyIgnore: []string{"operation_id", "operation_timeout_seconds"}},
 			{Config: terraformConfig(fixture.URL, "Qwen/Qwen3-14B", 2), Check: resource.ComposeTestCheckFunc(resource.TestCheckResourceAttr("infercrane_deployment.qwen", "model", "Qwen/Qwen3-14B"), resource.TestCheckResourceAttr("infercrane_deployment.qwen", "max_replicas", "2"))},
 		},
 	})
@@ -184,7 +184,7 @@ func (f *controlFixture) serve(t *testing.T, w http.ResponseWriter, r *http.Requ
 			f.notFound(w)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"deployment": map[string]any{"id": "dep-1", "name": "qwen-prod", "model": f.model, "runtime": "vllm", "observed_state": "healthy", "min_replicas": 1, "max_replicas": f.max, "active_revision_id": f.active, "candidate_revision_id": f.candidate}, "lifecycle_status": map[string]any{"serving_state": "serving"}, "revisions": []any{map[string]any{"id": f.active, "spec": map[string]any{"cloud": "fixture", "compute_mode": "elastic", "gpu": "L40S"}}}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"deployment": map[string]any{"id": "dep-1", "name": "qwen-prod", "endpoint_names": []string{"support-production"}, "model": f.model, "runtime": "vllm", "observed_state": "healthy", "min_replicas": 1, "max_replicas": f.max, "active_revision_id": f.active, "candidate_revision_id": f.candidate}, "lifecycle_status": map[string]any{"serving_state": "serving"}, "revisions": []any{map[string]any{"id": f.active, "spec": map[string]any{"cloud": "fixture", "compute_mode": "elastic", "gpu": "L40S"}}}})
 	case r.Method == "POST" && path == "/deployments/qwen-prod/rollouts":
 		var body struct {
 			Spec struct {

@@ -100,4 +100,4 @@ See the [Python SDK guide](https://docs.infercrane.com/integrations/python),
 
 ## License
 
-[MIT](LICENSE)
+[Apache-2.0](LICENSE)

@@ -14,7 +14,7 @@ while IFS=: read -r file _ declaration; do
   echo "==> fuzz $package/$name ($fuzz_time)"
   (cd "$root" && go test "$package" -run '^$' -fuzz "^${name}$" -fuzztime "$fuzz_time" -parallel "$parallel")
   found=$((found + 1))
-done < <(cd "$root" && rg -n --no-heading '^func Fuzz[A-Za-z0-9_]+\(' --glob '*_test.go' | sort)
+done < <(cd "$root" && git grep -n -E '^func Fuzz[A-Za-z0-9_]+\(' -- '*_test.go' | sort)
 
 if [[ "$found" -eq 0 ]]; then
   echo "no Go fuzz targets found" >&2
