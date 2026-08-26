@@ -128,7 +128,8 @@ request bound. Follow:
 1. [exact-combination compatibility](/compatibility#check-one-exact-serving-combination);
 2. [autoscaling `1 → N → 1`, streaming, and cleanup](/features/autoscaling#qualify-scale-up-streaming-drain-and-scale-down);
 3. [async deadlines, idempotency, encryption, and cancellation](/features/admission-async#durable-async-requests); and
-4. the selected [provider acceptance runbook](/testing/production-qualification-runbook).
+4. the exact provider, runtime, model, and accelerator boundary in
+   [compatibility and qualification](/compatibility).
 
 Approve the maximum provider cost and non-sensitive workload before the first mutation. Keep async
 request count, retention, retry, and deadline bounded; async protocol support still depends on the

@@ -148,7 +148,7 @@ and soak tests. Capacity limits must be based on those measurements rather than 
 Release maintainers can validate packaging metadata without publishing with `make release-check`.
 With `syft` installed, `make release-artifacts RELEASE_TAG=v1.0.0` creates and
 verifies four exact-version archives, checksums, archive SBOMs, and a generated Homebrew formula
-under `dist/`. It pushes no tag, image, package, or release. See [Release packaging](/release-packaging).
+under `dist/`. It pushes no tag, image, package, or release.
 
 The control-plane API accepts the bootstrap bearer secret or hashed tenant-scoped credentials:
 

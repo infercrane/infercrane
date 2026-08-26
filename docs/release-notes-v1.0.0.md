@@ -54,5 +54,4 @@ beyond the evidence that produced it.
 
 Review [compatibility and qualification](https://docs.infercrane.com/compatibility),
 [feature qualification matrix](https://docs.infercrane.com/testing/feature-qualification-matrix),
-and [manual edge-case procedures](https://docs.infercrane.com/testing/manual-edge-cases) before
-relying on an exact production combination.
+and the evidence linked for the exact production combination before relying on it.

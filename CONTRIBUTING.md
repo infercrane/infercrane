@@ -31,7 +31,8 @@ run `make dev-check-full` to exercise the isolated Docker stack, failure recover
 configuration, and documentation. Logs are retained under `.infercrane/dev-check/`.
 
 Provider adapters must pass `make test-provider-contracts`. Real-cloud tests are explicit paid
-qualification, not part of ordinary development; see [development and testing](docs/development.mdx).
+qualification, not part of ordinary development. Use `make dev-check` for the normal contributor
+loop and `make dev-check-full` before submitting a substantial change.
 Release maintainers use `make qualify-local` for machine-readable package proof and `make
 qualify-rc` only on a clean frozen commit with explicit paid-resource authorization.
 

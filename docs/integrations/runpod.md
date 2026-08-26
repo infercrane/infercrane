@@ -144,4 +144,4 @@ Serverless endpoints. Never erase the PostgreSQL state while provider cleanup is
 
 See [provider setup](../provider-setup.md) for the credential boundary, [production operations](../production.md)
 for self-hosting, [serverless lifecycle](../features/serverless.md) for worker-zero behavior, and
-[product qualification](../testing/product-qualification.mdx) for the resumable real-provider gate.
+[compatibility and qualification](../compatibility.md) for the current real-provider evidence boundary.

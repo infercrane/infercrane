@@ -25,5 +25,5 @@ rate, queue latency, time to first token, inter-token latency, output throughput
 sourced cost when those signals are available. Modeled results are never presented as measured
 or qualified evidence.
 
-See [product qualification](../docs/testing/product-qualification.mdx) and
+See [compatibility and qualification](../docs/compatibility.md) and
 [Release Guard](../docs/features/release-guard.md) for the evidence and promotion contracts.

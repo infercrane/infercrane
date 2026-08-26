@@ -207,7 +207,7 @@ Acceptance requires observed `1 → N → 1`, no duplicate provider identity, no
 no new request on a draining generation, an intact active stream, and zero leaked resources. Missing
 queue metrics, an unclassified provider delay, a stream without `[DONE]`, capacity that never returns
 to `min`, or unavailable provider inventory is a failed or inconclusive qualification, not permission
-to claim autoscaling support. See [production qualification](/testing/production-qualification-runbook)
+to claim autoscaling support. See [compatibility and qualification](/compatibility)
 for provider-specific evidence and cleanup.
 
 ## What happens to active streams
