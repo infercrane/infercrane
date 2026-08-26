@@ -4289,7 +4289,9 @@ func (a API) deployment(w http.ResponseWriter, r *http.Request) {
 	for _, evaluation := range guardEvaluations {
 		guardData = append(guardData, releaseGuardResponse(evaluation))
 	}
-	response := map[string]any{"deployment": deploymentResponse(resolved.Deployment), "targets": targets, "replicas": replicaData, "revisions": revisionData, "model_artifacts": artifactData, "request_stats": stats, "cold_start_stats": coldStarts, "release_guard_policy": guardPolicy, "release_guard_evaluations": guardData}
+	deploymentData := deploymentResponse(resolved.Deployment)
+	deploymentData["endpoint_names"] = resolved.EndpointNames
+	response := map[string]any{"deployment": deploymentData, "targets": targets, "replicas": replicaData, "revisions": revisionData, "model_artifacts": artifactData, "request_stats": stats, "cold_start_stats": coldStarts, "release_guard_policy": guardPolicy, "release_guard_evaluations": guardData}
 	response["lifecycle_status"] = deploymentLifecycleStatus(resolved, replicas, revisions, activeOperation, operationErr == nil)
 	if operationErr == nil {
 		response["active_operation"] = operationResponse(activeOperation)

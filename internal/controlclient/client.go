@@ -38,6 +38,7 @@ type Deployment struct {
 	ID, Name, Model, Runtime, ObservedState, ActiveRevisionID, CandidateRevisionID string
 	Cloud, ComputeMode, GPU, Region, ModelRevision                                 string
 	MinReplicas, MaxReplicas                                                       int
+	EndpointNames                                                                  []string
 }
 
 func New(baseURL, apiKey, userAgent string) (*Client, error) {
@@ -160,15 +161,16 @@ func (c *Client) Wait(ctx context.Context, id string) (domain.Operation, error) 
 func (c *Client) Deployment(ctx context.Context, name string) (Deployment, map[string]any, error) {
 	var result struct {
 		Deployment struct {
-			ID                  string `json:"id"`
-			Name                string `json:"name"`
-			Model               string `json:"model"`
-			Runtime             string `json:"runtime"`
-			ObservedState       string `json:"observed_state"`
-			ActiveRevisionID    string `json:"active_revision_id"`
-			CandidateRevisionID string `json:"candidate_revision_id"`
-			MinReplicas         int    `json:"min_replicas"`
-			MaxReplicas         int    `json:"max_replicas"`
+			ID                  string   `json:"id"`
+			Name                string   `json:"name"`
+			Model               string   `json:"model"`
+			Runtime             string   `json:"runtime"`
+			ObservedState       string   `json:"observed_state"`
+			ActiveRevisionID    string   `json:"active_revision_id"`
+			CandidateRevisionID string   `json:"candidate_revision_id"`
+			MinReplicas         int      `json:"min_replicas"`
+			MaxReplicas         int      `json:"max_replicas"`
+			EndpointNames       []string `json:"endpoint_names"`
 		} `json:"deployment"`
 		Lifecycle map[string]any `json:"lifecycle_status"`
 		Revisions []struct {
@@ -184,7 +186,7 @@ func (c *Client) Deployment(ctx context.Context, name string) (Deployment, map[s
 	}
 	err := c.Do(ctx, http.MethodGet, "/deployments/"+url.PathEscape(name), "", nil, &result)
 	row := result.Deployment
-	out := Deployment{ID: row.ID, Name: row.Name, Model: row.Model, Runtime: row.Runtime, ObservedState: row.ObservedState, ActiveRevisionID: row.ActiveRevisionID, CandidateRevisionID: row.CandidateRevisionID, MinReplicas: row.MinReplicas, MaxReplicas: row.MaxReplicas}
+	out := Deployment{ID: row.ID, Name: row.Name, Model: row.Model, Runtime: row.Runtime, ObservedState: row.ObservedState, ActiveRevisionID: row.ActiveRevisionID, CandidateRevisionID: row.CandidateRevisionID, MinReplicas: row.MinReplicas, MaxReplicas: row.MaxReplicas, EndpointNames: row.EndpointNames}
 	for _, revision := range result.Revisions {
 		if revision.ID == row.ActiveRevisionID {
 			out.Cloud, out.ComputeMode, out.GPU, out.Region, out.ModelRevision = revision.Spec.Cloud, revision.Spec.ComputeMode, revision.Spec.GPU, revision.Spec.Region, revision.Spec.ModelRevision

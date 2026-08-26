@@ -266,8 +266,26 @@ func (r *deploymentResource) refresh(ctx context.Context, model *deploymentModel
 		return err
 	}
 	model.ID, model.Model, model.Runtime = types.StringValue(row.ID), types.StringValue(row.Model), types.StringValue(row.Runtime)
-	if model.EndpointName.IsNull() || model.EndpointName.IsUnknown() || model.EndpointName.ValueString() == "" {
-		model.EndpointName = types.StringValue(row.Name)
+	endpointKnown := !model.EndpointName.IsNull() && !model.EndpointName.IsUnknown() && model.EndpointName.ValueString() != ""
+	if endpointKnown {
+		if len(row.EndpointNames) > 0 {
+			matched := false
+			for _, endpointName := range row.EndpointNames {
+				matched = matched || endpointName == model.EndpointName.ValueString()
+			}
+			if !matched {
+				return fmt.Errorf("configured endpoint_name %q is not bound to deployment %q", model.EndpointName.ValueString(), row.Name)
+			}
+		}
+	} else {
+		switch len(row.EndpointNames) {
+		case 0:
+			model.EndpointName = types.StringValue(row.Name)
+		case 1:
+			model.EndpointName = types.StringValue(row.EndpointNames[0])
+		default:
+			return fmt.Errorf("deployment %q has multiple stable endpoints; import cannot infer endpoint_name", row.Name)
+		}
 	}
 	model.MinReplicas, model.MaxReplicas = types.Int32Value(int32(row.MinReplicas)), types.Int32Value(int32(row.MaxReplicas))
 	model.Cloud, model.ComputeMode, model.GPU = types.StringValue(row.Cloud), types.StringValue(row.ComputeMode), types.StringValue(row.GPU)

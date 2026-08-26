@@ -69,14 +69,14 @@ node --test "$root"/actions/infercrane/test/*.test.js
 
 if [ "$mode" = full ]; then
   terraform_bin=$(command -v terraform 2>/dev/null || true)
-  if [ -z "$terraform_bin" ] && [ -x "$root/.infercrane/tools/terraform" ]; then
-    terraform_bin="$root/.infercrane/tools/terraform"
+  if [ -n "$terraform_bin" ]; then
+    terraform_version=$("$terraform_bin" version -json 2>/dev/null | jq -er '.terraform_version' 2>/dev/null || true)
+    [ "$terraform_version" = 1.15.8 ] || terraform_bin=
   fi
   if [ -z "$terraform_bin" ]; then
-    echo "Terraform CLI is required for full automation qualification." >&2
-    echo "Install the pinned version or place it at .infercrane/tools/terraform." >&2
-    exit 1
+    terraform_bin=$("$root/scripts/install-terraform.sh")
   fi
+  test "$("$terraform_bin" version -json | jq -r '.terraform_version')" = 1.15.8
   (
     cd "$root/integrations/terraform"
     PATH="$(dirname "$terraform_bin"):$PATH" TF_ACC=1 go test -count=1 -run TestAcc -v ./internal/provider

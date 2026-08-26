@@ -1669,12 +1669,12 @@ func TestSLOPolicyAPIRejectsUnknownAndEmptyInput(t *testing.T) {
 }
 
 func TestDeploymentReadAPIReturnsDurableState(t *testing.T) {
-	store := &fakeStore{}
+	store := &fakeStore{resolved: domain.ResolvedDeployment{Deployment: domain.Deployment{ID: "deployment", Name: "qwen"}, EndpointNames: []string{"support-production"}}}
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/deployments/qwen", nil)
 	request.Header.Set("Authorization", "Bearer secret")
 	response := httptest.NewRecorder()
 	(API{Store: store, APIKey: "secret"}).Handler().ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"deployment"`) || !strings.Contains(response.Body.String(), `"revisions"`) {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"deployment"`) || !strings.Contains(response.Body.String(), `"revisions"`) || !strings.Contains(response.Body.String(), `"endpoint_names":["support-production"]`) {
 		t.Fatalf("response=%d %s", response.Code, response.Body.String())
 	}
 }

@@ -120,8 +120,9 @@ type TrainingArtifactHandoff struct {
 }
 
 type ResolvedDeployment struct {
-	Deployment Deployment
-	Targets    []Target
+	Deployment    Deployment
+	Targets       []Target
+	EndpointNames []string
 }
 
 // LogicalModel is a stable product-level identity. It intentionally contains

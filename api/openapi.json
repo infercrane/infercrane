@@ -662,6 +662,12 @@
           "candidate_revision_id": {
             "type": "string"
           },
+          "endpoint_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "id": {
             "type": "string"
           },

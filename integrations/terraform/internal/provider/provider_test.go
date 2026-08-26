@@ -184,7 +184,7 @@ func (f *controlFixture) serve(t *testing.T, w http.ResponseWriter, r *http.Requ
 			f.notFound(w)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"deployment": map[string]any{"id": "dep-1", "name": "qwen-prod", "model": f.model, "runtime": "vllm", "observed_state": "healthy", "min_replicas": 1, "max_replicas": f.max, "active_revision_id": f.active, "candidate_revision_id": f.candidate}, "lifecycle_status": map[string]any{"serving_state": "serving"}, "revisions": []any{map[string]any{"id": f.active, "spec": map[string]any{"cloud": "fixture", "compute_mode": "elastic", "gpu": "L40S"}}}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"deployment": map[string]any{"id": "dep-1", "name": "qwen-prod", "endpoint_names": []string{"support-production"}, "model": f.model, "runtime": "vllm", "observed_state": "healthy", "min_replicas": 1, "max_replicas": f.max, "active_revision_id": f.active, "candidate_revision_id": f.candidate}, "lifecycle_status": map[string]any{"serving_state": "serving"}, "revisions": []any{map[string]any{"id": f.active, "spec": map[string]any{"cloud": "fixture", "compute_mode": "elastic", "gpu": "L40S"}}}})
 	case r.Method == "POST" && path == "/deployments/qwen-prod/rollouts":
 		var body struct {
 			Spec struct {
