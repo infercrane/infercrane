@@ -10,7 +10,7 @@ ARG VLLM_VERSION="0.22.0"
 # Never allow the publication workflow to attach a requested version tag to
 # different runtime bytes. A patched candidate supplies both an immutable base
 # digest and the version expected inside that image.
-RUN python -c 'import importlib.metadata, sys; actual = importlib.metadata.version("vllm"); expected = sys.argv[1]; assert actual == expected, f"vLLM version mismatch: expected {expected}, found {actual}"' "$VLLM_VERSION"
+RUN python3 -c 'import importlib.metadata, sys; actual = importlib.metadata.version("vllm"); expected = sys.argv[1]; assert actual == expected, f"vLLM version mismatch: expected {expected}, found {actual}"' "$VLLM_VERSION"
 
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends openssh-server rsync \

@@ -138,6 +138,7 @@ verify:
 audit:
 	go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
 	cd integrations/terraform && go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
+	npm --prefix docs audit --audit-level=moderate
 	npm --prefix sdk/typescript audit --audit-level=high
 
 deadcode:
