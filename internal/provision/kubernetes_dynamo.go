@@ -278,7 +278,7 @@ func (k KubernetesDynamo) workerComponent(spec ReplicaSpec, topology servingcont
 	if err != nil {
 		return nil, err
 	}
-	args := make([]string, 0, 24+len(spec.RuntimeArgs))
+	var args []string
 	command := []any{"python3", "-m", "dynamo." + spec.Runtime}
 	switch spec.Runtime {
 	case "vllm":

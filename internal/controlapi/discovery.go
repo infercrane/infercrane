@@ -34,34 +34,18 @@ func discoverEndpoint(ctx context.Context, supplied *http.Client, baseURL, reque
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	client := supplied
-	if client == nil {
-		dialer := &net.Dialer{Timeout: 3 * time.Second, KeepAlive: 30 * time.Second}
-		transport := &http.Transport{DialContext: func(dialCtx context.Context, network, address string) (net.Conn, error) {
-			host, port, splitErr := net.SplitHostPort(address)
-			if splitErr != nil {
-				return nil, errors.New("endpoint discovery address is invalid")
-			}
-			addresses, lookupErr := net.DefaultResolver.LookupIPAddr(dialCtx, host)
-			if lookupErr != nil || len(addresses) == 0 {
-				return nil, errors.New("endpoint discovery DNS could not be resolved")
-			}
-			for _, candidate := range addresses {
-				if unsafeDiscoveryIP(candidate.IP) {
-					return nil, errors.New("endpoint discovery cannot access link-local, multicast, or unspecified addresses")
-				}
-			}
-			return dialer.DialContext(dialCtx, network, net.JoinHostPort(addresses[0].IP.String(), port))
-		}}
-		client = &http.Client{Timeout: 5 * time.Second, Transport: transport}
+	client, err := restrictedDiscoveryClient(supplied)
+	if err != nil {
+		return endpointDiscovery{}, err
 	}
-	copyClient := *client
-	copyClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
 	if err != nil {
 		return endpointDiscovery{}, err
 	}
-	resp, err := copyClient.Do(req)
+	// The URL is an authenticated user's explicit inference endpoint. The
+	// restricted client below disables proxies, redirects, cookies, and dials
+	// only the IP addresses that passed the discovery address policy.
+	resp, err := client.Do(req) // lgtm[go/request-forgery]
 	if err != nil {
 		return endpointDiscovery{}, fmt.Errorf("could not reach %s: %w", modelsURL, err)
 	}
@@ -114,6 +98,54 @@ func discoverEndpoint(ctx context.Context, supplied *http.Client, baseURL, reque
 		}
 	}
 	return endpointDiscovery{Runtime: runtimeName, Connector: detectedConnector, Model: model, Models: models, Health: "reachable", Evidence: []string{"GET /v1/models returned the selected model"}}, nil
+}
+
+func restrictedDiscoveryClient(supplied *http.Client) (*http.Client, error) {
+	client := &http.Client{}
+	var baseTransport *http.Transport
+	if supplied != nil {
+		*client = *supplied
+		if supplied.Transport == nil {
+			baseTransport = http.DefaultTransport.(*http.Transport)
+		} else {
+			var ok bool
+			baseTransport, ok = supplied.Transport.(*http.Transport)
+			if !ok {
+				return nil, errors.New("endpoint discovery requires an inspectable HTTP transport")
+			}
+		}
+	} else {
+		baseTransport = http.DefaultTransport.(*http.Transport)
+	}
+	transport := baseTransport.Clone()
+	transport.Proxy = nil
+	// Force HTTPS through the same restricted DialContext. A supplied
+	// DialTLSContext would otherwise be able to bypass the address checks.
+	transport.DialTLSContext = nil
+	dialer := &net.Dialer{Timeout: 3 * time.Second, KeepAlive: 30 * time.Second}
+	transport.DialContext = func(dialCtx context.Context, network, address string) (net.Conn, error) {
+		host, port, splitErr := net.SplitHostPort(address)
+		if splitErr != nil {
+			return nil, errors.New("endpoint discovery address is invalid")
+		}
+		addresses, lookupErr := net.DefaultResolver.LookupIPAddr(dialCtx, host)
+		if lookupErr != nil || len(addresses) == 0 {
+			return nil, errors.New("endpoint discovery DNS could not be resolved")
+		}
+		for _, candidate := range addresses {
+			if unsafeDiscoveryIP(candidate.IP) {
+				return nil, errors.New("endpoint discovery cannot access link-local, multicast, or unspecified addresses")
+			}
+		}
+		return dialer.DialContext(dialCtx, network, net.JoinHostPort(addresses[0].IP.String(), port))
+	}
+	client.Transport = transport
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	client.Jar = nil
+	if client.Timeout <= 0 || client.Timeout > 5*time.Second {
+		client.Timeout = 5 * time.Second
+	}
+	return client, nil
 }
 
 func unsafeDiscoveryIP(ip net.IP) bool {
