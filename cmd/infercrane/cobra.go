@@ -63,7 +63,7 @@ var publicCommandSpecs = []commandSpec{
 	{use: "recipes [QUERY] [flags]", short: "Search immutable model recipes", group: "understand"},
 	{use: "models [QUERY] | models inspect NAME [flags]", short: "Explore reviewed model starting points", group: "start"},
 	{use: "lab MODEL_IDENTITY [flags]", short: "Compare persisted measured serving evidence", group: "understand"},
-	{use: "optimize propose|create MODEL [flags] | optimize list|inspect|results|approve|cancel | optimize doctor", short: "Propose and govern evidence-gated serving optimization campaigns", group: "understand"},
+	{use: "optimize propose|create MODEL [flags] | optimize list|inspect|results|approve|activate|cancel | optimize doctor", short: "Propose and govern evidence-gated serving optimization campaigns", group: "understand"},
 	{use: "passport ACTION [arguments]", short: "Issue, inspect, or verify signed release evidence", group: "understand"},
 	{use: "recommend DEPLOYMENT [flags]", short: "Recommend a qualified configuration from persisted evidence", group: "understand"},
 	{use: "slo ACTION DEPLOYMENT [flags]", short: "Inspect or set deterministic inference SLO policy", group: "operate"},
@@ -105,7 +105,7 @@ var commandExamples = map[string]string{
   # Follow its durable provisioning operation
   infercrane rollout provision production REVISION_ID --wait`,
 	"optimize": `  # One command: use pinned AIConfigurator when available, otherwise safe reviewed candidates
-  infercrane optimize propose mistral-7b-instruct --provider aws --region eu-central-1 --gpu L40S --objective interactive
+  infercrane optimize propose Qwen/Qwen3-8B --provider aws --region eu-central-1 --gpu L40S --objective interactive
 
   # Check the optional estimator toolchain without provisioning a GPU
   infercrane optimize doctor
@@ -176,7 +176,7 @@ func newLegacyCommand(ctx context.Context, spec commandSpec) *cobra.Command {
 		Args:               cobra.ArbitraryArgs,
 		ValidArgsFunction:  completionFor(name),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) > 0 && (args[0] == "help" || args[0] == "-h" || args[0] == "--help") {
+			if containsHelpArgument(args) {
 				return cmd.Help()
 			}
 			return runLegacy(ctx, append([]string{name}, args...))
@@ -185,6 +185,15 @@ func newLegacyCommand(ctx context.Context, spec commandSpec) *cobra.Command {
 	command.Example = commandExamples[name]
 	addHelpFlags(command, name)
 	return command
+}
+
+func containsHelpArgument(args []string) bool {
+	for _, arg := range args {
+		if arg == "help" || arg == "-h" || arg == "--help" {
+			return true
+		}
+	}
+	return false
 }
 
 func addHelpFlags(command *cobra.Command, name string) {
@@ -444,12 +453,16 @@ func addHelpFlags(command *cobra.Command, name string) {
 		stringFlag("aiconfigurator-python", "python3", "Python executable containing the pinned estimator tuple")
 		stringFlag("max-ttft-p95-ms", "", "required measured p95 TTFT")
 		stringFlag("max-tpot-p95-ms", "", "required measured p95 TPOT")
+		stringFlag("max-error-rate", "", "maximum measured failed-request ratio")
+		stringFlag("min-goodput", "", "minimum measured requests per second satisfying the SLO")
 		stringFlag("min-output-tokens-second", "", "required measured output throughput")
 		stringFlag("max-hourly-cost", "", "required sourced hourly cost")
 		stringFlag("write-dir", "", "write candidate DeploymentSpecs")
 		stringFlag("idempotency-key", "", "stable safe-retry key for campaign creation")
+		stringFlag("target-deployment", "", "existing deployment to evolve")
 		stringFlag("max-cost-usd", "", "hard maximum campaign spend for approval")
 		stringFlag("expires-in", "1h", "paid-resource approval validity")
+		stringFlag("candidate", "", "exact qualified candidate to activate")
 		intFlag("max-candidates", 10, "maximum candidates")
 		intFlag("limit", 20, "maximum campaigns to list")
 		boolFlag("include-simulated", "include simulated compatibility")
@@ -542,7 +555,7 @@ func completionFor(command string) func(*cobra.Command, []string, string) ([]str
 		"recipes":     {"--limit", "--output"},
 		"models":      {"--output"},
 		"lab":         {"--objective", "--profile", "--max-ttft-p95-ms", "--workload-digest", "--output"},
-		"optimize":    {"--provider", "--region", "--gpu", "--runtimes", "--objective", "--profile", "--source", "--target-concurrency", "--workload-fingerprint", "--aiconfigurator-python", "--allow-model-metadata-network", "--max-ttft-p95-ms", "--max-tpot-p95-ms", "--min-output-tokens-second", "--max-hourly-cost", "--include-simulated", "--max-candidates", "--write-dir", "--output"},
+		"optimize":    {"--provider", "--region", "--gpu", "--runtimes", "--objective", "--profile", "--source", "--target-concurrency", "--workload-fingerprint", "--aiconfigurator-python", "--allow-model-metadata-network", "--max-ttft-p95-ms", "--max-tpot-p95-ms", "--max-error-rate", "--min-goodput", "--min-output-tokens-second", "--max-hourly-cost", "--include-simulated", "--max-candidates", "--write-dir", "--idempotency-key", "--target-deployment", "--limit", "--max-cost-usd", "--expires-in", "--candidate", "--output"},
 		"passport":    {"--revision", "--file", "--output"},
 		"recommend":   {"--history", "--output"},
 		"slo":         {"--ttft-p95", "--latency-p95", "--error-rate", "--output-tokens-second", "--hourly-cost", "--output"},

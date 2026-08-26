@@ -53,6 +53,49 @@ func TestCommandHelpDoesNotRequireAuthentication(t *testing.T) {
 	}
 }
 
+func TestNestedCommandHelpIsSafeAndSuccessful(t *testing.T) {
+	t.Setenv("INFERCRANE_API_KEY", "")
+	t.Setenv("INFERCRANE_CONFIG", filepath.Join(t.TempDir(), "missing.json"))
+	for _, args := range [][]string{
+		{"workload", "init", "--help"},
+		{"optimize", "propose", "--help"},
+		{"endpoint", "create", "--help"},
+		{"rollout", "guard", "--help"},
+	} {
+		t.Run(strings.Join(args[:2], "-"), func(t *testing.T) {
+			output, err := captureStdout(t, func() error {
+				return run(context.Background(), args)
+			})
+			if err != nil {
+				t.Fatalf("run(%v) error = %v", args, err)
+			}
+			if !strings.Contains(output, "Usage:") || !strings.Contains(output, "infercrane "+args[0]) {
+				t.Fatalf("run(%v) returned incomplete help: %q", args, output)
+			}
+		})
+	}
+}
+
+func TestOptimizeHelpMatchesCampaignWorkflow(t *testing.T) {
+	output, err := captureStdout(t, func() error {
+		return run(context.Background(), []string{"optimize", "propose", "--help"})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		"approve|activate|cancel",
+		"--max-error-rate",
+		"--min-goodput",
+		"--target-deployment",
+		"--candidate",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("optimize help is missing %q:\n%s", expected, output)
+		}
+	}
+}
+
 func TestJSONCapableCommandsAdvertiseOutputFlag(t *testing.T) {
 	for _, name := range []string{"auth", "system", "secret", "external", "rollout", "target"} {
 		t.Run(name, func(t *testing.T) {
