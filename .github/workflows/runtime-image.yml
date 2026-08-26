@@ -88,17 +88,47 @@ jobs:
         uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7
         with:
           image: ${{ steps.meta.outputs.tags }}
-          fail-build: true
+          fail-build: false
           severity-cutoff: critical
-          output-format: table
+          output-format: json
+          output-file: grype-pr.json
+      - name: Enforce the PR runtime vulnerability threshold
+        if: github.event_name == 'pull_request'
+        run: |
+          jq -r '
+            .matches[] |
+            select(.vulnerability.severity == "Critical") |
+            [
+              .vulnerability.id,
+              .artifact.name,
+              .artifact.version,
+              ([.artifact.locations[].path] | unique | join(","))
+            ] | @tsv
+          ' grype-pr.json
+          test "$(jq '[.matches[] | select(.vulnerability.severity == "Critical")] | length' grype-pr.json)" -eq 0
       - name: Scan the published runtime image by digest
         if: github.event_name != 'pull_request'
         uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7
         with:
           image: ghcr.io/infercrane/vllm-runpod@${{ steps.build.outputs.digest }}
-          fail-build: true
+          fail-build: false
           severity-cutoff: critical
-          output-format: table
+          output-format: json
+          output-file: grype-published.json
+      - name: Enforce the published runtime vulnerability threshold
+        if: github.event_name != 'pull_request'
+        run: |
+          jq -r '
+            .matches[] |
+            select(.vulnerability.severity == "Critical") |
+            [
+              .vulnerability.id,
+              .artifact.name,
+              .artifact.version,
+              ([.artifact.locations[].path] | unique | join(","))
+            ] | @tsv
+          ' grype-published.json
+          test "$(jq '[.matches[] | select(.vulnerability.severity == "Critical")] | length' grype-published.json)" -eq 0
       - name: Remove a rejected candidate package version
         if: failure() && github.event_name != 'pull_request'
         env:
