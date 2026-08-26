@@ -40,7 +40,7 @@ func TestAccDeploymentCRUDImportAndInterruptedAdoption(t *testing.T) {
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){"infercrane": providerserver.NewProtocol6WithError(New("test"))},
 		Steps: []resource.TestStep{
 			{Config: terraformConfig(fixture.URL, "Qwen/Qwen3-8B", 1), Check: resource.ComposeTestCheckFunc(resource.TestCheckResourceAttr("infercrane_deployment.qwen", "observed_state", "healthy"), resource.TestCheckResourceAttrSet("infercrane_deployment.qwen", "active_revision_id"))},
-			{ResourceName: "infercrane_deployment.qwen", ImportState: true, ImportStateId: "qwen-prod", ImportStateVerify: true, ImportStateVerifyIgnore: []string{"operation_id", "operation_timeout_seconds"}},
+			{ResourceName: "infercrane_deployment.qwen", ImportState: true, ImportStateId: "qwen-prod/support-production", ImportStateVerify: true, ImportStateVerifyIgnore: []string{"operation_id", "operation_timeout_seconds"}},
 			{Config: terraformConfig(fixture.URL, "Qwen/Qwen3-14B", 2), Check: resource.ComposeTestCheckFunc(resource.TestCheckResourceAttr("infercrane_deployment.qwen", "model", "Qwen/Qwen3-14B"), resource.TestCheckResourceAttr("infercrane_deployment.qwen", "max_replicas", "2"))},
 		},
 	})

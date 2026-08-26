@@ -62,6 +62,15 @@ Updates create and qualify an immutable candidate before promotion. If Release G
 evidence that is not present, the update fails with an inspectable operation instead of silently
 moving production traffic. A Terraform timeout does not cancel durable InferCrane work.
 
+Import a deployment with a custom stable alias using both identities:
+
+```bash
+terraform import infercrane_deployment.support support-deployment/support-production
+```
+
+The import form is `deployment-name/endpoint-name`. A name-only import selects the default endpoint
+whose name matches the deployment.
+
 See the [Terraform integration guide](../../docs/integrations/terraform.mdx) for installation,
 imports, state behavior, and release safety.
 

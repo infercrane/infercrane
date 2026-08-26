@@ -67,7 +67,11 @@ and defaults to `name` when omitted.
 | Read | Refresh logical state and active revision through the API |
 | Update | Candidate → provision → Release Guard → promote; a rejection fails safely |
 | Delete | Submit durable logical deletion and wait for fenced cleanup |
-| Import | `terraform import infercrane_deployment.qwen qwen-prod` |
+| Import | `terraform import infercrane_deployment.qwen qwen-prod/support-production` |
+
+Use `deployment-name/endpoint-name` when importing an explicit alias. A name-only import selects
+the endpoint whose name matches the deployment; it is safe for the default endpoint even when the
+deployment also has additional aliases.
 
 If Terraform is interrupted, InferCrane continues the operation. The next apply derives the same
 idempotency identity, adopts the original logical deployment, and resumes observation. Terraform

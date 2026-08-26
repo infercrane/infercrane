@@ -606,7 +606,11 @@ func TestPublishDeploymentEndpointIsAtomicIdempotentAndNeverRebinds(t *testing.T
 		t.Fatalf("idempotent publication changed identity: first=%#v repeated=%#v err=%v", published, repeated, err)
 	}
 	resolved, err := s.ResolveForTenant(ctx, "global", selected.Name)
-	if err != nil || len(resolved.EndpointNames) != 1 || resolved.EndpointNames[0] != alias {
+	endpointSet := make(map[string]bool, len(resolved.EndpointNames))
+	for _, endpointName := range resolved.EndpointNames {
+		endpointSet[endpointName] = true
+	}
+	if err != nil || !endpointSet[selected.Name] || !endpointSet[alias] {
 		t.Fatalf("deployment did not expose its stable endpoint identity: resolved=%#v err=%v", resolved, err)
 	}
 	concurrentAlias := "llama-concurrent-" + suffix
