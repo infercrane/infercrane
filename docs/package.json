@@ -12,7 +12,7 @@
     "check": "npm run validate && npm run check:links"
   },
   "devDependencies": {
-    "mint": "4.2.788"
+    "mint": "4.2.819"
   },
   "engines": {
     "node": ">=20"
