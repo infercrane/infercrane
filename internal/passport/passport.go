@@ -112,6 +112,7 @@ type Benchmark struct {
 	Provider              string          `json:"provider"`
 	Region                string          `json:"region"`
 	GPU                   string          `json:"gpu"`
+	GPUCount              int             `json:"gpu_count"`
 	ComputeMode           string          `json:"compute_mode"`
 	Workload              json.RawMessage `json:"workload"`
 	ReproductionCommand   string          `json:"reproduction_command"`

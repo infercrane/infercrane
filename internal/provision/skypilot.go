@@ -39,6 +39,7 @@ const defaultRunPodVLLMImage = "ghcr.io/infercrane/vllm-runpod@sha256:c9d8303ad7
 type ReplicaSpec struct {
 	ExternalKey                                                             string
 	Name, Model, ModelRevision, Cloud, GPU, Region, Runtime, RuntimeVersion string
+	GPUCount                                                                int
 	RequestID                                                               string
 	RuntimeArgs                                                             []string
 	Port                                                                    int
@@ -124,6 +125,12 @@ func (s SkyPilot) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provider
 	if spec.ExternalKey == "" || spec.Model == "" || spec.Cloud == "" || spec.GPU == "" {
 		return ProviderHandle{}, errors.New("external key, model, cloud, and GPU are required")
 	}
+	if spec.GPUCount == 0 {
+		spec.GPUCount = 1
+	}
+	if spec.GPUCount < 1 || spec.GPUCount > 1024 {
+		return ProviderHandle{}, errors.New("GPU count must be between 1 and 1024")
+	}
 	if !spec.Workload.Empty() {
 		if err := spec.Workload.Validate(); err != nil {
 			return ProviderHandle{}, fmt.Errorf("%w: %v", ErrInvalidReplicaSpec, err)
@@ -185,7 +192,11 @@ func (s SkyPilot) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provider
 		runtimeImage = spec.Workload.Image
 		run = workloadCommand(spec.Workload.Command, spec.Model, spec.ModelRevision, spec.Port, spec.RuntimeArgs)
 	}
-	task := map[string]any{"resources": map[string]any{"infra": infrastructure(spec.Cloud, spec.Region), "accelerators": spec.GPU, "image_id": "docker:" + runtimeImage, "ports": []int{spec.Port}}, "run": run}
+	accelerators := spec.GPU
+	if spec.GPUCount > 1 {
+		accelerators = fmt.Sprintf("%s:%d", spec.GPU, spec.GPUCount)
+	}
+	task := map[string]any{"resources": map[string]any{"infra": infrastructure(spec.Cloud, spec.Region), "accelerators": accelerators, "image_id": "docker:" + runtimeImage, "ports": []int{spec.Port}}, "run": run}
 	task["secrets"] = map[string]any{"INFERCRANE_WORKER_API_KEY": nil}
 	path, cleanup, err := writeTask(task)
 	if err != nil {

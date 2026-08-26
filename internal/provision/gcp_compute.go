@@ -137,7 +137,11 @@ func (g GCPCompute) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provid
 	}
 	startup := g.startup(spec, port)
 	metadata := "^|||^infercrane-external-key=" + spec.ExternalKey + "|||infercrane-intent-digest=" + g.intentDigest(spec) + "|||startup-script=" + startup
-	args := []string{"compute", "instances", "create", handle.ResourceID, "--project", g.Project, "--zone", g.Zone, "--machine-type", g.MachineType, "--accelerator", "type=" + g.GPUType + ",count=1", "--subnet", g.Subnet, "--no-address", "--service-account", g.ServiceAccount, "--scopes", "cloud-platform", "--image", g.VMImage, "--boot-disk-size", fmt.Sprintf("%dGB", g.BootDiskGiB), "--boot-disk-type", "pd-balanced", "--boot-disk-auto-delete", "--maintenance-policy", "TERMINATE", "--metadata", metadata, "--labels", "infercrane-managed=true", "--format", "json", "--quiet"}
+	gpuCount := spec.GPUCount
+	if gpuCount == 0 {
+		gpuCount = 1
+	}
+	args := []string{"compute", "instances", "create", handle.ResourceID, "--project", g.Project, "--zone", g.Zone, "--machine-type", g.MachineType, "--accelerator", fmt.Sprintf("type=%s,count=%d", g.GPUType, gpuCount), "--subnet", g.Subnet, "--no-address", "--service-account", g.ServiceAccount, "--scopes", "cloud-platform", "--image", g.VMImage, "--boot-disk-size", fmt.Sprintf("%dGB", g.BootDiskGiB), "--boot-disk-type", "pd-balanced", "--boot-disk-auto-delete", "--maintenance-policy", "TERMINATE", "--metadata", metadata, "--labels", "infercrane-managed=true", "--format", "json", "--quiet"}
 	if artifactDisk.Name != "" {
 		args = append(args, "--disk", "name="+artifactDisk.Name+",device-name=infercrane-model-cache,mode=ro,auto-delete=no")
 	}
@@ -236,6 +240,9 @@ func (g GCPCompute) validate(spec ReplicaSpec) error {
 	}
 	if spec.GPU != g.GPUType {
 		return fmt.Errorf("configured machine is qualified for GPU %s, not %s", g.GPUType, spec.GPU)
+	}
+	if spec.GPUCount < 0 || spec.GPUCount > 1024 {
+		return errors.New("GCP GPU count must be between 1 and 1024")
 	}
 	if !strings.Contains(g.ContainerImage, "@sha256:") {
 		return errors.New("GCP container image must be pinned by sha256 digest")
@@ -491,6 +498,14 @@ func (g GCPCompute) startup(spec ReplicaSpec, port int) string {
 		arg = strings.ReplaceAll(arg, "${PORT}", fmt.Sprint(port))
 		quoted[i] = shellQuote(arg)
 	}
+	entrypoint, arguments := "", " "+strings.Join(quoted, " ")
+	if !spec.Workload.Empty() {
+		entrypoint, arguments = workloadEntrypoint(quoted), workloadArguments(quoted)
+	}
+	gpuCount := spec.GPUCount
+	if gpuCount == 0 {
+		gpuCount = 1
+	}
 	secretURL := "https://secretmanager.googleapis.com/v1/projects/" + url.PathEscape(g.Project) + "/secrets/" + url.PathEscape(g.WorkerSecret) + "/versions/latest:access"
 	artifactBootstrap, artifactContainerArgs := gcpArtifactCacheBootstrap(g.ArtifactDisks[modelIdentity(spec)])
 	return "#!/bin/sh\nset -eu\n" +
@@ -512,15 +527,31 @@ func (g GCPCompute) startup(spec ReplicaSpec, port int) string {
 		"  systemctl is-active --quiet gcr-online.target || systemctl start gcr-online.target\n" +
 		"  cos-extensions install gpu\n" +
 		"  [ -e /dev/nvidia0 ] && [ -e /dev/nvidia-uvm ] && [ -e /dev/nvidiactl ]\n" +
-		"  gpu_run_args='--volume /var/lib/nvidia/lib64:/usr/local/nvidia/lib64:ro --volume /var/lib/nvidia/bin:/usr/local/nvidia/bin:ro --device /dev/nvidia0:/dev/nvidia0 --device /dev/nvidia-uvm:/dev/nvidia-uvm --device /dev/nvidiactl:/dev/nvidiactl --env LD_LIBRARY_PATH=/usr/local/nvidia/lib64'\n" +
+		"  gpu_run_args='--volume /var/lib/nvidia/lib64:/usr/local/nvidia/lib64:ro --volume /var/lib/nvidia/bin:/usr/local/nvidia/bin:ro --device /dev/nvidia-uvm:/dev/nvidia-uvm --device /dev/nvidiactl:/dev/nvidiactl --env LD_LIBRARY_PATH=/usr/local/nvidia/lib64'\n" +
+		"  device_index=0; while [ \"$device_index\" -lt " + fmt.Sprint(gpuCount) + " ]; do [ -e \"/dev/nvidia${device_index}\" ] || { echo 'allocated GPU count does not match immutable revision intent' >&2; exit 1; }; gpu_run_args=\"$gpu_run_args --device /dev/nvidia${device_index}:/dev/nvidia${device_index}\"; device_index=$((device_index + 1)); done\n" +
 		"else\n" +
-		"  nvidia-smi >/dev/null\n" +
+		"  actual_gpu_count=$(nvidia-smi --list-gpus | wc -l | tr -d ' ')\n" +
+		"  [ \"$actual_gpu_count\" -eq " + fmt.Sprint(gpuCount) + " ] || { echo 'allocated GPU count does not match immutable revision intent' >&2; exit 1; }\n" +
 		"fi\n" +
 		"infercrane_stage gpu_driver_ready\n" +
 		cachedImageBootstrap(image) + artifactBootstrap +
 		"infercrane_stage runtime_start\n" +
-		"docker run -d --restart=unless-stopped $gpu_run_args " + artifactContainerArgs + "-e INFERCRANE_WORKER_API_KEY=\"$worker_key\" -e VLLM_API_KEY=\"$worker_key\" -p " + fmt.Sprintf("%d:%d", port, port) + " " + shellQuote(image) + " " + strings.Join(quoted, " ") + "\n" +
+		"docker run -d --restart=unless-stopped $gpu_run_args " + artifactContainerArgs + "-e INFERCRANE_WORKER_API_KEY=\"$worker_key\" -e VLLM_API_KEY=\"$worker_key\" -p " + fmt.Sprintf("%d:%d", port, port) + entrypoint + " " + shellQuote(image) + arguments + "\n" +
 		"infercrane_stage runtime_container_started\n"
+}
+
+func workloadEntrypoint(quoted []string) string {
+	if len(quoted) == 0 {
+		return ""
+	}
+	return " --entrypoint " + quoted[0]
+}
+
+func workloadArguments(quoted []string) string {
+	if len(quoted) < 2 {
+		return ""
+	}
+	return " " + strings.Join(quoted[1:], " ")
 }
 
 func gcpArtifactCacheBootstrap(diskName string) (string, string) {

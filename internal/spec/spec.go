@@ -30,7 +30,8 @@ type Deployment struct {
 		Mode string `yaml:"mode"`
 	} `yaml:"compute"`
 	Resources struct {
-		GPU string `yaml:"gpu"`
+		GPU      string `yaml:"gpu"`
+		GPUCount int    `yaml:"gpu_count,omitempty"`
 	} `yaml:"resources"`
 	Provider struct {
 		Cloud   string `yaml:"cloud"`
@@ -88,6 +89,15 @@ func Load(path string) (Deployment, error) {
 	}
 	if out.Name == "" || out.Model.ID == "" || out.Resources.GPU == "" || out.Provider.Cloud == "" {
 		return out, fmt.Errorf("name, model.id, resources.gpu, and provider.cloud are required")
+	}
+	if out.Resources.GPUCount == 0 {
+		out.Resources.GPUCount = 1
+	}
+	if out.Resources.GPUCount < 1 || out.Resources.GPUCount > 1024 {
+		return out, fmt.Errorf("resources.gpu_count must be between 1 and 1024")
+	}
+	if out.Compute.Mode == "serverless" && out.Resources.GPUCount != 1 {
+		return out, fmt.Errorf("serverless compute currently requires resources.gpu_count 1")
 	}
 	if out.Endpoint == "" {
 		out.Endpoint = out.Name

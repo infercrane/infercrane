@@ -42,7 +42,11 @@ func (s *Store) InferencePassportPayload(ctx context.Context, tenant, deployment
 		if row.RevisionID != revisionID {
 			continue
 		}
-		payload.Benchmarks = append(payload.Benchmarks, passport.Benchmark{ID: row.ID, Tool: row.Tool, ToolVersion: row.ToolVersion, Runtime: row.Runtime, RuntimeVersion: row.RuntimeVersion, Provider: row.Provider, Region: row.Region, GPU: row.GPU, ComputeMode: row.ComputeMode, Workload: json.RawMessage(row.WorkloadJSON), ReproductionCommand: row.ReproductionCommand, RequestCount: row.RequestCount, Succeeded: row.Succeeded, Failed: row.Failed, TTFTP95MS: row.TTFTP95MS, LatencyP95MS: row.LatencyP95MS, OutputTokenThroughput: row.OutputTokenThroughput, CostMetadata: json.RawMessage(row.CostMetadataJSON), CreatedAt: row.CreatedAt})
+		gpuCount := 1
+		if row.GPUCount != nil {
+			gpuCount = *row.GPUCount
+		}
+		payload.Benchmarks = append(payload.Benchmarks, passport.Benchmark{ID: row.ID, Tool: row.Tool, ToolVersion: row.ToolVersion, Runtime: row.Runtime, RuntimeVersion: row.RuntimeVersion, Provider: row.Provider, Region: row.Region, GPU: row.GPU, GPUCount: gpuCount, ComputeMode: row.ComputeMode, Workload: json.RawMessage(row.WorkloadJSON), ReproductionCommand: row.ReproductionCommand, RequestCount: row.RequestCount, Succeeded: row.Succeeded, Failed: row.Failed, TTFTP95MS: row.TTFTP95MS, LatencyP95MS: row.LatencyP95MS, OutputTokenThroughput: row.OutputTokenThroughput, CostMetadata: json.RawMessage(row.CostMetadataJSON), CreatedAt: row.CreatedAt})
 		payload.Reproduce.BenchmarkCommands = append(payload.Reproduce.BenchmarkCommands, row.ReproductionCommand)
 	}
 	payload.ColdStart, err = s.ColdStartStats(ctx, resolved.Deployment.ID, 24*time.Hour)

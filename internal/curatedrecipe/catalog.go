@@ -2,7 +2,11 @@
 // are not benchmark claims; measured recipes remain control-plane evidence.
 package curatedrecipe
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/infercrane/infercrane/internal/runtimecontract"
+)
 
 type Entry struct {
 	Name             string           `json:"name"`
@@ -33,18 +37,24 @@ type Entry struct {
 // not contain price, throughput, or latency estimates: those only become
 // trustworthy after a tenant records measured benchmark evidence.
 type ServingProfile struct {
-	Name               string   `json:"name"`
-	DisplayName        string   `json:"display_name"`
-	Description        string   `json:"description"`
-	Runtime            string   `json:"runtime"`
-	ComputeMode        string   `json:"compute_mode"`
-	GPUHint            string   `json:"gpu_hint"`
-	MinReplicas        int      `json:"min_replicas"`
-	MaxReplicas        int      `json:"max_replicas"`
-	RuntimeArgs        []string `json:"runtime_args"`
-	EvidenceClass      string   `json:"evidence_class"`
-	QualificationScope string   `json:"qualification_scope"`
-	Limitations        []string `json:"limitations"`
+	Name                string                   `json:"name"`
+	DisplayName         string                   `json:"display_name"`
+	Description         string                   `json:"description"`
+	Runtime             string                   `json:"runtime"`
+	RuntimeVersion      string                   `json:"runtime_version,omitempty"`
+	ComputeMode         string                   `json:"compute_mode"`
+	GPUHint             string                   `json:"gpu_hint"`
+	CompatibleGPUs      []string                 `json:"compatible_gpus,omitempty"`
+	GPUCount            int                      `json:"gpu_count"`
+	CloudHint           string                   `json:"cloud_hint,omitempty"`
+	ProviderAdapterHint string                   `json:"provider_adapter_hint,omitempty"`
+	MinReplicas         int                      `json:"min_replicas"`
+	MaxReplicas         int                      `json:"max_replicas"`
+	RuntimeArgs         []string                 `json:"runtime_args"`
+	EvidenceClass       string                   `json:"evidence_class"`
+	QualificationScope  string                   `json:"qualification_scope"`
+	Limitations         []string                 `json:"limitations"`
+	Workload            runtimecontract.Workload `json:"workload,omitzero"`
 }
 
 const configurationEvidence = "configuration-verified"
@@ -99,6 +109,7 @@ func elasticProfileFor(runtime, gpu string) ServingProfile {
 		Runtime:            runtime,
 		ComputeMode:        "elastic",
 		GPUHint:            gpu,
+		GPUCount:           1,
 		MinReplicas:        1,
 		MaxReplicas:        2,
 		RuntimeArgs:        []string{},
@@ -124,6 +135,7 @@ var catalog = []Entry{
 	{Name: "gemma-3-4b-it", DisplayName: "Gemma 3 4B IT", Publisher: "Google", Description: "Compact multimodal instruction model for text-and-image application workflows; upstream terms and access acceptance are required.", UseCase: "compact multimodal chat and document understanding", Tasks: []string{"vision", "chat", "documents"}, Model: "google/gemma-3-4b-it", Revision: "093f9f388b31de276ce2de164bdc2081324b9767", Runtime: "vllm", Protocol: "chat", Capabilities: []string{"chat-completions", "streaming", "vision"}, InputModalities: []string{"text", "image"}, OutputModalities: []string{"text"}, License: "gemma", LicenseURL: "https://ai.google.dev/gemma/terms", Gated: true, EvidenceClass: configurationEvidence, EvidenceSummary: configurationScope, Source: "https://huggingface.co/google/gemma-3-4b-it", ReviewedAt: "2026-08-19", Profiles: []ServingProfile{elasticProfileWithLimitations("vllm", "A10G", "Multimodal memory use depends on image count, resolution, and prompt length; qualify the exact prompt shape.")}},
 	{Name: "qwen2.5-vl-7b-instruct", DisplayName: "Qwen2.5 VL 7B Instruct", Publisher: "Qwen", Description: "Vision-language instruction model for document, screenshot, and image understanding.", UseCase: "document understanding and visual question answering", Tasks: []string{"vision", "documents", "chat"}, Model: "Qwen/Qwen2.5-VL-7B-Instruct", Revision: "cc594898137f460bfe9f0759e9844b3ce807cfb5", Runtime: "vllm", Protocol: "chat", Capabilities: []string{"chat-completions", "streaming", "vision"}, InputModalities: []string{"text", "image", "video"}, OutputModalities: []string{"text"}, License: "apache-2.0", LicenseURL: "https://huggingface.co/Qwen/Qwen2.5-VL-7B-Instruct/blob/main/LICENSE", EvidenceClass: configurationEvidence, EvidenceSummary: configurationScope, Source: "https://huggingface.co/Qwen/Qwen2.5-VL-7B-Instruct", ReviewedAt: "2026-08-19", Profiles: []ServingProfile{elasticProfileWithLimitations("vllm", "L40S", "Image resolution, item count, video duration, and media-fetch policy materially affect memory and latency; qualify bounded media inputs.")}},
 	{Name: "granite-3.3-8b-instruct", DisplayName: "Granite 3.3 8B Instruct", Publisher: "IBM", Description: "Apache-2.0 instruction model for enterprise text generation, extraction, and summarization workloads.", UseCase: "enterprise assistants, extraction, and summarization", Tasks: []string{"chat", "extraction", "summarization"}, Model: "ibm-granite/granite-3.3-8b-instruct", Revision: "51dd4bc2ade4059a6bd87649d68aa11e4fb2529b", Runtime: "vllm", Protocol: "chat", Capabilities: []string{"chat-completions", "streaming"}, InputModalities: []string{"text"}, OutputModalities: []string{"text"}, License: "apache-2.0", LicenseURL: "https://huggingface.co/ibm-granite/granite-3.3-8b-instruct/blob/main/LICENSE", EvidenceClass: configurationEvidence, EvidenceSummary: configurationScope, Source: "https://huggingface.co/ibm-granite/granite-3.3-8b-instruct", ReviewedAt: "2026-08-19", Profiles: vllmGenerationProfiles("L40S")},
+	{Name: "glm-5.3-flash", DisplayName: "GLM-5.3 Flash", Publisher: "Z.ai", Description: "Native-FP8 multimodal mixture-of-experts model with 321B total parameters, 18B active parameters, and a declared 1M-token context window.", UseCase: "large-scale multimodal, reasoning, tool, and coding workloads", Tasks: []string{"chat", "reasoning", "tools", "vision", "coding"}, Model: "zai-org/GLM-5.3-Flash", Revision: "3f1971b7b5f7a528c9c4ef6212c8785298a8c24a", Runtime: "custom-oci", Protocol: "chat", Capabilities: []string{"chat-completions", "streaming", "tool-calling", "vision"}, InputModalities: []string{"text", "image", "video"}, OutputModalities: []string{"text"}, License: "mit", LicenseURL: "https://huggingface.co/zai-org/GLM-5.3-Flash/blob/main/LICENSE", EvidenceClass: configurationEvidence, EvidenceSummary: configurationScope, Source: "https://huggingface.co/zai-org/GLM-5.3-Flash", ReviewedAt: "2026-08-26", Profiles: []ServingProfile{{Name: "custom-oci-hopper-tp4", DisplayName: "Custom OCI Hopper TP4", Description: "Immutable upstream GLM runtime candidate on one four-GPU Hopper worker; it is not a measured performance or capacity claim.", Runtime: "custom-oci", RuntimeVersion: "0.27.0-dev-glm53", ComputeMode: "elastic", GPUHint: "H200", CompatibleGPUs: []string{"H200"}, GPUCount: 4, CloudHint: "kubernetes", MinReplicas: 1, MaxReplicas: 1, RuntimeArgs: []string{}, EvidenceClass: configurationEvidence, QualificationScope: configurationScope, Limitations: []string{"The dedicated upstream image precedes standard vLLM 0.27.0 availability and must be re-pinned when upstream publishes replacement bytes.", "Four H200 GPUs exceed the upstream 386 GiB minimum aggregate VRAM, but actual memory fit, throughput, multimodal limits, and 131K context behavior require real-hardware qualification.", "Hopper uses BF16 KV cache for this model; FP8 KV cache is a separate Blackwell-only profile.", "This profile is experimental and must not be represented as one-click production-qualified."}, Workload: runtimecontract.Workload{Image: "vllm/vllm-openai@sha256:2c6da6c6f16ed15c91e412d896dba13701f25fe1861eaec9ddaa4db34d1d21c4", Command: []string{"vllm", "serve", "${MODEL}", "--revision", "${MODEL_REVISION}", "--host", "0.0.0.0", "--port", "${PORT}", "--tensor-parallel-size", "4", "--max-model-len", "131072", "--no-enable-flashinfer-autotune", "--speculative-config", "{\"method\":\"mtp\",\"num_speculative_tokens\":5}", "--tool-call-parser", "glm47", "--reasoning-parser", "glm45", "--enable-auto-tool-choice", "--served-model-name", "${MODEL}"}, Protocol: "openai", Port: 8000, ReadinessPath: "/health", ModelsPath: "/v1/models", MetricsPath: "/metrics", Cancellation: "http-disconnect", Drain: "connection", ShutdownGraceSeconds: 120}}}},
 }
 
 func cloneEntry(entry Entry) Entry {
@@ -135,7 +147,9 @@ func cloneEntry(entry Entry) Entry {
 	entry.Profiles = append([]ServingProfile{}, entry.Profiles...)
 	for index := range entry.Profiles {
 		entry.Profiles[index].RuntimeArgs = append([]string{}, entry.Profiles[index].RuntimeArgs...)
+		entry.Profiles[index].CompatibleGPUs = append([]string{}, entry.Profiles[index].CompatibleGPUs...)
 		entry.Profiles[index].Limitations = append([]string{}, entry.Profiles[index].Limitations...)
+		entry.Profiles[index].Workload.Command = append([]string{}, entry.Profiles[index].Workload.Command...)
 	}
 	return entry
 }

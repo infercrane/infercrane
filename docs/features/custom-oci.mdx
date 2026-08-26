@@ -33,6 +33,7 @@ provider:
   region: eu-central-1
 resources:
   gpu: L40S
+  gpu_count: 1
 scaling:
   min_replicas: 1
   max_replicas: 1
@@ -40,8 +41,9 @@ routing:
   strategy: round-robin
 ```
 
-The command is argv, not a shell program. `${MODEL}`, `${MODEL_REVISION}`, and `${PORT}` are replaced
-without losing argument boundaries. The workload receives the worker credential as
+The command is complete executable argv, not image-entrypoint arguments and not a shell program.
+Providers override the image entrypoint with `command[0]` and preserve every remaining argument.
+`${MODEL}`, `${MODEL_REVISION}`, and `${PORT}` are replaced without losing argument boundaries. The workload receives the worker credential as
 `INFERCRANE_WORKER_API_KEY`; it must read that environment variable directly. InferCrane rejects
 credentials in command arguments because runtimes commonly print parsed argv during startup. The
 value is not persisted in revision or provider metadata.
@@ -55,11 +57,13 @@ narrow: OpenAI-compatible HTTP, `/health`, `/v1/models`, and `/metrics`. Client 
 cancel upstream HTTP work, and InferCrane withdraws the router generation and drains active
 connections before provider deletion.
 
-Custom OCI is currently simulated-qualified on the AWS EC2 elastic path, whose user-data bootstrap
-launches the immutable image directly. Real GPU evidence is deferred to consolidated
-qualification. RunPod/SkyPilot images require an additional SSH bootstrap contract and are not
-claimed compatible. Serverless, arbitrary probe scripts, mutable tags, image builds and autoscaling
-signals for custom runtimes are rejected rather than silently assumed.
+Custom OCI is simulated-qualified on the AWS EC2, GCP Compute, and namespaced Kubernetes elastic
+paths. Each adapter compiles the same immutable image, executable argv, probe, shutdown, secret, and
+accelerator-count contract into its native resource. Real GPU evidence remains bound to the exact
+image, model revision, provider, accelerator topology, and workload. RunPod/SkyPilot images require
+an additional SSH bootstrap contract and are not claimed compatible. Serverless, arbitrary probe
+scripts, mutable tags, image builds and autoscaling signals for custom runtimes are rejected rather
+than silently assumed.
 
 Inspect the executable support boundary with:
 

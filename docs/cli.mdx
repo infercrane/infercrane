@@ -340,7 +340,8 @@ infercrane workload deploy ./fraud-explainer --wait
 ```
 
 `workload init --recipe NAME --profile PROFILE` pins a reviewed model commit and writes the selected
-candidate's runtime arguments, GPU hint, replica bounds, and routing policy. The default profile is
+candidate's runtime version, immutable workload when present, GPU type and count, provider hint,
+replica bounds, and routing policy. The default profile is
 the recipe's general starting point; profiles are not benchmark claims. `workload build --tag IMAGE` performs a
 local Docker Buildx build for custom OCI projects; add `--push` to record a registry-confirmed
 immutable digest. `workload dev` binds a custom OCI workload only to loopback. See
@@ -664,7 +665,7 @@ infercrane models --output json
 ```
 
 `models inspect` prints the immutable revision, license URL, protocol capabilities, serving
-profiles, and the exact qualification boundary. Create a project with `infercrane workload init
+profiles, accelerator topology, immutable runtime workload when present, and the exact qualification boundary. Create a project with `infercrane workload init
 --recipe NAME`. Catalog profiles are configuration-verified, not benchmark, price, capacity, or
 universal GPU-fit claims. See [Verified Models](/features/model-catalog).
 

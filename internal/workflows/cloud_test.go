@@ -674,10 +674,12 @@ type fakeInspector struct{ ready bool }
 type fakeCapacityAdvisor struct {
 	availability provision.Availability
 	calls        int
+	lastRequest  provision.AvailabilityRequest
 }
 
-func (f *fakeCapacityAdvisor) Availability(context.Context, provision.AvailabilityRequest) (provision.Availability, error) {
+func (f *fakeCapacityAdvisor) Availability(_ context.Context, request provision.AvailabilityRequest) (provision.Availability, error) {
 	f.calls++
+	f.lastRequest = request
 	return f.availability, nil
 }
 
@@ -728,9 +730,9 @@ func TestEnsureCloudReplicaDefersCreateWhenCapacityIsUnavailable(t *testing.T) {
 	store := &fakeCloudStore{}
 	provider := &fakeReplicaProvider{}
 	advisor := &fakeCapacityAdvisor{availability: provision.Availability{State: "unavailable", Message: "Provider reports no current secure capacity for L40S"}}
-	_, _, _, err := ensureCloudReplica(context.Background(), store, ReplicaBackend{Name: "sky", Cloud: "runpod", Runtime: "vllm", Provider: provider, Capacity: advisor}, fakeInspector{}, domain.Operation{ID: "operation-1"}, CloudRequest{TenantID: "global", DeploymentID: "deployment-1", RevisionID: "revision-1", Name: "qwen", Model: "Qwen/Qwen3-8B", Cloud: "runpod", GPU: "L40S", Runtime: "vllm", Port: 8000}, 0)
+	_, _, _, err := ensureCloudReplica(context.Background(), store, ReplicaBackend{Name: "sky", Cloud: "runpod", Runtime: "vllm", Provider: provider, Capacity: advisor}, fakeInspector{}, domain.Operation{ID: "operation-1"}, CloudRequest{TenantID: "global", DeploymentID: "deployment-1", RevisionID: "revision-1", Name: "qwen", Model: "Qwen/Qwen3-8B", Cloud: "runpod", GPU: "L40S", GPUCount: 4, Runtime: "vllm", Port: 8000}, 0)
 	var failure operations.Failure
-	if !errors.As(err, &failure) || failure.Code != "provider_capacity_unavailable" || !failure.Retryable || provider.ensureCalls != 0 || advisor.calls != 1 || store.capacity.State != "unavailable" || store.capacity.Source != "sky.availability" || !store.capacity.ExpiresAt.After(store.capacity.ObservedAt) {
+	if !errors.As(err, &failure) || failure.Code != "provider_capacity_unavailable" || !failure.Retryable || provider.ensureCalls != 0 || advisor.calls != 1 || advisor.lastRequest.Count != 4 || store.capacity.GPUCount != 4 || store.capacity.State != "unavailable" || store.capacity.Source != "sky.availability" || !store.capacity.ExpiresAt.After(store.capacity.ObservedAt) {
 		t.Fatalf("failure=%+v ensure_calls=%d advisor_calls=%d err=%v", failure, provider.ensureCalls, advisor.calls, err)
 	}
 }

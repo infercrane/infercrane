@@ -22,6 +22,7 @@ import (
 	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/optimizationcapability"
 	"github.com/infercrane/infercrane/internal/performanceprofile"
+	"github.com/infercrane/infercrane/internal/runtimecontract"
 	"github.com/infercrane/infercrane/internal/servingcontract"
 )
 
@@ -97,15 +98,17 @@ type DeploymentDraft struct {
 		Revision string `json:"revision" yaml:"revision"`
 	} `json:"model" yaml:"model"`
 	Runtime struct {
-		Engine  string   `json:"engine" yaml:"engine"`
-		Version string   `json:"version" yaml:"version"`
-		Args    []string `json:"args" yaml:"args"`
+		Engine   string                   `json:"engine" yaml:"engine"`
+		Version  string                   `json:"version" yaml:"version"`
+		Args     []string                 `json:"args" yaml:"args"`
+		Workload runtimecontract.Workload `json:"workload,omitzero" yaml:"workload,omitempty"`
 	} `json:"runtime" yaml:"runtime"`
 	Compute struct {
 		Mode string `json:"mode" yaml:"mode"`
 	} `json:"compute" yaml:"compute"`
 	Resources struct {
-		GPU string `json:"gpu" yaml:"gpu"`
+		GPU      string `json:"gpu" yaml:"gpu"`
+		GPUCount int    `json:"gpu_count" yaml:"gpu_count"`
 	} `json:"resources" yaml:"resources"`
 	Provider struct {
 		Cloud   string `json:"cloud" yaml:"cloud"`
@@ -201,7 +204,7 @@ func ValidateProposal(proposal Proposal) error {
 	}
 	seenIDs, seenRanks := map[string]struct{}{}, map[int]struct{}{}
 	for _, candidate := range proposal.Candidates {
-		if len(candidate.ID) != 64 || candidate.Rank < 1 || candidate.Rank > len(proposal.Candidates) || candidate.Objective != request.Objective || candidate.BenchmarkProfile != request.WorkloadProfile || candidate.Deployment.APIVersion != "infercrane.dev/v1" || candidate.Deployment.Kind != "Deployment" || candidate.Deployment.Name == "" || candidate.Deployment.Model.ID == "" || candidate.Deployment.Model.Revision == "" || candidate.Deployment.Runtime.Engine == "" || candidate.Deployment.Runtime.Version == "" || candidate.Deployment.Resources.GPU != request.GPU {
+		if len(candidate.ID) != 64 || candidate.Rank < 1 || candidate.Rank > len(proposal.Candidates) || candidate.Objective != request.Objective || candidate.BenchmarkProfile != request.WorkloadProfile || candidate.Deployment.APIVersion != "infercrane.dev/v1" || candidate.Deployment.Kind != "Deployment" || candidate.Deployment.Name == "" || candidate.Deployment.Model.ID == "" || candidate.Deployment.Model.Revision == "" || candidate.Deployment.Runtime.Engine == "" || candidate.Deployment.Runtime.Version == "" || candidate.Deployment.Resources.GPU != request.GPU || candidate.Deployment.Resources.GPUCount < 1 || candidate.Deployment.Resources.GPUCount > 1024 {
 			return errors.New("proposal contains an incomplete or mismatched candidate")
 		}
 		if candidate.EvidenceState != EvidenceUnmeasured && candidate.EvidenceState != EvidenceModeled {
@@ -262,7 +265,11 @@ func (s CatalogSource) Propose(_ context.Context, request Request) (Proposal, er
 			if compatible.Runtime != profile.Runtime || string(compatible.Mode) != profile.ComputeMode {
 				continue
 			}
-			candidate, compileErr := buildCandidate(entry, profile, compatible, runtimeVersion(s.Integrations.Runtimes, profile.Runtime), request, preferredProfile)
+			version := profile.RuntimeVersion
+			if version == "" {
+				version = runtimeVersion(s.Integrations.Runtimes, profile.Runtime)
+			}
+			candidate, compileErr := buildCandidate(entry, profile, compatible, version, request, preferredProfile)
 			if compileErr != nil {
 				return Proposal{}, fmt.Errorf("compile reviewed profile %s: %w", profile.Name, compileErr)
 			}
@@ -406,6 +413,9 @@ func matchingCompatibility(entries []integration.RuntimeCompatibility, request R
 func matchingProfiles(entries []curatedrecipe.ServingProfile, request Request) []curatedrecipe.ServingProfile {
 	var out []curatedrecipe.ServingProfile
 	for _, entry := range entries {
+		if len(entry.CompatibleGPUs) > 0 && !contains(entry.CompatibleGPUs, request.GPU) {
+			continue
+		}
 		if len(request.Runtimes) > 0 {
 			matched := false
 			for _, runtimeName := range request.Runtimes {
@@ -425,8 +435,13 @@ func buildCandidate(entry curatedrecipe.Entry, profile curatedrecipe.ServingProf
 	draft.Name = safeName(entry.Name + "-" + profile.Name + "-" + compatible.Cloud)
 	draft.Model.ID, draft.Model.Revision = entry.Model, entry.Revision
 	draft.Runtime.Engine, draft.Runtime.Version = profile.Runtime, runtimeVersion
+	draft.Runtime.Workload = profile.Workload
 	draft.Compute.Mode = profile.ComputeMode
 	draft.Resources.GPU = request.GPU
+	draft.Resources.GPUCount = profile.GPUCount
+	if draft.Resources.GPUCount == 0 {
+		draft.Resources.GPUCount = 1
+	}
 	draft.Provider.Cloud, draft.Provider.Adapter, draft.Provider.Region = compatible.Cloud, compatible.Adapter, request.Region
 	draft.Scaling.MinReplicas, draft.Scaling.MaxReplicas = profile.MinReplicas, profile.MaxReplicas
 	draft.Routing.Strategy = "round-robin"
@@ -442,16 +457,26 @@ func buildCandidate(entry curatedrecipe.Entry, profile curatedrecipe.ServingProf
 			Worker:  servingcontract.Pool{Replicas: 1, TensorParallelism: 1},
 		}
 	}
-	capabilities, err := optimizationcapability.V1()
-	if err != nil {
-		return Candidate{}, err
-	}
+	features := []Feature{}
 	base := optimizationcapability.Request{Runtime: profile.Runtime, RuntimeVersion: runtimeVersion, Model: entry.Model, ArtifactPrecision: "bf16", Accelerator: request.GPU}
-	continuous, err := capabilities.Compile(withMechanism(base, optimizationcapability.ContinuousBatching, nil))
-	if err != nil {
-		return Candidate{}, err
+	var capabilities optimizationcapability.Registry
+	if profile.Workload.Empty() {
+		var err error
+		capabilities, err = optimizationcapability.V1()
+		if err != nil {
+			return Candidate{}, err
+		}
+		continuous, compileErr := capabilities.Compile(withMechanism(base, optimizationcapability.ContinuousBatching, nil))
+		if compileErr != nil {
+			return Candidate{}, compileErr
+		}
+		features = append(features, Feature{Name: "continuous_batching", State: "runtime-owned", Source: continuous.DescriptorID})
+	} else {
+		if err := profile.Workload.Validate(); err != nil {
+			return Candidate{}, fmt.Errorf("portable runtime profile: %w", err)
+		}
+		features = append(features, Feature{Name: "immutable_runtime_artifact", State: "pinned", Source: profile.Workload.Image})
 	}
-	features := []Feature{{Name: "continuous_batching", State: "runtime-owned", Source: continuous.DescriptorID}}
 	if compatible.Adapter == "kubernetes-dynamo" {
 		features = append(features, Feature{Name: "dynamo_graph", State: "single-mutation-owner", Source: compatible.Evidence})
 	}

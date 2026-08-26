@@ -385,11 +385,11 @@ func childComplete(operation domain.Operation, label string) error {
 }
 
 func draftCloudRequest(draft optimizer.DeploymentDraft) workflows.CloudRequest {
-	return workflows.CloudRequest{Name: draft.Name, Model: draft.Model.ID, ModelRevision: draft.Model.Revision, Runtime: draft.Runtime.Engine, RuntimeVersion: draft.Runtime.Version, RuntimeArgs: draft.Runtime.Args, Cloud: draft.Provider.Cloud, ProviderAdapter: draft.Provider.Adapter, ComputeMode: draft.Compute.Mode, GPU: draft.Resources.GPU, Region: draft.Provider.Region, MinReplicas: draft.Scaling.MinReplicas, MaxReplicas: draft.Scaling.MaxReplicas, Serving: draft.Serving}
+	return workflows.CloudRequest{Name: draft.Name, Model: draft.Model.ID, ModelRevision: draft.Model.Revision, Runtime: draft.Runtime.Engine, RuntimeVersion: draft.Runtime.Version, RuntimeArgs: draft.Runtime.Args, Workload: draft.Runtime.Workload, Cloud: draft.Provider.Cloud, ProviderAdapter: draft.Provider.Adapter, ComputeMode: draft.Compute.Mode, GPU: draft.Resources.GPU, GPUCount: draft.Resources.GPUCount, Region: draft.Provider.Region, MinReplicas: draft.Scaling.MinReplicas, MaxReplicas: draft.Scaling.MaxReplicas, Serving: draft.Serving}
 }
 
 func draftRevisionSpec(draft optimizer.DeploymentDraft) domain.DeploymentRevisionSpec {
-	return domain.DeploymentRevisionSpec{Model: draft.Model.ID, ModelRevision: draft.Model.Revision, Runtime: draft.Runtime.Engine, RuntimeVersion: draft.Runtime.Version, RuntimeArgs: draft.Runtime.Args, RoutingStrategy: draft.Routing.Strategy, MinReplicas: draft.Scaling.MinReplicas, MaxReplicas: draft.Scaling.MaxReplicas, AutoscalingEnabled: draft.Scaling.MaxReplicas > draft.Scaling.MinReplicas, ComputeMode: draft.Compute.Mode, Cloud: draft.Provider.Cloud, ProviderAdapter: draft.Provider.Adapter, GPU: draft.Resources.GPU, Region: draft.Provider.Region, Serving: draft.Serving}
+	return domain.DeploymentRevisionSpec{Model: draft.Model.ID, ModelRevision: draft.Model.Revision, Runtime: draft.Runtime.Engine, RuntimeVersion: draft.Runtime.Version, RuntimeArgs: draft.Runtime.Args, Workload: draft.Runtime.Workload, RoutingStrategy: draft.Routing.Strategy, MinReplicas: draft.Scaling.MinReplicas, MaxReplicas: draft.Scaling.MaxReplicas, AutoscalingEnabled: draft.Scaling.MaxReplicas > draft.Scaling.MinReplicas, ComputeMode: draft.Compute.Mode, Cloud: draft.Provider.Cloud, ProviderAdapter: draft.Provider.Adapter, GPU: draft.Resources.GPU, GPUCount: draft.Resources.GPUCount, Region: draft.Provider.Region, Serving: draft.Serving}
 }
 
 func childKey(candidateID, step string) string { return "optimization:" + candidateID + ":" + step }

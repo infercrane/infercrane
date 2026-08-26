@@ -11,7 +11,7 @@ var ErrUnavailable = errors.New("pricing unavailable")
 
 type Request struct {
 	Cloud, Region, GPU string
-	Replicas           int
+	GPUCount, Replicas int
 }
 type Estimate struct {
 	Currency, Source string

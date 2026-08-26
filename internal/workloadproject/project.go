@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/infercrane/infercrane/internal/planning"
+	"github.com/infercrane/infercrane/internal/runtimecontract"
 	"github.com/infercrane/infercrane/internal/spec"
 	"gopkg.in/yaml.v3"
 )
@@ -27,20 +28,24 @@ const (
 var safeName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
 
 type InitOptions struct {
-	Directory     string
-	Name          string
-	Model         string
-	ModelRevision string
-	Runtime       string
-	Cloud         string
-	GPU           string
-	Region        string
-	ComputeMode   string
-	Routing       string
-	RuntimeArgs   []string
-	MinReplicas   int
-	MaxReplicas   int
-	Force         bool
+	Directory       string
+	Name            string
+	Model           string
+	ModelRevision   string
+	Runtime         string
+	RuntimeVersion  string
+	Cloud           string
+	ProviderAdapter string
+	GPU             string
+	GPUCount        int
+	Region          string
+	ComputeMode     string
+	Routing         string
+	RuntimeArgs     []string
+	Workload        runtimecontract.Workload
+	MinReplicas     int
+	MaxReplicas     int
+	Force           bool
 }
 
 type BuildPlan struct {
@@ -82,11 +87,21 @@ func Init(options InitOptions) (string, error) {
 		return "", errors.New("name must start with a lowercase letter and contain only lowercase letters, digits, and hyphens")
 	}
 	runtimeName := defaultValue(options.Runtime, "vllm")
-	if runtimeName != "vllm" && runtimeName != "sglang" {
-		return "", errors.New("project init supports runtime vllm or sglang; use an explicit DeploymentSpec for custom OCI")
+	if runtimeName != "vllm" && runtimeName != "sglang" && runtimeName != "custom-oci" {
+		return "", errors.New("project init supports runtime vllm, sglang, or custom-oci")
+	}
+	if runtimeName == "custom-oci" && options.Workload.Empty() {
+		return "", errors.New("custom-oci project init requires an immutable workload contract")
 	}
 	cloud := defaultValue(options.Cloud, "runpod")
 	gpu := defaultValue(options.GPU, "L40S")
+	gpuCount := options.GPUCount
+	if gpuCount == 0 {
+		gpuCount = 1
+	}
+	if gpuCount < 1 || gpuCount > 1024 {
+		return "", errors.New("project GPU count must be between 1 and 1024")
+	}
 	if cloud == "aws" && strings.TrimSpace(options.Region) == "" {
 		return "", errors.New("AWS projects require --region")
 	}
@@ -108,7 +123,7 @@ func Init(options InitOptions) (string, error) {
 	if minReplicas < 0 || maxReplicas < minReplicas {
 		return "", errors.New("project replica bounds must satisfy 0 <= min <= max")
 	}
-	content := renderSpec(name, options.Model, options.ModelRevision, runtimeName, cloud, gpu, options.Region, computeMode, routing, options.RuntimeArgs, minReplicas, maxReplicas)
+	content := renderSpec(name, options.Model, options.ModelRevision, runtimeName, options.RuntimeVersion, cloud, options.ProviderAdapter, gpu, gpuCount, options.Region, computeMode, routing, options.RuntimeArgs, options.Workload, minReplicas, maxReplicas)
 	if err = os.WriteFile(path, []byte(content), 0o644); err != nil {
 		return "", fmt.Errorf("write project spec: %w", err)
 	}
@@ -307,7 +322,7 @@ func defaultValue(value, fallback string) string {
 	return strings.TrimSpace(value)
 }
 
-func renderSpec(name, model, modelRevision, runtimeName, cloud, gpu, region, computeMode, routing string, runtimeArgs []string, minReplicas, maxReplicas int) string {
+func renderSpec(name, model, modelRevision, runtimeName, runtimeVersion, cloud, providerAdapter, gpu string, gpuCount int, region, computeMode, routing string, runtimeArgs []string, workload runtimecontract.Workload, minReplicas, maxReplicas int) string {
 	regionLine := ""
 	if strings.TrimSpace(region) != "" {
 		regionLine = "\n  region: " + region
@@ -321,6 +336,19 @@ func renderSpec(name, model, modelRevision, runtimeName, cloud, gpu, region, com
 		encoded, _ := json.Marshal(runtimeArgs)
 		argsLine = "\n  args: " + string(encoded)
 	}
+	versionLine := ""
+	if strings.TrimSpace(runtimeVersion) != "" {
+		versionLine = "\n  version: " + runtimeVersion
+	}
+	workloadLine := ""
+	if !workload.Empty() {
+		encoded, _ := json.Marshal(workload)
+		workloadLine = "\n  workload: " + string(encoded)
+	}
+	adapterLine := ""
+	if strings.TrimSpace(providerAdapter) != "" {
+		adapterLine = "\n  adapter: " + providerAdapter
+	}
 	return fmt.Sprintf(`# yaml-language-server: $schema=https://raw.githubusercontent.com/infercrane/infercrane/main/schemas/deployment-v1.schema.json
 apiVersion: infercrane.dev/v1
 kind: Deployment
@@ -330,16 +358,17 @@ model:
   id: %s%s
 
 runtime:
-  engine: %s%s
+  engine: %s%s%s%s
 
 compute:
   mode: %s
 
 resources:
   gpu: %s
+  gpu_count: %d
 
 provider:
-  cloud: %s%s
+  cloud: %s%s%s
 
 scaling:
   min_replicas: %d
@@ -347,5 +376,5 @@ scaling:
 
 routing:
   strategy: %s
-`, name, model, revisionLine, runtimeName, argsLine, computeMode, gpu, cloud, regionLine, minReplicas, maxReplicas, routing)
+`, name, model, revisionLine, runtimeName, versionLine, argsLine, workloadLine, computeMode, gpu, gpuCount, cloud, adapterLine, regionLine, minReplicas, maxReplicas, routing)
 }

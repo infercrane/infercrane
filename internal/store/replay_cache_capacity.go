@@ -206,7 +206,10 @@ func (s *Store) ArtifactCacheState(ctx context.Context, tenant, artifactID strin
 }
 
 func (s *Store) RecordCapacityOperation(ctx context.Context, row domain.CapacityOperation) (domain.CapacityOperation, error) {
-	if row.TenantID == "" || row.Provider == "" || row.Runtime == "" || row.ComputeMode == "" || row.Operation == "" || row.ResourceKey == "" || row.StartedAt.IsZero() {
+	if row.GPUCount == 0 {
+		row.GPUCount = 1
+	}
+	if row.TenantID == "" || row.Provider == "" || row.Runtime == "" || row.ComputeMode == "" || row.GPUCount < 1 || row.GPUCount > 1024 || row.Operation == "" || row.ResourceKey == "" || row.StartedAt.IsZero() {
 		return row, errors.New("complete capacity operation is required")
 	}
 	// Production callers omit completion so both ends of a multi-host duration
@@ -232,7 +235,7 @@ func (s *Store) RecordCapacityOperation(ctx context.Context, row domain.Capacity
 		return row, err
 	}
 	stamp := now()
-	_, err = s.ExecContext(ctx, `INSERT INTO capacity_operations(id,tenant_id,provider,runtime,compute_mode,region,gpu,operation,resource_key,outcome,error_code,started_at,completed_at,duration_seconds,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, row.ID, row.TenantID, row.Provider, row.Runtime, row.ComputeMode, row.Region, row.GPU, row.Operation, row.ResourceKey, row.Outcome, null(row.ErrorCode), row.StartedAt, row.CompletedAt, row.DurationSeconds, stamp)
+	_, err = s.ExecContext(ctx, `INSERT INTO capacity_operations(id,tenant_id,provider,runtime,compute_mode,region,gpu,gpu_count,operation,resource_key,outcome,error_code,started_at,completed_at,duration_seconds,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, row.ID, row.TenantID, row.Provider, row.Runtime, row.ComputeMode, row.Region, row.GPU, row.GPUCount, row.Operation, row.ResourceKey, row.Outcome, null(row.ErrorCode), row.StartedAt, row.CompletedAt, row.DurationSeconds, stamp)
 	row.CreatedAt = parseTime(stamp)
 	return row, err
 }
@@ -248,13 +251,13 @@ func (s *Store) CapacityIntelligence(ctx context.Context, tenant string, window 
 	end = end.UTC()
 	start := end.Add(-window)
 	rows, err := s.QueryContext(ctx, `WITH latest AS (
-		SELECT DISTINCT ON (provider,runtime,compute_mode,region,gpu,operation,resource_key)
-			provider,runtime,compute_mode,region,gpu,operation,resource_key,outcome,duration_seconds,completed_at,created_at,id
+		SELECT DISTINCT ON (provider,runtime,compute_mode,region,gpu,gpu_count,operation,resource_key)
+			provider,runtime,compute_mode,region,gpu,gpu_count,operation,resource_key,outcome,duration_seconds,completed_at,created_at,id
 		FROM capacity_operations
 		WHERE tenant_id=? AND completed_at>=? AND completed_at<=?
-		ORDER BY provider,runtime,compute_mode,region,gpu,operation,resource_key,completed_at DESC,created_at DESC,id DESC
+		ORDER BY provider,runtime,compute_mode,region,gpu,gpu_count,operation,resource_key,completed_at DESC,created_at DESC,id DESC
 	)
-	SELECT provider,runtime,compute_mode,region,gpu,
+	SELECT provider,runtime,compute_mode,region,gpu,gpu_count,
 		COUNT(*),
 		COUNT(*) FILTER(WHERE outcome='succeeded'),
 		COUNT(*) FILTER(WHERE outcome='pending'),
@@ -265,8 +268,8 @@ func (s *Store) CapacityIntelligence(ctx context.Context, tenant string, window 
 		CASE WHEN COUNT(*) FILTER(WHERE outcome='succeeded') >= 3 THEN percentile_cont(0.5) WITHIN GROUP(ORDER BY duration_seconds) FILTER(WHERE outcome='succeeded') END,
 		CASE WHEN COUNT(*) FILTER(WHERE outcome='succeeded') >= 20 THEN percentile_cont(0.95) WITHIN GROUP(ORDER BY duration_seconds) FILTER(WHERE outcome='succeeded') END
 	FROM latest
-	GROUP BY provider,runtime,compute_mode,region,gpu
-	ORDER BY provider,runtime,compute_mode,region,gpu`, tenant, start, end)
+	GROUP BY provider,runtime,compute_mode,region,gpu,gpu_count
+	ORDER BY provider,runtime,compute_mode,region,gpu,gpu_count`, tenant, start, end)
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +278,7 @@ func (s *Store) CapacityIntelligence(ctx context.Context, tenant string, window 
 	for rows.Next() {
 		var row domain.CapacitySummary
 		var p50, p95 sql.NullFloat64
-		if err = rows.Scan(&row.Provider, &row.Runtime, &row.ComputeMode, &row.Region, &row.GPU, &row.Attempts, &row.Succeeded, &row.Pending, &row.CapacityFailures, &row.RuntimeFailures, &row.ProviderFailures, &row.SuccessRate, &p50, &p95); err != nil {
+		if err = rows.Scan(&row.Provider, &row.Runtime, &row.ComputeMode, &row.Region, &row.GPU, &row.GPUCount, &row.Attempts, &row.Succeeded, &row.Pending, &row.CapacityFailures, &row.RuntimeFailures, &row.ProviderFailures, &row.SuccessRate, &p50, &p95); err != nil {
 			return nil, err
 		}
 		if p50.Valid {

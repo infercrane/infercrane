@@ -1286,7 +1286,7 @@ func (f *fakeStore) RecordInferenceRecommendation(_ context.Context, row domain.
 func (f *fakeStore) InferenceRecommendations(context.Context, string, string, int) ([]domain.InferenceRecommendation, error) {
 	return f.recommendations, f.err
 }
-func (f *fakeStore) LatestCapacityEvidence(context.Context, string, string, string, string, string, string) (domain.CapacityEvidence, error) {
+func (f *fakeStore) LatestCapacityEvidence(context.Context, string, string, string, string, string, string, int) (domain.CapacityEvidence, error) {
 	if f.capacity.ID == "" {
 		return domain.CapacityEvidence{}, domain.ErrNotFound
 	}

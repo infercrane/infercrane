@@ -377,6 +377,7 @@ func planCommand(ctx context.Context, cfg config.Config, args []string) error {
 	backend := fs.String("backend", "", "serving backend; use dynamo for a managed Dynamo graph")
 	providerAdapter := fs.String("provider-adapter", "", "provider adapter profile (advanced)")
 	gpu := fs.String("gpu", "", "GPU")
+	gpuCount := fs.Int("gpu-count", 1, "GPUs allocated to each runtime replica")
 	region := fs.String("region", "", "region")
 	runtimeEngine := fs.String("runtime", "vllm", "runtime engine: vllm or sglang")
 	computeMode := fs.String("compute", "elastic", "compute mode: elastic or serverless")
@@ -389,31 +390,37 @@ func planCommand(ctx context.Context, cfg config.Config, args []string) error {
 	if err := validateOutput(*output); err != nil {
 		return err
 	}
-	minExplicit := false
+	minExplicit, gpuCountExplicit := false, false
 	fs.Visit(func(item *flag.Flag) {
-		if item.Name == "min" {
+		switch item.Name {
+		case "min":
 			minExplicit = true
+		case "gpu-count":
+			gpuCountExplicit = true
 		}
 	})
 	if *computeMode == "serverless" && !minExplicit {
 		*minReplicas = 0
 	}
-	in := planning.Input{Name: *name, Model: model, Runtime: *runtimeEngine, ComputeMode: *computeMode, Cloud: *cloud, ProviderAdapter: *providerAdapter, GPU: *gpu, Region: *region, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas}
+	in := planning.Input{Name: *name, Model: model, Runtime: *runtimeEngine, ComputeMode: *computeMode, Cloud: *cloud, ProviderAdapter: *providerAdapter, GPU: *gpu, GPUCount: *gpuCount, Region: *region, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas}
 	if ext := filepath.Ext(model); ext == ".yaml" || ext == ".yml" {
 		file, err := spec.Load(model)
 		if err != nil {
 			return err
 		}
-		if *name != "" || *targets != "" || *cloud != "" || *backend != "" || *providerAdapter != "" || *gpu != "" || *region != "" || *runtimeEngine != "vllm" {
+		if *name != "" || *targets != "" || *cloud != "" || *backend != "" || *providerAdapter != "" || *gpu != "" || gpuCountExplicit || *region != "" || *runtimeEngine != "vllm" {
 			return errors.New("deployment YAML cannot be combined with deployment flags")
 		}
 		in = planning.Input{Name: file.Name, Model: file.Model.ID, ComputeMode: file.Compute.Mode, Cloud: file.Provider.Cloud, ProviderAdapter: file.Provider.Adapter,
-			GPU: file.Resources.GPU, Region: file.Provider.Region, Runtime: file.Runtime.Engine,
+			GPU: file.Resources.GPU, GPUCount: file.Resources.GPUCount, Region: file.Provider.Region, Runtime: file.Runtime.Engine,
 			RuntimeArgs: file.Runtime.Args, Routing: file.Routing.Strategy,
 			MinReplicas: file.Scaling.MinReplicas, MaxReplicas: file.Scaling.MaxReplicas, Serving: file.Serving}
 	} else if *targets != "" {
 		if *computeMode == "serverless" {
 			return errors.New("--compute serverless cannot be combined with --targets")
+		}
+		if gpuCountExplicit {
+			return errors.New("--gpu-count applies only to provisioned capacity and cannot be combined with --targets")
 		}
 		in.Targets = splitTargets(*targets)
 	}
@@ -452,7 +459,7 @@ func planCommand(ctx context.Context, cfg config.Config, args []string) error {
 				break
 			}
 		}
-		p = planning.Compare(p, planning.Current{Model: current.Deployment.Model, Runtime: current.Deployment.Runtime, Routing: current.Deployment.RoutingStrategy, ComputeMode: activeSpec.ComputeMode, Cloud: activeSpec.Cloud, ProviderAdapter: activeSpec.ProviderAdapter, GPU: activeSpec.GPU, Region: activeSpec.Region, MinReplicas: current.Deployment.MinReplicas, MaxReplicas: current.Deployment.MaxReplicas, ActiveRevision: current.Deployment.ActiveRevisionID, ActiveRevisionNumber: activeNumber, Serving: activeSpec.Serving})
+		p = planning.Compare(p, planning.Current{Model: current.Deployment.Model, Runtime: current.Deployment.Runtime, Routing: current.Deployment.RoutingStrategy, ComputeMode: activeSpec.ComputeMode, Cloud: activeSpec.Cloud, ProviderAdapter: activeSpec.ProviderAdapter, GPU: activeSpec.GPU, GPUCount: activeSpec.GPUCount, Region: activeSpec.Region, MinReplicas: current.Deployment.MinReplicas, MaxReplicas: current.Deployment.MaxReplicas, ActiveRevision: current.Deployment.ActiveRevisionID, ActiveRevisionNumber: activeNumber, Serving: activeSpec.Serving})
 	} else {
 		var controlErr *ControlError
 		if !errors.As(lookupErr, &controlErr) || controlErr.Code != "not_found" {
@@ -466,7 +473,7 @@ func planCommand(ctx context.Context, cfg config.Config, args []string) error {
 		if evidenceErr := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/capacity/intelligence?window_seconds=2592000", "", nil, &response); evidenceErr == nil {
 			evidence := make([]planning.CapacityEvidence, 0, len(response.Capacity))
 			for _, row := range response.Capacity {
-				evidence = append(evidence, planning.CapacityEvidence{Provider: row.Provider, Runtime: row.Runtime, ComputeMode: row.ComputeMode, Region: row.Region, GPU: row.GPU, Attempts: row.Attempts, Succeeded: row.Succeeded, Pending: row.Pending, SuccessRate: row.SuccessRate, DurationP50Seconds: row.DurationP50Seconds, DurationP95Seconds: row.DurationP95Seconds})
+				evidence = append(evidence, planning.CapacityEvidence{Provider: row.Provider, Runtime: row.Runtime, ComputeMode: row.ComputeMode, Region: row.Region, GPU: row.GPU, GPUCount: row.GPUCount, Attempts: row.Attempts, Succeeded: row.Succeeded, Pending: row.Pending, SuccessRate: row.SuccessRate, DurationP50Seconds: row.DurationP50Seconds, DurationP95Seconds: row.DurationP95Seconds})
 			}
 			p = planning.ApplyCapacityEvidence(p, evidence)
 		}
@@ -1670,6 +1677,7 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 	providerAdapter := fs.String("provider-adapter", "", "provider adapter profile (advanced)")
 	backend := fs.String("backend", "", "serving backend; use dynamo for a managed Dynamo graph")
 	gpu := fs.String("gpu", "", "GPU")
+	gpuCount := fs.Int("gpu-count", 1, "GPUs allocated to each runtime replica")
 	region := fs.String("region", "", "region")
 	runtimeFlag := fs.String("runtime", "vllm", "runtime engine: vllm or sglang")
 	computeMode := fs.String("compute", "elastic", "compute mode: elastic or serverless")
@@ -1688,10 +1696,13 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 	if *waitTimeout < 0 || (*waitTimeout > 0 && !*wait) {
 		return errors.New("--wait-timeout must be non-negative and requires --wait")
 	}
-	minExplicit := false
+	minExplicit, gpuCountExplicit := false, false
 	fs.Visit(func(item *flag.Flag) {
-		if item.Name == "min" {
+		switch item.Name {
+		case "min":
 			minExplicit = true
+		case "gpu-count":
+			gpuCountExplicit = true
 		}
 	})
 	strategy := "round-robin"
@@ -1706,7 +1717,7 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 		if err != nil {
 			return err
 		}
-		if *name != "" || *endpointName != "" || *targets != "" || *cloud != "" || *backend != "" || *providerAdapter != "" || *gpu != "" || *region != "" || *runtimeFlag != "vllm" {
+		if *name != "" || *endpointName != "" || *targets != "" || *cloud != "" || *backend != "" || *providerAdapter != "" || *gpu != "" || gpuCountExplicit || *region != "" || *runtimeFlag != "vllm" {
 			return errors.New("deployment YAML cannot be combined with deployment flags")
 		}
 		*name = file.Name
@@ -1719,6 +1730,7 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 		*cloud = file.Provider.Cloud
 		*providerAdapter = file.Provider.Adapter
 		*gpu = file.Resources.GPU
+		*gpuCount = file.Resources.GPUCount
 		*region = file.Provider.Region
 		strategy = file.Routing.Strategy
 		runtimeArgs = file.Runtime.Args
@@ -1774,13 +1786,16 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 		if *computeMode != "elastic" {
 			return errors.New("--compute serverless cannot be combined with --targets")
 		}
+		if gpuCountExplicit {
+			return errors.New("--gpu-count applies only to provisioned capacity and cannot be combined with --targets")
+		}
 		if *cloud != "" || *gpu != "" {
 			return errors.New("use either --targets or --cloud/--gpu")
 		}
 		path = "/api/v1/deployments/apply"
 		request = workflows.ApplyExistingRequest{Name: *name, EndpointName: *endpointName, Model: model, Targets: splitTargets(*targets), RoutingStrategy: strategy, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas, AutoscalingEnabled: *maxReplicas > *minReplicas}
 	} else if *cloud != "" && *gpu != "" {
-		request = workflows.CloudRequest{Name: *name, EndpointName: *endpointName, Model: model, ModelRevision: modelRevision, Runtime: runtimeEngine, RuntimeVersion: runtimeVersion, ComputeMode: *computeMode, Cloud: *cloud, ProviderAdapter: *providerAdapter, GPU: *gpu, Region: *region, RuntimeArgs: runtimeArgs, Workload: runtimeWorkload, Serving: servingTopology, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas}
+		request = workflows.CloudRequest{Name: *name, EndpointName: *endpointName, Model: model, ModelRevision: modelRevision, Runtime: runtimeEngine, RuntimeVersion: runtimeVersion, ComputeMode: *computeMode, Cloud: *cloud, ProviderAdapter: *providerAdapter, GPU: *gpu, GPUCount: *gpuCount, Region: *region, RuntimeArgs: runtimeArgs, Workload: runtimeWorkload, Serving: servingTopology, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas}
 	} else {
 		return errors.New("provide --targets or both --cloud and --gpu")
 	}
@@ -3620,6 +3635,7 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 	cloud := fs.String("cloud", "", "candidate provider cloud")
 	providerAdapter := fs.String("provider-adapter", "", "candidate provider adapter profile (advanced)")
 	gpu := fs.String("gpu", "", "candidate GPU")
+	gpuCount := fs.Int("gpu-count", 1, "candidate GPUs allocated to each runtime replica")
 	region := fs.String("region", "", "candidate region")
 	modelRevision := fs.String("model-revision", "", "candidate model revision")
 	runtimeVersion := fs.String("runtime-version", "", "candidate runtime version")
@@ -3638,6 +3654,12 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 	if err := fs.Parse(rest); err != nil {
 		return err
 	}
+	gpuCountExplicit := false
+	fs.Visit(func(item *flag.Flag) {
+		if item.Name == "gpu-count" {
+			gpuCountExplicit = true
+		}
+	})
 	if *output != "human" && *output != "json" {
 		return errors.New("--output must be human or json")
 	}
@@ -3722,7 +3744,7 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 				Runtime: candidate.Runtime.Engine, RuntimeVersion: candidate.Runtime.Version, RuntimeArgs: candidate.Runtime.Args,
 				RoutingStrategy: candidate.Routing.Strategy, MinReplicas: candidate.Scaling.MinReplicas, MaxReplicas: candidate.Scaling.MaxReplicas,
 				AutoscalingEnabled: candidate.Scaling.MaxReplicas > candidate.Scaling.MinReplicas, ComputeMode: candidate.Compute.Mode,
-				Cloud: candidate.Provider.Cloud, ProviderAdapter: candidate.Provider.Adapter, GPU: candidate.Resources.GPU, Region: candidate.Provider.Region,
+				Cloud: candidate.Provider.Cloud, ProviderAdapter: candidate.Provider.Adapter, GPU: candidate.Resources.GPU, GPUCount: candidate.Resources.GPUCount, Region: candidate.Provider.Region,
 				Workload: candidate.Runtime.Workload, Serving: candidate.Serving,
 			}
 		} else {
@@ -3735,11 +3757,16 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 			if (*cloud == "") != (*gpu == "") {
 				return errors.New("--cloud and --gpu must be provided together")
 			}
+			if *cloud == "" && gpuCountExplicit {
+				return errors.New("--gpu-count applies only to provisioned candidate capacity and requires --cloud and --gpu")
+			}
 			computeMode := "existing"
+			revisionGPUCount := 0
 			if *cloud != "" {
 				computeMode = "elastic"
+				revisionGPUCount = *gpuCount
 			}
-			revisionSpec = domain.DeploymentRevisionSpec{Model: *model, ModelRevision: *modelRevision, Runtime: *runtimeName, RuntimeVersion: *runtimeVersion, RoutingStrategy: *routing, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas, AutoscalingEnabled: *maxReplicas > *minReplicas, ComputeMode: computeMode, Cloud: *cloud, ProviderAdapter: *providerAdapter, GPU: *gpu, Region: *region}
+			revisionSpec = domain.DeploymentRevisionSpec{Model: *model, ModelRevision: *modelRevision, Runtime: *runtimeName, RuntimeVersion: *runtimeVersion, RoutingStrategy: *routing, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas, AutoscalingEnabled: *maxReplicas > *minReplicas, ComputeMode: computeMode, Cloud: *cloud, ProviderAdapter: *providerAdapter, GPU: *gpu, GPUCount: revisionGPUCount, Region: *region}
 			if *runtimeArgs != "" {
 				revisionSpec.RuntimeArgs = splitTargets(*runtimeArgs)
 			}
@@ -3962,7 +3989,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	}
 	priceCatalog := pricing.Catalog{Prices: map[pricing.Request]pricing.Estimate{}}
 	for _, row := range cfg.OptimizationPrices {
-		priceCatalog.Prices[pricing.Request{Cloud: row.Cloud, Region: row.Region, GPU: row.GPU, Replicas: row.Replicas}] = pricing.Estimate{Currency: row.Currency, Source: row.Source, Hourly: row.HourlyUSD, ObservedAt: row.ObservedAt, StaleAfter: row.ValidUntil.Sub(row.ObservedAt)}
+		priceCatalog.Prices[pricing.Request{Cloud: row.Cloud, Region: row.Region, GPU: row.GPU, GPUCount: row.GPUCount, Replicas: row.Replicas}] = pricing.Estimate{Currency: row.Currency, Source: row.Source, Hourly: row.HourlyUSD, ObservedAt: row.ObservedAt, StaleAfter: row.ValidUntil.Sub(row.ObservedAt)}
 	}
 	_, aiperfErr := exec.LookPath(cfg.AIPerfBinary)
 	optimizationExecutionEnabled := len(priceCatalog.Prices) > 0 && aiperfErr == nil
@@ -4009,7 +4036,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		awsProvider := provision.AWSEC2{
 			RoleARN: cfg.AWSRoleARN, ExternalID: cfg.AWSExternalID, Region: cfg.AWSRegion,
 			SubnetID: cfg.AWSSubnetID, SubnetIDs: cfg.AWSSubnetIDs, SecurityGroupIDs: cfg.AWSSecurityGroupIDs,
-			AMIID: cfg.AWSAMIID, InstanceType: cfg.AWSInstanceType, GPU: cfg.AWSGPU,
+			AMIID: cfg.AWSAMIID, InstanceType: cfg.AWSInstanceType, GPU: cfg.AWSGPU, GPUCount: cfg.AWSGPUCount,
 			InstanceProfileARN: cfg.AWSInstanceProfileARN, WorkerSecretARN: cfg.AWSWorkerSecretARN,
 			ImageDigest: cfg.AWSImageDigest, RootVolumeGiB: cfg.AWSRootVolumeGiB, ImageCachePolicy: cfg.AWSImageCachePolicy,
 			ArtifactCachePolicy: cfg.AWSArtifactCachePolicy, ArtifactSnapshots: cfg.AWSArtifactSnapshots,

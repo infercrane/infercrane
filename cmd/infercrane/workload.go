@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -45,7 +46,9 @@ func workloadInitCommand(args []string) error {
 	name := fs.String("name", "", "deployment name")
 	runtimeName := fs.String("runtime", "vllm", "vllm or sglang")
 	cloud := fs.String("cloud", "runpod", "infrastructure provider")
+	providerAdapter := fs.String("provider-adapter", "", "exact provider adapter")
 	gpu := fs.String("gpu", "L40S", "GPU type")
+	gpuCount := fs.Int("gpu-count", 1, "GPUs allocated to each runtime replica")
 	region := fs.String("region", "", "provider region")
 	force := fs.Bool("force", false, "replace an existing infercrane.yaml")
 	output := fs.String("output", "human", "human or json")
@@ -104,6 +107,21 @@ func workloadInitCommand(args []string) error {
 		if !explicit["gpu"] && selectedProfile.GPUHint != "" {
 			*gpu = selectedProfile.GPUHint
 		}
+		if explicit["gpu"] && len(selectedProfile.CompatibleGPUs) > 0 && !slices.Contains(selectedProfile.CompatibleGPUs, *gpu) {
+			return fmt.Errorf("serving profile %q is reviewed only for GPU %s; edit the generated DeploymentSpec to create an unreviewed configuration", selectedProfile.Name, strings.Join(selectedProfile.CompatibleGPUs, ", "))
+		}
+		if !explicit["gpu-count"] && selectedProfile.GPUCount > 0 {
+			*gpuCount = selectedProfile.GPUCount
+		}
+		if explicit["gpu-count"] && selectedProfile.GPUCount > 0 && *gpuCount != selectedProfile.GPUCount {
+			return fmt.Errorf("serving profile %q requires %d GPUs per replica; edit an unreviewed DeploymentSpec to test another topology", selectedProfile.Name, selectedProfile.GPUCount)
+		}
+		if !explicit["cloud"] && selectedProfile.CloudHint != "" {
+			*cloud = selectedProfile.CloudHint
+		}
+		if !explicit["provider-adapter"] && selectedProfile.ProviderAdapterHint != "" {
+			*providerAdapter = selectedProfile.ProviderAdapterHint
+		}
 		routing = "cache-aware"
 		if entry.Gated {
 			fmt.Fprintln(os.Stderr, "Notice: this model is gated. Confirm repository access and accept its model license before deployment.")
@@ -111,7 +129,7 @@ func workloadInitCommand(args []string) error {
 	} else if *profileName != "" {
 		return errors.New("--profile requires --recipe")
 	}
-	path, err := workloadproject.Init(workloadproject.InitOptions{Directory: directory, Name: *name, Model: *model, ModelRevision: modelRevision, Runtime: *runtimeName, Cloud: *cloud, GPU: *gpu, Region: *region, ComputeMode: selectedProfile.ComputeMode, Routing: routing, RuntimeArgs: selectedProfile.RuntimeArgs, MinReplicas: selectedProfile.MinReplicas, MaxReplicas: selectedProfile.MaxReplicas, Force: *force})
+	path, err := workloadproject.Init(workloadproject.InitOptions{Directory: directory, Name: *name, Model: *model, ModelRevision: modelRevision, Runtime: *runtimeName, RuntimeVersion: selectedProfile.RuntimeVersion, Cloud: *cloud, ProviderAdapter: *providerAdapter, GPU: *gpu, GPUCount: *gpuCount, Region: *region, ComputeMode: selectedProfile.ComputeMode, Routing: routing, RuntimeArgs: selectedProfile.RuntimeArgs, Workload: selectedProfile.Workload, MinReplicas: selectedProfile.MinReplicas, MaxReplicas: selectedProfile.MaxReplicas, Force: *force})
 	if err != nil {
 		return err
 	}

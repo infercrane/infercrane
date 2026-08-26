@@ -51,8 +51,10 @@ Generation recipes may expose three reviewed vLLM candidate profiles:
 | `vllm-throughput` | Favor aggregate token throughput | Prefix caching and `--max-num-batched-tokens 16384` |
 
 These are configuration-verified candidates, not performance claims. The selected profile is written
-into `infercrane.yaml`, including immutable runtime arguments, accelerator hint, replica bounds, and
-cache-aware routing. Review or edit that ordinary DeploymentSpec before `plan`.
+into `infercrane.yaml`, including the runtime version, immutable workload image and executable argv
+when required, accelerator type and count, provider hint, replica bounds, and cache-aware routing.
+Review or edit that ordinary DeploymentSpec before `plan`; editing a reviewed tuple creates an
+explicitly unreviewed configuration that must earn its own evidence.
 
 The candidates follow upstream [vLLM optimization guidance](https://docs.vllm.ai/en/latest/configuration/optimization/),
 which explicitly describes latency/throughput trade-offs for chunked prefill and requires workload-
@@ -63,14 +65,42 @@ promotion; a value that helps one workload can hurt another or increase memory p
 
 | Level | What it proves | What it does not prove |
 | --- | --- | --- |
-| Configuration verified | Repository identity, immutable revision, license metadata, protocol, and reviewed runtime configuration | GPU fit, provider capacity, latency, throughput, or price |
-| Measured recipe | One exact artifact, runtime, provider, GPU, region, workload, and AIPerf run | Portability to a different serving plan |
+| Configuration verified | Repository identity, immutable revision, license metadata, protocol, runtime image/argv, and accelerator topology were reviewed | GPU fit, provider capacity, latency, throughput, or price |
+| Measured recipe | One exact artifact, runtime, provider, GPU type/count, region, workload, and AIPerf run | Portability to a different serving plan |
 | Community recipe | Contributor-supplied configuration with visible provenance | InferCrane qualification unless separately recorded |
 | Explicit model | The operator selected a repository and serving plan | Compatibility or production readiness |
 
 The current built-in catalog contains only **configuration-verified** entries. Measured results stay
 tenant-scoped in benchmark history and immutable model recipes; InferCrane does not silently promote
 them into universal claims.
+
+## General profiles for fast-moving runtimes
+
+Serving profiles are not limited to InferCrane's built-in vLLM image. A profile can carry a custom
+OCI image pinned by digest, a runtime version label, complete executable argv and probes, an exact
+GPU count, compatible GPU types, and a provider hint. The same revision contract flows through
+planning, provider compilation, pricing, capacity evidence, benchmarking, recommendations, and
+signed inference passports. Lifecycle code contains no model-specific branch.
+
+`glm-5.3-flash` is the first experimental catalog entry exercising this general path. Its reviewed
+profile pins the model commit and upstream dedicated vLLM image, requests one four-H200 Kubernetes
+replica, and records tensor-parallel argv. It remains **configuration-verified**, not real-GPU or
+production-qualified. The profile deliberately uses a bounded 131K context starting point rather
+than converting the model card's declared 1M maximum into an unmeasured production promise. See the
+[official model card](https://huggingface.co/zai-org/GLM-5.3-Flash) and
+[upstream vLLM recipe](https://recipes.vllm.ai/zai-org/GLM-5.3-Flash).
+
+```bash
+infercrane models inspect glm-5.3-flash
+infercrane workload init ./glm-flash \
+  --recipe glm-5.3-flash \
+  --profile custom-oci-hopper-tp4
+infercrane workload validate ./glm-flash
+infercrane workload plan ./glm-flash
+```
+
+Those commands are local and non-mutating through `plan`. Deployment still requires an operator's
+Kubernetes GPU cluster and fresh qualification evidence for the exact generated tuple.
 
 ## Current market watch
 
@@ -139,9 +169,10 @@ performance or provider availability.
 </Note>
 
 <Warning>
-The `gpu_hint` in a serving profile is an editable configuration starting point. Run `plan`, confirm
-model memory/topology requirements, and qualify the exact provider/runtime combination before
-production.
+`gpu_hint` supplies the default accelerator. Profiles with `compatible_gpus` reject a different GPU
+during scaffolding because their runtime argv is hardware-specific. You can edit the generated YAML
+to experiment, but that is a new unreviewed configuration. Run `plan`, confirm memory/topology
+requirements, and qualify the exact provider/runtime combination before production.
 </Warning>
 
 ## Any Hugging Face model remains available

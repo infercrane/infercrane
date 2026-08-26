@@ -28,7 +28,7 @@ type Config struct {
 	AWSImageCachePolicy, AWSArtifactCachePolicy                                                                        string
 	AWSSubnetIDs, AWSSecurityGroupIDs                                                                                  []string
 	AWSArtifactSnapshots                                                                                               map[string]string
-	AWSRootVolumeGiB, AWSArtifactVolumeInitializationRate                                                              int
+	AWSGPUCount, AWSRootVolumeGiB, AWSArtifactVolumeInitializationRate                                                 int
 	GCPProject, GCPZone, GCPSubnet, GCPMachineType, GCPGPU, GCPServiceAccount                                          string
 	GCPVMImage, GCPContainerImage, GCPWorkerSecret, GCPArtifactCachePolicy                                             string
 	GCPArtifactDisks                                                                                                   map[string]string
@@ -46,7 +46,7 @@ type Config struct {
 
 type OptimizationPrice struct {
 	Cloud, Region, GPU, Currency, Source string
-	Replicas                             int
+	GPUCount, Replicas                   int
 	HourlyUSD                            float64
 	ObservedAt, ValidUntil               time.Time
 }
@@ -278,6 +278,10 @@ func load(requireAPIKey bool) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	awsGPUCount, err := envInt("INFERCRANE_AWS_GPU_COUNT", 1)
+	if err != nil {
+		return Config{}, err
+	}
 	awsArtifactVolumeInitializationRate, err := envInt("INFERCRANE_AWS_ARTIFACT_VOLUME_INITIALIZATION_RATE_MIBPS", 0)
 	if err != nil {
 		return Config{}, err
@@ -333,6 +337,7 @@ func load(requireAPIKey bool) (Config, error) {
 		AWSAMIID:                            env("INFERCRANE_AWS_AMI_ID", ""),
 		AWSInstanceType:                     env("INFERCRANE_AWS_INSTANCE_TYPE", ""),
 		AWSGPU:                              env("INFERCRANE_AWS_GPU", ""),
+		AWSGPUCount:                         awsGPUCount,
 		AWSInstanceProfileARN:               env("INFERCRANE_AWS_INSTANCE_PROFILE_ARN", ""),
 		AWSWorkerSecretARN:                  env("INFERCRANE_AWS_WORKER_SECRET_ARN", ""),
 		AWSImageDigest:                      env("INFERCRANE_AWS_IMAGE_DIGEST", ""),
@@ -503,6 +508,9 @@ func validateAWS(config Config) error {
 	}
 	if runtimecontract.ValidateImage(config.AWSImageDigest) != nil {
 		return errors.New("INFERCRANE_AWS_IMAGE_DIGEST must be pinned by sha256 digest")
+	}
+	if config.AWSGPUCount < 1 || config.AWSGPUCount > 1024 {
+		return errors.New("INFERCRANE_AWS_GPU_COUNT must be between 1 and 1024")
 	}
 	if config.AWSRootVolumeGiB < 50 || config.AWSRootVolumeGiB > 16384 {
 		return errors.New("INFERCRANE_AWS_ROOT_VOLUME_GIB must be between 50 and 16384")
@@ -771,6 +779,7 @@ func envOptimizationPrices(key string) ([]OptimizationPrice, error) {
 	}
 	type encodedPrice struct {
 		Cloud, Region, GPU, Currency, Source string
+		GPUCount                             int `json:"gpu_count"`
 		Replicas                             int
 		HourlyUSD                            float64 `json:"hourly_usd"`
 		ObservedAt                           string  `json:"observed_at"`
@@ -792,15 +801,18 @@ func envOptimizationPrices(key string) ([]OptimizationPrice, error) {
 	prices := make([]OptimizationPrice, 0, len(encoded))
 	seen := map[string]struct{}{}
 	for index, row := range encoded {
+		if row.GPUCount == 0 {
+			row.GPUCount = 1
+		}
 		observedAt, observedErr := time.Parse(time.RFC3339, row.ObservedAt)
 		validUntil, validErr := time.Parse(time.RFC3339, row.ValidUntil)
-		identity := strings.Join([]string{row.Cloud, row.Region, row.GPU, strconv.Itoa(row.Replicas)}, "\x00")
+		identity := strings.Join([]string{row.Cloud, row.Region, row.GPU, strconv.Itoa(row.GPUCount), strconv.Itoa(row.Replicas)}, "\x00")
 		_, duplicate := seen[identity]
-		if strings.TrimSpace(row.Cloud) == "" || strings.TrimSpace(row.GPU) == "" || strings.TrimSpace(row.Source) == "" || row.Currency != "USD" || row.Replicas < 1 || row.Replicas > 100 || row.HourlyUSD <= 0 || math.IsNaN(row.HourlyUSD) || math.IsInf(row.HourlyUSD, 0) || observedErr != nil || validErr != nil || !validUntil.After(observedAt) || duplicate {
-			return nil, fmt.Errorf("%s[%d] must contain a unique cloud/region/GPU/replicas tuple, positive finite USD rate, source, and increasing RFC3339 evidence window", key, index)
+		if strings.TrimSpace(row.Cloud) == "" || strings.TrimSpace(row.GPU) == "" || strings.TrimSpace(row.Source) == "" || row.Currency != "USD" || row.GPUCount < 1 || row.GPUCount > 1024 || row.Replicas < 1 || row.Replicas > 100 || row.HourlyUSD <= 0 || math.IsNaN(row.HourlyUSD) || math.IsInf(row.HourlyUSD, 0) || observedErr != nil || validErr != nil || !validUntil.After(observedAt) || duplicate {
+			return nil, fmt.Errorf("%s[%d] must contain a unique cloud/region/GPU/gpu_count/replicas tuple, positive finite USD rate, source, and increasing RFC3339 evidence window", key, index)
 		}
 		seen[identity] = struct{}{}
-		prices = append(prices, OptimizationPrice{Cloud: row.Cloud, Region: row.Region, GPU: row.GPU, Replicas: row.Replicas, HourlyUSD: row.HourlyUSD, Currency: row.Currency, Source: row.Source, ObservedAt: observedAt.UTC(), ValidUntil: validUntil.UTC()})
+		prices = append(prices, OptimizationPrice{Cloud: row.Cloud, Region: row.Region, GPU: row.GPU, GPUCount: row.GPUCount, Replicas: row.Replicas, HourlyUSD: row.HourlyUSD, Currency: row.Currency, Source: row.Source, ObservedAt: observedAt.UTC(), ValidUntil: validUntil.UTC()})
 	}
 	return prices, nil
 }

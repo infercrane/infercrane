@@ -119,9 +119,18 @@ func TestAWSBYOCConfigurationIsAllOrNothingAndImmutable(t *testing.T) {
 	}
 	t.Setenv("INFERCRANE_AWS_IMAGE_DIGEST", "ghcr.io/infercrane/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	cfg, err := Load()
-	if err != nil || !cfg.AWSEnabled() || len(cfg.AWSSecurityGroupIDs) != 2 || cfg.AWSRootVolumeGiB != 200 || cfg.AWSImageCachePolicy != "prefer" {
+	if err != nil || !cfg.AWSEnabled() || len(cfg.AWSSecurityGroupIDs) != 2 || cfg.AWSGPUCount != 1 || cfg.AWSRootVolumeGiB != 200 || cfg.AWSImageCachePolicy != "prefer" {
 		t.Fatalf("cfg=%#v err=%v", cfg, err)
 	}
+	t.Setenv("INFERCRANE_AWS_GPU_COUNT", "4")
+	if cfg, err = Load(); err != nil || cfg.AWSGPUCount != 4 {
+		t.Fatalf("multi-GPU AWS topology rejected: cfg=%#v err=%v", cfg, err)
+	}
+	t.Setenv("INFERCRANE_AWS_GPU_COUNT", "0")
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "AWS_GPU_COUNT") {
+		t.Fatalf("invalid AWS GPU count accepted: %v", err)
+	}
+	t.Setenv("INFERCRANE_AWS_GPU_COUNT", "1")
 	t.Setenv("INFERCRANE_AWS_SUBNET_ID", "")
 	t.Setenv("INFERCRANE_AWS_SUBNET_IDS", "subnet-private-a, subnet-private-b,subnet-private-a")
 	cfg, err = Load()

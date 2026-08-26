@@ -57,6 +57,23 @@ func TestKubernetesProviderAppliesValidatesAdoptsAndDeletesOwnerSet(t *testing.T
 	}
 }
 
+func TestKubernetesPortableWorkloadUsesExactTopologyAndExecutableArgv(t *testing.T) {
+	fixture := providerfixture.NewKubernetesCLI()
+	provider := testKubernetesProvider(fixture, "deployment")
+	spec := testKubernetesSpec()
+	spec.GPU, spec.GPUCount, spec.Runtime = "H200", 4, "custom-oci"
+	spec.Workload = runtimecontract.Workload{Image: "registry.example/runtime@sha256:" + strings.Repeat("b", 64), Command: []string{"vllm", "serve", "${MODEL}"}, Protocol: "openai", Port: 8000, ReadinessPath: "/health", ModelsPath: "/v1/models", MetricsPath: "/metrics", Cancellation: "http-disconnect", Drain: "connection", ShutdownGraceSeconds: 120}
+	if _, err := provider.EnsureReplica(context.Background(), spec); err != nil {
+		t.Fatal(err)
+	}
+	encoded, _ := json.Marshal(fixture.Objects)
+	for _, expected := range []string{`"nvidia.com/gpu":"4"`, `"command":["vllm"]`, `"args":["serve","Qwen/Qwen3-8B"]`, `"terminationGracePeriodSeconds":120`} {
+		if !strings.Contains(string(encoded), expected) {
+			t.Fatalf("manifest missing %q: %s", expected, encoded)
+		}
+	}
+}
+
 func TestKubernetesProviderAdoptsLostResponseAndRepairsPartialOwnerSet(t *testing.T) {
 	fixture := providerfixture.NewKubernetesCLI()
 	fixture.FailAfterApplyOnce = true

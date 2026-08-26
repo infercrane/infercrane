@@ -140,6 +140,21 @@ func TestGCPComputeCheckRequiresPrivateGoogleAccess(t *testing.T) {
 	}
 }
 
+func TestGCPComputeCompilesExactAcceleratorCountAndPortableEntrypoint(t *testing.T) {
+	runner := &fakeGCPRunner{}
+	provider := testGCPCompute(runner)
+	spec := ReplicaSpec{ExternalKey: "deployment-r0", Model: "zai-org/model", ModelRevision: "commit", Cloud: "gcp", Region: "europe-west4", GPU: "nvidia-l4", GPUCount: 4, Workload: runtimecontract.Workload{Image: "registry.example/runtime@sha256:" + strings.Repeat("b", 64), Command: []string{"vllm", "serve", "${MODEL}"}, Protocol: "openai", Port: 8000, ReadinessPath: "/health", ModelsPath: "/v1/models", MetricsPath: "/metrics", Cancellation: "http-disconnect", Drain: "connection", ShutdownGraceSeconds: 30}}
+	if _, err := provider.EnsureReplica(context.Background(), spec); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(runner.lastCreate, "\n")
+	for _, expected := range []string{"type=nvidia-l4,count=4", `[ "$actual_gpu_count" -eq 4 ]`, "--entrypoint 'vllm' '" + spec.Workload.Image + "' 'serve' 'zai-org/model'"} {
+		if !strings.Contains(joined, expected) {
+			t.Fatalf("create request missing %q:\n%s", expected, joined)
+		}
+	}
+}
+
 func TestGCPComputeCheckVerifiesConfiguredArtifactDiskWithoutMutation(t *testing.T) {
 	const identity = "Qwen/Qwen3-8B@0123456789abcdef0123456789abcdef01234567"
 	runner := &gcpCheckRunner{disk: gcpDisk{

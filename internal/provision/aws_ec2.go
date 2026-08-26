@@ -28,6 +28,7 @@ type AWSEC2 struct {
 	SubnetIDs                        []string
 	SecurityGroupIDs                 []string
 	AMIID, InstanceType, GPU         string
+	GPUCount                         int
 	InstanceProfileARN               string
 	WorkerSecretARN                  string
 	ImageDigest                      string
@@ -316,6 +317,20 @@ func (a AWSEC2) validate(spec ReplicaSpec) error {
 	}
 	if spec.GPU != a.GPU {
 		return fmt.Errorf("configured AWS instance type %s is qualified for GPU %s, not %s", a.InstanceType, a.GPU, spec.GPU)
+	}
+	configuredGPUCount := a.GPUCount
+	if configuredGPUCount == 0 {
+		configuredGPUCount = 1
+	}
+	requestedGPUCount := spec.GPUCount
+	if requestedGPUCount == 0 {
+		requestedGPUCount = 1
+	}
+	if configuredGPUCount < 1 || configuredGPUCount > 1024 {
+		return errors.New("configured AWS GPU count must be between 1 and 1024")
+	}
+	if requestedGPUCount != configuredGPUCount {
+		return fmt.Errorf("configured AWS instance type %s is qualified for %d GPUs, not %d", a.InstanceType, configuredGPUCount, requestedGPUCount)
 	}
 	if a.rootVolumeGiB() < 50 || a.rootVolumeGiB() > 16384 {
 		return errors.New("AWS root volume must be between 50 and 16384 GiB")
@@ -794,6 +809,11 @@ func (a AWSEC2) rootVolumeGiB() int {
 
 func (a AWSEC2) userData(spec ReplicaSpec, port int, artifactSnapshotID string) string {
 	artifactBootstrap, artifactContainerArgs := awsArtifactCacheBootstrap(artifactSnapshotID)
+	gpuCount := spec.GPUCount
+	if gpuCount == 0 {
+		gpuCount = 1
+	}
+	gpuIdentity := "infercrane_stage accelerator_check\nactual_gpu_count=$(nvidia-smi --list-gpus | wc -l | tr -d ' ')\n[ \"$actual_gpu_count\" -eq " + fmt.Sprint(gpuCount) + " ] || { echo 'allocated GPU count does not match immutable revision intent' >&2; exit 1; }\ninfercrane_stage accelerator_ready\n"
 	if !spec.Workload.Empty() {
 		args := append(append([]string(nil), spec.Workload.Command...), spec.RuntimeArgs...)
 		quoted := make([]string, len(args))
@@ -809,7 +829,7 @@ func (a AWSEC2) userData(spec ReplicaSpec, port int, artifactSnapshotID string) 
 			}
 		}
 		image := spec.Workload.Image
-		return "#!/bin/sh\nset -eu\ninfercrane_stage() { printf 'infercrane_startup stage=%s at=%s\\n' \"$1\" \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" >/dev/console; }\ninfercrane_stage identity_start\nworker_key=$(aws secretsmanager get-secret-value --region " + shellQuote(a.Region) + " --secret-id " + shellQuote(a.WorkerSecretARN) + " --query SecretString --output text)\ninfercrane_stage identity_ready\n" + cachedImageBootstrapWithPolicy(image, a.imageCachePolicy()) + artifactBootstrap + "infercrane_stage runtime_start\ncontainer_id=$(docker run -d --restart=unless-stopped --gpus all " + artifactContainerArgs + "-e INFERCRANE_WORKER_API_KEY=\"$worker_key\" -e VLLM_API_KEY=\"$worker_key\" -p " + fmt.Sprintf("%d:%d", port, port) + " " + shellQuote(image) + " " + strings.Join(quoted, " ") + ")\ninfercrane_stage runtime_container_started\ndocker logs --follow \"$container_id\" >/dev/console 2>&1 &\n"
+		return "#!/bin/sh\nset -eu\ninfercrane_stage() { printf 'infercrane_startup stage=%s at=%s\\n' \"$1\" \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" >/dev/console; }\ninfercrane_stage identity_start\nworker_key=$(aws secretsmanager get-secret-value --region " + shellQuote(a.Region) + " --secret-id " + shellQuote(a.WorkerSecretARN) + " --query SecretString --output text)\ninfercrane_stage identity_ready\n" + gpuIdentity + cachedImageBootstrapWithPolicy(image, a.imageCachePolicy()) + artifactBootstrap + "infercrane_stage runtime_start\ncontainer_id=$(docker run -d --restart=unless-stopped --gpus all " + artifactContainerArgs + "-e INFERCRANE_WORKER_API_KEY=\"$worker_key\" -e VLLM_API_KEY=\"$worker_key\" -p " + fmt.Sprintf("%d:%d", port, port) + " --entrypoint " + quoted[0] + " " + shellQuote(image) + " " + strings.Join(quoted[1:], " ") + ")\ninfercrane_stage runtime_container_started\ndocker logs --follow \"$container_id\" >/dev/console 2>&1 &\n"
 	}
 	// The vLLM OpenAI image entrypoint is `vllm serve`. Since v0.22 the model
 	// is a positional argument; keep generated startup compatible with the
@@ -823,7 +843,7 @@ func (a AWSEC2) userData(spec ReplicaSpec, port int, artifactSnapshotID string) 
 	for i, arg := range args {
 		quoted[i] = shellQuote(arg)
 	}
-	return "#!/bin/sh\nset -eu\ninfercrane_stage() { printf 'infercrane_startup stage=%s at=%s\\n' \"$1\" \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" >/dev/console; }\ninfercrane_stage identity_start\nworker_key=$(aws secretsmanager get-secret-value --region " + shellQuote(a.Region) + " --secret-id " + shellQuote(a.WorkerSecretARN) + " --query SecretString --output text)\ninfercrane_stage identity_ready\n" + cachedImageBootstrapWithPolicy(a.ImageDigest, a.imageCachePolicy()) + artifactBootstrap + "infercrane_stage runtime_start\ncontainer_id=$(docker run -d --restart=unless-stopped --gpus all " + artifactContainerArgs + "-e VLLM_API_KEY=\"$worker_key\" -p " + fmt.Sprintf("%d:%d", port, port) + " " + shellQuote(a.ImageDigest) + " " + strings.Join(quoted, " ") + ")\ninfercrane_stage runtime_container_started\ndocker logs --follow \"$container_id\" >/dev/console 2>&1 &\n"
+	return "#!/bin/sh\nset -eu\ninfercrane_stage() { printf 'infercrane_startup stage=%s at=%s\\n' \"$1\" \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" >/dev/console; }\ninfercrane_stage identity_start\nworker_key=$(aws secretsmanager get-secret-value --region " + shellQuote(a.Region) + " --secret-id " + shellQuote(a.WorkerSecretARN) + " --query SecretString --output text)\ninfercrane_stage identity_ready\n" + gpuIdentity + cachedImageBootstrapWithPolicy(a.ImageDigest, a.imageCachePolicy()) + artifactBootstrap + "infercrane_stage runtime_start\ncontainer_id=$(docker run -d --restart=unless-stopped --gpus all " + artifactContainerArgs + "-e VLLM_API_KEY=\"$worker_key\" -p " + fmt.Sprintf("%d:%d", port, port) + " " + shellQuote(a.ImageDigest) + " " + strings.Join(quoted, " ") + ")\ninfercrane_stage runtime_container_started\ndocker logs --follow \"$container_id\" >/dev/console 2>&1 &\n"
 }
 
 func awsArtifactCacheBootstrap(snapshotID string) (string, string) {

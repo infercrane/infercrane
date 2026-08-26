@@ -44,6 +44,7 @@ provider:
   region: EU-RO-1
 resources:
   gpu: L40S
+  gpu_count: 1
 scaling:
   min_replicas: 1
   max_replicas: 4
@@ -71,3 +72,10 @@ profile can serve a cloud/runtime pair; it is optional for an unambiguous defaul
 elastic defaults include configured AWS EC2 and GCP Compute, while other provider-product profiles
 remain registered but deferred until their exact combination is qualified. AWS and GCP require an
 explicit `provider.region`. Cost is omitted unless a trustworthy provider measurement exists.
+
+`resources.gpu_count` is the number of accelerators allocated to each runtime replica and defaults
+to one. It is part of immutable intent, pricing, capacity history, benchmarks, recommendations, and
+inference passports. SkyPilot, GCP Compute, and Kubernetes compile the exact count into provider
+resources. AWS EC2 binds the count to `INFERCRANE_AWS_GPU_COUNT` for the configured instance type and
+rejects a mismatch before creating paid capacity. Serverless currently supports one accelerator per
+worker and rejects any other count explicitly.
