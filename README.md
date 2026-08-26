@@ -15,9 +15,6 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/infercrane/infercrane/actions/workflows/quality.yml"><img alt="Quality" src="https://github.com/infercrane/infercrane/actions/workflows/quality.yml/badge.svg"></a>
-  <a href="https://github.com/infercrane/infercrane/actions/workflows/security.yml"><img alt="Security" src="https://github.com/infercrane/infercrane/actions/workflows/security.yml/badge.svg"></a>
-  <a href="https://github.com/infercrane/infercrane/actions/workflows/docs.yml"><img alt="Documentation" src="https://github.com/infercrane/infercrane/actions/workflows/docs.yml/badge.svg"></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-111111.svg"></a>
   <a href="https://docs.infercrane.com"><img alt="Documentation" src="https://img.shields.io/badge/docs-infercrane.com-235ee7.svg"></a>
 </p>
