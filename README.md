@@ -178,7 +178,7 @@ Read the [architecture](https://docs.infercrane.com/architecture/system),
 | Interface | Status and purpose |
 |---|---|
 | CLI and control API | Primary deployment, operation, evidence, and administration interfaces. |
-| OpenAI-compatible gateway | Chat, Completions, Embeddings, Responses, and qualified online batch paths. |
+| OpenAI-compatible gateway | Capability-gated Chat, Completions, Embeddings, Responses, and online batch paths. The pinned vLLM profile currently qualifies Chat plus model-compatible Completions and Embeddings; unsupported capabilities fail before upstream transmission. |
 | Python and TypeScript SDKs | Generated from the checked OpenAPI contract and built in CI. Public package publication is pending. |
 | Terraform provider | Logical deployment lifecycle with guarded updates and import. Registry publication is pending. |
 | Terminal workspace | Fleet attention, evidence inspection, and state-valid guarded actions. |
