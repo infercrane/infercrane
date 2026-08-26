@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-111111.svg"></a>
+  <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-111111.svg"></a>
   <a href="https://docs.infercrane.com"><img alt="Documentation" src="https://img.shields.io/badge/docs-infercrane.com-235ee7.svg"></a>
 </p>
 
@@ -237,7 +237,7 @@ Questions and reproducible defects follow [SUPPORT.md](SUPPORT.md).
 
 ## License
 
-InferCrane Community is available under the [MIT License](LICENSE). Hosted and enterprise products
+InferCrane Community is available under the [Apache License 2.0](LICENSE). Hosted and enterprise products
 are separate distributions and are not licensed by this repository. Release archives also include
 [third-party notices](THIRD_PARTY_NOTICES.md) and a release-specific SPDX SBOM. The InferCrane name
 and crane logo remain subject to the [trademark policy](TRADEMARKS.md).

@@ -6,6 +6,7 @@ before:
   hooks:
     - go mod download
     - go test ./...
+    - ./scripts/generate-go-license-bundle.sh .release/generated-licenses/go
 
 builds:
   - id: infercrane
@@ -24,8 +25,13 @@ archives:
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - LICENSE
+      - NOTICE
       - README.md
       - THIRD_PARTY_NOTICES.md
+      - src: .release/generated-licenses/go/**/*
+        dst: THIRD_PARTY_LICENSES
+      - src: .release/generated-licenses/go/manifest.csv
+        dst: THIRD_PARTY_LICENSES/manifest.csv
 
 checksum:
   name_template: checksums.txt

@@ -41,9 +41,24 @@ test -f "$root/docs/release-notes-v$release_version.md"
 go run ./tools/openapi-codegen -check
 PYTHONPATH="$root/sdk/python/src" python3 -m unittest discover -s "$root/sdk/python/tests"
 python3 -m pip wheel --disable-pip-version-check --no-deps --wheel-dir "$package_dir" "$root/sdk/python"
+python_wheel=$(find "$package_dir" -maxdepth 1 -name 'infercrane-*.whl' -print -quit)
+python3 - "$python_wheel" <<'PY'
+import sys
+import zipfile
+
+with zipfile.ZipFile(sys.argv[1]) as archive:
+    names = archive.namelist()
+    assert any(name.endswith(".dist-info/licenses/LICENSE") for name in names), names
+    assert any(name.endswith(".dist-info/licenses/NOTICE") for name in names), names
+    metadata_name = next(name for name in names if name.endswith(".dist-info/METADATA"))
+    metadata = archive.read(metadata_name).decode()
+    assert "License-Expression: Apache-2.0\n" in metadata, metadata
+PY
 npm --prefix "$root/sdk/typescript" ci --no-audit --no-fund
 npm --prefix "$root/sdk/typescript" test
-(cd "$root/sdk/typescript" && npm pack --dry-run >/dev/null)
+(cd "$root/sdk/typescript" && npm pack --dry-run --json) >"$package_dir/npm-pack.json"
+jq -e '.[0].files | map(.path) | index("LICENSE") != null and index("NOTICE") != null' \
+  "$package_dir/npm-pack.json" >/dev/null
 node --test "$root"/actions/infercrane/test/*.test.js
 
 (

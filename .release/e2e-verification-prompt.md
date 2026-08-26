@@ -132,6 +132,8 @@ Download the candidate draft assets produced by GitHub Actions; do not substitut
 files. Verify:
 
 - four darwin/linux amd64/arm64 archives and `checksums.txt`;
+- the Apache-2.0 `LICENSE`, InferCrane `NOTICE`, generated dependency license manifest, all linked
+  Go dependency license texts, and upstream notices including `gopkg.in/yaml.v3/NOTICE`;
 - SPDX SBOM for every archive;
 - generated `infercrane.rb` formula;
 - candidate image digest, BuildKit provenance/SBOM, and GitHub artifact attestation;
@@ -140,7 +142,8 @@ files. Verify:
 
 Extract the native archive into a clean prefix and run `version`, `--help`, and shell completion.
 Install the formula from the downloaded file. Inspect wheel and npm tarball contents for secrets,
-unexpected files, source maps, licenses, repository URLs, and exact version metadata. Pull and run
+unexpected files, source maps, Apache-2.0 license metadata and text, repository URLs, and exact
+version metadata. Pull and run
 the GHCR image by digest as its declared non-root user. Confirm anonymous pull visibility if the RC
 is intended to be public.
 

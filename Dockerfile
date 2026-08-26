@@ -13,6 +13,7 @@ RUN --mount=type=cache,target=/go/pkg/mod version="${INFERCRANE_VERSION#v}" \
     && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/runpod-fault-proxy ./internal/testtools/runpod-fault-proxy \
     && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/fake-vllm ./internal/testtools/fake-vllm \
     && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/fake-router ./internal/testtools/fake-router
+RUN --mount=type=cache,target=/go/pkg/mod ./scripts/generate-go-license-bundle.sh /out/licenses/go
 
 FROM builder AS test
 RUN --mount=type=cache,target=/go/pkg/mod go test -race -count=1 ./... \
@@ -64,7 +65,11 @@ RUN case "$TARGETARCH" in \
     && useradd --create-home --uid 10001 app
 COPY --from=builder /out/infercrane /usr/local/bin/infercrane
 COPY scripts/entrypoint.sh /usr/local/bin/infercrane-entrypoint
+COPY LICENSE NOTICE THIRD_PARTY_NOTICES.md packaging/container/THIRD_PARTY_COMPONENTS.md /usr/share/licenses/infercrane/
+COPY packaging/container/licenses /usr/share/licenses/infercrane/runtime-components
+COPY --from=builder /out/licenses/go /usr/share/licenses/infercrane/go
 RUN chmod 755 /usr/local/bin/infercrane-entrypoint
+LABEL org.opencontainers.image.licenses="Apache-2.0"
 ENV INFERCRANE_HOST=0.0.0.0
 ENV INFERCRANE_HF_PYTHON=/opt/infercrane-huggingface/bin/python
 EXPOSE 8080

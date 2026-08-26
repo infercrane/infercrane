@@ -63,4 +63,5 @@ Sign commits with:
 git commit -s
 ```
 
-By contributing, you agree that your contribution is licensed under the repository's MIT License.
+By contributing, you agree that your contribution is licensed under the repository's Apache
+License 2.0, including its contribution and patent terms.

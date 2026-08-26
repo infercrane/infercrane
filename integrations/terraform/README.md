@@ -68,4 +68,4 @@ imports, state behavior, and release safety.
 ## License
 
 The provider is part of the InferCrane open-source core and is available under the repository's
-[MIT License](../../LICENSE).
+[Apache License 2.0](../../LICENSE).

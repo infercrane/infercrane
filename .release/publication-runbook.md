@@ -52,8 +52,10 @@ file. Keep the current integration marked unpublished until that independent rel
    draft prerelease, archives, checksums, SPDX SBOMs, Homebrew formula, SDK artifacts, exact-tag GHCR
    image, vulnerability results, and GitHub attestations.
 4. Download the draft assets into a clean machine. Run `scripts/verify-release-artifacts.sh` with the
-   candidate tag, install the native archive, run the documented quickstart against the isolated
-   fixture stack, test the Python wheel and npm tarball, and install the generated Homebrew formula.
+   candidate tag, confirm its Apache-2.0 `LICENSE`, InferCrane `NOTICE`, generated linked-dependency
+   license bundle, and upstream attribution notices, install the native archive, run the documented
+   quickstart against the isolated fixture stack, test the Python wheel and npm tarball, and install
+   the generated Homebrew formula.
 5. Verify the image by immutable digest and verify its GitHub attestation. Run the container as the
    documented non-root user and execute the production Compose configuration checks.
 6. Record every untested real provider, GPU, Kubernetes, upgrade, and paid path. A green local gate
@@ -65,9 +67,10 @@ file. Keep the current integration marked unpublished until that independent rel
    The stable-tag guard requires the stable tag to point to the exact candidate commit.
 2. Push only `v1.0.0`. Do not rebuild from a different commit and do not move either tag.
 3. Wait for the stable tag workflow. Confirm all jobs pass and the GitHub release remains a draft.
-4. Download and independently verify the stable archives, checksums, SBOMs, formula, wheel, npm
-   tarball, image digest, vulnerability scan, and attestations. Confirm all embedded/package versions
-   are exactly `1.0.0` and all release assets originate from the stable tag commit.
+4. Download and independently verify the stable archives, licenses/notices, checksums, SBOMs,
+   formula, wheel, npm tarball, image digest, vulnerability scan, and attestations. Confirm all
+   embedded/package versions are exactly `1.0.0` and all release assets originate from the stable
+   tag commit.
 
 ## Publish
 

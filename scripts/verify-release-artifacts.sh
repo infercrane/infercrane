@@ -18,11 +18,25 @@ for target in $expected; do
   sbom="$archive.sbom.json"
   test -f "$archive" || { echo "missing archive: $archive" >&2; exit 1; }
   test -f "$sbom" || { echo "missing archive SBOM: $sbom" >&2; exit 1; }
-  listing=$(tar -tzf "$archive" | sort)
-  test "$listing" = "LICENSE
-README.md
-THIRD_PARTY_NOTICES.md
-infercrane" || { echo "unexpected archive contents: $archive" >&2; printf '%s\n' "$listing" >&2; exit 1; }
+  listing=$(tar -tzf "$archive" | sed '/\/$/d' | sort)
+  for required_file in LICENSE NOTICE README.md THIRD_PARTY_NOTICES.md infercrane \
+    THIRD_PARTY_LICENSES/manifest.csv THIRD_PARTY_LICENSES/gopkg.in/yaml.v3/NOTICE; do
+    printf '%s\n' "$listing" | grep -Fqx "$required_file" || {
+      echo "missing $required_file from $archive" >&2
+      exit 1
+    }
+  done
+  unexpected=$(printf '%s\n' "$listing" | grep -Ev '^(LICENSE|NOTICE|README\.md|THIRD_PARTY_NOTICES\.md|infercrane|THIRD_PARTY_LICENSES/.+)$' || true)
+  test -z "$unexpected" || {
+    echo "unexpected archive contents: $archive" >&2
+    printf '%s\n' "$unexpected" >&2
+    exit 1
+  }
+  bundled_license_count=$(printf '%s\n' "$listing" | grep -Ec '^THIRD_PARTY_LICENSES/.*/(LICENSE[^/]*|COPYING[^/]*)$')
+  test "$bundled_license_count" -ge 35 || {
+    echo "expected at least 35 dependency license files in $archive, found $bundled_license_count" >&2
+    exit 1
+  }
   jq -e '.spdxVersion | startswith("SPDX-")' "$sbom" >/dev/null
 done
 
@@ -49,4 +63,4 @@ if test -f "$native"; then
   "$install_root/infercrane" --help >/dev/null
 fi
 
-echo "Release artifacts verified for $tag: four archives, checksums, SPDX SBOMs, and native CLI smoke."
+echo "Release artifacts verified for $tag: four archives, Apache-2.0 and dependency notices, checksums, SPDX SBOMs, and native CLI smoke."
