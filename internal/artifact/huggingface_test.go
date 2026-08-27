@@ -3,6 +3,7 @@ package artifact
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -27,5 +28,16 @@ func TestHuggingFaceResolveRejectsMutableResponse(t *testing.T) {
 	_, err := (HuggingFace{Runner: fakeRunner{output: `{"repository":"Qwen/Qwen3-8B","requested_revision":"main","immutable_revision":"main"}`}}).Resolve(context.Background(), "Qwen/Qwen3-8B", "main")
 	if err == nil {
 		t.Fatal("mutable identity was accepted")
+	}
+}
+
+func TestHuggingFaceResolverPrefersExactRevisionFileSizes(t *testing.T) {
+	exact := strings.Index(resolverScript, `size = sum(sizes)`)
+	fallback := strings.Index(resolverScript, `size = getattr(info, "used_storage", None)`)
+	if exact < 0 || fallback < 0 || exact >= fallback {
+		t.Fatal("resolver must prefer the exact revision file sum over repository-wide historical storage")
+	}
+	if !strings.Contains(resolverScript, `"artifact_size_source": size_source`) {
+		t.Fatal("resolver must preserve the size evidence source")
 	}
 }

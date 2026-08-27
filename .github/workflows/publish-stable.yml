@@ -26,12 +26,20 @@ jobs:
       - name: Refuse an unprotected or mismatched publication
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ORG_SECURITY_READ_TOKEN: ${{ secrets.ORG_SECURITY_READ_TOKEN }}
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
           test "$RELEASE_TAG" = "$(jq -er '.stable_tag' .release/version.json)"
           test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$(git rev-parse HEAD)"
           test "$(gh api "repos/$GITHUB_REPOSITORY" --jq .visibility)" = public
-          test "$(gh api "orgs/$GITHUB_REPOSITORY_OWNER" --jq .two_factor_requirement_enabled)" = true
+          test -n "$ORG_SECURITY_READ_TOKEN"
+          org_2fa=$(curl --fail --silent --show-error \
+            -H 'Accept: application/vnd.github+json' \
+            -H "Authorization: Bearer $ORG_SECURITY_READ_TOKEN" \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "https://api.github.com/orgs/$GITHUB_REPOSITORY_OWNER" | \
+            jq -er '.two_factor_requirement_enabled')
+          test "$org_2fa" = true
           gh api "repos/$GITHUB_REPOSITORY/environments/stable-publication" \
             --jq 'select((.protection_rules | length) > 0)' >/dev/null
           gh release view "$RELEASE_TAG" \
@@ -89,9 +97,13 @@ jobs:
           path: publication-assets
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: "24"
+          node-version: "24.20.0"
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
+      - name: Install the minimum trusted-publishing npm client
+        run: |
+          npm install --global npm@11.6.4
+          test "$(npm --version)" = 11.6.4
       - name: Publish the exact package with npm Trusted Publishing
         run: npm publish publication-assets/npm/infercrane-sdk-*.tgz --access public
 

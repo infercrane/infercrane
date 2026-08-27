@@ -19,6 +19,7 @@ cpu_hourly=${INFERCRANE_RUNPOD_CPU_HOURLY_USD:-}
 storage_monthly=${INFERCRANE_RUNPOD_VOLUME_USD_PER_GB_MONTH:-}
 max_seconds=${INFERCRANE_RUNPOD_MAX_PAID_SECONDS:-7200}
 retention_hours=${INFERCRANE_RUNPOD_VOLUME_RETENTION_HOURS:-24}
+volume_reserve_gib=${INFERCRANE_ARTIFACT_VOLUME_RESERVE_GIB:-10}
 max_cost=${INFERCRANE_RUNPOD_MAX_COST_USD:-}
 hf_secret=${INFERCRANE_RUNPOD_HF_TOKEN_SECRET:-}
 preparer_image=${INFERCRANE_RUNPOD_PREFETCH_IMAGE:-python:3.12-slim-bookworm@sha256:0f5b26b9518d002b6173fd61daad821fa340635ebfec5bba471013f9ca114579}
@@ -41,6 +42,7 @@ esac
 case "$data_center" in *[!A-Za-z0-9_-]*|'') fail 'INFERCRANE_RUNPOD_DATA_CENTER_ID is required and invalid' ;; esac
 case "$volume_size" in *[!0-9]*|'') fail 'INFERCRANE_RUNPOD_VOLUME_GIB must be a positive integer' ;; esac
 [ "$volume_size" -ge 50 ] || fail 'INFERCRANE_RUNPOD_VOLUME_GIB must be at least 50'
+case "$volume_reserve_gib" in *[!0-9]*|'') fail 'INFERCRANE_ARTIFACT_VOLUME_RESERVE_GIB must be a non-negative integer' ;; esac
 case "$max_seconds" in *[!0-9]*|'') fail 'INFERCRANE_RUNPOD_MAX_PAID_SECONDS must be a positive integer' ;; esac
 [ "$max_seconds" -ge 300 ] && [ "$max_seconds" -le 10800 ] || fail 'INFERCRANE_RUNPOD_MAX_PAID_SECONDS must be between 300 and 10800'
 case "$retention_hours" in *[!0-9]*|'') fail 'INFERCRANE_RUNPOD_VOLUME_RETENTION_HOURS must be a positive integer' ;; esac
@@ -58,6 +60,35 @@ volume_name=infercrane-artifact-$(printf %.20s "$identity_digest")
 pod_name=infercrane-prefetch-$(printf %.20s "$identity_digest")
 report_dir=${INFERCRANE_E2E_REPORT_DIR:-/tmp/infercrane-e2e-report}
 mkdir -p "$report_dir"
+
+resolve_artifact_size() {
+  encoded_revision=$(printf '%s' "$revision" | jq -sRr @uri)
+  auth_header=''
+  if [ -n "${HF_TOKEN:-}" ]; then
+    auth_header="Authorization: Bearer $HF_TOKEN"
+  fi
+  response_file=$(mktemp "${TMPDIR:-/tmp}/infercrane-hf-model.XXXXXX")
+  if [ -n "$auth_header" ]; then
+    curl --fail --silent --show-error --max-time 30 -H "$auth_header" \
+      "https://huggingface.co/api/models/$model/revision/$encoded_revision?blobs=true" \
+      -o "$response_file" || { rm -f "$response_file"; fail 'failed to resolve exact Hugging Face revision size'; }
+  else
+    curl --fail --silent --show-error --max-time 30 \
+      "https://huggingface.co/api/models/$model/revision/$encoded_revision?blobs=true" \
+      -o "$response_file" || { rm -f "$response_file"; fail 'failed to resolve exact Hugging Face revision size'; }
+  fi
+  artifact_bytes=$(jq -er '
+    (.siblings // []) as $files |
+    select(($files | length) > 0) |
+    select(all($files[]; (.size | type) == "number" and . >= 0)) |
+    [$files[].size] | add
+  ' "$response_file") || { rm -f "$response_file"; fail 'exact Hugging Face revision file sizes are unavailable'; }
+  resolved_sha=$(jq -er '.sha' "$response_file") || { rm -f "$response_file"; fail 'Hugging Face revision response omitted immutable SHA'; }
+  rm -f "$response_file"
+  [ "$resolved_sha" = "$revision" ] || fail "Hugging Face resolved $revision to unexpected commit $resolved_sha"
+  required_volume_gib=$(awk -v bytes="$artifact_bytes" -v reserve="$volume_reserve_gib" 'BEGIN { gib=1073741824; printf "%d", int((bytes+gib-1)/gib)+reserve }')
+  [ "$volume_size" -ge "$required_volume_gib" ] || fail "RunPod volume ${volume_size} GiB is smaller than exact revision requirement ${required_volume_gib} GiB (${artifact_bytes} bytes plus ${volume_reserve_gib} GiB reserve)"
+}
 
 decimal() {
   awk -v value="$1" 'BEGIN { if (value !~ /^[0-9]+([.][0-9]+)?$/ || value <= 0) exit 1; printf "%.8f", value }' || fail "$2 must be a positive decimal"
@@ -81,22 +112,30 @@ cost_plan() {
   normalized_preparer=$(decimal "$preparer_hourly" "$hourly_name")
   normalized_storage=$(decimal "$storage_monthly" INFERCRANE_RUNPOD_VOLUME_USD_PER_GB_MONTH)
   projected=$(awk -v preparer="$normalized_preparer" -v seconds="$max_seconds" -v storage="$normalized_storage" -v gib="$volume_size" -v hours="$retention_hours" 'BEGIN { printf "%.4f", preparer*seconds/3600 + storage*gib*hours/730 }')
-  jq -n --arg identity "$identity" --arg digest "$identity_digest" --arg image "$preparer_image" --arg commit "$infercrane_commit" --arg observed_at "$observed_at" --arg dc "$data_center" --arg compute "$prefetch_compute" --arg resource "$preparer_resource" --argjson volume_gib "$volume_size" --argjson max_seconds "$max_seconds" --argjson retention_hours "$retention_hours" --argjson preparer_hourly "$normalized_preparer" --argjson storage_monthly "$normalized_storage" --argjson projected "$projected" '{schema:"infercrane.runpod-artifact-plan/v1",model_identity:$identity,model_identity_digest:$digest,preparer_image:$image,infercrane_commit:$commit,observed_at:$observed_at,data_center_id:$dc,prefetch_compute:$compute,prefetch_resource:$resource,volume_gib:$volume_gib,max_paid_seconds:$max_seconds,volume_retention_hours:$retention_hours,price_evidence:{preparer_hourly_usd:$preparer_hourly,volume_usd_per_gib_month:$storage_monthly,source:"operator-supplied current provider price"},worst_case_cost_usd:$projected,mutation:"none"}'
+  jq -n --arg identity "$identity" --arg digest "$identity_digest" --arg image "$preparer_image" --arg commit "$infercrane_commit" --arg observed_at "$observed_at" --arg dc "$data_center" --arg compute "$prefetch_compute" --arg resource "$preparer_resource" --argjson artifact_bytes "$artifact_bytes" --argjson required_volume_gib "$required_volume_gib" --argjson reserve_gib "$volume_reserve_gib" --argjson volume_gib "$volume_size" --argjson max_seconds "$max_seconds" --argjson retention_hours "$retention_hours" --argjson preparer_hourly "$normalized_preparer" --argjson storage_monthly "$normalized_storage" --argjson projected "$projected" '{schema:"infercrane.runpod-artifact-plan/v1",model_identity:$identity,model_identity_digest:$digest,preparer_image:$image,infercrane_commit:$commit,observed_at:$observed_at,data_center_id:$dc,prefetch_compute:$compute,prefetch_resource:$resource,artifact:{exact_revision_bytes:$artifact_bytes,size_source:"huggingface_revision_file_sum",required_volume_gib:$required_volume_gib,reserve_gib:$reserve_gib},volume_gib:$volume_gib,max_paid_seconds:$max_seconds,volume_retention_hours:$retention_hours,price_evidence:{preparer_hourly_usd:$preparer_hourly,volume_usd_per_gib_month:$storage_monthly,source:"operator-supplied current provider price"},worst_case_cost_usd:$projected,mutation:"none"}'
 }
 
 case "$command_name" in
-  plan)
-    plan_json=$(cost_plan)
-    printf '%s\n' "$plan_json" | tee "$report_dir/runpod-artifact-plan-${identity_digest}.json"
-    exit 0
-    ;;
-  build|status|cleanup|delete-volume) ;;
+  plan|build|status|cleanup|delete-volume) ;;
   *) fail 'usage: runpod-artifact-cache-build.sh plan|build|status|cleanup|delete-volume [approval]' ;;
 esac
 
 if [ "$command_name" = build ]; then
   [ "$approval" = --approve-paid-resources ] || fail 'build requires --approve-paid-resources'
   [ -n "$max_cost" ] || fail 'INFERCRANE_RUNPOD_MAX_COST_USD is required for build'
+fi
+
+case "$command_name" in
+  plan|build) resolve_artifact_size ;;
+esac
+
+if [ "$command_name" = plan ]; then
+  plan_json=$(cost_plan)
+  printf '%s\n' "$plan_json" | tee "$report_dir/runpod-artifact-plan-${identity_digest}.json"
+  exit 0
+fi
+
+if [ "$command_name" = build ]; then
   plan_json=$(cost_plan)
   normalized_max=$(decimal "$max_cost" INFERCRANE_RUNPOD_MAX_COST_USD)
   projected=$(printf '%s' "$plan_json" | jq -r .worst_case_cost_usd)

@@ -36,14 +36,18 @@ import json, sys
 from huggingface_hub import HfApi
 repo, revision = sys.argv[1], sys.argv[2]
 info = HfApi().model_info(repo_id=repo, revision=revision, files_metadata=True)
-size = getattr(info, "used_storage", None)
-if size is None:
-    sizes = [getattr(item, "size", None) for item in (info.siblings or [])]
-    if sizes and all(item is not None for item in sizes): size = sum(sizes)
+sizes = [getattr(item, "size", None) for item in (info.siblings or [])]
+if sizes and all(item is not None for item in sizes):
+    size = sum(sizes)
+    size_source = "exact_revision_file_sum"
+else:
+    size = getattr(info, "used_storage", None)
+    size_source = "repository_storage_fallback" if size is not None else "unknown"
 compat = {
     "library_name": getattr(info, "library_name", None),
     "pipeline_tag": getattr(info, "pipeline_tag", None),
     "tags": sorted((getattr(info, "tags", None) or []))[:100],
+    "artifact_size_source": size_source,
 }
 print(json.dumps({"repository": info.id, "requested_revision": revision, "immutable_revision": info.sha, "approximate_size_bytes": size, "runtime_compatibility": compat}))
 `
