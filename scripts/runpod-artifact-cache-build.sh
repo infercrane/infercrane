@@ -92,13 +92,29 @@ api_key=$(tr -d '\r\n' < "$key_file")
 [ -n "$api_key" ] || fail 'RunPod key file is empty'
 api() {
   method=$1
-  path=$2
+  endpoint_path=$2
   body=${3:-}
+  response_file=$(mktemp "${TMPDIR:-/tmp}/infercrane-runpod-response.XXXXXX")
   if [ -n "$body" ]; then
-    curl -fsS --max-time 30 -X "$method" -H "Authorization: Bearer $api_key" -H 'Content-Type: application/json' --data "$body" "$api_base$path"
+    status=$(curl -sS --max-time 30 -o "$response_file" -w '%{http_code}' -X "$method" -H "Authorization: Bearer $api_key" -H 'Content-Type: application/json' --data "$body" "$api_base$endpoint_path") || {
+      rm -f "$response_file"
+      fail "RunPod API transport failed for $method $endpoint_path"
+    }
   else
-    curl -fsS --max-time 30 -X "$method" -H "Authorization: Bearer $api_key" "$api_base$path"
+    status=$(curl -sS --max-time 30 -o "$response_file" -w '%{http_code}' -X "$method" -H "Authorization: Bearer $api_key" "$api_base$endpoint_path") || {
+      rm -f "$response_file"
+      fail "RunPod API transport failed for $method $endpoint_path"
+    }
   fi
+  case "$status" in
+    2??) cat "$response_file"; rm -f "$response_file" ;;
+    *)
+      diagnostic=$(tr '\r\n' '  ' < "$response_file" | cut -c 1-500)
+      rm -f "$response_file"
+      case "$diagnostic" in *"$api_key"*) diagnostic='provider diagnostic contained credential and was redacted' ;; esac
+      fail "RunPod API returned HTTP $status for $method $endpoint_path: $diagnostic"
+      ;;
+  esac
 }
 
 volumes=$(api GET /networkvolumes)
