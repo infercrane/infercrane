@@ -608,13 +608,23 @@ run_elastic_evidence() {
 
 	benchmark_requests=${INFERCRANE_ACCEPTANCE_BENCHMARK_REQUESTS:-64}
 	benchmark_tokens=${INFERCRANE_ACCEPTANCE_BENCHMARK_OUTPUT_TOKENS:-64}
-	for concurrency in 1 8 32; do
-		record "elastic-benchmark-c$concurrency" ic benchmark "$ELASTIC_NAME" --revision active \
-			--requests "$benchmark_requests" --concurrency "$concurrency" --output-tokens "$benchmark_tokens" \
-			--random-seed 53 --output json
-		jq -e --argjson gpu_count "$GPU_COUNT" --argjson concurrency "$concurrency" \
-			'.gpu_count == $gpu_count and .failed == 0 and .request_count > 0 and .workload.concurrency == $concurrency and .ttft_p95_ms != null and .tpot_p95_ms != null and .latency_p95_ms != null' \
-			"$evidence/elastic-benchmark-c$concurrency.log" >/dev/null
+	for mode in streaming buffered; do
+		case "$mode" in
+			streaming) streaming=true ;;
+			buffered) streaming=false ;;
+		esac
+		for concurrency in 1 8 32; do
+			record "elastic-benchmark-$mode-c$concurrency" ic benchmark "$ELASTIC_NAME" --revision active \
+				--requests "$benchmark_requests" --concurrency "$concurrency" --output-tokens "$benchmark_tokens" \
+				--streaming="$streaming" --random-seed 53 --output json
+			jq -e --argjson gpu_count "$GPU_COUNT" --argjson concurrency "$concurrency" --argjson streaming "$streaming" \
+				'.gpu_count == $gpu_count and .failed == 0 and .succeeded == .request_count and .request_count > 0 and .workload.concurrency == $concurrency and .workload.streaming == $streaming and .latency_p95_ms != null' \
+				"$evidence/elastic-benchmark-$mode-c$concurrency.log" >/dev/null
+			if [ "$streaming" = true ]; then
+				jq -e '.ttft_p95_ms != null and .tpot_p95_ms != null' \
+					"$evidence/elastic-benchmark-$mode-c$concurrency.log" >/dev/null
+			fi
+		done
 	done
 
 	active_before=$(ic status "$ELASTIC_NAME" --output json | tee "$evidence/guard-active-before.json" | jq -r '.deployment.active_revision_id')
