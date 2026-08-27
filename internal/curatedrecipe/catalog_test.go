@@ -2,6 +2,7 @@ package curatedrecipe
 
 import (
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -62,6 +63,26 @@ func TestFrontierProfilesUseTheGeneralImmutableWorkloadContract(t *testing.T) {
 				t.Fatalf("workload is invalid: %v", err)
 			}
 		})
+	}
+}
+
+func TestGLMProfileMaterializesPinnedSnapshotBeforeVLLM(t *testing.T) {
+	entry, ok := Get("glm-5.3-flash")
+	if !ok || len(entry.Profiles) != 1 {
+		t.Fatalf("entry=%#v ok=%t", entry, ok)
+	}
+	command := entry.Profiles[0].Workload.Command
+	if len(command) < 5 || command[0] != "python3" || command[1] != "-c" {
+		t.Fatalf("command=%#v", command)
+	}
+	bootstrap := command[2]
+	for _, expected := range []string{"snapshot_download", "repo_id='${MODEL}'", "revision='${MODEL_REVISION}'", `local_dir="/opt/infercrane/model"`, "os.execvp('vllm'"} {
+		if !strings.Contains(bootstrap, expected) {
+			t.Fatalf("bootstrap omitted %q: %s", expected, bootstrap)
+		}
+	}
+	if !contains(command, "--tensor-parallel-size") || !contains(command, "--served-model-name") || !contains(command, "${MODEL}") {
+		t.Fatalf("vLLM argv was not preserved: %#v", command)
 	}
 }
 

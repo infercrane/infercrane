@@ -3,6 +3,8 @@
 package curatedrecipe
 
 import (
+	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/infercrane/infercrane/internal/runtimecontract"
@@ -137,6 +139,38 @@ var catalog = []Entry{
 	{Name: "granite-3.3-8b-instruct", DisplayName: "Granite 3.3 8B Instruct", Publisher: "IBM", Description: "Apache-2.0 instruction model for enterprise text generation, extraction, and summarization workloads.", UseCase: "enterprise assistants, extraction, and summarization", Tasks: []string{"chat", "extraction", "summarization"}, Model: "ibm-granite/granite-3.3-8b-instruct", Revision: "51dd4bc2ade4059a6bd87649d68aa11e4fb2529b", Runtime: "vllm", Protocol: "chat", Capabilities: []string{"chat-completions", "streaming"}, InputModalities: []string{"text"}, OutputModalities: []string{"text"}, License: "apache-2.0", LicenseURL: "https://huggingface.co/ibm-granite/granite-3.3-8b-instruct/blob/main/LICENSE", EvidenceClass: configurationEvidence, EvidenceSummary: configurationScope, Source: "https://huggingface.co/ibm-granite/granite-3.3-8b-instruct", ReviewedAt: "2026-08-19", Profiles: vllmGenerationProfiles("L40S")},
 	{Name: "qwen3.8-flash-next", DisplayName: "Qwen3.8 Flash Next", Publisher: "Qwen", Description: "Experimental multimodal Qwen4-architecture preview with a 125B main model, 6B active parameters, 51B n-gram embeddings, and 4B MTP parameters.", UseCase: "large-scale multimodal, reasoning, tool, coding, and agent workloads", Tasks: []string{"chat", "reasoning", "tools", "vision", "coding", "agents"}, Model: "Qwen/Qwen3.8-Flash-Next-FP8", Revision: "bcd9f01ddc9cff2316eb84281bebcd5b058bddce", Runtime: "custom-oci", Protocol: "chat", Capabilities: []string{"chat-completions", "streaming", "tool-calling", "vision"}, InputModalities: []string{"text", "image"}, OutputModalities: []string{"text"}, License: "qwen-community-1.0", LicenseURL: "https://huggingface.co/Qwen/Qwen3.8-Flash-Next-FP8/blob/bcd9f01ddc9cff2316eb84281bebcd5b058bddce/LICENSE", EvidenceClass: configurationEvidence, EvidenceSummary: configurationScope, Source: "https://huggingface.co/Qwen/Qwen3.8-Flash-Next-FP8", ReviewedAt: "2026-08-27", Profiles: []ServingProfile{{Name: "custom-oci-hopper-tep8", DisplayName: "Custom OCI Hopper TEP8", Description: "Immutable upstream Qwen day-zero runtime candidate on one eight-H200 worker using tensor and expert parallelism; it is not a measured performance or capacity claim.", Runtime: "custom-oci", RuntimeVersion: "0.1.dev20073+g8e685d198", ComputeMode: "elastic", GPUHint: "H200", CompatibleGPUs: []string{"H200"}, GPUCount: 8, CloudHint: "runpod", ProviderAdapterHint: "runpod-pods", MinReplicas: 1, MaxReplicas: 1, RuntimeArgs: []string{}, EvidenceClass: configurationEvidence, QualificationScope: configurationScope, Limitations: []string{"This is the experimental Qwen3.8-Flash-Next open-weight preview, not the separate production Qwen3.8-Flash service announced for QwenCloud.", "The dedicated upstream image precedes a standard vLLM 0.28.0 release and must be re-pinned when upstream publishes replacement bytes.", "The official FP8 H200 recipe requires TEP8 with the Triton MoE backend; plain TP8 is incompatible with the checkpoint's 128-wide quantization blocks.", "The profile deliberately bounds context at 131K. Native 262K requests and one-million-token YaRN require separate memory, latency, and quality qualification.", "The Qwen Community License 1.0 is not an OSI open-source license and requires a separate Qwen license for specified commercial Model-as-a-Service and AI work-assistant uses; operators must review the linked terms.", "Model loading, GPU fit, multimodal behavior, tool calling, throughput, and cleanup require real eight-H200 qualification before production claims."}, Workload: runtimecontract.Workload{Image: "vllm/vllm-openai@sha256:fc120ece0a388cc0aa1caad4a9f1cd92113484ab7ec2fd0efadd62585be05bf8", Command: []string{"vllm", "serve", "${MODEL}", "--revision", "${MODEL_REVISION}", "--host", "0.0.0.0", "--port", "${PORT}", "--tensor-parallel-size", "8", "--enable-expert-parallel", "--moe-backend", "triton", "--gpu-memory-utilization", "0.85", "--max-num-seqs", "256", "--max-model-len", "131072", "--enable-prefix-caching", "--no-enable-flashinfer-autotune", "--enable-auto-tool-choice", "--tool-call-parser", "qwen3_coder", "--reasoning-parser", "qwen3", "--served-model-name", "${MODEL}"}, Protocol: "openai", Port: 8000, ReadinessPath: "/health", ModelsPath: "/v1/models", MetricsPath: "/metrics", Cancellation: "http-disconnect", Drain: "connection", ShutdownGraceSeconds: 120}}}},
 	{Name: "glm-5.3-flash", DisplayName: "GLM-5.3 Flash", Publisher: "Z.ai", Description: "Native-FP8 multimodal mixture-of-experts model with 321B total parameters, 18B active parameters, and a declared 1M-token context window.", UseCase: "large-scale multimodal, reasoning, tool, and coding workloads", Tasks: []string{"chat", "reasoning", "tools", "vision", "coding"}, Model: "zai-org/GLM-5.3-Flash", Revision: "3f1971b7b5f7a528c9c4ef6212c8785298a8c24a", Runtime: "custom-oci", Protocol: "chat", Capabilities: []string{"chat-completions", "streaming", "tool-calling", "vision"}, InputModalities: []string{"text", "image", "video"}, OutputModalities: []string{"text"}, License: "mit", LicenseURL: "https://huggingface.co/zai-org/GLM-5.3-Flash/blob/main/LICENSE", EvidenceClass: configurationEvidence, EvidenceSummary: configurationScope, Source: "https://huggingface.co/zai-org/GLM-5.3-Flash", ReviewedAt: "2026-08-26", Profiles: []ServingProfile{{Name: "custom-oci-hopper-tp4", DisplayName: "Custom OCI Hopper TP4", Description: "Immutable upstream GLM runtime candidate on one four-GPU Hopper worker; it is not a measured performance or capacity claim.", Runtime: "custom-oci", RuntimeVersion: "0.1.dev20051+g487ecf187", ComputeMode: "elastic", GPUHint: "H200", CompatibleGPUs: []string{"H200"}, GPUCount: 4, CloudHint: "runpod", ProviderAdapterHint: "runpod-pods", MinReplicas: 1, MaxReplicas: 1, RuntimeArgs: []string{}, EvidenceClass: configurationEvidence, QualificationScope: configurationScope, Limitations: []string{"The dedicated upstream image precedes standard vLLM 0.27.0 availability and must be re-pinned when upstream publishes replacement bytes.", "Four H200 GPUs exceed the upstream 386 GiB minimum aggregate VRAM, but actual memory fit, throughput, multimodal limits, and 131K context behavior require real-hardware qualification.", "Hopper uses BF16 KV cache for this model; FP8 KV cache is a separate Blackwell-only profile.", "This profile is experimental and must not be represented as one-click production-qualified."}, Workload: runtimecontract.Workload{Image: "vllm/vllm-openai@sha256:2c6da6c6f16ed15c91e412d896dba13701f25fe1861eaec9ddaa4db34d1d21c4", Command: []string{"vllm", "serve", "${MODEL}", "--revision", "${MODEL_REVISION}", "--host", "0.0.0.0", "--port", "${PORT}", "--tensor-parallel-size", "4", "--max-model-len", "131072", "--no-enable-flashinfer-autotune", "--speculative-config", "{\"method\":\"mtp\",\"num_speculative_tokens\":5}", "--tool-call-parser", "glm47", "--reasoning-parser", "glm45", "--enable-auto-tool-choice", "--served-model-name", "${MODEL}"}, Protocol: "openai", Port: 8000, ReadinessPath: "/health", ModelsPath: "/v1/models", MetricsPath: "/metrics", Cancellation: "http-disconnect", Drain: "connection", ShutdownGraceSeconds: 120}}}},
+}
+
+// materializedHuggingFaceVLLMCommand is a reusable compatibility path for
+// integration runtimes that require a filesystem model path before their
+// ordinary Hub resolver runs. It preserves the immutable repo revision,
+// downloads the complete snapshot into container storage, then replaces the
+// bootstrap process with vLLM so signals and exit status retain their normal
+// container semantics. Additional runtime arguments remain ordinary argv.
+func materializedHuggingFaceVLLMCommand(command []string, localDir string) []string {
+	if len(command) < 5 || command[0] != "vllm" || command[1] != "serve" || command[2] != "${MODEL}" || command[3] != "--revision" || command[4] != "${MODEL_REVISION}" {
+		panic("materialized Hugging Face vLLM command requires a pinned vllm serve prefix")
+	}
+	bootstrap := fmt.Sprintf("import os,sys\nfrom huggingface_hub import snapshot_download\nmodel_path=snapshot_download(repo_id='${MODEL}',revision='${MODEL_REVISION}',local_dir=%s)\nos.execvp('vllm',['vllm','serve',model_path]+sys.argv[1:])", strconv.Quote(localDir))
+	return append([]string{"python3", "-c", bootstrap}, command[5:]...)
+}
+
+func init() {
+	// The exact day-zero GLM integration build opens processor_config.json from
+	// its model argument before the normal Hub resolver materializes the repo.
+	// Use the provider-neutral snapshot bootstrap rather than teaching any
+	// provider adapter about this model or special-casing its OCI image.
+	for entryIndex := range catalog {
+		if catalog[entryIndex].Name != "glm-5.3-flash" {
+			continue
+		}
+		for profileIndex := range catalog[entryIndex].Profiles {
+			profile := &catalog[entryIndex].Profiles[profileIndex]
+			profile.Workload.Command = materializedHuggingFaceVLLMCommand(profile.Workload.Command, "/opt/infercrane/model")
+			profile.Limitations = append(profile.Limitations, "The pinned Hugging Face snapshot is materialized to container storage before vLLM starts because this integration build resolves multimodal processor metadata from a filesystem path; allow at least 306 GiB plus runtime overhead.")
+		}
+		return
+	}
 }
 
 func cloneEntry(entry Entry) Entry {

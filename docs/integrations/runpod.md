@@ -117,8 +117,11 @@ plan or local simulation is not real-provider qualification.
     ```
 
     The generated DeploymentSpec preserves the upstream image digest, complete argv, model
-    revision, and exact GPU count. Provider stock and real runtime behavior still require paid
-    qualification of that exact tuple.
+    revision, and exact GPU count. The GLM profile's provider-neutral bootstrap materializes the
+    complete pinned snapshot to a local container path before replacing itself with vLLM; configure
+    at least 500 GiB of container disk for this roughly 306 GiB FP8 checkpoint plus runtime
+    overhead. Provider stock and real runtime behavior still require paid qualification of that
+    exact tuple.
   </Tab>
   <Tab title="Serverless">
     ```bash

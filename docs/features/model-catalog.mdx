@@ -89,8 +89,12 @@ production-qualified.
 
 The GLM profile requests one native RunPod Pod with four H200 GPUs and tensor parallelism. The
 `runpod-pods` adapter launches the pinned upstream image directly, without an SSH-derived wrapper.
-It deliberately
-uses a bounded 131K context starting point rather than converting the model card's declared 1M
+The reviewed command first materializes the complete commit-pinned Hugging Face snapshot at a local
+container path, then replaces the bootstrap process with vLLM. This provider-neutral argv pattern
+works around a day-zero runtime ordering issue where multimodal processor metadata is opened before
+the runtime's ordinary Hub resolver runs; it is reusable by other custom OCI profiles that require a
+filesystem model path. It deliberately uses a bounded 131K context starting point rather than
+converting the model card's declared 1M
 maximum into an unmeasured production promise. See the [official model card](https://huggingface.co/zai-org/GLM-5.3-Flash)
 and [upstream vLLM recipe](https://recipes.vllm.ai/zai-org/GLM-5.3-Flash).
 
@@ -105,7 +109,8 @@ infercrane workload plan ./glm-flash
 
 Those commands are local and non-mutating through `plan`. Deployment still requires current RunPod
 capacity, enough configured container disk, paid-resource acknowledgement, and fresh qualification
-evidence for the exact generated tuple.
+evidence for the exact generated tuple. The FP8 snapshot is about 306 GiB before runtime overhead;
+the RunPod example therefore uses a 500 GiB container disk during qualification.
 
 The Qwen profile uses the separate FP8 checkpoint and the official eight-H200 TEP8 topology. Plain
 TP8 is incompatible with that checkpoint's quantization blocks, so the reviewed argv enables expert
