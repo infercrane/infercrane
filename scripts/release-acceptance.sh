@@ -512,10 +512,10 @@ submit_elastic_deploy() {
 	wait_timeout=$1
 	idempotency_key=$2
 	if [ -n "$requested_spec" ]; then
-		ic deploy "$requested_spec" --wait --wait-timeout "$wait_timeout" \
+		exec env INFERCRANE_CONFIG="$config_file" "$cli" --context acceptance deploy "$requested_spec" --wait --wait-timeout "$wait_timeout" \
 			--idempotency-key "$idempotency_key" --output json
 	else
-		ic deploy "$MODEL" --name "$ELASTIC_NAME" --cloud runpod --gpu "$GPU" --gpu-count "$GPU_COUNT" \
+		exec env INFERCRANE_CONFIG="$config_file" "$cli" --context acceptance deploy "$MODEL" --name "$ELASTIC_NAME" --cloud runpod --gpu "$GPU" --gpu-count "$GPU_COUNT" \
 			--min 1 --max 1 --wait --wait-timeout "$wait_timeout" \
 			--idempotency-key "$idempotency_key" --output json
 	fi
@@ -576,7 +576,9 @@ run_elastic_evidence() {
 	client_status=$?
 	set -e
 	[ "$client_status" -ne 0 ] || { echo "waiting CLI did not disconnect" >&2; return 1; }
-	grep -F "operation $operation_id continues safely in the control plane" "$evidence/durable-deploy-cli.log" >/dev/null
+	jq -e --arg operation_id "$operation_id" \
+		'.error.code == "operation_watch_interrupted" and (.error.message | contains("continues safely in the control plane")) and (.error.remediation | contains($operation_id))' \
+		"$evidence/durable-deploy-cli.log" >/dev/null
 	jq -n --arg operation_id "$operation_id" --arg provider_resource_id "$resource_id" \
 		--arg started_at "$deploy_started_at" --argjson client_exit "$client_status" \
 		'{schema_version:1,operation_id:$operation_id,provider_resource_id:$provider_resource_id,started_at:$started_at,client_exit:$client_exit,control_plane_continues:true}' \
