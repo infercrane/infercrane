@@ -6,7 +6,7 @@ sidebarTitle: v1.0.0 release notes
 
 # InferCrane v1.0.0
 
-`v1.0.0` is the first public release of InferCrane, an open-source inference infrastructure layer
+`v1.0.0` is the first public stable release of InferCrane, an open-source inference operations platform
 for teams deploying open-weight models or adopting inference they already run.
 
 Applications use one stable OpenAI-compatible endpoint while InferCrane operates changes beneath

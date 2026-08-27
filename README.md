@@ -34,9 +34,17 @@
 
 ## Install
 
-Coming with the `v1.0.0` release: `brew install infercrane/tap/infercrane`, release archives, and
-published Python and TypeScript SDKs. Until then, run the local proof with Git and Docker Compose v2.
-It uses GPU-free workers and creates no cloud resources:
+Install the `v1.0.0-rc.1` public beta CLI with Homebrew or use the matching SDK prerelease:
+
+```bash
+brew install infercrane/tap/infercrane
+python -m pip install 'infercrane==1.0.0rc1'
+npm install '@infercrane/sdk@1.0.0-rc.1'
+```
+
+Release archives and Terraform provider binaries are available from the
+[`v1.0.0-rc.1` prerelease](https://github.com/infercrane/infercrane/releases/tag/v1.0.0-rc.1).
+To run the complete GPU-free product proof without creating cloud resources:
 
 ```bash
 git clone https://github.com/infercrane/infercrane.git
@@ -48,8 +56,8 @@ The proof connects an OpenAI-compatible worker, sends and inspects a request, cr
 candidate, records a deterministic Release Guard rejection, verifies that production traffic did
 not move, and removes its disposable stack.
 
-InferCrane is the open-source control plane for self-hosted model inference. Your application keeps
-one model identity while InferCrane changes the model artifact, runtime, accelerator, provider,
+InferCrane is the open-source inference operations platform for self-hosted models. Your application
+keeps one model identity while InferCrane changes the model artifact, runtime, accelerator, provider,
 replica count, and active revision underneath it.
 
 - **Deploy or adopt:** operate vLLM, SGLang, custom OCI, and compatible existing endpoints across
@@ -217,16 +225,17 @@ Read the [architecture](https://docs.infercrane.com/architecture/system),
 |---|---|
 | CLI and control API | Primary deployment, operation, evidence, and administration interfaces. |
 | OpenAI-compatible gateway | Capability-gated Chat, Completions, Embeddings, Responses, and online batch paths. The pinned vLLM profile currently qualifies Chat plus model-compatible Completions and Embeddings; unsupported capabilities fail before upstream transmission. |
-| Python and TypeScript SDKs | Generated from the checked OpenAPI contract and built in CI. Public package publication is pending. |
-| Terraform provider | Logical deployment lifecycle with guarded updates and import. Registry publication is pending. |
+| Python and TypeScript SDKs | Public beta packages: `infercrane==1.0.0rc1` and `@infercrane/sdk@1.0.0-rc.1`. Generated from the checked OpenAPI contract. |
+| Terraform provider | Logical deployment lifecycle with guarded updates and import. Release binaries and source are public; Registry publication is pending. |
 | Terminal workspace | Fleet attention, evidence inspection, and state-valid guarded actions. |
 | Browser console | Separate deny-by-default private-preview application using the same control API. |
 | Read-only MCP server | Closed-world operational inspection without deployment, scaling, promotion, deletion, budget, or secret tools. |
 
 ## Qualification status
 
-InferCrane is preparing its first public stable release, `v1.0.0`. The current `main` branch is the
-launch product; no earlier development tag should be treated as a supported public release.
+InferCrane `v1.0.0-rc.1` is the first public beta. The stable `v1.0.0` release will promote the exact
+qualified product contract after the prerelease cycle; no earlier development tag should be treated
+as a supported public release.
 
 - Local race, PostgreSQL, fault-injection, Docker, Kind, KWOK, package, migration, security, and
   documentation gates are automated.

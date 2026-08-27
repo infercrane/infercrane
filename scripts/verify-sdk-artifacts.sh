@@ -1,9 +1,10 @@
 #!/bin/sh
 set -eu
 
-dist=${1:?usage: verify-sdk-artifacts.sh DIST VERSION [prepare|verify]}
-version=${2:?usage: verify-sdk-artifacts.sh DIST VERSION [prepare|verify]}
+dist=${1:?usage: verify-sdk-artifacts.sh DIST NPM_VERSION [prepare|verify] [PYTHON_VERSION]}
+version=${2:?usage: verify-sdk-artifacts.sh DIST NPM_VERSION [prepare|verify] [PYTHON_VERSION]}
 mode=${3:-verify}
+python_version=${4:-$version}
 
 case "$mode" in
   prepare|verify) ;;
@@ -11,11 +12,15 @@ case "$mode" in
 esac
 
 printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$' || {
-  echo "invalid SDK version: $version" >&2
+  echo "invalid npm SDK version: $version" >&2
+  exit 2
+}
+printf '%s\n' "$python_version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(rc[1-9][0-9]*|([.-][0-9A-Za-z.-]+))?$' || {
+  echo "invalid Python SDK version: $python_version" >&2
   exit 2
 }
 
-wheel="infercrane-${version}-py3-none-any.whl"
+wheel="infercrane-${python_version}-py3-none-any.whl"
 npm_package="infercrane-sdk-${version}.tgz"
 
 test "$(find "$dist" -maxdepth 1 -type f -name 'infercrane-*.whl' | wc -l | tr -d ' ')" = 1
@@ -23,7 +28,7 @@ test "$(find "$dist" -maxdepth 1 -type f -name 'infercrane-sdk-*.tgz' | wc -l | 
 test -f "$dist/$wheel"
 test -f "$dist/$npm_package"
 
-python3 - "$dist/$wheel" "$version" <<'PY'
+python3 - "$dist/$wheel" "$python_version" <<'PY'
 import sys
 import zipfile
 
@@ -33,6 +38,8 @@ with zipfile.ZipFile(wheel) as archive:
     metadata = archive.read(next(name for name in names if name.endswith(".dist-info/METADATA"))).decode()
     assert "Name: infercrane\n" in metadata
     assert f"Version: {version}\n" in metadata
+    expected_status = "Development Status :: 4 - Beta" if "rc" in version else "Development Status :: 5 - Production/Stable"
+    assert f"Classifier: {expected_status}\n" in metadata
     assert any(name.endswith(".dist-info/licenses/LICENSE") for name in names)
     assert any(name.endswith(".dist-info/licenses/NOTICE") for name in names)
 PY
@@ -68,4 +75,4 @@ fi
 test -f "$dist/sdk-checksums.txt"
 (cd "$dist" && verify_checksums)
 
-echo "SDK artifacts verified for $version: exact wheel and npm package, Apache-2.0 notices, and SHA-256 checksums."
+echo "SDK artifacts verified: Python $python_version and npm $version, Apache-2.0 notices, and SHA-256 checksums."

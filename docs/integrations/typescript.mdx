@@ -7,16 +7,11 @@ The TypeScript SDK targets Node.js 20 or newer and uses the platform `fetch` imp
 no runtime dependency and calls only the InferCrane HTTP surfaces.
 
 ```bash
-cd sdk/typescript
-npm ci
-npm run build
+npm install '@infercrane/sdk@1.0.0-rc.1'
 ```
 
-<Warning>
-Do not depend on `@infercrane/sdk` until the matching stable package is listed in the release notes.
-A reservation-only release candidate may exist to bootstrap npm trusted publishing; it is not a
-stable package or a support claim.
-</Warning>
+The npm `rc` tag resolves to the public beta. Use the SDK version from the same InferCrane release as
+the control plane; stable `1.0.0` remains reserved for the stable release.
 
 ```typescript
 import { InferCrane } from '@infercrane/sdk';
