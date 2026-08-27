@@ -24,7 +24,12 @@
 <p align="center">
   <a href="#install">Run the five-minute local proof</a>
   · <a href="https://docs.infercrane.com/quickstart">Read the quickstart</a>
-  · <a href="docs/images/product/github-product-demo.mp4">Watch the two-minute product tour</a>
+</p>
+
+<p align="center">
+  <img alt="InferCrane plans a model deployment and persists its durable operation" src="docs/images/product/github-product-demo.gif" width="960">
+  <br>
+  <sub>Plan before mutation · survive disconnects · explain latency · guard every release</sub>
 </p>
 
 ## Install
@@ -42,14 +47,6 @@ make demo
 The proof connects an OpenAI-compatible worker, sends and inspects a request, creates an isolated
 candidate, records a deterministic Release Guard rejection, verifies that production traffic did
 not move, and removes its disposable stack.
-
-<p align="center">
-  <a href="docs/images/product/github-product-demo.mp4">
-    <img alt="InferCrane plans a model deployment and persists its durable operation" src="docs/images/product/github-product-demo.gif" width="960">
-  </a>
-  <br>
-  <sub>Plan before mutation · survive disconnects · explain latency · guard every release</sub>
-</p>
 
 InferCrane is the open-source control plane for self-hosted model inference. Your application keeps
 one model identity while InferCrane changes the model artifact, runtime, accelerator, provider,
