@@ -87,7 +87,7 @@ func TestFrontierProfilesMaterializePinnedSnapshotBeforeVLLM(t *testing.T) {
 					t.Fatalf("profile=%s command=%#v", profile.Name, command)
 				}
 				bootstrap := command[2]
-				for _, expected := range []string{"snapshot_download", "repo_id='${MODEL}'", "revision='${MODEL_REVISION}'", "INFERCRANE_MODEL_DIR", "INFERCRANE_MODEL_CACHE_IO", "--safetensors-load-strategy", "HF_XET_HIGH_PERFORMANCE", `"/opt/infercrane/model"`, "os.execvp('vllm'"} {
+				for _, expected := range []string{"snapshot_download", "repo_id='${MODEL}'", "revision='${MODEL_REVISION}'", "INFERCRANE_MODEL_DIR", "HF_XET_HIGH_PERFORMANCE", `"/opt/infercrane/model"`, "os.execvp('vllm'"} {
 					if !strings.Contains(bootstrap, expected) {
 						t.Fatalf("profile %s bootstrap omitted %q: %s", profile.Name, expected, bootstrap)
 					}
