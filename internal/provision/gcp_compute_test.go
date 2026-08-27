@@ -26,6 +26,8 @@ type gcpCheckRunner struct {
 	calls               [][]string
 	privateGoogleAccess string
 	disk                gcpDisk
+	regionalQuotas      string
+	globalQuotas        string
 }
 
 func (r *gcpCheckRunner) Run(_ context.Context, _ []string, args ...string) ([]byte, error) {
@@ -39,10 +41,28 @@ func (r *gcpCheckRunner) Run(_ context.Context, _ []string, args ...string) ([]b
 	if len(args) > 2 && args[0] == "compute" && args[1] == "disks" && args[2] == "describe" {
 		return json.Marshal(r.disk)
 	}
+	if len(args) > 2 && args[0] == "compute" && args[1] == "regions" && args[2] == "describe" {
+		if r.regionalQuotas != "" {
+			return []byte(r.regionalQuotas), nil
+		}
+		return []byte(`{"quotas":[{"metric":"GPU_FAMILY:NVIDIA_L4","limit":8,"usage":0}]}`), nil
+	}
+	if len(args) > 2 && args[0] == "compute" && args[1] == "project-info" && args[2] == "describe" {
+		if r.globalQuotas != "" {
+			return []byte(r.globalQuotas), nil
+		}
+		return []byte(`{"quotas":[{"metric":"GPUS_ALL_REGIONS","limit":8,"usage":0}]}`), nil
+	}
 	return []byte("ok"), nil
 }
 
 func (f *fakeGCPRunner) Run(_ context.Context, _ []string, args ...string) ([]byte, error) {
+	if len(args) >= 3 && args[0] == "compute" && args[1] == "regions" && args[2] == "describe" {
+		return []byte(`{"quotas":[{"metric":"GPU_FAMILY:NVIDIA_L4","limit":8,"usage":0}]}`), nil
+	}
+	if len(args) >= 3 && args[0] == "compute" && args[1] == "project-info" && args[2] == "describe" {
+		return []byte(`{"quotas":[{"metric":"GPUS_ALL_REGIONS","limit":8,"usage":0}]}`), nil
+	}
 	if len(args) >= 3 && args[0] == "compute" && args[1] == "disks" && args[2] == "describe" {
 		if f.disk.Name == "" {
 			return []byte("was not found"), errors.New("exit 1")
@@ -122,8 +142,21 @@ func TestGCPComputeCheckIsReadOnly(t *testing.T) {
 	if err := provider.Check(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if len(runner.calls) != 8 || runner.calls[0][0] != "auth" || runner.calls[1][2] != "subnets" || runner.calls[2][1] != "zones" || runner.calls[3][1] != "machine-types" || runner.calls[4][1] != "accelerator-types" || runner.calls[5][0] != "iam" || runner.calls[6][0] != "secrets" || runner.calls[7][1] != "images" {
+	if len(runner.calls) != 10 || runner.calls[0][0] != "auth" || runner.calls[1][2] != "subnets" || runner.calls[2][1] != "zones" || runner.calls[3][1] != "machine-types" || runner.calls[4][1] != "accelerator-types" || runner.calls[5][0] != "iam" || runner.calls[6][0] != "secrets" || runner.calls[7][1] != "images" || runner.calls[8][1] != "regions" || runner.calls[9][1] != "project-info" {
 		t.Fatalf("unexpected read-only calls: %#v", runner.calls)
+	}
+}
+
+func TestGCPComputeCheckFailsFastOnObservedGPUQuotaExhaustion(t *testing.T) {
+	runner := &gcpCheckRunner{regionalQuotas: `{"quotas":[{"metric":"GPU_FAMILY:NVIDIA_L4","limit":4,"usage":4}]}`}
+	err := testGCPCompute(runner).Check(context.Background())
+	if !errors.Is(err, ErrProviderQuota) || !strings.Contains(err.Error(), "regional GPU quota") {
+		t.Fatalf("quota exhaustion was not typed: %v", err)
+	}
+	for _, call := range runner.calls {
+		if len(call) > 2 && call[0] == "compute" && call[1] == "instances" && call[2] == "create" {
+			t.Fatalf("quota preflight created capacity: %#v", runner.calls)
+		}
 	}
 }
 

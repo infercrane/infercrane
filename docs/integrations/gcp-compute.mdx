@@ -56,9 +56,8 @@ gcloud compute instances list \
   --filter='labels.infercrane-managed=true'
 ```
 
-The final command should be empty for a new boundary. GPU quota, current zone availability, and a
-billing budget alert must be checked separately. Budget alerts notify; they do not stop Compute
-Engine spend.
+The final command should be empty for a new boundary. A billing budget alert must still be checked
+separately; budget alerts notify and do not stop Compute Engine spend.
 
 Allow read-only serial-port output if startup waterfall evidence is required. InferCrane retains
 only its closed `infercrane_startup` markers and discards every other console line.
@@ -85,9 +84,12 @@ infercrane doctor --gcp
 ```
 
 The preflight describes the zone, machine type, accelerator type, private subnet, attached worker
-service account, worker secret, and immutable VM image. It fails when Private Google Access is not
-enabled because workers intentionally have no public IP. It does not prove GPU stock, quota, the
-private route from the control plane, or runtime readiness; those remain real-infrastructure checks.
+service account, worker secret, and immutable VM image. It also reads the matching regional GPU
+quota and project-wide `GPUS_ALL_REGIONS` quota. An observed insufficient limit fails before VM
+creation; a missing or provider-unknown metric remains unknown rather than becoming a fabricated
+pass or rejection. It fails when Private Google Access is not enabled because workers intentionally
+have no public IP. Quota is not stock: current zone capacity, the private route from the control
+plane, and runtime readiness remain real-infrastructure checks.
 
 The attached service account reads the worker credential from Secret Manager at startup. Grant it
 only secret-version access to that secret. The subnet must allow the control plane to reach the

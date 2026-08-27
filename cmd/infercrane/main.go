@@ -2896,6 +2896,7 @@ func startupEvidenceLines(raw json.RawMessage) []string {
 	}
 	labels := map[string]string{
 		"identity_start": "machine bootstrap", "identity_ready": "workload identity", "image_check": "image check",
+		"accelerator_check": "accelerator check", "accelerator_ready": "accelerator ready", "gpu_driver_start": "GPU driver setup", "gpu_driver_ready": "GPU driver ready",
 		"image_cache_hit": "image cache hit", "image_cache_miss_required": "required image cache miss", "image_pull_start": "image pull", "image_pull_complete": "image pulled",
 		"artifact_check": "artifact check", "artifact_cache_unconfigured": "artifact cache unavailable", "artifact_cache_hit": "artifact cache hit", "artifact_cache_mount_failed": "artifact cache mount failed",
 		"runtime_start": "runtime start", "runtime_container_started": "container started",
@@ -2925,6 +2926,8 @@ func startupEvidenceLines(raw json.RawMessage) []string {
 	}
 	lines = append(lines, "Phases     measured boundaries")
 	phase("workload identity", "identity_start", "identity_ready")
+	phase("accelerator check", "accelerator_check", "accelerator_ready")
+	phase("GPU driver setup", "gpu_driver_start", "gpu_driver_ready")
 	phase("container transfer", "image_pull_start", "image_pull_complete")
 	phase("artifact attach", "artifact_check", "artifact_cache_hit")
 	phase("container launch", "runtime_start", "runtime_container_started")
@@ -4039,7 +4042,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	if err != nil {
 		return fmt.Errorf("configure native RunPod Pods integration: %w", err)
 	}
-	runPodPods := provision.RunPodPods{APIKey: cfg.RunPodAPIKey, WorkerAPIKey: cfg.APIKey, BaseURL: cfg.RunPodRESTURL, ContainerDiskGiB: cfg.RunPodContainerDiskGiB}
+	runPodPods := provision.RunPodPods{APIKey: cfg.RunPodAPIKey, WorkerAPIKey: cfg.APIKey, BaseURL: cfg.RunPodRESTURL, ContainerDiskGiB: cfg.RunPodContainerDiskGiB, ArtifactCachePolicy: cfg.RunPodArtifactCachePolicy, NetworkVolumes: cfg.RunPodNetworkVolumes}
 	elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: "runpod-pods", Cloud: "runpod", Runtime: "custom-oci", Default: true, Profile: runPodPodsProfile, Provider: runPodPods, Capacity: capacity})
 	if cfg.AWSEnabled() {
 		awsProfile, profileErr := integrationRegistry.Provider("aws-ec2")
@@ -4051,7 +4054,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 			SubnetID: cfg.AWSSubnetID, SubnetIDs: cfg.AWSSubnetIDs, SecurityGroupIDs: cfg.AWSSecurityGroupIDs,
 			AMIID: cfg.AWSAMIID, InstanceType: cfg.AWSInstanceType, GPU: cfg.AWSGPU, GPUCount: cfg.AWSGPUCount,
 			InstanceProfileARN: cfg.AWSInstanceProfileARN, WorkerSecretARN: cfg.AWSWorkerSecretARN,
-			ImageDigest: cfg.AWSImageDigest, RootVolumeGiB: cfg.AWSRootVolumeGiB, ImageCachePolicy: cfg.AWSImageCachePolicy,
+			ImageDigest: cfg.AWSImageDigest, RootVolumeGiB: cfg.AWSRootVolumeGiB, GP3IOPS: cfg.AWSGP3IOPS, GP3Throughput: cfg.AWSGP3Throughput, ImageCachePolicy: cfg.AWSImageCachePolicy,
 			ArtifactCachePolicy: cfg.AWSArtifactCachePolicy, ArtifactSnapshots: cfg.AWSArtifactSnapshots,
 			ArtifactVolumeInitializationRate: cfg.AWSArtifactVolumeInitializationRate,
 		}
@@ -4078,7 +4081,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		if profileErr != nil {
 			return fmt.Errorf("configure Kubernetes integration: %w", profileErr)
 		}
-		kubernetesProvider := provision.Kubernetes{Context: cfg.KubernetesContext, Namespace: cfg.KubernetesNamespace, WorkloadAPI: cfg.KubernetesWorkloadAPI, ServiceAccount: cfg.KubernetesServiceAccount, WorkerSecretName: cfg.KubernetesWorkerSecretName, WorkerSecretKey: cfg.KubernetesWorkerSecretKey, ImageDigest: cfg.KubernetesImageDigest, GPUResource: cfg.KubernetesGPUResource, GPUProductLabel: cfg.KubernetesGPUProductLabel, ArtifactCachePolicy: cfg.KubernetesArtifactCachePolicy, ArtifactPVCs: cfg.KubernetesArtifactPVCs}
+		kubernetesProvider := provision.Kubernetes{Context: cfg.KubernetesContext, Namespace: cfg.KubernetesNamespace, WorkloadAPI: cfg.KubernetesWorkloadAPI, ServiceAccount: cfg.KubernetesServiceAccount, WorkerSecretName: cfg.KubernetesWorkerSecretName, WorkerSecretKey: cfg.KubernetesWorkerSecretKey, ImageDigest: cfg.KubernetesImageDigest, GPUResource: cfg.KubernetesGPUResource, GPUProductLabel: cfg.KubernetesGPUProductLabel, ImageCachePolicy: cfg.KubernetesImageCachePolicy, ArtifactCachePolicy: cfg.KubernetesArtifactCachePolicy, ArtifactPVCs: cfg.KubernetesArtifactPVCs}
 		artifactCacheAdapters["kubernetes"] = kubernetesProvider
 		for _, runtimeName := range []string{"vllm", "sglang", "custom-oci"} {
 			elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: "kubernetes", Cloud: "kubernetes", Runtime: runtimeName, Profile: kubernetesProfile, Provider: kubernetesProvider})

@@ -1043,13 +1043,23 @@ func TestStaleLeaseCannotCheckpointOrFinish(t *testing.T) {
 	if err = s.CheckpointClaimedOperation(ctx, second.ID, "worker-b", second.LeaseGeneration, "intent", "succeeded", `{}`, 15, "Replica identity replayed"); err != nil {
 		t.Fatal(err)
 	}
+	if err = s.CheckpointClaimedOperation(ctx, second.ID, "worker-b", second.LeaseGeneration, "runtime", "waiting", `{"state":"starting"}`, 70, "Runtime is starting"); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.CheckpointClaimedOperation(ctx, second.ID, "worker-b", second.LeaseGeneration, "intent", "succeeded", `{ }`, 15, "Replica identity replayed"); err != nil {
+		t.Fatal(err)
+	}
 	persisted, err := s.Operation(ctx, second.ID)
-	if err != nil || persisted.Progress != 50 || persisted.Message != "GPU provisioned" {
+	if err != nil || persisted.Progress != 70 || persisted.Message != "Runtime is starting" {
 		t.Fatalf("operation regressed after replay: %#v err=%v", persisted, err)
 	}
 	events, err := s.OperationEvents(ctx, second.ID, 10)
-	if err != nil || len(events) != 2 || events[0].Type != "step.succeeded" || events[0].Message != "Replica identity replayed" {
+	if err != nil || len(events) != 3 || events[0].Type != "step.waiting" || events[0].Message != "Runtime is starting" {
 		t.Fatalf("events=%#v err=%v", events, err)
+	}
+	steps, err := s.OperationSteps(ctx, second.ID, 10)
+	if err != nil || len(steps) != 3 || steps[0].Name != "runtime" || steps[1].Name != "intent" || steps[1].Attempt != 2 {
+		t.Fatalf("steps=%#v err=%v", steps, err)
 	}
 }
 

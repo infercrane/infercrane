@@ -56,6 +56,8 @@ export INFERCRANE_AWS_WORKER_SECRET_ARN='arn:aws:secretsmanager:eu-central-1:123
 export INFERCRANE_AWS_IMAGE_DIGEST='vllm/vllm-openai@sha256:REPLACE_WITH_QUALIFIED_DIGEST'
 export INFERCRANE_AWS_IMAGE_CACHE_POLICY='prefer'
 export INFERCRANE_AWS_ROOT_VOLUME_GIB='200'
+export INFERCRANE_AWS_GP3_IOPS='3000'
+export INFERCRANE_AWS_GP3_THROUGHPUT_MIBPS='125'
 # Optional model cache. Keys must be exact model@immutable-commit identities.
 export INFERCRANE_AWS_ARTIFACT_CACHE_POLICY='prefer'
 export INFERCRANE_AWS_ARTIFACT_SNAPSHOTS_JSON='{"mistralai/Mistral-7B-Instruct-v0.3@COMMIT":"snap-0123456789abcdef0"}'
@@ -91,6 +93,12 @@ AWS mutation. The 200 GiB default follows a real failure in which a current vLLM
 a 100 GiB Deep Learning AMI root filesystem while Docker was extracting its FlashInfer layer. A
 smaller explicit value remains available for a qualified slim image, but must not inherit evidence
 from the default vLLM profile.
+
+The root volume defaults to the gp3 baseline of 3,000 IOPS and 125 MiB/s. Increase
+`INFERCRANE_AWS_GP3_IOPS` or `INFERCRANE_AWS_GP3_THROUGHPUT_MIBPS` only from measured evidence:
+higher provisioned performance can add AWS charges, and storage tuning cannot remove model engine
+initialization time. InferCrane validates AWS's documented bounds and throughput-to-IOPS ratio
+before mutation and includes the selected values in `RunInstances`.
 
 InferCrane reads the AMI metadata before every create or adoption and overrides the AMI's declared
 root device, not a hard-coded Linux device name. It rejects an invalid root mapping or a configured

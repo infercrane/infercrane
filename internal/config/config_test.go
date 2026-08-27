@@ -40,6 +40,20 @@ func TestRunPodContainerDiskIsBounded(t *testing.T) {
 	}
 }
 
+func TestRunPodNetworkVolumesRequireImmutableExactMappings(t *testing.T) {
+	t.Setenv("INFERCRANE_API_KEY", "secret")
+	t.Setenv("INFERCRANE_RUNPOD_ARTIFACT_CACHE_POLICY", "required")
+	t.Setenv("INFERCRANE_RUNPOD_NETWORK_VOLUMES_JSON", `{"org/model@0123456789abcdef0123456789abcdef01234567":"volume_1234"}`)
+	cfg, err := Load()
+	if err != nil || cfg.RunPodNetworkVolumes["org/model@0123456789abcdef0123456789abcdef01234567"] != "volume_1234" {
+		t.Fatalf("cfg=%#v err=%v", cfg, err)
+	}
+	t.Setenv("INFERCRANE_RUNPOD_NETWORK_VOLUMES_JSON", `{"org/model@main":"volume_1234"}`)
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "immutable model identities") {
+		t.Fatalf("mutable RunPod mapping accepted: %v", err)
+	}
+}
+
 func TestLoadRequiresAPIKey(t *testing.T) {
 	t.Setenv("INFERCRANE_API_KEY", "")
 	if _, err := Load(); err == nil {

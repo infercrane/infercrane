@@ -221,6 +221,9 @@ type consoleIdentityListStore interface {
 type operationListStore interface {
 	OperationsForTenant(context.Context, string, time.Time, int) ([]domain.Operation, error)
 }
+type operationStepStore interface {
+	OperationSteps(context.Context, string, int) ([]domain.OperationStep, error)
+}
 type principalListStore interface {
 	PrincipalsForTenant(context.Context, string) ([]domain.Principal, error)
 }
@@ -4856,6 +4859,17 @@ func (a API) operation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "operation was not found")
 		return
 	}
+	if store, ok := a.Store.(operationStepStore); ok {
+		steps, stepErr := store.OperationSteps(r.Context(), op.ID, 1)
+		if stepErr != nil {
+			writeError(w, http.StatusInternalServerError, "internal", "operation step lookup failed")
+			return
+		}
+		if len(steps) > 0 {
+			op.CurrentStep = steps[0].Name
+			op.CurrentStepStatus = steps[0].Status
+		}
+	}
 	writeJSON(w, http.StatusOK, operationResponse(op))
 }
 func (a API) operations(w http.ResponseWriter, r *http.Request) {
@@ -4926,6 +4940,10 @@ func (a API) cancel(w http.ResponseWriter, r *http.Request) {
 }
 func operationResponse(op domain.Operation) map[string]any {
 	response := map[string]any{"id": op.ID, "tenant_id": op.TenantID, "kind": op.Kind, "resource_type": op.ResourceType, "resource_name": op.ResourceName, "status": op.Status, "progress": op.Progress, "message": op.Message, "error_code": op.ErrorCode, "attempt": op.Attempt, "max_attempts": op.MaxAttempts, "retryable": op.Retryable, "cancel_requested": op.CancelRequested, "created_at": op.CreatedAt, "updated_at": op.UpdatedAt, "completed_at": op.CompletedAt, "next_attempt_at": op.NextAttemptAt}
+	if op.CurrentStep != "" {
+		response["current_step"] = op.CurrentStep
+		response["current_step_status"] = op.CurrentStepStatus
+	}
 	if op.ResultJSON != "" {
 		var result map[string]any
 		if json.Unmarshal([]byte(op.ResultJSON), &result) == nil && len(result) > 0 {

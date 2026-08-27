@@ -36,6 +36,8 @@ type AWSEC2 struct {
 	CostObservedAt                   time.Time
 	HourlyCostMicrousd               int64
 	RootVolumeGiB                    int
+	GP3IOPS                          int
+	GP3Throughput                    int
 	ImageCachePolicy                 string
 	ArtifactCachePolicy              string
 	ArtifactSnapshots                map[string]string
@@ -186,7 +188,7 @@ func (a AWSEC2) EnsureReplica(ctx context.Context, spec ReplicaSpec) (ProviderHa
 	// inventory and guarded cleanup can detect either resource independently.
 	tags := []map[string]any{{"ResourceType": "instance", "Tags": instanceTags}, {"ResourceType": "volume", "Tags": volumeTags}}
 	tagsJSON, _ := json.Marshal(tags)
-	blockDevices := []map[string]any{{"DeviceName": image.RootDeviceName, "Ebs": map[string]any{"VolumeSize": rootVolumeGiB, "VolumeType": "gp3", "Encrypted": true, "DeleteOnTermination": true}}}
+	blockDevices := []map[string]any{{"DeviceName": image.RootDeviceName, "Ebs": map[string]any{"VolumeSize": rootVolumeGiB, "VolumeType": "gp3", "Iops": a.gp3IOPS(), "Throughput": a.gp3Throughput(), "Encrypted": true, "DeleteOnTermination": true}}}
 	if artifactSnapshot.SnapshotID != "" {
 		artifactDevice, deviceErr := artifactDeviceName(image)
 		if deviceErr != nil {
@@ -334,6 +336,12 @@ func (a AWSEC2) validate(spec ReplicaSpec) error {
 	}
 	if a.rootVolumeGiB() < 50 || a.rootVolumeGiB() > 16384 {
 		return errors.New("AWS root volume must be between 50 and 16384 GiB")
+	}
+	if a.gp3IOPS() < 3000 || a.gp3IOPS() > 80000 {
+		return errors.New("AWS gp3 IOPS must be between 3000 and 80000")
+	}
+	if a.gp3Throughput() < 125 || a.gp3Throughput() > 2000 || a.gp3Throughput()*4 > a.gp3IOPS() {
+		return errors.New("AWS gp3 throughput must be between 125 and 2000 MiB/s and no more than one quarter of configured IOPS")
 	}
 	if policy := a.artifactCachePolicy(); policy != "disabled" && policy != "prefer" && policy != "required" {
 		return errors.New("AWS artifact cache policy must be disabled, prefer, or required")
@@ -805,6 +813,20 @@ func (a AWSEC2) rootVolumeGiB() int {
 		return a.RootVolumeGiB
 	}
 	return 200
+}
+
+func (a AWSEC2) gp3IOPS() int {
+	if a.GP3IOPS > 0 {
+		return a.GP3IOPS
+	}
+	return 3000
+}
+
+func (a AWSEC2) gp3Throughput() int {
+	if a.GP3Throughput > 0 {
+		return a.GP3Throughput
+	}
+	return 125
 }
 
 func (a AWSEC2) userData(spec ReplicaSpec, port int, artifactSnapshotID string) string {

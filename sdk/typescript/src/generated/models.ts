@@ -9,6 +9,8 @@ export interface Operation {
   status: OperationStatus;
   progress: number;
   message?: string;
+  current_step?: string;
+  current_step_status?: string;
   resource_type?: string;
   resource_name?: string;
   error_code?: string;

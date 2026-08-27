@@ -22,34 +22,46 @@ import (
 type RunPodPods struct {
 	APIKey, WorkerAPIKey, BaseURL string
 	ContainerDiskGiB              int
+	ArtifactCachePolicy           string
+	NetworkVolumes                map[string]string
 	Client                        *http.Client
 }
 
+type runPodNetworkVolume struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	DataCenterID string `json:"dataCenterId"`
+	Size         int    `json:"size"`
+}
+
 type runPodRecord struct {
-	ID               string            `json:"id"`
-	Name             string            `json:"name"`
-	DesiredStatus    string            `json:"desiredStatus"`
-	Image            string            `json:"image"`
-	ImageName        string            `json:"imageName"`
-	GPUCount         int               `json:"gpuCount"`
-	DockerEntrypoint []string          `json:"dockerEntrypoint"`
-	DockerStartCmd   []string          `json:"dockerStartCmd"`
-	Ports            []string          `json:"ports"`
-	MachineID        string            `json:"machineId"`
-	LastStartedAt    string            `json:"lastStartedAt"`
-	LastStatusChange string            `json:"lastStatusChange"`
-	CostPerHour      json.RawMessage   `json:"costPerHr"`
-	AdjustedCost     json.RawMessage   `json:"adjustedCostPerHr"`
-	Environment      map[string]string `json:"env"`
-	PublicIP         string            `json:"publicIp"`
-	ContainerDiskGiB int               `json:"containerDiskInGb"`
-	VolumeInGiB      int               `json:"volumeInGb"`
-	GPUTypeID        string            `json:"gpuTypeId"`
+	ID               string               `json:"id"`
+	Name             string               `json:"name"`
+	DesiredStatus    string               `json:"desiredStatus"`
+	Image            string               `json:"image"`
+	ImageName        string               `json:"imageName"`
+	GPUCount         int                  `json:"gpuCount"`
+	DockerEntrypoint []string             `json:"dockerEntrypoint"`
+	DockerStartCmd   []string             `json:"dockerStartCmd"`
+	Ports            []string             `json:"ports"`
+	MachineID        string               `json:"machineId"`
+	LastStartedAt    string               `json:"lastStartedAt"`
+	LastStatusChange string               `json:"lastStatusChange"`
+	CostPerHour      json.RawMessage      `json:"costPerHr"`
+	AdjustedCost     json.RawMessage      `json:"adjustedCostPerHr"`
+	Environment      map[string]string    `json:"env"`
+	PublicIP         string               `json:"publicIp"`
+	ContainerDiskGiB int                  `json:"containerDiskInGb"`
+	VolumeInGiB      int                  `json:"volumeInGb"`
+	VolumeMountPath  string               `json:"volumeMountPath"`
+	GPUTypeID        string               `json:"gpuTypeId"`
+	NetworkVolume    *runPodNetworkVolume `json:"networkVolume"`
 	GPU              struct {
 		ID string `json:"id"`
 	} `json:"gpu"`
 	Machine struct {
-		GPUTypeID string `json:"gpuTypeId"`
+		GPUTypeID    string `json:"gpuTypeId"`
+		DataCenterID string `json:"dataCenterId"`
 	} `json:"machine"`
 }
 
@@ -70,9 +82,6 @@ func (r RunPodPods) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provid
 	if spec.GPUCount < 1 || spec.GPUCount > 8 {
 		return ProviderHandle{}, fmt.Errorf("%w: RunPod Pod GPU count must be between 1 and 8", ErrInvalidReplicaSpec)
 	}
-	if strings.TrimSpace(spec.Region) != "" {
-		return ProviderHandle{}, fmt.Errorf("%w: native RunPod Pods do not accept a region constraint; leave provider.region empty", ErrInvalidReplicaSpec)
-	}
 	if spec.Workload.Empty() {
 		return ProviderHandle{}, fmt.Errorf("%w: native RunPod Pods require an immutable custom OCI workload", ErrInvalidReplicaSpec)
 	}
@@ -89,11 +98,22 @@ func (r RunPodPods) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provid
 		return ProviderHandle{}, fmt.Errorf("%w: multiple RunPod Pods match durable key %q", ErrRequestFailed, spec.ExternalKey)
 	}
 	command := expandWorkloadCommand(spec.Workload.Command, spec.Model, spec.ModelRevision, spec.Workload.Port, spec.RuntimeArgs)
+	volumeID, err := r.configuredNetworkVolume(spec)
+	if err != nil {
+		return ProviderHandle{}, err
+	}
 	if len(matches) == 1 {
-		if err = validateRunPodIntent(matches[0], spec, command); err != nil {
+		if err = validateRunPodIntent(matches[0], spec, command, volumeID); err != nil {
 			return ProviderHandle{}, err
 		}
 		return ProviderHandle{ResourceID: name, ExternalKey: spec.ExternalKey}, nil
+	}
+	var volume runPodNetworkVolume
+	if volumeID != "" {
+		volume, err = r.verifyNetworkVolume(ctx, modelIdentity(spec), volumeID, spec.Region)
+		if err != nil {
+			return ProviderHandle{}, err
+		}
 	}
 	disk := r.ContainerDiskGiB
 	if disk == 0 {
@@ -102,6 +122,7 @@ func (r RunPodPods) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provid
 	if disk < 50 || disk > 2048 {
 		return ProviderHandle{}, fmt.Errorf("%w: RunPod container disk must be between 50 and 2048 GiB", ErrInvalidReplicaSpec)
 	}
+	environment := map[string]string{"INFERCRANE_WORKER_API_KEY": r.WorkerAPIKey, "VLLM_API_KEY": r.WorkerAPIKey}
 	body := map[string]any{
 		"name": name, "imageName": spec.Workload.Image,
 		"gpuTypeIds": []string{runPodGPUType(spec.GPU)}, "gpuTypePriority": "custom", "gpuCount": spec.GPUCount,
@@ -109,7 +130,21 @@ func (r RunPodPods) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provid
 		"containerDiskInGb": disk,
 		"dockerEntrypoint":  []string{command[0]}, "dockerStartCmd": command[1:],
 		"ports": []string{strconv.Itoa(spec.Workload.Port) + "/http"},
-		"env":   map[string]string{"INFERCRANE_WORKER_API_KEY": r.WorkerAPIKey, "VLLM_API_KEY": r.WorkerAPIKey},
+		"env":   environment,
+	}
+	dataCenterID := strings.TrimSpace(spec.Region)
+	if volume.ID != "" {
+		body["networkVolumeId"] = volume.ID
+		body["volumeMountPath"] = "/workspace"
+		dataCenterID = volume.DataCenterID
+		environment["HF_HOME"] = "/workspace/huggingface"
+		environment["HUGGINGFACE_HUB_CACHE"] = "/workspace/huggingface/hub"
+		environment["INFERCRANE_MODEL_DIR"] = "/workspace/infercrane/model"
+		environment["HF_XET_HIGH_PERFORMANCE"] = "1"
+	}
+	if dataCenterID != "" {
+		body["dataCenterIds"] = []string{dataCenterID}
+		body["dataCenterPriority"] = "custom"
 	}
 	var created runPodRecord
 	if err = r.do(ctx, http.MethodPost, "/pods", body, &created); err != nil {
@@ -117,7 +152,7 @@ func (r RunPodPods) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provid
 		// and adopt the deterministic name before surfacing a retryable failure.
 		if current, listErr := r.list(ctx); listErr == nil {
 			matches = matchingRunPodRecords(current, name)
-			if len(matches) == 1 && validateRunPodIntent(matches[0], spec, command) == nil {
+			if len(matches) == 1 && validateRunPodIntent(matches[0], spec, command, volumeID) == nil {
 				return ProviderHandle{ResourceID: name, ExternalKey: spec.ExternalKey}, nil
 			}
 		}
@@ -160,6 +195,7 @@ func (r RunPodPods) ObserveReplica(ctx context.Context, handle ProviderHandle, p
 		"machine_id": pod.MachineID, "last_started_at": pod.LastStartedAt,
 		"last_status_change": pod.LastStatusChange, "container_disk_gib": pod.ContainerDiskGiB,
 		"cost_per_hour": rawNumber(pod.CostPerHour), "adjusted_cost_per_hour": rawNumber(pod.AdjustedCost),
+		"network_volume": runPodVolumeEvidence(pod.NetworkVolume),
 	})
 	switch strings.ToUpper(pod.DesiredStatus) {
 	case "EXITED", "TERMINATED":
@@ -264,7 +300,7 @@ func matchingRunPodRecords(pods []runPodRecord, name string) []runPodRecord {
 	return matches
 }
 
-func validateRunPodIntent(pod runPodRecord, spec ReplicaSpec, command []string) error {
+func validateRunPodIntent(pod runPodRecord, spec ReplicaSpec, command []string, volumeID string) error {
 	image := pod.ImageName
 	if image == "" {
 		image = pod.Image
@@ -277,10 +313,70 @@ func validateRunPodIntent(pod runPodRecord, spec ReplicaSpec, command []string) 
 		actualGPU = pod.GPU.ID
 	}
 	credentialMismatch := len(pod.Environment) > 0 && (pod.Environment["INFERCRANE_WORKER_API_KEY"] == "" || pod.Environment["VLLM_API_KEY"] == "")
-	if image != spec.Workload.Image || pod.GPUCount != spec.GPUCount || (actualGPU != "" && actualGPU != runPodGPUType(spec.GPU)) || credentialMismatch || !equalStrings(pod.DockerEntrypoint, command[:1]) || !equalStrings(pod.DockerStartCmd, command[1:]) {
+	actualVolumeID := ""
+	if pod.NetworkVolume != nil {
+		actualVolumeID = pod.NetworkVolume.ID
+	}
+	actualDataCenterID := pod.Machine.DataCenterID
+	if actualDataCenterID == "" && pod.NetworkVolume != nil {
+		actualDataCenterID = pod.NetworkVolume.DataCenterID
+	}
+	regionMismatch := spec.Region != "" && actualDataCenterID != "" && actualDataCenterID != spec.Region
+	if image != spec.Workload.Image || pod.GPUCount != spec.GPUCount || (actualGPU != "" && actualGPU != runPodGPUType(spec.GPU)) || credentialMismatch || actualVolumeID != volumeID || regionMismatch || !equalStrings(pod.DockerEntrypoint, command[:1]) || !equalStrings(pod.DockerStartCmd, command[1:]) {
 		return fmt.Errorf("%w: existing RunPod Pod does not match immutable workload intent", ErrInvalidReplicaSpec)
 	}
 	return nil
+}
+
+func (r RunPodPods) configuredNetworkVolume(spec ReplicaSpec) (string, error) {
+	policy := strings.ToLower(strings.TrimSpace(r.ArtifactCachePolicy))
+	if policy == "" {
+		policy = "prefer"
+	}
+	if policy != "disabled" && policy != "prefer" && policy != "required" {
+		return "", fmt.Errorf("%w: RunPod artifact cache policy must be disabled, prefer, or required", ErrInvalidReplicaSpec)
+	}
+	if policy == "disabled" {
+		return "", nil
+	}
+	identity := modelIdentity(spec)
+	volumeID := strings.TrimSpace(r.NetworkVolumes[identity])
+	if volumeID == "" && policy == "required" {
+		return "", fmt.Errorf("%w: RunPod artifact cache requires a network volume for immutable model %q", ErrInvalidReplicaSpec, identity)
+	}
+	return volumeID, nil
+}
+
+func (r RunPodPods) verifyNetworkVolume(ctx context.Context, identity, volumeID, region string) (runPodNetworkVolume, error) {
+	var volumes []runPodNetworkVolume
+	if err := r.do(ctx, http.MethodGet, "/networkvolumes", nil, &volumes); err != nil {
+		return runPodNetworkVolume{}, fmt.Errorf("verify RunPod network volume: %w", err)
+	}
+	expectedName := runPodArtifactVolumeName(identity)
+	for _, volume := range volumes {
+		if volume.ID != volumeID {
+			continue
+		}
+		if volume.Name != expectedName || volume.Size < 1 || volume.DataCenterID == "" {
+			return runPodNetworkVolume{}, fmt.Errorf("%w: RunPod network volume %s must be named %q, have positive size, and declare a data center", ErrInvalidReplicaSpec, volumeID, expectedName)
+		}
+		if region != "" && region != volume.DataCenterID {
+			return runPodNetworkVolume{}, fmt.Errorf("%w: RunPod network volume %s is in %s, not requested region %s", ErrInvalidReplicaSpec, volumeID, volume.DataCenterID, region)
+		}
+		return volume, nil
+	}
+	return runPodNetworkVolume{}, fmt.Errorf("%w: configured RunPod network volume %s was not found", ErrInvalidReplicaSpec, volumeID)
+}
+
+func runPodArtifactVolumeName(identity string) string {
+	return "infercrane-artifact-" + modelIdentityDigest(identity)[:20]
+}
+
+func runPodVolumeEvidence(volume *runPodNetworkVolume) any {
+	if volume == nil {
+		return nil
+	}
+	return map[string]any{"id": volume.ID, "name": volume.Name, "size_gib": volume.Size, "data_center_id": volume.DataCenterID, "mount": "/workspace", "state": "attached"}
 }
 
 func expandWorkloadCommand(command []string, model, revision string, port int, runtimeArgs []string) []string {

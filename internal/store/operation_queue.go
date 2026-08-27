@@ -199,9 +199,22 @@ func (s *Store) CheckpointClaimedOperation(ctx context.Context, id, owner string
 	if status == "succeeded" || status == "failed" || status == "cancelled" {
 		completed = stamp
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO operation_steps(operation_id,step_name,status,attempt,checkpoint_json,started_at,updated_at,completed_at) VALUES(?,?,?,?,?::jsonb,?,?,?) ON CONFLICT(operation_id,step_name) DO UPDATE SET status=EXCLUDED.status,attempt=operation_steps.attempt+1,checkpoint_json=EXCLUDED.checkpoint_json,updated_at=EXCLUDED.updated_at,completed_at=EXCLUDED.completed_at`, id, step, status, 1, checkpoint, stamp, stamp, completed)
+	var previousStatus, previousCheckpoint string
+	lookupErr := tx.QueryRowContext(ctx, `SELECT status,checkpoint_json::text FROM operation_steps WHERE operation_id=? AND step_name=? FOR UPDATE`, id, step).Scan(&previousStatus, &previousCheckpoint)
+	if lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows) {
+		return lookupErr
+	}
+	duplicate := lookupErr == nil && previousStatus == status && semanticJSONEqual(previousCheckpoint, checkpoint)
+	if duplicate {
+		_, err = tx.ExecContext(ctx, `UPDATE operation_steps SET attempt=attempt+1 WHERE operation_id=? AND step_name=?`, id, step)
+	} else {
+		_, err = tx.ExecContext(ctx, `INSERT INTO operation_steps(operation_id,step_name,status,attempt,checkpoint_json,started_at,updated_at,completed_at) VALUES(?,?,?,?,?::jsonb,?,?,?) ON CONFLICT(operation_id,step_name) DO UPDATE SET status=EXCLUDED.status,attempt=operation_steps.attempt+1,checkpoint_json=EXCLUDED.checkpoint_json,updated_at=EXCLUDED.updated_at,completed_at=EXCLUDED.completed_at`, id, step, status, 1, checkpoint, stamp, stamp, completed)
+	}
 	if err != nil {
 		return err
+	}
+	if duplicate {
+		return tx.Commit()
 	}
 	var sequence int64
 	if err = tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(sequence),0)+1 FROM operation_events WHERE operation_id=?`, id).Scan(&sequence); err != nil {
@@ -211,6 +224,35 @@ func (s *Store) CheckpointClaimedOperation(ctx context.Context, id, owner string
 		return err
 	}
 	return tx.Commit()
+}
+
+func (s *Store) OperationSteps(ctx context.Context, id string, limit int) ([]domain.OperationStep, error) {
+	if limit < 1 || limit > 1000 {
+		limit = 100
+	}
+	rows, err := s.QueryContext(ctx, `SELECT operation_id,step_name,status,attempt,checkpoint_json::text,error_code,started_at,updated_at,completed_at FROM operation_steps WHERE operation_id=? ORDER BY updated_at DESC LIMIT ?`, id, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var steps []domain.OperationStep
+	for rows.Next() {
+		var step domain.OperationStep
+		var startedAt, updatedAt string
+		var errorCode, completedAt sql.NullString
+		if err := rows.Scan(&step.OperationID, &step.Name, &step.Status, &step.Attempt, &step.CheckpointJSON, &errorCode, &startedAt, &updatedAt, &completedAt); err != nil {
+			return nil, err
+		}
+		step.ErrorCode = errorCode.String
+		step.StartedAt = parseTime(startedAt)
+		step.UpdatedAt = parseTime(updatedAt)
+		if completedAt.Valid {
+			stamp := parseTime(completedAt.String)
+			step.CompletedAt = &stamp
+		}
+		steps = append(steps, step)
+	}
+	return steps, rows.Err()
 }
 
 func (s *Store) OperationEvents(ctx context.Context, id string, limit int) ([]domain.OperationEvent, error) {

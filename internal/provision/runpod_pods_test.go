@@ -133,6 +133,59 @@ func TestRunPodPodsAdoptsAfterLostCreateResponse(t *testing.T) {
 	}
 }
 
+func TestRunPodPodsUsesExactPersistentModelVolumeAndRegion(t *testing.T) {
+	identity := "org/model@0123456789abcdef0123456789abcdef01234567"
+	volume := runPodNetworkVolume{ID: "volume_1234", Name: runPodArtifactVolumeName(identity), DataCenterID: "EU-RO-1", Size: 500}
+	var created runPodRecord
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/pods":
+			if created.ID == "" {
+				_ = json.NewEncoder(w).Encode([]runPodRecord{})
+			} else {
+				_ = json.NewEncoder(w).Encode([]runPodRecord{created})
+			}
+		case r.Method == http.MethodGet && r.URL.Path == "/networkvolumes":
+			_ = json.NewEncoder(w).Encode([]runPodNetworkVolume{volume})
+		case r.Method == http.MethodPost && r.URL.Path == "/pods":
+			var body struct {
+				Name, ImageName, NetworkVolumeID, VolumeMountPath string
+				GPUCount                                          int
+				DockerEntrypoint, DockerStartCmd, DataCenterIDs   []string
+				Environment                                       map[string]string `json:"env"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if body.NetworkVolumeID != volume.ID || body.VolumeMountPath != "/workspace" || len(body.DataCenterIDs) != 1 || body.DataCenterIDs[0] != volume.DataCenterID || body.Environment["INFERCRANE_MODEL_DIR"] != "/workspace/infercrane/model" || body.Environment["HF_XET_HIGH_PERFORMANCE"] != "1" {
+				t.Fatalf("unexpected persistent cache request: %#v", body)
+			}
+			created = runPodRecord{ID: "pod-volume", Name: body.Name, DesiredStatus: "RUNNING", ImageName: body.ImageName, GPUCount: body.GPUCount, DockerEntrypoint: body.DockerEntrypoint, DockerStartCmd: body.DockerStartCmd, NetworkVolume: &volume}
+			created.Machine.GPUTypeID = "NVIDIA H200"
+			created.Machine.DataCenterID = volume.DataCenterID
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(created)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	provider := RunPodPods{APIKey: "provider-secret", WorkerAPIKey: "worker-secret", BaseURL: server.URL, Client: server.Client(), ArtifactCachePolicy: "required", NetworkVolumes: map[string]string{identity: volume.ID}}
+	spec := ReplicaSpec{ExternalKey: "volume", Model: "org/model", ModelRevision: "0123456789abcdef0123456789abcdef01234567", Cloud: "runpod", Region: volume.DataCenterID, GPU: "H200", GPUCount: 1, Workload: testRunPodWorkload()}
+	handle, err := provider.EnsureReplica(context.Background(), spec)
+	if err != nil || handle.ResourceID == "" {
+		t.Fatalf("handle=%#v err=%v", handle, err)
+	}
+	if _, err = provider.EnsureReplica(context.Background(), spec); err != nil {
+		t.Fatalf("adopt persistent volume pod: %v", err)
+	}
+	observed, err := provider.ObserveReplica(context.Background(), handle, 8000)
+	if err != nil || !strings.Contains(observed.Details, `"state":"attached"`) || strings.Contains(observed.Details, "worker-secret") {
+		t.Fatalf("observation=%#v err=%v", observed, err)
+	}
+}
+
 func testRunPodWorkload() runtimecontract.Workload {
 	return runtimecontract.Workload{
 		Image:    "registry.example/runtime@sha256:" + strings.Repeat("a", 64),

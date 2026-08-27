@@ -471,7 +471,7 @@ func TestAWSEC2LifecycleIsIdempotentPrivateAndTagged(t *testing.T) {
 		t.Fatalf("observation=%#v err=%v", observation, err)
 	}
 	joined := strings.Join(runner.runInstanceArgs, " ")
-	if !strings.Contains(joined, `"AssociatePublicIpAddress":false`) || !strings.Contains(joined, "infercrane:external-key") || !strings.Contains(joined, "infercrane:root-device-name") || !strings.Contains(joined, "--client-token") || !strings.Contains(joined, "--count 1") || !strings.Contains(joined, `"VolumeSize":200`) || !strings.Contains(joined, `"VolumeType":"gp3"`) || !strings.Contains(joined, `"Encrypted":true`) || !strings.Contains(joined, `"DeleteOnTermination":true`) || strings.Contains(joined, "--min-count") || strings.Contains(joined, "--max-count") || strings.Contains(joined, "temporary-secret") {
+	if !strings.Contains(joined, `"AssociatePublicIpAddress":false`) || !strings.Contains(joined, "infercrane:external-key") || !strings.Contains(joined, "infercrane:root-device-name") || !strings.Contains(joined, "--client-token") || !strings.Contains(joined, "--count 1") || !strings.Contains(joined, `"VolumeSize":200`) || !strings.Contains(joined, `"VolumeType":"gp3"`) || !strings.Contains(joined, `"Iops":3000`) || !strings.Contains(joined, `"Throughput":125`) || !strings.Contains(joined, `"Encrypted":true`) || !strings.Contains(joined, `"DeleteOnTermination":true`) || strings.Contains(joined, "--min-count") || strings.Contains(joined, "--max-count") || strings.Contains(joined, "temporary-secret") {
 		t.Fatalf("unsafe or non-idempotent run-instances args: %s", joined)
 	}
 	resourceTypes := awsArgumentTagResourceTypes(runner.runInstanceArgs)

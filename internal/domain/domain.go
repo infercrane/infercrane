@@ -775,29 +775,31 @@ type Replica struct {
 }
 
 type Operation struct {
-	ID              string     `json:"id"`
-	TenantID        string     `json:"tenant_id,omitempty"`
-	Kind            string     `json:"kind"`
-	ResourceType    string     `json:"resource_type,omitempty"`
-	ResourceName    string     `json:"resource_name,omitempty"`
-	IdempotencyKey  string     `json:"idempotency_key,omitempty"`
-	Status          string     `json:"status"`
-	Message         string     `json:"message,omitempty"`
-	RequestJSON     string     `json:"request_json,omitempty"`
-	ResultJSON      string     `json:"result_json,omitempty"`
-	ErrorCode       string     `json:"error_code,omitempty"`
-	Progress        int        `json:"progress"`
-	Attempt         int        `json:"attempt"`
-	MaxAttempts     int        `json:"max_attempts"`
-	Retryable       bool       `json:"retryable"`
-	CancelRequested bool       `json:"cancel_requested"`
-	LeaseOwner      string     `json:"lease_owner,omitempty"`
-	LeaseGeneration int64      `json:"lease_generation,omitempty"`
-	CreatedAt       time.Time  `json:"created_at,omitempty"`
-	UpdatedAt       time.Time  `json:"updated_at,omitempty"`
-	CompletedAt     *time.Time `json:"completed_at,omitempty"`
-	LeaseExpiresAt  *time.Time `json:"lease_expires_at,omitempty"`
-	NextAttemptAt   *time.Time `json:"next_attempt_at,omitempty"`
+	ID                string     `json:"id"`
+	TenantID          string     `json:"tenant_id,omitempty"`
+	Kind              string     `json:"kind"`
+	ResourceType      string     `json:"resource_type,omitempty"`
+	ResourceName      string     `json:"resource_name,omitempty"`
+	IdempotencyKey    string     `json:"idempotency_key,omitempty"`
+	Status            string     `json:"status"`
+	Message           string     `json:"message,omitempty"`
+	CurrentStep       string     `json:"current_step,omitempty"`
+	CurrentStepStatus string     `json:"current_step_status,omitempty"`
+	RequestJSON       string     `json:"request_json,omitempty"`
+	ResultJSON        string     `json:"result_json,omitempty"`
+	ErrorCode         string     `json:"error_code,omitempty"`
+	Progress          int        `json:"progress"`
+	Attempt           int        `json:"attempt"`
+	MaxAttempts       int        `json:"max_attempts"`
+	Retryable         bool       `json:"retryable"`
+	CancelRequested   bool       `json:"cancel_requested"`
+	LeaseOwner        string     `json:"lease_owner,omitempty"`
+	LeaseGeneration   int64      `json:"lease_generation,omitempty"`
+	CreatedAt         time.Time  `json:"created_at,omitempty"`
+	UpdatedAt         time.Time  `json:"updated_at,omitempty"`
+	CompletedAt       *time.Time `json:"completed_at,omitempty"`
+	LeaseExpiresAt    *time.Time `json:"lease_expires_at,omitempty"`
+	NextAttemptAt     *time.Time `json:"next_attempt_at,omitempty"`
 }
 
 type OperationStep struct {

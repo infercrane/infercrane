@@ -54,6 +54,25 @@ plan or local simulation is not real-provider qualification.
     Large custom OCI workloads may need more than the default 100 GiB container disk. Set, for
     example, `INFERCRANE_RUNPOD_CONTAINER_DISK_GIB=500` in the same private environment file. Disk
     size is validated before the control plane starts and may affect provider cost.
+
+    Native Pods can instead reuse a model-specific RunPod network volume. Create the volume in the
+    intended data center and name it `infercrane-artifact-` followed by the first 20 hexadecimal
+    characters of SHA-256 over the exact `model@commit` identity. Then configure the exact mapping:
+
+    ```bash
+    MODEL_IDENTITY='org/model@0123456789abcdef0123456789abcdef01234567'
+    MODEL_DIGEST="$(printf %s "$MODEL_IDENTITY" | shasum -a 256 | awk '{print $1}')"
+    # Name the existing volume infercrane-artifact-${MODEL_DIGEST:0:20} in RunPod.
+    export INFERCRANE_RUNPOD_ARTIFACT_CACHE_POLICY='required'
+    export INFERCRANE_RUNPOD_NETWORK_VOLUMES_JSON="{\"$MODEL_IDENTITY\":\"volume_1234\"}"
+    ```
+
+    Before creating a Pod, InferCrane performs a read-only volume lookup, verifies its ID, exact
+    identity-derived name, positive size, and data center, then mounts it at `/workspace`. Standard
+    Hugging Face downloads and filesystem-materialized model profiles use that persistent path.
+    The first deployment may still download the model; `required` proves the persistent volume was
+    attached, not that its bytes were already warm. Runtime readiness remains the proof that the
+    exact model became serveable. Deleting a Pod does not delete this operator-owned volume.
   </Step>
 
   <Step title="Connect and run read-only checks">

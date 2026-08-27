@@ -1971,6 +1971,20 @@
             "format": "date-time",
             "type": "string"
           },
+          "current_step": {
+            "type": "string"
+          },
+          "current_step_status": {
+            "enum": [
+              "pending",
+              "running",
+              "waiting",
+              "succeeded",
+              "failed",
+              "cancelled"
+            ],
+            "type": "string"
+          },
           "error_code": {
             "type": "string"
           },
