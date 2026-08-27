@@ -34,7 +34,7 @@ and Terraform provider ZIPs for macOS and Linux on amd64 and arm64.
   promotion, rejection, monitoring, and rollback;
 - CLI, control API, Python and TypeScript SDKs, Terraform provider, GitHub Action, terminal workspace,
   and a separately deployed browser console;
-- Apache-2.0 licensing, multi-architecture artifacts and images, checksums, SBOMs, provenance, and
+- Apache-2.0 licensing, multi-architecture artifacts, checksums, SBOMs, provenance, and
   GitHub attestations.
 
 ## Distribution status
