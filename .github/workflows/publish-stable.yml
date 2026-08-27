@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Exact candidate or stable tag already built as a draft release
+        description: Exact candidate or stable tag whose release artifacts already exist
         required: true
         type: string
 
@@ -65,7 +65,8 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/environments/stable-publication" \
             --jq 'select((.protection_rules | length) > 0)' >/dev/null
           actual=$(gh release view "$RELEASE_TAG" --json isDraft,isPrerelease,tagName)
-          test "$(printf '%s' "$actual" | jq -r .isDraft)" = true
+          is_draft=$(printf '%s' "$actual" | jq -er '.isDraft | if . == true then "true" elif . == false then "false" else error("invalid draft state") end')
+          case "$is_draft" in true|false) ;; *) exit 1 ;; esac
           test "$(printf '%s' "$actual" | jq -r .isPrerelease)" = "$prerelease"
           test "$(printf '%s' "$actual" | jq -r .tagName)" = "$RELEASE_TAG"
       - name: Download and verify the exact draft assets
