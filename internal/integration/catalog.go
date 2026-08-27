@@ -100,7 +100,7 @@ func providerCatalog() (*Registry, error) {
 			},
 			Qualification: []Qualification{
 				{State: QualificationLocal, Environment: "hermetic-runpod-rest", Evidence: "go:test/internal/provision#TestRunPodPodsLifecycleIsReplaySafeAndPreservesImmutableWorkload"},
-				{State: QualificationDeferred, Environment: "real-runpod-custom-oci", Reason: "real-provider qualification has not been completed"},
+				{State: QualificationDeferred, Environment: "real-runpod-native-pods", Reason: "real-provider qualification remains exact runtime, model, GPU, region, and workload evidence"},
 			},
 		},
 		{

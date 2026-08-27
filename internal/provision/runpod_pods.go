@@ -16,8 +16,9 @@ import (
 	"github.com/infercrane/infercrane/internal/artifactcache"
 )
 
-// RunPodPods launches immutable custom OCI workloads through RunPod's native
-// Pod API. Unlike the SkyPilot adapter, it does not require the workload image
+// RunPodPods launches immutable OCI workloads through RunPod's native Pod API.
+// Built-in runtimes and custom workloads share the same validated contract.
+// Unlike the SkyPilot adapter, it does not require the workload image
 // to contain an SSH daemon or rsync. ExternalKey is compiled into a
 // deterministic provider name so a retry can adopt a Pod after a lost create
 // response.
