@@ -296,7 +296,7 @@ func runPodVolumeLocation(location string) (string, error) {
 
 func (r RunPodPods) list(ctx context.Context) ([]runPodRecord, error) {
 	var pods []runPodRecord
-	if err := r.do(ctx, http.MethodGet, "/pods", nil, &pods); err != nil {
+	if err := r.do(ctx, http.MethodGet, "/pods?includeMachine=true&includeNetworkVolume=true", nil, &pods); err != nil {
 		return nil, err
 	}
 	return pods, nil

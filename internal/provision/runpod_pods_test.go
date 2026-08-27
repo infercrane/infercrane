@@ -172,6 +172,9 @@ func TestRunPodPodsUsesExactPersistentModelVolumeAndRegion(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/pods":
+			if r.URL.Query().Get("includeMachine") != "true" || r.URL.Query().Get("includeNetworkVolume") != "true" {
+				t.Fatalf("adoption list omitted immutable provider details: %s", r.URL.RawQuery)
+			}
 			if created.ID == "" {
 				_ = json.NewEncoder(w).Encode([]runPodRecord{})
 			} else {
