@@ -162,6 +162,10 @@ jobs:
       contents: read
       id-token: write
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 2
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: release-publication-assets
@@ -179,6 +183,7 @@ jobs:
         env:
           NPM_VERSION: ${{ needs.preflight.outputs.npm_version }}
           PRERELEASE: ${{ needs.preflight.outputs.prerelease }}
+          RELEASE_TAG: ${{ inputs.tag }}
         run: |
           package=publication-assets/npm/infercrane-sdk-${NPM_VERSION}.tgz
           if npm view "@infercrane/sdk@${NPM_VERSION}" version >/dev/null 2>&1; then
@@ -186,8 +191,17 @@ jobs:
             npm pack "@infercrane/sdk@${NPM_VERSION}" --pack-destination registry-package >/dev/null
             tar -xzf "$package" -C expected-package
             tar -xzf registry-package/*.tgz -C registry-package
-            diff -qr expected-package/package registry-package/package
-            echo "npm already contains the exact package contents."
+            if diff -qr expected-package/package registry-package/package; then
+              echo "npm already contains the exact package contents."
+            elif [ "$PRERELEASE" = true ]; then
+              diff -qr --exclude=README.md expected-package/package registry-package/package
+              git show "${RELEASE_TAG}^:sdk/typescript/README.md" >bootstrap-readme.md
+              diff -q bootstrap-readme.md registry-package/package/README.md
+              echo "npm RC contains the tracked bootstrap README; executable and metadata payloads are exact."
+            else
+              echo "stable npm package differs from the verified release artifact" >&2
+              exit 1
+            fi
           elif [ "$PRERELEASE" = true ]; then
             npm publish "$package" --access public --tag rc
           else
@@ -208,6 +222,7 @@ jobs:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
+          gh auth setup-git
           gh repo clone infercrane/homebrew-tap "$RUNNER_TEMP/homebrew-tap"
           mkdir -p "$RUNNER_TEMP/homebrew-tap/Formula"
           cp publication-assets/homebrew/infercrane.rb "$RUNNER_TEMP/homebrew-tap/Formula/infercrane.rb"

@@ -87,8 +87,11 @@ Verify from a clean machine:
 brew install infercrane/tap/infercrane
 python -m pip install 'infercrane==1.0.0rc1'
 npm install '@infercrane/sdk@1.0.0-rc.1'
-docker pull ghcr.io/infercrane/infercrane:v1.0.0-rc.1
 ```
+
+Publish and document the GHCR candidate only after its critical-vulnerability scan and image
+attestation jobs pass. A failed image gate does not become a qualified image by publishing the
+other independently verified release artifacts.
 
 ## Promote the exact candidate commit
 

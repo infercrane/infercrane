@@ -15,7 +15,6 @@ for deploying new model serving or adopting inference that a team already runs.
 brew install infercrane/tap/infercrane
 python -m pip install 'infercrane==1.0.0rc1'
 npm install '@infercrane/sdk@1.0.0-rc.1'
-docker pull ghcr.io/infercrane/infercrane:v1.0.0-rc.1
 ```
 
 The [GitHub prerelease](https://github.com/infercrane/infercrane/releases/tag/v1.0.0-rc.1)
@@ -40,7 +39,8 @@ and Terraform provider ZIPs for macOS and Linux on amd64 and arm64.
 
 ## Distribution status
 
-The CLI, SDK prereleases, GHCR image, and Terraform GitHub artifacts are public. Terraform Registry
+The CLI, SDK prereleases, and Terraform GitHub artifacts are public. The GHCR image is release-gated
+separately and is not part of this candidate until its vulnerability scan passes. Terraform Registry
 installation remains separate from the downloadable provider artifacts. The hosted InferCrane Cloud
 experience remains waitlist access; it does not limit use of the open-source release.
 
