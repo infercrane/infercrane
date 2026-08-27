@@ -123,10 +123,10 @@ jobs:
           node-version: "24.20.0"
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
-      - name: Install the minimum trusted-publishing npm client
+      - name: Install the pinned trusted-publishing npm client
         run: |
-          npm install --global npm@11.6.4
-          test "$(npm --version)" = 11.6.4
+          npm install --global npm@12.0.2
+          test "$(npm --version)" = 12.0.2
       - name: Publish the exact package with npm Trusted Publishing
         run: npm publish publication-assets/npm/infercrane-sdk-*.tgz --access public
 

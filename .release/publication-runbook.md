@@ -39,7 +39,8 @@ Complete every item before creating the stable tag:
    package's GitHub trusted publisher for
    `publish-stable.yml`/`stable-publication`, allow `npm publish`, require 2FA, and disallow legacy
    token publishing. Do not publish the stable version manually. The protected workflow pins npm
-   `11.6.4`; npm trusted publishing requires npm `11.5.1` or newer.
+   `12.0.2`, the current stable release at the time of this contract; npm trusted publishing requires
+   npm `11.5.1` or newer and this pin is compatible with the workflow's Node `24.20.0` runtime.
 9. Confirm the GHCR package inherits public repository visibility and anonymous users can pull the
    exact RC tag. Do not rely on authenticated maintainer pulls as visibility evidence.
 10. Increase free disk space to at least the qualification harness minimum, then run the complete
