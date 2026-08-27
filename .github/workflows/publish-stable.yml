@@ -251,9 +251,9 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
           if [ "${{ needs.preflight.outputs.prerelease }}" = true ]; then
-            gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false \
+            gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease --latest=false \
               --title "InferCrane $RELEASE_TAG — Public Beta"
           else
-            gh release edit "$RELEASE_TAG" --draft=false --latest \
+            gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest \
               --title "InferCrane $RELEASE_TAG"
           fi
