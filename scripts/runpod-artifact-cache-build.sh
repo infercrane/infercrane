@@ -10,8 +10,12 @@ model=${INFERCRANE_ARTIFACT_MODEL:-}
 revision=${INFERCRANE_ARTIFACT_REVISION:-}
 data_center=${INFERCRANE_RUNPOD_DATA_CENTER_ID:-}
 volume_size=${INFERCRANE_RUNPOD_VOLUME_GIB:-}
+prefetch_compute=${INFERCRANE_RUNPOD_PREFETCH_COMPUTE:-gpu}
 gpu_type=${INFERCRANE_RUNPOD_PREFETCH_GPU:-NVIDIA GeForce RTX 4090}
+cpu_flavors=${INFERCRANE_RUNPOD_PREFETCH_CPU_FLAVORS:-cpu5c,cpu3c}
+cpu_vcpus=${INFERCRANE_RUNPOD_PREFETCH_CPU_VCPUS:-4}
 gpu_hourly=${INFERCRANE_RUNPOD_GPU_HOURLY_USD:-}
+cpu_hourly=${INFERCRANE_RUNPOD_CPU_HOURLY_USD:-}
 storage_monthly=${INFERCRANE_RUNPOD_VOLUME_USD_PER_GB_MONTH:-}
 max_seconds=${INFERCRANE_RUNPOD_MAX_PAID_SECONDS:-7200}
 retention_hours=${INFERCRANE_RUNPOD_VOLUME_RETENTION_HOURS:-24}
@@ -41,6 +45,10 @@ case "$max_seconds" in *[!0-9]*|'') fail 'INFERCRANE_RUNPOD_MAX_PAID_SECONDS mus
 [ "$max_seconds" -ge 300 ] && [ "$max_seconds" -le 10800 ] || fail 'INFERCRANE_RUNPOD_MAX_PAID_SECONDS must be between 300 and 10800'
 case "$retention_hours" in *[!0-9]*|'') fail 'INFERCRANE_RUNPOD_VOLUME_RETENTION_HOURS must be a positive integer' ;; esac
 case "$hf_secret" in *[!A-Za-z0-9_-]*) fail 'INFERCRANE_RUNPOD_HF_TOKEN_SECRET contains unsafe characters' ;; esac
+case "$prefetch_compute" in gpu|cpu) ;; *) fail 'INFERCRANE_RUNPOD_PREFETCH_COMPUTE must be gpu or cpu' ;; esac
+case "$cpu_flavors" in *[!A-Za-z0-9,_-]*|'') fail 'INFERCRANE_RUNPOD_PREFETCH_CPU_FLAVORS is invalid' ;; esac
+case "$cpu_vcpus" in *[!0-9]*|'') fail 'INFERCRANE_RUNPOD_PREFETCH_CPU_VCPUS must be a positive integer' ;; esac
+[ "$cpu_vcpus" -ge 1 ] && [ "$cpu_vcpus" -le 64 ] || fail 'INFERCRANE_RUNPOD_PREFETCH_CPU_VCPUS must be between 1 and 64'
 
 identity=${model}@${revision}
 identity_digest=$(printf %s "$identity" | shasum -a 256 | awk '{print $1}')
@@ -56,12 +64,24 @@ decimal() {
 }
 
 cost_plan() {
-  [ -n "$gpu_hourly" ] || fail 'INFERCRANE_RUNPOD_GPU_HOURLY_USD is required; unknown price cannot authorize spend'
+  case "$prefetch_compute" in
+    gpu)
+      preparer_resource=$gpu_type
+      preparer_hourly=$gpu_hourly
+      hourly_name=INFERCRANE_RUNPOD_GPU_HOURLY_USD
+      ;;
+    cpu)
+      preparer_resource=$cpu_flavors
+      preparer_hourly=$cpu_hourly
+      hourly_name=INFERCRANE_RUNPOD_CPU_HOURLY_USD
+      ;;
+  esac
+  [ -n "$preparer_hourly" ] || fail "$hourly_name is required; unknown price cannot authorize spend"
   [ -n "$storage_monthly" ] || fail 'INFERCRANE_RUNPOD_VOLUME_USD_PER_GB_MONTH is required; unknown storage price cannot authorize spend'
-  normalized_gpu=$(decimal "$gpu_hourly" INFERCRANE_RUNPOD_GPU_HOURLY_USD)
+  normalized_preparer=$(decimal "$preparer_hourly" "$hourly_name")
   normalized_storage=$(decimal "$storage_monthly" INFERCRANE_RUNPOD_VOLUME_USD_PER_GB_MONTH)
-  projected=$(awk -v gpu="$normalized_gpu" -v seconds="$max_seconds" -v storage="$normalized_storage" -v gib="$volume_size" -v hours="$retention_hours" 'BEGIN { printf "%.4f", gpu*seconds/3600 + storage*gib*hours/730 }')
-  jq -n --arg identity "$identity" --arg digest "$identity_digest" --arg image "$preparer_image" --arg commit "$infercrane_commit" --arg observed_at "$observed_at" --arg dc "$data_center" --arg gpu "$gpu_type" --argjson volume_gib "$volume_size" --argjson max_seconds "$max_seconds" --argjson retention_hours "$retention_hours" --argjson gpu_hourly "$normalized_gpu" --argjson storage_monthly "$normalized_storage" --argjson projected "$projected" '{schema:"infercrane.runpod-artifact-plan/v1",model_identity:$identity,model_identity_digest:$digest,preparer_image:$image,infercrane_commit:$commit,observed_at:$observed_at,data_center_id:$dc,prefetch_gpu:$gpu,volume_gib:$volume_gib,max_paid_seconds:$max_seconds,volume_retention_hours:$retention_hours,price_evidence:{gpu_hourly_usd:$gpu_hourly,volume_usd_per_gib_month:$storage_monthly,source:"operator-supplied current provider price"},worst_case_cost_usd:$projected,mutation:"none"}'
+  projected=$(awk -v preparer="$normalized_preparer" -v seconds="$max_seconds" -v storage="$normalized_storage" -v gib="$volume_size" -v hours="$retention_hours" 'BEGIN { printf "%.4f", preparer*seconds/3600 + storage*gib*hours/730 }')
+  jq -n --arg identity "$identity" --arg digest "$identity_digest" --arg image "$preparer_image" --arg commit "$infercrane_commit" --arg observed_at "$observed_at" --arg dc "$data_center" --arg compute "$prefetch_compute" --arg resource "$preparer_resource" --argjson volume_gib "$volume_size" --argjson max_seconds "$max_seconds" --argjson retention_hours "$retention_hours" --argjson preparer_hourly "$normalized_preparer" --argjson storage_monthly "$normalized_storage" --argjson projected "$projected" '{schema:"infercrane.runpod-artifact-plan/v1",model_identity:$identity,model_identity_digest:$digest,preparer_image:$image,infercrane_commit:$commit,observed_at:$observed_at,data_center_id:$dc,prefetch_compute:$compute,prefetch_resource:$resource,volume_gib:$volume_gib,max_paid_seconds:$max_seconds,volume_retention_hours:$retention_hours,price_evidence:{preparer_hourly_usd:$preparer_hourly,volume_usd_per_gib_month:$storage_monthly,source:"operator-supplied current provider price"},worst_case_cost_usd:$projected,mutation:"none"}'
 }
 
 case "$command_name" in
@@ -166,10 +186,22 @@ if [ -z "$pod_id" ]; then
   # The network volume itself pins the Pod to its datacenter. Do not repeat the
   # location through dataCenterIds: RunPod's live inventory can advertise a new
   # datacenter before the REST OpenAPI enum accepts it.
-  pod_body=$(jq -n --arg name "$pod_name" --arg image "$preparer_image" --arg gpu "$gpu_type" --arg volume "$volume_id" --arg command "$prepare" --argjson env "$env_json" '{name:$name,imageName:$image,gpuTypeIds:[$gpu],gpuTypePriority:"custom",gpuCount:1,cloudType:"SECURE",computeType:"GPU",interruptible:false,containerDiskInGb:20,networkVolumeId:$volume,volumeMountPath:"/workspace",dockerEntrypoint:["/bin/sh"],dockerStartCmd:["-ec",$command],ports:["8000/http"],env:$env}')
+  case "$prefetch_compute" in
+    gpu)
+      pod_body=$(jq -n --arg name "$pod_name" --arg image "$preparer_image" --arg gpu "$gpu_type" --arg volume "$volume_id" --arg command "$prepare" --argjson env "$env_json" '{name:$name,imageName:$image,gpuTypeIds:[$gpu],gpuTypePriority:"custom",gpuCount:1,cloudType:"SECURE",computeType:"GPU",interruptible:false,containerDiskInGb:20,networkVolumeId:$volume,volumeMountPath:"/workspace",dockerEntrypoint:["/bin/sh"],dockerStartCmd:["-ec",$command],ports:["8000/http"],env:$env}')
+      ;;
+    cpu)
+      cpu_flavors_json=$(printf '%s' "$cpu_flavors" | jq -R 'split(",")')
+      pod_body=$(jq -n --arg name "$pod_name" --arg image "$preparer_image" --arg volume "$volume_id" --arg command "$prepare" --argjson env "$env_json" --argjson flavors "$cpu_flavors_json" --argjson vcpus "$cpu_vcpus" '{name:$name,imageName:$image,cpuFlavorIds:$flavors,cpuFlavorPriority:"custom",vcpuCount:$vcpus,cloudType:"SECURE",computeType:"CPU",interruptible:false,containerDiskInGb:20,networkVolumeId:$volume,volumeMountPath:"/workspace",dockerEntrypoint:["/bin/sh"],dockerStartCmd:["-ec",$command],ports:["8000/http"],env:$env}')
+      ;;
+  esac
   created=$(api POST /pods "$pod_body")
   pod_id=$(printf '%s' "$created" | jq -r '.id // empty')
   [ -n "$pod_id" ] || fail 'RunPod preparer Pod create returned no ID'
+  observed_hourly=$(printf '%s' "$created" | jq -r '.adjustedCostPerHr // .costPerHr // empty')
+  [ -n "$observed_hourly" ] || fail 'RunPod preparer Pod returned unknown hourly price; cleanup requested'
+  planned_hourly=$(printf '%s' "$plan_json" | jq -r '.price_evidence.preparer_hourly_usd')
+  awk -v observed="$observed_hourly" -v planned="$planned_hourly" 'BEGIN { exit !(observed <= planned) }' || fail "RunPod preparer hourly price USD $observed_hourly exceeds authorized USD $planned_hourly; cleanup requested"
 fi
 
 started_epoch=$(date +%s)
