@@ -52,7 +52,11 @@ func TestFrontierProfilesUseTheGeneralImmutableWorkloadContract(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			entry, ok := Get(test.name)
-			if !ok || entry.Revision != test.revision || len(entry.Profiles) != 2 {
+			expectedProfiles := 2
+			if test.name == "qwen3.8-flash-next" {
+				expectedProfiles = 3
+			}
+			if !ok || entry.Revision != test.revision || len(entry.Profiles) != expectedProfiles {
 				t.Fatalf("recipe identity is not pinned: %+v", entry)
 			}
 			profile := entry.Profiles[0]
@@ -70,7 +74,11 @@ func TestFrontierProfilesMaterializePinnedSnapshotBeforeVLLM(t *testing.T) {
 	for _, name := range []string{"glm-5.3-flash", "qwen3.8-flash-next"} {
 		t.Run(name, func(t *testing.T) {
 			entry, ok := Get(name)
-			if !ok || len(entry.Profiles) != 2 {
+			expectedProfiles := 2
+			if name == "qwen3.8-flash-next" {
+				expectedProfiles = 3
+			}
+			if !ok || len(entry.Profiles) != expectedProfiles {
 				t.Fatalf("entry=%#v ok=%t", entry, ok)
 			}
 			for _, profile := range entry.Profiles {
@@ -99,6 +107,7 @@ func TestFrontierBlackwellProfilesRemainExplicitCandidates(t *testing.T) {
 	tests := []struct {
 		entry, profile, requiredArg string
 	}{
+		{entry: "qwen3.8-flash-next", profile: "custom-oci-blackwell-tp2", requiredArg: "--tensor-parallel-size"},
 		{entry: "qwen3.8-flash-next", profile: "custom-oci-blackwell-tep4", requiredArg: "--enable-expert-parallel"},
 		{entry: "glm-5.3-flash", profile: "custom-oci-blackwell-tp4", requiredArg: "--kv-cache-dtype"},
 	}
@@ -109,7 +118,11 @@ func TestFrontierBlackwellProfilesRemainExplicitCandidates(t *testing.T) {
 			if profile.Name != test.profile {
 				continue
 			}
-			found = profile.GPUHint == "B200" && profile.GPUCount == 4 && contains(profile.CompatibleGPUs, "B200") && contains(profile.Workload.Command, test.requiredArg) && strings.Contains(strings.Join(profile.Limitations, " "), "exact")
+			expectedCount := 4
+			if test.profile == "custom-oci-blackwell-tp2" {
+				expectedCount = 2
+			}
+			found = profile.GPUHint == "B200" && profile.GPUCount == expectedCount && contains(profile.CompatibleGPUs, "B200") && contains(profile.Workload.Command, test.requiredArg) && strings.Contains(strings.Join(profile.Limitations, " "), "exact")
 		}
 		if !found {
 			t.Fatalf("missing explicit unqualified Blackwell candidate %s/%s", test.entry, test.profile)

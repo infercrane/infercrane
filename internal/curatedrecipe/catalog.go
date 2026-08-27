@@ -186,6 +186,28 @@ func qwen38BlackwellTP4Profile() ServingProfile {
 	}
 }
 
+func qwen38BlackwellTP2Profile() ServingProfile {
+	profile := qwen38BlackwellTP4Profile()
+	profile.Name = "custom-oci-blackwell-tp2"
+	profile.DisplayName = "Custom OCI Blackwell TP2"
+	profile.Description = "Immutable upstream Qwen FP8 runtime candidate on two B200 GPUs using tensor parallelism; it is not a measured performance or capacity claim."
+	profile.GPUCount = 2
+	profile.Limitations[0] = "Upstream validates TP2 as the minimum FP8 Blackwell topology on GB300; this exact two-B200 RunPod tuple still requires real qualification."
+	command := make([]string, 0, len(profile.Workload.Command)-1)
+	for index := 0; index < len(profile.Workload.Command); index++ {
+		if profile.Workload.Command[index] == "--enable-expert-parallel" {
+			continue
+		}
+		if index > 0 && profile.Workload.Command[index-1] == "--tensor-parallel-size" {
+			command = append(command, "2")
+			continue
+		}
+		command = append(command, profile.Workload.Command[index])
+	}
+	profile.Workload.Command = command
+	return profile
+}
+
 func glm53BlackwellTP4Profile() ServingProfile {
 	return ServingProfile{
 		Name:                "custom-oci-blackwell-tp4",
@@ -226,7 +248,7 @@ func init() {
 	for entryIndex := range catalog {
 		switch catalog[entryIndex].Name {
 		case "qwen3.8-flash-next":
-			catalog[entryIndex].Profiles = append(catalog[entryIndex].Profiles, qwen38BlackwellTP4Profile())
+			catalog[entryIndex].Profiles = append(catalog[entryIndex].Profiles, qwen38BlackwellTP2Profile(), qwen38BlackwellTP4Profile())
 		case "glm-5.3-flash":
 			catalog[entryIndex].Profiles = append(catalog[entryIndex].Profiles, glm53BlackwellTP4Profile())
 		}
