@@ -158,3 +158,12 @@ func TestRunPodServerlessActiveWorkersExcludesExitedHistory(t *testing.T) {
 		t.Fatalf("workers=%d err=%v", workers, err)
 	}
 }
+
+func TestRunPodGPUTypeMapsBlackwellServerAlias(t *testing.T) {
+	const providerID = "NVIDIA RTX PRO 6000 Blackwell Server Edition"
+	for _, input := range []string{"RTXPRO6000", "RTX PRO 6000", providerID} {
+		if got := runPodGPUType(input); got != providerID {
+			t.Fatalf("runPodGPUType(%q)=%q, want %q", input, got, providerID)
+		}
+	}
+}
