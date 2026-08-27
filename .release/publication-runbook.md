@@ -55,8 +55,8 @@ file. Keep the current integration marked unpublished until that independent rel
    tuple evidence; never reinterpret fixture results as GPU/provider qualification.
 3. Create and push only the configured candidate tag. Let `.github/workflows/release.yml` build the
    draft prerelease, archives, checksums, SPDX SBOMs, Homebrew formula, unpublishable SDK test
-   artifacts, exact-tag GHCR
-   image, vulnerability results, and GitHub attestations.
+   artifacts with a separate checksum manifest and attestations, exact-tag GHCR image,
+   vulnerability results, and GitHub attestations.
 4. Download the draft assets into a clean machine. Run `scripts/verify-release-artifacts.sh` with the
    candidate tag, confirm its Apache-2.0 `LICENSE`, InferCrane `NOTICE`, generated linked-dependency
    license bundle, and upstream attribution notices, install the native archive, run the documented
@@ -74,16 +74,17 @@ file. Keep the current integration marked unpublished until that independent rel
 2. Push only `v1.0.0`. Do not rebuild from a different commit and do not move either tag.
 3. Wait for the stable tag workflow. Confirm all jobs pass and the GitHub release remains a draft.
 4. Download and independently verify the stable archives, licenses/notices, checksums, SBOMs,
-   formula, wheel, npm tarball, image digest, vulnerability scan, and attestations. Confirm all
-   embedded/package versions are exactly `1.0.0` and all release assets originate from the stable
-   tag commit.
+   formula, wheel, npm tarball, SDK checksum manifest, image digest, vulnerability scan, and
+   attestations. Confirm all embedded/package versions are exactly `1.0.0` and all release assets
+   originate from the stable tag commit.
 
 ## Publish
 
 1. In GitHub Actions, run `publish stable release` with input `v1.0.0`.
 2. Approve the protected `stable-publication` environment only after reviewing the preflight output.
    The workflow refuses a private repository, disabled organization 2FA, an unprotected environment,
-   an RC/mismatched tag, a non-draft release, or incomplete artifacts.
+   an RC/mismatched tag, a non-draft release, incomplete artifacts, checksum failures, or artifact
+   attestations that do not originate from the exact release workflow, tag ref, and commit.
 3. The workflow publishes the exact wheel to PyPI with OIDC, the exact npm tarball with OIDC, updates
    the Homebrew tap, and publishes the already-verified GitHub draft last. If any registry step
    fails, the GitHub release stays draft. Do not replace an artifact at the same version; diagnose and

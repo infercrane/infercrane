@@ -18,11 +18,17 @@ concurrency:
 jobs:
   preflight:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      attestations: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ inputs.tag }}
           fetch-depth: 0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
       - name: Refuse an unprotected or mismatched publication
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -54,11 +60,28 @@ jobs:
           gh release download "$RELEASE_TAG" --dir publication-assets
           ./scripts/verify-release-artifacts.sh publication-assets "$RELEASE_TAG"
           test -f publication-assets/infercrane.rb
-          test "$(find publication-assets -maxdepth 1 -name 'infercrane-*.whl' | wc -l)" -eq 1
-          test "$(find publication-assets -maxdepth 1 -name 'infercrane-sdk-*.tgz' | wc -l)" -eq 1
+          version=$(jq -er '.version' .release/version.json)
+          wheel="publication-assets/infercrane-${version}-py3-none-any.whl"
+          npm_package="publication-assets/infercrane-sdk-${version}.tgz"
+          ./scripts/verify-sdk-artifacts.sh publication-assets "$version" verify
+          for artifact in \
+            publication-assets/infercrane_*.tar.gz \
+            publication-assets/infercrane_*.tar.gz.sbom.json \
+            publication-assets/checksums.txt \
+            publication-assets/infercrane.rb \
+            "$wheel" \
+            "$npm_package" \
+            publication-assets/sdk-checksums.txt; do
+            gh attestation verify "$artifact" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+              --source-digest "$(git rev-parse HEAD)" \
+              --source-ref "refs/tags/$RELEASE_TAG" \
+              --deny-self-hosted-runners >/dev/null
+          done
           mkdir -p publication-assets/python publication-assets/npm publication-assets/homebrew
-          cp publication-assets/infercrane-*.whl publication-assets/python/
-          cp publication-assets/infercrane-sdk-*.tgz publication-assets/npm/
+          cp "$wheel" publication-assets/python/
+          cp "$npm_package" publication-assets/npm/
           cp publication-assets/infercrane.rb publication-assets/homebrew/
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:

@@ -25,6 +25,12 @@ grep -Fq 'node-version: "24.20.0"' "$publish_workflow"
 grep -Fq 'npm install --global npm@11.6.4' "$publish_workflow"
 grep -Fq 'HOMEBREW_TAP_TOKEN' "$publish_workflow"
 grep -Fq 'gh release edit "$RELEASE_TAG" --draft=false --latest' "$publish_workflow"
+grep -Fq './scripts/verify-sdk-artifacts.sh publication-assets "$version" verify' "$publish_workflow"
+grep -Fq 'gh attestation verify "$artifact"' "$publish_workflow"
+grep -Fq -- '--signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"' "$publish_workflow"
+grep -Fq -- '--source-digest "$(git rev-parse HEAD)"' "$publish_workflow"
+grep -Fq -- '--source-ref "refs/tags/$RELEASE_TAG"' "$publish_workflow"
+grep -Fq -- '--deny-self-hosted-runners' "$publish_workflow"
 
 # The tag workflow may build and attach artifacts, but it must leave the GitHub
 # release as a draft and provide verifiable provenance for archives and images.
@@ -34,8 +40,11 @@ if grep -A2 -F 'sdk-packages:' "$release_workflow" | grep -Fq 'if:'; then
   echo "release candidates must build SDK artifacts for qualification" >&2
   exit 1
 fi
-test "$(grep -Ec 'uses: actions/attest@[0-9a-f]{40}' "$release_workflow")" -eq 2
+test "$(grep -Ec 'uses: actions/attest@[0-9a-f]{40}' "$release_workflow")" -eq 3
 grep -Fq 'subject-name: ghcr.io/infercrane/infercrane' "$release_workflow"
+grep -Fq './scripts/verify-sdk-artifacts.sh "$RUNNER_TEMP/sdk-dist" "$version" prepare' "$release_workflow"
+test -x "$root/scripts/verify-sdk-artifacts.sh"
+grep -Fq 'sdk-checksums.txt' "$root/scripts/verify-sdk-artifacts.sh"
 if grep -REq 'uses: [^ ]+@(v[0-9]+|release/v[0-9]+)([[:space:]]|$)' "$root/.github/workflows"; then
   echo "GitHub Actions must be pinned to full commit SHAs" >&2
   exit 1

@@ -118,6 +118,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
@@ -142,6 +144,10 @@ jobs:
           npm --prefix sdk/typescript test
           cd sdk/typescript
           npm pack --pack-destination "$RUNNER_TEMP/sdk-dist"
+      - name: Verify and checksum the exact SDK packages
+        run: |
+          version=$(jq -er '.version' .release/version.json)
+          ./scripts/verify-sdk-artifacts.sh "$RUNNER_TEMP/sdk-dist" "$version" prepare
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: sdk-packages-${{ github.ref_name }}
@@ -151,6 +157,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP/sdk-dist/"* --clobber
+      - name: Attest SDK packages and their checksum manifest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: ${{ runner.temp }}/sdk-dist/*
 
   image:
     needs: [preflight, artifacts]
