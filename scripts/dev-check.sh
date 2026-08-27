@@ -85,6 +85,16 @@ full|ci-container)
   ;;
 esac
 
+# The sequential `full` mode builds the TypeScript SDK in automation-clients.
+# The isolated stack shard has no artifacts from that runner, while its SDK
+# smoke imports the compiled entrypoint. Build that prerequisite explicitly so
+# the shard remains hermetic instead of depending on a dirty workspace.
+case "$mode" in
+ci-stack)
+  step stack-client-prerequisites sh -c 'npm --prefix "$1/sdk/typescript" ci --no-audit --no-fund && npm --prefix "$1/sdk/typescript" run build' sh "$root"
+  ;;
+esac
+
 case "$mode" in
 full|ci-stack)
   step stack-smoke "$root/scripts/test-stack.sh"
