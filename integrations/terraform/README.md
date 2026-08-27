@@ -4,14 +4,14 @@ Manage InferCrane logical deployments and SLO policies without making Terraform 
 replicas, rollout workers, or long-running cloud operations. InferCrane remains the single mutation
 owner for serving lifecycle changes.
 
-The provider is included in the source repository and is qualified in CI. Terraform Registry
-publication is deferred until the provider has an independent repository and release path. Build it
-from the matching InferCrane source tag or use the InferCrane CLI and control API.
+The provider is included in the source repository, qualified in CI, and distributed as
+multi-platform ZIPs on the matching InferCrane GitHub release. Terraform Registry publication is
+deferred until the provider has an independent repository and release path.
 
 ## Build from source
 
 ```bash
-git clone --branch v1.0.0 https://github.com/infercrane/infercrane.git
+git clone --branch v1.0.0-rc.1 https://github.com/infercrane/infercrane.git
 cd infercrane/integrations/terraform
 mkdir -p "$HOME/.local/share/infercrane/providers"
 go build -o "$HOME/.local/share/infercrane/providers/terraform-provider-infercrane"
@@ -48,7 +48,7 @@ terraform {
   required_providers {
     infercrane = {
       source  = "infercrane/infercrane"
-      version = "1.0.0"
+      version = "1.0.0-rc.1"
     }
   }
 }

@@ -249,16 +249,16 @@ control-flow evidence and does not satisfy any missing row. Follow the selected
 [provider guide](/provider-setup) and [exact-combination policy](/compatibility#check-one-exact-serving-combination)
 before `deploy`.
 
-The Homebrew formula and release archives are prepared but not yet publicly released. Approved
-preview users can build the CLI from their authenticated repository checkout:
+Install the public-beta CLI with Homebrew or download a matching archive from the
+[`v1.0.0-rc.1` prerelease](https://github.com/infercrane/infercrane/releases/tag/v1.0.0-rc.1):
 
 ```bash
-go build -o ./bin/infercrane ./cmd/infercrane
+brew install infercrane/tap/infercrane
 export INFERCRANE_API_KEY='ISSUED_CONTROL_PLANE_CREDENTIAL'
-./bin/infercrane init --url https://infercrane.example
-./bin/infercrane auth status
-./bin/infercrane doctor --cloud
-./bin/infercrane plan Qwen/Qwen3-8B --cloud runpod --gpu L40S
+infercrane init --url https://infercrane.example
+infercrane auth status
+infercrane doctor --cloud
+infercrane plan Qwen/Qwen3-8B --cloud runpod --gpu L40S
 ```
 
 `plan` is side-effect free. A real `deploy` can create billable resources, so check

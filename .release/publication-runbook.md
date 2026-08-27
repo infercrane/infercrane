@@ -1,9 +1,9 @@
 # Stable publication runbook
 
-This runbook publishes the first stable InferCrane release. Publication is intentionally separate
-from tag creation: the tag workflow builds a draft GitHub release and exact GHCR image first;
-maintainers verify those immutable outputs before the manual stable-publication workflow makes any
-registry or GitHub release public.
+This runbook publishes InferCrane candidate and stable releases. Publication is intentionally
+separate from tag creation: the tag workflow builds a draft GitHub release and exact GHCR image
+first; maintainers verify those immutable outputs before the protected manual publication workflow
+makes any registry or GitHub release public.
 
 ## One-time launch prerequisites
 
@@ -23,7 +23,8 @@ Complete every item before creating the stable tag:
    Enable the organization policy that requires actions to be pinned to full commit SHAs after all
    workflows have been migrated.
 5. Create a protected GitHub environment named `stable-publication`. Require maintainer approval,
-   disallow self-review where the plan supports it, and restrict deployment to stable tags.
+   disallow self-review where the plan supports it, and restrict deployment to the configured
+   candidate and stable tags.
 6. Create the public `infercrane/homebrew-tap` repository with a protected `main` branch and a
    `Formula/` directory. Store a fine-grained, tap-only write credential as the
    `HOMEBREW_TAP_TOKEN` secret on the `stable-publication` environment.
@@ -46,7 +47,9 @@ Complete every item before creating the stable tag:
 10. Increase free disk space to at least the qualification harness minimum, then run the complete
     clean-clone RC qualification. Archive the report by commit and tag.
 
-Terraform Registry publication is not part of v1.0.0. The provider must first move to a separate,
+Terraform Registry publication is not part of v1.0.0. Candidate and stable GitHub releases attach
+multi-platform provider ZIPs and checksums for explicit local installation. Registry publication
+requires the provider to first move to a separate,
 public, lowercase `infercrane/terraform-provider-infercrane` repository with Registry-formatted
 documentation, its own semantic tags, platform ZIPs, manifest, checksums, and GPG-signed checksum
 file. Keep the current integration marked unpublished until that independent release path passes.
@@ -57,8 +60,8 @@ file. Keep the current integration marked unpublished until that independent rel
 2. Run `make qualify-rc`. Real-cloud gates require their explicit paid-resource approval and exact
    tuple evidence; never reinterpret fixture results as GPU/provider qualification.
 3. Create and push only the configured candidate tag. Let `.github/workflows/release.yml` build the
-   draft prerelease, archives, checksums, SPDX SBOMs, Homebrew formula, unpublishable SDK test
-   artifacts with a separate checksum manifest and attestations, exact-tag GHCR image,
+   draft prerelease, archives, checksums, SPDX SBOMs, Homebrew formula, tag-correct SDK and Terraform
+   provider artifacts with checksum manifests and attestations, exact-tag GHCR image,
    vulnerability results, and GitHub attestations.
 4. Download the draft assets into a clean machine. Run `scripts/verify-release-artifacts.sh` with the
    candidate tag, confirm its Apache-2.0 `LICENSE`, InferCrane `NOTICE`, generated linked-dependency
@@ -69,6 +72,23 @@ file. Keep the current integration marked unpublished until that independent rel
    documented non-root user and execute the production Compose configuration checks.
 6. Record every untested real provider, GPU, Kubernetes, upgrade, and paid path. A green local gate
    cannot close a real-infrastructure evidence row.
+
+## Publish the public beta
+
+After independently verifying the candidate draft, run `publish release` with input
+`v1.0.0-rc.1` and approve the `stable-publication` environment. The workflow publishes the exact
+`1.0.0rc1` Python wheel with PyPI OIDC, verifies or publishes the exact
+`@infercrane/sdk@1.0.0-rc.1` npm package under the `rc` tag, updates the Homebrew tap, and makes the
+GitHub draft a prerelease last. It never consumes the stable `1.0.0` SDK versions.
+
+Verify from a clean machine:
+
+```bash
+brew install infercrane/tap/infercrane
+python -m pip install 'infercrane==1.0.0rc1'
+npm install '@infercrane/sdk@1.0.0-rc.1'
+docker pull ghcr.io/infercrane/infercrane:v1.0.0-rc.1
+```
 
 ## Promote the exact candidate commit
 
@@ -83,7 +103,7 @@ file. Keep the current integration marked unpublished until that independent rel
 
 ## Publish
 
-1. In GitHub Actions, run `publish stable release` with input `v1.0.0`.
+1. In GitHub Actions, run `publish release` with input `v1.0.0`.
 2. Approve the protected `stable-publication` environment only after reviewing the preflight output.
    The workflow refuses a private repository, disabled organization 2FA, an unprotected environment,
    an RC/mismatched tag, a non-draft release, incomplete artifacts, checksum failures, or artifact

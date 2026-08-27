@@ -1,10 +1,10 @@
-name: publish stable release
+name: publish release
 
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Exact stable tag already built as a draft release
+        description: Exact candidate or stable tag already built as a draft release
         required: true
         type: string
 
@@ -12,12 +12,17 @@ permissions:
   contents: read
 
 concurrency:
-  group: stable-publication
+  group: release-publication-${{ inputs.tag }}
   cancel-in-progress: false
 
 jobs:
   preflight:
     runs-on: ubuntu-latest
+    outputs:
+      npm_version: ${{ steps.packages.outputs.npm_version }}
+      python_version: ${{ steps.packages.outputs.python_version }}
+      pypi_exists: ${{ steps.packages.outputs.pypi_exists }}
+      prerelease: ${{ steps.release.outputs.prerelease }}
     permissions:
       contents: read
       attestations: read
@@ -30,12 +35,20 @@ jobs:
         with:
           python-version: "3.12"
       - name: Refuse an unprotected or mismatched publication
+        id: release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ORG_SECURITY_READ_TOKEN: ${{ secrets.ORG_SECURITY_READ_TOKEN }}
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
-          test "$RELEASE_TAG" = "$(jq -er '.stable_tag' .release/version.json)"
+          candidate_tag=$(jq -er '.candidate_tag' .release/version.json)
+          stable_tag=$(jq -er '.stable_tag' .release/version.json)
+          case "$RELEASE_TAG" in
+            "$candidate_tag") prerelease=true ;;
+            "$stable_tag") prerelease=false ;;
+            *) echo "publication tag must be $candidate_tag or $stable_tag" >&2; exit 1 ;;
+          esac
+          echo "prerelease=$prerelease" >>"$GITHUB_OUTPUT"
           test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$(git rev-parse HEAD)"
           test "$(gh api "repos/$GITHUB_REPOSITORY" --jq .visibility)" = public
           test -n "$ORG_SECURITY_READ_TOKEN"
@@ -48,10 +61,12 @@ jobs:
           test "$org_2fa" = true
           gh api "repos/$GITHUB_REPOSITORY/environments/stable-publication" \
             --jq 'select((.protection_rules | length) > 0)' >/dev/null
-          gh release view "$RELEASE_TAG" \
-            --json isDraft,isPrerelease,tagName \
-            --jq 'select(.isDraft == true and .isPrerelease == false and .tagName == env.RELEASE_TAG)' >/dev/null
+          actual=$(gh release view "$RELEASE_TAG" --json isDraft,isPrerelease,tagName)
+          test "$(printf '%s' "$actual" | jq -r .isDraft)" = true
+          test "$(printf '%s' "$actual" | jq -r .isPrerelease)" = "$prerelease"
+          test "$(printf '%s' "$actual" | jq -r .tagName)" = "$RELEASE_TAG"
       - name: Download and verify the exact draft assets
+        id: packages
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ inputs.tag }}
@@ -60,10 +75,20 @@ jobs:
           gh release download "$RELEASE_TAG" --dir publication-assets
           ./scripts/verify-release-artifacts.sh publication-assets "$RELEASE_TAG"
           test -f publication-assets/infercrane.rb
-          version=$(jq -er '.version' .release/version.json)
-          wheel="publication-assets/infercrane-${version}-py3-none-any.whl"
-          npm_package="publication-assets/infercrane-sdk-${version}.tgz"
-          ./scripts/verify-sdk-artifacts.sh publication-assets "$version" verify
+          stable_version=$(jq -er '.version' .release/version.json)
+          if [ "$RELEASE_TAG" = "$(jq -er '.candidate_tag' .release/version.json)" ]; then
+            npm_version=${RELEASE_TAG#v}
+            python_version=${stable_version}rc${npm_version##*.}
+          else
+            npm_version=$stable_version
+            python_version=$stable_version
+          fi
+          echo "npm_version=$npm_version" >>"$GITHUB_OUTPUT"
+          echo "python_version=$python_version" >>"$GITHUB_OUTPUT"
+          wheel="publication-assets/infercrane-${python_version}-py3-none-any.whl"
+          npm_package="publication-assets/infercrane-sdk-${npm_version}.tgz"
+          ./scripts/verify-sdk-artifacts.sh publication-assets "$npm_version" verify "$python_version"
+          ./scripts/verify-terraform-release-artifacts.sh publication-assets "$RELEASE_TAG"
           for artifact in \
             publication-assets/infercrane_*.tar.gz \
             publication-assets/infercrane_*.tar.gz.sbom.json \
@@ -71,7 +96,9 @@ jobs:
             publication-assets/infercrane.rb \
             "$wheel" \
             "$npm_package" \
-            publication-assets/sdk-checksums.txt; do
+            publication-assets/sdk-checksums.txt \
+            publication-assets/terraform-provider-infercrane_*.zip \
+            publication-assets/terraform-provider-infercrane_*_SHA256SUMS; do
             gh attestation verify "$artifact" \
               --repo "$GITHUB_REPOSITORY" \
               --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
@@ -83,9 +110,23 @@ jobs:
           cp "$wheel" publication-assets/python/
           cp "$npm_package" publication-assets/npm/
           cp publication-assets/infercrane.rb publication-assets/homebrew/
+          pypi_response=$(mktemp)
+          pypi_status=$(curl --silent --show-error --output "$pypi_response" --write-out '%{http_code}' \
+            "https://pypi.org/pypi/infercrane/$python_version/json")
+          case "$pypi_status" in
+            200)
+              expected=$(sha256sum "$wheel" | cut -d' ' -f1)
+              actual=$(jq -er --arg filename "$(basename "$wheel")" \
+                '.urls[] | select(.filename == $filename) | .digests.sha256' "$pypi_response")
+              test "$actual" = "$expected"
+              echo "pypi_exists=true" >>"$GITHUB_OUTPUT"
+              ;;
+            404) echo "pypi_exists=false" >>"$GITHUB_OUTPUT" ;;
+            *) echo "PyPI returned HTTP $pypi_status" >&2; cat "$pypi_response" >&2; exit 1 ;;
+          esac
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: stable-publication-assets
+          name: release-publication-assets
           path: publication-assets
           if-no-files-found: error
 
@@ -98,13 +139,17 @@ jobs:
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: stable-publication-assets
+          name: release-publication-assets
           path: publication-assets
       - name: Publish the exact wheel with PyPI Trusted Publishing
+        if: needs.preflight.outputs.pypi_exists != 'true'
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
         with:
           packages-dir: publication-assets/python
           attestations: true
+      - name: Confirm the exact wheel is already on PyPI
+        if: needs.preflight.outputs.pypi_exists == 'true'
+        run: echo "PyPI already contains the attested wheel with the same SHA-256 digest."
 
   npm:
     needs: preflight
@@ -116,7 +161,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: stable-publication-assets
+          name: release-publication-assets
           path: publication-assets
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
@@ -128,7 +173,23 @@ jobs:
           npm install --global npm@12.0.2
           test "$(npm --version)" = 12.0.2
       - name: Publish the exact package with npm Trusted Publishing
-        run: npm publish publication-assets/npm/infercrane-sdk-*.tgz --access public
+        env:
+          NPM_VERSION: ${{ needs.preflight.outputs.npm_version }}
+          PRERELEASE: ${{ needs.preflight.outputs.prerelease }}
+        run: |
+          package=publication-assets/npm/infercrane-sdk-${NPM_VERSION}.tgz
+          if npm view "@infercrane/sdk@${NPM_VERSION}" version >/dev/null 2>&1; then
+            mkdir registry-package expected-package
+            npm pack "@infercrane/sdk@${NPM_VERSION}" --pack-destination registry-package >/dev/null
+            tar -xzf "$package" -C expected-package
+            tar -xzf registry-package/*.tgz -C registry-package
+            diff -qr expected-package/package registry-package/package
+            echo "npm already contains the exact package contents."
+          elif [ "$PRERELEASE" = true ]; then
+            npm publish "$package" --access public --tag rc
+          else
+            npm publish "$package" --access public --tag latest
+          fi
 
   homebrew:
     needs: preflight
@@ -137,7 +198,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: stable-publication-assets
+          name: release-publication-assets
           path: publication-assets
       - name: Update the InferCrane Homebrew tap
         env:
@@ -149,7 +210,10 @@ jobs:
           cp publication-assets/homebrew/infercrane.rb "$RUNNER_TEMP/homebrew-tap/Formula/infercrane.rb"
           cd "$RUNNER_TEMP/homebrew-tap"
           ruby -c Formula/infercrane.rb
-          git diff --exit-code -- Formula/infercrane.rb && exit 0
+          if [ -z "$(git status --porcelain -- Formula/infercrane.rb)" ]; then
+            echo "Homebrew tap already contains the exact formula."
+            exit 0
+          fi
           git config user.name infercrane-release[bot]
           git config user.email 226962259+infercrane-release[bot]@users.noreply.github.com
           git add Formula/infercrane.rb
@@ -157,7 +221,7 @@ jobs:
           git push origin HEAD:main
 
   finalize:
-    needs: [pypi, npm, homebrew]
+    needs: [preflight, pypi, npm, homebrew]
     runs-on: ubuntu-latest
     environment: stable-publication
     permissions:
@@ -167,4 +231,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ inputs.tag }}
-        run: gh release edit "$RELEASE_TAG" --draft=false --latest
+        run: |
+          if [ "${{ needs.preflight.outputs.prerelease }}" = true ]; then
+            gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false \
+              --title "InferCrane $RELEASE_TAG — Public Beta"
+          else
+            gh release edit "$RELEASE_TAG" --draft=false --latest \
+              --title "InferCrane $RELEASE_TAG"
+          fi

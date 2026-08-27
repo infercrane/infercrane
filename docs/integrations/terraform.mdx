@@ -22,9 +22,11 @@ Destroying this resource deletes the policy but preserves benchmark and recommen
 Recommendations remain an explicit evaluation rather than a Terraform apply.
 
 <Warning>
-The provider is not yet published in the Terraform Registry. Local qualification builds it from
-`integrations/terraform`. Registry publication is deferred until the provider has an independent
-repository, signed release artifacts, and its own qualification path.
+The provider is not yet published in the Terraform Registry. The public beta provides source and
+attested multi-platform ZIPs on the
+[`v1.0.0-rc.1` prerelease](https://github.com/infercrane/infercrane/releases/tag/v1.0.0-rc.1).
+Registry publication is deferred until the provider has an independent repository, Registry-format
+documentation, signed checksums, and its own qualification path.
 </Warning>
 
 Build the provider from the same InferCrane tag as the control plane and use Terraform's
@@ -38,7 +40,7 @@ terraform {
   required_providers {
     infercrane = {
       source  = "infercrane/infercrane"
-      version = "1.0.0"
+      version = "1.0.0-rc.1"
     }
   }
 }

@@ -154,15 +154,17 @@ Do not publish. Review `.github/workflows/release.yml`,
 `.github/workflows/publish-stable.yml`, and `.release/publication-runbook.md` and prove:
 
 - tag creation builds a draft and does not publish PyPI/npm/Homebrew;
-- stable publication is manual and protected;
+- candidate and stable publication are manual and protected;
 - it refuses private repository visibility, disabled organization 2FA, an unprotected environment,
-  non-stable/mismatched tag, non-draft release, missing assets, checksum failure, or mismatched
+  unconfigured/mismatched tag, non-draft release, missing assets, checksum failure, or mismatched
   artifact provenance;
 - PyPI and npm use job-scoped OIDC; npm provenance is possible because repository and package are
   public; Homebrew uses a tap-only credential;
 - GitHub release publication happens only after PyPI, npm, and Homebrew jobs succeed;
 - the first-publication npm bootstrap builds only the configured RC version, changes the packaged
   User-Agent consistently, passes a clean install/import smoke, and never invokes `npm publish`;
+- the RC maps to PEP 440 `1.0.0rc1` on PyPI and SemVer `1.0.0-rc.1` on npm without consuming either
+  stable `1.0.0` package version;
 - Terraform Registry is explicitly deferred to a separate correctly named public repository with
   GPG-signed release checksums.
 
