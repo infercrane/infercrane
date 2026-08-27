@@ -5,9 +5,15 @@ package has no runtime dependencies and supports Python 3.10 or newer.
 
 ## Install
 
+For a published `v1.0.0` release:
+
 ```bash
-python -m pip install infercrane
+python -m pip install 'infercrane==1.0.0'
 ```
+
+Until that version appears on PyPI, install the SDK from the same checked-out tag as the control
+plane with `python -m pip install ./sdk/python`. Do not treat an unpublished package name as a
+release guarantee.
 
 ## Configure
 

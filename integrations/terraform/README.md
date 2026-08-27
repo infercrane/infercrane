@@ -5,16 +5,33 @@ replicas, rollout workers, or long-running cloud operations. InferCrane remains 
 owner for serving lifecycle changes.
 
 The provider is included in the source repository and is qualified in CI. Terraform Registry
-publication is pending the first stable release. Until then, build it from the matching source tag or
-use the InferCrane CLI and control API.
+publication is deferred until the provider has an independent repository and release path. Build it
+from the matching InferCrane source tag or use the InferCrane CLI and control API.
 
 ## Build from source
 
 ```bash
 git clone --branch v1.0.0 https://github.com/infercrane/infercrane.git
 cd infercrane/integrations/terraform
-go build -o terraform-provider-infercrane
+mkdir -p "$HOME/.local/share/infercrane/providers"
+go build -o "$HOME/.local/share/infercrane/providers/terraform-provider-infercrane"
 ```
+
+Until Registry publication, add a development override to `~/.terraformrc` using the absolute path
+to that directory:
+
+```hcl
+provider_installation {
+  dev_overrides {
+    "registry.terraform.io/infercrane/infercrane" = "/Users/you/.local/share/infercrane/providers"
+  }
+  direct {}
+}
+```
+
+The override is a local installation mechanism, not Registry qualification. With the override in
+place, run `terraform plan` or `terraform apply` directly; `terraform init` still attempts Registry
+version discovery for the unpublished source address.
 
 The provider requires:
 
