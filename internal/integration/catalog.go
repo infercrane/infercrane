@@ -172,6 +172,8 @@ func PortableCatalog() (*Registry, error) {
 	}
 	if err = registry.SetCompatibility(
 		RuntimeCompatibility{Runtime: "vllm", Adapter: "skypilot", Cloud: "runpod", Mode: ElasticMode, State: QualificationLocal, Evidence: "make:dev-check-full"},
+		RuntimeCompatibility{Runtime: "vllm", Adapter: "runpod-pods", Cloud: "runpod", Mode: ElasticMode, State: QualificationLocal, Evidence: "go:test/internal/provision#TestRunPodPodsLifecycleIsReplaySafeAndPreservesImmutableWorkload"},
+		RuntimeCompatibility{Runtime: "sglang", Adapter: "runpod-pods", Cloud: "runpod", Mode: ElasticMode, State: QualificationLocal, Evidence: "go:test/internal/provision#TestRunPodPodsLifecycleIsReplaySafeAndPreservesImmutableWorkload"},
 		RuntimeCompatibility{Runtime: "custom-oci", Adapter: "runpod-pods", Cloud: "runpod", Mode: ElasticMode, State: QualificationLocal, Evidence: "go:test/internal/provision#TestRunPodPodsLifecycleIsReplaySafeAndPreservesImmutableWorkload"},
 		RuntimeCompatibility{Runtime: "vllm", Adapter: "runpod-serverless", Cloud: "runpod", Mode: ServerlessMode, State: QualificationLocal, Evidence: "go:test/internal/workflows#TestServerlessConvergeRegistersScaleToZeroEndpointWithoutWarmingWorker"},
 		RuntimeCompatibility{Runtime: "vllm", Adapter: "aws-ec2", Cloud: "aws", Mode: ElasticMode, State: QualificationLocal, Evidence: "go:test/internal/conformance#TestAWSEC2ProviderContractConformance"},

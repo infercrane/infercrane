@@ -48,7 +48,7 @@ func TestPortableCatalogPublishesExactRuntimeCompatibility(t *testing.T) {
 		t.Fatal(err)
 	}
 	snapshot := registry.Snapshot()
-	if len(snapshot.Compatibility) != 6 {
+	if len(snapshot.Compatibility) != 8 {
 		t.Fatalf("compatibility=%#v", snapshot.Compatibility)
 	}
 	encoded, _ := json.Marshal(snapshot)

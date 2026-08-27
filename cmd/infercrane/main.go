@@ -4084,7 +4084,12 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	}
 	runPodPods := provision.RunPodPods{APIKey: cfg.RunPodAPIKey, WorkerAPIKey: cfg.APIKey, BaseURL: cfg.RunPodRESTURL, ContainerDiskGiB: cfg.RunPodContainerDiskGiB, ArtifactCachePolicy: cfg.RunPodArtifactCachePolicy, NetworkVolumes: cfg.RunPodNetworkVolumes, HFTokenSecret: cfg.RunPodHFTokenSecret}
 	artifactCacheAdapters["runpod"] = runPodPods
-	elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: "runpod-pods", Cloud: "runpod", Runtime: "custom-oci", Default: true, Profile: runPodPodsProfile, Provider: runPodPods, Capacity: capacity})
+	for _, runtimeName := range []string{"vllm", "sglang", "custom-oci"} {
+		// SkyPilot remains the implicit vLLM default for compatibility. An
+		// explicit runpod-pods selection must nevertheless work for every runtime
+		// whose immutable workload satisfies the native Pod contract.
+		elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: "runpod-pods", Cloud: "runpod", Runtime: runtimeName, Default: runtimeName != "vllm", Profile: runPodPodsProfile, Provider: runPodPods, Capacity: capacity})
+	}
 	if cfg.AWSEnabled() {
 		awsProfile, profileErr := integrationRegistry.Provider("aws-ec2")
 		if profileErr != nil {
