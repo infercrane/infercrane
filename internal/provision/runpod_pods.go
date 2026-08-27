@@ -145,7 +145,11 @@ func (r RunPodPods) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provid
 	if volume.ID != "" {
 		body["networkVolumeId"] = volume.ID
 		body["volumeMountPath"] = "/workspace"
-		dataCenterID = volume.DataCenterID
+		// The attached network volume is already an exact placement constraint.
+		// Omitting the redundant dataCenterIds field avoids coupling creates to
+		// RunPod's lagging REST enum when a newly advertised datacenter is valid
+		// for volumes and stock but is not yet present in the OpenAPI schema.
+		dataCenterID = ""
 		environment["HF_HOME"] = "/workspace/huggingface"
 		environment["HUGGINGFACE_HUB_CACHE"] = "/workspace/huggingface/hub"
 		environment["INFERCRANE_MODEL_DIR"] = "/workspace/infercrane/model"

@@ -186,7 +186,7 @@ func TestRunPodPodsUsesExactPersistentModelVolumeAndRegion(t *testing.T) {
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				t.Fatal(err)
 			}
-			if body.NetworkVolumeID != volume.ID || body.VolumeMountPath != "/workspace" || len(body.DataCenterIDs) != 1 || body.DataCenterIDs[0] != volume.DataCenterID || body.Environment["INFERCRANE_MODEL_DIR"] != "/workspace/infercrane/model" || body.Environment["HF_XET_HIGH_PERFORMANCE"] != "1" || body.Environment["HF_TOKEN"] != "{{ RUNPOD_SECRET_infercrane-hf }}" {
+			if body.NetworkVolumeID != volume.ID || body.VolumeMountPath != "/workspace" || len(body.DataCenterIDs) != 0 || body.Environment["INFERCRANE_MODEL_DIR"] != "/workspace/infercrane/model" || body.Environment["HF_XET_HIGH_PERFORMANCE"] != "1" || body.Environment["HF_TOKEN"] != "{{ RUNPOD_SECRET_infercrane-hf }}" {
 				t.Fatalf("unexpected persistent cache request: %#v", body)
 			}
 			created = runPodRecord{ID: "pod-volume", Name: body.Name, DesiredStatus: "RUNNING", ImageName: body.ImageName, GPUCount: body.GPUCount, DockerEntrypoint: body.DockerEntrypoint, DockerStartCmd: body.DockerStartCmd, NetworkVolume: &volume}
