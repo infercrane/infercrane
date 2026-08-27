@@ -33,8 +33,10 @@ Complete every item before creating the stable tag:
    the release and verify the name is still available.
 8. Ensure the npm `infercrane` organization owns the `@infercrane` scope. npm trusted publishers are
    configured on an existing package; if npm does not offer a pre-publication configuration for the
-   scope, reserve `@infercrane/sdk` before the stable release with a legitimate RC package published
-   interactively under 2FA. Then configure its GitHub trusted publisher for
+   scope, run `make npm-bootstrap-artifact`, inspect the generated `1.0.0-rc.1` tarball and checksum,
+   and reserve `@infercrane/sdk` with that exact RC package published interactively under 2FA and the
+   npm `rc` tag. Never publish the source tree's `1.0.0` package manually. Then configure the
+   package's GitHub trusted publisher for
    `publish-stable.yml`/`stable-publication`, allow `npm publish`, require 2FA, and disallow legacy
    token publishing. Do not publish the stable version manually. The protected workflow pins npm
    `11.6.4`; npm trusted publishing requires npm `11.5.1` or newer.

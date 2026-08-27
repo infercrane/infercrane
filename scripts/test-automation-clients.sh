@@ -60,6 +60,7 @@ npm --prefix "$root/sdk/typescript" test
 jq -e '.[0].files | map(.path) | index("LICENSE") != null and index("NOTICE") != null' \
   "$package_dir/npm-pack.json" >/dev/null
 "$root/scripts/verify-sdk-artifacts.sh" "$package_dir" "$release_version" prepare
+"$root/scripts/build-npm-bootstrap-package.sh" "$package_dir/npm-bootstrap" >/dev/null
 node --test "$root"/actions/infercrane/test/*.test.js
 
 (

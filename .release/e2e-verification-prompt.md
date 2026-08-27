@@ -161,6 +161,8 @@ Do not publish. Review `.github/workflows/release.yml`,
 - PyPI and npm use job-scoped OIDC; npm provenance is possible because repository and package are
   public; Homebrew uses a tap-only credential;
 - GitHub release publication happens only after PyPI, npm, and Homebrew jobs succeed;
+- the first-publication npm bootstrap builds only the configured RC version, changes the packaged
+  User-Agent consistently, passes a clean install/import smoke, and never invokes `npm publish`;
 - Terraform Registry is explicitly deferred to a separate correctly named public repository with
   GPG-signed release checksums.
 

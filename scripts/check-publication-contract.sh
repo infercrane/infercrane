@@ -8,6 +8,12 @@ publish_workflow="$root/.github/workflows/publish-stable.yml"
 test -f "$root/.release/publication-runbook.md"
 test -f "$root/.release/e2e-verification-prompt.md"
 test -f "$root/.gitleaks.toml"
+test -x "$root/scripts/build-npm-bootstrap-package.sh"
+grep -Fq 'npm-bootstrap-artifact:' "$root/Makefile"
+if grep -Eq 'npm (publish|stage publish)' "$root/scripts/build-npm-bootstrap-package.sh"; then
+  echo "npm bootstrap builder must not publish" >&2
+  exit 1
+fi
 
 # Stable publication must remain an explicit, protected action over an already
 # built draft. Tag creation alone is not authority to publish irreversible SDK
