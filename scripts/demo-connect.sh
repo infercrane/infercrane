@@ -56,13 +56,24 @@ echo
 echo '$ infercrane connect http://worker-a:8101/v1 --as coder-demo --type vllm --manage-traffic'
 run_cli connect http://worker-a:8101/v1 --as "$endpoint" --type vllm --manage-traffic
 
+echo
+echo "Waiting for the stable endpoint to become routable..."
 attempt=0
 until response_headers=$(curl -fsS -D - -o "$response_body" \
   -H "Authorization: Bearer $api_key" -H 'Content-Type: application/json' \
   -d "{\"model\":\"$endpoint\",\"messages\":[{\"role\":\"user\",\"content\":\"Explain durable inference in one sentence.\"}]}" \
   "$base_url/v1/chat/completions" 2>/dev/null); do
   attempt=$((attempt + 1))
-  test "$attempt" -lt 30 || { echo "Connected endpoint did not become routable" >&2; exit 1; }
+  if [ "$attempt" -ge 90 ]; then
+    echo "Connected endpoint did not become routable within 90s" >&2
+    if [ -s "$response_body" ]; then
+      echo "Last gateway response:" >&2
+      jq . "$response_body" >&2 2>/dev/null || cat "$response_body" >&2
+    fi
+    echo "Control-plane logs:" >&2
+    INFERCRANE_DEV_PORT=$port docker compose -p "$project" logs --tail 100 infercrane >&2
+    exit 1
+  fi
   sleep 1
 done
 request_id=$(printf '%s\n' "$response_headers" | awk '/^X-Request-Id:/ {gsub("\r", "", $2); print $2}')
