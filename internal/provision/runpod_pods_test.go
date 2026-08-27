@@ -75,6 +75,9 @@ func TestRunPodPodsLifecycleIsReplaySafeAndPreservesImmutableWorkload(t *testing
 
 func TestRunPodArtifactCacheAdoptsOnlyConfiguredExactVolume(t *testing.T) {
 	identity := "org/model@0123456789abcdef0123456789abcdef01234567"
+	if name := runPodArtifactVolumeName(identity); name != "infercrane-artifact-a5d33b0cefe277aeeb41" {
+		t.Fatalf("provider-safe volume identity drifted from the external builder: %s", name)
+	}
 	volume := runPodNetworkVolume{ID: "volume_1234", Name: runPodArtifactVolumeName(identity), DataCenterID: "EU-RO-1", Size: 500}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/networkvolumes" {

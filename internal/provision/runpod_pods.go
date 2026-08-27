@@ -451,7 +451,8 @@ func (r RunPodPods) verifyNetworkVolume(ctx context.Context, identity, volumeID,
 }
 
 func runPodArtifactVolumeName(identity string) string {
-	return "infercrane-artifact-" + modelIdentityDigest(identity)[:20]
+	hexDigest := strings.TrimPrefix(modelIdentityDigest(identity), "sha256:")
+	return "infercrane-artifact-" + hexDigest[:20]
 }
 
 func runPodVolumeEvidence(volume *runPodNetworkVolume) any {
