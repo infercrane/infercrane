@@ -566,6 +566,15 @@ run_elastic_evidence() {
 		operation_id=$(printf '%s' "$status" | jq -r '.active_operation.id // empty')
 		resource_id=$(printf '%s' "$status" | jq -r '.replicas[0].provider_resource_id // empty')
 		if [ -n "$operation_id" ] && [ -n "$resource_id" ]; then break; fi
+		if ! kill -0 "$client_pid" 2>/dev/null; then
+			set +e
+			wait "$client_pid"
+			client_status=$?
+			set -e
+			echo "deploy client exited before durable provider identity was persisted (exit $client_status)" >&2
+			tail -n 20 "$evidence/durable-deploy-cli.log" >&2
+			return "$client_status"
+		fi
 		sleep 1
 		elapsed=$((elapsed + 1))
 	done
