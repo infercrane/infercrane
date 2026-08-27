@@ -373,8 +373,12 @@ This is intentionally not a time estimate. If the tenant has at least three succ
 observations for the exact provider adapter, runtime, region, and GPU, `plan` instead shows an
 `observed` p50 from durable replica intent through runtime readiness. It shows p95 only after twenty
 successes and labels the sample count and boundary. That is historical evidence, not a capacity
-guarantee. Once an operation starts, durable events replace unknown stages with fresh provider and
-runtime observations where those boundaries are actually exposed.
+guarantee. For a DeploymentSpec pinned to an immutable model revision, `plan` can additionally show
+per-stage observed p50 after three successes and p95 after twenty only when model commit, runtime
+version and arguments, provider, region, GPU type/count, and compute mode all match. A stage with no
+provider marker or insufficient samples remains absent/unknown. Once an operation starts, durable
+events replace unknown stages with fresh provider and runtime observations where those boundaries
+are actually exposed.
 
 ### `deploy` and `apply`
 

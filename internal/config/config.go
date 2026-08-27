@@ -22,7 +22,7 @@ type Config struct {
 	AsyncEncryptionKey, AsyncEncryptionKeyReference                                                                    string
 	HostedAuthIssuer, HostedAuthAudience, HostedAuthJWTKeyFile                                                         string
 	HostedAuthAuthorizedParties                                                                                        []string
-	RunPodAPIKey, RunPodServerlessTemplateID, RunPodRESTURL, RunPodArtifactCachePolicy                                 string
+	RunPodAPIKey, RunPodServerlessTemplateID, RunPodRESTURL, RunPodArtifactCachePolicy, RunPodHFTokenSecret            string
 	RunPodContainerDiskGiB                                                                                             int
 	RunPodNetworkVolumes                                                                                               map[string]string
 	AWSRoleARN, AWSExternalID, AWSRegion, AWSSubnetID, AWSAMIID, AWSInstanceType, AWSGPU                               string
@@ -349,6 +349,7 @@ func load(requireAPIKey bool) (Config, error) {
 		RunPodContainerDiskGiB:              runPodContainerDiskGiB,
 		RunPodArtifactCachePolicy:           env("INFERCRANE_RUNPOD_ARTIFACT_CACHE_POLICY", "prefer"),
 		RunPodNetworkVolumes:                runPodNetworkVolumes,
+		RunPodHFTokenSecret:                 env("INFERCRANE_RUNPOD_HF_TOKEN_SECRET", ""),
 		AWSRoleARN:                          env("INFERCRANE_AWS_ROLE_ARN", ""),
 		AWSExternalID:                       env("INFERCRANE_AWS_EXTERNAL_ID", ""),
 		AWSRegion:                           env("INFERCRANE_AWS_REGION", ""),
@@ -483,6 +484,9 @@ func validateRunPod(config Config) error {
 		if !validImmutableModelIdentity(modelIdentity) || !validRunPodResourceID(volumeID) {
 			return errors.New("RunPod network volume mappings require immutable model identities and valid volume IDs")
 		}
+	}
+	if config.RunPodHFTokenSecret != "" && !validRunPodResourceID(config.RunPodHFTokenSecret) {
+		return errors.New("INFERCRANE_RUNPOD_HF_TOKEN_SECRET must be a valid RunPod secret name")
 	}
 	return nil
 }

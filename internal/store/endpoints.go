@@ -267,6 +267,9 @@ func normalizePlan(policy string, bindings []domain.ServingPlanBinding) (canonic
 	if policy == "manual" && len(copyBindings) != 1 {
 		return canonicalPlan{}, nil, errors.New("manual routing requires exactly one binding")
 	}
+	if policy == "weighted" && len(copyBindings) != 2 {
+		return canonicalPlan{}, nil, errors.New("weighted active-active routing requires exactly two bindings")
+	}
 	plan := canonicalPlan{RoutingPolicy: policy, Bindings: copyBindings}
 	body, err := json.Marshal(plan)
 	return plan, body, err
@@ -296,6 +299,32 @@ func (s *Store) CreateServingPlan(ctx context.Context, tenant string, plan domai
 		return domain.ServingPlan{}, fmt.Errorf("%w: endpoint", ErrNotFound)
 	} else if err != nil {
 		return domain.ServingPlan{}, err
+	}
+	if plan.RoutingPolicy == "weighted" {
+		identities := make([]activeActiveIdentity, 0, len(plan.Bindings))
+		for _, planned := range plan.Bindings {
+			var identity activeActiveIdentity
+			var deploymentID, targetID string
+			if err = tx.QueryRowContext(ctx, `SELECT COALESCE(b.deployment_id,''),COALESCE(b.target_id,''),COALESCE(d.model,''),COALESCE(NULLIF(r.spec_json->>'provider_adapter',''),r.spec_json->>'cloud','') FROM backend_bindings b LEFT JOIN deployments d ON d.id=b.deployment_id LEFT JOIN deployment_revisions r ON r.id=d.active_revision_id WHERE b.id=? AND b.endpoint_id=? AND b.tenant_id=?`, planned.BindingID, plan.EndpointID, tenant).Scan(&deploymentID, &targetID, &identity.Model, &identity.Provider); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return domain.ServingPlan{}, fmt.Errorf("%w: binding %s", ErrNotFound, planned.BindingID)
+				}
+				return domain.ServingPlan{}, err
+			}
+			if targetID != "" {
+				if err = tx.QueryRowContext(ctx, `SELECT provider,COALESCE(NULLIF(upstream_model_name,''),'') FROM targets WHERE id=?`, targetID).Scan(&identity.Provider, &identity.Model); err != nil {
+					return domain.ServingPlan{}, err
+				}
+			} else if identity.Provider == "" && deploymentID != "" {
+				if err = tx.QueryRowContext(ctx, `SELECT CASE WHEN COUNT(DISTINCT t.provider)=1 THEN MIN(t.provider) ELSE '' END FROM targets t JOIN deployment_targets dt ON dt.target_id=t.id WHERE dt.deployment_id=?`, deploymentID).Scan(&identity.Provider); err != nil {
+					return domain.ServingPlan{}, err
+				}
+			}
+			identities = append(identities, identity)
+		}
+		if err = validateActiveActiveIdentities(identities); err != nil {
+			return domain.ServingPlan{}, err
+		}
 	}
 	if err = tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(version),0)+1 FROM serving_plans WHERE endpoint_id=?`, plan.EndpointID).Scan(&plan.Version); err != nil {
 		return domain.ServingPlan{}, err
@@ -328,6 +357,21 @@ func (s *Store) CreateServingPlan(ctx context.Context, tenant string, plan domai
 	plan.TenantID = tenant
 	plan.CreatedAt = parseTime(stamp)
 	return plan, nil
+}
+
+type activeActiveIdentity struct{ Model, Provider string }
+
+func validateActiveActiveIdentities(identities []activeActiveIdentity) error {
+	if len(identities) != 2 {
+		return errors.New("weighted active-active routing requires exactly two bindings")
+	}
+	if identities[0].Model == "" || identities[1].Model == "" || identities[0].Model != identities[1].Model {
+		return errors.New("weighted active-active bindings must resolve the same explicit upstream model")
+	}
+	if identities[0].Provider == "" || identities[1].Provider == "" || identities[0].Provider == identities[1].Provider {
+		return errors.New("weighted active-active bindings must resolve two distinct explicit providers")
+	}
+	return nil
 }
 
 func (s *Store) SetEndpointPlan(ctx context.Context, tenant, name, planID, slot string) error {

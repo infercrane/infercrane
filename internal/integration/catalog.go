@@ -324,6 +324,15 @@ func V1Catalog() (*Registry, error) {
 			Qualification: []Qualification{{State: QualificationRegistered, Environment: "serving-contract"}, {State: QualificationDeferred, Environment: "real-lmcache-gpu", Reason: "cache protocol, process lifecycle, hit-rate, memory pressure, and failure behavior need real runtime evidence"}},
 		},
 		{
+			Adapter: "dynamo-nixl", Kind: CompositionOrchestrator, ContractVersion: CompositionV1,
+			Ownership: "Dynamo owns prefill/decode components and NIXL transport; InferCrane records immutable topology intent and translates arguments but refuses execution until the full transport lifecycle is qualified.",
+			Capabilities: []Capability{
+				{Name: "argument_translation", State: CapabilitySupported, Evidence: "go:test/internal/servingcontract#TestDeferredNIXLTranslationIsRuntimeSpecificAndCannotCompile"},
+				{Name: "executable_lifecycle", State: CapabilityUnsupported, Detail: "compile fails closed; no NIXL support claim is made"},
+			},
+			Qualification: []Qualification{{State: QualificationRegistered, Environment: "serving-contract"}, {State: QualificationDeferred, Environment: "real-dynamo-nixl-gpu-kubernetes", Reason: "NIXL versions, GPU transport, routing, recovery, and drain behavior require a real version-pinned cluster"}},
+		},
+		{
 			Adapter: "llm-d", Kind: CompositionOrchestrator, ContractVersion: CompositionV1,
 			Ownership: "llm-d owns Kubernetes scheduling and data-plane routing for its deployment; InferCrane may own only the outer immutable serving plan, evidence, and release decision.",
 			Capabilities: []Capability{
@@ -407,11 +416,11 @@ func V1Catalog() (*Registry, error) {
 			{Name: "dgd_parent_lifecycle", State: CapabilitySupported, Detail: "InferCrane owns one DynamoGraphDeployment; the Dynamo operator owns children", Evidence: "go:test/internal/provision#TestKubernetesDynamoLifecycleIsReplaySafeAndOwnsOneParent"},
 			{Name: "lost_response_adoption", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestKubernetesDynamoAdoptsLostApplyResponseAndRejectsStaleReadiness"},
 			{Name: "aggregated_serving", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestKubernetesDynamoManifestMakesTopologyAndSecretsExplicit"},
-			{Name: "disaggregated_serving", State: CapabilitySupported, Detail: "manifest and ownership contract are locally qualified; GPU performance is not", Evidence: "go:test/internal/provision#TestKubernetesDynamoDisaggregatedVLLMAndSGLangAreExplicit"},
+			{Name: "disaggregated_serving", State: CapabilityUnsupported, Detail: "NIXL argument translation is registered but compile fails closed until transport and failure contracts are qualified"},
 			{Name: "kv_aware_routing", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestKubernetesDynamoManifestMakesTopologyAndSecretsExplicit"},
 			{Name: "kvbm_cache", State: CapabilitySupported, Detail: "aggregated vLLM only until additional combinations are qualified", Evidence: "go:test/internal/provision#TestKubernetesDynamoManifestMakesTopologyAndSecretsExplicit"},
 			{Name: "dynamo_planner_autoscaling", State: CapabilityUnsupported, Detail: "registered in the serving contract but fails closed until DGDSA ownership is qualified"},
-			{Name: "lmcache", State: CapabilityUnsupported, Detail: "registered in the serving contract but not emitted by this adapter"},
+			{Name: "lmcache", State: CapabilityUnsupported, Detail: "registered with exact vLLM argument translation; compile fails closed until lifecycle qualification"},
 			{Name: "hicache", State: CapabilityUnsupported, Detail: "registered in the serving contract but not emitted by this adapter"},
 		},
 		Qualification: []Qualification{

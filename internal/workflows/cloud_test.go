@@ -640,20 +640,18 @@ func (f *fakeReplicaProvider) EnsureReplica(_ context.Context, spec provision.Re
 	return provision.ProviderHandle{ExternalKey: spec.ExternalKey, ResourceID: "infercrane-" + spec.ExternalKey, RequestID: "request-1"}, nil
 }
 
-func TestDynamoServingTopologyReachesProviderWithoutFlattening(t *testing.T) {
-	store := &fakeCloudStore{deployment: domain.Deployment{ID: "deployment-1", Name: "llama", Model: "meta-llama/Llama-3.1-8B-Instruct", Runtime: "vllm", RoutingStrategy: "round-robin", MinReplicas: 1, MaxReplicas: 1}}
+func TestDeferredDynamoServingTopologyFailsBeforeProviderMutation(t *testing.T) {
 	provider := &fakeReplicaProvider{observation: provision.Observation{Exists: true, State: "ready", Endpoint: "http://dynamo:8000", Details: `{}`}}
 	topology := servingcontract.Topology{
 		Backend: servingcontract.BackendDynamo, Profile: "custom", Mode: servingcontract.ModeDisaggregated, Routing: servingcontract.RoutingKVAware,
 		Prefill: servingcontract.Pool{Replicas: 1, TensorParallelism: 1}, Decode: servingcontract.Pool{Replicas: 2, TensorParallelism: 1},
 	}
 	request := CloudRequest{TenantID: "global", DeploymentID: "deployment-1", RevisionID: "revision-1", Name: "llama", Model: "meta-llama/Llama-3.1-8B-Instruct", Cloud: "kubernetes", ProviderAdapter: "kubernetes-dynamo", GPU: "NVIDIA-L40S", Runtime: "vllm", ComputeMode: "elastic", Port: 8000, MinReplicas: 1, MaxReplicas: 1, Serving: topology}
-	if err := request.Validate(); err != nil {
-		t.Fatal(err)
+	if err := request.Validate(); err == nil || !strings.Contains(err.Error(), "registered for argument translation") {
+		t.Fatalf("deferred topology was accepted: %v", err)
 	}
-	_, _, _, _ = ensureCloudReplica(context.Background(), store, ReplicaBackend{Name: "kubernetes-dynamo", Cloud: "kubernetes", Runtime: "vllm", Provider: provider}, fakeInspector{ready: true}, domain.Operation{ID: "operation-1"}, request, 0)
-	if provider.ensureCalls != 1 || provider.lastSpec.Serving.Normalize() != topology.Normalize() || provider.lastSpec.Runtime != "vllm" {
-		t.Fatalf("ensure_calls=%d spec=%#v", provider.ensureCalls, provider.lastSpec)
+	if provider.ensureCalls != 0 {
+		t.Fatalf("provider mutated for deferred topology: ensure_calls=%d", provider.ensureCalls)
 	}
 }
 func (f *fakeReplicaProvider) ObserveReplica(context.Context, provision.ProviderHandle, int) (provision.Observation, error) {
@@ -879,5 +877,21 @@ func TestRuntimeReadyEvidencePreservesStructuredProviderDetails(t *testing.T) {
 	malformed := withRuntimeReadyEvidence("not-json", readyAt)
 	if strings.Contains(malformed, "not-json") || !strings.Contains(malformed, `"runtime_ready_at"`) {
 		t.Fatalf("malformed provider data was retained: %s", malformed)
+	}
+}
+
+func TestStartupStageDurationsPreserveOnlyObservedBoundaries(t *testing.T) {
+	started := time.Date(2026, 8, 23, 10, 0, 0, 0, time.UTC)
+	ready := started.Add(100 * time.Second)
+	details := `{"startup_evidence":{"stages":[{"name":"identity_start","at":"2026-08-23T10:00:05Z"},{"name":"identity_ready","at":"2026-08-23T10:00:10Z"},{"name":"image_pull_start","at":"2026-08-23T10:00:20Z"},{"name":"image_pull_complete","at":"2026-08-23T10:00:50Z"},{"name":"runtime_start","at":"2026-08-23T10:00:55Z"},{"name":"runtime_container_started","at":"2026-08-23T10:01:10Z"}]}}`
+	var stages map[string]float64
+	if err := json.Unmarshal([]byte(startupStageDurations(details, started, ready)), &stages); err != nil {
+		t.Fatal(err)
+	}
+	if stages["deploy_to_ready"] != 100 || stages["identity"] != 5 || stages["image_pull"] != 30 || stages["engine_to_ready"] != 30 {
+		t.Fatalf("stages=%#v", stages)
+	}
+	if _, exists := stages["artifact_cache_attach"]; exists {
+		t.Fatalf("unobserved stage was fabricated: %#v", stages)
 	}
 }

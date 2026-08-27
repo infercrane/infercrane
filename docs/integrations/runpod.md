@@ -67,6 +67,22 @@ plan or local simulation is not real-provider qualification.
     export INFERCRANE_RUNPOD_NETWORK_VOLUMES_JSON="{\"$MODEL_IDENTITY\":\"volume_1234\"}"
     ```
 
+    For gated repositories, create a scoped RunPod secret and configure only its name:
+
+    ```bash
+    export INFERCRANE_RUNPOD_HF_TOKEN_SECRET='huggingface-read-token'
+    ```
+
+    Native Pod requests contain RunPod's secret reference syntax, never the Hugging Face token.
+    InferCrane fails closed on an invalid secret name and cannot verify the secret value without
+    launching a workload.
+
+    To populate a new identity-named volume with a resumable transfer, first set the exact
+    model/commit, data center, size, current provider rates, retention window, and watchdog, then run
+    `make plan-runpod-artifact-cache`. Review its JSON worst-case cost before setting
+    `INFERCRANE_RUNPOD_MAX_COST_USD` and using `make build-runpod-artifact-cache`. The build command is
+    billable; its hermetic safety test is `make test-runpod-artifact-cache`.
+
     Before creating a Pod, InferCrane performs a read-only volume lookup, verifies its ID, exact
     identity-derived name, positive size, and data center, then mounts it at `/workspace`. Standard
     Hugging Face downloads and filesystem-materialized model profiles use that persistent path.
@@ -125,7 +141,7 @@ plan or local simulation is not real-provider qualification.
     ```bash
     infercrane workload init ./custom-runtime \
       --recipe glm-5.3-flash \
-      --profile custom-oci-hopper-tp4 \
+      --profile custom-oci-hopper-tp8 \
       --name glm-production \
       --cloud runpod \
       --provider-adapter runpod-pods
@@ -137,10 +153,11 @@ plan or local simulation is not real-provider qualification.
 
     The generated DeploymentSpec preserves the upstream image digest, complete argv, model
     revision, and exact GPU count. The GLM profile's provider-neutral bootstrap materializes the
-    complete pinned snapshot to a local container path before replacing itself with vLLM; configure
-    at least 500 GiB of container disk for this roughly 306 GiB FP8 checkpoint plus runtime
-    overhead. Provider stock and real runtime behavior still require paid qualification of that
-    exact tuple.
+    complete pinned snapshot to a local container path before replacing itself with vLLM. Configure
+    storage for the roughly 306 GiB FP8 checkpoint plus runtime overhead, preferably through an
+    identity-bound network volume. Provider stock and real runtime behavior still require paid
+    qualification of that exact tuple. A four-B200 Blackwell candidate exists as
+    `custom-oci-blackwell-tp4`, but remains unqualified until exact-tuple evidence is recorded.
   </Tab>
   <Tab title="Serverless">
     ```bash

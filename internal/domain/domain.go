@@ -545,30 +545,43 @@ type ArtifactPrefetch struct {
 
 type CapacityOperation struct {
 	ID, TenantID, Provider, Runtime, ComputeMode, Region, GPU string
+	ModelIdentity, RuntimeVersion, RuntimeArgsDigest          string
 	GPUCount                                                  int
 	Operation, ResourceKey, Outcome, ErrorCode                string
+	StageDurationsJSON                                        string
 	StartedAt, CompletedAt, CreatedAt                         time.Time
 	DurationSeconds                                           float64
 }
 
+type StartupStageSummary struct {
+	Name              string   `json:"name"`
+	SuccessfulSamples int      `json:"successful_samples"`
+	P50Seconds        *float64 `json:"p50_seconds,omitempty"`
+	P95Seconds        *float64 `json:"p95_seconds,omitempty"`
+}
+
 type CapacitySummary struct {
-	Provider           string    `json:"provider"`
-	Runtime            string    `json:"runtime"`
-	ComputeMode        string    `json:"compute_mode"`
-	Region             string    `json:"region"`
-	GPU                string    `json:"gpu"`
-	GPUCount           int       `json:"gpu_count"`
-	Attempts           int       `json:"attempts"`
-	Succeeded          int       `json:"succeeded"`
-	Pending            int       `json:"pending"`
-	CapacityFailures   int       `json:"capacity_failures"`
-	RuntimeFailures    int       `json:"runtime_failures"`
-	ProviderFailures   int       `json:"provider_failures"`
-	SuccessRate        float64   `json:"success_rate"`
-	DurationP50Seconds *float64  `json:"duration_p50_seconds,omitempty"`
-	DurationP95Seconds *float64  `json:"duration_p95_seconds,omitempty"`
-	WindowStart        time.Time `json:"window_start"`
-	WindowEnd          time.Time `json:"window_end"`
+	Provider           string                `json:"provider"`
+	Runtime            string                `json:"runtime"`
+	RuntimeVersion     string                `json:"runtime_version,omitempty"`
+	RuntimeArgsDigest  string                `json:"runtime_args_digest,omitempty"`
+	ModelIdentity      string                `json:"model_identity,omitempty"`
+	ComputeMode        string                `json:"compute_mode"`
+	Region             string                `json:"region"`
+	GPU                string                `json:"gpu"`
+	GPUCount           int                   `json:"gpu_count"`
+	Attempts           int                   `json:"attempts"`
+	Succeeded          int                   `json:"succeeded"`
+	Pending            int                   `json:"pending"`
+	CapacityFailures   int                   `json:"capacity_failures"`
+	RuntimeFailures    int                   `json:"runtime_failures"`
+	ProviderFailures   int                   `json:"provider_failures"`
+	SuccessRate        float64               `json:"success_rate"`
+	DurationP50Seconds *float64              `json:"duration_p50_seconds,omitempty"`
+	DurationP95Seconds *float64              `json:"duration_p95_seconds,omitempty"`
+	StartupStages      []StartupStageSummary `json:"startup_stages,omitempty"`
+	WindowStart        time.Time             `json:"window_start"`
+	WindowEnd          time.Time             `json:"window_end"`
 }
 
 type FinOpsReport struct {
@@ -689,26 +702,33 @@ type ReleaseGuardPolicy struct {
 	RequireQualityEvidence         bool     `json:"require_quality_evidence"`
 	MinimumQualityScore            *float64 `json:"minimum_quality_score,omitempty"`
 	MaxQualityRegressionPercent    *float64 `json:"max_quality_regression_percent,omitempty"`
+	QualityComparisonMode          string   `json:"quality_comparison_mode"`
+	QualityBootstrapAlpha          float64  `json:"quality_bootstrap_alpha"`
+	QualityBootstrapMinSamples     int      `json:"quality_bootstrap_min_samples"`
+	QualityBootstrapSeed           int64    `json:"quality_bootstrap_seed"`
 }
 
 type RevisionMetrics struct {
-	EvidenceSource        string   `json:"evidence_source,omitempty"`
-	EvidenceID            string   `json:"evidence_id,omitempty"`
-	Requests              int      `json:"requests"`
-	ReadyReplicas         int      `json:"ready_replicas"`
-	ErrorRate             float64  `json:"error_rate"`
-	P95TTFTMS             *float64 `json:"p95_ttft_ms"`
-	P95LatencyMS          *float64 `json:"p95_latency_ms"`
-	OutputTokensPerSecond *float64 `json:"output_tokens_per_second"`
-	SourcedHourlyCost     *float64 `json:"sourced_hourly_cost,omitempty"`
-	Compatible            *bool    `json:"compatible,omitempty"`
-	CompatibilityEvidence string   `json:"compatibility_evidence,omitempty"`
-	SyntheticValidation   bool     `json:"synthetic_validation"`
-	QualityScore          *float64 `json:"quality_score,omitempty"`
-	QualityPassed         *bool    `json:"quality_passed,omitempty"`
-	QualityComparable     *bool    `json:"quality_comparable,omitempty"`
-	QualityEvidenceID     string   `json:"quality_evidence_id,omitempty"`
-	QualitySuite          string   `json:"quality_suite,omitempty"`
+	EvidenceSource        string    `json:"evidence_source,omitempty"`
+	EvidenceID            string    `json:"evidence_id,omitempty"`
+	Requests              int       `json:"requests"`
+	ReadyReplicas         int       `json:"ready_replicas"`
+	ErrorRate             float64   `json:"error_rate"`
+	P95TTFTMS             *float64  `json:"p95_ttft_ms"`
+	P95LatencyMS          *float64  `json:"p95_latency_ms"`
+	OutputTokensPerSecond *float64  `json:"output_tokens_per_second"`
+	SourcedHourlyCost     *float64  `json:"sourced_hourly_cost,omitempty"`
+	Compatible            *bool     `json:"compatible,omitempty"`
+	CompatibilityEvidence string    `json:"compatibility_evidence,omitempty"`
+	SyntheticValidation   bool      `json:"synthetic_validation"`
+	QualityScore          *float64  `json:"quality_score,omitempty"`
+	QualityPassed         *bool     `json:"quality_passed,omitempty"`
+	QualityComparable     *bool     `json:"quality_comparable,omitempty"`
+	QualityEvidenceID     string    `json:"quality_evidence_id,omitempty"`
+	QualitySuite          string    `json:"quality_suite,omitempty"`
+	QualitySampleCount    int       `json:"quality_sample_count,omitempty"`
+	QualityPairingDigest  string    `json:"quality_pairing_digest,omitempty"`
+	QualityScores         []float64 `json:"quality_scores,omitempty"`
 }
 
 // QualityEvidence is signed, revision-bound output from a customer-selected
@@ -722,6 +742,7 @@ type QualityEvidence struct {
 	Score                                                      float64
 	Passed                                                     bool
 	SampleCount                                                int
+	DistributionJSON                                           string
 	EvaluatedAt, CreatedAt                                     time.Time
 }
 

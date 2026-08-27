@@ -46,13 +46,13 @@ func TestFrontierProfilesUseTheGeneralImmutableWorkloadContract(t *testing.T) {
 		image      string
 		commandArg string
 	}{
-		{name: "glm-5.3-flash", revision: "3f1971b7b5f7a528c9c4ef6212c8785298a8c24a", gpuCount: 4, image: "vllm/vllm-openai@sha256:2c6da6c6f16ed15c91e412d896dba13701f25fe1861eaec9ddaa4db34d1d21c4", commandArg: "glm47"},
+		{name: "glm-5.3-flash", revision: "3f1971b7b5f7a528c9c4ef6212c8785298a8c24a", gpuCount: 8, image: "vllm/vllm-openai@sha256:2c6da6c6f16ed15c91e412d896dba13701f25fe1861eaec9ddaa4db34d1d21c4", commandArg: "glm47"},
 		{name: "qwen3.8-flash-next", revision: "bcd9f01ddc9cff2316eb84281bebcd5b058bddce", gpuCount: 8, image: "vllm/vllm-openai@sha256:fc120ece0a388cc0aa1caad4a9f1cd92113484ab7ec2fd0efadd62585be05bf8", commandArg: "--enable-expert-parallel"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			entry, ok := Get(test.name)
-			if !ok || entry.Revision != test.revision || len(entry.Profiles) != 1 {
+			if !ok || entry.Revision != test.revision || len(entry.Profiles) != 2 {
 				t.Fatalf("recipe identity is not pinned: %+v", entry)
 			}
 			profile := entry.Profiles[0]
@@ -66,23 +66,54 @@ func TestFrontierProfilesUseTheGeneralImmutableWorkloadContract(t *testing.T) {
 	}
 }
 
-func TestGLMProfileMaterializesPinnedSnapshotBeforeVLLM(t *testing.T) {
-	entry, ok := Get("glm-5.3-flash")
-	if !ok || len(entry.Profiles) != 1 {
-		t.Fatalf("entry=%#v ok=%t", entry, ok)
+func TestFrontierProfilesMaterializePinnedSnapshotBeforeVLLM(t *testing.T) {
+	for _, name := range []string{"glm-5.3-flash", "qwen3.8-flash-next"} {
+		t.Run(name, func(t *testing.T) {
+			entry, ok := Get(name)
+			if !ok || len(entry.Profiles) != 2 {
+				t.Fatalf("entry=%#v ok=%t", entry, ok)
+			}
+			for _, profile := range entry.Profiles {
+				command := profile.Workload.Command
+				if len(command) < 5 || command[0] != "python3" || command[1] != "-c" {
+					t.Fatalf("profile=%s command=%#v", profile.Name, command)
+				}
+				bootstrap := command[2]
+				for _, expected := range []string{"snapshot_download", "repo_id='${MODEL}'", "revision='${MODEL_REVISION}'", "INFERCRANE_MODEL_DIR", "HF_XET_HIGH_PERFORMANCE", `"/opt/infercrane/model"`, "os.execvp('vllm'"} {
+					if !strings.Contains(bootstrap, expected) {
+						t.Fatalf("profile %s bootstrap omitted %q: %s", profile.Name, expected, bootstrap)
+					}
+				}
+				if !contains(command, "--tensor-parallel-size") || !contains(command, "--served-model-name") || !contains(command, "${MODEL}") {
+					t.Fatalf("vLLM argv was not preserved for %s: %#v", profile.Name, command)
+				}
+				if name == "qwen3.8-flash-next" && (!contains(command, "qwen3_xml") || contains(command, "qwen3_coder")) {
+					t.Fatalf("Qwen profile does not use the reviewed upstream tool parser: %#v", command)
+				}
+			}
+		})
 	}
-	command := entry.Profiles[0].Workload.Command
-	if len(command) < 5 || command[0] != "python3" || command[1] != "-c" {
-		t.Fatalf("command=%#v", command)
+}
+
+func TestFrontierBlackwellProfilesRemainExplicitCandidates(t *testing.T) {
+	tests := []struct {
+		entry, profile, requiredArg string
+	}{
+		{entry: "qwen3.8-flash-next", profile: "custom-oci-blackwell-tep4", requiredArg: "--enable-expert-parallel"},
+		{entry: "glm-5.3-flash", profile: "custom-oci-blackwell-tp4", requiredArg: "--kv-cache-dtype"},
 	}
-	bootstrap := command[2]
-	for _, expected := range []string{"snapshot_download", "repo_id='${MODEL}'", "revision='${MODEL_REVISION}'", "INFERCRANE_MODEL_DIR", "HF_XET_HIGH_PERFORMANCE", `"/opt/infercrane/model"`, "os.execvp('vllm'"} {
-		if !strings.Contains(bootstrap, expected) {
-			t.Fatalf("bootstrap omitted %q: %s", expected, bootstrap)
+	for _, test := range tests {
+		entry, _ := Get(test.entry)
+		found := false
+		for _, profile := range entry.Profiles {
+			if profile.Name != test.profile {
+				continue
+			}
+			found = profile.GPUHint == "B200" && profile.GPUCount == 4 && contains(profile.CompatibleGPUs, "B200") && contains(profile.Workload.Command, test.requiredArg) && strings.Contains(strings.Join(profile.Limitations, " "), "exact")
 		}
-	}
-	if !contains(command, "--tensor-parallel-size") || !contains(command, "--served-model-name") || !contains(command, "${MODEL}") {
-		t.Fatalf("vLLM argv was not preserved: %#v", command)
+		if !found {
+			t.Fatalf("missing explicit unqualified Blackwell candidate %s/%s", test.entry, test.profile)
+		}
 	}
 }
 

@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://infercrane.dev/schemas/evaluator-result-v2.schema.json",
+  "title": "InferCrane evaluator result v2",
+  "description": "Content-free aggregate task-quality result with an optional bounded paired-score distribution.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "suite",
+    "suite_version",
+    "evaluator",
+    "evaluator_version",
+    "score",
+    "passed",
+    "sample_count",
+    "artifact_digest",
+    "evaluated_at"
+  ],
+  "properties": {
+    "schema": {"const": "infercrane.dev/evaluator-result/v2"},
+    "suite": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": ".*\\S.*"},
+    "suite_version": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": ".*\\S.*"},
+    "evaluator": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": ".*\\S.*"},
+    "evaluator_version": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": ".*\\S.*"},
+    "score": {"type": "number", "minimum": 0, "maximum": 1},
+    "passed": {"type": "boolean"},
+    "sample_count": {"type": "integer", "minimum": 1, "maximum": 10000000},
+    "distribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "kind", "pairing_digest", "scores"],
+      "properties": {
+        "schema": {"const": "infercrane.dev/quality-distribution/v1"},
+        "kind": {"const": "paired_scores"},
+        "pairing_digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+        "scores": {
+          "type": "array",
+          "maxItems": 100000,
+          "items": {"type": "number", "minimum": 0, "maximum": 1}
+        }
+      }
+    },
+    "artifact_digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+    "evaluated_at": {"type": "string", "format": "date-time"}
+  }
+}

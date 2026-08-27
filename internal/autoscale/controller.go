@@ -15,6 +15,7 @@ type Deployment struct {
 }
 type Repository interface {
 	AutoscalingDeployments(context.Context) ([]Deployment, error)
+	AutoscalingSLOEvidence(context.Context, string, time.Time) (SLOEvidence, error)
 	RecordDecision(context.Context, string, Decision, string) error
 	SaveState(context.Context, string, State) error
 }
@@ -55,12 +56,17 @@ func (c Controller) Once(ctx context.Context) error {
 			continue
 		}
 		signals.ObservedAt = now()
-		decision, err := Evaluate(deployment.Policy, deployment.State, signals)
+		evidence, evidenceErr := c.Repository.AutoscalingSLOEvidence(ctx, deployment.ID, signals.ObservedAt)
+		if evidenceErr != nil {
+			failures = append(failures, fmt.Errorf("SLO evidence for %s: %w", deployment.ID, evidenceErr))
+			continue
+		}
+		decision, err := EvaluateWithSLO(deployment.Policy, deployment.State, signals, evidence)
 		if err != nil {
 			failures = append(failures, fmt.Errorf("evaluate %s: %w", deployment.ID, err))
 			continue
 		}
-		encoded, _ := json.Marshal(signals)
+		encoded, _ := json.Marshal(EvidenceSnapshot{Queue: signals, SLO: evidence})
 		if decision.Action != "hold" {
 			if err := c.Fleet.ScaleTo(ctx, deployment.ID, decision.NewReplicas); err != nil {
 				failures = append(failures, fmt.Errorf("scale %s: %w", deployment.ID, err))

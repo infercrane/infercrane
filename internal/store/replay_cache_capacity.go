@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
@@ -212,6 +213,12 @@ func (s *Store) RecordCapacityOperation(ctx context.Context, row domain.Capacity
 	if row.TenantID == "" || row.Provider == "" || row.Runtime == "" || row.ComputeMode == "" || row.GPUCount < 1 || row.GPUCount > 1024 || row.Operation == "" || row.ResourceKey == "" || row.StartedAt.IsZero() {
 		return row, errors.New("complete capacity operation is required")
 	}
+	if row.StageDurationsJSON == "" {
+		row.StageDurationsJSON = "{}"
+	}
+	if !validStartupStageDurations(row.StageDurationsJSON) {
+		return row, errors.New("startup stage durations must be a bounded object of finite non-negative seconds")
+	}
 	// Production callers omit completion so both ends of a multi-host duration
 	// stay in the PostgreSQL clock domain. Historical/test ingestion may supply
 	// an explicit completion timestamp.
@@ -235,9 +242,25 @@ func (s *Store) RecordCapacityOperation(ctx context.Context, row domain.Capacity
 		return row, err
 	}
 	stamp := now()
-	_, err = s.ExecContext(ctx, `INSERT INTO capacity_operations(id,tenant_id,provider,runtime,compute_mode,region,gpu,gpu_count,operation,resource_key,outcome,error_code,started_at,completed_at,duration_seconds,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, row.ID, row.TenantID, row.Provider, row.Runtime, row.ComputeMode, row.Region, row.GPU, row.GPUCount, row.Operation, row.ResourceKey, row.Outcome, null(row.ErrorCode), row.StartedAt, row.CompletedAt, row.DurationSeconds, stamp)
+	_, err = s.ExecContext(ctx, `INSERT INTO capacity_operations(id,tenant_id,provider,runtime,runtime_version,runtime_args_digest,model_identity,compute_mode,region,gpu,gpu_count,operation,resource_key,outcome,error_code,stage_durations_json,started_at,completed_at,duration_seconds,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?::jsonb,?,?,?,?)`, row.ID, row.TenantID, row.Provider, row.Runtime, row.RuntimeVersion, row.RuntimeArgsDigest, row.ModelIdentity, row.ComputeMode, row.Region, row.GPU, row.GPUCount, row.Operation, row.ResourceKey, row.Outcome, null(row.ErrorCode), row.StageDurationsJSON, row.StartedAt, row.CompletedAt, row.DurationSeconds, stamp)
 	row.CreatedAt = parseTime(stamp)
 	return row, err
+}
+
+func validStartupStageDurations(raw string) bool {
+	if len(raw) > 16<<10 {
+		return false
+	}
+	var stages map[string]float64
+	if json.Unmarshal([]byte(raw), &stages) != nil || stages == nil || len(stages) > 32 {
+		return false
+	}
+	for name, seconds := range stages {
+		if name == "" || len(name) > 64 || seconds < 0 || seconds > 7*24*60*60 || math.IsNaN(seconds) || math.IsInf(seconds, 0) {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Store) CapacityIntelligence(ctx context.Context, tenant string, window time.Duration) ([]domain.CapacitySummary, error) {
@@ -252,12 +275,25 @@ func (s *Store) CapacityIntelligence(ctx context.Context, tenant string, window 
 	start := end.Add(-window)
 	rows, err := s.QueryContext(ctx, `WITH latest AS (
 		SELECT DISTINCT ON (provider,runtime,compute_mode,region,gpu,gpu_count,operation,resource_key)
-			provider,runtime,compute_mode,region,gpu,gpu_count,operation,resource_key,outcome,duration_seconds,completed_at,created_at,id
+			provider,runtime,runtime_version,runtime_args_digest,model_identity,compute_mode,region,gpu,gpu_count,operation,resource_key,outcome,duration_seconds,stage_durations_json,completed_at,created_at,id
 		FROM capacity_operations
 		WHERE tenant_id=? AND completed_at>=? AND completed_at<=?
 		ORDER BY provider,runtime,compute_mode,region,gpu,gpu_count,operation,resource_key,completed_at DESC,created_at DESC,id DESC
+	), stage_stats AS (
+		SELECT provider,runtime,runtime_version,runtime_args_digest,model_identity,compute_mode,region,gpu,gpu_count,stage.key AS stage_name,
+			COUNT(*) AS samples,
+			CASE WHEN COUNT(*) >= 3 THEN percentile_cont(0.5) WITHIN GROUP(ORDER BY (stage.value #>> '{}')::double precision) END AS p50,
+			CASE WHEN COUNT(*) >= 20 THEN percentile_cont(0.95) WITHIN GROUP(ORDER BY (stage.value #>> '{}')::double precision) END AS p95
+		FROM latest CROSS JOIN LATERAL jsonb_each(stage_durations_json) AS stage
+		WHERE outcome='succeeded' AND jsonb_typeof(stage.value)='number'
+		GROUP BY provider,runtime,runtime_version,runtime_args_digest,model_identity,compute_mode,region,gpu,gpu_count,stage.key
+	), stages AS (
+		SELECT provider,runtime,runtime_version,runtime_args_digest,model_identity,compute_mode,region,gpu,gpu_count,
+			jsonb_agg(jsonb_build_object('name',stage_name,'successful_samples',samples,'p50_seconds',p50,'p95_seconds',p95) ORDER BY stage_name) AS startup_stages
+		FROM stage_stats
+		GROUP BY provider,runtime,runtime_version,runtime_args_digest,model_identity,compute_mode,region,gpu,gpu_count
 	)
-	SELECT provider,runtime,compute_mode,region,gpu,gpu_count,
+	SELECT l.provider,l.runtime,l.runtime_version,l.runtime_args_digest,l.model_identity,l.compute_mode,l.region,l.gpu,l.gpu_count,
 		COUNT(*),
 		COUNT(*) FILTER(WHERE outcome='succeeded'),
 		COUNT(*) FILTER(WHERE outcome='pending'),
@@ -266,10 +302,11 @@ func (s *Store) CapacityIntelligence(ctx context.Context, tenant string, window 
 		COUNT(*) FILTER(WHERE outcome='provider_failed'),
 		COALESCE(COUNT(*) FILTER(WHERE outcome='succeeded')::double precision / NULLIF(COUNT(*) FILTER(WHERE outcome<>'pending'),0),0),
 		CASE WHEN COUNT(*) FILTER(WHERE outcome='succeeded') >= 3 THEN percentile_cont(0.5) WITHIN GROUP(ORDER BY duration_seconds) FILTER(WHERE outcome='succeeded') END,
-		CASE WHEN COUNT(*) FILTER(WHERE outcome='succeeded') >= 20 THEN percentile_cont(0.95) WITHIN GROUP(ORDER BY duration_seconds) FILTER(WHERE outcome='succeeded') END
-	FROM latest
-	GROUP BY provider,runtime,compute_mode,region,gpu,gpu_count
-	ORDER BY provider,runtime,compute_mode,region,gpu,gpu_count`, tenant, start, end)
+		CASE WHEN COUNT(*) FILTER(WHERE outcome='succeeded') >= 20 THEN percentile_cont(0.95) WITHIN GROUP(ORDER BY duration_seconds) FILTER(WHERE outcome='succeeded') END,
+		COALESCE(s.startup_stages,'[]'::jsonb)::text
+	FROM latest l LEFT JOIN stages s USING(provider,runtime,runtime_version,runtime_args_digest,model_identity,compute_mode,region,gpu,gpu_count)
+	GROUP BY l.provider,l.runtime,l.runtime_version,l.runtime_args_digest,l.model_identity,l.compute_mode,l.region,l.gpu,l.gpu_count,s.startup_stages
+	ORDER BY l.provider,l.runtime,l.runtime_version,l.runtime_args_digest,l.model_identity,l.compute_mode,l.region,l.gpu,l.gpu_count`, tenant, start, end)
 	if err != nil {
 		return nil, err
 	}
@@ -278,8 +315,12 @@ func (s *Store) CapacityIntelligence(ctx context.Context, tenant string, window 
 	for rows.Next() {
 		var row domain.CapacitySummary
 		var p50, p95 sql.NullFloat64
-		if err = rows.Scan(&row.Provider, &row.Runtime, &row.ComputeMode, &row.Region, &row.GPU, &row.GPUCount, &row.Attempts, &row.Succeeded, &row.Pending, &row.CapacityFailures, &row.RuntimeFailures, &row.ProviderFailures, &row.SuccessRate, &p50, &p95); err != nil {
+		var stagesJSON string
+		if err = rows.Scan(&row.Provider, &row.Runtime, &row.RuntimeVersion, &row.RuntimeArgsDigest, &row.ModelIdentity, &row.ComputeMode, &row.Region, &row.GPU, &row.GPUCount, &row.Attempts, &row.Succeeded, &row.Pending, &row.CapacityFailures, &row.RuntimeFailures, &row.ProviderFailures, &row.SuccessRate, &p50, &p95, &stagesJSON); err != nil {
 			return nil, err
+		}
+		if err = json.Unmarshal([]byte(stagesJSON), &row.StartupStages); err != nil {
+			return nil, fmt.Errorf("decode startup stage summary: %w", err)
 		}
 		if p50.Valid {
 			row.DurationP50Seconds = &p50.Float64

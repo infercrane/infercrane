@@ -39,6 +39,15 @@ func TestNormalizeServingPlanIsCanonicalAndBounded(t *testing.T) {
 	if _, _, err = normalizePlan("manual", bindings); err == nil {
 		t.Fatal("manual plan accepted multiple bindings")
 	}
+	if _, _, err = normalizePlan("weighted", bindings[:1]); err == nil {
+		t.Fatal("weighted plan accepted a non-active-active binding count")
+	}
+	if err = validateActiveActiveIdentities([]activeActiveIdentity{{Model: "org/model", Provider: "aws"}, {Model: "org/model", Provider: "gcp"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err = validateActiveActiveIdentities([]activeActiveIdentity{{Model: "org/model", Provider: "aws"}, {Model: "other/model", Provider: "aws"}}); err == nil {
+		t.Fatal("same-provider or mismatched-model active-active plan passed")
+	}
 }
 
 func TestEndpointGuardTopologyOnlyQualifiesMeasuredPrimaryOrGovernedAppend(t *testing.T) {
@@ -359,7 +368,15 @@ func TestEndpointReleaseGuardPersistsDeterministicPlanDecision(t *testing.T) {
 	if accepted, err := s.EndpointReleaseGuardAccepted(ctx, "global", endpoint.Name, candidatePlan.ID); err != nil || !accepted {
 		t.Fatalf("passing candidate accepted=%t err=%v", accepted, err)
 	}
-	replacementPlan, err := s.CreateServingPlan(ctx, "global", domain.ServingPlan{EndpointID: endpoint.ID, RoutingPolicy: "weighted", Bindings: []domain.ServingPlanBinding{{BindingID: candidateBinding.ID, Weight: 100}}})
+	secondaryTarget, err := s.AddTarget(ctx, domain.Target{Name: "guard-secondary-" + suffix, URL: "http://guard-secondary-" + suffix, Provider: "secondary-provider", Runtime: "vllm", UpstreamModel: "coder"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondaryBinding, err := s.CreateBackendBinding(ctx, "global", domain.BackendBinding{EndpointID: endpoint.ID, Name: "secondary", Kind: "external", OwnershipMode: "observe-only", TargetID: secondaryTarget.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacementPlan, err := s.CreateServingPlan(ctx, "global", domain.ServingPlan{EndpointID: endpoint.ID, RoutingPolicy: "weighted", Bindings: []domain.ServingPlanBinding{{BindingID: candidateBinding.ID, Priority: 0, Weight: 50}, {BindingID: secondaryBinding.ID, Priority: 1, Weight: 50}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -456,7 +473,7 @@ func TestEnvironmentPromotionStagesAtomicallyAndIsIdempotent(t *testing.T) {
 	// A later immutable source plan must receive a distinct destination binding
 	// snapshot. Sharing the binding would allow a future ownership transition to
 	// alter the semantics of both historical destination plans.
-	secondSourcePlan, err := s.CreateServingPlan(ctx, "global", domain.ServingPlan{EndpointID: sourceEndpoint.ID, RoutingPolicy: "weighted", Bindings: sourcePlan.Bindings})
+	secondSourcePlan, err := s.CreateServingPlan(ctx, "global", domain.ServingPlan{EndpointID: sourceEndpoint.ID, RoutingPolicy: "primary-fallback", Bindings: sourcePlan.Bindings})
 	if err != nil {
 		t.Fatal(err)
 	}

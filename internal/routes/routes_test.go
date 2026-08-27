@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestSnapshotNeverSerializesUpstreamCredential(t *testing.T) {
@@ -13,6 +14,43 @@ func TestSnapshotNeverSerializesUpstreamCredential(t *testing.T) {
 	}
 	if strings.Contains(string(encoded), "internal-router-secret") || strings.Contains(string(encoded), "UpstreamAPIKey") {
 		t.Fatalf("serialized route leaked upstream credential: %s", encoded)
+	}
+}
+
+func TestWeightedEndpointDecaysMissingBindingAndRequiresBoundedRecovery(t *testing.T) {
+	directory := New()
+	directory.now = func() time.Time { return time.Unix(100, 0) }
+	planned := []string{"aws", "gcp"}
+	both := []Snapshot{{TenantID: "tenant", Alias: "model", BindingID: "aws", Provider: "aws", RoutingWeight: 1}, {TenantID: "tenant", Alias: "model", BindingID: "gcp", Provider: "gcp", RoutingWeight: 1}}
+	directory.PublishEndpoint(EndpointRoute{TenantID: "tenant", Alias: "model", RoutingPolicy: "weighted", Routes: both, PlannedBindingIDs: planned})
+	directory.PublishEndpoint(EndpointRoute{TenantID: "tenant", Alias: "model", RoutingPolicy: "weighted", Routes: both[:1], PlannedBindingIDs: planned})
+	directory.PublishEndpoint(EndpointRoute{TenantID: "tenant", Alias: "model", RoutingPolicy: "weighted", Routes: both[:1], PlannedBindingIDs: planned})
+	for range 4 {
+		route, release, ok := directory.AcquireForTenant("tenant", "model")
+		if !ok || route.BindingID != "aws" {
+			t.Fatalf("decayed route selected: %#v ok=%t", route, ok)
+		}
+		release()
+	}
+	directory.PublishEndpoint(EndpointRoute{TenantID: "tenant", Alias: "model", RoutingPolicy: "weighted", Routes: both, PlannedBindingIDs: planned})
+	for range 2 {
+		route, release, _ := directory.AcquireForTenant("tenant", "model")
+		if route.BindingID != "aws" {
+			t.Fatalf("binding recovered without hysteresis: %#v", route)
+		}
+		release()
+	}
+	directory.PublishEndpoint(EndpointRoute{TenantID: "tenant", Alias: "model", RoutingPolicy: "weighted", Routes: both, PlannedBindingIDs: planned})
+	seenGCP := false
+	for range 4 {
+		route, release, ok := directory.AcquireForTenant("tenant", "model")
+		if ok && route.BindingID == "gcp" {
+			seenGCP = true
+		}
+		release()
+	}
+	if !seenGCP {
+		t.Fatal("healthy binding did not recover its configured weight")
 	}
 }
 

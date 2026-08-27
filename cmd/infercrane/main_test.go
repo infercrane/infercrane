@@ -1138,7 +1138,7 @@ func TestModelsCommandExploresReviewedCatalogWithoutControlPlane(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"8×H200", "vllm/vllm-openai@sha256:fc120ece", "Command: vllm serve", "--enable-expert-parallel", "qwen-community-1.0", "separate Qwen license"} {
+	for _, expected := range []string{"8×H200", "vllm/vllm-openai@sha256:fc120ece", "Command: python3 -c", "--enable-expert-parallel", "qwen3_xml", "qwen-community-1.0", "separate Qwen license"} {
 		if !strings.Contains(frontier, expected) {
 			t.Fatalf("frontier detail missing %q: %s", expected, frontier)
 		}
@@ -1425,7 +1425,7 @@ func TestRolloutInspectFormatsPersistedGuardComparison(t *testing.T) {
 	}
 }
 
-func TestRolloutCreateFromFilePreservesAdvancedServingTopology(t *testing.T) {
+func TestRolloutCreateFromFileFailsClosedForDeferredNIXLTopology(t *testing.T) {
 	filename := filepath.Join(t.TempDir(), "candidate.yaml")
 	body := `
 apiVersion: infercrane.dev/v1
@@ -1458,10 +1458,7 @@ serving:
 	}))
 	defer server.Close()
 	err := rolloutCommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, []string{"create", "llama-production", "--file", filename, "--idempotency-key", "rollout-file-1"})
-	revision, _ := request["spec"].(map[string]any)
-	serving, _ := revision["serving"].(map[string]any)
-	decode, _ := serving["decode"].(map[string]any)
-	if err != nil || revision["provider_adapter"] != "kubernetes-dynamo" || serving["backend"] != "dynamo" || serving["routing"] != "kv-aware" || decode["replicas"] != float64(2) {
+	if err == nil || !strings.Contains(err.Error(), "registered for argument translation") || request != nil {
 		t.Fatalf("request=%#v err=%v", request, err)
 	}
 	if err = rolloutCommand(context.Background(), config.Config{}, []string{"create", "llama-production", "--file", filename, "--model", "other"}); err == nil || !strings.Contains(err.Error(), "cannot be combined") {

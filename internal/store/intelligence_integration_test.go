@@ -110,7 +110,7 @@ func TestReplayCacheCapacityFinOpsAndAutopilotPersistence(t *testing.T) {
 	stableProvider := fixtureProvider + "-stable"
 	for index := 1; index <= 20; index++ {
 		begin := now.Add(-time.Duration(100-index) * time.Second)
-		if _, err = s.RecordCapacityOperation(ctx, domain.CapacityOperation{TenantID: "global", Provider: stableProvider, Runtime: "vllm", ComputeMode: "elastic", Region: "zone", GPU: "GPU", Operation: "ensure", ResourceKey: fmt.Sprintf("%s-stable-%d", name, index), Outcome: "succeeded", StartedAt: begin, CompletedAt: begin.Add(time.Duration(index) * time.Second)}); err != nil {
+		if _, err = s.RecordCapacityOperation(ctx, domain.CapacityOperation{TenantID: "global", Provider: stableProvider, Runtime: "vllm", RuntimeVersion: "1.2.3", RuntimeArgsDigest: "sha256:args", ModelIdentity: artifact.ModelIdentity, ComputeMode: "elastic", Region: "zone", GPU: "GPU", Operation: "ensure", ResourceKey: fmt.Sprintf("%s-stable-%d", name, index), Outcome: "succeeded", StageDurationsJSON: fmt.Sprintf(`{"image_pull":%d,"engine_to_ready":%d}`, index, index*2), StartedAt: begin, CompletedAt: begin.Add(time.Duration(index) * time.Second)}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -124,6 +124,9 @@ func TestReplayCacheCapacityFinOpsAndAutopilotPersistence(t *testing.T) {
 	}
 	if err != nil || stable == nil || stable.DurationP50Seconds == nil || stable.DurationP95Seconds == nil || *stable.DurationP50Seconds != 10.5 || *stable.DurationP95Seconds < 19 || *stable.DurationP95Seconds > 19.1 {
 		t.Fatalf("stable readiness evidence=%#v err=%v", stable, err)
+	}
+	if stable.ModelIdentity != artifact.ModelIdentity || stable.RuntimeVersion != "1.2.3" || len(stable.StartupStages) != 2 || stable.StartupStages[0].P50Seconds == nil || stable.StartupStages[0].P95Seconds == nil {
+		t.Fatalf("exact-tuple startup stage evidence=%#v", stable)
 	}
 	report, err := s.RecordFinOpsReport(ctx, domain.FinOpsReport{TenantID: "global", DeploymentID: deployment.ID, DeploymentName: name, WindowStart: now.Add(-time.Hour), WindowEnd: now, Currency: "USD", Status: "unavailable", SummaryJSON: `{"status":"unavailable"}`, EvidenceJSON: `[]`, InputDigest: strings.Repeat("b", 64)})
 	if err != nil || report.ID == "" {

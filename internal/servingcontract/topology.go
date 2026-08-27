@@ -181,11 +181,11 @@ func (t Topology) Validate(runtime, cloud, providerAdapter string, outerMin, out
 	if err := t.Cache.validate(runtime); err != nil {
 		return err
 	}
+	if t.Mode == ModeDisaggregated {
+		return errors.New("NIXL prefill/decode disaggregation is registered for argument translation but not executable until its transport, routing, and failure contracts are qualified")
+	}
 	if t.Cache.Backend == CacheLMCache || t.Cache.Backend == CacheHiCache {
 		return errors.New("LMCache and HiCache are registered but not executable until their runtime and lifecycle contracts are qualified")
-	}
-	if t.Mode == ModeDisaggregated && t.Cache.Backend != CacheNone {
-		return errors.New("disaggregated cache integration is registered but not yet executable; use cache none until that combination is qualified")
 	}
 	return nil
 }

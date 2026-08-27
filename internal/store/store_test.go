@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/authz"
+	"github.com/infercrane/infercrane/internal/autoscale"
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/operations"
 	"github.com/infercrane/infercrane/internal/optimizationcampaign"
@@ -585,7 +586,7 @@ func TestBenchmarkHistoryPersistsReproductionMetadata(t *testing.T) {
 	ctx := context.Background()
 	s := openStore(t, ctx)
 	name := "benchmark-" + time.Now().UTC().Format("150405.000000000")
-	deployment, _, _, err := s.SubmitCloudDeployment(ctx, domain.Deployment{Name: name, Model: "Qwen/Qwen3-8B", MinReplicas: 1, MaxReplicas: 1}, domain.Operation{Kind: "deployment.converge", IdempotencyKey: "create-" + name, RequestJSON: `{"name":"` + name + `","model":"Qwen/Qwen3-8B","model_revision":"commit","cloud":"runpod","gpu":"L40S"}`})
+	deployment, _, _, err := s.SubmitCloudDeployment(ctx, domain.Deployment{Name: name, Model: "Qwen/Qwen3-8B", MinReplicas: 1, MaxReplicas: 1}, domain.Operation{Kind: "deployment.converge", IdempotencyKey: "create-" + name, RequestJSON: `{"name":"` + name + `","model":"Qwen/Qwen3-8B","model_revision":"commit","cloud":"runpod","provider_adapter":"runpod","gpu":"L40S","runtime":"vllm","runtime_version":"0.10","runtime_args":[]}`})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -594,6 +595,9 @@ func TestBenchmarkHistoryPersistsReproductionMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	deployment = resolved.Deployment
+	if _, err = s.AttachModelArtifact(ctx, "global", deployment.ActiveRevisionID, domain.ModelArtifact{Source: "huggingface", Repository: "Qwen/Qwen3-8B", RequestedRevision: "commit", ImmutableRevision: "commit", ModelIdentity: "Qwen/Qwen3-8B@commit", CacheState: "unknown", RuntimeCompatibilityJSON: `{}`}); err != nil {
+		t.Fatal(err)
+	}
 	value := 12.5
 	gpuCount := 1
 	created, err := s.RecordBenchmark(ctx, domain.BenchmarkResult{TenantID: "global", DeploymentID: deployment.ID, DeploymentName: name, RevisionID: deployment.ActiveRevisionID, ModelIdentity: "Qwen/Qwen3-8B@commit", Runtime: "vllm", RuntimeVersion: "0.10", RuntimeConfigJSON: `{"args":[]}`, Provider: "runpod", GPU: "L40S", GPUCount: &gpuCount, ComputeMode: "elastic", Tool: "aiperf", ToolVersion: "0.9.0", WorkloadJSON: `{"request_count":10,"random_seed":17}`, ReproductionCommand: "aiperf profile --model qwen", RequestCount: 10, Succeeded: 10, DurationSeconds: 2, TTFTP95MS: &value, CostMetadataJSON: `{"available":false}`})
@@ -626,6 +630,20 @@ func TestBenchmarkHistoryPersistsReproductionMetadata(t *testing.T) {
 	}
 	if other, err := s.ModelRecipes(ctx, "missing-tenant", "", 10); err != nil || len(other) != 0 {
 		t.Fatalf("cross tenant recipes=%#v err=%v", other, err)
+	}
+	goodput := 2.5
+	for index := 0; index < autoscale.MinimumSLOSamples; index++ {
+		ttft := 100.0 + float64(index)
+		if err = s.RecordRequest(ctx, domain.InferenceRecord{RequestID: fmt.Sprintf("autoscale-evidence-%s-%d", name, index), DeploymentID: deployment.ID, RevisionID: deployment.ActiveRevisionID, StartedAt: time.Now().UTC().Add(-time.Minute), StatusCode: 200, LatencyMS: 200, TTFTMS: &ttft, OperationName: "chat"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err = s.RecordBenchmark(ctx, domain.BenchmarkResult{TenantID: "global", DeploymentID: deployment.ID, DeploymentName: name, RevisionID: deployment.ActiveRevisionID, ModelIdentity: "Qwen/Qwen3-8B@commit", Runtime: "vllm", RuntimeVersion: "0.10", RuntimeConfigJSON: `{"args":[]}`, Provider: "runpod", GPU: "L40S", GPUCount: &gpuCount, ComputeMode: "elastic", Tool: "aiperf", ToolVersion: "0.9.0", WorkloadJSON: `{"replicas":1}`, ReproductionCommand: "aiperf", RequestCount: autoscale.MinimumSLOSamples, Succeeded: autoscale.MinimumSLOSamples, DurationSeconds: 10, Goodput: &goodput, CostMetadataJSON: `{"available":false}`}); err != nil {
+		t.Fatal(err)
+	}
+	sloEvidence, err := s.AutoscalingSLOEvidence(ctx, deployment.ID, time.Now().UTC())
+	if err != nil || !sloEvidence.Comparable || sloEvidence.BenchmarkID == "" || sloEvidence.RequestSamples != autoscale.MinimumSLOSamples || sloEvidence.GoodputPerReplica == nil || *sloEvidence.GoodputPerReplica != goodput {
+		t.Fatalf("autoscaling SLO evidence=%#v err=%v", sloEvidence, err)
 	}
 	labRow, err := s.RecordLabEvaluation(ctx, "global", domain.LabEvaluation{ModelIdentity: "Qwen/Qwen3-8B@commit", AlgorithmVersion: "inference-lab-v1", InputJSON: `{"model_identity":"Qwen/Qwen3-8B@commit"}`, ResultsJSON: `[{"evidence_class":"measured"}]`, InputDigest: strings.Repeat("c", 64)})
 	if err != nil || labRow.ID == "" {
@@ -1290,17 +1308,21 @@ func TestScopedPrincipalAndExternalBudgetAreTenantSafe(t *testing.T) {
 	if err != nil || selected.Route != "external" || selected.Action != "overflow" {
 		t.Fatalf("selected=%#v err=%v", selected, err)
 	}
-	recovered, err := s.EvaluateOverflow(ctx, "external-a", deployment.ID, overflow.Signal{PrimaryHealthy: true}, true, evaluatedAt.Add(2*time.Minute))
+	heldForRecovery, err := s.EvaluateOverflow(ctx, "external-a", deployment.ID, overflow.Signal{PrimaryHealthy: true}, true, evaluatedAt.Add(2*time.Minute))
+	if err != nil || heldForRecovery.Route != "external" || heldForRecovery.Action != "hold" {
+		t.Fatalf("recovery hysteresis=%#v err=%v", heldForRecovery, err)
+	}
+	recovered, err := s.EvaluateOverflow(ctx, "external-a", deployment.ID, overflow.Signal{PrimaryHealthy: true}, true, evaluatedAt.Add(3*time.Minute))
 	if err != nil || recovered.Route != "primary" || recovered.Action != "recover" {
 		t.Fatalf("recovered=%#v err=%v", recovered, err)
 	}
-	for _, offset := range []time.Duration{3 * time.Minute, 4 * time.Minute} {
+	for _, offset := range []time.Duration{4 * time.Minute, 5 * time.Minute} {
 		if held, holdErr := s.EvaluateOverflow(ctx, "external-a", deployment.ID, overflow.Signal{PrimaryHealthy: true}, true, evaluatedAt.Add(offset)); holdErr != nil || held.Action != "hold" {
 			t.Fatalf("steady hold=%#v err=%v", held, holdErr)
 		}
 	}
 	var decisions int
-	if err = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM overflow_decisions WHERE tenant_id='external-a' AND deployment_id=$1`, deployment.ID).Scan(&decisions); err != nil || decisions != 3 {
+	if err = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM overflow_decisions WHERE tenant_id='external-a' AND deployment_id=$1`, deployment.ID).Scan(&decisions); err != nil || decisions != 4 {
 		t.Fatalf("decisions=%d err=%v", decisions, err)
 	}
 	first, err := s.LeaseExternalBudget(ctx, "external-a", policy.ID, 4)

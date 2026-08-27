@@ -2,6 +2,9 @@
 package planning
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -14,10 +17,17 @@ import (
 var nonNameCharacter = regexp.MustCompile(`[^a-z0-9]+`)
 
 type Input struct {
-	Name, Model, ComputeMode, Cloud, ProviderAdapter, GPU, Region, Runtime, Routing string
-	Targets, RuntimeArgs                                                            []string
-	GPUCount, MinReplicas, MaxReplicas                                              int
-	Serving                                                                         servingcontract.Topology
+	Name, Model, ModelRevision, ComputeMode, Cloud, ProviderAdapter, GPU, Region, Runtime, RuntimeVersion, Routing string
+	Targets, RuntimeArgs                                                                                           []string
+	GPUCount, MinReplicas, MaxReplicas                                                                             int
+	Serving                                                                                                        servingcontract.Topology
+}
+
+type StageEstimate struct {
+	Name               string   `json:"name"`
+	SuccessfulSamples  int      `json:"successful_samples"`
+	EstimateP50Seconds *float64 `json:"estimate_p50_seconds,omitempty"`
+	EstimateP95Seconds *float64 `json:"estimate_p95_seconds,omitempty"`
 }
 
 type Action struct {
@@ -35,24 +45,27 @@ type Cost struct {
 // duration is present only when enough tenant-scoped observations match the
 // exact serving plan; static specifications never manufacture one.
 type Readiness struct {
-	EstimateStatus     string   `json:"estimate_status"`
-	EstimateP50Seconds *float64 `json:"estimate_p50_seconds,omitempty"`
-	EstimateP95Seconds *float64 `json:"estimate_p95_seconds,omitempty"`
-	SuccessfulSamples  int      `json:"successful_samples,omitempty"`
-	ArtifactCacheState string   `json:"artifact_cache_state"`
-	CapacityState      string   `json:"capacity_state"`
-	EvidenceBoundary   string   `json:"evidence_boundary,omitempty"`
-	Stages             []string `json:"stages,omitempty"`
-	Reason             string   `json:"reason"`
+	EstimateStatus     string          `json:"estimate_status"`
+	EstimateP50Seconds *float64        `json:"estimate_p50_seconds,omitempty"`
+	EstimateP95Seconds *float64        `json:"estimate_p95_seconds,omitempty"`
+	SuccessfulSamples  int             `json:"successful_samples,omitempty"`
+	ArtifactCacheState string          `json:"artifact_cache_state"`
+	CapacityState      string          `json:"capacity_state"`
+	EvidenceBoundary   string          `json:"evidence_boundary,omitempty"`
+	Stages             []string        `json:"stages,omitempty"`
+	StageEstimates     []StageEstimate `json:"stage_estimates,omitempty"`
+	Reason             string          `json:"reason"`
 }
 
 // CapacityEvidence is the narrow, tenant-scoped observation boundary used to
 // annotate a static plan. It is historical evidence, not a provider promise.
 type CapacityEvidence struct {
-	Provider, Runtime, ComputeMode, Region, GPU string
-	GPUCount, Attempts, Succeeded, Pending      int
-	SuccessRate                                 float64
-	DurationP50Seconds, DurationP95Seconds      *float64
+	Provider, Runtime, ComputeMode, Region, GPU      string
+	ModelIdentity, RuntimeVersion, RuntimeArgsDigest string
+	GPUCount, Attempts, Succeeded, Pending           int
+	SuccessRate                                      float64
+	DurationP50Seconds, DurationP95Seconds           *float64
+	StartupStages                                    []StageEstimate
 }
 
 type Change struct {
@@ -69,26 +82,29 @@ type Current struct {
 }
 
 type Plan struct {
-	Version         int                      `json:"version"`
-	Name            string                   `json:"name"`
-	Model           string                   `json:"model"`
-	Mode            string                   `json:"mode"`
-	Cloud           string                   `json:"cloud,omitempty"`
-	ProviderAdapter string                   `json:"provider_adapter,omitempty"`
-	GPU             string                   `json:"gpu,omitempty"`
-	GPUCount        int                      `json:"gpu_count,omitempty"`
-	Region          string                   `json:"region,omitempty"`
-	Runtime         string                   `json:"runtime"`
-	Routing         string                   `json:"routing"`
-	Targets         []string                 `json:"targets,omitempty"`
-	MinReplicas     int                      `json:"min_replicas"`
-	MaxReplicas     int                      `json:"max_replicas"`
-	Actions         []Action                 `json:"actions"`
-	Changes         []Change                 `json:"changes,omitempty"`
-	Warnings        []string                 `json:"warnings,omitempty"`
-	Cost            Cost                     `json:"cost"`
-	Readiness       Readiness                `json:"readiness"`
-	Serving         servingcontract.Topology `json:"serving,omitzero"`
+	Version           int                      `json:"version"`
+	Name              string                   `json:"name"`
+	Model             string                   `json:"model"`
+	ModelRevision     string                   `json:"model_revision,omitempty"`
+	Mode              string                   `json:"mode"`
+	Cloud             string                   `json:"cloud,omitempty"`
+	ProviderAdapter   string                   `json:"provider_adapter,omitempty"`
+	GPU               string                   `json:"gpu,omitempty"`
+	GPUCount          int                      `json:"gpu_count,omitempty"`
+	Region            string                   `json:"region,omitempty"`
+	Runtime           string                   `json:"runtime"`
+	RuntimeVersion    string                   `json:"runtime_version,omitempty"`
+	RuntimeArgsDigest string                   `json:"runtime_args_digest,omitempty"`
+	Routing           string                   `json:"routing"`
+	Targets           []string                 `json:"targets,omitempty"`
+	MinReplicas       int                      `json:"min_replicas"`
+	MaxReplicas       int                      `json:"max_replicas"`
+	Actions           []Action                 `json:"actions"`
+	Changes           []Change                 `json:"changes,omitempty"`
+	Warnings          []string                 `json:"warnings,omitempty"`
+	Cost              Cost                     `json:"cost"`
+	Readiness         Readiness                `json:"readiness"`
+	Serving           servingcontract.Topology `json:"serving,omitzero"`
 }
 
 // Compare turns a creation plan into a deterministic revision rollout plan.
@@ -174,6 +190,14 @@ func Build(in Input) (Plan, error) {
 	if in.Runtime == "" {
 		in.Runtime = support.DefaultRuntime
 	}
+	if in.RuntimeVersion == "" {
+		switch in.Runtime {
+		case support.DefaultRuntime:
+			in.RuntimeVersion = support.DefaultRuntimeVersion
+		case "sglang":
+			in.RuntimeVersion = support.SGLangRuntimeVersion
+		}
+	}
 	if err := support.V1().ValidateRuntime(in.Runtime); err != nil {
 		return Plan{}, fmt.Errorf("support policy: %w", err)
 	}
@@ -221,8 +245,11 @@ func Build(in Input) (Plan, error) {
 		return Plan{}, fmt.Errorf("serving topology: %w", err)
 	}
 
-	p := Plan{Version: 1, Name: in.Name, Model: in.Model, Cloud: in.Cloud, ProviderAdapter: in.ProviderAdapter, GPU: in.GPU, GPUCount: in.GPUCount, Serving: in.Serving,
+	args, _ := json.Marshal(in.RuntimeArgs)
+	argsSum := sha256.Sum256(args)
+	p := Plan{Version: 1, Name: in.Name, Model: in.Model, ModelRevision: in.ModelRevision, Cloud: in.Cloud, ProviderAdapter: in.ProviderAdapter, GPU: in.GPU, GPUCount: in.GPUCount, Serving: in.Serving,
 		Region: in.Region, Runtime: in.Runtime, Routing: in.Routing, Targets: in.Targets,
+		RuntimeVersion: in.RuntimeVersion, RuntimeArgsDigest: "sha256:" + hex.EncodeToString(argsSum[:]),
 		MinReplicas: in.MinReplicas, MaxReplicas: in.MaxReplicas,
 		Cost: Cost{Status: "unavailable", Reason: "live provider pricing is not configured; no estimate is fabricated"},
 		Readiness: Readiness{
@@ -279,6 +306,25 @@ func ApplyCapacityEvidence(p Plan, evidence []CapacityEvidence) Plan {
 	expectedProvider := p.ProviderAdapter
 	if expectedProvider == "" {
 		expectedProvider = defaultProviderAdapter(p.Cloud)
+	}
+	expectedIdentity := p.Model
+	if p.ModelRevision != "" {
+		expectedIdentity += "@" + p.ModelRevision
+	}
+	for _, row := range evidence {
+		gpuCount := row.GPUCount
+		if gpuCount == 0 {
+			gpuCount = 1
+		}
+		if row.Provider != expectedProvider || row.Runtime != p.Runtime || row.ComputeMode != "elastic" || row.Region != p.Region || row.GPU != p.GPU || gpuCount != p.GPUCount || expectedIdentity != row.ModelIdentity || p.RuntimeVersion == "" || p.RuntimeVersion != row.RuntimeVersion || p.RuntimeArgsDigest != row.RuntimeArgsDigest {
+			continue
+		}
+		for _, stage := range row.StartupStages {
+			if stage.SuccessfulSamples >= 3 && stage.EstimateP50Seconds != nil {
+				p.Readiness.StageEstimates = append(p.Readiness.StageEstimates, stage)
+			}
+		}
+		break
 	}
 	for _, row := range evidence {
 		gpuCount := row.GPUCount

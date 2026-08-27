@@ -2,6 +2,7 @@ package qualityevidence
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -20,7 +21,7 @@ func TestSignedEvidenceRoundTripAndTamperRejection(t *testing.T) {
 		t.Fatal(err)
 	}
 	decoded, err := Decode(envelope)
-	if err != nil || decoded != payload {
+	if err != nil || !reflect.DeepEqual(decoded, payload) {
 		t.Fatalf("decoded=%+v err=%v", decoded, err)
 	}
 	var mutated map[string]any
@@ -72,7 +73,7 @@ func TestSignedEvidenceRejectsTrailingJSON(t *testing.T) {
 
 func TestEvaluatorResultStrictlyDecodesAndBinds(t *testing.T) {
 	resultJSON := `{
-  "schema":"infercrane.dev/evaluator-result/v1",
+	  "schema":"infercrane.dev/evaluator-result/v2",
   "suite":"support-answers",
   "suite_version":"git:8a91d7c",
   "evaluator":"custom-ci",
@@ -97,7 +98,7 @@ func TestEvaluatorResultStrictlyDecodesAndBinds(t *testing.T) {
 }
 
 func TestEvaluatorResultRejectsContentUnknownFieldsAndOversize(t *testing.T) {
-	base := `{"schema":"infercrane.dev/evaluator-result/v1","suite":"s","suite_version":"v1","evaluator":"e","evaluator_version":"v1","score":0.8,"passed":true,"sample_count":1,"artifact_digest":"sha256:` + strings.Repeat("e", 64) + `","evaluated_at":"2026-08-13T20:00:00Z"`
+	base := `{"schema":"infercrane.dev/evaluator-result/v2","suite":"s","suite_version":"v1","evaluator":"e","evaluator_version":"v1","score":0.8,"passed":true,"sample_count":1,"artifact_digest":"sha256:` + strings.Repeat("e", 64) + `","evaluated_at":"2026-08-13T20:00:00Z"`
 	for name, suffix := range map[string]string{
 		"prompt content":  `,"prompt":"secret prompt"}`,
 		"output content":  `,"output":"secret answer"}`,
@@ -111,5 +112,16 @@ func TestEvaluatorResultRejectsContentUnknownFieldsAndOversize(t *testing.T) {
 	}
 	if _, err := DecodeResult(make([]byte, MaxFileSize+1)); err == nil || !strings.Contains(err.Error(), "exceeds 1 MiB") {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestPairedDistributionIsBoundedAndContentFree(t *testing.T) {
+	base := Payload{Schema: Schema, Deployment: "prod", RevisionID: "rev", Suite: "suite", SuiteVersion: "v1", Evaluator: "eval", EvaluatorVersion: "v1", Score: .8, Passed: true, SampleCount: 3, Distribution: &Distribution{Schema: DistributionSchema, Kind: "paired_scores", PairingDigest: "sha256:" + strings.Repeat("f", 64), Scores: []float64{.7, .8, .9}}, ArtifactDigest: "sha256:" + strings.Repeat("a", 64), EvaluatedAt: time.Now().UTC()}
+	if err := base.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	base.Distribution.Scores = []float64{.7}
+	if err := base.Validate(); err == nil || !strings.Contains(err.Error(), "match sample_count") {
+		t.Fatalf("mismatched distribution accepted: %v", err)
 	}
 }

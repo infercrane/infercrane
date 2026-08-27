@@ -103,6 +103,27 @@ func TestApplyCapacityEvidenceRequiresMatchingStatisticalEvidence(t *testing.T) 
 	}
 }
 
+func TestApplyCapacityEvidenceUsesOnlyExactTupleStageHistory(t *testing.T) {
+	p, err := Build(Input{Model: "org/model", ModelRevision: strings.Repeat("a", 40), Runtime: "vllm", RuntimeVersion: "1.2.3", RuntimeArgs: []string{"--tp", "2"}, Cloud: "aws", GPU: "H200", GPUCount: 2, Region: "eu-central-1", MinReplicas: 1, MaxReplicas: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p50 := 120.0
+	wrong := CapacityEvidence{Provider: "aws-ec2", Runtime: "vllm", RuntimeVersion: "1.2.3", RuntimeArgsDigest: p.RuntimeArgsDigest, ModelIdentity: "org/other@" + strings.Repeat("a", 40), ComputeMode: "elastic", Region: "eu-central-1", GPU: "H200", GPUCount: 2, Attempts: 20, Succeeded: 20, SuccessRate: 1, DurationP50Seconds: &p50, StartupStages: []StageEstimate{{Name: "image_pull", SuccessfulSamples: 20, EstimateP50Seconds: &p50}}}
+	matching := wrong
+	matching.ModelIdentity = "org/model@" + strings.Repeat("a", 40)
+	p = ApplyCapacityEvidence(p, []CapacityEvidence{wrong, matching})
+	if len(p.Readiness.StageEstimates) != 1 || p.Readiness.StageEstimates[0].Name != "image_pull" {
+		t.Fatalf("exact stage evidence was not applied: %#v", p.Readiness.StageEstimates)
+	}
+	matching.RuntimeArgsDigest = "sha256:other"
+	p.Readiness.StageEstimates = nil
+	p = ApplyCapacityEvidence(p, []CapacityEvidence{matching})
+	if len(p.Readiness.StageEstimates) != 0 {
+		t.Fatalf("runtime argument mismatch leaked stage evidence: %#v", p.Readiness.StageEstimates)
+	}
+}
+
 func TestApplyCapacityEvidenceDoesNotCrossAcceleratorCounts(t *testing.T) {
 	p, err := Build(Input{Model: "model", Cloud: "aws", GPU: "H200", GPUCount: 4, Region: "eu-central-1", Runtime: "vllm", MinReplicas: 1, MaxReplicas: 1})
 	if err != nil {

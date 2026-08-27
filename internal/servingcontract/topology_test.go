@@ -48,21 +48,17 @@ func TestDynamoTopologyRejectsConflictingOwnershipAndCacheCombinations(t *testin
 	}
 }
 
-func TestDynamoTopologyAllowsDisaggregatedAndQualifiedAggregatedCache(t *testing.T) {
+func TestDynamoTopologyDefersDisaggregatedAndAllowsQualifiedAggregatedCache(t *testing.T) {
 	topology := Topology{
 		Backend: BackendDynamo, Mode: ModeDisaggregated, Routing: RoutingKVAware,
 		Prefill: Pool{Replicas: 2, TensorParallelism: 1}, Decode: Pool{Replicas: 3, TensorParallelism: 2},
 	}
-	if err := topology.Validate("vllm", "kubernetes", "kubernetes-dynamo", 1, 1); err != nil {
-		t.Fatal(err)
+	if err := topology.Validate("vllm", "kubernetes", "kubernetes-dynamo", 1, 1); err == nil || !strings.Contains(err.Error(), "registered for argument translation") {
+		t.Fatalf("deferred NIXL topology compiled: %v", err)
 	}
 	cached := validDynamo()
 	cached.Cache = Cache{Backend: CacheKVBM, HostGiB: 100, MemoryGiB: 150, DiskGiB: 200, StorageClaim: "kv-cache", Metrics: true}
 	if err := cached.Validate("vllm", "kubernetes", "kubernetes-dynamo", 1, 1); err != nil {
 		t.Fatal(err)
-	}
-	topology.Cache = cached.Cache
-	if err := topology.Validate("vllm", "kubernetes", "kubernetes-dynamo", 1, 1); err == nil {
-		t.Fatal("unqualified disaggregated cache combination passed")
 	}
 }
