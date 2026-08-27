@@ -153,6 +153,11 @@ func (r RunPodPods) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provid
 		environment["HF_HOME"] = "/workspace/huggingface"
 		environment["HUGGINGFACE_HUB_CACHE"] = "/workspace/huggingface/hub"
 		environment["INFERCRANE_MODEL_DIR"] = "/workspace/infercrane/model"
+		// RunPod network volumes are surfaced as FUSE. vLLM does not recognize
+		// that filesystem as network storage automatically, so reviewed runtime
+		// bootstraps need an explicit, provider-neutral I/O hint to overlap reads
+		// into RAM before weight deserialization.
+		environment["INFERCRANE_MODEL_CACHE_IO"] = "prefetch"
 		environment["HF_XET_HIGH_PERFORMANCE"] = "1"
 	}
 	if dataCenterID != "" {

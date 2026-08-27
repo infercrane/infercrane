@@ -327,6 +327,13 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 			break
 		}
 		copyHeaders(req.Header, r.Header)
+		// Compression is negotiated independently on each side of the gateway.
+		// Forwarding the caller's Accept-Encoding makes the upstream transport
+		// treat the encoding as caller-managed, so it will not transparently
+		// decode the response. Some provider proxies then strip Content-Encoding,
+		// leaving clients with opaque gzip bytes. Request identity here so request
+		// evidence, SSE framing, and the downstream response remain observable.
+		req.Header.Set("Accept-Encoding", "identity")
 		if route.UpstreamAPIKey != "" {
 			req.Header.Set("Authorization", "Bearer "+route.UpstreamAPIKey)
 		}

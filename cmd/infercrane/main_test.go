@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -289,6 +290,21 @@ func TestRequestCommandSendsOpenAICompatibleRequest(t *testing.T) {
 		return requestCommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, []string{"qwen-prod", "--message", "Hello"})
 	})
 	if err != nil || strings.TrimSpace(output) != "Hello from InferCrane" {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+}
+
+func TestRequestCommandDefensivelyDecodesUnlabelledGZIP(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		encoded := gzip.NewWriter(w)
+		_, _ = encoded.Write([]byte(`{"choices":[{"message":{"content":"compressed hello"}}]}`))
+		_ = encoded.Close()
+	}))
+	defer server.Close()
+	output, err := captureStdout(t, func() error {
+		return requestCommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, []string{"qwen-prod"})
+	})
+	if err != nil || strings.TrimSpace(output) != "compressed hello" {
 		t.Fatalf("output=%q err=%v", output, err)
 	}
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/ed25519"
 	"crypto/tls"
@@ -3144,10 +3145,14 @@ func requestCommand(ctx context.Context, cfg config.Config, args []string) error
 		data, _ := io.ReadAll(io.LimitReader(response.Body, 1<<20))
 		return fmt.Errorf("inference request returned HTTP %d: %s", response.StatusCode, strings.TrimSpace(string(data)))
 	}
-	if *stream {
-		return printStream(response.Body)
+	responseBody, err := decodedInferenceBody(response.Body)
+	if err != nil {
+		return fmt.Errorf("decode inference response body: %w", err)
 	}
-	data, err := io.ReadAll(io.LimitReader(response.Body, 8<<20))
+	if *stream {
+		return printStream(responseBody)
+	}
+	data, err := io.ReadAll(io.LimitReader(responseBody, 8<<20))
 	if err != nil {
 		return fmt.Errorf("read inference response: %w", err)
 	}
@@ -3185,6 +3190,22 @@ func requestCommand(ctx context.Context, cfg config.Config, args []string) error
 	}
 	fmt.Println(result.Choices[0].Message.Content)
 	return nil
+}
+
+func decodedInferenceBody(body io.Reader) (io.Reader, error) {
+	buffered := bufio.NewReader(body)
+	prefix, err := buffered.Peek(2)
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, bufio.ErrBufferFull) {
+		return nil, err
+	}
+	if len(prefix) != 2 || prefix[0] != 0x1f || prefix[1] != 0x8b {
+		return buffered, nil
+	}
+	decoded, err := gzip.NewReader(buffered)
+	if err != nil {
+		return nil, err
+	}
+	return decoded, nil
 }
 
 func requestInspectCommand(ctx context.Context, cfg config.Config, args []string) error {

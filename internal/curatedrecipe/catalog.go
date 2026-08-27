@@ -151,7 +151,7 @@ func materializedHuggingFaceVLLMCommand(command []string, localDir string) []str
 	if len(command) < 5 || command[0] != "vllm" || command[1] != "serve" || command[2] != "${MODEL}" || command[3] != "--revision" || command[4] != "${MODEL_REVISION}" {
 		panic("materialized Hugging Face vLLM command requires a pinned vllm serve prefix")
 	}
-	bootstrap := fmt.Sprintf("import os,sys\nfrom huggingface_hub import snapshot_download\nos.environ.setdefault('HF_XET_HIGH_PERFORMANCE','1')\nlocal_dir=os.environ.get('INFERCRANE_MODEL_DIR',%s)\nmodel_path=snapshot_download(repo_id='${MODEL}',revision='${MODEL_REVISION}',local_dir=local_dir)\nos.execvp('vllm',['vllm','serve',model_path]+sys.argv[1:])", strconv.Quote(localDir))
+	bootstrap := fmt.Sprintf("import os,sys\nfrom huggingface_hub import snapshot_download\nos.environ.setdefault('HF_XET_HIGH_PERFORMANCE','1')\nlocal_dir=os.environ.get('INFERCRANE_MODEL_DIR',%s)\nmodel_path=snapshot_download(repo_id='${MODEL}',revision='${MODEL_REVISION}',local_dir=local_dir)\nargs=['vllm','serve',model_path]+sys.argv[1:]\nif os.environ.get('INFERCRANE_MODEL_CACHE_IO')=='prefetch': args += ['--safetensors-load-strategy','prefetch']\nos.execvp('vllm',args)", strconv.Quote(localDir))
 	return append([]string{"python3", "-c", bootstrap}, command[5:]...)
 }
 

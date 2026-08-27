@@ -78,6 +78,9 @@ func (c *captureRecorder) RecordRequest(ctx context.Context, record domain.Infer
 
 func TestCompletionRewritesAlias(t *testing.T) {
 	client := &http.Client{Transport: roundTripper(func(r *http.Request) (*http.Response, error) {
+		if got := r.Header.Get("Accept-Encoding"); got != "identity" {
+			t.Errorf("accept-encoding = %q, want identity", got)
+		}
 		if !validTraceParent.MatchString(r.Header.Get("traceparent")) {
 			t.Errorf("invalid traceparent %q", r.Header.Get("traceparent"))
 		}
