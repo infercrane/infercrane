@@ -25,7 +25,9 @@ jobs:
       pypi_exists: ${{ steps.packages.outputs.pypi_exists }}
       prerelease: ${{ steps.release.outputs.prerelease }}
     permissions:
-      contents: read
+      # GitHub hides draft releases from a workflow token without push-level
+      # repository access, even though every command in this job is read-only.
+      contents: write
       attestations: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
