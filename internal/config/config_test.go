@@ -27,6 +27,19 @@ func TestLoadRejectsInvalidInteger(t *testing.T) {
 	}
 }
 
+func TestRunPodContainerDiskIsBounded(t *testing.T) {
+	t.Setenv("INFERCRANE_API_KEY", "secret")
+	t.Setenv("INFERCRANE_RUNPOD_CONTAINER_DISK_GIB", "500")
+	cfg, err := Load()
+	if err != nil || cfg.RunPodContainerDiskGiB != 500 {
+		t.Fatalf("cfg=%#v err=%v", cfg, err)
+	}
+	t.Setenv("INFERCRANE_RUNPOD_CONTAINER_DISK_GIB", "49")
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "RUNPOD_CONTAINER_DISK_GIB") {
+		t.Fatalf("undersized RunPod disk accepted: %v", err)
+	}
+}
+
 func TestLoadRequiresAPIKey(t *testing.T) {
 	t.Setenv("INFERCRANE_API_KEY", "")
 	if _, err := Load(); err == nil {

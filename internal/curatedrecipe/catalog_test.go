@@ -55,7 +55,7 @@ func TestFrontierProfilesUseTheGeneralImmutableWorkloadContract(t *testing.T) {
 				t.Fatalf("recipe identity is not pinned: %+v", entry)
 			}
 			profile := entry.Profiles[0]
-			if profile.Runtime != "custom-oci" || profile.GPUCount != test.gpuCount || profile.CloudHint != "kubernetes" || profile.Workload.Image != test.image || !contains(profile.Workload.Command, test.commandArg) {
+			if profile.Runtime != "custom-oci" || profile.GPUCount != test.gpuCount || profile.CloudHint != "runpod" || profile.ProviderAdapterHint != "runpod-pods" || profile.Workload.Image != test.image || !contains(profile.Workload.Command, test.commandArg) {
 				t.Fatalf("profile does not use the portable serving contract: %+v", profile)
 			}
 			if err := profile.Workload.Validate(); err != nil {

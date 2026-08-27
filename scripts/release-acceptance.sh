@@ -8,6 +8,9 @@ state_root=${INFERCRANE_ACCEPTANCE_STATE_DIR:-"$root/.infercrane/acceptance"}
 requested_run_id=${INFERCRANE_ACCEPTANCE_RUN_ID:-}
 requested_model=${INFERCRANE_ACCEPTANCE_MODEL:-}
 requested_gpu=${INFERCRANE_ACCEPTANCE_GPU:-}
+requested_gpu_count=${INFERCRANE_ACCEPTANCE_GPU_COUNT:-}
+requested_spec=${INFERCRANE_ACCEPTANCE_SPEC_FILE:-}
+requested_name=${INFERCRANE_ACCEPTANCE_NAME:-}
 run_id=${requested_run_id:-$(date -u +%Y%m%dT%H%M%SZ)}
 current_file="$state_root/current"
 paid_lock="$state_root/.paid.lock"
@@ -21,6 +24,7 @@ Commands:
   local       Run non-provider repository and container acceptance
   preflight   Validate credentials, dependencies, template, and inventories (read-only)
   elastic     Run the resumable paid elastic smoke workflow
+  elastic-evidence Run a fixed-capacity DeploymentSpec evidence suite
   elastic-qualify Run elastic benchmark, autoscaling, and Release Guard qualification
   serverless  Run the resumable paid serverless smoke workflow
   elastic-faults    Run disconnect, restart, promotion/drain, and delete-restart gates
@@ -54,8 +58,13 @@ new_run() {
   case "$run_id" in *[!A-Za-z0-9_.-]*) echo "invalid acceptance run ID" >&2; exit 1;; esac
   model=${INFERCRANE_ACCEPTANCE_MODEL:-Qwen/Qwen3-8B}
   gpu=${INFERCRANE_ACCEPTANCE_GPU:-L40S}
+  gpu_count=${INFERCRANE_ACCEPTANCE_GPU_COUNT:-1}
+	deployment_name=${INFERCRANE_ACCEPTANCE_NAME:-qwen-elastic-$run_id}
   case "$model" in *[!A-Za-z0-9_./-]*) echo "invalid acceptance model" >&2; exit 1;; esac
   case "$gpu" in *[!A-Za-z0-9_.-]*) echo "invalid acceptance GPU" >&2; exit 1;; esac
+	case "$gpu_count" in ''|*[!0-9]*) echo "invalid acceptance GPU count" >&2; exit 1;; esac
+	[ "$gpu_count" -ge 1 ] && [ "$gpu_count" -le 8 ] || { echo "acceptance GPU count must be between 1 and 8" >&2; exit 1; }
+	case "$deployment_name" in *[!a-z0-9-]*|'') echo "invalid acceptance deployment name" >&2; exit 1;; esac
   mkdir -p "$state_root"
   run_dir="$state_root/$run_id"
   mkdir -p "$run_dir/evidence" "$run_dir/bin"
@@ -65,10 +74,11 @@ new_run() {
   cat >"$run_dir/state.env" <<EOF
 RUN_ID='$run_id'
 CANDIDATE_COMMIT='$candidate_commit'
-ELASTIC_NAME='qwen-elastic-$run_id'
+ELASTIC_NAME='$deployment_name'
 SERVERLESS_NAME='qwen-serverless-$run_id'
 MODEL='$model'
 GPU='$gpu'
+GPU_COUNT='$gpu_count'
 EOF
 }
 
@@ -85,6 +95,7 @@ load_run() {
   [ -f "$run_dir/state.env" ] || { echo "acceptance state is missing: $run_dir/state.env" >&2; exit 1; }
   # The state file is generated above from bounded identifiers and contains no credentials.
   . "$run_dir/state.env"
+	GPU_COUNT=${GPU_COUNT:-1}
   if [ -n "$requested_model" ] && [ "$requested_model" != "$MODEL" ]; then
     echo "acceptance run $run_id was created for model $MODEL, not requested model $requested_model; use a new run ID" >&2
     exit 1
@@ -93,6 +104,14 @@ load_run() {
     echo "acceptance run $run_id was created for GPU $GPU, not requested GPU $requested_gpu; use a new run ID" >&2
     exit 1
   fi
+	if [ -n "$requested_gpu_count" ] && [ "$requested_gpu_count" != "$GPU_COUNT" ]; then
+		echo "acceptance run $run_id was created for $GPU_COUNT GPUs, not requested $requested_gpu_count; use a new run ID" >&2
+		exit 1
+	fi
+	if [ -n "$requested_name" ] && [ "$requested_name" != "$ELASTIC_NAME" ]; then
+		echo "acceptance run $run_id was created for deployment $ELASTIC_NAME, not requested $requested_name; use a new run ID" >&2
+		exit 1
+	fi
   evidence="$run_dir/evidence"
   cli="$run_dir/bin/infercrane"
   config_file="$run_dir/client.json"
@@ -121,6 +140,11 @@ record() {
   wait "$progress_tee_pid"
   rm -f "$output_stream" "$progress_stream"
   elapsed=$(( $(date +%s) - started_epoch ))
+	ended_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+	jq -n --arg operation "$name" --arg started_at "$started_at" --arg ended_at "$ended_at" \
+		--argjson elapsed_seconds "$elapsed" --argjson exit_code "$status" \
+		'{schema_version:1,operation:$operation,started_at:$started_at,ended_at:$ended_at,elapsed_seconds:$elapsed_seconds,exit_code:$exit_code}' \
+		>"$evidence/$name-timing.json"
   echo "<== $name (exit $status, ${elapsed}s)"
   if [ "$status" -ne 0 ]; then
     echo "Last output (full log: $evidence/$name.log):" >&2
@@ -174,11 +198,33 @@ release_paid_lock() {
   fi
 }
 
+start_paid_watchdog() {
+	limit=$1
+	case "$limit" in ''|*[!0-9]*) echo "invalid paid-resource time limit" >&2; return 1;; esac
+	[ "$limit" -ge 300 ] && [ "$limit" -le 10800 ] || { echo "paid-resource time limit must be between 300 and 10800 seconds" >&2; return 1; }
+	watchdog_parent=$$
+	(
+		sleep "$limit"
+		echo "paid-resource watchdog reached ${limit}s; terminating suite for guarded cleanup" >&2
+		kill -TERM "$watchdog_parent"
+	) &
+	watchdog_pid=$!
+	jq -n --argjson max_paid_seconds "$limit" --arg started_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+		'{schema_version:1,max_paid_seconds:$max_paid_seconds,started_at:$started_at}' >"$run_dir/paid-watchdog.json"
+}
+
+stop_paid_watchdog() {
+	if [ -n "${watchdog_pid:-}" ]; then
+		kill "$watchdog_pid" 2>/dev/null || true
+		watchdog_pid=""
+	fi
+}
+
 write_suite_result() {
   suite_command=$1
   outcome=$2
   exit_code=$3
-  case "$suite_command" in elastic|elastic-qualify|serverless|elastic-faults|serverless-faults|qualify) ;;
+  case "$suite_command" in elastic|elastic-evidence|elastic-qualify|serverless|elastic-faults|serverless-faults|qualify) ;;
     *) echo "invalid acceptance suite command: $suite_command" >&2; return 1;;
   esac
   case "$outcome" in running|passed|failed) ;;
@@ -450,7 +496,24 @@ run_preflight() {
   fi
   capture_inventory before
   capture_provider_inventory before
-  record elastic-plan ic plan "$MODEL" --name "$ELASTIC_NAME" --cloud runpod --gpu "$GPU" --min 1 --max 2 --output json
+	if [ -n "$requested_spec" ]; then
+		[ -f "$requested_spec" ] && [ -r "$requested_spec" ] || { echo "INFERCRANE_ACCEPTANCE_SPEC_FILE is not readable" >&2; return 1; }
+		record elastic-plan ic plan "$requested_spec" --output json
+	else
+		record elastic-plan ic plan "$MODEL" --name "$ELASTIC_NAME" --cloud runpod --gpu "$GPU" --gpu-count "$GPU_COUNT" --min 1 --max 2 --output json
+	fi
+}
+
+submit_elastic_deploy() {
+	wait_timeout=$1
+	if [ -n "$requested_spec" ]; then
+		ic deploy "$requested_spec" --wait --wait-timeout "$wait_timeout" \
+			--idempotency-key "$ELASTIC_NAME-create" --output json
+	else
+		ic deploy "$MODEL" --name "$ELASTIC_NAME" --cloud runpod --gpu "$GPU" --gpu-count "$GPU_COUNT" \
+			--min 1 --max 1 --wait --wait-timeout "$wait_timeout" \
+			--idempotency-key "$ELASTIC_NAME-create" --output json
+	fi
 }
 
 run_elastic() {
@@ -476,6 +539,119 @@ run_elastic() {
   record elastic-explain-scaling ic explain scaling "$ELASTIC_NAME" --output json
   record elastic-explain-cold-start ic explain cold-start "$ELASTIC_NAME" --output json
   echo "Elastic smoke completed. Full RC qualification still requires the controlled disconnect, restart, drain, and bad-candidate checkpoints in the release acceptance procedure."
+}
+
+run_elastic_evidence() {
+	require_paid_approval
+	[ -n "$requested_spec" ] || { echo "elastic-evidence requires INFERCRANE_ACCEPTANCE_SPEC_FILE" >&2; return 1; }
+	start_paid_watchdog "${INFERCRANE_ACCEPTANCE_MAX_PAID_SECONDS:-5400}"
+	run_preflight
+	ready_timeout=${INFERCRANE_ACCEPTANCE_READY_TIMEOUT_SECONDS:-5400}
+
+	echo "==> durable-deploy-cli-disconnect"
+	deploy_started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+	deploy_started_epoch=$(date +%s)
+	submit_elastic_deploy "${ready_timeout}s" >"$evidence/durable-deploy-cli.log" 2>&1 &
+	client_pid=$!
+	operation_id=""
+	resource_id=""
+	elapsed=0
+	while [ "$elapsed" -lt 180 ]; do
+		status=$(ic status "$ELASTIC_NAME" --output json 2>/dev/null || true)
+		operation_id=$(printf '%s' "$status" | jq -r '.active_operation.id // empty')
+		resource_id=$(printf '%s' "$status" | jq -r '.replicas[0].provider_resource_id // empty')
+		if [ -n "$operation_id" ] && [ -n "$resource_id" ]; then break; fi
+		sleep 1
+		elapsed=$((elapsed + 1))
+	done
+	[ -n "$operation_id" ] && [ -n "$resource_id" ] || { echo "durable provider identity was not persisted" >&2; return 1; }
+	kill -INT "$client_pid" 2>/dev/null || true
+	set +e
+	wait "$client_pid"
+	client_status=$?
+	set -e
+	[ "$client_status" -ne 0 ] || { echo "waiting CLI did not disconnect" >&2; return 1; }
+	grep -F "operation $operation_id continues safely in the control plane" "$evidence/durable-deploy-cli.log" >/dev/null
+	jq -n --arg operation_id "$operation_id" --arg provider_resource_id "$resource_id" \
+		--arg started_at "$deploy_started_at" --argjson client_exit "$client_status" \
+		'{schema_version:1,operation_id:$operation_id,provider_resource_id:$provider_resource_id,started_at:$started_at,client_exit:$client_exit,control_plane_continues:true}' \
+		>"$evidence/durable-deploy-cli-disconnect.json"
+
+	compose restart infercrane >/dev/null
+	restart_wait=0
+	until curl -fsS "http://127.0.0.1:${INFERCRANE_ACCEPTANCE_PORT:-18001}/readyz" >/dev/null 2>&1; do
+		restart_wait=$((restart_wait + 1)); [ "$restart_wait" -lt 60 ] || return 1; sleep 1
+	done
+	wait_operation_status "$operation_id" succeeded "$ready_timeout"
+	wait_ready "$ELASTIC_NAME"
+	deploy_elapsed=$(( $(date +%s) - deploy_started_epoch ))
+	deploy_ended_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+	jq -n --arg started_at "$deploy_started_at" --arg ended_at "$deploy_ended_at" \
+		--arg operation_id "$operation_id" --arg provider_resource_id "$resource_id" --argjson elapsed_seconds "$deploy_elapsed" \
+		'{schema_version:1,operation:"deploy_to_ready",started_at:$started_at,ended_at:$ended_at,elapsed_seconds:$elapsed_seconds,operation_id:$operation_id,provider_resource_id:$provider_resource_id}' \
+		>"$evidence/deploy-to-ready-timing.json"
+	capture_provider_inventory ready
+
+	record elastic-inspect ic inspect "$ELASTIC_NAME" --output json
+	record elastic-events ic events "$ELASTIC_NAME" --output json
+	record elastic-explain-cold-start ic explain cold-start "$ELASTIC_NAME" --output json
+	record elastic-buffered-request ic request "$ELASTIC_NAME" --message "InferCrane qualification: reply with exactly READY" --output json
+	base_url="http://127.0.0.1:${INFERCRANE_ACCEPTANCE_PORT:-18001}"
+	record elastic-first-token curl -sS -N -o "$evidence/elastic-first-token.stream" \
+		-w '{"http_code":%{http_code},"time_starttransfer_seconds":%{time_starttransfer},"time_total_seconds":%{time_total}}\n' \
+		-H 'Authorization: Bearer infercrane-runpod-acceptance-key' -H 'Content-Type: application/json' \
+		-d "{\"model\":\"$ELASTIC_NAME\",\"messages\":[{\"role\":\"user\",\"content\":\"Count from one to five.\"}],\"stream\":true,\"max_tokens\":64}" \
+		"$base_url/v1/chat/completions"
+	jq -e '.http_code >= 200 and .http_code < 300 and .time_starttransfer_seconds > 0 and .time_total_seconds >= .time_starttransfer_seconds' \
+		"$evidence/elastic-first-token.log" >/dev/null
+	grep -q 'data: \[DONE\]' "$evidence/elastic-first-token.stream"
+
+	benchmark_requests=${INFERCRANE_ACCEPTANCE_BENCHMARK_REQUESTS:-64}
+	benchmark_tokens=${INFERCRANE_ACCEPTANCE_BENCHMARK_OUTPUT_TOKENS:-64}
+	for concurrency in 1 8 32; do
+		record "elastic-benchmark-c$concurrency" ic benchmark "$ELASTIC_NAME" --revision active \
+			--requests "$benchmark_requests" --concurrency "$concurrency" --output-tokens "$benchmark_tokens" \
+			--random-seed 53 --output json
+		jq -e --argjson gpu_count "$GPU_COUNT" --argjson concurrency "$concurrency" \
+			'.gpu_count == $gpu_count and .failed == 0 and .request_count > 0 and .workload.concurrency == $concurrency and .ttft_p95_ms != null and .tpot_p95_ms != null and .latency_p95_ms != null' \
+			"$evidence/elastic-benchmark-c$concurrency.log" >/dev/null
+	done
+
+	active_before=$(ic status "$ELASTIC_NAME" --output json | tee "$evidence/guard-active-before.json" | jq -r '.deployment.active_revision_id')
+	record guard-candidate-create ic rollout create "$ELASTIC_NAME" --file "$requested_spec" --wait \
+		--idempotency-key "$ELASTIC_NAME-guard-candidate" --output json
+	candidate=$(ic status "$ELASTIC_NAME" --output json | jq -r '.deployment.candidate_revision_id // empty')
+	[ -n "$candidate" ] || { echo "guard candidate was not persisted" >&2; return 1; }
+	record guard-evaluate ic rollout evaluate "$ELASTIC_NAME" --wait \
+		--idempotency-key "$ELASTIC_NAME-guard-evaluate" --output json
+	record guard-inspect ic rollout inspect "$ELASTIC_NAME" --output json
+	jq -e '.release_guard_evaluations[0].decision == "REJECT" and ([.release_guard_evaluations[0].reasons[]? | select(.code == "candidate_not_ready")] | length) == 1' \
+		"$evidence/guard-inspect.log" >/dev/null
+	record guard-active-still-serving ic request "$ELASTIC_NAME" --message "After rejection reply with exactly ACTIVE" --output json
+	active_after=$(ic status "$ELASTIC_NAME" --output json | tee "$evidence/guard-active-after.json" | jq -r '.deployment.active_revision_id')
+	[ "$active_before" = "$active_after" ] || { echo "active revision changed after Release Guard rejection" >&2; return 1; }
+	jq -n --arg decision "REJECT" --arg candidate "$candidate" --arg active_before "$active_before" --arg active_after "$active_after" \
+		'{schema_version:1,decision:$decision,candidate_revision_id:$candidate,active_revision_before:$active_before,active_revision_after:$active_after,active_revision_preserved:($active_before == $active_after),post_rejection_request_succeeded:true}' \
+		>"$evidence/release-guard-proof.json"
+	record guard-reject ic rollout reject "$ELASTIC_NAME" "$candidate" \
+		--reason "qualification candidate intentionally has no capacity" --wait \
+		--idempotency-key "$ELASTIC_NAME-guard-reject" --output json
+
+	echo "==> durable-delete-control-plane-restart"
+	deletion=$(ic delete "$ELASTIC_NAME" --yes --idempotency-key "$ELASTIC_NAME-delete-restart" --output json)
+	printf '%s\n' "$deletion" >"$evidence/delete-restart-submit.json"
+	delete_id=$(printf '%s' "$deletion" | jq -r '.operation.id')
+	printf '%s' "$deletion" | jq -e '.operation.status == "pending"' >/dev/null
+	compose restart infercrane >/dev/null
+	restart_wait=0
+	until curl -fsS "$base_url/readyz" >/dev/null 2>&1; do
+		restart_wait=$((restart_wait + 1)); [ "$restart_wait" -lt 60 ] || return 1; sleep 1
+	done
+	wait_operation_status "$delete_id" succeeded 900
+	if ic status "$ELASTIC_NAME" --output json >/dev/null 2>&1; then echo "deployment remained after restarted delete" >&2; return 1; fi
+	capture_inventory elastic-evidence-after
+	verify_provider_inventory_absent
+	echo "Fixed-capacity custom OCI evidence suite completed with zero provider inventory."
 }
 
 run_serverless() {
@@ -769,7 +945,7 @@ run_report() {
 case "$command_name" in
   local) run_local ;;
   preflight) run_preflight ;;
-  elastic|elastic-qualify|serverless|elastic-faults|serverless-faults)
+  elastic|elastic-evidence|elastic-qualify|serverless|elastic-faults|serverless-faults)
     require_paid_approval
     # Suite bookkeeping and the EXIT recovery trap both require the durable
     # run paths. Initialize them before either can execute. Individual suites
@@ -778,16 +954,20 @@ case "$command_name" in
     load_run
     acquire_paid_lock
     write_suite_result "$command_name" running 0
-    trap 'result=$?; trap - EXIT; if [ "$result" -ne 0 ]; then write_suite_result "$command_name" failed "$result" || true; echo "acceptance failed; preserving provider inventory before guarded cleanup" >&2; capture_provider_inventory failure || true; run_cleanup || true; else write_suite_result "$command_name" passed 0 || result=$?; fi; release_paid_lock; exit "$result"' EXIT
+		trap 'exit 124' HUP INT TERM
+    trap 'result=$?; trap - EXIT; stop_paid_watchdog; if [ "$result" -ne 0 ]; then write_suite_result "$command_name" failed "$result" || true; echo "acceptance failed; preserving provider inventory before guarded cleanup" >&2; capture_provider_inventory failure || true; run_cleanup || true; else write_suite_result "$command_name" passed 0 || result=$?; fi; release_paid_lock; exit "$result"' EXIT
     case "$command_name" in
       elastic) run_elastic ;;
+			elastic-evidence) run_elastic_evidence ;;
       elastic-qualify) run_elastic_qualify ;;
       serverless) run_serverless ;;
       elastic-faults) run_elastic_faults ;;
       serverless-faults) run_serverless_faults ;;
     esac
     write_suite_result "$command_name" passed 0
+		stop_paid_watchdog
     trap - EXIT
+		trap - HUP INT TERM
     release_paid_lock
     ;;
   qualify)

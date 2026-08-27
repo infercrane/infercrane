@@ -53,6 +53,15 @@ fi
 grep -q 'refusing paid provider mutation' "$temporary/unapproved.log"
 test ! -e "$empty_state/.paid.lock"
 
+if INFERCRANE_ACCEPTANCE_STATE_DIR="$temporary/unapproved-evidence" \
+  INFERCRANE_ACCEPTANCE_RUN_ID=unapproved-evidence \
+  "$root/scripts/release-acceptance.sh" elastic-evidence >"$temporary/unapproved-evidence.log" 2>&1; then
+  echo "unapproved custom OCI evidence unexpectedly started" >&2
+  exit 1
+fi
+grep -q 'refusing paid provider mutation' "$temporary/unapproved-evidence.log"
+test ! -e "$temporary/unapproved-evidence/.paid.lock"
+
 # Paid-suite result bookkeeping must be initialized before the first provider
 # preflight. This reproduces the nested whole-product invocation without any
 # network or paid mutation: Docker fails immediately, the guarded trap runs,
@@ -266,6 +275,9 @@ grep -Fq '"$root/scripts/test-stack.sh" || return' "$root/scripts/product-accept
 grep -Fq 'record elastic-buffered-request ic request' "$root/scripts/release-acceptance.sh"
 grep -Fq 'record elastic-streaming-request ic request' "$root/scripts/release-acceptance.sh"
 grep -Fq 'record serverless-cold-request ic request' "$root/scripts/release-acceptance.sh"
+grep -Fq 'start_paid_watchdog "${INFERCRANE_ACCEPTANCE_MAX_PAID_SECONDS:-5400}"' "$root/scripts/release-acceptance.sh"
+grep -Fq 'for concurrency in 1 8 32' "$root/scripts/release-acceptance.sh"
+grep -Fq 'active_revision_preserved:($active_before == $active_after)' "$root/scripts/release-acceptance.sh"
 
 # Autoscaling qualification must observe the provider transition while a
 # sustained workload is still active. This avoids hardware-speed-dependent

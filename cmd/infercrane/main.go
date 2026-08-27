@@ -4035,6 +4035,12 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	skyProvider := provision.SkyPilot{APIKey: cfg.APIKey}
 	capacity := provision.RunPodAvailability{APIKey: cfg.RunPodAPIKey}
 	elasticBackends := []workflows.ReplicaBackend{{Name: "skypilot", Cloud: "runpod", Runtime: "vllm", Default: true, Profile: elasticProfile, Provider: skyProvider, Capacity: capacity}}
+	runPodPodsProfile, err := integrationRegistry.Provider("runpod-pods")
+	if err != nil {
+		return fmt.Errorf("configure native RunPod Pods integration: %w", err)
+	}
+	runPodPods := provision.RunPodPods{APIKey: cfg.RunPodAPIKey, WorkerAPIKey: cfg.APIKey, BaseURL: cfg.RunPodRESTURL, ContainerDiskGiB: cfg.RunPodContainerDiskGiB}
+	elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: "runpod-pods", Cloud: "runpod", Runtime: "custom-oci", Default: true, Profile: runPodPodsProfile, Provider: runPodPods, Capacity: capacity})
 	if cfg.AWSEnabled() {
 		awsProfile, profileErr := integrationRegistry.Provider("aws-ec2")
 		if profileErr != nil {

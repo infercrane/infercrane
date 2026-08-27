@@ -48,11 +48,11 @@ func TestPortableCatalogPublishesExactRuntimeCompatibility(t *testing.T) {
 		t.Fatal(err)
 	}
 	snapshot := registry.Snapshot()
-	if len(snapshot.Compatibility) != 5 {
+	if len(snapshot.Compatibility) != 6 {
 		t.Fatalf("compatibility=%#v", snapshot.Compatibility)
 	}
 	encoded, _ := json.Marshal(snapshot)
-	for _, required := range []string{`"runtime":"sglang"`, `"runtime":"custom-oci"`, `"mode":"serverless"`, `"default_workload"`} {
+	for _, required := range []string{`"runtime":"sglang"`, `"runtime":"custom-oci"`, `"adapter":"runpod-pods"`, `"mode":"serverless"`, `"default_workload"`} {
 		if !strings.Contains(string(encoded), required) {
 			t.Fatalf("missing %s: %s", required, encoded)
 		}

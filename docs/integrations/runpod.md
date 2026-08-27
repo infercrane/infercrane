@@ -5,10 +5,11 @@ description: Configure the RunPod elastic and provider-native Serverless adapter
 
 # RunPod
 
-RunPod is one registered infrastructure adapter. Elastic deployments use SkyPilot to provision
-RunPod Pods; Serverless deployments use RunPod's native endpoint lifecycle. InferCrane's base
-production stack does not require RunPod; enable it explicitly with
-`compose.production.runpod.yaml`.
+RunPod is one registered infrastructure provider with separate executable adapters. Built-in vLLM
+elastic deployments use SkyPilot. Immutable custom OCI workloads use the native `runpod-pods` REST
+adapter, which does not require SSH inside the runtime image. Serverless deployments use RunPod's
+native endpoint lifecycle. InferCrane's base production stack does not require RunPod; enable it
+explicitly with `compose.production.runpod.yaml`.
 
 <Warning>
 The commands in this guide can create billable GPU resources. The RunPod adapters have hermetic
@@ -49,6 +50,10 @@ plan or local simulation is not real-provider qualification.
 
     The base production profile is provider-neutral. The additional overlay mounts the key
     read-only and enables the RunPod/SkyPilot adapter explicitly.
+
+    Large custom OCI workloads may need more than the default 100 GiB container disk. Set, for
+    example, `INFERCRANE_RUNPOD_CONTAINER_DISK_GIB=500` in the same private environment file. Disk
+    size is validated before the control plane starts and may affect provider cost.
   </Step>
 
   <Step title="Connect and run read-only checks">
@@ -96,6 +101,24 @@ plan or local simulation is not real-provider qualification.
       --max 4 \
       --idempotency-key qwen-production-v1
     ```
+  </Tab>
+  <Tab title="Custom OCI">
+    ```bash
+    infercrane workload init ./custom-runtime \
+      --recipe glm-5.3-flash \
+      --profile custom-oci-hopper-tp4 \
+      --name glm-production \
+      --cloud runpod \
+      --provider-adapter runpod-pods
+
+    infercrane workload validate ./custom-runtime
+    infercrane workload plan ./custom-runtime
+    infercrane workload deploy ./custom-runtime --wait
+    ```
+
+    The generated DeploymentSpec preserves the upstream image digest, complete argv, model
+    revision, and exact GPU count. Provider stock and real runtime behavior still require paid
+    qualification of that exact tuple.
   </Tab>
   <Tab title="Serverless">
     ```bash

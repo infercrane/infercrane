@@ -23,6 +23,7 @@ type Config struct {
 	HostedAuthIssuer, HostedAuthAudience, HostedAuthJWTKeyFile                                                         string
 	HostedAuthAuthorizedParties                                                                                        []string
 	RunPodAPIKey, RunPodServerlessTemplateID, RunPodRESTURL                                                            string
+	RunPodContainerDiskGiB                                                                                             int
 	AWSRoleARN, AWSExternalID, AWSRegion, AWSSubnetID, AWSAMIID, AWSInstanceType, AWSGPU                               string
 	AWSInstanceProfileARN, AWSWorkerSecretARN, AWSImageDigest                                                          string
 	AWSImageCachePolicy, AWSArtifactCachePolicy                                                                        string
@@ -274,6 +275,10 @@ func load(requireAPIKey bool) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	runPodContainerDiskGiB, err := envInt("INFERCRANE_RUNPOD_CONTAINER_DISK_GIB", 100)
+	if err != nil {
+		return Config{}, err
+	}
 	awsRootVolumeGiB, err := envInt("INFERCRANE_AWS_ROOT_VOLUME_GIB", 200)
 	if err != nil {
 		return Config{}, err
@@ -328,6 +333,7 @@ func load(requireAPIKey bool) (Config, error) {
 		RunPodAPIKey:                        env("RUNPOD_API_KEY", ""),
 		RunPodServerlessTemplateID:          env("INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID", ""),
 		RunPodRESTURL:                       env("INFERCRANE_RUNPOD_REST_URL", "https://rest.runpod.io/v1"),
+		RunPodContainerDiskGiB:              runPodContainerDiskGiB,
 		AWSRoleARN:                          env("INFERCRANE_AWS_ROLE_ARN", ""),
 		AWSExternalID:                       env("INFERCRANE_AWS_EXTERNAL_ID", ""),
 		AWSRegion:                           env("INFERCRANE_AWS_REGION", ""),
@@ -416,6 +422,9 @@ func load(requireAPIKey bool) (Config, error) {
 	}
 	if config.HealthInterval <= 0 || config.UpstreamTimeout <= 0 || config.ShutdownTimeout <= 0 || config.RequestRetention <= 0 {
 		return Config{}, fmt.Errorf("timeouts must be positive")
+	}
+	if config.RunPodContainerDiskGiB < 50 || config.RunPodContainerDiskGiB > 2048 {
+		return Config{}, fmt.Errorf("INFERCRANE_RUNPOD_CONTAINER_DISK_GIB must be between 50 and 2048")
 	}
 	if err := validateAWS(config); err != nil {
 		return Config{}, err

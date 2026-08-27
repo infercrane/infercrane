@@ -87,7 +87,9 @@ path. Each reviewed profile pins the model commit, a dedicated upstream vLLM ima
 topology, and complete executable argv. Both remain **configuration-verified**, not real-GPU or
 production-qualified.
 
-The GLM profile requests one four-H200 Kubernetes replica with tensor parallelism. It deliberately
+The GLM profile requests one native RunPod Pod with four H200 GPUs and tensor parallelism. The
+`runpod-pods` adapter launches the pinned upstream image directly, without an SSH-derived wrapper.
+It deliberately
 uses a bounded 131K context starting point rather than converting the model card's declared 1M
 maximum into an unmeasured production promise. See the [official model card](https://huggingface.co/zai-org/GLM-5.3-Flash)
 and [upstream vLLM recipe](https://recipes.vllm.ai/zai-org/GLM-5.3-Flash).
@@ -101,8 +103,9 @@ infercrane workload validate ./glm-flash
 infercrane workload plan ./glm-flash
 ```
 
-Those commands are local and non-mutating through `plan`. Deployment still requires an operator's
-Kubernetes GPU cluster and fresh qualification evidence for the exact generated tuple.
+Those commands are local and non-mutating through `plan`. Deployment still requires current RunPod
+capacity, enough configured container disk, paid-resource acknowledgement, and fresh qualification
+evidence for the exact generated tuple.
 
 The Qwen profile uses the separate FP8 checkpoint and the official eight-H200 TEP8 topology. Plain
 TP8 is incompatible with that checkpoint's quantization blocks, so the reviewed argv enables expert
@@ -128,8 +131,9 @@ infercrane workload validate ./qwen-flash-next
 infercrane workload plan ./qwen-flash-next
 ```
 
-Those commands are also local and non-mutating through `plan`. Real deployment requires an exact
-eight-H200 worker and fresh protocol, memory, performance, and cleanup evidence.
+Those commands are also local and non-mutating through `plan`. Real deployment requires current
+RunPod capacity for an exact eight-H200 Pod and fresh protocol, memory, performance, and cleanup
+evidence.
 
 ## Current market watch
 

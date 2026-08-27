@@ -91,7 +91,7 @@ func New(runtimes []string, clouds map[string][]string) Matrix {
 // adapters remain private until their exact combination appears here.
 func V1() Matrix {
 	return Qualified(map[string]map[string][]string{
-		DefaultCloud: {ElasticMode: {DefaultRuntime}, ServerlessMode: {DefaultRuntime}},
+		DefaultCloud: {ElasticMode: {DefaultRuntime, "custom-oci"}, ServerlessMode: {DefaultRuntime}},
 		"aws":        {ElasticMode: {DefaultRuntime, "sglang", "custom-oci"}},
 		"gcp":        {ElasticMode: {DefaultRuntime, "sglang", "custom-oci"}},
 		"kubernetes": {ElasticMode: {DefaultRuntime, "sglang", "custom-oci"}},

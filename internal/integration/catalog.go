@@ -90,6 +90,19 @@ func providerCatalog() (*Registry, error) {
 	}
 	profiles := []ProviderProfile{
 		{
+			Adapter: "runpod-pods", Cloud: "runpod", ContractVersion: ProviderContractV1, AdapterVersion: "native-rest-v1", Modes: []ComputeMode{ElasticMode},
+			Capabilities: []Capability{
+				{Name: "adoption", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestRunPodPodsLifecycleIsReplaySafeAndPreservesImmutableWorkload"},
+				{Name: "idempotent_delete", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestRunPodPodsLifecycleIsReplaySafeAndPreservesImmutableWorkload"},
+				{Name: "immutable_workload", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestRunPodPodsLifecycleIsReplaySafeAndPreservesImmutableWorkload"},
+				{Name: "native_http_endpoint", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestRunPodPodsLifecycleIsReplaySafeAndPreservesImmutableWorkload"},
+			},
+			Qualification: []Qualification{
+				{State: QualificationLocal, Environment: "hermetic-runpod-rest", Evidence: "go:test/internal/provision#TestRunPodPodsLifecycleIsReplaySafeAndPreservesImmutableWorkload"},
+				{State: QualificationDeferred, Environment: "real-runpod-custom-oci", Reason: "real-provider qualification has not been completed"},
+			},
+		},
+		{
 			Adapter: "openrouter", Cloud: "external", ContractVersion: ProviderContractV1, AdapterVersion: "builtin-v1", Modes: []ComputeMode{ExternalMode},
 			Capabilities: []Capability{
 				{Name: "explicit_health_fallback", State: CapabilitySupported, Evidence: "go:test/internal/reconcile#TestExternalFallbackPublishesOnlyWhenNoPrimaryTargetIsHealthy"},
@@ -159,6 +172,7 @@ func PortableCatalog() (*Registry, error) {
 	}
 	if err = registry.SetCompatibility(
 		RuntimeCompatibility{Runtime: "vllm", Adapter: "skypilot", Cloud: "runpod", Mode: ElasticMode, State: QualificationLocal, Evidence: "make:dev-check-full"},
+		RuntimeCompatibility{Runtime: "custom-oci", Adapter: "runpod-pods", Cloud: "runpod", Mode: ElasticMode, State: QualificationLocal, Evidence: "go:test/internal/provision#TestRunPodPodsLifecycleIsReplaySafeAndPreservesImmutableWorkload"},
 		RuntimeCompatibility{Runtime: "vllm", Adapter: "runpod-serverless", Cloud: "runpod", Mode: ServerlessMode, State: QualificationLocal, Evidence: "go:test/internal/workflows#TestServerlessConvergeRegistersScaleToZeroEndpointWithoutWarmingWorker"},
 		RuntimeCompatibility{Runtime: "vllm", Adapter: "aws-ec2", Cloud: "aws", Mode: ElasticMode, State: QualificationLocal, Evidence: "go:test/internal/conformance#TestAWSEC2ProviderContractConformance"},
 		RuntimeCompatibility{Runtime: "sglang", Adapter: "aws-ec2", Cloud: "aws", Mode: ElasticMode, State: QualificationSimulated, Evidence: "go:test/internal/conformance#TestPortableRuntimeConformance"},
