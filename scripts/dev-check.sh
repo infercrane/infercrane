@@ -3,7 +3,10 @@ set -eu
 
 root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 mode=${1:-quick}
-case "$mode" in quick|full) ;; *) echo "usage: $0 [quick|full]" >&2; exit 2;; esac
+case "$mode" in
+  quick|full|ci-core|ci-container|ci-stack) ;;
+  *) echo "usage: $0 [quick|full|ci-core|ci-container|ci-stack]" >&2; exit 2 ;;
+esac
 
 run_id=$(date -u +%Y%m%dT%H%M%SZ)-$$
 evidence="$root/.infercrane/dev-check/$run_id"
@@ -52,27 +55,52 @@ step() {
   fi
 }
 
-# The repository verifier deliberately skips PostgreSQL integration tests when
-# no test database is configured; the full developer check runs those tests
-# later in its isolated container stage. Never let a stale caller-owned URL
-# accidentally enable them against an unavailable or unrelated database.
-step repository env -u INFERCRANE_TEST_DATABASE_URL make -C "$root" verify
-step provider-contracts sh -c 'cd "$1" && go test -count=1 ./internal/integration ./internal/conformance ./internal/provision ./internal/gateway ./internal/reconcile ./internal/workflows' sh "$root"
-step acceptance-safety "$root/scripts/test-acceptance-safety.sh"
+# `full` retains the complete sequential local gate. CI uses the three
+# `ci-*` modes on isolated runners and joins them behind one required summary
+# job, reducing wall-clock latency without omitting any full-mode stage.
+case "$mode" in
+quick|full|ci-core)
+  # The repository verifier deliberately skips PostgreSQL integration tests
+  # when no test database is configured; the full developer check runs those
+  # tests later in its isolated container stage. Never let a stale
+  # caller-owned URL accidentally enable them against an unavailable or
+  # unrelated database.
+  step repository env -u INFERCRANE_TEST_DATABASE_URL make -C "$root" verify
+  step provider-contracts sh -c 'cd "$1" && go test -count=1 ./internal/integration ./internal/conformance ./internal/provision ./internal/gateway ./internal/reconcile ./internal/workflows' sh "$root"
+  step acceptance-safety "$root/scripts/test-acceptance-safety.sh"
+  ;;
+esac
 
-if [ "$mode" = full ]; then
+case "$mode" in
+full|ci-core)
   step kubernetes-manifests make -C "$root" test-kubernetes-manifests
   step kubernetes-kind make -C "$root" test-kubernetes-kind
   step automation-clients make -C "$root" test-automation-full
+  ;;
+esac
+
+case "$mode" in
+full|ci-container)
   step container-tests make -C "$root" test-container
+  ;;
+esac
+
+case "$mode" in
+full|ci-stack)
   step stack-smoke "$root/scripts/test-stack.sh"
   step failure-recovery "$root/scripts/test-failure-recovery.sh"
   step control-plane-ha "$root/scripts/test-ha-control-plane.sh"
   step backup-restore-safety "$root/scripts/test-backup-restore-safety.sh"
   step backup-restore-docker "$root/scripts/test-backup-restore-docker.sh"
   step production-config make -C "$root" test-production-config
+  ;;
+esac
+
+case "$mode" in
+full|ci-core)
   step docs make -C "$root" docs-check
-fi
+  ;;
+esac
 
 cat >"$evidence/summary.txt" <<EOF
 InferCrane developer check passed

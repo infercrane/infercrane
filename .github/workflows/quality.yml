@@ -86,8 +86,13 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  developer-environment:
+  developer-environment-shard:
+    name: developer-environment / ${{ matrix.shard }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [core, container, stack]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
@@ -104,14 +109,29 @@ jobs:
           terraform_version: "1.15.8"
           terraform_wrapper: false
       - run: npm ci
+        if: matrix.shard == 'core'
         working-directory: docs
-      - run: make dev-check-full
+      - run: ./scripts/dev-check.sh "ci-${{ matrix.shard }}"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
         with:
-          name: developer-check-${{ github.run_id }}
+          name: developer-check-${{ github.run_id }}-${{ matrix.shard }}
           path: .infercrane/dev-check
           if-no-files-found: error
+
+  developer-environment:
+    if: always()
+    needs: developer-environment-shard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every developer-environment shard
+        env:
+          SHARD_RESULT: ${{ needs.developer-environment-shard.result }}
+        run: |
+          if [ "$SHARD_RESULT" != success ]; then
+            echo "One or more developer-environment shards failed: $SHARD_RESULT" >&2
+            exit 1
+          fi
 
   vulnerabilities:
     runs-on: ubuntu-latest
