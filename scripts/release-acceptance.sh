@@ -510,13 +510,14 @@ run_preflight() {
 
 submit_elastic_deploy() {
 	wait_timeout=$1
+	idempotency_key=$2
 	if [ -n "$requested_spec" ]; then
 		ic deploy "$requested_spec" --wait --wait-timeout "$wait_timeout" \
-			--idempotency-key "$ELASTIC_NAME-create" --output json
+			--idempotency-key "$idempotency_key" --output json
 	else
 		ic deploy "$MODEL" --name "$ELASTIC_NAME" --cloud runpod --gpu "$GPU" --gpu-count "$GPU_COUNT" \
 			--min 1 --max 1 --wait --wait-timeout "$wait_timeout" \
-			--idempotency-key "$ELASTIC_NAME-create" --output json
+			--idempotency-key "$idempotency_key" --output json
 	fi
 }
 
@@ -555,7 +556,7 @@ run_elastic_evidence() {
 	echo "==> durable-deploy-cli-disconnect"
 	deploy_started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 	deploy_started_epoch=$(date +%s)
-	submit_elastic_deploy "${ready_timeout}s" >"$evidence/durable-deploy-cli.log" 2>&1 &
+	submit_elastic_deploy "${ready_timeout}s" "$ELASTIC_NAME-$run_id-create" >"$evidence/durable-deploy-cli.log" 2>&1 &
 	client_pid=$!
 	operation_id=""
 	resource_id=""
@@ -633,11 +634,11 @@ run_elastic_evidence() {
 
 	active_before=$(ic status "$ELASTIC_NAME" --output json | tee "$evidence/guard-active-before.json" | jq -r '.deployment.active_revision_id')
 	record guard-candidate-create ic rollout create "$ELASTIC_NAME" --file "$requested_spec" --wait \
-		--idempotency-key "$ELASTIC_NAME-guard-candidate" --output json
+		--idempotency-key "$ELASTIC_NAME-$run_id-guard-candidate" --output json
 	candidate=$(ic status "$ELASTIC_NAME" --output json | jq -r '.deployment.candidate_revision_id // empty')
 	[ -n "$candidate" ] || { echo "guard candidate was not persisted" >&2; return 1; }
 	record guard-evaluate ic rollout evaluate "$ELASTIC_NAME" --wait \
-		--idempotency-key "$ELASTIC_NAME-guard-evaluate" --output json
+		--idempotency-key "$ELASTIC_NAME-$run_id-guard-evaluate" --output json
 	record guard-inspect ic rollout inspect "$ELASTIC_NAME" --output json
 	jq -e '.release_guard_evaluations[0].decision == "REJECT" and ([.release_guard_evaluations[0].reasons[]? | select(.code == "candidate_not_ready")] | length) == 1' \
 		"$evidence/guard-inspect.log" >/dev/null
@@ -649,10 +650,10 @@ run_elastic_evidence() {
 		>"$evidence/release-guard-proof.json"
 	record guard-reject ic rollout reject "$ELASTIC_NAME" "$candidate" \
 		--reason "qualification candidate intentionally has no capacity" --wait \
-		--idempotency-key "$ELASTIC_NAME-guard-reject" --output json
+		--idempotency-key "$ELASTIC_NAME-$run_id-guard-reject" --output json
 
 	echo "==> durable-delete-control-plane-restart"
-	deletion=$(ic delete "$ELASTIC_NAME" --yes --idempotency-key "$ELASTIC_NAME-delete-restart" --output json)
+	deletion=$(ic delete "$ELASTIC_NAME" --yes --idempotency-key "$ELASTIC_NAME-$run_id-delete-restart" --output json)
 	printf '%s\n' "$deletion" >"$evidence/delete-restart-submit.json"
 	delete_id=$(printf '%s' "$deletion" | jq -r '.operation.id')
 	printf '%s' "$deletion" | jq -e '.operation.status == "pending"' >/dev/null
@@ -906,8 +907,8 @@ run_cleanup() {
   load_run
   need docker; need go; need curl; need jq
   ensure_stack
-  delete_if_present "$ELASTIC_NAME" "$ELASTIC_NAME-delete"
-  delete_if_present "$SERVERLESS_NAME" "$SERVERLESS_NAME-delete"
+  delete_if_present "$ELASTIC_NAME" "$ELASTIC_NAME-$run_id-delete"
+  delete_if_present "$SERVERLESS_NAME" "$SERVERLESS_NAME-$run_id-delete"
   capture_inventory after-cleanup
   verify_provider_inventory_absent
   echo "==> local-control-plane (stopping Docker services)"
