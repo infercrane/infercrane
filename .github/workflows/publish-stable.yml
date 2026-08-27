@@ -18,6 +18,7 @@ concurrency:
 jobs:
   preflight:
     runs-on: ubuntu-latest
+    environment: stable-publication
     outputs:
       npm_version: ${{ steps.packages.outputs.npm_version }}
       python_version: ${{ steps.packages.outputs.python_version }}
