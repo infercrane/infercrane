@@ -630,8 +630,12 @@ run_elastic_evidence() {
 			buffered) streaming=false ;;
 		esac
 		for concurrency in 1 8 32; do
+			cell_requests=$benchmark_requests
+			if [ "$cell_requests" -lt "$concurrency" ]; then
+				cell_requests=$concurrency
+			fi
 			record "elastic-benchmark-$mode-c$concurrency" ic benchmark "$ELASTIC_NAME" --revision active \
-				--requests "$benchmark_requests" --concurrency "$concurrency" --output-tokens "$benchmark_tokens" \
+				--requests "$cell_requests" --concurrency "$concurrency" --output-tokens "$benchmark_tokens" \
 				--streaming="$streaming" --random-seed 53 --output json
 			jq -e --argjson gpu_count "$GPU_COUNT" --argjson concurrency "$concurrency" --argjson streaming "$streaming" \
 				'.gpu_count == $gpu_count and .failed == 0 and .succeeded == .request_count and .request_count > 0 and .workload.concurrency == $concurrency and .workload.streaming == $streaming and .latency_p95_ms != null' \
