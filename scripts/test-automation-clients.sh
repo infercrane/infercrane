@@ -56,9 +56,10 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
 PY
 npm --prefix "$root/sdk/typescript" ci --no-audit --no-fund
 npm --prefix "$root/sdk/typescript" test
-(cd "$root/sdk/typescript" && npm pack --dry-run --json) >"$package_dir/npm-pack.json"
+(cd "$root/sdk/typescript" && npm pack --pack-destination "$package_dir" --json) >"$package_dir/npm-pack.json"
 jq -e '.[0].files | map(.path) | index("LICENSE") != null and index("NOTICE") != null' \
   "$package_dir/npm-pack.json" >/dev/null
+"$root/scripts/verify-sdk-artifacts.sh" "$package_dir" "$release_version" prepare
 node --test "$root"/actions/infercrane/test/*.test.js
 
 (

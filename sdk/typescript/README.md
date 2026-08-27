@@ -4,9 +4,15 @@ Typed Node.js client for the InferCrane control API and OpenAI-compatible infere
 
 ## Install
 
+For a published `v1.0.0` release:
+
 ```bash
-npm install @infercrane/sdk
+npm install '@infercrane/sdk@1.0.0'
 ```
+
+Until that version appears on npm, build the SDK from the same checked-out tag as the control plane
+with `npm ci --prefix sdk/typescript && npm run build --prefix sdk/typescript`. Do not treat an
+unpublished package name as a release guarantee.
 
 Node.js 20 or newer is required.
 

@@ -22,10 +22,26 @@
 </p>
 
 <p align="center">
-  <a href="#try-the-complete-product-loop-locally">Run the five-minute local proof</a>
+  <a href="#install">Run the five-minute local proof</a>
   · <a href="https://docs.infercrane.com/quickstart">Read the quickstart</a>
   · <a href="docs/images/product/github-product-demo.mp4">Watch the two-minute product tour</a>
 </p>
+
+## Install
+
+Coming with the `v1.0.0` release: `brew install infercrane/tap/infercrane`, release archives, and
+published Python and TypeScript SDKs. Until then, run the local proof with Git and Docker Compose v2.
+It uses GPU-free workers and creates no cloud resources:
+
+```bash
+git clone https://github.com/infercrane/infercrane.git
+cd infercrane
+make demo
+```
+
+The proof connects an OpenAI-compatible worker, sends and inspects a request, creates an isolated
+candidate, records a deterministic Release Guard rejection, verifies that production traffic did
+not move, and removes its disposable stack.
 
 <p align="center">
   <a href="docs/images/product/github-product-demo.mp4">
@@ -44,6 +60,22 @@ replica count, and active revision underneath it.
 - **Keep one endpoint:** route revisions and providers behind a stable OpenAI-compatible contract.
 - **Prove every change:** persist request, benchmark, quality, cost, and rollout evidence before
   promotion—and preserve the active revision when evidence is missing.
+
+## Why not just…
+
+- **Raw vLLM and Kubernetes:** the serving engine and manifests do not by themselves provide an
+  evidence-gated release lifecycle. InferCrane adds deterministic promotion, rejection, rollback,
+  and a persisted record of what changed.
+- **LiteLLM:** it is an excellent routing layer. InferCrane additionally owns deployment lifecycle,
+  evidence-gated promotion, and rollback; it can also connect to an existing LiteLLM endpoint
+  without taking infrastructure ownership.
+- **A managed inference platform:** it is often the right choice when a team wants the provider to
+  operate its infrastructure. InferCrane is for teams that want the control plane, capacity, and
+  billing boundary to remain in infrastructure they own.
+- **Scripts and CI:** scripts can deploy a revision. InferCrane standardizes the durable
+  reject/promote/rollback decision and the evidence attached to it.
+
+See the [detailed comparison](docs/compare.mdx), including the boundaries InferCrane does not own.
 
 The local proof needs no GPU or cloud account. Real-provider support remains exact-tuple qualified;
 InferCrane reports missing model/runtime/hardware evidence as unknown instead of turning it into a
@@ -82,21 +114,6 @@ AWS · GCP · Kubernetes · RunPod · existing infrastructure
 | Understand production failures | Trace queue wait, attempts, runtime, revision, latency, saturation, and durable operations without storing prompt content. |
 | Optimize performance and cost | Propose serving configurations, measure comparable candidates on real hardware, and persist only qualified evidence. |
 | Survive infrastructure delays | Submit idempotent durable operations that continue after the CLI or control plane process disconnects. |
-
-## Try the complete product loop locally
-
-You need Git and Docker with Compose v2. The local proof uses GPU-free workers and creates no cloud
-resources:
-
-```bash
-git clone https://github.com/infercrane/infercrane.git
-cd infercrane
-make demo
-```
-
-The proof connects an OpenAI-compatible worker, sends and inspects a request, creates an isolated
-candidate, records a deterministic Release Guard rejection, verifies that production traffic did
-not move, and removes its disposable stack.
 
 <p align="center">
   <img alt="Connect an existing inference endpoint with InferCrane" src="docs/images/showcase/connect-existing.gif" width="820">

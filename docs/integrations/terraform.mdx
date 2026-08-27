@@ -23,8 +23,15 @@ Recommendations remain an explicit evaluation rather than a Terraform apply.
 
 <Warning>
 The provider is not yet published in the Terraform Registry. Local qualification builds it from
-`integrations/terraform`; registry installation begins only after release publication.
+`integrations/terraform`. Registry publication is deferred until the provider has an independent
+repository, signed release artifacts, and its own qualification path.
 </Warning>
+
+Build the provider from the same InferCrane tag as the control plane and use Terraform's
+`dev_overrides` installation mechanism as documented in
+[`integrations/terraform/README.md`](https://github.com/infercrane/infercrane/blob/main/integrations/terraform/README.md).
+The `infercrane/infercrane` source address below identifies the provider protocol address; it is not
+a claim that Registry installation works today.
 
 ```hcl
 terraform {

@@ -1,5 +1,5 @@
 class Infercrane < Formula
-  desc "Production inference without the platform engineering"
+  desc "Operate self-hosted models behind one OpenAI-compatible endpoint"
   homepage "https://github.com/infercrane/infercrane"
   # Generated release formulae substitute these template values from checksums.txt.
   version "RELEASE_VERSION"

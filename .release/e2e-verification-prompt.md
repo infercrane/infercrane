@@ -137,8 +137,9 @@ files. Verify:
 - SPDX SBOM for every archive;
 - generated `infercrane.rb` formula;
 - candidate image digest, BuildKit provenance/SBOM, and GitHub artifact attestation;
-- Python wheel and npm tarball only if the candidate workflow is designed to produce them;
-- checksums, attestation subjects, embedded CLI version, and source commit all agree.
+- Python wheel, npm tarball, and `sdk-checksums.txt`;
+- archive, formula, and SDK checksums and attestations originate from the exact release workflow,
+  tag ref, and source commit, and every embedded version agrees.
 
 Extract the native archive into a clean prefix and run `version`, `--help`, and shell completion.
 Install the formula from the downloaded file. Inspect wheel and npm tarball contents for secrets,
@@ -155,7 +156,8 @@ Do not publish. Review `.github/workflows/release.yml`,
 - tag creation builds a draft and does not publish PyPI/npm/Homebrew;
 - stable publication is manual and protected;
 - it refuses private repository visibility, disabled organization 2FA, an unprotected environment,
-  non-stable/mismatched tag, non-draft release, or missing assets;
+  non-stable/mismatched tag, non-draft release, missing assets, checksum failure, or mismatched
+  artifact provenance;
 - PyPI and npm use job-scoped OIDC; npm provenance is possible because repository and package are
   public; Homebrew uses a tap-only credential;
 - GitHub release publication happens only after PyPI, npm, and Homebrew jobs succeed;
