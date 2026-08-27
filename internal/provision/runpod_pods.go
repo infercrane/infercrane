@@ -86,7 +86,7 @@ func (r RunPodPods) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provid
 		return ProviderHandle{}, fmt.Errorf("%w: RunPod Pod GPU count must be between 1 and 8", ErrInvalidReplicaSpec)
 	}
 	if spec.Workload.Empty() {
-		return ProviderHandle{}, fmt.Errorf("%w: native RunPod Pods require an immutable custom OCI workload", ErrInvalidReplicaSpec)
+		return ProviderHandle{}, fmt.Errorf("%w: native RunPod Pods require an immutable OCI workload", ErrInvalidReplicaSpec)
 	}
 	if err := spec.Workload.Validate(); err != nil {
 		return ProviderHandle{}, fmt.Errorf("%w: %v", ErrInvalidReplicaSpec, err)

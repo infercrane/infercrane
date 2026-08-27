@@ -56,6 +56,7 @@ func BaseCatalog() (*Registry, error) {
 	}
 	if err := registry.RegisterRuntime(RuntimeProfile{
 		Runtime: support.DefaultRuntime, ContractVersion: RuntimeContractV1, AdapterVersion: "builtin-v1", EngineVersion: support.DefaultRuntimeVersion, Protocol: "openai",
+		DefaultWorkload: support.VLLMWorkload(),
 		Capabilities: []Capability{
 			{Name: "buffered_chat", State: CapabilitySupported, Evidence: "go:test/internal/gateway#TestCompletionRewritesAlias"},
 			{Name: "completions", State: CapabilitySupported, Evidence: "go:test/internal/gateway#TestQualifiedProtocolSurfacesPreservePayloads"},
