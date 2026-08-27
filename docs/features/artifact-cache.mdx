@@ -72,6 +72,14 @@ description binds it to one immutable `model@commit` digest. InferCrane attaches
 deletion disabled, mounts it as the runtime's Hugging Face cache, and leaves its lifecycle with the
 customer. See the [GCP cache setup](/integrations/gcp-compute#reuse-an-immutable-model-cache).
 
+For RunPod Pods, the repository includes a guarded, resumable network-volume population workflow.
+`plan-runpod-artifact-cache` is read-only and refuses to quote a cost without operator-supplied
+current GPU and storage rates. `build-runpod-artifact-cache` additionally requires explicit paid
+resource approval, a hard maximum cost, an immutable Hugging Face commit, and a bounded watchdog.
+It deletes the temporary preparer Pod but preserves the identity-named volume for deliberate reuse;
+volume deletion is a separate explicit command. Hermetic tests qualify these safety contracts only,
+not RunPod transfer speed or model correctness.
+
 ## Why prefetch is not a universal download command
 
 Providers expose different ownership boundaries. For example, RunPod Serverless configures one

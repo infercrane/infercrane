@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/ed25519"
 	"crypto/tls"
@@ -411,9 +412,9 @@ func planCommand(ctx context.Context, cfg config.Config, args []string) error {
 		if *name != "" || *targets != "" || *cloud != "" || *backend != "" || *providerAdapter != "" || *gpu != "" || gpuCountExplicit || *region != "" || *runtimeEngine != "vllm" {
 			return errors.New("deployment YAML cannot be combined with deployment flags")
 		}
-		in = planning.Input{Name: file.Name, Model: file.Model.ID, ComputeMode: file.Compute.Mode, Cloud: file.Provider.Cloud, ProviderAdapter: file.Provider.Adapter,
+		in = planning.Input{Name: file.Name, Model: file.Model.ID, ModelRevision: file.Model.Revision, ComputeMode: file.Compute.Mode, Cloud: file.Provider.Cloud, ProviderAdapter: file.Provider.Adapter,
 			GPU: file.Resources.GPU, GPUCount: file.Resources.GPUCount, Region: file.Provider.Region, Runtime: file.Runtime.Engine,
-			RuntimeArgs: file.Runtime.Args, Routing: file.Routing.Strategy,
+			RuntimeVersion: file.Runtime.Version, RuntimeArgs: file.Runtime.Args, Routing: file.Routing.Strategy,
 			MinReplicas: file.Scaling.MinReplicas, MaxReplicas: file.Scaling.MaxReplicas, Serving: file.Serving}
 	} else if *targets != "" {
 		if *computeMode == "serverless" {
@@ -473,7 +474,11 @@ func planCommand(ctx context.Context, cfg config.Config, args []string) error {
 		if evidenceErr := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/capacity/intelligence?window_seconds=2592000", "", nil, &response); evidenceErr == nil {
 			evidence := make([]planning.CapacityEvidence, 0, len(response.Capacity))
 			for _, row := range response.Capacity {
-				evidence = append(evidence, planning.CapacityEvidence{Provider: row.Provider, Runtime: row.Runtime, ComputeMode: row.ComputeMode, Region: row.Region, GPU: row.GPU, GPUCount: row.GPUCount, Attempts: row.Attempts, Succeeded: row.Succeeded, Pending: row.Pending, SuccessRate: row.SuccessRate, DurationP50Seconds: row.DurationP50Seconds, DurationP95Seconds: row.DurationP95Seconds})
+				stages := make([]planning.StageEstimate, 0, len(row.StartupStages))
+				for _, stage := range row.StartupStages {
+					stages = append(stages, planning.StageEstimate{Name: stage.Name, SuccessfulSamples: stage.SuccessfulSamples, EstimateP50Seconds: stage.P50Seconds, EstimateP95Seconds: stage.P95Seconds})
+				}
+				evidence = append(evidence, planning.CapacityEvidence{Provider: row.Provider, Runtime: row.Runtime, RuntimeVersion: row.RuntimeVersion, RuntimeArgsDigest: row.RuntimeArgsDigest, ModelIdentity: row.ModelIdentity, ComputeMode: row.ComputeMode, Region: row.Region, GPU: row.GPU, GPUCount: row.GPUCount, Attempts: row.Attempts, Succeeded: row.Succeeded, Pending: row.Pending, SuccessRate: row.SuccessRate, DurationP50Seconds: row.DurationP50Seconds, DurationP95Seconds: row.DurationP95Seconds, StartupStages: stages})
 			}
 			p = planning.ApplyCapacityEvidence(p, evidence)
 		}
@@ -517,6 +522,13 @@ func planCommand(ctx context.Context, cfg config.Config, args []string) error {
 		fmt.Printf("Artifact cache: %s\nCapacity:       %s\n", p.Readiness.ArtifactCacheState, p.Readiness.CapacityState)
 		if len(p.Readiness.Stages) > 0 {
 			fmt.Printf("Startup stages: %s\n", strings.Join(p.Readiness.Stages, " -> "))
+		}
+		for _, stage := range p.Readiness.StageEstimates {
+			fmt.Printf("  %-22s observed p50 %.0fs", stage.Name, *stage.EstimateP50Seconds)
+			if stage.EstimateP95Seconds != nil {
+				fmt.Printf(" · p95 %.0fs", *stage.EstimateP95Seconds)
+			}
+			fmt.Printf(" · %d exact-tuple samples\n", stage.SuccessfulSamples)
 		}
 		fmt.Printf("\nCost: %s — %s\n", p.Cost.Status, p.Cost.Reason)
 	default:
@@ -3133,10 +3145,14 @@ func requestCommand(ctx context.Context, cfg config.Config, args []string) error
 		data, _ := io.ReadAll(io.LimitReader(response.Body, 1<<20))
 		return fmt.Errorf("inference request returned HTTP %d: %s", response.StatusCode, strings.TrimSpace(string(data)))
 	}
-	if *stream {
-		return printStream(response.Body)
+	responseBody, err := decodedInferenceBody(response.Body)
+	if err != nil {
+		return fmt.Errorf("decode inference response body: %w", err)
 	}
-	data, err := io.ReadAll(io.LimitReader(response.Body, 8<<20))
+	if *stream {
+		return printStream(responseBody)
+	}
+	data, err := io.ReadAll(io.LimitReader(responseBody, 8<<20))
 	if err != nil {
 		return fmt.Errorf("read inference response: %w", err)
 	}
@@ -3174,6 +3190,22 @@ func requestCommand(ctx context.Context, cfg config.Config, args []string) error
 	}
 	fmt.Println(result.Choices[0].Message.Content)
 	return nil
+}
+
+func decodedInferenceBody(body io.Reader) (io.Reader, error) {
+	buffered := bufio.NewReader(body)
+	prefix, err := buffered.Peek(2)
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, bufio.ErrBufferFull) {
+		return nil, err
+	}
+	if len(prefix) != 2 || prefix[0] != 0x1f || prefix[1] != 0x8b {
+		return buffered, nil
+	}
+	decoded, err := gzip.NewReader(buffered)
+	if err != nil {
+		return nil, err
+	}
+	return decoded, nil
 }
 
 func requestInspectCommand(ctx context.Context, cfg config.Config, args []string) error {
@@ -3500,6 +3532,10 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 		maxCost := fs.String("max-cost-regression", "", "maximum sourced cost regression percent; omit to preserve")
 		minimumQuality := fs.String("minimum-quality-score", "", "minimum candidate score from 0 to 1; omit to preserve")
 		maxQualityRegression := fs.String("max-quality-regression", "", "maximum comparable score regression percent; omit to preserve")
+		qualityMode := fs.String("quality-comparison", policy.QualityComparisonMode, "quality comparison mode: threshold or bootstrap")
+		bootstrapAlpha := fs.Float64("quality-bootstrap-alpha", policy.QualityBootstrapAlpha, "paired-bootstrap alpha")
+		bootstrapMinimum := fs.Int("quality-bootstrap-min-samples", policy.QualityBootstrapMinSamples, "minimum paired quality samples")
+		bootstrapSeed := fs.Int64("quality-bootstrap-seed", policy.QualityBootstrapSeed, "deterministic paired-bootstrap seed")
 		window := fs.Int("auto-rollback-window", policy.AutoRollbackWindowSeconds, "observation window seconds")
 		maxRequests := fs.Int("validation-max-requests", policy.ValidationMaxRequests, "hard validation request bound")
 		maxConcurrency := fs.Int("validation-max-concurrency", policy.ValidationMaxConcurrency, "hard validation concurrency bound")
@@ -3516,6 +3552,10 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 		policy.AutoRollbackWindowSeconds = *window
 		policy.ValidationMaxRequests = *maxRequests
 		policy.ValidationMaxConcurrency = *maxConcurrency
+		policy.QualityComparisonMode = *qualityMode
+		policy.QualityBootstrapAlpha = *bootstrapAlpha
+		policy.QualityBootstrapMinSamples = *bootstrapMinimum
+		policy.QualityBootstrapSeed = *bootstrapSeed
 		if *maxCost != "" {
 			value, err := strconv.ParseFloat(*maxCost, 64)
 			if err != nil {
@@ -3543,7 +3583,7 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 		if *output == "json" {
 			return printJSON(policy)
 		}
-		fmt.Printf("%s Release Guard policy updated\nCompatibility evidence  %t\nSynthetic validation    %t\nSemantic quality         %t\nAutomatic rollback      %t (%ds)\nValidation bound        %d requests x %d concurrency\n", name, policy.RequireCompatibilityEvidence, policy.RequireSyntheticEvidence, policy.RequireQualityEvidence, policy.AutoRollbackEnabled, policy.AutoRollbackWindowSeconds, policy.ValidationMaxRequests, policy.ValidationMaxConcurrency)
+		fmt.Printf("%s Release Guard policy updated\nCompatibility evidence  %t\nSynthetic validation    %t\nSemantic quality         %t (%s)\nQuality bootstrap        alpha %.3f · min %d · seed %d\nAutomatic rollback      %t (%ds)\nValidation bound        %d requests x %d concurrency\n", name, policy.RequireCompatibilityEvidence, policy.RequireSyntheticEvidence, policy.RequireQualityEvidence, policy.QualityComparisonMode, policy.QualityBootstrapAlpha, policy.QualityBootstrapMinSamples, policy.QualityBootstrapSeed, policy.AutoRollbackEnabled, policy.AutoRollbackWindowSeconds, policy.ValidationMaxRequests, policy.ValidationMaxConcurrency)
 		return nil
 	}
 	if args[0] == "policy" && args[1] == "get" {
@@ -3581,7 +3621,7 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 		}
 		if action == "policy" {
 			policy := view.ReleaseGuardPolicy
-			fmt.Printf("%s Release Guard policy\nEnabled                %t\nMinimum requests       %d\nMax TTFT regression    %.1f%%\nMax latency regression %.1f%%\nMax error increase     %.2f%%\nMax throughput drop    %.1f%%\nCompatibility evidence %t\nSynthetic validation   %t\nSemantic quality       %t\nMinimum quality        %s\nMax quality regression %s\nAutomatic rollback     %t (%ds)\nValidation bound       %d requests x %d concurrency\n", name, policy.Enabled, policy.MinimumRequests, policy.MaxTTFTRegressionPercent, policy.MaxLatencyRegressionPercent, policy.MaxErrorRateIncrease*100, policy.MaxOutputThroughputDropPercent, policy.RequireCompatibilityEvidence, policy.RequireSyntheticEvidence, policy.RequireQualityEvidence, formatGuardMetric(policy.MinimumQualityScore, ""), formatGuardMetric(policy.MaxQualityRegressionPercent, "%"), policy.AutoRollbackEnabled, policy.AutoRollbackWindowSeconds, policy.ValidationMaxRequests, policy.ValidationMaxConcurrency)
+			fmt.Printf("%s Release Guard policy\nEnabled                %t\nMinimum requests       %d\nMax TTFT regression    %.1f%%\nMax latency regression %.1f%%\nMax error increase     %.2f%%\nMax throughput drop    %.1f%%\nCompatibility evidence %t\nSynthetic validation   %t\nSemantic quality       %t\nQuality comparison     %s\nQuality bootstrap      alpha %.3f · min %d · seed %d\nMinimum quality        %s\nMax quality regression %s\nAutomatic rollback     %t (%ds)\nValidation bound       %d requests x %d concurrency\n", name, policy.Enabled, policy.MinimumRequests, policy.MaxTTFTRegressionPercent, policy.MaxLatencyRegressionPercent, policy.MaxErrorRateIncrease*100, policy.MaxOutputThroughputDropPercent, policy.RequireCompatibilityEvidence, policy.RequireSyntheticEvidence, policy.RequireQualityEvidence, policy.QualityComparisonMode, policy.QualityBootstrapAlpha, policy.QualityBootstrapMinSamples, policy.QualityBootstrapSeed, formatGuardMetric(policy.MinimumQualityScore, ""), formatGuardMetric(policy.MaxQualityRegressionPercent, "%"), policy.AutoRollbackEnabled, policy.AutoRollbackWindowSeconds, policy.ValidationMaxRequests, policy.ValidationMaxConcurrency)
 			return nil
 		}
 		fmt.Printf("%s rollout\nACTIVE       %s\nCANDIDATE    %s\n\n", name, emptyAs(view.Deployment.ActiveRevisionID, "none"), emptyAs(view.Deployment.CandidateRevisionID, "none"))
@@ -4042,8 +4082,14 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	if err != nil {
 		return fmt.Errorf("configure native RunPod Pods integration: %w", err)
 	}
-	runPodPods := provision.RunPodPods{APIKey: cfg.RunPodAPIKey, WorkerAPIKey: cfg.APIKey, BaseURL: cfg.RunPodRESTURL, ContainerDiskGiB: cfg.RunPodContainerDiskGiB, ArtifactCachePolicy: cfg.RunPodArtifactCachePolicy, NetworkVolumes: cfg.RunPodNetworkVolumes}
-	elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: "runpod-pods", Cloud: "runpod", Runtime: "custom-oci", Default: true, Profile: runPodPodsProfile, Provider: runPodPods, Capacity: capacity})
+	runPodPods := provision.RunPodPods{APIKey: cfg.RunPodAPIKey, WorkerAPIKey: cfg.APIKey, BaseURL: cfg.RunPodRESTURL, ContainerDiskGiB: cfg.RunPodContainerDiskGiB, ArtifactCachePolicy: cfg.RunPodArtifactCachePolicy, NetworkVolumes: cfg.RunPodNetworkVolumes, HFTokenSecret: cfg.RunPodHFTokenSecret}
+	artifactCacheAdapters["runpod"] = runPodPods
+	for _, runtimeName := range []string{"vllm", "sglang", "custom-oci"} {
+		// SkyPilot remains the implicit vLLM default for compatibility. An
+		// explicit runpod-pods selection must nevertheless work for every runtime
+		// whose immutable workload satisfies the native Pod contract.
+		elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: "runpod-pods", Cloud: "runpod", Runtime: runtimeName, Default: runtimeName != "vllm", Profile: runPodPodsProfile, Provider: runPodPods, Capacity: capacity})
+	}
 	if cfg.AWSEnabled() {
 		awsProfile, profileErr := integrationRegistry.Provider("aws-ec2")
 		if profileErr != nil {

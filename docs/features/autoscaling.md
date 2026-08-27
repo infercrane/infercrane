@@ -48,6 +48,14 @@ auditable scale-up, scale-down, or no-op decision. `explain scaling` returns the
 old and new desired capacity, the signal snapshot, reason, and evaluation timestamp. Missing or
 stale metrics produce a persisted no-op instead of a guessed decision.
 
+When an endpoint has a TTFT or latency SLO, the controller also reads content-free request evidence
+from the active revision. After at least 20 requests, it can compute a replica target only from a
+one-replica benchmark whose immutable model, runtime version and arguments, provider, region, GPU
+type/count, compute mode, and workload boundary match. The target is bounded by the same min/max,
+hysteresis, cooldown, and generation-safe scale-down rules. If the sample floor or comparable
+goodput is absent, the existing queue policy remains authoritative and the persisted reason says
+`capacity evidence absent`; InferCrane does not infer per-replica throughput.
+
 ### Active-stream visibility boundary
 
 InferCrane exposes an aggregate `infercrane_gateway_active_requests` gauge, replica lifecycle and

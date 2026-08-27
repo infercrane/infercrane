@@ -339,6 +339,8 @@ func runPodGPUType(gpu string) string {
 		return "NVIDIA H200 NVL"
 	case "B200", "NVIDIA B200":
 		return "NVIDIA B200"
+	case "RTXPRO6000", "RTX PRO 6000", "NVIDIA RTX PRO 6000 BLACKWELL SERVER EDITION":
+		return "NVIDIA RTX PRO 6000 Blackwell Server Edition"
 	case "A40", "NVIDIA A40":
 		return "NVIDIA A40"
 	case "A100-80GB", "A100 80GB", "NVIDIA A100-SXM4-80GB":

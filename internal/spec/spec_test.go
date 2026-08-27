@@ -114,10 +114,13 @@ serving:
   cache: {backend: none}
 `
 	loaded, err := Load(writeSpec(t, base))
-	if err != nil || loaded.Serving.Backend != "dynamo" || loaded.Serving.Decode.Replicas != 2 || loaded.Serving.SchemaVersion == "" {
+	if err == nil || !strings.Contains(err.Error(), "registered for argument translation") || loaded.Serving.Backend != "dynamo" || loaded.Serving.Decode.Replicas != 2 || loaded.Serving.SchemaVersion == "" {
 		t.Fatalf("loaded=%+v err=%v", loaded, err)
 	}
-	_, err = Load(writeSpec(t, strings.Replace(base, "max_replicas: 1", "max_replicas: 2", 1)))
+	aggregated := strings.Replace(base, "mode: disaggregated", "mode: aggregated", 1)
+	aggregated = strings.Replace(aggregated, "routing: kv-aware", "routing: direct", 1)
+	aggregated = strings.Replace(aggregated, "  prefill: {replicas: 1, tensor_parallelism: 1}\n  decode: {replicas: 2, tensor_parallelism: 1}", "  worker: {replicas: 1, tensor_parallelism: 1}", 1)
+	_, err = Load(writeSpec(t, strings.Replace(aggregated, "max_replicas: 1", "max_replicas: 2", 1)))
 	if err == nil || !strings.Contains(err.Error(), "outer replica bounds") {
 		t.Fatalf("competing autoscaling owner accepted: %v", err)
 	}

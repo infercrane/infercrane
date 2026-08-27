@@ -16,10 +16,13 @@ grep -Fq 'workflow_dispatch:' "$publish_workflow"
 grep -Fq 'environment: stable-publication' "$publish_workflow"
 grep -Fq '.stable_tag' "$publish_workflow"
 grep -Fq '.two_factor_requirement_enabled' "$publish_workflow"
+grep -Fq 'ORG_SECURITY_READ_TOKEN' "$publish_workflow"
 grep -Fq '.visibility)" = public' "$publish_workflow"
 grep -Fq '.isDraft == true' "$publish_workflow"
 grep -Eq 'pypa/gh-action-pypi-publish@[0-9a-f]{40}' "$publish_workflow"
 grep -Fq 'npm publish publication-assets/npm/' "$publish_workflow"
+grep -Fq 'node-version: "24.20.0"' "$publish_workflow"
+grep -Fq 'npm install --global npm@11.6.4' "$publish_workflow"
 grep -Fq 'HOMEBREW_TAP_TOKEN' "$publish_workflow"
 grep -Fq 'gh release edit "$RELEASE_TAG" --draft=false --latest' "$publish_workflow"
 
@@ -27,6 +30,10 @@ grep -Fq 'gh release edit "$RELEASE_TAG" --draft=false --latest' "$publish_workf
 # release as a draft and provide verifiable provenance for archives and images.
 grep -Fq 'draft: true' "$root/.goreleaser.yaml"
 grep -Fq './scripts/generate-homebrew-formula.sh dist "$GITHUB_REF_NAME"' "$release_workflow"
+if grep -A2 -F 'sdk-packages:' "$release_workflow" | grep -Fq 'if:'; then
+  echo "release candidates must build SDK artifacts for qualification" >&2
+  exit 1
+fi
 test "$(grep -Ec 'uses: actions/attest@[0-9a-f]{40}' "$release_workflow")" -eq 2
 grep -Fq 'subject-name: ghcr.io/infercrane/infercrane' "$release_workflow"
 if grep -REq 'uses: [^ ]+@(v[0-9]+|release/v[0-9]+)([[:space:]]|$)' "$root/.github/workflows"; then

@@ -7,7 +7,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/infercrane/infercrane/internal/artifactcache"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
 )
 
@@ -68,6 +70,36 @@ func TestRunPodPodsLifecycleIsReplaySafeAndPreservesImmutableWorkload(t *testing
 	}
 	if err = provider.DeleteReplica(context.Background(), second); err != nil || deleteCalls != 1 {
 		t.Fatalf("idempotent delete: calls=%d err=%v", deleteCalls, err)
+	}
+}
+
+func TestRunPodArtifactCacheAdoptsOnlyConfiguredExactVolume(t *testing.T) {
+	identity := "org/model@0123456789abcdef0123456789abcdef01234567"
+	if name := runPodArtifactVolumeName(identity); name != "infercrane-artifact-a5d33b0cefe277aeeb41" {
+		t.Fatalf("provider-safe volume identity drifted from the external builder: %s", name)
+	}
+	volume := runPodNetworkVolume{ID: "volume_1234", Name: runPodArtifactVolumeName(identity), DataCenterID: "EU-RO-1", Size: 500}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/networkvolumes" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode([]runPodNetworkVolume{volume})
+	}))
+	defer server.Close()
+	provider := RunPodPods{APIKey: "provider-secret", WorkerAPIKey: "worker-secret", BaseURL: server.URL, Client: server.Client(), ArtifactCachePolicy: "required", NetworkVolumes: map[string]string{identity: volume.ID}}
+	request := artifactcache.Request{ArtifactID: "artifact", ModelIdentity: identity, Provider: "runpod", Region: volume.DataCenterID, Location: "runpod-volume://" + volume.ID, IdempotencyKey: "prefetch"}
+	operation, err := provider.Prefetch(context.Background(), request)
+	if err != nil || operation.Status != "succeeded" || operation.ProviderOperationID != volume.ID {
+		t.Fatalf("operation=%#v err=%v", operation, err)
+	}
+	observation, err := provider.Observe(context.Background(), request)
+	if err != nil || observation.State != "present" || observation.Source != "runpod-network-volume" || !observation.ExpiresAt.After(time.Now()) || !strings.Contains(observation.EvidenceJSON, `"population_state":"operator_attested"`) {
+		t.Fatalf("observation=%#v err=%v", observation, err)
+	}
+	request.Location = "runpod-volume://other"
+	if _, err = provider.Prefetch(context.Background(), request); err == nil {
+		t.Fatal("unconfigured volume was adopted")
 	}
 }
 
@@ -140,6 +172,9 @@ func TestRunPodPodsUsesExactPersistentModelVolumeAndRegion(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/pods":
+			if r.URL.Query().Get("includeMachine") != "true" || r.URL.Query().Get("includeNetworkVolume") != "true" {
+				t.Fatalf("adoption list omitted immutable provider details: %s", r.URL.RawQuery)
+			}
 			if created.ID == "" {
 				_ = json.NewEncoder(w).Encode([]runPodRecord{})
 			} else {
@@ -157,7 +192,7 @@ func TestRunPodPodsUsesExactPersistentModelVolumeAndRegion(t *testing.T) {
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				t.Fatal(err)
 			}
-			if body.NetworkVolumeID != volume.ID || body.VolumeMountPath != "/workspace" || len(body.DataCenterIDs) != 1 || body.DataCenterIDs[0] != volume.DataCenterID || body.Environment["INFERCRANE_MODEL_DIR"] != "/workspace/infercrane/model" || body.Environment["HF_XET_HIGH_PERFORMANCE"] != "1" {
+			if body.NetworkVolumeID != volume.ID || body.VolumeMountPath != "/workspace" || len(body.DataCenterIDs) != 0 || body.Environment["INFERCRANE_MODEL_DIR"] != "/workspace/infercrane/model" || body.Environment["HF_XET_HIGH_PERFORMANCE"] != "1" || body.Environment["HF_TOKEN"] != "{{ RUNPOD_SECRET_infercrane-hf }}" {
 				t.Fatalf("unexpected persistent cache request: %#v", body)
 			}
 			created = runPodRecord{ID: "pod-volume", Name: body.Name, DesiredStatus: "RUNNING", ImageName: body.ImageName, GPUCount: body.GPUCount, DockerEntrypoint: body.DockerEntrypoint, DockerStartCmd: body.DockerStartCmd, NetworkVolume: &volume}
@@ -171,7 +206,7 @@ func TestRunPodPodsUsesExactPersistentModelVolumeAndRegion(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := RunPodPods{APIKey: "provider-secret", WorkerAPIKey: "worker-secret", BaseURL: server.URL, Client: server.Client(), ArtifactCachePolicy: "required", NetworkVolumes: map[string]string{identity: volume.ID}}
+	provider := RunPodPods{APIKey: "provider-secret", WorkerAPIKey: "worker-secret", BaseURL: server.URL, Client: server.Client(), ArtifactCachePolicy: "required", NetworkVolumes: map[string]string{identity: volume.ID}, HFTokenSecret: "infercrane-hf"}
 	spec := ReplicaSpec{ExternalKey: "volume", Model: "org/model", ModelRevision: "0123456789abcdef0123456789abcdef01234567", Cloud: "runpod", Region: volume.DataCenterID, GPU: "H200", GPUCount: 1, Workload: testRunPodWorkload()}
 	handle, err := provider.EnsureReplica(context.Background(), spec)
 	if err != nil || handle.ResourceID == "" {

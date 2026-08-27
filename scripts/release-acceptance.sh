@@ -566,6 +566,15 @@ run_elastic_evidence() {
 		operation_id=$(printf '%s' "$status" | jq -r '.active_operation.id // empty')
 		resource_id=$(printf '%s' "$status" | jq -r '.replicas[0].provider_resource_id // empty')
 		if [ -n "$operation_id" ] && [ -n "$resource_id" ]; then break; fi
+		if ! kill -0 "$client_pid" 2>/dev/null; then
+			set +e
+			wait "$client_pid"
+			client_status=$?
+			set -e
+			echo "deploy client exited before durable provider identity was persisted (exit $client_status)" >&2
+			tail -n 20 "$evidence/durable-deploy-cli.log" >&2
+			return "$client_status"
+		fi
 		sleep 1
 		elapsed=$((elapsed + 1))
 	done
@@ -621,8 +630,12 @@ run_elastic_evidence() {
 			buffered) streaming=false ;;
 		esac
 		for concurrency in 1 8 32; do
+			cell_requests=$benchmark_requests
+			if [ "$cell_requests" -lt "$concurrency" ]; then
+				cell_requests=$concurrency
+			fi
 			record "elastic-benchmark-$mode-c$concurrency" ic benchmark "$ELASTIC_NAME" --revision active \
-				--requests "$benchmark_requests" --concurrency "$concurrency" --output-tokens "$benchmark_tokens" \
+				--requests "$cell_requests" --concurrency "$concurrency" --output-tokens "$benchmark_tokens" \
 				--streaming="$streaming" --random-seed 53 --output json
 			jq -e --argjson gpu_count "$GPU_COUNT" --argjson concurrency "$concurrency" --argjson streaming "$streaming" \
 				'.gpu_count == $gpu_count and .failed == 0 and .succeeded == .request_count and .request_count > 0 and .workload.concurrency == $concurrency and .workload.streaming == $streaming and .latency_p95_ms != null' \

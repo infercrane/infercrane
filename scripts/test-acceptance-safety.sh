@@ -281,10 +281,12 @@ grep -Fq '"$ELASTIC_NAME-$run_id-delete"' "$root/scripts/release-acceptance.sh"
 grep -Fq 'exec env INFERCRANE_CONFIG="$config_file" "$cli" --context acceptance deploy' "$root/scripts/release-acceptance.sh"
 grep -Fq '.error.code == "operation_watch_interrupted"' "$root/scripts/release-acceptance.sh"
 grep -Fq 'tail -n 1 "$evidence/durable-deploy-cli.log" | jq -e' "$root/scripts/release-acceptance.sh"
+grep -Fq 'deploy client exited before durable provider identity was persisted' "$root/scripts/release-acceptance.sh"
 grep -Fq 'for mode in streaming buffered; do' "$root/scripts/release-acceptance.sh"
 grep -Fq 'for concurrency in 1 8 32; do' "$root/scripts/release-acceptance.sh"
 grep -Fq '.workload.streaming == $streaming' "$root/scripts/release-acceptance.sh"
 grep -Fq 'for concurrency in 1 8 32' "$root/scripts/release-acceptance.sh"
+grep -Fq 'cell_requests=$concurrency' "$root/scripts/release-acceptance.sh"
 grep -Fq 'active_revision_preserved:($active_before == $active_after)' "$root/scripts/release-acceptance.sh"
 
 # Autoscaling qualification must observe the provider transition while a

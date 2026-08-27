@@ -79,3 +79,24 @@ func TestHealthFailureAndProviderRecoveryAreDeterministic(t *testing.T) {
 		t.Fatalf("recovered=%#v", recovered)
 	}
 }
+
+func TestHealthModeUsesConfiguredBreachAndRecoveryHysteresis(t *testing.T) {
+	now := time.Unix(100, 0)
+	policy := Policy{Mode: "health", BreachIntervals: 2, RecoveryIntervals: 2, PrivacyAcknowledged: true, BudgetAvailable: true}
+	first, err := Evaluate(policy, State{}, Signal{PrimaryHealthy: false}, now)
+	if err != nil || first.Route != "primary" || first.ConsecutiveHigh != 1 {
+		t.Fatalf("first=%#v err=%v", first, err)
+	}
+	second, _ := Evaluate(policy, State{ConsecutiveHigh: first.ConsecutiveHigh}, Signal{PrimaryHealthy: false}, now.Add(time.Second))
+	if second.Route != "external" || second.Action != "overflow" {
+		t.Fatalf("second=%#v", second)
+	}
+	recovering, _ := Evaluate(policy, State{External: true}, Signal{PrimaryHealthy: true}, now.Add(2*time.Second))
+	if recovering.Route != "external" || recovering.ConsecutiveLow != 1 {
+		t.Fatalf("recovering=%#v", recovering)
+	}
+	recovered, _ := Evaluate(policy, State{External: true, ConsecutiveLow: 1}, Signal{PrimaryHealthy: true}, now.Add(3*time.Second))
+	if recovered.Route != "primary" || recovered.Action != "recover" {
+		t.Fatalf("recovered=%#v", recovered)
+	}
+}

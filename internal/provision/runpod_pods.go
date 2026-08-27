@@ -12,10 +12,13 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/infercrane/infercrane/internal/artifactcache"
 )
 
-// RunPodPods launches immutable custom OCI workloads through RunPod's native
-// Pod API. Unlike the SkyPilot adapter, it does not require the workload image
+// RunPodPods launches immutable OCI workloads through RunPod's native Pod API.
+// Built-in runtimes and custom workloads share the same validated contract.
+// Unlike the SkyPilot adapter, it does not require the workload image
 // to contain an SSH daemon or rsync. ExternalKey is compiled into a
 // deterministic provider name so a retry can adopt a Pod after a lost create
 // response.
@@ -23,6 +26,7 @@ type RunPodPods struct {
 	APIKey, WorkerAPIKey, BaseURL string
 	ContainerDiskGiB              int
 	ArtifactCachePolicy           string
+	HFTokenSecret                 string
 	NetworkVolumes                map[string]string
 	Client                        *http.Client
 }
@@ -83,7 +87,7 @@ func (r RunPodPods) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provid
 		return ProviderHandle{}, fmt.Errorf("%w: RunPod Pod GPU count must be between 1 and 8", ErrInvalidReplicaSpec)
 	}
 	if spec.Workload.Empty() {
-		return ProviderHandle{}, fmt.Errorf("%w: native RunPod Pods require an immutable custom OCI workload", ErrInvalidReplicaSpec)
+		return ProviderHandle{}, fmt.Errorf("%w: native RunPod Pods require an immutable OCI workload", ErrInvalidReplicaSpec)
 	}
 	if err := spec.Workload.Validate(); err != nil {
 		return ProviderHandle{}, fmt.Errorf("%w: %v", ErrInvalidReplicaSpec, err)
@@ -103,7 +107,7 @@ func (r RunPodPods) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provid
 		return ProviderHandle{}, err
 	}
 	if len(matches) == 1 {
-		if err = validateRunPodIntent(matches[0], spec, command, volumeID); err != nil {
+		if err = validateRunPodIntent(matches[0], spec, command, volumeID, r.HFTokenSecret); err != nil {
 			return ProviderHandle{}, err
 		}
 		return ProviderHandle{ResourceID: name, ExternalKey: spec.ExternalKey}, nil
@@ -123,6 +127,12 @@ func (r RunPodPods) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provid
 		return ProviderHandle{}, fmt.Errorf("%w: RunPod container disk must be between 50 and 2048 GiB", ErrInvalidReplicaSpec)
 	}
 	environment := map[string]string{"INFERCRANE_WORKER_API_KEY": r.WorkerAPIKey, "VLLM_API_KEY": r.WorkerAPIKey}
+	if r.HFTokenSecret != "" {
+		if !validRunPodIdentifier(r.HFTokenSecret) {
+			return ProviderHandle{}, fmt.Errorf("%w: RunPod Hugging Face secret name is invalid", ErrInvalidReplicaSpec)
+		}
+		environment["HF_TOKEN"] = "{{ RUNPOD_SECRET_" + r.HFTokenSecret + " }}"
+	}
 	body := map[string]any{
 		"name": name, "imageName": spec.Workload.Image,
 		"gpuTypeIds": []string{runPodGPUType(spec.GPU)}, "gpuTypePriority": "custom", "gpuCount": spec.GPUCount,
@@ -136,7 +146,11 @@ func (r RunPodPods) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provid
 	if volume.ID != "" {
 		body["networkVolumeId"] = volume.ID
 		body["volumeMountPath"] = "/workspace"
-		dataCenterID = volume.DataCenterID
+		// The attached network volume is already an exact placement constraint.
+		// Omitting the redundant dataCenterIds field avoids coupling creates to
+		// RunPod's lagging REST enum when a newly advertised datacenter is valid
+		// for volumes and stock but is not yet present in the OpenAPI schema.
+		dataCenterID = ""
 		environment["HF_HOME"] = "/workspace/huggingface"
 		environment["HUGGINGFACE_HUB_CACHE"] = "/workspace/huggingface/hub"
 		environment["INFERCRANE_MODEL_DIR"] = "/workspace/infercrane/model"
@@ -152,7 +166,7 @@ func (r RunPodPods) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provid
 		// and adopt the deterministic name before surfacing a retryable failure.
 		if current, listErr := r.list(ctx); listErr == nil {
 			matches = matchingRunPodRecords(current, name)
-			if len(matches) == 1 && validateRunPodIntent(matches[0], spec, command, volumeID) == nil {
+			if len(matches) == 1 && validateRunPodIntent(matches[0], spec, command, volumeID, r.HFTokenSecret) == nil {
 				return ProviderHandle{ResourceID: name, ExternalKey: spec.ExternalKey}, nil
 			}
 		}
@@ -226,9 +240,64 @@ func (r RunPodPods) DeleteReplica(ctx context.Context, handle ProviderHandle) er
 	return nil
 }
 
+// Prefetch adopts an operator-prepared exact-model network volume. Population
+// is intentionally an explicit, durable workflow outside replica creation;
+// this adapter verifies identity and locality without silently creating spend.
+func (r RunPodPods) Prefetch(ctx context.Context, request artifactcache.Request) (artifactcache.Operation, error) {
+	if err := request.Validate(); err != nil {
+		return artifactcache.Operation{}, artifactcache.Definitive("invalid_prefetch_request", err)
+	}
+	if strings.ToLower(strings.TrimSpace(r.ArtifactCachePolicy)) == "disabled" {
+		return artifactcache.Operation{}, artifactcache.Definitive("artifact_cache_disabled", errors.New("RunPod artifact cache adapter is disabled"))
+	}
+	if request.Provider != "runpod" {
+		return artifactcache.Operation{}, artifactcache.Definitive("invalid_provider_boundary", errors.New("RunPod artifact prefetch provider must be runpod"))
+	}
+	volumeID, err := runPodVolumeLocation(request.Location)
+	if err != nil {
+		return artifactcache.Operation{}, artifactcache.Definitive("invalid_cache_location", err)
+	}
+	if configured := r.NetworkVolumes[request.ModelIdentity]; configured == "" || configured != volumeID {
+		return artifactcache.Operation{}, artifactcache.Definitive("artifact_cache_not_configured", errors.New("RunPod network volume is not configured for this immutable model identity"))
+	}
+	if _, err = r.verifyNetworkVolume(ctx, request.ModelIdentity, volumeID, request.Region); err != nil {
+		return artifactcache.Operation{}, artifactcache.Definitive("artifact_volume_verification_failed", err)
+	}
+	return artifactcache.Operation{ProviderOperationID: volumeID, Status: "succeeded"}, nil
+}
+
+func (r RunPodPods) Observe(ctx context.Context, request artifactcache.Request) (artifactcache.Observation, error) {
+	if err := request.Validate(); err != nil {
+		return artifactcache.Observation{}, err
+	}
+	volumeID, err := runPodVolumeLocation(request.Location)
+	if err != nil || request.Provider != "runpod" || r.NetworkVolumes[request.ModelIdentity] != volumeID {
+		return artifactcache.Observation{}, errors.New("RunPod artifact cache request does not match the configured boundary")
+	}
+	volume, err := r.verifyNetworkVolume(ctx, request.ModelIdentity, volumeID, request.Region)
+	if err != nil {
+		return artifactcache.Observation{}, err
+	}
+	observed := time.Now().UTC()
+	evidence, _ := json.Marshal(map[string]any{"volume_id": volume.ID, "data_center_id": volume.DataCenterID, "size_gib": volume.Size, "model_identity_digest": modelIdentityDigest(request.ModelIdentity), "mount": "/workspace", "population_state": "operator_attested"})
+	return artifactcache.Observation{State: "present", Source: "runpod-network-volume", EvidenceJSON: string(evidence), ObservedAt: observed, ExpiresAt: observed.Add(5 * time.Minute)}, nil
+}
+
+func runPodVolumeLocation(location string) (string, error) {
+	const prefix = "runpod-volume://"
+	if !strings.HasPrefix(location, prefix) {
+		return "", errors.New("RunPod artifact cache location must use runpod-volume://ID")
+	}
+	volumeID := strings.TrimPrefix(location, prefix)
+	if !validRunPodIdentifier(volumeID) {
+		return "", errors.New("RunPod artifact cache location contains an invalid volume ID")
+	}
+	return volumeID, nil
+}
+
 func (r RunPodPods) list(ctx context.Context) ([]runPodRecord, error) {
 	var pods []runPodRecord
-	if err := r.do(ctx, http.MethodGet, "/pods", nil, &pods); err != nil {
+	if err := r.do(ctx, http.MethodGet, "/pods?includeMachine=true&includeNetworkVolume=true", nil, &pods); err != nil {
 		return nil, err
 	}
 	return pods, nil
@@ -300,7 +369,7 @@ func matchingRunPodRecords(pods []runPodRecord, name string) []runPodRecord {
 	return matches
 }
 
-func validateRunPodIntent(pod runPodRecord, spec ReplicaSpec, command []string, volumeID string) error {
+func validateRunPodIntent(pod runPodRecord, spec ReplicaSpec, command []string, volumeID, hfTokenSecret string) error {
 	image := pod.ImageName
 	if image == "" {
 		image = pod.Image
@@ -313,6 +382,7 @@ func validateRunPodIntent(pod runPodRecord, spec ReplicaSpec, command []string, 
 		actualGPU = pod.GPU.ID
 	}
 	credentialMismatch := len(pod.Environment) > 0 && (pod.Environment["INFERCRANE_WORKER_API_KEY"] == "" || pod.Environment["VLLM_API_KEY"] == "")
+	secretMismatch := hfTokenSecret != "" && len(pod.Environment) > 0 && pod.Environment["HF_TOKEN"] != "{{ RUNPOD_SECRET_"+hfTokenSecret+" }}"
 	actualVolumeID := ""
 	if pod.NetworkVolume != nil {
 		actualVolumeID = pod.NetworkVolume.ID
@@ -322,10 +392,23 @@ func validateRunPodIntent(pod runPodRecord, spec ReplicaSpec, command []string, 
 		actualDataCenterID = pod.NetworkVolume.DataCenterID
 	}
 	regionMismatch := spec.Region != "" && actualDataCenterID != "" && actualDataCenterID != spec.Region
-	if image != spec.Workload.Image || pod.GPUCount != spec.GPUCount || (actualGPU != "" && actualGPU != runPodGPUType(spec.GPU)) || credentialMismatch || actualVolumeID != volumeID || regionMismatch || !equalStrings(pod.DockerEntrypoint, command[:1]) || !equalStrings(pod.DockerStartCmd, command[1:]) {
+	if image != spec.Workload.Image || pod.GPUCount != spec.GPUCount || (actualGPU != "" && actualGPU != runPodGPUType(spec.GPU)) || credentialMismatch || secretMismatch || actualVolumeID != volumeID || regionMismatch || !equalStrings(pod.DockerEntrypoint, command[:1]) || !equalStrings(pod.DockerStartCmd, command[1:]) {
 		return fmt.Errorf("%w: existing RunPod Pod does not match immutable workload intent", ErrInvalidReplicaSpec)
 	}
 	return nil
+}
+
+func validRunPodIdentifier(value string) bool {
+	if len(value) < 1 || len(value) > 128 {
+		return false
+	}
+	for _, char := range value {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') || char == '-' || char == '_' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func (r RunPodPods) configuredNetworkVolume(spec ReplicaSpec) (string, error) {
@@ -369,7 +452,8 @@ func (r RunPodPods) verifyNetworkVolume(ctx context.Context, identity, volumeID,
 }
 
 func runPodArtifactVolumeName(identity string) string {
-	return "infercrane-artifact-" + modelIdentityDigest(identity)[:20]
+	hexDigest := strings.TrimPrefix(modelIdentityDigest(identity), "sha256:")
+	return "infercrane-artifact-" + hexDigest[:20]
 }
 
 func runPodVolumeEvidence(volume *runPodNetworkVolume) any {

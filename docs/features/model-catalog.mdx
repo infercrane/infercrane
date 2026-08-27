@@ -87,8 +87,10 @@ path. Each reviewed profile pins the model commit, a dedicated upstream vLLM ima
 topology, and complete executable argv. Both remain **configuration-verified**, not real-GPU or
 production-qualified.
 
-The GLM profile requests one native RunPod Pod with four H200 GPUs and tensor parallelism. The
-`runpod-pods` adapter launches the pinned upstream image directly, without an SSH-derived wrapper.
+The primary GLM profile requests one native RunPod Pod with eight H200 GPUs and tensor parallelism,
+matching the current upstream H200 recipe. A separate four-B200 Blackwell profile follows upstream's
+TP4 Blackwell guidance but remains an exact-tuple qualification candidate. The `runpod-pods` adapter
+launches the pinned upstream image directly, without an SSH-derived wrapper.
 The reviewed command first materializes the complete commit-pinned Hugging Face snapshot at a local
 container path, then replaces the bootstrap process with vLLM. This provider-neutral argv pattern
 works around a day-zero runtime ordering issue where multimodal processor metadata is opened before
@@ -102,15 +104,16 @@ and [upstream vLLM recipe](https://recipes.vllm.ai/zai-org/GLM-5.3-Flash).
 infercrane models inspect glm-5.3-flash
 infercrane workload init ./glm-flash \
   --recipe glm-5.3-flash \
-  --profile custom-oci-hopper-tp4
+  --profile custom-oci-hopper-tp8
 infercrane workload validate ./glm-flash
 infercrane workload plan ./glm-flash
 ```
 
 Those commands are local and non-mutating through `plan`. Deployment still requires current RunPod
-capacity, enough configured container disk, paid-resource acknowledgement, and fresh qualification
-evidence for the exact generated tuple. The FP8 snapshot is about 306 GiB before runtime overhead;
-the RunPod example therefore uses a 500 GiB container disk during qualification.
+capacity, enough configured storage, paid-resource acknowledgement, and fresh qualification
+evidence for the exact generated tuple. The FP8 snapshot is about 306 GiB before runtime overhead.
+Use an appropriately sized identity-bound network volume or container disk; storage and topology
+remain plan inputs, not inferred defaults.
 
 The Qwen profile uses the separate FP8 checkpoint and the official eight-H200 TEP8 topology. Plain
 TP8 is incompatible with that checkpoint's quantization blocks, so the reviewed argv enables expert
@@ -138,7 +141,9 @@ infercrane workload plan ./qwen-flash-next
 
 Those commands are also local and non-mutating through `plan`. Real deployment requires current
 RunPod capacity for an exact eight-H200 Pod and fresh protocol, memory, performance, and cleanup
-evidence.
+evidence. The catalog also exposes `custom-oci-blackwell-tp2` and
+`custom-oci-blackwell-tep4` as explicitly unqualified two- and four-B200 candidates for environments
+where the H200 node shape is unavailable; selecting either does not create a support claim.
 
 ## Current market watch
 

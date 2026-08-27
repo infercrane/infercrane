@@ -2,6 +2,8 @@ package workflows
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -969,6 +971,7 @@ func mustJSON(value any) string {
 
 func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBackend, runtime RuntimeInspector, operation domain.Operation, request CloudRequest, ordinal int) (targetName, endpoint, resourceID string, resultErr error) {
 	started := time.Now().UTC()
+	stageDurationsJSON := "{}"
 	provider := backend.Provider
 	externalKey := fmt.Sprintf("%s-r%d", request.DeploymentID, ordinal)
 	if request.Candidate {
@@ -995,7 +998,13 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 				}
 			}
 		}
-		_, _ = evidenceStore.RecordCapacityOperation(context.WithoutCancel(ctx), domain.CapacityOperation{TenantID: request.TenantID, Provider: backend.Name, Runtime: request.Runtime, ComputeMode: request.ComputeMode, Region: request.Region, GPU: request.GPU, GPUCount: request.GPUCount, Operation: "replica.ensure", ResourceKey: externalKey, Outcome: outcome, ErrorCode: errorCode, StartedAt: started})
+		modelIdentity := ""
+		if request.ImmutableModelRevision != "" {
+			modelIdentity = request.Model + "@" + request.ImmutableModelRevision
+		}
+		args, _ := json.Marshal(request.RuntimeArgs)
+		argsSum := sha256.Sum256(args)
+		_, _ = evidenceStore.RecordCapacityOperation(context.WithoutCancel(ctx), domain.CapacityOperation{TenantID: request.TenantID, Provider: backend.Name, Runtime: request.Runtime, RuntimeVersion: request.RuntimeVersion, RuntimeArgsDigest: "sha256:" + hex.EncodeToString(argsSum[:]), ModelIdentity: modelIdentity, ComputeMode: request.ComputeMode, Region: request.Region, GPU: request.GPU, GPUCount: request.GPUCount, Operation: "replica.ensure", ResourceKey: externalKey, Outcome: outcome, ErrorCode: errorCode, StageDurationsJSON: stageDurationsJSON, StartedAt: started})
 	}()
 	replica, _, err := store.EnsureReplicaIntent(ctx, domain.Replica{TenantID: request.TenantID, DeploymentID: request.DeploymentID, RevisionID: request.RevisionID, Ordinal: ordinal, ExternalKey: externalKey, Provider: backend.Name})
 	if err != nil {
@@ -1110,6 +1119,7 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 	}
 	readyAt := time.Now().UTC()
 	readyDetails := withRuntimeReadyEvidence(observation.Details, readyAt)
+	stageDurationsJSON = startupStageDurations(readyDetails, started, readyAt)
 	if err = store.ObserveReplica(ctx, replica.ID, "ready", observation.Endpoint, "healthy", readyDetails, readyAt); err != nil {
 		return "", "", "", classify("observation_failed", err)
 	}
@@ -1132,6 +1142,48 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 		return "", "", "", classify("activation_failed", err)
 	}
 	return targetName, observation.Endpoint, ensured.ResourceID, nil
+}
+
+func startupStageDurations(details string, started, readyAt time.Time) string {
+	var evidence struct {
+		Startup struct {
+			Stages []struct {
+				Name string    `json:"name"`
+				At   time.Time `json:"at"`
+			} `json:"stages"`
+		} `json:"startup_evidence"`
+	}
+	if json.Unmarshal([]byte(details), &evidence) != nil || readyAt.Before(started) {
+		return "{}"
+	}
+	marks := make(map[string]time.Time, len(evidence.Startup.Stages))
+	for _, stage := range evidence.Startup.Stages {
+		if stage.Name != "" && !stage.At.IsZero() {
+			marks[stage.Name] = stage.At.UTC()
+		}
+	}
+	durations := map[string]float64{"deploy_to_ready": readyAt.Sub(started).Seconds()}
+	add := func(name, begin, end string) {
+		if first, ok := marks[begin]; ok {
+			if last, found := marks[end]; found && !last.Before(first) {
+				durations[name] = last.Sub(first).Seconds()
+			}
+		}
+	}
+	add("identity", "identity_start", "identity_ready")
+	add("gpu_driver", "gpu_driver_start", "gpu_driver_ready")
+	add("image_pull", "image_pull_start", "image_pull_complete")
+	add("image_cache_check", "image_check", "image_cache_hit")
+	add("artifact_cache_attach", "artifact_check", "artifact_cache_hit")
+	add("runtime_container", "runtime_start", "runtime_container_started")
+	if runtimeStarted, ok := marks["runtime_container_started"]; ok && !readyAt.Before(runtimeStarted) {
+		durations["engine_to_ready"] = readyAt.Sub(runtimeStarted).Seconds()
+	}
+	encoded, err := json.Marshal(durations)
+	if err != nil {
+		return "{}"
+	}
+	return string(encoded)
 }
 
 func withRuntimeReadyEvidence(details string, readyAt time.Time) string {

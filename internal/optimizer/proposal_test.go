@@ -92,7 +92,7 @@ func TestCatalogProposalCarriesGeneralImmutableMultiGPUProfile(t *testing.T) {
 		t.Fatalf("proposal=%+v err=%v", proposal, err)
 	}
 	candidate := proposal.Candidates[0]
-	if candidate.Deployment.Resources.GPUCount != 4 || candidate.Deployment.Runtime.Workload.Image == "" || candidate.Deployment.Runtime.Version == "" || !hasFeature(candidate.Features, "immutable_runtime_artifact", "pinned") {
+	if candidate.Deployment.Resources.GPUCount != 8 || candidate.Deployment.Runtime.Workload.Image == "" || candidate.Deployment.Runtime.Version == "" || !hasFeature(candidate.Features, "immutable_runtime_artifact", "pinned") {
 		t.Fatalf("portable serving profile was flattened: %+v", candidate)
 	}
 	if err = ValidateProposal(proposal); err != nil {

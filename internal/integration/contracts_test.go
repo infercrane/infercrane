@@ -48,7 +48,7 @@ func TestPortableCatalogPublishesExactRuntimeCompatibility(t *testing.T) {
 		t.Fatal(err)
 	}
 	snapshot := registry.Snapshot()
-	if len(snapshot.Compatibility) != 6 {
+	if len(snapshot.Compatibility) != 8 {
 		t.Fatalf("compatibility=%#v", snapshot.Compatibility)
 	}
 	encoded, _ := json.Marshal(snapshot)
@@ -145,7 +145,7 @@ func TestV1CatalogPublishesDynamoAsSeparateLocallySimulatedBackend(t *testing.T)
 		t.Fatalf("profile=%#v err=%v", profile, err)
 	}
 	encoded, _ := json.Marshal(profile)
-	for _, required := range []string{`"dgd_parent_lifecycle","state":"supported"`, `"disaggregated_serving","state":"supported"`, `"dynamo_planner_autoscaling","state":"unsupported"`, `"environment":"real-dynamo-gpu-kubernetes","reason"`} {
+	for _, required := range []string{`"dgd_parent_lifecycle","state":"supported"`, `"disaggregated_serving","state":"unsupported"`, `"dynamo_planner_autoscaling","state":"unsupported"`, `"environment":"real-dynamo-gpu-kubernetes","reason"`} {
 		if !strings.Contains(string(encoded), required) {
 			t.Fatalf("profile missing %s: %s", required, encoded)
 		}
@@ -168,6 +168,7 @@ func TestV1CatalogPublishesReplaceableOptimizationBoundariesWithoutExecutionClai
 		`"adapter":"vllm-speculators","kind":"artifact-builder"`,
 		`"adapter":"tensorrt-llm","kind":"artifact-builder"`,
 		`"adapter":"lmcache","kind":"cache"`,
+		`"adapter":"dynamo-nixl","kind":"orchestrator"`,
 		`"adapter":"llm-d","kind":"orchestrator"`,
 		`"adapter":"aibrix","kind":"orchestrator"`,
 	} {

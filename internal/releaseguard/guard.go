@@ -14,12 +14,13 @@ type Input struct {
 }
 
 type Reason struct {
-	Code      string   `json:"code"`
-	Metric    string   `json:"metric,omitempty"`
-	Active    *float64 `json:"active,omitempty"`
-	Candidate *float64 `json:"candidate,omitempty"`
-	Limit     *float64 `json:"limit,omitempty"`
-	Message   string   `json:"message"`
+	Code      string               `json:"code"`
+	Metric    string               `json:"metric,omitempty"`
+	Active    *float64             `json:"active,omitempty"`
+	Candidate *float64             `json:"candidate,omitempty"`
+	Limit     *float64             `json:"limit,omitempty"`
+	Message   string               `json:"message"`
+	Bootstrap *BootstrapComparison `json:"bootstrap,omitempty"`
 }
 
 type Result struct {
@@ -83,7 +84,36 @@ func Evaluate(input Input) Result {
 			rejected = append(rejected, comparisonReason("quality_score_below_minimum", "quality_score", value(input.Active.QualityScore), value(input.Candidate.QualityScore), *input.Policy.MinimumQualityScore, "Candidate semantic quality score is below policy"))
 		}
 	}
-	if input.Policy.MaxQualityRegressionPercent != nil {
+	mode := input.Policy.QualityComparisonMode
+	if mode == "" {
+		mode = "threshold"
+	}
+	if mode == "bootstrap" {
+		if !qualityComparable || input.Policy.MaxQualityRegressionPercent == nil || input.Active.QualityPairingDigest == "" || input.Active.QualityPairingDigest != input.Candidate.QualityPairingDigest {
+			waiting = append(waiting, Reason{Code: "quality_bootstrap_evidence_unavailable", Metric: "quality_distribution", Message: "Bootstrap quality policy requires comparable paired distributions, a shared pairing digest, and a regression limit"})
+		} else {
+			comparison, err := PairedBootstrap(input.Active.QualityScores, input.Candidate.QualityScores, input.Policy.QualityBootstrapAlpha, input.Policy.QualityBootstrapMinSamples, input.Policy.QualityBootstrapSeed, *input.Policy.MaxQualityRegressionPercent)
+			if err != nil {
+				waiting = append(waiting, Reason{Code: "quality_bootstrap_invalid", Metric: "quality_distribution", Message: err.Error(), Bootstrap: &comparison})
+			} else {
+				reason := Reason{Metric: "quality_distribution", Bootstrap: &comparison}
+				switch comparison.Status {
+				case "reject":
+					reason.Code, reason.Message = "quality_bootstrap_regression", "Paired-bootstrap confidence interval exceeds the persisted quality-regression limit"
+					rejected = append(rejected, reason)
+				case "accept":
+					// The successful comparison remains in the persisted metrics and
+					// final within-policy decision; it is not a failure reason.
+				case "inconclusive":
+					reason.Code, reason.Message = "quality_bootstrap_inconclusive", "Paired-bootstrap confidence interval overlaps the persisted quality-regression limit"
+					waiting = append(waiting, reason)
+				default:
+					reason.Code, reason.Message = "quality_bootstrap_insufficient", fmt.Sprintf("Bootstrap quality policy needs at least %d paired samples; active=%d candidate=%d", input.Policy.QualityBootstrapMinSamples, len(input.Active.QualityScores), len(input.Candidate.QualityScores))
+					waiting = append(waiting, reason)
+				}
+			}
+		}
+	} else if input.Policy.MaxQualityRegressionPercent != nil {
 		if !qualityComparable {
 			if !input.Policy.RequireQualityEvidence {
 				waiting = append(waiting, Reason{Code: "quality_evidence_not_comparable", Metric: "quality_score", Message: "Quality regression policy requires the same versioned evaluation suite and evaluator"})

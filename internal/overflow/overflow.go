@@ -69,19 +69,40 @@ func Evaluate(policy Policy, state State, signal Signal, now time.Time) (Decisio
 		}
 		return decision, nil
 	}
+	if policy.Mode == "health" {
+		cooldown := !state.LastChangedAt.IsZero() && now.Sub(state.LastChangedAt) < policy.Cooldown
+		if !signal.PrimaryHealthy {
+			decision.ConsecutiveHigh = min(policy.BreachIntervals, state.ConsecutiveHigh+1)
+			decision.ConsecutiveLow = 0
+			if state.External {
+				decision.Route = "external"
+				decision.Reason = "unhealthy capacity remains decayed"
+			} else if decision.ConsecutiveHigh >= policy.BreachIntervals && !cooldown {
+				decision.Route, decision.Action = "external", "overflow"
+				decision.Reason = "capacity was unhealthy for the required consecutive observations"
+			} else {
+				decision.Reason = "waiting for unhealthy-capacity hysteresis"
+			}
+			return decision, nil
+		}
+		decision.ConsecutiveHigh = 0
+		decision.ConsecutiveLow = min(policy.RecoveryIntervals, state.ConsecutiveLow+1)
+		if state.External {
+			decision.Route = "external"
+			decision.Reason = "decayed capacity awaits bounded recovery"
+			if decision.ConsecutiveLow >= policy.RecoveryIntervals && !cooldown {
+				decision.Route, decision.Action = "primary", "recover"
+				decision.Reason = "capacity recovered for the required consecutive observations"
+			}
+		}
+		return decision, nil
+	}
 	if !signal.PrimaryHealthy {
 		decision.Route = "external"
 		decision.Action = "overflow"
 		decision.Reason = "all primary capacity is unhealthy"
 		decision.ConsecutiveHigh = 0
 		decision.ConsecutiveLow = 0
-		return decision, nil
-	}
-	if policy.Mode == "health" {
-		if state.External {
-			decision.Action = "recover"
-			decision.Reason = "primary capacity recovered"
-		}
 		return decision, nil
 	}
 	if signal.Waiting == nil || math.IsNaN(*signal.Waiting) || math.IsInf(*signal.Waiting, 0) || signal.ObservedAt.IsZero() || now.Sub(signal.ObservedAt) < 0 || now.Sub(signal.ObservedAt) > policy.SignalMaxAge {

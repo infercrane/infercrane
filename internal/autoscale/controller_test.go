@@ -17,6 +17,9 @@ type fakeRepository struct {
 func (f *fakeRepository) AutoscalingDeployments(context.Context) ([]Deployment, error) {
 	return []Deployment{f.deployment}, nil
 }
+func (f *fakeRepository) AutoscalingSLOEvidence(context.Context, string, time.Time) (SLOEvidence, error) {
+	return SLOEvidence{}, nil
+}
 func (f *fakeRepository) RecordDecision(_ context.Context, _ string, d Decision, _ string) error {
 	f.decision = d
 	return nil
@@ -59,6 +62,9 @@ type multiRepository struct {
 
 func (f *multiRepository) AutoscalingDeployments(context.Context) ([]Deployment, error) {
 	return f.deployments, nil
+}
+func (f *multiRepository) AutoscalingSLOEvidence(context.Context, string, time.Time) (SLOEvidence, error) {
+	return SLOEvidence{}, nil
 }
 func (f *multiRepository) RecordDecision(_ context.Context, id string, d Decision, _ string) error {
 	if f.decisions == nil {

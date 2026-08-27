@@ -1,3 +1,9 @@
+---
+title: InferCrane v1.0.0
+description: Release notes and qualification boundary for the first public stable InferCrane release.
+sidebarTitle: v1.0.0 release notes
+---
+
 # InferCrane v1.0.0
 
 `v1.0.0` is the first public release of InferCrane, an open-source inference infrastructure layer

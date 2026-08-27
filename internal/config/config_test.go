@@ -54,6 +54,19 @@ func TestRunPodNetworkVolumesRequireImmutableExactMappings(t *testing.T) {
 	}
 }
 
+func TestRunPodHuggingFaceCredentialIsReferenceOnly(t *testing.T) {
+	t.Setenv("INFERCRANE_API_KEY", "secret")
+	t.Setenv("INFERCRANE_RUNPOD_HF_TOKEN_SECRET", "infercrane-hf-token")
+	cfg, err := Load()
+	if err != nil || cfg.RunPodHFTokenSecret != "infercrane-hf-token" {
+		t.Fatalf("cfg=%#v err=%v", cfg, err)
+	}
+	t.Setenv("INFERCRANE_RUNPOD_HF_TOKEN_SECRET", "{{unsafe}}")
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "secret name") {
+		t.Fatalf("unsafe secret reference accepted: %v", err)
+	}
+}
+
 func TestLoadRequiresAPIKey(t *testing.T) {
 	t.Setenv("INFERCRANE_API_KEY", "")
 	if _, err := Load(); err == nil {

@@ -463,7 +463,9 @@ func (r *Reconciler) compileEndpoints(ctx context.Context, deployments []domain.
 				bindings[binding.ID] = binding
 			}
 			compiled := make([]routes.Snapshot, 0, len(resolved.ActivePlan.Bindings))
+			plannedBindingIDs := make([]string, 0, len(resolved.ActivePlan.Bindings))
 			for _, planned := range resolved.ActivePlan.Bindings {
+				plannedBindingIDs = append(plannedBindingIDs, planned.BindingID)
 				binding, found := bindings[planned.BindingID]
 				if !found || binding.OwnershipMode == "observe-only" {
 					continue
@@ -530,7 +532,10 @@ func (r *Reconciler) compileEndpoints(ctx context.Context, deployments []domain.
 				state = "degraded"
 				r.Routes.RemoveEndpointForTenant(tenant, endpoint.Name)
 			} else {
-				r.Routes.PublishEndpoint(routes.EndpointRoute{TenantID: tenant, Alias: endpoint.Name, RoutingPolicy: resolved.ActivePlan.RoutingPolicy, Routes: compiled})
+				published := r.Routes.PublishEndpoint(routes.EndpointRoute{TenantID: tenant, Alias: endpoint.Name, RoutingPolicy: resolved.ActivePlan.RoutingPolicy, Routes: compiled, PlannedBindingIDs: plannedBindingIDs})
+				if resolved.ActivePlan.RoutingPolicy == "weighted" && published < len(plannedBindingIDs) {
+					state = "degraded"
+				}
 			}
 			if endpoint.ObservedState != state {
 				_ = store.SetEndpointState(ctx, tenant, endpoint.ID, state)

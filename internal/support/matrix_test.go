@@ -2,8 +2,19 @@ package support
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
+
+func TestVLLMWorkloadPinsImageAndResolvedModelRevision(t *testing.T) {
+	workload := VLLMWorkload()
+	if err := workload.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(workload.Image, "@sha256:") || workload.Command[2] != "${MODEL}" || workload.Command[4] != "${MODEL_REVISION}" {
+		t.Fatalf("workload=%#v", workload)
+	}
+}
 
 func TestSGLangWorkloadPinsResolvedModelRevision(t *testing.T) {
 	command := SGLangWorkload().Command

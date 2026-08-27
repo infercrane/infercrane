@@ -88,7 +88,7 @@ func (s *Store) ScaleTo(ctx context.Context, deploymentID string, desired int) e
 }
 
 func (s *Store) AutoscalingDeployments(ctx context.Context) ([]autoscale.Deployment, error) {
-	rows, err := s.QueryContext(ctx, `SELECT d.id,p.enabled,p.min_replicas,p.max_replicas,p.queue_threshold,p.low_load_threshold,p.scale_up_intervals,p.scale_down_intervals,p.cooldown_seconds,COUNT(dt.target_id),COALESCE(st.consecutive_high,0),COALESCE(st.consecutive_low,0),st.last_scaled_at FROM deployments d JOIN scaling_policies p ON p.deployment_id=d.id LEFT JOIN deployment_targets dt ON dt.deployment_id=d.id LEFT JOIN autoscaling_state st ON st.deployment_id=d.id WHERE d.desired_state='running' AND d.observed_state IN ('healthy','degraded') AND p.enabled=TRUE GROUP BY d.id,p.deployment_id,st.deployment_id`)
+	rows, err := s.QueryContext(ctx, `SELECT d.id,p.enabled,p.min_replicas,p.max_replicas,p.queue_threshold,p.low_load_threshold,p.scale_up_intervals,p.scale_down_intervals,p.cooldown_seconds,COUNT(dt.target_id),COALESCE(st.consecutive_high,0),COALESCE(st.consecutive_low,0),st.last_scaled_at,slo.max_ttft_p95_ms,slo.max_latency_p95_ms FROM deployments d JOIN scaling_policies p ON p.deployment_id=d.id LEFT JOIN deployment_targets dt ON dt.deployment_id=d.id LEFT JOIN autoscaling_state st ON st.deployment_id=d.id LEFT JOIN deployment_slo_policies slo ON slo.deployment_id=d.id WHERE d.desired_state='running' AND d.observed_state IN ('healthy','degraded') AND p.enabled=TRUE GROUP BY d.id,p.deployment_id,st.deployment_id,slo.deployment_id`)
 	if err != nil {
 		return nil, err
 	}
@@ -98,16 +98,82 @@ func (s *Store) AutoscalingDeployments(ctx context.Context) ([]autoscale.Deploym
 		var d autoscale.Deployment
 		var cooldown int
 		var last sql.NullTime
-		if err := rows.Scan(&d.ID, &d.Policy.Enabled, &d.Policy.MinReplicas, &d.Policy.MaxReplicas, &d.Policy.QueueThreshold, &d.Policy.LowLoadThreshold, &d.Policy.ScaleUpIntervals, &d.Policy.ScaleDownIntervals, &cooldown, &d.State.Replicas, &d.State.ConsecutiveHigh, &d.State.ConsecutiveLow, &last); err != nil {
+		var maxTTFT, maxLatency sql.NullFloat64
+		if err := rows.Scan(&d.ID, &d.Policy.Enabled, &d.Policy.MinReplicas, &d.Policy.MaxReplicas, &d.Policy.QueueThreshold, &d.Policy.LowLoadThreshold, &d.Policy.ScaleUpIntervals, &d.Policy.ScaleDownIntervals, &cooldown, &d.State.Replicas, &d.State.ConsecutiveHigh, &d.State.ConsecutiveLow, &last, &maxTTFT, &maxLatency); err != nil {
 			return nil, err
 		}
 		d.Policy.Cooldown = time.Duration(cooldown) * time.Second
 		if last.Valid {
 			d.State.LastScaledAt = last.Time
 		}
+		if maxTTFT.Valid {
+			d.Policy.MaxTTFTP95MS = &maxTTFT.Float64
+		}
+		if maxLatency.Valid {
+			d.Policy.MaxLatencyP95MS = &maxLatency.Float64
+		}
 		out = append(out, d)
 	}
 	return out, rows.Err()
+}
+
+const autoscalingSLOWindow = 5 * time.Minute
+
+// AutoscalingSLOEvidence returns only persisted, exact-tuple evidence. A
+// benchmark is capacity evidence only when it measured one replica and its
+// immutable model, runtime/config, provider, region and accelerator topology
+// all match the active revision.
+func (s *Store) AutoscalingSLOEvidence(ctx context.Context, deploymentID string, observedAt time.Time) (autoscale.SLOEvidence, error) {
+	if observedAt.IsZero() {
+		return autoscale.SLOEvidence{}, errors.New("autoscaling evidence observation time is required")
+	}
+	evidence := autoscale.SLOEvidence{RequestWindowSeconds: int(autoscalingSLOWindow.Seconds())}
+	windowStart := observedAt.UTC().Add(-autoscalingSLOWindow)
+	var ttft, latency sql.NullFloat64
+	if err := s.QueryRowContext(ctx, `SELECT COUNT(*),percentile_cont(0.95) WITHIN GROUP (ORDER BY ttft_ms) FILTER (WHERE ttft_ms IS NOT NULL),percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms) FILTER (WHERE latency_ms IS NOT NULL) FROM request_records r JOIN deployments d ON d.id=r.deployment_id WHERE r.deployment_id=? AND r.revision_id=d.active_revision_id AND r.started_at>=? AND r.started_at<=?`, deploymentID, windowStart.Format(time.RFC3339Nano), observedAt.UTC().Format(time.RFC3339Nano)).Scan(&evidence.RequestSamples, &ttft, &latency); err != nil {
+		return evidence, err
+	}
+	if evidence.RequestSamples > 0 {
+		rps := float64(evidence.RequestSamples) / autoscalingSLOWindow.Seconds()
+		evidence.RequestsPerSecond = &rps
+	}
+	if ttft.Valid {
+		evidence.P95TTFTMS = &ttft.Float64
+	}
+	if latency.Valid {
+		evidence.P95LatencyMS = &latency.Float64
+	}
+
+	var tenant, modelIdentity, runtimeName, runtimeVersion, runtimeArgs string
+	var provider, region, gpu, computeMode string
+	var gpuCount int
+	err := s.QueryRowContext(ctx, `SELECT d.tenant_id,COALESCE(a.model_identity,''),COALESCE(r.spec_json->>'runtime',''),COALESCE(r.spec_json->>'runtime_version',''),COALESCE(r.spec_json->'runtime_args','[]'::jsonb)::text,COALESCE(NULLIF(r.spec_json->>'provider_adapter',''),r.spec_json->>'cloud',''),COALESCE(r.spec_json->>'region',''),COALESCE(r.spec_json->>'gpu',''),COALESCE((r.spec_json->>'gpu_count')::integer,CASE WHEN COALESCE(r.spec_json->>'gpu','')='' THEN 0 ELSE 1 END),COALESCE(r.spec_json->>'compute_mode','elastic') FROM deployments d JOIN deployment_revisions r ON r.id=d.active_revision_id LEFT JOIN model_artifacts a ON a.id=r.model_artifact_id WHERE d.id=?`, deploymentID).Scan(&tenant, &modelIdentity, &runtimeName, &runtimeVersion, &runtimeArgs, &provider, &region, &gpu, &gpuCount, &computeMode)
+	if err != nil {
+		return evidence, err
+	}
+	evidence.ComparisonBoundary = "immutable model + runtime/version/args + provider/region + GPU topology + one replica"
+	if modelIdentity == "" || runtimeName == "" || provider == "" || gpu == "" {
+		return evidence, nil
+	}
+	var benchmarkID, benchmarkRuntimeConfig string
+	var benchmarkSamples, succeeded int
+	var goodput float64
+	err = s.QueryRowContext(ctx, `SELECT id,request_count,succeeded,goodput,runtime_config_json::text FROM benchmark_results WHERE tenant_id=? AND model_identity=? AND runtime=? AND runtime_version=? AND provider=? AND region=? AND gpu=? AND gpu_count=? AND compute_mode=? AND request_count>=? AND succeeded>=? AND goodput>0 AND COALESCE((workload_json->>'replicas')::integer,0)=1 ORDER BY created_at DESC,id DESC LIMIT 1`, tenant, modelIdentity, runtimeName, runtimeVersion, provider, region, gpu, gpuCount, computeMode, autoscale.MinimumSLOSamples, autoscale.MinimumSLOSamples).Scan(&benchmarkID, &benchmarkSamples, &succeeded, &goodput, &benchmarkRuntimeConfig)
+	if errors.Is(err, sql.ErrNoRows) {
+		return evidence, nil
+	}
+	if err != nil {
+		return evidence, err
+	}
+	var actualConfig struct {
+		Args json.RawMessage `json:"args"`
+	}
+	if json.Unmarshal([]byte(benchmarkRuntimeConfig), &actualConfig) != nil || string(actualConfig.Args) != runtimeArgs || succeeded > benchmarkSamples {
+		return evidence, nil
+	}
+	evidence.BenchmarkID, evidence.BenchmarkSamples = benchmarkID, benchmarkSamples
+	evidence.GoodputPerReplica, evidence.Comparable = &goodput, true
+	return evidence, nil
 }
 
 func (s *Store) AutoscalingTargetURLs(ctx context.Context, deploymentID string) ([]string, error) {

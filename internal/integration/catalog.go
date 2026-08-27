@@ -56,6 +56,7 @@ func BaseCatalog() (*Registry, error) {
 	}
 	if err := registry.RegisterRuntime(RuntimeProfile{
 		Runtime: support.DefaultRuntime, ContractVersion: RuntimeContractV1, AdapterVersion: "builtin-v1", EngineVersion: support.DefaultRuntimeVersion, Protocol: "openai",
+		DefaultWorkload: support.VLLMWorkload(),
 		Capabilities: []Capability{
 			{Name: "buffered_chat", State: CapabilitySupported, Evidence: "go:test/internal/gateway#TestCompletionRewritesAlias"},
 			{Name: "completions", State: CapabilitySupported, Evidence: "go:test/internal/gateway#TestQualifiedProtocolSurfacesPreservePayloads"},
@@ -99,7 +100,7 @@ func providerCatalog() (*Registry, error) {
 			},
 			Qualification: []Qualification{
 				{State: QualificationLocal, Environment: "hermetic-runpod-rest", Evidence: "go:test/internal/provision#TestRunPodPodsLifecycleIsReplaySafeAndPreservesImmutableWorkload"},
-				{State: QualificationDeferred, Environment: "real-runpod-custom-oci", Reason: "real-provider qualification has not been completed"},
+				{State: QualificationDeferred, Environment: "real-runpod-native-pods", Reason: "real-provider qualification remains exact runtime, model, GPU, region, and workload evidence"},
 			},
 		},
 		{
@@ -172,6 +173,8 @@ func PortableCatalog() (*Registry, error) {
 	}
 	if err = registry.SetCompatibility(
 		RuntimeCompatibility{Runtime: "vllm", Adapter: "skypilot", Cloud: "runpod", Mode: ElasticMode, State: QualificationLocal, Evidence: "make:dev-check-full"},
+		RuntimeCompatibility{Runtime: "vllm", Adapter: "runpod-pods", Cloud: "runpod", Mode: ElasticMode, State: QualificationLocal, Evidence: "go:test/internal/provision#TestRunPodPodsLifecycleIsReplaySafeAndPreservesImmutableWorkload"},
+		RuntimeCompatibility{Runtime: "sglang", Adapter: "runpod-pods", Cloud: "runpod", Mode: ElasticMode, State: QualificationLocal, Evidence: "go:test/internal/provision#TestRunPodPodsLifecycleIsReplaySafeAndPreservesImmutableWorkload"},
 		RuntimeCompatibility{Runtime: "custom-oci", Adapter: "runpod-pods", Cloud: "runpod", Mode: ElasticMode, State: QualificationLocal, Evidence: "go:test/internal/provision#TestRunPodPodsLifecycleIsReplaySafeAndPreservesImmutableWorkload"},
 		RuntimeCompatibility{Runtime: "vllm", Adapter: "runpod-serverless", Cloud: "runpod", Mode: ServerlessMode, State: QualificationLocal, Evidence: "go:test/internal/workflows#TestServerlessConvergeRegistersScaleToZeroEndpointWithoutWarmingWorker"},
 		RuntimeCompatibility{Runtime: "vllm", Adapter: "aws-ec2", Cloud: "aws", Mode: ElasticMode, State: QualificationLocal, Evidence: "go:test/internal/conformance#TestAWSEC2ProviderContractConformance"},
@@ -324,6 +327,15 @@ func V1Catalog() (*Registry, error) {
 			Qualification: []Qualification{{State: QualificationRegistered, Environment: "serving-contract"}, {State: QualificationDeferred, Environment: "real-lmcache-gpu", Reason: "cache protocol, process lifecycle, hit-rate, memory pressure, and failure behavior need real runtime evidence"}},
 		},
 		{
+			Adapter: "dynamo-nixl", Kind: CompositionOrchestrator, ContractVersion: CompositionV1,
+			Ownership: "Dynamo owns prefill/decode components and NIXL transport; InferCrane records immutable topology intent and translates arguments but refuses execution until the full transport lifecycle is qualified.",
+			Capabilities: []Capability{
+				{Name: "argument_translation", State: CapabilitySupported, Evidence: "go:test/internal/servingcontract#TestDeferredNIXLTranslationIsRuntimeSpecificAndCannotCompile"},
+				{Name: "executable_lifecycle", State: CapabilityUnsupported, Detail: "compile fails closed; no NIXL support claim is made"},
+			},
+			Qualification: []Qualification{{State: QualificationRegistered, Environment: "serving-contract"}, {State: QualificationDeferred, Environment: "real-dynamo-nixl-gpu-kubernetes", Reason: "NIXL versions, GPU transport, routing, recovery, and drain behavior require a real version-pinned cluster"}},
+		},
+		{
 			Adapter: "llm-d", Kind: CompositionOrchestrator, ContractVersion: CompositionV1,
 			Ownership: "llm-d owns Kubernetes scheduling and data-plane routing for its deployment; InferCrane may own only the outer immutable serving plan, evidence, and release decision.",
 			Capabilities: []Capability{
@@ -407,11 +419,11 @@ func V1Catalog() (*Registry, error) {
 			{Name: "dgd_parent_lifecycle", State: CapabilitySupported, Detail: "InferCrane owns one DynamoGraphDeployment; the Dynamo operator owns children", Evidence: "go:test/internal/provision#TestKubernetesDynamoLifecycleIsReplaySafeAndOwnsOneParent"},
 			{Name: "lost_response_adoption", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestKubernetesDynamoAdoptsLostApplyResponseAndRejectsStaleReadiness"},
 			{Name: "aggregated_serving", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestKubernetesDynamoManifestMakesTopologyAndSecretsExplicit"},
-			{Name: "disaggregated_serving", State: CapabilitySupported, Detail: "manifest and ownership contract are locally qualified; GPU performance is not", Evidence: "go:test/internal/provision#TestKubernetesDynamoDisaggregatedVLLMAndSGLangAreExplicit"},
+			{Name: "disaggregated_serving", State: CapabilityUnsupported, Detail: "NIXL argument translation is registered but compile fails closed until transport and failure contracts are qualified"},
 			{Name: "kv_aware_routing", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestKubernetesDynamoManifestMakesTopologyAndSecretsExplicit"},
 			{Name: "kvbm_cache", State: CapabilitySupported, Detail: "aggregated vLLM only until additional combinations are qualified", Evidence: "go:test/internal/provision#TestKubernetesDynamoManifestMakesTopologyAndSecretsExplicit"},
 			{Name: "dynamo_planner_autoscaling", State: CapabilityUnsupported, Detail: "registered in the serving contract but fails closed until DGDSA ownership is qualified"},
-			{Name: "lmcache", State: CapabilityUnsupported, Detail: "registered in the serving contract but not emitted by this adapter"},
+			{Name: "lmcache", State: CapabilityUnsupported, Detail: "registered with exact vLLM argument translation; compile fails closed until lifecycle qualification"},
 			{Name: "hicache", State: CapabilityUnsupported, Detail: "registered in the serving contract but not emitted by this adapter"},
 		},
 		Qualification: []Qualification{

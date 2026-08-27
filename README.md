@@ -16,8 +16,41 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-111111.svg"></a>
+  <a href="https://github.com/infercrane/infercrane/actions/workflows/quality.yml"><img alt="Quality checks" src="https://github.com/infercrane/infercrane/actions/workflows/quality.yml/badge.svg?branch=main"></a>
   <a href="https://docs.infercrane.com"><img alt="Documentation" src="https://img.shields.io/badge/docs-infercrane.com-235ee7.svg"></a>
+  <a href="https://github.com/infercrane/infercrane/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/infercrane/infercrane?style=social"></a>
 </p>
+
+<p align="center">
+  <a href="#try-the-complete-product-loop-locally">Run the five-minute local proof</a>
+  · <a href="https://docs.infercrane.com/quickstart">Read the quickstart</a>
+  · <a href="docs/images/product/github-product-demo.mp4">Watch the two-minute product tour</a>
+</p>
+
+<p align="center">
+  <a href="docs/images/product/github-product-demo.mp4">
+    <img alt="InferCrane plans a model deployment and persists its durable operation" src="docs/images/product/github-product-demo.gif" width="960">
+  </a>
+  <br>
+  <sub>Plan before mutation · survive disconnects · explain latency · guard every release</sub>
+</p>
+
+InferCrane is the open-source control plane for self-hosted model inference. Your application keeps
+one model identity while InferCrane changes the model artifact, runtime, accelerator, provider,
+replica count, and active revision underneath it.
+
+- **Deploy or adopt:** operate vLLM, SGLang, custom OCI, and compatible existing endpoints across
+  AWS, GCP, Kubernetes, and RunPod.
+- **Keep one endpoint:** route revisions and providers behind a stable OpenAI-compatible contract.
+- **Prove every change:** persist request, benchmark, quality, cost, and rollout evidence before
+  promotion—and preserve the active revision when evidence is missing.
+
+The local proof needs no GPU or cloud account. Real-provider support remains exact-tuple qualified;
+InferCrane reports missing model/runtime/hardware evidence as unknown instead of turning it into a
+compatibility claim.
+
+<details>
+<summary><strong>See the system boundary</strong></summary>
 
 ```text
 Applications and agents
@@ -37,16 +70,7 @@ vLLM · SGLang · custom OCI · experimental Dynamo
 AWS · GCP · Kubernetes · RunPod · existing infrastructure
 ```
 
-Your application keeps one model identity while InferCrane changes the model artifact, runtime,
-accelerator, provider, replica count, and active revision underneath it.
-
-<p align="center">
-  <a href="https://infercrane.com/product/infercrane-console-demo.mp4">
-    <img alt="InferCrane production fleet console" src="https://infercrane.com/product/fleet-overview.jpg" width="100%">
-  </a>
-  <br>
-  <a href="https://infercrane.com/product/infercrane-console-demo.mp4">Watch the product demo</a>
-</p>
+</details>
 
 ## Start with the job you need to do
 

@@ -13,7 +13,11 @@ Complete every item before creating the stable tag:
 2. Make `infercrane/infercrane` public. Confirm the license, history, issues, discussions, and every
    tracked file are intended for public disclosure before changing visibility.
 3. Require two-factor authentication for the `infercrane` GitHub organization. Add a second owner
-   and recovery procedure so the release process has no single-account recovery dependency.
+   and recovery procedure so the release process has no single-account recovery dependency. Create
+   a short-lived fine-grained token from an organization owner for the publication preflight, with
+   no repository write access or organization write permissions, and store it as the repository
+   secret `ORG_SECURITY_READ_TOKEN`. GitHub's repository-scoped `GITHUB_TOKEN` cannot see the
+   owner-only `two_factor_requirement_enabled` field. Delete this preflight token after publication.
 4. Protect `main` and release tags. Require the quality, security, docs, DCO, and release-safety
    checks; prevent force pushes and deletion; require CODEOWNER review for security/release paths.
    Enable the organization policy that requires actions to be pinned to full commit SHAs after all
@@ -32,7 +36,8 @@ Complete every item before creating the stable tag:
    scope, reserve `@infercrane/sdk` before the stable release with a legitimate RC package published
    interactively under 2FA. Then configure its GitHub trusted publisher for
    `publish-stable.yml`/`stable-publication`, allow `npm publish`, require 2FA, and disallow legacy
-   token publishing. Do not publish the stable version manually.
+   token publishing. Do not publish the stable version manually. The protected workflow pins npm
+   `11.6.4`; npm trusted publishing requires npm `11.5.1` or newer.
 9. Confirm the GHCR package inherits public repository visibility and anonymous users can pull the
    exact RC tag. Do not rely on authenticated maintainer pulls as visibility evidence.
 10. Increase free disk space to at least the qualification harness minimum, then run the complete
@@ -49,7 +54,8 @@ file. Keep the current integration marked unpublished until that independent rel
 2. Run `make qualify-rc`. Real-cloud gates require their explicit paid-resource approval and exact
    tuple evidence; never reinterpret fixture results as GPU/provider qualification.
 3. Create and push only the configured candidate tag. Let `.github/workflows/release.yml` build the
-   draft prerelease, archives, checksums, SPDX SBOMs, Homebrew formula, SDK artifacts, exact-tag GHCR
+   draft prerelease, archives, checksums, SPDX SBOMs, Homebrew formula, unpublishable SDK test
+   artifacts, exact-tag GHCR
    image, vulnerability results, and GitHub attestations.
 4. Download the draft assets into a clean machine. Run `scripts/verify-release-artifacts.sh` with the
    candidate tag, confirm its Apache-2.0 `LICENSE`, InferCrane `NOTICE`, generated linked-dependency

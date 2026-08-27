@@ -114,7 +114,6 @@ jobs:
             dist/homebrew/infercrane.rb
 
   sdk-packages:
-    if: ${{ !contains(github.ref_name, '-rc.') }}
     needs: [preflight, artifacts]
     runs-on: ubuntu-latest
     permissions:

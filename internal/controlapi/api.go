@@ -447,7 +447,16 @@ func (a API) recordQualityEvidence(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	actor := r.Context().Value(identityKey{}).(domain.Principal)
-	item := domain.QualityEvidence{RevisionID: payload.RevisionID, Suite: payload.Suite, SuiteVersion: payload.SuiteVersion, Evaluator: payload.Evaluator, EvaluatorVersion: payload.EvaluatorVersion, Score: payload.Score, Passed: payload.Passed, SampleCount: payload.SampleCount, ArtifactDigest: payload.ArtifactDigest, PayloadDigest: envelope.Digest, Signature: envelope.Signature, PublicKey: envelope.PublicKey, Algorithm: envelope.Algorithm, KeyID: envelope.KeyID, EvaluatedAt: payload.EvaluatedAt}
+	distributionJSON := "{}"
+	if payload.Distribution != nil {
+		encoded, encodeErr := json.Marshal(payload.Distribution)
+		if encodeErr != nil {
+			writeError(w, http.StatusUnprocessableEntity, "invalid_quality_evidence", "quality distribution could not be encoded")
+			return
+		}
+		distributionJSON = string(encoded)
+	}
+	item := domain.QualityEvidence{RevisionID: payload.RevisionID, Suite: payload.Suite, SuiteVersion: payload.SuiteVersion, Evaluator: payload.Evaluator, EvaluatorVersion: payload.EvaluatorVersion, Score: payload.Score, Passed: payload.Passed, SampleCount: payload.SampleCount, DistributionJSON: distributionJSON, ArtifactDigest: payload.ArtifactDigest, PayloadDigest: envelope.Digest, Signature: envelope.Signature, PublicKey: envelope.PublicKey, Algorithm: envelope.Algorithm, KeyID: envelope.KeyID, EvaluatedAt: payload.EvaluatedAt}
 	item, created, err := store.RecordQualityEvidence(r.Context(), actor.TenantID, payload.Deployment, item)
 	if errors.Is(err, domain.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "not_found", "deployment or revision was not found")
@@ -489,7 +498,11 @@ func (a API) qualityEvidence(w http.ResponseWriter, r *http.Request) {
 }
 
 func qualityEvidenceResponse(item domain.QualityEvidence) map[string]any {
-	return map[string]any{"id": item.ID, "deployment_id": item.DeploymentID, "revision_id": item.RevisionID, "suite": item.Suite, "suite_version": item.SuiteVersion, "evaluator": item.Evaluator, "evaluator_version": item.EvaluatorVersion, "score": item.Score, "passed": item.Passed, "sample_count": item.SampleCount, "artifact_digest": item.ArtifactDigest, "payload_digest": item.PayloadDigest, "algorithm": item.Algorithm, "key_id": item.KeyID, "evaluated_at": item.EvaluatedAt, "created_at": item.CreatedAt}
+	distribution := json.RawMessage(item.DistributionJSON)
+	if !json.Valid(distribution) {
+		distribution = json.RawMessage(`{}`)
+	}
+	return map[string]any{"id": item.ID, "deployment_id": item.DeploymentID, "revision_id": item.RevisionID, "suite": item.Suite, "suite_version": item.SuiteVersion, "evaluator": item.Evaluator, "evaluator_version": item.EvaluatorVersion, "score": item.Score, "passed": item.Passed, "sample_count": item.SampleCount, "distribution": distribution, "artifact_digest": item.ArtifactDigest, "payload_digest": item.PayloadDigest, "algorithm": item.Algorithm, "key_id": item.KeyID, "evaluated_at": item.EvaluatedAt, "created_at": item.CreatedAt}
 }
 
 func (a API) integrations(w http.ResponseWriter, _ *http.Request) {
@@ -3230,7 +3243,18 @@ func (a API) runBenchmark(w http.ResponseWriter, r *http.Request) {
 	if revisionSpec.ComputeMode == "" {
 		revisionSpec.ComputeMode = "elastic"
 	}
-	workload, _ := json.Marshal(map[string]any{"endpoint_type": "chat", "streaming": streaming, "request_count": request.Requests, "concurrency": request.Concurrency, "random_seed": request.RandomSeed, "input_tokens": request.InputTokens, "output_tokens": request.OutputTokens, "profile": request.Profile, "profile_version": request.ProfileVersion, "ttft_slo_ms": request.TTFTSLOMS, "tpot_slo_ms": request.TPOTSLOMS, "latency_slo_ms": request.LatencySLOMS, "server_token_count": true, "revision_selector": selector, "direct_revision_validation": selectedRevisionID != deployment.ActiveRevisionID})
+	replicas, replicaErr := a.Store.ReplicasForDeployment(r.Context(), principal.TenantID, deployment.ID)
+	if replicaErr != nil {
+		writeError(w, 500, "internal", "benchmark replica metadata lookup failed")
+		return
+	}
+	benchmarkReplicaCount := 0
+	for _, replica := range replicas {
+		if replica.RevisionID == selectedRevisionID && replica.Health == "healthy" && (replica.LifecycleState == "ready" || replica.LifecycleState == "active") {
+			benchmarkReplicaCount++
+		}
+	}
+	workload, _ := json.Marshal(map[string]any{"endpoint_type": "chat", "streaming": streaming, "request_count": request.Requests, "concurrency": request.Concurrency, "random_seed": request.RandomSeed, "input_tokens": request.InputTokens, "output_tokens": request.OutputTokens, "profile": request.Profile, "profile_version": request.ProfileVersion, "ttft_slo_ms": request.TTFTSLOMS, "tpot_slo_ms": request.TPOTSLOMS, "latency_slo_ms": request.LatencySLOMS, "server_token_count": true, "revision_selector": selector, "direct_revision_validation": selectedRevisionID != deployment.ActiveRevisionID, "replicas": benchmarkReplicaCount})
 	runtimeConfig, _ := json.Marshal(map[string]any{"args": revisionSpec.RuntimeArgs})
 	var gpuCount *int
 	if revisionSpec.GPU != "" {

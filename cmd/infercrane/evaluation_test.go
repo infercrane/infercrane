@@ -26,7 +26,7 @@ func TestEvaluationIngestSignsAndOptionallyAttachesStrictResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	resultPath := filepath.Join(directory, "result.json")
-	resultJSON := `{"schema":"infercrane.dev/evaluator-result/v1","suite":"support-answers","suite_version":"git:8a91d7c","evaluator":"custom-ci","evaluator_version":"1.4.0","score":0.93,"passed":true,"sample_count":250,"artifact_digest":"sha256:` + strings.Repeat("a", 64) + `","evaluated_at":"2026-08-13T20:00:00Z"}`
+	resultJSON := `{"schema":"infercrane.dev/evaluator-result/v2","suite":"support-answers","suite_version":"git:8a91d7c","evaluator":"custom-ci","evaluator_version":"1.4.0","score":0.93,"passed":true,"sample_count":250,"artifact_digest":"sha256:` + strings.Repeat("a", 64) + `","evaluated_at":"2026-08-13T20:00:00Z"}`
 	if err = os.WriteFile(resultPath, []byte(resultJSON), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestEvaluationIngestSignsAndOptionallyAttachesStrictResult(t *testing.T) {
 func TestEvaluationIngestRejectsPromptContentBeforeSigning(t *testing.T) {
 	directory := t.TempDir()
 	resultPath := filepath.Join(directory, "result.json")
-	result := `{"schema":"infercrane.dev/evaluator-result/v1","suite":"s","suite_version":"v1","evaluator":"e","evaluator_version":"v1","score":0.8,"passed":true,"sample_count":1,"artifact_digest":"sha256:` + strings.Repeat("b", 64) + `","evaluated_at":"2026-08-13T20:00:00Z","prompt":"do not persist"}`
+	result := `{"schema":"infercrane.dev/evaluator-result/v2","suite":"s","suite_version":"v1","evaluator":"e","evaluator_version":"v1","score":0.8,"passed":true,"sample_count":1,"artifact_digest":"sha256:` + strings.Repeat("b", 64) + `","evaluated_at":"2026-08-13T20:00:00Z","prompt":"do not persist"}`
 	if err := os.WriteFile(resultPath, []byte(result), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestEvaluationIngestPreservesSignedEvidenceWhenAttachmentFails(t *testing.T
 		t.Fatal(err)
 	}
 	resultPath := filepath.Join(directory, "result.json")
-	result := `{"schema":"infercrane.dev/evaluator-result/v1","suite":"s","suite_version":"v1","evaluator":"e","evaluator_version":"v1","score":0.8,"passed":true,"sample_count":1,"artifact_digest":"sha256:` + strings.Repeat("c", 64) + `","evaluated_at":"2026-08-13T20:00:00Z"}`
+	result := `{"schema":"infercrane.dev/evaluator-result/v2","suite":"s","suite_version":"v1","evaluator":"e","evaluator_version":"v1","score":0.8,"passed":true,"sample_count":1,"artifact_digest":"sha256:` + strings.Repeat("c", 64) + `","evaluated_at":"2026-08-13T20:00:00Z"}`
 	if err = os.WriteFile(resultPath, []byte(result), 0o600); err != nil {
 		t.Fatal(err)
 	}

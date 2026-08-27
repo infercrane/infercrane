@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -39,7 +40,7 @@ func (s *Store) RecordQualityEvidence(ctx context.Context, tenant, deploymentNam
 	if evidence.CreatedAt.IsZero() {
 		evidence.CreatedAt = time.Now().UTC()
 	}
-	result, err := s.ExecContext(ctx, `INSERT INTO revision_quality_evidence(id,tenant_id,deployment_id,revision_id,suite,suite_version,evaluator,evaluator_version,score,passed,sample_count,artifact_digest,payload_digest,signature,public_key,algorithm,key_id,evaluated_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(tenant_id,payload_digest) DO NOTHING`, evidence.ID, evidence.TenantID, evidence.DeploymentID, evidence.RevisionID, evidence.Suite, evidence.SuiteVersion, evidence.Evaluator, evidence.EvaluatorVersion, evidence.Score, evidence.Passed, evidence.SampleCount, evidence.ArtifactDigest, evidence.PayloadDigest, evidence.Signature, evidence.PublicKey, evidence.Algorithm, evidence.KeyID, evidence.EvaluatedAt.Format(time.RFC3339Nano), evidence.CreatedAt.Format(time.RFC3339Nano))
+	result, err := s.ExecContext(ctx, `INSERT INTO revision_quality_evidence(id,tenant_id,deployment_id,revision_id,suite,suite_version,evaluator,evaluator_version,score,passed,sample_count,distribution_json,artifact_digest,payload_digest,signature,public_key,algorithm,key_id,evaluated_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?::jsonb,?,?,?,?,?,?,?,?) ON CONFLICT(tenant_id,payload_digest) DO NOTHING`, evidence.ID, evidence.TenantID, evidence.DeploymentID, evidence.RevisionID, evidence.Suite, evidence.SuiteVersion, evidence.Evaluator, evidence.EvaluatorVersion, evidence.Score, evidence.Passed, evidence.SampleCount, nullJSON(evidence.DistributionJSON), evidence.ArtifactDigest, evidence.PayloadDigest, evidence.Signature, evidence.PublicKey, evidence.Algorithm, evidence.KeyID, evidence.EvaluatedAt.Format(time.RFC3339Nano), evidence.CreatedAt.Format(time.RFC3339Nano))
 	if err != nil {
 		return domain.QualityEvidence{}, false, err
 	}
@@ -69,7 +70,7 @@ func (s *Store) QualityEvidenceForDeployment(ctx context.Context, tenant, deploy
 	if limit < 1 || limit > 100 {
 		limit = 20
 	}
-	rows, err := s.QueryContext(ctx, `SELECT q.id,q.tenant_id,q.deployment_id,q.revision_id,q.suite,q.suite_version,q.evaluator,q.evaluator_version,q.score,q.passed,q.sample_count,q.artifact_digest,q.payload_digest,q.signature,q.public_key,q.algorithm,q.key_id,q.evaluated_at,q.created_at FROM revision_quality_evidence q JOIN deployments d ON d.id=q.deployment_id WHERE d.tenant_id=? AND d.name=? ORDER BY q.evaluated_at DESC,q.id DESC LIMIT ?`, tenant, deploymentName, limit)
+	rows, err := s.QueryContext(ctx, `SELECT q.id,q.tenant_id,q.deployment_id,q.revision_id,q.suite,q.suite_version,q.evaluator,q.evaluator_version,q.score,q.passed,q.sample_count,q.distribution_json::text,q.artifact_digest,q.payload_digest,q.signature,q.public_key,q.algorithm,q.key_id,q.evaluated_at,q.created_at FROM revision_quality_evidence q JOIN deployments d ON d.id=q.deployment_id WHERE d.tenant_id=? AND d.name=? ORDER BY q.evaluated_at DESC,q.id DESC LIMIT ?`, tenant, deploymentName, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +87,7 @@ func (s *Store) QualityEvidenceForDeployment(ctx context.Context, tenant, deploy
 }
 
 func (s *Store) qualityEvidenceByDigest(ctx context.Context, tenant, digest string) (domain.QualityEvidence, error) {
-	row := s.QueryRowContext(ctx, `SELECT id,tenant_id,deployment_id,revision_id,suite,suite_version,evaluator,evaluator_version,score,passed,sample_count,artifact_digest,payload_digest,signature,public_key,algorithm,key_id,evaluated_at,created_at FROM revision_quality_evidence WHERE tenant_id=? AND payload_digest=?`, tenant, digest)
+	row := s.QueryRowContext(ctx, `SELECT id,tenant_id,deployment_id,revision_id,suite,suite_version,evaluator,evaluator_version,score,passed,sample_count,distribution_json::text,artifact_digest,payload_digest,signature,public_key,algorithm,key_id,evaluated_at,created_at FROM revision_quality_evidence WHERE tenant_id=? AND payload_digest=?`, tenant, digest)
 	item, err := scanQualityEvidence(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return item, ErrNotFound
@@ -97,7 +98,7 @@ func (s *Store) qualityEvidenceByDigest(ctx context.Context, tenant, digest stri
 func scanQualityEvidence(row rowScanner) (domain.QualityEvidence, error) {
 	var item domain.QualityEvidence
 	var evaluatedAt, createdAt string
-	err := row.Scan(&item.ID, &item.TenantID, &item.DeploymentID, &item.RevisionID, &item.Suite, &item.SuiteVersion, &item.Evaluator, &item.EvaluatorVersion, &item.Score, &item.Passed, &item.SampleCount, &item.ArtifactDigest, &item.PayloadDigest, &item.Signature, &item.PublicKey, &item.Algorithm, &item.KeyID, &evaluatedAt, &createdAt)
+	err := row.Scan(&item.ID, &item.TenantID, &item.DeploymentID, &item.RevisionID, &item.Suite, &item.SuiteVersion, &item.Evaluator, &item.EvaluatorVersion, &item.Score, &item.Passed, &item.SampleCount, &item.DistributionJSON, &item.ArtifactDigest, &item.PayloadDigest, &item.Signature, &item.PublicKey, &item.Algorithm, &item.KeyID, &evaluatedAt, &createdAt)
 	item.EvaluatedAt, item.CreatedAt = parseTime(evaluatedAt), parseTime(createdAt)
 	return item, err
 }
@@ -121,10 +122,25 @@ func applyQualityEvidence(active, candidate *domain.RevisionMetrics, rows []doma
 			active.QualityEvidenceID, active.QualitySuite = row.ID, row.Suite+"@"+row.SuiteVersion
 			candidate.QualityScore, candidate.QualityPassed, candidate.QualityComparable = &candidateEvidence.Score, &candidateEvidence.Passed, &comparable
 			candidate.QualityEvidenceID, candidate.QualitySuite = candidateEvidence.ID, candidateEvidence.Suite+"@"+candidateEvidence.SuiteVersion
+			applyQualityDistribution(active, row)
+			applyQualityDistribution(candidate, candidateEvidence)
 			return
 		}
 	}
 	comparable := false
 	candidate.QualityScore, candidate.QualityPassed, candidate.QualityComparable = &candidateEvidence.Score, &candidateEvidence.Passed, &comparable
 	candidate.QualityEvidenceID, candidate.QualitySuite = candidateEvidence.ID, candidateEvidence.Suite+"@"+candidateEvidence.SuiteVersion
+	applyQualityDistribution(candidate, candidateEvidence)
+}
+
+func applyQualityDistribution(metrics *domain.RevisionMetrics, evidence *domain.QualityEvidence) {
+	metrics.QualitySampleCount = evidence.SampleCount
+	var distribution struct {
+		PairingDigest string    `json:"pairing_digest"`
+		Scores        []float64 `json:"scores"`
+	}
+	if json.Unmarshal([]byte(evidence.DistributionJSON), &distribution) == nil && distribution.PairingDigest != "" && len(distribution.Scores) == evidence.SampleCount {
+		metrics.QualityPairingDigest = distribution.PairingDigest
+		metrics.QualityScores = distribution.Scores
+	}
 }

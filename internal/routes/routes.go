@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/infercrane/infercrane/internal/overflow"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
 )
 
@@ -38,6 +39,7 @@ type Snapshot struct {
 type EndpointRoute struct {
 	TenantID, Alias, RoutingPolicy string
 	Routes                         []Snapshot
+	PlannedBindingIDs              []string
 }
 
 // Directory is an atomic in-memory data-plane snapshot. Reads never touch the database.
@@ -49,10 +51,12 @@ type Directory struct {
 	blocked    map[string]bool
 	inflight   map[string]int
 	retired    map[string]Snapshot
+	health     map[string]overflow.State
+	now        func() time.Time
 }
 
 func New() *Directory {
-	return &Directory{items: make(map[string]Snapshot), endpoints: make(map[string]EndpointRoute), selections: make(map[string]uint64), blocked: make(map[string]bool), inflight: make(map[string]int), retired: make(map[string]Snapshot)}
+	return &Directory{items: make(map[string]Snapshot), endpoints: make(map[string]EndpointRoute), selections: make(map[string]uint64), blocked: make(map[string]bool), inflight: make(map[string]int), retired: make(map[string]Snapshot), health: make(map[string]overflow.State), now: time.Now}
 }
 
 func routeID(route Snapshot) string {
@@ -180,18 +184,61 @@ func routeWeight(route Snapshot) int {
 
 // PublishEndpoint atomically replaces the routes future requests may acquire.
 // Existing requests retain their pinned immutable Snapshot until release.
-func (d *Directory) PublishEndpoint(endpoint EndpointRoute) {
+func (d *Directory) PublishEndpoint(endpoint EndpointRoute) int {
 	if endpoint.TenantID == "" {
 		endpoint.TenantID = "global"
 	}
 	key := endpoint.TenantID + "\x00" + endpoint.Alias
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if endpoint.RoutingPolicy == "weighted" {
+		endpoint.Routes = d.applyHealthDecayLocked(key, endpoint)
+	}
 	if previous, ok := d.endpoints[key]; ok {
 		d.retireEndpointRoutesLocked(previous.Routes, endpoint.Routes)
 	}
 	d.endpoints[key] = EndpointRoute{TenantID: endpoint.TenantID, Alias: endpoint.Alias, RoutingPolicy: endpoint.RoutingPolicy, Routes: append([]Snapshot(nil), endpoint.Routes...)}
 	delete(d.blocked, key)
+	return len(endpoint.Routes)
+}
+
+// applyHealthDecayLocked keeps an unavailable binding at effective weight zero
+// and requires two consecutive healthy publications before restoring its
+// configured weight. This reuses the external-capacity hysteresis state
+// machine; publication remains atomic and existing requests stay pinned.
+func (d *Directory) applyHealthDecayLocked(key string, endpoint EndpointRoute) []Snapshot {
+	planned := append([]string(nil), endpoint.PlannedBindingIDs...)
+	if len(planned) == 0 {
+		for _, route := range endpoint.Routes {
+			planned = append(planned, route.BindingID)
+		}
+	}
+	available := make(map[string]Snapshot, len(endpoint.Routes))
+	for _, route := range endpoint.Routes {
+		available[route.BindingID] = route
+	}
+	now := d.now().UTC()
+	policy := overflow.Policy{Mode: "health", BreachIntervals: 2, RecoveryIntervals: 2, PrivacyAcknowledged: true, BudgetAvailable: true}
+	effective := make([]Snapshot, 0, len(endpoint.Routes))
+	for _, bindingID := range planned {
+		stateKey := key + "\x00" + bindingID
+		state := d.health[stateKey]
+		_, healthy := available[bindingID]
+		decision, err := overflow.Evaluate(policy, state, overflow.Signal{PrimaryHealthy: healthy}, now)
+		if err != nil {
+			continue
+		}
+		state.External = decision.Route == "external"
+		state.ConsecutiveHigh, state.ConsecutiveLow = decision.ConsecutiveHigh, decision.ConsecutiveLow
+		if decision.Action == "overflow" || decision.Action == "recover" {
+			state.LastChangedAt = now
+		}
+		d.health[stateKey] = state
+		if route, present := available[bindingID]; present && !state.External {
+			effective = append(effective, route)
+		}
+	}
+	return effective
 }
 
 func (d *Directory) RemoveEndpointForTenant(tenant, alias string) {
@@ -203,6 +250,11 @@ func (d *Directory) RemoveEndpointForTenant(tenant, alias string) {
 	}
 	delete(d.endpoints, key)
 	delete(d.selections, key)
+	for stateKey := range d.health {
+		if len(stateKey) > len(key) && stateKey[:len(key)+1] == key+"\x00" {
+			delete(d.health, stateKey)
+		}
+	}
 	d.blocked[key] = true
 }
 

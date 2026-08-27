@@ -150,7 +150,7 @@ func TestKubernetesDynamoManifestMakesTopologyAndSecretsExplicit(t *testing.T) {
 	}
 }
 
-func TestKubernetesDynamoDisaggregatedVLLMAndSGLangAreExplicit(t *testing.T) {
+func TestKubernetesDynamoDisaggregatedVLLMAndSGLangFailClosedBeforeMutation(t *testing.T) {
 	for _, runtimeName := range []string{"vllm", "sglang"} {
 		t.Run(runtimeName, func(t *testing.T) {
 			fixture := providerfixture.NewKubernetesCLI()
@@ -161,19 +161,11 @@ func TestKubernetesDynamoDisaggregatedVLLMAndSGLangAreExplicit(t *testing.T) {
 			spec.Serving.Worker = servingcontract.Pool{}
 			spec.Serving.Prefill = servingcontract.Pool{Replicas: 1, TensorParallelism: 1}
 			spec.Serving.Decode = servingcontract.Pool{Replicas: 2, TensorParallelism: 1}
-			if _, err := provider.EnsureReplica(context.Background(), spec); err != nil {
-				t.Fatal(err)
+			if _, err := provider.EnsureReplica(context.Background(), spec); err == nil || !strings.Contains(err.Error(), "registered for argument translation") {
+				t.Fatalf("%s disaggregation did not fail closed: %v", runtimeName, err)
 			}
-			body, _ := json.Marshal(fixture.Objects)
-			encoded := string(body)
-			expectedImage := testDynamoImage
-			if runtimeName == "sglang" {
-				expectedImage = testDynamoSGLangImage
-			}
-			for _, required := range []string{`"name":"Prefill"`, `"name":"Decode"`, `"--disaggregation-mode"`, `"prefill"`, `"decode"`, `"backendFramework":"` + runtimeName + `"`, `"image":"` + expectedImage + `"`} {
-				if !strings.Contains(encoded, required) {
-					t.Fatalf("%s manifest missing %s: %s", runtimeName, required, encoded)
-				}
+			if len(fixture.Objects) != 0 || fixture.ApplyCalls != 0 {
+				t.Fatalf("%s deferred topology reached Kubernetes: objects=%#v apply=%d", runtimeName, fixture.Objects, fixture.ApplyCalls)
 			}
 		})
 	}

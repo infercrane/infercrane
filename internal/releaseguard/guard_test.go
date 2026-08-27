@@ -120,3 +120,22 @@ func TestEvaluateMinimumQualityThresholdFailsClosedWithoutEvidence(t *testing.T)
 		t.Fatalf("missing threshold evidence result=%+v", result)
 	}
 }
+
+func TestEvaluateBootstrapQualityPersistsStatisticalDecisionEvidence(t *testing.T) {
+	limit, ttft := 5.0, 100.0
+	activeScore, candidateScore, passed, comparable := .9, .7, true, true
+	activeScores := []float64{.90, .88, .92, .86, .91, .89, .93, .87, .90, .92}
+	candidateScores := []float64{.70, .68, .72, .66, .71, .69, .73, .67, .70, .72}
+	policy := domain.ReleaseGuardPolicy{Enabled: true, MinimumRequests: 1, RequireQualityEvidence: true, MaxQualityRegressionPercent: &limit, QualityComparisonMode: "bootstrap", QualityBootstrapAlpha: .05, QualityBootstrapMinSamples: 10, QualityBootstrapSeed: 42}
+	active := domain.RevisionMetrics{ReadyReplicas: 1, Requests: 1, P95TTFTMS: &ttft, QualityScore: &activeScore, QualityPassed: &passed, QualityComparable: &comparable, QualityPairingDigest: "sha256:pair", QualityScores: activeScores}
+	candidate := domain.RevisionMetrics{ReadyReplicas: 1, Requests: 1, P95TTFTMS: &ttft, QualityScore: &candidateScore, QualityPassed: &passed, QualityComparable: &comparable, QualityPairingDigest: "sha256:pair", QualityScores: candidateScores}
+	result := Evaluate(Input{Policy: policy, Active: active, Candidate: candidate})
+	if result.Decision != "REJECT" || len(result.Reasons) != 1 || result.Reasons[0].Code != "quality_bootstrap_regression" || result.Reasons[0].Bootstrap == nil || result.Reasons[0].Bootstrap.Seed != 42 || result.Reasons[0].Bootstrap.ActiveSamples != 10 || result.Reasons[0].Bootstrap.IntervalLowerPercent == nil {
+		t.Fatalf("result=%+v", result)
+	}
+	candidate.QualityScores = candidate.QualityScores[:9]
+	result = Evaluate(Input{Policy: policy, Active: active, Candidate: candidate})
+	if result.Decision != "WAIT" || result.Reasons[len(result.Reasons)-1].Code != "quality_bootstrap_insufficient" || result.Reasons[len(result.Reasons)-1].Bootstrap == nil {
+		t.Fatalf("insufficient result=%+v", result)
+	}
+}
