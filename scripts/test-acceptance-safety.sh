@@ -314,6 +314,8 @@ grep -Fq 'INFERCRANE_ACCEPTANCE_GUARD_REQUESTS:-100' "$root/scripts/release-acce
 grep -Fq 'LOCAL FIXTURE DEMO' "$root/scripts/demo-connect.sh"
 grep -Fq 'rollout evaluate qwen-prod --wait' "$root/scripts/demo-connect.sh"
 grep -Fq '.deployment.active_revision_id == $active' "$root/scripts/demo-connect.sh"
+grep -Fq 'Connected endpoint did not become routable within 90s' "$root/scripts/demo-connect.sh"
+grep -Fq 'docker compose -p "$project" logs --tail 100 infercrane' "$root/scripts/demo-connect.sh"
 if grep -Eq 'rollout (provision|validate)|--approve-paid-resources|release-acceptance\.sh' "$root/scripts/demo-product.sh" "$root/scripts/demo-connect.sh"; then
   echo "local product demo contains a paid or provisioning action" >&2
   exit 1
