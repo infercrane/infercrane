@@ -280,8 +280,12 @@ capture_inventory() {
 capture_provider_inventory() {
   label=$1
   api_key=$(tr -d '\r\n' <"$RUNPOD_KEY_FILE")
-  pods=$(curl -fsS -H "Authorization: Bearer $api_key" 'https://rest.runpod.io/v1/pods' | \
-    jq '[.[] | select((.name // "") | startswith("infercrane-")) | {id,name,desiredStatus,machineId,imageName,gpuCount,lastStatusChange,uptimeSeconds}]')
+  pods=$(curl -fsS -H "Authorization: Bearer $api_key" 'https://rest.runpod.io/v1/pods?includeMachine=true' | \
+		jq '[.[] | select((.name // "") | startswith("infercrane-")) |
+			{id,name,desiredStatus,machineId,image:(.imageName // .image),gpuCount,
+			 gpu_type:(.gpuTypeId // .machine.gpuTypeId // .gpu.id),containerDiskInGb,
+			 dockerEntrypoint,dockerStartCmd,ports,env_keys:((.env // {}) | keys),
+			 lastStartedAt,lastStatusChange,uptimeSeconds,costPerHr,adjustedCostPerHr}]')
   endpoints=$(curl -fsS -H "Authorization: Bearer $api_key" \
     'https://rest.runpod.io/v1/endpoints?includeWorkers=true' | \
     jq '[.[] | select((.name // "") | startswith("infercrane-")) |

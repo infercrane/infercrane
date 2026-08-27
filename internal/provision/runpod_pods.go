@@ -48,6 +48,9 @@ type runPodRecord struct {
 	GPU              struct {
 		ID string `json:"id"`
 	} `json:"gpu"`
+	Machine struct {
+		GPUTypeID string `json:"gpuTypeId"`
+	} `json:"machine"`
 }
 
 func (r RunPodPods) Handle(externalKey string) ProviderHandle {
@@ -90,7 +93,7 @@ func (r RunPodPods) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provid
 		if err = validateRunPodIntent(matches[0], spec, command); err != nil {
 			return ProviderHandle{}, err
 		}
-		return ProviderHandle{ResourceID: matches[0].ID, ExternalKey: spec.ExternalKey}, nil
+		return ProviderHandle{ResourceID: name, ExternalKey: spec.ExternalKey}, nil
 	}
 	disk := r.ContainerDiskGiB
 	if disk == 0 {
@@ -115,7 +118,7 @@ func (r RunPodPods) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provid
 		if current, listErr := r.list(ctx); listErr == nil {
 			matches = matchingRunPodRecords(current, name)
 			if len(matches) == 1 && validateRunPodIntent(matches[0], spec, command) == nil {
-				return ProviderHandle{ResourceID: matches[0].ID, ExternalKey: spec.ExternalKey}, nil
+				return ProviderHandle{ResourceID: name, ExternalKey: spec.ExternalKey}, nil
 			}
 		}
 		return ProviderHandle{}, err
@@ -123,7 +126,12 @@ func (r RunPodPods) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provid
 	if created.ID == "" {
 		return ProviderHandle{}, fmt.Errorf("%w: RunPod create returned no Pod ID", ErrRequestFailed)
 	}
-	return ProviderHandle{ResourceID: created.ID, ExternalKey: spec.ExternalKey}, nil
+	// Keep the deterministic provider name as InferCrane's durable identity.
+	// RunPod allocates the opaque Pod ID only after POST /pods; replacing the
+	// pre-persisted name with that ID would violate the control plane's
+	// write-once provider identity contract. Observe and delete resolve this
+	// stable name to the current opaque Pod ID on every call.
+	return ProviderHandle{ResourceID: name, ExternalKey: spec.ExternalKey}, nil
 }
 
 func (r RunPodPods) ObserveReplica(ctx context.Context, handle ProviderHandle, port int) (Observation, error) {
@@ -262,6 +270,9 @@ func validateRunPodIntent(pod runPodRecord, spec ReplicaSpec, command []string) 
 		image = pod.Image
 	}
 	actualGPU := pod.GPUTypeID
+	if actualGPU == "" {
+		actualGPU = pod.Machine.GPUTypeID
+	}
 	if actualGPU == "" {
 		actualGPU = pod.GPU.ID
 	}

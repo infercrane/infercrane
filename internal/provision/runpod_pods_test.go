@@ -52,7 +52,7 @@ func TestRunPodPodsLifecycleIsReplaySafeAndPreservesImmutableWorkload(t *testing
 	provider := RunPodPods{APIKey: "provider-secret", WorkerAPIKey: "worker-secret", BaseURL: server.URL, Client: server.Client(), ContainerDiskGiB: 500}
 	spec := ReplicaSpec{ExternalKey: "deployment-revision-r0", Model: "org/model", ModelRevision: "commit", Cloud: "runpod", GPU: "H200", GPUCount: 4, Workload: testRunPodWorkload()}
 	first, err := provider.EnsureReplica(context.Background(), spec)
-	if err != nil || first.ResourceID != "pod-1" {
+	if err != nil || first.ResourceID != clusterName(spec.ExternalKey) {
 		t.Fatalf("first ensure: handle=%#v err=%v", first, err)
 	}
 	second, err := provider.EnsureReplica(context.Background(), spec)
@@ -87,6 +87,25 @@ func TestRunPodPodsRejectsConflictingAdoptionAndRedactsErrors(t *testing.T) {
 	}
 }
 
+func TestRunPodPodsAdoptsRunPodListShapeWithMachineGPUType(t *testing.T) {
+	workload := testRunPodWorkload()
+	command := expandWorkloadCommand(workload.Command, "org/model", "commit", workload.Port, nil)
+	pod := runPodRecord{ID: "pod-1", Name: clusterName("key"), DesiredStatus: "RUNNING", Image: workload.Image, GPUCount: 4, DockerEntrypoint: command[:1], DockerStartCmd: command[1:]}
+	pod.Machine.GPUTypeID = "NVIDIA H200"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/pods" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode([]runPodRecord{pod})
+	}))
+	defer server.Close()
+	provider := RunPodPods{APIKey: "provider-secret", WorkerAPIKey: "worker-secret", BaseURL: server.URL, Client: server.Client()}
+	handle, err := provider.EnsureReplica(context.Background(), ReplicaSpec{ExternalKey: "key", Model: "org/model", ModelRevision: "commit", Cloud: "runpod", GPU: "H200", GPUCount: 4, Workload: workload})
+	if err != nil || handle.ResourceID != clusterName("key") {
+		t.Fatalf("handle=%#v err=%v", handle, err)
+	}
+}
+
 func TestRunPodPodsAdoptsAfterLostCreateResponse(t *testing.T) {
 	var pods []runPodRecord
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -109,7 +128,7 @@ func TestRunPodPodsAdoptsAfterLostCreateResponse(t *testing.T) {
 	defer server.Close()
 	provider := RunPodPods{APIKey: "provider-secret", WorkerAPIKey: "worker-secret", BaseURL: server.URL, Client: server.Client()}
 	handle, err := provider.EnsureReplica(context.Background(), ReplicaSpec{ExternalKey: "lost", Model: "org/model", ModelRevision: "commit", Cloud: "runpod", GPU: "H200", GPUCount: 4, Workload: testRunPodWorkload()})
-	if err != nil || handle.ResourceID != "adopted" {
+	if err != nil || handle.ResourceID != clusterName("lost") {
 		t.Fatalf("handle=%#v err=%v", handle, err)
 	}
 }
