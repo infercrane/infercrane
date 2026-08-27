@@ -66,8 +66,12 @@ func TestQualificationSelectionIsExactAndDoesNotPromoteDeferredEvidence(t *testi
 		t.Fatal(err)
 	}
 	selected := SelectQualification(registry.Snapshot(), domain.DeploymentRevisionSpec{Runtime: "vllm", Cloud: "runpod", ComputeMode: "elastic"})
-	if selected.ProviderContract == "" || selected.RuntimeContract == "" || len(selected.Providers) != 1 || selected.Providers[0].Cloud != "runpod" || len(selected.Runtimes) != 1 || selected.Runtimes[0].Runtime != "vllm" || len(selected.Compatibility) != 1 {
+	if selected.ProviderContract == "" || selected.RuntimeContract == "" || len(selected.Providers) != 2 || selected.Providers[0].Cloud != "runpod" || selected.Providers[1].Cloud != "runpod" || len(selected.Runtimes) != 1 || selected.Runtimes[0].Runtime != "vllm" || len(selected.Compatibility) != 2 {
 		t.Fatalf("selected=%+v", selected)
+	}
+	native := SelectQualification(registry.Snapshot(), domain.DeploymentRevisionSpec{Runtime: "vllm", Cloud: "runpod", ProviderAdapter: "runpod-pods", ComputeMode: "elastic"})
+	if len(native.Providers) != 1 || native.Providers[0].Adapter != "runpod-pods" || len(native.Compatibility) != 1 || native.Compatibility[0].Adapter != "runpod-pods" {
+		t.Fatalf("native=%+v", native)
 	}
 	custom := SelectQualification(registry.Snapshot(), domain.DeploymentRevisionSpec{Runtime: "custom-oci", Cloud: "runpod", ProviderAdapter: "runpod-pods", ComputeMode: "elastic"})
 	if len(custom.Providers) != 1 || custom.Providers[0].Adapter != "runpod-pods" || len(custom.Compatibility) != 1 || custom.Compatibility[0].Adapter != "runpod-pods" {
