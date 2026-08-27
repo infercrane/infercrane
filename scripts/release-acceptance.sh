@@ -576,9 +576,9 @@ run_elastic_evidence() {
 	client_status=$?
 	set -e
 	[ "$client_status" -ne 0 ] || { echo "waiting CLI did not disconnect" >&2; return 1; }
-	jq -e --arg operation_id "$operation_id" \
+	tail -n 1 "$evidence/durable-deploy-cli.log" | jq -e --arg operation_id "$operation_id" \
 		'.error.code == "operation_watch_interrupted" and (.error.message | contains("continues safely in the control plane")) and (.error.remediation | contains($operation_id))' \
-		"$evidence/durable-deploy-cli.log" >/dev/null
+		>/dev/null
 	jq -n --arg operation_id "$operation_id" --arg provider_resource_id "$resource_id" \
 		--arg started_at "$deploy_started_at" --argjson client_exit "$client_status" \
 		'{schema_version:1,operation_id:$operation_id,provider_resource_id:$provider_resource_id,started_at:$started_at,client_exit:$client_exit,control_plane_continues:true}' \
