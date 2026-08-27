@@ -19,7 +19,7 @@ if grep -Eq 'npm (publish|stage publish)' "$root/scripts/build-npm-bootstrap-pac
 fi
 
 # Candidate and stable publication must remain explicit, protected actions over
-# already built drafts. Tag creation alone is not publication authority.
+# already built release artifacts. Tag creation alone is not publication authority.
 grep -Fq 'workflow_dispatch:' "$publish_workflow"
 grep -Fq 'environment: stable-publication' "$publish_workflow"
 grep -Fq '.stable_tag' "$publish_workflow"
@@ -27,7 +27,6 @@ grep -Fq '.candidate_tag' "$publish_workflow"
 grep -Fq '.two_factor_requirement_enabled' "$publish_workflow"
 grep -Fq 'ORG_SECURITY_READ_TOKEN' "$publish_workflow"
 grep -Fq '.visibility)" = public' "$publish_workflow"
-grep -Fq 'jq -r .isDraft)" = true' "$publish_workflow"
 grep -Eq 'pypa/gh-action-pypi-publish@[0-9a-f]{40}' "$publish_workflow"
 grep -Fq 'npm publish "$package" --access public' "$publish_workflow"
 grep -Fq 'node-version: "24.20.0"' "$publish_workflow"
@@ -35,6 +34,7 @@ grep -Fq 'npm install --global npm@12.0.2' "$publish_workflow"
 grep -Fq 'HOMEBREW_TAP_TOKEN' "$publish_workflow"
 grep -Fq 'gh auth setup-git' "$publish_workflow"
 grep -Fq 'diff -qr --exclude=README.md expected-package/package registry-package/package' "$publish_workflow"
+grep -Fq 'case "$is_draft" in true|false)' "$publish_workflow"
 grep -Fq 'gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease --latest=false' "$publish_workflow"
 grep -Fq 'gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest' "$publish_workflow"
 grep -Fq './scripts/verify-sdk-artifacts.sh publication-assets "$npm_version" verify "$python_version"' "$publish_workflow"
