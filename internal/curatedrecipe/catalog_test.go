@@ -2,6 +2,7 @@ package curatedrecipe
 
 import (
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -37,17 +38,51 @@ func TestCatalogIsPinnedDistinctAndTruthful(t *testing.T) {
 	}
 }
 
-func TestGLMProfileUsesTheGeneralImmutableWorkloadContract(t *testing.T) {
+func TestFrontierProfilesUseTheGeneralImmutableWorkloadContract(t *testing.T) {
+	tests := []struct {
+		name       string
+		revision   string
+		gpuCount   int
+		image      string
+		commandArg string
+	}{
+		{name: "glm-5.3-flash", revision: "3f1971b7b5f7a528c9c4ef6212c8785298a8c24a", gpuCount: 4, image: "vllm/vllm-openai@sha256:2c6da6c6f16ed15c91e412d896dba13701f25fe1861eaec9ddaa4db34d1d21c4", commandArg: "glm47"},
+		{name: "qwen3.8-flash-next", revision: "bcd9f01ddc9cff2316eb84281bebcd5b058bddce", gpuCount: 8, image: "vllm/vllm-openai@sha256:fc120ece0a388cc0aa1caad4a9f1cd92113484ab7ec2fd0efadd62585be05bf8", commandArg: "--enable-expert-parallel"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			entry, ok := Get(test.name)
+			if !ok || entry.Revision != test.revision || len(entry.Profiles) != 1 {
+				t.Fatalf("recipe identity is not pinned: %+v", entry)
+			}
+			profile := entry.Profiles[0]
+			if profile.Runtime != "custom-oci" || profile.GPUCount != test.gpuCount || profile.CloudHint != "runpod" || profile.ProviderAdapterHint != "runpod-pods" || profile.Workload.Image != test.image || !contains(profile.Workload.Command, test.commandArg) {
+				t.Fatalf("profile does not use the portable serving contract: %+v", profile)
+			}
+			if err := profile.Workload.Validate(); err != nil {
+				t.Fatalf("workload is invalid: %v", err)
+			}
+		})
+	}
+}
+
+func TestGLMProfileMaterializesPinnedSnapshotBeforeVLLM(t *testing.T) {
 	entry, ok := Get("glm-5.3-flash")
-	if !ok || entry.Revision != "3f1971b7b5f7a528c9c4ef6212c8785298a8c24a" || len(entry.Profiles) != 1 {
-		t.Fatalf("GLM recipe identity is not pinned: %+v", entry)
+	if !ok || len(entry.Profiles) != 1 {
+		t.Fatalf("entry=%#v ok=%t", entry, ok)
 	}
-	profile := entry.Profiles[0]
-	if profile.Runtime != "custom-oci" || profile.GPUCount != 4 || profile.CloudHint != "kubernetes" || profile.Workload.Image != "vllm/vllm-openai@sha256:2c6da6c6f16ed15c91e412d896dba13701f25fe1861eaec9ddaa4db34d1d21c4" {
-		t.Fatalf("GLM profile does not use the portable serving contract: %+v", profile)
+	command := entry.Profiles[0].Workload.Command
+	if len(command) < 5 || command[0] != "python3" || command[1] != "-c" {
+		t.Fatalf("command=%#v", command)
 	}
-	if err := profile.Workload.Validate(); err != nil {
-		t.Fatalf("GLM workload is invalid: %v", err)
+	bootstrap := command[2]
+	for _, expected := range []string{"snapshot_download", "repo_id='${MODEL}'", "revision='${MODEL_REVISION}'", "INFERCRANE_MODEL_DIR", "HF_XET_HIGH_PERFORMANCE", `"/opt/infercrane/model"`, "os.execvp('vllm'"} {
+		if !strings.Contains(bootstrap, expected) {
+			t.Fatalf("bootstrap omitted %q: %s", expected, bootstrap)
+		}
+	}
+	if !contains(command, "--tensor-parallel-size") || !contains(command, "--served-model-name") || !contains(command, "${MODEL}") {
+		t.Fatalf("vLLM argv was not preserved: %#v", command)
 	}
 }
 

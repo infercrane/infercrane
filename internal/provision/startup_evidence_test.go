@@ -2,6 +2,7 @@ package provision
 
 import (
 	"encoding/base64"
+	"strings"
 	"testing"
 )
 
@@ -70,5 +71,26 @@ func TestParseStartupEvidenceRejectsMalformedAndUnknownMarkers(t *testing.T) {
 		if evidence, ok := parseStartupEvidence(raw); ok {
 			t.Fatalf("unexpected evidence for %q: %#v", raw, evidence)
 		}
+	}
+}
+
+func TestParseStartupEvidenceRetainsProviderAcceleratorStages(t *testing.T) {
+	for _, test := range []struct {
+		name, stages, current string
+	}{
+		{name: "aws", stages: "accelerator_check|accelerator_ready", current: "accelerator_ready"},
+		{name: "gcp", stages: "gpu_driver_start|gpu_driver_ready", current: "gpu_driver_ready"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			parts := strings.Split(test.stages, "|")
+			raw := "infercrane_startup stage=identity_start at=2026-08-23T10:00:00Z\n" +
+				"infercrane_startup stage=identity_ready at=2026-08-23T10:00:01Z\n" +
+				"infercrane_startup stage=" + parts[0] + " at=2026-08-23T10:00:02Z\n" +
+				"infercrane_startup stage=" + parts[1] + " at=2026-08-23T10:00:12Z\n"
+			evidence, ok := parseStartupEvidence(raw)
+			if !ok || evidence.CurrentStage != test.current || len(evidence.Stages) != 4 {
+				t.Fatalf("evidence=%#v ok=%v", evidence, ok)
+			}
+		})
 	}
 }

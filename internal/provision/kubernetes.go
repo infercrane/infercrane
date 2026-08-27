@@ -26,6 +26,7 @@ type Kubernetes struct {
 	Binary, Context, Namespace, WorkloadAPI           string
 	ServiceAccount, WorkerSecretName, WorkerSecretKey string
 	ImageDigest, GPUResource, GPUProductLabel         string
+	ImageCachePolicy                                  string
 	ArtifactCachePolicy                               string
 	ArtifactPVCs                                      map[string]string
 	Runner                                            CommandRunner
@@ -329,7 +330,11 @@ func (k Kubernetes) manifest(spec ReplicaSpec, artifactClaim string) ([]byte, er
 	if gpuCount == 0 {
 		gpuCount = 1
 	}
-	container := map[string]any{"name": "runtime", "image": image, "imagePullPolicy": "IfNotPresent", "args": command, "ports": []any{map[string]any{"name": "http", "containerPort": port}}, "env": environment, "readinessProbe": map[string]any{"httpGet": map[string]any{"path": readinessPath, "port": "http"}, "periodSeconds": 5, "timeoutSeconds": 2, "failureThreshold": 12}, "resources": map[string]any{"limits": map[string]any{k.GPUResource: fmt.Sprint(gpuCount)}, "requests": map[string]any{k.GPUResource: fmt.Sprint(gpuCount)}}, "securityContext": map[string]any{"allowPrivilegeEscalation": false}}
+	pullPolicy := "IfNotPresent"
+	if k.imagePolicy() == "required" {
+		pullPolicy = "Never"
+	}
+	container := map[string]any{"name": "runtime", "image": image, "imagePullPolicy": pullPolicy, "args": command, "ports": []any{map[string]any{"name": "http", "containerPort": port}}, "env": environment, "readinessProbe": map[string]any{"httpGet": map[string]any{"path": readinessPath, "port": "http"}, "periodSeconds": 5, "timeoutSeconds": 2, "failureThreshold": 12}, "resources": map[string]any{"limits": map[string]any{k.GPUResource: fmt.Sprint(gpuCount)}, "requests": map[string]any{k.GPUResource: fmt.Sprint(gpuCount)}}, "securityContext": map[string]any{"allowPrivilegeEscalation": false}}
 	if !spec.Workload.Empty() {
 		container["command"] = command[:1]
 		container["args"] = command[1:]
@@ -397,6 +402,9 @@ func (k Kubernetes) validateConfig() error {
 	if k.WorkloadAPI != "deployment" && k.WorkloadAPI != "kserve" {
 		return errors.New("Kubernetes workload API must be deployment or kserve")
 	}
+	if policy := k.imagePolicy(); policy != "prefer" && policy != "required" {
+		return errors.New("Kubernetes image cache policy must be prefer or required")
+	}
 	if policy := k.artifactPolicy(); policy != "disabled" && policy != "prefer" && policy != "required" {
 		return errors.New("Kubernetes artifact cache policy must be disabled, prefer, or required")
 	}
@@ -420,6 +428,13 @@ func (k Kubernetes) validateConfig() error {
 		return fmt.Errorf("invalid Kubernetes Secret key %q", k.WorkerSecretKey)
 	}
 	return nil
+}
+
+func (k Kubernetes) imagePolicy() string {
+	if k.ImageCachePolicy == "" {
+		return "prefer"
+	}
+	return k.ImageCachePolicy
 }
 
 func (k Kubernetes) artifactPolicy() string {
@@ -575,7 +590,8 @@ func (k Kubernetes) intentHash(spec ReplicaSpec) (string, error) {
 		ImageDigest    string
 		GPUResource    string
 		GPULabel       string
-	}{spec, k.Namespace, k.WorkloadAPI, k.ServiceAccount, k.WorkerSecretName, k.WorkerSecretKey, k.ImageDigest, k.GPUResource, k.GPUProductLabel}
+		ImagePolicy    string
+	}{spec, k.Namespace, k.WorkloadAPI, k.ServiceAccount, k.WorkerSecretName, k.WorkerSecretKey, k.ImageDigest, k.GPUResource, k.GPUProductLabel, k.imagePolicy()}
 	body, err := json.Marshal(value)
 	if err != nil {
 		return "", err

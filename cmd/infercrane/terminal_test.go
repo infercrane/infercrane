@@ -48,6 +48,18 @@ func TestOperationPhaseDoesNotMislabelAmbiguousRuntimeStartupAsArtifactPreparati
 	}
 }
 
+func TestOperationPhasePrefersDurableStepOverMessageHeuristics(t *testing.T) {
+	operation := domain.Operation{
+		Status:      "waiting",
+		Progress:    70,
+		CurrentStep: "replica.0.runtime",
+		Message:     "provider capacity may still be changing",
+	}
+	if got := operationPhase(operation); got != "STARTING RUNTIME" {
+		t.Fatalf("operation phase = %q, want STARTING RUNTIME", got)
+	}
+}
+
 func TestOperationPhaseDoesNotMislabelProviderDeletionAsCapacityWait(t *testing.T) {
 	operation := domain.Operation{
 		Kind:     "deployment.delete",

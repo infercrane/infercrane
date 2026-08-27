@@ -192,6 +192,19 @@ func TestKubernetesConfigurationAndManifestFailClosed(t *testing.T) {
 	}
 }
 
+func TestKubernetesRequiredImagePrewarmFailsClosedWithoutRegistryPull(t *testing.T) {
+	fixture := providerfixture.NewKubernetesCLI()
+	provider := testKubernetesProvider(fixture, "deployment")
+	provider.ImageCachePolicy = "required"
+	if _, err := provider.EnsureReplica(context.Background(), testKubernetesSpec()); err != nil {
+		t.Fatal(err)
+	}
+	encoded, _ := jsonMarshalFixtureObjects(fixture.Objects)
+	if !strings.Contains(encoded, `"imagePullPolicy":"Never"`) {
+		t.Fatalf("required prewarm policy can still pull from registry: %s", encoded)
+	}
+}
+
 func TestKubernetesArtifactPVCIsVerifiedMountedAndObservable(t *testing.T) {
 	fixture := providerfixture.NewKubernetesCLI()
 	provider := testKubernetesProvider(fixture, "deployment")

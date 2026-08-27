@@ -60,11 +60,49 @@ export INFERCRANE_KUBERNETES_WORKER_SECRET_KEY='api-key'
 export INFERCRANE_KUBERNETES_IMAGE_DIGEST='vllm/vllm-openai@sha256:REPLACE_WITH_QUALIFIED_DIGEST'
 export INFERCRANE_KUBERNETES_GPU_RESOURCE='nvidia.com/gpu'
 export INFERCRANE_KUBERNETES_GPU_PRODUCT_LABEL='nvidia.com/gpu.product'
+export INFERCRANE_KUBERNETES_IMAGE_CACHE_POLICY='prefer'
 export INFERCRANE_KUBERNETES_ARTIFACT_CACHE_POLICY='prefer'
 ```
 
 Configuration is all-or-nothing. The image must be immutable. The adapter always passes an explicit
 context and namespace to `kubectl`; it never relies on or changes the current context.
+
+## Pre-pull the immutable runtime image
+
+The default image policy is `prefer`, which renders `imagePullPolicy: IfNotPresent`. For a
+latency-critical pool, first use an operator-owned DaemonSet to pull the exact digest onto every
+eligible GPU node. A minimal container template is:
+
+```yaml
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: infercrane-runtime-prepull
+  namespace: infercrane-system
+spec:
+  selector:
+    matchLabels: {app: infercrane-runtime-prepull}
+  template:
+    metadata:
+      labels: {app: infercrane-runtime-prepull}
+    spec:
+      nodeSelector:
+        nvidia.com/gpu.product: NVIDIA-L40S
+      tolerations:
+        - {key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}
+      containers:
+        - name: retain-image
+          image: vllm/vllm-openai@sha256:REPLACE_WITH_QUALIFIED_DIGEST
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c", "trap : TERM INT; sleep infinity & wait"]
+```
+
+Wait until the DaemonSet is ready on the complete intended node pool, then set
+`INFERCRANE_KUBERNETES_IMAGE_CACHE_POLICY=required`. InferCrane renders `imagePullPolicy: Never` in
+that mode, so a missing prewarm fails immediately with `ErrImageNeverPull` instead of silently
+turning deploy into a registry transfer. InferCrane does not create this cluster-wide DaemonSet or
+change node taints; those remain explicit operator actions. Digest changes require rolling the
+pre-pull DaemonSet before deploying the new workload revision.
 
 ## Reuse an immutable model cache
 

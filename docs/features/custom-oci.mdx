@@ -58,12 +58,17 @@ cancel upstream HTTP work, and InferCrane withdraws the router generation and dr
 connections before provider deletion.
 
 Custom OCI is simulated-qualified on the AWS EC2, GCP Compute, and namespaced Kubernetes elastic
-paths. Each adapter compiles the same immutable image, executable argv, probe, shutdown, secret, and
-accelerator-count contract into its native resource. Real GPU evidence remains bound to the exact
-image, model revision, provider, accelerator topology, and workload. RunPod/SkyPilot images require
-an additional SSH bootstrap contract and are not claimed compatible. Serverless, arbitrary probe
-scripts, mutable tags, image builds and autoscaling signals for custom runtimes are rejected rather
-than silently assumed.
+paths. RunPod custom OCI uses the native `runpod-pods` REST adapter instead of SkyPilot, so the
+upstream image does not need an SSH daemon or rsync. Each adapter compiles the same immutable image,
+executable argv, probe, shutdown, secret, and accelerator-count contract into its native resource.
+RunPod additionally maps the runtime port to its HTTPS Pod proxy and uses the provider API for
+deterministic adoption and deletion.
+
+Real GPU evidence remains bound to the exact image, model revision, provider, accelerator topology,
+and workload. Serverless, arbitrary probe scripts, mutable tags, image builds and autoscaling
+signals for custom runtimes are rejected rather than silently assumed. Configure enough RunPod
+container disk for the image, checkpoint, and runtime overhead with
+`INFERCRANE_RUNPOD_CONTAINER_DISK_GIB`; the default is 100 GiB and the accepted range is 50–2048.
 
 Inspect the executable support boundary with:
 

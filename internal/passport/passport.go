@@ -68,6 +68,22 @@ type QualificationEvidence struct {
 
 func SelectQualification(snapshot integration.Snapshot, spec domain.DeploymentRevisionSpec) QualificationEvidence {
 	out := QualificationEvidence{ProviderContract: snapshot.ProviderContract, RuntimeContract: snapshot.RuntimeContract, Providers: []integration.ProviderProfile{}, Runtimes: []integration.RuntimeProfile{}, Compatibility: []integration.RuntimeCompatibility{}}
+	selectedAdapter := spec.ProviderAdapter
+	if selectedAdapter == "" {
+		for _, entry := range snapshot.Compatibility {
+			if entry.Runtime != spec.Runtime || entry.Cloud != spec.Cloud || string(entry.Mode) != spec.ComputeMode {
+				continue
+			}
+			if selectedAdapter == "" {
+				selectedAdapter = entry.Adapter
+			} else if selectedAdapter != entry.Adapter {
+				// Composition is ambiguous without an explicit provider adapter;
+				// do not attach unrelated provider evidence to the passport.
+				selectedAdapter = ""
+				break
+			}
+		}
+	}
 	for _, profile := range snapshot.Providers {
 		modeMatch := false
 		for _, mode := range profile.Modes {
@@ -76,7 +92,7 @@ func SelectQualification(snapshot integration.Snapshot, spec domain.DeploymentRe
 				break
 			}
 		}
-		if (profile.Cloud == spec.Cloud || profile.Adapter == spec.Cloud) && modeMatch {
+		if (profile.Cloud == spec.Cloud || profile.Adapter == spec.Cloud) && modeMatch && (selectedAdapter == "" || profile.Adapter == selectedAdapter) {
 			out.Providers = append(out.Providers, profile)
 		}
 	}
@@ -86,7 +102,7 @@ func SelectQualification(snapshot integration.Snapshot, spec domain.DeploymentRe
 		}
 	}
 	for _, entry := range snapshot.Compatibility {
-		if entry.Runtime == spec.Runtime && entry.Cloud == spec.Cloud && string(entry.Mode) == spec.ComputeMode {
+		if entry.Runtime == spec.Runtime && entry.Cloud == spec.Cloud && string(entry.Mode) == spec.ComputeMode && (selectedAdapter == "" || entry.Adapter == selectedAdapter) {
 			out.Compatibility = append(out.Compatibility, entry)
 		}
 	}

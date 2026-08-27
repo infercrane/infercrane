@@ -22,20 +22,22 @@ type Config struct {
 	AsyncEncryptionKey, AsyncEncryptionKeyReference                                                                    string
 	HostedAuthIssuer, HostedAuthAudience, HostedAuthJWTKeyFile                                                         string
 	HostedAuthAuthorizedParties                                                                                        []string
-	RunPodAPIKey, RunPodServerlessTemplateID, RunPodRESTURL                                                            string
+	RunPodAPIKey, RunPodServerlessTemplateID, RunPodRESTURL, RunPodArtifactCachePolicy                                 string
+	RunPodContainerDiskGiB                                                                                             int
+	RunPodNetworkVolumes                                                                                               map[string]string
 	AWSRoleARN, AWSExternalID, AWSRegion, AWSSubnetID, AWSAMIID, AWSInstanceType, AWSGPU                               string
 	AWSInstanceProfileARN, AWSWorkerSecretARN, AWSImageDigest                                                          string
 	AWSImageCachePolicy, AWSArtifactCachePolicy                                                                        string
 	AWSSubnetIDs, AWSSecurityGroupIDs                                                                                  []string
 	AWSArtifactSnapshots                                                                                               map[string]string
-	AWSGPUCount, AWSRootVolumeGiB, AWSArtifactVolumeInitializationRate                                                 int
+	AWSGPUCount, AWSRootVolumeGiB, AWSGP3IOPS, AWSGP3Throughput, AWSArtifactVolumeInitializationRate                   int
 	GCPProject, GCPZone, GCPSubnet, GCPMachineType, GCPGPU, GCPServiceAccount                                          string
 	GCPVMImage, GCPContainerImage, GCPWorkerSecret, GCPArtifactCachePolicy                                             string
 	GCPArtifactDisks                                                                                                   map[string]string
 	GCPBootDiskGiB                                                                                                     int
 	KubernetesContext, KubernetesNamespace, KubernetesWorkloadAPI, KubernetesServiceAccount                            string
 	KubernetesWorkerSecretName, KubernetesWorkerSecretKey, KubernetesImageDigest                                       string
-	KubernetesGPUResource, KubernetesGPUProductLabel, KubernetesArtifactCachePolicy                                    string
+	KubernetesGPUResource, KubernetesGPUProductLabel, KubernetesImageCachePolicy, KubernetesArtifactCachePolicy        string
 	KubernetesArtifactPVCs                                                                                             map[string]string
 	DynamoVLLMImageDigest, DynamoVLLMRuntimeVersion, DynamoSGLangImageDigest, DynamoSGLangRuntimeVersion               string
 	DynamoModelSecretName                                                                                              string
@@ -274,11 +276,27 @@ func load(requireAPIKey bool) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	runPodContainerDiskGiB, err := envInt("INFERCRANE_RUNPOD_CONTAINER_DISK_GIB", 100)
+	if err != nil {
+		return Config{}, err
+	}
+	runPodNetworkVolumes, err := envStringMap("INFERCRANE_RUNPOD_NETWORK_VOLUMES_JSON")
+	if err != nil {
+		return Config{}, err
+	}
 	awsRootVolumeGiB, err := envInt("INFERCRANE_AWS_ROOT_VOLUME_GIB", 200)
 	if err != nil {
 		return Config{}, err
 	}
 	awsGPUCount, err := envInt("INFERCRANE_AWS_GPU_COUNT", 1)
+	if err != nil {
+		return Config{}, err
+	}
+	awsGP3IOPS, err := envInt("INFERCRANE_AWS_GP3_IOPS", 3000)
+	if err != nil {
+		return Config{}, err
+	}
+	awsGP3Throughput, err := envInt("INFERCRANE_AWS_GP3_THROUGHPUT_MIBPS", 125)
 	if err != nil {
 		return Config{}, err
 	}
@@ -328,6 +346,9 @@ func load(requireAPIKey bool) (Config, error) {
 		RunPodAPIKey:                        env("RUNPOD_API_KEY", ""),
 		RunPodServerlessTemplateID:          env("INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID", ""),
 		RunPodRESTURL:                       env("INFERCRANE_RUNPOD_REST_URL", "https://rest.runpod.io/v1"),
+		RunPodContainerDiskGiB:              runPodContainerDiskGiB,
+		RunPodArtifactCachePolicy:           env("INFERCRANE_RUNPOD_ARTIFACT_CACHE_POLICY", "prefer"),
+		RunPodNetworkVolumes:                runPodNetworkVolumes,
 		AWSRoleARN:                          env("INFERCRANE_AWS_ROLE_ARN", ""),
 		AWSExternalID:                       env("INFERCRANE_AWS_EXTERNAL_ID", ""),
 		AWSRegion:                           env("INFERCRANE_AWS_REGION", ""),
@@ -346,6 +367,8 @@ func load(requireAPIKey bool) (Config, error) {
 		AWSArtifactSnapshots:                awsArtifactSnapshots,
 		AWSArtifactVolumeInitializationRate: awsArtifactVolumeInitializationRate,
 		AWSRootVolumeGiB:                    awsRootVolumeGiB,
+		AWSGP3IOPS:                          awsGP3IOPS,
+		AWSGP3Throughput:                    awsGP3Throughput,
 		GCPProject:                          env("INFERCRANE_GCP_PROJECT", ""),
 		GCPZone:                             env("INFERCRANE_GCP_ZONE", ""),
 		GCPSubnet:                           env("INFERCRANE_GCP_SUBNET", ""),
@@ -367,6 +390,7 @@ func load(requireAPIKey bool) (Config, error) {
 		KubernetesImageDigest:               env("INFERCRANE_KUBERNETES_IMAGE_DIGEST", ""),
 		KubernetesGPUResource:               env("INFERCRANE_KUBERNETES_GPU_RESOURCE", "nvidia.com/gpu"),
 		KubernetesGPUProductLabel:           env("INFERCRANE_KUBERNETES_GPU_PRODUCT_LABEL", "nvidia.com/gpu.product"),
+		KubernetesImageCachePolicy:          env("INFERCRANE_KUBERNETES_IMAGE_CACHE_POLICY", "prefer"),
 		KubernetesArtifactCachePolicy:       env("INFERCRANE_KUBERNETES_ARTIFACT_CACHE_POLICY", "prefer"),
 		KubernetesArtifactPVCs:              kubernetesArtifactPVCs,
 		DynamoVLLMImageDigest:               env("INFERCRANE_DYNAMO_VLLM_IMAGE_DIGEST", ""),
@@ -417,6 +441,12 @@ func load(requireAPIKey bool) (Config, error) {
 	if config.HealthInterval <= 0 || config.UpstreamTimeout <= 0 || config.ShutdownTimeout <= 0 || config.RequestRetention <= 0 {
 		return Config{}, fmt.Errorf("timeouts must be positive")
 	}
+	if config.RunPodContainerDiskGiB < 50 || config.RunPodContainerDiskGiB > 2048 {
+		return Config{}, fmt.Errorf("INFERCRANE_RUNPOD_CONTAINER_DISK_GIB must be between 50 and 2048")
+	}
+	if err := validateRunPod(config); err != nil {
+		return Config{}, err
+	}
 	if err := validateAWS(config); err != nil {
 		return Config{}, err
 	}
@@ -436,6 +466,38 @@ func load(requireAPIKey bool) (Config, error) {
 		return Config{}, err
 	}
 	return config, nil
+}
+
+func validateRunPod(config Config) error {
+	policy := config.RunPodArtifactCachePolicy
+	if policy != "disabled" && policy != "prefer" && policy != "required" {
+		return errors.New("INFERCRANE_RUNPOD_ARTIFACT_CACHE_POLICY must be disabled, prefer, or required")
+	}
+	if policy == "required" && len(config.RunPodNetworkVolumes) == 0 {
+		return errors.New("required RunPod artifact caching needs INFERCRANE_RUNPOD_NETWORK_VOLUMES_JSON")
+	}
+	if policy == "disabled" && len(config.RunPodNetworkVolumes) > 0 {
+		return errors.New("disabled RunPod artifact caching cannot configure network volume mappings")
+	}
+	for modelIdentity, volumeID := range config.RunPodNetworkVolumes {
+		if !validImmutableModelIdentity(modelIdentity) || !validRunPodResourceID(volumeID) {
+			return errors.New("RunPod network volume mappings require immutable model identities and valid volume IDs")
+		}
+	}
+	return nil
+}
+
+func validRunPodResourceID(value string) bool {
+	if len(value) < 4 || len(value) > 128 {
+		return false
+	}
+	for _, char := range value {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') || char == '-' || char == '_' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func (c Config) AWSEnabled() bool { return c.AWSRoleARN != "" }
@@ -514,6 +576,12 @@ func validateAWS(config Config) error {
 	}
 	if config.AWSRootVolumeGiB < 50 || config.AWSRootVolumeGiB > 16384 {
 		return errors.New("INFERCRANE_AWS_ROOT_VOLUME_GIB must be between 50 and 16384")
+	}
+	if config.AWSGP3IOPS < 3000 || config.AWSGP3IOPS > 80000 {
+		return errors.New("INFERCRANE_AWS_GP3_IOPS must be between 3000 and 80000")
+	}
+	if config.AWSGP3Throughput < 125 || config.AWSGP3Throughput > 2000 || config.AWSGP3Throughput*4 > config.AWSGP3IOPS {
+		return errors.New("INFERCRANE_AWS_GP3_THROUGHPUT_MIBPS must be between 125 and 2000 and no more than one quarter of configured IOPS")
 	}
 	if config.AWSImageCachePolicy != "prefer" && config.AWSImageCachePolicy != "required" {
 		return errors.New("INFERCRANE_AWS_IMAGE_CACHE_POLICY must be prefer or required")
@@ -633,6 +701,9 @@ func validateKubernetes(config Config) error {
 	}
 	if runtimecontract.ValidateImage(config.KubernetesImageDigest) != nil {
 		return errors.New("INFERCRANE_KUBERNETES_IMAGE_DIGEST must be pinned by sha256 digest")
+	}
+	if config.KubernetesImageCachePolicy != "prefer" && config.KubernetesImageCachePolicy != "required" {
+		return errors.New("INFERCRANE_KUBERNETES_IMAGE_CACHE_POLICY must be prefer or required")
 	}
 	if config.KubernetesArtifactCachePolicy != "disabled" && config.KubernetesArtifactCachePolicy != "prefer" && config.KubernetesArtifactCachePolicy != "required" {
 		return errors.New("INFERCRANE_KUBERNETES_ARTIFACT_CACHE_POLICY must be disabled, prefer, or required")

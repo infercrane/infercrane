@@ -69,6 +69,10 @@ func TestQualificationSelectionIsExactAndDoesNotPromoteDeferredEvidence(t *testi
 	if selected.ProviderContract == "" || selected.RuntimeContract == "" || len(selected.Providers) != 1 || selected.Providers[0].Cloud != "runpod" || len(selected.Runtimes) != 1 || selected.Runtimes[0].Runtime != "vllm" || len(selected.Compatibility) != 1 {
 		t.Fatalf("selected=%+v", selected)
 	}
+	custom := SelectQualification(registry.Snapshot(), domain.DeploymentRevisionSpec{Runtime: "custom-oci", Cloud: "runpod", ProviderAdapter: "runpod-pods", ComputeMode: "elastic"})
+	if len(custom.Providers) != 1 || custom.Providers[0].Adapter != "runpod-pods" || len(custom.Compatibility) != 1 || custom.Compatibility[0].Adapter != "runpod-pods" {
+		t.Fatalf("custom=%+v", custom)
+	}
 }
 
 func TestCompletenessListsEvidenceGapsDeterministically(t *testing.T) {

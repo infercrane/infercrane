@@ -33,6 +33,7 @@ func TestV1QualificationIsExact(t *testing.T) {
 	qualified := [][3]string{
 		{"vllm", "runpod", "elastic"},
 		{"vllm", "runpod", "serverless"},
+		{"custom-oci", "runpod", "elastic"},
 		{"vllm", "aws", "elastic"},
 		{"sglang", "gcp", "elastic"},
 		{"custom-oci", "kubernetes", "elastic"},

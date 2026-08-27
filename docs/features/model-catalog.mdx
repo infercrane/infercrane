@@ -82,13 +82,21 @@ GPU count, compatible GPU types, and a provider hint. The same revision contract
 planning, provider compilation, pricing, capacity evidence, benchmarking, recommendations, and
 signed inference passports. Lifecycle code contains no model-specific branch.
 
-`glm-5.3-flash` is the first experimental catalog entry exercising this general path. Its reviewed
-profile pins the model commit and upstream dedicated vLLM image, requests one four-H200 Kubernetes
-replica, and records tensor-parallel argv. It remains **configuration-verified**, not real-GPU or
-production-qualified. The profile deliberately uses a bounded 131K context starting point rather
-than converting the model card's declared 1M maximum into an unmeasured production promise. See the
-[official model card](https://huggingface.co/zai-org/GLM-5.3-Flash) and
-[upstream vLLM recipe](https://recipes.vllm.ai/zai-org/GLM-5.3-Flash).
+`glm-5.3-flash` and `qwen3.8-flash-next` are experimental catalog entries exercising this general
+path. Each reviewed profile pins the model commit, a dedicated upstream vLLM image, exact GPU
+topology, and complete executable argv. Both remain **configuration-verified**, not real-GPU or
+production-qualified.
+
+The GLM profile requests one native RunPod Pod with four H200 GPUs and tensor parallelism. The
+`runpod-pods` adapter launches the pinned upstream image directly, without an SSH-derived wrapper.
+The reviewed command first materializes the complete commit-pinned Hugging Face snapshot at a local
+container path, then replaces the bootstrap process with vLLM. This provider-neutral argv pattern
+works around a day-zero runtime ordering issue where multimodal processor metadata is opened before
+the runtime's ordinary Hub resolver runs; it is reusable by other custom OCI profiles that require a
+filesystem model path. It deliberately uses a bounded 131K context starting point rather than
+converting the model card's declared 1M
+maximum into an unmeasured production promise. See the [official model card](https://huggingface.co/zai-org/GLM-5.3-Flash)
+and [upstream vLLM recipe](https://recipes.vllm.ai/zai-org/GLM-5.3-Flash).
 
 ```bash
 infercrane models inspect glm-5.3-flash
@@ -99,8 +107,38 @@ infercrane workload validate ./glm-flash
 infercrane workload plan ./glm-flash
 ```
 
-Those commands are local and non-mutating through `plan`. Deployment still requires an operator's
-Kubernetes GPU cluster and fresh qualification evidence for the exact generated tuple.
+Those commands are local and non-mutating through `plan`. Deployment still requires current RunPod
+capacity, enough configured container disk, paid-resource acknowledgement, and fresh qualification
+evidence for the exact generated tuple. The FP8 snapshot is about 306 GiB before runtime overhead;
+the RunPod example therefore uses a 500 GiB container disk during qualification.
+
+The Qwen profile uses the separate FP8 checkpoint and the official eight-H200 TEP8 topology. Plain
+TP8 is incompatible with that checkpoint's quantization blocks, so the reviewed argv enables expert
+parallelism and the Triton MoE backend. InferCrane bounds the starting context at 131K; native 262K
+and one-million-token YaRN remain separate qualification targets. This is the experimental
+`Qwen3.8-Flash-Next` open-weight preview, not the forthcoming production `Qwen3.8-Flash` QwenCloud
+service. See the [official model card](https://huggingface.co/Qwen/Qwen3.8-Flash-Next-FP8) and
+[upstream vLLM recipe](https://recipes.vllm.ai/Qwen/Qwen3.8-Flash-Next).
+
+<Warning>
+  Qwen3.8-Flash-Next uses the Qwen Community License 1.0, not an OSI open-source license. Its terms
+  require a separate Qwen license for specified commercial Model-as-a-Service and AI work-assistant
+  uses. Review the [exact pinned license](https://huggingface.co/Qwen/Qwen3.8-Flash-Next-FP8/blob/bcd9f01ddc9cff2316eb84281bebcd5b058bddce/LICENSE)
+  before deployment.
+</Warning>
+
+```bash
+infercrane models inspect qwen3.8-flash-next
+infercrane workload init ./qwen-flash-next \
+  --recipe qwen3.8-flash-next \
+  --profile custom-oci-hopper-tep8
+infercrane workload validate ./qwen-flash-next
+infercrane workload plan ./qwen-flash-next
+```
+
+Those commands are also local and non-mutating through `plan`. Real deployment requires current
+RunPod capacity for an exact eight-H200 Pod and fresh protocol, memory, performance, and cleanup
+evidence.
 
 ## Current market watch
 

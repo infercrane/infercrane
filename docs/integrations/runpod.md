@@ -5,10 +5,11 @@ description: Configure the RunPod elastic and provider-native Serverless adapter
 
 # RunPod
 
-RunPod is one registered infrastructure adapter. Elastic deployments use SkyPilot to provision
-RunPod Pods; Serverless deployments use RunPod's native endpoint lifecycle. InferCrane's base
-production stack does not require RunPod; enable it explicitly with
-`compose.production.runpod.yaml`.
+RunPod is one registered infrastructure provider with separate executable adapters. Built-in vLLM
+elastic deployments use SkyPilot. Immutable custom OCI workloads use the native `runpod-pods` REST
+adapter, which does not require SSH inside the runtime image. Serverless deployments use RunPod's
+native endpoint lifecycle. InferCrane's base production stack does not require RunPod; enable it
+explicitly with `compose.production.runpod.yaml`.
 
 <Warning>
 The commands in this guide can create billable GPU resources. The RunPod adapters have hermetic
@@ -49,6 +50,29 @@ plan or local simulation is not real-provider qualification.
 
     The base production profile is provider-neutral. The additional overlay mounts the key
     read-only and enables the RunPod/SkyPilot adapter explicitly.
+
+    Large custom OCI workloads may need more than the default 100 GiB container disk. Set, for
+    example, `INFERCRANE_RUNPOD_CONTAINER_DISK_GIB=500` in the same private environment file. Disk
+    size is validated before the control plane starts and may affect provider cost.
+
+    Native Pods can instead reuse a model-specific RunPod network volume. Create the volume in the
+    intended data center and name it `infercrane-artifact-` followed by the first 20 hexadecimal
+    characters of SHA-256 over the exact `model@commit` identity. Then configure the exact mapping:
+
+    ```bash
+    MODEL_IDENTITY='org/model@0123456789abcdef0123456789abcdef01234567'
+    MODEL_DIGEST="$(printf %s "$MODEL_IDENTITY" | shasum -a 256 | awk '{print $1}')"
+    # Name the existing volume infercrane-artifact-${MODEL_DIGEST:0:20} in RunPod.
+    export INFERCRANE_RUNPOD_ARTIFACT_CACHE_POLICY='required'
+    export INFERCRANE_RUNPOD_NETWORK_VOLUMES_JSON="{\"$MODEL_IDENTITY\":\"volume_1234\"}"
+    ```
+
+    Before creating a Pod, InferCrane performs a read-only volume lookup, verifies its ID, exact
+    identity-derived name, positive size, and data center, then mounts it at `/workspace`. Standard
+    Hugging Face downloads and filesystem-materialized model profiles use that persistent path.
+    The first deployment may still download the model; `required` proves the persistent volume was
+    attached, not that its bytes were already warm. Runtime readiness remains the proof that the
+    exact model became serveable. Deleting a Pod does not delete this operator-owned volume.
   </Step>
 
   <Step title="Connect and run read-only checks">
@@ -96,6 +120,27 @@ plan or local simulation is not real-provider qualification.
       --max 4 \
       --idempotency-key qwen-production-v1
     ```
+  </Tab>
+  <Tab title="Custom OCI">
+    ```bash
+    infercrane workload init ./custom-runtime \
+      --recipe glm-5.3-flash \
+      --profile custom-oci-hopper-tp4 \
+      --name glm-production \
+      --cloud runpod \
+      --provider-adapter runpod-pods
+
+    infercrane workload validate ./custom-runtime
+    infercrane workload plan ./custom-runtime
+    infercrane workload deploy ./custom-runtime --wait
+    ```
+
+    The generated DeploymentSpec preserves the upstream image digest, complete argv, model
+    revision, and exact GPU count. The GLM profile's provider-neutral bootstrap materializes the
+    complete pinned snapshot to a local container path before replacing itself with vLLM; configure
+    at least 500 GiB of container disk for this roughly 306 GiB FP8 checkpoint plus runtime
+    overhead. Provider stock and real runtime behavior still require paid qualification of that
+    exact tuple.
   </Tab>
   <Tab title="Serverless">
     ```bash

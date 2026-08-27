@@ -198,6 +198,8 @@ class Operation:
     status: OperationStatus
     progress: int
     message: str = ""
+    current_step: str = ""
+    current_step_status: str = ""
     resource_type: str = ""
     resource_name: str = ""
     error_code: str = ""
@@ -237,6 +239,8 @@ class OperationDataRequired(TypedDict):
 
 class OperationData(OperationDataRequired, total=False):
     message: str
+    current_step: str
+    current_step_status: str
     resource_type: str
     resource_name: str
     error_code: str
@@ -288,6 +292,8 @@ export interface Operation {
   status: OperationStatus;
   progress: number;
   message?: string;
+  current_step?: string;
+  current_step_status?: string;
   resource_type?: string;
   resource_name?: string;
   error_code?: string;

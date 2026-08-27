@@ -80,6 +80,9 @@ func operationPhase(operation domain.Operation) string {
 	if operation.Status == "failed" || operation.Status == "cancelled" {
 		return strings.ToUpper(operation.Status)
 	}
+	if phase := operationStepPhase(operation.CurrentStep); phase != "" {
+		return phase
+	}
 	message := strings.ToLower(operation.Message)
 	switch {
 	case isDeleteOperation(operation):
@@ -96,6 +99,36 @@ func operationPhase(operation domain.Operation) string {
 		return "QUEUED"
 	default:
 		return strings.ToUpper(operation.Status)
+	}
+}
+
+func operationStepPhase(step string) string {
+	step = strings.ToLower(strings.TrimSpace(step))
+	switch {
+	case step == "":
+		return ""
+	case strings.Contains(step, "delete") || strings.Contains(step, "drain"):
+		return "DELETING"
+	case step == "model.artifact":
+		return "PREPARING ARTIFACT"
+	case strings.HasSuffix(step, ".intent"):
+		return "REPLICA RECORDED"
+	case strings.HasSuffix(step, ".availability"):
+		return "CHECKING CAPACITY"
+	case strings.HasSuffix(step, ".ensure") || strings.HasSuffix(step, ".ready"):
+		return "WAITING FOR CAPACITY"
+	case strings.HasSuffix(step, ".runtime"):
+		return "STARTING RUNTIME"
+	case strings.Contains(step, "route") || step == "endpoint.publish":
+		return "PUBLISHING ROUTE"
+	case step == "serverless.endpoint":
+		return "STARTING SERVERLESS"
+	case strings.Contains(step, "observe"):
+		return "OBSERVING"
+	case strings.Contains(step, "candidate"):
+		return "PREPARING CANDIDATE"
+	default:
+		return ""
 	}
 }
 

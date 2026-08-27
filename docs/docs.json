@@ -155,6 +155,7 @@
               "features/optimization",
               "testing/competitive-benchmark-methodology",
               "testing/aws-real-evidence",
+              "testing/runpod-glm53-real-evidence",
               "testing/feature-qualification-matrix",
               "features/recipes-lab",
               "features/replay-capacity",

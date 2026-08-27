@@ -103,19 +103,23 @@ func TestInitPersistsReviewedServingProfile(t *testing.T) {
 }
 
 func TestInitPersistsGeneralImmutableMultiGPUProfile(t *testing.T) {
-	entry, ok := curatedrecipe.Get("glm-5.3-flash")
-	if !ok {
-		t.Fatal("reviewed multi-GPU recipe missing")
-	}
-	profile := entry.Profiles[0]
-	root := t.TempDir()
-	_, err := Init(InitOptions{Directory: root, Model: entry.Model, ModelRevision: entry.Revision, Runtime: profile.Runtime, RuntimeVersion: profile.RuntimeVersion, Cloud: profile.CloudHint, GPU: profile.GPUHint, GPUCount: profile.GPUCount, ComputeMode: profile.ComputeMode, RuntimeArgs: profile.RuntimeArgs, Workload: profile.Workload, MinReplicas: profile.MinReplicas, MaxReplicas: profile.MaxReplicas})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, deployment, err := Validate(root)
-	if err != nil || deployment.Runtime.Engine != "custom-oci" || deployment.Runtime.Version != profile.RuntimeVersion || deployment.Runtime.Workload.Image != profile.Workload.Image || deployment.Resources.GPUCount != 4 || deployment.Provider.Cloud != "kubernetes" {
-		t.Fatalf("deployment=%+v err=%v", deployment, err)
+	for _, name := range []string{"glm-5.3-flash", "qwen3.8-flash-next"} {
+		t.Run(name, func(t *testing.T) {
+			entry, ok := curatedrecipe.Get(name)
+			if !ok {
+				t.Fatal("reviewed multi-GPU recipe missing")
+			}
+			profile := entry.Profiles[0]
+			root := t.TempDir()
+			_, err := Init(InitOptions{Directory: root, Model: entry.Model, ModelRevision: entry.Revision, Runtime: profile.Runtime, RuntimeVersion: profile.RuntimeVersion, Cloud: profile.CloudHint, ProviderAdapter: profile.ProviderAdapterHint, GPU: profile.GPUHint, GPUCount: profile.GPUCount, ComputeMode: profile.ComputeMode, RuntimeArgs: profile.RuntimeArgs, Workload: profile.Workload, MinReplicas: profile.MinReplicas, MaxReplicas: profile.MaxReplicas})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, deployment, err := Validate(root)
+			if err != nil || deployment.Runtime.Engine != "custom-oci" || deployment.Runtime.Version != profile.RuntimeVersion || deployment.Runtime.Workload.Image != profile.Workload.Image || deployment.Resources.GPUCount != profile.GPUCount || deployment.Provider.Cloud != "runpod" || deployment.Provider.Adapter != "runpod-pods" {
+				t.Fatalf("deployment=%+v err=%v", deployment, err)
+			}
+		})
 	}
 }
 

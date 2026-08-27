@@ -103,6 +103,9 @@ func (g GCPCompute) Check(ctx context.Context) error {
 			return err
 		}
 	}
+	if err := g.checkGPUQuota(ctx, 1); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -128,6 +131,13 @@ func (g GCPCompute) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provid
 		}
 		return handle, nil
 	}
+	gpuCount := spec.GPUCount
+	if gpuCount == 0 {
+		gpuCount = 1
+	}
+	if err = g.checkGPUQuota(ctx, gpuCount); err != nil {
+		return ProviderHandle{}, err
+	}
 	port := spec.Port
 	if !spec.Workload.Empty() {
 		port = spec.Workload.Port
@@ -137,10 +147,6 @@ func (g GCPCompute) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provid
 	}
 	startup := g.startup(spec, port)
 	metadata := "^|||^infercrane-external-key=" + spec.ExternalKey + "|||infercrane-intent-digest=" + g.intentDigest(spec) + "|||startup-script=" + startup
-	gpuCount := spec.GPUCount
-	if gpuCount == 0 {
-		gpuCount = 1
-	}
 	args := []string{"compute", "instances", "create", handle.ResourceID, "--project", g.Project, "--zone", g.Zone, "--machine-type", g.MachineType, "--accelerator", fmt.Sprintf("type=%s,count=%d", g.GPUType, gpuCount), "--subnet", g.Subnet, "--no-address", "--service-account", g.ServiceAccount, "--scopes", "cloud-platform", "--image", g.VMImage, "--boot-disk-size", fmt.Sprintf("%dGB", g.BootDiskGiB), "--boot-disk-type", "pd-balanced", "--boot-disk-auto-delete", "--maintenance-policy", "TERMINATE", "--metadata", metadata, "--labels", "infercrane-managed=true", "--format", "json", "--quiet"}
 	if artifactDisk.Name != "" {
 		args = append(args, "--disk", "name="+artifactDisk.Name+",device-name=infercrane-model-cache,mode=ro,auto-delete=no")
@@ -453,6 +459,63 @@ func normalizeGCPAPIError(output []byte) error {
 		return errors.New("GCP API request failed")
 	}
 }
+
+func (g GCPCompute) checkGPUQuota(ctx context.Context, count int) error {
+	if count < 1 {
+		count = 1
+	}
+	region, ok := gcpRegionFromZone(g.Zone)
+	if !ok {
+		return nil
+	}
+	type quota struct {
+		Metric string  `json:"metric"`
+		Limit  float64 `json:"limit"`
+		Usage  float64 `json:"usage"`
+	}
+	checks := []struct {
+		args    []string
+		metrics map[string]struct{}
+		scope   string
+	}{
+		{args: []string{"compute", "regions", "describe", region, "--project", g.Project, "--format", "json(quotas)"}, metrics: gcpRegionalGPUQuotaMetrics(g.GPUType), scope: "regional"},
+		{args: []string{"compute", "project-info", "describe", "--project", g.Project, "--format", "json(quotas)"}, metrics: map[string]struct{}{"GPUS_ALL_REGIONS": {}}, scope: "global"},
+	}
+	for _, check := range checks {
+		output, err := g.run(ctx, check.args...)
+		if err != nil {
+			// Quota APIs and metric names vary across projects and GPU families.
+			// An unavailable signal remains unknown; the create call retains its
+			// typed quota classification instead of fabricating a preflight result.
+			continue
+		}
+		var response struct {
+			Quotas []quota `json:"quotas"`
+		}
+		if json.Unmarshal(output, &response) != nil {
+			continue
+		}
+		for _, quota := range response.Quotas {
+			if _, relevant := check.metrics[strings.ToUpper(quota.Metric)]; !relevant {
+				continue
+			}
+			if quota.Limit-quota.Usage < float64(count) {
+				return fmt.Errorf("%w: GCP %s GPU quota has less than %d accelerator(s) available for the requested placement", ErrProviderQuota, check.scope, count)
+			}
+		}
+	}
+	return nil
+}
+
+func gcpRegionalGPUQuotaMetrics(gpuType string) map[string]struct{} {
+	name := strings.TrimPrefix(strings.ToUpper(strings.TrimSpace(gpuType)), "NVIDIA-")
+	name = strings.NewReplacer("-", "_", " ", "_").Replace(name)
+	return map[string]struct{}{
+		"NVIDIA_" + name + "_GPUS":  {},
+		"GPU_FAMILY:NVIDIA_" + name: {},
+	}
+}
+
 func (g GCPCompute) name(key string) string {
 	sum := sha256.Sum256([]byte(key))
 	return "infercrane-" + hex.EncodeToString(sum[:10])
