@@ -1,8 +1,10 @@
 name: docs
 
 on:
+  # `validate` is a required branch-protection check. Run it for every PR so
+  # path filtering can never leave a merge permanently waiting for a check
+  # that GitHub did not create.
   pull_request:
-    paths: ["docs/**", ".github/workflows/docs.yml"]
   push:
     branches: [main]
     paths: ["docs/**", ".github/workflows/docs.yml"]
