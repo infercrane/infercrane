@@ -6,30 +6,30 @@
 </p>
 
 <p align="center">
-  <strong>Give InferCrane a model. Get a production endpoint.</strong>
+  <strong>One endpoint for the complete inference lifecycle.</strong>
 </p>
 
 <p align="center">
-  Open-source infrastructure for deploying, operating, optimizing, and safely evolving<br>
-  open-weight and custom-model inference behind one stable OpenAI-compatible endpoint.
+  Deploy or adopt self-hosted models, then route, observe, scale, optimize, release, and recover<br>
+  them across your infrastructure without changing the application's OpenAI-compatible contract.
 </p>
 
 <p align="center">
   <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-111111.svg"></a>
   <a href="https://github.com/infercrane/infercrane/actions/workflows/quality.yml"><img alt="Quality checks" src="https://github.com/infercrane/infercrane/actions/workflows/quality.yml/badge.svg?branch=main"></a>
   <a href="https://docs.infercrane.com"><img alt="Documentation" src="https://img.shields.io/badge/docs-infercrane.com-235ee7.svg"></a>
-  <a href="https://github.com/infercrane/infercrane/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/infercrane/infercrane?style=social"></a>
 </p>
 
 <p align="center">
-  <a href="#install">Run the five-minute local proof</a>
+  <a href="#the-release-loop">See the release loop</a>
+  · <a href="#install">Install the public beta</a>
   · <a href="https://docs.infercrane.com/quickstart">Read the quickstart</a>
 </p>
 
 <p align="center">
   <img alt="InferCrane plans a model deployment and persists its durable operation" src="docs/images/product/github-product-demo.gif" width="960">
   <br>
-  <sub>Plan before mutation · survive disconnects · explain latency · guard every release</sub>
+  <sub>Plan before spend · survive disconnects · explain latency · guard every release</sub>
 </p>
 
 ## Install
@@ -56,15 +56,39 @@ The proof connects an OpenAI-compatible worker, sends and inspects a request, cr
 candidate, records a deterministic Release Guard rejection, verifies that production traffic did
 not move, and removes its disposable stack.
 
-InferCrane is the open-source inference operations platform for self-hosted models. Your application
-keeps one model identity while InferCrane changes the model artifact, runtime, accelerator, provider,
-replica count, and active revision underneath it.
+## Why InferCrane
 
-- **Deploy or adopt:** operate vLLM, SGLang, custom OCI, and compatible existing endpoints across
-  AWS, GCP, Kubernetes, and RunPod.
-- **Keep one endpoint:** route revisions and providers behind a stable OpenAI-compatible contract.
-- **Prove every change:** persist request, benchmark, quality, cost, and rollout evidence before
-  promotion—and preserve the active revision when evidence is missing.
+Starting a model server can be one command. Operating it while models, runtimes, accelerators,
+providers, scaling policies, and revisions change is the longer-lived problem.
+
+- **Start where you are:** deploy vLLM, SGLang, or a custom OCI workload—or adopt a compatible
+  endpoint you already operate—across AWS, GCP, Kubernetes, and RunPod.
+- **Keep the application stable:** route infrastructure and revision changes behind one
+  OpenAI-compatible endpoint instead of teaching every application about the serving topology.
+- **Make long operations durable:** persist intent before provider mutation, survive CLI and worker
+  disconnects, and reattach to the same operation rather than guessing what completed.
+- **Prove changes before traffic moves:** evaluate isolated candidates with benchmark, replay,
+  quality, reliability, and sourced cost evidence. Missing evidence is never silently treated as a
+  successful release.
+
+## The release loop
+
+A candidate does not receive production traffic merely because its health endpoint returns `200`.
+InferCrane keeps the active revision serving while the candidate is measured and records one of
+three explicit Release Guard decisions: `ACCEPT`, `REJECT`, or `WAIT`. An `ACCEPT` decision permits
+an explicit promotion; it does not move traffic by itself.
+
+```text
+Stable endpoint ───────────────────────────────▶ active revision
+                                                     ▲
+                                                     │ explicit promotion after ACCEPT
+new serving plan ▶ isolated candidate ▶ evidence ▶ ACCEPT / REJECT / WAIT
+                                                     └─ reject or wait: active unchanged
+```
+
+The evidence and decision remain inspectable after the operation finishes. If this is an
+operational gap your team recognizes, [star InferCrane](https://github.com/infercrane/infercrane)
+and tell us which model, runtime, accelerator, and provider tuple should be qualified next.
 
 ## Why not just…
 
