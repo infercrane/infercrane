@@ -94,7 +94,7 @@ jobs:
           ./scripts/generate-homebrew-formula.sh dist "$GITHUB_REF_NAME"
           ./scripts/verify-release-artifacts.sh dist "$GITHUB_REF_NAME"
       - name: Scan release artifacts
-        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7
+        uses: anchore/scan-action@8964e60c6fabdb85fdbbbfd9834d8f19c97a3086 # v7.4.1
         with:
           path: dist
           fail-build: true
@@ -195,7 +195,7 @@ jobs:
           path: image-digest.txt
           if-no-files-found: error
       - name: Scan published image by digest
-        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7
+        uses: anchore/scan-action@8964e60c6fabdb85fdbbbfd9834d8f19c97a3086 # v7.4.1
         with:
           image: ghcr.io/infercrane/infercrane@${{ steps.build.outputs.digest }}
           registry-username: ${{ github.actor }}

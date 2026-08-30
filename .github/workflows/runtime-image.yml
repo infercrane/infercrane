@@ -85,7 +85,7 @@ jobs:
           sbom: ${{ github.event_name != 'pull_request' }}
       - name: Scan the validated PR runtime image
         if: github.event_name == 'pull_request'
-        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7
+        uses: anchore/scan-action@8964e60c6fabdb85fdbbbfd9834d8f19c97a3086 # v7.4.1
         with:
           image: ${{ steps.meta.outputs.tags }}
           fail-build: false
@@ -108,7 +108,7 @@ jobs:
           test "$(jq '[.matches[] | select(.vulnerability.severity == "Critical")] | length' grype-pr.json)" -eq 0
       - name: Scan the published runtime image by digest
         if: github.event_name != 'pull_request'
-        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7
+        uses: anchore/scan-action@8964e60c6fabdb85fdbbbfd9834d8f19c97a3086 # v7.4.1
         with:
           image: ghcr.io/infercrane/vllm-runpod@${{ steps.build.outputs.digest }}
           fail-build: false
