@@ -15,7 +15,10 @@ data = tomllib.loads(path.read_text())
 assert "app" not in data, "the reusable profile must not hard-code a Fly application name"
 assert data["primary_region"] == "fra"
 assert data["kill_timeout"] >= 30
-assert data["build"]["dockerfile"] == "Dockerfile"
+project_root = path.parents[2]
+dockerfile = (path.parent / data["build"]["dockerfile"]).resolve()
+assert dockerfile == (project_root / "Dockerfile").resolve()
+assert dockerfile.is_file()
 assert data["build"]["build-target"] == "runtime"
 
 env = data["env"]

@@ -7,7 +7,9 @@ kill_signal = "SIGTERM"
 kill_timeout = 35
 
 [build]
-  dockerfile = "Dockerfile"
+  # Fly resolves this path relative to this configuration file, while the
+  # build context remains the repository root used by `fly deploy`.
+  dockerfile = "../../Dockerfile"
   build-target = "runtime"
 
 [env]
