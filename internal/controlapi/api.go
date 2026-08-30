@@ -33,6 +33,7 @@ import (
 	"github.com/infercrane/infercrane/internal/finops"
 	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/lab"
+	"github.com/infercrane/infercrane/internal/modelapicatalog"
 	"github.com/infercrane/infercrane/internal/optimizationcampaign"
 	"github.com/infercrane/infercrane/internal/optimizedartifact"
 	"github.com/infercrane/infercrane/internal/optimizer"
@@ -123,6 +124,9 @@ type adoptionStore interface {
 	AdoptEndpoint(context.Context, string, string, string, string, string, string, string, string) (domain.ResolvedEndpoint, domain.AdoptedWorkload, error)
 	PromoteAdoptionOwnership(context.Context, string, string, string) (domain.AdoptedWorkload, error)
 }
+type targetHealthStore interface {
+	SetTargetHealth(context.Context, string, string) error
+}
 type diagnosticStore interface {
 	RequestInspectionForTenant(context.Context, string, string) (domain.RequestInspection, error)
 	DiagnoseEndpoint(context.Context, string, string, time.Duration) ([]domain.DiagnosticFinding, error)
@@ -145,6 +149,15 @@ type providerConnectionStore interface {
 	ProviderConnectionForTenant(context.Context, string, string) (domain.ProviderConnection, error)
 	ProviderConnectionsForTenant(context.Context, string) ([]domain.ProviderConnection, error)
 	DeleteProviderConnectionForTenant(context.Context, string, string) error
+}
+type managedBillingStore interface {
+	ManagedWallet(context.Context, string) (domain.ManagedWallet, error)
+	ManagedWalletLedger(context.Context, string, int) ([]domain.ManagedWalletLedgerEntry, error)
+	ManagedUsageReservations(context.Context, string, string, int) ([]domain.ManagedUsageReservation, error)
+	CreditManagedWallet(context.Context, string, string, string, int64) (domain.ManagedWallet, error)
+	SettleManagedUsage(context.Context, string, string, domain.ManagedUsageSettlement) (domain.ManagedUsageReservation, error)
+	ReleaseManagedUsage(context.Context, string, string, string) error
+	ProcessManagedPaymentEvent(context.Context, domain.ManagedPaymentEvent) (domain.ManagedPaymentResult, error)
 }
 type intelligenceStore interface {
 	CaptureReplayTrace(context.Context, string, string, time.Duration, int) (domain.ReplayTrace, error)
@@ -250,7 +263,7 @@ type API struct {
 	BenchmarkRunner interface {
 		Run(context.Context, benchmark.Config) (benchmark.Result, error)
 	}
-	Diagnostics              func(context.Context, bool, bool, bool, bool, bool) doctor.Report
+	Diagnostics              func(context.Context, bool, bool, bool, bool, bool, string) doctor.Report
 	Backends                 map[string]BackendMetadata
 	Integrations             integration.Snapshot
 	GatewayURL, AIPerfBinary string
@@ -270,6 +283,11 @@ type API struct {
 	AdmissionState        interface {
 		State(string) (admission.State, bool)
 	}
+	BillingCheckout interface {
+		CreateCheckoutSession(context.Context, string, int64) (domain.ManagedCheckoutSession, error)
+		ParseWebhook([]byte, string) (domain.ManagedPaymentEvent, error)
+	}
+	ModelAPICatalog modelapicatalog.Catalog
 }
 
 type BackendMetadata struct {
@@ -306,6 +324,8 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/integrations", a.auth(authz.Read, a.integrations))
 	mux.HandleFunc("GET /api/v1/catalog/models", a.auth(authz.Read, a.catalogModels))
 	mux.HandleFunc("GET /api/v1/catalog/models/{name}", a.auth(authz.Read, a.catalogModel))
+	mux.HandleFunc("GET /api/v1/model-api-catalog", a.auth(authz.Read, a.modelAPIModels))
+	mux.HandleFunc("GET /api/v1/model-api-catalog/{id}", a.auth(authz.Read, a.modelAPIModel))
 	mux.HandleFunc("GET /api/v1/system/instances", a.auth(authz.Read, a.controlPlaneInstances))
 	mux.HandleFunc("POST /api/v1/deployments/{name}/recipes", a.auth(authz.Deploy, a.captureRecipe))
 	mux.HandleFunc("GET /api/v1/recipes", a.auth(authz.Read, a.recipes))
@@ -411,6 +431,14 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/provider-connections", a.auth(authz.ManageExternal, a.providerConnections))
 	mux.HandleFunc("POST /api/v1/provider-connections", a.auth(authz.ManageExternal, a.createProviderConnection))
 	mux.HandleFunc("DELETE /api/v1/provider-connections/{name}", a.auth(authz.ManageExternal, a.deleteProviderConnection))
+	mux.HandleFunc("GET /api/v1/billing/wallet", a.auth(authz.Read, a.managedWallet))
+	mux.HandleFunc("GET /api/v1/billing/ledger", a.auth(authz.Read, a.managedWalletLedger))
+	mux.HandleFunc("POST /api/v1/billing/checkout-sessions", a.auth(authz.Read, a.createManagedCheckoutSession))
+	mux.HandleFunc("POST /api/v1/billing/webhooks/stripe", a.managedStripeWebhook)
+	mux.HandleFunc("POST /api/v1/admin/billing/credits", a.auth(authz.ManageTenant, a.creditManagedWallet))
+	mux.HandleFunc("GET /api/v1/admin/billing/reservations", a.auth(authz.ManageTenant, a.managedUsageReservations))
+	mux.HandleFunc("POST /api/v1/admin/billing/reservations/{id}/settlement", a.auth(authz.ManageTenant, a.settleManagedUsage))
+	mux.HandleFunc("POST /api/v1/admin/billing/reservations/{id}/release", a.auth(authz.ManageTenant, a.releaseManagedUsage))
 	mux.HandleFunc("GET /api/v1/orphans", a.auth(authz.Read, a.orphans))
 	mux.HandleFunc("GET /api/v1/audit-events", a.auth(authz.ManageTenant, a.auditEvents))
 	mux.HandleFunc("PUT /api/v1/tenant/quota", a.auth(authz.ManageTenant, a.setQuota))
@@ -533,6 +561,134 @@ func (a API) catalogModel(w http.ResponseWriter, r *http.Request) {
 		"model":              entry,
 		"performance_claims": false,
 	})
+}
+
+func (a API) modelAPIModels(w http.ResponseWriter, r *http.Request) {
+	allowed := map[string]bool{"query": true, "task": true, "capability": true, "publisher": true, "access": true, "offset": true, "limit": true}
+	for key := range r.URL.Query() {
+		if !allowed[key] {
+			writeError(w, http.StatusBadRequest, "invalid_query", "unsupported Model API catalog filter")
+			return
+		}
+	}
+	offset, limit := 0, 24
+	var err error
+	if value := r.URL.Query().Get("offset"); value != "" {
+		offset, err = strconv.Atoi(value)
+		if err != nil || offset < 0 {
+			writeError(w, http.StatusBadRequest, "invalid_query", "offset must be a non-negative integer")
+			return
+		}
+	}
+	if value := r.URL.Query().Get("limit"); value != "" {
+		limit, err = strconv.Atoi(value)
+		if err != nil || limit < 1 || limit > 100 {
+			writeError(w, http.StatusBadRequest, "invalid_query", "limit must be between 1 and 100")
+			return
+		}
+	}
+	catalog := a.ModelAPICatalog
+	if len(catalog.Models) == 0 {
+		catalog = modelapicatalog.Default()
+	}
+	page := catalog.List(modelapicatalog.Filter{Query: r.URL.Query().Get("query"), Task: r.URL.Query().Get("task"), Capability: r.URL.Query().Get("capability"), Publisher: r.URL.Query().Get("publisher"), Access: r.URL.Query().Get("access"), Offset: offset, Limit: limit})
+	data := make([]map[string]any, 0, len(page.Models))
+	for _, model := range page.Models {
+		data = append(data, modelAPIModelResponse(model))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"data": data, "total": page.Total, "next_offset": page.NextOffset,
+		"catalog_policy": "catalog identity is not a managed availability, price, performance, or production qualification claim",
+	})
+}
+
+func (a API) modelAPIModel(w http.ResponseWriter, r *http.Request) {
+	catalog := a.ModelAPICatalog
+	if len(catalog.Models) == 0 {
+		catalog = modelapicatalog.Default()
+	}
+	model, ok := catalog.Find(r.PathValue("id"))
+	if !ok {
+		writeError(w, http.StatusNotFound, "not_found", "Model API catalog entry was not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"model": modelAPIModelResponse(model)})
+}
+
+func modelAPIModelResponse(model modelapicatalog.Model) map[string]any {
+	offers := make([]map[string]any, 0, 1)
+	if offer, ok := preferredModelAPIOffer(model.Offers); ok {
+		access := offer.Access
+		if access == "connect-provider" {
+			// Supplier procurement stays inside InferCrane. Model API customers
+			// request an InferCrane product and never connect its supplier.
+			access = "request-access"
+		}
+		pricingCurrent := modelapicatalog.PricingCurrentAt(offer.Pricing, time.Now())
+		availability := offer.Availability
+		if offer.Pricing != nil && !pricingCurrent {
+			access = "request-access"
+			availability = "unknown"
+		}
+		service := map[string]any{
+			"id": "infercrane-standard", "protocol": offer.Protocol, "access": access,
+			"availability": availability, "capabilities": offer.Capabilities,
+		}
+		if pricingCurrent {
+			service["pricing"] = map[string]any{
+				"currency":                          offer.Pricing.Currency,
+				"input_microusd_per_million":        offer.Pricing.InputMicrousdPerMillion,
+				"cached_input_microusd_per_million": offer.Pricing.CachedInputMicrousdPerMillion,
+				"output_microusd_per_million":       offer.Pricing.OutputMicrousdPerMillion,
+				"provenance":                        "InferCrane rate card",
+				"observed_at":                       offer.Pricing.ObservedAt,
+				"valid_until":                       offer.Pricing.ValidUntil,
+			}
+		}
+		offers = append(offers, service)
+	}
+	return map[string]any{
+		"id": model.ID, "display_name": model.DisplayName, "publisher": model.Publisher,
+		"publisher_slug": model.PublisherSlug, "repository": model.Repository, "family": model.Family,
+		"parameters": model.Parameters, "description": model.Description, "tasks": model.Tasks,
+		"capabilities": model.Capabilities, "input_modalities": model.InputModalities,
+		"output_modalities": model.OutputModalities, "license": model.License,
+		"context_window_tokens": model.ContextWindowTokens, "access": model.Access,
+		"qualification": customerQualification(model.Qualification), "qualification_note": customerQualificationNote(model.Qualification),
+		"offers": offers,
+	}
+}
+
+func customerQualification(qualification string) string {
+	if qualification == "supplier-reported" {
+		return "reported"
+	}
+	return qualification
+}
+
+func preferredModelAPIOffer(offers []modelapicatalog.Offer) (modelapicatalog.Offer, bool) {
+	for _, offer := range offers {
+		if offer.Access == "ready" && offer.Availability == "available" && modelapicatalog.PricingCurrentAt(offer.Pricing, time.Now()) {
+			return offer, true
+		}
+	}
+	if len(offers) == 0 {
+		return modelapicatalog.Offer{}, false
+	}
+	return offers[0], true
+}
+
+func customerQualificationNote(qualification string) string {
+	switch qualification {
+	case "measured":
+		return "Measured evidence is attached to the InferCrane service tuple."
+	case "configuration-reviewed":
+		return "The service configuration was reviewed; workload performance still requires measured evidence."
+	case "supplier-reported":
+		return "Service availability is sourced but has not been independently measured by InferCrane."
+	default:
+		return "Model identity is cataloged; managed availability, rate, performance, and production qualification are not attached."
+	}
 }
 
 func (a API) proposeOptimization(w http.ResponseWriter, r *http.Request) {
@@ -1221,6 +1377,17 @@ func (a API) adoptEndpoint(w http.ResponseWriter, r *http.Request) {
 	if writeEndpointMutationError(w, err) {
 		return
 	}
+	// Successful discovery is fresh, concrete reachability evidence for the
+	// exact target and model selected above. Publish that observation before a
+	// traffic-managed route refresh so a newly adopted endpoint is usable in
+	// the same operation instead of waiting for the periodic health loop. The
+	// reconciler remains authoritative and will demote the target on a later
+	// failed probe.
+	if request.Discover && discovery.Health == "reachable" {
+		if healthStore, ok := a.Store.(targetHealthStore); ok {
+			_ = healthStore.SetTargetHealth(r.Context(), adoption.TargetID, "healthy")
+		}
+	}
 	refresh := a.refreshEndpoints(r.Context())
 	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "endpoint.adopt", ResourceType: "endpoint", ResourceName: request.Name, Outcome: "succeeded"})
 	writeJSON(w, http.StatusCreated, map[string]any{"endpoint": resolvedEndpointResponse(resolved), "adoption": map[string]any{"id": adoption.ID, "target_id": adoption.TargetID, "binding_id": adoption.BindingID, "ownership_mode": adoption.OwnershipMode, "source": adoption.Source, "immutable_identity": adoption.ImmutableIdentity}, "discovery": discovery, "route_refresh": refresh})
@@ -1857,7 +2024,7 @@ func (a API) createEndpointBinding(w http.ResponseWriter, r *http.Request) {
 		}
 		binding.TargetID = target.ID
 		config, managed, configErr := external.ParseManagedBindingConfig(configJSON)
-		providerManaged := target.Provider == "openrouter" || target.Provider == "openai-compatible-external"
+		providerManaged := external.SupportedAdapter(target.Provider)
 		if configErr != nil {
 			writeError(w, http.StatusUnprocessableEntity, "validation_failed", configErr.Error())
 			return
@@ -1869,6 +2036,10 @@ func (a API) createEndpointBinding(w http.ResponseWriter, r *http.Request) {
 		if managed {
 			if !authz.AllowedScoped(authz.Role(actor.Role), actor.Scopes, authz.ManageExternal) {
 				writeError(w, http.StatusForbidden, "permission_denied", "principal is not allowed to manage external inference capacity")
+				return
+			}
+			if config.BillingMode == "customer_wallet" && actor.ID != "bootstrap" {
+				writeError(w, http.StatusForbidden, "managed_billing_operator_required", "customer-wallet bindings and their retail prices can be created only by the bootstrap operator")
 				return
 			}
 			if request.OwnershipMode != "traffic-managed" || config.Adapter != target.Provider {
@@ -2119,10 +2290,32 @@ func endpointResponse(item domain.Endpoint) map[string]any {
 
 func bindingResponse(item domain.BackendBinding) map[string]any {
 	var config any = map[string]any{}
+	name, targetID := item.Name, item.TargetID
 	if item.ConfigJSON != "" {
-		_ = json.Unmarshal([]byte(item.ConfigJSON), &config)
+		var raw map[string]any
+		if err := json.Unmarshal([]byte(item.ConfigJSON), &raw); err == nil {
+			if billingMode, _ := raw["billing_mode"].(string); billingMode == "customer_wallet" {
+				config = customerManagedBindingConfig(raw)
+				name, targetID = "infercrane-standard", ""
+			} else {
+				config = raw
+			}
+		}
 	}
-	return map[string]any{"id": item.ID, "tenant_id": item.TenantID, "endpoint_id": item.EndpointID, "name": item.Name, "kind": item.Kind, "ownership_mode": item.OwnershipMode, "deployment_id": item.DeploymentID, "target_id": item.TargetID, "config": config, "created_at": item.CreatedAt, "updated_at": item.UpdatedAt}
+	return map[string]any{"id": item.ID, "tenant_id": item.TenantID, "endpoint_id": item.EndpointID, "name": name, "kind": item.Kind, "ownership_mode": item.OwnershipMode, "deployment_id": item.DeploymentID, "target_id": targetID, "config": config, "created_at": item.CreatedAt, "updated_at": item.UpdatedAt}
+}
+
+func customerManagedBindingConfig(raw map[string]any) map[string]any {
+	visible := map[string]any{"service": "infercrane-standard", "billing_mode": "customer_wallet"}
+	for _, key := range []string{
+		"enabled", "request_limit", "cost_limit_microusd", "max_request_cost_microusd",
+		"input_microusd_per_mtok", "output_microusd_per_mtok", "rate_card_valid_until",
+	} {
+		if value, ok := raw[key]; ok {
+			visible[key] = value
+		}
+	}
+	return visible
 }
 
 func servingPlanResponse(item domain.ServingPlan) map[string]any {
@@ -2228,7 +2421,12 @@ func (a API) diagnostics(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "kubernetes must be true or false")
 		return
 	}
-	writeJSON(w, http.StatusOK, a.Diagnostics(r.Context(), cloud, serverless, aws, gcp, kubernetes))
+	gpu := strings.TrimSpace(defaultValue(r.URL.Query().Get("gpu"), support.DefaultGPU))
+	if gpu == "" || len(gpu) > 100 || strings.ContainsAny(gpu, "\r\n\x00") {
+		writeError(w, http.StatusBadRequest, "invalid_request", "gpu must be a valid GPU type")
+		return
+	}
+	writeJSON(w, http.StatusOK, a.Diagnostics(r.Context(), cloud, serverless, aws, gcp, kubernetes, gpu))
 }
 
 func (a API) controlPlaneInstances(w http.ResponseWriter, r *http.Request) {
@@ -4351,7 +4549,7 @@ func deploymentLifecycleStatus(resolved domain.ResolvedDeployment, replicas []do
 	healthyTargets := 0
 	primaryTargets := 0
 	for _, target := range resolved.Targets {
-		if target.Provider == "openrouter" || target.Provider == "openai-compatible-external" {
+		if external.SupportedAdapter(target.Provider) {
 			// Governed fallback is an alternate serving path, not desired primary
 			// replica capacity. Its health is exposed in inspect and external policy
 			// views but must not make a healthy primary deployment look degraded.
@@ -4655,8 +4853,8 @@ func (a API) addTarget(w http.ResponseWriter, r *http.Request) {
 			request.Runtime = "openai-compatible-api"
 		}
 	}
-	if request.Provider != "existing" && request.Provider != "openrouter" && request.Provider != "openai-compatible-external" {
-		writeError(w, 422, "validation_failed", "provider must be existing, openrouter, or openai-compatible-external")
+	if request.Provider != "existing" && !external.SupportedAdapter(request.Provider) {
+		writeError(w, 422, "validation_failed", "provider must be existing or a supported managed external adapter")
 		return
 	}
 	if request.Provider != "existing" {

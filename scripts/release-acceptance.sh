@@ -200,6 +200,9 @@ release_paid_lock() {
 
 start_paid_watchdog() {
 	limit=$1
+	if [ -n "${watchdog_pid:-}" ] && kill -0 "$watchdog_pid" 2>/dev/null; then
+		return 0
+	fi
 	case "$limit" in ''|*[!0-9]*) echo "invalid paid-resource time limit" >&2; return 1;; esac
 	[ "$limit" -ge 300 ] && [ "$limit" -le 10800 ] || { echo "paid-resource time limit must be between 300 and 10800 seconds" >&2; return 1; }
 	watchdog_parent=$$
@@ -492,7 +495,7 @@ run_preflight() {
   need docker; need go; need curl; need jq
   require_key
   start_stack
-  record preflight-doctor ic doctor --cloud --output json
+  record preflight-doctor ic doctor --cloud --gpu "$GPU" --output json
   if [ -n "${INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID:-}" ]; then
     record preflight-serverless ic doctor --serverless --output json
   else
@@ -500,7 +503,24 @@ run_preflight() {
   fi
   capture_inventory before
   capture_provider_inventory before
-	if [ -n "$requested_spec" ]; then
+	preflight_compute=${INFERCRANE_ACCEPTANCE_COMPUTE:-}
+	case "$command_name" in
+		serverless|serverless-faults) preflight_compute=serverless ;;
+	esac
+	case "$preflight_compute" in
+		''|elastic|serverless) ;;
+		*) echo "INFERCRANE_ACCEPTANCE_COMPUTE must be elastic or serverless" >&2; return 1 ;;
+	esac
+	if [ "$preflight_compute" = serverless ]; then
+		[ -z "$requested_spec" ] || { echo "serverless preflight does not accept INFERCRANE_ACCEPTANCE_SPEC_FILE" >&2; return 1; }
+		serverless_max_workers=${INFERCRANE_ACCEPTANCE_SERVERLESS_MAX_WORKERS:-1}
+		case "$serverless_max_workers" in ''|*[!0-9]*) echo "invalid serverless worker limit" >&2; return 1;; esac
+		[ "$serverless_max_workers" -ge 1 ] && [ "$serverless_max_workers" -le 2 ] || {
+			echo "serverless worker limit must be between 1 and 2" >&2
+			return 1
+		}
+		record serverless-plan ic plan "$MODEL" --name "$SERVERLESS_NAME" --compute serverless --cloud runpod --gpu "$GPU" --min 0 --max "$serverless_max_workers" --output json
+	elif [ -n "$requested_spec" ]; then
 		[ -f "$requested_spec" ] && [ -r "$requested_spec" ] || { echo "INFERCRANE_ACCEPTANCE_SPEC_FILE is not readable" >&2; return 1; }
 		record elastic-plan ic plan "$requested_spec" --output json
 	else
@@ -687,9 +707,19 @@ run_elastic_evidence() {
 run_serverless() {
   require_paid_approval
   [ -n "${INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID:-}" ] || { echo "INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID is required" >&2; exit 1; }
+  serverless_max_workers=${INFERCRANE_ACCEPTANCE_SERVERLESS_MAX_WORKERS:-1}
+  case "$serverless_max_workers" in ''|*[!0-9]*) echo "invalid serverless worker limit" >&2; return 1;; esac
+  [ "$serverless_max_workers" -ge 1 ] && [ "$serverless_max_workers" -le 2 ] || {
+    echo "serverless worker limit must be between 1 and 2" >&2
+    return 1
+  }
   run_preflight
+  jq -n --argjson workers_max "$serverless_max_workers" \
+    --argjson max_paid_seconds "${INFERCRANE_ACCEPTANCE_MAX_PAID_SECONDS:-2400}" \
+    '{schema_version:1,workers_min:0,workers_max:$workers_max,idle_timeout_seconds:5,max_paid_seconds:$max_paid_seconds}' \
+    >"$evidence/serverless-spend-guard.json"
   record serverless-deploy ic deploy "$MODEL" --name "$SERVERLESS_NAME" --compute serverless \
-    --cloud runpod --gpu "$GPU" --max 2 --wait --idempotency-key "$SERVERLESS_NAME-create" --output json
+    --cloud runpod --gpu "$GPU" --max "$serverless_max_workers" --wait --idempotency-key "$SERVERLESS_NAME-create" --output json
   # Provider endpoint persistence completes before the reconciler publishes the
   # logical alias. Do not race the first request against route publication.
   wait_ready "$SERVERLESS_NAME"
@@ -706,7 +736,10 @@ run_serverless() {
   printf 'provider scaled to zero and the second cold request passed\n' >"$evidence/serverless-second-cold.log"
   record serverless-events-after-second-cold ic events "$SERVERLESS_NAME" --output json
   record serverless-explain-second-cold ic explain cold-start "$SERVERLESS_NAME" --output json
-  echo "Serverless cold, warm, scale-to-zero, second-cold, and streaming smoke completed."
+  delete_if_present "$SERVERLESS_NAME" "$SERVERLESS_NAME-delete"
+  capture_inventory serverless-after
+  verify_provider_inventory_absent
+  echo "Serverless cold, warm, scale-to-zero, second-cold, streaming, and zero-inventory smoke completed."
 }
 
 run_elastic_faults() {
@@ -984,6 +1017,11 @@ case "$command_name" in
     load_run
     acquire_paid_lock
     write_suite_result "$command_name" running 0
+		case "$command_name" in
+			serverless|serverless-faults) default_paid_seconds=2400 ;;
+			*) default_paid_seconds=5400 ;;
+		esac
+		start_paid_watchdog "${INFERCRANE_ACCEPTANCE_MAX_PAID_SECONDS:-$default_paid_seconds}"
 		trap 'exit 124' HUP INT TERM
     trap 'result=$?; trap - EXIT; stop_paid_watchdog; if [ "$result" -ne 0 ]; then write_suite_result "$command_name" failed "$result" || true; echo "acceptance failed; preserving provider inventory before guarded cleanup" >&2; capture_provider_inventory failure || true; run_cleanup || true; else write_suite_result "$command_name" passed 0 || result=$?; fi; release_paid_lock; exit "$result"' EXIT
     case "$command_name" in
@@ -1007,11 +1045,13 @@ case "$command_name" in
     load_run
     acquire_paid_lock
     write_suite_result "$command_name" running 0
-    trap 'result=$?; trap - EXIT; write_suite_result "$command_name" failed "$result" || true; echo "qualification failed; preserving provider inventory before guarded cleanup" >&2; capture_provider_inventory failure || true; run_cleanup || true; release_paid_lock; exit "$result"' EXIT
+		start_paid_watchdog "${INFERCRANE_ACCEPTANCE_MAX_PAID_SECONDS:-10800}"
+    trap 'result=$?; trap - EXIT; stop_paid_watchdog; write_suite_result "$command_name" failed "$result" || true; echo "qualification failed; preserving provider inventory before guarded cleanup" >&2; capture_provider_inventory failure || true; run_cleanup || true; release_paid_lock; exit "$result"' EXIT
     run_qualify
     trap - EXIT
     run_cleanup
     write_suite_result "$command_name" passed 0
+		stop_paid_watchdog
     release_paid_lock
     ;;
   cleanup) run_cleanup ;;

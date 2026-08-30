@@ -20,8 +20,12 @@ type Config struct {
 	DatabaseURL, ControlURL, Host, APIKey, RouterBinary, AIPerfBinary, PassportSigningKeyFile, InstanceID, Environment string
 	TLSCertFile, TLSKeyFile, TLSClientCAFile, ClientTLSCertFile, ClientTLSKeyFile, ClientTLSCAFile                     string
 	AsyncEncryptionKey, AsyncEncryptionKeyReference                                                                    string
-	HostedAuthIssuer, HostedAuthAudience, HostedAuthJWTKeyFile                                                         string
+	HostedAuthIssuer, HostedAuthAudience, HostedAuthJWTKey, HostedAuthJWTKeyFile                                       string
 	HostedAuthAuthorizedParties                                                                                        []string
+	StripeSecretKey, StripeWebhookSecret, StripeBillingReturnURL                                                       string
+	ModelAPICatalogFile                                                                                                string
+	StripePriceIDs                                                                                                     map[int64]string
+	StripeLivemode                                                                                                     bool
 	RunPodAPIKey, RunPodServerlessTemplateID, RunPodRESTURL, RunPodArtifactCachePolicy, RunPodHFTokenSecret            string
 	RunPodContainerDiskGiB                                                                                             int
 	RunPodNetworkVolumes                                                                                               map[string]string
@@ -324,6 +328,14 @@ func load(requireAPIKey bool) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	stripePriceIDs, err := envStripePriceIDs("INFERCRANE_STRIPE_PRICE_IDS_JSON")
+	if err != nil {
+		return Config{}, err
+	}
+	stripeLivemode, err := envBool("INFERCRANE_STRIPE_LIVEMODE", false)
+	if err != nil {
+		return Config{}, err
+	}
 	config := Config{
 		DatabaseURL:                         env("INFERCRANE_DATABASE_URL", "postgres://infercrane:infercrane@127.0.0.1:5432/infercrane?sslmode=disable"),
 		ControlURL:                          env("INFERCRANE_URL", "http://127.0.0.1:8080"),
@@ -341,8 +353,15 @@ func load(requireAPIKey bool) (Config, error) {
 		AsyncEncryptionKeyReference:         env("INFERCRANE_ASYNC_ENCRYPTION_KEY_REFERENCE", "environment:INFERCRANE_ASYNC_ENCRYPTION_KEY"),
 		HostedAuthIssuer:                    env("INFERCRANE_HOSTED_AUTH_ISSUER", ""),
 		HostedAuthAudience:                  env("INFERCRANE_HOSTED_AUTH_AUDIENCE", ""),
+		HostedAuthJWTKey:                    env("INFERCRANE_HOSTED_AUTH_JWT_KEY", ""),
 		HostedAuthJWTKeyFile:                env("INFERCRANE_HOSTED_AUTH_JWT_KEY_FILE", ""),
 		HostedAuthAuthorizedParties:         splitCSV(env("INFERCRANE_HOSTED_AUTH_AUTHORIZED_PARTIES", "")),
+		StripeSecretKey:                     env("INFERCRANE_STRIPE_SECRET_KEY", ""),
+		StripeWebhookSecret:                 env("INFERCRANE_STRIPE_WEBHOOK_SECRET", ""),
+		StripeBillingReturnURL:              env("INFERCRANE_BILLING_RETURN_URL", ""),
+		StripePriceIDs:                      stripePriceIDs,
+		StripeLivemode:                      stripeLivemode,
+		ModelAPICatalogFile:                 env("INFERCRANE_MODEL_API_CATALOG_FILE", ""),
 		RunPodAPIKey:                        env("RUNPOD_API_KEY", ""),
 		RunPodServerlessTemplateID:          env("INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID", ""),
 		RunPodRESTURL:                       env("INFERCRANE_RUNPOD_REST_URL", "https://rest.runpod.io/v1"),
@@ -466,6 +485,9 @@ func load(requireAPIKey bool) (Config, error) {
 	if err := validateHostedAuth(config); err != nil {
 		return Config{}, err
 	}
+	if err := validateStripe(config); err != nil {
+		return Config{}, err
+	}
 	return config, nil
 }
 
@@ -524,15 +546,46 @@ func (c Config) DynamoRuntimeEnabled(runtime string) bool {
 	}
 }
 
-func (c Config) HostedAuthEnabled() bool { return c.HostedAuthJWTKeyFile != "" }
+func (c Config) HostedAuthEnabled() bool {
+	return c.HostedAuthJWTKey != "" || c.HostedAuthJWTKeyFile != ""
+}
 
-func validateHostedAuth(config Config) error {
-	configured := config.HostedAuthIssuer != "" || config.HostedAuthAudience != "" || config.HostedAuthJWTKeyFile != "" || len(config.HostedAuthAuthorizedParties) > 0
+func (c Config) StripeEnabled() bool { return c.StripeSecretKey != "" }
+
+func validateStripe(config Config) error {
+	configured := config.StripeSecretKey != "" || config.StripeWebhookSecret != "" || config.StripeBillingReturnURL != "" || len(config.StripePriceIDs) > 0 || config.StripeLivemode
 	if !configured {
 		return nil
 	}
-	if config.HostedAuthIssuer == "" || config.HostedAuthJWTKeyFile == "" || len(config.HostedAuthAuthorizedParties) == 0 {
-		return errors.New("hosted auth configuration is partial; issuer, JWT public-key file, and authorized parties are required")
+	if config.StripeSecretKey == "" || config.StripeWebhookSecret == "" || config.StripeBillingReturnURL == "" || len(config.StripePriceIDs) != 5 {
+		return errors.New("Stripe prepaid funding configuration is partial; secret key, webhook secret, return URL, and all five fixed Price IDs are required")
+	}
+	if config.StripeLivemode && !strings.HasPrefix(config.StripeSecretKey, "sk_live_") {
+		return errors.New("INFERCRANE_STRIPE_LIVEMODE=true requires a Stripe live-mode secret key")
+	}
+	if !config.StripeLivemode && !strings.HasPrefix(config.StripeSecretKey, "sk_test_") {
+		return errors.New("Stripe sandbox funding requires an sk_test_ secret key")
+	}
+	if !strings.HasPrefix(config.StripeWebhookSecret, "whsec_") {
+		return errors.New("INFERCRANE_STRIPE_WEBHOOK_SECRET must be a Stripe webhook signing secret")
+	}
+	parsed, err := url.Parse(config.StripeBillingReturnURL)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
+		return errors.New("INFERCRANE_BILLING_RETURN_URL must be an absolute HTTP(S) URL without credentials or fragment")
+	}
+	return nil
+}
+
+func validateHostedAuth(config Config) error {
+	configured := config.HostedAuthIssuer != "" || config.HostedAuthAudience != "" || config.HostedAuthJWTKey != "" || config.HostedAuthJWTKeyFile != "" || len(config.HostedAuthAuthorizedParties) > 0
+	if !configured {
+		return nil
+	}
+	if config.HostedAuthIssuer == "" || (config.HostedAuthJWTKey == "" && config.HostedAuthJWTKeyFile == "") || len(config.HostedAuthAuthorizedParties) == 0 {
+		return errors.New("hosted auth configuration is partial; issuer, JWT public key, and authorized parties are required")
+	}
+	if config.HostedAuthJWTKey != "" && config.HostedAuthJWTKeyFile != "" {
+		return errors.New("configure exactly one of INFERCRANE_HOSTED_AUTH_JWT_KEY or INFERCRANE_HOSTED_AUTH_JWT_KEY_FILE")
 	}
 	issuer, err := url.Parse(config.HostedAuthIssuer)
 	if err != nil || issuer.Scheme != "https" || issuer.Host == "" || issuer.User != nil || issuer.RawQuery != "" || issuer.Fragment != "" {
@@ -827,6 +880,36 @@ func envInt(key string, fallback int) (int, error) {
 		return 0, fmt.Errorf("%s must be an integer: %w", key, err)
 	}
 	return value, nil
+}
+
+func envBool(key string, fallback bool) (bool, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback, nil
+	}
+	value, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, fmt.Errorf("%s must be true or false: %w", key, err)
+	}
+	return value, nil
+}
+
+func envStripePriceIDs(key string) (map[int64]string, error) {
+	encoded, err := envStringMap(key)
+	if err != nil || len(encoded) == 0 {
+		return nil, err
+	}
+	allowed := map[int64]struct{}{25: {}, 50: {}, 100: {}, 250: {}, 500: {}}
+	prices := make(map[int64]string, len(encoded))
+	for dollarAmount, priceID := range encoded {
+		amount, parseErr := strconv.ParseInt(dollarAmount, 10, 64)
+		_, supported := allowed[amount]
+		if parseErr != nil || !supported || !strings.HasPrefix(priceID, "price_") || strings.TrimSpace(priceID) != priceID || len(priceID) < len("price_")+1 {
+			return nil, fmt.Errorf("%s must map only 25, 50, 100, 250, and 500 USD to Stripe price_ IDs", key)
+		}
+		prices[amount*1_000_000] = priceID
+	}
+	return prices, nil
 }
 
 func envStringMap(key string) (map[string]string, error) {

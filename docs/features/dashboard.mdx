@@ -23,6 +23,7 @@ reads PostgreSQL or provider credentials directly.
 - lifecycle overlays, signed alert policies, sourced FinOps reports, and signed output-quality evidence;
 - provider/runtime capability inventory and secret references;
 - scoped API-key lifecycle and private-preview team access.
+- a curated Model API shelf with InferCrane rates, capabilities, limits, and availability.
 
 Missing or forbidden evidence remains explicit. A failed optional panel does not make a deployment
 look healthy, and an unavailable measurement is never rendered as zero.
@@ -38,8 +39,15 @@ served. The primary paths are ordered by intent:
    and starts observe-only. The endpoint page then presents a separate, explicit ownership action
    before InferCrane can route traffic. Promotion changes routing ownership only; it does not grant
    lifecycle control over the external workload.
-3. **Use a model API** registers OpenRouter or another OpenAI-compatible provider. Configuration
-   alone sends no traffic and authorizes no spend.
+3. **Use a Model API** selects a hosted InferCrane product, creates one API key, and uses the same
+   OpenAI-compatible endpoint across the catalog. The customer surface shows only the InferCrane
+   rate, capability, limit, and availability contract. Procurement routing, internal offer IDs,
+   credentials, and upstream rate provenance remain inside the control plane. Prepaid reservation
+   happens before a managed request can leave InferCrane.
+
+Teams that want to pay infrastructure vendors directly use the separate **Your infrastructure**
+path. Connecting infrastructure does not make that vendor part of the Model API product catalog,
+authorize spend, or send traffic.
 
 Each workflow separates configuration from review. The review step states ownership, billable
 effects, missing cost evidence, and whether traffic changes before the mutation is submitted.
@@ -95,12 +103,15 @@ does not grant access. The Go control plane independently requires a mapped Infe
 organization membership, role/scopes, and active `web_console_access` entitlement. Default access is
 denied.
 
-Configure the Go verifier with the Clerk instance's HTTPS issuer and public JWT verification key:
+Configure the Go verifier with the Clerk instance's HTTPS issuer and public JWT verification key.
+Use the inline value when the deployment platform stores environment secrets, or the file value
+when it mounts secrets; never configure both:
 
 ```bash
 export INFERCRANE_HOSTED_AUTH_ISSUER="https://YOUR-CLERK-DOMAIN"
 export INFERCRANE_HOSTED_AUTH_AUDIENCE="infercrane-control-api"
-export INFERCRANE_HOSTED_AUTH_JWT_KEY_FILE="/run/secrets/clerk-jwt-public.pem"
+export INFERCRANE_HOSTED_AUTH_JWT_KEY="-----BEGIN PUBLIC KEY-----...-----END PUBLIC KEY-----"
+# Alternative: INFERCRANE_HOSTED_AUTH_JWT_KEY_FILE=/run/secrets/clerk-jwt-public.pem
 export INFERCRANE_HOSTED_AUTH_AUTHORIZED_PARTIES="https://app.infercrane.ai"
 ```
 

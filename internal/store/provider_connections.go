@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/external"
 )
 
 // CreateProviderConnection records reusable provider configuration without
@@ -16,7 +17,7 @@ func (s *Store) CreateProviderConnection(ctx context.Context, tenant string, ite
 	if tenant == "" || item.Name == "" || item.Adapter == "" || item.TargetID == "" || item.SecretReferenceID == "" {
 		return domain.ProviderConnection{}, errors.New("tenant, name, adapter, target, and secret reference are required")
 	}
-	if item.Adapter != "openrouter" && item.Adapter != "openai-compatible-external" {
+	if !external.SupportedAdapter(item.Adapter) {
 		return domain.ProviderConnection{}, fmt.Errorf("unsupported provider adapter %q", item.Adapter)
 	}
 	tx, err := s.beginTx(ctx)

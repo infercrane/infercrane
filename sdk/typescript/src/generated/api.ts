@@ -58,6 +58,16 @@ export class ControlApi {
     return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
   }
 
+  listModelAPICatalog(): Promise<ObjectList> {
+    const path = '/model-api-catalog';
+    return this.transport.request('GET', path) as Promise<ObjectList>;
+  }
+
+  getModelAPICatalogEntry(id: string): Promise<Record<string, JsonValue>> {
+    const path = `/model-api-catalog/${encodeURIComponent(id)}`;
+    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+  }
+
   listControlPlaneInstances(): Promise<ObjectList> {
     const path = '/system/instances';
     return this.transport.request('GET', path) as Promise<ObjectList>;
@@ -581,6 +591,46 @@ export class ControlApi {
   deleteProviderConnection(name: string): Promise<Record<string, JsonValue>> {
     const path = `/provider-connections/${encodeURIComponent(name)}`;
     return this.transport.request('DELETE', path) as Promise<Record<string, JsonValue>>;
+  }
+
+  getManagedWallet(): Promise<Record<string, JsonValue>> {
+    const path = '/billing/wallet';
+    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+  }
+
+  listManagedWalletLedger(): Promise<Record<string, JsonValue>> {
+    const path = '/billing/ledger';
+    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+  }
+
+  createManagedCheckoutSession(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = '/billing/checkout-sessions';
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  processStripeBillingWebhook(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = '/billing/webhooks/stripe';
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  creditManagedWallet(body: JsonValue, idempotencyKey: string): Promise<Record<string, JsonValue>> {
+    const path = '/admin/billing/credits';
+    return this.transport.request('POST', path, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
+  }
+
+  listManagedUsageReservations(): Promise<Record<string, JsonValue>> {
+    const path = '/admin/billing/reservations';
+    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+  }
+
+  settleManagedUsage(id: string, body: JsonValue, idempotencyKey: string): Promise<Record<string, JsonValue>> {
+    const path = `/admin/billing/reservations/${encodeURIComponent(id)}/settlement`;
+    return this.transport.request('POST', path, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
+  }
+
+  releaseManagedUsage(id: string, body: JsonValue, idempotencyKey: string): Promise<Record<string, JsonValue>> {
+    const path = `/admin/billing/reservations/${encodeURIComponent(id)}/release`;
+    return this.transport.request('POST', path, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
   }
 
   listOrphans(): Promise<ObjectList> {

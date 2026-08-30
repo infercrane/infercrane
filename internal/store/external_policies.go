@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/external"
 	"github.com/infercrane/infercrane/internal/overflow"
 )
 
@@ -38,7 +39,7 @@ func (s *Store) SetExternalTargetPolicyForTenant(ctx context.Context, policy dom
 	if policy.TenantID == "" || policy.DeploymentID == "" || policy.TargetID == "" || policy.SecretReferenceID == "" || policy.Adapter == "" || policy.RequestLimit < 1 {
 		return domain.ExternalTargetPolicy{}, errors.New("tenant, deployment, target, adapter, secret reference, and positive request limit are required")
 	}
-	if policy.Adapter != "openai-compatible-external" && policy.Adapter != "openrouter" {
+	if !external.SupportedAdapter(policy.Adapter) {
 		return domain.ExternalTargetPolicy{}, fmt.Errorf("unsupported external adapter %q", policy.Adapter)
 	}
 	if policy.Enabled && !policy.PrivacyAcknowledged {

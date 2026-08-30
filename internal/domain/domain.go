@@ -948,23 +948,33 @@ type ExternalTargetPolicy struct {
 // control plane. Hard budgets are durably reserved before the gateway can send
 // a request.
 type ManagedExternalBindingConfig struct {
-	Adapter                string `json:"adapter"`
-	SecretReferenceID      string `json:"secret_reference_id"`
-	Enabled                bool   `json:"enabled"`
-	PrivacyAcknowledged    bool   `json:"privacy_acknowledged"`
-	RequestLimit           int64  `json:"request_limit"`
-	CostLimitMicrousd      int64  `json:"cost_limit_microusd"`
-	MaxRequestCostMicrousd int64  `json:"max_request_cost_microusd"`
+	Adapter                        string `json:"adapter"`
+	SecretReferenceID              string `json:"secret_reference_id"`
+	Enabled                        bool   `json:"enabled"`
+	PrivacyAcknowledged            bool   `json:"privacy_acknowledged"`
+	RequestLimit                   int64  `json:"request_limit"`
+	CostLimitMicrousd              int64  `json:"cost_limit_microusd"`
+	MaxRequestCostMicrousd         int64  `json:"max_request_cost_microusd"`
+	BillingMode                    string `json:"billing_mode,omitempty"`
+	InputMicrousdPerMTok           int64  `json:"input_microusd_per_mtok,omitempty"`
+	OutputMicrousdPerMTok          int64  `json:"output_microusd_per_mtok,omitempty"`
+	CostBasisInputMicrousdPerMTok  int64  `json:"cost_basis_input_microusd_per_mtok,omitempty"`
+	CostBasisOutputMicrousdPerMTok int64  `json:"cost_basis_output_microusd_per_mtok,omitempty"`
+	MinimumGrossMarginBPS          int    `json:"minimum_gross_margin_bps,omitempty"`
+	CostBasisProvenance            string `json:"cost_basis_provenance,omitempty"`
+	RateCardValidUntil             string `json:"rate_card_valid_until,omitempty"`
 }
 
 type ManagedExternalBindingPolicy struct {
-	ID, TenantID, BindingID, TargetID         string
-	Adapter, SecretReferenceID                string
-	Enabled, PrivacyAcknowledged              bool
-	RequestLimit, RequestsReserved            int64
-	CostLimitMicrousd, MaxRequestCostMicrousd int64
-	CostReservedMicrousd                      int64
-	CreatedAt, UpdatedAt                      time.Time
+	ID, TenantID, BindingID, TargetID           string
+	Adapter, SecretReferenceID                  string
+	Enabled, PrivacyAcknowledged                bool
+	RequestLimit, RequestsReserved              int64
+	CostLimitMicrousd, MaxRequestCostMicrousd   int64
+	CostReservedMicrousd                        int64
+	BillingMode                                 string
+	InputMicrousdPerMTok, OutputMicrousdPerMTok int64
+	CreatedAt, UpdatedAt                        time.Time
 }
 
 type ExternalBudgetLease struct {
@@ -972,6 +982,99 @@ type ExternalBudgetLease struct {
 	Requests               int64  `json:"requests"`
 	ReservedCostMicrousd   int64  `json:"reserved_cost_microusd"`
 	MaxRequestCostMicrousd int64  `json:"max_request_cost_microusd"`
+}
+
+// ManagedWallet is the prepaid customer balance used only by managed Model
+// API bindings. BYOC and adopted endpoints never consume this wallet.
+type ManagedWallet struct {
+	TenantID          string    `json:"tenant_id"`
+	Currency          string    `json:"currency"`
+	BalanceMicrousd   int64     `json:"balance_microusd"`
+	ReservedMicrousd  int64     `json:"reserved_microusd"`
+	DebtMicrousd      int64     `json:"debt_microusd"`
+	AvailableMicrousd int64     `json:"available_microusd"`
+	UpdatedAt         time.Time `json:"updated_at"`
+}
+
+type ManagedUsageAuthorization struct {
+	ReservationID    string `json:"reservation_id,omitempty"`
+	Required         bool   `json:"required"`
+	ReservedMicrousd int64  `json:"reserved_microusd,omitempty"`
+}
+
+type ManagedUsageSettlement struct {
+	StatusCode   int  `json:"status_code"`
+	InputTokens  *int `json:"input_tokens,omitempty"`
+	OutputTokens *int `json:"output_tokens,omitempty"`
+}
+
+type ManagedUsageReservation struct {
+	ID               string    `json:"id"`
+	TenantID         string    `json:"tenant_id"`
+	BindingID        string    `json:"binding_id"`
+	Supplier         string    `json:"supplier"`
+	Model            string    `json:"model"`
+	ReservedMicrousd int64     `json:"reserved_microusd"`
+	ActualMicrousd   int64     `json:"actual_microusd"`
+	InputTokens      *int      `json:"input_tokens,omitempty"`
+	OutputTokens     *int      `json:"output_tokens,omitempty"`
+	State            string    `json:"state"`
+	Resolution       string    `json:"resolution"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+type ManagedWalletLedgerEntry struct {
+	ID             string    `json:"id"`
+	TenantID       string    `json:"tenant_id"`
+	ReservationID  string    `json:"reservation_id,omitempty"`
+	Kind           string    `json:"kind"`
+	Currency       string    `json:"currency"`
+	Description    string    `json:"description"`
+	AmountMicrousd int64     `json:"amount_microusd"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+// ManagedCheckoutSession is a short-lived redirect to a hosted payment page.
+// Creating a session never changes the wallet; only a verified payment event
+// may create spending authority.
+type ManagedCheckoutSession struct {
+	Provider       string    `json:"provider"`
+	ProviderID     string    `json:"provider_id"`
+	URL            string    `json:"url"`
+	AmountMicrousd int64     `json:"amount_microusd"`
+	Currency       string    `json:"currency"`
+	ExpiresAt      time.Time `json:"expires_at"`
+}
+
+// ManagedPaymentEvent is the normalized result of a provider-signed webhook.
+// Apply remains false for unsupported or unpaid events so they can be recorded
+// without granting balance.
+type ManagedPaymentEvent struct {
+	Provider         string `json:"provider"`
+	EventID          string `json:"event_id"`
+	EventType        string `json:"event_type"`
+	PayloadDigest    string `json:"payload_digest"`
+	TenantID         string `json:"tenant_id,omitempty"`
+	SessionID        string `json:"session_id,omitempty"`
+	PaymentIntentID  string `json:"payment_intent_id,omitempty"`
+	AmountMicrousd   int64  `json:"amount_microusd,omitempty"`
+	RefundedMicrousd int64  `json:"refunded_microusd,omitempty"`
+	Currency         string `json:"currency,omitempty"`
+	Operation        string `json:"operation,omitempty"`
+	Apply            bool   `json:"apply"`
+	IgnoreReason     string `json:"ignore_reason,omitempty"`
+	MetadataJSON     string `json:"metadata,omitempty"`
+}
+
+type ManagedPaymentResult struct {
+	Provider      string                    `json:"provider"`
+	EventID       string                    `json:"event_id"`
+	Status        string                    `json:"status"`
+	CreditApplied bool                      `json:"credit_applied"`
+	RefundApplied bool                      `json:"refund_applied"`
+	Wallet        *ManagedWallet            `json:"wallet,omitempty"`
+	LedgerEntry   *ManagedWalletLedgerEntry `json:"ledger_entry,omitempty"`
 }
 
 var RoutingStrategies = map[string]string{

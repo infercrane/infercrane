@@ -22,13 +22,24 @@ type providerConnectionView struct {
 	SecretReferenceName string `json:"secret_reference"`
 }
 
+const providerAdapterHelp = "openrouter, openai-compatible-external, modal, runpod-serverless-api, or fly-io"
+
+func supportedProviderConnectionAdapter(adapter string) bool {
+	switch adapter {
+	case "openrouter", "openai-compatible-external", "modal", "runpod-serverless-api", "fly-io":
+		return true
+	default:
+		return false
+	}
+}
+
 func providerCommand(ctx context.Context, cfg config.Config, args []string) error {
 	if len(args) == 0 {
 		return errors.New("provider requires connect, list, or delete")
 	}
 	action := args[0]
 	fs := flag.NewFlagSet("provider "+action, flag.ContinueOnError)
-	adapter := fs.String("adapter", "openrouter", "openrouter or openai-compatible-external")
+	adapter := fs.String("adapter", "openrouter", providerAdapterHelp)
 	providerURL := fs.String("url", "", "provider OpenAI-compatible base URL")
 	model := fs.String("model", "", "provider model identifier")
 	secretReference := fs.String("secret-reference", "", "existing InferCrane secret reference ID")
@@ -69,16 +80,16 @@ func providerCommand(ctx context.Context, cfg config.Config, args []string) erro
 		return w.Flush()
 	case "connect":
 		if name == "" || fs.NArg() != 0 || *model == "" || (*secretReference == "") == (*fromEnv == "") {
-			return errors.New("usage: infercrane provider connect NAME --model MODEL (--from-env VARIABLE | --secret-reference ID) [--adapter openrouter|openai-compatible-external --url URL]")
+			return errors.New("usage: infercrane provider connect NAME --model MODEL (--from-env VARIABLE | --secret-reference ID) [--adapter ADAPTER --url URL]")
 		}
-		if *adapter != "openrouter" && *adapter != "openai-compatible-external" {
-			return errors.New("--adapter must be openrouter or openai-compatible-external")
+		if !supportedProviderConnectionAdapter(*adapter) {
+			return fmt.Errorf("--adapter must be one of: %s", providerAdapterHelp)
 		}
 		if *providerURL == "" && *adapter == "openrouter" {
 			*providerURL = "https://openrouter.ai/api/v1"
 		}
 		if *providerURL == "" {
-			return errors.New("--url is required for an OpenAI-compatible provider")
+			return errors.New("--url is required; it must be the provider's OpenAI-compatible base URL")
 		}
 		resolvedSecretReference := *secretReference
 		if *fromEnv != "" {

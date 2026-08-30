@@ -1,0 +1,44 @@
+# Deploy with an explicit application name:
+#   fly deploy -a YOUR_APP_NAME -c deploy/fly/control-plane.toml
+# Secrets are configured with `fly secrets set`; never add them here.
+
+primary_region = "fra"
+kill_signal = "SIGTERM"
+kill_timeout = 35
+
+[build]
+  dockerfile = "Dockerfile"
+  build-target = "runtime"
+
+[env]
+  INFERCRANE_ENV = "production"
+  INFERCRANE_HOST = "0.0.0.0"
+  INFERCRANE_PORT = "8080"
+  INFERCRANE_SKYPILOT_API = "disabled"
+  INFERCRANE_DATABASE_MAX_OPEN = "12"
+  INFERCRANE_DATABASE_MAX_IDLE = "4"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = false
+  min_machines_running = 1
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 100
+    hard_limit = 200
+
+  [[http_service.checks]]
+    grace_period = "30s"
+    interval = "15s"
+    method = "GET"
+    path = "/readyz"
+    timeout = "3s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"
+  processes = ["app"]

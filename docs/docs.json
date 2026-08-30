@@ -103,7 +103,7 @@
           {
             "group": "Start here",
             "boost": 2,
-            "pages": ["index", "quickstart", "release-notes-v1.0.0-rc.1", "release-notes-v1.0.0", "why-infercrane", "compare", "editions", "concepts", "architecture/system", "architecture/invariants", "architecture/data-flows"]
+            "pages": ["index", "quickstart", "release-notes-v1.0.0-rc.1", "release-notes-v1.0.0", "why-infercrane", "compare", "editions", "concepts", "architecture/system", "architecture/control-plane-hosting", "architecture/managed-model-apis", "architecture/invariants", "architecture/data-flows"]
           },
           {
             "group": "Deploy and connect",

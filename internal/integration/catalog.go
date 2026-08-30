@@ -119,6 +119,9 @@ func providerCatalog() (*Registry, error) {
 				{State: QualificationDeferred, Environment: "real-openrouter", Reason: "real-provider qualification has not been completed"},
 			},
 		},
+		governedExternalAPIProfile("modal", "Modal web endpoint", "operator supplies an OpenAI-compatible Modal web endpoint; InferCrane does not provision Modal functions"),
+		governedExternalAPIProfile("runpod-serverless-api", "RunPod Serverless API", "operator supplies an OpenAI-compatible RunPod Serverless endpoint; native asynchronous worker payloads are outside this binding"),
+		governedExternalAPIProfile("fly-io", "Fly.io service", "operator supplies an OpenAI-compatible service hosted on Fly.io; this adapter does not claim GPU provisioning"),
 		{
 			Adapter: "aws-ec2", Cloud: "aws", ContractVersion: ProviderContractV1, AdapterVersion: "builtin-v1", Modes: []ComputeMode{ElasticMode},
 			Capabilities: []Capability{
@@ -141,6 +144,24 @@ func providerCatalog() (*Registry, error) {
 		}
 	}
 	return registry, nil
+}
+
+func governedExternalAPIProfile(adapter, environment, provisioningDetail string) ProviderProfile {
+	return ProviderProfile{
+		Adapter: adapter, Cloud: "external", ContractVersion: ProviderContractV1, AdapterVersion: "boundary-v1", Modes: []ComputeMode{ExternalMode},
+		Capabilities: []Capability{
+			{Name: "hard_budget", State: CapabilitySupported, Evidence: "go:test/internal/external#TestBudgetPoolNeverAuthorizesBeyondLease"},
+			{Name: "prepaid_reservation", State: CapabilitySupported, Evidence: "go:test/internal/gateway#TestManagedModelAPIInsufficientPrepaidBalanceNeverReachesSupplier"},
+			{Name: "reference_credentials", State: CapabilitySupported, Evidence: "go:test/internal/controlapi#TestManagedExternalEndpointBindingRequiresConsentReferenceAndHardBudget"},
+			{Name: "stable_endpoint_binding", State: CapabilitySupported, Evidence: "go:test/internal/reconcile#TestManagedExternalBindingCompilesThroughCredentialAndBudgetCoordinator"},
+			{Name: "streaming_without_replay", State: CapabilitySupported, Evidence: "go:test/internal/gateway#TestExternalFallbackConsumesHardBudgetBeforeTransmissionAndNeverReplaysStream"},
+			{Name: "provisioning", State: CapabilityUnsupported, Detail: provisioningDetail},
+		},
+		Qualification: []Qualification{
+			{State: QualificationLocal, Environment: "hermetic-openai-compatible", Evidence: "go:test/internal/external#TestCoordinatorResolvesManagedExternalBindingWithoutPersistingCredential"},
+			{State: QualificationDeferred, Environment: "real-" + adapter, Reason: environment + " behavior remains target-specific and has not been real-provider qualified"},
+		},
+	}
 }
 
 // PortableCatalog adds portable OCI and SGLang profiles without changing the

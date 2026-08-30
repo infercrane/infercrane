@@ -294,5 +294,5 @@ func (c *Coordinator) adapters() map[string]struct{} {
 	if len(c.Adapters) > 0 {
 		return c.Adapters
 	}
-	return map[string]struct{}{"openai-compatible-external": {}, "openrouter": {}}
+	return map[string]struct{}{"openai-compatible-external": {}, "openrouter": {}, "modal": {}, "runpod-serverless-api": {}, "fly-io": {}}
 }

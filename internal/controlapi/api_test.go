@@ -20,6 +20,7 @@ import (
 	"github.com/infercrane/infercrane/internal/doctor"
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/integration"
+	"github.com/infercrane/infercrane/internal/modelapicatalog"
 	"github.com/infercrane/infercrane/internal/optimizationcampaign"
 	"github.com/infercrane/infercrane/internal/optimizedartifact"
 	"github.com/infercrane/infercrane/internal/optimizer"
@@ -72,6 +73,73 @@ type fakeEndpointStore struct {
 type fakeProviderEndpointStore struct {
 	*fakeEndpointStore
 	connections []domain.ProviderConnection
+}
+
+type fakeManagedBillingStore struct {
+	*fakeStore
+	wallet             domain.ManagedWallet
+	ledger             []domain.ManagedWalletLedgerEntry
+	reservations       []domain.ManagedUsageReservation
+	reservationTenant  string
+	reservationState   string
+	settledReservation domain.ManagedUsageReservation
+	releasedTenant     string
+	releasedID         string
+	releaseReason      string
+	payment            domain.ManagedPaymentEvent
+	paymentResult      domain.ManagedPaymentResult
+}
+
+func (f *fakeManagedBillingStore) ManagedWallet(context.Context, string) (domain.ManagedWallet, error) {
+	return f.wallet, f.err
+}
+
+func (f *fakeManagedBillingStore) ManagedWalletLedger(context.Context, string, int) ([]domain.ManagedWalletLedgerEntry, error) {
+	return f.ledger, f.err
+}
+
+func (f *fakeManagedBillingStore) ManagedUsageReservations(_ context.Context, tenant, state string, _ int) ([]domain.ManagedUsageReservation, error) {
+	f.reservationTenant, f.reservationState = tenant, state
+	return f.reservations, f.err
+}
+
+func (f *fakeManagedBillingStore) CreditManagedWallet(context.Context, string, string, string, int64) (domain.ManagedWallet, error) {
+	return f.wallet, f.err
+}
+
+func (f *fakeManagedBillingStore) SettleManagedUsage(_ context.Context, tenant, id string, settlement domain.ManagedUsageSettlement) (domain.ManagedUsageReservation, error) {
+	f.settledReservation = domain.ManagedUsageReservation{ID: id, TenantID: tenant, State: "settled", InputTokens: settlement.InputTokens, OutputTokens: settlement.OutputTokens}
+	return f.settledReservation, f.err
+}
+
+func (f *fakeManagedBillingStore) ReleaseManagedUsage(_ context.Context, tenant, id, reason string) error {
+	f.releasedTenant, f.releasedID, f.releaseReason = tenant, id, reason
+	return f.err
+}
+
+func (f *fakeManagedBillingStore) ProcessManagedPaymentEvent(_ context.Context, payment domain.ManagedPaymentEvent) (domain.ManagedPaymentResult, error) {
+	f.payment = payment
+	return f.paymentResult, f.err
+}
+
+type fakeManagedCheckoutProvider struct {
+	tenant  string
+	amount  int64
+	session domain.ManagedCheckoutSession
+	payment domain.ManagedPaymentEvent
+	err     error
+}
+
+func (f *fakeManagedCheckoutProvider) CreateCheckoutSession(_ context.Context, tenant string, amount int64) (domain.ManagedCheckoutSession, error) {
+	f.tenant, f.amount = tenant, amount
+	return f.session, f.err
+}
+
+func (f *fakeManagedCheckoutProvider) ParseWebhook(_ []byte, signature string) (domain.ManagedPaymentEvent, error) {
+	if signature == "" {
+		return domain.ManagedPaymentEvent{}, errors.New("signature is required")
+	}
+	return f.payment, f.err
 }
 
 func (f *fakeProviderEndpointStore) CreateProviderConnection(_ context.Context, tenant string, item domain.ProviderConnection) (domain.ProviderConnection, error) {
@@ -451,6 +519,91 @@ func TestModelCatalogIsAuthenticatedSearchableAndTruthful(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("unexpected query status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestModelAPICatalogPaginatesAndNeverExposesSupplierRouting(t *testing.T) {
+	price := int64(125000)
+	catalog := modelapicatalog.Catalog{SchemaVersion: modelapicatalog.SchemaVersion, Models: []modelapicatalog.Model{{
+		ID: "private-model", DisplayName: "Private Model", Publisher: "Publisher", PublisherSlug: "publisher", Family: "Private", Description: "Managed model.",
+		Tasks: []string{"chat"}, Capabilities: []string{"streaming"}, InputModalities: []string{"text"}, OutputModalities: []string{"text"},
+		Access: "ready", Qualification: "supplier-reported", QualificationNote: "Managed contract observed.",
+		Offers: []modelapicatalog.Offer{{ID: "secret-offer", Supplier: "Secret Supplier", SupplierSlug: "secret-supplier", SupplierModelID: "supplier/private", Adapter: "openai-compatible-external", Protocol: "openai", Access: "connect-provider", Availability: "available", Regions: []string{"supplier-private-region"}, SourceURL: "https://supplier.example/private", Pricing: &modelapicatalog.Pricing{Currency: "USD", InputMicrousdPerMillion: &price, Provenance: "Secret Supplier contract", ObservedAt: "2026-08-30T00:00:00Z", ValidUntil: "2026-08-31T00:00:00Z"}}},
+	}}}
+	handler := (API{Store: &fakeStore{}, APIKey: "secret", ModelAPICatalog: catalog}).Handler()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/model-api-catalog?task=chat&limit=1", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	body := response.Body.String()
+	if response.Code != http.StatusOK || !strings.Contains(body, `"display_name":"Private Model"`) || !strings.Contains(body, `"total":1`) {
+		t.Fatalf("status=%d body=%s", response.Code, body)
+	}
+	if !strings.Contains(body, `"access":"request-access"`) || strings.Contains(body, `"access":"connect-provider"`) {
+		t.Fatalf("customer response exposed a supplier connection action: %s", body)
+	}
+	if !strings.Contains(body, `"id":"infercrane-standard"`) || !strings.Contains(body, `"provenance":"InferCrane rate card"`) {
+		t.Fatalf("customer response did not present the InferCrane service contract: %s", body)
+	}
+	if !strings.Contains(body, `"qualification":"reported"`) {
+		t.Fatalf("customer response did not normalize internal qualification: %s", body)
+	}
+	for _, secret := range []string{"Secret Supplier", "secret-offer", "secret-supplier", "supplier/private", "openai-compatible-external", "supplier.example", "supplier-private-region", "Secret Supplier contract"} {
+		if strings.Contains(body, secret) {
+			t.Fatalf("customer response exposed supplier detail %q: %s", secret, body)
+		}
+	}
+	if strings.Contains(strings.ToLower(body), "supplier") {
+		t.Fatalf("customer response exposed procurement vocabulary: %s", body)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/model-api-catalog?limit=101", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("invalid limit status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestModelAPICatalogDoesNotPublishExpiredRateCard(t *testing.T) {
+	price := int64(125000)
+	catalog := modelapicatalog.Catalog{SchemaVersion: modelapicatalog.SchemaVersion, Models: []modelapicatalog.Model{{
+		ID: "expired-model", DisplayName: "Expired Model", Publisher: "Publisher", PublisherSlug: "publisher", Family: "Expired", Description: "Managed model.",
+		Tasks: []string{"chat"}, Capabilities: []string{"streaming"}, InputModalities: []string{"text"}, OutputModalities: []string{"text"},
+		Access: "ready", Qualification: "supplier-reported", QualificationNote: "Managed contract observed.",
+		Offers: []modelapicatalog.Offer{{ID: "expired-offer", Supplier: "internal", SupplierSlug: "internal", SupplierModelID: "private", Adapter: "openai-compatible-external", Protocol: "openai", Access: "ready", Availability: "available", Pricing: &modelapicatalog.Pricing{Currency: "USD", InputMicrousdPerMillion: &price, Provenance: "private", ObservedAt: "1999-01-01T00:00:00Z", ValidUntil: "2000-01-01T00:00:00Z"}}},
+	}}}
+	handler := (API{Store: &fakeStore{}, APIKey: "secret", ModelAPICatalog: catalog}).Handler()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/model-api-catalog/expired-model", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	body := response.Body.String()
+	if response.Code != http.StatusOK || !strings.Contains(body, `"access":"request-access"`) || !strings.Contains(body, `"availability":"unknown"`) || strings.Contains(body, `"pricing"`) {
+		t.Fatalf("expired rate card was not hidden: status=%d body=%s", response.Code, body)
+	}
+}
+
+func TestCustomerWalletBindingResponseRedactsSupplierAndCostBasis(t *testing.T) {
+	response := bindingResponse(domain.BackendBinding{
+		ID: "binding", TenantID: "tenant", EndpointID: "endpoint", Name: "runpod-primary", Kind: "external", OwnershipMode: "traffic-managed", TargetID: "private-target",
+		ConfigJSON: `{"adapter":"runpod-serverless-api","secret_reference_id":"private-secret","enabled":true,"privacy_acknowledged":true,"request_limit":100,"cost_limit_microusd":1000000,"max_request_cost_microusd":10000,"billing_mode":"customer_wallet","input_microusd_per_mtok":100000,"output_microusd_per_mtok":400000,"cost_basis_input_microusd_per_mtok":80000,"cost_basis_output_microusd_per_mtok":320000,"minimum_gross_margin_bps":2000,"cost_basis_provenance":"private supplier quote","rate_card_valid_until":"2099-01-01T00:00:00Z"}`,
+	})
+	body, err := json.Marshal(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded := string(body)
+	for _, secret := range []string{"runpod", "private-secret", "private-target", "cost_basis", "gross_margin", "supplier quote", "privacy_acknowledged"} {
+		if strings.Contains(encoded, secret) {
+			t.Fatalf("binding response exposed private field %q: %s", secret, encoded)
+		}
+	}
+	for _, visible := range []string{`"service":"infercrane-standard"`, `"billing_mode":"customer_wallet"`, `"input_microusd_per_mtok":100000`, `"rate_card_valid_until":"2099-01-01T00:00:00Z"`} {
+		if !strings.Contains(encoded, visible) {
+			t.Fatalf("binding response omitted customer contract %q: %s", visible, encoded)
+		}
 	}
 }
 
@@ -1507,6 +1660,160 @@ func TestManagedExternalEndpointBindingRequiresConsentReferenceAndHardBudget(t *
 	}
 }
 
+func TestTenantOperatorCannotCreateCustomerWalletBinding(t *testing.T) {
+	base := &fakeStore{
+		principal: domain.Principal{ID: "operator-1", TenantID: "global", Name: "operator", Role: "operator", Scopes: []string{"read", "deploy", "manage_external"}},
+		targets:   []domain.Target{{ID: "target", Name: "managed-api", Provider: "openai-compatible-external", Runtime: "openai-compatible", URL: "https://provider.invalid/v1", UpstreamModel: "provider/coder"}},
+	}
+	store := &fakeEndpointStore{fakeStore: base, resolvedEndpoint: domain.ResolvedEndpoint{Endpoint: domain.Endpoint{ID: "endpoint", TenantID: "global", Name: "coder-production"}}}
+	handler := (API{Store: store, Authenticator: base}).Handler()
+	body := `{"name":"managed","kind":"external","ownership_mode":"traffic-managed","target":"managed-api","config":{"adapter":"openai-compatible-external","secret_reference_id":"secret","enabled":true,"privacy_acknowledged":true,"request_limit":100,"cost_limit_microusd":1000000,"max_request_cost_microusd":10000,"billing_mode":"customer_wallet","input_microusd_per_mtok":100000,"output_microusd_per_mtok":400000,"cost_basis_input_microusd_per_mtok":80000,"cost_basis_output_microusd_per_mtok":320000,"minimum_gross_margin_bps":2000,"cost_basis_provenance":"supplier quote fixture","rate_card_valid_until":"2099-01-01T00:00:00Z"}}`
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/endpoints/coder-production/bindings", strings.NewReader(body))
+	request.Header.Set("Authorization", "Bearer hosted-session")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden || store.binding.ID != "" || !strings.Contains(response.Body.String(), "managed_billing_operator_required") {
+		t.Fatalf("response=%d %s binding=%#v", response.Code, response.Body.String(), store.binding)
+	}
+}
+
+func TestBootstrapCanReconcileManagedUsageWithoutRecordingContent(t *testing.T) {
+	base := &fakeStore{}
+	store := &fakeManagedBillingStore{
+		fakeStore: base,
+		reservations: []domain.ManagedUsageReservation{{
+			ID:       "usage-1",
+			TenantID: "tenant-1",
+			State:    "pending_reconciliation",
+		}},
+	}
+	handler := (API{Store: store, APIKey: "secret"}).Handler()
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/billing/reservations?tenant_id=tenant-1&state=pending_reconciliation", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || store.reservationTenant != "tenant-1" || store.reservationState != "pending_reconciliation" || !strings.Contains(response.Body.String(), `"content_recorded":false`) {
+		t.Fatalf("reservation response=%d %s tenant=%q state=%q", response.Code, response.Body.String(), store.reservationTenant, store.reservationState)
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/admin/billing/reservations/usage-1/settlement", strings.NewReader(`{"tenant_id":"tenant-1","input_tokens":12,"output_tokens":34}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || store.settledReservation.ID != "usage-1" || store.settledReservation.InputTokens == nil || *store.settledReservation.InputTokens != 12 || !strings.Contains(response.Body.String(), `"content_recorded":false`) {
+		t.Fatalf("settlement response=%d %s reservation=%#v", response.Code, response.Body.String(), store.settledReservation)
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/admin/billing/reservations/usage-2/release", strings.NewReader(`{"tenant_id":"tenant-1","reason":"supplier confirmed no charge"}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || store.releasedTenant != "tenant-1" || store.releasedID != "usage-2" || store.releaseReason != "supplier confirmed no charge" {
+		t.Fatalf("release response=%d %s tenant=%q id=%q reason=%q", response.Code, response.Body.String(), store.releasedTenant, store.releasedID, store.releaseReason)
+	}
+}
+
+func TestManagedPrepaidCheckoutCreditsOnlyFromVerifiedWebhook(t *testing.T) {
+	base := &fakeStore{}
+	store := &fakeManagedBillingStore{
+		fakeStore: base,
+		wallet: domain.ManagedWallet{
+			TenantID:          "global",
+			Currency:          "USD",
+			BalanceMicrousd:   25_000_000,
+			AvailableMicrousd: 25_000_000,
+		},
+		paymentResult: domain.ManagedPaymentResult{
+			Provider:      "stripe",
+			EventID:       "evt_paid",
+			Status:        "applied",
+			CreditApplied: true,
+		},
+	}
+	checkout := &fakeManagedCheckoutProvider{
+		session: domain.ManagedCheckoutSession{
+			Provider:       "stripe",
+			ProviderID:     "cs_test_paid",
+			URL:            "https://checkout.stripe.test/session",
+			AmountMicrousd: 25_000_000,
+			Currency:       "USD",
+		},
+		payment: domain.ManagedPaymentEvent{
+			Provider:       "stripe",
+			EventID:        "evt_paid",
+			EventType:      "checkout.session.completed",
+			PayloadDigest:  strings.Repeat("a", 64),
+			TenantID:       "global",
+			SessionID:      "cs_test_paid",
+			Currency:       "USD",
+			AmountMicrousd: 25_000_000,
+			MetadataJSON:   `{}`,
+			Apply:          true,
+		},
+	}
+	handler := (API{Store: store, APIKey: "secret", BillingCheckout: checkout}).Handler()
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/billing/checkout-sessions", strings.NewReader(`{"amount_microusd":25000000}`))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated checkout response=%d %s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/billing/checkout-sessions", strings.NewReader(`{"amount_microusd":25000000}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || checkout.tenant != "global" || checkout.amount != 25_000_000 || store.payment.EventID != "" || !strings.Contains(response.Body.String(), `"balance_changed":false`) || !strings.Contains(response.Body.String(), `"credit_authority":"verified_provider_webhook"`) {
+		t.Fatalf("checkout response=%d %s tenant=%q amount=%d payment=%#v", response.Code, response.Body.String(), checkout.tenant, checkout.amount, store.payment)
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/billing/checkout-sessions", strings.NewReader(`{"amount_microusd":26000000}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "invalid_amount") {
+		t.Fatalf("invalid checkout response=%d %s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/billing/webhooks/stripe", strings.NewReader(`{"id":"evt_paid"}`))
+	request.Header.Set("Stripe-Signature", "verified-test-signature")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || store.payment.EventID != "evt_paid" || !strings.Contains(response.Body.String(), `"credit_applied":true`) {
+		t.Fatalf("webhook response=%d %s payment=%#v", response.Code, response.Body.String(), store.payment)
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/billing/webhooks/stripe", strings.NewReader(`{"id":"evt_paid"}`))
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "invalid_signature") {
+		t.Fatalf("unsigned webhook response=%d %s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/billing/wallet", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"funding_available":true`) || !strings.Contains(response.Body.String(), `25000000`) {
+		t.Fatalf("wallet response=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestTenantOperatorCannotUseManagedBillingAdministration(t *testing.T) {
+	base := &fakeStore{principal: domain.Principal{ID: "operator-1", TenantID: "tenant-1", Name: "operator", Role: "admin", Scopes: authz.DefaultScopeNames(authz.Admin)}}
+	store := &fakeManagedBillingStore{fakeStore: base}
+	handler := (API{Store: store, Authenticator: base}).Handler()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/billing/reservations?tenant_id=tenant-1", nil)
+	request.Header.Set("Authorization", "Bearer hosted-session")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "bootstrap administrator") {
+		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+}
+
 func TestProviderConnectionCompilesBindingWithoutBrowserCredentialMetadata(t *testing.T) {
 	base := &fakeStore{targets: []domain.Target{{ID: "target", Name: "provider-openrouter", Provider: "openrouter", Runtime: "openai-compatible-api", URL: "https://openrouter.ai/api/v1", UpstreamModel: "provider/model"}}}
 	endpointStore := &fakeEndpointStore{fakeStore: base, resolvedEndpoint: domain.ResolvedEndpoint{Endpoint: domain.Endpoint{ID: "endpoint", TenantID: "global", Name: "coder-production"}}}
@@ -2295,11 +2602,11 @@ func TestCancelHidesMissingOperation(t *testing.T) {
 
 func TestDoctorDiagnosticsRunInsideAuthenticatedControlPlane(t *testing.T) {
 	called := false
-	handler := (API{Store: &fakeStore{}, APIKey: "secret", Diagnostics: func(_ context.Context, cloud, serverless, aws, gcp, kubernetes bool) doctor.Report {
-		called = cloud && serverless && aws && gcp && kubernetes
+	handler := (API{Store: &fakeStore{}, APIKey: "secret", Diagnostics: func(_ context.Context, cloud, serverless, aws, gcp, kubernetes bool, gpu string) doctor.Report {
+		called = cloud && serverless && aws && gcp && kubernetes && gpu == "L4"
 		return doctor.Report{Ready: true, Checks: []doctor.Check{{Name: "PostgreSQL", Status: doctor.Pass, Message: "connected"}}}
 	}}).Handler()
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/doctor?cloud=true&serverless=true&aws=true&gcp=true&kubernetes=true", nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/doctor?cloud=true&serverless=true&aws=true&gcp=true&kubernetes=true&gpu=L4", nil)
 	request.Header.Set("Authorization", "Bearer secret")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)

@@ -16,9 +16,16 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/config"
+	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/passport"
 	"github.com/infercrane/infercrane/internal/support"
 )
+
+type inertRuntimeInspector struct{}
+
+func (inertRuntimeInspector) Inspect(context.Context, string) (bool, map[string]struct{}) {
+	return true, map[string]struct{}{}
+}
 
 func captureStdout(t *testing.T, run func() error) (string, error) {
 	t.Helper()
@@ -41,6 +48,22 @@ func captureStdout(t *testing.T, run func() error) (string, error) {
 		t.Fatal(err)
 	}
 	return string(output), runErr
+}
+
+func TestBindRuntimeBackendsIncludesDiscoveredRuntimeProfiles(t *testing.T) {
+	registry, err := integration.V1Catalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	backends, err := bindRuntimeBackends(registry, inertRuntimeInspector{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"vllm", "sglang", "custom-oci", "openai-compatible", "litellm"} {
+		if _, err := backends.ForRuntime(name); err != nil {
+			t.Errorf("runtime %q is discoverable but has no executable inspector: %v", name, err)
+		}
+	}
 }
 
 func TestCommandHelpDoesNotRequireAuthentication(t *testing.T) {
@@ -497,6 +520,19 @@ func TestProviderConnectRequiresExactlyOneCredentialReferenceSource(t *testing.T
 	}
 }
 
+func TestProviderConnectAdapterSetIsExplicit(t *testing.T) {
+	for _, adapter := range []string{"openrouter", "openai-compatible-external", "modal", "runpod-serverless-api", "fly-io"} {
+		if !supportedProviderConnectionAdapter(adapter) {
+			t.Fatalf("supported adapter %q was rejected", adapter)
+		}
+	}
+	for _, adapter := range []string{"", "runpod-serverless", "fly-gpu", "unknown"} {
+		if supportedProviderConnectionAdapter(adapter) {
+			t.Fatalf("unsupported adapter %q was accepted", adapter)
+		}
+	}
+}
+
 func TestEndpointBindUsesProviderConnectionAndStillRequiresConsent(t *testing.T) {
 	var request map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -776,7 +812,7 @@ func TestDoctorCLIOnlyReadsAuthenticatedControlPlaneDiagnostics(t *testing.T) {
 	defer server.Close()
 
 	output, err := captureStdout(t, func() error {
-		return doctorCommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, []string{"--cloud", "--serverless", "--aws", "--gcp", "--kubernetes", "--output", "json"})
+		return doctorCommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, []string{"--cloud", "--gpu", "L4", "--serverless", "--aws", "--gcp", "--kubernetes", "--output", "json"})
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -785,7 +821,7 @@ func TestDoctorCLIOnlyReadsAuthenticatedControlPlaneDiagnostics(t *testing.T) {
 	if err := json.Unmarshal([]byte(output), &report); err != nil || report["ready"] != true {
 		t.Fatalf("output=%q report=%#v err=%v", output, report, err)
 	}
-	if requested != "/api/v1/doctor?aws=true&cloud=true&gcp=true&kubernetes=true&serverless=true" {
+	if requested != "/api/v1/doctor?aws=true&cloud=true&gcp=true&gpu=L4&kubernetes=true&serverless=true" {
 		t.Fatalf("request=%q", requested)
 	}
 }

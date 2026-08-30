@@ -39,6 +39,38 @@ func (b *oneRequestBudget) Authorize(policy string) (domain.ExternalBudgetLease,
 	return domain.ExternalBudgetLease{}, errors.New("exhausted")
 }
 
+type captureManagedBilling struct {
+	authorizeErr error
+	authorized   int
+	settled      int
+	released     int
+	requestIDs   []string
+	settlement   domain.ManagedUsageSettlement
+}
+
+func (b *captureManagedBilling) AuthorizeManagedUsage(_ context.Context, tenant, binding, request, supplier, model string) (domain.ManagedUsageAuthorization, error) {
+	if b.authorizeErr != nil {
+		return domain.ManagedUsageAuthorization{}, b.authorizeErr
+	}
+	if tenant == "" || binding == "" || request == "" || supplier == "" || model == "" {
+		return domain.ManagedUsageAuthorization{}, errors.New("missing authorization identity")
+	}
+	b.authorized++
+	b.requestIDs = append(b.requestIDs, request)
+	return domain.ManagedUsageAuthorization{Required: true, ReservationID: request, ReservedMicrousd: 100}, nil
+}
+
+func (b *captureManagedBilling) SettleManagedUsage(_ context.Context, _ string, _ string, settlement domain.ManagedUsageSettlement) (domain.ManagedUsageReservation, error) {
+	b.settled++
+	b.settlement = settlement
+	return domain.ManagedUsageReservation{State: "settled"}, nil
+}
+
+func (b *captureManagedBilling) ReleaseManagedUsage(context.Context, string, string, string) error {
+	b.released++
+	return nil
+}
+
 type denyRequestQuota struct{ tenant string }
 
 func (d *denyRequestQuota) Authorize(tenant string) error {
@@ -768,6 +800,71 @@ func TestExternalFallbackConsumesHardBudgetBeforeTransmissionAndNeverReplaysStre
 	}
 	if requests != 1 {
 		t.Fatalf("external stream was transmitted %d times", requests)
+	}
+}
+
+func TestManagedModelAPIReservesBeforeTransmissionAndSettlesObservedSSEUsage(t *testing.T) {
+	requests := 0
+	client := &http.Client{Transport: roundTripper(func(r *http.Request) (*http.Response, error) {
+		requests++
+		body := "data: {\"model\":\"supplier/model\",\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":7}}\n\ndata: [DONE]\n\n"
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(body))}, nil
+	})}
+	billing := &captureManagedBilling{}
+	directory := routes.New()
+	directory.Put(routes.Snapshot{TenantID: "global", Alias: "managed", UpstreamModel: "supplier/model", RouterURL: "https://supplier.invalid/v1", Provider: "modal", ComputeMode: "external", ExternalPolicyID: "policy", UpstreamAPIKey: "supplier-key"})
+	handler := (&Gateway{Routes: directory, APIKey: "secret", Client: client, ExternalAuthorizer: &oneRequestBudget{remaining: 1}, ManagedBilling: billing}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"managed","stream":true,"messages":[]}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || requests != 1 || billing.authorized != 1 || billing.settled != 1 || billing.released != 0 {
+		t.Fatalf("response=%d requests=%d authorize=%d settle=%d release=%d", response.Code, requests, billing.authorized, billing.settled, billing.released)
+	}
+	if billing.settlement.InputTokens == nil || *billing.settlement.InputTokens != 11 || billing.settlement.OutputTokens == nil || *billing.settlement.OutputTokens != 7 {
+		t.Fatalf("settlement=%+v", billing.settlement)
+	}
+}
+
+func TestManagedModelAPIInsufficientPrepaidBalanceNeverReachesSupplier(t *testing.T) {
+	requests := 0
+	client := &http.Client{Transport: roundTripper(func(r *http.Request) (*http.Response, error) {
+		requests++
+		return nil, errors.New("must not be called")
+	})}
+	billing := &captureManagedBilling{authorizeErr: errors.New("insufficient")}
+	directory := routes.New()
+	directory.Put(routes.Snapshot{TenantID: "global", Alias: "managed", UpstreamModel: "supplier/model", RouterURL: "https://supplier.invalid/v1", Provider: "runpod-serverless-api", ComputeMode: "external", ExternalPolicyID: "policy"})
+	handler := (&Gateway{Routes: directory, APIKey: "secret", Client: client, ExternalAuthorizer: &oneRequestBudget{remaining: 1}, ManagedBilling: billing}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"managed","messages":[]}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusPaymentRequired || requests != 0 {
+		t.Fatalf("response=%d requests=%d body=%s", response.Code, requests, response.Body.String())
+	}
+}
+
+func TestManagedModelAPIBillingIdentityIgnoresReusedClientRequestID(t *testing.T) {
+	client := &http.Client{Transport: roundTripper(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"usage":{"prompt_tokens":1,"completion_tokens":1}}`))}, nil
+	})}
+	billing := &captureManagedBilling{}
+	directory := routes.New()
+	directory.Put(routes.Snapshot{TenantID: "global", Alias: "managed", UpstreamModel: "supplier/model", RouterURL: "https://supplier.invalid/v1", Provider: "modal", ComputeMode: "external", ExternalPolicyID: "policy", UpstreamAPIKey: "supplier-key"})
+	handler := (&Gateway{Routes: directory, APIKey: "secret", Client: client, ExternalAuthorizer: &oneRequestBudget{remaining: 2}, ManagedBilling: billing}).Handler()
+	for range 2 {
+		request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"managed","messages":[]}`))
+		request.Header.Set("Authorization", "Bearer secret")
+		request.Header.Set("X-Request-ID", "client-reused")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("response=%d %s", response.Code, response.Body.String())
+		}
+	}
+	if len(billing.requestIDs) != 2 || billing.requestIDs[0] == billing.requestIDs[1] || billing.requestIDs[0] == "client-reused" || billing.requestIDs[1] == "client-reused" {
+		t.Fatalf("billing request identities=%#v", billing.requestIDs)
 	}
 }
 

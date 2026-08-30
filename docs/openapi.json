@@ -1320,7 +1320,17 @@
           "adapter": {
             "enum": [
               "openrouter",
-              "openai-compatible-external"
+              "openai-compatible-external",
+              "modal",
+              "runpod-serverless-api",
+              "fly-io"
+            ],
+            "type": "string"
+          },
+          "billing_mode": {
+            "enum": [
+              "byoc",
+              "customer_wallet"
             ],
             "type": "string"
           },
@@ -1336,6 +1346,18 @@
             "minimum": 0,
             "type": "integer"
           },
+          "cost_basis_input_microusd_per_mtok": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "cost_basis_output_microusd_per_mtok": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "cost_basis_provenance": {
+            "minLength": 1,
+            "type": "string"
+          },
           "cost_limit_microusd": {
             "minimum": 1,
             "type": "integer"
@@ -1343,8 +1365,21 @@
           "enabled": {
             "type": "boolean"
           },
+          "input_microusd_per_mtok": {
+            "minimum": 0,
+            "type": "integer"
+          },
           "max_request_cost_microusd": {
             "minimum": 1,
+            "type": "integer"
+          },
+          "minimum_gross_margin_bps": {
+            "maximum": 9999,
+            "minimum": 1500,
+            "type": "integer"
+          },
+          "output_microusd_per_mtok": {
+            "minimum": 0,
             "type": "integer"
           },
           "overflow_mode": {
@@ -1361,6 +1396,10 @@
           "queue_threshold": {
             "exclusiveMinimum": 0,
             "type": "number"
+          },
+          "rate_card_valid_until": {
+            "format": "date-time",
+            "type": "string"
           },
           "recovery_intervals": {
             "default": 2,
@@ -1496,6 +1535,425 @@
         },
         "required": [
           "name"
+        ],
+        "type": "object"
+      },
+      "ManagedCheckoutEnvelope": {
+        "additionalProperties": false,
+        "properties": {
+          "balance_changed": {
+            "const": false,
+            "type": "boolean"
+          },
+          "checkout": {
+            "$ref": "#/components/schemas/ManagedCheckoutSession"
+          },
+          "credit_authority": {
+            "const": "verified_provider_webhook",
+            "type": "string"
+          }
+        },
+        "required": [
+          "checkout",
+          "balance_changed",
+          "credit_authority"
+        ],
+        "type": "object"
+      },
+      "ManagedCheckoutRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "amount_microusd": {
+            "enum": [
+              25000000,
+              50000000,
+              100000000,
+              250000000,
+              500000000
+            ],
+            "type": "integer"
+          }
+        },
+        "required": [
+          "amount_microusd"
+        ],
+        "type": "object"
+      },
+      "ManagedCheckoutSession": {
+        "additionalProperties": false,
+        "properties": {
+          "amount_microusd": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "currency": {
+            "const": "USD",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "provider": {
+            "const": "stripe",
+            "type": "string"
+          },
+          "provider_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "url": {
+            "format": "uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "provider_id",
+          "url",
+          "amount_microusd",
+          "currency",
+          "expires_at"
+        ],
+        "type": "object"
+      },
+      "ManagedPaymentWebhookResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "credit_applied": {
+            "type": "boolean"
+          },
+          "received": {
+            "const": true,
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "ignored",
+              "applied"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "received",
+          "status",
+          "credit_applied"
+        ],
+        "type": "object"
+      },
+      "ManagedUsageRelease": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "tenant_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenant_id",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "ManagedUsageReservation": {
+        "additionalProperties": false,
+        "properties": {
+          "actual_microusd": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "binding_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "input_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "model": {
+            "type": "string"
+          },
+          "output_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "reserved_microusd": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "resolution": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "reserved",
+              "settled",
+              "released",
+              "pending_reconciliation"
+            ],
+            "type": "string"
+          },
+          "supplier": {
+            "type": "string"
+          },
+          "tenant_id": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "tenant_id",
+          "binding_id",
+          "supplier",
+          "model",
+          "reserved_microusd",
+          "actual_microusd",
+          "state",
+          "resolution",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "ManagedUsageReservationEnvelope": {
+        "properties": {
+          "content_recorded": {
+            "type": "boolean"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ManagedUsageReservation"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "ManagedUsageReservationList": {
+        "properties": {
+          "content_recorded": {
+            "type": "boolean"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ManagedUsageReservation"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "ManagedUsageSettlement": {
+        "additionalProperties": false,
+        "properties": {
+          "input_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "output_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "tenant_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenant_id",
+          "input_tokens",
+          "output_tokens"
+        ],
+        "type": "object"
+      },
+      "ManagedWallet": {
+        "additionalProperties": false,
+        "properties": {
+          "available_microusd": {
+            "type": "integer"
+          },
+          "balance_microusd": {
+            "type": "integer"
+          },
+          "currency": {
+            "const": "USD",
+            "type": "string"
+          },
+          "reserved_microusd": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "tenant_id": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenant_id",
+          "currency",
+          "balance_microusd",
+          "reserved_microusd",
+          "available_microusd",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "ManagedWalletCredit": {
+        "additionalProperties": false,
+        "properties": {
+          "amount_microusd": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "description": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "tenant_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenant_id",
+          "amount_microusd",
+          "description"
+        ],
+        "type": "object"
+      },
+      "ManagedWalletEnvelope": {
+        "properties": {
+          "checkout_amounts_microusd": {
+            "items": {
+              "enum": [
+                25000000,
+                50000000,
+                100000000,
+                250000000,
+                500000000
+              ],
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "credit_id": {
+            "type": "string"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ManagedWallet"
+          },
+          "funding_available": {
+            "type": "boolean"
+          },
+          "funding_mode": {
+            "const": "prepaid",
+            "type": "string"
+          },
+          "funding_provider": {
+            "enum": [
+              "",
+              "stripe"
+            ],
+            "type": "string"
+          },
+          "payment_collected_by_infercrane": {
+            "type": "boolean"
+          },
+          "payment_collection": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "data",
+          "funding_mode",
+          "funding_available",
+          "funding_provider",
+          "checkout_amounts_microusd"
+        ],
+        "type": "object"
+      },
+      "ManagedWalletLedgerEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "amount_microusd": {
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "currency": {
+            "const": "USD",
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "credit",
+              "settlement"
+            ],
+            "type": "string"
+          },
+          "reservation_id": {
+            "type": "string"
+          },
+          "tenant_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "tenant_id",
+          "kind",
+          "currency",
+          "amount_microusd",
+          "description",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "ManagedWalletLedgerList": {
+        "properties": {
+          "content_recorded": {
+            "type": "boolean"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ManagedWalletLedgerEntry"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
         ],
         "type": "object"
       },
@@ -2433,7 +2891,10 @@
           "adapter": {
             "enum": [
               "openrouter",
-              "openai-compatible-external"
+              "openai-compatible-external",
+              "modal",
+              "runpod-serverless-api",
+              "fly-io"
             ],
             "type": "string"
           },
@@ -3109,6 +3570,234 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/admin/billing/credits": {
+      "post": {
+        "operationId": "creditManagedWallet",
+        "parameters": [
+          {
+            "description": "Stable key used to adopt the original durable operation after retries or disconnects.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManagedWalletCredit"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedWalletEnvelope"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Post an externally collected prepaid payment using bootstrap authority",
+        "tags": [
+          "Billing administration"
+        ]
+      }
+    },
+    "/api/v1/admin/billing/reservations": {
+      "get": {
+        "operationId": "listManagedUsageReservations",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedUsageReservationList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List tenant reservations requiring operator reconciliation",
+        "tags": [
+          "Billing administration"
+        ]
+      }
+    },
+    "/api/v1/admin/billing/reservations/{id}/release": {
+      "post": {
+        "operationId": "releaseManagedUsage",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Stable key used to adopt the original durable operation after retries or disconnects.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManagedUsageRelease"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Release a reservation after external non-billing is verified",
+        "tags": [
+          "Billing administration"
+        ]
+      }
+    },
+    "/api/v1/admin/billing/reservations/{id}/settlement": {
+      "post": {
+        "operationId": "settleManagedUsage",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Stable key used to adopt the original durable operation after retries or disconnects.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManagedUsageSettlement"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedUsageReservationEnvelope"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Settle a reservation from externally verified token usage",
+        "tags": [
+          "Billing administration"
+        ]
+      }
+    },
     "/api/v1/adoptions/endpoints": {
       "post": {
         "operationId": "adoptEndpoint",
@@ -3615,6 +4304,177 @@
         "summary": "Record human approval without mutating serving state",
         "tags": [
           "Autopilot"
+        ]
+      }
+    },
+    "/api/v1/billing/checkout-sessions": {
+      "post": {
+        "operationId": "createManagedCheckoutSession",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManagedCheckoutRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedCheckoutEnvelope"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Create a fixed-price hosted checkout without changing the prepaid balance",
+        "tags": [
+          "Billing"
+        ]
+      }
+    },
+    "/api/v1/billing/ledger": {
+      "get": {
+        "operationId": "listManagedWalletLedger",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedWalletLedgerList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List append-only managed Model API settlements and credits",
+        "tags": [
+          "Billing"
+        ]
+      }
+    },
+    "/api/v1/billing/wallet": {
+      "get": {
+        "operationId": "getManagedWallet",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedWalletEnvelope"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Inspect prepaid managed Model API funds and active reservations",
+        "tags": [
+          "Billing"
+        ]
+      }
+    },
+    "/api/v1/billing/webhooks/stripe": {
+      "post": {
+        "operationId": "processStripeBillingWebhook",
+        "parameters": [
+          {
+            "description": "Stripe webhook HMAC signature; the request is unauthenticated by bearer token and grants balance only after verification.",
+            "in": "header",
+            "name": "Stripe-Signature",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedPaymentWebhookResponse"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [],
+        "summary": "Verify and atomically apply an idempotent Stripe prepaid payment event",
+        "tags": [
+          "Billing"
         ]
       }
     },
@@ -7525,6 +8385,89 @@
         ]
       }
     },
+    "/api/v1/model-api-catalog": {
+      "get": {
+        "operationId": "listModelAPICatalog",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Browse supplier-neutral managed Model API identities",
+        "tags": [
+          "Model APIs"
+        ]
+      }
+    },
+    "/api/v1/model-api-catalog/{id}": {
+      "get": {
+        "operationId": "getModelAPICatalogEntry",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Inspect one managed Model API identity without supplier disclosure",
+        "tags": [
+          "Model APIs"
+        ]
+      }
+    },
     "/api/v1/operations": {
       "get": {
         "operationId": "listOperations",
@@ -9782,6 +10725,12 @@
       "name": "Benchmarks"
     },
     {
+      "name": "Billing"
+    },
+    {
+      "name": "Billing administration"
+    },
+    {
       "name": "Burst Guard"
     },
     {
@@ -9822,6 +10771,9 @@
     },
     {
       "name": "Infrastructure"
+    },
+    {
+      "name": "Model APIs"
     },
     {
       "name": "Model artifacts"

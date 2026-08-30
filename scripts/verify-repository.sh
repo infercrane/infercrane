@@ -31,3 +31,5 @@ grep -Fq 'main.version=${version}' Dockerfile
 grep -Fq 'INFERCRANE_VERSION=${{ github.ref_name }}' .github/workflows/release.yml
 docker compose config --quiet
 ./scripts/test-runtime-image-contract.sh
+./scripts/test-fly-config.sh
+./scripts/test-control-plane-host-contract.sh
