@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -78,5 +79,78 @@ func TestConsoleAdministrativeListsExposeOnlyTenantSafeMetadata(t *testing.T) {
 	members, err := s.ConsoleIdentitiesForTenant(ctx, "global")
 	if err != nil || len(members) != 1 || members[0].UserID != created.UserID || !members[0].Access {
 		t.Fatalf("members=%#v err=%v", members, err)
+	}
+}
+
+func TestHostedIdentityBootstrapCreatesIsolatedTenantAndPreservesMemberships(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	suffix := time.Now().UTC().Format("150405.000000000")
+	organizationA := domain.ExternalIdentity{Provider: "clerk", ExternalUserID: "user_owner_" + suffix, ExternalOrganizationID: "org_a_" + suffix}
+
+	owner, err := s.ResolveOrProvisionExternalPrincipal(ctx, organizationA, WebConsoleAccess, "operator")
+	if err != nil || owner.Role != "admin" || owner.TenantID == "" || owner.Kind != "human" {
+		t.Fatalf("owner=%#v err=%v", owner, err)
+	}
+	again, err := s.ResolveOrProvisionExternalPrincipal(ctx, organizationA, WebConsoleAccess, "viewer")
+	if err != nil || again.ID != owner.ID || again.TenantID != owner.TenantID || again.Role != "admin" {
+		t.Fatalf("idempotent owner=%#v err=%v", again, err)
+	}
+
+	memberIdentity := domain.ExternalIdentity{Provider: "clerk", ExternalUserID: "user_member_" + suffix, ExternalOrganizationID: organizationA.ExternalOrganizationID}
+	member, err := s.ResolveOrProvisionExternalPrincipal(ctx, memberIdentity, WebConsoleAccess, "operator")
+	if err != nil || member.TenantID != owner.TenantID || member.Role != "operator" {
+		t.Fatalf("member=%#v err=%v", member, err)
+	}
+	memberAgain, err := s.ResolveOrProvisionExternalPrincipal(ctx, memberIdentity, WebConsoleAccess, "admin")
+	if err != nil || memberAgain.Role != "operator" {
+		t.Fatalf("membership changed during login: member=%#v err=%v", memberAgain, err)
+	}
+
+	organizationB := domain.ExternalIdentity{Provider: "clerk", ExternalUserID: organizationA.ExternalUserID, ExternalOrganizationID: "org_b_" + suffix}
+	secondWorkspace, err := s.ResolveOrProvisionExternalPrincipal(ctx, organizationB, WebConsoleAccess, "operator")
+	if err != nil || secondWorkspace.ID != owner.ID || secondWorkspace.TenantID == owner.TenantID || secondWorkspace.Role != "admin" {
+		t.Fatalf("second workspace=%#v err=%v", secondWorkspace, err)
+	}
+
+	_, err = s.ProvisionConsoleIdentity(ctx, owner.TenantID, domain.ConsoleIdentityProvisioning{
+		ExternalIdentity: organizationA,
+		DisplayName:      owner.Name,
+		Role:             "admin",
+		Access:           false,
+	})
+	if err != nil {
+		t.Fatalf("revoke bootstrapped owner: %v", err)
+	}
+	if _, err = s.ResolveOrProvisionExternalPrincipal(ctx, organizationA, WebConsoleAccess, "admin"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("login restored explicitly revoked access: %v", err)
+	}
+}
+
+func TestHostedIdentityBootstrapIsConcurrentAndIdempotent(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	suffix := time.Now().UTC().Format("150405.000000000")
+	identity := domain.ExternalIdentity{Provider: "clerk", ExternalUserID: "user_concurrent_" + suffix, ExternalOrganizationID: "org_concurrent_" + suffix}
+
+	const requests = 8
+	principals := make([]domain.Principal, requests)
+	errorsByRequest := make([]error, requests)
+	var wait sync.WaitGroup
+	wait.Add(requests)
+	for index := range requests {
+		go func() {
+			defer wait.Done()
+			principals[index], errorsByRequest[index] = s.ResolveOrProvisionExternalPrincipal(ctx, identity, WebConsoleAccess, "operator")
+		}()
+	}
+	wait.Wait()
+	for index := range requests {
+		if errorsByRequest[index] != nil || principals[index].ID == "" || principals[index].Role != "admin" {
+			t.Fatalf("request %d principal=%#v err=%v", index, principals[index], errorsByRequest[index])
+		}
+		if principals[index].ID != principals[0].ID || principals[index].TenantID != principals[0].TenantID {
+			t.Fatalf("request %d produced a second identity: first=%#v current=%#v", index, principals[0], principals[index])
+		}
 	}
 }

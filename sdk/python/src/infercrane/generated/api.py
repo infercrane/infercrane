@@ -55,6 +55,14 @@ class ControlAPI:
         path = f"/catalog/models/{quote(name, safe='')}"
         return cast(dict[str, Any], self._transport.request("GET", path))
 
+    def list_model_a_p_i_catalog(self) -> ObjectList:
+        path = "/model-api-catalog"
+        return cast(ObjectList, self._transport.request("GET", path))
+
+    def get_model_a_p_i_catalog_entry(self, id: str) -> dict[str, Any]:
+        path = f"/model-api-catalog/{quote(id, safe='')}"
+        return cast(dict[str, Any], self._transport.request("GET", path))
+
     def list_control_plane_instances(self) -> ObjectList:
         path = "/system/instances"
         return cast(ObjectList, self._transport.request("GET", path))
@@ -474,6 +482,38 @@ class ControlAPI:
     def delete_provider_connection(self, name: str) -> dict[str, Any]:
         path = f"/provider-connections/{quote(name, safe='')}"
         return cast(dict[str, Any], self._transport.request("DELETE", path))
+
+    def get_managed_wallet(self) -> dict[str, Any]:
+        path = "/billing/wallet"
+        return cast(dict[str, Any], self._transport.request("GET", path))
+
+    def list_managed_wallet_ledger(self) -> dict[str, Any]:
+        path = "/billing/ledger"
+        return cast(dict[str, Any], self._transport.request("GET", path))
+
+    def create_managed_checkout_session(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = "/billing/checkout-sessions"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
+    def process_stripe_billing_webhook(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = "/billing/webhooks/stripe"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
+    def credit_managed_wallet(self, *, body: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
+        path = "/admin/billing/credits"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body, idempotency_key=idempotency_key))
+
+    def list_managed_usage_reservations(self) -> dict[str, Any]:
+        path = "/admin/billing/reservations"
+        return cast(dict[str, Any], self._transport.request("GET", path))
+
+    def settle_managed_usage(self, id: str, *, body: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
+        path = f"/admin/billing/reservations/{quote(id, safe='')}/settlement"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body, idempotency_key=idempotency_key))
+
+    def release_managed_usage(self, id: str, *, body: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
+        path = f"/admin/billing/reservations/{quote(id, safe='')}/release"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body, idempotency_key=idempotency_key))
 
     def list_orphans(self) -> ObjectList:
         path = "/orphans"

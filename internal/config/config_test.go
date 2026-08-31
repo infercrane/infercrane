@@ -19,6 +19,43 @@ func TestLoadOptimizationPricesRequiresExactSourcedEvidence(t *testing.T) {
 	}
 }
 
+func TestStripePrepaidFundingRequiresCompleteFixedSandboxConfiguration(t *testing.T) {
+	t.Setenv("INFERCRANE_API_KEY", "secret")
+	t.Setenv("INFERCRANE_STRIPE_SECRET_KEY", "sk_test_fixture")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "partial") {
+		t.Fatalf("partial Stripe funding configuration accepted: %v", err)
+	}
+
+	t.Setenv("INFERCRANE_STRIPE_WEBHOOK_SECRET", "whsec_fixture")
+	t.Setenv("INFERCRANE_BILLING_RETURN_URL", "http://localhost:3200/settings/billing")
+	t.Setenv("INFERCRANE_STRIPE_PRICE_IDS_JSON", `{"25":"price_25","50":"price_50","100":"price_100","250":"price_250","500":"price_500"}`)
+	cfg, err := Load()
+	if err != nil || !cfg.StripeEnabled() || cfg.StripeLivemode || cfg.StripePriceIDs[25_000_000] != "price_25" {
+		t.Fatalf("cfg=%#v err=%v", cfg, err)
+	}
+
+	t.Setenv("INFERCRANE_STRIPE_PRICE_IDS_JSON", `{"25":"price_25","50":"price_50","100":"price_100","250":"price_250","999":"price_999"}`)
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "25, 50, 100, 250, and 500") {
+		t.Fatalf("unexpected Stripe amount accepted: %v", err)
+	}
+}
+
+func TestStripeModeMustMatchSecretKey(t *testing.T) {
+	t.Setenv("INFERCRANE_API_KEY", "secret")
+	t.Setenv("INFERCRANE_STRIPE_SECRET_KEY", "sk_test_fixture")
+	t.Setenv("INFERCRANE_STRIPE_WEBHOOK_SECRET", "whsec_fixture")
+	t.Setenv("INFERCRANE_BILLING_RETURN_URL", "https://console.infercrane.com/settings/billing")
+	t.Setenv("INFERCRANE_STRIPE_PRICE_IDS_JSON", `{"25":"price_25","50":"price_50","100":"price_100","250":"price_250","500":"price_500"}`)
+	t.Setenv("INFERCRANE_STRIPE_LIVEMODE", "true")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "live-mode") {
+		t.Fatalf("test key accepted for live mode: %v", err)
+	}
+	t.Setenv("INFERCRANE_STRIPE_LIVEMODE", "maybe")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "true or false") {
+		t.Fatalf("invalid Stripe mode accepted: %v", err)
+	}
+}
+
 func TestLoadRejectsInvalidInteger(t *testing.T) {
 	t.Setenv("INFERCRANE_API_KEY", "secret")
 	t.Setenv("INFERCRANE_PORT", "not-a-number")
@@ -135,6 +172,16 @@ func TestHostedAuthenticationIsExplicitAndProductionPartiesRequireHTTPS(t *testi
 	t.Setenv("INFERCRANE_HOSTED_AUTH_AUTHORIZED_PARTIES", "https://app.infercrane.ai")
 	if _, err = Load(); err != nil {
 		t.Fatalf("production hosted auth rejected: %v", err)
+	}
+	t.Setenv("INFERCRANE_HOSTED_AUTH_JWT_KEY", "-----BEGIN PUBLIC KEY-----\nfixture\n-----END PUBLIC KEY-----")
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "exactly one") {
+		t.Fatalf("ambiguous hosted auth key source accepted: %v", err)
+	}
+	t.Setenv("INFERCRANE_HOSTED_AUTH_JWT_KEY_FILE", "")
+	t.Setenv("INFERCRANE_HOSTED_AUTH_AUTO_PROVISION", "true")
+	config, err = Load()
+	if err != nil || config.HostedAuthJWTKey == "" || !config.HostedAuthEnabled() || !config.HostedAuthAutoProvision {
+		t.Fatalf("secret-manager hosted auth config=%#v err=%v", config, err)
 	}
 }
 

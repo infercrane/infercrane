@@ -65,7 +65,10 @@ test-backup-restore:
 	./scripts/test-backup-restore-docker.sh
 
 test-production-config:
+	sh -n ./scripts/bootstrap-stripe-prepaid.sh
 	./scripts/test-production-compose.sh
+	./scripts/test-fly-config.sh
+	./scripts/test-control-plane-host-contract.sh
 	./scripts/test-entrypoint.sh
 
 test-provider-contracts:

@@ -41,6 +41,9 @@ INFERCRANE_POSTGRES_PASSWORD=test-only-postgres-password \
   docker compose -f "$compose_file" config >"$base_rendered"
 
 grep -q 'INFERCRANE_ENV: production' "$base_rendered"
+grep -q 'INFERCRANE_HOSTED_AUTH_JWT_KEY:' "$base_rendered"
+grep -q 'INFERCRANE_HOSTED_AUTH_JWT_KEY_FILE:' "$base_rendered"
+grep -q 'INFERCRANE_STRIPE_WEBHOOK_SECRET:' "$base_rendered"
 grep -q 'sslmode=require' "$base_rendered"
 grep -q 'ssl=on' "$base_rendered"
 grep -q 'no-new-privileges:true' "$base_rendered"

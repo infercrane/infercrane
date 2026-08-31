@@ -36,6 +36,9 @@ func (s *Store) ManagedExternalBindingPolicy(ctx context.Context, tenant, bindin
 	out.RequestLimit = config.RequestLimit
 	out.CostLimitMicrousd = config.CostLimitMicrousd
 	out.MaxRequestCostMicrousd = config.MaxRequestCostMicrousd
+	out.BillingMode = config.BillingMode
+	out.InputMicrousdPerMTok = config.InputMicrousdPerMTok
+	out.OutputMicrousdPerMTok = config.OutputMicrousdPerMTok
 	out.CreatedAt, out.UpdatedAt = parseTime(created), parseTime(updated)
 	return out, nil
 }

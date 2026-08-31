@@ -47,6 +47,8 @@ import (
 	"github.com/infercrane/infercrane/internal/external"
 	"github.com/infercrane/infercrane/internal/gateway"
 	"github.com/infercrane/infercrane/internal/integration"
+	"github.com/infercrane/infercrane/internal/managedbilling"
+	"github.com/infercrane/infercrane/internal/modelapicatalog"
 	"github.com/infercrane/infercrane/internal/operations"
 	"github.com/infercrane/infercrane/internal/optimizationcampaign"
 	"github.com/infercrane/infercrane/internal/passport"
@@ -544,6 +546,7 @@ func doctorCommand(ctx context.Context, cfg config.Config, args []string) error 
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	output := fs.String("output", "human", "human or json")
 	cloud := fs.Bool("cloud", false, "also validate SkyPilot cloud credentials")
+	gpu := fs.String("gpu", "", "GPU type used by the optional cloud capacity probe")
 	serverless := fs.Bool("serverless", false, "also validate RunPod Serverless credentials and template")
 	aws := fs.Bool("aws", false, "also validate the configured AWS BYOC role")
 	gcp := fs.Bool("gcp", false, "also validate the configured GCP BYOC identity")
@@ -554,12 +557,18 @@ func doctorCommand(ctx context.Context, cfg config.Config, args []string) error 
 	if err := validateOutput(*output); err != nil {
 		return err
 	}
+	if *gpu != "" && !*cloud {
+		return errors.New("--gpu requires --cloud")
+	}
 	query := url.Values{}
 	query.Set("cloud", fmt.Sprint(*cloud))
 	query.Set("serverless", fmt.Sprint(*serverless))
 	query.Set("aws", fmt.Sprint(*aws))
 	query.Set("gcp", fmt.Sprint(*gcp))
 	query.Set("kubernetes", fmt.Sprint(*kubernetes))
+	if *gpu != "" {
+		query.Set("gpu", *gpu)
+	}
 	var report doctor.Report
 	if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/doctor?"+query.Encode(), "", nil, &report); err != nil {
 		return err
@@ -1656,7 +1665,7 @@ func targetAPICommand(ctx context.Context, cfg config.Config, args []string) err
 	}
 	fs := flag.NewFlagSet("target add", flag.ContinueOnError)
 	targetURL := fs.String("url", "", "target URL")
-	provider := fs.String("provider", "existing", "existing, openrouter, or openai-compatible-external")
+	provider := fs.String("provider", "existing", "existing, "+providerAdapterHelp)
 	runtimeName := fs.String("runtime", "", "runtime identity; defaults to vllm for existing targets and openai-compatible-api for external targets")
 	upstream := fs.String("upstream-model", "", "upstream model")
 	output := fs.String("output", "human", "human or json")
@@ -2729,7 +2738,7 @@ func externalAPICommand(ctx context.Context, cfg config.Config, args []string) e
 	case "configure":
 		fs := flag.NewFlagSet("external configure", flag.ContinueOnError)
 		target := fs.String("target", "", "attached external target name")
-		adapter := fs.String("adapter", "openrouter", "openrouter or openai-compatible-external")
+		adapter := fs.String("adapter", "openrouter", providerAdapterHelp)
 		secretReference := fs.String("secret-reference", "", "secret reference ID")
 		requestLimit := fs.Int64("request-limit", 0, "hard maximum reserved requests")
 		costLimit := fs.String("cost-limit-usd", "", "hard USD reservation budget")
@@ -3909,19 +3918,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	go runContextPassportRefresh(ctx, s, contextPassports, time.Second, slog.Default())
 	backend := router.NewVLLM(cfg.RouterBinary, cfg.APIKey)
 	runtime := runtimeadapter.OpenAI{APIKey: cfg.APIKey}
-	runtimeProfile, err := integrationRegistry.Runtime(support.DefaultRuntime)
-	if err != nil {
-		return fmt.Errorf("configure runtime contract: %w", err)
-	}
-	sglangProfile, err := integrationRegistry.Runtime("sglang")
-	if err != nil {
-		return fmt.Errorf("configure SGLang runtime contract: %w", err)
-	}
-	customProfile, err := integrationRegistry.Runtime("custom-oci")
-	if err != nil {
-		return fmt.Errorf("configure custom OCI runtime contract: %w", err)
-	}
-	runtimeBackends, err := integration.NewRuntimeBackends(integration.RuntimeBackend{Profile: runtimeProfile, Inspector: runtime}, integration.RuntimeBackend{Profile: sglangProfile, Inspector: runtime}, integration.RuntimeBackend{Profile: customProfile, Inspector: runtime})
+	runtimeBackends, err := bindRuntimeBackends(integrationRegistry, runtime)
 	if err != nil {
 		return fmt.Errorf("bind runtime adapter: %w", err)
 	}
@@ -3949,11 +3946,15 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	go func() { _ = credentialCache.Run(ctx) }()
 	controlAuthenticator := authn.Chain{Authenticators: []authn.PrincipalAuthenticator{credentialCache}}
 	if cfg.HostedAuthEnabled() {
-		jwtKey, readErr := os.ReadFile(cfg.HostedAuthJWTKeyFile)
-		if readErr != nil {
-			return fmt.Errorf("read hosted auth JWT public key: %w", readErr)
+		jwtKey := cfg.HostedAuthJWTKey
+		if cfg.HostedAuthJWTKeyFile != "" {
+			keyBytes, readErr := os.ReadFile(cfg.HostedAuthJWTKeyFile)
+			if readErr != nil {
+				return fmt.Errorf("read hosted auth JWT public key: %w", readErr)
+			}
+			jwtKey = string(keyBytes)
 		}
-		hosted, hostedErr := authn.NewClerkAuthenticator(authn.ClerkVerifierConfig{JWTKey: string(jwtKey), Issuer: cfg.HostedAuthIssuer, Audience: cfg.HostedAuthAudience, AuthorizedParties: cfg.HostedAuthAuthorizedParties}, s, store.WebConsoleAccess)
+		hosted, hostedErr := authn.NewClerkAuthenticator(authn.ClerkVerifierConfig{JWTKey: jwtKey, Issuer: cfg.HostedAuthIssuer, Audience: cfg.HostedAuthAudience, AuthorizedParties: cfg.HostedAuthAuthorizedParties, AutoProvision: cfg.HostedAuthAutoProvision}, s, store.WebConsoleAccess)
 		if hostedErr != nil {
 			return fmt.Errorf("configure hosted authentication: %w", hostedErr)
 		}
@@ -3977,11 +3978,11 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 			logger.Error("admission policy refresh stopped", "error", err)
 		}
 	}()
-	diagnostics := func(checkCtx context.Context, cloud, checkServerless, checkAWS, checkGCP, checkKubernetes bool) doctor.Report {
+	diagnostics := func(checkCtx context.Context, cloud, checkServerless, checkAWS, checkGCP, checkKubernetes bool, gpu string) doctor.Report {
 		report := doctor.Run(checkCtx, cfg, doctor.Dependencies{})
 		if cloud {
 			report.Add(doctor.CheckCloudCredentials(checkCtx, doctor.Dependencies{}))
-			report.Add(doctor.CheckCapacity(checkCtx, "runpod", support.DefaultGPU, provision.RunPodAvailability{APIKey: cfg.RunPodAPIKey}))
+			report.Add(doctor.CheckCapacity(checkCtx, "runpod", gpu, provision.RunPodAvailability{APIKey: cfg.RunPodAPIKey}))
 			report.Capabilities = append(report.Capabilities,
 				doctor.Capability{Adapter: "skypilot", Name: "durable_replica_lifecycle", State: "supported", Detail: "create, observe, adopt, and delete through a deterministic resource identity"},
 				doctor.Capability{Adapter: "runpod", Name: "availability_probe", State: "supported", Detail: "advisory secure-capacity stock signal; not a reservation"},
@@ -4056,7 +4057,18 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		asyncService = &asyncinference.Service{Store: s, Cipher: cipher, KeyReference: cfg.AsyncEncryptionKeyReference, GatewayURL: cfg.ControlURL, APIKey: cfg.APIKey, Owner: cfg.InstanceID + ":async", Lease: time.Minute, Secrets: secrets.Environment{}}
 	}
 	artifactCacheAdapters := map[string]artifactcache.Adapter{}
-	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool, OptimizationCosts: optimizationCosts}
+	modelAPICatalog, catalogErr := modelapicatalog.Load(cfg.ModelAPICatalogFile)
+	if catalogErr != nil {
+		return fmt.Errorf("configure Model API catalog: %w", catalogErr)
+	}
+	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool, OptimizationCosts: optimizationCosts, ModelAPICatalog: modelAPICatalog}
+	if cfg.StripeEnabled() {
+		stripeBilling, stripeErr := managedbilling.NewStripe(cfg.StripeSecretKey, cfg.StripeWebhookSecret, cfg.StripeBillingReturnURL, cfg.StripePriceIDs, cfg.StripeLivemode)
+		if stripeErr != nil {
+			return fmt.Errorf("configure Stripe prepaid funding: %w", stripeErr)
+		}
+		controlAPI.BillingCheckout = stripeBilling
+	}
 	// Assign the optional service only when it exists. A nil *Service stored in
 	// an interface is non-nil and would otherwise turn the intended capability
 	// error into a panic when async encryption is not configured.
@@ -4205,7 +4217,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	if err != nil {
 		return err
 	}
-	server := &http.Server{Addr: fmt.Sprintf("%s:%d", cfg.Host, cfg.Port), Handler: (&gateway.Gateway{Routes: directory, APIKey: cfg.APIKey, Authenticator: credentialCache, Recorder: recorder, Logger: logger, Client: client, Ready: s.Ping, Control: control, Telemetry: gatewayTelemetry, CapacityObservers: map[string]gateway.CapacityObserver{"runpod": serverless.ActiveWorkers}, ExternalAuthorizer: externalBudgets, RequestAuthorizer: requestQuotas, AdmissionAuthorizer: admissionPool, ContextPassports: contextPassports}).Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 1 << 20, TLSConfig: serverTLS}
+	server := &http.Server{Addr: fmt.Sprintf("%s:%d", cfg.Host, cfg.Port), Handler: (&gateway.Gateway{Routes: directory, APIKey: cfg.APIKey, Authenticator: credentialCache, Recorder: recorder, Logger: logger, Client: client, Ready: s.Ping, Control: control, Telemetry: gatewayTelemetry, CapacityObservers: map[string]gateway.CapacityObserver{"runpod": serverless.ActiveWorkers}, ExternalAuthorizer: externalBudgets, ManagedBilling: s, RequestAuthorizer: requestQuotas, AdmissionAuthorizer: admissionPool, ContextPassports: contextPassports}).Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 1 << 20, TLSConfig: serverTLS}
 	go func() {
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)

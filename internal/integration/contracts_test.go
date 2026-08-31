@@ -52,7 +52,7 @@ func TestPortableCatalogPublishesExactRuntimeCompatibility(t *testing.T) {
 		t.Fatalf("compatibility=%#v", snapshot.Compatibility)
 	}
 	encoded, _ := json.Marshal(snapshot)
-	for _, required := range []string{`"runtime":"sglang"`, `"runtime":"custom-oci"`, `"adapter":"runpod-pods"`, `"mode":"serverless"`, `"default_workload"`} {
+	for _, required := range []string{`"runtime":"sglang"`, `"runtime":"custom-oci"`, `"adapter":"runpod-pods"`, `"adapter":"modal"`, `"adapter":"runpod-serverless-api"`, `"adapter":"fly-io"`, `"mode":"serverless"`, `"default_workload"`} {
 		if !strings.Contains(string(encoded), required) {
 			t.Fatalf("missing %s: %s", required, encoded)
 		}

@@ -1,0 +1,118 @@
+---
+title: Control-plane hosting
+description: The portable runtime contract and staged path from one economical host to a qualified highly available control plane.
+---
+
+# Control-plane hosting
+
+InferCrane's hosted control plane is a CPU service, not GPU supply. It owns the stable gateway,
+durable operations, evidence, policy, metering, and provider coordination. Model execution remains
+behind explicit managed, serverless, connected-endpoint, or BYOC contracts.
+
+The maintained early-stage deployment uses one always-on Fly.io Machine in Frankfurt with external
+PostgreSQL. Fly is a replaceable host for the control-plane image; it is not part of InferCrane's
+durability model and is never presented as an inference provider.
+
+## Portable host contract
+
+Any host that satisfies this contract can run the same control-plane release:
+
+| Contract | Requirement |
+| --- | --- |
+| Artifact | One immutable OCI image built from the `runtime` target and pinned by digest for production rollout |
+| Network | Public HTTPS termination, outbound HTTPS, and one private connection to external PostgreSQL |
+| Health | `/livez` for process liveness and `/readyz` for bounded database readiness |
+| Lifecycle | Deliver `SIGTERM` and allow at least the configured shutdown timeout for request draining |
+| Identity | Provide a stable, unique hostname per live replica or set a unique `INFERCRANE_INSTANCE_ID` per replica |
+| State | No host-local durable state; PostgreSQL and external provider APIs are the recovery boundaries |
+| Secrets | Inject at runtime through the host secret manager; never bake secrets into the image or deployment profile |
+| Availability | Keep at least one process running; request-triggered scale-to-zero is not valid for reconcilers and workers |
+
+The process may use bounded in-memory route snapshots and queues. Those are reconstructed from
+durable intent and observed provider state after restart. A host volume must not become a hidden
+source of truth.
+
+## Stage 1: economical public preview
+
+Use `deploy/fly/control-plane.toml` with one always-on Machine and a managed PostgreSQL session
+pooler. This minimizes fixed cost while preserving the correct process lifecycle. Deploy the web
+console separately and keep GPU supply behind InferCrane adapters.
+
+The one-machine profile is configuration-qualified, not a high-availability claim. A Machine or
+regional outage creates a control-plane interruption. Existing inference workers may continue
+serving through their last published routes only where that exact route path has been qualified.
+
+Operational rules:
+
+- keep auto-stop disabled;
+- rely on the Machine hostname for replica identity unless the platform injects a unique stable ID;
+- deploy immutable images and retain the previous digest for rollback;
+- back up PostgreSQL and exercise restore before accepting durable customer state;
+- alert on readiness, operation backlog, failed leases, Stripe webhook failures, and database
+  connection pressure;
+- do not add Render, Fly Volumes, or another stateful service merely to duplicate PostgreSQL.
+
+## Stage 2: qualified high availability
+
+Do not change the Fly minimum from one to two and call the result highly available. Scale-out is
+allowed only after the same-version two-replica qualification proves all of the following:
+
+1. Both replicas register different instance identities and reconstruct usable route snapshots.
+2. Durable operation, async-inference, and migration ownership remain lease-fenced in PostgreSQL.
+3. A terminated replica drains requests and another replica resumes unfinished work without a
+   duplicate provider mutation.
+4. Rolling deployment preserves API compatibility and active routes.
+5. Database interruption has a bounded, visible failure mode and recovery does not invent success.
+6. Connection-pool totals remain below the database budget.
+7. Region loss and DNS/load-balancer behavior are tested from an external client.
+
+After those gates pass, run two Machines in separate failure domains where the host supports it.
+Keep worker leadership and correctness in PostgreSQL rather than adding a Fly-specific coordinator.
+Record the exact image, database, region, host configuration, failure injection, and result in the
+qualification matrix.
+
+## Stage 3: product growth
+
+The growth target is the same image and host contract on AWS ECS/Fargate or Kubernetes, selected by
+measured reliability, compliance, traffic locality, and cost—not by an early PaaS dependency. At
+that stage:
+
+- place replicas across at least two failure domains;
+- use managed load balancing, workload identity, private database networking, and a managed secret
+  store;
+- separate release cadence and capacity policy from GPU suppliers;
+- add regional gateways only when traffic and latency evidence justify them;
+- keep the provider adapters, ledger, and API contracts unchanged during the host migration.
+
+Kubernetes is appropriate when InferCrane needs multi-region policy, dedicated networking, or a
+larger operational team—not as an early-stage badge. AWS ECS is the simpler managed-container exit
+when enterprise customers already standardize on AWS.
+
+## Fly.io and Render decision
+
+Fly.io remains the maintained early-stage host because its Machine lifecycle, process model, and
+network controls fit InferCrane's long-running reconciler and gateway. Render is a valid portability
+and disaster-recovery target, and may offer a simpler general-purpose PaaS workflow, but adding a
+second live deployment today would double operational surface without removing the PostgreSQL or
+GPU-supply boundaries.
+
+Neither vendor is allowed to own customer identity, durable operation state, billing truth, model
+catalog semantics, or provider routing. A migration changes the host and DNS; it does not change
+the customer API.
+
+## Host migration procedure
+
+1. Back up PostgreSQL and verify the restore artifact according to the backup runbook.
+2. Deploy the same immutable image on the destination with a distinct instance identity and the
+   same external PostgreSQL, secrets, and public configuration.
+3. Keep the destination out of public traffic until `/readyz`, instance membership, route
+   reconstruction, and a read-only API smoke test pass.
+4. Move a bounded traffic slice, verify request and operation evidence, then complete the DNS or
+   load-balancer change.
+5. Mark the old instance draining, wait longer than the shutdown timeout and active operation
+   lease, and then stop it.
+6. Preserve the old deployment definition and image digest until the rollback window closes.
+
+If the source and destination cannot temporarily share the same PostgreSQL safely, use the
+documented maintenance-window upgrade path. Never run independent writable databases and merge
+their operation histories later.

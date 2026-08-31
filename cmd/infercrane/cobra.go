@@ -497,7 +497,7 @@ func addHelpFlags(command *cobra.Command, name string) {
 		boolFlag("acknowledge-external-data", "acknowledge external data transmission")
 		boolFlag("enable", "enable policy")
 	case "provider":
-		stringFlag("adapter", "openrouter", "openrouter or openai-compatible-external")
+		stringFlag("adapter", "openrouter", providerAdapterHelp)
 		stringFlag("url", "", "provider OpenAI-compatible base URL")
 		stringFlag("model", "", "provider model identifier")
 		stringFlag("secret-reference", "", "existing secret reference ID")
@@ -564,7 +564,7 @@ func completionFor(command string) func(*cobra.Command, []string, string) ([]str
 		"recommend":   {"--history", "--output"},
 		"slo":         {"--ttft-p95", "--latency-p95", "--error-rate", "--output-tokens-second", "--hourly-cost", "--output"},
 		"external":    {"--target", "--adapter", "--secret-reference", "--request-limit", "--cost-limit-usd", "--max-request-cost-usd", "--mode", "--queue-threshold", "--breach-intervals", "--recovery-intervals", "--cooldown-seconds", "--signal-max-age-seconds", "--acknowledge-external-data", "--enable", "--output"},
-		"doctor":      {"--cloud", "--serverless", "--aws", "--gcp", "--kubernetes", "--output"},
+		"doctor":      {"--cloud", "--gpu", "--serverless", "--aws", "--gcp", "--kubernetes", "--output"},
 		"operation":   {"--wait-timeout", "--output"},
 		"observe":     {"--watch", "--diagnose", "--events", "--window", "--output"},
 		"inbox":       {"--limit", "--output"},

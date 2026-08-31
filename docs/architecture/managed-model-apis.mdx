@@ -1,0 +1,115 @@
+---
+title: Managed Model API architecture
+description: How InferCrane turns replaceable inference supply into one prepaid, supplier-neutral, evidence-backed customer API.
+---
+
+# Managed Model API architecture
+
+InferCrane Model APIs sell an InferCrane service contract, not access to a named infrastructure
+vendor. Customers choose a logical model, receive one OpenAI-compatible endpoint and API key, and
+see InferCrane's price, availability, capabilities, limits, and measured evidence. Procurement
+routing, supplier credentials, internal offer identifiers, and upstream rate cards remain private.
+
+This boundary lets the implementation change supply without changing application code. It does not
+permit silent model substitution: failover must preserve the requested logical model and a
+compatible, qualified protocol/capability tuple.
+
+## Customer value
+
+The product must improve more than procurement convenience:
+
+- **Stable integration:** one API and logical model ID survive supplier, region, runtime, and
+  topology changes.
+- **Effective cost:** session affinity and cache-aware routing keep repeated agent context on a warm
+  compatible worker when that behavior is measured; asynchronous and batch traffic can use a
+  cheaper capacity class without weakening interactive SLOs.
+- **Measured configuration:** runtime, accelerator, concurrency, cache policy, and warm capacity are
+  selected from comparable tuple evidence. Missing evidence remains unknown.
+- **Safe evolution:** a new supply or runtime configuration is an isolated candidate. Benchmark,
+  replay, Release Guard, and explicit promotion happen before active traffic moves.
+- **Operational evidence:** request outcome, TTFT, latency, reported tokens, saturation, cold-start
+  stages, cost, and the routing decision remain inspectable without retaining request content.
+
+Marketing claims must name the workload and evidence boundary. "Cache-local agent sessions reduced
+effective input cost in this measured workload" is valid evidence-led language. "Always cheapest"
+or "fastest model API" is not.
+
+## Request path
+
+1. Authenticate the workspace API key and resolve the requested logical model.
+2. Enforce tenant quota, endpoint admission, deadline, and request-size policy.
+3. Select only an available binding that preserves model and capability compatibility.
+4. For an InferCrane-paid binding, reserve the immutable worst-case request amount from the prepaid
+   wallet before any supplier transmission.
+5. Reject the request before transmission when balance is insufficient, the rate card is expired,
+   the internal cost basis is absent, or the retail rate violates the configured margin floor.
+6. Route with session/cache locality when fresh health permits; reliability wins over affinity.
+7. Stream or buffer the supplier response through the stable endpoint.
+8. Settle from reported token usage. If usage is absent, retain the reservation for reconciliation;
+   never invent a charge or assume the request was free.
+
+The customer API redacts every internal supplier field. The durable ledger retains money and
+request identifiers, not prompts or generated content.
+
+## Supply lanes
+
+InferCrane keeps three explicit lanes behind the same product contract:
+
+| Lane | Best use | Capacity behavior |
+| --- | --- | --- |
+| Elastic managed supply | Preview traffic, burst, and scale-to-zero models | Pay for measured execution/startup; maintain warm capacity only when demand or a paid SLO justifies it |
+| Reserved managed supply | Sustained predictable utilization | Commit only after measured utilization makes the reserved unit cost lower than elastic supply plus risk reserve |
+| Customer-owned supply | BYOC, Kubernetes, or an adopted endpoint | Customer pays infrastructure directly; InferCrane provides planning, operations, routing, evidence, and release safety |
+
+Temporary optimization experiments are separate from serving supply. They receive an expiring spend
+ceiling, evaluate bounded candidates, persist exact tuple evidence, and clean up. An experiment
+cannot become active production capacity implicitly.
+
+## Cost and performance techniques
+
+Use optimizations only after the exact boundary can be measured:
+
+- digest-pinned runtime images and immutable model revisions;
+- supplier-native cached models, baked images, snapshots, or shared model volumes;
+- FUSE-aware weight prefetch where the runtime documents it;
+- prefix-cache/session locality for multi-turn agents;
+- workload-specific batching and concurrency rather than one fleet-wide setting;
+- active workers for paid latency SLOs and scale-to-zero workers for tolerant traffic;
+- bounded speculative decoding, quantization, KV-cache precision, and compilation as candidate
+  mechanisms with quality and memory gates;
+- capacity reuse across compatible logical products only when isolation and accounting remain
+  explicit.
+
+Every optimization result is keyed by model revision, runtime version and image digest, runtime
+arguments, accelerator type/count, supplier/region, workload shape, and date. Evidence from a
+different tuple is a proposal, not a benchmark.
+
+## Loss limits and rate publication
+
+Managed access is prepaid. A browser redirect never grants credit; only a verified paid Stripe
+event updates the append-only wallet ledger. Each request has a hard reservation ceiling and each
+binding has request and cost limits.
+
+The internal rate card also records cost basis, cost-basis provenance, a minimum gross-margin floor,
+and expiry. InferCrane currently requires at least a 15% configured gross-margin floor. Supplier
+fees, cold starts, idle/warm time, storage, network transfer, payment fees, refunds, and an incident
+reserve must be represented in the cost basis before a price is published. An expired public rate
+is removed from the customer response until an operator installs a fresh, profitable contract.
+
+Capacity-priced GPU supply cannot be converted into a per-token cost by guesswork. The conversion
+requires measured goodput and utilization for the comparable tuple plus explicit overhead
+allocation. Until then, price and performance remain unknown and the product stays request-access.
+
+## Staged rollout
+
+1. Start with a deliberately small catalog and one qualified supply path per model.
+2. Prove prepaid checkout, no-balance/no-transmission, streaming settlement, unknown-usage
+   reconciliation, supplier outage, and zero-resource cleanup in sandbox and real bounded tests.
+3. Add a second supplier only after compatible failover and invoice reconciliation are qualified.
+4. Introduce warm pools and reserved capacity only from observed traffic and paid latency demand.
+5. Move high-utilization products to reserved or owned capacity while preserving the public model,
+   endpoint, key, metering, and evidence contracts.
+
+Catalog breadth is not the launch metric. Successful first request, gross margin after all supplier
+costs, TTFT/latency SLO attainment, error rate, cache hit rate for eligible workloads, reconciliation
+lag, and safe supplier failover are.

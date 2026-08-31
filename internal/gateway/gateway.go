@@ -36,6 +36,11 @@ type CapacityObserver func(context.Context, string) (int, error)
 type ExternalAuthorizer interface {
 	Authorize(string) (domain.ExternalBudgetLease, error)
 }
+type ManagedBillingAuthorizer interface {
+	AuthorizeManagedUsage(context.Context, string, string, string, string, string) (domain.ManagedUsageAuthorization, error)
+	SettleManagedUsage(context.Context, string, string, domain.ManagedUsageSettlement) (domain.ManagedUsageReservation, error)
+	ReleaseManagedUsage(context.Context, string, string, string) error
+}
 type RequestAuthorizer interface {
 	Authorize(string) error
 }
@@ -61,6 +66,7 @@ type Gateway struct {
 	// remain available when telemetry observation fails.
 	CapacityObservers   map[string]CapacityObserver
 	ExternalAuthorizer  ExternalAuthorizer
+	ManagedBilling      ManagedBillingAuthorizer
 	RequestAuthorizer   RequestAuthorizer
 	AdmissionAuthorizer AdmissionAuthorizer
 	ContextPassports    ContextPassportResolver
@@ -282,13 +288,28 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 		}
 	}
 	evidenceResult := g.observeCapacity(r.Context(), route, started)
+	billingAuthorization := domain.ManagedUsageAuthorization{}
 	if route.ExternalPolicyID != "" {
+		if g.ManagedBilling != nil {
+			// Public request IDs are caller-controlled observability values. Billing
+			// reservations use a fresh internal identity so replaying X-Request-ID
+			// cannot reuse a settled charge for another supplier transmission.
+			billingRequestID := "usage_" + randomID()
+			billingAuthorization, err = g.ManagedBilling.AuthorizeManagedUsage(r.Context(), principal.TenantID, route.ExternalPolicyID, billingRequestID, route.Provider, route.UpstreamModel)
+			if err != nil {
+				g.record(context.WithoutCancel(r.Context()), requestID, route, alias, operation, started, http.StatusPaymentRequired, "prepaid_balance_insufficient", streaming, responseObservation{}, <-evidenceResult, replay, &queueMS, 0)
+				openAIError(w, "Prepaid managed Model API balance is insufficient", http.StatusPaymentRequired, "billing_error")
+				return
+			}
+		}
 		if g.ExternalAuthorizer == nil {
+			g.releaseManagedBilling(r.Context(), principal.TenantID, billingAuthorization, "external budget unavailable before supplier transmission")
 			g.record(context.WithoutCancel(r.Context()), requestID, route, alias, operation, started, http.StatusTooManyRequests, "external_budget_unavailable", streaming, responseObservation{}, <-evidenceResult, replay, &queueMS, 0)
 			openAIError(w, "External fallback budget is unavailable", http.StatusTooManyRequests, "rate_limit_error")
 			return
 		}
 		if _, err := g.ExternalAuthorizer.Authorize(route.ExternalPolicyID); err != nil {
+			g.releaseManagedBilling(r.Context(), principal.TenantID, billingAuthorization, "external hard budget exhausted before supplier transmission")
 			g.record(context.WithoutCancel(r.Context()), requestID, route, alias, operation, started, http.StatusTooManyRequests, "external_budget_exhausted", streaming, responseObservation{}, <-evidenceResult, replay, &queueMS, 0)
 			openAIError(w, "External fallback hard budget is exhausted", http.StatusTooManyRequests, "rate_limit_error")
 			return
@@ -310,6 +331,7 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 	}
 	target, err := openaicompat.Endpoint(route.RouterURL, resource)
 	if err != nil {
+		g.releaseManagedBilling(r.Context(), principal.TenantID, billingAuthorization, "invalid supplier endpoint before transmission")
 		openAIError(w, "Inference upstream is unavailable", http.StatusServiceUnavailable, "server_error")
 		return
 	}
@@ -360,6 +382,7 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 		}
 	}
 	if err != nil {
+		g.releaseManagedBilling(r.Context(), principal.TenantID, billingAuthorization, "supplier connection failed before a response")
 		status, errorType, message := http.StatusServiceUnavailable, "upstream_unavailable", "Inference upstream is unavailable"
 		if errors.Is(err, context.DeadlineExceeded) {
 			status, errorType, message = http.StatusGatewayTimeout, "request_deadline_exceeded", "Inference request exceeded its endpoint deadline"
@@ -369,6 +392,7 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 		return
 	}
 	if resp == nil {
+		g.releaseManagedBilling(r.Context(), principal.TenantID, billingAuthorization, "supplier returned no response")
 		g.record(context.WithoutCancel(r.Context()), requestID, route, alias, operation, started, http.StatusServiceUnavailable, "upstream_unavailable", streaming, responseObservation{}, <-evidenceResult, replay, &queueMS, max(0, attemptCount-1))
 		openAIError(w, "Inference upstream is unavailable", http.StatusServiceUnavailable, "server_error")
 		return
@@ -390,9 +414,28 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 			errorType = "upstream_disconnect"
 		}
 	}
+	if billingAuthorization.Required && g.ManagedBilling != nil {
+		_, inputTokens, outputTokens := observation.usage()
+		settleCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
+		if _, settleErr := g.ManagedBilling.SettleManagedUsage(settleCtx, principal.TenantID, billingAuthorization.ReservationID, domain.ManagedUsageSettlement{StatusCode: resp.StatusCode, InputTokens: inputTokens, OutputTokens: outputTokens}); settleErr != nil && g.Logger != nil {
+			g.Logger.Error("settle managed model API usage", "error", settleErr, "request_id", requestID, "tenant_id", principal.TenantID)
+		}
+		cancel()
+	}
 	g.record(context.WithoutCancel(r.Context()), requestID, route, alias, operation, started, resp.StatusCode, errorType, streaming, observation, <-evidenceResult, replay, &queueMS, max(0, attemptCount-1))
 	if g.Logger != nil {
 		g.Logger.Info("inference request", "request_id", requestID, "traceparent", traceParent, "tenant_id", principal.TenantID, "deployment_id", route.DeploymentID, "status", resp.StatusCode, "duration_ms", float64(time.Since(started).Microseconds())/1000)
+	}
+}
+
+func (g *Gateway) releaseManagedBilling(ctx context.Context, tenant string, authorization domain.ManagedUsageAuthorization, reason string) {
+	if !authorization.Required || g.ManagedBilling == nil {
+		return
+	}
+	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := g.ManagedBilling.ReleaseManagedUsage(releaseCtx, tenant, authorization.ReservationID, reason); err != nil && g.Logger != nil {
+		g.Logger.Error("release managed model API reservation", "error", err, "reservation_id", authorization.ReservationID, "tenant_id", tenant)
 	}
 }
 

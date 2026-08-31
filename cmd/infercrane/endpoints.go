@@ -192,7 +192,7 @@ func endpointCommand(ctx context.Context, cfg config.Config, args []string) erro
 	target := fs.String("target", "", "external target name")
 	connection := fs.String("connection", "", "configured external provider connection")
 	ownership := fs.String("ownership", "lifecycle-managed", "observe-only, traffic-managed, or lifecycle-managed")
-	externalAdapter := fs.String("external-adapter", "", "openrouter or openai-compatible-external")
+	externalAdapter := fs.String("external-adapter", "", providerAdapterHelp)
 	secretReference := fs.String("secret-reference", "", "secret reference ID for an authenticated external API")
 	requestLimit := fs.Int64("request-limit", 0, "hard external request reservation limit")
 	costLimit := fs.String("cost-limit-usd", "", "hard external USD reservation budget")

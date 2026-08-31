@@ -16,6 +16,89 @@ Required configuration:
 - `INFERCRANE_PASSPORT_SIGNING_KEY_FILE`: optional mounted Ed25519 private-key file for issuing
   Inference Passports. It must be readable only by its owner (`0600`); the private key is never
   persisted in PostgreSQL. Back it up and rotate it through the workload secret manager.
+
+## Hosted control plane on Fly.io
+
+`deploy/fly/control-plane.toml` is the maintained single-machine hosted-control-plane profile. It
+runs the Go API, gateway, reconciler, and durable-operation worker on a small CPU machine. It does
+not run model inference and does not make Fly.io a GPU supplier. Managed model APIs, RunPod
+Serverless, bounded Modal experiments, BYOC deployments, and connected endpoints remain behind
+InferCrane's provider contracts.
+
+Use a Supabase **session pooler** connection string on port 5432 for this persistent IPv4 backend.
+Keep `sslmode=require` in the URL. Direct database URLs may require IPv6; transaction pooling is
+intended for transient or serverless clients and can change prepared-statement/session behavior.
+
+The profile deliberately keeps one machine running. Auto-stop is unsafe for the background
+reconciler and would interrupt durable work until another request arrived. Start with one machine
+to minimize fixed cost; move to two machines only after completing the database-failover and
+rolling-upgrade qualifications described below.
+
+Configure secrets without printing or committing them:
+
+```sh
+fly secrets set -a YOUR_APP_NAME \
+  INFERCRANE_DATABASE_URL='postgres://...pooler.supabase.com:5432/postgres?sslmode=require' \
+  INFERCRANE_API_KEY='at-least-32-random-characters' \
+  INFERCRANE_URL='https://YOUR_APP_NAME.fly.dev' \
+  INFERCRANE_HOSTED_AUTH_ISSUER='https://YOUR-CLERK-DOMAIN' \
+  INFERCRANE_HOSTED_AUTH_AUDIENCE='infercrane-control-api' \
+  INFERCRANE_HOSTED_AUTH_JWT_KEY='-----BEGIN PUBLIC KEY-----...-----END PUBLIC KEY-----' \
+  INFERCRANE_HOSTED_AUTH_AUTHORIZED_PARTIES='https://console.infercrane.com' \
+  INFERCRANE_HOSTED_AUTH_AUTO_PROVISION='true' \
+  INFERCRANE_STRIPE_SECRET_KEY='sk_test_...' \
+  INFERCRANE_STRIPE_WEBHOOK_SECRET='whsec_...' \
+  INFERCRANE_STRIPE_LIVEMODE='false' \
+  INFERCRANE_BILLING_RETURN_URL='https://console.infercrane.com/usage' \
+  INFERCRANE_STRIPE_PRICE_IDS_JSON='{"25":"price_...","50":"price_...","100":"price_...","250":"price_...","500":"price_..."}'
+fly deploy -a YOUR_APP_NAME -c deploy/fly/control-plane.toml
+fly checks list -a YOUR_APP_NAME
+```
+
+The Fly Machine hostname is the default replica identity. Do not set `INFERCRANE_INSTANCE_ID` to
+one shared value: two live replicas with the same identity would violate lease ownership and route
+generation isolation. Set the variable only when the host supplies a different stable, unique
+value for every replica.
+
+The provider-neutral runtime requirements, scale-out gates, and Fly-to-ECS/Kubernetes exit path are
+defined in [Control-plane hosting](/architecture/control-plane-hosting). The maintained Fly
+profile remains deliberately single-machine until those real failure and rolling-upgrade gates are
+recorded as passing.
+
+Use test-mode Stripe keys until the complete checkout, signed webhook, idempotent ledger-credit,
+refund, and replay journey passes. The hosted verifier accepts either
+`INFERCRANE_HOSTED_AUTH_JWT_KEY` from a secret manager or the file variant used by mounted-secret
+platforms, never both. A static Clerk PEM avoids a network dependency during request verification;
+rotate it when the Clerk signing key changes.
+
+Public hosted signup also requires `INFERCRANE_HOSTED_AUTH_AUTO_PROVISION=true`. After Clerk verifies
+the session and active organization, InferCrane atomically creates a dedicated tenant for a new
+organization, grants its first member administrator access, and maps later verified members without
+changing existing roles or restoring revoked access. Leave this setting disabled for invite-only
+or manually provisioned installations.
+
+For a test-mode Stripe account authenticated with the Stripe CLI, create or verify the fixed-price
+prepaid catalog with `scripts/bootstrap-stripe-prepaid.sh`. The command is idempotent by product
+name and denomination and prints the non-secret `INFERCRANE_STRIPE_PRICE_IDS_JSON` value. It never
+creates recurring prices and never runs in live mode. Keep secret keys and webhook signing secrets
+in the deployment secret manager.
+
+The default Model API catalog is a deliberately small discovery shelf. It publishes model identity
+and explicit unknown states, not managed availability or price claims. A hosted operator can load a
+strict `model-api-catalog/v1` file with `INFERCRANE_MODEL_API_CATALOG_FILE` to attach internal supply
+contracts and InferCrane rate cards. Treat that file as an operational secret: it may contain
+procurement routing, but the customer API collapses it to one `infercrane-standard` service offer,
+standardizes price provenance, and omits internal offer IDs, regions, adapters, URLs, credentials,
+and supplier identities. Invalid or incomplete priced entries fail control-plane startup.
+
+Customer-wallet bindings additionally require an internal input/output cost basis, provenance, an
+RFC3339 rate-card expiry, and a minimum gross-margin floor of at least 15%. The retail rate must
+satisfy that floor for each charged token dimension. Authorization fails before supplier
+transmission when the immutable rate card has expired. Public catalog responses also stop emitting
+expired pricing and downgrade availability to unknown until a fresh contract is installed. See
+[Managed Model API architecture](/architecture/managed-model-apis) for supply lanes, prepaid loss
+limits, and the evidence boundary for capacity-derived pricing.
+
 For a single-host first installation, copy `.env.production.example` to a private path, replace
 every example secret and URL, then render and start the maintained production stack:
 
