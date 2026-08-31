@@ -97,4 +97,17 @@ func TestPublicGPUPricesAreDocumentedWithoutBearerAuthentication(t *testing.T) {
 	if !ok || len(security) != 0 {
 		t.Fatalf("public GPU prices must not require bearer authentication: %#v", operation["security"])
 	}
+	parameters, ok := operation["parameters"].([]map[string]any)
+	if !ok {
+		t.Fatalf("public GPU price query parameters missing: %#v", operation["parameters"])
+	}
+	found := map[string]bool{}
+	for _, parameter := range parameters {
+		found[parameter["name"].(string)] = true
+	}
+	for _, name := range []string{"q", "provider", "gpu", "current", "sort", "limit", "offset"} {
+		if !found[name] {
+			t.Fatalf("public GPU price query parameter %q missing", name)
+		}
+	}
 }
