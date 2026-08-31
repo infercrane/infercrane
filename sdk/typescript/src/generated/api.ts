@@ -68,6 +68,21 @@ export class ControlApi {
     return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
   }
 
+  listComputeProviders(): Promise<ObjectList> {
+    const path = '/compute/providers';
+    return this.transport.request('GET', path) as Promise<ObjectList>;
+  }
+
+  listGPUPrices(): Promise<ObjectList> {
+    const path = '/catalog/gpu-prices';
+    return this.transport.request('GET', path) as Promise<ObjectList>;
+  }
+
+  listPublicGPUPrices(): Promise<ObjectList> {
+    const path = '/public/catalog/gpu-prices';
+    return this.transport.request('GET', path) as Promise<ObjectList>;
+  }
+
   listControlPlaneInstances(): Promise<ObjectList> {
     const path = '/system/instances';
     return this.transport.request('GET', path) as Promise<ObjectList>;

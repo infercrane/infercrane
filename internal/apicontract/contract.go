@@ -23,9 +23,10 @@ type Route struct {
 	Idempotent  bool
 }
 
-// Routes is the complete authenticated /api/v1 contract. Keep route behavior
-// in the handler and this metadata in lockstep; TestServerRouteCoverage makes
-// drift a release failure.
+// Routes is the complete /api/v1 contract. Keep route behavior in the handler
+// and this metadata in lockstep; TestServerRouteCoverage makes drift a release
+// failure. Routes under /public and the verified billing webhook are explicitly
+// unauthenticated in the generated document.
 var Routes = []Route{
 	{"GET", "/operations/{id}", "getOperation", "Operations", "Inspect a durable operation", "", "Operation", 200, false},
 	{"GET", "/operations", "listOperations", "Operations", "List durable operations for the authenticated organization", "", "ObjectList", 200, false},
@@ -193,7 +194,7 @@ func Document() (map[string]any, error) {
 			"security":    []map[string][]string{{"bearerAuth": {}}},
 			"responses":   responses(route),
 		}
-		if route.Path == "/billing/webhooks/stripe" {
+		if route.Path == "/billing/webhooks/stripe" || strings.HasPrefix(route.Path, "/public/") {
 			operation["security"] = []any{}
 		}
 		parameters := pathParameters(route.Path)
