@@ -534,10 +534,10 @@ submit_elastic_deploy() {
 	wait_timeout=$1
 	idempotency_key=$2
 	if [ -n "$requested_spec" ]; then
-		exec env INFERCRANE_CONFIG="$config_file" "$cli" --context acceptance deploy "$requested_spec" --wait --wait-timeout "$wait_timeout" \
+		env INFERCRANE_CONFIG="$config_file" "$cli" --context acceptance deploy "$requested_spec" --wait --wait-timeout "$wait_timeout" \
 			--idempotency-key "$idempotency_key" --output json
 	else
-		exec env INFERCRANE_CONFIG="$config_file" "$cli" --context acceptance deploy "$MODEL" --name "$ELASTIC_NAME" --cloud runpod --gpu "$GPU" --gpu-count "$GPU_COUNT" \
+		env INFERCRANE_CONFIG="$config_file" "$cli" --context acceptance deploy "$MODEL" --name "$ELASTIC_NAME" --cloud runpod --gpu "$GPU" --gpu-count "$GPU_COUNT" \
 			--min 1 --max 1 --wait --wait-timeout "$wait_timeout" \
 			--idempotency-key "$idempotency_key" --output json
 	fi
