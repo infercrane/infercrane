@@ -3954,7 +3954,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 			}
 			jwtKey = string(keyBytes)
 		}
-		hosted, hostedErr := authn.NewClerkAuthenticator(authn.ClerkVerifierConfig{JWTKey: jwtKey, Issuer: cfg.HostedAuthIssuer, Audience: cfg.HostedAuthAudience, AuthorizedParties: cfg.HostedAuthAuthorizedParties}, s, store.WebConsoleAccess)
+		hosted, hostedErr := authn.NewClerkAuthenticator(authn.ClerkVerifierConfig{JWTKey: jwtKey, Issuer: cfg.HostedAuthIssuer, Audience: cfg.HostedAuthAudience, AuthorizedParties: cfg.HostedAuthAuthorizedParties, AutoProvision: cfg.HostedAuthAutoProvision}, s, store.WebConsoleAccess)
 		if hostedErr != nil {
 			return fmt.Errorf("configure hosted authentication: %w", hostedErr)
 		}

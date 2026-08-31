@@ -45,6 +45,7 @@ fly secrets set -a YOUR_APP_NAME \
   INFERCRANE_HOSTED_AUTH_AUDIENCE='infercrane-control-api' \
   INFERCRANE_HOSTED_AUTH_JWT_KEY='-----BEGIN PUBLIC KEY-----...-----END PUBLIC KEY-----' \
   INFERCRANE_HOSTED_AUTH_AUTHORIZED_PARTIES='https://console.infercrane.com' \
+  INFERCRANE_HOSTED_AUTH_AUTO_PROVISION='true' \
   INFERCRANE_STRIPE_SECRET_KEY='sk_test_...' \
   INFERCRANE_STRIPE_WEBHOOK_SECRET='whsec_...' \
   INFERCRANE_STRIPE_LIVEMODE='false' \
@@ -69,6 +70,12 @@ refund, and replay journey passes. The hosted verifier accepts either
 `INFERCRANE_HOSTED_AUTH_JWT_KEY` from a secret manager or the file variant used by mounted-secret
 platforms, never both. A static Clerk PEM avoids a network dependency during request verification;
 rotate it when the Clerk signing key changes.
+
+Public hosted signup also requires `INFERCRANE_HOSTED_AUTH_AUTO_PROVISION=true`. After Clerk verifies
+the session and active organization, InferCrane atomically creates a dedicated tenant for a new
+organization, grants its first member administrator access, and maps later verified members without
+changing existing roles or restoring revoked access. Leave this setting disabled for invite-only
+or manually provisioned installations.
 
 For a test-mode Stripe account authenticated with the Stripe CLI, create or verify the fixed-price
 prepaid catalog with `scripts/bootstrap-stripe-prepaid.sh`. The command is idempotent by product

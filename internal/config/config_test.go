@@ -178,8 +178,9 @@ func TestHostedAuthenticationIsExplicitAndProductionPartiesRequireHTTPS(t *testi
 		t.Fatalf("ambiguous hosted auth key source accepted: %v", err)
 	}
 	t.Setenv("INFERCRANE_HOSTED_AUTH_JWT_KEY_FILE", "")
+	t.Setenv("INFERCRANE_HOSTED_AUTH_AUTO_PROVISION", "true")
 	config, err = Load()
-	if err != nil || config.HostedAuthJWTKey == "" || !config.HostedAuthEnabled() {
+	if err != nil || config.HostedAuthJWTKey == "" || !config.HostedAuthEnabled() || !config.HostedAuthAutoProvision {
 		t.Fatalf("secret-manager hosted auth config=%#v err=%v", config, err)
 	}
 }

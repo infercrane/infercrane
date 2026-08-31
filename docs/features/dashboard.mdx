@@ -96,12 +96,11 @@ SameSite=Strict session. Browser JavaScript does not receive the raw token after
   shared browser session; create a scoped service account instead.
 </Warning>
 
-## Hosted private preview
+## Hosted identity and workspace provisioning
 
-Hosted mode uses Clerk for sign-in, sessions, and organization selection. Clerk authentication alone
-does not grant access. The Go control plane independently requires a mapped InferCrane user,
-organization membership, role/scopes, and active `web_console_access` entitlement. Default access is
-denied.
+Hosted mode uses Clerk for sign-in, sessions, and organization selection. The Go control plane then
+independently requires a mapped InferCrane user, organization membership, role/scopes, and active
+`web_console_access` entitlement.
 
 Configure the Go verifier with the Clerk instance's HTTPS issuer and public JWT verification key.
 Use the inline value when the deployment platform stores environment secrets, or the file value
@@ -113,11 +112,16 @@ export INFERCRANE_HOSTED_AUTH_AUDIENCE="infercrane-control-api"
 export INFERCRANE_HOSTED_AUTH_JWT_KEY="-----BEGIN PUBLIC KEY-----...-----END PUBLIC KEY-----"
 # Alternative: INFERCRANE_HOSTED_AUTH_JWT_KEY_FILE=/run/secrets/clerk-jwt-public.pem
 export INFERCRANE_HOSTED_AUTH_AUTHORIZED_PARTIES="https://app.infercrane.ai"
+# Public signup only; defaults to false for fail-closed private installations.
+export INFERCRANE_HOSTED_AUTH_AUTO_PROVISION="true"
 ```
 
-The private-preview Clerk instance must disable public sign-up and restrict organization creation.
-Those identity-provider controls improve the sign-in UX; the InferCrane entitlement remains the
-authoritative access boundary.
+When automatic provisioning is enabled, a cryptographically verified Clerk organization receives a
+dedicated tenant on first use. Its first member is the tenant administrator; subsequent members use
+the role asserted by Clerk. Provisioning is transactional and idempotent, never remaps an external
+organization, never changes an existing membership during login, and never restores revoked access.
+Keep the setting disabled when access must be granted only through the administrative provisioning
+API.
 
 Every protected page and server action resolves a server-side session. Every control API request
 then repeats authentication, authorization, and tenant ownership checks. Organization IDs supplied

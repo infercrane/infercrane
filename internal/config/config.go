@@ -22,6 +22,7 @@ type Config struct {
 	AsyncEncryptionKey, AsyncEncryptionKeyReference                                                                    string
 	HostedAuthIssuer, HostedAuthAudience, HostedAuthJWTKey, HostedAuthJWTKeyFile                                       string
 	HostedAuthAuthorizedParties                                                                                        []string
+	HostedAuthAutoProvision                                                                                            bool
 	StripeSecretKey, StripeWebhookSecret, StripeBillingReturnURL                                                       string
 	ModelAPICatalogFile                                                                                                string
 	StripePriceIDs                                                                                                     map[int64]string
@@ -336,6 +337,10 @@ func load(requireAPIKey bool) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	hostedAuthAutoProvision, err := envBool("INFERCRANE_HOSTED_AUTH_AUTO_PROVISION", false)
+	if err != nil {
+		return Config{}, err
+	}
 	config := Config{
 		DatabaseURL:                         env("INFERCRANE_DATABASE_URL", "postgres://infercrane:infercrane@127.0.0.1:5432/infercrane?sslmode=disable"),
 		ControlURL:                          env("INFERCRANE_URL", "http://127.0.0.1:8080"),
@@ -356,6 +361,7 @@ func load(requireAPIKey bool) (Config, error) {
 		HostedAuthJWTKey:                    env("INFERCRANE_HOSTED_AUTH_JWT_KEY", ""),
 		HostedAuthJWTKeyFile:                env("INFERCRANE_HOSTED_AUTH_JWT_KEY_FILE", ""),
 		HostedAuthAuthorizedParties:         splitCSV(env("INFERCRANE_HOSTED_AUTH_AUTHORIZED_PARTIES", "")),
+		HostedAuthAutoProvision:             hostedAuthAutoProvision,
 		StripeSecretKey:                     env("INFERCRANE_STRIPE_SECRET_KEY", ""),
 		StripeWebhookSecret:                 env("INFERCRANE_STRIPE_WEBHOOK_SECRET", ""),
 		StripeBillingReturnURL:              env("INFERCRANE_BILLING_RETURN_URL", ""),
@@ -577,7 +583,7 @@ func validateStripe(config Config) error {
 }
 
 func validateHostedAuth(config Config) error {
-	configured := config.HostedAuthIssuer != "" || config.HostedAuthAudience != "" || config.HostedAuthJWTKey != "" || config.HostedAuthJWTKeyFile != "" || len(config.HostedAuthAuthorizedParties) > 0
+	configured := config.HostedAuthIssuer != "" || config.HostedAuthAudience != "" || config.HostedAuthJWTKey != "" || config.HostedAuthJWTKeyFile != "" || len(config.HostedAuthAuthorizedParties) > 0 || config.HostedAuthAutoProvision
 	if !configured {
 		return nil
 	}

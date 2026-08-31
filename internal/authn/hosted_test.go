@@ -16,16 +16,31 @@ import (
 )
 
 type hostedResolver struct {
-	identity domain.ExternalIdentity
-	err      error
+	identity        domain.ExternalIdentity
+	provisioned     bool
+	provisionedRole string
+	err             error
 }
 
 func (r *hostedResolver) ResolveExternalPrincipal(_ context.Context, identity domain.ExternalIdentity, entitlement string) (domain.Principal, error) {
 	r.identity = identity
-	if r.err != nil || entitlement != "web_console_access" {
+	if r.err != nil {
+		return domain.Principal{}, r.err
+	}
+	if entitlement != "web_console_access" {
 		return domain.Principal{}, domain.ErrNotFound
 	}
 	return domain.Principal{ID: "user-internal", TenantID: "tenant-internal", Name: "Ada", Role: "operator", Kind: "human", Scopes: []string{"read"}}, nil
+}
+
+func (r *hostedResolver) ResolveOrProvisionExternalPrincipal(_ context.Context, identity domain.ExternalIdentity, entitlement, role string) (domain.Principal, error) {
+	r.identity = identity
+	r.provisioned = true
+	r.provisionedRole = role
+	if entitlement != "web_console_access" {
+		return domain.Principal{}, domain.ErrNotFound
+	}
+	return domain.Principal{ID: "user-provisioned", TenantID: "tenant-provisioned", Name: "Ada", Role: role, Kind: "human", Scopes: []string{"read"}}, nil
 }
 
 func TestClerkAuthenticatorVerifiesAndResolvesV2OrganizationClaims(t *testing.T) {
@@ -60,7 +75,7 @@ func TestClerkAuthenticatorRejectsWrongAuthorizedPartyAndMissingEntitlement(t *t
 		t.Fatal(err)
 	}
 	publicPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: mustMarshalPublicKey(t, &privateKey.PublicKey)})
-	resolver := &hostedResolver{err: errors.New("denied")}
+	resolver := &hostedResolver{err: domain.ErrNotFound}
 	authenticator, err := NewClerkAuthenticator(ClerkVerifierConfig{JWTKey: string(publicPEM), Issuer: "https://issuer.example", AuthorizedParties: []string{"https://app.infercrane.ai"}}, resolver, "web_console_access")
 	if err != nil {
 		t.Fatal(err)
@@ -73,6 +88,35 @@ func TestClerkAuthenticatorRejectsWrongAuthorizedPartyAndMissingEntitlement(t *t
 		if _, err = authenticator.AuthenticatePrincipal(context.Background(), token); !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("party=%s error=%v, want not found", party, err)
 		}
+	}
+}
+
+func TestClerkAuthenticatorAutoProvisionsOnlyVerifiedMissingIdentities(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: mustMarshalPublicKey(t, &privateKey.PublicKey)})
+	resolver := &hostedResolver{err: domain.ErrNotFound}
+	authenticator, err := NewClerkAuthenticator(ClerkVerifierConfig{JWTKey: string(publicPEM), Issuer: "https://infercrane.clerk.accounts.dev", Audience: "infercrane-control", AuthorizedParties: []string{"https://app.infercrane.ai"}, AutoProvision: true}, resolver, "web_console_access")
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := signClerkToken(t, privateKey, map[string]any{
+		"iss": "https://infercrane.clerk.accounts.dev", "sub": "user_external", "sid": "sess_external",
+		"azp": "https://app.infercrane.ai", "aud": []string{"infercrane-control"}, "v": 2,
+		"o":   map[string]any{"id": "org_external", "rol": "admin"},
+		"iat": time.Now().Add(-time.Minute).Unix(), "nbf": time.Now().Add(-time.Minute).Unix(), "exp": time.Now().Add(time.Minute).Unix(),
+	})
+	principal, err := authenticator.AuthenticatePrincipal(context.Background(), token)
+	if err != nil || principal.ID != "user-provisioned" || !resolver.provisioned || resolver.provisionedRole != "admin" {
+		t.Fatalf("principal=%#v identity=%#v auto=%v provisioned=%v role=%q err=%v", principal, resolver.identity, authenticator.autoProvision, resolver.provisioned, resolver.provisionedRole, err)
+	}
+
+	resolver.err = errors.New("database unavailable")
+	resolver.provisioned = false
+	if _, err = authenticator.AuthenticatePrincipal(context.Background(), token); err == nil || resolver.provisioned {
+		t.Fatalf("non-not-found error=%v provisioned=%v", err, resolver.provisioned)
 	}
 }
 
