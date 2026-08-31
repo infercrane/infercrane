@@ -524,7 +524,9 @@ run_preflight() {
 		[ -f "$requested_spec" ] && [ -r "$requested_spec" ] || { echo "INFERCRANE_ACCEPTANCE_SPEC_FILE is not readable" >&2; return 1; }
 		record elastic-plan ic plan "$requested_spec" --output json
 	else
-		record elastic-plan ic plan "$MODEL" --name "$ELASTIC_NAME" --cloud runpod --gpu "$GPU" --gpu-count "$GPU_COUNT" --min 1 --max 2 --output json
+		elastic_max_replicas=${INFERCRANE_ACCEPTANCE_ELASTIC_MAX_REPLICAS:-2}
+		case "$elastic_max_replicas" in 1|2) ;; *) echo "elastic max replicas must be 1 or 2" >&2; return 1;; esac
+		record elastic-plan ic plan "$MODEL" --name "$ELASTIC_NAME" --cloud runpod --gpu "$GPU" --gpu-count "$GPU_COUNT" --min 1 --max "$elastic_max_replicas" --output json
 	fi
 }
 
@@ -544,9 +546,11 @@ submit_elastic_deploy() {
 run_elastic() {
   require_paid_approval
   run_preflight
+  elastic_max_replicas=${INFERCRANE_ACCEPTANCE_ELASTIC_MAX_REPLICAS:-2}
+  case "$elastic_max_replicas" in 1|2) ;; *) echo "elastic max replicas must be 1 or 2" >&2; return 1;; esac
   ready_timeout=${INFERCRANE_ACCEPTANCE_READY_TIMEOUT_SECONDS:-2700}
   record elastic-deploy ic deploy "$MODEL" --name "$ELASTIC_NAME" --cloud runpod --gpu "$GPU" \
-    --min 1 --max 2 --wait --wait-timeout "${ready_timeout}s" \
+    --min 1 --max "$elastic_max_replicas" --wait --wait-timeout "${ready_timeout}s" \
     --idempotency-key "$ELASTIC_NAME-create" --output json
   wait_ready "$ELASTIC_NAME"
   record elastic-buffered-request ic request "$ELASTIC_NAME" --message "acceptance probe" --output json
