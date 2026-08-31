@@ -284,7 +284,11 @@ grep -Fq 'delete_if_present "$SERVERLESS_NAME" "$SERVERLESS_NAME-delete"' "$root
 grep -Fq 'verify_provider_inventory_absent' "$root/scripts/release-acceptance.sh"
 grep -Fq '"$ELASTIC_NAME-$run_id-create"' "$root/scripts/release-acceptance.sh"
 grep -Fq '"$ELASTIC_NAME-$run_id-delete"' "$root/scripts/release-acceptance.sh"
-grep -Fq 'exec env INFERCRANE_CONFIG="$config_file" "$cli" --context acceptance deploy' "$root/scripts/release-acceptance.sh"
+grep -Fq 'env INFERCRANE_CONFIG="$config_file" "$cli" --context acceptance deploy' "$root/scripts/release-acceptance.sh"
+if grep -Fq 'exec env INFERCRANE_CONFIG="$config_file" "$cli" --context acceptance deploy' "$root/scripts/release-acceptance.sh"; then
+  echo "spec deploy helper can replace the qualification suite process" >&2
+  exit 1
+fi
 grep -Fq '.error.code == "operation_watch_interrupted"' "$root/scripts/release-acceptance.sh"
 grep -Fq 'tail -n 1 "$evidence/durable-deploy-cli.log" | jq -e' "$root/scripts/release-acceptance.sh"
 grep -Fq 'deploy client exited before durable provider identity was persisted' "$root/scripts/release-acceptance.sh"

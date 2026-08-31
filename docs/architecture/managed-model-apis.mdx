@@ -65,6 +65,29 @@ Temporary optimization experiments are separate from serving supply. They receiv
 ceiling, evaluate bounded candidates, persist exact tuple evidence, and clean up. An experiment
 cannot become active production capacity implicitly.
 
+## Supply-plan compiler
+
+The private supply catalog is input to a versioned, deterministic compiler; catalog order is never
+a routing policy. For the requested logical model, protocol, capabilities, region, workload shape,
+SLO and time boundary, the compiler:
+
+1. rejects a different model identity, even when a supplier describes it as compatible;
+2. rejects unavailable capacity, non-ready access, unhealthy observations, stale observations and
+   expired rate cards;
+3. rejects a missing cost basis or a retail rate below the configured gross-margin floor;
+4. requires fresh, minimum-sample, exact-tuple evidence whenever the request contains a TTFT or
+   throughput SLO;
+5. ranks eligible offers by estimated customer cost only when an input/output workload shape was
+   declared; otherwise it uses stable identity and labels cost ranking unavailable;
+6. prefers a different supplier failure domain for fallback while preserving the same model and
+   protocol contract; and
+7. persists the primary, fallbacks, rejection reasons, timestamp and content digest as one internal
+   plan.
+
+This compiler is advisory until the selected binding passes its normal credential, hard-budget,
+prepaid-reservation, health and route-publication gates. Its supplier fields never cross the
+customer API.
+
 ## Cost and performance techniques
 
 Use optimizations only after the exact boundary can be measured:

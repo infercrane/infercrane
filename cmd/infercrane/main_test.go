@@ -66,6 +66,19 @@ func TestBindRuntimeBackendsIncludesDiscoveredRuntimeProfiles(t *testing.T) {
 	}
 }
 
+func TestContextPassportRefreshBackoffIsBounded(t *testing.T) {
+	base := 10 * time.Second
+	wants := []time.Duration{base, 2 * base, 4 * base, time.Minute, time.Minute}
+	for index, want := range wants {
+		if got := contextPassportRefreshBackoff(base, index+1); got != want {
+			t.Fatalf("failure %d backoff=%s want=%s", index+1, got, want)
+		}
+	}
+	if got := contextPassportRefreshBackoff(base, 0); got != base {
+		t.Fatalf("success backoff=%s want=%s", got, base)
+	}
+}
+
 func TestCommandHelpDoesNotRequireAuthentication(t *testing.T) {
 	t.Setenv("INFERCRANE_API_KEY", "")
 	t.Setenv("INFERCRANE_CONFIG", filepath.Join(t.TempDir(), "missing.json"))

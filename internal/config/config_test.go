@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadOptimizationPricesRequiresExactSourcedEvidence(t *testing.T) {
@@ -77,6 +78,19 @@ func TestRunPodContainerDiskIsBounded(t *testing.T) {
 	}
 }
 
+func TestGPUPriceSyncIntervalIsBounded(t *testing.T) {
+	t.Setenv("INFERCRANE_API_KEY", "secret")
+	t.Setenv("INFERCRANE_GPU_PRICE_SYNC_SECONDS", "3600")
+	cfg, err := Load()
+	if err != nil || cfg.GPUPriceSyncInterval != time.Hour {
+		t.Fatalf("cfg=%#v err=%v", cfg, err)
+	}
+	t.Setenv("INFERCRANE_GPU_PRICE_SYNC_SECONDS", "60")
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "GPU_PRICE_SYNC") {
+		t.Fatalf("unsafe price refresh interval accepted: %v", err)
+	}
+}
+
 func TestRunPodNetworkVolumesRequireImmutableExactMappings(t *testing.T) {
 	t.Setenv("INFERCRANE_API_KEY", "secret")
 	t.Setenv("INFERCRANE_RUNPOD_ARTIFACT_CACHE_POLICY", "required")
@@ -101,6 +115,39 @@ func TestRunPodHuggingFaceCredentialIsReferenceOnly(t *testing.T) {
 	t.Setenv("INFERCRANE_RUNPOD_HF_TOKEN_SECRET", "{{unsafe}}")
 	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "secret name") {
 		t.Fatalf("unsafe secret reference accepted: %v", err)
+	}
+}
+
+func TestSkyPilotExecutionBoundary(t *testing.T) {
+	t.Setenv("INFERCRANE_API_KEY", "test-key")
+	t.Setenv("INFERCRANE_SKYPILOT_API", "disabled")
+	t.Setenv("RUNPOD_API_KEY", "runpod-key")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SkyPilotEnabled() {
+		t.Fatal("disabled SkyPilot was executable")
+	}
+
+	t.Setenv("INFERCRANE_SKYPILOT_API", "auto")
+	cfg, err = Load()
+	if err != nil || !cfg.SkyPilotEnabled() {
+		t.Fatalf("auto SkyPilot did not follow RunPod credentials: enabled=%v err=%v", cfg.SkyPilotEnabled(), err)
+	}
+
+	t.Setenv("INFERCRANE_SKYPILOT_API", "invalid")
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "INFERCRANE_SKYPILOT_API") {
+		t.Fatalf("invalid SkyPilot mode accepted: %v", err)
+	}
+}
+
+func TestSkyPilotEnabledRequiresRunPodCredentials(t *testing.T) {
+	t.Setenv("INFERCRANE_API_KEY", "test-key")
+	t.Setenv("INFERCRANE_SKYPILOT_API", "enabled")
+	t.Setenv("RUNPOD_API_KEY", "")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "RUNPOD_API_KEY") {
+		t.Fatalf("credential-less enabled SkyPilot accepted: %v", err)
 	}
 }
 

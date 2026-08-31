@@ -28,6 +28,7 @@ type Config struct {
 	StripePriceIDs                                                                                                     map[int64]string
 	StripeLivemode                                                                                                     bool
 	RunPodAPIKey, RunPodServerlessTemplateID, RunPodRESTURL, RunPodArtifactCachePolicy, RunPodHFTokenSecret            string
+	SkyPilotAPI                                                                                                        string
 	RunPodContainerDiskGiB                                                                                             int
 	RunPodNetworkVolumes                                                                                               map[string]string
 	AWSRoleARN, AWSExternalID, AWSRegion, AWSSubnetID, AWSAMIID, AWSInstanceType, AWSGPU                               string
@@ -47,7 +48,7 @@ type Config struct {
 	DynamoVLLMImageDigest, DynamoVLLMRuntimeVersion, DynamoSGLangImageDigest, DynamoSGLangRuntimeVersion               string
 	DynamoModelSecretName                                                                                              string
 	Port, RouterStartPort, DatabaseMaxOpen, DatabaseMaxIdle                                                            int
-	HealthInterval, UpstreamTimeout, ShutdownTimeout, RequestRetention                                                 time.Duration
+	HealthInterval, UpstreamTimeout, ShutdownTimeout, RequestRetention, GPUPriceSyncInterval                           time.Duration
 	OptimizationPrices                                                                                                 []OptimizationPrice
 }
 
@@ -281,6 +282,10 @@ func load(requireAPIKey bool) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	gpuPriceSyncSeconds, err := envInt("INFERCRANE_GPU_PRICE_SYNC_SECONDS", 0)
+	if err != nil {
+		return Config{}, err
+	}
 	runPodContainerDiskGiB, err := envInt("INFERCRANE_RUNPOD_CONTAINER_DISK_GIB", 100)
 	if err != nil {
 		return Config{}, err
@@ -375,6 +380,7 @@ func load(requireAPIKey bool) (Config, error) {
 		RunPodArtifactCachePolicy:           env("INFERCRANE_RUNPOD_ARTIFACT_CACHE_POLICY", "prefer"),
 		RunPodNetworkVolumes:                runPodNetworkVolumes,
 		RunPodHFTokenSecret:                 env("INFERCRANE_RUNPOD_HF_TOKEN_SECRET", ""),
+		SkyPilotAPI:                         env("INFERCRANE_SKYPILOT_API", "auto"),
 		AWSRoleARN:                          env("INFERCRANE_AWS_ROLE_ARN", ""),
 		AWSExternalID:                       env("INFERCRANE_AWS_EXTERNAL_ID", ""),
 		AWSRegion:                           env("INFERCRANE_AWS_REGION", ""),
@@ -428,6 +434,7 @@ func load(requireAPIKey bool) (Config, error) {
 		Port:                                port, RouterStartPort: routerPort, DatabaseMaxOpen: maxOpen, DatabaseMaxIdle: maxIdle,
 		HealthInterval: time.Duration(healthSeconds) * time.Second, UpstreamTimeout: time.Duration(upstreamSeconds) * time.Second,
 		ShutdownTimeout: time.Duration(shutdownSeconds) * time.Second, RequestRetention: time.Duration(retentionHours) * time.Hour,
+		GPUPriceSyncInterval: time.Duration(gpuPriceSyncSeconds) * time.Second,
 	}
 	if config.Port < 1 || config.Port > 65535 {
 		return Config{}, fmt.Errorf("INFERCRANE_PORT must be between 1 and 65535")
@@ -467,10 +474,16 @@ func load(requireAPIKey bool) (Config, error) {
 	if config.HealthInterval <= 0 || config.UpstreamTimeout <= 0 || config.ShutdownTimeout <= 0 || config.RequestRetention <= 0 {
 		return Config{}, fmt.Errorf("timeouts must be positive")
 	}
+	if config.GPUPriceSyncInterval != 0 && (config.GPUPriceSyncInterval < 5*time.Minute || config.GPUPriceSyncInterval > 24*time.Hour) {
+		return Config{}, fmt.Errorf("INFERCRANE_GPU_PRICE_SYNC_SECONDS must be 0 or between 300 and 86400")
+	}
 	if config.RunPodContainerDiskGiB < 50 || config.RunPodContainerDiskGiB > 2048 {
 		return Config{}, fmt.Errorf("INFERCRANE_RUNPOD_CONTAINER_DISK_GIB must be between 50 and 2048")
 	}
 	if err := validateRunPod(config); err != nil {
+		return Config{}, err
+	}
+	if err := validateSkyPilot(config); err != nil {
 		return Config{}, err
 	}
 	if err := validateAWS(config); err != nil {
@@ -519,6 +532,18 @@ func validateRunPod(config Config) error {
 	return nil
 }
 
+func validateSkyPilot(config Config) error {
+	switch config.SkyPilotAPI {
+	case "auto", "enabled", "disabled":
+	default:
+		return errors.New("INFERCRANE_SKYPILOT_API must be auto, enabled, or disabled")
+	}
+	if config.SkyPilotAPI == "enabled" && config.RunPodAPIKey == "" {
+		return errors.New("enabled SkyPilot API requires RUNPOD_API_KEY")
+	}
+	return nil
+}
+
 func validRunPodResourceID(value string) bool {
 	if len(value) < 4 || len(value) > 128 {
 		return false
@@ -533,6 +558,14 @@ func validRunPodResourceID(value string) bool {
 }
 
 func (c Config) AWSEnabled() bool { return c.AWSRoleARN != "" }
+
+// SkyPilotEnabled is the single execution boundary for both the optional
+// local API process and the provider adapter. Keeping composition behind the
+// same switch prevents an innocuous status observation from auto-starting
+// SkyPilot's local multiprocessing server on control-plane replicas.
+func (c Config) SkyPilotEnabled() bool {
+	return c.SkyPilotAPI == "enabled" || (c.SkyPilotAPI == "auto" && c.RunPodAPIKey != "")
+}
 
 func (c Config) GCPEnabled() bool { return c.GCPProject != "" }
 

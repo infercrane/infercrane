@@ -26,6 +26,7 @@ assert env["INFERCRANE_ENV"] == "production"
 assert env["INFERCRANE_HOST"] == "0.0.0.0"
 assert env["INFERCRANE_PORT"] == "8080"
 assert env["INFERCRANE_SKYPILOT_API"] == "disabled"
+assert env["INFERCRANE_GPU_PRICE_SYNC_SECONDS"] == "3600"
 assert "INFERCRANE_INSTANCE_ID" not in env, "replica identity must default to the unique machine hostname"
 
 service = data["http_service"]
