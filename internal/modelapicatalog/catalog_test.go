@@ -12,8 +12,8 @@ func TestDefaultCatalogIsCuratedValidatedAndPaged(t *testing.T) {
 	if err := catalog.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if len(catalog.Models) < 6 || len(catalog.Models) > 12 {
-		t.Fatalf("expected a deliberate 6-12 model launch shelf, got %d", len(catalog.Models))
+	if len(catalog.Models) < 12 || len(catalog.Models) > 24 {
+		t.Fatalf("expected a deliberate 12-24 model discovery shelf, got %d", len(catalog.Models))
 	}
 	page := catalog.List(Filter{Task: "coding", Limit: 2})
 	if len(page.Models) != 2 || page.Total < 3 || page.NextOffset == nil {

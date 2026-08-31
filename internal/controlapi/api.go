@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -287,7 +288,35 @@ type API struct {
 		CreateCheckoutSession(context.Context, string, int64) (domain.ManagedCheckoutSession, error)
 		ParseWebhook([]byte, string) (domain.ManagedPaymentEvent, error)
 	}
-	ModelAPICatalog modelapicatalog.Catalog
+	ModelAPICatalog  modelapicatalog.Catalog
+	ComputeProviders []ComputeProvider
+	GPUPrices        []GPUPriceObservation
+}
+
+// ComputeProvider is the customer-facing execution readiness for one cloud.
+// It is intentionally separate from adapter registration and price discovery:
+// registered code and a catalog price do not prove that this control plane can
+// create a billable resource.
+type ComputeProvider struct {
+	ID     string `json:"id"`
+	Label  string `json:"label"`
+	Mode   string `json:"mode"`
+	State  string `json:"state"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// GPUPriceObservation is sourced price evidence, not an availability claim.
+type GPUPriceObservation struct {
+	Provider   string    `json:"provider"`
+	Region     string    `json:"region"`
+	GPU        string    `json:"gpu"`
+	GPUCount   int       `json:"gpu_count"`
+	Replicas   int       `json:"replicas"`
+	Currency   string    `json:"currency"`
+	HourlyUSD  float64   `json:"hourly_usd"`
+	Source     string    `json:"source"`
+	ObservedAt time.Time `json:"observed_at"`
+	ValidUntil time.Time `json:"valid_until"`
 }
 
 type BackendMetadata struct {
@@ -314,6 +343,7 @@ func (a API) endpointResources() (endpointStore, bool) {
 
 func (a API) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/public/catalog/gpu-prices", a.gpuPrices)
 	mux.HandleFunc("GET /api/v1/operations/{id}", a.auth(authz.Read, a.operation))
 	mux.HandleFunc("GET /api/v1/operations", a.auth(authz.Read, a.operations))
 	mux.HandleFunc("GET /api/v1/doctor", a.auth(authz.Read, a.diagnostics))
@@ -326,6 +356,8 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/catalog/models/{name}", a.auth(authz.Read, a.catalogModel))
 	mux.HandleFunc("GET /api/v1/model-api-catalog", a.auth(authz.Read, a.modelAPIModels))
 	mux.HandleFunc("GET /api/v1/model-api-catalog/{id}", a.auth(authz.Read, a.modelAPIModel))
+	mux.HandleFunc("GET /api/v1/compute/providers", a.auth(authz.Read, a.computeProviders))
+	mux.HandleFunc("GET /api/v1/catalog/gpu-prices", a.auth(authz.Read, a.gpuPrices))
 	mux.HandleFunc("GET /api/v1/system/instances", a.auth(authz.Read, a.controlPlaneInstances))
 	mux.HandleFunc("POST /api/v1/deployments/{name}/recipes", a.auth(authz.Deploy, a.captureRecipe))
 	mux.HandleFunc("GET /api/v1/recipes", a.auth(authz.Read, a.recipes))
@@ -4100,6 +4132,17 @@ func (a API) createCloudDeployment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "request body must contain one JSON object")
 		return
 	}
+	providerReady := false
+	for _, provider := range a.ComputeProviders {
+		if provider.ID == request.Cloud && provider.State == "ready" {
+			providerReady = true
+			break
+		}
+	}
+	if len(a.ComputeProviders) > 0 && !providerReady {
+		writeError(w, http.StatusConflict, "compute_connection_required", "this control plane has no ready compute connection for "+request.Cloud)
+		return
+	}
 	principal := r.Context().Value(identityKey{}).(domain.Principal)
 	request.Actor, request.TenantID = principal.Name, principal.TenantID
 	if request.ComputeMode == "" {
@@ -4134,6 +4177,34 @@ func (a API) createCloudDeployment(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusOK
 	}
 	writeJSON(w, status, map[string]any{"deployment": deploymentResponse(deployment), "operation": operationResponse(operation), "created": created})
+}
+
+func (a API) computeProviders(w http.ResponseWriter, _ *http.Request) {
+	providers := append([]ComputeProvider(nil), a.ComputeProviders...)
+	sort.SliceStable(providers, func(i, j int) bool { return providers[i].Label < providers[j].Label })
+	writeJSON(w, http.StatusOK, map[string]any{"data": providers})
+}
+
+func (a API) gpuPrices(w http.ResponseWriter, _ *http.Request) {
+	now := time.Now().UTC()
+	rows := make([]map[string]any, 0, len(a.GPUPrices))
+	for _, price := range a.GPUPrices {
+		rows = append(rows, map[string]any{
+			"provider": price.Provider, "region": price.Region, "gpu": price.GPU,
+			"gpu_count": price.GPUCount, "replicas": price.Replicas,
+			"currency": price.Currency, "hourly_usd": price.HourlyUSD,
+			"source": price.Source, "observed_at": price.ObservedAt,
+			"valid_until": price.ValidUntil, "current": price.ValidUntil.After(now),
+			"availability": "unknown",
+		})
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		return rows[i]["hourly_usd"].(float64) < rows[j]["hourly_usd"].(float64)
+	})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"data":       rows,
+		"disclosure": "Prices are sourced observations. Current stock, account quota, and deployability are verified separately.",
+	})
 }
 
 func (a API) auditEvents(w http.ResponseWriter, r *http.Request) {

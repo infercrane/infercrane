@@ -70,6 +70,20 @@ import (
 	"github.com/infercrane/infercrane/internal/workflows"
 )
 
+func readinessState(ready bool) string {
+	if ready {
+		return "ready"
+	}
+	return "connection-required"
+}
+
+func readinessReason(ready bool, missing string) string {
+	if ready {
+		return ""
+	}
+	return missing
+}
+
 var version = "1.0.0"
 
 const controlPlaneProtocolMin, controlPlaneProtocolMax = 1, 2
@@ -4039,8 +4053,10 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		benchmarkBackends["kubernetes"] = controlapi.BackendMetadata{APIKey: cfg.APIKey, APIKeyEnv: "INFERCRANE_WORKER_API_KEY"}
 	}
 	priceCatalog := pricing.Catalog{Prices: map[pricing.Request]pricing.Estimate{}}
+	gpuPrices := make([]controlapi.GPUPriceObservation, 0, len(cfg.OptimizationPrices))
 	for _, row := range cfg.OptimizationPrices {
 		priceCatalog.Prices[pricing.Request{Cloud: row.Cloud, Region: row.Region, GPU: row.GPU, GPUCount: row.GPUCount, Replicas: row.Replicas}] = pricing.Estimate{Currency: row.Currency, Source: row.Source, Hourly: row.HourlyUSD, ObservedAt: row.ObservedAt, StaleAfter: row.ValidUntil.Sub(row.ObservedAt)}
+		gpuPrices = append(gpuPrices, controlapi.GPUPriceObservation{Provider: row.Cloud, Region: row.Region, GPU: row.GPU, GPUCount: row.GPUCount, Replicas: row.Replicas, Currency: row.Currency, HourlyUSD: row.HourlyUSD, Source: row.Source, ObservedAt: row.ObservedAt, ValidUntil: row.ValidUntil})
 	}
 	_, aiperfErr := exec.LookPath(cfg.AIPerfBinary)
 	optimizationExecutionEnabled := len(priceCatalog.Prices) > 0 && aiperfErr == nil
@@ -4061,7 +4077,13 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	if catalogErr != nil {
 		return fmt.Errorf("configure Model API catalog: %w", catalogErr)
 	}
-	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool, OptimizationCosts: optimizationCosts, ModelAPICatalog: modelAPICatalog}
+	computeProviders := []controlapi.ComputeProvider{
+		{ID: "runpod", Label: "RunPod", Mode: "control-plane", State: readinessState(cfg.RunPodAPIKey != ""), Reason: readinessReason(cfg.RunPodAPIKey != "", "RUNPOD_API_KEY is not configured")},
+		{ID: "aws", Label: "AWS", Mode: "BYOC", State: readinessState(cfg.AWSEnabled()), Reason: readinessReason(cfg.AWSEnabled(), "AWS workload identity is not configured")},
+		{ID: "gcp", Label: "Google Cloud", Mode: "BYOC", State: readinessState(cfg.GCPEnabled()), Reason: readinessReason(cfg.GCPEnabled(), "GCP project and workload identity are not configured")},
+		{ID: "kubernetes", Label: "Kubernetes", Mode: "BYOC", State: readinessState(cfg.KubernetesEnabled()), Reason: readinessReason(cfg.KubernetesEnabled(), "Kubernetes context is not configured")},
+	}
+	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool, OptimizationCosts: optimizationCosts, ModelAPICatalog: modelAPICatalog, ComputeProviders: computeProviders, GPUPrices: gpuPrices}
 	if cfg.StripeEnabled() {
 		stripeBilling, stripeErr := managedbilling.NewStripe(cfg.StripeSecretKey, cfg.StripeWebhookSecret, cfg.StripeBillingReturnURL, cfg.StripePriceIDs, cfg.StripeLivemode)
 		if stripeErr != nil {
