@@ -23,9 +23,10 @@ type Route struct {
 	Idempotent  bool
 }
 
-// Routes is the complete authenticated /api/v1 contract. Keep route behavior
-// in the handler and this metadata in lockstep; TestServerRouteCoverage makes
-// drift a release failure.
+// Routes is the complete /api/v1 contract. Keep route behavior in the handler
+// and this metadata in lockstep; TestServerRouteCoverage makes drift a release
+// failure. Routes under /public and the verified billing webhook are explicitly
+// unauthenticated in the generated document.
 var Routes = []Route{
 	{"GET", "/operations/{id}", "getOperation", "Operations", "Inspect a durable operation", "", "Operation", 200, false},
 	{"GET", "/operations", "listOperations", "Operations", "List durable operations for the authenticated organization", "", "ObjectList", 200, false},
@@ -39,6 +40,9 @@ var Routes = []Route{
 	{"GET", "/catalog/models/{name}", "getCatalogModel", "Model catalog", "Inspect one reviewed model and its serving profiles", "", "Object", 200, false},
 	{"GET", "/model-api-catalog", "listModelAPICatalog", "Model APIs", "Browse supplier-neutral managed Model API identities", "", "ObjectList", 200, false},
 	{"GET", "/model-api-catalog/{id}", "getModelAPICatalogEntry", "Model APIs", "Inspect one managed Model API identity without supplier disclosure", "", "Object", 200, false},
+	{"GET", "/compute/providers", "listComputeProviders", "Compute", "List real execution readiness separately from adapter registration", "", "ObjectList", 200, false},
+	{"GET", "/catalog/gpu-prices", "listGPUPrices", "Compute", "List timestamped GPU price observations without claiming stock", "", "ObjectList", 200, false},
+	{"GET", "/public/catalog/gpu-prices", "listPublicGPUPrices", "Compute", "List public timestamped GPU price observations without claiming stock", "", "ObjectList", 200, false},
 	{"GET", "/system/instances", "listControlPlaneInstances", "System", "List live control-plane instances and protocol compatibility", "", "ObjectList", 200, false},
 	{"GET", "/environments", "listEnvironments", "Endpoints", "List endpoint environments", "", "ObjectList", 200, false},
 	{"POST", "/environments", "createEnvironment", "Endpoints", "Create an endpoint environment", "EnvironmentCreate", "Object", 201, false},
@@ -190,7 +194,7 @@ func Document() (map[string]any, error) {
 			"security":    []map[string][]string{{"bearerAuth": {}}},
 			"responses":   responses(route),
 		}
-		if route.Path == "/billing/webhooks/stripe" {
+		if route.Path == "/billing/webhooks/stripe" || strings.HasPrefix(route.Path, "/public/") {
 			operation["security"] = []any{}
 		}
 		parameters := pathParameters(route.Path)

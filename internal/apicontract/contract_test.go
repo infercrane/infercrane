@@ -86,3 +86,15 @@ func TestDocumentBuilds(t *testing.T) {
 		}
 	}
 }
+
+func TestPublicGPUPricesAreDocumentedWithoutBearerAuthentication(t *testing.T) {
+	doc, err := Document()
+	if err != nil {
+		t.Fatal(err)
+	}
+	operation := doc["paths"].(map[string]any)["/api/v1/public/catalog/gpu-prices"].(map[string]any)["get"].(map[string]any)
+	security, ok := operation["security"].([]any)
+	if !ok || len(security) != 0 {
+		t.Fatalf("public GPU prices must not require bearer authentication: %#v", operation["security"])
+	}
+}

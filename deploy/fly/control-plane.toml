@@ -18,6 +18,7 @@ kill_timeout = 35
   INFERCRANE_PORT = "8080"
   INFERCRANE_HOSTED_AUTH_AUTO_PROVISION = "true"
   INFERCRANE_SKYPILOT_API = "disabled"
+  INFERCRANE_GPU_PRICE_SYNC_SECONDS = "3600"
   INFERCRANE_DATABASE_MAX_OPEN = "12"
   INFERCRANE_DATABASE_MAX_IDLE = "4"
 
@@ -43,5 +44,8 @@ kill_timeout = 35
 
 [[vm]]
   size = "shared-cpu-1x"
+  # Provider CLIs must not start resident helper servers in the hosted control
+  # plane. This budget is verified by staging after disabled adapters are kept
+  # outside the executable backend registry.
   memory = "1gb"
   processes = ["app"]

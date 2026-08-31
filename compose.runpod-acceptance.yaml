@@ -51,6 +51,10 @@ services:
       INFERCRANE_ENV: test
       INFERCRANE_INSTANCE_ID: runpod-acceptance
       INFERCRANE_ROUTER_BINARY: vllm-router
+      # Match the hosted production execution boundary. The native RunPod Pods
+      # driver runs OCI workloads directly; SkyPilot requires an SSH-capable
+      # base image and is qualified separately with its own artifact contract.
+      INFERCRANE_SKYPILOT_API: ${INFERCRANE_SKYPILOT_API:-disabled}
       RUNPOD_API_KEY_FILE: /runpod-key
       INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID: ${INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID:-}
       INFERCRANE_RUNPOD_REST_URL: http://runpod-fault-proxy:8090/v1

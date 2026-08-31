@@ -4514,6 +4514,42 @@
         ]
       }
     },
+    "/api/v1/catalog/gpu-prices": {
+      "get": {
+        "operationId": "listGPUPrices",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List timestamped GPU price observations without claiming stock",
+        "tags": [
+          "Compute"
+        ]
+      }
+    },
     "/api/v1/catalog/models": {
       "get": {
         "operationId": "listCatalogModels",
@@ -4594,6 +4630,42 @@
         "summary": "Inspect one reviewed model and its serving profiles",
         "tags": [
           "Model catalog"
+        ]
+      }
+    },
+    "/api/v1/compute/providers": {
+      "get": {
+        "operationId": "listComputeProviders",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List real execution readiness separately from adapter registration",
+        "tags": [
+          "Compute"
         ]
       }
     },
@@ -9641,6 +9713,38 @@
         ]
       }
     },
+    "/api/v1/public/catalog/gpu-prices": {
+      "get": {
+        "operationId": "listPublicGPUPrices",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [],
+        "summary": "List public timestamped GPU price observations without claiming stock",
+        "tags": [
+          "Compute"
+        ]
+      }
+    },
     "/api/v1/recipes": {
       "get": {
         "operationId": "listRecipes",
@@ -10735,6 +10839,9 @@
     },
     {
       "name": "Capacity intelligence"
+    },
+    {
+      "name": "Compute"
     },
     {
       "name": "Context Passport"

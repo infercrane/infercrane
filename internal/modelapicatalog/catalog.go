@@ -166,6 +166,24 @@ func PricingCurrentAt(pricing *Pricing, at time.Time) bool {
 	return err == nil && validUntil.After(at.UTC())
 }
 
+// PreferredOfferAt chooses the customer-facing service source deterministically.
+// Executable offers win only when access, observed availability, and pricing
+// are all current. When none are executable, the stable first offer is returned
+// for request-access discovery; callers must not route traffic to that fallback.
+func PreferredOfferAt(offers []Offer, at time.Time) (Offer, bool) {
+	if len(offers) == 0 {
+		return Offer{}, false
+	}
+	ordered := append([]Offer(nil), offers...)
+	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].ID < ordered[j].ID })
+	for _, offer := range ordered {
+		if offer.Access == "ready" && offer.Availability == "available" && PricingCurrentAt(offer.Pricing, at) {
+			return offer, true
+		}
+	}
+	return ordered[0], true
+}
+
 func (c Catalog) Find(id string) (Model, bool) {
 	for _, model := range c.Models {
 		if model.ID == id {
@@ -279,6 +297,7 @@ func builtins() []Model {
 		{"qwen3-30b-a3b", "Qwen3 30B A3B", "Qwen", "qwen", "Qwen3", "30B A3B", "Qwen/Qwen3-30B-A3B", []string{"chat", "reasoning", "tools"}, tools},
 		{"qwen3-32b", "Qwen3 32B", "Qwen", "qwen", "Qwen3", "32B", "Qwen/Qwen3-32B", []string{"chat", "reasoning", "tools"}, tools},
 		{"qwen3-235b-a22b", "Qwen3 235B A22B", "Qwen", "qwen", "Qwen3", "235B A22B", "Qwen/Qwen3-235B-A22B", []string{"chat", "reasoning", "tools"}, tools},
+		{"qwen3.6-27b", "Qwen3.6 27B", "Qwen", "qwen", "Qwen3.6", "27B", "Qwen/Qwen3.6-27B", []string{"chat", "reasoning", "vision", "tools"}, vision},
 		{"qwen3.8-27b", "Qwen3.8 27B", "Qwen", "qwen", "Qwen3.8", "27B", "Qwen/Qwen3.8-27B", []string{"coding", "reasoning", "tools"}, tools},
 		{"qwen3.8-flash-next", "Qwen3.8 Flash Next", "Qwen", "qwen", "Qwen3.8", "125B A6B", "Qwen/Qwen3.8-Flash-Next-FP8", []string{"chat", "coding", "vision", "tools"}, vision},
 		{"mistral-7b-instruct", "Mistral 7B Instruct", "Mistral AI", "mistral", "Mistral", "7B", "mistralai/Mistral-7B-Instruct-v0.3", []string{"chat", "tools"}, tools},
@@ -289,6 +308,7 @@ func builtins() []Model {
 		{"devstral-small", "Devstral Small", "Mistral AI", "mistral", "Devstral", "24B", "mistralai/Devstral-Small-2505", []string{"coding", "agents", "tools"}, tools},
 		{"deepseek-r1", "DeepSeek R1", "DeepSeek", "deepseek", "DeepSeek R1", "671B A37B", "deepseek-ai/DeepSeek-R1", []string{"reasoning", "coding"}, chat},
 		{"deepseek-v3", "DeepSeek V3", "DeepSeek", "deepseek", "DeepSeek V3", "671B A37B", "deepseek-ai/DeepSeek-V3", []string{"chat", "coding", "tools"}, tools},
+		{"deepseek-v4-flash", "DeepSeek V4 Flash", "DeepSeek", "deepseek", "DeepSeek V4", "304B", "deepseek-ai/DeepSeek-V4-Flash-0731", []string{"chat", "coding", "reasoning", "tools"}, tools},
 		{"deepseek-r1-distill-qwen-7b", "DeepSeek R1 Distill Qwen 7B", "DeepSeek", "deepseek", "DeepSeek R1 Distill", "7B", "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B", []string{"reasoning", "chat"}, chat},
 		{"deepseek-r1-distill-qwen-14b", "DeepSeek R1 Distill Qwen 14B", "DeepSeek", "deepseek", "DeepSeek R1 Distill", "14B", "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B", []string{"reasoning", "chat"}, chat},
 		{"deepseek-r1-distill-qwen-32b", "DeepSeek R1 Distill Qwen 32B", "DeepSeek", "deepseek", "DeepSeek R1 Distill", "32B", "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B", []string{"reasoning", "chat"}, chat},
@@ -309,6 +329,8 @@ func builtins() []Model {
 		{"granite-3.3-8b-instruct", "Granite 3.3 8B Instruct", "IBM", "ibm", "Granite 3.3", "8B", "ibm-granite/granite-3.3-8b-instruct", []string{"chat", "extraction", "summarization"}, chat},
 		{"glm-4.5-air", "GLM 4.5 Air", "Z.ai", "zai", "GLM 4.5", "106B A12B", "zai-org/GLM-4.5-Air", []string{"chat", "coding", "tools"}, tools},
 		{"glm-5.3-flash", "GLM 5.3 Flash", "Z.ai", "zai", "GLM 5.3", "321B A18B", "zai-org/GLM-5.3-Flash", []string{"chat", "coding", "vision", "tools"}, vision},
+		{"kimi-k3", "Kimi K3", "Moonshot AI", "moonshot", "Kimi K3", "2.8T", "moonshotai/Kimi-K3", []string{"chat", "coding", "reasoning", "vision", "tools"}, vision},
+		{"nemotron-3.5-lightning-30b", "Nemotron 3.5 Lightning 30B", "NVIDIA", "nvidia", "Nemotron 3.5", "30B A3B", "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4", []string{"chat", "reasoning", "tools"}, tools},
 		{"bge-m3", "BGE-M3", "BAAI", "baai", "BGE", "568M", "BAAI/bge-m3", []string{"embeddings", "retrieval", "rag"}, []string{"embeddings"}},
 		{"bge-large-en-v1.5", "BGE Large EN v1.5", "BAAI", "baai", "BGE", "335M", "BAAI/bge-large-en-v1.5", []string{"embeddings", "retrieval"}, []string{"embeddings"}},
 		{"e5-mistral-7b-instruct", "E5 Mistral 7B Instruct", "Microsoft", "microsoft", "E5", "7B", "intfloat/e5-mistral-7b-instruct", []string{"embeddings", "retrieval"}, []string{"embeddings"}},
@@ -321,13 +343,24 @@ func builtins() []Model {
 	// next instead of presenting an uncurated marketplace.
 	featured := map[string]bool{
 		"bge-m3":                       true,
+		"deepseek-r1":                  true,
 		"deepseek-r1-distill-qwen-32b": true,
+		"deepseek-v4-flash":            true,
 		"glm-5.3-flash":                true,
+		"kimi-k3":                      true,
 		"llama-3.1-8b-instruct":        true,
+		"llama-3.3-70b-instruct":       true,
 		"mistral-7b-instruct":          true,
+		"nemotron-3.5-lightning-30b":   true,
+		"qwen2.5-coder-32b-instruct":   true,
 		"qwen3-8b":                     true,
+		"qwen3-30b-a3b":                true,
+		"qwen3.6-27b":                  true,
 		"qwen3.8-27b":                  true,
 		"qwen3.8-flash-next":           true,
+		"gemma-3-27b-it":               true,
+		"devstral-small":               true,
+		"phi-4":                        true,
 	}
 	models := make([]Model, 0, len(featured))
 	for _, item := range seeds {

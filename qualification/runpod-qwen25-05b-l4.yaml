@@ -1,0 +1,26 @@
+apiVersion: infercrane.dev/v1
+kind: Deployment
+name: qwen25-05b-l4
+model:
+  id: Qwen/Qwen2.5-0.5B-Instruct
+  revision: 7ae557604adf67be50417f59c2c2f167def9a775
+runtime:
+  engine: vllm
+  version: 0.22.1
+  args:
+    - --enable-auto-tool-choice
+    - --tool-call-parser
+    - hermes
+compute:
+  mode: elastic
+provider:
+  cloud: runpod
+  adapter: runpod-pods
+resources:
+  gpu: L4
+  gpu_count: 1
+scaling:
+  min_replicas: 1
+  max_replicas: 1
+routing:
+  strategy: round-robin

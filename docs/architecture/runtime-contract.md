@@ -47,3 +47,25 @@ The portable contract persists argv rather than a shell fragment and standardize
 connection-generation draining, and a bounded shutdown-grace declaration. See [Custom OCI
 workloads](/features/custom-oci) and inspect the exact runtime/provider matrix with
 `infercrane integrations`.
+
+## Agent sandbox boundary
+
+InferCrane composes with execution sandboxes; it does not currently implement a multi-tenant
+untrusted-code runtime. The portable product contract records an external sandbox identity and
+revision, then issues a short-lived credential restricted to one inference endpoint. Commands,
+files, prompts, outputs, runtime credentials and snapshot contents remain with the sandbox owner.
+
+The runtime choice stays below this contract:
+
+- A managed microVM or hardened-sandbox service is the smallest credible early production path.
+- On customer Kubernetes, a `RuntimeClass` backed by gVisor or Kata Containers is a later
+  qualification target. The Kubernetes Agent Sandbox CRDs are a useful orchestration adapter, but
+  do not themselves provide the isolation boundary.
+- Direct Firecracker ownership is deferred because image construction, guest lifecycle, networking,
+  storage, patching and multi-tenant operations would create a second infrastructure product.
+- bVisor is an early implementation reference, not a production security dependency. InferCrane
+  will not treat acquisition, popularity or repository availability as security evidence.
+- A plain shared container is not an acceptable boundary for hostile customer code.
+
+Every real adapter still requires provider-specific qualification for egress policy, credential
+injection, resource exhaustion, cleanup, snapshot confidentiality and tenant escape resistance.

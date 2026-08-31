@@ -63,6 +63,18 @@ class ControlAPI:
         path = f"/model-api-catalog/{quote(id, safe='')}"
         return cast(dict[str, Any], self._transport.request("GET", path))
 
+    def list_compute_providers(self) -> ObjectList:
+        path = "/compute/providers"
+        return cast(ObjectList, self._transport.request("GET", path))
+
+    def list_g_p_u_prices(self) -> ObjectList:
+        path = "/catalog/gpu-prices"
+        return cast(ObjectList, self._transport.request("GET", path))
+
+    def list_public_g_p_u_prices(self) -> ObjectList:
+        path = "/public/catalog/gpu-prices"
+        return cast(ObjectList, self._transport.request("GET", path))
+
     def list_control_plane_instances(self) -> ObjectList:
         path = "/system/instances"
         return cast(ObjectList, self._transport.request("GET", path))
