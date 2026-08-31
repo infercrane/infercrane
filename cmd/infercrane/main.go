@@ -56,6 +56,7 @@ import (
 	"github.com/infercrane/infercrane/internal/planning"
 	"github.com/infercrane/infercrane/internal/pricing"
 	"github.com/infercrane/infercrane/internal/provision"
+	"github.com/infercrane/infercrane/internal/readiness"
 	"github.com/infercrane/infercrane/internal/reconcile"
 	"github.com/infercrane/infercrane/internal/requestquota"
 	"github.com/infercrane/infercrane/internal/router"
@@ -3915,7 +3916,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	if err := refreshContextPassports(ctx, s, contextPassports); err != nil {
 		return fmt.Errorf("load Context Passport snapshot: %w", err)
 	}
-	go runContextPassportRefresh(ctx, s, contextPassports, time.Second, slog.Default())
+	go runContextPassportRefresh(ctx, s, contextPassports, 10*time.Second, slog.Default())
 	backend := router.NewVLLM(cfg.RouterBinary, cfg.APIKey)
 	runtime := runtimeadapter.OpenAI{APIKey: cfg.APIKey}
 	runtimeBackends, err := bindRuntimeBackends(integrationRegistry, runtime)
@@ -4083,13 +4084,16 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	for kind, handler := range workflows.ReleaseGuardHandlers(s) {
 		handlers[kind] = handler
 	}
-	elasticProfile, err := integrationRegistry.Provider("skypilot")
-	if err != nil {
-		return fmt.Errorf("configure elastic integration: %w", err)
-	}
-	skyProvider := provision.SkyPilot{APIKey: cfg.APIKey}
 	capacity := provision.RunPodAvailability{APIKey: cfg.RunPodAPIKey}
-	elasticBackends := []workflows.ReplicaBackend{{Name: "skypilot", Cloud: "runpod", Runtime: "vllm", Default: true, Profile: elasticProfile, Provider: skyProvider, Capacity: capacity}}
+	elasticBackends := make([]workflows.ReplicaBackend, 0, 12)
+	if cfg.SkyPilotEnabled() {
+		elasticProfile, profileErr := integrationRegistry.Provider("skypilot")
+		if profileErr != nil {
+			return fmt.Errorf("configure elastic integration: %w", profileErr)
+		}
+		skyProvider := provision.SkyPilot{APIKey: cfg.APIKey}
+		elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: "skypilot", Cloud: "runpod", Runtime: "vllm", Default: true, Profile: elasticProfile, Provider: skyProvider, Capacity: capacity})
+	}
 	runPodPodsProfile, err := integrationRegistry.Provider("runpod-pods")
 	if err != nil {
 		return fmt.Errorf("configure native RunPod Pods integration: %w", err)
@@ -4097,10 +4101,10 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	runPodPods := provision.RunPodPods{APIKey: cfg.RunPodAPIKey, WorkerAPIKey: cfg.APIKey, BaseURL: cfg.RunPodRESTURL, ContainerDiskGiB: cfg.RunPodContainerDiskGiB, ArtifactCachePolicy: cfg.RunPodArtifactCachePolicy, NetworkVolumes: cfg.RunPodNetworkVolumes, HFTokenSecret: cfg.RunPodHFTokenSecret}
 	artifactCacheAdapters["runpod"] = runPodPods
 	for _, runtimeName := range []string{"vllm", "sglang", "custom-oci"} {
-		// SkyPilot remains the implicit vLLM default for compatibility. An
-		// explicit runpod-pods selection must nevertheless work for every runtime
-		// whose immutable workload satisfies the native Pod contract.
-		elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: "runpod-pods", Cloud: "runpod", Runtime: runtimeName, Default: runtimeName != "vllm", Profile: runPodPodsProfile, Provider: runPodPods, Capacity: capacity})
+		// SkyPilot remains the implicit vLLM default when enabled. When it is
+		// disabled, native RunPod Pods becomes the explicit default and no SkyPilot
+		// command can be reached by a persisted operation or observation loop.
+		elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: "runpod-pods", Cloud: "runpod", Runtime: runtimeName, Default: runtimeName != "vllm" || !cfg.SkyPilotEnabled(), Profile: runPodPodsProfile, Provider: runPodPods, Capacity: capacity})
 	}
 	if cfg.AWSEnabled() {
 		awsProfile, profileErr := integrationRegistry.Provider("aws-ec2")
@@ -4217,7 +4221,8 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	if err != nil {
 		return err
 	}
-	server := &http.Server{Addr: fmt.Sprintf("%s:%d", cfg.Host, cfg.Port), Handler: (&gateway.Gateway{Routes: directory, APIKey: cfg.APIKey, Authenticator: credentialCache, Recorder: recorder, Logger: logger, Client: client, Ready: s.Ping, Control: control, Telemetry: gatewayTelemetry, CapacityObservers: map[string]gateway.CapacityObserver{"runpod": serverless.ActiveWorkers}, ExternalAuthorizer: externalBudgets, ManagedBilling: s, RequestAuthorizer: requestQuotas, AdmissionAuthorizer: admissionPool, ContextPassports: contextPassports}).Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 1 << 20, TLSConfig: serverTLS}
+	databaseReadiness := &readiness.Gate{Probe: s.Ping, StaleAfter: 30 * time.Second}
+	server := &http.Server{Addr: fmt.Sprintf("%s:%d", cfg.Host, cfg.Port), Handler: (&gateway.Gateway{Routes: directory, APIKey: cfg.APIKey, Authenticator: credentialCache, Recorder: recorder, Logger: logger, Client: client, Ready: databaseReadiness.Check, Control: control, Telemetry: gatewayTelemetry, CapacityObservers: map[string]gateway.CapacityObserver{"runpod": serverless.ActiveWorkers}, ExternalAuthorizer: externalBudgets, ManagedBilling: s, RequestAuthorizer: requestQuotas, AdmissionAuthorizer: admissionPool, ContextPassports: contextPassports}).Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 1 << 20, TLSConfig: serverTLS}
 	go func() {
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
@@ -4350,23 +4355,60 @@ func refreshContextPassports(ctx context.Context, s *store.Store, directory *con
 
 func runContextPassportRefresh(ctx context.Context, s *store.Store, directory *contextpassport.Directory, interval time.Duration, logger *slog.Logger) {
 	if interval <= 0 {
-		interval = time.Second
+		interval = 10 * time.Second
 	}
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
+	delay := interval
+	failures := 0
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
-			refreshCtx, cancel := context.WithTimeout(ctx, interval)
+		case <-timer.C:
+			refreshTimeout := interval / 2
+			if refreshTimeout < time.Second {
+				refreshTimeout = time.Second
+			}
+			if refreshTimeout > 5*time.Second {
+				refreshTimeout = 5 * time.Second
+			}
+			refreshCtx, cancel := context.WithTimeout(ctx, refreshTimeout)
 			err := refreshContextPassports(refreshCtx, s, directory)
 			cancel()
 			if err != nil && ctx.Err() == nil {
-				logger.Error("Context Passport snapshot refresh failed", "error", err)
+				failures++
+				delay = contextPassportRefreshBackoff(interval, failures)
+				if failures == 1 || delay < time.Minute || failures%10 == 0 {
+					logger.Warn("Context Passport snapshot refresh deferred", "error", err, "next_retry", delay)
+				}
+			} else {
+				if failures > 0 {
+					logger.Info("Context Passport snapshot refresh recovered", "failures", failures)
+				}
+				failures = 0
+				delay = interval
 			}
+			timer.Reset(delay)
 		}
 	}
+}
+
+func contextPassportRefreshBackoff(interval time.Duration, failures int) time.Duration {
+	if interval <= 0 {
+		interval = 10 * time.Second
+	}
+	if failures < 1 {
+		return interval
+	}
+	delay := interval
+	for attempt := 1; attempt < failures && delay < time.Minute; attempt++ {
+		delay *= 2
+	}
+	if delay > time.Minute {
+		return time.Minute
+	}
+	return delay
 }
 func runAutoscaler(ctx context.Context, controller autoscale.Controller, interval time.Duration, logger *slog.Logger) {
 	ticker := time.NewTicker(interval)

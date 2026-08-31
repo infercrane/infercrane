@@ -43,5 +43,8 @@ kill_timeout = 35
 
 [[vm]]
   size = "shared-cpu-1x"
+  # Provider CLIs must not start resident helper servers in the hosted control
+  # plane. This budget is verified by staging after disabled adapters are kept
+  # outside the executable backend registry.
   memory = "1gb"
   processes = ["app"]

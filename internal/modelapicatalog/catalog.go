@@ -166,6 +166,24 @@ func PricingCurrentAt(pricing *Pricing, at time.Time) bool {
 	return err == nil && validUntil.After(at.UTC())
 }
 
+// PreferredOfferAt chooses the customer-facing service source deterministically.
+// Executable offers win only when access, observed availability, and pricing
+// are all current. When none are executable, the stable first offer is returned
+// for request-access discovery; callers must not route traffic to that fallback.
+func PreferredOfferAt(offers []Offer, at time.Time) (Offer, bool) {
+	if len(offers) == 0 {
+		return Offer{}, false
+	}
+	ordered := append([]Offer(nil), offers...)
+	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].ID < ordered[j].ID })
+	for _, offer := range ordered {
+		if offer.Access == "ready" && offer.Availability == "available" && PricingCurrentAt(offer.Pricing, at) {
+			return offer, true
+		}
+	}
+	return ordered[0], true
+}
+
 func (c Catalog) Find(id string) (Model, bool) {
 	for _, model := range c.Models {
 		if model.ID == id {

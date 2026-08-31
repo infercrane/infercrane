@@ -104,6 +104,39 @@ func TestRunPodHuggingFaceCredentialIsReferenceOnly(t *testing.T) {
 	}
 }
 
+func TestSkyPilotExecutionBoundary(t *testing.T) {
+	t.Setenv("INFERCRANE_API_KEY", "test-key")
+	t.Setenv("INFERCRANE_SKYPILOT_API", "disabled")
+	t.Setenv("RUNPOD_API_KEY", "runpod-key")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SkyPilotEnabled() {
+		t.Fatal("disabled SkyPilot was executable")
+	}
+
+	t.Setenv("INFERCRANE_SKYPILOT_API", "auto")
+	cfg, err = Load()
+	if err != nil || !cfg.SkyPilotEnabled() {
+		t.Fatalf("auto SkyPilot did not follow RunPod credentials: enabled=%v err=%v", cfg.SkyPilotEnabled(), err)
+	}
+
+	t.Setenv("INFERCRANE_SKYPILOT_API", "invalid")
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "INFERCRANE_SKYPILOT_API") {
+		t.Fatalf("invalid SkyPilot mode accepted: %v", err)
+	}
+}
+
+func TestSkyPilotEnabledRequiresRunPodCredentials(t *testing.T) {
+	t.Setenv("INFERCRANE_API_KEY", "test-key")
+	t.Setenv("INFERCRANE_SKYPILOT_API", "enabled")
+	t.Setenv("RUNPOD_API_KEY", "")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "RUNPOD_API_KEY") {
+		t.Fatalf("credential-less enabled SkyPilot accepted: %v", err)
+	}
+}
+
 func TestLoadRequiresAPIKey(t *testing.T) {
 	t.Setenv("INFERCRANE_API_KEY", "")
 	if _, err := Load(); err == nil {

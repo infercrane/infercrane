@@ -617,14 +617,15 @@ func (a API) modelAPIModel(w http.ResponseWriter, r *http.Request) {
 
 func modelAPIModelResponse(model modelapicatalog.Model) map[string]any {
 	offers := make([]map[string]any, 0, 1)
-	if offer, ok := preferredModelAPIOffer(model.Offers); ok {
+	now := time.Now().UTC()
+	if offer, ok := modelapicatalog.PreferredOfferAt(model.Offers, now); ok {
 		access := offer.Access
 		if access == "connect-provider" {
 			// Supplier procurement stays inside InferCrane. Model API customers
 			// request an InferCrane product and never connect its supplier.
 			access = "request-access"
 		}
-		pricingCurrent := modelapicatalog.PricingCurrentAt(offer.Pricing, time.Now())
+		pricingCurrent := modelapicatalog.PricingCurrentAt(offer.Pricing, now)
 		availability := offer.Availability
 		if offer.Pricing != nil && !pricingCurrent {
 			access = "request-access"
@@ -664,18 +665,6 @@ func customerQualification(qualification string) string {
 		return "reported"
 	}
 	return qualification
-}
-
-func preferredModelAPIOffer(offers []modelapicatalog.Offer) (modelapicatalog.Offer, bool) {
-	for _, offer := range offers {
-		if offer.Access == "ready" && offer.Availability == "available" && modelapicatalog.PricingCurrentAt(offer.Pricing, time.Now()) {
-			return offer, true
-		}
-	}
-	if len(offers) == 0 {
-		return modelapicatalog.Offer{}, false
-	}
-	return offers[0], true
 }
 
 func customerQualificationNote(qualification string) string {

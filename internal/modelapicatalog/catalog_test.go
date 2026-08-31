@@ -36,6 +36,28 @@ func TestPricingCurrentAtFailsClosed(t *testing.T) {
 	}
 }
 
+func TestPreferredOfferAtIsOrderIndependentAndFailClosed(t *testing.T) {
+	at := time.Date(2029, 12, 31, 23, 0, 0, 0, time.UTC)
+	current := &Pricing{ValidUntil: "2030-01-01T00:00:00Z"}
+	expired := &Pricing{ValidUntil: "2029-01-01T00:00:00Z"}
+	offers := []Offer{
+		{ID: "z-expired", Access: "ready", Availability: "available", Pricing: expired},
+		{ID: "b-ready", Access: "ready", Availability: "available", Pricing: current},
+		{ID: "a-request", Access: "request-access", Availability: "unknown"},
+	}
+	selected, ok := PreferredOfferAt(offers, at)
+	if !ok || selected.ID != "b-ready" {
+		t.Fatalf("expected executable offer, got %+v ok=%v", selected, ok)
+	}
+	selected, ok = PreferredOfferAt([]Offer{offers[2], offers[0]}, at)
+	if !ok || selected.ID != "a-request" {
+		t.Fatalf("expected deterministic discovery fallback, got %+v ok=%v", selected, ok)
+	}
+	if _, ok = PreferredOfferAt(nil, at); ok {
+		t.Fatal("empty offers must not produce a service")
+	}
+}
+
 func TestCatalogSearchAndCopyIsolation(t *testing.T) {
 	catalog := Default()
 	page := catalog.List(Filter{Query: "BGE", Capability: "embeddings", Limit: 100})
