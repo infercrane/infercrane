@@ -549,9 +549,13 @@ run_elastic() {
   elastic_max_replicas=${INFERCRANE_ACCEPTANCE_ELASTIC_MAX_REPLICAS:-2}
   case "$elastic_max_replicas" in 1|2) ;; *) echo "elastic max replicas must be 1 or 2" >&2; return 1;; esac
   ready_timeout=${INFERCRANE_ACCEPTANCE_READY_TIMEOUT_SECONDS:-2700}
-  record elastic-deploy ic deploy "$MODEL" --name "$ELASTIC_NAME" --cloud runpod --gpu "$GPU" \
-    --min 1 --max "$elastic_max_replicas" --wait --wait-timeout "${ready_timeout}s" \
-    --idempotency-key "$ELASTIC_NAME-create" --output json
+	if [ -n "$requested_spec" ]; then
+		record elastic-deploy submit_elastic_deploy "${ready_timeout}s" "$ELASTIC_NAME-create"
+	else
+		record elastic-deploy ic deploy "$MODEL" --name "$ELASTIC_NAME" --cloud runpod --gpu "$GPU" \
+			--min 1 --max "$elastic_max_replicas" --wait --wait-timeout "${ready_timeout}s" \
+			--idempotency-key "$ELASTIC_NAME-create" --output json
+	fi
   wait_ready "$ELASTIC_NAME"
   record elastic-buffered-request ic request "$ELASTIC_NAME" --message "acceptance probe" --output json
   record elastic-streaming-request ic request "$ELASTIC_NAME" --message "stream acceptance probe" --stream
