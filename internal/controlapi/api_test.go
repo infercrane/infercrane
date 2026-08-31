@@ -622,6 +622,40 @@ func TestComputeCatalogSeparatesPriceFromExecutionReadiness(t *testing.T) {
 	}
 }
 
+func TestPublicGPUPricesFilterAndPaginateWithoutDumpingCatalog(t *testing.T) {
+	now := time.Now().UTC()
+	handler := (API{
+		Store:  &fakeStore{},
+		APIKey: "secret",
+		GPUPrices: []GPUPriceObservation{
+			{Provider: "runpod", Region: "eu", GPU: "L40S", GPUCount: 1, Replicas: 1, Currency: "USD", HourlyUSD: 0.42, Source: "test", ObservedAt: now, ValidUntil: now.Add(time.Hour)},
+			{Provider: "lambda", Region: "us", GPU: "H100", GPUCount: 1, Replicas: 1, Currency: "USD", HourlyUSD: 2.49, Source: "test", ObservedAt: now, ValidUntil: now.Add(time.Hour)},
+			{Provider: "runpod", Region: "us", GPU: "H100", GPUCount: 1, Replicas: 1, Currency: "USD", HourlyUSD: 1.99, Source: "test", ObservedAt: now.Add(-2 * time.Hour), ValidUntil: now.Add(-time.Hour)},
+		},
+	}).Handler()
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/public/catalog/gpu-prices?q=h100&current=true&limit=1&offset=0&sort=hourly_usd", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	body := response.Body.String()
+	if response.Code != http.StatusOK || !strings.Contains(body, `"provider":"lambda"`) || strings.Contains(body, `"provider":"runpod"`) {
+		t.Fatalf("filtered catalog status=%d body=%s", response.Code, body)
+	}
+	if !strings.Contains(body, `"total":1`) || !strings.Contains(body, `"providers":1`) || !strings.Contains(body, `"has_more":false`) {
+		t.Fatalf("filtered catalog metadata missing: %s", body)
+	}
+	if response.Header().Get("Cache-Control") == "" || response.Header().Get("Last-Modified") == "" {
+		t.Fatalf("public cache evidence missing: %#v", response.Header())
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/public/catalog/gpu-prices?limit=101", nil)
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"invalid_query"`) {
+		t.Fatalf("invalid public limit status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestCloudDeploymentFailsClosedWithoutReadyCompute(t *testing.T) {
 	handler := (API{Store: &fakeStore{}, APIKey: "secret", ComputeProviders: []ComputeProvider{{ID: "runpod", Label: "RunPod", State: "connection-required"}}}).Handler()
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments", strings.NewReader(`{"name":"qwen","model":"Qwen/Qwen3-8B","cloud":"runpod","gpu":"L40S","min_replicas":1,"max_replicas":1}`))

@@ -4178,7 +4178,27 @@ func (a API) computeProviders(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"data": providers})
 }
 
-func (a API) gpuPrices(w http.ResponseWriter, _ *http.Request) {
+type gpuPriceRow struct {
+	Provider     string    `json:"provider"`
+	Region       string    `json:"region"`
+	GPU          string    `json:"gpu"`
+	GPUCount     int       `json:"gpu_count"`
+	Replicas     int       `json:"replicas"`
+	Currency     string    `json:"currency"`
+	HourlyUSD    float64   `json:"hourly_usd"`
+	Source       string    `json:"source"`
+	ObservedAt   time.Time `json:"observed_at"`
+	ValidUntil   time.Time `json:"valid_until"`
+	Current      bool      `json:"current"`
+	Availability string    `json:"availability"`
+}
+
+type gpuPriceFacet struct {
+	Value string `json:"value"`
+	Count int    `json:"count"`
+}
+
+func (a API) gpuPrices(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	prices := append([]GPUPriceObservation(nil), a.GPUPrices...)
 	if a.GPUPriceCatalog != nil {
@@ -4192,23 +4212,171 @@ func (a API) gpuPrices(w http.ResponseWriter, _ *http.Request) {
 			})
 		}
 	}
-	rows := make([]map[string]any, 0, len(prices))
+	rows := make([]gpuPriceRow, 0, len(prices))
 	for _, price := range prices {
-		rows = append(rows, map[string]any{
-			"provider": price.Provider, "region": price.Region, "gpu": price.GPU,
-			"gpu_count": price.GPUCount, "replicas": price.Replicas,
-			"currency": price.Currency, "hourly_usd": price.HourlyUSD,
-			"source": price.Source, "observed_at": price.ObservedAt,
-			"valid_until": price.ValidUntil, "current": price.ValidUntil.After(now),
-			"availability": "unknown",
+		rows = append(rows, gpuPriceRow{
+			Provider: price.Provider, Region: price.Region, GPU: price.GPU,
+			GPUCount: price.GPUCount, Replicas: price.Replicas,
+			Currency: price.Currency, HourlyUSD: price.HourlyUSD,
+			Source: price.Source, ObservedAt: price.ObservedAt,
+			ValidUntil: price.ValidUntil, Current: price.ValidUntil.After(now),
+			Availability: "unknown",
 		})
 	}
+
+	query := r.URL.Query()
+	search := strings.ToLower(strings.TrimSpace(query.Get("q")))
+	provider := strings.ToLower(strings.TrimSpace(query.Get("provider")))
+	gpu := strings.ToLower(strings.TrimSpace(query.Get("gpu")))
+	region := strings.ToLower(strings.TrimSpace(query.Get("region")))
+	currentFilter := strings.ToLower(strings.TrimSpace(query.Get("current")))
+	if currentFilter != "" && currentFilter != "true" && currentFilter != "false" {
+		writeError(w, http.StatusBadRequest, "invalid_query", "current must be true or false")
+		return
+	}
+
+	facetRows := make([]gpuPriceRow, 0, len(rows))
+	filtered := make([]gpuPriceRow, 0, len(rows))
+	for _, row := range rows {
+		if search != "" && !strings.Contains(strings.ToLower(row.Provider+" "+row.GPU+" "+row.Region), search) {
+			continue
+		}
+		if currentFilter == "true" && !row.Current {
+			continue
+		}
+		if currentFilter == "false" && row.Current {
+			continue
+		}
+		facetRows = append(facetRows, row)
+		if provider != "" && strings.ToLower(row.Provider) != provider {
+			continue
+		}
+		if gpu != "" && strings.ToLower(row.GPU) != gpu {
+			continue
+		}
+		if region != "" && strings.ToLower(row.Region) != region {
+			continue
+		}
+		filtered = append(filtered, row)
+	}
+	rows = filtered
+
+	sortField := strings.ToLower(strings.TrimSpace(query.Get("sort")))
+	if sortField == "" {
+		sortField = "hourly_usd"
+	}
+	if sortField != "hourly_usd" && sortField != "provider" && sortField != "gpu" && sortField != "observed_at" {
+		writeError(w, http.StatusBadRequest, "invalid_query", "sort must be hourly_usd, provider, gpu, or observed_at")
+		return
+	}
+	order := strings.ToLower(strings.TrimSpace(query.Get("order")))
+	if order == "" {
+		order = "asc"
+	}
+	if order != "asc" && order != "desc" {
+		writeError(w, http.StatusBadRequest, "invalid_query", "order must be asc or desc")
+		return
+	}
 	sort.SliceStable(rows, func(i, j int) bool {
-		return rows[i]["hourly_usd"].(float64) < rows[j]["hourly_usd"].(float64)
+		comparison := 0
+		switch sortField {
+		case "provider":
+			comparison = strings.Compare(strings.ToLower(rows[i].Provider), strings.ToLower(rows[j].Provider))
+		case "gpu":
+			comparison = strings.Compare(strings.ToLower(rows[i].GPU), strings.ToLower(rows[j].GPU))
+		case "observed_at":
+			comparison = rows[i].ObservedAt.Compare(rows[j].ObservedAt)
+		default:
+			if rows[i].HourlyUSD < rows[j].HourlyUSD {
+				comparison = -1
+			} else if rows[i].HourlyUSD > rows[j].HourlyUSD {
+				comparison = 1
+			}
+		}
+		if comparison == 0 {
+			comparison = strings.Compare(
+				strings.ToLower(rows[i].Provider+"\x00"+rows[i].Region+"\x00"+rows[i].GPU),
+				strings.ToLower(rows[j].Provider+"\x00"+rows[j].Region+"\x00"+rows[j].GPU),
+			)
+		}
+		if order == "desc" {
+			return comparison > 0
+		}
+		return comparison < 0
 	})
+
+	isPublic := strings.Contains(r.URL.Path, "/public/")
+	defaultLimit, maxLimit := len(rows), 5000
+	if isPublic {
+		defaultLimit, maxLimit = 40, 100
+	}
+	limit := defaultLimit
+	if raw := strings.TrimSpace(query.Get("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > maxLimit {
+			writeError(w, http.StatusBadRequest, "invalid_query", "limit must be between 1 and "+strconv.Itoa(maxLimit))
+			return
+		}
+		limit = parsed
+	}
+	offset := 0
+	if raw := strings.TrimSpace(query.Get("offset")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 0 {
+			writeError(w, http.StatusBadRequest, "invalid_query", "offset must be zero or greater")
+			return
+		}
+		offset = parsed
+	}
+	total := len(rows)
+	if offset > total {
+		offset = total
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+
+	providerCounts, gpuCounts := map[string]int{}, map[string]int{}
+	for _, row := range facetRows {
+		providerCounts[row.Provider]++
+		gpuCounts[row.GPU]++
+	}
+	matchedProviders, matchedGPUs := map[string]bool{}, map[string]bool{}
+	currentCount := 0
+	latestObservedAt := time.Time{}
+	for _, row := range rows {
+		matchedProviders[row.Provider] = true
+		matchedGPUs[row.GPU] = true
+		if row.Current {
+			currentCount++
+		}
+		if row.ObservedAt.After(latestObservedAt) {
+			latestObservedAt = row.ObservedAt
+		}
+	}
+	providers, gpus := make([]gpuPriceFacet, 0, len(providerCounts)), make([]gpuPriceFacet, 0, len(gpuCounts))
+	for value, count := range providerCounts {
+		providers = append(providers, gpuPriceFacet{Value: value, Count: count})
+	}
+	for value, count := range gpuCounts {
+		gpus = append(gpus, gpuPriceFacet{Value: value, Count: count})
+	}
+	sort.Slice(providers, func(i, j int) bool { return providers[i].Value < providers[j].Value })
+	sort.Slice(gpus, func(i, j int) bool { return gpus[i].Value < gpus[j].Value })
+
+	if isPublic {
+		w.Header().Set("Cache-Control", "public, max-age=60, stale-while-revalidate=300")
+	}
+	if !latestObservedAt.IsZero() {
+		w.Header().Set("Last-Modified", latestObservedAt.UTC().Format(http.TimeFormat))
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"data":       rows,
+		"data":       rows[offset:end],
 		"disclosure": "Prices are sourced observations. Current stock, account quota, and deployability are verified separately.",
+		"pagination": map[string]any{"limit": limit, "offset": offset, "total": total, "has_more": end < total},
+		"summary":    map[string]any{"providers": len(matchedProviders), "gpus": len(matchedGPUs), "current": currentCount, "latest_observed_at": latestObservedAt},
+		"facets":     map[string]any{"providers": providers, "gpus": gpus},
 	})
 }
 

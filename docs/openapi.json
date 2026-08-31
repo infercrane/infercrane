@@ -4517,6 +4517,105 @@
     "/api/v1/catalog/gpu-prices": {
       "get": {
         "operationId": "listGPUPrices",
+        "parameters": [
+          {
+            "description": "Case-insensitive search across provider, GPU, and region.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Exact provider filter.",
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Exact GPU model filter.",
+            "in": "query",
+            "name": "gpu",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Exact region filter.",
+            "in": "query",
+            "name": "region",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter observations by evidence freshness; this is not a stock claim.",
+            "in": "query",
+            "name": "current",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Sort field.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "hourly_usd",
+              "enum": [
+                "hourly_usd",
+                "provider",
+                "gpu",
+                "observed_at"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Sort direction.",
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "default": "asc",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Maximum observations returned.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "maximum": 5000,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Zero-based result offset.",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -9716,6 +9815,105 @@
     "/api/v1/public/catalog/gpu-prices": {
       "get": {
         "operationId": "listPublicGPUPrices",
+        "parameters": [
+          {
+            "description": "Case-insensitive search across provider, GPU, and region.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Exact provider filter.",
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Exact GPU model filter.",
+            "in": "query",
+            "name": "gpu",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Exact region filter.",
+            "in": "query",
+            "name": "region",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter observations by evidence freshness; this is not a stock claim.",
+            "in": "query",
+            "name": "current",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Sort field.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "hourly_usd",
+              "enum": [
+                "hourly_usd",
+                "provider",
+                "gpu",
+                "observed_at"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Sort direction.",
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "default": "asc",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Maximum observations returned.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Zero-based result offset.",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {

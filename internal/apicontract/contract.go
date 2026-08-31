@@ -198,6 +198,9 @@ func Document() (map[string]any, error) {
 			operation["security"] = []any{}
 		}
 		parameters := pathParameters(route.Path)
+		if route.Path == "/catalog/gpu-prices" || route.Path == "/public/catalog/gpu-prices" {
+			parameters = append(parameters, gpuPriceQueryParameters(route.Path == "/public/catalog/gpu-prices")...)
+		}
 		if route.Path == "/billing/webhooks/stripe" {
 			parameters = append(parameters, map[string]any{"name": "Stripe-Signature", "in": "header", "required": true, "description": "Stripe webhook HMAC signature; the request is unauthenticated by bearer token and grants balance only after verification.", "schema": map[string]any{"type": "string"}})
 		}
@@ -277,6 +280,24 @@ func pathParameters(path string) []map[string]any {
 		}
 	}
 	return parameters
+}
+
+func gpuPriceQueryParameters(public bool) []map[string]any {
+	maxLimit := 5000
+	if public {
+		maxLimit = 100
+	}
+	return []map[string]any{
+		{"name": "q", "in": "query", "required": false, "description": "Case-insensitive search across provider, GPU, and region.", "schema": map[string]any{"type": "string"}},
+		{"name": "provider", "in": "query", "required": false, "description": "Exact provider filter.", "schema": map[string]any{"type": "string"}},
+		{"name": "gpu", "in": "query", "required": false, "description": "Exact GPU model filter.", "schema": map[string]any{"type": "string"}},
+		{"name": "region", "in": "query", "required": false, "description": "Exact region filter.", "schema": map[string]any{"type": "string"}},
+		{"name": "current", "in": "query", "required": false, "description": "Filter observations by evidence freshness; this is not a stock claim.", "schema": map[string]any{"type": "boolean"}},
+		{"name": "sort", "in": "query", "required": false, "description": "Sort field.", "schema": map[string]any{"type": "string", "enum": []string{"hourly_usd", "provider", "gpu", "observed_at"}, "default": "hourly_usd"}},
+		{"name": "order", "in": "query", "required": false, "description": "Sort direction.", "schema": map[string]any{"type": "string", "enum": []string{"asc", "desc"}, "default": "asc"}},
+		{"name": "limit", "in": "query", "required": false, "description": "Maximum observations returned.", "schema": map[string]any{"type": "integer", "minimum": 1, "maximum": maxLimit}},
+		{"name": "offset", "in": "query", "required": false, "description": "Zero-based result offset.", "schema": map[string]any{"type": "integer", "minimum": 0, "default": 0}},
+	}
 }
 
 func ref(name string) map[string]any { return map[string]any{"$ref": "#/components/schemas/" + name} }
