@@ -40,6 +40,7 @@ import (
 	"github.com/infercrane/infercrane/internal/optimizer"
 	"github.com/infercrane/infercrane/internal/passport"
 	"github.com/infercrane/infercrane/internal/performanceprofile"
+	"github.com/infercrane/infercrane/internal/pricing"
 	"github.com/infercrane/infercrane/internal/qualityevidence"
 	"github.com/infercrane/infercrane/internal/recipe"
 	"github.com/infercrane/infercrane/internal/support"
@@ -291,6 +292,9 @@ type API struct {
 	ModelAPICatalog  modelapicatalog.Catalog
 	ComputeProviders []ComputeProvider
 	GPUPrices        []GPUPriceObservation
+	GPUPriceCatalog  interface {
+		Snapshot() map[pricing.Request]pricing.Estimate
+	}
 }
 
 // ComputeProvider is the customer-facing execution readiness for one cloud.
@@ -4176,8 +4180,20 @@ func (a API) computeProviders(w http.ResponseWriter, _ *http.Request) {
 
 func (a API) gpuPrices(w http.ResponseWriter, _ *http.Request) {
 	now := time.Now().UTC()
-	rows := make([]map[string]any, 0, len(a.GPUPrices))
-	for _, price := range a.GPUPrices {
+	prices := append([]GPUPriceObservation(nil), a.GPUPrices...)
+	if a.GPUPriceCatalog != nil {
+		prices = prices[:0]
+		for request, estimate := range a.GPUPriceCatalog.Snapshot() {
+			prices = append(prices, GPUPriceObservation{
+				Provider: request.Cloud, Region: request.Region, GPU: request.GPU,
+				GPUCount: request.GPUCount, Replicas: request.Replicas,
+				Currency: estimate.Currency, HourlyUSD: estimate.Hourly, Source: estimate.Source,
+				ObservedAt: estimate.ObservedAt, ValidUntil: estimate.ObservedAt.Add(estimate.StaleAfter),
+			})
+		}
+	}
+	rows := make([]map[string]any, 0, len(prices))
+	for _, price := range prices {
 		rows = append(rows, map[string]any{
 			"provider": price.Provider, "region": price.Region, "gpu": price.GPU,
 			"gpu_count": price.GPUCount, "replicas": price.Replicas,

@@ -54,6 +54,7 @@ import (
 	"github.com/infercrane/infercrane/internal/passport"
 	"github.com/infercrane/infercrane/internal/performanceprofile"
 	"github.com/infercrane/infercrane/internal/planning"
+	"github.com/infercrane/infercrane/internal/priceingest"
 	"github.com/infercrane/infercrane/internal/pricing"
 	"github.com/infercrane/infercrane/internal/provision"
 	"github.com/infercrane/infercrane/internal/readiness"
@@ -4053,14 +4054,25 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	if cfg.KubernetesEnabled() {
 		benchmarkBackends["kubernetes"] = controlapi.BackendMetadata{APIKey: cfg.APIKey, APIKeyEnv: "INFERCRANE_WORKER_API_KEY"}
 	}
-	priceCatalog := pricing.Catalog{Prices: map[pricing.Request]pricing.Estimate{}}
-	gpuPrices := make([]controlapi.GPUPriceObservation, 0, len(cfg.OptimizationPrices))
+	manualPrices := map[pricing.Request]pricing.Estimate{}
 	for _, row := range cfg.OptimizationPrices {
-		priceCatalog.Prices[pricing.Request{Cloud: row.Cloud, Region: row.Region, GPU: row.GPU, GPUCount: row.GPUCount, Replicas: row.Replicas}] = pricing.Estimate{Currency: row.Currency, Source: row.Source, Hourly: row.HourlyUSD, ObservedAt: row.ObservedAt, StaleAfter: row.ValidUntil.Sub(row.ObservedAt)}
-		gpuPrices = append(gpuPrices, controlapi.GPUPriceObservation{Provider: row.Cloud, Region: row.Region, GPU: row.GPU, GPUCount: row.GPUCount, Replicas: row.Replicas, Currency: row.Currency, HourlyUSD: row.HourlyUSD, Source: row.Source, ObservedAt: row.ObservedAt, ValidUntil: row.ValidUntil})
+		manualPrices[pricing.Request{Cloud: row.Cloud, Region: row.Region, GPU: row.GPU, GPUCount: row.GPUCount, Replicas: row.Replicas}] = pricing.Estimate{Currency: row.Currency, Source: row.Source, Hourly: row.HourlyUSD, ObservedAt: row.ObservedAt, StaleAfter: row.ValidUntil.Sub(row.ObservedAt)}
+	}
+	priceCatalog := pricing.NewDynamicCatalog(manualPrices)
+	if cfg.GPUPriceSyncInterval > 0 {
+		feed := priceingest.Feed{ValidFor: 2 * cfg.GPUPriceSyncInterval}
+		refreshCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		refreshErr := feed.Refresh(refreshCtx, priceCatalog)
+		cancel()
+		if refreshErr != nil {
+			logger.Warn("initial GPU price refresh was incomplete", "error", refreshErr)
+		}
+		go priceingest.Run(ctx, feed, priceCatalog, cfg.GPUPriceSyncInterval, func(err error) {
+			logger.Warn("scheduled GPU price refresh was incomplete", "error", err)
+		})
 	}
 	_, aiperfErr := exec.LookPath(cfg.AIPerfBinary)
-	optimizationExecutionEnabled := len(priceCatalog.Prices) > 0 && aiperfErr == nil
+	optimizationExecutionEnabled := len(priceCatalog.Snapshot()) > 0 && aiperfErr == nil
 	var optimizationCosts optimizationcampaign.CostAuthority
 	if optimizationExecutionEnabled {
 		optimizationCosts = optimizationcampaign.PricingAuthority{Provider: priceCatalog}
@@ -4084,7 +4096,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		{ID: "gcp", Label: "Google Cloud", Mode: "BYOC", State: readinessState(cfg.GCPEnabled()), Reason: readinessReason(cfg.GCPEnabled(), "GCP project and workload identity are not configured")},
 		{ID: "kubernetes", Label: "Kubernetes", Mode: "BYOC", State: readinessState(cfg.KubernetesEnabled()), Reason: readinessReason(cfg.KubernetesEnabled(), "Kubernetes context is not configured")},
 	}
-	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool, OptimizationCosts: optimizationCosts, ModelAPICatalog: modelAPICatalog, ComputeProviders: computeProviders, GPUPrices: gpuPrices}
+	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool, OptimizationCosts: optimizationCosts, ModelAPICatalog: modelAPICatalog, ComputeProviders: computeProviders, GPUPriceCatalog: priceCatalog}
 	if cfg.StripeEnabled() {
 		stripeBilling, stripeErr := managedbilling.NewStripe(cfg.StripeSecretKey, cfg.StripeWebhookSecret, cfg.StripeBillingReturnURL, cfg.StripePriceIDs, cfg.StripeLivemode)
 		if stripeErr != nil {

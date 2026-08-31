@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadOptimizationPricesRequiresExactSourcedEvidence(t *testing.T) {
@@ -74,6 +75,19 @@ func TestRunPodContainerDiskIsBounded(t *testing.T) {
 	t.Setenv("INFERCRANE_RUNPOD_CONTAINER_DISK_GIB", "49")
 	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "RUNPOD_CONTAINER_DISK_GIB") {
 		t.Fatalf("undersized RunPod disk accepted: %v", err)
+	}
+}
+
+func TestGPUPriceSyncIntervalIsBounded(t *testing.T) {
+	t.Setenv("INFERCRANE_API_KEY", "secret")
+	t.Setenv("INFERCRANE_GPU_PRICE_SYNC_SECONDS", "3600")
+	cfg, err := Load()
+	if err != nil || cfg.GPUPriceSyncInterval != time.Hour {
+		t.Fatalf("cfg=%#v err=%v", cfg, err)
+	}
+	t.Setenv("INFERCRANE_GPU_PRICE_SYNC_SECONDS", "60")
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "GPU_PRICE_SYNC") {
+		t.Fatalf("unsafe price refresh interval accepted: %v", err)
 	}
 }
 
