@@ -585,6 +585,55 @@ func TestModelAPICatalogDoesNotPublishExpiredRateCard(t *testing.T) {
 	}
 }
 
+func TestComputeCatalogSeparatesPriceFromExecutionReadiness(t *testing.T) {
+	now := time.Now().UTC()
+	handler := (API{
+		Store:  &fakeStore{},
+		APIKey: "secret",
+		ComputeProviders: []ComputeProvider{
+			{ID: "runpod", Label: "RunPod", Mode: "control-plane", State: "connection-required", Reason: "RUNPOD_API_KEY is not configured"},
+		},
+		GPUPrices: []GPUPriceObservation{
+			{Provider: "runpod", Region: "eu", GPU: "L40S", GPUCount: 1, Replicas: 1, Currency: "USD", HourlyUSD: 0.42, Source: "test catalog", ObservedAt: now.Add(-time.Hour), ValidUntil: now.Add(time.Hour)},
+		},
+	}).Handler()
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/catalog/gpu-prices", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"hourly_usd":0.42`) || !strings.Contains(response.Body.String(), `"availability":"unknown"`) || !strings.Contains(response.Body.String(), `"current":true`) {
+		t.Fatalf("price catalog status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/public/catalog/gpu-prices", nil)
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"hourly_usd":0.42`) {
+		t.Fatalf("public price catalog status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/compute/providers", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"state":"connection-required"`) {
+		t.Fatalf("compute readiness status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestCloudDeploymentFailsClosedWithoutReadyCompute(t *testing.T) {
+	handler := (API{Store: &fakeStore{}, APIKey: "secret", ComputeProviders: []ComputeProvider{{ID: "runpod", Label: "RunPod", State: "connection-required"}}}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments", strings.NewReader(`{"name":"qwen","model":"Qwen/Qwen3-8B","cloud":"runpod","gpu":"L40S","min_replicas":1,"max_replicas":1}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Idempotency-Key", "test-compute-readiness")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), `"code":"compute_connection_required"`) {
+		t.Fatalf("deployment status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestCustomerWalletBindingResponseRedactsSupplierAndCostBasis(t *testing.T) {
 	response := bindingResponse(domain.BackendBinding{
 		ID: "binding", TenantID: "tenant", EndpointID: "endpoint", Name: "runpod-primary", Kind: "external", OwnershipMode: "traffic-managed", TargetID: "private-target",
