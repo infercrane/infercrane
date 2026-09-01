@@ -155,3 +155,16 @@ func TestAzureRetailQueryIsStableAndOfficial(t *testing.T) {
 		}
 	}
 }
+
+func TestAzurePaginationAcceptsExplicitDefaultPortOnly(t *testing.T) {
+	endpoint, _ := url.Parse("https://prices.azure.com/api/retail/prices")
+	defaultPort, _ := url.Parse("https://prices.azure.com:443/api/retail/prices?$skip=1000")
+	wrongPort, _ := url.Parse("https://prices.azure.com:444/api/retail/prices?$skip=1000")
+	foreignHost, _ := url.Parse("https://example.com:443/api/retail/prices?$skip=1000")
+	if !sameAzureOrigin(endpoint, defaultPort) {
+		t.Fatal("Azure's explicit HTTPS default port was rejected")
+	}
+	if sameAzureOrigin(endpoint, wrongPort) || sameAzureOrigin(endpoint, foreignHost) {
+		t.Fatal("untrusted Azure pagination origin was accepted")
+	}
+}
