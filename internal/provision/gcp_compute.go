@@ -30,6 +30,8 @@ type GCPCompute struct {
 	ArtifactDisks                                                                                      map[string]string
 }
 
+var _ LaunchProber = GCPCompute{}
+
 type gcpInstance struct {
 	Name, Status      string
 	NetworkInterfaces []struct {
@@ -45,6 +47,93 @@ type gcpDisk struct {
 	Zone        string `json:"zone"`
 	Description string `json:"description"`
 	Type        string `json:"type"`
+}
+
+type gcpGPUQuotaEvidence struct {
+	State, Scope string
+}
+
+// ProbeLaunch performs an exact, read-only preflight against the configured
+// native GCP placement. Accelerator catalog support and quota headroom are not
+// stock signals, so positive observations deliberately leave availability and
+// deployability unknown. A configuration mismatch, unsupported exact-zone
+// resource, or exhausted observed quota can still prove that a launch cannot
+// currently succeed.
+func (g GCPCompute) ProbeLaunch(ctx context.Context, request LaunchProbeRequest) (LaunchProbeEvidence, error) {
+	now := time.Now().UTC()
+	count := request.GPUCount
+	if count < 1 {
+		count = 1
+	}
+	region := strings.TrimSpace(g.Zone)
+	if region == "" {
+		region = strings.TrimSpace(request.Region)
+	}
+	evidence := LaunchProbeEvidence{
+		Provider: "gcp", Region: region, GPU: request.GPU, GPUCount: count,
+		ConnectionState: "configured", AvailabilityState: "unknown", QuotaState: "unknown", Deployability: "unknown",
+		Source: "gcp.compute.exact-zone-preflight", ObservedAt: now, ExpiresAt: now.Add(30 * time.Second),
+		Message: "Exact-zone support and GPU quota are checked read-only; current stock remains unknown until launch",
+		Limitations: []string{
+			"accelerator catalog support is not current stock",
+			"support evidence applies only to the configured GCP zone",
+			"GPU quota headroom does not cover every Compute Engine quota",
+			"read-only preflight does not reserve capacity",
+		},
+	}
+	configuredRegion, validZone := gcpRegionFromZone(g.Zone)
+	if !validZone || g.Project == "" || g.MachineType == "" || g.GPUType == "" {
+		return evidence, errors.New("GCP exact-zone launch probe is not fully configured")
+	}
+	if request.Provider != "" && !strings.EqualFold(strings.TrimSpace(request.Provider), "gcp") {
+		evidence.Deployability = "unavailable"
+		evidence.Message = "Requested provider does not match the configured native GCP placement"
+		return evidence, nil
+	}
+	if request.Region != "" && !strings.EqualFold(strings.TrimSpace(request.Region), g.Zone) && !strings.EqualFold(strings.TrimSpace(request.Region), configuredRegion) {
+		evidence.Deployability = "unavailable"
+		evidence.Message = "Requested region does not match the configured native GCP zone"
+		return evidence, nil
+	}
+	if strings.TrimSpace(request.GPU) != g.GPUType {
+		evidence.Deployability = "unavailable"
+		evidence.Message = "Requested GPU does not match the configured native GCP machine"
+		return evidence, nil
+	}
+	if _, err := g.run(ctx, "auth", "print-access-token", "--quiet"); err != nil {
+		return evidence, fmt.Errorf("authenticate GCP launch probe: %w", err)
+	}
+	checks := []struct {
+		kind string
+		args []string
+	}{
+		{kind: "machine type", args: []string{"compute", "machine-types", "describe", g.MachineType, "--zone", g.Zone, "--project", g.Project, "--format", "value(name)"}},
+		{kind: "accelerator type", args: []string{"compute", "accelerator-types", "describe", g.GPUType, "--zone", g.Zone, "--project", g.Project, "--format", "value(name)"}},
+	}
+	for _, check := range checks {
+		if _, err := g.run(ctx, check.args...); err != nil {
+			if errors.Is(err, errGCPResourceNotFound) {
+				if check.kind == "accelerator type" {
+					evidence.AvailabilityState = "unavailable"
+				}
+				evidence.Deployability = "unavailable"
+				evidence.Message = "Configured " + check.kind + " is not offered in the exact GCP zone"
+				return evidence, nil
+			}
+			return evidence, fmt.Errorf("verify exact-zone GCP %s: %w", check.kind, err)
+		}
+	}
+	quota := g.observeGPUQuota(ctx, count)
+	evidence.QuotaState = quota.State
+	if quota.State == "unavailable" {
+		evidence.Deployability = "unavailable"
+		evidence.Message = fmt.Sprintf("Observed %s GCP GPU quota cannot satisfy %d accelerator(s)", quota.Scope, count)
+	} else if quota.State == "available" {
+		evidence.Message = "Exact-zone resources are catalog-supported and observed GPU quotas have headroom; current stock and overall deployability remain unknown"
+	} else {
+		evidence.Message = "Exact-zone resources are catalog-supported, but GPU quota or current stock could not be proven"
+	}
+	return evidence, nil
 }
 
 // Check performs a read-only identity and Compute API probe. It deliberately
@@ -436,7 +525,7 @@ func (g GCPCompute) run(ctx context.Context, args ...string) ([]byte, error) {
 }
 
 func gcpNotFoundProbe(args []string) bool {
-	return len(args) >= 3 && args[0] == "compute" && ((args[1] == "instances" && (args[2] == "describe" || args[2] == "delete")) || (args[1] == "disks" && args[2] == "describe"))
+	return len(args) >= 3 && args[0] == "compute" && ((args[1] == "instances" && (args[2] == "describe" || args[2] == "delete")) || (args[1] == "disks" && args[2] == "describe") || (args[1] == "machine-types" && args[2] == "describe") || (args[1] == "accelerator-types" && args[2] == "describe"))
 }
 
 // normalizeGCPAPIError retains only the provider error class and bounded
@@ -461,17 +550,25 @@ func normalizeGCPAPIError(output []byte) error {
 }
 
 func (g GCPCompute) checkGPUQuota(ctx context.Context, count int) error {
+	evidence := g.observeGPUQuota(ctx, count)
+	if evidence.State == "unavailable" {
+		return fmt.Errorf("%w: GCP %s GPU quota has less than %d accelerator(s) available for the requested placement", ErrProviderQuota, evidence.Scope, count)
+	}
+	return nil
+}
+
+func (g GCPCompute) observeGPUQuota(ctx context.Context, count int) gcpGPUQuotaEvidence {
 	if count < 1 {
 		count = 1
 	}
 	region, ok := gcpRegionFromZone(g.Zone)
 	if !ok {
-		return nil
+		return gcpGPUQuotaEvidence{State: "unknown"}
 	}
 	type quota struct {
-		Metric string  `json:"metric"`
-		Limit  float64 `json:"limit"`
-		Usage  float64 `json:"usage"`
+		Metric string   `json:"metric"`
+		Limit  *float64 `json:"limit"`
+		Usage  *float64 `json:"usage"`
 	}
 	checks := []struct {
 		args    []string
@@ -481,30 +578,45 @@ func (g GCPCompute) checkGPUQuota(ctx context.Context, count int) error {
 		{args: []string{"compute", "regions", "describe", region, "--project", g.Project, "--format", "json(quotas)"}, metrics: gcpRegionalGPUQuotaMetrics(g.GPUType), scope: "regional"},
 		{args: []string{"compute", "project-info", "describe", "--project", g.Project, "--format", "json(quotas)"}, metrics: map[string]struct{}{"GPUS_ALL_REGIONS": {}}, scope: "global"},
 	}
+	complete := true
 	for _, check := range checks {
 		output, err := g.run(ctx, check.args...)
 		if err != nil {
 			// Quota APIs and metric names vary across projects and GPU families.
 			// An unavailable signal remains unknown; the create call retains its
 			// typed quota classification instead of fabricating a preflight result.
+			complete = false
 			continue
 		}
 		var response struct {
 			Quotas []quota `json:"quotas"`
 		}
 		if json.Unmarshal(output, &response) != nil {
+			complete = false
 			continue
 		}
+		observed := false
 		for _, quota := range response.Quotas {
 			if _, relevant := check.metrics[strings.ToUpper(quota.Metric)]; !relevant {
 				continue
 			}
-			if quota.Limit-quota.Usage < float64(count) {
-				return fmt.Errorf("%w: GCP %s GPU quota has less than %d accelerator(s) available for the requested placement", ErrProviderQuota, check.scope, count)
+			if quota.Limit == nil || quota.Usage == nil {
+				complete = false
+				continue
+			}
+			observed = true
+			if *quota.Limit-*quota.Usage < float64(count) {
+				return gcpGPUQuotaEvidence{State: "unavailable", Scope: check.scope}
 			}
 		}
+		if !observed {
+			complete = false
+		}
 	}
-	return nil
+	if complete {
+		return gcpGPUQuotaEvidence{State: "available"}
+	}
+	return gcpGPUQuotaEvidence{State: "unknown"}
 }
 
 func gcpRegionalGPUQuotaMetrics(gpuType string) map[string]struct{} {

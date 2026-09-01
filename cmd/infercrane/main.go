@@ -4185,8 +4185,15 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 			computeProviders = append(computeProviders, controlapi.ComputeProvider{ID: manifest.Cloud, Label: label, Mode: "SkyPilot", State: "ready"})
 		}
 	}
+	var gcpProvider provision.GCPCompute
+	if cfg.GCPEnabled() {
+		gcpProvider = provision.GCPCompute{Project: cfg.GCPProject, Zone: cfg.GCPZone, Subnet: cfg.GCPSubnet, MachineType: cfg.GCPMachineType, GPUType: cfg.GCPGPU, ServiceAccount: cfg.GCPServiceAccount, VMImage: cfg.GCPVMImage, ContainerImage: cfg.GCPContainerImage, WorkerSecret: cfg.GCPWorkerSecret, BootDiskGiB: cfg.GCPBootDiskGiB, ArtifactCachePolicy: cfg.GCPArtifactCachePolicy, ArtifactDisks: cfg.GCPArtifactDisks}
+	}
 	launchProbers := map[string]provision.LaunchProber{
 		"runpod": provision.RunPodAvailability{APIKey: cfg.RunPodAPIKey},
+	}
+	if cfg.GCPEnabled() {
+		launchProbers["gcp"] = gcpProvider
 	}
 	defaultProviderAdapters := make(map[string]string, len(configuredSkyPilotProviders))
 	for _, manifest := range configuredSkyPilotProviders {
@@ -4281,7 +4288,6 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		if profileErr != nil {
 			return fmt.Errorf("configure GCP integration: %w", profileErr)
 		}
-		gcpProvider := provision.GCPCompute{Project: cfg.GCPProject, Zone: cfg.GCPZone, Subnet: cfg.GCPSubnet, MachineType: cfg.GCPMachineType, GPUType: cfg.GCPGPU, ServiceAccount: cfg.GCPServiceAccount, VMImage: cfg.GCPVMImage, ContainerImage: cfg.GCPContainerImage, WorkerSecret: cfg.GCPWorkerSecret, BootDiskGiB: cfg.GCPBootDiskGiB, ArtifactCachePolicy: cfg.GCPArtifactCachePolicy, ArtifactDisks: cfg.GCPArtifactDisks}
 		artifactCacheAdapters["gcp"] = gcpProvider
 		for _, runtimeName := range []string{"vllm", "sglang", "custom-oci"} {
 			elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: "gcp-compute", Cloud: "gcp", Runtime: runtimeName, Default: true, Profile: gcpProfile, Provider: gcpProvider})
