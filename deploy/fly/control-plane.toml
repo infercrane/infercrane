@@ -17,9 +17,10 @@ kill_timeout = 35
   INFERCRANE_HOST = "0.0.0.0"
   INFERCRANE_PORT = "8080"
   INFERCRANE_HOSTED_AUTH_AUTO_PROVISION = "true"
-  # SkyPilot starts a local API process. Keep the provider list credential-gated
-  # and give the machine enough memory for the control plane plus that process.
-  INFERCRANE_SKYPILOT_API = "auto"
+  # Native provider adapters are the production default. SkyPilot remains an
+  # explicit manifest-driven long-tail execution option; it is not a pricing
+  # source and is not started merely because a RunPod credential exists.
+  INFERCRANE_SKYPILOT_API = "disabled"
   SKYPILOT_DISABLE_USAGE_COLLECTION = "1"
   # Provider-native price feeds rotate exact marketplace shards while staying
   # below provider request budgets. This is observation, not capacity polling.
@@ -49,7 +50,6 @@ kill_timeout = 35
 
 [[vm]]
   size = "shared-cpu-1x"
-  # SkyPilot recommends at least 2 GiB for its local API server. The production
-  # readiness check is not considered healthy until both processes have started.
+  # Leave headroom for reconciliation, pricing ingestion, and API traffic.
   memory = "2gb"
   processes = ["app"]

@@ -37,10 +37,11 @@ if [ "${1:-}" != "infercrane" ] || [ "${2:-}" != "serve" ]; then
 fi
 
 skypilot_mode=${INFERCRANE_SKYPILOT_API:-auto}
+skypilot_providers=${INFERCRANE_SKYPILOT_PROVIDERS_JSON:-}
 case "$skypilot_mode" in
-  auto) [ -n "${RUNPOD_API_KEY:-}" ] || exec "$@" ;;
-  enabled) [ -n "${RUNPOD_API_KEY:-}" ] || {
-    echo "INFERCRANE_SKYPILOT_API=enabled requires a RunPod API key" >&2
+  auto) [ -n "$skypilot_providers" ] || exec "$@" ;;
+  enabled) [ -n "$skypilot_providers" ] || {
+    echo "INFERCRANE_SKYPILOT_API=enabled requires INFERCRANE_SKYPILOT_PROVIDERS_JSON" >&2
     exit 1
   } ;;
   disabled) exec "$@" ;;
@@ -49,6 +50,7 @@ case "$skypilot_mode" in
     exit 1
     ;;
 esac
+unset skypilot_providers
 
 sky api start --host 127.0.0.1 --foreground &
 sky_pid=$!

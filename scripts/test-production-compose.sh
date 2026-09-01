@@ -81,9 +81,12 @@ INFERCRANE_POSTGRES_PASSWORD=test-only-postgres-password \
 RUNPOD_KEY_FILE="$fixture_key" \
   docker compose -f "$compose_file" -f "$runpod_compose_file" config >"$runpod_rendered"
 
-grep -q 'INFERCRANE_SKYPILOT_API: enabled' "$runpod_rendered"
+grep -q 'INFERCRANE_SKYPILOT_API: disabled' "$runpod_rendered"
 grep -q 'target: /run/secrets/runpod-api-key' "$runpod_rendered"
-grep -q 'source: skypilot-state' "$runpod_rendered"
+if grep -q 'source: skypilot-state' "$runpod_rendered"; then
+  echo 'native RunPod production overlay unexpectedly persists SkyPilot state' >&2
+  exit 1
+fi
 grep -q 'source: runpod-state' "$runpod_rendered"
 if grep -Eq 'fake-vllm|fake-router|runpod-fault-proxy|infercrane-runpod-acceptance-key' "$runpod_rendered"; then
   echo 'RunPod production overlay includes a development or acceptance-only component' >&2

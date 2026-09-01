@@ -453,16 +453,10 @@ func load(requireAPIKey bool) (Config, error) {
 		ShutdownTimeout: time.Duration(shutdownSeconds) * time.Second, RequestRetention: time.Duration(retentionHours) * time.Hour,
 		GPUPriceSyncInterval: time.Duration(gpuPriceSyncSeconds) * time.Second,
 	}
-	// Preserve the existing RunPod default while moving the execution boundary
-	// to provider-neutral manifests. Other clouds must be declared explicitly.
-	if len(config.SkyPilotProviders) == 0 && config.RunPodAPIKey != "" {
-		config.SkyPilotProviders = []SkyPilotProvider{{
-			Cloud:         "runpod",
-			Label:         "RunPod",
-			Runtimes:      []string{"vllm", "sglang", "custom-oci"},
-			CredentialEnv: []string{"RUNPOD_API_KEY"},
-		}}
-	}
+	// SkyPilot is an explicit long-tail execution boundary. A RunPod API key by
+	// itself selects the native RunPod adapter and must not silently opt the
+	// control plane into SkyPilot's independently refreshed provider catalogs.
+	// Operators enable SkyPilot only by declaring provider manifests.
 	if config.Port < 1 || config.Port > 65535 {
 		return Config{}, fmt.Errorf("INFERCRANE_PORT must be between 1 and 65535")
 	}

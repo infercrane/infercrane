@@ -39,8 +39,10 @@
 ## Provisioning
 
 The durable workflow resolves a registered provider backend by cloud, runtime, and persisted adapter
-identity. RunPod elastic delegates to SkyPilot. AWS EC2 delegates API compatibility and STS to AWS
-CLI v2 while InferCrane retains idempotency, adoption, private-network, tag, and deletion policy.
+identity. RunPod elastic uses the native Pods adapter by default. Explicit SkyPilot manifests may
+add long-tail execution targets, but do not supply InferCrane's price authority. AWS EC2 delegates
+API compatibility and STS to AWS CLI v2 while InferCrane retains idempotency, adoption,
+private-network, tag, and deletion policy.
 Both return a target that follows the same runtime and reconciliation path as an existing worker.
 
 ## Governed external fallback
