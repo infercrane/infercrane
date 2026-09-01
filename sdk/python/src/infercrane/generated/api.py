@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any, Protocol, cast
 from urllib.parse import quote
 
-from .models import DeploymentList, DeploymentOperationEnvelope, DeploymentView, ObjectList, OperationData, OperationEnvelope
+from .models import DeploymentList, DeploymentOperationEnvelope, DeploymentView, IntentPlanEnvelope, ObjectList, OperationData, OperationEnvelope
 
 
 class Transport(Protocol):
@@ -55,9 +55,9 @@ class ControlAPI:
         path = f"/catalog/models/{quote(name, safe='')}"
         return cast(dict[str, Any], self._transport.request("GET", path))
 
-    def plan_intent(self, *, body: dict[str, Any]) -> dict[str, Any]:
+    def plan_intent(self, *, body: dict[str, Any]) -> IntentPlanEnvelope:
         path = "/planning/intents"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        return cast(IntentPlanEnvelope, self._transport.request("POST", path, body=body))
 
     def list_model_a_p_i_catalog(self) -> ObjectList:
         path = "/model-api-catalog"

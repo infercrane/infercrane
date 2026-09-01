@@ -6,6 +6,7 @@ package intentplan
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"sort"
 	"strings"
@@ -16,6 +17,9 @@ import (
 	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/pricing"
 	"github.com/infercrane/infercrane/internal/provideridentity"
+	"github.com/infercrane/infercrane/internal/runtimecontract"
+	"github.com/infercrane/infercrane/internal/servingcontract"
+	"github.com/infercrane/infercrane/internal/workflows"
 )
 
 const SchemaVersion = "infercrane.intent-plan/v1"
@@ -142,18 +146,77 @@ type Architecture struct {
 	Edges []Edge `json:"edges"`
 }
 
+// DeploymentDraft contains only the public CloudRequest fields accepted by the
+// deployment creation endpoint. It is validated through CloudRequest.Validate
+// before it is returned, but validating a draft never mutates the draft itself.
+type DeploymentDraft struct {
+	Name            string                    `json:"name"`
+	EndpointName    string                    `json:"endpoint_name,omitempty"`
+	Model           string                    `json:"model"`
+	Runtime         string                    `json:"runtime,omitempty"`
+	Cloud           string                    `json:"cloud"`
+	ProviderAdapter string                    `json:"provider_adapter,omitempty"`
+	ComputeMode     string                    `json:"compute_mode,omitempty"`
+	GPU             string                    `json:"gpu"`
+	GPUCount        int                       `json:"gpu_count,omitempty"`
+	Region          string                    `json:"region,omitempty"`
+	RuntimeVersion  string                    `json:"runtime_version,omitempty"`
+	ModelRevision   string                    `json:"model_revision,omitempty"`
+	RuntimeArgs     []string                  `json:"runtime_args,omitempty"`
+	Port            int                       `json:"port,omitempty"`
+	MinReplicas     int                       `json:"min_replicas,omitempty"`
+	MaxReplicas     int                       `json:"max_replicas,omitempty"`
+	Workload        *runtimecontract.Workload `json:"workload,omitempty"`
+	Serving         *servingcontract.Topology `json:"serving,omitempty"`
+}
+
+func (d DeploymentDraft) CloudRequest() workflows.CloudRequest {
+	request := workflows.CloudRequest{
+		Name: d.Name, EndpointName: d.EndpointName, Model: d.Model, Runtime: d.Runtime,
+		Cloud: d.Cloud, ProviderAdapter: d.ProviderAdapter, ComputeMode: d.ComputeMode,
+		GPU: d.GPU, GPUCount: d.GPUCount, Region: d.Region, RuntimeVersion: d.RuntimeVersion,
+		ModelRevision: d.ModelRevision, RuntimeArgs: append([]string(nil), d.RuntimeArgs...),
+		Port: d.Port, MinReplicas: d.MinReplicas, MaxReplicas: d.MaxReplicas,
+	}
+	if d.Workload != nil {
+		request.Workload = *d.Workload
+		request.Workload.Command = append([]string(nil), d.Workload.Command...)
+	}
+	if d.Serving != nil {
+		request.Serving = *d.Serving
+	}
+	return request
+}
+
+// Validate uses the same validation and defaulting path as POST /deployments on
+// a copy so callers can inspect or revalidate a plan without changing it.
+func (d DeploymentDraft) Validate() error {
+	request := d.CloudRequest()
+	return request.Validate()
+}
+
+type Envelope struct {
+	Plan              Plan             `json:"plan"`
+	DeploymentDraft   *DeploymentDraft `json:"deployment_draft,omitempty"`
+	ProviderMutation  bool             `json:"provider_mutation"`
+	CapacityReserved  bool             `json:"capacity_reserved"`
+	PerformanceClaims bool             `json:"performance_claims"`
+	SelectionBoundary string           `json:"selection_boundary"`
+}
+
 type Plan struct {
-	SchemaVersion  string          `json:"schema_version"`
-	Status         string          `json:"status"`
-	Mutation       string          `json:"mutation"`
-	Interpretation Interpretation  `json:"interpretation"`
-	Model          *Model          `json:"model,omitempty"`
-	Configuration  *Configuration  `json:"configuration,omitempty"`
-	Choices        []Choice        `json:"choices"`
-	Missing        []MissingChoice `json:"missing_choices"`
-	Architecture   Architecture    `json:"architecture"`
-	Evidence       Evidence        `json:"evidence"`
-	Warnings       []string        `json:"warnings"`
+	SchemaVersion   string           `json:"schema_version"`
+	Status          string           `json:"status"`
+	Mutation        string           `json:"mutation"`
+	Interpretation  Interpretation   `json:"interpretation"`
+	Model           *Model           `json:"model,omitempty"`
+	Configuration   *Configuration   `json:"configuration,omitempty"`
+	Choices         []Choice         `json:"choices"`
+	Missing         []MissingChoice  `json:"missing_choices"`
+	Architecture    Architecture     `json:"architecture"`
+	Evidence        Evidence         `json:"evidence"`
+	Warnings        []string         `json:"warnings"`
+	DeploymentDraft *DeploymentDraft `json:"-"`
 }
 
 func (p Planner) Plan(request Request) (Plan, error) {
@@ -248,9 +311,72 @@ func (p Planner) Plan(request Request) (Plan, error) {
 	}
 	result.Warnings = append(result.Warnings, profile.Limitations...)
 	if len(result.Missing) == 0 {
+		draft, err := validatedDeploymentDraft(entry.Name, configuration, profile.Workload)
+		if err != nil {
+			return Plan{}, fmt.Errorf("ready deployment draft is invalid: %w", err)
+		}
 		result.Status = "ready"
+		result.DeploymentDraft = &draft
 	}
 	return result, nil
+}
+
+func NewEnvelope(plan Plan) Envelope {
+	envelope := Envelope{
+		Plan:              plan,
+		ProviderMutation:  false,
+		CapacityReserved:  false,
+		PerformanceClaims: false,
+		SelectionBoundary: "reviewed configuration only; probe capacity and review billable inputs before deployment",
+	}
+	if plan.Status == "ready" && plan.DeploymentDraft != nil {
+		draft := *plan.DeploymentDraft
+		draft.RuntimeArgs = append([]string(nil), draft.RuntimeArgs...)
+		if draft.Workload != nil {
+			workload := *draft.Workload
+			workload.Command = append([]string(nil), draft.Workload.Command...)
+			draft.Workload = &workload
+		}
+		if draft.Serving != nil {
+			serving := *draft.Serving
+			draft.Serving = &serving
+		}
+		envelope.DeploymentDraft = &draft
+	}
+	return envelope
+}
+
+func validatedDeploymentDraft(name string, configuration Configuration, workload runtimecontract.Workload) (DeploymentDraft, error) {
+	request := workflows.CloudRequest{
+		Name: name, EndpointName: name, Model: configuration.Model,
+		Runtime: configuration.Runtime, Cloud: configuration.Provider,
+		ProviderAdapter: configuration.ProviderAdapter, ComputeMode: configuration.ComputeMode,
+		GPU: configuration.GPU, GPUCount: configuration.GPUCount, Region: configuration.Region,
+		RuntimeVersion: configuration.RuntimeVersion, ModelRevision: configuration.ModelRevision,
+		RuntimeArgs: append([]string(nil), configuration.RuntimeArgs...), Workload: workload,
+		MinReplicas: configuration.MinReplicas, MaxReplicas: configuration.MaxReplicas,
+	}
+	if err := request.Validate(); err != nil {
+		return DeploymentDraft{}, err
+	}
+	draft := DeploymentDraft{
+		Name: request.Name, EndpointName: request.EndpointName, Model: request.Model,
+		Runtime: request.Runtime, Cloud: request.Cloud, ProviderAdapter: request.ProviderAdapter,
+		ComputeMode: request.ComputeMode, GPU: request.GPU, GPUCount: request.GPUCount,
+		Region: request.Region, RuntimeVersion: request.RuntimeVersion,
+		ModelRevision: request.ModelRevision, RuntimeArgs: append([]string(nil), request.RuntimeArgs...),
+		Port: request.Port, MinReplicas: request.MinReplicas, MaxReplicas: request.MaxReplicas,
+	}
+	if !request.Workload.Empty() {
+		workload := request.Workload
+		workload.Command = append([]string(nil), request.Workload.Command...)
+		draft.Workload = &workload
+	}
+	if !request.Serving.Empty() {
+		serving := request.Serving
+		draft.Serving = &serving
+	}
+	return draft, nil
 }
 
 func normalizeRequest(request Request) Request {

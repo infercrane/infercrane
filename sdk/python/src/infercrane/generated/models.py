@@ -94,3 +94,146 @@ class DeploymentView(DeploymentViewRequired, total=False):
 
 class ObjectList(TypedDict):
     data: list[dict[str, Any]]
+
+class IntentPlanOptionRequired(TypedDict):
+    value: str
+    label: str
+
+class IntentPlanOption(IntentPlanOptionRequired, total=False):
+    state: str
+    reason: str
+
+class IntentPlanChoiceRequired(TypedDict):
+    field: str
+    label: str
+    editable: bool
+    required: bool
+
+class IntentPlanChoice(IntentPlanChoiceRequired, total=False):
+    value: str | int
+    options: list[IntentPlanOption]
+
+class IntentPlanMissingChoiceRequired(TypedDict):
+    field: str
+    prompt: str
+    reason: str
+    remediation: str
+
+class IntentPlanMissingChoice(IntentPlanMissingChoiceRequired, total=False):
+    options: list[IntentPlanOption]
+
+class IntentPlanInterpretationRequired(TypedDict):
+    action: Literal["deploy", "optimize"]
+    objective: Literal["interactive", "latency", "throughput", "cost-efficiency"]
+
+class IntentPlanInterpretation(IntentPlanInterpretationRequired, total=False):
+    compute_mode: Literal["elastic", "serverless"]
+
+class IntentPlanModel(TypedDict):
+    name: str
+    display_name: str
+    repository: str
+    revision: str
+    runtime: str
+    tasks: list[str]
+    gated: bool
+    evidence_class: str
+    evidence_summary: str
+
+class IntentPlanConfigurationRequired(TypedDict):
+    model: str
+    model_revision: str
+    runtime: str
+    runtime_args: list[str]
+    profile: str
+    compute_mode: Literal["elastic", "serverless"]
+    gpu: str
+    gpu_count: int
+    min_replicas: int
+    max_replicas: int
+    routing: str
+
+class IntentPlanConfiguration(IntentPlanConfigurationRequired, total=False):
+    runtime_version: str
+    provider: str
+    provider_adapter: str
+    region: str
+
+class IntentPlanPriceEvidenceRequired(TypedDict):
+    state: Literal["current", "unavailable"]
+    deployment_comparable: bool
+    reason: str
+
+class IntentPlanPriceEvidence(IntentPlanPriceEvidenceRequired, total=False):
+    currency: str
+    hourly_usd_per_replica: float
+    cost_scope: str
+    price_authority: str
+    source: str
+    observed_at: str
+    valid_until: str
+
+class IntentPlanEvidence(TypedDict):
+    configuration: str
+    performance: str
+    capacity: str
+    price: IntentPlanPriceEvidence
+
+class IntentPlanNode(TypedDict):
+    id: str
+    kind: str
+    label: str
+    state: str
+
+IntentPlanEdge = TypedDict("IntentPlanEdge", {"from": str, "to": str, "label": str})
+
+class IntentPlanArchitecture(TypedDict):
+    nodes: list[IntentPlanNode]
+    edges: list[IntentPlanEdge]
+
+class IntentDeploymentDraftRequired(TypedDict):
+    name: str
+    model: str
+    cloud: str
+    gpu: str
+
+class IntentDeploymentDraft(IntentDeploymentDraftRequired, total=False):
+    endpoint_name: str
+    runtime: str
+    provider_adapter: str
+    compute_mode: Literal["elastic", "serverless"]
+    gpu_count: int
+    region: str
+    runtime_version: str
+    model_revision: str
+    runtime_args: list[str]
+    port: int
+    min_replicas: int
+    max_replicas: int
+    workload: dict[str, Any]
+    serving: dict[str, Any]
+
+class IntentPlanRequired(TypedDict):
+    schema_version: Literal["infercrane.intent-plan/v1"]
+    status: Literal["ready", "needs_input"]
+    mutation: Literal["none"]
+    interpretation: IntentPlanInterpretation
+    choices: list[IntentPlanChoice]
+    missing_choices: list[IntentPlanMissingChoice]
+    architecture: IntentPlanArchitecture
+    evidence: IntentPlanEvidence
+    warnings: list[str]
+
+class IntentPlan(IntentPlanRequired, total=False):
+    model: IntentPlanModel
+    configuration: IntentPlanConfiguration
+
+class IntentPlanEnvelopeRequired(TypedDict):
+    plan: IntentPlan
+    provider_mutation: bool
+    capacity_reserved: bool
+    performance_claims: bool
+    selection_boundary: str
+
+class IntentPlanEnvelope(IntentPlanEnvelopeRequired, total=False):
+    deployment_draft: IntentDeploymentDraft

@@ -1,6 +1,7 @@
 package intentplan
 
 import (
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -53,6 +54,47 @@ func TestPlanResolvesSimpleIntentIntoEditableReviewedConfiguration(t *testing.T)
 	if len(plan.Choices) < 7 || len(plan.Architecture.Nodes) < 5 || len(plan.Architecture.Edges) < 4 {
 		t.Fatalf("editable plan is incomplete: choices=%+v architecture=%+v", plan.Choices, plan.Architecture)
 	}
+	if plan.DeploymentDraft == nil {
+		t.Fatal("ready plan did not include a deployment draft")
+	}
+	before := *plan.DeploymentDraft
+	before.RuntimeArgs = append([]string(nil), plan.DeploymentDraft.RuntimeArgs...)
+	if err := plan.DeploymentDraft.Validate(); err != nil {
+		t.Fatalf("deployment draft does not pass CloudRequest validation: %v", err)
+	}
+	if !reflect.DeepEqual(before, *plan.DeploymentDraft) {
+		t.Fatalf("deployment draft validation mutated the response: before=%+v after=%+v", before, *plan.DeploymentDraft)
+	}
+	encoded, err := json.Marshal(NewEnvelope(plan))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response struct {
+		DeploymentDraft map[string]any `json:"deployment_draft"`
+	}
+	if err = json.Unmarshal(encoded, &response); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"name", "endpoint_name", "model", "runtime", "cloud", "provider_adapter", "compute_mode", "gpu", "gpu_count", "runtime_version", "model_revision", "runtime_args", "min_replicas", "max_replicas"} {
+		if _, ok := response.DeploymentDraft[field]; !ok {
+			t.Fatalf("deployment draft missing CloudRequest field %q: %s", field, encoded)
+		}
+	}
+	publicCreateFields := map[string]bool{
+		"name": true, "endpoint_name": true, "model": true, "runtime": true,
+		"cloud": true, "provider_adapter": true, "compute_mode": true, "gpu": true,
+		"gpu_count": true, "region": true, "runtime_version": true,
+		"model_revision": true, "runtime_args": true, "port": true,
+		"min_replicas": true, "max_replicas": true, "workload": true, "serving": true,
+	}
+	for field := range response.DeploymentDraft {
+		if !publicCreateFields[field] {
+			t.Fatalf("deployment draft exposed non-create field %q: %s", field, encoded)
+		}
+	}
+	if _, ok := response.DeploymentDraft["workload"]; ok {
+		t.Fatalf("deployment draft emitted an empty optional workload: %s", encoded)
+	}
 }
 
 func TestPlanDoesNotSubstituteUnknownOrAmbiguousModel(t *testing.T) {
@@ -65,7 +107,7 @@ func TestPlanDoesNotSubstituteUnknownOrAmbiguousModel(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if plan.Status != "needs_input" || plan.Model != nil || plan.Configuration != nil || len(plan.Missing) != 1 || plan.Missing[0].Field != "model" || len(plan.Missing[0].Options) == 0 || len(plan.Missing[0].Options) > 8 {
+		if plan.Status != "needs_input" || plan.Model != nil || plan.Configuration != nil || plan.DeploymentDraft != nil || len(plan.Missing) != 1 || plan.Missing[0].Field != "model" || len(plan.Missing[0].Options) == 0 || len(plan.Missing[0].Options) > 8 {
 			t.Fatalf("unsupported model was silently resolved: %+v", plan)
 		}
 	}

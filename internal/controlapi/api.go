@@ -645,13 +645,7 @@ func (a API) planIntent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "intent plan could not be compiled")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"plan":               plan,
-		"provider_mutation":  false,
-		"capacity_reserved":  false,
-		"performance_claims": false,
-		"selection_boundary": "reviewed configuration only; probe capacity and review billable inputs before deployment",
-	})
+	writeJSON(w, http.StatusOK, intentplan.NewEnvelope(plan))
 }
 
 func (a API) modelAPIModels(w http.ResponseWriter, r *http.Request) {

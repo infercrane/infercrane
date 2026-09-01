@@ -20,6 +20,7 @@ import (
 	"github.com/infercrane/infercrane/internal/doctor"
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/integration"
+	"github.com/infercrane/infercrane/internal/intentplan"
 	"github.com/infercrane/infercrane/internal/modelapicatalog"
 	"github.com/infercrane/infercrane/internal/optimizationcampaign"
 	"github.com/infercrane/infercrane/internal/optimizedartifact"
@@ -724,13 +725,31 @@ func TestIntentPlanningReturnsEditableTruthBoundedConfiguration(t *testing.T) {
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	body := response.Body.String()
-	for _, expected := range []string{`"schema_version":"infercrane.intent-plan/v1"`, `"status":"ready"`, `"repository":"Qwen/Qwen3-8B"`, `"profile":"vllm-interactive"`, `"provider_adapter":"runpod-pods"`, `"hourly_usd_per_replica":0.74`, `"performance":"unmeasured"`, `"capacity_reserved":false`, `"performance_claims":false`, `"editable":true`} {
+	for _, expected := range []string{`"schema_version":"infercrane.intent-plan/v1"`, `"status":"ready"`, `"repository":"Qwen/Qwen3-8B"`, `"profile":"vllm-interactive"`, `"deployment_draft":{"name":"qwen3-8b"`, `"cloud":"runpod"`, `"provider_adapter":"runpod-pods"`, `"hourly_usd_per_replica":0.74`, `"performance":"unmeasured"`, `"capacity_reserved":false`, `"performance_claims":false`, `"editable":true`} {
 		if response.Code != http.StatusOK || !strings.Contains(body, expected) {
 			t.Fatalf("intent plan status=%d missing=%q body=%s", response.Code, expected, body)
 		}
 	}
 	if strings.Contains(body, `"capacity":"available"`) || strings.Contains(body, `"provider_mutation":true`) {
 		t.Fatalf("intent plan fabricated capacity or mutation: %s", body)
+	}
+	var envelope intentplan.Envelope
+	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.DeploymentDraft == nil {
+		t.Fatalf("ready response omitted deployment draft: %s", body)
+	}
+	if err := envelope.DeploymentDraft.Validate(); err != nil {
+		t.Fatalf("response draft failed CloudRequest validation: %v body=%s", err, body)
+	}
+
+	needsInput := httptest.NewRequest(http.MethodPost, "/api/v1/planning/intents", strings.NewReader(`{"intent":"deploy a model"}`))
+	needsInput.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, needsInput)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"status":"needs_input"`) || strings.Contains(response.Body.String(), `"deployment_draft"`) {
+		t.Fatalf("needs-input plan exposed a deployment draft: status=%d body=%s", response.Code, response.Body.String())
 	}
 
 	unauthenticated := httptest.NewRequest(http.MethodPost, "/api/v1/planning/intents", strings.NewReader(`{"intent":"Deploy Qwen/Qwen3-8B"}`))
