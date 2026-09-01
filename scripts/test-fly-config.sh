@@ -25,7 +25,8 @@ env = data["env"]
 assert env["INFERCRANE_ENV"] == "production"
 assert env["INFERCRANE_HOST"] == "0.0.0.0"
 assert env["INFERCRANE_PORT"] == "8080"
-assert env["INFERCRANE_SKYPILOT_API"] == "disabled"
+assert env["INFERCRANE_SKYPILOT_API"] == "auto"
+assert env["SKYPILOT_DISABLE_USAGE_COLLECTION"] == "1"
 assert env["INFERCRANE_GPU_PRICE_SYNC_SECONDS"] == "3600"
 assert "INFERCRANE_INSTANCE_ID" not in env, "replica identity must default to the unique machine hostname"
 
@@ -40,7 +41,7 @@ assert service["checks"][0]["method"] == "GET"
 
 machine = data["vm"][0]
 assert machine["size"] == "shared-cpu-1x"
-assert machine["memory"] == "1gb"
+assert machine["memory"] == "2gb"
 
 serialized = path.read_text().lower()
 for forbidden in ("database_url", "api_key", "secret_key", "webhook_secret", "private key"):

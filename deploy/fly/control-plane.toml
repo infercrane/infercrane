@@ -17,7 +17,10 @@ kill_timeout = 35
   INFERCRANE_HOST = "0.0.0.0"
   INFERCRANE_PORT = "8080"
   INFERCRANE_HOSTED_AUTH_AUTO_PROVISION = "true"
-  INFERCRANE_SKYPILOT_API = "disabled"
+  # SkyPilot starts a local API process. Keep the provider list credential-gated
+  # and give the machine enough memory for the control plane plus that process.
+  INFERCRANE_SKYPILOT_API = "auto"
+  SKYPILOT_DISABLE_USAGE_COLLECTION = "1"
   INFERCRANE_GPU_PRICE_SYNC_SECONDS = "3600"
   INFERCRANE_DATABASE_MAX_OPEN = "12"
   INFERCRANE_DATABASE_MAX_IDLE = "4"
@@ -44,8 +47,7 @@ kill_timeout = 35
 
 [[vm]]
   size = "shared-cpu-1x"
-  # Provider CLIs must not start resident helper servers in the hosted control
-  # plane. This budget is verified by staging after disabled adapters are kept
-  # outside the executable backend registry.
-  memory = "1gb"
+  # SkyPilot recommends at least 2 GiB for its local API server. The production
+  # readiness check is not considered healthy until both processes have started.
+  memory = "2gb"
   processes = ["app"]
