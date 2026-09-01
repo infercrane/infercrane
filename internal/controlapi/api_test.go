@@ -20,6 +20,7 @@ import (
 	"github.com/infercrane/infercrane/internal/doctor"
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/integration"
+	"github.com/infercrane/infercrane/internal/intentplan"
 	"github.com/infercrane/infercrane/internal/modelapicatalog"
 	"github.com/infercrane/infercrane/internal/optimizationcampaign"
 	"github.com/infercrane/infercrane/internal/optimizedartifact"
@@ -709,19 +710,95 @@ func TestCloudDeploymentFailsClosedWithoutReadyCompute(t *testing.T) {
 	}
 }
 
+func TestIntentPlanningReturnsEditableTruthBoundedConfiguration(t *testing.T) {
+	registry, err := integration.V1Catalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	catalog := pricing.NewDynamicCatalog(map[pricing.Request]pricing.Estimate{
+		{Cloud: "runpod", Region: "global", GPU: "NVIDIA L40S", GPUCount: 1, Replicas: 1}: {Currency: "USD", Hourly: .74, CostScope: pricing.CostScopeInstanceTotal, Authority: pricing.PriceAuthorityProviderAPI, Source: "https://api.runpod.io/graphql", ObservedAt: now, StaleAfter: time.Hour},
+	})
+	handler := (API{APIKey: "secret", Integrations: registry.Snapshot(), ComputeProviders: []ComputeProvider{{ID: "runpod", Label: "RunPod", State: "ready"}, {ID: "aws", Label: "AWS", State: "connection-required", Reason: "AWS workload identity is not configured"}}, GPUPriceCatalog: catalog}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/planning/intents", strings.NewReader(`{"intent":"Deploy Qwen/Qwen3-8B for low latency on RunPod"}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	body := response.Body.String()
+	for _, expected := range []string{`"schema_version":"infercrane.intent-plan/v1"`, `"status":"ready"`, `"repository":"Qwen/Qwen3-8B"`, `"profile":"vllm-interactive"`, `"deployment_draft":{"name":"qwen3-8b"`, `"cloud":"runpod"`, `"provider_adapter":"runpod-pods"`, `"hourly_usd_per_replica":0.74`, `"performance":"unmeasured"`, `"capacity_reserved":false`, `"performance_claims":false`, `"editable":true`} {
+		if response.Code != http.StatusOK || !strings.Contains(body, expected) {
+			t.Fatalf("intent plan status=%d missing=%q body=%s", response.Code, expected, body)
+		}
+	}
+	if strings.Contains(body, `"capacity":"available"`) || strings.Contains(body, `"provider_mutation":true`) {
+		t.Fatalf("intent plan fabricated capacity or mutation: %s", body)
+	}
+	var envelope intentplan.Envelope
+	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.DeploymentDraft == nil {
+		t.Fatalf("ready response omitted deployment draft: %s", body)
+	}
+	if err := envelope.DeploymentDraft.Validate(); err != nil {
+		t.Fatalf("response draft failed CloudRequest validation: %v body=%s", err, body)
+	}
+
+	needsInput := httptest.NewRequest(http.MethodPost, "/api/v1/planning/intents", strings.NewReader(`{"intent":"deploy a model"}`))
+	needsInput.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, needsInput)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"status":"needs_input"`) || strings.Contains(response.Body.String(), `"deployment_draft"`) {
+		t.Fatalf("needs-input plan exposed a deployment draft: status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	unauthenticated := httptest.NewRequest(http.MethodPost, "/api/v1/planning/intents", strings.NewReader(`{"intent":"Deploy Qwen/Qwen3-8B"}`))
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, unauthenticated)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated intent plan status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestIntentPlanningRejectsUnboundedOrAmbiguousInputWithoutMutation(t *testing.T) {
+	registry, err := integration.V1Catalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := (API{APIKey: "secret", Integrations: registry.Snapshot()}).Handler()
+	tests := []struct {
+		body string
+		code int
+	}{
+		{`{"intent":"deploy a model","unknown":true}`, http.StatusBadRequest},
+		{`{"intent":"deploy a model"}{}`, http.StatusBadRequest},
+		{`{"intent":"deploy a model","objective":"magical"}`, http.StatusUnprocessableEntity},
+		{`{"intent":"` + strings.Repeat("x", 17<<10) + `"}`, http.StatusBadRequest},
+	}
+	for _, test := range tests {
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/planning/intents", strings.NewReader(test.body))
+		request.Header.Set("Authorization", "Bearer secret")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != test.code {
+			t.Fatalf("body bytes=%d status=%d want=%d response=%s", len(test.body), response.Code, test.code, response.Body.String())
+		}
+	}
+}
+
 func TestCapacityProbeKeepsCatalogQuoteSeparateFromLaunchEvidence(t *testing.T) {
 	now := time.Now().UTC()
 	catalog := pricing.NewDynamicCatalog(map[pricing.Request]pricing.Estimate{
 		{Cloud: "runpod", Region: "EU-RO-1", GPU: "NVIDIA L40S", GPUCount: 1, Replicas: 1}: {Currency: "USD", Hourly: 0.42, CostScope: pricing.CostScopeInstanceTotal, Authority: pricing.PriceAuthorityProviderAPI, Source: "provider catalog", ObservedAt: now.Add(-time.Minute), StaleAfter: time.Hour},
 	})
-	probeEvidence := provision.LaunchProbeEvidence{Provider: "runpod", Region: "EU-RO-1", GPU: "L40S", GPUCount: 1, ConnectionState: "configured", AvailabilityState: "constrained", QuotaState: "unknown", Deployability: "constrained", Source: "runpod.stock", ObservedAt: now, ExpiresAt: now.Add(30 * time.Second), Message: "low stock"}
+	probeEvidence := provision.LaunchProbeEvidence{Provider: "runpod", Region: "EU-RO-1", GPU: "L40S", GPUCount: 1, ConnectionState: "configured", AvailabilityState: "constrained", QuotaState: "unknown", Deployability: "unknown", Source: "runpod.stock", ObservedAt: now, ExpiresAt: now.Add(30 * time.Second), Message: "low stock"}
 	handler := (API{Store: &fakeStore{}, APIKey: "secret", ComputeProviders: []ComputeProvider{{ID: "runpod", Label: "RunPod", State: "ready"}}, GPUPriceCatalog: catalog, LaunchProbers: map[string]provision.LaunchProber{"runpod": fakeLaunchProber{evidence: probeEvidence}}}).Handler()
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/capacity/probes", strings.NewReader(`{"provider":"runpod","region":"EU-RO-1","gpu":"L40S","gpu_count":1}`))
 	request.Header.Set("Authorization", "Bearer secret")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	body := response.Body.String()
-	for _, expected := range []string{`"state":"current"`, `"hourly_usd":0.42`, `"availability_state":"constrained"`, `"quota_state":"unknown"`, `"deployability":"constrained"`, `only an accepted provider launch reserves capacity`} {
+	for _, expected := range []string{`"state":"current"`, `"hourly_usd":0.42`, `"availability_state":"constrained"`, `"quota_state":"unknown"`, `"deployability":"unknown"`, `only an accepted provider launch reserves capacity`} {
 		if response.Code != http.StatusOK || !strings.Contains(body, expected) {
 			t.Fatalf("capacity probe status=%d missing=%q body=%s", response.Code, expected, body)
 		}

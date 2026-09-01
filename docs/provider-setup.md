@@ -92,9 +92,11 @@ adapter test alone.
 ## SkyPilot provider breadth and launch preflight
 
 SkyPilot is the portable capacity driver for clouds that do not need a native InferCrane lifecycle
-adapter. Provider registration is declarative and fail closed: a cloud appears as executable only
-when its manifest is present and every named credential environment variable exists in the control-
-plane process.
+adapter. Provider registration is declarative and fail closed: a validated manifest appears in the
+planning catalog even before credentials exist, with state `connection-required`. This lets an
+exact current provider quote inform a recommendation and return connection remediation without
+starting provider processes. A cloud appears as executable only when its manifest is present and
+every named credential environment variable exists in the control-plane process.
 
 ```bash
 export INFERCRANE_SKYPILOT_API=enabled

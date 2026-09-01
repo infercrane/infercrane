@@ -38,6 +38,7 @@ var Routes = []Route{
 	{"GET", "/integrations", "listIntegrations", "System", "Inspect registered integration capabilities", "", "Object", 200, false},
 	{"GET", "/catalog/models", "listCatalogModels", "Model catalog", "Search reviewed model starting points", "", "ObjectList", 200, false},
 	{"GET", "/catalog/models/{name}", "getCatalogModel", "Model catalog", "Inspect one reviewed model and its serving profiles", "", "Object", 200, false},
+	{"POST", "/planning/intents", "planIntent", "Planning", "Compile bounded user intent into an editable reviewed configuration", "IntentPlanRequest", "IntentPlanEnvelope", 200, false},
 	{"GET", "/model-api-catalog", "listModelAPICatalog", "Model APIs", "Browse supplier-neutral managed Model API identities", "", "ObjectList", 200, false},
 	{"GET", "/model-api-catalog/{id}", "getModelAPICatalogEntry", "Model APIs", "Inspect one managed Model API identity without supplier disclosure", "", "Object", 200, false},
 	{"GET", "/compute/providers", "listComputeProviders", "Compute", "List real execution readiness separately from adapter registration", "", "ObjectList", 200, false},
@@ -312,6 +313,20 @@ func schemas() map[string]any {
 		"Error":                           map[string]any{"type": "object", "required": []string{"code", "message"}, "properties": map[string]any{"code": map[string]any{"type": "string"}, "category": map[string]any{"type": "string"}, "message": map[string]any{"type": "string"}, "request_id": map[string]any{"type": "string"}, "retryable": map[string]any{"type": "boolean"}, "remediation": map[string]any{"type": "string"}}},
 		"ErrorEnvelope":                   map[string]any{"type": "object", "required": []string{"error"}, "properties": map[string]any{"error": ref("Error")}},
 		"ConsoleIdentityProvisioning":     map[string]any{"type": "object", "additionalProperties": false, "required": []string{"provider", "external_user_id", "external_organization_id", "display_name", "role", "access"}, "properties": map[string]any{"provider": map[string]any{"type": "string", "enum": []string{"clerk"}}, "external_user_id": map[string]any{"type": "string", "minLength": 1, "maxLength": 255}, "external_organization_id": map[string]any{"type": "string", "minLength": 1, "maxLength": 255}, "display_name": map[string]any{"type": "string", "minLength": 1, "maxLength": 255}, "role": map[string]any{"type": "string", "enum": []string{"viewer", "operator", "admin"}}, "scopes": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": 32}, "access": map[string]any{"type": "boolean"}}},
+		"IntentPlanRequest":               map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{"intent": map[string]any{"type": "string", "maxLength": 2048}, "model": map[string]any{"type": "string", "maxLength": 256}, "provider": map[string]any{"type": "string", "maxLength": 64}, "region": map[string]any{"type": "string", "maxLength": 128}, "gpu": map[string]any{"type": "string", "maxLength": 128}, "objective": map[string]any{"type": "string", "enum": []string{"interactive", "latency", "throughput", "cost-efficiency"}}, "compute_mode": map[string]any{"type": "string", "enum": []string{"elastic", "serverless"}}}, "anyOf": []map[string]any{{"required": []string{"intent"}}, {"required": []string{"model"}}}},
+		"IntentPlanOption":                intentPlanOptionSchema(),
+		"IntentPlanChoice":                intentPlanChoiceSchema(),
+		"IntentPlanMissingChoice":         intentPlanMissingChoiceSchema(),
+		"IntentPlanInterpretation":        intentPlanInterpretationSchema(),
+		"IntentPlanModel":                 intentPlanModelSchema(),
+		"IntentPlanConfiguration":         intentPlanConfigurationSchema(),
+		"IntentPlanPriceEvidence":         intentPlanPriceEvidenceSchema(),
+		"IntentPlanEvidence":              intentPlanEvidenceSchema(),
+		"IntentPlanNode":                  intentPlanNodeSchema(),
+		"IntentPlanEdge":                  intentPlanEdgeSchema(),
+		"IntentPlanArchitecture":          intentPlanArchitectureSchema(),
+		"IntentPlan":                      intentPlanSchema(),
+		"IntentPlanEnvelope":              intentPlanEnvelopeSchema(),
 		"Operation":                       map[string]any{"type": "object", "required": []string{"id", "kind", "status", "progress"}, "properties": map[string]any{"id": map[string]any{"type": "string"}, "kind": map[string]any{"type": "string"}, "resource_type": map[string]any{"type": "string"}, "resource_name": map[string]any{"type": "string"}, "status": map[string]any{"type": "string", "enum": []string{"pending", "leased", "running", "waiting", "cancelling", "succeeded", "failed", "cancelled"}}, "progress": map[string]any{"type": "integer", "minimum": 0, "maximum": 100}, "message": map[string]any{"type": "string"}, "current_step": map[string]any{"type": "string"}, "current_step_status": map[string]any{"type": "string", "enum": []string{"pending", "running", "waiting", "succeeded", "failed", "cancelled"}}, "error_code": map[string]any{"type": "string"}, "retryable": map[string]any{"type": "boolean"}, "cancel_requested": map[string]any{"type": "boolean"}, "attempt": map[string]any{"type": "integer"}, "max_attempts": map[string]any{"type": "integer"}, "result": stringMap, "created_at": map[string]any{"type": "string", "format": "date-time"}, "updated_at": map[string]any{"type": "string", "format": "date-time"}}},
 		"OperationEnvelope":               map[string]any{"type": "object", "required": []string{"operation"}, "properties": map[string]any{"operation": ref("Operation"), "created": map[string]any{"type": "boolean"}}},
 		"DeploymentOperationEnvelope":     map[string]any{"allOf": []map[string]any{ref("OperationEnvelope"), {"type": "object", "properties": map[string]any{"deployment": ref("Deployment")}}}},
@@ -321,7 +336,7 @@ func schemas() map[string]any {
 		"RuntimeWorkload":                 map[string]any{"type": "object", "required": []string{"image", "command", "protocol", "port", "readiness_path", "models_path", "metrics_path", "cancellation", "drain", "shutdown_grace_seconds"}, "properties": map[string]any{"image": map[string]any{"type": "string", "pattern": `@sha256:[a-f0-9]{64}$`}, "command": map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "string"}}, "protocol": map[string]any{"type": "string", "enum": []string{"openai"}}, "port": map[string]any{"type": "integer", "minimum": 1, "maximum": 65535}, "readiness_path": map[string]any{"type": "string", "enum": []string{"/health"}}, "models_path": map[string]any{"type": "string", "enum": []string{"/v1/models"}}, "metrics_path": map[string]any{"type": "string", "enum": []string{"/metrics"}}, "cancellation": map[string]any{"type": "string", "enum": []string{"http-disconnect"}}, "drain": map[string]any{"type": "string", "enum": []string{"connection"}}, "shutdown_grace_seconds": map[string]any{"type": "integer", "minimum": 1, "maximum": 3600}}, "additionalProperties": false},
 		"ServingPool":                     map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{"replicas": map[string]any{"type": "integer", "minimum": 0, "maximum": 10000}, "tensor_parallelism": map[string]any{"type": "integer", "minimum": 0, "maximum": 1024}}},
 		"ServingTopology":                 map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{"schema_version": map[string]any{"type": "string", "enum": []string{"infercrane.serving/v1"}}, "backend": map[string]any{"type": "string", "enum": []string{"dynamo"}}, "profile": map[string]any{"type": "string", "enum": []string{"baseline", "custom"}}, "mode": map[string]any{"type": "string", "enum": []string{"aggregated", "disaggregated"}}, "routing": map[string]any{"type": "string", "enum": []string{"direct", "kv-aware"}}, "worker": ref("ServingPool"), "prefill": ref("ServingPool"), "decode": ref("ServingPool"), "autoscaling": map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{"owner": map[string]any{"type": "string", "enum": []string{"disabled", "dynamo-planner", "external"}}, "min": map[string]any{"type": "integer", "minimum": 0, "maximum": 10000}, "max": map[string]any{"type": "integer", "minimum": 0, "maximum": 10000}}}, "cache": map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{"backend": map[string]any{"type": "string", "enum": []string{"none", "kvbm", "lmcache", "hicache"}}, "host_gib": map[string]any{"type": "integer", "minimum": 0}, "disk_gib": map[string]any{"type": "integer", "minimum": 0}, "memory_gib": map[string]any{"type": "integer", "minimum": 0}, "storage_claim": map[string]any{"type": "string"}, "configuration_ref": map[string]any{"type": "string"}, "metrics": map[string]any{"type": "boolean"}}}}},
-		"DeploymentCreate":                map[string]any{"type": "object", "required": []string{"name", "model"}, "properties": map[string]any{"name": map[string]any{"type": "string"}, "endpoint_name": map[string]any{"type": "string", "description": "Stable application endpoint alias. Defaults to the deployment name.", "pattern": `^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$`}, "model": map[string]any{"type": "string"}, "runtime": map[string]any{"type": "string", "default": "vllm", "enum": []string{"vllm", "sglang", "custom-oci"}}, "cloud": map[string]any{"type": "string"}, "provider_adapter": map[string]any{"type": "string", "description": "Exact provider profile for this immutable revision; omit only when the cloud/runtime default is unambiguous."}, "compute_mode": map[string]any{"type": "string", "enum": []string{"elastic", "serverless"}}, "gpu": map[string]any{"type": "string"}, "gpu_count": map[string]any{"type": "integer", "minimum": 1, "maximum": 1024, "default": 1, "description": "Accelerators allocated to each runtime replica."}, "region": map[string]any{"type": "string"}, "port": map[string]any{"type": "integer", "minimum": 1, "maximum": 65535}, "min_replicas": map[string]any{"type": "integer", "minimum": 0}, "max_replicas": map[string]any{"type": "integer", "minimum": 0}, "runtime_version": map[string]any{"type": "string"}, "runtime_args": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "workload": ref("RuntimeWorkload"), "serving": ref("ServingTopology"), "model_revision": map[string]any{"type": "string"}}},
+		"DeploymentCreate":                map[string]any{"type": "object", "additionalProperties": false, "required": []string{"name", "model", "cloud", "gpu"}, "properties": map[string]any{"name": map[string]any{"type": "string"}, "endpoint_name": map[string]any{"type": "string", "description": "Stable application endpoint alias. Defaults to the deployment name.", "pattern": `^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$`}, "model": map[string]any{"type": "string"}, "runtime": map[string]any{"type": "string", "default": "vllm", "enum": []string{"vllm", "sglang", "custom-oci"}}, "cloud": map[string]any{"type": "string"}, "provider_adapter": map[string]any{"type": "string", "description": "Exact provider profile for this immutable revision; omit only when the cloud/runtime default is unambiguous."}, "compute_mode": map[string]any{"type": "string", "enum": []string{"elastic", "serverless"}}, "gpu": map[string]any{"type": "string"}, "gpu_count": map[string]any{"type": "integer", "minimum": 1, "maximum": 1024, "default": 1, "description": "Accelerators allocated to each runtime replica."}, "region": map[string]any{"type": "string"}, "port": map[string]any{"type": "integer", "minimum": 1, "maximum": 65535}, "min_replicas": map[string]any{"type": "integer", "minimum": 0}, "max_replicas": map[string]any{"type": "integer", "minimum": 0}, "runtime_version": map[string]any{"type": "string"}, "runtime_args": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "workload": ref("RuntimeWorkload"), "serving": ref("ServingTopology"), "model_revision": map[string]any{"type": "string"}}},
 		"LaunchProbeRequest":              map[string]any{"type": "object", "additionalProperties": false, "required": []string{"provider", "gpu"}, "properties": map[string]any{"provider": map[string]any{"type": "string", "minLength": 1, "maxLength": 64}, "region": map[string]any{"type": "string", "maxLength": 128}, "gpu": map[string]any{"type": "string", "minLength": 1, "maxLength": 128}, "gpu_count": map[string]any{"type": "integer", "minimum": 1, "maximum": 1024, "default": 1}}},
 		"CatalogLaunchQuote":              map[string]any{"type": "object", "additionalProperties": false, "required": []string{"state", "provider", "gpu", "gpu_count", "hourly_usd", "limitations"}, "properties": map[string]any{"state": map[string]any{"type": "string", "enum": []string{"current", "unavailable"}}, "provider": map[string]any{"type": "string"}, "region": map[string]any{"type": "string"}, "gpu": map[string]any{"type": "string"}, "gpu_count": map[string]any{"type": "integer"}, "currency": map[string]any{"type": "string"}, "hourly_usd": nullableNumberSchema(), "cost_scope": map[string]any{"type": "string", "enum": []string{"instance_total"}}, "source": map[string]any{"type": "string"}, "observed_at": map[string]any{"type": "string", "format": "date-time"}, "valid_until": map[string]any{"type": "string", "format": "date-time"}, "limitations": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}}},
 		"LaunchProbeEvidence":             map[string]any{"type": "object", "additionalProperties": false, "required": []string{"provider", "gpu", "gpu_count", "connection_state", "availability_state", "quota_state", "deployability", "source", "observed_at", "expires_at", "message"}, "properties": map[string]any{"provider": map[string]any{"type": "string"}, "region": map[string]any{"type": "string"}, "gpu": map[string]any{"type": "string"}, "gpu_count": map[string]any{"type": "integer"}, "connection_state": map[string]any{"type": "string", "enum": []string{"configured", "connection-required"}}, "availability_state": map[string]any{"type": "string", "enum": []string{"available", "constrained", "unavailable", "unknown"}}, "quota_state": map[string]any{"type": "string", "enum": []string{"available", "constrained", "unavailable", "unknown"}}, "deployability": map[string]any{"type": "string", "enum": []string{"available", "constrained", "unavailable", "unknown"}}, "source": map[string]any{"type": "string"}, "observed_at": map[string]any{"type": "string", "format": "date-time"}, "expires_at": map[string]any{"type": "string", "format": "date-time"}, "message": map[string]any{"type": "string"}, "limitations": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}}},
@@ -408,6 +423,108 @@ func schemas() map[string]any {
 		"ChatCompletionRequest":          map[string]any{"type": "object", "required": []string{"model", "messages"}, "properties": map[string]any{"model": map[string]any{"type": "string", "description": "Stable InferCrane endpoint name; migrated v1 deployment aliases remain compatible endpoints."}, "messages": map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "object", "required": []string{"role", "content"}, "properties": map[string]any{"role": map[string]any{"type": "string"}, "content": map[string]any{"type": "string"}}}}, "stream": map[string]any{"type": "boolean", "default": false}}, "additionalProperties": true},
 		"Empty":                          map[string]any{"type": "null"},
 	}
+}
+
+func intentPlanOptionSchema() map[string]any {
+	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"value", "label"}, "properties": map[string]any{
+		"value": map[string]any{"type": "string"}, "label": map[string]any{"type": "string"},
+		"state": map[string]any{"type": "string"}, "reason": map[string]any{"type": "string"},
+	}}
+}
+
+func intentPlanChoiceSchema() map[string]any {
+	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"field", "label", "editable", "required"}, "properties": map[string]any{
+		"field": map[string]any{"type": "string"}, "label": map[string]any{"type": "string"}, "value": map[string]any{"oneOf": []map[string]any{{"type": "string"}, {"type": "integer"}}},
+		"editable": map[string]any{"type": "boolean"}, "required": map[string]any{"type": "boolean"},
+		"options": map[string]any{"type": "array", "items": ref("IntentPlanOption")},
+	}}
+}
+
+func intentPlanMissingChoiceSchema() map[string]any {
+	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"field", "prompt", "reason", "remediation"}, "properties": map[string]any{
+		"field": map[string]any{"type": "string"}, "prompt": map[string]any{"type": "string"}, "reason": map[string]any{"type": "string"},
+		"options": map[string]any{"type": "array", "items": ref("IntentPlanOption")}, "remediation": map[string]any{"type": "string"},
+	}}
+}
+
+func intentPlanInterpretationSchema() map[string]any {
+	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"action", "objective"}, "properties": map[string]any{
+		"action":       map[string]any{"type": "string", "enum": []string{"deploy", "optimize"}},
+		"objective":    map[string]any{"type": "string", "enum": []string{"interactive", "latency", "throughput", "cost-efficiency"}},
+		"compute_mode": map[string]any{"type": "string", "enum": []string{"elastic", "serverless"}},
+	}}
+}
+
+func intentPlanModelSchema() map[string]any {
+	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"name", "display_name", "repository", "revision", "runtime", "tasks", "gated", "evidence_class", "evidence_summary"}, "properties": map[string]any{
+		"name": map[string]any{"type": "string"}, "display_name": map[string]any{"type": "string"}, "repository": map[string]any{"type": "string"},
+		"revision": map[string]any{"type": "string"}, "runtime": map[string]any{"type": "string"}, "tasks": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+		"gated": map[string]any{"type": "boolean"}, "evidence_class": map[string]any{"type": "string"}, "evidence_summary": map[string]any{"type": "string"},
+	}}
+}
+
+func intentPlanConfigurationSchema() map[string]any {
+	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"model", "model_revision", "runtime", "runtime_args", "profile", "compute_mode", "gpu", "gpu_count", "min_replicas", "max_replicas", "routing"}, "properties": map[string]any{
+		"model": map[string]any{"type": "string"}, "model_revision": map[string]any{"type": "string"}, "runtime": map[string]any{"type": "string"},
+		"runtime_version": map[string]any{"type": "string"}, "runtime_args": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+		"profile": map[string]any{"type": "string"}, "compute_mode": map[string]any{"type": "string", "enum": []string{"elastic", "serverless"}},
+		"provider": map[string]any{"type": "string"}, "provider_adapter": map[string]any{"type": "string"}, "region": map[string]any{"type": "string"},
+		"gpu": map[string]any{"type": "string"}, "gpu_count": map[string]any{"type": "integer", "minimum": 1, "maximum": 1024},
+		"min_replicas": map[string]any{"type": "integer", "minimum": 0}, "max_replicas": map[string]any{"type": "integer", "minimum": 0}, "routing": map[string]any{"type": "string"},
+	}}
+}
+
+func intentPlanPriceEvidenceSchema() map[string]any {
+	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"state", "deployment_comparable", "reason"}, "properties": map[string]any{
+		"state": map[string]any{"type": "string", "enum": []string{"current", "unavailable"}}, "currency": map[string]any{"type": "string"},
+		"hourly_usd_per_replica": map[string]any{"type": "number", "minimum": 0}, "cost_scope": map[string]any{"type": "string"},
+		"price_authority": map[string]any{"type": "string"}, "source": map[string]any{"type": "string"},
+		"observed_at": map[string]any{"type": "string", "format": "date-time"}, "valid_until": map[string]any{"type": "string", "format": "date-time"},
+		"deployment_comparable": map[string]any{"type": "boolean"}, "reason": map[string]any{"type": "string"},
+	}}
+}
+
+func intentPlanEvidenceSchema() map[string]any {
+	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"configuration", "performance", "capacity", "price"}, "properties": map[string]any{
+		"configuration": map[string]any{"type": "string"}, "performance": map[string]any{"type": "string"},
+		"capacity": map[string]any{"type": "string"}, "price": ref("IntentPlanPriceEvidence"),
+	}}
+}
+
+func intentPlanNodeSchema() map[string]any {
+	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"id", "kind", "label", "state"}, "properties": map[string]any{
+		"id": map[string]any{"type": "string"}, "kind": map[string]any{"type": "string"}, "label": map[string]any{"type": "string"}, "state": map[string]any{"type": "string"},
+	}}
+}
+
+func intentPlanEdgeSchema() map[string]any {
+	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"from", "to", "label"}, "properties": map[string]any{
+		"from": map[string]any{"type": "string"}, "to": map[string]any{"type": "string"}, "label": map[string]any{"type": "string"},
+	}}
+}
+
+func intentPlanArchitectureSchema() map[string]any {
+	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"nodes", "edges"}, "properties": map[string]any{
+		"nodes": map[string]any{"type": "array", "items": ref("IntentPlanNode")}, "edges": map[string]any{"type": "array", "items": ref("IntentPlanEdge")},
+	}}
+}
+
+func intentPlanSchema() map[string]any {
+	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"schema_version", "status", "mutation", "interpretation", "choices", "missing_choices", "architecture", "evidence", "warnings"}, "properties": map[string]any{
+		"schema_version": map[string]any{"type": "string", "const": "infercrane.intent-plan/v1"}, "status": map[string]any{"type": "string", "enum": []string{"ready", "needs_input"}},
+		"mutation": map[string]any{"type": "string", "const": "none"}, "interpretation": ref("IntentPlanInterpretation"), "model": ref("IntentPlanModel"),
+		"configuration": ref("IntentPlanConfiguration"), "choices": map[string]any{"type": "array", "items": ref("IntentPlanChoice")},
+		"missing_choices": map[string]any{"type": "array", "items": ref("IntentPlanMissingChoice")}, "architecture": ref("IntentPlanArchitecture"),
+		"evidence": ref("IntentPlanEvidence"), "warnings": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+	}}
+}
+
+func intentPlanEnvelopeSchema() map[string]any {
+	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"plan", "provider_mutation", "capacity_reserved", "performance_claims", "selection_boundary"}, "properties": map[string]any{
+		"plan": ref("IntentPlan"), "deployment_draft": ref("DeploymentCreate"), "provider_mutation": map[string]any{"type": "boolean", "const": false},
+		"capacity_reserved": map[string]any{"type": "boolean", "const": false}, "performance_claims": map[string]any{"type": "boolean", "const": false},
+		"selection_boundary": map[string]any{"type": "string"},
+	}}
 }
 
 func nullableNumberSchema() map[string]any {

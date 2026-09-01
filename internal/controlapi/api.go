@@ -34,6 +34,7 @@ import (
 	"github.com/infercrane/infercrane/internal/external"
 	"github.com/infercrane/infercrane/internal/finops"
 	"github.com/infercrane/infercrane/internal/integration"
+	"github.com/infercrane/infercrane/internal/intentplan"
 	"github.com/infercrane/infercrane/internal/lab"
 	"github.com/infercrane/infercrane/internal/modelapicatalog"
 	"github.com/infercrane/infercrane/internal/optimizationcampaign"
@@ -369,6 +370,7 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/integrations", a.auth(authz.Read, a.integrations))
 	mux.HandleFunc("GET /api/v1/catalog/models", a.auth(authz.Read, a.catalogModels))
 	mux.HandleFunc("GET /api/v1/catalog/models/{name}", a.auth(authz.Read, a.catalogModel))
+	mux.HandleFunc("POST /api/v1/planning/intents", a.auth(authz.Read, a.planIntent))
 	mux.HandleFunc("GET /api/v1/model-api-catalog", a.auth(authz.Read, a.modelAPIModels))
 	mux.HandleFunc("GET /api/v1/model-api-catalog/{id}", a.auth(authz.Read, a.modelAPIModel))
 	mux.HandleFunc("GET /api/v1/compute/providers", a.auth(authz.Read, a.computeProviders))
@@ -609,6 +611,41 @@ func (a API) catalogModel(w http.ResponseWriter, r *http.Request) {
 		"model":              entry,
 		"performance_claims": false,
 	})
+}
+
+// planIntent compiles only a side-effect-free starting configuration. Provider
+// capacity remains a separate explicit probe and deployment remains a separate
+// authenticated, idempotent mutation.
+func (a API) planIntent(w http.ResponseWriter, r *http.Request) {
+	var request intentplan.Request
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "request body must be one strict JSON object no larger than 16 KiB")
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "request body must contain exactly one JSON object")
+		return
+	}
+	providers := make([]intentplan.Provider, 0, len(a.ComputeProviders))
+	for _, provider := range a.ComputeProviders {
+		providers = append(providers, intentplan.Provider{ID: provider.ID, Label: provider.Label, State: provider.State, Reason: provider.Reason})
+	}
+	var prices map[pricing.Request]pricing.Estimate
+	if a.GPUPriceCatalog != nil {
+		prices = a.GPUPriceCatalog.Snapshot()
+	}
+	plan, err := (intentplan.Planner{Recipes: curatedrecipe.All(), Compatibility: a.Integrations.Compatibility, Providers: providers, Prices: prices}).Plan(request)
+	if errors.Is(err, intentplan.ErrInvalidRequest) {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_intent", err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "intent plan could not be compiled")
+		return
+	}
+	writeJSON(w, http.StatusOK, intentplan.NewEnvelope(plan))
 }
 
 func (a API) modelAPIModels(w http.ResponseWriter, r *http.Request) {

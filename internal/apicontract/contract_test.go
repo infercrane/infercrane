@@ -111,3 +111,27 @@ func TestPublicGPUPricesAreDocumentedWithoutBearerAuthentication(t *testing.T) {
 		}
 	}
 }
+
+func TestIntentPlanningHasTypedEnvelopeAndDeploymentDraft(t *testing.T) {
+	doc, err := Document()
+	if err != nil {
+		t.Fatal(err)
+	}
+	operation := doc["paths"].(map[string]any)["/api/v1/planning/intents"].(map[string]any)["post"].(map[string]any)
+	response := operation["responses"].(map[string]any)["200"].(map[string]any)
+	content := response["content"].(map[string]any)["application/json"].(map[string]any)
+	schema := content["schema"].(map[string]any)
+	if schema["$ref"] != "#/components/schemas/IntentPlanEnvelope" {
+		t.Fatalf("intent plan response remains generic: %#v", schema)
+	}
+	schemas := doc["components"].(map[string]any)["schemas"].(map[string]any)
+	envelope := schemas["IntentPlanEnvelope"].(map[string]any)
+	properties := envelope["properties"].(map[string]any)
+	if properties["plan"].(map[string]any)["$ref"] != "#/components/schemas/IntentPlan" || properties["deployment_draft"].(map[string]any)["$ref"] != "#/components/schemas/DeploymentCreate" {
+		t.Fatalf("intent plan envelope refs=%#v", properties)
+	}
+	deployment := schemas["DeploymentCreate"].(map[string]any)
+	if deployment["additionalProperties"] != false {
+		t.Fatalf("deployment draft schema must reject unknown CloudRequest fields: %#v", deployment)
+	}
+}

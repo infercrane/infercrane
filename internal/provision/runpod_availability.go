@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/infercrane/infercrane/internal/provideridentity"
 )
 
 const defaultRunPodGraphQLURL = "https://api.runpod.io/graphql"
@@ -46,13 +48,12 @@ func (r RunPodAvailability) ProbeLaunch(ctx context.Context, request LaunchProbe
 	evidence.AvailabilityState = availability.State
 	evidence.Message = availability.Message
 	switch availability.State {
-	case "available":
-		evidence.Deployability = "available"
-	case "constrained":
-		evidence.Deployability = "constrained"
 	case "unavailable":
 		evidence.Deployability = "unavailable"
 	default:
+		// Positive stock is advisory. RunPod does not expose account quota in
+		// this signal, so deployability must remain unknown until a launch is
+		// accepted. A proven absence of stock can still fail closed above.
 		evidence.Deployability = "unknown"
 	}
 	return evidence, nil
@@ -115,14 +116,18 @@ func (r RunPodAvailability) Availability(ctx context.Context, request Availabili
 	matches := make([]string, 0)
 	best := "none"
 	for _, gpu := range payload.Data.GPUTypes {
-		if !gpuMatches(request.GPU, gpu.ID, gpu.DisplayName) {
+		if !provideridentity.MatchesGPU("runpod", gpu.ID, request.GPU) {
 			continue
 		}
 		stock := "None"
 		if gpu.LowestPrice != nil && gpu.LowestPrice.StockStatus != "" {
 			stock = gpu.LowestPrice.StockStatus
 		}
-		matches = append(matches, gpu.DisplayName+":"+stock)
+		label := gpu.DisplayName
+		if strings.TrimSpace(label) == "" {
+			label = gpu.ID
+		}
+		matches = append(matches, label+":"+stock)
 		best = betterStock(best, strings.ToLower(stock))
 	}
 	if len(matches) == 0 {
@@ -139,16 +144,6 @@ func (r RunPodAvailability) Availability(ctx context.Context, request Availabili
 		message += "; the signal is global and does not guarantee region " + request.Region
 	}
 	return Availability{State: state, Message: message, Details: safeRunPodDiagnostic(strings.Join(matches, ","), r.APIKey)}, nil
-}
-
-func gpuMatches(requested, id, display string) bool {
-	normalize := func(value string) string {
-		value = strings.ToLower(value)
-		value = strings.NewReplacer("nvidia", "", "geforce", "", "generation", "", " ", "", "-", "", "_", "").Replace(value)
-		return value
-	}
-	want, identifier, shown := normalize(requested), normalize(id), normalize(display)
-	return want != "" && (identifier == want || shown == want || strings.Contains(identifier, want) || strings.Contains(shown, want))
 }
 
 func betterStock(current, candidate string) string {

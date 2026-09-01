@@ -21,7 +21,7 @@ func SkyPilotProviderProfile(cloud, adapter string) ProviderProfile {
 		},
 	}
 	if cloud == "runpod" {
-		profile.Capabilities[1] = Capability{Name: "capacity_preflight", State: CapabilitySupported, Detail: "advisory provider stock; not a reservation", Evidence: "go:test/internal/provision#TestRunPodAvailabilityAggregatesCompatibleGPUStock"}
+		profile.Capabilities[1] = Capability{Name: "capacity_preflight", State: CapabilitySupported, Detail: "advisory provider stock; not a reservation", Evidence: "go:test/internal/provision#TestRunPodAvailabilityUsesExactReviewedGPUIdentity"}
 	}
 	return profile
 }

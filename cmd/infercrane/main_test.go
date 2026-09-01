@@ -16,8 +16,10 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/config"
+	"github.com/infercrane/infercrane/internal/controlapi"
 	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/passport"
+	"github.com/infercrane/infercrane/internal/pricing"
 	"github.com/infercrane/infercrane/internal/support"
 )
 
@@ -888,6 +890,59 @@ func TestPrimaryDeployPathDefaultsToRunPodL40S(t *testing.T) {
 func TestSkyPilotAdapterIdentityIsStableAndCloudSpecific(t *testing.T) {
 	if skyPilotAdapter("runpod") != "skypilot" || skyPilotAdapter("lambda") != "skypilot-lambda" || skyPilotAdapter("vast") != "skypilot-vast" {
 		t.Fatal("SkyPilot adapter identity is not stable across declarative provider manifests")
+	}
+}
+
+func TestUnconnectedDeclaredVastCanWinExactComparablePlanningQuote(t *testing.T) {
+	t.Setenv("VAST_API_KEY", "")
+	cfg := config.Config{
+		APIKey:       "secret",
+		RunPodAPIKey: "runpod-connected",
+		SkyPilotAPI:  "auto",
+		SkyPilotProviders: []config.SkyPilotProvider{
+			{Cloud: "vast", Label: "Vast.ai", Runtimes: []string{"vllm"}, CredentialEnv: []string{"VAST_API_KEY"}},
+		},
+	}
+	configured := cfg.ConfiguredSkyPilotProviders()
+	if len(configured) != 0 || cfg.SkyPilotEnabled() {
+		t.Fatalf("unconnected Vast became executable: configured=%+v enabled=%v", configured, cfg.SkyPilotEnabled())
+	}
+	registry, err := integration.V1Catalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = registerSkyPilotPlanningCandidates(registry, cfg.SkyPilotProviders); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = registry.Provider("skypilot-vast"); err != nil {
+		t.Fatalf("declared Vast adapter is absent from planning compatibility: %v", err)
+	}
+	providers := computeProviderInventory(cfg, configured)
+	var vastProvider *controlapi.ComputeProvider
+	for index := range providers {
+		if providers[index].ID == "vast" {
+			vastProvider = &providers[index]
+			break
+		}
+	}
+	if vastProvider == nil || vastProvider.State != "connection-required" {
+		t.Fatalf("declared Vast planning candidate=%+v providers=%+v", vastProvider, providers)
+	}
+	now := time.Now().UTC()
+	catalog := pricing.NewDynamicCatalog(map[pricing.Request]pricing.Estimate{
+		{Cloud: "runpod", Region: "global", GPU: "NVIDIA L40S", GPUCount: 1, Replicas: 1}: {Currency: "USD", Hourly: .74, CostScope: pricing.CostScopeInstanceTotal, Authority: pricing.PriceAuthorityProviderAPI, Source: "https://api.runpod.io/graphql", ObservedAt: now, StaleAfter: time.Hour},
+		{Cloud: "vast", Region: "global", GPU: "L40S", GPUCount: 1, Replicas: 1}:          {Currency: "USD", Hourly: .42, CostScope: pricing.CostScopeInstanceTotal, Authority: pricing.PriceAuthorityProviderAPI, Source: "https://console.vast.ai/api/v0/bundles/#offer-1", ObservedAt: now, StaleAfter: time.Hour},
+	})
+	handler := (controlapi.API{APIKey: cfg.APIKey, Integrations: registry.Snapshot(), ComputeProviders: providers, GPUPriceCatalog: catalog}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/planning/intents", strings.NewReader(`{"intent":"Deploy Qwen/Qwen3-8B"}`))
+	request.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	body := response.Body.String()
+	for _, expected := range []string{`"status":"needs_input"`, `"field":"provider_connection"`, `"provider":"vast"`, `"provider_adapter":"skypilot-vast"`, `"hourly_usd_per_replica":0.42`, `catalog pricing alone does not authorize or prove a launch`} {
+		if response.Code != http.StatusOK || !strings.Contains(body, expected) {
+			t.Fatalf("Vast planning response status=%d missing=%q body=%s", response.Code, expected, body)
+		}
 	}
 }
 

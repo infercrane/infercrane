@@ -6,13 +6,22 @@ from .errors import (
     OperationTimeout,
     StreamError,
 )
-from .generated.models import Deployment, Operation
+from .generated.models import (
+    Deployment,
+    IntentDeploymentDraft,
+    IntentPlan,
+    IntentPlanEnvelope,
+    Operation,
+)
 
 __all__ = [
     "APIError",
     "AsyncInferCrane",
     "Deployment",
     "InferCrane",
+    "IntentDeploymentDraft",
+    "IntentPlan",
+    "IntentPlanEnvelope",
     "Operation",
     "OperationCancelled",
     "OperationFailed",

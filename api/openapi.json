@@ -763,6 +763,7 @@
         "type": "object"
       },
       "DeploymentCreate": {
+        "additionalProperties": false,
         "properties": {
           "cloud": {
             "type": "string"
@@ -845,7 +846,9 @@
         },
         "required": [
           "name",
-          "model"
+          "model",
+          "cloud",
+          "gpu"
         ],
         "type": "object"
       },
@@ -1510,6 +1513,544 @@
             "maximum": 31536000,
             "minimum": 1,
             "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "IntentPlan": {
+        "additionalProperties": false,
+        "properties": {
+          "architecture": {
+            "$ref": "#/components/schemas/IntentPlanArchitecture"
+          },
+          "choices": {
+            "items": {
+              "$ref": "#/components/schemas/IntentPlanChoice"
+            },
+            "type": "array"
+          },
+          "configuration": {
+            "$ref": "#/components/schemas/IntentPlanConfiguration"
+          },
+          "evidence": {
+            "$ref": "#/components/schemas/IntentPlanEvidence"
+          },
+          "interpretation": {
+            "$ref": "#/components/schemas/IntentPlanInterpretation"
+          },
+          "missing_choices": {
+            "items": {
+              "$ref": "#/components/schemas/IntentPlanMissingChoice"
+            },
+            "type": "array"
+          },
+          "model": {
+            "$ref": "#/components/schemas/IntentPlanModel"
+          },
+          "mutation": {
+            "const": "none",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "infercrane.intent-plan/v1",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "ready",
+              "needs_input"
+            ],
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "schema_version",
+          "status",
+          "mutation",
+          "interpretation",
+          "choices",
+          "missing_choices",
+          "architecture",
+          "evidence",
+          "warnings"
+        ],
+        "type": "object"
+      },
+      "IntentPlanArchitecture": {
+        "additionalProperties": false,
+        "properties": {
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/IntentPlanEdge"
+            },
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/IntentPlanNode"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "nodes",
+          "edges"
+        ],
+        "type": "object"
+      },
+      "IntentPlanChoice": {
+        "additionalProperties": false,
+        "properties": {
+          "editable": {
+            "type": "boolean"
+          },
+          "field": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/IntentPlanOption"
+            },
+            "type": "array"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "value": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
+            ]
+          }
+        },
+        "required": [
+          "field",
+          "label",
+          "editable",
+          "required"
+        ],
+        "type": "object"
+      },
+      "IntentPlanConfiguration": {
+        "additionalProperties": false,
+        "properties": {
+          "compute_mode": {
+            "enum": [
+              "elastic",
+              "serverless"
+            ],
+            "type": "string"
+          },
+          "gpu": {
+            "type": "string"
+          },
+          "gpu_count": {
+            "maximum": 1024,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_replicas": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "min_replicas": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "model": {
+            "type": "string"
+          },
+          "model_revision": {
+            "type": "string"
+          },
+          "profile": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "provider_adapter": {
+            "type": "string"
+          },
+          "region": {
+            "type": "string"
+          },
+          "routing": {
+            "type": "string"
+          },
+          "runtime": {
+            "type": "string"
+          },
+          "runtime_args": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "runtime_version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "model_revision",
+          "runtime",
+          "runtime_args",
+          "profile",
+          "compute_mode",
+          "gpu",
+          "gpu_count",
+          "min_replicas",
+          "max_replicas",
+          "routing"
+        ],
+        "type": "object"
+      },
+      "IntentPlanEdge": {
+        "additionalProperties": false,
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "label"
+        ],
+        "type": "object"
+      },
+      "IntentPlanEnvelope": {
+        "additionalProperties": false,
+        "properties": {
+          "capacity_reserved": {
+            "const": false,
+            "type": "boolean"
+          },
+          "deployment_draft": {
+            "$ref": "#/components/schemas/DeploymentCreate"
+          },
+          "performance_claims": {
+            "const": false,
+            "type": "boolean"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/IntentPlan"
+          },
+          "provider_mutation": {
+            "const": false,
+            "type": "boolean"
+          },
+          "selection_boundary": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "plan",
+          "provider_mutation",
+          "capacity_reserved",
+          "performance_claims",
+          "selection_boundary"
+        ],
+        "type": "object"
+      },
+      "IntentPlanEvidence": {
+        "additionalProperties": false,
+        "properties": {
+          "capacity": {
+            "type": "string"
+          },
+          "configuration": {
+            "type": "string"
+          },
+          "performance": {
+            "type": "string"
+          },
+          "price": {
+            "$ref": "#/components/schemas/IntentPlanPriceEvidence"
+          }
+        },
+        "required": [
+          "configuration",
+          "performance",
+          "capacity",
+          "price"
+        ],
+        "type": "object"
+      },
+      "IntentPlanInterpretation": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "deploy",
+              "optimize"
+            ],
+            "type": "string"
+          },
+          "compute_mode": {
+            "enum": [
+              "elastic",
+              "serverless"
+            ],
+            "type": "string"
+          },
+          "objective": {
+            "enum": [
+              "interactive",
+              "latency",
+              "throughput",
+              "cost-efficiency"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "objective"
+        ],
+        "type": "object"
+      },
+      "IntentPlanMissingChoice": {
+        "additionalProperties": false,
+        "properties": {
+          "field": {
+            "type": "string"
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/IntentPlanOption"
+            },
+            "type": "array"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "remediation": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "field",
+          "prompt",
+          "reason",
+          "remediation"
+        ],
+        "type": "object"
+      },
+      "IntentPlanModel": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "type": "string"
+          },
+          "evidence_class": {
+            "type": "string"
+          },
+          "evidence_summary": {
+            "type": "string"
+          },
+          "gated": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "repository": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string"
+          },
+          "runtime": {
+            "type": "string"
+          },
+          "tasks": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "display_name",
+          "repository",
+          "revision",
+          "runtime",
+          "tasks",
+          "gated",
+          "evidence_class",
+          "evidence_summary"
+        ],
+        "type": "object"
+      },
+      "IntentPlanNode": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "label",
+          "state"
+        ],
+        "type": "object"
+      },
+      "IntentPlanOption": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "label"
+        ],
+        "type": "object"
+      },
+      "IntentPlanPriceEvidence": {
+        "additionalProperties": false,
+        "properties": {
+          "cost_scope": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "deployment_comparable": {
+            "type": "boolean"
+          },
+          "hourly_usd_per_replica": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "observed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "price_authority": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "current",
+              "unavailable"
+            ],
+            "type": "string"
+          },
+          "valid_until": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "deployment_comparable",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "IntentPlanRequest": {
+        "additionalProperties": false,
+        "anyOf": [
+          {
+            "required": [
+              "intent"
+            ]
+          },
+          {
+            "required": [
+              "model"
+            ]
+          }
+        ],
+        "properties": {
+          "compute_mode": {
+            "enum": [
+              "elastic",
+              "serverless"
+            ],
+            "type": "string"
+          },
+          "gpu": {
+            "maxLength": 128,
+            "type": "string"
+          },
+          "intent": {
+            "maxLength": 2048,
+            "type": "string"
+          },
+          "model": {
+            "maxLength": 256,
+            "type": "string"
+          },
+          "objective": {
+            "enum": [
+              "interactive",
+              "latency",
+              "throughput",
+              "cost-efficiency"
+            ],
+            "type": "string"
+          },
+          "provider": {
+            "maxLength": 64,
+            "type": "string"
+          },
+          "region": {
+            "maxLength": 128,
+            "type": "string"
           }
         },
         "type": "object"
@@ -9777,6 +10318,52 @@
         ]
       }
     },
+    "/api/v1/planning/intents": {
+      "post": {
+        "operationId": "planIntent",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntentPlanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntentPlanEnvelope"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Compile bounded user intent into an editable reviewed configuration",
+        "tags": [
+          "Planning"
+        ]
+      }
+    },
     "/api/v1/principals": {
       "get": {
         "operationId": "listPrincipals",
@@ -11359,6 +11946,9 @@
     },
     {
       "name": "Operations"
+    },
+    {
+      "name": "Planning"
     },
     {
       "name": "Providers"

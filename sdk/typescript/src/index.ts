@@ -11,6 +11,9 @@ export {
 export { ControlApi } from "./generated/api.js";
 export type {
   Deployment,
+  IntentDeploymentDraft,
+  IntentPlan,
+  IntentPlanEnvelope,
   JsonPrimitive,
   JsonValue,
   Operation,

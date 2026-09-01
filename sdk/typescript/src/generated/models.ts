@@ -58,3 +58,145 @@ export interface DeploymentView {
 export interface ObjectList {
   data: Array<Record<string, JsonValue>>;
 }
+
+export interface IntentPlanOption {
+  value: string;
+  label: string;
+  state?: string;
+  reason?: string;
+}
+
+export interface IntentPlanChoice {
+  field: string;
+  label: string;
+  value?: string | number;
+  editable: boolean;
+  required: boolean;
+  options?: IntentPlanOption[];
+}
+
+export interface IntentPlanMissingChoice {
+  field: string;
+  prompt: string;
+  reason: string;
+  options?: IntentPlanOption[];
+  remediation: string;
+}
+
+export interface IntentPlanInterpretation {
+  action: 'deploy' | 'optimize';
+  objective: 'interactive' | 'latency' | 'throughput' | 'cost-efficiency';
+  compute_mode?: 'elastic' | 'serverless';
+}
+
+export interface IntentPlanModel {
+  name: string;
+  display_name: string;
+  repository: string;
+  revision: string;
+  runtime: string;
+  tasks: string[];
+  gated: boolean;
+  evidence_class: string;
+  evidence_summary: string;
+}
+
+export interface IntentPlanConfiguration {
+  model: string;
+  model_revision: string;
+  runtime: string;
+  runtime_version?: string;
+  runtime_args: string[];
+  profile: string;
+  compute_mode: 'elastic' | 'serverless';
+  provider?: string;
+  provider_adapter?: string;
+  region?: string;
+  gpu: string;
+  gpu_count: number;
+  min_replicas: number;
+  max_replicas: number;
+  routing: string;
+}
+
+export interface IntentPlanPriceEvidence {
+  state: 'current' | 'unavailable';
+  currency?: string;
+  hourly_usd_per_replica?: number;
+  cost_scope?: string;
+  price_authority?: string;
+  source?: string;
+  observed_at?: string;
+  valid_until?: string;
+  deployment_comparable: boolean;
+  reason: string;
+}
+
+export interface IntentPlanEvidence {
+  configuration: string;
+  performance: string;
+  capacity: string;
+  price: IntentPlanPriceEvidence;
+}
+
+export interface IntentPlanNode {
+  id: string;
+  kind: string;
+  label: string;
+  state: string;
+}
+
+export interface IntentPlanEdge {
+  from: string;
+  to: string;
+  label: string;
+}
+
+export interface IntentPlanArchitecture {
+  nodes: IntentPlanNode[];
+  edges: IntentPlanEdge[];
+}
+
+export interface IntentDeploymentDraft {
+  name: string;
+  endpoint_name?: string;
+  model: string;
+  runtime?: string;
+  cloud: string;
+  provider_adapter?: string;
+  compute_mode?: 'elastic' | 'serverless';
+  gpu: string;
+  gpu_count?: number;
+  region?: string;
+  runtime_version?: string;
+  model_revision?: string;
+  runtime_args?: string[];
+  port?: number;
+  min_replicas?: number;
+  max_replicas?: number;
+  workload?: Record<string, JsonValue>;
+  serving?: Record<string, JsonValue>;
+}
+
+export interface IntentPlan {
+  schema_version: 'infercrane.intent-plan/v1';
+  status: 'ready' | 'needs_input';
+  mutation: 'none';
+  interpretation: IntentPlanInterpretation;
+  model?: IntentPlanModel;
+  configuration?: IntentPlanConfiguration;
+  choices: IntentPlanChoice[];
+  missing_choices: IntentPlanMissingChoice[];
+  architecture: IntentPlanArchitecture;
+  evidence: IntentPlanEvidence;
+  warnings: string[];
+}
+
+export interface IntentPlanEnvelope {
+  plan: IntentPlan;
+  deployment_draft?: IntentDeploymentDraft;
+  provider_mutation: false;
+  capacity_reserved: false;
+  performance_claims: false;
+  selection_boundary: string;
+}
