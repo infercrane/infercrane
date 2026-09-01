@@ -6,6 +6,7 @@ package intentplan
 
 import (
 	"errors"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -202,17 +203,18 @@ func (p Planner) Plan(request Request) (Plan, error) {
 		return result, nil
 	}
 
-	provider, providerOptions, providerReady := p.chooseProvider(request.Provider, request.Intent, profile)
-	if provider.ID == "" {
-		result.Missing = append(result.Missing, MissingChoice{Field: "provider", Prompt: "Where should InferCrane deploy this model?", Reason: "A provider could not be selected from one unambiguous ready and compatible connection.", Options: providerOptions, Remediation: "Choose a compatible provider and configure its compute connection before deployment."})
-	} else if !providerReady {
-		result.Missing = append(result.Missing, MissingChoice{Field: "provider_connection", Prompt: "Connect " + providerLabel(provider) + " before deployment.", Reason: provider.Reason, Options: providerOptions, Remediation: "Configure and verify the provider connection; catalog pricing alone does not authorize or prove a launch."})
-	}
-
 	gpu := request.GPU
 	if gpu == "" {
 		gpu = profile.GPUHint
 	}
+	gpuCount := max(1, profile.GPUCount)
+	provider, providerOptions, providerReady := p.chooseProvider(request.Provider, request.Intent, request.Region, gpu, gpuCount, profile)
+	if provider.ID == "" {
+		result.Missing = append(result.Missing, MissingChoice{Field: "provider", Prompt: "Where should InferCrane deploy this model?", Reason: "No exact comparable quote, reviewed profile hint, or single ready compatible connection selected a provider.", Options: providerOptions, Remediation: "Choose a compatible provider and configure its compute connection before deployment."})
+	} else if !providerReady {
+		result.Missing = append(result.Missing, MissingChoice{Field: "provider_connection", Prompt: "Connect " + providerLabel(provider) + " before deployment.", Reason: provider.Reason, Options: providerOptions, Remediation: "Configure and verify the provider connection; catalog pricing alone does not authorize or prove a launch."})
+	}
+
 	region := request.Region
 	if (provider.ID == "aws" || provider.ID == "gcp") && region == "" {
 		result.Missing = append(result.Missing, MissingChoice{Field: "region", Prompt: "Which " + providerLabel(provider) + " region should be used?", Reason: "This provider requires an explicit region; price and capacity vary by region.", Remediation: "Choose a configured region, then request a capacity probe before launching."})
@@ -222,7 +224,7 @@ func (p Planner) Plan(request Request) (Plan, error) {
 		result.Missing = append(result.Missing, MissingChoice{Field: "provider", Prompt: "Choose a compatible provider.", Reason: "No registered compatibility evidence matches this runtime, provider, and compute mode.", Options: providerOptions, Remediation: "Choose a listed compatible provider or qualify and register the missing tuple."})
 	}
 
-	configuration := Configuration{Model: entry.Model, ModelRevision: entry.Revision, Runtime: profile.Runtime, RuntimeVersion: profile.RuntimeVersion, RuntimeArgs: append([]string(nil), profile.RuntimeArgs...), Profile: profile.Name, ComputeMode: profile.ComputeMode, Provider: provider.ID, ProviderAdapter: adapter, Region: region, GPU: gpu, GPUCount: max(1, profile.GPUCount), MinReplicas: profile.MinReplicas, MaxReplicas: profile.MaxReplicas, Routing: "round-robin"}
+	configuration := Configuration{Model: entry.Model, ModelRevision: entry.Revision, Runtime: profile.Runtime, RuntimeVersion: profile.RuntimeVersion, RuntimeArgs: append([]string(nil), profile.RuntimeArgs...), Profile: profile.Name, ComputeMode: profile.ComputeMode, Provider: provider.ID, ProviderAdapter: adapter, Region: region, GPU: gpu, GPUCount: gpuCount, MinReplicas: profile.MinReplicas, MaxReplicas: profile.MaxReplicas, Routing: "round-robin"}
 	result.Configuration = &configuration
 	result.Choices = append(result.Choices,
 		Choice{Field: "model", Label: "Model", Value: entry.Model, Editable: true, Required: true, Options: []Option{{Value: entry.Name, Label: entry.DisplayName, State: "reviewed"}}},
@@ -430,7 +432,7 @@ func profileAcceptsGPU(profile curatedrecipe.ServingProfile, gpu string) bool {
 	return false
 }
 
-func (p Planner) chooseProvider(explicit, intent string, profile curatedrecipe.ServingProfile) (Provider, []Option, bool) {
+func (p Planner) chooseProvider(explicit, intent, region, gpu string, gpuCount int, profile curatedrecipe.ServingProfile) (Provider, []Option, bool) {
 	requested := explicit
 	if requested == "" {
 		requested = providerFromIntent(intent)
@@ -439,7 +441,7 @@ func (p Planner) chooseProvider(explicit, intent string, profile curatedrecipe.S
 	sort.Slice(providers, func(i, j int) bool { return providers[i].ID < providers[j].ID })
 	compatibleClouds := map[string]bool{}
 	for _, row := range p.Compatibility {
-		if row.Runtime == profile.Runtime && string(row.Mode) == profile.ComputeMode && row.State != integration.QualificationDeferred {
+		if row.Runtime == profile.Runtime && string(row.Mode) == profile.ComputeMode && row.State != integration.QualificationDeferred && (profile.ProviderAdapterHint == "" || row.Adapter == profile.ProviderAdapterHint) {
 			compatibleClouds[row.Cloud] = true
 		}
 	}
@@ -468,6 +470,9 @@ func (p Planner) chooseProvider(explicit, intent string, profile curatedrecipe.S
 	if requested != "" {
 		return Provider{}, options, false
 	}
+	if provider, ok := p.cheapestComparableProvider(providers, compatibleClouds, region, gpu, gpuCount); ok {
+		return provider, options, provider.State == "ready"
+	}
 	if profile.CloudHint != "" {
 		for _, provider := range readyCompatible {
 			if provider.ID == profile.CloudHint {
@@ -479,6 +484,29 @@ func (p Planner) chooseProvider(explicit, intent string, profile curatedrecipe.S
 		return readyCompatible[0], options, true
 	}
 	return Provider{}, options, false
+}
+
+// cheapestComparableProvider ranks price only after configuration compatibility
+// has been established. Connection readiness deliberately does not participate:
+// an unconnected provider may be the recommendation, but cannot make the plan
+// ready or authorize a launch.
+func (p Planner) cheapestComparableProvider(providers []Provider, compatibleClouds map[string]bool, region, gpu string, gpuCount int) (Provider, bool) {
+	var selected Provider
+	var selectedPrice pricing.Estimate
+	found := false
+	for _, provider := range providers {
+		if !compatibleClouds[provider.ID] {
+			continue
+		}
+		estimate, ok := p.selectPrice(provider.ID, region, gpu, gpuCount, true)
+		if !ok {
+			continue
+		}
+		if !found || estimate.Hourly < selectedPrice.Hourly || estimate.Hourly == selectedPrice.Hourly && provider.ID < selected.ID {
+			selected, selectedPrice, found = provider, estimate, true
+		}
+	}
+	return selected, found
 }
 
 func chooseCompatibility(rows []integration.RuntimeCompatibility, cloud, runtime, mode, hint string) (string, string, string) {
@@ -515,27 +543,9 @@ func qualificationRank(state integration.QualificationState) int {
 }
 
 func (p Planner) priceEvidence(configuration Configuration) PriceEvidence {
-	now := time.Now().UTC()
-	if p.Now != nil {
-		now = p.Now().UTC()
-	}
-	var selected pricing.Estimate
-	selectedKey := ""
-	found := false
-	for request, estimate := range p.Prices {
-		if request.Cloud != configuration.Provider || request.GPUCount != configuration.GPUCount || request.Replicas != 1 || !provideridentity.MatchesGPU(configuration.Provider, request.GPU, configuration.GPU) || estimate.Stale(now) {
-			continue
-		}
-		if configuration.Region != "" && request.Region != "global" && !strings.EqualFold(request.Region, configuration.Region) {
-			continue
-		}
-		if configuration.Region == "" && request.Region != "global" {
-			continue
-		}
-		candidateKey := request.Region + "\x00" + request.GPU + "\x00" + estimate.Source
-		if !found || estimate.Hourly < selected.Hourly || estimate.Hourly == selected.Hourly && (estimate.ObservedAt.After(selected.ObservedAt) || estimate.ObservedAt.Equal(selected.ObservedAt) && candidateKey < selectedKey) {
-			selected, selectedKey, found = estimate, candidateKey, true
-		}
+	selected, found := p.selectPrice(configuration.Provider, configuration.Region, configuration.GPU, configuration.GPUCount, true)
+	if !found {
+		selected, found = p.selectPrice(configuration.Provider, configuration.Region, configuration.GPU, configuration.GPUCount, false)
 	}
 	if !found {
 		return unavailablePrice("no exact current price observation for one replica of this provider/region/GPU tuple")
@@ -546,6 +556,35 @@ func (p Planner) priceEvidence(configuration Configuration) PriceEvidence {
 		reason = "current billing component or non-authoritative observation; it must not rank against a complete deployment total"
 	}
 	return PriceEvidence{State: "current", Currency: selected.Currency, HourlyUSDPerReplica: &hourly, CostScope: string(selected.CostScope), Authority: string(selected.Authority), Source: selected.Source, ObservedAt: &observed, ValidUntil: &valid, DeploymentComparable: selected.DeploymentComparable(), Reason: reason}
+}
+
+func (p Planner) selectPrice(provider, region, gpu string, gpuCount int, comparableOnly bool) (pricing.Estimate, bool) {
+	now := time.Now().UTC()
+	if p.Now != nil {
+		now = p.Now().UTC()
+	}
+	var selected pricing.Estimate
+	selectedKey := ""
+	found := false
+	for request, estimate := range p.Prices {
+		if request.Cloud != provider || request.GPUCount != gpuCount || request.Replicas != 1 || !provideridentity.MatchesGPU(provider, request.GPU, gpu) || estimate.Stale(now) || estimate.Hourly < 0 || math.IsNaN(estimate.Hourly) || math.IsInf(estimate.Hourly, 0) {
+			continue
+		}
+		if region != "" && !strings.EqualFold(request.Region, region) {
+			continue
+		}
+		if region == "" && request.Region != "global" {
+			continue
+		}
+		if comparableOnly && (!estimate.DeploymentComparable() || !strings.EqualFold(estimate.Currency, "USD")) {
+			continue
+		}
+		candidateKey := request.Region + "\x00" + request.GPU + "\x00" + estimate.Source
+		if !found || estimate.Hourly < selected.Hourly || estimate.Hourly == selected.Hourly && (estimate.ObservedAt.After(selected.ObservedAt) || estimate.ObservedAt.Equal(selected.ObservedAt) && candidateKey < selectedKey) {
+			selected, selectedKey, found = estimate, candidateKey, true
+		}
+	}
+	return selected, found
 }
 
 func unavailablePrice(reason string) PriceEvidence {

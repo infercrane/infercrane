@@ -23,6 +23,13 @@ Optional fields are `model`, `provider`, `region`, `gpu`, `objective`, and `comp
 fields override only the matching interpretation. Objectives are `interactive`, `latency`,
 `throughput`, or `cost-efficiency`; compute mode is `elastic` or `serverless`.
 
+When no provider is named, InferCrane ranks compatible registered providers only when it has an
+exact, fresh USD quote for the reviewed GPU count and region. The quote must be a complete instance
+total from an accepted provider, contract, or measured-invoice authority. Connection state does not
+change that ranking: a cheaper unconnected provider is returned with a `provider_connection`
+remediation. If no comparable quote exists, selection falls back to the reviewed profile hint or one
+unambiguous ready provider.
+
 The response has one of two statuses:
 
 - `ready`: every choice needed to form the reviewed starting configuration is present.

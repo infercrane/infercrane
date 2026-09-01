@@ -74,12 +74,47 @@ func TestPlanDoesNotSubstituteUnknownOrAmbiguousModel(t *testing.T) {
 func TestPlanRequiresProviderChoiceWhenSeveralReadyConnectionsMatch(t *testing.T) {
 	planner := testPlanner(t)
 	planner.Providers[0].State = "ready"
+	planner.Prices = nil
 	plan, err := planner.Plan(Request{Intent: "Deploy Qwen/Qwen3-8B"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if plan.Status != "needs_input" || plan.Configuration == nil || plan.Configuration.Provider != "" || !hasMissing(plan, "provider") {
 		t.Fatalf("ambiguous provider was silently selected: %+v", plan)
+	}
+}
+
+func TestPlanRecommendsCheaperCompatibleProviderEvenWhenConnectionIsMissing(t *testing.T) {
+	planner := testPlanner(t)
+	planner.Prices[pricing.Request{Cloud: "aws", Region: "global", GPU: "NVIDIA L40S", GPUCount: 1, Replicas: 1}] = pricing.Estimate{Currency: "USD", Hourly: .42, CostScope: pricing.CostScopeInstanceTotal, Authority: pricing.PriceAuthorityProviderAPI, Source: "https://pricing.us-east-1.amazonaws.com", ObservedAt: planner.Now().Add(-time.Minute), StaleAfter: time.Hour}
+	plan, err := planner.Plan(Request{Intent: "Deploy Qwen/Qwen3-8B"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Configuration == nil || plan.Configuration.Provider != "aws" || !hasMissing(plan, "provider_connection") || plan.Evidence.Price.HourlyUSDPerReplica == nil || *plan.Evidence.Price.HourlyUSDPerReplica != .42 {
+		t.Fatalf("cheaper unconnected provider was not recommended with remediation: %+v", plan)
+	}
+}
+
+func TestPlanExcludesNonComparableAndStalePricesFromProviderRanking(t *testing.T) {
+	now := testPlanner(t).Now()
+	tests := map[string]pricing.Estimate{
+		"accelerator-only":  {Currency: "USD", Hourly: .01, CostScope: pricing.CostScopeAcceleratorOnly, Authority: pricing.PriceAuthorityProviderAPI, Source: "https://pricing.us-east-1.amazonaws.com", ObservedAt: now.Add(-time.Minute), StaleAfter: time.Hour},
+		"non-authoritative": {Currency: "USD", Hourly: .01, CostScope: pricing.CostScopeInstanceTotal, Authority: pricing.PriceAuthorityUnknown, Source: "operator snapshot", ObservedAt: now.Add(-time.Minute), StaleAfter: time.Hour},
+		"stale":             {Currency: "USD", Hourly: .01, CostScope: pricing.CostScopeInstanceTotal, Authority: pricing.PriceAuthorityProviderAPI, Source: "https://pricing.us-east-1.amazonaws.com", ObservedAt: now.Add(-2 * time.Hour), StaleAfter: time.Hour},
+	}
+	for name, estimate := range tests {
+		t.Run(name, func(t *testing.T) {
+			planner := testPlanner(t)
+			planner.Prices[pricing.Request{Cloud: "aws", Region: "global", GPU: "NVIDIA L40S", GPUCount: 1, Replicas: 1}] = estimate
+			plan, err := planner.Plan(Request{Intent: "Deploy Qwen/Qwen3-8B"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if plan.Configuration == nil || plan.Configuration.Provider != "runpod" || plan.Status != "ready" {
+				t.Fatalf("%s price influenced provider ranking: %+v", name, plan)
+			}
+		})
 	}
 }
 
