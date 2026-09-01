@@ -91,6 +91,28 @@ func (c *DynamicCatalog) ReplaceProvider(provider string, prices map[Request]Est
 	}
 }
 
+// ReplaceProviderGPU atomically replaces one provider/GPU shard. Marketplace
+// APIs with strict request budgets can refresh exact accelerator SKUs over
+// several rate-limit windows without presenting a capped mixed response as a
+// complete provider snapshot.
+func (c *DynamicCatalog) ReplaceProviderGPU(provider, gpu string, prices map[Request]Estimate) {
+	if c == nil || provider == "" || gpu == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for request := range c.feed {
+		if request.Cloud == provider && request.GPU == gpu {
+			delete(c.feed, request)
+		}
+	}
+	for request, estimate := range prices {
+		if request.Cloud == provider && request.GPU == gpu {
+			c.feed[request] = estimate
+		}
+	}
+}
+
 func (c *DynamicCatalog) Snapshot() map[Request]Estimate {
 	if c == nil {
 		return nil

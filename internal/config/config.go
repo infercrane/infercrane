@@ -501,8 +501,8 @@ func load(requireAPIKey bool) (Config, error) {
 	if config.HealthInterval <= 0 || config.UpstreamTimeout <= 0 || config.ShutdownTimeout <= 0 || config.RequestRetention <= 0 {
 		return Config{}, fmt.Errorf("timeouts must be positive")
 	}
-	if config.GPUPriceSyncInterval != 0 && (config.GPUPriceSyncInterval < 5*time.Minute || config.GPUPriceSyncInterval > 24*time.Hour) {
-		return Config{}, fmt.Errorf("INFERCRANE_GPU_PRICE_SYNC_SECONDS must be 0 or between 300 and 86400")
+	if config.GPUPriceSyncInterval != 0 && (config.GPUPriceSyncInterval < time.Minute || config.GPUPriceSyncInterval > 24*time.Hour) {
+		return Config{}, fmt.Errorf("INFERCRANE_GPU_PRICE_SYNC_SECONDS must be 0 or between 60 and 86400")
 	}
 	if config.RunPodContainerDiskGiB < 50 || config.RunPodContainerDiskGiB > 2048 {
 		return Config{}, fmt.Errorf("INFERCRANE_RUNPOD_CONTAINER_DISK_GIB must be between 50 and 2048")
