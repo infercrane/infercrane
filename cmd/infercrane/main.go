@@ -4111,6 +4111,20 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		}, time.Minute, func(err error) {
 			logger.Warn("provider-native RunPod price refresh failed", "error", err)
 		})
+		vastFeed := priceingest.VastFeed{ValidFor: 10 * time.Minute}
+		vastCtx, vastCancel := context.WithTimeout(ctx, 45*time.Second)
+		vastErr := vastFeed.Refresh(vastCtx, priceCatalog)
+		vastCancel()
+		if vastErr != nil {
+			logger.Warn("initial provider-native Vast offer refresh failed", "error", vastErr)
+		}
+		go priceingest.RunProviderFeed(ctx, func(refreshCtx context.Context) error {
+			refreshCtx, cancel := context.WithTimeout(refreshCtx, 45*time.Second)
+			defer cancel()
+			return vastFeed.Refresh(refreshCtx, priceCatalog)
+		}, 5*time.Minute, func(err error) {
+			logger.Warn("provider-native Vast offer refresh failed", "error", err)
+		})
 	}
 	_, aiperfErr := exec.LookPath(cfg.AIPerfBinary)
 	optimizationExecutionEnabled := false
