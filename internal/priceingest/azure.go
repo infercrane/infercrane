@@ -301,7 +301,7 @@ func azurePrice(item azureRetailItem, now time.Time, validFor time.Duration, que
 	official.RawQuery = source.RawQuery
 	official.Fragment = url.Values{"arm_sku": {item.ArmSKUName}, "meter_id": {item.MeterID}}.Encode()
 	request := pricing.Request{Cloud: "azure", Region: region, GPU: shape.GPU, GPUCount: shape.Count, Replicas: 1}
-	estimate := pricing.Estimate{Currency: "USD", Hourly: item.RetailPrice, Source: official.String(), ObservedAt: now, StaleAfter: validFor}
+	estimate := pricing.Estimate{Currency: "USD", Hourly: item.RetailPrice, CostScope: pricing.CostScopeInstanceTotal, Authority: pricing.PriceAuthorityProviderAPI, Source: official.String(), ObservedAt: now, StaleAfter: validFor}
 	return request, estimate, effectiveStart.UTC(), true
 }
 

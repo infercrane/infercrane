@@ -338,7 +338,7 @@ func addAWSPriceRow(prices map[pricing.Request]pricing.Estimate, columns map[str
 		return
 	}
 	request := pricing.Request{Cloud: "aws", Region: region, GPU: gpu, GPUCount: int(count), Replicas: 1}
-	estimate := pricing.Estimate{Currency: "USD", Hourly: hourly, Source: source, ObservedAt: now, StaleAfter: validFor}
+	estimate := pricing.Estimate{Currency: "USD", Hourly: hourly, CostScope: pricing.CostScopeInstanceTotal, Authority: pricing.PriceAuthorityProviderAPI, Source: source, ObservedAt: now, StaleAfter: validFor}
 	if current, ok := prices[request]; !ok || estimate.Hourly < current.Hourly {
 		prices[request] = estimate
 	}

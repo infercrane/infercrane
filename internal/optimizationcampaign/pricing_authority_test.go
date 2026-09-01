@@ -15,7 +15,7 @@ func TestPricingAuthorityRequiresExactFreshPriceThroughExecutionWindow(t *testin
 	draft.Provider.Cloud, draft.Provider.Region, draft.Resources.GPU = "aws", "eu-central-1", "L40S"
 	draft.Scaling.MaxReplicas = 2
 	request := pricing.Request{Cloud: "aws", Region: "eu-central-1", GPU: "NVIDIA L40S", GPUCount: 1, Replicas: 2}
-	authority := PricingAuthority{Provider: pricing.Catalog{Prices: map[pricing.Request]pricing.Estimate{request: {Currency: "USD", Source: "aws-price-list/2026-08-24", Hourly: 3.72, ObservedAt: now, StaleAfter: 2 * time.Hour, GuaranteedUntil: now.Add(2 * time.Hour)}}}, Now: func() time.Time { return now }}
+	authority := PricingAuthority{Provider: pricing.Catalog{Prices: map[pricing.Request]pricing.Estimate{request: {Currency: "USD", Source: "aws-price-list/2026-08-24", Hourly: 3.72, CostScope: pricing.CostScopeInstanceTotal, Authority: pricing.PriceAuthorityAccountContract, ObservedAt: now, StaleAfter: 2 * time.Hour, GuaranteedUntil: now.Add(2 * time.Hour)}}}, Now: func() time.Time { return now }}
 	quote, err := authority.Quote(context.Background(), draft, now.Add(time.Hour))
 	if err != nil || quote.HourlyUSD != 3.72 || quote.Source == "" || quote.ValidUntil != now.Add(2*time.Hour) {
 		t.Fatalf("quote=%+v err=%v", quote, err)
@@ -28,7 +28,7 @@ func TestPricingAuthorityRequiresExactFreshPriceThroughExecutionWindow(t *testin
 	if _, err = authority.Quote(context.Background(), draft, now.Add(3*time.Hour)); err == nil {
 		t.Fatal("price that expires during execution must not authorize mutation")
 	}
-	authority.Provider = pricing.Catalog{Prices: map[pricing.Request]pricing.Estimate{request: {Currency: "USD", Source: "future", Hourly: 3.72, ObservedAt: now.Add(time.Minute), StaleAfter: 2 * time.Hour, GuaranteedUntil: now.Add(2 * time.Hour)}}}
+	authority.Provider = pricing.Catalog{Prices: map[pricing.Request]pricing.Estimate{request: {Currency: "USD", Source: "future", Hourly: 3.72, CostScope: pricing.CostScopeInstanceTotal, Authority: pricing.PriceAuthorityAccountContract, ObservedAt: now.Add(time.Minute), StaleAfter: 2 * time.Hour, GuaranteedUntil: now.Add(2 * time.Hour)}}}
 	if _, err = authority.Quote(context.Background(), draft, now.Add(time.Hour)); err == nil {
 		t.Fatal("future-dated price evidence was accepted")
 	}
@@ -40,7 +40,7 @@ func TestPricingAuthorityResolvesRunPodAliasButRejectsUnlockedMarketPrice(t *tes
 	draft.Provider.Cloud, draft.Provider.Region, draft.Resources.GPU = "runpod", "EU-RO-1", "H100"
 	draft.Resources.GPUCount, draft.Scaling.MaxReplicas = 1, 1
 	request := pricing.Request{Cloud: "runpod", Region: "global", GPU: "NVIDIA H100 80GB HBM3", GPUCount: 1, Replicas: 1}
-	market := pricing.Estimate{Currency: "USD", Source: "runpod provider API", Hourly: 2.69, ObservedAt: now, StaleAfter: 2 * time.Minute}
+	market := pricing.Estimate{Currency: "USD", Source: "runpod provider API", Hourly: 2.69, CostScope: pricing.CostScopeInstanceTotal, Authority: pricing.PriceAuthorityProviderAPI, ObservedAt: now, StaleAfter: 2 * time.Minute}
 	authority := PricingAuthority{Provider: pricing.Catalog{Prices: map[pricing.Request]pricing.Estimate{request: market}}, Now: func() time.Time { return now }}
 	if _, err := authority.Quote(context.Background(), draft, now.Add(time.Minute)); err == nil {
 		t.Fatal("fresh but unlocked marketplace price authorized mutation")

@@ -44,7 +44,7 @@ func (a PricingAuthority) Quote(ctx context.Context, draft optimizer.DeploymentD
 		now = a.Now().UTC()
 	}
 	guaranteedUntil := estimate.GuaranteedUntil.UTC()
-	if estimate.Currency != "USD" || estimate.Source == "" || estimate.Hourly <= 0 || estimate.ObservedAt.After(now) || estimate.Stale(now) || guaranteedUntil.IsZero() || guaranteedUntil.Before(requiredUntil) {
+	if estimate.Currency != "USD" || estimate.Source == "" || estimate.Hourly <= 0 || estimate.ObservedAt.After(now) || estimate.Stale(now) || !estimate.DeploymentComparable() || guaranteedUntil.IsZero() || guaranteedUntil.Before(requiredUntil) {
 		return CostQuote{}, fmt.Errorf("exact provider price must be fresh, locked USD evidence guaranteed through %s", requiredUntil.UTC().Format(time.RFC3339))
 	}
 	return CostQuote{HourlyUSD: estimate.Hourly, Source: estimate.Source, ObservedAt: estimate.ObservedAt.UTC(), ValidUntil: guaranteedUntil}, nil

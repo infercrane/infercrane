@@ -62,7 +62,7 @@ func finOpsCollectCommand(ctx context.Context, cfg config.Config, args []string)
 	for _, row := range rows {
 		values = append(values, map[string]any{"scope": row.Scope, "resource": row.Resource, "billing_unit": row.BillingUnit, "amount": row.Amount, "window_start": row.WindowStart, "window_end": row.WindowEnd})
 	}
-	body := map[string]any{"source": *source, "currency": *currency, "evidence_class": "provider_reported", "observed_at": observedAt, "valid_until": observedAt.Add(*ttl), "allocations": values}
+	body := map[string]any{"source": *source, "currency": *currency, "evidence_class": "measured", "observed_at": observedAt, "valid_until": observedAt.Add(*ttl), "allocations": values}
 	var ingested struct {
 		Data              []domain.CostEvidence `json:"data"`
 		ContentRecorded   bool                  `json:"content_recorded"`

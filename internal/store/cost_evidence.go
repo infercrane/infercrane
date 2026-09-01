@@ -89,8 +89,8 @@ func validateCostEvidence(row domain.CostEvidence, now time.Time) error {
 	if row.BillingUnit != "hour" {
 		return errors.New("v1 cost evidence requires the canonical billing_unit hour")
 	}
-	if row.EvidenceClass != "measured" && row.EvidenceClass != "provider_reported" {
-		return errors.New("cost evidence_class must be measured or provider_reported")
+	if row.EvidenceClass != "measured" {
+		return errors.New("imported cost evidence_class must be measured")
 	}
 	if math.IsNaN(row.Amount) || math.IsInf(row.Amount, 0) || row.Amount < 0 {
 		return errors.New("cost amount must be finite and non-negative")

@@ -18,6 +18,10 @@ func TestLoadOptimizationPricesRequiresExactSourcedEvidence(t *testing.T) {
 	if _, err = envOptimizationPrices("INFERCRANE_OPTIMIZATION_PRICES_JSON"); err == nil {
 		t.Fatal("reversed price evidence window was accepted")
 	}
+	t.Setenv("INFERCRANE_OPTIMIZATION_PRICES_JSON", `[{"cloud":"aws","region":"eu-central-1","gpu":"L40S","replicas":1,"hourly_usd":2.1,"currency":"USD","source":"https://raw.githubusercontent.com/example/catalog/main/prices.csv","observed_at":"2026-08-24T10:00:00Z","valid_until":"2026-08-25T10:00:00Z"}]`)
+	if _, err = envOptimizationPrices("INFERCRANE_OPTIMIZATION_PRICES_JSON"); err == nil {
+		t.Fatal("repository snapshot was accepted as manual optimization price authority")
+	}
 }
 
 func TestStripePrepaidFundingRequiresCompleteFixedSandboxConfiguration(t *testing.T) {

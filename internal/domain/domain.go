@@ -390,10 +390,11 @@ type OperationalMeasurement struct {
 	CreatedAt     time.Time `json:"created_at"`
 }
 
-// CostEvidence is an immutable, revision-bound cost observation imported from
-// a qualified external cost source. Amount is the normalized rate denominated
-// by BillingUnit and retains its source window; InferCrane never assumes or
-// converts currency.
+// CostEvidence is an immutable, revision-bound measured cost observation
+// imported from a tenant-authorized collector. Amount is the normalized rate
+// denominated by BillingUnit and retains its source window; InferCrane never
+// assumes or converts currency. Provider-reported authority is carried by the
+// provider pricing path instead of this tenant-controlled import boundary.
 type CostEvidence struct {
 	ID            string    `json:"id"`
 	TenantID      string    `json:"-"`

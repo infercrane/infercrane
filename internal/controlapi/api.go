@@ -326,6 +326,8 @@ type GPUPriceObservation struct {
 	Replicas             int        `json:"replicas"`
 	Currency             string     `json:"currency"`
 	HourlyUSD            float64    `json:"hourly_usd"`
+	CostScope            string     `json:"cost_scope"`
+	PriceAuthority       string     `json:"price_authority"`
 	Source               string     `json:"source"`
 	ObservedAt           time.Time  `json:"observed_at"`
 	ValidUntil           time.Time  `json:"valid_until"`
@@ -1924,6 +1926,13 @@ func (a API) recordCostEvidence(w http.ResponseWriter, r *http.Request) {
 	if !decodeMutationBody(w, r, &request) {
 		return
 	}
+	// This endpoint imports observations supplied by the tenant. It can record
+	// measurements from a bounded collector such as OpenCost, but it must never
+	// let a caller mint provider authority by choosing a stronger label.
+	if request.EvidenceClass != "measured" {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_cost_evidence", "imported cost evidence must use evidence_class measured; provider-reported rates come only from provider adapters")
+		return
+	}
 	rows := make([]domain.CostEvidence, 0, len(request.Allocations))
 	for _, allocation := range request.Allocations {
 		rows = append(rows, domain.CostEvidence{Source: request.Source, Currency: request.Currency, EvidenceClass: request.EvidenceClass, ObservedAt: request.ObservedAt, ValidUntil: request.ValidUntil, Scope: allocation.Scope, Resource: allocation.Resource, BillingUnit: allocation.BillingUnit, Amount: allocation.Amount, WindowStart: allocation.WindowStart, WindowEnd: allocation.WindowEnd})
@@ -2655,6 +2664,9 @@ func (a API) createFinOpsReport(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, row := range rows {
+			if row.EvidenceClass != "measured" {
+				continue
+			}
 			validUntil := row.ValidUntil
 			evidence = append(evidence, finops.CostEvidence{ID: row.ID, Scope: row.Scope, Resource: row.Resource, Source: row.Source, Currency: row.Currency, BillingUnit: row.BillingUnit, EvidenceClass: row.EvidenceClass, Amount: row.Amount, ObservedAt: row.ObservedAt, ValidUntil: &validUntil})
 		}
@@ -3530,7 +3542,7 @@ func benchmarkCostMetadata(ctx context.Context, candidate any, tenant, deploymen
 		return unavailable("qualified provider cost evidence lookup failed")
 	}
 	for _, row := range rows {
-		if row.RevisionID != revisionID || row.BillingUnit != "hour" || !strings.HasPrefix(row.Scope, "deployment_hourly_rate/") || row.ObservedAt.After(startedAt) || row.ValidUntil.Before(endedAt) {
+		if row.RevisionID != revisionID || row.EvidenceClass != "measured" || row.BillingUnit != "hour" || !strings.HasPrefix(row.Scope, "deployment_hourly_rate/") || row.ObservedAt.After(startedAt) || row.ValidUntil.Before(endedAt) {
 			continue
 		}
 		encoded, _ := json.Marshal(map[string]any{
@@ -4199,6 +4211,7 @@ type catalogLaunchQuote struct {
 	GPUCount    int       `json:"gpu_count"`
 	Currency    string    `json:"currency,omitempty"`
 	HourlyUSD   *float64  `json:"hourly_usd"`
+	CostScope   string    `json:"cost_scope,omitempty"`
 	Source      string    `json:"source,omitempty"`
 	ObservedAt  time.Time `json:"observed_at,omitempty"`
 	ValidUntil  time.Time `json:"valid_until,omitempty"`
@@ -4283,7 +4296,7 @@ func (a API) catalogLaunchQuote(request provision.LaunchProbeRequest, now time.T
 	found := false
 	providerGPU := provideridentity.GPUTypeID(request.Provider, request.GPU)
 	for candidate, estimate := range a.GPUPriceCatalog.Snapshot() {
-		if !strings.EqualFold(candidate.Cloud, request.Provider) || !strings.EqualFold(candidate.GPU, providerGPU) || candidate.GPUCount != request.GPUCount || candidate.Replicas != 1 || request.Region != "" && !strings.EqualFold(candidate.Region, "global") && !strings.EqualFold(candidate.Region, request.Region) || estimate.Stale(now) {
+		if !strings.EqualFold(candidate.Cloud, request.Provider) || !strings.EqualFold(candidate.GPU, providerGPU) || candidate.GPUCount != request.GPUCount || candidate.Replicas != 1 || request.Region != "" && !strings.EqualFold(candidate.Region, "global") && !strings.EqualFold(candidate.Region, request.Region) || estimate.Stale(now) || !estimate.DeploymentComparable() {
 			continue
 		}
 		if !found || estimate.Hourly < selected.Hourly {
@@ -4296,7 +4309,7 @@ func (a API) catalogLaunchQuote(request provision.LaunchProbeRequest, now time.T
 	hourly := selected.Hourly
 	return catalogLaunchQuote{
 		State: "current", Provider: selectedRequest.Cloud, Region: selectedRequest.Region, GPU: selectedRequest.GPU, GPUCount: selectedRequest.GPUCount,
-		Currency: selected.Currency, HourlyUSD: &hourly, Source: selected.Source, ObservedAt: selected.ObservedAt, ValidUntil: selected.ObservedAt.Add(selected.StaleAfter),
+		Currency: selected.Currency, HourlyUSD: &hourly, CostScope: string(pricing.CostScopeInstanceTotal), Source: selected.Source, ObservedAt: selected.ObservedAt, ValidUntil: selected.ObservedAt.Add(selected.StaleAfter),
 		Limitations: []string{"price is a catalog observation, not a launch quote", "actual account, region, stock, and billing terms may differ"},
 	}
 }
@@ -4309,6 +4322,9 @@ type gpuPriceRow struct {
 	Replicas             int        `json:"replicas"`
 	Currency             string     `json:"currency"`
 	HourlyUSD            float64    `json:"hourly_usd"`
+	CostScope            string     `json:"cost_scope"`
+	PriceAuthority       string     `json:"price_authority"`
+	DeploymentComparable bool       `json:"deployment_comparable"`
 	Source               string     `json:"source"`
 	ObservedAt           time.Time  `json:"observed_at"`
 	ValidUntil           time.Time  `json:"valid_until"`
@@ -4320,6 +4336,39 @@ type gpuPriceRow struct {
 type gpuPriceFacet struct {
 	Value string `json:"value"`
 	Count int    `json:"count"`
+}
+
+func normalizedCostScope(estimate pricing.Estimate) string {
+	switch estimate.CostScope {
+	case pricing.CostScopeInstanceTotal:
+		return string(pricing.CostScopeInstanceTotal)
+	case pricing.CostScopeAcceleratorOnly:
+		return string(pricing.CostScopeAcceleratorOnly)
+	default:
+		return string(pricing.CostScopeUnknown)
+	}
+}
+
+func normalizedObservationCostScope(scope string) string {
+	switch scope {
+	case string(pricing.CostScopeInstanceTotal), string(pricing.CostScopeAcceleratorOnly):
+		return scope
+	default:
+		return string(pricing.CostScopeUnknown)
+	}
+}
+
+func normalizedPriceAuthority(authority pricing.PriceAuthority) string {
+	switch authority {
+	case pricing.PriceAuthorityProviderAPI, pricing.PriceAuthorityAccountContract, pricing.PriceAuthorityMeasuredInvoice:
+		return string(authority)
+	default:
+		return string(pricing.PriceAuthorityUnknown)
+	}
+}
+
+func normalizedObservationPriceAuthority(authority string) string {
+	return normalizedPriceAuthority(pricing.PriceAuthority(authority))
 }
 
 func (a API) gpuPrices(w http.ResponseWriter, r *http.Request) {
@@ -4336,7 +4385,7 @@ func (a API) gpuPrices(w http.ResponseWriter, r *http.Request) {
 			prices = append(prices, GPUPriceObservation{
 				Provider: request.Cloud, Region: request.Region, GPU: request.GPU,
 				GPUCount: request.GPUCount, Replicas: request.Replicas,
-				Currency: estimate.Currency, HourlyUSD: estimate.Hourly, Source: estimate.Source,
+				Currency: estimate.Currency, HourlyUSD: estimate.Hourly, CostScope: normalizedCostScope(estimate), PriceAuthority: normalizedPriceAuthority(estimate.Authority), Source: estimate.Source,
 				ObservedAt: estimate.ObservedAt, ValidUntil: estimate.ObservedAt.Add(estimate.StaleAfter),
 				PriceGuaranteedUntil: guaranteedUntil,
 			})
@@ -4347,8 +4396,9 @@ func (a API) gpuPrices(w http.ResponseWriter, r *http.Request) {
 		rows = append(rows, gpuPriceRow{
 			Provider: price.Provider, Region: price.Region, GPU: price.GPU,
 			GPUCount: price.GPUCount, Replicas: price.Replicas,
-			Currency: price.Currency, HourlyUSD: price.HourlyUSD,
-			Source: price.Source, ObservedAt: price.ObservedAt,
+			Currency: price.Currency, HourlyUSD: price.HourlyUSD, CostScope: normalizedObservationCostScope(price.CostScope), PriceAuthority: normalizedObservationPriceAuthority(price.PriceAuthority),
+			DeploymentComparable: pricing.Estimate{CostScope: pricing.CostScope(normalizedObservationCostScope(price.CostScope)), Authority: pricing.PriceAuthority(normalizedObservationPriceAuthority(price.PriceAuthority)), Source: price.Source}.DeploymentComparable(),
+			Source:               price.Source, ObservedAt: price.ObservedAt,
 			ValidUntil: price.ValidUntil, PriceGuaranteedUntil: price.PriceGuaranteedUntil, Current: price.ValidUntil.After(now),
 			Availability: "unknown",
 		})
@@ -4364,6 +4414,11 @@ func (a API) gpuPrices(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_query", "current must be true or false")
 		return
 	}
+	comparableFilter := strings.ToLower(strings.TrimSpace(query.Get("deployment_comparable")))
+	if comparableFilter != "" && comparableFilter != "true" && comparableFilter != "false" {
+		writeError(w, http.StatusBadRequest, "invalid_query", "deployment_comparable must be true or false")
+		return
+	}
 
 	facetRows := make([]gpuPriceRow, 0, len(rows))
 	filtered := make([]gpuPriceRow, 0, len(rows))
@@ -4375,6 +4430,12 @@ func (a API) gpuPrices(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if currentFilter == "false" && row.Current {
+			continue
+		}
+		if comparableFilter == "true" && !row.DeploymentComparable {
+			continue
+		}
+		if comparableFilter == "false" && row.DeploymentComparable {
 			continue
 		}
 		facetRows = append(facetRows, row)
@@ -4519,7 +4580,7 @@ func (a API) gpuPrices(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"data":       rows[offset:end],
-		"disclosure": "Prices are sourced observations. Current stock, account quota, and deployability are verified separately.",
+		"disclosure": "Prices are sourced observations. Stock, account quota, and deployability are checked at launch when provider evidence is available; otherwise they remain unknown.",
 		"pagination": map[string]any{"limit": limit, "offset": offset, "total": total, "has_more": end < total},
 		"summary":    map[string]any{"providers": len(matchedProviders), "gpus": len(matchedGPUs), "current": currentCount, "latest_observed_at": latestObservedAt},
 		"facets":     map[string]any{"providers": providers, "gpus": gpus},
