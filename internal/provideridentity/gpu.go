@@ -9,8 +9,53 @@ import "strings"
 // alias. Unknown values remain unchanged instead of being guessed.
 func GPUTypeID(provider, gpu string) string {
 	provider = strings.ToLower(strings.TrimSpace(provider))
+	normalized := strings.ToUpper(strings.TrimSpace(gpu))
+	if provider == "aws" {
+		switch normalized {
+		case "T4", "NVIDIA T4":
+			return "NVIDIA T4"
+		case "L4", "NVIDIA L4":
+			return "NVIDIA L4"
+		case "L40S", "NVIDIA L40S":
+			return "NVIDIA L40S"
+		case "A100", "A100 80GB", "NVIDIA A100-SXM4-80GB":
+			return "NVIDIA A100-SXM4-80GB"
+		case "A100 40GB", "NVIDIA A100-SXM4-40GB":
+			return "NVIDIA A100-SXM4-40GB"
+		case "H100", "H100 SXM", "NVIDIA H100 80GB HBM3":
+			return "NVIDIA H100 80GB HBM3"
+		case "H200", "NVIDIA H200":
+			return "NVIDIA H200"
+		case "B200", "NVIDIA B200":
+			return "NVIDIA B200"
+		default:
+			return gpu
+		}
+	}
+	if provider == "azure" {
+		switch normalized {
+		case "T4":
+			return "T4"
+		case "V100", "V100 16GB", "V100-16GB":
+			return "V100-16GB"
+		case "A10", "A10 24GB", "A10-24GB":
+			return "A10-24GB"
+		case "A100", "A100 80GB", "A100-80GB":
+			return "A100-80GB"
+		case "A100 40GB", "A100-40GB":
+			return "A100-40GB"
+		case "H100", "H100 80GB", "H100-80GB":
+			return "H100-80GB"
+		case "H100 NVL", "H100-NVL", "H100-NVL-94GB":
+			return "H100-NVL-94GB"
+		case "H200", "H200 141GB", "H200-141GB":
+			return "H200-141GB"
+		default:
+			return gpu
+		}
+	}
 	if provider == "vast" {
-		switch strings.ToUpper(strings.TrimSpace(gpu)) {
+		switch normalized {
 		case "H100", "H100 SXM":
 			return "H100 SXM"
 		case "H100 PCIE":
@@ -36,7 +81,7 @@ func GPUTypeID(provider, gpu string) string {
 	if provider != "runpod" {
 		return gpu
 	}
-	switch strings.ToUpper(strings.TrimSpace(gpu)) {
+	switch normalized {
 	case "L40S", "NVIDIA L40S":
 		return "NVIDIA L40S"
 	case "L40", "NVIDIA L40":

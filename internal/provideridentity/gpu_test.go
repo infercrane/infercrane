@@ -18,9 +18,20 @@ func TestRunPodAliasesResolveToExactProviderSKU(t *testing.T) {
 	}
 }
 
-func TestProviderIdentityDoesNotGuessOtherClouds(t *testing.T) {
-	if got := GPUTypeID("aws", "H100"); got != "H100" {
-		t.Fatalf("unexpected non-RunPod mapping: %q", got)
+func TestHyperscalerAliasesResolveToReviewedCatalogGPU(t *testing.T) {
+	for _, test := range []struct{ provider, input, expected string }{
+		{provider: "aws", input: "H100", expected: "NVIDIA H100 80GB HBM3"},
+		{provider: "aws", input: "A100 40GB", expected: "NVIDIA A100-SXM4-40GB"},
+		{provider: "azure", input: "H100", expected: "H100-80GB"},
+		{provider: "azure", input: "H100 NVL", expected: "H100-NVL-94GB"},
+		{provider: "azure", input: "A100", expected: "A100-80GB"},
+	} {
+		if got := GPUTypeID(test.provider, test.input); got != test.expected {
+			t.Fatalf("GPUTypeID(%s, %q)=%q, want %q", test.provider, test.input, got, test.expected)
+		}
+	}
+	if got := GPUTypeID("gcp", "H100"); got != "H100" {
+		t.Fatalf("unreviewed provider mapping changed: %q", got)
 	}
 	if got := PriceRegion("runpod", "EU-RO-1"); got != "global" {
 		t.Fatalf("RunPod price scope=%q", got)

@@ -4133,6 +4133,46 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		}, priceSyncInterval, func(err error) {
 			logger.Warn("provider-native Vast offer refresh failed", "error", err)
 		})
+		// Hyperscaler retail catalogs publish current list prices, not live stock.
+		// Refresh them on a catalog cadence and keep deployability as a separate
+		// launch-time probe. This avoids hammering public catalog APIs every 75s.
+		hyperscalerSyncInterval := priceSyncInterval
+		if hyperscalerSyncInterval < 6*time.Hour {
+			hyperscalerSyncInterval = 6 * time.Hour
+		}
+		hyperscalerValidFor := 2 * hyperscalerSyncInterval
+		azureFeed := priceingest.AzureFeed{ValidFor: hyperscalerValidFor}
+		azureCtx, azureCancel := context.WithTimeout(ctx, 35*time.Second)
+		azureErr := azureFeed.Refresh(azureCtx, priceCatalog)
+		azureCancel()
+		if azureErr != nil {
+			logger.Warn("initial provider-native Azure Retail Prices refresh failed", "error", azureErr)
+		}
+		go priceingest.RunProviderFeed(ctx, func(refreshCtx context.Context) error {
+			refreshCtx, cancel := context.WithTimeout(refreshCtx, 35*time.Second)
+			defer cancel()
+			return azureFeed.Refresh(refreshCtx, priceCatalog)
+		}, hyperscalerSyncInterval, func(err error) {
+			logger.Warn("provider-native Azure Retail Prices refresh failed", "error", err)
+		})
+		// AWS's official regional EC2 catalog is hundreds of MB. Stream it in the
+		// background so a cold catalog download can never delay API readiness.
+		awsFeed := priceingest.AWSFeed{Regions: []string{"us-east-1"}, ValidFor: hyperscalerValidFor}
+		go func() {
+			awsCtx, awsCancel := context.WithTimeout(ctx, 6*time.Minute)
+			awsErr := awsFeed.Refresh(awsCtx, priceCatalog)
+			awsCancel()
+			if awsErr != nil {
+				logger.Warn("initial provider-native AWS Price List refresh failed", "error", awsErr)
+			}
+			priceingest.RunProviderFeed(ctx, func(refreshCtx context.Context) error {
+				refreshCtx, cancel := context.WithTimeout(refreshCtx, 6*time.Minute)
+				defer cancel()
+				return awsFeed.Refresh(refreshCtx, priceCatalog)
+			}, hyperscalerSyncInterval, func(err error) {
+				logger.Warn("provider-native AWS Price List refresh failed", "error", err)
+			})
+		}()
 	}
 	_, aiperfErr := exec.LookPath(cfg.AIPerfBinary)
 	optimizationExecutionEnabled := false
