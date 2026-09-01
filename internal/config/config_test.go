@@ -135,6 +135,10 @@ func TestSkyPilotExecutionBoundary(t *testing.T) {
 	if err != nil || !cfg.SkyPilotEnabled() {
 		t.Fatalf("auto SkyPilot did not follow RunPod credentials: enabled=%v err=%v", cfg.SkyPilotEnabled(), err)
 	}
+	providers := cfg.ConfiguredSkyPilotProviders()
+	if len(providers) != 1 || providers[0].Cloud != "runpod" || strings.Join(providers[0].Runtimes, ",") != "vllm,sglang,custom-oci" {
+		t.Fatalf("unexpected RunPod SkyPilot defaults: %#v", providers)
+	}
 
 	t.Setenv("INFERCRANE_SKYPILOT_API", "invalid")
 	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "INFERCRANE_SKYPILOT_API") {
