@@ -772,14 +772,14 @@ func TestCapacityProbeKeepsCatalogQuoteSeparateFromLaunchEvidence(t *testing.T) 
 	catalog := pricing.NewDynamicCatalog(map[pricing.Request]pricing.Estimate{
 		{Cloud: "runpod", Region: "EU-RO-1", GPU: "NVIDIA L40S", GPUCount: 1, Replicas: 1}: {Currency: "USD", Hourly: 0.42, CostScope: pricing.CostScopeInstanceTotal, Authority: pricing.PriceAuthorityProviderAPI, Source: "provider catalog", ObservedAt: now.Add(-time.Minute), StaleAfter: time.Hour},
 	})
-	probeEvidence := provision.LaunchProbeEvidence{Provider: "runpod", Region: "EU-RO-1", GPU: "L40S", GPUCount: 1, ConnectionState: "configured", AvailabilityState: "constrained", QuotaState: "unknown", Deployability: "constrained", Source: "runpod.stock", ObservedAt: now, ExpiresAt: now.Add(30 * time.Second), Message: "low stock"}
+	probeEvidence := provision.LaunchProbeEvidence{Provider: "runpod", Region: "EU-RO-1", GPU: "L40S", GPUCount: 1, ConnectionState: "configured", AvailabilityState: "constrained", QuotaState: "unknown", Deployability: "unknown", Source: "runpod.stock", ObservedAt: now, ExpiresAt: now.Add(30 * time.Second), Message: "low stock"}
 	handler := (API{Store: &fakeStore{}, APIKey: "secret", ComputeProviders: []ComputeProvider{{ID: "runpod", Label: "RunPod", State: "ready"}}, GPUPriceCatalog: catalog, LaunchProbers: map[string]provision.LaunchProber{"runpod": fakeLaunchProber{evidence: probeEvidence}}}).Handler()
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/capacity/probes", strings.NewReader(`{"provider":"runpod","region":"EU-RO-1","gpu":"L40S","gpu_count":1}`))
 	request.Header.Set("Authorization", "Bearer secret")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	body := response.Body.String()
-	for _, expected := range []string{`"state":"current"`, `"hourly_usd":0.42`, `"availability_state":"constrained"`, `"quota_state":"unknown"`, `"deployability":"constrained"`, `only an accepted provider launch reserves capacity`} {
+	for _, expected := range []string{`"state":"current"`, `"hourly_usd":0.42`, `"availability_state":"constrained"`, `"quota_state":"unknown"`, `"deployability":"unknown"`, `only an accepted provider launch reserves capacity`} {
 		if response.Code != http.StatusOK || !strings.Contains(body, expected) {
 			t.Fatalf("capacity probe status=%d missing=%q body=%s", response.Code, expected, body)
 		}
