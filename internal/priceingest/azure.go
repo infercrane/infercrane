@@ -314,5 +314,23 @@ func sameAzureOrigin(endpoint, candidate *url.URL) bool {
 	if endpoint == nil || candidate == nil || candidate.Scheme != "https" && candidate.Scheme != "http" {
 		return false
 	}
-	return strings.EqualFold(endpoint.Scheme, candidate.Scheme) && strings.EqualFold(endpoint.Host, candidate.Host)
+	return strings.EqualFold(endpoint.Scheme, candidate.Scheme) &&
+		strings.EqualFold(endpoint.Hostname(), candidate.Hostname()) &&
+		effectivePort(endpoint) == effectivePort(candidate)
+}
+
+func effectivePort(value *url.URL) string {
+	if value == nil {
+		return ""
+	}
+	if port := value.Port(); port != "" {
+		return port
+	}
+	if strings.EqualFold(value.Scheme, "https") {
+		return "443"
+	}
+	if strings.EqualFold(value.Scheme, "http") {
+		return "80"
+	}
+	return ""
 }
