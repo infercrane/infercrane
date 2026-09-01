@@ -58,6 +58,11 @@ export class ControlApi {
     return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
   }
 
+  planIntent(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = '/planning/intents';
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
   listModelAPICatalog(): Promise<ObjectList> {
     const path = '/model-api-catalog';
     return this.transport.request('GET', path) as Promise<ObjectList>;

@@ -55,6 +55,10 @@ class ControlAPI:
         path = f"/catalog/models/{quote(name, safe='')}"
         return cast(dict[str, Any], self._transport.request("GET", path))
 
+    def plan_intent(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = "/planning/intents"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
     def list_model_a_p_i_catalog(self) -> ObjectList:
         path = "/model-api-catalog"
         return cast(ObjectList, self._transport.request("GET", path))

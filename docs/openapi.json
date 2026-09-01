@@ -1514,6 +1514,60 @@
         },
         "type": "object"
       },
+      "IntentPlanRequest": {
+        "additionalProperties": false,
+        "anyOf": [
+          {
+            "required": [
+              "intent"
+            ]
+          },
+          {
+            "required": [
+              "model"
+            ]
+          }
+        ],
+        "properties": {
+          "compute_mode": {
+            "enum": [
+              "elastic",
+              "serverless"
+            ],
+            "type": "string"
+          },
+          "gpu": {
+            "maxLength": 128,
+            "type": "string"
+          },
+          "intent": {
+            "maxLength": 2048,
+            "type": "string"
+          },
+          "model": {
+            "maxLength": 256,
+            "type": "string"
+          },
+          "objective": {
+            "enum": [
+              "interactive",
+              "latency",
+              "throughput",
+              "cost-efficiency"
+            ],
+            "type": "string"
+          },
+          "provider": {
+            "maxLength": 64,
+            "type": "string"
+          },
+          "region": {
+            "maxLength": 128,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "LabEvaluationRequest": {
         "additionalProperties": false,
         "properties": {
@@ -9777,6 +9831,52 @@
         ]
       }
     },
+    "/api/v1/planning/intents": {
+      "post": {
+        "operationId": "planIntent",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntentPlanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Compile bounded user intent into an editable reviewed configuration",
+        "tags": [
+          "Planning"
+        ]
+      }
+    },
     "/api/v1/principals": {
       "get": {
         "operationId": "listPrincipals",
@@ -11359,6 +11459,9 @@
     },
     {
       "name": "Operations"
+    },
+    {
+      "name": "Planning"
     },
     {
       "name": "Providers"

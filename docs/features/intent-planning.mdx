@@ -1,0 +1,53 @@
+---
+title: Intent planning
+description: Turn a simple model request into an editable, evidence-bounded deployment starting point.
+sidebarTitle: Intent planning
+---
+
+# Plan from a simple request
+
+`POST /api/v1/planning/intents` is an authenticated, read-only planning endpoint. It accepts a short
+intent and optional explicit choices, resolves an exact reviewed model when possible, and returns an
+editable configuration plus a small architecture graph.
+
+```bash
+curl -fsS "$INFERCRANE_URL/api/v1/planning/intents" \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "intent": "Deploy Qwen/Qwen3-8B for low latency on RunPod"
+  }'
+```
+
+Optional fields are `model`, `provider`, `region`, `gpu`, `objective`, and `compute_mode`. Explicit
+fields override only the matching interpretation. Objectives are `interactive`, `latency`,
+`throughput`, or `cost-efficiency`; compute mode is `elastic` or `serverless`.
+
+The response has one of two statuses:
+
+- `ready`: every choice needed to form the reviewed starting configuration is present.
+- `needs_input`: `missing_choices` contains a prompt, bounded options when available, the evidence
+  reason, and a remediation. InferCrane never substitutes an unreviewed model or silently chooses
+  among several ready providers.
+
+`choices` is suitable for an editable form. `architecture.nodes` and `architecture.edges` provide a
+stable application → endpoint → runtime/model/compute view without requiring the console to invent
+topology. The returned configuration is still non-mutating; deployment requires a separate
+idempotent request.
+
+## Evidence boundary
+
+The plan combines only these facts:
+
+- immutable identities and starting profiles from the reviewed model recipe catalog;
+- registered runtime/provider compatibility;
+- configured compute-connection readiness; and
+- a current exact provider catalog observation for one replica, when one exists.
+
+The plan always reports performance as `unmeasured` and capacity as unknown until a bounded provider
+probe or accepted launch supplies evidence. A catalog price is not stock, quota, a reservation, an
+account-specific discount, or a final invoice. Accelerator-only price components remain explicitly
+non-comparable with complete instance totals.
+
+The request body is a strict JSON object bounded to 16 KiB, and the intent itself is bounded to 2 KiB.
+The endpoint performs no provider calls, reserves no capacity, and starts no billable work.
