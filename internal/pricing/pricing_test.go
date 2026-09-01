@@ -21,6 +21,32 @@ func TestCatalogAndStaleness(t *testing.T) {
 	}
 }
 
+func TestComparableTotalRejectsPartialBillingComponents(t *testing.T) {
+	if (Estimate{}).ComparableTotal() || !(Estimate{CostScope: CostScopeInstanceTotal}).ComparableTotal() {
+		t.Fatal("only explicitly scoped complete totals may be comparable")
+	}
+	if (Estimate{CostScope: CostScopeAcceleratorOnly}).ComparableTotal() {
+		t.Fatal("accelerator-only billing component became a complete deployment cost")
+	}
+}
+
+func TestDeploymentComparableRejectsRepositorySnapshots(t *testing.T) {
+	for _, source := range []string{
+		"https://raw.githubusercontent.com/example/catalog/main/prices.csv",
+		"https://github.com/example/catalog/releases/download/latest/prices.csv",
+	} {
+		if (Estimate{CostScope: CostScopeInstanceTotal, Authority: PriceAuthorityProviderAPI, Source: source}).DeploymentComparable() {
+			t.Fatalf("repository snapshot became deployment price authority: %s", source)
+		}
+	}
+	if !(Estimate{CostScope: CostScopeInstanceTotal, Authority: PriceAuthorityProviderAPI, Source: "https://api.runpod.io/graphql"}).DeploymentComparable() {
+		t.Fatal("provider-owned price source was rejected")
+	}
+	if (Estimate{CostScope: CostScopeInstanceTotal, Source: "https://api.runpod.io/graphql"}).DeploymentComparable() {
+		t.Fatal("a source label without positive authority became deployment-comparable")
+	}
+}
+
 func TestDynamicCatalogReplacesOneProviderGPUShard(t *testing.T) {
 	catalog := NewDynamicCatalog(nil)
 	h100 := Request{Cloud: "vast", Region: "global", GPU: "H100 SXM", GPUCount: 1, Replicas: 1}

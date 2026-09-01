@@ -195,7 +195,7 @@ func (f GCPFeed) Refresh(ctx context.Context, catalog *pricing.DynamicCatalog) e
 			source := defaultGCPCatalogURL + "?currencyCode=USD&pageSize=" + strconv.Itoa(defaultGCPPageSize) + "#" + fragment
 			for _, region := range gcpSKURegions(sku) {
 				request := pricing.Request{Cloud: "gcp", Region: region, GPU: gpu, GPUCount: 1, Replicas: 1}
-				estimate := pricing.Estimate{Currency: "USD", Hourly: hourly, Source: source, ObservedAt: now, StaleAfter: validFor}
+				estimate := pricing.Estimate{Currency: "USD", Hourly: hourly, CostScope: pricing.CostScopeAcceleratorOnly, Authority: pricing.PriceAuthorityProviderAPI, Source: source, ObservedAt: now, StaleAfter: validFor}
 				prior, found := candidates[request]
 				if !found || effective.After(prior.effective) || effective.Equal(prior.effective) && estimate.Hourly < prior.estimate.Hourly {
 					candidates[request] = gcpCandidate{estimate: estimate, effective: effective}

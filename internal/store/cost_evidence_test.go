@@ -22,7 +22,7 @@ func TestCostEvidenceIsImmutableRevisionBoundTenantSafeAndCurrencyExplicit(t *te
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	input := []domain.CostEvidence{{Source: "opencost/allocation", Scope: "deployment_hourly_rate/inference", Resource: "inference", Currency: "USD", BillingUnit: "hour", EvidenceClass: "provider_reported", Amount: 1.25, WindowStart: now.Add(-time.Hour), WindowEnd: now, ObservedAt: now, ValidUntil: now.Add(time.Hour)}}
+	input := []domain.CostEvidence{{Source: "opencost/allocation", Scope: "deployment_hourly_rate/inference", Resource: "inference", Currency: "USD", BillingUnit: "hour", EvidenceClass: "measured", Amount: 1.25, WindowStart: now.Add(-time.Hour), WindowEnd: now, ObservedAt: now, ValidUntil: now.Add(time.Hour)}}
 	created, err := s.RecordCostEvidence(ctx, "global", deployment.ID, input)
 	if err != nil {
 		t.Fatal(err)
@@ -44,6 +44,11 @@ func TestCostEvidenceIsImmutableRevisionBoundTenantSafeAndCurrencyExplicit(t *te
 	invalid[0].Currency = ""
 	if _, err = s.RecordCostEvidence(ctx, "global", name, invalid); err == nil {
 		t.Fatal("implicit currency was accepted")
+	}
+	invalid = append([]domain.CostEvidence(nil), input...)
+	invalid[0].EvidenceClass = "provider_reported"
+	if _, err = s.RecordCostEvidence(ctx, "global", name, invalid); err == nil {
+		t.Fatal("tenant import minted provider-reported authority")
 	}
 	rows, err := s.CostEvidenceForDeployment(ctx, "global", name, now.Add(-2*time.Hour), now.Add(time.Hour), 20)
 	if err != nil || len(rows) != 1 || rows[0].RevisionID == "" || rows[0].Amount != 1.25 || rows[0].Currency != "USD" {

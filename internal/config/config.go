@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/infercrane/infercrane/internal/pricing"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
 )
 
@@ -1122,7 +1123,7 @@ func envOptimizationPrices(key string) ([]OptimizationPrice, error) {
 		validUntil, validErr := time.Parse(time.RFC3339, row.ValidUntil)
 		identity := strings.Join([]string{row.Cloud, row.Region, row.GPU, strconv.Itoa(row.GPUCount), strconv.Itoa(row.Replicas)}, "\x00")
 		_, duplicate := seen[identity]
-		if strings.TrimSpace(row.Cloud) == "" || strings.TrimSpace(row.GPU) == "" || strings.TrimSpace(row.Source) == "" || row.Currency != "USD" || row.GPUCount < 1 || row.GPUCount > 1024 || row.Replicas < 1 || row.Replicas > 100 || row.HourlyUSD <= 0 || math.IsNaN(row.HourlyUSD) || math.IsInf(row.HourlyUSD, 0) || observedErr != nil || validErr != nil || !validUntil.After(observedAt) || duplicate {
+		if strings.TrimSpace(row.Cloud) == "" || strings.TrimSpace(row.GPU) == "" || strings.TrimSpace(row.Source) == "" || pricing.RepositorySnapshotSource(row.Source) || row.Currency != "USD" || row.GPUCount < 1 || row.GPUCount > 1024 || row.Replicas < 1 || row.Replicas > 100 || row.HourlyUSD <= 0 || math.IsNaN(row.HourlyUSD) || math.IsInf(row.HourlyUSD, 0) || observedErr != nil || validErr != nil || !validUntil.After(observedAt) || duplicate {
 			return nil, fmt.Errorf("%s[%d] must contain a unique cloud/region/GPU/gpu_count/replicas tuple, positive finite USD rate, source, and increasing RFC3339 evidence window", key, index)
 		}
 		seen[identity] = struct{}{}

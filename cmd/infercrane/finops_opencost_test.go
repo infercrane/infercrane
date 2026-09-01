@@ -31,13 +31,14 @@ func TestFinOpsCollectOpenCostUsesExactAllocationAndCreatesReport(t *testing.T) 
 		switch r.URL.Path {
 		case "/api/v1/deployments/coder-production/cost-evidence":
 			var body struct {
-				Currency    string `json:"currency"`
-				Allocations []struct {
+				Currency      string `json:"currency"`
+				EvidenceClass string `json:"evidence_class"`
+				Allocations   []struct {
 					Resource string  `json:"resource"`
 					Amount   float64 `json:"amount"`
 				} `json:"allocations"`
 			}
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Currency != "USD" || len(body.Allocations) != 1 || body.Allocations[0].Resource != "coder" || body.Allocations[0].Amount != 1.25 {
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Currency != "USD" || body.EvidenceClass != "measured" || len(body.Allocations) != 1 || body.Allocations[0].Resource != "coder" || body.Allocations[0].Amount != 1.25 {
 				t.Fatalf("body=%+v err=%v", body, err)
 			}
 			_, _ = io.WriteString(w, `{"data":[{"resource":"coder","amount":1.25,"currency":"USD","billing_unit":"hour","source":"opencost/allocation"}],"content_recorded":false,"currency_converted":false}`)

@@ -105,6 +105,8 @@ func (f RunPodFeed) Refresh(ctx context.Context, catalog *pricing.DynamicCatalog
 		}
 		prices[pricing.Request{Cloud: "runpod", Region: "global", GPU: providerID, GPUCount: 1, Replicas: 1}] = pricing.Estimate{
 			Currency: "USD", Hourly: gpu.LowestPrice.UninterruptablePrice,
+			CostScope:  pricing.CostScopeInstanceTotal,
+			Authority:  pricing.PriceAuthorityProviderAPI,
 			Source:     "https://api.runpod.io/graphql#gpuTypes.lowestPrice.secureCloud",
 			ObservedAt: now, StaleAfter: validFor,
 		}

@@ -54,7 +54,7 @@ func TestGCPFeedPublishesExactCurrentOnDemandGPUComponents(t *testing.T) {
 		{Cloud: "gcp", Region: "europe-west4", GPU: "nvidia-l4", GPUCount: 1, Replicas: 1}:      0.672,
 	} {
 		estimate, err := catalog.Estimate(context.Background(), request)
-		if err != nil || estimate.Hourly != want || estimate.Currency != "USD" || estimate.ObservedAt != now || estimate.StaleAfter != time.Hour || !estimate.GuaranteedUntil.IsZero() {
+		if err != nil || estimate.Hourly != want || estimate.Currency != "USD" || estimate.CostScope != pricing.CostScopeAcceleratorOnly || estimate.ObservedAt != now || estimate.StaleAfter != time.Hour || !estimate.GuaranteedUntil.IsZero() {
 			t.Fatalf("unexpected GCP estimate for %#v: %#v err=%v", request, estimate, err)
 		}
 		if !strings.HasPrefix(estimate.Source, defaultGCPCatalogURL+"?currencyCode=USD&pageSize=5000#billing_component=gpu&sku_id=") || strings.Contains(estimate.Source, server.URL) || strings.Contains(estimate.Source, "key=") {

@@ -97,7 +97,7 @@ func ParseOpenCostAllocation(body []byte, options OpenCostOptions) ([]domain.Cos
 			Resource:      key,
 			Currency:      options.Currency,
 			BillingUnit:   "hour",
-			EvidenceClass: "provider_reported",
+			EvidenceClass: "measured",
 			Amount:        *allocation.TotalCost / hours,
 			WindowStart:   allocation.Window.Start.UTC(),
 			WindowEnd:     allocation.Window.End.UTC(),

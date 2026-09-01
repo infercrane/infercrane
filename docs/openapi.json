@@ -449,6 +449,12 @@
       "CatalogLaunchQuote": {
         "additionalProperties": false,
         "properties": {
+          "cost_scope": {
+            "enum": [
+              "instance_total"
+            ],
+            "type": "string"
+          },
           "currency": {
             "type": "string"
           },
@@ -641,9 +647,9 @@
             "type": "string"
           },
           "evidence_class": {
+            "description": "Tenant-imported cost evidence is measured. Provider-reported authority is assigned only by provider adapters.",
             "enum": [
-              "measured",
-              "provider_reported"
+              "measured"
             ],
             "type": "string"
           },
@@ -4802,6 +4808,15 @@
             "description": "Filter observations by evidence freshness; this is not a stock claim.",
             "in": "query",
             "name": "current",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Filter to complete instance totals from an accepted pricing authority. This still does not claim launch capacity.",
+            "in": "query",
+            "name": "deployment_comparable",
             "required": false,
             "schema": {
               "type": "boolean"
@@ -10100,6 +10115,15 @@
             "description": "Filter observations by evidence freshness; this is not a stock claim.",
             "in": "query",
             "name": "current",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Filter to complete instance totals from an accepted pricing authority. This still does not claim launch capacity.",
+            "in": "query",
+            "name": "deployment_comparable",
             "required": false,
             "schema": {
               "type": "boolean"

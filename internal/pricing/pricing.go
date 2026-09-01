@@ -4,11 +4,47 @@ package pricing
 import (
 	"context"
 	"errors"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 )
 
 var ErrUnavailable = errors.New("pricing unavailable")
+
+type CostScope string
+
+const (
+	// CostScopeUnknown means the collector has not proven whether the amount is
+	// a complete instance total or only one billing component. Unknown values
+	// remain useful observations, but fail closed for deployment decisions.
+	CostScopeUnknown CostScope = "unknown"
+	// CostScopeInstanceTotal is the complete hourly price for the described
+	// provider instance or marketplace offer. Only complete totals are eligible
+	// for cross-provider ranking and launch-cost decisions.
+	CostScopeInstanceTotal CostScope = "instance_total"
+	// CostScopeAcceleratorOnly is one billing component of a larger instance
+	// price. It is useful market evidence, but cannot be compared with a complete
+	// instance total until the remaining components are assembled.
+	CostScopeAcceleratorOnly CostScope = "accelerator_only"
+)
+
+type PriceAuthority string
+
+const (
+	// PriceAuthorityUnknown is the default for imported, manual, and historical
+	// observations. A URL or source label alone never creates spend authority.
+	PriceAuthorityUnknown PriceAuthority = "unknown"
+	// PriceAuthorityProviderAPI identifies a quote fetched directly from the
+	// provider's current pricing or marketplace API by a reviewed collector.
+	PriceAuthorityProviderAPI PriceAuthority = "provider_api"
+	// PriceAuthorityAccountContract is reserved for a verified customer-specific
+	// contract or rate card. It is not inferred from user-supplied metadata.
+	PriceAuthorityAccountContract PriceAuthority = "account_contract"
+	// PriceAuthorityMeasuredInvoice identifies a complete rate derived from a
+	// verified provider invoice or allocation export.
+	PriceAuthorityMeasuredInvoice PriceAuthority = "measured_invoice"
+)
 
 type Request struct {
 	Cloud, Region, GPU string
@@ -17,12 +53,39 @@ type Request struct {
 type Estimate struct {
 	Currency, Source string
 	Hourly           float64
+	CostScope        CostScope
+	Authority        PriceAuthority
 	ObservedAt       time.Time
 	StaleAfter       time.Duration
 	// GuaranteedUntil is set only when the provider/operator actually locks or
 	// guarantees the quoted rate. Fresh marketplace observations leave it zero:
 	// they may rank plans, but cannot authorize future spend.
 	GuaranteedUntil time.Time
+}
+
+func (e Estimate) ComparableTotal() bool {
+	return e.CostScope == CostScopeInstanceTotal
+}
+
+// RepositorySnapshotSource reports whether a price came from a repository-
+// hosted snapshot rather than a provider or account pricing authority. These
+// snapshots are useful for discovery and historical comparison, but their
+// publication cadence and availability semantics are outside InferCrane's
+// control, so they must never authorize an optimization run or deployment.
+func RepositorySnapshotSource(source string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(source))
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	return host == "raw.githubusercontent.com" || host == "github.com" || strings.HasSuffix(host, ".githubusercontent.com")
+}
+
+func (e Estimate) DeploymentComparable() bool {
+	if !e.ComparableTotal() || RepositorySnapshotSource(e.Source) {
+		return false
+	}
+	return e.Authority == PriceAuthorityProviderAPI || e.Authority == PriceAuthorityAccountContract || e.Authority == PriceAuthorityMeasuredInvoice
 }
 
 func (e Estimate) Stale(now time.Time) bool {

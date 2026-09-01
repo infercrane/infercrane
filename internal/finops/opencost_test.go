@@ -13,7 +13,7 @@ func TestParseOpenCostAllocationRequiresExplicitExactSelection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 1 || rows[0].Amount != 1.25 || rows[0].Resource != "inference" || rows[0].Currency != "USD" || rows[0].EvidenceClass != "provider_reported" {
+	if len(rows) != 1 || rows[0].Amount != 1.25 || rows[0].Resource != "inference" || rows[0].Currency != "USD" || rows[0].EvidenceClass != "measured" {
 		t.Fatalf("unexpected rows: %#v", rows)
 	}
 	if _, err = ParseOpenCostAllocation(body, OpenCostOptions{Allocations: []string{"missing"}, Currency: "USD", Source: "opencost/allocation", ObservedAt: now, TTL: time.Hour}); err == nil {

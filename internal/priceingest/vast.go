@@ -177,6 +177,8 @@ func (f *VastFeed) fetchGPU(ctx context.Context, gpu string, attemptBudget *int)
 		key := pricing.Request{Cloud: "vast", Region: "global", GPU: gpu, GPUCount: 1, Replicas: 1}
 		prices[key] = pricing.Estimate{
 			Currency: "USD", Hourly: offer.Hourly,
+			CostScope:  pricing.CostScopeInstanceTotal,
+			Authority:  pricing.PriceAuthorityProviderAPI,
 			Source:     defaultVastOffersURL + "#offer-" + strconv.FormatInt(offer.ID, 10),
 			ObservedAt: now, StaleAfter: validFor,
 		}

@@ -479,10 +479,10 @@ func TestOperationalMeasurementIngestionIsAuthenticatedStrictAndContentFree(t *t
 	}
 }
 
-func TestCostEvidenceIngestionIsAuthenticatedStrictAndCurrencyExplicit(t *testing.T) {
+func TestCostEvidenceIngestionIsAuthenticatedStrictMeasuredAndCurrencyExplicit(t *testing.T) {
 	store := &fakeCostEvidenceStore{fakeStore: &fakeStore{}}
 	handler := (API{Store: store, APIKey: "secret"}).Handler()
-	body := `{"source":"opencost/allocation","currency":"USD","evidence_class":"provider_reported","observed_at":"2026-08-19T20:00:00Z","valid_until":"2026-08-19T21:00:00Z","allocations":[{"scope":"deployment_hourly_rate/inference","resource":"inference","billing_unit":"hour","amount":1.25,"window_start":"2026-08-19T19:00:00Z","window_end":"2026-08-19T20:00:00Z"}]}`
+	body := `{"source":"opencost/allocation","currency":"USD","evidence_class":"measured","observed_at":"2026-08-19T20:00:00Z","valid_until":"2026-08-19T21:00:00Z","allocations":[{"scope":"deployment_hourly_rate/inference","resource":"inference","billing_unit":"hour","amount":1.25,"window_start":"2026-08-19T19:00:00Z","window_end":"2026-08-19T20:00:00Z"}]}`
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments/coder/cost-evidence", strings.NewReader(body))
 	request.Header.Set("Authorization", "Bearer secret")
 	response := httptest.NewRecorder()
@@ -496,6 +496,13 @@ func TestCostEvidenceIngestionIsAuthenticatedStrictAndCurrencyExplicit(t *testin
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("unknown field status=%d body=%s", response.Code, response.Body.String())
+	}
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/deployments/coder/cost-evidence", strings.NewReader(strings.Replace(body, `"evidence_class":"measured"`, `"evidence_class":"provider_reported"`, 1)))
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusUnprocessableEntity || len(store.rows) != 1 || !strings.Contains(response.Body.String(), "provider-reported rates come only from provider adapters") {
+		t.Fatalf("caller minted provider authority: status=%d body=%s rows=%+v", response.Code, response.Body.String(), store.rows)
 	}
 }
 
@@ -605,7 +612,7 @@ func TestComputeCatalogSeparatesPriceFromExecutionReadiness(t *testing.T) {
 			{ID: "runpod", Label: "RunPod", Mode: "control-plane", State: "connection-required", Reason: "RUNPOD_API_KEY is not configured"},
 		},
 		GPUPrices: []GPUPriceObservation{
-			{Provider: "runpod", Region: "eu", GPU: "L40S", GPUCount: 1, Replicas: 1, Currency: "USD", HourlyUSD: 0.42, Source: "test catalog", ObservedAt: now.Add(-time.Hour), ValidUntil: now.Add(time.Hour)},
+			{Provider: "runpod", Region: "eu", GPU: "L40S", GPUCount: 1, Replicas: 1, Currency: "USD", HourlyUSD: 0.42, CostScope: string(pricing.CostScopeInstanceTotal), PriceAuthority: string(pricing.PriceAuthorityProviderAPI), Source: "test catalog", ObservedAt: now.Add(-time.Hour), ValidUntil: now.Add(time.Hour)},
 		},
 	}).Handler()
 
@@ -613,7 +620,7 @@ func TestComputeCatalogSeparatesPriceFromExecutionReadiness(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer secret")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"hourly_usd":0.42`) || !strings.Contains(response.Body.String(), `"availability":"unknown"`) || !strings.Contains(response.Body.String(), `"current":true`) {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"hourly_usd":0.42`) || !strings.Contains(response.Body.String(), `"cost_scope":"instance_total"`) || !strings.Contains(response.Body.String(), `"availability":"unknown"`) || !strings.Contains(response.Body.String(), `"current":true`) {
 		t.Fatalf("price catalog status=%d body=%s", response.Code, response.Body.String())
 	}
 
@@ -675,7 +682,7 @@ func TestPublicGPUPricesFilterAcceptsReviewedRunPodAlias(t *testing.T) {
 	catalog := pricing.NewDynamicCatalog(nil)
 	catalog.ReplaceProvider("runpod", map[pricing.Request]pricing.Estimate{
 		{Cloud: "runpod", Region: "global", GPU: "NVIDIA L40S", GPUCount: 1, Replicas: 1}: {
-			Currency: "USD", Hourly: 0.74, Source: "runpod provider API", ObservedAt: now, StaleAfter: time.Minute,
+			Currency: "USD", Hourly: 0.74, CostScope: pricing.CostScopeInstanceTotal, Authority: pricing.PriceAuthorityProviderAPI, Source: "runpod provider API", ObservedAt: now, StaleAfter: time.Minute,
 		},
 	})
 	handler := (API{GPUPriceCatalog: catalog}).Handler()
@@ -705,7 +712,7 @@ func TestCloudDeploymentFailsClosedWithoutReadyCompute(t *testing.T) {
 func TestCapacityProbeKeepsCatalogQuoteSeparateFromLaunchEvidence(t *testing.T) {
 	now := time.Now().UTC()
 	catalog := pricing.NewDynamicCatalog(map[pricing.Request]pricing.Estimate{
-		{Cloud: "runpod", Region: "EU-RO-1", GPU: "NVIDIA L40S", GPUCount: 1, Replicas: 1}: {Currency: "USD", Hourly: 0.42, Source: "provider catalog", ObservedAt: now.Add(-time.Minute), StaleAfter: time.Hour},
+		{Cloud: "runpod", Region: "EU-RO-1", GPU: "NVIDIA L40S", GPUCount: 1, Replicas: 1}: {Currency: "USD", Hourly: 0.42, CostScope: pricing.CostScopeInstanceTotal, Authority: pricing.PriceAuthorityProviderAPI, Source: "provider catalog", ObservedAt: now.Add(-time.Minute), StaleAfter: time.Hour},
 	})
 	probeEvidence := provision.LaunchProbeEvidence{Provider: "runpod", Region: "EU-RO-1", GPU: "L40S", GPUCount: 1, ConnectionState: "configured", AvailabilityState: "constrained", QuotaState: "unknown", Deployability: "constrained", Source: "runpod.stock", ObservedAt: now, ExpiresAt: now.Add(30 * time.Second), Message: "low stock"}
 	handler := (API{Store: &fakeStore{}, APIKey: "secret", ComputeProviders: []ComputeProvider{{ID: "runpod", Label: "RunPod", State: "ready"}}, GPUPriceCatalog: catalog, LaunchProbers: map[string]provision.LaunchProber{"runpod": fakeLaunchProber{evidence: probeEvidence}}}).Handler()
@@ -725,13 +732,87 @@ func TestCapacityProbeMatchesReviewedRunPodAliasToExactProviderSKU(t *testing.T)
 	now := time.Now().UTC()
 	catalog := pricing.NewDynamicCatalog(map[pricing.Request]pricing.Estimate{
 		{Cloud: "runpod", Region: "global", GPU: "NVIDIA H100 80GB HBM3", GPUCount: 1, Replicas: 1}: {
-			Currency: "USD", Hourly: 2.69, Source: "runpod secure price", ObservedAt: now, StaleAfter: time.Minute,
+			Currency: "USD", Hourly: 2.69, CostScope: pricing.CostScopeInstanceTotal, Authority: pricing.PriceAuthorityProviderAPI, Source: "runpod secure price", ObservedAt: now, StaleAfter: time.Minute,
 		},
 	})
 	api := API{GPUPriceCatalog: catalog}
 	quote := api.catalogLaunchQuote(provision.LaunchProbeRequest{Provider: "runpod", Region: "EU-RO-1", GPU: "H100", GPUCount: 1}, now)
 	if quote.State != "current" || quote.HourlyUSD == nil || *quote.HourlyUSD != 2.69 || quote.GPU != "NVIDIA H100 80GB HBM3" {
 		t.Fatalf("exact RunPod SKU was not selected: %#v", quote)
+	}
+}
+
+func TestCapacityProbeDoesNotRankAcceleratorOnlyComponentAsInstanceTotal(t *testing.T) {
+	now := time.Now().UTC()
+	catalog := pricing.NewDynamicCatalog(map[pricing.Request]pricing.Estimate{
+		{Cloud: "gcp", Region: "europe-west4", GPU: "nvidia-l4", GPUCount: 1, Replicas: 1}: {
+			Currency: "USD", Hourly: 0.67, CostScope: pricing.CostScopeAcceleratorOnly, Source: "gcp billing component", ObservedAt: now, StaleAfter: time.Hour,
+		},
+	})
+	quote := (API{GPUPriceCatalog: catalog}).catalogLaunchQuote(provision.LaunchProbeRequest{Provider: "gcp", Region: "europe-west4", GPU: "nvidia-l4", GPUCount: 1}, now)
+	if quote.State != "unavailable" || quote.HourlyUSD != nil {
+		t.Fatalf("partial GCP component became a launch total: %#v", quote)
+	}
+
+	handler := (API{GPUPriceCatalog: catalog}).Handler()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/public/catalog/gpu-prices?provider=gcp&current=true", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"cost_scope":"accelerator_only"`) {
+		t.Fatalf("partial price scope was not disclosed: status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestCapacityProbeDoesNotRankRepositorySnapshot(t *testing.T) {
+	now := time.Now().UTC()
+	catalog := pricing.NewDynamicCatalog(map[pricing.Request]pricing.Estimate{
+		{Cloud: "runpod", Region: "global", GPU: "NVIDIA L40S", GPUCount: 1, Replicas: 1}: {
+			Currency: "USD", Hourly: 0.72, CostScope: pricing.CostScopeInstanceTotal,
+			Source: "https://raw.githubusercontent.com/example/catalog/main/prices.csv", ObservedAt: now, StaleAfter: time.Hour,
+		},
+	})
+	quote := (API{GPUPriceCatalog: catalog}).catalogLaunchQuote(provision.LaunchProbeRequest{Provider: "runpod", GPU: "NVIDIA L40S", GPUCount: 1}, now)
+	if quote.State != "unavailable" || quote.HourlyUSD != nil {
+		t.Fatalf("repository snapshot became launch price authority: %#v", quote)
+	}
+}
+
+func TestGPUPriceCatalogCanReturnOnlyDeploymentComparableTotals(t *testing.T) {
+	now := time.Now().UTC()
+	catalog := pricing.NewDynamicCatalog(nil)
+	catalog.ReplaceProvider("runpod", map[pricing.Request]pricing.Estimate{
+		{Cloud: "runpod", Region: "global", GPU: "L40S", GPUCount: 1, Replicas: 1}: {
+			Currency: "USD", Hourly: 0.74, CostScope: pricing.CostScopeInstanceTotal, Authority: pricing.PriceAuthorityProviderAPI,
+			Source: "https://api.runpod.io/graphql", ObservedAt: now, StaleAfter: time.Hour,
+		},
+	})
+	catalog.ReplaceProvider("gcp", map[pricing.Request]pricing.Estimate{
+		{Cloud: "gcp", Region: "us-central1", GPU: "L4", GPUCount: 1, Replicas: 1}: {
+			Currency: "USD", Hourly: 0.67, CostScope: pricing.CostScopeAcceleratorOnly, Authority: pricing.PriceAuthorityProviderAPI,
+			Source: "https://cloudbilling.googleapis.com/v1/services/compute/skus", ObservedAt: now, StaleAfter: time.Hour,
+		},
+	})
+	catalog.ReplaceProvider("snapshot", map[pricing.Request]pricing.Estimate{
+		{Cloud: "snapshot", Region: "global", GPU: "L40S", GPUCount: 1, Replicas: 1}: {
+			Currency: "USD", Hourly: 0.50, CostScope: pricing.CostScopeInstanceTotal, Authority: pricing.PriceAuthorityProviderAPI,
+			Source: "https://raw.githubusercontent.com/example/catalog/main/prices.csv", ObservedAt: now, StaleAfter: time.Hour,
+		},
+	})
+
+	handler := (API{GPUPriceCatalog: catalog}).Handler()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/public/catalog/gpu-prices?current=true&deployment_comparable=true&sort=hourly_usd", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	body := response.Body.String()
+	if response.Code != http.StatusOK || !strings.Contains(body, `"provider":"runpod"`) || !strings.Contains(body, `"deployment_comparable":true`) || strings.Contains(body, `"provider":"gcp"`) || strings.Contains(body, `"provider":"snapshot"`) || !strings.Contains(body, `"total":1`) {
+		t.Fatalf("deployment-comparable catalog status=%d body=%s", response.Code, body)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/public/catalog/gpu-prices?deployment_comparable=maybe", nil)
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"invalid_query"`) {
+		t.Fatalf("invalid comparable filter status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 
@@ -1456,7 +1537,7 @@ func TestFinOpsPersistsUnavailableWithoutInventingCurrency(t *testing.T) {
 func TestFinOpsUsesFreshImportedCostEvidenceBeforeBenchmarkPriceFallback(t *testing.T) {
 	now := time.Now().UTC()
 	base := &fakeStore{resolved: domain.ResolvedDeployment{Deployment: domain.Deployment{ID: "deployment-1", Name: "prod"}}}
-	store := &fakeCostOptimizationStore{fakeOptimizationStore: &fakeOptimizationStore{fakeStore: base}, costs: []domain.CostEvidence{{ID: "cost-1", Scope: "deployment_hourly_rate/prod", Resource: "prod", Source: "opencost/allocation", Currency: "USD", BillingUnit: "hour", EvidenceClass: "provider_reported", Amount: 1.25, WindowStart: now.Add(-time.Hour), WindowEnd: now, ObservedAt: now.Add(-time.Second), ValidUntil: now.Add(time.Hour)}}}
+	store := &fakeCostOptimizationStore{fakeOptimizationStore: &fakeOptimizationStore{fakeStore: base}, costs: []domain.CostEvidence{{ID: "cost-1", Scope: "deployment_hourly_rate/prod", Resource: "prod", Source: "opencost/allocation", Currency: "USD", BillingUnit: "hour", EvidenceClass: "measured", Amount: 1.25, WindowStart: now.Add(-time.Hour), WindowEnd: now, ObservedAt: now.Add(-time.Second), ValidUntil: now.Add(time.Hour)}}}
 	handler := (API{Store: store, APIKey: "secret"}).Handler()
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments/prod/finops/reports", strings.NewReader(`{"window_seconds":3600}`))
 	request.Header.Set("Authorization", "Bearer secret")
@@ -2331,17 +2412,17 @@ func TestBenchmarkAttachesOnlyFreshRevisionBoundOperationalAndCostEvidence(t *te
 	now := time.Now().UTC()
 	gpu := 73.5
 	base := &fakeStore{resolved: domain.ResolvedDeployment{Deployment: domain.Deployment{ID: "dep", Name: "llama", ActiveRevisionID: "rev"}}, revisions: []domain.DeploymentRevision{{ID: "rev", SpecJSON: `{"model":"meta-llama/Llama-3.1-8B-Instruct","model_revision":"commit","runtime":"vllm","compute_mode":"elastic","cloud":"aws","gpu":"L40S"}`}}, artifact: domain.ModelArtifact{ID: "artifact", Repository: "meta-llama/Llama-3.1-8B-Instruct", ModelIdentity: "meta-llama/Llama-3.1-8B-Instruct@commit"}}
-	store := &fakeBenchmarkEvidenceStore{fakeStore: base, measurement: domain.MeasurementEvidence{Name: "gpu_utilization", Value: &gpu, Unit: "percent", Availability: "available", EvidenceClass: "measured", Source: "dcgm_exporter"}, costs: []domain.CostEvidence{{RevisionID: "rev", Source: "aws/price-list", Scope: "deployment_hourly_rate/llama", Resource: "g6e.xlarge", Currency: "USD", BillingUnit: "hour", EvidenceClass: "provider_reported", Amount: 1.86, WindowStart: now.Add(-time.Hour), WindowEnd: now.Add(-time.Minute), ObservedAt: now.Add(-time.Minute), ValidUntil: now.Add(time.Hour)}}}
+	store := &fakeBenchmarkEvidenceStore{fakeStore: base, measurement: domain.MeasurementEvidence{Name: "gpu_utilization", Value: &gpu, Unit: "percent", Availability: "available", EvidenceClass: "measured", Source: "dcgm_exporter"}, costs: []domain.CostEvidence{{RevisionID: "rev", Source: "opencost/allocation", Scope: "deployment_hourly_rate/llama", Resource: "g6e.xlarge", Currency: "USD", BillingUnit: "hour", EvidenceClass: "measured", Amount: 1.86, WindowStart: now.Add(-time.Hour), WindowEnd: now.Add(-time.Minute), ObservedAt: now.Add(-time.Minute), ValidUntil: now.Add(time.Hour)}}}
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments/llama/benchmarks", strings.NewReader(`{"requests":10,"concurrency":2}`))
 	request.Header.Set("Authorization", "Bearer secret")
 	response := httptest.NewRecorder()
 	(API{Store: store, APIKey: "secret", BenchmarkRunner: &fakeBenchmarkRunner{}, GatewayURL: "http://gateway"}).Handler().ServeHTTP(response, request)
-	if response.Code != http.StatusCreated || len(base.benchmarks) != 1 || base.benchmarks[0].GPUUtilization == nil || *base.benchmarks[0].GPUUtilization != gpu || !strings.Contains(base.benchmarks[0].CostMetadataJSON, `"available":true`) || !strings.Contains(base.benchmarks[0].CostMetadataJSON, `"source":"aws/price-list"`) || !strings.Contains(base.benchmarks[0].CostMetadataJSON, `"revision_id":"rev"`) {
+	if response.Code != http.StatusCreated || len(base.benchmarks) != 1 || base.benchmarks[0].GPUUtilization == nil || *base.benchmarks[0].GPUUtilization != gpu || !strings.Contains(base.benchmarks[0].CostMetadataJSON, `"available":true`) || !strings.Contains(base.benchmarks[0].CostMetadataJSON, `"source":"opencost/allocation"`) || !strings.Contains(base.benchmarks[0].CostMetadataJSON, `"revision_id":"rev"`) {
 		t.Fatalf("response=%d %s benchmarks=%#v", response.Code, response.Body.String(), base.benchmarks)
 	}
 
 	store.measurement.EvidenceClass = "provider_reported"
-	store.costs[0].RevisionID = "stale-revision"
+	store.costs[0].EvidenceClass = "provider_reported"
 	request = httptest.NewRequest(http.MethodPost, "/api/v1/deployments/llama/benchmarks", strings.NewReader(`{"requests":10,"concurrency":2}`))
 	request.Header.Set("Authorization", "Bearer secret")
 	response = httptest.NewRecorder()
