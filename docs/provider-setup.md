@@ -89,6 +89,60 @@ ownership unchanged. Never infer qualification from a provider name, region flag
 adapter test alone.
 </Warning>
 
+## SkyPilot provider breadth and launch preflight
+
+SkyPilot is the portable capacity driver for clouds that do not need a native InferCrane lifecycle
+adapter. Provider registration is declarative and fail closed: a cloud appears as executable only
+when its manifest is present and every named credential environment variable exists in the control-
+plane process.
+
+```bash
+export INFERCRANE_SKYPILOT_API=enabled
+export INFERCRANE_SKYPILOT_PROVIDERS_JSON='[
+  {
+    "cloud": "lambda",
+    "label": "Lambda Cloud",
+    "runtimes": ["vllm", "sglang", "custom-oci"],
+    "credential_env": ["LAMBDA_API_KEY"]
+  },
+  {
+    "cloud": "vast",
+    "label": "Vast.ai",
+    "runtimes": ["vllm", "custom-oci"],
+    "credential_env": ["VAST_API_KEY"]
+  }
+]'
+```
+
+`credential_env` contains environment-variable names, never secret values. The underlying SkyPilot
+installation must support the declared cloud and the process must receive the corresponding
+credentials. A registered runtime is a routing capability, not real-infrastructure qualification;
+the exact provider, region, accelerator, runtime, image, and model tuple must still pass the release
+qualification workflow.
+
+Before a billable launch, an authenticated client can compare the current catalog quote with
+provider capacity evidence:
+
+```bash
+curl -fsS "$INFERCRANE_URL/api/v1/capacity/probes" \
+  -H "Authorization: Bearer $INFERCRANE_CONTROL_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"provider":"runpod","region":"EU-RO-1","gpu":"L40S","gpu_count":1}'
+```
+
+The response deliberately keeps three facts separate:
+
+- `catalog_quote` is a timestamped catalog observation; it does not reserve inventory.
+- `launch_evidence` reports connection, availability, quota, and deployability independently.
+  Missing credentials and unsupported provider probes return `unknown` or `connection-required`,
+  never an optimistic success.
+- Only an accepted provider launch reserves capacity. The resulting operation and qualification
+  evidence remain the durable proof used by Release Guard.
+
+RunPod exposes an advisory stock check through its read-only API. Generic SkyPilot clouds currently
+prove only that declared credentials are configured; their stock and quota remain `unknown` until
+the actual launch or a provider-specific read-only probe supplies evidence.
+
 ## RunPod
 
 Set a scoped `RUNPOD_API_KEY` on the control plane and configure SkyPilot's RunPod credentials for elastic workers. Run `infercrane doctor --cloud` before provisioning.

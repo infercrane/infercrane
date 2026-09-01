@@ -86,6 +86,13 @@ func readinessReason(ready bool, missing string) string {
 	return missing
 }
 
+func skyPilotAdapter(cloud string) string {
+	if cloud == "runpod" {
+		return "skypilot"
+	}
+	return "skypilot-" + cloud
+}
+
 var version = "1.0.0"
 
 const controlPlaneProtocolMin, controlPlaneProtocolMax = 1, 2
@@ -3926,6 +3933,33 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	if err != nil {
 		return fmt.Errorf("configure integration contracts: %w", err)
 	}
+	configuredSkyPilotProviders := cfg.ConfiguredSkyPilotProviders()
+	compatibility := integrationRegistry.Snapshot().Compatibility
+	compatibilitySeen := make(map[string]struct{}, len(compatibility))
+	for _, entry := range compatibility {
+		compatibilitySeen[entry.Runtime+"\x00"+entry.Adapter+"\x00"+string(entry.Mode)] = struct{}{}
+	}
+	for _, manifest := range configuredSkyPilotProviders {
+		adapter := skyPilotAdapter(manifest.Cloud)
+		if manifest.Cloud != "runpod" {
+			if err = integrationRegistry.RegisterProvider(integration.SkyPilotProviderProfile(manifest.Cloud, adapter)); err != nil {
+				return fmt.Errorf("register SkyPilot provider %q: %w", manifest.Cloud, err)
+			}
+		}
+		for _, runtimeName := range manifest.Runtimes {
+			key := runtimeName + "\x00" + adapter + "\x00" + string(integration.ElasticMode)
+			if _, exists := compatibilitySeen[key]; exists {
+				continue
+			}
+			compatibility = append(compatibility, integration.RuntimeCompatibility{Runtime: runtimeName, Adapter: adapter, Cloud: manifest.Cloud, Mode: integration.ElasticMode, State: integration.QualificationRegistered, Reason: "portable lifecycle is registered; real tuple qualification remains required"})
+			compatibilitySeen[key] = struct{}{}
+		}
+	}
+	if len(configuredSkyPilotProviders) > 0 {
+		if err = integrationRegistry.SetCompatibility(compatibility...); err != nil {
+			return fmt.Errorf("register SkyPilot runtime compatibility: %w", err)
+		}
+	}
 	directory := routes.New()
 	contextPassports := contextpassport.New()
 	if err := refreshContextPassports(ctx, s, contextPassports); err != nil {
@@ -4042,8 +4076,10 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		return err
 	}
 	benchmarkBackends := map[string]controlapi.BackendMetadata{
-		"skypilot":          {APIKey: cfg.APIKey, APIKeyEnv: "INFERCRANE_WORKER_API_KEY"},
 		"runpod-serverless": {APIKey: cfg.RunPodAPIKey, APIKeyEnv: "RUNPOD_API_KEY", Serverless: true},
+	}
+	for _, manifest := range configuredSkyPilotProviders {
+		benchmarkBackends[skyPilotAdapter(manifest.Cloud)] = controlapi.BackendMetadata{APIKey: cfg.APIKey, APIKeyEnv: "INFERCRANE_WORKER_API_KEY"}
 	}
 	if cfg.AWSEnabled() {
 		benchmarkBackends["aws-ec2"] = controlapi.BackendMetadata{APIKey: cfg.APIKey, APIKeyEnv: "INFERCRANE_WORKER_API_KEY"}
@@ -4096,7 +4132,41 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		{ID: "gcp", Label: "Google Cloud", Mode: "BYOC", State: readinessState(cfg.GCPEnabled()), Reason: readinessReason(cfg.GCPEnabled(), "GCP project and workload identity are not configured")},
 		{ID: "kubernetes", Label: "Kubernetes", Mode: "BYOC", State: readinessState(cfg.KubernetesEnabled()), Reason: readinessReason(cfg.KubernetesEnabled(), "Kubernetes context is not configured")},
 	}
-	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool, OptimizationCosts: optimizationCosts, ModelAPICatalog: modelAPICatalog, ComputeProviders: computeProviders, GPUPriceCatalog: priceCatalog}
+	for _, manifest := range configuredSkyPilotProviders {
+		found := false
+		for index := range computeProviders {
+			if computeProviders[index].ID == manifest.Cloud {
+				computeProviders[index].State, computeProviders[index].Reason = "ready", ""
+				if computeProviders[index].Mode != "control-plane" {
+					computeProviders[index].Mode = "SkyPilot"
+				}
+				found = true
+				break
+			}
+		}
+		if !found {
+			label := manifest.Label
+			if label == "" {
+				label = manifest.Cloud
+			}
+			computeProviders = append(computeProviders, controlapi.ComputeProvider{ID: manifest.Cloud, Label: label, Mode: "SkyPilot", State: "ready"})
+		}
+	}
+	launchProbers := map[string]provision.LaunchProber{
+		"runpod": provision.RunPodAvailability{APIKey: cfg.RunPodAPIKey},
+	}
+	defaultProviderAdapters := make(map[string]string, len(configuredSkyPilotProviders))
+	for _, manifest := range configuredSkyPilotProviders {
+		if manifest.Cloud != "runpod" && manifest.Cloud != "aws" && manifest.Cloud != "gcp" && manifest.Cloud != "kubernetes" {
+			defaultProviderAdapters[manifest.Cloud] = skyPilotAdapter(manifest.Cloud)
+		}
+	}
+	for _, provider := range computeProviders {
+		if provider.State == "ready" && launchProbers[provider.ID] == nil {
+			launchProbers[provider.ID] = provision.ConfiguredLaunchProbe{Provider: provider.ID}
+		}
+	}
+	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool, OptimizationCosts: optimizationCosts, ModelAPICatalog: modelAPICatalog, ComputeProviders: computeProviders, GPUPriceCatalog: priceCatalog, LaunchProbers: launchProbers, DefaultProviderAdapters: defaultProviderAdapters}
 	if cfg.StripeEnabled() {
 		stripeBilling, stripeErr := managedbilling.NewStripe(cfg.StripeSecretKey, cfg.StripeWebhookSecret, cfg.StripeBillingReturnURL, cfg.StripePriceIDs, cfg.StripeLivemode)
 		if stripeErr != nil {
@@ -4120,13 +4190,25 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	}
 	capacity := provision.RunPodAvailability{APIKey: cfg.RunPodAPIKey}
 	elasticBackends := make([]workflows.ReplicaBackend, 0, 12)
+	skyPilotRuntime := map[string]bool{}
 	if cfg.SkyPilotEnabled() {
-		elasticProfile, profileErr := integrationRegistry.Provider("skypilot")
-		if profileErr != nil {
-			return fmt.Errorf("configure elastic integration: %w", profileErr)
-		}
 		skyProvider := provision.SkyPilot{APIKey: cfg.APIKey}
-		elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: "skypilot", Cloud: "runpod", Runtime: "vllm", Default: true, Profile: elasticProfile, Provider: skyProvider, Capacity: capacity})
+		for _, manifest := range configuredSkyPilotProviders {
+			adapter := skyPilotAdapter(manifest.Cloud)
+			profile, profileErr := integrationRegistry.Provider(adapter)
+			if profileErr != nil {
+				return fmt.Errorf("configure SkyPilot integration %q: %w", manifest.Cloud, profileErr)
+			}
+			for _, runtimeName := range manifest.Runtimes {
+				skyPilotRuntime[manifest.Cloud+"\x00"+runtimeName] = true
+				var advisor workflows.CapacityAdvisor
+				if manifest.Cloud == "runpod" {
+					advisor = capacity
+				}
+				defaultBackend := manifest.Cloud == "runpod" || manifest.Cloud == "aws" && !cfg.AWSEnabled() || manifest.Cloud == "gcp" && !cfg.GCPEnabled() || manifest.Cloud == "kubernetes" && !cfg.KubernetesEnabled() || manifest.Cloud != "runpod" && manifest.Cloud != "aws" && manifest.Cloud != "gcp" && manifest.Cloud != "kubernetes"
+				elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: adapter, Cloud: manifest.Cloud, Runtime: runtimeName, Default: defaultBackend, Profile: profile, Provider: skyProvider, Capacity: advisor})
+			}
+		}
 	}
 	runPodPodsProfile, err := integrationRegistry.Provider("runpod-pods")
 	if err != nil {
@@ -4135,10 +4217,10 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	runPodPods := provision.RunPodPods{APIKey: cfg.RunPodAPIKey, WorkerAPIKey: cfg.APIKey, BaseURL: cfg.RunPodRESTURL, ContainerDiskGiB: cfg.RunPodContainerDiskGiB, ArtifactCachePolicy: cfg.RunPodArtifactCachePolicy, NetworkVolumes: cfg.RunPodNetworkVolumes, HFTokenSecret: cfg.RunPodHFTokenSecret}
 	artifactCacheAdapters["runpod"] = runPodPods
 	for _, runtimeName := range []string{"vllm", "sglang", "custom-oci"} {
-		// SkyPilot remains the implicit vLLM default when enabled. When it is
-		// disabled, native RunPod Pods becomes the explicit default and no SkyPilot
-		// command can be reached by a persisted operation or observation loop.
-		elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: "runpod-pods", Cloud: "runpod", Runtime: runtimeName, Default: runtimeName != "vllm" || !cfg.SkyPilotEnabled(), Profile: runPodPodsProfile, Provider: runPodPods, Capacity: capacity})
+		// A configured SkyPilot manifest is the default only for the runtimes it
+		// explicitly lists. Native RunPod Pods remains available as an exact
+		// adapter and owns every undeclared runtime.
+		elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: "runpod-pods", Cloud: "runpod", Runtime: runtimeName, Default: !skyPilotRuntime["runpod\x00"+runtimeName], Profile: runPodPodsProfile, Provider: runPodPods, Capacity: capacity})
 	}
 	if cfg.AWSEnabled() {
 		awsProfile, profileErr := integrationRegistry.Provider("aws-ec2")

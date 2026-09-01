@@ -54,3 +54,23 @@ func TestRunPodAvailabilityRedactsAndBoundsGraphQLError(t *testing.T) {
 		t.Fatalf("unsafe GraphQL error length=%d err=%v", len(err.Error()), err)
 	}
 }
+
+func TestRunPodLaunchProbeSeparatesStockQuotaAndDeployability(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"gpuTypes":[{"id":"NVIDIA L40S","displayName":"L40S","lowestPrice":{"stockStatus":"Low","availableGpuCounts":[1]}}]}}`))
+	}))
+	defer server.Close()
+
+	evidence, err := (RunPodAvailability{APIKey: "secret", BaseURL: server.URL, Client: server.Client()}).ProbeLaunch(context.Background(), LaunchProbeRequest{Provider: "runpod", Region: "EU-RO-1", GPU: "L40S", GPUCount: 1})
+	if err != nil || evidence.ConnectionState != "configured" || evidence.AvailabilityState != "constrained" || evidence.QuotaState != "unknown" || evidence.Deployability != "constrained" || evidence.Source == "" || evidence.ExpiresAt.IsZero() {
+		t.Fatalf("evidence=%+v err=%v", evidence, err)
+	}
+}
+
+func TestRunPodLaunchProbeFailsClosedWithoutCredentials(t *testing.T) {
+	evidence, err := (RunPodAvailability{}).ProbeLaunch(context.Background(), LaunchProbeRequest{Provider: "runpod", GPU: "H100", GPUCount: 1})
+	if err != nil || evidence.ConnectionState != "connection-required" || evidence.AvailabilityState != "unknown" || evidence.Deployability != "unknown" {
+		t.Fatalf("evidence=%+v err=%v", evidence, err)
+	}
+}

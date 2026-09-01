@@ -283,6 +283,10 @@ class ControlAPI:
         path = "/capacity/intelligence"
         return cast(dict[str, Any], self._transport.request("GET", path))
 
+    def probe_launch_capacity(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = "/capacity/probes"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
     def record_artifact_cache_observation(self, id: str, *, body: dict[str, Any]) -> dict[str, Any]:
         path = f"/artifacts/{quote(id, safe='')}/cache-observations"
         return cast(dict[str, Any], self._transport.request("POST", path, body=body))

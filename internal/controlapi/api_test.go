@@ -25,6 +25,8 @@ import (
 	"github.com/infercrane/infercrane/internal/optimizedartifact"
 	"github.com/infercrane/infercrane/internal/optimizer"
 	"github.com/infercrane/infercrane/internal/passport"
+	"github.com/infercrane/infercrane/internal/pricing"
+	"github.com/infercrane/infercrane/internal/provision"
 	"github.com/infercrane/infercrane/internal/qualityevidence"
 	"github.com/infercrane/infercrane/internal/support"
 	"github.com/infercrane/infercrane/internal/trainingartifact"
@@ -55,6 +57,15 @@ type fakeStore struct {
 }
 
 type fakeOptimizationCosts struct{}
+
+type fakeLaunchProber struct {
+	evidence provision.LaunchProbeEvidence
+	err      error
+}
+
+func (p fakeLaunchProber) ProbeLaunch(context.Context, provision.LaunchProbeRequest) (provision.LaunchProbeEvidence, error) {
+	return p.evidence, p.err
+}
 
 func (fakeOptimizationCosts) Quote(_ context.Context, _ optimizer.DeploymentDraft, requiredUntil time.Time) (optimizationcampaign.CostQuote, error) {
 	return optimizationcampaign.CostQuote{HourlyUSD: 2, Source: "test-price-list", ObservedAt: requiredUntil.Add(-time.Hour), ValidUntil: requiredUntil.Add(time.Hour)}, nil
@@ -665,6 +676,48 @@ func TestCloudDeploymentFailsClosedWithoutReadyCompute(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), `"code":"compute_connection_required"`) {
 		t.Fatalf("deployment status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestCapacityProbeKeepsCatalogQuoteSeparateFromLaunchEvidence(t *testing.T) {
+	now := time.Now().UTC()
+	catalog := pricing.NewDynamicCatalog(map[pricing.Request]pricing.Estimate{
+		{Cloud: "runpod", Region: "EU-RO-1", GPU: "L40S", GPUCount: 1, Replicas: 1}: {Currency: "USD", Hourly: 0.42, Source: "provider catalog", ObservedAt: now.Add(-time.Minute), StaleAfter: time.Hour},
+	})
+	probeEvidence := provision.LaunchProbeEvidence{Provider: "runpod", Region: "EU-RO-1", GPU: "L40S", GPUCount: 1, ConnectionState: "configured", AvailabilityState: "constrained", QuotaState: "unknown", Deployability: "constrained", Source: "runpod.stock", ObservedAt: now, ExpiresAt: now.Add(30 * time.Second), Message: "low stock"}
+	handler := (API{Store: &fakeStore{}, APIKey: "secret", ComputeProviders: []ComputeProvider{{ID: "runpod", Label: "RunPod", State: "ready"}}, GPUPriceCatalog: catalog, LaunchProbers: map[string]provision.LaunchProber{"runpod": fakeLaunchProber{evidence: probeEvidence}}}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/capacity/probes", strings.NewReader(`{"provider":"runpod","region":"EU-RO-1","gpu":"L40S","gpu_count":1}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	body := response.Body.String()
+	for _, expected := range []string{`"state":"current"`, `"hourly_usd":0.42`, `"availability_state":"constrained"`, `"quota_state":"unknown"`, `"deployability":"constrained"`, `only an accepted provider launch reserves capacity`} {
+		if response.Code != http.StatusOK || !strings.Contains(body, expected) {
+			t.Fatalf("capacity probe status=%d missing=%q body=%s", response.Code, expected, body)
+		}
+	}
+}
+
+func TestCapacityProbeFailsClosedWhenConnectionOrProviderProbeIsUnavailable(t *testing.T) {
+	handler := (API{Store: &fakeStore{}, APIKey: "secret", ComputeProviders: []ComputeProvider{{ID: "lambda", Label: "Lambda", State: "connection-required", Reason: "credential missing"}}}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/capacity/probes", strings.NewReader(`{"provider":"lambda","gpu":"H100"}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	body := response.Body.String()
+	if response.Code != http.StatusOK || !strings.Contains(body, `"state":"unavailable"`) || !strings.Contains(body, `"connection_state":"connection-required"`) || !strings.Contains(body, `"deployability":"unknown"`) || !strings.Contains(body, `credential missing`) {
+		t.Fatalf("capacity probe status=%d body=%s", response.Code, body)
+	}
+
+	now := time.Now().UTC()
+	handler = (API{Store: &fakeStore{}, APIKey: "secret", ComputeProviders: []ComputeProvider{{ID: "runpod", State: "ready"}}, LaunchProbers: map[string]provision.LaunchProber{"runpod": fakeLaunchProber{evidence: provision.LaunchProbeEvidence{Provider: "runpod", GPU: "H100", GPUCount: 1, Source: "runpod.stock", ObservedAt: now, ExpiresAt: now.Add(time.Second)}, err: errors.New("private transport failure")}}}).Handler()
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/capacity/probes", strings.NewReader(`{"provider":"runpod","gpu":"H100"}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	body = response.Body.String()
+	if response.Code != http.StatusOK || !strings.Contains(body, `"availability_state":"unknown"`) || strings.Contains(body, "private transport failure") {
+		t.Fatalf("failed provider probe leaked or claimed evidence: status=%d body=%s", response.Code, body)
 	}
 }
 
@@ -2471,6 +2524,28 @@ func TestCloudDeployPersistsExactProviderAdapterIntent(t *testing.T) {
 	(API{Store: store, APIKey: "secret"}).Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusAccepted || !strings.Contains(store.operation.RequestJSON, `"provider_adapter":"gcp-compute"`) {
 		t.Fatalf("response=%d %s operation=%#v", response.Code, response.Body.String(), store.operation)
+	}
+}
+
+func TestCloudDeployInjectsOnlyConfiguredDeclarativeSkyPilotAdapter(t *testing.T) {
+	store := &fakeStore{created: true}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments", strings.NewReader(`{"name":"qwen-lambda","model":"Qwen/Qwen3-8B","cloud":"lambda","gpu":"H100","min_replicas":1,"max_replicas":1}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Idempotency-Key", "deploy-qwen-lambda")
+	response := httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret", ComputeProviders: []ComputeProvider{{ID: "lambda", State: "ready"}}, DefaultProviderAdapters: map[string]string{"lambda": "skypilot-lambda"}}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted || !strings.Contains(store.operation.RequestJSON, `"provider_adapter":"skypilot-lambda"`) {
+		t.Fatalf("response=%d %s operation=%#v", response.Code, response.Body.String(), store.operation)
+	}
+
+	store = &fakeStore{created: true}
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/deployments", strings.NewReader(`{"name":"qwen-lambda","model":"Qwen/Qwen3-8B","cloud":"lambda","gpu":"H100"}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Idempotency-Key", "deploy-qwen-lambda-unconfigured")
+	response = httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret", ComputeProviders: []ComputeProvider{{ID: "lambda", State: "connection-required"}}}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusUnprocessableEntity || store.operation.RequestJSON != "" {
+		t.Fatalf("unconfigured declarative cloud did not fail closed: response=%d %s operation=%#v", response.Code, response.Body.String(), store.operation)
 	}
 }
 

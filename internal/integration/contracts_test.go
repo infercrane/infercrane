@@ -337,3 +337,18 @@ func TestCapabilityEvidenceReferencesExistingTests(t *testing.T) {
 		}
 	}
 }
+
+func TestSkyPilotProviderProfileDoesNotClaimGenericCapacityPreflight(t *testing.T) {
+	profile := SkyPilotProviderProfile("lambda", "skypilot-lambda")
+	if err := profile.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if profile.Cloud != "lambda" || profile.Adapter != "skypilot-lambda" {
+		t.Fatalf("unexpected profile: %#v", profile)
+	}
+	for _, capability := range profile.Capabilities {
+		if capability.Name == "capacity_preflight" && capability.State != CapabilityUnknown {
+			t.Fatalf("generic provider claimed capacity evidence: %#v", capability)
+		}
+	}
+}
