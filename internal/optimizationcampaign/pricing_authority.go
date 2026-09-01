@@ -8,6 +8,7 @@ import (
 
 	"github.com/infercrane/infercrane/internal/optimizer"
 	"github.com/infercrane/infercrane/internal/pricing"
+	"github.com/infercrane/infercrane/internal/provideridentity"
 )
 
 // PricingAuthority adapts InferCrane's timestamped provider pricing boundary
@@ -31,7 +32,10 @@ func (a PricingAuthority) Quote(ctx context.Context, draft optimizer.DeploymentD
 	if gpuCount == 0 {
 		gpuCount = 1
 	}
-	estimate, err := a.Provider.Estimate(ctx, pricing.Request{Cloud: draft.Provider.Cloud, Region: draft.Provider.Region, GPU: draft.Resources.GPU, GPUCount: gpuCount, Replicas: replicas})
+	estimate, err := a.Provider.Estimate(ctx, pricing.Request{
+		Cloud: draft.Provider.Cloud, Region: provideridentity.PriceRegion(draft.Provider.Cloud, draft.Provider.Region),
+		GPU: provideridentity.GPUTypeID(draft.Provider.Cloud, draft.Resources.GPU), GPUCount: gpuCount, Replicas: replicas,
+	})
 	if err != nil {
 		return CostQuote{}, err
 	}
@@ -39,9 +43,9 @@ func (a PricingAuthority) Quote(ctx context.Context, draft optimizer.DeploymentD
 	if a.Now != nil {
 		now = a.Now().UTC()
 	}
-	validUntil := estimate.ObservedAt.UTC().Add(estimate.StaleAfter)
-	if estimate.Currency != "USD" || estimate.Source == "" || estimate.Hourly <= 0 || estimate.ObservedAt.After(now) || estimate.Stale(now) || validUntil.Before(requiredUntil) {
-		return CostQuote{}, fmt.Errorf("exact provider price must be fresh USD evidence valid through %s", requiredUntil.UTC().Format(time.RFC3339))
+	guaranteedUntil := estimate.GuaranteedUntil.UTC()
+	if estimate.Currency != "USD" || estimate.Source == "" || estimate.Hourly <= 0 || estimate.ObservedAt.After(now) || estimate.Stale(now) || guaranteedUntil.IsZero() || guaranteedUntil.Before(requiredUntil) {
+		return CostQuote{}, fmt.Errorf("exact provider price must be fresh, locked USD evidence guaranteed through %s", requiredUntil.UTC().Format(time.RFC3339))
 	}
-	return CostQuote{HourlyUSD: estimate.Hourly, Source: estimate.Source, ObservedAt: estimate.ObservedAt.UTC(), ValidUntil: validUntil}, nil
+	return CostQuote{HourlyUSD: estimate.Hourly, Source: estimate.Source, ObservedAt: estimate.ObservedAt.UTC(), ValidUntil: guaranteedUntil}, nil
 }

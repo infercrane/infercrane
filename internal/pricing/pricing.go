@@ -19,6 +19,10 @@ type Estimate struct {
 	Hourly           float64
 	ObservedAt       time.Time
 	StaleAfter       time.Duration
+	// GuaranteedUntil is set only when the provider/operator actually locks or
+	// guarantees the quoted rate. Fresh marketplace observations leave it zero:
+	// they may rank plans, but cannot authorize future spend.
+	GuaranteedUntil time.Time
 }
 
 func (e Estimate) Stale(now time.Time) bool {

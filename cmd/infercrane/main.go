@@ -56,6 +56,7 @@ import (
 	"github.com/infercrane/infercrane/internal/planning"
 	"github.com/infercrane/infercrane/internal/priceingest"
 	"github.com/infercrane/infercrane/internal/pricing"
+	"github.com/infercrane/infercrane/internal/provideridentity"
 	"github.com/infercrane/infercrane/internal/provision"
 	"github.com/infercrane/infercrane/internal/readiness"
 	"github.com/infercrane/infercrane/internal/reconcile"
@@ -4092,23 +4093,33 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	}
 	manualPrices := map[pricing.Request]pricing.Estimate{}
 	for _, row := range cfg.OptimizationPrices {
-		manualPrices[pricing.Request{Cloud: row.Cloud, Region: row.Region, GPU: row.GPU, GPUCount: row.GPUCount, Replicas: row.Replicas}] = pricing.Estimate{Currency: row.Currency, Source: row.Source, Hourly: row.HourlyUSD, ObservedAt: row.ObservedAt, StaleAfter: row.ValidUntil.Sub(row.ObservedAt)}
+		manualPrices[pricing.Request{Cloud: row.Cloud, Region: provideridentity.PriceRegion(row.Cloud, row.Region), GPU: provideridentity.GPUTypeID(row.Cloud, row.GPU), GPUCount: row.GPUCount, Replicas: row.Replicas}] = pricing.Estimate{Currency: row.Currency, Source: row.Source, Hourly: row.HourlyUSD, ObservedAt: row.ObservedAt, StaleAfter: row.ValidUntil.Sub(row.ObservedAt), GuaranteedUntil: row.ValidUntil}
 	}
 	priceCatalog := pricing.NewDynamicCatalog(manualPrices)
 	if cfg.GPUPriceSyncInterval > 0 {
-		feed := priceingest.Feed{ValidFor: 2 * cfg.GPUPriceSyncInterval}
-		refreshCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		refreshErr := feed.Refresh(refreshCtx, priceCatalog)
-		cancel()
-		if refreshErr != nil {
-			logger.Warn("initial GPU price refresh was incomplete", "error", refreshErr)
+		// Dynamic marketplace prices must come from the provider itself. Static
+		// third-party catalogs are intentionally excluded from this live catalog.
+		runPodFeed := priceingest.RunPodFeed{APIKey: cfg.RunPodAPIKey, ValidFor: 2 * time.Minute}
+		runPodCtx, runPodCancel := context.WithTimeout(ctx, 20*time.Second)
+		runPodErr := runPodFeed.Refresh(runPodCtx, priceCatalog)
+		runPodCancel()
+		if runPodErr != nil {
+			logger.Warn("initial provider-native RunPod price refresh failed", "error", runPodErr)
 		}
-		go priceingest.Run(ctx, feed, priceCatalog, cfg.GPUPriceSyncInterval, func(err error) {
-			logger.Warn("scheduled GPU price refresh was incomplete", "error", err)
+		go priceingest.RunProviderFeed(ctx, func(refreshCtx context.Context) error {
+			return runPodFeed.Refresh(refreshCtx, priceCatalog)
+		}, time.Minute, func(err error) {
+			logger.Warn("provider-native RunPod price refresh failed", "error", err)
 		})
 	}
 	_, aiperfErr := exec.LookPath(cfg.AIPerfBinary)
-	optimizationExecutionEnabled := len(priceCatalog.Snapshot()) > 0 && aiperfErr == nil
+	optimizationExecutionEnabled := false
+	for _, estimate := range priceCatalog.Snapshot() {
+		if !estimate.GuaranteedUntil.IsZero() && estimate.GuaranteedUntil.After(time.Now().UTC()) {
+			optimizationExecutionEnabled = aiperfErr == nil
+			break
+		}
+	}
 	var optimizationCosts optimizationcampaign.CostAuthority
 	if optimizationExecutionEnabled {
 		optimizationCosts = optimizationcampaign.PricingAuthority{Provider: priceCatalog}

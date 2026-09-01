@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/infercrane/infercrane/internal/provideridentity"
 )
 
 const defaultRunPodRESTURL = "https://rest.runpod.io/v1"
@@ -103,14 +105,14 @@ func (r RunPodServerless) EnsureEndpoint(ctx context.Context, spec ServerlessEnd
 	}
 	if len(existing) == 1 {
 		endpoint := existing[0]
-		if endpoint.TemplateID != templateID || endpoint.WorkersMin != 0 || endpoint.WorkersMax != spec.WorkersMax || !contains(endpoint.GPUTypeIDs, runPodGPUType(spec.GPU)) {
+		if endpoint.TemplateID != templateID || endpoint.WorkersMin != 0 || endpoint.WorkersMax != spec.WorkersMax || !contains(endpoint.GPUTypeIDs, RunPodGPUTypeID(spec.GPU)) {
 			return ServerlessEndpoint{}, fmt.Errorf("existing RunPod Serverless endpoint %s does not match immutable intent", endpoint.ID)
 		}
 		return endpoint, nil
 	}
 	body := map[string]any{
 		"name": name, "templateId": templateID, "computeType": "GPU",
-		"gpuTypeIds": []string{runPodGPUType(spec.GPU)}, "gpuCount": 1,
+		"gpuTypeIds": []string{RunPodGPUTypeID(spec.GPU)}, "gpuCount": 1,
 		"minCudaVersion": runPodServerlessMinCUDAVersion,
 		"workersMin":     0, "workersMax": spec.WorkersMax,
 		"idleTimeout": 5, "scalerType": "QUEUE_DELAY", "scalerValue": 4,
@@ -126,7 +128,7 @@ func (r RunPodServerless) EnsureEndpoint(ctx context.Context, spec ServerlessEnd
 	if endpoint.ID == "" || endpoint.Name != name || endpoint.TemplateID != templateID {
 		return ServerlessEndpoint{}, errors.New("RunPod Serverless create returned an invalid endpoint identity")
 	}
-	if endpoint.WorkersMin != 0 || endpoint.WorkersMax != spec.WorkersMax || !contains(endpoint.GPUTypeIDs, runPodGPUType(spec.GPU)) {
+	if endpoint.WorkersMin != 0 || endpoint.WorkersMax != spec.WorkersMax || !contains(endpoint.GPUTypeIDs, RunPodGPUTypeID(spec.GPU)) {
 		return ServerlessEndpoint{}, errors.New("RunPod Serverless create returned endpoint configuration that does not match immutable intent")
 	}
 	return endpoint, nil
@@ -321,33 +323,11 @@ func ServerlessEndpointName(externalKey string) string {
 
 func serverlessName(externalKey string) string { return ServerlessEndpointName(externalKey) }
 
-func runPodGPUType(gpu string) string {
-	switch strings.ToUpper(strings.TrimSpace(gpu)) {
-	case "L40S", "NVIDIA L40S":
-		return "NVIDIA L40S"
-	case "L40", "NVIDIA L40":
-		return "NVIDIA L40"
-	case "L4", "NVIDIA L4":
-		return "NVIDIA L4"
-	case "H100", "H100 SXM", "NVIDIA H100 80GB HBM3":
-		return "NVIDIA H100 80GB HBM3"
-	case "H100 PCIE", "NVIDIA H100 PCIE":
-		return "NVIDIA H100 PCIe"
-	case "H200", "H200 SXM", "NVIDIA H200":
-		return "NVIDIA H200"
-	case "H200 NVL", "NVIDIA H200 NVL":
-		return "NVIDIA H200 NVL"
-	case "B200", "NVIDIA B200":
-		return "NVIDIA B200"
-	case "RTXPRO6000", "RTX PRO 6000", "NVIDIA RTX PRO 6000 BLACKWELL SERVER EDITION":
-		return "NVIDIA RTX PRO 6000 Blackwell Server Edition"
-	case "A40", "NVIDIA A40":
-		return "NVIDIA A40"
-	case "A100-80GB", "A100 80GB", "NVIDIA A100-SXM4-80GB":
-		return "NVIDIA A100-SXM4-80GB"
-	default:
-		return gpu
-	}
+// RunPodGPUTypeID converts InferCrane's small, explicit aliases to RunPod's
+// provider resource IDs. Unknown values remain unchanged instead of being
+// guessed, so catalog and launch matching stay exact.
+func RunPodGPUTypeID(gpu string) string {
+	return provideridentity.GPUTypeID("runpod", gpu)
 }
 
 func contains(values []string, expected string) bool {

@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
@@ -41,6 +42,7 @@ import (
 	"github.com/infercrane/infercrane/internal/passport"
 	"github.com/infercrane/infercrane/internal/performanceprofile"
 	"github.com/infercrane/infercrane/internal/pricing"
+	"github.com/infercrane/infercrane/internal/provideridentity"
 	"github.com/infercrane/infercrane/internal/provision"
 	"github.com/infercrane/infercrane/internal/qualityevidence"
 	"github.com/infercrane/infercrane/internal/recipe"
@@ -317,16 +319,17 @@ type ComputeProvider struct {
 
 // GPUPriceObservation is sourced price evidence, not an availability claim.
 type GPUPriceObservation struct {
-	Provider   string    `json:"provider"`
-	Region     string    `json:"region"`
-	GPU        string    `json:"gpu"`
-	GPUCount   int       `json:"gpu_count"`
-	Replicas   int       `json:"replicas"`
-	Currency   string    `json:"currency"`
-	HourlyUSD  float64   `json:"hourly_usd"`
-	Source     string    `json:"source"`
-	ObservedAt time.Time `json:"observed_at"`
-	ValidUntil time.Time `json:"valid_until"`
+	Provider             string     `json:"provider"`
+	Region               string     `json:"region"`
+	GPU                  string     `json:"gpu"`
+	GPUCount             int        `json:"gpu_count"`
+	Replicas             int        `json:"replicas"`
+	Currency             string     `json:"currency"`
+	HourlyUSD            float64    `json:"hourly_usd"`
+	Source               string     `json:"source"`
+	ObservedAt           time.Time  `json:"observed_at"`
+	ValidUntil           time.Time  `json:"valid_until"`
+	PriceGuaranteedUntil *time.Time `json:"price_guaranteed_until,omitempty"`
 }
 
 type BackendMetadata struct {
@@ -4278,8 +4281,9 @@ func (a API) catalogLaunchQuote(request provision.LaunchProbeRequest, now time.T
 	var selectedRequest pricing.Request
 	var selected pricing.Estimate
 	found := false
+	providerGPU := provideridentity.GPUTypeID(request.Provider, request.GPU)
 	for candidate, estimate := range a.GPUPriceCatalog.Snapshot() {
-		if !strings.EqualFold(candidate.Cloud, request.Provider) || !strings.EqualFold(candidate.GPU, request.GPU) || candidate.GPUCount != request.GPUCount || candidate.Replicas != 1 || request.Region != "" && !strings.EqualFold(candidate.Region, request.Region) || estimate.Stale(now) {
+		if !strings.EqualFold(candidate.Cloud, request.Provider) || !strings.EqualFold(candidate.GPU, providerGPU) || candidate.GPUCount != request.GPUCount || candidate.Replicas != 1 || request.Region != "" && !strings.EqualFold(candidate.Region, "global") && !strings.EqualFold(candidate.Region, request.Region) || estimate.Stale(now) {
 			continue
 		}
 		if !found || estimate.Hourly < selected.Hourly {
@@ -4298,18 +4302,19 @@ func (a API) catalogLaunchQuote(request provision.LaunchProbeRequest, now time.T
 }
 
 type gpuPriceRow struct {
-	Provider     string    `json:"provider"`
-	Region       string    `json:"region"`
-	GPU          string    `json:"gpu"`
-	GPUCount     int       `json:"gpu_count"`
-	Replicas     int       `json:"replicas"`
-	Currency     string    `json:"currency"`
-	HourlyUSD    float64   `json:"hourly_usd"`
-	Source       string    `json:"source"`
-	ObservedAt   time.Time `json:"observed_at"`
-	ValidUntil   time.Time `json:"valid_until"`
-	Current      bool      `json:"current"`
-	Availability string    `json:"availability"`
+	Provider             string     `json:"provider"`
+	Region               string     `json:"region"`
+	GPU                  string     `json:"gpu"`
+	GPUCount             int        `json:"gpu_count"`
+	Replicas             int        `json:"replicas"`
+	Currency             string     `json:"currency"`
+	HourlyUSD            float64    `json:"hourly_usd"`
+	Source               string     `json:"source"`
+	ObservedAt           time.Time  `json:"observed_at"`
+	ValidUntil           time.Time  `json:"valid_until"`
+	PriceGuaranteedUntil *time.Time `json:"price_guaranteed_until,omitempty"`
+	Current              bool       `json:"current"`
+	Availability         string     `json:"availability"`
 }
 
 type gpuPriceFacet struct {
@@ -4323,11 +4328,17 @@ func (a API) gpuPrices(w http.ResponseWriter, r *http.Request) {
 	if a.GPUPriceCatalog != nil {
 		prices = prices[:0]
 		for request, estimate := range a.GPUPriceCatalog.Snapshot() {
+			var guaranteedUntil *time.Time
+			if !estimate.GuaranteedUntil.IsZero() {
+				value := estimate.GuaranteedUntil.UTC()
+				guaranteedUntil = &value
+			}
 			prices = append(prices, GPUPriceObservation{
 				Provider: request.Cloud, Region: request.Region, GPU: request.GPU,
 				GPUCount: request.GPUCount, Replicas: request.Replicas,
 				Currency: estimate.Currency, HourlyUSD: estimate.Hourly, Source: estimate.Source,
 				ObservedAt: estimate.ObservedAt, ValidUntil: estimate.ObservedAt.Add(estimate.StaleAfter),
+				PriceGuaranteedUntil: guaranteedUntil,
 			})
 		}
 	}
@@ -4338,7 +4349,7 @@ func (a API) gpuPrices(w http.ResponseWriter, r *http.Request) {
 			GPUCount: price.GPUCount, Replicas: price.Replicas,
 			Currency: price.Currency, HourlyUSD: price.HourlyUSD,
 			Source: price.Source, ObservedAt: price.ObservedAt,
-			ValidUntil: price.ValidUntil, Current: price.ValidUntil.After(now),
+			ValidUntil: price.ValidUntil, PriceGuaranteedUntil: price.PriceGuaranteedUntil, Current: price.ValidUntil.After(now),
 			Availability: "unknown",
 		})
 	}
@@ -4370,7 +4381,7 @@ func (a API) gpuPrices(w http.ResponseWriter, r *http.Request) {
 		if provider != "" && strings.ToLower(row.Provider) != provider {
 			continue
 		}
-		if gpu != "" && strings.ToLower(row.GPU) != gpu {
+		if gpu != "" && !provideridentity.MatchesGPU(row.Provider, row.GPU, gpu) {
 			continue
 		}
 		if region != "" && strings.ToLower(row.Region) != region {
@@ -4485,7 +4496,23 @@ func (a API) gpuPrices(w http.ResponseWriter, r *http.Request) {
 	sort.Slice(gpus, func(i, j int) bool { return gpus[i].Value < gpus[j].Value })
 
 	if isPublic {
-		w.Header().Set("Cache-Control", "public, max-age=60, stale-while-revalidate=300")
+		// Never cache a response beyond the earliest evidence expiry represented
+		// by current=true. In particular, provider-native minute quotes must not
+		// remain "current" through stale-while-revalidate.
+		maxAge := 15 * time.Second
+		for _, row := range rows {
+			if !row.Current {
+				continue
+			}
+			remaining := row.ValidUntil.Sub(now)
+			if remaining < maxAge {
+				maxAge = remaining
+			}
+		}
+		if maxAge < 0 {
+			maxAge = 0
+		}
+		w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d, must-revalidate", int(maxAge/time.Second)))
 	}
 	if !latestObservedAt.IsZero() {
 		w.Header().Set("Last-Modified", latestObservedAt.UTC().Format(http.TimeFormat))
