@@ -94,6 +94,88 @@ func skyPilotAdapter(cloud string) string {
 	return "skypilot-" + cloud
 }
 
+// registerSkyPilotPlanningCandidates exposes validated declarations to the
+// side-effect-free planning catalog. Credential evidence is deliberately not
+// consulted here: it gates executable backends and probes, not whether a user
+// can compare a provider and receive connection remediation.
+func registerSkyPilotPlanningCandidates(registry *integration.Registry, manifests []config.SkyPilotProvider) error {
+	compatibility := registry.Snapshot().Compatibility
+	compatibilitySeen := make(map[string]struct{}, len(compatibility))
+	for _, entry := range compatibility {
+		compatibilitySeen[entry.Runtime+"\x00"+entry.Adapter+"\x00"+string(entry.Mode)] = struct{}{}
+	}
+	for _, manifest := range manifests {
+		adapter := skyPilotAdapter(manifest.Cloud)
+		if manifest.Cloud != "runpod" {
+			if err := registry.RegisterProvider(integration.SkyPilotProviderProfile(manifest.Cloud, adapter)); err != nil {
+				return fmt.Errorf("register SkyPilot provider %q: %w", manifest.Cloud, err)
+			}
+		}
+		for _, runtimeName := range manifest.Runtimes {
+			key := runtimeName + "\x00" + adapter + "\x00" + string(integration.ElasticMode)
+			if _, exists := compatibilitySeen[key]; exists {
+				continue
+			}
+			compatibility = append(compatibility, integration.RuntimeCompatibility{Runtime: runtimeName, Adapter: adapter, Cloud: manifest.Cloud, Mode: integration.ElasticMode, State: integration.QualificationRegistered, Reason: "portable lifecycle is registered; real tuple qualification remains required"})
+			compatibilitySeen[key] = struct{}{}
+		}
+	}
+	if len(manifests) == 0 {
+		return nil
+	}
+	if err := registry.SetCompatibility(compatibility...); err != nil {
+		return fmt.Errorf("register SkyPilot runtime compatibility: %w", err)
+	}
+	return nil
+}
+
+func computeProviderInventory(cfg config.Config, configuredSkyPilotProviders []config.SkyPilotProvider) []controlapi.ComputeProvider {
+	providers := []controlapi.ComputeProvider{
+		{ID: "runpod", Label: "RunPod", Mode: "control-plane", State: readinessState(cfg.RunPodAPIKey != ""), Reason: readinessReason(cfg.RunPodAPIKey != "", "RUNPOD_API_KEY is not configured")},
+		{ID: "aws", Label: "AWS", Mode: "BYOC", State: readinessState(cfg.AWSEnabled()), Reason: readinessReason(cfg.AWSEnabled(), "AWS workload identity is not configured")},
+		{ID: "gcp", Label: "Google Cloud", Mode: "BYOC", State: readinessState(cfg.GCPEnabled()), Reason: readinessReason(cfg.GCPEnabled(), "GCP project and workload identity are not configured")},
+		{ID: "kubernetes", Label: "Kubernetes", Mode: "BYOC", State: readinessState(cfg.KubernetesEnabled()), Reason: readinessReason(cfg.KubernetesEnabled(), "Kubernetes context is not configured")},
+	}
+	configured := make(map[string]struct{}, len(configuredSkyPilotProviders))
+	for _, manifest := range configuredSkyPilotProviders {
+		configured[manifest.Cloud] = struct{}{}
+	}
+	for _, manifest := range cfg.SkyPilotProviders {
+		_, credentialsConfigured := configured[manifest.Cloud]
+		executable := credentialsConfigured && cfg.SkyPilotAPI != "disabled"
+		reason := "provider credential environment references are not configured"
+		if credentialsConfigured && cfg.SkyPilotAPI == "disabled" {
+			reason = "SkyPilot execution is disabled"
+		}
+		found := false
+		for index := range providers {
+			if providers[index].ID != manifest.Cloud {
+				continue
+			}
+			// A declaration may add a second adapter for a native provider. It
+			// can upgrade readiness when executable, but must not downgrade an
+			// already-ready native connection when its own credentials are absent.
+			if executable {
+				providers[index].State, providers[index].Reason = "ready", ""
+				if providers[index].Mode != "control-plane" {
+					providers[index].Mode = "SkyPilot"
+				}
+			}
+			found = true
+			break
+		}
+		if found {
+			continue
+		}
+		label := manifest.Label
+		if label == "" {
+			label = manifest.Cloud
+		}
+		providers = append(providers, controlapi.ComputeProvider{ID: manifest.Cloud, Label: label, Mode: "SkyPilot", State: readinessState(executable), Reason: readinessReason(executable, reason)})
+	}
+	return providers
+}
+
 var version = "1.0.0"
 
 const controlPlaneProtocolMin, controlPlaneProtocolMax = 1, 2
@@ -3935,31 +4017,8 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		return fmt.Errorf("configure integration contracts: %w", err)
 	}
 	configuredSkyPilotProviders := cfg.ConfiguredSkyPilotProviders()
-	compatibility := integrationRegistry.Snapshot().Compatibility
-	compatibilitySeen := make(map[string]struct{}, len(compatibility))
-	for _, entry := range compatibility {
-		compatibilitySeen[entry.Runtime+"\x00"+entry.Adapter+"\x00"+string(entry.Mode)] = struct{}{}
-	}
-	for _, manifest := range configuredSkyPilotProviders {
-		adapter := skyPilotAdapter(manifest.Cloud)
-		if manifest.Cloud != "runpod" {
-			if err = integrationRegistry.RegisterProvider(integration.SkyPilotProviderProfile(manifest.Cloud, adapter)); err != nil {
-				return fmt.Errorf("register SkyPilot provider %q: %w", manifest.Cloud, err)
-			}
-		}
-		for _, runtimeName := range manifest.Runtimes {
-			key := runtimeName + "\x00" + adapter + "\x00" + string(integration.ElasticMode)
-			if _, exists := compatibilitySeen[key]; exists {
-				continue
-			}
-			compatibility = append(compatibility, integration.RuntimeCompatibility{Runtime: runtimeName, Adapter: adapter, Cloud: manifest.Cloud, Mode: integration.ElasticMode, State: integration.QualificationRegistered, Reason: "portable lifecycle is registered; real tuple qualification remains required"})
-			compatibilitySeen[key] = struct{}{}
-		}
-	}
-	if len(configuredSkyPilotProviders) > 0 {
-		if err = integrationRegistry.SetCompatibility(compatibility...); err != nil {
-			return fmt.Errorf("register SkyPilot runtime compatibility: %w", err)
-		}
+	if err = registerSkyPilotPlanningCandidates(integrationRegistry, cfg.SkyPilotProviders); err != nil {
+		return err
 	}
 	directory := routes.New()
 	contextPassports := contextpassport.New()
@@ -4221,32 +4280,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	if catalogErr != nil {
 		return fmt.Errorf("configure Model API catalog: %w", catalogErr)
 	}
-	computeProviders := []controlapi.ComputeProvider{
-		{ID: "runpod", Label: "RunPod", Mode: "control-plane", State: readinessState(cfg.RunPodAPIKey != ""), Reason: readinessReason(cfg.RunPodAPIKey != "", "RUNPOD_API_KEY is not configured")},
-		{ID: "aws", Label: "AWS", Mode: "BYOC", State: readinessState(cfg.AWSEnabled()), Reason: readinessReason(cfg.AWSEnabled(), "AWS workload identity is not configured")},
-		{ID: "gcp", Label: "Google Cloud", Mode: "BYOC", State: readinessState(cfg.GCPEnabled()), Reason: readinessReason(cfg.GCPEnabled(), "GCP project and workload identity are not configured")},
-		{ID: "kubernetes", Label: "Kubernetes", Mode: "BYOC", State: readinessState(cfg.KubernetesEnabled()), Reason: readinessReason(cfg.KubernetesEnabled(), "Kubernetes context is not configured")},
-	}
-	for _, manifest := range configuredSkyPilotProviders {
-		found := false
-		for index := range computeProviders {
-			if computeProviders[index].ID == manifest.Cloud {
-				computeProviders[index].State, computeProviders[index].Reason = "ready", ""
-				if computeProviders[index].Mode != "control-plane" {
-					computeProviders[index].Mode = "SkyPilot"
-				}
-				found = true
-				break
-			}
-		}
-		if !found {
-			label := manifest.Label
-			if label == "" {
-				label = manifest.Cloud
-			}
-			computeProviders = append(computeProviders, controlapi.ComputeProvider{ID: manifest.Cloud, Label: label, Mode: "SkyPilot", State: "ready"})
-		}
-	}
+	computeProviders := computeProviderInventory(cfg, configuredSkyPilotProviders)
 	var gcpProvider provision.GCPCompute
 	if cfg.GCPEnabled() {
 		gcpProvider = provision.GCPCompute{Project: cfg.GCPProject, Zone: cfg.GCPZone, Subnet: cfg.GCPSubnet, MachineType: cfg.GCPMachineType, GPUType: cfg.GCPGPU, ServiceAccount: cfg.GCPServiceAccount, VMImage: cfg.GCPVMImage, ContainerImage: cfg.GCPContainerImage, WorkerSecret: cfg.GCPWorkerSecret, BootDiskGiB: cfg.GCPBootDiskGiB, ArtifactCachePolicy: cfg.GCPArtifactCachePolicy, ArtifactDisks: cfg.GCPArtifactDisks}
