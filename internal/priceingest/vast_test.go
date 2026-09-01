@@ -124,6 +124,64 @@ func TestVastFeedRetries429AtStatedReset(t *testing.T) {
 	}
 }
 
+func TestVastFeedRetriesWithinSharedAttemptBudget(t *testing.T) {
+	var calls atomic.Int64
+	seen := map[string]int{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var request map[string]any
+		_ = json.Unmarshal(body, &request)
+		gpu := request["gpu_name"].(map[string]any)["eq"].(string)
+		seen[gpu]++
+		call := calls.Add(1)
+		if call <= 2 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = w.Write([]byte(`{"offers":[{"id":1,"gpu_name":"` + gpu + `","num_gpus":1,"dph_total":1,"rentable":true,"rented":false,"verification":"verified"}]}`))
+	}))
+	defer server.Close()
+	catalog := pricing.NewDynamicCatalog(nil)
+	feed := VastFeed{BaseURL: server.URL, Client: server.Client(), GPUQueries: []string{"B200", "H200", "H100 SXM", "L40S"}}
+	if err := feed.Refresh(context.Background(), catalog); err != nil {
+		t.Fatal(err)
+	}
+	if got := calls.Load(); got != 4 {
+		t.Fatalf("retrying sweep made %d calls, want hard budget of 4", got)
+	}
+	if seen["B200"] != 3 || seen["H200"] != 1 || seen["H100 SXM"] != 0 {
+		t.Fatalf("retry budget did not shorten the sweep: %#v", seen)
+	}
+}
+
+func TestVastFeedAdvancesPastPoisonedShard(t *testing.T) {
+	seen := map[string]int{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var request map[string]any
+		_ = json.Unmarshal(body, &request)
+		gpu := request["gpu_name"].(map[string]any)["eq"].(string)
+		seen[gpu]++
+		if gpu == "poison" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		_, _ = w.Write([]byte(`{"offers":[{"id":1,"gpu_name":"` + gpu + `","num_gpus":1,"dph_total":1,"rentable":true,"rented":false,"verification":"verified"}]}`))
+	}))
+	defer server.Close()
+	catalog := pricing.NewDynamicCatalog(nil)
+	feed := VastFeed{BaseURL: server.URL, Client: server.Client(), GPUQueries: []string{"first", "poison", "after"}, ShardsPerRefresh: 2}
+	if err := feed.Refresh(context.Background(), catalog); err == nil {
+		t.Fatal("expected poisoned shard to be reported")
+	}
+	if err := feed.Refresh(context.Background(), catalog); err != nil {
+		t.Fatal(err)
+	}
+	if seen["after"] == 0 {
+		t.Fatalf("shard after persistent failure was never reached: %#v", seen)
+	}
+}
+
 func TestVastFeedDoesNotSendCredentialsToCustomEndpoint(t *testing.T) {
 	feed := VastFeed{APIKey: "secret", BaseURL: "http://example.test", GPUQueries: []string{"L40S"}}
 	if err := feed.Refresh(context.Background(), pricing.NewDynamicCatalog(nil)); err == nil || !strings.Contains(err.Error(), "untrusted") {

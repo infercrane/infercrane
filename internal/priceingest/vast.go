@@ -88,27 +88,38 @@ func (f *VastFeed) Refresh(ctx context.Context, catalog *pricing.DynamicCatalog)
 	if f.cursor >= len(gpus) {
 		f.cursor = 0
 	}
-	completed := 0
-	for completed < shards {
+	attemptBudget := defaultVastShardsPerSweep
+	visited := 0
+	var failures []error
+	for visited < shards && attemptBudget > 0 {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		gpu := strings.TrimSpace(gpus[f.cursor])
 		if gpu == "" {
-			return errors.New("Vast GPU query is empty")
+			failures = append(failures, errors.New("Vast GPU query is empty"))
+			f.cursor = (f.cursor + 1) % len(gpus)
+			visited++
+			continue
 		}
-		prices, err := f.fetchGPU(ctx, gpu)
+		prices, err := f.fetchGPU(ctx, gpu, &attemptBudget)
 		if err != nil {
-			return err
+			failures = append(failures, err)
+		} else {
+			catalog.ReplaceProviderGPU("vast", gpu, prices)
 		}
-		catalog.ReplaceProviderGPU("vast", gpu, prices)
+		// A poisoned or unavailable shard must not block every GPU after it. Its
+		// last-good row remains untouched and it is retried on the next rotation.
 		f.cursor = (f.cursor + 1) % len(gpus)
-		completed++
+		visited++
+	}
+	if len(failures) > 0 {
+		return fmt.Errorf("Vast staged refresh had failed shards: %w", errors.Join(failures...))
 	}
 	return nil
 }
 
-func (f *VastFeed) fetchGPU(ctx context.Context, gpu string) (map[pricing.Request]pricing.Estimate, error) {
+func (f *VastFeed) fetchGPU(ctx context.Context, gpu string, attemptBudget *int) (map[pricing.Request]pricing.Estimate, error) {
 	endpoint := strings.TrimSpace(f.BaseURL)
 	if endpoint == "" {
 		endpoint = defaultVastOffersURL
@@ -132,7 +143,7 @@ func (f *VastFeed) fetchGPU(ctx context.Context, gpu string) (map[pricing.Reques
 		"allocated_storage": 5,
 		"order":             [][]string{{"dph_total", "asc"}},
 	})
-	data, err := f.request(ctx, endpoint, body, gpu)
+	data, err := f.request(ctx, endpoint, body, gpu, attemptBudget)
 	if err != nil {
 		return nil, err
 	}
@@ -174,12 +185,16 @@ func (f *VastFeed) fetchGPU(ctx context.Context, gpu string) (map[pricing.Reques
 	return prices, nil
 }
 
-func (f *VastFeed) request(ctx context.Context, endpoint string, body []byte, gpu string) ([]byte, error) {
+func (f *VastFeed) request(ctx context.Context, endpoint string, body []byte, gpu string, attemptBudget *int) ([]byte, error) {
 	client := f.Client
 	if client == nil {
 		client = &http.Client{Timeout: 15 * time.Second}
 	}
 	for attempt := 0; attempt < 3; attempt++ {
+		if attemptBudget == nil || *attemptBudget <= 0 {
+			return nil, fmt.Errorf("Vast %s offer request budget exhausted", gpu)
+		}
+		*attemptBudget--
 		request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 		if err != nil {
 			return nil, fmt.Errorf("prepare Vast %s offer request: %w", gpu, err)
