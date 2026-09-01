@@ -46,6 +46,7 @@ import (
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/external"
 	"github.com/infercrane/infercrane/internal/gateway"
+	"github.com/infercrane/infercrane/internal/hfcatalog"
 	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/managedbilling"
 	"github.com/infercrane/infercrane/internal/modelapicatalog"
@@ -4280,6 +4281,39 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	if catalogErr != nil {
 		return fmt.Errorf("configure Model API catalog: %w", catalogErr)
 	}
+	hfRepositories := make([]string, 0)
+	for _, entry := range curatedrecipe.All() {
+		hfRepositories = append(hfRepositories, entry.Model)
+	}
+	hfCatalog, catalogErr := hfcatalog.New(hfRepositories)
+	if catalogErr != nil {
+		return fmt.Errorf("configure Hugging Face catalog: %w", catalogErr)
+	}
+	if cfg.HFCatalogRefreshInterval > 0 {
+		hfClient := hfcatalog.Client{Token: os.Getenv("HF_TOKEN")}
+		refreshHFCatalog := func(refreshCtx context.Context) error {
+			refreshCtx, cancel := context.WithTimeout(refreshCtx, 45*time.Second)
+			defer cancel()
+			return hfCatalog.Refresh(refreshCtx, hfClient)
+		}
+		go func() {
+			if refreshErr := refreshHFCatalog(ctx); refreshErr != nil {
+				logger.Warn("initial Hugging Face catalog refresh failed; retaining last-good metadata", "error", refreshErr)
+			}
+			ticker := time.NewTicker(cfg.HFCatalogRefreshInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if refreshErr := refreshHFCatalog(ctx); refreshErr != nil {
+						logger.Warn("Hugging Face catalog refresh failed; retaining last-good metadata", "error", refreshErr)
+					}
+				}
+			}
+		}()
+	}
 	computeProviders := computeProviderInventory(cfg, configuredSkyPilotProviders)
 	var gcpProvider provision.GCPCompute
 	if cfg.GCPEnabled() {
@@ -4302,7 +4336,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 			launchProbers[provider.ID] = provision.ConfiguredLaunchProbe{Provider: provider.ID}
 		}
 	}
-	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool, OptimizationCosts: optimizationCosts, ModelAPICatalog: modelAPICatalog, ComputeProviders: computeProviders, GPUPriceCatalog: priceCatalog, LaunchProbers: launchProbers, DefaultProviderAdapters: defaultProviderAdapters}
+	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool, OptimizationCosts: optimizationCosts, ModelAPICatalog: modelAPICatalog, HFCatalog: hfCatalog, ComputeProviders: computeProviders, GPUPriceCatalog: priceCatalog, LaunchProbers: launchProbers, DefaultProviderAdapters: defaultProviderAdapters}
 	if cfg.StripeEnabled() {
 		stripeBilling, stripeErr := managedbilling.NewStripe(cfg.StripeSecretKey, cfg.StripeWebhookSecret, cfg.StripeBillingReturnURL, cfg.StripePriceIDs, cfg.StripeLivemode)
 		if stripeErr != nil {

@@ -19,6 +19,7 @@ import (
 	"github.com/infercrane/infercrane/internal/curatedrecipe"
 	"github.com/infercrane/infercrane/internal/doctor"
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/hfcatalog"
 	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/intentplan"
 	"github.com/infercrane/infercrane/internal/modelapicatalog"
@@ -582,6 +583,42 @@ func TestModelAPICatalogPaginatesAndNeverExposesSupplierRouting(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("invalid limit status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestHuggingFaceCatalogReturnsOnlyNormalizedCachedMetadata(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"id":"Qwen/Qwen3-8B","author":"Qwen","sha":"b968826d9c46dd6066d109eabc6255188de91218","private":false,"gated":false,"pipeline_tag":"text-generation","cardData":{"license":"apache-2.0"},"siblings":[{"rfilename":"do-not-expose.bin"}]}`))
+	}))
+	defer server.Close()
+	cache, err := hfcatalog.New([]string{"Qwen/Qwen3-8B"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = cache.Refresh(context.Background(), hfcatalog.Client{BaseURL: server.URL, HTTPClient: server.Client()}); err != nil {
+		t.Fatal(err)
+	}
+	handler := (API{APIKey: "secret", HFCatalog: cache}).Handler()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/catalog/hugging-face/models?query=qwen", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	body := response.Body.String()
+	for _, expected := range []string{`"schema_version":"infercrane.hugging-face-catalog/v1"`, `"repository":"Qwen/Qwen3-8B"`, `"provider":"huggingface_hub_api"`, `"current":true`, `not an InferCrane-reviewed deployment recipe`} {
+		if response.Code != http.StatusOK || !strings.Contains(body, expected) {
+			t.Fatalf("Hugging Face catalog status=%d missing=%q body=%s", response.Code, expected, body)
+		}
+	}
+	if strings.Contains(body, "do-not-expose.bin") || strings.Contains(body, `"siblings"`) {
+		t.Fatalf("raw upstream payload crossed the normalized catalog boundary: %s", body)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/catalog/hugging-face/models?limit=10", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("unsupported filter status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 
