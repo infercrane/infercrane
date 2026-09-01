@@ -38,6 +38,7 @@ var Routes = []Route{
 	{"GET", "/integrations", "listIntegrations", "System", "Inspect registered integration capabilities", "", "Object", 200, false},
 	{"GET", "/catalog/models", "listCatalogModels", "Model catalog", "Search reviewed model starting points", "", "ObjectList", 200, false},
 	{"GET", "/catalog/models/{name}", "getCatalogModel", "Model catalog", "Inspect one reviewed model and its serving profiles", "", "Object", 200, false},
+	{"GET", "/catalog/hugging-face/models", "listHuggingFaceCatalogModels", "Model catalog", "Inspect bounded normalized Hugging Face metadata without promoting it to a reviewed recipe", "", "Object", 200, false},
 	{"POST", "/planning/intents", "planIntent", "Planning", "Compile bounded user intent into an editable reviewed configuration", "IntentPlanRequest", "IntentPlanEnvelope", 200, false},
 	{"GET", "/model-api-catalog", "listModelAPICatalog", "Model APIs", "Browse supplier-neutral managed Model API identities", "", "ObjectList", 200, false},
 	{"GET", "/model-api-catalog/{id}", "getModelAPICatalogEntry", "Model APIs", "Inspect one managed Model API identity without supplier disclosure", "", "Object", 200, false},

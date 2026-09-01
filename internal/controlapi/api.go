@@ -33,6 +33,7 @@ import (
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/external"
 	"github.com/infercrane/infercrane/internal/finops"
+	"github.com/infercrane/infercrane/internal/hfcatalog"
 	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/intentplan"
 	"github.com/infercrane/infercrane/internal/lab"
@@ -294,6 +295,7 @@ type API struct {
 		ParseWebhook([]byte, string) (domain.ManagedPaymentEvent, error)
 	}
 	ModelAPICatalog  modelapicatalog.Catalog
+	HFCatalog        *hfcatalog.Cache
 	ComputeProviders []ComputeProvider
 	GPUPrices        []GPUPriceObservation
 	GPUPriceCatalog  interface {
@@ -370,6 +372,7 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/integrations", a.auth(authz.Read, a.integrations))
 	mux.HandleFunc("GET /api/v1/catalog/models", a.auth(authz.Read, a.catalogModels))
 	mux.HandleFunc("GET /api/v1/catalog/models/{name}", a.auth(authz.Read, a.catalogModel))
+	mux.HandleFunc("GET /api/v1/catalog/hugging-face/models", a.auth(authz.Read, a.huggingFaceCatalogModels))
 	mux.HandleFunc("POST /api/v1/planning/intents", a.auth(authz.Read, a.planIntent))
 	mux.HandleFunc("GET /api/v1/model-api-catalog", a.auth(authz.Read, a.modelAPIModels))
 	mux.HandleFunc("GET /api/v1/model-api-catalog/{id}", a.auth(authz.Read, a.modelAPIModel))
@@ -611,6 +614,22 @@ func (a API) catalogModel(w http.ResponseWriter, r *http.Request) {
 		"model":              entry,
 		"performance_claims": false,
 	})
+}
+
+func (a API) huggingFaceCatalogModels(w http.ResponseWriter, r *http.Request) {
+	for key := range r.URL.Query() {
+		if key != "query" {
+			writeError(w, http.StatusBadRequest, "invalid_query", "only the query filter is supported")
+			return
+		}
+	}
+	query := strings.TrimSpace(r.URL.Query().Get("query"))
+	if len(query) > 256 {
+		writeError(w, http.StatusBadRequest, "invalid_query", "query must not exceed 256 bytes")
+		return
+	}
+	snapshot := a.HFCatalog.Snapshot(time.Now().UTC(), query)
+	writeJSON(w, http.StatusOK, snapshot)
 }
 
 // planIntent compiles only a side-effect-free starting configuration. Provider

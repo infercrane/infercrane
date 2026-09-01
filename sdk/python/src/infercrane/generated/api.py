@@ -55,6 +55,10 @@ class ControlAPI:
         path = f"/catalog/models/{quote(name, safe='')}"
         return cast(dict[str, Any], self._transport.request("GET", path))
 
+    def list_hugging_face_catalog_models(self) -> dict[str, Any]:
+        path = "/catalog/hugging-face/models"
+        return cast(dict[str, Any], self._transport.request("GET", path))
+
     def plan_intent(self, *, body: dict[str, Any]) -> IntentPlanEnvelope:
         path = "/planning/intents"
         return cast(IntentPlanEnvelope, self._transport.request("POST", path, body=body))

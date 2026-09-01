@@ -246,3 +246,35 @@ curl -sS "$INFERCRANE_CONTROL_URL/api/v1/catalog/models/qwen3-8b" \
 The response includes `performance_claims: false`. Trustworthy performance comes from
 [AIPerf benchmarking](/features/benchmarking), [Inference Lab](/features/recipes-lab), and the exact
 evidence attached to a revision.
+
+## Bounded Hugging Face metadata cache
+
+InferCrane can refresh normalized metadata for the repositories already present in the reviewed
+catalog. Enable the opt-in background refresh with a value from 300 to 86400 seconds:
+
+```bash
+export INFERCRANE_HF_CATALOG_REFRESH_SECONDS=21600
+# Optional for private or gated metadata. Use a fine-grained read token.
+export HF_TOKEN=hf_replace
+```
+
+The collector uses Hugging Face's official
+[`model_info`](https://huggingface.co/docs/huggingface_hub/package_reference/hf_api#huggingface_hub.HfApi.model_info)
+API surface. Requests have per-call and whole-refresh time limits, at most four execute concurrently,
+responses are capped at 1 MiB, and only the bounded reviewed repository set is requested. A token is
+sent only to `https://huggingface.co`.
+
+```bash
+curl -sS "$INFERCRANE_CONTROL_URL/api/v1/catalog/hugging-face/models?query=qwen" \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY"
+```
+
+The process-local cache publishes repository identity, immutable revision when reported, access
+state, selected card fields, tags, timestamps, explicit unknown fields, and source/retrieval
+provenance. Unknown or new upstream JSON is not copied wholesale into the public response. Refreshes
+atomically retain the last good record for any repository whose latest fetch fails.
+
+This surface is discovery evidence only. It cannot create or modify a reviewed recipe and does not
+claim runtime compatibility, GPU fit, performance, price, stock, quota, license approval, or
+deployability. The reviewed `/api/v1/catalog/models` contract remains the deployment starting-point
+authority.
