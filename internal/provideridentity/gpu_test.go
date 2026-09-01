@@ -26,3 +26,20 @@ func TestProviderIdentityDoesNotGuessOtherClouds(t *testing.T) {
 		t.Fatalf("RunPod price scope=%q", got)
 	}
 }
+
+func TestVastAliasesResolveToExactMarketplaceName(t *testing.T) {
+	for input, expected := range map[string]string{
+		"H100":      "H100 SXM",
+		"H100 PCIe": "H100 PCIE",
+		"A100 80GB": "A100 SXM4",
+		"T4":        "Tesla T4",
+		"L40S":      "L40S",
+	} {
+		if got := GPUTypeID("vast", input); got != expected {
+			t.Fatalf("GPUTypeID(vast, %q)=%q, want %q", input, got, expected)
+		}
+	}
+	if got := PriceRegion("vast", "US"); got != "global" {
+		t.Fatalf("Vast price scope=%q", got)
+	}
+}

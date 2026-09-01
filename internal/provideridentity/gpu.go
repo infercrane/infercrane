@@ -8,7 +8,32 @@ import "strings"
 // GPUTypeID returns the exact provider resource identifier for a reviewed
 // alias. Unknown values remain unchanged instead of being guessed.
 func GPUTypeID(provider, gpu string) string {
-	if !strings.EqualFold(strings.TrimSpace(provider), "runpod") {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if provider == "vast" {
+		switch strings.ToUpper(strings.TrimSpace(gpu)) {
+		case "H100", "H100 SXM":
+			return "H100 SXM"
+		case "H100 PCIE":
+			return "H100 PCIE"
+		case "H100 NVL":
+			return "H100 NVL"
+		case "H200", "H200 SXM":
+			return "H200"
+		case "H200 NVL":
+			return "H200 NVL"
+		case "A100", "A100 80GB", "A100 SXM4":
+			return "A100 SXM4"
+		case "A100 PCIE", "A100 80GB PCIE":
+			return "A100 PCIE"
+		case "T4", "TESLA T4":
+			return "Tesla T4"
+		case "V100", "TESLA V100":
+			return "Tesla V100"
+		default:
+			return gpu
+		}
+	}
+	if provider != "runpod" {
 		return gpu
 	}
 	switch strings.ToUpper(strings.TrimSpace(gpu)) {
@@ -47,7 +72,7 @@ func GPUTypeID(provider, gpu string) string {
 // secure-cloud gpuTypes quote is global; launch capacity is checked separately
 // for the requested data center.
 func PriceRegion(provider, region string) string {
-	if strings.EqualFold(strings.TrimSpace(provider), "runpod") {
+	if strings.EqualFold(strings.TrimSpace(provider), "runpod") || strings.EqualFold(strings.TrimSpace(provider), "vast") {
 		return "global"
 	}
 	return region

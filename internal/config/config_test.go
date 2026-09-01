@@ -85,7 +85,12 @@ func TestGPUPriceSyncIntervalIsBounded(t *testing.T) {
 	if err != nil || cfg.GPUPriceSyncInterval != time.Hour {
 		t.Fatalf("cfg=%#v err=%v", cfg, err)
 	}
-	t.Setenv("INFERCRANE_GPU_PRICE_SYNC_SECONDS", "60")
+	t.Setenv("INFERCRANE_GPU_PRICE_SYNC_SECONDS", "75")
+	cfg, err = Load()
+	if err != nil || cfg.GPUPriceSyncInterval != 75*time.Second {
+		t.Fatalf("cfg=%#v err=%v", cfg, err)
+	}
+	t.Setenv("INFERCRANE_GPU_PRICE_SYNC_SECONDS", "59")
 	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "GPU_PRICE_SYNC") {
 		t.Fatalf("unsafe price refresh interval accepted: %v", err)
 	}

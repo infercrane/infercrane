@@ -21,7 +21,9 @@ kill_timeout = 35
   # and give the machine enough memory for the control plane plus that process.
   INFERCRANE_SKYPILOT_API = "auto"
   SKYPILOT_DISABLE_USAGE_COLLECTION = "1"
-  INFERCRANE_GPU_PRICE_SYNC_SECONDS = "3600"
+  # Provider-native price feeds rotate exact marketplace shards while staying
+  # below provider request budgets. This is observation, not capacity polling.
+  INFERCRANE_GPU_PRICE_SYNC_SECONDS = "75"
   INFERCRANE_DATABASE_MAX_OPEN = "12"
   INFERCRANE_DATABASE_MAX_IDLE = "4"
 

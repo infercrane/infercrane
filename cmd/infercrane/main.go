@@ -4099,7 +4099,12 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	if cfg.GPUPriceSyncInterval > 0 {
 		// Dynamic marketplace prices must come from the provider itself. Static
 		// third-party catalogs are intentionally excluded from this live catalog.
-		runPodFeed := priceingest.RunPodFeed{APIKey: cfg.RunPodAPIKey, ValidFor: 2 * time.Minute}
+		priceSyncInterval := cfg.GPUPriceSyncInterval
+		runPodValidFor := 2 * priceSyncInterval
+		if runPodValidFor < 2*time.Minute {
+			runPodValidFor = 2 * time.Minute
+		}
+		runPodFeed := priceingest.RunPodFeed{APIKey: cfg.RunPodAPIKey, ValidFor: runPodValidFor}
 		runPodCtx, runPodCancel := context.WithTimeout(ctx, 20*time.Second)
 		runPodErr := runPodFeed.Refresh(runPodCtx, priceCatalog)
 		runPodCancel()
@@ -4108,21 +4113,24 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		}
 		go priceingest.RunProviderFeed(ctx, func(refreshCtx context.Context) error {
 			return runPodFeed.Refresh(refreshCtx, priceCatalog)
-		}, time.Minute, func(err error) {
+		}, priceSyncInterval, func(err error) {
 			logger.Warn("provider-native RunPod price refresh failed", "error", err)
 		})
-		vastFeed := priceingest.VastFeed{ValidFor: 10 * time.Minute}
-		vastCtx, vastCancel := context.WithTimeout(ctx, 45*time.Second)
+		// Four exact Vast GPU shards are refreshed per rate-limit window. A full
+		// reviewed catalog rotation is nine windows, so validity covers two full
+		// rotations plus retry headroom without pretending an expired row is live.
+		vastFeed := priceingest.VastFeed{APIKey: os.Getenv("VAST_API_KEY"), ValidFor: 20 * priceSyncInterval}
+		vastCtx, vastCancel := context.WithTimeout(ctx, 75*time.Second)
 		vastErr := vastFeed.Refresh(vastCtx, priceCatalog)
 		vastCancel()
 		if vastErr != nil {
 			logger.Warn("initial provider-native Vast offer refresh failed", "error", vastErr)
 		}
 		go priceingest.RunProviderFeed(ctx, func(refreshCtx context.Context) error {
-			refreshCtx, cancel := context.WithTimeout(refreshCtx, 45*time.Second)
+			refreshCtx, cancel := context.WithTimeout(refreshCtx, 75*time.Second)
 			defer cancel()
 			return vastFeed.Refresh(refreshCtx, priceCatalog)
-		}, 5*time.Minute, func(err error) {
+		}, priceSyncInterval, func(err error) {
 			logger.Warn("provider-native Vast offer refresh failed", "error", err)
 		})
 	}
