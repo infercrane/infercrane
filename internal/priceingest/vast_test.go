@@ -71,6 +71,40 @@ func TestVastFeedKeepsLastGoodSnapshotWhenSweepIsPartial(t *testing.T) {
 	}
 }
 
+func TestDefaultVastFeedUsesFiveGroupedMarketplaceQueries(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var request struct {
+			GPUName struct {
+				In []string `json:"in"`
+			} `json:"gpu_name"`
+		}
+		if err := json.Unmarshal(body, &request); err != nil {
+			t.Fatal(err)
+		}
+		if len(request.GPUName.In) < 2 {
+			t.Fatalf("default query was not grouped: %s", body)
+		}
+		calls.Add(1)
+		gpu := request.GPUName.In[0]
+		_, _ = w.Write([]byte(`{"offers":[{"id":1,"gpu_name":"` + gpu + `","num_gpus":1,"dph_total":1,"geolocation":"US","rentable":true,"rented":false,"verification":"verified"}]}`))
+	}))
+	defer server.Close()
+
+	catalog := pricing.NewDynamicCatalog(nil)
+	feed := VastFeed{BaseURL: server.URL, Client: server.Client()}
+	if err := feed.Refresh(context.Background(), catalog); err != nil {
+		t.Fatal(err)
+	}
+	if got := calls.Load(); got != 5 {
+		t.Fatalf("default Vast refresh made %d requests; public limit is five", got)
+	}
+	if got := len(catalog.Snapshot()); got != 5 {
+		t.Fatalf("grouped refresh published %d offers, want 5", got)
+	}
+}
+
 func TestVastRegionUsesCountrySuffix(t *testing.T) {
 	for input, expected := range map[string]string{"Frankfurt, DE": "DE", ", US": "US", "": "global"} {
 		if got := vastRegion(input); got != expected {
