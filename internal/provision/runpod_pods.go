@@ -135,7 +135,7 @@ func (r RunPodPods) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provid
 	}
 	body := map[string]any{
 		"name": name, "imageName": spec.Workload.Image,
-		"gpuTypeIds": []string{runPodGPUType(spec.GPU)}, "gpuTypePriority": "custom", "gpuCount": spec.GPUCount,
+		"gpuTypeIds": []string{RunPodGPUTypeID(spec.GPU)}, "gpuTypePriority": "custom", "gpuCount": spec.GPUCount,
 		"cloudType": "SECURE", "computeType": "GPU", "interruptible": false,
 		"containerDiskInGb": disk,
 		"dockerEntrypoint":  []string{command[0]}, "dockerStartCmd": command[1:],
@@ -392,7 +392,7 @@ func validateRunPodIntent(pod runPodRecord, spec ReplicaSpec, command []string, 
 		actualDataCenterID = pod.NetworkVolume.DataCenterID
 	}
 	regionMismatch := spec.Region != "" && actualDataCenterID != "" && actualDataCenterID != spec.Region
-	if image != spec.Workload.Image || pod.GPUCount != spec.GPUCount || (actualGPU != "" && actualGPU != runPodGPUType(spec.GPU)) || credentialMismatch || secretMismatch || actualVolumeID != volumeID || regionMismatch || !equalStrings(pod.DockerEntrypoint, command[:1]) || !equalStrings(pod.DockerStartCmd, command[1:]) {
+	if image != spec.Workload.Image || pod.GPUCount != spec.GPUCount || (actualGPU != "" && actualGPU != RunPodGPUTypeID(spec.GPU)) || credentialMismatch || secretMismatch || actualVolumeID != volumeID || regionMismatch || !equalStrings(pod.DockerEntrypoint, command[:1]) || !equalStrings(pod.DockerStartCmd, command[1:]) {
 		return fmt.Errorf("%w: existing RunPod Pod does not match immutable workload intent", ErrInvalidReplicaSpec)
 	}
 	return nil

@@ -658,12 +658,35 @@ func TestPublicGPUPricesFilterAndPaginateWithoutDumpingCatalog(t *testing.T) {
 	if response.Header().Get("Cache-Control") == "" || response.Header().Get("Last-Modified") == "" {
 		t.Fatalf("public cache evidence missing: %#v", response.Header())
 	}
+	if strings.Contains(response.Header().Get("Cache-Control"), "stale-while-revalidate") {
+		t.Fatalf("current price evidence may not be served stale: %q", response.Header().Get("Cache-Control"))
+	}
 
 	request = httptest.NewRequest(http.MethodGet, "/api/v1/public/catalog/gpu-prices?limit=101", nil)
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"invalid_query"`) {
 		t.Fatalf("invalid public limit status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestPublicGPUPricesFilterAcceptsReviewedRunPodAlias(t *testing.T) {
+	now := time.Now().UTC()
+	catalog := pricing.NewDynamicCatalog(nil)
+	catalog.ReplaceProvider("runpod", map[pricing.Request]pricing.Estimate{
+		{Cloud: "runpod", Region: "global", GPU: "NVIDIA L40S", GPUCount: 1, Replicas: 1}: {
+			Currency: "USD", Hourly: 0.74, Source: "runpod provider API", ObservedAt: now, StaleAfter: time.Minute,
+		},
+	})
+	handler := (API{GPUPriceCatalog: catalog}).Handler()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/public/catalog/gpu-prices?provider=runpod&gpu=L40S&current=true", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"gpu":"NVIDIA L40S"`) {
+		t.Fatalf("canonical RunPod alias did not filter exact provider SKU: code=%d body=%s", response.Code, response.Body.String())
+	}
+	if strings.Contains(response.Body.String(), "price_guaranteed_until") {
+		t.Fatalf("unlocked marketplace quote claimed a guarantee: %s", response.Body.String())
 	}
 }
 
@@ -682,7 +705,7 @@ func TestCloudDeploymentFailsClosedWithoutReadyCompute(t *testing.T) {
 func TestCapacityProbeKeepsCatalogQuoteSeparateFromLaunchEvidence(t *testing.T) {
 	now := time.Now().UTC()
 	catalog := pricing.NewDynamicCatalog(map[pricing.Request]pricing.Estimate{
-		{Cloud: "runpod", Region: "EU-RO-1", GPU: "L40S", GPUCount: 1, Replicas: 1}: {Currency: "USD", Hourly: 0.42, Source: "provider catalog", ObservedAt: now.Add(-time.Minute), StaleAfter: time.Hour},
+		{Cloud: "runpod", Region: "EU-RO-1", GPU: "NVIDIA L40S", GPUCount: 1, Replicas: 1}: {Currency: "USD", Hourly: 0.42, Source: "provider catalog", ObservedAt: now.Add(-time.Minute), StaleAfter: time.Hour},
 	})
 	probeEvidence := provision.LaunchProbeEvidence{Provider: "runpod", Region: "EU-RO-1", GPU: "L40S", GPUCount: 1, ConnectionState: "configured", AvailabilityState: "constrained", QuotaState: "unknown", Deployability: "constrained", Source: "runpod.stock", ObservedAt: now, ExpiresAt: now.Add(30 * time.Second), Message: "low stock"}
 	handler := (API{Store: &fakeStore{}, APIKey: "secret", ComputeProviders: []ComputeProvider{{ID: "runpod", Label: "RunPod", State: "ready"}}, GPUPriceCatalog: catalog, LaunchProbers: map[string]provision.LaunchProber{"runpod": fakeLaunchProber{evidence: probeEvidence}}}).Handler()
@@ -695,6 +718,20 @@ func TestCapacityProbeKeepsCatalogQuoteSeparateFromLaunchEvidence(t *testing.T) 
 		if response.Code != http.StatusOK || !strings.Contains(body, expected) {
 			t.Fatalf("capacity probe status=%d missing=%q body=%s", response.Code, expected, body)
 		}
+	}
+}
+
+func TestCapacityProbeMatchesReviewedRunPodAliasToExactProviderSKU(t *testing.T) {
+	now := time.Now().UTC()
+	catalog := pricing.NewDynamicCatalog(map[pricing.Request]pricing.Estimate{
+		{Cloud: "runpod", Region: "global", GPU: "NVIDIA H100 80GB HBM3", GPUCount: 1, Replicas: 1}: {
+			Currency: "USD", Hourly: 2.69, Source: "runpod secure price", ObservedAt: now, StaleAfter: time.Minute,
+		},
+	})
+	api := API{GPUPriceCatalog: catalog}
+	quote := api.catalogLaunchQuote(provision.LaunchProbeRequest{Provider: "runpod", Region: "EU-RO-1", GPU: "H100", GPUCount: 1}, now)
+	if quote.State != "current" || quote.HourlyUSD == nil || *quote.HourlyUSD != 2.69 || quote.GPU != "NVIDIA H100 80GB HBM3" {
+		t.Fatalf("exact RunPod SKU was not selected: %#v", quote)
 	}
 }
 
