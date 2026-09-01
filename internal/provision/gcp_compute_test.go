@@ -30,6 +30,54 @@ type gcpCheckRunner struct {
 	globalQuotas        string
 }
 
+type gcpLaunchProbeRunner struct {
+	calls                                        [][]string
+	acceleratorMissing, machineMissing           bool
+	regionalQuotas, globalQuotas                 string
+	omitRegionalQuota, omitGlobalQuota, failAuth bool
+}
+
+func (r *gcpLaunchProbeRunner) Run(_ context.Context, _ []string, args ...string) ([]byte, error) {
+	r.calls = append(r.calls, append([]string(nil), args...))
+	if len(args) > 0 && args[0] == "auth" {
+		if r.failAuth {
+			return []byte("unauthenticated"), errors.New("exit 1")
+		}
+		return []byte("token"), nil
+	}
+	if len(args) > 2 && args[0] == "compute" && args[1] == "machine-types" && args[2] == "describe" {
+		if r.machineMissing {
+			return []byte("was not found"), errors.New("exit 1")
+		}
+		return []byte("g2-standard-4"), nil
+	}
+	if len(args) > 2 && args[0] == "compute" && args[1] == "accelerator-types" && args[2] == "describe" {
+		if r.acceleratorMissing {
+			return []byte("was not found"), errors.New("exit 1")
+		}
+		return []byte("nvidia-l4"), nil
+	}
+	if len(args) > 2 && args[0] == "compute" && args[1] == "regions" && args[2] == "describe" {
+		if r.omitRegionalQuota {
+			return []byte(`{"quotas":[]}`), nil
+		}
+		if r.regionalQuotas != "" {
+			return []byte(r.regionalQuotas), nil
+		}
+		return []byte(`{"quotas":[{"metric":"GPU_FAMILY:NVIDIA_L4","limit":8,"usage":0}]}`), nil
+	}
+	if len(args) > 2 && args[0] == "compute" && args[1] == "project-info" && args[2] == "describe" {
+		if r.omitGlobalQuota {
+			return []byte(`{"quotas":[]}`), nil
+		}
+		if r.globalQuotas != "" {
+			return []byte(r.globalQuotas), nil
+		}
+		return []byte(`{"quotas":[{"metric":"GPUS_ALL_REGIONS","limit":8,"usage":0}]}`), nil
+	}
+	return nil, errors.New("unexpected gcloud command")
+}
+
 func (r *gcpCheckRunner) Run(_ context.Context, _ []string, args ...string) ([]byte, error) {
 	r.calls = append(r.calls, append([]string(nil), args...))
 	if len(args) > 2 && args[0] == "compute" && args[1] == "networks" && args[2] == "subnets" {
@@ -144,6 +192,102 @@ func TestGCPComputeCheckIsReadOnly(t *testing.T) {
 	}
 	if len(runner.calls) != 10 || runner.calls[0][0] != "auth" || runner.calls[1][2] != "subnets" || runner.calls[2][1] != "zones" || runner.calls[3][1] != "machine-types" || runner.calls[4][1] != "accelerator-types" || runner.calls[5][0] != "iam" || runner.calls[6][0] != "secrets" || runner.calls[7][1] != "images" || runner.calls[8][1] != "regions" || runner.calls[9][1] != "project-info" {
 		t.Fatalf("unexpected read-only calls: %#v", runner.calls)
+	}
+}
+
+func TestGCPComputeProbeLaunchHeadroomDoesNotClaimStockOrDeployability(t *testing.T) {
+	runner := &gcpLaunchProbeRunner{}
+	evidence, err := testGCPCompute(runner).ProbeLaunch(context.Background(), LaunchProbeRequest{Provider: "gcp", Region: "europe-west4", GPU: "nvidia-l4", GPUCount: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evidence.ConnectionState != "configured" || evidence.QuotaState != "available" || evidence.AvailabilityState != "unknown" || evidence.Deployability != "unknown" {
+		t.Fatalf("positive support or quota headroom became stock/deployability evidence: %#v", evidence)
+	}
+	if evidence.Source != "gcp.compute.exact-zone-preflight" || evidence.ObservedAt.IsZero() || !evidence.ExpiresAt.After(evidence.ObservedAt) {
+		t.Fatalf("probe evidence lacks bounded provenance: %#v", evidence)
+	}
+	if evidence.Region != "europe-west4-a" {
+		t.Fatalf("region-wide request did not retain exact-zone evidence scope: %#v", evidence)
+	}
+	if len(runner.calls) != 5 || runner.calls[0][0] != "auth" || runner.calls[1][1] != "machine-types" || runner.calls[2][1] != "accelerator-types" || runner.calls[3][1] != "regions" || runner.calls[4][1] != "project-info" {
+		t.Fatalf("unexpected exact-zone read-only calls: %#v", runner.calls)
+	}
+	if machineCall, acceleratorCall := strings.Join(runner.calls[1], " "), strings.Join(runner.calls[2], " "); !strings.Contains(machineCall, "g2-standard-4 --zone europe-west4-a --project project") || !strings.Contains(acceleratorCall, "nvidia-l4 --zone europe-west4-a --project project") {
+		t.Fatalf("probe did not bind support checks to the exact configured tuple: %#v", runner.calls)
+	}
+	for _, call := range runner.calls {
+		if len(call) > 2 && call[0] == "compute" && call[1] == "instances" {
+			t.Fatalf("launch probe mutated provider state: %#v", runner.calls)
+		}
+	}
+}
+
+func TestGCPComputeProbeLaunchReportsTriStateQuotaEvidence(t *testing.T) {
+	tests := []struct {
+		name   string
+		runner *gcpLaunchProbeRunner
+		state  string
+		deploy string
+	}{
+		{name: "available", runner: &gcpLaunchProbeRunner{}, state: "available", deploy: "unknown"},
+		{name: "unknown", runner: &gcpLaunchProbeRunner{omitGlobalQuota: true}, state: "unknown", deploy: "unknown"},
+		{name: "malformed quota is unknown", runner: &gcpLaunchProbeRunner{regionalQuotas: `{"quotas":[{"metric":"GPU_FAMILY:NVIDIA_L4"}]}`}, state: "unknown", deploy: "unknown"},
+		{name: "unavailable", runner: &gcpLaunchProbeRunner{regionalQuotas: `{"quotas":[{"metric":"GPU_FAMILY:NVIDIA_L4","limit":4,"usage":4}]}`}, state: "unavailable", deploy: "unavailable"},
+		{name: "known blocker dominates missing signal", runner: &gcpLaunchProbeRunner{omitRegionalQuota: true, globalQuotas: `{"quotas":[{"metric":"GPUS_ALL_REGIONS","limit":0,"usage":0}]}`}, state: "unavailable", deploy: "unavailable"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			evidence, err := testGCPCompute(test.runner).ProbeLaunch(context.Background(), LaunchProbeRequest{Provider: "gcp", Region: "europe-west4-a", GPU: "nvidia-l4", GPUCount: 1})
+			if err != nil || evidence.QuotaState != test.state || evidence.Deployability != test.deploy || evidence.AvailabilityState != "unknown" {
+				t.Fatalf("evidence=%#v err=%v", evidence, err)
+			}
+		})
+	}
+}
+
+func TestGCPComputeProbeLaunchReportsUnsupportedExactZoneWithoutCreating(t *testing.T) {
+	tests := []struct {
+		name         string
+		runner       *gcpLaunchProbeRunner
+		availability string
+		calls        int
+	}{
+		{name: "machine", runner: &gcpLaunchProbeRunner{machineMissing: true}, availability: "unknown", calls: 2},
+		{name: "accelerator", runner: &gcpLaunchProbeRunner{acceleratorMissing: true}, availability: "unavailable", calls: 3},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			evidence, err := testGCPCompute(test.runner).ProbeLaunch(context.Background(), LaunchProbeRequest{Provider: "gcp", Region: "europe-west4", GPU: "nvidia-l4", GPUCount: 1})
+			if err != nil || evidence.AvailabilityState != test.availability || evidence.QuotaState != "unknown" || evidence.Deployability != "unavailable" {
+				t.Fatalf("evidence=%#v err=%v", evidence, err)
+			}
+			if len(test.runner.calls) != test.calls {
+				t.Fatalf("unsupported resource should stop before quota calls: %#v", test.runner.calls)
+			}
+		})
+	}
+}
+
+func TestGCPComputeProbeLaunchAuthenticationFailureDoesNotClaimEvidence(t *testing.T) {
+	runner := &gcpLaunchProbeRunner{failAuth: true}
+	evidence, err := testGCPCompute(runner).ProbeLaunch(context.Background(), LaunchProbeRequest{Provider: "gcp", Region: "europe-west4", GPU: "nvidia-l4", GPUCount: 1})
+	if !errors.Is(err, ErrProviderAuthorization) || evidence.AvailabilityState != "unknown" || evidence.QuotaState != "unknown" || evidence.Deployability != "unknown" || len(runner.calls) != 1 {
+		t.Fatalf("evidence=%#v calls=%#v err=%v", evidence, runner.calls, err)
+	}
+}
+
+func TestGCPComputeProbeLaunchRejectsUnconfiguredTupleWithoutProviderCalls(t *testing.T) {
+	requests := []LaunchProbeRequest{
+		{Provider: "gcp", Region: "us-central1", GPU: "nvidia-l4", GPUCount: 1},
+		{Provider: "gcp", Region: "europe-west4", GPU: "nvidia-tesla-t4", GPUCount: 1},
+	}
+	for _, request := range requests {
+		runner := &gcpLaunchProbeRunner{}
+		evidence, err := testGCPCompute(runner).ProbeLaunch(context.Background(), request)
+		if err != nil || evidence.AvailabilityState != "unknown" || evidence.QuotaState != "unknown" || evidence.Deployability != "unavailable" || len(runner.calls) != 0 {
+			t.Fatalf("request=%#v evidence=%#v calls=%#v err=%v", request, evidence, runner.calls, err)
+		}
 	}
 }
 

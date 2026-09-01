@@ -4133,6 +4133,46 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		}, priceSyncInterval, func(err error) {
 			logger.Warn("provider-native Vast offer refresh failed", "error", err)
 		})
+		// Hyperscaler retail catalogs publish current list prices, not live stock.
+		// Refresh them on a catalog cadence and keep deployability as a separate
+		// launch-time probe. This avoids hammering public catalog APIs every 75s.
+		hyperscalerSyncInterval := priceSyncInterval
+		if hyperscalerSyncInterval < 6*time.Hour {
+			hyperscalerSyncInterval = 6 * time.Hour
+		}
+		hyperscalerValidFor := 2 * hyperscalerSyncInterval
+		azureFeed := priceingest.AzureFeed{ValidFor: hyperscalerValidFor}
+		azureCtx, azureCancel := context.WithTimeout(ctx, 35*time.Second)
+		azureErr := azureFeed.Refresh(azureCtx, priceCatalog)
+		azureCancel()
+		if azureErr != nil {
+			logger.Warn("initial provider-native Azure Retail Prices refresh failed", "error", azureErr)
+		}
+		go priceingest.RunProviderFeed(ctx, func(refreshCtx context.Context) error {
+			refreshCtx, cancel := context.WithTimeout(refreshCtx, 35*time.Second)
+			defer cancel()
+			return azureFeed.Refresh(refreshCtx, priceCatalog)
+		}, hyperscalerSyncInterval, func(err error) {
+			logger.Warn("provider-native Azure Retail Prices refresh failed", "error", err)
+		})
+		// AWS's official regional EC2 catalog is hundreds of MB. Stream it in the
+		// background so a cold catalog download can never delay API readiness.
+		awsFeed := priceingest.AWSFeed{Regions: []string{"us-east-1"}, ValidFor: hyperscalerValidFor}
+		go func() {
+			awsCtx, awsCancel := context.WithTimeout(ctx, 6*time.Minute)
+			awsErr := awsFeed.Refresh(awsCtx, priceCatalog)
+			awsCancel()
+			if awsErr != nil {
+				logger.Warn("initial provider-native AWS Price List refresh failed", "error", awsErr)
+			}
+			priceingest.RunProviderFeed(ctx, func(refreshCtx context.Context) error {
+				refreshCtx, cancel := context.WithTimeout(refreshCtx, 6*time.Minute)
+				defer cancel()
+				return awsFeed.Refresh(refreshCtx, priceCatalog)
+			}, hyperscalerSyncInterval, func(err error) {
+				logger.Warn("provider-native AWS Price List refresh failed", "error", err)
+			})
+		}()
 	}
 	_, aiperfErr := exec.LookPath(cfg.AIPerfBinary)
 	optimizationExecutionEnabled := false
@@ -4185,8 +4225,15 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 			computeProviders = append(computeProviders, controlapi.ComputeProvider{ID: manifest.Cloud, Label: label, Mode: "SkyPilot", State: "ready"})
 		}
 	}
+	var gcpProvider provision.GCPCompute
+	if cfg.GCPEnabled() {
+		gcpProvider = provision.GCPCompute{Project: cfg.GCPProject, Zone: cfg.GCPZone, Subnet: cfg.GCPSubnet, MachineType: cfg.GCPMachineType, GPUType: cfg.GCPGPU, ServiceAccount: cfg.GCPServiceAccount, VMImage: cfg.GCPVMImage, ContainerImage: cfg.GCPContainerImage, WorkerSecret: cfg.GCPWorkerSecret, BootDiskGiB: cfg.GCPBootDiskGiB, ArtifactCachePolicy: cfg.GCPArtifactCachePolicy, ArtifactDisks: cfg.GCPArtifactDisks}
+	}
 	launchProbers := map[string]provision.LaunchProber{
 		"runpod": provision.RunPodAvailability{APIKey: cfg.RunPodAPIKey},
+	}
+	if cfg.GCPEnabled() {
+		launchProbers["gcp"] = gcpProvider
 	}
 	defaultProviderAdapters := make(map[string]string, len(configuredSkyPilotProviders))
 	for _, manifest := range configuredSkyPilotProviders {
@@ -4281,7 +4328,6 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		if profileErr != nil {
 			return fmt.Errorf("configure GCP integration: %w", profileErr)
 		}
-		gcpProvider := provision.GCPCompute{Project: cfg.GCPProject, Zone: cfg.GCPZone, Subnet: cfg.GCPSubnet, MachineType: cfg.GCPMachineType, GPUType: cfg.GCPGPU, ServiceAccount: cfg.GCPServiceAccount, VMImage: cfg.GCPVMImage, ContainerImage: cfg.GCPContainerImage, WorkerSecret: cfg.GCPWorkerSecret, BootDiskGiB: cfg.GCPBootDiskGiB, ArtifactCachePolicy: cfg.GCPArtifactCachePolicy, ArtifactDisks: cfg.GCPArtifactDisks}
 		artifactCacheAdapters["gcp"] = gcpProvider
 		for _, runtimeName := range []string{"vllm", "sglang", "custom-oci"} {
 			elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: "gcp-compute", Cloud: "gcp", Runtime: runtimeName, Default: true, Profile: gcpProfile, Provider: gcpProvider})

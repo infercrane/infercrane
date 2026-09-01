@@ -14,7 +14,7 @@ func TestPricingAuthorityRequiresExactFreshPriceThroughExecutionWindow(t *testin
 	draft := optimizer.DeploymentDraft{}
 	draft.Provider.Cloud, draft.Provider.Region, draft.Resources.GPU = "aws", "eu-central-1", "L40S"
 	draft.Scaling.MaxReplicas = 2
-	request := pricing.Request{Cloud: "aws", Region: "eu-central-1", GPU: "L40S", GPUCount: 1, Replicas: 2}
+	request := pricing.Request{Cloud: "aws", Region: "eu-central-1", GPU: "NVIDIA L40S", GPUCount: 1, Replicas: 2}
 	authority := PricingAuthority{Provider: pricing.Catalog{Prices: map[pricing.Request]pricing.Estimate{request: {Currency: "USD", Source: "aws-price-list/2026-08-24", Hourly: 3.72, ObservedAt: now, StaleAfter: 2 * time.Hour, GuaranteedUntil: now.Add(2 * time.Hour)}}}, Now: func() time.Time { return now }}
 	quote, err := authority.Quote(context.Background(), draft, now.Add(time.Hour))
 	if err != nil || quote.HourlyUSD != 3.72 || quote.Source == "" || quote.ValidUntil != now.Add(2*time.Hour) {
