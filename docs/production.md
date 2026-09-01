@@ -136,9 +136,9 @@ docker compose --env-file /private/path/infercrane.env \
 ```
 
 The overlay mounts the RunPod key read-only and persists only the provider client's local state.
-The entrypoint configures the RunPod client without printing the key and supervises SkyPilot only
-when this overlay explicitly enables it. `INFERCRANE_SKYPILOT_API=disabled` is available for
-diagnostics, but disables RunPod elastic provisioning from that control-plane instance.
+The entrypoint configures the RunPod client without printing the key. Native RunPod Pods remain
+available while `INFERCRANE_SKYPILOT_API=disabled`; SkyPilot starts only for an explicit provider
+manifest in an operator-owned overlay.
 
 AWS and Kubernetes follow the same explicit composition pattern:
 
@@ -164,7 +164,7 @@ context/namespace/RBAC boundary. Never combine overlays merely because their cli
 the image; enable only providers this control-plane instance is intended to operate.
 
 The real RunPod qualification stack is isolated from the development Compose stack. It persists
-PostgreSQL, RunPod configuration, and SkyPilot state across control-plane restarts:
+PostgreSQL and RunPod client configuration across control-plane restarts:
 
 ```sh
 export RUNPOD_KEY_FILE=/absolute/path/to/runpod-key
@@ -175,13 +175,14 @@ docker compose -p infercrane-runpod -f compose.runpod-acceptance.yaml up --build
 
 This command starts the control plane but does not provision a GPU or create a Serverless endpoint.
 Provider mutation begins only after a deployment is submitted. The key file is mounted read-only;
-the entrypoint configures SkyPilot/RunPod and passes the key only to its runtime child processes so
-Serverless API calls work without declaring the secret value in Compose environment metadata.
+the entrypoint configures the RunPod client and passes the key only to its runtime child processes
+so Serverless API calls work without declaring the secret value in Compose environment metadata.
 
-The production image includes the local `git`, OpenSSH, and `rsync` executables required by
-SkyPilot's task packaging and remote synchronization paths. When the RunPod overlay is enabled,
-the entrypoint supervises SkyPilot's foreground API server and exits if that required subprocess
-stops. Without that overlay, InferCrane is executed directly and has no SkyPilot subprocess.
+The production image still includes the executables required by the optional SkyPilot execution
+path. The normal RunPod overlay executes InferCrane directly with no SkyPilot subprocess. An
+operator that enables SkyPilot must provide `INFERCRANE_SKYPILOT_PROVIDERS_JSON`; the entrypoint
+then supervises its foreground API server and exits if that required subprocess stops.
+
 - `INFERCRANE_INSTANCE_ID`: stable and unique per control-plane replica.
 - `INFERCRANE_DATABASE_MAX_OPEN` and `INFERCRANE_DATABASE_MAX_IDLE`: size these with the total
   replica count below PostgreSQL's connection budget or place PgBouncer in transaction mode.

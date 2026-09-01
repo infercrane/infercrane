@@ -137,12 +137,17 @@ func TestSkyPilotExecutionBoundary(t *testing.T) {
 
 	t.Setenv("INFERCRANE_SKYPILOT_API", "auto")
 	cfg, err = Load()
-	if err != nil || !cfg.SkyPilotEnabled() {
-		t.Fatalf("auto SkyPilot did not follow RunPod credentials: enabled=%v err=%v", cfg.SkyPilotEnabled(), err)
+	if err != nil {
+		t.Fatal(err)
 	}
-	providers := cfg.ConfiguredSkyPilotProviders()
-	if len(providers) != 1 || providers[0].Cloud != "runpod" || strings.Join(providers[0].Runtimes, ",") != "vllm,sglang,custom-oci" {
-		t.Fatalf("unexpected RunPod SkyPilot defaults: %#v", providers)
+	if cfg.SkyPilotEnabled() || len(cfg.ConfiguredSkyPilotProviders()) != 0 {
+		t.Fatalf("RunPod credentials silently enabled SkyPilot: cfg=%#v", cfg)
+	}
+
+	t.Setenv("INFERCRANE_SKYPILOT_PROVIDERS_JSON", `[{"cloud":"runpod","runtimes":["vllm","sglang","custom-oci"],"credential_env":["RUNPOD_API_KEY"]}]`)
+	cfg, err = Load()
+	if err != nil || !cfg.SkyPilotEnabled() {
+		t.Fatalf("explicit RunPod SkyPilot manifest was not enabled: enabled=%v err=%v", cfg.SkyPilotEnabled(), err)
 	}
 
 	t.Setenv("INFERCRANE_SKYPILOT_API", "invalid")

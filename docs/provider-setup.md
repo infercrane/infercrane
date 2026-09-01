@@ -145,7 +145,10 @@ the actual launch or a provider-specific read-only probe supplies evidence.
 
 ## RunPod
 
-Set a scoped `RUNPOD_API_KEY` on the control plane and configure SkyPilot's RunPod credentials for elastic workers. Run `infercrane doctor --cloud` before provisioning.
+Set a scoped `RUNPOD_API_KEY` on the control plane. Native RunPod Pods are the default elastic
+worker path and do not depend on a third-party catalog. Declare a SkyPilot provider manifest only
+when intentionally using its long-tail execution path. Run `infercrane doctor --cloud` before
+provisioning.
 
 For Serverless, create a RunPod vLLM template with `MODEL_NAME`, immutable `MODEL_REVISION`, and `RAW_OPENAI_OUTPUT=1`, then set `INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID`. `infercrane doctor --serverless` reads and validates the template without creating an endpoint.
 
@@ -168,6 +171,12 @@ and deterministic adoption identity. Configuration is all-or-nothing. See
 [GCP Compute BYOC](/integrations/gcp-compute). MIG, GKE, and Vertex remain separate registered,
 deferred profiles rather than implicit aliases. Run `infercrane doctor --gcp` before provisioning;
 it performs only identity and Compute API reads.
+
+Google's public Cloud Billing Catalog requires a consumer API key. To add current GCP GPU billing
+components to the price market, create a key restricted to `cloudbilling.googleapis.com` and set it
+as `GOOGLE_CLOUD_BILLING_API_KEY` on the control plane. This key is used only for the official
+Compute Engine SKU catalog. The resulting rows are GPU-device rates, not complete VM quotes or
+capacity evidence; CPU, memory, disk, network, quota, and launchability remain separate facts.
 
 ## CoreWeave
 

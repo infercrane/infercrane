@@ -49,7 +49,8 @@ plan or local simulation is not real-provider qualification.
     ```
 
     The base production profile is provider-neutral. The additional overlay mounts the key
-    read-only and enables the RunPod/SkyPilot adapter explicitly.
+    read-only and enables native RunPod Pods and optional provider-native Serverless. SkyPilot is
+    not enabled implicitly by a RunPod credential.
 
     Large custom OCI workloads may need more than the default 100 GiB container disk. Set, for
     example, `INFERCRANE_RUNPOD_CONTAINER_DISK_GIB=500` in the same private environment file. Disk

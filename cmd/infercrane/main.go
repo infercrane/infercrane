@@ -4155,6 +4155,28 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		}, hyperscalerSyncInterval, func(err error) {
 			logger.Warn("provider-native Azure Retail Prices refresh failed", "error", err)
 		})
+		// Google requires a restricted API key even for its public Billing
+		// Catalog. The full Compute Engine catalog is paginated, so refresh it in
+		// the background and publish only after every bounded page succeeds.
+		// Catalog prices are GPU billing components, never stock evidence.
+		if gcpBillingAPIKey := strings.TrimSpace(os.Getenv("GOOGLE_CLOUD_BILLING_API_KEY")); gcpBillingAPIKey != "" {
+			gcpFeed := priceingest.GCPFeed{APIKey: gcpBillingAPIKey, ValidFor: hyperscalerValidFor}
+			go func() {
+				gcpCtx, gcpCancel := context.WithTimeout(ctx, 2*time.Minute)
+				gcpErr := gcpFeed.Refresh(gcpCtx, priceCatalog)
+				gcpCancel()
+				if gcpErr != nil {
+					logger.Warn("initial provider-native Google Cloud Billing Catalog refresh failed", "error", gcpErr)
+				}
+				priceingest.RunProviderFeed(ctx, func(refreshCtx context.Context) error {
+					refreshCtx, cancel := context.WithTimeout(refreshCtx, 2*time.Minute)
+					defer cancel()
+					return gcpFeed.Refresh(refreshCtx, priceCatalog)
+				}, hyperscalerSyncInterval, func(err error) {
+					logger.Warn("provider-native Google Cloud Billing Catalog refresh failed", "error", err)
+				})
+			}()
+		}
 		// AWS's official regional EC2 catalog is hundreds of MB. Stream it in the
 		// background so a cold catalog download can never delay API readiness.
 		awsFeed := priceingest.AWSFeed{Regions: []string{"us-east-1"}, ValidFor: hyperscalerValidFor}

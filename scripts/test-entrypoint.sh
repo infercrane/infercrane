@@ -44,12 +44,12 @@ RUNPOD_API_KEY_FILE="$key_file" INFERCRANE_SKYPILOT_API=disabled \
 grep -qx 'runpod:config test-only-key' "$ENTRYPOINT_TEST_LOG"
 grep -qx 'infercrane:version' "$ENTRYPOINT_TEST_LOG"
 
-if env -u RUNPOD_API_KEY -u RUNPOD_API_KEY_FILE INFERCRANE_SKYPILOT_API=enabled \
+if env -u INFERCRANE_SKYPILOT_PROVIDERS_JSON INFERCRANE_SKYPILOT_API=enabled \
   sh "$root/scripts/entrypoint.sh" infercrane serve >"$fixture/out" 2>"$fixture/error"; then
-  echo 'enabled SkyPilot mode accepted a missing RunPod credential' >&2
+  echo 'enabled SkyPilot mode accepted a missing provider manifest' >&2
   exit 1
 fi
-grep -q 'requires a RunPod API key' "$fixture/error"
+grep -q 'requires INFERCRANE_SKYPILOT_PROVIDERS_JSON' "$fixture/error"
 
 if INFERCRANE_SKYPILOT_API=invalid sh "$root/scripts/entrypoint.sh" infercrane serve \
   >"$fixture/out" 2>"$fixture/error"; then
