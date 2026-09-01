@@ -22,6 +22,42 @@ type RunPodAvailability struct {
 	Client          *http.Client
 }
 
+func (r RunPodAvailability) ProbeLaunch(ctx context.Context, request LaunchProbeRequest) (LaunchProbeEvidence, error) {
+	now := time.Now().UTC()
+	evidence := LaunchProbeEvidence{
+		Provider: request.Provider, Region: request.Region, GPU: request.GPU, GPUCount: request.GPUCount,
+		ConnectionState: "connection-required", AvailabilityState: "unknown", QuotaState: "unknown", Deployability: "unknown",
+		Source: "runpod.gpuTypes.lowestPrice", ObservedAt: now, ExpiresAt: now.Add(30 * time.Second),
+		Message:     "RunPod credentials are not configured",
+		Limitations: []string{"provider stock is advisory and not a reservation", "quota is not exposed by this read-only signal"},
+	}
+	if evidence.Provider == "" {
+		evidence.Provider = "runpod"
+	}
+	if strings.TrimSpace(r.APIKey) == "" {
+		return evidence, nil
+	}
+	evidence.ConnectionState = "configured"
+	availability, err := r.Availability(ctx, AvailabilityRequest{Cloud: evidence.Provider, Region: request.Region, GPU: request.GPU, Count: request.GPUCount})
+	if err != nil {
+		evidence.Message = "RunPod stock could not be observed; launchability remains unknown"
+		return evidence, err
+	}
+	evidence.AvailabilityState = availability.State
+	evidence.Message = availability.Message
+	switch availability.State {
+	case "available":
+		evidence.Deployability = "available"
+	case "constrained":
+		evidence.Deployability = "constrained"
+	case "unavailable":
+		evidence.Deployability = "unavailable"
+	default:
+		evidence.Deployability = "unknown"
+	}
+	return evidence, nil
+}
+
 func (r RunPodAvailability) Availability(ctx context.Context, request AvailabilityRequest) (Availability, error) {
 	if strings.TrimSpace(r.APIKey) == "" {
 		return Availability{State: "unknown", Message: "Provider availability was not checked because credentials are not configured"}, nil

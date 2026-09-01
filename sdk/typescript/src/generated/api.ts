@@ -343,6 +343,11 @@ export class ControlApi {
     return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
   }
 
+  probeLaunchCapacity(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = '/capacity/probes';
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
   recordArtifactCacheObservation(id: string, body: JsonValue): Promise<Record<string, JsonValue>> {
     const path = `/artifacts/${encodeURIComponent(id)}/cache-observations`;
     return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;

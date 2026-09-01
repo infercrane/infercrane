@@ -133,9 +133,32 @@ func (r *CloudRequest) Validate() error {
 		}
 	}
 	if err := support.V1().Validate(r.Runtime, r.Cloud, r.ComputeMode); err != nil {
-		return err
+		// Production composition may register an explicitly configured SkyPilot
+		// cloud that is intentionally absent from the static public qualification
+		// matrix. Requiring its exact adapter identity keeps this escape hatch
+		// bound to the configured backend; a provider name alone is never enough.
+		if r.ComputeMode != "elastic" || r.ProviderAdapter != "skypilot-"+r.Cloud || !validPortableCloud(r.Cloud) {
+			return err
+		}
 	}
 	return nil
+}
+
+func validPortableCloud(cloud string) bool {
+	if cloud == "" || len(cloud) > 64 {
+		return false
+	}
+	isAlphaNumeric := func(char byte) bool { return char >= 'a' && char <= 'z' || char >= '0' && char <= '9' }
+	if !isAlphaNumeric(cloud[0]) || !isAlphaNumeric(cloud[len(cloud)-1]) {
+		return false
+	}
+	for _, char := range cloud {
+		if char >= 'a' && char <= 'z' || char >= '0' && char <= '9' || char == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 type DeleteRequest struct {

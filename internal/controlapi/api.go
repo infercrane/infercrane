@@ -41,6 +41,7 @@ import (
 	"github.com/infercrane/infercrane/internal/passport"
 	"github.com/infercrane/infercrane/internal/performanceprofile"
 	"github.com/infercrane/infercrane/internal/pricing"
+	"github.com/infercrane/infercrane/internal/provision"
 	"github.com/infercrane/infercrane/internal/qualityevidence"
 	"github.com/infercrane/infercrane/internal/recipe"
 	"github.com/infercrane/infercrane/internal/support"
@@ -295,6 +296,11 @@ type API struct {
 	GPUPriceCatalog  interface {
 		Snapshot() map[pricing.Request]pricing.Estimate
 	}
+	LaunchProbers map[string]provision.LaunchProber
+	// DefaultProviderAdapters contains only credential-gated, dynamically
+	// registered provider adapters. It lets the simple API omit an advanced
+	// adapter field without widening the static provider qualification matrix.
+	DefaultProviderAdapters map[string]string
 }
 
 // ComputeProvider is the customer-facing execution readiness for one cloud.
@@ -362,6 +368,7 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/model-api-catalog/{id}", a.auth(authz.Read, a.modelAPIModel))
 	mux.HandleFunc("GET /api/v1/compute/providers", a.auth(authz.Read, a.computeProviders))
 	mux.HandleFunc("GET /api/v1/catalog/gpu-prices", a.auth(authz.Read, a.gpuPrices))
+	mux.HandleFunc("POST /api/v1/capacity/probes", a.auth(authz.Read, a.probeCapacity))
 	mux.HandleFunc("GET /api/v1/system/instances", a.auth(authz.Read, a.controlPlaneInstances))
 	mux.HandleFunc("POST /api/v1/deployments/{name}/recipes", a.auth(authz.Deploy, a.captureRecipe))
 	mux.HandleFunc("GET /api/v1/recipes", a.auth(authz.Read, a.recipes))
@@ -4117,6 +4124,9 @@ func (a API) createCloudDeployment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid: "+err.Error())
 		return
 	}
+	if request.ProviderAdapter == "" {
+		request.ProviderAdapter = a.DefaultProviderAdapters[request.Cloud]
+	}
 	if err := request.Validate(); err != nil {
 		writeError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
 		return
@@ -4176,6 +4186,115 @@ func (a API) computeProviders(w http.ResponseWriter, _ *http.Request) {
 	providers := append([]ComputeProvider(nil), a.ComputeProviders...)
 	sort.SliceStable(providers, func(i, j int) bool { return providers[i].Label < providers[j].Label })
 	writeJSON(w, http.StatusOK, map[string]any{"data": providers})
+}
+
+type catalogLaunchQuote struct {
+	State       string    `json:"state"`
+	Provider    string    `json:"provider"`
+	Region      string    `json:"region,omitempty"`
+	GPU         string    `json:"gpu"`
+	GPUCount    int       `json:"gpu_count"`
+	Currency    string    `json:"currency,omitempty"`
+	HourlyUSD   *float64  `json:"hourly_usd"`
+	Source      string    `json:"source,omitempty"`
+	ObservedAt  time.Time `json:"observed_at,omitempty"`
+	ValidUntil  time.Time `json:"valid_until,omitempty"`
+	Limitations []string  `json:"limitations"`
+}
+
+func (a API) probeCapacity(w http.ResponseWriter, r *http.Request) {
+	var request provision.LaunchProbeRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "request body must be one strict JSON object")
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "request body must contain exactly one JSON object")
+		return
+	}
+	request.Provider = strings.ToLower(strings.TrimSpace(request.Provider))
+	request.Region, request.GPU = strings.TrimSpace(request.Region), strings.TrimSpace(request.GPU)
+	if request.GPUCount == 0 {
+		request.GPUCount = 1
+	}
+	if request.Provider == "" || len(request.Provider) > 64 || request.GPU == "" || len(request.GPU) > 128 || len(request.Region) > 128 || request.GPUCount < 1 || request.GPUCount > 1024 {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_capacity_probe", "provider, GPU, optional region, and a GPU count between 1 and 1024 are required")
+		return
+	}
+
+	now := time.Now().UTC()
+	quote := a.catalogLaunchQuote(request, now)
+	evidence := provision.LaunchProbeEvidence{
+		Provider: request.Provider, Region: request.Region, GPU: request.GPU, GPUCount: request.GPUCount,
+		ConnectionState: "connection-required", AvailabilityState: "unknown", QuotaState: "unknown", Deployability: "unknown",
+		Source: "control-plane.configuration", ObservedAt: now, ExpiresAt: now.Add(30 * time.Second), Message: "No configured compute connection can probe this provider",
+		Limitations: []string{"catalog price does not prove current stock", "capacity probes do not reserve resources"},
+	}
+	providerReady := false
+	for _, provider := range a.ComputeProviders {
+		if strings.EqualFold(provider.ID, request.Provider) {
+			providerReady = provider.State == "ready"
+			if !providerReady && provider.Reason != "" {
+				evidence.Message = provider.Reason
+			}
+			break
+		}
+	}
+	if providerReady {
+		evidence.ConnectionState = "configured"
+		evidence.Message = "Provider is configured, but no read-only stock or quota probe is registered"
+		if prober := a.LaunchProbers[request.Provider]; prober != nil {
+			probed, err := prober.ProbeLaunch(r.Context(), request)
+			if err == nil {
+				evidence = probed
+			} else {
+				// Provider transport and schema failures cannot become availability
+				// claims. Preserve only bounded, customer-actionable state.
+				evidence = probed
+				evidence.ConnectionState = "configured"
+				evidence.AvailabilityState, evidence.QuotaState, evidence.Deployability = "unknown", "unknown", "unknown"
+				evidence.Message = "Provider capacity could not be observed; deployability remains unknown"
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"request":            request,
+		"catalog_quote":      quote,
+		"launch_evidence":    evidence,
+		"selection_boundary": "catalog_quote and launch_evidence are advisory; only an accepted provider launch reserves capacity",
+	})
+}
+
+func (a API) catalogLaunchQuote(request provision.LaunchProbeRequest, now time.Time) catalogLaunchQuote {
+	quote := catalogLaunchQuote{
+		State: "unavailable", Provider: request.Provider, Region: request.Region, GPU: request.GPU, GPUCount: request.GPUCount,
+		Limitations: []string{"no current exact catalog observation was found", "catalog price does not prove stock, quota, or deployability"},
+	}
+	if a.GPUPriceCatalog == nil {
+		return quote
+	}
+	var selectedRequest pricing.Request
+	var selected pricing.Estimate
+	found := false
+	for candidate, estimate := range a.GPUPriceCatalog.Snapshot() {
+		if !strings.EqualFold(candidate.Cloud, request.Provider) || !strings.EqualFold(candidate.GPU, request.GPU) || candidate.GPUCount != request.GPUCount || candidate.Replicas != 1 || request.Region != "" && !strings.EqualFold(candidate.Region, request.Region) || estimate.Stale(now) {
+			continue
+		}
+		if !found || estimate.Hourly < selected.Hourly {
+			selectedRequest, selected, found = candidate, estimate, true
+		}
+	}
+	if !found {
+		return quote
+	}
+	hourly := selected.Hourly
+	return catalogLaunchQuote{
+		State: "current", Provider: selectedRequest.Cloud, Region: selectedRequest.Region, GPU: selectedRequest.GPU, GPUCount: selectedRequest.GPUCount,
+		Currency: selected.Currency, HourlyUSD: &hourly, Source: selected.Source, ObservedAt: selected.ObservedAt, ValidUntil: selected.ObservedAt.Add(selected.StaleAfter),
+		Limitations: []string{"price is a catalog observation, not a launch quote", "actual account, region, stock, and billing terms may differ"},
+	}
 }
 
 type gpuPriceRow struct {

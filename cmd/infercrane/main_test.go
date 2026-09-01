@@ -885,6 +885,12 @@ func TestPrimaryDeployPathDefaultsToRunPodL40S(t *testing.T) {
 	}
 }
 
+func TestSkyPilotAdapterIdentityIsStableAndCloudSpecific(t *testing.T) {
+	if skyPilotAdapter("runpod") != "skypilot" || skyPilotAdapter("lambda") != "skypilot-lambda" || skyPilotAdapter("vast") != "skypilot-vast" {
+		t.Fatal("SkyPilot adapter identity is not stable across declarative provider manifests")
+	}
+}
+
 func TestServerlessDeployDefaultsToZeroMinimumWorkers(t *testing.T) {
 	var body map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

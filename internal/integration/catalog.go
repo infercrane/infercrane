@@ -2,25 +2,37 @@ package integration
 
 import "github.com/infercrane/infercrane/internal/support"
 
+// SkyPilotProviderProfile projects the provider-neutral SkyPilot lifecycle
+// contract onto one explicitly configured cloud. Registration proves only the
+// adapter contract; real runtime/GPU/provider tuples remain deferred until
+// qualification evidence exists.
+func SkyPilotProviderProfile(cloud, adapter string) ProviderProfile {
+	profile := ProviderProfile{
+		Adapter: adapter, Cloud: cloud, ContractVersion: ProviderContractV1, AdapterVersion: "builtin-v1", Modes: []ComputeMode{ElasticMode},
+		Capabilities: []Capability{
+			{Name: "adoption", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestProviderContractSkyPilotLifecycle"},
+			{Name: "capacity_preflight", State: CapabilityUnknown, Detail: "provider-specific read-only stock and quota signals must be registered separately"},
+			{Name: "idempotent_delete", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestProviderContractSkyPilotLifecycle"},
+			{Name: "orphan_inventory", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestInventoryFiltersOwnedResources"},
+		},
+		Qualification: []Qualification{
+			{State: QualificationLocal, Environment: "hermetic-provider-contract", Evidence: "go:test/internal/provision#TestProviderContractSkyPilotLifecycle"},
+			{State: QualificationDeferred, Environment: "real-" + cloud + "-elastic", Reason: "real-provider qualification remains bound to an exact runtime, model, GPU, region, and workload tuple"},
+		},
+	}
+	if cloud == "runpod" {
+		profile.Capabilities[1] = Capability{Name: "capacity_preflight", State: CapabilitySupported, Detail: "advisory provider stock; not a reservation", Evidence: "go:test/internal/provision#TestRunPodAvailabilityAggregatesCompatibleGPUStock"}
+	}
+	return profile
+}
+
 // BaseCatalog is the smallest compiled integration inventory. It describes
 // the core runtime and adoption boundaries used by focused contract tests.
 // Public support remains owned by support.Matrix.
 func BaseCatalog() (*Registry, error) {
 	registry := NewRegistry()
 	profiles := []ProviderProfile{
-		{
-			Adapter: "skypilot", Cloud: "runpod", ContractVersion: ProviderContractV1, AdapterVersion: "builtin-v1", Modes: []ComputeMode{ElasticMode},
-			Capabilities: []Capability{
-				{Name: "adoption", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestProviderContractSkyPilotLifecycle"},
-				{Name: "capacity_preflight", State: CapabilitySupported, Detail: "advisory provider stock; not a reservation", Evidence: "go:test/internal/provision#TestRunPodAvailabilityAggregatesCompatibleGPUStock"},
-				{Name: "idempotent_delete", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestProviderContractSkyPilotLifecycle"},
-				{Name: "orphan_inventory", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestInventoryFiltersOwnedResources"},
-			},
-			Qualification: []Qualification{
-				{State: QualificationLocal, Environment: "hermetic-provider-contract", Evidence: "go:test/internal/provision#TestProviderContractSkyPilotLifecycle"},
-				{State: QualificationDeferred, Environment: "real-runpod-elastic", Reason: "real-provider qualification has not been completed"},
-			},
-		},
+		SkyPilotProviderProfile("runpod", "skypilot"),
 		{
 			Adapter: "runpod-serverless", Cloud: "runpod", ContractVersion: ProviderContractV1, AdapterVersion: "builtin-v1", Modes: []ComputeMode{ServerlessMode},
 			Capabilities: []Capability{

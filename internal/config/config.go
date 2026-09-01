@@ -29,6 +29,7 @@ type Config struct {
 	StripeLivemode                                                                                                     bool
 	RunPodAPIKey, RunPodServerlessTemplateID, RunPodRESTURL, RunPodArtifactCachePolicy, RunPodHFTokenSecret            string
 	SkyPilotAPI                                                                                                        string
+	SkyPilotProviders                                                                                                  []SkyPilotProvider
 	RunPodContainerDiskGiB                                                                                             int
 	RunPodNetworkVolumes                                                                                               map[string]string
 	AWSRoleARN, AWSExternalID, AWSRegion, AWSSubnetID, AWSAMIID, AWSInstanceType, AWSGPU                               string
@@ -57,6 +58,17 @@ type OptimizationPrice struct {
 	GPUCount, Replicas                   int
 	HourlyUSD                            float64
 	ObservedAt, ValidUntil               time.Time
+}
+
+// SkyPilotProvider is a declarative execution manifest. It contains only
+// provider identity, supported portable runtimes, and names of environment
+// variables that prove credentials are configured. Credential values never
+// enter configuration snapshots or API responses.
+type SkyPilotProvider struct {
+	Cloud         string   `json:"cloud"`
+	Label         string   `json:"label,omitempty"`
+	Runtimes      []string `json:"runtimes"`
+	CredentialEnv []string `json:"credential_env"`
 }
 
 type ClientContext struct {
@@ -334,6 +346,10 @@ func load(requireAPIKey bool) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	skyPilotProviders, err := envSkyPilotProviders("INFERCRANE_SKYPILOT_PROVIDERS_JSON")
+	if err != nil {
+		return Config{}, err
+	}
 	stripePriceIDs, err := envStripePriceIDs("INFERCRANE_STRIPE_PRICE_IDS_JSON")
 	if err != nil {
 		return Config{}, err
@@ -381,6 +397,7 @@ func load(requireAPIKey bool) (Config, error) {
 		RunPodNetworkVolumes:                runPodNetworkVolumes,
 		RunPodHFTokenSecret:                 env("INFERCRANE_RUNPOD_HF_TOKEN_SECRET", ""),
 		SkyPilotAPI:                         env("INFERCRANE_SKYPILOT_API", "auto"),
+		SkyPilotProviders:                   skyPilotProviders,
 		AWSRoleARN:                          env("INFERCRANE_AWS_ROLE_ARN", ""),
 		AWSExternalID:                       env("INFERCRANE_AWS_EXTERNAL_ID", ""),
 		AWSRegion:                           env("INFERCRANE_AWS_REGION", ""),
@@ -435,6 +452,11 @@ func load(requireAPIKey bool) (Config, error) {
 		HealthInterval: time.Duration(healthSeconds) * time.Second, UpstreamTimeout: time.Duration(upstreamSeconds) * time.Second,
 		ShutdownTimeout: time.Duration(shutdownSeconds) * time.Second, RequestRetention: time.Duration(retentionHours) * time.Hour,
 		GPUPriceSyncInterval: time.Duration(gpuPriceSyncSeconds) * time.Second,
+	}
+	// Preserve the existing RunPod default while moving the execution boundary
+	// to provider-neutral manifests. Other clouds must be declared explicitly.
+	if len(config.SkyPilotProviders) == 0 && config.RunPodAPIKey != "" {
+		config.SkyPilotProviders = []SkyPilotProvider{{Cloud: "runpod", Label: "RunPod", Runtimes: []string{"vllm"}, CredentialEnv: []string{"RUNPOD_API_KEY"}}}
 	}
 	if config.Port < 1 || config.Port > 65535 {
 		return Config{}, fmt.Errorf("INFERCRANE_PORT must be between 1 and 65535")
@@ -538,10 +560,65 @@ func validateSkyPilot(config Config) error {
 	default:
 		return errors.New("INFERCRANE_SKYPILOT_API must be auto, enabled, or disabled")
 	}
-	if config.SkyPilotAPI == "enabled" && config.RunPodAPIKey == "" {
-		return errors.New("enabled SkyPilot API requires RUNPOD_API_KEY")
+	seen := map[string]struct{}{}
+	for _, provider := range config.SkyPilotProviders {
+		if !validManifestID(provider.Cloud) || len(provider.Runtimes) == 0 || len(provider.CredentialEnv) == 0 {
+			return errors.New("SkyPilot provider manifests require a safe cloud ID, at least one runtime, and credential_env references")
+		}
+		if _, duplicate := seen[provider.Cloud]; duplicate {
+			return fmt.Errorf("SkyPilot provider manifest %q is duplicated", provider.Cloud)
+		}
+		seen[provider.Cloud] = struct{}{}
+		runtimes := map[string]struct{}{}
+		for _, runtime := range provider.Runtimes {
+			if runtime != "vllm" && runtime != "sglang" && runtime != "custom-oci" {
+				return fmt.Errorf("SkyPilot provider %q runtime must be vllm, sglang, or custom-oci", provider.Cloud)
+			}
+			if _, duplicate := runtimes[runtime]; duplicate {
+				return fmt.Errorf("SkyPilot provider %q runtime %q is duplicated", provider.Cloud, runtime)
+			}
+			runtimes[runtime] = struct{}{}
+		}
+		for _, name := range provider.CredentialEnv {
+			if !validEnvironmentName(name) {
+				return fmt.Errorf("SkyPilot provider %q has an invalid credential environment reference", provider.Cloud)
+			}
+		}
+	}
+	if config.SkyPilotAPI == "enabled" && len(config.ConfiguredSkyPilotProviders()) == 0 {
+		return errors.New("enabled SkyPilot API requires at least one manifest whose credential_env references are configured")
 	}
 	return nil
+}
+
+func validManifestID(value string) bool {
+	if value == "" || len(value) > 64 {
+		return false
+	}
+	isAlphaNumeric := func(char byte) bool { return char >= 'a' && char <= 'z' || char >= '0' && char <= '9' }
+	if !isAlphaNumeric(value[0]) || !isAlphaNumeric(value[len(value)-1]) {
+		return false
+	}
+	for _, char := range value {
+		if char >= 'a' && char <= 'z' || char >= '0' && char <= '9' || char == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func validEnvironmentName(value string) bool {
+	if value == "" || len(value) > 128 || value[0] < 'A' || value[0] > 'Z' {
+		return false
+	}
+	for _, char := range value {
+		if char >= 'A' && char <= 'Z' || char >= '0' && char <= '9' || char == '_' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func validRunPodResourceID(value string) bool {
@@ -564,7 +641,27 @@ func (c Config) AWSEnabled() bool { return c.AWSRoleARN != "" }
 // same switch prevents an innocuous status observation from auto-starting
 // SkyPilot's local multiprocessing server on control-plane replicas.
 func (c Config) SkyPilotEnabled() bool {
-	return c.SkyPilotAPI == "enabled" || (c.SkyPilotAPI == "auto" && c.RunPodAPIKey != "")
+	return c.SkyPilotAPI != "disabled" && len(c.ConfiguredSkyPilotProviders()) > 0
+}
+
+// ConfiguredSkyPilotProviders returns only manifests whose named credential
+// evidence exists in this process. A catalog declaration by itself can never
+// make a provider executable.
+func (c Config) ConfiguredSkyPilotProviders() []SkyPilotProvider {
+	configured := make([]SkyPilotProvider, 0, len(c.SkyPilotProviders))
+	for _, provider := range c.SkyPilotProviders {
+		ready := len(provider.CredentialEnv) > 0
+		for _, name := range provider.CredentialEnv {
+			if strings.TrimSpace(os.Getenv(name)) == "" {
+				ready = false
+				break
+			}
+		}
+		if ready {
+			configured = append(configured, provider)
+		}
+	}
+	return configured
 }
 
 func (c Config) GCPEnabled() bool { return c.GCPProject != "" }
@@ -967,6 +1064,27 @@ func envStringMap(key string) (map[string]string, error) {
 		return nil, fmt.Errorf("%s must contain exactly one JSON object", key)
 	}
 	return values, nil
+}
+
+func envSkyPilotProviders(key string) ([]SkyPilotProvider, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return nil, nil
+	}
+	var providers []SkyPilotProvider
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&providers); err != nil {
+		return nil, fmt.Errorf("%s must be a JSON array of SkyPilot provider manifests: %w", key, err)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("%s must contain exactly one JSON array", key)
+	}
+	if len(providers) > 32 {
+		return nil, fmt.Errorf("%s supports at most 32 provider manifests", key)
+	}
+	return providers, nil
 }
 
 func envOptimizationPrices(key string) ([]OptimizationPrice, error) {

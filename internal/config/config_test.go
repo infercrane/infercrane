@@ -142,12 +142,30 @@ func TestSkyPilotExecutionBoundary(t *testing.T) {
 	}
 }
 
-func TestSkyPilotEnabledRequiresRunPodCredentials(t *testing.T) {
+func TestSkyPilotEnabledRequiresConfiguredManifestCredentials(t *testing.T) {
 	t.Setenv("INFERCRANE_API_KEY", "test-key")
 	t.Setenv("INFERCRANE_SKYPILOT_API", "enabled")
 	t.Setenv("RUNPOD_API_KEY", "")
-	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "RUNPOD_API_KEY") {
+	t.Setenv("INFERCRANE_SKYPILOT_PROVIDERS_JSON", `[{"cloud":"lambda","runtimes":["vllm","sglang"],"credential_env":["LAMBDA_API_KEY"]}]`)
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "at least one manifest") {
 		t.Fatalf("credential-less enabled SkyPilot accepted: %v", err)
+	}
+	t.Setenv("LAMBDA_API_KEY", "configured-outside-the-manifest")
+	cfg, err := Load()
+	if err != nil || !cfg.SkyPilotEnabled() || len(cfg.ConfiguredSkyPilotProviders()) != 1 || cfg.ConfiguredSkyPilotProviders()[0].Cloud != "lambda" {
+		t.Fatalf("configured generic SkyPilot manifest was not enabled: cfg=%#v err=%v", cfg, err)
+	}
+}
+
+func TestSkyPilotProviderManifestIsStrictAndDoesNotContainCredentialValues(t *testing.T) {
+	t.Setenv("INFERCRANE_API_KEY", "test-key")
+	t.Setenv("INFERCRANE_SKYPILOT_PROVIDERS_JSON", `[{"cloud":"lambda","runtimes":["vllm"],"credential_env":["LAMBDA_API_KEY"],"api_key":"unsafe"}]`)
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("secret-bearing manifest accepted: %v", err)
+	}
+	t.Setenv("INFERCRANE_SKYPILOT_PROVIDERS_JSON", `[{"cloud":"Lambda Cloud","runtimes":["vllm"],"credential_env":["LAMBDA_API_KEY"]}]`)
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "safe cloud ID") {
+		t.Fatalf("unsafe cloud identity accepted: %v", err)
 	}
 }
 

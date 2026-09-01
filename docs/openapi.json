@@ -446,6 +446,65 @@
         ],
         "type": "object"
       },
+      "CatalogLaunchQuote": {
+        "additionalProperties": false,
+        "properties": {
+          "currency": {
+            "type": "string"
+          },
+          "gpu": {
+            "type": "string"
+          },
+          "gpu_count": {
+            "type": "integer"
+          },
+          "hourly_usd": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "observed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "region": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "current",
+              "unavailable"
+            ],
+            "type": "string"
+          },
+          "valid_until": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "provider",
+          "gpu",
+          "gpu_count",
+          "hourly_usd",
+          "limitations"
+        ],
+        "type": "object"
+      },
       "ChatCompletionRequest": {
         "additionalProperties": true,
         "properties": {
@@ -1519,6 +1578,145 @@
         },
         "required": [
           "model_identity"
+        ],
+        "type": "object"
+      },
+      "LaunchProbeEnvelope": {
+        "additionalProperties": false,
+        "properties": {
+          "catalog_quote": {
+            "$ref": "#/components/schemas/CatalogLaunchQuote"
+          },
+          "launch_evidence": {
+            "$ref": "#/components/schemas/LaunchProbeEvidence"
+          },
+          "request": {
+            "$ref": "#/components/schemas/LaunchProbeRequest"
+          },
+          "selection_boundary": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "request",
+          "catalog_quote",
+          "launch_evidence",
+          "selection_boundary"
+        ],
+        "type": "object"
+      },
+      "LaunchProbeEvidence": {
+        "additionalProperties": false,
+        "properties": {
+          "availability_state": {
+            "enum": [
+              "available",
+              "constrained",
+              "unavailable",
+              "unknown"
+            ],
+            "type": "string"
+          },
+          "connection_state": {
+            "enum": [
+              "configured",
+              "connection-required"
+            ],
+            "type": "string"
+          },
+          "deployability": {
+            "enum": [
+              "available",
+              "constrained",
+              "unavailable",
+              "unknown"
+            ],
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "gpu": {
+            "type": "string"
+          },
+          "gpu_count": {
+            "type": "integer"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "message": {
+            "type": "string"
+          },
+          "observed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "quota_state": {
+            "enum": [
+              "available",
+              "constrained",
+              "unavailable",
+              "unknown"
+            ],
+            "type": "string"
+          },
+          "region": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "gpu",
+          "gpu_count",
+          "connection_state",
+          "availability_state",
+          "quota_state",
+          "deployability",
+          "source",
+          "observed_at",
+          "expires_at",
+          "message"
+        ],
+        "type": "object"
+      },
+      "LaunchProbeRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "gpu": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "gpu_count": {
+            "default": 1,
+            "maximum": 1024,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "provider": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "region": {
+            "maxLength": 128,
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "gpu"
         ],
         "type": "object"
       },
@@ -4509,6 +4707,52 @@
           }
         ],
         "summary": "Summarize tenant-scoped observed capacity evidence",
+        "tags": [
+          "Capacity intelligence"
+        ]
+      }
+    },
+    "/api/v1/capacity/probes": {
+      "post": {
+        "operationId": "probeLaunchCapacity",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LaunchProbeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LaunchProbeEnvelope"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Compare a current catalog quote with read-only provider launch evidence",
         "tags": [
           "Capacity intelligence"
         ]

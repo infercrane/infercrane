@@ -843,6 +843,19 @@ func TestCloudRequestDefaultsAndValidatesStableEndpointName(t *testing.T) {
 	}
 }
 
+func TestCloudRequestRequiresExactAdapterForDeclarativeSkyPilotCloud(t *testing.T) {
+	request := CloudRequest{Name: "coder-production", Model: "openai/gpt-oss-20b", Cloud: "lambda", ProviderAdapter: "skypilot-lambda", GPU: "H100", MinReplicas: 1, MaxReplicas: 1}
+	if err := request.Validate(); err != nil {
+		t.Fatalf("configured declarative SkyPilot request was rejected: %v", err)
+	}
+	for _, adapter := range []string{"", "skypilot", "skypilot-vast"} {
+		request.ProviderAdapter = adapter
+		if err := request.Validate(); err == nil || !strings.Contains(err.Error(), "not qualified") {
+			t.Fatalf("generic cloud with adapter %q did not fail closed: %v", adapter, err)
+		}
+	}
+}
+
 func TestConvergeCancellationDeletesProviderResource(t *testing.T) {
 	store := &fakeCloudStore{deployment: domain.Deployment{ID: "deployment-1", Name: "qwen"}, replica: domain.Replica{ID: "replica-1", DeploymentID: "deployment-1", ExternalKey: "deployment-1-r0", ProviderResourceID: "infercrane-deployment-1-r0", LifecycleState: "starting"}}
 	provider := &fakeReplicaProvider{observation: provision.Observation{Exists: true, State: "starting"}}
