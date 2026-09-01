@@ -1,0 +1,251 @@
+---
+title: Hosted Model APIs to customer cloud
+description: Decision record for supplier-neutral hosted inference and evidence-gated promotion to customer-owned capacity.
+---
+
+# Hosted Model APIs to customer cloud
+
+**Status:** Proposed, 2026-09-01. This record refines the [Managed Model API architecture](/architecture/managed-model-apis); it does not announce additional provider support.
+
+The following labels are normative throughout this record:
+
+- **Implemented** means the behavior exists in this repository. It may still require a separately documented real-provider qualification before production use.
+- **Registered/deferred** means an interface, profile, or local adapter exists, but the real provider path is not qualified.
+- **Proposed** means an architecture decision or an inference from the linked provider documentation. It is not implemented product behavior.
+
+## Decision
+
+InferCrane should expose one tenant-scoped OpenAI-compatible endpoint and stable logical model ID,
+then satisfy it from three explicit supply lanes:
+
+1. a token-priced hosted supplier for immediate access and burst traffic;
+2. an InferCrane-operated, exact-artifact elastic or warm pool for portable open models; and
+3. a customer-owned deployment when sustained load, data policy, or infrastructure ownership makes
+   it the better fit.
+
+The public API contract is stable across lanes, but a route may move only between bindings that
+preserve the exact model and required protocol capabilities. Provider identity, commercial rate,
+or a similar model name is not sufficient evidence.
+
+“Promotion to customer cloud” means that InferCrane produces and validates an immutable deployment
+specification, launches a new candidate using customer-authorized credentials, measures that exact
+candidate, and promotes its serving plan only after Release Guard passes. It does **not** move an
+upstream provider resource, conversation state, KV cache, supplier credentials, or upstream IDs.
+The hosted binding remains active until the customer explicitly promotes and later retires it.
+
+## Current implementation boundary
+
+The decision builds on these repository facts:
+
+| Capability | Status and implementation evidence |
+| --- | --- |
+| Stable OpenAI surface | **Implemented:** `internal/gateway/gateway.go` handles models, chat, responses, embeddings, completions, and batch surfaces; streaming and cancellation stay on the selected binding. |
+| Tenant routing | **Implemented:** `internal/routes/routes.go` publishes immutable in-memory route snapshots, supports weighted selection and affinity hints, and pins an in-flight generation. The database is not on the request hot path. |
+| Prepaid managed requests | **Implemented:** `internal/gateway/gateway.go`, `internal/managedbilling`, and `internal/store/managed_billing.go` reserve worst-case integer-microusd cost before supplier transmission and settle from reported usage. Missing usage remains reserved for reconciliation. |
+| Governed external APIs | **Implemented contract:** `internal/external/binding.go` requires reference-only secrets, privacy acknowledgment, hard limits, a current cost basis, and the margin floor. It names OpenAI-compatible external, Modal, and RunPod Serverless API profiles. This does not by itself qualify any real target. |
+| Supplier selection | **Implemented:** `internal/modelapicatalog/catalog.go` and `internal/modelapisupply/plan.go` reject stale price, access, capacity, health, cost, margin, and mismatched performance evidence. A catalog row is not a capacity claim. |
+| RunPod Serverless lifecycle | **Implemented locally; real target deferred:** `internal/provision/runpod_serverless.go` and `internal/workflows/serverless.go` reconcile a pinned model revision, runtime options, GPU, worker bounds, and endpoint lifecycle. Real queue-versus-load-balancer, OpenAI streaming, usage, billing, cold-start, adoption, and deletion behavior still require bounded qualification. |
+| Customer AWS and GCP | **Implemented adapters; exact real tuples require qualification:** `internal/provision/aws_ec2.go` targets private EC2 and `internal/provision/gcp_compute.go` targets private Compute Engine. The repository does not currently implement SageMaker or Vertex AI deployment lifecycles. |
+| Candidate promotion | **Implemented:** `internal/store/endpoints.go` separates active and candidate serving plans and requires a current Release Guard pass before promotion. `internal/benchmark`, `internal/releaseguard`, and `internal/replay` provide the evidence path. |
+| Portable deployment description | **Implemented contract:** `docs/deployment-spec.md` defines immutable model, runtime, image, provider, GPU, scaling, and route fields. Terraform resources are not yet a complete export of every workload detail. |
+
+Fireworks and Lightning are not named lifecycle adapters today. A generic OpenAI-compatible binding
+can describe an external URL, but it must not be represented as provider-qualified until identity,
+streaming, cancellation, usage, hard-budget, and failure behavior pass a real target contract.
+
+## Portability classes
+
+Every hosted offer must declare one of these classes before publication:
+
+- **Exact artifact:** immutable repository/revision or content digest, tokenizer and chat template,
+  quantization, runtime image digest/version/arguments, protocol capabilities, and tool parser are
+  all known. Only this class may create a customer-cloud promotion candidate.
+- **Semantic only:** the provider claims the same model family or label, but InferCrane cannot prove
+  the artifact/runtime tuple. A separately benchmarked replacement can be offered, but not as a
+  seamless promotion.
+- **Provider only:** the model or behavior cannot be reproduced outside that supplier. It is a
+  hosted API only and must be labeled non-exportable.
+
+This classification prevents a cheap supplier rate from becoming false evidence that a customer
+can reproduce the same model in their account.
+
+## Control plane and data plane
+
+The control plane owns desired state and evidence: logical models, artifact manifests, provider
+qualifications, expiring rates, supply plans, wallets, deployment drafts, candidate plans,
+benchmarks, Release Guard decisions, and audit records. Provider reconcilers consume desired state;
+they do not publish a route until inventory and health establish the expected resource identity.
+
+The data plane performs tenant authentication, request-size/deadline/quota admission, prepaid
+reservation, capability-safe route selection, streaming proxying, cancellation, settlement, and
+content-free telemetry. It reads an immutable route snapshot. A control-plane outage must not turn
+into a database lookup or provider discovery call on each inference request.
+
+```text
+customer SDK -> tenant gateway -> immutable route snapshot -> qualified binding -> supplier/runtime
+                    |                     ^
+              reserve/settle              |
+                    v                     |
+             prepaid ledger       control-plane publish
+                                          ^
+artifact + rates + provider state -> candidate -> benchmark/guard -> promotion
+```
+
+Secrets remain references resolved at the execution boundary. A supplier credential, customer
+cloud role, or model API key must never enter the route snapshot, deployment specification, logs,
+or browser payload.
+
+## Cold starts and warm capacity
+
+InferCrane should normalize cold-start observations into
+`zero -> allocating -> image_weights -> runtime_ready -> warm -> draining`, while retaining the raw
+provider state, source, timestamp, and request ID. Unknown stages remain unknown.
+
+Provider behavior is not interchangeable:
+
+- RunPod [queue-based endpoints](https://docs.runpod.io/serverless/endpoints/overview) queue work and
+  can retry; load-balancing endpoints send direct HTTP traffic and do not retry. RunPod bills Flex
+  workers from start through execution and idle time, while Active workers remain running
+  ([pricing](https://docs.runpod.io/serverless/pricing)). The endpoint type must therefore be pinned
+  and qualified, not inferred from a URL.
+- Fireworks dedicated deployments can scale to zero, but the first request receives a `503` while
+  capacity starts; it is not queued and cold start can take minutes
+  ([autoscaling](https://docs.fireworks.ai/deployments/autoscaling)).
+- SageMaker inference components can scale to zero, but the first requests fail while an instance
+  provisions, which can take several minutes
+  ([AWS guide](https://docs.aws.amazon.com/en_en/sagemaker/latest/dg/endpoint-auto-scaling-zero-instances.html)).
+- Vertex AI scale-to-zero is preview, drops the first request with `429`, and can encounter stockout
+  without a reservation
+  ([GCP autoscaling guide](https://docs.cloud.google.com/gemini-enterprise-agent-platform/machine-learning/predictions/autoscaling)).
+- Modal exposes minimum, maximum, buffer, and concurrency controls; its cold-start guidance favors
+  volumes for weights and explicitly distinguishes memory snapshots from loading model weights
+  ([scaling](https://modal.com/docs/guide/scale), [cold starts](https://modal.com/docs/guide/cold-start),
+  [model weights](https://modal.com/docs/guide/model-weights)).
+
+Consequently, **proposed** synchronous behavior is either an already-warm compatible fallback or a
+bounded `503` with retry guidance. The gateway must not hide multi-minute allocation inside an
+unbounded retry, replay a request after an upstream may have accepted it, or retry a started stream.
+Economy tiers may scale to zero; a latency SLO requires measured warm capacity and includes its idle
+cost in the price.
+
+## Pooling and routing
+
+A reusable worker pool is keyed by the complete artifact manifest, runtime/topology, accelerator,
+region, and security class. “Same model family” is not a pool key. Continuous batching and target
+concurrency are selected from measured workload evidence rather than GPU memory arithmetic alone.
+
+Physical capacity may be shared across tenants only for an explicitly shared service tier with
+per-tenant admission, quotas, billing attribution, credentials, and log partitioning. Prompt,
+response, session, and KV/prefix-cache state must not cross tenant boundaries unless the runtime's
+isolation has been specifically qualified. Strict privacy tiers use dedicated tenant pools.
+
+At request time, routing considers only current healthy, capability-compatible bindings. Reliability
+wins over cache/session affinity. Weighted canaries require evidence, and a stream remains pinned to
+one target. Supplier failover must preserve the public model contract; otherwise the request fails
+closed.
+
+## Pricing decision
+
+Retail prices are immutable, expiring rate cards with first-party provenance:
+
+- token suppliers use their published token rate plus reported usage and invoice reconciliation;
+- RunPod, Modal, AWS, GCP, and Lightning capacity uses provider-reported compute, CPU, memory,
+  storage, and network units at the applicable account rate;
+- AWS public list prices can be queried through the
+  [Price List Query API](https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/using-price-list-query-api.html),
+  but AWS warns that it does not include every account discount;
+- Modal exposes machine-readable account rates through
+  [`modal billing rates --json`](https://modal.com/docs/cli/latest/billing); and
+- Fireworks publishes separate [serverless token pricing](https://docs.fireworks.ai/serverless/pricing)
+  and bills dedicated deployments by GPU-second.
+
+A GPU-second price must not be converted to a token price until InferCrane has measured exact-tuple
+goodput and utilization. Cost basis also includes startup and idle time, CPU/RAM, volumes and image
+storage, network transfer, provider fees, payment fees/refunds, failure allowance, and operational
+reserve. Provider pages are discovery sources; account invoices or billing exports are the
+reconciliation authority. Expired or unreconciled rates cannot authorize managed traffic.
+
+The expected economic progression is token-priced burst, elastic exact-artifact capacity for
+intermittent demand, warm or reserved capacity for steady demand, then customer-owned capacity when
+measured utilization or policy justifies it. This is a workload-specific crossover calculation,
+not a universal “cheapest provider” ranking.
+
+## Observability and tenancy
+
+**Implemented:** gateway telemetry already records tenant, deployment/revision, binding/target,
+provider/runtime/mode, status, latency, queue time, TTFT, reported tokens, retries, cold state, and
+hashed session identifiers without prompt or response content.
+
+**Proposed additions:** record each cold-start phase, worker/replica count, provider queue duration,
+supplier request ID, reserved/settled/reconciled cost, rate-card version, route reason, and raw
+provider observation provenance. Provider signals should be imported but never silently promoted
+to stronger evidence: Fireworks exposes a rate-limited
+[Prometheus endpoint](https://docs.fireworks.ai/deployments/exporting-metrics), Modal can export
+[OpenTelemetry](https://modal.com/docs/guide/otel-integration), SageMaker emits
+[enhanced CloudWatch metrics](https://docs.aws.amazon.com/sagemaker/latest/dg/monitoring-cloudwatch-enhanced-metrics.html),
+and Vertex publishes prediction/autoscaling metrics.
+
+All dashboards, traces, cost ledgers, and audit queries are tenant scoped. Content logging remains
+off by default. A customer-supplied provider account changes resource ownership, not the tenant
+isolation or gateway authorization boundary.
+
+## Provider fit
+
+| Provider primitive | Official behavior relevant to this decision | InferCrane decision |
+| --- | --- | --- |
+| RunPod Serverless | Queue and load-balancing endpoint modes; Flex scale-to-zero and Active workers; vLLM exposes an [OpenAI-compatible endpoint](https://docs.runpod.io/serverless/vllm/overview). | **First proposed exact-artifact managed lane**, because a local lifecycle already exists. Qualify the real endpoint type, immutable artifact, streaming/cancel/usage, cold and warm paths, invoice, adoption, and deletion before publication. |
+| Modal | Web endpoints support direct URLs and [container concurrency](https://modal.com/docs/guide/concurrent-inputs); autoscaling has min/max/buffer controls. | **Registered/deferred.** The repository has a governed external profile, not lifecycle reconciliation. Add only after real target qualification and an authoritative rate import. |
+| Fireworks | Shared serverless models are token-priced and best-effort; dedicated deployments allow custom models and GPU-second billing ([model overview](https://docs.fireworks.ai/models/overview)). The API is [OpenAI compatible](https://docs.fireworks.ai/tools-sdks/python-client/sdk-reference). | **Proposed burst supplier.** Provider-only models are non-exportable. An open model is portable only after exact artifact identity is proven. Add a governed binding before any lifecycle adapter. |
+| AWS | Current InferCrane path is private EC2. SageMaker inference components add managed autoscaling and scale-to-zero, with cold-request failures. | **Customer-cloud promotion uses EC2 first.** SageMaker is future work, not current support; adopt it only after a dedicated reconciler, pricing, cold-start, and metrics contract. |
+| GCP | Current InferCrane path is private Compute Engine. Custom vLLM on Vertex requires [raw inference requests](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/open-models/deploy-custom-vllm) rather than the normal prediction envelope. | **Customer-cloud promotion uses Compute Engine first.** Vertex needs a translation adapter and preview-risk qualification; it is not currently a pass-through OpenAI target. |
+| Lightning | Lightning Inference documents custom containers, streaming, health, autoscaling to zero, secrets, and customer cloud accounts through its [deployment SDK](https://lightning.ai/docs/overview/lightning-deploy/sdk). | **Deferred.** No current InferCrane adapter. Require idempotent ensure/adopt/inventory/delete, API semantics, metrics, pricing, and real-target evidence before registration. |
+
+## Phased implementation
+
+### Phase 0 — close the truth gap
+
+Qualify one bounded real RunPod vLLM tuple end to end: endpoint mode, exact artifact, first/cold/warm
+request, stream and cancellation, token usage, no-balance/no-transmission, invoice reconciliation,
+adoption, deletion, and zero-resource proof. Do not publish a hosted SKU before these pass.
+
+### Phase 1 — one portable hosted SKU
+
+Publish a single pinned open-model manifest behind the stable gateway. Offer an economy Flex tier and
+a paid warm tier only if their measured cold-start and TTFT distributions support the advertised
+contract. A Fireworks binding may provide burst fallback after the same identity, protocol, prepaid,
+and billing gates; otherwise expose it as a distinct, non-portable offer.
+
+### Phase 2 — customer-cloud promotion MVP
+
+Compile the hosted artifact manifest into the existing deployment specification for private AWS EC2
+or GCP Compute. Resolve customer credentials only at execution, perform read-only prerequisite and
+quota checks, launch an explicit candidate, bind it without traffic, benchmark/replay the exact
+tuple, require Release Guard, and ask for explicit promotion. Keep the hosted lane available for
+rollback until the customer retires it.
+
+### Phase 3 — measured efficiency
+
+Use observed arrival rate, batch shape, TTFT, goodput, cache locality, cold-start distribution, and
+idle cost to tune warm count, worker concurrency, and pool boundaries. Add reserved capacity only
+where sustained measured utilization beats elastic capacity after risk and operational cost.
+
+### Phase 4 — supplier breadth
+
+Add Modal lifecycle, Fireworks dedicated, Lightning, SageMaker, or Vertex one at a time. Each needs a
+provider-specific reconciliation contract and bounded real qualification; a generic catalog entry
+or OpenAI-shaped response is not sufficient.
+
+## Release gates
+
+A new hosted or promotion path is not releasable until it proves:
+
+- immutable artifact and runtime identity, protocol capabilities, and tenant isolation;
+- real first, cold, warm, streaming, cancellation, timeout, quota, and provider-outage behavior;
+- no supplier transmission without a valid route, current price, sufficient balance, and hard cap;
+- reported-usage settlement plus invoice reconciliation with explainable variance;
+- content-free logs, reference-only secrets, and no provider identity leaked through the public API;
+- replay-safe ensure/adopt, inventory, health, rollback, deletion, and absence proof; and
+- a current exact-tuple benchmark and Release Guard pass before customer traffic promotion.
+
+These gates make low price and deployability measured properties of a specific supply tuple, not
+claims inferred from a provider catalog or accelerator name.
