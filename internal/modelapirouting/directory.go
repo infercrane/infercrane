@@ -74,11 +74,17 @@ type Candidate struct {
 	OfferID, QualificationEvidenceID, CompatibilityKey           string
 	OfferVersion                                                 int64
 	Protocol, Supplier, SupplierModelID                          string
+	TargetBindingID, TargetBindingDigest                         string `json:"-"`
 	Operations                                                   []string
 	Endpoint, Credential                                         string `json:"-"`
 	Adapter, CredentialReference                                 string `json:"-"`
-	Qualified, Available                                         bool
-	ValidUntil                                                   time.Time
+	// TrafficWeightBPS controls deterministic request admission for a
+	// published generation. Zero-weight candidates remain qualified fallbacks.
+	// A legacy generation with every weight set to zero routes to the first
+	// candidate exactly as it did before weighted rollout support.
+	TrafficWeightBPS     int
+	Qualified, Available bool
+	ValidUntil           time.Time
 }
 
 func (c Candidate) supports(operation string) bool {
@@ -120,9 +126,11 @@ type RouteSource struct {
 }
 
 type CandidateSource struct {
-	Candidate           Candidate
-	Adapter             string `json:"-"`
-	CredentialReference string `json:"-"`
+	Candidate            Candidate
+	Adapter              string `json:"-"`
+	CredentialReference  string `json:"-"`
+	EndpointReference    string `json:"-"`
+	EndpointConfigDigest string `json:"-"`
 }
 
 // Lease pins an immutable route generation and retail contract for one
@@ -180,11 +188,23 @@ func validatePublishedRoute(route PublishedRoute) error {
 		return errors.New("route requires at least one candidate")
 	}
 	seen := make(map[string]struct{}, len(route.Candidates))
+	totalWeight := 0
+	hasWeights := false
 	for _, candidate := range route.Candidates {
 		if _, duplicate := seen[candidate.ID]; duplicate {
 			return errors.New("candidate identity is duplicated")
 		}
 		seen[candidate.ID] = struct{}{}
+		if candidate.TrafficWeightBPS < 0 || candidate.TrafficWeightBPS > 10_000 {
+			return errors.New("candidate traffic weight must be between 0 and 10000 basis points")
+		}
+		if candidate.TrafficWeightBPS > 0 {
+			hasWeights = true
+			totalWeight += candidate.TrafficWeightBPS
+		}
+	}
+	if hasWeights && totalWeight != 10_000 {
+		return errors.New("weighted route candidates must total 10000 basis points")
 	}
 	return nil
 }

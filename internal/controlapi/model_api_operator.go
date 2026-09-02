@@ -9,6 +9,7 @@ import (
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/modelapiproduct"
 	"github.com/infercrane/infercrane/internal/modelapisupply"
+	"github.com/infercrane/infercrane/internal/modelapitarget"
 	"github.com/infercrane/infercrane/internal/store"
 )
 
@@ -17,6 +18,7 @@ type modelAPIOperatorStore interface {
 	PublishModelAPIRetailRate(context.Context, modelapiproduct.RetailRate) (modelapiproduct.RetailRate, error)
 	PublishModelAPISupplierOffer(context.Context, string, modelapisupply.Offer) (modelapisupply.Offer, error)
 	PublishModelAPISupplyQualification(context.Context, string, string, int64, modelapisupply.QualificationEvidence) (modelapisupply.QualificationEvidence, error)
+	PublishModelAPITargetBinding(context.Context, string, modelapitarget.Binding) (modelapitarget.Binding, error)
 	CompileAndPublishModelAPISupplyPlan(context.Context, store.SupplyPlanDraft) (modelapisupply.Plan, error)
 	SaveModelAPIOperatorPublication(context.Context, string, modelapiproduct.OperatorPublication) (modelapiproduct.OperatorPublication, error)
 	SaveModelAPIProductEntitlement(context.Context, string, modelapiproduct.ProductEntitlement) (modelapiproduct.ProductEntitlement, error)
@@ -115,6 +117,29 @@ func (a API) publishModelAPISupplyQualification(w http.ResponseWriter, r *http.R
 	}
 	a.auditModelAPIMutation(r, actor, "model_api.qualification.publish", "model_api_supply_qualification", stored.ID)
 	writeJSON(w, http.StatusCreated, map[string]any{"qualification": stored})
+}
+
+func (a API) publishModelAPITargetBinding(w http.ResponseWriter, r *http.Request) {
+	operator, actor, ok := a.modelAPIOperator(w, r)
+	if !ok {
+		return
+	}
+	var binding modelapitarget.Binding
+	if !decodeMutationBody(w, r, &binding) {
+		return
+	}
+	// OperatorTenantID participates in the immutable contract digest, so the
+	// server must reject a mismatch rather than rewriting it after decoding.
+	if binding.OperatorTenantID != actor.TenantID {
+		writeError(w, http.StatusUnprocessableEntity, "validation_failed", "target binding operator tenant does not match the authenticated platform operator")
+		return
+	}
+	stored, err := operator.PublishModelAPITargetBinding(r.Context(), actor.TenantID, binding)
+	if modelAPIOperatorError(w, err) {
+		return
+	}
+	a.auditModelAPIMutation(r, actor, "model_api.target_binding.publish", "model_api_target_binding", stored.ID)
+	writeJSON(w, http.StatusCreated, map[string]any{"target_binding": stored})
 }
 
 func (a API) compileModelAPISupplyPlan(w http.ResponseWriter, r *http.Request) {

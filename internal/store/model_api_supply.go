@@ -10,6 +10,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/infercrane/infercrane/internal/modelapiqualification"
 	"github.com/infercrane/infercrane/internal/modelapisupply"
 )
 
@@ -26,6 +27,7 @@ type SupplyCandidateReference struct {
 	OfferVersion      int64  `json:"offer_version"`
 	QualificationID   string `json:"qualification_id"`
 	RetailRateVersion int    `json:"retail_rate_version"`
+	TrafficWeightBPS  int    `json:"traffic_weight_bps,omitempty"`
 }
 
 // SupplyPlanDraft is the operator input to deterministic plan compilation.
@@ -143,6 +145,34 @@ func (s *Store) PublishModelAPISupplyQualification(ctx context.Context, operator
 	return stored, nil
 }
 
+// PublishMeasuredModelAPISupplyQualification promotes only a deterministic
+// measurement of the exact immutable offer tuple into callable supply
+// evidence. The raw artifact stays outside PostgreSQL and is referenced by
+// evidenceRef; its digest is committed by the measured evidence itself.
+func (s *Store) PublishMeasuredModelAPISupplyQualification(ctx context.Context, operatorTenant, offerID string, offerVersion int64, qualificationID, scope, evidenceRef string, measured modelapiqualification.Evidence) (modelapisupply.QualificationEvidence, error) {
+	if qualificationID == "" || scope == "" || evidenceRef == "" || measured.Digest == "" {
+		return modelapisupply.QualificationEvidence{}, errors.New("qualification identity, scope, evidence reference, and measured digest are required")
+	}
+	offer, err := s.ModelAPISupplierOffer(ctx, operatorTenant, offerID, offerVersion)
+	if err != nil {
+		return modelapisupply.QualificationEvidence{}, err
+	}
+	capabilities := normalizedModelAPIStrings(measured.Target.Capabilities)
+	if measured.Target.TupleKey != offer.TupleKey || measured.Target.Supplier != offer.Supplier || measured.Target.Adapter != offer.Adapter ||
+		measured.Target.SupplierModelID != offer.SupplierModelID || measured.Target.Protocol != offer.Protocol || measured.Target.Region != offer.Region ||
+		!reflect.DeepEqual(capabilities, normalizedModelAPIStrings(offer.Capabilities)) {
+		return modelapisupply.QualificationEvidence{}, errors.New("measured qualification does not exactly match the immutable supplier offer")
+	}
+	ttft, output := measured.TTFTP95MS, measured.OutputTokensPerSecondP5
+	return s.PublishModelAPISupplyQualification(ctx, operatorTenant, offerID, offerVersion, modelapisupply.QualificationEvidence{
+		ID: qualificationID, State: modelapisupply.QualificationQualified,
+		TupleKey: measured.Target.TupleKey, Protocol: measured.Target.Protocol, Region: measured.Target.Region,
+		Capabilities: capabilities, Scope: scope, EvidenceRef: evidenceRef, EvidenceDigest: measured.Digest,
+		ObservedAt: measured.ObservedAt, ValidUntil: measured.ValidUntil, SampleCount: measured.SampleCount,
+		TTFTP95MS: &ttft, OutputTokensP5: &output,
+	})
+}
+
 func (s *Store) ModelAPISupplyQualification(ctx context.Context, operatorTenant, offerID string, offerVersion int64, qualificationID string) (modelapisupply.QualificationEvidence, error) {
 	if operatorTenant == "" || offerID == "" || offerVersion <= 0 || qualificationID == "" {
 		return modelapisupply.QualificationEvidence{}, errors.New("operator tenant, offer revision, and qualification id are required")
@@ -176,6 +206,9 @@ func (s *Store) CompileAndPublishModelAPISupplyPlan(ctx context.Context, draft S
 		if reference.CandidateID == "" || reference.OfferID == "" || reference.OfferVersion <= 0 || reference.QualificationID == "" || reference.RetailRateVersion <= 0 {
 			return modelapisupply.Plan{}, errors.New("each supply candidate requires exact candidate, offer, qualification, and rate identities")
 		}
+		if reference.TrafficWeightBPS < 0 || reference.TrafficWeightBPS > 10_000 {
+			return modelapisupply.Plan{}, errors.New("candidate traffic weight must be between 0 and 10000 basis points")
+		}
 		offer, err := s.ModelAPISupplierOffer(ctx, draft.OperatorTenantID, reference.OfferID, reference.OfferVersion)
 		if err != nil {
 			return modelapisupply.Plan{}, err
@@ -200,6 +233,9 @@ func (s *Store) CompileAndPublishModelAPISupplyPlan(ctx context.Context, draft S
 	}
 	plan, err := modelapisupply.Compile(draft.Request, materialized)
 	if err != nil {
+		return modelapisupply.Plan{}, err
+	}
+	if err = validateModelAPIRolloutWeights(plan, draft.Candidates); err != nil {
 		return modelapisupply.Plan{}, err
 	}
 	requestJSON, err := json.Marshal(draft.Request)
@@ -233,6 +269,9 @@ func (s *Store) CompileAndPublishModelAPISupplyPlan(ctx context.Context, draft S
 		if json.Unmarshal([]byte(existingJSON), &existing) != nil || !reflect.DeepEqual(existing, plan) {
 			return modelapisupply.Plan{}, fmt.Errorf("%w: supply plan identity already has a different immutable contract", ErrConflict)
 		}
+		if err = validateExistingModelAPISupplyPlanCandidates(ctx, tx, draft); err != nil {
+			return modelapisupply.Plan{}, err
+		}
 		return existing, tx.Commit()
 	}
 	for index, candidate := range materialized {
@@ -243,9 +282,9 @@ func (s *Store) CompileAndPublishModelAPISupplyPlan(ctx context.Context, draft S
 		}
 		reasonsJSON, _ := json.Marshal(reasons)
 		materializationJSON, _ := json.Marshal(candidate)
-		if _, err = tx.ExecContext(ctx, `INSERT INTO model_api_supply_plan_candidates(plan_id,managed_product_id,candidate_id,offer_id,offer_version,qualification_id,retail_rate_card_id,retail_rate_version,disposition,position,rejection_reasons_json,materialization_json) VALUES(?,?,?,?,?,?,?,?,?,?,?::jsonb,?::jsonb)`,
+		if _, err = tx.ExecContext(ctx, `INSERT INTO model_api_supply_plan_candidates(plan_id,managed_product_id,candidate_id,offer_id,offer_version,qualification_id,retail_rate_card_id,retail_rate_version,disposition,position,traffic_weight_bps,rejection_reasons_json,materialization_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?::jsonb,?::jsonb)`,
 			draft.ID, draft.ProductID, candidate.ID, candidate.OfferID, candidate.OfferVersion, reference.QualificationID, candidate.RetailRateID, candidate.RetailRateVersion,
-			disposition, position, reasonsJSON, materializationJSON); err != nil {
+			disposition, position, reference.TrafficWeightBPS, reasonsJSON, materializationJSON); err != nil {
 			return modelapisupply.Plan{}, err
 		}
 	}
@@ -253,6 +292,59 @@ func (s *Store) CompileAndPublishModelAPISupplyPlan(ctx context.Context, draft S
 		return modelapisupply.Plan{}, err
 	}
 	return plan, nil
+}
+
+func validateExistingModelAPISupplyPlanCandidates(ctx context.Context, tx *tx, draft SupplyPlanDraft) error {
+	rows, err := tx.QueryContext(ctx, `SELECT candidate_id,offer_id,offer_version,qualification_id,retail_rate_version,traffic_weight_bps FROM model_api_supply_plan_candidates WHERE plan_id=? AND managed_product_id=?`, draft.ID, draft.ProductID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	existing := make(map[string]SupplyCandidateReference, len(draft.Candidates))
+	for rows.Next() {
+		var reference SupplyCandidateReference
+		if err = rows.Scan(&reference.CandidateID, &reference.OfferID, &reference.OfferVersion, &reference.QualificationID, &reference.RetailRateVersion, &reference.TrafficWeightBPS); err != nil {
+			return err
+		}
+		existing[reference.CandidateID] = reference
+	}
+	if err = rows.Err(); err != nil {
+		return err
+	}
+	if len(existing) != len(draft.Candidates) {
+		return fmt.Errorf("%w: supply plan identity already has different immutable candidates", ErrConflict)
+	}
+	for _, reference := range draft.Candidates {
+		stored, ok := existing[reference.CandidateID]
+		if !ok || !reflect.DeepEqual(stored, reference) {
+			return fmt.Errorf("%w: supply plan identity already has different immutable candidates or rollout weights", ErrConflict)
+		}
+	}
+	return nil
+}
+
+func validateModelAPIRolloutWeights(plan modelapisupply.Plan, references []SupplyCandidateReference) error {
+	accepted := make(map[string]bool, 1+len(plan.Fallbacks))
+	if plan.Primary != nil {
+		accepted[plan.Primary.CandidateID] = true
+	}
+	for _, candidate := range plan.Fallbacks {
+		accepted[candidate.CandidateID] = true
+	}
+	total, weighted := 0, false
+	for _, reference := range references {
+		if reference.TrafficWeightBPS > 0 {
+			weighted = true
+			if !accepted[reference.CandidateID] {
+				return errors.New("rejected supply candidates cannot receive rollout traffic")
+			}
+			total += reference.TrafficWeightBPS
+		}
+	}
+	if weighted && total != 10_000 {
+		return errors.New("accepted rollout traffic weights must total 10000 basis points")
+	}
+	return nil
 }
 
 func modelAPICandidateDisposition(plan modelapisupply.Plan, candidateID string) (string, any, []string, bool) {

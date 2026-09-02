@@ -98,6 +98,11 @@ export class ControlApi {
     return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
   }
 
+  publishModelAPITargetBinding(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = '/admin/model-api/target-bindings';
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
   compileModelAPISupplyPlan(body: JsonValue): Promise<Record<string, JsonValue>> {
     const path = '/admin/model-api/plans';
     return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;

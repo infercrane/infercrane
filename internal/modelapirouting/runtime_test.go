@@ -332,6 +332,41 @@ func TestRuntimeNeverRetriesAfterSupplierResponseStarts(t *testing.T) {
 	}
 }
 
+func TestRuntimeRoutesNextRequestToFallbackWhenCanaryCircuitIsOpen(t *testing.T) {
+	called := ""
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = r.URL.Path
+		_, _ = io.WriteString(w, `{"model":"supplier/glm","choices":[],"usage":{"prompt_tokens":1,"completion_tokens":1}}`)
+	}))
+	defer server.Close()
+	billing := &billingFake{}
+	runtime, now := runtimeFixture(t, server, billing)
+	route := routeFixture(now, "customer")
+	route.Candidates[0].ID = "runpod"
+	route.Candidates[0].Endpoint = server.URL + "/runpod/v1"
+	route.Candidates[0].TrafficWeightBPS = 10_000
+	upstream := route.Candidates[0]
+	upstream.ID, upstream.OfferID = "upstream", "upstream-offer"
+	upstream.Endpoint, upstream.TrafficWeightBPS = server.URL+"/upstream/v1", 0
+	route.Candidates = append(route.Candidates, upstream)
+	if err := runtime.Routes.Publish([]PublishedRoute{route}); err != nil {
+		t.Fatal(err)
+	}
+	runtime.Circuit = NewCircuitBreaker(1, time.Minute)
+	runtime.Circuit.Observe("runpod", false, now)
+	recorder := httptest.NewRecorder()
+	runtime.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil), ProxyRequest{
+		TenantID: "customer", ProductID: "glm-5.3", Operation: "chat", Resource: "chat/completions",
+		RequestID: "request", TraceParent: "trace", Payload: map[string]any{"model": "glm-5.3"},
+	})
+	if recorder.Code != http.StatusOK || called != "/upstream/v1/chat/completions" {
+		t.Fatalf("status=%d called=%q body=%s", recorder.Code, called, recorder.Body.String())
+	}
+	if len(billing.requests) != 1 || billing.requests[0].CandidateID != "upstream" {
+		t.Fatalf("reservation did not pin fallback candidate: %#v", billing.requests)
+	}
+}
+
 func TestHostedSSEFlushesStopsAtDoneRetainsUsageAndSettlesOnce(t *testing.T) {
 	stream := "data: {\"model\":\"supplier/glm\",\"choices\":[]}\n\n" +
 		"data: {\"model\":\"supplier/glm\",\"usage\":{\"prompt_tokens\":17,\"completion_tokens\":5}}\n\n" +

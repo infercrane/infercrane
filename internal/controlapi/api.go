@@ -401,6 +401,7 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/admin/model-api/rates", a.auth(authz.ManageModelAPI, a.publishModelAPIRetailRate))
 	mux.HandleFunc("POST /api/v1/admin/model-api/offers", a.auth(authz.ManageModelAPI, a.publishModelAPISupplierOffer))
 	mux.HandleFunc("POST /api/v1/admin/model-api/qualifications", a.auth(authz.ManageModelAPI, a.publishModelAPISupplyQualification))
+	mux.HandleFunc("POST /api/v1/admin/model-api/target-bindings", a.auth(authz.ManageModelAPI, a.publishModelAPITargetBinding))
 	mux.HandleFunc("POST /api/v1/admin/model-api/plans", a.auth(authz.ManageModelAPI, a.compileModelAPISupplyPlan))
 	mux.HandleFunc("POST /api/v1/admin/model-api/publications", a.auth(authz.ManageModelAPI, a.publishModelAPIOperatorRoute))
 	mux.HandleFunc("POST /api/v1/admin/model-api/entitlements", a.auth(authz.ManageModelAPI, a.publishModelAPIEntitlement))

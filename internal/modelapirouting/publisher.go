@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/modelapitarget"
 	"github.com/infercrane/infercrane/internal/supplieradapter"
 )
 
@@ -41,6 +42,10 @@ type ResolvedReference struct {
 
 type ReferenceTargetResolver interface {
 	ResolveHostedModelReference(ctx context.Context, operatorTenantID, supplier, adapter, credentialReference string) (ResolvedReference, error)
+}
+
+type BoundReferenceTargetResolver interface {
+	ResolveBoundHostedModelReference(ctx context.Context, operatorTenantID, supplier, adapter, credentialReference, endpointReference, endpointConfigDigest string) (ResolvedReference, error)
 }
 
 type RuntimeCredentialResolver interface {
@@ -120,6 +125,21 @@ func (r *RegistryTargetResolver) ResolveHostedModelReference(ctx context.Context
 	return ResolvedReference{Endpoint: endpoint, CredentialReference: reference.ID}, nil
 }
 
+func (r *RegistryTargetResolver) ResolveBoundHostedModelReference(ctx context.Context, operatorTenantID, supplier, adapter, credentialReference, endpointReference, endpointConfigDigest string) (ResolvedReference, error) {
+	if r == nil || endpointReference != supplier+"/"+adapter {
+		return ResolvedReference{}, errors.New("hosted target binding does not match its supplier adapter registry key")
+	}
+	endpoint, exists := r.endpoints[endpointReference]
+	if !exists {
+		return ResolvedReference{}, errors.New("bound hosted supplier endpoint is not configured")
+	}
+	digest, err := modelapitarget.EndpointConfigDigest(endpointReference, endpoint)
+	if err != nil || digest != endpointConfigDigest {
+		return ResolvedReference{}, errors.New("bound hosted supplier endpoint config does not match its immutable digest")
+	}
+	return r.ResolveHostedModelReference(ctx, operatorTenantID, supplier, adapter, credentialReference)
+}
+
 func (r *RegistryTargetResolver) ResolveHostedModelCredential(ctx context.Context, operatorTenantID, credentialReference string) ([]byte, error) {
 	if r == nil || operatorTenantID == "" || credentialReference == "" {
 		return nil, errors.New("operator and credential reference are required")
@@ -183,7 +203,20 @@ func (p *Publisher) PublishOnce(ctx context.Context) error {
 				if !ok {
 					return errors.New("strict hosted adapter requires a reference target resolver")
 				}
-				target, resolveErr := referenceResolver.ResolveHostedModelReference(ctx, source.Publication.OperatorTenantID, candidate.Supplier, candidateSource.Adapter, candidateSource.CredentialReference)
+				var target ResolvedReference
+				var resolveErr error
+				if candidate.TargetBindingID != "" {
+					boundResolver, ok := p.Resolver.(BoundReferenceTargetResolver)
+					if !ok {
+						return errors.New("immutable hosted target binding requires a bound reference resolver")
+					}
+					target, resolveErr = boundResolver.ResolveBoundHostedModelReference(ctx, source.Publication.OperatorTenantID, candidate.Supplier, candidateSource.Adapter, candidateSource.CredentialReference, candidateSource.EndpointReference, candidateSource.EndpointConfigDigest)
+				} else {
+					if candidateSource.Adapter == supplieradapter.RunPodVLLMAdapterName {
+						return errors.New("RunPod hosted candidate requires a current immutable target binding")
+					}
+					target, resolveErr = referenceResolver.ResolveHostedModelReference(ctx, source.Publication.OperatorTenantID, candidate.Supplier, candidateSource.Adapter, candidateSource.CredentialReference)
+				}
 				if resolveErr != nil {
 					return resolveErr
 				}

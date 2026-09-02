@@ -76,6 +76,9 @@ func (rt *Runtime) serveStrictCandidate(w http.ResponseWriter, r *http.Request, 
 	}
 	upstream, err := adapter.BuildRequest(r.Context(), target, normalized, scopedCredentialResolver{resolver: rt.Credentials, operator: lease.Publication.OperatorTenantID})
 	if err != nil {
+		if tripsCandidateCircuit(err) {
+			rt.observeCandidate(candidate.ID, false)
+		}
 		_ = rt.Billing.ReleaseUnsent(context.WithoutCancel(r.Context()), request.TenantID, reservation.ID, "strict supplier request failed before transmission")
 		rt.writeStrictError(w, request, reservation.ID, err)
 		return
@@ -97,6 +100,7 @@ func (rt *Runtime) serveStrictCandidate(w http.ResponseWriter, r *http.Request, 
 	strictClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	response, err := strictClient.Do(upstream)
 	if err != nil {
+		rt.observeCandidate(candidate.ID, false)
 		rt.settleStrict(request, reservation.ID, Usage{})
 		if rt.Logger != nil {
 			rt.Logger.Error("strict hosted model API supplier result is ambiguous", "request_id", request.RequestID, "reservation_id", reservation.ID, "error", err)
@@ -109,16 +113,19 @@ func (rt *Runtime) serveStrictCandidate(w http.ResponseWriter, r *http.Request, 
 		rt.Logger.Error("mark strict hosted response start", "request_id", request.RequestID, "reservation_id", reservation.ID, "error", err)
 	}
 	if normalized.Stream {
-		rt.serveStrictStream(w, r, request, reservation.ID, response, adapter)
+		rt.serveStrictStream(w, r, request, reservation.ID, candidate.ID, response, adapter)
 		return
 	}
-	rt.serveStrictBuffered(w, r, request, reservation.ID, response, adapter)
+	rt.serveStrictBuffered(w, r, request, reservation.ID, candidate.ID, response, adapter)
 }
 
-func (rt *Runtime) serveStrictBuffered(w http.ResponseWriter, r *http.Request, request ProxyRequest, reservationID string, upstream *http.Response, adapter supplieradapter.Adapter) {
+func (rt *Runtime) serveStrictBuffered(w http.ResponseWriter, r *http.Request, request ProxyRequest, reservationID, candidateID string, upstream *http.Response, adapter supplieradapter.Adapter) {
 	status := upstream.StatusCode
 	response, err := adapter.DecodeResponse(r.Context(), upstream)
 	if err != nil {
+		if tripsCandidateCircuit(err) {
+			rt.observeCandidate(candidateID, false)
+		}
 		rt.settleStrict(request, reservationID, Usage{StatusCode: status})
 		rt.writeStrictError(w, request, reservationID, err)
 		return
@@ -126,10 +133,12 @@ func (rt *Runtime) serveStrictBuffered(w http.ResponseWriter, r *http.Request, r
 	usage := routingUsage(status, response.Usage)
 	body, err := publicBufferedResponse(request.ProductID, response)
 	if err != nil {
+		rt.observeCandidate(candidateID, false)
 		rt.settleStrict(request, reservationID, usage)
 		writeError(w, http.StatusBadGateway, "Inference supplier returned an invalid response", "upstream_error")
 		return
 	}
+	rt.observeCandidate(candidateID, true)
 	copyResponseHeaders(w.Header(), upstream.Header)
 	w.Header().Set("X-Request-ID", request.RequestID)
 	w.Header().Set("traceparent", request.TraceParent)
@@ -141,10 +150,13 @@ func (rt *Runtime) serveStrictBuffered(w http.ResponseWriter, r *http.Request, r
 	}
 }
 
-func (rt *Runtime) serveStrictStream(w http.ResponseWriter, r *http.Request, request ProxyRequest, reservationID string, upstream *http.Response, adapter supplieradapter.Adapter) {
+func (rt *Runtime) serveStrictStream(w http.ResponseWriter, r *http.Request, request ProxyRequest, reservationID, candidateID string, upstream *http.Response, adapter supplieradapter.Adapter) {
 	status := upstream.StatusCode
 	stream, err := adapter.OpenStream(r.Context(), upstream)
 	if err != nil {
+		if tripsCandidateCircuit(err) {
+			rt.observeCandidate(candidateID, false)
+		}
 		rt.settleStrict(request, reservationID, Usage{StatusCode: status})
 		rt.writeStrictError(w, request, reservationID, err)
 		return
@@ -186,9 +198,30 @@ func (rt *Runtime) serveStrictStream(w http.ResponseWriter, r *http.Request, req
 			break
 		}
 	}
+	if copyErr == nil {
+		rt.observeCandidate(candidateID, true)
+	} else if tripsCandidateCircuit(copyErr) {
+		rt.observeCandidate(candidateID, false)
+	}
 	rt.settleStrict(request, reservationID, usage)
 	if copyErr != nil && rt.Logger != nil {
 		rt.Logger.Error("strict hosted model API stream incomplete", "request_id", request.RequestID, "reservation_id", reservationID, "error", copyErr)
+	}
+}
+
+func tripsCandidateCircuit(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) {
+		return false
+	}
+	var supplierErr *supplieradapter.Error
+	if !errors.As(err, &supplierErr) {
+		return true
+	}
+	switch supplierErr.Code {
+	case supplieradapter.ErrorInvalidRequest, supplieradapter.ErrorCancelled:
+		return false
+	default:
+		return true
 	}
 }
 
@@ -225,7 +258,7 @@ func (rt *Runtime) writeStrictError(w http.ResponseWriter, request ProxyRequest,
 }
 
 func routingUsage(status int, usage supplieradapter.Usage) Usage {
-	return Usage{StatusCode: status, InputTokens: intToken(usage.InputTokens), OutputTokens: intToken(usage.OutputTokens)}
+	return Usage{StatusCode: status, InputTokens: intToken(usage.InputTokens), CachedInputTokens: intToken(usage.CachedInput), OutputTokens: intToken(usage.OutputTokens)}
 }
 
 func intToken(value *int64) *int {

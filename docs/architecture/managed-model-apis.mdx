@@ -48,6 +48,10 @@ or "fastest model API" is not.
 8. Settle from reported token usage. If usage is absent, retain the reservation for reconciliation;
    never invent a charge or assume the request was free.
 
+Settlement pins the supplier-rate digest before transmission and records uncached input, cached
+input, output, supplier COGS, customer retail, gross profit, and gross margin in integer micro-USD.
+Customer wallet entries and private supplier COGS remain separate ledgers joined by reservation ID.
+
 The customer API redacts every internal supplier field. The durable ledger retains money and
 request identifiers, not prompts or generated content.
 
@@ -64,6 +68,25 @@ InferCrane keeps three explicit lanes behind the same product contract:
 Temporary optimization experiments are separate from serving supply. They receive an expiring spend
 ceiling, evaluate bounded candidates, persist exact tuple evidence, and clean up. An experiment
 cannot become active production capacity implicitly.
+
+### RunPod Serverless execution path
+
+RunPod Serverless is one private supply implementation, not a customer-visible product identity.
+Each callable target is attached to an immutable binding that pins the exact supplier offer,
+logical model, adapter, credential reference, endpoint reference, and secret-free endpoint-config
+digest. A changed endpoint or credential reference requires a new binding and publication.
+
+The adapter accepts only the canonical RunPod queue-based OpenAI path and the exact configured
+model identity. Buffered responses require complete supplier usage. Streaming responses must end
+with a finish event, one usage event, and `[DONE]`; ambiguous usage remains unsettled rather than
+being guessed. Redirects, unbounded bodies, unsafe credential forms, and supplier error bodies are
+rejected or sanitized.
+
+New supply is released through deterministic basis-point weights. A typical migration is upstream
+95% / RunPod 5%, followed by 75/25, 50/50, and 0/100 only after fresh qualification and supplier
+cost reconciliation remain healthy. The circuit breaker removes a failing candidate from future
+requests for a bounded interval. An already transmitted request is never silently replayed to a
+second paid supplier.
 
 ## Supply-plan compiler
 

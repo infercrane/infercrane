@@ -46,6 +46,7 @@ var Routes = []Route{
 	{"POST", "/admin/model-api/rates", "publishModelAPIRetailRate", "Model API administration", "Publish an immutable customer-visible Model API rate", "Object", "Object", 201, false},
 	{"POST", "/admin/model-api/offers", "publishModelAPISupplierOffer", "Model API administration", "Publish an immutable supplier offer using a credential reference", "Object", "Object", 201, false},
 	{"POST", "/admin/model-api/qualifications", "publishModelAPIQualification", "Model API administration", "Publish measured qualification evidence for an exact supplier offer", "Object", "Object", 201, false},
+	{"POST", "/admin/model-api/target-bindings", "publishModelAPITargetBinding", "Model API administration", "Bind a Model API product to an immutable operator execution target", "Object", "Object", 201, false},
 	{"POST", "/admin/model-api/plans", "compileModelAPISupplyPlan", "Model API administration", "Compile and publish a deterministic qualified supply plan", "Object", "Object", 201, false},
 	{"POST", "/admin/model-api/publications", "publishModelAPIRoute", "Model API administration", "Publish a qualified shared Model API route", "Object", "Object", 201, false},
 	{"POST", "/admin/model-api/entitlements", "publishModelAPIEntitlement", "Model API administration", "Grant a customer workspace bounded access to a published Model API", "Object", "Object", 201, false},

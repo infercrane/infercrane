@@ -13,6 +13,7 @@ import (
 	"github.com/infercrane/infercrane/internal/modelapiproduct"
 	"github.com/infercrane/infercrane/internal/modelapirouting"
 	"github.com/infercrane/infercrane/internal/modelapisupply"
+	"github.com/infercrane/infercrane/internal/supplieradapter"
 )
 
 // PublishedModelAPIRoutes compiles the complete secret-free hosted routing
@@ -135,14 +136,21 @@ func (s *Store) PublishedModelAPIRoutes(ctx context.Context, at time.Time) ([]mo
 }
 
 func publishedModelAPICandidates(ctx context.Context, tx *tx, at time.Time, source modelapirouting.RouteSource, operations []string, plan modelapisupply.Plan) ([]modelapirouting.CandidateSource, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT c.candidate_id,c.offer_id,c.offer_version,c.qualification_id,c.retail_rate_card_id,c.retail_rate_version,c.disposition,c.position,
+	rows, err := tx.QueryContext(ctx, `SELECT c.candidate_id,c.offer_id,c.offer_version,c.qualification_id,c.retail_rate_card_id,c.retail_rate_version,c.disposition,c.position,c.traffic_weight_bps,
 		o.supplier,o.adapter,o.supplier_model_id,o.protocol,o.tuple_key,o.region,o.credential_reference,o.state,o.capabilities_json::text,o.access_state,o.availability_state,o.health_state,o.observed_at,o.cost_valid_until,o.commercial_state,o.commercial_valid_until,
-		q.id,q.state,q.tuple_key,q.protocol,q.region,q.capabilities_json::text,q.evidence_ref,q.evidence_digest,q.observed_at,q.valid_until
+		q.id,q.state,q.tuple_key,q.protocol,q.region,q.capabilities_json::text,q.evidence_ref,q.evidence_digest,q.observed_at,q.valid_until,
+		b.binding_count,b.id,b.endpoint_reference,b.endpoint_config_digest,b.contract_digest,b.valid_until
 	FROM model_api_supply_plan_candidates c
 	JOIN model_api_supplier_offers o ON o.id=c.offer_id AND o.version=c.offer_version AND o.managed_product_id=c.managed_product_id
 	JOIN model_api_supply_qualifications q ON q.id=c.qualification_id AND q.offer_id=c.offer_id AND q.offer_version=c.offer_version
+	LEFT JOIN LATERAL (
+		SELECT count(*) AS binding_count,min(id) AS id,min(endpoint_reference) AS endpoint_reference,min(endpoint_config_digest) AS endpoint_config_digest,min(contract_digest) AS contract_digest,min(valid_until) AS valid_until
+		FROM model_api_target_bindings
+		WHERE operator_tenant_id=o.operator_tenant_id AND managed_product_id=o.managed_product_id AND offer_id=o.id AND offer_version=o.version
+			AND adapter=o.adapter AND supplier_model_id=o.supplier_model_id AND region=o.region AND valid_from<=? AND valid_until>?
+	) b ON true
 	WHERE c.plan_id=? AND c.managed_product_id=? AND c.disposition IN ('primary','fallback')
-	ORDER BY c.position`, source.Publication.SupplyPlanID, source.Entitlement.ProductID)
+	ORDER BY c.position`, at, at, source.Publication.SupplyPlanID, source.Entitlement.ProductID)
 	if err != nil {
 		return nil, err
 	}
@@ -154,13 +162,16 @@ func publishedModelAPICandidates(ctx context.Context, tx *tx, at time.Time, sour
 		var qualificationID, rateID, disposition, offerState, access, availability, health, qualificationState string
 		var region, offerCapabilitiesJSON, qualificationTuple, qualificationProtocol, qualificationRegion, qualificationCapabilitiesJSON string
 		var evidenceRef, evidenceDigest sql.NullString
+		var bindingID, endpointReference, endpointConfigDigest, bindingDigest sql.NullString
 		var position int
-		var observed, costUntil, commercialUntil, qualificationObserved, qualificationUntil sql.NullTime
+		var bindingCount int
+		var observed, costUntil, commercialUntil, qualificationObserved, qualificationUntil, bindingUntil sql.NullTime
 		var commercialState string
 		candidate := &item.Candidate
-		if err = rows.Scan(&candidate.ID, &candidate.OfferID, &candidate.OfferVersion, &qualificationID, &rateID, &candidateRateVersion, &disposition, &position,
+		if err = rows.Scan(&candidate.ID, &candidate.OfferID, &candidate.OfferVersion, &qualificationID, &rateID, &candidateRateVersion, &disposition, &position, &candidate.TrafficWeightBPS,
 			&candidate.Supplier, &item.Adapter, &candidate.SupplierModelID, &candidate.Protocol, &candidate.CompatibilityKey, &region, &item.CredentialReference, &offerState, &offerCapabilitiesJSON, &access, &availability, &health, &observed, &costUntil, &commercialState, &commercialUntil,
-			&candidate.QualificationEvidenceID, &qualificationState, &qualificationTuple, &qualificationProtocol, &qualificationRegion, &qualificationCapabilitiesJSON, &evidenceRef, &evidenceDigest, &qualificationObserved, &qualificationUntil); err != nil {
+			&candidate.QualificationEvidenceID, &qualificationState, &qualificationTuple, &qualificationProtocol, &qualificationRegion, &qualificationCapabilitiesJSON, &evidenceRef, &evidenceDigest, &qualificationObserved, &qualificationUntil,
+			&bindingCount, &bindingID, &endpointReference, &endpointConfigDigest, &bindingDigest, &bindingUntil); err != nil {
 			return nil, err
 		}
 		candidate.ProductID, candidate.OperatorTenantID = source.Entitlement.ProductID, source.Entitlement.OperatorTenantID
@@ -182,9 +193,21 @@ func publishedModelAPICandidates(ctx context.Context, tx *tx, at time.Time, sour
 			selection.ValidUntil.IsZero() || !at.Before(selection.ValidUntil.UTC()) || !supportsPublishedOperations(offerCapabilities, operations) {
 			return nil, fmt.Errorf("hosted candidate %q does not exactly match current plan, rate, qualification, and evidence", candidate.ID)
 		}
+		if bindingCount > 1 {
+			return nil, fmt.Errorf("hosted candidate %q has ambiguous current target bindings", candidate.ID)
+		}
+		if bindingCount == 1 {
+			if !bindingID.Valid || !endpointReference.Valid || !endpointConfigDigest.Valid || !bindingDigest.Valid || !bindingUntil.Valid {
+				return nil, fmt.Errorf("hosted candidate %q has an incomplete target binding", candidate.ID)
+			}
+			candidate.TargetBindingID, candidate.TargetBindingDigest = bindingID.String, bindingDigest.String
+			item.EndpointReference, item.EndpointConfigDigest = endpointReference.String, endpointConfigDigest.String
+		} else if item.Adapter == supplieradapter.RunPodVLLMAdapterName {
+			return nil, fmt.Errorf("hosted RunPod candidate %q has no current immutable target binding", candidate.ID)
+		}
 		candidate.Operations = append([]string(nil), operations...)
 		candidate.Qualified, candidate.Available = true, true
-		candidate.ValidUntil = earliestTime(source.Publication.ValidUntil, selection.ValidUntil, costUntil.Time, commercialUntil.Time, qualificationUntil.Time)
+		candidate.ValidUntil = earliestTime(source.Publication.ValidUntil, selection.ValidUntil, costUntil.Time, commercialUntil.Time, qualificationUntil.Time, bindingUntil.Time)
 		candidates = append(candidates, item)
 	}
 	if err = rows.Err(); err != nil {

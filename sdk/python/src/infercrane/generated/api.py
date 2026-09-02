@@ -87,6 +87,10 @@ class ControlAPI:
         path = "/admin/model-api/qualifications"
         return cast(dict[str, Any], self._transport.request("POST", path, body=body))
 
+    def publish_model_a_p_i_target_binding(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = "/admin/model-api/target-bindings"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
     def compile_model_a_p_i_supply_plan(self, *, body: dict[str, Any]) -> dict[str, Any]:
         path = "/admin/model-api/plans"
         return cast(dict[str, Any], self._transport.request("POST", path, body=body))

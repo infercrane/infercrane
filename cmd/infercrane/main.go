@@ -4347,7 +4347,10 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		if resolverErr != nil {
 			return fmt.Errorf("configure hosted Model API targets: %w", resolverErr)
 		}
-		supplierAdapters, adapterErr := supplieradapter.NewRegistry(supplieradapter.NewDeepSeekAdapter(client))
+		supplierAdapters, adapterErr := supplieradapter.NewRegistry(
+			supplieradapter.NewDeepSeekAdapter(client),
+			supplieradapter.NewRunPodVLLMAdapter(client),
+		)
 		if adapterErr != nil {
 			return fmt.Errorf("configure hosted Model API supplier adapters: %w", adapterErr)
 		}
@@ -4359,7 +4362,15 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 			return fmt.Errorf("load hosted Model API route snapshot: %w", publishErr)
 		}
 		go publisher.Run(ctx)
-		hostedModels = &modelapirouting.Runtime{Routes: hostedRoutes, Billing: store.ModelAPIBillingAdapter{Store: s}, Client: client, Logger: logger, Adapters: supplierAdapters, Credentials: targetResolver}
+		hostedModels = &modelapirouting.Runtime{
+			Routes:      hostedRoutes,
+			Billing:     store.ModelAPIBillingAdapter{Store: s},
+			Client:      client,
+			Logger:      logger,
+			Adapters:    supplierAdapters,
+			Credentials: targetResolver,
+			Circuit:     modelapirouting.NewCircuitBreaker(3, 30*time.Second),
+		}
 	}
 	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool, OptimizationCosts: optimizationCosts, ModelAPICatalog: modelAPICatalog, ModelAPIProducts: s, ModelAPIOperatorTenantID: cfg.ModelAPIOperatorTenantID, HFCatalog: hfCatalog, ComputeProviders: computeProviders, GPUPriceCatalog: priceCatalog, LaunchProbers: launchProbers, DefaultProviderAdapters: defaultProviderAdapters}
 	if cfg.StripeEnabled() {
