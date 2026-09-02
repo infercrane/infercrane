@@ -26,6 +26,7 @@ type Config struct {
 	HostedAuthAutoProvision                                                                                            bool
 	StripeSecretKey, StripeWebhookSecret, StripeBillingReturnURL                                                       string
 	ModelAPICatalogFile                                                                                                string
+	HostedModelAPIEndpoints                                                                                            map[string]string
 	StripePriceIDs                                                                                                     map[int64]string
 	StripeLivemode                                                                                                     bool
 	RunPodAPIKey, RunPodServerlessTemplateID, RunPodRESTURL, RunPodArtifactCachePolicy, RunPodHFTokenSecret            string
@@ -359,6 +360,10 @@ func load(requireAPIKey bool) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	hostedModelAPIEndpoints, err := envStringMap("INFERCRANE_HOSTED_MODEL_API_ENDPOINTS_JSON")
+	if err != nil {
+		return Config{}, err
+	}
 	stripeLivemode, err := envBool("INFERCRANE_STRIPE_LIVEMODE", false)
 	if err != nil {
 		return Config{}, err
@@ -394,6 +399,7 @@ func load(requireAPIKey bool) (Config, error) {
 		StripePriceIDs:                      stripePriceIDs,
 		StripeLivemode:                      stripeLivemode,
 		ModelAPICatalogFile:                 env("INFERCRANE_MODEL_API_CATALOG_FILE", ""),
+		HostedModelAPIEndpoints:             hostedModelAPIEndpoints,
 		RunPodAPIKey:                        env("RUNPOD_API_KEY", ""),
 		RunPodServerlessTemplateID:          env("INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID", ""),
 		RunPodRESTURL:                       env("INFERCRANE_RUNPOD_REST_URL", "https://rest.runpod.io/v1"),

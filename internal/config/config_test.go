@@ -117,6 +117,19 @@ func TestHFCatalogRefreshIntervalIsBoundedAndOptIn(t *testing.T) {
 	}
 }
 
+func TestHostedModelAPIEndpointsAreExplicitConfiguration(t *testing.T) {
+	t.Setenv("INFERCRANE_API_KEY", "test-key")
+	t.Setenv("INFERCRANE_HOSTED_MODEL_API_ENDPOINTS_JSON", `{"openrouter/openai":"https://openrouter.ai/api/v1"}`)
+	cfg, err := Load()
+	if err != nil || cfg.HostedModelAPIEndpoints["openrouter/openai"] != "https://openrouter.ai/api/v1" {
+		t.Fatalf("hosted model API endpoints=%#v err=%v", cfg.HostedModelAPIEndpoints, err)
+	}
+	t.Setenv("INFERCRANE_HOSTED_MODEL_API_ENDPOINTS_JSON", `{"openrouter/openai":42}`)
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "INFERCRANE_HOSTED_MODEL_API_ENDPOINTS_JSON") {
+		t.Fatalf("non-string hosted endpoint accepted: %v", err)
+	}
+}
+
 func TestRunPodNetworkVolumesRequireImmutableExactMappings(t *testing.T) {
 	t.Setenv("INFERCRANE_API_KEY", "secret")
 	t.Setenv("INFERCRANE_RUNPOD_ARTIFACT_CACHE_POLICY", "required")

@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"net/url"
 	"os"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -183,5 +184,50 @@ func TestMigrationLedgerRejectsTamperGapAndNewerDatabase(t *testing.T) {
 				t.Fatalf("%s migration history was accepted", name)
 			}
 		})
+	}
+}
+
+func TestModelAPISupplyEvidenceTablesHaveImmutableTriggers(t *testing.T) {
+	ctx, databaseURL, _ := isolatedMigrationDatabase(t)
+	current, err := Open(ctx, databaseURL, Options{MaxOpenConns: 2, MaxIdleConns: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer current.Close()
+
+	rows, err := current.db.QueryContext(ctx, `
+		SELECT c.relname,t.tgname
+		FROM pg_trigger t
+		JOIN pg_class c ON c.oid=t.tgrelid
+		WHERE NOT t.tgisinternal AND c.relname IN (
+			'model_api_supplier_offers',
+			'model_api_supply_qualifications',
+			'model_api_supply_plans',
+			'model_api_supply_plan_candidates'
+		)
+		ORDER BY c.relname,t.tgname`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	found := map[string]string{}
+	for rows.Next() {
+		var table, trigger string
+		if err = rows.Scan(&table, &trigger); err != nil {
+			t.Fatal(err)
+		}
+		found[table] = trigger
+	}
+	if err = rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"model_api_supplier_offers":        "model_api_supplier_offers_immutable",
+		"model_api_supply_qualifications":  "model_api_supply_qualifications_immutable",
+		"model_api_supply_plans":           "model_api_supply_plans_immutable",
+		"model_api_supply_plan_candidates": "model_api_supply_plan_candidates_immutable",
+	}
+	if !reflect.DeepEqual(found, want) {
+		t.Fatalf("immutable supply triggers=%v want=%v", found, want)
 	}
 }
