@@ -196,7 +196,7 @@ func DefaultCatalog() []Product {
 		newCatalogProduct("glm-5.3-flash", "GLM-5.3-Flash", "Z.ai", "Planned for cost-sensitive and latency-sensitive workloads.", []string{"chat", "coding"}),
 		newCatalogProduct("kimi-k3", "Kimi-K3", "Moonshot AI", "Planned for coding and agentic workflows.", []string{"coding", "agents", "chat"}),
 		newCatalogProduct("kimi-k2.6", "Kimi-K2.6", "Moonshot AI", "Planned for coding, agentic, and long-context workloads.", []string{"coding", "agents", "long-context", "chat"}),
-		newCatalogProduct("deepseek-v4-flash-0731-fast", "DeepSeek-V4-Flash-0731-Fast", "DeepSeek", "Planned for high-throughput workloads after route qualification.", []string{"chat", "coding", "throughput"}),
+		newCatalogProduct("deepseek-v4-flash", "DeepSeek-V4-Flash", "DeepSeek", "Planned for high-throughput workloads after route qualification.", []string{"chat", "coding", "throughput"}),
 	}
 	sort.Slice(products, func(i, j int) bool { return products[i].ID < products[j].ID })
 	return products

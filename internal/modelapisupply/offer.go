@@ -27,77 +27,81 @@ const (
 // CostRate is private supplier cost. It is deliberately separate from the
 // supplier-neutral customer retail rate supplied during materialization.
 type CostRate struct {
-	Currency                   string
-	InputMicrousdPerMTok       *int64
-	OutputMicrousdPerMTok      *int64
-	CachedInputMicrousdPerMTok *int64
-	Provenance                 string
-	ValidFrom                  time.Time
-	ValidUntil                 time.Time
+	Currency                   string    `json:"currency"`
+	InputMicrousdPerMTok       *int64    `json:"input_microusd_per_million,omitempty"`
+	OutputMicrousdPerMTok      *int64    `json:"output_microusd_per_million,omitempty"`
+	CachedInputMicrousdPerMTok *int64    `json:"cached_input_microusd_per_million,omitempty"`
+	Provenance                 string    `json:"provenance,omitempty"`
+	ValidFrom                  time.Time `json:"valid_from,omitempty"`
+	ValidUntil                 time.Time `json:"valid_until,omitempty"`
 }
 
 type CommercialAuthorization struct {
-	State      string
-	TermsRef   string
-	ValidUntil time.Time
+	State      string    `json:"state"`
+	TermsRef   string    `json:"terms_ref,omitempty"`
+	ValidUntil time.Time `json:"valid_until,omitempty"`
 }
 
 // QualificationEvidence is valid only for its exact immutable tuple and
 // stated protocol, region, and capabilities.
 type QualificationEvidence struct {
-	ID             string
-	State          string
-	TupleKey       string
-	Protocol       string
-	Region         string
-	Capabilities   []string
-	Scope          string
-	EvidenceRef    string
-	EvidenceDigest string
-	Reason         string
-	ObservedAt     time.Time
-	ValidUntil     time.Time
-	SampleCount    int
-	TTFTP95MS      *float64
-	OutputTokensP5 *float64
+	ID             string    `json:"id"`
+	State          string    `json:"state"`
+	TupleKey       string    `json:"tuple_key"`
+	Protocol       string    `json:"protocol"`
+	Region         string    `json:"region"`
+	Capabilities   []string  `json:"capabilities"`
+	Scope          string    `json:"scope,omitempty"`
+	EvidenceRef    string    `json:"evidence_ref,omitempty"`
+	EvidenceDigest string    `json:"evidence_digest,omitempty"`
+	Reason         string    `json:"reason,omitempty"`
+	ObservedAt     time.Time `json:"observed_at,omitempty"`
+	ValidUntil     time.Time `json:"valid_until,omitempty"`
+	SampleCount    int       `json:"sample_count"`
+	TTFTP95MS      *float64  `json:"ttft_p95_ms,omitempty"`
+	OutputTokensP5 *float64  `json:"output_tokens_p5,omitempty"`
 }
+
+// Validate checks that qualification evidence is complete and internally
+// consistent before it crosses a persistence or publication boundary.
+func (e QualificationEvidence) Validate() error { return validateQualification(e) }
 
 // HuggingFaceProvenance is discovery metadata only. MaterializeCandidate does
 // not use these fields to establish availability, capabilities, price,
 // qualification, or performance truth.
 type HuggingFaceProvenance struct {
-	RepositoryID string
-	Revision     string
-	License      string
-	SourceURL    string
-	ObservedAt   time.Time
+	RepositoryID string    `json:"repository_id,omitempty"`
+	Revision     string    `json:"revision,omitempty"`
+	License      string    `json:"license,omitempty"`
+	SourceURL    string    `json:"source_url,omitempty"`
+	ObservedAt   time.Time `json:"observed_at"`
 }
 
 // Offer is an immutable revision of an operator-owned private supplier offer.
 // CredentialReference points at a secret manager; credentials are never part
 // of this record or a compiled supply plan.
 type Offer struct {
-	ID                  string
-	Version             int64
-	OperatorTenantID    string
-	ProductID           string
-	Supplier            string
-	Adapter             string
-	SupplierModelID     string
-	Protocol            string
-	TupleKey            string
-	Region              string
-	CredentialReference string
-	State               string
-	Capabilities        []string
-	Access              string
-	Availability        string
-	Health              string
-	ObservedAt          time.Time
-	CostRate            CostRate
-	Commercial          CommercialAuthorization
-	Qualification       *QualificationEvidence
-	HuggingFace         *HuggingFaceProvenance
+	ID                  string                  `json:"id"`
+	Version             int64                   `json:"version"`
+	OperatorTenantID    string                  `json:"operator_tenant_id"`
+	ProductID           string                  `json:"product_id"`
+	Supplier            string                  `json:"supplier"`
+	Adapter             string                  `json:"adapter"`
+	SupplierModelID     string                  `json:"supplier_model_id"`
+	Protocol            string                  `json:"protocol"`
+	TupleKey            string                  `json:"tuple_key"`
+	Region              string                  `json:"region"`
+	CredentialReference string                  `json:"credential_reference"`
+	State               string                  `json:"state"`
+	Capabilities        []string                `json:"capabilities"`
+	Access              string                  `json:"access"`
+	Availability        string                  `json:"availability"`
+	Health              string                  `json:"health"`
+	ObservedAt          time.Time               `json:"observed_at"`
+	CostRate            CostRate                `json:"cost_rate"`
+	Commercial          CommercialAuthorization `json:"commercial"`
+	Qualification       *QualificationEvidence  `json:"qualification,omitempty"`
+	HuggingFace         *HuggingFaceProvenance  `json:"hugging_face,omitempty"`
 }
 
 type CandidateMaterialization struct {
@@ -146,6 +150,10 @@ func (o Offer) Validate() error {
 	}
 	return nil
 }
+
+// Validate checks whether a supplier cost schedule is complete enough to be
+// compared with an immutable customer retail rate.
+func (r CostRate) Validate() error { return validateCostRate(r) }
 
 func validateCostRate(rate CostRate) error {
 	if rate.Currency != "USD" {

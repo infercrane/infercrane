@@ -120,6 +120,7 @@ func TestHFCatalogRefreshIntervalIsBoundedAndOptIn(t *testing.T) {
 func TestHostedModelAPIEndpointsAreExplicitConfiguration(t *testing.T) {
 	t.Setenv("INFERCRANE_API_KEY", "test-key")
 	t.Setenv("INFERCRANE_HOSTED_MODEL_API_ENDPOINTS_JSON", `{"openrouter/openai":"https://openrouter.ai/api/v1"}`)
+	t.Setenv("INFERCRANE_MODEL_API_OPERATOR_TENANT_ID", "model-api-operator")
 	cfg, err := Load()
 	if err != nil || cfg.HostedModelAPIEndpoints["openrouter/openai"] != "https://openrouter.ai/api/v1" {
 		t.Fatalf("hosted model API endpoints=%#v err=%v", cfg.HostedModelAPIEndpoints, err)
@@ -127,6 +128,14 @@ func TestHostedModelAPIEndpointsAreExplicitConfiguration(t *testing.T) {
 	t.Setenv("INFERCRANE_HOSTED_MODEL_API_ENDPOINTS_JSON", `{"openrouter/openai":42}`)
 	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "INFERCRANE_HOSTED_MODEL_API_ENDPOINTS_JSON") {
 		t.Fatalf("non-string hosted endpoint accepted: %v", err)
+	}
+}
+
+func TestHostedModelAPIEndpointsRequireExplicitOperatorTenant(t *testing.T) {
+	t.Setenv("INFERCRANE_API_KEY", "test-key")
+	t.Setenv("INFERCRANE_HOSTED_MODEL_API_ENDPOINTS_JSON", `{"deepseek/openai":"https://api.deepseek.com"}`)
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "INFERCRANE_MODEL_API_OPERATOR_TENANT_ID") {
+		t.Fatalf("hosted endpoint without platform operator tenant was accepted: %v", err)
 	}
 }
 

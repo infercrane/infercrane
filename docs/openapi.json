@@ -2339,6 +2339,10 @@
             "format": "date-time",
             "type": "string"
           },
+          "funding_intent_id": {
+            "pattern": "^funding_[a-f0-9]{32}$",
+            "type": "string"
+          },
           "provider": {
             "const": "stripe",
             "type": "string"
@@ -2353,6 +2357,7 @@
           }
         },
         "required": [
+          "funding_intent_id",
           "provider",
           "provider_id",
           "url",
@@ -4543,6 +4548,328 @@
         ]
       }
     },
+    "/api/v1/admin/model-api/entitlements": {
+      "post": {
+        "operationId": "publishModelAPIEntitlement",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Grant a customer workspace bounded access to a published Model API",
+        "tags": [
+          "Model API administration"
+        ]
+      }
+    },
+    "/api/v1/admin/model-api/offers": {
+      "post": {
+        "operationId": "publishModelAPISupplierOffer",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Publish an immutable supplier offer using a credential reference",
+        "tags": [
+          "Model API administration"
+        ]
+      }
+    },
+    "/api/v1/admin/model-api/plans": {
+      "post": {
+        "operationId": "compileModelAPISupplyPlan",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Compile and publish a deterministic qualified supply plan",
+        "tags": [
+          "Model API administration"
+        ]
+      }
+    },
+    "/api/v1/admin/model-api/products": {
+      "post": {
+        "operationId": "publishModelAPIProduct",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Publish an immutable shared Model API product contract",
+        "tags": [
+          "Model API administration"
+        ]
+      }
+    },
+    "/api/v1/admin/model-api/publications": {
+      "post": {
+        "operationId": "publishModelAPIRoute",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Publish a qualified shared Model API route",
+        "tags": [
+          "Model API administration"
+        ]
+      }
+    },
+    "/api/v1/admin/model-api/qualifications": {
+      "post": {
+        "operationId": "publishModelAPIQualification",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Publish measured qualification evidence for an exact supplier offer",
+        "tags": [
+          "Model API administration"
+        ]
+      }
+    },
+    "/api/v1/admin/model-api/rates": {
+      "post": {
+        "operationId": "publishModelAPIRetailRate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Publish an immutable customer-visible Model API rate",
+        "tags": [
+          "Model API administration"
+        ]
+      }
+    },
     "/api/v1/adoptions/endpoints": {
       "post": {
         "operationId": "adoptEndpoint",
@@ -5055,6 +5382,18 @@
     "/api/v1/billing/checkout-sessions": {
       "post": {
         "operationId": "createManagedCheckoutSession",
+        "parameters": [
+          {
+            "description": "Stable key used to adopt the original durable operation after retries or disconnects.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -5092,7 +5431,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Create a fixed-price hosted checkout without changing the prepaid balance",
+        "summary": "Idempotently create a durable fixed-price hosted checkout without changing the prepaid balance",
         "tags": [
           "Billing"
         ]
@@ -11967,6 +12306,9 @@
     },
     {
       "name": "Infrastructure"
+    },
+    {
+      "name": "Model API administration"
     },
     {
       "name": "Model APIs"

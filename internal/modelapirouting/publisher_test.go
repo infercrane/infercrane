@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/supplieradapter"
 )
 
 type sourceStoreFake struct {
@@ -14,10 +15,16 @@ type sourceStoreFake struct {
 	err     error
 }
 
-type referenceStoreFake struct{ tenant, id string }
+type referenceStoreFake struct {
+	tenant, id string
+	err        error
+}
 
 func (s *referenceStoreFake) SecretReferenceForTenant(_ context.Context, tenant, id string) (domain.SecretReference, error) {
 	s.tenant, s.id = tenant, id
+	if s.err != nil {
+		return domain.SecretReference{}, s.err
+	}
 	return domain.SecretReference{ID: id, TenantID: tenant, Resolver: "env", Reference: "SUPPLIER_KEY"}, nil
 }
 
@@ -25,6 +32,13 @@ type secretValueFake struct{}
 
 func (secretValueFake) Resolve(context.Context, domain.SecretReference) (string, error) {
 	return "secret", nil
+}
+
+type secretValueFailIfResolved struct{ calls int }
+
+func (s *secretValueFailIfResolved) Resolve(context.Context, domain.SecretReference) (string, error) {
+	s.calls++
+	return "", errors.New("strict credentials must not resolve while publishing")
 }
 
 func (s *sourceStoreFake) PublishedModelAPIRoutes(context.Context, time.Time) ([]RouteSource, error) {
@@ -91,6 +105,59 @@ func TestRegistryTargetResolverUsesConfiguredHTTPSAndTenantScopedSecretID(t *tes
 	}
 	if _, err = resolver.ResolveHostedModelTarget(context.Background(), "operator", "other-supplier", "openrouter", "secret-id"); err == nil {
 		t.Fatal("supplier/adapter endpoint mismatch was accepted")
+	}
+}
+
+func TestRegistryTargetResolverRechecksCredentialReferenceForEveryRequest(t *testing.T) {
+	references := &referenceStoreFake{}
+	resolver, err := NewRegistryTargetResolver(map[string]string{"supplier/adapter": "https://supplier.example/v1"}, references, secretValueFake{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	credential, err := resolver.ResolveHostedModelCredential(context.Background(), "operator", "secret-id")
+	if err != nil || string(credential) != "secret" {
+		t.Fatalf("credential=%q err=%v", credential, err)
+	}
+	references.err = errors.New("credential reference deleted")
+	if _, err = resolver.ResolveHostedModelCredential(context.Background(), "operator", "secret-id"); err == nil {
+		t.Fatal("deleted credential reference remained callable from an in-memory route")
+	}
+}
+
+func TestPublisherKeepsStrictCredentialReferenceSecretFree(t *testing.T) {
+	now := time.Date(2026, 9, 2, 10, 0, 0, 0, time.UTC)
+	directory := NewDirectory()
+	directory.now = func() time.Time { return now }
+	source := sourceFixture(now, "customer")
+	source.Candidates[0].Candidate.Supplier = supplieradapter.DeepSeekSupplier
+	source.Candidates[0].Candidate.SupplierModelID = supplieradapter.DeepSeekV4FlashModelID
+	source.Candidates[0].Adapter = supplieradapter.DeepSeekAdapterName
+	source.Candidates[0].CredentialReference = "strict-reference"
+	references := &referenceStoreFake{}
+	secrets := &secretValueFailIfResolved{}
+	resolver, err := NewRegistryTargetResolver(map[string]string{
+		supplieradapter.DeepSeekSupplier + "/" + supplieradapter.DeepSeekAdapterName: supplieradapter.DeepSeekBaseURL,
+	}, references, secrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publisher := &Publisher{
+		Store: &sourceStoreFake{sources: []RouteSource{source}}, Resolver: resolver,
+		Adapters: supplieradapter.DefaultRegistry(), Directory: directory, Now: func() time.Time { return now },
+	}
+	if err = publisher.PublishOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := directory.Acquire("customer", "glm-5.3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := lease.Candidates[0]
+	if candidate.Endpoint != supplieradapter.DeepSeekBaseURL || candidate.Adapter != supplieradapter.DeepSeekAdapterName || candidate.CredentialReference != "strict-reference" || candidate.Credential != "" {
+		t.Fatalf("strict route snapshot=%#v", candidate)
+	}
+	if secrets.calls != 0 {
+		t.Fatalf("strict secret resolved %d times during publication", secrets.calls)
 	}
 }
 

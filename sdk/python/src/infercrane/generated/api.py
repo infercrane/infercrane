@@ -71,6 +71,34 @@ class ControlAPI:
         path = f"/model-api-catalog/{quote(id, safe='')}"
         return cast(dict[str, Any], self._transport.request("GET", path))
 
+    def publish_model_a_p_i_product(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = "/admin/model-api/products"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
+    def publish_model_a_p_i_retail_rate(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = "/admin/model-api/rates"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
+    def publish_model_a_p_i_supplier_offer(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = "/admin/model-api/offers"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
+    def publish_model_a_p_i_qualification(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = "/admin/model-api/qualifications"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
+    def compile_model_a_p_i_supply_plan(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = "/admin/model-api/plans"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
+    def publish_model_a_p_i_route(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = "/admin/model-api/publications"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
+    def publish_model_a_p_i_entitlement(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = "/admin/model-api/entitlements"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
     def list_compute_providers(self) -> ObjectList:
         path = "/compute/providers"
         return cast(ObjectList, self._transport.request("GET", path))
@@ -515,9 +543,9 @@ class ControlAPI:
         path = "/billing/ledger"
         return cast(dict[str, Any], self._transport.request("GET", path))
 
-    def create_managed_checkout_session(self, *, body: dict[str, Any]) -> dict[str, Any]:
+    def create_managed_checkout_session(self, *, body: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
         path = "/billing/checkout-sessions"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body, idempotency_key=idempotency_key))
 
     def process_stripe_billing_webhook(self, *, body: dict[str, Any]) -> dict[str, Any]:
         path = "/billing/webhooks/stripe"

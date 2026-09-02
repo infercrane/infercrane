@@ -12,6 +12,9 @@ func TestPolicy(t *testing.T) {
 	if !Allowed(Admin, ManageTenant) || Allowed(Role("unknown"), Read) {
 		t.Fatal("admin or default policy is incorrect")
 	}
+	if !Allowed(Admin, ManageModelAPI) || Allowed(Operator, ManageModelAPI) || Allowed(Viewer, ManageModelAPI) {
+		t.Fatal("platform Model API management must remain admin-only")
+	}
 }
 
 func TestExplicitScopesCannotEscalateRole(t *testing.T) {

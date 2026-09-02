@@ -1040,12 +1040,31 @@ type ManagedWalletLedgerEntry struct {
 // Creating a session never changes the wallet; only a verified payment event
 // may create spending authority.
 type ManagedCheckoutSession struct {
-	Provider       string    `json:"provider"`
-	ProviderID     string    `json:"provider_id"`
-	URL            string    `json:"url"`
-	AmountMicrousd int64     `json:"amount_microusd"`
-	Currency       string    `json:"currency"`
-	ExpiresAt      time.Time `json:"expires_at"`
+	FundingIntentID string    `json:"funding_intent_id"`
+	Provider        string    `json:"provider"`
+	ProviderID      string    `json:"provider_id"`
+	URL             string    `json:"url"`
+	AmountMicrousd  int64     `json:"amount_microusd"`
+	Currency        string    `json:"currency"`
+	ExpiresAt       time.Time `json:"expires_at"`
+}
+
+// ManagedFundingIntent is the durable, tenant-scoped authority for creating a
+// single hosted Checkout session. The idempotency key is stored only inside
+// the control plane; callers receive the non-secret intent ID instead.
+type ManagedFundingIntent struct {
+	ID                string    `json:"id"`
+	TenantID          string    `json:"tenant_id"`
+	Provider          string    `json:"provider"`
+	IdempotencyKey    string    `json:"-"`
+	AmountMicrousd    int64     `json:"amount_microusd"`
+	Currency          string    `json:"currency"`
+	Status            string    `json:"status"`
+	CheckoutSessionID string    `json:"checkout_session_id,omitempty"`
+	CheckoutURL       string    `json:"checkout_url,omitempty"`
+	CheckoutExpiresAt time.Time `json:"checkout_expires_at,omitempty"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 // ManagedPaymentEvent is the normalized result of a provider-signed webhook.
@@ -1057,6 +1076,7 @@ type ManagedPaymentEvent struct {
 	EventType        string `json:"event_type"`
 	PayloadDigest    string `json:"payload_digest"`
 	TenantID         string `json:"tenant_id,omitempty"`
+	FundingIntentID  string `json:"funding_intent_id,omitempty"`
 	SessionID        string `json:"session_id,omitempty"`
 	PaymentIntentID  string `json:"payment_intent_id,omitempty"`
 	AmountMicrousd   int64  `json:"amount_microusd,omitempty"`

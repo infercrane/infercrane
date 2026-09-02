@@ -71,6 +71,7 @@ import (
 	"github.com/infercrane/infercrane/internal/servingcontract"
 	"github.com/infercrane/infercrane/internal/spec"
 	"github.com/infercrane/infercrane/internal/store"
+	"github.com/infercrane/infercrane/internal/supplieradapter"
 	"github.com/infercrane/infercrane/internal/support"
 	"github.com/infercrane/infercrane/internal/workflows"
 )
@@ -380,6 +381,8 @@ func runLegacy(ctx context.Context, args []string) error {
 		return targetAPICommand(ctx, cfg, args[1:])
 	case "provider":
 		return providerCommand(ctx, cfg, args[1:])
+	case "model-api":
+		return modelAPICommand(ctx, cfg, args[1:])
 	case "orphans":
 		return orphanAPICommand(ctx, cfg, args[1:])
 	case "integrations":
@@ -4344,7 +4347,11 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		if resolverErr != nil {
 			return fmt.Errorf("configure hosted Model API targets: %w", resolverErr)
 		}
-		publisher := &modelapirouting.Publisher{Store: s, Resolver: targetResolver, Directory: hostedRoutes, Interval: 15 * time.Second, Logger: logger}
+		supplierAdapters, adapterErr := supplieradapter.NewRegistry(supplieradapter.NewDeepSeekAdapter(client))
+		if adapterErr != nil {
+			return fmt.Errorf("configure hosted Model API supplier adapters: %w", adapterErr)
+		}
+		publisher := &modelapirouting.Publisher{Store: s, Resolver: targetResolver, Adapters: supplierAdapters, Directory: hostedRoutes, Interval: 15 * time.Second, Logger: logger}
 		publishCtx, publishCancel := context.WithTimeout(ctx, 15*time.Second)
 		publishErr := publisher.PublishOnce(publishCtx)
 		publishCancel()
@@ -4352,9 +4359,9 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 			return fmt.Errorf("load hosted Model API route snapshot: %w", publishErr)
 		}
 		go publisher.Run(ctx)
-		hostedModels = &modelapirouting.Runtime{Routes: hostedRoutes, Billing: store.ModelAPIBillingAdapter{Store: s}, Client: client, Logger: logger}
+		hostedModels = &modelapirouting.Runtime{Routes: hostedRoutes, Billing: store.ModelAPIBillingAdapter{Store: s}, Client: client, Logger: logger, Adapters: supplierAdapters, Credentials: targetResolver}
 	}
-	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool, OptimizationCosts: optimizationCosts, ModelAPICatalog: modelAPICatalog, ModelAPIProducts: s, HFCatalog: hfCatalog, ComputeProviders: computeProviders, GPUPriceCatalog: priceCatalog, LaunchProbers: launchProbers, DefaultProviderAdapters: defaultProviderAdapters}
+	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool, OptimizationCosts: optimizationCosts, ModelAPICatalog: modelAPICatalog, ModelAPIProducts: s, ModelAPIOperatorTenantID: cfg.ModelAPIOperatorTenantID, HFCatalog: hfCatalog, ComputeProviders: computeProviders, GPUPriceCatalog: priceCatalog, LaunchProbers: launchProbers, DefaultProviderAdapters: defaultProviderAdapters}
 	if cfg.StripeEnabled() {
 		stripeBilling, stripeErr := managedbilling.NewStripe(cfg.StripeSecretKey, cfg.StripeWebhookSecret, cfg.StripeBillingReturnURL, cfg.StripePriceIDs, cfg.StripeLivemode)
 		if stripeErr != nil {

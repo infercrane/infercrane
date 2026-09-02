@@ -52,20 +52,20 @@ const (
 // Request is the private planning contract. A zero input/output token shape is
 // valid, but cost-based ranking is then unavailable and the plan says so.
 type Request struct {
-	ModelID                string
-	Protocol               string
-	Capabilities           []string
-	Region                 string
-	InputTokens            int
-	OutputTokens           int
-	MinimumGrossMarginBPS  int
-	MaximumObservationAge  time.Duration
-	MaximumEvidenceAge     time.Duration
-	MinimumEvidenceSamples int
-	MaximumTTFTP95MS       *float64
-	MinimumOutputTokensPS  *float64
-	MaximumFallbacks       int
-	At                     time.Time
+	ModelID                string        `json:"model_id"`
+	Protocol               string        `json:"protocol"`
+	Capabilities           []string      `json:"capabilities"`
+	Region                 string        `json:"region,omitempty"`
+	InputTokens            int           `json:"input_tokens"`
+	OutputTokens           int           `json:"output_tokens"`
+	MinimumGrossMarginBPS  int           `json:"minimum_gross_margin_bps"`
+	MaximumObservationAge  time.Duration `json:"maximum_observation_age_ns"`
+	MaximumEvidenceAge     time.Duration `json:"maximum_evidence_age_ns,omitempty"`
+	MinimumEvidenceSamples int           `json:"minimum_evidence_samples,omitempty"`
+	MaximumTTFTP95MS       *float64      `json:"maximum_ttft_p95_ms,omitempty"`
+	MinimumOutputTokensPS  *float64      `json:"minimum_output_tokens_p5,omitempty"`
+	MaximumFallbacks       int           `json:"maximum_fallbacks"`
+	At                     time.Time     `json:"at"`
 }
 
 // CapacityEvidence is comparable only when TupleKey exactly matches the

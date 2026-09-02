@@ -167,6 +167,9 @@ type managedBillingStore interface {
 	SettleManagedUsage(context.Context, string, string, domain.ManagedUsageSettlement) (domain.ManagedUsageReservation, error)
 	ReleaseManagedUsage(context.Context, string, string, string) error
 	ProcessManagedPaymentEvent(context.Context, domain.ManagedPaymentEvent) (domain.ManagedPaymentResult, error)
+	PrepareManagedFundingIntent(context.Context, string, domain.ManagedFundingIntent, time.Duration) (domain.ManagedFundingIntent, string, error)
+	CompleteManagedFundingIntent(context.Context, string, string, string, domain.ManagedCheckoutSession) (domain.ManagedFundingIntent, error)
+	ReleaseManagedFundingIntentLease(context.Context, string, string, string) error
 }
 type intelligenceStore interface {
 	CaptureReplayTrace(context.Context, string, string, time.Duration, int) (domain.ReplayTrace, error)
@@ -304,15 +307,19 @@ type API struct {
 		State(string) (admission.State, bool)
 	}
 	BillingCheckout interface {
-		CreateCheckoutSession(context.Context, string, int64) (domain.ManagedCheckoutSession, error)
+		CreateCheckoutSession(context.Context, string, string, int64) (domain.ManagedCheckoutSession, error)
 		ParseWebhook([]byte, string) (domain.ManagedPaymentEvent, error)
 	}
 	ModelAPICatalog  modelapicatalog.Catalog
 	ModelAPIProducts modelAPIProductStore
-	HFCatalog        *hfcatalog.Cache
-	ComputeProviders []ComputeProvider
-	GPUPrices        []GPUPriceObservation
-	GPUPriceCatalog  interface {
+	// ModelAPIOperatorTenantID is the platform-owned workspace allowed to
+	// publish shared supplier routes. Ordinary tenant administrators never
+	// inherit this authority merely by holding an admin role.
+	ModelAPIOperatorTenantID string
+	HFCatalog                *hfcatalog.Cache
+	ComputeProviders         []ComputeProvider
+	GPUPrices                []GPUPriceObservation
+	GPUPriceCatalog          interface {
 		Snapshot() map[pricing.Request]pricing.Estimate
 	}
 	LaunchProbers map[string]provision.LaunchProber
@@ -390,6 +397,13 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/planning/intents", a.auth(authz.Read, a.planIntent))
 	mux.HandleFunc("GET /api/v1/model-api-catalog", a.auth(authz.Read, a.modelAPIModels))
 	mux.HandleFunc("GET /api/v1/model-api-catalog/{id}", a.auth(authz.Read, a.modelAPIModel))
+	mux.HandleFunc("POST /api/v1/admin/model-api/products", a.auth(authz.ManageModelAPI, a.publishModelAPIProduct))
+	mux.HandleFunc("POST /api/v1/admin/model-api/rates", a.auth(authz.ManageModelAPI, a.publishModelAPIRetailRate))
+	mux.HandleFunc("POST /api/v1/admin/model-api/offers", a.auth(authz.ManageModelAPI, a.publishModelAPISupplierOffer))
+	mux.HandleFunc("POST /api/v1/admin/model-api/qualifications", a.auth(authz.ManageModelAPI, a.publishModelAPISupplyQualification))
+	mux.HandleFunc("POST /api/v1/admin/model-api/plans", a.auth(authz.ManageModelAPI, a.compileModelAPISupplyPlan))
+	mux.HandleFunc("POST /api/v1/admin/model-api/publications", a.auth(authz.ManageModelAPI, a.publishModelAPIOperatorRoute))
+	mux.HandleFunc("POST /api/v1/admin/model-api/entitlements", a.auth(authz.ManageModelAPI, a.publishModelAPIEntitlement))
 	mux.HandleFunc("GET /api/v1/compute/providers", a.auth(authz.Read, a.computeProviders))
 	mux.HandleFunc("GET /api/v1/catalog/gpu-prices", a.auth(authz.Read, a.gpuPrices))
 	mux.HandleFunc("POST /api/v1/capacity/probes", a.auth(authz.Read, a.probeCapacity))

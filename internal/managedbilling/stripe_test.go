@@ -28,8 +28,8 @@ func TestStripeCheckoutUsesConfiguredFixedPrice(t *testing.T) {
 	prices := fixtureStripePrices()
 	checkout := &fakeStripeCheckout{row: &stripe.CheckoutSession{ID: "cs_test", URL: "https://checkout.stripe.com/c/pay/test", ExpiresAt: time.Now().Add(time.Hour).Unix()}}
 	provider := Stripe{Checkout: checkout, ReturnURL: "https://console.infercrane.com/settings/billing", PriceIDs: prices}
-	session, err := provider.CreateCheckoutSession(context.Background(), "tenant-a", 50_000_000)
-	if err != nil || session.ProviderID != "cs_test" || session.AmountMicrousd != 50_000_000 {
+	session, err := provider.CreateCheckoutSession(context.Background(), "tenant-a", "funding-test-1", 50_000_000)
+	if err != nil || session.FundingIntentID != "funding-test-1" || session.ProviderID != "cs_test" || session.AmountMicrousd != 50_000_000 {
 		t.Fatalf("session=%+v err=%v", session, err)
 	}
 	if checkout.params == nil || len(checkout.params.LineItems) != 1 || checkout.params.LineItems[0].Price == nil || *checkout.params.LineItems[0].Price != prices[50_000_000] || checkout.params.LineItems[0].PriceData != nil {
@@ -38,15 +38,18 @@ func TestStripeCheckoutUsesConfiguredFixedPrice(t *testing.T) {
 	if checkout.params.SuccessURL == nil || !strings.Contains(*checkout.params.SuccessURL, "session_id=%7BCHECKOUT_SESSION_ID%7D") || checkout.params.CancelURL == nil || !strings.Contains(*checkout.params.CancelURL, "checkout=cancelled") {
 		t.Fatalf("unexpected return URLs: success=%v cancel=%v", checkout.params.SuccessURL, checkout.params.CancelURL)
 	}
+	if checkout.params.IdempotencyKey == nil || *checkout.params.IdempotencyKey != "funding-test-1" || checkout.params.Metadata["infercrane_funding_intent_id"] != "funding-test-1" || checkout.params.PaymentIntentData == nil || checkout.params.PaymentIntentData.Metadata["infercrane_funding_intent_id"] != "funding-test-1" || checkout.params.PaymentIntentData.Metadata["infercrane_tenant_id"] != "tenant-a" {
+		t.Fatalf("Checkout and PaymentIntent did not preserve funding identity: %+v", checkout.params)
+	}
 }
 
 func TestStripeWebhookVerificationIsPaidIdempotencyInput(t *testing.T) {
 	secret := "whsec_fixture"
 	provider := Stripe{WebhookSecret: secret, ExpectedLivemode: false}
-	payload := []byte(fmt.Sprintf(`{"id":"evt_1","object":"event","api_version":%q,"created":1700000000,"livemode":false,"pending_webhooks":1,"type":"checkout.session.completed","data":{"object":{"id":"cs_1","object":"checkout.session","amount_total":5000,"client_reference_id":"tenant-a","currency":"usd","livemode":false,"metadata":{"infercrane_tenant_id":"tenant-a","infercrane_amount_microusd":"50000000"},"payment_intent":"pi_1","payment_status":"paid","status":"complete"}}}`, stripe.APIVersion))
+	payload := []byte(fmt.Sprintf(`{"id":"evt_1","object":"event","api_version":%q,"created":1700000000,"livemode":false,"pending_webhooks":1,"type":"checkout.session.completed","data":{"object":{"id":"cs_1","object":"checkout.session","amount_total":5000,"client_reference_id":"tenant-a","currency":"usd","livemode":false,"metadata":{"infercrane_tenant_id":"tenant-a","infercrane_amount_microusd":"50000000","infercrane_funding_intent_id":"funding-1"},"payment_intent":"pi_1","payment_status":"paid","status":"complete"}}}`, stripe.APIVersion))
 	signature := stripeTestSignature(payload, secret, time.Now().Unix())
 	payment, err := provider.ParseWebhook(payload, signature)
-	if err != nil || !payment.Apply || payment.Operation != "credit" || payment.EventID != "evt_1" || payment.SessionID != "cs_1" || payment.PaymentIntentID != "pi_1" || payment.TenantID != "tenant-a" || payment.AmountMicrousd != 50_000_000 || payment.Currency != "USD" || len(payment.PayloadDigest) != 64 {
+	if err != nil || !payment.Apply || payment.Operation != "credit" || payment.EventID != "evt_1" || payment.FundingIntentID != "funding-1" || payment.SessionID != "cs_1" || payment.PaymentIntentID != "pi_1" || payment.TenantID != "tenant-a" || payment.AmountMicrousd != 50_000_000 || payment.Currency != "USD" || len(payment.PayloadDigest) != 64 {
 		t.Fatalf("payment=%+v err=%v", payment, err)
 	}
 	if _, err = provider.ParseWebhook(payload, "t=1,v1=invalid"); err == nil {
@@ -56,7 +59,7 @@ func TestStripeWebhookVerificationIsPaidIdempotencyInput(t *testing.T) {
 
 func TestStripeWebhookFailsClosedOnModeAndAmountMismatch(t *testing.T) {
 	secret := "whsec_fixture"
-	payload := []byte(fmt.Sprintf(`{"id":"evt_2","object":"event","api_version":%q,"created":1700000000,"livemode":false,"pending_webhooks":1,"type":"checkout.session.completed","data":{"object":{"id":"cs_2","object":"checkout.session","amount_total":5000,"client_reference_id":"tenant-a","currency":"usd","livemode":false,"metadata":{"infercrane_tenant_id":"tenant-a","infercrane_amount_microusd":"100000000"},"payment_intent":"pi_2","payment_status":"paid","status":"complete"}}}`, stripe.APIVersion))
+	payload := []byte(fmt.Sprintf(`{"id":"evt_2","object":"event","api_version":%q,"created":1700000000,"livemode":false,"pending_webhooks":1,"type":"checkout.session.completed","data":{"object":{"id":"cs_2","object":"checkout.session","amount_total":5000,"client_reference_id":"tenant-a","currency":"usd","livemode":false,"metadata":{"infercrane_tenant_id":"tenant-a","infercrane_amount_microusd":"100000000","infercrane_funding_intent_id":"funding-2"},"payment_intent":"pi_2","payment_status":"paid","status":"complete"}}}`, stripe.APIVersion))
 	signature := stripeTestSignature(payload, secret, time.Now().Unix())
 	if _, err := (Stripe{WebhookSecret: secret}).ParseWebhook(payload, signature); err == nil || !strings.Contains(err.Error(), "amount") {
 		t.Fatalf("amount mismatch error=%v", err)
@@ -68,7 +71,7 @@ func TestStripeWebhookFailsClosedOnModeAndAmountMismatch(t *testing.T) {
 
 func TestStripeWebhookFailsClosedOnTenantReferenceMismatch(t *testing.T) {
 	secret := "whsec_fixture"
-	payload := []byte(fmt.Sprintf(`{"id":"evt_tenant","object":"event","api_version":%q,"created":1700000000,"livemode":false,"pending_webhooks":1,"type":"checkout.session.completed","data":{"object":{"id":"cs_tenant","object":"checkout.session","amount_total":5000,"client_reference_id":"tenant-b","currency":"usd","livemode":false,"metadata":{"infercrane_tenant_id":"tenant-a","infercrane_amount_microusd":"50000000"},"payment_intent":"pi_tenant","payment_status":"paid","status":"complete"}}}`, stripe.APIVersion))
+	payload := []byte(fmt.Sprintf(`{"id":"evt_tenant","object":"event","api_version":%q,"created":1700000000,"livemode":false,"pending_webhooks":1,"type":"checkout.session.completed","data":{"object":{"id":"cs_tenant","object":"checkout.session","amount_total":5000,"client_reference_id":"tenant-b","currency":"usd","livemode":false,"metadata":{"infercrane_tenant_id":"tenant-a","infercrane_amount_microusd":"50000000","infercrane_funding_intent_id":"funding-tenant"},"payment_intent":"pi_tenant","payment_status":"paid","status":"complete"}}}`, stripe.APIVersion))
 	signature := stripeTestSignature(payload, secret, time.Now().Unix())
 	if _, err := (Stripe{WebhookSecret: secret}).ParseWebhook(payload, signature); err == nil || !strings.Contains(err.Error(), "metadata") {
 		t.Fatalf("tenant mismatch error=%v", err)

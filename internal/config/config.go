@@ -25,7 +25,7 @@ type Config struct {
 	HostedAuthAuthorizedParties                                                                                        []string
 	HostedAuthAutoProvision                                                                                            bool
 	StripeSecretKey, StripeWebhookSecret, StripeBillingReturnURL                                                       string
-	ModelAPICatalogFile                                                                                                string
+	ModelAPICatalogFile, ModelAPIOperatorTenantID                                                                      string
 	HostedModelAPIEndpoints                                                                                            map[string]string
 	StripePriceIDs                                                                                                     map[int64]string
 	StripeLivemode                                                                                                     bool
@@ -399,6 +399,7 @@ func load(requireAPIKey bool) (Config, error) {
 		StripePriceIDs:                      stripePriceIDs,
 		StripeLivemode:                      stripeLivemode,
 		ModelAPICatalogFile:                 env("INFERCRANE_MODEL_API_CATALOG_FILE", ""),
+		ModelAPIOperatorTenantID:            env("INFERCRANE_MODEL_API_OPERATOR_TENANT_ID", ""),
 		HostedModelAPIEndpoints:             hostedModelAPIEndpoints,
 		RunPodAPIKey:                        env("RUNPOD_API_KEY", ""),
 		RunPodServerlessTemplateID:          env("INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID", ""),
@@ -512,6 +513,9 @@ func load(requireAPIKey bool) (Config, error) {
 	}
 	if config.HFCatalogRefreshInterval != 0 && (config.HFCatalogRefreshInterval < 5*time.Minute || config.HFCatalogRefreshInterval > 24*time.Hour) {
 		return Config{}, fmt.Errorf("INFERCRANE_HF_CATALOG_REFRESH_SECONDS must be 0 or between 300 and 86400")
+	}
+	if len(config.HostedModelAPIEndpoints) > 0 && strings.TrimSpace(config.ModelAPIOperatorTenantID) == "" {
+		return Config{}, errors.New("INFERCRANE_MODEL_API_OPERATOR_TENANT_ID is required when hosted Model API endpoints are configured")
 	}
 	if config.RunPodContainerDiskGiB < 50 || config.RunPodContainerDiskGiB > 2048 {
 		return Config{}, fmt.Errorf("INFERCRANE_RUNPOD_CONTAINER_DISK_GIB must be between 50 and 2048")

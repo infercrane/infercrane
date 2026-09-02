@@ -14,7 +14,7 @@ func TestDefaultCatalogIsExactlyTheStableSixAndMakesNoServiceClaim(t *testing.T)
 		t.Fatal(err)
 	}
 	want := []string{
-		"deepseek-v4-flash-0731-fast",
+		"deepseek-v4-flash",
 		"glm-5.2",
 		"glm-5.3",
 		"glm-5.3-flash",

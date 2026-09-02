@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/managedbilling"
@@ -34,6 +35,16 @@ func (a API) createManagedCheckoutSession(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusNotImplemented, "funding_unavailable", "prepaid funding is not configured")
 		return
 	}
+	store, ok := a.Store.(managedBillingStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "managed billing storage is not configured")
+		return
+	}
+	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if idempotencyKey == "" || len(idempotencyKey) > 128 {
+		writeError(w, http.StatusBadRequest, "invalid_idempotency_key", "Idempotency-Key is required and must not exceed 128 characters")
+		return
+	}
 	var request struct {
 		AmountMicrousd int64 `json:"amount_microusd"`
 	}
@@ -45,12 +56,59 @@ func (a API) createManagedCheckoutSession(w http.ResponseWriter, r *http.Request
 		return
 	}
 	actor := r.Context().Value(identityKey{}).(domain.Principal)
-	session, err := a.BillingCheckout.CreateCheckoutSession(r.Context(), actor.TenantID, request.AmountMicrousd)
+	requested := domain.ManagedFundingIntent{
+		ID:             managedbilling.FundingIntentID(actor.TenantID, idempotencyKey),
+		TenantID:       actor.TenantID,
+		Provider:       "stripe",
+		IdempotencyKey: idempotencyKey,
+		AmountMicrousd: request.AmountMicrousd,
+		Currency:       "USD",
+	}
+	intent, leaseToken, err := store.PrepareManagedFundingIntent(r.Context(), actor.TenantID, requested, 30*time.Second)
+	if errors.Is(err, domain.ErrConflict) {
+		writeError(w, http.StatusConflict, "idempotency_conflict", "Idempotency-Key was already used for a different checkout")
+		return
+	}
 	if err != nil {
+		writeError(w, http.StatusInternalServerError, "funding_intent_unavailable", "durable funding intent could not be prepared")
+		return
+	}
+	if intent.Status == "completed" {
+		writeJSON(w, http.StatusCreated, managedCheckoutResponse(checkoutSessionFromFundingIntent(intent)))
+		return
+	}
+	if leaseToken == "" {
+		w.Header().Set("Retry-After", "2")
+		writeError(w, http.StatusConflict, "checkout_in_progress", "checkout creation is already in progress; retry with the same Idempotency-Key")
+		return
+	}
+	session, err := a.BillingCheckout.CreateCheckoutSession(r.Context(), actor.TenantID, intent.ID, request.AmountMicrousd)
+	if err != nil {
+		releaseFundingIntentLease(r.Context(), store, actor.TenantID, intent.ID, leaseToken)
 		writeError(w, http.StatusBadGateway, "checkout_unavailable", "payment checkout could not be created")
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"checkout": session, "balance_changed": false, "credit_authority": "verified_provider_webhook"})
+	intent, err = store.CompleteManagedFundingIntent(r.Context(), actor.TenantID, intent.ID, leaseToken, session)
+	if err != nil {
+		releaseFundingIntentLease(r.Context(), store, actor.TenantID, intent.ID, leaseToken)
+		writeError(w, http.StatusInternalServerError, "funding_intent_incomplete", "payment checkout could not be durably recorded")
+		return
+	}
+	writeJSON(w, http.StatusCreated, managedCheckoutResponse(checkoutSessionFromFundingIntent(intent)))
+}
+
+func checkoutSessionFromFundingIntent(intent domain.ManagedFundingIntent) domain.ManagedCheckoutSession {
+	return domain.ManagedCheckoutSession{FundingIntentID: intent.ID, Provider: intent.Provider, ProviderID: intent.CheckoutSessionID, URL: intent.CheckoutURL, AmountMicrousd: intent.AmountMicrousd, Currency: intent.Currency, ExpiresAt: intent.CheckoutExpiresAt}
+}
+
+func managedCheckoutResponse(session domain.ManagedCheckoutSession) map[string]any {
+	return map[string]any{"checkout": session, "balance_changed": false, "credit_authority": "verified_provider_webhook"}
+}
+
+func releaseFundingIntentLease(requestContext context.Context, store managedBillingStore, tenant, id, leaseToken string) {
+	cleanupContext, cancel := context.WithTimeout(context.WithoutCancel(requestContext), 2*time.Second)
+	defer cancel()
+	_ = store.ReleaseManagedFundingIntentLease(cleanupContext, tenant, id, leaseToken)
 }
 
 func (a API) managedStripeWebhook(w http.ResponseWriter, r *http.Request) {

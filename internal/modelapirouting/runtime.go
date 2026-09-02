@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/openaicompat"
+	"github.com/infercrane/infercrane/internal/supplieradapter"
 )
 
 type ProxyRequest struct {
@@ -29,11 +30,13 @@ type ProxyRequest struct {
 // tenant already authenticated by Gateway, resolves an in-memory product
 // lease, reserves prepaid balance, then makes at most one supplier attempt.
 type Runtime struct {
-	Routes  *Directory
-	Billing Billing
-	Client  *http.Client
-	Logger  *slog.Logger
-	now     func() time.Time
+	Routes      *Directory
+	Billing     Billing
+	Client      *http.Client
+	Logger      *slog.Logger
+	Adapters    *supplieradapter.Registry
+	Credentials RuntimeCredentialResolver
+	now         func() time.Time
 }
 
 func (rt *Runtime) ServeHTTP(w http.ResponseWriter, r *http.Request, request ProxyRequest) {
@@ -61,6 +64,21 @@ func (rt *Runtime) ServeHTTP(w http.ResponseWriter, r *http.Request, request Pro
 		writeError(w, http.StatusUnprocessableEntity, "Model does not support this API operation", "unsupported_protocol")
 		return
 	}
+	var strictAdapter supplieradapter.Adapter
+	var strictRequest supplieradapter.Request
+	if candidate.Adapter != "" {
+		var exists bool
+		strictAdapter, exists = rt.Adapters.Lookup(candidate.Adapter)
+		if !exists {
+			writeError(w, http.StatusServiceUnavailable, "Inference upstream is unavailable", "server_error")
+			return
+		}
+		strictRequest, err = normalizeStrictRequest(request)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "Request is outside the qualified model contract", "invalid_request_error")
+			return
+		}
+	}
 
 	now := time.Now
 	if rt.now != nil {
@@ -84,6 +102,10 @@ func (rt *Runtime) ServeHTTP(w http.ResponseWriter, r *http.Request, request Pro
 			rt.Logger.Error("reserve hosted Model API usage", "request_id", request.RequestID, "error", err)
 		}
 		writeError(w, http.StatusServiceUnavailable, "Usage authorization is temporarily unavailable", "billing_error")
+		return
+	}
+	if strictAdapter != nil {
+		rt.serveStrictCandidate(w, r, request, lease, *candidate, reservation, strictAdapter, strictRequest, now)
 		return
 	}
 
