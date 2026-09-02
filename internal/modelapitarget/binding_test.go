@@ -68,6 +68,26 @@ func TestBindingNormalizesTimesBeforeDigesting(t *testing.T) {
 	}
 }
 
+func TestBindingPinsOptionalBillingPrincipalInContractDigest(t *testing.T) {
+	draft := validDraft(KindUpstream)
+	withoutPrincipal, err := NewBinding(draft)
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft.BillingPrincipal = "infercrane"
+	withPrincipal, err := NewBinding(draft)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if withPrincipal.ContractDigest == withoutPrincipal.ContractDigest {
+		t.Fatal("billing principal was not covered by the immutable contract digest")
+	}
+	draft.BillingPrincipal = " bad payer "
+	if _, err = NewBinding(draft); err == nil {
+		t.Fatal("non-canonical billing principal was accepted")
+	}
+}
+
 func TestEndpointConfigDigestPinsReferenceAndURL(t *testing.T) {
 	digest, err := EndpointConfigDigest("runpod/runpod-vllm-openai", "https://api.runpod.ai/v2/abc123/openai/")
 	if err != nil {

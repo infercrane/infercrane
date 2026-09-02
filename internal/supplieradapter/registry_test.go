@@ -47,3 +47,9 @@ func TestRoutedAndSelfHostedAdaptersRequireImmutableTargets(t *testing.T) {
 		}
 	}
 }
+
+func TestOnlyHuggingFaceRouterRequiresExplicitBillingPrincipal(t *testing.T) {
+	if !RequiresBillingPrincipal(HuggingFaceRouterAdapterName) || RequiresBillingPrincipal(DeepSeekAdapterName) || RequiresBillingPrincipal(RunPodVLLMAdapterName) {
+		t.Fatal("billing principal requirement does not match supplier billing semantics")
+	}
+}

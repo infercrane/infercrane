@@ -9,9 +9,10 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/modelapitarget"
+	"github.com/infercrane/infercrane/internal/supplieradapter"
 )
 
-const modelAPITargetBindingSelect = `SELECT schema_version,id,operator_tenant_id,managed_product_id,target_kind,offer_id,offer_version,adapter,supplier_model_id,endpoint_reference,endpoint_config_digest,region,valid_from,valid_until,created_at,contract_digest FROM model_api_target_bindings`
+const modelAPITargetBindingSelect = `SELECT schema_version,id,operator_tenant_id,managed_product_id,target_kind,offer_id,offer_version,adapter,supplier_model_id,endpoint_reference,endpoint_config_digest,billing_principal,region,valid_from,valid_until,created_at,contract_digest FROM model_api_target_bindings`
 
 // PublishModelAPITargetBinding stores one immutable execution contract. Exact
 // replays are idempotent; changing any pinned field requires a new binding ID.
@@ -21,6 +22,9 @@ func (s *Store) PublishModelAPITargetBinding(ctx context.Context, operatorTenant
 	}
 	if err := binding.Validate(); err != nil {
 		return modelapitarget.Binding{}, err
+	}
+	if supplieradapter.RequiresBillingPrincipal(binding.Adapter) && binding.BillingPrincipal == "" {
+		return modelapitarget.Binding{}, errors.New("hosted target binding requires an immutable billing principal")
 	}
 	if err := requirePostgresSafeTargetBindingTimes(binding); err != nil {
 		return modelapitarget.Binding{}, err
@@ -32,9 +36,9 @@ func (s *Store) PublishModelAPITargetBinding(ctx context.Context, operatorTenant
 	if offer.ProductID != binding.ProductID || offer.Adapter != binding.Adapter || offer.SupplierModelID != binding.SupplierModelID || offer.Region != binding.Region {
 		return modelapitarget.Binding{}, errors.New("target binding must exactly match the pinned supplier offer revision")
 	}
-	result, err := s.ExecContext(ctx, `INSERT INTO model_api_target_bindings(schema_version,id,operator_tenant_id,managed_product_id,target_kind,offer_id,offer_version,adapter,supplier_model_id,endpoint_reference,endpoint_config_digest,region,valid_from,valid_until,created_at,contract_digest) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING`,
+	result, err := s.ExecContext(ctx, `INSERT INTO model_api_target_bindings(schema_version,id,operator_tenant_id,managed_product_id,target_kind,offer_id,offer_version,adapter,supplier_model_id,endpoint_reference,endpoint_config_digest,billing_principal,region,valid_from,valid_until,created_at,contract_digest) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING`,
 		binding.SchemaVersion, binding.ID, operatorTenant, binding.ProductID, binding.Kind, binding.OfferID, binding.OfferVersion,
-		binding.Adapter, binding.SupplierModelID, binding.EndpointReference, binding.EndpointConfigDigest, binding.Region,
+		binding.Adapter, binding.SupplierModelID, binding.EndpointReference, binding.EndpointConfigDigest, binding.BillingPrincipal, binding.Region,
 		binding.ValidFrom.UTC(), binding.ValidUntil.UTC(), binding.CreatedAt.UTC(), binding.ContractDigest)
 	if err != nil {
 		return modelapitarget.Binding{}, err
@@ -102,7 +106,7 @@ func scanModelAPITargetBinding(row interface{ Scan(...any) error }) (modelapitar
 	var binding modelapitarget.Binding
 	err := row.Scan(&binding.SchemaVersion, &binding.ID, &binding.OperatorTenantID, &binding.ProductID, &binding.Kind,
 		&binding.OfferID, &binding.OfferVersion, &binding.Adapter, &binding.SupplierModelID, &binding.EndpointReference,
-		&binding.EndpointConfigDigest, &binding.Region, &binding.ValidFrom, &binding.ValidUntil, &binding.CreatedAt, &binding.ContractDigest)
+		&binding.EndpointConfigDigest, &binding.BillingPrincipal, &binding.Region, &binding.ValidFrom, &binding.ValidUntil, &binding.CreatedAt, &binding.ContractDigest)
 	if errors.Is(err, sql.ErrNoRows) {
 		return modelapitarget.Binding{}, ErrNotFound
 	}

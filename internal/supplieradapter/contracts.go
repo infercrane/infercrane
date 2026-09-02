@@ -44,12 +44,15 @@ const (
 
 // Target is an operator-owned supplier route. CredentialReference names a
 // secret-manager entry; it must never contain the secret itself.
+// BillingPrincipal pins the non-secret supplier account charged by adapters
+// whose credentials may be rotated independently of their billing owner.
 type Target struct {
 	Supplier            string
 	BaseURL             string
 	SupplierModelID     string
 	Region              string
 	CredentialReference string
+	BillingPrincipal    string
 }
 
 // CredentialResolver resolves a reference only inside the trusted adapter

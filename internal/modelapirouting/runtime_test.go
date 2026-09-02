@@ -157,6 +157,7 @@ func strictHuggingFaceRuntimeFixture(t *testing.T, billing *billingFake, transpo
 	route.Candidates[0].Credential = ""
 	route.Candidates[0].Adapter = supplieradapter.HuggingFaceRouterAdapterName
 	route.Candidates[0].CredentialReference = "router-secret-reference"
+	route.Candidates[0].BillingPrincipal = "infercrane"
 	directory := NewDirectory()
 	directory.now = func() time.Time { return now }
 	if err := directory.Publish([]PublishedRoute{route}); err != nil {

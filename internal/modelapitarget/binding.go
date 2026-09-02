@@ -43,6 +43,8 @@ func (kind Kind) Valid() bool {
 // Binding pins every execution-relevant identity needed to reconstruct a
 // target choice. EndpointReference is an opaque, secret-free registry key;
 // EndpointConfigDigest proves which immutable adapter configuration it names.
+// BillingPrincipal pins a non-secret supplier account separately from a
+// rotatable credential reference when the adapter supports that distinction.
 type Binding struct {
 	SchemaVersion        string    `json:"schema_version"`
 	ID                   string    `json:"id"`
@@ -55,6 +57,7 @@ type Binding struct {
 	SupplierModelID      string    `json:"supplier_model_id"`
 	EndpointReference    string    `json:"endpoint_reference"`
 	EndpointConfigDigest string    `json:"endpoint_config_digest"`
+	BillingPrincipal     string    `json:"billing_principal,omitempty"`
 	Region               string    `json:"region"`
 	ValidFrom            time.Time `json:"valid_from"`
 	ValidUntil           time.Time `json:"valid_until"`
@@ -76,6 +79,7 @@ type Draft struct {
 	SupplierModelID      string
 	EndpointReference    string
 	EndpointConfigDigest string
+	BillingPrincipal     string
 	Region               string
 	ValidFrom            time.Time
 	ValidUntil           time.Time
@@ -95,6 +99,7 @@ func NewBinding(draft Draft) (Binding, error) {
 		SupplierModelID:      draft.SupplierModelID,
 		EndpointReference:    draft.EndpointReference,
 		EndpointConfigDigest: draft.EndpointConfigDigest,
+		BillingPrincipal:     draft.BillingPrincipal,
 		Region:               draft.Region,
 		ValidFrom:            draft.ValidFrom.UTC(),
 		ValidUntil:           draft.ValidUntil.UTC(),
@@ -157,7 +162,10 @@ func EndpointConfigDigest(endpointReference, endpoint string) (string, error) {
 	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
 
-var sha256Pattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+var (
+	sha256Pattern           = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+	billingPrincipalPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
+)
 
 func (binding Binding) validateFields() error {
 	if binding.SchemaVersion != SchemaVersion {
@@ -181,6 +189,9 @@ func (binding Binding) validateFields() error {
 	if !sha256Pattern.MatchString(binding.EndpointConfigDigest) {
 		return errors.New("target binding endpoint config digest must be a lowercase sha256 digest")
 	}
+	if binding.BillingPrincipal != "" && (!billingPrincipalPattern.MatchString(binding.BillingPrincipal) || strings.TrimSpace(binding.BillingPrincipal) != binding.BillingPrincipal) {
+		return errors.New("target binding billing principal must be a canonical account identifier")
+	}
 	if binding.CreatedAt.IsZero() || binding.ValidFrom.IsZero() || binding.ValidUntil.IsZero() || binding.CreatedAt.After(binding.ValidFrom) || !binding.ValidUntil.After(binding.ValidFrom) {
 		return errors.New("target binding needs ordered created_at, valid_from, and valid_until timestamps")
 	}
@@ -200,6 +211,7 @@ func (binding Binding) canonicalDigest() (string, error) {
 		SupplierModelID      string    `json:"supplier_model_id"`
 		EndpointReference    string    `json:"endpoint_reference"`
 		EndpointConfigDigest string    `json:"endpoint_config_digest"`
+		BillingPrincipal     string    `json:"billing_principal,omitempty"`
 		Region               string    `json:"region"`
 		ValidFrom            time.Time `json:"valid_from"`
 		ValidUntil           time.Time `json:"valid_until"`
@@ -208,7 +220,7 @@ func (binding Binding) canonicalDigest() (string, error) {
 		SchemaVersion: binding.SchemaVersion, ID: binding.ID, OperatorTenantID: binding.OperatorTenantID,
 		ProductID: binding.ProductID, Kind: binding.Kind, OfferID: binding.OfferID, OfferVersion: binding.OfferVersion,
 		Adapter: binding.Adapter, SupplierModelID: binding.SupplierModelID, EndpointReference: binding.EndpointReference,
-		EndpointConfigDigest: binding.EndpointConfigDigest, Region: binding.Region, ValidFrom: binding.ValidFrom.UTC(),
+		EndpointConfigDigest: binding.EndpointConfigDigest, BillingPrincipal: binding.BillingPrincipal, Region: binding.Region, ValidFrom: binding.ValidFrom.UTC(),
 		ValidUntil: binding.ValidUntil.UTC(), CreatedAt: binding.CreatedAt.UTC(),
 	}
 	body, err := json.Marshal(contract)

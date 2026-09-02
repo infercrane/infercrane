@@ -58,3 +58,10 @@ func RequiresImmutableTargetBinding(adapter string) bool {
 		return false
 	}
 }
+
+// RequiresBillingPrincipal identifies adapters whose supplier-side payer must
+// be pinned separately from the credential reference. This prevents a secret
+// rotation from silently moving spend to another account.
+func RequiresBillingPrincipal(adapter string) bool {
+	return strings.TrimSpace(adapter) == HuggingFaceRouterAdapterName
+}

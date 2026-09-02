@@ -10,6 +10,7 @@ import (
 
 	"github.com/infercrane/infercrane/internal/modelapisupply"
 	"github.com/infercrane/infercrane/internal/modelapitarget"
+	"github.com/infercrane/infercrane/internal/supplieradapter"
 )
 
 func TestModelAPITargetBindingRepositoryRejectsInvalidInputsBeforeDatabaseAccess(t *testing.T) {
@@ -30,6 +31,18 @@ func TestModelAPITargetBindingRepositoryRejectsInvalidInputsBeforeDatabaseAccess
 	}
 	if _, err = s.CurrentModelAPITargetBindings(ctx, "operator-a", binding.ProductID, time.Time{}); err == nil {
 		t.Fatal("zero evaluation time was not rejected before database access")
+	}
+	huggingFaceBinding, err := modelapitarget.NewBinding(modelapitarget.Draft{
+		ID: "binding-hf", OperatorTenantID: "operator-a", ProductID: "glm-5.2", Kind: modelapitarget.KindUpstream,
+		OfferID: "offer-1", OfferVersion: 1, Adapter: supplieradapter.HuggingFaceRouterAdapterName, SupplierModelID: "Qwen/Qwen3-8B:together",
+		EndpointReference: "huggingface/huggingface-router-openai", EndpointConfigDigest: "sha256:" + strings.Repeat("c", 64), Region: "global",
+		CreatedAt: now, ValidFrom: now.Add(time.Minute), ValidUntil: now.Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.PublishModelAPITargetBinding(ctx, "operator-a", huggingFaceBinding); err == nil || !strings.Contains(err.Error(), "billing principal") {
+		t.Fatalf("Hugging Face binding without a pinned payer was accepted: %v", err)
 	}
 
 	draft := modelapitarget.Draft{
@@ -82,11 +95,16 @@ func TestModelAPITargetBindingsPersistExactImmutableOfferRevisions(t *testing.T)
 
 	bindings := make([]modelapitarget.Binding, 0, 4)
 	for index, kind := range []modelapitarget.Kind{modelapitarget.KindUpstream, modelapitarget.KindServerlessGPU, modelapitarget.KindDedicated, modelapitarget.KindBYOC} {
+		billingPrincipal := ""
+		if index == 0 {
+			billingPrincipal = "billing-account"
+		}
 		binding, bindingErr := modelapitarget.NewBinding(modelapitarget.Draft{
 			ID: fmt.Sprintf("target-binding-%d-%s", index, suffix), OperatorTenantID: operator, ProductID: product.ID, Kind: kind,
 			OfferID: offer.ID, OfferVersion: offer.Version, Adapter: offer.Adapter, SupplierModelID: offer.SupplierModelID,
 			EndpointReference: fmt.Sprintf("endpoint-registry/%s/%d", kind, index), EndpointConfigDigest: "sha256:" + strings.Repeat(fmt.Sprint(index+1), 64), Region: offer.Region,
-			CreatedAt: now, ValidFrom: now.Add(time.Minute), ValidUntil: now.Add(time.Hour),
+			BillingPrincipal: billingPrincipal,
+			CreatedAt:        now, ValidFrom: now.Add(time.Minute), ValidUntil: now.Add(time.Hour),
 		})
 		if bindingErr != nil {
 			t.Fatal(bindingErr)

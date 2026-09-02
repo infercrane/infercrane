@@ -217,6 +217,7 @@ func TestPublisherKeepsRoutedInferenceDormantWithoutImmutableTargetBinding(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
+	candidateSource.BillingPrincipal = "infercrane"
 	resolver, err := NewRegistryTargetResolver(map[string]string{endpointReference: supplieradapter.HuggingFaceRouterBaseURL}, &referenceStoreFake{}, &secretValueFailIfResolved{})
 	if err != nil {
 		t.Fatal(err)
@@ -231,11 +232,16 @@ func TestPublisherKeepsRoutedInferenceDormantWithoutImmutableTargetBinding(t *te
 	candidateSource.Candidate.TargetBindingDigest = "sha256:" + strings.Repeat("a", 64)
 	candidateSource.EndpointReference = endpointReference
 	candidateSource.EndpointConfigDigest = digest
+	candidateSource.BillingPrincipal = ""
+	if err = publisher.PublishOnce(context.Background()); err == nil {
+		t.Fatal("routed inference route without a pinned billing principal was published")
+	}
+	candidateSource.BillingPrincipal = "infercrane"
 	if err = publisher.PublishOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	lease, err := directory.Acquire("customer", "glm-5.3")
-	if err != nil || lease.Candidates[0].Endpoint != supplieradapter.HuggingFaceRouterBaseURL || lease.Candidates[0].TargetBindingID != "binding-hf-1" {
+	if err != nil || lease.Candidates[0].Endpoint != supplieradapter.HuggingFaceRouterBaseURL || lease.Candidates[0].TargetBindingID != "binding-hf-1" || lease.Candidates[0].BillingPrincipal != "infercrane" {
 		t.Fatalf("bound routed inference route=%#v err=%v", lease, err)
 	}
 }

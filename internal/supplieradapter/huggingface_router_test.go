@@ -26,7 +26,7 @@ func (f huggingFaceRoundTripperFunc) RoundTrip(request *http.Request) (*http.Res
 func huggingFaceTarget() Target {
 	return Target{
 		Supplier: HuggingFaceSupplier, BaseURL: HuggingFaceRouterBaseURL,
-		SupplierModelID: "Qwen/Qwen3-8B:together", Region: "global", CredentialReference: "secret://hf/router",
+		SupplierModelID: "Qwen/Qwen3-8B:together", Region: "global", CredentialReference: "secret://hf/router", BillingPrincipal: "infercrane",
 	}
 }
 
@@ -64,7 +64,7 @@ func TestHuggingFaceRouterBuildRequestPinsExactProvider(t *testing.T) {
 	if request.Method != http.MethodPost || request.URL.String() != HuggingFaceRouterBaseURL+"/chat/completions" {
 		t.Fatalf("upstream request=%s %s", request.Method, request.URL)
 	}
-	if request.Header.Get("Authorization") != "Bearer hf_secret" || request.Header.Get("Accept") != "text/event-stream" || request.Header.Get("X-Request-ID") != "request-1" {
+	if request.Header.Get("Authorization") != "Bearer hf_secret" || request.Header.Get("Accept") != "text/event-stream" || request.Header.Get("X-Request-ID") != "request-1" || request.Header.Get("X-HF-Bill-To") != "infercrane" {
 		t.Fatalf("upstream headers=%#v", request.Header)
 	}
 	for index, value := range credential {
@@ -116,6 +116,8 @@ func TestHuggingFaceRouterFailsClosedOutsideQualifiedMVP(t *testing.T) {
 		"wrong host":           {target: Target{Supplier: HuggingFaceSupplier, BaseURL: "https://proxy.example/v1", SupplierModelID: "Qwen/Qwen3-8B:together", Region: "global", CredentialReference: "secret"}},
 		"wrong path":           {target: Target{Supplier: HuggingFaceSupplier, BaseURL: "https://router.huggingface.co", SupplierModelID: "Qwen/Qwen3-8B:together", Region: "global", CredentialReference: "secret"}},
 		"wrong region":         {target: Target{Supplier: HuggingFaceSupplier, BaseURL: HuggingFaceRouterBaseURL, SupplierModelID: "Qwen/Qwen3-8B:together", Region: "us-east", CredentialReference: "secret"}},
+		"missing payer":        {target: Target{Supplier: HuggingFaceSupplier, BaseURL: HuggingFaceRouterBaseURL, SupplierModelID: "Qwen/Qwen3-8B:together", Region: "global", CredentialReference: "secret"}},
+		"malformed payer":      {target: Target{Supplier: HuggingFaceSupplier, BaseURL: HuggingFaceRouterBaseURL, SupplierModelID: "Qwen/Qwen3-8B:together", Region: "global", CredentialReference: "secret", BillingPrincipal: "bad payer"}},
 		"responses":            {target: huggingFaceTarget(), mutate: func(request *Request) { request.Operation = OperationResponses }},
 		"missing output bound": {target: huggingFaceTarget(), mutate: func(request *Request) { request.MaxOutputTokens = nil }},
 		"tools": {target: huggingFaceTarget(), mutate: func(request *Request) {
@@ -255,7 +257,7 @@ func TestHuggingFaceRouterStreamFailsClosedWhenIncomplete(t *testing.T) {
 
 func TestHuggingFaceRouterProbeProvesCredentialAndProviderBoundCompletion(t *testing.T) {
 	client := &http.Client{Transport: huggingFaceRoundTripperFunc(func(request *http.Request) (*http.Response, error) {
-		if request.Method != http.MethodPost || request.URL.String() != HuggingFaceRouterBaseURL+"/chat/completions" || request.Header.Get("Authorization") != "Bearer hf_secret" || request.Header.Get("Accept") != "application/json" {
+		if request.Method != http.MethodPost || request.URL.String() != HuggingFaceRouterBaseURL+"/chat/completions" || request.Header.Get("Authorization") != "Bearer hf_secret" || request.Header.Get("Accept") != "application/json" || request.Header.Get("X-HF-Bill-To") != "infercrane" {
 			t.Fatalf("probe request=%s headers=%#v", request.URL, request.Header)
 		}
 		body, err := io.ReadAll(request.Body)

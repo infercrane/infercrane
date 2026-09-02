@@ -72,7 +72,7 @@ func (r scopedCredentialResolver) Resolve(ctx context.Context, reference string)
 func (rt *Runtime) serveStrictCandidate(w http.ResponseWriter, r *http.Request, request ProxyRequest, lease Lease, candidate Candidate, reservation Reservation, adapter supplieradapter.Adapter, normalized supplieradapter.Request, now func() time.Time) {
 	target := supplieradapter.Target{
 		Supplier: candidate.Supplier, BaseURL: candidate.Endpoint, SupplierModelID: candidate.SupplierModelID,
-		Region: "global", CredentialReference: candidate.CredentialReference,
+		Region: "global", CredentialReference: candidate.CredentialReference, BillingPrincipal: candidate.BillingPrincipal,
 	}
 	upstream, err := adapter.BuildRequest(r.Context(), target, normalized, scopedCredentialResolver{resolver: rt.Credentials, operator: lease.Publication.OperatorTenantID})
 	if err != nil {

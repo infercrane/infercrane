@@ -197,7 +197,11 @@ func (p *Publisher) PublishOnce(ctx context.Context) error {
 			if strings.TrimSpace(candidateSource.Adapter) == "" || strings.TrimSpace(candidateSource.CredentialReference) == "" {
 				return errors.New("published hosted candidate lacks adapter or credential reference")
 			}
+			if supplieradapter.RequiresBillingPrincipal(candidateSource.Adapter) && strings.TrimSpace(candidateSource.BillingPrincipal) == "" {
+				return errors.New("published hosted candidate lacks an immutable billing principal")
+			}
 			candidate := candidateSource.Candidate
+			candidate.BillingPrincipal = candidateSource.BillingPrincipal
 			if _, strict := p.Adapters.Lookup(candidateSource.Adapter); strict {
 				referenceResolver, ok := p.Resolver.(ReferenceTargetResolver)
 				if !ok {

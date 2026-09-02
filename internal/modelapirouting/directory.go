@@ -75,6 +75,7 @@ type Candidate struct {
 	OfferVersion                                                 int64
 	Protocol, Supplier, SupplierModelID                          string
 	TargetBindingID, TargetBindingDigest                         string `json:"-"`
+	BillingPrincipal                                             string `json:"-"`
 	Operations                                                   []string
 	Endpoint, Credential                                         string `json:"-"`
 	Adapter, CredentialReference                                 string `json:"-"`
@@ -131,6 +132,7 @@ type CandidateSource struct {
 	CredentialReference  string `json:"-"`
 	EndpointReference    string `json:"-"`
 	EndpointConfigDigest string `json:"-"`
+	BillingPrincipal     string `json:"-"`
 }
 
 // Lease pins an immutable route generation and retail contract for one

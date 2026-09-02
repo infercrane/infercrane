@@ -27,8 +27,9 @@ const (
 )
 
 var (
-	huggingFaceRepositoryPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,95}/[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
-	huggingFaceProviderPattern   = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
+	huggingFaceRepositoryPattern       = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,95}/[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
+	huggingFaceProviderPattern         = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
+	huggingFaceBillingPrincipalPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 )
 
 type huggingFaceExpectedModel struct {
@@ -118,6 +119,7 @@ func (a *HuggingFaceRouterAdapter) BuildRequest(ctx context.Context, target Targ
 		return nil, internalBeforeTransmission("supplier request could not be constructed", err)
 	}
 	upstream.Header.Set("Authorization", "Bearer "+string(credentialValue))
+	upstream.Header.Set("X-HF-Bill-To", target.BillingPrincipal)
 	upstream.Header.Set("Content-Type", "application/json")
 	if request.Stream {
 		upstream.Header.Set("Accept", "text/event-stream")
@@ -325,6 +327,9 @@ func validateHuggingFaceTarget(target Target) (string, string, error) {
 	}
 	if strings.TrimSpace(target.CredentialReference) == "" {
 		return "", "", errors.New("target credential reference is required")
+	}
+	if !huggingFaceBillingPrincipalPattern.MatchString(target.BillingPrincipal) {
+		return "", "", errors.New("target must pin one canonical Hugging Face billing principal")
 	}
 	return repository, provider, nil
 }
