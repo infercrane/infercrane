@@ -28,13 +28,19 @@ const (
 	ReasonProtocolMismatch            = "protocol_mismatch"
 	ReasonCapabilityMissing           = "capability_missing"
 	ReasonRegionUnavailable           = "region_unavailable"
+	ReasonOfferNotActive              = "offer_not_active"
 	ReasonAccessNotReady              = "access_not_ready"
 	ReasonCapacityUnavailable         = "capacity_unavailable"
 	ReasonHealthNotReady              = "health_not_ready"
 	ReasonObservationStale            = "observation_stale"
 	ReasonRateExpired                 = "rate_expired"
+	ReasonCommercialAuthorization     = "commercial_authorization_not_ready"
 	ReasonCostBasisAbsent             = "cost_basis_absent"
 	ReasonMarginBelowFloor            = "margin_below_floor"
+	ReasonQualificationAbsent         = "qualification_absent"
+	ReasonQualificationNotReady       = "qualification_not_ready"
+	ReasonQualificationStale          = "qualification_stale"
+	ReasonQualificationMismatched     = "qualification_mismatched"
 	ReasonCapacityEvidenceAbsent      = "capacity_evidence_absent"
 	ReasonCapacityEvidenceStale       = "capacity_evidence_stale"
 	ReasonCapacityEvidenceMismatched  = "capacity_evidence_mismatched"
@@ -77,6 +83,10 @@ type CapacityEvidence struct {
 // or credential fields so the resulting plan is safe to persist internally.
 type Candidate struct {
 	ID                          string
+	OfferID                     string
+	OfferVersion                int64
+	RetailRateID                string
+	RetailRateVersion           int
 	Supplier                    string
 	ModelID                     string
 	SupplierModelID             string
@@ -84,33 +94,46 @@ type Candidate struct {
 	Protocol                    string
 	Capabilities                []string
 	Regions                     []string
+	OfferState                  string
 	Access                      string
 	Availability                string
 	Health                      string
 	ObservedAt                  time.Time
 	RateValidUntil              time.Time
+	CommercialState             string
+	CommercialValidUntil        time.Time
 	RetailInputMicrousdPerMTok  *int64
 	RetailOutputMicrousdPerMTok *int64
 	CostInputMicrousdPerMTok    *int64
 	CostOutputMicrousdPerMTok   *int64
 	CostBasisProvenance         string
+	Qualification               *QualificationEvidence
 	Evidence                    *CapacityEvidence
 }
 
 type Rejection struct {
-	CandidateID string   `json:"candidate_id"`
-	Reasons     []string `json:"reasons"`
+	CandidateID             string   `json:"candidate_id"`
+	OfferID                 string   `json:"offer_id,omitempty"`
+	OfferVersion            int64    `json:"offer_version,omitempty"`
+	QualificationEvidenceID string   `json:"qualification_evidence_id,omitempty"`
+	Reasons                 []string `json:"reasons"`
 }
 
 type Selection struct {
-	CandidateID                   string `json:"candidate_id"`
-	Supplier                      string `json:"supplier"`
-	SupplierModelID               string `json:"supplier_model_id"`
-	TupleKey                      string `json:"tuple_key"`
-	EstimatedRetailMicrousd       *int64 `json:"estimated_retail_microusd,omitempty"`
-	EstimatedSupplierCostMicrousd *int64 `json:"estimated_supplier_cost_microusd,omitempty"`
-	GrossMarginBPS                int    `json:"gross_margin_bps"`
-	EvidenceSampleCount           int    `json:"evidence_sample_count,omitempty"`
+	CandidateID                   string    `json:"candidate_id"`
+	OfferID                       string    `json:"offer_id,omitempty"`
+	OfferVersion                  int64     `json:"offer_version,omitempty"`
+	RetailRateID                  string    `json:"retail_rate_id,omitempty"`
+	RetailRateVersion             int       `json:"retail_rate_version,omitempty"`
+	QualificationEvidenceID       string    `json:"qualification_evidence_id,omitempty"`
+	Supplier                      string    `json:"supplier"`
+	SupplierModelID               string    `json:"supplier_model_id"`
+	TupleKey                      string    `json:"tuple_key"`
+	EstimatedRetailMicrousd       *int64    `json:"estimated_retail_microusd,omitempty"`
+	EstimatedSupplierCostMicrousd *int64    `json:"estimated_supplier_cost_microusd,omitempty"`
+	GrossMarginBPS                int       `json:"gross_margin_bps"`
+	EvidenceSampleCount           int       `json:"evidence_sample_count,omitempty"`
+	ValidUntil                    time.Time `json:"valid_until"`
 }
 
 type Plan struct {
@@ -121,6 +144,7 @@ type Plan struct {
 	Status        string      `json:"status"`
 	RankingBasis  string      `json:"ranking_basis"`
 	GeneratedAt   time.Time   `json:"generated_at"`
+	ValidUntil    time.Time   `json:"valid_until,omitempty"`
 	Primary       *Selection  `json:"primary,omitempty"`
 	Fallbacks     []Selection `json:"fallbacks"`
 	Rejections    []Rejection `json:"rejections"`
@@ -137,8 +161,8 @@ func Compile(request Request, candidates []Candidate) (Plan, error) {
 	ordered := append([]Candidate(nil), candidates...)
 	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].ID < ordered[j].ID })
 	for index, candidate := range ordered {
-		if strings.TrimSpace(candidate.ID) == "" || strings.TrimSpace(candidate.Supplier) == "" || strings.TrimSpace(candidate.SupplierModelID) == "" || strings.TrimSpace(candidate.TupleKey) == "" {
-			return Plan{}, fmt.Errorf("candidate %d requires id, supplier, supplier model id, and tuple key", index)
+		if strings.TrimSpace(candidate.ID) == "" || strings.TrimSpace(candidate.OfferID) == "" || candidate.OfferVersion <= 0 || strings.TrimSpace(candidate.RetailRateID) == "" || candidate.RetailRateVersion <= 0 || strings.TrimSpace(candidate.Supplier) == "" || strings.TrimSpace(candidate.SupplierModelID) == "" || strings.TrimSpace(candidate.TupleKey) == "" {
+			return Plan{}, fmt.Errorf("candidate %d requires id, offer revision, retail rate version, supplier, supplier model id, and tuple key", index)
 		}
 		if index > 0 && candidate.ID == ordered[index-1].ID {
 			return Plan{}, fmt.Errorf("candidate id %q is duplicated", candidate.ID)
@@ -150,7 +174,11 @@ func Compile(request Request, candidates []Candidate) (Plan, error) {
 	for _, candidate := range ordered {
 		selection, reasons := evaluate(request, candidate)
 		if len(reasons) > 0 {
-			rejections = append(rejections, Rejection{CandidateID: candidate.ID, Reasons: reasons})
+			rejection := Rejection{CandidateID: candidate.ID, OfferID: candidate.OfferID, OfferVersion: candidate.OfferVersion, Reasons: reasons}
+			if candidate.Qualification != nil {
+				rejection.QualificationEvidenceID = candidate.Qualification.ID
+			}
+			rejections = append(rejections, rejection)
 			continue
 		}
 		eligible = append(eligible, selection)
@@ -182,6 +210,10 @@ func Compile(request Request, candidates []Candidate) (Plan, error) {
 		plan.Status = StatusReady
 		plan.Primary = selectionPointer(eligible[0])
 		plan.Fallbacks = chooseFallbacks(eligible[1:], eligible[0].Supplier, maximumFallbacks(request.MaximumFallbacks))
+		plan.ValidUntil = plan.Primary.ValidUntil
+		for _, fallback := range plan.Fallbacks {
+			plan.ValidUntil = earlierTime(plan.ValidUntil, fallback.ValidUntil)
+		}
 	}
 	digest, err := digestPlan(plan)
 	if err != nil {
@@ -238,6 +270,9 @@ func evaluate(request Request, candidate Candidate) (Selection, []string) {
 	if request.Region != "" && !contains(candidate.Regions, request.Region) {
 		reasons = append(reasons, ReasonRegionUnavailable)
 	}
+	if candidate.OfferState != OfferActive {
+		reasons = append(reasons, ReasonOfferNotActive)
+	}
 	if candidate.Access != "ready" {
 		reasons = append(reasons, ReasonAccessNotReady)
 	}
@@ -252,6 +287,23 @@ func evaluate(request Request, candidate Candidate) (Selection, []string) {
 	}
 	if candidate.RateValidUntil.IsZero() || !candidate.RateValidUntil.UTC().After(request.At) {
 		reasons = append(reasons, ReasonRateExpired)
+	}
+	if candidate.CommercialState != CommercialReady || candidate.CommercialValidUntil.IsZero() || !candidate.CommercialValidUntil.UTC().After(request.At) {
+		reasons = append(reasons, ReasonCommercialAuthorization)
+	}
+
+	qualification := candidate.Qualification
+	switch {
+	case qualification == nil:
+		reasons = append(reasons, ReasonQualificationAbsent)
+	case qualification.State != QualificationQualified:
+		reasons = append(reasons, ReasonQualificationNotReady)
+	case qualification.TupleKey != candidate.TupleKey || qualification.Protocol != candidate.Protocol ||
+		!contains(candidate.Regions, qualification.Region) || !containsAll(qualification.Capabilities, request.Capabilities):
+		reasons = append(reasons, ReasonQualificationMismatched)
+	case qualification.ObservedAt.IsZero() || qualification.ValidUntil.IsZero() ||
+		request.At.Sub(qualification.ObservedAt.UTC()) < 0 || !qualification.ValidUntil.UTC().After(request.At):
+		reasons = append(reasons, ReasonQualificationStale)
 	}
 
 	pricesPresent := candidate.RetailInputMicrousdPerMTok != nil && candidate.RetailOutputMicrousdPerMTok != nil && candidate.CostInputMicrousdPerMTok != nil && candidate.CostOutputMicrousdPerMTok != nil && strings.TrimSpace(candidate.CostBasisProvenance) != ""
@@ -287,9 +339,22 @@ func evaluate(request Request, candidate Candidate) (Selection, []string) {
 		}
 	}
 
-	selection := Selection{CandidateID: candidate.ID, Supplier: candidate.Supplier, SupplierModelID: candidate.SupplierModelID, TupleKey: candidate.TupleKey, GrossMarginBPS: marginBPS}
+	selection := Selection{
+		CandidateID: candidate.ID, OfferID: candidate.OfferID, OfferVersion: candidate.OfferVersion,
+		RetailRateID: candidate.RetailRateID, RetailRateVersion: candidate.RetailRateVersion, Supplier: candidate.Supplier,
+		SupplierModelID: candidate.SupplierModelID, TupleKey: candidate.TupleKey, GrossMarginBPS: marginBPS,
+		ValidUntil: earlierTime(candidate.RateValidUntil.UTC(), candidate.CommercialValidUntil.UTC()),
+	}
+	selection.ValidUntil = earlierTime(selection.ValidUntil, candidate.ObservedAt.UTC().Add(request.MaximumObservationAge))
+	if candidate.Qualification != nil {
+		selection.QualificationEvidenceID = candidate.Qualification.ID
+		selection.ValidUntil = earlierTime(selection.ValidUntil, candidate.Qualification.ValidUntil.UTC())
+	}
 	if candidate.Evidence != nil {
 		selection.EvidenceSampleCount = candidate.Evidence.SampleCount
+		if (request.MaximumTTFTP95MS != nil || request.MinimumOutputTokensPS != nil) && request.MaximumEvidenceAge > 0 {
+			selection.ValidUntil = earlierTime(selection.ValidUntil, candidate.Evidence.ObservedAt.UTC().Add(request.MaximumEvidenceAge))
+		}
 	}
 	if pricesPresent && (request.InputTokens > 0 || request.OutputTokens > 0) {
 		retail, retailErr := managedbilling.TokenCostMicrousd(request.InputTokens, request.OutputTokens, *candidate.RetailInputMicrousdPerMTok, *candidate.RetailOutputMicrousdPerMTok)
@@ -355,6 +420,24 @@ func digestPlan(plan Plan) (string, error) {
 	}
 	digest := sha256.Sum256(body)
 	return "sha256:" + hex.EncodeToString(digest[:]), nil
+}
+
+// CanonicalDigest recomputes the digest over the complete plan while excluding
+// the embedded Digest field. Persistence and publication boundaries use this
+// to reject a plan whose JSON body no longer matches its immutable identity.
+func (plan Plan) CanonicalDigest() (string, error) {
+	return digestPlan(plan)
+}
+
+// HasCanonicalDigest reports whether the embedded digest matches the complete
+// canonical plan body. A plan loaded from storage must pass this check before
+// it can participate in a published route generation.
+func (plan Plan) HasCanonicalDigest() bool {
+	if plan.Digest == "" {
+		return false
+	}
+	digest, err := plan.CanonicalDigest()
+	return err == nil && digest == plan.Digest
 }
 
 func selectionPointer(value Selection) *Selection { return &value }

@@ -50,6 +50,7 @@ import (
 	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/managedbilling"
 	"github.com/infercrane/infercrane/internal/modelapicatalog"
+	"github.com/infercrane/infercrane/internal/modelapirouting"
 	"github.com/infercrane/infercrane/internal/operations"
 	"github.com/infercrane/infercrane/internal/optimizationcampaign"
 	"github.com/infercrane/infercrane/internal/passport"
@@ -4336,7 +4337,24 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 			launchProbers[provider.ID] = provision.ConfiguredLaunchProbe{Provider: provider.ID}
 		}
 	}
-	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool, OptimizationCosts: optimizationCosts, ModelAPICatalog: modelAPICatalog, HFCatalog: hfCatalog, ComputeProviders: computeProviders, GPUPriceCatalog: priceCatalog, LaunchProbers: launchProbers, DefaultProviderAdapters: defaultProviderAdapters}
+	var hostedModels *modelapirouting.Runtime
+	if len(cfg.HostedModelAPIEndpoints) > 0 {
+		hostedRoutes := modelapirouting.NewDirectory()
+		targetResolver, resolverErr := modelapirouting.NewRegistryTargetResolver(cfg.HostedModelAPIEndpoints, s, secrets.Environment{})
+		if resolverErr != nil {
+			return fmt.Errorf("configure hosted Model API targets: %w", resolverErr)
+		}
+		publisher := &modelapirouting.Publisher{Store: s, Resolver: targetResolver, Directory: hostedRoutes, Interval: 15 * time.Second, Logger: logger}
+		publishCtx, publishCancel := context.WithTimeout(ctx, 15*time.Second)
+		publishErr := publisher.PublishOnce(publishCtx)
+		publishCancel()
+		if publishErr != nil {
+			return fmt.Errorf("load hosted Model API route snapshot: %w", publishErr)
+		}
+		go publisher.Run(ctx)
+		hostedModels = &modelapirouting.Runtime{Routes: hostedRoutes, Billing: store.ModelAPIBillingAdapter{Store: s}, Client: client, Logger: logger}
+	}
+	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool, OptimizationCosts: optimizationCosts, ModelAPICatalog: modelAPICatalog, ModelAPIProducts: s, HFCatalog: hfCatalog, ComputeProviders: computeProviders, GPUPriceCatalog: priceCatalog, LaunchProbers: launchProbers, DefaultProviderAdapters: defaultProviderAdapters}
 	if cfg.StripeEnabled() {
 		stripeBilling, stripeErr := managedbilling.NewStripe(cfg.StripeSecretKey, cfg.StripeWebhookSecret, cfg.StripeBillingReturnURL, cfg.StripePriceIDs, cfg.StripeLivemode)
 		if stripeErr != nil {
@@ -4507,7 +4525,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		return err
 	}
 	databaseReadiness := &readiness.Gate{Probe: s.Ping, StaleAfter: 30 * time.Second}
-	server := &http.Server{Addr: fmt.Sprintf("%s:%d", cfg.Host, cfg.Port), Handler: (&gateway.Gateway{Routes: directory, APIKey: cfg.APIKey, Authenticator: credentialCache, Recorder: recorder, Logger: logger, Client: client, Ready: databaseReadiness.Check, Control: control, Telemetry: gatewayTelemetry, CapacityObservers: map[string]gateway.CapacityObserver{"runpod": serverless.ActiveWorkers}, ExternalAuthorizer: externalBudgets, ManagedBilling: s, RequestAuthorizer: requestQuotas, AdmissionAuthorizer: admissionPool, ContextPassports: contextPassports}).Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 1 << 20, TLSConfig: serverTLS}
+	server := &http.Server{Addr: fmt.Sprintf("%s:%d", cfg.Host, cfg.Port), Handler: (&gateway.Gateway{Routes: directory, APIKey: cfg.APIKey, Authenticator: credentialCache, Recorder: recorder, Logger: logger, Client: client, Ready: databaseReadiness.Check, Control: control, Telemetry: gatewayTelemetry, CapacityObservers: map[string]gateway.CapacityObserver{"runpod": serverless.ActiveWorkers}, ExternalAuthorizer: externalBudgets, ManagedBilling: s, HostedModels: hostedModels, RequestAuthorizer: requestQuotas, AdmissionAuthorizer: admissionPool, ContextPassports: contextPassports}).Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 1 << 20, TLSConfig: serverTLS}
 	go func() {
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)

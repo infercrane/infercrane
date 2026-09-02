@@ -24,6 +24,7 @@ import (
 	"github.com/infercrane/infercrane/internal/authz"
 	"github.com/infercrane/infercrane/internal/contextpassport"
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/modelapirouting"
 	"github.com/infercrane/infercrane/internal/openaicompat"
 	"github.com/infercrane/infercrane/internal/routes"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
@@ -67,6 +68,7 @@ type Gateway struct {
 	CapacityObservers   map[string]CapacityObserver
 	ExternalAuthorizer  ExternalAuthorizer
 	ManagedBilling      ManagedBillingAuthorizer
+	HostedModels        *modelapirouting.Runtime
 	RequestAuthorizer   RequestAuthorizer
 	AdmissionAuthorizer AdmissionAuthorizer
 	ContextPassports    ContextPassportResolver
@@ -138,6 +140,7 @@ func (g *Gateway) health(w http.ResponseWriter, _ *http.Request) {
 func (g *Gateway) models(w http.ResponseWriter, r *http.Request) {
 	data := make([]map[string]any, 0)
 	principal := r.Context().Value(principalKey{}).(domain.Principal)
+	seen := make(map[string]struct{})
 	for _, route := range g.Routes.ListForTenant(principal.TenantID) {
 		if !principalAllowsEndpoint(principal, route.Alias) {
 			continue
@@ -147,6 +150,15 @@ func (g *Gateway) models(w http.ResponseWriter, r *http.Request) {
 			owner = "endpoint"
 		}
 		data = append(data, map[string]any{"id": route.Alias, "object": "model", "owned_by": owner, "infercrane_capabilities": route.ProtocolCapabilities})
+		seen[route.Alias] = struct{}{}
+	}
+	if g.HostedModels != nil && g.HostedModels.Routes != nil {
+		for _, productID := range g.HostedModels.Routes.ListForTenant(principal.TenantID) {
+			if _, exists := seen[productID]; exists || !principalAllowsEndpoint(principal, productID) {
+				continue
+			}
+			data = append(data, map[string]any{"id": productID, "object": "model", "owned_by": "infercrane"})
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": data})
 }
@@ -212,6 +224,13 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 	}
 	route, releaseRoute, ok := g.Routes.AcquirePreferredForTenant(principal.TenantID, alias, preferredBinding, preferredTarget)
 	if !ok {
+		if g.HostedModels != nil {
+			g.HostedModels.ServeHTTP(w, r, modelapirouting.ProxyRequest{
+				TenantID: principal.TenantID, ProductID: alias, Operation: operation, Resource: resource,
+				RequestID: requestID, TraceParent: traceParent, Payload: payload,
+			})
+			return
+		}
 		openAIError(w, "Unknown model alias: "+alias, http.StatusNotFound, "invalid_request_error")
 		return
 	}

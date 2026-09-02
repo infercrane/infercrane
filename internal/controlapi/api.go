@@ -38,6 +38,7 @@ import (
 	"github.com/infercrane/infercrane/internal/intentplan"
 	"github.com/infercrane/infercrane/internal/lab"
 	"github.com/infercrane/infercrane/internal/modelapicatalog"
+	"github.com/infercrane/infercrane/internal/modelapiproduct"
 	"github.com/infercrane/infercrane/internal/optimizationcampaign"
 	"github.com/infercrane/infercrane/internal/optimizedartifact"
 	"github.com/infercrane/infercrane/internal/optimizer"
@@ -48,6 +49,7 @@ import (
 	"github.com/infercrane/infercrane/internal/provision"
 	"github.com/infercrane/infercrane/internal/qualityevidence"
 	"github.com/infercrane/infercrane/internal/recipe"
+	"github.com/infercrane/infercrane/internal/store"
 	"github.com/infercrane/infercrane/internal/support"
 	"github.com/infercrane/infercrane/internal/trainingartifact"
 	"github.com/infercrane/infercrane/internal/workflows"
@@ -261,6 +263,17 @@ type externalWorkloadStore interface {
 	AttachTrainingArtifactHandoff(context.Context, string, string, domain.TrainingArtifactHandoff, domain.ModelArtifact) (domain.TrainingArtifactHandoff, domain.ModelArtifact, error)
 	TrainingArtifactHandoffs(context.Context, string, string) ([]domain.TrainingArtifactHandoff, error)
 }
+
+// modelAPIProductStore is deliberately separate from Store. The durable
+// customer product boundary is optional while older installations migrate,
+// and adding it here avoids forcing every control API test double to implement
+// catalog persistence.
+type modelAPIProductStore interface {
+	PublicModelAPIProducts(context.Context, time.Time) ([]modelapiproduct.PublicProjection, error)
+	PublicModelAPIProduct(context.Context, string, time.Time) (modelapiproduct.PublicProjection, error)
+	ModelAPIProductAccess(context.Context, string, string, time.Time) (store.ModelAPIProductAccess, error)
+}
+
 type API struct {
 	Store         Store
 	APIKey        string
@@ -295,6 +308,7 @@ type API struct {
 		ParseWebhook([]byte, string) (domain.ManagedPaymentEvent, error)
 	}
 	ModelAPICatalog  modelapicatalog.Catalog
+	ModelAPIProducts modelAPIProductStore
 	HFCatalog        *hfcatalog.Cache
 	ComputeProviders []ComputeProvider
 	GPUPrices        []GPUPriceObservation
@@ -691,6 +705,10 @@ func (a API) modelAPIModels(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if a.ModelAPIProducts != nil {
+		a.durableModelAPIModels(w, r, offset, limit)
+		return
+	}
 	catalog := a.ModelAPICatalog
 	if len(catalog.Models) == 0 {
 		catalog = modelapicatalog.Default()
@@ -707,6 +725,10 @@ func (a API) modelAPIModels(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a API) modelAPIModel(w http.ResponseWriter, r *http.Request) {
+	if a.ModelAPIProducts != nil {
+		a.durableModelAPIModel(w, r)
+		return
+	}
 	catalog := a.ModelAPICatalog
 	if len(catalog.Models) == 0 {
 		catalog = modelapicatalog.Default()
@@ -716,7 +738,13 @@ func (a API) modelAPIModel(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "Model API catalog entry was not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"model": modelAPIModelResponse(model)})
+	// The compatibility catalog is discovery-only. It cannot grant routing
+	// authority without a durable, tenant-scoped entitlement.
+	writeJSON(w, http.StatusOK, map[string]any{
+		"model":          modelAPIModelResponse(model),
+		"access":         map[string]any{"authorized": false},
+		"catalog_source": "compatibility_fallback",
+	})
 }
 
 func modelAPIModelResponse(model modelapicatalog.Model) map[string]any {
