@@ -3,10 +3,12 @@ package modelapirouting
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/modelapitarget"
 	"github.com/infercrane/infercrane/internal/supplieradapter"
 )
 
@@ -158,6 +160,47 @@ func TestPublisherKeepsStrictCredentialReferenceSecretFree(t *testing.T) {
 	}
 	if secrets.calls != 0 {
 		t.Fatalf("strict secret resolved %d times during publication", secrets.calls)
+	}
+}
+
+func TestPublisherRequiresAndVerifiesRunPodTargetBinding(t *testing.T) {
+	now := time.Date(2026, 9, 2, 10, 0, 0, 0, time.UTC)
+	source := sourceFixture(now, "customer")
+	candidateSource := &source.Candidates[0]
+	candidateSource.Candidate.Supplier = supplieradapter.RunPodSupplier
+	candidateSource.Candidate.SupplierModelID = "org/exact-model"
+	candidateSource.Adapter = supplieradapter.RunPodVLLMAdapterName
+	candidateSource.CredentialReference = "runpod-reference"
+	endpointReference := supplieradapter.RunPodSupplier + "/" + supplieradapter.RunPodVLLMAdapterName
+	endpoint := "https://api.runpod.ai/v2/abc123/openai"
+	digest, err := modelapitarget.EndpointConfigDigest(endpointReference, endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver, err := NewRegistryTargetResolver(map[string]string{endpointReference: endpoint}, &referenceStoreFake{}, &secretValueFailIfResolved{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := NewDirectory()
+	directory.now = func() time.Time { return now }
+	publisher := &Publisher{Store: &sourceStoreFake{sources: []RouteSource{source}}, Resolver: resolver, Adapters: supplieradapter.DefaultRegistry(), Directory: directory, Now: func() time.Time { return now }}
+	if err = publisher.PublishOnce(context.Background()); err == nil {
+		t.Fatal("RunPod route without an immutable target binding was published")
+	}
+	candidateSource.Candidate.TargetBindingID = "binding-1"
+	candidateSource.Candidate.TargetBindingDigest = "sha256:" + strings.Repeat("a", 64)
+	candidateSource.EndpointReference = endpointReference
+	candidateSource.EndpointConfigDigest = digest
+	if err = publisher.PublishOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := directory.Acquire("customer", "glm-5.3")
+	if err != nil || lease.Candidates[0].Endpoint != endpoint || lease.Candidates[0].TargetBindingID != "binding-1" {
+		t.Fatalf("bound RunPod route=%#v err=%v", lease, err)
+	}
+	candidateSource.EndpointConfigDigest = "sha256:" + strings.Repeat("b", 64)
+	if err = publisher.PublishOnce(context.Background()); err == nil {
+		t.Fatal("RunPod route with a mismatched endpoint config digest was published")
 	}
 }
 

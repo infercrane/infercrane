@@ -9,6 +9,74 @@ InferCrane separates durable deployment decisions from latency-sensitive inferen
 PostgreSQL is authoritative for control-plane state. An atomic in-memory snapshot is authoritative
 for each gateway replica's request path.
 
+## Whole-product topology
+
+```mermaid
+flowchart TB
+  subgraph Surfaces[Customer and operator surfaces]
+    Site[Website and model catalog]
+    Console[Web console]
+    Clients[OpenAI SDKs and customer apps]
+    Tooling[CLI / Terraform / GitHub]
+  end
+
+  subgraph Control[Durable control plane]
+    API[Control API]
+    Planner[Plan and optimization engine]
+    Operations[Leased operations and reconcilers]
+    Publisher[Qualification and route publisher]
+    Evidence[Telemetry, benchmarks, Release Guard]
+    DB[(PostgreSQL source of truth)]
+  end
+
+  subgraph Data[Managed Model API data plane]
+    Gateway[api.infercrane.com/v1]
+    Admission[Auth, quota, prepaid reservation]
+    Snapshot[Atomic route snapshot]
+    Router[Deterministic weighted router]
+    Settlement[Usage settlement and COGS]
+  end
+
+  subgraph Supply[Replaceable inference supply]
+    Upstream[Token-priced upstream API]
+    RunPod[RunPod Serverless vLLM]
+    Dedicated[InferCrane-managed dedicated GPU]
+    BYOC[Customer cloud / Kubernetes / existing endpoint]
+  end
+
+  Stripe[Stripe signed webhooks]
+  HF[Hugging Face model metadata and immutable artifacts]
+
+  Site --> Console
+  Console --> API
+  Tooling --> API
+  API --> Planner
+  API --> Operations
+  Planner --> DB
+  Operations --> DB
+  Operations --> Supply
+  HF --> Planner
+  Evidence --> DB
+  DB --> Publisher
+  Publisher --> Snapshot
+
+  Clients --> Gateway
+  Gateway --> Admission
+  Admission --> Snapshot
+  Snapshot --> Router
+  Router --> Upstream
+  Router --> RunPod
+  Router --> Dedicated
+  Router --> BYOC
+  Router --> Settlement
+  Settlement --> DB
+  Stripe --> DB
+```
+
+The public model ID and API endpoint stay stable. The private route may move from an upstream API
+to a qualified RunPod target and later to dedicated or BYOC capacity. That movement creates new
+immutable target bindings and route publications; it never rewrites historical evidence.
+
 <Tabs>
   <Tab title="Request path">
     <div className="ic-flow not-prose" aria-label="Application request flow">

@@ -14,6 +14,7 @@ type ReservationRequest struct {
 	RetailRate                                      RetailRate
 	MaxRequestMicrousd                              int64
 	CandidateID, OfferID, Supplier, SupplierModelID string
+	TargetBindingID, TargetBindingDigest            string
 	OfferVersion                                    int64
 	CreatedAt                                       time.Time
 }
@@ -27,24 +28,33 @@ func (r ReservationRequest) Validate() error {
 	if r.RetailRate.ProductID != r.ProductID || !r.RetailRate.currentAt(r.CreatedAt.UTC()) {
 		return errors.New("hosted reservation requires the exact current immutable retail rate")
 	}
+	if (r.TargetBindingID == "") != (r.TargetBindingDigest == "") {
+		return errors.New("hosted reservation target binding id and digest must be supplied together")
+	}
 	return nil
 }
 
 type Reservation struct {
 	ID, TenantID, ProductID, EntitlementID            string
+	OperatorTenantID, SupplyPlanID, CandidateID       string
+	OfferID, Supplier, SupplierModelID                string
+	TargetBindingID, TargetBindingDigest              string
+	SupplierRateID, SupplierRateDigest                string
+	SupplierRateVersion                               int64
+	OfferVersion                                      int64
 	RetailRateID, RetailRateDigest                    string
 	RetailRateVersion                                 int
 	InputMicrousdPerMillion, OutputMicrousdPerMillion int64
 	ReservedMicrousd, ActualMicrousd                  int64
-	InputTokens, OutputTokens                         *int
+	InputTokens, CachedInputTokens, OutputTokens      *int
 	State, Resolution                                 string
 	TransmittedAt, ResponseStartedAt                  *time.Time
 	CreatedAt, UpdatedAt                              time.Time
 }
 
 type Usage struct {
-	StatusCode                int
-	InputTokens, OutputTokens *int
+	StatusCode                                   int
+	InputTokens, CachedInputTokens, OutputTokens *int
 }
 
 type Billing interface {

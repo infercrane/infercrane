@@ -36,6 +36,7 @@ type Runtime struct {
 	Logger      *slog.Logger
 	Adapters    *supplieradapter.Registry
 	Credentials RuntimeCredentialResolver
+	Circuit     CandidateCircuit
 	now         func() time.Time
 }
 
@@ -53,10 +54,11 @@ func (rt *Runtime) ServeHTTP(w http.ResponseWriter, r *http.Request, request Pro
 		writeError(w, status, message, errorType)
 		return
 	}
+	orderedCandidates := lease.CandidatesForRequest(request.RequestID, request.Operation)
 	var candidate *Candidate
-	for index := range lease.Candidates {
-		if lease.Candidates[index].supports(request.Operation) {
-			candidate = &lease.Candidates[index]
+	for index := range orderedCandidates {
+		if rt.Circuit == nil || rt.Circuit.Allow(orderedCandidates[index].ID, rt.currentTime()) {
+			candidate = &orderedCandidates[index]
 			break
 		}
 	}
@@ -90,7 +92,8 @@ func (rt *Runtime) ServeHTTP(w http.ResponseWriter, r *http.Request, request Pro
 		ServingPlanID: lease.Entitlement.ServingPlanID, SupplyPlanID: lease.Publication.SupplyPlanID,
 		RetailRate: lease.Rate, MaxRequestMicrousd: lease.Entitlement.MaxRequestMicrousd,
 		CandidateID: candidate.ID, OfferID: candidate.OfferID, OfferVersion: candidate.OfferVersion, Supplier: candidate.Supplier,
-		SupplierModelID: candidate.SupplierModelID, CreatedAt: now().UTC(),
+		SupplierModelID: candidate.SupplierModelID, TargetBindingID: candidate.TargetBindingID,
+		TargetBindingDigest: candidate.TargetBindingDigest, CreatedAt: now().UTC(),
 	}
 	reservation, err := rt.Billing.Reserve(r.Context(), reservationRequest)
 	if err != nil {
@@ -155,6 +158,7 @@ func (rt *Runtime) ServeHTTP(w http.ResponseWriter, r *http.Request, request Pro
 	}
 	response, err := client.Do(upstream)
 	if err != nil {
+		rt.observeCandidate(candidate.ID, false)
 		settlementContext, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
 		_, _ = rt.Billing.Settle(settlementContext, request.TenantID, reservation.ID, Usage{})
 		cancel()
@@ -170,6 +174,7 @@ func (rt *Runtime) ServeHTTP(w http.ResponseWriter, r *http.Request, request Pro
 		rt.Logger.Error("mark hosted response start", "request_id", request.RequestID, "reservation_id", reservation.ID, "error", err)
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		rt.observeCandidate(candidate.ID, false)
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
 		settlementContext, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
 		_, settleErr := rt.Billing.Settle(settlementContext, request.TenantID, reservation.ID, Usage{StatusCode: response.StatusCode})
@@ -185,6 +190,7 @@ func (rt *Runtime) ServeHTTP(w http.ResponseWriter, r *http.Request, request Pro
 	w.Header().Set("traceparent", request.TraceParent)
 	w.WriteHeader(response.StatusCode)
 	input, output, copyErr := copyPublicResponse(w, response, request.ProductID)
+	rt.observeCandidate(candidate.ID, copyErr == nil)
 	settlementContext, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
 	_, settleErr := rt.Billing.Settle(settlementContext, request.TenantID, reservation.ID, Usage{StatusCode: response.StatusCode, InputTokens: input, OutputTokens: output})
 	cancel()
@@ -193,6 +199,20 @@ func (rt *Runtime) ServeHTTP(w http.ResponseWriter, r *http.Request, request Pro
 	}
 	// An upstream response or partial body is terminal. Never fail over after
 	// response start, even when the supplier status is retryable.
+}
+
+func (rt *Runtime) currentTime() time.Time {
+	now := time.Now
+	if rt != nil && rt.now != nil {
+		now = rt.now
+	}
+	return now().UTC()
+}
+
+func (rt *Runtime) observeCandidate(candidateID string, success bool) {
+	if rt != nil && rt.Circuit != nil {
+		rt.Circuit.Observe(candidateID, success, rt.currentTime())
+	}
 }
 
 func forceStreamUsage(payload map[string]any) {

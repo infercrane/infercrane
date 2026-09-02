@@ -19,10 +19,13 @@ func TestRegistryRequiresExplicitUniqueAdapterNames(t *testing.T) {
 	}
 }
 
-func TestDefaultRegistryContainsOnlyQualifiedMVPAdapter(t *testing.T) {
+func TestDefaultRegistryContainsQualifiedHostedAdapters(t *testing.T) {
 	registry := DefaultRegistry()
 	if _, ok := registry.Lookup(DeepSeekAdapterName); !ok {
 		t.Fatal("DeepSeek adapter is absent from the default registry")
+	}
+	if _, ok := registry.Lookup(RunPodVLLMAdapterName); !ok {
+		t.Fatal("RunPod vLLM adapter is absent from the default registry")
 	}
 	if _, ok := registry.Lookup("openai"); ok {
 		t.Fatal("unqualified generic adapter appeared in the default registry")

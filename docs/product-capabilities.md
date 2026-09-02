@@ -93,6 +93,12 @@ key. Internally, InferCrane compiles fresh private supply offers into immutable
 primary/fallback plans, reserves wallet funds before transmission, settles from
 returned usage, and fails closed when rates, health, evidence, or usage are stale.
 
+Qualified supply can move gradually between token-priced upstream APIs, RunPod
+Serverless vLLM, dedicated GPUs, and customer-owned targets without changing the
+public endpoint or logical model ID. Every private target is immutable and
+digest-bound; weighted rollout, circuit state, supplier usage, COGS, and gross
+margin stay internal and auditable.
+
 The same reviewed model configuration can later become a customer-owned
 deployment. Hosted API and own-cloud deployment are two delivery modes of one
 model contract, not separate product catalogs.

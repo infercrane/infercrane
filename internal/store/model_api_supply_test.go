@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/modelapiproduct"
+	"github.com/infercrane/infercrane/internal/modelapiqualification"
 	"github.com/infercrane/infercrane/internal/modelapisupply"
 )
 
@@ -88,14 +89,17 @@ func TestModelAPISupplyWritersCompileOnlyExactImmutableEvidence(t *testing.T) {
 	if _, err = s.PublishModelAPISupplierOffer(ctx, operator, changed); !errors.Is(err, ErrConflict) {
 		t.Fatalf("conflicting immutable offer error=%v", err)
 	}
-	evidence := modelapisupply.QualificationEvidence{
-		ID: "qualification-" + suffix, State: modelapisupply.QualificationQualified,
-		TupleKey: offer.TupleKey, Protocol: offer.Protocol, Region: offer.Region,
-		Capabilities: []string{"chat-completions", "streaming"}, Scope: "chat buffered and streaming",
-		EvidenceRef: "artifact://qualification/" + suffix, EvidenceDigest: "sha256:" + strings.Repeat("b", 64),
-		ObservedAt: now, ValidUntil: now.Add(time.Hour), SampleCount: 8,
+	measured, err := modelapiqualification.Measure(modelapiqualification.Target{
+		TupleKey: offer.TupleKey, Supplier: offer.Supplier, Adapter: offer.Adapter, SupplierModelID: offer.SupplierModelID,
+		Operation: "chat-completions", Protocol: offer.Protocol, Region: offer.Region, Capabilities: []string{"chat-completions", "streaming"},
+	}, []modelapiqualification.Sample{
+		{RequestID: "qualification-request-1", StartedAt: now.Add(-3 * time.Second), FirstTokenAt: now.Add(-2 * time.Second), CompletedAt: now, InputTokens: 100, OutputTokens: 50},
+	}, time.Hour)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err = s.PublishModelAPISupplyQualification(ctx, operator, offer.ID, offer.Version, evidence); err != nil {
+	evidence, err := s.PublishMeasuredModelAPISupplyQualification(ctx, operator, offer.ID, offer.Version, "qualification-"+suffix, "chat buffered and streaming", "artifact://qualification/"+suffix, measured)
+	if err != nil {
 		t.Fatal(err)
 	}
 	draft := SupplyPlanDraft{
@@ -114,6 +118,12 @@ func TestModelAPISupplyWritersCompileOnlyExactImmutableEvidence(t *testing.T) {
 	replayed, err := s.CompileAndPublishModelAPISupplyPlan(ctx, draft)
 	if err != nil || replayed.Digest != plan.Digest {
 		t.Fatalf("plan replay=%+v err=%v", replayed, err)
+	}
+	changedRollout := draft
+	changedRollout.Candidates = append([]SupplyCandidateReference(nil), draft.Candidates...)
+	changedRollout.Candidates[0].TrafficWeightBPS = 10_000
+	if _, err = s.CompileAndPublishModelAPISupplyPlan(ctx, changedRollout); !errors.Is(err, ErrConflict) {
+		t.Fatalf("immutable plan accepted changed rollout weight: %v", err)
 	}
 	var candidateCount int
 	if err = s.QueryRowContext(ctx, `SELECT COUNT(*) FROM model_api_supply_plan_candidates WHERE plan_id=?`, draft.ID).Scan(&candidateCount); err != nil || candidateCount != 1 {

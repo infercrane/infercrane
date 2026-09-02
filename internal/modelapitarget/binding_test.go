@@ -68,6 +68,24 @@ func TestBindingNormalizesTimesBeforeDigesting(t *testing.T) {
 	}
 }
 
+func TestEndpointConfigDigestPinsReferenceAndURL(t *testing.T) {
+	digest, err := EndpointConfigDigest("runpod/runpod-vllm-openai", "https://api.runpod.ai/v2/abc123/openai/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	same, err := EndpointConfigDigest("runpod/runpod-vllm-openai", "https://api.runpod.ai/v2/abc123/openai")
+	if err != nil || same != digest {
+		t.Fatalf("canonical endpoint digest mismatch: digest=%q same=%q err=%v", digest, same, err)
+	}
+	changed, err := EndpointConfigDigest("runpod/runpod-vllm-openai", "https://api.runpod.ai/v2/other/openai")
+	if err != nil || changed == digest {
+		t.Fatalf("changed endpoint was not detected: changed=%q err=%v", changed, err)
+	}
+	if _, err = EndpointConfigDigest("runpod/runpod-vllm-openai", "http://api.runpod.ai/v2/abc123/openai"); err == nil {
+		t.Fatal("insecure endpoint was accepted")
+	}
+}
+
 func validDraft(kind Kind) Draft {
 	created := time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC)
 	return Draft{

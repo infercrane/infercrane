@@ -10,12 +10,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
 )
 
 const SchemaVersion = "model-api-target-binding/v1"
+
+const endpointConfigSchemaVersion = "model-api-endpoint-config/v1"
 
 // Kind describes who operates the capacity behind a target. The customer
 // product identity is deliberately independent from this private choice.
@@ -129,6 +132,30 @@ func (binding Binding) CurrentAt(at time.Time) bool {
 }
 
 func (binding Binding) HasCanonicalDigest() bool { return binding.Validate() == nil }
+
+// EndpointConfigDigest commits a target binding to one exact, secret-free
+// registry entry. Credentials remain references and are deliberately excluded.
+func EndpointConfigDigest(endpointReference, endpoint string) (string, error) {
+	endpointReference = strings.TrimSpace(endpointReference)
+	parsed, err := url.Parse(strings.TrimSpace(endpoint))
+	if endpointReference == "" {
+		return "", errors.New("endpoint reference must be non-empty and canonical")
+	}
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", errors.New("endpoint config must be an absolute HTTPS URL without credentials, query, or fragment")
+	}
+	canonicalEndpoint := strings.TrimRight(parsed.String(), "/")
+	body, err := json.Marshal(struct {
+		SchemaVersion     string `json:"schema_version"`
+		EndpointReference string `json:"endpoint_reference"`
+		Endpoint          string `json:"endpoint"`
+	}{endpointConfigSchemaVersion, endpointReference, canonicalEndpoint})
+	if err != nil {
+		return "", fmt.Errorf("encode endpoint config: %w", err)
+	}
+	sum := sha256.Sum256(body)
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
+}
 
 var sha256Pattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
