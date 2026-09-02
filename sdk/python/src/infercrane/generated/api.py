@@ -71,6 +71,10 @@ class ControlAPI:
         path = f"/model-api-catalog/{quote(id, safe='')}"
         return cast(dict[str, Any], self._transport.request("GET", path))
 
+    def get_hosted_model_a_p_i_usage(self) -> dict[str, Any]:
+        path = "/model-api-usage"
+        return cast(dict[str, Any], self._transport.request("GET", path))
+
     def publish_model_a_p_i_product(self, *, body: dict[str, Any]) -> dict[str, Any]:
         path = "/admin/model-api/products"
         return cast(dict[str, Any], self._transport.request("POST", path, body=body))

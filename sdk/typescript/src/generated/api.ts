@@ -78,6 +78,11 @@ export class ControlApi {
     return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
   }
 
+  getHostedModelAPIUsage(): Promise<Record<string, JsonValue>> {
+    const path = '/model-api-usage';
+    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+  }
+
   publishModelAPIProduct(body: JsonValue): Promise<Record<string, JsonValue>> {
     const path = '/admin/model-api/products';
     return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
