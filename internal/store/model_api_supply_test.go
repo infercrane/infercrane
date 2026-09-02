@@ -25,6 +25,14 @@ func TestModelAPISupplierOfferInsertHasOneValuePerColumn(t *testing.T) {
 	}
 }
 
+func TestAcceptedModelAPICandidatePersistsAnEmptyReasonsArray(t *testing.T) {
+	plan := modelapisupply.Plan{Primary: &modelapisupply.Selection{CandidateID: "candidate-primary"}}
+	disposition, _, reasons, ok := modelAPICandidateDisposition(plan, "candidate-primary")
+	if !ok || disposition != "primary" || reasons == nil || len(reasons) != 0 {
+		t.Fatalf("disposition=%q reasons=%v ok=%t", disposition, reasons, ok)
+	}
+}
+
 func TestModelAPISupplyWritersCompileOnlyExactImmutableEvidence(t *testing.T) {
 	ctx := context.Background()
 	s := openStore(t, ctx)

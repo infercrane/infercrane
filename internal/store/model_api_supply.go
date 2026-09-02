@@ -257,11 +257,11 @@ func (s *Store) CompileAndPublishModelAPISupplyPlan(ctx context.Context, draft S
 
 func modelAPICandidateDisposition(plan modelapisupply.Plan, candidateID string) (string, any, []string, bool) {
 	if plan.Primary != nil && plan.Primary.CandidateID == candidateID {
-		return "primary", 0, nil, true
+		return "primary", 0, []string{}, true
 	}
 	for index, candidate := range plan.Fallbacks {
 		if candidate.CandidateID == candidateID {
-			return "fallback", index + 1, nil, true
+			return "fallback", index + 1, []string{}, true
 		}
 	}
 	for _, candidate := range plan.Rejections {
