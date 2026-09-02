@@ -143,6 +143,9 @@ type diagnosticStore interface {
 type monitoringStore interface {
 	EndpointMonitoring(context.Context, string, string, time.Duration, time.Duration) (domain.EndpointMonitoringSnapshot, error)
 }
+type hostedModelAPIUsageStore interface {
+	HostedModelAPIUsage(context.Context, string, string, time.Duration, time.Duration) (domain.HostedModelAPIUsageSnapshot, error)
+}
 type operationalMeasurementStore interface {
 	RecordOperationalMeasurements(context.Context, string, string, []domain.OperationalMeasurement) ([]domain.OperationalMeasurement, error)
 }
@@ -397,6 +400,7 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/planning/intents", a.auth(authz.Read, a.planIntent))
 	mux.HandleFunc("GET /api/v1/model-api-catalog", a.auth(authz.Read, a.modelAPIModels))
 	mux.HandleFunc("GET /api/v1/model-api-catalog/{id}", a.auth(authz.Read, a.modelAPIModel))
+	mux.HandleFunc("GET /api/v1/model-api-usage", a.auth(authz.Read, a.hostedModelAPIUsage))
 	mux.HandleFunc("POST /api/v1/admin/model-api/products", a.auth(authz.ManageModelAPI, a.publishModelAPIProduct))
 	mux.HandleFunc("POST /api/v1/admin/model-api/rates", a.auth(authz.ManageModelAPI, a.publishModelAPIRetailRate))
 	mux.HandleFunc("POST /api/v1/admin/model-api/offers", a.auth(authz.ManageModelAPI, a.publishModelAPISupplierOffer))

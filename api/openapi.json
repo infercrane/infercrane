@@ -1517,6 +1517,227 @@
         },
         "type": "object"
       },
+      "HostedModelAPIUsage": {
+        "additionalProperties": false,
+        "properties": {
+          "bucket_seconds": {
+            "maximum": 86400,
+            "minimum": 60,
+            "type": "integer"
+          },
+          "currency": {
+            "const": "USD",
+            "type": "string"
+          },
+          "evidence": {
+            "$ref": "#/components/schemas/HostedModelAPIUsageEvidence"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/HostedModelAPIUsageModel"
+            },
+            "type": "array"
+          },
+          "series": {
+            "items": {
+              "$ref": "#/components/schemas/HostedModelAPIUsageBucket"
+            },
+            "maxItems": 500,
+            "type": "array"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/HostedModelAPIUsageSummary"
+          },
+          "window_end": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "window_start": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "window_start",
+          "window_end",
+          "bucket_seconds",
+          "currency",
+          "summary",
+          "models",
+          "series",
+          "evidence"
+        ],
+        "type": "object"
+      },
+      "HostedModelAPIUsageBucket": {
+        "additionalProperties": false,
+        "properties": {
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/HostedModelAPIUsageSummary"
+          }
+        },
+        "required": [
+          "started_at",
+          "usage"
+        ],
+        "type": "object"
+      },
+      "HostedModelAPIUsageEvidence": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "items": {
+              "enum": [
+                "requests",
+                "reconciliation_state",
+                "settled_spend",
+                "tokens"
+              ],
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "content_recorded": {
+            "const": false,
+            "type": "boolean"
+          },
+          "latest_request_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reconciliation_complete": {
+            "type": "boolean"
+          },
+          "request_scope": {
+            "const": "funded_supplier_attempts",
+            "type": "string"
+          },
+          "source": {
+            "const": "model_api_usage_reservations+model_api_usage_ledger",
+            "type": "string"
+          },
+          "token_usage_complete": {
+            "type": "boolean"
+          },
+          "unavailable": {
+            "items": {
+              "enum": [
+                "errors",
+                "latency",
+                "ttft",
+                "tokens"
+              ],
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "source",
+          "request_scope",
+          "latest_request_at",
+          "token_usage_complete",
+          "reconciliation_complete",
+          "content_recorded",
+          "available",
+          "unavailable"
+        ],
+        "type": "object"
+      },
+      "HostedModelAPIUsageModel": {
+        "additionalProperties": false,
+        "properties": {
+          "latest_request_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "product_id": {
+            "type": "string"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/HostedModelAPIUsageSummary"
+          }
+        },
+        "required": [
+          "product_id",
+          "latest_request_at",
+          "usage"
+        ],
+        "type": "object"
+      },
+      "HostedModelAPIUsageSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "confirmed_no_charge_requests": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "in_flight_requests": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "input_tokens": {
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "output_tokens": {
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "pending_reconciliation_requests": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "settled_requests": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "settled_spend_microusd": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "settlement_entries": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "token_usage_samples": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "transmitted_requests": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "transmitted_requests",
+          "settled_requests",
+          "in_flight_requests",
+          "pending_reconciliation_requests",
+          "confirmed_no_charge_requests",
+          "token_usage_samples",
+          "settlement_entries",
+          "input_tokens",
+          "output_tokens",
+          "settled_spend_microusd"
+        ],
+        "type": "object"
+      },
       "IntentPlan": {
         "additionalProperties": false,
         "properties": {
@@ -9855,6 +10076,78 @@
           }
         ],
         "summary": "Inspect one managed Model API identity without supplier disclosure",
+        "tags": [
+          "Model APIs"
+        ]
+      }
+    },
+    "/api/v1/model-api-usage": {
+      "get": {
+        "operationId": "getHostedModelAPIUsage",
+        "parameters": [
+          {
+            "description": "Lookback window for funded supplier attempts.",
+            "in": "query",
+            "name": "window_seconds",
+            "required": false,
+            "schema": {
+              "default": 86400,
+              "maximum": 2592000,
+              "minimum": 60,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Time-series bucket size; the response is limited to 500 buckets.",
+            "in": "query",
+            "name": "bucket_seconds",
+            "required": false,
+            "schema": {
+              "default": 900,
+              "maximum": 86400,
+              "minimum": 60,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Exact public Model API product ID. Omit to include all hosted products for the authenticated tenant.",
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "maxLength": 256,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedModelAPIUsage"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read tenant-scoped hosted Model API settlement evidence",
         "tags": [
           "Model APIs"
         ]

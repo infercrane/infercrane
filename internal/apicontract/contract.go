@@ -42,6 +42,7 @@ var Routes = []Route{
 	{"POST", "/planning/intents", "planIntent", "Planning", "Compile bounded user intent into an editable reviewed configuration", "IntentPlanRequest", "IntentPlanEnvelope", 200, false},
 	{"GET", "/model-api-catalog", "listModelAPICatalog", "Model APIs", "Browse supplier-neutral managed Model API identities", "", "ObjectList", 200, false},
 	{"GET", "/model-api-catalog/{id}", "getModelAPICatalogEntry", "Model APIs", "Inspect one managed Model API identity without supplier disclosure", "", "Object", 200, false},
+	{"GET", "/model-api-usage", "getHostedModelAPIUsage", "Model APIs", "Read tenant-scoped hosted Model API settlement evidence", "", "HostedModelAPIUsage", 200, false},
 	{"POST", "/admin/model-api/products", "publishModelAPIProduct", "Model API administration", "Publish an immutable shared Model API product contract", "Object", "Object", 201, false},
 	{"POST", "/admin/model-api/rates", "publishModelAPIRetailRate", "Model API administration", "Publish an immutable customer-visible Model API rate", "Object", "Object", 201, false},
 	{"POST", "/admin/model-api/offers", "publishModelAPISupplierOffer", "Model API administration", "Publish an immutable supplier offer using a credential reference", "Object", "Object", 201, false},
@@ -212,6 +213,9 @@ func Document() (map[string]any, error) {
 		if route.Path == "/catalog/gpu-prices" || route.Path == "/public/catalog/gpu-prices" {
 			parameters = append(parameters, gpuPriceQueryParameters(route.Path == "/public/catalog/gpu-prices")...)
 		}
+		if route.Path == "/model-api-usage" {
+			parameters = append(parameters, hostedModelAPIUsageQueryParameters()...)
+		}
 		if route.Path == "/billing/webhooks/stripe" {
 			parameters = append(parameters, map[string]any{"name": "Stripe-Signature", "in": "header", "required": true, "description": "Stripe webhook HMAC signature; the request is unauthenticated by bearer token and grants balance only after verification.", "schema": map[string]any{"type": "string"}})
 		}
@@ -312,6 +316,14 @@ func gpuPriceQueryParameters(public bool) []map[string]any {
 	}
 }
 
+func hostedModelAPIUsageQueryParameters() []map[string]any {
+	return []map[string]any{
+		{"name": "window_seconds", "in": "query", "required": false, "description": "Lookback window for funded supplier attempts.", "schema": map[string]any{"type": "integer", "minimum": 60, "maximum": 2592000, "default": 86400}},
+		{"name": "bucket_seconds", "in": "query", "required": false, "description": "Time-series bucket size; the response is limited to 500 buckets.", "schema": map[string]any{"type": "integer", "minimum": 60, "maximum": 86400, "default": 900}},
+		{"name": "model", "in": "query", "required": false, "description": "Exact public Model API product ID. Omit to include all hosted products for the authenticated tenant.", "schema": map[string]any{"type": "string", "maxLength": 256}},
+	}
+}
+
 func ref(name string) map[string]any { return map[string]any{"$ref": "#/components/schemas/" + name} }
 
 func schemas() map[string]any {
@@ -355,6 +367,11 @@ func schemas() map[string]any {
 		"ProviderConnectionCreate":        map[string]any{"type": "object", "additionalProperties": false, "required": []string{"name", "adapter", "target", "secret_reference_id"}, "properties": map[string]any{"name": map[string]any{"type": "string"}, "adapter": map[string]any{"type": "string", "enum": []string{"openrouter", "openai-compatible-external", "modal", "runpod-serverless-api", "fly-io"}}, "target": map[string]any{"type": "string"}, "secret_reference_id": map[string]any{"type": "string"}}},
 		"ManagedWallet":                   map[string]any{"type": "object", "additionalProperties": false, "required": []string{"tenant_id", "currency", "balance_microusd", "reserved_microusd", "available_microusd", "updated_at"}, "properties": map[string]any{"tenant_id": map[string]any{"type": "string"}, "currency": map[string]any{"type": "string", "const": "USD"}, "balance_microusd": map[string]any{"type": "integer"}, "reserved_microusd": map[string]any{"type": "integer", "minimum": 0}, "available_microusd": map[string]any{"type": "integer"}, "updated_at": map[string]any{"type": "string", "format": "date-time"}}},
 		"ManagedWalletEnvelope":           map[string]any{"type": "object", "required": []string{"data", "funding_mode", "funding_available", "funding_provider", "checkout_amounts_microusd"}, "properties": map[string]any{"data": ref("ManagedWallet"), "funding_mode": map[string]any{"type": "string", "const": "prepaid"}, "funding_available": map[string]any{"type": "boolean"}, "funding_provider": map[string]any{"type": "string", "enum": []string{"", "stripe"}}, "checkout_amounts_microusd": map[string]any{"type": "array", "items": map[string]any{"type": "integer", "enum": []int64{25000000, 50000000, 100000000, 250000000, 500000000}}}, "payment_collection": map[string]any{"type": "string"}, "credit_id": map[string]any{"type": "string"}, "payment_collected_by_infercrane": map[string]any{"type": "boolean"}}},
+		"HostedModelAPIUsageSummary":      hostedModelAPIUsageSummarySchema(),
+		"HostedModelAPIUsageModel":        map[string]any{"type": "object", "additionalProperties": false, "required": []string{"product_id", "latest_request_at", "usage"}, "properties": map[string]any{"product_id": map[string]any{"type": "string"}, "latest_request_at": map[string]any{"type": "string", "format": "date-time"}, "usage": ref("HostedModelAPIUsageSummary")}},
+		"HostedModelAPIUsageBucket":       map[string]any{"type": "object", "additionalProperties": false, "required": []string{"started_at", "usage"}, "properties": map[string]any{"started_at": map[string]any{"type": "string", "format": "date-time"}, "usage": ref("HostedModelAPIUsageSummary")}},
+		"HostedModelAPIUsageEvidence":     hostedModelAPIUsageEvidenceSchema(),
+		"HostedModelAPIUsage":             hostedModelAPIUsageSchema(),
 		"ManagedCheckoutRequest":          map[string]any{"type": "object", "additionalProperties": false, "required": []string{"amount_microusd"}, "properties": map[string]any{"amount_microusd": map[string]any{"type": "integer", "enum": []int64{25000000, 50000000, 100000000, 250000000, 500000000}}}},
 		"ManagedCheckoutSession":          map[string]any{"type": "object", "additionalProperties": false, "required": []string{"funding_intent_id", "provider", "provider_id", "url", "amount_microusd", "currency", "expires_at"}, "properties": map[string]any{"funding_intent_id": map[string]any{"type": "string", "pattern": `^funding_[a-f0-9]{32}$`}, "provider": map[string]any{"type": "string", "const": "stripe"}, "provider_id": map[string]any{"type": "string", "minLength": 1}, "url": map[string]any{"type": "string", "format": "uri"}, "amount_microusd": map[string]any{"type": "integer", "minimum": 1}, "currency": map[string]any{"type": "string", "const": "USD"}, "expires_at": map[string]any{"type": "string", "format": "date-time"}}},
 		"ManagedCheckoutEnvelope":         map[string]any{"type": "object", "additionalProperties": false, "required": []string{"checkout", "balance_changed", "credit_authority"}, "properties": map[string]any{"checkout": ref("ManagedCheckoutSession"), "balance_changed": map[string]any{"type": "boolean", "const": false}, "credit_authority": map[string]any{"type": "string", "const": "verified_provider_webhook"}}},
@@ -431,6 +448,61 @@ func schemas() map[string]any {
 		"ExternalPolicyEnvelope":         map[string]any{"type": "object", "required": []string{"policy"}, "properties": map[string]any{"policy": ref("ExternalPolicy")}},
 		"ChatCompletionRequest":          map[string]any{"type": "object", "required": []string{"model", "messages"}, "properties": map[string]any{"model": map[string]any{"type": "string", "description": "Stable InferCrane endpoint name; migrated v1 deployment aliases remain compatible endpoints."}, "messages": map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "object", "required": []string{"role", "content"}, "properties": map[string]any{"role": map[string]any{"type": "string"}, "content": map[string]any{"type": "string"}}}}, "stream": map[string]any{"type": "boolean", "default": false}}, "additionalProperties": true},
 		"Empty":                          map[string]any{"type": "null"},
+	}
+}
+
+func hostedModelAPIUsageSummarySchema() map[string]any {
+	nonNegativeInteger := func() map[string]any { return map[string]any{"type": "integer", "minimum": 0} }
+	nullableNonNegativeInteger := func() map[string]any { return map[string]any{"type": []string{"integer", "null"}, "minimum": 0} }
+	return map[string]any{
+		"type": "object", "additionalProperties": false,
+		"required": []string{"transmitted_requests", "settled_requests", "in_flight_requests", "pending_reconciliation_requests", "confirmed_no_charge_requests", "token_usage_samples", "settlement_entries", "input_tokens", "output_tokens", "settled_spend_microusd"},
+		"properties": map[string]any{
+			"transmitted_requests":            nonNegativeInteger(),
+			"settled_requests":                nonNegativeInteger(),
+			"in_flight_requests":              nonNegativeInteger(),
+			"pending_reconciliation_requests": nonNegativeInteger(),
+			"confirmed_no_charge_requests":    nonNegativeInteger(),
+			"token_usage_samples":             nonNegativeInteger(),
+			"settlement_entries":              nonNegativeInteger(),
+			"input_tokens":                    nullableNonNegativeInteger(),
+			"output_tokens":                   nullableNonNegativeInteger(),
+			"settled_spend_microusd":          nonNegativeInteger(),
+		},
+	}
+}
+
+func hostedModelAPIUsageEvidenceSchema() map[string]any {
+	return map[string]any{
+		"type": "object", "additionalProperties": false,
+		"required": []string{"source", "request_scope", "latest_request_at", "token_usage_complete", "reconciliation_complete", "content_recorded", "available", "unavailable"},
+		"properties": map[string]any{
+			"source":                  map[string]any{"type": "string", "const": "model_api_usage_reservations+model_api_usage_ledger"},
+			"request_scope":           map[string]any{"type": "string", "const": "funded_supplier_attempts"},
+			"latest_request_at":       map[string]any{"type": []string{"string", "null"}, "format": "date-time"},
+			"token_usage_complete":    map[string]any{"type": "boolean"},
+			"reconciliation_complete": map[string]any{"type": "boolean"},
+			"content_recorded":        map[string]any{"type": "boolean", "const": false},
+			"available":               map[string]any{"type": "array", "uniqueItems": true, "items": map[string]any{"type": "string", "enum": []string{"requests", "reconciliation_state", "settled_spend", "tokens"}}},
+			"unavailable":             map[string]any{"type": "array", "uniqueItems": true, "items": map[string]any{"type": "string", "enum": []string{"errors", "latency", "ttft", "tokens"}}},
+		},
+	}
+}
+
+func hostedModelAPIUsageSchema() map[string]any {
+	return map[string]any{
+		"type": "object", "additionalProperties": false,
+		"required": []string{"window_start", "window_end", "bucket_seconds", "currency", "summary", "models", "series", "evidence"},
+		"properties": map[string]any{
+			"window_start":   map[string]any{"type": "string", "format": "date-time"},
+			"window_end":     map[string]any{"type": "string", "format": "date-time"},
+			"bucket_seconds": map[string]any{"type": "integer", "minimum": 60, "maximum": 86400},
+			"currency":       map[string]any{"type": "string", "const": "USD"},
+			"summary":        ref("HostedModelAPIUsageSummary"),
+			"models":         map[string]any{"type": "array", "items": ref("HostedModelAPIUsageModel")},
+			"series":         map[string]any{"type": "array", "maxItems": 500, "items": ref("HostedModelAPIUsageBucket")},
+			"evidence":       ref("HostedModelAPIUsageEvidence"),
+		},
 	}
 }
 
