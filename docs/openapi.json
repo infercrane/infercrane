@@ -4870,6 +4870,52 @@
         ]
       }
     },
+    "/api/v1/admin/model-api/target-bindings": {
+      "post": {
+        "operationId": "publishModelAPITargetBinding",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Bind a Model API product to an immutable operator execution target",
+        "tags": [
+          "Model API administration"
+        ]
+      }
+    },
     "/api/v1/adoptions/endpoints": {
       "post": {
         "operationId": "adoptEndpoint",
