@@ -316,10 +316,10 @@ type API struct {
 	// publish shared supplier routes. Ordinary tenant administrators never
 	// inherit this authority merely by holding an admin role.
 	ModelAPIOperatorTenantID string
-	HFCatalog        *hfcatalog.Cache
-	ComputeProviders []ComputeProvider
-	GPUPrices        []GPUPriceObservation
-	GPUPriceCatalog  interface {
+	HFCatalog                *hfcatalog.Cache
+	ComputeProviders         []ComputeProvider
+	GPUPrices                []GPUPriceObservation
+	GPUPriceCatalog          interface {
 		Snapshot() map[pricing.Request]pricing.Estimate
 	}
 	LaunchProbers map[string]provision.LaunchProber
