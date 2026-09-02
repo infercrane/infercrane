@@ -11,6 +11,20 @@ import (
 	"github.com/infercrane/infercrane/internal/modelapisupply"
 )
 
+func TestModelAPISupplierOfferInsertHasOneValuePerColumn(t *testing.T) {
+	columnsStart := strings.Index(modelAPISupplierOfferInsert, "(")
+	columnsEnd := strings.Index(modelAPISupplierOfferInsert, ") VALUES(")
+	valuesEnd := strings.Index(modelAPISupplierOfferInsert, ") ON CONFLICT")
+	if columnsStart < 0 || columnsEnd < 0 || valuesEnd < 0 {
+		t.Fatal("supplier offer insert shape is not parseable")
+	}
+	columnCount := strings.Count(modelAPISupplierOfferInsert[columnsStart+1:columnsEnd], ",") + 1
+	valueCount := strings.Count(modelAPISupplierOfferInsert[columnsEnd:valuesEnd], "?")
+	if columnCount != valueCount {
+		t.Fatalf("supplier offer insert columns=%d placeholders=%d", columnCount, valueCount)
+	}
+}
+
 func TestModelAPISupplyWritersCompileOnlyExactImmutableEvidence(t *testing.T) {
 	ctx := context.Background()
 	s := openStore(t, ctx)

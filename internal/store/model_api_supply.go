@@ -14,6 +14,7 @@ import (
 )
 
 const modelAPISupplierOfferSelect = `SELECT id,version,operator_tenant_id,managed_product_id,supplier,adapter,supplier_model_id,protocol,tuple_key,region,credential_reference,state,capabilities_json::text,access_state,availability_state,health_state,observed_at,cost_currency,cost_input_microusd_per_mtoken,cost_output_microusd_per_mtoken,cost_cached_input_microusd_per_mtoken,cost_basis_provenance,cost_valid_from,cost_valid_until,commercial_state,commercial_terms_ref,commercial_valid_until,hf_repository_id,hf_revision,hf_license,hf_source_url,hf_observed_at FROM model_api_supplier_offers`
+const modelAPISupplierOfferInsert = `INSERT INTO model_api_supplier_offers(id,version,operator_tenant_id,managed_product_id,supplier,adapter,supplier_model_id,protocol,tuple_key,region,credential_reference,state,capabilities_json,access_state,availability_state,health_state,observed_at,cost_currency,cost_input_microusd_per_mtoken,cost_output_microusd_per_mtoken,cost_cached_input_microusd_per_mtoken,cost_basis_provenance,cost_valid_from,cost_valid_until,commercial_state,commercial_terms_ref,commercial_valid_until,hf_repository_id,hf_revision,hf_license,hf_source_url,hf_observed_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?::jsonb,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id,version) DO NOTHING`
 const modelAPISupplyQualificationSelect = `SELECT id,state,tuple_key,protocol,region,capabilities_json::text,scope,evidence_ref,evidence_digest,reason,observed_at,valid_until,sample_count,ttft_p95_ms,output_tokens_p5 FROM model_api_supply_qualifications`
 
 // SupplyCandidateReference binds a plan candidate to exact immutable offer,
@@ -73,7 +74,7 @@ func (s *Store) PublishModelAPISupplierOffer(ctx context.Context, operatorTenant
 	if offer.HuggingFace != nil {
 		hfRepository, hfRevision, hfLicense, hfSource, hfObserved = offer.HuggingFace.RepositoryID, offer.HuggingFace.Revision, offer.HuggingFace.License, offer.HuggingFace.SourceURL, offer.HuggingFace.ObservedAt.UTC()
 	}
-	result, err := s.ExecContext(ctx, `INSERT INTO model_api_supplier_offers(id,version,operator_tenant_id,managed_product_id,supplier,adapter,supplier_model_id,protocol,tuple_key,region,credential_reference,state,capabilities_json,access_state,availability_state,health_state,observed_at,cost_currency,cost_input_microusd_per_mtoken,cost_output_microusd_per_mtoken,cost_cached_input_microusd_per_mtoken,cost_basis_provenance,cost_valid_from,cost_valid_until,commercial_state,commercial_terms_ref,commercial_valid_until,hf_repository_id,hf_revision,hf_license,hf_source_url,hf_observed_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?::jsonb,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id,version) DO NOTHING`,
+	result, err := s.ExecContext(ctx, modelAPISupplierOfferInsert,
 		offer.ID, offer.Version, operatorTenant, offer.ProductID, offer.Supplier, offer.Adapter, offer.SupplierModelID, offer.Protocol,
 		offer.TupleKey, offer.Region, offer.CredentialReference, offer.State, capabilities, offer.Access, offer.Availability, offer.Health,
 		nullableModelAPITime(offer.ObservedAt), offer.CostRate.Currency, nullableModelAPIInt64(offer.CostRate.InputMicrousdPerMTok), nullableModelAPIInt64(offer.CostRate.OutputMicrousdPerMTok), nullableModelAPIInt64(offer.CostRate.CachedInputMicrousdPerMTok),
