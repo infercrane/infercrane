@@ -4347,8 +4347,12 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		if resolverErr != nil {
 			return fmt.Errorf("configure hosted Model API targets: %w", resolverErr)
 		}
+		// MVP funding boundary: adapters may exist without publishing catalog
+		// products. Only one customer-callable model is intentionally funded and
+		// qualified until InferCrane can fund compute for the full catalog.
 		supplierAdapters, adapterErr := supplieradapter.NewRegistry(
 			supplieradapter.NewDeepSeekAdapter(client),
+			supplieradapter.NewHuggingFaceRouterAdapter(client),
 			supplieradapter.NewRunPodVLLMAdapter(client),
 		)
 		if adapterErr != nil {

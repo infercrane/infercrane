@@ -27,7 +27,23 @@ func TestDefaultRegistryContainsQualifiedHostedAdapters(t *testing.T) {
 	if _, ok := registry.Lookup(RunPodVLLMAdapterName); !ok {
 		t.Fatal("RunPod vLLM adapter is absent from the default registry")
 	}
+	if _, ok := registry.Lookup(HuggingFaceRouterAdapterName); !ok {
+		t.Fatal("Hugging Face router adapter is absent from the default registry")
+	}
 	if _, ok := registry.Lookup("openai"); ok {
 		t.Fatal("unqualified generic adapter appeared in the default registry")
+	}
+}
+
+func TestRoutedAndSelfHostedAdaptersRequireImmutableTargets(t *testing.T) {
+	for _, adapter := range []string{HuggingFaceRouterAdapterName, RunPodVLLMAdapterName} {
+		if !RequiresImmutableTargetBinding(adapter) {
+			t.Fatalf("adapter %q did not require an immutable target", adapter)
+		}
+	}
+	for _, adapter := range []string{"", DeepSeekAdapterName, "unqualified"} {
+		if RequiresImmutableTargetBinding(adapter) {
+			t.Fatalf("adapter %q unexpectedly required an immutable target", adapter)
+		}
 	}
 }

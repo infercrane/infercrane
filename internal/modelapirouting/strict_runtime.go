@@ -131,7 +131,7 @@ func (rt *Runtime) serveStrictBuffered(w http.ResponseWriter, r *http.Request, r
 		return
 	}
 	usage := routingUsage(status, response.Usage)
-	body, err := publicBufferedResponse(request.ProductID, response)
+	body, err := publicBufferedResponse(request.RequestID, request.ProductID, response)
 	if err != nil {
 		rt.observeCandidate(candidateID, false)
 		rt.settleStrict(request, reservationID, usage)
@@ -269,7 +269,7 @@ func intToken(value *int64) *int {
 	return &converted
 }
 
-func publicBufferedResponse(publicModel string, response supplieradapter.Response) ([]byte, error) {
+func publicBufferedResponse(requestID, publicModel string, response supplieradapter.Response) ([]byte, error) {
 	choices := make([]map[string]any, 0, len(response.Choices))
 	for _, choice := range response.Choices {
 		if choice.Message == nil || len(choice.Message.Content) != 1 || choice.Message.Content[0].Type != "text" {
@@ -281,7 +281,7 @@ func publicBufferedResponse(publicModel string, response supplieradapter.Respons
 		})
 	}
 	return json.Marshal(map[string]any{
-		"id": response.ID, "object": "chat.completion", "model": publicModel, "choices": choices, "usage": publicUsage(response.Usage),
+		"id": requestID, "object": "chat.completion", "model": publicModel, "choices": choices, "usage": publicUsage(response.Usage),
 	})
 }
 

@@ -101,8 +101,8 @@ func (s *Store) ReserveModelAPIUsage(ctx context.Context, request modelapiroutin
 		if err != nil || bindingCount != 1 {
 			return modelapirouting.Reservation{}, fmt.Errorf("%w: immutable target binding changed before billing authorization", ErrConflict)
 		}
-	} else if offer.Adapter == supplieradapter.RunPodVLLMAdapterName {
-		return modelapirouting.Reservation{}, fmt.Errorf("%w: RunPod usage requires an immutable target binding", ErrConflict)
+	} else if supplieradapter.RequiresImmutableTargetBinding(offer.Adapter) {
+		return modelapirouting.Reservation{}, fmt.Errorf("%w: hosted usage requires an immutable target binding", ErrConflict)
 	}
 
 	var balance, reserved, debt int64

@@ -212,8 +212,8 @@ func (p *Publisher) PublishOnce(ctx context.Context) error {
 					}
 					target, resolveErr = boundResolver.ResolveBoundHostedModelReference(ctx, source.Publication.OperatorTenantID, candidate.Supplier, candidateSource.Adapter, candidateSource.CredentialReference, candidateSource.EndpointReference, candidateSource.EndpointConfigDigest)
 				} else {
-					if candidateSource.Adapter == supplieradapter.RunPodVLLMAdapterName {
-						return errors.New("RunPod hosted candidate requires a current immutable target binding")
+					if supplieradapter.RequiresImmutableTargetBinding(candidateSource.Adapter) {
+						return errors.New("hosted candidate requires a current immutable target binding")
 					}
 					target, resolveErr = referenceResolver.ResolveHostedModelReference(ctx, source.Publication.OperatorTenantID, candidate.Supplier, candidateSource.Adapter, candidateSource.CredentialReference)
 				}

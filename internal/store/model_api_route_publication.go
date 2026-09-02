@@ -202,8 +202,8 @@ func publishedModelAPICandidates(ctx context.Context, tx *tx, at time.Time, sour
 			}
 			candidate.TargetBindingID, candidate.TargetBindingDigest = bindingID.String, bindingDigest.String
 			item.EndpointReference, item.EndpointConfigDigest = endpointReference.String, endpointConfigDigest.String
-		} else if item.Adapter == supplieradapter.RunPodVLLMAdapterName {
-			return nil, fmt.Errorf("hosted RunPod candidate %q has no current immutable target binding", candidate.ID)
+		} else if supplieradapter.RequiresImmutableTargetBinding(item.Adapter) {
+			return nil, fmt.Errorf("hosted candidate %q has no current immutable target binding", candidate.ID)
 		}
 		candidate.Operations = append([]string(nil), operations...)
 		candidate.Qualified, candidate.Available = true, true

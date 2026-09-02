@@ -40,9 +40,21 @@ func (r *Registry) Lookup(name string) (Adapter, bool) {
 }
 
 func DefaultRegistry() *Registry {
-	registry, err := NewRegistry(NewDeepSeekAdapter(nil), NewRunPodVLLMAdapter(nil))
+	registry, err := NewRegistry(NewDeepSeekAdapter(nil), NewHuggingFaceRouterAdapter(nil), NewRunPodVLLMAdapter(nil))
 	if err != nil {
 		panic(err)
 	}
 	return registry
+}
+
+// RequiresImmutableTargetBinding identifies adapters whose execution identity
+// includes operator-selected infrastructure or a routed provider. Their exact
+// endpoint and model/provider tuple must be committed before publication.
+func RequiresImmutableTargetBinding(adapter string) bool {
+	switch strings.TrimSpace(adapter) {
+	case HuggingFaceRouterAdapterName, RunPodVLLMAdapterName:
+		return true
+	default:
+		return false
+	}
 }

@@ -144,6 +144,32 @@ func strictProxyRequest(stream bool) ProxyRequest {
 	}
 }
 
+func strictHuggingFaceRuntimeFixture(t *testing.T, billing *billingFake, transport http.RoundTripper, credentials *hostedCredentialFake) *Runtime {
+	t.Helper()
+	now := time.Date(2026, 9, 2, 10, 0, 0, 0, time.UTC)
+	route := routeFixture(now, "customer")
+	for _, product := range []*string{&route.Entitlement.ProductID, &route.Publication.ProductID, &route.Rate.ProductID, &route.Candidates[0].ProductID} {
+		*product = "qwen3-8b"
+	}
+	route.Candidates[0].Supplier = supplieradapter.HuggingFaceSupplier
+	route.Candidates[0].SupplierModelID = "Qwen/Qwen3-8B:together"
+	route.Candidates[0].Endpoint = supplieradapter.HuggingFaceRouterBaseURL
+	route.Candidates[0].Credential = ""
+	route.Candidates[0].Adapter = supplieradapter.HuggingFaceRouterAdapterName
+	route.Candidates[0].CredentialReference = "router-secret-reference"
+	directory := NewDirectory()
+	directory.now = func() time.Time { return now }
+	if err := directory.Publish([]PublishedRoute{route}); err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Transport: transport}
+	registry, err := supplieradapter.NewRegistry(supplieradapter.NewHuggingFaceRouterAdapter(client))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &Runtime{Routes: directory, Billing: billing, Client: client, Adapters: registry, Credentials: credentials, now: func() time.Time { return now }}
+}
+
 func TestStrictRuntimeResolvesCredentialPerRequestAndRewritesBufferedResponse(t *testing.T) {
 	calls := 0
 	transport := routingRoundTripperFunc(func(request *http.Request) (*http.Response, error) {
@@ -177,6 +203,49 @@ func TestStrictRuntimeResolvesCredentialPerRequestAndRewritesBufferedResponse(t 
 	}
 	if billing.transmitted != 1 || billing.responseStarted != 1 || len(billing.settlements) != 1 || *billing.settlements[0].InputTokens != 19 || *billing.settlements[0].OutputTokens != 5 {
 		t.Fatalf("strict billing=%#v", billing)
+	}
+}
+
+func TestStrictRuntimeNeverExposesRoutedSupplierIdentity(t *testing.T) {
+	transport := routingRoundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		body, err := io.ReadAll(request.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if request.URL.String() != supplieradapter.HuggingFaceRouterBaseURL+"/chat/completions" || !strings.Contains(string(body), `"model":"Qwen/Qwen3-8B:together"`) {
+			t.Fatalf("private routed request=%s body=%s", request.URL, body)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": {"application/json"}, "Inference-Id": {"private-router-request"}},
+			Request:    request,
+			Body: io.NopCloser(strings.NewReader(`{
+				"id":"private-completion","model":"Qwen/Qwen3-8B",
+				"choices":[{"index":0,"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}],
+				"usage":{"prompt_tokens":7,"completion_tokens":1}
+			}`)),
+		}, nil
+	})
+	billing := &billingFake{}
+	runtime := strictHuggingFaceRuntimeFixture(t, billing, transport, &hostedCredentialFake{credential: []byte("private-router-secret")})
+	recorder := httptest.NewRecorder()
+	runtime.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil), ProxyRequest{
+		TenantID: "customer", ProductID: "qwen3-8b", Operation: "chat", Resource: "chat/completions", RequestID: "public-request", TraceParent: "trace",
+		Payload: map[string]any{
+			"model": "qwen3-8b", "messages": []any{map[string]any{"role": "user", "content": "Hello"}}, "max_tokens": float64(256), "stream": false,
+		},
+	})
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	publicBody := recorder.Body.String()
+	for _, privateValue := range []string{"HuggingFace", "huggingface", "Qwen/", "together", "private-router", "private-completion"} {
+		if strings.Contains(publicBody, privateValue) {
+			t.Fatalf("private supplier value %q escaped in %s", privateValue, publicBody)
+		}
+	}
+	if !strings.Contains(publicBody, `"id":"public-request"`) || !strings.Contains(publicBody, `"model":"qwen3-8b"`) || !strings.Contains(publicBody, `"content":"hello"`) {
+		t.Fatalf("public response=%s", publicBody)
 	}
 }
 

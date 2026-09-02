@@ -204,6 +204,42 @@ func TestPublisherRequiresAndVerifiesRunPodTargetBinding(t *testing.T) {
 	}
 }
 
+func TestPublisherKeepsRoutedInferenceDormantWithoutImmutableTargetBinding(t *testing.T) {
+	now := time.Date(2026, 9, 2, 10, 0, 0, 0, time.UTC)
+	source := sourceFixture(now, "customer")
+	candidateSource := &source.Candidates[0]
+	candidateSource.Candidate.Supplier = supplieradapter.HuggingFaceSupplier
+	candidateSource.Candidate.SupplierModelID = "Qwen/Qwen3-8B:together"
+	candidateSource.Adapter = supplieradapter.HuggingFaceRouterAdapterName
+	candidateSource.CredentialReference = "router-reference"
+	endpointReference := supplieradapter.HuggingFaceSupplier + "/" + supplieradapter.HuggingFaceRouterAdapterName
+	digest, err := modelapitarget.EndpointConfigDigest(endpointReference, supplieradapter.HuggingFaceRouterBaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver, err := NewRegistryTargetResolver(map[string]string{endpointReference: supplieradapter.HuggingFaceRouterBaseURL}, &referenceStoreFake{}, &secretValueFailIfResolved{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := NewDirectory()
+	directory.now = func() time.Time { return now }
+	publisher := &Publisher{Store: &sourceStoreFake{sources: []RouteSource{source}}, Resolver: resolver, Adapters: supplieradapter.DefaultRegistry(), Directory: directory, Now: func() time.Time { return now }}
+	if err = publisher.PublishOnce(context.Background()); err == nil {
+		t.Fatal("routed inference route without an immutable target binding was published")
+	}
+	candidateSource.Candidate.TargetBindingID = "binding-hf-1"
+	candidateSource.Candidate.TargetBindingDigest = "sha256:" + strings.Repeat("a", 64)
+	candidateSource.EndpointReference = endpointReference
+	candidateSource.EndpointConfigDigest = digest
+	if err = publisher.PublishOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := directory.Acquire("customer", "glm-5.3")
+	if err != nil || lease.Candidates[0].Endpoint != supplieradapter.HuggingFaceRouterBaseURL || lease.Candidates[0].TargetBindingID != "binding-hf-1" {
+		t.Fatalf("bound routed inference route=%#v err=%v", lease, err)
+	}
+}
+
 func TestPublisherRetainsPreviousGenerationOnSourceOrSecretFailure(t *testing.T) {
 	now := time.Date(2026, 9, 2, 10, 0, 0, 0, time.UTC)
 	directory := NewDirectory()
