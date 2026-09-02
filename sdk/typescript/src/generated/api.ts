@@ -668,9 +668,9 @@ export class ControlApi {
     return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
   }
 
-  createManagedCheckoutSession(body: JsonValue): Promise<Record<string, JsonValue>> {
+  createManagedCheckoutSession(body: JsonValue, idempotencyKey: string): Promise<Record<string, JsonValue>> {
     const path = '/billing/checkout-sessions';
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    return this.transport.request('POST', path, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
   }
 
   processStripeBillingWebhook(body: JsonValue): Promise<Record<string, JsonValue>> {

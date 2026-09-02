@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/managedbilling"
 )
 
 func TestManagedPaymentWebhookIsAtomicAndSessionIdempotent(t *testing.T) {
@@ -19,11 +20,12 @@ func TestManagedPaymentWebhookIsAtomicAndSessionIdempotent(t *testing.T) {
 	if err := s.CreateTenant(ctx, tenant, "Managed Payment"); err != nil {
 		t.Fatal(err)
 	}
+	fundingIntentID, checkoutSessionID := completeFundingIntentForTest(t, s, tenant, suffix, 50_000_000)
 	ignored, err := s.ProcessManagedPaymentEvent(ctx, domain.ManagedPaymentEvent{Provider: "stripe", EventID: "evt-unpaid-" + suffix, EventType: "checkout.session.completed", PayloadDigest: strings.Repeat("a", 64), Apply: false, IgnoreReason: "payment is not paid", MetadataJSON: `{}`})
 	if err != nil || ignored.Status != "ignored" || ignored.CreditApplied {
 		t.Fatalf("ignored=%+v err=%v", ignored, err)
 	}
-	payment := domain.ManagedPaymentEvent{Provider: "stripe", EventID: "evt-paid-" + suffix, EventType: "checkout.session.async_payment_succeeded", PayloadDigest: strings.Repeat("b", 64), TenantID: tenant, SessionID: "cs-" + suffix, PaymentIntentID: "pi-" + suffix, AmountMicrousd: 50_000_000, Currency: "USD", Operation: "credit", Apply: true, MetadataJSON: `{"livemode":false}`}
+	payment := domain.ManagedPaymentEvent{Provider: "stripe", EventID: "evt-paid-" + suffix, EventType: "checkout.session.async_payment_succeeded", PayloadDigest: strings.Repeat("b", 64), TenantID: tenant, FundingIntentID: fundingIntentID, SessionID: checkoutSessionID, PaymentIntentID: "pi-" + suffix, AmountMicrousd: 50_000_000, Currency: "USD", Operation: "credit", Apply: true, MetadataJSON: `{"livemode":false}`}
 	first, err := s.ProcessManagedPaymentEvent(ctx, payment)
 	if err != nil || first.Status != "applied" || !first.CreditApplied || first.Wallet == nil || first.Wallet.BalanceMicrousd != 50_000_000 || first.LedgerEntry == nil {
 		t.Fatalf("first=%+v err=%v", first, err)
@@ -60,7 +62,8 @@ func TestManagedPaymentRefundPreservesReservationsAndCreatesDebt(t *testing.T) {
 	if err := s.CreateTenant(ctx, tenant, "Managed Refund"); err != nil {
 		t.Fatal(err)
 	}
-	payment := domain.ManagedPaymentEvent{Provider: "stripe", EventID: "evt-credit-" + suffix, EventType: "checkout.session.completed", PayloadDigest: strings.Repeat("a", 64), TenantID: tenant, SessionID: "cs-" + suffix, PaymentIntentID: "pi-" + suffix, AmountMicrousd: 50_000_000, Currency: "USD", Operation: "credit", Apply: true, MetadataJSON: `{}`}
+	fundingIntentID, checkoutSessionID := completeFundingIntentForTest(t, s, tenant, suffix, 50_000_000)
+	payment := domain.ManagedPaymentEvent{Provider: "stripe", EventID: "evt-credit-" + suffix, EventType: "checkout.session.completed", PayloadDigest: strings.Repeat("a", 64), TenantID: tenant, FundingIntentID: fundingIntentID, SessionID: checkoutSessionID, PaymentIntentID: "pi-" + suffix, AmountMicrousd: 50_000_000, Currency: "USD", Operation: "credit", Apply: true, MetadataJSON: `{}`}
 	if result, err := s.ProcessManagedPaymentEvent(ctx, payment); err != nil || !result.CreditApplied {
 		t.Fatalf("credit=%+v err=%v", result, err)
 	}
@@ -133,6 +136,23 @@ func TestManagedPaymentLockIDIsStableAndSessionScoped(t *testing.T) {
 	if first == managedPaymentLockID("stripe", "cs_test_2") || first == managedPaymentLockID("other", "cs_test_1") {
 		t.Fatal("payment lock identity is not provider/session scoped")
 	}
+}
+
+func completeFundingIntentForTest(t *testing.T, s *Store, tenant, suffix string, amountMicrousd int64) (string, string) {
+	t.Helper()
+	key := "checkout-" + suffix
+	id := managedbilling.FundingIntentID(tenant, key)
+	requested := domain.ManagedFundingIntent{ID: id, TenantID: tenant, Provider: "stripe", IdempotencyKey: key, AmountMicrousd: amountMicrousd, Currency: "USD"}
+	_, lease, err := s.PrepareManagedFundingIntent(context.Background(), tenant, requested, time.Minute)
+	if err != nil || lease == "" {
+		t.Fatalf("prepare funding intent lease=%q err=%v", lease, err)
+	}
+	sessionID := "cs-" + suffix
+	session := domain.ManagedCheckoutSession{FundingIntentID: id, Provider: "stripe", ProviderID: sessionID, URL: "https://checkout.stripe.test/" + sessionID, AmountMicrousd: amountMicrousd, Currency: "USD", ExpiresAt: time.Now().UTC().Add(time.Hour)}
+	if _, err = s.CompleteManagedFundingIntent(context.Background(), tenant, id, lease, session); err != nil {
+		t.Fatalf("complete funding intent: %v", err)
+	}
+	return id, sessionID
 }
 
 func TestManagedWalletAuthorizesAndSettlesExactlyOnce(t *testing.T) {

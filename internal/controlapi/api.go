@@ -167,6 +167,9 @@ type managedBillingStore interface {
 	SettleManagedUsage(context.Context, string, string, domain.ManagedUsageSettlement) (domain.ManagedUsageReservation, error)
 	ReleaseManagedUsage(context.Context, string, string, string) error
 	ProcessManagedPaymentEvent(context.Context, domain.ManagedPaymentEvent) (domain.ManagedPaymentResult, error)
+	PrepareManagedFundingIntent(context.Context, string, domain.ManagedFundingIntent, time.Duration) (domain.ManagedFundingIntent, string, error)
+	CompleteManagedFundingIntent(context.Context, string, string, string, domain.ManagedCheckoutSession) (domain.ManagedFundingIntent, error)
+	ReleaseManagedFundingIntentLease(context.Context, string, string, string) error
 }
 type intelligenceStore interface {
 	CaptureReplayTrace(context.Context, string, string, time.Duration, int) (domain.ReplayTrace, error)
@@ -304,7 +307,7 @@ type API struct {
 		State(string) (admission.State, bool)
 	}
 	BillingCheckout interface {
-		CreateCheckoutSession(context.Context, string, int64) (domain.ManagedCheckoutSession, error)
+		CreateCheckoutSession(context.Context, string, string, int64) (domain.ManagedCheckoutSession, error)
 		ParseWebhook([]byte, string) (domain.ManagedPaymentEvent, error)
 	}
 	ModelAPICatalog  modelapicatalog.Catalog

@@ -88,8 +88,8 @@ func (s *Store) ProcessManagedPaymentEvent(ctx context.Context, payment domain.M
 	if payment.Operation == "" && payment.SessionID != "" {
 		payment.Operation = "credit"
 	}
-	if payment.Apply && payment.Operation == "credit" && (payment.TenantID == "" || payment.SessionID == "" || payment.PaymentIntentID == "" || payment.AmountMicrousd <= 0 || payment.Currency != "USD") {
-		return result, errors.New("applied credit requires tenant, session, payment intent, positive USD amount, and currency")
+	if payment.Apply && payment.Operation == "credit" && (payment.TenantID == "" || payment.FundingIntentID == "" || payment.SessionID == "" || payment.PaymentIntentID == "" || payment.AmountMicrousd <= 0 || payment.Currency != "USD") {
+		return result, errors.New("applied credit requires tenant, funding intent, session, payment intent, positive USD amount, and currency")
 	}
 	if payment.Apply && payment.Operation == "refund" && (payment.PaymentIntentID == "" || payment.RefundedMicrousd <= 0 || payment.Currency != "USD") {
 		return result, errors.New("applied refund requires payment intent, positive cumulative refunded USD amount, and currency")
@@ -136,11 +136,18 @@ func (s *Store) ProcessManagedPaymentEvent(ctx context.Context, payment domain.M
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(?)`, managedPaymentLockID(payment.Provider, payment.SessionID)); err != nil {
 		return result, err
 	}
-	var creditedTenant, creditedEvent, ledgerID, currency, paymentIntentID string
+	intent, _, _, err := managedFundingIntentByIDTx(ctx, tx, payment.TenantID, payment.FundingIntentID)
+	if err != nil {
+		return result, fmt.Errorf("validate funding intent: %w", err)
+	}
+	if intent.Status != "completed" || intent.Provider != payment.Provider || intent.CheckoutSessionID != payment.SessionID || intent.AmountMicrousd != payment.AmountMicrousd || intent.Currency != payment.Currency {
+		return result, fmt.Errorf("%w: verified payment does not match its durable funding intent", ErrConflict)
+	}
+	var creditedTenant, creditedEvent, ledgerID, currency, paymentIntentID, fundingIntentID string
 	var creditedAmount int64
-	err = tx.QueryRowContext(ctx, `SELECT tenant_id,event_id,ledger_id,currency,amount_microusd,COALESCE(payment_intent_id,'') FROM managed_payment_credits WHERE provider=? AND session_id=?`, payment.Provider, payment.SessionID).Scan(&creditedTenant, &creditedEvent, &ledgerID, &currency, &creditedAmount, &paymentIntentID)
+	err = tx.QueryRowContext(ctx, `SELECT tenant_id,event_id,ledger_id,currency,amount_microusd,COALESCE(payment_intent_id,''),COALESCE(funding_intent_id,'') FROM managed_payment_credits WHERE provider=? AND session_id=?`, payment.Provider, payment.SessionID).Scan(&creditedTenant, &creditedEvent, &ledgerID, &currency, &creditedAmount, &paymentIntentID, &fundingIntentID)
 	if err == nil {
-		if creditedTenant != payment.TenantID || currency != payment.Currency || creditedAmount != payment.AmountMicrousd || paymentIntentID != payment.PaymentIntentID {
+		if creditedTenant != payment.TenantID || currency != payment.Currency || creditedAmount != payment.AmountMicrousd || paymentIntentID != payment.PaymentIntentID || fundingIntentID != payment.FundingIntentID {
 			return result, fmt.Errorf("%w: checkout session has a different credited intent", ErrConflict)
 		}
 		if _, err = tx.ExecContext(ctx, `UPDATE managed_payment_events SET tenant_id=?,session_id=?,status='applied',error_code=NULL,processed_at=? WHERE provider=? AND event_id=?`, payment.TenantID, payment.SessionID, stamp, payment.Provider, payment.EventID); err != nil {
@@ -172,7 +179,7 @@ func (s *Store) ProcessManagedPaymentEvent(ctx context.Context, payment domain.M
 	if err = applyManagedCreditTx(ctx, tx, payment.TenantID, payment.AmountMicrousd, stamp); err != nil {
 		return result, err
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO managed_payment_credits(provider,session_id,tenant_id,event_id,ledger_id,currency,amount_microusd,payment_intent_id,created_at) VALUES(?,?,?,?,?,'USD',?,?,?)`, payment.Provider, payment.SessionID, payment.TenantID, payment.EventID, ledgerID, payment.AmountMicrousd, payment.PaymentIntentID, stamp); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO managed_payment_credits(provider,session_id,tenant_id,event_id,ledger_id,currency,amount_microusd,payment_intent_id,funding_intent_id,created_at) VALUES(?,?,?,?,?,'USD',?,?,?,?)`, payment.Provider, payment.SessionID, payment.TenantID, payment.EventID, ledgerID, payment.AmountMicrousd, payment.PaymentIntentID, payment.FundingIntentID, stamp); err != nil {
 		return result, err
 	}
 	if _, err = tx.ExecContext(ctx, `UPDATE managed_payment_events SET tenant_id=?,session_id=?,status='applied',error_code=NULL,processed_at=? WHERE provider=? AND event_id=?`, payment.TenantID, payment.SessionID, stamp, payment.Provider, payment.EventID); err != nil {

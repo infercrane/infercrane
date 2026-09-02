@@ -48,9 +48,12 @@ func NewStripe(secretKey, webhookSecret, returnURL string, priceIDs map[int64]st
 	return &Stripe{Checkout: client.V1CheckoutSessions, WebhookSecret: webhookSecret, ReturnURL: returnURL, PriceIDs: clonePriceIDs(priceIDs), ExpectedLivemode: expectedLivemode}, nil
 }
 
-func (s Stripe) CreateCheckoutSession(ctx context.Context, tenant string, amountMicrousd int64) (domain.ManagedCheckoutSession, error) {
+func (s Stripe) CreateCheckoutSession(ctx context.Context, tenant, fundingIntentID string, amountMicrousd int64) (domain.ManagedCheckoutSession, error) {
 	if strings.TrimSpace(tenant) == "" {
 		return domain.ManagedCheckoutSession{}, errors.New("tenant is required")
+	}
+	if strings.TrimSpace(fundingIntentID) == "" {
+		return domain.ManagedCheckoutSession{}, errors.New("funding intent ID is required")
 	}
 	if !ValidateCheckoutAmount(amountMicrousd) {
 		return domain.ManagedCheckoutSession{}, errors.New("amount is not an allowed prepaid top-up")
@@ -79,13 +82,19 @@ func (s Stripe) CreateCheckoutSession(ctx context.Context, tenant string, amount
 		CancelURL:          stripe.String(cancel.String()),
 		ClientReferenceID:  stripe.String(tenant),
 		PaymentMethodTypes: []*string{stripe.String("card")},
+		PaymentIntentData:  &stripe.CheckoutSessionCreatePaymentIntentDataParams{},
 		LineItems: []*stripe.CheckoutSessionCreateLineItemParams{{
 			Quantity: stripe.Int64(1),
 			Price:    stripe.String(priceID),
 		}},
 	}
+	params.SetIdempotencyKey(fundingIntentID)
 	params.AddMetadata("infercrane_tenant_id", tenant)
 	params.AddMetadata("infercrane_amount_microusd", strconv.FormatInt(amountMicrousd, 10))
+	params.AddMetadata("infercrane_funding_intent_id", fundingIntentID)
+	params.PaymentIntentData.AddMetadata("infercrane_tenant_id", tenant)
+	params.PaymentIntentData.AddMetadata("infercrane_amount_microusd", strconv.FormatInt(amountMicrousd, 10))
+	params.PaymentIntentData.AddMetadata("infercrane_funding_intent_id", fundingIntentID)
 	created, err := s.Checkout.Create(ctx, params)
 	if err != nil {
 		return domain.ManagedCheckoutSession{}, fmt.Errorf("create Stripe Checkout session: %w", err)
@@ -93,7 +102,7 @@ func (s Stripe) CreateCheckoutSession(ctx context.Context, tenant string, amount
 	if created == nil || created.ID == "" || created.URL == "" || created.ExpiresAt <= 0 {
 		return domain.ManagedCheckoutSession{}, errors.New("Stripe returned an incomplete Checkout session")
 	}
-	return domain.ManagedCheckoutSession{Provider: stripeProvider, ProviderID: created.ID, URL: created.URL, AmountMicrousd: amountMicrousd, Currency: "USD", ExpiresAt: time.Unix(created.ExpiresAt, 0).UTC()}, nil
+	return domain.ManagedCheckoutSession{FundingIntentID: fundingIntentID, Provider: stripeProvider, ProviderID: created.ID, URL: created.URL, AmountMicrousd: amountMicrousd, Currency: "USD", ExpiresAt: time.Unix(created.ExpiresAt, 0).UTC()}, nil
 }
 
 func (s Stripe) ParseWebhook(payload []byte, signature string) (domain.ManagedPaymentEvent, error) {
@@ -128,6 +137,7 @@ func (s Stripe) ParseWebhook(payload []byte, signature string) (domain.ManagedPa
 		normalized.PaymentIntentID = session.PaymentIntent.ID
 	}
 	normalized.TenantID = strings.TrimSpace(session.Metadata["infercrane_tenant_id"])
+	normalized.FundingIntentID = strings.TrimSpace(session.Metadata["infercrane_funding_intent_id"])
 	normalized.Currency = strings.ToUpper(string(session.Currency))
 	if session.AmountTotal < 0 || session.AmountTotal > math.MaxInt64/MicrousdPerUSCent {
 		return domain.ManagedPaymentEvent{}, errors.New("Stripe Checkout amount is outside the supported range")
@@ -142,7 +152,7 @@ func (s Stripe) ParseWebhook(payload []byte, signature string) (domain.ManagedPa
 		return normalized, nil
 	}
 	expected, parseErr := strconv.ParseInt(expectedRaw, 10, 64)
-	if session.ID == "" || normalized.PaymentIntentID == "" || normalized.TenantID == "" || session.ClientReferenceID != normalized.TenantID || parseErr != nil || !ValidateCheckoutAmount(expected) {
+	if session.ID == "" || normalized.PaymentIntentID == "" || normalized.TenantID == "" || normalized.FundingIntentID == "" || session.ClientReferenceID != normalized.TenantID || parseErr != nil || !ValidateCheckoutAmount(expected) {
 		return domain.ManagedPaymentEvent{}, errors.New("Stripe Checkout metadata is incomplete or invalid")
 	}
 	if session.Livemode != s.ExpectedLivemode {

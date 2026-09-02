@@ -2,6 +2,8 @@ package managedbilling
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 
 	"github.com/infercrane/infercrane/internal/domain"
 )
@@ -17,8 +19,15 @@ var checkoutAmounts = [...]int64{
 }
 
 type CheckoutProvider interface {
-	CreateCheckoutSession(context.Context, string, int64) (domain.ManagedCheckoutSession, error)
+	CreateCheckoutSession(context.Context, string, string, int64) (domain.ManagedCheckoutSession, error)
 	ParseWebhook([]byte, string) (domain.ManagedPaymentEvent, error)
+}
+
+// FundingIntentID is stable for one tenant and caller-supplied idempotency
+// key. Reusing the key with different parameters is rejected by the store.
+func FundingIntentID(tenant, idempotencyKey string) string {
+	digest := sha256.Sum256([]byte(tenant + "\x00" + idempotencyKey))
+	return "funding_" + hex.EncodeToString(digest[:16])
 }
 
 func CheckoutAmounts() []int64 {

@@ -543,9 +543,9 @@ class ControlAPI:
         path = "/billing/ledger"
         return cast(dict[str, Any], self._transport.request("GET", path))
 
-    def create_managed_checkout_session(self, *, body: dict[str, Any]) -> dict[str, Any]:
+    def create_managed_checkout_session(self, *, body: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
         path = "/billing/checkout-sessions"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body, idempotency_key=idempotency_key))
 
     def process_stripe_billing_webhook(self, *, body: dict[str, Any]) -> dict[str, Any]:
         path = "/billing/webhooks/stripe"

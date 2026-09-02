@@ -22,6 +22,7 @@ import (
 	"github.com/infercrane/infercrane/internal/hfcatalog"
 	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/intentplan"
+	"github.com/infercrane/infercrane/internal/managedbilling"
 	"github.com/infercrane/infercrane/internal/modelapicatalog"
 	"github.com/infercrane/infercrane/internal/optimizationcampaign"
 	"github.com/infercrane/infercrane/internal/optimizedartifact"
@@ -101,6 +102,8 @@ type fakeManagedBillingStore struct {
 	releaseReason      string
 	payment            domain.ManagedPaymentEvent
 	paymentResult      domain.ManagedPaymentResult
+	fundingIntent      domain.ManagedFundingIntent
+	fundingLease       string
 }
 
 func (f *fakeManagedBillingStore) ManagedWallet(context.Context, string) (domain.ManagedWallet, error) {
@@ -135,16 +138,64 @@ func (f *fakeManagedBillingStore) ProcessManagedPaymentEvent(_ context.Context, 
 	return f.paymentResult, f.err
 }
 
+func (f *fakeManagedBillingStore) PrepareManagedFundingIntent(_ context.Context, _ string, requested domain.ManagedFundingIntent, _ time.Duration) (domain.ManagedFundingIntent, string, error) {
+	if f.err != nil {
+		return domain.ManagedFundingIntent{}, "", f.err
+	}
+	if f.fundingIntent.ID == "" {
+		requested.Status = "pending"
+		f.fundingIntent, f.fundingLease = requested, "lease-test"
+		return f.fundingIntent, f.fundingLease, nil
+	}
+	if f.fundingIntent.ID != requested.ID || f.fundingIntent.AmountMicrousd != requested.AmountMicrousd || f.fundingIntent.Currency != requested.Currency {
+		return domain.ManagedFundingIntent{}, "", domain.ErrConflict
+	}
+	if f.fundingIntent.Status == "completed" {
+		return f.fundingIntent, "", nil
+	}
+	if f.fundingLease == "" {
+		f.fundingLease = "lease-test-retry"
+		return f.fundingIntent, f.fundingLease, nil
+	}
+	return f.fundingIntent, "", nil
+}
+
+func (f *fakeManagedBillingStore) CompleteManagedFundingIntent(_ context.Context, _ string, id, lease string, session domain.ManagedCheckoutSession) (domain.ManagedFundingIntent, error) {
+	if f.err != nil {
+		return domain.ManagedFundingIntent{}, f.err
+	}
+	if f.fundingIntent.ID != id || f.fundingLease != lease {
+		return domain.ManagedFundingIntent{}, domain.ErrConflict
+	}
+	f.fundingIntent.Status = "completed"
+	f.fundingIntent.CheckoutSessionID = session.ProviderID
+	f.fundingIntent.CheckoutURL = session.URL
+	f.fundingIntent.CheckoutExpiresAt = session.ExpiresAt
+	f.fundingLease = ""
+	return f.fundingIntent, nil
+}
+
+func (f *fakeManagedBillingStore) ReleaseManagedFundingIntentLease(_ context.Context, _, id, lease string) error {
+	if f.fundingIntent.ID == id && f.fundingLease == lease {
+		f.fundingLease = ""
+	}
+	return f.err
+}
+
 type fakeManagedCheckoutProvider struct {
 	tenant  string
+	intent  string
 	amount  int64
+	calls   int
 	session domain.ManagedCheckoutSession
 	payment domain.ManagedPaymentEvent
 	err     error
 }
 
-func (f *fakeManagedCheckoutProvider) CreateCheckoutSession(_ context.Context, tenant string, amount int64) (domain.ManagedCheckoutSession, error) {
-	f.tenant, f.amount = tenant, amount
+func (f *fakeManagedCheckoutProvider) CreateCheckoutSession(_ context.Context, tenant, intent string, amount int64) (domain.ManagedCheckoutSession, error) {
+	f.tenant, f.intent, f.amount = tenant, intent, amount
+	f.calls++
+	f.session.FundingIntentID = intent
 	return f.session, f.err
 }
 
@@ -2106,6 +2157,7 @@ func TestManagedPrepaidCheckoutCreditsOnlyFromVerifiedWebhook(t *testing.T) {
 			URL:            "https://checkout.stripe.test/session",
 			AmountMicrousd: 25_000_000,
 			Currency:       "USD",
+			ExpiresAt:      time.Now().UTC().Add(time.Hour),
 		},
 		payment: domain.ManagedPaymentEvent{
 			Provider:       "stripe",
@@ -2133,12 +2185,43 @@ func TestManagedPrepaidCheckoutCreditsOnlyFromVerifiedWebhook(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer secret")
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "invalid_idempotency_key") {
+		t.Fatalf("checkout without idempotency response=%d %s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/billing/checkout-sessions", strings.NewReader(`{"amount_microusd":25000000}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Idempotency-Key", "checkout-attempt-1")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusCreated || checkout.tenant != "global" || checkout.amount != 25_000_000 || store.payment.EventID != "" || !strings.Contains(response.Body.String(), `"balance_changed":false`) || !strings.Contains(response.Body.String(), `"credit_authority":"verified_provider_webhook"`) {
 		t.Fatalf("checkout response=%d %s tenant=%q amount=%d payment=%#v", response.Code, response.Body.String(), checkout.tenant, checkout.amount, store.payment)
+	}
+	if checkout.intent != managedbilling.FundingIntentID("global", "checkout-attempt-1") || checkout.calls != 1 || !strings.Contains(response.Body.String(), `"funding_intent_id":"funding_`) {
+		t.Fatalf("checkout funding identity response=%s intent=%q calls=%d", response.Body.String(), checkout.intent, checkout.calls)
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/billing/checkout-sessions", strings.NewReader(`{"amount_microusd":25000000}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Idempotency-Key", "checkout-attempt-1")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || checkout.calls != 1 || !strings.Contains(response.Body.String(), `"provider_id":"cs_test_paid"`) {
+		t.Fatalf("replayed checkout response=%d %s calls=%d", response.Code, response.Body.String(), checkout.calls)
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/billing/checkout-sessions", strings.NewReader(`{"amount_microusd":50000000}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Idempotency-Key", "checkout-attempt-1")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "idempotency_conflict") {
+		t.Fatalf("conflicting checkout response=%d %s", response.Code, response.Body.String())
 	}
 
 	request = httptest.NewRequest(http.MethodPost, "/api/v1/billing/checkout-sessions", strings.NewReader(`{"amount_microusd":26000000}`))
 	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Idempotency-Key", "checkout-invalid-amount")
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "invalid_amount") {
