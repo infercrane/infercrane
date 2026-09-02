@@ -180,7 +180,7 @@ func main() {
 	validUntil := evidenceUntil
 	entitlement := modelapiproduct.ProductEntitlement{
 		SchemaVersion:       modelapiproduct.EntitlementSchemaVersion,
-		ID:                  "entitlement-infercrane-production-canary-deepseek-v4-flash",
+		ID:                  "entitlement-" + customerWorkspaceID + "-" + productID,
 		CustomerWorkspaceID: customerWorkspaceID,
 		ProductID:           productID,
 		OperatorWorkspaceID: operatorWorkspaceID,
