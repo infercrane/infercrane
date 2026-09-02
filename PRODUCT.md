@@ -54,7 +54,7 @@ policy, evidence, billing, and release controls.
 ## Operating Context
 
 - The initial public catalog is planned around GLM-5.2, GLM-5.3, GLM-5.3-Flash,
-  Kimi-K3, Kimi-K2.6, and DeepSeek-V4-Flash-0731-Fast.
+  Kimi-K3, Kimi-K2.6, and DeepSeek-V4-Flash.
 - Customers use one InferCrane API key and OpenAI-compatible endpoint.
 - Public model identities and prices are supplier-neutral. Private supply
   offers contain upstream identity, cost, health, region, policy, and capacity.

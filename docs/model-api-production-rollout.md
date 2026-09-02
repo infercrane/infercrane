@@ -58,17 +58,48 @@ reconciliation, route publication, and operational safety are.
 
 ## Launch scope
 
-The six requested product identities stay supplier-neutral. Competitor prices
-are research inputs, not InferCrane prices.
+The six requested product identities stay supplier-neutral. Supplier list
+prices are dated procurement inputs, not InferCrane retail rates or measured
+performance claims. Prices below are USD per one million input / cached-input /
+output tokens as published on 2026-09-02; every value must be refreshed and
+bound to an immutable offer before publication.
 
-| InferCrane product | Verified potential supplier identity | Launch state |
-| --- | --- | --- |
-| `glm-5.2` | Cloudflare Workers AI `@cf/zai-org/glm-5.2` | Catalog only until contract qualification |
-| `glm-5.3` | Cloudflare Workers AI `@cf/zai-org/glm-5.3` | Catalog only until contract qualification |
-| `glm-5.3-flash` | Cloudflare Workers AI `@cf/zai-org/glm-5.3-flash` | Catalog only until contract qualification |
-| `kimi-k2.6` | Cloudflare `@cf/moonshotai/kimi-k2.6`; Kimi `kimi-k2.6` | Catalog only until one offer is qualified |
-| `kimi-k3` | Kimi `kimi-k3` | Cloudflare-hosted offer unverified |
-| `deepseek-v4-flash-0731-fast` | Cloudflare `@cf/deepseek-ai/deepseek-v4-flash-0731`; direct DeepSeek family | `-fast` remains an InferCrane alias, never a supplier ID |
+| InferCrane product | Exact potential supplier identity | Supplier-reported context and list price | Launch state |
+| --- | --- | --- | --- |
+| `glm-5.2` | Cloudflare Workers AI `@cf/zai-org/glm-5.2` | 262,144 tokens; $1.40 / $0.26 / $4.40 | Catalog only; Cloudflare commercial authorization and contract qualification required |
+| `glm-5.3` | Cloudflare Workers AI `@cf/zai-org/glm-5.3` | 1,048,576 tokens; $1.40 / $0.26 / $4.40 | Catalog only; Cloudflare commercial authorization and contract qualification required |
+| `glm-5.3-flash` | Cloudflare Workers AI `@cf/zai-org/glm-5.3-flash` | 1,048,576 tokens; $0.15 / $0.03 / $0.50 | Catalog only; Cloudflare commercial authorization and contract qualification required |
+| `kimi-k2.6` | Kimi `kimi-k2.6`; Cloudflare `@cf/moonshotai/kimi-k2.6` | 262,144 tokens; $0.95 / $0.16 / $4.00 | Catalog only; qualify one separately authorized offer, not both identities as one route |
+| `kimi-k3` | Kimi `kimi-k3` | 1,048,576 tokens; $3.00 / $0.30 / $15.00 | Catalog only; Kimi commercial authorization and contract qualification required |
+| `deepseek-v4-flash` | DeepSeek `deepseek-v4-flash` (currently reports version `DeepSeek-V4-Flash-0731`); Cloudflare `@cf/deepseek-ai/deepseek-v4-flash-0731` | 1M tokens; direct peak and Cloudflare list price $0.44 / $0.014 / $1.32; DeepSeek direct off-peak is half | First MVP candidate only after commercial authorization and exact-contract qualification |
+
+Sources: [Cloudflare Workers AI model pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/),
+[Cloudflare GLM-5.2 model limits](https://developers.cloudflare.com/workers-ai/models/glm-5.2/),
+[Cloudflare GLM-5.3 catalog](https://developers.cloudflare.com/workers-ai/models/),
+[Kimi model catalog and prices](https://platform.kimi.ai/), and
+[DeepSeek models and pricing](https://api-docs.deepseek.com/quick_start/pricing/).
+The direct DeepSeek ID is a mutable product name, so a changed reported version
+must quarantine the offer until drift policy and compatibility tests pass.
+
+The old InferCrane ID `deepseek-v4-flash-0731-fast` combined a revision with an
+invented tier suffix and must never be sent upstream. Migration 062 retains it
+only as an unavailable historical tombstone so existing foreign keys remain
+valid. New rates, offers, entitlements, examples, and usage use
+`deepseek-v4-flash`.
+
+Commercial authorization is a hard gate, not a documentation checkbox. Default
+supplier terms generally distinguish embedding a service in a customer
+application from reselling or sublicensing the supplier service itself. Before
+operating a transparent multi-tenant Model API, attach a signed order form,
+reseller agreement, or written supplier approval to the offer. In particular,
+[Cloudflare's default enterprise terms](https://www.cloudflare.com/enterpriseterms/)
+restrict resale or making the service available to third parties;
+[Kimi's platform terms](https://platform.kimi.ai/docs/agreement/modeluse) allow
+customer applications but restrict relicensing or reselling the service without
+authorization; and [DeepSeek's terms](https://cdn.deepseek.com/policies/en-US/deepseek-terms-of-use.html)
+restrict selling or sublicensing the service without authorization. Legal and
+privacy review must confirm the exact account, geography, data path, and end-user
+contract before traffic is enabled.
 
 Do not make all six callable merely to fill the shelf. Launch the first exact
 offer that passes every gate, then repeat the same qualification. A product

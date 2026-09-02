@@ -51,7 +51,7 @@ Before then it is labeled `Catalog only`, `Private preview`, or `Unavailable`.
 | GLM-5.3-Flash | Low-cost, latency-sensitive work | Catalog only until qualified |
 | Kimi-K3 | Coding and agentic workflows | Catalog only until qualified |
 | Kimi-K2.6 | Coding, agents, long context | Catalog only until qualified |
-| DeepSeek-V4-Flash-0731-Fast | High-throughput workloads | Catalog only until qualified |
+| DeepSeek-V4-Flash | High-throughput workloads | Catalog only until qualified |
 
 The prices shown in competitor screenshots are research inputs, not InferCrane
 rate cards. A public price is published only after supplier cost, resale terms,
