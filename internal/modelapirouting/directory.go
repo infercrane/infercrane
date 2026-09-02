@@ -76,6 +76,7 @@ type Candidate struct {
 	Protocol, Supplier, SupplierModelID                          string
 	Operations                                                   []string
 	Endpoint, Credential                                         string `json:"-"`
+	Adapter, CredentialReference                                 string `json:"-"`
 	Qualified, Available                                         bool
 	ValidUntil                                                   time.Time
 }

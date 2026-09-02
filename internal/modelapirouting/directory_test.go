@@ -10,14 +10,14 @@ import (
 
 func TestHostedCandidateNeverSerializesCredentialOrEndpoint(t *testing.T) {
 	body, err := json.Marshal(CandidateSource{
-		Candidate:           Candidate{ID: "candidate", Endpoint: "https://private.example", Credential: "supplier-secret"},
+		Candidate:           Candidate{ID: "candidate", Endpoint: "https://private.example", Credential: "supplier-secret", Adapter: "strict-adapter", CredentialReference: "strict-reference"},
 		Adapter:             "private-adapter",
 		CredentialReference: "private-reference",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(body), "private.example") || strings.Contains(string(body), "supplier-secret") || strings.Contains(string(body), "private-adapter") || strings.Contains(string(body), "private-reference") {
+	if strings.Contains(string(body), "private.example") || strings.Contains(string(body), "supplier-secret") || strings.Contains(string(body), "private-adapter") || strings.Contains(string(body), "private-reference") || strings.Contains(string(body), "strict-adapter") || strings.Contains(string(body), "strict-reference") {
 		t.Fatalf("private supply leaked through JSON: %s", body)
 	}
 }

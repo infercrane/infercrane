@@ -12,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/infercrane/infercrane/internal/supplieradapter"
 )
 
 type flushingRecorder struct {
@@ -32,6 +34,29 @@ type billingFake struct {
 	responseStarted int
 	settlements     []Usage
 	released        int
+}
+
+type hostedCredentialFake struct {
+	credential []byte
+	err        error
+	calls      int
+	operator   string
+	reference  string
+}
+
+func (c *hostedCredentialFake) ResolveHostedModelCredential(_ context.Context, operator, reference string) ([]byte, error) {
+	c.calls++
+	c.operator, c.reference = operator, reference
+	if c.err != nil {
+		return nil, c.err
+	}
+	return append([]byte(nil), c.credential...), nil
+}
+
+type routingRoundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f routingRoundTripperFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
 }
 
 func (b *billingFake) Reserve(_ context.Context, request ReservationRequest) (Reservation, error) {
@@ -79,6 +104,134 @@ func runtimeFixture(t *testing.T, server *httptest.Server, billing *billingFake)
 		t.Fatal(err)
 	}
 	return &Runtime{Routes: directory, Billing: billing, Client: server.Client(), now: func() time.Time { return now }}, now
+}
+
+func strictRuntimeFixture(t *testing.T, billing *billingFake, transport http.RoundTripper, credentials *hostedCredentialFake) *Runtime {
+	t.Helper()
+	now := time.Date(2026, 9, 2, 10, 0, 0, 0, time.UTC)
+	route := routeFixture(now, "customer")
+	route.Entitlement.ProductID = "deepseek-v4-flash"
+	route.Publication.ProductID = "deepseek-v4-flash"
+	route.Rate.ProductID = "deepseek-v4-flash"
+	route.Candidates[0].ProductID = "deepseek-v4-flash"
+	route.Candidates[0].Supplier = supplieradapter.DeepSeekSupplier
+	route.Candidates[0].SupplierModelID = supplieradapter.DeepSeekV4FlashModelID
+	route.Candidates[0].Endpoint = supplieradapter.DeepSeekBaseURL
+	route.Candidates[0].Credential = ""
+	route.Candidates[0].Adapter = supplieradapter.DeepSeekAdapterName
+	route.Candidates[0].CredentialReference = "deepseek-secret-reference"
+	directory := NewDirectory()
+	directory.now = func() time.Time { return now }
+	if err := directory.Publish([]PublishedRoute{route}); err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Transport: transport}
+	registry, err := supplieradapter.NewRegistry(supplieradapter.NewDeepSeekAdapter(client))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &Runtime{Routes: directory, Billing: billing, Client: client, Adapters: registry, Credentials: credentials, now: func() time.Time { return now }}
+}
+
+func strictProxyRequest(stream bool) ProxyRequest {
+	return ProxyRequest{
+		TenantID: "customer", ProductID: "deepseek-v4-flash", Operation: "chat", Resource: "chat/completions",
+		RequestID: "public-request", TraceParent: "00-12345678901234567890123456789012-1234567890123456-01",
+		Payload: map[string]any{
+			"model": "deepseek-v4-flash", "messages": []any{map[string]any{"role": "user", "content": "Hello"}},
+			"max_tokens": float64(256), "stream": stream,
+		},
+	}
+}
+
+func TestStrictRuntimeResolvesCredentialPerRequestAndRewritesBufferedResponse(t *testing.T) {
+	calls := 0
+	transport := routingRoundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		calls++
+		if request.URL.String() != supplieradapter.DeepSeekBaseURL+"/chat/completions" || request.Header.Get("Authorization") != "Bearer supplier-secret" || request.Header.Get("X-InferCrane-Attempt") != "1" {
+			t.Fatalf("strict supplier request=%s headers=%#v", request.URL, request.Header)
+		}
+		body, err := io.ReadAll(request.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(body), "deepseek-v4-flash\"") == false || strings.Contains(string(body), "supplier-secret") {
+			t.Fatalf("strict supplier body=%s", body)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}, "X-DS-Request-ID": {"private-supplier-id"}}, Body: io.NopCloser(strings.NewReader(`{
+			"id":"chatcmpl-private","model":"deepseek-v4-flash",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":19,"completion_tokens":5,"prompt_cache_hit_tokens":11}
+		}`))}, nil
+	})
+	billing := &billingFake{}
+	credentials := &hostedCredentialFake{credential: []byte("supplier-secret")}
+	runtime := strictRuntimeFixture(t, billing, transport, credentials)
+	recorder := httptest.NewRecorder()
+	runtime.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil), strictProxyRequest(false))
+	if recorder.Code != http.StatusOK || calls != 1 || credentials.calls != 1 || credentials.operator != "operator" || credentials.reference != "deepseek-secret-reference" {
+		t.Fatalf("status=%d calls=%d credentials=%#v body=%s", recorder.Code, calls, credentials, recorder.Body.String())
+	}
+	if strings.Contains(recorder.Body.String(), "private-supplier-id") || strings.Contains(recorder.Body.String(), "supplier-secret") || !strings.Contains(recorder.Body.String(), `"model":"deepseek-v4-flash"`) || !strings.Contains(recorder.Body.String(), `"cached_tokens":11`) {
+		t.Fatalf("public buffered response=%s", recorder.Body.String())
+	}
+	if billing.transmitted != 1 || billing.responseStarted != 1 || len(billing.settlements) != 1 || *billing.settlements[0].InputTokens != 19 || *billing.settlements[0].OutputTokens != 5 {
+		t.Fatalf("strict billing=%#v", billing)
+	}
+}
+
+func TestStrictRuntimeCredentialRevocationFailsBeforeTransmission(t *testing.T) {
+	calls := 0
+	transport := routingRoundTripperFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		return nil, errors.New("must not transmit")
+	})
+	billing := &billingFake{}
+	credentials := &hostedCredentialFake{err: errors.New("secret reference was deleted")}
+	runtime := strictRuntimeFixture(t, billing, transport, credentials)
+	recorder := httptest.NewRecorder()
+	runtime.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil), strictProxyRequest(false))
+	if recorder.Code != http.StatusServiceUnavailable || calls != 0 || credentials.calls != 1 || billing.transmitted != 0 || billing.released != 1 || len(billing.settlements) != 0 {
+		t.Fatalf("status=%d calls=%d credentials=%d transmitted=%d released=%d settlements=%d", recorder.Code, calls, credentials.calls, billing.transmitted, billing.released, len(billing.settlements))
+	}
+}
+
+func TestStrictRuntimeRewritesSSEAndSettlesTerminalUsageOnce(t *testing.T) {
+	calls := 0
+	transport := routingRoundTripperFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		stream := "data: {\"model\":\"deepseek-v4-flash\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"},\"finish_reason\":null}]}\n\n" +
+			"data: {\"model\":\"deepseek-v4-flash\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+			"data: {\"model\":\"deepseek-v4-flash\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":null}],\"usage\":{\"prompt_tokens\":17,\"completion_tokens\":3}}\n\n" +
+			"data: [DONE]\n\n"
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}, "X-Request-ID": {"private-id"}}, Body: io.NopCloser(strings.NewReader(stream))}, nil
+	})
+	billing := &billingFake{}
+	runtime := strictRuntimeFixture(t, billing, transport, &hostedCredentialFake{credential: []byte("supplier-secret")})
+	recorder := &flushingRecorder{ResponseRecorder: httptest.NewRecorder()}
+	runtime.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil), strictProxyRequest(true))
+	body := recorder.Body.String()
+	if recorder.Code != http.StatusOK || calls != 1 || recorder.flushes < 4 || !strings.Contains(body, `"model":"deepseek-v4-flash"`) || !strings.Contains(body, "data: [DONE]") || strings.Contains(body, "private-id") {
+		t.Fatalf("status=%d calls=%d flushes=%d body=%s", recorder.Code, calls, recorder.flushes, body)
+	}
+	if len(billing.settlements) != 1 || *billing.settlements[0].InputTokens != 17 || *billing.settlements[0].OutputTokens != 3 {
+		t.Fatalf("strict stream settlement=%#v", billing.settlements)
+	}
+}
+
+func TestStrictRuntimeRejectsUnqualifiedFieldsBeforeReservation(t *testing.T) {
+	billing := &billingFake{}
+	runtime := strictRuntimeFixture(t, billing, routingRoundTripperFunc(func(*http.Request) (*http.Response, error) {
+		t.Fatal("strict invalid request was transmitted")
+		return nil, nil
+	}), &hostedCredentialFake{credential: []byte("secret")})
+	request := strictProxyRequest(false)
+	request.Payload["tools"] = []any{}
+	recorder := httptest.NewRecorder()
+	runtime.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil), request)
+	if recorder.Code != http.StatusBadRequest || len(billing.requests) != 0 {
+		t.Fatalf("status=%d reservations=%d", recorder.Code, len(billing.requests))
+	}
 }
 
 func TestRuntimeInsufficientBalanceDoesNotSend(t *testing.T) {
