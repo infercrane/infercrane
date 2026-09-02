@@ -309,6 +309,10 @@ type API struct {
 	}
 	ModelAPICatalog  modelapicatalog.Catalog
 	ModelAPIProducts modelAPIProductStore
+	// ModelAPIOperatorTenantID is the platform-owned workspace allowed to
+	// publish shared supplier routes. Ordinary tenant administrators never
+	// inherit this authority merely by holding an admin role.
+	ModelAPIOperatorTenantID string
 	HFCatalog        *hfcatalog.Cache
 	ComputeProviders []ComputeProvider
 	GPUPrices        []GPUPriceObservation
@@ -390,6 +394,13 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/planning/intents", a.auth(authz.Read, a.planIntent))
 	mux.HandleFunc("GET /api/v1/model-api-catalog", a.auth(authz.Read, a.modelAPIModels))
 	mux.HandleFunc("GET /api/v1/model-api-catalog/{id}", a.auth(authz.Read, a.modelAPIModel))
+	mux.HandleFunc("POST /api/v1/admin/model-api/products", a.auth(authz.ManageModelAPI, a.publishModelAPIProduct))
+	mux.HandleFunc("POST /api/v1/admin/model-api/rates", a.auth(authz.ManageModelAPI, a.publishModelAPIRetailRate))
+	mux.HandleFunc("POST /api/v1/admin/model-api/offers", a.auth(authz.ManageModelAPI, a.publishModelAPISupplierOffer))
+	mux.HandleFunc("POST /api/v1/admin/model-api/qualifications", a.auth(authz.ManageModelAPI, a.publishModelAPISupplyQualification))
+	mux.HandleFunc("POST /api/v1/admin/model-api/plans", a.auth(authz.ManageModelAPI, a.compileModelAPISupplyPlan))
+	mux.HandleFunc("POST /api/v1/admin/model-api/publications", a.auth(authz.ManageModelAPI, a.publishModelAPIOperatorRoute))
+	mux.HandleFunc("POST /api/v1/admin/model-api/entitlements", a.auth(authz.ManageModelAPI, a.publishModelAPIEntitlement))
 	mux.HandleFunc("GET /api/v1/compute/providers", a.auth(authz.Read, a.computeProviders))
 	mux.HandleFunc("GET /api/v1/catalog/gpu-prices", a.auth(authz.Read, a.gpuPrices))
 	mux.HandleFunc("POST /api/v1/capacity/probes", a.auth(authz.Read, a.probeCapacity))

@@ -78,6 +78,41 @@ export class ControlApi {
     return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
   }
 
+  publishModelAPIProduct(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = '/admin/model-api/products';
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  publishModelAPIRetailRate(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = '/admin/model-api/rates';
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  publishModelAPISupplierOffer(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = '/admin/model-api/offers';
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  publishModelAPIQualification(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = '/admin/model-api/qualifications';
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  compileModelAPISupplyPlan(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = '/admin/model-api/plans';
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  publishModelAPIRoute(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = '/admin/model-api/publications';
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  publishModelAPIEntitlement(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = '/admin/model-api/entitlements';
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
   listComputeProviders(): Promise<ObjectList> {
     const path = '/compute/providers';
     return this.transport.request('GET', path) as Promise<ObjectList>;

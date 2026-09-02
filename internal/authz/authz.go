@@ -16,6 +16,7 @@ const (
 	ManageTenant   Action = "manage_tenant"
 	ManageSecrets  Action = "manage_secrets"
 	ManageExternal Action = "manage_external"
+	ManageModelAPI Action = "manage_model_api"
 )
 
 func Allowed(role Role, action Action) bool {
@@ -62,7 +63,7 @@ func DefaultScopeNames(role Role) []string {
 func ValidateScopes(role Role, scopes []Action) error {
 	seen := map[Action]struct{}{}
 	for _, scope := range scopes {
-		if scope != Read && scope != Deploy && scope != Delete && scope != ManageTenant && scope != ManageSecrets && scope != ManageExternal {
+		if scope != Read && scope != Deploy && scope != Delete && scope != ManageTenant && scope != ManageSecrets && scope != ManageExternal && scope != ManageModelAPI {
 			return fmt.Errorf("unknown scope %q", scope)
 		}
 		if !Allowed(role, scope) {
@@ -77,7 +78,7 @@ func ValidateScopes(role Role, scopes []Action) error {
 }
 
 func DefaultScopes(role Role) []Action {
-	candidates := []Action{Read, Deploy, Delete, ManageTenant, ManageSecrets, ManageExternal}
+	candidates := []Action{Read, Deploy, Delete, ManageTenant, ManageSecrets, ManageExternal, ManageModelAPI}
 	out := make([]Action, 0, len(candidates))
 	for _, candidate := range candidates {
 		if Allowed(role, candidate) {
