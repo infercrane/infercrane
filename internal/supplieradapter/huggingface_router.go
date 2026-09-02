@@ -23,6 +23,7 @@ const (
 	HuggingFaceRouterMaxRequestBytes     = 4 << 20
 	HuggingFaceRouterMaxResponseBytes    = 8 << 20
 	HuggingFaceRouterMaxStreamEventBytes = 1 << 20
+	huggingFaceProbeMaxOutputTokens      = 4
 )
 
 var (
@@ -38,8 +39,10 @@ type huggingFaceExpectedModel struct {
 type huggingFaceExpectedModelKey struct{}
 
 // HuggingFaceRouterAdapter implements a narrow OpenAI-compatible contract.
-// Every executable target must pin <repository>:<provider>; automatic routing
-// policies are useful for discovery but are deliberately forbidden here.
+// Every executable target must bind <repository>:<provider>; automatic routing
+// policies are useful for discovery but are deliberately forbidden here. This
+// provider binding does not prove an upstream model revision, quantization, or
+// runtime. Those remain time-bounded qualification facts.
 type HuggingFaceRouterAdapter struct {
 	client *http.Client
 	now    func() time.Time
@@ -131,13 +134,15 @@ func (a *HuggingFaceRouterAdapter) DecodeResponse(_ context.Context, response *h
 		return Response{}, huggingFaceProtocolFailure("supplier response is missing", "", nil)
 	}
 	requestID := huggingFaceSupplierRequestID(response.Header)
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		if response.Body != nil {
+			defer response.Body.Close()
+			_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
+		}
+		return Response{}, normalizeHuggingFaceHTTPError(response.StatusCode, response.Header, requestID)
+	}
 	if response.Body == nil {
 		return Response{}, huggingFaceProtocolFailure("supplier response body is missing", requestID, nil)
-	}
-	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		defer response.Body.Close()
-		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
-		return Response{}, normalizeHuggingFaceHTTPError(response.StatusCode, response.Header, requestID)
 	}
 	expected, ok := expectedHuggingFaceModel(response)
 	if !ok {
@@ -192,13 +197,15 @@ func (a *HuggingFaceRouterAdapter) OpenStream(_ context.Context, response *http.
 		return nil, huggingFaceProtocolFailure("supplier response is missing", "", nil)
 	}
 	requestID := huggingFaceSupplierRequestID(response.Header)
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		if response.Body != nil {
+			defer response.Body.Close()
+			_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
+		}
+		return nil, normalizeHuggingFaceHTTPError(response.StatusCode, response.Header, requestID)
+	}
 	if response.Body == nil {
 		return nil, huggingFaceProtocolFailure("supplier response body is missing", requestID, nil)
-	}
-	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		defer response.Body.Close()
-		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
-		return nil, normalizeHuggingFaceHTTPError(response.StatusCode, response.Header, requestID)
 	}
 	expected, ok := expectedHuggingFaceModel(response)
 	if !ok {
@@ -214,84 +221,48 @@ func (a *HuggingFaceRouterAdapter) OpenStream(_ context.Context, response *http.
 }
 
 func (a *HuggingFaceRouterAdapter) Probe(ctx context.Context, target Target, credentials CredentialResolver) (Observation, error) {
-	repository, provider, err := validateHuggingFaceTarget(target)
-	if err != nil {
+	// Probe is a bounded, billable qualification action, not a readiness check.
+	// Callers must schedule it explicitly and reconcile its operator-owned cost.
+	if _, _, err := validateHuggingFaceTarget(target); err != nil {
 		return Observation{}, invalidRequest(err.Error())
 	}
-	if credentials == nil {
-		return Observation{}, internalBeforeTransmission("supplier credential resolver is unavailable", nil)
+	observedAt := time.Now().UTC()
+	if a.now != nil {
+		observedAt = a.now().UTC()
 	}
-	credential, err := credentials.Resolve(ctx, target.CredentialReference)
+	temperature := 0.0
+	maximum := huggingFaceProbeMaxOutputTokens
+	request, err := a.BuildRequest(ctx, target, Request{
+		ID:        fmt.Sprintf("infercrane-hf-probe-%d", observedAt.UnixNano()),
+		Operation: OperationChatCompletions,
+		ModelID:   target.SupplierModelID,
+		Messages: []Message{{
+			Role:    "user",
+			Content: []ContentPart{{Type: "text", Text: "Reply with OK."}},
+		}},
+		MaxOutputTokens: &maximum,
+		Temperature:     &temperature,
+		Stream:          false,
+	}, credentials)
 	if err != nil {
-		return Observation{}, internalBeforeTransmission("supplier credential could not be resolved", err)
+		return Observation{}, err
 	}
-	defer clear(credential)
-	credentialValue := bytes.TrimSpace(credential)
-	if len(credentialValue) == 0 || !safeIdentifier(string(credentialValue)) {
-		return Observation{}, internalBeforeTransmission("supplier credential is invalid", nil)
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, HuggingFaceRouterBaseURL+"/models", nil)
-	if err != nil {
-		return Observation{}, internalBeforeTransmission("supplier inventory probe could not be constructed", err)
-	}
-	request.Header.Set("Authorization", "Bearer "+string(credentialValue))
-	request.Header.Set("Accept", "application/json")
 	response, err := a.client.Do(request)
 	if err != nil {
-		return Observation{}, &Error{Code: ErrorTransport, Message: "supplier inventory probe failed", Retry: RetrySameOffer, Billing: BillingNoChargeConfirmed, Cause: err}
+		// A transport failure cannot prove whether the router accepted and billed
+		// the request. Keep it ambiguous so callers cannot retry automatically.
+		return Observation{}, &Error{Code: ErrorTransport, Message: "supplier completion probe failed", Retry: RetryOtherOffer, Billing: BillingAmbiguous, Cause: err}
 	}
-	if response == nil || response.Body == nil {
-		return Observation{}, huggingFaceProtocolFailure("supplier inventory response body is missing", "", nil)
+	if _, err = a.DecodeResponse(ctx, response); err != nil {
+		return Observation{}, err
 	}
-	requestID := huggingFaceSupplierRequestID(response.Header)
-	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		defer response.Body.Close()
-		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
-		normalized := normalizeHuggingFaceHTTPError(response.StatusCode, response.Header, requestID)
-		normalized.Billing = BillingNoChargeConfirmed
-		return Observation{}, normalized
-	}
-	defer response.Body.Close()
-	body, err := readBounded(response.Body, 2<<20)
-	if err != nil {
-		return Observation{}, huggingFaceProtocolFailure("supplier inventory response exceeded the safe byte limit", requestID, err)
-	}
-	var inventory struct {
-		Data []struct {
-			ID        string `json:"id"`
-			Providers []struct {
-				Provider string `json:"provider"`
-				Status   string `json:"status"`
-			} `json:"providers"`
-		} `json:"data"`
-	}
-	if err = json.Unmarshal(body, &inventory); err != nil {
-		return Observation{}, huggingFaceProtocolFailure("supplier inventory response was malformed", requestID, err)
-	}
-	matchCount := 0
-	for _, item := range inventory.Data {
-		if item.ID != repository {
-			continue
-		}
-		for _, candidate := range item.Providers {
-			if candidate.Provider == provider && candidate.Status == "live" {
-				matchCount++
-			}
-		}
-	}
-	availability := "unavailable"
-	items := []InventoryItem(nil)
-	if matchCount == 1 {
-		availability = "available"
-		items = []InventoryItem{{SupplierModelID: target.SupplierModelID, Region: target.Region, Available: true}}
-	}
-	now := time.Now
-	if a.now != nil {
-		now = a.now
-	}
+	// The public /v1/models inventory is discovery metadata and does not
+	// authenticate a token. A successful, decoded completion proves the exact
+	// credential + provider-bound request contract used for publication.
 	return Observation{
-		Access: "authorized", Availability: availability, Health: "healthy", ObservedAt: now().UTC(),
-		RateLimit: huggingFaceRateLimit(response.Header, now()), Inventory: items,
+		Access: "authorized", Availability: "available", Health: "healthy", ObservedAt: observedAt,
+		RateLimit: huggingFaceRateLimit(response.Header, observedAt),
+		Inventory: []InventoryItem{{SupplierModelID: target.SupplierModelID, Region: target.Region, Available: true}},
 	}, nil
 }
 
@@ -432,6 +403,14 @@ func huggingFaceSupplierRequestID(header http.Header) string {
 
 func normalizeHuggingFaceHTTPError(status int, header http.Header, requestID string) *Error {
 	code, message, retry := ErrorInternal, "supplier request failed", RetryNever
+	billing := BillingAmbiguous
+	// Hugging Face's provider contract bills completed requests only when the
+	// provider response status is 2xx or 3xx. A received 4xx/5xx therefore
+	// proves no charge at this router boundary; transport failures remain
+	// ambiguous because no status was received.
+	if status >= http.StatusBadRequest && status <= 599 {
+		billing = BillingNoChargeConfirmed
+	}
 	switch status {
 	case http.StatusBadRequest, http.StatusUnprocessableEntity:
 		code, message = ErrorInvalidRequest, "supplier rejected the request"
@@ -452,7 +431,7 @@ func normalizeHuggingFaceHTTPError(status int, header http.Header, requestID str
 	}
 	return &Error{
 		Code: code, Message: message, HTTPStatus: status, SupplierRequestID: requestID,
-		Retry: retry, RetryAfter: parseRetryAfter(header.Get("Retry-After"), time.Now()), Billing: BillingAmbiguous,
+		Retry: retry, RetryAfter: parseRetryAfter(header.Get("Retry-After"), time.Now()), Billing: billing,
 	}
 }
 

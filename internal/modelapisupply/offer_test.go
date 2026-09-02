@@ -111,6 +111,11 @@ func TestOfferValidationRejectsRawOrIncompleteCommercialData(t *testing.T) {
 	if err := offer.Validate(); err == nil {
 		t.Fatal("commercial authorization without terms reference was accepted")
 	}
+	offer = completeOffer(at)
+	offer.Qualification.ValidUntil = offer.Qualification.ObservedAt.Add(24*time.Hour + time.Nanosecond)
+	if err := offer.Validate(); err == nil {
+		t.Fatal("qualification evidence beyond the measured maximum validity was accepted")
+	}
 }
 
 func completeOffer(at time.Time) Offer {

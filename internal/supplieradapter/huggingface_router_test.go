@@ -176,7 +176,7 @@ func TestHuggingFaceRouterDecodeRequiresExactIdentityAndCompleteUsage(t *testing
 	}
 }
 
-func TestHuggingFaceRouterHTTPErrorIsSanitizedAndAmbiguous(t *testing.T) {
+func TestHuggingFaceRouterReceivedErrorIsNoChargeAndRetryable(t *testing.T) {
 	response := &http.Response{
 		StatusCode: http.StatusTooManyRequests,
 		Header:     http.Header{"Retry-After": {"7"}, "Inference-Id": {"private-request"}},
@@ -187,7 +187,7 @@ func TestHuggingFaceRouterHTTPErrorIsSanitizedAndAmbiguous(t *testing.T) {
 	if !errors.As(err, &normalized) {
 		t.Fatalf("error=%#v", err)
 	}
-	if normalized.Code != ErrorRateLimited || normalized.Retry != RetryOtherOffer || normalized.RetryAfter != 7*time.Second || normalized.SupplierRequestID != "private-request" || normalized.Billing != BillingAmbiguous || normalized.SafeToRetry() {
+	if normalized.Code != ErrorRateLimited || normalized.Retry != RetryOtherOffer || normalized.RetryAfter != 7*time.Second || normalized.SupplierRequestID != "private-request" || normalized.Billing != BillingNoChargeConfirmed || !normalized.SafeToRetry() {
 		t.Fatalf("normalized error=%+v", normalized)
 	}
 	if strings.Contains(normalized.Error(), "raw supplier") {
@@ -195,11 +195,11 @@ func TestHuggingFaceRouterHTTPErrorIsSanitizedAndAmbiguous(t *testing.T) {
 	}
 }
 
-func TestHuggingFaceRouterStreamRequiresFinishUsageAndDone(t *testing.T) {
-	body := "data: {\"id\":\"chatcmpl-1\",\"model\":\"Qwen/Qwen3-8B\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hel\"},\"finish_reason\":null}]}\n\n" +
-		"data: {\"id\":\"chatcmpl-1\",\"model\":\"Qwen/Qwen3-8B\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo\"},\"finish_reason\":\"stop\"}]}\n\n" +
-		"data: {\"id\":\"chatcmpl-1\",\"model\":\"Qwen/Qwen3-8B\",\"choices\":[],\"usage\":{\"prompt_tokens\":8,\"completion_tokens\":2,\"prompt_tokens_details\":{\"cached_tokens\":3}}}\n\n" +
-		"data: [DONE]\n\n"
+func TestHuggingFaceRouterStreamRequiresFinishUsageAndDoneWithCRLF(t *testing.T) {
+	body := "data: {\"id\":\"chatcmpl-1\",\"model\":\"Qwen/Qwen3-8B\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hel\"},\"finish_reason\":null}]}\r\n\r\n" +
+		"data: {\"id\":\"chatcmpl-1\",\"model\":\"Qwen/Qwen3-8B\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo\"},\"finish_reason\":\"stop\"}]}\r\n\r\n" +
+		"data: {\"id\":\"chatcmpl-1\",\"model\":\"Qwen/Qwen3-8B\",\"choices\":[],\"usage\":{\"prompt_tokens\":8,\"completion_tokens\":2,\"prompt_tokens_details\":{\"cached_tokens\":3}}}\r\n\r\n" +
+		"data: [DONE]\r\n\r\n"
 	stream, err := NewHuggingFaceRouterAdapter(nil).OpenStream(context.Background(), &http.Response{
 		StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream; charset=utf-8"}, "Inference-Id": {"stream-1"}},
 		Request: huggingFaceResponseRequest("Qwen/Qwen3-8B:together"), Body: io.NopCloser(strings.NewReader(body)),
@@ -253,17 +253,29 @@ func TestHuggingFaceRouterStreamFailsClosedWhenIncomplete(t *testing.T) {
 	}
 }
 
-func TestHuggingFaceRouterProbeRequiresPinnedProviderToBeLive(t *testing.T) {
+func TestHuggingFaceRouterProbeProvesCredentialAndProviderBoundCompletion(t *testing.T) {
 	client := &http.Client{Transport: huggingFaceRoundTripperFunc(func(request *http.Request) (*http.Response, error) {
-		if request.URL.String() != HuggingFaceRouterBaseURL+"/models" || request.Header.Get("Authorization") != "Bearer hf_secret" {
+		if request.Method != http.MethodPost || request.URL.String() != HuggingFaceRouterBaseURL+"/chat/completions" || request.Header.Get("Authorization") != "Bearer hf_secret" || request.Header.Get("Accept") != "application/json" {
 			t.Fatalf("probe request=%s headers=%#v", request.URL, request.Header)
+		}
+		body, err := io.ReadAll(request.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var payload map[string]any
+		if err = json.Unmarshal(body, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload["model"] != "Qwen/Qwen3-8B:together" || payload["stream"] != false || payload["max_tokens"] != float64(huggingFaceProbeMaxOutputTokens) || payload["stream_options"] != nil {
+			t.Fatalf("probe payload=%s", body)
 		}
 		header := make(http.Header)
 		header.Set("X-RateLimit-Remaining-Requests", "17")
 		header.Set("Inference-Id", "probe-1")
+		header.Set("Content-Type", "application/json")
 		return &http.Response{
-			StatusCode: http.StatusOK, Header: header,
-			Body: io.NopCloser(strings.NewReader(`{"object":"list","data":[{"id":"Qwen/Qwen3-8B","providers":[{"provider":"together","status":"live"},{"provider":"other","status":"live"}]}]}`)),
+			StatusCode: http.StatusOK, Header: header, Request: request,
+			Body: io.NopCloser(strings.NewReader(`{"id":"probe-response","model":"Qwen/Qwen3-8B","choices":[{"index":0,"message":{"role":"assistant","content":"OK"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":1}}`)),
 		}, nil
 	})}
 	adapter := NewHuggingFaceRouterAdapter(client)
@@ -275,5 +287,36 @@ func TestHuggingFaceRouterProbeRequiresPinnedProviderToBeLive(t *testing.T) {
 	}
 	if observation.Access != "authorized" || observation.Availability != "available" || observation.Health != "healthy" || !observation.ObservedAt.Equal(observedAt) || len(observation.Inventory) != 1 || observation.Inventory[0].SupplierModelID != "Qwen/Qwen3-8B:together" || observation.RateLimit.RequestsRemaining == nil || *observation.RateLimit.RequestsRemaining != 17 {
 		t.Fatalf("observation=%+v", observation)
+	}
+}
+
+func TestHuggingFaceRouterProbeRejectsInvalidCredentialViaCompletion(t *testing.T) {
+	client := &http.Client{Transport: huggingFaceRoundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusUnauthorized,
+			Header:     http.Header{"Content-Type": {"application/json"}},
+			Request:    request,
+			Body:       io.NopCloser(strings.NewReader(`{"error":"invalid token"}`)),
+		}, nil
+	})}
+	_, err := NewHuggingFaceRouterAdapter(client).Probe(context.Background(), huggingFaceTarget(), huggingFaceCredentialResolverFunc(func(context.Context, string) ([]byte, error) {
+		return []byte("hf_invalid"), nil
+	}))
+	var normalized *Error
+	if !errors.As(err, &normalized) || normalized.Code != ErrorAuthentication || normalized.Billing != BillingNoChargeConfirmed || normalized.SafeToRetry() {
+		t.Fatalf("error=%#v", err)
+	}
+}
+
+func TestHuggingFaceRouterProbeTransportFailureKeepsBillingAmbiguous(t *testing.T) {
+	client := &http.Client{Transport: huggingFaceRoundTripperFunc(func(*http.Request) (*http.Response, error) {
+		return nil, context.DeadlineExceeded
+	})}
+	_, err := NewHuggingFaceRouterAdapter(client).Probe(context.Background(), huggingFaceTarget(), huggingFaceCredentialResolverFunc(func(context.Context, string) ([]byte, error) {
+		return []byte("hf_secret"), nil
+	}))
+	var normalized *Error
+	if !errors.As(err, &normalized) || normalized.Code != ErrorTransport || normalized.Billing != BillingAmbiguous || normalized.SafeToRetry() {
+		t.Fatalf("error=%#v", err)
 	}
 }

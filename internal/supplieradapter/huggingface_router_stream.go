@@ -47,7 +47,9 @@ func (s *huggingFaceRouterStream) Next(ctx context.Context) (StreamEvent, error)
 			s.done = true
 			return StreamEvent{}, huggingFaceStreamFailure("supplier stream ended before its terminal marker", s.requestID, io.ErrUnexpectedEOF)
 		}
-		line := s.scanner.Text()
+		// bufio.Scanner removes '\n' but preserves the '\r' in valid CRLF SSE
+		// framing. Normalize only that framing byte; payload data remains exact.
+		line := strings.TrimSuffix(s.scanner.Text(), "\r")
 		if line == "" {
 			if len(s.data) == 0 {
 				continue

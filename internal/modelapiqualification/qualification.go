@@ -1,5 +1,5 @@
-// Package modelapiqualification builds deterministic qualification evidence
-// for one exact hosted Model API target.
+// Package modelapiqualification builds deterministic, time-bounded
+// qualification evidence for one provider-bound Model API target.
 package modelapiqualification
 
 import (
@@ -22,9 +22,11 @@ const (
 	nanosecondsPerSec = int64(time.Second)
 )
 
-// Target is the exact supplier tuple proven by a qualification run. TupleKey
-// is the opaque key already carried by an immutable supplier offer; the other
-// fields make the key's meaning auditable instead of relying on convention.
+// Target is the provider-bound supplier tuple observed by a qualification run.
+// TupleKey is the opaque key already carried by an immutable supplier offer;
+// the other fields make the key's meaning auditable instead of relying on
+// convention. A routed provider tuple is not proof of its private runtime or
+// model revision, so evidence is always limited to MaximumValidity.
 type Target struct {
 	TupleKey        string   `json:"tuple_key"`
 	Supplier        string   `json:"supplier"`

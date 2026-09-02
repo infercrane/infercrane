@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/modelapiproduct"
+	"github.com/infercrane/infercrane/internal/modelapiqualification"
 )
 
 const (
@@ -42,8 +43,9 @@ type CommercialAuthorization struct {
 	ValidUntil time.Time `json:"valid_until,omitempty"`
 }
 
-// QualificationEvidence is valid only for its exact immutable tuple and
-// stated protocol, region, and capabilities.
+// QualificationEvidence is valid only for its provider-bound offer tuple,
+// stated protocol, region, capabilities, and observation window. It does not
+// claim an upstream runtime or model revision that the supplier cannot prove.
 type QualificationEvidence struct {
 	ID             string    `json:"id"`
 	State          string    `json:"state"`
@@ -189,6 +191,9 @@ func validateQualification(evidence QualificationEvidence) error {
 	}
 	if evidence.State == QualificationQualified && (evidence.ObservedAt.IsZero() || evidence.ValidUntil.IsZero() || !evidence.ValidUntil.After(evidence.ObservedAt)) {
 		return errors.New("qualified evidence requires an increasing validity window")
+	}
+	if evidence.State == QualificationQualified && evidence.ValidUntil.Sub(evidence.ObservedAt) > modelapiqualification.MaximumValidity {
+		return fmt.Errorf("qualified evidence validity cannot exceed %s", modelapiqualification.MaximumValidity)
 	}
 	if !evidence.ObservedAt.IsZero() && !evidence.ValidUntil.IsZero() && !evidence.ValidUntil.After(evidence.ObservedAt) {
 		return errors.New("qualification evidence validity window must increase")
