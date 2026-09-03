@@ -22,7 +22,7 @@ func TestRunGeneratesCompleteGLMLaunchSequence(t *testing.T) {
 	err = run(config{
 		Profile: "glm-5.3", QualificationPath: qualificationPath, CredentialReference: "zai-secret-ref",
 		OperatorWorkspaceID: "operator-workspace", ServingPlanID: "serving-plan", CustomerWorkspaceID: "customer-workspace",
-		CommercialTermsRef: "contract://zai-mvp-2026-09", OutputDirectory: output,
+		CommercialTermsRef: "contract://zai-mvp-2026-09", OutputDirectory: output, ReleaseVersion: 2,
 	}, now)
 	if err != nil {
 		t.Fatal(err)
@@ -35,12 +35,20 @@ func TestRunGeneratesCompleteGLMLaunchSequence(t *testing.T) {
 		t.Fatalf("generated %d manifests, want 9", len(entries))
 	}
 	var rate struct {
-		Input  int64 `json:"input_microusd_per_million"`
-		Output int64 `json:"output_microusd_per_million"`
+		Input   int64 `json:"input_microusd_per_million"`
+		Output  int64 `json:"output_microusd_per_million"`
+		Version int   `json:"version"`
 	}
 	readJSON(t, filepath.Join(output, "02-retail-rate.json"), &rate)
-	if rate.Input != 1_400_000 || rate.Output != 4_400_000 {
+	if rate.Input != 1_400_000 || rate.Output != 4_400_000 || rate.Version != 2 {
 		t.Fatalf("unexpected launch parity rate: %+v", rate)
+	}
+	var offer struct {
+		Version int64 `json:"version"`
+	}
+	readJSON(t, filepath.Join(output, "03-supplier-offer.json"), &offer)
+	if offer.Version != 2 {
+		t.Fatalf("offer version=%d, want 2", offer.Version)
 	}
 	var binding struct {
 		Kind   string `json:"kind"`
@@ -49,6 +57,26 @@ func TestRunGeneratesCompleteGLMLaunchSequence(t *testing.T) {
 	readJSON(t, filepath.Join(output, "05-target-binding.json"), &binding)
 	if binding.Kind != "upstream" || !strings.HasPrefix(binding.Digest, "sha256:") {
 		t.Fatalf("unexpected target binding: %+v", binding)
+	}
+}
+
+func TestRunNeverOverwritesReleaseArtifacts(t *testing.T) {
+	now := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
+	p, err := launchProfile("glm-5.2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "release")
+	cfg := config{
+		Profile: p.Name, QualificationPath: writeTestQualification(t, now, p, p.DefaultEndpoint), CredentialReference: "zai-secret-ref",
+		OperatorWorkspaceID: "operator-workspace", ServingPlanID: "serving-plan", CustomerWorkspaceID: "customer-workspace",
+		CommercialTermsRef: "contract://zai-mvp-2026-09", OutputDirectory: output, ReleaseVersion: 2,
+	}
+	if err = run(cfg, now); err != nil {
+		t.Fatal(err)
+	}
+	if err = run(cfg, now); err == nil || !strings.Contains(err.Error(), "file exists") {
+		t.Fatalf("second release error=%v, want append-only refusal", err)
 	}
 }
 
@@ -66,7 +94,7 @@ func TestRunPodRequiresMeasuredEconomicsAndExactQualifiedOrigin(t *testing.T) {
 	cfg := config{
 		Profile: p.Name, QualificationPath: qualificationPath, CredentialReference: "runpod-secret-ref",
 		OperatorWorkspaceID: "operator-workspace", ServingPlanID: "serving-plan", CustomerWorkspaceID: "customer-workspace",
-		Endpoint: endpoint, CommercialTermsRef: "contract://runpod-mvp-2026-09", OutputDirectory: filepath.Join(t.TempDir(), "release"),
+		Endpoint: endpoint, CommercialTermsRef: "contract://runpod-mvp-2026-09", OutputDirectory: filepath.Join(t.TempDir(), "release"), ReleaseVersion: 2,
 	}
 	if err = run(cfg, now); err == nil || !strings.Contains(err.Error(), "measured COGS") {
 		t.Fatalf("missing measured economics error=%v", err)
@@ -83,7 +111,7 @@ func writeTestQualification(t *testing.T, now time.Time, p profile, endpoint str
 	t.Helper()
 	ttft, throughput := 100.0, 200.0
 	manifest := qualificationManifest{
-		OfferID: p.OfferID, OfferVersion: 1,
+		OfferID: p.OfferID, OfferVersion: 2,
 		Evidence: modelapisupply.QualificationEvidence{
 			ID: "qualification-" + p.ProductID, State: modelapisupply.QualificationQualified,
 			TupleKey: p.ExpectedTuple, Protocol: "openai", Region: p.Region,

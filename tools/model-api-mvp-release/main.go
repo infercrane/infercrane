@@ -52,6 +52,7 @@ type config struct {
 	CustomerWorkspaceID, OutputDirectory             string
 	Endpoint, CommercialTermsRef                     string
 	CostInput, CostOutput, RetailInput, RetailOutput int64
+	ReleaseVersion                                   int
 }
 
 func main() {
@@ -69,6 +70,7 @@ func main() {
 	flag.Int64Var(&cfg.CostOutput, "cost-output-microusd-per-million", 0, "RunPod output COGS per million tokens")
 	flag.Int64Var(&cfg.RetailInput, "retail-input-microusd-per-million", 0, "RunPod launch retail input rate")
 	flag.Int64Var(&cfg.RetailOutput, "retail-output-microusd-per-million", 0, "RunPod launch retail output rate")
+	flag.IntVar(&cfg.ReleaseVersion, "release-version", 0, "positive immutable offer and retail-rate revision")
 	flag.Parse()
 	if err := run(cfg, time.Now().UTC().Truncate(time.Microsecond)); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -81,8 +83,8 @@ func run(cfg config, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(cfg.QualificationPath) == "" || strings.TrimSpace(cfg.CredentialReference) == "" || strings.TrimSpace(cfg.OperatorWorkspaceID) == "" || strings.TrimSpace(cfg.ServingPlanID) == "" || strings.TrimSpace(cfg.CustomerWorkspaceID) == "" || strings.TrimSpace(cfg.OutputDirectory) == "" || strings.TrimSpace(cfg.CommercialTermsRef) == "" {
-		return errors.New("qualification, credential reference, operator workspace, serving plan, customer workspace, commercial terms reference, and output directory are required")
+	if strings.TrimSpace(cfg.QualificationPath) == "" || strings.TrimSpace(cfg.CredentialReference) == "" || strings.TrimSpace(cfg.OperatorWorkspaceID) == "" || strings.TrimSpace(cfg.ServingPlanID) == "" || strings.TrimSpace(cfg.CustomerWorkspaceID) == "" || strings.TrimSpace(cfg.OutputDirectory) == "" || strings.TrimSpace(cfg.CommercialTermsRef) == "" || cfg.ReleaseVersion <= 0 {
+		return errors.New("qualification, credential reference, operator workspace, serving plan, customer workspace, commercial terms reference, output directory, and a positive release version are required")
 	}
 	endpoint := p.DefaultEndpoint
 	if cfg.Endpoint != "" {
@@ -106,7 +108,7 @@ func run(cfg config, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	if err = validateQualification(now, p, endpoint, qualification); err != nil {
+	if err = validateQualification(now, int64(cfg.ReleaseVersion), p, endpoint, qualification); err != nil {
 		return err
 	}
 	if err = os.MkdirAll(cfg.OutputDirectory, 0o700); err != nil {
@@ -131,9 +133,10 @@ func run(cfg config, now time.Time) error {
 	if err = product.Validate(); err != nil {
 		return err
 	}
-	rateID := p.ProductID + "-launch-rate-1"
+	releaseSuffix := fmt.Sprintf("r%d", cfg.ReleaseVersion)
+	rateID := fmt.Sprintf("%s-launch-rate-%d", p.ProductID, cfg.ReleaseVersion)
 	rate, err := modelapiproduct.NewRetailRate(modelapiproduct.RetailRateDraft{
-		ID: rateID, ProductID: p.ProductID, Version: 1,
+		ID: rateID, ProductID: p.ProductID, Version: cfg.ReleaseVersion,
 		InputMicrousdPerMillion: cfg.RetailInput, OutputMicrousdPerMillion: cfg.RetailOutput,
 		PublishedAt: now.Add(-2 * time.Minute), ValidFrom: now.Add(-time.Minute), ValidUntil: validUntil,
 		PublicProvenance: modelapiproduct.CustomerRetailRateProvenance,
@@ -147,7 +150,7 @@ func run(cfg config, now time.Time) error {
 		cached = int64Pointer(p.CostCached)
 	}
 	offer := modelapisupply.Offer{
-		ID: p.OfferID, Version: 1, OperatorTenantID: cfg.OperatorWorkspaceID, ProductID: p.ProductID,
+		ID: p.OfferID, Version: int64(cfg.ReleaseVersion), OperatorTenantID: cfg.OperatorWorkspaceID, ProductID: p.ProductID,
 		Supplier: p.Supplier, Adapter: p.Adapter, SupplierModelID: p.SupplierModelID, Protocol: "openai",
 		TupleKey: p.ExpectedTuple, Region: p.Region, CredentialReference: cfg.CredentialReference,
 		State: modelapisupply.OfferActive, Capabilities: []string{"chat-completions", "streaming"},
@@ -164,23 +167,23 @@ func run(cfg config, now time.Time) error {
 		return err
 	}
 	binding, err := modelapitarget.NewBinding(modelapitarget.Draft{
-		ID: "target-" + p.ProductID + "-r1", OperatorTenantID: cfg.OperatorWorkspaceID, ProductID: p.ProductID,
-		Kind: p.Kind, OfferID: p.OfferID, OfferVersion: 1, Adapter: p.Adapter, SupplierModelID: p.SupplierModelID,
+		ID: "target-" + p.ProductID + "-" + releaseSuffix, OperatorTenantID: cfg.OperatorWorkspaceID, ProductID: p.ProductID,
+		Kind: p.Kind, OfferID: p.OfferID, OfferVersion: int64(cfg.ReleaseVersion), Adapter: p.Adapter, SupplierModelID: p.SupplierModelID,
 		EndpointReference: p.EndpointReference, EndpointConfigDigest: digest, Region: p.Region,
 		CreatedAt: now.Add(-2 * time.Minute), ValidFrom: now.Add(-time.Minute), ValidUntil: validUntil,
 	})
 	if err != nil {
 		return err
 	}
-	planID := "supply-" + p.ProductID + "-launch-r1"
+	planID := "supply-" + p.ProductID + "-launch-" + releaseSuffix
 	plan := store.SupplyPlanDraft{
 		ID: planID, OperatorTenantID: cfg.OperatorWorkspaceID, ProductID: p.ProductID,
 		Request: modelapisupply.Request{ModelID: p.ProductID, Protocol: "openai", Capabilities: []string{"chat-completions", "streaming"}, Region: p.Region,
 			InputTokens: 1_000, OutputTokens: 1_000, MinimumGrossMarginBPS: 0, PricingPolicy: modelapisupply.PricingPolicyLaunchParity,
 			MaximumObservationAge: 24 * time.Hour, MaximumEvidenceAge: 24 * time.Hour,
 			MinimumEvidenceSamples: qualification.Evidence.SampleCount, MaximumFallbacks: 0, At: now},
-		Candidates: []store.SupplyCandidateReference{{CandidateID: "candidate-" + p.ProductID + "-launch-r1", OfferID: p.OfferID, OfferVersion: 1,
-			QualificationID: qualification.Evidence.ID, RetailRateVersion: 1, TrafficWeightBPS: 10_000}},
+		Candidates: []store.SupplyCandidateReference{{CandidateID: "candidate-" + p.ProductID + "-launch-" + releaseSuffix, OfferID: p.OfferID, OfferVersion: int64(cfg.ReleaseVersion),
+			QualificationID: qualification.Evidence.ID, RetailRateVersion: cfg.ReleaseVersion, TrafficWeightBPS: 10_000}},
 	}
 	publication := modelapiproduct.OperatorPublication{
 		SchemaVersion: modelapiproduct.OperatorProjectionSchemaVersion, ProductID: p.ProductID,
@@ -193,7 +196,7 @@ func run(cfg config, now time.Time) error {
 	entitlement := modelapiproduct.ProductEntitlement{
 		SchemaVersion: modelapiproduct.EntitlementSchemaVersion, ID: "entitlement-" + cfg.CustomerWorkspaceID + "-" + p.ProductID,
 		CustomerWorkspaceID: cfg.CustomerWorkspaceID, ProductID: p.ProductID, OperatorWorkspaceID: cfg.OperatorWorkspaceID,
-		ServingPlanID: cfg.ServingPlanID, RetailRateID: rateID, RetailRateVersion: 1, State: modelapiproduct.EntitlementActive,
+		ServingPlanID: cfg.ServingPlanID, RetailRateID: rateID, RetailRateVersion: cfg.ReleaseVersion, State: modelapiproduct.EntitlementActive,
 		Limits:    modelapiproduct.CustomerLimits{MaxRequestMicrousd: int64Pointer(2_000_000)},
 		ValidFrom: now.Add(-time.Minute), ValidUntil: &validUntil, CreatedAt: now, UpdatedAt: now,
 	}
@@ -260,9 +263,9 @@ func readQualification(path string) (qualificationManifest, error) {
 	return manifest, nil
 }
 
-func validateQualification(now time.Time, p profile, endpoint string, manifest qualificationManifest) error {
-	if manifest.OfferID != p.OfferID || manifest.OfferVersion != 1 {
-		return errors.New("qualification does not match the immutable launch offer revision")
+func validateQualification(now time.Time, releaseVersion int64, p profile, endpoint string, manifest qualificationManifest) error {
+	if manifest.OfferID != p.OfferID || manifest.OfferVersion != releaseVersion {
+		return errors.New("qualification does not match the immutable release offer revision")
 	}
 	if err := manifest.Evidence.Validate(); err != nil {
 		return err
@@ -278,10 +281,11 @@ func validateQualification(now time.Time, p profile, endpoint string, manifest q
 	if !manifest.Evidence.ValidUntil.After(now.Add(time.Hour)) {
 		return errors.New("qualification must remain current for at least one hour")
 	}
-	if !strings.Contains(manifest.Evidence.Scope, "revision="+p.ExpectedRevision+";") {
+	scope := splitScope(manifest.Evidence.Scope)
+	if !slices.Contains(scope, "revision="+p.ExpectedRevision) {
 		return errors.New("qualification scope does not pin the expected model revision")
 	}
-	if !strings.Contains(manifest.Evidence.Scope, "target_origin_sha256="+digestString(endpoint)) {
+	if !slices.Contains(scope, "target_origin_sha256="+digestString(endpoint)) {
 		return errors.New("qualification scope does not bind the expected supplier origin")
 	}
 	return nil
@@ -293,10 +297,22 @@ func writeManifest(path string, value any) error {
 		return fmt.Errorf("encode %s: %w", path, err)
 	}
 	body = append(body, '\n')
-	if err = os.WriteFile(path, body, 0o600); err != nil {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
+	if _, err = file.Write(body); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	if err = file.Close(); err != nil {
+		return fmt.Errorf("close %s: %w", path, err)
+	}
 	return os.Chmod(path, 0o600)
+}
+
+func splitScope(scope string) []string {
+	return slices.DeleteFunc(strings.Split(scope, ";"), func(value string) bool { return value == "" })
 }
 
 func int64Pointer(value int64) *int64 { return &value }
