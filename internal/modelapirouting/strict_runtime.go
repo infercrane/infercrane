@@ -22,6 +22,12 @@ type strictChatPayload struct {
 	Stream      bool                `json:"stream,omitempty"`
 }
 
+// strictDefaultMaxOutputTokens keeps an omitted OpenAI-compatible max_tokens
+// request bounded before reservation and supplier transmission. It matches the
+// smallest currently qualified hosted route limit (the provisional Qwen
+// serverless recipe), so the public default remains portable across targets.
+const strictDefaultMaxOutputTokens = 512
+
 type strictChatMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
@@ -43,6 +49,10 @@ func normalizeStrictRequest(request ProxyRequest) (supplieradapter.Request, erro
 	}
 	if request.Operation != "chat" || payload.Model != request.ProductID {
 		return supplieradapter.Request{}, errors.New("request operation or public model does not match the strict route")
+	}
+	if payload.MaxTokens == nil {
+		maximum := strictDefaultMaxOutputTokens
+		payload.MaxTokens = &maximum
 	}
 	normalized := supplieradapter.Request{
 		ID: request.RequestID, Operation: supplieradapter.OperationChatCompletions, ModelID: request.ProductID,

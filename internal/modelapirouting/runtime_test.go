@@ -144,6 +144,32 @@ func strictProxyRequest(stream bool) ProxyRequest {
 	}
 }
 
+func TestNormalizeStrictRequestAppliesPortableOutputBoundWhenOmitted(t *testing.T) {
+	request := strictProxyRequest(false)
+	delete(request.Payload, "max_tokens")
+
+	normalized, err := normalizeStrictRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if normalized.MaxOutputTokens == nil || *normalized.MaxOutputTokens != strictDefaultMaxOutputTokens {
+		t.Fatalf("max output tokens=%v, want %d", normalized.MaxOutputTokens, strictDefaultMaxOutputTokens)
+	}
+}
+
+func TestNormalizeStrictRequestPreservesExplicitOutputBound(t *testing.T) {
+	request := strictProxyRequest(false)
+	request.Payload["max_tokens"] = float64(37)
+
+	normalized, err := normalizeStrictRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if normalized.MaxOutputTokens == nil || *normalized.MaxOutputTokens != 37 {
+		t.Fatalf("max output tokens=%v, want 37", normalized.MaxOutputTokens)
+	}
+}
+
 func TestStrictRuntimeResolvesCredentialPerRequestAndRewritesBufferedResponse(t *testing.T) {
 	calls := 0
 	transport := routingRoundTripperFunc(func(request *http.Request) (*http.Response, error) {
