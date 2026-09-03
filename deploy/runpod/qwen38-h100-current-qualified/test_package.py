@@ -25,7 +25,7 @@ class DeploymentPackageTest(unittest.TestCase):
         self.assertEqual(runpod["endpoint_mode"], "load_balancer")
         self.assertEqual(runpod["gpu"]["model"], "NVIDIA H100 80GB HBM3")
         self.assertEqual(runpod["gpu"]["count"], 1)
-        self.assertEqual(runpod["qualification_worker_policy"]["workers_min"], 1)
+        self.assertEqual(runpod["qualification_worker_policy"]["workers_min"], 0)
         self.assertEqual(runpod["qualification_worker_policy"]["workers_max"], 1)
         self.assertEqual(runpod["template"]["docker_entrypoint_override"], None)
         self.assertEqual(runpod["template"]["docker_start_command_override"], None)
@@ -47,6 +47,10 @@ class DeploymentPackageTest(unittest.TestCase):
         serve_script = (PACKAGE_DIR / "serve.sh").read_text()
         self.assertNotIn('"$@"', serve_script)
         self.assertIn("if (( $# != 0 )); then", serve_script)
+        self.assertIn("--cuda-graph-max-bs 8", serve_script)
+        self.assertIn("--disable-piecewise-cuda-graph", serve_script)
+        self.assertIn("HF_HUB_OFFLINE=1", serve_script)
+        self.assertIn("artifact manifest revision does not match", serve_script)
 
     def test_source_handoff_manifest_hash_is_preserved(self) -> None:
         source = self.manifest["source_handoff"]

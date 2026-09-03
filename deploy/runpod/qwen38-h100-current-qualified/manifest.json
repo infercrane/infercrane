@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "id": "qwen38-h100-current-qualified",
-  "status": "provisional_serverless_recipe",
+  "status": "provisional_faststart_candidate",
   "final_release": false,
   "production_publication_allowed": false,
   "source_handoff": {
@@ -53,14 +53,16 @@
     "start_command_override_allowed": false,
     "argument_vector": [
       "/usr/bin/python3", "-m", "sglang.launch_server",
-      "--model-path", "Qwen/Qwen3.8-27B-FP8",
+      "--model-path", "/tmp/infercrane-qwen38-model",
       "--served-model-name", "Qwen/Qwen3.8-27B-FP8",
-      "--revision", "017b9c7af6b5689d5dd426a76e0bc077eb5ca20a",
       "--host", "0.0.0.0",
       "--port", "30000",
       "--tp-size", "1",
       "--context-length", "18432",
       "--mem-fraction-static", "0.90",
+      "--max-running-requests", "8",
+      "--cuda-graph-max-bs", "8",
+      "--disable-piecewise-cuda-graph",
       "--enable-metrics",
       "--reasoning-parser", "qwen3",
       "--tool-call-parser", "qwen3_coder",
@@ -89,11 +91,14 @@
       "required": true,
       "runpod_mount_path": "/runpod-volume",
       "recipe_compatibility_path": "/model-cache",
+      "artifact_path": "/runpod-volume/infercrane/model",
+      "artifact_manifest": "/runpod-volume/infercrane/manifest.json",
+      "worker_local_staging_path": "/tmp/infercrane-qwen38-model",
       "minimum_capacity_gib": 50,
       "mount_required_at_startup": true
     },
     "qualification_worker_policy": {
-      "workers_min": 1,
+      "workers_min": 0,
       "workers_max": 1,
       "scale_to_zero_qualified": false,
       "autoscaling_qualified": false
@@ -106,6 +111,8 @@
       "environment": {
         "HF_HOME": "/model-cache",
         "HF_HUB_CACHE": "/model-cache/hub",
+        "HF_HUB_OFFLINE": "1",
+        "TRANSFORMERS_OFFLINE": "1",
         "PORT": "30000",
         "PORT_HEALTH": "30001",
         "HEALTH_CHECK_PATH": "/ping"
@@ -173,12 +180,24 @@
     "cold_model_download_measured": false,
     "readiness_timeout_seconds": 1200
   },
+  "faststart_hypothesis": {
+    "state": "unqualified",
+    "target_readiness_seconds": 100,
+    "changes": [
+      "stage exact network-volume artifact onto worker-local storage",
+      "force offline model loading",
+      "cap running requests and decode CUDA graph capture at batch size 8",
+      "disable piecewise prefill CUDA graph capture",
+      "enable RunPod FlashBoot"
+    ]
+  },
   "publication_gate": {
     "fail_closed": true,
     "blocked_reasons": [
       "derived image has no immutable OCI digest",
       "RunPod qualification has not started",
       "cold-cache startup is unmeasured",
+      "fast-start launch changes are unqualified",
       "RunPod-specific cost and reliability are unmeasured",
       "scale-to-zero and autoscaling are unqualified"
     ]

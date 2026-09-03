@@ -4,7 +4,7 @@ FROM ${SGLANG_BASE_IMAGE}
 LABEL org.opencontainers.image.title="InferCrane provisional Qwen3.8 RunPod candidate" \
       org.opencontainers.image.description="Modal-qualified candidate; requires independent RunPod qualification" \
       ai.infercrane.package="qwen38-h100-current-qualified" \
-      ai.infercrane.status="provisional_serverless_recipe" \
+      ai.infercrane.status="provisional_faststart_candidate" \
       ai.infercrane.runtime="sglang-0.5.18" \
       ai.infercrane.model.repository="Qwen/Qwen3.8-27B-FP8" \
       ai.infercrane.model.revision="017b9c7af6b5689d5dd426a76e0bc077eb5ca20a" \
@@ -31,6 +31,8 @@ RUN chmod 0444 \
 # /model-cache symlink preserves the path used by the Modal-qualified recipe.
 ENV HF_HOME=/model-cache \
     HF_HUB_CACHE=/model-cache/hub \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1 \
     PORT=30000 \
     PORT_HEALTH=30001 \
     HEALTH_CHECK_PATH=/ping

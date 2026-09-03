@@ -1,6 +1,7 @@
 # Qwen3.8 H100 provisional RunPod package
 
-This directory is deployable input for an exact RunPod qualification. It is
+This directory is deployable input for an exact RunPod cold-start
+qualification. It is
 **not a production recipe**, is **not `recipe-v1`**, and must not be published
 to the InferCrane catalog or receive customer traffic yet.
 
@@ -24,6 +25,12 @@ or reliability. `manifest.json` is the machine-readable contract and keeps
 The serving arguments are fixed in `serve.sh`. The script rejects container
 arguments and changes to its five contract environment variables. A RunPod
 template must not override the Docker entrypoint or start command.
+
+This candidate stages the immutable artifact from the attached network volume
+onto local container storage, forces offline loading, caps decode CUDA graph
+capture at batch size 8, and disables piecewise prefill graph capture. Those
+changes target startup time and are not covered by the earlier Modal evidence;
+they therefore require fresh correctness, performance, and cost evidence.
 
 ## Build and pin the derived image
 
@@ -62,14 +69,15 @@ following exact settings:
 | Application port | `30000` |
 | Health port | `30001` |
 | Health path | `/ping` |
-| Minimum workers | `1` |
-| Maximum workers | `1` during qualification |
+| Minimum workers | `0` outside a bounded qualification window; `1` only while measuring |
+| Maximum workers | `1` during qualification; return to `0` afterward |
 | Startup/readiness allowance | At least 1,200 seconds |
 
-RunPod mounts Serverless network volumes at `/runpod-volume`. The image pins
-`/model-cache` as a symlink to that mount so the qualified Hugging Face cache
-layout remains stable. Startup fails if `/runpod-volume` is not a real mount,
-preventing an accidental download into ephemeral container storage.
+RunPod mounts Serverless network volumes at `/runpod-volume`. The exact
+artifact and its identity manifest must exist under `/runpod-volume/infercrane`.
+The worker verifies that manifest, copies the model onto local container
+storage, and loads in offline mode. Startup fails if the mount or exact
+artifact is missing, preventing an accidental network download.
 
 Set these non-secret template variables exactly:
 
@@ -104,9 +112,8 @@ Keep the endpoint isolated from customer routes. Complete every RunPod gate in
 `manifest.json`, including:
 
 1. Verify the deployed image digest, H100 identity, driver, and CUDA support.
-2. Verify persistent-cache behavior and measure both cold-cache and warm-cache
-   startup. The existing 345–439 second startup evidence reused Modal's cache;
-   cold download is unmeasured.
+2. Verify persistent-cache behavior and measure first boot, FlashBoot revival,
+   network-to-local staging, weight load, and CUDA graph capture separately.
 3. Verify the 204-to-200 health transition and that no request reaches SGLang
    before readiness.
 4. Verify `/v1/models`, buffered chat, streaming usage and `[DONE]`, structured
