@@ -23,6 +23,7 @@ go run ./tools/model-api-mvp-release \
   --serving-plan SERVING_PLAN_ID \
   --customer-workspace CANARY_WORKSPACE_ID \
   --commercial-terms-ref contract://zai-mvp-reviewed-2026-09 \
+  --release-version 2 \
   --output-directory ./artifacts/zai-glm-5.3-release
 ```
 

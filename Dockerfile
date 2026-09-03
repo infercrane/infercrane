@@ -10,6 +10,10 @@ RUN go mod download
 COPY . .
 RUN --mount=type=cache,target=/go/pkg/mod version="${INFERCRANE_VERSION#v}" \
     && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${version}" -o /out/infercrane ./cmd/infercrane \
+	&& CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/infercrane-model-api-qualifier ./tools/model-api-qualifier \
+	&& CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/infercrane-model-api-production-release ./tools/model-api-production-release \
+	&& CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/infercrane-model-api-mvp-release ./tools/model-api-mvp-release \
+	&& CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/infercrane-model-api-renewer ./tools/model-api-renewer \
     && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/runpod-fault-proxy ./internal/testtools/runpod-fault-proxy \
     && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/fake-vllm ./internal/testtools/fake-vllm \
     && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/fake-router ./internal/testtools/fake-router
@@ -64,6 +68,10 @@ RUN case "$TARGETARCH" in \
 	&& rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 10001 app
 COPY --from=builder /out/infercrane /usr/local/bin/infercrane
+COPY --from=builder /out/infercrane-model-api-qualifier /usr/local/bin/infercrane-model-api-qualifier
+COPY --from=builder /out/infercrane-model-api-production-release /usr/local/bin/infercrane-model-api-production-release
+COPY --from=builder /out/infercrane-model-api-mvp-release /usr/local/bin/infercrane-model-api-mvp-release
+COPY --from=builder /out/infercrane-model-api-renewer /usr/local/bin/infercrane-model-api-renewer
 COPY scripts/entrypoint.sh /usr/local/bin/infercrane-entrypoint
 COPY LICENSE NOTICE THIRD_PARTY_NOTICES.md packaging/container/THIRD_PARTY_COMPONENTS.md /usr/share/licenses/infercrane/
 COPY packaging/container/licenses /usr/share/licenses/infercrane/runtime-components
