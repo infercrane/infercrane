@@ -63,12 +63,12 @@ RUNPOD_API_KEY='replace-in-shell-only' \
 go run ./tools/model-api-qualifier \
   --profile qwen3.8-27b-runpod \
   --endpoint-origin 'https://YOUR_ENDPOINT_ID.api.runpod.ai' \
-  --region 'EU-RO-1' \
+  --region 'EU-NL-1' \
   --confirm-live \
   --offer-id runpod-qwen38-sglang \
   --offer-version 1 \
   --qualification-id runpod-qwen38-sglang-q-20260903 \
-  --tuple-key 'runpod|Qwen/Qwen3.8-27B-FP8|openai|EU-RO-1' \
+  --tuple-key 'runpod|Qwen/Qwen3.8-27B-FP8|openai|EU-NL-1' \
   --expected-revision 017b9c7af6b5689d5dd426a76e0bc077eb5ca20a \
   --samples-per-mode 3 \
   --max-output-tokens 512 \

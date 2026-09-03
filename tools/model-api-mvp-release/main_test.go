@@ -58,6 +58,9 @@ func TestRunPodRequiresMeasuredEconomicsAndExactQualifiedOrigin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if p.Region != "EU-NL-1" || !strings.HasSuffix(p.ExpectedTuple, "|EU-NL-1") {
+		t.Fatalf("unexpected pinned RunPod placement: region=%q tuple=%q", p.Region, p.ExpectedTuple)
+	}
 	endpoint := "https://qwen38pilot.api.runpod.ai"
 	qualificationPath := writeTestQualification(t, now, p, endpoint)
 	cfg := config{

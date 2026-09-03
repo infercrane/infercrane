@@ -239,7 +239,7 @@ func launchProfile(name string) (profile, error) {
 	case "qwen3.8-27b-runpod":
 		return profile{Name: name, ProductID: "qwen3.8-27b", DisplayName: "Qwen3.8 27B", Publisher: "Qwen", Description: "InferCrane-optimized Qwen model for fast text chat.",
 			Supplier: supplieradapter.RunPodSupplier, Adapter: supplieradapter.RunPodSGLangLBAdapterName, SupplierModelID: supplieradapter.RunPodQwen38SupplierModelID,
-			OfferID: "runpod-qwen38-sglang", Region: "EU-RO-1", ExpectedTuple: strings.Join([]string{supplieradapter.RunPodSupplier, supplieradapter.RunPodQwen38SupplierModelID, "openai", "EU-RO-1"}, "|"),
+			OfferID: "runpod-qwen38-sglang", Region: "EU-NL-1", ExpectedTuple: strings.Join([]string{supplieradapter.RunPodSupplier, supplieradapter.RunPodQwen38SupplierModelID, "openai", "EU-NL-1"}, "|"),
 			ExpectedRevision: qwenRevision, EndpointReference: supplieradapter.RunPodSupplier + "/" + supplieradapter.RunPodSGLangLBAdapterName,
 			ContextWindow: supplieradapter.RunPodQwen38QualifiedContext, Kind: modelapitarget.KindServerlessGPU,
 			SelfHost: modelapiproduct.SelfHostEligible, Tasks: []string{"chat", "coding"}}, nil
