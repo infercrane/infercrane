@@ -1,0 +1,186 @@
+{
+  "schema_version": 1,
+  "id": "qwen38-h100-current-qualified",
+  "status": "provisional_serverless_recipe",
+  "final_release": false,
+  "production_publication_allowed": false,
+  "source_handoff": {
+    "repository": "infercrane-fastpath-poc",
+    "path": "artifacts/handoff/qwen38-h100-current-qualified",
+    "manifest_sha256": "b45d8b70d28f72fc6d03056a3f6904fef59ec6ca230cd202e96c5a851ab461d1",
+    "dockerfile_sha256": "505db4e5f87432c499e27f24aa9286d4bf319f23a96ed48f984be02e46e9d18a",
+    "readme_sha256": "b989660745f41ac3994e728a7de1276637235ac5eb4c11b4fb605ab2bba13f99",
+    "serve_script_sha256": "1454755df11cff0dbb957e03348685657914dc715a4a70a3946d8a946f04e568",
+    "runtime_packages_sha256": "7d22850fce10e3a5b95b5f379ed74439147207942218d8b2d781f9a9faaef750",
+    "overlay_requirements_sha256": "db67ad51bd750fe70770fbe6ded6f8d6d8e18a2e9b4a3b31251812b666c34189",
+    "schema_sha256": "9612572f77ce8d5b6a534da84963ef3634b670a0e71c24e6952d5d408d7d3c79",
+    "qualification_provider": "modal",
+    "qualification_requests": 3000,
+    "qualification_successes": 3000,
+    "public_claim_eligible": false,
+    "runpod_qualification_inherited": false
+  },
+  "model": {
+    "repository": "Qwen/Qwen3.8-27B-FP8",
+    "revision": "017b9c7af6b5689d5dd426a76e0bc077eb5ca20a",
+    "tokenizer_repository": "Qwen/Qwen3.8-27B-FP8",
+    "tokenizer_revision": "017b9c7af6b5689d5dd426a76e0bc077eb5ca20a",
+    "architecture": "Qwen3_5ForConditionalGeneration",
+    "license": "apache-2.0",
+    "precision": "block_fp8_e4m3_dynamic_activations",
+    "artifact_hashes": {
+      "config_json_sha256": "74227dd615bf1ea975aa676bdf355a0379858c12f394b5365cd9dfa5fc2c70bc",
+      "tokenizer_json_sha256": "0997f410c57a1f4e53b09e4be8f4a172d90edd9564368fb0847030937229b9f3",
+      "tokenizer_config_json_sha256": "b11349aafa7cdc6a320767cf7ceb29ed82f7eda5d65e8e0819e76f0ce947bf27",
+      "chat_template_jinja_sha256": "c3cf9e34abf4f9e36c2d72165aa9c132d3e2a725b6c2586aaa3a8af9d7a81041"
+    }
+  },
+  "runtime": {
+    "name": "sglang",
+    "version": "0.5.18",
+    "commit": "71de97b264b04dcd514cf904003028aefe9775c8",
+    "base_image": "lmsysorg/sglang@sha256:9e148f5ac788e856a06166bd6347a831831eb9fcfab4d1770874823a7c29a1a1",
+    "linux_amd64_manifest": "sha256:bde16a8447b19e89056b9eea06c72be6c02801dc89d528c9ea90c53368fd74bf",
+    "derived_image_digest": null,
+    "derived_image_digest_record": "required_in_external_runpod_qualification_receipt_after_push",
+    "cuda_version": "13.0.3",
+    "python_version": "3.12"
+  },
+  "launch": {
+    "entrypoint": ["/opt/infercrane/serve.sh"],
+    "container_arguments": [],
+    "entrypoint_override_allowed": false,
+    "start_command_override_allowed": false,
+    "argument_vector": [
+      "/usr/bin/python3", "-m", "sglang.launch_server",
+      "--model-path", "Qwen/Qwen3.8-27B-FP8",
+      "--served-model-name", "Qwen/Qwen3.8-27B-FP8",
+      "--revision", "017b9c7af6b5689d5dd426a76e0bc077eb5ca20a",
+      "--host", "0.0.0.0",
+      "--port", "30000",
+      "--tp-size", "1",
+      "--context-length", "18432",
+      "--mem-fraction-static", "0.90",
+      "--enable-metrics",
+      "--reasoning-parser", "qwen3",
+      "--tool-call-parser", "qwen3_coder",
+      "--speculative-algorithm", "NEXTN",
+      "--speculative-num-steps", "3",
+      "--speculative-eagle-topk", "1",
+      "--speculative-num-draft-tokens", "4"
+    ],
+    "argument_vector_mutable": false
+  },
+  "runpod": {
+    "endpoint_mode": "load_balancer",
+    "request_base_url_pattern": "https://{endpoint_id}.api.runpod.ai",
+    "gpu": {
+      "model": "NVIDIA H100 80GB HBM3",
+      "architecture": "sm_90a",
+      "count": 1,
+      "minimum_vram_gib": 80,
+      "tensor_parallel_size": 1
+    },
+    "minimum_cuda_version": "13.0",
+    "minimum_cpu_vcpu": 8,
+    "minimum_system_ram_gib": 64,
+    "container_disk_gib": 100,
+    "network_volume": {
+      "required": true,
+      "runpod_mount_path": "/runpod-volume",
+      "recipe_compatibility_path": "/model-cache",
+      "minimum_capacity_gib": 50,
+      "mount_required_at_startup": true
+    },
+    "qualification_worker_policy": {
+      "workers_min": 1,
+      "workers_max": 1,
+      "scale_to_zero_qualified": false,
+      "autoscaling_qualified": false
+    },
+    "template": {
+      "image_must_use_derived_digest": true,
+      "docker_entrypoint_override": null,
+      "docker_start_command_override": null,
+      "ports": ["30000/http", "30001/http"],
+      "environment": {
+        "HF_HOME": "/model-cache",
+        "HF_HUB_CACHE": "/model-cache/hub",
+        "PORT": "30000",
+        "PORT_HEALTH": "30001",
+        "HEALTH_CHECK_PATH": "/ping"
+      },
+      "optional_secret_environment": ["HF_TOKEN"]
+    }
+  },
+  "server_contract": {
+    "inference_port": 30000,
+    "strict_model_readiness": "http://127.0.0.1:30000/health",
+    "runpod_health_port": 30001,
+    "runpod_health_path": "/ping",
+    "runpod_health_states": {
+      "ready": 200,
+      "initializing": 204
+    },
+    "openai_compatible_paths": [
+      "/v1/models",
+      "/v1/chat/completions",
+      "/v1/completions"
+    ],
+    "served_model_name": "Qwen/Qwen3.8-27B-FP8",
+    "qualified_context_tokens": 18432,
+    "qualified_max_output_tokens": 512,
+    "streaming_qualified": true,
+    "structured_output_qualified_on_modal": true,
+    "tool_calls_qualified_on_modal": true
+  },
+  "qualification": {
+    "modal": {
+      "state": "passed",
+      "workload_contract_id": "serverless-primary",
+      "workload_digest": "60380d21475dbaaf7ebe3e544f518854ad67707f03b330f8ec55d3af4b9586b2",
+      "prompt_dataset_sha256": "228e92c8d58b2bfc194e18fd35ebbb9b0af4e1dd6977ca1ed538362f6747aaf1",
+      "concurrency_lanes": [1, 4, 8],
+      "requests": 3000,
+      "successful_requests": 3000
+    },
+    "runpod": {
+      "state": "not_started",
+      "required_before_publication": true,
+      "required_gates": [
+        "derived_linux_amd64_oci_digest_recorded",
+        "exact_h100_and_cuda_identity_verified",
+        "network_volume_persistence_verified",
+        "warm_cache_startup_measured",
+        "cold_cache_startup_measured",
+        "health_204_to_200_transition_verified",
+        "models_endpoint_identity_verified",
+        "buffered_usage_accounting_verified",
+        "streaming_usage_and_done_verified",
+        "structured_output_verified",
+        "tool_call_verified",
+        "timeout_cancellation_and_error_mapping_verified",
+        "immutable_serverless_primary_workload_reproduced",
+        "provider_cost_and_invoice_reconciled",
+        "worker_recovery_verified"
+      ]
+    }
+  },
+  "known_startup_evidence": {
+    "source": "modal_warm_model_cache",
+    "weight_load_seconds_range": [125.26, 157.33],
+    "full_startup_seconds_range": [344.85, 439.15],
+    "cold_model_download_measured": false,
+    "readiness_timeout_seconds": 1200
+  },
+  "publication_gate": {
+    "fail_closed": true,
+    "blocked_reasons": [
+      "derived image has no immutable OCI digest",
+      "RunPod qualification has not started",
+      "cold-cache startup is unmeasured",
+      "RunPod-specific cost and reliability are unmeasured",
+      "scale-to-zero and autoscaling are unqualified"
+    ]
+  }
+}

@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func TestDefaultCatalogIsExactlyTheStableSixAndMakesNoServiceClaim(t *testing.T) {
+func TestDefaultCatalogIsExactlyTheStableSevenAndMakesNoServiceClaim(t *testing.T) {
 	products := DefaultCatalog()
 	if err := ValidateCatalog(products); err != nil {
 		t.Fatal(err)
@@ -20,12 +20,21 @@ func TestDefaultCatalogIsExactlyTheStableSixAndMakesNoServiceClaim(t *testing.T)
 		"glm-5.3-flash",
 		"kimi-k2.6",
 		"kimi-k3",
+		"qwen3.8-27b",
 	}
 	got := make([]string, 0, len(products))
 	for _, product := range products {
 		got = append(got, product.ID)
-		if product.Availability != AvailabilityCatalogOnly || product.ContextWindowTokens != nil || product.SelfHostEligibility != SelfHostUnknown {
+		if product.Availability != AvailabilityCatalogOnly || product.SelfHostEligibility != SelfHostUnknown {
 			t.Fatalf("default product fabricated operational evidence: %+v", product)
+		}
+		if product.ID == "qwen3.8-27b" {
+			if product.ContextWindowTokens == nil || *product.ContextWindowTokens != 18_432 || !reflect.DeepEqual(product.Tasks, []string{"chat"}) ||
+				!reflect.DeepEqual(product.InputModalities, []string{"text"}) || !reflect.DeepEqual(product.OutputModalities, []string{"text"}) {
+				t.Fatalf("Qwen3.8 preview contract changed: %+v", product)
+			}
+		} else if product.ContextWindowTokens != nil {
+			t.Fatalf("default product fabricated a context window: %+v", product)
 		}
 		for _, claim := range product.Capabilities {
 			if claim.State != ClaimCataloged || claim.EvidenceID != "" || claim.EvidenceUntil != nil {
@@ -42,6 +51,11 @@ func TestDefaultCatalogIsExactlyTheStableSixAndMakesNoServiceClaim(t *testing.T)
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("stable public product ids changed: got %v want %v", got, want)
+	}
+	qwen := productByID(t, "qwen3.8-27b")
+	wantCapabilities := []CapabilityClaim{{Name: "chat-completions", State: ClaimCataloged}, {Name: "streaming", State: ClaimCataloged}}
+	if !reflect.DeepEqual(qwen.Capabilities, wantCapabilities) {
+		t.Fatalf("Qwen3.8 preview advertised unsupported capabilities: %+v", qwen.Capabilities)
 	}
 }
 

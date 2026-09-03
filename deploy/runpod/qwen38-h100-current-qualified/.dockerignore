@@ -1,0 +1,6 @@
+*
+!Dockerfile
+!health_shim.py
+!manifest.json
+!modal-overlay-requirements.txt
+!serve.sh

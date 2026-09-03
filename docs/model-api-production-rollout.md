@@ -58,50 +58,32 @@ reconciliation, route publication, and operational safety are.
 
 ## Launch scope
 
-The six requested product identities stay supplier-neutral. Supplier list
-prices are dated procurement inputs, not InferCrane retail rates or measured
-performance claims. Prices below are USD per one million input / cached-input /
-output tokens as published on 2026-09-02; every value must be refreshed and
-bound to an immutable offer before publication.
+The MVP has four supplier-neutral product identities. Procurement costs stay
+private and are not public performance or availability claims. A product stays
+`Catalog only` until the exact endpoint, model revision, commercial terms,
+usage contract, and failure behavior have passed qualification.
 
-| InferCrane product | Exact potential supplier identity | Supplier-reported context and list price | Launch state |
-| --- | --- | --- | --- |
-| `glm-5.2` | Cloudflare Workers AI `@cf/zai-org/glm-5.2` | 262,144 tokens; $1.40 / $0.26 / $4.40 | Catalog only; Cloudflare commercial authorization and contract qualification required |
-| `glm-5.3` | Cloudflare Workers AI `@cf/zai-org/glm-5.3` | 1,048,576 tokens; $1.40 / $0.26 / $4.40 | Catalog only; Cloudflare commercial authorization and contract qualification required |
-| `glm-5.3-flash` | Cloudflare Workers AI `@cf/zai-org/glm-5.3-flash` | 1,048,576 tokens; $0.15 / $0.03 / $0.50 | Catalog only; Cloudflare commercial authorization and contract qualification required |
-| `kimi-k2.6` | Kimi `kimi-k2.6`; Cloudflare `@cf/moonshotai/kimi-k2.6` | 262,144 tokens; $0.95 / $0.16 / $4.00 | Catalog only; qualify one separately authorized offer, not both identities as one route |
-| `kimi-k3` | Kimi `kimi-k3` | 1,048,576 tokens; $3.00 / $0.30 / $15.00 | Catalog only; Kimi commercial authorization and contract qualification required |
-| `deepseek-v4-flash` | DeepSeek `deepseek-v4-flash` (currently reports version `DeepSeek-V4-Flash-0731`); Cloudflare `@cf/deepseek-ai/deepseek-v4-flash-0731` | 1M tokens; direct peak and Cloudflare list price $0.44 / $0.014 / $1.32; DeepSeek direct off-peak is half | First MVP candidate only after commercial authorization and exact-contract qualification |
+| InferCrane product | Private execution target | Honest launch boundary |
+| --- | --- | --- |
+| `glm-5.2` | Z.ai general pay-as-you-go API | Catalog only until the exact direct route is qualified |
+| `glm-5.3` | Z.ai general pay-as-you-go API | Catalog only until the exact direct route is qualified |
+| `glm-5.3-flash` | Z.ai general pay-as-you-go API | Catalog only until the exact direct route is qualified |
+| `qwen3.8-27b` | InferCrane-operated RunPod load-balanced SGLang endpoint | Provisional recipe; 18,432-token context and 512-token output cap until RunPod qualification |
 
-Sources: [Cloudflare Workers AI model pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/),
-[Cloudflare GLM-5.2 model limits](https://developers.cloudflare.com/workers-ai/models/glm-5.2/),
-[Cloudflare GLM-5.3 catalog](https://developers.cloudflare.com/workers-ai/models/),
-[Kimi model catalog and prices](https://platform.kimi.ai/), and
-[DeepSeek models and pricing](https://api-docs.deepseek.com/quick_start/pricing/).
-The direct DeepSeek ID is a mutable product name, so a changed reported version
-must quarantine the offer until drift policy and compatibility tests pass.
-
-The old InferCrane ID `deepseek-v4-flash-0731-fast` combined a revision with an
-invented tier suffix and must never be sent upstream. Migration 062 retains it
-only as an unavailable historical tombstone so existing foreign keys remain
-valid. New rates, offers, entitlements, examples, and usage use
-`deepseek-v4-flash`.
+Supplier identities, credentials, costs, and routing targets never appear in
+the customer catalog response. The public contract contains only the stable
+InferCrane model ID, current retail rate, supported features, and evidence
+state.
 
 Commercial authorization is a hard gate, not a documentation checkbox. Default
 supplier terms generally distinguish embedding a service in a customer
 application from reselling or sublicensing the supplier service itself. Before
 operating a transparent multi-tenant Model API, attach a signed order form,
-reseller agreement, or written supplier approval to the offer. In particular,
-[Cloudflare's default enterprise terms](https://www.cloudflare.com/enterpriseterms/)
-restrict resale or making the service available to third parties;
-[Kimi's platform terms](https://platform.kimi.ai/docs/agreement/modeluse) allow
-customer applications but restrict relicensing or reselling the service without
-authorization; and [DeepSeek's terms](https://cdn.deepseek.com/policies/en-US/deepseek-terms-of-use.html)
-restrict selling or sublicensing the service without authorization. Legal and
+reseller agreement, or written supplier approval to the offer. Legal and
 privacy review must confirm the exact account, geography, data path, and end-user
 contract before traffic is enabled.
 
-Do not make all six callable merely to fill the shelf. Launch the first exact
+Do not make all four callable merely to fill the shelf. Launch the first exact
 offer that passes every gate, then repeat the same qualification. A product
 without a current offer remains visible as `Catalog only` or `Private preview`.
 
@@ -255,8 +237,8 @@ transport as the only adapter. Normalize supplier errors, billing outcome,
 supplier request ID before committing the public response.
 
 Do not enable supplier-internal retries or hidden fallbacks unless their exact
-behavior is part of the qualified tuple. A Cloudflare AI Gateway route is not
-the same offer as a Cloudflare Workers AI-hosted model.
+behavior is part of the qualified tuple. A gateway route is not the same offer
+as its underlying model endpoint.
 
 ## Phase 3 — Prepaid Stripe production qualification
 
@@ -495,10 +477,6 @@ Stripe:
 
 Suppliers and runtimes:
 
-- [Cloudflare Workers AI OpenAI compatibility](https://developers.cloudflare.com/workers-ai/configuration/open-ai-compatibility/)
-- [Cloudflare Workers AI pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/)
-- [Cloudflare Workers AI limits](https://developers.cloudflare.com/workers-ai/platform/limits/)
-- [Cloudflare AI Gateway request handling](https://developers.cloudflare.com/ai-gateway/configuration/request-handling/)
 - [RunPod endpoint configuration](https://docs.runpod.io/serverless/endpoints/endpoint-configurations)
 - [RunPod load-balancer health](https://docs.runpod.io/serverless/load-balancing/overview)
 - [vLLM OpenAI-compatible server](https://docs.vllm.ai/en/latest/serving/openai_compatible_server/)

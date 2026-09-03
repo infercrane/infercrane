@@ -190,13 +190,17 @@ func (p Product) Validate() error {
 // catalog-only with cataloged (not qualified) capability claims and no invented
 // context, price, availability, or performance evidence.
 func DefaultCatalog() []Product {
+	qwen38Context := int64(18_432)
+	qwen38 := newCatalogProduct("qwen3.8-27b", "Qwen3.8 27B", "Qwen", "Cataloged for text chat workloads.", []string{"chat"})
+	qwen38.ContextWindowTokens = &qwen38Context
 	products := []Product{
 		newCatalogProduct("glm-5.2", "GLM-5.2", "Z.ai", "Planned for coding, reasoning, and bilingual chat workloads.", []string{"coding", "reasoning", "chat"}),
 		newCatalogProduct("glm-5.3", "GLM-5.3", "Z.ai", "Planned for reasoning and long-context workloads.", []string{"reasoning", "long-context", "chat"}),
-		newCatalogProduct("glm-5.3-flash", "GLM-5.3-Flash", "Z.ai", "Planned for cost-sensitive and latency-sensitive workloads.", []string{"chat", "coding"}),
+		newCatalogProduct("glm-5.3-flash", "GLM-5.3-Flash", "Z.ai", "Planned for text chat and coding workloads.", []string{"chat", "coding"}),
 		newCatalogProduct("kimi-k3", "Kimi-K3", "Moonshot AI", "Planned for coding and agentic workflows.", []string{"coding", "agents", "chat"}),
 		newCatalogProduct("kimi-k2.6", "Kimi-K2.6", "Moonshot AI", "Planned for coding, agentic, and long-context workloads.", []string{"coding", "agents", "long-context", "chat"}),
 		newCatalogProduct("deepseek-v4-flash", "DeepSeek-V4-Flash", "DeepSeek", "Planned for high-throughput workloads after route qualification.", []string{"chat", "coding", "throughput"}),
+		qwen38,
 	}
 	sort.Slice(products, func(i, j int) bool { return products[i].ID < products[j].ID })
 	return products

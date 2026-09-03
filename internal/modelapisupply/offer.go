@@ -66,17 +66,6 @@ type QualificationEvidence struct {
 // consistent before it crosses a persistence or publication boundary.
 func (e QualificationEvidence) Validate() error { return validateQualification(e) }
 
-// HuggingFaceProvenance is discovery metadata only. MaterializeCandidate does
-// not use these fields to establish availability, capabilities, price,
-// qualification, or performance truth.
-type HuggingFaceProvenance struct {
-	RepositoryID string    `json:"repository_id,omitempty"`
-	Revision     string    `json:"revision,omitempty"`
-	License      string    `json:"license,omitempty"`
-	SourceURL    string    `json:"source_url,omitempty"`
-	ObservedAt   time.Time `json:"observed_at"`
-}
-
 // Offer is an immutable revision of an operator-owned private supplier offer.
 // CredentialReference points at a secret manager; credentials are never part
 // of this record or a compiled supply plan.
@@ -101,7 +90,6 @@ type Offer struct {
 	CostRate            CostRate                `json:"cost_rate"`
 	Commercial          CommercialAuthorization `json:"commercial"`
 	Qualification       *QualificationEvidence  `json:"qualification,omitempty"`
-	HuggingFace         *HuggingFaceProvenance  `json:"hugging_face,omitempty"`
 }
 
 type CandidateMaterialization struct {
@@ -144,9 +132,6 @@ func (o Offer) Validate() error {
 		if err := validateQualification(*o.Qualification); err != nil {
 			return err
 		}
-	}
-	if o.HuggingFace != nil && o.HuggingFace.ObservedAt.IsZero() {
-		return errors.New("Hugging Face metadata requires an observation timestamp")
 	}
 	return nil
 }

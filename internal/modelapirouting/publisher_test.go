@@ -204,6 +204,36 @@ func TestPublisherRequiresAndVerifiesRunPodTargetBinding(t *testing.T) {
 	}
 }
 
+func TestPublisherRequiresImmutableBindingsForEveryMVPTarget(t *testing.T) {
+	now := time.Date(2026, 9, 3, 10, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name, supplier, adapter, model, endpoint string
+	}{
+		{"zai", supplieradapter.ZAISupplier, supplieradapter.ZAIAdapterName, supplieradapter.ZAIGLM53ModelID, supplieradapter.ZAIBaseURL},
+		{"runpod-load-balanced", supplieradapter.RunPodSupplier, supplieradapter.RunPodSGLangLBAdapterName, supplieradapter.RunPodQwen38SupplierModelID, "https://qwen38pilot.api.runpod.ai"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			source := sourceFixture(now, "customer")
+			source.Candidates[0].Candidate.Supplier = test.supplier
+			source.Candidates[0].Candidate.SupplierModelID = test.model
+			source.Candidates[0].Adapter = test.adapter
+			source.Candidates[0].CredentialReference = "strict-reference"
+			resolver, err := NewRegistryTargetResolver(map[string]string{test.supplier + "/" + test.adapter: test.endpoint}, &referenceStoreFake{}, &secretValueFailIfResolved{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			publisher := &Publisher{
+				Store: &sourceStoreFake{sources: []RouteSource{source}}, Resolver: resolver,
+				Adapters: supplieradapter.DefaultRegistry(), Directory: NewDirectory(), Now: func() time.Time { return now },
+			}
+			if err = publisher.PublishOnce(context.Background()); err == nil || !strings.Contains(err.Error(), "immutable target binding") {
+				t.Fatalf("unbound %s route error=%v", test.name, err)
+			}
+		})
+	}
+}
+
 func TestPublisherRetainsPreviousGenerationOnSourceOrSecretFailure(t *testing.T) {
 	now := time.Date(2026, 9, 2, 10, 0, 0, 0, time.UTC)
 	directory := NewDirectory()

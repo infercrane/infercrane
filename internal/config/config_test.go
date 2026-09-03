@@ -100,23 +100,6 @@ func TestGPUPriceSyncIntervalIsBounded(t *testing.T) {
 	}
 }
 
-func TestHFCatalogRefreshIntervalIsBoundedAndOptIn(t *testing.T) {
-	t.Setenv("INFERCRANE_API_KEY", "test-key")
-	cfg, err := Load()
-	if err != nil || cfg.HFCatalogRefreshInterval != 0 {
-		t.Fatalf("default Hugging Face refresh=%s err=%v", cfg.HFCatalogRefreshInterval, err)
-	}
-	t.Setenv("INFERCRANE_HF_CATALOG_REFRESH_SECONDS", "21600")
-	cfg, err = Load()
-	if err != nil || cfg.HFCatalogRefreshInterval != 6*time.Hour {
-		t.Fatalf("configured Hugging Face refresh=%s err=%v", cfg.HFCatalogRefreshInterval, err)
-	}
-	t.Setenv("INFERCRANE_HF_CATALOG_REFRESH_SECONDS", "299")
-	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "INFERCRANE_HF_CATALOG_REFRESH_SECONDS") {
-		t.Fatalf("unsafe Hugging Face refresh interval accepted: %v", err)
-	}
-}
-
 func TestHostedModelAPIEndpointsAreExplicitConfiguration(t *testing.T) {
 	t.Setenv("INFERCRANE_API_KEY", "test-key")
 	t.Setenv("INFERCRANE_HOSTED_MODEL_API_ENDPOINTS_JSON", `{"openrouter/openai":"https://openrouter.ai/api/v1"}`)

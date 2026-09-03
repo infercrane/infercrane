@@ -5,3 +5,11 @@ useDefault = true
 description = "Documented synthetic bearer used only by the paid RunPod acceptance harness"
 regexTarget = "secret"
 regexes = ['''^infercrane-runpod-acceptance-key$''']
+
+[[allowlists]]
+description = "Public Qwen checkpoint revision and artifact checksum pinned by the provisional RunPod manifest"
+regexTarget = "secret"
+regexes = [
+  '''^017b9c7af6b5689d5dd426a76e0bc077eb5ca20a$''',
+  '''^0997f410c57a1f4e53b09e4be8f4a172d90edd9564368fb0847030937229b9f3$''',
+]

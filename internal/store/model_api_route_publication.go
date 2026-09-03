@@ -202,8 +202,8 @@ func publishedModelAPICandidates(ctx context.Context, tx *tx, at time.Time, sour
 			}
 			candidate.TargetBindingID, candidate.TargetBindingDigest = bindingID.String, bindingDigest.String
 			item.EndpointReference, item.EndpointConfigDigest = endpointReference.String, endpointConfigDigest.String
-		} else if item.Adapter == supplieradapter.RunPodVLLMAdapterName {
-			return nil, fmt.Errorf("hosted RunPod candidate %q has no current immutable target binding", candidate.ID)
+		} else if requiresModelAPITargetBinding(item.Adapter) {
+			return nil, fmt.Errorf("hosted candidate %q has no current immutable target binding", candidate.ID)
 		}
 		candidate.Operations = append([]string(nil), operations...)
 		candidate.Qualified, candidate.Available = true, true
@@ -223,6 +223,12 @@ func publishedModelAPICandidates(ctx context.Context, tx *tx, at time.Time, sour
 		}
 	}
 	return candidates, nil
+}
+
+func requiresModelAPITargetBinding(adapter string) bool {
+	return adapter == supplieradapter.RunPodVLLMAdapterName ||
+		adapter == supplieradapter.RunPodSGLangLBAdapterName ||
+		adapter == supplieradapter.ZAIAdapterName
 }
 
 func supportsPublishedOperations(capabilities, operations []string) bool {

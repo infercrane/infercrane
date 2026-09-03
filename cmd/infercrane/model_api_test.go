@@ -68,3 +68,21 @@ func TestModelAPIPublishRejectsInvalidManifestBeforeRequest(t *testing.T) {
 		t.Fatal("expected invalid JSON to be rejected")
 	}
 }
+
+func TestModelAPIPublishSupportsImmutableTargetBinding(t *testing.T) {
+	manifestPath := filepath.Join(t.TempDir(), "binding.json")
+	if err := os.WriteFile(manifestPath, []byte(`{"id":"binding-qwen38-runpod-r1"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/admin/model-api/target-bindings" {
+			t.Fatalf("request=%s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"target_binding":{"id":"binding-qwen38-runpod-r1"}}`)
+	}))
+	defer server.Close()
+	if err := modelAPICommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "operator-token"}, []string{"publish", "target-binding", "--file", manifestPath}); err != nil {
+		t.Fatal(err)
+	}
+}

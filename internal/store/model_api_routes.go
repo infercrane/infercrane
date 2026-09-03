@@ -11,7 +11,6 @@ import (
 	"github.com/infercrane/infercrane/internal/modelapireconciliation"
 	"github.com/infercrane/infercrane/internal/modelapirouting"
 	"github.com/infercrane/infercrane/internal/modelapisupply"
-	"github.com/infercrane/infercrane/internal/supplieradapter"
 )
 
 // ReserveModelAPIUsage durably reserves the entitlement's per-request ceiling
@@ -101,8 +100,8 @@ func (s *Store) ReserveModelAPIUsage(ctx context.Context, request modelapiroutin
 		if err != nil || bindingCount != 1 {
 			return modelapirouting.Reservation{}, fmt.Errorf("%w: immutable target binding changed before billing authorization", ErrConflict)
 		}
-	} else if offer.Adapter == supplieradapter.RunPodVLLMAdapterName {
-		return modelapirouting.Reservation{}, fmt.Errorf("%w: RunPod usage requires an immutable target binding", ErrConflict)
+	} else if requiresModelAPITargetBinding(offer.Adapter) {
+		return modelapirouting.Reservation{}, fmt.Errorf("%w: hosted usage requires an immutable target binding", ErrConflict)
 	}
 
 	var balance, reserved, debt int64

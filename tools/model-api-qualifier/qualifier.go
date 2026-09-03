@@ -11,8 +11,10 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -23,13 +25,88 @@ import (
 
 const (
 	qualificationSchema = "infercrane.supplier-qualification.raw/v1"
-	qualificationScope  = "deepseek-mvp:inventory+buffered-chat-completions+streaming-chat-completions"
 	qualificationProto  = "openai"
-	revisionAuthority   = "https://api-docs.deepseek.com/quick_start/pricing/"
 	qualificationPrompt = "Return exactly eight lowercase English words and no punctuation."
+	qwen38Revision      = "017b9c7af6b5689d5dd426a76e0bc077eb5ca20a"
 )
 
+const (
+	profileDeepSeekV4Flash = "deepseek-v4-flash"
+	profileGLM52           = "glm-5.2"
+	profileGLM53           = "glm-5.3"
+	profileGLM53Flash      = "glm-5.3-flash"
+	profileQwen38RunPod    = "qwen3.8-27b-runpod"
+)
+
+var runPodLBEndpointPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{2,127}$`)
+
+type qualificationProfile struct {
+	Name               string
+	Supplier           string
+	AdapterName        string
+	SupplierModelID    string
+	CredentialEnv      string
+	ExpectedRevision   string
+	RevisionAuthority  string
+	RevisionCheck      string
+	Scope              string
+	DefaultBaseURL     string
+	MaximumOutputToken int
+	NewAdapter         func(*http.Client) supplieradapter.Adapter
+}
+
+func qualificationProfiles() map[string]qualificationProfile {
+	return map[string]qualificationProfile{
+		profileDeepSeekV4Flash: {
+			Name: profileDeepSeekV4Flash, Supplier: supplieradapter.DeepSeekSupplier, AdapterName: supplieradapter.DeepSeekAdapterName,
+			SupplierModelID: supplieradapter.DeepSeekV4FlashModelID, CredentialEnv: "DEEPSEEK_API_KEY",
+			ExpectedRevision: supplieradapter.DeepSeekV4FlashRevision, RevisionAuthority: "https://api-docs.deepseek.com/quick_start/pricing/",
+			RevisionCheck: "operator-pinned official model table; alias responses verified by the production adapter",
+			Scope:         "deepseek-mvp:inventory+buffered-chat-completions+streaming-chat-completions", DefaultBaseURL: supplieradapter.DeepSeekBaseURL,
+			MaximumOutputToken: 1024, NewAdapter: func(client *http.Client) supplieradapter.Adapter { return supplieradapter.NewDeepSeekAdapter(client) },
+		},
+		profileGLM52:      zaiQualificationProfile(profileGLM52, supplieradapter.ZAIGLM52ModelID, "https://docs.z.ai/guides/llm/glm-5.2"),
+		profileGLM53:      zaiQualificationProfile(profileGLM53, supplieradapter.ZAIGLM53ModelID, "https://docs.z.ai/guides/llm/glm-5.3"),
+		profileGLM53Flash: zaiQualificationProfile(profileGLM53Flash, supplieradapter.ZAIGLM53FlashModelID, "https://docs.z.ai/guides/vlm/glm-5.3-flash"),
+		profileQwen38RunPod: {
+			Name: profileQwen38RunPod, Supplier: supplieradapter.RunPodSupplier, AdapterName: supplieradapter.RunPodSGLangLBAdapterName,
+			SupplierModelID: supplieradapter.RunPodQwen38SupplierModelID, CredentialEnv: "RUNPOD_API_KEY", ExpectedRevision: qwen38Revision,
+			RevisionAuthority: "https://huggingface.co/Qwen/Qwen3.8-27B-FP8/commit/" + qwen38Revision,
+			RevisionCheck:     "immutable Hugging Face checkpoint pinned by the RunPod SGLang deployment recipe; exact served model verified by the production adapter",
+			Scope:             "runpod-sglang-mvp:inventory+buffered-chat-completions+streaming-chat-completions", MaximumOutputToken: supplieradapter.RunPodQwen38MaxOutputTokens,
+			NewAdapter: func(client *http.Client) supplieradapter.Adapter {
+				return supplieradapter.NewRunPodSGLangLBAdapter(client)
+			},
+		},
+	}
+}
+
+func zaiQualificationProfile(name, modelID, authority string) qualificationProfile {
+	return qualificationProfile{
+		Name: name, Supplier: supplieradapter.ZAISupplier, AdapterName: supplieradapter.ZAIAdapterName,
+		SupplierModelID: modelID, CredentialEnv: "ZAI_API_KEY", ExpectedRevision: modelID, RevisionAuthority: authority,
+		RevisionCheck: "operator-pinned supplier API model identity; exact response identity verified by the production adapter",
+		Scope:         "zai-mvp:authenticated-model-probe+buffered-chat-completions+streaming-chat-completions", DefaultBaseURL: supplieradapter.ZAIBaseURL,
+		MaximumOutputToken: 1024, NewAdapter: func(client *http.Client) supplieradapter.Adapter { return supplieradapter.NewZAIAdapter(client) },
+	}
+}
+
+func resolveQualificationProfile(name string) (qualificationProfile, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = profileDeepSeekV4Flash
+	}
+	profile, ok := qualificationProfiles()[name]
+	if !ok {
+		return qualificationProfile{}, fmt.Errorf("unsupported --profile %q", name)
+	}
+	return profile, nil
+}
+
 type qualifierConfig struct {
+	Profile             string
+	EndpointOrigin      string
+	Region              string
 	OfferID             string
 	OfferVersion        int64
 	QualificationID     string
@@ -48,6 +125,10 @@ type qualifierConfig struct {
 }
 
 func (c qualifierConfig) Validate() error {
+	profile, err := resolveQualificationProfile(c.Profile)
+	if err != nil {
+		return err
+	}
 	required := map[string]string{
 		"--offer-id": c.OfferID, "--qualification-id": c.QualificationID,
 		"--tuple-key": c.TupleKey, "--expected-revision": c.ExpectedRevision,
@@ -65,14 +146,14 @@ func (c qualifierConfig) Validate() error {
 	if c.OfferVersion <= 0 {
 		return errors.New("--offer-version must be positive")
 	}
-	if c.ExpectedRevision != supplieradapter.DeepSeekV4FlashRevision {
-		return fmt.Errorf("revision drift: this binary qualifies only %s", supplieradapter.DeepSeekV4FlashRevision)
+	if c.ExpectedRevision != profile.ExpectedRevision {
+		return fmt.Errorf("revision drift: profile %s qualifies only %s", profile.Name, profile.ExpectedRevision)
 	}
 	if c.SamplesPerMode < 1 || c.SamplesPerMode > 20 {
 		return errors.New("--samples-per-mode must be between 1 and 20")
 	}
-	if c.MaxOutputTokens < 1 || c.MaxOutputTokens > 1024 {
-		return errors.New("--max-output-tokens must be between 1 and 1024")
+	if c.MaxOutputTokens < 1 || c.MaxOutputTokens > profile.MaximumOutputToken {
+		return fmt.Errorf("--max-output-tokens must be between 1 and %d for profile %s", profile.MaximumOutputToken, profile.Name)
 	}
 	if c.RequestTimeout <= 0 || c.RequestTimeout > 5*time.Minute {
 		return errors.New("--request-timeout must be positive and at most 5m")
@@ -87,7 +168,41 @@ func (c qualifierConfig) Validate() error {
 		return errors.New("--max-stream-bytes must be between 1MiB and 32MiB")
 	}
 	if !c.ConfirmLive {
-		return errors.New("--confirm-live-deepseek is required; qualification makes billable supplier calls")
+		return errors.New("--confirm-live is required; qualification makes billable supplier calls")
+	}
+	if profile.Name == profileQwen38RunPod {
+		if err := validateRunPodLBOrigin(c.EndpointOrigin); err != nil {
+			return err
+		}
+		if strings.TrimSpace(c.Region) == "" {
+			return errors.New("--region is required for the RunPod profile")
+		}
+	} else if strings.TrimSpace(c.EndpointOrigin) != "" {
+		return errors.New("--endpoint-origin is accepted only by the RunPod profile")
+	}
+	region := "global"
+	if profile.Name == profileQwen38RunPod {
+		region = strings.TrimSpace(c.Region)
+	}
+	expectedTuple := strings.Join([]string{profile.Supplier, profile.SupplierModelID, qualificationProto, region}, "|")
+	if c.TupleKey != expectedTuple {
+		return fmt.Errorf("--tuple-key must exactly match %q for profile %s", expectedTuple, profile.Name)
+	}
+	return nil
+}
+
+func validateRunPodLBOrigin(value string) error {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil || parsed.Scheme != "https" || parsed.User != nil || parsed.Port() != "" || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.RawPath != "" || strings.Trim(parsed.Path, "/") != "" {
+		return errors.New("--endpoint-origin must be an exact HTTPS RunPod load-balanced endpoint origin")
+	}
+	host := strings.TrimSuffix(parsed.Hostname(), ".")
+	if !strings.HasSuffix(host, ".api.runpod.ai") {
+		return errors.New("--endpoint-origin must end in .api.runpod.ai")
+	}
+	endpointID := strings.TrimSuffix(host, ".api.runpod.ai")
+	if !runPodLBEndpointPattern.MatchString(endpointID) || strings.Contains(endpointID, ".") {
+		return errors.New("--endpoint-origin contains an invalid RunPod endpoint id")
 	}
 	return nil
 }
@@ -109,10 +224,11 @@ type rawEvidence struct {
 }
 
 type modelIdentity struct {
-	SupplierModelID   string `json:"supplier_model_id"`
-	ExpectedRevision  string `json:"expected_revision"`
-	RevisionAuthority string `json:"revision_authority"`
-	RevisionCheck     string `json:"revision_check"`
+	SupplierModelID    string `json:"supplier_model_id"`
+	ExpectedRevision   string `json:"expected_revision"`
+	RevisionAuthority  string `json:"revision_authority"`
+	RevisionCheck      string `json:"revision_check"`
+	TargetOriginSHA256 string `json:"target_origin_sha256"`
 }
 
 type runLimits struct {
@@ -166,10 +282,13 @@ type qualificationManifest struct {
 	Evidence     modelapisupply.QualificationEvidence `json:"evidence"`
 }
 
-type memoryCredential struct{ value []byte }
+type memoryCredential struct {
+	reference string
+	value     []byte
+}
 
 func (r memoryCredential) Resolve(_ context.Context, reference string) ([]byte, error) {
-	if reference != "env://DEEPSEEK_API_KEY" || len(r.value) == 0 {
+	if reference != r.reference || len(r.value) == 0 {
 		return nil, errors.New("supplier credential is unavailable")
 	}
 	return append([]byte(nil), r.value...), nil
@@ -178,6 +297,8 @@ func (r memoryCredential) Resolve(_ context.Context, reference string) ([]byte, 
 type qualifier struct {
 	client  *http.Client
 	adapter supplieradapter.Adapter
+	profile qualificationProfile
+	target  supplieradapter.Target
 	secret  memoryCredential
 	now     func() time.Time
 }
@@ -189,13 +310,23 @@ func runQualification(ctx context.Context, cfg qualifierConfig, client *http.Cli
 	if client == nil || client.Transport == nil || len(credential) == 0 {
 		return rawEvidence{}, qualificationManifest{}, errors.New("qualified HTTP client and credential are required")
 	}
-	q := qualifier{client: client, adapter: supplieradapter.NewDeepSeekAdapter(client), secret: memoryCredential{value: credential}, now: time.Now}
+	profile, err := resolveQualificationProfile(cfg.Profile)
+	if err != nil {
+		return rawEvidence{}, qualificationManifest{}, err
+	}
+	target, err := profile.target(cfg)
+	if err != nil {
+		return rawEvidence{}, qualificationManifest{}, err
+	}
+	credentialReference := "env://" + profile.CredentialEnv
+	q := qualifier{client: client, adapter: profile.NewAdapter(client), profile: profile, target: target,
+		secret: memoryCredential{reference: credentialReference, value: credential}, now: time.Now}
 	started := q.now().UTC().Truncate(time.Microsecond)
 	raw := rawEvidence{
-		SchemaVersion: qualificationSchema, Status: "passed", Supplier: supplieradapter.DeepSeekSupplier,
-		Adapter: supplieradapter.DeepSeekAdapterName, Protocol: qualificationProto, Region: "global", StartedAt: started,
-		Model: modelIdentity{SupplierModelID: supplieradapter.DeepSeekV4FlashModelID, ExpectedRevision: cfg.ExpectedRevision,
-			RevisionAuthority: revisionAuthority, RevisionCheck: "operator-pinned official model table; alias responses verified by adapter"},
+		SchemaVersion: qualificationSchema, Status: "passed", Supplier: profile.Supplier,
+		Adapter: profile.AdapterName, Protocol: qualificationProto, Region: target.Region, StartedAt: started,
+		Model: modelIdentity{SupplierModelID: profile.SupplierModelID, ExpectedRevision: cfg.ExpectedRevision,
+			RevisionAuthority: profile.RevisionAuthority, RevisionCheck: profile.RevisionCheck, TargetOriginSHA256: digestBytes([]byte(target.BaseURL))},
 		Limits: runLimits{SamplesPerMode: cfg.SamplesPerMode, RequestTimeoutMS: cfg.RequestTimeout.Milliseconds(),
 			TotalTimeoutMS: cfg.TotalTimeout.Milliseconds(), MaxOutputTokens: cfg.MaxOutputTokens, MaxStreamBytes: cfg.MaxStreamBytes,
 			PromptSHA256: digestBytes([]byte(qualificationPrompt))},
@@ -231,8 +362,8 @@ func runQualification(ctx context.Context, cfg qualifierConfig, client *http.Cli
 		OfferID: cfg.OfferID, OfferVersion: cfg.OfferVersion,
 		Evidence: modelapisupply.QualificationEvidence{
 			ID: cfg.QualificationID, State: modelapisupply.QualificationQualified, TupleKey: cfg.TupleKey,
-			Protocol: qualificationProto, Region: "global", Capabilities: []string{"chat-completions", "streaming"},
-			Scope: qualificationScope + ";revision=" + cfg.ExpectedRevision, EvidenceRef: cfg.EvidenceRef,
+			Protocol: qualificationProto, Region: target.Region, Capabilities: []string{"chat-completions", "streaming"},
+			Scope: profile.Scope + ";revision=" + cfg.ExpectedRevision + ";target_origin_sha256=" + raw.Model.TargetOriginSHA256, EvidenceRef: cfg.EvidenceRef,
 			EvidenceDigest: "sha256:" + digestBytes(canonical), ObservedAt: raw.FinishedAt,
 			ValidUntil: raw.FinishedAt.Add(cfg.ValidFor).UTC().Truncate(time.Microsecond), SampleCount: len(raw.Samples),
 			TTFTP95MS: &ttft, OutputTokensP5: &throughput,
@@ -244,15 +375,24 @@ func runQualification(ctx context.Context, cfg qualifierConfig, client *http.Cli
 	return raw, manifest, nil
 }
 
-func deepSeekTarget() supplieradapter.Target {
-	return supplieradapter.Target{Supplier: supplieradapter.DeepSeekSupplier, BaseURL: supplieradapter.DeepSeekBaseURL,
-		SupplierModelID: supplieradapter.DeepSeekV4FlashModelID, Region: "global", CredentialReference: "env://DEEPSEEK_API_KEY"}
+func (p qualificationProfile) target(cfg qualifierConfig) (supplieradapter.Target, error) {
+	baseURL := p.DefaultBaseURL
+	region := "global"
+	if p.Name == profileQwen38RunPod {
+		baseURL = strings.TrimSpace(cfg.EndpointOrigin)
+		region = strings.TrimSpace(cfg.Region)
+	}
+	if strings.TrimSpace(baseURL) == "" || strings.TrimSpace(region) == "" {
+		return supplieradapter.Target{}, errors.New("qualification target is incomplete")
+	}
+	return supplieradapter.Target{Supplier: p.Supplier, BaseURL: baseURL, SupplierModelID: p.SupplierModelID,
+		Region: region, CredentialReference: "env://" + p.CredentialEnv}, nil
 }
 
 func (q qualifier) inventory(ctx context.Context, cfg qualifierConfig) (inventoryEvidence, error) {
 	callCtx, cancel := context.WithTimeout(ctx, cfg.RequestTimeout)
 	defer cancel()
-	observation, err := q.adapter.Probe(callCtx, deepSeekTarget(), q.secret)
+	observation, err := q.adapter.Probe(callCtx, q.target, q.secret)
 	if err != nil {
 		return inventoryEvidence{}, safeStageError("inventory probe", err)
 	}
@@ -264,7 +404,7 @@ func (q qualifier) inventory(ctx context.Context, cfg qualifierConfig) (inventor
 			return inventoryEvidence{}, errors.New("inventory probe failed closed on an invalid model item")
 		}
 		ids = append(ids, id)
-		if id == supplieradapter.DeepSeekV4FlashModelID {
+		if id == q.profile.SupplierModelID {
 			targetCount++
 		}
 	}
@@ -278,11 +418,11 @@ func (q qualifier) inventory(ctx context.Context, cfg qualifierConfig) (inventor
 		ModelIDsSHA256: digestBytes(encoded)}, nil
 }
 
-func qualificationRequest(cfg qualifierConfig, id string, stream bool) supplieradapter.Request {
+func (q qualifier) qualificationRequest(cfg qualifierConfig, id string, stream bool) supplieradapter.Request {
 	maximum := cfg.MaxOutputTokens
 	temperature := 0.0
 	return supplieradapter.Request{
-		ID: id, Operation: supplieradapter.OperationChatCompletions, ModelID: "deepseek-v4-flash",
+		ID: id, Operation: supplieradapter.OperationChatCompletions, ModelID: "qualification-target",
 		Messages:        []supplieradapter.Message{{Role: "user", Content: []supplieradapter.ContentPart{{Type: "text", Text: qualificationPrompt}}}},
 		MaxOutputTokens: &maximum, Temperature: &temperature, Stream: stream,
 	}
@@ -292,7 +432,7 @@ func (q qualifier) buffered(ctx context.Context, cfg qualifierConfig, sequence i
 	callCtx, cancel := context.WithTimeout(ctx, cfg.RequestTimeout)
 	defer cancel()
 	requestID := fmt.Sprintf("ic-qual-%d-b-%02d", runStarted.UnixMicro(), sequence)
-	request, err := q.adapter.BuildRequest(callCtx, deepSeekTarget(), qualificationRequest(cfg, requestID, false), q.secret)
+	request, err := q.adapter.BuildRequest(callCtx, q.target, q.qualificationRequest(cfg, requestID, false), q.secret)
 	if err != nil {
 		return sampleEvidence{}, safeStageError("buffered request construction", err)
 	}
@@ -312,7 +452,7 @@ func (q qualifier) buffered(ctx context.Context, cfg qualifierConfig, sequence i
 		return sampleEvidence{}, safeStageError("buffered response contract", err)
 	}
 	input, output, err := requireCompleteUsage(decoded.Usage)
-	if err != nil || decoded.ModelID != supplieradapter.DeepSeekV4FlashModelID || decoded.ID == "" || len(decoded.Choices) != 1 || decoded.Choices[0].FinishReason == "" {
+	if err != nil || decoded.ModelID != q.profile.SupplierModelID || decoded.ID == "" || len(decoded.Choices) != 1 || decoded.Choices[0].FinishReason == "" {
 		return sampleEvidence{}, errors.New("buffered response failed exact identity, usage, or terminal contract")
 	}
 	return sampleEvidence{Mode: "buffered", Sequence: sequence, Succeeded: true, ModelID: decoded.ModelID,
@@ -325,7 +465,7 @@ func (q qualifier) streaming(ctx context.Context, cfg qualifierConfig, sequence 
 	callCtx, cancel := context.WithTimeout(ctx, cfg.RequestTimeout)
 	defer cancel()
 	requestID := fmt.Sprintf("ic-qual-%d-s-%02d", runStarted.UnixMicro(), sequence)
-	request, err := q.adapter.BuildRequest(callCtx, deepSeekTarget(), qualificationRequest(cfg, requestID, true), q.secret)
+	request, err := q.adapter.BuildRequest(callCtx, q.target, q.qualificationRequest(cfg, requestID, true), q.secret)
 	if err != nil {
 		return sampleEvidence{}, safeStageError("streaming request construction", err)
 	}
@@ -384,7 +524,7 @@ func (q qualifier) streaming(ctx context.Context, cfg qualifierConfig, sequence 
 		generationSeconds = 1e-9
 	}
 	throughput := float64(output) / generationSeconds
-	return sampleEvidence{Mode: "streaming", Sequence: sequence, Succeeded: true, ModelID: supplieradapter.DeepSeekV4FlashModelID,
+	return sampleEvidence{Mode: "streaming", Sequence: sequence, Succeeded: true, ModelID: q.profile.SupplierModelID,
 		SupplierRequestIDPresent: supplierRequestIDPresent, InputTokens: input, OutputTokens: output, CachedInputTokens: usage.CachedInput,
 		LatencyMS: durationMS(finished.Sub(started)), TTFTMS: &ttft, OutputTokensPerSecond: &throughput, FinishReason: finishReason,
 		WireSHA256: wire.Digest(), WireBytes: wire.BytesRead(), TerminalDoneFrames: wire.DoneFrames()}, nil
