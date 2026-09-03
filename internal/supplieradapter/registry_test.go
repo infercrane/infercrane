@@ -27,6 +27,12 @@ func TestDefaultRegistryContainsQualifiedHostedAdapters(t *testing.T) {
 	if _, ok := registry.Lookup(RunPodVLLMAdapterName); !ok {
 		t.Fatal("RunPod vLLM adapter is absent from the default registry")
 	}
+	if _, ok := registry.Lookup(RunPodSGLangLBAdapterName); !ok {
+		t.Fatal("RunPod SGLang load-balanced adapter is absent from the default registry")
+	}
+	if _, ok := registry.Lookup(ZAIAdapterName); !ok {
+		t.Fatal("Z.ai adapter is absent from the default registry")
+	}
 	if _, ok := registry.Lookup("openai"); ok {
 		t.Fatal("unqualified generic adapter appeared in the default registry")
 	}

@@ -89,7 +89,7 @@ func main() {
 		PublishedAt:              now.Add(-2 * time.Minute),
 		ValidFrom:                now.Add(-time.Minute),
 		ValidUntil:               now.Add(30 * 24 * time.Hour),
-		PublicProvenance:         "InferCrane retail rate v1; supplier cost basis observed from " + productionTerms,
+		PublicProvenance:         modelapiproduct.CustomerRetailRateProvenance,
 	})
 	if err != nil {
 		fatal(err)

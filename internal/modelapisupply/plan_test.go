@@ -136,6 +136,38 @@ func TestCompileRequiresCurrentExactQualificationWithoutAnSLO(t *testing.T) {
 	}
 }
 
+func TestCompileAllowsOnlyShortExplicitMVPLaunchPriceParity(t *testing.T) {
+	at := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
+	request := baseRequest(at)
+	request.MinimumGrossMarginBPS = 0
+	request.PricingPolicy = PricingPolicyLaunchParity
+	priceParity := candidate("price-parity", "supplier-a", 100_000, 400_000, at)
+	priceParity.CostInputMicrousdPerMTok = int64Pointer(100_000)
+	priceParity.CostOutputMicrousdPerMTok = int64Pointer(400_000)
+
+	plan, err := Compile(request, []Candidate{priceParity})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Status != StatusReady || plan.Primary == nil || plan.Primary.GrossMarginBPS != 0 {
+		t.Fatalf("short explicit parity offer was not eligible: %+v", plan)
+	}
+
+	priceParity.RateValidUntil = at.Add(maximumLaunchParityWindow + time.Second)
+	plan, err = Compile(request, []Candidate{priceParity})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Status != StatusInsufficient || len(plan.Rejections) != 1 || !contains(plan.Rejections[0].Reasons, ReasonLaunchParityWindow) {
+		t.Fatalf("long-lived parity offer escaped the launch guard: %+v", plan)
+	}
+
+	request.PricingPolicy = ""
+	if _, err = Compile(request, []Candidate{priceParity}); err == nil {
+		t.Fatal("zero-margin request without the explicit launch policy was accepted")
+	}
+}
+
 func baseRequest(at time.Time) Request {
 	return Request{
 		ModelID: "logical-model", Protocol: "openai", Capabilities: []string{"streaming", "tool-calling"}, Region: "eu",

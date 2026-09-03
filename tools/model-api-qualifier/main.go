@@ -14,6 +14,9 @@ import (
 
 func main() {
 	cfg := qualifierConfig{}
+	flag.StringVar(&cfg.Profile, "profile", profileDeepSeekV4Flash, "qualification profile: deepseek-v4-flash, glm-5.2, glm-5.3, glm-5.3-flash, or qwen3.8-27b-runpod")
+	flag.StringVar(&cfg.EndpointOrigin, "endpoint-origin", "", "exact RunPod load-balanced HTTPS endpoint origin (RunPod profile only)")
+	flag.StringVar(&cfg.Region, "region", "", "exact supplier region (required for the RunPod profile)")
 	flag.StringVar(&cfg.OfferID, "offer-id", "", "immutable supplier offer id")
 	flag.Int64Var(&cfg.OfferVersion, "offer-version", 0, "immutable supplier offer version")
 	flag.StringVar(&cfg.QualificationID, "qualification-id", "", "append-only qualification id")
@@ -28,15 +31,25 @@ func main() {
 	flag.DurationVar(&cfg.TotalTimeout, "total-timeout", 10*time.Minute, "hard timeout for the complete qualification run")
 	flag.DurationVar(&cfg.ValidFor, "valid-for", time.Hour, "qualification validity window (up to 24h)")
 	flag.Int64Var(&cfg.MaxStreamBytes, "max-stream-bytes", 8<<20, "maximum SSE bytes accepted per sample")
-	flag.BoolVar(&cfg.ConfirmLive, "confirm-live-deepseek", false, "required acknowledgement that this spends DeepSeek credit")
+	flag.BoolVar(&cfg.ConfirmLive, "confirm-live", false, "required acknowledgement that qualification makes billable supplier calls")
+	legacyDeepSeekConfirmation := false
+	flag.BoolVar(&legacyDeepSeekConfirmation, "confirm-live-deepseek", false, "deprecated alias for --confirm-live")
 	flag.Parse()
+	profile, err := resolveQualificationProfile(cfg.Profile)
+	if err != nil {
+		fatal(err)
+	}
+	if legacyDeepSeekConfirmation && profile.Name != profileDeepSeekV4Flash {
+		fatal(errors.New("--confirm-live-deepseek is accepted only by the deepseek-v4-flash profile; use --confirm-live"))
+	}
+	cfg.ConfirmLive = cfg.ConfirmLive || legacyDeepSeekConfirmation
 
 	if err := cfg.Validate(); err != nil {
 		fatal(err)
 	}
-	credential, ok := os.LookupEnv("DEEPSEEK_API_KEY")
+	credential, ok := os.LookupEnv(profile.CredentialEnv)
 	if !ok || credential == "" {
-		fatal(errors.New("DEEPSEEK_API_KEY is required"))
+		fatal(errors.New(profile.CredentialEnv + " is required"))
 	}
 	secret := []byte(credential)
 	credential = ""

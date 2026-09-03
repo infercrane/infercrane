@@ -6055,42 +6055,6 @@
         ]
       }
     },
-    "/api/v1/catalog/hugging-face/models": {
-      "get": {
-        "operationId": "listHuggingFaceCatalogModels",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Object"
-                }
-              }
-            },
-            "description": "Success"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Typed API error"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Inspect bounded normalized Hugging Face metadata without promoting it to a reviewed recipe",
-        "tags": [
-          "Model catalog"
-        ]
-      }
-    },
     "/api/v1/catalog/models": {
       "get": {
         "operationId": "listCatalogModels",

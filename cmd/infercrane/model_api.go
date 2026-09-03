@@ -13,18 +13,19 @@ import (
 )
 
 var modelAPIManifestEndpoints = map[string]string{
-	"product":       "/api/v1/admin/model-api/products",
-	"rate":          "/api/v1/admin/model-api/rates",
-	"offer":         "/api/v1/admin/model-api/offers",
-	"qualification": "/api/v1/admin/model-api/qualifications",
-	"plan":          "/api/v1/admin/model-api/plans",
-	"publication":   "/api/v1/admin/model-api/publications",
-	"entitlement":   "/api/v1/admin/model-api/entitlements",
+	"product":        "/api/v1/admin/model-api/products",
+	"rate":           "/api/v1/admin/model-api/rates",
+	"offer":          "/api/v1/admin/model-api/offers",
+	"qualification":  "/api/v1/admin/model-api/qualifications",
+	"target-binding": "/api/v1/admin/model-api/target-bindings",
+	"plan":           "/api/v1/admin/model-api/plans",
+	"publication":    "/api/v1/admin/model-api/publications",
+	"entitlement":    "/api/v1/admin/model-api/entitlements",
 }
 
 func modelAPICommand(ctx context.Context, cfg config.Config, args []string) error {
 	if len(args) < 2 || args[0] != "publish" {
-		return errors.New("usage: infercrane model-api publish product|rate|offer|qualification|plan|publication|entitlement --file MANIFEST.json")
+		return errors.New("usage: infercrane model-api publish product|rate|offer|qualification|target-binding|plan|publication|entitlement --file MANIFEST.json")
 	}
 	contractType := args[1]
 	endpoint, ok := modelAPIManifestEndpoints[contractType]

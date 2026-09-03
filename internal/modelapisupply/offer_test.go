@@ -8,14 +8,10 @@ import (
 	"github.com/infercrane/infercrane/internal/modelapiproduct"
 )
 
-func TestMaterializeCandidateKeepsHuggingFaceMetadataAdvisory(t *testing.T) {
+func TestMaterializeCandidateKeepsSupplierDiscoveryOutOfExecutableIdentity(t *testing.T) {
 	at := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 	offer := completeOffer(at)
 	offer.Capabilities = []string{"streaming", "tool-calling"}
-	offer.HuggingFace = &HuggingFaceProvenance{
-		RepositoryID: "unreviewed/repository", Revision: "candidate", License: "unknown",
-		SourceURL: "https://huggingface.co/unreviewed/repository", ObservedAt: at,
-	}
 	candidate, err := MaterializeCandidate(CandidateMaterialization{
 		CandidateID: "offer-a-v1", Offer: offer,
 		RetailRate: testRetailRate(t, at, at.Add(2*time.Hour)),
@@ -24,13 +20,13 @@ func TestMaterializeCandidateKeepsHuggingFaceMetadataAdvisory(t *testing.T) {
 		t.Fatal(err)
 	}
 	if candidate.ModelID != offer.ProductID || candidate.SupplierModelID != offer.SupplierModelID {
-		t.Fatalf("Hugging Face metadata changed exact identity: %+v", candidate)
+		t.Fatalf("supplier discovery changed exact identity: %+v", candidate)
 	}
 	if candidate.RetailRateID != "retail-rate" || candidate.RetailRateVersion != 1 {
 		t.Fatalf("canonical retail rate identity was not materialized: %+v", candidate)
 	}
 	if !reflect.DeepEqual(candidate.Capabilities, []string{"streaming", "tool-calling"}) {
-		t.Fatalf("Hugging Face metadata changed capabilities: %+v", candidate.Capabilities)
+		t.Fatalf("supplier discovery changed capabilities: %+v", candidate.Capabilities)
 	}
 	if candidate.RateValidUntil != at.Add(2*time.Hour) {
 		t.Fatalf("candidate did not use the earliest private validity boundary: %v", candidate.RateValidUntil)

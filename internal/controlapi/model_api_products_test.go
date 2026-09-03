@@ -64,12 +64,12 @@ func TestDurableModelAPICatalogPreservesPublicContractAndRedactsInternals(t *tes
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	body := response.Body.String()
-	for _, expected := range []string{`"catalog_source":"durable_product_catalog"`, `"display_name":"GLM-5.2"`, `"access":"ready"`, `"callable":true`, `"id":"infercrane-standard"`, `"version":1`} {
+	for _, expected := range []string{`"catalog_source":"durable_product_catalog"`, `"display_name":"GLM-5.2"`, `"access":"ready"`, `"callable":true`, `"id":"infercrane-standard"`, `"version":1`, `"provenance":"InferCrane retail rate card"`} {
 		if response.Code != http.StatusOK || !strings.Contains(body, expected) {
 			t.Fatalf("status=%d missing=%q body=%s", response.Code, expected, body)
 		}
 	}
-	for _, secret := range []string{"operator_workspace_id", "serving_plan_id", "supply_plan_id", "contract_digest", "rate-glm-1", "supplier_model_id", "credential"} {
+	for _, secret := range []string{"operator_workspace_id", "serving_plan_id", "supply_plan_id", "contract_digest", "rate-glm-1", "supplier_model_id", "credential", "Private Route Vendor", "supplier.example/private-route"} {
 		if strings.Contains(body, secret) {
 			t.Fatalf("durable catalog leaked private field %q: %s", secret, body)
 		}
@@ -91,6 +91,38 @@ func TestDurableModelAPICatalogHidesExpiredRateAndFailsClosed(t *testing.T) {
 	body := response.Body.String()
 	if response.Code != http.StatusOK || !strings.Contains(body, `"callable":false`) || !strings.Contains(body, `"offers":[]`) || strings.Contains(body, `"pricing"`) {
 		t.Fatalf("expired durable product was not closed: status=%d body=%s", response.Code, body)
+	}
+}
+
+func TestDurableModelAPICatalogKeepsQwen38AsAnHonestPreview(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	var qwen modelapiproduct.Product
+	for _, product := range modelapiproduct.DefaultCatalog() {
+		if product.ID == "qwen3.8-27b" {
+			qwen = product
+			break
+		}
+	}
+	projection, err := modelapiproduct.PublicProjectionAt(qwen, nil, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	durable := &fakeModelAPIProductStore{products: []modelapiproduct.PublicProjection{projection}}
+	handler := (API{Store: &fakeStore{}, APIKey: "secret", ModelAPIProducts: durable}).Handler()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/model-api-catalog?query=qwen3.8", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	body := response.Body.String()
+	for _, expected := range []string{`"id":"qwen3.8-27b"`, `"context_window_tokens":18432`, `"tasks":["chat"]`, `"capabilities":["chat-completions","streaming"]`, `"availability":"catalog_only"`, `"qualification":"cataloged"`, `"callable":false`, `"offers":[]`} {
+		if response.Code != http.StatusOK || !strings.Contains(body, expected) {
+			t.Fatalf("status=%d missing=%q body=%s", response.Code, expected, body)
+		}
+	}
+	for _, unsupported := range []string{"reasoning", "tool-calling", "vision", "image", "pricing"} {
+		if strings.Contains(body, unsupported) {
+			t.Fatalf("Qwen3.8 preview exposed unsupported contract %q: %s", unsupported, body)
+		}
 	}
 }
 
@@ -234,7 +266,7 @@ func callableModelAPIProduct(t *testing.T, now time.Time) modelapiproduct.Public
 		ID: "rate-glm-1", ProductID: product.ID, Version: 1,
 		InputMicrousdPerMillion: 1_260_000, OutputMicrousdPerMillion: 3_960_000,
 		ValidFrom: now.Add(-time.Hour), ValidUntil: now.Add(24 * time.Hour),
-		PublishedAt: now.Add(-2 * time.Hour), PublicProvenance: "InferCrane rate card",
+		PublishedAt: now.Add(-2 * time.Hour), PublicProvenance: "Private Route Vendor https://supplier.example/private-route",
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -9,6 +9,11 @@ import (
 	"time"
 )
 
+// CustomerRetailRateProvenance is the only pricing provenance exposed at the
+// customer API boundary. Supplier cost evidence and route identity remain in
+// the operator-private supply contract.
+const CustomerRetailRateProvenance = "InferCrane retail rate card"
+
 // RetailRate is an append-only, versioned public price contract. Supplier cost
 // and supplier identity intentionally do not belong in this record.
 type RetailRate struct {

@@ -107,7 +107,7 @@ func modelAPIProductResponse(product modelapiproduct.PublicProjection, now time.
 		pricing := map[string]any{
 			"currency": rate.Currency, "input_microusd_per_million": rate.InputMicrousdPerMillion,
 			"output_microusd_per_million": rate.OutputMicrousdPerMillion,
-			"provenance":                  rate.PublicProvenance, "observed_at": rate.PublishedAt,
+			"provenance":                  modelapiproduct.CustomerRetailRateProvenance, "observed_at": rate.PublishedAt,
 			"valid_until": rate.ValidUntil, "version": rate.Version,
 		}
 		availability := "unknown"

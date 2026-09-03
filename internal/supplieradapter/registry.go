@@ -40,7 +40,7 @@ func (r *Registry) Lookup(name string) (Adapter, bool) {
 }
 
 func DefaultRegistry() *Registry {
-	registry, err := NewRegistry(NewDeepSeekAdapter(nil), NewRunPodVLLMAdapter(nil))
+	registry, err := NewRegistry(NewDeepSeekAdapter(nil), NewRunPodVLLMAdapter(nil), NewRunPodSGLangLBAdapter(nil), NewZAIAdapter(nil))
 	if err != nil {
 		panic(err)
 	}

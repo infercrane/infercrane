@@ -21,6 +21,9 @@ import (
 const (
 	SchemaVersion                     = "managed-model-supply-plan/v1"
 	MinimumSafeGrossMarginBPS         = 1500
+	PricingPolicyStandard             = "standard_margin"
+	PricingPolicyLaunchParity         = "mvp_launch_price_parity"
+	maximumLaunchParityWindow         = 7 * 24 * time.Hour
 	defaultMaximumFallbacks           = 2
 	StatusReady                       = "ready"
 	StatusInsufficient                = "insufficient"
@@ -37,6 +40,7 @@ const (
 	ReasonCommercialAuthorization     = "commercial_authorization_not_ready"
 	ReasonCostBasisAbsent             = "cost_basis_absent"
 	ReasonMarginBelowFloor            = "margin_below_floor"
+	ReasonLaunchParityWindow          = "launch_price_parity_window_exceeded"
 	ReasonQualificationAbsent         = "qualification_absent"
 	ReasonQualificationNotReady       = "qualification_not_ready"
 	ReasonQualificationStale          = "qualification_stale"
@@ -59,6 +63,7 @@ type Request struct {
 	InputTokens            int           `json:"input_tokens"`
 	OutputTokens           int           `json:"output_tokens"`
 	MinimumGrossMarginBPS  int           `json:"minimum_gross_margin_bps"`
+	PricingPolicy          string        `json:"pricing_policy,omitempty"`
 	MaximumObservationAge  time.Duration `json:"maximum_observation_age_ns"`
 	MaximumEvidenceAge     time.Duration `json:"maximum_evidence_age_ns,omitempty"`
 	MinimumEvidenceSamples int           `json:"minimum_evidence_samples,omitempty"`
@@ -233,8 +238,21 @@ func validateRequest(request Request) error {
 	if request.InputTokens < 0 || request.OutputTokens < 0 {
 		return errors.New("workload token counts cannot be negative")
 	}
-	if request.MinimumGrossMarginBPS < MinimumSafeGrossMarginBPS || request.MinimumGrossMarginBPS >= 10_000 {
-		return fmt.Errorf("minimum gross margin must be between %d and 9999 basis points", MinimumSafeGrossMarginBPS)
+	pricingPolicy := request.PricingPolicy
+	if pricingPolicy == "" {
+		pricingPolicy = PricingPolicyStandard
+	}
+	switch pricingPolicy {
+	case PricingPolicyStandard:
+		if request.MinimumGrossMarginBPS < MinimumSafeGrossMarginBPS || request.MinimumGrossMarginBPS >= 10_000 {
+			return fmt.Errorf("minimum gross margin must be between %d and 9999 basis points", MinimumSafeGrossMarginBPS)
+		}
+	case PricingPolicyLaunchParity:
+		if request.MinimumGrossMarginBPS != 0 {
+			return errors.New("MVP launch price parity requires a zero gross-margin floor")
+		}
+	default:
+		return fmt.Errorf("unknown pricing policy %q", request.PricingPolicy)
 	}
 	if request.MaximumObservationAge <= 0 {
 		return errors.New("maximum observation age must be positive")
@@ -287,6 +305,9 @@ func evaluate(request Request, candidate Candidate) (Selection, []string) {
 	}
 	if candidate.RateValidUntil.IsZero() || !candidate.RateValidUntil.UTC().After(request.At) {
 		reasons = append(reasons, ReasonRateExpired)
+	}
+	if request.PricingPolicy == PricingPolicyLaunchParity && candidate.RateValidUntil.UTC().After(request.At.Add(maximumLaunchParityWindow)) {
+		reasons = append(reasons, ReasonLaunchParityWindow)
 	}
 	if candidate.CommercialState != CommercialReady || candidate.CommercialValidUntil.IsZero() || !candidate.CommercialValidUntil.UTC().After(request.At) {
 		reasons = append(reasons, ReasonCommercialAuthorization)
