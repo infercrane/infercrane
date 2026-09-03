@@ -41,7 +41,8 @@ func (s *Store) PublishedModelAPIRoutes(ctx context.Context, at time.Time) ([]mo
 	JOIN model_api_products m ON m.id=e.product_id
 	JOIN model_api_retail_rate_cards r ON r.product_id=e.product_id AND r.id=e.retail_rate_card_id AND r.version=e.retail_rate_version
 	JOIN model_api_supply_plans sp ON sp.id=p.supply_plan_id AND sp.managed_product_id=e.product_id AND sp.operator_tenant_id=e.operator_tenant_id
-	WHERE e.state='active' ORDER BY e.customer_tenant_id,e.product_id`)
+	WHERE e.state='active' AND e.valid_from<=? AND (e.valid_until IS NULL OR e.valid_until>?)
+	ORDER BY e.customer_tenant_id,e.product_id`, at, at)
 	if err != nil {
 		return nil, err
 	}
