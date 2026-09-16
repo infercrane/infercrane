@@ -20,11 +20,15 @@ import (
 	"github.com/infercrane/infercrane/internal/curatedrecipe"
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/integration"
+	"github.com/infercrane/infercrane/internal/optimizationevidence"
 	"github.com/infercrane/infercrane/internal/optimizer"
 	"gopkg.in/yaml.v3"
 )
 
 func optimizeCommand(ctx context.Context, args []string) error {
+	if len(args) > 0 && args[0] == "evidence" {
+		return optimizeEvidenceCommand(args[1:])
+	}
 	if len(args) > 0 && args[0] == "doctor" {
 		return optimizeDoctorCommand(ctx, args[1:])
 	}
@@ -32,7 +36,7 @@ func optimizeCommand(ctx context.Context, args []string) error {
 		return optimizeCampaignCommand(ctx, args)
 	}
 	if len(args) < 2 || (args[0] != "propose" && args[0] != "create") {
-		return errors.New("usage: infercrane optimize propose|create MODEL --provider CLOUD_OR_ADAPTER --gpu GPU [flags] | infercrane optimize list|inspect|results|approve|activate|cancel | infercrane optimize doctor")
+		return errors.New("usage: infercrane optimize propose|create MODEL --provider CLOUD_OR_ADAPTER --gpu GPU [flags] | infercrane optimize evidence evaluate|inspect-fastpath --file FILE | infercrane optimize list|inspect|results|approve|activate|cancel | infercrane optimize doctor")
 	}
 	action := args[0]
 	model := args[1]
@@ -168,6 +172,69 @@ func optimizeCommand(ctx context.Context, args []string) error {
 		fmt.Printf("DeploymentSpecs: %s\n", *writeDir)
 	}
 	return nil
+}
+
+func optimizeEvidenceCommand(args []string) error {
+	if len(args) < 1 || (args[0] != "evaluate" && args[0] != "inspect-fastpath") {
+		return errors.New("usage: infercrane optimize evidence evaluate|inspect-fastpath --file FILE [--output human|json]")
+	}
+	action := args[0]
+	fs := flag.NewFlagSet("optimize evidence "+action, flag.ContinueOnError)
+	filePath := fs.String("file", "", "immutable optimization evidence JSON")
+	output := fs.String("output", "human", "human or json")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 || strings.TrimSpace(*filePath) == "" {
+		return errors.New("optimize evidence " + action + " requires --file and no positional arguments")
+	}
+	if err := validateOutput(*output); err != nil {
+		return err
+	}
+	body, err := os.ReadFile(*filePath)
+	if err != nil {
+		return fmt.Errorf("read optimization evidence: %w", err)
+	}
+	if action == "inspect-fastpath" {
+		imported, decodeErr := optimizationevidence.DecodeFastPathManifest(body)
+		if decodeErr != nil {
+			return decodeErr
+		}
+		if *output == "json" {
+			return printJSON(imported)
+		}
+		fmt.Printf("FastPath candidate · %s\n", imported.CandidateID)
+		fmt.Printf("Model       %s\nRuntime     %s\nGPU         %d× %s\nManifest    %s\nClaimed     %s / %s\nImported    %s\n\n", imported.ModelIdentity, imported.RuntimeIdentity, imported.GPUCount, imported.GPU, imported.ManifestDigest, imported.ClaimedStatus, imported.ClaimedEvidenceState, imported.ImportedEvidenceState)
+		fmt.Println("Qualification remains blocked until InferCrane binds the exact revision and passing signed quality evidence.")
+		return nil
+	}
+	campaign, err := optimizationevidence.Decode(body)
+	if err != nil {
+		return err
+	}
+	evaluation, err := optimizationevidence.Evaluate(campaign)
+	if err != nil {
+		return err
+	}
+	if *output == "json" {
+		return printJSON(evaluation)
+	}
+	fmt.Printf("Optimization evidence · %s\n", evaluation.ModelIdentity)
+	fmt.Printf("Workload    %s\nPolicy      %s@%d\nEvidence    %s\nWinner      %s\n\n", evaluation.WorkloadDigest, evaluation.SelectionPolicy.ID, evaluation.SelectionPolicy.Version, evaluation.InputDigest, emptyAs(evaluation.WinnerID, "none"))
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "CHOICE\tCANDIDATE\tRUNTIME\tQUALIFIED\tSCORE\tPARETO\tREASON")
+	for _, candidate := range evaluation.Candidates {
+		choice := ""
+		if candidate.Selected {
+			choice = "SELECTED"
+		}
+		score := "-"
+		if candidate.Score != nil {
+			score = strconv.FormatFloat(*candidate.Score, 'f', 4, 64)
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%t\t%s\t%t\t%s\n", choice, candidate.CandidateID, candidate.RuntimeID, candidate.Qualified, score, candidate.Pareto, strings.Join(candidate.RejectionReasons, "; "))
+	}
+	return w.Flush()
 }
 
 type optimizationCampaignView struct {

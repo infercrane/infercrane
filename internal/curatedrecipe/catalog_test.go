@@ -70,6 +70,33 @@ func TestFrontierProfilesUseTheGeneralImmutableWorkloadContract(t *testing.T) {
 	}
 }
 
+func TestQwen38QualifiedCandidateIsExposedWithoutCrossProviderClaim(t *testing.T) {
+	entry, ok := Get("qwen3.8-27b-fp8")
+	if !ok || entry.Model != "Qwen/Qwen3.8-27B-FP8" || entry.Revision != "017b9c7af6b5689d5dd426a76e0bc077eb5ca20a" || len(entry.Profiles) != 1 {
+		t.Fatalf("pinned Qwen candidate missing: %+v", entry)
+	}
+	profile := entry.Profiles[0]
+	wantImage := "lmsysorg/sglang@sha256:9e148f5ac788e856a06166bd6347a831831eb9fcfab4d1770874823a7c29a1a1"
+	if profile.Runtime != "custom-oci" || profile.RuntimeVersion != "0.5.18+71de97b264b04dcd514cf904003028aefe9775c8" || profile.GPUHint != "H100" || profile.GPUCount != 1 || profile.Workload.Image != wantImage {
+		t.Fatalf("Qwen serving tuple drifted: %+v", profile)
+	}
+	command := profile.Workload.Command
+	for _, value := range []string{"NEXTN", "3", "1", "4", "qwen3_coder", "18432", "${MODEL_REVISION}"} {
+		if !contains(command, value) {
+			t.Fatalf("Qwen launch command omitted %q: %#v", value, command)
+		}
+	}
+	limitations := strings.Join(profile.Limitations, " ")
+	for _, disclosure := range []string{"Modal", "RunPod", "not recipe-v1", "no public-grade performance claim"} {
+		if !strings.Contains(limitations, disclosure) {
+			t.Fatalf("Qwen recipe omitted evidence boundary %q: %s", disclosure, limitations)
+		}
+	}
+	if err := profile.Workload.Validate(); err != nil {
+		t.Fatalf("Qwen workload is invalid: %v", err)
+	}
+}
+
 func TestFrontierProfilesMaterializePinnedSnapshotBeforeVLLM(t *testing.T) {
 	for _, name := range []string{"glm-5.3-flash", "qwen3.8-flash-next"} {
 		t.Run(name, func(t *testing.T) {

@@ -294,6 +294,55 @@ execution systems remain replaceable. Modeled results cannot satisfy a measured 
 mutation requires bounded approval, optimized artifacts retain immutable provenance, and activation
 or promotion remains an explicit action.
 
+## Multi-lane optimization evidence
+
+External optimization workers can emit the content-free
+`infercrane.dev/optimization-evidence/v1` contract defined in
+`schemas/optimization-evidence-v1.schema.json`.
+It keeps three benchmark evidence levels distinct:
+
+- `screening` is inexpensive candidate-search evidence (at least 12 requests per lane);
+- `qualification` requires at least 100 requests, two independent runs, and 300 seconds per lane;
+- `public` requires at least 300 requests, three independent runs, and 600 seconds per lane, and is
+  reserved for independently repeated baseline-versus-final receipts.
+
+These schema floors prevent evidence relabeling; a workload policy may require larger samples. They
+do not retroactively promote the existing 12-request Qwen measurements, which remain screening
+evidence.
+
+Every campaign pins one model, hardware tuple, and workload digest. Every candidate adds an
+immutable serving-recipe digest and every required concurrency lane. Each
+lane records aggregate output throughput, request throughput, SLO goodput in requests/second, and
+SLO-qualified output tokens/second as separate metrics. InferCrane applies error, prompt-integrity,
+quality, sample-size, TTFT, ITL, and SLO-attainment gates to every lane before calculating a score.
+An ineligible candidate has no score, even when another lane has the highest raw throughput.
+
+Evaluate a secret-free document locally without provisioning infrastructure:
+
+```bash
+infercrane optimize evidence evaluate \
+  --file optimization-evidence.json \
+  --output json
+```
+
+The result pins the evaluator algorithm, input digest, policy/version, rejection reasons, Pareto
+set, and selected candidate. The supported policies cover qualified output throughput, SLO request
+goodput, qualified throughput per dollar, minimum COGS under the SLO, and latency-sensitive serving.
+
+FastPath provisional handoffs have a separate inspection boundary:
+
+```bash
+infercrane optimize evidence inspect-fastpath \
+  --file artifacts/handoff/MODEL/manifest.json
+```
+
+Inspection validates immutable model/tokenizer revisions, tokenizer and chat-template hashes,
+runtime commit, digest-pinned image, CUDA and hardware identity, launch revision, evidence level,
+quality declaration, and every workload lane. The result remains `external_unverified` inside
+InferCrane until the control plane binds it to its own immutable revision and passing signed quality
+evidence. A community source remains recorded even after InferCrane independently reproduces its
+recipe; community measurements never become qualification evidence.
+
 ## Benchmarks and competitor comparisons
 
 AIConfigurator estimates help decide what to test; they are not publishable performance claims.

@@ -42,6 +42,45 @@ func TestOptimizeProposeRejectsInvalidErrorRate(t *testing.T) {
 	}
 }
 
+func TestOptimizeEvidenceEvaluatesQualificationBeforeScoring(t *testing.T) {
+	fixture := filepath.Join("..", "..", "internal", "optimizationevidence", "testdata", "qwen38-modal-screening.json")
+	output, err := captureStdout(t, func() error {
+		return optimizeCommand(context.Background(), []string{"evidence", "evaluate", "--file", fixture, "--output", "json"})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result struct {
+		WinnerID   string `json:"winner_id"`
+		Candidates []struct {
+			CandidateID string   `json:"candidate_id"`
+			Qualified   bool     `json:"qualified"`
+			Score       *float64 `json:"score"`
+		} `json:"candidates"`
+	}
+	if err = json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("decode evaluation: %v\n%s", err, output)
+	}
+	if result.WinnerID != "sglang-control" {
+		t.Fatalf("winner=%q", result.WinnerID)
+	}
+	for _, candidate := range result.Candidates {
+		if candidate.CandidateID == "vllm-control" && (candidate.Qualified || candidate.Score != nil) {
+			t.Fatalf("SLO-ineligible baseline was scored: %+v", candidate)
+		}
+	}
+}
+
+func TestOptimizeEvidenceInspectsFastPathWithoutTrustPromotion(t *testing.T) {
+	fixture := filepath.Join("..", "..", "internal", "optimizationevidence", "testdata", "qwen38-fastpath-qualified.json")
+	output, err := captureStdout(t, func() error {
+		return optimizeCommand(context.Background(), []string{"evidence", "inspect-fastpath", "--file", fixture})
+	})
+	if err != nil || !strings.Contains(output, "Imported    external_unverified") || !strings.Contains(output, "Qualification remains blocked") {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+}
+
 func TestOptimizeProposeWritesLoadableImmutableDeploymentSpecs(t *testing.T) {
 	directory := filepath.Join(t.TempDir(), "candidates")
 	if err := optimizeCommand(context.Background(), []string{"propose", "mistral-7b-instruct", "--provider", "aws", "--region", "eu-central-1", "--gpu", "L40S", "--source", "catalog", "--write-dir", directory, "--output", "json"}); err != nil {
