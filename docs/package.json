@@ -16,10 +16,15 @@
   },
   "overrides": {
     "@puppeteer/browsers": "3.2.1",
+    "adm-zip": "0.6.1",
+    "front-matter": {
+      "js-yaml": "3.15.2"
+    },
+    "js-yaml": "4.3.2",
     "puppeteer": "25.9.0",
     "puppeteer-core": "25.9.0",
     "qs": "6.16.0",
-    "sharp": "0.35.0"
+    "sharp": "0.35.4"
   },
   "engines": {
     "node": ">=20"
