@@ -29,7 +29,7 @@ type Config struct {
 	ModelAPICatalogFile, ModelAPIOperatorTenantID                                                                         string
 	HostedModelAPIEndpoints                                                                                               map[string]string
 	BrezelSandboxURL, BrezelSandboxTokenFile, BrezelSandboxProjectID, BrezelSandboxTenantID, BrezelSandboxDefaultTemplate string
-	BrezelSandboxTemplates                                                                                                map[string]string
+	BrezelSandboxTemplates, BrezelSandboxModelConnectors                                                                  map[string]string
 	StripePriceIDs                                                                                                        map[int64]string
 	StripeLivemode                                                                                                        bool
 	RunPodAPIKey, RunPodServerlessTemplateID, RunPodRESTURL, RunPodArtifactCachePolicy, RunPodHFTokenSecret               string
@@ -367,6 +367,10 @@ func load(requireAPIKey bool) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	brezelSandboxModelConnectors, err := envStringMap("INFERCRANE_BREZEL_SANDBOX_MODEL_CONNECTORS_JSON")
+	if err != nil {
+		return Config{}, err
+	}
 	stripeLivemode, err := envBool("INFERCRANE_STRIPE_LIVEMODE", false)
 	if err != nil {
 		return Config{}, err
@@ -410,6 +414,7 @@ func load(requireAPIKey bool) (Config, error) {
 		BrezelSandboxTenantID:               env("INFERCRANE_BREZEL_SANDBOX_TENANT_ID", ""),
 		BrezelSandboxDefaultTemplate:        env("INFERCRANE_BREZEL_SANDBOX_DEFAULT_TEMPLATE", ""),
 		BrezelSandboxTemplates:              brezelSandboxTemplates,
+		BrezelSandboxModelConnectors:        brezelSandboxModelConnectors,
 		RunPodAPIKey:                        env("RUNPOD_API_KEY", ""),
 		RunPodServerlessTemplateID:          env("INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID", ""),
 		RunPodRESTURL:                       env("INFERCRANE_RUNPOD_REST_URL", "https://rest.runpod.io/v1"),
@@ -563,7 +568,7 @@ func (c Config) BrezelSandboxEnabled() bool {
 }
 
 func validateBrezelSandbox(config Config) error {
-	configured := config.BrezelSandboxURL != "" || config.BrezelSandboxTokenFile != "" || config.BrezelSandboxProjectID != "" || config.BrezelSandboxTenantID != "" || config.BrezelSandboxDefaultTemplate != "" || len(config.BrezelSandboxTemplates) > 0
+	configured := config.BrezelSandboxURL != "" || config.BrezelSandboxTokenFile != "" || config.BrezelSandboxProjectID != "" || config.BrezelSandboxTenantID != "" || config.BrezelSandboxDefaultTemplate != "" || len(config.BrezelSandboxTemplates) > 0 || len(config.BrezelSandboxModelConnectors) > 0
 	if !configured {
 		return nil
 	}
@@ -586,7 +591,24 @@ func validateBrezelSandbox(config Config) error {
 			return errors.New("INFERCRANE_BREZEL_SANDBOX_DEFAULT_TEMPLATE must name an approved template")
 		}
 	}
+	for endpoint, revision := range config.BrezelSandboxModelConnectors {
+		if strings.TrimSpace(endpoint) == "" || len(endpoint) > 255 || !validBrezelConnectorRevision(revision) {
+			return errors.New("INFERCRANE_BREZEL_SANDBOX_MODEL_CONNECTORS_JSON must map endpoint names to immutable connr_ revisions")
+		}
+	}
 	return nil
+}
+
+func validBrezelConnectorRevision(value string) bool {
+	if len(value) != 30 || !strings.HasPrefix(value, "connr_") {
+		return false
+	}
+	for _, character := range value[6:] {
+		if character < '0' || character > '9' && character < 'a' || character > 'f' {
+			return false
+		}
+	}
+	return true
 }
 
 func validateRunPod(config Config) error {

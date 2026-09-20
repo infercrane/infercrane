@@ -110,6 +110,43 @@ type SandboxReference struct {
 	ExpiresAt, CreatedAt, UpdatedAt                      time.Time
 }
 
+// NativeSandbox is the InferCrane-owned customer identity for a private
+// computer. Provider identifiers are backend references and must never be
+// included in customer API projections.
+type NativeSandbox struct {
+	ID, TenantID, CreatedBy, DisplayName, Purpose    string
+	SourceType, SourceReference, TemplateID          string
+	ModelEndpoint, BrezelProjectID                   string
+	BrezelWorkspaceID, BrezelSandboxID               string
+	Status, FailureCode, IdempotencyKey, InputDigest string
+	CreatedAt, UpdatedAt, LastActiveAt               time.Time
+	DeletedAt                                        *time.Time
+}
+
+// SandboxUsageEvent is an append-only, content-free operational ledger. It is
+// intentionally unsuitable as an invoice until reconciliation and pricing
+// rules are added separately.
+type SandboxUsageEvent struct {
+	EventID, TenantID, SandboxID, ProviderOperationID  string
+	EventType, TemplateID, RuntimeClass                string
+	OccurredAt                                         time.Time
+	RunningMilliseconds, StandbyMilliseconds           int64
+	CommandDurationMilliseconds                        int64
+	CommandExitClass                                   string
+	FileIngressBytes, FileEgressBytes, PreviewRequests int64
+	MetadataVersion                                    int
+}
+
+type SandboxUsageSummary struct {
+	ActiveComputers     int64 `json:"active_computers"`
+	CommandsExecuted    int64 `json:"commands_executed"`
+	PreviewRequests     int64 `json:"preview_requests"`
+	RunningMilliseconds int64 `json:"running_milliseconds"`
+	StandbyMilliseconds int64 `json:"standby_milliseconds"`
+	FileIngressBytes    int64 `json:"file_ingress_bytes"`
+	FileEgressBytes     int64 `json:"file_egress_bytes"`
+}
+
 // TrainingArtifactHandoff binds signed, content-free external training
 // provenance to the immutable model artifact of one deployment revision.
 type TrainingArtifactHandoff struct {

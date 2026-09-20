@@ -16,661 +16,697 @@ class ControlAPI:
         self._transport = transport
 
     def get_operation(self, id: str) -> OperationData:
-        path = f"/operations/{quote(id, safe='')}"
-        return cast(OperationData, self._transport.request("GET", path))
+        request_path = f"/operations/{quote(id, safe='')}"
+        return cast(OperationData, self._transport.request("GET", request_path))
 
     def list_operations(self) -> ObjectList:
-        path = "/operations"
-        return cast(ObjectList, self._transport.request("GET", path))
+        request_path = "/operations"
+        return cast(ObjectList, self._transport.request("GET", request_path))
 
     def get_doctor(self) -> dict[str, Any]:
-        path = "/doctor"
-        return cast(dict[str, Any], self._transport.request("GET", path))
+        request_path = "/doctor"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
 
     def get_current_principal(self) -> dict[str, Any]:
-        path = "/whoami"
-        return cast(dict[str, Any], self._transport.request("GET", path))
+        request_path = "/whoami"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
 
     def get_console_session(self) -> dict[str, Any]:
-        path = "/console/session"
-        return cast(dict[str, Any], self._transport.request("GET", path))
+        request_path = "/console/session"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
 
     def configure_console_access(self, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = "/console/access"
-        return cast(dict[str, Any], self._transport.request("PUT", path, body=body))
+        request_path = "/console/access"
+        return cast(dict[str, Any], self._transport.request("PUT", request_path, body=body))
 
     def list_console_access(self) -> ObjectList:
-        path = "/console/access"
-        return cast(ObjectList, self._transport.request("GET", path))
+        request_path = "/console/access"
+        return cast(ObjectList, self._transport.request("GET", request_path))
 
     def list_integrations(self) -> dict[str, Any]:
-        path = "/integrations"
-        return cast(dict[str, Any], self._transport.request("GET", path))
+        request_path = "/integrations"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
 
     def list_catalog_models(self) -> ObjectList:
-        path = "/catalog/models"
-        return cast(ObjectList, self._transport.request("GET", path))
+        request_path = "/catalog/models"
+        return cast(ObjectList, self._transport.request("GET", request_path))
 
     def get_catalog_model(self, name: str) -> dict[str, Any]:
-        path = f"/catalog/models/{quote(name, safe='')}"
-        return cast(dict[str, Any], self._transport.request("GET", path))
+        request_path = f"/catalog/models/{quote(name, safe='')}"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
 
     def plan_intent(self, *, body: dict[str, Any]) -> IntentPlanEnvelope:
-        path = "/planning/intents"
-        return cast(IntentPlanEnvelope, self._transport.request("POST", path, body=body))
+        request_path = "/planning/intents"
+        return cast(IntentPlanEnvelope, self._transport.request("POST", request_path, body=body))
 
     def list_model_a_p_i_catalog(self) -> ObjectList:
-        path = "/model-api-catalog"
-        return cast(ObjectList, self._transport.request("GET", path))
+        request_path = "/model-api-catalog"
+        return cast(ObjectList, self._transport.request("GET", request_path))
 
     def get_model_a_p_i_catalog_entry(self, id: str) -> dict[str, Any]:
-        path = f"/model-api-catalog/{quote(id, safe='')}"
-        return cast(dict[str, Any], self._transport.request("GET", path))
+        request_path = f"/model-api-catalog/{quote(id, safe='')}"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
 
     def get_hosted_model_a_p_i_usage(self) -> dict[str, Any]:
-        path = "/model-api-usage"
-        return cast(dict[str, Any], self._transport.request("GET", path))
+        request_path = "/model-api-usage"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
 
     def publish_model_a_p_i_product(self, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = "/admin/model-api/products"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = "/admin/model-api/products"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def publish_model_a_p_i_retail_rate(self, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = "/admin/model-api/rates"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = "/admin/model-api/rates"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def publish_model_a_p_i_supplier_offer(self, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = "/admin/model-api/offers"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = "/admin/model-api/offers"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def publish_model_a_p_i_qualification(self, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = "/admin/model-api/qualifications"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = "/admin/model-api/qualifications"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def publish_model_a_p_i_target_binding(self, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = "/admin/model-api/target-bindings"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = "/admin/model-api/target-bindings"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def compile_model_a_p_i_supply_plan(self, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = "/admin/model-api/plans"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = "/admin/model-api/plans"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def publish_model_a_p_i_route(self, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = "/admin/model-api/publications"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = "/admin/model-api/publications"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def publish_model_a_p_i_entitlement(self, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = "/admin/model-api/entitlements"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = "/admin/model-api/entitlements"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def list_compute_providers(self) -> ObjectList:
-        path = "/compute/providers"
-        return cast(ObjectList, self._transport.request("GET", path))
+        request_path = "/compute/providers"
+        return cast(ObjectList, self._transport.request("GET", request_path))
 
     def list_g_p_u_prices(self) -> ObjectList:
-        path = "/catalog/gpu-prices"
-        return cast(ObjectList, self._transport.request("GET", path))
+        request_path = "/catalog/gpu-prices"
+        return cast(ObjectList, self._transport.request("GET", request_path))
 
     def list_public_g_p_u_prices(self) -> ObjectList:
-        path = "/public/catalog/gpu-prices"
-        return cast(ObjectList, self._transport.request("GET", path))
+        request_path = "/public/catalog/gpu-prices"
+        return cast(ObjectList, self._transport.request("GET", request_path))
 
     def list_control_plane_instances(self) -> ObjectList:
-        path = "/system/instances"
-        return cast(ObjectList, self._transport.request("GET", path))
+        request_path = "/system/instances"
+        return cast(ObjectList, self._transport.request("GET", request_path))
 
     def list_environments(self) -> ObjectList:
-        path = "/environments"
-        return cast(ObjectList, self._transport.request("GET", path))
+        request_path = "/environments"
+        return cast(ObjectList, self._transport.request("GET", request_path))
 
     def create_environment(self, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = "/environments"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = "/environments"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def stage_environment_promotion(self, *, body: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
-        path = "/environment-promotions"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body, idempotency_key=idempotency_key))
+        request_path = "/environment-promotions"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body, idempotency_key=idempotency_key))
 
     def list_logical_models(self) -> ObjectList:
-        path = "/logical-models"
-        return cast(ObjectList, self._transport.request("GET", path))
+        request_path = "/logical-models"
+        return cast(ObjectList, self._transport.request("GET", request_path))
 
     def create_logical_model(self, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = "/logical-models"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = "/logical-models"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def list_endpoints(self) -> ObjectList:
-        path = "/endpoints"
-        return cast(ObjectList, self._transport.request("GET", path))
+        request_path = "/endpoints"
+        return cast(ObjectList, self._transport.request("GET", request_path))
 
     def create_endpoint(self, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = "/endpoints"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = "/endpoints"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def adopt_endpoint(self, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = "/adoptions/endpoints"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = "/adoptions/endpoints"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def promote_adoption_ownership(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = f"/adoptions/endpoints/{quote(name, safe='')}/ownership"
-        return cast(dict[str, Any], self._transport.request("PUT", path, body=body))
+        request_path = f"/adoptions/endpoints/{quote(name, safe='')}/ownership"
+        return cast(dict[str, Any], self._transport.request("PUT", request_path, body=body))
 
     def inspect_request(self, id: str) -> dict[str, Any]:
-        path = f"/requests/{quote(id, safe='')}"
-        return cast(dict[str, Any], self._transport.request("GET", path))
+        request_path = f"/requests/{quote(id, safe='')}"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
 
     def get_endpoint(self, name: str) -> dict[str, Any]:
-        path = f"/endpoints/{quote(name, safe='')}"
-        return cast(dict[str, Any], self._transport.request("GET", path))
+        request_path = f"/endpoints/{quote(name, safe='')}"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
 
     def get_endpoint_monitoring(self, name: str) -> dict[str, Any]:
-        path = f"/endpoints/{quote(name, safe='')}/monitoring"
-        return cast(dict[str, Any], self._transport.request("GET", path))
+        request_path = f"/endpoints/{quote(name, safe='')}/monitoring"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
 
     def get_endpoint_optimization_readiness(self, name: str) -> dict[str, Any]:
-        path = f"/endpoints/{quote(name, safe='')}/optimization-readiness"
-        return cast(dict[str, Any], self._transport.request("GET", path))
+        request_path = f"/endpoints/{quote(name, safe='')}/optimization-readiness"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
 
     def diagnose_endpoint(self, name: str, *, body: dict[str, Any]) -> ObjectList:
-        path = f"/endpoints/{quote(name, safe='')}/doctor"
-        return cast(ObjectList, self._transport.request("POST", path, body=body))
+        request_path = f"/endpoints/{quote(name, safe='')}/doctor"
+        return cast(ObjectList, self._transport.request("POST", request_path, body=body))
 
     def list_alert_policies(self, name: str) -> ObjectList:
-        path = f"/endpoints/{quote(name, safe='')}/alerts"
-        return cast(ObjectList, self._transport.request("GET", path))
+        request_path = f"/endpoints/{quote(name, safe='')}/alerts"
+        return cast(ObjectList, self._transport.request("GET", request_path))
 
     def create_alert_policy(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = f"/endpoints/{quote(name, safe='')}/alerts"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = f"/endpoints/{quote(name, safe='')}/alerts"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def evaluate_alerts(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = f"/endpoints/{quote(name, safe='')}/alerts/evaluate"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = f"/endpoints/{quote(name, safe='')}/alerts/evaluate"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def get_admission_policy(self, name: str) -> dict[str, Any]:
-        path = f"/endpoints/{quote(name, safe='')}/admission"
-        return cast(dict[str, Any], self._transport.request("GET", path))
+        request_path = f"/endpoints/{quote(name, safe='')}/admission"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
 
     def set_admission_policy(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = f"/endpoints/{quote(name, safe='')}/admission"
-        return cast(dict[str, Any], self._transport.request("PUT", path, body=body))
+        request_path = f"/endpoints/{quote(name, safe='')}/admission"
+        return cast(dict[str, Any], self._transport.request("PUT", request_path, body=body))
 
     def submit_async_inference(self, name: str, *, body: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
-        path = f"/endpoints/{quote(name, safe='')}/async"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body, idempotency_key=idempotency_key))
+        request_path = f"/endpoints/{quote(name, safe='')}/async"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body, idempotency_key=idempotency_key))
 
     def get_async_inference_job(self, id: str) -> dict[str, Any]:
-        path = f"/async/jobs/{quote(id, safe='')}"
-        return cast(dict[str, Any], self._transport.request("GET", path))
+        request_path = f"/async/jobs/{quote(id, safe='')}"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
 
     def cancel_async_inference_job(self, id: str) -> None:
-        path = f"/async/jobs/{quote(id, safe='')}"
-        return cast(None, self._transport.request("DELETE", path))
+        request_path = f"/async/jobs/{quote(id, safe='')}"
+        return cast(None, self._transport.request("DELETE", request_path))
 
     def delete_endpoint(self, name: str) -> dict[str, Any]:
-        path = f"/endpoints/{quote(name, safe='')}"
-        return cast(dict[str, Any], self._transport.request("DELETE", path))
+        request_path = f"/endpoints/{quote(name, safe='')}"
+        return cast(dict[str, Any], self._transport.request("DELETE", request_path))
 
     def create_endpoint_binding(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = f"/endpoints/{quote(name, safe='')}/bindings"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = f"/endpoints/{quote(name, safe='')}/bindings"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def create_serving_plan(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = f"/endpoints/{quote(name, safe='')}/plans"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = f"/endpoints/{quote(name, safe='')}/plans"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def activate_serving_plan(self, name: str, plan: str, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = f"/endpoints/{quote(name, safe='')}/plans/{quote(plan, safe='')}/active"
-        return cast(dict[str, Any], self._transport.request("PUT", path, body=body))
+        request_path = f"/endpoints/{quote(name, safe='')}/plans/{quote(plan, safe='')}/active"
+        return cast(dict[str, Any], self._transport.request("PUT", request_path, body=body))
 
     def stage_serving_plan(self, name: str, plan: str, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = f"/endpoints/{quote(name, safe='')}/plans/{quote(plan, safe='')}/candidate"
-        return cast(dict[str, Any], self._transport.request("PUT", path, body=body))
+        request_path = f"/endpoints/{quote(name, safe='')}/plans/{quote(plan, safe='')}/candidate"
+        return cast(dict[str, Any], self._transport.request("PUT", request_path, body=body))
 
     def get_endpoint_release_guard_policy(self, name: str) -> dict[str, Any]:
-        path = f"/endpoints/{quote(name, safe='')}/release-guard/policy"
-        return cast(dict[str, Any], self._transport.request("GET", path))
+        request_path = f"/endpoints/{quote(name, safe='')}/release-guard/policy"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
 
     def set_endpoint_release_guard_policy(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = f"/endpoints/{quote(name, safe='')}/release-guard/policy"
-        return cast(dict[str, Any], self._transport.request("PUT", path, body=body))
+        request_path = f"/endpoints/{quote(name, safe='')}/release-guard/policy"
+        return cast(dict[str, Any], self._transport.request("PUT", request_path, body=body))
 
     def evaluate_endpoint_release_guard(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = f"/endpoints/{quote(name, safe='')}/release-guard/evaluate"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = f"/endpoints/{quote(name, safe='')}/release-guard/evaluate"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def list_endpoint_release_guard_evaluations(self, name: str) -> ObjectList:
-        path = f"/endpoints/{quote(name, safe='')}/release-guard/evaluations"
-        return cast(ObjectList, self._transport.request("GET", path))
+        request_path = f"/endpoints/{quote(name, safe='')}/release-guard/evaluations"
+        return cast(ObjectList, self._transport.request("GET", request_path))
 
     def list_operation_events(self, id: str) -> ObjectList:
-        path = f"/operations/{quote(id, safe='')}/events"
-        return cast(ObjectList, self._transport.request("GET", path))
+        request_path = f"/operations/{quote(id, safe='')}/events"
+        return cast(ObjectList, self._transport.request("GET", request_path))
 
     def cancel_operation(self, id: str) -> dict[str, Any]:
-        path = f"/operations/{quote(id, safe='')}/cancel"
-        return cast(dict[str, Any], self._transport.request("POST", path))
+        request_path = f"/operations/{quote(id, safe='')}/cancel"
+        return cast(dict[str, Any], self._transport.request("POST", request_path))
 
     def apply_deployment(self, *, body: dict[str, Any], idempotency_key: str) -> OperationEnvelope:
-        path = "/deployments/apply"
-        return cast(OperationEnvelope, self._transport.request("POST", path, body=body, idempotency_key=idempotency_key))
+        request_path = "/deployments/apply"
+        return cast(OperationEnvelope, self._transport.request("POST", request_path, body=body, idempotency_key=idempotency_key))
 
     def create_deployment(self, *, body: dict[str, Any], idempotency_key: str) -> DeploymentOperationEnvelope:
-        path = "/deployments"
-        return cast(DeploymentOperationEnvelope, self._transport.request("POST", path, body=body, idempotency_key=idempotency_key))
+        request_path = "/deployments"
+        return cast(DeploymentOperationEnvelope, self._transport.request("POST", request_path, body=body, idempotency_key=idempotency_key))
 
     def delete_deployment(self, name: str, idempotency_key: str) -> OperationEnvelope:
-        path = f"/deployments/{quote(name, safe='')}"
-        return cast(OperationEnvelope, self._transport.request("DELETE", path, idempotency_key=idempotency_key))
+        request_path = f"/deployments/{quote(name, safe='')}"
+        return cast(OperationEnvelope, self._transport.request("DELETE", request_path, idempotency_key=idempotency_key))
 
     def list_deployments(self) -> DeploymentList:
-        path = "/deployments"
-        return cast(DeploymentList, self._transport.request("GET", path))
+        request_path = "/deployments"
+        return cast(DeploymentList, self._transport.request("GET", request_path))
 
     def get_deployment(self, name: str) -> DeploymentView:
-        path = f"/deployments/{quote(name, safe='')}"
-        return cast(DeploymentView, self._transport.request("GET", path))
+        request_path = f"/deployments/{quote(name, safe='')}"
+        return cast(DeploymentView, self._transport.request("GET", request_path))
 
     def record_operational_measurements(self, name: str, *, body: dict[str, Any]) -> ObjectList:
-        path = f"/deployments/{quote(name, safe='')}/measurements"
-        return cast(ObjectList, self._transport.request("POST", path, body=body))
+        request_path = f"/deployments/{quote(name, safe='')}/measurements"
+        return cast(ObjectList, self._transport.request("POST", request_path, body=body))
 
     def import_traffic_observations(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = f"/deployments/{quote(name, safe='')}/traffic-observations"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = f"/deployments/{quote(name, safe='')}/traffic-observations"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def record_cost_evidence(self, name: str, *, body: dict[str, Any]) -> ObjectList:
-        path = f"/deployments/{quote(name, safe='')}/cost-evidence"
-        return cast(ObjectList, self._transport.request("POST", path, body=body))
+        request_path = f"/deployments/{quote(name, safe='')}/cost-evidence"
+        return cast(ObjectList, self._transport.request("POST", request_path, body=body))
 
     def list_deployment_events(self, name: str) -> ObjectList:
-        path = f"/deployments/{quote(name, safe='')}/events"
-        return cast(ObjectList, self._transport.request("GET", path))
+        request_path = f"/deployments/{quote(name, safe='')}/events"
+        return cast(ObjectList, self._transport.request("GET", request_path))
 
     def attach_quality_evidence(self, name: str, *, body: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
-        path = f"/deployments/{quote(name, safe='')}/quality-evidence"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body, idempotency_key=idempotency_key))
+        request_path = f"/deployments/{quote(name, safe='')}/quality-evidence"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body, idempotency_key=idempotency_key))
 
     def list_quality_evidence(self, name: str) -> ObjectList:
-        path = f"/deployments/{quote(name, safe='')}/quality-evidence"
-        return cast(ObjectList, self._transport.request("GET", path))
+        request_path = f"/deployments/{quote(name, safe='')}/quality-evidence"
+        return cast(ObjectList, self._transport.request("GET", request_path))
 
     def run_benchmark(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = f"/deployments/{quote(name, safe='')}/benchmarks"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = f"/deployments/{quote(name, safe='')}/benchmarks"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def list_benchmarks(self, name: str) -> ObjectList:
-        path = f"/deployments/{quote(name, safe='')}/benchmarks"
-        return cast(ObjectList, self._transport.request("GET", path))
+        request_path = f"/deployments/{quote(name, safe='')}/benchmarks"
+        return cast(ObjectList, self._transport.request("GET", request_path))
 
     def capture_recipe(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = f"/deployments/{quote(name, safe='')}/recipes"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = f"/deployments/{quote(name, safe='')}/recipes"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def list_recipes(self) -> ObjectList:
-        path = "/recipes"
-        return cast(ObjectList, self._transport.request("GET", path))
+        request_path = "/recipes"
+        return cast(ObjectList, self._transport.request("GET", request_path))
 
     def get_recipe(self, name: str, version: str) -> dict[str, Any]:
-        path = f"/recipes/{quote(name, safe='')}/{quote(version, safe='')}"
-        return cast(dict[str, Any], self._transport.request("GET", path))
+        request_path = f"/recipes/{quote(name, safe='')}/{quote(version, safe='')}"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
 
     def evaluate_lab(self, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = "/lab/evaluations"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = "/lab/evaluations"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def capture_replay(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = f"/deployments/{quote(name, safe='')}/replays"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = f"/deployments/{quote(name, safe='')}/replays"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def list_replays(self, name: str) -> ObjectList:
-        path = f"/deployments/{quote(name, safe='')}/replays"
-        return cast(ObjectList, self._transport.request("GET", path))
+        request_path = f"/deployments/{quote(name, safe='')}/replays"
+        return cast(ObjectList, self._transport.request("GET", request_path))
 
     def get_replay(self, id: str) -> dict[str, Any]:
-        path = f"/replays/{quote(id, safe='')}"
-        return cast(dict[str, Any], self._transport.request("GET", path))
+        request_path = f"/replays/{quote(id, safe='')}"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
 
     def capacity_intelligence(self) -> dict[str, Any]:
-        path = "/capacity/intelligence"
-        return cast(dict[str, Any], self._transport.request("GET", path))
+        request_path = "/capacity/intelligence"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
 
     def probe_launch_capacity(self, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = "/capacity/probes"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = "/capacity/probes"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def record_artifact_cache_observation(self, id: str, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = f"/artifacts/{quote(id, safe='')}/cache-observations"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = f"/artifacts/{quote(id, safe='')}/cache-observations"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def request_artifact_prefetch(self, id: str, *, body: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
-        path = f"/artifacts/{quote(id, safe='')}/prefetches"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body, idempotency_key=idempotency_key))
+        request_path = f"/artifacts/{quote(id, safe='')}/prefetches"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body, idempotency_key=idempotency_key))
 
     def inspect_artifact_cache(self, id: str) -> dict[str, Any]:
-        path = f"/artifacts/{quote(id, safe='')}/cache"
-        return cast(dict[str, Any], self._transport.request("GET", path))
+        request_path = f"/artifacts/{quote(id, safe='')}/cache"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
 
     def list_workload_profiles(self) -> ObjectList:
-        path = "/workload-profiles"
-        return cast(ObjectList, self._transport.request("GET", path))
+        request_path = "/workload-profiles"
+        return cast(ObjectList, self._transport.request("GET", request_path))
 
     def get_workload_profile(self, name: str) -> dict[str, Any]:
-        path = f"/workload-profiles/{quote(name, safe='')}"
-        return cast(dict[str, Any], self._transport.request("GET", path))
+        request_path = f"/workload-profiles/{quote(name, safe='')}"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
 
     def propose_optimization(self, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = "/optimization/proposals"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = "/optimization/proposals"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def plan_kernel_opportunities(self, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = "/optimization/kernel-opportunities"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = "/optimization/kernel-opportunities"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def list_optimization_campaigns(self) -> ObjectList:
-        path = "/optimization/campaigns"
-        return cast(ObjectList, self._transport.request("GET", path))
+        request_path = "/optimization/campaigns"
+        return cast(ObjectList, self._transport.request("GET", request_path))
 
     def create_optimization_campaign(self, *, body: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
-        path = "/optimization/campaigns"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body, idempotency_key=idempotency_key))
+        request_path = "/optimization/campaigns"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body, idempotency_key=idempotency_key))
 
     def get_optimization_campaign(self, id: str) -> dict[str, Any]:
-        path = f"/optimization/campaigns/{quote(id, safe='')}"
-        return cast(dict[str, Any], self._transport.request("GET", path))
+        request_path = f"/optimization/campaigns/{quote(id, safe='')}"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
 
     def approve_optimization_campaign(self, id: str, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = f"/optimization/campaigns/{quote(id, safe='')}/approve"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = f"/optimization/campaigns/{quote(id, safe='')}/approve"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def activate_optimization_campaign(self, id: str, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = f"/optimization/campaigns/{quote(id, safe='')}/activate"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = f"/optimization/campaigns/{quote(id, safe='')}/activate"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def cancel_optimization_campaign(self, id: str, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = f"/optimization/campaigns/{quote(id, safe='')}/cancel"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = f"/optimization/campaigns/{quote(id, safe='')}/cancel"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def list_optimized_artifacts(self) -> ObjectList:
-        path = "/optimized-artifacts"
-        return cast(ObjectList, self._transport.request("GET", path))
+        request_path = "/optimized-artifacts"
+        return cast(ObjectList, self._transport.request("GET", request_path))
 
     def create_optimized_artifact(self, *, body: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
-        path = "/optimized-artifacts"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body, idempotency_key=idempotency_key))
+        request_path = "/optimized-artifacts"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body, idempotency_key=idempotency_key))
 
     def get_optimized_artifact(self, id: str) -> dict[str, Any]:
-        path = f"/optimized-artifacts/{quote(id, safe='')}"
-        return cast(dict[str, Any], self._transport.request("GET", path))
+        request_path = f"/optimized-artifacts/{quote(id, safe='')}"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
 
     def begin_optimized_artifact_build(self, id: str, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = f"/optimized-artifacts/{quote(id, safe='')}/build"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = f"/optimized-artifacts/{quote(id, safe='')}/build"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def attest_optimized_artifact_build(self, id: str, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = f"/optimized-artifacts/{quote(id, safe='')}/attest"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = f"/optimized-artifacts/{quote(id, safe='')}/attest"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def qualify_optimized_artifact(self, id: str, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = f"/optimized-artifacts/{quote(id, safe='')}/qualify"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = f"/optimized-artifacts/{quote(id, safe='')}/qualify"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def get_sandbox_capabilities(self) -> dict[str, Any]:
-        path = "/sandboxes/capabilities"
-        return cast(dict[str, Any], self._transport.request("GET", path))
+        request_path = "/sandboxes/capabilities"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
 
     def list_sandboxes(self) -> ObjectList:
-        path = "/sandboxes"
-        return cast(ObjectList, self._transport.request("GET", path))
+        request_path = "/sandboxes"
+        return cast(ObjectList, self._transport.request("GET", request_path))
 
     def create_sandbox(self, *, body: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
-        path = "/sandboxes"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body, idempotency_key=idempotency_key))
+        request_path = "/sandboxes"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body, idempotency_key=idempotency_key))
+
+    def get_sandbox_usage(self) -> dict[str, Any]:
+        request_path = "/sandboxes/usage"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
 
     def get_sandbox(self, id: str) -> dict[str, Any]:
-        path = f"/sandboxes/{quote(id, safe='')}"
-        return cast(dict[str, Any], self._transport.request("GET", path))
+        request_path = f"/sandboxes/{quote(id, safe='')}"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
+    def run_sandbox_command(self, id: str, *, body: dict[str, Any]) -> dict[str, Any]:
+        request_path = f"/sandboxes/{quote(id, safe='')}/commands"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
+
+    def write_sandbox_file(self, id: str, *, body: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
+        request_path = f"/sandboxes/{quote(id, safe='')}/files"
+        return cast(dict[str, Any], self._transport.request("PUT", request_path, body=body, idempotency_key=idempotency_key))
+
+    def read_sandbox_file(self, id: str) -> dict[str, Any]:
+        request_path = f"/sandboxes/{quote(id, safe='')}/files"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
+    def create_sandbox_port_lease(self, id: str, port: str, *, body: dict[str, Any]) -> dict[str, Any]:
+        request_path = f"/sandboxes/{quote(id, safe='')}/ports/{quote(port, safe='')}/leases"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
+
+    def get_sandbox_events(self, id: str) -> ObjectList:
+        request_path = f"/sandboxes/{quote(id, safe='')}/events"
+        return cast(ObjectList, self._transport.request("GET", request_path))
+
+    def get_sandbox_receipt(self, id: str) -> dict[str, Any]:
+        request_path = f"/sandboxes/{quote(id, safe='')}/receipt"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
+    def get_sandbox_preview(self, sandbox: str, token: str, path: str) -> dict[str, Any]:
+        request_path = f"/sandbox-previews/{quote(sandbox, safe='')}/{quote(token, safe='')}/{quote(path, safe='')}"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
+    def head_sandbox_preview(self, sandbox: str, token: str, path: str) -> None:
+        request_path = f"/sandbox-previews/{quote(sandbox, safe='')}/{quote(token, safe='')}/{quote(path, safe='')}"
+        return cast(None, self._transport.request("HEAD", request_path))
 
     def pause_sandbox(self, id: str, idempotency_key: str) -> dict[str, Any]:
-        path = f"/sandboxes/{quote(id, safe='')}/pause"
-        return cast(dict[str, Any], self._transport.request("POST", path, idempotency_key=idempotency_key))
+        request_path = f"/sandboxes/{quote(id, safe='')}/pause"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, idempotency_key=idempotency_key))
 
     def resume_sandbox(self, id: str, idempotency_key: str) -> dict[str, Any]:
-        path = f"/sandboxes/{quote(id, safe='')}/resume"
-        return cast(dict[str, Any], self._transport.request("POST", path, idempotency_key=idempotency_key))
+        request_path = f"/sandboxes/{quote(id, safe='')}/resume"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, idempotency_key=idempotency_key))
 
     def delete_sandbox(self, id: str, idempotency_key: str) -> dict[str, Any]:
-        path = f"/sandboxes/{quote(id, safe='')}"
-        return cast(dict[str, Any], self._transport.request("DELETE", path, idempotency_key=idempotency_key))
+        request_path = f"/sandboxes/{quote(id, safe='')}"
+        return cast(dict[str, Any], self._transport.request("DELETE", request_path, idempotency_key=idempotency_key))
 
     def create_sandbox_reference(self, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = "/sandboxes/references"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = "/sandboxes/references"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def list_sandbox_references(self) -> ObjectList:
-        path = "/sandboxes/references"
-        return cast(ObjectList, self._transport.request("GET", path))
+        request_path = "/sandboxes/references"
+        return cast(ObjectList, self._transport.request("GET", request_path))
 
     def rotate_sandbox_credential(self, id: str) -> dict[str, Any]:
-        path = f"/sandboxes/references/{quote(id, safe='')}/credential/rotate"
-        return cast(dict[str, Any], self._transport.request("POST", path))
+        request_path = f"/sandboxes/references/{quote(id, safe='')}/credential/rotate"
+        return cast(dict[str, Any], self._transport.request("POST", request_path))
 
     def revoke_sandbox_reference(self, id: str) -> dict[str, Any]:
-        path = f"/sandboxes/references/{quote(id, safe='')}"
-        return cast(dict[str, Any], self._transport.request("DELETE", path))
+        request_path = f"/sandboxes/references/{quote(id, safe='')}"
+        return cast(dict[str, Any], self._transport.request("DELETE", request_path))
 
     def attach_training_artifact(self, name: str, *, body: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
-        path = f"/deployments/{quote(name, safe='')}/training-artifacts"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body, idempotency_key=idempotency_key))
+        request_path = f"/deployments/{quote(name, safe='')}/training-artifacts"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body, idempotency_key=idempotency_key))
 
     def list_training_artifacts(self, name: str) -> ObjectList:
-        path = f"/deployments/{quote(name, safe='')}/training-artifacts"
-        return cast(ObjectList, self._transport.request("GET", path))
+        request_path = f"/deployments/{quote(name, safe='')}/training-artifacts"
+        return cast(ObjectList, self._transport.request("GET", request_path))
 
     def create_fin_ops_report(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = f"/deployments/{quote(name, safe='')}/finops/reports"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = f"/deployments/{quote(name, safe='')}/finops/reports"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def list_fin_ops_reports(self, name: str) -> ObjectList:
-        path = f"/deployments/{quote(name, safe='')}/finops/reports"
-        return cast(ObjectList, self._transport.request("GET", path))
+        request_path = f"/deployments/{quote(name, safe='')}/finops/reports"
+        return cast(ObjectList, self._transport.request("GET", request_path))
 
     def create_autopilot_plan(self, name: str, *, body: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
-        path = f"/deployments/{quote(name, safe='')}/autopilot/plans"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body, idempotency_key=idempotency_key))
+        request_path = f"/deployments/{quote(name, safe='')}/autopilot/plans"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body, idempotency_key=idempotency_key))
 
     def get_autopilot_plan(self, id: str) -> dict[str, Any]:
-        path = f"/autopilot/plans/{quote(id, safe='')}"
-        return cast(dict[str, Any], self._transport.request("GET", path))
+        request_path = f"/autopilot/plans/{quote(id, safe='')}"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
 
     def approve_autopilot_plan(self, id: str, *, body: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
-        path = f"/autopilot/plans/{quote(id, safe='')}/approve"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body, idempotency_key=idempotency_key))
+        request_path = f"/autopilot/plans/{quote(id, safe='')}/approve"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body, idempotency_key=idempotency_key))
 
     def create_context_passport(self, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = "/context-passports"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = "/context-passports"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def get_context_passport(self, id: str) -> dict[str, Any]:
-        path = f"/context-passports/{quote(id, safe='')}"
-        return cast(dict[str, Any], self._transport.request("GET", path))
+        request_path = f"/context-passports/{quote(id, safe='')}"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
 
     def evaluate_burst_guard(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = f"/deployments/{quote(name, safe='')}/burst-guard/evaluate"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = f"/deployments/{quote(name, safe='')}/burst-guard/evaluate"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def create_inference_passport(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = f"/deployments/{quote(name, safe='')}/passports"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = f"/deployments/{quote(name, safe='')}/passports"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def list_inference_passports(self, name: str) -> ObjectList:
-        path = f"/deployments/{quote(name, safe='')}/passports"
-        return cast(ObjectList, self._transport.request("GET", path))
+        request_path = f"/deployments/{quote(name, safe='')}/passports"
+        return cast(ObjectList, self._transport.request("GET", request_path))
 
     def get_s_l_o_policy(self, name: str) -> dict[str, Any]:
-        path = f"/deployments/{quote(name, safe='')}/slo-policy"
-        return cast(dict[str, Any], self._transport.request("GET", path))
+        request_path = f"/deployments/{quote(name, safe='')}/slo-policy"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
 
     def set_s_l_o_policy(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = f"/deployments/{quote(name, safe='')}/slo-policy"
-        return cast(dict[str, Any], self._transport.request("PUT", path, body=body))
+        request_path = f"/deployments/{quote(name, safe='')}/slo-policy"
+        return cast(dict[str, Any], self._transport.request("PUT", request_path, body=body))
 
     def delete_s_l_o_policy(self, name: str) -> None:
-        path = f"/deployments/{quote(name, safe='')}/slo-policy"
-        return cast(None, self._transport.request("DELETE", path))
+        request_path = f"/deployments/{quote(name, safe='')}/slo-policy"
+        return cast(None, self._transport.request("DELETE", request_path))
 
     def create_recommendation(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = f"/deployments/{quote(name, safe='')}/recommendations"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = f"/deployments/{quote(name, safe='')}/recommendations"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def list_recommendations(self, name: str) -> ObjectList:
-        path = f"/deployments/{quote(name, safe='')}/recommendations"
-        return cast(ObjectList, self._transport.request("GET", path))
+        request_path = f"/deployments/{quote(name, safe='')}/recommendations"
+        return cast(ObjectList, self._transport.request("GET", request_path))
 
     def list_revisions(self, name: str) -> ObjectList:
-        path = f"/deployments/{quote(name, safe='')}/revisions"
-        return cast(ObjectList, self._transport.request("GET", path))
+        request_path = f"/deployments/{quote(name, safe='')}/revisions"
+        return cast(ObjectList, self._transport.request("GET", request_path))
 
     def create_rollout(self, name: str, *, body: dict[str, Any], idempotency_key: str) -> OperationEnvelope:
-        path = f"/deployments/{quote(name, safe='')}/rollouts"
-        return cast(OperationEnvelope, self._transport.request("POST", path, body=body, idempotency_key=idempotency_key))
+        request_path = f"/deployments/{quote(name, safe='')}/rollouts"
+        return cast(OperationEnvelope, self._transport.request("POST", request_path, body=body, idempotency_key=idempotency_key))
 
     def evaluate_release_guard(self, name: str, *, body: dict[str, Any], idempotency_key: str) -> OperationEnvelope:
-        path = f"/deployments/{quote(name, safe='')}/rollouts/guard/evaluate"
-        return cast(OperationEnvelope, self._transport.request("POST", path, body=body, idempotency_key=idempotency_key))
+        request_path = f"/deployments/{quote(name, safe='')}/rollouts/guard/evaluate"
+        return cast(OperationEnvelope, self._transport.request("POST", request_path, body=body, idempotency_key=idempotency_key))
 
     def get_release_guard_policy(self, name: str) -> dict[str, Any]:
-        path = f"/deployments/{quote(name, safe='')}/release-guard/policy"
-        return cast(dict[str, Any], self._transport.request("GET", path))
+        request_path = f"/deployments/{quote(name, safe='')}/release-guard/policy"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
 
     def set_release_guard_policy(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = f"/deployments/{quote(name, safe='')}/release-guard/policy"
-        return cast(dict[str, Any], self._transport.request("PUT", path, body=body))
+        request_path = f"/deployments/{quote(name, safe='')}/release-guard/policy"
+        return cast(dict[str, Any], self._transport.request("PUT", request_path, body=body))
 
     def promote_rollout(self, name: str, revision: str, idempotency_key: str) -> OperationEnvelope:
-        path = f"/deployments/{quote(name, safe='')}/rollouts/{quote(revision, safe='')}/promote"
-        return cast(OperationEnvelope, self._transport.request("POST", path, idempotency_key=idempotency_key))
+        request_path = f"/deployments/{quote(name, safe='')}/rollouts/{quote(revision, safe='')}/promote"
+        return cast(OperationEnvelope, self._transport.request("POST", request_path, idempotency_key=idempotency_key))
 
     def provision_rollout(self, name: str, revision: str, idempotency_key: str) -> OperationEnvelope:
-        path = f"/deployments/{quote(name, safe='')}/rollouts/{quote(revision, safe='')}/provision"
-        return cast(OperationEnvelope, self._transport.request("POST", path, idempotency_key=idempotency_key))
+        request_path = f"/deployments/{quote(name, safe='')}/rollouts/{quote(revision, safe='')}/provision"
+        return cast(OperationEnvelope, self._transport.request("POST", request_path, idempotency_key=idempotency_key))
 
     def reject_rollout(self, name: str, revision: str, *, body: dict[str, Any], idempotency_key: str) -> OperationEnvelope:
-        path = f"/deployments/{quote(name, safe='')}/rollouts/{quote(revision, safe='')}/reject"
-        return cast(OperationEnvelope, self._transport.request("POST", path, body=body, idempotency_key=idempotency_key))
+        request_path = f"/deployments/{quote(name, safe='')}/rollouts/{quote(revision, safe='')}/reject"
+        return cast(OperationEnvelope, self._transport.request("POST", request_path, body=body, idempotency_key=idempotency_key))
 
     def rollback_deployment(self, name: str, *, body: dict[str, Any], idempotency_key: str) -> OperationEnvelope:
-        path = f"/deployments/{quote(name, safe='')}/rollback"
-        return cast(OperationEnvelope, self._transport.request("POST", path, body=body, idempotency_key=idempotency_key))
+        request_path = f"/deployments/{quote(name, safe='')}/rollback"
+        return cast(OperationEnvelope, self._transport.request("POST", request_path, body=body, idempotency_key=idempotency_key))
 
     def list_scaling_decisions(self, name: str) -> ObjectList:
-        path = f"/deployments/{quote(name, safe='')}/scaling-decisions"
-        return cast(ObjectList, self._transport.request("GET", path))
+        request_path = f"/deployments/{quote(name, safe='')}/scaling-decisions"
+        return cast(ObjectList, self._transport.request("GET", request_path))
 
     def set_deployment_route(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = f"/deployments/{quote(name, safe='')}/route"
-        return cast(dict[str, Any], self._transport.request("PUT", path, body=body))
+        request_path = f"/deployments/{quote(name, safe='')}/route"
+        return cast(dict[str, Any], self._transport.request("PUT", request_path, body=body))
 
     def list_targets(self) -> ObjectList:
-        path = "/targets"
-        return cast(ObjectList, self._transport.request("GET", path))
+        request_path = "/targets"
+        return cast(ObjectList, self._transport.request("GET", request_path))
 
     def create_target(self, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = "/targets"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = "/targets"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def list_provider_connections(self) -> ObjectList:
-        path = "/provider-connections"
-        return cast(ObjectList, self._transport.request("GET", path))
+        request_path = "/provider-connections"
+        return cast(ObjectList, self._transport.request("GET", request_path))
 
     def create_provider_connection(self, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = "/provider-connections"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = "/provider-connections"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def delete_provider_connection(self, name: str) -> dict[str, Any]:
-        path = f"/provider-connections/{quote(name, safe='')}"
-        return cast(dict[str, Any], self._transport.request("DELETE", path))
+        request_path = f"/provider-connections/{quote(name, safe='')}"
+        return cast(dict[str, Any], self._transport.request("DELETE", request_path))
 
     def get_managed_wallet(self) -> dict[str, Any]:
-        path = "/billing/wallet"
-        return cast(dict[str, Any], self._transport.request("GET", path))
+        request_path = "/billing/wallet"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
 
     def list_managed_wallet_ledger(self) -> dict[str, Any]:
-        path = "/billing/ledger"
-        return cast(dict[str, Any], self._transport.request("GET", path))
+        request_path = "/billing/ledger"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
 
     def create_managed_checkout_session(self, *, body: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
-        path = "/billing/checkout-sessions"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body, idempotency_key=idempotency_key))
+        request_path = "/billing/checkout-sessions"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body, idempotency_key=idempotency_key))
 
     def process_stripe_billing_webhook(self, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = "/billing/webhooks/stripe"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = "/billing/webhooks/stripe"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def credit_managed_wallet(self, *, body: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
-        path = "/admin/billing/credits"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body, idempotency_key=idempotency_key))
+        request_path = "/admin/billing/credits"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body, idempotency_key=idempotency_key))
 
     def list_managed_usage_reservations(self) -> dict[str, Any]:
-        path = "/admin/billing/reservations"
-        return cast(dict[str, Any], self._transport.request("GET", path))
+        request_path = "/admin/billing/reservations"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
 
     def settle_managed_usage(self, id: str, *, body: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
-        path = f"/admin/billing/reservations/{quote(id, safe='')}/settlement"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body, idempotency_key=idempotency_key))
+        request_path = f"/admin/billing/reservations/{quote(id, safe='')}/settlement"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body, idempotency_key=idempotency_key))
 
     def release_managed_usage(self, id: str, *, body: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
-        path = f"/admin/billing/reservations/{quote(id, safe='')}/release"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body, idempotency_key=idempotency_key))
+        request_path = f"/admin/billing/reservations/{quote(id, safe='')}/release"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body, idempotency_key=idempotency_key))
 
     def list_orphans(self) -> ObjectList:
-        path = "/orphans"
-        return cast(ObjectList, self._transport.request("GET", path))
+        request_path = "/orphans"
+        return cast(ObjectList, self._transport.request("GET", request_path))
 
     def list_audit_events(self) -> ObjectList:
-        path = "/audit-events"
-        return cast(ObjectList, self._transport.request("GET", path))
+        request_path = "/audit-events"
+        return cast(ObjectList, self._transport.request("GET", request_path))
 
     def set_tenant_quota(self, *, body: dict[str, Any]) -> None:
-        path = "/tenant/quota"
-        return cast(None, self._transport.request("PUT", path, body=body))
+        request_path = "/tenant/quota"
+        return cast(None, self._transport.request("PUT", request_path, body=body))
 
     def create_tenant(self, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = "/tenants"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = "/tenants"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def create_principal(self, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = "/principals"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = "/principals"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def list_principals(self) -> ObjectList:
-        path = "/principals"
-        return cast(ObjectList, self._transport.request("GET", path))
+        request_path = "/principals"
+        return cast(ObjectList, self._transport.request("GET", request_path))
 
     def rotate_principal(self, id: str) -> dict[str, Any]:
-        path = f"/principals/{quote(id, safe='')}/rotate"
-        return cast(dict[str, Any], self._transport.request("POST", path))
+        request_path = f"/principals/{quote(id, safe='')}/rotate"
+        return cast(dict[str, Any], self._transport.request("POST", request_path))
 
     def revoke_principal(self, id: str) -> None:
-        path = f"/principals/{quote(id, safe='')}"
-        return cast(None, self._transport.request("DELETE", path))
+        request_path = f"/principals/{quote(id, safe='')}"
+        return cast(None, self._transport.request("DELETE", request_path))
 
     def list_secret_references(self) -> ObjectList:
-        path = "/secrets"
-        return cast(ObjectList, self._transport.request("GET", path))
+        request_path = "/secrets"
+        return cast(ObjectList, self._transport.request("GET", request_path))
 
     def create_secret_reference(self, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = "/secrets"
-        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+        request_path = "/secrets"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def delete_secret_reference(self, id: str) -> None:
-        path = f"/secrets/{quote(id, safe='')}"
-        return cast(None, self._transport.request("DELETE", path))
+        request_path = f"/secrets/{quote(id, safe='')}"
+        return cast(None, self._transport.request("DELETE", request_path))
 
     def get_external_policy(self, name: str) -> dict[str, Any]:
-        path = f"/deployments/{quote(name, safe='')}/external-policy"
-        return cast(dict[str, Any], self._transport.request("GET", path))
+        request_path = f"/deployments/{quote(name, safe='')}/external-policy"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
 
     def set_external_policy(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
-        path = f"/deployments/{quote(name, safe='')}/external-policy"
-        return cast(dict[str, Any], self._transport.request("PUT", path, body=body))
+        request_path = f"/deployments/{quote(name, safe='')}/external-policy"
+        return cast(dict[str, Any], self._transport.request("PUT", request_path, body=body))

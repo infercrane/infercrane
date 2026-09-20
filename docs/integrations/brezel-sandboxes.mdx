@@ -1,97 +1,156 @@
 ---
-title: Native Brezel sandboxes
-description: Offer private-tenant CPU sandboxes through InferCrane while Brezel owns isolated execution.
-sidebarTitle: Brezel sandboxes
+title: InferCrane private computers
+description: Give agents a persistent private computer while InferCrane owns access, audit, and usage.
+sidebarTitle: Private computers
 ---
 
-# Native sandboxes with Brezel
+# Private computers backed by Brezel
 
-InferCrane can expose an approved subset of a dedicated Brezel project as the
-**Sandboxes** product. InferCrane owns tenant authorization, allowed templates,
-audit, and the stable customer API. Brezel owns the microVM lifecycle and guest
-execution.
+Customers see an InferCrane **private computer**: a durable workspace that runs
+commands safely, sleeps when idle, exposes short-lived previews, and can call an
+approved InferCrane model endpoint. Brezel is the execution backend, not a
+customer identity or browser dependency.
 
 <Warning>
-This is a private-tenant preview. Map one InferCrane tenant to one dedicated
-Brezel project. Do not use one Brezel project as a shared hostile multi-tenant
-service.
+This remains a private-tenant CPU preview. Map one InferCrane tenant to one
+dedicated Brezel project. The current host uses host-local workspace durability;
+do not promise survival after complete host loss until encrypted backup and
+restore or replicated storage is implemented and tested.
 </Warning>
 
 ```mermaid
 flowchart LR
-  USER[Enterprise user] --> IC[InferCrane<br/>tenant policy · audit]
-  IC --> B[Brezel<br/>dedicated project]
-  B --> SB[Approved CPU sandbox]
-  IC -. exact GPU work .-> GPU[Disposable benchmark worker]
+  Browser[InferCrane dashboard] --> Console[Next.js console]
+  Console --> API[InferCrane control API]
+  API --> DB[(metadata + usage)]
+  API --> Edge[HTTPS Brezel edge]
+  Edge --> Lifecycle[brezeld]
+  Lifecycle -->|signed 30s capability| Node[brezel-node]
+  Node --> VM[Firecracker microVM]
+  VM -->|scoped connector| Model[InferCrane model endpoint]
 ```
+
+The browser never receives Brezel tokens, project credentials, engine IDs,
+node capability tokens, internal addresses, workspace IDs, or provider sandbox
+IDs. Every operation starts by resolving the customer-facing InferCrane ID and
+checking its tenant ownership.
 
 ## Configure the provider
 
-Create immutable Brezel environment revisions first. Then configure InferCrane
-with an owner-only token file and a stable product-template mapping:
+Create immutable Brezel environment and connector revisions first. Then mount a
+dedicated owner-only service token and configure the stable mappings:
 
 ```bash
-export INFERCRANE_BREZEL_SANDBOX_URL="https://brezel.internal.example"
-export INFERCRANE_BREZEL_SANDBOX_TOKEN_FILE="/run/secrets/brezel-token"
-export INFERCRANE_BREZEL_SANDBOX_PROJECT_ID="enterprise-a"
+export INFERCRANE_BREZEL_SANDBOX_URL="https://sandbox.infercrane.com"
+export INFERCRANE_BREZEL_SANDBOX_TOKEN_FILE="/run/secrets/brezel-sandbox-token"
+export INFERCRANE_BREZEL_SANDBOX_PROJECT_ID="infercrane-private-computers"
 export INFERCRANE_BREZEL_SANDBOX_TENANT_ID="tenant-enterprise-a"
-export INFERCRANE_BREZEL_SANDBOX_TEMPLATES_JSON='{
-  "coding-agent":"envr_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-  "evaluation-worker":"envr_abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
-}'
 export INFERCRANE_BREZEL_SANDBOX_DEFAULT_TEMPLATE="coding-agent"
+export INFERCRANE_BREZEL_SANDBOX_TEMPLATES_JSON='{
+  "coding-agent":"envr_0123456789abcdef01234567",
+  "evaluation-worker":"envr_abcdef0123456789abcdef01"
+}'
+export INFERCRANE_BREZEL_SANDBOX_MODEL_CONNECTORS_JSON='{
+  "coder-production":"connr_0123456789abcdef01234567"
+}'
 ```
 
 The token file must be a non-empty regular file readable only by its owner.
-Production Brezel origins require HTTPS; loopback HTTP is accepted for local
-development. Configuration is all-or-nothing so a partial provider cannot
-appear ready in the console.
+Production origins require HTTPS; loopback HTTP is accepted for local
+development. None of these values may use a `NEXT_PUBLIC_` prefix.
 
-## Customer lifecycle
+For a model-enabled computer, Brezel injects only a short-lived connector
+session:
+
+```text
+BREZEL_CONNECTOR_GATEWAY_URL=https://sandbox.infercrane.com/connector/v1/proxy
+BREZEL_CONNECTOR_RENEW_URL=https://sandbox.infercrane.com/connector/v1/leases/renew
+BREZEL_CONNECTOR_LEASE=<short-lived signed lease>
+```
+
+The client sends the lease to the gateway path for the immutable connector
+revision selected by InferCrane. The gateway checks the live computer and route
+policy before adding the real credential outside the guest. Long-lived
+InferCrane, provider, GitHub, and cloud secrets must never enter guest
+environment variables, command arguments, files, snapshots, receipts, or logs.
+
+## Customer API
 
 ```text
 GET    /api/v1/sandboxes/capabilities
 GET    /api/v1/sandboxes
 POST   /api/v1/sandboxes
 GET    /api/v1/sandboxes/{id}
+POST   /api/v1/sandboxes/{id}/commands
+PUT    /api/v1/sandboxes/{id}/files?path=...
+GET    /api/v1/sandboxes/{id}/files?path=...
+POST   /api/v1/sandboxes/{id}/ports/{port}/leases
+GET    /api/v1/sandboxes/{id}/events
+GET    /api/v1/sandboxes/{id}/receipt
+GET    /api/v1/sandboxes/usage
 POST   /api/v1/sandboxes/{id}/pause
 POST   /api/v1/sandboxes/{id}/resume
 DELETE /api/v1/sandboxes/{id}
 ```
 
-Create accepts a product template, expiration, optional standby timing, and the
-`offline` network mode. InferCrane resolves the product template to its pinned
-Brezel environment revision. Lifecycle mutations require `Idempotency-Key` and
-are recorded in the InferCrane tenant audit log.
+Create records InferCrane metadata first, creates a durable Brezel workspace,
+attaches it at `/workspace`, then creates the computer from an approved
+environment. Partial failure is compensated and remains visibly `failed` or
+`cleanup_pending`; uncertainty is never rewritten as running.
 
 ```bash
 curl -sS https://control.example.com/api/v1/sandboxes \
   -H "Authorization: Bearer $INFERCRANE_API_KEY" \
-  -H "Idempotency-Key: sandbox-$(uuidgen)" \
+  -H "Idempotency-Key: computer-$(uuidgen)" \
   -H "Content-Type: application/json" \
   -d '{
+    "display_name":"Evaluation run",
+    "purpose":"evaluation",
+    "source_type":"empty_workspace",
     "template_id":"evaluation-worker",
     "ttl_seconds":3600,
+    "standby_after_seconds":900,
+    "auto_resume":true,
     "network_mode":"offline"
   }'
 ```
 
-InferCrane preserves Brezel's real `requested`, `preparing`, `running`,
-`pausing`, `standby`, `resuming`, `deleting`, `deleted`, `expired`, `failed`,
-and `unknown` states. It does not rewrite an uncertain provider state as ready.
+Commands are bounded tasks, not an interactive PTY. The response stays an
+incremental NDJSON stream: output chunks are base64-encoded and the terminal
+`exited` event carries the exit code. Files are streamed with a 32 MiB limit.
+Preview leases are re-brokered through an InferCrane-scoped URL; the original
+provider path never reaches the browser.
+
+## Usage and privacy
+
+InferCrane maintains an append-only, idempotent usage ledger for running time,
+standby time, command duration and exit class, transfer bytes, and preview
+request counts. The dashboard calls this **usage**, not an invoice.
+
+The ledger never records command text, stdout, stderr, file names or paths,
+file contents, source code, prompts, model responses, preview URLs, or lease
+tokens. Brezel Prometheus metrics remain operational metrics and are not the
+customer billing ledger.
+
+## Public edge and operations
+
+Run the included Caddy edge with
+`BREZEL_PUBLIC_HOST=sandbox.infercrane.com`. Only ports 80 and 443 are public;
+restrict SSH to an operator network and never publish lifecycle, node,
+database, Redis, or metrics ports. Cloud IAM used to administer the host is a
+separate operational credential and must be rotated without changing the
+dedicated Brezel service token used by InferCrane.
+
+Verify `https://sandbox.infercrane.com/readyz` and `/v1/capabilities`, then run
+the full lifecycle through InferCrane: create, command, file write/read, HTTP
+preview, pause, resume, persistence check, delete, and cleanup confirmation.
 
 ## Current boundary
 
-The first contract includes capability discovery and lifecycle management. It
-does not claim GPU passthrough, PTY/SSH, arbitrary OCI builds, shared hosted
-multitenancy, or hardware attestation. The dashboard labels completed command
-output as task output rather than an interactive terminal.
+This release does not claim GPU passthrough, interactive PTY/SSH, arbitrary OCI
+builds, public shared multitenancy, unrestricted internet with controlled egress,
+or host-loss durability. Direct internet access stays disabled by default.
 
-Customer-facing sandboxes are also separate from InferCrane's internal
-optimization workers. Internal workers accept only typed, digest-bound jobs and
-a baked-in runner; exact GPU correctness and performance tests run through the
-normal optimization campaign on separate workers.
-
-For E2B, Modal, Kubernetes, or other externally owned sandboxes, use
-[external sandbox access](/integrations/sandboxes) instead. Those routes issue
-endpoint-scoped inference credentials but never mutate the external sandbox.
+For E2B, Modal, Kubernetes, or another externally owned runtime, use
+[external sandbox access](/integrations/sandboxes). Those routes bind scoped
+model access but never mutate the external runtime.

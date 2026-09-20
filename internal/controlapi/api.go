@@ -327,6 +327,15 @@ type API struct {
 	ModelAPICatalog  modelapicatalog.Catalog
 	ModelAPIProducts modelAPIProductStore
 	SandboxProvider  sandboxprovider.Provider
+	// SandboxProjectID is a server-only backend reference persisted for
+	// reconciliation. It is never included in customer responses.
+	SandboxProjectID string
+	SandboxPreviews  *SandboxPreviewBroker
+	// SandboxDefaultTemplate and SandboxModelConnectors are server-side
+	// allowlists. Connector revisions bind a customer endpoint to a Brezel
+	// credential broker without sending credential bytes to the guest.
+	SandboxDefaultTemplate string
+	SandboxModelConnectors map[string]string
 	// ModelAPIOperatorTenantID is the platform-owned workspace allowed to
 	// publish shared supplier routes. Ordinary tenant administrators never
 	// inherit this authority merely by holding an admin role.
@@ -438,6 +447,15 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/sandboxes", a.auth(authz.Read, a.sandboxes))
 	mux.HandleFunc("POST /api/v1/sandboxes", a.auth(authz.Deploy, a.createSandbox))
 	mux.HandleFunc("GET /api/v1/sandboxes/{id}", a.auth(authz.Read, a.sandbox))
+	mux.HandleFunc("POST /api/v1/sandboxes/{id}/commands", a.auth(authz.Deploy, a.runSandboxCommand))
+	mux.HandleFunc("PUT /api/v1/sandboxes/{id}/files", a.auth(authz.Deploy, a.writeSandboxFile))
+	mux.HandleFunc("GET /api/v1/sandboxes/{id}/files", a.auth(authz.Read, a.readSandboxFile))
+	mux.HandleFunc("POST /api/v1/sandboxes/{id}/ports/{port}/leases", a.auth(authz.Deploy, a.createSandboxPortLease))
+	mux.HandleFunc("GET /api/v1/sandboxes/{id}/events", a.auth(authz.Read, a.sandboxEvents))
+	mux.HandleFunc("GET /api/v1/sandboxes/{id}/receipt", a.auth(authz.Read, a.sandboxReceipt))
+	mux.HandleFunc("GET /api/v1/sandboxes/usage", a.auth(authz.Read, a.sandboxUsage))
+	mux.HandleFunc("GET /api/v1/sandbox-previews/{sandbox}/{token}/{path...}", a.auth(authz.Read, a.proxySandboxPreview))
+	mux.HandleFunc("HEAD /api/v1/sandbox-previews/{sandbox}/{token}/{path...}", a.auth(authz.Read, a.proxySandboxPreview))
 	mux.HandleFunc("POST /api/v1/sandboxes/{id}/pause", a.auth(authz.Deploy, a.pauseSandbox))
 	mux.HandleFunc("POST /api/v1/sandboxes/{id}/resume", a.auth(authz.Deploy, a.resumeSandbox))
 	mux.HandleFunc("DELETE /api/v1/sandboxes/{id}", a.auth(authz.Delete, a.deleteSandbox))
@@ -3399,148 +3417,6 @@ func (a API) capacityIntelligence(w http.ResponseWriter, r *http.Request) {
 		rows = make([]domain.CapacitySummary, 0)
 	}
 	writeJSON(w, 200, map[string]any{"capacity": rows, "evidence": "observed", "sample_scope": "tenant", "window_seconds": int(window.Seconds())})
-}
-
-func (a API) sandboxCapabilities(w http.ResponseWriter, r *http.Request) {
-	actor := r.Context().Value(identityKey{}).(domain.Principal)
-	if a.SandboxProvider == nil {
-		writeJSON(w, http.StatusOK, sandboxprovider.Capabilities{
-			Provider: "brezel", Product: "InferCrane Sandboxes", State: "not_configured",
-			Assurance: "private-tenant-preview", Templates: []sandboxprovider.Template{},
-			Qualification:     "unavailable",
-			QualificationNote: "Configure a dedicated Brezel project and approved immutable templates for this tenant.",
-		})
-		return
-	}
-	capabilities, err := a.SandboxProvider.Capabilities(r.Context(), actor.TenantID)
-	if err != nil {
-		a.writeSandboxProviderError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, capabilities)
-}
-
-func (a API) sandboxes(w http.ResponseWriter, r *http.Request) {
-	if a.SandboxProvider == nil {
-		writeError(w, http.StatusNotImplemented, "sandbox_provider_unavailable", "a native sandbox provider is not configured")
-		return
-	}
-	includeTerminal := false
-	if raw := strings.TrimSpace(r.URL.Query().Get("include_terminal")); raw != "" {
-		var err error
-		includeTerminal, err = strconv.ParseBool(raw)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request", "include_terminal must be true or false")
-			return
-		}
-	}
-	actor := r.Context().Value(identityKey{}).(domain.Principal)
-	rows, err := a.SandboxProvider.List(r.Context(), actor.TenantID, includeTerminal)
-	if err != nil {
-		a.writeSandboxProviderError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": rows, "execution_boundary": "brezel", "assurance": "private-tenant-preview"})
-}
-
-func (a API) sandbox(w http.ResponseWriter, r *http.Request) {
-	if a.SandboxProvider == nil {
-		writeError(w, http.StatusNotImplemented, "sandbox_provider_unavailable", "a native sandbox provider is not configured")
-		return
-	}
-	actor := r.Context().Value(identityKey{}).(domain.Principal)
-	row, err := a.SandboxProvider.Get(r.Context(), actor.TenantID, r.PathValue("id"))
-	if err != nil {
-		a.writeSandboxProviderError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, row)
-}
-
-func (a API) createSandbox(w http.ResponseWriter, r *http.Request) {
-	if a.SandboxProvider == nil {
-		writeError(w, http.StatusNotImplemented, "sandbox_provider_unavailable", "a native sandbox provider is not configured")
-		return
-	}
-	var request struct {
-		TemplateID          string `json:"template_id"`
-		TTLSeconds          int64  `json:"ttl_seconds"`
-		StandbyAfterSeconds int64  `json:"standby_after_seconds,omitempty"`
-		AutoResume          bool   `json:"auto_resume,omitempty"`
-		NetworkMode         string `json:"network_mode,omitempty"`
-	}
-	if !decodeMutationBody(w, r, &request) {
-		return
-	}
-	actor := r.Context().Value(identityKey{}).(domain.Principal)
-	mutation, err := a.SandboxProvider.Create(r.Context(), actor.TenantID, strings.TrimSpace(r.Header.Get("Idempotency-Key")), sandboxprovider.CreateRequest{
-		TemplateID: request.TemplateID, ExpiresAfterSeconds: request.TTLSeconds,
-		StandbyAfterSeconds: request.StandbyAfterSeconds, AutoResume: request.AutoResume, NetworkMode: request.NetworkMode,
-	})
-	if err != nil {
-		a.writeSandboxProviderError(w, err)
-		return
-	}
-	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "sandbox.create", ResourceType: "sandbox", ResourceName: mutation.Resource.ID, Outcome: "accepted"})
-	writeJSON(w, http.StatusAccepted, mutation)
-}
-
-func (a API) pauseSandbox(w http.ResponseWriter, r *http.Request) {
-	a.mutateSandboxLifecycle(w, r, "pause")
-}
-
-func (a API) resumeSandbox(w http.ResponseWriter, r *http.Request) {
-	a.mutateSandboxLifecycle(w, r, "resume")
-}
-
-func (a API) deleteSandbox(w http.ResponseWriter, r *http.Request) {
-	a.mutateSandboxLifecycle(w, r, "delete")
-}
-
-func (a API) mutateSandboxLifecycle(w http.ResponseWriter, r *http.Request, action string) {
-	if a.SandboxProvider == nil {
-		writeError(w, http.StatusNotImplemented, "sandbox_provider_unavailable", "a native sandbox provider is not configured")
-		return
-	}
-	actor := r.Context().Value(identityKey{}).(domain.Principal)
-	id, key := r.PathValue("id"), strings.TrimSpace(r.Header.Get("Idempotency-Key"))
-	var (
-		mutation sandboxprovider.Mutation
-		err      error
-	)
-	switch action {
-	case "pause":
-		mutation, err = a.SandboxProvider.Pause(r.Context(), actor.TenantID, id, key)
-	case "resume":
-		mutation, err = a.SandboxProvider.Resume(r.Context(), actor.TenantID, id, key)
-	case "delete":
-		mutation, err = a.SandboxProvider.Delete(r.Context(), actor.TenantID, id, key)
-	default:
-		err = sandboxprovider.ErrInvalid
-	}
-	if err != nil {
-		a.writeSandboxProviderError(w, err)
-		return
-	}
-	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "sandbox." + action, ResourceType: "sandbox", ResourceName: id, Outcome: "accepted"})
-	writeJSON(w, http.StatusAccepted, mutation)
-}
-
-func (a API) writeSandboxProviderError(w http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, sandboxprovider.ErrForbidden):
-		writeError(w, http.StatusForbidden, "sandbox_tenant_not_enabled", "native sandboxes are not enabled for this tenant")
-	case errors.Is(err, sandboxprovider.ErrNotFound):
-		writeError(w, http.StatusNotFound, "sandbox_not_found", "sandbox was not found")
-	case errors.Is(err, sandboxprovider.ErrConflict):
-		writeError(w, http.StatusConflict, "sandbox_conflict", err.Error())
-	case errors.Is(err, sandboxprovider.ErrInvalid):
-		writeError(w, http.StatusBadRequest, "invalid_sandbox_request", err.Error())
-	case errors.Is(err, sandboxprovider.ErrUnavailable):
-		writeError(w, http.StatusServiceUnavailable, "sandbox_provider_unavailable", "the Brezel provider is not ready")
-	default:
-		writeError(w, http.StatusBadGateway, "sandbox_provider_failed", "the Brezel provider request failed")
-	}
 }
 
 func (a API) createSandboxReference(w http.ResponseWriter, r *http.Request) {

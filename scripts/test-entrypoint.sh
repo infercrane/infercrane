@@ -44,6 +44,15 @@ RUNPOD_API_KEY_FILE="$key_file" INFERCRANE_SKYPILOT_API=disabled \
 grep -qx 'runpod:config test-only-key' "$ENTRYPOINT_TEST_LOG"
 grep -qx 'infercrane:version' "$ENTRYPOINT_TEST_LOG"
 
+: >"$ENTRYPOINT_TEST_LOG"
+INFERCRANE_BREZEL_SANDBOX_TOKEN='brezel-test-token' INFERCRANE_SKYPILOT_API=disabled \
+  sh "$root/scripts/entrypoint.sh" sh -c '
+    test -r "$INFERCRANE_BREZEL_SANDBOX_TOKEN_FILE"
+    test "$(stat -c %a "$INFERCRANE_BREZEL_SANDBOX_TOKEN_FILE" 2>/dev/null || stat -f %Lp "$INFERCRANE_BREZEL_SANDBOX_TOKEN_FILE")" = 600
+    test "$(cat "$INFERCRANE_BREZEL_SANDBOX_TOKEN_FILE")" = brezel-test-token
+    test -z "${INFERCRANE_BREZEL_SANDBOX_TOKEN:-}"
+  '
+
 if env -u INFERCRANE_SKYPILOT_PROVIDERS_JSON INFERCRANE_SKYPILOT_API=enabled \
   sh "$root/scripts/entrypoint.sh" infercrane serve >"$fixture/out" 2>"$fixture/error"; then
   echo 'enabled SkyPilot mode accepted a missing provider manifest' >&2

@@ -22,11 +22,16 @@ func TestGeneratedClientsHaveTypedResponsesAndEscapedPaths(t *testing.T) {
 		"getOperation(id: string): Promise<Operation>",
 		"planIntent(body: JsonValue): Promise<IntentPlanEnvelope>",
 		"encodeURIComponent(id)",
+		"getSandboxPreview(sandbox: string, token: string, path: string)",
+		"const requestPath = `/sandbox-previews/",
 		"as Promise<Operation>",
 	} {
 		if !strings.Contains(typeScript, fragment) {
 			t.Errorf("TypeScript client is missing %q", fragment)
 		}
+	}
+	if strings.Contains(typeScript, "const path =") {
+		t.Fatal("TypeScript generated route variable collides with path parameters")
 	}
 }
 

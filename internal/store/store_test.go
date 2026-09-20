@@ -116,6 +116,42 @@ func TestTargetAndDeploymentLifecycle(t *testing.T) {
 	}
 }
 
+func TestNativeSandboxMetadataOwnsIdentityAndUsageIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	created, fresh, err := s.CreateNativeSandbox(ctx, domain.NativeSandbox{
+		TenantID: "global", CreatedBy: "operator", DisplayName: "Agent workbench",
+		Purpose: "coding_agent", SourceType: "empty_workspace", TemplateID: "coding-agent",
+		Status: "creating_workspace", IdempotencyKey: "native-sandbox-" + suffix,
+		InputDigest: strings.Repeat("a", 64), BrezelProjectID: "provider-project-" + suffix,
+	})
+	if err != nil || !fresh || created.ID == "" {
+		t.Fatalf("create native sandbox=%#v fresh=%v err=%v", created, fresh, err)
+	}
+	replayed, fresh, err := s.CreateNativeSandbox(ctx, domain.NativeSandbox{
+		TenantID: "global", CreatedBy: "operator", DisplayName: "Agent workbench",
+		Purpose: "coding_agent", SourceType: "empty_workspace", TemplateID: "coding-agent",
+		Status: "creating_workspace", IdempotencyKey: "native-sandbox-" + suffix,
+		InputDigest: strings.Repeat("a", 64), BrezelProjectID: "provider-project-" + suffix,
+	})
+	if err != nil || fresh || replayed.ID != created.ID {
+		t.Fatalf("replay=%#v fresh=%v err=%v", replayed, fresh, err)
+	}
+	if _, err = s.NativeSandbox(ctx, "another-tenant", created.ID); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("cross-tenant lookup err=%v", err)
+	}
+	event := domain.SandboxUsageEvent{EventID: "usage-" + suffix, TenantID: "global", SandboxID: created.ID, ProviderOperationID: "execution-" + suffix, EventType: "command.completed", OccurredAt: time.Now().UTC(), TemplateID: created.TemplateID, RuntimeClass: "firecracker-cpu", CommandDurationMilliseconds: 12, CommandExitClass: "success", MetadataVersion: 1}
+	inserted, err := s.AppendSandboxUsageEvent(ctx, event)
+	if err != nil || !inserted {
+		t.Fatalf("append usage inserted=%v err=%v", inserted, err)
+	}
+	inserted, err = s.AppendSandboxUsageEvent(ctx, event)
+	if err != nil || inserted {
+		t.Fatalf("duplicate usage inserted=%v err=%v", inserted, err)
+	}
+}
+
 func TestOptimizationCampaignIsBoundedDurableFencedAndCleansRejectedCandidate(t *testing.T) {
 	ctx := context.Background()
 	s := openStore(t, ctx)

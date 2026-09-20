@@ -126,8 +126,12 @@ The implemented InferCrane API supports:
 
 - provider capability discovery;
 - create from an approved immutable environment revision;
+- InferCrane-owned names, purpose, source, workspace, and tenant authorization;
 - list and detail;
-- pause, resume, and delete;
+- incremental command tasks, bounded file transfer, private previews, activity,
+  and redacted receipts;
+- durable workspace creation, compensation, pause, resume, and delete;
+- an append-only content-free usage ledger;
 - no-internet networking only;
 - provider states and failures without optimistic rewriting;
 - required idempotency keys and InferCrane audit events.
@@ -139,6 +143,13 @@ GET    /api/v1/sandboxes/capabilities
 GET    /api/v1/sandboxes
 POST   /api/v1/sandboxes
 GET    /api/v1/sandboxes/{id}
+POST   /api/v1/sandboxes/{id}/commands
+PUT    /api/v1/sandboxes/{id}/files?path=...
+GET    /api/v1/sandboxes/{id}/files?path=...
+POST   /api/v1/sandboxes/{id}/ports/{port}/leases
+GET    /api/v1/sandboxes/{id}/events
+GET    /api/v1/sandboxes/{id}/receipt
+GET    /api/v1/sandboxes/usage
 POST   /api/v1/sandboxes/{id}/pause
 POST   /api/v1/sandboxes/{id}/resume
 DELETE /api/v1/sandboxes/{id}
@@ -153,8 +164,9 @@ as separate ownership modes.
 The native provider is a **private-tenant preview**. One configured InferCrane
 tenant maps to one dedicated Brezel project. The MVP does not claim shared
 hosted multitenancy, GPU passthrough, interactive PTY/SSH, arbitrary OCI builds,
-or hardware attestation. The UI must use “task output” rather than “terminal”
-until PTY support exists.
+controlled arbitrary egress, host-loss durability, or hardware attestation. The
+UI uses “Console” for bounded tasks and explicitly says it is not an interactive
+terminal.
 
 Configuration is all-or-nothing:
 
@@ -165,6 +177,7 @@ INFERCRANE_BREZEL_SANDBOX_PROJECT_ID
 INFERCRANE_BREZEL_SANDBOX_TENANT_ID
 INFERCRANE_BREZEL_SANDBOX_TEMPLATES_JSON
 INFERCRANE_BREZEL_SANDBOX_DEFAULT_TEMPLATE
+INFERCRANE_BREZEL_SANDBOX_MODEL_CONNECTORS_JSON
 ```
 
 The token file must be an owner-only regular file. Production uses HTTPS;
@@ -176,14 +189,14 @@ loopback HTTP is accepted for local development. Template values are immutable
 1. Simplify navigation and redirect `/overview` to `/workloads`.
 2. Merge Model APIs and open-weight selection into one Models page with two
    tabs; keep the current routes as internal/deep-link compatibility.
-3. Add Sandboxes list, create, and detail pages against the native lifecycle
-   API. Show the not-configured and tenant-not-enabled states explicitly.
+3. Add private-computer list, guided create, and Console, Files, Preview,
+   Activity, and Access detail tabs against the native product API. Show the
+   not-configured and tenant-not-enabled states explicitly.
 4. Add public workload-prior selection to Build and place **Improve** on the
    deployment detail.
 5. Reduce the New dialog and command menu to the same five-product vocabulary.
-6. Add task execution, files, connector policy, HTTP preview leases, durable
-   workspaces, and filesystem checkpoints only after each native Brezel path is
-   proxied, audited, and qualified.
+6. Keep every native Brezel path server-side, audited, tenant-authorized, and
+   qualified before exposing it through the console.
 
 ## MVP acceptance
 

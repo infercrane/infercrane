@@ -1,10 +1,12 @@
 package controlapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -59,6 +61,8 @@ type fakeStore struct {
 	principals      []domain.Principal
 	consoleMembers  []domain.ConsoleIdentity
 	sandboxRefs     []domain.SandboxReference
+	nativeSandboxes []domain.NativeSandbox
+	sandboxUsage    []domain.SandboxUsageEvent
 	trainingRows    []domain.TrainingArtifactHandoff
 }
 
@@ -70,9 +74,18 @@ type fakeLaunchProber struct {
 }
 
 type fakeSandboxProvider struct {
-	created sandboxprovider.CreateRequest
-	key     string
-	tenant  string
+	created              sandboxprovider.CreateRequest
+	key                  string
+	tenant               string
+	workspaceCreates     int
+	sandboxCreates       int
+	workspaceDeletes     int
+	commandCalls         int
+	fileData             []byte
+	createErr            error
+	commandErr           error
+	deleteErr            error
+	deleteWorkspaceError error
 }
 
 func (f *fakeSandboxProvider) Capabilities(_ context.Context, tenant string) (sandboxprovider.Capabilities, error) {
@@ -83,12 +96,29 @@ func (f *fakeSandboxProvider) List(_ context.Context, tenant string, _ bool) ([]
 	f.tenant = tenant
 	return []sandboxprovider.Sandbox{{ID: "sandbox-1", Provider: "brezel", State: "running"}}, nil
 }
+func (f *fakeSandboxProvider) CreateWorkspace(_ context.Context, tenant, key, _ string) (sandboxprovider.WorkspaceMutation, error) {
+	f.workspaceCreates++
+	f.tenant, f.key = tenant, key
+	return sandboxprovider.WorkspaceMutation{Resource: sandboxprovider.Workspace{ID: "workspace-1", State: "ready"}, Operation: sandboxprovider.Operation{ID: "workspace-operation-1", State: "succeeded"}}, nil
+}
+func (f *fakeSandboxProvider) DeleteWorkspace(_ context.Context, tenant, id, key string) (sandboxprovider.WorkspaceMutation, error) {
+	f.workspaceDeletes++
+	f.tenant, f.key = tenant, key
+	if f.deleteWorkspaceError != nil {
+		return sandboxprovider.WorkspaceMutation{}, f.deleteWorkspaceError
+	}
+	return sandboxprovider.WorkspaceMutation{Resource: sandboxprovider.Workspace{ID: id, State: "deleted"}, Operation: sandboxprovider.Operation{ID: "workspace-operation-delete", State: "succeeded"}}, nil
+}
 func (f *fakeSandboxProvider) Get(_ context.Context, tenant, id string) (sandboxprovider.Sandbox, error) {
 	f.tenant = tenant
 	return sandboxprovider.Sandbox{ID: id, Provider: "brezel", State: "running"}, nil
 }
 func (f *fakeSandboxProvider) Create(_ context.Context, tenant, key string, request sandboxprovider.CreateRequest) (sandboxprovider.Mutation, error) {
+	f.sandboxCreates++
 	f.tenant, f.key, f.created = tenant, key, request
+	if f.createErr != nil {
+		return sandboxprovider.Mutation{}, f.createErr
+	}
 	return sandboxprovider.Mutation{Resource: sandboxprovider.Sandbox{ID: "sandbox-1", Provider: "brezel", State: "running"}, Operation: sandboxprovider.Operation{ID: "operation-1", State: "succeeded"}}, nil
 }
 func (f *fakeSandboxProvider) Pause(_ context.Context, tenant, id, key string) (sandboxprovider.Mutation, error) {
@@ -101,7 +131,52 @@ func (f *fakeSandboxProvider) Resume(_ context.Context, tenant, id, key string) 
 }
 func (f *fakeSandboxProvider) Delete(_ context.Context, tenant, id, key string) (sandboxprovider.Mutation, error) {
 	f.tenant, f.key = tenant, key
+	if f.deleteErr != nil {
+		return sandboxprovider.Mutation{}, f.deleteErr
+	}
 	return sandboxprovider.Mutation{Resource: sandboxprovider.Sandbox{ID: id, Provider: "brezel", State: "deleted"}}, nil
+}
+func (f *fakeSandboxProvider) RunCommand(_ context.Context, tenant, _ string, _ sandboxprovider.CommandRequest, emit func(sandboxprovider.CommandEvent) error) (string, error) {
+	f.commandCalls++
+	f.tenant = tenant
+	code := int32(0)
+	if err := emit(sandboxprovider.CommandEvent{ExecutionID: "execution-1", Type: "stdout", Data: []byte("ok\n")}); err != nil {
+		return "execution-1", err
+	}
+	if f.commandErr != nil {
+		return "execution-1", f.commandErr
+	}
+	return "execution-1", emit(sandboxprovider.CommandEvent{ExecutionID: "execution-1", Type: "exited", ExitCode: &code, Exited: true})
+}
+func (f *fakeSandboxProvider) WriteFile(_ context.Context, tenant, _, _ string, body io.Reader, _ int64) (sandboxprovider.FileInfo, error) {
+	f.tenant = tenant
+	data, err := io.ReadAll(body)
+	f.fileData = append([]byte(nil), data...)
+	return sandboxprovider.FileInfo{Size: int64(len(data))}, err
+}
+func (f *fakeSandboxProvider) ReadFile(_ context.Context, tenant, _, _ string) (sandboxprovider.FileDownload, error) {
+	f.tenant = tenant
+	data := f.fileData
+	if data == nil {
+		data = []byte("file")
+	}
+	return sandboxprovider.FileDownload{Body: io.NopCloser(bytes.NewReader(data)), FileInfo: sandboxprovider.FileInfo{Size: int64(len(data)), ContentType: "application/octet-stream"}}, nil
+}
+func (f *fakeSandboxProvider) CreatePortLease(_ context.Context, tenant, _ string, _ uint16, _ int64) (sandboxprovider.PortLease, error) {
+	f.tenant = tenant
+	return sandboxprovider.PortLease{Path: "/p/provider-secret/", ExpiresAt: time.Now().Add(time.Minute)}, nil
+}
+func (f *fakeSandboxProvider) ProxyPreview(_ context.Context, tenant, _ string, _ sandboxprovider.PreviewRequest) (sandboxprovider.PreviewResponse, error) {
+	f.tenant = tenant
+	return sandboxprovider.PreviewResponse{StatusCode: http.StatusOK, Header: map[string][]string{"Content-Type": {"text/plain"}}, Body: io.NopCloser(bytes.NewBufferString("preview"))}, nil
+}
+func (f *fakeSandboxProvider) Events(_ context.Context, tenant, _ string) ([]sandboxprovider.Event, error) {
+	f.tenant = tenant
+	return []sandboxprovider.Event{{ID: "event-1", Type: "command.completed", At: time.Now().UTC()}}, nil
+}
+func (f *fakeSandboxProvider) Receipt(_ context.Context, tenant, _ string) (sandboxprovider.ReceiptEvidence, error) {
+	f.tenant = tenant
+	return sandboxprovider.ReceiptEvidence{Digest: "sha256:" + strings.Repeat("a", 64), Signed: true}, nil
 }
 
 func (p fakeLaunchProber) ProbeLaunch(context.Context, provision.LaunchProbeRequest) (provision.LaunchProbeEvidence, error) {
@@ -2152,6 +2227,98 @@ func (f *fakeStore) RevokeSandboxReference(context.Context, string, string) erro
 func (f *fakeStore) RotateSandboxCredential(context.Context, string, string) (string, error) {
 	return "ic_sandbox_rotated", f.err
 }
+func (f *fakeStore) CreateNativeSandbox(_ context.Context, row domain.NativeSandbox) (domain.NativeSandbox, bool, error) {
+	for _, existing := range f.nativeSandboxes {
+		if existing.TenantID == row.TenantID && existing.IdempotencyKey == row.IdempotencyKey {
+			if existing.InputDigest != row.InputDigest {
+				return existing, false, domain.ErrConflict
+			}
+			return existing, false, f.err
+		}
+	}
+	row.ID = "computer-1"
+	stamp := time.Now().UTC()
+	row.CreatedAt, row.UpdatedAt, row.LastActiveAt = stamp, stamp, stamp
+	f.nativeSandboxes = append([]domain.NativeSandbox{row}, f.nativeSandboxes...)
+	return row, true, f.err
+}
+func (f *fakeStore) NativeSandbox(_ context.Context, tenant, id string) (domain.NativeSandbox, error) {
+	for _, row := range f.nativeSandboxes {
+		if row.TenantID == tenant && row.ID == id {
+			return row, f.err
+		}
+	}
+	return domain.NativeSandbox{}, domain.ErrNotFound
+}
+func (f *fakeStore) NativeSandboxes(_ context.Context, tenant string, includeTerminal bool) ([]domain.NativeSandbox, error) {
+	rows := make([]domain.NativeSandbox, 0, len(f.nativeSandboxes))
+	for _, row := range f.nativeSandboxes {
+		if row.TenantID == tenant && (includeTerminal || row.DeletedAt == nil) {
+			rows = append(rows, row)
+		}
+	}
+	return rows, f.err
+}
+func (f *fakeStore) SetNativeSandboxProviderRefs(_ context.Context, tenant, id, workspaceID, sandboxID, status, failure string) (domain.NativeSandbox, error) {
+	for index := range f.nativeSandboxes {
+		row := &f.nativeSandboxes[index]
+		if row.TenantID == tenant && row.ID == id {
+			if workspaceID != "" {
+				row.BrezelWorkspaceID = workspaceID
+			}
+			if sandboxID != "" {
+				row.BrezelSandboxID = sandboxID
+			}
+			row.Status, row.FailureCode, row.UpdatedAt, row.LastActiveAt = status, failure, time.Now().UTC(), time.Now().UTC()
+			return *row, f.err
+		}
+	}
+	return domain.NativeSandbox{}, domain.ErrNotFound
+}
+func (f *fakeStore) SetNativeSandboxStatus(_ context.Context, tenant, id, status, failure string) (domain.NativeSandbox, error) {
+	row, err := f.SetNativeSandboxProviderRefs(context.Background(), tenant, id, "", "", status, failure)
+	if err == nil && status == "deleted" {
+		stamp := time.Now().UTC()
+		for index := range f.nativeSandboxes {
+			if f.nativeSandboxes[index].TenantID == tenant && f.nativeSandboxes[index].ID == id {
+				f.nativeSandboxes[index].DeletedAt = &stamp
+				row = f.nativeSandboxes[index]
+			}
+		}
+	}
+	return row, err
+}
+func (f *fakeStore) AppendSandboxUsageEvent(_ context.Context, event domain.SandboxUsageEvent) (bool, error) {
+	for _, row := range f.sandboxUsage {
+		if row.EventID == event.EventID {
+			return false, f.err
+		}
+	}
+	f.sandboxUsage = append(f.sandboxUsage, event)
+	return true, f.err
+}
+func (f *fakeStore) SandboxUsageSummary(_ context.Context, tenant string) (domain.SandboxUsageSummary, error) {
+	var summary domain.SandboxUsageSummary
+	for _, row := range f.nativeSandboxes {
+		if row.TenantID == tenant && row.DeletedAt == nil {
+			summary.ActiveComputers++
+		}
+	}
+	for _, event := range f.sandboxUsage {
+		if event.TenantID != tenant {
+			continue
+		}
+		summary.RunningMilliseconds += event.RunningMilliseconds
+		summary.StandbyMilliseconds += event.StandbyMilliseconds
+		if event.EventType == "command.completed" {
+			summary.CommandsExecuted++
+		}
+		summary.FileIngressBytes += event.FileIngressBytes
+		summary.FileEgressBytes += event.FileEgressBytes
+		summary.PreviewRequests += event.PreviewRequests
+	}
+	return summary, f.err
+}
 func (f *fakeStore) AttachTrainingArtifactHandoff(_ context.Context, tenant, _ string, row domain.TrainingArtifactHandoff, artifact domain.ModelArtifact) (domain.TrainingArtifactHandoff, domain.ModelArtifact, error) {
 	row.ID, row.TenantID, row.DeploymentID, row.ModelArtifactID = "handoff", tenant, "deployment", "artifact"
 	row.CreatedAt = time.Now().UTC()
@@ -3278,7 +3445,7 @@ func TestNativeSandboxLifecycleUsesProviderWithoutChangingReferenceRoutes(t *tes
 	request.Header.Set("Idempotency-Key", "sandbox-create-1")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusAccepted || provider.tenant != "global" || provider.key != "sandbox-create-1" || provider.created.TemplateID != "python-agent" || provider.created.ExpiresAfterSeconds != 900 || !strings.Contains(response.Body.String(), `"provider":"brezel"`) {
+	if response.Code != http.StatusAccepted || provider.tenant != "global" || provider.key != "sandbox-create-1.computer" || provider.created.TemplateID != "python-agent" || provider.created.WorkspaceID != "workspace-1" || provider.created.ExpiresAfterSeconds != 900 || !strings.Contains(response.Body.String(), `"id":"computer-1"`) || strings.Contains(response.Body.String(), "workspace-1") || strings.Contains(response.Body.String(), "sandbox-1") || strings.Contains(response.Body.String(), `"provider":"brezel"`) {
 		t.Fatalf("native sandbox response=%d %s provider=%#v", response.Code, response.Body.String(), provider)
 	}
 
@@ -3288,6 +3455,180 @@ func TestNativeSandboxLifecycleUsesProviderWithoutChangingReferenceRoutes(t *tes
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"assurance":"private-tenant-preview"`) {
 		t.Fatalf("capabilities response=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestNativeSandboxCreateIsIdempotentAndHidesProviderIdentities(t *testing.T) {
+	store, provider := &fakeStore{}, &fakeSandboxProvider{}
+	handler := (API{Store: store, APIKey: "secret", SandboxProvider: provider, SandboxProjectID: "brezel-project"}).Handler()
+	body := `{"display_name":"Agent workbench","purpose":"coding_agent","source_type":"empty_workspace","template_id":"python-agent","ttl_seconds":900}`
+	for attempt := 0; attempt < 2; attempt++ {
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/sandboxes", strings.NewReader(body))
+		request.Header.Set("Authorization", "Bearer secret")
+		request.Header.Set("Idempotency-Key", "sandbox-create-repeat")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusAccepted || !strings.Contains(response.Body.String(), `"id":"computer-1"`) || strings.Contains(response.Body.String(), "sandbox-1") || strings.Contains(response.Body.String(), "workspace-1") || strings.Contains(response.Body.String(), "brezel-project") {
+			t.Fatalf("attempt %d response=%d %s", attempt, response.Code, response.Body.String())
+		}
+	}
+	if provider.workspaceCreates != 1 || provider.sandboxCreates != 1 {
+		t.Fatalf("provider effects workspace=%d sandbox=%d, want one each", provider.workspaceCreates, provider.sandboxCreates)
+	}
+}
+
+func TestNativeSandboxOwnershipIsCheckedBeforeProviderLookup(t *testing.T) {
+	stamp := time.Now().UTC()
+	store := &fakeStore{nativeSandboxes: []domain.NativeSandbox{{ID: "computer-private", TenantID: "other-tenant", BrezelSandboxID: "provider-private", Status: "running", CreatedAt: stamp, UpdatedAt: stamp, LastActiveAt: stamp}}}
+	provider := &fakeSandboxProvider{}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/sandboxes/computer-private", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret", SandboxProvider: provider}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusNotFound || provider.tenant != "" {
+		t.Fatalf("response=%d %s provider_tenant=%q", response.Code, response.Body.String(), provider.tenant)
+	}
+}
+
+func TestDeletedNativeSandboxCannotExecuteCommands(t *testing.T) {
+	stamp := time.Now().UTC()
+	store := &fakeStore{nativeSandboxes: []domain.NativeSandbox{{ID: "computer-1", TenantID: "global", DisplayName: "Deleted", Purpose: "blank_computer", SourceType: "empty_workspace", TemplateID: "base", BrezelSandboxID: "sandbox-1", Status: "deleted", CreatedAt: stamp, UpdatedAt: stamp, LastActiveAt: stamp, DeletedAt: &stamp}}}
+	provider := &fakeSandboxProvider{}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/sandboxes/computer-1/commands", strings.NewReader(`{"argv":["echo","secret-command"]}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret", SandboxProvider: provider}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusConflict || provider.commandCalls != 0 || strings.Contains(response.Body.String(), "secret-command") {
+		t.Fatalf("response=%d %s command_calls=%d", response.Code, response.Body.String(), provider.commandCalls)
+	}
+}
+
+func TestCommandStreamUsesInferCraneIdentityAndContentFreeUsage(t *testing.T) {
+	stamp := time.Now().UTC()
+	store := &fakeStore{nativeSandboxes: []domain.NativeSandbox{{ID: "computer-1", TenantID: "global", DisplayName: "Runner", Purpose: "coding_agent", SourceType: "empty_workspace", TemplateID: "base", BrezelSandboxID: "sandbox-provider-secret", Status: "running", CreatedAt: stamp, UpdatedAt: stamp, LastActiveAt: stamp}}}
+	provider := &fakeSandboxProvider{}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/sandboxes/computer-1/commands", strings.NewReader(`{"argv":["printf","sensitive-command"]}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret", SandboxProvider: provider}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "application/x-ndjson" || strings.Contains(response.Body.String(), "execution-1") || strings.Contains(response.Body.String(), "sandbox-provider-secret") || strings.Contains(response.Body.String(), "sensitive-command") || !strings.Contains(response.Body.String(), `"data":"b2sK"`) {
+		t.Fatalf("response=%d headers=%v body=%s", response.Code, response.Header(), response.Body.String())
+	}
+	if len(store.sandboxUsage) != 2 || store.sandboxUsage[1].EventType != "command.completed" || store.sandboxUsage[1].CommandExitClass != "success" {
+		t.Fatalf("usage=%#v", store.sandboxUsage)
+	}
+}
+
+func TestCancelledCommandIsRecordedWithoutCustomerContent(t *testing.T) {
+	stamp := time.Now().UTC()
+	store := &fakeStore{nativeSandboxes: []domain.NativeSandbox{{ID: "computer-1", TenantID: "global", DisplayName: "Runner", Purpose: "coding_agent", SourceType: "empty_workspace", TemplateID: "base", BrezelSandboxID: "sandbox-1", Status: "running", CreatedAt: stamp, UpdatedAt: stamp, LastActiveAt: stamp}}}
+	provider := &fakeSandboxProvider{commandErr: context.Canceled}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/sandboxes/computer-1/commands", strings.NewReader(`{"argv":["sh","-lc","customer-secret-command"]}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret", SandboxProvider: provider}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), "customer-secret-command") || !strings.Contains(response.Body.String(), `"status":"cancelled"`) {
+		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+	if len(store.sandboxUsage) != 2 || store.sandboxUsage[1].EventType != "command.cancelled" || store.sandboxUsage[1].CommandExitClass != "cancelled" {
+		t.Fatalf("usage=%#v", store.sandboxUsage)
+	}
+}
+
+func TestFailedSandboxCreationCompensatesWorkspace(t *testing.T) {
+	store := &fakeStore{}
+	provider := &fakeSandboxProvider{createErr: sandboxprovider.ErrUnavailable}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/sandboxes", strings.NewReader(`{"display_name":"Broken","purpose":"evaluation","source_type":"empty_workspace","template_id":"evaluation-worker"}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Idempotency-Key", "sandbox-create-fails")
+	response := httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret", SandboxProvider: provider}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusServiceUnavailable || provider.workspaceDeletes != 1 || len(store.nativeSandboxes) != 1 || store.nativeSandboxes[0].Status != "failed" {
+		t.Fatalf("response=%d %s deletes=%d rows=%#v", response.Code, response.Body.String(), provider.workspaceDeletes, store.nativeSandboxes)
+	}
+}
+
+func TestPreviewLeaseIsRebrokeredAndNeverDisclosesProviderToken(t *testing.T) {
+	stamp := time.Now().UTC()
+	store := &fakeStore{nativeSandboxes: []domain.NativeSandbox{{ID: "computer-1", TenantID: "global", DisplayName: "Preview", Purpose: "coding_agent", SourceType: "empty_workspace", TemplateID: "base", BrezelSandboxID: "sandbox-1", Status: "running", CreatedAt: stamp, UpdatedAt: stamp, LastActiveAt: stamp}}}
+	provider, broker := &fakeSandboxProvider{}, NewSandboxPreviewBroker()
+	handler := (API{Store: store, APIKey: "secret", SandboxProvider: provider, SandboxPreviews: broker}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/sandboxes/computer-1/ports/3000/leases", strings.NewReader(`{"ttl_seconds":60}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || strings.Contains(response.Body.String(), "provider-secret") {
+		t.Fatalf("lease response=%d %s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		PreviewURL string `json:"preview_url"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil || payload.PreviewURL == "" {
+		t.Fatalf("decode lease: %v %s", err, response.Body.String())
+	}
+	request = httptest.NewRequest(http.MethodGet, payload.PreviewURL, nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || response.Body.String() != "preview" {
+		t.Fatalf("preview response=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestDeleteTreatsAbsentProviderResourceAsSuccessAndCleansWorkspace(t *testing.T) {
+	stamp := time.Now().UTC()
+	store := &fakeStore{nativeSandboxes: []domain.NativeSandbox{{ID: "computer-1", TenantID: "global", DisplayName: "Cleanup", Purpose: "blank_computer", SourceType: "empty_workspace", TemplateID: "base", BrezelWorkspaceID: "workspace-1", BrezelSandboxID: "sandbox-1", Status: "running", CreatedAt: stamp, UpdatedAt: stamp, LastActiveAt: stamp}}}
+	provider := &fakeSandboxProvider{deleteErr: sandboxprovider.ErrNotFound}
+	request := httptest.NewRequest(http.MethodDelete, "/api/v1/sandboxes/computer-1", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Idempotency-Key", "delete-absent-provider")
+	response := httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret", SandboxProvider: provider}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted || provider.workspaceDeletes != 1 || store.nativeSandboxes[0].Status != "deleted" || store.nativeSandboxes[0].DeletedAt == nil {
+		t.Fatalf("response=%d %s deletes=%d row=%#v", response.Code, response.Body.String(), provider.workspaceDeletes, store.nativeSandboxes[0])
+	}
+	response = httptest.NewRecorder()
+	handler := (API{Store: store, APIKey: "secret", SandboxProvider: provider}).Handler()
+	request = httptest.NewRequest(http.MethodDelete, "/api/v1/sandboxes/computer-1", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Idempotency-Key", "delete-absent-provider")
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted || provider.workspaceDeletes != 1 {
+		t.Fatalf("idempotent delete response=%d %s workspace_deletes=%d", response.Code, response.Body.String(), provider.workspaceDeletes)
+	}
+}
+
+func TestWorkspaceFileRemainsAfterPauseAndResume(t *testing.T) {
+	stamp := time.Now().UTC()
+	store := &fakeStore{nativeSandboxes: []domain.NativeSandbox{{ID: "computer-1", TenantID: "global", DisplayName: "Durable", Purpose: "coding_agent", SourceType: "empty_workspace", TemplateID: "base", BrezelWorkspaceID: "workspace-1", BrezelSandboxID: "sandbox-1", Status: "running", CreatedAt: stamp, UpdatedAt: stamp, LastActiveAt: stamp}}}
+	provider := &fakeSandboxProvider{}
+	handler := (API{Store: store, APIKey: "secret", SandboxProvider: provider}).Handler()
+
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/sandboxes/computer-1/files?path=%2Fworkspace%2Fproof.txt", strings.NewReader("durable-proof"))
+	request.ContentLength = int64(len("durable-proof"))
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Idempotency-Key", "file-proof")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("write response=%d %s", response.Code, response.Body.String())
+	}
+	for _, action := range []string{"pause", "resume"} {
+		request = httptest.NewRequest(http.MethodPost, "/api/v1/sandboxes/computer-1/"+action, nil)
+		request.Header.Set("Authorization", "Bearer secret")
+		request.Header.Set("Idempotency-Key", "lifecycle-"+action)
+		response = httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusAccepted {
+			t.Fatalf("%s response=%d %s", action, response.Code, response.Body.String())
+		}
+	}
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/sandboxes/computer-1/files?path=%2Fworkspace%2Fproof.txt", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || response.Body.String() != "durable-proof" {
+		t.Fatalf("read response=%d %q", response.Code, response.Body.String())
 	}
 }
 

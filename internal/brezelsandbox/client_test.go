@@ -14,7 +14,7 @@ import (
 )
 
 func TestClientMapsApprovedTemplateAndPreservesLifecycle(t *testing.T) {
-	revision := "envr_" + strings.Repeat("a", 64)
+	revision := "envr_" + strings.Repeat("a", 24)
 	now := time.Date(2026, 9, 20, 10, 0, 0, 0, time.UTC)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer token" || r.Header.Get("X-Project-ID") != "project-a" {
@@ -27,11 +27,16 @@ func TestClientMapsApprovedTemplateAndPreservesLifecycle(t *testing.T) {
 			EnvironmentRevision string          `json:"environment_revision"`
 			Lifecycle           brezelLifecycle `json:"lifecycle"`
 			Network             brezelNetwork   `json:"network"`
+			WorkspaceMounts     []struct {
+				WorkspaceID string `json:"workspace_id"`
+				Path        string `json:"path"`
+			} `json:"workspace_mounts"`
+			ConnectorRevisions []string `json:"connector_revisions"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		if body.EnvironmentRevision != revision || body.Lifecycle.ExpiresAfterSeconds != 900 || body.Lifecycle.StandbyAfterSeconds != 300 || !body.Lifecycle.AutoResume || body.Network.AllowInternet {
+		if body.EnvironmentRevision != revision || body.Lifecycle.ExpiresAfterSeconds != 900 || body.Lifecycle.StandbyAfterSeconds != 300 || !body.Lifecycle.AutoResume || body.Network.AllowInternet || len(body.WorkspaceMounts) != 1 || body.WorkspaceMounts[0].WorkspaceID != "workspace-1" || body.WorkspaceMounts[0].Path != "/workspace" || len(body.ConnectorRevisions) != 1 || body.ConnectorRevisions[0] != "connr_"+strings.Repeat("b", 24) {
 			t.Fatalf("unexpected create body: %#v", body)
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -45,7 +50,7 @@ func TestClientMapsApprovedTemplateAndPreservesLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mutation, err := client.Create(context.Background(), "tenant-a", "create-1", sandboxprovider.CreateRequest{ExpiresAfterSeconds: 900, StandbyAfterSeconds: 300, AutoResume: true, NetworkMode: "offline"})
+	mutation, err := client.Create(context.Background(), "tenant-a", "create-1", sandboxprovider.CreateRequest{WorkspaceID: "workspace-1", ConnectorRevision: "connr_" + strings.Repeat("b", 24), ExpiresAfterSeconds: 900, StandbyAfterSeconds: 300, AutoResume: true, NetworkMode: "offline"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +60,7 @@ func TestClientMapsApprovedTemplateAndPreservesLifecycle(t *testing.T) {
 }
 
 func TestClientRejectsUnapprovedScopeBeforeCallingBrezel(t *testing.T) {
-	revision := "envr_" + strings.Repeat("b", 64)
+	revision := "envr_" + strings.Repeat("b", 24)
 	client, err := New(Config{BaseURL: "http://127.0.0.1:1", Token: "token", ProjectID: "project-a", AllowedTenant: "tenant-a", Templates: map[string]string{"base": revision}, DefaultTemplate: "base"})
 	if err != nil {
 		t.Fatal(err)
@@ -72,7 +77,7 @@ func TestClientRejectsUnapprovedScopeBeforeCallingBrezel(t *testing.T) {
 }
 
 func TestCapabilitiesDoNotClaimPTYOrGPU(t *testing.T) {
-	revision := "envr_" + strings.Repeat("c", 64)
+	revision := "envr_" + strings.Repeat("c", 24)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"runtime": "microvm", "qualification": "unverified", "qualification_note": "run conformance",
@@ -90,5 +95,73 @@ func TestCapabilitiesDoNotClaimPTYOrGPU(t *testing.T) {
 	}
 	if capabilities.State != "ready" || capabilities.Assurance != "private-tenant-preview" || !capabilities.Features.HTTPPreview || capabilities.Features.InteractivePTY || capabilities.Features.GPU {
 		t.Fatalf("unsafe capability projection: %#v", capabilities)
+	}
+}
+
+func TestCommandEventsAreDeliveredBeforeTheStreamCompletes(t *testing.T) {
+	revision := "envr_" + strings.Repeat("d", 24)
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/sandboxes/sandbox-1/commands" || r.Method != http.MethodPost {
+			t.Fatalf("unexpected command request %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_ = json.NewEncoder(w).Encode(map[string]any{"execution_id": "exec-1", "type": "stdout", "data": []byte("first")})
+		w.(http.Flusher).Flush()
+		<-release
+		code := int32(0)
+		_ = json.NewEncoder(w).Encode(map[string]any{"execution_id": "exec-1", "type": "exited", "exit_code": code, "exited": true})
+	}))
+	defer server.Close()
+	client, err := New(Config{BaseURL: server.URL, Token: "token", ProjectID: "project-a", AllowedTenant: "tenant-a", Templates: map[string]string{"base": revision}, DefaultTemplate: "base", Client: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := make(chan sandboxprovider.CommandEvent, 1)
+	result := make(chan error, 1)
+	go func() {
+		_, runErr := client.RunCommand(context.Background(), "tenant-a", "sandbox-1", sandboxprovider.CommandRequest{Argv: []string{"true"}}, func(event sandboxprovider.CommandEvent) error {
+			if event.Type == "stdout" {
+				first <- event
+			}
+			return nil
+		})
+		result <- runErr
+	}()
+	select {
+	case event := <-first:
+		if string(event.Data) != "first" {
+			t.Fatalf("first chunk = %q", event.Data)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("first command chunk was buffered until stream completion")
+	}
+	close(release)
+	if err = <-result; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestProviderCredentialsNeverFollowRedirects(t *testing.T) {
+	revision := "envr_" + strings.Repeat("e", 24)
+	credentialReachedSink := false
+	sink := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		credentialReachedSink = r.Header.Get("Authorization") != ""
+	}))
+	defer sink.Close()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, sink.URL, http.StatusFound)
+	}))
+	defer server.Close()
+	client, err := New(Config{BaseURL: server.URL, Token: "token", ProjectID: "project-a", AllowedTenant: "tenant-a", Templates: map[string]string{"base": revision}, DefaultTemplate: "base", Client: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := client.ProxyPreview(context.Background(), "tenant-a", "/p/opaque/", sandboxprovider.PreviewRequest{Method: http.MethodGet})
+	if response.Body != nil {
+		response.Body.Close()
+	}
+	if err == nil || credentialReachedSink {
+		t.Fatalf("redirect err=%v credential_reached_sink=%v", err, credentialReachedSink)
 	}
 }
