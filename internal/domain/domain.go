@@ -46,24 +46,25 @@ type DeploymentRevision struct {
 }
 
 type DeploymentRevisionSpec struct {
-	Model              string                   `json:"model"`
-	ModelRevision      string                   `json:"model_revision,omitempty"`
-	Runtime            string                   `json:"runtime"`
-	RuntimeVersion     string                   `json:"runtime_version,omitempty"`
-	RuntimeArgs        []string                 `json:"runtime_args,omitempty"`
-	RoutingStrategy    string                   `json:"routing_strategy"`
-	MinReplicas        int                      `json:"min_replicas"`
-	MaxReplicas        int                      `json:"max_replicas"`
-	AutoscalingEnabled bool                     `json:"autoscaling_enabled"`
-	ComputeMode        string                   `json:"compute_mode,omitempty"`
-	Cloud              string                   `json:"cloud,omitempty"`
-	ProviderAdapter    string                   `json:"provider_adapter,omitempty"`
-	GPU                string                   `json:"gpu,omitempty"`
-	GPUCount           int                      `json:"gpu_count,omitempty"`
-	Region             string                   `json:"region,omitempty"`
-	Port               int                      `json:"port,omitempty"`
-	Workload           runtimecontract.Workload `json:"workload,omitzero"`
-	Serving            servingcontract.Topology `json:"serving,omitzero"`
+	Model                  string                   `json:"model"`
+	ModelRevision          string                   `json:"model_revision,omitempty"`
+	ModelSecretReferenceID string                   `json:"model_secret_reference_id,omitempty"`
+	Runtime                string                   `json:"runtime"`
+	RuntimeVersion         string                   `json:"runtime_version,omitempty"`
+	RuntimeArgs            []string                 `json:"runtime_args,omitempty"`
+	RoutingStrategy        string                   `json:"routing_strategy"`
+	MinReplicas            int                      `json:"min_replicas"`
+	MaxReplicas            int                      `json:"max_replicas"`
+	AutoscalingEnabled     bool                     `json:"autoscaling_enabled"`
+	ComputeMode            string                   `json:"compute_mode,omitempty"`
+	Cloud                  string                   `json:"cloud,omitempty"`
+	ProviderAdapter        string                   `json:"provider_adapter,omitempty"`
+	GPU                    string                   `json:"gpu,omitempty"`
+	GPUCount               int                      `json:"gpu_count,omitempty"`
+	Region                 string                   `json:"region,omitempty"`
+	Port                   int                      `json:"port,omitempty"`
+	Workload               runtimecontract.Workload `json:"workload,omitzero"`
+	Serving                servingcontract.Topology `json:"serving,omitzero"`
 }
 
 // ControlPlaneInstance is an ephemeral HA membership observation. PostgreSQL

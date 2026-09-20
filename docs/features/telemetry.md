@@ -53,6 +53,38 @@ infercrane observe coder-production
 The human view includes the latest traffic summary. Use the authenticated console for 1-hour to
 30-day charts and correlated scaling or release events.
 
+## Import existing production telemetry
+
+Customers can keep Baseten, Fireworks, Datadog, or an OpenTelemetry pipeline as their monitoring
+source and post a strict content-free observation batch:
+
+```bash
+curl -fsS "$INFERCRANE_API_URL/api/v1/deployments/coder-production/traffic-observations" \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "schema_version":"infercrane.traffic-observations/v1",
+    "source":"opentelemetry",
+    "observations":[{
+      "source_request_id":"trace-1/span-1",
+      "started_at":"2026-09-20T10:00:00Z",
+      "latency_ms":184,
+      "input_tokens":512,
+      "output_tokens":96,
+      "status_code":200
+    }]
+  }'
+```
+
+The endpoint accepts at most 1,000 observations per batch and rejects unknown fields, including
+prompt or response content. `source_request_id` is deterministically scoped to the tenant,
+deployment, and source, so retrying an import updates the same request record.
+
+After import, `POST /api/v1/deployments/{name}/replays` captures an immutable workload-shape trace;
+`GET /api/v1/deployments/{name}/replays` lists its history. Replay evidence contains arrival,
+duration, token-count, session-hash, streaming, and concurrency shapes only. It does not duplicate
+live traffic. Real prompt shadowing remains a separate explicit data-policy and approval boundary.
+
 The Prometheus endpoint also exposes accounting queue depth and capacity, persisted and dropped
 request-record counters, and persistence failures. These distinguish inference-path health from
 telemetry backpressure without putting PostgreSQL on the request path. vLLM running/waiting and

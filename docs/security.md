@@ -62,9 +62,10 @@ infercrane provider list --output json
 ```
 
 Creating and listing the connection does not send a prompt, test request, or authorize spend. It
-proves that InferCrane can resolve the named reference, not that the upstream credential or model is
-valid. There is no generic no-traffic API credential probe in the current release. Validate real
-provider access through that provider's documented metadata/auth endpoint or an explicitly approved,
+proves that InferCrane can resolve the named reference, not that the upstream model can serve a real
+prompt. Connecting an existing endpoint can use that reference for one bounded authenticated
+`/v1/models` discovery request. This verifies reachability and metadata access without enabling
+traffic or spend; it is not a generation probe. Validate real serving through an explicitly approved,
 budgeted staging request. Never put a credential in a URL, CLI argument value, DeploymentSpec,
 ticket, log, or qualification artifact.
 

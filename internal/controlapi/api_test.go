@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -466,6 +467,16 @@ type fakeOperationalMeasurementStore struct {
 	rows []domain.OperationalMeasurement
 }
 
+type fakeTrafficObservationStore struct {
+	*fakeStore
+	rows []domain.InferenceRecord
+}
+
+func (f *fakeTrafficObservationStore) RecordRequest(_ context.Context, row domain.InferenceRecord) error {
+	f.rows = append(f.rows, row)
+	return f.err
+}
+
 type fakeCostEvidenceStore struct {
 	*fakeStore
 	rows []domain.CostEvidence
@@ -608,6 +619,37 @@ func TestOperationalMeasurementIngestionIsAuthenticatedStrictAndContentFree(t *t
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthorized status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestTrafficObservationImportIsIdempotentShapeOnlyAndReplayReady(t *testing.T) {
+	store := &fakeTrafficObservationStore{fakeStore: &fakeStore{resolved: domain.ResolvedDeployment{Deployment: domain.Deployment{ID: "deployment", Name: "coder", ActiveRevisionID: "revision"}}}}
+	handler := (API{Store: store, APIKey: "secret"}).Handler()
+	started := time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano)
+	body := fmt.Sprintf(`{"source":"opentelemetry","schema_version":"infercrane.traffic-observations/v1","observations":[{"source_request_id":"trace-1/span-1","started_at":%q,"latency_ms":125.5,"ttft_ms":28,"input_tokens":128,"output_tokens":32,"status_code":200,"operation":"chat","provider":"baseten","runtime":"vllm","semantic_convention_schema":"https://opentelemetry.io/schemas/1.44.0","streaming":true,"session_id_hash":"%s"}]}`, started, strings.Repeat("a", 64))
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments/coder/traffic-observations", strings.NewReader(body))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || len(store.rows) != 1 || store.rows[0].DeploymentID != "deployment" || store.rows[0].RevisionID != "revision" || store.rows[0].ComputeMode != "imported" || !strings.Contains(response.Body.String(), `"content_recorded":false`) {
+		t.Fatalf("status=%d body=%s rows=%+v", response.Code, response.Body.String(), store.rows)
+	}
+	firstID := store.rows[0].RequestID
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/deployments/coder/traffic-observations", strings.NewReader(body))
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || len(store.rows) != 2 || store.rows[1].RequestID != firstID {
+		t.Fatalf("retry was not deterministic: status=%d rows=%+v", response.Code, store.rows)
+	}
+
+	withContent := strings.Replace(body, `"streaming":true`, `"streaming":true,"prompt":"secret"`, 1)
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/deployments/coder/traffic-observations", strings.NewReader(withContent))
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || len(store.rows) != 2 {
+		t.Fatalf("content-bearing import accepted: status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 
@@ -1267,6 +1309,9 @@ func (f *fakeIntelligenceStore) CaptureReplayTrace(context.Context, string, stri
 func (f *fakeIntelligenceStore) ReplayTrace(context.Context, string, string) (domain.ReplayTrace, error) {
 	return f.trace, nil
 }
+func (f *fakeIntelligenceStore) ReplayTraces(context.Context, string, string, int) ([]domain.ReplayTrace, error) {
+	return []domain.ReplayTrace{f.trace}, nil
+}
 func (f *fakeIntelligenceStore) RecordArtifactCacheObservation(_ context.Context, tenant string, row domain.ArtifactCacheObservation) (domain.ArtifactCacheObservation, error) {
 	row.ID, row.TenantID = "cache-observation-1", tenant
 	f.cacheObservations = append(f.cacheObservations, row)
@@ -1851,6 +1896,13 @@ func TestReplaySerializesPersistedJSONAsObjects(t *testing.T) {
 		if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil || len(envelope.Replay.Shape) != 1 || envelope.Replay.Summary["requests"] != float64(1) {
 			t.Fatalf("%s %s replay JSON was double encoded: body=%s err=%v", tc.method, tc.path, response.Body.String(), err)
 		}
+	}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/deployments/qwen-prod/replays?limit=3", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"content_recorded":false`) || !strings.Contains(response.Body.String(), `"shape":[{"input_tokens":8}]`) {
+		t.Fatalf("replay list status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 

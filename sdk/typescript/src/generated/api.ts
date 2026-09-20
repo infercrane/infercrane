@@ -333,6 +333,11 @@ export class ControlApi {
     return this.transport.request('POST', path, { body }) as Promise<ObjectList>;
   }
 
+  importTrafficObservations(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = `/deployments/${encodeURIComponent(name)}/traffic-observations`;
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
   recordCostEvidence(name: string, body: JsonValue): Promise<ObjectList> {
     const path = `/deployments/${encodeURIComponent(name)}/cost-evidence`;
     return this.transport.request('POST', path, { body }) as Promise<ObjectList>;
@@ -386,6 +391,11 @@ export class ControlApi {
   captureReplay(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
     const path = `/deployments/${encodeURIComponent(name)}/replays`;
     return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  listReplays(name: string): Promise<ObjectList> {
+    const path = `/deployments/${encodeURIComponent(name)}/replays`;
+    return this.transport.request('GET', path) as Promise<ObjectList>;
   }
 
   getReplay(id: string): Promise<Record<string, JsonValue>> {

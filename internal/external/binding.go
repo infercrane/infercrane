@@ -16,6 +16,7 @@ const minimumCustomerWalletGrossMarginBPS = 1500
 
 var supportedAdapters = map[string]struct{}{
 	"openrouter": {}, "openai-compatible-external": {}, "modal": {}, "runpod-serverless-api": {}, "fly-io": {},
+	"baseten": {}, "fireworks": {},
 }
 
 func SupportedAdapter(adapter string) bool {

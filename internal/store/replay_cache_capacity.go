@@ -73,6 +73,32 @@ func (s *Store) ReplayTrace(ctx context.Context, tenant, id string) (domain.Repl
 	return row, nil
 }
 
+func (s *Store) ReplayTraces(ctx context.Context, tenant, deploymentName string, limit int) ([]domain.ReplayTrace, error) {
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+	resolved, err := s.ResolveForTenant(ctx, tenant, deploymentName)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.QueryContext(ctx, `SELECT id,tenant_id,deployment_id,deployment_name,COALESCE(revision_id,''),schema_version,window_start,window_end,request_count,shape_json::text,summary_json::text,shape_digest,created_at FROM replay_traces WHERE tenant_id=? AND deployment_id=? ORDER BY created_at DESC LIMIT ?`, tenant, resolved.Deployment.ID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]domain.ReplayTrace, 0)
+	for rows.Next() {
+		var row domain.ReplayTrace
+		var start, end, created string
+		if err = rows.Scan(&row.ID, &row.TenantID, &row.DeploymentID, &row.DeploymentName, &row.RevisionID, &row.SchemaVersion, &start, &end, &row.RequestCount, &row.ShapeJSON, &row.SummaryJSON, &row.ShapeDigest, &created); err != nil {
+			return nil, err
+		}
+		row.WindowStart, row.WindowEnd, row.CreatedAt = parseTime(start), parseTime(end), parseTime(created)
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) RecordArtifactCacheObservation(ctx context.Context, tenant string, row domain.ArtifactCacheObservation) (domain.ArtifactCacheObservation, error) {
 	if tenant == "" || row.ModelArtifactID == "" || row.Provider == "" || row.Location == "" || row.Source == "" || row.ObservedAt.IsZero() || !row.ExpiresAt.After(row.ObservedAt) || row.ExpiresAt.Sub(row.ObservedAt) > 24*time.Hour || !json.Valid([]byte(row.EvidenceJSON)) {
 		return row, errors.New("complete bounded cache observation is required")

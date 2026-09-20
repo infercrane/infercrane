@@ -37,6 +37,25 @@ func TestDiscoverEndpointSelectsSingleModelAndConservativelyClassifiesRuntime(t 
 	}
 }
 
+func TestDiscoverEndpointAuthenticatedUsesBearerWithoutReturningIt(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer private-token" {
+			t.Fatalf("authorization = %q", got)
+		}
+		_, _ = w.Write([]byte(`{"data":[{"id":"private/coder"}]}`))
+	}))
+	defer server.Close()
+
+	got, err := discoverEndpointAuthenticated(context.Background(), server.Client(), server.URL, "", "auto", "private-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded := strings.Join(got.Evidence, " ")
+	if got.Model != "private/coder" || !strings.Contains(encoded, "server-resolved") || strings.Contains(encoded, "private-token") {
+		t.Fatalf("discovery = %+v", got)
+	}
+}
+
 func TestDiscoverEndpointRequiresSelectionForMultipleModels(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"data":[{"id":"second"},{"id":"first"}]}`))

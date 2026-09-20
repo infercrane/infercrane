@@ -53,6 +53,13 @@ func TestReplayCacheCapacityFinOpsAndAutopilotPersistence(t *testing.T) {
 	if _, err = s.ReplayTrace(ctx, "other", trace.ID); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("cross tenant replay err=%v", err)
 	}
+	traces, err := s.ReplayTraces(ctx, "global", name, 10)
+	if err != nil || len(traces) != 1 || traces[0].ID != trace.ID {
+		t.Fatalf("traces=%#v err=%v", traces, err)
+	}
+	if _, err = s.ReplayTraces(ctx, "other", name, 10); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("cross tenant replay list err=%v", err)
+	}
 	now := time.Now().UTC()
 	observation, err := s.RecordArtifactCacheObservation(ctx, "global", domain.ArtifactCacheObservation{ModelArtifactID: artifact.ID, Provider: fixtureProvider, Location: "zone/cache", State: "present", Source: "fixture-api", EvidenceJSON: `{"present":true}`, ObservedAt: now, ExpiresAt: now.Add(time.Minute)})
 	if err != nil || observation.ID == "" {

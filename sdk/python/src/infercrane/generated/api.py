@@ -275,6 +275,10 @@ class ControlAPI:
         path = f"/deployments/{quote(name, safe='')}/measurements"
         return cast(ObjectList, self._transport.request("POST", path, body=body))
 
+    def import_traffic_observations(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = f"/deployments/{quote(name, safe='')}/traffic-observations"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
     def record_cost_evidence(self, name: str, *, body: dict[str, Any]) -> ObjectList:
         path = f"/deployments/{quote(name, safe='')}/cost-evidence"
         return cast(ObjectList, self._transport.request("POST", path, body=body))
@@ -318,6 +322,10 @@ class ControlAPI:
     def capture_replay(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
         path = f"/deployments/{quote(name, safe='')}/replays"
         return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
+    def list_replays(self, name: str) -> ObjectList:
+        path = f"/deployments/{quote(name, safe='')}/replays"
+        return cast(ObjectList, self._transport.request("GET", path))
 
     def get_replay(self, id: str) -> dict[str, Any]:
         path = f"/replays/{quote(id, safe='')}"

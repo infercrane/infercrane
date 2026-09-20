@@ -837,6 +837,10 @@
           "model_revision": {
             "type": "string"
           },
+          "model_secret_reference_id": {
+            "description": "Tenant-scoped server-side credential reference for private or gated model resolution.",
+            "type": "string"
+          },
           "name": {
             "type": "string"
           },
@@ -1029,6 +1033,10 @@
             ],
             "type": "string"
           },
+          "provider_connection": {
+            "description": "Tenant-scoped server-side credential and endpoint reference used for authenticated discovery.",
+            "type": "string"
+          },
           "runtime": {
             "type": "string"
           },
@@ -1043,6 +1051,7 @@
             "type": "string"
           },
           "url": {
+            "description": "Required unless provider_connection supplies the private endpoint.",
             "format": "uri",
             "type": "string"
           }
@@ -1050,7 +1059,6 @@
         "required": [
           "name",
           "logical_model",
-          "url",
           "source",
           "ownership_mode",
           "runtime"
@@ -1424,7 +1432,9 @@
               "openai-compatible-external",
               "modal",
               "runpod-serverless-api",
-              "fly-io"
+              "fly-io",
+              "baseten",
+              "fireworks"
             ],
             "type": "string"
           },
@@ -4053,7 +4063,9 @@
               "openai-compatible-external",
               "modal",
               "runpod-serverless-api",
-              "fly-io"
+              "fly-io",
+              "baseten",
+              "fireworks"
             ],
             "type": "string"
           },
@@ -4711,6 +4723,151 @@
           "url",
           "provider",
           "runtime"
+        ],
+        "type": "object"
+      },
+      "TrafficObservation": {
+        "additionalProperties": false,
+        "properties": {
+          "error_type": {
+            "maxLength": 255,
+            "type": "string"
+          },
+          "generation_ms": {
+            "maximum": 86400000,
+            "minimum": 0,
+            "type": "number"
+          },
+          "input_tokens": {
+            "maximum": 10000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "latency_ms": {
+            "maximum": 86400000,
+            "minimum": 0,
+            "type": "number"
+          },
+          "operation": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "output_tokens": {
+            "maximum": 10000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "parent_session_id_hash": {
+            "pattern": "^[a-fA-F0-9]{64}$",
+            "type": "string"
+          },
+          "provider": {
+            "maxLength": 255,
+            "type": "string"
+          },
+          "queue_ms": {
+            "maximum": 86400000,
+            "minimum": 0,
+            "type": "number"
+          },
+          "request_model": {
+            "maxLength": 255,
+            "type": "string"
+          },
+          "response_model": {
+            "maxLength": 255,
+            "type": "string"
+          },
+          "retry_count": {
+            "maximum": 100,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "runtime": {
+            "maxLength": 255,
+            "type": "string"
+          },
+          "semantic_convention_schema": {
+            "maxLength": 255,
+            "type": "string"
+          },
+          "session_id_hash": {
+            "pattern": "^[a-fA-F0-9]{64}$",
+            "type": "string"
+          },
+          "shared_prefix_hash": {
+            "pattern": "^[a-fA-F0-9]{64}$",
+            "type": "string"
+          },
+          "source_request_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status_code": {
+            "maximum": 599,
+            "minimum": 100,
+            "type": "integer"
+          },
+          "streaming": {
+            "type": "boolean"
+          },
+          "tool_pause_ms": {
+            "maximum": 86400000,
+            "minimum": 0,
+            "type": "number"
+          },
+          "ttft_ms": {
+            "maximum": 86400000,
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "source_request_id",
+          "started_at",
+          "latency_ms",
+          "status_code",
+          "operation",
+          "streaming"
+        ],
+        "type": "object"
+      },
+      "TrafficObservationImport": {
+        "additionalProperties": false,
+        "properties": {
+          "observations": {
+            "items": {
+              "$ref": "#/components/schemas/TrafficObservation"
+            },
+            "maxItems": 1000,
+            "minItems": 1,
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "infercrane.traffic-observations/v1",
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "opentelemetry",
+              "datadog",
+              "baseten",
+              "fireworks",
+              "custom"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "schema_version",
+          "observations"
         ],
         "type": "object"
       }
@@ -7890,6 +8047,51 @@
       }
     },
     "/api/v1/deployments/{name}/replays": {
+      "get": {
+        "operationId": "listReplays",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List privacy-preserving workload-shape traces for one deployment",
+        "tags": [
+          "Replay"
+        ]
+      },
       "post": {
         "operationId": "captureReplay",
         "parameters": [
@@ -8643,6 +8845,63 @@
         "summary": "Set deterministic SLO policy",
         "tags": [
           "Inference decisions"
+        ]
+      }
+    },
+    "/api/v1/deployments/{name}/traffic-observations": {
+      "post": {
+        "operationId": "importTrafficObservations",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrafficObservationImport"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Import bounded content-free production request shapes for monitoring and replay",
+        "tags": [
+          "Monitoring"
         ]
       }
     },
