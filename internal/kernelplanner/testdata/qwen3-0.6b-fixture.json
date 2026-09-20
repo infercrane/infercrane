@@ -1,0 +1,60 @@
+{
+  "schema_version": "infercrane.kernel-opportunity-request/v1",
+  "model": {
+    "repository": "Qwen/Qwen3-0.6B",
+    "revision": "23749fefcc72300e3a2ad315e1317431b06b590a"
+  },
+  "runtime": {
+    "name": "vllm",
+    "version": "0.22.1",
+    "image_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "hardware": {
+    "vendor": "nvidia",
+    "accelerator": "H100",
+    "compute_capability": "sm90"
+  },
+  "workload": {
+    "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "phase": "decode",
+    "batch_size": 1,
+    "concurrency": 1,
+    "input_tokens": 32,
+    "output_tokens": 16
+  },
+  "profile": {
+    "tool": "documentation-fixture",
+    "tool_version": "1",
+    "evidence_class": "fixture",
+    "hotspots": [
+      {
+        "id": "decode-quantized-linear",
+        "name": "representative quantized projection",
+        "family": "quantized-linear",
+        "device_time_fraction": 0.32,
+        "shapes": ["1x1024x1024"],
+        "dtypes": ["int4", "bf16"]
+      },
+      {
+        "id": "decode-residual-rmsnorm",
+        "name": "representative residual plus RMSNorm",
+        "family": "residual-rmsnorm",
+        "device_time_fraction": 0.12,
+        "shapes": ["1x1024"],
+        "dtypes": ["bf16"]
+      },
+      {
+        "id": "small-sampling",
+        "name": "representative sampler",
+        "family": "sampling",
+        "device_time_fraction": 0.01
+      }
+    ]
+  },
+  "policy": {
+    "min_hotspot_fraction": 0.05,
+    "min_max_end_to_end_speedup": 1.05,
+    "target_end_to_end_speedup": 1.02,
+    "max_candidates": 3
+  }
+}

@@ -167,6 +167,10 @@ class ControlAPI:
         path = f"/endpoints/{quote(name, safe='')}/monitoring"
         return cast(dict[str, Any], self._transport.request("GET", path))
 
+    def get_endpoint_optimization_readiness(self, name: str) -> dict[str, Any]:
+        path = f"/endpoints/{quote(name, safe='')}/optimization-readiness"
+        return cast(dict[str, Any], self._transport.request("GET", path))
+
     def diagnose_endpoint(self, name: str, *, body: dict[str, Any]) -> ObjectList:
         path = f"/endpoints/{quote(name, safe='')}/doctor"
         return cast(ObjectList, self._transport.request("POST", path, body=body))
@@ -339,8 +343,20 @@ class ControlAPI:
         path = f"/artifacts/{quote(id, safe='')}/cache"
         return cast(dict[str, Any], self._transport.request("GET", path))
 
+    def list_workload_profiles(self) -> ObjectList:
+        path = "/workload-profiles"
+        return cast(ObjectList, self._transport.request("GET", path))
+
+    def get_workload_profile(self, name: str) -> dict[str, Any]:
+        path = f"/workload-profiles/{quote(name, safe='')}"
+        return cast(dict[str, Any], self._transport.request("GET", path))
+
     def propose_optimization(self, *, body: dict[str, Any]) -> dict[str, Any]:
         path = "/optimization/proposals"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
+    def plan_kernel_opportunities(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        path = "/optimization/kernel-opportunities"
         return cast(dict[str, Any], self._transport.request("POST", path, body=body))
 
     def list_optimization_campaigns(self) -> ObjectList:
@@ -390,6 +406,34 @@ class ControlAPI:
     def qualify_optimized_artifact(self, id: str, *, body: dict[str, Any]) -> dict[str, Any]:
         path = f"/optimized-artifacts/{quote(id, safe='')}/qualify"
         return cast(dict[str, Any], self._transport.request("POST", path, body=body))
+
+    def get_sandbox_capabilities(self) -> dict[str, Any]:
+        path = "/sandboxes/capabilities"
+        return cast(dict[str, Any], self._transport.request("GET", path))
+
+    def list_sandboxes(self) -> ObjectList:
+        path = "/sandboxes"
+        return cast(ObjectList, self._transport.request("GET", path))
+
+    def create_sandbox(self, *, body: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
+        path = "/sandboxes"
+        return cast(dict[str, Any], self._transport.request("POST", path, body=body, idempotency_key=idempotency_key))
+
+    def get_sandbox(self, id: str) -> dict[str, Any]:
+        path = f"/sandboxes/{quote(id, safe='')}"
+        return cast(dict[str, Any], self._transport.request("GET", path))
+
+    def pause_sandbox(self, id: str, idempotency_key: str) -> dict[str, Any]:
+        path = f"/sandboxes/{quote(id, safe='')}/pause"
+        return cast(dict[str, Any], self._transport.request("POST", path, idempotency_key=idempotency_key))
+
+    def resume_sandbox(self, id: str, idempotency_key: str) -> dict[str, Any]:
+        path = f"/sandboxes/{quote(id, safe='')}/resume"
+        return cast(dict[str, Any], self._transport.request("POST", path, idempotency_key=idempotency_key))
+
+    def delete_sandbox(self, id: str, idempotency_key: str) -> dict[str, Any]:
+        path = f"/sandboxes/{quote(id, safe='')}"
+        return cast(dict[str, Any], self._transport.request("DELETE", path, idempotency_key=idempotency_key))
 
     def create_sandbox_reference(self, *, body: dict[str, Any]) -> dict[str, Any]:
         path = "/sandboxes/references"

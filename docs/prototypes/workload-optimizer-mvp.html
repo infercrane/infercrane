@@ -1,0 +1,1907 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>InferCrane — Simple Product Flow</title>
+  <style>
+    @font-face {
+      font-family: "Albert Sans Prototype";
+      src: url("../../.infercrane/frontend/apps/site/public/assets/albert-sans-latin-wght-normal-BJ0ssN8N.woff2") format("woff2");
+      font-weight: 100 900;
+      font-display: swap;
+    }
+
+    :root {
+      color-scheme: dark;
+      --canvas: #050706;
+      --sidebar: #080a09;
+      --surface: #0c0f0d;
+      --raised: #111512;
+      --hover: #161b18;
+      --line: #252b27;
+      --line-strong: #3c463f;
+      --text: #eef1ef;
+      --muted: #9aa39e;
+      --faint: #818b85;
+      --green: #45d6a8;
+      --green-bg: #0f251b;
+      --amber: #efb54d;
+      --amber-bg: #2a2111;
+      --blue: #79adff;
+      --blue-bg: #101d2d;
+      --rose: #ff7e90;
+      --sans: "Albert Sans Prototype", "Avenir Next", "Helvetica Neue", Arial, system-ui, sans-serif;
+      --mono: "SFMono-Regular", "Cascadia Mono", Consolas, monospace;
+      --radius: 10px;
+      --radius-sm: 7px;
+    }
+
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html { background: var(--canvas); }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      background: var(--canvas);
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 14px;
+      line-height: 1.5;
+      text-rendering: optimizeLegibility;
+    }
+
+    ::selection { background: var(--green); color: #03100b; }
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-track { background: var(--canvas); }
+    ::-webkit-scrollbar-thumb { border: 3px solid var(--canvas); border-radius: 8px; background: var(--line-strong); }
+
+    button, input, select { font: inherit; }
+    button { color: inherit; }
+    button, a { -webkit-tap-highlight-color: transparent; }
+    button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible {
+      outline: 2px solid var(--text);
+      outline-offset: 3px;
+    }
+
+    .svg-defs { position: absolute; width: 0; height: 0; overflow: hidden; }
+
+    .prototype-bar {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 30px;
+      padding: 5px 16px;
+      border-bottom: 1px solid var(--line);
+      background: #0d110e;
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: .03em;
+      text-align: center;
+    }
+
+    .prototype-bar strong { color: var(--green); }
+
+    .shell {
+      display: grid;
+      grid-template-columns: 230px minmax(0, 1fr);
+      min-height: calc(100vh - 30px);
+    }
+
+    .sidebar {
+      position: sticky;
+      top: 0;
+      display: flex;
+      flex-direction: column;
+      height: calc(100vh - 30px);
+      border-right: 1px solid var(--line);
+      background: var(--sidebar);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      height: 64px;
+      padding: 0 18px;
+      border-bottom: 1px solid var(--line);
+      font-size: 18px;
+      font-weight: 680;
+      letter-spacing: -.025em;
+    }
+
+    .brand-mark { width: 30px; height: 24px; }
+
+    .workspace {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 14px 11px 10px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+    }
+
+    .workspace-mark {
+      display: grid;
+      place-items: center;
+      width: 32px;
+      height: 32px;
+      border-radius: var(--radius-sm);
+      background: var(--text);
+      color: var(--canvas);
+      font-size: 11px;
+      font-weight: 750;
+    }
+
+    .workspace-name { font-weight: 640; }
+    .workspace-meta { color: var(--faint); font-family: var(--mono); font-size: 9px; text-transform: uppercase; }
+
+    .deploy-model-button, .primary-button, .secondary-button, .quiet-button, .icon-button {
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease, transform 140ms ease;
+    }
+
+    .deploy-model-button {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 42px;
+      margin: 0 11px 20px;
+      border: 0;
+      background: var(--text);
+      color: var(--canvas);
+      font-weight: 680;
+    }
+
+    .deploy-model-button svg { width: 16px; height: 16px; }
+    .deploy-model-button:hover, .primary-button:hover { background: #d8deda; }
+    .deploy-model-button:active, .primary-button:active { transform: translateY(1px); }
+
+    .nav-label {
+      padding: 0 18px 7px;
+      color: var(--faint);
+      font-family: var(--mono);
+      font-size: 9px;
+      font-weight: 650;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    .nav { display: grid; gap: 3px; padding: 0 9px; }
+
+    .nav-button {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      width: 100%;
+      min-height: 40px;
+      padding: 0 10px;
+      border: 1px solid transparent;
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: var(--muted);
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .nav-button:hover { background: var(--surface); color: var(--text); }
+    .nav-button.active { border-color: var(--line); background: var(--raised); color: var(--text); }
+    .nav-button svg { width: 17px; height: 17px; }
+    .nav-tag { margin-left: auto; color: var(--green); font-family: var(--mono); font-size: 8px; text-transform: uppercase; }
+
+    .sidebar-spacer { margin-top: auto; }
+
+    .main { min-width: 0; }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 64px;
+      padding: 0 28px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(5, 7, 6, .96);
+      backdrop-filter: blur(12px);
+    }
+
+    .breadcrumb { color: var(--muted); }
+    .breadcrumb strong { color: var(--text); font-weight: 620; }
+
+    .top-actions { display: flex; align-items: center; gap: 8px; }
+    .connected { display: inline-flex; align-items: center; gap: 6px; color: var(--green); font-family: var(--mono); font-size: 9px; font-weight: 650; text-transform: uppercase; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+
+    .page {
+      display: none;
+      width: min(1180px, 100%);
+      margin: 0 auto;
+      padding: 38px 34px 64px;
+    }
+
+    .page.active { display: block; animation: page-in 180ms cubic-bezier(.2,.8,.2,1); }
+
+    @keyframes page-in {
+      from { opacity: .65; transform: translateY(3px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; scroll-behavior: auto !important; }
+    }
+
+    .page-heading {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 30px;
+    }
+
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { margin-bottom: 7px; font-size: clamp(28px, 3.1vw, 42px); font-weight: 640; line-height: 1.08; letter-spacing: -.035em; }
+    h2 { margin-bottom: 5px; font-size: 20px; font-weight: 650; letter-spacing: -.025em; }
+    h3 { margin-bottom: 4px; font-size: 14px; font-weight: 650; }
+    .page-heading p, .section-heading p { margin-bottom: 0; color: var(--muted); font-size: 14px; }
+
+    .catalog-tabs {
+      display: inline-flex;
+      gap: 3px;
+      margin-bottom: 24px;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: var(--surface);
+    }
+
+    .catalog-tab {
+      min-height: 36px;
+      padding: 0 14px;
+      border: 0;
+      border-radius: 5px;
+      background: transparent;
+      color: var(--muted);
+      font-weight: 620;
+      cursor: pointer;
+    }
+
+    .catalog-tab.active { background: var(--text); color: var(--canvas); }
+    .catalog-panel { display: none; }
+    .catalog-panel.active { display: block; }
+
+    .api-model-list { border-top: 1px solid var(--line); }
+    .api-model { border-bottom: 1px solid var(--line); }
+    .api-model-head {
+      display: grid;
+      grid-template-columns: minmax(260px, 1.4fr) repeat(4, minmax(90px, .45fr)) 92px;
+      align-items: center;
+      gap: 18px;
+      min-height: 96px;
+      padding: 15px 4px;
+    }
+
+    .price-label { color: var(--faint); font-size: 10px; }
+    .price-value { margin-top: 3px; color: var(--text); font-family: var(--mono); font-size: 13px; }
+    .api-model-detail { display: none; padding: 0 4px 18px 59px; }
+    .api-model.open .api-model-detail { display: block; }
+    .code-sample {
+      position: relative;
+      padding: 17px 110px 17px 17px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: #030504;
+      overflow-x: auto;
+      color: #c8d2cc;
+      font-family: var(--mono);
+      font-size: 11px;
+      line-height: 1.7;
+      white-space: pre;
+    }
+
+    .code-sample .quiet-button { position: absolute; top: 12px; right: 12px; }
+
+    .primary-button, .secondary-button, .quiet-button {
+      min-height: 39px;
+      padding: 0 14px;
+      font-weight: 640;
+    }
+
+    .primary-button { border: 0; background: var(--text); color: var(--canvas); }
+    .primary-button:disabled { background: #39403c; color: #89918c; cursor: wait; }
+    .secondary-button { border: 1px solid var(--line-strong); background: transparent; color: var(--text); }
+    .secondary-button:hover, .quiet-button:hover { border-color: #5e6962; background: var(--hover); }
+    .quiet-button { border: 1px solid var(--line); background: var(--surface); color: var(--muted); }
+    .icon-button { display: grid; place-items: center; width: 36px; height: 36px; border: 1px solid var(--line); background: var(--surface); }
+    .icon-button:hover { background: var(--hover); }
+    .icon-button svg { width: 16px; height: 16px; }
+
+    .catalog-tools {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+
+    .catalog-search {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      flex: 1;
+      min-height: 43px;
+      padding: 0 12px;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-sm);
+      background: var(--surface);
+    }
+
+    .catalog-search svg { width: 16px; height: 16px; color: var(--faint); }
+    .catalog-search input { width: 100%; border: 0; outline: 0; background: transparent; color: var(--text); }
+    .catalog-search input::placeholder { color: var(--faint); }
+
+    .filter-button {
+      min-height: 43px;
+      padding: 0 13px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: var(--surface);
+      color: var(--muted);
+      cursor: pointer;
+    }
+
+    .filter-button.active { border-color: var(--line-strong); background: var(--raised); color: var(--text); }
+
+    .model-list { border-top: 1px solid var(--line); }
+
+    .catalog-zero {
+      padding: 44px 18px;
+      border-bottom: 1px solid var(--line);
+      text-align: center;
+    }
+
+    .catalog-zero h3 { margin: 0 0 4px; font-size: 15px; }
+    .catalog-zero p { margin: 0 0 15px; color: var(--muted); font-size: 12px; }
+
+    .model-row {
+      display: grid;
+      grid-template-columns: minmax(260px, 1.4fr) minmax(150px, .7fr) 118px 92px;
+      align-items: center;
+      gap: 18px;
+      min-height: 88px;
+      padding: 14px 4px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .model-row[hidden] { display: none; }
+
+    .model-identity { display: flex; align-items: center; gap: 13px; min-width: 0; }
+    .model-avatar { display: grid; place-items: center; flex: 0 0 auto; width: 42px; height: 42px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--raised); font-family: var(--mono); font-size: 10px; font-weight: 650; }
+    .model-name { overflow: hidden; color: var(--text); font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+    .model-author { color: var(--faint); font-size: 11px; }
+    .model-use { color: var(--muted); font-size: 12px; }
+    .tag-list { display: flex; flex-wrap: wrap; gap: 5px; }
+    .tag { padding: 3px 6px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 10px; }
+    .evidence { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 9px; font-weight: 650; text-transform: uppercase; }
+    .evidence.reviewed { color: var(--green); }
+    .evidence.catalog { color: var(--amber); }
+    .model-row .primary-button { justify-self: end; min-width: 92px; }
+
+    .catalog-footer { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 18px 2px; color: var(--muted); font-size: 12px; }
+    .text-button { padding: 0; border: 0; background: transparent; color: var(--text); font-weight: 620; text-decoration: underline; text-underline-offset: 4px; cursor: pointer; }
+
+    .stepper {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      max-width: 460px;
+      margin-bottom: 34px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+    }
+
+    .step {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 48px;
+      padding: 0 12px;
+      border-right: 1px solid var(--line);
+      color: var(--faint);
+      background: var(--surface);
+    }
+
+    .step:last-child { border-right: 0; }
+    .step.active { background: var(--raised); color: var(--text); }
+    .step.complete { color: var(--green); }
+    .step-number { display: grid; place-items: center; width: 20px; height: 20px; border: 1px solid currentColor; border-radius: 50%; font-family: var(--mono); font-size: 8px; }
+    .step span:last-child { font-weight: 620; }
+
+    .deploy-step { display: none; }
+    .deploy-step.active { display: block; }
+
+    .deploy-assistant {
+      width: min(780px, 100%);
+      margin: 0 auto;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius);
+      background: var(--surface);
+      overflow: hidden;
+    }
+
+    .assistant-progress {
+      display: grid;
+      grid-template-columns: auto minmax(120px, 1fr);
+      align-items: center;
+      gap: 16px;
+      min-height: 48px;
+      padding: 0 24px;
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .assistant-progress strong { color: var(--text); font-family: var(--mono); font-size: 9px; font-weight: 620; text-transform: uppercase; }
+    .progress-track { height: 2px; background: var(--line); overflow: hidden; }
+    .progress-value { display: block; width: 100%; height: 100%; background: var(--green); transform: scaleX(.2); transform-origin: left; transition: transform 180ms cubic-bezier(.2,.8,.2,1); }
+    .assistant-body { min-height: 500px; padding: 32px; }
+    .assistant-body .deploy-step { animation: page-in 160ms cubic-bezier(.2,.8,.2,1); }
+    .question-head { margin-bottom: 22px; }
+    .question-head h2 { margin-bottom: 6px; font-size: 24px; }
+    .question-head p { max-width: 62ch; margin-bottom: 0; color: var(--muted); }
+    .model-context { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 18px; color: var(--muted); font-size: 11px; }
+    .model-context .model-avatar { width: 28px; height: 28px; border-radius: 6px; font-size: 8px; }
+    .model-context strong { color: var(--text); font-weight: 630; }
+
+    .conditional-panel {
+      margin-top: 18px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+    }
+
+    .conditional-panel[hidden] { display: none; }
+    .connector-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .connector-fields .field-wide { grid-column: 1 / -1; }
+    .privacy-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+    .inline-note { display: flex; align-items: flex-start; gap: 9px; margin-top: 14px; color: var(--muted); font-size: 11px; }
+    .inline-note svg { flex: 0 0 auto; width: 15px; height: 15px; margin-top: 1px; color: var(--green); }
+    .command-box { display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 10px 11px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: #030504; }
+    .command-box code { min-width: 0; overflow: hidden; color: #c8d2cc; font-family: var(--mono); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+    .command-box button { flex: 0 0 auto; margin-left: auto; }
+    .upload-line { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 12px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    .upload-line span { color: var(--muted); font-size: 11px; }
+
+    .review-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 28px; border-top: 1px solid var(--line-strong); }
+    .review-item { min-height: 68px; padding: 13px 16px 13px 0; border-bottom: 1px solid var(--line); }
+    .review-item:nth-child(2n) { padding-left: 16px; }
+    .review-label { color: var(--faint); font-family: var(--mono); font-size: 8px; font-weight: 650; text-transform: uppercase; }
+    .review-value { margin-top: 5px; font-size: 12px; font-weight: 630; }
+    .review-detail { margin-top: 1px; color: var(--muted); font-size: 10px; }
+
+    .delivery-map { margin-top: 26px; padding-top: 24px; border-top: 1px solid var(--line-strong); }
+    .delivery-map-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; margin-bottom: 18px; }
+    .delivery-map-head h3 { margin: 0; font-size: 16px; }
+    .delivery-map-head p { margin: 0; color: var(--muted); font-size: 11px; }
+    .delivery-path { display: grid; grid-template-columns: minmax(110px, .8fr) 28px minmax(260px, 1.65fr) 28px minmax(120px, .9fr); align-items: stretch; }
+    .delivery-node { min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--raised); }
+    .delivery-node > svg { width: 18px; height: 18px; margin-bottom: 20px; color: var(--muted); }
+    .delivery-node-label { color: var(--faint); font-family: var(--mono); font-size: 8px; font-weight: 650; text-transform: uppercase; }
+    .delivery-node strong { display: block; margin-top: 4px; font-size: 13px; }
+    .delivery-node > span:last-child { display: block; margin-top: 2px; color: var(--muted); font-size: 10px; }
+    .delivery-arrow { display: grid; place-items: center; color: var(--faint); }
+    .delivery-arrow svg { width: 16px; height: 16px; }
+    .stack-list { margin-top: 12px; border-top: 1px solid var(--line); }
+    .stack-line { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 7px 0; border-bottom: 1px solid var(--line); }
+    .stack-line:last-child { border-bottom: 0; }
+    .stack-line span { color: var(--muted); font-size: 9px; }
+    .stack-line strong { margin: 0; font-family: var(--mono); font-size: 9px; font-weight: 580; text-align: right; }
+
+    .profile-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 20px; border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line); }
+    .profile-item { padding: 14px 14px 14px 0; border-right: 1px solid var(--line); }
+    .profile-item + .profile-item { padding-left: 14px; }
+    .profile-item:nth-child(3n) { border-right: 0; }
+    .profile-item:nth-child(n+4) { border-top: 1px solid var(--line); }
+    .profile-value { font-family: var(--mono); font-size: 13px; }
+    .profile-label { margin-top: 3px; color: var(--muted); font-size: 9px; }
+    .coverage-line { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-top: 14px; color: var(--muted); font-size: 11px; }
+    .coverage-line strong { color: var(--green); font-family: var(--mono); font-size: 10px; }
+
+    .campaign-flow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 20px; border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line); }
+    .campaign-stage { position: relative; min-height: 82px; padding: 14px 24px 14px 0; border-right: 1px solid var(--line); }
+    .campaign-stage + .campaign-stage { padding-left: 14px; }
+    .campaign-stage:last-child { border-right: 0; }
+    .campaign-stage strong { display: block; font-size: 12px; }
+    .campaign-stage span { display: block; margin-top: 3px; color: var(--muted); font-size: 9px; }
+    .campaign-stage svg { position: absolute; top: 17px; right: 5px; width: 13px; height: 13px; color: var(--faint); }
+    .campaign-stage:last-child svg { display: none; }
+
+    .recipe-table { margin-top: 18px; border-top: 1px solid var(--line-strong); }
+    .recipe-row { display: grid; grid-template-columns: 100px 1fr 1fr; border-bottom: 1px solid var(--line); }
+    .recipe-row > div { min-width: 0; padding: 11px 12px; }
+    .recipe-row > div + div { border-left: 1px solid var(--line); }
+    .recipe-row.header { color: var(--faint); font-family: var(--mono); font-size: 8px; font-weight: 650; text-transform: uppercase; }
+    .recipe-axis { color: var(--muted); font-size: 10px; }
+    .recipe-value { font-family: var(--mono); font-size: 10px; }
+    .recipe-value small { display: block; margin-top: 2px; color: var(--faint); font-family: var(--sans); font-size: 9px; }
+    .outcome-strip { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--line-strong); }
+    .outcome-item { padding: 14px 0; }
+    .outcome-item + .outcome-item { padding-left: 16px; border-left: 1px solid var(--line); }
+    .outcome-item strong { display: block; font-family: var(--mono); font-size: 15px; }
+    .outcome-item span { color: var(--muted); font-size: 9px; }
+
+    .form-layout { display: grid; grid-template-columns: minmax(0, 1fr) 290px; gap: 44px; align-items: start; }
+    .form-main { max-width: 720px; }
+    .form-section { padding: 26px 0; border-top: 1px solid var(--line); }
+    .form-section:first-child { padding-top: 0; border-top: 0; }
+    .form-section > p { margin-bottom: 16px; color: var(--muted); font-size: 12px; }
+    .section-heading { margin-bottom: 18px; }
+
+    .selected-model {
+      display: flex;
+      align-items: center;
+      gap: 15px;
+      padding: 17px;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius);
+      background: var(--surface);
+    }
+
+    .selected-model .model-avatar { width: 48px; height: 48px; }
+    .selected-model-content { min-width: 0; }
+    .selected-model-actions { margin-left: auto; }
+
+    .choice-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+    .workload-grid .choice:last-child { grid-column: 1 / -1; }
+    .custom-workload-field { margin-top: 12px; }
+
+    .choice {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      min-height: 74px;
+      padding: 13px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: var(--surface);
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .choice:hover { border-color: var(--line-strong); background: var(--hover); }
+    .choice.selected { border-color: #5e7468; background: #101813; }
+    .radio { flex: 0 0 auto; width: 15px; height: 15px; margin-top: 2px; border: 1px solid var(--line-strong); border-radius: 50%; }
+    .choice.selected .radio { border: 4px solid var(--text); }
+    .choice-title { display: block; font-weight: 630; }
+    .choice-copy { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; }
+
+    .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .field { display: grid; gap: 6px; }
+    .field label { color: var(--muted); font-size: 11px; }
+    .field input, .field select { width: 100%; min-height: 41px; padding: 0 11px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); }
+
+    .side-summary { position: sticky; top: 94px; border-top: 1px solid var(--line-strong); }
+    .summary-row { display: flex; justify-content: space-between; gap: 18px; padding: 12px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
+    .summary-row span:first-child { color: var(--muted); }
+    .summary-row strong { max-width: 170px; color: var(--text); font-weight: 620; text-align: right; }
+    .summary-note { padding-top: 14px; color: var(--faint); font-size: 10px; }
+
+    .form-actions { display: flex; justify-content: space-between; gap: 10px; margin-top: 26px; padding-top: 20px; border-top: 1px solid var(--line); }
+    .form-actions-right { display: flex; gap: 9px; margin-left: auto; }
+
+    .plan {
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius);
+      background: var(--surface);
+      overflow: hidden;
+    }
+
+    .plan-title { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 17px 18px; border-bottom: 1px solid var(--line); }
+    .plan-title h3 { margin: 0; font-size: 16px; }
+    .status { display: inline-flex; align-items: center; gap: 6px; padding: 4px 7px; border: 1px solid #345344; border-radius: 999px; background: var(--green-bg); color: var(--green); font-family: var(--mono); font-size: 8px; font-weight: 700; text-transform: uppercase; }
+    .status.warning { border-color: #594822; background: var(--amber-bg); color: var(--amber); }
+    .status.info { border-color: #304768; background: var(--blue-bg); color: var(--blue); }
+    .plan-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .plan-item { min-height: 76px; padding: 16px 18px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    .plan-item:nth-child(2n) { border-right: 0; }
+    .plan-item:nth-last-child(-n+2) { border-bottom: 0; }
+    .plan-label { color: var(--faint); font-family: var(--mono); font-size: 9px; font-weight: 650; text-transform: uppercase; }
+    .plan-value { margin-top: 6px; font-weight: 640; }
+    .plan-detail { margin-top: 2px; color: var(--muted); font-size: 11px; }
+    .honesty-note { display: flex; gap: 10px; margin-top: 14px; padding: 12px 13px; border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--muted); font-size: 11px; }
+    .honesty-note svg { flex: 0 0 auto; width: 16px; height: 16px; color: var(--blue); }
+
+    .table { width: 100%; border-collapse: collapse; }
+    .table th { padding: 10px 11px; border-bottom: 1px solid var(--line); color: var(--faint); font-family: var(--mono); font-size: 9px; font-weight: 650; text-align: left; text-transform: uppercase; }
+    .table td { padding: 15px 11px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+    .table tbody tr:last-child td { border-bottom: 0; }
+    .table tbody tr.clickable { cursor: pointer; }
+    .table tbody tr.clickable:hover { background: var(--surface); }
+    .table strong { color: var(--text); font-weight: 630; }
+    .table code { color: var(--text); font-family: var(--mono); font-size: 10px; }
+    .table-actions { text-align: right; }
+
+    .empty-state { padding: 56px 20px; border-top: 1px solid var(--line); text-align: center; }
+    .empty-state svg { width: 28px; height: 28px; margin-bottom: 14px; color: var(--faint); }
+    .empty-state p { max-width: 430px; margin: 5px auto 18px; color: var(--muted); }
+
+    .deployment-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 26px;
+    }
+
+    .back-button { display: inline-flex; align-items: center; gap: 7px; margin-bottom: 18px; padding: 0; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
+    .back-button:hover { color: var(--text); }
+    .back-button svg { width: 15px; height: 15px; }
+
+    .endpoint-box { display: flex; align-items: center; gap: 12px; padding: 15px 16px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--surface); }
+    .endpoint-box code { min-width: 0; overflow: hidden; color: var(--text); font-family: var(--mono); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+    .endpoint-box button { margin-left: auto; }
+
+    .performance-strip {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      margin-top: 26px;
+      border-top: 1px solid var(--line-strong);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .observe-heading {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 18px;
+      margin-top: 28px;
+    }
+
+    .observe-heading h2 { margin: 0 0 3px; font-size: 17px; }
+    .observe-heading p { margin: 0; color: var(--muted); font-size: 11px; }
+
+    .workload-upgrade { margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--line-strong); }
+    .workload-upgrade .observe-heading { margin-top: 0; }
+    .workload-upgrade .campaign-flow { margin-top: 14px; }
+
+    .performance-item { padding: 17px 16px 17px 0; border-right: 1px solid var(--line); }
+    .performance-item + .performance-item { padding-left: 16px; }
+    .performance-item:last-child { border-right: 0; }
+    .performance-value { font-family: var(--mono); font-size: 19px; }
+    .performance-label { margin-top: 3px; color: var(--muted); font-size: 10px; }
+
+    .improve-card { margin-top: 30px; border-top: 1px solid var(--line-strong); }
+    .improve-prompt { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 22px 0; }
+    .improve-prompt h2, .improve-panel h2 { margin-bottom: 4px; }
+    .improve-prompt p, .improve-panel p { margin: 0; color: var(--muted); }
+    .improve-panel { display: none; padding-top: 22px; }
+    .improve-panel.active { display: block; }
+    .improve-stage { display: none; max-width: 720px; }
+    .improve-stage.active { display: block; }
+
+    .diagnosis-line {
+      display: grid;
+      grid-template-columns: 150px minmax(0, 1fr);
+      margin-top: 22px;
+      border-top: 1px solid var(--line-strong);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .diagnosis-line > div { padding: 14px 0; }
+    .diagnosis-line > div + div { padding-left: 18px; border-left: 1px solid var(--line); }
+    .diagnosis-line span { display: block; color: var(--faint); font-family: var(--mono); font-size: 8px; text-transform: uppercase; }
+    .diagnosis-line strong { display: block; margin-top: 4px; font-size: 12px; }
+    .diagnosis-line p { margin-top: 3px; font-size: 10px; }
+
+    .source-ladder {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      margin-top: 20px;
+      border-top: 1px solid var(--line-strong);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .source-ladder > div { min-width: 0; padding: 13px 12px; border-right: 1px solid var(--line); }
+    .source-ladder > div:last-child { border-right: 0; }
+    .source-ladder span { display: block; color: var(--faint); font-family: var(--mono); font-size: 8px; text-transform: uppercase; }
+    .source-ladder strong { display: block; margin-top: 4px; font-size: 11px; }
+    .source-ladder small { display: block; margin-top: 3px; color: var(--muted); font-size: 9px; }
+
+    .proof-log { margin-top: 18px; border-top: 1px solid var(--line); }
+    .proof-log div { display: grid; grid-template-columns: 112px 1fr auto; gap: 14px; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--line); font-size: 10px; }
+    .proof-log code { color: var(--muted); }
+    .proof-log strong { font-size: 10px; }
+    .result-contract { display: grid; grid-template-columns: repeat(3, 1fr); margin-top: 16px; border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line); }
+    .result-contract > div { padding: 12px 14px; border-right: 1px solid var(--line); }
+    .result-contract > div:last-child { border-right: 0; }
+    .result-contract span { display: block; color: var(--faint); font-family: var(--mono); font-size: 8px; text-transform: uppercase; }
+    .result-contract strong { display: block; margin-top: 4px; font-size: 11px; }
+    .source-list { display: grid; gap: 8px; margin-top: 18px; }
+    .source-option { min-height: 58px; }
+    .prototype-result { margin-top: 18px; border: 1px solid var(--line-strong); border-radius: var(--radius); overflow: hidden; }
+    .compare-row { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid var(--line); }
+    .compare-cell { padding: 14px 16px; }
+    .compare-cell + .compare-cell { border-left: 1px solid var(--line); }
+    .compare-label { color: var(--faint); font-size: 10px; }
+    .compare-value { margin-top: 4px; font-family: var(--mono); font-size: 13px; }
+
+    .workflow-error {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-top: 12px;
+      padding: 11px 13px;
+      border: 1px solid #713743;
+      border-radius: var(--radius-sm);
+      background: #241116;
+      color: #ffc0c9;
+      font-size: 11px;
+    }
+
+    .workflow-error strong { color: #ffe5e9; }
+
+    .detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 24px; margin-top: 22px; }
+    .detail-section { border-top: 1px solid var(--line-strong); }
+    .detail-section-title { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 0; }
+    .detail-section-title h2 { margin: 0; font-size: 16px; }
+    .detail-list { border-top: 1px solid var(--line); }
+    .detail-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; min-height: 50px; border-bottom: 1px solid var(--line); }
+    .detail-row span:first-child { color: var(--muted); }
+    .detail-row strong, .detail-row code { color: var(--text); font-family: var(--mono); font-size: 10px; font-weight: 550; text-align: right; }
+
+    .next-actions { display: grid; gap: 8px; }
+    .next-action { display: flex; align-items: center; gap: 11px; width: 100%; padding: 13px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); text-align: left; cursor: pointer; }
+    .next-action:hover { border-color: var(--line-strong); background: var(--hover); }
+    .next-action svg { width: 17px; height: 17px; color: var(--muted); }
+    .next-action-title { display: block; font-weight: 630; }
+    .next-action-copy { display: block; color: var(--muted); font-size: 10px; }
+
+    .simple-form { display: grid; gap: 18px; max-width: 690px; }
+    .simple-form .choice-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+    .sandbox-intro { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 44px; align-items: end; margin-bottom: 30px; }
+    .sandbox-intro p { max-width: 680px; margin-bottom: 0; color: var(--muted); }
+    .sandbox-facts { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--line-strong); }
+    .sandbox-fact { padding: 12px 8px 0 0; }
+    .sandbox-fact strong { display: block; font-family: var(--mono); font-size: 11px; font-weight: 600; }
+    .sandbox-fact span { color: var(--faint); font-size: 10px; }
+
+    .template-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; margin-bottom: 28px; }
+    .template { padding: 15px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); cursor: pointer; }
+    .template:hover { border-color: var(--line-strong); background: var(--hover); }
+    .template svg { width: 19px; height: 19px; margin-bottom: 20px; color: var(--muted); }
+    .template p { margin: 4px 0 0; color: var(--muted); font-size: 11px; }
+
+    .run-log {
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #030504;
+      color: #b9c5be;
+      font-family: var(--mono);
+      font-size: 11px;
+      line-height: 1.75;
+      overflow-x: auto;
+    }
+
+    .run-log .passed { color: var(--green); }
+    .run-log .muted { color: var(--faint); }
+
+    .usage-filters { display: grid; grid-template-columns: 1fr 1fr 140px; gap: 10px; margin-bottom: 25px; }
+    .usage-summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); margin-bottom: 28px; border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line); }
+    .usage-item { padding: 18px 18px 18px 0; border-right: 1px solid var(--line); }
+    .usage-item + .usage-item { padding-left: 18px; }
+    .usage-item:last-child { border-right: 0; }
+    .usage-value { font-family: var(--mono); font-size: 20px; letter-spacing: -.025em; }
+    .usage-label { margin-top: 3px; color: var(--muted); font-size: 11px; }
+    .usage-chart { margin-bottom: 28px; padding: 18px 20px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+    .usage-chart-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 8px; }
+    .usage-chart svg { display: block; width: 100%; height: 180px; }
+    .chart-axis { display: flex; justify-content: space-between; color: var(--faint); font-family: var(--mono); font-size: 9px; }
+    .credits-row { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 18px 0; border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line); }
+    .credits-row p { margin: 2px 0 0; color: var(--muted); font-size: 11px; }
+
+    .key-value { display: inline-flex; align-items: center; gap: 7px; font-family: var(--mono); }
+    .key-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--faint); }
+
+    .settings-dialog {
+      width: min(620px, calc(100vw - 32px));
+      padding: 0;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius);
+      background: var(--surface-raised);
+      color: var(--text);
+    }
+    .settings-dialog::backdrop { background: rgba(0, 0, 0, .72); }
+    .dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 20px 22px 16px; border-bottom: 1px solid var(--line); }
+    .dialog-head h2 { margin: 0 0 4px; font-size: 20px; }
+    .dialog-head p { margin: 0; color: var(--muted); font-size: 12px; }
+    .dialog-body { padding: 20px 22px; }
+    .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 18px; }
+
+    .toast {
+      position: fixed;
+      right: 24px;
+      bottom: 24px;
+      z-index: 50;
+      max-width: 360px;
+      padding: 12px 14px;
+      border-radius: var(--radius-sm);
+      background: var(--text);
+      color: var(--canvas);
+      font-weight: 630;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(8px);
+      transition: opacity 150ms ease, transform 150ms ease;
+    }
+
+    .toast.show { opacity: 1; transform: translateY(0); }
+
+    @media (max-width: 960px) {
+      .shell { grid-template-columns: 200px minmax(0, 1fr); }
+      .form-layout, .detail-grid, .sandbox-intro { grid-template-columns: 1fr; gap: 24px; }
+      .side-summary { position: static; }
+      .delivery-path { grid-template-columns: 1fr 24px 1.5fr 24px 1fr; }
+      .sandbox-intro { align-items: start; }
+      .api-model-head { grid-template-columns: minmax(220px, 1fr) repeat(2, 90px) 92px; }
+      .api-model-head > :nth-child(4), .api-model-head > :nth-child(5) { display: none; }
+      .model-row { grid-template-columns: minmax(220px, 1.4fr) minmax(150px, .8fr) 100px; }
+      .model-row > :nth-child(3) { display: none; }
+      .usage-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .usage-item:nth-child(3) { border-right: 0; }
+      .usage-item:nth-child(n+4) { border-top: 1px solid var(--line); }
+    }
+
+    @media (max-width: 760px) {
+      .prototype-bar { justify-content: flex-start; overflow: hidden; white-space: nowrap; }
+      .shell { display: block; }
+      .sidebar { position: relative; width: 100%; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+      .brand { height: 56px; }
+      .workspace, .nav-label { display: none; }
+      .deploy-model-button { position: absolute; top: 8px; right: 10px; width: auto; min-height: 39px; margin: 0; padding: 0 13px; }
+      .nav { display: flex; padding: 7px 9px; overflow-x: auto; }
+      .nav-button { width: auto; white-space: nowrap; }
+      .nav-tag { display: none; }
+      .topbar { height: 56px; padding: 0 18px; }
+      .connected { display: none; }
+      .page { padding: 28px 18px 48px; }
+      .page-heading { align-items: flex-start; flex-direction: column; margin-bottom: 24px; }
+      .assistant-body { min-height: 0; padding: 26px 22px; }
+      .catalog-tools { align-items: stretch; flex-wrap: wrap; }
+      .catalog-search { flex: 1 1 100%; }
+      .catalog-tabs { width: 100%; }
+      .catalog-tab { flex: 1; }
+      .api-model-head { grid-template-columns: minmax(0, 1fr) auto; gap: 12px; }
+      .api-model-head > :nth-child(n+2):not(:last-child) { display: none; }
+      .api-model-detail { padding-left: 0; }
+      .code-sample { padding: 54px 14px 14px; }
+      .model-row { grid-template-columns: minmax(0, 1fr) auto; gap: 12px; }
+      .model-row > :nth-child(2), .model-row > :nth-child(3) { display: none; }
+      .model-row .primary-button { min-width: 80px; }
+      .catalog-footer { align-items: flex-start; flex-direction: column; }
+      .template-strip { grid-template-columns: 1fr; }
+      .usage-filters, .usage-summary { grid-template-columns: 1fr; }
+      .usage-item, .usage-item + .usage-item { padding: 14px 0; border-right: 0; border-bottom: 1px solid var(--line); }
+      .usage-item:last-child { border-bottom: 0; }
+      .usage-item:nth-child(n+4) { border-top: 0; }
+      .performance-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .performance-item:nth-child(2) { border-right: 0; }
+      .performance-item:nth-child(n+3) { border-top: 1px solid var(--line); }
+      .improve-prompt, .credits-row { align-items: flex-start; flex-direction: column; }
+      .observe-heading { align-items: flex-start; }
+      .delivery-map-head { align-items: flex-start; flex-direction: column; }
+      .table-wrap { overflow-x: auto; }
+      .table { min-width: 700px; }
+    }
+
+    @media (max-width: 520px) {
+      .brand span { display: none; }
+      .deploy-model-button { font-size: 0; width: 39px; padding: 0; }
+      .choice-grid, .simple-form .choice-grid, .field-row, .plan-grid, .result-contract { grid-template-columns: 1fr; }
+      .result-contract > div { border-right: 0; border-bottom: 1px solid var(--line); }
+      .result-contract > div:last-child { border-bottom: 0; }
+      .connector-fields, .privacy-row, .review-summary { grid-template-columns: 1fr; }
+      .review-item:nth-child(2n) { padding-left: 0; }
+      .assistant-progress { padding: 0 18px; }
+      .assistant-body { padding: 24px 18px; }
+      .question-head h2 { font-size: 21px; }
+      .delivery-path { grid-template-columns: 1fr; }
+      .delivery-arrow { min-height: 26px; transform: rotate(90deg); }
+      .profile-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .profile-item:nth-child(3n) { border-right: 1px solid var(--line); }
+      .profile-item:nth-child(2n) { border-right: 0; }
+      .profile-item:nth-child(n+3) { border-top: 1px solid var(--line); }
+      .campaign-flow { grid-template-columns: 1fr 1fr; }
+      .campaign-stage:nth-child(2) { border-right: 0; }
+      .campaign-stage:nth-child(n+3) { border-top: 1px solid var(--line); }
+      .recipe-row { grid-template-columns: 76px 1fr 1fr; }
+      .source-ladder { grid-template-columns: 1fr 1fr; }
+      .source-ladder > div:nth-child(2) { border-right: 0; }
+      .source-ladder > div:nth-child(n+3) { border-top: 1px solid var(--line); }
+      .diagnosis-line { grid-template-columns: 1fr; }
+      .diagnosis-line > div + div { padding-left: 0; border-top: 1px solid var(--line); border-left: 0; }
+      .proof-log div { grid-template-columns: 1fr; gap: 3px; }
+      .plan-item { border-right: 0; }
+      .plan-item:nth-last-child(2) { border-bottom: 1px solid var(--line); }
+      .selected-model { align-items: flex-start; }
+      .selected-model-actions { margin-left: 0; }
+      .form-actions { align-items: stretch; flex-direction: column; }
+      .form-actions-right { width: 100%; margin-left: 0; }
+      .form-actions-right button { flex: 1; }
+      .sandbox-facts { grid-template-columns: 1fr; }
+      .sandbox-fact { padding: 10px 0; border-bottom: 1px solid var(--line); }
+      .compare-row { grid-template-columns: 1fr; }
+      .compare-cell + .compare-cell { border-top: 1px solid var(--line); border-left: 0; }
+    }
+  </style>
+</head>
+<body>
+  <svg class="svg-defs" aria-hidden="true">
+    <symbol id="i-plus" viewBox="0 0 20 20"><path d="M10 3v14M3 10h14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></symbol>
+    <symbol id="i-search" viewBox="0 0 20 20"><circle cx="8.5" cy="8.5" r="5.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="m12.5 12.5 4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></symbol>
+    <symbol id="i-model" viewBox="0 0 20 20"><path d="M5 5.5A3.5 3.5 0 1 1 8.5 9H5a3 3 0 0 0 0 6h1M15 14.5A3.5 3.5 0 1 1 11.5 11H15a3 3 0 0 0 0-6h-1" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></symbol>
+    <symbol id="i-deploy" viewBox="0 0 20 20"><path d="m10 2.5 6 3.25v8.5L10 17.5l-6-3.25v-8.5L10 2.5Z" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="m4.3 5.9 5.7 3.2 5.7-3.2M10 9.1v8" fill="none" stroke="currentColor" stroke-width="1.4"/></symbol>
+    <symbol id="i-optimize" viewBox="0 0 20 20"><path d="M7 3h6M8 3v5l-4.2 6.7A1.5 1.5 0 0 0 5.1 17h9.8a1.5 1.5 0 0 0 1.3-2.3L12 8V3M6.5 12h7" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-sandbox" viewBox="0 0 20 20"><rect x="3" y="3" width="14" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="m6 7 2.5 2.5L6 12m4 0h4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-usage" viewBox="0 0 20 20"><path d="M3 16V9m4 7V5m4 11v-4m4 4V3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></symbol>
+    <symbol id="i-key" viewBox="0 0 20 20"><circle cx="7" cy="10" r="4" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M11 10h6m-2 0v2m-2-2v2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 20 20"><path d="M4 10h12m-4-4 4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-back" viewBox="0 0 20 20"><path d="M16 10H4m4-4-4 4 4 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-check" viewBox="0 0 20 20"><path d="m4 10 4 4 8-8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-info" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M10 9v5m0-8h.01" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></symbol>
+    <symbol id="i-code" viewBox="0 0 20 20"><path d="m7 5-5 5 5 5m6-10 5 5-5 5m-2-12L9 17" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  </svg>
+
+  <div class="prototype-bar"><strong>PRODUCT PROTOTYPE</strong>&nbsp;· Illustrative, not live</div>
+
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <svg class="brand-mark" aria-hidden="true" viewBox="40 85 390 300"><path d="M237 369.5l87 1 14-3 20-8 15-10 18-20-59-1-19-7-15-12-61 60ZM76 188.5l23 46 87 34 7 6-1 4-93 91 40 1 89-83 4-8v-9l-2-5-14-11-90-45-46-21Zm193 21 28 22 6-28 9-17 14-14 16-8 74-17-52-1-12-9h-59l1 3 19 9 2 4-32 33-14 23ZM49 97.5l35 65 113 63 39 24 9 9 5 12v9l-6 15-76 74 1 2 43-1 76-73 6-10 3-12v-9l-4-13-11-14-32-22-106-65-95-54Z" fill="currentColor" fill-rule="evenodd"/></svg>
+        <span>InferCrane</span>
+      </div>
+
+      <div class="workspace">
+        <div class="workspace-mark">AC</div>
+        <div><div class="workspace-name">Acme AI</div><div class="workspace-meta">Enterprise</div></div>
+      </div>
+
+      <button class="deploy-model-button" type="button" data-open-catalog="open-weight">
+        <svg aria-hidden="true"><use href="#i-plus"></use></svg><span>Deploy model</span>
+      </button>
+
+      <div class="nav-label">Build</div>
+      <nav class="nav" aria-label="Primary">
+        <button class="nav-button active" type="button" data-nav="models"><svg aria-hidden="true"><use href="#i-model"></use></svg>Models</button>
+        <button class="nav-button" type="button" data-nav="deployments"><svg aria-hidden="true"><use href="#i-deploy"></use></svg>Deployments</button>
+        <button class="nav-button" type="button" data-nav="sandboxes"><svg aria-hidden="true"><use href="#i-sandbox"></use></svg>Sandboxes <span class="nav-tag">Brezel</span></button>
+      </nav>
+
+      <div class="nav-label" style="margin-top:22px">Manage</div>
+      <nav class="nav" aria-label="Management">
+        <button class="nav-button" type="button" data-nav="usage"><svg aria-hidden="true"><use href="#i-usage"></use></svg>Usage</button>
+        <button class="nav-button" type="button" data-nav="api-keys"><svg aria-hidden="true"><use href="#i-key"></use></svg>API keys</button>
+      </nav>
+
+      <div class="sidebar-spacer"></div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="breadcrumb">InferCrane / <strong data-breadcrumb>Models</strong></div>
+        <div class="top-actions">
+          <span class="connected"><span class="dot"></span>Connected</span>
+        </div>
+      </header>
+
+      <section class="page" data-page="model-apis">
+        <div class="page-heading">
+          <div><h1>Models</h1><p>Use a hosted API or deploy an open-weight model.</p></div>
+          <button class="primary-button" type="button" data-show-page="api-keys">Create API key</button>
+        </div>
+
+        <div class="catalog-tabs" role="tablist" aria-label="Model delivery">
+          <button class="catalog-tab active" type="button" role="tab" aria-selected="true" data-show-page="model-apis">Use via API</button>
+          <button class="catalog-tab" type="button" role="tab" aria-selected="false" data-show-page="models">Deploy open-weight</button>
+        </div>
+
+        <div class="catalog-tools" aria-label="Filter Model APIs">
+          <button class="filter-button active" type="button" data-api-filter="all">All</button>
+          <button class="filter-button" type="button" data-api-filter="general">General</button>
+          <button class="filter-button" type="button" data-api-filter="coding">Coding</button>
+          <button class="filter-button" type="button" data-api-filter="agents">Agents</button>
+          <button class="filter-button" type="button" data-api-filter="long-context">Long context</button>
+        </div>
+
+        <div class="api-model-list">
+            <article class="api-model open" data-api-model data-api-categories="general coding agents long-context">
+              <div class="api-model-head">
+                <div class="model-identity"><div class="model-avatar">Z</div><div><div class="model-name">GLM-5.3-Flash</div><div class="model-author">Fast chat and coding · 1M context</div></div></div>
+                <div><div class="price-label">Input</div><div class="price-value">$0.15</div></div>
+                <div><div class="price-label">Output</div><div class="price-value">$0.50</div></div>
+                <div><div class="price-label">Cache</div><div class="price-value">$0.03</div></div>
+                <div><div class="price-label">Context</div><div class="price-value">1M</div></div>
+                <button class="quiet-button" type="button" aria-expanded="true" data-api-toggle>Hide code</button>
+              </div>
+              <div class="api-model-detail">
+                <div class="code-sample">curl https://api.infercrane.com/v1/chat/completions \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"glm-5.3-flash","messages":[{"role":"user","content":"Hello"}]}'<button class="quiet-button" type="button" data-copy="curl https://api.infercrane.com/v1/chat/completions">Copy</button></div>
+              </div>
+            </article>
+
+            <article class="api-model" data-api-model data-api-categories="general coding agents long-context">
+              <div class="api-model-head">
+                <div class="model-identity"><div class="model-avatar">Z</div><div><div class="model-name">GLM-5.3</div><div class="model-author">Reasoning and long context · 1M context</div></div></div>
+                <div><div class="price-label">Input</div><div class="price-value">$1.40</div></div>
+                <div><div class="price-label">Output</div><div class="price-value">$4.40</div></div>
+                <div><div class="price-label">Cache</div><div class="price-value">$0.26</div></div>
+                <div><div class="price-label">Context</div><div class="price-value">1M</div></div>
+                <button class="quiet-button" type="button" aria-expanded="false" data-api-toggle>View code</button>
+              </div>
+              <div class="api-model-detail"><div class="code-sample">curl https://api.infercrane.com/v1/chat/completions \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"glm-5.3","messages":[{"role":"user","content":"Hello"}]}'<button class="quiet-button" type="button" data-copy="curl https://api.infercrane.com/v1/chat/completions">Copy</button></div></div>
+            </article>
+
+            <article class="api-model" data-api-model data-api-categories="general coding agents long-context">
+              <div class="api-model-head">
+                <div class="model-identity"><div class="model-avatar">DS</div><div><div class="model-name">DeepSeek-V4-Flash</div><div class="model-author">Coding and high-throughput chat · 1M context</div></div></div>
+                <div><div class="price-label">Input</div><div class="price-value">$0.55</div></div>
+                <div><div class="price-label">Output</div><div class="price-value">$1.65</div></div>
+                <div><div class="price-label">Cache</div><div class="price-value">—</div></div>
+                <div><div class="price-label">Context</div><div class="price-value">1M</div></div>
+                <button class="quiet-button" type="button" aria-expanded="false" data-api-toggle>View code</button>
+              </div>
+              <div class="api-model-detail"><div class="code-sample">curl https://api.infercrane.com/v1/chat/completions \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"Hello"}]}'<button class="quiet-button" type="button" data-copy="curl https://api.infercrane.com/v1/chat/completions">Copy</button></div></div>
+            </article>
+        </div>
+        <div class="catalog-footer"><span>Task labels and market context use the <a href="https://artificialanalysis.ai/models/open-source" target="_blank" rel="noreferrer">Artificial Analysis</a> taxonomy. Prices are illustrative.</span><button class="text-button" type="button" data-show-page="usage">View usage</button></div>
+      </section>
+
+      <section class="page active" data-page="models">
+        <div class="page-heading">
+          <div><h1>Models</h1><p>Use a hosted API or deploy an open-weight model.</p></div>
+        </div>
+          <div class="catalog-tabs" role="tablist" aria-label="Model delivery">
+            <button class="catalog-tab" type="button" role="tab" aria-selected="false" data-show-page="model-apis">Use via API</button>
+            <button class="catalog-tab active" type="button" role="tab" aria-selected="true" data-show-page="models">Deploy open-weight</button>
+          </div>
+          <div class="catalog-tools">
+            <label class="catalog-search">
+              <svg aria-hidden="true"><use href="#i-search"></use></svg>
+              <input type="search" placeholder="Search models or paste a Hugging Face ID" aria-label="Search models" data-model-search>
+            </label>
+            <button class="filter-button active" type="button" data-filter="all">All</button>
+            <button class="filter-button" type="button" data-filter="general">General</button>
+            <button class="filter-button" type="button" data-filter="coding">Coding</button>
+            <button class="filter-button" type="button" data-filter="agents">Agents</button>
+            <button class="filter-button" type="button" data-filter="efficient">Efficient</button>
+          </div>
+
+          <div class="model-list" data-model-list>
+            <div class="model-row" data-model-row data-categories="general coding agents" data-model-id="glm-5-3">
+              <div class="model-identity"><div class="model-avatar">Z</div><div><div class="model-name">GLM-5.3</div><div class="model-author">Z.ai · frontier MoE</div></div></div>
+              <div class="model-use">General · coding · long context</div>
+              <div><span class="evidence catalog">Qualify first</span></div>
+              <button class="primary-button" type="button" data-start-deploy="glm-5-3">Deploy</button>
+            </div>
+            <div class="model-row" data-model-row data-categories="general agents" data-model-id="kimi-k3">
+              <div class="model-identity"><div class="model-avatar">K</div><div><div class="model-name">Kimi K3</div><div class="model-author">Moonshot AI · frontier MoE</div></div></div>
+              <div class="model-use">General · agents · multimodal</div>
+              <div><span class="evidence catalog">Qualify first</span></div>
+              <button class="primary-button" type="button" data-start-deploy="kimi-k3">Deploy</button>
+            </div>
+            <div class="model-row" data-model-row data-categories="general coding agents" data-model-id="glm-5-3-flash">
+              <div class="model-identity"><div class="model-avatar">Z</div><div><div class="model-name">GLM-5.3-Flash</div><div class="model-author">Z.ai · fast MoE</div></div></div>
+              <div class="model-use">Coding · agents · low latency</div>
+              <div><span class="evidence catalog">Catalog</span></div>
+              <button class="primary-button" type="button" data-start-deploy="glm-5-3-flash">Deploy</button>
+            </div>
+            <div class="model-row" data-model-row data-categories="general coding agents" data-model-id="qwen3-8-a95b">
+              <div class="model-identity"><div class="model-avatar">QW</div><div><div class="model-name">Qwen3.8 2.4T A95B</div><div class="model-author">Qwen · frontier MoE</div></div></div>
+              <div class="model-use">General · coding · agents</div>
+              <div><span class="evidence catalog">Qualify first</span></div>
+              <button class="primary-button" type="button" data-start-deploy="qwen3-8-a95b">Deploy</button>
+            </div>
+            <div class="model-row" data-model-row data-categories="general coding agents" data-model-id="deepseek-v4-1-flash">
+              <div class="model-identity"><div class="model-avatar">DS</div><div><div class="model-name">DeepSeek V4.1 Flash</div><div class="model-author">DeepSeek · fast MoE</div></div></div>
+              <div class="model-use">Coding · reasoning · throughput</div>
+              <div><span class="evidence catalog">Catalog</span></div>
+              <button class="primary-button" type="button" data-start-deploy="deepseek-v4-1-flash">Deploy</button>
+            </div>
+            <div class="model-row" data-model-row data-categories="general agents" data-model-id="minimax-m3">
+              <div class="model-identity"><div class="model-avatar">MM</div><div><div class="model-name">MiniMax M3</div><div class="model-author">MiniMax · agentic MoE</div></div></div>
+              <div class="model-use">Agents · long context · tools</div>
+              <div><span class="evidence catalog">Catalog</span></div>
+              <button class="primary-button" type="button" data-start-deploy="minimax-m3">Deploy</button>
+            </div>
+            <div class="model-row" data-model-row data-categories="coding agents" data-model-id="kimi-k2-7-code">
+              <div class="model-identity"><div class="model-avatar">K</div><div><div class="model-name">Kimi K2.7 Code</div><div class="model-author">Moonshot AI · coding MoE</div></div></div>
+              <div class="model-use">Coding · repository agents</div>
+              <div><span class="evidence catalog">Catalog</span></div>
+              <button class="primary-button" type="button" data-start-deploy="kimi-k2-7-code">Deploy</button>
+            </div>
+            <div class="model-row" data-model-row data-categories="general coding efficient" data-model-id="qwen3-8-27b">
+              <div class="model-identity"><div class="model-avatar">QW</div><div><div class="model-name">Qwen3.8 27B</div><div class="model-author">Qwen · dense</div></div></div>
+              <div class="model-use">General · coding · smaller fleet</div>
+              <div><span class="evidence catalog">Catalog</span></div>
+              <button class="primary-button" type="button" data-start-deploy="qwen3-8-27b">Deploy</button>
+            </div>
+            <div class="model-row" data-model-row data-categories="general agents" data-model-id="nemotron-3-ultra">
+              <div class="model-identity"><div class="model-avatar">NV</div><div><div class="model-name">Nemotron 3 Ultra</div><div class="model-author">NVIDIA · 550B A55B</div></div></div>
+              <div class="model-use">Reasoning · agents · tools</div>
+              <div><span class="evidence catalog">Qualify first</span></div>
+              <button class="primary-button" type="button" data-start-deploy="nemotron-3-ultra">Deploy</button>
+            </div>
+            <div class="model-row" data-model-row data-categories="general agents efficient" data-model-id="qwen3-next-80b-a3b">
+              <div class="model-identity"><div class="model-avatar">QW</div><div><div class="model-name">Qwen3 Next 80B A3B</div><div class="model-author">Qwen · sparse MoE</div></div></div>
+              <div class="model-use">Chat · tools · efficient serving</div>
+              <div><span class="evidence catalog">Catalog</span></div>
+              <button class="primary-button" type="button" data-start-deploy="qwen3-next-80b-a3b">Deploy</button>
+            </div>
+          </div>
+          <div class="catalog-zero" data-catalog-zero hidden>
+            <h3>No matching models</h3>
+            <p>Clear the search or use an exact Hugging Face model ID.</p>
+            <button class="secondary-button" type="button" data-clear-model-search>Clear search</button>
+          </div>
+          <div class="catalog-footer"><span>Discovery uses a dated <a href="https://artificialanalysis.ai/models/open-source" target="_blank" rel="noreferrer">Artificial Analysis</a> snapshot. “Catalog” is not a performance claim; InferCrane qualifies the exact revision and hardware.</span><button class="text-button" type="button" data-own-model>Use another model</button></div>
+      </section>
+
+      <section class="page" data-page="deploy">
+        <button class="back-button" type="button" data-show-page="models"><svg aria-hidden="true"><use href="#i-back"></use></svg>Back to models</button>
+        <div class="page-heading">
+          <div><h1>Deploy a model</h1><p>Answer four questions. InferCrane chooses the serving stack.</p></div>
+        </div>
+
+        <div class="deploy-assistant" role="dialog" aria-labelledby="deploy-question-1">
+          <div class="assistant-progress"><strong data-deploy-count>Question 1 of 4</strong><div class="progress-track" aria-hidden="true"><span class="progress-value" data-deploy-progress></span></div></div>
+          <div class="assistant-body">
+            <div class="deploy-step active" data-deploy-step="1">
+              <div class="model-context"><span class="model-avatar">QW</span><span>Deploying <strong data-selected-model-title>Qwen3 8B</strong></span></div>
+              <div class="question-head"><h2 id="deploy-question-1" tabindex="-1">What are you building?</h2><p>This sets the starting behavior. You can change it later.</p></div>
+              <div class="choice-grid workload-grid" data-radio-group="workload">
+                <button class="choice selected" type="button" data-value="Interactive app"><span class="radio"></span><span><span class="choice-title">Interactive app</span><span class="choice-copy">Chat, RAG, search, or copilots</span></span></button>
+                <button class="choice" type="button" data-value="Agents and coding"><span class="radio"></span><span><span class="choice-title">Agents &amp; coding</span><span class="choice-copy">Tools, repositories, and long tasks</span></span></button>
+                <button class="choice" type="button" data-value="Structured decisions"><span class="radio"></span><span><span class="choice-title">Structured decisions</span><span class="choice-copy">Extract, classify, score, or route</span></span></button>
+                <button class="choice" type="button" data-value="Batch processing"><span class="radio"></span><span><span class="choice-title">Batch processing</span><span class="choice-copy">Queued high-throughput work</span></span></button>
+                <button class="choice" type="button" data-value="Custom workload"><span class="radio"></span><span><span class="choice-title">Custom / not sure</span><span class="choice-copy">Describe it or bring a trace</span></span></button>
+              </div>
+              <div class="field custom-workload-field" data-custom-workload hidden><label for="custom-workload">Describe the workload</label><input id="custom-workload" data-custom-workload-input placeholder="e.g. classify support tickets at 200 requests/s"></div>
+              <div class="form-actions"><button class="secondary-button" type="button" data-show-page="models">Cancel</button><div class="form-actions-right"><button class="primary-button" type="button" data-next-step="2">Continue</button></div></div>
+            </div>
+
+            <div class="deploy-step" data-deploy-step="2">
+              <div class="model-context"><span class="model-avatar">QW</span><span>Deploying <strong data-selected-model-title>Qwen3 8B</strong></span></div>
+              <div class="question-head"><h2 id="deploy-question-2" tabindex="-1">What matters most?</h2><p>InferCrane treats the other requirements as constraints.</p></div>
+              <div class="choice-grid" data-radio-group="objective">
+                <button class="choice selected" type="button" data-value="Balanced"><span class="radio"></span><span><span class="choice-title">Balanced</span><span class="choice-copy">Recommended starting point</span></span></button>
+                <button class="choice" type="button" data-value="Faster responses"><span class="radio"></span><span><span class="choice-title">Faster responses</span><span class="choice-copy">Lower TTFT and ITL</span></span></button>
+                <button class="choice" type="button" data-value="Lower cost"><span class="radio"></span><span><span class="choice-title">Lower cost</span><span class="choice-copy">Meet the SLO for less</span></span></button>
+                <button class="choice" type="button" data-value="More throughput"><span class="radio"></span><span><span class="choice-title">More throughput</span><span class="choice-copy">Serve more per GPU</span></span></button>
+              </div>
+              <div class="form-actions"><button class="secondary-button" type="button" data-next-step="1">Back</button><div class="form-actions-right"><button class="primary-button" type="button" data-next-step="3">Continue</button></div></div>
+            </div>
+
+            <div class="deploy-step" data-deploy-step="3">
+              <div class="question-head"><h2 id="deploy-question-3" tabindex="-1">Where should it run?</h2><p>You choose the infrastructure boundary. InferCrane recommends the hardware and serving configuration.</p></div>
+              <div class="choice-grid" data-radio-group="destination">
+                <button class="choice selected" type="button" data-value="InferCrane managed"><span class="radio"></span><span><span class="choice-title">InferCrane managed</span><span class="choice-copy">Fastest setup</span></span></button>
+                <button class="choice" type="button" data-value="Your cloud or Kubernetes"><span class="radio"></span><span><span class="choice-title">Your cloud or Kubernetes</span><span class="choice-copy">AWS, GCP, Azure, or existing cluster</span></span></button>
+                <button class="choice" type="button" data-value="Existing inference provider"><span class="radio"></span><span><span class="choice-title">Existing provider</span><span class="choice-copy">Baseten, Fireworks, Modal, or compatible</span></span></button>
+                <button class="choice" type="button" data-value="Plan only"><span class="radio"></span><span><span class="choice-title">Plan only</span><span class="choice-copy">Recipe and evidence, no deployment</span></span></button>
+              </div>
+
+              <div class="conditional-panel" data-destination-panel="InferCrane managed">
+                <div class="field"><label for="managed-region">Region</label><select id="managed-region" data-managed-region><option>eu-central-1</option><option>us-east-1</option><option>us-west-2</option></select></div>
+              </div>
+              <div class="conditional-panel" data-destination-panel="Your cloud or Kubernetes" hidden>
+                <div class="connector-fields"><div class="field"><label for="customer-cloud">Environment</label><select id="customer-cloud" data-customer-cloud><option>AWS EKS</option><option>GCP GKE</option><option>Azure AKS</option><option>Existing Kubernetes</option></select></div><div class="field"><label for="customer-region">Region</label><select id="customer-region" data-customer-region><option>eu-central-1</option><option>us-east-1</option><option>Use cluster default</option></select></div></div>
+                <div class="inline-note"><svg aria-hidden="true"><use href="#i-check"></use></svg><span>A short-lived worker runs in your account. Model weights and traffic can remain inside your boundary.</span></div>
+              </div>
+              <div class="conditional-panel" data-destination-panel="Existing inference provider" hidden>
+                <div class="connector-fields"><div class="field"><label for="existing-provider">Provider</label><select id="existing-provider" data-existing-provider><option>OpenAI-compatible</option><option>Baseten</option><option>Fireworks</option><option>Modal</option></select></div><div class="field"><label for="existing-endpoint">Endpoint</label><input id="existing-endpoint" value="https://api.provider.com/v1"></div></div>
+              </div>
+              <div class="conditional-panel" data-destination-panel="Plan only" hidden>
+                <div class="field"><label for="plan-hardware">Target hardware family</label><select id="plan-hardware" data-plan-hardware><option>NVIDIA L40S</option><option>NVIDIA H100</option><option>NVIDIA H200</option><option>Recommend one</option></select></div>
+              </div>
+
+              <div class="form-actions"><button class="secondary-button" type="button" data-next-step="2">Back</button><div class="form-actions-right"><button class="primary-button" type="button" data-next-step="4">Continue</button></div></div>
+            </div>
+
+            <div class="deploy-step" data-deploy-step="4">
+              <div class="question-head"><h2 id="deploy-question-4" tabindex="-1">How should we profile it?</h2><p>Start now with a public prior, or connect representative traffic.</p></div>
+              <div class="source-list" data-radio-group="workload-source">
+                <button class="choice source-option selected" type="button" data-value="Public prior"><span class="radio"></span><span><span class="choice-title">Use public prior</span><span class="choice-copy">Day-zero shape from public production metadata</span></span></button>
+                <button class="choice source-option" type="button" data-value="Live endpoint"><span class="radio"></span><span><span class="choice-title">Connect a live endpoint</span><span class="choice-copy">Any OpenAI-compatible endpoint</span></span></button>
+                <button class="choice source-option" type="button" data-value="Telemetry"><span class="radio"></span><span><span class="choice-title">Connect telemetry</span><span class="choice-copy">OpenTelemetry, Prometheus, Datadog, Langfuse, or Phoenix</span></span></button>
+                <button class="choice source-option" type="button" data-value="Local AIPerf"><span class="radio"></span><span><span class="choice-title">Run AIPerf locally</span><span class="choice-copy">Profile inside your environment</span></span></button>
+                <button class="choice source-option" type="button" data-value="Trace or evaluation"><span class="radio"></span><span><span class="choice-title">Upload trace or evaluation</span><span class="choice-copy">JSONL, CSV, or approved dataset</span></span></button>
+              </div>
+
+              <div class="conditional-panel" data-source-panel="Public prior">
+                <div class="profile-summary">
+                  <div class="profile-item"><div class="profile-value" data-public-prior-name>Interactive</div><div class="profile-label">Selected lane</div></div>
+                  <div class="profile-item"><div class="profile-value" data-public-prior-shape>3.9k in · 295 out</div><div class="profile-label">Token shape</div></div>
+                  <div class="profile-item"><div class="profile-value" data-public-prior-load>8 concurrent</div><div class="profile-label">Screening load</div></div>
+                </div>
+                <div class="coverage-line"><span>Public Chutes trace · 6.12B rows</span><strong>150k shapes inspected</strong></div>
+                <div class="inline-note"><svg aria-hidden="true"><use href="#i-info"></use></svg><span>Screening only. No prompts are stored, and customer replay is required before qualification or promotion.</span></div>
+              </div>
+              <div class="conditional-panel" data-source-panel="Live endpoint" hidden>
+                <div class="connector-fields"><div class="field field-wide"><label for="workload-endpoint">Endpoint</label><input id="workload-endpoint" value="https://api.example.com/v1"></div><div class="field"><label for="workload-model">Model</label><input id="workload-model" value="production-model"></div><div class="field"><label for="workload-secret">Credential</label><select id="workload-secret"><option>Select read-only secret</option><option>provider-production</option></select></div></div>
+              </div>
+              <div class="conditional-panel" data-source-panel="Telemetry" hidden>
+                <div class="connector-fields"><div class="field"><label for="telemetry-platform">Source</label><select id="telemetry-platform"><option>OpenTelemetry</option><option>Prometheus</option><option>Datadog</option><option>Langfuse</option><option>Arize Phoenix</option></select></div><div class="field"><label for="telemetry-window">Window</label><select id="telemetry-window"><option>Last 24 hours</option><option>Last 7 days</option><option>Choose range</option></select></div></div>
+              </div>
+              <div class="conditional-panel" data-source-panel="Local AIPerf" hidden>
+                <div class="command-box"><code>infercrane workload capture --endpoint YOUR_URL --metadata-only</code><button class="quiet-button" type="button" data-copy="infercrane workload capture --endpoint YOUR_URL --metadata-only">Copy</button></div>
+                <div class="inline-note"><svg aria-hidden="true"><use href="#i-check"></use></svg><span>The runner executes in your cluster and returns an aggregated workload profile.</span></div>
+              </div>
+              <div class="conditional-panel" data-source-panel="Trace or evaluation" hidden>
+                <div class="upload-line"><span>JSONL, CSV, or exported evaluation dataset</span><button class="quiet-button" type="button" data-toast-message="A secure file picker would open here.">Choose file</button></div>
+              </div>
+
+              <div class="privacy-row" data-evidence-controls hidden>
+                <div class="field"><label for="privacy-boundary">Data boundary</label><select id="privacy-boundary" data-privacy-boundary><option>Metadata only — recommended</option><option>Redacted traces</option><option>Keep all data in our cluster</option><option>Approved full examples</option></select></div>
+                <div class="field"><label for="quality-gate">Quality protection</label><select id="quality-gate" data-quality-gate><option>Performance only — manual promotion</option><option>Run our evaluation command</option><option>Use an evaluation dataset</option><option>Basic schema checks</option></select></div>
+              </div>
+
+              <div class="form-actions"><button class="secondary-button" type="button" data-next-step="3">Back</button><div class="form-actions-right"><button class="primary-button" type="button" data-next-step="5">Review plan</button></div></div>
+            </div>
+
+            <div class="deploy-step" data-deploy-step="5">
+              <div class="question-head"><h2 id="deploy-question-5" tabindex="-1">Review the deployment</h2><p>You chose the boundary. InferCrane owns the serving-stack decisions.</p></div>
+
+              <div class="review-summary">
+                <div class="review-item"><div class="review-label">Model and workload</div><div class="review-value"><span data-summary-model>Qwen3 8B</span> · <span data-summary-workload>Interactive app</span></div></div>
+                <div class="review-item"><div class="review-label">Priority</div><div class="review-value" data-summary-objective>Balanced</div></div>
+                <div class="review-item"><div class="review-label">Destination</div><div class="review-value" data-summary-target>InferCrane managed</div><div class="review-detail" data-review-destination-detail>eu-central-1</div></div>
+                <div class="review-item"><div class="review-label">Workload evidence</div><div class="review-value" data-review-source>Public prior</div><div class="review-detail" data-review-privacy>Public screening · customer replay before promotion</div></div>
+              </div>
+
+              <section class="delivery-map" aria-labelledby="delivery-map-title">
+                <div class="delivery-map-head"><div><h3 id="delivery-map-title">Best safe starting combination</h3><p>Selected from model fit, workload goal, compatibility, and current evidence.</p></div><span class="status info">Unmeasured baseline</span></div>
+                <div class="delivery-path">
+                  <div class="delivery-node"><svg aria-hidden="true"><use href="#i-code"></use></svg><div class="delivery-node-label">Stable API</div><strong data-delivery-api>One endpoint</strong><span data-delivery-api-detail>Versioned and OpenAI-compatible</span></div>
+                  <div class="delivery-arrow"><svg aria-hidden="true"><use href="#i-arrow"></use></svg></div>
+                  <div class="delivery-node"><svg aria-hidden="true"><use href="#i-deploy"></use></svg><div class="delivery-node-label">Starting revision</div><strong data-plan-model>Qwen3 8B for chat</strong><div class="stack-list"><div class="stack-line"><span>Runtime</span><strong data-stack-runtime>vLLM</strong></div><div class="stack-line"><span>Recipe</span><strong data-stack-recipe>BF16 · prefix cache</strong></div><div class="stack-line"><span>Acceleration</span><strong data-stack-acceleration>Existing kernels first</strong></div><div class="stack-line"><span>Hardware</span><strong data-stack-hardware>L40S · 1–4 replicas</strong></div></div></div>
+                  <div class="delivery-arrow"><svg aria-hidden="true"><use href="#i-arrow"></use></svg></div>
+                  <div class="delivery-node"><svg aria-hidden="true"><use href="#i-check"></use></svg><div class="delivery-node-label">Evidence</div><strong data-delivery-evidence>Screen now, prove later</strong><span data-delivery-evidence-detail>Public lane → customer replay → guard</span></div>
+                </div>
+              </section>
+
+              <div class="honesty-note"><svg aria-hidden="true"><use href="#i-info"></use></svg><span>Deploy the compatible baseline first. InferCrane observes real traffic, locates the bottleneck, searches existing implementations, and writes custom code only when the end-to-end ceiling justifies it.</span></div>
+
+              <div class="form-section" style="margin-top:24px"><div class="field"><label for="deployment-name">Deployment name</label><input id="deployment-name" value="support-production" aria-describedby="deployment-error" data-deployment-name></div></div>
+              <div class="form-actions"><button class="secondary-button" type="button" data-next-step="4">Back</button><div class="form-actions-right"><button class="secondary-button" type="button" data-open-advanced>Advanced settings</button><button class="primary-button" type="button" data-deploy-now data-deploy-action>Deploy model</button></div></div>
+              <div class="workflow-error" id="deployment-error" role="alert" data-deploy-error hidden><span><strong>Deployment could not start.</strong> Enter a deployment name, then retry.</span><button class="quiet-button" type="button" data-retry-deploy>Fix name</button></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="page" data-page="deployments">
+        <div class="page-heading"><div><h1>Deployments</h1><p>Models currently serving or being prepared.</p></div><button class="primary-button" type="button" data-show-page="models">Deploy model</button></div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>Name</th><th>Model</th><th>Status</th><th>Replicas</th><th>Updated</th><th></th></tr></thead>
+            <tbody>
+              <tr class="clickable" data-open-deployment><td><strong>support-production</strong></td><td>Qwen3 8B</td><td><span class="status"><span class="dot"></span>Serving</span></td><td><code>1 / 1</code></td><td>2 minutes ago</td><td class="table-actions"><button class="quiet-button" type="button">Open</button></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="page" data-page="deployment-detail">
+        <button class="back-button" type="button" data-show-page="deployments"><svg aria-hidden="true"><use href="#i-back"></use></svg>Back to deployments</button>
+        <div class="deployment-head">
+          <div><div style="display:flex;align-items:center;gap:10px"><h1 style="margin-bottom:4px">support-production</h1><span class="status"><span class="dot"></span>Serving</span></div><p style="margin:0;color:var(--muted)">Qwen3 8B · vLLM · L40S · eu-central-1</p></div>
+        </div>
+
+        <div class="endpoint-box"><code>https://api.infercrane.com/v1</code><button class="quiet-button" type="button" data-copy="https://api.infercrane.com/v1">Copy endpoint</button></div>
+
+        <section class="workload-upgrade" aria-labelledby="workload-upgrade-title">
+          <div class="observe-heading"><div><h2 id="workload-upgrade-title">Workload evidence</h2><p>Start instantly, then replace the public prior with your traffic.</p></div><span class="status info">Promotion guarded</span></div>
+          <div class="campaign-flow" aria-label="Workload evidence upgrade path">
+            <div class="campaign-stage"><strong>Public prior</strong><span>Day-zero screening</span><svg aria-hidden="true"><use href="#i-arrow"></use></svg></div>
+            <div class="campaign-stage"><strong>Observe</strong><span>Metadata-only traffic</span><svg aria-hidden="true"><use href="#i-arrow"></use></svg></div>
+            <div class="campaign-stage"><strong>Replay</strong><span>Customer workload</span><svg aria-hidden="true"><use href="#i-arrow"></use></svg></div>
+            <div class="campaign-stage"><strong>Qualify</strong><span>Quality, cost, SLO</span><svg aria-hidden="true"><use href="#i-arrow"></use></svg></div>
+          </div>
+        </section>
+
+        <div class="observe-heading"><div><h2>Observe production</h2><p>Last 24 hours · content-free workload and serving evidence</p></div><span class="status">Fresh</span></div>
+        <div class="performance-strip" aria-label="Observed deployment performance">
+          <div class="performance-item"><div class="performance-value">420 ms</div><div class="performance-label">TTFT p95</div></div>
+          <div class="performance-item"><div class="performance-value">24 ms</div><div class="performance-label">ITL p95</div></div>
+          <div class="performance-item"><div class="performance-value">1,830</div><div class="performance-label">Output tok/s</div></div>
+          <div class="performance-item"><div class="performance-value">0.08%</div><div class="performance-label">Error rate</div></div>
+        </div>
+
+        <section class="improve-card">
+          <div class="improve-prompt" data-improve-prompt>
+            <div><h2>Improve from real traffic</h2><p>InferCrane finds what is slow before spending on experiments.</p></div>
+            <button class="primary-button" type="button" aria-expanded="false" aria-controls="improve-panel" data-open-improve>Improve</button>
+          </div>
+
+          <div class="improve-panel" id="improve-panel" data-improve-panel>
+            <div class="improve-stage active" data-improve-stage="1">
+              <h2 tabindex="-1" data-improve-heading>Connect the workload</h2>
+              <p>Use the system you already have. Metadata-only is the default.</p>
+              <div class="source-list" data-radio-group="improvement-source">
+                <button class="choice source-option selected" type="button" data-value="Observe endpoint"><span class="radio"></span><span><span class="choice-title">Observe this endpoint</span><span class="choice-copy">Token counts, timing, status, and request shape</span></span></button>
+                <button class="choice source-option" type="button" data-value="Telemetry"><span class="radio"></span><span><span class="choice-title">Connect telemetry</span><span class="choice-copy">OpenTelemetry, Prometheus, Datadog, Langfuse, or Phoenix</span></span></button>
+                <button class="choice source-option" type="button" data-value="Local AIPerf"><span class="radio"></span><span><span class="choice-title">Run AIPerf locally</span><span class="choice-copy">Inside your environment</span></span></button>
+                <button class="choice source-option" type="button" data-value="Trace or evaluation"><span class="radio"></span><span><span class="choice-title">Upload trace or evaluation</span><span class="choice-copy">JSONL, CSV, or approved dataset</span></span></button>
+              </div>
+              <div class="inline-note"><svg aria-hidden="true"><use href="#i-check"></use></svg><span>This connection collects request shape, timing, token counts, and status only. Content handling remains governed by the selected deployment boundary.</span></div>
+              <div class="form-actions"><button class="secondary-button" type="button" data-close-improve>Cancel</button><button class="primary-button" type="button" data-improve-next="2">Continue</button></div>
+            </div>
+
+            <div class="improve-stage" data-improve-stage="2">
+              <div class="plan-title" style="padding-left:0;padding-right:0"><h2 style="margin:0" tabindex="-1" data-improve-heading>Workload detected</h2><span class="status">Metadata only</span></div>
+              <p>Confirm the profile InferCrane will replay against every candidate.</p>
+              <div class="profile-summary">
+                <div class="profile-item"><div class="profile-value">18 req/s</div><div class="profile-label">Typical traffic</div></div>
+                <div class="profile-item"><div class="profile-value">54 req/s</div><div class="profile-label">Peak traffic</div></div>
+                <div class="profile-item"><div class="profile-value">1.8k / 12.4k</div><div class="profile-label">Input tokens p50 / p95</div></div>
+                <div class="profile-item"><div class="profile-value">410 / 1.2k</div><div class="profile-label">Output tokens p50 / p95</div></div>
+                <div class="profile-item"><div class="profile-value">96%</div><div class="profile-label">Streaming requests</div></div>
+                <div class="profile-item"><div class="profile-value">31%</div><div class="profile-label">Tool-calling requests</div></div>
+              </div>
+              <div class="coverage-line"><span>Representative traffic captured</span><strong>92% coverage</strong></div>
+              <div class="diagnosis-line">
+                <div><span>Serving-stage signal</span><strong>First-token pressure</strong></div>
+                <div><span>Next proof</span><strong>Profile prefill on the exact L40S revision</strong><p>Request monitoring narrows the stage. It does not claim a kernel bottleneck.</p></div>
+              </div>
+              <div class="form-actions"><button class="secondary-button" type="button" data-improve-next="1">Back</button><button class="primary-button" type="button" data-improve-next="3">Use this profile</button></div>
+            </div>
+
+            <div class="improve-stage" data-improve-stage="3">
+              <h2 tabindex="-1" data-improve-heading>Choose the outcome</h2>
+              <p>Quality and hard SLOs stay fixed.</p>
+              <div class="choice-grid" style="margin-top:18px" data-radio-group="optimization">
+                <button class="choice selected" type="button" data-value="Lower cost"><span class="radio"></span><span><span class="choice-title">Lower cost</span><span class="choice-copy">Keep the SLO</span></span></button>
+                <button class="choice" type="button" data-value="Faster response"><span class="radio"></span><span><span class="choice-title">Faster response</span><span class="choice-copy">Lower latency</span></span></button>
+                <button class="choice" type="button" data-value="More throughput"><span class="radio"></span><span><span class="choice-title">More throughput</span><span class="choice-copy">More per GPU</span></span></button>
+              </div>
+              <div class="field-row" style="margin-top:18px"><div class="field"><label for="opt-budget">Experiment limit</label><select id="opt-budget" data-opt-budget><option>$50 hard cap</option><option>$100 hard cap</option><option>Plan only — no GPU</option></select></div><div class="field"><label for="experiment-location">Run experiments in</label><select id="experiment-location" data-experiment-location><option>Deployment environment</option><option>Temporary InferCrane worker</option><option>Customer-provided worker</option></select></div></div>
+              <div class="campaign-flow" aria-label="Optimization campaign">
+                <div class="campaign-stage"><strong>Profile</strong><span>Freeze workload and SLO</span><svg aria-hidden="true"><use href="#i-arrow"></use></svg></div>
+                <div class="campaign-stage"><strong>Search</strong><span>Best existing path first</span><svg aria-hidden="true"><use href="#i-arrow"></use></svg></div>
+                <div class="campaign-stage"><strong>Test</strong><span>Bounded AIPerf and quality runs</span><svg aria-hidden="true"><use href="#i-arrow"></use></svg></div>
+                <div class="campaign-stage"><strong>Prove</strong><span>Evidence and guarded release</span><svg aria-hidden="true"><use href="#i-arrow"></use></svg></div>
+              </div>
+              <div class="source-ladder" aria-label="Kernel source order">
+                <div><span>1 · Baseline</span><strong>Pinned runtime</strong><small>Measure what already ships</small></div>
+                <div><span>2 · Libraries</span><strong>FlashInfer · CUTLASS</strong><small>Match shape and hardware</small></div>
+                <div><span>3 · Adapt</span><strong>Triton · CuTe</strong><small>Specialize and autotune</small></div>
+                <div><span>4 · Last</span><strong>Custom CUDA</strong><small>Only with Amdahl headroom</small></div>
+              </div>
+              <div class="form-actions"><button class="secondary-button" type="button" data-improve-next="2">Back</button><button class="primary-button" type="button" data-start-optimization>Build plan</button></div>
+            </div>
+
+            <div class="improve-stage" data-improve-stage="4">
+              <div class="plan-title" style="padding-left:0;padding-right:0"><h2 style="margin:0" tabindex="-1" data-improve-heading data-result-title>Qualified candidate</h2><span class="status info" data-result-status>Illustrative result</span></div>
+              <p data-result-intro>The whole serving stack wins or loses together.</p>
+              <div class="result-contract" aria-label="Selected optimization contract"><div><span>Goal</span><strong data-result-goal>Lower cost</strong></div><div><span>Experiment limit</span><strong data-result-budget>$50 hard cap</strong></div><div><span>Execution boundary</span><strong data-result-location>Deployment environment</strong></div></div>
+              <div class="recipe-table">
+                <div class="recipe-row header"><div>Axis</div><div>Current</div><div data-result-candidate-label>Candidate</div></div>
+                <div class="recipe-row"><div class="recipe-axis">Runtime</div><div class="recipe-value">vLLM 0.22.1</div><div class="recipe-value">SGLang candidate</div></div>
+                <div class="recipe-row"><div class="recipe-axis">Recipe</div><div class="recipe-value">BF16</div><div class="recipe-value">FP8 · prefix cache</div></div>
+                <div class="recipe-row"><div class="recipe-axis">Kernel</div><div class="recipe-value">vLLM bundled</div><div class="recipe-value">FlashInfer candidate<small data-custom-kernel-outcome>Custom CUDA rejected: below end-to-end threshold</small></div></div>
+                <div class="recipe-row"><div class="recipe-axis">Hardware</div><div class="recipe-value">NVIDIA L40S</div><div class="recipe-value">NVIDIA L40S</div></div>
+              </div>
+              <div class="outcome-strip" data-result-outcomes><div class="outcome-item"><strong data-result-primary-value>$2.10 → $1.51</strong><span data-result-primary-label>Illustrative cost / 1M tokens</span></div><div class="outcome-item"><strong data-result-secondary-value>420 → 390 ms</strong><span data-result-secondary-label>Illustrative TTFT p95</span></div></div>
+              <div class="proof-log" aria-label="Kernel search evidence" data-result-proof>
+                <div><code>runtime-vllm</code><strong>Control</strong><span class="status">Measured</span></div>
+                <div><code>flashinfer</code><strong>Selected for qualification</strong><span class="status info">Candidate</span></div>
+                <div><code>triton · cuda</code><strong>No material application gain</strong><span class="status warning">Rejected</span></div>
+              </div>
+              <div class="honesty-note"><svg aria-hidden="true"><use href="#i-info"></use></svg><span data-result-note>Illustrative only. Production recommendations require workload, quality, and cost evidence.</span></div>
+              <div class="form-actions"><button class="secondary-button" type="button" data-result-secondary-action data-toast-message="Evidence would open with workload, AIPerf, quality, and cost artifacts.">View evidence</button><button class="primary-button" type="button" data-result-primary-action data-toast-message="A guarded canary would be prepared for approval.">Deploy canary</button></div>
+            </div>
+          </div>
+        </section>
+
+        <div class="detail-grid">
+          <section class="detail-section"><div class="detail-section-title"><h2>Current serving revision</h2><span class="status">Healthy</span></div><div class="detail-list"><div class="detail-row"><span>Model</span><code>Qwen/Qwen3-8B</code></div><div class="detail-row"><span>Runtime</span><code>vLLM 0.22.1</code></div><div class="detail-row"><span>Recipe</span><code>BF16 · prefix cache</code></div><div class="detail-row"><span>Acceleration</span><code>NVIDIA fused kernels</code></div><div class="detail-row"><span>Hardware</span><code>L40S · 1 replica</code></div><div class="detail-row"><span>Release evidence</span><code>guarded · rollback ready</code></div></div></section>
+          <aside><div class="section-heading"><h2>Developer tools</h2></div><div class="next-actions"><button class="next-action" type="button" data-toast-message="A copyable test request would open here."><svg aria-hidden="true"><use href="#i-code"></use></svg><span><span class="next-action-title">View API example</span></span></button><button class="next-action" type="button" data-show-page="sandbox-new"><svg aria-hidden="true"><use href="#i-sandbox"></use></svg><span><span class="next-action-title">Open in sandbox</span></span></button></div></aside>
+        </div>
+      </section>
+
+      <section class="page" data-page="sandboxes">
+        <div class="page-heading"><div><h1>Sandboxes</h1><p>Private task environments, powered by Brezel.</p></div><button class="primary-button" type="button" data-show-page="sandbox-new">Create sandbox</button></div>
+        <div class="sandbox-facts" aria-label="Brezel boundaries">
+          <div class="sandbox-fact"><strong>Private-tenant preview</strong><span>One dedicated Brezel project per enterprise tenant</span></div>
+          <div class="sandbox-fact"><strong>Network off by default</strong><span>Access is added later through approved connectors</span></div>
+          <div class="sandbox-fact"><strong>CPU task environment</strong><span>GPU benchmarks run on separate exact-hardware workers</span></div>
+        </div>
+        <div class="section-heading"><h2>Templates</h2></div>
+        <div class="template-strip">
+          <button class="template" type="button" data-template="Coding agent"><svg aria-hidden="true"><use href="#i-code"></use></svg><h3>Coding agent</h3><p>Approved repository tasks</p></button>
+          <button class="template" type="button" data-template="Evaluation worker"><svg aria-hidden="true"><use href="#i-optimize"></use></svg><h3>Evaluation worker</h3><p>Tests and quality suites</p></button>
+          <button class="template" type="button" data-template="Blank Linux"><svg aria-hidden="true"><use href="#i-sandbox"></use></svg><h3>Blank Linux</h3><p>Minimal approved environment</p></button>
+        </div>
+
+        <div class="section-heading"><h2>Your sandboxes</h2></div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>Sandbox</th><th>Template</th><th>State</th><th>Network</th><th>Expires</th><th></th></tr></thead>
+            <tbody><tr class="clickable" data-open-sandbox><td><strong>sbx_release_01</strong></td><td>Evaluation worker</td><td><span class="status"><span class="dot"></span>Running</span></td><td>Off</td><td>47 minutes</td><td class="table-actions"><button class="quiet-button" type="button">Inspect</button></td></tr></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="page" data-page="sandbox-new">
+        <button class="back-button" type="button" data-show-page="sandboxes"><svg aria-hidden="true"><use href="#i-back"></use></svg>Back to sandboxes</button>
+        <div class="page-heading"><div><h1>Create sandbox</h1><p>Choose an approved environment and expiration.</p></div></div>
+        <div class="form-layout">
+          <div class="form-main simple-form">
+            <div class="field-row"><div class="field"><label for="sandbox-template">Template</label><select id="sandbox-template" data-sandbox-template><option>Coding agent</option><option>Evaluation worker</option><option>Blank Linux</option></select></div><div class="field"><label for="sandbox-ttl">Expires after</label><select id="sandbox-ttl"><option>1 hour</option><option>4 hours</option><option>24 hours</option></select></div></div>
+            <div class="inline-note"><svg aria-hidden="true"><use href="#i-info"></use></svg><span>Internet access is off. Approved connectors arrive after the private-tenant lifecycle is qualified.</span></div>
+            <div><button class="primary-button" type="button" data-create-sandbox>Create sandbox</button></div>
+          </div>
+          <aside class="side-summary"><div class="summary-row"><span>Provider</span><strong>Brezel</strong></div><div class="summary-row"><span>Runtime</span><strong>MicroVM</strong></div><div class="summary-row"><span>Assurance</span><strong>Private-tenant preview</strong></div><div class="summary-row"><span>GPU</span><strong>Separate worker</strong></div></aside>
+        </div>
+      </section>
+
+      <section class="page" data-page="sandbox-detail">
+        <button class="back-button" type="button" data-show-page="sandboxes"><svg aria-hidden="true"><use href="#i-back"></use></svg>Back to sandboxes</button>
+        <div class="deployment-head"><div><div style="display:flex;align-items:center;gap:10px"><h1 style="margin-bottom:4px">sbx_release_01</h1><span class="status"><span class="dot"></span>Running</span></div><p style="margin:0;color:var(--muted)">Evaluation worker · Brezel · private-tenant preview</p></div><button class="secondary-button" type="button" data-toast-message="Pause requested. Brezel will report the real lifecycle state.">Pause</button></div>
+        <div class="run-log" aria-label="Most recent sandbox task"><span class="muted">Most recent task · command stream is complete, not an interactive terminal</span><br>verify model identity <span class="passed">passed</span><br>verify quality evidence <span class="passed">passed</span><br>verify performance evidence <span class="muted">waiting for exact GPU worker</span></div>
+        <div class="detail-grid"><div class="detail-section"><div class="detail-section-title"><h2>Lifecycle</h2></div><div class="detail-list"><div class="detail-row"><span>Template</span><code>evaluation-worker</code></div><div class="detail-row"><span>Environment revision</span><code>envr_8f3…19a</code></div><div class="detail-row"><span>Network</span><strong>Off</strong></div><div class="detail-row"><span>Expires</span><strong>47 minutes</strong></div></div></div><aside><div class="section-heading"><h2>Actions</h2></div><div class="next-actions"><button class="next-action" type="button" data-toast-message="Pause requested with an idempotency key."><svg aria-hidden="true"><use href="#i-sandbox"></use></svg><span><span class="next-action-title">Pause compute</span><span class="next-action-copy">Keep the lifecycle recoverable.</span></span></button><button class="next-action" type="button" data-toast-message="Delete requested. Provider cleanup remains visible until complete."><svg aria-hidden="true"><use href="#i-back"></use></svg><span><span class="next-action-title">Delete sandbox</span><span class="next-action-copy">Start provider cleanup.</span></span></button></div></aside></div>
+      </section>
+
+      <section class="page" data-page="usage">
+        <div class="page-heading"><div><h1>Usage</h1><p>Traffic, performance, and spend.</p></div></div>
+        <div class="usage-filters">
+          <div class="field"><label for="usage-endpoint">Endpoint</label><select id="usage-endpoint"><option>All endpoints</option><option>Model API</option><option>support-production</option></select></div>
+          <div class="field"><label for="usage-key">API key</label><select id="usage-key"><option>All keys</option><option>production-app</option><option>ci-deploy</option></select></div>
+          <div class="field"><label for="usage-window">Period</label><select id="usage-window"><option>24 hours</option><option>7 days</option><option>30 days</option></select></div>
+        </div>
+        <div class="usage-summary">
+          <div class="usage-item"><div class="usage-value">84.2k</div><div class="usage-label">Requests</div></div>
+          <div class="usage-item"><div class="usage-value">420 ms</div><div class="usage-label">TTFT p95</div></div>
+          <div class="usage-item"><div class="usage-value">1,830</div><div class="usage-label">Output tok/s</div></div>
+          <div class="usage-item"><div class="usage-value">0.08%</div><div class="usage-label">Error rate</div></div>
+          <div class="usage-item"><div class="usage-value">$48.20</div><div class="usage-label">Spend</div></div>
+        </div>
+        <div class="usage-chart">
+          <div class="usage-chart-head"><h2 style="margin:0">Requests</h2><span class="evidence reviewed"><span class="dot"></span>Measured</span></div>
+          <svg viewBox="0 0 900 180" role="img" aria-label="Illustrative request volume over 24 hours">
+            <path d="M0 150H900M0 95H900M0 40H900" fill="none" stroke="#252b27" stroke-width="1"/>
+            <path d="M0 142 C70 135 95 112 150 120 S250 84 310 92 S400 118 462 89 S555 58 620 71 S720 35 780 49 S850 78 900 44" fill="none" stroke="#45d6a8" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <div class="chart-axis"><span>5 PM</span><span>11 PM</span><span>5 AM</span><span>11 AM</span><span>5 PM</span></div>
+        </div>
+        <div class="credits-row"><div><h2 style="margin:0">$45.00 credits</h2><p>$5.00 reserved</p></div><button class="secondary-button" type="button" data-toast-message="Credit purchase would open here.">Add credits</button></div>
+      </section>
+
+      <section class="page" data-page="api-keys">
+        <div class="page-heading"><div><h1>API keys</h1><p>Keys are scoped to a workspace and shown only once.</p></div><button class="primary-button" type="button" data-toast-message="A scoped key creation form would open here.">Create API key</button></div>
+        <div class="table-wrap"><table class="table"><thead><tr><th>Name</th><th>Key</th><th>Scope</th><th>Created</th><th>Last used</th></tr></thead><tbody><tr><td><strong>production-app</strong></td><td><span class="key-value">ic_live_<span class="key-dot"></span><span class="key-dot"></span><span class="key-dot"></span><span class="key-dot"></span>9f2a</span></td><td>Inference</td><td>Sep 12</td><td>2 minutes ago</td></tr><tr><td><strong>ci-deploy</strong></td><td><span class="key-value">ic_live_<span class="key-dot"></span><span class="key-dot"></span><span class="key-dot"></span><span class="key-dot"></span>4d10</span></td><td>Deployments</td><td>Sep 08</td><td>1 day ago</td></tr></tbody></table></div>
+      </section>
+    </main>
+  </div>
+
+  <dialog class="settings-dialog" data-advanced-dialog aria-labelledby="advanced-title">
+    <div class="dialog-head">
+      <div><h2 id="advanced-title">Advanced settings</h2><p>Optional. The recommended defaults work for the first deployment.</p></div>
+      <button class="quiet-button" type="button" data-close-advanced>Close</button>
+    </div>
+    <div class="dialog-body">
+      <div class="field-row">
+        <div class="field"><label for="target-concurrency">Peak concurrency</label><input id="target-concurrency" inputmode="numeric" value="20"></div>
+        <div class="field"><label for="latency-target">TTFT target</label><select id="latency-target"><option>Recommend one</option><option>Under 500 ms</option><option>Under 1 second</option><option>Batch — no TTFT target</option></select></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label for="minimum-capacity">Minimum capacity</label><select id="minimum-capacity"><option>Scale to zero</option><option>1 warm replica</option><option>2 warm replicas</option></select></div>
+        <div class="field"><label for="spend-limit">Monthly spend limit</label><input id="spend-limit" value="$1,000"></div>
+      </div>
+      <div class="inline-note"><svg aria-hidden="true"><use href="#i-info"></use></svg><span>Runtime, GPU, parallelism, quantization, cache, and kernels are outputs—not questions.</span></div>
+      <div class="dialog-actions"><button class="secondary-button" type="button" data-reset-advanced>Use defaults</button><button class="primary-button" type="button" data-save-advanced>Save settings</button></div>
+    </div>
+  </dialog>
+
+  <div class="toast" role="status" aria-live="polite" data-toast></div>
+
+  <script>
+    const modelCatalog = {
+      'glm-5-3': { name: 'GLM-5.3', avatar: 'Z', runtime: 'vLLM / SGLang qualification', recipe: 'BF16 control · FP8 candidate', acceleration: 'Existing kernels first', hardware: 'H200 fleet · capacity check' },
+      'kimi-k3': { name: 'Kimi K3', avatar: 'K', runtime: 'SGLang qualification', recipe: 'Pinned vendor recipe', acceleration: 'Existing kernels first', hardware: 'H200 fleet · capacity check' },
+      'glm-5-3-flash': { name: 'GLM-5.3-Flash', avatar: 'Z', runtime: 'vLLM / SGLang qualification', recipe: 'BF16 control · FP8 candidate', acceleration: 'FlashInfer / CUTLASS search', hardware: 'H100 or H200 · benchmark' },
+      'qwen3-8-a95b': { name: 'Qwen3.8 2.4T A95B', avatar: 'QW', runtime: 'SGLang qualification', recipe: 'Pinned MoE recipe', acceleration: 'Existing kernels first', hardware: 'H200 fleet · topology check' },
+      'deepseek-v4-1-flash': { name: 'DeepSeek V4.1 Flash', avatar: 'DS', runtime: 'vLLM / SGLang qualification', recipe: 'FP8 candidate', acceleration: 'Fused MoE search', hardware: 'H100 or H200 · benchmark' },
+      'minimax-m3': { name: 'MiniMax M3', avatar: 'MM', runtime: 'SGLang qualification', recipe: 'Pinned MoE recipe', acceleration: 'Existing kernels first', hardware: 'H200 fleet · topology check' },
+      'kimi-k2-7-code': { name: 'Kimi K2.7 Code', avatar: 'K', runtime: 'SGLang qualification', recipe: 'Coding workload control', acceleration: 'Prefix cache · fused MoE', hardware: 'H100 or H200 · benchmark' },
+      'qwen3-8-27b': { name: 'Qwen3.8 27B', avatar: 'QW', runtime: 'vLLM qualification', recipe: 'BF16 control · FP8 candidate', acceleration: 'FlashInfer / CUTLASS search', hardware: 'L40S or H100 · benchmark' },
+      'nemotron-3-ultra': { name: 'Nemotron 3 Ultra', avatar: 'NV', runtime: 'NVIDIA runtime qualification', recipe: 'Pinned vendor recipe', acceleration: 'TensorRT-LLM / CUTLASS search', hardware: 'H200 fleet · topology check' },
+      'qwen3-next-80b-a3b': { name: 'Qwen3 Next 80B A3B', avatar: 'QW', runtime: 'vLLM / SGLang qualification', recipe: 'Sparse MoE control', acceleration: 'Fused MoE search', hardware: 'L40S or H100 · benchmark' }
+    };
+
+    const pageTitles = {
+      'model-apis': 'Models', models: 'Models', deploy: 'Deploy model', deployments: 'Deployments', 'deployment-detail': 'support-production',
+      sandboxes: 'Sandboxes', 'sandbox-new': 'Create sandbox', 'sandbox-detail': 'release-evaluator',
+      usage: 'Usage', 'api-keys': 'API keys'
+    };
+
+    const navParents = {
+      'model-apis': 'models',
+      deploy: 'models',
+      'deployment-detail': 'deployments',
+      'sandbox-new': 'sandboxes',
+      'sandbox-detail': 'sandboxes'
+    };
+
+    let selectedModelId = 'glm-5-3';
+    let toastTimer;
+    const toast = document.querySelector('[data-toast]');
+
+    function showToast(message) {
+      toast.textContent = message;
+      toast.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove('show'), 2400);
+    }
+
+    function showPage(name) {
+      document.querySelectorAll('[data-page]').forEach(page => page.classList.toggle('active', page.dataset.page === name));
+      const activeNav = navParents[name] || name;
+      document.querySelectorAll('[data-nav]').forEach(button => {
+        const active = button.dataset.nav === activeNav;
+        button.classList.toggle('active', active);
+        if (active) button.setAttribute('aria-current', 'page');
+        else button.removeAttribute('aria-current');
+      });
+      document.querySelector('[data-breadcrumb]').textContent = pageTitles[name] || name;
+      history.replaceState(null, '', '#' + name);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function setDeployStep(step) {
+      let activePanel;
+      document.querySelectorAll('[data-deploy-step]').forEach(panel => {
+        const active = Number(panel.dataset.deployStep) === step;
+        panel.classList.toggle('active', active);
+        if (active) activePanel = panel;
+      });
+      const count = document.querySelector('[data-deploy-count]');
+      const progress = document.querySelector('[data-deploy-progress]');
+      if (count) count.textContent = step === 5 ? 'Review' : `Question ${step} of 4`;
+      if (progress) progress.style.transform = `scaleX(${Math.min(step, 4) / 4})`;
+      const heading = activePanel?.querySelector('h2');
+      if (heading?.id) document.querySelector('.deploy-assistant')?.setAttribute('aria-labelledby', heading.id);
+      updatePlanSummary();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      setTimeout(() => heading?.focus({ preventScroll: true }), 0);
+    }
+
+    function selectModel(id) {
+      selectedModelId = id;
+      const model = modelCatalog[id] || { name: id, repo: id, avatar: 'HF', tags: ['Compatibility unknown'] };
+      document.querySelectorAll('[data-selected-model-title], [data-summary-model]').forEach(node => node.textContent = model.name);
+      document.querySelectorAll('.model-context .model-avatar').forEach(node => node.textContent = model.avatar || 'HF');
+      updatePlanSummary();
+    }
+
+    function selectedValue(group) {
+      return document.querySelector(`[data-radio-group="${group}"] .choice.selected`)?.dataset.value || '';
+    }
+
+    function syncConditionalPanels() {
+      const destination = selectedValue('destination') || 'InferCrane managed';
+      const source = selectedValue('workload-source') || 'Public prior';
+      const workload = selectedValue('workload') || 'Interactive app';
+      const customWorkload = document.querySelector('[data-custom-workload]');
+      if (customWorkload) customWorkload.hidden = workload !== 'Custom workload';
+      document.querySelectorAll('[data-destination-panel]').forEach(panel => { panel.hidden = panel.dataset.destinationPanel !== destination; });
+      document.querySelectorAll('[data-source-panel]').forEach(panel => { panel.hidden = panel.dataset.sourcePanel !== source; });
+      const evidenceControls = document.querySelector('[data-evidence-controls]');
+      if (evidenceControls) evidenceControls.hidden = source === 'Public prior';
+    }
+
+    function publicPriorFor(workload) {
+      if (workload === 'Agents and coding') return { name: 'Long prefill', shape: '7.9k in · 295 out', load: '4 concurrent' };
+      if (workload === 'Batch processing') return { name: 'Decode heavy', shape: '3.9k in · 1.4k out', load: '4 concurrent' };
+      return { name: 'Interactive', shape: '3.9k in · 295 out', load: '8 concurrent' };
+    }
+
+    function destinationDetail(destination) {
+      if (destination === 'InferCrane managed') return document.querySelector('[data-managed-region]')?.value || 'eu-central-1';
+      if (destination === 'Your cloud or Kubernetes') {
+        const cloud = document.querySelector('[data-customer-cloud]')?.value || 'Existing Kubernetes';
+        const region = document.querySelector('[data-customer-region]')?.value || 'Cluster default';
+        return `${cloud} · ${region}`;
+      }
+      if (destination === 'Existing inference provider') return document.querySelector('[data-existing-provider]')?.value || 'OpenAI-compatible';
+      return document.querySelector('[data-plan-hardware]')?.value || 'Recommend hardware';
+    }
+
+    function updatePlanSummary() {
+      const model = modelCatalog[selectedModelId] || { name: selectedModelId };
+      const selectedWorkload = selectedValue('workload') || 'Interactive app';
+      const customWorkload = document.querySelector('[data-custom-workload-input]')?.value.trim();
+      const workload = selectedWorkload === 'Custom workload' && customWorkload ? customWorkload : selectedWorkload;
+      const objective = selectedValue('objective') || 'Balanced';
+      const destination = selectedValue('destination') || 'InferCrane managed';
+      const source = selectedValue('workload-source') || 'Public prior';
+      const publicPrior = publicPriorFor(selectedWorkload);
+      const privacy = document.querySelector('[data-privacy-boundary]')?.value || 'Metadata only';
+      const quality = document.querySelector('[data-quality-gate]')?.value || 'Performance only — manual promotion';
+      syncConditionalPanels();
+      document.querySelectorAll('[data-summary-model]').forEach(node => { node.textContent = model.name; });
+      document.querySelectorAll('[data-summary-workload]').forEach(node => { node.textContent = workload; });
+      document.querySelectorAll('[data-summary-objective]').forEach(node => { node.textContent = objective; });
+      document.querySelectorAll('[data-summary-target]').forEach(node => { node.textContent = destination; });
+      document.querySelectorAll('[data-review-destination-detail]').forEach(node => { node.textContent = destinationDetail(destination); });
+      document.querySelectorAll('[data-review-source]').forEach(node => { node.textContent = source; });
+      document.querySelectorAll('[data-review-privacy]').forEach(node => {
+        node.textContent = source === 'Public prior' ? `Public screening · ${publicPrior.name} · replay before promotion` : `${privacy.replace(' — recommended', '')} · ${quality.replace(' — manual promotion', '')}`;
+      });
+      document.querySelectorAll('[data-public-prior-name]').forEach(node => { node.textContent = publicPrior.name; });
+      document.querySelectorAll('[data-public-prior-shape]').forEach(node => { node.textContent = publicPrior.shape; });
+      document.querySelectorAll('[data-public-prior-load]').forEach(node => { node.textContent = publicPrior.load; });
+      document.querySelectorAll('[data-plan-model]').forEach(node => { node.textContent = `${model.name} for ${workload.toLowerCase()}`; });
+      document.querySelectorAll('[data-stack-runtime]').forEach(node => { node.textContent = destination === 'Existing inference provider' ? 'Provider-managed' : model.runtime || 'Compatibility qualification'; });
+      document.querySelectorAll('[data-stack-recipe]').forEach(node => { node.textContent = destination === 'Existing inference provider' ? 'Observe current settings' : model.recipe || 'Safe precision control'; });
+      document.querySelectorAll('[data-stack-acceleration]').forEach(node => { node.textContent = destination === 'Existing inference provider' ? 'Profile before migration' : model.acceleration || 'Existing kernels first'; });
+      document.querySelectorAll('[data-stack-hardware]').forEach(node => {
+        node.textContent = destination === 'Plan only' ? destinationDetail(destination) : destination === 'Existing inference provider' ? 'Provider-managed · observe first' : model.hardware || 'Capacity check, then benchmark';
+      });
+      document.querySelectorAll('[data-delivery-api]').forEach(node => { node.textContent = destination === 'Plan only' ? 'Recipe export' : destination === 'Existing inference provider' ? 'Stable integration' : 'One endpoint'; });
+      document.querySelectorAll('[data-delivery-api-detail]').forEach(node => { node.textContent = destination === 'Plan only' ? 'No infrastructure or traffic change' : destination === 'Existing inference provider' ? 'Wrap now, migrate only with proof' : 'Versioned and OpenAI-compatible'; });
+      document.querySelectorAll('[data-delivery-evidence]').forEach(node => { node.textContent = source === 'Public prior' ? 'Screen now, prove later' : 'Guarded release'; });
+      document.querySelectorAll('[data-delivery-evidence-detail]').forEach(node => { node.textContent = source === 'Public prior' ? 'Public lane → customer replay → guard' : 'AIPerf, quality, cost, and rollback'; });
+      const deployAction = document.querySelector('[data-deploy-action]');
+      if (deployAction) deployAction.textContent = destination === 'Plan only' ? 'Create plan' : destination === 'Existing inference provider' ? 'Connect deployment' : 'Deploy model';
+    }
+
+    document.querySelectorAll('[data-nav]').forEach(button => button.addEventListener('click', () => showPage(button.dataset.nav)));
+    document.querySelectorAll('[data-show-page]').forEach(button => button.addEventListener('click', () => showPage(button.dataset.showPage)));
+    document.querySelectorAll('[data-open-catalog]').forEach(button => button.addEventListener('click', () => {
+      showPage('models');
+    }));
+
+    document.querySelectorAll('[data-api-filter]').forEach(button => {
+      button.setAttribute('aria-pressed', String(button.classList.contains('active')));
+      button.addEventListener('click', () => {
+        document.querySelectorAll('[data-api-filter]').forEach(item => { item.classList.remove('active'); item.setAttribute('aria-pressed', 'false'); });
+        button.classList.add('active');
+        button.setAttribute('aria-pressed', 'true');
+        const filter = button.dataset.apiFilter;
+        document.querySelectorAll('[data-api-model]').forEach(model => { model.hidden = filter !== 'all' && !model.dataset.apiCategories.includes(filter); });
+      });
+    });
+
+    document.querySelectorAll('[data-api-toggle]').forEach(button => button.addEventListener('click', () => {
+      const model = button.closest('[data-api-model]');
+      const open = model.classList.toggle('open');
+      button.setAttribute('aria-expanded', String(open));
+      button.textContent = open ? 'Hide code' : 'View code';
+    }));
+
+    document.querySelectorAll('[data-start-deploy]').forEach(button => button.addEventListener('click', () => {
+      selectModel(button.dataset.startDeploy);
+      setDeployStep(1);
+      showPage('deploy');
+    }));
+
+    document.querySelectorAll('[data-next-step]').forEach(button => button.addEventListener('click', () => {
+      updatePlanSummary();
+      setDeployStep(Number(button.dataset.nextStep));
+    }));
+
+    document.querySelectorAll('[data-radio-group]').forEach(group => {
+      group.setAttribute('role', 'group');
+      group.querySelectorAll('.choice').forEach(choice => {
+        choice.setAttribute('aria-pressed', String(choice.classList.contains('selected')));
+        choice.addEventListener('click', () => {
+          group.querySelectorAll('.choice').forEach(item => { item.classList.remove('selected'); item.setAttribute('aria-pressed', 'false'); });
+          choice.classList.add('selected');
+          choice.setAttribute('aria-pressed', 'true');
+          updatePlanSummary();
+        });
+      });
+    });
+
+    document.querySelectorAll('[data-managed-region], [data-customer-cloud], [data-customer-region], [data-existing-provider], [data-plan-hardware], [data-privacy-boundary], [data-quality-gate]').forEach(control => control.addEventListener('change', updatePlanSummary));
+    document.querySelector('[data-custom-workload-input]').addEventListener('input', updatePlanSummary);
+
+    function applyModelFilters() {
+      const filter = document.querySelector('[data-filter].active')?.dataset.filter || 'all';
+      const query = document.querySelector('[data-model-search]').value.trim().toLowerCase();
+      let visibleCount = 0;
+      document.querySelectorAll('[data-model-row]').forEach(row => {
+        const matchesFilter = filter === 'all' || row.dataset.categories.includes(filter);
+        const matchesQuery = query.length === 0 || row.textContent.toLowerCase().includes(query);
+        const visible = matchesFilter && matchesQuery;
+        row.hidden = !visible;
+        if (visible) visibleCount += 1;
+      });
+      document.querySelector('[data-catalog-zero]').hidden = visibleCount !== 0;
+    }
+
+    document.querySelectorAll('[data-filter]').forEach(button => {
+      button.setAttribute('aria-pressed', String(button.classList.contains('active')));
+      button.addEventListener('click', () => {
+        document.querySelectorAll('[data-filter]').forEach(item => { item.classList.remove('active'); item.setAttribute('aria-pressed', 'false'); });
+        button.classList.add('active');
+        button.setAttribute('aria-pressed', 'true');
+        applyModelFilters();
+      });
+    });
+
+    document.querySelector('[data-model-search]').addEventListener('input', applyModelFilters);
+    document.querySelector('[data-clear-model-search]').addEventListener('click', () => {
+      const search = document.querySelector('[data-model-search]');
+      search.value = '';
+      document.querySelector('[data-filter="all"]').click();
+      search.focus();
+    });
+
+    document.querySelector('[data-own-model]').addEventListener('click', () => {
+      const search = document.querySelector('[data-model-search]');
+      search.focus();
+      search.placeholder = 'Paste an exact organization/model ID';
+      showToast('Enter an exact Hugging Face model ID. Compatibility will remain unknown until checked.');
+    });
+
+    document.querySelector('[data-deploy-now]').addEventListener('click', event => {
+      const button = event.currentTarget;
+      const idleLabel = button.textContent;
+      const destination = selectedValue('destination') || 'InferCrane managed';
+      const deploymentName = document.querySelector('[data-deployment-name]');
+      const deployError = document.querySelector('[data-deploy-error]');
+      if (!deploymentName.value.trim()) {
+        deployError.hidden = false;
+        deploymentName.setAttribute('aria-invalid', 'true');
+        deploymentName.focus();
+        return;
+      }
+      deployError.hidden = true;
+      deploymentName.removeAttribute('aria-invalid');
+      button.disabled = true;
+      button.textContent = destination === 'Plan only' ? 'Creating plan…' : 'Creating deployment…';
+      setTimeout(() => {
+        button.disabled = false;
+        button.textContent = idleLabel;
+        showPage(destination === 'Plan only' ? 'deployments' : 'deployment-detail');
+        showToast(destination === 'Plan only' ? 'Deployment plan created. No infrastructure was changed.' : 'Deployment created. This prototype advances to the serving state.');
+      }, 1200);
+    });
+
+    document.querySelector('[data-retry-deploy]').addEventListener('click', () => document.querySelector('[data-deployment-name]').focus());
+
+    const advancedDialog = document.querySelector('[data-advanced-dialog]');
+    document.querySelector('[data-open-advanced]').addEventListener('click', () => advancedDialog.showModal());
+    document.querySelector('[data-close-advanced]').addEventListener('click', () => advancedDialog.close());
+    document.querySelector('[data-reset-advanced]').addEventListener('click', () => {
+      document.querySelector('#target-concurrency').value = '20';
+      document.querySelector('#latency-target').selectedIndex = 0;
+      document.querySelector('#minimum-capacity').selectedIndex = 0;
+      document.querySelector('#spend-limit').value = '$1,000';
+      showToast('Recommended defaults restored.');
+    });
+    document.querySelector('[data-save-advanced]').addEventListener('click', () => {
+      advancedDialog.close();
+      showToast('Advanced constraints saved.');
+    });
+
+    document.querySelectorAll('[data-open-deployment]').forEach(row => row.addEventListener('click', () => showPage('deployment-detail')));
+
+    document.querySelectorAll('[data-open-sandbox]').forEach(row => row.addEventListener('click', () => showPage('sandbox-detail')));
+    document.querySelectorAll('[data-template]').forEach(button => button.addEventListener('click', () => {
+      document.querySelector('[data-sandbox-template]').value = button.dataset.template;
+      showPage('sandbox-new');
+    }));
+
+    document.querySelector('[data-create-sandbox]').addEventListener('click', () => {
+      showPage('sandboxes');
+      showToast('Sandbox create requested from an approved immutable Brezel template.');
+    });
+
+    function setImproveStage(step) {
+      let activeStage;
+      document.querySelectorAll('[data-improve-stage]').forEach(stage => {
+        const active = Number(stage.dataset.improveStage) === step;
+        stage.classList.toggle('active', active);
+        if (active) activeStage = stage;
+      });
+      requestAnimationFrame(() => activeStage?.querySelector('[data-improve-heading]')?.focus({ preventScroll: true }));
+    }
+
+    document.querySelector('[data-open-improve]').addEventListener('click', () => {
+      document.querySelector('[data-open-improve]').setAttribute('aria-expanded', 'true');
+      document.querySelector('[data-improve-prompt]').hidden = true;
+      document.querySelector('[data-improve-panel]').classList.add('active');
+      setImproveStage(1);
+    });
+
+    document.querySelector('[data-close-improve]').addEventListener('click', () => {
+      const openButton = document.querySelector('[data-open-improve]');
+      openButton.setAttribute('aria-expanded', 'false');
+      document.querySelector('[data-improve-prompt]').hidden = false;
+      document.querySelector('[data-improve-panel]').classList.remove('active');
+      openButton.focus();
+    });
+
+    document.querySelectorAll('[data-improve-next]').forEach(button => button.addEventListener('click', () => setImproveStage(Number(button.dataset.improveNext))));
+
+    document.querySelector('[data-start-optimization]').addEventListener('click', event => {
+      const button = event.currentTarget;
+      const goal = selectedValue('optimization') || 'Lower cost';
+      const budget = document.querySelector('[data-opt-budget]').value;
+      const location = document.querySelector('[data-experiment-location]').value;
+      const planOnly = budget.startsWith('Plan only');
+      document.querySelector('[data-result-goal]').textContent = goal;
+      document.querySelector('[data-result-budget]').textContent = budget;
+      document.querySelector('[data-result-location]').textContent = location;
+      document.querySelector('[data-result-title]').textContent = planOnly ? 'Experiment plan' : 'Qualified candidate';
+      document.querySelector('[data-result-status]').textContent = planOnly ? 'No GPU run' : 'Illustrative result';
+      document.querySelector('[data-result-intro]').textContent = planOnly
+        ? `Proposed tests for ${location.toLowerCase()}. No benchmark or performance claim was produced.`
+        : `Illustrative whole-stack result from ${location.toLowerCase()}.`;
+      document.querySelector('[data-result-candidate-label]').textContent = planOnly ? 'Planned test' : 'Candidate';
+      document.querySelector('[data-custom-kernel-outcome]').textContent = planOnly
+        ? 'Custom CUDA deferred until profiling proves headroom'
+        : 'Custom CUDA rejected: below end-to-end threshold';
+      document.querySelector('[data-result-outcomes]').hidden = planOnly;
+      document.querySelector('[data-result-proof]').hidden = planOnly;
+      const secondaryAction = document.querySelector('[data-result-secondary-action]');
+      const primaryAction = document.querySelector('[data-result-primary-action]');
+      secondaryAction.textContent = planOnly ? 'View plan' : 'View evidence';
+      secondaryAction.dataset.toastMessage = planOnly ? 'The proposed experiment sequence would open here.' : 'Evidence would open with workload, AIPerf, quality, and cost artifacts.';
+      primaryAction.textContent = planOnly ? 'Export plan' : 'Deploy canary';
+      primaryAction.dataset.toastMessage = planOnly ? 'A portable experiment plan would be exported. No GPU or deployment is changed.' : 'A guarded canary would be prepared for approval.';
+      document.querySelector('[data-result-note]').textContent = planOnly
+        ? 'Plan only. Connect an exact target GPU later to establish correctness and performance evidence.'
+        : 'Illustrative only. Production recommendations require workload, quality, and cost evidence.';
+      if (!planOnly) {
+        const metrics = goal === 'More throughput'
+          ? ['1,830 → 2,240 tok/s', 'Illustrative output throughput', '$2.10 → $1.78', 'Illustrative cost / 1M tokens']
+          : goal === 'Faster response'
+            ? ['420 → 335 ms', 'Illustrative TTFT p95', '24 → 19 ms', 'Illustrative ITL p95']
+            : ['$2.10 → $1.51', 'Illustrative cost / 1M tokens', '420 → 390 ms', 'Illustrative TTFT p95'];
+        document.querySelector('[data-result-primary-value]').textContent = metrics[0];
+        document.querySelector('[data-result-primary-label]').textContent = metrics[1];
+        document.querySelector('[data-result-secondary-value]').textContent = metrics[2];
+        document.querySelector('[data-result-secondary-label]').textContent = metrics[3];
+      }
+      button.disabled = true;
+      button.textContent = 'Building plan…';
+      setTimeout(() => {
+        button.disabled = false;
+        button.textContent = 'Build plan';
+        setImproveStage(4);
+        showToast('Prototype recommendation ready.');
+      }, 1000);
+    });
+
+    document.querySelectorAll('[data-toast-message]').forEach(button => button.addEventListener('click', () => showToast(button.dataset.toastMessage)));
+
+    document.querySelectorAll('[data-copy]').forEach(button => button.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(button.dataset.copy); showToast('Copied to clipboard'); }
+      catch { showToast('Clipboard is unavailable in this browser context.'); }
+    }));
+
+    const initialPage = location.hash.slice(1);
+    showPage(pageTitles[initialPage] ? initialPage : 'models');
+    selectModel(selectedModelId);
+  </script>
+</body>
+</html>

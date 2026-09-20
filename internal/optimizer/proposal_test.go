@@ -11,6 +11,7 @@ import (
 	"github.com/infercrane/infercrane/internal/curatedrecipe"
 	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/servingcontract"
+	"github.com/infercrane/infercrane/internal/workloadprofile"
 )
 
 func TestCatalogProposalCoversDistinctModelAndWorkloadFamilies(t *testing.T) {
@@ -77,6 +78,9 @@ func TestCatalogProposalIsDeterministicUnmeasuredAndDeployable(t *testing.T) {
 	if first.Candidates[1].ConfigurationProfile != "vllm-balanced" || first.Candidates[2].ConfigurationProfile != "vllm-throughput" {
 		t.Fatalf("unexpected alternative ordering: %#v", first.Candidates)
 	}
+	if first.StartingPoint == nil || first.StartingPoint.CandidateID != selected.ID || first.StartingPoint.EvidenceState != EvidenceUnmeasured || len(first.PostDeployWorkflow) != 5 {
+		t.Fatalf("proposal did not connect baseline to monitored improvement: %+v", first)
+	}
 	encoded, _ := json.Marshal(first)
 	for _, forbidden := range []string{`"qualified":true`, `"recommended":true`, `"estimated_throughput"`, `"estimated_cost"`} {
 		if containsString(string(encoded), forbidden) {
@@ -107,12 +111,39 @@ func TestCatalogProposalCarriesGeneralImmutableMultiGPUProfile(t *testing.T) {
 
 func TestCatalogProposalFailsClosedForUnknownOrUnqualifiedBoundary(t *testing.T) {
 	unknown, err := catalogSource(t).Propose(context.Background(), Request{ModelIdentity: "unknown/model", Provider: "gcp", Region: "europe-west4", GPU: "nvidia-l4", Objective: "latency"})
-	if err != nil || !reflect.DeepEqual(unknown.Missing, []string{"reviewed_model_recipe"}) || len(unknown.Candidates) != 0 {
+	if err != nil || !reflect.DeepEqual(unknown.Missing, []string{"immutable_model_revision"}) || len(unknown.Candidates) != 0 {
 		t.Fatalf("unknown=%#v err=%v", unknown, err)
 	}
 	deferred, err := catalogSource(t).Propose(context.Background(), Request{ModelIdentity: "mistral-7b-instruct", Provider: "gcp-mig", Region: "europe-west4", GPU: "nvidia-l4", Objective: "latency"})
 	if err != nil || !reflect.DeepEqual(deferred.Missing, []string{"qualified_provider_runtime_compatibility"}) || len(deferred.Candidates) != 0 {
 		t.Fatalf("deferred=%#v err=%v", deferred, err)
+	}
+}
+
+func TestCatalogProposalCreatesConservativeGenericOpenWeightBaseline(t *testing.T) {
+	revision := strings.Repeat("a", 40)
+	proposal, err := catalogSource(t).Propose(context.Background(), Request{ModelIdentity: "acme/novel-model", ModelRevision: revision, Provider: "runpod-pods", GPU: "H100", GPUCount: 2, Runtimes: []string{"vllm", "sglang"}, Objective: "throughput", IncludeSimulated: true})
+	if err != nil || len(proposal.Candidates) != 2 {
+		t.Fatalf("proposal=%+v err=%v", proposal, err)
+	}
+	for _, candidate := range proposal.Candidates {
+		if candidate.Source.Name != "infercrane-generic-open-weight" || candidate.EvidenceState != EvidenceUnmeasured || candidate.Deployment.Model.ID != "acme/novel-model" || candidate.Deployment.Model.Revision != revision || candidate.Deployment.Resources.GPUCount != 2 || len(candidate.Deployment.Runtime.Args) != 0 || !hasFeature(candidate.Features, "runtime_baseline", "untuned") {
+			t.Fatalf("generic baseline crossed its proof boundary: %+v", candidate)
+		}
+	}
+	if err = ValidateProposal(proposal); err != nil {
+		t.Fatalf("generic proposal failed validation: %v", err)
+	}
+}
+
+func TestCatalogProposalAcceptsPinnedIdentityAndRejectsMutableRevision(t *testing.T) {
+	revision := strings.Repeat("b", 64)
+	proposal, err := catalogSource(t).Propose(context.Background(), Request{ModelIdentity: "acme/novel-model@" + revision, Provider: "aws", Region: "eu-central-1", GPU: "H100", Objective: "interactive"})
+	if err != nil || len(proposal.Candidates) != 1 || proposal.Input.ModelRevision != revision || proposal.Candidates[0].Deployment.Model.ID != "acme/novel-model" {
+		t.Fatalf("pinned identity was not normalized: proposal=%+v err=%v", proposal, err)
+	}
+	if _, err = catalogSource(t).Propose(context.Background(), Request{ModelIdentity: "acme/novel-model", ModelRevision: "main", Provider: "aws", Region: "eu-central-1", GPU: "H100"}); err == nil {
+		t.Fatal("mutable model revision was accepted")
 	}
 }
 
@@ -215,6 +246,51 @@ func TestCatalogProposalCarriesFullMeasuredSLOBoundary(t *testing.T) {
 	invalid := 1.01
 	if _, err = catalogSource(t).Propose(context.Background(), Request{ModelIdentity: "qwen3-8b", Provider: "aws", Region: "eu-central-1", GPU: "L40S", Objective: "interactive", MaxErrorRate: &invalid}); err == nil {
 		t.Fatal("invalid error-rate boundary was accepted")
+	}
+}
+
+func TestPublicWorkloadPriorIsBoundAndCannotQualifyProduction(t *testing.T) {
+	proposal, err := catalogSource(t).Propose(context.Background(), Request{
+		ModelIdentity: "qwen3-8b", Provider: "aws", Region: "eu-central-1", GPU: "L40S",
+		Objective: "interactive", WorkloadProfile: "public-interactive", MaxCandidates: 1,
+	})
+	if err != nil || len(proposal.Candidates) != 1 {
+		t.Fatalf("proposal=%+v err=%v", proposal, err)
+	}
+	if proposal.Input.WorkloadSource != WorkloadSourcePublicPrior || proposal.Input.WorkloadFingerprint != workloadprofile.PublicPriorDigest {
+		t.Fatalf("public prior identity was not bound: %+v", proposal.Input)
+	}
+	if len(proposal.Warnings) == 0 || !strings.Contains(proposal.Warnings[0], "screening evidence") || !strings.Contains(proposal.SelectionBoundary, "cannot qualify") {
+		t.Fatalf("public prior boundary missing: warnings=%v boundary=%q", proposal.Warnings, proposal.SelectionBoundary)
+	}
+	candidate := proposal.Candidates[0]
+	if !contains(candidate.RequiredEvidence, "representative customer replay replacing the public workload prior") || !strings.Contains(strings.Join(candidate.Limitations, " "), "cannot qualify") {
+		t.Fatalf("customer replay gate missing: %+v", candidate)
+	}
+	if len(proposal.PostDeployWorkflow) != 5 || !strings.Contains(proposal.PostDeployWorkflow[0], "replace the public prior") {
+		t.Fatalf("upgrade workflow missing: %v", proposal.PostDeployWorkflow)
+	}
+	if err = ValidateProposal(proposal); err != nil {
+		t.Fatalf("valid public-prior proposal rejected: %v", err)
+	}
+}
+
+func TestPublicWorkloadPriorRejectsMismatchedIdentity(t *testing.T) {
+	_, err := catalogSource(t).Propose(context.Background(), Request{
+		ModelIdentity: "qwen3-8b", Provider: "aws", Region: "eu-central-1", GPU: "L40S",
+		WorkloadProfile: "public-interactive", WorkloadSource: WorkloadSourcePublicPrior,
+		WorkloadFingerprint: "sha256:" + strings.Repeat("0", 64),
+	})
+	if err == nil || !strings.Contains(err.Error(), "fingerprint") {
+		t.Fatalf("mismatched public prior identity accepted: %v", err)
+	}
+	_, err = catalogSource(t).Propose(context.Background(), Request{
+		ModelIdentity: "qwen3-8b", Provider: "aws", Region: "eu-central-1", GPU: "L40S",
+		WorkloadProfile: "public-interactive", WorkloadSource: WorkloadSourceCustomerObserved,
+		WorkloadFingerprint: "sha256:" + strings.Repeat("1", 64),
+	})
+	if err == nil || !strings.Contains(err.Error(), "cannot use a public workload profile") {
+		t.Fatalf("public workload profile was laundered as observed evidence: %v", err)
 	}
 }
 

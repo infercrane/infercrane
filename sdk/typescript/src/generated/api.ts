@@ -198,6 +198,11 @@ export class ControlApi {
     return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
   }
 
+  getEndpointOptimizationReadiness(name: string): Promise<Record<string, JsonValue>> {
+    const path = `/endpoints/${encodeURIComponent(name)}/optimization-readiness`;
+    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+  }
+
   diagnoseEndpoint(name: string, body: JsonValue): Promise<ObjectList> {
     const path = `/endpoints/${encodeURIComponent(name)}/doctor`;
     return this.transport.request('POST', path, { body }) as Promise<ObjectList>;
@@ -413,8 +418,23 @@ export class ControlApi {
     return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
   }
 
+  listWorkloadProfiles(): Promise<ObjectList> {
+    const path = '/workload-profiles';
+    return this.transport.request('GET', path) as Promise<ObjectList>;
+  }
+
+  getWorkloadProfile(name: string): Promise<Record<string, JsonValue>> {
+    const path = `/workload-profiles/${encodeURIComponent(name)}`;
+    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+  }
+
   proposeOptimization(body: JsonValue): Promise<Record<string, JsonValue>> {
     const path = '/optimization/proposals';
+    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  planKernelOpportunities(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const path = '/optimization/kernel-opportunities';
     return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
   }
 
@@ -476,6 +496,41 @@ export class ControlApi {
   qualifyOptimizedArtifact(id: string, body: JsonValue): Promise<Record<string, JsonValue>> {
     const path = `/optimized-artifacts/${encodeURIComponent(id)}/qualify`;
     return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  getSandboxCapabilities(): Promise<Record<string, JsonValue>> {
+    const path = '/sandboxes/capabilities';
+    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+  }
+
+  listSandboxes(): Promise<ObjectList> {
+    const path = '/sandboxes';
+    return this.transport.request('GET', path) as Promise<ObjectList>;
+  }
+
+  createSandbox(body: JsonValue, idempotencyKey: string): Promise<Record<string, JsonValue>> {
+    const path = '/sandboxes';
+    return this.transport.request('POST', path, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
+  }
+
+  getSandbox(id: string): Promise<Record<string, JsonValue>> {
+    const path = `/sandboxes/${encodeURIComponent(id)}`;
+    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+  }
+
+  pauseSandbox(id: string, idempotencyKey: string): Promise<Record<string, JsonValue>> {
+    const path = `/sandboxes/${encodeURIComponent(id)}/pause`;
+    return this.transport.request('POST', path, { idempotencyKey }) as Promise<Record<string, JsonValue>>;
+  }
+
+  resumeSandbox(id: string, idempotencyKey: string): Promise<Record<string, JsonValue>> {
+    const path = `/sandboxes/${encodeURIComponent(id)}/resume`;
+    return this.transport.request('POST', path, { idempotencyKey }) as Promise<Record<string, JsonValue>>;
+  }
+
+  deleteSandbox(id: string, idempotencyKey: string): Promise<Record<string, JsonValue>> {
+    const path = `/sandboxes/${encodeURIComponent(id)}`;
+    return this.transport.request('DELETE', path, { idempotencyKey }) as Promise<Record<string, JsonValue>>;
   }
 
   createSandboxReference(body: JsonValue): Promise<Record<string, JsonValue>> {

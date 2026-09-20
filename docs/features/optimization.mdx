@@ -61,6 +61,50 @@ The result is a bounded candidate set. Each spec pins:
 - reviewed runtime arguments;
 - compute mode, scale bounds, and routing strategy.
 
+### Start from a public workload prior
+
+When customer traffic is not available yet, choose one of InferCrane's immutable content-free
+public priors. The default interactive lane is available directly to the optimizer:
+
+```bash
+infercrane optimize propose Qwen/Qwen3-8B \
+  --provider aws --region eu-central-1 --gpu L40S \
+  --objective interactive --profile public-interactive
+```
+
+Automation clients can discover the same versioned inputs with `GET /api/v1/workload-profiles`.
+Each result includes a ready-to-submit `benchmark_request`, its exact optimizer binding, source
+provenance, and the evidence digest. Available lanes cover interactive, long-prefill, and
+decode-heavy shapes.
+
+The public trace chooses token-shape experiments only. It does not supply a customer arrival rate,
+quality target, or production SLO, so InferCrane marks it `promotion_eligible: false`. Every
+candidate requires a representative customer replay before qualification or promotion. Use the
+remote Modal profiler in the [public trace PoC](/testing/chutes-public-workload-poc) only to
+reproduce or update the embedded artifact; normal product use does not download or rescan the
+dataset.
+
+### Start with any pinned open-weight model
+
+A model does not need to be in the reviewed catalog to enter the proof loop. Supply its repository,
+immutable commit, intended GPU count, and one or more executable runtimes:
+
+```bash
+infercrane optimize propose acme/novel-open-model \
+  --model-revision 0123456789abcdef0123456789abcdef01234567 \
+  --provider runpod-pods \
+  --gpu H100 --gpu-count 2 \
+  --runtimes vllm,sglang \
+  --objective throughput
+```
+
+For an uncataloged model InferCrane creates only an empty-argument vLLM or SGLang baseline. It does
+not infer architecture support, memory fit, tokenizer behavior, licensing, quantization, speculative
+decoding, or kernel compatibility. Those gaps are listed as required evidence. The optional
+AIConfigurator adapter may reduce this generic candidate space, but its output remains modeled and
+unqualified. A mutable branch such as `main` is rejected; the revision must be a 40–64 character
+hexadecimal commit.
+
 The command refuses to overwrite a non-empty candidate directory. Use `--output json` to archive the
 input digest, source, compatibility evidence, required evidence, and limitations with the specs.
 
@@ -279,7 +323,7 @@ InferCrane will reuse upstream execution and optimization work behind replaceabl
 | Upstream | InferCrane boundary | Current status |
 |---|---|---|
 | vLLM | Runtime execution, continuous batching, attention, prefix caching, and qualified engine flags | Active runtime; reviewed starting profiles are locally qualified |
-| SGLang | Alternative runtime and prefix-aware execution | Runtime contract exists; each provider/model path needs qualification |
+| SGLang | Alternative runtime and prefix-aware execution | Runtime contract exists; the Qwen3-0.6B/SGLang 0.5.10.post1/H100 tuple is negative compatibility evidence, not a qualified recipe |
 | AIConfigurator | GPU-free modeled candidate reduction | Active optional adapter pinned to `0.11.0` plus `plotext 5.3.2`; Linux x86_64 real-package contract verified |
 | AISimulate | GPU-free simulation and recommendation source | Not integrated; adoption requires a stable package, schema, support, parity, and rollback contract |
 | LLM Compressor / ModelOpt | Produce immutable quantized artifacts | Replaceable external-builder plans and provenance are local-qualified; transformation and GPU compatibility remain external qualification |

@@ -200,6 +200,18 @@ infercrane optimize propose llama-3.1-8b-instruct \
   --write-dir .infercrane/candidates
 ```
 
+Uncataloged open-weight models enter through an untuned, fail-closed baseline:
+
+```bash
+infercrane optimize propose OWNER/MODEL \
+  --model-revision IMMUTABLE_40_TO_64_HEX_COMMIT \
+  --provider runpod-pods --gpu H100 --gpu-count 1 \
+  --runtimes vllm,sglang --objective throughput
+```
+
+The generic path makes no memory-fit, license, quality, kernel, or performance claim. Measure an
+isolated candidate with repeated AIPerf runs before Release Guard can move traffic.
+
 ```text
 model + hardware + workload + SLO + cost target
                        │
@@ -273,6 +285,20 @@ See the authoritative [compatibility and qualification policy](docs/compatibilit
 [AWS evidence](docs/testing/aws-real-evidence.md), and
 [feature qualification matrix](docs/testing/feature-qualification-matrix.md) before relying on an
 exact provider, runtime, model, or accelerator combination.
+
+## Deploy, observe, improve
+
+InferCrane selects a reviewed compatible starting configuration for a declared
+workload objective, deploys it behind a stable endpoint, and uses content-free
+production monitoring to decide what evidence to collect next. Request-level
+signals can narrow the bottleneck to queueing, prefill, or decode; only an exact
+target-GPU profile can open the custom-kernel path.
+
+Kernel opportunities search the pinned runtime, FlashInfer, CUTLASS/CuTe, and
+Triton before proposing handwritten CUDA. Candidate code is built outside the
+API process in an isolated worker and must pass correctness, exact-GPU, AIPerf,
+quality, cost, and Release Guard gates before promotion. See
+[`docs/architecture/model-agnostic-optimization-engine.md`](docs/architecture/model-agnostic-optimization-engine.md).
 
 ## Documentation
 

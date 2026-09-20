@@ -35,10 +35,12 @@ import (
 	"github.com/infercrane/infercrane/internal/finops"
 	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/intentplan"
+	"github.com/infercrane/infercrane/internal/kernelplanner"
 	"github.com/infercrane/infercrane/internal/lab"
 	"github.com/infercrane/infercrane/internal/modelapicatalog"
 	"github.com/infercrane/infercrane/internal/modelapiproduct"
 	"github.com/infercrane/infercrane/internal/optimizationcampaign"
+	"github.com/infercrane/infercrane/internal/optimizationreadiness"
 	"github.com/infercrane/infercrane/internal/optimizedartifact"
 	"github.com/infercrane/infercrane/internal/optimizer"
 	"github.com/infercrane/infercrane/internal/passport"
@@ -48,10 +50,12 @@ import (
 	"github.com/infercrane/infercrane/internal/provision"
 	"github.com/infercrane/infercrane/internal/qualityevidence"
 	"github.com/infercrane/infercrane/internal/recipe"
+	"github.com/infercrane/infercrane/internal/sandboxprovider"
 	"github.com/infercrane/infercrane/internal/store"
 	"github.com/infercrane/infercrane/internal/support"
 	"github.com/infercrane/infercrane/internal/trainingartifact"
 	"github.com/infercrane/infercrane/internal/workflows"
+	"github.com/infercrane/infercrane/internal/workloadprofile"
 )
 
 type Store interface {
@@ -314,6 +318,7 @@ type API struct {
 	}
 	ModelAPICatalog  modelapicatalog.Catalog
 	ModelAPIProducts modelAPIProductStore
+	SandboxProvider  sandboxprovider.Provider
 	// ModelAPIOperatorTenantID is the platform-owned workspace allowed to
 	// publish shared supplier routes. Ordinary tenant administrators never
 	// inherit this authority merely by holding an admin role.
@@ -420,6 +425,13 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/artifacts/{id}/cache-observations", a.auth(authz.Deploy, a.recordCacheObservation))
 	mux.HandleFunc("POST /api/v1/artifacts/{id}/prefetches", a.auth(authz.Deploy, a.requestPrefetch))
 	mux.HandleFunc("GET /api/v1/artifacts/{id}/cache", a.auth(authz.Read, a.artifactCacheState))
+	mux.HandleFunc("GET /api/v1/sandboxes/capabilities", a.auth(authz.Read, a.sandboxCapabilities))
+	mux.HandleFunc("GET /api/v1/sandboxes", a.auth(authz.Read, a.sandboxes))
+	mux.HandleFunc("POST /api/v1/sandboxes", a.auth(authz.Deploy, a.createSandbox))
+	mux.HandleFunc("GET /api/v1/sandboxes/{id}", a.auth(authz.Read, a.sandbox))
+	mux.HandleFunc("POST /api/v1/sandboxes/{id}/pause", a.auth(authz.Deploy, a.pauseSandbox))
+	mux.HandleFunc("POST /api/v1/sandboxes/{id}/resume", a.auth(authz.Deploy, a.resumeSandbox))
+	mux.HandleFunc("DELETE /api/v1/sandboxes/{id}", a.auth(authz.Delete, a.deleteSandbox))
 	mux.HandleFunc("POST /api/v1/sandboxes/references", a.auth(authz.ManageTenant, a.createSandboxReference))
 	mux.HandleFunc("GET /api/v1/sandboxes/references", a.auth(authz.Read, a.sandboxReferences))
 	mux.HandleFunc("POST /api/v1/sandboxes/references/{id}/credential/rotate", a.auth(authz.ManageTenant, a.rotateSandboxCredential))
@@ -431,7 +443,10 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/deployments/{name}/autopilot/plans", a.auth(authz.Deploy, a.createAutopilotPlan))
 	mux.HandleFunc("GET /api/v1/autopilot/plans/{id}", a.auth(authz.Read, a.getAutopilotPlan))
 	mux.HandleFunc("POST /api/v1/autopilot/plans/{id}/approve", a.auth(authz.Deploy, a.approveAutopilotPlan))
+	mux.HandleFunc("GET /api/v1/workload-profiles", a.auth(authz.Read, a.workloadProfiles))
+	mux.HandleFunc("GET /api/v1/workload-profiles/{name}", a.auth(authz.Read, a.workloadProfile))
 	mux.HandleFunc("POST /api/v1/optimization/proposals", a.auth(authz.Read, a.proposeOptimization))
+	mux.HandleFunc("POST /api/v1/optimization/kernel-opportunities", a.auth(authz.Read, a.kernelOpportunities))
 	mux.HandleFunc("GET /api/v1/optimization/campaigns", a.auth(authz.Read, a.optimizationCampaigns))
 	mux.HandleFunc("POST /api/v1/optimization/campaigns", a.auth(authz.Deploy, a.createOptimizationCampaign))
 	mux.HandleFunc("GET /api/v1/optimization/campaigns/{id}", a.auth(authz.Read, a.optimizationCampaign))
@@ -468,6 +483,7 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/v1/async/jobs/{id}", a.auth(authz.Deploy, a.cancelAsyncInferenceJob))
 	mux.HandleFunc("GET /api/v1/endpoints/{name}", a.auth(authz.Read, a.endpoint))
 	mux.HandleFunc("GET /api/v1/endpoints/{name}/monitoring", a.auth(authz.Read, a.endpointMonitoring))
+	mux.HandleFunc("GET /api/v1/endpoints/{name}/optimization-readiness", a.auth(authz.Read, a.endpointOptimizationReadiness))
 	mux.HandleFunc("DELETE /api/v1/endpoints/{name}", a.auth(authz.Delete, a.deleteEndpoint))
 	mux.HandleFunc("POST /api/v1/endpoints/{name}/bindings", a.auth(authz.Deploy, a.createEndpointBinding))
 	mux.HandleFunc("POST /api/v1/endpoints/{name}/plans", a.auth(authz.Deploy, a.createEndpointPlan))
@@ -827,6 +843,101 @@ func (a API) proposeOptimization(w http.ResponseWriter, r *http.Request) {
 		"provider_mutation":    false,
 		"performance_claims":   false,
 		"qualification_needed": []string{"benchmark", "quality", "cost", "release_guard"},
+	})
+}
+
+func (a API) workloadProfiles(w http.ResponseWriter, _ *http.Request) {
+	document, err := workloadprofile.PublicChutesPrior()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "invalid_embedded_workload_profile", "the embedded public workload profile failed integrity validation")
+		return
+	}
+	data := make([]map[string]any, 0, len(document.Profiles))
+	for _, profile := range document.Profiles {
+		data = append(data, publicWorkloadProfileView(document, profile))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"data":           data,
+		"default":        "public-interactive",
+		"source":         publicWorkloadSourceView(document),
+		"content_stored": false,
+		"upgrade": map[string]any{
+			"next_source":  "customer_observed",
+			"action":       "capture a representative content-free replay",
+			"required_for": []string{"qualification", "promotion"},
+		},
+	})
+}
+
+func (a API) workloadProfile(w http.ResponseWriter, r *http.Request) {
+	document, err := workloadprofile.PublicChutesPrior()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "invalid_embedded_workload_profile", "the embedded public workload profile failed integrity validation")
+		return
+	}
+	profile, err := workloadprofile.Lookup(document, r.PathValue("name"))
+	if err != nil || !performanceprofile.IsPublicPrior(profile.Name) {
+		writeError(w, http.StatusNotFound, "workload_profile_not_found", "public workload profile was not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"profile":        publicWorkloadProfileView(document, profile),
+		"source":         publicWorkloadSourceView(document),
+		"content_stored": false,
+	})
+}
+
+func publicWorkloadProfileView(document workloadprofile.Document, profile workloadprofile.BenchmarkShape) map[string]any {
+	return map[string]any{
+		"id":          profile.Name,
+		"description": profile.Description,
+		"objective":   profile.Objective,
+		"source_kind": optimizer.WorkloadSourcePublicPrior,
+		"workload": map[string]any{
+			"input_tokens": profile.InputTokens, "output_tokens": profile.OutputTokens,
+			"concurrency": profile.Concurrency, "streaming": profile.Streaming,
+		},
+		"benchmark_request": map[string]any{
+			"profile": profile.Name, "profile_version": performanceprofile.Version,
+			"requests": profile.Requests, "concurrency": profile.Concurrency,
+			"input_tokens": profile.InputTokens, "output_tokens": profile.OutputTokens,
+			"streaming": profile.Streaming,
+		},
+		"optimization_binding": map[string]any{
+			"workload_profile": profile.Name, "workload_source": optimizer.WorkloadSourcePublicPrior,
+			"workload_fingerprint": document.Digest,
+		},
+		"evidence_class":     document.EvidenceClass,
+		"promotion_eligible": false,
+		"replacement":        optimizer.WorkloadSourceCustomerObserved,
+	}
+}
+
+func publicWorkloadSourceView(document workloadprofile.Document) map[string]any {
+	return map[string]any{
+		"name": document.Source.Name, "url": document.Source.URL, "license": document.Source.License,
+		"citation": document.Source.Citation, "trace_rows": document.Source.TraceRows,
+		"rows_inspected": document.Sampling.RowsInspected, "digest": document.Digest,
+		"remote_only": document.Sampling.RemoteOnly, "methodology_boundary": document.MethodologyBoundary,
+	}
+}
+
+func (a API) kernelOpportunities(w http.ResponseWriter, r *http.Request) {
+	var request kernelplanner.Request
+	if !decodeMutationBody(w, r, &request) {
+		return
+	}
+	plan, err := kernelplanner.Build(request)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_kernel_opportunity_request", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"plan":               plan,
+		"provider_mutation":  false,
+		"code_execution":     false,
+		"performance_claims": false,
+		"next":               "pin a source revision, build in an isolated sandbox, and qualify on the exact target GPU",
 	})
 }
 
@@ -1930,6 +2041,53 @@ func (a API) endpointMonitoring(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, snapshot)
 }
 
+func (a API) endpointOptimizationReadiness(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(monitoringStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "endpoint monitoring is not supported by this store")
+		return
+	}
+	for key, values := range r.URL.Query() {
+		if key != "window_seconds" || len(values) != 1 {
+			writeError(w, http.StatusBadRequest, "invalid_request", "optimization readiness accepts one window_seconds value")
+			return
+		}
+	}
+	windowSeconds := 3600
+	if raw := r.URL.Query().Get("window_seconds"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "window_seconds must be an integer")
+			return
+		}
+		windowSeconds = value
+	}
+	if windowSeconds < 60 || windowSeconds > 30*24*60*60 {
+		writeError(w, http.StatusUnprocessableEntity, "validation_failed", "optimization readiness requires a 1 minute..30 day window")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	bucketSeconds := defaultMonitoringBucket(windowSeconds)
+	snapshot, err := store.EndpointMonitoring(r.Context(), actor.TenantID, r.PathValue("name"), time.Duration(windowSeconds)*time.Second, time.Duration(bucketSeconds)*time.Second)
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "endpoint was not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "optimization readiness evidence could not be read")
+		return
+	}
+	if a.AdmissionState != nil {
+		if state, found := a.AdmissionState.State(actor.TenantID + "\x00" + snapshot.Endpoint); found {
+			snapshot.Admission = &domain.AdmissionMonitoring{CapacityState: state.CapacityState, Scope: state.Scope, InstanceID: a.GatewayInstanceID, Active: state.Active, Waiting: state.Waiting, MaxConcurrent: state.MaxConcurrent, MaxQueueDepth: state.MaxQueueDepth, Rejected: state.Rejected, QueueTimeouts: state.QueueTimeouts, ObservedAt: time.Now().UTC()}
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"assessment": optimizationreadiness.Assess(snapshot, optimizationreadiness.DefaultPolicy()),
+		"window":     map[string]any{"start": snapshot.WindowStart, "end": snapshot.WindowEnd, "sample_count": snapshot.Evidence.SampleCount},
+	})
+}
+
 type operationalMeasurementRequest struct {
 	Source        string                        `json:"source"`
 	EvidenceClass string                        `json:"evidence_class"`
@@ -2998,6 +3156,148 @@ func (a API) capacityIntelligence(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"capacity": rows, "evidence": "observed", "sample_scope": "tenant", "window_seconds": int(window.Seconds())})
 }
 
+func (a API) sandboxCapabilities(w http.ResponseWriter, r *http.Request) {
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	if a.SandboxProvider == nil {
+		writeJSON(w, http.StatusOK, sandboxprovider.Capabilities{
+			Provider: "brezel", Product: "InferCrane Sandboxes", State: "not_configured",
+			Assurance: "private-tenant-preview", Templates: []sandboxprovider.Template{},
+			Qualification:     "unavailable",
+			QualificationNote: "Configure a dedicated Brezel project and approved immutable templates for this tenant.",
+		})
+		return
+	}
+	capabilities, err := a.SandboxProvider.Capabilities(r.Context(), actor.TenantID)
+	if err != nil {
+		a.writeSandboxProviderError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, capabilities)
+}
+
+func (a API) sandboxes(w http.ResponseWriter, r *http.Request) {
+	if a.SandboxProvider == nil {
+		writeError(w, http.StatusNotImplemented, "sandbox_provider_unavailable", "a native sandbox provider is not configured")
+		return
+	}
+	includeTerminal := false
+	if raw := strings.TrimSpace(r.URL.Query().Get("include_terminal")); raw != "" {
+		var err error
+		includeTerminal, err = strconv.ParseBool(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "include_terminal must be true or false")
+			return
+		}
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	rows, err := a.SandboxProvider.List(r.Context(), actor.TenantID, includeTerminal)
+	if err != nil {
+		a.writeSandboxProviderError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": rows, "execution_boundary": "brezel", "assurance": "private-tenant-preview"})
+}
+
+func (a API) sandbox(w http.ResponseWriter, r *http.Request) {
+	if a.SandboxProvider == nil {
+		writeError(w, http.StatusNotImplemented, "sandbox_provider_unavailable", "a native sandbox provider is not configured")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	row, err := a.SandboxProvider.Get(r.Context(), actor.TenantID, r.PathValue("id"))
+	if err != nil {
+		a.writeSandboxProviderError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, row)
+}
+
+func (a API) createSandbox(w http.ResponseWriter, r *http.Request) {
+	if a.SandboxProvider == nil {
+		writeError(w, http.StatusNotImplemented, "sandbox_provider_unavailable", "a native sandbox provider is not configured")
+		return
+	}
+	var request struct {
+		TemplateID          string `json:"template_id"`
+		TTLSeconds          int64  `json:"ttl_seconds"`
+		StandbyAfterSeconds int64  `json:"standby_after_seconds,omitempty"`
+		AutoResume          bool   `json:"auto_resume,omitempty"`
+		NetworkMode         string `json:"network_mode,omitempty"`
+	}
+	if !decodeMutationBody(w, r, &request) {
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	mutation, err := a.SandboxProvider.Create(r.Context(), actor.TenantID, strings.TrimSpace(r.Header.Get("Idempotency-Key")), sandboxprovider.CreateRequest{
+		TemplateID: request.TemplateID, ExpiresAfterSeconds: request.TTLSeconds,
+		StandbyAfterSeconds: request.StandbyAfterSeconds, AutoResume: request.AutoResume, NetworkMode: request.NetworkMode,
+	})
+	if err != nil {
+		a.writeSandboxProviderError(w, err)
+		return
+	}
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "sandbox.create", ResourceType: "sandbox", ResourceName: mutation.Resource.ID, Outcome: "accepted"})
+	writeJSON(w, http.StatusAccepted, mutation)
+}
+
+func (a API) pauseSandbox(w http.ResponseWriter, r *http.Request) {
+	a.mutateSandboxLifecycle(w, r, "pause")
+}
+
+func (a API) resumeSandbox(w http.ResponseWriter, r *http.Request) {
+	a.mutateSandboxLifecycle(w, r, "resume")
+}
+
+func (a API) deleteSandbox(w http.ResponseWriter, r *http.Request) {
+	a.mutateSandboxLifecycle(w, r, "delete")
+}
+
+func (a API) mutateSandboxLifecycle(w http.ResponseWriter, r *http.Request, action string) {
+	if a.SandboxProvider == nil {
+		writeError(w, http.StatusNotImplemented, "sandbox_provider_unavailable", "a native sandbox provider is not configured")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	id, key := r.PathValue("id"), strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	var (
+		mutation sandboxprovider.Mutation
+		err      error
+	)
+	switch action {
+	case "pause":
+		mutation, err = a.SandboxProvider.Pause(r.Context(), actor.TenantID, id, key)
+	case "resume":
+		mutation, err = a.SandboxProvider.Resume(r.Context(), actor.TenantID, id, key)
+	case "delete":
+		mutation, err = a.SandboxProvider.Delete(r.Context(), actor.TenantID, id, key)
+	default:
+		err = sandboxprovider.ErrInvalid
+	}
+	if err != nil {
+		a.writeSandboxProviderError(w, err)
+		return
+	}
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "sandbox." + action, ResourceType: "sandbox", ResourceName: id, Outcome: "accepted"})
+	writeJSON(w, http.StatusAccepted, mutation)
+}
+
+func (a API) writeSandboxProviderError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, sandboxprovider.ErrForbidden):
+		writeError(w, http.StatusForbidden, "sandbox_tenant_not_enabled", "native sandboxes are not enabled for this tenant")
+	case errors.Is(err, sandboxprovider.ErrNotFound):
+		writeError(w, http.StatusNotFound, "sandbox_not_found", "sandbox was not found")
+	case errors.Is(err, sandboxprovider.ErrConflict):
+		writeError(w, http.StatusConflict, "sandbox_conflict", err.Error())
+	case errors.Is(err, sandboxprovider.ErrInvalid):
+		writeError(w, http.StatusBadRequest, "invalid_sandbox_request", err.Error())
+	case errors.Is(err, sandboxprovider.ErrUnavailable):
+		writeError(w, http.StatusServiceUnavailable, "sandbox_provider_unavailable", "the Brezel provider is not ready")
+	default:
+		writeError(w, http.StatusBadGateway, "sandbox_provider_failed", "the Brezel provider request failed")
+	}
+}
+
 func (a API) createSandboxReference(w http.ResponseWriter, r *http.Request) {
 	store, ok := a.Store.(externalWorkloadStore)
 	if !ok {
@@ -3405,6 +3705,11 @@ func (a API) runBenchmark(w http.ResponseWriter, r *http.Request) {
 		InputTokens    int     `json:"input_tokens"`
 		OutputTokens   int     `json:"output_tokens"`
 		RandomSeed     int64   `json:"random_seed"`
+		Runs           int     `json:"runs"`
+		WarmupRequests int     `json:"warmup_requests"`
+		Cooldown       int     `json:"run_cooldown_seconds"`
+		ArrivalPattern string  `json:"arrival_pattern"`
+		RequestRate    float64 `json:"request_rate"`
 		Revision       string  `json:"revision"`
 		Streaming      *bool   `json:"streaming"`
 		TTFTSLOMS      float64 `json:"ttft_slo_ms"`
@@ -3423,6 +3728,9 @@ func (a API) runBenchmark(w http.ResponseWriter, r *http.Request) {
 	if request.RandomSeed == 0 {
 		request.RandomSeed = 17
 	}
+	if request.Runs == 0 {
+		request.Runs = 1
+	}
 	if request.InputTokens == 0 {
 		request.InputTokens = 128
 	}
@@ -3435,6 +3743,12 @@ func (a API) runBenchmark(w http.ResponseWriter, r *http.Request) {
 	}
 	if request.TTFTSLOMS < 0 || request.TPOTSLOMS < 0 || request.LatencySLOMS < 0 {
 		writeError(w, http.StatusUnprocessableEntity, "validation_failed", "benchmark SLO thresholds cannot be negative")
+		return
+	}
+	request.ArrivalPattern = strings.ToLower(strings.TrimSpace(request.ArrivalPattern))
+	validArrival := request.ArrivalPattern == "" || request.ArrivalPattern == "constant" || request.ArrivalPattern == "poisson" || request.ArrivalPattern == "gamma"
+	if request.Runs < 1 || request.Runs > 10 || request.WarmupRequests < 0 || request.WarmupRequests > 100000 || request.Cooldown < 0 || request.Cooldown > 3600 || !validArrival || (request.ArrivalPattern == "") != (request.RequestRate == 0) || request.RequestRate < 0 || math.IsNaN(request.RequestRate) || math.IsInf(request.RequestRate, 0) {
+		writeError(w, http.StatusUnprocessableEntity, "validation_failed", "runs must be 1..10; warmup requests 0..100000; cooldown 0..3600; arrival pattern and a finite positive request rate must be supplied together")
 		return
 	}
 	if request.Profile != "" {
@@ -3536,7 +3850,7 @@ func (a API) runBenchmark(w http.ResponseWriter, r *http.Request) {
 		streaming = *request.Streaming
 	}
 	benchmarkStartedAt := time.Now().UTC()
-	measured, err := a.BenchmarkRunner.Run(r.Context(), benchmark.Config{Binary: a.AIPerfBinary, Endpoint: endpoint, APIKey: credential, APIKeyEnv: apiKeyEnv, Model: model, Tokenizer: artifact.Repository, Requests: request.Requests, Concurrency: request.Concurrency, InputTokens: request.InputTokens, OutputTokens: request.OutputTokens, RandomSeed: request.RandomSeed, Streaming: &streaming, TTFTSLOMS: request.TTFTSLOMS, TPOTSLOMS: request.TPOTSLOMS, LatencySLOMS: request.LatencySLOMS})
+	measured, err := a.BenchmarkRunner.Run(r.Context(), benchmark.Config{Binary: a.AIPerfBinary, Endpoint: endpoint, APIKey: credential, APIKeyEnv: apiKeyEnv, Model: model, Tokenizer: artifact.Repository, Requests: request.Requests, Concurrency: request.Concurrency, InputTokens: request.InputTokens, OutputTokens: request.OutputTokens, ProfileRuns: request.Runs, WarmupRequests: request.WarmupRequests, ProfileRunCooldown: time.Duration(request.Cooldown) * time.Second, ArrivalPattern: request.ArrivalPattern, RequestRate: request.RequestRate, RandomSeed: request.RandomSeed, Streaming: &streaming, TTFTSLOMS: request.TTFTSLOMS, TPOTSLOMS: request.TPOTSLOMS, LatencySLOMS: request.LatencySLOMS})
 	benchmarkEndedAt := time.Now().UTC()
 	if err != nil {
 		writeError(w, 502, "benchmark_failed", err.Error())
@@ -3583,7 +3897,7 @@ func (a API) runBenchmark(w http.ResponseWriter, r *http.Request) {
 			benchmarkReplicaCount++
 		}
 	}
-	workload, _ := json.Marshal(map[string]any{"endpoint_type": "chat", "streaming": streaming, "request_count": request.Requests, "concurrency": request.Concurrency, "random_seed": request.RandomSeed, "input_tokens": request.InputTokens, "output_tokens": request.OutputTokens, "profile": request.Profile, "profile_version": request.ProfileVersion, "ttft_slo_ms": request.TTFTSLOMS, "tpot_slo_ms": request.TPOTSLOMS, "latency_slo_ms": request.LatencySLOMS, "server_token_count": true, "revision_selector": selector, "direct_revision_validation": selectedRevisionID != deployment.ActiveRevisionID, "replicas": benchmarkReplicaCount})
+	workload, _ := json.Marshal(map[string]any{"endpoint_type": "chat", "streaming": streaming, "request_count": request.Requests, "request_count_per_run": request.Requests, "profile_runs": request.Runs, "warmup_requests": request.WarmupRequests, "run_cooldown_seconds": request.Cooldown, "arrival_pattern": request.ArrivalPattern, "request_rate": request.RequestRate, "concurrency": request.Concurrency, "random_seed": request.RandomSeed, "input_tokens": request.InputTokens, "output_tokens": request.OutputTokens, "profile": request.Profile, "profile_version": request.ProfileVersion, "ttft_slo_ms": request.TTFTSLOMS, "tpot_slo_ms": request.TPOTSLOMS, "latency_slo_ms": request.LatencySLOMS, "confidence_95": measured.Confidence, "server_token_count": true, "revision_selector": selector, "direct_revision_validation": selectedRevisionID != deployment.ActiveRevisionID, "replicas": benchmarkReplicaCount})
 	runtimeConfig, _ := json.Marshal(map[string]any{"args": revisionSpec.RuntimeArgs})
 	var gpuCount *int
 	if revisionSpec.GPU != "" {

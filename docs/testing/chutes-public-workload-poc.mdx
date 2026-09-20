@@ -1,0 +1,94 @@
+---
+title: Public trace workload PoC
+description: Remote-only profiling of the 6.12B-request Chutes trace and real L40S screening of two pinned Qwen models.
+---
+
+# Public trace workload PoC
+
+InferCrane can now use a large public serving trace to choose realistic screening shapes without
+downloading the 91 GB dataset or model weights to the operator's laptop.
+
+```text
+public S3 Parquet (91 GB)
+        │ selected row groups + six content-free columns
+        ▼
+Modal CPU profiler ──► versioned workload profile ──► InferCrane validation
+                                                        │
+                                                        ▼
+                                      pinned model/runtime/GPU AIPerf lanes
+                                                        │
+                                                        ▼
+                                      screening evidence, never auto-promotion
+```
+
+The source is Harvard MadSys and Chutes' [A Year in LLM Serving](https://github.com/HarvardMadSys/chutes_workload)
+trace: 6,122,413,756 requests across 9,174 models, released under CC BY 4.0. It contains token counts,
+normalized timing, anonymized identities, and cache reuse metadata; it does not contain prompt text.
+
+## Remote-only profile
+
+The PoC read 150,000 rows from deterministic row groups at 10%, 50%, and 90% of the Parquet file.
+Only `started_at`, `completed_at`, `it`, `ot`, `ct`, and `ttft` were requested. Modal returned one
+compact JSON document and stopped. No dataset file was created locally.
+
+| Metric | p50 | p95 | p99 |
+| --- | ---: | ---: | ---: |
+| Input tokens | 3,919 | 24,832 | 64,428 |
+| Output tokens | 295 | 1,377 | 3,403 |
+| TTFT | 989 ms | 8,505 ms | 21,295 ms |
+| End-to-end duration | 6.51 s | 49.10 s | 108.17 s |
+
+Among the 20,790 sampled requests that reported cached tokens, the median token hit ratio was 1.8%
+while p90 was 99.4%. That bimodal result makes prefix reuse a valuable candidate to test, but it is
+not evidence that every customer workload will benefit from prefix caching.
+
+Reproduce the remote profile and validate its strict, content-free schema:
+
+```bash
+modal run --profile yasintoy tools/modal-kernel-poc/chutes_trace_modal.py \
+  --row-groups 3 --rows-per-group 50000 --max-context-tokens 8192
+
+infercrane optimize workload-profile \
+  --file docs/testing/evidence/chutes-public-workload-2026-09-20.json
+```
+
+The validator emits exact `infercrane benchmark` inputs and a stable evidence digest. Unknown JSON
+fields are rejected, which prevents a prompt-bearing document from silently entering this profile
+path.
+
+## Two-model L40S screen
+
+We ran the median and decode-heavy shapes against two Apache-2.0 Qwen models. Both model revisions
+were downloaded into Modal images, not to the laptop. Every lane used NVIDIA L40S, vLLM 0.22.1,
+AIPerf 0.12.0, BF16, streaming, seed 17, and two profile runs.
+
+| Model | Shape | Output tok/s | p95 TTFT | p95 TPOT | p95 latency | Errors |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Qwen3-0.6B | 3,919 in / 295 out / c8 | 955 | 236 ms | 8.10 ms | 2.57 s | 0/64 |
+| Qwen3-1.7B | 3,919 in / 295 out / c8 | 665 | 383 ms | 11.64 ms | 3.74 s | 0/64 |
+| Qwen3-0.6B | 3,919 in / 1,377 out / c4 | 705 | 65 ms | 5.75 ms | 7.75 s | 0/64 |
+| Qwen3-1.7B | 3,919 in / 1,377 out / c4 | 453 | 71 ms | 8.79 ms | 12.16 s | 0/64 |
+
+On these exact lanes, Qwen3-0.6B delivered **1.44x** the interactive output throughput and **1.56x**
+the decode-heavy output throughput of Qwen3-1.7B. This is the expected performance/size tradeoff,
+not a recommendation: no semantic-quality comparison was run. Interactive TTFT was also noisy
+across two runs, especially for Qwen3-1.7B, so a decision campaign needs at least five runs and a
+customer-specific quality suite.
+
+The first decode-heavy attempt correctly failed with context-overflow errors because the harness
+had reserved no room for chat-template control tokens. InferCrane discarded those metrics, added a
+bounded 512-token context allowance, and repeated the complete paired campaign. The accepted rerun
+completed 256/256 requests without errors.
+
+## Product boundary
+
+The public trace is a cold-start prior. It helps InferCrane avoid toy 128/64 benchmarks and decide
+which prefill, decode, cache, runtime, quantization, topology, or kernel experiments deserve paid GPU
+time. It cannot replace a customer's privacy-preserving production profile: the public fleet's
+model mix, aggregate rate, semantic tasks, and SLOs are not portable.
+
+The machine-readable inputs and measurements are stored in
+[`evidence/chutes-public-workload-2026-09-20.json`](./evidence/chutes-public-workload-2026-09-20.json)
+and
+[`evidence/chutes-qwen-l40s-screen-2026-09-20.json`](./evidence/chutes-qwen-l40s-screen-2026-09-20.json).
+The Modal evidence records zero active GPU tasks after completion.

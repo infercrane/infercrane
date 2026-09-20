@@ -1,0 +1,118 @@
+diff --git a/apps/console/lib/control-api.ts b/apps/console/lib/control-api.ts
+--- a/apps/console/lib/control-api.ts
++++ b/apps/console/lib/control-api.ts
+@@ -148,6 +148,30 @@ export async function endpointMonitoring(
+   );
+ }
+ 
++export type EndpointOptimizationReadiness = {
++  algorithm_version: string;
++  candidate_families: string[];
++  confidence: string;
++  content_recorded: boolean;
++  endpoint: string;
++  kernel_gate: { eligible: boolean; reason: string };
++  next_action: string;
++  primary_bottleneck: string;
++  provider_mutation: boolean;
++  required_evidence: string[];
++  schema_version: string;
++  state: string;
++};
++
++export async function endpointOptimizationReadiness(
++  name: string,
++): Promise<EndpointOptimizationReadiness> {
++  const client = await controlClient();
++  return client.get<EndpointOptimizationReadiness>(
++    `/api/v1/endpoints/${encodeURIComponent(name)}/optimization-readiness?window_seconds=86400`,
++  );
++}
++
+ export async function endpointAdmission(name: string): Promise<AdmissionPolicy> {
+   const client = await controlClient();
+   return (
+diff --git a/apps/console/app/(protected)/endpoints/[name]/page.tsx b/apps/console/app/(protected)/endpoints/[name]/page.tsx
+--- a/apps/console/app/(protected)/endpoints/[name]/page.tsx
++++ b/apps/console/app/(protected)/endpoints/[name]/page.tsx
+@@ -12,6 +12,7 @@ import {
+ import {
+   endpointDetail,
+   endpointAdmission,
++  endpointOptimizationReadiness,
+   endpointGuardEvaluations,
+   listProviderConnections,
+ } from "../../../../lib/control-api";
+@@ -35,15 +36,18 @@ export default async function EndpointDetailPage({
+   const { connection, staged } = await searchParams;
+   try {
+     const detail = await endpointDetail(name);
+-    const [evaluationsResult, providerConnectionsResult, admissionResult] =
++    const [evaluationsResult, providerConnectionsResult, admissionResult, readinessResult] =
+       await Promise.allSettled([
+         endpointGuardEvaluations(name),
+         listProviderConnections(),
+         endpointAdmission(name),
++        endpointOptimizationReadiness(name),
+       ]);
+     const evaluations = evaluationsResult.status === "fulfilled" ? evaluationsResult.value : [];
+     const providerConnections =
+       providerConnectionsResult.status === "fulfilled" ? providerConnectionsResult.value : [];
++    const optimizationReadiness =
++      readinessResult.status === "fulfilled" ? readinessResult.value : undefined;
+     const endpoint = detail.endpoint;
+     const observeOnlyAdoption = detail.bindings.some(
+       (binding) => binding.kind === "external" && binding.ownership_mode === "observe-only",
+@@ -76,12 +80,51 @@ export default async function EndpointDetailPage({
+           </div>
+         )}
+         {(evaluationsResult.status === "rejected" ||
+-          providerConnectionsResult.status === "rejected") && (
++          providerConnectionsResult.status === "rejected" ||
++          readinessResult.status === "rejected") && (
+           <InlinePanelUnavailable
+             title="Some endpoint evidence is temporarily unavailable"
+             detail="The serving identity remains available. Release or external-connection evidence can be retried without affecting traffic."
+           />
+         )}
++        {optimizationReadiness && (
++          <section className="dashboard-card section-card" id="optimize">
++            <div className="dashboard-card__header">
++              <div>
++                <h2>Observe and improve</h2>
++                <p>Content-free production evidence · last 24 hours</p>
++              </div>
++              <StateBadge>{optimizationReadiness.state}</StateBadge>
++            </div>
++            <DefinitionList
++              items={[
++                [
++                  "Serving-stage signal",
++                  optimizationReadiness.primary_bottleneck.replaceAll("-", " "),
++                ],
++                ["Confidence", optimizationReadiness.confidence.replaceAll("-", " ")],
++                ["Next proof", optimizationReadiness.next_action],
++                [
++                  "Candidate families",
++                  optimizationReadiness.candidate_families.length
++                    ? optimizationReadiness.candidate_families.join(" · ")
++                    : "Collecting evidence",
++                ],
++              ]}
++            />
++            <div className="card-header-actions">
++              <Link
++                className="primary-action"
++                href={{ pathname: "/optimization", query: { model: detail.logical_model.name } }}
++              >
++                Build optimization plan
++              </Link>
++              <span className="count-label">
++                Kernel work stays locked until an exact target-GPU profile passes the Amdahl gate.
++              </span>
++            </div>
++          </section>
++        )}
+         <section className="detail-grid">
+           <article className="dashboard-card detail-card">
+             <div className="dashboard-card__header">

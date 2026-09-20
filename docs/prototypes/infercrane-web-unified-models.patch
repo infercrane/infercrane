@@ -1,0 +1,133 @@
+diff --git a/apps/console/components/console-shell.tsx b/apps/console/components/console-shell.tsx
+--- a/apps/console/components/console-shell.tsx
++++ b/apps/console/components/console-shell.tsx
+@@ -32,6 +32,5 @@ import { OrganizationControl } from "./organization-control";
+ 
+ const icons = {
+-  modelapis: CloudCog,
+   models: ServerCog,
+   usage: ChartNoAxesCombined,
+   workloads: Boxes,
+@@ -43,13 +42,6 @@ const primaryNavigation = [
+   {
+-    label: "Model APIs",
++    label: "Models",
+     href: "/model-apis",
+-    icon: "modelapis",
+-    shortcut: "G A",
+-    previewHref: "/design-lab#templates",
+-  },
+-  {
+-    label: "Open-weight models",
+-    href: "/models",
+     icon: "models",
+     shortcut: "G M",
+     previewHref: "/design-lab#templates",
+@@ -96,5 +88,5 @@ function navigationItemIsActive(pathname: string, item: { href: string }) {
+   const endpointMonitoring = /^\/endpoints\/[^/]+\/monitoring(?:\/|$)/.test(pathname);
+   const operationActivity = pathname.startsWith("/activity/operations");
+   if (item.href === "/model-apis") {
+-    return pathname.startsWith("/model-apis");
++    return pathname.startsWith("/model-apis") || pathname.startsWith("/models");
+   }
+@@ -145,5 +137,5 @@ const directBreadcrumbLabels: Record<string, string> = {
+   "/design-lab": "Experience lab",
+   "/dedicated": "Dedicated",
+   "/endpoints": "Endpoints",
+-  "/model-apis": "Model APIs",
++  "/model-apis": "Models",
+   "/models": "Models",
+diff --git a/apps/console/components/model-surface-switcher.tsx b/apps/console/components/model-surface-switcher.tsx
+--- a/apps/console/components/model-surface-switcher.tsx
++++ b/apps/console/components/model-surface-switcher.tsx
+@@ -7,13 +7,13 @@ const surfaces: Array<{ id: ModelSurface; href: Route; label: string; detail: st
+   {
+     id: "hosted",
+     href: "/model-apis",
+-    label: "Managed",
+-    detail: "Engineering-qualified shared or dedicated supply",
++    label: "Use via API",
++    detail: "Start with hosted, qualified capacity",
+   },
+   {
+     id: "deploy",
+     href: "/models",
+-    label: "BYOC",
+-    detail: "Plan and operate a model in your infrastructure",
++    label: "Deploy open-weight",
++    detail: "Run with InferCrane or in your cloud",
+   },
+ ];
+diff --git a/apps/console/app/(protected)/model-apis/page.tsx b/apps/console/app/(protected)/model-apis/page.tsx
+--- a/apps/console/app/(protected)/model-apis/page.tsx
++++ b/apps/console/app/(protected)/model-apis/page.tsx
+@@ -4,4 +4,5 @@ import type { Route } from "next";
+ import Link from "next/link";
+ import { EndpointCodeExamples } from "../../../components/endpoint-code-examples";
+ import { ModelAPICatalog } from "../../../components/model-api-catalog";
++import { ModelSurfaceSwitcher } from "../../../components/model-surface-switcher";
+ import {
+@@ -136,7 +137,6 @@ export default async function ModelAPIsPage() {
+   return (
+     <div className="console-page model-apis-page">
+       <PageHeading
+-        eyebrow="Models"
+-        title="Model APIs"
+-        description="Compare models, then connect an API or deploy the configuration you choose."
++        title="Models"
++        description="Use a hosted API or deploy an open-weight model."
+         actions={
+@@ -163,4 +163,6 @@ export default async function ModelAPIsPage() {
+         }
+       />
+ 
++      <ModelSurfaceSwitcher current="hosted" />
++
+       {catalogResult ? (
+diff --git a/apps/console/app/(protected)/models/page.tsx b/apps/console/app/(protected)/models/page.tsx
+--- a/apps/console/app/(protected)/models/page.tsx
++++ b/apps/console/app/(protected)/models/page.tsx
+@@ -1,4 +1,5 @@
+ import Link from "next/link";
+ import { DataUnavailable, PageHeading } from "../../../components/console-primitives";
+ import { ModelCatalogBrowser } from "../../../components/model-catalog-browser";
++import { ModelSurfaceSwitcher } from "../../../components/model-surface-switcher";
+ import { listCatalogModels } from "../../../lib/control-api";
+@@ -10,6 +11,5 @@ export default async function ModelsPage() {
+       <div className="console-page model-catalog-page">
+         <PageHeading
+-          eyebrow="Deploy"
+-          title="Open-weight models"
+-          description="Choose a model. InferCrane recommends the serving stack."
++          title="Models"
++          description="Use a hosted API or deploy an open-weight model."
+           actions={
+@@ -24,3 +24,4 @@ export default async function ModelsPage() {
+           }
+         />
++        <ModelSurfaceSwitcher current="deploy" />
+         <div className="catalog-trust-strip">
+diff --git a/packages/config/src/index.ts b/packages/config/src/index.ts
+--- a/packages/config/src/index.ts
++++ b/packages/config/src/index.ts
+@@ -53,6 +53,5 @@ export const publicNavigation = [
+ ] as const;
+ 
+ export const consoleNavigation = [
+-  { label: "Model APIs", href: "/model-apis", icon: "modelapis", shortcut: "G A" },
+-  { label: "Open-weight models", href: "/models", icon: "models", shortcut: "G M" },
++  { label: "Models", href: "/model-apis", icon: "models", shortcut: "G M" },
+   { label: "Deployments", href: "/workloads", icon: "workloads", shortcut: "G D" },
+diff --git a/packages/config/src/config.test.ts b/packages/config/src/config.test.ts
+--- a/packages/config/src/config.test.ts
++++ b/packages/config/src/config.test.ts
+@@ -18,8 +18,7 @@ describe("surface boundaries", () => {
+   it("keeps model APIs, model definitions, optimization, and operations distinct", () => {
+     expect(consoleNavigation.map((item) => item.label)).toEqual([
+-      "Model APIs",
+-      "Open-weight models",
++      "Models",
+       "Deployments",
+       "Sandboxes",
+       "Usage",
+       "API keys",

@@ -47,6 +47,19 @@ func TestAIConfiguratorProposalIsModeledExecutableAndRequiresProof(t *testing.T)
 	}
 }
 
+func TestAIConfiguratorCanModelPinnedUncatalogedModel(t *testing.T) {
+	ttft := 220.0
+	runner := &fixedEstimator{output: modeledOutput("vllm", estimatorCandidate{Mode: "aggregated", Backend: "vllm", TotalGPUs: 1, Replicas: 1, GPUsPerReplica: 1, TensorParallelism: 1, EstimatedTTFTMS: &ttft})}
+	runner.output.ModelPath = "acme/novel-model"
+	proposal, err := (AIConfiguratorSource{Catalog: catalogSource(t), Runner: runner}).Propose(context.Background(), Request{ModelIdentity: "acme/novel-model", ModelRevision: strings.Repeat("c", 40), Provider: "aws", Region: "eu-central-1", GPU: "L40S", Objective: "interactive"})
+	if err != nil || len(proposal.Candidates) != 1 {
+		t.Fatalf("proposal=%+v err=%v", proposal, err)
+	}
+	if runner.input.ModelPath != "acme/novel-model" || proposal.Candidates[0].EvidenceState != EvidenceModeled {
+		t.Fatalf("generic estimator boundary was lost: input=%+v candidate=%+v", runner.input, proposal.Candidates[0])
+	}
+}
+
 func TestAIConfiguratorRefusesUnexecutableProviderTopology(t *testing.T) {
 	runner := &fixedEstimator{output: modeledOutput("vllm", estimatorCandidate{Mode: "aggregated", Backend: "vllm", TotalGPUs: 4, Replicas: 1, GPUsPerReplica: 4, TensorParallelism: 4})}
 	_, err := (AIConfiguratorSource{Catalog: catalogSource(t), Runner: runner}).Propose(context.Background(), Request{ModelIdentity: "mistral-7b-instruct", Provider: "aws", Region: "eu-central-1", GPU: "L40S", Objective: "throughput"})

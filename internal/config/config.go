@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -18,41 +19,43 @@ import (
 )
 
 type Config struct {
-	DatabaseURL, ControlURL, Host, APIKey, RouterBinary, AIPerfBinary, PassportSigningKeyFile, InstanceID, Environment string
-	TLSCertFile, TLSKeyFile, TLSClientCAFile, ClientTLSCertFile, ClientTLSKeyFile, ClientTLSCAFile                     string
-	AsyncEncryptionKey, AsyncEncryptionKeyReference                                                                    string
-	HostedAuthIssuer, HostedAuthAudience, HostedAuthJWTKey, HostedAuthJWTKeyFile                                       string
-	HostedAuthAuthorizedParties                                                                                        []string
-	HostedAuthAutoProvision                                                                                            bool
-	StripeSecretKey, StripeWebhookSecret, StripeBillingReturnURL                                                       string
-	ModelAPICatalogFile, ModelAPIOperatorTenantID                                                                      string
-	HostedModelAPIEndpoints                                                                                            map[string]string
-	StripePriceIDs                                                                                                     map[int64]string
-	StripeLivemode                                                                                                     bool
-	RunPodAPIKey, RunPodServerlessTemplateID, RunPodRESTURL, RunPodArtifactCachePolicy, RunPodHFTokenSecret            string
-	SkyPilotAPI                                                                                                        string
-	SkyPilotProviders                                                                                                  []SkyPilotProvider
-	RunPodContainerDiskGiB                                                                                             int
-	RunPodNetworkVolumes                                                                                               map[string]string
-	AWSRoleARN, AWSExternalID, AWSRegion, AWSSubnetID, AWSAMIID, AWSInstanceType, AWSGPU                               string
-	AWSInstanceProfileARN, AWSWorkerSecretARN, AWSImageDigest                                                          string
-	AWSImageCachePolicy, AWSArtifactCachePolicy                                                                        string
-	AWSSubnetIDs, AWSSecurityGroupIDs                                                                                  []string
-	AWSArtifactSnapshots                                                                                               map[string]string
-	AWSGPUCount, AWSRootVolumeGiB, AWSGP3IOPS, AWSGP3Throughput, AWSArtifactVolumeInitializationRate                   int
-	GCPProject, GCPZone, GCPSubnet, GCPMachineType, GCPGPU, GCPServiceAccount                                          string
-	GCPVMImage, GCPContainerImage, GCPWorkerSecret, GCPArtifactCachePolicy                                             string
-	GCPArtifactDisks                                                                                                   map[string]string
-	GCPBootDiskGiB                                                                                                     int
-	KubernetesContext, KubernetesNamespace, KubernetesWorkloadAPI, KubernetesServiceAccount                            string
-	KubernetesWorkerSecretName, KubernetesWorkerSecretKey, KubernetesImageDigest                                       string
-	KubernetesGPUResource, KubernetesGPUProductLabel, KubernetesImageCachePolicy, KubernetesArtifactCachePolicy        string
-	KubernetesArtifactPVCs                                                                                             map[string]string
-	DynamoVLLMImageDigest, DynamoVLLMRuntimeVersion, DynamoSGLangImageDigest, DynamoSGLangRuntimeVersion               string
-	DynamoModelSecretName                                                                                              string
-	Port, RouterStartPort, DatabaseMaxOpen, DatabaseMaxIdle                                                            int
-	HealthInterval, UpstreamTimeout, ShutdownTimeout, RequestRetention, GPUPriceSyncInterval                           time.Duration
-	OptimizationPrices                                                                                                 []OptimizationPrice
+	DatabaseURL, ControlURL, Host, APIKey, RouterBinary, AIPerfBinary, PassportSigningKeyFile, InstanceID, Environment    string
+	TLSCertFile, TLSKeyFile, TLSClientCAFile, ClientTLSCertFile, ClientTLSKeyFile, ClientTLSCAFile                        string
+	AsyncEncryptionKey, AsyncEncryptionKeyReference                                                                       string
+	HostedAuthIssuer, HostedAuthAudience, HostedAuthJWTKey, HostedAuthJWTKeyFile                                          string
+	HostedAuthAuthorizedParties                                                                                           []string
+	HostedAuthAutoProvision                                                                                               bool
+	StripeSecretKey, StripeWebhookSecret, StripeBillingReturnURL                                                          string
+	ModelAPICatalogFile, ModelAPIOperatorTenantID                                                                         string
+	HostedModelAPIEndpoints                                                                                               map[string]string
+	BrezelSandboxURL, BrezelSandboxTokenFile, BrezelSandboxProjectID, BrezelSandboxTenantID, BrezelSandboxDefaultTemplate string
+	BrezelSandboxTemplates                                                                                                map[string]string
+	StripePriceIDs                                                                                                        map[int64]string
+	StripeLivemode                                                                                                        bool
+	RunPodAPIKey, RunPodServerlessTemplateID, RunPodRESTURL, RunPodArtifactCachePolicy, RunPodHFTokenSecret               string
+	SkyPilotAPI                                                                                                           string
+	SkyPilotProviders                                                                                                     []SkyPilotProvider
+	RunPodContainerDiskGiB                                                                                                int
+	RunPodNetworkVolumes                                                                                                  map[string]string
+	AWSRoleARN, AWSExternalID, AWSRegion, AWSSubnetID, AWSAMIID, AWSInstanceType, AWSGPU                                  string
+	AWSInstanceProfileARN, AWSWorkerSecretARN, AWSImageDigest                                                             string
+	AWSImageCachePolicy, AWSArtifactCachePolicy                                                                           string
+	AWSSubnetIDs, AWSSecurityGroupIDs                                                                                     []string
+	AWSArtifactSnapshots                                                                                                  map[string]string
+	AWSGPUCount, AWSRootVolumeGiB, AWSGP3IOPS, AWSGP3Throughput, AWSArtifactVolumeInitializationRate                      int
+	GCPProject, GCPZone, GCPSubnet, GCPMachineType, GCPGPU, GCPServiceAccount                                             string
+	GCPVMImage, GCPContainerImage, GCPWorkerSecret, GCPArtifactCachePolicy                                                string
+	GCPArtifactDisks                                                                                                      map[string]string
+	GCPBootDiskGiB                                                                                                        int
+	KubernetesContext, KubernetesNamespace, KubernetesWorkloadAPI, KubernetesServiceAccount                               string
+	KubernetesWorkerSecretName, KubernetesWorkerSecretKey, KubernetesImageDigest                                          string
+	KubernetesGPUResource, KubernetesGPUProductLabel, KubernetesImageCachePolicy, KubernetesArtifactCachePolicy           string
+	KubernetesArtifactPVCs                                                                                                map[string]string
+	DynamoVLLMImageDigest, DynamoVLLMRuntimeVersion, DynamoSGLangImageDigest, DynamoSGLangRuntimeVersion                  string
+	DynamoModelSecretName                                                                                                 string
+	Port, RouterStartPort, DatabaseMaxOpen, DatabaseMaxIdle                                                               int
+	HealthInterval, UpstreamTimeout, ShutdownTimeout, RequestRetention, GPUPriceSyncInterval                              time.Duration
+	OptimizationPrices                                                                                                    []OptimizationPrice
 }
 
 type OptimizationPrice struct {
@@ -360,6 +363,10 @@ func load(requireAPIKey bool) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	brezelSandboxTemplates, err := envStringMap("INFERCRANE_BREZEL_SANDBOX_TEMPLATES_JSON")
+	if err != nil {
+		return Config{}, err
+	}
 	stripeLivemode, err := envBool("INFERCRANE_STRIPE_LIVEMODE", false)
 	if err != nil {
 		return Config{}, err
@@ -397,6 +404,12 @@ func load(requireAPIKey bool) (Config, error) {
 		ModelAPICatalogFile:                 env("INFERCRANE_MODEL_API_CATALOG_FILE", ""),
 		ModelAPIOperatorTenantID:            env("INFERCRANE_MODEL_API_OPERATOR_TENANT_ID", ""),
 		HostedModelAPIEndpoints:             hostedModelAPIEndpoints,
+		BrezelSandboxURL:                    env("INFERCRANE_BREZEL_SANDBOX_URL", ""),
+		BrezelSandboxTokenFile:              env("INFERCRANE_BREZEL_SANDBOX_TOKEN_FILE", ""),
+		BrezelSandboxProjectID:              env("INFERCRANE_BREZEL_SANDBOX_PROJECT_ID", ""),
+		BrezelSandboxTenantID:               env("INFERCRANE_BREZEL_SANDBOX_TENANT_ID", ""),
+		BrezelSandboxDefaultTemplate:        env("INFERCRANE_BREZEL_SANDBOX_DEFAULT_TEMPLATE", ""),
+		BrezelSandboxTemplates:              brezelSandboxTemplates,
 		RunPodAPIKey:                        env("RUNPOD_API_KEY", ""),
 		RunPodServerlessTemplateID:          env("INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID", ""),
 		RunPodRESTURL:                       env("INFERCRANE_RUNPOD_REST_URL", "https://rest.runpod.io/v1"),
@@ -509,6 +522,9 @@ func load(requireAPIKey bool) (Config, error) {
 	if len(config.HostedModelAPIEndpoints) > 0 && strings.TrimSpace(config.ModelAPIOperatorTenantID) == "" {
 		return Config{}, errors.New("INFERCRANE_MODEL_API_OPERATOR_TENANT_ID is required when hosted Model API endpoints are configured")
 	}
+	if err := validateBrezelSandbox(config); err != nil {
+		return Config{}, err
+	}
 	if config.RunPodContainerDiskGiB < 50 || config.RunPodContainerDiskGiB > 2048 {
 		return Config{}, fmt.Errorf("INFERCRANE_RUNPOD_CONTAINER_DISK_GIB must be between 50 and 2048")
 	}
@@ -540,6 +556,37 @@ func load(requireAPIKey bool) (Config, error) {
 		return Config{}, err
 	}
 	return config, nil
+}
+
+func (c Config) BrezelSandboxEnabled() bool {
+	return c.BrezelSandboxURL != "" && c.BrezelSandboxTokenFile != "" && c.BrezelSandboxProjectID != "" && c.BrezelSandboxTenantID != "" && len(c.BrezelSandboxTemplates) > 0
+}
+
+func validateBrezelSandbox(config Config) error {
+	configured := config.BrezelSandboxURL != "" || config.BrezelSandboxTokenFile != "" || config.BrezelSandboxProjectID != "" || config.BrezelSandboxTenantID != "" || config.BrezelSandboxDefaultTemplate != "" || len(config.BrezelSandboxTemplates) > 0
+	if !configured {
+		return nil
+	}
+	if !config.BrezelSandboxEnabled() {
+		return errors.New("Brezel sandbox configuration is partial; URL, token file, project ID, tenant ID, and approved templates are required")
+	}
+	parsed, err := url.Parse(config.BrezelSandboxURL)
+	loopback := parsed != nil && (strings.EqualFold(parsed.Hostname(), "localhost") || net.ParseIP(parsed.Hostname()) != nil && net.ParseIP(parsed.Hostname()).IsLoopback())
+	if err != nil || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Scheme != "https" && !(parsed.Scheme == "http" && loopback) {
+		return errors.New("INFERCRANE_BREZEL_SANDBOX_URL must use HTTPS except for an absolute loopback HTTP origin")
+	}
+	if !filepath.IsAbs(config.BrezelSandboxTokenFile) {
+		return errors.New("INFERCRANE_BREZEL_SANDBOX_TOKEN_FILE must be an absolute path")
+	}
+	if strings.TrimSpace(config.BrezelSandboxProjectID) != config.BrezelSandboxProjectID || strings.TrimSpace(config.BrezelSandboxTenantID) != config.BrezelSandboxTenantID {
+		return errors.New("Brezel sandbox project and tenant IDs cannot contain surrounding whitespace")
+	}
+	if config.BrezelSandboxDefaultTemplate != "" {
+		if _, ok := config.BrezelSandboxTemplates[config.BrezelSandboxDefaultTemplate]; !ok {
+			return errors.New("INFERCRANE_BREZEL_SANDBOX_DEFAULT_TEMPLATE must name an approved template")
+		}
+	}
+	return nil
 }
 
 func validateRunPod(config Config) error {

@@ -1,0 +1,89 @@
+{
+  "schema_version": "infercrane.modal-public-trace-two-model-screen/v1",
+  "evidence_class": "public-trace-shaped-real-gpu-screening",
+  "observed_at": "2026-09-20T07:37:40Z",
+  "modal_app_id": "ap-W6TiBCAZb0jWDB6qGcwJH1",
+  "workload_profile_digest": "sha256:fc88149b14f24e73c49b841df7e32db2be2a2e3e10c7cfbd834b1617310d5c7e",
+  "workload_source": {
+    "name": "A Year in LLM Serving (Chutes)",
+    "license": "CC-BY-4.0",
+    "trace_rows": 6122413756,
+    "trace_bytes": 91044147663,
+    "rows_inspected": 150000,
+    "row_groups": [611, 3056, 5502],
+    "total_row_groups": 6114,
+    "remote_only": true
+  },
+  "environment": {
+    "gpu_request": "L40S",
+    "gpu": "NVIDIA L40S",
+    "compute_capability": "sm89",
+    "runtime": "vllm==0.22.1",
+    "benchmark": "aiperf==0.12.0",
+    "torch": "2.11.0+cu130",
+    "profile_runs": 2,
+    "random_seed": 17,
+    "streaming": true
+  },
+  "models": [
+    {
+      "model": "Qwen/Qwen3-0.6B",
+      "revision": "c1899de289a04d12100db370d81485cdf75e47ca",
+      "campaigns": [
+        {
+          "profile": "public-interactive",
+          "workload": {"input_tokens": 3919, "output_tokens": 295, "concurrency": 8, "requests_per_run": 32},
+          "aggregate": {"requests": 64, "succeeded": 64, "failed": 0, "request_throughput": 3.240274779078211, "output_token_throughput": 955.3241376004182, "ttft_p95_ms": 236.15740399999999, "tpot_p95_ms": 8.096892985097131, "latency_p95_ms": 2571.092398},
+          "coefficient_of_variation": {"request_throughput": 0.0510074036098778, "output_token_throughput": 0.050333728095874435, "ttft_p95_ms": 0.6828878382263596, "tpot_p95_ms": 0.04460346343391862, "latency_p95_ms": 0.09190877467140517},
+          "runs": [
+            {"request_throughput": 3.1274740430114365, "output_token_throughput": 922.5071091245296, "ttft_p95_ms": 350.191821, "tpot_p95_ms": 8.352264224489796, "latency_p95_ms": 2738.185939},
+            {"request_throughput": 3.3615168981816783, "output_token_throughput": 990.5970109329132, "ttft_p95_ms": 122.122987, "tpot_p95_ms": 7.841521745704467, "latency_p95_ms": 2403.998857}
+          ]
+        },
+        {
+          "profile": "public-decode-heavy",
+          "workload": {"input_tokens": 3919, "output_tokens": 1377, "concurrency": 4, "requests_per_run": 32},
+          "aggregate": {"requests": 64, "succeeded": 64, "failed": 0, "request_throughput": 0.5174548419801052, "output_token_throughput": 704.8462618640567, "ttft_p95_ms": 65.4989935, "tpot_p95_ms": 5.751579559980273, "latency_p95_ms": 7747.395147499999},
+          "coefficient_of_variation": {"request_throughput": 0.0003479425657882874, "output_token_throughput": 0.0011931785592069366, "ttft_p95_ms": 0.13636211084026217, "tpot_p95_ms": 0.01354049929159349, "latency_p95_ms": 0.0012551843230517031},
+          "runs": [
+            {"request_throughput": 0.5175821840435062, "output_token_throughput": 704.2514336074471, "ttft_p95_ms": 59.183412, "tpot_p95_ms": 5.806648512102874, "latency_p95_ms": 7740.518951999999},
+            {"request_throughput": 0.5173275625618758, "output_token_throughput": 705.440797498438, "ttft_p95_ms": 71.81457499999999, "tpot_p95_ms": 5.696510607857673, "latency_p95_ms": 7754.271342999999}
+          ]
+        }
+      ]
+    },
+    {
+      "model": "Qwen/Qwen3-1.7B",
+      "revision": "70d244cc86ccca08cf5af4e1e306ecf908b1ad5e",
+      "campaigns": [
+        {
+          "profile": "public-interactive",
+          "workload": {"input_tokens": 3919, "output_tokens": 295, "concurrency": 8, "requests_per_run": 32},
+          "aggregate": {"requests": 64, "succeeded": 64, "failed": 0, "request_throughput": 2.2528130903723635, "output_token_throughput": 664.5798616598472, "ttft_p95_ms": 382.572512, "tpot_p95_ms": 11.63669355782313, "latency_p95_ms": 3741.836837},
+          "coefficient_of_variation": {"request_throughput": 0.09246874322982576, "output_token_throughput": 0.09246874322982558, "ttft_p95_ms": 0.9835050057681518, "tpot_p95_ms": 0.08291858448578458, "latency_p95_ms": 0.15308469821657428},
+          "runs": [
+            {"request_throughput": 2.1145524932818094, "output_token_throughput": 623.7929855181338, "ttft_p95_ms": 648.62991, "tpot_p95_ms": 12.318979588435374, "latency_p95_ms": 4146.880303},
+            {"request_throughput": 2.410419000515789, "output_token_throughput": 711.0736051521576, "ttft_p95_ms": 116.515114, "tpot_p95_ms": 10.954407527210883, "latency_p95_ms": 3336.7933709999998}
+          ]
+        },
+        {
+          "profile": "public-decode-heavy",
+          "workload": {"input_tokens": 3919, "output_tokens": 1377, "concurrency": 4, "requests_per_run": 32},
+          "aggregate": {"requests": 64, "succeeded": 64, "failed": 0, "request_throughput": 0.32921255292270796, "output_token_throughput": 453.2176625056411, "ttft_p95_ms": 71.34604999999999, "tpot_p95_ms": 8.793586273783701, "latency_p95_ms": 12157.189191},
+          "coefficient_of_variation": {"request_throughput": 0.00011407638357578077, "output_token_throughput": 0.000030383444626530123, "ttft_p95_ms": 0.008899295246249942, "tpot_p95_ms": 0.00126746190778762, "latency_p95_ms": 0.000025386116878540155},
+          "runs": [
+            {"request_throughput": 0.32923911072704726, "output_token_throughput": 453.20792463799074, "ttft_p95_ms": 71.795013, "tpot_p95_ms": 8.80146735761107, "latency_p95_ms": 12156.970960999999},
+            {"request_throughput": 0.3291859994025504, "output_token_throughput": 453.2273988024239, "ttft_p95_ms": 70.897087, "tpot_p95_ms": 8.785705189956332, "latency_p95_ms": 12157.407421}
+          ]
+        }
+      ]
+    }
+  ],
+  "comparisons": [
+    {"profile": "public-interactive", "qwen06_over_qwen17_output_throughput": 1.437485835358314, "qwen06_over_qwen17_request_throughput": 1.4383238418339588, "qwen06_over_qwen17_ttft_p95": 0.6172879561195447, "qwen06_over_qwen17_tpot_p95": 0.6958070129511783},
+    {"profile": "public-decode-heavy", "qwen06_over_qwen17_output_throughput": 1.5552047507753157, "qwen06_over_qwen17_request_throughput": 1.571795599487947, "qwen06_over_qwen17_ttft_p95": 0.9180465281539764, "qwen06_over_qwen17_tpot_p95": 0.65406529041825}
+  ],
+  "preflight_correction": "The first decode-heavy attempt was rejected by the server context guard because the harness did not reserve chat-template headroom. No metric from that attempt is included. The rerun reserved 512 tokens and completed with zero errors.",
+  "selection_boundary": "Performance-only screening on the same L40S request and public trace token shapes. Model quality differs and is not measured; customer replay, semantic quality, sourced cost, and Release Guard remain required.",
+  "cleanup": {"app_state": "stopped", "active_gpu_tasks": 0}
+}

@@ -98,6 +98,13 @@ func RankMeasuredCampaign(campaign domain.OptimizationCampaign, benchmarks []dom
 	if err = json.Unmarshal([]byte(evaluation.ResultsJSON), &rows); err != nil {
 		return MeasuredRanking{}, fmt.Errorf("decode deterministic Lab result: %w", err)
 	}
+	if proposal.Input.WorkloadSource == optimizer.WorkloadSourcePublicPrior {
+		for _, candidateID := range evidenceToCandidate {
+			decisions[candidateID] = RankInconclusive
+			reasons[candidateID] = "public workload prior is screening evidence; representative customer replay is required before qualification or promotion"
+		}
+		return MeasuredRanking{Evaluation: evaluation, Decisions: decisions, Reasons: reasons}, nil
+	}
 	selectedCandidate := ""
 	allComparable, allFailedConstraints := len(rows) > 0, len(rows) > 0
 	for _, row := range rows {

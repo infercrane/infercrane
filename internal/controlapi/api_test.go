@@ -21,6 +21,7 @@ import (
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/intentplan"
+	"github.com/infercrane/infercrane/internal/kernelplanner"
 	"github.com/infercrane/infercrane/internal/managedbilling"
 	"github.com/infercrane/infercrane/internal/modelapicatalog"
 	"github.com/infercrane/infercrane/internal/optimizationcampaign"
@@ -30,8 +31,10 @@ import (
 	"github.com/infercrane/infercrane/internal/pricing"
 	"github.com/infercrane/infercrane/internal/provision"
 	"github.com/infercrane/infercrane/internal/qualityevidence"
+	"github.com/infercrane/infercrane/internal/sandboxprovider"
 	"github.com/infercrane/infercrane/internal/support"
 	"github.com/infercrane/infercrane/internal/trainingartifact"
+	"github.com/infercrane/infercrane/internal/workloadprofile"
 )
 
 type fakeStore struct {
@@ -63,6 +66,41 @@ type fakeOptimizationCosts struct{}
 type fakeLaunchProber struct {
 	evidence provision.LaunchProbeEvidence
 	err      error
+}
+
+type fakeSandboxProvider struct {
+	created sandboxprovider.CreateRequest
+	key     string
+	tenant  string
+}
+
+func (f *fakeSandboxProvider) Capabilities(_ context.Context, tenant string) (sandboxprovider.Capabilities, error) {
+	f.tenant = tenant
+	return sandboxprovider.Capabilities{Provider: "brezel", Product: "InferCrane Sandboxes", State: "ready", Assurance: "private-tenant-preview", Templates: []sandboxprovider.Template{}}, nil
+}
+func (f *fakeSandboxProvider) List(_ context.Context, tenant string, _ bool) ([]sandboxprovider.Sandbox, error) {
+	f.tenant = tenant
+	return []sandboxprovider.Sandbox{{ID: "sandbox-1", Provider: "brezel", State: "running"}}, nil
+}
+func (f *fakeSandboxProvider) Get(_ context.Context, tenant, id string) (sandboxprovider.Sandbox, error) {
+	f.tenant = tenant
+	return sandboxprovider.Sandbox{ID: id, Provider: "brezel", State: "running"}, nil
+}
+func (f *fakeSandboxProvider) Create(_ context.Context, tenant, key string, request sandboxprovider.CreateRequest) (sandboxprovider.Mutation, error) {
+	f.tenant, f.key, f.created = tenant, key, request
+	return sandboxprovider.Mutation{Resource: sandboxprovider.Sandbox{ID: "sandbox-1", Provider: "brezel", State: "running"}, Operation: sandboxprovider.Operation{ID: "operation-1", State: "succeeded"}}, nil
+}
+func (f *fakeSandboxProvider) Pause(_ context.Context, tenant, id, key string) (sandboxprovider.Mutation, error) {
+	f.tenant, f.key = tenant, key
+	return sandboxprovider.Mutation{Resource: sandboxprovider.Sandbox{ID: id, Provider: "brezel", State: "standby"}}, nil
+}
+func (f *fakeSandboxProvider) Resume(_ context.Context, tenant, id, key string) (sandboxprovider.Mutation, error) {
+	f.tenant, f.key = tenant, key
+	return sandboxprovider.Mutation{Resource: sandboxprovider.Sandbox{ID: id, Provider: "brezel", State: "running"}}, nil
+}
+func (f *fakeSandboxProvider) Delete(_ context.Context, tenant, id, key string) (sandboxprovider.Mutation, error) {
+	f.tenant, f.key = tenant, key
+	return sandboxprovider.Mutation{Resource: sandboxprovider.Sandbox{ID: id, Provider: "brezel", State: "deleted"}}, nil
 }
 
 func (p fakeLaunchProber) ProbeLaunch(context.Context, provision.LaunchProbeRequest) (provision.LaunchProbeEvidence, error) {
@@ -502,6 +540,48 @@ func TestEndpointMonitoringIsAuthenticatedBoundedAndContentFree(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("unknown query status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestEndpointOptimizationReadinessUsesMonitoringWithoutClaimingKernelEvidence(t *testing.T) {
+	now := time.Now().UTC()
+	zero, latency, queue := 0.0, 1000.0, 300.0
+	store := &fakeMonitoringStore{fakeStore: &fakeStore{}, snapshot: domain.EndpointMonitoringSnapshot{
+		Endpoint: "coder-production", WindowStart: now.Add(-time.Hour), WindowEnd: now, BucketSeconds: 60,
+		Summary:  domain.MonitoringSummary{Requests: 100, ErrorRate: &zero, P95LatencyMS: &latency, P95QueueMS: &queue},
+		Evidence: domain.MonitoringEvidence{Source: "infercrane_gateway_request_records", SampleCount: 100, Fresh: true, ContentRecorded: false},
+	}}
+	handler := (API{Store: store, APIKey: "secret"}).Handler()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/endpoints/coder-production/optimization-readiness?window_seconds=3600", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"primary_bottleneck":"queueing-and-admission"`) || !strings.Contains(response.Body.String(), `"eligible":false`) || !strings.Contains(response.Body.String(), `"provider_mutation":false`) || strings.Contains(response.Body.String(), "prompt") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestKernelOpportunityAPIPlansExistingFirstWithoutExecutingCode(t *testing.T) {
+	requestBody := kernelplanner.Request{
+		SchemaVersion: kernelplanner.RequestSchemaV1,
+		Model:         kernelplanner.ModelIdentity{Repository: "Qwen/Qwen3-0.6B", Revision: strings.Repeat("a", 40)},
+		Runtime:       kernelplanner.RuntimeIdentity{Name: "vllm", Version: "0.22.1", ImageDigest: "sha256:" + strings.Repeat("1", 64)},
+		Hardware:      kernelplanner.HardwareIdentity{Vendor: "nvidia", Accelerator: "H100", ComputeCapability: "sm90"},
+		Workload:      kernelplanner.Workload{Digest: "sha256:" + strings.Repeat("2", 64), Phase: kernelplanner.PhaseDecode, BatchSize: 1, Concurrency: 1, InputTokens: 32, OutputTokens: 16},
+		Profile:       kernelplanner.Profile{Tool: "nsys", ToolVersion: "2026.4", EvidenceClass: "measured", Hotspots: []kernelplanner.Hotspot{{ID: "attention", Name: "paged_attention", Family: kernelplanner.AttentionDecode, DeviceTimeFraction: .25, Shapes: []string{"1x16x128"}, DTypes: []string{"bf16"}}}},
+		Policy:        kernelplanner.Policy{RequireMeasuredProfiler: true},
+	}
+	body, err := json.Marshal(requestBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := (API{Store: &fakeStore{}, APIKey: "secret"}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/optimization/kernel-opportunities", strings.NewReader(string(body)))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"registry_version":"infercrane-kernel-registry-v1"`) || !strings.Contains(response.Body.String(), `"implementation_id":"runtime-vllm"`) || !strings.Contains(response.Body.String(), `"code_execution":false`) || !strings.Contains(response.Body.String(), `"performance_claims":false`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 
@@ -1084,6 +1164,50 @@ func TestOptimizationCampaignRequiresImmutableProposalAndExplicitBoundedApproval
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"modeled evidence cannot qualify`) || !strings.Contains(response.Body.String(), `"target_endpoint":`) {
 		t.Fatalf("inspect status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestPublicWorkloadProfilesFeedOptimizationWithoutPromotionClaims(t *testing.T) {
+	registry, err := integration.V1Catalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := (API{Store: &fakeStore{}, APIKey: "secret", Integrations: registry.Snapshot()}).Handler()
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/workload-profiles", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	for _, expected := range []string{`"id":"public-interactive"`, `"promotion_eligible":false`, `"content_stored":false`, workloadprofile.PublicPriorDigest, `"next_source":"customer_observed"`} {
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), expected) {
+			t.Fatalf("list status=%d missing=%q body=%s", response.Code, expected, response.Body.String())
+		}
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/workload-profiles/public-decode-heavy", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"output_tokens":1377`) || !strings.Contains(response.Body.String(), `"workload_source":"public_prior"`) {
+		t.Fatalf("detail status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/workload-profiles/not-a-profile", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("unknown profile status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/optimization/proposals", strings.NewReader(`{"model_identity":"qwen3-8b","provider":"aws","region":"eu-central-1","gpu":"L40S","objective":"interactive","workload_profile":"public-interactive","max_candidates":1}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	for _, expected := range []string{`"workload_source":"public_prior"`, workloadprofile.PublicPriorDigest, "screening evidence", "representative customer replay"} {
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), expected) {
+			t.Fatalf("proposal status=%d missing=%q body=%s", response.Code, expected, response.Body.String())
+		}
 	}
 }
 
@@ -2543,14 +2667,14 @@ func TestBenchmarkRunsThroughControlPlaneAndPersistsIdentity(t *testing.T) {
 	spec := `{"model":"Qwen/Qwen3-8B","model_revision":"commit","runtime":"vllm","runtime_version":"0.10","compute_mode":"elastic","gpu":"L40S","region":"EU"}`
 	store := &fakeStore{resolved: domain.ResolvedDeployment{Deployment: domain.Deployment{ID: "dep", Name: "qwen", ActiveRevisionID: "rev"}, Targets: []domain.Target{{Provider: "runpod"}}}, revisions: []domain.DeploymentRevision{{ID: "rev", SpecJSON: spec}}, artifact: domain.ModelArtifact{ID: "artifact", Repository: "Qwen/Qwen3-8B", ModelIdentity: "Qwen/Qwen3-8B@commit"}}
 	runner := &fakeBenchmarkRunner{}
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments/qwen/benchmarks", strings.NewReader(`{"requests":10,"concurrency":2,"random_seed":42}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments/qwen/benchmarks", strings.NewReader(`{"requests":10,"concurrency":2,"random_seed":42,"runs":3,"warmup_requests":4,"run_cooldown_seconds":2,"arrival_pattern":"poisson","request_rate":5}`))
 	request.Header.Set("Authorization", "Bearer secret")
 	response := httptest.NewRecorder()
 	(API{Store: store, APIKey: "secret", BenchmarkRunner: runner, GatewayURL: "http://gateway", AIPerfBinary: "aiperf"}).Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"model_identity":"Qwen/Qwen3-8B@commit"`) || !strings.Contains(response.Body.String(), `"gpu_count":1`) {
 		t.Fatalf("response=%d %s", response.Code, response.Body.String())
 	}
-	if runner.config.APIKey != "secret" || runner.config.RandomSeed != 42 || runner.config.Model != "qwen" || runner.config.Tokenizer != "Qwen/Qwen3-8B" || len(store.benchmarks) != 1 || store.benchmarks[0].GPU != "L40S" || store.benchmarks[0].GPUCount == nil || *store.benchmarks[0].GPUCount != 1 || !strings.Contains(store.benchmarks[0].CostMetadataJSON, `"available":false`) {
+	if runner.config.APIKey != "secret" || runner.config.RandomSeed != 42 || runner.config.Model != "qwen" || runner.config.Tokenizer != "Qwen/Qwen3-8B" || runner.config.ProfileRuns != 3 || runner.config.WarmupRequests != 4 || runner.config.ProfileRunCooldown != 2*time.Second || runner.config.ArrivalPattern != "poisson" || runner.config.RequestRate != 5 || len(store.benchmarks) != 1 || store.benchmarks[0].GPU != "L40S" || store.benchmarks[0].GPUCount == nil || *store.benchmarks[0].GPUCount != 1 || !strings.Contains(store.benchmarks[0].WorkloadJSON, `"profile_runs":3`) || !strings.Contains(store.benchmarks[0].CostMetadataJSON, `"available":false`) {
 		t.Fatalf("config=%#v benchmarks=%#v", runner.config, store.benchmarks)
 	}
 }
@@ -3090,6 +3214,39 @@ func TestSandboxCompositionIssuesOneTimeScopedCredentialWithoutExternalMutation(
 	}
 	if refreshes != 3 {
 		t.Fatalf("credential cache refreshes=%d, want 3", refreshes)
+	}
+}
+
+func TestNativeSandboxLifecycleUsesProviderWithoutChangingReferenceRoutes(t *testing.T) {
+	store, provider := &fakeStore{}, &fakeSandboxProvider{}
+	handler := (API{Store: store, APIKey: "secret", SandboxProvider: provider}).Handler()
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/sandboxes", strings.NewReader(`{"template_id":"python-agent","ttl_seconds":900,"network_mode":"offline"}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Idempotency-Key", "sandbox-create-1")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted || provider.tenant != "global" || provider.key != "sandbox-create-1" || provider.created.TemplateID != "python-agent" || provider.created.ExpiresAfterSeconds != 900 || !strings.Contains(response.Body.String(), `"provider":"brezel"`) {
+		t.Fatalf("native sandbox response=%d %s provider=%#v", response.Code, response.Body.String(), provider)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/sandboxes/capabilities", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"assurance":"private-tenant-preview"`) {
+		t.Fatalf("capabilities response=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestNativeSandboxCapabilitiesAreHonestWhenProviderIsNotConfigured(t *testing.T) {
+	handler := (API{Store: &fakeStore{}, APIKey: "secret"}).Handler()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/sandboxes/capabilities", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"state":"not_configured"`) || !strings.Contains(response.Body.String(), `"qualification":"unavailable"`) {
+		t.Fatalf("capabilities response=%d %s", response.Code, response.Body.String())
 	}
 }
 
