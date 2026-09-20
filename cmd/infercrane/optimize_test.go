@@ -12,6 +12,7 @@ import (
 
 	"github.com/infercrane/infercrane/internal/optimizer"
 	"github.com/infercrane/infercrane/internal/spec"
+	"github.com/infercrane/infercrane/internal/workloadprofile"
 )
 
 func TestOptimizeProposeRunsOfflineAndEmitsUnmeasuredJSON(t *testing.T) {
@@ -35,10 +36,102 @@ func TestOptimizeProposeRunsOfflineAndEmitsUnmeasuredJSON(t *testing.T) {
 	}
 }
 
+func TestOptimizeWorkloadProfileProducesBenchmarkInputs(t *testing.T) {
+	distribution := workloadprofile.Distribution{Unit: "tokens", Samples: 100, Percentiles: workloadprofile.Percentiles{P50: 16, P90: 32, P95: 64, P99: 128}}
+	document := workloadprofile.Document{
+		SchemaVersion: workloadprofile.SchemaVersion, EvidenceClass: workloadprofile.EvidenceClass, GeneratedAt: "2026-09-20T12:00:00Z",
+		Source:              workloadprofile.Source{Name: "A Year in LLM Serving", URL: "https://example.com/trace.parquet", License: "CC-BY-4.0", TraceRows: 1000},
+		Sampling:            workloadprofile.Sampling{Method: "deterministic", Columns: []string{"it", "ot"}, RowGroups: []int{1}, TotalRowGroups: 10, RowsInspected: 100, RemoteOnly: true},
+		Distributions:       workloadprofile.Distributions{InputTokens: distribution, OutputTokens: distribution, CachedTokens: distribution, TTFTMilliseconds: distribution, DurationMS: distribution, CacheHitFraction: workloadprofile.Distribution{Unit: "ratio", Samples: 100, Percentiles: workloadprofile.Percentiles{P50: 0, P90: .5, P95: .75, P99: 1}}},
+		Profiles:            []workloadprofile.BenchmarkShape{{Name: "interactive", Description: "median shape", Objective: "latency", Requests: 32, Concurrency: 4, InputTokens: 16, OutputTokens: 32, Streaming: true}},
+		MethodologyBoundary: "Screening input only.",
+	}
+	digest, err := workloadprofile.Digest(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document.Digest = digest
+	encoded, _ := json.Marshal(document)
+	path := filepath.Join(t.TempDir(), "profile.json")
+	if err = os.WriteFile(path, encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	output, err := captureStdout(t, func() error {
+		return optimizeCommand(context.Background(), []string{"workload-profile", "--file", path})
+	})
+	if err != nil || !strings.Contains(output, "remote only") || !strings.Contains(output, "infercrane benchmark DEPLOYMENT") || !strings.Contains(output, digest) {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+}
+
+func TestOptimizeKernelPlanKeepsFixtureEvidenceUnmeasured(t *testing.T) {
+	fixture := filepath.Join("..", "..", "internal", "kernelplanner", "testdata", "qwen3-0.6b-fixture.json")
+	output, err := captureStdout(t, func() error {
+		return optimizeCommand(context.Background(), []string{"kernel-plan", "--file", fixture, "--output", "json"})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result struct {
+		EvidenceClass string `json:"evidence_class"`
+		Candidates    []struct {
+			Status string `json:"status"`
+		} `json:"candidates"`
+	}
+	if err = json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("decode kernel plan: %v\n%s", err, output)
+	}
+	if result.EvidenceClass != "fixture-unmeasured" || len(result.Candidates) == 0 || result.Candidates[0].Status != "proposed-unmeasured" {
+		t.Fatalf("result=%+v", result)
+	}
+	if err = optimizeCommand(context.Background(), []string{"kernel-plan", "--file", fixture, "--require-measured"}); err == nil || !strings.Contains(err.Error(), "measured profiler") {
+		t.Fatalf("fixture crossed measured boundary: %v", err)
+	}
+}
+
 func TestOptimizeProposeRejectsInvalidErrorRate(t *testing.T) {
 	err := optimizeCommand(context.Background(), []string{"propose", "qwen3-8b", "--provider", "aws", "--region", "eu-central-1", "--gpu", "L40S", "--max-error-rate", "1.1", "--source", "catalog"})
 	if err == nil || !strings.Contains(err.Error(), "between zero and one") {
 		t.Fatalf("invalid error-rate policy was accepted: %v", err)
+	}
+}
+
+func TestOptimizeEvidenceEvaluatesQualificationBeforeScoring(t *testing.T) {
+	fixture := filepath.Join("..", "..", "internal", "optimizationevidence", "testdata", "qwen38-modal-screening.json")
+	output, err := captureStdout(t, func() error {
+		return optimizeCommand(context.Background(), []string{"evidence", "evaluate", "--file", fixture, "--output", "json"})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result struct {
+		WinnerID   string `json:"winner_id"`
+		Candidates []struct {
+			CandidateID string   `json:"candidate_id"`
+			Qualified   bool     `json:"qualified"`
+			Score       *float64 `json:"score"`
+		} `json:"candidates"`
+	}
+	if err = json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("decode evaluation: %v\n%s", err, output)
+	}
+	if result.WinnerID != "sglang-control" {
+		t.Fatalf("winner=%q", result.WinnerID)
+	}
+	for _, candidate := range result.Candidates {
+		if candidate.CandidateID == "vllm-control" && (candidate.Qualified || candidate.Score != nil) {
+			t.Fatalf("SLO-ineligible baseline was scored: %+v", candidate)
+		}
+	}
+}
+
+func TestOptimizeEvidenceInspectsFastPathWithoutTrustPromotion(t *testing.T) {
+	fixture := filepath.Join("..", "..", "internal", "optimizationevidence", "testdata", "qwen38-fastpath-qualified.json")
+	output, err := captureStdout(t, func() error {
+		return optimizeCommand(context.Background(), []string{"evidence", "inspect-fastpath", "--file", fixture})
+	})
+	if err != nil || !strings.Contains(output, "Imported    external_unverified") || !strings.Contains(output, "Qualification remains blocked") {
+		t.Fatalf("output=%q err=%v", output, err)
 	}
 }
 
@@ -69,7 +162,7 @@ func TestOptimizeProposeFailsClosedWithoutReviewedModel(t *testing.T) {
 	output, err := captureStdout(t, func() error {
 		return optimizeCommand(context.Background(), []string{"propose", "unreviewed/model", "--provider", "gcp", "--region", "europe-west4", "--gpu", "nvidia-l4", "--source", "catalog"})
 	})
-	if err != nil || !strings.Contains(output, "reviewed_model_recipe") {
+	if err != nil || !strings.Contains(output, "immutable_model_revision") {
 		t.Fatalf("output=%q err=%v", output, err)
 	}
 }

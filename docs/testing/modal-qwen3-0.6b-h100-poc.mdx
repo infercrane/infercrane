@@ -1,0 +1,121 @@
+---
+title: "Qwen3-0.6B H100 optimization PoC"
+description: "Measured kernel and end-to-end recipe evidence from the Modal GPU campaign."
+---
+
+# Qwen3-0.6B H100 optimization PoC
+
+The PoC works, but the two useful conclusions are different:
+
+1. InferCrane can generate, validate, and benchmark a real Triton kernel on the
+   target GPU. The fused residual-add + RMSNorm candidate beat vLLM's isolated
+   fused operator by **3.1–13.0% on H100** and **1.6–11.2% on L40S**.
+2. The deployable runtime recipe mattered much more. Compiled vLLM produced
+   **4.41–6.44x** the output throughput of eager execution and reduced p95
+   request latency by **76.9–85.1%**.
+3. Writing CUDA was not treated as a success by itself. A handwritten CUDA C++
+   version passed correctness on H100 but was **8.9–13.5% slower than Triton**
+   and **1.7–12.8% slower than vLLM's vendor kernel**, so the agent rejected it.
+
+The kernel result is encouraging engineering evidence, not yet a customer
+performance claim. Its absolute saving is only about 0.0002–0.0008 ms per
+invocation. Qwen3-0.6B has 55 matching fused residual-normalization calls per
+decoded step, which gives an optimistic Amdahl ceiling of roughly **1.3–2.4%**
+on the measured decode workload. The candidate also did not consistently beat
+an equivalent `torch.compile` graph. It should remain in the candidate library
+until a profiler proves that this operator is a material end-to-end hotspot.
+
+## End-to-end result
+
+All rows used the same immutable model revision, H100 SXM, BF16 weights,
+vLLM 0.22.1, AIPerf 0.12.0, streaming, 128 input tokens, 64 forced output
+tokens, and three profile runs. There were no failed requests.
+
+| Concurrency | Eager output tok/s | Compiled output tok/s | Speedup | Compiled p95 TTFT | Compiled p95 latency |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 89 | 573 | 6.44x | 15.5 ms | 116.1 ms |
+| 8 | 660 | 3,915 | 5.93x | 34.1 ms | 137.1 ms |
+| 32 | 2,376 | 10,485 | 4.41x | 70.1 ms | 200.1 ms |
+
+At concurrency 32, compiled throughput had a **0.8% coefficient of variation**
+across the three runs. This is a clear recipe result rather than benchmark
+noise.
+
+## CUDA compiler ladder result
+
+The same residual-add + RMSNorm contract was implemented directly in visible
+CUDA C++, compiled with NVRTC, and launched through CuPy. This is a real custom
+CUDA kernel, not a Triton kernel described as CUDA. All five Qwen-shaped input
+sizes passed the independent PyTorch oracle.
+
+| Rows | CUDA | Triton | vLLM vendor | Decision |
+| ---: | ---: | ---: | ---: | --- |
+| 1 | 0.00632 ms | 0.00573 ms | 0.00617 ms | reject CUDA |
+| 8 | 0.00621 ms | 0.00571 ms | 0.00599 ms | reject CUDA |
+| 32 | 0.00626 ms | 0.00569 ms | 0.00613 ms | reject CUDA |
+| 128 | 0.00659 ms | 0.00604 ms | 0.00648 ms | reject CUDA |
+| 512 | 0.00809 ms | 0.00713 ms | 0.00717 ms | reject CUDA |
+
+This is the desired optimizer behavior: CUDA, Triton, and vendor kernels are
+peer candidates. “Custom kernel” is not a product checkbox that can override
+correctness, Amdahl headroom, or measured performance.
+
+## Cross-engine screening
+
+SGLang 0.5.10.post1 was also screened on H100. The attempt found several exact
+recipe constraints: Qwen3's default RoPE path needs a CUDA development toolkit,
+the SM90 extension needs `libnuma1`, and the default experimental piecewise
+CUDA graph path hit an illegal memory access. Disabling only that experimental
+path allowed the server to start while retaining ordinary CUDA graphs, but the
+standardized AIPerf streaming campaign did not complete within the operator's
+cost bound. That exact SGLang tuple is therefore **rejected for the MVP**, not
+silently tuned until it appears to win. This is not a general claim about
+SGLang.
+
+## Public-workload check
+
+We also reproduced the workload in AIPerf's comprehensive guide: 1,000
+requests at concurrency 100, with 1,000 input and 500 forced output tokens.
+Balanced vLLM reached **12,950 output tok/s** with zero errors. vLLM's named
+`throughput` mode reached **12,880 output tok/s** and worsened p95 TTFT, so the
+agent rejected that recipe for this workload.
+
+The guide shows 22,521 output tok/s, but does not identify the accelerator or
+runtime version. The numerical ratio is therefore directional only, not a
+valid competitive ranking. vLLM's own benchmark documentation also warns that
+performance is highly sensitive to workload parameters.
+
+## What the PoC proves
+
+- Immutable model identity and exact software versions are carried into the
+  experiment.
+- Kernel candidates are checked against an independent numerical oracle on
+  every shape before performance is considered.
+- InferCrane can compare the candidate with eager PyTorch, `torch.compile`,
+  and the runtime vendor kernel on real L40S and H100 hardware.
+- The same campaign can qualify runtime recipes under repeated AIPerf traffic,
+  calculate variance, accept a clear win, and reject a plausible-sounding loss.
+- Compatibility failures become recipe evidence. For this run, vLLM 0.22.1
+  required `VLLM_USE_DEEP_GEMM=0` for a normal BF16 model because of an
+  [upstream H100 startup bug](https://github.com/vllm-project/vllm/issues/41849).
+- A candidate runtime or kernel can be rejected without being erased from the
+  evidence trail. Negative results prevent the optimizer from retrying unsafe
+  or unproductive tuples.
+
+## What it does not prove
+
+This is fixed-shape synthetic evidence. It does not establish semantic quality,
+production workload performance, fleet economics, or safe promotion. A customer
+campaign must replay a content-free workload shape or an approved trace, run
+task-specific quality evaluations, compare cost per successful/SLO-compliant
+request, and pass Release Guard before receiving traffic.
+
+The machine-readable summary is in
+[`evidence/qwen3-0.6b-modal-2026-09-20.json`](./evidence/qwen3-0.6b-modal-2026-09-20.json).
+The handwritten CUDA screen is in
+[`evidence/qwen3-0.6b-cuda-h100-2026-09-20.json`](./evidence/qwen3-0.6b-cuda-h100-2026-09-20.json),
+and the rejected SGLang tuple is in
+[`evidence/qwen3-0.6b-sglang-screen-2026-09-20.json`](./evidence/qwen3-0.6b-sglang-screen-2026-09-20.json).
+The workload follows NVIDIA's
+[AIPerf methodology](https://developer.nvidia.com/blog/benchmarking-llm-inference-at-scale-with-aiperf/),
+including streaming metrics and forced output length.

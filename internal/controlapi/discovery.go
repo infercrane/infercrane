@@ -25,6 +25,13 @@ type endpointDiscovery struct {
 }
 
 func discoverEndpoint(ctx context.Context, supplied *http.Client, baseURL, requestedModel, connector string) (endpointDiscovery, error) {
+	return discoverEndpointAuthenticated(ctx, supplied, baseURL, requestedModel, connector, "")
+}
+
+// discoverEndpointAuthenticated performs the same bounded discovery as
+// discoverEndpoint while attaching one explicitly resolved bearer credential.
+// The credential is never returned, logged, persisted, or added to a URL.
+func discoverEndpointAuthenticated(ctx context.Context, supplied *http.Client, baseURL, requestedModel, connector, bearerToken string) (endpointDiscovery, error) {
 	if connector != "auto" && connector != "vllm" && connector != "litellm" && connector != "openai-compatible" {
 		return endpointDiscovery{}, errors.New("connector must be auto, vllm, litellm, or openai-compatible")
 	}
@@ -43,6 +50,9 @@ func discoverEndpoint(ctx context.Context, supplied *http.Client, baseURL, reque
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
 	if err != nil {
 		return endpointDiscovery{}, err
+	}
+	if bearerToken != "" {
+		req.Header.Set("Authorization", "Bearer "+bearerToken)
 	}
 	// The URL is an authenticated user's explicit inference endpoint. The
 	// restricted client below disables proxies, redirects, cookies, and dials
@@ -100,7 +110,11 @@ func discoverEndpoint(ctx context.Context, supplied *http.Client, baseURL, reque
 			detectedConnector, runtimeName = "vllm", "vllm"
 		}
 	}
-	return endpointDiscovery{Runtime: runtimeName, Connector: detectedConnector, Model: model, Models: models, Health: "reachable", Evidence: []string{"GET /v1/models returned the selected model"}}, nil
+	evidence := []string{"GET /v1/models returned the selected model"}
+	if bearerToken != "" {
+		evidence = append(evidence, "request used a server-resolved bearer credential")
+	}
+	return endpointDiscovery{Runtime: runtimeName, Connector: detectedConnector, Model: model, Models: models, Health: "reachable", Evidence: evidence}, nil
 }
 
 func restrictedDiscoveryClient(supplied *http.Client) (*http.Client, error) {

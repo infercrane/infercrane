@@ -1,0 +1,140 @@
+---
+title: Open-weight optimization PoC
+description: Prove the InferCrane optimization loop locally before authorizing paid GPU campaigns.
+---
+
+# Open-weight optimization PoC
+
+This PoC proves the system, not a universal speed claim. It accepts any immutable open-weight model,
+creates conservative runtime baselines, measures the same workload against isolated candidates, and
+promotes only evidence that survives quality, SLO, cost, and Release Guard checks.
+
+The complete operator-driven search design and research map live in
+[Model-agnostic optimization engine](/architecture/model-agnostic-optimization-engine).
+
+```text
+content-free workload shape
+          │
+          ▼
+ Profile ──► Search ──► Build in isolation ──► Measure ──► Prove ──► Deploy
+             │              │                    │           │
+             │              │                    │           └─ human activation / Release Guard
+             │              │                    └─ AIPerf 0.12 records + confidence
+             │              └─ pinned model, runtime, image, GPU and recipe
+             └─ baseline first; mechanisms become candidates, never assumptions
+```
+
+## Stage 1: local and free
+
+Run the contract and evidence tests without allocating a GPU:
+
+```bash
+GOCACHE=/tmp/infercrane-go-cache GOTMPDIR=/tmp \
+  go test ./internal/optimizer ./internal/benchmark \
+  ./internal/optimizationevidence ./internal/optimizationcampaign
+```
+
+Propose an uncataloged model using its immutable upstream commit:
+
+```bash
+infercrane optimize propose OWNER/MODEL \
+  --model-revision IMMUTABLE_40_TO_64_HEX_COMMIT \
+  --provider runpod-pods --gpu H100 --gpu-count 1 \
+  --runtimes vllm,sglang --objective throughput \
+  --source catalog --output json
+```
+
+This step is non-mutating. The output should contain one or more `proposed-unmeasured` generic
+baselines with no model-specific runtime arguments. A missing immutable revision, runtime version,
+or locally qualified provider/runtime path must fail closed.
+
+If a small OpenAI-compatible model is already running locally, exercise the AIPerf adapter through
+the normal benchmark API. Use three runs for the smoke result:
+
+```bash
+infercrane benchmark LOCAL_DEPLOYMENT \
+  --profile interactive --runs 3 --warmup-requests 4 \
+  --run-cooldown-seconds 2 --random-seed 17
+```
+
+No raw prompt or generated text is retained. InferCrane stores record-level metrics, immutable
+identities, the content-free load shape, and 95% intervals. A CPU endpoint validates orchestration
+and evidence plumbing; it is not GPU performance evidence.
+
+## Stage 2: one controlled GPU
+
+Start this only after an operator explicitly approves paid resources. Use the same model revision,
+runtime image, token shape, seed, and SLO for every lane. Measure concurrency `1`, `4`, and `8` for
+both the baseline and one candidate, with three runs during development and five for a decision.
+
+The first candidate should be a runtime recipe with a plausible large effect: batching budget,
+prefix caching for a workload with real prefix reuse, quantization with semantic-quality evidence,
+or model-native speculative decoding. Do not start with a custom kernel.
+
+Emit `infercrane.dev/optimization-evidence/v1` and evaluate it locally:
+
+```bash
+infercrane optimize evidence evaluate \
+  --file optimization-evidence.json --output json
+```
+
+The candidate must win on the declared objective without violating error, prompt-integrity,
+quality, TTFT, TPOT, and SLO gates. The receipt stays bound to the exact model, runtime, CUDA/GPU,
+recipe, workload digest, and run count.
+
+## Mechanism ladder
+
+Use the cheapest, broadest mechanisms first:
+
+1. Runtime scheduling: continuous batching, chunked prefill, queue and batch-token bounds.
+2. Workload reuse: prefix/KV caching only when the profile proves reusable prefixes.
+3. Artifact changes: FP8, AWQ, GPTQ, or NVFP4 with immutable build provenance and quality gates.
+4. Model-native decoding: MTP, EAGLE, DFlash, or another exact verifier pairing with acceptance data.
+5. Topology: tensor/expert parallelism, disaggregated prefill/decode, KV-aware routing.
+6. Custom CUDA/Triton/Rust-CUDA kernel only after a profile identifies a dominant kernel and an
+   Amdahl calculation shows material end-to-end headroom.
+
+A faster kernel is not automatically a faster service. If the target operation is only 2% of
+end-to-end time, even eliminating it has at most 2% theoretical upside. InferCrane should record
+that rejection as useful search evidence and move to the next mechanism.
+
+The kernel-planning PoC makes this gate executable. The checked-in Qwen profile is explicitly a
+documentation fixture, not measured H100 evidence:
+
+```bash
+infercrane optimize kernel-plan \
+  --file internal/kernelplanner/testdata/qwen3-0.6b-fixture.json
+
+python3 tools/kernel-lab/fused_residual_rmsnorm.py \
+  --self-test --rows 7 --hidden-size 1024
+```
+
+The first command computes Amdahl ceilings and required kernel speedup from typed operator hotspots.
+The second checks the fused residual-add + RMSNorm contract locally. A paid campaign must replace the
+fixture with measured profiler evidence, add `--require-measured`, compile on the exact target GPU,
+and pass paired AIPerf plus quality gates.
+
+## PoC exit criteria
+
+The unpaid stage is complete when generic proposals are deterministic, mutable revisions fail,
+AIPerf multi-run fixtures produce pooled metrics and confidence, and evidence evaluation is
+repeatable. The first paid stage is complete only when baseline and candidate each have all required
+lanes, repeated runs, zero identity drift, passing semantic quality, sourced cost, and cleanup
+evidence. Production promotion remains a separate explicit action.
+
+The first measured Qwen3-0.6B/H100 campaign, including accepted vLLM evidence,
+a rejected handwritten CUDA candidate, and a rejected SGLang tuple, is recorded
+in [Qwen3-0.6B H100 optimization PoC](/testing/modal-qwen3-0.6b-h100-poc).
+
+The remote-only integration of the 6.12B-request Chutes trace and paired
+Qwen3-0.6B/Qwen3-1.7B L40S measurements are recorded in
+[Public trace workload PoC](/testing/chutes-public-workload-poc).
+
+Existing FastPath manifests can be inspected with:
+
+```bash
+infercrane optimize evidence inspect-fastpath --file MANIFEST.json
+```
+
+Inspection imports provenance; it does not relabel community or screening measurements as InferCrane
+qualification evidence.

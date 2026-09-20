@@ -51,7 +51,21 @@ var profiles = map[string]Profile{
 		Name: "buffered", Objective: "buffered_latency", Requests: 256, Concurrency: 8, InputTokens: 512, OutputTokens: 128, Streaming: false,
 		Description: "Non-streaming response latency for buffered clients.",
 	},
+	"public-interactive": {
+		Name: "public-interactive", Objective: "latency", Requests: 32, Concurrency: 8, InputTokens: 3919, OutputTokens: 295, Streaming: true,
+		Description: "Median token shape from the sampled public trace.",
+	},
+	"public-long-prefill": {
+		Name: "public-long-prefill", Objective: "long_context", Requests: 32, Concurrency: 4, InputTokens: 7897, OutputTokens: 295, Streaming: true,
+		Description: "P95 input with median output to stress prefill.",
+	},
+	"public-decode-heavy": {
+		Name: "public-decode-heavy", Objective: "long_generation", Requests: 32, Concurrency: 4, InputTokens: 3919, OutputTokens: 1377, Streaming: true,
+		Description: "Median input with P95 output to stress decode.",
+	},
 }
+
+var publicPriorNames = []string{"public-interactive", "public-long-prefill", "public-decode-heavy"}
 
 func Get(name string) (Profile, error) {
 	profile, ok := profiles[strings.ToLower(strings.TrimSpace(name))]
@@ -68,4 +82,18 @@ func Names() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+func PublicPriorNames() []string {
+	return append([]string(nil), publicPriorNames...)
+}
+
+func IsPublicPrior(name string) bool {
+	name = strings.ToLower(strings.TrimSpace(name))
+	for _, candidate := range publicPriorNames {
+		if name == candidate {
+			return true
+		}
+	}
+	return false
 }

@@ -149,10 +149,10 @@ infercrane sandbox revoke SANDBOX_REFERENCE_ID --yes
 ```
 
 <Warning>
-InferCrane does not create, pause, snapshot, isolate, or delete sandboxes, and it does not record
-sandbox commands, files, prompts, or outputs. E2B, Modal, Kubernetes, and similar names describe the
-external execution owner, not an InferCrane sandbox runtime. Real provider secret injection and
-isolation remain provider-specific qualification.
+The commands above use the external-reference contract: InferCrane does not
+create, pause, snapshot, isolate, or delete those sandboxes. The separate
+private-tenant Brezel preview can own an approved native lifecycle, but it does
+not change the ownership of E2B, Modal, Kubernetes, or other external systems.
 </Warning>
 
 ## Bring a trained artifact into the release path

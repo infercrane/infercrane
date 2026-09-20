@@ -122,6 +122,33 @@ func TestHostedModelAPIEndpointsRequireExplicitOperatorTenant(t *testing.T) {
 	}
 }
 
+func TestBrezelSandboxRequiresDedicatedTenantAndApprovedTemplates(t *testing.T) {
+	t.Setenv("INFERCRANE_API_KEY", "test-key")
+	t.Setenv("INFERCRANE_BREZEL_SANDBOX_URL", "http://127.0.0.1:8090")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "partial") {
+		t.Fatalf("partial Brezel sandbox configuration accepted: %v", err)
+	}
+	t.Setenv("INFERCRANE_BREZEL_SANDBOX_TOKEN_FILE", filepath.Join(t.TempDir(), "brezel.token"))
+	t.Setenv("INFERCRANE_BREZEL_SANDBOX_PROJECT_ID", "enterprise-project")
+	t.Setenv("INFERCRANE_BREZEL_SANDBOX_TENANT_ID", "enterprise-tenant")
+	t.Setenv("INFERCRANE_BREZEL_SANDBOX_TEMPLATES_JSON", `{"python-agent":"envr_aaaaaaaaaaaaaaaaaaaaaaaa"}`)
+	t.Setenv("INFERCRANE_BREZEL_SANDBOX_DEFAULT_TEMPLATE", "python-agent")
+	t.Setenv("INFERCRANE_BREZEL_SANDBOX_MODEL_CONNECTORS_JSON", `{"coder-production":"connr_bbbbbbbbbbbbbbbbbbbbbbbb"}`)
+	cfg, err := Load()
+	if err != nil || !cfg.BrezelSandboxEnabled() || cfg.BrezelSandboxTemplates["python-agent"] == "" || cfg.BrezelSandboxModelConnectors["coder-production"] == "" {
+		t.Fatalf("Brezel sandbox config=%#v err=%v", cfg, err)
+	}
+	t.Setenv("INFERCRANE_BREZEL_SANDBOX_DEFAULT_TEMPLATE", "unapproved")
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "approved template") {
+		t.Fatalf("unapproved default Brezel template accepted: %v", err)
+	}
+	t.Setenv("INFERCRANE_BREZEL_SANDBOX_DEFAULT_TEMPLATE", "python-agent")
+	t.Setenv("INFERCRANE_BREZEL_SANDBOX_MODEL_CONNECTORS_JSON", `{"coder-production":"latest"}`)
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "connr_") {
+		t.Fatalf("mutable Brezel connector revision accepted: %v", err)
+	}
+}
+
 func TestRunPodNetworkVolumesRequireImmutableExactMappings(t *testing.T) {
 	t.Setenv("INFERCRANE_API_KEY", "secret")
 	t.Setenv("INFERCRANE_RUNPOD_ARTIFACT_CACHE_POLICY", "required")

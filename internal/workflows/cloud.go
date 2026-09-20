@@ -45,6 +45,7 @@ type CloudRequest struct {
 	Region                 string                   `json:"region,omitempty"`
 	RuntimeVersion         string                   `json:"runtime_version,omitempty"`
 	ModelRevision          string                   `json:"model_revision,omitempty"`
+	ModelSecretReferenceID string                   `json:"model_secret_reference_id,omitempty"`
 	ImmutableModelRevision string                   `json:"immutable_model_revision,omitempty"`
 	RevisionID             string                   `json:"revision_id,omitempty"`
 	RuntimeArgs            []string                 `json:"runtime_args,omitempty"`
@@ -83,6 +84,9 @@ func (r *CloudRequest) Validate() error {
 	}
 	if r.Name == "" || r.Model == "" || r.Cloud == "" || r.GPU == "" {
 		return errors.New("name, model, cloud, and gpu are required")
+	}
+	if len(r.ModelSecretReferenceID) > 255 {
+		return errors.New("model secret reference must not exceed 255 characters")
 	}
 	if r.GPUCount == 0 {
 		r.GPUCount = 1
@@ -317,6 +321,21 @@ type ArtifactResolver interface {
 	Resolve(context.Context, string, string) (domain.ModelArtifact, error)
 }
 
+type AuthenticatedArtifactResolver interface {
+	ResolveAuthenticated(context.Context, string, string, string, string) (domain.ModelArtifact, error)
+}
+
+func resolveRequestedArtifact(ctx context.Context, resolver ArtifactResolver, request CloudRequest) (domain.ModelArtifact, error) {
+	if request.ModelSecretReferenceID == "" {
+		return resolver.Resolve(ctx, request.Model, request.ModelRevision)
+	}
+	authenticated, ok := resolver.(AuthenticatedArtifactResolver)
+	if !ok {
+		return domain.ModelArtifact{}, errors.New("authenticated Hugging Face artifact resolution is not configured")
+	}
+	return authenticated.ResolveAuthenticated(ctx, request.TenantID, request.ModelSecretReferenceID, request.Model, request.ModelRevision)
+}
+
 type DrainTracker interface {
 	RetiringInFlight(string) int
 	HasCurrentDeployment(string) bool
@@ -389,7 +408,7 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 			if artifactResolver == nil {
 				return "", operations.Permanent("artifact_resolver_unavailable", errors.New("Hugging Face artifact resolver is required"))
 			}
-			modelArtifact, artifactErr = artifactResolver.Resolve(ctx, request.Model, request.ModelRevision)
+			modelArtifact, artifactErr = resolveRequestedArtifact(ctx, artifactResolver, request)
 			if artifactErr == nil {
 				modelArtifact, artifactErr = store.AttachModelArtifact(ctx, request.TenantID, request.RevisionID, modelArtifact)
 			}
@@ -609,7 +628,7 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 		if err != nil {
 			return "", operations.Permanent("deployment_missing", err)
 		}
-		request := CloudRequest{DeploymentID: resolved.Deployment.ID, Name: rollout.Name, Model: spec.Model, ModelRevision: spec.ModelRevision, RevisionID: revision.ID, Cloud: spec.Cloud, ProviderAdapter: spec.ProviderAdapter, GPU: spec.GPU, GPUCount: spec.GPUCount, Region: spec.Region, Runtime: spec.Runtime, RuntimeVersion: spec.RuntimeVersion, RuntimeArgs: spec.RuntimeArgs, Port: spec.Port, Workload: spec.Workload, Serving: spec.Serving, MinReplicas: spec.MinReplicas, MaxReplicas: spec.MaxReplicas, DesiredReplicas: spec.MinReplicas, TenantID: rollout.TenantID, Actor: rollout.Actor, Candidate: true}
+		request := CloudRequest{DeploymentID: resolved.Deployment.ID, Name: rollout.Name, Model: spec.Model, ModelRevision: spec.ModelRevision, ModelSecretReferenceID: spec.ModelSecretReferenceID, RevisionID: revision.ID, Cloud: spec.Cloud, ProviderAdapter: spec.ProviderAdapter, GPU: spec.GPU, GPUCount: spec.GPUCount, Region: spec.Region, Runtime: spec.Runtime, RuntimeVersion: spec.RuntimeVersion, RuntimeArgs: spec.RuntimeArgs, Port: spec.Port, Workload: spec.Workload, Serving: spec.Serving, MinReplicas: spec.MinReplicas, MaxReplicas: spec.MaxReplicas, DesiredReplicas: spec.MinReplicas, TenantID: rollout.TenantID, Actor: rollout.Actor, Candidate: true}
 		request.Runtime = spec.Runtime
 		if request.Runtime == "" {
 			request.Runtime = support.DefaultRuntime
@@ -631,7 +650,7 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 			if artifactResolver == nil {
 				return "", operations.Permanent("artifact_resolver_unavailable", errors.New("Hugging Face artifact resolver is required"))
 			}
-			modelArtifact, artifactErr = artifactResolver.Resolve(ctx, request.Model, request.ModelRevision)
+			modelArtifact, artifactErr = resolveRequestedArtifact(ctx, artifactResolver, request)
 			if artifactErr == nil {
 				modelArtifact, artifactErr = store.AttachModelArtifact(ctx, request.TenantID, request.RevisionID, modelArtifact)
 			}

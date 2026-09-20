@@ -22,6 +22,24 @@ infercrane benchmark mistral-prod --profile long-context
 infercrane benchmark mistral-prod --profile buffered
 ```
 
+For repeatable optimization evidence, use independent AIPerf runs instead of treating one run as a
+stable result. Three runs are a useful engineering smoke test; five are the default target for a
+decision or public result:
+
+```console
+infercrane benchmark mistral-prod --profile interactive \
+  --runs 3 --warmup-requests 8 --run-cooldown-seconds 5
+
+infercrane benchmark mistral-prod --profile throughput \
+  --runs 5 --warmup-requests 8 --run-cooldown-seconds 10 \
+  --arrival-pattern poisson --request-rate 12
+```
+
+`constant`, `poisson`, and `gamma` arrival patterns model different request timing. The request rate
+and pattern must be supplied together. InferCrane pools the record-level results, retains the run
+count and load shape, and stores Student-t 95% intervals and coefficient of variation for
+throughput, tail latency, and goodput when at least two runs contain the metric.
+
 Profiles define load shape, not runtime tuning claims. `interactive`, `balanced`, `throughput`,
 `buffered`, `long-context`, `long-generation`, and `overload` record their immutable
 `benchmark-profile-v1` identity inside the workload evidence. Explicit token or concurrency flags
@@ -54,7 +72,7 @@ constant while running concurrency `1`, `8`, `32`, and `128`. The resulting
 that supports a concurrency scaling comparison. Override the bounded defaults with
 `INFERCRANE_BENCHMARK_SWEEP_*` variables; every override remains in persisted workload evidence.
 
-The CLI submits the benchmark through the authenticated control-plane API. The control plane resolves the active immutable revision, runs AIPerf against the logical InferCrane endpoint, and persists the result. A fixed dataset seed defaults to `17` and can be changed with `--random-seed`.
+The CLI submits the benchmark through the authenticated control-plane API. The control plane resolves the active immutable revision, runs AIPerf against the logical InferCrane endpoint, and persists the result. A fixed dataset seed defaults to `17` and can be changed with `--random-seed`. AIPerf `0.12.0` is pinned so flag semantics and exports cannot drift between candidates.
 
 Release Guard validation can benchmark an isolated candidate explicitly:
 
@@ -153,4 +171,6 @@ can pass.
 
 InferCrane asks AIPerf for the `records` export level. This contains per-request measurements but not the raw request/response export, so prompt and generated content are not persisted. Results remain in the InferCrane PostgreSQL database and are never uploaded by default.
 
-The control-plane image pins its AIPerf version. For a standalone control plane, install AIPerf with `pipx install aiperf`; `infercrane doctor` verifies that the configured executable is available.
+The control-plane image pins AIPerf `0.12.0`. For a standalone control plane, install it with
+`pipx install aiperf==0.12.0`; the benchmark adapter rejects another version rather than silently
+mixing tool semantics.

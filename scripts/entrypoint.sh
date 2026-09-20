@@ -32,6 +32,21 @@ if [ -n "$runpod_key" ]; then
 fi
 unset runpod_key
 
+# Fly and similar platforms inject secrets as environment variables, while the
+# Brezel client deliberately accepts only a protected credential file. Materialize
+# the deployment secret on container-local storage and remove it from the child
+# process environment before starting InferCrane.
+if [ -n "${INFERCRANE_BREZEL_SANDBOX_TOKEN:-}" ]; then
+  brezel_secret_dir=/tmp/infercrane-secrets
+  brezel_token_file="$brezel_secret_dir/brezel-sandbox-token"
+  umask 077
+  mkdir -p "$brezel_secret_dir"
+  printf '%s' "$INFERCRANE_BREZEL_SANDBOX_TOKEN" >"$brezel_token_file"
+  chmod 600 "$brezel_token_file"
+  export INFERCRANE_BREZEL_SANDBOX_TOKEN_FILE="$brezel_token_file"
+  unset INFERCRANE_BREZEL_SANDBOX_TOKEN brezel_secret_dir brezel_token_file
+fi
+
 if [ "${1:-}" != "infercrane" ] || [ "${2:-}" != "serve" ]; then
   exec "$@"
 fi

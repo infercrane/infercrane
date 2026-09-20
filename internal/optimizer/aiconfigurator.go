@@ -273,10 +273,6 @@ func (s AIConfiguratorSource) Propose(ctx context.Context, request Request) (Pro
 	if s.Runner == nil {
 		return Proposal{}, fmt.Errorf("%w: runner is not configured", ErrEstimatorUnavailable)
 	}
-	entry, ok := findRecipe(s.Catalog.Recipes, base.Input.ModelIdentity)
-	if !ok {
-		return base, nil
-	}
 	profile, err := performanceprofile.Get(base.Input.WorkloadProfile)
 	if err != nil {
 		return Proposal{}, err
@@ -302,7 +298,7 @@ func (s AIConfiguratorSource) Propose(ctx context.Context, request Request) (Pro
 	var modeled []Candidate
 	var failures []string
 	for _, runtimeName := range sortedRuntimeNames(byRuntime) {
-		input := estimatorInput{SchemaVersion: estimatorInputSchema, RequiredVersion: AIConfiguratorVersion, RequiredPlotextVersion: AIConfiguratorPlotextVersion, ModelPath: entry.Model, System: aiConfiguratorSystem(base.Input.GPU), Backend: runtimeName, DatabaseMode: "HYBRID", TargetConcurrency: targetConcurrency, InputTokens: profile.InputTokens, OutputTokens: profile.OutputTokens, TTFTMS: ttft, TPOTMS: tpot, TopN: base.Input.MaxCandidates, EnableChunkedPrefill: true}
+		input := estimatorInput{SchemaVersion: estimatorInputSchema, RequiredVersion: AIConfiguratorVersion, RequiredPlotextVersion: AIConfiguratorPlotextVersion, ModelPath: byRuntime[runtimeName].Deployment.Model.ID, System: aiConfiguratorSystem(base.Input.GPU), Backend: runtimeName, DatabaseMode: "HYBRID", TargetConcurrency: targetConcurrency, InputTokens: profile.InputTokens, OutputTokens: profile.OutputTokens, TTFTMS: ttft, TPOTMS: tpot, TopN: base.Input.MaxCandidates, EnableChunkedPrefill: true}
 		output, estimateErr := s.Runner.Estimate(ctx, input)
 		if estimateErr != nil {
 			failures = append(failures, runtimeName+": "+estimateErr.Error())
@@ -335,6 +331,7 @@ func (s AIConfiguratorSource) Propose(ctx context.Context, request Request) (Pro
 	}
 	base.AlgorithmVersion = "aiconfigurator-adapter-v1"
 	base.Candidates = modeled
+	attachStartingPoint(&base)
 	base.SelectionBoundary = "AIConfigurator modeled candidates only; exact AIPerf, replay, semantic quality, sourced cost, and Release Guard evidence are required before qualification"
 	return base, nil
 }

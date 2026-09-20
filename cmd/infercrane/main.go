@@ -38,6 +38,7 @@ import (
 	"github.com/infercrane/infercrane/internal/authn"
 	"github.com/infercrane/infercrane/internal/autoscale"
 	"github.com/infercrane/infercrane/internal/benchmark"
+	"github.com/infercrane/infercrane/internal/brezelsandbox"
 	"github.com/infercrane/infercrane/internal/config"
 	"github.com/infercrane/infercrane/internal/contextpassport"
 	"github.com/infercrane/infercrane/internal/controlapi"
@@ -66,6 +67,7 @@ import (
 	"github.com/infercrane/infercrane/internal/routes"
 	runtimeadapter "github.com/infercrane/infercrane/internal/runtime"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
+	"github.com/infercrane/infercrane/internal/sandboxprovider"
 	"github.com/infercrane/infercrane/internal/secrets"
 	"github.com/infercrane/infercrane/internal/servingcontract"
 	"github.com/infercrane/infercrane/internal/spec"
@@ -774,6 +776,11 @@ func benchmarkCommand(ctx context.Context, cfg config.Config, args []string) err
 	inputTokens := fs.Int("input-tokens", 128, "mean input token count")
 	outputTokens := fs.Int("output-tokens", 32, "maximum output token count")
 	randomSeed := fs.Int64("random-seed", 17, "deterministic AIPerf dataset seed")
+	profileRuns := fs.Int("runs", 1, "independent AIPerf profile runs (3 smoke, 5 publication)")
+	warmupRequests := fs.Int("warmup-requests", 0, "warmup requests before each measured run")
+	profileRunCooldown := fs.Int("run-cooldown-seconds", 0, "cooldown between independent runs")
+	arrivalPattern := fs.String("arrival-pattern", "", "optional open-loop arrival pattern: constant, poisson, or gamma")
+	requestRate := fs.Float64("request-rate", 0, "requests per second for an arrival pattern")
 	profileName := fs.String("profile", "", "versioned workload profile: "+strings.Join(performanceprofile.Names(), ", "))
 	revision := fs.String("revision", "active", "revision to benchmark: active, candidate, or revision ID")
 	streaming := fs.Bool("streaming", true, "measure streaming responses; set false for buffered responses")
@@ -819,12 +826,20 @@ func benchmarkCommand(ctx context.Context, cfg config.Config, args []string) err
 	if *ttftSLO < 0 || *tPotSLO < 0 || *latencySLO < 0 {
 		return errors.New("benchmark SLO thresholds cannot be negative")
 	}
-	request := map[string]any{"requests": *requests, "concurrency": *concurrency, "input_tokens": *inputTokens, "output_tokens": *outputTokens, "random_seed": *randomSeed, "revision": *revision, "streaming": *streaming, "profile": *profileName, "profile_version": performanceprofile.Version, "ttft_slo_ms": *ttftSLO, "tpot_slo_ms": *tPotSLO, "latency_slo_ms": *latencySLO}
+	*arrivalPattern = strings.ToLower(strings.TrimSpace(*arrivalPattern))
+	if *profileRuns < 1 || *profileRuns > 10 || *warmupRequests < 0 || *warmupRequests > 100000 || *profileRunCooldown < 0 || *profileRunCooldown > 3600 {
+		return errors.New("runs must be 1..10, warmup requests 0..100000, and cooldown 0..3600 seconds")
+	}
+	if *arrivalPattern != "" && *arrivalPattern != "constant" && *arrivalPattern != "poisson" && *arrivalPattern != "gamma" || (*arrivalPattern == "") != (*requestRate == 0) || *requestRate < 0 || math.IsNaN(*requestRate) || math.IsInf(*requestRate, 0) {
+		return errors.New("arrival pattern and a finite positive request rate must be supplied together; pattern must be constant, poisson, or gamma")
+	}
+	request := map[string]any{"requests": *requests, "concurrency": *concurrency, "input_tokens": *inputTokens, "output_tokens": *outputTokens, "random_seed": *randomSeed, "runs": *profileRuns, "warmup_requests": *warmupRequests, "run_cooldown_seconds": *profileRunCooldown, "arrival_pattern": *arrivalPattern, "request_rate": *requestRate, "revision": *revision, "streaming": *streaming, "profile": *profileName, "profile_version": performanceprofile.Version, "ttft_slo_ms": *ttftSLO, "tpot_slo_ms": *tPotSLO, "latency_slo_ms": *latencySLO}
 	if *revision != "active" {
 		fmt.Fprintln(os.Stderr, "Notice: selected-revision validation sends an explicit AIPerf workload directly to revision capacity and may incur provider inference cost; it does not duplicate user traffic.")
 	}
 	// AIPerf runs can legitimately exceed the ordinary control request timeout.
-	if err := controlJSONWithTimeout(ctx, cfg, http.MethodPost, "/api/v1/deployments/"+url.PathEscape(deployment)+"/benchmarks", "", request, &response, 35*time.Minute); err != nil {
+	benchmarkTimeout := time.Duration(*profileRuns) * 35 * time.Minute
+	if err := controlJSONWithTimeout(ctx, cfg, http.MethodPost, "/api/v1/deployments/"+url.PathEscape(deployment)+"/benchmarks", "", request, &response, benchmarkTimeout); err != nil {
 		return err
 	}
 	if *output == "json" {
@@ -4053,6 +4068,17 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	}()
 	transport := &http.Transport{Proxy: http.ProxyFromEnvironment, DialContext: (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext, MaxIdleConns: 1024, MaxIdleConnsPerHost: 256, IdleConnTimeout: 90 * time.Second, ResponseHeaderTimeout: cfg.UpstreamTimeout, ForceAttemptHTTP2: true}
 	client := &http.Client{Transport: transport}
+	var nativeSandboxProvider sandboxprovider.Provider
+	if cfg.BrezelSandboxEnabled() {
+		provider, providerErr := brezelsandbox.NewFromTokenFile(brezelsandbox.Config{
+			BaseURL: cfg.BrezelSandboxURL, ProjectID: cfg.BrezelSandboxProjectID, AllowedTenant: cfg.BrezelSandboxTenantID,
+			Templates: cfg.BrezelSandboxTemplates, DefaultTemplate: cfg.BrezelSandboxDefaultTemplate, Client: client,
+		}, cfg.BrezelSandboxTokenFile)
+		if providerErr != nil {
+			return fmt.Errorf("configure Brezel sandbox provider: %w", providerErr)
+		}
+		nativeSandboxProvider = provider
+	}
 	credentialCache := &authn.Cache{Source: s, Interval: time.Second}
 	if err := credentialCache.Refresh(ctx); err != nil {
 		return fmt.Errorf("load credential snapshot: %w", err)
@@ -4340,7 +4366,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 			Circuit:     modelapirouting.NewCircuitBreaker(3, 30*time.Second),
 		}
 	}
-	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool, OptimizationCosts: optimizationCosts, ModelAPICatalog: modelAPICatalog, ModelAPIProducts: s, ModelAPIOperatorTenantID: cfg.ModelAPIOperatorTenantID, ComputeProviders: computeProviders, GPUPriceCatalog: priceCatalog, LaunchProbers: launchProbers, DefaultProviderAdapters: defaultProviderAdapters}
+	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, DiscoveryClient: nil, Secrets: secrets.Environment{}, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool, OptimizationCosts: optimizationCosts, ModelAPICatalog: modelAPICatalog, ModelAPIProducts: s, SandboxProvider: nativeSandboxProvider, SandboxProjectID: cfg.BrezelSandboxProjectID, SandboxPreviews: controlapi.NewSandboxPreviewBroker(), SandboxDefaultTemplate: cfg.BrezelSandboxDefaultTemplate, SandboxModelConnectors: cfg.BrezelSandboxModelConnectors, ModelAPIOperatorTenantID: cfg.ModelAPIOperatorTenantID, ComputeProviders: computeProviders, GPUPriceCatalog: priceCatalog, LaunchProbers: launchProbers, DefaultProviderAdapters: defaultProviderAdapters}
 	if cfg.StripeEnabled() {
 		stripeBilling, stripeErr := managedbilling.NewStripe(cfg.StripeSecretKey, cfg.StripeWebhookSecret, cfg.StripeBillingReturnURL, cfg.StripePriceIDs, cfg.StripeLivemode)
 		if stripeErr != nil {
@@ -4462,7 +4488,8 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	if err != nil {
 		return fmt.Errorf("configure replica backends: %w", err)
 	}
-	for kind, handler := range workflows.CloudHandlersWithBackendsAndDrain(s, replicaBackends, runtimeBackends, directory, artifact.HuggingFace{}) {
+	huggingFaceResolver := artifact.TenantHuggingFace{Public: artifact.HuggingFace{}, Store: s, Secrets: secrets.Environment{}}
+	for kind, handler := range workflows.CloudHandlersWithBackendsAndDrain(s, replicaBackends, runtimeBackends, directory, huggingFaceResolver) {
 		handlers[kind] = handler
 	}
 	serverlessProfile, err := integrationRegistry.Provider("runpod-serverless")
@@ -4470,7 +4497,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		return fmt.Errorf("configure serverless integration: %w", err)
 	}
 	serverlessBackend := workflows.ServerlessBackend{Name: "runpod-serverless", Cloud: "runpod", Runtime: "vllm", Profile: serverlessProfile, Provider: serverless}
-	for kind, handler := range workflows.ServerlessHandlers(s, serverlessBackend, artifact.HuggingFace{}) {
+	for kind, handler := range workflows.ServerlessHandlers(s, serverlessBackend, huggingFaceResolver) {
 		handlers[kind] = handler
 	}
 	candidateBackends := make(map[string]optimizationcampaign.BenchmarkBackend, len(benchmarkBackends))

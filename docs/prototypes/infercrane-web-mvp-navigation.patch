@@ -1,0 +1,489 @@
+diff --git a/apps/console/components/console-shell.tsx b/apps/console/components/console-shell.tsx
+--- a/apps/console/components/console-shell.tsx
++++ b/apps/console/components/console-shell.tsx
+@@ -1,7 +1,6 @@
+ "use client";
+ 
+ import type { ManagedWallet } from "@infercrane/api-client";
+-import { consoleNavigation } from "@infercrane/config";
+ import { Badge, Cloudscape, Logo } from "@infercrane/ui";
+ import {
+   BookOpen,
+@@ -9,21 +8,17 @@
+   ChartNoAxesCombined,
+   CloudCog,
+   Command,
+-  FlaskConical,
+-  Hammer,
+   KeyRound,
+-  LayoutDashboard,
+   Menu,
+   PanelLeftClose,
+   PanelLeftOpen,
+   Plus,
+   Search,
+-  Settings,
+   ServerCog,
+   WalletCards,
+   X,
+ } from "lucide-react";
+-import { useMemo, useRef, useState, type ReactNode } from "react";
++import { useRef, useState, type ReactNode } from "react";
+ import type { Route } from "next";
+ import Link from "next/link";
+ import { usePathname, useRouter } from "next/navigation";
+@@ -36,46 +31,25 @@
+ import { OrganizationControl } from "./organization-control";
+ 
+ const icons = {
+-  overview: LayoutDashboard,
+-  build: Hammer,
+-  optimize: FlaskConical,
+   modelapis: CloudCog,
+-  models: Boxes,
+-  endpoints: ServerCog,
++  models: ServerCog,
+   usage: ChartNoAxesCombined,
+-  settings: Settings,
+   workloads: Boxes,
+   apikeys: KeyRound,
+-  keys: KeyRound,
+-  dedicated: ServerCog,
+ };
+ 
+-const previewAnchors: Record<(typeof consoleNavigation)[number]["href"], string> = {
+-  "/overview": "/design-lab#fleet-preview",
+-  "/build": "/design-lab#journeys",
+-  "/dedicated": "/design-lab#fleet-preview",
+-  "/optimization": "/design-lab#journeys",
+-  "/model-apis": "/design-lab#templates",
+-  "/models": "/design-lab#templates",
+-  "/releases": "/design-lab#journeys",
+-  "/settings/api-keys": "/design-lab#state-coverage",
+-  "/usage": "/design-lab#fleet-preview",
+-  "/settings": "/design-lab#state-coverage",
+-  "/workloads": "/design-lab#fleet-preview",
+-};
+-
+ const primaryNavigation = [
+   {
+-    label: "Overview",
+-    href: "/overview",
+-    icon: "overview",
+-    shortcut: "G V",
+-    previewHref: "/design-lab#fleet-preview",
+-  },
+-  {
+-    label: "Models",
++    label: "Model APIs",
+     href: "/model-apis",
+     icon: "modelapis",
++    shortcut: "G A",
++    previewHref: "/design-lab#templates",
++  },
++  {
++    label: "Open-weight models",
++    href: "/models",
++    icon: "models",
+     shortcut: "G M",
+     previewHref: "/design-lab#templates",
+   },
+@@ -83,15 +57,8 @@
+     label: "Deployments",
+     href: "/workloads",
+     icon: "workloads",
+-    shortcut: "G E",
++    shortcut: "G D",
+     previewHref: "/design-lab#fleet-preview",
+-  },
+-  {
+-    label: "Optimize",
+-    href: "/optimization",
+-    icon: "optimize",
+-    shortcut: "G O",
+-    previewHref: "/design-lab#journeys",
+   },
+   {
+     label: "Usage",
+@@ -109,10 +76,6 @@
+   },
+ ] as const;
+ 
+-function navigationLabel(item: { href: string; label: string }) {
+-  return item.href === "/usage" ? "Usage & spend" : item.label;
+-}
+-
+ const navigationGroups = [
+   {
+     label: "Console",
+@@ -120,19 +83,6 @@
+   },
+ ];
+ 
+-type CommandGroup = "Start" | "Operate" | "Observe" | "Organization";
+-
+-function commandGroupFor(href: string): CommandGroup {
+-  if (["/build", "/model-apis"].includes(href)) return "Start";
+-  if (["/overview", "/optimization", "/endpoints", "/workloads", "/dedicated"].includes(href)) {
+-    return "Operate";
+-  }
+-  if (["/usage", "/monitoring", "/activity", "/activity/requests"].includes(href)) {
+-    return "Observe";
+-  }
+-  return "Organization";
+-}
+-
+ function navigationItemIsActive(pathname: string, item: { href: string }) {
+   const endpointMonitoring = /^\/endpoints\/[^/]+\/monitoring(?:\/|$)/.test(pathname);
+   const operationActivity = pathname.startsWith("/activity/operations");
+@@ -167,7 +117,6 @@
+       ) || pathname.startsWith("/onboarding")
+     );
+   }
+-  if (item.href === "/overview") return pathname === "/overview";
+   return pathname === item.href || pathname.startsWith(`${item.href}/`);
+ }
+ 
+@@ -272,66 +221,13 @@
+   const pathname = usePathname();
+   const router = useRouter();
+   const organization = session?.organization.id ?? "InferCrane Labs";
+-  const currentRoute = [...primaryNavigation, ...consoleNavigation].find((item) =>
+-    navigationItemIsActive(pathname, item),
+-  );
++  const currentRoute = primaryNavigation.find((item) => navigationItemIsActive(pathname, item));
+   const breadcrumb = breadcrumbLabelForPath(pathname, currentRoute?.label);
+   const workspaceLabel = readablePathSegment(organization);
+-  const workspaceHref = session ? "/overview" : "/design-lab";
+-  const commandItems = useMemo(
+-    () => [
+-      ...consoleNavigation.map((item) => ({
+-        ...item,
+-        label: navigationLabel(item),
+-        group: commandGroupFor(item.href),
+-      })),
+-      {
+-        label: "Connect existing inference",
+-        href: "/build?mode=connect",
+-        icon: "endpoints" as const,
+-        shortcut: undefined,
+-        group: "Start" as const,
+-      },
+-      {
+-        label: "Deploy a model",
+-        href: "/build?mode=deploy",
+-        icon: "workloads" as const,
+-        shortcut: undefined,
+-        group: "Start" as const,
+-      },
+-      {
+-        label: "Endpoints",
+-        href: "/endpoints",
+-        icon: "endpoints" as const,
+-        shortcut: undefined,
+-        group: "Operate" as const,
+-      },
+-      {
+-        label: "Monitoring",
+-        href: "/monitoring",
+-        icon: "usage" as const,
+-        shortcut: undefined,
+-        group: "Observe" as const,
+-      },
+-      {
+-        label: "Request inspector",
+-        href: "/activity/requests",
+-        icon: "usage" as const,
+-        shortcut: undefined,
+-        group: "Observe" as const,
+-      },
+-      {
+-        label: "Activity",
+-        href: "/activity",
+-        icon: "usage" as const,
+-        shortcut: undefined,
+-        group: "Observe" as const,
+-      },
+-    ],
+-    [],
+-  );
++  const workspaceHref = session ? "/model-apis" : "/design-lab";
++  const commandItems = primaryNavigation;
+   const filteredCommandItems = commandItems.filter((item) =>
+-    `${item.label} ${item.group}`.toLowerCase().includes(commandQuery.trim().toLowerCase()),
++    item.label.toLowerCase().includes(commandQuery.trim().toLowerCase()),
+   );
+ 
+   useEffect(() => {
+@@ -399,14 +295,6 @@
+           );
+           return;
+         }
+-        const destination = consoleNavigation.find(
+-          (item) => item.shortcut.split(" ")[1]?.toLowerCase() === key,
+-        );
+-        if (destination) {
+-          event.preventDefault();
+-          const previewDestination = previewAnchors[destination.href];
+-          router.push((session ? destination.href : previewDestination) as Route);
+-        }
+         return;
+       }
+ 
+@@ -632,7 +520,7 @@
+               type="button"
+             >
+               <Search aria-hidden size={14} />
+-              <span>Search navigation and workflows</span>
++              <span>Search dashboard</span>
+               <kbd>
+                 <Command aria-hidden size={11} /> K
+               </kbd>
+@@ -683,8 +571,8 @@
+           >
+             <header className="new-flow-dialog__header">
+               <div>
+-                <span>New workflow</span>
+-                <h2 id="new-flow-title">What do you want to run?</h2>
++                <span>New</span>
++                <h2 id="new-flow-title">How do you want to start?</h2>
+               </div>
+               <button
+                 aria-label="Close new workflow"
+@@ -721,14 +609,6 @@
+                   <small>Bring an existing endpoint.</small>
+                 </span>
+                 <b aria-hidden>03</b>
+-              </Link>
+-              <Link href="/optimization" onClick={() => setNewFlowOpen(false)}>
+-                <FlaskConical aria-hidden size={19} />
+-                <span>
+-                  <strong>Optimize a workload</strong>
+-                  <small>Measure, qualify, and compare.</small>
+-                </span>
+-                <b aria-hidden>04</b>
+               </Link>
+             </div>
+             <footer>Review and approval come before execution or spend.</footer>
+@@ -771,42 +651,38 @@
+             <div className="command-menu__search">
+               <Search aria-hidden size={16} />
+               <input
+-                aria-label="Search navigation and workflows"
++                aria-label="Search dashboard"
+                 onChange={(event) => setCommandQuery(event.target.value)}
+-                placeholder="Type a page or workflow…"
++                placeholder="Search dashboard pages…"
+                 ref={commandInput}
+                 value={commandQuery}
+               />
+               <kbd>ESC</kbd>
+             </div>
+-            {(["Start", "Operate", "Observe", "Organization"] as const).map((group) => {
+-              const items = filteredCommandItems.filter((item) => item.group === group);
+-              if (!items.length) return null;
+-              return (
+-                <div className="command-menu__group" key={group}>
+-                  <span className="command-menu__label">{group}</span>
+-                  {items.map((item) => {
+-                    const Icon = icons[item.icon];
+-                    return (
+-                      <Link
+-                        href={item.href as Route}
+-                        key={item.label}
+-                        onClick={() => {
+-                          setCommandOpen(false);
+-                          setCommandQuery("");
+-                        }}
+-                      >
+-                        <Icon aria-hidden size={16} />
+-                        <span>{item.label}</span>
+-                        {item.shortcut && <kbd aria-hidden="true">{item.shortcut}</kbd>}
+-                      </Link>
+-                    );
+-                  })}
+-                </div>
+-              );
+-            })}
++            {filteredCommandItems.length > 0 && (
++              <div className="command-menu__group">
++                <span className="command-menu__label">Dashboard</span>
++                {filteredCommandItems.map((item) => {
++                  const Icon = icons[item.icon];
++                  return (
++                    <Link
++                      href={(session ? item.href : item.previewHref) as Route}
++                      key={item.label}
++                      onClick={() => {
++                        setCommandOpen(false);
++                        setCommandQuery("");
++                      }}
++                    >
++                      <Icon aria-hidden size={16} />
++                      <span>{item.label}</span>
++                      <kbd aria-hidden="true">{item.shortcut}</kbd>
++                    </Link>
++                  );
++                })}
++              </div>
++            )}
+             {!filteredCommandItems.length && (
+-              <div className="command-menu__empty">No matching page or workflow.</div>
++              <div className="command-menu__empty">No matching dashboard page.</div>
+             )}
+           </section>
+         </div>
+diff --git a/apps/console/components/model-api-catalog.tsx b/apps/console/components/model-api-catalog.tsx
+--- a/apps/console/components/model-api-catalog.tsx
++++ b/apps/console/components/model-api-catalog.tsx
+@@ -9,13 +9,28 @@
+ 
+ const filters = [
+   ["all", "All"],
+-  ["chat", "Chat"],
++  ["general", "General"],
+   ["coding", "Coding"],
+-  ["reasoning", "Reasoning"],
+-  ["vision", "Vision"],
+-  ["embeddings", "Embeddings"],
++  ["agents", "Agents"],
++  ["long-context", "Long context"],
+ ] as const;
+ 
++function matchesCategory(model: ModelAPIModel, category: (typeof filters)[number][0]) {
++  if (category === "all") return true;
++  if (category === "general") {
++    return model.tasks.some((task) => task === "chat" || task === "reasoning");
++  }
++  if (category === "agents") {
++    return model.tasks.some(
++      (task) => task === "tools" || task === "tool-use" || task === "agentic",
++    );
++  }
++  if (category === "long-context") {
++    return model.tasks.includes("long-context") || (model.context_window_tokens ?? 0) >= 131_072;
++  }
++  return model.tasks.includes(category);
++}
++
+ function ModelMark({ model }: { model: ModelAPIModel }) {
+   const letters = model.publisher
+     .split(/\s+/)
+@@ -95,7 +110,7 @@
+   const visible = useMemo(() => {
+     const needle = query.trim().toLowerCase();
+     return models.filter((model) => {
+-      const matchesFilter = filter === "all" || model.tasks.includes(filter);
++      const matchesFilter = matchesCategory(model, filter);
+       const matchesQuery =
+         !needle ||
+         [model.display_name, model.publisher, model.family, model.parameters, ...model.tasks]
+@@ -112,7 +127,17 @@
+       <header>
+         <div>
+           <h2 id="model-api-catalog-title">Models</h2>
+-          <p>Available is callable now. Preview, degraded, and unavailable states are not.</p>
++          <p>
++            Available is callable now. Categories follow{" "}
++            <a
++              href="https://artificialanalysis.ai/models/open-source"
++              rel="noreferrer"
++              target="_blank"
++            >
++              Artificial Analysis
++            </a>
++            ; availability and price come from InferCrane.
++          </p>
+         </div>
+         <label className="model-api-search">
+           <Search aria-hidden size={15} />
+diff --git a/apps/console/app/(protected)/models/page.tsx b/apps/console/app/(protected)/models/page.tsx
+--- a/apps/console/app/(protected)/models/page.tsx
++++ b/apps/console/app/(protected)/models/page.tsx
+@@ -1,7 +1,6 @@
+ import Link from "next/link";
+ import { DataUnavailable, PageHeading } from "../../../components/console-primitives";
+ import { ModelCatalogBrowser } from "../../../components/model-catalog-browser";
+-import { ModelSurfaceSwitcher } from "../../../components/model-surface-switcher";
+ import { listCatalogModels } from "../../../lib/control-api";
+ 
+ export default async function ModelsPage() {
+@@ -10,27 +9,22 @@
+     return (
+       <div className="console-page model-catalog-page">
+         <PageHeading
+-          eyebrow="Model catalog"
+-          title="Models"
+-          description="Choose a popular starting point or bring any compatible Hugging Face model. InferCrane turns it into an explicit serving plan before deployment."
++          eyebrow="Deploy"
++          title="Open-weight models"
++          description="Choose a model. InferCrane recommends the serving stack."
+           actions={
+             <div className="page-heading__actions">
+-              <Link className="secondary-action" href="/model-apis">
+-                Managed supply
+-              </Link>
+               <Link className="primary-action" href="/build?mode=deploy">
+                 New deployment
+               </Link>
+             </div>
+           }
+         />
+-        <ModelSurfaceSwitcher current="deploy" />
+         <div className="catalog-trust-strip">
+-          <strong>Transparent starting points</strong>
++          <strong>Evidence before claims</strong>
+           <span>
+-            Catalog entries pin identity, revision, license, protocol, and serving defaults.
+-            Hardware fit, provider availability, performance, quality, and price require measured
+-            evidence.
++            Catalog entries are starting points. The exact revision, hardware, quality, and
++            performance are qualified before release.
+           </span>
+         </div>
+         <ModelCatalogBrowser models={models} />
+diff --git a/packages/config/src/index.ts b/packages/config/src/index.ts
+--- a/packages/config/src/index.ts
++++ b/packages/config/src/index.ts
+@@ -53,15 +53,9 @@
+ ] as const;
+ 
+ export const consoleNavigation = [
+-  { label: "Overview", href: "/overview", icon: "overview", shortcut: "G O" },
+   { label: "Model APIs", href: "/model-apis", icon: "modelapis", shortcut: "G A" },
+-  { label: "Model catalog", href: "/models", icon: "models", shortcut: "G M" },
+-  { label: "Build", href: "/build", icon: "build", shortcut: "G B" },
+-  { label: "Optimize", href: "/optimization", icon: "optimize", shortcut: "G X" },
+-  { label: "Dedicated", href: "/dedicated", icon: "dedicated", shortcut: "G C" },
++  { label: "Open-weight models", href: "/models", icon: "models", shortcut: "G M" },
+   { label: "Deployments", href: "/workloads", icon: "workloads", shortcut: "G D" },
+-  { label: "Releases", href: "/releases", icon: "optimize", shortcut: "G R" },
+-  { label: "Usage & billing", href: "/usage", icon: "usage", shortcut: "G U" },
++  { label: "Usage", href: "/usage", icon: "usage", shortcut: "G U" },
+   { label: "API keys", href: "/settings/api-keys", icon: "keys", shortcut: "G K" },
+-  { label: "Settings", href: "/settings", icon: "settings", shortcut: "G S" },
+ ] as const;
+diff --git a/packages/config/src/config.test.ts b/packages/config/src/config.test.ts
+--- a/packages/config/src/config.test.ts
++++ b/packages/config/src/config.test.ts
+@@ -17,17 +17,11 @@
+ 
+   it("keeps model APIs, model definitions, optimization, and operations distinct", () => {
+     expect(consoleNavigation.map((item) => item.label)).toEqual([
+-      "Overview",
+       "Model APIs",
+-      "Model catalog",
+-      "Build",
+-      "Optimize",
+-      "Dedicated",
++      "Open-weight models",
+       "Deployments",
+-      "Releases",
+-      "Usage & billing",
++      "Usage",
+       "API keys",
+-      "Settings",
+     ]);
+     expect(new Set(consoleNavigation.map((item) => item.href)).size).toBe(consoleNavigation.length);
+   });
+

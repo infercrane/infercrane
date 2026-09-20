@@ -1,0 +1,104 @@
+{
+  "schema_version": "infercrane.dev/optimization-evidence/v1",
+  "model_identity": "Qwen/Qwen3.8-27B-FP8@017b9c7af6b5689d5dd426a76e0bc077eb5ca20a",
+  "hardware_identity": "modal:NVIDIA H100 80GB HBM3:sm_90a:1",
+  "workload_id": "serverless-primary",
+  "workload_digest": "60380d21475dbaaf7ebe3e544f518854ad67707f03b330f8ec55d3af4b9586b2",
+  "required_concurrency_lanes": [1, 4, 8],
+  "slo": {
+    "scope": "each_concurrency_lane",
+    "max_ttft_ms": 3000,
+    "max_itl_ms": 80,
+    "min_successful_fraction": 0.99,
+    "max_error_rate": 0,
+    "max_prompt_token_mismatch_rate": 0,
+    "required_quality_gates": ["api_models", "stream_byte_integrity", "structured_output", "tool_call"],
+    "minimum_requests_per_lane": 12,
+    "minimum_independent_runs": 1,
+    "minimum_measurement_seconds_per_lane": 0
+  },
+  "selection_policy": {
+    "id": "serverless-primary-slo-output-throughput",
+    "version": 2,
+    "objective": "maximum_slo_qualified_output_throughput",
+    "lane_aggregation": "arithmetic_mean",
+    "evidence_level": "screening",
+    "qualification_before_scoring": true,
+    "cost_tie_breaker": true
+  },
+  "candidates": [
+    {
+      "id": "sglang-control",
+      "runtime_id": "sglang-0.5.18-control",
+      "origin": "infercrane_control",
+      "evidence_level": "screening",
+      "evidence_state": "reproduced",
+      "recipe_digest": "25953eadd430cb0286bfa87a9bafa39039fceb491390d70b75a4e957b3fd2a1d",
+      "workload_digest": "60380d21475dbaaf7ebe3e544f518854ad67707f03b330f8ec55d3af4b9586b2",
+      "quality_passed": true,
+      "quality_gates": [{"name":"api_models","passed":true},{"name":"stream_byte_integrity","passed":true},{"name":"structured_output","passed":true},{"name":"tool_call","passed":true}],
+      "error_rate": 0,
+      "prompt_token_mismatch_rate": 0,
+      "lanes": [
+        {"concurrency":1,"requests":12,"successful_requests":12,"independent_runs":1,"measurement_seconds":78.03147059200006,"slo_attainment":1,"ttft_p95_ms":756.3418539999702,"itl_p95_ms":12.384767318982341,"aggregate_output_tokens_per_second":78.28892565593024,"request_throughput_requests_per_second":0.15378410670668896,"slo_goodput_requests_per_second":0.15378410670668896,"slo_qualified_output_tokens_per_second":78.28892565593024,"gpu_seconds_per_successful_request":6.5026225493333385,"cost_per_1m_successful_output_tokens_usd":17.218626599912565},
+        {"concurrency":4,"requests":12,"successful_requests":12,"independent_runs":1,"measurement_seconds":21.26335368299999,"slo_attainment":1,"ttft_p95_ms":275.4795570000397,"itl_p95_ms":14.021899236790611,"aggregate_output_tokens_per_second":266.27972635035263,"request_throughput_requests_per_second":0.5643512391741843,"slo_goodput_requests_per_second":0.5643512391741843,"slo_qualified_output_tokens_per_second":266.27972635035263,"gpu_seconds_per_successful_request":1.7719461402499992,"cost_per_1m_successful_output_tokens_usd":5.062449914058178},
+        {"concurrency":8,"requests":12,"successful_requests":12,"independent_runs":1,"measurement_seconds":14.507134613999938,"slo_attainment":1,"ttft_p95_ms":206.69077899992772,"itl_p95_ms":14.737556369862926,"aggregate_output_tokens_per_second":376.78012546496274,"request_throughput_requests_per_second":0.8271791997035406,"slo_goodput_requests_per_second":0.8271791997035406,"slo_qualified_output_tokens_per_second":376.78012546496274,"gpu_seconds_per_successful_request":1.2089278844999949,"cost_per_1m_successful_output_tokens_usd":3.5777571232406538}
+      ]
+    },
+    {
+      "id": "vllm-control",
+      "runtime_id": "vllm-0.28.0-control",
+      "origin": "infercrane_control",
+      "evidence_level": "screening",
+      "evidence_state": "reproduced",
+      "recipe_digest": "4c81d154a2444531a1eb16e960b9e50401819d8c09eee1ea9ec36a78aeffff0c",
+      "workload_digest": "60380d21475dbaaf7ebe3e544f518854ad67707f03b330f8ec55d3af4b9586b2",
+      "quality_passed": true,
+      "quality_gates": [{"name":"api_models","passed":true},{"name":"stream_byte_integrity","passed":true},{"name":"structured_output","passed":true},{"name":"tool_call","passed":true}],
+      "error_rate": 0,
+      "prompt_token_mismatch_rate": 0,
+      "lanes": [
+        {"concurrency":1,"requests":12,"successful_requests":12,"independent_runs":1,"measurement_seconds":80.41749494900006,"slo_attainment":1,"ttft_p95_ms":290.02360699996643,"itl_p95_ms":12.857478164383524,"aggregate_output_tokens_per_second":76.40128561448552,"request_throughput_requests_per_second":0.14922126096579202,"slo_goodput_requests_per_second":0.14922126096579202,"slo_qualified_output_tokens_per_second":76.40128561448552,"gpu_seconds_per_successful_request":6.7014579124166715,"cost_per_1m_successful_output_tokens_usd":17.644045737395217},
+        {"concurrency":4,"requests":12,"successful_requests":12,"independent_runs":1,"measurement_seconds":24.786389355999972,"slo_attainment":0.6666666666666666,"ttft_p95_ms":4592.269056000077,"itl_p95_ms":14.864107827788544,"aggregate_output_tokens_per_second":183.6895214791689,"request_throughput_requests_per_second":0.48413666983308296,"slo_goodput_requests_per_second":0.32275777988872195,"slo_qualified_output_tokens_per_second":145.07962205998052,"gpu_seconds_per_successful_request":2.065532446333331,"cost_per_1m_successful_output_tokens_usd":7.338620988953087},
+        {"concurrency":8,"requests":12,"successful_requests":12,"independent_runs":1,"measurement_seconds":9.462802898000064,"slo_attainment":1,"ttft_p95_ms":225.78758999998172,"itl_p95_ms":14.947018630137112,"aggregate_output_tokens_per_second":443.5260931924329,"request_throughput_requests_per_second":1.2681232114151046,"slo_goodput_requests_per_second":1.2681232114151046,"slo_qualified_output_tokens_per_second":443.5260931924329,"gpu_seconds_per_successful_request":0.788566908166672,"cost_per_1m_successful_output_tokens_usd":3.039342664317403}
+      ]
+    },
+    {
+      "id": "vllm-mtp2",
+      "runtime_id": "vllm-0.28.0-native-mtp-k2",
+      "origin": "infercrane_generated",
+      "evidence_level": "screening",
+      "evidence_state": "reproduced",
+      "recipe_digest": "ea6910eb4fef1a1bc41a0e2aac78f4c8134898e6fcaa20b4270c57167622fe52",
+      "workload_digest": "60380d21475dbaaf7ebe3e544f518854ad67707f03b330f8ec55d3af4b9586b2",
+      "quality_passed": true,
+      "quality_gates": [{"name":"api_models","passed":true},{"name":"stream_byte_integrity","passed":true},{"name":"structured_output","passed":true},{"name":"tool_call","passed":true}],
+      "error_rate": 0,
+      "prompt_token_mismatch_rate": 0,
+      "lanes": [
+        {"concurrency":1,"requests":12,"successful_requests":12,"independent_runs":1,"measurement_seconds":41.80931009900007,"slo_attainment":1,"ttft_p95_ms":326.9834310000306,"itl_p95_ms":7.840316622309195,"aggregate_output_tokens_per_second":130.52116830147148,"request_throughput_requests_per_second":0.2870174122994103,"slo_goodput_requests_per_second":0.2870174122994103,"slo_qualified_output_tokens_per_second":130.52116830147148,"gpu_seconds_per_successful_request":3.484109174916673,"cost_per_1m_successful_output_tokens_usd":10.328039469154676},
+        {"concurrency":4,"requests":12,"successful_requests":12,"independent_runs":1,"measurement_seconds":16.22406373399997,"slo_attainment":1,"ttft_p95_ms":2077.353770000059,"itl_p95_ms":10.778860696673078,"aggregate_output_tokens_per_second":354.78164375904385,"request_throughput_requests_per_second":0.7396396165762721,"slo_goodput_requests_per_second":0.7396396165762721,"slo_qualified_output_tokens_per_second":354.78164375904385,"gpu_seconds_per_successful_request":1.3520053111666641,"cost_per_1m_successful_output_tokens_usd":3.799598433264248},
+        {"concurrency":8,"requests":12,"successful_requests":12,"independent_runs":1,"measurement_seconds":13.179106164000018,"slo_attainment":0.4166666666666667,"ttft_p95_ms":4690.728970000009,"itl_p95_ms":17.991161630136983,"aggregate_output_tokens_per_second":419.9070810368496,"request_throughput_requests_per_second":0.9105276118569628,"slo_goodput_requests_per_second":0.3793865049404012,"slo_qualified_output_tokens_per_second":179.98185692435985,"gpu_seconds_per_successful_request":1.0982588470000014,"cost_per_1m_successful_output_tokens_usd":3.2103001798616475}
+      ]
+    },
+    {
+      "id": "vllm-mtp2-fp8kv",
+      "runtime_id": "vllm-0.28.0-localmaxxing-mtp2-fp8kv",
+      "origin": "community_import_reproduced_by_infercrane",
+      "evidence_level": "screening",
+      "evidence_state": "reproduced",
+      "source_recipe_evidence_state": "external_unverified",
+      "recipe_digest": "a4abd2ac3b86e932fb6970d5451ffdc10821017113c2044f5b81acbe6912ab94",
+      "workload_digest": "60380d21475dbaaf7ebe3e544f518854ad67707f03b330f8ec55d3af4b9586b2",
+      "quality_passed": true,
+      "quality_gates": [{"name":"api_models","passed":true},{"name":"stream_byte_integrity","passed":true},{"name":"structured_output","passed":true},{"name":"tool_call","passed":true}],
+      "error_rate": 0,
+      "prompt_token_mismatch_rate": 0,
+      "lanes": [
+        {"concurrency":1,"requests":12,"successful_requests":12,"independent_runs":1,"measurement_seconds":43.355395015,"slo_attainment":1,"ttft_p95_ms":305.14239100000395,"itl_p95_ms":8.676524649706318,"aggregate_output_tokens_per_second":123.92921338027394,"request_throughput_requests_per_second":0.2767821627700144,"slo_goodput_requests_per_second":0.2767821627700144,"slo_qualified_output_tokens_per_second":123.92921338027394,"gpu_seconds_per_successful_request":3.6129495845833333,"cost_per_1m_successful_output_tokens_usd":10.877401227758831},
+        {"concurrency":4,"requests":12,"successful_requests":12,"independent_runs":1,"measurement_seconds":18.546407787999897,"slo_attainment":1,"ttft_p95_ms":2268.6877219999815,"itl_p95_ms":12.949374557729866,"aggregate_output_tokens_per_second":285.12259950530694,"request_throughput_requests_per_second":0.6470255661996375,"slo_goodput_requests_per_second":0.6470255661996375,"slo_qualified_output_tokens_per_second":285.12259950530694,"gpu_seconds_per_successful_request":1.5455339823333247,"cost_per_1m_successful_output_tokens_usd":4.727888214110812},
+        {"concurrency":8,"requests":12,"successful_requests":12,"independent_runs":1,"measurement_seconds":12.274154638000027,"slo_attainment":0.9166666666666666,"ttft_p95_ms":5083.620472000007,"itl_p95_ms":39.018611303571255,"aggregate_output_tokens_per_second":399.6201893052921,"request_throughput_requests_per_second":0.9776640716949042,"slo_goodput_requests_per_second":0.8961920657203288,"slo_qualified_output_tokens_per_second":357.9065222463095,"gpu_seconds_per_successful_request":1.0228462198333357,"cost_per_1m_successful_output_tokens_usd":3.3732724568326162}
+      ]
+    }
+  ]
+}

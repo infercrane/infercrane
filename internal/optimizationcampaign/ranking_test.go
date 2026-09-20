@@ -97,3 +97,34 @@ func TestRankMeasuredCampaignRejectsMismatchedBenchmarkIdentity(t *testing.T) {
 		t.Fatal("mismatched benchmark identity was accepted")
 	}
 }
+
+func TestRankMeasuredCampaignKeepsPublicPriorScreeningInconclusive(t *testing.T) {
+	campaign, benchmarks := rankingFixture(t, "interactive", nil)
+	registry, err := integration.V1Catalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal, err := optimizer.NewCatalogSource(curatedrecipe.All(), registry.Snapshot()).Propose(t.Context(), optimizer.Request{
+		ModelIdentity: "qwen3-8b", Provider: "aws", Region: "eu-central-1", GPU: "L40S", Runtimes: []string{"vllm"},
+		Objective: "interactive", WorkloadProfile: "public-interactive", MaxCandidates: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, _ := json.Marshal(proposal)
+	campaign.ProposalJSON = string(encoded)
+	campaign.InputDigest = proposal.InputDigest
+	campaign.ModelIdentity = proposal.Input.ModelIdentity
+	for index := range benchmarks {
+		benchmarks[index].WorkloadJSON = `{"profile":"public-interactive","request_count":100,"random_seed":17}`
+	}
+	result, err := RankMeasuredCampaign(campaign, benchmarks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, candidate := range campaign.Candidates {
+		if result.Decisions[candidate.ID] != RankInconclusive || !strings.Contains(result.Reasons[candidate.ID], "customer replay") {
+			t.Fatalf("public prior crossed the qualification boundary: decisions=%v reasons=%v", result.Decisions, result.Reasons)
+		}
+	}
+}

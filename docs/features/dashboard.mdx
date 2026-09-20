@@ -22,7 +22,9 @@ reads PostgreSQL or provider credentials directly.
 - Release Guard, benchmark, replay, revision, and replica evidence where available;
 - lifecycle overlays, signed alert policies, sourced FinOps reports, and signed output-quality evidence;
 - provider/runtime capability inventory and secret references;
-- scoped API-key lifecycle and private-preview team access.
+- private/gated model-access references and authenticated existing-endpoint discovery;
+- content-free telemetry imports and workload replay history;
+- scoped API-key lifecycle, organization roles, hosted SSO entry, and approval boundaries;
 - a curated Model API shelf with InferCrane rates, capabilities, limits, and availability.
 
 Missing or forbidden evidence remains explicit. A failed optional panel does not make a deployment
@@ -38,7 +40,9 @@ served. The primary paths are ordered by intent:
 2. **Connect existing inference** discovers vLLM, SGLang, LiteLLM, or another compatible endpoint
    and starts observe-only. The endpoint page then presents a separate, explicit ownership action
    before InferCrane can route traffic. Promotion changes routing ownership only; it does not grant
-   lifecycle control over the external workload.
+   lifecycle control over the external workload. Saved Baseten, Fireworks, OpenRouter, and generic
+   OpenAI-compatible connections can authenticate the bounded discovery call without putting their
+   bearer credential in the browser or endpoint URL.
 3. **Use a Model API** selects a hosted InferCrane product, creates one API key, and uses the same
    OpenAI-compatible endpoint across the catalog. The customer surface shows only the InferCrane
    rate, capability, limit, and availability contract. Procurement routing, internal offer IDs,
@@ -59,9 +63,10 @@ durable and remain reattachable after the browser closes.
 
 The console navigation keeps stable application identities under **Endpoints**, lifecycle-managed
 capacity under **Deployments**, live evidence under **Monitoring**, and provider/runtime setup under
-**Settings → Connections**. Endpoint pages expose task tabs for monitoring, requests, releases,
-routing, and settings. Deployment pages expose replicas, revisions, autoscaling, benchmarks, and
-events without turning every capability into a global navigation item.
+**Settings → Connections**. Existing monitoring systems enter through **Settings → Observability**;
+identity and policy remain under **Settings → Access**. Endpoint pages expose task tabs for
+monitoring, requests, releases, routing, and settings. Deployment pages expose replicas, revisions,
+autoscaling, benchmarks, and events without turning every capability into a global navigation item.
 
 Optional evidence fails locally: a missing benchmark, alert, member directory, or adapter inventory
 shows an explicit unavailable panel while the rest of the resource stays usable. Unknown values are

@@ -20,11 +20,23 @@ import (
 	"github.com/infercrane/infercrane/internal/curatedrecipe"
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/integration"
+	"github.com/infercrane/infercrane/internal/kernelplanner"
+	"github.com/infercrane/infercrane/internal/optimizationevidence"
 	"github.com/infercrane/infercrane/internal/optimizer"
+	"github.com/infercrane/infercrane/internal/workloadprofile"
 	"gopkg.in/yaml.v3"
 )
 
 func optimizeCommand(ctx context.Context, args []string) error {
+	if len(args) > 0 && args[0] == "kernel-plan" {
+		return optimizeKernelPlanCommand(args[1:])
+	}
+	if len(args) > 0 && args[0] == "workload-profile" {
+		return optimizeWorkloadProfileCommand(args[1:])
+	}
+	if len(args) > 0 && args[0] == "evidence" {
+		return optimizeEvidenceCommand(args[1:])
+	}
 	if len(args) > 0 && args[0] == "doctor" {
 		return optimizeDoctorCommand(ctx, args[1:])
 	}
@@ -32,14 +44,16 @@ func optimizeCommand(ctx context.Context, args []string) error {
 		return optimizeCampaignCommand(ctx, args)
 	}
 	if len(args) < 2 || (args[0] != "propose" && args[0] != "create") {
-		return errors.New("usage: infercrane optimize propose|create MODEL --provider CLOUD_OR_ADAPTER --gpu GPU [flags] | infercrane optimize list|inspect|results|approve|activate|cancel | infercrane optimize doctor")
+		return errors.New("usage: infercrane optimize propose|create MODEL --provider CLOUD_OR_ADAPTER --gpu GPU [flags] | infercrane optimize workload-profile --file PROFILE.json | infercrane optimize kernel-plan --file PROFILE.json | infercrane optimize evidence evaluate|inspect-fastpath --file FILE | infercrane optimize list|inspect|results|approve|activate|cancel | infercrane optimize doctor")
 	}
 	action := args[0]
 	model := args[1]
 	fs := flag.NewFlagSet("optimize "+action, flag.ContinueOnError)
+	modelRevision := fs.String("model-revision", "", "immutable 40 to 64 character model commit (required for uncataloged models)")
 	provider := fs.String("provider", "", "provider cloud or exact adapter")
 	region := fs.String("region", "", "exact provider region")
 	gpu := fs.String("gpu", "", "exact accelerator identity")
+	gpuCount := fs.Int("gpu-count", 1, "GPUs per baseline replica")
 	runtimes := fs.String("runtimes", "", "optional comma-separated runtime allowlist")
 	objective := fs.String("objective", "interactive", "interactive, latency, throughput, or cost-efficiency")
 	profile := fs.String("profile", "", "benchmark workload profile; defaults from objective")
@@ -69,7 +83,7 @@ func optimizeCommand(ctx context.Context, args []string) error {
 	if err := validateOutput(*output); err != nil {
 		return err
 	}
-	request := optimizer.Request{ModelIdentity: model, Provider: *provider, Region: *region, GPU: *gpu, Runtimes: splitList(*runtimes), Objective: *objective, WorkloadProfile: *profile, IncludeSimulated: *includeSimulated, WorkloadFingerprint: *workloadFingerprint, MaxCandidates: *maxCandidates}
+	request := optimizer.Request{ModelIdentity: model, ModelRevision: *modelRevision, Provider: *provider, Region: *region, GPU: *gpu, GPUCount: *gpuCount, Runtimes: splitList(*runtimes), Objective: *objective, WorkloadProfile: *profile, IncludeSimulated: *includeSimulated, WorkloadFingerprint: *workloadFingerprint, MaxCandidates: *maxCandidates}
 	var err error
 	if request.MaxTTFTP95MS, err = optionalMilliseconds(*maxTTFT); err != nil {
 		return fmt.Errorf("max TTFT p95: %w", err)
@@ -162,12 +176,206 @@ func optimizeCommand(ctx context.Context, args []string) error {
 	if err = w.Flush(); err != nil {
 		return err
 	}
-	fmt.Println("\nThese are configuration candidates, not performance recommendations.")
-	fmt.Printf("Next: deploy each written spec, run `infercrane benchmark NAME --profile %s`, compare with `infercrane lab`, then use Release Guard.\n", proposal.Input.WorkloadProfile)
+	if proposal.StartingPoint != nil {
+		fmt.Printf("\nStarting point: candidate %s · %s\n", shortID(proposal.StartingPoint.CandidateID), proposal.StartingPoint.ClaimBoundary)
+	}
+	fmt.Println("These are configuration candidates, not performance recommendations.")
+	fmt.Printf("Next: deploy the starting point, observe representative traffic, run `infercrane benchmark NAME --profile %s`, profile material bottlenecks, compare with `infercrane lab`, then use Release Guard.\n", proposal.Input.WorkloadProfile)
 	if *writeDir != "" {
 		fmt.Printf("DeploymentSpecs: %s\n", *writeDir)
 	}
 	return nil
+}
+
+func optimizeWorkloadProfileCommand(args []string) error {
+	fs := flag.NewFlagSet("optimize workload-profile", flag.ContinueOnError)
+	filePath := fs.String("file", "", "content-free public workload profile JSON")
+	profileName := fs.String("profile", "", "optional exact derived benchmark profile")
+	output := fs.String("output", "human", "human or json")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 || strings.TrimSpace(*filePath) == "" {
+		return errors.New("usage: infercrane optimize workload-profile --file PROFILE.json [--profile NAME] [--output human|json]")
+	}
+	if err := validateOutput(*output); err != nil {
+		return err
+	}
+	body, err := os.ReadFile(*filePath)
+	if err != nil {
+		return fmt.Errorf("read workload profile: %w", err)
+	}
+	document, err := workloadprofile.Decode(body)
+	if err != nil {
+		return err
+	}
+	digest, err := workloadprofile.Digest(document)
+	if err != nil {
+		return err
+	}
+	profiles := document.Profiles
+	if strings.TrimSpace(*profileName) != "" {
+		profile, lookupErr := workloadprofile.Lookup(document, *profileName)
+		if lookupErr != nil {
+			return lookupErr
+		}
+		profiles = []workloadprofile.BenchmarkShape{profile}
+	}
+	type result struct {
+		Digest              string                           `json:"digest"`
+		Source              workloadprofile.Source           `json:"source"`
+		Sampling            workloadprofile.Sampling         `json:"sampling"`
+		Distributions       workloadprofile.Distributions    `json:"distributions"`
+		Profiles            []workloadprofile.BenchmarkShape `json:"profiles"`
+		EvidenceClass       string                           `json:"evidence_class"`
+		MethodologyBoundary string                           `json:"methodology_boundary"`
+	}
+	view := result{Digest: digest, Source: document.Source, Sampling: document.Sampling, Distributions: document.Distributions, Profiles: profiles, EvidenceClass: document.EvidenceClass, MethodologyBoundary: document.MethodologyBoundary}
+	if *output == "json" {
+		return printJSON(view)
+	}
+	fmt.Printf("Workload profile · %s\n", document.Source.Name)
+	fmt.Printf("Evidence    %s\n", document.EvidenceClass)
+	fmt.Printf("Sample      %d content-free rows · %d/%d row groups · remote only\n", document.Sampling.RowsInspected, len(document.Sampling.RowGroups), document.Sampling.TotalRowGroups)
+	fmt.Printf("Digest      %s\n\n", digest)
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "PROFILE\tOBJECTIVE\tINPUT\tOUTPUT\tCONCURRENCY\tREQUESTS\tCONTEXT CLIPPED")
+	for _, profile := range profiles {
+		fmt.Fprintf(w, "%s\t%s\t%d\t%d\t%d\t%d\t%t\n", profile.Name, profile.Objective, profile.InputTokens, profile.OutputTokens, profile.Concurrency, profile.Requests, profile.Clipped)
+	}
+	if err = w.Flush(); err != nil {
+		return err
+	}
+	fmt.Println("\nReproduce against a deployment:")
+	for _, profile := range profiles {
+		fmt.Printf("  infercrane benchmark DEPLOYMENT --requests %d --concurrency %d --input-tokens %d --output-tokens %d --runs 3 --warmup-requests %d\n", profile.Requests, profile.Concurrency, profile.InputTokens, profile.OutputTokens, profile.Concurrency)
+	}
+	fmt.Printf("\nBoundary: %s\n", document.MethodologyBoundary)
+	return nil
+}
+
+func optimizeKernelPlanCommand(args []string) error {
+	fs := flag.NewFlagSet("optimize kernel-plan", flag.ContinueOnError)
+	filePath := fs.String("file", "", "profile-backed kernel opportunity request JSON")
+	requireMeasured := fs.Bool("require-measured", false, "reject fixture or simulated profiler evidence")
+	output := fs.String("output", "human", "human or json")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 || strings.TrimSpace(*filePath) == "" {
+		return errors.New("usage: infercrane optimize kernel-plan --file PROFILE.json [--require-measured] [--output human|json]")
+	}
+	if err := validateOutput(*output); err != nil {
+		return err
+	}
+	body, err := os.ReadFile(*filePath)
+	if err != nil {
+		return fmt.Errorf("read kernel opportunity profile: %w", err)
+	}
+	var request kernelplanner.Request
+	if err = json.Unmarshal(body, &request); err != nil {
+		return fmt.Errorf("decode kernel opportunity profile: %w", err)
+	}
+	if *requireMeasured {
+		request.Policy.RequireMeasuredProfiler = true
+	}
+	plan, err := kernelplanner.Build(request)
+	if err != nil {
+		return err
+	}
+	if *output == "json" {
+		return printJSON(plan)
+	}
+	fmt.Printf("Kernel opportunities · %s · %s on %s\n", request.Model.Repository, request.Workload.Phase, request.Hardware.Accelerator)
+	fmt.Printf("Evidence %s · input %s\n\n", plan.EvidenceClass, shortID(strings.TrimPrefix(plan.InputDigest, "sha256:")))
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "RANK\tOPERATOR\tHOTSPOT\tSHARE\tAMDAHL CEILING\tTARGET\tKERNEL NEEDED\tSEARCH ORDER\tSTATUS")
+	for _, candidate := range plan.Candidates {
+		projectCounts := make(map[string]int, len(candidate.ExistingImplementations))
+		for _, implementation := range candidate.ExistingImplementations {
+			projectCounts[implementation.Project]++
+		}
+		sources := make([]string, 0, len(candidate.ExistingImplementations))
+		for _, implementation := range candidate.ExistingImplementations {
+			label := implementation.Project
+			if projectCounts[label] > 1 {
+				label += " (" + implementation.Backend + ")"
+			}
+			sources = append(sources, label)
+		}
+		fmt.Fprintf(w, "%d\t%s\t%s\t%.1f%%\t%.3fx\t%.3fx\t%.3fx\t%s\t%s\n", candidate.Rank, candidate.OperatorFamily, candidate.HotspotID, candidate.DeviceTimeFraction*100, candidate.MaxEndToEndSpeedup, candidate.TargetEndToEndSpeedup, candidate.RequiredKernelSpeedup, strings.Join(sources, " → "), candidate.Status)
+	}
+	if err = w.Flush(); err != nil {
+		return err
+	}
+	for _, rejected := range plan.Rejected {
+		fmt.Printf("Rejected %s · %s\n", rejected.HotspotID, rejected.Reason)
+	}
+	fmt.Println("\nThese are bounded experiments, not kernel performance claims. Target-GPU and end-to-end AIPerf evidence are still required.")
+	return nil
+}
+
+func optimizeEvidenceCommand(args []string) error {
+	if len(args) < 1 || (args[0] != "evaluate" && args[0] != "inspect-fastpath") {
+		return errors.New("usage: infercrane optimize evidence evaluate|inspect-fastpath --file FILE [--output human|json]")
+	}
+	action := args[0]
+	fs := flag.NewFlagSet("optimize evidence "+action, flag.ContinueOnError)
+	filePath := fs.String("file", "", "immutable optimization evidence JSON")
+	output := fs.String("output", "human", "human or json")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 || strings.TrimSpace(*filePath) == "" {
+		return errors.New("optimize evidence " + action + " requires --file and no positional arguments")
+	}
+	if err := validateOutput(*output); err != nil {
+		return err
+	}
+	body, err := os.ReadFile(*filePath)
+	if err != nil {
+		return fmt.Errorf("read optimization evidence: %w", err)
+	}
+	if action == "inspect-fastpath" {
+		imported, decodeErr := optimizationevidence.DecodeFastPathManifest(body)
+		if decodeErr != nil {
+			return decodeErr
+		}
+		if *output == "json" {
+			return printJSON(imported)
+		}
+		fmt.Printf("FastPath candidate · %s\n", imported.CandidateID)
+		fmt.Printf("Model       %s\nRuntime     %s\nGPU         %d× %s\nManifest    %s\nClaimed     %s / %s\nImported    %s\n\n", imported.ModelIdentity, imported.RuntimeIdentity, imported.GPUCount, imported.GPU, imported.ManifestDigest, imported.ClaimedStatus, imported.ClaimedEvidenceState, imported.ImportedEvidenceState)
+		fmt.Println("Qualification remains blocked until InferCrane binds the exact revision and passing signed quality evidence.")
+		return nil
+	}
+	campaign, err := optimizationevidence.Decode(body)
+	if err != nil {
+		return err
+	}
+	evaluation, err := optimizationevidence.Evaluate(campaign)
+	if err != nil {
+		return err
+	}
+	if *output == "json" {
+		return printJSON(evaluation)
+	}
+	fmt.Printf("Optimization evidence · %s\n", evaluation.ModelIdentity)
+	fmt.Printf("Workload    %s\nPolicy      %s@%d\nEvidence    %s\nWinner      %s\n\n", evaluation.WorkloadDigest, evaluation.SelectionPolicy.ID, evaluation.SelectionPolicy.Version, evaluation.InputDigest, emptyAs(evaluation.WinnerID, "none"))
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "CHOICE\tCANDIDATE\tRUNTIME\tQUALIFIED\tSCORE\tPARETO\tREASON")
+	for _, candidate := range evaluation.Candidates {
+		choice := ""
+		if candidate.Selected {
+			choice = "SELECTED"
+		}
+		score := "-"
+		if candidate.Score != nil {
+			score = strconv.FormatFloat(*candidate.Score, 'f', 4, 64)
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%t\t%s\t%t\t%s\n", choice, candidate.CandidateID, candidate.RuntimeID, candidate.Qualified, score, candidate.Pareto, strings.Join(candidate.RejectionReasons, "; "))
+	}
+	return w.Flush()
 }
 
 type optimizationCampaignView struct {

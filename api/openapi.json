@@ -325,6 +325,14 @@
       },
       "BenchmarkRequest": {
         "properties": {
+          "arrival_pattern": {
+            "enum": [
+              "constant",
+              "poisson",
+              "gamma"
+            ],
+            "type": "string"
+          },
           "concurrency": {
             "minimum": 1,
             "type": "integer"
@@ -353,6 +361,9 @@
               "long-context",
               "long-generation",
               "overload",
+              "public-decode-heavy",
+              "public-interactive",
+              "public-long-prefill",
               "throughput"
             ],
             "type": "string"
@@ -367,6 +378,10 @@
             "default": 17,
             "type": "integer"
           },
+          "request_rate": {
+            "exclusiveMinimum": 0,
+            "type": "number"
+          },
           "requests": {
             "maximum": 100000,
             "minimum": 1,
@@ -374,6 +389,18 @@
           },
           "revision": {
             "type": "string"
+          },
+          "run_cooldown_seconds": {
+            "default": 0,
+            "maximum": 3600,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "runs": {
+            "default": 1,
+            "maximum": 10,
+            "minimum": 1,
+            "type": "integer"
           },
           "streaming": {
             "default": true,
@@ -386,6 +413,12 @@
           "ttft_slo_ms": {
             "minimum": 0,
             "type": "number"
+          },
+          "warmup_requests": {
+            "default": 0,
+            "maximum": 100000,
+            "minimum": 0,
+            "type": "integer"
           }
         },
         "required": [
@@ -804,6 +837,10 @@
           "model_revision": {
             "type": "string"
           },
+          "model_secret_reference_id": {
+            "description": "Tenant-scoped server-side credential reference for private or gated model resolution.",
+            "type": "string"
+          },
           "name": {
             "type": "string"
           },
@@ -996,6 +1033,10 @@
             ],
             "type": "string"
           },
+          "provider_connection": {
+            "description": "Tenant-scoped server-side credential and endpoint reference used for authenticated discovery.",
+            "type": "string"
+          },
           "runtime": {
             "type": "string"
           },
@@ -1010,6 +1051,7 @@
             "type": "string"
           },
           "url": {
+            "description": "Required unless provider_connection supplies the private endpoint.",
             "format": "uri",
             "type": "string"
           }
@@ -1017,7 +1059,6 @@
         "required": [
           "name",
           "logical_model",
-          "url",
           "source",
           "ownership_mode",
           "runtime"
@@ -1391,7 +1432,9 @@
               "openai-compatible-external",
               "modal",
               "runpod-serverless-api",
-              "fly-io"
+              "fly-io",
+              "baseten",
+              "fireworks"
             ],
             "type": "string"
           },
@@ -2276,6 +2319,137 @@
         },
         "type": "object"
       },
+      "KernelOpportunityRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "hardware": {
+            "additionalProperties": false,
+            "properties": {
+              "accelerator": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "compute_capability": {
+                "type": "string"
+              },
+              "vendor": {
+                "const": "nvidia",
+                "type": "string"
+              }
+            },
+            "required": [
+              "vendor",
+              "accelerator"
+            ],
+            "type": "object"
+          },
+          "model": {
+            "additionalProperties": false,
+            "properties": {
+              "repository": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "revision": {
+                "pattern": "^[a-fA-F0-9]{40,64}$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "repository",
+              "revision"
+            ],
+            "type": "object"
+          },
+          "policy": {
+            "description": "Amdahl materiality, target speedup, measured-evidence, and candidate-budget gates.",
+            "type": "object"
+          },
+          "profile": {
+            "description": "Exact profiler identity and bounded operator hotspots; request-level monitoring alone is insufficient.",
+            "type": "object"
+          },
+          "runtime": {
+            "additionalProperties": false,
+            "properties": {
+              "image_digest": {
+                "pattern": "^sha256:[a-fA-F0-9]{64}$",
+                "type": "string"
+              },
+              "name": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "version": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "version",
+              "image_digest"
+            ],
+            "type": "object"
+          },
+          "schema_version": {
+            "const": "infercrane.kernel-opportunity-request/v1",
+            "type": "string"
+          },
+          "workload": {
+            "additionalProperties": false,
+            "properties": {
+              "batch_size": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "concurrency": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "digest": {
+                "pattern": "^sha256:[a-fA-F0-9]{64}$",
+                "type": "string"
+              },
+              "input_tokens": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "output_tokens": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "phase": {
+                "enum": [
+                  "prefill",
+                  "decode",
+                  "mixed"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "digest",
+              "phase",
+              "batch_size",
+              "concurrency",
+              "input_tokens",
+              "output_tokens"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "schema_version",
+          "model",
+          "runtime",
+          "hardware",
+          "workload",
+          "profile",
+          "policy"
+        ],
+        "type": "object"
+      },
       "LabEvaluationRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2339,6 +2513,9 @@
               "long-context",
               "long-generation",
               "overload",
+              "public-decode-heavy",
+              "public-interactive",
+              "public-long-prefill",
               "throughput"
             ],
             "type": "string"
@@ -3625,6 +3802,12 @@
             "minLength": 1,
             "type": "string"
           },
+          "gpu_count": {
+            "default": 1,
+            "maximum": 1024,
+            "minimum": 1,
+            "type": "integer"
+          },
           "include_simulated": {
             "default": false,
             "type": "boolean"
@@ -3663,6 +3846,10 @@
           "model_identity": {
             "maxLength": 256,
             "minLength": 1,
+            "type": "string"
+          },
+          "model_revision": {
+            "pattern": "^[a-fA-F0-9]{40,64}$",
             "type": "string"
           },
           "objective": {
@@ -3710,7 +3897,18 @@
               "long-context",
               "long-generation",
               "overload",
+              "public-decode-heavy",
+              "public-interactive",
+              "public-long-prefill",
               "throughput"
+            ],
+            "type": "string"
+          },
+          "workload_source": {
+            "enum": [
+              "reviewed_default",
+              "public_prior",
+              "customer_observed"
             ],
             "type": "string"
           }
@@ -3865,7 +4063,9 @@
               "openai-compatible-external",
               "modal",
               "runpod-serverless-api",
-              "fly-io"
+              "fly-io",
+              "baseten",
+              "fireworks"
             ],
             "type": "string"
           },
@@ -4523,6 +4723,151 @@
           "url",
           "provider",
           "runtime"
+        ],
+        "type": "object"
+      },
+      "TrafficObservation": {
+        "additionalProperties": false,
+        "properties": {
+          "error_type": {
+            "maxLength": 255,
+            "type": "string"
+          },
+          "generation_ms": {
+            "maximum": 86400000,
+            "minimum": 0,
+            "type": "number"
+          },
+          "input_tokens": {
+            "maximum": 10000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "latency_ms": {
+            "maximum": 86400000,
+            "minimum": 0,
+            "type": "number"
+          },
+          "operation": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "output_tokens": {
+            "maximum": 10000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "parent_session_id_hash": {
+            "pattern": "^[a-fA-F0-9]{64}$",
+            "type": "string"
+          },
+          "provider": {
+            "maxLength": 255,
+            "type": "string"
+          },
+          "queue_ms": {
+            "maximum": 86400000,
+            "minimum": 0,
+            "type": "number"
+          },
+          "request_model": {
+            "maxLength": 255,
+            "type": "string"
+          },
+          "response_model": {
+            "maxLength": 255,
+            "type": "string"
+          },
+          "retry_count": {
+            "maximum": 100,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "runtime": {
+            "maxLength": 255,
+            "type": "string"
+          },
+          "semantic_convention_schema": {
+            "maxLength": 255,
+            "type": "string"
+          },
+          "session_id_hash": {
+            "pattern": "^[a-fA-F0-9]{64}$",
+            "type": "string"
+          },
+          "shared_prefix_hash": {
+            "pattern": "^[a-fA-F0-9]{64}$",
+            "type": "string"
+          },
+          "source_request_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status_code": {
+            "maximum": 599,
+            "minimum": 100,
+            "type": "integer"
+          },
+          "streaming": {
+            "type": "boolean"
+          },
+          "tool_pause_ms": {
+            "maximum": 86400000,
+            "minimum": 0,
+            "type": "number"
+          },
+          "ttft_ms": {
+            "maximum": 86400000,
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "source_request_id",
+          "started_at",
+          "latency_ms",
+          "status_code",
+          "operation",
+          "streaming"
+        ],
+        "type": "object"
+      },
+      "TrafficObservationImport": {
+        "additionalProperties": false,
+        "properties": {
+          "observations": {
+            "items": {
+              "$ref": "#/components/schemas/TrafficObservation"
+            },
+            "maxItems": 1000,
+            "minItems": 1,
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "infercrane.traffic-observations/v1",
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "opentelemetry",
+              "datadog",
+              "baseten",
+              "fireworks",
+              "custom"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "schema_version",
+          "observations"
         ],
         "type": "object"
       }
@@ -7702,6 +8047,51 @@
       }
     },
     "/api/v1/deployments/{name}/replays": {
+      "get": {
+        "operationId": "listReplays",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List privacy-preserving workload-shape traces for one deployment",
+        "tags": [
+          "Replay"
+        ]
+      },
       "post": {
         "operationId": "captureReplay",
         "parameters": [
@@ -8455,6 +8845,63 @@
         "summary": "Set deterministic SLO policy",
         "tags": [
           "Inference decisions"
+        ]
+      }
+    },
+    "/api/v1/deployments/{name}/traffic-observations": {
+      "post": {
+        "operationId": "importTrafficObservations",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrafficObservationImport"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Import bounded content-free production request shapes for monitoring and replay",
+        "tags": [
+          "Monitoring"
         ]
       }
     },
@@ -9264,6 +9711,53 @@
         "summary": "Read bounded normalized inference and lifecycle evidence",
         "tags": [
           "Monitoring"
+        ]
+      }
+    },
+    "/api/v1/endpoints/{name}/optimization-readiness": {
+      "get": {
+        "operationId": "getEndpointOptimizationReadiness",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Turn content-free monitoring into a conservative next profiling action",
+        "tags": [
+          "Inference optimization"
         ]
       }
     },
@@ -10604,6 +11098,52 @@
         ]
       }
     },
+    "/api/v1/optimization/kernel-opportunities": {
+      "post": {
+        "operationId": "planKernelOpportunities",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KernelOpportunityRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Search reviewed existing kernel sources before bounded custom-kernel experiments",
+        "tags": [
+          "Inference optimization"
+        ]
+      }
+    },
     "/api/v1/optimization/proposals": {
       "post": {
         "operationId": "proposeOptimization",
@@ -11662,6 +12202,255 @@
         ]
       }
     },
+    "/api/v1/sandbox-previews/{sandbox}/{token}/{path...}": {
+      "get": {
+        "operationId": "getSandboxPreview",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sandbox",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "path...",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Proxy a tenant-scoped short-lived private-computer preview",
+        "tags": [
+          "Sandboxes"
+        ]
+      },
+      "head": {
+        "operationId": "headSandboxPreview",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sandbox",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "path...",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Inspect a tenant-scoped short-lived private-computer preview",
+        "tags": [
+          "Sandboxes"
+        ]
+      }
+    },
+    "/api/v1/sandboxes": {
+      "get": {
+        "operationId": "listSandboxes",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List tenant-owned private computers without provider identities or customer content",
+        "tags": [
+          "Sandboxes"
+        ]
+      },
+      "post": {
+        "operationId": "createSandbox",
+        "parameters": [
+          {
+            "description": "Stable key used to adopt the original durable operation after retries or disconnects.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Durable operation accepted"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Create a durable private computer from an approved immutable environment",
+        "tags": [
+          "Sandboxes"
+        ]
+      }
+    },
+    "/api/v1/sandboxes/capabilities": {
+      "get": {
+        "operationId": "getSandboxCapabilities",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Inspect the configured private-tenant sandbox provider and its exact implemented capabilities",
+        "tags": [
+          "Sandboxes"
+        ]
+      }
+    },
     "/api/v1/sandboxes/references": {
       "get": {
         "operationId": "listSandboxReferences",
@@ -11831,6 +12620,587 @@
           }
         ],
         "summary": "Rotate the expiring endpoint-scoped credential for an active sandbox reference",
+        "tags": [
+          "Sandboxes"
+        ]
+      }
+    },
+    "/api/v1/sandboxes/usage": {
+      "get": {
+        "operationId": "getSandboxUsage",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read content-free private-computer usage; this is not an invoice",
+        "tags": [
+          "Sandboxes"
+        ]
+      }
+    },
+    "/api/v1/sandboxes/{id}": {
+      "delete": {
+        "operationId": "deleteSandbox",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Stable key used to adopt the original durable operation after retries or disconnects.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Durable operation accepted"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Delete a private computer and durably clean up its workspace",
+        "tags": [
+          "Sandboxes"
+        ]
+      },
+      "get": {
+        "operationId": "getSandbox",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Inspect one tenant-owned private computer",
+        "tags": [
+          "Sandboxes"
+        ]
+      }
+    },
+    "/api/v1/sandboxes/{id}/commands": {
+      "post": {
+        "operationId": "runSandboxCommand",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Run one bounded command and stream base64 NDJSON output through InferCrane",
+        "tags": [
+          "Sandboxes"
+        ]
+      }
+    },
+    "/api/v1/sandboxes/{id}/events": {
+      "get": {
+        "operationId": "getSandboxEvents",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List content-free private-computer activity",
+        "tags": [
+          "Sandboxes"
+        ]
+      }
+    },
+    "/api/v1/sandboxes/{id}/files": {
+      "get": {
+        "operationId": "readSandboxFile",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Stream a file from the durable workspace",
+        "tags": [
+          "Sandboxes"
+        ]
+      },
+      "put": {
+        "operationId": "writeSandboxFile",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Stable key used to adopt the original durable operation after retries or disconnects.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Stream a bounded file into the durable workspace",
+        "tags": [
+          "Sandboxes"
+        ]
+      }
+    },
+    "/api/v1/sandboxes/{id}/pause": {
+      "post": {
+        "operationId": "pauseSandbox",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Stable key used to adopt the original durable operation after retries or disconnects.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Durable operation accepted"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Put a private computer to sleep while retaining its workspace",
+        "tags": [
+          "Sandboxes"
+        ]
+      }
+    },
+    "/api/v1/sandboxes/{id}/ports/{port}/leases": {
+      "post": {
+        "operationId": "createSandboxPortLease",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "port",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Create a short-lived InferCrane-brokered HTTP preview",
+        "tags": [
+          "Sandboxes"
+        ]
+      }
+    },
+    "/api/v1/sandboxes/{id}/receipt": {
+      "get": {
+        "operationId": "getSandboxReceipt",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read redacted execution receipt evidence without provider identity",
+        "tags": [
+          "Sandboxes"
+        ]
+      }
+    },
+    "/api/v1/sandboxes/{id}/resume": {
+      "post": {
+        "operationId": "resumeSandbox",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Stable key used to adopt the original durable operation after retries or disconnects.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Durable operation accepted"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Wake a private computer with its durable workspace attached",
         "tags": [
           "Sandboxes"
         ]
@@ -12190,6 +13560,89 @@
         "summary": "Inspect the authenticated principal",
         "tags": [
           "Identity"
+        ]
+      }
+    },
+    "/api/v1/workload-profiles": {
+      "get": {
+        "operationId": "listWorkloadProfiles",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List content-free public workload priors for day-zero screening",
+        "tags": [
+          "Inference optimization"
+        ]
+      }
+    },
+    "/api/v1/workload-profiles/{name}": {
+      "get": {
+        "operationId": "getWorkloadProfile",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Inspect one immutable public workload prior and its optimizer binding",
+        "tags": [
+          "Inference optimization"
         ]
       }
     },

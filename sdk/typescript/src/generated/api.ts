@@ -9,762 +9,872 @@ export class ControlApi {
   constructor(private readonly transport: ApiTransport) {}
 
   getOperation(id: string): Promise<Operation> {
-    const path = `/operations/${encodeURIComponent(id)}`;
-    return this.transport.request('GET', path) as Promise<Operation>;
+    const requestPath = `/operations/${encodeURIComponent(id)}`;
+    return this.transport.request('GET', requestPath) as Promise<Operation>;
   }
 
   listOperations(): Promise<ObjectList> {
-    const path = '/operations';
-    return this.transport.request('GET', path) as Promise<ObjectList>;
+    const requestPath = '/operations';
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
   getDoctor(): Promise<Record<string, JsonValue>> {
-    const path = '/doctor';
-    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+    const requestPath = '/doctor';
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
   getCurrentPrincipal(): Promise<Record<string, JsonValue>> {
-    const path = '/whoami';
-    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+    const requestPath = '/whoami';
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
   getConsoleSession(): Promise<Record<string, JsonValue>> {
-    const path = '/console/session';
-    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+    const requestPath = '/console/session';
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
   configureConsoleAccess(body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = '/console/access';
-    return this.transport.request('PUT', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = '/console/access';
+    return this.transport.request('PUT', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   listConsoleAccess(): Promise<ObjectList> {
-    const path = '/console/access';
-    return this.transport.request('GET', path) as Promise<ObjectList>;
+    const requestPath = '/console/access';
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
   listIntegrations(): Promise<Record<string, JsonValue>> {
-    const path = '/integrations';
-    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+    const requestPath = '/integrations';
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
   listCatalogModels(): Promise<ObjectList> {
-    const path = '/catalog/models';
-    return this.transport.request('GET', path) as Promise<ObjectList>;
+    const requestPath = '/catalog/models';
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
   getCatalogModel(name: string): Promise<Record<string, JsonValue>> {
-    const path = `/catalog/models/${encodeURIComponent(name)}`;
-    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/catalog/models/${encodeURIComponent(name)}`;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
   planIntent(body: JsonValue): Promise<IntentPlanEnvelope> {
-    const path = '/planning/intents';
-    return this.transport.request('POST', path, { body }) as Promise<IntentPlanEnvelope>;
+    const requestPath = '/planning/intents';
+    return this.transport.request('POST', requestPath, { body }) as Promise<IntentPlanEnvelope>;
   }
 
   listModelAPICatalog(): Promise<ObjectList> {
-    const path = '/model-api-catalog';
-    return this.transport.request('GET', path) as Promise<ObjectList>;
+    const requestPath = '/model-api-catalog';
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
   getModelAPICatalogEntry(id: string): Promise<Record<string, JsonValue>> {
-    const path = `/model-api-catalog/${encodeURIComponent(id)}`;
-    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/model-api-catalog/${encodeURIComponent(id)}`;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
   getHostedModelAPIUsage(): Promise<Record<string, JsonValue>> {
-    const path = '/model-api-usage';
-    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+    const requestPath = '/model-api-usage';
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
   publishModelAPIProduct(body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = '/admin/model-api/products';
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = '/admin/model-api/products';
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   publishModelAPIRetailRate(body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = '/admin/model-api/rates';
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = '/admin/model-api/rates';
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   publishModelAPISupplierOffer(body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = '/admin/model-api/offers';
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = '/admin/model-api/offers';
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   publishModelAPIQualification(body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = '/admin/model-api/qualifications';
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = '/admin/model-api/qualifications';
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   publishModelAPITargetBinding(body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = '/admin/model-api/target-bindings';
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = '/admin/model-api/target-bindings';
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   compileModelAPISupplyPlan(body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = '/admin/model-api/plans';
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = '/admin/model-api/plans';
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   publishModelAPIRoute(body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = '/admin/model-api/publications';
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = '/admin/model-api/publications';
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   publishModelAPIEntitlement(body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = '/admin/model-api/entitlements';
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = '/admin/model-api/entitlements';
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   listComputeProviders(): Promise<ObjectList> {
-    const path = '/compute/providers';
-    return this.transport.request('GET', path) as Promise<ObjectList>;
+    const requestPath = '/compute/providers';
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
   listGPUPrices(): Promise<ObjectList> {
-    const path = '/catalog/gpu-prices';
-    return this.transport.request('GET', path) as Promise<ObjectList>;
+    const requestPath = '/catalog/gpu-prices';
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
   listPublicGPUPrices(): Promise<ObjectList> {
-    const path = '/public/catalog/gpu-prices';
-    return this.transport.request('GET', path) as Promise<ObjectList>;
+    const requestPath = '/public/catalog/gpu-prices';
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
   listControlPlaneInstances(): Promise<ObjectList> {
-    const path = '/system/instances';
-    return this.transport.request('GET', path) as Promise<ObjectList>;
+    const requestPath = '/system/instances';
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
   listEnvironments(): Promise<ObjectList> {
-    const path = '/environments';
-    return this.transport.request('GET', path) as Promise<ObjectList>;
+    const requestPath = '/environments';
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
   createEnvironment(body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = '/environments';
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = '/environments';
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   stageEnvironmentPromotion(body: JsonValue, idempotencyKey: string): Promise<Record<string, JsonValue>> {
-    const path = '/environment-promotions';
-    return this.transport.request('POST', path, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
+    const requestPath = '/environment-promotions';
+    return this.transport.request('POST', requestPath, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
   }
 
   listLogicalModels(): Promise<ObjectList> {
-    const path = '/logical-models';
-    return this.transport.request('GET', path) as Promise<ObjectList>;
+    const requestPath = '/logical-models';
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
   createLogicalModel(body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = '/logical-models';
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = '/logical-models';
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   listEndpoints(): Promise<ObjectList> {
-    const path = '/endpoints';
-    return this.transport.request('GET', path) as Promise<ObjectList>;
+    const requestPath = '/endpoints';
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
   createEndpoint(body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = '/endpoints';
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = '/endpoints';
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   adoptEndpoint(body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = '/adoptions/endpoints';
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = '/adoptions/endpoints';
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   promoteAdoptionOwnership(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = `/adoptions/endpoints/${encodeURIComponent(name)}/ownership`;
-    return this.transport.request('PUT', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/adoptions/endpoints/${encodeURIComponent(name)}/ownership`;
+    return this.transport.request('PUT', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   inspectRequest(id: string): Promise<Record<string, JsonValue>> {
-    const path = `/requests/${encodeURIComponent(id)}`;
-    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/requests/${encodeURIComponent(id)}`;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
   getEndpoint(name: string): Promise<Record<string, JsonValue>> {
-    const path = `/endpoints/${encodeURIComponent(name)}`;
-    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/endpoints/${encodeURIComponent(name)}`;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
   getEndpointMonitoring(name: string): Promise<Record<string, JsonValue>> {
-    const path = `/endpoints/${encodeURIComponent(name)}/monitoring`;
-    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/endpoints/${encodeURIComponent(name)}/monitoring`;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
+  getEndpointOptimizationReadiness(name: string): Promise<Record<string, JsonValue>> {
+    const requestPath = `/endpoints/${encodeURIComponent(name)}/optimization-readiness`;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
   diagnoseEndpoint(name: string, body: JsonValue): Promise<ObjectList> {
-    const path = `/endpoints/${encodeURIComponent(name)}/doctor`;
-    return this.transport.request('POST', path, { body }) as Promise<ObjectList>;
+    const requestPath = `/endpoints/${encodeURIComponent(name)}/doctor`;
+    return this.transport.request('POST', requestPath, { body }) as Promise<ObjectList>;
   }
 
   listAlertPolicies(name: string): Promise<ObjectList> {
-    const path = `/endpoints/${encodeURIComponent(name)}/alerts`;
-    return this.transport.request('GET', path) as Promise<ObjectList>;
+    const requestPath = `/endpoints/${encodeURIComponent(name)}/alerts`;
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
   createAlertPolicy(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = `/endpoints/${encodeURIComponent(name)}/alerts`;
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/endpoints/${encodeURIComponent(name)}/alerts`;
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   evaluateAlerts(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = `/endpoints/${encodeURIComponent(name)}/alerts/evaluate`;
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/endpoints/${encodeURIComponent(name)}/alerts/evaluate`;
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   getAdmissionPolicy(name: string): Promise<Record<string, JsonValue>> {
-    const path = `/endpoints/${encodeURIComponent(name)}/admission`;
-    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/endpoints/${encodeURIComponent(name)}/admission`;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
   setAdmissionPolicy(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = `/endpoints/${encodeURIComponent(name)}/admission`;
-    return this.transport.request('PUT', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/endpoints/${encodeURIComponent(name)}/admission`;
+    return this.transport.request('PUT', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   submitAsyncInference(name: string, body: JsonValue, idempotencyKey: string): Promise<Record<string, JsonValue>> {
-    const path = `/endpoints/${encodeURIComponent(name)}/async`;
-    return this.transport.request('POST', path, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/endpoints/${encodeURIComponent(name)}/async`;
+    return this.transport.request('POST', requestPath, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
   }
 
   getAsyncInferenceJob(id: string): Promise<Record<string, JsonValue>> {
-    const path = `/async/jobs/${encodeURIComponent(id)}`;
-    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/async/jobs/${encodeURIComponent(id)}`;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
   cancelAsyncInferenceJob(id: string): Promise<void> {
-    const path = `/async/jobs/${encodeURIComponent(id)}`;
-    return this.transport.request('DELETE', path) as Promise<void>;
+    const requestPath = `/async/jobs/${encodeURIComponent(id)}`;
+    return this.transport.request('DELETE', requestPath) as Promise<void>;
   }
 
   deleteEndpoint(name: string): Promise<Record<string, JsonValue>> {
-    const path = `/endpoints/${encodeURIComponent(name)}`;
-    return this.transport.request('DELETE', path) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/endpoints/${encodeURIComponent(name)}`;
+    return this.transport.request('DELETE', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
   createEndpointBinding(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = `/endpoints/${encodeURIComponent(name)}/bindings`;
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/endpoints/${encodeURIComponent(name)}/bindings`;
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   createServingPlan(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = `/endpoints/${encodeURIComponent(name)}/plans`;
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/endpoints/${encodeURIComponent(name)}/plans`;
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   activateServingPlan(name: string, plan: string, body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = `/endpoints/${encodeURIComponent(name)}/plans/${encodeURIComponent(plan)}/active`;
-    return this.transport.request('PUT', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/endpoints/${encodeURIComponent(name)}/plans/${encodeURIComponent(plan)}/active`;
+    return this.transport.request('PUT', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   stageServingPlan(name: string, plan: string, body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = `/endpoints/${encodeURIComponent(name)}/plans/${encodeURIComponent(plan)}/candidate`;
-    return this.transport.request('PUT', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/endpoints/${encodeURIComponent(name)}/plans/${encodeURIComponent(plan)}/candidate`;
+    return this.transport.request('PUT', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   getEndpointReleaseGuardPolicy(name: string): Promise<Record<string, JsonValue>> {
-    const path = `/endpoints/${encodeURIComponent(name)}/release-guard/policy`;
-    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/endpoints/${encodeURIComponent(name)}/release-guard/policy`;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
   setEndpointReleaseGuardPolicy(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = `/endpoints/${encodeURIComponent(name)}/release-guard/policy`;
-    return this.transport.request('PUT', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/endpoints/${encodeURIComponent(name)}/release-guard/policy`;
+    return this.transport.request('PUT', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   evaluateEndpointReleaseGuard(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = `/endpoints/${encodeURIComponent(name)}/release-guard/evaluate`;
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/endpoints/${encodeURIComponent(name)}/release-guard/evaluate`;
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   listEndpointReleaseGuardEvaluations(name: string): Promise<ObjectList> {
-    const path = `/endpoints/${encodeURIComponent(name)}/release-guard/evaluations`;
-    return this.transport.request('GET', path) as Promise<ObjectList>;
+    const requestPath = `/endpoints/${encodeURIComponent(name)}/release-guard/evaluations`;
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
   listOperationEvents(id: string): Promise<ObjectList> {
-    const path = `/operations/${encodeURIComponent(id)}/events`;
-    return this.transport.request('GET', path) as Promise<ObjectList>;
+    const requestPath = `/operations/${encodeURIComponent(id)}/events`;
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
   cancelOperation(id: string): Promise<Record<string, JsonValue>> {
-    const path = `/operations/${encodeURIComponent(id)}/cancel`;
-    return this.transport.request('POST', path) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/operations/${encodeURIComponent(id)}/cancel`;
+    return this.transport.request('POST', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
   applyDeployment(body: JsonValue, idempotencyKey: string): Promise<OperationEnvelope> {
-    const path = '/deployments/apply';
-    return this.transport.request('POST', path, { body, idempotencyKey }) as Promise<OperationEnvelope>;
+    const requestPath = '/deployments/apply';
+    return this.transport.request('POST', requestPath, { body, idempotencyKey }) as Promise<OperationEnvelope>;
   }
 
   createDeployment(body: JsonValue, idempotencyKey: string): Promise<DeploymentOperationEnvelope> {
-    const path = '/deployments';
-    return this.transport.request('POST', path, { body, idempotencyKey }) as Promise<DeploymentOperationEnvelope>;
+    const requestPath = '/deployments';
+    return this.transport.request('POST', requestPath, { body, idempotencyKey }) as Promise<DeploymentOperationEnvelope>;
   }
 
   deleteDeployment(name: string, idempotencyKey: string): Promise<OperationEnvelope> {
-    const path = `/deployments/${encodeURIComponent(name)}`;
-    return this.transport.request('DELETE', path, { idempotencyKey }) as Promise<OperationEnvelope>;
+    const requestPath = `/deployments/${encodeURIComponent(name)}`;
+    return this.transport.request('DELETE', requestPath, { idempotencyKey }) as Promise<OperationEnvelope>;
   }
 
   listDeployments(): Promise<DeploymentList> {
-    const path = '/deployments';
-    return this.transport.request('GET', path) as Promise<DeploymentList>;
+    const requestPath = '/deployments';
+    return this.transport.request('GET', requestPath) as Promise<DeploymentList>;
   }
 
   getDeployment(name: string): Promise<DeploymentView> {
-    const path = `/deployments/${encodeURIComponent(name)}`;
-    return this.transport.request('GET', path) as Promise<DeploymentView>;
+    const requestPath = `/deployments/${encodeURIComponent(name)}`;
+    return this.transport.request('GET', requestPath) as Promise<DeploymentView>;
   }
 
   recordOperationalMeasurements(name: string, body: JsonValue): Promise<ObjectList> {
-    const path = `/deployments/${encodeURIComponent(name)}/measurements`;
-    return this.transport.request('POST', path, { body }) as Promise<ObjectList>;
+    const requestPath = `/deployments/${encodeURIComponent(name)}/measurements`;
+    return this.transport.request('POST', requestPath, { body }) as Promise<ObjectList>;
+  }
+
+  importTrafficObservations(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const requestPath = `/deployments/${encodeURIComponent(name)}/traffic-observations`;
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   recordCostEvidence(name: string, body: JsonValue): Promise<ObjectList> {
-    const path = `/deployments/${encodeURIComponent(name)}/cost-evidence`;
-    return this.transport.request('POST', path, { body }) as Promise<ObjectList>;
+    const requestPath = `/deployments/${encodeURIComponent(name)}/cost-evidence`;
+    return this.transport.request('POST', requestPath, { body }) as Promise<ObjectList>;
   }
 
   listDeploymentEvents(name: string): Promise<ObjectList> {
-    const path = `/deployments/${encodeURIComponent(name)}/events`;
-    return this.transport.request('GET', path) as Promise<ObjectList>;
+    const requestPath = `/deployments/${encodeURIComponent(name)}/events`;
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
   attachQualityEvidence(name: string, body: JsonValue, idempotencyKey: string): Promise<Record<string, JsonValue>> {
-    const path = `/deployments/${encodeURIComponent(name)}/quality-evidence`;
-    return this.transport.request('POST', path, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/deployments/${encodeURIComponent(name)}/quality-evidence`;
+    return this.transport.request('POST', requestPath, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
   }
 
   listQualityEvidence(name: string): Promise<ObjectList> {
-    const path = `/deployments/${encodeURIComponent(name)}/quality-evidence`;
-    return this.transport.request('GET', path) as Promise<ObjectList>;
+    const requestPath = `/deployments/${encodeURIComponent(name)}/quality-evidence`;
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
   runBenchmark(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = `/deployments/${encodeURIComponent(name)}/benchmarks`;
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/deployments/${encodeURIComponent(name)}/benchmarks`;
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   listBenchmarks(name: string): Promise<ObjectList> {
-    const path = `/deployments/${encodeURIComponent(name)}/benchmarks`;
-    return this.transport.request('GET', path) as Promise<ObjectList>;
+    const requestPath = `/deployments/${encodeURIComponent(name)}/benchmarks`;
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
   captureRecipe(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = `/deployments/${encodeURIComponent(name)}/recipes`;
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/deployments/${encodeURIComponent(name)}/recipes`;
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   listRecipes(): Promise<ObjectList> {
-    const path = '/recipes';
-    return this.transport.request('GET', path) as Promise<ObjectList>;
+    const requestPath = '/recipes';
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
   getRecipe(name: string, version: string): Promise<Record<string, JsonValue>> {
-    const path = `/recipes/${encodeURIComponent(name)}/${encodeURIComponent(version)}`;
-    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/recipes/${encodeURIComponent(name)}/${encodeURIComponent(version)}`;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
   evaluateLab(body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = '/lab/evaluations';
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = '/lab/evaluations';
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   captureReplay(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = `/deployments/${encodeURIComponent(name)}/replays`;
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/deployments/${encodeURIComponent(name)}/replays`;
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  listReplays(name: string): Promise<ObjectList> {
+    const requestPath = `/deployments/${encodeURIComponent(name)}/replays`;
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
   getReplay(id: string): Promise<Record<string, JsonValue>> {
-    const path = `/replays/${encodeURIComponent(id)}`;
-    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/replays/${encodeURIComponent(id)}`;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
   capacityIntelligence(): Promise<Record<string, JsonValue>> {
-    const path = '/capacity/intelligence';
-    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+    const requestPath = '/capacity/intelligence';
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
   probeLaunchCapacity(body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = '/capacity/probes';
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = '/capacity/probes';
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   recordArtifactCacheObservation(id: string, body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = `/artifacts/${encodeURIComponent(id)}/cache-observations`;
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/artifacts/${encodeURIComponent(id)}/cache-observations`;
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   requestArtifactPrefetch(id: string, body: JsonValue, idempotencyKey: string): Promise<Record<string, JsonValue>> {
-    const path = `/artifacts/${encodeURIComponent(id)}/prefetches`;
-    return this.transport.request('POST', path, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/artifacts/${encodeURIComponent(id)}/prefetches`;
+    return this.transport.request('POST', requestPath, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
   }
 
   inspectArtifactCache(id: string): Promise<Record<string, JsonValue>> {
-    const path = `/artifacts/${encodeURIComponent(id)}/cache`;
-    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/artifacts/${encodeURIComponent(id)}/cache`;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
+  listWorkloadProfiles(): Promise<ObjectList> {
+    const requestPath = '/workload-profiles';
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
+  }
+
+  getWorkloadProfile(name: string): Promise<Record<string, JsonValue>> {
+    const requestPath = `/workload-profiles/${encodeURIComponent(name)}`;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
   proposeOptimization(body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = '/optimization/proposals';
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = '/optimization/proposals';
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  planKernelOpportunities(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const requestPath = '/optimization/kernel-opportunities';
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   listOptimizationCampaigns(): Promise<ObjectList> {
-    const path = '/optimization/campaigns';
-    return this.transport.request('GET', path) as Promise<ObjectList>;
+    const requestPath = '/optimization/campaigns';
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
   createOptimizationCampaign(body: JsonValue, idempotencyKey: string): Promise<Record<string, JsonValue>> {
-    const path = '/optimization/campaigns';
-    return this.transport.request('POST', path, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
+    const requestPath = '/optimization/campaigns';
+    return this.transport.request('POST', requestPath, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
   }
 
   getOptimizationCampaign(id: string): Promise<Record<string, JsonValue>> {
-    const path = `/optimization/campaigns/${encodeURIComponent(id)}`;
-    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/optimization/campaigns/${encodeURIComponent(id)}`;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
   approveOptimizationCampaign(id: string, body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = `/optimization/campaigns/${encodeURIComponent(id)}/approve`;
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/optimization/campaigns/${encodeURIComponent(id)}/approve`;
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   activateOptimizationCampaign(id: string, body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = `/optimization/campaigns/${encodeURIComponent(id)}/activate`;
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/optimization/campaigns/${encodeURIComponent(id)}/activate`;
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   cancelOptimizationCampaign(id: string, body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = `/optimization/campaigns/${encodeURIComponent(id)}/cancel`;
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/optimization/campaigns/${encodeURIComponent(id)}/cancel`;
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   listOptimizedArtifacts(): Promise<ObjectList> {
-    const path = '/optimized-artifacts';
-    return this.transport.request('GET', path) as Promise<ObjectList>;
+    const requestPath = '/optimized-artifacts';
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
   createOptimizedArtifact(body: JsonValue, idempotencyKey: string): Promise<Record<string, JsonValue>> {
-    const path = '/optimized-artifacts';
-    return this.transport.request('POST', path, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
+    const requestPath = '/optimized-artifacts';
+    return this.transport.request('POST', requestPath, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
   }
 
   getOptimizedArtifact(id: string): Promise<Record<string, JsonValue>> {
-    const path = `/optimized-artifacts/${encodeURIComponent(id)}`;
-    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/optimized-artifacts/${encodeURIComponent(id)}`;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
   beginOptimizedArtifactBuild(id: string, body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = `/optimized-artifacts/${encodeURIComponent(id)}/build`;
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/optimized-artifacts/${encodeURIComponent(id)}/build`;
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   attestOptimizedArtifactBuild(id: string, body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = `/optimized-artifacts/${encodeURIComponent(id)}/attest`;
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/optimized-artifacts/${encodeURIComponent(id)}/attest`;
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   qualifyOptimizedArtifact(id: string, body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = `/optimized-artifacts/${encodeURIComponent(id)}/qualify`;
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/optimized-artifacts/${encodeURIComponent(id)}/qualify`;
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  getSandboxCapabilities(): Promise<Record<string, JsonValue>> {
+    const requestPath = '/sandboxes/capabilities';
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
+  listSandboxes(): Promise<ObjectList> {
+    const requestPath = '/sandboxes';
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
+  }
+
+  createSandbox(body: JsonValue, idempotencyKey: string): Promise<Record<string, JsonValue>> {
+    const requestPath = '/sandboxes';
+    return this.transport.request('POST', requestPath, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
+  }
+
+  getSandboxUsage(): Promise<Record<string, JsonValue>> {
+    const requestPath = '/sandboxes/usage';
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
+  getSandbox(id: string): Promise<Record<string, JsonValue>> {
+    const requestPath = `/sandboxes/${encodeURIComponent(id)}`;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
+  runSandboxCommand(id: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const requestPath = `/sandboxes/${encodeURIComponent(id)}/commands`;
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  writeSandboxFile(id: string, body: JsonValue, idempotencyKey: string): Promise<Record<string, JsonValue>> {
+    const requestPath = `/sandboxes/${encodeURIComponent(id)}/files`;
+    return this.transport.request('PUT', requestPath, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
+  }
+
+  readSandboxFile(id: string): Promise<Record<string, JsonValue>> {
+    const requestPath = `/sandboxes/${encodeURIComponent(id)}/files`;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
+  createSandboxPortLease(id: string, port: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const requestPath = `/sandboxes/${encodeURIComponent(id)}/ports/${encodeURIComponent(port)}/leases`;
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  getSandboxEvents(id: string): Promise<ObjectList> {
+    const requestPath = `/sandboxes/${encodeURIComponent(id)}/events`;
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
+  }
+
+  getSandboxReceipt(id: string): Promise<Record<string, JsonValue>> {
+    const requestPath = `/sandboxes/${encodeURIComponent(id)}/receipt`;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
+  getSandboxPreview(sandbox: string, token: string, path: string): Promise<Record<string, JsonValue>> {
+    const requestPath = `/sandbox-previews/${encodeURIComponent(sandbox)}/${encodeURIComponent(token)}/${encodeURIComponent(path)}`;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
+  headSandboxPreview(sandbox: string, token: string, path: string): Promise<void> {
+    const requestPath = `/sandbox-previews/${encodeURIComponent(sandbox)}/${encodeURIComponent(token)}/${encodeURIComponent(path)}`;
+    return this.transport.request('HEAD', requestPath) as Promise<void>;
+  }
+
+  pauseSandbox(id: string, idempotencyKey: string): Promise<Record<string, JsonValue>> {
+    const requestPath = `/sandboxes/${encodeURIComponent(id)}/pause`;
+    return this.transport.request('POST', requestPath, { idempotencyKey }) as Promise<Record<string, JsonValue>>;
+  }
+
+  resumeSandbox(id: string, idempotencyKey: string): Promise<Record<string, JsonValue>> {
+    const requestPath = `/sandboxes/${encodeURIComponent(id)}/resume`;
+    return this.transport.request('POST', requestPath, { idempotencyKey }) as Promise<Record<string, JsonValue>>;
+  }
+
+  deleteSandbox(id: string, idempotencyKey: string): Promise<Record<string, JsonValue>> {
+    const requestPath = `/sandboxes/${encodeURIComponent(id)}`;
+    return this.transport.request('DELETE', requestPath, { idempotencyKey }) as Promise<Record<string, JsonValue>>;
   }
 
   createSandboxReference(body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = '/sandboxes/references';
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = '/sandboxes/references';
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   listSandboxReferences(): Promise<ObjectList> {
-    const path = '/sandboxes/references';
-    return this.transport.request('GET', path) as Promise<ObjectList>;
+    const requestPath = '/sandboxes/references';
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
   rotateSandboxCredential(id: string): Promise<Record<string, JsonValue>> {
-    const path = `/sandboxes/references/${encodeURIComponent(id)}/credential/rotate`;
-    return this.transport.request('POST', path) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/sandboxes/references/${encodeURIComponent(id)}/credential/rotate`;
+    return this.transport.request('POST', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
   revokeSandboxReference(id: string): Promise<Record<string, JsonValue>> {
-    const path = `/sandboxes/references/${encodeURIComponent(id)}`;
-    return this.transport.request('DELETE', path) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/sandboxes/references/${encodeURIComponent(id)}`;
+    return this.transport.request('DELETE', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
   attachTrainingArtifact(name: string, body: JsonValue, idempotencyKey: string): Promise<Record<string, JsonValue>> {
-    const path = `/deployments/${encodeURIComponent(name)}/training-artifacts`;
-    return this.transport.request('POST', path, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/deployments/${encodeURIComponent(name)}/training-artifacts`;
+    return this.transport.request('POST', requestPath, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
   }
 
   listTrainingArtifacts(name: string): Promise<ObjectList> {
-    const path = `/deployments/${encodeURIComponent(name)}/training-artifacts`;
-    return this.transport.request('GET', path) as Promise<ObjectList>;
+    const requestPath = `/deployments/${encodeURIComponent(name)}/training-artifacts`;
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
   createFinOpsReport(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = `/deployments/${encodeURIComponent(name)}/finops/reports`;
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/deployments/${encodeURIComponent(name)}/finops/reports`;
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   listFinOpsReports(name: string): Promise<ObjectList> {
-    const path = `/deployments/${encodeURIComponent(name)}/finops/reports`;
-    return this.transport.request('GET', path) as Promise<ObjectList>;
+    const requestPath = `/deployments/${encodeURIComponent(name)}/finops/reports`;
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
   createAutopilotPlan(name: string, body: JsonValue, idempotencyKey: string): Promise<Record<string, JsonValue>> {
-    const path = `/deployments/${encodeURIComponent(name)}/autopilot/plans`;
-    return this.transport.request('POST', path, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/deployments/${encodeURIComponent(name)}/autopilot/plans`;
+    return this.transport.request('POST', requestPath, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
   }
 
   getAutopilotPlan(id: string): Promise<Record<string, JsonValue>> {
-    const path = `/autopilot/plans/${encodeURIComponent(id)}`;
-    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/autopilot/plans/${encodeURIComponent(id)}`;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
   approveAutopilotPlan(id: string, body: JsonValue, idempotencyKey: string): Promise<Record<string, JsonValue>> {
-    const path = `/autopilot/plans/${encodeURIComponent(id)}/approve`;
-    return this.transport.request('POST', path, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/autopilot/plans/${encodeURIComponent(id)}/approve`;
+    return this.transport.request('POST', requestPath, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
   }
 
   createContextPassport(body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = '/context-passports';
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = '/context-passports';
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   getContextPassport(id: string): Promise<Record<string, JsonValue>> {
-    const path = `/context-passports/${encodeURIComponent(id)}`;
-    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/context-passports/${encodeURIComponent(id)}`;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
   evaluateBurstGuard(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = `/deployments/${encodeURIComponent(name)}/burst-guard/evaluate`;
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/deployments/${encodeURIComponent(name)}/burst-guard/evaluate`;
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   createInferencePassport(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = `/deployments/${encodeURIComponent(name)}/passports`;
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/deployments/${encodeURIComponent(name)}/passports`;
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   listInferencePassports(name: string): Promise<ObjectList> {
-    const path = `/deployments/${encodeURIComponent(name)}/passports`;
-    return this.transport.request('GET', path) as Promise<ObjectList>;
+    const requestPath = `/deployments/${encodeURIComponent(name)}/passports`;
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
   getSLOPolicy(name: string): Promise<Record<string, JsonValue>> {
-    const path = `/deployments/${encodeURIComponent(name)}/slo-policy`;
-    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/deployments/${encodeURIComponent(name)}/slo-policy`;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
   setSLOPolicy(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = `/deployments/${encodeURIComponent(name)}/slo-policy`;
-    return this.transport.request('PUT', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/deployments/${encodeURIComponent(name)}/slo-policy`;
+    return this.transport.request('PUT', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   deleteSLOPolicy(name: string): Promise<void> {
-    const path = `/deployments/${encodeURIComponent(name)}/slo-policy`;
-    return this.transport.request('DELETE', path) as Promise<void>;
+    const requestPath = `/deployments/${encodeURIComponent(name)}/slo-policy`;
+    return this.transport.request('DELETE', requestPath) as Promise<void>;
   }
 
   createRecommendation(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = `/deployments/${encodeURIComponent(name)}/recommendations`;
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/deployments/${encodeURIComponent(name)}/recommendations`;
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   listRecommendations(name: string): Promise<ObjectList> {
-    const path = `/deployments/${encodeURIComponent(name)}/recommendations`;
-    return this.transport.request('GET', path) as Promise<ObjectList>;
+    const requestPath = `/deployments/${encodeURIComponent(name)}/recommendations`;
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
   listRevisions(name: string): Promise<ObjectList> {
-    const path = `/deployments/${encodeURIComponent(name)}/revisions`;
-    return this.transport.request('GET', path) as Promise<ObjectList>;
+    const requestPath = `/deployments/${encodeURIComponent(name)}/revisions`;
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
   createRollout(name: string, body: JsonValue, idempotencyKey: string): Promise<OperationEnvelope> {
-    const path = `/deployments/${encodeURIComponent(name)}/rollouts`;
-    return this.transport.request('POST', path, { body, idempotencyKey }) as Promise<OperationEnvelope>;
+    const requestPath = `/deployments/${encodeURIComponent(name)}/rollouts`;
+    return this.transport.request('POST', requestPath, { body, idempotencyKey }) as Promise<OperationEnvelope>;
   }
 
   evaluateReleaseGuard(name: string, body: JsonValue, idempotencyKey: string): Promise<OperationEnvelope> {
-    const path = `/deployments/${encodeURIComponent(name)}/rollouts/guard/evaluate`;
-    return this.transport.request('POST', path, { body, idempotencyKey }) as Promise<OperationEnvelope>;
+    const requestPath = `/deployments/${encodeURIComponent(name)}/rollouts/guard/evaluate`;
+    return this.transport.request('POST', requestPath, { body, idempotencyKey }) as Promise<OperationEnvelope>;
   }
 
   getReleaseGuardPolicy(name: string): Promise<Record<string, JsonValue>> {
-    const path = `/deployments/${encodeURIComponent(name)}/release-guard/policy`;
-    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/deployments/${encodeURIComponent(name)}/release-guard/policy`;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
   setReleaseGuardPolicy(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = `/deployments/${encodeURIComponent(name)}/release-guard/policy`;
-    return this.transport.request('PUT', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/deployments/${encodeURIComponent(name)}/release-guard/policy`;
+    return this.transport.request('PUT', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   promoteRollout(name: string, revision: string, idempotencyKey: string): Promise<OperationEnvelope> {
-    const path = `/deployments/${encodeURIComponent(name)}/rollouts/${encodeURIComponent(revision)}/promote`;
-    return this.transport.request('POST', path, { idempotencyKey }) as Promise<OperationEnvelope>;
+    const requestPath = `/deployments/${encodeURIComponent(name)}/rollouts/${encodeURIComponent(revision)}/promote`;
+    return this.transport.request('POST', requestPath, { idempotencyKey }) as Promise<OperationEnvelope>;
   }
 
   provisionRollout(name: string, revision: string, idempotencyKey: string): Promise<OperationEnvelope> {
-    const path = `/deployments/${encodeURIComponent(name)}/rollouts/${encodeURIComponent(revision)}/provision`;
-    return this.transport.request('POST', path, { idempotencyKey }) as Promise<OperationEnvelope>;
+    const requestPath = `/deployments/${encodeURIComponent(name)}/rollouts/${encodeURIComponent(revision)}/provision`;
+    return this.transport.request('POST', requestPath, { idempotencyKey }) as Promise<OperationEnvelope>;
   }
 
   rejectRollout(name: string, revision: string, body: JsonValue, idempotencyKey: string): Promise<OperationEnvelope> {
-    const path = `/deployments/${encodeURIComponent(name)}/rollouts/${encodeURIComponent(revision)}/reject`;
-    return this.transport.request('POST', path, { body, idempotencyKey }) as Promise<OperationEnvelope>;
+    const requestPath = `/deployments/${encodeURIComponent(name)}/rollouts/${encodeURIComponent(revision)}/reject`;
+    return this.transport.request('POST', requestPath, { body, idempotencyKey }) as Promise<OperationEnvelope>;
   }
 
   rollbackDeployment(name: string, body: JsonValue, idempotencyKey: string): Promise<OperationEnvelope> {
-    const path = `/deployments/${encodeURIComponent(name)}/rollback`;
-    return this.transport.request('POST', path, { body, idempotencyKey }) as Promise<OperationEnvelope>;
+    const requestPath = `/deployments/${encodeURIComponent(name)}/rollback`;
+    return this.transport.request('POST', requestPath, { body, idempotencyKey }) as Promise<OperationEnvelope>;
   }
 
   listScalingDecisions(name: string): Promise<ObjectList> {
-    const path = `/deployments/${encodeURIComponent(name)}/scaling-decisions`;
-    return this.transport.request('GET', path) as Promise<ObjectList>;
+    const requestPath = `/deployments/${encodeURIComponent(name)}/scaling-decisions`;
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
   setDeploymentRoute(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = `/deployments/${encodeURIComponent(name)}/route`;
-    return this.transport.request('PUT', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/deployments/${encodeURIComponent(name)}/route`;
+    return this.transport.request('PUT', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   listTargets(): Promise<ObjectList> {
-    const path = '/targets';
-    return this.transport.request('GET', path) as Promise<ObjectList>;
+    const requestPath = '/targets';
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
   createTarget(body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = '/targets';
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = '/targets';
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   listProviderConnections(): Promise<ObjectList> {
-    const path = '/provider-connections';
-    return this.transport.request('GET', path) as Promise<ObjectList>;
+    const requestPath = '/provider-connections';
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
   createProviderConnection(body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = '/provider-connections';
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = '/provider-connections';
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   deleteProviderConnection(name: string): Promise<Record<string, JsonValue>> {
-    const path = `/provider-connections/${encodeURIComponent(name)}`;
-    return this.transport.request('DELETE', path) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/provider-connections/${encodeURIComponent(name)}`;
+    return this.transport.request('DELETE', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
   getManagedWallet(): Promise<Record<string, JsonValue>> {
-    const path = '/billing/wallet';
-    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+    const requestPath = '/billing/wallet';
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
   listManagedWalletLedger(): Promise<Record<string, JsonValue>> {
-    const path = '/billing/ledger';
-    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+    const requestPath = '/billing/ledger';
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
   createManagedCheckoutSession(body: JsonValue, idempotencyKey: string): Promise<Record<string, JsonValue>> {
-    const path = '/billing/checkout-sessions';
-    return this.transport.request('POST', path, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
+    const requestPath = '/billing/checkout-sessions';
+    return this.transport.request('POST', requestPath, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
   }
 
   processStripeBillingWebhook(body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = '/billing/webhooks/stripe';
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = '/billing/webhooks/stripe';
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   creditManagedWallet(body: JsonValue, idempotencyKey: string): Promise<Record<string, JsonValue>> {
-    const path = '/admin/billing/credits';
-    return this.transport.request('POST', path, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
+    const requestPath = '/admin/billing/credits';
+    return this.transport.request('POST', requestPath, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
   }
 
   listManagedUsageReservations(): Promise<Record<string, JsonValue>> {
-    const path = '/admin/billing/reservations';
-    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+    const requestPath = '/admin/billing/reservations';
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
   settleManagedUsage(id: string, body: JsonValue, idempotencyKey: string): Promise<Record<string, JsonValue>> {
-    const path = `/admin/billing/reservations/${encodeURIComponent(id)}/settlement`;
-    return this.transport.request('POST', path, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/admin/billing/reservations/${encodeURIComponent(id)}/settlement`;
+    return this.transport.request('POST', requestPath, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
   }
 
   releaseManagedUsage(id: string, body: JsonValue, idempotencyKey: string): Promise<Record<string, JsonValue>> {
-    const path = `/admin/billing/reservations/${encodeURIComponent(id)}/release`;
-    return this.transport.request('POST', path, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/admin/billing/reservations/${encodeURIComponent(id)}/release`;
+    return this.transport.request('POST', requestPath, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
   }
 
   listOrphans(): Promise<ObjectList> {
-    const path = '/orphans';
-    return this.transport.request('GET', path) as Promise<ObjectList>;
+    const requestPath = '/orphans';
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
   listAuditEvents(): Promise<ObjectList> {
-    const path = '/audit-events';
-    return this.transport.request('GET', path) as Promise<ObjectList>;
+    const requestPath = '/audit-events';
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
   setTenantQuota(body: JsonValue): Promise<void> {
-    const path = '/tenant/quota';
-    return this.transport.request('PUT', path, { body }) as Promise<void>;
+    const requestPath = '/tenant/quota';
+    return this.transport.request('PUT', requestPath, { body }) as Promise<void>;
   }
 
   createTenant(body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = '/tenants';
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = '/tenants';
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   createPrincipal(body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = '/principals';
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = '/principals';
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   listPrincipals(): Promise<ObjectList> {
-    const path = '/principals';
-    return this.transport.request('GET', path) as Promise<ObjectList>;
+    const requestPath = '/principals';
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
   rotatePrincipal(id: string): Promise<Record<string, JsonValue>> {
-    const path = `/principals/${encodeURIComponent(id)}/rotate`;
-    return this.transport.request('POST', path) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/principals/${encodeURIComponent(id)}/rotate`;
+    return this.transport.request('POST', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
   revokePrincipal(id: string): Promise<void> {
-    const path = `/principals/${encodeURIComponent(id)}`;
-    return this.transport.request('DELETE', path) as Promise<void>;
+    const requestPath = `/principals/${encodeURIComponent(id)}`;
+    return this.transport.request('DELETE', requestPath) as Promise<void>;
   }
 
   listSecretReferences(): Promise<ObjectList> {
-    const path = '/secrets';
-    return this.transport.request('GET', path) as Promise<ObjectList>;
+    const requestPath = '/secrets';
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
   createSecretReference(body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = '/secrets';
-    return this.transport.request('POST', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = '/secrets';
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   deleteSecretReference(id: string): Promise<void> {
-    const path = `/secrets/${encodeURIComponent(id)}`;
-    return this.transport.request('DELETE', path) as Promise<void>;
+    const requestPath = `/secrets/${encodeURIComponent(id)}`;
+    return this.transport.request('DELETE', requestPath) as Promise<void>;
   }
 
   getExternalPolicy(name: string): Promise<Record<string, JsonValue>> {
-    const path = `/deployments/${encodeURIComponent(name)}/external-policy`;
-    return this.transport.request('GET', path) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/deployments/${encodeURIComponent(name)}/external-policy`;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
   setExternalPolicy(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
-    const path = `/deployments/${encodeURIComponent(name)}/external-policy`;
-    return this.transport.request('PUT', path, { body }) as Promise<Record<string, JsonValue>>;
+    const requestPath = `/deployments/${encodeURIComponent(name)}/external-policy`;
+    return this.transport.request('PUT', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 }

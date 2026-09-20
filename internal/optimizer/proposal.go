@@ -24,11 +24,16 @@ import (
 	"github.com/infercrane/infercrane/internal/performanceprofile"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
 	"github.com/infercrane/infercrane/internal/servingcontract"
+	"github.com/infercrane/infercrane/internal/workloadprofile"
 )
 
 const (
 	SchemaVersion    = "infercrane.optimizer.proposal/v1"
 	AlgorithmVersion = "catalog-candidate-planner-v1"
+
+	WorkloadSourceReviewedDefault  = "reviewed_default"
+	WorkloadSourcePublicPrior      = "public_prior"
+	WorkloadSourceCustomerObserved = "customer_observed"
 )
 
 // EvidenceState makes the optimization proof boundary explicit. A state is
@@ -58,9 +63,11 @@ var objectives = map[string]string{
 // fabricates values for them.
 type Request struct {
 	ModelIdentity         string   `json:"model_identity"`
+	ModelRevision         string   `json:"model_revision,omitempty"`
 	Provider              string   `json:"provider"`
 	Region                string   `json:"region"`
 	GPU                   string   `json:"gpu"`
+	GPUCount              int      `json:"gpu_count,omitempty"`
 	Runtimes              []string `json:"runtimes,omitempty"`
 	Objective             string   `json:"objective"`
 	WorkloadProfile       string   `json:"workload_profile"`
@@ -71,6 +78,7 @@ type Request struct {
 	MinOutputTokensSecond *float64 `json:"min_output_tokens_second,omitempty"`
 	MaxHourlyCost         *float64 `json:"max_hourly_cost,omitempty"`
 	IncludeSimulated      bool     `json:"include_simulated,omitempty"`
+	WorkloadSource        string   `json:"workload_source,omitempty"`
 	WorkloadFingerprint   string   `json:"workload_fingerprint,omitempty"`
 	TargetConcurrency     *float64 `json:"target_concurrency,omitempty"`
 	MaxCandidates         int      `json:"max_candidates"`
@@ -163,16 +171,28 @@ type Candidate struct {
 	Deployment            DeploymentDraft  `json:"deployment"`
 }
 
+// StartingPoint identifies the first deployable configuration selected from
+// compatibility and objective fit. It is a safe baseline, not a claim that the
+// candidate is fastest or cheapest for production traffic.
+type StartingPoint struct {
+	CandidateID   string        `json:"candidate_id"`
+	EvidenceState EvidenceState `json:"evidence_state"`
+	Basis         string        `json:"basis"`
+	ClaimBoundary string        `json:"claim_boundary"`
+}
+
 type Proposal struct {
-	SchemaVersion     string      `json:"schema_version"`
-	AlgorithmVersion  string      `json:"algorithm_version"`
-	Input             Request     `json:"input"`
-	InputDigest       string      `json:"input_digest"`
-	Candidates        []Candidate `json:"candidates"`
-	Missing           []string    `json:"missing,omitempty"`
-	Warnings          []string    `json:"warnings,omitempty"`
-	Mutation          string      `json:"mutation"`
-	SelectionBoundary string      `json:"selection_boundary"`
+	SchemaVersion      string         `json:"schema_version"`
+	AlgorithmVersion   string         `json:"algorithm_version"`
+	Input              Request        `json:"input"`
+	InputDigest        string         `json:"input_digest"`
+	Candidates         []Candidate    `json:"candidates"`
+	Missing            []string       `json:"missing,omitempty"`
+	Warnings           []string       `json:"warnings,omitempty"`
+	StartingPoint      *StartingPoint `json:"starting_point,omitempty"`
+	PostDeployWorkflow []string       `json:"post_deploy_workflow,omitempty"`
+	Mutation           string         `json:"mutation"`
+	SelectionBoundary  string         `json:"selection_boundary"`
 }
 
 // Source creates candidate configurations. It may estimate or discover, but
@@ -221,6 +241,11 @@ func ValidateProposal(proposal Proposal) error {
 		}
 		seenIDs[candidate.ID], seenRanks[candidate.Rank] = struct{}{}, struct{}{}
 	}
+	if proposal.StartingPoint != nil {
+		if _, found := seenIDs[proposal.StartingPoint.CandidateID]; !found || proposal.StartingPoint.EvidenceState != EvidenceUnmeasured && proposal.StartingPoint.EvidenceState != EvidenceModeled || proposal.StartingPoint.Basis == "" || proposal.StartingPoint.ClaimBoundary == "" {
+			return errors.New("proposal starting point is incomplete or does not reference a candidate")
+		}
+	}
 	return nil
 }
 
@@ -244,10 +269,13 @@ func (s CatalogSource) Propose(_ context.Context, request Request) (Proposal, er
 	}
 	sum := sha256.Sum256(input)
 	proposal := Proposal{SchemaVersion: SchemaVersion, AlgorithmVersion: AlgorithmVersion, Input: request, InputDigest: hex.EncodeToString(sum[:]), Mutation: "none", SelectionBoundary: "configuration candidates only; benchmark, quality, cost, and Release Guard evidence are required before qualification"}
+	applyWorkloadBoundary(&proposal)
 	entry, ok := findRecipe(s.Recipes, request.ModelIdentity)
+	if ok && request.ModelRevision != "" && request.ModelRevision != entry.Revision {
+		ok = false
+	}
 	if !ok {
-		proposal.Missing = []string{"reviewed_model_recipe"}
-		return proposal, nil
+		return s.proposeGeneric(proposal)
 	}
 	compatibility := matchingCompatibility(s.Integrations.Compatibility, request)
 	if len(compatibility) == 0 {
@@ -294,6 +322,8 @@ func (s CatalogSource) Propose(_ context.Context, request Request) (Proposal, er
 	}
 	if len(proposal.Candidates) == 0 {
 		proposal.Missing = []string{"compatible_reviewed_candidate"}
+	} else {
+		attachStartingPoint(&proposal)
 	}
 	return proposal, nil
 }
@@ -310,6 +340,11 @@ func configurationProfileRank(name, preferred string) int {
 
 func normalizeRequest(request Request) Request {
 	request.ModelIdentity = strings.TrimSpace(request.ModelIdentity)
+	request.ModelRevision = strings.ToLower(strings.TrimSpace(request.ModelRevision))
+	if repository, revision, found := splitPinnedModel(request.ModelIdentity); found && request.ModelRevision == "" {
+		request.ModelIdentity = repository + "@" + revision
+		request.ModelRevision = revision
+	}
 	request.Provider = strings.ToLower(strings.TrimSpace(request.Provider))
 	request.Region = strings.TrimSpace(request.Region)
 	request.GPU = strings.TrimSpace(request.GPU)
@@ -318,12 +353,30 @@ func normalizeRequest(request Request) Request {
 		request.Objective = "interactive"
 	}
 	request.WorkloadProfile = strings.ToLower(strings.TrimSpace(request.WorkloadProfile))
+	request.WorkloadSource = strings.ToLower(strings.TrimSpace(request.WorkloadSource))
 	request.WorkloadFingerprint = strings.TrimSpace(request.WorkloadFingerprint)
 	if request.WorkloadProfile == "" {
 		request.WorkloadProfile = objectives[request.Objective]
 	}
+	if performanceprofile.IsPublicPrior(request.WorkloadProfile) {
+		if request.WorkloadSource == "" {
+			request.WorkloadSource = WorkloadSourcePublicPrior
+		}
+		if request.WorkloadFingerprint == "" {
+			request.WorkloadFingerprint = workloadprofile.PublicPriorDigest
+		}
+	} else if request.WorkloadSource == "" {
+		if request.WorkloadFingerprint == "" {
+			request.WorkloadSource = WorkloadSourceReviewedDefault
+		} else {
+			request.WorkloadSource = WorkloadSourceCustomerObserved
+		}
+	}
 	if request.MaxCandidates == 0 {
 		request.MaxCandidates = 10
+	}
+	if request.GPUCount == 0 {
+		request.GPUCount = 1
 	}
 	seen := map[string]struct{}{}
 	var runtimes []string
@@ -352,8 +405,39 @@ func validateRequest(request Request) error {
 	if _, err := performanceprofile.Get(request.WorkloadProfile); err != nil {
 		return err
 	}
+	switch request.WorkloadSource {
+	case WorkloadSourceReviewedDefault:
+		if performanceprofile.IsPublicPrior(request.WorkloadProfile) {
+			return errors.New("public workload profiles require workload_source public_prior")
+		}
+	case WorkloadSourcePublicPrior:
+		if !performanceprofile.IsPublicPrior(request.WorkloadProfile) {
+			return errors.New("workload_source public_prior requires a public workload profile")
+		}
+		if request.WorkloadFingerprint != workloadprofile.PublicPriorDigest {
+			return errors.New("public workload prior fingerprint does not match the product evidence artifact")
+		}
+	case WorkloadSourceCustomerObserved:
+		if performanceprofile.IsPublicPrior(request.WorkloadProfile) {
+			return errors.New("customer_observed workloads cannot use a public workload profile")
+		}
+		if request.WorkloadFingerprint == "" {
+			return errors.New("customer_observed workloads require a workload fingerprint")
+		}
+	default:
+		return errors.New("workload_source must be reviewed_default, public_prior, or customer_observed")
+	}
 	if request.MaxCandidates < 1 || request.MaxCandidates > 100 {
 		return errors.New("max candidates must be between 1 and 100")
+	}
+	if request.GPUCount < 1 || request.GPUCount > 1024 {
+		return errors.New("GPU count must be between 1 and 1024")
+	}
+	if _, embeddedRevision, found := splitPinnedModel(request.ModelIdentity); found && embeddedRevision != request.ModelRevision {
+		return errors.New("model identity revision and model_revision must match")
+	}
+	if request.ModelRevision != "" && !immutableModelRevision(request.ModelRevision) {
+		return errors.New("model revision must be an immutable 40 to 64 character hexadecimal commit")
 	}
 	if len(request.WorkloadFingerprint) > 256 {
 		return errors.New("workload fingerprint must be at most 256 characters")
@@ -383,6 +467,156 @@ func findRecipe(entries []curatedrecipe.Entry, identity string) (curatedrecipe.E
 		}
 	}
 	return curatedrecipe.Entry{}, false
+}
+
+func splitPinnedModel(identity string) (string, string, bool) {
+	index := strings.LastIndex(strings.TrimSpace(identity), "@")
+	if index <= 0 || index == len(identity)-1 {
+		return strings.TrimSpace(identity), "", false
+	}
+	return strings.TrimSpace(identity[:index]), strings.ToLower(strings.TrimSpace(identity[index+1:])), true
+}
+
+func immutableModelRevision(revision string) bool {
+	if len(revision) < 40 || len(revision) > 64 {
+		return false
+	}
+	_, err := hex.DecodeString(revision)
+	return err == nil
+}
+
+// proposeGeneric creates deliberately untuned starting points for any pinned
+// open-weight model. It reuses only executable provider/runtime compatibility;
+// model fit, licensing, quality, and performance remain explicit evidence gaps.
+func (s CatalogSource) proposeGeneric(proposal Proposal) (Proposal, error) {
+	request := proposal.Input
+	model, embeddedRevision, _ := splitPinnedModel(request.ModelIdentity)
+	revision := request.ModelRevision
+	if revision == "" {
+		revision = embeddedRevision
+	}
+	if revision == "" {
+		proposal.Missing = []string{"immutable_model_revision"}
+		proposal.Warnings = append(proposal.Warnings, "Uncataloged models require an exact 40 to 64 character hexadecimal commit before InferCrane can create a candidate.")
+		return proposal, nil
+	}
+	if model == request.ModelIdentity {
+		model = strings.TrimSpace(request.ModelIdentity)
+	}
+	if entry, found := findRecipe(s.Recipes, model); found {
+		model = entry.Model
+	}
+	compatibility := matchingCompatibility(s.Integrations.Compatibility, request)
+	if len(compatibility) == 0 {
+		proposal.Missing = []string{"qualified_provider_runtime_compatibility"}
+		return proposal, nil
+	}
+	for _, compatible := range compatibility {
+		if compatible.Runtime != "vllm" && compatible.Runtime != "sglang" {
+			continue
+		}
+		version := runtimeVersion(s.Integrations.Runtimes, compatible.Runtime)
+		if version == "" {
+			continue
+		}
+		candidate := buildGenericCandidate(model, revision, compatible, version, request)
+		proposal.Candidates = append(proposal.Candidates, candidate)
+	}
+	sort.Slice(proposal.Candidates, func(i, j int) bool {
+		if qualificationRank(proposal.Candidates[i].CompatibilityState) != qualificationRank(proposal.Candidates[j].CompatibilityState) {
+			return qualificationRank(proposal.Candidates[i].CompatibilityState) < qualificationRank(proposal.Candidates[j].CompatibilityState)
+		}
+		return proposal.Candidates[i].ID < proposal.Candidates[j].ID
+	})
+	if len(proposal.Candidates) > request.MaxCandidates {
+		proposal.Candidates = proposal.Candidates[:request.MaxCandidates]
+	}
+	for index := range proposal.Candidates {
+		proposal.Candidates[index].Rank = index + 1
+	}
+	if len(proposal.Candidates) == 0 {
+		proposal.Missing = []string{"generic_open_weight_runtime"}
+		return proposal, nil
+	}
+	attachStartingPoint(&proposal)
+	proposal.Warnings = append(proposal.Warnings, "Generic candidates are safe, untuned baselines. InferCrane has not inferred model architecture, GPU memory fit, license, tokenizer behavior, runtime compatibility, or quality.")
+	return proposal, nil
+}
+
+func attachStartingPoint(proposal *Proposal) {
+	if proposal == nil || len(proposal.Candidates) == 0 {
+		return
+	}
+	first := proposal.Candidates[0]
+	proposal.StartingPoint = &StartingPoint{
+		CandidateID: first.ID, EvidenceState: first.EvidenceState,
+		Basis:         "highest-ranked compatible configuration for the declared objective and reviewed capability boundary",
+		ClaimBoundary: "a deployment starting point only; production performance, quality, cost, and capacity remain unqualified until measured",
+	}
+	firstStep := "observe representative traffic"
+	if proposal.Input.WorkloadSource == WorkloadSourcePublicPrior {
+		firstStep = "replace the public prior with representative customer replay"
+	}
+	proposal.PostDeployWorkflow = []string{firstStep, "assess serving-stage bottlenecks", "profile the exact runtime and target GPU", "search existing implementations before custom code", "qualify candidates with workload, quality, cost, and Release Guard evidence"}
+}
+
+func applyWorkloadBoundary(proposal *Proposal) {
+	if proposal == nil || proposal.Input.WorkloadSource != WorkloadSourcePublicPrior {
+		return
+	}
+	proposal.Warnings = append(proposal.Warnings, "The public workload prior is day-zero screening evidence. Replace it with representative customer replay before qualification or promotion.")
+	proposal.SelectionBoundary += "; public workload priors cannot qualify or promote a production candidate"
+}
+
+func requireCustomerReplay(request Request, required, limitations []string) ([]string, []string) {
+	if request.WorkloadSource != WorkloadSourcePublicPrior {
+		return required, limitations
+	}
+	required = append(required, "representative customer replay replacing the public workload prior")
+	limitations = append(limitations, "The public workload prior is a screening input and cannot qualify this candidate for production.")
+	return required, limitations
+}
+
+func buildGenericCandidate(model, revision string, compatible integration.RuntimeCompatibility, runtimeVersion string, request Request) Candidate {
+	draft := DeploymentDraft{APIVersion: "infercrane.dev/v1", Kind: "Deployment"}
+	draft.Name = safeName(model + "-" + compatible.Runtime + "-baseline-" + compatible.Adapter)
+	draft.Model.ID, draft.Model.Revision = model, revision
+	draft.Runtime.Engine, draft.Runtime.Version = compatible.Runtime, runtimeVersion
+	draft.Runtime.Args = []string{}
+	draft.Compute.Mode = string(compatible.Mode)
+	draft.Resources.GPU, draft.Resources.GPUCount = request.GPU, request.GPUCount
+	draft.Provider.Cloud, draft.Provider.Adapter, draft.Provider.Region = compatible.Cloud, compatible.Adapter, request.Region
+	draft.Scaling.MinReplicas, draft.Scaling.MaxReplicas = 1, 1
+	draft.Routing.Strategy = "round-robin"
+	if compatible.Adapter == "kubernetes-dynamo" {
+		draft.Serving = servingcontract.Topology{Backend: servingcontract.BackendDynamo, Profile: "baseline", Mode: servingcontract.ModeAggregated, Routing: servingcontract.RoutingDirect, Worker: servingcontract.Pool{Replicas: 1, TensorParallelism: request.GPUCount}}
+	}
+	source := SourceInfo{Name: "infercrane-generic-open-weight", Version: "generic-open-weight-v1", EvidenceClass: "configuration-unverified"}
+	features := []Feature{{Name: "runtime_baseline", State: "untuned", Source: compatible.Evidence}, {Name: "immutable_model_revision", State: "pinned", Source: revision}}
+	if compatible.Adapter == "kubernetes-dynamo" {
+		features = append(features, Feature{Name: "dynamo_graph", State: "single-mutation-owner", Source: compatible.Evidence})
+	}
+	required := []string{"runtime readiness and exact served-model identity", "model architecture and accelerator memory fit", "license and access review", "AIPerf " + request.WorkloadProfile + " workload", "semantic quality evidence", "fresh provider capacity observation"}
+	if request.MaxHourlyCost != nil || request.Objective == "cost-efficiency" {
+		required = append(required, "sourced hourly cost")
+	}
+	if request.MaxTTFTP95MS != nil || request.MaxTPOTP95MS != nil || request.MaxErrorRate != nil || request.MinGoodput != nil || request.MinOutputTokensSecond != nil {
+		required = append(required, "measured SLO metrics")
+	}
+	limitations := []string{
+		"This baseline has no model-specific runtime arguments or kernel claims.",
+		"The exact model, revision, tokenizer, runtime, GPU count, and workload must pass real qualification before production use.",
+		"GPU memory fit and model license/access were supplied by the operator and have not been inferred.",
+	}
+	required, limitations = requireCustomerReplay(request, required, limitations)
+	identity, _ := json.Marshal(struct {
+		Source        SourceInfo                       `json:"source"`
+		Deployment    DeploymentDraft                  `json:"deployment"`
+		Profile       string                           `json:"profile"`
+		Compatibility integration.RuntimeCompatibility `json:"compatibility"`
+	}{source, draft, request.WorkloadProfile, compatible})
+	sum := sha256.Sum256(identity)
+	return Candidate{ID: hex.EncodeToString(sum[:]), Status: "proposed-unmeasured", EvidenceState: EvidenceUnmeasured, Objective: request.Objective, ConfigurationProfile: compatible.Runtime + "-generic-baseline", BenchmarkProfile: request.WorkloadProfile, CompatibilityState: string(compatible.State), CompatibilityEvidence: compatible.Evidence, Source: source, Features: features, RequiredEvidence: required, Limitations: limitations, Deployment: draft}
 }
 
 func matchingCompatibility(entries []integration.RuntimeCompatibility, request Request) []integration.RuntimeCompatibility {
@@ -519,6 +753,7 @@ func buildCandidate(entry curatedrecipe.Entry, profile curatedrecipe.ServingProf
 	if profile.Name != preferredProfile && !strings.HasSuffix(profile.Name, "-"+preferredProfile) {
 		limitations = append(limitations, "This profile is an alternative candidate; it is not ranked by unmeasured performance.")
 	}
+	required, limitations = requireCustomerReplay(request, required, limitations)
 	source := SourceInfo{Name: "infercrane-curated-catalog", Version: entry.ReviewedAt, EvidenceClass: profile.EvidenceClass}
 	identity, _ := json.Marshal(struct {
 		Source        SourceInfo                       `json:"source"`

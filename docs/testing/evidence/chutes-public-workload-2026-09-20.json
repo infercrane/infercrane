@@ -1,0 +1,96 @@
+{
+  "schema_version": "infercrane.public-workload-profile/v1",
+  "evidence_class": "public-trace-derived-screening-input",
+  "generated_at": "2026-09-20T07:18:56Z",
+  "source": {
+    "name": "A Year in LLM Serving (Chutes)",
+    "url": "https://harvardsys-datasets.s3.us-east-1.amazonaws.com/2026_chutes_anonymized/chutes_trace.parquet",
+    "license": "CC-BY-4.0",
+    "citation": "Nixon et al., A Year in LLM Serving: Workload Evolution, Caching and Load-Balancing (2026)",
+    "trace_rows": 6122413756,
+    "trace_bytes": 91044147663
+  },
+  "sampling": {
+    "method": "deterministic 10%-to-90% row-group coverage with bounded leading batches",
+    "columns": [
+      "started_at",
+      "completed_at",
+      "it",
+      "ot",
+      "ct",
+      "ttft"
+    ],
+    "row_groups": [611, 3056, 5502],
+    "total_row_groups": 6114,
+    "rows_inspected": 150000,
+    "remote_only": true
+  },
+  "distributions": {
+    "input_tokens": {
+      "unit": "tokens",
+      "samples": 116721,
+      "percentiles": {"p50": 3919, "p90": 15339, "p95": 24832, "p99": 64428}
+    },
+    "output_tokens": {
+      "unit": "tokens",
+      "samples": 116721,
+      "percentiles": {"p50": 295, "p90": 915, "p95": 1377, "p99": 3403}
+    },
+    "cached_tokens": {
+      "unit": "tokens",
+      "samples": 20790,
+      "percentiles": {"p50": 64, "p90": 4060, "p95": 7998, "p99": 36736}
+    },
+    "ttft_ms": {
+      "unit": "milliseconds",
+      "samples": 77565,
+      "percentiles": {"p50": 989.0000224113464, "p90": 5192.999839782715, "p95": 8505.000114440918, "p99": 21295.000076293945}
+    },
+    "duration_ms": {
+      "unit": "milliseconds",
+      "samples": 147802,
+      "percentiles": {"p50": 6505.866, "p90": 31081.427, "p95": 49102.949, "p99": 108171.524}
+    },
+    "cache_hit_fraction": {
+      "unit": "ratio",
+      "samples": 20790,
+      "percentiles": {"p50": 0.018447348193697154, "p90": 0.9944567627494457, "p95": 0.9997684496047105, "p99": 1}
+    }
+  },
+  "profiles": [
+    {
+      "name": "public-interactive",
+      "description": "Median token shape from the sampled public trace.",
+      "objective": "latency",
+      "requests": 32,
+      "concurrency": 8,
+      "input_tokens": 3919,
+      "output_tokens": 295,
+      "streaming": true,
+      "clipped_to_context_window": false
+    },
+    {
+      "name": "public-long-prefill",
+      "description": "P95 input with median output to stress prefill.",
+      "objective": "long_context",
+      "requests": 32,
+      "concurrency": 4,
+      "input_tokens": 7897,
+      "output_tokens": 295,
+      "streaming": true,
+      "clipped_to_context_window": true
+    },
+    {
+      "name": "public-decode-heavy",
+      "description": "Median input with P95 output to stress decode.",
+      "objective": "long_generation",
+      "requests": 32,
+      "concurrency": 4,
+      "input_tokens": 3919,
+      "output_tokens": 1377,
+      "streaming": true,
+      "clipped_to_context_window": false
+    }
+  ],
+  "methodology_boundary": "The public fleet sample selects representative token shapes only. It does not represent a customer's model mix, absolute arrival rate, semantic quality, or production SLO. Controlled concurrency lanes must be qualified on the exact model, runtime, GPU, and customer replay before promotion."
+}

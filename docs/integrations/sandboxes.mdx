@@ -10,6 +10,10 @@ Keep tool execution in E2B, Modal, Kubernetes, or another sandbox specialist. In
 the external sandbox identity and issues an expiring inference credential restricted to one stable
 endpoint.
 
+This page describes **externally owned** sandboxes. For InferCrane-managed
+lifecycle backed by a dedicated Brezel project, see
+[Native Brezel sandboxes](/integrations/brezel-sandboxes).
+
 ```mermaid
 flowchart LR
   USER[Agent application] --> SB[External sandbox<br/>isolation · files · commands]
@@ -77,9 +81,9 @@ initial `401` from a newly issued credential. Rotation and revocation may take t
 interval to reach every replica.
 
 <Warning>
-InferCrane does not provide sandbox isolation and never stores sandbox commands, files, prompts,
-outputs, or provider credentials. Configure network policy, filesystem access, resource limits, and
-secret injection in the sandbox system that owns execution.
+These external-reference routes do not provide sandbox isolation and never
+store sandbox commands, files, prompts, outputs, or provider credentials.
+Configure those controls in the external sandbox system that owns execution.
 </Warning>
 
 ## Console workflow

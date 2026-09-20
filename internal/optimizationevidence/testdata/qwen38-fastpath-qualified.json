@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "id": "qwen38-h100-sglang-nextn-k4",
+  "status": "provisional_serverless_recipe",
+  "evidence_state": "qualified",
+  "final_release": false,
+  "optimization_campaign_continues": true,
+  "model": {
+    "repository": "Qwen/Qwen3.8-27B-FP8",
+    "revision": "017b9c7af6b5689d5dd426a76e0bc077eb5ca20a",
+    "tokenizer_repository": "Qwen/Qwen3.8-27B-FP8",
+    "tokenizer_revision": "017b9c7af6b5689d5dd426a76e0bc077eb5ca20a",
+    "artifacts": {
+      "tokenizer_json": {"sha256":"0997f410c57a1f4e53b09e4be8f4a172d90edd9564368fb0847030937229b9f3"},
+      "chat_template_jinja": {"sha256":"c3cf9e34abf4f9e36c2d72165aa9c132d3e2a725b6c2586aaa3a8af9d7a81041"}
+    }
+  },
+  "runtime": {
+    "name": "sglang",
+    "version": "0.5.18",
+    "commit": "71de97b264b04dcd514cf904003028aefe9775c8",
+    "base_image": "lmsysorg/sglang@sha256:9e148f5ac788e856a06166bd6347a831831eb9fcfab4d1770874823a7c29a1a1",
+    "cuda_version": "13.0.3"
+  },
+  "launch": {
+    "deployment_argument_vector": ["--model-path","Qwen/Qwen3.8-27B-FP8","--revision","017b9c7af6b5689d5dd426a76e0bc077eb5ca20a","--speculative-algorithm","NEXTN","--speculative-num-steps","3","--speculative-num-draft-tokens","4"],
+    "environment": {"secret_values_included":false}
+  },
+  "hardware": {"gpu_model":"NVIDIA H100 80GB HBM3","gpu_count":1,"minimum_gpu_vram_gib":80},
+  "qualification": {
+    "passed": true,
+    "provider": "modal",
+    "evidence_level": "qualification",
+    "independent_runs": 3,
+    "requests": 3000,
+    "successful_requests": 3000,
+    "workload": {"contract_id":"serverless-primary","digest":"60380d21475dbaaf7ebe3e544f518854ad67707f03b330f8ec55d3af4b9586b2","concurrency_lanes":[1,4,8],"minimum_measurement_seconds_per_lane":300,"minimum_requests_per_lane_per_run":120},
+    "slo_policy": {"scope":"each_concurrency_lane","ttft_ms_max":3000,"tpot_itl_ms_max":80,"successful_fraction_min":0.99,"error_rate_max":0,"prompt_token_mismatch_rate_max":0,"required_quality_gates":["api_models","stream_byte_integrity","structured_output","tool_call"]},
+    "metrics": {"campaign":{"error_rate":0,"prompt_token_mismatch_rate":0},"lanes": {
+      "1": {"requests":360,"successful_requests":360,"slo_attainment_fraction":1,"ttft_ms_pooled":{"p95":97.20632409999439},"tpot_itl_ms_pooled":{"p95":7.003143754990169},"aggregate_output_tokens_per_second_mean":160.89368579057137,"request_throughput_requests_per_second_mean":0.36398666832071314,"slo_goodput_requests_per_second_mean":0.36398666832071314,"slo_qualified_output_tokens_per_second_mean":160.89368579057137,"measured_cogs_usd_per_successful_1m_output_tokens_mean":6.819399938889316},
+      "4": {"requests":984,"successful_requests":984,"slo_attainment_fraction":1,"ttft_ms_pooled":{"p95":212.88126144992242},"tpot_itl_ms_pooled":{"p95":7.941221465655669},"aggregate_output_tokens_per_second_mean":496.550780101495,"request_throughput_requests_per_second_mean":1.0857299512738834,"slo_goodput_requests_per_second_mean":1.0857299512738834,"slo_qualified_output_tokens_per_second_mean":496.550780101495,"measured_cogs_usd_per_successful_1m_output_tokens_mean":2.210352463322091},
+      "8": {"requests":1656,"successful_requests":1656,"slo_attainment_fraction":1,"ttft_ms_pooled":{"p95":279.4467484999359},"tpot_itl_ms_pooled":{"p95":9.00938348454907},"aggregate_output_tokens_per_second_mean":840.8891312978136,"request_throughput_requests_per_second_mean":1.8312906479968858,"slo_goodput_requests_per_second_mean":1.8312906479968858,"slo_qualified_output_tokens_per_second_mean":840.8891312978136,"measured_cogs_usd_per_successful_1m_output_tokens_mean":1.3051552815734113}
+    }},
+    "quality": {"passed":true,"gates":{"api_models":"passed_all_runs","stream_byte_integrity":"passed_all_runs","structured_output":"passed_all_runs","tool_call":"passed_all_runs"}}
+  }
+}

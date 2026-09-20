@@ -20,10 +20,20 @@ type Runner interface {
 	Run(context.Context, string, ...string) ([]byte, error)
 }
 
+type environmentRunner interface {
+	RunWithEnvironment(context.Context, string, []string, ...string) ([]byte, error)
+}
+
 type execRunner struct{}
 
 func (execRunner) Run(ctx context.Context, binary string, args ...string) ([]byte, error) {
 	return exec.CommandContext(ctx, binary, args...).CombinedOutput()
+}
+
+func (execRunner) RunWithEnvironment(ctx context.Context, binary string, environment []string, args ...string) ([]byte, error) {
+	command := exec.CommandContext(ctx, binary, args...)
+	command.Env = append(os.Environ(), environment...)
+	return command.CombinedOutput()
 }
 
 type HuggingFace struct {
@@ -33,9 +43,10 @@ type HuggingFace struct {
 
 const resolverScript = `
 import json, sys
+import os
 from huggingface_hub import HfApi
 repo, revision = sys.argv[1], sys.argv[2]
-info = HfApi().model_info(repo_id=repo, revision=revision, files_metadata=True)
+info = HfApi(token=os.environ.get("HF_TOKEN")).model_info(repo_id=repo, revision=revision, files_metadata=True)
 sizes = [getattr(item, "size", None) for item in (info.siblings or [])]
 if sizes and all(item is not None for item in sizes):
     size = sum(sizes)
@@ -53,6 +64,20 @@ print(json.dumps({"repository": info.id, "requested_revision": revision, "immuta
 `
 
 func (h HuggingFace) Resolve(ctx context.Context, repository, revision string) (domain.ModelArtifact, error) {
+	return h.resolve(ctx, repository, revision, "")
+}
+
+// ResolveWithToken resolves a private or gated repository without putting the
+// token in argv, logs, model metadata, or the returned artifact. Only the
+// child resolver process receives HF_TOKEN.
+func (h HuggingFace) ResolveWithToken(ctx context.Context, repository, revision, token string) (domain.ModelArtifact, error) {
+	if strings.TrimSpace(token) == "" {
+		return domain.ModelArtifact{}, errors.New("Hugging Face token is required")
+	}
+	return h.resolve(ctx, repository, revision, token)
+}
+
+func (h HuggingFace) resolve(ctx context.Context, repository, revision, token string) (domain.ModelArtifact, error) {
 	repository = strings.TrimSpace(repository)
 	if repository == "" || !strings.Contains(repository, "/") {
 		return domain.ModelArtifact{}, errors.New("Hugging Face repository must be namespace/name")
@@ -71,7 +96,17 @@ func (h HuggingFace) Resolve(ctx context.Context, repository, revision string) (
 	if runner == nil {
 		runner = execRunner{}
 	}
-	output, err := runner.Run(ctx, python, "-c", resolverScript, repository, revision)
+	var output []byte
+	var err error
+	if token != "" {
+		withEnvironment, ok := runner.(environmentRunner)
+		if !ok {
+			return domain.ModelArtifact{}, errors.New("Hugging Face resolver runner cannot receive an isolated credential environment")
+		}
+		output, err = withEnvironment.RunWithEnvironment(ctx, python, []string{"HF_TOKEN=" + token}, "-c", resolverScript, repository, revision)
+	} else {
+		output, err = runner.Run(ctx, python, "-c", resolverScript, repository, revision)
+	}
 	if err != nil {
 		return domain.ModelArtifact{}, fmt.Errorf("resolve Hugging Face model: %w: %s", err, strings.TrimSpace(string(output)))
 	}

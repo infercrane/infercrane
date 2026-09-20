@@ -46,24 +46,25 @@ type DeploymentRevision struct {
 }
 
 type DeploymentRevisionSpec struct {
-	Model              string                   `json:"model"`
-	ModelRevision      string                   `json:"model_revision,omitempty"`
-	Runtime            string                   `json:"runtime"`
-	RuntimeVersion     string                   `json:"runtime_version,omitempty"`
-	RuntimeArgs        []string                 `json:"runtime_args,omitempty"`
-	RoutingStrategy    string                   `json:"routing_strategy"`
-	MinReplicas        int                      `json:"min_replicas"`
-	MaxReplicas        int                      `json:"max_replicas"`
-	AutoscalingEnabled bool                     `json:"autoscaling_enabled"`
-	ComputeMode        string                   `json:"compute_mode,omitempty"`
-	Cloud              string                   `json:"cloud,omitempty"`
-	ProviderAdapter    string                   `json:"provider_adapter,omitempty"`
-	GPU                string                   `json:"gpu,omitempty"`
-	GPUCount           int                      `json:"gpu_count,omitempty"`
-	Region             string                   `json:"region,omitempty"`
-	Port               int                      `json:"port,omitempty"`
-	Workload           runtimecontract.Workload `json:"workload,omitzero"`
-	Serving            servingcontract.Topology `json:"serving,omitzero"`
+	Model                  string                   `json:"model"`
+	ModelRevision          string                   `json:"model_revision,omitempty"`
+	ModelSecretReferenceID string                   `json:"model_secret_reference_id,omitempty"`
+	Runtime                string                   `json:"runtime"`
+	RuntimeVersion         string                   `json:"runtime_version,omitempty"`
+	RuntimeArgs            []string                 `json:"runtime_args,omitempty"`
+	RoutingStrategy        string                   `json:"routing_strategy"`
+	MinReplicas            int                      `json:"min_replicas"`
+	MaxReplicas            int                      `json:"max_replicas"`
+	AutoscalingEnabled     bool                     `json:"autoscaling_enabled"`
+	ComputeMode            string                   `json:"compute_mode,omitempty"`
+	Cloud                  string                   `json:"cloud,omitempty"`
+	ProviderAdapter        string                   `json:"provider_adapter,omitempty"`
+	GPU                    string                   `json:"gpu,omitempty"`
+	GPUCount               int                      `json:"gpu_count,omitempty"`
+	Region                 string                   `json:"region,omitempty"`
+	Port                   int                      `json:"port,omitempty"`
+	Workload               runtimecontract.Workload `json:"workload,omitzero"`
+	Serving                servingcontract.Topology `json:"serving,omitzero"`
 }
 
 // ControlPlaneInstance is an ephemeral HA membership observation. PostgreSQL
@@ -107,6 +108,43 @@ type SandboxReference struct {
 	ID, TenantID, Provider, ExternalID, ExternalRevision string
 	EndpointName, PrincipalID, Status, MetadataJSON      string
 	ExpiresAt, CreatedAt, UpdatedAt                      time.Time
+}
+
+// NativeSandbox is the InferCrane-owned customer identity for a private
+// computer. Provider identifiers are backend references and must never be
+// included in customer API projections.
+type NativeSandbox struct {
+	ID, TenantID, CreatedBy, DisplayName, Purpose    string
+	SourceType, SourceReference, TemplateID          string
+	ModelEndpoint, BrezelProjectID                   string
+	BrezelWorkspaceID, BrezelSandboxID               string
+	Status, FailureCode, IdempotencyKey, InputDigest string
+	CreatedAt, UpdatedAt, LastActiveAt               time.Time
+	DeletedAt                                        *time.Time
+}
+
+// SandboxUsageEvent is an append-only, content-free operational ledger. It is
+// intentionally unsuitable as an invoice until reconciliation and pricing
+// rules are added separately.
+type SandboxUsageEvent struct {
+	EventID, TenantID, SandboxID, ProviderOperationID  string
+	EventType, TemplateID, RuntimeClass                string
+	OccurredAt                                         time.Time
+	RunningMilliseconds, StandbyMilliseconds           int64
+	CommandDurationMilliseconds                        int64
+	CommandExitClass                                   string
+	FileIngressBytes, FileEgressBytes, PreviewRequests int64
+	MetadataVersion                                    int
+}
+
+type SandboxUsageSummary struct {
+	ActiveComputers     int64 `json:"active_computers"`
+	CommandsExecuted    int64 `json:"commands_executed"`
+	PreviewRequests     int64 `json:"preview_requests"`
+	RunningMilliseconds int64 `json:"running_milliseconds"`
+	StandbyMilliseconds int64 `json:"standby_milliseconds"`
+	FileIngressBytes    int64 `json:"file_ingress_bytes"`
+	FileEgressBytes     int64 `json:"file_egress_bytes"`
 }
 
 // TrainingArtifactHandoff binds signed, content-free external training

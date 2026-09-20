@@ -1,0 +1,64 @@
+{
+  "schema_version": "infercrane.runtime-compatibility-screen/v1",
+  "recorded_at": "2026-09-20T02:20:00+02:00",
+  "evidence_class": "real-gpu-negative-compatibility-evidence",
+  "model": {
+    "id": "Qwen/Qwen3-0.6B",
+    "revision": "c1899de289a04d12100db370d81485cdf75e47ca"
+  },
+  "hardware": {
+    "gpu_request": "H100!",
+    "gpu": "NVIDIA H100 80GB HBM3",
+    "compute_capability": "sm90"
+  },
+  "candidate": {
+    "runtime": "sglang==0.5.10.post1",
+    "benchmark": "aiperf==0.12.0",
+    "image": "nvidia/cuda:12.8.1-devel-ubuntu22.04 with Python 3.12 and libnuma1",
+    "stable_recipe": [
+      "--disable-piecewise-cuda-graph"
+    ],
+    "workload": {
+      "input_tokens": 128,
+      "output_tokens": 64,
+      "streaming": true,
+      "concurrency_lanes": [1, 8, 32]
+    }
+  },
+  "attempts": [
+    {
+      "app_id": "ap-EApdiR1fr0n4XGkJjPn4QO",
+      "outcome": "rejected",
+      "finding": "runtime-only image could not import optional DeepGEMM because no CUDA toolkit was present"
+    },
+    {
+      "app_id": "ap-yw5ZkSPC8LPkthEtdkU0jS",
+      "outcome": "rejected",
+      "finding": "Qwen3 RoPE JIT path required CUDA_HOME and nvcc"
+    },
+    {
+      "app_id": "ap-qjrEgjTuFZMVuVnX98S496",
+      "outcome": "rejected",
+      "finding": "native SM90 extension required the libnuma runtime"
+    },
+    {
+      "app_id": "ap-qsZiNWXy1TZsDg2O2QlJD0",
+      "outcome": "rejected",
+      "finding": "default experimental piecewise CUDA graph warmup caused an illegal memory access after ordinary CUDA graph capture succeeded"
+    },
+    {
+      "app_id": "ap-01FRg3pRRCCh4slj4xjpFm",
+      "outcome": "aborted",
+      "finding": "stable fallback server started, but the AIPerf streaming campaign did not complete promptly"
+    },
+    {
+      "app_id": "ap-wMaUiacP5zPw2vD7eZCNfP",
+      "outcome": "aborted",
+      "finding": "engine-neutral local token counting did not make the standardized AIPerf campaign complete within the operator's cost bound"
+    }
+  ],
+  "decision": "reject this SGLang recipe for the MVP qualification set",
+  "reason": "the pinned runtime did not produce a complete, zero-failure AIPerf receipt under the bounded H100 campaign; startup compatibility fixes alone are not performance evidence",
+  "qualified_alternative": "vLLM 0.22.1 compiled recipe in qwen3-0.6b-modal-2026-09-20.json",
+  "qualification_boundary": "this rejects only the exact runtime, model, image, accelerator, and workload tuple; it is not a general claim about SGLang"
+}

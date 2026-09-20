@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://infercrane.dev/schemas/optimization-evidence-v1.schema.json",
+  "title": "InferCrane optimization evidence v1",
+  "description": "Content-free multi-lane serving evidence. Qualification gates are evaluated before selection scoring.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "model_identity", "hardware_identity", "workload_id", "workload_digest", "required_concurrency_lanes", "slo", "selection_policy", "candidates"],
+  "properties": {
+    "schema_version": {"const": "infercrane.dev/optimization-evidence/v1"},
+    "model_identity": {"type": "string", "minLength": 1},
+    "hardware_identity": {"type": "string", "minLength": 1},
+    "workload_id": {"type": "string", "minLength": 1},
+    "workload_digest": {"type": "string", "pattern": "^(sha256:)?[a-f0-9]{64}$"},
+    "required_concurrency_lanes": {"type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true, "items": {"type": "integer", "minimum": 1, "maximum": 1000000}},
+    "slo": {"$ref": "#/$defs/slo"},
+    "selection_policy": {"$ref": "#/$defs/selection"},
+    "candidates": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"$ref": "#/$defs/candidate"}}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"selection_policy": {"properties": {"evidence_level": {"const": "screening"}}}}},
+      "then": {"properties": {"slo": {"properties": {"minimum_requests_per_lane": {"minimum": 12}}}}}
+    },
+    {
+      "if": {"properties": {"selection_policy": {"properties": {"evidence_level": {"const": "qualification"}}}}},
+      "then": {"properties": {"slo": {"properties": {"minimum_requests_per_lane": {"minimum": 100}, "minimum_independent_runs": {"minimum": 2}, "minimum_measurement_seconds_per_lane": {"minimum": 300}}}}}
+    },
+    {
+      "if": {"properties": {"selection_policy": {"properties": {"evidence_level": {"const": "public"}}}}},
+      "then": {"properties": {"slo": {"properties": {"minimum_requests_per_lane": {"minimum": 300}, "minimum_independent_runs": {"minimum": 3}, "minimum_measurement_seconds_per_lane": {"minimum": 600}}}}}
+    }
+  ],
+  "$defs": {
+    "slo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "max_ttft_ms", "max_itl_ms", "min_successful_fraction", "max_error_rate", "max_prompt_token_mismatch_rate", "required_quality_gates", "minimum_requests_per_lane", "minimum_independent_runs"],
+      "properties": {
+        "scope": {"const": "each_concurrency_lane"},
+        "max_ttft_ms": {"type": "number", "exclusiveMinimum": 0},
+        "max_itl_ms": {"type": "number", "exclusiveMinimum": 0},
+        "min_successful_fraction": {"type": "number", "minimum": 0, "maximum": 1},
+        "max_error_rate": {"type": "number", "minimum": 0, "maximum": 1},
+        "max_prompt_token_mismatch_rate": {"type": "number", "minimum": 0, "maximum": 1},
+        "required_quality_gates": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "minimum_requests_per_lane": {"type": "integer", "minimum": 1},
+        "minimum_independent_runs": {"type": "integer", "minimum": 1},
+        "minimum_measurement_seconds_per_lane": {"type": "number", "minimum": 0}
+      }
+    },
+    "selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "objective", "lane_aggregation", "evidence_level", "qualification_before_scoring", "cost_tie_breaker"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "version": {"type": "integer", "minimum": 1},
+        "objective": {"enum": ["maximum_slo_qualified_output_throughput", "maximum_slo_goodput", "maximum_qualified_output_per_dollar", "minimum_cogs_under_slo", "minimum_latency_under_slo"]},
+        "lane_aggregation": {"const": "arithmetic_mean"},
+        "evidence_level": {"enum": ["screening", "qualification", "public"]},
+        "qualification_before_scoring": {"const": true},
+        "cost_tie_breaker": {"type": "boolean"}
+      }
+    },
+    "quality_gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "passed"],
+      "properties": {"name": {"type": "string", "minLength": 1}, "passed": {"type": "boolean"}}
+    },
+    "lane": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["concurrency", "requests", "successful_requests", "independent_runs", "measurement_seconds", "slo_attainment", "ttft_p95_ms", "itl_p95_ms", "aggregate_output_tokens_per_second", "request_throughput_requests_per_second", "slo_goodput_requests_per_second", "slo_qualified_output_tokens_per_second", "gpu_seconds_per_successful_request", "cost_per_1m_successful_output_tokens_usd"],
+      "properties": {
+        "concurrency": {"type": "integer", "minimum": 1},
+        "requests": {"type": "integer", "minimum": 1},
+        "successful_requests": {"type": "integer", "minimum": 0},
+        "independent_runs": {"type": "integer", "minimum": 1},
+        "measurement_seconds": {"type": "number", "minimum": 0},
+        "slo_attainment": {"type": "number", "minimum": 0, "maximum": 1},
+        "ttft_p95_ms": {"type": "number", "minimum": 0},
+        "itl_p95_ms": {"type": "number", "minimum": 0},
+        "aggregate_output_tokens_per_second": {"type": "number", "minimum": 0},
+        "request_throughput_requests_per_second": {"type": "number", "minimum": 0},
+        "slo_goodput_requests_per_second": {"type": "number", "minimum": 0},
+        "slo_qualified_output_tokens_per_second": {"type": "number", "minimum": 0},
+        "gpu_seconds_per_successful_request": {"type": "number", "minimum": 0},
+        "cost_per_1m_successful_output_tokens_usd": {"type": "number", "minimum": 0}
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "runtime_id", "origin", "evidence_level", "evidence_state", "recipe_digest", "workload_digest", "quality_passed", "quality_gates", "error_rate", "prompt_token_mismatch_rate", "lanes"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "runtime_id": {"type": "string", "minLength": 1},
+        "origin": {"type": "string", "minLength": 1},
+        "evidence_level": {"enum": ["screening", "qualification", "public"]},
+        "evidence_state": {"enum": ["external_unverified", "reproduced", "qualified", "optimized_qualified", "serverless_recipe"]},
+        "source_recipe_evidence_state": {"enum": ["external_unverified", "reproduced", "qualified", "optimized_qualified", "serverless_recipe"]},
+        "recipe_digest": {"type": "string", "pattern": "^(sha256:)?[a-f0-9]{64}$"},
+        "workload_digest": {"type": "string", "pattern": "^(sha256:)?[a-f0-9]{64}$"},
+        "quality_passed": {"type": "boolean"},
+        "quality_gates": {"type": "array", "items": {"$ref": "#/$defs/quality_gate"}},
+        "error_rate": {"type": "number", "minimum": 0, "maximum": 1},
+        "prompt_token_mismatch_rate": {"type": "number", "minimum": 0, "maximum": 1},
+        "lanes": {"type": "array", "minItems": 1, "maxItems": 64, "items": {"$ref": "#/$defs/lane"}}
+      }
+    }
+  }
+}

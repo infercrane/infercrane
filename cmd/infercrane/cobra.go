@@ -63,7 +63,7 @@ var publicCommandSpecs = []commandSpec{
 	{use: "recipes [QUERY] [flags]", short: "Search immutable model recipes", group: "understand"},
 	{use: "models [QUERY] | models inspect NAME [flags]", short: "Explore reviewed model starting points", group: "start"},
 	{use: "lab MODEL_IDENTITY [flags]", short: "Compare persisted measured serving evidence", group: "understand"},
-	{use: "optimize propose|create MODEL [flags] | optimize list|inspect|results|approve|activate|cancel | optimize doctor", short: "Propose and govern evidence-gated serving optimization campaigns", group: "understand"},
+	{use: "optimize propose|create MODEL [flags] | optimize workload-profile --file FILE | optimize evidence ACTION --file FILE | optimize list|inspect|results|approve|activate|cancel | optimize doctor", short: "Propose and govern evidence-gated serving optimization campaigns", group: "understand"},
 	{use: "passport ACTION [arguments]", short: "Issue, inspect, or verify signed release evidence", group: "understand"},
 	{use: "recommend DEPLOYMENT [flags]", short: "Recommend a qualified configuration from persisted evidence", group: "understand"},
 	{use: "slo ACTION DEPLOYMENT [flags]", short: "Inspect or set deterministic inference SLO policy", group: "operate"},
@@ -110,6 +110,9 @@ var commandExamples = map[string]string{
 
   # Check the optional estimator toolchain without provisioning a GPU
   infercrane optimize doctor
+
+  # Inspect a remote-derived, content-free public workload profile
+  infercrane optimize workload-profile --file chutes-profile.json
 
   # Advanced: bind the proposal to an observed content-free workload shape
   infercrane optimize propose Qwen/Qwen3-8B --provider kubernetes-dynamo --gpu NVIDIA-L40S --workload-fingerprint sha256:WORKLOAD_DIGEST --source aiconfigurator`,
@@ -562,7 +565,7 @@ func completionFor(command string) func(*cobra.Command, []string, string) ([]str
 		"recipes":     {"--limit", "--output"},
 		"models":      {"--output"},
 		"lab":         {"--objective", "--profile", "--max-ttft-p95-ms", "--workload-digest", "--output"},
-		"optimize":    {"--provider", "--region", "--gpu", "--runtimes", "--objective", "--profile", "--source", "--target-concurrency", "--workload-fingerprint", "--aiconfigurator-python", "--allow-model-metadata-network", "--max-ttft-p95-ms", "--max-tpot-p95-ms", "--max-error-rate", "--min-goodput", "--min-output-tokens-second", "--max-hourly-cost", "--include-simulated", "--max-candidates", "--write-dir", "--idempotency-key", "--target-deployment", "--limit", "--max-cost-usd", "--expires-in", "--candidate", "--output"},
+		"optimize":    {"--provider", "--region", "--gpu", "--runtimes", "--objective", "--profile", "--source", "--target-concurrency", "--workload-fingerprint", "--aiconfigurator-python", "--allow-model-metadata-network", "--max-ttft-p95-ms", "--max-tpot-p95-ms", "--max-error-rate", "--min-goodput", "--min-output-tokens-second", "--max-hourly-cost", "--include-simulated", "--max-candidates", "--write-dir", "--file", "--idempotency-key", "--target-deployment", "--limit", "--max-cost-usd", "--expires-in", "--candidate", "--output"},
 		"passport":    {"--revision", "--file", "--output"},
 		"recommend":   {"--history", "--output"},
 		"slo":         {"--ttft-p95", "--latency-p95", "--error-rate", "--output-tokens-second", "--hourly-cost", "--output"},

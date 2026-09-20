@@ -154,6 +154,9 @@
             "pages": [
               "features/optimization",
               "testing/competitive-benchmark-methodology",
+              "testing/open-weight-optimization-poc",
+              "testing/chutes-public-workload-poc",
+              "testing/modal-qwen3-0.6b-h100-poc",
               "testing/aws-real-evidence",
               "testing/runpod-glm53-real-evidence",
               "testing/runpod-qwen-real-evidence",
@@ -186,6 +189,7 @@
             "group": "Gateways and external systems",
             "pages": [
               "integrations/litellm",
+              "integrations/brezel-sandboxes",
               "integrations/sandboxes",
               "integrations/training-artifacts",
               "integrations/mcp"

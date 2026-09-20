@@ -50,10 +50,17 @@ workloads](/features/custom-oci) and inspect the exact runtime/provider matrix w
 
 ## Agent sandbox boundary
 
-InferCrane composes with execution sandboxes; it does not currently implement a multi-tenant
-untrusted-code runtime. The portable product contract records an external sandbox identity and
-revision, then issues a short-lived credential restricted to one inference endpoint. Commands,
-files, prompts, outputs, runtime credentials and snapshot contents remain with the sandbox owner.
+InferCrane supports two explicit sandbox ownership modes. External composition
+records a provider-owned sandbox identity and issues a short-lived credential
+restricted to one inference endpoint. An optional private-tenant Brezel adapter
+lets InferCrane own approved-template lifecycle while Brezel remains the
+untrusted-code execution service. InferCrane does not implement a shared
+multi-tenant untrusted-code runtime.
+
+External sandbox commands, files, prompts, outputs, runtime credentials, and
+snapshot contents remain with the external owner. The initial native Brezel
+contract exposes lifecycle metadata only; command and file content remains in
+Brezel and is not yet proxied through the InferCrane API.
 
 The runtime choice stays below this contract:
 
@@ -61,8 +68,9 @@ The runtime choice stays below this contract:
 - On customer Kubernetes, a `RuntimeClass` backed by gVisor or Kata Containers is a later
   qualification target. The Kubernetes Agent Sandbox CRDs are a useful orchestration adapter, but
   do not themselves provide the isolation boundary.
-- Direct Firecracker ownership is deferred because image construction, guest lifecycle, networking,
-  storage, patching and multi-tenant operations would create a second infrastructure product.
+- Direct microVM ownership remains in Brezel. InferCrane owns customer policy,
+  templates, audit, and the provider adapter rather than duplicating guest
+  lifecycle and isolation code.
 - bVisor is an early implementation reference, not a production security dependency. InferCrane
   will not treat acquisition, popularity or repository availability as security evidence.
 - A plain shared container is not an acceptable boundary for hostile customer code.
