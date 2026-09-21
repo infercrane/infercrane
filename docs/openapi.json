@@ -798,6 +798,14 @@
       "DeploymentCreate": {
         "additionalProperties": false,
         "properties": {
+          "billing_mode": {
+            "default": "provider_account",
+            "enum": [
+              "provider_account",
+              "customer_wallet"
+            ],
+            "type": "string"
+          },
           "cloud": {
             "type": "string"
           },
@@ -821,6 +829,12 @@
             "description": "Accelerators allocated to each runtime replica.",
             "maximum": 1024,
             "minimum": 1,
+            "type": "integer"
+          },
+          "managed_runtime_seconds": {
+            "maximum": 86400,
+            "minimum": 900,
+            "multipleOf": 60,
             "type": "integer"
           },
           "max_replicas": {
@@ -2765,6 +2779,151 @@
         ],
         "type": "object"
       },
+      "ManagedDeploymentQuote": {
+        "additionalProperties": false,
+        "properties": {
+          "cleanup_allowance_seconds": {
+            "minimum": 60,
+            "type": "integer"
+          },
+          "currency": {
+            "const": "USD",
+            "type": "string"
+          },
+          "gpu": {
+            "type": "string"
+          },
+          "gpu_count": {
+            "const": 1,
+            "type": "integer"
+          },
+          "observed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "region": {
+            "type": "string"
+          },
+          "reserved_microusd": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "retail_hourly_microusd": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "runtime_limit_seconds": {
+            "maximum": 86400,
+            "minimum": 900,
+            "type": "integer"
+          },
+          "state": {
+            "const": "current",
+            "type": "string"
+          },
+          "valid_until": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "provider",
+          "gpu",
+          "gpu_count",
+          "currency",
+          "retail_hourly_microusd",
+          "reserved_microusd",
+          "runtime_limit_seconds",
+          "cleanup_allowance_seconds",
+          "observed_at",
+          "valid_until"
+        ],
+        "type": "object"
+      },
+      "ManagedDeploymentQuoteEnvelope": {
+        "additionalProperties": false,
+        "properties": {
+          "affordable": {
+            "type": "boolean"
+          },
+          "disclosure": {
+            "type": "string"
+          },
+          "funding_mode": {
+            "const": "prepaid",
+            "type": "string"
+          },
+          "quote": {
+            "$ref": "#/components/schemas/ManagedDeploymentQuote"
+          },
+          "reservation_is_charge": {
+            "const": false,
+            "type": "boolean"
+          },
+          "shortfall_microusd": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "wallet": {
+            "$ref": "#/components/schemas/ManagedWallet"
+          }
+        },
+        "required": [
+          "quote",
+          "wallet",
+          "affordable",
+          "shortfall_microusd",
+          "funding_mode",
+          "reservation_is_charge",
+          "disclosure"
+        ],
+        "type": "object"
+      },
+      "ManagedDeploymentQuoteRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "compute_mode": {
+            "const": "elastic",
+            "type": "string"
+          },
+          "gpu": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "gpu_count": {
+            "const": 1,
+            "type": "integer"
+          },
+          "provider": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "region": {
+            "maxLength": 128,
+            "type": "string"
+          },
+          "runtime_seconds": {
+            "maximum": 86400,
+            "minimum": 900,
+            "multipleOf": 60,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "provider",
+          "gpu",
+          "gpu_count",
+          "compute_mode",
+          "runtime_seconds"
+        ],
+        "type": "object"
+      },
       "ManagedPaymentWebhookResponse": {
         "additionalProperties": false,
         "properties": {
@@ -2946,6 +3105,10 @@
             "const": "USD",
             "type": "string"
           },
+          "debt_microusd": {
+            "minimum": 0,
+            "type": "integer"
+          },
           "reserved_microusd": {
             "minimum": 0,
             "type": "integer"
@@ -2963,6 +3126,7 @@
           "currency",
           "balance_microusd",
           "reserved_microusd",
+          "debt_microusd",
           "available_microusd",
           "updated_at"
         ],
@@ -3066,11 +3230,15 @@
           "kind": {
             "enum": [
               "credit",
-              "settlement"
+              "settlement",
+              "refund"
             ],
             "type": "string"
           },
           "reservation_id": {
+            "type": "string"
+          },
+          "spend_reservation_id": {
             "type": "string"
           },
           "tenant_id": {
@@ -10456,6 +10624,52 @@
         ]
       }
     },
+    "/api/v1/managed-deployment-quotes": {
+      "post": {
+        "operationId": "quoteManagedDeployment",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManagedDeploymentQuoteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedDeploymentQuoteEnvelope"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Quote a time-boxed prepaid InferCrane Cloud deployment",
+        "tags": [
+          "Compute"
+        ]
+      }
+    },
     "/api/v1/model-api-catalog": {
       "get": {
         "operationId": "listModelAPICatalog",
@@ -10785,6 +10999,100 @@
         "summary": "List durable operation events",
         "tags": [
           "Operations"
+        ]
+      }
+    },
+    "/api/v1/optimization/accelerator-lab/capabilities": {
+      "get": {
+        "operationId": "getAcceleratorLabCapabilities",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Inspect exact accelerator, runtime, topology, profiler, and modality adapter contracts",
+        "tags": [
+          "Inference optimization"
+        ]
+      }
+    },
+    "/api/v1/optimization/accelerator-lab/runs": {
+      "post": {
+        "operationId": "runAcceleratorLab",
+        "parameters": [
+          {
+            "description": "Stable key used to adopt the original durable operation after retries or disconnects.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationEnvelope"
+                }
+              }
+            },
+            "description": "Durable operation accepted"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Queue a budget-bounded profile, isolated build, and exact-target qualification operation",
+        "tags": [
+          "Inference optimization"
         ]
       }
     },

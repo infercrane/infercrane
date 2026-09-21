@@ -121,6 +121,116 @@ func TestManagedPaymentRefundPreservesReservationsAndCreatesDebt(t *testing.T) {
 	}
 }
 
+func TestManagedDeploymentReservationIsAtomicIdempotentAndSettledAfterCleanup(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	suffix := strings.ReplaceAll(time.Now().UTC().Format("150405.000000000"), ".", "-")
+	tenant, name := "managed-deploy-"+suffix, "qwen-"+suffix
+	if err := s.CreateTenant(ctx, tenant, "Managed Deployment"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreditManagedWallet(ctx, tenant, "managed-deploy-credit-"+suffix, "test credit", 5_000_000); err != nil {
+		t.Fatal(err)
+	}
+	deployment := domain.Deployment{TenantID: tenant, Name: name, Model: "Qwen/Qwen3-8B", Runtime: "vllm", MinReplicas: 1, MaxReplicas: 1}
+	operation := domain.Operation{TenantID: tenant, Kind: "deployment.converge", IdempotencyKey: "managed-deploy-" + suffix, RequestJSON: `{"cloud":"runpod","gpu":"L40S","billing_mode":"customer_wallet","managed_runtime_seconds":3600}`}
+	reservationInput := domain.ManagedSpendReservation{
+		Provider: "runpod", SupplierHourlyMicrousd: 600_000, RetailHourlyMicrousd: 1_000_000,
+		ReservedMicrousd: 1_166_667, GrossMarginBPS: 4_000, RuntimeLimitSeconds: 3_600,
+		CleanupAllowanceSeconds: 600, PricingJSON: `{"source":"test provider quote"}`,
+	}
+	createdDeployment, createdOperation, reservation, created, err := s.SubmitManagedCloudDeployment(ctx, deployment, operation, reservationInput)
+	if err != nil || !created || createdDeployment.ID == "" || createdOperation.ID == "" || reservation.ID == "" {
+		t.Fatalf("managed submit=(%+v,%+v,%+v,%t,%v)", createdDeployment, createdOperation, reservation, created, err)
+	}
+	wallet, err := s.ManagedWallet(ctx, tenant)
+	if err != nil || wallet.ReservedMicrousd != reservationInput.ReservedMicrousd || wallet.AvailableMicrousd != 5_000_000-reservationInput.ReservedMicrousd {
+		t.Fatalf("reserved wallet=%+v err=%v", wallet, err)
+	}
+	_, replayedOperation, replayedReservation, replayed, err := s.SubmitManagedCloudDeployment(ctx, deployment, operation, reservationInput)
+	if err != nil || replayed || replayedOperation.ID != createdOperation.ID || replayedReservation.ID != reservation.ID {
+		t.Fatalf("managed replay=(%+v,%+v,%t,%v)", replayedOperation, replayedReservation, replayed, err)
+	}
+	wallet, err = s.ManagedWallet(ctx, tenant)
+	if err != nil || wallet.ReservedMicrousd != reservationInput.ReservedMicrousd {
+		t.Fatalf("replay duplicated wallet hold: wallet=%+v err=%v", wallet, err)
+	}
+
+	activatedAt := time.Now().UTC().Add(-30 * time.Minute)
+	if _, err = s.ExecContext(ctx, `UPDATE managed_spend_reservations SET activated_at=?,expires_at=? WHERE id=?`, activatedAt, activatedAt.Add(time.Hour), reservation.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.DeleteDeploymentForTenant(ctx, tenant, name); err != nil {
+		t.Fatal(err)
+	}
+	settled, err := s.ManagedSpendReservation(ctx, tenant, "deployment", name)
+	if err != nil || settled.State != "settled" || settled.ActualMicrousd <= 490_000 || settled.ActualMicrousd >= 520_000 {
+		t.Fatalf("settled reservation=%+v err=%v", settled, err)
+	}
+	wallet, err = s.ManagedWallet(ctx, tenant)
+	if err != nil || wallet.ReservedMicrousd != 0 || wallet.BalanceMicrousd != 5_000_000-settled.ActualMicrousd {
+		t.Fatalf("settled wallet=%+v reservation=%+v err=%v", wallet, settled, err)
+	}
+
+	poorTenant := tenant + "-poor"
+	if err = s.CreateTenant(ctx, poorTenant, "No Credit"); err != nil {
+		t.Fatal(err)
+	}
+	poorDeployment := deployment
+	poorDeployment.TenantID, poorDeployment.Name = poorTenant, name+"-poor"
+	poorOperation := operation
+	poorOperation.TenantID, poorOperation.IdempotencyKey = poorTenant, poorTenant
+	if _, _, _, _, err = s.SubmitManagedCloudDeployment(ctx, poorDeployment, poorOperation, reservationInput); !errors.Is(err, domain.ErrInsufficientCredits) {
+		t.Fatalf("unfunded managed deployment error=%v", err)
+	}
+	if _, err = s.ResolveForTenant(ctx, poorTenant, poorDeployment.Name); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unfunded deployment was persisted: %v", err)
+	}
+}
+
+func TestFailedManagedDeploymentIsSelectedForDurableHoldRelease(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	suffix := strings.ReplaceAll(time.Now().UTC().Format("150405.000000000"), ".", "-")
+	tenant, name := "managed-failed-"+suffix, "failed-"+suffix
+	if err := s.CreateTenant(ctx, tenant, "Failed Managed Deployment"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreditManagedWallet(ctx, tenant, "managed-failed-credit-"+suffix, "test credit", 2_000_000); err != nil {
+		t.Fatal(err)
+	}
+	deployment, operation, reservation, _, err := s.SubmitManagedCloudDeployment(ctx,
+		domain.Deployment{TenantID: tenant, Name: name, Model: "Qwen/Qwen3-8B", Runtime: "vllm", MinReplicas: 1, MaxReplicas: 1},
+		domain.Operation{TenantID: tenant, Kind: "deployment.converge", IdempotencyKey: "failed-" + suffix, RequestJSON: `{"cloud":"runpod","gpu":"L40S"}`},
+		domain.ManagedSpendReservation{Provider: "runpod", SupplierHourlyMicrousd: 600_000, RetailHourlyMicrousd: 1_000_000, ReservedMicrousd: 1_166_667, GrossMarginBPS: 4_000, RuntimeLimitSeconds: 3_600, CleanupAllowanceSeconds: 600, PricingJSON: `{}`},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.ExecContext(ctx, `UPDATE operations SET status='failed',completed_at=NOW() WHERE id=?`, operation.ID); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := s.FailedUnactivatedManagedDeployments(ctx, 100)
+	if err != nil || len(rows) != 1 || rows[0].ID != reservation.ID {
+		t.Fatalf("failed cleanup candidates=%+v err=%v", rows, err)
+	}
+	request := `{"deployment_id":"` + deployment.ID + `","name":"` + name + `","tenant_id":"` + tenant + `"}`
+	if _, _, err = s.SubmitDeploymentDelete(ctx, tenant, name, deployment.ID, domain.Operation{TenantID: tenant, Kind: "deployment.delete", IdempotencyKey: "cleanup-" + suffix, RequestJSON: request}); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.DeleteDeploymentForTenant(ctx, tenant, name); err != nil {
+		t.Fatal(err)
+	}
+	released, err := s.ManagedSpendReservation(ctx, tenant, "deployment", name)
+	if err != nil || released.State != "released" || released.ActualMicrousd != 0 {
+		t.Fatalf("released reservation=%+v err=%v", released, err)
+	}
+	wallet, err := s.ManagedWallet(ctx, tenant)
+	if err != nil || wallet.BalanceMicrousd != 2_000_000 || wallet.ReservedMicrousd != 0 {
+		t.Fatalf("released wallet=%+v err=%v", wallet, err)
+	}
+}
+
 func TestManagedUsageReservationIDIsTenantScoped(t *testing.T) {
 	first := managedUsageReservationID("tenant-a", "request-1")
 	if first == managedUsageReservationID("tenant-b", "request-1") || first != managedUsageReservationID("tenant-a", "request-1") || !strings.HasPrefix(first, "usage_") {

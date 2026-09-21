@@ -33,6 +33,9 @@ const (
 	maxJSONBytes        = 4 << 20
 	maxEventBytes       = 2 << 20
 	maxCommandBytes     = 4 << 20
+	defaultMaxArtifact  = 512 << 20
+	inputArtifactDir    = "/workspace/infercrane/input/artifacts"
+	outputArtifactDir   = "/workspace/infercrane/output/artifacts"
 )
 
 var safeID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$`)
@@ -85,8 +88,10 @@ type Check struct {
 
 type OutputArtifact struct {
 	Kind   string `json:"kind"`
+	Path   string `json:"path"`
 	SHA256 string `json:"sha256"`
 	Size   int64  `json:"size"`
+	URI    string `json:"-"`
 }
 
 // Result contains evidence identities, never source or command output.
@@ -111,6 +116,21 @@ type Config struct {
 	RunnerPath          string
 	SandboxTTL          time.Duration
 	Client              *http.Client
+	InputResolver       InputResolver
+	ArtifactPublisher   ArtifactPublisher
+	MaxArtifactBytes    int64
+}
+
+// InputResolver is InferCrane's trusted content-addressed artifact store. The
+// sandbox never receives store credentials or fetches arbitrary URLs.
+type InputResolver interface {
+	Open(context.Context, ArtifactRef) (io.ReadCloser, error)
+}
+
+// ArtifactPublisher persists a verified build output after it leaves Brezel
+// and returns a durable URI. It must consume the reader before returning.
+type ArtifactPublisher interface {
+	Publish(context.Context, string, string, io.Reader, int64) (string, error)
 }
 
 type Client struct {
@@ -121,6 +141,9 @@ type Client struct {
 	runnerPath          string
 	sandboxTTL          time.Duration
 	httpClient          *http.Client
+	inputResolver       InputResolver
+	artifactPublisher   ArtifactPublisher
+	maxArtifactBytes    int64
 }
 
 type mutationEnvelope struct {
@@ -173,7 +196,14 @@ func New(config Config) (*Client, error) {
 		httpClient = &http.Client{Timeout: 20 * time.Minute}
 	}
 	base.Path = strings.TrimRight(base.Path, "/")
-	return &Client{baseURL: base, token: strings.TrimSpace(config.Token), projectID: strings.TrimSpace(config.ProjectID), environmentRevision: strings.TrimSpace(config.EnvironmentRevision), runnerPath: runner, sandboxTTL: ttl, httpClient: httpClient}, nil
+	maxArtifactBytes := config.MaxArtifactBytes
+	if maxArtifactBytes == 0 {
+		maxArtifactBytes = defaultMaxArtifact
+	}
+	if maxArtifactBytes < 1 || maxArtifactBytes > 4<<30 {
+		return nil, fmt.Errorf("%w: artifact size boundary must be between 1 byte and 4 GiB", ErrInvalidConfig)
+	}
+	return &Client{baseURL: base, token: strings.TrimSpace(config.Token), projectID: strings.TrimSpace(config.ProjectID), environmentRevision: strings.TrimSpace(config.EnvironmentRevision), runnerPath: runner, sandboxTTL: ttl, httpClient: httpClient, inputResolver: config.InputResolver, artifactPublisher: config.ArtifactPublisher, maxArtifactBytes: maxArtifactBytes}, nil
 }
 
 // NewFromTokenFile reads a Brezel service token from a regular owner-only
@@ -226,6 +256,9 @@ func (c *Client) Run(ctx context.Context, job Job) (result Result, runErr error)
 	} else if !errors.Is(readErr, errNotFound) {
 		return Result{}, readErr
 	} else {
+		if err = c.stageInputs(ctx, sandboxID, job.Inputs); err != nil {
+			return Result{}, fmt.Errorf("stage Brezel build inputs: %w", err)
+		}
 		if err = c.writeFile(ctx, sandboxID, manifestPath, manifest); err != nil {
 			return Result{}, fmt.Errorf("write Brezel job manifest: %w", err)
 		}
@@ -241,6 +274,9 @@ func (c *Client) Run(ctx context.Context, job Job) (result Result, runErr error)
 	}
 	if err = validateResult(result, job.ID, digest); err != nil {
 		return Result{}, err
+	}
+	if err = c.publishArtifacts(ctx, sandboxID, job, &result); err != nil {
+		return Result{}, fmt.Errorf("publish Brezel build artifacts: %w", err)
 	}
 	result.SandboxID = sandboxID
 	if err = c.deleteSandbox(ctx, sandboxID); err != nil {
@@ -278,8 +314,8 @@ func encodeJob(job Job) ([]byte, string, error) {
 	}
 	for _, input := range job.Inputs {
 		parsed, err := url.Parse(strings.TrimSpace(input.URI))
-		if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "s3") || parsed.Host == "" || !safeID.MatchString(input.Name) || !validSHA256(input.SHA256) {
-			return nil, "", fmt.Errorf("%w: every input must have a safe name, HTTPS or S3 URI, and SHA-256 digest", ErrInvalidJob)
+		if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "s3" && parsed.Scheme != "gs") || parsed.Host == "" || !safeID.MatchString(input.Name) || !validSHA256(input.SHA256) {
+			return nil, "", fmt.Errorf("%w: every input must have a safe name, HTTPS, S3, or GCS URI, and SHA-256 digest", ErrInvalidJob)
 		}
 	}
 	encoded, err := json.Marshal(job)
@@ -307,7 +343,11 @@ func (c *Client) createSandbox(ctx context.Context, digest string) (string, erro
 }
 
 func (c *Client) writeFile(ctx context.Context, sandboxID, filePath string, data []byte) error {
-	request, err := c.request(ctx, http.MethodPut, "/v1/sandboxes/"+url.PathEscape(sandboxID)+"/files?path="+url.QueryEscape(filePath), bytes.NewReader(data), "application/octet-stream", "")
+	return c.writeFileReader(ctx, sandboxID, filePath, bytes.NewReader(data))
+}
+
+func (c *Client) writeFileReader(ctx context.Context, sandboxID, filePath string, data io.Reader) error {
+	request, err := c.request(ctx, http.MethodPut, "/v1/sandboxes/"+url.PathEscape(sandboxID)+"/files?path="+url.QueryEscape(filePath), data, "application/octet-stream", "")
 	if err != nil {
 		return err
 	}
@@ -317,6 +357,111 @@ func (c *Client) writeFile(ctx context.Context, sandboxID, filePath string, data
 	}
 	defer response.Body.Close()
 	return statusError(response)
+}
+
+func (c *Client) stageInputs(ctx context.Context, sandboxID string, inputs []ArtifactRef) error {
+	if len(inputs) == 0 {
+		return nil
+	}
+	if c.inputResolver == nil {
+		return errors.New("content-addressed input resolver is not configured")
+	}
+	for _, input := range inputs {
+		reader, err := c.inputResolver.Open(ctx, input)
+		if err != nil {
+			return fmt.Errorf("open input %q: %w", input.Name, err)
+		}
+		temporary, digest, size, materializeErr := materializeVerified(reader, input.SHA256, c.maxArtifactBytes)
+		_ = reader.Close()
+		if materializeErr != nil {
+			return fmt.Errorf("verify input %q: %w", input.Name, materializeErr)
+		}
+		if digest != strings.ToLower(input.SHA256) {
+			_ = temporary.Close()
+			_ = os.Remove(temporary.Name())
+			return fmt.Errorf("input %q digest mismatch", input.Name)
+		}
+		if _, err = temporary.Seek(0, io.SeekStart); err == nil {
+			err = c.writeFileReader(ctx, sandboxID, inputArtifactDir+"/"+input.Name, io.LimitReader(temporary, size))
+		}
+		_ = temporary.Close()
+		_ = os.Remove(temporary.Name())
+		if err != nil {
+			return fmt.Errorf("upload input %q: %w", input.Name, err)
+		}
+	}
+	return nil
+}
+
+func (c *Client) publishArtifacts(ctx context.Context, sandboxID string, job Job, result *Result) error {
+	if len(result.Artifacts) == 0 {
+		return nil
+	}
+	if c.artifactPublisher == nil {
+		return errors.New("content-addressed artifact publisher is not configured")
+	}
+	for index := range result.Artifacts {
+		artifact := &result.Artifacts[index]
+		request, err := c.request(ctx, http.MethodGet, "/v1/sandboxes/"+url.PathEscape(sandboxID)+"/files?path="+url.QueryEscape(artifact.Path), nil, "", "")
+		if err != nil {
+			return err
+		}
+		response, err := c.httpClient.Do(request)
+		if err != nil {
+			return err
+		}
+		if err = statusError(response); err != nil {
+			response.Body.Close()
+			return err
+		}
+		temporary, digest, size, materializeErr := materializeVerified(response.Body, artifact.SHA256, c.maxArtifactBytes)
+		response.Body.Close()
+		if materializeErr != nil {
+			return materializeErr
+		}
+		if size != artifact.Size || digest != strings.ToLower(artifact.SHA256) {
+			_ = temporary.Close()
+			_ = os.Remove(temporary.Name())
+			return errors.New("downloaded build artifact identity mismatch")
+		}
+		if _, err = temporary.Seek(0, io.SeekStart); err == nil {
+			artifact.URI, err = c.artifactPublisher.Publish(ctx, job.ID, artifact.Kind, temporary, size)
+		}
+		_ = temporary.Close()
+		_ = os.Remove(temporary.Name())
+		if err != nil {
+			return err
+		}
+		if !durableArtifactURI(artifact.URI) {
+			return errors.New("artifact publisher returned a non-durable URI")
+		}
+	}
+	return nil
+}
+
+func materializeVerified(reader io.Reader, expected string, maximum int64) (*os.File, string, int64, error) {
+	temporary, err := os.CreateTemp("", "infercrane-artifact-*")
+	if err != nil {
+		return nil, "", 0, err
+	}
+	failed := func(err error) (*os.File, string, int64, error) {
+		_ = temporary.Close()
+		_ = os.Remove(temporary.Name())
+		return nil, "", 0, err
+	}
+	hash := sha256.New()
+	written, err := io.Copy(io.MultiWriter(temporary, hash), io.LimitReader(reader, maximum+1))
+	if err != nil {
+		return failed(err)
+	}
+	if written > maximum {
+		return failed(errors.New("artifact exceeds authorized size boundary"))
+	}
+	digest := hex.EncodeToString(hash.Sum(nil))
+	if expected != "" && !strings.EqualFold(digest, strings.TrimPrefix(expected, "sha256:")) {
+		return failed(errors.New("artifact digest mismatch"))
+	}
+	return temporary, digest, written, nil
 }
 
 func (c *Client) runCommand(ctx context.Context, sandboxID string, timeoutSecs int) (string, error) {
@@ -407,11 +552,21 @@ func validateResult(result Result, jobID, digest string) error {
 		return errors.New("Brezel optimization result does not match the admitted job")
 	}
 	for _, artifact := range result.Artifacts {
-		if strings.TrimSpace(artifact.Kind) == "" || !validSHA256(artifact.SHA256) || artifact.Size < 0 {
+		if strings.TrimSpace(artifact.Kind) == "" || !validArtifactPath(artifact.Path) || !validSHA256(artifact.SHA256) || artifact.Size < 1 {
 			return errors.New("Brezel optimization result contains an invalid artifact identity")
 		}
 	}
 	return nil
+}
+
+func validArtifactPath(value string) bool {
+	clean := path.Clean(strings.TrimSpace(value))
+	return clean == value && strings.HasPrefix(clean, outputArtifactDir+"/") && clean != outputArtifactDir && !strings.Contains(clean, "\\")
+}
+
+func durableArtifactURI(value string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	return err == nil && parsed.Host != "" && (parsed.Scheme == "https" || parsed.Scheme == "s3" || parsed.Scheme == "gs")
 }
 
 func (c *Client) deleteSandbox(ctx context.Context, sandboxID string) error {

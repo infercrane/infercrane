@@ -82,6 +82,9 @@ func (s *Store) ApplyDeploymentForTenant(ctx context.Context, tenant string, dep
 	if _, err = tx.ExecContext(ctx, `INSERT INTO deployment_events(id,deployment_id,event_type,summary,payload_json,created_at) VALUES(?,?,?,?,?::jsonb,?)`, eventID, id, "deployment_applied", "Deployment "+deployment.Name+" converged", "{}", stamp); err != nil {
 		return domain.Deployment{}, err
 	}
+	if _, err = tx.ExecContext(ctx, `UPDATE managed_spend_reservations SET activated_at=COALESCE(activated_at,?::timestamptz),expires_at=CASE WHEN activated_at IS NULL THEN ?::timestamptz+(runtime_limit_seconds * INTERVAL '1 second') ELSE expires_at END,updated_at=? WHERE tenant_id=? AND resource_type='deployment' AND resource_name=? AND state='reserved'`, stamp, stamp, stamp, tenant, deployment.Name); err != nil {
+		return domain.Deployment{}, err
+	}
 	if err = tx.Commit(); err != nil {
 		return domain.Deployment{}, err
 	}

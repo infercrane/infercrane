@@ -1,0 +1,74 @@
+{
+  "schema_version": "infercrane.modal-kernel-campaign/v1",
+  "recorded_at": "2026-09-21T01:14:45Z",
+  "evidence_class": "real-gpu-microbenchmark",
+  "modal_app_id": "ap-ni5kmFc9J0ShlV7brR4EqC",
+  "model_shape_source": "Qwen/Qwen3-0.6B@c1899de289a04d12100db370d81485cdf75e47ca",
+  "operator": "residual-add+rmsnorm",
+  "hidden_size": 1024,
+  "rms_norm_epsilon": 0.000001,
+  "gpu": {
+    "request": "L40S",
+    "name": "NVIDIA L40S",
+    "uuid": "GPU-89deae79-6c14-f830-cbb8-27ab53d02d16",
+    "compute_capability": "sm89",
+    "memory_mib": 46068,
+    "driver_version": "580.95.05"
+  },
+  "software": {
+    "torch": "2.11.0+cu130",
+    "torch_cuda": "13.0",
+    "triton": "3.6.0",
+    "vllm": "0.22.1"
+  },
+  "comparison": "InferCrane Triton candidate versus vLLM fused_add_rms_norm",
+  "measurements": [
+    {
+      "rows": 1,
+      "selected_num_warps": 16,
+      "custom_kernel_ms": 0.0044063283,
+      "vllm_vendor_ms": 0.0046404758,
+      "torch_compile_ms": 0.0047202973,
+      "pytorch_eager_ms": 0.0253823748,
+      "speedup_vs_vllm_vendor": 1.0531389,
+      "speedup_vs_torch_compile": 1.0712541,
+      "correctness_passed": true
+    },
+    {
+      "rows": 8,
+      "selected_num_warps": 4,
+      "custom_kernel_ms": 0.0045130706,
+      "vllm_vendor_ms": 0.0052224238,
+      "torch_compile_ms": 0.0045636282,
+      "pytorch_eager_ms": 0.0265453174,
+      "speedup_vs_vllm_vendor": 1.1571775,
+      "speedup_vs_torch_compile": 1.0112025,
+      "correctness_passed": true
+    },
+    {
+      "rows": 32,
+      "selected_num_warps": 8,
+      "custom_kernel_ms": 0.0054050149,
+      "vllm_vendor_ms": 0.0052463345,
+      "torch_compile_ms": 0.0058011599,
+      "pytorch_eager_ms": 0.0277253020,
+      "speedup_vs_vllm_vendor": 0.9706420,
+      "speedup_vs_torch_compile": 1.0732921,
+      "correctness_passed": true
+    },
+    {
+      "rows": 128,
+      "selected_num_warps": 16,
+      "custom_kernel_ms": 0.0064681637,
+      "vllm_vendor_ms": 0.0069767112,
+      "torch_compile_ms": 0.0068079109,
+      "pytorch_eager_ms": 0.0295956424,
+      "speedup_vs_vllm_vendor": 1.0786232,
+      "speedup_vs_torch_compile": 1.0525261,
+      "correctness_passed": true
+    }
+  ],
+  "decision": "retain as an unqualified experiment; do not integrate into serving",
+  "reason": "the candidate was correct and beat the vLLM vendor operator by 5.3%, 15.7%, and 7.9% on three shapes, but lost by 2.9% at 32 rows and has no paired end-to-end workload evidence",
+  "qualification_boundary": "microbenchmark only; runtime integration and paired AIPerf, quality, cost, and Release Guard evidence remain required"
+}

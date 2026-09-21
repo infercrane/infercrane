@@ -116,6 +116,12 @@ The handwritten CUDA screen is in
 [`evidence/qwen3-0.6b-cuda-h100-2026-09-20.json`](./evidence/qwen3-0.6b-cuda-h100-2026-09-20.json),
 and the rejected SGLang tuple is in
 [`evidence/qwen3-0.6b-sglang-screen-2026-09-20.json`](./evidence/qwen3-0.6b-sglang-screen-2026-09-20.json).
+
+A fresh L40S vendor comparison on 2026-09-21 is retained in
+[`evidence/qwen3-0.6b-triton-l40s-2026-09-21.json`](./evidence/qwen3-0.6b-triton-l40s-2026-09-21.json).
+It confirmed correctness and mixed shape-level results: the Triton candidate beat
+the vLLM operator by 5.3–15.7% on three shapes and lost by 2.9% at 32 rows. It
+therefore remains an unqualified experiment rather than a serving change.
 The workload follows NVIDIA's
 [AIPerf methodology](https://developer.nvidia.com/blog/benchmarking-llm-inference-at-scale-with-aiperf/),
 including streaming metrics and forced output length.

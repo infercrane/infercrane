@@ -107,6 +107,10 @@ class ControlAPI:
         request_path = "/compute/providers"
         return cast(ObjectList, self._transport.request("GET", request_path))
 
+    def quote_managed_deployment(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        request_path = "/managed-deployment-quotes"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
+
     def list_g_p_u_prices(self) -> ObjectList:
         request_path = "/catalog/gpu-prices"
         return cast(ObjectList, self._transport.request("GET", request_path))
@@ -366,6 +370,14 @@ class ControlAPI:
     def plan_kernel_opportunities(self, *, body: dict[str, Any]) -> dict[str, Any]:
         request_path = "/optimization/kernel-opportunities"
         return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
+
+    def get_accelerator_lab_capabilities(self) -> dict[str, Any]:
+        request_path = "/optimization/accelerator-lab/capabilities"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
+    def run_accelerator_lab(self, *, body: dict[str, Any], idempotency_key: str) -> OperationEnvelope:
+        request_path = "/optimization/accelerator-lab/runs"
+        return cast(OperationEnvelope, self._transport.request("POST", request_path, body=body, idempotency_key=idempotency_key))
 
     def list_optimization_campaigns(self) -> ObjectList:
         request_path = "/optimization/campaigns"

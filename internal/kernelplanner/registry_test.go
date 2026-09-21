@@ -41,9 +41,27 @@ func TestRegistryFiltersRuntimeHardwareAndDType(t *testing.T) {
 	if len(matches) == 0 || matches[0].ImplementationID != "runtime-sglang" {
 		t.Fatalf("missing exact runtime baseline: %+v", matches)
 	}
-	unsupported, err := registry.Search(SearchRequest{Family: ResidualRMSNorm, Runtime: "vllm", HardwareVendor: "amd", ComputeCapability: "gfx942", DTypes: []string{"bf16"}, Phase: PhaseDecode})
-	if err != nil || len(unsupported) != 0 {
-		t.Fatalf("unsupported hardware matched: %+v err=%v", unsupported, err)
+	amd, err := registry.Search(SearchRequest{Family: ResidualRMSNorm, Runtime: "vllm", HardwareVendor: "amd", ComputeCapability: "gfx942", DTypes: []string{"bf16"}, Phase: PhaseDecode})
+	if err != nil || len(amd) < 3 || amd[0].ImplementationID != "runtime-vllm-rocm" || amd[1].ImplementationID != "aiter" {
+		t.Fatalf("AMD search did not preserve existing-first order: %+v err=%v", amd, err)
+	}
+}
+
+func TestRegistryHasExistingFirstCompilerPathsForEveryAcceleratorVendor(t *testing.T) {
+	tests := []struct {
+		vendor, accelerator, runtime, first string
+	}{
+		{"nvidia", "sm90", "vllm", "runtime-vllm"},
+		{"amd", "gfx942", "vllm", "runtime-vllm-rocm"},
+		{"google", "tpu-v6e", "vllm", "runtime-vllm-tpu"},
+		{"aws", "trn2", "vllm", "runtime-vllm-neuron"},
+	}
+	registry := DefaultRegistry()
+	for _, test := range tests {
+		matches, err := registry.Search(SearchRequest{Family: AttentionDecode, Runtime: test.runtime, HardwareVendor: test.vendor, ComputeCapability: test.accelerator, DTypes: []string{"bf16"}, Phase: PhaseDecode})
+		if err != nil || len(matches) < 2 || matches[0].ImplementationID != test.first {
+			t.Fatalf("vendor=%s matches=%+v err=%v", test.vendor, matches, err)
+		}
 	}
 }
 

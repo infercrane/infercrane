@@ -82,6 +82,25 @@ func TestRunPodContainerDiskIsBounded(t *testing.T) {
 	}
 }
 
+func TestManagedDeploymentsRequireExplicitEnablementAndRunPodCredential(t *testing.T) {
+	t.Setenv("INFERCRANE_API_KEY", "secret")
+	config, err := Load()
+	if err != nil || config.ManagedDeploymentsEnabled {
+		t.Fatalf("managed deployments should be disabled by default: cfg=%#v err=%v", config, err)
+	}
+
+	t.Setenv("INFERCRANE_MANAGED_DEPLOYMENTS_ENABLED", "true")
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "RUNPOD_API_KEY") {
+		t.Fatalf("managed deployments without platform credential were accepted: %v", err)
+	}
+
+	t.Setenv("RUNPOD_API_KEY", "platform-runpod-key")
+	config, err = Load()
+	if err != nil || !config.ManagedDeploymentsEnabled {
+		t.Fatalf("explicit managed deployment configuration was not loaded: cfg=%#v err=%v", config, err)
+	}
+}
+
 func TestGPUPriceSyncIntervalIsBounded(t *testing.T) {
 	t.Setenv("INFERCRANE_API_KEY", "secret")
 	t.Setenv("INFERCRANE_GPU_PRICE_SYNC_SECONDS", "3600")
@@ -146,6 +165,35 @@ func TestBrezelSandboxRequiresDedicatedTenantAndApprovedTemplates(t *testing.T) 
 	t.Setenv("INFERCRANE_BREZEL_SANDBOX_MODEL_CONNECTORS_JSON", `{"coder-production":"latest"}`)
 	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "connr_") {
 		t.Fatalf("mutable Brezel connector revision accepted: %v", err)
+	}
+}
+
+func TestAcceleratorLabRequiresCompletePrivateExecutionBoundary(t *testing.T) {
+	t.Setenv("INFERCRANE_API_KEY", "test-key")
+	t.Setenv("INFERCRANE_ACCELERATOR_WORKER_URL", "http://127.0.0.1:8091")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "Accelerator Lab configuration is partial") {
+		t.Fatalf("partial Accelerator Lab configuration accepted: %v", err)
+	}
+	t.Setenv("INFERCRANE_BREZEL_SANDBOX_URL", "http://127.0.0.1:8090")
+	t.Setenv("INFERCRANE_BREZEL_SANDBOX_TOKEN_FILE", filepath.Join(t.TempDir(), "brezel.token"))
+	t.Setenv("INFERCRANE_BREZEL_SANDBOX_PROJECT_ID", "optimization-builds")
+	t.Setenv("INFERCRANE_BREZEL_SANDBOX_TENANT_ID", "enterprise-tenant")
+	t.Setenv("INFERCRANE_BREZEL_SANDBOX_TEMPLATES_JSON", `{"evaluation-worker":"envr_aaaaaaaaaaaaaaaaaaaaaaaa"}`)
+	t.Setenv("INFERCRANE_BREZEL_SANDBOX_DEFAULT_TEMPLATE", "evaluation-worker")
+	t.Setenv("INFERCRANE_ACCELERATOR_WORKER_TOKEN_FILE", filepath.Join(t.TempDir(), "worker.token"))
+	t.Setenv("INFERCRANE_BREZEL_OPTIMIZATION_ENVIRONMENT", "envr_bbbbbbbbbbbbbbbbbbbbbbbb")
+	cfg, err := Load()
+	if err != nil || !cfg.AcceleratorLabEnabled() {
+		t.Fatalf("Accelerator Lab config=%#v err=%v", cfg, err)
+	}
+	t.Setenv("INFERCRANE_ACCELERATOR_WORKER_URL", "http://worker.internal:8091")
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "must use HTTPS") {
+		t.Fatalf("insecure Accelerator Lab worker origin accepted: %v", err)
+	}
+	t.Setenv("INFERCRANE_ACCELERATOR_WORKER_URL", "https://worker.internal")
+	t.Setenv("INFERCRANE_BREZEL_OPTIMIZATION_ENVIRONMENT", "evaluation-worker:latest")
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "envr_") {
+		t.Fatalf("mutable Accelerator Lab environment accepted: %v", err)
 	}
 }
 

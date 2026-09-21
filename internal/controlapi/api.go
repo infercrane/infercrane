@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/infercrane/infercrane/internal/acceleratorlab"
 	"github.com/infercrane/infercrane/internal/admission"
 	"github.com/infercrane/infercrane/internal/artifactcache"
 	"github.com/infercrane/infercrane/internal/asyncinference"
@@ -37,6 +38,7 @@ import (
 	"github.com/infercrane/infercrane/internal/intentplan"
 	"github.com/infercrane/infercrane/internal/kernelplanner"
 	"github.com/infercrane/infercrane/internal/lab"
+	"github.com/infercrane/infercrane/internal/managedbilling"
 	"github.com/infercrane/infercrane/internal/modelapicatalog"
 	"github.com/infercrane/infercrane/internal/modelapiproduct"
 	"github.com/infercrane/infercrane/internal/optimizationcampaign"
@@ -181,6 +183,9 @@ type managedBillingStore interface {
 	CompleteManagedFundingIntent(context.Context, string, string, string, domain.ManagedCheckoutSession) (domain.ManagedFundingIntent, error)
 	ReleaseManagedFundingIntentLease(context.Context, string, string, string) error
 }
+type managedCloudDeploymentStore interface {
+	SubmitManagedCloudDeployment(context.Context, domain.Deployment, domain.Operation, domain.ManagedSpendReservation) (domain.Deployment, domain.Operation, domain.ManagedSpendReservation, bool, error)
+}
 type intelligenceStore interface {
 	CaptureReplayTrace(context.Context, string, string, time.Duration, int) (domain.ReplayTrace, error)
 	ReplayTrace(context.Context, string, string) (domain.ReplayTrace, error)
@@ -317,6 +322,8 @@ type API struct {
 	ProductVersion        string
 	GatewayInstanceID     string
 	OptimizationCosts     optimizationcampaign.CostAuthority
+	AcceleratorLabEnabled bool
+	AcceleratorLabCatalog acceleratorlab.CapabilityCatalog
 	AdmissionState        interface {
 		State(string) (admission.State, bool)
 	}
@@ -350,6 +357,10 @@ type API struct {
 	// registered provider adapters. It lets the simple API omit an advanced
 	// adapter field without widening the static provider qualification matrix.
 	DefaultProviderAdapters map[string]string
+	// ManagedDeployments is the server-owned commercial policy for prepaid
+	// InferCrane Cloud. Browser input can select the mode, never the margin or
+	// provider account.
+	ManagedDeployments managedbilling.DeploymentPolicy
 }
 
 // ComputeProvider is the customer-facing execution readiness for one cloud.
@@ -357,11 +368,12 @@ type API struct {
 // registered code and a catalog price do not prove that this control plane can
 // create a billable resource.
 type ComputeProvider struct {
-	ID     string `json:"id"`
-	Label  string `json:"label"`
-	Mode   string `json:"mode"`
-	State  string `json:"state"`
-	Reason string `json:"reason,omitempty"`
+	ID           string   `json:"id"`
+	Label        string   `json:"label"`
+	Mode         string   `json:"mode"`
+	State        string   `json:"state"`
+	Reason       string   `json:"reason,omitempty"`
+	BillingModes []string `json:"billing_modes"`
 }
 
 // GPUPriceObservation is sourced price evidence, not an availability claim.
@@ -431,6 +443,7 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/compute/providers", a.auth(authz.Read, a.computeProviders))
 	mux.HandleFunc("GET /api/v1/catalog/gpu-prices", a.auth(authz.Read, a.gpuPrices))
 	mux.HandleFunc("POST /api/v1/capacity/probes", a.auth(authz.Read, a.probeCapacity))
+	mux.HandleFunc("POST /api/v1/managed-deployment-quotes", a.auth(authz.Read, a.managedDeploymentQuote))
 	mux.HandleFunc("GET /api/v1/system/instances", a.auth(authz.Read, a.controlPlaneInstances))
 	mux.HandleFunc("POST /api/v1/deployments/{name}/recipes", a.auth(authz.Deploy, a.captureRecipe))
 	mux.HandleFunc("GET /api/v1/recipes", a.auth(authz.Read, a.recipes))
@@ -474,6 +487,8 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/workload-profiles/{name}", a.auth(authz.Read, a.workloadProfile))
 	mux.HandleFunc("POST /api/v1/optimization/proposals", a.auth(authz.Read, a.proposeOptimization))
 	mux.HandleFunc("POST /api/v1/optimization/kernel-opportunities", a.auth(authz.Read, a.kernelOpportunities))
+	mux.HandleFunc("GET /api/v1/optimization/accelerator-lab/capabilities", a.auth(authz.Read, a.acceleratorLabCapabilities))
+	mux.HandleFunc("POST /api/v1/optimization/accelerator-lab/runs", a.auth(authz.Deploy, a.runAcceleratorLab))
 	mux.HandleFunc("GET /api/v1/optimization/campaigns", a.auth(authz.Read, a.optimizationCampaigns))
 	mux.HandleFunc("POST /api/v1/optimization/campaigns", a.auth(authz.Deploy, a.createOptimizationCampaign))
 	mux.HandleFunc("GET /api/v1/optimization/campaigns/{id}", a.auth(authz.Read, a.optimizationCampaign))
@@ -1063,6 +1078,62 @@ func (a API) optimizationCampaign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"campaign": optimizationCampaignResponse(campaign)})
+}
+
+func (a API) acceleratorLabCapabilities(w http.ResponseWriter, _ *http.Request) {
+	catalog := a.AcceleratorLabCatalog
+	if catalog.Version == "" {
+		catalog = acceleratorlab.DefaultCapabilityCatalog()
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"version":      catalog.Version,
+		"configured":   a.AcceleratorLabEnabled,
+		"capabilities": catalog.Capabilities,
+		"boundary":     "registered adapters are not performance or capacity claims; every run requires exact-target evidence",
+	})
+}
+
+func (a API) runAcceleratorLab(w http.ResponseWriter, r *http.Request) {
+	if !a.AcceleratorLabEnabled {
+		writeError(w, http.StatusServiceUnavailable, "accelerator_lab_unavailable", "Accelerator Lab is not configured on this control plane")
+		return
+	}
+	var request acceleratorlab.Request
+	if !decodeMutationBody(w, r, &request) {
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	request.TenantID = actor.TenantID
+	now := time.Now().UTC()
+	if !request.Policy.AuthorizedUntil.After(now) || request.Policy.AuthorizedUntil.After(now.Add(24*time.Hour)) {
+		writeError(w, http.StatusUnprocessableEntity, "accelerator_lab_authority_invalid", "authorized_until must be in the future and within 24 hours")
+		return
+	}
+	validated, digest, err := acceleratorlab.ValidateRequest(request)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "accelerator_lab_request_invalid", err.Error())
+		return
+	}
+	catalog := a.AcceleratorLabCatalog
+	if catalog.Version == "" {
+		writeError(w, http.StatusServiceUnavailable, "accelerator_lab_unavailable", "Accelerator Lab worker capabilities are unavailable")
+		return
+	}
+	if err = catalog.ValidateRequest(validated); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "accelerator_lab_capability_unavailable", err.Error())
+		return
+	}
+	encoded, _ := json.Marshal(validated)
+	operation, _, err := a.Store.EnqueueOperation(r.Context(), domain.Operation{
+		TenantID: actor.TenantID, Kind: acceleratorlab.ExecuteKind, ResourceType: "optimization_campaign", ResourceName: validated.CampaignID,
+		IdempotencyKey: "accelerator-lab:" + digest, RequestJSON: string(encoded), MaxAttempts: 20,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "accelerator_lab_enqueue_failed", "accelerator qualification could not be queued")
+		return
+	}
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "accelerator_lab.run", ResourceType: "optimization_campaign", ResourceName: validated.CampaignID, Outcome: "queued"})
+	writeJSON(w, http.StatusAccepted, map[string]any{"operation": operationResponse(operation), "input_digest": digest, "provider_mutation": false, "automatic_promotion": false})
 }
 
 func (a API) optimizationCampaigns(w http.ResponseWriter, r *http.Request) {
@@ -4665,6 +4736,11 @@ func (a API) createCloudDeployment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
 		return
 	}
+	managedPolicy := a.ManagedDeployments.Normalize()
+	if managedPolicy.Enabled && request.Cloud == managedPolicy.Provider && request.BillingMode != "customer_wallet" {
+		writeError(w, http.StatusUnprocessableEntity, "managed_billing_required", "InferCrane-managed compute requires prepaid credit")
+		return
+	}
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
 		writeError(w, http.StatusBadRequest, "invalid_request", "request body must contain one JSON object")
 		return
@@ -4717,7 +4793,34 @@ func (a API) createCloudDeployment(w http.ResponseWriter, r *http.Request) {
 	}
 	encoded, _ := json.Marshal(request)
 	autoscalingEnabled := request.ComputeMode != "serverless" && maxReplicas > minReplicas
-	deployment, operation, created, err := a.Store.SubmitCloudDeployment(r.Context(), domain.Deployment{TenantID: principal.TenantID, Name: request.Name, Model: request.Model, Runtime: request.Runtime, MinReplicas: minReplicas, MaxReplicas: maxReplicas, AutoscalingEnabled: autoscalingEnabled}, domain.Operation{TenantID: principal.TenantID, Kind: operationKind, IdempotencyKey: key, RequestJSON: string(encoded)})
+	deploymentInput := domain.Deployment{TenantID: principal.TenantID, Name: request.Name, Model: request.Model, Runtime: request.Runtime, MinReplicas: minReplicas, MaxReplicas: maxReplicas, AutoscalingEnabled: autoscalingEnabled}
+	operationInput := domain.Operation{TenantID: principal.TenantID, Kind: operationKind, IdempotencyKey: key, RequestJSON: string(encoded)}
+	var deployment domain.Deployment
+	var operation domain.Operation
+	var managedReservation domain.ManagedSpendReservation
+	var created bool
+	var err error
+	if request.BillingMode == "customer_wallet" {
+		managedStore, supported := a.Store.(managedCloudDeploymentStore)
+		if !supported {
+			writeError(w, http.StatusNotImplemented, "capability_unavailable", "managed deployment billing storage is not configured")
+			return
+		}
+		quote, quoteErr := a.quoteManagedDeployment(managedDeploymentQuoteRequest{Provider: request.Cloud, Region: request.Region, GPU: request.GPU, GPUCount: request.GPUCount, ComputeMode: request.ComputeMode, RuntimeSeconds: request.ManagedRuntimeSeconds}, time.Now().UTC())
+		if quoteErr != nil {
+			writeError(w, http.StatusUnprocessableEntity, "managed_quote_unavailable", quoteErr.Error())
+			return
+		}
+		pricingJSON, _ := json.Marshal(quote)
+		managedReservation = domain.ManagedSpendReservation{Provider: quote.Provider, SupplierHourlyMicrousd: quote.SupplierHourlyMicrousd, RetailHourlyMicrousd: quote.RetailHourlyMicrousd, ReservedMicrousd: quote.ReservedMicrousd, GrossMarginBPS: quote.GrossMarginBPS, RuntimeLimitSeconds: quote.RuntimeLimitSeconds, CleanupAllowanceSeconds: quote.CleanupAllowanceSeconds, PricingJSON: string(pricingJSON)}
+		deployment, operation, managedReservation, created, err = managedStore.SubmitManagedCloudDeployment(r.Context(), deploymentInput, operationInput, managedReservation)
+	} else {
+		deployment, operation, created, err = a.Store.SubmitCloudDeployment(r.Context(), deploymentInput, operationInput)
+	}
+	if errors.Is(err, domain.ErrInsufficientCredits) {
+		writeError(w, http.StatusPaymentRequired, "insufficient_prepaid_credits", "available prepaid credit is below the required managed deployment hold")
+		return
+	}
 	if errors.Is(err, domain.ErrConflict) {
 		writeError(w, http.StatusConflict, "conflict", err.Error())
 		return
@@ -4731,11 +4834,23 @@ func (a API) createCloudDeployment(w http.ResponseWriter, r *http.Request) {
 	if !created && operation.Status == "succeeded" {
 		status = http.StatusOK
 	}
-	writeJSON(w, status, map[string]any{"deployment": deploymentResponse(deployment), "operation": operationResponse(operation), "created": created})
+	response := map[string]any{"deployment": deploymentResponse(deployment), "operation": operationResponse(operation), "created": created}
+	if managedReservation.ID != "" {
+		response["billing"] = map[string]any{"funding_mode": "prepaid", "reservation": managedReservation, "reservation_is_charge": false}
+	}
+	writeJSON(w, status, response)
 }
 
 func (a API) computeProviders(w http.ResponseWriter, _ *http.Request) {
 	providers := append([]ComputeProvider(nil), a.ComputeProviders...)
+	managedPolicy := a.ManagedDeployments.Normalize()
+	for index := range providers {
+		if managedPolicy.Enabled && providers[index].ID == managedPolicy.Provider {
+			providers[index].BillingModes = []string{"customer_wallet"}
+		} else if len(providers[index].BillingModes) == 0 {
+			providers[index].BillingModes = []string{"provider_account"}
+		}
+	}
 	sort.SliceStable(providers, func(i, j int) bool { return providers[i].Label < providers[j].Label })
 	writeJSON(w, http.StatusOK, map[string]any{"data": providers})
 }
@@ -6069,6 +6184,7 @@ func (a API) operation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "operation was not found")
 		return
 	}
+	var acceleratorProgress map[string]any
 	if store, ok := a.Store.(operationStepStore); ok {
 		steps, stepErr := store.OperationSteps(r.Context(), op.ID, 1)
 		if stepErr != nil {
@@ -6078,9 +6194,29 @@ func (a API) operation(w http.ResponseWriter, r *http.Request) {
 		if len(steps) > 0 {
 			op.CurrentStep = steps[0].Name
 			op.CurrentStepStatus = steps[0].Status
+			if op.Kind == acceleratorlab.ExecuteKind {
+				var checkpoint struct {
+					Stage       string                  `json:"stage"`
+					CostUSD     float64                 `json:"cost_usd"`
+					MaxCostUSD  float64                 `json:"max_cost_usd"`
+					Accelerator string                  `json:"accelerator"`
+					Runtime     string                  `json:"runtime"`
+					Modality    acceleratorlab.Modality `json:"modality"`
+				}
+				if json.Unmarshal([]byte(steps[0].CheckpointJSON), &checkpoint) == nil && checkpoint.Stage != "" {
+					acceleratorProgress = map[string]any{
+						"stage": checkpoint.Stage, "cost_usd": checkpoint.CostUSD, "max_cost_usd": checkpoint.MaxCostUSD,
+						"accelerator": checkpoint.Accelerator, "runtime": checkpoint.Runtime, "modality": checkpoint.Modality,
+					}
+				}
+			}
 		}
 	}
-	writeJSON(w, http.StatusOK, operationResponse(op))
+	response := operationResponse(op)
+	if acceleratorProgress != nil {
+		response["optimization_progress"] = acceleratorProgress
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 func (a API) operations(w http.ResponseWriter, r *http.Request) {
 	store, ok := a.Store.(operationListStore)

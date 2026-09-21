@@ -47,11 +47,11 @@ export INFERCRANE_BREZEL_SANDBOX_PROJECT_ID="infercrane-private-computers"
 export INFERCRANE_BREZEL_SANDBOX_TENANT_ID="tenant-enterprise-a"
 export INFERCRANE_BREZEL_SANDBOX_DEFAULT_TEMPLATE="coding-agent"
 export INFERCRANE_BREZEL_SANDBOX_TEMPLATES_JSON='{
-  "coding-agent":"envr_0123456789abcdef01234567",
-  "evaluation-worker":"envr_abcdef0123456789abcdef01"
+  "coding-agent":"envr_964f832968870a80ca50570b",
+  "evaluation-worker":"envr_82e4e61dd60afc96f4aff2a4"
 }'
 export INFERCRANE_BREZEL_SANDBOX_MODEL_CONNECTORS_JSON='{
-  "coder-production":"connr_0123456789abcdef01234567"
+  "<approved-infercrane-endpoint-id>":"connr_7cd6a14266f1d50ccc90c299"
 }'
 ```
 
@@ -141,9 +141,29 @@ database, Redis, or metrics ports. Cloud IAM used to administer the host is a
 separate operational credential and must be rotated without changing the
 dedicated Brezel service token used by InferCrane.
 
-Verify `https://sandbox.infercrane.com/readyz` and `/v1/capabilities`, then run
-the full lifecycle through InferCrane: create, command, file write/read, HTTP
-preview, pause, resume, persistence check, delete, and cleanup confirmation.
+Verify the public `https://sandbox.infercrane.com/readyz` boundary. Query
+`/v1/capabilities` through InferCrane with the dedicated service credential;
+an unauthenticated request must return `401`. Then run the full lifecycle
+through InferCrane: create, command, file write/read, HTTP preview, pause,
+resume, persistence check, delete, and cleanup confirmation.
+
+## Production qualification
+
+The bounded Scaleway production tuple was qualified on 2026-09-21:
+
+- Host: `brezel-benchmark` at `51.159.203.254`
+- Public edge: `https://sandbox.infercrane.com` with active DNS and TLS
+- Dedicated project: `infercrane-private-computers`
+- Approved environments: `envr_964f832968870a80ca50570b` and
+  `envr_82e4e61dd60afc96f4aff2a4`
+- Model connector: `connr_7cd6a14266f1d50ccc90c299`
+
+The production workflow passed creation, streamed commands, file persistence,
+preview brokering, sanitized receipts, pause/resume, model connector access,
+usage recording, deletion, and cleanup through InferCrane. The service token
+remains host-side in an owner-only file and its value is not part of this
+evidence. See [Scaleway Brezel evidence](/testing/scaleway-brezel-real-evidence)
+for the exact qualification boundary.
 
 ## Current boundary
 

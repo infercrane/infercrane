@@ -123,6 +123,11 @@ export class ControlApi {
     return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
+  quoteManagedDeployment(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const requestPath = '/managed-deployment-quotes';
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
   listGPUPrices(): Promise<ObjectList> {
     const requestPath = '/catalog/gpu-prices';
     return this.transport.request('GET', requestPath) as Promise<ObjectList>;
@@ -446,6 +451,16 @@ export class ControlApi {
   planKernelOpportunities(body: JsonValue): Promise<Record<string, JsonValue>> {
     const requestPath = '/optimization/kernel-opportunities';
     return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  getAcceleratorLabCapabilities(): Promise<Record<string, JsonValue>> {
+    const requestPath = '/optimization/accelerator-lab/capabilities';
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
+  runAcceleratorLab(body: JsonValue, idempotencyKey: string): Promise<OperationEnvelope> {
+    const requestPath = '/optimization/accelerator-lab/runs';
+    return this.transport.request('POST', requestPath, { body, idempotencyKey }) as Promise<OperationEnvelope>;
   }
 
   listOptimizationCampaigns(): Promise<ObjectList> {

@@ -45,6 +45,33 @@ func TestBuildWorksForAnyPinnedModelIdentity(t *testing.T) {
 	}
 }
 
+func TestBuildSelectsVendorNativeCompilerFamilies(t *testing.T) {
+	tests := []struct {
+		vendor, accelerator, compiler string
+	}{
+		{"amd", "MI300X", "aiter"},
+		{"google", "TPU-V6E", "pallas"},
+		{"aws", "TRN2", "nki"},
+	}
+	for _, test := range tests {
+		request := fixtureRequest()
+		request.Hardware = HardwareIdentity{Vendor: test.vendor, Accelerator: test.accelerator}
+		request.Runtime.ImageDigest = "sha256:" + strings.Repeat("3", 64)
+		plan, err := Build(request)
+		if err != nil || len(plan.Candidates) == 0 || len(plan.Candidates[0].CompilerChoices) == 0 || plan.Candidates[0].CompilerChoices[0] != test.compiler {
+			t.Fatalf("vendor=%s plan=%+v err=%v", test.vendor, plan, err)
+		}
+	}
+}
+
+func TestBuildRejectsUnknownAcceleratorVendor(t *testing.T) {
+	request := fixtureRequest()
+	request.Hardware.Vendor = "mystery"
+	if _, err := Build(request); err == nil || !strings.Contains(err.Error(), "nvidia, amd, google, or aws") {
+		t.Fatalf("unknown vendor was accepted: %v", err)
+	}
+}
+
 func TestBuildFailsClosedForFixtureWhenMeasuredProfileRequired(t *testing.T) {
 	request := fixtureRequest()
 	request.Policy.RequireMeasuredProfiler = true

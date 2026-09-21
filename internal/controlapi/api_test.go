@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/infercrane/infercrane/internal/acceleratorlab"
 	"github.com/infercrane/infercrane/internal/admission"
 	"github.com/infercrane/infercrane/internal/artifactcache"
 	"github.com/infercrane/infercrane/internal/asyncinference"
@@ -64,6 +65,7 @@ type fakeStore struct {
 	nativeSandboxes []domain.NativeSandbox
 	sandboxUsage    []domain.SandboxUsageEvent
 	trainingRows    []domain.TrainingArtifactHandoff
+	operationSteps  []domain.OperationStep
 }
 
 type fakeOptimizationCosts struct{}
@@ -671,6 +673,48 @@ func TestKernelOpportunityAPIPlansExistingFirstWithoutExecutingCode(t *testing.T
 	}
 }
 
+func TestAcceleratorLabAPIExposesTruthfulCapabilitiesAndQueuesTenantBoundRun(t *testing.T) {
+	store := &fakeStore{}
+	handler := (API{Store: store, APIKey: "secret", AcceleratorLabEnabled: true, AcceleratorLabCatalog: acceleratorlab.DefaultCapabilityCatalog()}).Handler()
+	capabilities := httptest.NewRequest(http.MethodGet, "/api/v1/optimization/accelerator-lab/capabilities", nil)
+	capabilities.Header.Set("Authorization", "Bearer secret")
+	capabilityResponse := httptest.NewRecorder()
+	handler.ServeHTTP(capabilityResponse, capabilities)
+	if capabilityResponse.Code != http.StatusOK || !strings.Contains(capabilityResponse.Body.String(), `"profiler":"nsight-systems+nsight-compute"`) || !strings.Contains(capabilityResponse.Body.String(), `"vendor":"amd"`) || !strings.Contains(capabilityResponse.Body.String(), `"vendor":"google"`) || !strings.Contains(capabilityResponse.Body.String(), `"vendor":"aws"`) || !strings.Contains(capabilityResponse.Body.String(), "not performance or capacity claims") {
+		t.Fatalf("status=%d body=%s", capabilityResponse.Code, capabilityResponse.Body.String())
+	}
+
+	run := acceleratorlab.Request{
+		SchemaVersion: acceleratorlab.RequestSchemaV1, TenantID: "attacker-tenant", CampaignID: "campaign-1", CandidateID: "candidate-1",
+		Model:    kernelplanner.ModelIdentity{Repository: "Qwen/Qwen3-0.6B", Revision: strings.Repeat("a", 40)},
+		Runtime:  kernelplanner.RuntimeIdentity{Name: "vllm", Version: "0.22.1", ImageDigest: "sha256:" + strings.Repeat("1", 64)},
+		Hardware: kernelplanner.HardwareIdentity{Vendor: "nvidia", Accelerator: "L40S", ComputeCapability: "sm89"},
+		Topology: acceleratorlab.Topology{Mode: "aggregated", Nodes: 1, Accelerators: 1, TensorParallel: 1, PipelineParallel: 1, ExpertParallel: 1},
+		Workload: acceleratorlab.Workload{Digest: "sha256:" + strings.Repeat("2", 64), Modality: acceleratorlab.ModalityText, Phase: kernelplanner.PhaseDecode, BatchSize: 1, Concurrency: 4, InputTokens: 128, OutputTokens: 32, QualitySuite: "quality@sha256:" + strings.Repeat("3", 64), Replay: "aiperf@sha256:" + strings.Repeat("4", 64)},
+		Policy:   acceleratorlab.Policy{MaxCandidates: 1, MaxCostUSD: 5, MinHotspotFraction: .05, MinAmdahlCeiling: 1.05, TargetEndToEndSpeedup: 1.02, MinKernelSpeedup: 1.01, MaxMemoryRegressionPct: 2, RequireSanitizer: true, RequireHiddenShapes: true, RequireServingReplay: true, RequireQuality: true, AuthorizedUntil: time.Now().UTC().Add(time.Hour)},
+		Sources:  []acceleratorlab.SourcePin{{ImplementationID: "infercrane-residual-rmsnorm-triton", Revision: strings.Repeat("b", 40), License: "Apache-2.0", Artifacts: []acceleratorlab.Artifact{{Kind: "source", URI: "s3://source/kernel.tar.zst", SHA256: "sha256:" + strings.Repeat("5", 64), Size: 1024}}}},
+	}
+	body, _ := json.Marshal(run)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/optimization/accelerator-lab/runs", bytes.NewReader(body))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted || store.operation.Kind != acceleratorlab.ExecuteKind || store.operation.TenantID != "global" || !strings.Contains(store.operation.RequestJSON, `"tenant_id":"global"`) || strings.Contains(store.operation.RequestJSON, "attacker-tenant") || !strings.Contains(response.Body.String(), `"automatic_promotion":false`) {
+		t.Fatalf("status=%d body=%s operation=%+v", response.Code, response.Body.String(), store.operation)
+	}
+}
+
+func TestAcceleratorLabRejectsRunsWhenExecutionBoundaryIsNotConfigured(t *testing.T) {
+	handler := (API{Store: &fakeStore{}, APIKey: "secret"}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/optimization/accelerator-lab/runs", strings.NewReader(`{}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), "accelerator_lab_unavailable") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestOperationalMeasurementIngestionIsAuthenticatedStrictAndContentFree(t *testing.T) {
 	store := &fakeOperationalMeasurementStore{fakeStore: &fakeStore{}}
 	handler := (API{Store: store, APIKey: "secret"}).Handler()
@@ -955,6 +999,71 @@ func TestCloudDeploymentFailsClosedWithoutReadyCompute(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), `"code":"compute_connection_required"`) {
 		t.Fatalf("deployment status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestManagedComputeCannotBypassPrepaidBilling(t *testing.T) {
+	handler := (API{
+		Store:              &fakeStore{},
+		APIKey:             "secret",
+		ComputeProviders:   []ComputeProvider{{ID: "runpod", Label: "RunPod", State: "ready"}},
+		ManagedDeployments: managedbilling.DeploymentPolicy{Enabled: true, Provider: "runpod"},
+	}).Handler()
+
+	providersRequest := httptest.NewRequest(http.MethodGet, "/api/v1/compute/providers", nil)
+	providersRequest.Header.Set("Authorization", "Bearer secret")
+	providersResponse := httptest.NewRecorder()
+	handler.ServeHTTP(providersResponse, providersRequest)
+	if providersResponse.Code != http.StatusOK || !strings.Contains(providersResponse.Body.String(), `"billing_modes":["customer_wallet"]`) {
+		t.Fatalf("managed billing capability was not advertised: status=%d body=%s", providersResponse.Code, providersResponse.Body.String())
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments", strings.NewReader(`{"name":"qwen","model":"Qwen/Qwen3-8B","cloud":"runpod","gpu":"L40S","min_replicas":1,"max_replicas":1}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Idempotency-Key", "managed-bypass")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), `"code":"managed_billing_required"`) {
+		t.Fatalf("unfunded platform deployment was accepted: status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestManagedDeploymentQuoteUsesCurrentProviderPriceAndWallet(t *testing.T) {
+	current := time.Now().UTC()
+	catalog := pricing.NewDynamicCatalog(map[pricing.Request]pricing.Estimate{
+		{Cloud: "runpod", Region: "global", GPU: "NVIDIA L40S", GPUCount: 1, Replicas: 1}: {
+			Currency: "USD", Hourly: 0.60, CostScope: pricing.CostScopeInstanceTotal,
+			Authority: pricing.PriceAuthorityProviderAPI, Source: "runpod provider API",
+			ObservedAt: current, StaleAfter: time.Hour,
+		},
+	})
+	store := &fakeManagedBillingStore{
+		fakeStore: &fakeStore{},
+		wallet: domain.ManagedWallet{
+			TenantID: "global", Currency: "USD", BalanceMicrousd: 2_000_000,
+			AvailableMicrousd: 2_000_000,
+		},
+	}
+	handler := (API{
+		Store:              store,
+		APIKey:             "secret",
+		GPUPriceCatalog:    catalog,
+		ManagedDeployments: managedbilling.DeploymentPolicy{Enabled: true, Provider: "runpod"},
+	}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/managed-deployment-quotes", strings.NewReader(`{"provider":"runpod","gpu":"L40S","gpu_count":1,"compute_mode":"elastic","runtime_seconds":3600}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	body := response.Body.String()
+	for _, expected := range []string{`"retail_hourly_microusd":1000000`, `"reserved_microusd":1166667`, `"affordable":true`, `"reservation_is_charge":false`} {
+		if response.Code != http.StatusOK || !strings.Contains(body, expected) {
+			t.Fatalf("managed quote status=%d missing=%s body=%s", response.Code, expected, body)
+		}
+	}
+	for _, internal := range []string{"supplier_hourly_microusd", "gross_margin_bps", "runpod provider API"} {
+		if strings.Contains(body, internal) {
+			t.Fatalf("managed quote exposed internal commercial field %q: %s", internal, body)
+		}
 	}
 }
 
@@ -2096,6 +2205,9 @@ func (f *fakeStore) ActiveOperationForResource(context.Context, string, string, 
 func (f *fakeStore) Operation(context.Context, string) (domain.Operation, error) {
 	return f.operation, f.err
 }
+func (f *fakeStore) OperationSteps(context.Context, string, int) ([]domain.OperationStep, error) {
+	return f.operationSteps, f.err
+}
 func (f *fakeStore) OperationsForTenant(context.Context, string, time.Time, int) ([]domain.Operation, error) {
 	return f.operations, f.err
 }
@@ -2657,6 +2769,22 @@ func TestOperationAPIAuthenticationAndResponse(t *testing.T) {
 	}
 	if response.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("authenticated control response may be cached: %q", response.Header().Get("Cache-Control"))
+	}
+}
+
+func TestOperationAPIExposesOnlyTypedAcceleratorProgress(t *testing.T) {
+	store := &fakeStore{
+		operation:      domain.Operation{ID: "op", TenantID: "global", Kind: acceleratorlab.ExecuteKind, Status: "running", MaxAttempts: 5},
+		operationSteps: []domain.OperationStep{{Name: "measure", Status: "running", CheckpointJSON: `{"stage":"measure","cost_usd":1.25,"max_cost_usd":5,"accelerator":"L40S","runtime":"vllm","modality":"video","secret":"must-not-leak"}`}},
+	}
+	handler := (API{Store: store, APIKey: "secret"}).Handler()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/operations/op", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	body := response.Body.String()
+	if response.Code != http.StatusOK || !strings.Contains(body, `"optimization_progress":{"accelerator":"L40S","cost_usd":1.25,"max_cost_usd":5,"modality":"video","runtime":"vllm","stage":"measure"}`) || strings.Contains(body, "must-not-leak") {
+		t.Fatalf("response=%d %s", response.Code, body)
 	}
 }
 

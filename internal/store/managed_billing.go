@@ -332,7 +332,7 @@ func managedWalletTx(ctx context.Context, tx *tx, tenant string) (domain.Managed
 func managedWalletLedgerEntryTx(ctx context.Context, tx *tx, id string) (domain.ManagedWalletLedgerEntry, error) {
 	var out domain.ManagedWalletLedgerEntry
 	var created string
-	if err := tx.QueryRowContext(ctx, `SELECT id,tenant_id,COALESCE(reservation_id,''),kind,currency,amount_microusd,description,created_at FROM managed_wallet_ledger WHERE id=?`, id).Scan(&out.ID, &out.TenantID, &out.ReservationID, &out.Kind, &out.Currency, &out.AmountMicrousd, &out.Description, &created); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT id,tenant_id,COALESCE(reservation_id,''),COALESCE(spend_reservation_id,''),kind,currency,amount_microusd,description,created_at FROM managed_wallet_ledger WHERE id=?`, id).Scan(&out.ID, &out.TenantID, &out.ReservationID, &out.SpendReservationID, &out.Kind, &out.Currency, &out.AmountMicrousd, &out.Description, &created); err != nil {
 		return domain.ManagedWalletLedgerEntry{}, err
 	}
 	out.CreatedAt = parseTime(created)
@@ -545,7 +545,7 @@ func (s *Store) ManagedWalletLedger(ctx context.Context, tenant string, limit in
 	if limit < 1 || limit > 500 {
 		limit = 100
 	}
-	rows, err := s.QueryContext(ctx, `SELECT id,tenant_id,COALESCE(reservation_id,''),kind,currency,amount_microusd,description,created_at FROM managed_wallet_ledger WHERE tenant_id=? ORDER BY created_at DESC,id DESC LIMIT ?`, tenant, limit)
+	rows, err := s.QueryContext(ctx, `SELECT id,tenant_id,COALESCE(reservation_id,''),COALESCE(spend_reservation_id,''),kind,currency,amount_microusd,description,created_at FROM managed_wallet_ledger WHERE tenant_id=? ORDER BY created_at DESC,id DESC LIMIT ?`, tenant, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -554,7 +554,7 @@ func (s *Store) ManagedWalletLedger(ctx context.Context, tenant string, limit in
 	for rows.Next() {
 		var item domain.ManagedWalletLedgerEntry
 		var created time.Time
-		if err = rows.Scan(&item.ID, &item.TenantID, &item.ReservationID, &item.Kind, &item.Currency, &item.AmountMicrousd, &item.Description, &created); err != nil {
+		if err = rows.Scan(&item.ID, &item.TenantID, &item.ReservationID, &item.SpendReservationID, &item.Kind, &item.Currency, &item.AmountMicrousd, &item.Description, &created); err != nil {
 			return nil, err
 		}
 		item.CreatedAt = created.UTC()
