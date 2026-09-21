@@ -30,5 +30,4 @@ ALTER TABLE managed_wallet_ledger
   ADD COLUMN spend_reservation_id TEXT REFERENCES managed_spend_reservations(id) ON DELETE RESTRICT;
 
 CREATE UNIQUE INDEX managed_wallet_ledger_spend_reservation_kind_idx
-  ON managed_wallet_ledger(tenant_id,spend_reservation_id,kind)
-  WHERE spend_reservation_id IS NOT NULL;
+  ON managed_wallet_ledger(tenant_id,spend_reservation_id,kind);
