@@ -1,0 +1,94 @@
+---
+title: Managed deployments
+description: The prepaid commercial and lifecycle boundary for InferCrane-operated GPU deployments.
+---
+
+# Managed deployments
+
+InferCrane Cloud is the MVP path for customers who want InferCrane to operate a model deployment.
+It is deliberately time-boxed and prepaid. BYOC remains a separate path in which the customer pays
+their cloud directly.
+
+The control plane must not queue provider work unless the tenant's available wallet credit covers
+the complete authorization hold. A merely positive balance is insufficient: available credit must
+be greater than or equal to the current hold.
+
+## Customer flow
+
+1. Choose a model and serving goal.
+2. Select **InferCrane Cloud · prepaid** and a 1, 6, or 24 hour runtime window.
+3. InferCrane checks a current exact provider price and launch evidence.
+4. Review the retail hourly rate, authorization hold, available credit, and any shortfall.
+5. Add credit when needed, then approve the deployment.
+6. InferCrane atomically reserves credit and queues one durable deployment operation.
+7. The runtime clock starts only when the stable endpoint is activated.
+8. At the runtime limit, InferCrane withdraws the route, deletes provider resources, settles measured
+   runtime, and releases unused held credit.
+
+The UI never labels a hold as spend or an estimate as an invoice. Failed launch evidence blocks the
+billable action. A failed pre-activation operation enters the same durable cleanup path; the hold is
+released only after no live provider replica remains.
+
+## Commercial policy
+
+The current MVP supports one elastic RunPod GPU per managed deployment. RunPod is an internal supply
+implementation; the customer product is InferCrane Cloud. The server computes price from a current,
+complete provider observation and applies the operator-owned policy. Browser input cannot set the
+supplier rate or gross margin.
+
+Defaults:
+
+| Policy | Default |
+| --- | ---: |
+| Minimum gross margin | 40% |
+| Cleanup allowance held | 10 minutes |
+| Default runtime window | 1 hour |
+| Maximum runtime window | 24 hours |
+
+For example, a current supplier rate of `$0.42/hour` produces a minimum retail price of
+`$0.70/hour` at a 40% gross margin. A one-hour deployment holds `$0.816667`, including the ten-minute
+cleanup allowance. The hold is not the final charge. Settlement is capped by the hold, and unused
+credit returns to the available wallet after provider deletion succeeds.
+
+Supplier cost, margin, procurement source, provider credentials, and internal resource identifiers
+remain server-side. The customer quote returns only retail price, hold, runtime, public placement,
+and validity evidence.
+
+## Atomicity and recovery
+
+Wallet reservation, deployment intent, and lifecycle operation are one database transaction.
+Idempotency keys cannot create duplicate holds. Deletion settlement and wallet release are also one
+transaction and are safe to retry.
+
+The background expiry worker finds:
+
+- activated reservations past their time limit; and
+- terminal failed or cancelled launches that never activated and have no live replica.
+
+It queues the ordinary durable delete workflow rather than mutating wallet state directly. Provider
+uncertainty remains visible and credit stays reserved until cleanup is proven.
+
+## Operator enablement
+
+Managed deployments are off by default even when a RunPod key exists. Enable them only after wallet
+funding, current GPU pricing, provider deletion, and the complete browser journey have been
+qualified:
+
+```sh
+INFERCRANE_MANAGED_DEPLOYMENTS_ENABLED=true
+RUNPOD_API_KEY_FILE=/run/secrets/runpod-api-key
+```
+
+The entrypoint reads the owner-restricted file and exports the key only inside the control-plane
+process. Stripe test mode should remain enabled until checkout, signed webhook replay, wallet
+credit, deployment hold, settlement, and refund behavior pass together.
+
+Fly.io hosts the CPU control plane and stable public gateway. It does not supply GPUs. Customer
+wallet credit pays for managed GPU exposure; BYOC provider charges never pass through InferCrane.
+
+## MVP limits
+
+This is not an unlimited production cluster contract. The initial self-serve product supports one
+GPU, one replica, elastic serving, and a maximum 24-hour window. Longer-running or multi-GPU
+deployments remain BYOC or sales-assisted until reconciliation, capacity commitments, support SLOs,
+and margin evidence are qualified.

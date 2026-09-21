@@ -14,10 +14,12 @@ match an exact runtime/hardware capability, and collect the required evidence.
 Unsupported architecture features produce a conservative baseline and an
 explicit missing-capability result—not a guessed recipe.
 
-The initial custom-kernel compiler set is NVIDIA-only. The planner boundary is
-extensible to ROCm, TPU, and other accelerators, but those backends must acquire
-their own exact capability and qualification evidence before they can emit
-experiments.
+The planner and evidence protocol cover NVIDIA, AMD ROCm, Google TPU, and AWS
+Neuron. That is not a blanket hardware-support claim. At startup a configured
+Accelerator Lab worker must declare its installed profiler, runtime, topology,
+modality, and generated-kernel capabilities. InferCrane accepts a run only when
+that live catalog covers the exact request, and a result becomes qualified only
+after the same worker returns evidence for the exact immutable tuple.
 
 ```text
 pinned model + workload/SLO + data boundary + target environment
@@ -206,6 +208,40 @@ kernel language:
 Vendor kernels remain candidates. The custom path is successful when it finds
 the fastest qualified solution, including the result “FlashInfer/CUTLASS won.”
 
+### Autonomous kernel research incorporated
+
+The implementation follows the common result from current kernel-agent work:
+generation is a search primitive, not an evidence authority.
+
+- [KernelBench](https://arxiv.org/abs/2502.10517) supplies the functional
+  correctness plus target-device speed evaluation shape. InferCrane also uses
+  the project's stricter [evaluation guidance](https://github.com/ScalingIntelligence/KernelBench/blob/main/EVAL.md):
+  hidden/adversarial shapes, suspicious-speedup review, and independent
+  verification.
+- [KernelBench-Verified](https://arxiv.org/abs/2607.16241) and
+  [RealisticTritonBench](https://arxiv.org/abs/2608.12004) reinforce why
+  realistic operators, stronger tests, and contamination-resistant evaluation
+  matter more than a single public-shape score.
+- [CUDA Agent](https://arxiv.org/abs/2602.24286),
+  [KernelPro](https://arxiv.org/abs/2606.26453), and
+  [CudaForge](https://arxiv.org/abs/2511.01884) motivate iterative
+  profile/generate/compile/measure loops. InferCrane adopts the loop but places
+  generation behind Amdahl materiality, a hard spend/expiry lease, an isolated
+  Brezel build, exact-target sanitizers, and full serving replay.
+- [AIConfigurator](https://arxiv.org/abs/2601.06288) informs the broader
+  configuration search. Its proposals remain candidates until InferCrane's
+  model/runtime/hardware/workload evidence gates pass.
+- [NVIDIA SOL-ExecBench](https://github.com/NVIDIA/SOL-ExecBench) is a useful
+  independent execution benchmark for generated GPU programs; it complements,
+  rather than replaces, workload-specific end-to-end qualification.
+
+`internal/acceleratorlab` now exposes an opt-in generator contract. A generated
+source bundle must echo the input digest, candidate identity, and exact profile
+artifact digest; include immutable revision, license, content hashes, and
+sizes; build through the fixed Brezel runner; and then pass the same target
+qualification gates as reviewed code. The system never promotes it
+automatically.
+
 ## Technique evidence map
 
 The search space is grounded in primary work and maintained implementations:
@@ -233,6 +269,82 @@ The search space is grounded in primary work and maintained implementations:
 Published speedups are hypotheses for candidate generation, never InferCrane
 product claims. Every product claim is bound to InferCrane's exact immutable
 tuple and retained raw evidence.
+
+## Implementation coverage
+
+The [Wafer GPU performance engineering resource map](https://github.com/wafer-ai/gpu-perf-engineering-resources)
+is a useful field checklist, not a feature checklist InferCrane can honestly mark
+complete. The current implementation boundary is:
+
+| Area | Current status | Product boundary |
+|---|---|---|
+| Workload identity, replay, SLO/goodput, cost caps, immutable evidence and guarded promotion | Implemented | Control-plane workflow and qualification policy |
+| vLLM and SGLang recipe candidates, cache/precision/scheduler/topology fields | Implemented for bounded candidates | Every exact tuple still needs compatibility and measured qualification |
+| AIPerf load generation and persisted benchmark evidence | Implemented | Requires an installed runner and a reachable exact serving tuple |
+| Profiler-hotspot and Amdahl kernel opportunity planning | Implemented and locally qualified | Accelerator worker `POST /v1/profiles` captures vendor-native evidence; a real worker/toolchain is required for measured claims |
+| Existing-first kernel search across runtime, FlashInfer, CUTLASS/CuTe, Triton and CUDA sources | Implemented as reviewed registry policy | Matches are unmeasured source candidates, never automatic performance claims |
+| Triton and handwritten CUDA correctness/microbenchmark PoCs | Implemented as operator experiments | Manual GPU qualification tools; not yet an automatic campaign executor |
+| Profiler → generated/reviewed source → Brezel build → target qualification | Implemented and locally qualified | Durable operation, progressive cost, immutable artifacts, worker-declared capabilities, and no implicit promotion; deployed runner/worker still require real-infrastructure qualification |
+| Brezel-isolated optimization build jobs and receipts | Implemented and locally qualified | Fixed baked runner, deny-by-default egress, verified input/output artifacts, cleanup and signed receipt; the optimization environment revision must actually contain that runner |
+| TensorRT-LLM, multi-node collectives, expert placement and disaggregated MoE qualification | Executable worker contract | NVIDIA workers may declare these independently; undeclared topology fails before spend, and no real tuple is claimed without evidence |
+| Nsight Systems/Compute, rocprof, XProf and Neuron Explorer capture | Executable worker contract | Capabilities are loaded from the configured worker at startup; built-in schemas are never presented as deployed capacity |
+| AI-generated kernels and KernelBench-style evaluation | Implemented orchestration and gates | Profile-bound generation, isolated build, hidden shapes, sanitizers, exact-target and serving replay; generator and hardware-worker implementations need deployment qualification |
+| AMD ROCm, TPU and Trainium compiler/runtime paths | Planner, registry and worker contracts implemented | AITER/CK/Triton-ROCm/HIP, Pallas/XLA, and NKI/Neuron candidates exist; no real-hardware product claim until the corresponding worker passes |
+| Image, video and voice optimization lanes | Typed workload and qualification contracts implemented | Each run requires media shapes, immutable replay, modality quality suite and a worker-declared lane; measured suites remain tuple-specific real-infrastructure work |
+
+For the MVP, the defensible product is the locally qualified control plane plus
+the real tuples whose worker evidence has passed. An installed adapter or a
+compiled contract is never rendered as a speed, capacity, hardware, or modality
+claim.
+
+## Accelerator Lab product wiring
+
+The authenticated surface is:
+
+- `GET /api/v1/optimization/accelerator-lab/capabilities` — shows the live
+  worker catalog and whether execution is configured;
+- `POST /api/v1/optimization/accelerator-lab/runs` — validates the tenant,
+  immutable request, 24-hour authority ceiling, cost cap, and live worker
+  capability before enqueueing a durable operation;
+- `POST /v1/profiles`, `POST /v1/kernel-generations`, and
+  `POST /v1/qualifications` — server-to-worker calls, never browser calls; and
+- `/v1/artifacts/...` — same-origin, content-addressed exchange between the
+  trusted worker and a deny-by-default Brezel builder.
+
+Enablement requires all three server-only values in addition to the normal
+Brezel sandbox configuration:
+
+```text
+INFERCRANE_ACCELERATOR_WORKER_URL=https://...
+INFERCRANE_ACCELERATOR_WORKER_TOKEN_FILE=/run/secrets/accelerator-worker-token
+INFERCRANE_BREZEL_OPTIMIZATION_ENVIRONMENT=envr_<immutable revision>
+```
+
+Startup fails if the token path is not absolute, the URL is not HTTPS (except
+loopback), the environment is not immutable, or the worker capability catalog
+cannot be loaded. The token must be an owner-only regular file.
+
+## FastPath PoC migration
+
+`infercrane-fastpath-poc` remains a research repository; it is not copied into
+the control-plane binary or imported at runtime. Its production-worthy
+concepts have been absorbed as typed Go policy:
+
+| FastPath concept | InferCrane production location |
+|---|---|
+| Release/evidence manifest import without trust upgrade | `internal/optimizationevidence/fastpath.go` |
+| Hotspot normalization, Amdahl stop gate and existing-first kernel plan | `internal/kernelplanner` |
+| Budget, durable campaign stages, ranking and explicit promotion | `internal/optimizationcampaign` and `internal/acceleratorlab` |
+| Nsight/profile request and exact target evidence boundary | `internal/acceleratorlab` worker client |
+| Isolated source build and lifecycle receipt | `internal/brezelexecutor` |
+| vLLM/AIPerf/quality evidence and Release Guard | existing benchmark, quality-evidence and release-guard packages |
+
+The old Python `CandidateGenerator` was only an interface and the PoC registry
+kept generator adapters blocked until targeted NCU evidence existed. InferCrane
+now has the full typed generation-to-evaluation orchestration, but the actual
+generator model/service and vendor workers must still declare and prove their
+installed capabilities. This is deliberate separation, not duplicate product
+logic.
 
 ## Kernel registry and search order
 

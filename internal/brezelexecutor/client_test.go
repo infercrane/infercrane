@@ -21,6 +21,10 @@ import (
 func TestRunUsesFixedRunnerValidatesResultAndCleansSandbox(t *testing.T) {
 	var calls []string
 	var manifest []byte
+	inputBytes := []byte("pinned-source")
+	artifactBytes := []byte("compiled-artifact")
+	artifactDigest := sha256.Sum256(artifactBytes)
+	published := false
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if request.Header.Get("Authorization") != "Bearer protected-token" || request.Header.Get("X-Project-ID") != "infercrane" {
 			t.Fatalf("missing Brezel authentication headers")
@@ -39,6 +43,10 @@ func TestRunUsesFixedRunnerValidatesResultAndCleansSandbox(t *testing.T) {
 			response.WriteHeader(http.StatusAccepted)
 			_, _ = io.WriteString(response, `{"resource":{"id":"sbx_1","state":"running"}}`)
 		case "GET /v1/sandboxes/sbx_1/files":
+			if request.URL.Query().Get("path") == outputArtifactDir+"/kernel.so" {
+				_, _ = response.Write(artifactBytes)
+				return
+			}
 			if request.URL.Query().Get("path") == resultPath && manifest == nil {
 				response.WriteHeader(http.StatusNotFound)
 				return
@@ -46,13 +54,20 @@ func TestRunUsesFixedRunnerValidatesResultAndCleansSandbox(t *testing.T) {
 			var job Job
 			_ = json.Unmarshal(manifest, &job)
 			digest := sha256.Sum256(manifest)
-			result := Result{SchemaVersion: ResultSchemaVersion, JobID: job.ID, InputDigest: hex.EncodeToString(digest[:]), Status: "passed", Artifacts: []OutputArtifact{{Kind: "shared-library", SHA256: strings.Repeat("a", 64), Size: 42}}}
+			result := Result{SchemaVersion: ResultSchemaVersion, JobID: job.ID, InputDigest: hex.EncodeToString(digest[:]), Status: "passed", Artifacts: []OutputArtifact{{Kind: "shared-library", Path: outputArtifactDir + "/kernel.so", SHA256: hex.EncodeToString(artifactDigest[:]), Size: int64(len(artifactBytes))}}}
 			_ = json.NewEncoder(response).Encode(result)
 		case "PUT /v1/sandboxes/sbx_1/files":
-			if request.URL.Query().Get("path") != manifestPath {
-				t.Fatalf("unexpected manifest path %q", request.URL.Query().Get("path"))
+			switch request.URL.Query().Get("path") {
+			case inputArtifactDir + "/source":
+				data, _ := io.ReadAll(request.Body)
+				if string(data) != string(inputBytes) {
+					t.Fatalf("input=%q", data)
+				}
+			case manifestPath:
+				manifest, _ = io.ReadAll(request.Body)
+			default:
+				t.Fatalf("unexpected upload path %q", request.URL.Query().Get("path"))
 			}
-			manifest, _ = io.ReadAll(request.Body)
 			_, _ = io.WriteString(response, `{}`)
 		case "POST /v1/sandboxes/sbx_1/commands":
 			var body struct {
@@ -81,7 +96,15 @@ func TestRunUsesFixedRunnerValidatesResultAndCleansSandbox(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := New(Config{BaseURL: server.URL, Token: "protected-token", ProjectID: "infercrane", EnvironmentRevision: "envr_runner_v1", SandboxTTL: 10 * time.Minute})
+	resolver := inputResolverFunc(func(_ context.Context, _ ArtifactRef) (io.ReadCloser, error) {
+		return io.NopCloser(strings.NewReader(string(inputBytes))), nil
+	})
+	publisher := artifactPublisherFunc(func(_ context.Context, jobID, kind string, reader io.Reader, size int64) (string, error) {
+		data, _ := io.ReadAll(reader)
+		published = jobID == "job_1" && kind == "shared-library" && size == int64(len(artifactBytes)) && string(data) == string(artifactBytes)
+		return "s3://infercrane-artifacts/kernel.so", nil
+	})
+	client, err := New(Config{BaseURL: server.URL, Token: "protected-token", ProjectID: "infercrane", EnvironmentRevision: "envr_runner_v1", SandboxTTL: 10 * time.Minute, InputResolver: resolver, ArtifactPublisher: publisher})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,10 +112,10 @@ func TestRunUsesFixedRunnerValidatesResultAndCleansSandbox(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.SandboxID != "sbx_1" || result.ExecutionID != "exec_1" || len(result.Receipt) == 0 {
+	if result.SandboxID != "sbx_1" || result.ExecutionID != "exec_1" || len(result.Receipt) == 0 || !published || result.Artifacts[0].URI != "s3://infercrane-artifacts/kernel.so" {
 		t.Fatalf("unexpected result: %#v", result)
 	}
-	wantCalls := []string{"POST /v1/sandboxes", "GET /v1/sandboxes/sbx_1/files", "PUT /v1/sandboxes/sbx_1/files", "POST /v1/sandboxes/sbx_1/commands", "GET /v1/sandboxes/sbx_1/files", "DELETE /v1/sandboxes/sbx_1", "GET /v1/sandboxes/sbx_1/receipt"}
+	wantCalls := []string{"POST /v1/sandboxes", "GET /v1/sandboxes/sbx_1/files", "PUT /v1/sandboxes/sbx_1/files", "PUT /v1/sandboxes/sbx_1/files", "POST /v1/sandboxes/sbx_1/commands", "GET /v1/sandboxes/sbx_1/files", "GET /v1/sandboxes/sbx_1/files", "DELETE /v1/sandboxes/sbx_1", "GET /v1/sandboxes/sbx_1/receipt"}
 	if !reflect.DeepEqual(calls, wantCalls) {
 		t.Fatalf("calls=%v, want %v", calls, wantCalls)
 	}
@@ -123,7 +146,9 @@ func TestRunCleansSandboxWhenCommandIsIndeterminate(t *testing.T) {
 	}))
 	defer server.Close()
 	client, _ := New(Config{BaseURL: server.URL, Token: "protected-token", ProjectID: "infercrane", EnvironmentRevision: "envr_runner_v1"})
-	_, err := client.Run(context.Background(), validJob())
+	job := validJob()
+	job.Inputs = nil
+	_, err := client.Run(context.Background(), job)
 	if !errorsIs(err, ErrCommandIndeterminate) || !deleted {
 		t.Fatalf("err=%v deleted=%v", err, deleted)
 	}
@@ -164,12 +189,25 @@ func TestNewFromTokenFileRequiresOwnerOnlyRegularFile(t *testing.T) {
 }
 
 func validJob() Job {
+	sourceDigest := sha256.Sum256([]byte("pinned-source"))
 	return Job{
 		ID: "job_1", CampaignID: "campaign_1", CandidateID: "candidate_1", Kind: KindArtifactBuild,
 		Model: "Qwen/Qwen3-8B", ModelRevision: "0123456789abcdef", TargetSM: "sm_90",
 		Candidate: Candidate{ImplementationID: "flashinfer-fa3", OperatorFamily: "attention", Backend: "cuda", SourceRevision: "abcdef0123456789", License: "Apache-2.0"},
-		Inputs:    []ArtifactRef{{Name: "source", URI: "https://artifacts.example.invalid/source.tar.zst", SHA256: strings.Repeat("b", 64)}}, TimeoutSecs: 600,
+		Inputs:    []ArtifactRef{{Name: "source", URI: "https://artifacts.example.invalid/source.tar.zst", SHA256: hex.EncodeToString(sourceDigest[:])}}, TimeoutSecs: 600,
 	}
+}
+
+type inputResolverFunc func(context.Context, ArtifactRef) (io.ReadCloser, error)
+
+func (function inputResolverFunc) Open(ctx context.Context, reference ArtifactRef) (io.ReadCloser, error) {
+	return function(ctx, reference)
+}
+
+type artifactPublisherFunc func(context.Context, string, string, io.Reader, int64) (string, error)
+
+func (function artifactPublisherFunc) Publish(ctx context.Context, jobID, kind string, reader io.Reader, size int64) (string, error) {
+	return function(ctx, jobID, kind, reader, size)
 }
 
 func errorsIs(err, target error) bool {

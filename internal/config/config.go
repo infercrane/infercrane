@@ -29,9 +29,11 @@ type Config struct {
 	ModelAPICatalogFile, ModelAPIOperatorTenantID                                                                         string
 	HostedModelAPIEndpoints                                                                                               map[string]string
 	BrezelSandboxURL, BrezelSandboxTokenFile, BrezelSandboxProjectID, BrezelSandboxTenantID, BrezelSandboxDefaultTemplate string
+	AcceleratorWorkerURL, AcceleratorWorkerTokenFile, BrezelOptimizationEnvironment                                       string
 	BrezelSandboxTemplates, BrezelSandboxModelConnectors                                                                  map[string]string
 	StripePriceIDs                                                                                                        map[int64]string
 	StripeLivemode                                                                                                        bool
+	ManagedDeploymentsEnabled                                                                                             bool
 	RunPodAPIKey, RunPodServerlessTemplateID, RunPodRESTURL, RunPodArtifactCachePolicy, RunPodHFTokenSecret               string
 	SkyPilotAPI                                                                                                           string
 	SkyPilotProviders                                                                                                     []SkyPilotProvider
@@ -375,6 +377,10 @@ func load(requireAPIKey bool) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	managedDeploymentsEnabled, err := envBool("INFERCRANE_MANAGED_DEPLOYMENTS_ENABLED", false)
+	if err != nil {
+		return Config{}, err
+	}
 	hostedAuthAutoProvision, err := envBool("INFERCRANE_HOSTED_AUTH_AUTO_PROVISION", false)
 	if err != nil {
 		return Config{}, err
@@ -405,6 +411,7 @@ func load(requireAPIKey bool) (Config, error) {
 		StripeBillingReturnURL:              env("INFERCRANE_BILLING_RETURN_URL", ""),
 		StripePriceIDs:                      stripePriceIDs,
 		StripeLivemode:                      stripeLivemode,
+		ManagedDeploymentsEnabled:           managedDeploymentsEnabled,
 		ModelAPICatalogFile:                 env("INFERCRANE_MODEL_API_CATALOG_FILE", ""),
 		ModelAPIOperatorTenantID:            env("INFERCRANE_MODEL_API_OPERATOR_TENANT_ID", ""),
 		HostedModelAPIEndpoints:             hostedModelAPIEndpoints,
@@ -415,6 +422,9 @@ func load(requireAPIKey bool) (Config, error) {
 		BrezelSandboxDefaultTemplate:        env("INFERCRANE_BREZEL_SANDBOX_DEFAULT_TEMPLATE", ""),
 		BrezelSandboxTemplates:              brezelSandboxTemplates,
 		BrezelSandboxModelConnectors:        brezelSandboxModelConnectors,
+		AcceleratorWorkerURL:                env("INFERCRANE_ACCELERATOR_WORKER_URL", ""),
+		AcceleratorWorkerTokenFile:          env("INFERCRANE_ACCELERATOR_WORKER_TOKEN_FILE", ""),
+		BrezelOptimizationEnvironment:       env("INFERCRANE_BREZEL_OPTIMIZATION_ENVIRONMENT", ""),
 		RunPodAPIKey:                        env("RUNPOD_API_KEY", ""),
 		RunPodServerlessTemplateID:          env("INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID", ""),
 		RunPodRESTURL:                       env("INFERCRANE_RUNPOD_REST_URL", "https://rest.runpod.io/v1"),
@@ -502,6 +512,9 @@ func load(requireAPIKey bool) (Config, error) {
 	if config.Environment != "development" && config.Environment != "test" && config.Environment != "production" {
 		return Config{}, fmt.Errorf("INFERCRANE_ENV must be development, test, or production")
 	}
+	if config.ManagedDeploymentsEnabled && config.RunPodAPIKey == "" {
+		return Config{}, fmt.Errorf("INFERCRANE_MANAGED_DEPLOYMENTS_ENABLED requires RUNPOD_API_KEY")
+	}
 	if config.Environment == "production" {
 		if requireAPIKey && len(config.APIKey) < 32 {
 			return Config{}, fmt.Errorf("INFERCRANE_API_KEY must be at least 32 characters in production")
@@ -528,6 +541,9 @@ func load(requireAPIKey bool) (Config, error) {
 		return Config{}, errors.New("INFERCRANE_MODEL_API_OPERATOR_TENANT_ID is required when hosted Model API endpoints are configured")
 	}
 	if err := validateBrezelSandbox(config); err != nil {
+		return Config{}, err
+	}
+	if err := validateAcceleratorLab(config); err != nil {
 		return Config{}, err
 	}
 	if config.RunPodContainerDiskGiB < 50 || config.RunPodContainerDiskGiB > 2048 {
@@ -567,6 +583,36 @@ func (c Config) BrezelSandboxEnabled() bool {
 	return c.BrezelSandboxURL != "" && c.BrezelSandboxTokenFile != "" && c.BrezelSandboxProjectID != "" && c.BrezelSandboxTenantID != "" && len(c.BrezelSandboxTemplates) > 0
 }
 
+// AcceleratorLabEnabled means the control plane has both halves of the
+// execution boundary: a target-accelerator worker and an isolated Brezel build
+// environment. It does not claim that any particular accelerator currently
+// has capacity; exact-target workers make that decision for every run.
+func (c Config) AcceleratorLabEnabled() bool {
+	return c.BrezelSandboxEnabled() && c.AcceleratorWorkerURL != "" && c.AcceleratorWorkerTokenFile != "" && c.BrezelOptimizationEnvironment != ""
+}
+
+func validateAcceleratorLab(config Config) error {
+	configured := config.AcceleratorWorkerURL != "" || config.AcceleratorWorkerTokenFile != "" || config.BrezelOptimizationEnvironment != ""
+	if !configured {
+		return nil
+	}
+	if !config.AcceleratorLabEnabled() {
+		return errors.New("Accelerator Lab configuration is partial; the complete Brezel sandbox configuration, accelerator worker URL, worker token file, and immutable optimization environment are required")
+	}
+	parsed, err := url.Parse(config.AcceleratorWorkerURL)
+	loopback := parsed != nil && (strings.EqualFold(parsed.Hostname(), "localhost") || net.ParseIP(parsed.Hostname()) != nil && net.ParseIP(parsed.Hostname()).IsLoopback())
+	if err != nil || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Scheme != "https" && !(parsed.Scheme == "http" && loopback) {
+		return errors.New("INFERCRANE_ACCELERATOR_WORKER_URL must use HTTPS except for an absolute loopback HTTP origin")
+	}
+	if !filepath.IsAbs(config.AcceleratorWorkerTokenFile) {
+		return errors.New("INFERCRANE_ACCELERATOR_WORKER_TOKEN_FILE must be an absolute path")
+	}
+	if !validBrezelEnvironmentRevision(config.BrezelOptimizationEnvironment) {
+		return errors.New("INFERCRANE_BREZEL_OPTIMIZATION_ENVIRONMENT must be an immutable envr_ revision")
+	}
+	return nil
+}
+
 func validateBrezelSandbox(config Config) error {
 	configured := config.BrezelSandboxURL != "" || config.BrezelSandboxTokenFile != "" || config.BrezelSandboxProjectID != "" || config.BrezelSandboxTenantID != "" || config.BrezelSandboxDefaultTemplate != "" || len(config.BrezelSandboxTemplates) > 0 || len(config.BrezelSandboxModelConnectors) > 0
 	if !configured {
@@ -604,6 +650,18 @@ func validBrezelConnectorRevision(value string) bool {
 		return false
 	}
 	for _, character := range value[6:] {
+		if character < '0' || character > '9' && character < 'a' || character > 'f' {
+			return false
+		}
+	}
+	return true
+}
+
+func validBrezelEnvironmentRevision(value string) bool {
+	if len(value) != 29 || !strings.HasPrefix(value, "envr_") {
+		return false
+	}
+	for _, character := range value[5:] {
 		if character < '0' || character > '9' && character < 'a' || character > 'f' {
 			return false
 		}

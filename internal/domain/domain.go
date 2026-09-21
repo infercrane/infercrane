@@ -11,6 +11,7 @@ import (
 
 var ErrNotFound = errors.New("not found")
 var ErrConflict = errors.New("conflict")
+var ErrInsufficientCredits = errors.New("insufficient prepaid credits")
 
 type Target struct {
 	ID, Name, URL, Provider, Runtime, Health           string
@@ -1023,8 +1024,8 @@ type ExternalBudgetLease struct {
 	MaxRequestCostMicrousd int64  `json:"max_request_cost_microusd"`
 }
 
-// ManagedWallet is the prepaid customer balance used only by managed Model
-// API bindings. BYOC and adopted endpoints never consume this wallet.
+// ManagedWallet is the prepaid customer balance used by InferCrane-operated
+// services. BYOC and adopted endpoints never consume this wallet.
 type ManagedWallet struct {
 	TenantID          string    `json:"tenant_id"`
 	Currency          string    `json:"currency"`
@@ -1033,6 +1034,33 @@ type ManagedWallet struct {
 	DebtMicrousd      int64     `json:"debt_microusd"`
 	AvailableMicrousd int64     `json:"available_microusd"`
 	UpdatedAt         time.Time `json:"updated_at"`
+}
+
+// ManagedSpendReservation is the durable authorization boundary for a
+// billable, asynchronous InferCrane operation. The hold is not a charge. It is
+// released or settled only after the corresponding provider lifecycle reaches
+// a durable terminal state.
+type ManagedSpendReservation struct {
+	ID                      string     `json:"id"`
+	TenantID                string     `json:"tenant_id"`
+	ResourceType            string     `json:"resource_type"`
+	ResourceName            string     `json:"resource_name"`
+	Provider                string     `json:"provider"`
+	State                   string     `json:"state"`
+	Currency                string     `json:"currency"`
+	SupplierHourlyMicrousd  int64      `json:"supplier_hourly_microusd"`
+	RetailHourlyMicrousd    int64      `json:"retail_hourly_microusd"`
+	ReservedMicrousd        int64      `json:"reserved_microusd"`
+	ActualMicrousd          int64      `json:"actual_microusd"`
+	GrossMarginBPS          int        `json:"gross_margin_bps"`
+	RuntimeLimitSeconds     int        `json:"runtime_limit_seconds"`
+	CleanupAllowanceSeconds int        `json:"cleanup_allowance_seconds"`
+	PricingJSON             string     `json:"-"`
+	Resolution              string     `json:"resolution"`
+	ExpiresAt               time.Time  `json:"expires_at"`
+	ActivatedAt             *time.Time `json:"activated_at,omitempty"`
+	CreatedAt               time.Time  `json:"created_at"`
+	UpdatedAt               time.Time  `json:"updated_at"`
 }
 
 type ManagedUsageAuthorization struct {
@@ -1064,14 +1092,15 @@ type ManagedUsageReservation struct {
 }
 
 type ManagedWalletLedgerEntry struct {
-	ID             string    `json:"id"`
-	TenantID       string    `json:"tenant_id"`
-	ReservationID  string    `json:"reservation_id,omitempty"`
-	Kind           string    `json:"kind"`
-	Currency       string    `json:"currency"`
-	Description    string    `json:"description"`
-	AmountMicrousd int64     `json:"amount_microusd"`
-	CreatedAt      time.Time `json:"created_at"`
+	ID                 string    `json:"id"`
+	TenantID           string    `json:"tenant_id"`
+	ReservationID      string    `json:"reservation_id,omitempty"`
+	SpendReservationID string    `json:"spend_reservation_id,omitempty"`
+	Kind               string    `json:"kind"`
+	Currency           string    `json:"currency"`
+	Description        string    `json:"description"`
+	AmountMicrousd     int64     `json:"amount_microusd"`
+	CreatedAt          time.Time `json:"created_at"`
 }
 
 // ManagedCheckoutSession is a short-lived redirect to a hosted payment page.

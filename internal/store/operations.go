@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/managedbilling"
 )
 
 func (s *Store) RecordBenchmark(ctx context.Context, result domain.BenchmarkResult) (domain.BenchmarkResult, error) {
@@ -359,17 +360,66 @@ func (s *Store) DeleteDeploymentForTenant(ctx context.Context, tenant, name stri
 	if desired == "deleted" && observed == "deleted" {
 		return tx.Commit()
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE deployments SET desired_state='deleted',observed_state='deleted',updated_at=? WHERE id=?`, now(), id); err != nil {
+	stamp := now()
+	if _, err := tx.ExecContext(ctx, `UPDATE deployments SET desired_state='deleted',observed_state='deleted',updated_at=? WHERE id=?`, stamp, id); err != nil {
 		return err
 	}
 	eventID, err := newID()
 	if err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO deployment_events(id,deployment_id,event_type,summary,payload_json,created_at) VALUES(?,?,?,?,?::jsonb,?)`, eventID, id, "deployment_deleted", "Deployment "+name+" deleted", "{}", now()); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO deployment_events(id,deployment_id,event_type,summary,payload_json,created_at) VALUES(?,?,?,?,?::jsonb,?)`, eventID, id, "deployment_deleted", "Deployment "+name+" deleted", "{}", stamp); err != nil {
+		return err
+	}
+	if err := finalizeManagedDeploymentSpendTx(ctx, tx, tenant, name, stamp); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+func finalizeManagedDeploymentSpendTx(ctx context.Context, tx *tx, tenant, name, stamp string) error {
+	reservation, err := managedSpendReservationByResourceTx(ctx, tx, tenant, "deployment", name, true)
+	if errors.Is(err, ErrNotFound) || err == nil && reservation.State != "reserved" && reservation.State != "pending_reconciliation" {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	actual := int64(0)
+	resolution := "provider resources deleted before serving; prepaid hold released"
+	state := "released"
+	if reservation.ActivatedAt != nil {
+		elapsed := parseTime(stamp).Sub(*reservation.ActivatedAt)
+		maximum := time.Duration(reservation.RuntimeLimitSeconds+reservation.CleanupAllowanceSeconds) * time.Second
+		if elapsed > maximum {
+			elapsed = maximum
+		}
+		if elapsed < 0 {
+			elapsed = 0
+		}
+		actual, err = managedbilling.DurationCostMicrousd(reservation.RetailHourlyMicrousd, elapsed)
+		if err != nil {
+			return err
+		}
+		if actual > reservation.ReservedMicrousd {
+			actual = reservation.ReservedMicrousd
+		}
+		state = "settled"
+		resolution = "metered managed runtime; unused prepaid hold released after provider deletion"
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE managed_wallets SET balance_microusd=balance_microusd-?,reserved_microusd=reserved_microusd-?,updated_at=? WHERE tenant_id=?`, actual, reservation.ReservedMicrousd, stamp, tenant); err != nil {
+		return err
+	}
+	if actual > 0 {
+		ledgerID := "settlement_" + reservation.ID
+		if _, err = tx.ExecContext(ctx, `INSERT INTO managed_wallet_ledger(id,tenant_id,spend_reservation_id,kind,currency,amount_microusd,description,created_at) VALUES(?,?,?,'settlement','USD',?,?,?) ON CONFLICT(tenant_id,spend_reservation_id,kind) DO NOTHING`, ledgerID, tenant, reservation.ID, -actual, resolution, stamp); err != nil {
+			return err
+		}
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE managed_spend_reservations SET actual_microusd=?,state=?,resolution=?,updated_at=? WHERE id=? AND tenant_id=?`, actual, state, resolution, stamp, reservation.ID, tenant); err != nil {
+		return err
+	}
+	return reconcileManagedDebtTx(ctx, tx, tenant, stamp)
 }
 func (s *Store) SetTargetHealth(ctx context.Context, id, health string) error {
 	_, err := s.ExecContext(ctx, `UPDATE targets SET health=?,updated_at=? WHERE id=?`, health, now(), id)

@@ -146,15 +146,47 @@ type template struct {
 	compilers []string
 }
 
-var templates = map[OperatorFamily]template{
-	ResidualRMSNorm:  {"fused-residual-rmsnorm", []string{"triton", "cuda-cute"}},
-	QuantizedLinear:  {"fused-dequant-matmul", []string{"cutlass", "cuda-cute", "triton"}},
-	SwiGLU:           {"fused-swiglu", []string{"triton", "cuda-cute"}},
-	AttentionPrefill: {"flash-attention-prefill", []string{"flashinfer", "triton", "cuda-cute"}},
-	AttentionDecode:  {"paged-gqa-decode", []string{"flashinfer", "triton", "cuda-cute"}},
-	KVCache:          {"fused-kv-append-quantize", []string{"flashinfer", "triton"}},
-	MoERouting:       {"fused-router-topk", []string{"flashinfer", "cutlass", "triton"}},
-	Sampling:         {"sorting-free-sampling", []string{"flashinfer", "triton"}},
+var templates = map[string]map[OperatorFamily]template{
+	"nvidia": {
+		ResidualRMSNorm:  {"fused-residual-rmsnorm", []string{"triton", "cuda-cute"}},
+		QuantizedLinear:  {"fused-dequant-matmul", []string{"cutlass", "cuda-cute", "triton"}},
+		SwiGLU:           {"fused-swiglu", []string{"triton", "cuda-cute"}},
+		AttentionPrefill: {"flash-attention-prefill", []string{"flashinfer", "triton", "cuda-cute"}},
+		AttentionDecode:  {"paged-gqa-decode", []string{"flashinfer", "triton", "cuda-cute"}},
+		KVCache:          {"fused-kv-append-quantize", []string{"flashinfer", "triton"}},
+		MoERouting:       {"fused-router-topk", []string{"flashinfer", "cutlass", "triton"}},
+		Sampling:         {"sorting-free-sampling", []string{"flashinfer", "triton"}},
+	},
+	"amd": {
+		ResidualRMSNorm:  {"fused-residual-rmsnorm", []string{"aiter", "composable-kernel", "triton-rocm", "hip"}},
+		QuantizedLinear:  {"fused-dequant-matmul", []string{"aiter", "composable-kernel", "triton-rocm", "hip"}},
+		SwiGLU:           {"fused-swiglu", []string{"aiter", "triton-rocm", "hip"}},
+		AttentionPrefill: {"flash-attention-prefill", []string{"aiter", "composable-kernel", "triton-rocm"}},
+		AttentionDecode:  {"paged-gqa-decode", []string{"aiter", "composable-kernel", "triton-rocm"}},
+		KVCache:          {"fused-kv-append-quantize", []string{"aiter", "triton-rocm"}},
+		MoERouting:       {"fused-router-topk", []string{"aiter", "composable-kernel", "triton-rocm"}},
+		Sampling:         {"sorting-free-sampling", []string{"triton-rocm", "hip"}},
+	},
+	"google": {
+		ResidualRMSNorm:  {"fused-residual-rmsnorm", []string{"pallas", "xla-custom-call"}},
+		QuantizedLinear:  {"fused-dequant-matmul", []string{"pallas", "xla-custom-call"}},
+		SwiGLU:           {"fused-swiglu", []string{"pallas", "xla-custom-call"}},
+		AttentionPrefill: {"flash-attention-prefill", []string{"pallas", "xla-custom-call"}},
+		AttentionDecode:  {"paged-gqa-decode", []string{"pallas", "xla-custom-call"}},
+		KVCache:          {"fused-kv-append-quantize", []string{"pallas", "xla-custom-call"}},
+		MoERouting:       {"fused-router-topk", []string{"pallas", "xla-custom-call"}},
+		Sampling:         {"sorting-free-sampling", []string{"pallas", "xla-custom-call"}},
+	},
+	"aws": {
+		ResidualRMSNorm:  {"fused-residual-rmsnorm", []string{"nki", "neuron-compiler"}},
+		QuantizedLinear:  {"fused-dequant-matmul", []string{"nki", "neuron-compiler"}},
+		SwiGLU:           {"fused-swiglu", []string{"nki", "neuron-compiler"}},
+		AttentionPrefill: {"flash-attention-prefill", []string{"nki", "neuron-compiler"}},
+		AttentionDecode:  {"paged-gqa-decode", []string{"nki", "neuron-compiler"}},
+		KVCache:          {"fused-kv-append-quantize", []string{"nki", "neuron-compiler"}},
+		MoERouting:       {"fused-router-topk", []string{"nki", "neuron-compiler"}},
+		Sampling:         {"sorting-free-sampling", []string{"nki", "neuron-compiler"}},
+	},
 }
 
 // Build creates experiments, not deployable kernels or performance claims.
@@ -178,8 +210,9 @@ func Build(request Request) (Plan, error) {
 		SelectionBoundary: "local checks establish semantic parity and memory safety only; target-GPU microbenchmarks plus end-to-end AIPerf, quality, SLO, cost, and Release Guard evidence are required before promotion",
 	}
 	for _, hotspot := range request.Profile.Hotspots {
-		tmpl, supported := templates[hotspot.Family]
-		if !supported {
+		vendorTemplates, vendorSupported := templates[request.Hardware.Vendor]
+		tmpl, supported := vendorTemplates[hotspot.Family]
+		if !vendorSupported || !supported {
 			plan.Rejected = append(plan.Rejected, Rejection{HotspotID: hotspot.ID, Reason: "operator family has no reviewed kernel template"})
 			continue
 		}
@@ -292,8 +325,8 @@ func validate(request Request) error {
 	if request.Hardware.Vendor == "" || request.Hardware.Accelerator == "" {
 		return errors.New("exact hardware vendor and accelerator are required")
 	}
-	if request.Hardware.Vendor != "nvidia" {
-		return errors.New("the initial kernel planner has reviewed compiler backends only for NVIDIA hardware")
+	if _, ok := templates[request.Hardware.Vendor]; !ok {
+		return errors.New("hardware vendor must be nvidia, amd, google, or aws")
 	}
 	if request.Workload.Phase != PhasePrefill && request.Workload.Phase != PhaseDecode && request.Workload.Phase != PhaseMixed {
 		return errors.New("workload phase must be prefill, decode, or mixed")

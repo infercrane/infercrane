@@ -53,6 +53,24 @@ func TestExecutionHandlerRunsProofLoopAndNeverPromotes(t *testing.T) {
 	}
 }
 
+func TestExecutionCheckpointNamesLongRunningWorkAndCustomKernelBuilds(t *testing.T) {
+	regular := checkpointForCandidate(domain.OptimizationCandidateRun{State: CandidateMeasuring}, 0, 2)
+	if regular.Name != "benchmark-measure" || regular.Progress != 58 || !strings.Contains(regular.Message, "candidate 1 of 2") {
+		t.Fatalf("unexpected measurement checkpoint: %+v", regular)
+	}
+	kernel := checkpointForCandidate(domain.OptimizationCandidateRun{
+		State:                 CandidateProvisioning,
+		PredictedEvidenceJSON: `{"technique":"custom_kernel"}`,
+	}, 1, 2)
+	if kernel.Name != "candidate-build" || kernel.Progress != 30 || !strings.Contains(kernel.Message, "custom kernel") || !strings.Contains(kernel.Message, "candidate 2 of 2") {
+		t.Fatalf("custom kernel work was not identified: %+v", kernel)
+	}
+	waiting := checkpointForCandidate(domain.OptimizationCandidateRun{State: CandidateQualified}, 0, 1)
+	if waiting.Name != "awaiting-activation" || waiting.Status != "waiting" || waiting.Progress != 95 {
+		t.Fatalf("human boundary checkpoint=%+v", waiting)
+	}
+}
+
 func TestNewEndpointExecutionStopsQualifiedWithoutFakeReleaseGuard(t *testing.T) {
 	now := time.Now().UTC()
 	repository, driver, coordinator := approvedCoordinatorFixture(now, 2)

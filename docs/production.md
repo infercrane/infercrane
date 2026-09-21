@@ -55,6 +55,12 @@ fly deploy -a YOUR_APP_NAME -c deploy/fly/control-plane.toml
 fly checks list -a YOUR_APP_NAME
 ```
 
+To enable the first self-serve InferCrane Cloud lane on Fly after its real-provider qualification,
+add `RUNPOD_API_KEY` and `INFERCRANE_MANAGED_DEPLOYMENTS_ENABLED=true` as Fly secrets. The RunPod
+key is the platform's supply credential, not a tenant BYOC credential. Leave the flag absent or
+false until current price ingestion, Stripe funding, auto-stop, provider deletion, and settlement
+are all operational.
+
 The Fly Machine hostname is the default replica identity. Do not set `INFERCRANE_INSTANCE_ID` to
 one shared value: two live replicas with the same identity would violate lease ownership and route
 generation isolation. Set the variable only when the host supplies a different stable, unique
@@ -139,6 +145,14 @@ The overlay mounts the RunPod key read-only and persists only the provider clien
 The entrypoint configures the RunPod client without printing the key. Native RunPod Pods remain
 available while `INFERCRANE_SKYPILOT_API=disabled`; SkyPilot starts only for an explicit provider
 manifest in an operator-owned overlay.
+
+InferCrane-paid GPU deployments remain disabled unless
+`INFERCRANE_MANAGED_DEPLOYMENTS_ENABLED=true` is set explicitly in that private environment file.
+When enabled, RunPod becomes internal InferCrane Cloud supply: the API requires a current exact
+price, atomically holds sufficient prepaid wallet credit before queueing provider work, limits the
+first self-serve product to one elastic GPU for 1–24 hours, and deletes resources before settling
+actual runtime and releasing unused credit. BYOC requests cannot use this platform-owned provider
+connection. See [Managed deployments](/architecture/managed-deployments).
 
 AWS and Kubernetes follow the same explicit composition pattern:
 

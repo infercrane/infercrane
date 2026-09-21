@@ -102,6 +102,37 @@ func DefaultRegistry() Registry {
 			ID: "cuda-cute-template", Name: "Handwritten CUDA/CuTe template", Project: "InferCrane", SourceURL: "https://github.com/infercrane/infercrane/tree/main/tools/kernel-lab", License: "Apache-2.0", Kind: "custom-template", Backend: "cuda-cute", OperatorFamilies: allFamilies, HardwareVendors: []string{"nvidia"}, MinimumComputeCapability: "sm70", Phases: []Phase{PhasePrefill, PhaseDecode, PhaseMixed}, Priority: 60, Status: "generate-last", RevisionPolicy: "pin source, compiler, flags, generated artifact, driver, and target architecture", ExecutionBoundary: "brezel-build-and-target-gpu-worker",
 			Notes: []string{"Enter only after an Amdahl gate and after existing runtime, vendor, and open-source candidates have been measured."},
 		},
+		{
+			ID: "runtime-vllm-rocm", Name: "Pinned vLLM ROCm implementation", Project: "vLLM", SourceURL: "https://github.com/vllm-project/vllm", License: "Apache-2.0", Kind: "runtime-bundled", Backend: "vllm", OperatorFamilies: allFamilies, RuntimeAllowlist: []string{"vllm"}, HardwareVendors: []string{"amd"}, Priority: 10, Status: "baseline", RevisionPolicy: "use the implementation bundled in the pinned ROCm runtime image", ExecutionBoundary: "trusted-runtime-image",
+			Notes: []string{"Measure this implementation as the control on the exact gfx target before adapting a kernel."},
+		},
+		{
+			ID: "aiter", Name: "AITER operator library", Project: "AMD AITER", SourceURL: "https://github.com/ROCm/aiter", License: "MIT", Kind: "specialized-library", Backend: "aiter", OperatorFamilies: allFamilies, HardwareVendors: []string{"amd"}, DTypes: []string{"fp32", "fp16", "bf16", "fp8", "int8", "int4"}, Phases: []Phase{PhasePrefill, PhaseDecode, PhaseMixed}, Priority: 20, Status: "review-required", RevisionPolicy: "pin AITER commit, ROCm version, gfx target, package digest, and generated artifact", ExecutionBoundary: "brezel-build-and-target-accelerator-worker",
+		},
+		{
+			ID: "composable-kernel", Name: "Composable Kernel template", Project: "AMD Composable Kernel", SourceURL: "https://github.com/ROCm/composable_kernel", License: "MIT", Kind: "vendor-library", Backend: "composable-kernel", OperatorFamilies: []OperatorFamily{QuantizedLinear, AttentionPrefill, AttentionDecode, MoERouting}, HardwareVendors: []string{"amd"}, DTypes: []string{"fp32", "fp16", "bf16", "fp8", "int8", "int4"}, Phases: []Phase{PhasePrefill, PhaseDecode, PhaseMixed}, Priority: 30, Status: "review-required", RevisionPolicy: "pin source commit, compiler, flags, generated artifact, ROCm, and gfx target", ExecutionBoundary: "brezel-build-and-target-accelerator-worker",
+		},
+		{
+			ID: "triton-rocm", Name: "Triton ROCm implementation search", Project: "Triton", SourceURL: "https://github.com/triton-lang/triton", License: "MIT", Kind: "kernel-dsl", Backend: "triton-rocm", OperatorFamilies: allFamilies, HardwareVendors: []string{"amd"}, DTypes: []string{"fp32", "fp16", "bf16", "fp8", "int8", "int4"}, Phases: []Phase{PhasePrefill, PhaseDecode, PhaseMixed}, Priority: 40, Status: "adapt-or-generate", RevisionPolicy: "pin compiler, source, generated artifact, ROCm, and gfx target", ExecutionBoundary: "brezel-build-and-target-accelerator-worker",
+		},
+		{
+			ID: "hip-template", Name: "Handwritten HIP template", Project: "InferCrane", SourceURL: "https://github.com/infercrane/infercrane/tree/main/tools/kernel-lab", License: "Apache-2.0", Kind: "custom-template", Backend: "hip", OperatorFamilies: allFamilies, HardwareVendors: []string{"amd"}, Phases: []Phase{PhasePrefill, PhaseDecode, PhaseMixed}, Priority: 60, Status: "generate-last", RevisionPolicy: "pin source, hipcc, flags, generated artifact, ROCm, and gfx target", ExecutionBoundary: "brezel-build-and-target-accelerator-worker",
+		},
+		{
+			ID: "runtime-vllm-tpu", Name: "Pinned vLLM TPU implementation", Project: "vLLM", SourceURL: "https://github.com/vllm-project/vllm", License: "Apache-2.0", Kind: "runtime-bundled", Backend: "vllm", OperatorFamilies: allFamilies, RuntimeAllowlist: []string{"vllm"}, HardwareVendors: []string{"google"}, Priority: 10, Status: "baseline", RevisionPolicy: "use the implementation bundled in the pinned TPU runtime image", ExecutionBoundary: "trusted-runtime-image",
+		},
+		{
+			ID: "jax-pallas", Name: "JAX Pallas kernel", Project: "JAX", SourceURL: "https://github.com/jax-ml/jax", License: "Apache-2.0", Kind: "kernel-dsl", Backend: "pallas", OperatorFamilies: allFamilies, HardwareVendors: []string{"google"}, DTypes: []string{"fp32", "fp16", "bf16", "int8"}, Phases: []Phase{PhasePrefill, PhaseDecode, PhaseMixed}, Priority: 30, Status: "adapt-or-generate", RevisionPolicy: "pin JAX, Pallas source, libtpu, compiler flags, artifact, and TPU topology", ExecutionBoundary: "brezel-build-and-target-accelerator-worker",
+		},
+		{
+			ID: "xla-custom-call", Name: "XLA custom call", Project: "OpenXLA", SourceURL: "https://github.com/openxla/xla", License: "Apache-2.0", Kind: "compiler-extension", Backend: "xla-custom-call", OperatorFamilies: allFamilies, HardwareVendors: []string{"google"}, Phases: []Phase{PhasePrefill, PhaseDecode, PhaseMixed}, Priority: 50, Status: "generate-last", RevisionPolicy: "pin XLA commit, StableHLO, compiler flags, artifact, libtpu, and TPU topology", ExecutionBoundary: "brezel-build-and-target-accelerator-worker",
+		},
+		{
+			ID: "runtime-vllm-neuron", Name: "Pinned vLLM Neuron implementation", Project: "vLLM", SourceURL: "https://github.com/vllm-project/vllm", License: "Apache-2.0", Kind: "runtime-bundled", Backend: "vllm", OperatorFamilies: allFamilies, RuntimeAllowlist: []string{"vllm"}, HardwareVendors: []string{"aws"}, Priority: 10, Status: "baseline", RevisionPolicy: "use the implementation bundled in the pinned Neuron runtime image", ExecutionBoundary: "trusted-runtime-image",
+		},
+		{
+			ID: "neuron-nki", Name: "Neuron Kernel Interface implementation", Project: "AWS Neuron", SourceURL: "https://github.com/aws-neuron/nki-samples", License: "Apache-2.0", Kind: "kernel-dsl", Backend: "nki", OperatorFamilies: allFamilies, HardwareVendors: []string{"aws"}, DTypes: []string{"fp32", "fp16", "bf16", "fp8", "int8"}, Phases: []Phase{PhasePrefill, PhaseDecode, PhaseMixed}, Priority: 30, Status: "adapt-or-generate", RevisionPolicy: "pin Neuron SDK, NKI source, compiler flags, NEFF artifact, and NeuronCore topology", ExecutionBoundary: "brezel-build-and-target-accelerator-worker",
+		},
 	}}
 }
 

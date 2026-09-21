@@ -40,6 +40,8 @@ type CloudRequest struct {
 	Cloud                  string                   `json:"cloud"`
 	ProviderAdapter        string                   `json:"provider_adapter,omitempty"`
 	ComputeMode            string                   `json:"compute_mode,omitempty"`
+	BillingMode            string                   `json:"billing_mode,omitempty"`
+	ManagedRuntimeSeconds  int                      `json:"managed_runtime_seconds,omitempty"`
 	GPU                    string                   `json:"gpu"`
 	GPUCount               int                      `json:"gpu_count,omitempty"`
 	Region                 string                   `json:"region,omitempty"`
@@ -108,6 +110,25 @@ func (r *CloudRequest) Validate() error {
 	}
 	if r.ComputeMode != "elastic" && r.ComputeMode != "serverless" {
 		return errors.New("compute mode must be elastic or serverless")
+	}
+	if r.BillingMode == "" {
+		r.BillingMode = "provider_account"
+	}
+	if r.BillingMode != "provider_account" && r.BillingMode != "customer_wallet" {
+		return errors.New("billing mode must be provider_account or customer_wallet")
+	}
+	if r.BillingMode == "customer_wallet" {
+		if r.Cloud != "runpod" || r.ComputeMode != "elastic" || r.GPUCount != 1 {
+			return errors.New("InferCrane Cloud currently requires one elastic RunPod GPU")
+		}
+		if r.ManagedRuntimeSeconds < 900 || r.ManagedRuntimeSeconds > 86_400 || r.ManagedRuntimeSeconds%60 != 0 {
+			return errors.New("InferCrane Cloud runtime must be whole minutes between 15 minutes and 24 hours")
+		}
+		if r.MinReplicas > 1 || r.MaxReplicas > 1 {
+			return errors.New("InferCrane Cloud MVP supports one replica")
+		}
+	} else if r.ManagedRuntimeSeconds != 0 {
+		return errors.New("managed runtime is valid only for InferCrane Cloud billing")
 	}
 	if r.MinReplicas < 0 || r.MaxReplicas < 0 || (r.MaxReplicas > 0 && r.MaxReplicas < r.MinReplicas) {
 		return errors.New("replica bounds must satisfy 0 <= min <= max")

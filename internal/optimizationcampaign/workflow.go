@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
@@ -42,6 +43,15 @@ type ActivationStore interface {
 	Repository
 	EnqueueOperation(context.Context, domain.Operation) (domain.Operation, bool, error)
 	PublishDeploymentEndpoint(context.Context, string, string, string) (domain.ResolvedEndpoint, error)
+}
+
+type operationCheckpointer interface {
+	CheckpointClaimedOperation(context.Context, string, string, int64, string, string, string, int, string) error
+}
+
+type executionCheckpoint struct {
+	Name, Status, Message string
+	Progress              int
 }
 
 // ActivationHandlers owns the explicit human boundary after qualification.
@@ -180,8 +190,11 @@ func Handlers(coordinator Coordinator) map[string]operations.Handler {
 			// Phase one advances every candidate only to the measured ranking
 			// barrier. This prevents the first proposal from winning before its
 			// peers have produced comparable evidence.
-			for _, candidateID := range request.Candidates {
+			for candidateIndex, candidateID := range request.Candidates {
 				for boundary := 0; boundary < 8; boundary++ {
+					if err := checkpointCandidate(ctx, coordinator, operation, request, candidateID, candidateIndex); err != nil {
+						return "", operations.Retryable("optimization_checkpoint_failed", err)
+					}
 					result, err := coordinator.Step(ctx, request.TenantID, request.CampaignID, candidateID)
 					if err != nil {
 						return "", executionFailure(err)
@@ -199,8 +212,11 @@ func Handlers(coordinator Coordinator) map[string]operations.Handler {
 			}
 			// Phase two ranks the complete measured set, rejects non-selected
 			// candidates, and evaluates Release Guard only for the winner.
-			for _, candidateID := range request.Candidates {
+			for candidateIndex, candidateID := range request.Candidates {
 				for boundary := 0; boundary < 3; boundary++ {
+					if err := checkpointCandidate(ctx, coordinator, operation, request, candidateID, candidateIndex); err != nil {
+						return "", operations.Retryable("optimization_checkpoint_failed", err)
+					}
 					result, err := coordinator.Step(ctx, request.TenantID, request.CampaignID, candidateID)
 					if err != nil {
 						return "", executionFailure(err)
@@ -215,6 +231,16 @@ func Handlers(coordinator Coordinator) map[string]operations.Handler {
 					if boundary == 2 {
 						return "", operations.Permanent("optimization_state_loop", errors.New("candidate exceeded the bounded ranking, guard, and cleanup transition count"))
 					}
+				}
+			}
+			if len(waiting) > 0 {
+				if err := checkpointOperation(ctx, coordinator.Repository, operation, executionCheckpoint{
+					Name:     "awaiting-activation",
+					Status:   "waiting",
+					Progress: 95,
+					Message:  "Evidence passed. Waiting for an operator to publish the measured winner.",
+				}, map[string]any{"campaign_id": request.CampaignID, "candidate_ids": waiting}); err != nil {
+					return "", operations.Retryable("optimization_checkpoint_failed", err)
 				}
 			}
 			encoded, _ := json.Marshal(map[string]any{
@@ -241,8 +267,16 @@ func cleanupHandler(coordinator Coordinator) operations.Handler {
 		if err := request.Validate(); err != nil {
 			return "", operations.Permanent("invalid_request", err)
 		}
-		for _, candidateID := range request.Candidates {
+		for candidateIndex, candidateID := range request.Candidates {
 			for boundary := 0; boundary < 2; boundary++ {
+				if err := checkpointOperation(ctx, coordinator.Repository, operation, executionCheckpoint{
+					Name:     "cleanup",
+					Status:   "running",
+					Progress: 96,
+					Message:  fmt.Sprintf("Cleaning candidate %d of %d.", candidateIndex+1, len(request.Candidates)),
+				}, map[string]any{"campaign_id": request.CampaignID, "candidate_id": candidateID}); err != nil {
+					return "", operations.Retryable("optimization_checkpoint_failed", err)
+				}
 				result, err := coordinator.CancelCandidate(ctx, request.TenantID, request.CampaignID, candidateID)
 				if err != nil {
 					return "", executionFailure(err)
@@ -255,6 +289,87 @@ func cleanupHandler(coordinator Coordinator) operations.Handler {
 		encoded, _ := json.Marshal(map[string]any{"campaign_id": request.CampaignID, "cleanup": "completed", "promotion": "not_performed"})
 		return string(encoded), nil
 	}
+}
+
+func checkpointCandidate(ctx context.Context, coordinator Coordinator, operation domain.Operation, request ExecuteRequest, candidateID string, candidateIndex int) error {
+	campaign, err := coordinator.Repository.OptimizationCampaign(ctx, request.TenantID, request.CampaignID)
+	if err != nil {
+		return err
+	}
+	candidate, found := candidateByID(campaign.Candidates, candidateID)
+	if !found {
+		return domain.ErrNotFound
+	}
+	checkpoint := checkpointForCandidate(candidate, candidateIndex, len(request.Candidates))
+	return checkpointOperation(ctx, coordinator.Repository, operation, checkpoint, map[string]any{
+		"campaign_id":  request.CampaignID,
+		"candidate_id": candidateID,
+		"candidate":    candidateIndex + 1,
+		"candidates":   len(request.Candidates),
+		"state":        candidate.State,
+	})
+}
+
+func checkpointOperation(ctx context.Context, repository Repository, operation domain.Operation, checkpoint executionCheckpoint, payload map[string]any) error {
+	checkpointer, ok := repository.(operationCheckpointer)
+	if !ok || operation.ID == "" || operation.LeaseOwner == "" || operation.LeaseGeneration < 1 {
+		return nil
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	return checkpointer.CheckpointClaimedOperation(ctx, operation.ID, operation.LeaseOwner, operation.LeaseGeneration, checkpoint.Name, checkpoint.Status, string(encoded), checkpoint.Progress, checkpoint.Message)
+}
+
+func checkpointForCandidate(candidate domain.OptimizationCandidateRun, index, total int) executionCheckpoint {
+	position := fmt.Sprintf("candidate %d of %d", index+1, total)
+	switch candidate.State {
+	case CandidateProposed:
+		return executionCheckpoint{Name: "candidate-search", Status: "running", Progress: 15, Message: "Preparing " + position + "."}
+	case CandidateProvisioning:
+		return executionCheckpoint{Name: "candidate-build", Status: "running", Progress: 30, Message: buildCheckpointMessage(candidate, position)}
+	case CandidateReady:
+		return executionCheckpoint{Name: "benchmark-prepare", Status: "running", Progress: 45, Message: "Preparing the exact workload for " + position + "."}
+	case CandidateMeasuring:
+		return executionCheckpoint{Name: "benchmark-measure", Status: "running", Progress: 58, Message: "Measuring latency, throughput, errors, and cost for " + position + "."}
+	case CandidateValidating:
+		return executionCheckpoint{Name: "quality-gate", Status: "running", Progress: 72, Message: "Checking output quality and workload SLOs for " + position + "."}
+	case CandidateRanked:
+		return executionCheckpoint{Name: "measured-ranking", Status: "running", Progress: 84, Message: "Comparing measured candidates on the same workload."}
+	case CandidateGuarding:
+		return executionCheckpoint{Name: "release-guard", Status: "running", Progress: 91, Message: "Checking the measured winner against the active deployment."}
+	case CandidateQualified, CandidateGuardPassed:
+		return executionCheckpoint{Name: "awaiting-activation", Status: "waiting", Progress: 95, Message: "Evidence passed. Waiting for an operator to publish the measured winner."}
+	case CandidateRejected, CandidateInconclusive, CandidateFailed, CandidateCancelled:
+		return executionCheckpoint{Name: "cleanup", Status: "running", Progress: 96, Message: "Cleaning rejected resources for " + position + "."}
+	case CandidateCleaned:
+		return executionCheckpoint{Name: "cleanup", Status: "succeeded", Progress: 98, Message: "Rejected resources were cleaned."}
+	case CandidatePromoted, CandidateObserved:
+		return executionCheckpoint{Name: "deployed", Status: "succeeded", Progress: 99, Message: "The measured winner is serving behind the stable endpoint."}
+	default:
+		return executionCheckpoint{Name: "campaign", Status: "running", Progress: 10, Message: "Processing " + position + "."}
+	}
+}
+
+func buildCheckpointMessage(candidate domain.OptimizationCandidateRun, position string) string {
+	var predicted map[string]any
+	_ = json.Unmarshal([]byte(candidate.PredictedEvidenceJSON), &predicted)
+	kind := ""
+	for _, key := range []string{"technique", "candidate_kind", "optimization_type"} {
+		if value, ok := predicted[key].(string); ok {
+			kind = value
+			break
+		}
+	}
+	kind = strings.ToLower(strings.ReplaceAll(strings.TrimSpace(kind), "-", "_"))
+	if kind == "custom_kernel" || kind == "kernel" || strings.Contains(kind, "kernel") {
+		return "Building and checking a custom kernel for " + position + "."
+	}
+	if candidate.OptimizedArtifactID != "" || strings.Contains(kind, "quant") || strings.Contains(kind, "artifact") {
+		return "Building an immutable optimized artifact for " + position + "."
+	}
+	return "Provisioning the serving recipe for " + position + "."
 }
 
 func executionFailure(err error) error {

@@ -29,6 +29,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/infercrane/infercrane/internal/acceleratorlab"
 	"github.com/infercrane/infercrane/internal/accounting"
 	"github.com/infercrane/infercrane/internal/admission"
 	"github.com/infercrane/infercrane/internal/alert"
@@ -38,6 +39,7 @@ import (
 	"github.com/infercrane/infercrane/internal/authn"
 	"github.com/infercrane/infercrane/internal/autoscale"
 	"github.com/infercrane/infercrane/internal/benchmark"
+	"github.com/infercrane/infercrane/internal/brezelexecutor"
 	"github.com/infercrane/infercrane/internal/brezelsandbox"
 	"github.com/infercrane/infercrane/internal/config"
 	"github.com/infercrane/infercrane/internal/contextpassport"
@@ -4079,6 +4081,41 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		}
 		nativeSandboxProvider = provider
 	}
+	var acceleratorEngine *acceleratorlab.Engine
+	var acceleratorCatalog acceleratorlab.CapabilityCatalog
+	if cfg.AcceleratorLabEnabled() {
+		worker, workerErr := acceleratorlab.NewWorkerClientFromTokenFile(acceleratorlab.WorkerConfig{
+			BaseURL: cfg.AcceleratorWorkerURL,
+			Client:  client,
+		}, cfg.AcceleratorWorkerTokenFile)
+		if workerErr != nil {
+			return fmt.Errorf("configure Accelerator Lab target worker: %w", workerErr)
+		}
+		buildRunner, runnerErr := brezelexecutor.NewFromTokenFile(brezelexecutor.Config{
+			BaseURL:             cfg.BrezelSandboxURL,
+			ProjectID:           cfg.BrezelSandboxProjectID,
+			EnvironmentRevision: cfg.BrezelOptimizationEnvironment,
+			Client:              client,
+			InputResolver:       worker,
+			ArtifactPublisher:   worker,
+		}, cfg.BrezelSandboxTokenFile)
+		if runnerErr != nil {
+			return fmt.Errorf("configure Accelerator Lab Brezel builder: %w", runnerErr)
+		}
+		capabilityCtx, cancelCapabilities := context.WithTimeout(ctx, 15*time.Second)
+		acceleratorCatalog, workerErr = worker.Capabilities(capabilityCtx)
+		cancelCapabilities()
+		if workerErr != nil {
+			return fmt.Errorf("load Accelerator Lab worker capabilities: %w", workerErr)
+		}
+		acceleratorEngine = &acceleratorlab.Engine{
+			Profiler:     worker,
+			Generator:    worker,
+			Builder:      acceleratorlab.BrezelBuilder{Runner: buildRunner, BuilderVersion: "infercrane-optimization-runner/" + version, EnvironmentRevision: cfg.BrezelOptimizationEnvironment},
+			Qualifier:    worker,
+			Capabilities: acceleratorCatalog,
+		}
+	}
 	credentialCache := &authn.Cache{Source: s, Interval: time.Second}
 	if err := credentialCache.Refresh(ctx); err != nil {
 		return fmt.Errorf("load credential snapshot: %w", err)
@@ -4366,7 +4403,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 			Circuit:     modelapirouting.NewCircuitBreaker(3, 30*time.Second),
 		}
 	}
-	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, DiscoveryClient: nil, Secrets: secrets.Environment{}, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool, OptimizationCosts: optimizationCosts, ModelAPICatalog: modelAPICatalog, ModelAPIProducts: s, SandboxProvider: nativeSandboxProvider, SandboxProjectID: cfg.BrezelSandboxProjectID, SandboxPreviews: controlapi.NewSandboxPreviewBroker(), SandboxDefaultTemplate: cfg.BrezelSandboxDefaultTemplate, SandboxModelConnectors: cfg.BrezelSandboxModelConnectors, ModelAPIOperatorTenantID: cfg.ModelAPIOperatorTenantID, ComputeProviders: computeProviders, GPUPriceCatalog: priceCatalog, LaunchProbers: launchProbers, DefaultProviderAdapters: defaultProviderAdapters}
+	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, DiscoveryClient: nil, Secrets: secrets.Environment{}, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool, OptimizationCosts: optimizationCosts, AcceleratorLabEnabled: acceleratorEngine != nil, AcceleratorLabCatalog: acceleratorCatalog, ModelAPICatalog: modelAPICatalog, ModelAPIProducts: s, SandboxProvider: nativeSandboxProvider, SandboxProjectID: cfg.BrezelSandboxProjectID, SandboxPreviews: controlapi.NewSandboxPreviewBroker(), SandboxDefaultTemplate: cfg.BrezelSandboxDefaultTemplate, SandboxModelConnectors: cfg.BrezelSandboxModelConnectors, ModelAPIOperatorTenantID: cfg.ModelAPIOperatorTenantID, ComputeProviders: computeProviders, GPUPriceCatalog: priceCatalog, LaunchProbers: launchProbers, DefaultProviderAdapters: defaultProviderAdapters, ManagedDeployments: managedbilling.DeploymentPolicy{Enabled: cfg.ManagedDeploymentsEnabled, Provider: "runpod"}}
 	if cfg.StripeEnabled() {
 		stripeBilling, stripeErr := managedbilling.NewStripe(cfg.StripeSecretKey, cfg.StripeWebhookSecret, cfg.StripeBillingReturnURL, cfg.StripePriceIDs, cfg.StripeLivemode)
 		if stripeErr != nil {
@@ -4382,6 +4419,11 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	}
 	operationTelemetry := &operations.Telemetry{}
 	handlers := workflows.DeploymentHandlers(s)
+	if acceleratorEngine != nil {
+		for kind, handler := range acceleratorlab.Handlers(*acceleratorEngine, s) {
+			handlers[kind] = handler
+		}
+	}
 	for kind, handler := range workflows.RolloutHandlers(s) {
 		handlers[kind] = handler
 	}
@@ -4519,6 +4561,9 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 			logger.Error("operation worker stopped", "error", err)
 		}
 	}()
+	if controlAPI.ManagedDeployments.Enabled {
+		go runManagedDeploymentExpiry(ctx, s, time.Minute, logger)
+	}
 	if asyncService != nil {
 		go func() {
 			if err := asyncService.Run(ctx); err != nil && ctx.Err() == nil {
@@ -4737,6 +4782,55 @@ func runAutoscaler(ctx context.Context, controller autoscale.Controller, interva
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+		}
+	}
+}
+
+func runManagedDeploymentExpiry(ctx context.Context, s *store.Store, interval time.Duration, logger *slog.Logger) {
+	if interval <= 0 {
+		interval = time.Minute
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		failed, failedErr := s.FailedUnactivatedManagedDeployments(ctx, 100)
+		if failedErr != nil {
+			if ctx.Err() == nil {
+				logger.Error("failed managed deployment cleanup lookup failed", "error", failedErr)
+			}
+		} else {
+			queueManagedDeploymentCleanup(ctx, s, failed, "managed-failed:", logger)
+		}
+		rows, err := s.ExpiredManagedDeployments(ctx, time.Now().UTC(), 100)
+		if err != nil {
+			if ctx.Err() == nil {
+				logger.Error("managed deployment expiry lookup failed", "error", err)
+			}
+		} else {
+			queueManagedDeploymentCleanup(ctx, s, rows, "managed-expiry:", logger)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func queueManagedDeploymentCleanup(ctx context.Context, s *store.Store, rows []domain.ManagedSpendReservation, keyPrefix string, logger *slog.Logger) {
+	for _, reservation := range rows {
+		resolved, resolveErr := s.ResolveForTenant(ctx, reservation.TenantID, reservation.ResourceName)
+		if resolveErr != nil {
+			logger.Error("managed deployment cleanup could not resolve deployment", "deployment", reservation.ResourceName, "error", resolveErr)
+			continue
+		}
+		request, _ := json.Marshal(workflows.DeleteRequest{DeploymentID: resolved.Deployment.ID, Name: reservation.ResourceName, Actor: "managed-budget-guard", TenantID: reservation.TenantID})
+		kind := workflows.DeleteKind
+		if resolved.Deployment.ComputeMode == "serverless" {
+			kind = workflows.ServerlessDeleteKind
+		}
+		if _, _, submitErr := s.SubmitDeploymentDelete(ctx, reservation.TenantID, reservation.ResourceName, resolved.Deployment.ID, domain.Operation{TenantID: reservation.TenantID, Kind: kind, IdempotencyKey: keyPrefix + reservation.ID, RequestJSON: string(request)}); submitErr != nil && !errors.Is(submitErr, domain.ErrConflict) {
+			logger.Error("managed deployment cleanup could not be queued", "deployment", reservation.ResourceName, "error", submitErr)
 		}
 	}
 }
