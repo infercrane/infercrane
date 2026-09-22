@@ -72,7 +72,7 @@ func TestZAIBuildRequestPinsPayAsYouGoWireContractForEveryModel(t *testing.T) {
 				t.Fatal(err)
 			}
 			thinking, _ := payload["thinking"].(map[string]any)
-			if payload["model"] != model || payload["max_tokens"] != float64(4096) || payload["stream"] != true || thinking["type"] != "enabled" {
+			if payload["model"] != model || payload["max_tokens"] != float64(4096) || payload["stream"] != true || payload["request_id"] != "request-1" || thinking["type"] != "enabled" {
 				t.Fatalf("wire contract=%s", body)
 			}
 			if _, exists := payload["stream_options"]; exists {
@@ -150,7 +150,7 @@ func TestZAIDecodeResponseNormalizesSupplierIdentityUsageCacheAndFinishReason(t 
 		Header:     testHeaders(map[string]string{"Content-Type": "application/json; charset=utf-8"}),
 		Request:    zaiUpstreamRequest(t, ZAIGLM53ModelID, false),
 		Body: io.NopCloser(strings.NewReader(`{
-			"id":"chatcmpl-1","request_id":"zai-request-7","model":"glm-5.3",
+			"id":"chatcmpl-1","request_id":"request-1","model":"glm-5.3",
 			"choices":[{"index":0,"message":{"role":"assistant","content":"hello","reasoning_content":"private"},"finish_reason":"model_context_window_exceeded"}],
 			"usage":{"prompt_tokens":19,"completion_tokens":5,"prompt_tokens_details":{"cached_tokens":11}}
 		}`)),
@@ -159,7 +159,7 @@ func TestZAIDecodeResponseNormalizesSupplierIdentityUsageCacheAndFinishReason(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decoded.ID != "chatcmpl-1" || decoded.ModelID != ZAIGLM53ModelID || decoded.SupplierRequestID != "zai-request-7" || len(decoded.Choices) != 1 || decoded.Choices[0].Message.Content[0].Text != "hello" || decoded.Choices[0].FinishReason != "length" {
+	if decoded.ID != "chatcmpl-1" || decoded.ModelID != ZAIGLM53ModelID || decoded.SupplierRequestID != "request-1" || len(decoded.Choices) != 1 || decoded.Choices[0].Message.Content[0].Text != "hello" || decoded.Choices[0].FinishReason != "length" {
 		t.Fatalf("decoded response=%+v", decoded)
 	}
 	if decoded.Usage.State != UsageComplete || *decoded.Usage.InputTokens != 19 || *decoded.Usage.OutputTokens != 5 || *decoded.Usage.CachedInput != 11 {
@@ -189,10 +189,19 @@ func TestZAIDecodeResponseRequiresExactModelCompleteUsageAndRequestIdentity(t *t
 		StatusCode: http.StatusOK,
 		Header:     testHeaders(map[string]string{"Content-Type": "application/json", "X-Request-ID": "header-id"}),
 		Request:    zaiUpstreamRequest(t, ZAIGLM53ModelID, false),
-		Body:       io.NopCloser(strings.NewReader(`{"id":"one","request_id":"body-id","model":"glm-5.3","choices":[{"index":0,"message":{"role":"assistant","content":"x"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`)),
+		Body:       io.NopCloser(strings.NewReader(`{"id":"one","request_id":"request-1","model":"glm-5.3","choices":[{"index":0,"message":{"role":"assistant","content":"x"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`)),
+	}
+	if _, err := NewZAIAdapter(nil).DecodeResponse(context.Background(), response); err != nil {
+		t.Fatalf("an undocumented response header overrode the documented body identity: %v", err)
+	}
+	response = &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     testHeaders(map[string]string{"Content-Type": "application/json"}),
+		Request:    zaiUpstreamRequest(t, ZAIGLM53ModelID, false),
+		Body:       io.NopCloser(strings.NewReader(`{"id":"one","request_id":"other-request","model":"glm-5.3","choices":[{"index":0,"message":{"role":"assistant","content":"x"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`)),
 	}
 	if _, err := NewZAIAdapter(nil).DecodeResponse(context.Background(), response); err == nil {
-		t.Fatal("conflicting supplier request identities were accepted")
+		t.Fatal("a response for a different submitted request identity was accepted")
 	}
 }
 
@@ -216,8 +225,8 @@ func TestZAIHTTPErrorIsSanitizedAmbiguousAndNeverRetryable(t *testing.T) {
 }
 
 func TestZAIStreamNormalizesTerminalUsageAndCRLF(t *testing.T) {
-	body := "data: {\"id\":\"stream-response\",\"request_id\":\"zai-stream-1\",\"model\":\"glm-5.3-flash\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hel\",\"reasoning_content\":\"hidden\"},\"finish_reason\":null}]}\r\n\r\n" +
-		"data: {\"id\":\"stream-response\",\"request_id\":\"zai-stream-1\",\"model\":\"glm-5.3-flash\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":8,\"completion_tokens\":2,\"prompt_tokens_details\":{\"cached_tokens\":3}}}\r\n\r\n" +
+	body := "data: {\"id\":\"stream-response\",\"request_id\":\"request-1\",\"model\":\"glm-5.3-flash\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hel\",\"reasoning_content\":\"hidden\"},\"finish_reason\":null}]}\r\n\r\n" +
+		"data: {\"id\":\"stream-response\",\"request_id\":\"request-1\",\"model\":\"glm-5.3-flash\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":8,\"completion_tokens\":2,\"prompt_tokens_details\":{\"cached_tokens\":3}}}\r\n\r\n" +
 		"data: [DONE]\r\n\r\n"
 	stream, err := NewZAIAdapter(nil).OpenStream(context.Background(), &http.Response{
 		StatusCode: http.StatusOK,
@@ -230,7 +239,7 @@ func TestZAIStreamNormalizesTerminalUsageAndCRLF(t *testing.T) {
 	}
 	defer stream.Close()
 	first, err := stream.Next(context.Background())
-	if err != nil || first.Type != StreamEventContent || first.TextDelta != "hel" || first.SupplierRequestID != "zai-stream-1" {
+	if err != nil || first.Type != StreamEventContent || first.TextDelta != "hel" || first.SupplierRequestID != "request-1" {
 		t.Fatalf("first=%+v err=%v", first, err)
 	}
 	terminal, err := stream.Next(context.Background())
@@ -290,7 +299,7 @@ func TestZAIProbeProvesExactModelWithMinimalNonStreamingCompletion(t *testing.T)
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK, Header: testHeaders(map[string]string{"Content-Type": "application/json"}), Request: request,
-			Body: io.NopCloser(strings.NewReader(`{"id":"probe-1","request_id":"supplier-probe-1","model":"glm-5.2","choices":[{"index":0,"message":{"role":"assistant","content":"."},"finish_reason":"length"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"prompt_tokens_details":{"cached_tokens":0}}}`)),
+			Body: io.NopCloser(strings.NewReader(`{"id":"probe-1","request_id":"zai-qualification-probe","model":"glm-5.2","choices":[{"index":0,"message":{"role":"assistant","content":"."},"finish_reason":"length"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"prompt_tokens_details":{"cached_tokens":0}}}`)),
 		}, nil
 	})}
 	adapter := NewZAIAdapter(client)
