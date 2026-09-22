@@ -400,6 +400,17 @@ func matchZAIRequestID(expectedID, bodyID string) (string, error) {
 	return bodyID, nil
 }
 
+// Z.ai's documented streaming chunks do not include request_id. The HTTP
+// response is already bound to the submitted request by its request context,
+// so preserve that identity when the field is absent and reject it when a
+// supplier does provide a contradictory value.
+func matchOptionalZAIRequestID(expectedID, bodyID string) (string, error) {
+	if strings.TrimSpace(bodyID) == "" {
+		return expectedID, nil
+	}
+	return matchZAIRequestID(expectedID, bodyID)
+}
+
 func zaiSafeClientRequestID(value string) bool {
 	return len(value) >= 6 && len(value) <= 64 && zaiSafeHeaderValue(value)
 }
