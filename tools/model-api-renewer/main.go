@@ -49,8 +49,9 @@ var renewalProfiles = []profile{
 		CommercialTermsRef:     "https://api-docs.deepseek.com/quick_start/pricing",
 		ReleaseTool:            "infercrane-model-api-production-release",
 		Publication: []publicationStep{
-			{"rate", "02-retail-rate.json"}, {"offer", "03-supplier-offer.json"}, {"qualification", "04-qualification.json"},
-			{"plan", "05-supply-plan.json"}, {"product", "07-product-available.json"}, {"publication", "06-publication.json"}, {"entitlement", "08-canary-entitlement.json"},
+			{"product", "01-product-catalog-only.json"}, {"rate", "02-retail-rate.json"}, {"offer", "03-supplier-offer.json"},
+			{"qualification", "04-qualification.json"}, {"plan", "05-supply-plan.json"}, {"publication", "06-publication.json"},
+			{"product", "07-product-available.json"}, {"entitlement", "08-canary-entitlement.json"},
 		},
 	},
 	{
@@ -84,9 +85,9 @@ var renewalProfiles = []profile{
 
 func zaiPublicationSteps() []publicationStep {
 	return []publicationStep{
-		{"rate", "02-retail-rate.json"}, {"offer", "03-supplier-offer.json"}, {"qualification", "04-qualification.json"},
-		{"target-binding", "05-target-binding.json"}, {"plan", "06-supply-plan.json"}, {"product", "08-product-available.json"},
-		{"publication", "07-publication.json"}, {"entitlement", "09-canary-entitlement.json"},
+		{"product", "01-product-catalog-only.json"}, {"rate", "02-retail-rate.json"}, {"offer", "03-supplier-offer.json"},
+		{"qualification", "04-qualification.json"}, {"target-binding", "05-target-binding.json"}, {"plan", "06-supply-plan.json"},
+		{"publication", "07-publication.json"}, {"product", "08-product-available.json"}, {"entitlement", "09-canary-entitlement.json"},
 	}
 }
 

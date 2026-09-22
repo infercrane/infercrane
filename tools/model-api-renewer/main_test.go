@@ -62,8 +62,8 @@ func TestRenewProfileUsesBoundedQualificationAndImmutableVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(calls) != 10 {
-		t.Fatalf("ran %d commands, want qualifier + release + 8 renewal publications", len(calls))
+	if len(calls) != 11 {
+		t.Fatalf("ran %d commands, want qualifier + release + 9 renewal publications", len(calls))
 	}
 	if calls[0].name != "infercrane-model-api-qualifier" || !hasPair(calls[0].args, "--max-output-tokens", "512") || !hasPair(calls[0].args, "--samples-per-mode", "3") || !hasPair(calls[0].args, "--valid-for", "24h0m0s") {
 		t.Fatalf("qualification is not bounded as required: %q %q", calls[0].name, calls[0].args)
@@ -72,11 +72,15 @@ func TestRenewProfileUsesBoundedQualificationAndImmutableVersion(t *testing.T) {
 	if !hasPair(calls[0].args, "--offer-version", wantVersion) || calls[1].name != "infercrane-model-api-mvp-release" || !hasPair(calls[1].args, "--release-version", wantVersion) {
 		t.Fatalf("qualification and release do not share immutable version %s", wantVersion)
 	}
-	wantTypes := []string{"rate", "offer", "qualification", "target-binding", "plan", "product", "publication", "entitlement"}
+	wantTypes := []string{"product", "rate", "offer", "qualification", "target-binding", "plan", "publication", "product", "entitlement"}
+	wantFiles := []string{"01-product-catalog-only.json", "02-retail-rate.json", "03-supplier-offer.json", "04-qualification.json", "05-target-binding.json", "06-supply-plan.json", "07-publication.json", "08-product-available.json", "09-canary-entitlement.json"}
 	for index, want := range wantTypes {
 		call := calls[index+2]
 		if call.name != "infercrane" || len(call.args) < 4 || call.args[0] != "model-api" || call.args[1] != "publish" || call.args[2] != want {
 			t.Fatalf("publication %d = %q %q, want %s", index, call.name, call.args, want)
+		}
+		if !strings.HasSuffix(call.args[4], wantFiles[index]) {
+			t.Fatalf("publication %d file = %q, want suffix %q", index, call.args[4], wantFiles[index])
 		}
 	}
 	if !strings.HasPrefix(calls[0].args[slices.Index(calls[0].args, "--evidence-ref")+1], "fly-machine://machine-1/") {
