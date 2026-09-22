@@ -225,8 +225,8 @@ func TestZAIHTTPErrorIsSanitizedAmbiguousAndNeverRetryable(t *testing.T) {
 }
 
 func TestZAIStreamNormalizesTerminalUsageAndCRLF(t *testing.T) {
-	body := "data: {\"id\":\"stream-response\",\"request_id\":\"request-1\",\"model\":\"glm-5.3-flash\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hel\",\"reasoning_content\":\"hidden\"},\"finish_reason\":null}]}\r\n\r\n" +
-		"data: {\"id\":\"stream-response\",\"request_id\":\"request-1\",\"model\":\"glm-5.3-flash\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":8,\"completion_tokens\":2,\"prompt_tokens_details\":{\"cached_tokens\":3}}}\r\n\r\n" +
+	body := "data: {\"id\":\"stream-response\",\"model\":\"glm-5.3-flash\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hel\",\"reasoning_content\":\"hidden\"},\"finish_reason\":null}]}\r\n\r\n" +
+		"data: {\"id\":\"stream-response\",\"model\":\"glm-5.3-flash\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":8,\"completion_tokens\":2,\"prompt_tokens_details\":{\"cached_tokens\":3}}}\r\n\r\n" +
 		"data: [DONE]\r\n\r\n"
 	stream, err := NewZAIAdapter(nil).OpenStream(context.Background(), &http.Response{
 		StatusCode: http.StatusOK,
@@ -253,10 +253,11 @@ func TestZAIStreamNormalizesTerminalUsageAndCRLF(t *testing.T) {
 
 func TestZAIStreamFailsClosedOnIncompleteOrChangedContract(t *testing.T) {
 	tests := map[string]string{
-		"early EOF":     "data: {\"id\":\"one\",\"model\":\"glm-5.3\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"x\"},\"finish_reason\":null}]}\n\n",
-		"wrong model":   "data: {\"id\":\"one\",\"model\":\"glm-5.2\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"x\"},\"finish_reason\":null}]}\n\n",
-		"changed id":    "data: {\"id\":\"one\",\"model\":\"glm-5.3\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"x\"},\"finish_reason\":null}]}\n\ndata: {\"id\":\"two\",\"model\":\"glm-5.3\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"y\"},\"finish_reason\":null}]}\n\n",
-		"missing usage": "data: {\"id\":\"one\",\"model\":\"glm-5.3\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"x\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n",
+		"early EOF":                    "data: {\"id\":\"one\",\"model\":\"glm-5.3\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"x\"},\"finish_reason\":null}]}\n\n",
+		"wrong model":                  "data: {\"id\":\"one\",\"model\":\"glm-5.2\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"x\"},\"finish_reason\":null}]}\n\n",
+		"changed id":                   "data: {\"id\":\"one\",\"model\":\"glm-5.3\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"x\"},\"finish_reason\":null}]}\n\ndata: {\"id\":\"two\",\"model\":\"glm-5.3\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"y\"},\"finish_reason\":null}]}\n\n",
+		"missing usage":                "data: {\"id\":\"one\",\"model\":\"glm-5.3\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"x\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n",
+		"conflicting request identity": "data: {\"id\":\"one\",\"request_id\":\"different-request\",\"model\":\"glm-5.3\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"x\"},\"finish_reason\":null}]}\n\n",
 	}
 	for name, body := range tests {
 		t.Run(name, func(t *testing.T) {
