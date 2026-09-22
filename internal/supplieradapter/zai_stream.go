@@ -94,7 +94,7 @@ func (s *zaiStream) parseEvent() (StreamEvent, error) {
 		s.done = true
 		return StreamEvent{}, zaiProtocolStreamFailure("supplier stream contained malformed JSON", s.requestID, err)
 	}
-	requestID, err := mergeZAIRequestID(s.requestID, raw.RequestID)
+	requestID, err := matchZAIRequestID(s.requestID, raw.RequestID)
 	if err != nil {
 		s.done = true
 		return StreamEvent{}, zaiProtocolStreamFailure("supplier stream request identity did not match", s.requestID, err)

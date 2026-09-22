@@ -333,6 +333,7 @@ func successfulProfileSupplier(t *testing.T, profile qualificationProfile, cfg q
 			Model     string `json:"model"`
 			MaxTokens int    `json:"max_tokens"`
 			Stream    bool   `json:"stream"`
+			RequestID string `json:"request_id"`
 		}
 		if err = json.Unmarshal(body, &payload); err != nil {
 			t.Fatal(err)
@@ -342,22 +343,22 @@ func successfulProfileSupplier(t *testing.T, profile qualificationProfile, cfg q
 		}
 		sequence++
 		if payload.Stream {
-			response := profileStreamResponse(profile, sequence)
+			response := profileStreamResponse(profile, sequence, payload.RequestID)
 			response.Request = request
 			return response, nil
 		}
-		response := profileBufferedResponse(profile, sequence)
+		response := profileBufferedResponse(profile, sequence, payload.RequestID)
 		response.Request = request
 		return response, nil
 	})
 }
 
-func profileBufferedResponse(profile qualificationProfile, sequence int) *http.Response {
+func profileBufferedResponse(profile qualificationProfile, sequence int, submittedRequestID string) *http.Response {
 	cache := `"prompt_cache_hit_tokens":0`
 	requestID := ""
 	if profile.Supplier == supplieradapter.ZAISupplier {
 		cache = `"prompt_tokens_details":{"cached_tokens":0}`
-		requestID = `,"request_id":"zai-buffered-request"`
+		requestID = fmt.Sprintf(`,"request_id":%q`, submittedRequestID)
 	}
 	body := fmt.Sprintf(`{"id":"chatcmpl-%d"%s,"model":%q,"choices":[{"index":0,"message":{"role":"assistant","content":"one two three four five six seven eight"},"finish_reason":"stop"}],"usage":{"prompt_tokens":12,"completion_tokens":8,%s}}`, sequence, requestID, profile.SupplierModelID, cache)
 	response := jsonResponse(body)
@@ -369,13 +370,13 @@ func profileBufferedResponse(profile qualificationProfile, sequence int) *http.R
 	return response
 }
 
-func profileStreamResponse(profile qualificationProfile, sequence int) *http.Response {
+func profileStreamResponse(profile qualificationProfile, sequence int, submittedRequestID string) *http.Response {
 	id := fmt.Sprintf("chatcmpl-%d", sequence)
 	var body string
 	switch profile.Supplier {
 	case supplieradapter.ZAISupplier:
-		body = fmt.Sprintf("data: {\"id\":%q,\"request_id\":\"zai-stream-request\",\"model\":%q,\"choices\":[{\"index\":0,\"delta\":{\"content\":\"one two three four\"},\"finish_reason\":null}]}\n\n", id, profile.SupplierModelID) +
-			fmt.Sprintf("data: {\"id\":%q,\"request_id\":\"zai-stream-request\",\"model\":%q,\"choices\":[{\"index\":0,\"delta\":{\"content\":\" five six seven eight\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":8,\"prompt_tokens_details\":{\"cached_tokens\":0}}}\n\n", id, profile.SupplierModelID)
+		body = fmt.Sprintf("data: {\"id\":%q,\"request_id\":%q,\"model\":%q,\"choices\":[{\"index\":0,\"delta\":{\"content\":\"one two three four\"},\"finish_reason\":null}]}\n\n", id, submittedRequestID, profile.SupplierModelID) +
+			fmt.Sprintf("data: {\"id\":%q,\"request_id\":%q,\"model\":%q,\"choices\":[{\"index\":0,\"delta\":{\"content\":\" five six seven eight\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":8,\"prompt_tokens_details\":{\"cached_tokens\":0}}}\n\n", id, submittedRequestID, profile.SupplierModelID)
 	case supplieradapter.RunPodSupplier:
 		body = fmt.Sprintf("data: {\"id\":%q,\"model\":%q,\"choices\":[{\"index\":0,\"delta\":{\"content\":\"one two three four\"},\"finish_reason\":null}]}\n\n", id, profile.SupplierModelID) +
 			fmt.Sprintf("data: {\"id\":%q,\"model\":%q,\"choices\":[{\"index\":0,\"delta\":{\"content\":\" five six seven eight\"},\"finish_reason\":\"stop\"}]}\n\n", id, profile.SupplierModelID) +

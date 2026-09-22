@@ -28,7 +28,10 @@ const (
 	ZAIMVPMaxStreamEventBytes = 1 << 20
 )
 
-type zaiExpectedModelKey struct{}
+type (
+	zaiExpectedModelKey     struct{}
+	zaiExpectedRequestIDKey struct{}
+)
 
 // ZAIAdapter implements the deliberately narrow text-only subset of Z.ai's
 // OpenAI-compatible pay-as-you-go API that InferCrane qualifies for its public
@@ -81,12 +84,13 @@ func (a *ZAIAdapter) BuildRequest(ctx context.Context, target Target, request Re
 		MaxTokens   int           `json:"max_tokens"`
 		Temperature *float64      `json:"temperature,omitempty"`
 		Stream      bool          `json:"stream"`
+		RequestID   string        `json:"request_id"`
 		Thinking    struct {
 			Type string `json:"type"`
 		} `json:"thinking"`
 	}{
 		Model: target.SupplierModelID, Messages: make([]wireMessage, 0, len(request.Messages)),
-		MaxTokens: *request.MaxOutputTokens, Temperature: request.Temperature, Stream: request.Stream,
+		MaxTokens: *request.MaxOutputTokens, Temperature: request.Temperature, Stream: request.Stream, RequestID: request.ID,
 	}
 	// Pin thinking instead of relying on a supplier default that can differ
 	// between endpoints or change independently of an InferCrane product.
@@ -103,6 +107,7 @@ func (a *ZAIAdapter) BuildRequest(ctx context.Context, target Target, request Re
 	}
 
 	requestContext := context.WithValue(ctx, zaiExpectedModelKey{}, target.SupplierModelID)
+	requestContext = context.WithValue(requestContext, zaiExpectedRequestIDKey{}, request.ID)
 	upstream, err := http.NewRequestWithContext(requestContext, http.MethodPost, ZAIBaseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return nil, zaiInternalBeforeTransmission("supplier request could not be constructed", err)
@@ -137,6 +142,11 @@ func (a *ZAIAdapter) DecodeResponse(_ context.Context, response *http.Response) 
 		response.Body.Close()
 		return Response{}, zaiProtocolFailure("supplier response lost its expected model identity", requestID, nil)
 	}
+	expectedRequestID, ok := zaiExpectedRequestID(response)
+	if !ok {
+		response.Body.Close()
+		return Response{}, zaiProtocolFailure("supplier response lost its expected request identity", requestID, nil)
+	}
 	if !zaiJSONContentType(response.Header.Get("Content-Type")) {
 		response.Body.Close()
 		return Response{}, zaiProtocolFailure("supplier response content type is invalid", requestID, nil)
@@ -163,7 +173,7 @@ func (a *ZAIAdapter) DecodeResponse(_ context.Context, response *http.Response) 
 	if err = json.Unmarshal(body, &raw); err != nil {
 		return Response{}, zaiProtocolFailure("supplier returned malformed JSON", requestID, err)
 	}
-	requestID, err = mergeZAIRequestID(requestID, raw.RequestID)
+	requestID, err = matchZAIRequestID(expectedRequestID, raw.RequestID)
 	if err != nil {
 		return Response{}, zaiProtocolFailure("supplier response request identity did not match", requestID, err)
 	}
@@ -203,12 +213,17 @@ func (a *ZAIAdapter) OpenStream(_ context.Context, response *http.Response) (Str
 		response.Body.Close()
 		return nil, zaiProtocolFailure("supplier stream lost its expected model identity", requestID, nil)
 	}
+	expectedRequestID, ok := zaiExpectedRequestID(response)
+	if !ok {
+		response.Body.Close()
+		return nil, zaiProtocolFailure("supplier stream lost its expected request identity", requestID, nil)
+	}
 	mediaType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
 	if err != nil || !strings.EqualFold(mediaType, "text/event-stream") {
 		response.Body.Close()
 		return nil, zaiProtocolFailure("supplier stream content type is invalid", requestID, err)
 	}
-	return newZAIStream(response.Body, requestID, expectedModel), nil
+	return newZAIStream(response.Body, expectedRequestID, expectedModel), nil
 }
 
 func (a *ZAIAdapter) Probe(ctx context.Context, target Target, credentials CredentialResolver) (Observation, error) {
@@ -299,6 +314,9 @@ func validateZAIRequest(request Request) error {
 	if err := request.Validate(); err != nil {
 		return err
 	}
+	if !zaiSafeClientRequestID(request.ID) {
+		return errors.New("request id must contain 6 to 64 visible ASCII characters for Z.ai")
+	}
 	if request.Operation != OperationChatCompletions {
 		return errors.New("Z.ai MVP supports Chat Completions only")
 	}
@@ -337,6 +355,14 @@ func zaiExpectedModel(response *http.Response) (string, bool) {
 	return value, ok && zaiSupportedModel(value)
 }
 
+func zaiExpectedRequestID(response *http.Response) (string, bool) {
+	if response == nil || response.Request == nil {
+		return "", false
+	}
+	value, ok := response.Request.Context().Value(zaiExpectedRequestIDKey{}).(string)
+	return value, ok && zaiSafeClientRequestID(value)
+}
+
 func normalizeZAIFinishReason(value *string) (string, bool) {
 	if value == nil {
 		return "", false
@@ -363,18 +389,19 @@ func zaiSupplierRequestID(header http.Header) string {
 	return ""
 }
 
-func mergeZAIRequestID(headerID, bodyID string) (string, error) {
+func matchZAIRequestID(expectedID, bodyID string) (string, error) {
 	bodyID = strings.TrimSpace(bodyID)
-	if bodyID == "" {
-		return headerID, nil
+	if !zaiSafeClientRequestID(bodyID) {
+		return expectedID, errors.New("unsafe or missing supplier request id")
 	}
-	if !zaiSafeRequestID(bodyID) {
-		return headerID, errors.New("unsafe supplier request id")
-	}
-	if headerID != "" && headerID != bodyID {
-		return headerID, errors.New("conflicting supplier request ids")
+	if expectedID != bodyID {
+		return expectedID, errors.New("supplier request id did not echo the submitted request id")
 	}
 	return bodyID, nil
+}
+
+func zaiSafeClientRequestID(value string) bool {
+	return len(value) >= 6 && len(value) <= 64 && zaiSafeHeaderValue(value)
 }
 
 func zaiSafeRequestID(value string) bool {
