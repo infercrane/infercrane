@@ -1,0 +1,808 @@
+[
+  {
+    "candidate_id": "sglang-0520-nextn-k4-bounded-graphs",
+    "compile_cache": {
+      "after": {
+        "bytes": 42101986,
+        "families": {
+          ".cache": {
+            "bytes": 0,
+            "files": 1
+          },
+          "deep-gemm": {
+            "bytes": 1610522,
+            "files": 121
+          },
+          "deep_gemm": {
+            "bytes": 1610522,
+            "files": 121
+          },
+          "flashinfer-workspace": {
+            "bytes": 0,
+            "files": 1
+          },
+          "inductor": {
+            "bytes": 3243619,
+            "files": 33
+          },
+          "triton": {
+            "bytes": 35634333,
+            "files": 1617
+          },
+          "vllm": {
+            "bytes": 2990,
+            "files": 1
+          }
+        },
+        "files": 1895,
+        "gdn_precision_patch": {
+          "patches": [
+            {
+              "after_sha256": "5fcf3e425d41c5544948b512e1b534897f04bdbac9ac1619ffe224cbb960477a",
+              "before_sha256": "35a928d24bf6cc3ca56d73e4b729ec004ec8a34760e2425e2f04d6ef783db9f8",
+              "path": "kernels/ops/attention/fla/fused_recurrent.py",
+              "upstream": "sgl-project/sglang#38977@301780e843493a9cabcab32a5de727c7715143c2"
+            },
+            {
+              "after_sha256": "a18e01ba74904e8f7d27f1eb2d886af5c139b3de8f2a84290c71b5c041a5aa1a",
+              "before_sha256": "a8824a71ab49fde1f070c325c89603e6198928bdcb2238f2d6e9ef8fb7247f62",
+              "path": "kernels/ops/attention/fla/fused_recurrent_linear_replayssm.py",
+              "upstream": "sgl-project/sglang#38977@301780e843493a9cabcab32a5de727c7715143c2"
+            },
+            {
+              "after_sha256": "7318818b58efcb17803b52f236319eda5cc47b813d64113d1c7b83dd2cac378d",
+              "before_sha256": "c7736d1e506fb2c3e5c0496a2ed8c23347c2507ebe73c08bc6745517495d0957",
+              "path": "kernels/ops/attention/fla/fused_gdn_gating.py",
+              "upstream": "sgl-project/sglang#40362@1f313ba3263f2043c1adf4ccdd36483010d43551"
+            }
+          ],
+          "runtime": "sglang-0.5.20",
+          "schema_version": "infercrane.dev/runtime-source-patch/v1"
+        },
+        "root": "/compile-cache"
+      },
+      "before": {
+        "bytes": 42101986,
+        "families": {
+          ".cache": {
+            "bytes": 0,
+            "files": 1
+          },
+          "deep-gemm": {
+            "bytes": 1610522,
+            "files": 121
+          },
+          "deep_gemm": {
+            "bytes": 1610522,
+            "files": 121
+          },
+          "flashinfer-workspace": {
+            "bytes": 0,
+            "files": 1
+          },
+          "inductor": {
+            "bytes": 3243619,
+            "files": 33
+          },
+          "triton": {
+            "bytes": 35634333,
+            "files": 1617
+          },
+          "vllm": {
+            "bytes": 2990,
+            "files": 1
+          }
+        },
+        "files": 1895,
+        "gdn_precision_patch": {
+          "patches": [
+            {
+              "after_sha256": "5fcf3e425d41c5544948b512e1b534897f04bdbac9ac1619ffe224cbb960477a",
+              "before_sha256": "35a928d24bf6cc3ca56d73e4b729ec004ec8a34760e2425e2f04d6ef783db9f8",
+              "path": "kernels/ops/attention/fla/fused_recurrent.py",
+              "upstream": "sgl-project/sglang#38977@301780e843493a9cabcab32a5de727c7715143c2"
+            },
+            {
+              "after_sha256": "a18e01ba74904e8f7d27f1eb2d886af5c139b3de8f2a84290c71b5c041a5aa1a",
+              "before_sha256": "a8824a71ab49fde1f070c325c89603e6198928bdcb2238f2d6e9ef8fb7247f62",
+              "path": "kernels/ops/attention/fla/fused_recurrent_linear_replayssm.py",
+              "upstream": "sgl-project/sglang#38977@301780e843493a9cabcab32a5de727c7715143c2"
+            },
+            {
+              "after_sha256": "7318818b58efcb17803b52f236319eda5cc47b813d64113d1c7b83dd2cac378d",
+              "before_sha256": "c7736d1e506fb2c3e5c0496a2ed8c23347c2507ebe73c08bc6745517495d0957",
+              "path": "kernels/ops/attention/fla/fused_gdn_gating.py",
+              "upstream": "sgl-project/sglang#40362@1f313ba3263f2043c1adf4ccdd36483010d43551"
+            }
+          ],
+          "runtime": "sglang-0.5.20",
+          "schema_version": "infercrane.dev/runtime-source-patch/v1"
+        },
+        "root": "/compile-cache"
+      }
+    },
+    "correctness_probes": [
+      {
+        "id": "deterministic-1",
+        "output_sha256": "2b38292243fd0bd55b53428d3b23ed277445421aaaec8551d27a2da51962f0c3",
+        "parity_mode": "exact"
+      },
+      {
+        "id": "deterministic-2",
+        "output_sha256": "6b51d431df5d7f141cbececcf79edf3dd861c3b4069f0b11661a3eefacbba918",
+        "parity_mode": "exact"
+      },
+      {
+        "id": "deterministic-3",
+        "output_sha256": "71fa9faaa6f884aa11f4cea21477b2204a48a4fa7f05cecad00a1250eeeffb4c",
+        "parity_mode": "exact"
+      },
+      {
+        "content_sha256": "a528d0879d2e44e21e137b25b887e7ab32cb5ec027ec87cc3a2c433ce35f1bc4",
+        "id": "deterministic-thinking-1",
+        "output_sha256": "c373e5907c980446d0f70627814db0a303c67fc3f1b7cca601264f0b4f1e15b6",
+        "parity_mode": "semantic",
+        "reasoning_sha256": "9336119b7d3a113c3a09e00d2ff2720c21327048462ccb9bb8be87f6c74d6d9c",
+        "semantic_passed": true
+      },
+      {
+        "expected_prompt_tokens": 25238,
+        "id": "gdn-long-state-sentinel",
+        "output_sha256": "f0cd115f59e600a3e3b66390608355ad84232625a8de2c05e4b02fd6b8f0ff1d",
+        "parity_mode": "exact",
+        "prompt_tokens": 25238,
+        "semantic_passed": true
+      }
+    ],
+    "created_at": "2026-09-23T11:37:01.711196+00:00",
+    "error_rate": 0.0,
+    "gdn_precision_patch": {
+      "patches": [
+        {
+          "after_sha256": "5fcf3e425d41c5544948b512e1b534897f04bdbac9ac1619ffe224cbb960477a",
+          "before_sha256": "35a928d24bf6cc3ca56d73e4b729ec004ec8a34760e2425e2f04d6ef783db9f8",
+          "path": "kernels/ops/attention/fla/fused_recurrent.py",
+          "upstream": "sgl-project/sglang#38977@301780e843493a9cabcab32a5de727c7715143c2"
+        },
+        {
+          "after_sha256": "a18e01ba74904e8f7d27f1eb2d886af5c139b3de8f2a84290c71b5c041a5aa1a",
+          "before_sha256": "a8824a71ab49fde1f070c325c89603e6198928bdcb2238f2d6e9ef8fb7247f62",
+          "path": "kernels/ops/attention/fla/fused_recurrent_linear_replayssm.py",
+          "upstream": "sgl-project/sglang#38977@301780e843493a9cabcab32a5de727c7715143c2"
+        },
+        {
+          "after_sha256": "7318818b58efcb17803b52f236319eda5cc47b813d64113d1c7b83dd2cac378d",
+          "before_sha256": "c7736d1e506fb2c3e5c0496a2ed8c23347c2507ebe73c08bc6745517495d0957",
+          "path": "kernels/ops/attention/fla/fused_gdn_gating.py",
+          "upstream": "sgl-project/sglang#40362@1f313ba3263f2043c1adf4ccdd36483010d43551"
+        }
+      ],
+      "runtime": "sglang-0.5.20",
+      "schema_version": "infercrane.dev/runtime-source-patch/v1"
+    },
+    "gpu_inventory": [
+      {
+        "compute_capability": "9.0",
+        "name": "NVIDIA H200",
+        "uuid": "GPU-48f68d65-44f8-6864-64e5-1a7e3bd055c5"
+      }
+    ],
+    "lanes": [
+      {
+        "aggregate_output_tokens_per_second": 11.919413101471438,
+        "concurrency": 1,
+        "cost_per_1m_successful_output_tokens_usd": 105.79379951554252,
+        "gpu_seconds_per_successful_request": 42.955135092750005,
+        "input_tokens": 3096566,
+        "itl_p50_ms": 5.472553051859035,
+        "itl_p95_ms": 5.712861887769026,
+        "measurement_seconds": 515.4616211130001,
+        "output_tokens": 6144,
+        "per_request_output_tokens_per_second_p50": 183.08880040118683,
+        "per_request_output_tokens_per_second_p95": 200.47587014966342,
+        "prompt_token_mismatch_count": 0,
+        "request_throughput_requests_per_second": 0.023280103713811402,
+        "requests": 12,
+        "slo_attainment": 0.0,
+        "slo_goodput_requests_per_second": 0.0,
+        "slo_qualified_output_tokens_per_second": 0.0,
+        "successful_requests": 12,
+        "ttft_p50_ms": 30005.607769999984,
+        "ttft_p95_ms": 30154.161654849955
+      }
+    ],
+    "prefix_cache_correctness": {
+      "applicable": false,
+      "cache_metrics": {},
+      "cold": {},
+      "gates": [],
+      "warm": {}
+    },
+    "prompt_token_mismatch_rate": 0.0,
+    "quality": [
+      {
+        "name": "api_models",
+        "passed": true
+      },
+      {
+        "name": "stream_usage",
+        "passed": true
+      },
+      {
+        "name": "stream_done",
+        "passed": true
+      },
+      {
+        "name": "stream_finish_reason",
+        "passed": true
+      },
+      {
+        "name": "buffered_usage",
+        "passed": true
+      },
+      {
+        "name": "reasoning_output",
+        "passed": true
+      },
+      {
+        "name": "thinking_semantic",
+        "passed": true
+      },
+      {
+        "name": "structured_output",
+        "passed": true
+      },
+      {
+        "name": "tool_call",
+        "passed": true
+      },
+      {
+        "name": "unknown_model_rejected",
+        "passed": false
+      },
+      {
+        "name": "invalid_request_rejected",
+        "passed": true
+      },
+      {
+        "accept_length": 3.525,
+        "accept_rate": 0.8416666666666667,
+        "name": "speculation_health",
+        "passed": true
+      },
+      {
+        "name": "gdn_long_state_semantics",
+        "passed": true
+      }
+    ],
+    "recipe": {
+      "args": [
+        "--model-path",
+        "Qwen/Qwen3.8-27B-FP8",
+        "--served-model-name",
+        "Qwen/Qwen3.8-27B-FP8",
+        "--revision",
+        "017b9c7af6b5689d5dd426a76e0bc077eb5ca20a",
+        "--tp-size",
+        "1",
+        "--context-length",
+        "262144",
+        "--mem-fraction-static",
+        "0.90",
+        "--kv-cache-dtype",
+        "fp8_e4m3",
+        "--enable-metrics",
+        "--reasoning-parser",
+        "qwen3",
+        "--tool-call-parser",
+        "qwen3_coder",
+        "--port",
+        "30000",
+        "--speculative-algorithm",
+        "NEXTN",
+        "--speculative-num-steps",
+        "3",
+        "--speculative-eagle-topk",
+        "1",
+        "--speculative-num-draft-tokens",
+        "4",
+        "--cuda-graph-bs-decode",
+        "1",
+        "2",
+        "4",
+        "8",
+        "12",
+        "16",
+        "24",
+        "32",
+        "33",
+        "--cuda-graph-bs-prefill",
+        "256",
+        "512",
+        "1024",
+        "2048",
+        "4096",
+        "8192"
+      ],
+      "command": [
+        "/opt/sglang/bin/python",
+        "-m",
+        "sglang.launch_server",
+        "--model-path",
+        "Qwen/Qwen3.8-27B-FP8",
+        "--served-model-name",
+        "Qwen/Qwen3.8-27B-FP8",
+        "--revision",
+        "017b9c7af6b5689d5dd426a76e0bc077eb5ca20a",
+        "--tp-size",
+        "1",
+        "--context-length",
+        "262144",
+        "--mem-fraction-static",
+        "0.90",
+        "--kv-cache-dtype",
+        "fp8_e4m3",
+        "--enable-metrics",
+        "--reasoning-parser",
+        "qwen3",
+        "--tool-call-parser",
+        "qwen3_coder",
+        "--port",
+        "30000",
+        "--speculative-algorithm",
+        "NEXTN",
+        "--speculative-num-steps",
+        "3",
+        "--speculative-eagle-topk",
+        "1",
+        "--speculative-num-draft-tokens",
+        "4",
+        "--cuda-graph-bs-decode",
+        "1",
+        "2",
+        "4",
+        "8",
+        "12",
+        "16",
+        "24",
+        "32",
+        "33",
+        "--cuda-graph-bs-prefill",
+        "256",
+        "512",
+        "1024",
+        "2048",
+        "4096",
+        "8192"
+      ],
+      "gpu": "H200",
+      "harness_digest": "sha256:cdd5ba735f0dc5c2b5626687ec181418ec698ecbd1a664ed8a4a29e84d61de16",
+      "image": "lmsysorg/sglang@sha256:06e4f2ed21afde4ff513cda65070124e727ba23ccaeff7712b8c40e1097d611f",
+      "model": "Qwen/Qwen3.8-27B-FP8",
+      "model_revision": "017b9c7af6b5689d5dd426a76e0bc077eb5ca20a"
+    },
+    "request_samples": [
+      {
+        "completion_tokens": 512,
+        "concurrency": 1,
+        "error": null,
+        "expected_prompt_tokens": 258047,
+        "finish_reason": "length",
+        "itl_ms": 5.621288027397278,
+        "latency_ms": 32063.437343000034,
+        "output_sha256": "a1c547b2ae7a6ba82a09a6ec8f2f509044833176f571f8cbbc1316d2755d8600",
+        "output_tokens_per_second": 178.24330336375672,
+        "prompt_token_match": true,
+        "prompt_tokens": 258047,
+        "saw_done": true,
+        "slo_pass": false,
+        "status": 200,
+        "success": true,
+        "ttft_ms": 29190.601330999983
+      },
+      {
+        "completion_tokens": 512,
+        "concurrency": 1,
+        "error": null,
+        "expected_prompt_tokens": 258049,
+        "finish_reason": "length",
+        "itl_ms": 5.550422467710433,
+        "latency_ms": 32289.905514,
+        "output_sha256": "78d856d45be72072e01c7d6df1d5fde06b9582b55fb94a614c8aa9d4ad0165f3",
+        "output_tokens_per_second": 180.51904210739062,
+        "prompt_token_match": true,
+        "prompt_tokens": 258049,
+        "saw_done": true,
+        "slo_pass": false,
+        "status": 200,
+        "success": true,
+        "ttft_ms": 29453.269353999985
+      },
+      {
+        "completion_tokens": 512,
+        "concurrency": 1,
+        "error": null,
+        "expected_prompt_tokens": 258047,
+        "finish_reason": "length",
+        "itl_ms": 5.590480688845365,
+        "latency_ms": 32753.856178999966,
+        "output_sha256": "b2dde4e6042c75ff49e72774421658ec7903beb3b3940ab6c24dcc9303cd9634",
+        "output_tokens_per_second": 179.2255448018311,
+        "prompt_token_match": true,
+        "prompt_tokens": 258047,
+        "saw_done": true,
+        "slo_pass": false,
+        "status": 200,
+        "success": true,
+        "ttft_ms": 29896.755901999997
+      },
+      {
+        "completion_tokens": 512,
+        "concurrency": 1,
+        "error": null,
+        "expected_prompt_tokens": 258045,
+        "finish_reason": "length",
+        "itl_ms": 5.728742763209224,
+        "latency_ms": 32913.99031699996,
+        "output_sha256": "1777562f1797370151e0d7759246e52973ead6cd2173dacba2f392533813d278",
+        "output_tokens_per_second": 174.89997170009661,
+        "prompt_token_match": true,
+        "prompt_tokens": 258045,
+        "saw_done": true,
+        "slo_pass": false,
+        "status": 200,
+        "success": true,
+        "ttft_ms": 29986.20818300003
+      },
+      {
+        "completion_tokens": 512,
+        "concurrency": 1,
+        "error": null,
+        "expected_prompt_tokens": 258050,
+        "finish_reason": "length",
+        "itl_ms": 4.992115729941336,
+        "latency_ms": 32677.549741999996,
+        "output_sha256": "3f597bb89ebd282b0989cd07b32c3450e651cf376340402000119cb31dbf1b96",
+        "output_tokens_per_second": 200.70787645265608,
+        "prompt_token_match": true,
+        "prompt_tokens": 258050,
+        "saw_done": true,
+        "slo_pass": false,
+        "status": 200,
+        "success": true,
+        "ttft_ms": 30126.215649999947
+      },
+      {
+        "completion_tokens": 512,
+        "concurrency": 1,
+        "error": null,
+        "expected_prompt_tokens": 258045,
+        "finish_reason": "length",
+        "itl_ms": 5.097641397260357,
+        "latency_ms": 32656.790279999994,
+        "output_sha256": "102848a7aeb44831bf0d4cd6d9f2dbe72bce4fa4eaca0e10c7d151e12284bccc",
+        "output_tokens_per_second": 196.5530466111076,
+        "prompt_token_match": true,
+        "prompt_tokens": 258045,
+        "saw_done": true,
+        "slo_pass": false,
+        "status": 200,
+        "success": true,
+        "ttft_ms": 30051.507467999952
+      },
+      {
+        "completion_tokens": 512,
+        "concurrency": 1,
+        "error": null,
+        "expected_prompt_tokens": 258045,
+        "finish_reason": "length",
+        "itl_ms": 5.699868444227045,
+        "latency_ms": 32968.49854700008,
+        "output_sha256": "fd43e2f6a34a3d471c8cc6b33abf4e4fcc855d722cd4c624318e3508d68d5f59",
+        "output_tokens_per_second": 175.78597768817474,
+        "prompt_token_match": true,
+        "prompt_tokens": 258045,
+        "saw_done": true,
+        "slo_pass": false,
+        "status": 200,
+        "success": true,
+        "ttft_ms": 30055.469860000016
+      },
+      {
+        "completion_tokens": 512,
+        "concurrency": 1,
+        "error": null,
+        "expected_prompt_tokens": 258048,
+        "finish_reason": "length",
+        "itl_ms": 5.104926052837578,
+        "latency_ms": 32633.987137999953,
+        "output_sha256": "cd96dec6cbacb4d9bc4f4c5a2409a90e10bd852b347ab2b2f5b56f9b2b49c8f3",
+        "output_tokens_per_second": 196.27256825894432,
+        "prompt_token_match": true,
+        "prompt_tokens": 258048,
+        "saw_done": true,
+        "slo_pass": false,
+        "status": 200,
+        "success": true,
+        "ttft_ms": 30025.007356999937
+      },
+      {
+        "completion_tokens": 512,
+        "concurrency": 1,
+        "error": null,
+        "expected_prompt_tokens": 258045,
+        "finish_reason": "length",
+        "itl_ms": 5.458911090019564,
+        "latency_ms": 32743.456259000028,
+        "output_sha256": "18739007e83a0e8b56a69598c670e921985e0dff17093d8208b2fa7d1c73e6b6",
+        "output_tokens_per_second": 183.5452035469652,
+        "prompt_token_match": true,
+        "prompt_tokens": 258045,
+        "saw_done": true,
+        "slo_pass": false,
+        "status": 200,
+        "success": true,
+        "ttft_ms": 29953.59251299999
+      },
+      {
+        "completion_tokens": 512,
+        "concurrency": 1,
+        "error": null,
+        "expected_prompt_tokens": 258048,
+        "finish_reason": "length",
+        "itl_ms": 5.486195013698506,
+        "latency_ms": 32716.17547200003,
+        "output_sha256": "a3fb8ab2ae25b5266c797405cf80b6b23cdbfdd0ca7ea66ff7f4b68f9f12793e",
+        "output_tokens_per_second": 182.63239725540845,
+        "prompt_token_match": true,
+        "prompt_tokens": 258048,
+        "saw_done": true,
+        "slo_pass": false,
+        "status": 200,
+        "success": true,
+        "ttft_ms": 29912.365386000034
+      },
+      {
+        "completion_tokens": 512,
+        "concurrency": 1,
+        "error": null,
+        "expected_prompt_tokens": 258049,
+        "finish_reason": "length",
+        "itl_ms": 5.45690171428579,
+        "latency_ms": 32977.18883599998,
+        "output_sha256": "37eccdca2b5e00cf3955fb4255b180d18b7bfec2a2a46f7aee8203ec6e6785a9",
+        "output_tokens_per_second": 183.61278975198928,
+        "prompt_token_match": true,
+        "prompt_tokens": 258049,
+        "saw_done": true,
+        "slo_pass": false,
+        "status": 200,
+        "success": true,
+        "ttft_ms": 30188.317882999967
+      },
+      {
+        "completion_tokens": 512,
+        "concurrency": 1,
+        "error": null,
+        "expected_prompt_tokens": 258048,
+        "finish_reason": "length",
+        "itl_ms": 5.002629804305179,
+        "latency_ms": 32613.756006000018,
+        "output_sha256": "ad4e937d23f5dc9f2eeec0ed0a00709e256b87f8266e4bbb7e34aa3d9540dc12",
+        "output_tokens_per_second": 200.28604681085125,
+        "prompt_token_match": true,
+        "prompt_tokens": 258048,
+        "saw_done": true,
+        "slo_pass": false,
+        "status": 200,
+        "success": true,
+        "ttft_ms": 30057.04864900008
+      }
+    ],
+    "run_index": 1,
+    "runtime_id": "sglang-0.5.20-nextn-k4-bounded-graphs",
+    "runtime_metric_delta": {
+      "sglang:evicted_tokens_total{cache_type=\"UnifiedRadixCache\"}": 1525953.0,
+      "sglang:full_token_usage{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 0.16392781376941884,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"+Inf\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"1.1e+06\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"1000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"10000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"100000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"12500.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"1500.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"15000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"17500.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"1e+06\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"2000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"20000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"200000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"22500.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"25000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"27500.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"3000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"30000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"300000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"35000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"4000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"40000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"400000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"5000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"6000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"60000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"600000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"700.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"7000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"8000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"80000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"800000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"9000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:generation_tokens_histogram_count{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:generation_tokens_histogram_sum{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 6144.0,
+      "sglang:generation_tokens_total{engine_type=\"unified\",is_streaming=\"true\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 6144.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"+Inf\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 6132.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"0.004\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 31.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"0.006\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 5392.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"0.008\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 5510.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"0.01\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 5889.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"0.015\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 5895.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"0.02\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 6129.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"0.025\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 6132.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"0.03\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 6132.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"0.035\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 6132.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"0.04\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 6132.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"0.06\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 6132.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"0.08\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 6132.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"0.1\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 6132.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"0.2\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 6132.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"0.4\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 6132.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"0.6\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 6132.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"0.8\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 6132.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"1.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 6132.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"2.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 6132.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"4.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 6132.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"6.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 6132.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"8.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 6132.0,
+      "sglang:inter_token_latency_seconds_count{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 6132.0,
+      "sglang:inter_token_latency_seconds_sum{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 33.0654753949953,
+      "sglang:kv_available_tokens{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 1957.0,
+      "sglang:kv_cache_memory_usage_gb{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 48.1187744140625,
+      "sglang:kv_evictable_tokens{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 1316324.0,
+      "sglang:kv_used_tokens{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 258474.0,
+      "sglang:mamba_available_tokens{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 2.0,
+      "sglang:mamba_evictable_tokens{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 159.0,
+      "sglang:mamba_used_tokens{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 4.0,
+      "sglang:max_total_num_tokens{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 1576755.0,
+      "sglang:new_token_ratio{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 0.7,
+      "sglang:num_used_tokens{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 258474.0,
+      "sglang:prefill_effective_tokens_total{engine_type=\"unified\",mode=\"input\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 3096566.0,
+      "sglang:prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"+Inf\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"1.1e+06\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"1e+06\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"300000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"400000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"600000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"800000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:prompt_tokens_histogram_count{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:prompt_tokens_histogram_sum{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 3096566.0,
+      "sglang:prompt_tokens_total{engine_type=\"unified\",is_streaming=\"true\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 3096566.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"+Inf\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 12.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"0.005\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 12.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"0.01\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 12.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"0.05\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 12.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"0.1\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 12.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"0.2\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 12.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"0.5\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 12.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"1.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 12.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"10.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 12.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"100.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 12.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"1000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 12.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"1200.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 12.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"1400.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 12.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"15.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 12.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"1600.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 12.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"1800.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 12.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"2.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 12.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"20.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 12.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"200.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 12.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"2000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 12.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"2500.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 12.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"3.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 12.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"30.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 12.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"300.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 12.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"3000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 12.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"4.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 12.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"40.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 12.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"400.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 12.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"5.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 12.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"50.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 12.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"500.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 12.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"60.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 12.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"600.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 12.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"70.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 12.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"700.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 12.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"80.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 12.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"800.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 12.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"90.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 12.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"900.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 12.0,
+      "sglang:queue_time_seconds_count{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 12.0,
+      "sglang:queue_time_seconds_sum{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 0.013619062999737253,
+      "sglang:realtime_tokens_total{engine_type=\"unified\",mode=\"decode\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 6190.0,
+      "sglang:realtime_tokens_total{engine_type=\"unified\",mode=\"prefill_compute\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 3096566.0,
+      "sglang:spec_accept_length{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 3.525,
+      "sglang:spec_accept_rate{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 0.8416666666666667,
+      "sglang:spec_num_draft_tokens{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 4.0,
+      "sglang:spec_num_steps{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 3.0,
+      "sglang:spec_verify_calls_total{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 1854.0,
+      "sglang:time_to_first_token_seconds_bucket{engine_type=\"unified\",is_streaming=\"true\",le=\"+Inf\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:time_to_first_token_seconds_bucket{engine_type=\"unified\",is_streaming=\"true\",le=\"100.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:time_to_first_token_seconds_bucket{engine_type=\"unified\",is_streaming=\"true\",le=\"200.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:time_to_first_token_seconds_bucket{engine_type=\"unified\",is_streaming=\"true\",le=\"40.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:time_to_first_token_seconds_bucket{engine_type=\"unified\",is_streaming=\"true\",le=\"400.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:time_to_first_token_seconds_bucket{engine_type=\"unified\",is_streaming=\"true\",le=\"60.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:time_to_first_token_seconds_bucket{engine_type=\"unified\",is_streaming=\"true\",le=\"80.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:time_to_first_token_seconds_count{engine_type=\"unified\",is_streaming=\"true\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:time_to_first_token_seconds_sum{engine_type=\"unified\",is_streaming=\"true\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 358.70658238299995,
+      "sglang:token_usage{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 0.16,
+      "sglang:uncached_prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"+Inf\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:uncached_prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"1.1e+06\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:uncached_prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"1e+06\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:uncached_prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"300000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:uncached_prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"400000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:uncached_prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"600000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:uncached_prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"800000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:uncached_prompt_tokens_histogram_count{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 12.0,
+      "sglang:uncached_prompt_tokens_histogram_sum{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 3096566.0
+    },
+    "runtime_profile": null,
+    "schema_version": "infercrane.dev/modal-workload-screen/v1",
+    "server_log": "/results/20260923T112253Z/sglang-0520-nextn-k4-bounded-graphs/public-context-boundary-262k/server.log",
+    "startup_breakdown": {
+      "available": true,
+      "cuda_graph_seconds": {
+        "decode": 0.0,
+        "draft_decode": 0.96,
+        "draft_extend": 0.0,
+        "draft_prefill": 0.68,
+        "prefill": 132.72,
+        "target_verify": 4.39
+      },
+      "kv_cache_allocation_seconds": 1.15,
+      "load_weight_seconds": 17.22,
+      "scheduler_e2e_seconds": 166.83,
+      "tokenizer_e2e_seconds": 184.53
+    },
+    "startup_seconds": 237.138269003,
+    "workload": {
+      "boundary": "A single-request capability and correctness qualification near the declared context boundary. It is not an interactive-latency claim or an arrival mix.",
+      "concurrency_lanes": [
+        1
+      ],
+      "id": "qwen38-public-context-boundary-262k-v1",
+      "input_tokens": 258048,
+      "output_tokens": 512,
+      "sampling": {
+        "enable_thinking": false,
+        "min_p": 0.0,
+        "presence_penalty": 1.5,
+        "seed": 20260923,
+        "temperature": 0.7,
+        "top_k": 20,
+        "top_p": 0.8
+      },
+      "slo": {
+        "id": "infercrane-context-boundary-v1",
+        "max_itl_ms": 20.0,
+        "max_ttft_ms": 20000.0,
+        "source": "pre_registered_context_qualification_objective"
+      },
+      "source": {
+        "name": "Qwen3.8 declared context boundary",
+        "release_state": "model_card_boundary",
+        "url": "https://huggingface.co/Qwen/Qwen3.8-27B-FP8"
+      },
+      "streaming": true
+    },
+    "workload_name": "public-context-boundary-262k"
+  }
+]

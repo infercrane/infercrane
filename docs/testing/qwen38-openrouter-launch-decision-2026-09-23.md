@@ -9,13 +9,14 @@ production soak with this bounded offer:
 
 - model: `Qwen/Qwen3.8-27B-FP8@017b9c7af6b5689d5dd426a76e0bc077eb5ca20a`;
 - runtime: SGLang 0.5.20;
-- target: one H100 for the first public canary, with H200 retained as a
-  separately qualified higher-throughput candidate;
+- target: one H200 for the first public canary; B200 is a separately measured
+  latency/capacity tier and H100 is retained only as API-canary evidence;
 - recipe: FP8 weights and KV cache, bounded CUDA graphs, NEXTN/MTP with three
   speculative steps and four draft tokens, and the runtime-selected DeepGEMM
   FP8 path;
-- admission: twelve in-flight requests, with immediate HTTP 429 above the
-  boundary;
+- admission: adaptive four-to-sixteen decode requests, starting at eight, with
+  a three-second p95 TTFT objective and a separately bounded prefill-token
+  budget; reject immediately with HTTP 429 above either boundary;
 - public contract: text input, 32,768 input tokens, 2,048 output tokens, tools,
   structured output, streaming, and usage accounting; and
 - starting price: $0.10/M input tokens and $2.20/M output tokens.
@@ -59,6 +60,76 @@ network volume also did not preserve the owner-only mode required by the
 content-free receipt recorder; the canary used an owner-only local receipt
 path. Production needs a durable encrypted receipt collector or a filesystem
 that preserves the fail-closed POSIX permission contract.
+
+## Hardware and cache decision
+
+Exact-hardware screens on the same pinned model, SGLang image, recipe, workload,
+and harness changed the preferred launch accelerator. The H200 campaign was a
+paired control/selected qualification. H100 and B200 were single-candidate
+hardware screens: their API, semantic, long-state, token-identity, and load
+gates passed, but they deliberately remain unpromoted because runtime-parity
+was not measured in those runs.
+
+| GPU | c12 output tok/s | c12 p95 TTFT | c12 GPU COGS / M output | c16 output tok/s | c16 projected margin |
+|---|---:|---:|---:|---:|---:|
+| H100 80 GB SXM | 852.7 | 6,092 ms | $1.287 | 1,054.4 | 30.2% |
+| H200 SXM | 1,304.7 | 2,494 ms | $0.967 | 1,575.2 | 44.0% |
+| B200 | 1,803.5 | 1,463 ms | $0.963 | 2,033.0 | 40.9% |
+
+H200 produced 53.0% more output throughput than H100 at concurrency twelve
+and cost 24.9% less per measured million output-equivalent tokens. B200 was
+38.2% faster than H200 and had the better TTFT, but H200 retained 6.3% lower
+cost per output-equivalent token at concurrency sixteen. H200 is therefore the
+default economic tier; B200 is the performance tier. These Modal costs use the
+public $3.9492, $4.5396, and $6.2496 hourly rates and are not a substitute for
+the final hosting invoice.
+
+The compile-volume warm run reduced H200 startup from 336.2 to 237.1 seconds,
+a 29.5% improvement. The immutable release cache covers Triton, DeepGEMM,
+FlashInfer, Inductor, CUDA, TileLang, TVM FFI, and CuTe artifacts. CUDA graph
+capture remains process-local and accounts for much of the remaining startup.
+
+Evidence:
+
+- `docs/testing/evidence/qwen38-public-decode-saturation-modal-2026-09-23T111756Z.json`
+- `docs/testing/evidence/qwen38-public-decode-saturation-modal-2026-09-23T114709Z.json`
+- `docs/testing/evidence/qwen38-public-decode-saturation-modal-2026-09-23T115711Z.json`
+
+## GDN, prefix cache, and context boundary
+
+SGLang 0.5.20 ships FlashInfer 0.6.18. The newer FlashInfer 0.7.0 was released
+on 2026-09-22 but is not the dependency pinned by this SGLang release, so it is
+not silently substituted into the production tuple.
+
+On the exact H200 saturation screen, the current Triton GDN route remained the
+winner. Full FlashInfer GDN reached 1,483.4 tok/s at concurrency sixteen, 5.8%
+below the selected 1,575.2 tok/s. FlashInfer prefill with Triton decode reached
+1,386.2 tok/s, 12.0% below selected. Both preserved all correctness gates, so
+they are clean performance rejections. They also extended cold readiness from
+325–336 seconds to 410–446 seconds.
+
+The source image contained three known recurrent-state precision narrowings.
+The provider build now applies the exact reviewed upstream expressions only
+when all original SGLang 0.5.20 source hashes match, writes a patch receipt, and
+fails closed otherwise. The long-state semantic sentinel and prompt-token
+identity checks passed on H100, H200, and B200 screens.
+
+For the 95K-token agent-session workload, cold/warm deterministic outputs were
+byte-identical and the warm request reused 95,808 tokens at a 99.95% cache-hit
+rate. LPM scheduling improved concurrency-one throughput by 2.7% and was tied
+at concurrency four, which is insufficient to replace the simpler selected
+recipe.
+
+At the near-262K boundary, 12/12 requests completed with zero prompt-token
+mismatches and 5.7 ms p95 ITL, but p95 TTFT was 30.15 seconds against the
+pre-registered 20-second boundary. The launch contract therefore stays at 32K;
+262K is supported by the runtime but is not launch-qualified.
+
+Evidence:
+
+- `docs/testing/evidence/qwen38-agent-prefix-reuse-modal-2026-09-23T113633Z.json`
+- `docs/testing/evidence/qwen38-public-context-boundary-262k-modal-2026-09-23T113709Z.json`
+- `docs/testing/evidence/qwen38-public-decode-saturation-modal-2026-09-23T111756Z.json`
 
 ## Why this recipe
 
@@ -165,7 +236,7 @@ are stored in
 
 ## Economics
 
-At concurrency twelve, the measured Modal H200 GPU cost was $0.905 per million
+At concurrency twelve, the measured Modal H200 GPU cost was $0.967 per million
 successful output tokens. For the measured 2.847:1 input/output token ratio,
 the proposed price produces $2.485 of revenue per million output-equivalent
 tokens.
@@ -173,8 +244,8 @@ tokens.
 Using the target RunPod H200 price of $4.59/hour and reserving 10% of revenue
 for gateway, storage, monitoring, recovery, and other non-GPU costs:
 
-- contribution break-even requires approximately 40.9% utilization; and
-- a 35% contribution margin requires approximately 66.9% utilization.
+- contribution break-even requires approximately 43.2% utilization; and
+- a 35% contribution margin requires approximately 70.7% utilization.
 
 This is capacity economics, not a revenue forecast. OpenRouter demand may not
 fill the GPU, and one replica is not enough for high availability. Do not add a
@@ -205,6 +276,13 @@ finds a shape that the vendor path does not cover. Earlier custom residual plus
 RMSNorm Triton and CUDA candidates were also correctly rejected after their
 endpoint ceiling or measured performance lost to the runtime operator.
 
+The recurrent GDN family did not clear the custom-kernel gate either. It was
+less than 5% of measured endpoint GPU time, and the compatible fused
+FlashInfer implementation lost 5.8% at saturation. Generating another custom
+GDN kernel would spend engineering time below the measured endpoint ceiling;
+the campaign therefore records a deliberate rejection instead of manufacturing
+a kernel headline.
+
 Backend evidence:
 
 - `docs/testing/evidence/qwen38-public-decode-saturation-modal-2026-09-23T045002Z-failures.json`
@@ -216,7 +294,7 @@ Backend evidence:
 1. Build and publish the immutable candidate image.
 2. Prepare the exact model revision on a persistent target volume and verify
    every file hash before startup.
-3. Deploy one regional H100 endpoint behind HTTPS using the provider edge.
+3. Deploy one regional H200 endpoint behind HTTPS using the provider edge.
 4. Run the external qualifier for `/models`, streaming, usage, tools,
    structured output, invalid requests, bounded overload, recovery, and
    cleanup.

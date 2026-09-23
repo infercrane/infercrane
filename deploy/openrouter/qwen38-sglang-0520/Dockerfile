@@ -25,12 +25,15 @@ COPY --from=edge-builder /out/infercrane-openrouter-edge /usr/local/bin/infercra
 COPY deploy/openrouter/qwen38-provider-models.json /opt/infercrane/provider-models.json
 COPY deploy/openrouter/qwen38-sglang-0520/health_shim.py /opt/infercrane/health_shim.py
 COPY deploy/openrouter/qwen38-sglang-0520/prepare_model.py /opt/infercrane/prepare_model.py
+COPY deploy/openrouter/qwen38-sglang-0520/compile_cache.py /opt/infercrane/compile_cache.py
+COPY deploy/openrouter/qwen38-sglang-0520/patch_gdn_precision.py /opt/infercrane/patch_gdn_precision.py
 COPY deploy/openrouter/qwen38-sglang-0520/serve.sh /opt/infercrane/serve.sh
 
 RUN chmod 0555 /usr/local/bin/infercrane-openrouter-edge /opt/infercrane/serve.sh \
-    && chmod 0444 /opt/infercrane/provider-models.json /opt/infercrane/health_shim.py /opt/infercrane/prepare_model.py \
+    && chmod 0444 /opt/infercrane/provider-models.json /opt/infercrane/health_shim.py /opt/infercrane/prepare_model.py /opt/infercrane/compile_cache.py /opt/infercrane/patch_gdn_precision.py \
     && mkdir -p /runpod-volume /run/infercrane \
     && python3 -c "import huggingface_hub, sglang" \
+    && python3 /opt/infercrane/patch_gdn_precision.py \
     && test ! -e /model-cache \
     && ln -s /runpod-volume /model-cache
 

@@ -28,8 +28,10 @@ modal run tools/modal-openrouter-qwen38/modal_app.py \
 ```
 
 Run the public decode-saturation diagnostic on the exact launch candidate. The
-same command can compare H100 and H200; the GPU identity and hourly cost are
-included in every receipt.
+same command can compare exact H100, H200, and B200 hardware; the physical GPU
+identity and current hourly cost are included in every receipt. The adapter
+uses Modal's `H100!` request internally so a benchmark cannot be silently
+upgraded and mislabeled as H100 evidence.
 
 ```bash
 INFERCRANE_MODAL_GPU=H100 modal run tools/modal-openrouter-qwen38/modal_app.py \
@@ -39,6 +41,12 @@ INFERCRANE_MODAL_GPU=H100 modal run tools/modal-openrouter-qwen38/modal_app.py \
   --no-parallel
 
 INFERCRANE_MODAL_GPU=H200 modal run tools/modal-openrouter-qwen38/modal_app.py \
+  --action screen \
+  --workload public-decode-saturation \
+  --candidates sglang-0520-nextn-k4-bounded-graphs \
+  --no-parallel
+
+INFERCRANE_MODAL_GPU=B200 modal run tools/modal-openrouter-qwen38/modal_app.py \
   --action screen \
   --workload public-decode-saturation \
   --candidates sglang-0520-nextn-k4-bounded-graphs \

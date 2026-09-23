@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import gzip
 import hashlib
+import importlib.metadata
 import json
 import math
 import os
@@ -52,10 +53,14 @@ from campaign_support import (
 
 APP_NAME = "infercrane-qwen38-workload-optimizer"
 PORT = 30000
-GPU_PRICES_USD_PER_HOUR = {"H100": 3.9492, "H200": 4.5396}
+GPU_PRICES_USD_PER_HOUR = {"H100": 3.9492, "H200": 4.5396, "B200": 6.2496}
 GPU = os.environ.get("INFERCRANE_MODAL_GPU", "H200").strip().upper()
 if GPU not in GPU_PRICES_USD_PER_HOUR:
-    raise ValueError("INFERCRANE_MODAL_GPU must be H100 or H200")
+    raise ValueError("INFERCRANE_MODAL_GPU must be H100, H200, or B200")
+# Modal may transparently substitute a newer compatible accelerator unless the
+# request has the exact-hardware suffix. Reproducibility-sensitive evidence
+# must never label an H200 result as H100 evidence.
+GPU_REQUEST = "H100!" if GPU == "H100" else GPU
 GPU_HOURLY_COST_USD = float(
     os.environ.get("INFERCRANE_MODAL_GPU_HOURLY_USD", GPU_PRICES_USD_PER_HOUR[GPU])
 )
@@ -64,7 +69,7 @@ GPU_HOURLY_COST_USD = float(
 # not a published rate card.
 # Enter the low-price routing set without matching the current absolute floor.
 # At the qualified H200/c12 lane this price still clears a 35% contribution
-# margin at roughly 66.2% utilization with a 10% non-GPU revenue reserve.
+# margin at roughly 70.7% utilization with a 10% non-GPU revenue reserve.
 LAUNCH_INPUT_PRICE_USD_PER_MILLION = 0.10
 LAUNCH_OUTPUT_PRICE_USD_PER_MILLION = 2.20
 SGLANG_VERSION = "0.5.20"
@@ -79,6 +84,7 @@ SCREENING_REQUESTS_PER_LANE = 12
 MODULE_PATH = Path(__file__).resolve()
 ROOT = MODULE_PATH.parents[2] if len(MODULE_PATH.parents) > 2 else Path.cwd()
 SUPPORT = MODULE_PATH.with_name("campaign_support.py")
+GDN_PRECISION_PATCH = ROOT / "deploy/openrouter/qwen38-sglang-0520/patch_gdn_precision.py"
 
 app = modal.App(APP_NAME)
 model_cache = modal.Volume.from_name("infercrane-qwen38-model-cache", create_if_missing=True)
@@ -107,6 +113,10 @@ image = (
         "--extra-index-url https://pypi.nvidia.com"
     )
 )
+if GDN_PRECISION_PATCH.exists():
+    image = image.add_local_file(
+        GDN_PRECISION_PATCH, "/opt/infercrane/patch_gdn_precision.py", copy=True
+    )
 if SUPPORT.exists():
     image = image.add_local_file(SUPPORT, "/opt/infercrane/campaign_support.py")
 vllm_image = (
@@ -362,7 +372,14 @@ CANDIDATES: dict[str, dict[str, Any]] = {
             "8192",
         ],
         "class": "native_mtp_bounded_graph_capture",
-        "workloads": ["public-interactive", "public-long-prefill", "public-decode-heavy", "public-decode-saturation"],
+        "workloads": [
+            "public-interactive",
+            "public-long-prefill",
+            "public-decode-heavy",
+            "public-decode-saturation",
+            "agent-prefix-reuse",
+            "public-context-boundary-262k",
+        ],
     },
     "sglang-0520-dflash2-k8-bounded-graphs": {
         "runtime_id": "sglang-0.5.20-dflash2-k8-bounded-graphs",
@@ -595,6 +612,92 @@ CANDIDATES: dict[str, dict[str, Any]] = {
         "class": "native_mtp_cache_aware",
         "workloads": ["agent-prefix-reuse"],
     },
+    "sglang-0520-nextn-k4-graphs-linear-flashinfer": {
+        "runtime_id": "sglang-0.5.20-nextn-k4-graphs-linear-flashinfer",
+        "args": [
+            "--speculative-algorithm",
+            "NEXTN",
+            "--speculative-num-steps",
+            "3",
+            "--speculative-eagle-topk",
+            "1",
+            "--speculative-num-draft-tokens",
+            "4",
+            "--cuda-graph-bs-decode",
+            "1",
+            "2",
+            "4",
+            "8",
+            "12",
+            "16",
+            "24",
+            "32",
+            "33",
+            "--cuda-graph-bs-prefill",
+            "256",
+            "512",
+            "1024",
+            "2048",
+            "4096",
+            "8192",
+            "--linear-attn-decode-backend",
+            "flashinfer",
+            "--linear-attn-prefill-backend",
+            "flashinfer",
+        ],
+        "class": "native_mtp_gdn_backend_ablation",
+        "workloads": [
+            "public-interactive",
+            "public-long-prefill",
+            "public-decode-heavy",
+            "public-decode-saturation",
+            "agent-prefix-reuse",
+            "public-context-boundary-262k",
+        ],
+    },
+    "sglang-0520-nextn-k4-graphs-linear-flashinfer-prefill": {
+        "runtime_id": "sglang-0.5.20-nextn-k4-graphs-linear-flashinfer-prefill",
+        "args": [
+            "--speculative-algorithm",
+            "NEXTN",
+            "--speculative-num-steps",
+            "3",
+            "--speculative-eagle-topk",
+            "1",
+            "--speculative-num-draft-tokens",
+            "4",
+            "--cuda-graph-bs-decode",
+            "1",
+            "2",
+            "4",
+            "8",
+            "12",
+            "16",
+            "24",
+            "32",
+            "33",
+            "--cuda-graph-bs-prefill",
+            "256",
+            "512",
+            "1024",
+            "2048",
+            "4096",
+            "8192",
+            "--linear-attn-decode-backend",
+            "triton",
+            "--linear-attn-prefill-backend",
+            "flashinfer",
+        ],
+        "class": "native_mtp_gdn_backend_ablation",
+        "workloads": [
+            "public-interactive",
+            "public-long-prefill",
+            "public-decode-heavy",
+            "public-decode-saturation",
+            "agent-prefix-reuse",
+            "public-context-boundary-262k",
+        ],
+    },
 }
 
 
@@ -603,6 +706,36 @@ def _python() -> str:
         if Path(candidate).exists():
             return candidate
     raise RuntimeError("SGLang image has no usable Python interpreter")
+
+
+def _apply_gdn_precision_patch() -> dict[str, Any]:
+    """Patch the mounted SGLang package before it can serve any request."""
+    patch_path = Path("/opt/infercrane/patch_gdn_precision.py")
+    if not patch_path.exists():
+        raise RuntimeError("the pinned GDN precision patch is unavailable")
+    subprocess.run([_python(), str(patch_path)], check=True, timeout=60)
+    receipt_path = Path("/opt/infercrane/gdn-precision-patch.json")
+    if not receipt_path.exists():
+        raise RuntimeError("the GDN precision patch did not produce a receipt")
+    return json.loads(receipt_path.read_text())
+
+
+def _runtime_dependency_versions() -> dict[str, str]:
+    versions: dict[str, str] = {}
+    for distribution in (
+        "sglang",
+        "sglang-kernel",
+        "flashinfer-python",
+        "sgl-deep-gemm",
+        "triton",
+        "torch",
+        "nvidia-cutlass-dsl",
+    ):
+        try:
+            versions[distribution] = importlib.metadata.version(distribution)
+        except importlib.metadata.PackageNotFoundError:
+            versions[distribution] = "unavailable"
+    return versions
 
 
 def _gpu_inventory() -> list[dict[str, str]]:
@@ -629,6 +762,28 @@ def _harness_digest() -> str:
         digest.update(source.read_bytes())
         digest.update(b"\0")
     return "sha256:" + digest.hexdigest()
+
+
+def _compile_cache_inventory(root: str = "/compile-cache") -> dict[str, Any]:
+    base = Path(root)
+    files = [path for path in base.rglob("*") if path.is_file() and not path.is_symlink()]
+    by_family: dict[str, dict[str, int]] = {}
+    for path in files:
+        relative = path.relative_to(base)
+        family = relative.parts[0] if relative.parts else "root"
+        row = by_family.setdefault(family, {"files": 0, "bytes": 0})
+        row["files"] += 1
+        row["bytes"] += path.stat().st_size
+    receipt_path = Path("/opt/infercrane/gdn-precision-patch.json")
+    return {
+        "root": str(base),
+        "files": len(files),
+        "bytes": sum(path.stat().st_size for path in files),
+        "families": by_family,
+        "gdn_precision_patch": json.loads(receipt_path.read_text())
+        if receipt_path.is_file()
+        else None,
+    }
 
 
 def _wait_for_server(process: subprocess.Popen[str], log_path: Path, timeout: int = 1200) -> None:
@@ -1092,7 +1247,7 @@ async def _quality_gates() -> list[dict[str, Any]]:
     return rows
 
 
-async def _correctness_probes() -> list[dict[str, Any]]:
+async def _correctness_probes(tokenizer: Any) -> list[dict[str, Any]]:
     import httpx
 
     prompts = [
@@ -1168,7 +1323,100 @@ async def _correctness_probes() -> list[dict[str, Any]]:
                 ).hexdigest(),
             }
         )
+
+        sentinel = "IC-GDN-STATE-7F31"
+        filler = "Repository record: function call result remained stable. " * 2800
+        long_prompt = (
+            f"Remember this exact sentinel: {sentinel}.\n"
+            f"{filler}\nReturn exactly the sentinel and nothing else."
+        )
+        long_messages = [{"role": "user", "content": long_prompt}]
+        long_prompt_tokens = encoded_token_count(
+            tokenizer.apply_chat_template(
+                long_messages, tokenize=True, add_generation_prompt=True, enable_thinking=False
+            )
+        )
+        response = await client.post(
+            f"http://127.0.0.1:{PORT}/v1/chat/completions",
+            json={
+                "model": MODEL_ID,
+                "messages": long_messages,
+                "temperature": 0,
+                "seed": 20260927,
+                "max_tokens": 32,
+                "chat_template_kwargs": {"enable_thinking": False},
+            },
+        )
+        response.raise_for_status()
+        payload = response.json()
+        content = payload["choices"][0]["message"]["content"].strip()
+        rows.append(
+            {
+                "id": "gdn-long-state-sentinel",
+                "parity_mode": "exact",
+                "semantic_passed": content == sentinel,
+                "prompt_tokens": int(payload.get("usage", {}).get("prompt_tokens") or 0),
+                "expected_prompt_tokens": long_prompt_tokens,
+                "output_sha256": hashlib.sha256(content.encode()).hexdigest(),
+            }
+        )
     return rows
+
+
+async def _prefix_cache_correctness(
+    tokenizer: Any, workload: dict[str, Any], *, flush_path: str = "/flush_cache"
+) -> dict[str, Any]:
+    """Prove that cache reuse preserves bytes and is visible in runtime telemetry."""
+
+    import httpx
+
+    if not workload["id"].endswith("agent-prefix-reuse-derived-v1"):
+        return {"applicable": False, "gates": [], "cold": {}, "warm": {}, "cache_metrics": {}}
+    deterministic = {
+        **workload,
+        "output_tokens": 64,
+        "sampling": {**workload["sampling"], "temperature": 0.0, "top_p": 1.0, "top_k": 1, "presence_penalty": 0.0},
+    }
+    request = _workload_requests(tokenizer, deterministic, 1, variant_offset=8_000_000)[0]
+    timeout = httpx.Timeout(1800, connect=30)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        flush = await client.post(f"http://127.0.0.1:{PORT}{flush_path}")
+        flush.raise_for_status()
+        before_cold = _metric_snapshot()
+        cold = await _one_request(client, request, deterministic, 1)
+        after_cold = _metric_snapshot()
+        cold_metrics = _metric_delta(before_cold, after_cold)
+        warm = await _one_request(client, request, deterministic, 1)
+        after_warm = _metric_snapshot()
+        warm_metrics = _metric_delta(after_cold, after_warm)
+
+    cache_metrics = {
+        key: {"cold": cold_metrics.get(key, 0.0), "warm": warm_metrics.get(key, 0.0)}
+        for key in sorted(cold_metrics.keys() | warm_metrics.keys())
+        if any(marker in key.lower() for marker in ("cache_hit", "cached_token", "radix"))
+    }
+    reuse_observed = any(
+        row["warm"] > row["cold"] or row["warm"] > 0 and row["cold"] == 0
+        for row in cache_metrics.values()
+    )
+    exact = bool(
+        cold.get("success")
+        and warm.get("success")
+        and cold.get("output_sha256") == warm.get("output_sha256")
+        and cold.get("prompt_tokens") == warm.get("prompt_tokens")
+        and cold.get("prompt_token_match")
+        and warm.get("prompt_token_match")
+    )
+    return {
+        "applicable": True,
+        "gates": [
+            {"name": "prefix_cache_output_parity", "passed": exact},
+            {"name": "prefix_cache_reuse_observed", "passed": reuse_observed},
+        ],
+        "cold": cold,
+        "warm": warm,
+        "cache_metrics": cache_metrics,
+    }
 
 
 async def _benchmark_profile(
@@ -1339,6 +1587,7 @@ async def _capture_runtime_profiles(
 
 @app.function(image=image, cpu=2, memory=4096, timeout=10 * 60)
 def preflight() -> dict[str, Any]:
+    patch_receipt = _apply_gdn_precision_patch()
     version = subprocess.check_output(
         [_python(), "-c", "import sglang; print(sglang.__version__)"], text=True, timeout=60
     ).strip()
@@ -1380,10 +1629,12 @@ def preflight() -> dict[str, Any]:
         "relevant_options": relevant_options,
         "option_help": option_help,
         "python": _python(),
+        "gdn_precision_patch": patch_receipt,
+        "dependency_versions": _runtime_dependency_versions(),
     }
 
 
-@app.function(image=vllm_image, gpu=GPU, cpu=2, memory=4096, timeout=10 * 60)
+@app.function(image=vllm_image, gpu=GPU_REQUEST, cpu=2, memory=4096, timeout=10 * 60)
 def vllm_preflight() -> dict[str, Any]:
     candidates = sorted(
         str(path)
@@ -1486,7 +1737,7 @@ def vllm_preflight() -> dict[str, Any]:
 
 @app.function(
     image=vllm_image,
-    gpu=GPU,
+    gpu=GPU_REQUEST,
     cpu=8,
     memory=131072,
     timeout=90 * 60,
@@ -1567,7 +1818,22 @@ def screen_vllm_candidate(
         )
         quality = asyncio.run(_quality_gates())
         quality.append(_speculation_health_gate(candidate, metrics))
-        correctness_probes = asyncio.run(_correctness_probes())
+        prefix_cache = asyncio.run(
+            _prefix_cache_correctness(tokenizer, workload, flush_path="/reset_prefix_cache")
+        )
+        quality.extend(prefix_cache["gates"])
+        correctness_probes = asyncio.run(_correctness_probes(tokenizer))
+        quality.append(
+            {
+                "name": "gdn_long_state_semantics",
+                "passed": any(
+                    probe.get("id") == "gdn-long-state-sentinel"
+                    and probe.get("semantic_passed")
+                    and probe.get("prompt_tokens") == probe.get("expected_prompt_tokens")
+                    for probe in correctness_probes
+                ),
+            }
+        )
         total_requests = sum(lane["requests"] for lane in lanes)
         successful = sum(lane["successful_requests"] for lane in lanes)
         result = {
@@ -1584,6 +1850,7 @@ def screen_vllm_candidate(
                 "args": VLLM_BASE_ARGS + candidate["args"],
                 "harness_digest": _harness_digest(),
                 "command": command,
+                "dependency_versions": _runtime_dependency_versions(),
             },
             "workload_name": workload_name,
             "workload": workload,
@@ -1592,6 +1859,7 @@ def screen_vllm_candidate(
             "correctness_probes": correctness_probes,
             "lanes": lanes,
             "runtime_metric_delta": metrics,
+            "prefix_cache_correctness": prefix_cache,
             "request_samples": samples,
             "startup_seconds": startup_seconds,
             "error_rate": 1 - successful / total_requests,
@@ -1622,7 +1890,7 @@ def screen_vllm_candidate(
 
 @app.function(
     image=image,
-    gpu=GPU,
+    gpu=GPU_REQUEST,
     cpu=8,
     memory=131072,
     timeout=90 * 60,
@@ -1647,6 +1915,7 @@ def screen_candidate(
         raise ValueError(f"unknown workload {workload_name}")
     candidate = CANDIDATES[candidate_id]
     workload = WORKLOADS[workload_name]
+    patch_receipt = _apply_gdn_precision_patch()
     inventory = _gpu_inventory()
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     run_dir = Path("/results") / stamp / candidate_id / workload_name
@@ -1660,9 +1929,20 @@ def screen_candidate(
             "HF_HUB_CACHE": "/model-cache/hub",
             "TRANSFORMERS_CACHE": "/model-cache/transformers",
             "SGLANG_CACHE_DIR": "/compile-cache",
+            "TRITON_CACHE_DIR": "/compile-cache/triton",
+            "TORCHINDUCTOR_CACHE_DIR": "/compile-cache/inductor",
+            "DG_JIT_CACHE_DIR": "/compile-cache/deep-gemm",
+            "SGLANG_DG_CACHE_DIR": "/compile-cache/deep-gemm",
+            "FLASHINFER_CACHE_DIR": "/compile-cache/flashinfer",
+            "FLASHINFER_WORKSPACE_BASE": "/compile-cache/flashinfer-workspace",
+            "TVM_FFI_CACHE_DIR": "/compile-cache/tvm-ffi",
+            "TILELANG_CACHE_DIR": "/compile-cache/tilelang",
+            "CUTE_DSL_CACHE_DIR": "/compile-cache/cute-dsl",
+            "CUDA_CACHE_PATH": "/compile-cache/cuda",
             "SGLANG_TORCH_PROFILER_DIR": str(run_dir / "profiles"),
         }
     )
+    cache_before = _compile_cache_inventory()
     command = [_python(), "-m", "sglang.launch_server", *BASE_ARGS, *candidate["args"]]
     print(
         f"starting candidate={candidate_id} workload={workload_name} gpu={inventory[0]['name']}",
@@ -1691,7 +1971,20 @@ def screen_candidate(
         )
         quality = asyncio.run(_quality_gates())
         quality.append(_speculation_health_gate(candidate, metrics))
-        correctness_probes = asyncio.run(_correctness_probes())
+        prefix_cache = asyncio.run(_prefix_cache_correctness(tokenizer, workload))
+        quality.extend(prefix_cache["gates"])
+        correctness_probes = asyncio.run(_correctness_probes(tokenizer))
+        quality.append(
+            {
+                "name": "gdn_long_state_semantics",
+                "passed": any(
+                    probe.get("id") == "gdn-long-state-sentinel"
+                    and probe.get("semantic_passed")
+                    and probe.get("prompt_tokens") == probe.get("expected_prompt_tokens")
+                    for probe in correctness_probes
+                ),
+            }
+        )
         runtime_profile = (
             asyncio.run(_capture_runtime_profiles(tokenizer, workload, run_dir / "profiles"))
             if capture_profile
@@ -1721,11 +2014,14 @@ def screen_candidate(
             "gpu_inventory": inventory,
             "quality": quality,
             "correctness_probes": correctness_probes,
+            "gdn_precision_patch": patch_receipt,
             "lanes": lanes,
             "runtime_metric_delta": metrics,
+            "prefix_cache_correctness": prefix_cache,
             "request_samples": samples,
             "startup_seconds": startup_seconds,
             "startup_breakdown": parse_sglang_startup(log_path.read_text(errors="replace")),
+            "compile_cache": {"before": cache_before, "after": _compile_cache_inventory()},
             "error_rate": 1 - successful / total_requests,
             "prompt_token_mismatch_rate": sum(
                 lane["prompt_token_mismatch_count"] for lane in lanes
