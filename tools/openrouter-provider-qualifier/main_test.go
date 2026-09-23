@@ -21,3 +21,25 @@ func TestPercentileUsesSortedInput(t *testing.T) {
 		t.Fatalf("p95=%v", got)
 	}
 }
+
+func TestDeltaHasOutput(t *testing.T) {
+	tests := []struct {
+		name  string
+		delta map[string]any
+		want  bool
+	}{
+		{name: "empty", delta: map[string]any{}, want: false},
+		{name: "role only", delta: map[string]any{"role": "assistant"}, want: false},
+		{name: "content", delta: map[string]any{"content": "ready"}, want: true},
+		{name: "reasoning", delta: map[string]any{"reasoning": "thinking"}, want: true},
+		{name: "reasoning content", delta: map[string]any{"reasoning_content": "thinking"}, want: true},
+		{name: "tool call", delta: map[string]any{"tool_calls": []any{map[string]any{"index": 0}}}, want: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := deltaHasOutput(test.delta); got != test.want {
+				t.Fatalf("deltaHasOutput() = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
