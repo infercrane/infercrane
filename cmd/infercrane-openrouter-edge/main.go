@@ -25,6 +25,7 @@ func main() {
 	upstreamURL := flag.String("upstream-url", env("INFERCRANE_OPENROUTER_UPSTREAM_URL", "http://127.0.0.1:30000"), "local model server URL")
 	keyFile := flag.String("api-key-file", os.Getenv("INFERCRANE_OPENROUTER_API_KEY_FILE"), "file containing the inbound provider API key")
 	upstreamKeyFile := flag.String("upstream-api-key-file", os.Getenv("INFERCRANE_OPENROUTER_UPSTREAM_API_KEY_FILE"), "optional file containing the runtime API key")
+	receiptFile := flag.String("receipt-file", os.Getenv("INFERCRANE_OPENROUTER_RECEIPT_FILE"), "optional owner-only JSONL request receipt file")
 	maxInFlight := flag.Int("max-in-flight", 8, "maximum accepted in-flight requests; excess receives HTTP 429")
 	flag.Parse()
 	if *catalogFile == "" || *keyFile == "" {
@@ -45,7 +46,15 @@ func main() {
 			fatal(fmt.Errorf("read upstream API key: %w", err))
 		}
 	}
-	edge := &openrouterprovider.Edge{Catalog: catalog, PublicModel: *publicModel, UpstreamModel: *upstreamModel, APIKey: key, UpstreamURL: *upstreamURL, UpstreamKey: upstreamKey, MaxInFlight: *maxInFlight}
+	var receiptRecorder *openrouterprovider.JSONLReceiptRecorder
+	if *receiptFile != "" {
+		receiptRecorder, err = openrouterprovider.NewJSONLReceiptRecorder(*receiptFile)
+		if err != nil {
+			fatal(fmt.Errorf("open request receipt file: %w", err))
+		}
+		defer receiptRecorder.Close()
+	}
+	edge := &openrouterprovider.Edge{Catalog: catalog, PublicModel: *publicModel, UpstreamModel: *upstreamModel, APIKey: key, UpstreamURL: *upstreamURL, UpstreamKey: upstreamKey, MaxInFlight: *maxInFlight, ReceiptRecorder: receiptRecorder}
 	handler, err := edge.Handler()
 	if err != nil {
 		fatal(err)

@@ -6,11 +6,49 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+type memoryReceiptRecorder struct {
+	mu       sync.Mutex
+	receipts []RequestReceipt
+}
+
+func (r *memoryReceiptRecorder) Record(receipt RequestReceipt) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.receipts = append(r.receipts, receipt)
+	return nil
+}
+
+func (r *memoryReceiptRecorder) last(t *testing.T) RequestReceipt {
+	t.Helper()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.receipts) == 0 {
+		t.Fatal("expected a request receipt")
+	}
+	return r.receipts[len(r.receipts)-1]
+}
+
+func (r *memoryReceiptRecorder) findOutcome(t *testing.T, outcome string) RequestReceipt {
+	t.Helper()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, receipt := range r.receipts {
+		if receipt.Outcome == outcome {
+			return receipt
+		}
+	}
+	t.Fatalf("expected a request receipt with outcome %q", outcome)
+	return RequestReceipt{}
+}
 
 func testCatalog() *Catalog {
 	return &Catalog{Data: []Model{{
@@ -37,10 +75,11 @@ func TestEdgeAuthenticatesRewritesAndStreams(t *testing.T) {
 			t.Error("OpenRouter reasoning control reached strict upstream")
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = io.WriteString(w, "data: {\"choices\":[]}\n\ndata: [DONE]\n\n")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"secret response\"},\"finish_reason\":null}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":7,\"total_tokens\":18}}\n\ndata: [DONE]\n\n")
 	}))
 	defer upstream.Close()
-	edge := &Edge{Catalog: testCatalog(), PublicModel: "qwen/qwen3.8-27b", UpstreamModel: "Qwen/Qwen3.8-27B-FP8", APIKey: "provider-secret", UpstreamURL: upstream.URL, MaxInFlight: 1}
+	receipts := &memoryReceiptRecorder{}
+	edge := &Edge{Catalog: testCatalog(), PublicModel: "qwen/qwen3.8-27b", UpstreamModel: "Qwen/Qwen3.8-27B-FP8", APIKey: "provider-secret", UpstreamURL: upstream.URL, MaxInFlight: 1, ReceiptRecorder: receipts}
 	handler, err := edge.Handler()
 	if err != nil {
 		t.Fatal(err)
@@ -63,6 +102,36 @@ func TestEdgeAuthenticatesRewritesAndStreams(t *testing.T) {
 	handler.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK || seenModel != "Qwen/Qwen3.8-27B-FP8" || !seenThinking || !strings.Contains(recorder.Body.String(), "[DONE]") {
 		t.Fatalf("unexpected proxy response code=%d model=%q thinking=%v body=%q", recorder.Code, seenModel, seenThinking, recorder.Body.String())
+	}
+	receipt := receipts.last(t)
+	if receipt.PromptTokens != 11 || receipt.CompletionTokens != 7 || receipt.TotalTokens != 18 || receipt.FinishReason != "stop" || receipt.Outcome != "completed" || !receipt.Stream {
+		t.Fatalf("unexpected request receipt: %+v", receipt)
+	}
+}
+
+func TestEdgeRecordsBufferedUsageWithoutContent(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"do not retain me"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":3,"total_tokens":8}}`+"\n")
+	}))
+	defer upstream.Close()
+	receipts := &memoryReceiptRecorder{}
+	edge := &Edge{Catalog: testCatalog(), PublicModel: "qwen/qwen3.8-27b", UpstreamModel: "upstream", APIKey: "secret", UpstreamURL: upstream.URL, MaxInFlight: 1, ReceiptRecorder: receipts}
+	handler, err := edge.Handler()
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"qwen/qwen3.8-27b","messages":[]}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), "do not retain me") || !strings.HasSuffix(recorder.Body.String(), "\n") {
+		t.Fatalf("unexpected buffered response: %d %q", recorder.Code, recorder.Body.String())
+	}
+	receipt := receipts.last(t)
+	encoded, _ := json.Marshal(receipt)
+	if receipt.PromptTokens != 5 || receipt.CompletionTokens != 3 || receipt.TotalTokens != 8 || receipt.FinishReason != "stop" || bytesContain(encoded, []byte("do not retain me")) {
+		t.Fatalf("unexpected content-free receipt: %s", encoded)
 	}
 }
 
@@ -152,7 +221,8 @@ func TestEdgeReturnsImmediate429AtCapacity(t *testing.T) {
 		_, _ = io.WriteString(w, `{}`)
 	}))
 	defer upstream.Close()
-	edge := &Edge{Catalog: testCatalog(), PublicModel: "qwen/qwen3.8-27b", UpstreamModel: "upstream", APIKey: "secret", UpstreamURL: upstream.URL, MaxInFlight: 1}
+	receipts := &memoryReceiptRecorder{}
+	edge := &Edge{Catalog: testCatalog(), PublicModel: "qwen/qwen3.8-27b", UpstreamModel: "upstream", APIKey: "secret", UpstreamURL: upstream.URL, MaxInFlight: 1, ReceiptRecorder: receipts}
 	handler, err := edge.Handler()
 	if err != nil {
 		t.Fatal(err)
@@ -178,6 +248,38 @@ func TestEdgeReturnsImmediate429AtCapacity(t *testing.T) {
 	if calls.Load() != 1 {
 		t.Fatalf("expected one upstream call, got %d", calls.Load())
 	}
+	if receipt := receipts.findOutcome(t, "capacity_rejected"); receipt.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("unexpected capacity receipt: %+v", receipt)
+	}
+}
+
+func TestJSONLReceiptRecorderUsesOwnerOnlyContentFreeRecords(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "receipts", "requests.ndjson")
+	recorder, err := NewJSONLReceiptRecorder(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = recorder.Record(RequestReceipt{RequestID: "req-1", Model: "model", StatusCode: 200, Outcome: "completed", PromptTokens: 2, CompletionTokens: 3, TotalTokens: 5}); err != nil {
+		t.Fatal(err)
+	}
+	if err = recorder.Close(); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 || !strings.Contains(string(body), receiptSchemaVersion) || strings.Contains(string(body), "messages") {
+		t.Fatalf("unexpected receipt file mode=%o body=%q", info.Mode().Perm(), body)
+	}
+}
+
+func bytesContain(body, value []byte) bool {
+	return strings.Contains(string(body), string(value))
 }
 
 func TestEdgePropagatesCancellation(t *testing.T) {
