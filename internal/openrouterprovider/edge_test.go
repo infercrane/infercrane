@@ -253,6 +253,169 @@ func TestEdgeReturnsImmediate429AtCapacity(t *testing.T) {
 	}
 }
 
+func TestAdaptiveAdmissionDecreasesOnTTFTMissAndRecoversWhenSaturated(t *testing.T) {
+	controller, err := newAdmissionController(AdmissionConfig{
+		MinLimit: 2, InitialLimit: 4, MaxLimit: 5, Window: 4,
+		TargetTTFT: 100 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 4 {
+		if controller.tryAcquire(1) != admissionAccepted {
+			t.Fatal("expected initial admission")
+		}
+		controller.releasePrefill(1)
+		controller.complete(admissionObservation{StatusCode: 200, Outcome: "completed", TTFT: 250 * time.Millisecond, CompletionTokens: 10})
+	}
+	if got := controller.snapshot().limit; got != 3 {
+		t.Fatalf("multiplicative decrease limit=%d, want 3", got)
+	}
+	for range 4 {
+		if controller.tryAcquire(1) != admissionAccepted {
+			t.Fatal("expected recovery admission")
+		}
+		controller.releasePrefill(1)
+		controller.mu.Lock()
+		controller.windowSaturated = true
+		controller.mu.Unlock()
+		controller.complete(admissionObservation{StatusCode: 200, Outcome: "completed", TTFT: 50 * time.Millisecond, CompletionTokens: 10})
+	}
+	if got := controller.snapshot().limit; got != 4 {
+		t.Fatalf("additive recovery limit=%d, want 4", got)
+	}
+}
+
+func TestAdmissionProtectsPrefillSeparatelyFromDecode(t *testing.T) {
+	controller, err := newAdmissionController(AdmissionConfig{
+		MinLimit: 2, InitialLimit: 2, MaxLimit: 2, Window: 4,
+		MaxPrefillTokensInFlight: 100,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision := controller.tryAcquire(70); decision != admissionAccepted {
+		t.Fatalf("first request decision=%q", decision)
+	}
+	if decision := controller.tryAcquire(40); decision != admissionPrefillRejected {
+		t.Fatalf("overlapping long prefill decision=%q", decision)
+	}
+	controller.releasePrefill(70)
+	if decision := controller.tryAcquire(40); decision != admissionAccepted {
+		t.Fatalf("decode-overlapped request decision=%q", decision)
+	}
+	snapshot := controller.snapshot()
+	if snapshot.prefillTokensInFlight != 40 || snapshot.inFlight != 2 || snapshot.prefillRejected != 1 {
+		t.Fatalf("unexpected prefill snapshot: %+v", snapshot)
+	}
+	controller.releasePrefill(40)
+	controller.complete(admissionObservation{StatusCode: 200, Outcome: "completed"})
+	controller.complete(admissionObservation{StatusCode: 200, Outcome: "completed"})
+}
+
+func TestEdgeReleasesPrefillBudgetAtFirstStreamToken(t *testing.T) {
+	firstStreaming := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		call := calls.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ready\"},\"finish_reason\":null}]}\n\n")
+		w.(http.Flusher).Flush()
+		if call == 1 {
+			close(firstStreaming)
+			<-releaseFirst
+		}
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":60,\"completion_tokens\":1,\"total_tokens\":61}}\n\ndata: [DONE]\n\n")
+	}))
+	defer upstream.Close()
+	edge := &Edge{
+		Catalog: testCatalog(), PublicModel: "qwen/qwen3.8-27b", UpstreamModel: "upstream",
+		APIKey: "secret", UpstreamURL: upstream.URL, MaxInFlight: 2, MaxPrefillTokensInFlight: 100,
+	}
+	handler, err := edge.Handler()
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := `{"model":"qwen/qwen3.8-27b","stream":true,"messages":[{"role":"user","content":"` + strings.Repeat("x", 180) + `"}]}`
+	firstDone := make(chan struct{})
+	go func() {
+		request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+		request.Header.Set("Authorization", "Bearer secret")
+		handler.ServeHTTP(httptest.NewRecorder(), request)
+		close(firstDone)
+	}()
+	<-firstStreaming
+	deadline := time.Now().Add(time.Second)
+	for edge.admission.snapshot().prefillTokensInFlight != 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	second := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	request.Header.Set("Authorization", "Bearer secret")
+	handler.ServeHTTP(second, request)
+	if second.Code != http.StatusOK {
+		t.Fatalf("decode-overlapped prefill returned %d: %s", second.Code, second.Body.String())
+	}
+	close(releaseFirst)
+	<-firstDone
+	if calls.Load() != 2 {
+		t.Fatalf("expected two upstream calls, got %d", calls.Load())
+	}
+}
+
+func TestEstimatePromptTokensDoesNotRetainOrMarshalContent(t *testing.T) {
+	payload := map[string]any{"messages": []any{
+		map[string]any{"role": "system", "content": "123456"},
+		map[string]any{"role": "user", "content": []any{map[string]any{"type": "text", "text": "abcdef"}}},
+	}, "tools": []any{map[string]any{"name": "read_file"}}}
+	if got := estimatePromptTokens(payload); got != 12 {
+		// The estimator includes role/type strings as a conservative boundary.
+		t.Fatalf("estimated tokens=%d, want 12", got)
+	}
+}
+
+func TestEdgeProtectsOperationalMetricsAndReportsProductiveUtilization(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ready\"},\"finish_reason\":null}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":50,\"total_tokens\":150}}\n\ndata: [DONE]\n\n")
+	}))
+	defer upstream.Close()
+	edge := &Edge{
+		Catalog: testCatalog(), PublicModel: "qwen/qwen3.8-27b", UpstreamModel: "upstream",
+		APIKey: "secret", MetricsKey: "metrics-secret", UpstreamURL: upstream.URL,
+		MaxInFlight: 2, TargetTTFT: time.Second, QualifiedOutputTokensPerSecond: 100,
+		InputPricePerMillionUSD: 0.10, OutputPricePerMillionUSD: 2.20, GPUHourlyCostUSD: 1.68,
+	}
+	handler, err := edge.Handler()
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"qwen/qwen3.8-27b","stream":true}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	handler.ServeHTTP(httptest.NewRecorder(), request)
+
+	unauthorized := httptest.NewRecorder()
+	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("metrics without dedicated key returned %d", unauthorized.Code)
+	}
+	metricsRequest := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	metricsRequest.Header.Set("Authorization", "Bearer metrics-secret")
+	metrics := httptest.NewRecorder()
+	handler.ServeHTTP(metrics, metricsRequest)
+	for _, expected := range []string{
+		"infercrane_provider_productive_output_tokens_total 50",
+		"infercrane_provider_revenue_usd_total",
+		"infercrane_provider_productive_utilization_ratio",
+		"infercrane_provider_admission_limit 2",
+	} {
+		if !strings.Contains(metrics.Body.String(), expected) {
+			t.Fatalf("metrics missing %q:\n%s", expected, metrics.Body.String())
+		}
+	}
+}
+
 func TestJSONLReceiptRecorderUsesOwnerOnlyContentFreeRecords(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "receipts", "requests.ndjson")
 	recorder, err := NewJSONLReceiptRecorder(path)

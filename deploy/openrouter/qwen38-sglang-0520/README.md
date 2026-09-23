@@ -3,19 +3,43 @@
 This package turns the workload-qualified SGLang 0.5.20 recipe into an
 OpenRouter provider endpoint. The public edge accepts only the declared model,
 streams without buffering, emits SSE heartbeats during quiet generation,
-propagates cancellation, and returns HTTP 429 as soon as the twelve-request
-admission boundary is full.
+propagates cancellation, and returns HTTP 429 before the model server queues
+past its safe boundary. The edge starts at eight concurrent requests, can grow
+to sixteen after healthy saturated windows, and can fall as low as four when
+measured p95-oriented TTFT or request reliability regresses. A separate
+estimated-prefill budget prevents
+large prompts from occupying every scheduler slot; that budget is released at
+the first streamed token while the request remains counted against decode
+concurrency.
 
 The catalog remains `is_ready: false` until the exact target deployment passes
 the provider qualifier and a production soak. Modal H100/H200 measurements are
 screening evidence; they do not qualify a RunPod deployment.
 
-The current launch boundary is one H200 with twelve admitted requests. The
-catalog intentionally declares only 32,768 input tokens, 2,048 output tokens,
-and text input. Longer context, image/video inputs, and higher concurrency stay
-disabled until they pass their own exact-target qualification. The initial
-price is $0.10/M input and $2.20/M output: lower than most current providers,
-but not an uneconomic attempt to match the absolute output-price floor.
+The current launch boundary is one H200 with adaptive admission from four to
+sixteen decode requests, starting at eight. The three-second p95 TTFT objective
+is intended to settle around the measured twelve-request frontier and reject
+load before the runtime builds an unbounded queue. The catalog intentionally
+declares only 32,768 input tokens, 2,048 output tokens, and text input. Longer
+context, image/video inputs, and higher concurrency stay disabled until they
+pass their own exact-target qualification. The initial price is $0.10/M input
+and $2.20/M output: lower than most current providers, but not an uneconomic
+attempt to match the absolute output-price floor.
+
+Portable JIT artifacts are restored from an immutable, SHA-256 verified release
+scoped to the exact runtime image, model revision, CUDA version, and GPU compute
+capability. Triton, DeepGEMM, FlashInfer, Inductor, CUDA, TileLang, TVM FFI, and
+CuTe caches are staged onto local disk before the runtime starts. CUDA graph
+capture remains a per-process startup operation and is not misrepresented as a
+portable cache.
+
+The image also carries a fail-closed source patch for the three GDN gate paths
+where SGLang 0.5.20 narrows an FP32 sigmoid through BF16 before updating the
+persistent recurrent state. Every input file must match the exact v0.5.20 hash;
+the image build records before/after hashes and the two upstream review commits.
+This patch is a correctness candidate until the long-state, runtime-parity, and
+full workload gates pass on the target GPU. It is not promoted from the source
+change alone.
 
 Build from the repository root:
 
@@ -31,6 +55,26 @@ file, writes the artifact manifest, and then exits. The serving worker requires
 `INFERCRANE_OPENROUTER_API_KEY` as a provider secret and exposes the provider
 API on port 8080. Configure the load balancer health probe for `/ping` on port
 30001.
+
+Production workers should additionally set:
+
+```text
+INFERCRANE_COMPILE_CACHE_RELEASE=<immutable release name>
+INFERCRANE_COMPILE_CACHE_MANIFEST_SHA256=<manifest digest>
+INFERCRANE_RUNTIME_IMAGE_DIGEST=sha256:<final provider image digest>
+INFERCRANE_QUALIFIED_OUTPUT_TPS=<exact-host SLO-qualified capacity>
+INFERCRANE_GPU_HOURLY_COST_USD=<all-in hourly host cost>
+INFERCRANE_OPENROUTER_METRICS_KEY_FILE=<owner-only credential path>
+INFERCRANE_MAX_PREFILL_TOKENS_IN_FLIGHT=65536
+```
+
+The protected `/metrics` endpoint reports current admission capacity, fail-fast
+rejections, successful and SLO-qualified token totals, productive utilization,
+prefill pressure/rejections, implied revenue, GPU cost, and gross margin.
+Productive utilization deliberately excludes failed responses and successful
+streams that miss the configured TTFT objective. Production dashboards should
+use a rolling `rate()` over the token counters; the process-lifetime ratio is a
+diagnostic that includes startup and recovery time.
 
 Qualify the public HTTPS endpoint from outside the provider network:
 

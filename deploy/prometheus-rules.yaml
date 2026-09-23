@@ -22,3 +22,50 @@ groups:
           severity: critical
         annotations:
           summary: InferCrane metrics endpoint is unavailable
+  - name: infercrane-openrouter-provider
+    interval: 30s
+    rules:
+      - record: infercrane_provider:productive_utilization_ratio_5m
+        expr: |
+          rate(infercrane_provider_productive_output_tokens_total[5m])
+          / clamp_min(infercrane_provider_qualified_output_tokens_per_second, 0.001)
+      - record: infercrane_provider:request_failure_ratio_5m
+        expr: |
+          rate(infercrane_provider_requests_failed_total[5m])
+          / clamp_min(rate(infercrane_provider_requests_completed_total[5m]), 0.001)
+      - record: infercrane_provider:ttft_slo_miss_ratio_5m
+        expr: |
+          rate(infercrane_provider_ttft_slo_missed_total[5m])
+          / clamp_min(rate(infercrane_provider_requests_completed_total[5m]), 0.001)
+      - record: infercrane_provider:prefill_rejection_ratio_5m
+        expr: |
+          rate(infercrane_provider_prefill_rejected_total[5m])
+          / clamp_min(rate(infercrane_provider_requests_accepted_total[5m]) + rate(infercrane_provider_requests_rejected_total[5m]), 0.001)
+      - record: infercrane_provider:gross_margin_ratio_1h
+        expr: |
+          (
+            rate(infercrane_provider_revenue_usd_total[1h])
+            - infercrane_provider_gpu_hourly_cost_usd / 3600
+          )
+          / clamp_min(rate(infercrane_provider_revenue_usd_total[1h]), 0.000000001)
+      - alert: InferCraneProviderFailureRateHigh
+        expr: infercrane_provider:request_failure_ratio_5m > 0.01
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: OpenRouter provider failure rate exceeds 1%
+      - alert: InferCraneProviderTTFTSLOMissHigh
+        expr: infercrane_provider:ttft_slo_miss_ratio_5m > 0.05
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: OpenRouter provider TTFT SLO miss rate exceeds 5%
+      - alert: InferCraneProviderCapacityCalibrationStale
+        expr: infercrane_provider:productive_utilization_ratio_5m > 1.10
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: Productive token rate exceeds the qualified capacity by more than 10%

@@ -1,0 +1,151 @@
+{
+  "candidates": [
+    {
+      "error_rate": 0.0,
+      "evidence_level": "screening",
+      "evidence_state": "reproduced",
+      "id": "sglang-0520-nextn-k4-bounded-graphs",
+      "lanes": [
+        {
+          "aggregate_output_tokens_per_second": 11.919413101471438,
+          "concurrency": 1,
+          "cost_per_1m_successful_output_tokens_usd": 105.79379951554252,
+          "economics": {
+            "break_even_utilization": 2.234772430815067,
+            "can_reach_target_margin_at_full_utilization": false,
+            "input_output_token_ratio": 503.9983723958333,
+            "input_price_usd_per_million": 0.1,
+            "measured_gpu_cost_per_million_output_equivalent_usd": 105.79379951554252,
+            "measured_gpu_cost_usd": 0.6499971042234932,
+            "measured_output_tokens_per_second": 11.919413101471438,
+            "measured_revenue_usd": 0.32317340000000006,
+            "non_gpu_revenue_fraction": 0.1,
+            "output_price_usd_per_million": 2.2,
+            "passes_target_margin_at_target_utilization": false,
+            "projected_gross_margin": -1.9732788396193723,
+            "required_output_tokens_per_second_for_target_margin": 43.588105839268835,
+            "target_gross_margin": 0.35,
+            "target_margin_utilization": 3.6569003413337464,
+            "target_utilization": 0.7
+          },
+          "gpu_seconds_per_successful_request": 42.955135092750005,
+          "independent_runs": 1,
+          "input_tokens": 3096566,
+          "itl_p95_ms": 5.712861887769026,
+          "measurement_seconds": 515.4616211130001,
+          "output_tokens": 6144,
+          "request_throughput_requests_per_second": 0.023280103713811402,
+          "requests": 12,
+          "slo_attainment": 0.0,
+          "slo_goodput_requests_per_second": 0.0,
+          "slo_qualified_output_tokens_per_second": 0.0,
+          "successful_requests": 12,
+          "ttft_p95_ms": 30154.161654849955
+        }
+      ],
+      "origin": "infercrane_generated",
+      "prompt_token_mismatch_rate": 0.0,
+      "quality_gates": [
+        {
+          "name": "api_models",
+          "passed": true
+        },
+        {
+          "name": "stream_usage",
+          "passed": true
+        },
+        {
+          "name": "stream_done",
+          "passed": true
+        },
+        {
+          "name": "stream_finish_reason",
+          "passed": true
+        },
+        {
+          "name": "buffered_usage",
+          "passed": true
+        },
+        {
+          "name": "reasoning_output",
+          "passed": true
+        },
+        {
+          "name": "thinking_semantic",
+          "passed": true
+        },
+        {
+          "name": "structured_output",
+          "passed": true
+        },
+        {
+          "name": "tool_call",
+          "passed": true
+        },
+        {
+          "name": "invalid_request_rejected",
+          "passed": true
+        },
+        {
+          "name": "speculation_health",
+          "passed": true
+        },
+        {
+          "name": "runtime_parity",
+          "passed": false
+        },
+        {
+          "name": "gdn_long_state_semantics",
+          "passed": true
+        }
+      ],
+      "quality_passed": false,
+      "recipe_digest": "sha256:ada45fa22a46c6d9d71118fa5a1f3b5e4dc7c22ff964fea5caba701349906e60",
+      "runtime_id": "sglang-0.5.20-nextn-k4-bounded-graphs",
+      "workload_digest": "sha256:266762a7f933b5ad2405a5947ce80199ab0c1201c3cf3c17d48e942fc15ed591"
+    }
+  ],
+  "hardware_identity": "modal:NVIDIA H200:9.0",
+  "model_identity": "Qwen/Qwen3.8-27B-FP8@017b9c7af6b5689d5dd426a76e0bc077eb5ca20a",
+  "required_concurrency_lanes": [
+    1
+  ],
+  "schema_version": "infercrane.dev/optimization-evidence/v1",
+  "selection_policy": {
+    "cost_tie_breaker": true,
+    "evidence_level": "screening",
+    "id": "workload-qualified-price-performance-screen-v1",
+    "lane_aggregation": "arithmetic_mean",
+    "objective": "minimum_cogs_under_slo",
+    "qualification_before_scoring": true,
+    "version": 1
+  },
+  "slo": {
+    "max_error_rate": 0.01,
+    "max_itl_ms": 20.0,
+    "max_prompt_token_mismatch_rate": 0.0,
+    "max_ttft_ms": 20000.0,
+    "min_successful_fraction": 0.99,
+    "minimum_independent_runs": 1,
+    "minimum_measurement_seconds_per_lane": 0.0,
+    "minimum_requests_per_lane": 12,
+    "required_quality_gates": [
+      "api_models",
+      "stream_usage",
+      "stream_done",
+      "stream_finish_reason",
+      "buffered_usage",
+      "reasoning_output",
+      "thinking_semantic",
+      "structured_output",
+      "tool_call",
+      "invalid_request_rejected",
+      "speculation_health",
+      "runtime_parity",
+      "gdn_long_state_semantics"
+    ],
+    "scope": "each_concurrency_lane"
+  },
+  "workload_digest": "sha256:266762a7f933b5ad2405a5947ce80199ab0c1201c3cf3c17d48e942fc15ed591",
+  "workload_id": "qwen38-public-context-boundary-262k-v1"
+}

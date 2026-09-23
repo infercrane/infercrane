@@ -25,13 +25,23 @@ const defaultStreamKeepAliveInterval = 10 * time.Second
 // public model identity, provider credential, and admission boundary out of
 // the model server while preserving streaming and request cancellation.
 type Edge struct {
-	Catalog       *Catalog
-	PublicModel   string
-	UpstreamModel string
-	APIKey        string
-	UpstreamURL   string
-	UpstreamKey   string
-	MaxInFlight   int
+	Catalog                        *Catalog
+	PublicModel                    string
+	UpstreamModel                  string
+	APIKey                         string
+	UpstreamURL                    string
+	UpstreamKey                    string
+	MaxInFlight                    int
+	MinInFlight                    int
+	InitialInFlight                int
+	AdmissionWindow                int
+	TargetTTFT                     time.Duration
+	QualifiedOutputTokensPerSecond float64
+	InputPricePerMillionUSD        float64
+	OutputPricePerMillionUSD       float64
+	GPUHourlyCostUSD               float64
+	MaxPrefillTokensInFlight       int64
+	MetricsKey                     string
 	// StreamKeepAliveInterval controls SSE comment heartbeats while the model
 	// is producing no bytes. Zero selects the production default.
 	StreamKeepAliveInterval time.Duration
@@ -39,14 +49,26 @@ type Edge struct {
 	Logger                  *slog.Logger
 	ReceiptRecorder         ReceiptRecorder
 
-	semaphore chan struct{}
+	admission *admissionController
 }
 
 func (e *Edge) Handler() (http.Handler, error) {
 	if err := e.validate(); err != nil {
 		return nil, err
 	}
-	e.semaphore = make(chan struct{}, e.MaxInFlight)
+	var err error
+	e.admission, err = newAdmissionController(AdmissionConfig{
+		MinLimit: e.MinInFlight, InitialLimit: e.InitialInFlight, MaxLimit: e.MaxInFlight,
+		Window: e.AdmissionWindow, TargetTTFT: e.TargetTTFT,
+		QualifiedOutputTokensPerSec: e.QualifiedOutputTokensPerSecond,
+		InputPricePerMillionUSD:     e.InputPricePerMillionUSD,
+		OutputPricePerMillionUSD:    e.OutputPricePerMillionUSD,
+		GPUHourlyCostUSD:            e.GPUHourlyCostUSD,
+		MaxPrefillTokensInFlight:    e.MaxPrefillTokensInFlight,
+	})
+	if err != nil {
+		return nil, err
+	}
 	if e.Client == nil {
 		e.Client = &http.Client{Transport: &http.Transport{
 			MaxIdleConns:          e.MaxInFlight * 2,
@@ -65,7 +87,28 @@ func (e *Edge) Handler() (http.Handler, error) {
 	mux.HandleFunc("GET /v1/models", e.auth(e.Catalog.ServeHTTP))
 	mux.HandleFunc("GET /openrouter/v1/models", e.auth(e.Catalog.ServeHTTP))
 	mux.HandleFunc("POST /v1/chat/completions", e.auth(e.completions))
+	if e.MetricsKey != "" {
+		mux.HandleFunc("GET /metrics", e.metricsAuth(e.metrics))
+	}
 	return mux, nil
+}
+
+func (e *Edge) metricsAuth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		expected := "Bearer " + e.MetricsKey
+		if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte(expected)) != 1 {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			writeProviderError(w, http.StatusUnauthorized, "Invalid metrics API key", "authentication_error")
+			return
+		}
+		next(w, r)
+	}
+}
+
+func (e *Edge) metrics(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	e.admission.writePrometheus(w, time.Now())
 }
 
 func (e *Edge) validate() error {
@@ -155,15 +198,30 @@ func (e *Edge) completions(w http.ResponseWriter, r *http.Request) {
 	}
 	stream, _ := payload["stream"].(bool)
 	translateReasoningRequest(payload)
-	select {
-	case e.semaphore <- struct{}{}:
-		defer func() { <-e.semaphore }()
-	default:
+	estimatedPrefillTokens := estimatePromptTokens(payload)
+	decision := e.admission.tryAcquire(estimatedPrefillTokens)
+	if decision != admissionAccepted {
 		w.Header().Set("Retry-After", "1")
-		writeProviderError(w, http.StatusTooManyRequests, "Provider capacity is temporarily full", "rate_limit_error")
-		e.recordReceipt(RequestReceipt{RequestID: requestID, Model: e.PublicModel, UpstreamModel: e.UpstreamModel, Stream: stream, StatusCode: http.StatusTooManyRequests, Outcome: "capacity_rejected"})
+		message := "Provider capacity is temporarily full"
+		if decision == admissionPrefillRejected {
+			message = "Provider long-context capacity is temporarily full"
+		}
+		writeProviderError(w, http.StatusTooManyRequests, message, "rate_limit_error")
+		e.recordReceipt(RequestReceipt{RequestID: requestID, Model: e.PublicModel, UpstreamModel: e.UpstreamModel, Stream: stream, StatusCode: http.StatusTooManyRequests, Outcome: string(decision)})
 		return
 	}
+	observation := admissionObservation{StatusCode: http.StatusInternalServerError, Outcome: "edge_error"}
+	prefillReleased := false
+	releasePrefill := func() {
+		if !prefillReleased {
+			e.admission.releasePrefill(estimatedPrefillTokens)
+			prefillReleased = true
+		}
+	}
+	defer func() {
+		releasePrefill()
+		e.admission.complete(observation)
+	}()
 	payload["model"] = e.UpstreamModel
 	body, err = json.Marshal(payload)
 	if err != nil {
@@ -183,6 +241,7 @@ func (e *Edge) completions(w http.ResponseWriter, r *http.Request) {
 		e.Logger.Error("provider upstream request failed", "request_id", requestID, "duration_ms", time.Since(started).Milliseconds(), "error", err)
 		writeProviderError(w, http.StatusBadGateway, "Model server request failed", "server_error")
 		e.recordReceipt(RequestReceipt{RequestID: requestID, Model: e.PublicModel, UpstreamModel: e.UpstreamModel, Stream: stream, StatusCode: http.StatusBadGateway, Outcome: "upstream_error", DurationMS: time.Since(started).Milliseconds()})
+		observation = admissionObservation{StatusCode: http.StatusBadGateway, Outcome: "upstream_error", Duration: time.Since(started)}
 		return
 	}
 	defer response.Body.Close()
@@ -191,12 +250,50 @@ func (e *Edge) completions(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Request-ID", requestID)
 	w.WriteHeader(response.StatusCode)
 	if strings.HasPrefix(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") {
-		metadata := e.copyEventStream(w, r, response.Body, requestID, started)
+		metadata := e.copyEventStream(w, r, response.Body, requestID, started, releasePrefill)
 		e.recordResponseReceipt(requestID, stream, response.StatusCode, started, metadata)
+		observation = admissionObservation{StatusCode: response.StatusCode, Outcome: metadata.outcome, TTFT: metadata.timeToFirstToken, Duration: time.Since(started), PromptTokens: metadata.promptTokens, CompletionTokens: metadata.completionTokens}
 		return
 	}
+	releasePrefill()
 	metadata := e.copyBufferedResponse(w, response.Body, requestID, started)
 	e.recordResponseReceipt(requestID, stream, response.StatusCode, started, metadata)
+	observation = admissionObservation{StatusCode: response.StatusCode, Outcome: metadata.outcome, TTFT: metadata.timeToFirstToken, Duration: time.Since(started), PromptTokens: metadata.promptTokens, CompletionTokens: metadata.completionTokens}
+}
+
+// estimatePromptTokens is deliberately conservative and content-free. The
+// edge does not embed a tokenizer or retain prompts; it estimates UTF-8 text
+// at three bytes per token solely to protect prefill capacity.
+func estimatePromptTokens(payload map[string]any) int64 {
+	var textBytes int64
+	for _, key := range []string{"messages", "prompt", "input", "tools", "response_format"} {
+		textBytes += estimateTextBytes(payload[key])
+	}
+	if textBytes == 0 {
+		return 1
+	}
+	return (textBytes + 2) / 3
+}
+
+func estimateTextBytes(value any) int64 {
+	switch typed := value.(type) {
+	case string:
+		return int64(len([]byte(typed)))
+	case []any:
+		var total int64
+		for _, item := range typed {
+			total += estimateTextBytes(item)
+		}
+		return total
+	case map[string]any:
+		var total int64
+		for _, item := range typed {
+			total += estimateTextBytes(item)
+		}
+		return total
+	default:
+		return 0
+	}
 }
 
 // translateReasoningRequest maps OpenRouter's provider-neutral reasoning
@@ -302,7 +399,7 @@ func (w flushWriter) Write(data []byte) (int, error) {
 	return count, err
 }
 
-func (e *Edge) copyEventStream(w http.ResponseWriter, r *http.Request, body io.Reader, requestID string, started time.Time) responseMetadata {
+func (e *Edge) copyEventStream(w http.ResponseWriter, r *http.Request, body io.Reader, requestID string, started time.Time, onFirstToken func()) responseMetadata {
 	metadata := responseMetadata{outcome: "completed"}
 	inspector := newSSEMetadataInspector(started)
 	interval := e.StreamKeepAliveInterval
@@ -349,7 +446,9 @@ func (e *Edge) copyEventStream(w http.ResponseWriter, r *http.Request, body io.R
 			heartbeat.Reset(interval)
 		case read := <-reads:
 			if len(read.data) > 0 {
-				inspector.observe(read.data)
+				if inspector.observe(read.data) && onFirstToken != nil {
+					onFirstToken()
+				}
 				if _, err := w.Write(read.data); err != nil {
 					metadata = inspector.metadata()
 					metadata.outcome = "client_write_error"
@@ -389,7 +488,8 @@ func newSSEMetadataInspector(started time.Time) *sseMetadataInspector {
 	return &sseMetadataInspector{started: started, result: responseMetadata{outcome: "completed"}}
 }
 
-func (i *sseMetadataInspector) observe(data []byte) {
+func (i *sseMetadataInspector) observe(data []byte) bool {
+	firstTokenBefore := i.result.timeToFirstToken
 	i.pending = append(i.pending, data...)
 	for {
 		index := bytes.IndexByte(i.pending, '\n')
@@ -398,7 +498,7 @@ func (i *sseMetadataInspector) observe(data []byte) {
 				i.pending = nil
 				i.result.outcome = "usage_unavailable"
 			}
-			return
+			return firstTokenBefore == 0 && i.result.timeToFirstToken > 0
 		}
 		line := bytes.TrimSpace(i.pending[:index])
 		i.pending = i.pending[index+1:]

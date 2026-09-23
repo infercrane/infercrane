@@ -136,6 +136,31 @@ WORKLOADS = {
             "fleet telemetry. It is not a replay of the unreleased agent trace."
         ),
     },
+    "public-context-boundary-262k": {
+        "id": "qwen38-public-context-boundary-262k-v1",
+        "source": {
+            "name": "Qwen3.8 declared context boundary",
+            "url": "https://huggingface.co/Qwen/Qwen3.8-27B-FP8",
+            "release_state": "model_card_boundary",
+        },
+        # Leave room for the chat template, output, and runtime bookkeeping
+        # below the declared 262,144-token total context boundary.
+        "input_tokens": 258048,
+        "output_tokens": 512,
+        "concurrency_lanes": [1],
+        "streaming": True,
+        "slo": {
+            "id": "infercrane-context-boundary-v1",
+            "source": "pre_registered_context_qualification_objective",
+            "max_ttft_ms": 20000.0,
+            "max_itl_ms": 20.0,
+        },
+        "sampling": _SAMPLING,
+        "boundary": (
+            "A single-request capability and correctness qualification near the declared "
+            "context boundary. It is not an interactive-latency claim or an arrival mix."
+        ),
+    },
 }
 
 # Backward-compatible default for the competitive target calculation. OpenRouter
@@ -776,7 +801,12 @@ def build_evidence(
         "invalid_request_rejected",
         "speculation_health",
         "runtime_parity",
+        "gdn_long_state_semantics",
     ]
+    if workload["id"].endswith("agent-prefix-reuse-derived-v1"):
+        required_gates.extend(
+            ["prefix_cache_output_parity", "prefix_cache_reuse_observed"]
+        )
     minimums = {
         "screening": {"requests": 12, "runs": 1, "seconds": 0.0},
         "qualification": {"requests": 100, "runs": 2, "seconds": 300.0},

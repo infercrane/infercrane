@@ -8,6 +8,9 @@ readonly artifact_model="${artifact_root}/model"
 readonly artifact_manifest="${artifact_root}/manifest.json"
 readonly local_model="/tmp/infercrane-qwen38-model"
 readonly provider_key_file="/run/infercrane/openrouter-api-key"
+readonly metrics_key_file="/run/infercrane/metrics-api-key"
+readonly base_runtime_image="lmsysorg/sglang@sha256:06e4f2ed21afde4ff513cda65070124e727ba23ccaeff7712b8c40e1097d611f"
+readonly local_compile_cache="/tmp/infercrane-qwen38-compile-cache"
 
 if (( $# != 0 )); then
   echo "refusing mutable container arguments: this recipe has a pinned launch vector" >&2
@@ -31,6 +34,11 @@ umask 077
 printf '%s' "$INFERCRANE_OPENROUTER_API_KEY" > "$provider_key_file"
 unset INFERCRANE_OPENROUTER_API_KEY
 export INFERCRANE_OPENROUTER_API_KEY_FILE="$provider_key_file"
+if [[ -n "${INFERCRANE_OPENROUTER_METRICS_KEY:-}" ]]; then
+  printf '%s' "$INFERCRANE_OPENROUTER_METRICS_KEY" > "$metrics_key_file"
+  unset INFERCRANE_OPENROUTER_METRICS_KEY
+  export INFERCRANE_OPENROUTER_METRICS_KEY_FILE="$metrics_key_file"
+fi
 
 if [[ ! -d /runpod-volume ]] || [[ ! -w /runpod-volume ]]; then
   echo "persistent volume /runpod-volume is unavailable or read-only" >&2
@@ -92,6 +100,49 @@ if actual_paths != expected_paths:
     raise SystemExit("artifact directory and manifest file sets differ")
 PY
 
+compute_capability="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -n 1 | tr -d '[:space:].')"
+if [[ -z "$compute_capability" ]]; then
+  echo "GPU compute capability is unavailable" >&2
+  exit 69
+fi
+gpu_arch="sm${compute_capability}"
+cuda_version="$(python3 -c 'import torch; print(torch.version.cuda or "unknown")')"
+if [[ -n "${INFERCRANE_COMPILE_CACHE_RELEASE:-}" ]]; then
+  if [[ -z "${INFERCRANE_COMPILE_CACHE_MANIFEST_SHA256:-}" ]]; then
+    echo "INFERCRANE_COMPILE_CACHE_MANIFEST_SHA256 is required with a compiled-cache release" >&2
+    exit 64
+  fi
+  if [[ ! "${INFERCRANE_RUNTIME_IMAGE_DIGEST:-}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+    echo "INFERCRANE_RUNTIME_IMAGE_DIGEST must pin the final provider image when restoring a compiled-cache release" >&2
+    exit 64
+  fi
+  python3 /opt/infercrane/compile_cache.py restore \
+    --release-dir "${artifact_root}/compile-cache/releases/${INFERCRANE_COMPILE_CACHE_RELEASE}" \
+    --manifest-sha256 "$INFERCRANE_COMPILE_CACHE_MANIFEST_SHA256" \
+    --destination "$local_compile_cache" \
+    --runtime-image "$INFERCRANE_RUNTIME_IMAGE_DIGEST" \
+    --model-revision "$revision" \
+    --gpu-arch "$gpu_arch" \
+    --cuda-version "$cuda_version"
+else
+  mkdir -p "$local_compile_cache"
+  echo "starting without an immutable compiled-cache release from ${base_runtime_image}" >&2
+fi
+export SGLANG_CACHE_DIR="${local_compile_cache}/sglang"
+export TRITON_CACHE_DIR="${local_compile_cache}/triton"
+export TORCHINDUCTOR_CACHE_DIR="${local_compile_cache}/inductor"
+export DG_JIT_CACHE_DIR="${local_compile_cache}/deep-gemm"
+export SGLANG_DG_CACHE_DIR="$DG_JIT_CACHE_DIR"
+export FLASHINFER_CACHE_DIR="${local_compile_cache}/flashinfer"
+export FLASHINFER_WORKSPACE_BASE="${local_compile_cache}/flashinfer-workspace"
+export TVM_FFI_CACHE_DIR="${local_compile_cache}/tvm-ffi"
+export TILELANG_CACHE_DIR="${local_compile_cache}/tilelang"
+export CUTE_DSL_CACHE_DIR="${local_compile_cache}/cute-dsl"
+export CUDA_CACHE_PATH="${local_compile_cache}/cuda"
+mkdir -p "$SGLANG_CACHE_DIR" "$TRITON_CACHE_DIR" "$TORCHINDUCTOR_CACHE_DIR" \
+  "$DG_JIT_CACHE_DIR" "$FLASHINFER_CACHE_DIR" "$FLASHINFER_WORKSPACE_BASE" \
+  "$TVM_FFI_CACHE_DIR" "$TILELANG_CACHE_DIR" "$CUTE_DSL_CACHE_DIR" "$CUDA_CACHE_PATH"
+
 # The persistent volume is the source of truth; local disk avoids serving
 # weights over network storage. The marker is valid only for this revision.
 if [[ ! -f "$local_model/.infercrane-ready-$revision" ]]; then
@@ -125,7 +176,22 @@ python3 -m sglang.launch_server \
   --cuda-graph-bs-prefill 256 512 1024 2048 4096 8192 &
 runtime_pid=$!
 
-/usr/local/bin/infercrane-openrouter-edge --max-in-flight 12 &
+edge_args=(
+  --min-in-flight 4
+  --initial-in-flight 8
+  --max-in-flight 16
+  --admission-window 32
+  --target-ttft 3s
+  --max-prefill-tokens-in-flight "${INFERCRANE_MAX_PREFILL_TOKENS_IN_FLIGHT:-65536}"
+  --qualified-output-tps "${INFERCRANE_QUALIFIED_OUTPUT_TPS:-0}"
+  --input-price-per-million "${INFERCRANE_INPUT_PRICE_PER_MILLION_USD:-0.10}"
+  --output-price-per-million "${INFERCRANE_OUTPUT_PRICE_PER_MILLION_USD:-2.20}"
+  --gpu-hourly-cost "${INFERCRANE_GPU_HOURLY_COST_USD:-0}"
+)
+if [[ -n "${INFERCRANE_OPENROUTER_METRICS_KEY_FILE:-}" ]]; then
+  edge_args+=(--metrics-key-file "$INFERCRANE_OPENROUTER_METRICS_KEY_FILE")
+fi
+/usr/local/bin/infercrane-openrouter-edge "${edge_args[@]}" &
 edge_pid=$!
 
 terminate() {

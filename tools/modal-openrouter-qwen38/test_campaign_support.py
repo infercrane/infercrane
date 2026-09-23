@@ -114,6 +114,7 @@ class CampaignSupportTest(unittest.TestCase):
                     "invalid_request_rejected",
                     "speculation_health",
                     "runtime_parity",
+                    "gdn_long_state_semantics",
                 )
             ],
             "lanes": [{**lane, "concurrency": concurrency} for concurrency in (1, 4, 8)],
@@ -150,6 +151,8 @@ class CampaignSupportTest(unittest.TestCase):
 
     def test_workload_suite_distinguishes_released_and_derived_inputs(self):
         self.assertEqual(WORKLOADS["public-long-prefill"]["input_tokens"], 24832)
+        self.assertEqual(WORKLOADS["public-context-boundary-262k"]["input_tokens"], 258048)
+        self.assertEqual(WORKLOADS["public-context-boundary-262k"]["concurrency_lanes"], [1])
         self.assertEqual(
             WORKLOADS["public-interactive"]["slo"]["source"],
             "pre_registered_internal_launch_objective",
