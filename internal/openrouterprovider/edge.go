@@ -37,6 +37,7 @@ type Edge struct {
 	StreamKeepAliveInterval time.Duration
 	Client                  *http.Client
 	Logger                  *slog.Logger
+	ReceiptRecorder         ReceiptRecorder
 
 	semaphore chan struct{}
 }
@@ -133,6 +134,10 @@ func (e *Edge) ready(w http.ResponseWriter, r *http.Request) {
 }
 
 func (e *Edge) completions(w http.ResponseWriter, r *http.Request) {
+	requestID := r.Header.Get("X-Request-ID")
+	if requestID == "" {
+		requestID = randomRequestID()
+	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxProviderRequestBytes))
 	if err != nil {
 		writeProviderError(w, http.StatusRequestEntityTooLarge, "Request body is too large", "invalid_request_error")
@@ -148,6 +153,7 @@ func (e *Edge) completions(w http.ResponseWriter, r *http.Request) {
 		writeProviderError(w, http.StatusNotFound, "Unknown model", "invalid_request_error")
 		return
 	}
+	stream, _ := payload["stream"].(bool)
 	translateReasoningRequest(payload)
 	select {
 	case e.semaphore <- struct{}{}:
@@ -155,6 +161,7 @@ func (e *Edge) completions(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.Header().Set("Retry-After", "1")
 		writeProviderError(w, http.StatusTooManyRequests, "Provider capacity is temporarily full", "rate_limit_error")
+		e.recordReceipt(RequestReceipt{RequestID: requestID, Model: e.PublicModel, UpstreamModel: e.UpstreamModel, Stream: stream, StatusCode: http.StatusTooManyRequests, Outcome: "capacity_rejected"})
 		return
 	}
 	payload["model"] = e.UpstreamModel
@@ -162,10 +169,6 @@ func (e *Edge) completions(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeProviderError(w, http.StatusBadRequest, "Request could not be encoded", "invalid_request_error")
 		return
-	}
-	requestID := r.Header.Get("X-Request-ID")
-	if requestID == "" {
-		requestID = randomRequestID()
 	}
 	request, _ := http.NewRequestWithContext(r.Context(), http.MethodPost, e.UpstreamURL+"/v1/chat/completions", bytes.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
@@ -179,6 +182,7 @@ func (e *Edge) completions(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		e.Logger.Error("provider upstream request failed", "request_id", requestID, "duration_ms", time.Since(started).Milliseconds(), "error", err)
 		writeProviderError(w, http.StatusBadGateway, "Model server request failed", "server_error")
+		e.recordReceipt(RequestReceipt{RequestID: requestID, Model: e.PublicModel, UpstreamModel: e.UpstreamModel, Stream: stream, StatusCode: http.StatusBadGateway, Outcome: "upstream_error", DurationMS: time.Since(started).Milliseconds()})
 		return
 	}
 	defer response.Body.Close()
@@ -187,27 +191,12 @@ func (e *Edge) completions(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Request-ID", requestID)
 	w.WriteHeader(response.StatusCode)
 	if strings.HasPrefix(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") {
-		e.copyEventStream(w, r, response.Body, requestID, started)
+		metadata := e.copyEventStream(w, r, response.Body, requestID, started)
+		e.recordResponseReceipt(requestID, stream, response.StatusCode, started, metadata)
 		return
 	}
-	buffer := make([]byte, 32<<10)
-	for {
-		count, readErr := response.Body.Read(buffer)
-		if count > 0 {
-			if _, err = w.Write(buffer[:count]); err != nil {
-				return
-			}
-			if flusher, ok := w.(http.Flusher); ok {
-				flusher.Flush()
-			}
-		}
-		if readErr != nil {
-			if readErr != io.EOF {
-				e.Logger.Warn("provider upstream stream ended with error", "request_id", requestID, "duration_ms", time.Since(started).Milliseconds(), "error", readErr)
-			}
-			return
-		}
-	}
+	metadata := e.copyBufferedResponse(w, response.Body, requestID, started)
+	e.recordResponseReceipt(requestID, stream, response.StatusCode, started, metadata)
 }
 
 // translateReasoningRequest maps OpenRouter's provider-neutral reasoning
@@ -256,7 +245,66 @@ type streamRead struct {
 	err  error
 }
 
-func (e *Edge) copyEventStream(w http.ResponseWriter, r *http.Request, body io.Reader, requestID string, started time.Time) {
+type responseMetadata struct {
+	promptTokens     int64
+	completionTokens int64
+	totalTokens      int64
+	finishReason     string
+	timeToFirstToken time.Duration
+	outcome          string
+}
+
+type upstreamUsage struct {
+	PromptTokens     int64 `json:"prompt_tokens"`
+	CompletionTokens int64 `json:"completion_tokens"`
+	TotalTokens      int64 `json:"total_tokens"`
+}
+
+type upstreamResponseMetadata struct {
+	Usage   upstreamUsage `json:"usage"`
+	Choices []struct {
+		FinishReason string `json:"finish_reason"`
+	} `json:"choices"`
+}
+
+func (e *Edge) copyBufferedResponse(w http.ResponseWriter, body io.Reader, requestID string, started time.Time) responseMetadata {
+	metadata := responseMetadata{outcome: "completed"}
+	tee := io.TeeReader(body, flushWriter{writer: w})
+	var upstream upstreamResponseMetadata
+	if err := json.NewDecoder(tee).Decode(&upstream); err != nil {
+		metadata.outcome = "invalid_upstream_response"
+		e.Logger.Warn("provider upstream response could not be decoded", "request_id", requestID, "duration_ms", time.Since(started).Milliseconds(), "error", err)
+	}
+	// The decoder is allowed to stop after the first JSON value. Forward any
+	// unread bytes so observation never changes the provider response body.
+	if _, err := io.Copy(flushWriter{writer: w}, body); err != nil {
+		metadata.outcome = "client_write_error"
+		return metadata
+	}
+	metadata.promptTokens = upstream.Usage.PromptTokens
+	metadata.completionTokens = upstream.Usage.CompletionTokens
+	metadata.totalTokens = upstream.Usage.TotalTokens
+	if len(upstream.Choices) > 0 {
+		metadata.finishReason = upstream.Choices[0].FinishReason
+	}
+	return metadata
+}
+
+type flushWriter struct {
+	writer io.Writer
+}
+
+func (w flushWriter) Write(data []byte) (int, error) {
+	count, err := w.writer.Write(data)
+	if flusher, ok := w.writer.(http.Flusher); ok {
+		flusher.Flush()
+	}
+	return count, err
+}
+
+func (e *Edge) copyEventStream(w http.ResponseWriter, r *http.Request, body io.Reader, requestID string, started time.Time) responseMetadata {
+	metadata := responseMetadata{outcome: "completed"}
+	inspector := newSSEMetadataInspector(started)
 	interval := e.StreamKeepAliveInterval
 	if interval <= 0 {
 		interval = defaultStreamKeepAliveInterval
@@ -286,10 +334,14 @@ func (e *Edge) copyEventStream(w http.ResponseWriter, r *http.Request, body io.R
 	for {
 		select {
 		case <-r.Context().Done():
-			return
+			metadata = inspector.metadata()
+			metadata.outcome = "client_canceled"
+			return metadata
 		case <-heartbeat.C:
 			if _, err := io.WriteString(w, ": keep-alive\n\n"); err != nil {
-				return
+				metadata = inspector.metadata()
+				metadata.outcome = "client_write_error"
+				return metadata
 			}
 			if flusher != nil {
 				flusher.Flush()
@@ -297,8 +349,11 @@ func (e *Edge) copyEventStream(w http.ResponseWriter, r *http.Request, body io.R
 			heartbeat.Reset(interval)
 		case read := <-reads:
 			if len(read.data) > 0 {
+				inspector.observe(read.data)
 				if _, err := w.Write(read.data); err != nil {
-					return
+					metadata = inspector.metadata()
+					metadata.outcome = "client_write_error"
+					return metadata
 				}
 				if flusher != nil {
 					flusher.Flush()
@@ -314,11 +369,109 @@ func (e *Edge) copyEventStream(w http.ResponseWriter, r *http.Request, body io.R
 			if read.err != nil {
 				if read.err != io.EOF {
 					e.Logger.Warn("provider upstream stream ended with error", "request_id", requestID, "duration_ms", time.Since(started).Milliseconds(), "error", read.err)
+					metadata = inspector.metadata()
+					metadata.outcome = "upstream_stream_error"
+					return metadata
 				}
-				return
+				return inspector.metadata()
 			}
 		}
 	}
+}
+
+type sseMetadataInspector struct {
+	started time.Time
+	pending []byte
+	result  responseMetadata
+}
+
+func newSSEMetadataInspector(started time.Time) *sseMetadataInspector {
+	return &sseMetadataInspector{started: started, result: responseMetadata{outcome: "completed"}}
+}
+
+func (i *sseMetadataInspector) observe(data []byte) {
+	i.pending = append(i.pending, data...)
+	for {
+		index := bytes.IndexByte(i.pending, '\n')
+		if index < 0 {
+			if len(i.pending) > 1<<20 {
+				i.pending = nil
+				i.result.outcome = "usage_unavailable"
+			}
+			return
+		}
+		line := bytes.TrimSpace(i.pending[:index])
+		i.pending = i.pending[index+1:]
+		if !bytes.HasPrefix(line, []byte("data:")) {
+			continue
+		}
+		value := bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:")))
+		if bytes.Equal(value, []byte("[DONE]")) || len(value) == 0 {
+			continue
+		}
+		var event upstreamResponseMetadata
+		if json.Unmarshal(value, &event) != nil {
+			continue
+		}
+		if len(event.Choices) > 0 && i.result.timeToFirstToken == 0 {
+			i.result.timeToFirstToken = time.Since(i.started)
+		}
+		if event.Usage.TotalTokens > 0 || event.Usage.PromptTokens > 0 || event.Usage.CompletionTokens > 0 {
+			i.result.promptTokens = event.Usage.PromptTokens
+			i.result.completionTokens = event.Usage.CompletionTokens
+			i.result.totalTokens = event.Usage.TotalTokens
+		}
+		for _, choice := range event.Choices {
+			if choice.FinishReason != "" {
+				i.result.finishReason = choice.FinishReason
+			}
+		}
+	}
+}
+
+func (i *sseMetadataInspector) metadata() responseMetadata {
+	return i.result
+}
+
+func (e *Edge) recordResponseReceipt(requestID string, stream bool, statusCode int, started time.Time, metadata responseMetadata) {
+	receipt := RequestReceipt{
+		RequestID:        requestID,
+		Model:            e.PublicModel,
+		UpstreamModel:    e.UpstreamModel,
+		Stream:           stream,
+		StatusCode:       statusCode,
+		Outcome:          metadata.outcome,
+		DurationMS:       time.Since(started).Milliseconds(),
+		PromptTokens:     metadata.promptTokens,
+		CompletionTokens: metadata.completionTokens,
+		TotalTokens:      metadata.totalTokens,
+		FinishReason:     metadata.finishReason,
+	}
+	if metadata.timeToFirstToken > 0 {
+		receipt.TimeToFirstTokenMS = metadata.timeToFirstToken.Milliseconds()
+	}
+	e.recordReceipt(receipt)
+}
+
+func (e *Edge) recordReceipt(receipt RequestReceipt) {
+	if e.ReceiptRecorder != nil {
+		if err := e.ReceiptRecorder.Record(receipt); err != nil {
+			e.Logger.Error("provider receipt recording failed", "request_id", receipt.RequestID, "error", err)
+		}
+	}
+	e.Logger.Info("provider request completed",
+		"request_id", receipt.RequestID,
+		"model", receipt.Model,
+		"stream", receipt.Stream,
+		"status_code", receipt.StatusCode,
+		"outcome", receipt.Outcome,
+		"duration_ms", receipt.DurationMS,
+		"time_to_first_token_ms", receipt.TimeToFirstTokenMS,
+		"prompt_tokens", receipt.PromptTokens,
+		"completion_tokens", receipt.CompletionTokens,
+		"total_tokens", receipt.TotalTokens,
+		"finish_reason", receipt.FinishReason,
+	)
 }
 
 func randomRequestID() string {
