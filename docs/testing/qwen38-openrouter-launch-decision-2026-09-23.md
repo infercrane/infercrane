@@ -19,7 +19,9 @@ production soak with this bounded offer:
   budget; reject immediately with HTTP 429 above either boundary;
 - public contract: text input, 32,768 input tokens, 2,048 output tokens, tools,
   structured output, streaming, and usage accounting; and
-- starting price: $0.10/M input tokens and $2.20/M output tokens.
+- base price: $0.10/M input tokens and $2.20/M output tokens, with a 19%
+  launch discount that displays $0.081/M input and $1.782/M output until
+  production utilization and contribution margin justify reducing it.
 
 Keep `is_ready: false` until the exact deployment passes the external provider
 qualifier, a 24-hour soak, usage reconciliation, overload/recovery tests, and

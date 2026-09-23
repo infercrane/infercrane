@@ -45,6 +45,24 @@ func TestCatalogRejectsFloatOrNegativePrices(t *testing.T) {
 	}
 }
 
+func TestCatalogValidatesUserDiscount(t *testing.T) {
+	catalog := validCatalog()
+	catalog.Data[0].DiscountToUser = 0.19
+	if err := catalog.Validate(); err != nil {
+		t.Fatalf("expected launch discount to pass: %v", err)
+	}
+
+	catalog.Data[0].DiscountToUser = -0.1
+	if err := catalog.Validate(); err != nil {
+		t.Fatalf("expected documented markup value to pass: %v", err)
+	}
+
+	catalog.Data[0].DiscountToUser = 1
+	if err := catalog.Validate(); err == nil {
+		t.Fatal("expected a discount of one to fail")
+	}
+}
+
 func TestLoadIsStrict(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "models.json")
 	if err := os.WriteFile(path, []byte(`{"data":[],"unknown":true}`), 0o600); err != nil {
@@ -69,6 +87,9 @@ func TestStagedQwenCatalogMatchesLaunchBoundary(t *testing.T) {
 	}
 	if model.InputModalities[0].Pricing[0].CostUSD != "0.00000010" || model.OutputModalities[0].Pricing[0].CostUSD != "0.00000220" {
 		t.Fatalf("unexpected staged pricing: input=%s output=%s", model.InputModalities[0].Pricing[0].CostUSD, model.OutputModalities[0].Pricing[0].CostUSD)
+	}
+	if model.DiscountToUser != 0.19 {
+		t.Fatalf("unexpected launch discount: %v", model.DiscountToUser)
 	}
 }
 

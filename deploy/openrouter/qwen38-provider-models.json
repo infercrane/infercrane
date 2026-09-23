@@ -110,6 +110,7 @@
       ],
       "is_ready": false,
       "is_free": false,
+      "discount_to_user": 0.19,
       "openrouter": {
         "slug": "qwen/qwen3.8-27b"
       }

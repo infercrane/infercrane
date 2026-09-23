@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"net/http"
 	"os"
@@ -32,6 +33,7 @@ type Model struct {
 	Passthrough      map[string]any     `json:"passthrough_parameters,omitempty"`
 	IsReady          bool               `json:"is_ready"`
 	IsFree           bool               `json:"is_free"`
+	DiscountToUser   float64            `json:"discount_to_user,omitempty"`
 	OpenRouter       OpenRouterIdentity `json:"openrouter"`
 	Datacenters      []Datacenter       `json:"datacenters,omitempty"`
 	DeploymentRegion string             `json:"deployment_region,omitempty"`
@@ -119,6 +121,9 @@ func (c Catalog) Validate() error {
 		}
 		if model.OpenRouter.Slug == "" || model.OpenRouter.Slug != model.ID {
 			return fmt.Errorf("OpenRouter model %q must use its id as openrouter.slug", model.ID)
+		}
+		if math.IsNaN(model.DiscountToUser) || math.IsInf(model.DiscountToUser, 0) || model.DiscountToUser >= 1 {
+			return fmt.Errorf("OpenRouter model %q has invalid discount_to_user %v", model.ID, model.DiscountToUser)
 		}
 		if _, duplicate := seen[model.ID]; duplicate {
 			return fmt.Errorf("duplicate OpenRouter model id %q", model.ID)

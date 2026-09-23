@@ -22,9 +22,11 @@ is intended to settle around the measured twelve-request frontier and reject
 load before the runtime builds an unbounded queue. The catalog intentionally
 declares only 32,768 input tokens, 2,048 output tokens, and text input. Longer
 context, image/video inputs, and higher concurrency stay disabled until they
-pass their own exact-target qualification. The initial price is $0.10/M input
-and $2.20/M output: lower than most current providers, but not an uneconomic
-attempt to match the absolute output-price floor.
+pass their own exact-target qualification. The base price is $0.10/M input and
+$2.20/M output. The staged catalog applies a 19% launch discount, so users
+initially see $0.081/M input and $1.782/M output. Keeping the base price explicit
+allows the discount to be reduced after measured OpenRouter traffic establishes
+utilization, reliability, and contribution margin.
 
 Portable JIT artifacts are restored from an immutable, SHA-256 verified release
 scoped to the exact runtime image, model revision, CUDA version, and GPU compute
