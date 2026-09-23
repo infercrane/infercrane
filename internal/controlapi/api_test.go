@@ -1002,6 +1002,27 @@ func TestCloudDeploymentFailsClosedWithoutReadyCompute(t *testing.T) {
 	}
 }
 
+func TestTenantCannotUseProcessGlobalProviderAccountCompute(t *testing.T) {
+	store := &fakeStore{principal: domain.Principal{
+		ID: "operator-1", TenantID: "tenant-1", Name: "operator", Role: "operator",
+		Scopes: []string{"read", "deploy"},
+	}}
+	handler := (API{
+		Store: store, Authenticator: store,
+		ComputeProviders: []ComputeProvider{{
+			ID: "aws", Label: "AWS", State: "ready", BillingModes: []string{"provider_account"},
+		}},
+	}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments", strings.NewReader(`{"name":"qwen","model":"Qwen/Qwen3-8B","cloud":"aws","region":"eu-central-1","gpu":"L40S","min_replicas":1,"max_replicas":1}`))
+	request.Header.Set("Authorization", "Bearer tenant-session")
+	request.Header.Set("Idempotency-Key", "tenant-global-provider")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), `"code":"compute_connection_required"`) {
+		t.Fatalf("tenant inherited process-global provider credentials: status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestManagedComputeCannotBypassPrepaidBilling(t *testing.T) {
 	handler := (API{
 		Store:              &fakeStore{},
@@ -1390,6 +1411,42 @@ func TestOptimizationCampaignRequiresImmutableProposalAndExplicitBoundedApproval
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"modeled evidence cannot qualify`) || !strings.Contains(response.Body.String(), `"target_endpoint":`) {
 		t.Fatalf("inspect status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestOptimizationApprovalRejectsProcessGlobalProviderAccountCompute(t *testing.T) {
+	base := &fakeStore{principal: domain.Principal{
+		ID: "operator-1", TenantID: "tenant-1", Name: "operator", Role: "operator",
+		Scopes: []string{"read", "deploy"},
+	}}
+	var draft optimizer.DeploymentDraft
+	draft.Provider.Cloud = "aws"
+	draftJSON, err := json.Marshal(draft)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &fakeOptimizationCampaignStore{
+		fakeStore: base,
+		campaign: domain.OptimizationCampaign{
+			ID: "campaign-1", TenantID: "tenant-1", State: optimizationcampaign.CampaignAwaitingApproval,
+			Candidates: []domain.OptimizationCandidateRun{{ID: "candidate-1", DeploymentSpecJSON: string(draftJSON)}},
+		},
+	}
+	handler := (API{
+		Store: store, Authenticator: base, OptimizationCosts: fakeOptimizationCosts{},
+		ComputeProviders: []ComputeProvider{{
+			ID: "aws", Label: "AWS", State: "ready", BillingModes: []string{"provider_account"},
+		}},
+	}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/optimization/campaigns/campaign-1/approve", strings.NewReader(`{"max_cost_usd":20,"expires_in_seconds":3600}`))
+	request.Header.Set("Authorization", "Bearer tenant-session")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), `"code":"compute_connection_required"`) {
+		t.Fatalf("optimization inherited process-global provider credentials: status=%d body=%s", response.Code, response.Body.String())
+	}
+	if store.campaign.State != optimizationcampaign.CampaignAwaitingApproval {
+		t.Fatalf("rejected optimization changed campaign state: %s", store.campaign.State)
 	}
 }
 
