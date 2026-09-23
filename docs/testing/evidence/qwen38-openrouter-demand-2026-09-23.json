@@ -1,0 +1,37 @@
+{
+  "schema_version": "infercrane.dev/openrouter-demand-evidence/v1",
+  "captured_at": "2026-09-23T07:22:55.723Z",
+  "source": {
+    "attribution": "Source: OpenRouter (openrouter.ai/rankings), as of 2026-09-23T07:22:55.723Z.",
+    "license": "CC BY 4.0",
+    "url": "https://openrouter.ai/api/v1/datasets/rankings-daily"
+  },
+  "dataset": {
+    "version": "v1",
+    "start_date": "2026-09-22",
+    "end_date": "2026-09-22",
+    "model_permaslug": "qwen/qwen3.8-27b-20260814",
+    "total_tokens": 59522333736
+  },
+  "projection": {
+    "status": "capacity economics, not a traffic forecast",
+    "measured_input_tokens_per_output_token": 2.8468,
+    "measured_output_tokens_per_second": 1393.6,
+    "provider_price_usd_per_million_input_tokens": 0.1,
+    "provider_price_usd_per_million_output_tokens": 2.2,
+    "target_gpu_hourly_usd": 4.59,
+    "non_gpu_reserve_fraction_of_revenue": 0.1,
+    "output_capacity_tokens_per_day": 120407040,
+    "estimated_market_output_equivalent_tokens_per_day": 15473207273,
+    "gpu_and_reserve_break_even_utilization": 0.409128,
+    "gpu_and_reserve_break_even_market_share": 0.003184,
+    "thirty_five_percent_contribution_utilization": 0.669482,
+    "thirty_five_percent_contribution_market_share": 0.00521
+  },
+  "limitations": [
+    "OpenRouter reports prompt plus completion tokens, not the input/output split for this model.",
+    "The market output-equivalent estimate applies InferCrane's measured workload mix to the public aggregate.",
+    "Routing share depends on onboarding, stability, feature eligibility, price, performance, geography, user selection, and OpenRouter policy.",
+    "The measured throughput is screening evidence until reproduced through the exact hosted endpoint."
+  ]
+}

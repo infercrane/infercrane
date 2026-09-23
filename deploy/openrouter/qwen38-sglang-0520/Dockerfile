@@ -30,6 +30,7 @@ COPY deploy/openrouter/qwen38-sglang-0520/serve.sh /opt/infercrane/serve.sh
 RUN chmod 0555 /usr/local/bin/infercrane-openrouter-edge /opt/infercrane/serve.sh \
     && chmod 0444 /opt/infercrane/provider-models.json /opt/infercrane/health_shim.py /opt/infercrane/prepare_model.py \
     && mkdir -p /runpod-volume /run/infercrane \
+    && python3 -c "import huggingface_hub, sglang" \
     && test ! -e /model-cache \
     && ln -s /runpod-volume /model-cache
 
@@ -49,7 +50,7 @@ ENV HF_HOME=/model-cache \
 EXPOSE 8080 30001
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20m --retries=3 \
-  CMD /usr/bin/python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/readyz', timeout=3)"
+  CMD python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/readyz', timeout=3)"
 
 ENTRYPOINT ["/opt/infercrane/serve.sh"]
 CMD []
