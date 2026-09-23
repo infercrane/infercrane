@@ -1,0 +1,61 @@
+{
+  "schema_version": "infercrane.dev/openrouter-serving-profiles/v1",
+  "profiles": [
+    {
+      "id": "qwen38-latitude-h100-planning-2026-09-23",
+      "model_id": "qwen/qwen3.8-27b",
+      "runtime": "sglang-0.5.18-nextn-k4",
+      "hardware": {
+        "provider": "latitude",
+        "region": "us",
+        "gpu": "NVIDIA H100 80GB",
+        "gpu_count": 1,
+        "hourly_cost_usd": 1.68,
+        "price_source": "https://www.latitude.sh/pricing/g3-h100-medium",
+        "price_observed_at": "2026-09-23T08:30:00Z",
+        "price_valid_until": "2026-09-24T08:30:00Z"
+      },
+      "aggregate_output_tokens_per_second": 840.8891312978136,
+      "input_tokens_per_output_token": 2.8468,
+      "evidence_level": "analogous",
+      "evidence_ref": "internal/optimizationevidence/testdata/qwen38-fastpath-qualified.json",
+      "target_context_length": 32768,
+      "maximum_qualified_context": 18432,
+      "feature_coverage": 0.95,
+      "availability_factor": 0.95,
+      "observed_at": "2026-09-20T00:00:00Z",
+      "limitations": [
+        "Performance was measured on a Modal H100, not the exact Latitude host.",
+        "The current evidence does not qualify the planned 32K provider context."
+      ]
+    },
+    {
+      "id": "qwen38-runpod-h200-planning-2026-09-23",
+      "model_id": "qwen/qwen3.8-27b",
+      "runtime": "sglang-0.5.20-nextn-k4-bounded-graphs",
+      "hardware": {
+        "provider": "runpod",
+        "region": "ca-mtl-4",
+        "gpu": "NVIDIA H200 141GB",
+        "gpu_count": 1,
+        "hourly_cost_usd": 4.59,
+        "price_source": "https://api.runpod.io/graphql",
+        "price_observed_at": "2026-09-23T08:30:00Z",
+        "price_valid_until": "2026-09-24T08:30:00Z"
+      },
+      "aggregate_output_tokens_per_second": 1393.638185055203,
+      "input_tokens_per_output_token": 2.8468,
+      "evidence_level": "analogous",
+      "evidence_ref": "docs/testing/evidence/qwen38-public-decode-saturation-modal-2026-09-23T044530Z.json",
+      "target_context_length": 32768,
+      "maximum_qualified_context": 24832,
+      "feature_coverage": 0.95,
+      "availability_factor": 0.95,
+      "observed_at": "2026-09-23T04:45:30Z",
+      "limitations": [
+        "Performance was measured on a Modal H200, not the exact RunPod endpoint.",
+        "The current evidence does not qualify the planned 32K provider context."
+      ]
+    }
+  ]
+}
