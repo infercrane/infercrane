@@ -1199,6 +1199,10 @@ func (a API) approveOptimizationCampaign(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusUnprocessableEntity, "optimization_candidate_invalid", "campaign candidate deployment specification is invalid")
 			return
 		}
+		if actor.ID != "bootstrap" && !a.computeProviderSupports(draft.Provider.Cloud, "customer_wallet") {
+			writeError(w, http.StatusConflict, "compute_connection_required", "optimization execution requires InferCrane-managed compute or a verified tenant compute connection")
+			return
+		}
 		if costErr := optimizationcampaign.AuthorizeCost(r.Context(), a.OptimizationCosts, draft, optimizationcampaign.Budget{MaxCostUSD: perCandidateBudget, ExpiresAt: expiresAt}, time.Now().UTC()); costErr != nil {
 			writeError(w, http.StatusUnprocessableEntity, "optimization_cost_authority_rejected", costErr.Error())
 			return
@@ -4745,18 +4749,15 @@ func (a API) createCloudDeployment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "request body must contain one JSON object")
 		return
 	}
-	providerReady := false
-	for _, provider := range a.ComputeProviders {
-		if provider.ID == request.Cloud && provider.State == "ready" {
-			providerReady = true
-			break
-		}
+	principal := r.Context().Value(identityKey{}).(domain.Principal)
+	if request.BillingMode == "provider_account" && principal.ID != "bootstrap" {
+		writeError(w, http.StatusConflict, "compute_connection_required", "provider-account deployments require a verified tenant compute connection")
+		return
 	}
-	if len(a.ComputeProviders) > 0 && !providerReady {
+	if !a.computeProviderSupports(request.Cloud, request.BillingMode) && (principal.ID != "bootstrap" || len(a.ComputeProviders) > 0) {
 		writeError(w, http.StatusConflict, "compute_connection_required", "this control plane has no ready compute connection for "+request.Cloud)
 		return
 	}
-	principal := r.Context().Value(identityKey{}).(domain.Principal)
 	if request.ModelSecretReferenceID != "" {
 		references, secretErr := a.Store.SecretReferencesForTenant(r.Context(), principal.TenantID)
 		if secretErr != nil {
@@ -4843,16 +4844,36 @@ func (a API) createCloudDeployment(w http.ResponseWriter, r *http.Request) {
 
 func (a API) computeProviders(w http.ResponseWriter, _ *http.Request) {
 	providers := append([]ComputeProvider(nil), a.ComputeProviders...)
-	managedPolicy := a.ManagedDeployments.Normalize()
 	for index := range providers {
-		if managedPolicy.Enabled && providers[index].ID == managedPolicy.Provider {
-			providers[index].BillingModes = []string{"customer_wallet"}
-		} else if len(providers[index].BillingModes) == 0 {
-			providers[index].BillingModes = []string{"provider_account"}
-		}
+		providers[index].BillingModes = a.computeProviderBillingModes(providers[index])
 	}
 	sort.SliceStable(providers, func(i, j int) bool { return providers[i].Label < providers[j].Label })
 	writeJSON(w, http.StatusOK, map[string]any{"data": providers})
+}
+
+func (a API) computeProviderBillingModes(provider ComputeProvider) []string {
+	managedPolicy := a.ManagedDeployments.Normalize()
+	if managedPolicy.Enabled && provider.ID == managedPolicy.Provider {
+		return []string{"customer_wallet"}
+	}
+	if len(provider.BillingModes) == 0 {
+		return []string{"provider_account"}
+	}
+	return append([]string(nil), provider.BillingModes...)
+}
+
+func (a API) computeProviderSupports(providerID, billingMode string) bool {
+	for _, provider := range a.ComputeProviders {
+		if provider.ID != providerID || provider.State != "ready" {
+			continue
+		}
+		for _, supported := range a.computeProviderBillingModes(provider) {
+			if supported == billingMode {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 type catalogLaunchQuote struct {
