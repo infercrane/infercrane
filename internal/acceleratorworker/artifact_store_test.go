@@ -3,6 +3,7 @@ package acceleratorworker
 import (
 	"context"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -38,5 +39,22 @@ func TestLocalArtifactStoreRejectsSizeMismatch(t *testing.T) {
 	}
 	if _, err = store.Put(context.Background(), "kernel", strings.NewReader("payload"), 8); err == nil {
 		t.Fatal("size mismatch accepted")
+	}
+}
+
+func TestLocalArtifactStoreRejectsPathExpressions(t *testing.T) {
+	store, err := NewLocalArtifactStore(filepath.Join(t.TempDir(), "artifacts"), "http://127.0.0.1:8091", 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, digest := range []string{
+		"../" + strings.Repeat("a", 64),
+		"/" + strings.Repeat("a", 64),
+		strings.Repeat("a", 63) + "/",
+		strings.Repeat("g", 64),
+	} {
+		if _, _, openErr := store.Open(context.Background(), digest); !os.IsNotExist(openErr) {
+			t.Fatalf("digest %q returned %v, want not exist", digest, openErr)
+		}
 	}
 }

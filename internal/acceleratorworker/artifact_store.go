@@ -105,7 +105,15 @@ func (s *LocalArtifactStore) Open(_ context.Context, digest string) (io.ReadClos
 	if _, err := hex.DecodeString(digest); err != nil {
 		return nil, 0, os.ErrNotExist
 	}
-	file, err := os.Open(filepath.Join(s.directory, digest))
+	// Keep the content-addressed object lookup beneath the configured root even
+	// if validation above changes later. os.Root rejects traversal, absolute
+	// paths, and platform-specific path escapes at the filesystem boundary.
+	root, err := os.OpenRoot(s.directory)
+	if err != nil {
+		return nil, 0, err
+	}
+	file, err := root.Open(digest)
+	root.Close()
 	if err != nil {
 		return nil, 0, err
 	}
