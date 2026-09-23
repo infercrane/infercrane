@@ -44,12 +44,46 @@ The result is in
 `docs/testing/evidence/qwen38-public-decode-saturation-modal-2026-09-23T044530Z.json`
 with raw measurements in the adjacent `-raw.json` file.
 
+### Runtime and decoder challenge
+
+A later single-run screen challenged the selected recipe against SGLang
+DFlash2 and vLLM 0.30.0 MTP on the same H200 workload shape. It does not replace
+the repeated result above, but it changes what InferCrane should search next.
+
+| Runtime recipe | c4 output tok/s | c8 | c12 | c16 | c12 GPU COGS / M output |
+|---|---:|---:|---:|---:|---:|
+| SGLang native MTP | 680.7 | 1,080.5 | 1,335.7 | 1,582.1 | $0.944 |
+| SGLang DFlash2 | 767.5 | 1,147.0 | 1,323.5 | 1,560.3 | $0.953 |
+| vLLM native MTP | 517.4 | 957.1 | 1,203.2 | 1,570.3 | $1.048 |
+
+DFlash2 won aggregate throughput at concurrency four and eight, while native
+MTP retained the better TTFT and narrowly won saturation economics. vLLM
+nearly converged at concurrency sixteen but was slower at the launch boundary.
+The launch recipe therefore remains SGLang native MTP. DFlash2 becomes a
+workload-specific candidate for interactive/code-heavy traffic rather than a
+universal replacement.
+
+The campaign now normalizes speculative-health evidence across SGLang gauges
+and vLLM counters. vLLM MTP accepted approximately 2.11 tokens per verification
+round and 70.3% of drafted tokens; the earlier zero-acceptance result was a
+measurement-adapter bug, not a runtime failure. Thinking output is checked for
+valid final-answer semantics while byte parity remains mandatory for stable
+non-thinking probes. Unknown public model rejection belongs to the provider
+edge, not the internal runtime.
+
+Screening receipts:
+
+- `docs/testing/evidence/qwen38-public-decode-saturation-modal-2026-09-23T063227Z.json`
+- `docs/testing/evidence/qwen38-vllm-public-decode-saturation-modal-2026-09-23T063555Z.json`
+
 ## Competitive position
 
-OpenRouter's public model page on 2026-09-23 showed sixteen providers, a best
-p50 output speed of 85 tok/s, a best p50 latency of 0.57 seconds, and a market
-floor of $0.10/M input and $1.80/M output. Wafer displayed $0.11/$2.50, 10
-tok/s, 13.57-second latency, and 100% uptime at that observation.
+OpenRouter's endpoint API on 2026-09-23 showed sixteen providers and a market
+floor of $0.10/M input and $1.80/M output. In the 06:25 UTC snapshot, the best
+stable p50 output speed was 64 tok/s and the lowest stable p50 latency was 308
+ms. Wafer displayed $0.11/$2.50, 61 tok/s, 808 ms latency, and approximately
+99.82% one-day uptime. These fields can be null when an endpoint has
+insufficient recent traffic, so every comparison preserves its capture time.
 
 The selected lane's 141 tok/s per-request p50 has meaningful throughput
 headroom over the current public maximum. Its 739 ms p50 TTFT at saturated
@@ -59,7 +93,10 @@ and 351 ms at eight requests. Only OpenRouter's own production measurements
 can establish rank because network, arrival distribution, prompt mix, and
 regional routing differ from the Modal loopback screen.
 
-The $0.10/$2.20 price is intended to enter OpenRouter's low-price routing set
+For the measured 2.847:1 input/output ratio, the $0.10/$2.20 price is about
+$2.485 per million output-equivalent tokens. It is cheaper than thirteen of
+the sixteen current endpoints on that workload mix, behind only Darkbloom and
+DeepInfra. The price is intended to enter OpenRouter's low-price routing set
 without matching the absolute output-price floor. OpenRouter's default routing
 first considers recent stability, then weights stable low-cost providers by
 inverse-square price; `:nitro` explicitly sorts by throughput. Reliability and
@@ -140,6 +177,12 @@ Backend evidence:
 10. Compare the resulting public TTFT, throughput, uptime, 429 rate, and actual
     paid utilization with this decision; change price or capacity from measured
     production data, not the screening projection.
+
+The first immutable candidate image was published successfully as
+`ghcr.io/infercrane/qwen38-openrouter@sha256:dba4c6bbe8aa6896a8a4666480c6ab1ca7dd176589929b7cd0a9f49ea68ac811`.
+It is not the launch digest: request-reasoning compatibility and the corrected
+qualification policy must land and publish a new immutable image before the
+target canary.
 
 Multimodal input, 262K/1M context, 32K output, prompt-cache pricing, and
 multi-replica availability are follow-on qualification lanes. They are not

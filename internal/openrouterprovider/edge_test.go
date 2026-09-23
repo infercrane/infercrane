@@ -22,6 +22,7 @@ func testCatalog() *Catalog {
 
 func TestEdgeAuthenticatesRewritesAndStreams(t *testing.T) {
 	var seenModel string
+	var seenThinking bool
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/health" {
 			w.WriteHeader(http.StatusOK)
@@ -30,6 +31,11 @@ func TestEdgeAuthenticatesRewritesAndStreams(t *testing.T) {
 		var payload map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&payload)
 		seenModel, _ = payload["model"].(string)
+		kwargs, _ := payload["chat_template_kwargs"].(map[string]any)
+		seenThinking, _ = kwargs["enable_thinking"].(bool)
+		if _, present := payload["reasoning"]; present {
+			t.Error("OpenRouter reasoning control reached strict upstream")
+		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = io.WriteString(w, "data: {\"choices\":[]}\n\ndata: [DONE]\n\n")
 	}))
@@ -51,12 +57,36 @@ func TestEdgeAuthenticatesRewritesAndStreams(t *testing.T) {
 	if models.Code != http.StatusOK || !strings.Contains(models.Body.String(), "qwen/qwen3.8-27b") {
 		t.Fatalf("unexpected models response code=%d body=%q", models.Code, models.Body.String())
 	}
-	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"qwen/qwen3.8-27b","stream":true,"messages":[]}`))
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"qwen/qwen3.8-27b","stream":true,"messages":[],"reasoning":{"effort":"high"},"include_reasoning":true}`))
 	request.Header.Set("Authorization", "Bearer provider-secret")
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusOK || seenModel != "Qwen/Qwen3.8-27B-FP8" || !strings.Contains(recorder.Body.String(), "[DONE]") {
-		t.Fatalf("unexpected proxy response code=%d model=%q body=%q", recorder.Code, seenModel, recorder.Body.String())
+	if recorder.Code != http.StatusOK || seenModel != "Qwen/Qwen3.8-27B-FP8" || !seenThinking || !strings.Contains(recorder.Body.String(), "[DONE]") {
+		t.Fatalf("unexpected proxy response code=%d model=%q thinking=%v body=%q", recorder.Code, seenModel, seenThinking, recorder.Body.String())
+	}
+}
+
+func TestTranslateReasoningRequestCanDisableThinking(t *testing.T) {
+	payload := map[string]any{
+		"reasoning":            map[string]any{"enabled": false},
+		"chat_template_kwargs": map[string]any{"custom": "kept"},
+	}
+	translateReasoningRequest(payload)
+	kwargs := payload["chat_template_kwargs"].(map[string]any)
+	if kwargs["enable_thinking"] != false || kwargs["preserve_thinking"] != false || kwargs["custom"] != "kept" {
+		t.Fatalf("unexpected translated kwargs: %#v", kwargs)
+	}
+}
+
+func TestTranslateReasoningEffortEnablesThinking(t *testing.T) {
+	payload := map[string]any{"reasoning_effort": "high"}
+	translateReasoningRequest(payload)
+	kwargs := payload["chat_template_kwargs"].(map[string]any)
+	if kwargs["enable_thinking"] != true {
+		t.Fatalf("unexpected translated kwargs: %#v", kwargs)
+	}
+	if _, found := payload["reasoning_effort"]; found {
+		t.Fatal("provider-only reasoning_effort reached upstream")
 	}
 }
 

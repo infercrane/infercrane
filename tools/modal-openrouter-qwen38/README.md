@@ -56,3 +56,16 @@ only a production OpenRouter canary can establish OpenRouter routing position.
 
 Adding another model should create another immutable campaign definition or
 provider job. It must not add model-name checks to the optimizer or worker.
+
+The reusable service boundary is `cmd/infercrane-accelerator-worker` plus
+`internal/acceleratorlab`, `internal/optimizationcampaign`, and
+`internal/optimizer`. A provider adapter receives typed `profile`, `generate`,
+or `qualify` jobs and returns immutable evidence. This directory is the Modal
+adapter and launch campaign for one exact Qwen3.8 tuple; deleting it would not
+remove the optimization algorithm.
+
+The current search includes SGLang and vLLM controls, native MTP, DFlash2,
+cache/scheduler/graph variants, and measured kernel backends. It profiles the
+winning control before custom-kernel work. A custom candidate is promoted only
+if target-GPU correctness and full workload evidence beat the best existing
+kernel; “the vendor kernel won” is a valid optimization result.

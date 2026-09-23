@@ -73,6 +73,9 @@
             },
             "structured_outputs": {
               "type": "boolean"
+            },
+            "reasoning": {
+              "type": "boolean"
             }
           },
           "pricing": [

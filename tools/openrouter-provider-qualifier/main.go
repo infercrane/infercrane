@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -126,6 +127,12 @@ func (q qualifier) run(ctx context.Context, requests, concurrency int) (receipt,
 		"tool_choice": map[string]any{"type": "function", "function": map[string]string{"name": "read_file"}},
 	})
 	result.Gates = append(result.Gates, gate{Name: "forced_tool_call", Passed: status == http.StatusOK && expectedToolCall(tool), Detail: statusDetail(status, err)})
+
+	reasoning, status, err := q.postJSON(ctx, map[string]any{
+		"model": q.model, "messages": []map[string]string{{"role": "user", "content": "Think through 17 plus 25, then give the integer."}}, "temperature": 0, "max_tokens": 256,
+		"reasoning": map[string]any{"effort": "high"}, "include_reasoning": true,
+	})
+	result.Gates = append(result.Gates, gate{Name: "reasoning_output", Passed: status == http.StatusOK && reasoningReady(reasoning), Detail: statusDetail(status, err)})
 
 	_, status, err = q.postJSON(ctx, map[string]any{"model": "infercrane/unknown-model", "messages": []map[string]string{{"role": "user", "content": "hello"}}, "max_tokens": 1})
 	result.Gates = append(result.Gates, gate{Name: "unknown_model_rejected", Passed: err == nil && status >= 400 && status < 500, Detail: statusDetail(status, err)})
@@ -333,6 +340,21 @@ func expectedToolCall(value map[string]any) bool {
 	function, _ := calls[0]["function"].(map[string]any)
 	var arguments map[string]any
 	return function["name"] == "read_file" && json.Unmarshal([]byte(fmt.Sprint(function["arguments"])), &arguments) == nil && arguments["path"] == "src/cache.py"
+}
+
+func reasoningReady(value map[string]any) bool {
+	choices := slice(value["choices"])
+	if len(choices) == 0 {
+		return false
+	}
+	message, _ := choices[0]["message"].(map[string]any)
+	reasoning := strings.TrimSpace(fmt.Sprint(message["reasoning_content"]))
+	if reasoning == "" || reasoning == "<nil>" {
+		reasoning = strings.TrimSpace(fmt.Sprint(message["reasoning"]))
+	}
+	content := strings.TrimSpace(fmt.Sprint(message["content"]))
+	answer := regexp.MustCompile(`(^|\D)42(\D|$)`)
+	return reasoning != "" && reasoning != "<nil>" && answer.MatchString(content)
 }
 
 func slice(value any) []map[string]any {

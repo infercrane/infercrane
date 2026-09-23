@@ -603,23 +603,79 @@ def project_lane_economics(
     }
 
 
+def speculation_health(
+    candidate_class: str, metrics: dict[str, float]
+) -> dict[str, Any]:
+    """Normalize speculative-decoding health across runtime metric schemas."""
+    if "mtp" not in candidate_class and "dflash" not in candidate_class:
+        return {"name": "speculation_health", "passed": True, "not_applicable": True}
+    accept_lengths = [
+        value for key, value in metrics.items() if "spec_accept_length" in key.lower()
+    ]
+    accept_rates = [
+        value for key, value in metrics.items() if "spec_accept_rate" in key.lower()
+    ]
+    accepted_tokens = sum(
+        value
+        for key, value in metrics.items()
+        if "spec_decode_num_accepted_tokens_total" in key.lower()
+    )
+    draft_tokens = sum(
+        value
+        for key, value in metrics.items()
+        if "spec_decode_num_draft_tokens_total" in key.lower()
+    )
+    drafts = sum(
+        value
+        for key, value in metrics.items()
+        if "spec_decode_num_drafts_total" in key.lower()
+    )
+    accept_length = max(
+        [*accept_lengths, accepted_tokens / drafts if drafts > 0 else 0.0],
+        default=0.0,
+    )
+    accept_rate = max(
+        [*accept_rates, accepted_tokens / draft_tokens if draft_tokens > 0 else 0.0],
+        default=0.0,
+    )
+    return {
+        "name": "speculation_health",
+        "passed": accept_length >= 1.5 and accept_rate >= 0.10,
+        "accept_length": accept_length,
+        "accept_rate": accept_rate,
+    }
+
+
 def apply_runtime_parity(
     candidate_results: list[dict[str, Any]],
     *,
     reference_candidate_id: str = "sglang-0520-control",
 ) -> None:
-    """Attach lossless runtime parity gates using deterministic probe hashes."""
+    """Attach exact parity gates for probes that define byte-level output.
+
+    Reasoning traces are intentionally excluded: independent GPU executions
+    may produce different valid traces at temperature zero. Their non-empty
+    reasoning and final-answer semantics are separate required gates.
+    """
     reference = next(
         (row for row in candidate_results if row["candidate_id"] == reference_candidate_id),
         None,
     )
     reference_hashes = (
-        [probe["output_sha256"] for probe in reference.get("correctness_probes", [])]
+        [
+            (probe["id"], probe["output_sha256"])
+            for probe in reference.get("correctness_probes", [])
+            if probe.get("parity_mode", "exact") == "exact"
+        ]
         if reference
         else []
     )
     for result in candidate_results:
-        observed = [probe["output_sha256"] for probe in result.get("correctness_probes", [])]
+        observed = [
+            (probe["id"], probe["output_sha256"])
+            for probe in result.get("correctness_probes", [])
+            if probe.get("parity_mode", "exact") == "exact"
+        ]
         passed = bool(reference_hashes and observed == reference_hashes)
         result["quality"] = [
             row for row in result["quality"] if row["name"] != "runtime_parity"
@@ -713,9 +769,12 @@ def build_evidence(
         "stream_done",
         "stream_finish_reason",
         "buffered_usage",
+        "reasoning_output",
+        "thinking_semantic",
         "structured_output",
         "tool_call",
         "invalid_request_rejected",
+        "speculation_health",
         "runtime_parity",
     ]
     minimums = {
