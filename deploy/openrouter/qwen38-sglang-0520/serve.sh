@@ -16,7 +16,7 @@ fi
 
 if [[ "${INFERCRANE_OPENROUTER_MODE:-serve}" == "prepare-model" ]]; then
   unset TRANSFORMERS_OFFLINE HF_HUB_OFFLINE
-  exec /usr/bin/python3 /opt/infercrane/prepare_model.py
+  exec python3 /opt/infercrane/prepare_model.py
 fi
 if [[ "${INFERCRANE_OPENROUTER_MODE:-serve}" != "serve" ]]; then
   echo "unsupported INFERCRANE_OPENROUTER_MODE" >&2
@@ -38,7 +38,7 @@ if [[ ! -d /runpod-volume ]] || [[ ! -w /runpod-volume ]]; then
 fi
 mkdir -p "$HF_HUB_CACHE"
 
-/usr/bin/python3 - "$artifact_manifest" "$artifact_model" "$revision" <<'PY'
+python3 - "$artifact_manifest" "$artifact_model" "$revision" <<'PY'
 import hashlib
 import json
 import pathlib
@@ -101,10 +101,10 @@ if [[ ! -f "$local_model/.infercrane-ready-$revision" ]]; then
   touch "$local_model/.infercrane-ready-$revision"
 fi
 
-/usr/bin/python3 /opt/infercrane/health_shim.py &
+python3 /opt/infercrane/health_shim.py &
 health_pid=$!
 
-/usr/bin/python3 -m sglang.launch_server \
+python3 -m sglang.launch_server \
   --model-path "$local_model" \
   --served-model-name "$model" \
   --host 127.0.0.1 \

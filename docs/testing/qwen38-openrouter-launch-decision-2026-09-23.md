@@ -108,6 +108,24 @@ Sources:
 - [Provider routing](https://openrouter.ai/docs/guides/routing/provider-selection)
 - [OpenRouter provider requirements](https://openrouter.ai/docs/guides/community/for-providers)
 
+### Demand boundary
+
+OpenRouter's authenticated rankings dataset reported 59.52 billion total
+Qwen3.8-27B tokens on 2026-09-22. Applying the measured 2.847:1 input/output
+mix yields an estimated 15.47 billion output-equivalent tokens for that day.
+The selected lane can produce approximately 120.4 million output tokens/day at
+its measured ceiling, so one H200 needs only about 0.32% of that estimated
+market volume to cover the GPU and a 10% non-GPU reserve. Approximately 0.52%
+would fill the capacity needed for a 35% contribution margin.
+
+This removes market volume as the primary one-GPU risk, but it does not predict
+InferCrane's routing share. A new provider begins without production
+performance history, OpenRouter has a provider-application backlog, and actual
+traffic depends on feature eligibility, geography, uptime, price, routing
+policy, and explicit user selection. The captured public row and derivation
+are stored in
+`docs/testing/evidence/qwen38-openrouter-demand-2026-09-23.json`.
+
 ## Economics
 
 At concurrency twelve, the measured Modal H200 GPU cost was $0.905 per million
@@ -115,13 +133,11 @@ successful output tokens. For the measured 2.847:1 input/output token ratio,
 the proposed price produces $2.485 of revenue per million output-equivalent
 tokens.
 
-Using Modal's $4.5396/H200-hour price and reserving 10% of revenue for gateway,
-storage, monitoring, recovery, and other non-GPU costs:
+Using the target RunPod H200 price of $4.59/hour and reserving 10% of revenue
+for gateway, storage, monitoring, recovery, and other non-GPU costs:
 
-- contribution break-even requires approximately 40.5% utilization;
-- a 35% contribution margin requires approximately 66.2% utilization; and
-- at 70% utilization, the projection is about $6,283 monthly revenue, $3,269
-  GPU cost, $628 non-GPU reserve, and $2,386 contribution, or a 38.0% margin.
+- contribution break-even requires approximately 40.9% utilization; and
+- a 35% contribution margin requires approximately 66.9% utilization.
 
 This is capacity economics, not a revenue forecast. OpenRouter demand may not
 fill the GPU, and one replica is not enough for high availability. Do not add a
@@ -178,11 +194,13 @@ Backend evidence:
     paid utilization with this decision; change price or capacity from measured
     production data, not the screening projection.
 
-The first immutable candidate image was published successfully as
-`ghcr.io/infercrane/qwen38-openrouter@sha256:dba4c6bbe8aa6896a8a4666480c6ab1ca7dd176589929b7cd0a9f49ea68ac811`.
-It is not the launch digest: request-reasoning compatibility and the corrected
-qualification policy must land and publish a new immutable image before the
-target canary.
+The first exact-target canary image,
+`ghcr.io/infercrane/qwen38-openrouter@sha256:4fccddbde2ae93e66e83813e1b916448a82de6e530e9d2028b5d3061a7960c42`,
+was rejected before traffic. Its startup script selected the base system Python
+instead of the Python environment shipped by the pinned SGLang image, so model
+artifact preparation could not import `huggingface_hub`. The replacement image
+must pass the dependency smoke check and hosted canary before becoming a launch
+digest.
 
 Multimodal input, 262K/1M context, 32K output, prompt-cache pricing, and
 multi-replica availability are follow-on qualification lanes. They are not
