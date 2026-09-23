@@ -1,0 +1,60 @@
+package acceleratorworker
+
+import (
+	"context"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestLocalArtifactStorePublishesImmutableContentAddress(t *testing.T) {
+	store, err := NewLocalArtifactStore(filepath.Join(t.TempDir(), "artifacts"), "https://worker.example", 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := store.Put(context.Background(), "kernel", strings.NewReader("payload"), 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.SHA256 != "sha256:239f59ed55e737c77147cf55ad0c1b030b6d7ee748a7426952f9b852d5a935e5" || !strings.HasSuffix(artifact.URI, strings.TrimPrefix(artifact.SHA256, "sha256:")) {
+		t.Fatalf("artifact=%+v", artifact)
+	}
+	reader, size, err := store.Open(context.Background(), strings.TrimPrefix(artifact.SHA256, "sha256:"))
+	if err != nil || size != 7 {
+		t.Fatalf("size=%d err=%v", size, err)
+	}
+	defer reader.Close()
+	data, _ := io.ReadAll(reader)
+	if string(data) != "payload" {
+		t.Fatalf("payload=%q", data)
+	}
+}
+
+func TestLocalArtifactStoreRejectsSizeMismatch(t *testing.T) {
+	store, err := NewLocalArtifactStore(filepath.Join(t.TempDir(), "artifacts"), "http://127.0.0.1:8091", 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.Put(context.Background(), "kernel", strings.NewReader("payload"), 8); err == nil {
+		t.Fatal("size mismatch accepted")
+	}
+}
+
+func TestLocalArtifactStoreRejectsPathExpressions(t *testing.T) {
+	store, err := NewLocalArtifactStore(filepath.Join(t.TempDir(), "artifacts"), "http://127.0.0.1:8091", 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, digest := range []string{
+		"../" + strings.Repeat("a", 64),
+		"/" + strings.Repeat("a", 64),
+		strings.Repeat("a", 63) + "/",
+		strings.Repeat("g", 64),
+	} {
+		if _, _, openErr := store.Open(context.Background(), digest); !os.IsNotExist(openErr) {
+			t.Fatalf("digest %q returned %v, want not exist", digest, openErr)
+		}
+	}
+}

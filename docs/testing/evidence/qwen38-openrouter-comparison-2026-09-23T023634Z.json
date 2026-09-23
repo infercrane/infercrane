@@ -1,0 +1,42 @@
+{
+  "candidates": [
+    {
+      "beats_launch_latency_target": false,
+      "beats_launch_speed_target": true,
+      "candidate_id": "sglang-0520-bf16-kv-nextn-k4-bounded-graphs",
+      "p50_output_tokens_per_second": 246.56051974668014,
+      "p50_ttft_ms": 242.72688100001005,
+      "quality_passed": true,
+      "screening_only": true
+    },
+    {
+      "beats_launch_latency_target": false,
+      "beats_launch_speed_target": false,
+      "candidate_id": "sglang-0520-control",
+      "p50_output_tokens_per_second": 95.05307530251699,
+      "p50_ttft_ms": 235.13202799998112,
+      "quality_passed": true,
+      "screening_only": true
+    },
+    {
+      "beats_launch_latency_target": false,
+      "beats_launch_speed_target": true,
+      "candidate_id": "sglang-0520-nextn-k4-bounded-graphs",
+      "p50_output_tokens_per_second": 240.60432787843376,
+      "p50_ttft_ms": 237.91174199999432,
+      "quality_passed": true,
+      "screening_only": true
+    }
+  ],
+  "comparison_boundary": "Modal loopback screening is directional. Only OpenRouter-observed production traffic can establish leaderboard placement.",
+  "model": "qwen/qwen3.8-27b",
+  "schema_version": "infercrane.dev/openrouter-competitive-report/v1",
+  "target_captured_at": "2026-09-23T02:30:57.647830+00:00",
+  "targets": {
+    "maximum_input_price_usd_per_million": 0.09999999999999999,
+    "maximum_output_price_usd_per_million": 1.7999999999999998,
+    "maximum_p50_ttft_ms": 227.70000000000002,
+    "minimum_p50_output_tokens_per_second": 118.80000000000001,
+    "minimum_uptime_percent": 99.95
+  }
+}

@@ -53,6 +53,7 @@ import (
 	"github.com/infercrane/infercrane/internal/managedbilling"
 	"github.com/infercrane/infercrane/internal/modelapicatalog"
 	"github.com/infercrane/infercrane/internal/modelapirouting"
+	"github.com/infercrane/infercrane/internal/openrouterprovider"
 	"github.com/infercrane/infercrane/internal/operations"
 	"github.com/infercrane/infercrane/internal/optimizationcampaign"
 	"github.com/infercrane/infercrane/internal/passport"
@@ -4583,7 +4584,14 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		return err
 	}
 	databaseReadiness := &readiness.Gate{Probe: s.Ping, StaleAfter: 30 * time.Second}
-	server := &http.Server{Addr: fmt.Sprintf("%s:%d", cfg.Host, cfg.Port), Handler: (&gateway.Gateway{Routes: directory, APIKey: cfg.APIKey, Authenticator: credentialCache, Recorder: recorder, Logger: logger, Client: client, Ready: databaseReadiness.Check, Control: control, Telemetry: gatewayTelemetry, CapacityObservers: map[string]gateway.CapacityObserver{"runpod": serverless.ActiveWorkers}, ExternalAuthorizer: externalBudgets, ManagedBilling: s, HostedModels: hostedModels, RequestAuthorizer: requestQuotas, AdmissionAuthorizer: admissionPool, ContextPassports: contextPassports}).Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 1 << 20, TLSConfig: serverTLS}
+	var openRouterCatalog *openrouterprovider.Catalog
+	if cfg.OpenRouterProviderCatalogFile != "" {
+		openRouterCatalog, err = openrouterprovider.Load(cfg.OpenRouterProviderCatalogFile)
+		if err != nil {
+			return fmt.Errorf("configure OpenRouter provider catalog: %w", err)
+		}
+	}
+	server := &http.Server{Addr: fmt.Sprintf("%s:%d", cfg.Host, cfg.Port), Handler: (&gateway.Gateway{Routes: directory, APIKey: cfg.APIKey, Authenticator: credentialCache, Recorder: recorder, Logger: logger, Client: client, Ready: databaseReadiness.Check, Control: control, Telemetry: gatewayTelemetry, CapacityObservers: map[string]gateway.CapacityObserver{"runpod": serverless.ActiveWorkers}, ExternalAuthorizer: externalBudgets, ManagedBilling: s, HostedModels: hostedModels, RequestAuthorizer: requestQuotas, AdmissionAuthorizer: admissionPool, ContextPassports: contextPassports, OpenRouterCatalog: openRouterCatalog}).Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 1 << 20, TLSConfig: serverTLS}
 	go func() {
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)

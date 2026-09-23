@@ -299,6 +299,43 @@ claim.
 
 ## Accelerator Lab product wiring
 
+InferCrane is split into a durable, provider-neutral control service and small
+target-compute adapters. A campaign directory such as
+`tools/modal-openrouter-qwen38` is an executable example for one pinned tuple;
+it is not the optimization algorithm.
+
+```text
+customer workload + constraints + immutable model
+                       │
+                       ▼
+         InferCrane optimization service
+     proposal → campaign → budget → evidence
+            │                         ▲
+            │ typed, idempotent jobs  │ immutable receipts
+            ▼                         │
+       accelerator worker service ────┘
+       profile │ generate │ qualify
+            │         │          │
+            ▼         ▼          ▼
+      Modal / RunPod / BYOC / private cluster
+            │
+            └── Brezel isolated source build
+```
+
+`cmd/infercrane-accelerator-worker` is the deployable worker. It exposes the
+existing `acceleratorlab.WorkerClient` contract, persists idempotency receipts
+across restarts, brokers content-addressed build artifacts, and invokes an
+absolute provider adapter executable without a shell. The adapter receives a
+typed JSON request on stdin and returns typed evidence on stdout. Provider
+credentials are explicitly supplied from an owner-only environment file; the
+worker does not inherit the control-plane environment.
+
+This supports previously unseen model repositories without adding a model-name
+branch. “Model agnostic” does not mean every model is automatically runnable:
+the pinned model must load in a declared runtime, fit a declared target, and
+pass the workload, quality, and compatibility gates. Unsupported tuples fail
+closed and remain useful negative evidence.
+
 The authenticated surface is:
 
 - `GET /api/v1/optimization/accelerator-lab/capabilities` — shows the live

@@ -1,0 +1,1204 @@
+[
+  {
+    "candidate_id": "sglang-0520-nextn-k4-bounded-graphs",
+    "correctness_probes": [
+      {
+        "id": "deterministic-1",
+        "output_sha256": "2b38292243fd0bd55b53428d3b23ed277445421aaaec8551d27a2da51962f0c3"
+      },
+      {
+        "id": "deterministic-2",
+        "output_sha256": "6b51d431df5d7f141cbececcf79edf3dd861c3b4069f0b11661a3eefacbba918"
+      },
+      {
+        "id": "deterministic-3",
+        "output_sha256": "71fa9faaa6f884aa11f4cea21477b2204a48a4fa7f05cecad00a1250eeeffb4c"
+      }
+    ],
+    "created_at": "2026-09-23T03:11:27.965336+00:00",
+    "error_rate": 0.0,
+    "gpu_inventory": [
+      {
+        "compute_capability": "9.0",
+        "name": "NVIDIA H200",
+        "uuid": "GPU-075c120a-b6d1-8db5-07fa-a9432520a63b"
+      }
+    ],
+    "lanes": [
+      {
+        "aggregate_output_tokens_per_second": 205.92365841003354,
+        "concurrency": 1,
+        "cost_per_1m_successful_output_tokens_usd": 6.123628580301866,
+        "gpu_seconds_per_successful_request": 6.686944135666669,
+        "itl_p50_ms": 4.756618747456386,
+        "itl_p95_ms": 4.937238602071218,
+        "measurement_seconds": 80.24332962800003,
+        "per_request_output_tokens_per_second_p50": 210.38629463126222,
+        "per_request_output_tokens_per_second_p95": 248.83559713820438,
+        "prompt_token_mismatch_count": 0,
+        "request_throughput_requests_per_second": 0.1495451404575407,
+        "requests": 12,
+        "slo_attainment": 1.0,
+        "slo_goodput_requests_per_second": 0.1495451404575407,
+        "slo_qualified_output_tokens_per_second": 205.92365841003354,
+        "successful_requests": 12,
+        "ttft_p50_ms": 248.41476349999425,
+        "ttft_p95_ms": 251.01673129999824
+      },
+      {
+        "aggregate_output_tokens_per_second": 641.9450032669345,
+        "concurrency": 4,
+        "cost_per_1m_successful_output_tokens_usd": 1.9643427296460303,
+        "gpu_seconds_per_successful_request": 2.145043567583334,
+        "itl_p50_ms": 5.4343059044331286,
+        "itl_p95_ms": 6.082372458757272,
+        "measurement_seconds": 25.740522811000005,
+        "per_request_output_tokens_per_second_p50": 184.26835218282898,
+        "per_request_output_tokens_per_second_p95": 229.40716855972764,
+        "prompt_token_mismatch_count": 0,
+        "request_throughput_requests_per_second": 0.46619099728898655,
+        "requests": 12,
+        "slo_attainment": 0.5833333333333334,
+        "slo_goodput_requests_per_second": 0.27194474841857547,
+        "slo_qualified_output_tokens_per_second": 374.46791857237844,
+        "successful_requests": 12,
+        "ttft_p50_ms": 528.0013059999931,
+        "ttft_p95_ms": 1364.820702999992
+      }
+    ],
+    "prompt_token_mismatch_rate": 0.0,
+    "quality": [
+      {
+        "name": "api_models",
+        "passed": true
+      },
+      {
+        "name": "stream_usage",
+        "passed": true
+      },
+      {
+        "name": "structured_output",
+        "passed": true
+      },
+      {
+        "name": "tool_call",
+        "passed": true
+      }
+    ],
+    "recipe": {
+      "args": [
+        "--model-path",
+        "Qwen/Qwen3.8-27B-FP8",
+        "--served-model-name",
+        "Qwen/Qwen3.8-27B-FP8",
+        "--revision",
+        "017b9c7af6b5689d5dd426a76e0bc077eb5ca20a",
+        "--tp-size",
+        "1",
+        "--context-length",
+        "262144",
+        "--mem-fraction-static",
+        "0.90",
+        "--kv-cache-dtype",
+        "fp8_e4m3",
+        "--enable-metrics",
+        "--reasoning-parser",
+        "qwen3",
+        "--tool-call-parser",
+        "qwen3_coder",
+        "--port",
+        "30000",
+        "--speculative-algorithm",
+        "NEXTN",
+        "--speculative-num-steps",
+        "3",
+        "--speculative-eagle-topk",
+        "1",
+        "--speculative-num-draft-tokens",
+        "4",
+        "--cuda-graph-bs-decode",
+        "1",
+        "2",
+        "4",
+        "8",
+        "12",
+        "16",
+        "24",
+        "32",
+        "33",
+        "--cuda-graph-bs-prefill",
+        "256",
+        "512",
+        "1024",
+        "2048",
+        "4096",
+        "8192"
+      ],
+      "command": [
+        "/opt/sglang/bin/python",
+        "-m",
+        "sglang.launch_server",
+        "--model-path",
+        "Qwen/Qwen3.8-27B-FP8",
+        "--served-model-name",
+        "Qwen/Qwen3.8-27B-FP8",
+        "--revision",
+        "017b9c7af6b5689d5dd426a76e0bc077eb5ca20a",
+        "--tp-size",
+        "1",
+        "--context-length",
+        "262144",
+        "--mem-fraction-static",
+        "0.90",
+        "--kv-cache-dtype",
+        "fp8_e4m3",
+        "--enable-metrics",
+        "--reasoning-parser",
+        "qwen3",
+        "--tool-call-parser",
+        "qwen3_coder",
+        "--port",
+        "30000",
+        "--speculative-algorithm",
+        "NEXTN",
+        "--speculative-num-steps",
+        "3",
+        "--speculative-eagle-topk",
+        "1",
+        "--speculative-num-draft-tokens",
+        "4",
+        "--cuda-graph-bs-decode",
+        "1",
+        "2",
+        "4",
+        "8",
+        "12",
+        "16",
+        "24",
+        "32",
+        "33",
+        "--cuda-graph-bs-prefill",
+        "256",
+        "512",
+        "1024",
+        "2048",
+        "4096",
+        "8192"
+      ],
+      "gpu": "H200",
+      "harness_digest": "sha256:fcc701cf633ddaecccf54a7943c0924a361a0dd511cea92358c447f612d84e1d",
+      "image": "lmsysorg/sglang@sha256:06e4f2ed21afde4ff513cda65070124e727ba23ccaeff7712b8c40e1097d611f",
+      "model": "Qwen/Qwen3.8-27B-FP8",
+      "model_revision": "017b9c7af6b5689d5dd426a76e0bc077eb5ca20a"
+    },
+    "request_samples": [
+      {
+        "completion_tokens": 1377,
+        "concurrency": 1,
+        "error": null,
+        "expected_prompt_tokens": 3923,
+        "itl_ms": 4.8360403699128085,
+        "latency_ms": 6896.5518490000195,
+        "output_sha256": "3f285e0d81cdc94cb3db2bd7d9ee2df8994f3466b2c6cef380858abf3f526571",
+        "output_tokens_per_second": 206.9310153844082,
+        "prompt_token_match": true,
+        "prompt_tokens": 3923,
+        "slo_pass": true,
+        "status": 200,
+        "success": true,
+        "ttft_ms": 241.45878599998127
+      },
+      {
+        "completion_tokens": 1377,
+        "concurrency": 1,
+        "error": null,
+        "expected_prompt_tokens": 3913,
+        "itl_ms": 4.283351058139556,
+        "latency_ms": 6144.797030000007,
+        "output_sha256": "61fc9db2eb2ca770de848aeb8ef58936383a204b4bbf5d069dbc109f6a262cbb",
+        "output_tokens_per_second": 233.63173613434927,
+        "prompt_token_match": true,
+        "prompt_tokens": 3913,
+        "slo_pass": true,
+        "status": 200,
+        "success": true,
+        "ttft_ms": 250.47089299999925
+      },
+      {
+        "completion_tokens": 1377,
+        "concurrency": 1,
+        "error": null,
+        "expected_prompt_tokens": 3923,
+        "itl_ms": 3.838161877906973,
+        "latency_ms": 5524.101387999963,
+        "output_sha256": "68593271ab87dcf3d420c80116e3ca9f0ef609a43373dc2be27299ae27442bd1",
+        "output_tokens_per_second": 260.7307289320905,
+        "prompt_token_match": true,
+        "prompt_tokens": 3923,
+        "slo_pass": true,
+        "status": 200,
+        "success": true,
+        "ttft_ms": 242.38986599999635
+      },
+      {
+        "completion_tokens": 1377,
+        "concurrency": 1,
+        "error": null,
+        "expected_prompt_tokens": 3921,
+        "itl_ms": 4.752787991279041,
+        "latency_ms": 6786.231284999985,
+        "output_sha256": "6523dc12cf30ee03dd531801753fb2dd566401cea26d26ba9b2e3bafaeb62b4c",
+        "output_tokens_per_second": 210.55572982053786,
+        "prompt_token_match": true,
+        "prompt_tokens": 3921,
+        "slo_pass": true,
+        "status": 200,
+        "success": true,
+        "ttft_ms": 245.97178200002645
+      },
+      {
+        "completion_tokens": 1377,
+        "concurrency": 1,
+        "error": null,
+        "expected_prompt_tokens": 3914,
+        "itl_ms": 4.668640465116293,
+        "latency_ms": 6670.42198400003,
+        "output_sha256": "03060d02ab4d2a142580ccc13df8dd6918fcf5f7704f2c0663dee4305665cc8f",
+        "output_tokens_per_second": 214.3507840587418,
+        "prompt_token_match": true,
+        "prompt_tokens": 3914,
+        "slo_pass": true,
+        "status": 200,
+        "success": true,
+        "ttft_ms": 245.96851100000094
+      },
+      {
+        "completion_tokens": 1377,
+        "concurrency": 1,
+        "error": null,
+        "expected_prompt_tokens": 3921,
+        "itl_ms": 4.783588223837233,
+        "latency_ms": 6828.487302000041,
+        "output_sha256": "68295c0072dda9f7d91726cad05702bbfe35b24a315338e40aa47004b0a81592",
+        "output_tokens_per_second": 209.20001834591383,
+        "prompt_token_match": true,
+        "prompt_tokens": 3921,
+        "slo_pass": true,
+        "status": 200,
+        "success": true,
+        "ttft_ms": 245.85872400001563
+      },
+      {
+        "completion_tokens": 1377,
+        "concurrency": 1,
+        "error": null,
+        "expected_prompt_tokens": 3921,
+        "itl_ms": 4.185333675145346,
+        "latency_ms": 6009.706100000017,
+        "output_sha256": "4986d619fccbab528d616d354e13020a6c97c572c1c1a66705b3d7eadcc7cba4",
+        "output_tokens_per_second": 239.1032165795703,
+        "prompt_token_match": true,
+        "prompt_tokens": 3921,
+        "slo_pass": true,
+        "status": 200,
+        "success": true,
+        "ttft_ms": 250.30813400002216
+      },
+      {
+        "completion_tokens": 1377,
+        "concurrency": 1,
+        "error": null,
+        "expected_prompt_tokens": 3924,
+        "itl_ms": 4.760449503633731,
+        "latency_ms": 6800.8747819999935,
+        "output_sha256": "6a62f99f354a3b8fc3fed18b4ce70b4e40457cf191b79fd01709b64764bde3bc",
+        "output_tokens_per_second": 210.21685944198654,
+        "prompt_token_match": true,
+        "prompt_tokens": 3924,
+        "slo_pass": true,
+        "status": 200,
+        "success": true,
+        "ttft_ms": 250.1003759999776
+      },
+      {
+        "completion_tokens": 1377,
+        "concurrency": 1,
+        "error": null,
+        "expected_prompt_tokens": 3921,
+        "itl_ms": 4.718738785610497,
+        "latency_ms": 6741.801183999996,
+        "output_sha256": "39031c07969c0b18e09e3b30bc1040d4ef9bc4d7b1a7f7777ca250dfc3606012",
+        "output_tokens_per_second": 212.07504582319774,
+        "prompt_token_match": true,
+        "prompt_tokens": 3921,
+        "slo_pass": true,
+        "status": 200,
+        "success": true,
+        "ttft_ms": 248.42301199998928
+      },
+      {
+        "completion_tokens": 1377,
+        "concurrency": 1,
+        "error": null,
+        "expected_prompt_tokens": 3924,
+        "itl_ms": 4.930349729651175,
+        "latency_ms": 7032.9800019999875,
+        "output_sha256": "323089df978002545009eb24431a9d14ba01aa775b282575c057247c40a3f163",
+        "output_tokens_per_second": 202.97277050503445,
+        "prompt_token_match": true,
+        "prompt_tokens": 3924,
+        "slo_pass": true,
+        "status": 200,
+        "success": true,
+        "ttft_ms": 248.40651499999922
+      },
+      {
+        "completion_tokens": 1377,
+        "concurrency": 1,
+        "error": null,
+        "expected_prompt_tokens": 3913,
+        "itl_ms": 4.842136372093001,
+        "latency_ms": 6912.216665000016,
+        "output_sha256": "6305d7527f9158789400fdb66e3b43254b9bbdd58d30d4922154e10611494bc4",
+        "output_tokens_per_second": 206.6704998135947,
+        "prompt_token_match": true,
+        "prompt_tokens": 3913,
+        "slo_pass": true,
+        "status": 200,
+        "success": true,
+        "ttft_ms": 248.97630100002743
+      },
+      {
+        "completion_tokens": 1377,
+        "concurrency": 1,
+        "error": null,
+        "expected_prompt_tokens": 3924,
+        "itl_ms": 4.945658335029047,
+        "latency_ms": 7057.300053000006,
+        "output_sha256": "0ddee0f530ddb998014262535907291c9f8de46f0386d7acb0ebd48976ae105a",
+        "output_tokens_per_second": 202.3444962014686,
+        "prompt_token_match": true,
+        "prompt_tokens": 3924,
+        "slo_pass": true,
+        "status": 200,
+        "success": true,
+        "ttft_ms": 251.683866999997
+      },
+      {
+        "completion_tokens": 1377,
+        "concurrency": 4,
+        "error": null,
+        "expected_prompt_tokens": 3919,
+        "itl_ms": 5.867882031250022,
+        "latency_ms": 8711.573247999979,
+        "output_sha256": "3ecf9231c8f7fc0e67360a2e19fee7f4d777301f25d16fdee1613ced000ad2de",
+        "output_tokens_per_second": 170.54309184413918,
+        "prompt_token_match": true,
+        "prompt_tokens": 3919,
+        "slo_pass": true,
+        "status": 200,
+        "success": true,
+        "ttft_ms": 636.5900019999913
+      },
+      {
+        "completion_tokens": 1377,
+        "concurrency": 4,
+        "error": null,
+        "expected_prompt_tokens": 3916,
+        "itl_ms": 5.572102675872077,
+        "latency_ms": 8709.730417000002,
+        "output_sha256": "8b3d7d86d7a8b7052aac357ee13f094669166327507c0e63f654d6c74ee8bd68",
+        "output_tokens_per_second": 179.59589088681412,
+        "prompt_token_match": true,
+        "prompt_tokens": 3916,
+        "slo_pass": false,
+        "status": 200,
+        "success": true,
+        "ttft_ms": 1042.002636999996
+      },
+      {
+        "completion_tokens": 1377,
+        "concurrency": 4,
+        "error": null,
+        "expected_prompt_tokens": 3920,
+        "itl_ms": 5.04774218604651,
+        "latency_ms": 7987.967169999991,
+        "output_sha256": "154745648dccae998c91f55a5eef131c9b67edb4b3b3c724ae07505c89cb5cf6",
+        "output_tokens_per_second": 198.25234873372864,
+        "prompt_token_match": true,
+        "prompt_tokens": 3920,
+        "slo_pass": false,
+        "status": 200,
+        "success": true,
+        "ttft_ms": 1041.8123949999654
+      },
+      {
+        "completion_tokens": 1377,
+        "concurrency": 4,
+        "error": null,
+        "expected_prompt_tokens": 3923,
+        "itl_ms": 4.8175954106104575,
+        "latency_ms": 8388.760875000004,
+        "output_sha256": "1244921f53e0c92d56793fbc77ab6c2cd52a23920fe70b958b04ab726231ddbc",
+        "output_tokens_per_second": 207.72328493629982,
+        "prompt_token_match": true,
+        "prompt_tokens": 3923,
+        "slo_pass": false,
+        "status": 200,
+        "success": true,
+        "ttft_ms": 1759.376116999988
+      },
+      {
+        "completion_tokens": 1377,
+        "concurrency": 4,
+        "error": null,
+        "expected_prompt_tokens": 3913,
+        "itl_ms": 5.777908618459334,
+        "latency_ms": 8220.834743000012,
+        "output_sha256": "ca19295d5b6ea0e5065d5c6699e4fa1d4ee221114dce6b45d2c33aef333d13f2",
+        "output_tokens_per_second": 173.1987835510088,
+        "prompt_token_match": true,
+        "prompt_tokens": 3913,
+        "slo_pass": true,
+        "status": 200,
+        "success": true,
+        "ttft_ms": 270.032088999983
+      },
+      {
+        "completion_tokens": 1377,
+        "concurrency": 4,
+        "error": null,
+        "expected_prompt_tokens": 3913,
+        "itl_ms": 6.304104385174411,
+        "latency_ms": 8943.29428100002,
+        "output_sha256": "ed9947347dad8326c80daf63a164f3c3ff405ca7f670a0a2f845172960a52584",
+        "output_tokens_per_second": 158.7420961079724,
+        "prompt_token_match": true,
+        "prompt_tokens": 3913,
+        "slo_pass": true,
+        "status": 200,
+        "success": true,
+        "ttft_ms": 268.3494330000258
+      },
+      {
+        "completion_tokens": 1377,
+        "concurrency": 4,
+        "error": null,
+        "expected_prompt_tokens": 3913,
+        "itl_ms": 4.314783198401173,
+        "latency_ms": 6739.427324000018,
+        "output_sha256": "6a4dddceb3497e7ea64e2176e23212c0f77b887b7ae5dcbc5ac97d59b0b50cc8",
+        "output_tokens_per_second": 231.92978607983412,
+        "prompt_token_match": true,
+        "prompt_tokens": 3913,
+        "slo_pass": false,
+        "status": 200,
+        "success": true,
+        "ttft_ms": 800.9984209999743
+      },
+      {
+        "completion_tokens": 1377,
+        "concurrency": 4,
+        "error": null,
+        "expected_prompt_tokens": 3924,
+        "itl_ms": 4.401832584302304,
+        "latency_ms": 6858.367726999973,
+        "output_sha256": "1f2f0c5b722dce85cd78343ec08868d4d2fb14d449300d732e407fa57618159c",
+        "output_tokens_per_second": 227.3432087705496,
+        "prompt_token_match": true,
+        "prompt_tokens": 3924,
+        "slo_pass": false,
+        "status": 200,
+        "success": true,
+        "ttft_ms": 800.7693189999827
+      },
+      {
+        "completion_tokens": 1377,
+        "concurrency": 4,
+        "error": null,
+        "expected_prompt_tokens": 3921,
+        "itl_ms": 5.680055992005813,
+        "latency_ms": 8115.186166000001,
+        "output_sha256": "45007a10e3ea01b0de8881fea91aac50a63c46f9eb671ea9d74b5835961f2a3a",
+        "output_tokens_per_second": 176.18254918516345,
+        "prompt_token_match": true,
+        "prompt_tokens": 3921,
+        "slo_pass": true,
+        "status": 200,
+        "success": true,
+        "ttft_ms": 298.98466700001336
+      },
+      {
+        "completion_tokens": 1377,
+        "concurrency": 4,
+        "error": null,
+        "expected_prompt_tokens": 3920,
+        "itl_ms": 5.900955428052339,
+        "latency_ms": 8539.555693000011,
+        "output_sha256": "2b6dc8faf3f1900d6b821133778a636548fa0566104a02d785964b414b51a7f6",
+        "output_tokens_per_second": 169.5872399626555,
+        "prompt_token_match": true,
+        "prompt_tokens": 3920,
+        "slo_pass": true,
+        "status": 200,
+        "success": true,
+        "ttft_ms": 419.41260999999486
+      },
+      {
+        "completion_tokens": 1377,
+        "concurrency": 4,
+        "error": null,
+        "expected_prompt_tokens": 3923,
+        "itl_ms": 4.80047588008718,
+        "latency_ms": 6891.3988669999635,
+        "output_sha256": "fa9565cab2c445ffe4b4e3ad6b3a3ca18fd669f239dc195cde934d49411fbc54",
+        "output_tokens_per_second": 208.4640708928784,
+        "prompt_token_match": true,
+        "prompt_tokens": 3923,
+        "slo_pass": true,
+        "status": 200,
+        "success": true,
+        "ttft_ms": 285.45608100000663
+      },
+      {
+        "completion_tokens": 1377,
+        "concurrency": 4,
+        "error": null,
+        "expected_prompt_tokens": 3914,
+        "itl_ms": 5.2965091329941805,
+        "latency_ms": 7557.524721999982,
+        "output_sha256": "465d7ae090f3f17ed7ac71d9168d414df5cd3a2e32d0cf321fd864de599acf7d",
+        "output_tokens_per_second": 188.94081347884384,
+        "prompt_token_match": true,
+        "prompt_tokens": 3914,
+        "slo_pass": true,
+        "status": 200,
+        "success": true,
+        "ttft_ms": 267.62726800001246
+      }
+    ],
+    "run_index": 1,
+    "runtime_id": "sglang-0.5.20-nextn-k4-bounded-graphs",
+    "runtime_metric_delta": {
+      "sglang:full_token_usage{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 0.0033042546242123857,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"+Inf\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"1.1e+06\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"10000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"100000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"12500.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"1500.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"15000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"17500.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"1e+06\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"2000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"20000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"200000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"22500.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"25000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"27500.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"3000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"30000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"300000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"35000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"4000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"40000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"400000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"5000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"6000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"60000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"600000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"7000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"8000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"80000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"800000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:generation_tokens_histogram_bucket{engine_type=\"unified\",le=\"9000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:generation_tokens_histogram_count{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:generation_tokens_histogram_sum{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 33048.0,
+      "sglang:generation_tokens_total{engine_type=\"unified\",is_streaming=\"true\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 33048.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"+Inf\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 33024.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"0.002\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 154.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"0.004\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24081.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"0.006\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 28743.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"0.008\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 31232.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"0.01\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 31446.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"0.015\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 32287.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"0.02\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 32888.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"0.025\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 32908.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"0.03\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 32918.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"0.035\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 32922.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"0.04\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 32928.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"0.06\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 32979.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"0.08\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 32981.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"0.1\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 33003.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"0.2\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 33016.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"0.4\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 33024.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"0.6\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 33024.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"0.8\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 33024.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"1.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 33024.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"2.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 33024.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"4.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 33024.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"6.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 33024.0,
+      "sglang:inter_token_latency_seconds_bucket{engine_type=\"unified\",le=\"8.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 33024.0,
+      "sglang:inter_token_latency_seconds_count{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 33024.0,
+      "sglang:inter_token_latency_seconds_sum{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 163.8993632689983,
+      "sglang:kv_available_tokens{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 1515665.0,
+      "sglang:kv_cache_memory_usage_gb{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 48.1187744140625,
+      "sglang:kv_evictable_tokens{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 61090.0,
+      "sglang:kv_used_tokens{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 5210.0,
+      "sglang:mamba_available_tokens{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 141.0,
+      "sglang:mamba_evictable_tokens{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 24.0,
+      "sglang:mamba_used_tokens{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 4.0,
+      "sglang:max_total_num_tokens{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 1576755.0,
+      "sglang:new_token_ratio{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 0.098,
+      "sglang:num_used_tokens{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 5210.0,
+      "sglang:prefill_effective_tokens_total{engine_type=\"unified\",mode=\"input\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 94061.0,
+      "sglang:prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"+Inf\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"1.1e+06\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"10000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"100000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"12500.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"15000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"17500.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"1e+06\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"20000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"200000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"22500.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"25000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"27500.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"30000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"300000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"35000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"4000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"40000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"400000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"5000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"6000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"60000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"600000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"7000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"8000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"80000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"800000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"9000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:prompt_tokens_histogram_count{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:prompt_tokens_histogram_sum{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 94061.0,
+      "sglang:prompt_tokens_total{engine_type=\"unified\",is_streaming=\"true\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 94061.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"+Inf\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 24.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"0.001\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 20.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"0.005\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 23.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"0.01\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 24.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"0.05\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 24.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"0.1\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 24.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"0.2\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 24.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"0.5\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 24.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"1.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 24.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"10.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 24.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"100.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 24.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"1000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 24.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"1200.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 24.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"1400.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 24.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"15.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 24.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"1600.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 24.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"1800.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 24.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"2.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 24.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"20.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 24.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"200.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 24.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"2000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 24.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"2500.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 24.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"3.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 24.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"30.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 24.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"300.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 24.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"3000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 24.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"4.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 24.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"40.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 24.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"400.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 24.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"5.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 24.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"50.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 24.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"500.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 24.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"60.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 24.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"600.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 24.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"70.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 24.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"700.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 24.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"80.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 24.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"800.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 24.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"90.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 24.0,
+      "sglang:queue_time_seconds_bucket{engine_type=\"unified\",le=\"900.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 24.0,
+      "sglang:queue_time_seconds_count{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 24.0,
+      "sglang:queue_time_seconds_sum{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 0.022945809999981748,
+      "sglang:realtime_tokens_total{engine_type=\"unified\",mode=\"decode\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 33126.0,
+      "sglang:realtime_tokens_total{engine_type=\"unified\",mode=\"prefill_compute\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 94061.0,
+      "sglang:spec_accept_length{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 2.406779661016949,
+      "sglang:spec_accept_rate{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 0.4689265536723164,
+      "sglang:spec_num_draft_tokens{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 4.0,
+      "sglang:spec_num_steps{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 3.0,
+      "sglang:spec_verify_calls_total{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 10210.0,
+      "sglang:time_to_first_token_seconds_bucket{engine_type=\"unified\",is_streaming=\"true\",le=\"+Inf\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:time_to_first_token_seconds_bucket{engine_type=\"unified\",is_streaming=\"true\",le=\"0.4\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 17.0,
+      "sglang:time_to_first_token_seconds_bucket{engine_type=\"unified\",is_streaming=\"true\",le=\"0.6\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 18.0,
+      "sglang:time_to_first_token_seconds_bucket{engine_type=\"unified\",is_streaming=\"true\",le=\"0.8\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 21.0,
+      "sglang:time_to_first_token_seconds_bucket{engine_type=\"unified\",is_streaming=\"true\",le=\"1.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 23.0,
+      "sglang:time_to_first_token_seconds_bucket{engine_type=\"unified\",is_streaming=\"true\",le=\"10.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:time_to_first_token_seconds_bucket{engine_type=\"unified\",is_streaming=\"true\",le=\"100.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:time_to_first_token_seconds_bucket{engine_type=\"unified\",is_streaming=\"true\",le=\"2.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:time_to_first_token_seconds_bucket{engine_type=\"unified\",is_streaming=\"true\",le=\"20.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:time_to_first_token_seconds_bucket{engine_type=\"unified\",is_streaming=\"true\",le=\"200.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:time_to_first_token_seconds_bucket{engine_type=\"unified\",is_streaming=\"true\",le=\"4.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:time_to_first_token_seconds_bucket{engine_type=\"unified\",is_streaming=\"true\",le=\"40.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:time_to_first_token_seconds_bucket{engine_type=\"unified\",is_streaming=\"true\",le=\"400.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:time_to_first_token_seconds_bucket{engine_type=\"unified\",is_streaming=\"true\",le=\"6.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:time_to_first_token_seconds_bucket{engine_type=\"unified\",is_streaming=\"true\",le=\"60.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:time_to_first_token_seconds_bucket{engine_type=\"unified\",is_streaming=\"true\",le=\"8.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:time_to_first_token_seconds_bucket{engine_type=\"unified\",is_streaming=\"true\",le=\"80.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:time_to_first_token_seconds_count{engine_type=\"unified\",is_streaming=\"true\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:time_to_first_token_seconds_sum{engine_type=\"unified\",is_streaming=\"true\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 10.472666354999973,
+      "sglang:token_usage{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 0.02,
+      "sglang:uncached_prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"+Inf\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:uncached_prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"1.1e+06\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:uncached_prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"10000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:uncached_prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"100000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:uncached_prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"12500.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:uncached_prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"15000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:uncached_prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"17500.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:uncached_prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"1e+06\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:uncached_prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"20000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:uncached_prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"200000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:uncached_prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"22500.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:uncached_prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"25000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:uncached_prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"27500.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:uncached_prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"30000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:uncached_prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"300000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:uncached_prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"35000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:uncached_prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"4000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:uncached_prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"40000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:uncached_prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"400000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:uncached_prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"5000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:uncached_prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"6000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:uncached_prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"60000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:uncached_prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"600000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:uncached_prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"7000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:uncached_prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"8000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:uncached_prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"80000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:uncached_prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"800000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:uncached_prompt_tokens_histogram_bucket{engine_type=\"unified\",le=\"9000.0\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:uncached_prompt_tokens_histogram_count{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 24.0,
+      "sglang:uncached_prompt_tokens_histogram_sum{engine_type=\"unified\",model_name=\"Qwen/Qwen3.8-27B-FP8\"}": 94061.0
+    },
+    "runtime_profile": {
+      "boundary": "Profiles identify candidate hotspots. They do not qualify a custom kernel; promotion requires target-GPU parity, microbenchmarks, and end-to-end evidence.",
+      "captures": {
+        "decode": {
+          "artifacts": [
+            {
+              "path": "/results/20260923T030450Z/sglang-0520-nextn-k4-bounded-graphs/public-decode-heavy/profiles/decode/infercrane-decode-1790133058.1906598-TP-0.trace.json.gz",
+              "sha256": "34dc71b52f996a43cc453ad85a52d3c54fded5ef923832669962904d0c8fb7e8"
+            }
+          ],
+          "custom_kernel_gate": {
+            "boundary": "Eligibility authorizes a bounded kernel candidate only. Promotion still requires numerical parity, target-GPU microbenchmarks, end-to-end workload evidence, and cost gates.",
+            "decision": "build_candidate",
+            "eligible": true,
+            "hotspot_family": "gemm",
+            "maximum_endpoint_upside_fraction": 0.573949654092201,
+            "measured_device_time_fraction": 0.573949654092201,
+            "minimum_endpoint_upside_fraction": 0.03,
+            "minimum_hotspot_fraction": 0.05,
+            "schema_version": "infercrane.dev/custom-kernel-gate/v1"
+          },
+          "profile": {
+            "families": [
+              {
+                "device_time_fraction": 0.573949654092201,
+                "device_time_us": 1347353.6469999794,
+                "name": "gemm"
+              },
+              {
+                "device_time_fraction": 0.3638040456592341,
+                "device_time_us": 854034.3289998276,
+                "name": "other"
+              },
+              {
+                "device_time_fraction": 0.03259017505805572,
+                "device_time_us": 76505.82400000058,
+                "name": "normalization"
+              },
+              {
+                "device_time_fraction": 0.013172354060396164,
+                "device_time_us": 30922.257999999936,
+                "name": "attention"
+              },
+              {
+                "device_time_fraction": 0.006713242626376982,
+                "device_time_us": 15759.41699999999,
+                "name": "gated_deltanet"
+              },
+              {
+                "device_time_fraction": 0.0052282857281371765,
+                "device_time_us": 12273.463000000243,
+                "name": "memory"
+              },
+              {
+                "device_time_fraction": 0.004542242775512334,
+                "device_time_us": 10662.968999999981,
+                "name": "sampling"
+              }
+            ],
+            "kernel_events": 202994,
+            "schema_version": "infercrane.dev/gpu-hotspot-profile/v1",
+            "top_kernels": [
+              {
+                "device_time_fraction": 0.20580931860636523,
+                "device_time_us": 483139.8260000012,
+                "name": "void deep_gemm::sm90_fp8_gemm_1d2d_impl<(cute::UMMA::Major)0, 0u, 0u, 0u, 1u, 16u, 144u, 128u, 128u, 128u, 32u, 11u, 128u, 128u, 2u, false, 132u, (deep_gemm::GemmType)0, cutlass::bfloat16_t, deep_gemm::epilogue::transform::EpilogueIdentity>(float*, int*, unsigned int, unsigned int, unsigned int, CUtensorMap_st, CUtensorMap_st, CUtensorMap_st, CUtensorMap_st)"
+              },
+              {
+                "device_time_fraction": 0.1986305878192101,
+                "device_time_us": 466287.6700000071,
+                "name": "void deep_gemm::sm90_fp8_gemm_1d2d_impl<(cute::UMMA::Major)0, 0u, 0u, 0u, 1u, 16u, 48u, 128u, 128u, 128u, 32u, 16u, 128u, 128u, 1u, false, 132u, (deep_gemm::GemmType)0, cutlass::bfloat16_t, deep_gemm::epilogue::transform::EpilogueIdentity>(float*, int*, unsigned int, unsigned int, unsigned int, CUtensorMap_st, CUtensorMap_st, CUtensorMap_st, CUtensorMap_st)"
+              },
+              {
+                "device_time_fraction": 0.15014979346811824,
+                "device_time_us": 352478.428,
+                "name": "nvjet_sm90_tst_512x8_64x3_2x1_v_bz_TNT"
+              },
+              {
+                "device_time_fraction": 0.07903896182452867,
+                "device_time_us": 185544.90400000036,
+                "name": "void deep_gemm::sm90_fp8_gemm_1d2d_impl<(cute::UMMA::Major)0, 0u, 0u, 0u, 1u, 16u, 128u, 128u, 128u, 128u, 128u, 12u, 128u, 128u, 1u, false, 132u, (deep_gemm::GemmType)0, cutlass::bfloat16_t, deep_gemm::epilogue::transform::EpilogueIdentity>(float*, int*, unsigned int, unsigned int, unsigned int, CUtensorMap_st, CUtensorMap_st, CUtensorMap_st, CUtensorMap_st)"
+              },
+              {
+                "device_time_fraction": 0.04802940452135496,
+                "device_time_us": 112749.59900000092,
+                "name": "fused_sigmoid_gating_delta_rule_update_kernel"
+              },
+              {
+                "device_time_fraction": 0.042072149114768705,
+                "device_time_us": 98764.8709999995,
+                "name": "_layer_norm_fwd_1pass_kernel"
+              },
+              {
+                "device_time_fraction": 0.04147904626581283,
+                "device_time_us": 97372.55499999995,
+                "name": "nvjet_sm90_tst_64x8_64x16_2x1_v_bz_splitK_TNT"
+              },
+              {
+                "device_time_fraction": 0.02942086589382291,
+                "device_time_us": 69065.8329999998,
+                "name": "void cublasLt::splitKreduce_kernel<32, 16, int, float, __nv_bfloat16, float, __nv_bfloat16, false, float, __nv_bfloat16, __nv_bfloat16, true, false, false, false>(cublasLt::cublasSplitKParams<float>, float const*, __nv_bfloat16 const*, float*, __nv_bfloat16*, float const*, float const*, __nv_bfloat16 const*, float const*, __nv_bfloat16*, void*, long, float*, int*, float*, float*, float const*, float const*, float const*, float const*, float const*)"
+              },
+              {
+                "device_time_fraction": 0.027870448624736734,
+                "device_time_us": 65426.210000001556,
+                "name": "kernel_cutlass_kernel_flashinfernormkernelsfused_add_rmsnormFusedAddRMSNormKernel_object_at__tensorptrbf16gmemalign128oi64512051201_tensorptrbf16gmemalign128oi64512051201_tensorptrbf16gme_0"
+              },
+              {
+                "device_time_fraction": 0.02609588595368929,
+                "device_time_us": 61260.40299999994,
+                "name": "void deep_gemm::sm90_fp8_gemm_1d2d_impl<(cute::UMMA::Major)0, 0u, 0u, 0u, 1u, 16u, 112u, 128u, 128u, 128u, 32u, 13u, 128u, 128u, 1u, false, 132u, (deep_gemm::GemmType)0, cutlass::bfloat16_t, deep_gemm::epilogue::transform::EpilogueIdentity>(float*, int*, unsigned int, unsigned int, unsigned int, CUtensorMap_st, CUtensorMap_st, CUtensorMap_st, CUtensorMap_st)"
+              },
+              {
+                "device_time_fraction": 0.02276691710940108,
+                "device_time_us": 53445.6090000013,
+                "name": "void sglang::per_token_group_quant_flat_kernel<sglang::QuantTrait<__nv_bfloat16, __nv_fp8_e4m3, 128u, false, false, true, false>, true>(sglang::QuantKernelParams)"
+              },
+              {
+                "device_time_fraction": 0.015115895214072587,
+                "device_time_us": 35484.743999999875,
+                "name": "void cutlass::device_kernel<flash::enable_sm90_or_later<flash::FlashAttnFwdSm90<flash::CollectiveMainloopFwdSm90<2, cute::tuple<cute::C<1>, cute::C<1>, cute::C<1> >, cute::tuple<cute::C<128>, cute::C<128>, cute::C<256> >, 256, cutlass::float_e4m3_t, float, cutlass::arch::Sm90, true, false, false, true, true, false, false, false, true, false, true, true, false, cutlass::bfloat16_t, false, 1>, flash::CollectiveEpilogueFwd<cute::tuple<cute::C<128>, cute::C<256>, cute::C<128> >, cute::tuple<cute::C<1>, cute::C<1>, cute::C<1> >, cutlass::bfloat16_t, cutlass::arch::Sm90, 256, true, true, true, true>, flash::VarlenDynamicPersistentTileScheduler<128, 128, 256, 128, true, true, true, true, true, true> > > >(flash::enable_sm90_or_later<flash::FlashAttnFwdSm90<flash::CollectiveMainloopFwdSm90<2, cute::tuple<cute::C<1>, cute::C<1>, cute::C<1> >, cute::tuple<cute::C<128>, cute::C<128>, cute::C<256> >, 256, cutlass::float_e4m3_t, float, cutlass::arch::Sm90, true, false, false, true, true, false, false, false, true, false, true, true, false, cutlass::bfloat16_t, false, 1>, flash::CollectiveEpilogueFwd<cute::tuple<cute::C<128>, cute::C<256>, cute::C<128> >, cute::tuple<cute::C<1>, cute::C<1>, cute::C<1> >, cutlass::bfloat16_t, cutlass::arch::Sm90, 256, true, true, true, true>, flash::VarlenDynamicPersistentTileScheduler<128, 128, 256, 128, true, true, true, true, true, true> > >::Params)"
+              },
+              {
+                "device_time_fraction": 0.011225891515786738,
+                "device_time_us": 26352.913999999768,
+                "name": "_causal_conv1d_update_kernel"
+              },
+              {
+                "device_time_fraction": 0.009164093240954673,
+                "device_time_us": 21512.817999999414,
+                "name": "fused_qkvzba_split_reshape_cat_contiguous_kernel"
+              },
+              {
+                "device_time_fraction": 0.008485953549627586,
+                "device_time_us": 19920.876999999764,
+                "name": "void at::native::elementwise_kernel<128, 4, at::native::gpu_kernel_impl<at::native::BinaryFunctor<c10::BFloat16, c10::BFloat16, c10::BFloat16, at::native::binary_internal::DivFunctor<c10::BFloat16> > >(at::TensorIteratorBase&, at::native::BinaryFunctor<c10::BFloat16, c10::BFloat16, c10::BFloat16, at::native::binary_internal::DivFunctor<c10::BFloat16> > const&)::{lambda(int)#1}>(int, at::native::gpu_kernel_impl<at::native::BinaryFunctor<c10::BFloat16, c10::BFloat16, c10::BFloat16, at::native::binary_internal::DivFunctor<c10::BFloat16> > >(at::TensorIteratorBase&, at::native::BinaryFunctor<c10::BFloat16, c10::BFloat16, c10::BFloat16, at::native::binary_internal::DivFunctor<c10::BFloat16> > const&)::{lambda(int)#1})"
+              },
+              {
+                "device_time_fraction": 0.007621163899809031,
+                "device_time_us": 17890.77300000034,
+                "name": "void sglang::act_and_mul_kernel<__nv_bfloat16, (sglang::ActivationKind)0, true, false, false, false>(sglang::ActivationParams)"
+              },
+              {
+                "device_time_fraction": 0.006063013762596405,
+                "device_time_us": 14232.996999999998,
+                "name": "_fused_mamba_state_scatter_with_mask_kernel"
+              },
+              {
+                "device_time_fraction": 0.005774210115646469,
+                "device_time_us": 13555.026999999996,
+                "name": "nvjet_sm90_tst_256x8_64x6_4x1_v_bz_splitK_TNT"
+              },
+              {
+                "device_time_fraction": 0.005401697415117707,
+                "device_time_us": 12680.548999999997,
+                "name": "void flashinfer::sampling::air_top_p::AirTopPRenormApplyKernel<float>(float const*, float*, flashinfer::sampling::air_top_p::Counter<float>*, int)"
+              },
+              {
+                "device_time_fraction": 0.00517933645565099,
+                "device_time_us": 12158.553999999933,
+                "name": "void cutlass::device_kernel<flash::FlashAttnFwdCombine<cute::tuple<cute::C<8>, cute::C<128> >, 5, 256, 1, false, true, cutlass::bfloat16_t, float, cutlass::arch::Sm90> >(flash::FlashAttnFwdCombine<cute::tuple<cute::C<8>, cute::C<128> >, 5, 256, 1, false, true, cutlass::bfloat16_t, float, cutlass::arch::Sm90>::Params)"
+              }
+            ],
+            "total_gpu_kernel_time_us": 2347511.907000011
+          },
+          "request": {
+            "completion_tokens": 512,
+            "concurrency": 1,
+            "error": null,
+            "expected_prompt_tokens": 262,
+            "itl_ms": 4.067829322896324,
+            "latency_ms": 2187.9088329999945,
+            "output_sha256": "b2baccf40bf6837819038b3a662f6c36d12a81c7d7dd287e23fbaebc697c2928",
+            "output_tokens_per_second": 246.31243536270742,
+            "prompt_token_match": true,
+            "prompt_tokens": 262,
+            "slo_pass": true,
+            "status": 200,
+            "success": true,
+            "ttft_ms": 108.8450929999567
+          }
+        },
+        "prefill": {
+          "artifacts": [
+            {
+              "path": "/results/20260923T030450Z/sglang-0520-nextn-k4-bounded-graphs/public-decode-heavy/profiles/prefill/infercrane-prefill-1790133050.903254-TP-0.trace.json.gz",
+              "sha256": "fed98e665838b24139f0d56dc74dc0114ecf17b14e4dc1dc17d3fa907258b5d3"
+            }
+          ],
+          "custom_kernel_gate": {
+            "boundary": "Eligibility authorizes a bounded kernel candidate only. Promotion still requires numerical parity, target-GPU microbenchmarks, end-to-end workload evidence, and cost gates.",
+            "decision": "build_candidate",
+            "eligible": true,
+            "hotspot_family": "gemm",
+            "maximum_endpoint_upside_fraction": 0.73006411815776,
+            "measured_device_time_fraction": 0.73006411815776,
+            "minimum_endpoint_upside_fraction": 0.03,
+            "minimum_hotspot_fraction": 0.05,
+            "schema_version": "infercrane.dev/custom-kernel-gate/v1"
+          },
+          "profile": {
+            "families": [
+              {
+                "device_time_fraction": 0.73006411815776,
+                "device_time_us": 167431.44400000016,
+                "name": "gemm"
+              },
+              {
+                "device_time_fraction": 0.15160896210662414,
+                "device_time_us": 34769.69599999999,
+                "name": "other"
+              },
+              {
+                "device_time_fraction": 0.07627176951168921,
+                "device_time_us": 17492.015000000003,
+                "name": "gated_deltanet"
+              },
+              {
+                "device_time_fraction": 0.03664063101902271,
+                "device_time_us": 8403.088999999994,
+                "name": "normalization"
+              },
+              {
+                "device_time_fraction": 0.003103454303706557,
+                "device_time_us": 711.7399999999998,
+                "name": "memory"
+              },
+              {
+                "device_time_fraction": 0.0012535515320337305,
+                "device_time_us": 287.487,
+                "name": "attention"
+              },
+              {
+                "device_time_fraction": 0.0010575133691647853,
+                "device_time_us": 242.52800000000002,
+                "name": "sampling"
+              }
+            ],
+            "kernel_events": 3619,
+            "schema_version": "infercrane.dev/gpu-hotspot-profile/v1",
+            "top_kernels": [
+              {
+                "device_time_fraction": 0.6656250584971746,
+                "device_time_us": 152653.1189999999,
+                "name": "void deep_gemm::sm90_fp8_gemm_1d2d_impl<(cute::UMMA::Major)0, 0u, 0u, 0u, 1u, 256u, 128u, 128u, 128u, 128u, 128u, 3u, 128u, 256u, 2u, true, 132u, (deep_gemm::GemmType)0, cutlass::bfloat16_t, deep_gemm::epilogue::transform::EpilogueIdentity>(float*, int*, unsigned int, unsigned int, unsigned int, CUtensorMap_st, CUtensorMap_st, CUtensorMap_st, CUtensorMap_st)"
+              },
+              {
+                "device_time_fraction": 0.06405061552839314,
+                "device_time_us": 14689.240000000003,
+                "name": "kernel_cutlass_kernel_flashinfergdn_kernelsdelta_rule_dsldelta_rule_sm90_FullyFusedDeltaRuleSm90_object_at__tensorptrf32gmemalign16o1_tensorptrf32gmemalign16o1_CopyAtom_ThrID10_TVLayoutSr_0"
+              },
+              {
+                "device_time_fraction": 0.0333009009989662,
+                "device_time_us": 7637.162000000007,
+                "name": "void sglang::per_token_group_quant_flat_kernel<sglang::QuantTrait<__nv_bfloat16, __nv_fp8_e4m3, 128u, false, false, true, false>, true>(sglang::QuantKernelParams)"
+              },
+              {
+                "device_time_fraction": 0.02810767961745406,
+                "device_time_us": 6446.158999999997,
+                "name": "void sglang::act_and_mul_kernel<__nv_bfloat16, (sglang::ActivationKind)0, true, false, false, false>(sglang::ActivationParams)"
+              },
+              {
+                "device_time_fraction": 0.025253329257486037,
+                "device_time_us": 5791.548000000001,
+                "name": "kernel_cutlass_kernel_flashinfernormkernelsfused_add_rmsnormFusedAddRMSNormKernel_object_at__tensorptrbf16gmemalign128oi64512051201_tensorptrbf16gmemalign128oi64512051201_tensorptrbf16gme_0"
+              },
+              {
+                "device_time_fraction": 0.019088759904982006,
+                "device_time_us": 4377.778000000001,
+                "name": "void cutlass::device_kernel<flash::enable_sm90_or_later<flash::FlashAttnFwdSm90<flash::CollectiveMainloopFwdSm90<2, cute::tuple<cute::C<1>, cute::C<1>, cute::C<1> >, cute::tuple<cute::C<128>, cute::C<128>, cute::C<256> >, 256, cutlass::float_e4m3_t, float, cutlass::arch::Sm90, true, false, false, true, true, false, false, false, true, false, true, false, false, cutlass::bfloat16_t, false, 1>, flash::CollectiveEpilogueFwd<cute::tuple<cute::C<128>, cute::C<256>, cute::C<128> >, cute::tuple<cute::C<1>, cute::C<1>, cute::C<1> >, cutlass::bfloat16_t, cutlass::arch::Sm90, 256, true, true, false, true>, flash::VarlenDynamicPersistentTileScheduler<128, 128, 256, 128, false, true, true, true, true, true> > > >(flash::enable_sm90_or_later<flash::FlashAttnFwdSm90<flash::CollectiveMainloopFwdSm90<2, cute::tuple<cute::C<1>, cute::C<1>, cute::C<1> >, cute::tuple<cute::C<128>, cute::C<128>, cute::C<256> >, 256, cutlass::float_e4m3_t, float, cutlass::arch::Sm90, true, false, false, true, true, false, false, false, true, false, true, false, false, cutlass::bfloat16_t, false, 1>, flash::CollectiveEpilogueFwd<cute::tuple<cute::C<128>, cute::C<256>, cute::C<128> >, cute::tuple<cute::C<1>, cute::C<1>, cute::C<1> >, cutlass::bfloat16_t, cutlass::arch::Sm90, 256, true, true, false, true>, flash::VarlenDynamicPersistentTileScheduler<128, 128, 256, 128, false, true, true, true, true, true> > >::Params)"
+              },
+              {
+                "device_time_fraction": 0.017467955670093738,
+                "device_time_us": 4006.0660000000003,
+                "name": "_causal_conv1d_fwd_kernel"
+              },
+              {
+                "device_time_fraction": 0.016760406111330912,
+                "device_time_us": 3843.7980000000007,
+                "name": "_layer_norm_fwd_1pass_kernel"
+              },
+              {
+                "device_time_fraction": 0.01620674295671343,
+                "device_time_us": 3716.822,
+                "name": "nvjet_sm90_tst_512x8_64x3_2x1_v_bz_TNT"
+              },
+              {
+                "device_time_fraction": 0.01571474424523955,
+                "device_time_us": 3603.9880000000016,
+                "name": "void deep_gemm::sm90_fp8_gemm_1d2d_impl<(cute::UMMA::Major)0, 0u, 0u, 0u, 1u, 16u, 48u, 128u, 128u, 128u, 32u, 16u, 128u, 128u, 1u, false, 132u, (deep_gemm::GemmType)0, cutlass::bfloat16_t, deep_gemm::epilogue::transform::EpilogueIdentity>(float*, int*, unsigned int, unsigned int, unsigned int, CUtensorMap_st, CUtensorMap_st, CUtensorMap_st, CUtensorMap_st)"
+              },
+              {
+                "device_time_fraction": 0.015572582893251818,
+                "device_time_us": 3571.3850000000007,
+                "name": "void deep_gemm::sm90_fp8_gemm_1d2d_impl<(cute::UMMA::Major)0, 0u, 0u, 0u, 1u, 16u, 144u, 128u, 128u, 128u, 32u, 11u, 128u, 128u, 2u, false, 132u, (deep_gemm::GemmType)0, cutlass::bfloat16_t, deep_gemm::epilogue::transform::EpilogueIdentity>(float*, int*, unsigned int, unsigned int, unsigned int, CUtensorMap_st, CUtensorMap_st, CUtensorMap_st, CUtensorMap_st)"
+              },
+              {
+                "device_time_fraction": 0.010858196246841763,
+                "device_time_us": 2490.1969999999988,
+                "name": "_fused_qk_rmsnorm_rope_gate_kernel"
+              },
+              {
+                "device_time_fraction": 0.008467475989445607,
+                "device_time_us": 1941.9139999999998,
+                "name": "gdn_prefill_qkv_prepare_kernel"
+              },
+              {
+                "device_time_fraction": 0.006428782000491774,
+                "device_time_us": 1474.3639999999998,
+                "name": "void deep_gemm::sm90_fp8_gemm_1d2d_impl<(cute::UMMA::Major)0, 0u, 0u, 0u, 1u, 16u, 128u, 128u, 128u, 128u, 128u, 12u, 128u, 128u, 1u, false, 132u, (deep_gemm::GemmType)0, cutlass::bfloat16_t, deep_gemm::epilogue::transform::EpilogueIdentity>(float*, int*, unsigned int, unsigned int, unsigned int, CUtensorMap_st, CUtensorMap_st, CUtensorMap_st, CUtensorMap_st)"
+              },
+              {
+                "device_time_fraction": 0.004218193252832909,
+                "device_time_us": 967.3920000000002,
+                "name": "fused_sigmoid_gating_delta_rule_update_kernel"
+              },
+              {
+                "device_time_fraction": 0.004109362618098017,
+                "device_time_us": 942.433,
+                "name": "l2norm_fwd_kernel"
+              },
+              {
+                "device_time_fraction": 0.0040630161772711735,
+                "device_time_us": 931.8039999999997,
+                "name": "void at::native::elementwise_kernel<128, 4, at::native::gpu_kernel_impl<at::native::BinaryFunctor<c10::BFloat16, c10::BFloat16, c10::BFloat16, at::native::binary_internal::DivFunctor<c10::BFloat16> > >(at::TensorIteratorBase&, at::native::BinaryFunctor<c10::BFloat16, c10::BFloat16, c10::BFloat16, at::native::binary_internal::DivFunctor<c10::BFloat16> > const&)::{lambda(int)#1}>(int, at::native::gpu_kernel_impl<at::native::BinaryFunctor<c10::BFloat16, c10::BFloat16, c10::BFloat16, at::native::binary_internal::DivFunctor<c10::BFloat16> > >(at::TensorIteratorBase&, at::native::BinaryFunctor<c10::BFloat16, c10::BFloat16, c10::BFloat16, at::native::binary_internal::DivFunctor<c10::BFloat16> > const&)::{lambda(int)#1})"
+              },
+              {
+                "device_time_fraction": 0.003580248382650275,
+                "device_time_us": 821.087,
+                "name": "nvjet_sm90_tst_96x64_64x10_1x2_h_bz_splitK_TNN"
+              },
+              {
+                "device_time_fraction": 0.003323500699070809,
+                "device_time_us": 762.2050000000002,
+                "name": "fused_gdn_gating_kernel"
+              },
+              {
+                "device_time_fraction": 0.0031308200260350243,
+                "device_time_us": 718.0160000000001,
+                "name": "nvjet_sm90_tst_64x8_64x16_2x1_v_bz_splitK_TNT"
+              }
+            ],
+            "total_gpu_kernel_time_us": 229337.9989999999
+          },
+          "request": {
+            "completion_tokens": 1,
+            "concurrency": 1,
+            "error": null,
+            "expected_prompt_tokens": 3924,
+            "itl_ms": null,
+            "latency_ms": 253.91842599998427,
+            "output_sha256": "a83dd0ccbffe39d071cc317ddf6e97f5c6b1c87af91919271f9fa140b0508c6c",
+            "output_tokens_per_second": 0,
+            "prompt_token_match": true,
+            "prompt_tokens": 3924,
+            "slo_pass": false,
+            "status": 200,
+            "success": false,
+            "ttft_ms": 253.64283499999374
+          }
+        }
+      },
+      "method": "workload_separated_torch_profiler",
+      "schema_version": "infercrane.dev/runtime-profile-bundle/v1"
+    },
+    "schema_version": "infercrane.dev/modal-workload-screen/v1",
+    "server_log": "/results/20260923T030450Z/sglang-0520-nextn-k4-bounded-graphs/public-decode-heavy/server.log",
+    "startup_breakdown": {
+      "available": true,
+      "cuda_graph_seconds": {
+        "decode": 0.0,
+        "draft_decode": 3.16,
+        "draft_extend": 0.0,
+        "draft_prefill": 1.64,
+        "prefill": 123.35,
+        "target_verify": 6.4
+      },
+      "kv_cache_allocation_seconds": 1.61,
+      "load_weight_seconds": 19.72,
+      "scheduler_e2e_seconds": 165.22,
+      "tokenizer_e2e_seconds": 184.87
+    },
+    "startup_seconds": 237.17868764600001,
+    "workload": {
+      "boundary": "Median input and P95 output token shape from the released trace sample.",
+      "concurrency_lanes": [
+        1,
+        4
+      ],
+      "id": "agentic-system-chutes-public-decode-heavy-v1",
+      "input_tokens": 3919,
+      "output_tokens": 1377,
+      "sampling": {
+        "enable_thinking": false,
+        "min_p": 0.0,
+        "presence_penalty": 1.5,
+        "seed": 20260923,
+        "temperature": 0.7,
+        "top_k": 20,
+        "top_p": 0.8
+      },
+      "slo": {
+        "id": "infercrane-decode-heavy-aggressive-v1",
+        "max_itl_ms": 12.0,
+        "max_ttft_ms": 800.0,
+        "source": "pre_registered_internal_launch_objective"
+      },
+      "source": {
+        "artifact": "https://harvardsys-datasets.s3.us-east-1.amazonaws.com/2026_chutes_anonymized/chutes_trace.parquet",
+        "citation": "Nixon et al., arXiv:2608.13573 (2026)",
+        "license": "CC-BY-4.0",
+        "name": "A Year in LLM Serving: Workload Evolution, Caching and Load-Balancing",
+        "url": "https://data.agentic-system.org/#chutes"
+      },
+      "streaming": true
+    },
+    "workload_name": "public-decode-heavy"
+  }
+]

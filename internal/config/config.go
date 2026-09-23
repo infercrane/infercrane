@@ -26,7 +26,7 @@ type Config struct {
 	HostedAuthAuthorizedParties                                                                                           []string
 	HostedAuthAutoProvision                                                                                               bool
 	StripeSecretKey, StripeWebhookSecret, StripeBillingReturnURL                                                          string
-	ModelAPICatalogFile, ModelAPIOperatorTenantID                                                                         string
+	ModelAPICatalogFile, ModelAPIOperatorTenantID, OpenRouterProviderCatalogFile                                          string
 	HostedModelAPIEndpoints                                                                                               map[string]string
 	BrezelSandboxURL, BrezelSandboxTokenFile, BrezelSandboxProjectID, BrezelSandboxTenantID, BrezelSandboxDefaultTemplate string
 	AcceleratorWorkerURL, AcceleratorWorkerTokenFile, BrezelOptimizationEnvironment                                       string
@@ -414,6 +414,7 @@ func load(requireAPIKey bool) (Config, error) {
 		ManagedDeploymentsEnabled:           managedDeploymentsEnabled,
 		ModelAPICatalogFile:                 env("INFERCRANE_MODEL_API_CATALOG_FILE", ""),
 		ModelAPIOperatorTenantID:            env("INFERCRANE_MODEL_API_OPERATOR_TENANT_ID", ""),
+		OpenRouterProviderCatalogFile:       env("INFERCRANE_OPENROUTER_PROVIDER_CATALOG_FILE", ""),
 		HostedModelAPIEndpoints:             hostedModelAPIEndpoints,
 		BrezelSandboxURL:                    env("INFERCRANE_BREZEL_SANDBOX_URL", ""),
 		BrezelSandboxTokenFile:              env("INFERCRANE_BREZEL_SANDBOX_TOKEN_FILE", ""),
