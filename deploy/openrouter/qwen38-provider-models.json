@@ -1,0 +1,115 @@
+{
+  "data": [
+    {
+      "schema_version": "2.4",
+      "id": "qwen/qwen3.8-27b",
+      "name": "Qwen: Qwen3.8 27B",
+      "hugging_face_id": "Qwen/Qwen3.8-27B-FP8",
+      "created": 1786665600,
+      "quantization": "fp8",
+      "tokenizer": "Qwen",
+      "description": "Workload-qualified Qwen3.8 27B inference served by InferCrane.",
+      "input_modalities": [
+        {
+          "type": "text",
+          "supported_inputs": {
+            "max_context_length": {
+              "value": 32768,
+              "unit": "token"
+            }
+          },
+          "pricing": [
+            {
+              "type": "prompt",
+              "unit": "token",
+              "cost_usd": "0.00000010"
+            }
+          ],
+          "capacity": [
+            {
+              "type": "prompt",
+              "unit": "token",
+              "per": "minute",
+              "value": 150000
+            }
+          ]
+        }
+      ],
+      "output_modalities": [
+        {
+          "type": "text",
+          "max_length": {
+            "value": 2048,
+            "unit": "token"
+          },
+          "streaming": true,
+          "supported_parameters": {
+            "temperature": {
+              "type": "range",
+              "min": 0,
+              "max": 2
+            },
+            "top_p": {
+              "type": "range",
+              "min": 0,
+              "max": 1
+            },
+            "top_k": {
+              "type": "integer",
+              "min": 0
+            },
+            "max_tokens": {
+              "type": "integer",
+              "min": 1,
+              "max": 2048,
+              "unit": "token"
+            },
+            "stop": {
+              "type": "array",
+              "max_items": 4
+            },
+            "tools": {
+              "type": "boolean"
+            },
+            "structured_outputs": {
+              "type": "boolean"
+            }
+          },
+          "pricing": [
+            {
+              "type": "completion",
+              "unit": "token",
+              "cost_usd": "0.00000220"
+            }
+          ],
+          "capacity": [
+            {
+              "type": "completion",
+              "unit": "token",
+              "per": "minute",
+              "value": 50000
+            },
+            {
+              "type": "concurrency",
+              "unit": "request",
+              "value": 12
+            }
+          ]
+        }
+      ],
+      "capacity": [
+        {
+          "type": "request",
+          "unit": "request",
+          "per": "minute",
+          "value": 30
+        }
+      ],
+      "is_ready": false,
+      "is_free": false,
+      "openrouter": {
+        "slug": "qwen/qwen3.8-27b"
+      }
+    }
+  ]
+}

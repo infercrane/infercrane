@@ -1,0 +1,293 @@
+{
+  "candidates": [
+    {
+      "error_rate": 0.0,
+      "evidence_level": "screening",
+      "evidence_state": "reproduced",
+      "id": "sglang-0520-bf16-kv-nextn-k4-bounded-graphs",
+      "lanes": [
+        {
+          "aggregate_output_tokens_per_second": 193.3874462575755,
+          "concurrency": 1,
+          "cost_per_1m_successful_output_tokens_usd": 6.520588716603952,
+          "gpu_seconds_per_successful_request": 1.525435108166666,
+          "independent_runs": 1,
+          "itl_p95_ms": 4.727325142857121,
+          "measurement_seconds": 18.305221297999992,
+          "request_throughput_requests_per_second": 0.655550665279917,
+          "requests": 12,
+          "slo_attainment": 1.0,
+          "slo_goodput_requests_per_second": 0.655550665279917,
+          "slo_qualified_output_tokens_per_second": 193.3874462575755,
+          "successful_requests": 12,
+          "ttft_p95_ms": 259.00905199997055
+        },
+        {
+          "aggregate_output_tokens_per_second": 464.9356651557838,
+          "concurrency": 4,
+          "cost_per_1m_successful_output_tokens_usd": 2.71220320251724,
+          "gpu_seconds_per_successful_request": 0.6344963875833353,
+          "independent_runs": 1,
+          "itl_p95_ms": 7.6955933545917965,
+          "measurement_seconds": 7.613956651000024,
+          "request_throughput_requests_per_second": 1.576053102222996,
+          "requests": 12,
+          "slo_attainment": 0.6666666666666666,
+          "slo_goodput_requests_per_second": 1.0507020681486638,
+          "slo_qualified_output_tokens_per_second": 309.9571101038559,
+          "successful_requests": 12,
+          "ttft_p95_ms": 907.8854722499982
+        },
+        {
+          "aggregate_output_tokens_per_second": 553.1782448754484,
+          "concurrency": 8,
+          "cost_per_1m_successful_output_tokens_usd": 2.2795545769952006,
+          "gpu_seconds_per_successful_request": 0.5332819985833339,
+          "independent_runs": 1,
+          "itl_p95_ms": 12.829694182993158,
+          "measurement_seconds": 6.399383983000007,
+          "request_throughput_requests_per_second": 1.8751804911032148,
+          "requests": 12,
+          "slo_attainment": 0.3333333333333333,
+          "slo_goodput_requests_per_second": 0.6250601637010716,
+          "slo_qualified_output_tokens_per_second": 184.39274829181613,
+          "successful_requests": 12,
+          "ttft_p95_ms": 1808.2445196500144
+        }
+      ],
+      "origin": "infercrane_generated",
+      "prompt_token_mismatch_rate": 0.0,
+      "quality_gates": [
+        {
+          "name": "api_models",
+          "passed": true
+        },
+        {
+          "name": "stream_usage",
+          "passed": true
+        },
+        {
+          "name": "structured_output",
+          "passed": true
+        },
+        {
+          "name": "tool_call",
+          "passed": true
+        },
+        {
+          "name": "runtime_parity",
+          "passed": true
+        }
+      ],
+      "quality_passed": true,
+      "recipe_digest": "sha256:e1020ef0cae6b70f25d6391e95d9cbbafd5f231d87854b25a3c32ca45c87e97b",
+      "runtime_id": "sglang-0.5.20-bf16-kv-nextn-k4-bounded-graphs",
+      "workload_digest": "sha256:2a28268ab42dda08835ff73b6872bb02b0719ad63c5ed68efc7363a5f76478de"
+    },
+    {
+      "error_rate": 0.0,
+      "evidence_level": "screening",
+      "evidence_state": "reproduced",
+      "id": "sglang-0520-control",
+      "lanes": [
+        {
+          "aggregate_output_tokens_per_second": 86.7013528999092,
+          "concurrency": 1,
+          "cost_per_1m_successful_output_tokens_usd": 14.544179044769216,
+          "gpu_seconds_per_successful_request": 3.402484391916668,
+          "independent_runs": 1,
+          "itl_p95_ms": 10.611882531122474,
+          "measurement_seconds": 40.829812703000016,
+          "request_throughput_requests_per_second": 0.2939028911861329,
+          "requests": 12,
+          "slo_attainment": 1.0,
+          "slo_goodput_requests_per_second": 0.2939028911861329,
+          "slo_qualified_output_tokens_per_second": 86.7013528999092,
+          "successful_requests": 12,
+          "ttft_p95_ms": 237.57272370001488
+        },
+        {
+          "aggregate_output_tokens_per_second": 269.0705994867256,
+          "concurrency": 4,
+          "cost_per_1m_successful_output_tokens_usd": 4.686502361853958,
+          "gpu_seconds_per_successful_request": 1.0963665319166676,
+          "independent_runs": 1,
+          "itl_p95_ms": 13.06095956717688,
+          "measurement_seconds": 13.15639838300001,
+          "request_throughput_requests_per_second": 0.9121037270736461,
+          "requests": 12,
+          "slo_attainment": 0.5,
+          "slo_goodput_requests_per_second": 0.45605186353682303,
+          "slo_qualified_output_tokens_per_second": 134.5352997433628,
+          "successful_requests": 12,
+          "ttft_p95_ms": 863.707796600022
+        },
+        {
+          "aggregate_output_tokens_per_second": 356.2089266787966,
+          "concurrency": 8,
+          "cost_per_1m_successful_output_tokens_usd": 3.540057268517244,
+          "gpu_seconds_per_successful_request": 0.8281656575833362,
+          "independent_runs": 1,
+          "itl_p95_ms": 15.499587394897818,
+          "measurement_seconds": 9.937987891000034,
+          "request_throughput_requests_per_second": 1.2074878870467682,
+          "requests": 12,
+          "slo_attainment": 0.16666666666666666,
+          "slo_goodput_requests_per_second": 0.20124798117446138,
+          "slo_qualified_output_tokens_per_second": 59.36815444646611,
+          "successful_requests": 12,
+          "ttft_p95_ms": 1640.377599999988
+        }
+      ],
+      "origin": "infercrane_generated",
+      "prompt_token_mismatch_rate": 0.0,
+      "quality_gates": [
+        {
+          "name": "api_models",
+          "passed": true
+        },
+        {
+          "name": "stream_usage",
+          "passed": true
+        },
+        {
+          "name": "structured_output",
+          "passed": true
+        },
+        {
+          "name": "tool_call",
+          "passed": true
+        },
+        {
+          "name": "runtime_parity",
+          "passed": true
+        }
+      ],
+      "quality_passed": true,
+      "recipe_digest": "sha256:9fc3e7247f193f70b00e3337e212fe28862d38e16c6a387bcbac955731cc1e8e",
+      "runtime_id": "sglang-0.5.20",
+      "workload_digest": "sha256:2a28268ab42dda08835ff73b6872bb02b0719ad63c5ed68efc7363a5f76478de"
+    },
+    {
+      "error_rate": 0.0,
+      "evidence_level": "screening",
+      "evidence_state": "reproduced",
+      "id": "sglang-0520-nextn-k4-bounded-graphs",
+      "lanes": [
+        {
+          "aggregate_output_tokens_per_second": 189.68086118697138,
+          "concurrency": 1,
+          "cost_per_1m_successful_output_tokens_usd": 6.648008618840109,
+          "gpu_seconds_per_successful_request": 1.5552438878333323,
+          "independent_runs": 1,
+          "itl_p95_ms": 4.723558773129209,
+          "measurement_seconds": 18.66292665399999,
+          "request_throughput_requests_per_second": 0.6429859701253267,
+          "requests": 12,
+          "slo_attainment": 1.0,
+          "slo_goodput_requests_per_second": 0.6429859701253267,
+          "slo_qualified_output_tokens_per_second": 189.68086118697138,
+          "successful_requests": 12,
+          "ttft_p95_ms": 241.37640350000993
+        },
+        {
+          "aggregate_output_tokens_per_second": 466.95651038042143,
+          "concurrency": 4,
+          "cost_per_1m_successful_output_tokens_usd": 2.7004656150370083,
+          "gpu_seconds_per_successful_request": 0.6317504809166673,
+          "independent_runs": 1,
+          "itl_p95_ms": 7.214842168027274,
+          "measurement_seconds": 7.581005771000008,
+          "request_throughput_requests_per_second": 1.5829034250183778,
+          "requests": 12,
+          "slo_attainment": 0.9166666666666666,
+          "slo_goodput_requests_per_second": 1.4509948062668463,
+          "slo_qualified_output_tokens_per_second": 428.0434678487196,
+          "successful_requests": 12,
+          "ttft_p95_ms": 812.4049117999958
+        },
+        {
+          "aggregate_output_tokens_per_second": 562.3312229253775,
+          "concurrency": 8,
+          "cost_per_1m_successful_output_tokens_usd": 2.2424506208991657,
+          "gpu_seconds_per_successful_request": 0.524601850250003,
+          "independent_runs": 1,
+          "itl_p95_ms": 12.399869917857139,
+          "measurement_seconds": 6.295222203000037,
+          "request_throughput_requests_per_second": 1.9062075353402628,
+          "requests": 12,
+          "slo_attainment": 0.4166666666666667,
+          "slo_goodput_requests_per_second": 0.7942531397251095,
+          "slo_qualified_output_tokens_per_second": 234.3046762189073,
+          "successful_requests": 12,
+          "ttft_p95_ms": 1662.8296476000314
+        }
+      ],
+      "origin": "infercrane_generated",
+      "prompt_token_mismatch_rate": 0.0,
+      "quality_gates": [
+        {
+          "name": "api_models",
+          "passed": true
+        },
+        {
+          "name": "stream_usage",
+          "passed": true
+        },
+        {
+          "name": "structured_output",
+          "passed": true
+        },
+        {
+          "name": "tool_call",
+          "passed": true
+        },
+        {
+          "name": "runtime_parity",
+          "passed": true
+        }
+      ],
+      "quality_passed": true,
+      "recipe_digest": "sha256:e1e88833b2378f24ad21430b69cddb4caead2afbe725f8c247093157b4d0aac6",
+      "runtime_id": "sglang-0.5.20-nextn-k4-bounded-graphs",
+      "workload_digest": "sha256:2a28268ab42dda08835ff73b6872bb02b0719ad63c5ed68efc7363a5f76478de"
+    }
+  ],
+  "hardware_identity": "modal:NVIDIA H200:9.0",
+  "model_identity": "Qwen/Qwen3.8-27B-FP8@017b9c7af6b5689d5dd426a76e0bc077eb5ca20a",
+  "required_concurrency_lanes": [
+    1,
+    4,
+    8
+  ],
+  "schema_version": "infercrane.dev/optimization-evidence/v1",
+  "selection_policy": {
+    "cost_tie_breaker": true,
+    "evidence_level": "screening",
+    "id": "workload-qualified-price-performance-screen-v1",
+    "lane_aggregation": "arithmetic_mean",
+    "objective": "minimum_cogs_under_slo",
+    "qualification_before_scoring": true,
+    "version": 1
+  },
+  "slo": {
+    "max_error_rate": 0.01,
+    "max_itl_ms": 12.0,
+    "max_prompt_token_mismatch_rate": 0.0,
+    "max_ttft_ms": 800.0,
+    "min_successful_fraction": 0.99,
+    "minimum_independent_runs": 1,
+    "minimum_measurement_seconds_per_lane": 0.0,
+    "minimum_requests_per_lane": 12,
+    "required_quality_gates": [
+      "api_models",
+      "stream_usage",
+      "structured_output",
+      "tool_call",
+      "runtime_parity"
+    ],
+    "scope": "each_concurrency_lane"
+  },
+  "workload_digest": "sha256:2a28268ab42dda08835ff73b6872bb02b0719ad63c5ed68efc7363a5f76478de",
+  "workload_id": "agentic-system-chutes-public-interactive-v1"
+}

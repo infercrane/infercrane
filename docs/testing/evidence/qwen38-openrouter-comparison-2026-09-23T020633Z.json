@@ -1,0 +1,69 @@
+{
+  "candidates": [
+    {
+      "beats_launch_latency_target": false,
+      "beats_launch_speed_target": true,
+      "candidate_id": "sglang-0520-bf16-kv-control",
+      "p50_output_tokens_per_second": 100.00112016078677,
+      "p50_ttft_ms": 237.5865390000058,
+      "quality_passed": true,
+      "screening_only": true
+    },
+    {
+      "beats_launch_latency_target": false,
+      "beats_launch_speed_target": true,
+      "candidate_id": "sglang-0520-bf16-kv-nextn-k3",
+      "p50_output_tokens_per_second": 206.03201471913002,
+      "p50_ttft_ms": 239.59491800002297,
+      "quality_passed": true,
+      "screening_only": true
+    },
+    {
+      "beats_launch_latency_target": false,
+      "beats_launch_speed_target": false,
+      "candidate_id": "sglang-0520-control",
+      "p50_output_tokens_per_second": 97.27334734441153,
+      "p50_ttft_ms": 232.5417729999799,
+      "quality_passed": true,
+      "screening_only": true
+    },
+    {
+      "beats_launch_latency_target": false,
+      "beats_launch_speed_target": true,
+      "candidate_id": "sglang-0520-nextn-k2",
+      "p50_output_tokens_per_second": 155.621167374352,
+      "p50_ttft_ms": 238.72981500002766,
+      "quality_passed": true,
+      "screening_only": true
+    },
+    {
+      "beats_launch_latency_target": false,
+      "beats_launch_speed_target": true,
+      "candidate_id": "sglang-0520-nextn-k3",
+      "p50_output_tokens_per_second": 203.5959365648298,
+      "p50_ttft_ms": 240.12001200000554,
+      "quality_passed": true,
+      "screening_only": true
+    },
+    {
+      "beats_launch_latency_target": false,
+      "beats_launch_speed_target": true,
+      "candidate_id": "sglang-0520-nextn-k4",
+      "p50_output_tokens_per_second": 237.97178334519862,
+      "p50_ttft_ms": 238.9040945000147,
+      "quality_passed": true,
+      "screening_only": true
+    }
+  ],
+  "comparison_boundary": "Modal loopback screening is directional. Only OpenRouter-observed production traffic can establish leaderboard placement.",
+  "model": "qwen/qwen3.8-27b",
+  "schema_version": "infercrane.dev/openrouter-competitive-report/v1",
+  "target_captured_at": "2026-09-23T02:00:48.747422+00:00",
+  "targets": {
+    "maximum_input_price_usd_per_million": 0.09999999999999999,
+    "maximum_output_price_usd_per_million": 1.7999999999999998,
+    "maximum_p50_ttft_ms": 198.9,
+    "minimum_p50_output_tokens_per_second": 100.0,
+    "minimum_uptime_percent": 99.95
+  }
+}

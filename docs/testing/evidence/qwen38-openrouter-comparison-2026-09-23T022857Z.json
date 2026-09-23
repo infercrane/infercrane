@@ -1,0 +1,60 @@
+{
+  "candidates": [
+    {
+      "beats_launch_latency_target": false,
+      "beats_launch_speed_target": true,
+      "candidate_id": "sglang-0520-bf16-kv-nextn-k4",
+      "p50_output_tokens_per_second": 245.78143055247943,
+      "p50_ttft_ms": 242.2082084999886,
+      "quality_passed": true,
+      "screening_only": true
+    },
+    {
+      "beats_launch_latency_target": false,
+      "beats_launch_speed_target": false,
+      "candidate_id": "sglang-0520-control",
+      "p50_output_tokens_per_second": 96.00069544941738,
+      "p50_ttft_ms": 234.93077350002523,
+      "quality_passed": true,
+      "screening_only": true
+    },
+    {
+      "beats_launch_latency_target": false,
+      "beats_launch_speed_target": true,
+      "candidate_id": "sglang-0520-nextn-k4",
+      "p50_output_tokens_per_second": 234.48689043324205,
+      "p50_ttft_ms": 243.73850399999242,
+      "quality_passed": true,
+      "screening_only": true
+    },
+    {
+      "beats_launch_latency_target": false,
+      "beats_launch_speed_target": true,
+      "candidate_id": "sglang-0520-nextn-k4-chunk16k",
+      "p50_output_tokens_per_second": 245.2781762437639,
+      "p50_ttft_ms": 241.40082299999222,
+      "quality_passed": true,
+      "screening_only": true
+    },
+    {
+      "beats_launch_latency_target": false,
+      "beats_launch_speed_target": true,
+      "candidate_id": "sglang-0520-nextn-k4-chunk4k",
+      "p50_output_tokens_per_second": 240.3722306786851,
+      "p50_ttft_ms": 241.8960400000003,
+      "quality_passed": true,
+      "screening_only": true
+    }
+  ],
+  "comparison_boundary": "Modal loopback screening is directional. Only OpenRouter-observed production traffic can establish leaderboard placement.",
+  "model": "qwen/qwen3.8-27b",
+  "schema_version": "infercrane.dev/openrouter-competitive-report/v1",
+  "target_captured_at": "2026-09-23T02:18:44.496629+00:00",
+  "targets": {
+    "maximum_input_price_usd_per_million": 0.09999999999999999,
+    "maximum_output_price_usd_per_million": 1.7999999999999998,
+    "maximum_p50_ttft_ms": 199.8,
+    "minimum_p50_output_tokens_per_second": 137.5,
+    "minimum_uptime_percent": 99.95
+  }
+}

@@ -1,0 +1,99 @@
+name: OpenRouter provider candidate
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/openrouter-provider-candidate.yml
+      - cmd/infercrane-openrouter-edge/**
+      - deploy/openrouter/**
+      - internal/openrouterprovider/**
+      - tools/openrouter-provider-qualifier/**
+      - go.mod
+      - go.sum
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/openrouter-provider-candidate.yml
+      - cmd/infercrane-openrouter-edge/**
+      - deploy/openrouter/**
+      - internal/openrouterprovider/**
+      - tools/openrouter-provider-qualifier/**
+      - go.mod
+      - go.sum
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: openrouter-provider-candidate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: Validate provider edge and deployment package
+        run: |
+          go test ./internal/openrouterprovider ./cmd/infercrane-openrouter-edge ./tools/openrouter-provider-qualifier
+          bash -n deploy/openrouter/qwen38-sglang-0520/serve.sh
+          python -m py_compile \
+            deploy/openrouter/qwen38-sglang-0520/health_shim.py \
+            deploy/openrouter/qwen38-sglang-0520/prepare_model.py
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: .
+          file: deploy/openrouter/qwen38-sglang-0520/Dockerfile
+          target: edge-builder
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  publish:
+    if: github.event_name != 'pull_request'
+    needs: validate
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Reclaim runner disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup
+          docker system prune --all --force
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
+        id: meta
+        with:
+          images: ghcr.io/infercrane/qwen38-openrouter
+          tags: type=sha,prefix=candidate-sha-
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        id: build
+        with:
+          context: .
+          file: deploy/openrouter/qwen38-sglang-0520/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+      - name: Record immutable deployment reference
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: echo "Deploy only ghcr.io/infercrane/qwen38-openrouter@${IMAGE_DIGEST}" >> "$GITHUB_STEP_SUMMARY"

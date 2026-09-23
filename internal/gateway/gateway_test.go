@@ -15,6 +15,7 @@ import (
 	"github.com/infercrane/infercrane/internal/admission"
 	"github.com/infercrane/infercrane/internal/contextpassport"
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/openrouterprovider"
 	"github.com/infercrane/infercrane/internal/routes"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
 )
@@ -930,5 +931,30 @@ func TestClientCancellationPropagatesToRuntime(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("gateway did not finish after cancellation")
+	}
+}
+
+func TestOpenRouterCatalogUsesDedicatedAuthenticatedPath(t *testing.T) {
+	catalog := &openrouterprovider.Catalog{Data: []openrouterprovider.Model{{
+		SchemaVersion: "2.4", ID: "qwen/qwen3.8-27b", Name: "Qwen 3.8 27B",
+		HuggingFaceID: "Qwen/Qwen3.8-27B-FP8", Created: 1,
+		InputModalities:  []openrouterprovider.InputModality{{Type: "text"}},
+		OutputModalities: []openrouterprovider.OutputModality{{Type: "text", SupportedParameters: map[string]any{}}},
+		OpenRouter:       openrouterprovider.OpenRouterIdentity{Slug: "qwen/qwen3.8-27b"},
+	}}}
+	handler := (&Gateway{Routes: routes.New(), APIKey: "provider-secret", OpenRouterCatalog: catalog}).Handler()
+
+	unauthorized := httptest.NewRecorder()
+	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/openrouter/v1/models", nil))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized response=%d", unauthorized.Code)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/openrouter/v1/models", nil)
+	request.Header.Set("Authorization", "Bearer provider-secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"schema_version":"2.4"`) {
+		t.Fatalf("catalog response=%d %s", response.Code, response.Body.String())
 	}
 }

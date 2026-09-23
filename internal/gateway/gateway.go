@@ -26,6 +26,7 @@ import (
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/modelapirouting"
 	"github.com/infercrane/infercrane/internal/openaicompat"
+	"github.com/infercrane/infercrane/internal/openrouterprovider"
 	"github.com/infercrane/infercrane/internal/routes"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
 )
@@ -72,6 +73,7 @@ type Gateway struct {
 	RequestAuthorizer   RequestAuthorizer
 	AdmissionAuthorizer AdmissionAuthorizer
 	ContextPassports    ContextPassportResolver
+	OpenRouterCatalog   *openrouterprovider.Catalog
 	Authenticator       interface {
 		AuthenticatePrincipal(context.Context, string) (domain.Principal, error)
 	}
@@ -84,6 +86,9 @@ func (g *Gateway) Handler() http.Handler {
 	mux.HandleFunc("GET /livez", g.health)
 	mux.HandleFunc("GET /readyz", g.ready)
 	mux.HandleFunc("GET /v1/models", g.auth(g.models))
+	if g.OpenRouterCatalog != nil {
+		mux.HandleFunc("GET /openrouter/v1/models", g.auth(g.OpenRouterCatalog.ServeHTTP))
+	}
 	if g.Telemetry == nil {
 		g.Telemetry = &Telemetry{}
 	}
