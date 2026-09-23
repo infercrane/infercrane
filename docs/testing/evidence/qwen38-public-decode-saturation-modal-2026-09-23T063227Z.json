@@ -1,0 +1,673 @@
+{
+  "candidates": [
+    {
+      "error_rate": 0.0,
+      "evidence_level": "screening",
+      "evidence_state": "reproduced",
+      "id": "sglang-0520-control",
+      "lanes": [
+        {
+          "aggregate_output_tokens_per_second": 338.2433797765852,
+          "concurrency": 4,
+          "cost_per_1m_successful_output_tokens_usd": 3.728084791586784,
+          "economics": {
+            "break_even_utilization": 1.6671368286414823,
+            "can_reach_target_margin_at_full_utilization": false,
+            "input_output_token_ratio": 2.846889373033164,
+            "input_price_usd_per_million": 0.1,
+            "measured_gpu_cost_per_million_output_equivalent_usd": 3.728084791586784,
+            "measured_gpu_cost_usd": 0.06160287309618002,
+            "measured_output_tokens_per_second": 338.2433797765852,
+            "measured_revenue_usd": 0.041057,
+            "non_gpu_revenue_fraction": 0.1,
+            "output_price_usd_per_million": 2.2,
+            "passes_target_margin_at_target_utilization": false,
+            "projected_gross_margin": -1.2434616368247635,
+            "required_output_tokens_per_second_for_target_margin": 922.7421744049846,
+            "target_gross_margin": 0.35,
+            "target_margin_utilization": 2.7280420832315166,
+            "target_utilization": 0.7
+          },
+          "gpu_seconds_per_successful_request": 4.071033115000001,
+          "independent_runs": 1,
+          "input_tokens": 47042,
+          "itl_p95_ms": 11.43218030199855,
+          "measurement_seconds": 48.85239738000001,
+          "output_tokens": 16524,
+          "request_throughput_requests_per_second": 0.24563789381015627,
+          "requests": 12,
+          "slo_attainment": 1.0,
+          "slo_goodput_requests_per_second": 0.24563789381015627,
+          "slo_qualified_output_tokens_per_second": 338.2433797765852,
+          "successful_requests": 12,
+          "ttft_p95_ms": 981.8106807000048
+        },
+        {
+          "aggregate_output_tokens_per_second": 618.5493742953195,
+          "concurrency": 8,
+          "cost_per_1m_successful_output_tokens_usd": 2.0386408141412975,
+          "economics": {
+            "break_even_utilization": 0.9117052916503734,
+            "can_reach_target_margin_at_full_utilization": false,
+            "input_output_token_ratio": 2.845270515613653,
+            "input_price_usd_per_million": 0.1,
+            "measured_gpu_cost_per_million_output_equivalent_usd": 2.0386408141412975,
+            "measured_gpu_cost_usd": 0.044915334417161064,
+            "measured_output_tokens_per_second": 618.5493742953195,
+            "measured_revenue_usd": 0.054739100000000006,
+            "non_gpu_revenue_fraction": 0.1,
+            "output_price_usd_per_million": 2.2,
+            "passes_target_margin_at_target_utilization": false,
+            "projected_gross_margin": -0.27219251783619436,
+            "required_output_tokens_per_second_for_target_margin": 922.8022980415693,
+            "target_gross_margin": 0.35,
+            "target_margin_utilization": 1.4918813863369744,
+            "target_utilization": 0.7
+          },
+          "gpu_seconds_per_successful_request": 2.226176368812503,
+          "independent_runs": 1,
+          "input_tokens": 62687,
+          "itl_p95_ms": 12.421768638808157,
+          "measurement_seconds": 35.61882190100005,
+          "output_tokens": 22032,
+          "request_throughput_requests_per_second": 0.4492007075492516,
+          "requests": 16,
+          "slo_attainment": 1.0,
+          "slo_goodput_requests_per_second": 0.4492007075492516,
+          "slo_qualified_output_tokens_per_second": 618.5493742953195,
+          "successful_requests": 16,
+          "ttft_p95_ms": 1682.8652644999947
+        },
+        {
+          "aggregate_output_tokens_per_second": 814.3453555996359,
+          "concurrency": 12,
+          "cost_per_1m_successful_output_tokens_usd": 1.5484830745691107,
+          "economics": {
+            "break_even_utilization": 0.6924581220694931,
+            "can_reach_target_margin_at_full_utilization": false,
+            "input_output_token_ratio": 2.8467985959816025,
+            "input_price_usd_per_million": 0.1,
+            "measured_gpu_cost_per_million_output_equivalent_usd": 1.5484830745691107,
+            "measured_gpu_cost_usd": 0.05117426864835997,
+            "measured_output_tokens_per_second": 814.3453555996359,
+            "measured_revenue_usd": 0.08211370000000001,
+            "non_gpu_revenue_fraction": 0.1,
+            "output_price_usd_per_million": 2.2,
+            "passes_target_margin_at_target_utilization": false,
+            "projected_gross_margin": 0.009696700196366015,
+            "required_output_tokens_per_second_for_target_margin": 922.7455456165159,
+            "target_gross_margin": 0.35,
+            "target_margin_utilization": 1.1331132906591705,
+            "target_utilization": 0.7
+          },
+          "gpu_seconds_per_successful_request": 1.6909287816666658,
+          "independent_runs": 1,
+          "input_tokens": 94081,
+          "itl_p95_ms": 14.014437445312502,
+          "measurement_seconds": 40.58229075999998,
+          "output_tokens": 33048,
+          "request_throughput_requests_per_second": 0.591390962672212,
+          "requests": 24,
+          "slo_attainment": 1.0,
+          "slo_goodput_requests_per_second": 0.591390962672212,
+          "slo_qualified_output_tokens_per_second": 814.3453555996359,
+          "successful_requests": 24,
+          "ttft_p95_ms": 2490.5479956500017
+        },
+        {
+          "aggregate_output_tokens_per_second": 1024.6444364817,
+          "concurrency": 16,
+          "cost_per_1m_successful_output_tokens_usd": 1.2306708113595668,
+          "economics": {
+            "break_even_utilization": 0.5503510426732783,
+            "can_reach_target_margin_at_full_utilization": true,
+            "input_output_token_ratio": 2.8461782861292666,
+            "input_price_usd_per_million": 0.1,
+            "measured_gpu_cost_per_million_output_equivalent_usd": 1.2306708113595668,
+            "measured_gpu_cost_usd": 0.05422827863174796,
+            "measured_output_tokens_per_second": 1024.6444364817,
+            "measured_revenue_usd": 0.1094822,
+            "non_gpu_revenue_fraction": 0.1,
+            "output_price_usd_per_million": 2.2,
+            "passes_target_margin_at_target_utilization": false,
+            "projected_gross_margin": 0.19240580227721352,
+            "required_output_tokens_per_second_for_target_margin": 922.7685828879445,
+            "target_gross_margin": 0.35,
+            "target_margin_utilization": 0.9005744334653645,
+            "target_utilization": 0.7
+          },
+          "gpu_seconds_per_successful_request": 1.343880814624999,
+          "independent_runs": 1,
+          "input_tokens": 125414,
+          "itl_p95_ms": 14.625252007231088,
+          "measurement_seconds": 43.00418606799997,
+          "output_tokens": 44064,
+          "request_throughput_requests_per_second": 0.7441136067405228,
+          "requests": 32,
+          "slo_attainment": 1.0,
+          "slo_goodput_requests_per_second": 0.7441136067405228,
+          "slo_qualified_output_tokens_per_second": 1024.6444364817,
+          "successful_requests": 32,
+          "ttft_p95_ms": 3313.401496049994
+        }
+      ],
+      "origin": "infercrane_generated",
+      "prompt_token_mismatch_rate": 0.0,
+      "quality_gates": [
+        {
+          "name": "api_models",
+          "passed": true
+        },
+        {
+          "name": "stream_usage",
+          "passed": true
+        },
+        {
+          "name": "stream_done",
+          "passed": true
+        },
+        {
+          "name": "stream_finish_reason",
+          "passed": true
+        },
+        {
+          "name": "buffered_usage",
+          "passed": true
+        },
+        {
+          "name": "reasoning_output",
+          "passed": true
+        },
+        {
+          "name": "structured_output",
+          "passed": true
+        },
+        {
+          "name": "tool_call",
+          "passed": true
+        },
+        {
+          "name": "unknown_model_rejected",
+          "passed": false
+        },
+        {
+          "name": "invalid_request_rejected",
+          "passed": true
+        },
+        {
+          "name": "speculation_health",
+          "passed": true
+        },
+        {
+          "name": "runtime_parity",
+          "passed": true
+        }
+      ],
+      "quality_passed": false,
+      "recipe_digest": "sha256:1480a2ff5c4cfd97835cf23e2ff7d38295f6f030b961a6a0fe9191f49429aafa",
+      "runtime_id": "sglang-0.5.20",
+      "workload_digest": "sha256:80c207192b535b80b29e2214a0635fe25742910c7ce09d8faf38d04964d716f8"
+    },
+    {
+      "error_rate": 0.0,
+      "evidence_level": "screening",
+      "evidence_state": "reproduced",
+      "id": "sglang-0520-dflash2-k8-bounded-graphs",
+      "lanes": [
+        {
+          "aggregate_output_tokens_per_second": 767.4743394733971,
+          "concurrency": 4,
+          "cost_per_1m_successful_output_tokens_usd": 1.6430516763143324,
+          "economics": {
+            "break_even_utilization": 0.7347450806715332,
+            "can_reach_target_margin_at_full_utilization": false,
+            "input_output_token_ratio": 2.846889373033164,
+            "input_price_usd_per_million": 0.1,
+            "measured_gpu_cost_per_million_output_equivalent_usd": 1.6430516763143324,
+            "measured_gpu_cost_usd": 0.02714978589941803,
+            "measured_output_tokens_per_second": 767.4743394733971,
+            "measured_revenue_usd": 0.041057,
+            "non_gpu_revenue_fraction": 0.1,
+            "output_price_usd_per_million": 2.2,
+            "passes_target_margin_at_target_utilization": false,
+            "projected_gross_margin": -0.044672246577685794,
+            "required_output_tokens_per_second_for_target_margin": 922.7421744049846,
+            "target_gross_margin": 0.35,
+            "target_margin_utilization": 1.2023101320079634,
+            "target_utilization": 0.7
+          },
+          "gpu_seconds_per_successful_request": 1.7941967948333353,
+          "independent_runs": 1,
+          "input_tokens": 47042,
+          "itl_p95_ms": 5.271453945675879,
+          "measurement_seconds": 21.530361538000022,
+          "output_tokens": 16524,
+          "request_throughput_requests_per_second": 0.5573524614912106,
+          "requests": 12,
+          "slo_attainment": 1.0,
+          "slo_goodput_requests_per_second": 0.5573524614912106,
+          "slo_qualified_output_tokens_per_second": 767.4743394733971,
+          "successful_requests": 12,
+          "ttft_p95_ms": 1211.1016255500117
+        },
+        {
+          "aggregate_output_tokens_per_second": 1147.0020685995921,
+          "concurrency": 8,
+          "cost_per_1m_successful_output_tokens_usd": 1.099387729561457,
+          "economics": {
+            "break_even_utilization": 0.491659739010405,
+            "can_reach_target_margin_at_full_utilization": true,
+            "input_output_token_ratio": 2.845270515613653,
+            "input_price_usd_per_million": 0.1,
+            "measured_gpu_cost_per_million_output_equivalent_usd": 1.099387729561457,
+            "measured_gpu_cost_usd": 0.02422171045769802,
+            "measured_output_tokens_per_second": 1147.0020685995921,
+            "measured_revenue_usd": 0.054739100000000006,
+            "non_gpu_revenue_fraction": 0.1,
+            "output_price_usd_per_million": 2.2,
+            "passes_target_margin_at_target_utilization": false,
+            "projected_gross_margin": 0.26786604984376494,
+            "required_output_tokens_per_second_for_target_margin": 922.8022980415693,
+            "target_gross_margin": 0.35,
+            "target_margin_utilization": 0.8045341183806627,
+            "target_utilization": 0.7
+          },
+          "gpu_seconds_per_successful_request": 1.2005209386250009,
+          "independent_runs": 1,
+          "input_tokens": 62687,
+          "itl_p95_ms": 6.762018486373529,
+          "measurement_seconds": 19.208335018000014,
+          "output_tokens": 22032,
+          "request_throughput_requests_per_second": 0.8329717273780626,
+          "requests": 16,
+          "slo_attainment": 1.0,
+          "slo_goodput_requests_per_second": 0.8329717273780626,
+          "slo_qualified_output_tokens_per_second": 1147.0020685995921,
+          "successful_requests": 16,
+          "ttft_p95_ms": 1760.3583244999754
+        },
+        {
+          "aggregate_output_tokens_per_second": 1323.528224386622,
+          "concurrency": 12,
+          "cost_per_1m_successful_output_tokens_usd": 0.9527564103020167,
+          "economics": {
+            "break_even_utilization": 0.4260582020575135,
+            "can_reach_target_margin_at_full_utilization": true,
+            "input_output_token_ratio": 2.8467985959816025,
+            "input_price_usd_per_million": 0.1,
+            "measured_gpu_cost_per_million_output_equivalent_usd": 0.9527564103020167,
+            "measured_gpu_cost_usd": 0.03148669384766105,
+            "measured_output_tokens_per_second": 1323.528224386622,
+            "measured_revenue_usd": 0.08211370000000001,
+            "non_gpu_revenue_fraction": 0.1,
+            "output_price_usd_per_million": 2.2,
+            "passes_target_margin_at_target_utilization": true,
+            "projected_gross_margin": 0.35221088306891113,
+            "required_output_tokens_per_second_for_target_margin": 922.7455456165159,
+            "target_gross_margin": 0.35,
+            "target_margin_utilization": 0.6971861488213857,
+            "target_utilization": 0.7
+          },
+          "gpu_seconds_per_successful_request": 1.0404009333750015,
+          "independent_runs": 1,
+          "input_tokens": 94081,
+          "itl_p95_ms": 8.909382981976742,
+          "measurement_seconds": 24.969622401000038,
+          "output_tokens": 33048,
+          "request_throughput_requests_per_second": 0.961167918944533,
+          "requests": 24,
+          "slo_attainment": 1.0,
+          "slo_goodput_requests_per_second": 0.961167918944533,
+          "slo_qualified_output_tokens_per_second": 1323.528224386622,
+          "successful_requests": 24,
+          "ttft_p95_ms": 2587.79173570002
+        },
+        {
+          "aggregate_output_tokens_per_second": 1560.251495149652,
+          "concurrency": 16,
+          "cost_per_1m_successful_output_tokens_usd": 0.8082030390100992,
+          "economics": {
+            "break_even_utilization": 0.361425152124587,
+            "can_reach_target_margin_at_full_utilization": true,
+            "input_output_token_ratio": 2.8461782861292666,
+            "input_price_usd_per_million": 0.1,
+            "measured_gpu_cost_per_million_output_equivalent_usd": 0.8082030390100992,
+            "measured_gpu_cost_usd": 0.03561265871094101,
+            "measured_output_tokens_per_second": 1560.251495149652,
+            "measured_revenue_usd": 0.1094822,
+            "non_gpu_revenue_fraction": 0.1,
+            "output_price_usd_per_million": 2.2,
+            "passes_target_margin_at_target_utilization": true,
+            "projected_gross_margin": 0.4353105186969595,
+            "required_output_tokens_per_second_for_target_margin": 922.7685828879445,
+            "target_gross_margin": 0.35,
+            "target_margin_utilization": 0.5914229762038696,
+            "target_utilization": 0.7
+          },
+          "gpu_seconds_per_successful_request": 0.8825500275312503,
+          "independent_runs": 1,
+          "input_tokens": 125414,
+          "itl_p95_ms": 10.327248726308138,
+          "measurement_seconds": 28.24160088100001,
+          "output_tokens": 44064,
+          "request_throughput_requests_per_second": 1.133080243391178,
+          "requests": 32,
+          "slo_attainment": 1.0,
+          "slo_goodput_requests_per_second": 1.133080243391178,
+          "slo_qualified_output_tokens_per_second": 1560.251495149652,
+          "successful_requests": 32,
+          "ttft_p95_ms": 3358.751186850014
+        }
+      ],
+      "origin": "infercrane_generated",
+      "prompt_token_mismatch_rate": 0.0,
+      "quality_gates": [
+        {
+          "name": "api_models",
+          "passed": true
+        },
+        {
+          "name": "stream_usage",
+          "passed": true
+        },
+        {
+          "name": "stream_done",
+          "passed": true
+        },
+        {
+          "name": "stream_finish_reason",
+          "passed": true
+        },
+        {
+          "name": "buffered_usage",
+          "passed": true
+        },
+        {
+          "name": "reasoning_output",
+          "passed": true
+        },
+        {
+          "name": "structured_output",
+          "passed": true
+        },
+        {
+          "name": "tool_call",
+          "passed": true
+        },
+        {
+          "name": "unknown_model_rejected",
+          "passed": false
+        },
+        {
+          "name": "invalid_request_rejected",
+          "passed": true
+        },
+        {
+          "name": "speculation_health",
+          "passed": true
+        },
+        {
+          "name": "runtime_parity",
+          "passed": false
+        }
+      ],
+      "quality_passed": false,
+      "recipe_digest": "sha256:6c5415dfb271231873fb30f9b500ab34a7e96e3b4015faa46cb2362d96a0ec99",
+      "runtime_id": "sglang-0.5.20-dflash2-k8-bounded-graphs",
+      "workload_digest": "sha256:80c207192b535b80b29e2214a0635fe25742910c7ce09d8faf38d04964d716f8"
+    },
+    {
+      "error_rate": 0.0,
+      "evidence_level": "screening",
+      "evidence_state": "reproduced",
+      "id": "sglang-0520-nextn-k4-bounded-graphs",
+      "lanes": [
+        {
+          "aggregate_output_tokens_per_second": 680.7186678091069,
+          "concurrency": 4,
+          "cost_per_1m_successful_output_tokens_usd": 1.8524539720036306,
+          "economics": {
+            "break_even_utilization": 0.8283862660687983,
+            "can_reach_target_margin_at_full_utilization": false,
+            "input_output_token_ratio": 2.846889373033164,
+            "input_price_usd_per_million": 0.1,
+            "measured_gpu_cost_per_million_output_equivalent_usd": 1.8524539720036306,
+            "measured_gpu_cost_usd": 0.030609949433387993,
+            "measured_output_tokens_per_second": 680.7186678091069,
+            "measured_revenue_usd": 0.041057,
+            "non_gpu_revenue_fraction": 0.1,
+            "output_price_usd_per_million": 2.2,
+            "passes_target_margin_at_target_utilization": false,
+            "projected_gross_margin": -0.16506805637416935,
+            "required_output_tokens_per_second_for_target_margin": 922.7421744049846,
+            "target_gross_margin": 0.35,
+            "target_margin_utilization": 1.3555411626580336,
+            "target_utilization": 0.7
+          },
+          "gpu_seconds_per_successful_request": 2.0228621089999996,
+          "independent_runs": 1,
+          "input_tokens": 47042,
+          "itl_p95_ms": 5.756636934847385,
+          "measurement_seconds": 24.274345307999994,
+          "output_tokens": 16524,
+          "request_throughput_requests_per_second": 0.4943490688519295,
+          "requests": 12,
+          "slo_attainment": 1.0,
+          "slo_goodput_requests_per_second": 0.4943490688519295,
+          "slo_qualified_output_tokens_per_second": 680.7186678091069,
+          "successful_requests": 12,
+          "ttft_p95_ms": 808.7977939500034
+        },
+        {
+          "aggregate_output_tokens_per_second": 1080.5173223504805,
+          "concurrency": 8,
+          "cost_per_1m_successful_output_tokens_usd": 1.1670335809674113,
+          "economics": {
+            "break_even_utilization": 0.521911797272557,
+            "can_reach_target_margin_at_full_utilization": true,
+            "input_output_token_ratio": 2.845270515613653,
+            "input_price_usd_per_million": 0.1,
+            "measured_gpu_cost_per_million_output_equivalent_usd": 1.1670335809674113,
+            "measured_gpu_cost_usd": 0.025712083855874007,
+            "measured_output_tokens_per_second": 1080.5173223504805,
+            "measured_revenue_usd": 0.054739100000000006,
+            "non_gpu_revenue_fraction": 0.1,
+            "output_price_usd_per_million": 2.2,
+            "passes_target_margin_at_target_utilization": false,
+            "projected_gross_margin": 0.2289705463638552,
+            "required_output_tokens_per_second_for_target_margin": 922.8022980415693,
+            "target_gross_margin": 0.35,
+            "target_margin_utilization": 0.8540374864460024,
+            "target_utilization": 0.7
+          },
+          "gpu_seconds_per_successful_request": 1.2743895646250003,
+          "independent_runs": 1,
+          "input_tokens": 62687,
+          "itl_p95_ms": 7.329559785428772,
+          "measurement_seconds": 20.390233034000005,
+          "output_tokens": 22032,
+          "request_throughput_requests_per_second": 0.7846894134716634,
+          "requests": 16,
+          "slo_attainment": 1.0,
+          "slo_goodput_requests_per_second": 0.7846894134716634,
+          "slo_qualified_output_tokens_per_second": 1080.5173223504805,
+          "successful_requests": 16,
+          "ttft_p95_ms": 1646.8828564999994
+        },
+        {
+          "aggregate_output_tokens_per_second": 1335.6602597339752,
+          "concurrency": 12,
+          "cost_per_1m_successful_output_tokens_usd": 0.9441023574746131,
+          "economics": {
+            "break_even_utilization": 0.42218824101785435,
+            "can_reach_target_margin_at_full_utilization": true,
+            "input_output_token_ratio": 2.8467985959816025,
+            "input_price_usd_per_million": 0.1,
+            "measured_gpu_cost_per_million_output_equivalent_usd": 0.9441023574746131,
+            "measured_gpu_cost_usd": 0.031200694709821016,
+            "measured_output_tokens_per_second": 1335.6602597339752,
+            "measured_revenue_usd": 0.08211370000000001,
+            "non_gpu_revenue_fraction": 0.1,
+            "output_price_usd_per_million": 2.2,
+            "passes_target_margin_at_target_utilization": true,
+            "projected_gross_margin": 0.35718654726275856,
+            "required_output_tokens_per_second_for_target_margin": 922.7455456165159,
+            "target_gross_margin": 0.35,
+            "target_margin_utilization": 0.6908534853019435,
+            "target_utilization": 0.7
+          },
+          "gpu_seconds_per_successful_request": 1.0309507900416672,
+          "independent_runs": 1,
+          "input_tokens": 94081,
+          "itl_p95_ms": 9.407955808321208,
+          "measurement_seconds": 24.74281896100001,
+          "output_tokens": 33048,
+          "request_throughput_requests_per_second": 0.9699784021307009,
+          "requests": 24,
+          "slo_attainment": 1.0,
+          "slo_goodput_requests_per_second": 0.9699784021307009,
+          "slo_qualified_output_tokens_per_second": 1335.6602597339752,
+          "successful_requests": 24,
+          "ttft_p95_ms": 2490.988053400002
+        },
+        {
+          "aggregate_output_tokens_per_second": 1582.1446883108847,
+          "concurrency": 16,
+          "cost_per_1m_successful_output_tokens_usd": 0.797019393558915,
+          "economics": {
+            "break_even_utilization": 0.356423870808629,
+            "can_reach_target_margin_at_full_utilization": true,
+            "input_output_token_ratio": 2.8461782861292666,
+            "input_price_usd_per_million": 0.1,
+            "measured_gpu_cost_per_million_output_equivalent_usd": 0.797019393558915,
+            "measured_gpu_cost_usd": 0.03511986255778003,
+            "measured_output_tokens_per_second": 1582.1446883108847,
+            "measured_revenue_usd": 0.1094822,
+            "non_gpu_revenue_fraction": 0.1,
+            "output_price_usd_per_million": 2.2,
+            "passes_target_margin_at_target_utilization": true,
+            "projected_gross_margin": 0.4417407375317627,
+            "required_output_tokens_per_second_for_target_margin": 922.7685828879445,
+            "target_gross_margin": 0.35,
+            "target_margin_utilization": 0.583239061323211,
+            "target_utilization": 0.7
+          },
+          "gpu_seconds_per_successful_request": 0.8703375931250008,
+          "independent_runs": 1,
+          "input_tokens": 125414,
+          "itl_p95_ms": 10.13406835730376,
+          "measurement_seconds": 27.850802980000026,
+          "output_tokens": 44064,
+          "request_throughput_requests_per_second": 1.1489794395866992,
+          "requests": 32,
+          "slo_attainment": 1.0,
+          "slo_goodput_requests_per_second": 1.1489794395866992,
+          "slo_qualified_output_tokens_per_second": 1582.1446883108847,
+          "successful_requests": 32,
+          "ttft_p95_ms": 3341.8874549000006
+        }
+      ],
+      "origin": "infercrane_generated",
+      "prompt_token_mismatch_rate": 0.0,
+      "quality_gates": [
+        {
+          "name": "api_models",
+          "passed": true
+        },
+        {
+          "name": "stream_usage",
+          "passed": true
+        },
+        {
+          "name": "stream_done",
+          "passed": true
+        },
+        {
+          "name": "stream_finish_reason",
+          "passed": true
+        },
+        {
+          "name": "buffered_usage",
+          "passed": true
+        },
+        {
+          "name": "reasoning_output",
+          "passed": true
+        },
+        {
+          "name": "structured_output",
+          "passed": true
+        },
+        {
+          "name": "tool_call",
+          "passed": true
+        },
+        {
+          "name": "unknown_model_rejected",
+          "passed": false
+        },
+        {
+          "name": "invalid_request_rejected",
+          "passed": true
+        },
+        {
+          "name": "speculation_health",
+          "passed": true
+        },
+        {
+          "name": "runtime_parity",
+          "passed": false
+        }
+      ],
+      "quality_passed": false,
+      "recipe_digest": "sha256:ebd7dd93e8d7fe681e5ac19607f0ed7018ce7ab9dfa6e638aa25f7e69dc72e3f",
+      "runtime_id": "sglang-0.5.20-nextn-k4-bounded-graphs",
+      "workload_digest": "sha256:80c207192b535b80b29e2214a0635fe25742910c7ce09d8faf38d04964d716f8"
+    }
+  ],
+  "hardware_identity": "modal:NVIDIA H200:9.0",
+  "model_identity": "Qwen/Qwen3.8-27B-FP8@017b9c7af6b5689d5dd426a76e0bc077eb5ca20a",
+  "required_concurrency_lanes": [
+    4,
+    8,
+    12,
+    16
+  ],
+  "schema_version": "infercrane.dev/optimization-evidence/v1",
+  "selection_policy": {
+    "cost_tie_breaker": true,
+    "evidence_level": "screening",
+    "id": "workload-qualified-price-performance-screen-v1",
+    "lane_aggregation": "arithmetic_mean",
+    "objective": "minimum_cogs_under_slo",
+    "qualification_before_scoring": true,
+    "version": 1
+  },
+  "slo": {
+    "max_error_rate": 0.01,
+    "max_itl_ms": 20.0,
+    "max_prompt_token_mismatch_rate": 0.0,
+    "max_ttft_ms": 5000.0,
+    "min_successful_fraction": 0.99,
+    "minimum_independent_runs": 1,
+    "minimum_measurement_seconds_per_lane": 0.0,
+    "minimum_requests_per_lane": 12,
+    "required_quality_gates": [
+      "api_models",
+      "stream_usage",
+      "stream_done",
+      "stream_finish_reason",
+      "buffered_usage",
+      "reasoning_output",
+      "structured_output",
+      "tool_call",
+      "unknown_model_rejected",
+      "invalid_request_rejected",
+      "speculation_health",
+      "runtime_parity"
+    ],
+    "scope": "each_concurrency_lane"
+  },
+  "workload_digest": "sha256:80c207192b535b80b29e2214a0635fe25742910c7ce09d8faf38d04964d716f8",
+  "workload_id": "agentic-system-chutes-public-decode-saturation-v1"
+}

@@ -41,6 +41,7 @@ from campaign_support import (
     merge_candidate_runs,
     openrouter_snapshot,
     project_lane_economics,
+    speculation_health,
     summarize_lane,
     summarize_torch_trace,
     custom_kernel_gate,
@@ -68,6 +69,11 @@ LAUNCH_INPUT_PRICE_USD_PER_MILLION = 0.10
 LAUNCH_OUTPUT_PRICE_USD_PER_MILLION = 2.20
 SGLANG_VERSION = "0.5.20"
 SGLANG_IMAGE = "lmsysorg/sglang@sha256:06e4f2ed21afde4ff513cda65070124e727ba23ccaeff7712b8c40e1097d611f"
+VLLM_VERSION = "0.30.0"
+VLLM_IMAGE = "vllm/vllm-openai@sha256:5f5e535216848d0c52159c8c13a0af04be5f6fe1a84e79914300610796f76d40"
+VLLM_CUTLASS_DSL_VERSION = "4.7.1"
+DFLASH2_MODEL_ID = "incoai/Qwen3.8-27B-DFlash2"
+DFLASH2_MODEL_REVISION = "015e795645c74b1a0eeef3b570031fb62e769bc5"
 SCREENING_REQUESTS_PER_LANE = 12
 
 MODULE_PATH = Path(__file__).resolve()
@@ -88,9 +94,41 @@ image = (
         }
     )
     .pip_install("httpx==0.28.1", "jsonschema==4.25.1")
+    .run_commands(
+        # Modal's dependency layer uses the source image's /opt interpreter,
+        # while this campaign intentionally executes the injected /usr/local
+        # Python. Install the three exact CUTLASS DSL wheels into that
+        # interpreter's package root, without replacing vLLM dependencies.
+        "/usr/local/bin/python -m pip install --no-deps --upgrade "
+        "--target /usr/local/lib/python3.12/dist-packages "
+        f"nvidia-cutlass-dsl=={VLLM_CUTLASS_DSL_VERSION} "
+        f"nvidia-cutlass-dsl-libs-base=={VLLM_CUTLASS_DSL_VERSION} "
+        f"nvidia-cutlass-dsl-libs-cu13=={VLLM_CUTLASS_DSL_VERSION} "
+        "--extra-index-url https://pypi.nvidia.com"
+    )
 )
 if SUPPORT.exists():
     image = image.add_local_file(SUPPORT, "/opt/infercrane/campaign_support.py")
+vllm_image = (
+    # Modal injects its worker interpreter at /usr/local. Keep vLLM's pinned
+    # /opt/venv packages visible to that same Python 3.12 ABI rather than
+    # reinstalling or mutating the release image.
+    modal.Image.from_registry(VLLM_IMAGE, add_python="3.12")
+    .entrypoint([])
+    .env(
+        {
+            "PYTHONPATH": (
+                "/usr/local/lib/python3.12/dist-packages:"
+                "/usr/local/lib/python3.12/dist-packages/nvidia_cutlass_dsl/dsl_packages:"
+                "/opt/venv/lib/python3.12/site-packages"
+            ),
+            "PATH": "/opt/venv/bin:/usr/local/bin:/usr/bin:/bin",
+        }
+    )
+    .pip_install("httpx==0.28.1", "jsonschema==4.25.1")
+)
+if SUPPORT.exists():
+    vllm_image = vllm_image.add_local_file(SUPPORT, "/opt/infercrane/campaign_support.py")
 
 
 BASE_ARGS = [
@@ -116,6 +154,53 @@ BASE_ARGS = [
     "--port",
     str(PORT),
 ]
+
+VLLM_BASE_ARGS = [
+    MODEL_ID,
+    "--served-model-name",
+    MODEL_ID,
+    "--revision",
+    MODEL_REVISION,
+    "--tensor-parallel-size",
+    "1",
+    "--max-model-len",
+    "262144",
+    "--gpu-memory-utilization",
+    "0.90",
+    "--kv-cache-dtype",
+    "fp8_e4m3",
+    "--reasoning-parser",
+    "qwen3",
+    "--tool-call-parser",
+    "qwen3_coder",
+    "--enable-auto-tool-choice",
+    "--enable-prefix-caching",
+    "--language-model-only",
+    "--port",
+    str(PORT),
+]
+
+VLLM_CANDIDATES: dict[str, dict[str, Any]] = {
+    "vllm-0300-control": {
+        "runtime_id": "vllm-0.30.0",
+        "args": [],
+        "class": "runtime_control",
+        "workloads": list(WORKLOADS),
+    },
+    "vllm-0300-mtp-k3": {
+        "runtime_id": "vllm-0.30.0-mtp-k3",
+        "args": [
+            "--speculative-config",
+            '{"method":"mtp","num_speculative_tokens":3}',
+        ],
+        "class": "native_mtp",
+        "workloads": [
+            "public-interactive",
+            "public-decode-heavy",
+            "public-decode-saturation",
+        ],
+    },
+}
 
 CANDIDATES: dict[str, dict[str, Any]] = {
     "sglang-0520-control": {
@@ -278,6 +363,50 @@ CANDIDATES: dict[str, dict[str, Any]] = {
         ],
         "class": "native_mtp_bounded_graph_capture",
         "workloads": ["public-interactive", "public-long-prefill", "public-decode-heavy", "public-decode-saturation"],
+    },
+    "sglang-0520-dflash2-k8-bounded-graphs": {
+        "runtime_id": "sglang-0.5.20-dflash2-k8-bounded-graphs",
+        "args": [
+            "--speculative-algorithm",
+            "DFLASH",
+            "--speculative-draft-model-path",
+            DFLASH2_MODEL_ID,
+            "--speculative-draft-model-revision",
+            DFLASH2_MODEL_REVISION,
+            # SGLang may otherwise inherit target quantization for the draft.
+            # The quantized DFlash path can serve with near-zero acceptance,
+            # so this is deliberately explicit and measured below.
+            "--speculative-draft-model-quantization",
+            "unquant",
+            "--speculative-num-draft-tokens",
+            "8",
+            "--speculative-dflash-block-size",
+            "8",
+            "--cuda-graph-bs-decode",
+            "1",
+            "2",
+            "4",
+            "8",
+            "12",
+            "16",
+            "24",
+            "32",
+            "33",
+            "--cuda-graph-bs-prefill",
+            "256",
+            "512",
+            "1024",
+            "2048",
+            "4096",
+            "8192",
+        ],
+        "class": "external_dflash2_bounded_graph_capture",
+        "workloads": [
+            "public-interactive",
+            "public-long-prefill",
+            "public-decode-heavy",
+            "public-decode-saturation",
+        ],
     },
     "sglang-0520-nextn-k4-graphs-fp8-flashinfer-trtllm": {
         "runtime_id": "sglang-0.5.20-nextn-k4-graphs-fp8-flashinfer-trtllm",
@@ -507,7 +636,7 @@ def _wait_for_server(process: subprocess.Popen[str], log_path: Path, timeout: in
     while time.monotonic() < deadline:
         if process.poll() is not None:
             raise RuntimeError(
-                f"SGLang exited with {process.returncode}:\n"
+                f"inference runtime exited with {process.returncode}:\n"
                 + log_path.read_text(errors="replace")[-16000:]
             )
         try:
@@ -516,7 +645,10 @@ def _wait_for_server(process: subprocess.Popen[str], log_path: Path, timeout: in
                     return
         except OSError:
             time.sleep(2)
-    raise TimeoutError("SGLang did not become healthy:\n" + log_path.read_text(errors="replace")[-16000:])
+    raise TimeoutError(
+        "inference runtime did not become healthy:\n"
+        + log_path.read_text(errors="replace")[-16000:]
+    )
 
 
 def _metric_snapshot() -> dict[str, float]:
@@ -553,6 +685,12 @@ def _metric_delta(before: dict[str, float], after: dict[str, float]) -> dict[str
         if value:
             values[key] = value
     return values
+
+
+def _speculation_health_gate(
+    candidate: dict[str, Any], metrics: dict[str, float]
+) -> dict[str, Any]:
+    return speculation_health(candidate["class"], metrics)
 
 
 def _prompt_near_tokens(tokenizer: Any, target: int, variant: int, *, shared_prefix: str = "") -> tuple[list[dict[str, str]], int]:
@@ -823,6 +961,42 @@ async def _quality_gates() -> list[dict[str, Any]]:
             pass
         rows.append({"name": "buffered_usage", "passed": buffered_usage})
 
+        response = await client.post(
+            f"{base}/chat/completions",
+            json={
+                "model": MODEL_ID,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "Think through 17 plus 25, then give the integer.",
+                    }
+                ],
+                "max_tokens": 256,
+                "temperature": 0,
+                "seed": 20260923,
+                "stream": False,
+                "chat_template_kwargs": {
+                    "enable_thinking": True,
+                    "preserve_thinking": True,
+                },
+            },
+        )
+        reasoning_output = False
+        thinking_semantic = False
+        try:
+            response.raise_for_status()
+            message = response.json()["choices"][0]["message"]
+            reasoning = message.get("reasoning_content") or message.get("reasoning") or ""
+            content = (message.get("content") or "").strip()
+            reasoning_output = bool(reasoning.strip() and content)
+            thinking_semantic = reasoning_output and bool(
+                re.search(r"(?<!\d)42(?!\d)", content)
+            )
+        except Exception:
+            pass
+        rows.append({"name": "reasoning_output", "passed": reasoning_output})
+        rows.append({"name": "thinking_semantic", "passed": thinking_semantic})
+
         schema = {
             "type": "object",
             "additionalProperties": False,
@@ -945,9 +1119,55 @@ async def _correctness_probes() -> list[dict[str, Any]]:
             rows.append(
                 {
                     "id": f"deterministic-{index + 1}",
+                    "parity_mode": "exact",
                     "output_sha256": hashlib.sha256(content.encode()).hexdigest(),
                 }
             )
+        response = await client.post(
+            f"http://127.0.0.1:{PORT}/v1/chat/completions",
+            json={
+                "model": MODEL_ID,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "Think step by step: what is 23 times 7? Give the final integer.",
+                    }
+                ],
+                "temperature": 0,
+                "seed": 20260926,
+                "max_tokens": 256,
+                "chat_template_kwargs": {
+                    "enable_thinking": True,
+                    "preserve_thinking": True,
+                },
+            },
+        )
+        response.raise_for_status()
+        message = response.json()["choices"][0]["message"]
+        reasoning = message.get("reasoning_content") or message.get("reasoning") or ""
+        content = message.get("content") or ""
+        rows.append(
+            {
+                "id": "deterministic-thinking-1",
+                # A reasoning trace is not a stable byte-level contract even
+                # at temperature zero. Preserve both hashes for diagnostics,
+                # but qualify its externally visible answer semantically.
+                "parity_mode": "semantic",
+                "semantic_passed": bool(
+                    reasoning.strip()
+                    and re.search(r"(?<!\d)161(?!\d)", content)
+                ),
+                "reasoning_sha256": hashlib.sha256(reasoning.encode()).hexdigest(),
+                "content_sha256": hashlib.sha256(content.encode()).hexdigest(),
+                "output_sha256": hashlib.sha256(
+                    json.dumps(
+                        {"reasoning": reasoning, "content": content},
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode()
+                ).hexdigest(),
+            }
+        )
     return rows
 
 
@@ -956,6 +1176,8 @@ async def _benchmark_profile(
     workload: dict[str, Any],
     requests_per_lane: int,
     minimum_lane_seconds: float,
+    *,
+    flush_path: str = "/flush_cache",
 ) -> tuple[list[dict[str, Any]], dict[str, float], list[dict[str, Any]]]:
     import httpx
 
@@ -970,7 +1192,7 @@ async def _benchmark_profile(
         for lane_index, concurrency in enumerate(workload["concurrency_lanes"]):
             # Every lane starts from a clean cache. Explicit session-prefix
             # reuse is then rebuilt inside that lane only.
-            flush = await client.post(f"http://127.0.0.1:{PORT}/flush_cache")
+            flush = await client.post(f"http://127.0.0.1:{PORT}{flush_path}")
             flush.raise_for_status()
             target_requests = max(requests_per_lane, concurrency * 2)
             print(
@@ -1137,7 +1359,7 @@ def preflight() -> dict[str, Any]:
     relevant_options = sorted(
         set(
             re.findall(
-                r"--(?:cuda-graph|chunked-prefill|max-prefill|fp8|gemm|linear-attn|gdn)[a-z0-9-]*",
+                r"--(?:cuda-graph|chunked-prefill|max-prefill|fp8|gemm|linear-attn|gdn|speculative)[a-z0-9-]*",
                 help_text,
             )
         )
@@ -1159,6 +1381,243 @@ def preflight() -> dict[str, Any]:
         "option_help": option_help,
         "python": _python(),
     }
+
+
+@app.function(image=vllm_image, gpu=GPU, cpu=2, memory=4096, timeout=10 * 60)
+def vllm_preflight() -> dict[str, Any]:
+    candidates = sorted(
+        str(path)
+        for pattern in (
+            "/opt/venv/lib/python*/site-packages/vllm",
+            "/usr/local/lib/python*/site-packages/vllm",
+            "/usr/local/lib/python*/dist-packages/vllm",
+        )
+        for path in Path("/").glob(pattern.removeprefix("/"))
+    )
+    if not candidates:
+        discovered = subprocess.run(
+            [
+                "/usr/bin/find",
+                "/opt",
+                "/usr",
+                "/vllm-workspace",
+                "-maxdepth",
+                "6",
+                "-type",
+                "d",
+                "-name",
+                "vllm",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        return {
+            "version": None,
+            "image": VLLM_IMAGE,
+            "python": sys.executable,
+            "sys_path": sys.path,
+            "env_path": os.environ.get("PATH"),
+            "discovered_packages": discovered.stdout.splitlines(),
+            "find_error": discovered.stderr,
+        }
+    package_root = str(Path(candidates[0]).parent)
+    environment = os.environ.copy()
+    environment["PYTHONPATH"] = os.pathsep.join(
+        [package_root, environment.get("PYTHONPATH", "")]
+    ).rstrip(os.pathsep)
+    version = subprocess.check_output(
+        [sys.executable, "-c", "import vllm; print(vllm.__version__)"],
+        text=True,
+        timeout=60,
+        env=environment,
+    ).strip()
+    dependency_probe = json.loads(
+        subprocess.check_output(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import importlib.metadata as m,json; import cutlass; "
+                    "print(json.dumps({'cutlass_module': cutlass.__file__, "
+                    "'cutlass_dsl': m.version('nvidia-cutlass-dsl'), "
+                    "'flashinfer': m.version('flashinfer-python')}))"
+                ),
+            ],
+            text=True,
+            timeout=60,
+            env=environment,
+        )
+    )
+    help_text = subprocess.check_output(
+        [sys.executable, "-m", "vllm.entrypoints.cli.main", "serve", "--help=all"],
+        text=True,
+        timeout=180,
+        env=environment,
+    )
+    relevant_options = sorted(
+        set(
+            re.findall(
+                r"--(?:speculative|num-speculative|kv-cache|gpu-memory|max-model|enable-prefix|reasoning|tool-call|chat-template|compilation|cuda-graph)[a-z0-9-]*",
+                help_text,
+            )
+        )
+    )
+    help_lines = help_text.splitlines()
+    option_help = {}
+    for option in relevant_options:
+        matches = [
+            " ".join(help_lines[index : min(index + 4, len(help_lines))]).strip()
+            for index, line in enumerate(help_lines)
+            if option in line
+        ]
+        option_help[option] = matches[:3]
+    return {
+        "version": version,
+        "image": VLLM_IMAGE,
+        "relevant_options": relevant_options,
+        "option_help": option_help,
+        "python": sys.executable,
+        "package_root": package_root,
+        "dependency_probe": dependency_probe,
+    }
+
+
+@app.function(
+    image=vllm_image,
+    gpu=GPU,
+    cpu=8,
+    memory=131072,
+    timeout=90 * 60,
+    startup_timeout=30 * 60,
+    volumes={
+        "/model-cache": model_cache,
+        "/compile-cache": compile_cache,
+        "/results": results,
+    },
+)
+def screen_vllm_candidate(
+    candidate_id: str,
+    workload_name: str = "public-decode-saturation",
+    requests_per_lane: int = SCREENING_REQUESTS_PER_LANE,
+    minimum_lane_seconds: float = 0.0,
+    run_index: int = 1,
+) -> dict[str, Any]:
+    if candidate_id not in VLLM_CANDIDATES:
+        raise ValueError(f"unknown vLLM candidate {candidate_id}")
+    if workload_name not in WORKLOADS:
+        raise ValueError(f"unknown workload {workload_name}")
+    candidate = VLLM_CANDIDATES[candidate_id]
+    if workload_name not in candidate["workloads"]:
+        raise ValueError(f"candidate {candidate_id} does not support {workload_name}")
+    workload = WORKLOADS[workload_name]
+    inventory = _gpu_inventory()
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    run_dir = Path("/results") / stamp / candidate_id / workload_name
+    run_dir.mkdir(parents=True, exist_ok=False)
+    log_path = run_dir / "server.log"
+    log = log_path.open("w", encoding="utf-8")
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "HF_HOME": "/model-cache",
+            "HF_HUB_CACHE": "/model-cache/hub",
+            "TRANSFORMERS_CACHE": "/model-cache/transformers",
+            "VLLM_SERVER_DEV_MODE": "1",
+            "VLLM_CONFIG_ROOT": "/compile-cache/vllm",
+        }
+    )
+    command = [
+        sys.executable,
+        "-m",
+        "vllm.entrypoints.cli.main",
+        "serve",
+        *VLLM_BASE_ARGS,
+        *candidate["args"],
+    ]
+    print(
+        f"starting candidate={candidate_id} workload={workload_name} gpu={inventory[0]['name']}",
+        flush=True,
+    )
+    launch_started = time.perf_counter()
+    process = subprocess.Popen(
+        command, stdout=log, stderr=subprocess.STDOUT, env=environment, text=True
+    )
+    try:
+        _wait_for_server(process, log_path)
+        startup_seconds = time.perf_counter() - launch_started
+        print(
+            f"runtime ready candidate={candidate_id} startup_seconds={startup_seconds:.3f}",
+            flush=True,
+        )
+        from transformers import AutoTokenizer
+
+        tokenizer = AutoTokenizer.from_pretrained(
+            MODEL_ID, revision=MODEL_REVISION, cache_dir="/model-cache/hub"
+        )
+        lanes, metrics, samples = asyncio.run(
+            _benchmark_profile(
+                tokenizer,
+                workload,
+                requests_per_lane,
+                minimum_lane_seconds,
+                flush_path="/reset_prefix_cache",
+            )
+        )
+        quality = asyncio.run(_quality_gates())
+        quality.append(_speculation_health_gate(candidate, metrics))
+        correctness_probes = asyncio.run(_correctness_probes())
+        total_requests = sum(lane["requests"] for lane in lanes)
+        successful = sum(lane["successful_requests"] for lane in lanes)
+        result = {
+            "schema_version": "infercrane.dev/modal-workload-screen/v1",
+            "created_at": datetime.now(UTC).isoformat(),
+            "candidate_id": candidate_id,
+            "run_index": run_index,
+            "runtime_id": candidate["runtime_id"],
+            "recipe": {
+                "image": VLLM_IMAGE,
+                "model": MODEL_ID,
+                "model_revision": MODEL_REVISION,
+                "gpu": GPU,
+                "args": VLLM_BASE_ARGS + candidate["args"],
+                "harness_digest": _harness_digest(),
+                "command": command,
+            },
+            "workload_name": workload_name,
+            "workload": workload,
+            "gpu_inventory": inventory,
+            "quality": quality,
+            "correctness_probes": correctness_probes,
+            "lanes": lanes,
+            "runtime_metric_delta": metrics,
+            "request_samples": samples,
+            "startup_seconds": startup_seconds,
+            "error_rate": 1 - successful / total_requests,
+            "prompt_token_mismatch_rate": sum(
+                lane["prompt_token_mismatch_count"] for lane in lanes
+            )
+            / total_requests,
+            "server_log": str(log_path),
+            "runtime_profile": None,
+        }
+        (run_dir / "result.json").write_text(
+            json.dumps(result, indent=2, sort_keys=True) + "\n"
+        )
+        results.commit()
+        return result
+    finally:
+        if process.poll() is None:
+            process.send_signal(signal.SIGTERM)
+            try:
+                process.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                process.kill()
+        log.close()
+        model_cache.commit()
+        compile_cache.commit()
+        results.commit()
 
 
 @app.function(
@@ -1231,6 +1690,7 @@ def screen_candidate(
             )
         )
         quality = asyncio.run(_quality_gates())
+        quality.append(_speculation_health_gate(candidate, metrics))
         correctness_probes = asyncio.run(_correctness_probes())
         runtime_profile = (
             asyncio.run(_capture_runtime_profiles(tokenizer, workload, run_dir / "profiles"))
@@ -1308,6 +1768,137 @@ def _safe_stamp() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H%M%SZ")
 
 
+def _run_vllm_campaign(
+    *,
+    candidates: str,
+    workload: str,
+    evidence_level: str,
+    independent_runs: int,
+    parallel: bool,
+    output_dir: str,
+) -> None:
+    selected = (
+        [
+            candidate_id
+            for candidate_id, candidate in VLLM_CANDIDATES.items()
+            if workload in candidate["workloads"]
+        ]
+        if candidates == "all"
+        else [value.strip() for value in candidates.split(",")]
+    )
+    unknown = set(selected) - VLLM_CANDIDATES.keys()
+    if unknown:
+        raise ValueError(f"unknown vLLM candidates: {sorted(unknown)}")
+    if workload not in WORKLOADS:
+        raise ValueError(f"unknown workload: {workload}")
+    incompatible = [
+        candidate_id
+        for candidate_id in selected
+        if workload not in VLLM_CANDIDATES[candidate_id]["workloads"]
+    ]
+    if incompatible:
+        raise ValueError(f"candidates are not applicable to {workload}: {incompatible}")
+    evidence_floors = {
+        "screening": (SCREENING_REQUESTS_PER_LANE, 1, 0.0),
+        "qualification": (100, 2, 300.0),
+        "public": (300, 3, 600.0),
+    }
+    if evidence_level not in evidence_floors:
+        raise ValueError("evidence_level must be screening, qualification, or public")
+    requests_per_lane, minimum_runs, minimum_lane_seconds = evidence_floors[
+        evidence_level
+    ]
+    run_count = independent_runs or minimum_runs
+    if run_count < minimum_runs:
+        raise ValueError(
+            f"{evidence_level} requires at least {minimum_runs} independent runs"
+        )
+    if "vllm-0300-control" not in selected:
+        raise ValueError("vLLM campaigns must include vllm-0300-control for parity")
+    jobs = [
+        (
+            candidate_id,
+            workload,
+            requests_per_lane,
+            minimum_lane_seconds,
+            run_index,
+        )
+        for candidate_id in selected
+        for run_index in range(1, run_count + 1)
+    ]
+    for job in jobs:
+        print(
+            f"{evidence_level} {job[0]} on {workload} run={job[4]}/{run_count}",
+            flush=True,
+        )
+    if parallel:
+        outcomes = list(
+            screen_vllm_candidate.starmap(
+                jobs, order_outputs=True, return_exceptions=True
+            )
+        )
+    else:
+        outcomes = [screen_vllm_candidate.remote(*job) for job in jobs]
+    run_results = []
+    failures = []
+    for job, outcome in zip(jobs, outcomes, strict=True):
+        if isinstance(outcome, BaseException):
+            failures.append(
+                {
+                    "candidate_id": job[0],
+                    "workload": job[1],
+                    "run_index": job[4],
+                    "error_type": type(outcome).__name__,
+                    "error": str(outcome)[:4000],
+                }
+            )
+        else:
+            run_results.append(outcome)
+    destination = ROOT / output_dir
+    destination.mkdir(parents=True, exist_ok=True)
+    stamp = _safe_stamp()
+    failures_path = None
+    if failures:
+        failures_path = destination / f"qwen38-vllm-{workload}-modal-{stamp}-failures.json"
+        failures_path.write_text(json.dumps(failures, indent=2, sort_keys=True) + "\n")
+    if not run_results:
+        raise RuntimeError(
+            f"all vLLM candidate runs failed; evidence={failures_path}: {failures}"
+        )
+    candidate_results = merge_candidate_runs(
+        run_results, hourly_cost_usd=GPU_HOURLY_COST_USD
+    )
+    for result in candidate_results:
+        for lane in result["lanes"]:
+            lane["economics"] = project_lane_economics(
+                lane,
+                hourly_cost_usd=GPU_HOURLY_COST_USD,
+                input_price_usd_per_million=LAUNCH_INPUT_PRICE_USD_PER_MILLION,
+                output_price_usd_per_million=LAUNCH_OUTPUT_PRICE_USD_PER_MILLION,
+            )
+    apply_runtime_parity(
+        candidate_results, reference_candidate_id="vllm-0300-control"
+    )
+    evidence = build_evidence(
+        candidate_results,
+        workload=WORKLOADS[workload],
+        evidence_level=evidence_level,
+    )
+    paths = {
+        "raw": destination / f"qwen38-vllm-{workload}-modal-{stamp}-raw.json",
+        "evidence": destination / f"qwen38-vllm-{workload}-modal-{stamp}.json",
+    }
+    paths["raw"].write_text(
+        json.dumps(run_results, indent=2, sort_keys=True) + "\n"
+    )
+    paths["evidence"].write_text(
+        json.dumps(evidence, indent=2, sort_keys=True) + "\n"
+    )
+    if failures_path is not None:
+        paths["failures"] = failures_path
+    print(json.dumps({key: str(value) for key, value in paths.items()}, indent=2))
+
+
 @app.local_entrypoint()
 def main(
     action: str = "screen",
@@ -1321,8 +1912,23 @@ def main(
     if action == "preflight":
         print(json.dumps(preflight.remote(), indent=2, sort_keys=True))
         return
+    if action == "vllm-preflight":
+        print(json.dumps(vllm_preflight.remote(), indent=2, sort_keys=True))
+        return
+    if action == "vllm-screen":
+        _run_vllm_campaign(
+            candidates=candidates,
+            workload=workload,
+            evidence_level=evidence_level,
+            independent_runs=independent_runs,
+            parallel=parallel,
+            output_dir=output_dir,
+        )
+        return
     if action not in {"screen", "profile"}:
-        raise ValueError("action must be preflight, screen, or profile")
+        raise ValueError(
+            "action must be preflight, vllm-preflight, vllm-screen, screen, or profile"
+        )
     selected = (
         [
             candidate_id

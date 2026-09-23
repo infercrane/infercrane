@@ -10,6 +10,7 @@ from campaign_support import (
     openrouter_snapshot,
     percentile,
     project_lane_economics,
+    speculation_health,
     summarize_lane,
     synthetic_prompt_content,
     merge_candidate_runs,
@@ -106,10 +107,12 @@ class CampaignSupportTest(unittest.TestCase):
                     "stream_done",
                     "stream_finish_reason",
                     "buffered_usage",
+                    "reasoning_output",
+                    "thinking_semantic",
                     "structured_output",
                     "tool_call",
-                    "unknown_model_rejected",
                     "invalid_request_rejected",
+                    "speculation_health",
                     "runtime_parity",
                 )
             ],
@@ -159,17 +162,25 @@ class CampaignSupportTest(unittest.TestCase):
         rows = [
             {
                 "candidate_id": "sglang-0520-control",
-                "correctness_probes": [{"output_sha256": "a"}],
+                "correctness_probes": [
+                    {"id": "exact", "parity_mode": "exact", "output_sha256": "a"},
+                    {"id": "thinking", "parity_mode": "semantic", "output_sha256": "x"},
+                ],
                 "quality": [],
             },
             {
                 "candidate_id": "candidate-match",
-                "correctness_probes": [{"output_sha256": "a"}],
+                "correctness_probes": [
+                    {"id": "exact", "parity_mode": "exact", "output_sha256": "a"},
+                    {"id": "thinking", "parity_mode": "semantic", "output_sha256": "y"},
+                ],
                 "quality": [],
             },
             {
                 "candidate_id": "candidate-drift",
-                "correctness_probes": [{"output_sha256": "b"}],
+                "correctness_probes": [
+                    {"id": "exact", "parity_mode": "exact", "output_sha256": "b"}
+                ],
                 "quality": [],
             },
         ]
@@ -221,6 +232,25 @@ class CampaignSupportTest(unittest.TestCase):
         self.assertEqual(merged['sglang:spec_accept_length'], 3.6)
         self.assertEqual(merged['sglang:prompt_tokens_total{model="qwen"}'], 140)
         self.assertEqual(merged['sglang:ttft_seconds_bucket{le="1"}'], 11)
+
+    def test_speculation_health_normalizes_sglang_and_vllm(self):
+        sglang = speculation_health(
+            "native_mtp",
+            {"sglang:spec_accept_length": 3.1, "sglang:spec_accept_rate": 0.72},
+        )
+        self.assertTrue(sglang["passed"])
+        self.assertEqual(sglang["accept_length"], 3.1)
+        vllm = speculation_health(
+            "native_mtp",
+            {
+                "vllm:spec_decode_num_accepted_tokens_total": 78_467,
+                "vllm:spec_decode_num_draft_tokens_total": 111_678,
+                "vllm:spec_decode_num_drafts_total": 37_226,
+            },
+        )
+        self.assertTrue(vllm["passed"])
+        self.assertAlmostEqual(vllm["accept_length"], 78_467 / 37_226)
+        self.assertAlmostEqual(vllm["accept_rate"], 78_467 / 111_678)
 
     def test_profile_and_kernel_gate_use_measured_device_time(self):
         trace = {

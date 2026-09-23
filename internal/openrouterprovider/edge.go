@@ -148,6 +148,7 @@ func (e *Edge) completions(w http.ResponseWriter, r *http.Request) {
 		writeProviderError(w, http.StatusNotFound, "Unknown model", "invalid_request_error")
 		return
 	}
+	translateReasoningRequest(payload)
 	select {
 	case e.semaphore <- struct{}{}:
 		defer func() { <-e.semaphore }()
@@ -207,6 +208,47 @@ func (e *Edge) completions(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+}
+
+// translateReasoningRequest maps OpenRouter's provider-neutral reasoning
+// controls onto the Qwen chat-template contract understood by the serving
+// runtime. OpenRouter-only controls are removed so strict OpenAI-compatible
+// runtimes do not reject an otherwise valid request.
+func translateReasoningRequest(payload map[string]any) {
+	enabled, configured := false, false
+	if effort, ok := payload["reasoning_effort"].(string); ok {
+		enabled, configured = effort != "" && effort != "none", true
+	}
+	if include, ok := payload["include_reasoning"].(bool); ok {
+		enabled, configured = include, true
+	}
+	if reasoning, exists := payload["reasoning"]; exists {
+		switch value := reasoning.(type) {
+		case bool:
+			enabled, configured = value, true
+		case map[string]any:
+			if explicit, ok := value["enabled"].(bool); ok {
+				enabled, configured = explicit, true
+			} else if effort, ok := value["effort"].(string); ok {
+				enabled, configured = effort != "" && effort != "none", true
+			} else {
+				enabled, configured = true, true
+			}
+		}
+	}
+	delete(payload, "reasoning")
+	delete(payload, "include_reasoning")
+	delete(payload, "reasoning_effort")
+	if !configured {
+		return
+	}
+	kwargs, _ := payload["chat_template_kwargs"].(map[string]any)
+	if kwargs == nil {
+		kwargs = map[string]any{}
+	}
+	kwargs["enable_thinking"] = enabled
+	kwargs["preserve_thinking"] = enabled
+	payload["chat_template_kwargs"] = kwargs
 }
 
 type streamRead struct {
