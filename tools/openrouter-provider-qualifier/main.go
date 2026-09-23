@@ -246,7 +246,7 @@ func (q qualifier) stream(ctx context.Context) (streamResult, error) {
 			if choice["finish_reason"] != nil {
 				result.SawFinishReason = true
 			}
-			if delta, ok := choice["delta"].(map[string]any); ok && fmt.Sprint(delta["content"]) != "<nil>" && fmt.Sprint(delta["content"]) != "" && firstContent.IsZero() {
+			if delta, ok := choice["delta"].(map[string]any); ok && deltaHasOutput(delta) && firstContent.IsZero() {
 				firstContent = time.Now()
 			}
 		}
@@ -255,6 +255,15 @@ func (q qualifier) stream(ctx context.Context) (streamResult, error) {
 		result.TTFTMilliseconds = float64(firstContent.Sub(started).Microseconds()) / 1000
 	}
 	return result, scanner.Err()
+}
+
+func deltaHasOutput(delta map[string]any) bool {
+	for _, key := range []string{"content", "reasoning", "reasoning_content"} {
+		if value, exists := delta[key]; exists && value != nil && strings.TrimSpace(fmt.Sprint(value)) != "" {
+			return true
+		}
+	}
+	return len(slice(delta["tool_calls"])) > 0
 }
 
 func (q qualifier) load(ctx context.Context, requests, concurrency int) map[string]any {

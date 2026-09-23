@@ -4,11 +4,13 @@ Date: 2026-09-23
 
 ## Decision
 
-Proceed to an exact-target canary with this bounded offer:
+The exact-target canary passed. Proceed to supplier qualification and the
+production soak with this bounded offer:
 
 - model: `Qwen/Qwen3.8-27B-FP8@017b9c7af6b5689d5dd426a76e0bc077eb5ca20a`;
 - runtime: SGLang 0.5.20;
-- target: one H200 for canary qualification;
+- target: one H100 for the first public canary, with H200 retained as a
+  separately qualified higher-throughput candidate;
 - recipe: FP8 weights and KV cache, bounded CUDA graphs, NEXTN/MTP with three
   speculative steps and four draft tokens, and the runtime-selected DeepGEMM
   FP8 path;
@@ -22,6 +24,41 @@ Keep `is_ready: false` until the exact deployment passes the external provider
 qualifier, a 24-hour soak, usage reconciliation, overload/recovery tests, and
 an OpenRouter test canary. Modal results are screening evidence, not a hosted
 provider claim.
+
+## Exact H100 provider canary
+
+An externally reachable RunPod Secure H100 SXM canary passed the provider
+qualifier on 2026-09-23 using the immutable image
+`ghcr.io/infercrane/qwen38-openrouter@sha256:ff70583b16ce9d2bddbf7d258be3146a0fd2dcd3a6c1a700d3ba9cc238e32f7c`.
+The model artifact was the pinned revision above, copied from the verified
+persistent artifact volume to node-local storage before SGLang startup.
+
+| External measurement | Result |
+|---|---:|
+| Stream TTFT | 166 ms |
+| Bounded-load latency p50 | 644 ms |
+| Bounded-load latency p95 | 829 ms |
+| Load requests | 64/64 HTTP 200 |
+| Server or unexpected errors | 0 |
+
+All twelve gates passed: model discovery, buffered usage, streaming usage and
+finish semantics, structured output, forced tools, reasoning output, unknown
+model rejection, malformed request rejection, bounded load, and post-load
+recovery. The receipt is
+`docs/testing/evidence/qwen38-openrouter-runpod-h100-2026-09-23.json`.
+
+This qualifies API compatibility and a bounded H100 load shape. It is not a
+production or OpenRouter leaderboard result. A 24-hour soak, the long-context
+boundary, durable usage reconciliation, provider onboarding, and OpenRouter's
+own network measurements remain open.
+
+Cold startup exposed two release issues. SGLang spent approximately 200
+seconds compiling and capturing the first prefill graph, so the exact compiled
+kernel and graph cache must be prepared before production traffic. The RunPod
+network volume also did not preserve the owner-only mode required by the
+content-free receipt recorder; the canary used an owner-only local receipt
+path. Production needs a durable encrypted receipt collector or a filesystem
+that preserves the fail-closed POSIX permission contract.
 
 ## Why this recipe
 
@@ -179,7 +216,7 @@ Backend evidence:
 1. Build and publish the immutable candidate image.
 2. Prepare the exact model revision on a persistent target volume and verify
    every file hash before startup.
-3. Deploy one regional H200 endpoint behind HTTPS using the provider edge.
+3. Deploy one regional H100 endpoint behind HTTPS using the provider edge.
 4. Run the external qualifier for `/models`, streaming, usage, tools,
    structured output, invalid requests, bounded overload, recovery, and
    cleanup.
@@ -194,13 +231,12 @@ Backend evidence:
     paid utilization with this decision; change price or capacity from measured
     production data, not the screening projection.
 
-The first exact-target canary image,
+The first rejected exact-target canary image,
 `ghcr.io/infercrane/qwen38-openrouter@sha256:4fccddbde2ae93e66e83813e1b916448a82de6e530e9d2028b5d3061a7960c42`,
 was rejected before traffic. Its startup script selected the base system Python
 instead of the Python environment shipped by the pinned SGLang image, so model
 artifact preparation could not import `huggingface_hub`. The replacement image
-must pass the dependency smoke check and hosted canary before becoming a launch
-digest.
+passed the dependency smoke check and exact hosted canary recorded above.
 
 Multimodal input, 262K/1M context, 32K output, prompt-cache pricing, and
 multi-replica availability are follow-on qualification lanes. They are not

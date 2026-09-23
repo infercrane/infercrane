@@ -1,0 +1,85 @@
+{
+  "schema_version": "infercrane.dev/openrouter-provider-qualification/v1",
+  "created_at": "2026-09-23T09:55:34.227387Z",
+  "endpoint": "https://fpn98cqwtfacgk-8080.proxy.runpod.net",
+  "model": "qwen/qwen3.8-27b",
+  "gates": [
+    {
+      "name": "provider_models_schema_2_4",
+      "passed": true,
+      "detail": "HTTP 200"
+    },
+    {
+      "name": "buffered_usage_and_finish",
+      "passed": true,
+      "detail": "HTTP 200"
+    },
+    {
+      "name": "stream_done",
+      "passed": true,
+      "detail": "HTTP 200"
+    },
+    {
+      "name": "stream_finish_reason",
+      "passed": true
+    },
+    {
+      "name": "stream_usage",
+      "passed": true
+    },
+    {
+      "name": "structured_output",
+      "passed": true,
+      "detail": "HTTP 200"
+    },
+    {
+      "name": "forced_tool_call",
+      "passed": true,
+      "detail": "HTTP 200"
+    },
+    {
+      "name": "reasoning_output",
+      "passed": true,
+      "detail": "HTTP 200"
+    },
+    {
+      "name": "unknown_model_rejected",
+      "passed": true,
+      "detail": "HTTP 404"
+    },
+    {
+      "name": "malformed_json_rejected",
+      "passed": true,
+      "detail": "HTTP 400"
+    },
+    {
+      "name": "bounded_load_no_server_errors",
+      "passed": true
+    },
+    {
+      "name": "post_load_recovery",
+      "passed": true,
+      "detail": "HTTP 200"
+    }
+  ],
+  "stream": {
+    "status": 200,
+    "ttft_ms": 166.164,
+    "saw_done": true,
+    "saw_finish_reason": true,
+    "prompt_tokens": 56,
+    "completion_tokens": 16
+  },
+  "load": {
+    "concurrency": 12,
+    "latency_p50_ms": 643.719,
+    "latency_p95_ms": 828.892,
+    "other_statuses": 0,
+    "requests": 64,
+    "server_errors": 0,
+    "status_counts": {
+      "200": 64
+    }
+  },
+  "passed": true
+}
