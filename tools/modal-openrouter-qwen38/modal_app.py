@@ -84,6 +84,7 @@ SCREENING_REQUESTS_PER_LANE = 12
 MODULE_PATH = Path(__file__).resolve()
 ROOT = MODULE_PATH.parents[2] if len(MODULE_PATH.parents) > 2 else Path.cwd()
 SUPPORT = MODULE_PATH.with_name("campaign_support.py")
+ADAPTIVE_SPEC_CONFIG = MODULE_PATH.with_name("adaptive_spec_h200.json")
 GDN_PRECISION_PATCH = ROOT / "deploy/openrouter/qwen38-sglang-0520/patch_gdn_precision.py"
 
 app = modal.App(APP_NAME)
@@ -119,6 +120,11 @@ if GDN_PRECISION_PATCH.exists():
     )
 if SUPPORT.exists():
     image = image.add_local_file(SUPPORT, "/opt/infercrane/campaign_support.py")
+if ADAPTIVE_SPEC_CONFIG.exists():
+    image = image.add_local_file(
+        ADAPTIVE_SPEC_CONFIG,
+        "/opt/infercrane/adaptive_spec_h200.json",
+    )
 vllm_image = (
     # Modal injects its worker interpreter at /usr/local. Keep vLLM's pinned
     # /opt/venv packages visible to that same Python 3.12 ABI rather than
@@ -379,6 +385,49 @@ CANDIDATES: dict[str, dict[str, Any]] = {
             "public-decode-saturation",
             "agent-prefix-reuse",
             "public-context-boundary-262k",
+        ],
+    },
+    "sglang-0520-nextn-adaptive-bounded-graphs": {
+        "runtime_id": "sglang-0.5.20-nextn-adaptive-bounded-graphs",
+        "args": [
+            "--speculative-algorithm",
+            "NEXTN",
+            # Start from the current winner. SGLang resolves NEXTN to EAGLE
+            # before enabling its acceptance- and batch-aware adaptive policy.
+            "--speculative-num-steps",
+            "3",
+            "--speculative-eagle-topk",
+            "1",
+            "--speculative-num-draft-tokens",
+            "4",
+            "--speculative-adaptive",
+            "--speculative-adaptive-config",
+            "/opt/infercrane/adaptive_spec_h200.json",
+            "--cuda-graph-bs-decode",
+            "1",
+            "2",
+            "4",
+            "8",
+            "12",
+            "16",
+            "24",
+            "32",
+            "33",
+            "--cuda-graph-bs-prefill",
+            "256",
+            "512",
+            "1024",
+            "2048",
+            "4096",
+            "8192",
+        ],
+        "class": "native_mtp_adaptive_bounded_graph_capture",
+        "workloads": [
+            "public-interactive",
+            "public-long-prefill",
+            "public-decode-heavy",
+            "public-decode-saturation",
+            "agent-prefix-reuse",
         ],
     },
     "sglang-0520-dflash2-k8-bounded-graphs": {
@@ -1512,27 +1561,54 @@ async def _capture_runtime_profiles(
     timeout = httpx.Timeout(1800, connect=30)
     captures = {}
     async with httpx.AsyncClient(timeout=timeout) as client:
-        cases = {
-            "prefill": {
-                **workload,
-                "output_tokens": 1,
-                "slo": {"max_ttft_ms": 1e12, "max_itl_ms": 1e12},
-            },
-            "decode": {
-                **workload,
-                "input_tokens": min(256, int(workload["input_tokens"])),
-                "output_tokens": max(128, min(512, int(workload["output_tokens"]))),
-                "slo": {"max_ttft_ms": 1e12, "max_itl_ms": 1e12},
-            },
+        max_workload_concurrency = max(int(value) for value in workload["concurrency_lanes"])
+        cases: dict[str, tuple[dict[str, Any], int]] = {
+            "prefill": (
+                {
+                    **workload,
+                    "output_tokens": 1,
+                    "slo": {"max_ttft_ms": 1e12, "max_itl_ms": 1e12},
+                },
+                1,
+            ),
+            "decode": (
+                {
+                    **workload,
+                    "input_tokens": min(256, int(workload["input_tokens"])),
+                    "output_tokens": max(128, min(512, int(workload["output_tokens"]))),
+                    "slo": {"max_ttft_ms": 1e12, "max_itl_ms": 1e12},
+                },
+                1,
+            ),
         }
-        for index, (stage, profile_workload) in enumerate(cases.items()):
+        if max_workload_concurrency > 1:
+            # A c1 trace cannot explain the production lane where batching,
+            # verification width, GEMM shapes, and scheduler pressure differ.
+            # Bound the capture at c16 to keep trace size and GPU cost finite.
+            cases["decode_saturation"] = (
+                {
+                    **workload,
+                    "input_tokens": min(256, int(workload["input_tokens"])),
+                    "output_tokens": max(128, min(256, int(workload["output_tokens"]))),
+                    "slo": {"max_ttft_ms": 1e12, "max_itl_ms": 1e12},
+                },
+                min(16, max_workload_concurrency),
+            )
+        for index, (stage, (profile_workload, concurrency)) in enumerate(cases.items()):
             stage_dir = output_dir / stage
             stage_dir.mkdir(parents=True, exist_ok=False)
             warmups = _workload_requests(
-                tokenizer, profile_workload, 2, variant_offset=7_000_000 + index * 100
+                tokenizer,
+                profile_workload,
+                max(2, concurrency),
+                variant_offset=7_000_000 + index * 100,
             )
-            for request in warmups:
-                await _one_request(client, request, profile_workload, 1)
+            await asyncio.gather(
+                *(
+                    _one_request(client, request, profile_workload, concurrency)
+                    for request in warmups
+                )
+            )
             flush = await client.post(f"http://127.0.0.1:{PORT}/flush_cache")
             flush.raise_for_status()
             start = await client.post(
@@ -1547,10 +1623,18 @@ async def _capture_runtime_profiles(
                 },
             )
             start.raise_for_status()
-            request = _workload_requests(
-                tokenizer, profile_workload, 1, variant_offset=7_100_000 + index
-            )[0]
-            sample = await _one_request(client, request, profile_workload, 1)
+            requests = _workload_requests(
+                tokenizer,
+                profile_workload,
+                concurrency,
+                variant_offset=7_100_000 + index * 100,
+            )
+            samples = await asyncio.gather(
+                *(
+                    _one_request(client, request, profile_workload, concurrency)
+                    for request in requests
+                )
+            )
             stop = await client.post(f"http://127.0.0.1:{PORT}/stop_profile")
             stop.raise_for_status()
             trace_paths = sorted(
@@ -1563,7 +1647,9 @@ async def _capture_runtime_profiles(
             # paths/digests in case the runtime also writes an auxiliary trace.
             primary = max(summaries, key=lambda row: row["total_gpu_kernel_time_us"])
             captures[stage] = {
-                "request": sample,
+                "concurrency": concurrency,
+                "request": samples[0],
+                "requests": samples,
                 "profile": primary,
                 "custom_kernel_gate": custom_kernel_gate(primary),
                 "artifacts": [
@@ -1599,6 +1685,7 @@ def preflight() -> dict[str, Any]:
         "--speculative-algorithm",
         "--speculative-num-steps",
         "--speculative-num-draft-tokens",
+        "--speculative-adaptive",
         "--schedule-policy",
         "--context-length",
         "--chunked-prefill-size",
