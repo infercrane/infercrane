@@ -229,6 +229,7 @@ func TestGatewayMarketplaceChannelsUseScopedCredentialsPoliciesAndReceipts(t *te
 	}{
 		{channel: ChannelRequesty, credential: "requesty-secret", inputPrice: 0.11, outputPrice: 2.30, costNanoUSD: 7_450},
 		{channel: ChannelVercel, credential: "vercel-secret", inputPrice: 0.12, outputPrice: 2.40, costNanoUSD: 7_800},
+		{channel: ChannelOpenCode, credential: "opencode-secret", inputPrice: 0.13, outputPrice: 2.50, costNanoUSD: 8_150},
 		{channel: ChannelKilo, credential: "kilo-secret", inputPrice: 0.10, outputPrice: 2.20, costNanoUSD: 7_100},
 	} {
 		t.Run(test.channel, func(t *testing.T) {
