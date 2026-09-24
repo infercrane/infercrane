@@ -86,6 +86,30 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  ai-sdk-provider:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: sdk/ai-sdk-provider/package-lock.json
+      - name: Use npm 11
+        run: npm install --global npm@11.6.4
+      - run: npm ci --no-audit --no-fund
+        working-directory: sdk/ai-sdk-provider
+      - run: npm run check
+        working-directory: sdk/ai-sdk-provider
+      - run: npm test
+        working-directory: sdk/ai-sdk-provider
+      - run: npm run build
+        working-directory: sdk/ai-sdk-provider
+      - run: npm pack --dry-run
+        working-directory: sdk/ai-sdk-provider
+      - run: npm audit --omit=dev
+        working-directory: sdk/ai-sdk-provider
+
   developer-environment-shard:
     name: developer-environment / ${{ matrix.shard }}
     runs-on: ubuntu-latest

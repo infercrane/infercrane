@@ -201,6 +201,7 @@
             "pages": [
               "integrations/python",
               "integrations/typescript",
+              "integrations/ai-sdk",
               "integrations/terraform",
               "integrations/github-actions"
             ]
