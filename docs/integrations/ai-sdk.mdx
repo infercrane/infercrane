@@ -1,0 +1,83 @@
+---
+title: Vercel AI SDK
+description: Use InferCrane model APIs with generateText, streamText, tools, and structured output.
+---
+
+The InferCrane provider connects the Vercel AI SDK to InferCrane's OpenAI-compatible model API.
+
+## Install
+
+```bash
+npm install ai @infercrane/ai-sdk-provider
+```
+
+Configure the API key in a trusted server environment:
+
+```bash
+export INFERCRANE_API_KEY=your_api_key
+```
+
+## Stream text
+
+```ts
+import {infercrane} from '@infercrane/ai-sdk-provider';
+import {streamText} from 'ai';
+
+const result = streamText({
+  model: infercrane('qwen/qwen3.8-27b'),
+  prompt: 'Explain prefix caching in three sentences.',
+});
+
+for await (const text of result.textStream) {
+  process.stdout.write(text);
+}
+```
+
+The adapter includes final token usage in streaming requests so applications can reconcile usage with InferCrane receipts.
+
+## Control reasoning effort
+
+Qwen3.8 supports `none`, `low`, `medium`, and `xhigh` reasoning effort:
+
+```ts
+import {infercrane} from '@infercrane/ai-sdk-provider';
+import {generateText} from 'ai';
+
+const result = await generateText({
+  model: infercrane('qwen/qwen3.8-27b'),
+  prompt: 'Review this rollout plan.',
+  providerOptions: {
+    infercrane: {reasoningEffort: 'low'},
+  },
+});
+```
+
+## Connect a private endpoint
+
+```ts
+import {createInferCrane} from '@infercrane/ai-sdk-provider';
+
+const infercrane = createInferCrane({
+  apiKey: process.env.INFERCRANE_API_KEY,
+  baseURL: process.env.INFERCRANE_BASE_URL,
+});
+```
+
+Use this form for a private canary, a dedicated deployment, or a regional InferCrane endpoint. Keep the credential in server code and never expose it in a browser bundle.
+
+## Direct compatibility without the package
+
+The standard AI SDK OpenAI-compatible adapter can call the same endpoint:
+
+```ts
+import {createOpenAICompatible} from '@ai-sdk/openai-compatible';
+
+const infercrane = createOpenAICompatible({
+  name: 'infercrane',
+  apiKey: process.env.INFERCRANE_API_KEY,
+  baseURL: 'https://provider.infercrane.com/v1',
+  includeUsage: true,
+});
+```
+
+The dedicated package provides the stable default endpoint, model identifiers, structured-output declaration, and InferCrane environment conventions.
