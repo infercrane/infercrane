@@ -81,6 +81,27 @@ describe('createInferCrane', () => {
     );
   });
 
+  it('normalizes a base URL with a long trailing slash sequence in linear time', async () => {
+    let requestURL = '';
+    const provider = createInferCrane({
+      apiKey: 'test-secret',
+      baseURL: `https://canary.infercrane.test/v1${'/'.repeat(100_000)}`,
+      fetch: async input => {
+        requestURL = input instanceof Request ? input.url : String(input);
+        return Response.json(completion);
+      },
+    });
+
+    await generateText({
+      model: provider('qwen/qwen3.8-27b'),
+      prompt: 'hello',
+    });
+
+    expect(requestURL).toBe(
+      'https://canary.infercrane.test/v1/chat/completions',
+    );
+  });
+
   it('forwards native Qwen reasoning effort controls', async () => {
     let requestBody: Record<string, unknown> | undefined;
     const provider = createInferCrane({
