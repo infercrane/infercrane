@@ -33,6 +33,7 @@ func main() {
 	requestyKeyFile := flag.String("requesty-api-key-file", os.Getenv("INFERCRANE_REQUESTY_API_KEY_FILE"), "optional owner-only Requesty provider API key file")
 	vercelKeyFile := flag.String("vercel-api-key-file", os.Getenv("INFERCRANE_VERCEL_API_KEY_FILE"), "optional owner-only Vercel provider API key file")
 	openCodeKeyFile := flag.String("opencode-api-key-file", os.Getenv("INFERCRANE_OPENCODE_API_KEY_FILE"), "optional owner-only OpenCode Zen provider API key file")
+	kiloKeyFile := flag.String("kilo-api-key-file", os.Getenv("INFERCRANE_KILO_API_KEY_FILE"), "optional owner-only Kilo Gateway provider API key file")
 	maxInFlight := flag.Int("max-in-flight", 8, "maximum accepted in-flight requests; excess receives HTTP 429")
 	minInFlight := flag.Int("min-in-flight", 0, "minimum adaptive admission limit; zero keeps a fixed maximum")
 	initialInFlight := flag.Int("initial-in-flight", 0, "initial adaptive admission limit; zero starts at the maximum")
@@ -47,6 +48,7 @@ func main() {
 	requestyMaxInFlight := flag.Int("requesty-max-in-flight", 2, "maximum concurrent Requesty requests; zero shares the global limit")
 	vercelMaxInFlight := flag.Int("vercel-max-in-flight", 2, "maximum concurrent Vercel requests; zero shares the global limit")
 	openCodeMaxInFlight := flag.Int("opencode-max-in-flight", 2, "maximum concurrent OpenCode Zen requests; zero shares the global limit")
+	kiloMaxInFlight := flag.Int("kilo-max-in-flight", 2, "maximum concurrent Kilo Gateway requests; zero shares the global limit")
 	huggingFaceInputPrice := flag.Float64("huggingface-input-price-per-million", 0, "Hugging Face input price in USD per million; zero inherits the catalog price")
 	huggingFaceOutputPrice := flag.Float64("huggingface-output-price-per-million", 0, "Hugging Face output price in USD per million; zero inherits the catalog price")
 	requestyInputPrice := flag.Float64("requesty-input-price-per-million", 0, "Requesty input price in USD per million; zero inherits the catalog price")
@@ -55,6 +57,8 @@ func main() {
 	vercelOutputPrice := flag.Float64("vercel-output-price-per-million", 0, "Vercel output price in USD per million; zero inherits the catalog price")
 	openCodeInputPrice := flag.Float64("opencode-input-price-per-million", 0, "OpenCode Zen input price in USD per million; zero inherits the catalog price")
 	openCodeOutputPrice := flag.Float64("opencode-output-price-per-million", 0, "OpenCode Zen output price in USD per million; zero inherits the catalog price")
+	kiloInputPrice := flag.Float64("kilo-input-price-per-million", 0, "Kilo Gateway input price in USD per million; zero inherits the catalog price")
+	kiloOutputPrice := flag.Float64("kilo-output-price-per-million", 0, "Kilo Gateway output price in USD per million; zero inherits the catalog price")
 	flag.Parse()
 	if *catalogFile == "" {
 		fatal(errors.New("--catalog is required"))
@@ -94,6 +98,7 @@ func main() {
 		{openrouterprovider.ChannelRequesty, *requestyKeyFile, "INFERCRANE_REQUESTY_API_KEY"},
 		{openrouterprovider.ChannelVercel, *vercelKeyFile, "INFERCRANE_VERCEL_API_KEY"},
 		{openrouterprovider.ChannelOpenCode, *openCodeKeyFile, "INFERCRANE_OPENCODE_API_KEY"},
+		{openrouterprovider.ChannelKilo, *kiloKeyFile, "INFERCRANE_KILO_API_KEY"},
 	} {
 		optionalKey, present, credentialErr := readOptionalSecretOrEnvironment(optional.path, optional.environmentName)
 		if credentialErr != nil {
@@ -138,6 +143,7 @@ func main() {
 			openrouterprovider.ChannelRequesty:    {MaxInFlight: *requestyMaxInFlight, InputPricePerMillionUSD: *requestyInputPrice, OutputPricePerMillionUSD: *requestyOutputPrice},
 			openrouterprovider.ChannelVercel:      {MaxInFlight: *vercelMaxInFlight, InputPricePerMillionUSD: *vercelInputPrice, OutputPricePerMillionUSD: *vercelOutputPrice},
 			openrouterprovider.ChannelOpenCode:    {MaxInFlight: *openCodeMaxInFlight, InputPricePerMillionUSD: *openCodeInputPrice, OutputPricePerMillionUSD: *openCodeOutputPrice},
+			openrouterprovider.ChannelKilo:        {MaxInFlight: *kiloMaxInFlight, InputPricePerMillionUSD: *kiloInputPrice, OutputPricePerMillionUSD: *kiloOutputPrice},
 		},
 		MaxInFlight: *maxInFlight, MinInFlight: *minInFlight,
 		InitialInFlight: *initialInFlight, AdmissionWindow: *admissionWindow,

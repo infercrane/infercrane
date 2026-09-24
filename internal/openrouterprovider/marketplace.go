@@ -17,6 +17,7 @@ const (
 	ChannelRequesty    = "requesty"
 	ChannelVercel      = "vercel"
 	ChannelOpenCode    = "opencode"
+	ChannelKilo        = "kilo"
 )
 
 type ChannelCredential struct {
@@ -45,7 +46,7 @@ func identityFromRequest(request *http.Request) requestIdentity {
 
 func supportedChannel(channel string) bool {
 	switch channel {
-	case ChannelOpenRouter, ChannelHuggingFace, ChannelRequesty, ChannelVercel, ChannelOpenCode:
+	case ChannelOpenRouter, ChannelHuggingFace, ChannelRequesty, ChannelVercel, ChannelOpenCode, ChannelKilo:
 		return true
 	default:
 		return false
