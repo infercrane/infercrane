@@ -1,0 +1,136 @@
+---
+title: Model API quickstart
+description: Call InferCrane's workload qualified open weight models through one OpenAI compatible API.
+sidebarTitle: Model APIs
+---
+
+# Call an InferCrane model
+
+InferCrane Model APIs expose qualified open weight models through the OpenAI chat completions
+contract. Your application keeps one client while InferCrane operates the serving configuration,
+capacity, and release path behind it.
+
+<Card title="Create an API key" icon="key" href="https://console.infercrane.com/model-apis">
+  Sign in to the InferCrane console, choose a model, and create a scoped API key.
+</Card>
+
+## Send your first request
+
+Set the key in your shell. Keep it on the server and never commit it to source control.
+
+```bash
+export INFERCRANE_API_KEY="your_api_key"
+```
+
+The API is compatible with the official OpenAI clients. Change the base URL and model name; the
+rest of the request shape stays familiar.
+
+<CodeGroup>
+```bash cURL
+curl -fsS https://api.infercrane.com/v1/chat/completions \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "qwen3.8-27b",
+    "messages": [
+      {"role": "user", "content": "Write a safe retry helper in TypeScript."}
+    ],
+    "stream": false
+  }'
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="https://api.infercrane.com/v1",
+    api_key=os.environ["INFERCRANE_API_KEY"],
+)
+
+response = client.chat.completions.create(
+    model="qwen3.8-27b",
+    messages=[
+        {"role": "user", "content": "Write a safe retry helper in Python."}
+    ],
+)
+
+print(response.choices[0].message.content)
+```
+
+```typescript TypeScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "https://api.infercrane.com/v1",
+  apiKey: process.env.INFERCRANE_API_KEY,
+});
+
+const response = await client.chat.completions.create({
+  model: "qwen3.8-27b",
+  messages: [
+    { role: "user", content: "Write a safe retry helper in TypeScript." },
+  ],
+});
+
+console.log(response.choices[0].message.content);
+```
+</CodeGroup>
+
+<Note>
+Install the official Python client with `python -m pip install openai`. For TypeScript, install it
+with `npm install openai`.
+</Note>
+
+## Discover available models
+
+Availability and prices can change as capacity and qualification evidence change. Read the live
+catalog instead of copying a stale model list into your application.
+
+```bash
+curl -fsS https://api.infercrane.com/v1/models \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY"
+```
+
+The first qualified product is `qwen3.8-27b` with:
+
+| Contract | Qualified boundary |
+| --- | --- |
+| Input and output | Text |
+| Context window | 32,768 tokens |
+| Maximum generated output | 2,048 tokens |
+| API | Chat completions, streaming |
+| Application behavior | Tool calling, structured output, reasoning |
+
+These are serving limits for the current InferCrane release, not the maximum capabilities stated by
+the base model publisher.
+
+## Stream tokens
+
+Set `stream: true` and consume standard server sent events. The final chunk includes normal OpenAI
+compatible completion metadata.
+
+```python
+stream = client.chat.completions.create(
+    model="qwen3.8-27b",
+    messages=[{"role": "user", "content": "Explain prefix caching."}],
+    stream=True,
+)
+
+for chunk in stream:
+    text = chunk.choices[0].delta.content
+    if text:
+        print(text, end="", flush=True)
+```
+
+## Handle capacity safely
+
+InferCrane returns `429 Too Many Requests` before an overloaded request enters an unbounded queue.
+Retry with exponential backoff and jitter. Respect `Retry-After` when it is present, and reuse your
+application request ID when retrying an operation that must be idempotent.
+
+<Info>
+Inference prompts and responses are not retained for model training. See the
+[privacy policy](https://infercrane.com/privacy) for the current service and subprocessors boundary.
+</Info>
