@@ -45,6 +45,25 @@ func TestBuildWorksForAnyPinnedModelIdentity(t *testing.T) {
 	}
 }
 
+func TestBuildPlansHybridRecurrentOperatorsWithoutModelNameBranches(t *testing.T) {
+	request := fixtureRequest()
+	request.Model.Repository = "example/unseen-hybrid-architecture"
+	request.Profile.Hotspots = []Hotspot{
+		{ID: "recurrent", Name: "delta_state_update", Family: LinearRecurrence, DeviceTimeFraction: .18, Shapes: []string{"12x48x128x128"}, DTypes: []string{"bf16", "fp32"}},
+		{ID: "commit", Name: "recurrent_state_commit", Family: StateCommit, DeviceTimeFraction: .08, Shapes: []string{"48x12x4x48x128x128"}, DTypes: []string{"fp32"}},
+	}
+	plan, err := Build(request)
+	if err != nil || len(plan.Candidates) != 2 {
+		t.Fatalf("plan=%+v err=%v", plan, err)
+	}
+	if plan.Candidates[0].OperatorFamily != LinearRecurrence || plan.Candidates[1].OperatorFamily != StateCommit {
+		t.Fatalf("unexpected recurrent plan: %+v", plan.Candidates)
+	}
+	if plan.Candidates[0].Template != "fused-linear-recurrence-update" || plan.Candidates[1].Template != "fused-recurrent-state-commit" {
+		t.Fatalf("unexpected templates: %+v", plan.Candidates)
+	}
+}
+
 func TestBuildSelectsVendorNativeCompilerFamilies(t *testing.T) {
 	tests := []struct {
 		vendor, accelerator, compiler string

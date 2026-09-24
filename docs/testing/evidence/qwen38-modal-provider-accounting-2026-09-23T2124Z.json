@@ -1,0 +1,33 @@
+{
+  "schema_version": "infercrane.dev/openrouter-accounting-reconciliation/v1",
+  "created_at": "2026-09-23T21:24:00Z",
+  "endpoint_kind": "hidden_modal_h200_canary",
+  "window_started_at": "2026-09-23T21:16:24Z",
+  "model": "qwen/qwen3.8-27b",
+  "runtime_model": "Qwen/Qwen3.8-27B-FP8",
+  "runtime_model_revision": "017b9c7af6b5689d5dd426a76e0bc077eb5ca20a",
+  "edge_counters": {
+    "accepted_requests": 72,
+    "rejected_requests": 9,
+    "completed_requests": 72,
+    "failed_requests": 0,
+    "prompt_tokens": 135441,
+    "completion_tokens": 4233,
+    "streaming_ttft_samples": 59
+  },
+  "durable_receipts": {
+    "total": 81,
+    "accepted_requests": 72,
+    "rejected_requests": 9,
+    "failed_requests": 0,
+    "prompt_tokens": 135441,
+    "completion_tokens": 4233,
+    "streaming_ttft_samples": 59
+  },
+  "reconciled": true,
+  "notes": [
+    "Receipts are content-free and persisted on the Modal evidence volume.",
+    "The exact 32768-input and 2048-output boundary request is included in this window.",
+    "The nine HTTP 429 responses were pre-admission capacity rejections and incurred zero runtime tokens."
+  ]
+}

@@ -28,6 +28,7 @@ import (
 	"github.com/infercrane/infercrane/internal/benchmark"
 	"github.com/infercrane/infercrane/internal/burstguard"
 	"github.com/infercrane/infercrane/internal/contextpassport"
+	"github.com/infercrane/infercrane/internal/continualoptimizer"
 	"github.com/infercrane/infercrane/internal/curatedrecipe"
 	"github.com/infercrane/infercrane/internal/decision"
 	"github.com/infercrane/infercrane/internal/doctor"
@@ -211,6 +212,13 @@ type optimizationCampaignStore interface {
 	OptimizationCampaigns(context.Context, string, int) ([]domain.OptimizationCampaign, error)
 	ApproveOptimizationCampaign(context.Context, string, string, string, float64, time.Time) (domain.OptimizationCampaign, error)
 	CancelOptimizationCampaign(context.Context, string, string) (domain.OptimizationCampaign, error)
+}
+type continualOptimizationStore interface {
+	SetContinualOptimizationPolicy(context.Context, string, string, continualoptimizer.Policy) (domain.ContinualOptimizationPolicyRecord, error)
+	ContinualOptimizationPolicy(context.Context, string, string) (domain.ContinualOptimizationPolicyRecord, error)
+	ContinualOptimizationState(context.Context, string, string) (domain.ContinualOptimizationState, error)
+	RecordContinualOptimizationDecision(context.Context, string, string, continualoptimizer.Workload, continualoptimizer.Decision) (domain.ContinualOptimizationDecisionRecord, bool, error)
+	ContinualOptimizationDecisions(context.Context, string, string, int) ([]domain.ContinualOptimizationDecisionRecord, error)
 }
 type optimizedArtifactStore interface {
 	CreateOptimizedArtifact(context.Context, string, string, optimizedartifact.Plan) (domain.OptimizedArtifact, bool, error)
@@ -440,6 +448,8 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/admin/model-api/plans", a.auth(authz.ManageModelAPI, a.compileModelAPISupplyPlan))
 	mux.HandleFunc("POST /api/v1/admin/model-api/publications", a.auth(authz.ManageModelAPI, a.publishModelAPIOperatorRoute))
 	mux.HandleFunc("POST /api/v1/admin/model-api/entitlements", a.auth(authz.ManageModelAPI, a.publishModelAPIEntitlement))
+	mux.HandleFunc("POST /api/v1/admin/marketplace/receipts", a.auth(authz.ManageModelAPI, a.recordMarketplaceReceipt))
+	mux.HandleFunc("POST /api/v1/admin/marketplace/billing/requests", a.auth(authz.ManageModelAPI, a.marketplaceBillingRequests))
 	mux.HandleFunc("GET /api/v1/compute/providers", a.auth(authz.Read, a.computeProviders))
 	mux.HandleFunc("GET /api/v1/catalog/gpu-prices", a.auth(authz.Read, a.gpuPrices))
 	mux.HandleFunc("POST /api/v1/capacity/probes", a.auth(authz.Read, a.probeCapacity))
@@ -495,6 +505,10 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/optimization/campaigns/{id}/approve", a.auth(authz.Deploy, a.approveOptimizationCampaign))
 	mux.HandleFunc("POST /api/v1/optimization/campaigns/{id}/activate", a.auth(authz.Deploy, a.activateOptimizationCampaign))
 	mux.HandleFunc("POST /api/v1/optimization/campaigns/{id}/cancel", a.auth(authz.Deploy, a.cancelOptimizationCampaign))
+	mux.HandleFunc("GET /api/v1/deployments/{name}/continual-optimization/policy", a.auth(authz.Read, a.continualOptimizationPolicy))
+	mux.HandleFunc("PUT /api/v1/deployments/{name}/continual-optimization/policy", a.auth(authz.Deploy, a.setContinualOptimizationPolicy))
+	mux.HandleFunc("POST /api/v1/deployments/{name}/continual-optimization/evaluate", a.auth(authz.Deploy, a.evaluateContinualOptimization))
+	mux.HandleFunc("GET /api/v1/deployments/{name}/continual-optimization/decisions", a.auth(authz.Read, a.continualOptimizationDecisions))
 	mux.HandleFunc("GET /api/v1/optimized-artifacts", a.auth(authz.Read, a.optimizedArtifacts))
 	mux.HandleFunc("POST /api/v1/optimized-artifacts", a.auth(authz.Deploy, a.createOptimizedArtifact))
 	mux.HandleFunc("GET /api/v1/optimized-artifacts/{id}", a.auth(authz.Read, a.getOptimizedArtifact))
@@ -963,6 +977,286 @@ func publicWorkloadSourceView(document workloadprofile.Document) map[string]any 
 		"rows_inspected": document.Sampling.RowsInspected, "digest": document.Digest,
 		"remote_only": document.Sampling.RemoteOnly, "methodology_boundary": document.MethodologyBoundary,
 	}
+}
+
+func (a API) continualOptimizationPolicy(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(continualOptimizationStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "continual optimization storage is not configured")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	row, err := store.ContinualOptimizationPolicy(r.Context(), actor.TenantID, r.PathValue("name"))
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "continual optimization policy was not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "continual optimization policy could not be loaded")
+		return
+	}
+	writeJSON(w, http.StatusOK, continualOptimizationPolicyResponse(row))
+}
+
+func (a API) setContinualOptimizationPolicy(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(continualOptimizationStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "continual optimization storage is not configured")
+		return
+	}
+	var policy continualoptimizer.Policy
+	if !decodeMutationBody(w, r, &policy) {
+		return
+	}
+	if err := continualoptimizer.ValidatePolicy(policy); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_continual_optimization_policy", err.Error())
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	row, err := store.SetContinualOptimizationPolicy(r.Context(), actor.TenantID, r.PathValue("name"), policy)
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "deployment was not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "continual optimization policy could not be persisted")
+		return
+	}
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "continual_optimization.policy", ResourceType: "deployment", ResourceName: r.PathValue("name"), Outcome: "succeeded"})
+	writeJSON(w, http.StatusOK, continualOptimizationPolicyResponse(row))
+}
+
+type continualOptimizationEconomics struct {
+	Availability                   float64 `json:"availability"`
+	ProductiveUtilization          float64 `json:"productive_utilization"`
+	CostPerMillionOutputUSD        float64 `json:"cost_per_million_output_usd"`
+	ContributionMargin             float64 `json:"contribution_margin"`
+	QualifiedOutputTokensPerSecond float64 `json:"qualified_output_tokens_per_second"`
+}
+
+type continualOptimizationEvaluationRequest struct {
+	PublicProfile string                          `json:"public_profile,omitempty"`
+	ReplayTraceID string                          `json:"replay_trace_id,omitempty"`
+	Hypotheses    []continualoptimizer.Hypothesis `json:"hypotheses,omitempty"`
+	Economics     continualOptimizationEconomics  `json:"economics"`
+}
+
+func (a API) evaluateContinualOptimization(w http.ResponseWriter, r *http.Request) {
+	loopStore, ok := a.Store.(continualOptimizationStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "continual optimization storage is not configured")
+		return
+	}
+	var request continualOptimizationEvaluationRequest
+	if !decodeMutationBody(w, r, &request) {
+		return
+	}
+	if (strings.TrimSpace(request.PublicProfile) == "") == (strings.TrimSpace(request.ReplayTraceID) == "") {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_workload_evidence", "exactly one of public_profile or replay_trace_id is required")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	name := r.PathValue("name")
+	policyRow, err := loopStore.ContinualOptimizationPolicy(r.Context(), actor.TenantID, name)
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusConflict, "continual_optimization_policy_required", "persist a bounded continual optimization policy before evaluation")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "continual optimization policy could not be loaded")
+		return
+	}
+	var policy continualoptimizer.Policy
+	if err = json.Unmarshal([]byte(policyRow.PolicyJSON), &policy); err != nil || continualoptimizer.ValidatePolicy(policy) != nil {
+		writeError(w, http.StatusInternalServerError, "invalid_persisted_policy", "persisted continual optimization policy is invalid")
+		return
+	}
+
+	var current continualoptimizer.Workload
+	if request.PublicProfile != "" {
+		document, documentErr := workloadprofile.PublicChutesPrior()
+		if documentErr != nil {
+			writeError(w, http.StatusInternalServerError, "invalid_embedded_workload_profile", "the embedded public workload profile failed integrity validation")
+			return
+		}
+		profile, lookupErr := workloadprofile.Lookup(document, request.PublicProfile)
+		if lookupErr != nil || !performanceprofile.IsPublicPrior(profile.Name) {
+			writeError(w, http.StatusUnprocessableEntity, "public_workload_profile_not_found", "public workload profile was not found")
+			return
+		}
+		current, err = continualoptimizer.FromPublicProfile(document, profile)
+	} else {
+		intelligence, available := a.Store.(intelligenceStore)
+		if !available {
+			writeError(w, http.StatusNotImplemented, "capability_unavailable", "replay trace storage is not configured")
+			return
+		}
+		var trace domain.ReplayTrace
+		trace, err = intelligence.ReplayTrace(r.Context(), actor.TenantID, request.ReplayTraceID)
+		if err == nil && trace.DeploymentName != name {
+			err = domain.ErrNotFound
+		}
+		if err == nil {
+			current, err = continualoptimizer.FromReplayTrace(trace)
+		}
+	}
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "workload_evidence_not_found", "workload evidence was not found for this deployment")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_workload_evidence", err.Error())
+		return
+	}
+
+	var baseline *continualoptimizer.Workload
+	var lastExperiment *time.Time
+	state, stateErr := loopStore.ContinualOptimizationState(r.Context(), actor.TenantID, name)
+	if stateErr == nil {
+		lastExperiment = state.LastExperimentAt
+		if state.BaselineJSON != "" {
+			var decoded continualoptimizer.Workload
+			if json.Unmarshal([]byte(state.BaselineJSON), &decoded) != nil {
+				writeError(w, http.StatusInternalServerError, "invalid_persisted_baseline", "persisted continual optimization baseline is invalid")
+				return
+			}
+			baseline = &decoded
+		}
+	} else if !errors.Is(stateErr, domain.ErrNotFound) {
+		writeError(w, http.StatusInternalServerError, "internal", "continual optimization state could not be loaded")
+		return
+	}
+
+	service := continualoptimizer.ServiceEvidence{
+		RequestCount: current.RequestCount, Availability: request.Economics.Availability,
+		ProductiveUtilization:          request.Economics.ProductiveUtilization,
+		CostPerMillionOutputUSD:        request.Economics.CostPerMillionOutputUSD,
+		ContributionMargin:             request.Economics.ContributionMargin,
+		QualifiedOutputTokensPerSecond: request.Economics.QualifiedOutputTokensPerSecond,
+	}
+	if current.Source == continualoptimizer.SourceCustomerObserved {
+		resolved, resolveErr := a.Store.ResolveForTenant(r.Context(), actor.TenantID, name)
+		if resolveErr != nil {
+			writeError(w, http.StatusNotFound, "not_found", "deployment was not found")
+			return
+		}
+		window := current.WindowEnd.Sub(current.WindowStart)
+		stats, statsErr := a.Store.RequestStats(r.Context(), resolved.Deployment.ID, window)
+		if statsErr != nil {
+			writeError(w, http.StatusInternalServerError, "internal", "request evidence could not be loaded")
+			return
+		}
+		service.ErrorRate, service.TTFTP95MS, service.OutputTokensPerSecond = stats.ErrorRate, floatValue(stats.P95TTFTMS), stats.OutputTokensPerSecond
+	}
+
+	history, active := continualOptimizationCampaignMemory(r.Context(), a.Store, actor.TenantID, name)
+	input := continualoptimizer.Input{
+		Now: time.Now().UTC(), Policy: policy, Baseline: baseline, Current: current,
+		ActiveService: service, Hypotheses: request.Hypotheses,
+		History: history, ActiveCampaigns: active, LastExperimentAt: lastExperiment,
+	}
+	decision, err := continualoptimizer.Evaluate(input)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_continual_optimization_evaluation", err.Error())
+		return
+	}
+	recorded, created, err := loopStore.RecordContinualOptimizationDecision(r.Context(), actor.TenantID, name, current, decision)
+	if errors.Is(err, domain.ErrConflict) {
+		writeError(w, http.StatusConflict, "decision_conflict", "the same normalized evidence produced a different decision")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "continual optimization decision could not be persisted")
+		return
+	}
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "continual_optimization.evaluate", ResourceType: "deployment", ResourceName: name, Outcome: "succeeded", Payload: recorded.ID})
+	status := http.StatusOK
+	if created {
+		status = http.StatusCreated
+	}
+	writeJSON(w, status, map[string]any{
+		"decision": decision, "record_id": recorded.ID, "created": created,
+		"mutation": "decision_record_only", "campaign_execution": "use selected hypotheses to create a bounded optimization campaign",
+	})
+}
+
+func (a API) continualOptimizationDecisions(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(continualOptimizationStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "continual optimization storage is not configured")
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	rows, err := store.ContinualOptimizationDecisions(r.Context(), actor.TenantID, r.PathValue("name"), limit)
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "deployment was not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "continual optimization decisions could not be listed")
+		return
+	}
+	data := make([]json.RawMessage, 0, len(rows))
+	for _, row := range rows {
+		if json.Valid([]byte(row.DecisionJSON)) {
+			data = append(data, json.RawMessage(row.DecisionJSON))
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": data})
+}
+
+func continualOptimizationCampaignMemory(ctx context.Context, base Store, tenant, deployment string) ([]continualoptimizer.Outcome, []continualoptimizer.Active) {
+	store, ok := base.(optimizationCampaignStore)
+	if !ok {
+		return nil, nil
+	}
+	campaigns, err := store.OptimizationCampaigns(ctx, tenant, 100)
+	if err != nil {
+		return nil, nil
+	}
+	var history []continualoptimizer.Outcome
+	var active []continualoptimizer.Active
+	for _, campaign := range campaigns {
+		if campaign.Intent != optimizationcampaign.IntentEvolveEndpoint || campaign.TargetDeployment != deployment {
+			continue
+		}
+		if campaign.State == optimizationcampaign.CampaignApproved || campaign.State == optimizationcampaign.CampaignRunning || campaign.State == optimizationcampaign.CampaignRanked || campaign.State == optimizationcampaign.CampaignQualified || campaign.State == optimizationcampaign.CampaignGuardPassed {
+			active = append(active, continualoptimizer.Active{CampaignID: campaign.ID, Phase: campaign.State, Count: len(campaign.Candidates)})
+		}
+		for _, candidate := range campaign.Candidates {
+			decision := ""
+			switch candidate.State {
+			case optimizationcampaign.CandidateRejected:
+				decision = "rejected"
+			case optimizationcampaign.CandidateFailed:
+				decision = "failed"
+			case optimizationcampaign.CandidateCleaned:
+				if candidate.FailureCode != "" {
+					decision = "failed"
+				}
+			}
+			if decision != "" && len(candidate.ProposalCandidateID) == 64 {
+				history = append(history, continualoptimizer.Outcome{Fingerprint: "sha256:" + candidate.ProposalCandidateID, Decision: decision, FailureCode: candidate.FailureCode, CompletedAt: candidate.UpdatedAt})
+			}
+		}
+	}
+	return history, active
+}
+
+func continualOptimizationPolicyResponse(row domain.ContinualOptimizationPolicyRecord) map[string]any {
+	policy := json.RawMessage(row.PolicyJSON)
+	if !json.Valid(policy) {
+		policy = json.RawMessage(`{}`)
+	}
+	return map[string]any{"deployment": row.DeploymentName, "generation": row.Generation, "policy": policy, "created_at": row.CreatedAt, "updated_at": row.UpdatedAt}
+}
+
+func floatValue(value *float64) float64 {
+	if value == nil {
+		return 0
+	}
+	return *value
 }
 
 func (a API) kernelOpportunities(w http.ResponseWriter, r *http.Request) {
@@ -5333,9 +5627,10 @@ func (a API) createTenant(w http.ResponseWriter, r *http.Request) {
 func (a API) createPrincipal(w http.ResponseWriter, r *http.Request) {
 	actor := r.Context().Value(identityKey{}).(domain.Principal)
 	var request struct {
-		Name   string         `json:"name"`
-		Role   authz.Role     `json:"role"`
-		Scopes []authz.Action `json:"scopes,omitempty"`
+		TenantID string         `json:"tenant_id,omitempty"`
+		Name     string         `json:"name"`
+		Role     authz.Role     `json:"role"`
+		Scopes   []authz.Action `json:"scopes,omitempty"`
 	}
 	if !decodeMutationBody(w, r, &request) {
 		return
@@ -5347,7 +5642,15 @@ func (a API) createPrincipal(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
 		return
 	}
-	principal, token, err := a.Store.CreatePrincipalScoped(r.Context(), actor.TenantID, request.Name, request.Role, request.Scopes)
+	tenantID := actor.TenantID
+	if request.TenantID != "" && request.TenantID != actor.TenantID {
+		if actor.ID != "bootstrap" {
+			writeError(w, http.StatusForbidden, "forbidden", "only the bootstrap administrator can create a service principal for another tenant")
+			return
+		}
+		tenantID = request.TenantID
+	}
+	principal, token, err := a.Store.CreatePrincipalScoped(r.Context(), tenantID, request.Name, request.Role, request.Scopes)
 	if errors.Is(err, domain.ErrConflict) {
 		writeError(w, 409, "conflict", err.Error())
 		return

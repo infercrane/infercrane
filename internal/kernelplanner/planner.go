@@ -38,6 +38,8 @@ const (
 	AttentionPrefill OperatorFamily = "attention-prefill"
 	AttentionDecode  OperatorFamily = "attention-decode"
 	KVCache          OperatorFamily = "kv-cache"
+	LinearRecurrence OperatorFamily = "linear-recurrence"
+	StateCommit      OperatorFamily = "state-commit"
 	MoERouting       OperatorFamily = "moe-routing"
 	Sampling         OperatorFamily = "sampling"
 )
@@ -154,6 +156,8 @@ var templates = map[string]map[OperatorFamily]template{
 		AttentionPrefill: {"flash-attention-prefill", []string{"flashinfer", "triton", "cuda-cute"}},
 		AttentionDecode:  {"paged-gqa-decode", []string{"flashinfer", "triton", "cuda-cute"}},
 		KVCache:          {"fused-kv-append-quantize", []string{"flashinfer", "triton"}},
+		LinearRecurrence: {"fused-linear-recurrence-update", []string{"flashinfer", "triton", "cuda-cute"}},
+		StateCommit:      {"fused-recurrent-state-commit", []string{"triton", "cuda-cute"}},
 		MoERouting:       {"fused-router-topk", []string{"flashinfer", "cutlass", "triton"}},
 		Sampling:         {"sorting-free-sampling", []string{"flashinfer", "triton"}},
 	},
@@ -164,6 +168,8 @@ var templates = map[string]map[OperatorFamily]template{
 		AttentionPrefill: {"flash-attention-prefill", []string{"aiter", "composable-kernel", "triton-rocm"}},
 		AttentionDecode:  {"paged-gqa-decode", []string{"aiter", "composable-kernel", "triton-rocm"}},
 		KVCache:          {"fused-kv-append-quantize", []string{"aiter", "triton-rocm"}},
+		LinearRecurrence: {"fused-linear-recurrence-update", []string{"aiter", "triton-rocm", "hip"}},
+		StateCommit:      {"fused-recurrent-state-commit", []string{"aiter", "triton-rocm", "hip"}},
 		MoERouting:       {"fused-router-topk", []string{"aiter", "composable-kernel", "triton-rocm"}},
 		Sampling:         {"sorting-free-sampling", []string{"triton-rocm", "hip"}},
 	},
@@ -174,6 +180,8 @@ var templates = map[string]map[OperatorFamily]template{
 		AttentionPrefill: {"flash-attention-prefill", []string{"pallas", "xla-custom-call"}},
 		AttentionDecode:  {"paged-gqa-decode", []string{"pallas", "xla-custom-call"}},
 		KVCache:          {"fused-kv-append-quantize", []string{"pallas", "xla-custom-call"}},
+		LinearRecurrence: {"fused-linear-recurrence-update", []string{"pallas", "xla-custom-call"}},
+		StateCommit:      {"fused-recurrent-state-commit", []string{"pallas", "xla-custom-call"}},
 		MoERouting:       {"fused-router-topk", []string{"pallas", "xla-custom-call"}},
 		Sampling:         {"sorting-free-sampling", []string{"pallas", "xla-custom-call"}},
 	},
@@ -184,6 +192,8 @@ var templates = map[string]map[OperatorFamily]template{
 		AttentionPrefill: {"flash-attention-prefill", []string{"nki", "neuron-compiler"}},
 		AttentionDecode:  {"paged-gqa-decode", []string{"nki", "neuron-compiler"}},
 		KVCache:          {"fused-kv-append-quantize", []string{"nki", "neuron-compiler"}},
+		LinearRecurrence: {"fused-linear-recurrence-update", []string{"nki", "neuron-compiler"}},
+		StateCommit:      {"fused-recurrent-state-commit", []string{"nki", "neuron-compiler"}},
 		MoERouting:       {"fused-router-topk", []string{"nki", "neuron-compiler"}},
 		Sampling:         {"sorting-free-sampling", []string{"nki", "neuron-compiler"}},
 	},

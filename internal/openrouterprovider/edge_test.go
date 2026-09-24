@@ -3,6 +3,7 @@ package openrouterprovider
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -25,6 +26,25 @@ func (r *memoryReceiptRecorder) Record(receipt RequestReceipt) error {
 	defer r.mu.Unlock()
 	r.receipts = append(r.receipts, receipt)
 	return nil
+}
+
+func (r *memoryReceiptRecorder) Lookup(channel string, requestIDs []string) ([]RequestCost, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	requested := make(map[string]struct{}, len(requestIDs))
+	for _, requestID := range requestIDs {
+		requested[requestID] = struct{}{}
+	}
+	result := make([]RequestCost, 0, len(requestIDs))
+	for _, receipt := range r.receipts {
+		if receipt.Channel != channel || receipt.StatusCode < 200 || receipt.StatusCode >= 400 || receipt.Outcome != "completed" {
+			continue
+		}
+		if _, found := requested[receipt.RequestID]; found {
+			result = append(result, RequestCost{RequestID: receipt.RequestID, CostNanoUSD: receipt.CostNanoUSD})
+		}
+	}
+	return result, nil
 }
 
 func (r *memoryReceiptRecorder) last(t *testing.T) RequestReceipt {
@@ -52,7 +72,7 @@ func (r *memoryReceiptRecorder) findOutcome(t *testing.T, outcome string) Reques
 
 func testCatalog() *Catalog {
 	return &Catalog{Data: []Model{{
-		SchemaVersion: "2.4", ID: "qwen/qwen3.8-27b", Name: "Qwen3.8", HuggingFaceID: "Qwen/Qwen3.8-27B-FP8", Created: 1,
+		SchemaVersion: "2.5", ID: "qwen/qwen3.8-27b", Name: "Qwen3.8", HuggingFaceID: "Qwen/Qwen3.8-27B-FP8", Created: 1,
 		InputModalities: []InputModality{{Type: "text"}}, OutputModalities: []OutputModality{{Type: "text", SupportedParameters: map[string]any{}}},
 		OpenRouter: OpenRouterIdentity{Slug: "qwen/qwen3.8-27b"},
 	}}}
@@ -135,6 +155,130 @@ func TestEdgeRecordsBufferedUsageWithoutContent(t *testing.T) {
 	}
 }
 
+func TestHuggingFaceModelsRequestIdentityAndBilling(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":3,"total_tokens":8}}`)
+	}))
+	defer upstream.Close()
+	catalog := validCatalog()
+	catalog.Data[0].InputModalities[0].SupportedInputs = map[string]any{"max_context_length": map[string]any{"value": 32768}}
+	receipts := &memoryReceiptRecorder{}
+	edge := &Edge{
+		Catalog: &catalog, PublicModel: "qwen/qwen3.8-27b", UpstreamModel: "upstream", UpstreamURL: upstream.URL, MaxInFlight: 4,
+		Credentials: []ChannelCredential{
+			{Channel: ChannelOpenRouter, APIKey: "openrouter-secret"},
+			{Channel: ChannelHuggingFace, APIKey: "huggingface-secret"},
+		},
+		ChannelPolicies: map[string]ChannelPolicy{
+			ChannelHuggingFace: {MaxInFlight: 2, InputPricePerMillionUSD: 0.10, OutputPricePerMillionUSD: 2.20, BillingLookupEnabled: true},
+		},
+		ReceiptRecorder: receipts,
+	}
+	handler, err := edge.Handler()
+	if err != nil {
+		t.Fatal(err)
+	}
+	modelsRequest := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	modelsRequest.Header.Set("Authorization", "Bearer huggingface-secret")
+	models := httptest.NewRecorder()
+	handler.ServeHTTP(models, modelsRequest)
+	if models.Code != http.StatusOK || !strings.Contains(models.Body.String(), `"owned_by":"infercrane"`) || !strings.Contains(models.Body.String(), `"context_length":32768`) || !strings.Contains(models.Body.String(), `"output":2.2`) {
+		t.Fatalf("unexpected Hugging Face model response code=%d body=%s", models.Code, models.Body.String())
+	}
+
+	completionRequest := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"qwen/qwen3.8-27b","messages":[]}`))
+	completionRequest.Header.Set("Authorization", "Bearer huggingface-secret")
+	completion := httptest.NewRecorder()
+	handler.ServeHTTP(completion, completionRequest)
+	requestID := completion.Header().Get("Inference-Id")
+	if completion.Code != http.StatusOK || requestID == "" || completion.Header().Get("X-Request-ID") != requestID {
+		t.Fatalf("unexpected completion identity code=%d inference_id=%q request_id=%q", completion.Code, requestID, completion.Header().Get("X-Request-ID"))
+	}
+
+	billingRequest := httptest.NewRequest(http.MethodPost, "/v1/billing/requests", strings.NewReader(`{"requestIds":["`+requestID+`","unknown"]}`))
+	billingRequest.Header.Set("Authorization", "Bearer huggingface-secret")
+	billing := httptest.NewRecorder()
+	handler.ServeHTTP(billing, billingRequest)
+	if billing.Code != http.StatusOK || !strings.Contains(billing.Body.String(), `"requestId":"`+requestID+`"`) || !strings.Contains(billing.Body.String(), `"costNanoUsd":7100`) || strings.Contains(billing.Body.String(), "unknown") {
+		t.Fatalf("unexpected billing response code=%d body=%s", billing.Code, billing.Body.String())
+	}
+
+	openRouterBilling := httptest.NewRequest(http.MethodPost, "/v1/billing/requests", strings.NewReader(`{"requestIds":["`+requestID+`"]}`))
+	openRouterBilling.Header.Set("Authorization", "Bearer openrouter-secret")
+	forbidden := httptest.NewRecorder()
+	handler.ServeHTTP(forbidden, openRouterBilling)
+	if forbidden.Code != http.StatusForbidden {
+		t.Fatalf("expected OpenRouter billing lookup to fail closed, got %d", forbidden.Code)
+	}
+}
+
+func TestGatewayMarketplaceChannelsUseScopedCredentialsPoliciesAndReceipts(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":3,"total_tokens":8}}`)
+	}))
+	defer upstream.Close()
+
+	for _, test := range []struct {
+		channel     string
+		credential  string
+		inputPrice  float64
+		outputPrice float64
+		costNanoUSD int64
+	}{
+		{channel: ChannelRequesty, credential: "requesty-secret", inputPrice: 0.11, outputPrice: 2.30, costNanoUSD: 7_450},
+		{channel: ChannelVercel, credential: "vercel-secret", inputPrice: 0.12, outputPrice: 2.40, costNanoUSD: 7_800},
+	} {
+		t.Run(test.channel, func(t *testing.T) {
+			receipts := &memoryReceiptRecorder{}
+			edge := &Edge{
+				Catalog: testCatalog(), PublicModel: "qwen/qwen3.8-27b", UpstreamModel: "upstream", UpstreamURL: upstream.URL, MaxInFlight: 4,
+				Credentials: []ChannelCredential{
+					{Channel: ChannelOpenRouter, APIKey: "openrouter-secret"},
+					{Channel: test.channel, APIKey: test.credential},
+				},
+				ChannelPolicies: map[string]ChannelPolicy{
+					test.channel: {MaxInFlight: 2, InputPricePerMillionUSD: test.inputPrice, OutputPricePerMillionUSD: test.outputPrice},
+				},
+				ReceiptRecorder: receipts,
+			}
+			handler, err := edge.Handler()
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			modelsRequest := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+			modelsRequest.Header.Set("Authorization", "Bearer "+test.credential)
+			models := httptest.NewRecorder()
+			handler.ServeHTTP(models, modelsRequest)
+			if models.Code != http.StatusOK || !strings.Contains(models.Body.String(), fmt.Sprintf(`"input":%g`, test.inputPrice)) || !strings.Contains(models.Body.String(), fmt.Sprintf(`"output":%g`, test.outputPrice)) {
+				t.Fatalf("unexpected %s models response code=%d body=%s", test.channel, models.Code, models.Body.String())
+			}
+
+			completionRequest := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"qwen/qwen3.8-27b","messages":[]}`))
+			completionRequest.Header.Set("Authorization", "Bearer "+test.credential)
+			completion := httptest.NewRecorder()
+			handler.ServeHTTP(completion, completionRequest)
+			if completion.Code != http.StatusOK || completion.Header().Get("X-Request-ID") == "" || completion.Header().Get("Inference-Id") == "" {
+				t.Fatalf("unexpected %s completion response code=%d headers=%v", test.channel, completion.Code, completion.Header())
+			}
+			receipt := receipts.last(t)
+			if receipt.Channel != test.channel || receipt.CostNanoUSD != test.costNanoUSD || receipt.Outcome != "completed" {
+				t.Fatalf("unexpected %s receipt: %+v", test.channel, receipt)
+			}
+
+			billingRequest := httptest.NewRequest(http.MethodPost, "/v1/billing/requests", strings.NewReader(`{"requestIds":["`+receipt.RequestID+`"]}`))
+			billingRequest.Header.Set("Authorization", "Bearer "+test.credential)
+			billing := httptest.NewRecorder()
+			handler.ServeHTTP(billing, billingRequest)
+			if billing.Code != http.StatusForbidden {
+				t.Fatalf("expected %s billing lookup to fail closed, got %d", test.channel, billing.Code)
+			}
+		})
+	}
+}
+
 func TestTranslateReasoningRequestCanDisableThinking(t *testing.T) {
 	payload := map[string]any{
 		"reasoning":            map[string]any{"enabled": false},
@@ -147,15 +291,53 @@ func TestTranslateReasoningRequestCanDisableThinking(t *testing.T) {
 	}
 }
 
-func TestTranslateReasoningEffortEnablesThinking(t *testing.T) {
-	payload := map[string]any{"reasoning_effort": "high"}
+func TestTranslateReasoningEffortPreservesQwenNativeLevel(t *testing.T) {
+	for _, effort := range []string{"low", "medium", "xhigh"} {
+		t.Run(effort, func(t *testing.T) {
+			payload := map[string]any{"reasoning_effort": effort}
+			translateReasoningRequest(payload)
+			kwargs := payload["chat_template_kwargs"].(map[string]any)
+			if kwargs["enable_thinking"] != true || kwargs["preserve_thinking"] != true || kwargs["reasoning_effort"] != effort {
+				t.Fatalf("unexpected translated kwargs: %#v", kwargs)
+			}
+			if _, found := payload["reasoning_effort"]; found {
+				t.Fatal("provider-only reasoning_effort reached upstream")
+			}
+		})
+	}
+}
+
+func TestTranslateReasoningEffortNoneDisablesThinking(t *testing.T) {
+	payload := map[string]any{"reasoning_effort": "none"}
 	translateReasoningRequest(payload)
 	kwargs := payload["chat_template_kwargs"].(map[string]any)
-	if kwargs["enable_thinking"] != true {
+	if kwargs["enable_thinking"] != false || kwargs["preserve_thinking"] != false {
 		t.Fatalf("unexpected translated kwargs: %#v", kwargs)
 	}
-	if _, found := payload["reasoning_effort"]; found {
-		t.Fatal("provider-only reasoning_effort reached upstream")
+	if _, found := kwargs["reasoning_effort"]; found {
+		t.Fatalf("disabled reasoning retained an effort: %#v", kwargs)
+	}
+}
+
+func TestValidateTextOnlyMessages(t *testing.T) {
+	text := map[string]any{"messages": []any{
+		map[string]any{"role": "user", "content": "hello"},
+		map[string]any{"role": "user", "content": []any{map[string]any{"type": "text", "text": "hello"}}},
+	}}
+	if err := validateTextOnlyMessages(text); err != nil {
+		t.Fatalf("text request rejected: %v", err)
+	}
+
+	for _, kind := range []string{"image_url", "input_image", "video_url", "file"} {
+		t.Run(kind, func(t *testing.T) {
+			payload := map[string]any{"messages": []any{map[string]any{
+				"role":    "user",
+				"content": []any{map[string]any{"type": kind}},
+			}}}
+			if err := validateTextOnlyMessages(payload); err == nil {
+				t.Fatalf("%s input was not rejected", kind)
+			}
+		})
 	}
 }
 
@@ -283,6 +465,53 @@ func TestAdaptiveAdmissionDecreasesOnTTFTMissAndRecoversWhenSaturated(t *testing
 	}
 	if got := controller.snapshot().limit; got != 4 {
 		t.Fatalf("additive recovery limit=%d, want 4", got)
+	}
+}
+
+func TestAdaptiveAdmissionDoesNotTreatBufferedSuccessAsTTFTMiss(t *testing.T) {
+	controller, err := newAdmissionController(AdmissionConfig{
+		MinLimit: 2, InitialLimit: 4, MaxLimit: 5, Window: 4,
+		TargetTTFT: 100 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 4 {
+		if controller.tryAcquire(1) != admissionAccepted {
+			t.Fatal("expected buffered request admission")
+		}
+		controller.releasePrefill(1)
+		controller.complete(admissionObservation{StatusCode: 200, Outcome: "completed", CompletionTokens: 10})
+	}
+	snapshot := controller.snapshot()
+	if snapshot.sloMissed != 0 {
+		t.Fatalf("buffered successes produced %d TTFT misses, want 0", snapshot.sloMissed)
+	}
+	if snapshot.productiveOutputTokens != 0 {
+		t.Fatalf("buffered output was counted as TTFT-qualified: %d", snapshot.productiveOutputTokens)
+	}
+}
+
+func TestAdaptiveAdmissionKeepsClientCancellationOutOfFailureWindow(t *testing.T) {
+	controller, err := newAdmissionController(AdmissionConfig{
+		MinLimit: 2, InitialLimit: 4, MaxLimit: 5, Window: 4,
+		TargetTTFT: 100 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if controller.tryAcquire(1) != admissionAccepted {
+		t.Fatal("expected cancellation test admission")
+	}
+	controller.releasePrefill(1)
+	controller.complete(admissionObservation{StatusCode: 200, Outcome: "client_canceled", Duration: 50 * time.Millisecond})
+
+	snapshot := controller.snapshot()
+	if snapshot.completed != 1 || snapshot.canceled != 1 || snapshot.failed != 0 {
+		t.Fatalf("unexpected cancellation counters: %+v", snapshot)
+	}
+	if controller.windowCompleted != 0 || controller.windowFailures != 0 || snapshot.limit != 4 {
+		t.Fatalf("client cancellation affected adaptive capacity: window_completed=%d window_failures=%d limit=%d", controller.windowCompleted, controller.windowFailures, snapshot.limit)
 	}
 }
 
@@ -416,13 +645,26 @@ func TestEdgeProtectsOperationalMetricsAndReportsProductiveUtilization(t *testin
 	}
 }
 
+func TestEdgeRejectsRevenuePriceThatDiffersFromDiscountedCatalog(t *testing.T) {
+	catalog := validCatalog()
+	catalog.Data[0].DiscountToUser = 0.19
+	edge := &Edge{
+		Catalog: &catalog, PublicModel: "qwen/qwen3.8-27b", UpstreamModel: "upstream",
+		APIKey: "secret", UpstreamURL: "http://127.0.0.1:30000", MaxInFlight: 1,
+		InputPricePerMillionUSD: 0.11, OutputPricePerMillionUSD: 2.50,
+	}
+	if _, err := edge.Handler(); err == nil || !strings.Contains(err.Error(), "effective catalog price") {
+		t.Fatalf("expected mismatched undiscounted price to fail, got %v", err)
+	}
+}
+
 func TestJSONLReceiptRecorderUsesOwnerOnlyContentFreeRecords(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "receipts", "requests.ndjson")
 	recorder, err := NewJSONLReceiptRecorder(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = recorder.Record(RequestReceipt{RequestID: "req-1", Model: "model", StatusCode: 200, Outcome: "completed", PromptTokens: 2, CompletionTokens: 3, TotalTokens: 5}); err != nil {
+	if err = recorder.Record(RequestReceipt{RequestID: "req-1", Model: "model", UpstreamModel: "upstream", StatusCode: 200, Outcome: "completed", PromptTokens: 2, CompletionTokens: 3, TotalTokens: 5}); err != nil {
 		t.Fatal(err)
 	}
 	if err = recorder.Close(); err != nil {

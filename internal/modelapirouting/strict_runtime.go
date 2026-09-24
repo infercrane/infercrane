@@ -141,7 +141,7 @@ func (rt *Runtime) serveStrictBuffered(w http.ResponseWriter, r *http.Request, r
 		return
 	}
 	usage := routingUsage(status, response.Usage)
-	body, err := publicBufferedResponse(request.ProductID, response)
+	body, err := publicBufferedResponse(request.publicModelID(), response)
 	if err != nil {
 		rt.observeCandidate(candidateID, false)
 		rt.settleStrict(request, reservationID, usage)
@@ -196,7 +196,7 @@ func (rt *Runtime) serveStrictStream(w http.ResponseWriter, r *http.Request, req
 		if event.Usage != nil {
 			usage = routingUsage(status, *event.Usage)
 		}
-		body, encodeErr := publicStreamEvent(request.RequestID, request.ProductID, event)
+		body, encodeErr := publicStreamEvent(request.RequestID, request.publicModelID(), event)
 		if encodeErr != nil {
 			copyErr = encodeErr
 			break

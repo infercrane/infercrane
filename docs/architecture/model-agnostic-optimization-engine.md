@@ -120,6 +120,111 @@ communication; and a faster microkernel may not move end-to-end latency.
 10. **Promote separately.** A human-approved Release Guard action creates a
     canary. Monitoring invalidates evidence when workload or identity drifts.
 
+## Continual optimization loop
+
+The candidate pipeline above is now wrapped by `internal/continualoptimizer`.
+This outer loop is deliberately slower than request admission and fleet
+autoscaling. It decides when the evidence justifies another bounded experiment;
+it does not tune production inline.
+
+```text
+public Agentic Systems workload prior
+                 │ screening only
+                 ▼
+       bounded candidate campaign
+                 │
+                 ▼
+customer traffic → content-free replay → drift + SLO + economics
+      ▲                                      │
+      │                                      ▼
+      └──── observe promoted recipe ← Release Guard canary
+                                             │
+                            reject / rollback / recommend promote
+```
+
+The public dataset supplies day-zero token shapes and screening lanes. Its
+provenance always remains `public_prior`; no number of public samples makes it
+production promotion evidence. Once a customer endpoint has enough requests,
+the loop replaces that prior with a content-free replay carrying only arrival,
+duration, token counts, streaming, hashed session/prefix relationships, and
+tool-pause timing. Prompt and completion content are not stored.
+
+Every evaluation joins four independent inputs:
+
+1. workload shape and drift;
+2. correctness, quality, SLO, and availability;
+3. cost per productive token, contribution margin, and productive utilization;
+4. durable experiment memory, including failures and superseded candidates.
+
+An exact failed fingerprint is suppressed for the configured rejection-memory
+window. Kernel hypotheses are ineligible without measured profiler evidence.
+The loop uses a hard candidate count, spend ceiling, cooldown, and active-
+campaign limit so noisy traffic cannot create an experiment storm. It may
+create experiment intent automatically under standing policy, but production
+promotion remains manual by default. Release Guard can still roll back a bad
+canary automatically.
+
+The commercial objective is therefore not raw throughput:
+
+```text
+qualified performance + lower productive-token cost + availability
+                              │
+                              ▼
+                 competitive price and margin
+                              │
+                              ▼
+              traffic → utilization → more evidence
+                              │
+                              └───────────────→ optimize again
+```
+
+`internal/store/migrations/070_continual_optimization.sql` persists reviewed
+policy, customer baseline, exact normalized inputs, immutable decisions, and
+the last experiment boundary. The authenticated deployment API exposes policy,
+evaluation, and decision history. Evaluation records a decision only; paid GPU
+mutation continues through the existing approved optimization-campaign
+workflow.
+
+## Capacity loop for marketplace traffic
+
+Optimization and autoscaling solve different problems. Recipe search runs over
+hours or days. Admission reacts per request, and fleet scaling reacts over
+seconds or minutes. `internal/autoscale.EvaluateCapacityEnvelope` sizes the
+fleet against four exact-workload capacity dimensions independently:
+
+- requests per second;
+- prefill tokens per second;
+- decode tokens per second; and
+- concurrent requests.
+
+It adds a failure reserve, productive-utilization headroom, and a demand
+forecast multiplier. It refuses to scale from modeled or cross-provider
+capacity, unavailable accelerator supply, an unapproved hourly cost, or a
+fleet that violates contribution-margin policy. When supply or economics block
+growth, the edge keeps its fail-fast admission boundary and returns early 429s
+instead of allowing queue collapse. A single aggregate output-token benchmark
+is never converted directly into total-token marketplace capacity.
+
+Production policy also declares a minimum number of qualified fault domains.
+The controller keeps an explicit high-availability-blocked state when the
+provider inventory cannot meet it; adding replicas in one zone does not count
+as redundant capacity.
+
+`internal/autoscale.CapacityController` applies that safe admission envelope
+before asking a provider to add or remove replicas. Ready, pending, and draining
+capacity are tracked separately. Pending GPUs prevent duplicate scale requests
+but never count as request-ready capacity. Provider mutation failures are
+recorded and leave admission bounded by the currently ready fleet.
+
+For example, 1,450 qualified output tokens/second is about 125 million output
+tokens/day. It corresponds to roughly 1.1 billion total tokens/day only for the
+specific 4,000-input/512-output mix and only if the same replica also sustains
+the required prefill rate under the target TTFT. A 4.7-billion-total-token day
+at that mix requires roughly 48,225 input and 6,173 output tokens/second. With
+70% target productive utilization, a 1.15 demand multiplier, and one failure
+reserve, decode alone calls for seven serving replicas plus one reserve. The
+production decision must take the maximum across all four capacity dimensions.
+
 Candidate ranking is constrained optimization, not one scalar benchmark:
 
 ```text
@@ -143,6 +248,8 @@ It is independent of the model repository name. Supported initial families are:
 - SwiGLU activation;
 - prefill and decode attention;
 - KV-cache append/quantization;
+- recurrent/linear-attention state updates for hybrid and state-space models;
+- recurrent-state commit, scatter, and movement;
 - MoE routing/grouped GEMM; and
 - token sampling.
 
@@ -228,6 +335,13 @@ generation is a search primitive, not an evidence authority.
   profile/generate/compile/measure loops. InferCrane adopts the loop but places
   generation behind Amdahl materiality, a hard spend/expiry lease, an isolated
   Brezel build, exact-target sanitizers, and full serving replay.
+- [AutoKernel](https://arxiv.org/abs/2603.21331) contributes the deliberately
+  simple inner loop: change one kernel revision, run five-stage correctness,
+  benchmark it, retain only a material improvement, and move on after a
+  plateau, roofline, time, iteration, or target-speedup limit. InferCrane uses
+  that loop as a model-neutral worker contract rather than a Qwen-specific
+  script. The retained kernel still has to pass the wider serving and Release
+  Guard gates below.
 - [AIConfigurator](https://arxiv.org/abs/2601.06288) informs the broader
   configuration search. Its proposals remain candidates until InferCrane's
   model/runtime/hardware/workload evidence gates pass.
@@ -235,12 +349,22 @@ generation is a search primitive, not an evidence authority.
   independent execution benchmark for generated GPU programs; it complements,
   rather than replaces, workload-specific end-to-end qualification.
 
-`internal/acceleratorlab` now exposes an opt-in generator contract. A generated
-source bundle must echo the input digest, candidate identity, and exact profile
-artifact digest; include immutable revision, license, content hashes, and
-sizes; build through the fixed Brezel runner; and then pass the same target
-qualification gates as reviewed code. The system never promotes it
-automatically.
+`internal/kernelresearch` implements the reusable AutoKernel-style state
+machine. Its intent binds the search to the exact input, hotspot candidate,
+profile artifact, model revision, runtime image, hardware, and workload. Its
+receipt records every keep/reject decision, all five correctness stages,
+baseline and candidate timing, roofline utilization, cost, plateau state, and
+the immutable winning source revision. The receipt is content-addressed and
+tampering fails validation.
+
+`internal/acceleratorlab` passes that intent through its opt-in generator
+contract. A worker may iterate in Triton, CUDA C++, CuTe, Pallas, NKI, HIP, or
+another declared backend; this is not tied to a model name. The generated
+source bundle must match the retained winner, echo the input digest, candidate
+identity, and exact profile artifact digest, include immutable revision,
+license, content hashes, and sizes, build through the fixed Brezel runner, and
+then pass the same target qualification gates as reviewed code. The system
+never promotes it automatically.
 
 ## Technique evidence map
 
@@ -288,7 +412,7 @@ complete. The current implementation boundary is:
 | Brezel-isolated optimization build jobs and receipts | Implemented and locally qualified | Fixed baked runner, deny-by-default egress, verified input/output artifacts, cleanup and signed receipt; the optimization environment revision must actually contain that runner |
 | TensorRT-LLM, multi-node collectives, expert placement and disaggregated MoE qualification | Executable worker contract | NVIDIA workers may declare these independently; undeclared topology fails before spend, and no real tuple is claimed without evidence |
 | Nsight Systems/Compute, rocprof, XProf and Neuron Explorer capture | Executable worker contract | Capabilities are loaded from the configured worker at startup; built-in schemas are never presented as deployed capacity |
-| AI-generated kernels and KernelBench-style evaluation | Implemented orchestration and gates | Profile-bound generation, isolated build, hidden shapes, sanitizers, exact-target and serving replay; generator and hardware-worker implementations need deployment qualification |
+| Iterative authored-kernel research and KernelBench-style evaluation | Implemented model-neutral state machine and orchestration gates | Profile-bound AutoKernel-style keep/reject loop, five correctness stages, plateau/roofline/time/iteration/cost limits, isolated build, exact-target and serving replay; generator and hardware-worker implementations still need deployment qualification |
 | AMD ROCm, TPU and Trainium compiler/runtime paths | Planner, registry and worker contracts implemented | AITER/CK/Triton-ROCm/HIP, Pallas/XLA, and NKI/Neuron candidates exist; no real-hardware product claim until the corresponding worker passes |
 | Image, video and voice optimization lanes | Typed workload and qualification contracts implemented | Each run requires media shapes, immutable replay, modality quality suite and a worker-declared lane; measured suites remain tuple-specific real-infrastructure work |
 

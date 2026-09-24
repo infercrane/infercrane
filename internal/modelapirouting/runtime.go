@@ -22,8 +22,15 @@ import (
 )
 
 type ProxyRequest struct {
-	TenantID, ProductID, Operation, Resource, RequestID, TraceParent string
-	Payload                                                          map[string]any
+	TenantID, ProductID, PublicModelID, Operation, Resource, RequestID, TraceParent string
+	Payload                                                                         map[string]any
+}
+
+func (r ProxyRequest) publicModelID() string {
+	if r.PublicModelID != "" {
+		return r.PublicModelID
+	}
+	return r.ProductID
 }
 
 // Runtime is the supplier-neutral hosted request boundary. It receives a
@@ -189,7 +196,7 @@ func (rt *Runtime) ServeHTTP(w http.ResponseWriter, r *http.Request, request Pro
 	w.Header().Set("X-Request-ID", request.RequestID)
 	w.Header().Set("traceparent", request.TraceParent)
 	w.WriteHeader(response.StatusCode)
-	input, output, copyErr := copyPublicResponse(w, response, request.ProductID)
+	input, output, copyErr := copyPublicResponse(w, response, request.publicModelID())
 	rt.observeCandidate(candidate.ID, copyErr == nil)
 	settlementContext, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
 	_, settleErr := rt.Billing.Settle(settlementContext, request.TenantID, reservation.ID, Usage{StatusCode: response.StatusCode, InputTokens: input, OutputTokens: output})

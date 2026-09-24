@@ -1,0 +1,367 @@
+{
+  "boundary": "Authored Triton microbenchmark; endpoint promotion requires full workload qualification.",
+  "created_unix": 1790189412,
+  "endpoint_candidate_eligible": false,
+  "geometry": {
+    "concurrency": [
+      4,
+      8,
+      12,
+      16
+    ],
+    "linear_attention_layers": 48,
+    "state_dtype": "float32",
+    "state_shape": [
+      48,
+      128,
+      128
+    ],
+    "verification_steps": 4
+  },
+  "gpu": {
+    "compute_capability": "9.0",
+    "name": "NVIDIA H200"
+  },
+  "hotspot_fraction": 0.05480692269096207,
+  "method": "profile -> five-stage correctness -> benchmark -> Amdahl gate",
+  "minimum_endpoint_upside_fraction": 0.03,
+  "projected_endpoint_upside_fraction": 0.00035941416035617155,
+  "receipt_sha256": "37bfe416a13c85af4bfc61ac9b397016a6d28825e832e95e4fcd46a85ac963f5",
+  "schema_version": "infercrane.dev/authored-state-commit-kernel-screen/v1",
+  "selected": "ic-b512-c4-w4",
+  "selected_speedup": 1.0066011130730461,
+  "software": {
+    "authored_source_sha256": "4876ea2dcfb019ae31747e8f1e22c5d1742aeec78d35ba5bcd86fdc7d2a8786a",
+    "sglang_source_sha256": "e814dc1e68071c7c089734cc99eac0d1c00f8d00041d352f862e9dd2bd5775c5",
+    "torch": "2.13.0+cu130",
+    "triton": "3.7.1"
+  },
+  "upstream_measurements_us": {
+    "c12-t4": 919.2533493041992,
+    "c16-t4": 1220.5973466237385,
+    "c4-t4": 315.21334250768024,
+    "c8-t4": 616.4506673812866
+  },
+  "variants": [
+    {
+      "all_correctness_passed": true,
+      "block": 512,
+      "chunks": 4,
+      "correctness": {
+        "adversarial_and_edge": {
+          "max_abs": 0.0,
+          "passed": true
+        },
+        "determinism": {
+          "passed": true
+        },
+        "numerical_stability": {
+          "max_abs": 0.0,
+          "passed": true
+        },
+        "shape_sweep": {
+          "max_abs": 0.0,
+          "passed": true
+        },
+        "single_element": {
+          "max_abs": 0.0,
+          "passed": true
+        },
+        "smoke": {
+          "max_abs": 0.0,
+          "passed": true
+        }
+      },
+      "measurements_us": {
+        "c12-t4": 913.312037785848,
+        "c16-t4": 1212.5306924184163,
+        "c4-t4": 312.0906750361125,
+        "c8-t4": 612.122654914856
+      },
+      "name": "ic-b512-c4-w4",
+      "projected_endpoint_upside_fraction": 0.00035941416035617155,
+      "warps": 4,
+      "weighted_speedup_vs_upstream": 1.0066011130730461
+    },
+    {
+      "all_correctness_passed": true,
+      "block": 512,
+      "chunks": 8,
+      "correctness": {
+        "adversarial_and_edge": {
+          "max_abs": 0.0,
+          "passed": true
+        },
+        "determinism": {
+          "passed": true
+        },
+        "numerical_stability": {
+          "max_abs": 0.0,
+          "passed": true
+        },
+        "shape_sweep": {
+          "max_abs": 0.0,
+          "passed": true
+        },
+        "single_element": {
+          "max_abs": 0.0,
+          "passed": true
+        },
+        "smoke": {
+          "max_abs": 0.0,
+          "passed": true
+        }
+      },
+      "measurements_us": {
+        "c12-t4": 914.0106836954752,
+        "c16-t4": 1214.5626544952393,
+        "c4-t4": 311.41867240269977,
+        "c8-t4": 612.1253172556559
+      },
+      "name": "ic-b512-c8-w4",
+      "projected_endpoint_upside_fraction": 0.0002855336315525472,
+      "warps": 4,
+      "weighted_speedup_vs_upstream": 1.0052370938539628
+    },
+    {
+      "all_correctness_passed": true,
+      "block": 1024,
+      "chunks": 2,
+      "correctness": {
+        "adversarial_and_edge": {
+          "max_abs": 0.0,
+          "passed": true
+        },
+        "determinism": {
+          "passed": true
+        },
+        "numerical_stability": {
+          "max_abs": 0.0,
+          "passed": true
+        },
+        "shape_sweep": {
+          "max_abs": 0.0,
+          "passed": true
+        },
+        "single_element": {
+          "max_abs": 0.0,
+          "passed": true
+        },
+        "smoke": {
+          "max_abs": 0.0,
+          "passed": true
+        }
+      },
+      "measurements_us": {
+        "c12-t4": 914.7413571675619,
+        "c16-t4": 1214.6906852722168,
+        "c4-t4": 312.50133117039996,
+        "c8-t4": 612.9253307978312
+      },
+      "name": "ic-b1024-c2-w4",
+      "projected_endpoint_upside_fraction": 0.00026654607583023493,
+      "warps": 4,
+      "weighted_speedup_vs_upstream": 1.004887133026439
+    },
+    {
+      "all_correctness_passed": true,
+      "block": 1024,
+      "chunks": 4,
+      "correctness": {
+        "adversarial_and_edge": {
+          "max_abs": 0.0,
+          "passed": true
+        },
+        "determinism": {
+          "passed": true
+        },
+        "numerical_stability": {
+          "max_abs": 0.0,
+          "passed": true
+        },
+        "shape_sweep": {
+          "max_abs": 0.0,
+          "passed": true
+        },
+        "single_element": {
+          "max_abs": 0.0,
+          "passed": true
+        },
+        "smoke": {
+          "max_abs": 0.0,
+          "passed": true
+        }
+      },
+      "measurements_us": {
+        "c12-t4": 914.4799709320068,
+        "c16-t4": 1215.6346638997395,
+        "c4-t4": 311.2506667772929,
+        "c8-t4": 612.2693220774332
+      },
+      "name": "ic-b1024-c4-w4",
+      "projected_endpoint_upside_fraction": 0.00024445737695249733,
+      "warps": 4,
+      "weighted_speedup_vs_upstream": 1.0044803213261284
+    },
+    {
+      "all_correctness_passed": true,
+      "block": 1024,
+      "chunks": 8,
+      "correctness": {
+        "adversarial_and_edge": {
+          "max_abs": 0.0,
+          "passed": true
+        },
+        "determinism": {
+          "passed": true
+        },
+        "numerical_stability": {
+          "max_abs": 0.0,
+          "passed": true
+        },
+        "shape_sweep": {
+          "max_abs": 0.0,
+          "passed": true
+        },
+        "single_element": {
+          "max_abs": 0.0,
+          "passed": true
+        },
+        "smoke": {
+          "max_abs": 0.0,
+          "passed": true
+        }
+      },
+      "measurements_us": {
+        "c12-t4": 918.3119932810465,
+        "c16-t4": 1220.5413182576497,
+        "c4-t4": 311.13600730895996,
+        "c8-t4": 613.1999890009562
+      },
+      "name": "ic-b1024-c8-w4",
+      "projected_endpoint_upside_fraction": 2.1284866957819843e-05,
+      "warps": 4,
+      "weighted_speedup_vs_upstream": 1.0003885118035167
+    },
+    {
+      "all_correctness_passed": true,
+      "block": 1024,
+      "chunks": 16,
+      "correctness": {
+        "adversarial_and_edge": {
+          "max_abs": 0.0,
+          "passed": true
+        },
+        "determinism": {
+          "passed": true
+        },
+        "numerical_stability": {
+          "max_abs": 0.0,
+          "passed": true
+        },
+        "shape_sweep": {
+          "max_abs": 0.0,
+          "passed": true
+        },
+        "single_element": {
+          "max_abs": 0.0,
+          "passed": true
+        },
+        "smoke": {
+          "max_abs": 0.0,
+          "passed": true
+        }
+      },
+      "measurements_us": {
+        "c12-t4": 921.6933250427246,
+        "c16-t4": 1224.2533365885417,
+        "c4-t4": 313.098669052124,
+        "c8-t4": 615.3333187103271
+      },
+      "name": "ic-b1024-c16-w4",
+      "projected_endpoint_upside_fraction": 0.0,
+      "warps": 4,
+      "weighted_speedup_vs_upstream": 0.9971323444414839
+    },
+    {
+      "all_correctness_passed": true,
+      "block": 2048,
+      "chunks": 2,
+      "correctness": {
+        "adversarial_and_edge": {
+          "max_abs": 0.0,
+          "passed": true
+        },
+        "determinism": {
+          "passed": true
+        },
+        "numerical_stability": {
+          "max_abs": 0.0,
+          "passed": true
+        },
+        "shape_sweep": {
+          "max_abs": 0.0,
+          "passed": true
+        },
+        "single_element": {
+          "max_abs": 0.0,
+          "passed": true
+        },
+        "smoke": {
+          "max_abs": 0.0,
+          "passed": true
+        }
+      },
+      "measurements_us": {
+        "c12-t4": 943.4560139973959,
+        "c16-t4": 1254.5546690622966,
+        "c4-t4": 321.9119906425476,
+        "c8-t4": 631.4773162206014
+      },
+      "name": "ic-b2048-c2-w8",
+      "projected_endpoint_upside_fraction": 0.0,
+      "warps": 8,
+      "weighted_speedup_vs_upstream": 0.9734274459545793
+    },
+    {
+      "all_correctness_passed": true,
+      "block": 2048,
+      "chunks": 4,
+      "correctness": {
+        "adversarial_and_edge": {
+          "max_abs": 0.0,
+          "passed": true
+        },
+        "determinism": {
+          "passed": true
+        },
+        "numerical_stability": {
+          "max_abs": 0.0,
+          "passed": true
+        },
+        "shape_sweep": {
+          "max_abs": 0.0,
+          "passed": true
+        },
+        "single_element": {
+          "max_abs": 0.0,
+          "passed": true
+        },
+        "smoke": {
+          "max_abs": 0.0,
+          "passed": true
+        }
+      },
+      "measurements_us": {
+        "c12-t4": 950.0133196512858,
+        "c16-t4": 1263.856013615926,
+        "c4-t4": 323.69067271550495,
+        "c8-t4": 636.0640128453573
+      },
+      "name": "ic-b2048-c4-w8",
+      "projected_endpoint_upside_fraction": 0.0,
+      "warps": 8,
+      "weighted_speedup_vs_upstream": 0.9664192428108973
+    }
+  ]
+}

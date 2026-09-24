@@ -118,6 +118,16 @@ export class ControlApi {
     return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
+  recordMarketplaceReceipt(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const requestPath = '/admin/marketplace/receipts';
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  lookupMarketplaceBillingRequests(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const requestPath = '/admin/marketplace/billing/requests';
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
   listComputeProviders(): Promise<ObjectList> {
     const requestPath = '/compute/providers';
     return this.transport.request('GET', requestPath) as Promise<ObjectList>;
@@ -491,6 +501,26 @@ export class ControlApi {
   cancelOptimizationCampaign(id: string, body: JsonValue): Promise<Record<string, JsonValue>> {
     const requestPath = `/optimization/campaigns/${encodeURIComponent(id)}/cancel`;
     return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  getContinualOptimizationPolicy(name: string): Promise<Record<string, JsonValue>> {
+    const requestPath = `/deployments/${encodeURIComponent(name)}/continual-optimization/policy`;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
+  setContinualOptimizationPolicy(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const requestPath = `/deployments/${encodeURIComponent(name)}/continual-optimization/policy`;
+    return this.transport.request('PUT', requestPath, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  evaluateContinualOptimization(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const requestPath = `/deployments/${encodeURIComponent(name)}/continual-optimization/evaluate`;
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  listContinualOptimizationDecisions(name: string): Promise<ObjectList> {
+    const requestPath = `/deployments/${encodeURIComponent(name)}/continual-optimization/decisions`;
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
   listOptimizedArtifacts(): Promise<ObjectList> {

@@ -110,6 +110,43 @@ func TestRegistryTargetResolverUsesConfiguredHTTPSAndTenantScopedSecretID(t *tes
 	}
 }
 
+func TestPublisherVerifiesGenericTargetBindingBeforeResolvingSecret(t *testing.T) {
+	now := time.Date(2026, 9, 24, 10, 0, 0, 0, time.UTC)
+	source := sourceFixture(now, "customer")
+	candidateSource := &source.Candidates[0]
+	candidateSource.Candidate.Supplier = "infercrane-capacity"
+	candidateSource.Candidate.SupplierModelID = "qwen/qwen3.8-27b"
+	candidateSource.Candidate.TargetBindingID = "binding-qwen38-r1"
+	candidateSource.Candidate.TargetBindingDigest = "sha256:" + strings.Repeat("a", 64)
+	candidateSource.Adapter = "openai-compatible"
+	candidateSource.CredentialReference = "provider-token"
+	candidateSource.EndpointReference = "infercrane-capacity/openai-compatible"
+	endpoint := "https://provider.example"
+	digest, err := modelapitarget.EndpointConfigDigest(candidateSource.EndpointReference, endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidateSource.EndpointConfigDigest = digest
+	resolver, err := NewRegistryTargetResolver(map[string]string{candidateSource.EndpointReference: endpoint}, &referenceStoreFake{}, secretValueFake{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := NewDirectory()
+	directory.now = func() time.Time { return now }
+	publisher := &Publisher{Store: &sourceStoreFake{sources: []RouteSource{source}}, Resolver: resolver, Adapters: supplieradapter.DefaultRegistry(), Directory: directory, Now: func() time.Time { return now }}
+	if err = publisher.PublishOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := directory.Acquire("customer", "glm-5.3")
+	if err != nil || lease.Candidates[0].Endpoint != endpoint || lease.Candidates[0].Credential != "secret" {
+		t.Fatalf("bound generic route=%#v err=%v", lease, err)
+	}
+	candidateSource.EndpointConfigDigest = "sha256:" + strings.Repeat("b", 64)
+	if err = publisher.PublishOnce(context.Background()); err == nil {
+		t.Fatal("generic route with a mismatched endpoint config digest was published")
+	}
+}
+
 func TestRegistryTargetResolverRechecksCredentialReferenceForEveryRequest(t *testing.T) {
 	references := &referenceStoreFake{}
 	resolver, err := NewRegistryTargetResolver(map[string]string{"supplier/adapter": "https://supplier.example/v1"}, references, secretValueFake{})
