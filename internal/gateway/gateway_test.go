@@ -962,3 +962,13 @@ func TestOpenRouterCatalogUsesDedicatedAuthenticatedPath(t *testing.T) {
 		t.Fatalf("catalog response=%d %s", response.Code, response.Body.String())
 	}
 }
+
+func TestOpenRouterModelAliasTargetsDurableHostedProduct(t *testing.T) {
+	gateway := &Gateway{OpenRouterModelAliases: map[string]string{"qwen/qwen3.8-27b": "qwen3.8-27b"}}
+	if got := gateway.hostedProductID("qwen/qwen3.8-27b"); got != "qwen3.8-27b" {
+		t.Fatalf("hosted product id=%q", got)
+	}
+	if got := gateway.hostedProductID("customer-model"); got != "customer-model" {
+		t.Fatalf("unmapped hosted product id=%q", got)
+	}
+}

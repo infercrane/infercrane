@@ -90,6 +90,52 @@ type Compliance struct {
 	HIPAA bool `json:"hipaa"`
 }
 
+// EffectiveTokenPrices returns the user-visible per-million token prices after
+// the catalog discount is applied. Operational revenue telemetry must use
+// these values rather than the undiscounted list price.
+func (c Catalog) EffectiveTokenPrices(modelID string) (float64, float64, bool, error) {
+	for _, model := range c.Data {
+		if model.ID != modelID {
+			continue
+		}
+		var input, output float64
+		var hasInput, hasOutput bool
+		for _, modality := range model.InputModalities {
+			for _, price := range modality.Pricing {
+				if price.Type == "prompt" && price.Unit == "token" {
+					value, err := pricePerMillion(price.CostUSD, model.DiscountToUser)
+					if err != nil {
+						return 0, 0, false, fmt.Errorf("OpenRouter model %q prompt price: %w", model.ID, err)
+					}
+					input, hasInput = value, true
+				}
+			}
+		}
+		for _, modality := range model.OutputModalities {
+			for _, price := range modality.Pricing {
+				if price.Type == "completion" && price.Unit == "token" {
+					value, err := pricePerMillion(price.CostUSD, model.DiscountToUser)
+					if err != nil {
+						return 0, 0, false, fmt.Errorf("OpenRouter model %q completion price: %w", model.ID, err)
+					}
+					output, hasOutput = value, true
+				}
+			}
+		}
+		return input, output, hasInput && hasOutput, nil
+	}
+	return 0, 0, false, fmt.Errorf("OpenRouter model %q is absent from the catalog", modelID)
+}
+
+func pricePerMillion(costUSD string, discount float64) (float64, error) {
+	value, ok := new(big.Rat).SetString(costUSD)
+	if !ok || value.Sign() < 0 {
+		return 0, fmt.Errorf("invalid decimal cost_usd %q", costUSD)
+	}
+	perToken, _ := value.Float64()
+	return perToken * 1_000_000 * (1 - discount), nil
+}
+
 func Load(path string) (*Catalog, error) {
 	body, err := os.ReadFile(path)
 	if err != nil {
@@ -113,8 +159,8 @@ func (c Catalog) Validate() error {
 	}
 	seen := make(map[string]struct{}, len(c.Data))
 	for index, model := range c.Data {
-		if model.SchemaVersion != "2.4" {
-			return fmt.Errorf("OpenRouter model %d must use schema_version 2.4", index)
+		if model.SchemaVersion != "2.5" {
+			return fmt.Errorf("OpenRouter model %d must use schema_version 2.5", index)
 		}
 		if model.ID == "" || model.Name == "" || model.HuggingFaceID == "" || model.Created <= 0 {
 			return fmt.Errorf("OpenRouter model %d has incomplete identity", index)
@@ -132,11 +178,11 @@ func (c Catalog) Validate() error {
 		if len(model.InputModalities) == 0 || len(model.OutputModalities) == 0 {
 			return fmt.Errorf("OpenRouter model %q must declare input and output modalities", model.ID)
 		}
-		if model.IsReady && (len(model.Datacenters) == 0 || strings.TrimSpace(model.DeploymentRegion) == "") {
-			return fmt.Errorf("ready OpenRouter model %q must declare datacenter and deployment region", model.ID)
+		if model.IsReady && (len(model.Datacenters) == 0 || strings.TrimSpace(model.DeploymentRegion) == "" || model.Compliance == nil) {
+			return fmt.Errorf("ready OpenRouter model %q must declare datacenter, deployment region, and compliance", model.ID)
 		}
 		for _, datacenter := range model.Datacenters {
-			if len(datacenter.CountryCode) != 2 || strings.TrimSpace(datacenter.Region) == "" {
+			if len(datacenter.CountryCode) != 2 || datacenter.CountryCode != strings.ToUpper(datacenter.CountryCode) || strings.TrimSpace(datacenter.Region) == "" {
 				return fmt.Errorf("OpenRouter model %q has an invalid datacenter", model.ID)
 			}
 		}
@@ -198,4 +244,51 @@ func (c Catalog) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "private, max-age=30")
 	_ = json.NewEncoder(w).Encode(c)
+}
+
+// ServeOpenAI exposes the model metadata shape used by Hugging Face Inference
+// Providers and generic OpenAI-compatible gateways. OpenRouter continues to
+// receive its richer provider catalog from ServeHTTP.
+func (c Catalog) ServeOpenAI(w http.ResponseWriter, modelID string, policy ChannelPolicy) {
+	var selected *Model
+	for index := range c.Data {
+		if c.Data[index].ID == modelID {
+			selected = &c.Data[index]
+			break
+		}
+	}
+	if selected == nil {
+		writeProviderError(w, http.StatusNotFound, "Unknown model", "invalid_request_error")
+		return
+	}
+	contextLength := int64(0)
+	for _, modality := range selected.InputModalities {
+		if value, ok := modality.SupportedInputs["max_context_length"].(map[string]any); ok {
+			switch typed := value["value"].(type) {
+			case float64:
+				contextLength = int64(typed)
+			case int64:
+				contextLength = typed
+			case int:
+				contextLength = int64(typed)
+			}
+		}
+	}
+	response := map[string]any{
+		"object": "list",
+		"data": []map[string]any{{
+			"id":             selected.ID,
+			"object":         "model",
+			"created":        selected.Created,
+			"owned_by":       "infercrane",
+			"context_length": contextLength,
+			"pricing": map[string]float64{
+				"input":  policy.InputPricePerMillionUSD,
+				"output": policy.OutputPricePerMillionUSD,
+			},
+		}},
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "private, max-age=30")
+	_ = json.NewEncoder(w).Encode(response)
 }

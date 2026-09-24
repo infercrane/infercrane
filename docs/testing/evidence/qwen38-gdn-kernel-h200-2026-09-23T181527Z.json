@@ -1,0 +1,572 @@
+{
+  "boundary": "Exact Qwen3.8 geometry microbenchmark on H200. Selection does not authorize endpoint promotion without workload parity and cost qualification.",
+  "created_unix": 1790187325,
+  "endpoint_candidate_eligible": false,
+  "geometry": {
+    "key_dimension": 128,
+    "key_heads": 16,
+    "packed_concurrency": [
+      1,
+      4,
+      8,
+      12,
+      16
+    ],
+    "value_dimension": 128,
+    "value_heads": 48,
+    "verification_steps": [
+      1,
+      4
+    ]
+  },
+  "gpu": {
+    "compute_capability": "9.0",
+    "name": "NVIDIA H200"
+  },
+  "receipt_sha256": "8ac6f1d2d16a11aafe66e848cf5b7ea32591fcda1f6305993e17fd4d07e9e740",
+  "schema_version": "infercrane.dev/gdn-kernel-screen/v1",
+  "selected_microbenchmark": "upstream-bv32-w1",
+  "software": {
+    "sglang_source_sha256": "0cf7b4dbed432cec721c60b69629a4cb53d1600b865699f461da82618098b505",
+    "torch": "2.13.0+cu130",
+    "triton": "3.7.1"
+  },
+  "variants": [
+    {
+      "all_parity_passed": true,
+      "bv_cap": 32,
+      "measurements_us": {
+        "c1-t1": 56.36672019958496,
+        "c12-t1": 56.96767807006836,
+        "c12-t4": 58.270721435546875,
+        "c16-t1": 55.66527843475342,
+        "c16-t4": 57.64607906341553,
+        "c4-t1": 55.06752014160156,
+        "c4-t4": 55.732479095458984,
+        "c8-t1": 57.34911918640137,
+        "c8-t4": 57.350401878356934
+      },
+      "name": "upstream-bv32-w1",
+      "num_stages": 3,
+      "num_warps": 1,
+      "parity": {
+        "c1-t1": {
+          "output_max_abs": 0.0,
+          "passed": true,
+          "state_max_abs": 0.0
+        },
+        "c12-t1": {
+          "output_max_abs": 0.0,
+          "passed": true,
+          "state_max_abs": 0.0
+        },
+        "c12-t4": {
+          "output_max_abs": 0.0,
+          "passed": true,
+          "state_max_abs": 0.0
+        },
+        "c16-t1": {
+          "output_max_abs": 0.0,
+          "passed": true,
+          "state_max_abs": 0.0
+        },
+        "c16-t4": {
+          "output_max_abs": 0.0,
+          "passed": true,
+          "state_max_abs": 0.0
+        },
+        "c4-t1": {
+          "output_max_abs": 0.0,
+          "passed": true,
+          "state_max_abs": 0.0
+        },
+        "c4-t4": {
+          "output_max_abs": 0.0,
+          "passed": true,
+          "state_max_abs": 0.0
+        },
+        "c8-t1": {
+          "output_max_abs": 0.0,
+          "passed": true,
+          "state_max_abs": 0.0
+        },
+        "c8-t4": {
+          "output_max_abs": 0.0,
+          "passed": true,
+          "state_max_abs": 0.0
+        }
+      },
+      "source_sha256": "0cf7b4dbed432cec721c60b69629a4cb53d1600b865699f461da82618098b505",
+      "weighted_speedup_vs_upstream": 1.0
+    },
+    {
+      "all_parity_passed": true,
+      "bv_cap": 16,
+      "measurements_us": {
+        "c1-t1": 56.5388822555542,
+        "c12-t1": 55.18400192260742,
+        "c12-t4": 57.50271797180176,
+        "c16-t1": 55.778560638427734,
+        "c16-t4": 57.94943809509277,
+        "c4-t1": 55.4150390625,
+        "c4-t4": 55.41567802429199,
+        "c8-t1": 57.02911853790283,
+        "c8-t4": 56.2227201461792
+      },
+      "name": "bv16-w1",
+      "num_stages": 3,
+      "num_warps": 1,
+      "parity": {
+        "c1-t1": {
+          "output_max_abs": 0.0,
+          "passed": true,
+          "state_max_abs": 0.0
+        },
+        "c12-t1": {
+          "output_max_abs": 0.0,
+          "passed": true,
+          "state_max_abs": 0.0
+        },
+        "c12-t4": {
+          "output_max_abs": 0.0,
+          "passed": true,
+          "state_max_abs": 0.0
+        },
+        "c16-t1": {
+          "output_max_abs": 0.0,
+          "passed": true,
+          "state_max_abs": 0.0
+        },
+        "c16-t4": {
+          "output_max_abs": 0.0,
+          "passed": true,
+          "state_max_abs": 0.0
+        },
+        "c4-t1": {
+          "output_max_abs": 0.0,
+          "passed": true,
+          "state_max_abs": 0.0
+        },
+        "c4-t4": {
+          "output_max_abs": 0.0,
+          "passed": true,
+          "state_max_abs": 0.0
+        },
+        "c8-t1": {
+          "output_max_abs": 0.0,
+          "passed": true,
+          "state_max_abs": 0.0
+        },
+        "c8-t4": {
+          "output_max_abs": 0.0,
+          "passed": true,
+          "state_max_abs": 0.0
+        }
+      },
+      "source_sha256": "8bea13cce0c1fd15a86fd4d0f3821c708d85cf8973a7367741f524c446b9ce14",
+      "weighted_speedup_vs_upstream": 0.9957252160540032
+    },
+    {
+      "all_parity_passed": true,
+      "bv_cap": 64,
+      "measurements_us": {
+        "c1-t1": 54.98496055603027,
+        "c12-t1": 56.27200126647949,
+        "c12-t4": 70.65983772277832,
+        "c16-t1": 56.0972785949707,
+        "c16-t4": 88.17791938781738,
+        "c4-t1": 55.38815975189209,
+        "c4-t4": 56.32192134857178,
+        "c8-t1": 57.221760749816895,
+        "c8-t4": 56.635518074035645
+      },
+      "name": "bv64-w1",
+      "num_stages": 3,
+      "num_warps": 1,
+      "parity": {
+        "c1-t1": {
+          "output_max_abs": 0.0,
+          "passed": true,
+          "state_max_abs": 0.0
+        },
+        "c12-t1": {
+          "output_max_abs": 0.0,
+          "passed": true,
+          "state_max_abs": 0.0
+        },
+        "c12-t4": {
+          "output_max_abs": 0.0,
+          "passed": true,
+          "state_max_abs": 0.0
+        },
+        "c16-t1": {
+          "output_max_abs": 0.0,
+          "passed": true,
+          "state_max_abs": 0.0
+        },
+        "c16-t4": {
+          "output_max_abs": 0.0,
+          "passed": true,
+          "state_max_abs": 0.0
+        },
+        "c4-t1": {
+          "output_max_abs": 0.0,
+          "passed": true,
+          "state_max_abs": 0.0
+        },
+        "c4-t4": {
+          "output_max_abs": 0.0,
+          "passed": true,
+          "state_max_abs": 0.0
+        },
+        "c8-t1": {
+          "output_max_abs": 0.0,
+          "passed": true,
+          "state_max_abs": 0.0
+        },
+        "c8-t4": {
+          "output_max_abs": 0.0,
+          "passed": true,
+          "state_max_abs": 0.0
+        }
+      },
+      "source_sha256": "360ec61696a0bda083da1a352ef225c7edae35fe7b7c7e7ae7a8c9113e5e5dd4",
+      "weighted_speedup_vs_upstream": 0.7409343441678334
+    },
+    {
+      "all_parity_passed": true,
+      "bv_cap": 128,
+      "measurements_us": {
+        "c1-t1": 57.60767936706543,
+        "c12-t1": 232.59967803955078,
+        "c12-t4": 524.3462371826172,
+        "c16-t1": 281.04000091552734,
+        "c16-t4": 653.2371520996094,
+        "c4-t1": 97.68063545227051,
+        "c4-t4": 244.51839447021484,
+        "c8-t1": 162.09407806396484,
+        "c8-t4": 354.4211196899414
+      },
+      "name": "bv128-w1",
+      "num_stages": 3,
+      "num_warps": 1,
+      "parity": {
+        "c1-t1": {
+          "output_max_abs": 0.0,
+          "passed": true,
+          "state_max_abs": 0.0
+        },
+        "c12-t1": {
+          "output_max_abs": 0.0,
+          "passed": true,
+          "state_max_abs": 0.0
+        },
+        "c12-t4": {
+          "output_max_abs": 0.0,
+          "passed": true,
+          "state_max_abs": 0.0
+        },
+        "c16-t1": {
+          "output_max_abs": 0.0,
+          "passed": true,
+          "state_max_abs": 0.0
+        },
+        "c16-t4": {
+          "output_max_abs": 0.0,
+          "passed": true,
+          "state_max_abs": 0.0
+        },
+        "c4-t1": {
+          "output_max_abs": 0.0,
+          "passed": true,
+          "state_max_abs": 0.0
+        },
+        "c4-t4": {
+          "output_max_abs": 0.0,
+          "passed": true,
+          "state_max_abs": 0.0
+        },
+        "c8-t1": {
+          "output_max_abs": 0.0,
+          "passed": true,
+          "state_max_abs": 0.0
+        },
+        "c8-t4": {
+          "output_max_abs": 0.0,
+          "passed": true,
+          "state_max_abs": 0.0
+        }
+      },
+      "source_sha256": "f4b2bcb218346c6d6c2eaaa88220819ead3456648478902630655f88c6a08e87",
+      "weighted_speedup_vs_upstream": 0.11246932836487962
+    },
+    {
+      "all_parity_passed": false,
+      "bv_cap": 32,
+      "measurements_us": {
+        "c1-t1": 56.90752029418945,
+        "c12-t1": 57.50783920288086,
+        "c12-t4": 55.68704128265381,
+        "c16-t1": 57.90207862854004,
+        "c16-t4": 73.99040222167969,
+        "c4-t1": 57.02784061431885,
+        "c4-t4": 56.66048049926758,
+        "c8-t1": 56.78207874298096,
+        "c8-t4": 55.60512065887451
+      },
+      "name": "bv32-w2",
+      "num_stages": 3,
+      "num_warps": 2,
+      "parity": {
+        "c1-t1": {
+          "output_max_abs": 0.0,
+          "passed": true,
+          "state_max_abs": 5.960464477539063e-08
+        },
+        "c12-t1": {
+          "output_max_abs": 1.1920928955078125e-07,
+          "passed": true,
+          "state_max_abs": 5.960464477539063e-08
+        },
+        "c12-t4": {
+          "output_max_abs": 9.5367431640625e-07,
+          "passed": true,
+          "state_max_abs": 8.940696716308594e-08
+        },
+        "c16-t1": {
+          "output_max_abs": 3.814697265625e-06,
+          "passed": true,
+          "state_max_abs": 1.1920928955078125e-07
+        },
+        "c16-t4": {
+          "output_max_abs": 1.52587890625e-05,
+          "passed": false,
+          "state_max_abs": 1.1920928955078125e-07
+        },
+        "c4-t1": {
+          "output_max_abs": 7.450580596923828e-09,
+          "passed": true,
+          "state_max_abs": 8.940696716308594e-08
+        },
+        "c4-t4": {
+          "output_max_abs": 3.0517578125e-05,
+          "passed": false,
+          "state_max_abs": 8.940696716308594e-08
+        },
+        "c8-t1": {
+          "output_max_abs": 3.814697265625e-06,
+          "passed": true,
+          "state_max_abs": 8.940696716308594e-08
+        },
+        "c8-t4": {
+          "output_max_abs": 1.9073486328125e-06,
+          "passed": true,
+          "state_max_abs": 1.1920928955078125e-07
+        }
+      },
+      "source_sha256": "c0813c19710ab94a18efad8451ad5374c47e91bc252bffc0a4b9d903a8552f47",
+      "weighted_speedup_vs_upstream": 0.8298185494957795
+    },
+    {
+      "all_parity_passed": false,
+      "bv_cap": 32,
+      "measurements_us": {
+        "c1-t1": 55.12767791748047,
+        "c12-t1": 56.18815898895264,
+        "c12-t4": 56.06400012969971,
+        "c16-t1": 57.04319953918457,
+        "c16-t4": 57.74335861206055,
+        "c4-t1": 55.47840118408203,
+        "c4-t4": 56.7903995513916,
+        "c8-t1": 55.4860782623291,
+        "c8-t4": 56.007041931152344
+      },
+      "name": "bv32-w4",
+      "num_stages": 3,
+      "num_warps": 4,
+      "parity": {
+        "c1-t1": {
+          "output_max_abs": 0.0,
+          "passed": true,
+          "state_max_abs": 2.9802322387695312e-08
+        },
+        "c12-t1": {
+          "output_max_abs": 1.1920928955078125e-07,
+          "passed": true,
+          "state_max_abs": 5.960464477539063e-08
+        },
+        "c12-t4": {
+          "output_max_abs": 1.52587890625e-05,
+          "passed": false,
+          "state_max_abs": 8.940696716308594e-08
+        },
+        "c16-t1": {
+          "output_max_abs": 3.814697265625e-06,
+          "passed": true,
+          "state_max_abs": 8.940696716308594e-08
+        },
+        "c16-t4": {
+          "output_max_abs": 1.52587890625e-05,
+          "passed": false,
+          "state_max_abs": 8.940696716308594e-08
+        },
+        "c4-t1": {
+          "output_max_abs": 1.1920928955078125e-07,
+          "passed": true,
+          "state_max_abs": 8.940696716308594e-08
+        },
+        "c4-t4": {
+          "output_max_abs": 6.103515625e-05,
+          "passed": false,
+          "state_max_abs": 8.940696716308594e-08
+        },
+        "c8-t1": {
+          "output_max_abs": 3.814697265625e-06,
+          "passed": true,
+          "state_max_abs": 5.960464477539063e-08
+        },
+        "c8-t4": {
+          "output_max_abs": 6.103515625e-05,
+          "passed": false,
+          "state_max_abs": 1.043081283569336e-07
+        }
+      },
+      "source_sha256": "c484cb49be4589556b1d9a3aea3c6046a637751845ce7d3e1c319e56588ea311",
+      "weighted_speedup_vs_upstream": 0.9915201972502099
+    },
+    {
+      "all_parity_passed": false,
+      "bv_cap": 64,
+      "measurements_us": {
+        "c1-t1": 55.91231822967529,
+        "c12-t1": 57.5270414352417,
+        "c12-t4": 57.35616207122803,
+        "c16-t1": 57.83552169799805,
+        "c16-t4": 61.573758125305176,
+        "c4-t1": 57.258877754211426,
+        "c4-t4": 56.540160179138184,
+        "c8-t1": 56.686081886291504,
+        "c8-t4": 57.047038078308105
+      },
+      "name": "bv64-w2",
+      "num_stages": 3,
+      "num_warps": 2,
+      "parity": {
+        "c1-t1": {
+          "output_max_abs": 0.0,
+          "passed": true,
+          "state_max_abs": 5.960464477539063e-08
+        },
+        "c12-t1": {
+          "output_max_abs": 1.1920928955078125e-07,
+          "passed": true,
+          "state_max_abs": 5.960464477539063e-08
+        },
+        "c12-t4": {
+          "output_max_abs": 9.5367431640625e-07,
+          "passed": true,
+          "state_max_abs": 8.940696716308594e-08
+        },
+        "c16-t1": {
+          "output_max_abs": 3.814697265625e-06,
+          "passed": true,
+          "state_max_abs": 1.1920928955078125e-07
+        },
+        "c16-t4": {
+          "output_max_abs": 1.52587890625e-05,
+          "passed": false,
+          "state_max_abs": 1.1920928955078125e-07
+        },
+        "c4-t1": {
+          "output_max_abs": 7.450580596923828e-09,
+          "passed": true,
+          "state_max_abs": 8.940696716308594e-08
+        },
+        "c4-t4": {
+          "output_max_abs": 3.0517578125e-05,
+          "passed": false,
+          "state_max_abs": 8.940696716308594e-08
+        },
+        "c8-t1": {
+          "output_max_abs": 3.814697265625e-06,
+          "passed": true,
+          "state_max_abs": 8.940696716308594e-08
+        },
+        "c8-t4": {
+          "output_max_abs": 1.9073486328125e-06,
+          "passed": true,
+          "state_max_abs": 1.1920928955078125e-07
+        }
+      },
+      "source_sha256": "139882e39cd6a4d30e61e64661d6f65be830bc8e2e191aee0216c59323b1500b",
+      "weighted_speedup_vs_upstream": 0.9440147860328526
+    },
+    {
+      "all_parity_passed": false,
+      "bv_cap": 64,
+      "measurements_us": {
+        "c1-t1": 56.540160179138184,
+        "c12-t1": 57.146878242492676,
+        "c12-t4": 57.655677795410156,
+        "c16-t1": 57.62944221496582,
+        "c16-t4": 74.94080066680908,
+        "c4-t1": 56.330881118774414,
+        "c4-t4": 57.71200180053711,
+        "c8-t1": 55.96799850463867,
+        "c8-t4": 57.12639808654785
+      },
+      "name": "bv64-w4",
+      "num_stages": 3,
+      "num_warps": 4,
+      "parity": {
+        "c1-t1": {
+          "output_max_abs": 0.0,
+          "passed": true,
+          "state_max_abs": 2.9802322387695312e-08
+        },
+        "c12-t1": {
+          "output_max_abs": 1.1920928955078125e-07,
+          "passed": true,
+          "state_max_abs": 5.960464477539063e-08
+        },
+        "c12-t4": {
+          "output_max_abs": 1.52587890625e-05,
+          "passed": false,
+          "state_max_abs": 8.940696716308594e-08
+        },
+        "c16-t1": {
+          "output_max_abs": 3.814697265625e-06,
+          "passed": true,
+          "state_max_abs": 8.940696716308594e-08
+        },
+        "c16-t4": {
+          "output_max_abs": 1.52587890625e-05,
+          "passed": false,
+          "state_max_abs": 8.940696716308594e-08
+        },
+        "c4-t1": {
+          "output_max_abs": 1.1920928955078125e-07,
+          "passed": true,
+          "state_max_abs": 8.940696716308594e-08
+        },
+        "c4-t4": {
+          "output_max_abs": 6.103515625e-05,
+          "passed": false,
+          "state_max_abs": 8.940696716308594e-08
+        },
+        "c8-t1": {
+          "output_max_abs": 3.814697265625e-06,
+          "passed": true,
+          "state_max_abs": 5.960464477539063e-08
+        },
+        "c8-t4": {
+          "output_max_abs": 6.103515625e-05,
+          "passed": false,
+          "state_max_abs": 1.043081283569336e-07
+        }
+      },
+      "source_sha256": "e0ec4f912850e30d9d5b052985837dab0632aa81da951ecfbce90b81ba8766f5",
+      "weighted_speedup_vs_upstream": 0.8236031554782792
+    }
+  ]
+}

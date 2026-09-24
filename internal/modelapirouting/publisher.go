@@ -48,6 +48,10 @@ type BoundReferenceTargetResolver interface {
 	ResolveBoundHostedModelReference(ctx context.Context, operatorTenantID, supplier, adapter, credentialReference, endpointReference, endpointConfigDigest string) (ResolvedReference, error)
 }
 
+type BoundTargetResolver interface {
+	ResolveBoundHostedModelTarget(ctx context.Context, operatorTenantID, supplier, adapter, credentialReference, endpointReference, endpointConfigDigest string) (ResolvedTarget, error)
+}
+
 type RuntimeCredentialResolver interface {
 	ResolveHostedModelCredential(ctx context.Context, operatorTenantID, credentialReference string) ([]byte, error)
 }
@@ -140,6 +144,24 @@ func (r *RegistryTargetResolver) ResolveBoundHostedModelReference(ctx context.Co
 	return r.ResolveHostedModelReference(ctx, operatorTenantID, supplier, adapter, credentialReference)
 }
 
+// ResolveBoundHostedModelTarget applies the same immutable endpoint check to
+// transparent OpenAI-compatible routes before resolving their credential.
+// Generic proxying is intentionally not a way around target pinning.
+func (r *RegistryTargetResolver) ResolveBoundHostedModelTarget(ctx context.Context, operatorTenantID, supplier, adapter, credentialReference, endpointReference, endpointConfigDigest string) (ResolvedTarget, error) {
+	if r == nil || endpointReference != supplier+"/"+adapter {
+		return ResolvedTarget{}, errors.New("hosted target binding does not match its supplier adapter registry key")
+	}
+	endpoint, exists := r.endpoints[endpointReference]
+	if !exists {
+		return ResolvedTarget{}, errors.New("bound hosted supplier endpoint is not configured")
+	}
+	digest, err := modelapitarget.EndpointConfigDigest(endpointReference, endpoint)
+	if err != nil || digest != endpointConfigDigest {
+		return ResolvedTarget{}, errors.New("bound hosted supplier endpoint config does not match its immutable digest")
+	}
+	return r.ResolveHostedModelTarget(ctx, operatorTenantID, supplier, adapter, credentialReference)
+}
+
 func (r *RegistryTargetResolver) ResolveHostedModelCredential(ctx context.Context, operatorTenantID, credentialReference string) ([]byte, error) {
 	if r == nil || operatorTenantID == "" || credentialReference == "" {
 		return nil, errors.New("operator and credential reference are required")
@@ -223,7 +245,17 @@ func (p *Publisher) PublishOnce(ctx context.Context) error {
 				candidate.Endpoint, candidate.Adapter, candidate.CredentialReference = target.Endpoint, candidateSource.Adapter, target.CredentialReference
 				candidate.Credential = ""
 			} else {
-				target, resolveErr := p.Resolver.ResolveHostedModelTarget(ctx, source.Publication.OperatorTenantID, candidate.Supplier, candidateSource.Adapter, candidateSource.CredentialReference)
+				var target ResolvedTarget
+				var resolveErr error
+				if candidate.TargetBindingID != "" {
+					boundResolver, ok := p.Resolver.(BoundTargetResolver)
+					if !ok {
+						return errors.New("immutable hosted target binding requires a bound target resolver")
+					}
+					target, resolveErr = boundResolver.ResolveBoundHostedModelTarget(ctx, source.Publication.OperatorTenantID, candidate.Supplier, candidateSource.Adapter, candidateSource.CredentialReference, candidateSource.EndpointReference, candidateSource.EndpointConfigDigest)
+				} else {
+					target, resolveErr = p.Resolver.ResolveHostedModelTarget(ctx, source.Publication.OperatorTenantID, candidate.Supplier, candidateSource.Adapter, candidateSource.CredentialReference)
+				}
 				if resolveErr != nil {
 					return resolveErr
 				}

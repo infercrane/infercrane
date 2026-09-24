@@ -258,7 +258,12 @@ class CampaignSupportTest(unittest.TestCase):
     def test_profile_and_kernel_gate_use_measured_device_time(self):
         trace = {
             "traceEvents": [
-                {"ph": "X", "cat": "kernel", "name": "gated_deltanet_update", "dur": 70},
+                {
+                    "ph": "X",
+                    "cat": "kernel",
+                    "name": "fused_sigmoid_gating_delta_rule_update_kernel",
+                    "dur": 70,
+                },
                 {"ph": "X", "cat": "kernel", "name": "cutlass_gemm", "dur": 20},
                 {"ph": "X", "cat": "kernel", "name": "memcpy", "dur": 10},
                 {"ph": "X", "cat": "cuda_runtime", "name": "cudaLaunchKernel", "dur": 999},

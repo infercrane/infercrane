@@ -103,6 +103,14 @@ class ControlAPI:
         request_path = "/admin/model-api/entitlements"
         return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
+    def record_marketplace_receipt(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        request_path = "/admin/marketplace/receipts"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
+
+    def lookup_marketplace_billing_requests(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        request_path = "/admin/marketplace/billing/requests"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
+
     def list_compute_providers(self) -> ObjectList:
         request_path = "/compute/providers"
         return cast(ObjectList, self._transport.request("GET", request_path))
@@ -402,6 +410,22 @@ class ControlAPI:
     def cancel_optimization_campaign(self, id: str, *, body: dict[str, Any]) -> dict[str, Any]:
         request_path = f"/optimization/campaigns/{quote(id, safe='')}/cancel"
         return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
+
+    def get_continual_optimization_policy(self, name: str) -> dict[str, Any]:
+        request_path = f"/deployments/{quote(name, safe='')}/continual-optimization/policy"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
+    def set_continual_optimization_policy(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
+        request_path = f"/deployments/{quote(name, safe='')}/continual-optimization/policy"
+        return cast(dict[str, Any], self._transport.request("PUT", request_path, body=body))
+
+    def evaluate_continual_optimization(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
+        request_path = f"/deployments/{quote(name, safe='')}/continual-optimization/evaluate"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
+
+    def list_continual_optimization_decisions(self, name: str) -> ObjectList:
+        request_path = f"/deployments/{quote(name, safe='')}/continual-optimization/decisions"
+        return cast(ObjectList, self._transport.request("GET", request_path))
 
     def list_optimized_artifacts(self) -> ObjectList:
         request_path = "/optimized-artifacts"

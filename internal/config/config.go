@@ -27,7 +27,7 @@ type Config struct {
 	HostedAuthAutoProvision                                                                                               bool
 	StripeSecretKey, StripeWebhookSecret, StripeBillingReturnURL                                                          string
 	ModelAPICatalogFile, ModelAPIOperatorTenantID, OpenRouterProviderCatalogFile                                          string
-	HostedModelAPIEndpoints                                                                                               map[string]string
+	HostedModelAPIEndpoints, OpenRouterModelAliases                                                                       map[string]string
 	BrezelSandboxURL, BrezelSandboxTokenFile, BrezelSandboxProjectID, BrezelSandboxTenantID, BrezelSandboxDefaultTemplate string
 	AcceleratorWorkerURL, AcceleratorWorkerTokenFile, BrezelOptimizationEnvironment                                       string
 	BrezelSandboxTemplates, BrezelSandboxModelConnectors                                                                  map[string]string
@@ -365,6 +365,18 @@ func load(requireAPIKey bool) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	openRouterModelAliases, err := envStringMap("INFERCRANE_OPENROUTER_MODEL_ALIASES_JSON")
+	if err != nil {
+		return Config{}, err
+	}
+	if len(openRouterModelAliases) > 128 {
+		return Config{}, errors.New("INFERCRANE_OPENROUTER_MODEL_ALIASES_JSON supports at most 128 aliases")
+	}
+	for externalID, productID := range openRouterModelAliases {
+		if externalID == "" || productID == "" || strings.TrimSpace(externalID) != externalID || strings.TrimSpace(productID) != productID || len(externalID) > 256 || len(productID) > 256 {
+			return Config{}, errors.New("INFERCRANE_OPENROUTER_MODEL_ALIASES_JSON must map non-empty model IDs of at most 256 bytes without surrounding whitespace")
+		}
+	}
 	brezelSandboxTemplates, err := envStringMap("INFERCRANE_BREZEL_SANDBOX_TEMPLATES_JSON")
 	if err != nil {
 		return Config{}, err
@@ -416,6 +428,7 @@ func load(requireAPIKey bool) (Config, error) {
 		ModelAPIOperatorTenantID:            env("INFERCRANE_MODEL_API_OPERATOR_TENANT_ID", ""),
 		OpenRouterProviderCatalogFile:       env("INFERCRANE_OPENROUTER_PROVIDER_CATALOG_FILE", ""),
 		HostedModelAPIEndpoints:             hostedModelAPIEndpoints,
+		OpenRouterModelAliases:              openRouterModelAliases,
 		BrezelSandboxURL:                    env("INFERCRANE_BREZEL_SANDBOX_URL", ""),
 		BrezelSandboxTokenFile:              env("INFERCRANE_BREZEL_SANDBOX_TOKEN_FILE", ""),
 		BrezelSandboxProjectID:              env("INFERCRANE_BREZEL_SANDBOX_PROJECT_ID", ""),

@@ -133,6 +133,19 @@ func TestHostedModelAPIEndpointsAreExplicitConfiguration(t *testing.T) {
 	}
 }
 
+func TestOpenRouterModelAliasesAreExplicitAndBounded(t *testing.T) {
+	t.Setenv("INFERCRANE_API_KEY", "test-key")
+	t.Setenv("INFERCRANE_OPENROUTER_MODEL_ALIASES_JSON", `{"qwen/qwen3.8-27b":"qwen3.8-27b"}`)
+	cfg, err := Load()
+	if err != nil || cfg.OpenRouterModelAliases["qwen/qwen3.8-27b"] != "qwen3.8-27b" {
+		t.Fatalf("OpenRouter model aliases=%#v err=%v", cfg.OpenRouterModelAliases, err)
+	}
+	t.Setenv("INFERCRANE_OPENROUTER_MODEL_ALIASES_JSON", `{" qwen/qwen3.8-27b":"qwen3.8-27b"}`)
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "INFERCRANE_OPENROUTER_MODEL_ALIASES_JSON") {
+		t.Fatalf("model alias with surrounding whitespace accepted: %v", err)
+	}
+}
+
 func TestHostedModelAPIEndpointsRequireExplicitOperatorTenant(t *testing.T) {
 	t.Setenv("INFERCRANE_API_KEY", "test-key")
 	t.Setenv("INFERCRANE_HOSTED_MODEL_API_ENDPOINTS_JSON", `{"deepseek/openai":"https://api.deepseek.com"}`)

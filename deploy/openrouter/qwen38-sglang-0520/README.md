@@ -5,7 +5,7 @@ OpenRouter provider endpoint. The public edge accepts only the declared model,
 streams without buffering, emits SSE heartbeats during quiet generation,
 propagates cancellation, and returns HTTP 429 before the model server queues
 past its safe boundary. The edge starts at eight concurrent requests, can grow
-to sixteen after healthy saturated windows, and can fall as low as four when
+to twelve after healthy saturated windows, and can fall as low as four when
 measured p95-oriented TTFT or request reliability regresses. A separate
 estimated-prefill budget prevents
 large prompts from occupying every scheduler slot; that budget is released at
@@ -17,7 +17,7 @@ the provider qualifier and a production soak. Modal H100/H200 measurements are
 screening evidence; they do not qualify a RunPod deployment.
 
 The current launch boundary is one H200 with adaptive admission from four to
-sixteen decode requests, starting at eight. The three-second p95 TTFT objective
+twelve decode requests, starting at eight. The three-second p95 TTFT objective
 is intended to settle around the measured twelve-request frontier and reject
 load before the runtime builds an unbounded queue. The catalog intentionally
 declares only 32,768 input tokens, 2,048 output tokens, and text input. Longer
@@ -85,7 +85,7 @@ go run ./tools/openrouter-provider-qualifier \
   --url https://provider.example.com \
   --api-key-file ~/.config/infercrane/openrouter-provider-token \
   --requests 64 \
-  --concurrency 16 \
+  --concurrency 12 \
   --output evidence/provider-qualification.json
 ```
 

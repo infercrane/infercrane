@@ -48,6 +48,7 @@ type admissionSnapshot struct {
 	rejected                uint64
 	completed               uint64
 	failed                  uint64
+	canceled                uint64
 	sloMissed               uint64
 	promptTokens            uint64
 	completionTokens        uint64
@@ -78,6 +79,7 @@ type admissionController struct {
 	rejected               uint64
 	completed              uint64
 	failed                 uint64
+	canceled               uint64
 	sloMissed              uint64
 	promptTokens           uint64
 	completionTokens       uint64
@@ -89,10 +91,11 @@ type admissionController struct {
 	prefillTokensInFlight  int64
 	prefillRejected        uint64
 
-	windowCompleted int
-	windowFailures  int
-	windowSLOMisses int
-	windowSaturated bool
+	windowCompleted   int
+	windowFailures    int
+	windowTTFTSamples int
+	windowSLOMisses   int
+	windowSaturated   bool
 }
 
 func newAdmissionController(config AdmissionConfig) (*admissionController, error) {
@@ -162,11 +165,13 @@ func (a *admissionController) complete(observation admissionObservation) {
 		a.inFlight--
 	}
 	a.completed++
-	a.windowCompleted++
 	a.requestSeconds += observation.Duration.Seconds()
 
+	canceled := observation.Outcome == "client_canceled"
 	succeeded := observation.StatusCode >= 200 && observation.StatusCode < 300 && observation.Outcome == "completed"
-	if !succeeded {
+	if canceled {
+		a.canceled++
+	} else if !succeeded {
 		a.failed++
 		a.windowFailures++
 	}
@@ -178,18 +183,30 @@ func (a *admissionController) complete(observation admissionObservation) {
 	}
 	a.revenueUSD += float64(observation.PromptTokens) * a.config.InputPricePerMillionUSD / 1_000_000
 	a.revenueUSD += float64(observation.CompletionTokens) * a.config.OutputPricePerMillionUSD / 1_000_000
+	// A caller cancellation is neither evidence of an unhealthy model server
+	// nor a successful SLO sample. Keep it visible, but exclude it from the
+	// adaptive window so user behavior cannot lower fleet capacity.
+	if canceled {
+		return
+	}
+	a.windowCompleted++
 
-	qualified := succeeded
+	qualified := false
 	if observation.TTFT > 0 {
 		a.ttftSeconds += observation.TTFT.Seconds()
 		a.ttftSamples++
-	}
-	if a.config.TargetTTFT > 0 {
-		qualified = qualified && observation.TTFT > 0 && observation.TTFT <= a.config.TargetTTFT
-		if succeeded && !qualified {
-			a.sloMissed++
-			a.windowSLOMisses++
+		a.windowTTFTSamples++
+		qualified = succeeded
+		if a.config.TargetTTFT > 0 {
+			qualified = qualified && observation.TTFT <= a.config.TargetTTFT
+			if succeeded && !qualified {
+				a.sloMissed++
+				a.windowSLOMisses++
+			}
 		}
+	}
+	if a.config.TargetTTFT == 0 {
+		qualified = succeeded
 	}
 	if qualified && observation.CompletionTokens > 0 {
 		a.productiveOutputTokens += uint64(observation.CompletionTokens)
@@ -198,7 +215,10 @@ func (a *admissionController) complete(observation admissionObservation) {
 	if a.config.TargetTTFT == 0 || a.config.MinLimit == a.config.MaxLimit || a.windowCompleted < a.config.Window {
 		return
 	}
-	bad := a.windowFailures > 0 || float64(a.windowSLOMisses)/float64(a.windowCompleted) > 0.05
+	bad := a.windowFailures > 0
+	if a.windowTTFTSamples > 0 {
+		bad = bad || float64(a.windowSLOMisses)/float64(a.windowTTFTSamples) > 0.05
+	}
 	if bad {
 		reduced := int(math.Floor(float64(a.limit) * 0.8))
 		if reduced < a.config.MinLimit {
@@ -210,6 +230,7 @@ func (a *admissionController) complete(observation admissionObservation) {
 	}
 	a.windowCompleted = 0
 	a.windowFailures = 0
+	a.windowTTFTSamples = 0
 	a.windowSLOMisses = 0
 	a.windowSaturated = false
 }
@@ -220,7 +241,7 @@ func (a *admissionController) snapshot() admissionSnapshot {
 	return admissionSnapshot{
 		startedAt: a.startedAt, inFlight: a.inFlight, limit: a.limit,
 		accepted: a.accepted, rejected: a.rejected, completed: a.completed,
-		failed: a.failed, sloMissed: a.sloMissed,
+		failed: a.failed, canceled: a.canceled, sloMissed: a.sloMissed,
 		promptTokens: a.promptTokens, completionTokens: a.completionTokens,
 		productiveOutputTokens: a.productiveOutputTokens,
 		requestSeconds:         a.requestSeconds, ttftSeconds: a.ttftSeconds,
@@ -263,6 +284,7 @@ func (a *admissionController) writePrometheus(writer io.Writer, now time.Time) {
 		{"infercrane_provider_prefill_rejected_total", "Requests rejected by the long-prefill token boundary.", "counter", s.prefillRejected},
 		{"infercrane_provider_requests_completed_total", "Accepted requests that reached a terminal outcome.", "counter", s.completed},
 		{"infercrane_provider_requests_failed_total", "Accepted requests with a non-success terminal outcome.", "counter", s.failed},
+		{"infercrane_provider_requests_canceled_total", "Accepted requests canceled by the caller before a terminal model response.", "counter", s.canceled},
 		{"infercrane_provider_ttft_slo_missed_total", "Successful requests that missed the configured TTFT objective.", "counter", s.sloMissed},
 		{"infercrane_provider_prompt_tokens_total", "Billable prompt tokens reported by the model server.", "counter", s.promptTokens},
 		{"infercrane_provider_completion_tokens_total", "Billable completion tokens reported by the model server.", "counter", s.completionTokens},

@@ -72,7 +72,7 @@ type SearchRequest struct {
 // should investigate them: the pinned runtime/vendor path first, specialized
 // libraries next, then adaptable DSL and handwritten templates.
 func DefaultRegistry() Registry {
-	allFamilies := []OperatorFamily{ResidualRMSNorm, QuantizedLinear, SwiGLU, AttentionPrefill, AttentionDecode, KVCache, MoERouting, Sampling}
+	allFamilies := []OperatorFamily{ResidualRMSNorm, QuantizedLinear, SwiGLU, AttentionPrefill, AttentionDecode, KVCache, LinearRecurrence, StateCommit, MoERouting, Sampling}
 	return Registry{Version: RegistryVersion, Implementations: []Implementation{
 		{
 			ID: "runtime-vllm", Name: "Pinned vLLM implementation", Project: "vLLM", SourceURL: "https://github.com/vllm-project/vllm", License: "Apache-2.0", Kind: "runtime-bundled", Backend: "vllm", OperatorFamilies: allFamilies, RuntimeAllowlist: []string{"vllm"}, HardwareVendors: []string{"nvidia"}, Priority: 10, Status: "baseline", RevisionPolicy: "use the implementation bundled in the pinned runtime image", ExecutionBoundary: "trusted-runtime-image",
@@ -83,7 +83,7 @@ func DefaultRegistry() Registry {
 			Notes: []string{"Measure this implementation as the control before adapting or generating a kernel."},
 		},
 		{
-			ID: "flashinfer", Name: "FlashInfer kernel and primitive", Project: "FlashInfer", SourceURL: "https://github.com/flashinfer-ai/flashinfer", License: "Apache-2.0", Kind: "specialized-library", Backend: "flashinfer", OperatorFamilies: []OperatorFamily{AttentionPrefill, AttentionDecode, KVCache, MoERouting, Sampling}, HardwareVendors: []string{"nvidia"}, MinimumComputeCapability: "sm75", DTypes: []string{"fp16", "bf16", "fp8", "int8"}, Phases: []Phase{PhasePrefill, PhaseDecode, PhaseMixed}, Priority: 20, Status: "review-required", RevisionPolicy: "pin an immutable upstream commit and package digest per campaign", ExecutionBoundary: "brezel-build-and-target-gpu-worker",
+			ID: "flashinfer", Name: "FlashInfer kernel and primitive", Project: "FlashInfer", SourceURL: "https://github.com/flashinfer-ai/flashinfer", License: "Apache-2.0", Kind: "specialized-library", Backend: "flashinfer", OperatorFamilies: []OperatorFamily{AttentionPrefill, AttentionDecode, KVCache, LinearRecurrence, MoERouting, Sampling}, HardwareVendors: []string{"nvidia"}, MinimumComputeCapability: "sm75", DTypes: []string{"fp16", "bf16", "fp8", "int8"}, Phases: []Phase{PhasePrefill, PhaseDecode, PhaseMixed}, Priority: 20, Status: "review-required", RevisionPolicy: "pin an immutable upstream commit and package digest per campaign", ExecutionBoundary: "brezel-build-and-target-gpu-worker",
 			Notes: []string{"Runner and tactic selection must be profiled for the exact shapes and accelerator."},
 		},
 		{

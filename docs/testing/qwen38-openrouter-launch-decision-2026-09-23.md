@@ -14,7 +14,7 @@ production soak with this bounded offer:
 - recipe: FP8 weights and KV cache, bounded CUDA graphs, NEXTN/MTP with three
   speculative steps and four draft tokens, and the runtime-selected DeepGEMM
   FP8 path;
-- admission: adaptive four-to-sixteen decode requests, starting at eight, with
+- admission: adaptive four-to-twelve decode requests, starting at eight, with
   a three-second p95 TTFT objective and a separately bounded prefill-token
   budget; reject immediately with HTTP 429 above either boundary;
 - public contract: text input, 32,768 input tokens, 2,048 output tokens, tools,
@@ -278,18 +278,22 @@ finds a shape that the vendor path does not cover. Earlier custom residual plus
 RMSNorm Triton and CUDA candidates were also correctly rejected after their
 endpoint ceiling or measured performance lost to the runtime operator.
 
-The recurrent GDN family did not clear the custom-kernel gate either. It was
-less than 5% of measured endpoint GPU time, and the compatible fused
-FlashInfer implementation lost 5.8% at saturation. Generating another custom
-GDN kernel would spend engineering time below the measured endpoint ceiling;
-the campaign therefore records a deliberate rejection instead of manufacturing
-a kernel headline.
+The recurrent GDN family accounted for 14.66% of device time in the saturated
+concurrency-sixteen trace, so it cleared the gate for a bounded custom search.
+The exact H200 lab tested eight tile and warp configurations at Qwen3.8's real
+16 key-head, 48 value-head, 128-dimension geometry across packed concurrency
+one through sixteen and four-token MTP verification. The pinned upstream
+BV32/one-warp kernel remained the winner. The closest parity-preserving
+candidate was 0.43% slower; larger tiles were 26% to 89% slower, and multi-warp
+variants changed reduction results without improving speed. No custom GDN
+kernel is promoted.
 
 Backend evidence:
 
 - `docs/testing/evidence/qwen38-public-decode-saturation-modal-2026-09-23T045002Z-failures.json`
 - `docs/testing/evidence/qwen38-public-decode-saturation-modal-2026-09-23T045916Z.json`
 - `docs/testing/evidence/qwen38-public-decode-saturation-modal-2026-09-23T045916Z-failures.json`
+- `docs/testing/evidence/qwen38-gdn-kernel-h200-2026-09-23T181527Z.json`
 
 ## Required launch gates
 

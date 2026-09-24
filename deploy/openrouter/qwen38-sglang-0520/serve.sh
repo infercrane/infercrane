@@ -179,13 +179,11 @@ runtime_pid=$!
 edge_args=(
   --min-in-flight 4
   --initial-in-flight 8
-  --max-in-flight 16
+  --max-in-flight 12
   --admission-window 32
   --target-ttft 3s
   --max-prefill-tokens-in-flight "${INFERCRANE_MAX_PREFILL_TOKENS_IN_FLIGHT:-65536}"
   --qualified-output-tps "${INFERCRANE_QUALIFIED_OUTPUT_TPS:-0}"
-  --input-price-per-million "${INFERCRANE_INPUT_PRICE_PER_MILLION_USD:-0.10}"
-  --output-price-per-million "${INFERCRANE_OUTPUT_PRICE_PER_MILLION_USD:-2.20}"
   --gpu-hourly-cost "${INFERCRANE_GPU_HOURLY_COST_USD:-0}"
 )
 if [[ -n "${INFERCRANE_OPENROUTER_METRICS_KEY_FILE:-}" ]]; then

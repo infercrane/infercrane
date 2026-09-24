@@ -210,7 +210,10 @@ def merge_prometheus_measurements(
 def _kernel_family(name: str) -> str:
     lowered = name.lower()
     families = (
-        ("gated_deltanet", ("deltanet", "gdn", "linear_attn", "mamba")),
+        (
+            "gated_deltanet",
+            ("deltanet", "delta_rule", "gdn", "linear_attn", "mamba"),
+        ),
         ("normalization", ("rmsnorm", "layernorm", "norm_kernel")),
         ("attention", ("attention", "flash_attn", "flashinfer", "fmha")),
         ("gemm", ("gemm", "matmul", "cutlass", "cublas", "wgmma", "nvjet")),

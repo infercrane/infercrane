@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/kernelplanner"
+	"github.com/infercrane/infercrane/internal/kernelresearch"
 )
 
 const (
@@ -69,19 +70,20 @@ type Workload struct {
 }
 
 type Policy struct {
-	MaxCandidates          int       `json:"max_candidates"`
-	MaxCostUSD             float64   `json:"max_cost_usd"`
-	MinHotspotFraction     float64   `json:"min_hotspot_fraction"`
-	MinAmdahlCeiling       float64   `json:"min_amdahl_ceiling"`
-	TargetEndToEndSpeedup  float64   `json:"target_end_to_end_speedup"`
-	MinKernelSpeedup       float64   `json:"min_kernel_speedup"`
-	MaxMemoryRegressionPct float64   `json:"max_memory_regression_percent"`
-	RequireSanitizer       bool      `json:"require_sanitizer"`
-	RequireHiddenShapes    bool      `json:"require_hidden_shapes"`
-	RequireServingReplay   bool      `json:"require_serving_replay"`
-	RequireQuality         bool      `json:"require_quality"`
-	AllowGeneratedKernels  bool      `json:"allow_generated_kernels"`
-	AuthorizedUntil        time.Time `json:"authorized_until"`
+	MaxCandidates          int                   `json:"max_candidates"`
+	MaxCostUSD             float64               `json:"max_cost_usd"`
+	MinHotspotFraction     float64               `json:"min_hotspot_fraction"`
+	MinAmdahlCeiling       float64               `json:"min_amdahl_ceiling"`
+	TargetEndToEndSpeedup  float64               `json:"target_end_to_end_speedup"`
+	MinKernelSpeedup       float64               `json:"min_kernel_speedup"`
+	MaxMemoryRegressionPct float64               `json:"max_memory_regression_percent"`
+	RequireSanitizer       bool                  `json:"require_sanitizer"`
+	RequireHiddenShapes    bool                  `json:"require_hidden_shapes"`
+	RequireServingReplay   bool                  `json:"require_serving_replay"`
+	RequireQuality         bool                  `json:"require_quality"`
+	AllowGeneratedKernels  bool                  `json:"allow_generated_kernels"`
+	KernelResearch         kernelresearch.Policy `json:"kernel_research,omitzero"`
+	AuthorizedUntil        time.Time             `json:"authorized_until"`
 }
 
 type SourcePin struct {
@@ -170,20 +172,22 @@ type GenerationRequest struct {
 	Runtime     kernelplanner.RuntimeIdentity  `json:"runtime"`
 	Hardware    kernelplanner.HardwareIdentity `json:"hardware"`
 	Workload    Workload                       `json:"workload"`
+	Research    *kernelresearch.Intent         `json:"research,omitempty"`
 }
 
 // GenerationEvidence points at immutable generated source. Generated code is
 // still untrusted input: it must pass the same isolated build and exact-target
 // qualification gates as reviewed source.
 type GenerationEvidence struct {
-	InputDigest           string    `json:"input_digest"`
-	CandidateID           string    `json:"candidate_id"`
-	Generator             string    `json:"generator"`
-	GeneratorVersion      string    `json:"generator_version"`
-	ProfileArtifactDigest string    `json:"profile_artifact_digest"`
-	Source                SourcePin `json:"source"`
-	GeneratedAt           time.Time `json:"generated_at"`
-	CostUSD               float64   `json:"cost_usd"`
+	InputDigest           string                  `json:"input_digest"`
+	CandidateID           string                  `json:"candidate_id"`
+	Generator             string                  `json:"generator"`
+	GeneratorVersion      string                  `json:"generator_version"`
+	ProfileArtifactDigest string                  `json:"profile_artifact_digest"`
+	Source                SourcePin               `json:"source"`
+	GeneratedAt           time.Time               `json:"generated_at"`
+	CostUSD               float64                 `json:"cost_usd"`
+	Research              *kernelresearch.Receipt `json:"research,omitempty"`
 }
 
 type QualificationRequest struct {
@@ -350,14 +354,31 @@ func (e Engine) Run(ctx context.Context, request Request) (Result, error) {
 			if err = e.report(ctx, Progress{Stage: "search", Progress: 20 + index*5/max(len(plan.Candidates), 1), Message: "Generating one profile-bound kernel candidate in isolation.", CostUSD: result.CostUSD}); err != nil {
 				return result, err
 			}
-			generated, generationErr := e.Generator.Generate(ctx, GenerationRequest{InputDigest: digest, Candidate: candidate, Profile: profile, Model: request.Model, Runtime: request.Runtime, Hardware: request.Hardware, Workload: request.Workload})
+			var researchIntent *kernelresearch.Intent
+			if request.Policy.KernelResearch.Enabled {
+				researchPolicy := request.Policy.KernelResearch
+				researchPolicy.HotspotFraction = candidate.DeviceTimeFraction
+				intent, intentErr := kernelresearch.NewIntent(kernelresearch.Identity{
+					InputDigest: digest, CandidateID: candidate.ID,
+					ProfileArtifactDigest: profile.ArtifactDigest,
+					ModelRevision:         request.Model.Revision,
+					RuntimeImageDigest:    request.Runtime.ImageDigest,
+					Hardware:              strings.Join([]string{request.Hardware.Vendor, request.Hardware.Accelerator, request.Hardware.ComputeCapability}, "/"),
+					WorkloadDigest:        request.Workload.Digest,
+				}, researchPolicy)
+				if intentErr != nil {
+					return result, fmt.Errorf("create kernel research intent: %w", intentErr)
+				}
+				researchIntent = &intent
+			}
+			generated, generationErr := e.Generator.Generate(ctx, GenerationRequest{InputDigest: digest, Candidate: candidate, Profile: profile, Model: request.Model, Runtime: request.Runtime, Hardware: request.Hardware, Workload: request.Workload, Research: researchIntent})
 			if generationErr != nil {
 				experiment.State, experiment.FailureCode = "inconclusive", "kernel_generation_failed"
 				experiment.Reasons = []string{generationErr.Error()}
 				result.Experiments = append(result.Experiments, experiment)
 				continue
 			}
-			if generationErr = validateGeneration(digest, candidate, profile, generated); generationErr != nil {
+			if generationErr = validateGeneration(digest, candidate, profile, researchIntent, generated); generationErr != nil {
 				experiment.State, experiment.FailureCode = "rejected", "generation_evidence_invalid"
 				experiment.Reasons = []string{generationErr.Error()}
 				result.Experiments = append(result.Experiments, experiment)
@@ -464,6 +485,9 @@ func normalize(request Request) Request {
 	if request.Policy.MaxCandidates == 0 {
 		request.Policy.MaxCandidates = 3
 	}
+	if request.Policy.KernelResearch.Enabled {
+		request.Policy.KernelResearch = kernelresearch.NormalizePolicy(request.Policy.KernelResearch)
+	}
 	if request.Policy.MinHotspotFraction == 0 {
 		request.Policy.MinHotspotFraction = .05
 	}
@@ -524,6 +548,17 @@ func validateAndDigest(request Request) (string, error) {
 	}
 	if request.Policy.MaxCandidates < 1 || request.Policy.MaxCandidates > 20 || request.Policy.MaxCostUSD <= 0 || math.IsNaN(request.Policy.MaxCostUSD) || math.IsInf(request.Policy.MaxCostUSD, 0) || request.Policy.MinHotspotFraction <= 0 || request.Policy.MinHotspotFraction >= 1 || request.Policy.MinAmdahlCeiling <= 1 || request.Policy.TargetEndToEndSpeedup <= 1 || request.Policy.MinKernelSpeedup <= 1 || request.Policy.MaxMemoryRegressionPct < 0 || request.Policy.AuthorizedUntil.IsZero() {
 		return "", errors.New("bounded candidate, cost, speed, hotspot, and memory policies are required")
+	}
+	if request.Policy.KernelResearch.Enabled {
+		if !request.Policy.AllowGeneratedKernels {
+			return "", errors.New("iterative kernel research requires generated kernels to be enabled")
+		}
+		if err := kernelresearch.ValidatePolicy(request.Policy.KernelResearch, false); err != nil {
+			return "", fmt.Errorf("kernel research policy: %w", err)
+		}
+		if request.Policy.KernelResearch.MaxCostUSD > request.Policy.MaxCostUSD {
+			return "", errors.New("kernel research cost authority cannot exceed campaign authority")
+		}
 	}
 	seen := map[string]struct{}{}
 	for _, source := range request.Sources {
@@ -591,7 +626,7 @@ func validateBuild(inputDigest string, build BuildEvidence) error {
 	return nil
 }
 
-func validateGeneration(inputDigest string, candidate kernelplanner.Candidate, profile ProfileEvidence, generated GenerationEvidence) error {
+func validateGeneration(inputDigest string, candidate kernelplanner.Candidate, profile ProfileEvidence, researchIntent *kernelresearch.Intent, generated GenerationEvidence) error {
 	if generated.InputDigest != inputDigest || generated.CandidateID != candidate.ID || generated.Generator == "" || generated.GeneratorVersion == "" || generated.GeneratedAt.IsZero() || generated.ProfileArtifactDigest != profile.ArtifactDigest || invalidCost(generated.CostUSD) {
 		return errors.New("generated source is not bound to the request, candidate, and measured profile")
 	}
@@ -601,6 +636,17 @@ func validateGeneration(inputDigest string, candidate kernelplanner.Candidate, p
 	for _, artifact := range generated.Source.Artifacts {
 		if !validArtifact(artifact) {
 			return errors.New("generated source artifact is not immutable and retrievable")
+		}
+	}
+	if researchIntent != nil {
+		if generated.Research == nil {
+			return errors.New("iterative generation requires a bound kernel research receipt")
+		}
+		if err := kernelresearch.ValidateReceipt(*researchIntent, *generated.Research); err != nil {
+			return fmt.Errorf("kernel research receipt: %w", err)
+		}
+		if generated.Source.Revision != generated.Research.BestSourceRevision {
+			return errors.New("generated source does not match the retained kernel research winner")
 		}
 	}
 	return nil
