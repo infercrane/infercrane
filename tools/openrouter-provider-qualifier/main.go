@@ -37,15 +37,23 @@ type streamResult struct {
 	CompletionTokens int     `json:"completion_tokens"`
 }
 
+type boundaryResult struct {
+	TargetPromptTokens     int          `json:"target_prompt_tokens"`
+	TargetCompletionTokens int          `json:"target_completion_tokens"`
+	ContentRepetitions     int          `json:"content_repetitions"`
+	Stream                 streamResult `json:"stream"`
+}
+
 type receipt struct {
-	SchemaVersion string         `json:"schema_version"`
-	CreatedAt     time.Time      `json:"created_at"`
-	Endpoint      string         `json:"endpoint"`
-	Model         string         `json:"model"`
-	Gates         []gate         `json:"gates"`
-	Stream        streamResult   `json:"stream"`
-	Load          map[string]any `json:"load"`
-	Passed        bool           `json:"passed"`
+	SchemaVersion string          `json:"schema_version"`
+	CreatedAt     time.Time       `json:"created_at"`
+	Endpoint      string          `json:"endpoint"`
+	Model         string          `json:"model"`
+	Gates         []gate          `json:"gates"`
+	Stream        streamResult    `json:"stream"`
+	Boundary      *boundaryResult `json:"boundary,omitempty"`
+	Load          map[string]any  `json:"load"`
+	Passed        bool            `json:"passed"`
 }
 
 type qualifier struct {
@@ -62,9 +70,14 @@ func main() {
 	requests := flag.Int("requests", 32, "number of bounded load requests")
 	concurrency := flag.Int("concurrency", 8, "bounded load concurrency")
 	output := flag.String("output", "", "optional JSON receipt path")
+	boundaryInput := flag.Int("boundary-input-tokens", 0, "optional exact prompt-token boundary to qualify")
+	boundaryOutput := flag.Int("boundary-output-tokens", 0, "optional exact completion-token boundary to qualify")
 	flag.Parse()
 	if *baseURL == "" || *keyFile == "" || *requests < 1 || *concurrency < 1 {
 		fatal(errors.New("--url, --api-key-file, positive --requests, and positive --concurrency are required"))
+	}
+	if (*boundaryInput == 0) != (*boundaryOutput == 0) || *boundaryInput < 0 || *boundaryOutput < 0 {
+		fatal(errors.New("--boundary-input-tokens and --boundary-output-tokens must both be positive or both omitted"))
 	}
 	parsed, err := url.Parse(*baseURL)
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
@@ -78,7 +91,7 @@ func main() {
 		baseURL: strings.TrimRight(*baseURL, "/"), apiKey: strings.TrimSpace(string(key)), model: *model,
 		client: &http.Client{Timeout: 5 * time.Minute, Transport: &http.Transport{MaxIdleConns: 128, MaxIdleConnsPerHost: 64, IdleConnTimeout: 90 * time.Second}},
 	}
-	result, err := q.run(context.Background(), *requests, *concurrency)
+	result, err := q.run(context.Background(), *requests, *concurrency, *boundaryInput, *boundaryOutput)
 	if err != nil {
 		fatal(err)
 	}
@@ -98,7 +111,7 @@ func main() {
 	}
 }
 
-func (q qualifier) run(ctx context.Context, requests, concurrency int) (receipt, error) {
+func (q qualifier) run(ctx context.Context, requests, concurrency, boundaryInput, boundaryOutput int) (receipt, error) {
 	result := receipt{SchemaVersion: "infercrane.dev/openrouter-provider-qualification/v1", CreatedAt: time.Now().UTC(), Endpoint: q.baseURL, Model: q.model}
 	catalogGate := q.catalogGate(ctx)
 	result.Gates = append(result.Gates, catalogGate)
@@ -130,7 +143,7 @@ func (q qualifier) run(ctx context.Context, requests, concurrency int) (receipt,
 
 	reasoning, status, err := q.postJSON(ctx, map[string]any{
 		"model": q.model, "messages": []map[string]string{{"role": "user", "content": "Think through 17 plus 25, then give the integer."}}, "temperature": 0, "max_tokens": 256,
-		"reasoning": map[string]any{"effort": "high"}, "include_reasoning": true,
+		"reasoning": map[string]any{"effort": "xhigh"}, "include_reasoning": true,
 	})
 	result.Gates = append(result.Gates, gate{Name: "reasoning_output", Passed: status == http.StatusOK && reasoningReady(reasoning), Detail: statusDetail(status, err)})
 
@@ -144,6 +157,13 @@ func (q qualifier) run(ctx context.Context, requests, concurrency int) (receipt,
 	serverErrors, _ := load["server_errors"].(int)
 	other, _ := load["other_statuses"].(int)
 	result.Gates = append(result.Gates, gate{Name: "bounded_load_no_server_errors", Passed: serverErrors == 0 && other == 0})
+
+	if boundaryInput > 0 {
+		boundary, err := q.boundary(ctx, boundaryInput, boundaryOutput)
+		result.Boundary = &boundary
+		passed := err == nil && boundary.Stream.Status == http.StatusOK && boundary.Stream.SawDone && boundary.Stream.SawFinishReason && boundary.Stream.PromptTokens == boundaryInput && boundary.Stream.CompletionTokens == boundaryOutput
+		result.Gates = append(result.Gates, gate{Name: "advertised_token_boundary", Passed: passed, Detail: statusDetail(boundary.Stream.Status, err)})
+	}
 
 	recovery, status, err := q.postJSON(ctx, map[string]any{"model": q.model, "messages": []map[string]string{{"role": "user", "content": "Reply recovered."}}, "temperature": 0, "max_tokens": 16})
 	result.Gates = append(result.Gates, gate{Name: "post_load_recovery", Passed: err == nil && status == http.StatusOK && positiveUsage(recovery), Detail: statusDetail(status, err)})
@@ -159,7 +179,7 @@ func (q qualifier) catalogGate(ctx context.Context) gate {
 	req.Header.Set("Authorization", "Bearer "+q.apiKey)
 	response, err := q.client.Do(req)
 	if err != nil {
-		return gate{Name: "provider_models_schema_2_4", Detail: err.Error()}
+		return gate{Name: "provider_models_schema_2_5", Detail: err.Error()}
 	}
 	defer response.Body.Close()
 	var catalog openrouterprovider.Catalog
@@ -171,7 +191,7 @@ func (q qualifier) catalogGate(ctx context.Context) gate {
 	for _, model := range catalog.Data {
 		found = found || model.ID == q.model
 	}
-	return gate{Name: "provider_models_schema_2_4", Passed: response.StatusCode == http.StatusOK && err == nil && found, Detail: statusDetail(response.StatusCode, err)}
+	return gate{Name: "provider_models_schema_2_5", Passed: response.StatusCode == http.StatusOK && err == nil && found, Detail: statusDetail(response.StatusCode, err)}
 }
 
 func (q qualifier) postJSON(ctx context.Context, payload map[string]any) (map[string]any, int, error) {
@@ -203,7 +223,15 @@ func (q qualifier) postRaw(ctx context.Context, body []byte) (int, error) {
 }
 
 func (q qualifier) stream(ctx context.Context) (streamResult, error) {
-	payload, _ := json.Marshal(map[string]any{"model": q.model, "messages": []map[string]string{{"role": "user", "content": "Reply with ready."}}, "temperature": 0, "max_tokens": 16, "stream": true, "stream_options": map[string]bool{"include_usage": true}})
+	return q.streamPrompt(ctx, "Reply with ready.", 16)
+}
+
+func (q qualifier) streamPrompt(ctx context.Context, content string, maxTokens int) (streamResult, error) {
+	return q.streamPayload(ctx, map[string]any{"model": q.model, "messages": []map[string]string{{"role": "user", "content": content}}, "temperature": 0, "max_tokens": maxTokens, "stream": true, "stream_options": map[string]bool{"include_usage": true}})
+}
+
+func (q qualifier) streamPayload(ctx context.Context, value map[string]any) (streamResult, error) {
+	payload, _ := json.Marshal(value)
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, q.baseURL+"/v1/chat/completions", bytes.NewReader(payload))
 	req.Header.Set("Authorization", "Bearer "+q.apiKey)
 	req.Header.Set("Content-Type", "application/json")
@@ -257,6 +285,35 @@ func (q qualifier) stream(ctx context.Context) (streamResult, error) {
 	return result, scanner.Err()
 }
 
+func (q qualifier) boundary(ctx context.Context, promptTokens, completionTokens int) (boundaryResult, error) {
+	// Qwen tokenizes the repeated leading-space atom as one token. Calibrate the
+	// fixed chat-template overhead against the deployed tokenizer so the final
+	// request exercises the exact advertised input boundary rather than an
+	// approximation based on bytes.
+	repetitions := promptTokens - 64
+	if repetitions < 1 {
+		repetitions = 1
+	}
+	calibration, status, err := q.postJSON(ctx, map[string]any{
+		"model": q.model, "messages": []map[string]string{{"role": "user", "content": strings.Repeat(" x", repetitions)}},
+		"temperature": 0, "max_tokens": 1,
+	})
+	if err != nil || status != http.StatusOK {
+		return boundaryResult{TargetPromptTokens: promptTokens, TargetCompletionTokens: completionTokens, ContentRepetitions: repetitions, Stream: streamResult{Status: status}}, err
+	}
+	usage, _ := calibration["usage"].(map[string]any)
+	repetitions += promptTokens - integer(usage["prompt_tokens"])
+	if repetitions < 1 {
+		return boundaryResult{}, errors.New("tokenizer calibration produced an invalid repetition count")
+	}
+	stream, err := q.streamPayload(ctx, map[string]any{
+		"model": q.model, "messages": []map[string]string{{"role": "user", "content": strings.Repeat(" x", repetitions)}},
+		"temperature": 0, "max_tokens": completionTokens, "ignore_eos": true,
+		"stream": true, "stream_options": map[string]bool{"include_usage": true},
+	})
+	return boundaryResult{TargetPromptTokens: promptTokens, TargetCompletionTokens: completionTokens, ContentRepetitions: repetitions, Stream: stream}, err
+}
+
 func deltaHasOutput(delta map[string]any) bool {
 	for _, key := range []string{"content", "reasoning", "reasoning_content"} {
 		if value, exists := delta[key]; exists && value != nil && strings.TrimSpace(fmt.Sprint(value)) != "" {
@@ -278,7 +335,8 @@ func (q qualifier) load(ctx context.Context, requests, concurrency int) map[stri
 			semaphore <- struct{}{}
 			defer func() { <-semaphore }()
 			started := time.Now()
-			_, status, err := q.postJSON(ctx, map[string]any{"model": q.model, "messages": []map[string]string{{"role": "user", "content": fmt.Sprintf("Reply with request %d.", index)}}, "temperature": 0, "max_tokens": 32})
+			result, err := q.streamPrompt(ctx, fmt.Sprintf("Reply with request %d.", index), 32)
+			status := result.Status
 			if err != nil {
 				status = 0
 			}

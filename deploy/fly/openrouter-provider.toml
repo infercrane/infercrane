@@ -1,0 +1,51 @@
+# Dedicated OpenRouter wholesale ingress. This data plane intentionally has no
+# database dependency: the trusted OpenRouter counterparty is reconciled from
+# content-free provider receipts outside the latency-sensitive request path.
+primary_region = "iad"
+kill_signal = "SIGTERM"
+kill_timeout = 35
+
+[build]
+  dockerfile = "../../Dockerfile"
+  build-target = "openrouter-edge"
+
+[env]
+  INFERCRANE_OPENROUTER_LISTEN = ":8080"
+  INFERCRANE_OPENROUTER_PROVIDER_CATALOG_FILE = "/etc/infercrane/provider-models.json"
+  INFERCRANE_OPENROUTER_PUBLIC_MODEL = "qwen/qwen3.8-27b"
+  INFERCRANE_OPENROUTER_UPSTREAM_MODEL = "qwen/qwen3.8-27b"
+  INFERCRANE_OPENROUTER_UPSTREAM_URL = "https://yasintoy--infercrane-qwen38-openrouter-20260924a-provider.us-east.modal.direct"
+  INFERCRANE_MARKETPLACE_LEDGER_URL = "https://api.infercrane.com"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = false
+  min_machines_running = 1
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 64
+    hard_limit = 96
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "15s"
+    method = "GET"
+    path = "/readyz"
+    timeout = "5s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+  processes = ["app"]
+
+[experimental]
+  cmd = [
+    "--max-in-flight", "64",
+    "--max-prefill-tokens-in-flight", "131072",
+    "--input-price-per-million", "0.081",
+    "--output-price-per-million", "1.782"
+  ]

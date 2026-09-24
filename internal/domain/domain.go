@@ -901,6 +901,33 @@ type OptimizationCandidateRun struct {
 	CreatedAt, UpdatedAt                                                time.Time
 }
 
+// ContinualOptimizationPolicyRecord and ContinualOptimizationDecisionRecord
+// are durable envelopes. Their JSON payloads use the versioned contracts in
+// internal/continualoptimizer so policy and decision history remain auditable
+// as the algorithm evolves.
+type ContinualOptimizationPolicyRecord struct {
+	TenantID, DeploymentID, DeploymentName, PolicyJSON string
+	Generation                                         int64
+	CreatedAt, UpdatedAt                               time.Time
+}
+
+type ContinualOptimizationState struct {
+	TenantID, DeploymentID, DeploymentName string
+	BaselineJSON, BaselineDigest           string
+	LatestDecisionID                       string
+	LastExperimentAt                       *time.Time
+	Generation                             int64
+	CreatedAt, UpdatedAt                   time.Time
+}
+
+type ContinualOptimizationDecisionRecord struct {
+	ID, TenantID, DeploymentID, DeploymentName  string
+	InputDigest, WorkloadSource, WorkloadDigest string
+	Action, DecisionJSON                        string
+	PromotionEligible                           bool
+	CreatedAt                                   time.Time
+}
+
 type Orphan struct {
 	TargetID, Name, Provider, ProviderResourceID string
 	CreatedAt                                    time.Time

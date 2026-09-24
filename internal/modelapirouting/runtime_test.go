@@ -268,7 +268,7 @@ func TestRuntimeInsufficientBalanceDoesNotSend(t *testing.T) {
 	runtime, _ := runtimeFixture(t, server, billing)
 	recorder := httptest.NewRecorder()
 	runtime.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil), ProxyRequest{
-		TenantID: "customer", ProductID: "glm-5.3", Operation: "chat", Resource: "chat/completions",
+		TenantID: "customer", ProductID: "glm-5.3", PublicModelID: "qwen/qwen3.8-27b", Operation: "chat", Resource: "chat/completions",
 		RequestID: "request", TraceParent: "trace", Payload: map[string]any{"model": "glm-5.3"},
 	})
 	if recorder.Code != http.StatusPaymentRequired || requests != 0 || billing.transmitted != 0 {
@@ -284,7 +284,7 @@ func TestRuntimeDoesNotMisreportBillingInfrastructureFailureAsInsufficientCredit
 	runtime, _ := runtimeFixture(t, server, billing)
 	recorder := httptest.NewRecorder()
 	runtime.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil), ProxyRequest{
-		TenantID: "customer", ProductID: "glm-5.3", Operation: "chat", Resource: "chat/completions",
+		TenantID: "customer", ProductID: "glm-5.3", PublicModelID: "qwen/qwen3.8-27b", Operation: "chat", Resource: "chat/completions",
 		RequestID: "request", TraceParent: "trace", Payload: map[string]any{"model": "glm-5.3"},
 	})
 	if recorder.Code != http.StatusServiceUnavailable || requests != 0 || billing.transmitted != 0 {
@@ -305,7 +305,7 @@ func TestRuntimePinsRetailRateAndSettlesObservedUsage(t *testing.T) {
 	updated.Entitlement.RetailRateID, updated.Entitlement.RetailRateVersion = "rate-two", 2
 	recorder := httptest.NewRecorder()
 	runtime.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil), ProxyRequest{
-		TenantID: "customer", ProductID: "glm-5.3", Operation: "chat", Resource: "chat/completions",
+		TenantID: "customer", ProductID: "glm-5.3", PublicModelID: "qwen/qwen3.8-27b", Operation: "chat", Resource: "chat/completions",
 		RequestID: "request", TraceParent: "trace", Payload: map[string]any{"model": "glm-5.3"},
 	})
 	if err := runtime.Routes.Publish([]PublishedRoute{updated}); err != nil {
@@ -316,6 +316,9 @@ func TestRuntimePinsRetailRateAndSettlesObservedUsage(t *testing.T) {
 	}
 	if len(billing.settlements) != 1 || billing.settlements[0].InputTokens == nil || *billing.settlements[0].InputTokens != 100 || billing.settlements[0].OutputTokens == nil || *billing.settlements[0].OutputTokens != 20 {
 		t.Fatalf("settlement=%#v", billing.settlements)
+	}
+	if billing.requests[0].ProductID != "glm-5.3" || !strings.Contains(recorder.Body.String(), `"model":"qwen/qwen3.8-27b"`) {
+		t.Fatalf("internal billing product=%q public response=%s", billing.requests[0].ProductID, recorder.Body.String())
 	}
 }
 
@@ -415,13 +418,13 @@ func TestHostedSSEFlushesStopsAtDoneRetainsUsageAndSettlesOnce(t *testing.T) {
 	runtime, _ := runtimeFixture(t, server, billing)
 	recorder := &flushingRecorder{ResponseRecorder: httptest.NewRecorder()}
 	runtime.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil), ProxyRequest{
-		TenantID: "customer", ProductID: "glm-5.3", Operation: "chat", Resource: "chat/completions",
+		TenantID: "customer", ProductID: "glm-5.3", PublicModelID: "qwen/qwen3.8-27b", Operation: "chat", Resource: "chat/completions",
 		RequestID: "request", TraceParent: "trace", Payload: map[string]any{"model": "glm-5.3", "stream": true},
 	})
 	if recorder.Code != http.StatusOK || recorder.flushes < 3 {
 		t.Fatalf("status=%d flushes=%d body=%q", recorder.Code, recorder.flushes, recorder.Body.String())
 	}
-	if strings.Contains(recorder.Body.String(), "999") || !strings.Contains(recorder.Body.String(), "data: [DONE]") || strings.Contains(recorder.Body.String(), "supplier/glm") || !strings.Contains(recorder.Body.String(), `"model":"glm-5.3"`) {
+	if strings.Contains(recorder.Body.String(), "999") || !strings.Contains(recorder.Body.String(), "data: [DONE]") || strings.Contains(recorder.Body.String(), "supplier/glm") || !strings.Contains(recorder.Body.String(), `"model":"qwen/qwen3.8-27b"`) {
 		t.Fatalf("hosted public stream=%q", recorder.Body.String())
 	}
 	if len(billing.settlements) != 1 {

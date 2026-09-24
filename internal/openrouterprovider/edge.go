@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/url"
 	"strings"
@@ -29,6 +30,8 @@ type Edge struct {
 	PublicModel                    string
 	UpstreamModel                  string
 	APIKey                         string
+	Credentials                    []ChannelCredential
+	ChannelPolicies                map[string]ChannelPolicy
 	UpstreamURL                    string
 	UpstreamKey                    string
 	MaxInFlight                    int
@@ -49,14 +52,28 @@ type Edge struct {
 	Logger                  *slog.Logger
 	ReceiptRecorder         ReceiptRecorder
 
-	admission *admissionController
+	admission        *admissionController
+	channelAdmission *channelAdmissionController
 }
 
 func (e *Edge) Handler() (http.Handler, error) {
 	if err := e.validate(); err != nil {
 		return nil, err
 	}
-	var err error
+	inputPrice, outputPrice, hasCatalogPrices, err := e.Catalog.EffectiveTokenPrices(e.PublicModel)
+	if err != nil {
+		return nil, err
+	}
+	if hasCatalogPrices {
+		if e.InputPricePerMillionUSD != 0 && !samePrice(e.InputPricePerMillionUSD, inputPrice) {
+			return nil, fmt.Errorf("configured input price %.9g differs from effective catalog price %.9g", e.InputPricePerMillionUSD, inputPrice)
+		}
+		if e.OutputPricePerMillionUSD != 0 && !samePrice(e.OutputPricePerMillionUSD, outputPrice) {
+			return nil, fmt.Errorf("configured output price %.9g differs from effective catalog price %.9g", e.OutputPricePerMillionUSD, outputPrice)
+		}
+		e.InputPricePerMillionUSD = inputPrice
+		e.OutputPricePerMillionUSD = outputPrice
+	}
 	e.admission, err = newAdmissionController(AdmissionConfig{
 		MinLimit: e.MinInFlight, InitialLimit: e.InitialInFlight, MaxLimit: e.MaxInFlight,
 		Window: e.AdmissionWindow, TargetTTFT: e.TargetTTFT,
@@ -69,6 +86,7 @@ func (e *Edge) Handler() (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
+	e.channelAdmission = newChannelAdmissionController(e.ChannelPolicies)
 	if e.Client == nil {
 		e.Client = &http.Client{Transport: &http.Transport{
 			MaxIdleConns:          e.MaxInFlight * 2,
@@ -83,14 +101,20 @@ func (e *Edge) Handler() (http.Handler, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", e.health)
 	mux.HandleFunc("GET /readyz", e.ready)
-	mux.HandleFunc("GET /models", e.auth(e.Catalog.ServeHTTP))
-	mux.HandleFunc("GET /v1/models", e.auth(e.Catalog.ServeHTTP))
-	mux.HandleFunc("GET /openrouter/v1/models", e.auth(e.Catalog.ServeHTTP))
-	mux.HandleFunc("POST /v1/chat/completions", e.auth(e.completions))
+	mux.HandleFunc("GET /models", e.marketplaceAuth(e.models))
+	mux.HandleFunc("GET /v1/models", e.marketplaceAuth(e.models))
+	mux.HandleFunc("GET /openrouter/v1/models", e.marketplaceAuth(e.Catalog.ServeHTTP))
+	mux.HandleFunc("POST /v1/chat/completions", e.marketplaceAuth(e.completions))
+	mux.HandleFunc("POST /v1/billing/requests", e.marketplaceAuth(e.billingRequests))
 	if e.MetricsKey != "" {
 		mux.HandleFunc("GET /metrics", e.metricsAuth(e.metrics))
 	}
 	return mux, nil
+}
+
+func samePrice(left, right float64) bool {
+	delta := math.Abs(left - right)
+	return delta <= 1e-9*math.Max(1, math.Max(math.Abs(left), math.Abs(right)))
 }
 
 func (e *Edge) metricsAuth(next http.HandlerFunc) http.HandlerFunc {
@@ -118,8 +142,14 @@ func (e *Edge) validate() error {
 	if err := e.Catalog.Validate(); err != nil {
 		return err
 	}
-	if e.PublicModel == "" || e.UpstreamModel == "" || e.APIKey == "" || e.MaxInFlight < 1 {
-		return errors.New("public model, upstream model, API key, and positive admission limit are required")
+	if e.PublicModel == "" || e.UpstreamModel == "" || e.MaxInFlight < 1 {
+		return errors.New("public model, upstream model, and positive admission limit are required")
+	}
+	if err := validateChannelCredentials(e.marketplaceCredentials()); err != nil {
+		return err
+	}
+	if err := validateChannelPolicies(e.ChannelPolicies); err != nil {
+		return err
 	}
 	found := false
 	for _, model := range e.Catalog.Data {
@@ -143,21 +173,61 @@ func isLoopbackHost(host string) bool {
 	return host == "127.0.0.1" || host == "localhost" || host == "::1"
 }
 
-func (e *Edge) auth(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		expected := "Bearer " + e.APIKey
-		actual := r.Header.Get("Authorization")
-		if subtle.ConstantTimeCompare([]byte(actual), []byte(expected)) != 1 {
-			w.Header().Set("WWW-Authenticate", "Bearer")
-			writeProviderError(w, http.StatusUnauthorized, "Invalid provider API key", "authentication_error")
-			return
-		}
-		next(w, r)
-	}
-}
-
 func (e *Edge) health(w http.ResponseWriter, _ *http.Request) {
 	writeProviderJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (e *Edge) models(w http.ResponseWriter, r *http.Request) {
+	identity := identityFromRequest(r)
+	if identity.channel == ChannelOpenRouter {
+		e.Catalog.ServeHTTP(w, r)
+		return
+	}
+	e.Catalog.ServeOpenAI(w, e.PublicModel, e.channelPolicy(identity.channel))
+}
+
+func (e *Edge) billingRequests(w http.ResponseWriter, r *http.Request) {
+	identity := identityFromRequest(r)
+	policy := e.channelPolicy(identity.channel)
+	if !policy.BillingLookupEnabled {
+		writeProviderError(w, http.StatusForbidden, "Billing lookup is not enabled for this marketplace channel", "authorization_error")
+		return
+	}
+	ledger, ok := e.ReceiptRecorder.(ReceiptLedger)
+	if !ok {
+		writeProviderError(w, http.StatusServiceUnavailable, "Billing ledger is unavailable", "server_error")
+		return
+	}
+	var input struct {
+		RequestIDs []string `json:"requestIds"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil {
+		writeProviderError(w, http.StatusBadRequest, "Billing request must be valid JSON", "invalid_request_error")
+		return
+	}
+	if len(input.RequestIDs) == 0 || len(input.RequestIDs) > 10_000 {
+		writeProviderError(w, http.StatusBadRequest, "Billing request must contain between 1 and 10000 request IDs", "invalid_request_error")
+		return
+	}
+	for _, requestID := range input.RequestIDs {
+		if requestID == "" || len(requestID) > 256 {
+			writeProviderError(w, http.StatusBadRequest, "Billing request contains an invalid request ID", "invalid_request_error")
+			return
+		}
+	}
+	requests, err := ledger.Lookup(identity.channel, input.RequestIDs)
+	if err != nil {
+		e.Logger.Error("marketplace billing lookup failed", "channel", identity.channel, "request_count", len(input.RequestIDs), "error", err)
+		writeProviderError(w, http.StatusServiceUnavailable, "Billing ledger is temporarily unavailable", "server_error")
+		return
+	}
+	var responseRequests any = requests
+	if len(requests) == 0 {
+		responseRequests = nil
+	}
+	writeProviderJSON(w, http.StatusOK, map[string]any{"requests": responseRequests})
 }
 
 func (e *Edge) ready(w http.ResponseWriter, r *http.Request) {
@@ -177,9 +247,12 @@ func (e *Edge) ready(w http.ResponseWriter, r *http.Request) {
 }
 
 func (e *Edge) completions(w http.ResponseWriter, r *http.Request) {
-	requestID := r.Header.Get("X-Request-ID")
-	if requestID == "" {
-		requestID = randomRequestID()
+	identity := identityFromRequest(r)
+	requestID := identity.requestID
+	channel := identity.channel
+	if requestID == "" || channel == "" {
+		writeProviderError(w, http.StatusInternalServerError, "Marketplace request identity is unavailable", "server_error")
+		return
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxProviderRequestBytes))
 	if err != nil {
@@ -196,9 +269,20 @@ func (e *Edge) completions(w http.ResponseWriter, r *http.Request) {
 		writeProviderError(w, http.StatusNotFound, "Unknown model", "invalid_request_error")
 		return
 	}
+	if err = validateTextOnlyMessages(payload); err != nil {
+		writeProviderError(w, http.StatusBadRequest, err.Error(), "invalid_request_error")
+		return
+	}
 	stream, _ := payload["stream"].(bool)
 	translateReasoningRequest(payload)
 	estimatedPrefillTokens := estimatePromptTokens(payload)
+	if !e.channelAdmission.tryAcquire(channel) {
+		w.Header().Set("Retry-After", "1")
+		writeProviderError(w, http.StatusTooManyRequests, "Provider channel capacity is temporarily full", "rate_limit_error")
+		e.recordReceipt(RequestReceipt{RequestID: requestID, Channel: channel, Model: e.PublicModel, UpstreamModel: e.UpstreamModel, Stream: stream, StatusCode: http.StatusTooManyRequests, Outcome: "channel_capacity_rejected"})
+		return
+	}
+	defer e.channelAdmission.release(channel)
 	decision := e.admission.tryAcquire(estimatedPrefillTokens)
 	if decision != admissionAccepted {
 		w.Header().Set("Retry-After", "1")
@@ -207,7 +291,7 @@ func (e *Edge) completions(w http.ResponseWriter, r *http.Request) {
 			message = "Provider long-context capacity is temporarily full"
 		}
 		writeProviderError(w, http.StatusTooManyRequests, message, "rate_limit_error")
-		e.recordReceipt(RequestReceipt{RequestID: requestID, Model: e.PublicModel, UpstreamModel: e.UpstreamModel, Stream: stream, StatusCode: http.StatusTooManyRequests, Outcome: string(decision)})
+		e.recordReceipt(RequestReceipt{RequestID: requestID, Channel: channel, Model: e.PublicModel, UpstreamModel: e.UpstreamModel, Stream: stream, StatusCode: http.StatusTooManyRequests, Outcome: string(decision)})
 		return
 	}
 	observation := admissionObservation{StatusCode: http.StatusInternalServerError, Outcome: "edge_error"}
@@ -240,24 +324,23 @@ func (e *Edge) completions(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		e.Logger.Error("provider upstream request failed", "request_id", requestID, "duration_ms", time.Since(started).Milliseconds(), "error", err)
 		writeProviderError(w, http.StatusBadGateway, "Model server request failed", "server_error")
-		e.recordReceipt(RequestReceipt{RequestID: requestID, Model: e.PublicModel, UpstreamModel: e.UpstreamModel, Stream: stream, StatusCode: http.StatusBadGateway, Outcome: "upstream_error", DurationMS: time.Since(started).Milliseconds()})
+		e.recordReceipt(RequestReceipt{RequestID: requestID, Channel: channel, Model: e.PublicModel, UpstreamModel: e.UpstreamModel, Stream: stream, StatusCode: http.StatusBadGateway, Outcome: "upstream_error", DurationMS: time.Since(started).Milliseconds()})
 		observation = admissionObservation{StatusCode: http.StatusBadGateway, Outcome: "upstream_error", Duration: time.Since(started)}
 		return
 	}
 	defer response.Body.Close()
 	w.Header().Set("Content-Type", response.Header.Get("Content-Type"))
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("X-Request-ID", requestID)
 	w.WriteHeader(response.StatusCode)
 	if strings.HasPrefix(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") {
 		metadata := e.copyEventStream(w, r, response.Body, requestID, started, releasePrefill)
-		e.recordResponseReceipt(requestID, stream, response.StatusCode, started, metadata)
+		e.recordResponseReceipt(channel, requestID, stream, response.StatusCode, started, metadata)
 		observation = admissionObservation{StatusCode: response.StatusCode, Outcome: metadata.outcome, TTFT: metadata.timeToFirstToken, Duration: time.Since(started), PromptTokens: metadata.promptTokens, CompletionTokens: metadata.completionTokens}
 		return
 	}
 	releasePrefill()
 	metadata := e.copyBufferedResponse(w, response.Body, requestID, started)
-	e.recordResponseReceipt(requestID, stream, response.StatusCode, started, metadata)
+	e.recordResponseReceipt(channel, requestID, stream, response.StatusCode, started, metadata)
 	observation = admissionObservation{StatusCode: response.StatusCode, Outcome: metadata.outcome, TTFT: metadata.timeToFirstToken, Duration: time.Since(started), PromptTokens: metadata.promptTokens, CompletionTokens: metadata.completionTokens}
 }
 
@@ -302,21 +385,44 @@ func estimateTextBytes(value any) int64 {
 // runtimes do not reject an otherwise valid request.
 func translateReasoningRequest(payload map[string]any) {
 	enabled, configured := false, false
-	if effort, ok := payload["reasoning_effort"].(string); ok {
-		enabled, configured = effort != "" && effort != "none", true
+	effort := ""
+	if requestedEffort, ok := payload["reasoning_effort"].(string); ok {
+		enabled, configured = requestedEffort != "" && requestedEffort != "none", true
+		if enabled {
+			// Qwen3.8 consumes its native low, medium, and xhigh effort
+			// values through the chat template. Preserve the caller's value
+			// instead of collapsing every non-none effort into one mode.
+			// Unsupported values are deliberately forwarded so the strict
+			// model template rejects them rather than silently changing intent.
+			effort = requestedEffort
+		}
 	}
 	if include, ok := payload["include_reasoning"].(bool); ok {
 		enabled, configured = include, true
+		if !include {
+			effort = ""
+		}
 	}
 	if reasoning, exists := payload["reasoning"]; exists {
 		switch value := reasoning.(type) {
 		case bool:
 			enabled, configured = value, true
+			if !value {
+				effort = ""
+			}
 		case map[string]any:
 			if explicit, ok := value["enabled"].(bool); ok {
 				enabled, configured = explicit, true
-			} else if effort, ok := value["effort"].(string); ok {
-				enabled, configured = effort != "" && effort != "none", true
+				if !explicit {
+					effort = ""
+				}
+			} else if requestedEffort, ok := value["effort"].(string); ok {
+				enabled, configured = requestedEffort != "" && requestedEffort != "none", true
+				if enabled {
+					effort = requestedEffort
+				} else {
+					effort = ""
+				}
 			} else {
 				enabled, configured = true, true
 			}
@@ -334,6 +440,11 @@ func translateReasoningRequest(payload map[string]any) {
 	}
 	kwargs["enable_thinking"] = enabled
 	kwargs["preserve_thinking"] = enabled
+	if effort != "" {
+		kwargs["reasoning_effort"] = effort
+	} else if !enabled {
+		delete(kwargs, "reasoning_effort")
+	}
 	payload["chat_template_kwargs"] = kwargs
 }
 
@@ -533,9 +644,10 @@ func (i *sseMetadataInspector) metadata() responseMetadata {
 	return i.result
 }
 
-func (e *Edge) recordResponseReceipt(requestID string, stream bool, statusCode int, started time.Time, metadata responseMetadata) {
+func (e *Edge) recordResponseReceipt(channel, requestID string, stream bool, statusCode int, started time.Time, metadata responseMetadata) {
 	receipt := RequestReceipt{
 		RequestID:        requestID,
+		Channel:          channel,
 		Model:            e.PublicModel,
 		UpstreamModel:    e.UpstreamModel,
 		Stream:           stream,
@@ -553,7 +665,45 @@ func (e *Edge) recordResponseReceipt(requestID string, stream bool, statusCode i
 	e.recordReceipt(receipt)
 }
 
+// validateTextOnlyMessages keeps the public launch boundary aligned with the
+// workload that was qualified and priced. The underlying checkpoint can parse
+// visual inputs, but image and video tokenization have a different admission
+// and cost profile and must not reach this route until separately qualified.
+func validateTextOnlyMessages(payload map[string]any) error {
+	messages, ok := payload["messages"].([]any)
+	if !ok {
+		return nil
+	}
+	for _, rawMessage := range messages {
+		message, ok := rawMessage.(map[string]any)
+		if !ok {
+			continue
+		}
+		blocks, ok := message["content"].([]any)
+		if !ok {
+			continue
+		}
+		for _, rawBlock := range blocks {
+			block, ok := rawBlock.(map[string]any)
+			if !ok {
+				continue
+			}
+			kind, _ := block["type"].(string)
+			if kind != "text" && kind != "input_text" {
+				return errors.New("This model endpoint accepts text input only")
+			}
+		}
+	}
+	return nil
+}
+
 func (e *Edge) recordReceipt(receipt RequestReceipt) {
+	if receipt.Channel == "" {
+		receipt.Channel = ChannelOpenRouter
+	}
+	if receipt.StatusCode >= 200 && receipt.StatusCode < 400 && receipt.Outcome == "completed" {
+		receipt.CostNanoUSD = requestCostNanoUSD(receipt.PromptTokens, receipt.CompletionTokens, e.channelPolicy(receipt.Channel))
+	}
 	if e.ReceiptRecorder != nil {
 		if err := e.ReceiptRecorder.Record(receipt); err != nil {
 			e.Logger.Error("provider receipt recording failed", "request_id", receipt.RequestID, "error", err)
@@ -561,6 +711,7 @@ func (e *Edge) recordReceipt(receipt RequestReceipt) {
 	}
 	e.Logger.Info("provider request completed",
 		"request_id", receipt.RequestID,
+		"channel", receipt.Channel,
 		"model", receipt.Model,
 		"stream", receipt.Stream,
 		"status_code", receipt.StatusCode,

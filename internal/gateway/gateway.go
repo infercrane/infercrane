@@ -74,7 +74,11 @@ type Gateway struct {
 	AdmissionAuthorizer AdmissionAuthorizer
 	ContextPassports    ContextPassportResolver
 	OpenRouterCatalog   *openrouterprovider.Catalog
-	Authenticator       interface {
+	// OpenRouterModelAliases maps provider-facing model slugs to durable
+	// InferCrane product IDs. The public slug remains visible in responses while
+	// authorization, reservations, and settlement use the existing product.
+	OpenRouterModelAliases map[string]string
+	Authenticator          interface {
 		AuthenticatePrincipal(context.Context, string) (domain.Principal, error)
 	}
 }
@@ -209,16 +213,17 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 		openAIError(w, "Invalid JSON body", http.StatusBadRequest, "invalid_request_error")
 		return
 	}
-	alias, ok := payload["model"].(string)
-	if !ok || alias == "" {
+	publicAlias, ok := payload["model"].(string)
+	if !ok || publicAlias == "" {
 		openAIError(w, "The 'model' field is required", http.StatusBadRequest, "invalid_request_error")
 		return
 	}
 	principal := r.Context().Value(principalKey{}).(domain.Principal)
-	if !principalAllowsEndpoint(principal, alias) {
+	if !principalAllowsEndpoint(principal, publicAlias) {
 		openAIError(w, "API key is not allowed to invoke this model alias", http.StatusForbidden, "permission_error")
 		return
 	}
+	alias := publicAlias
 	replay := g.replayShape(payload, r.Header)
 	passportID := strings.TrimSpace(r.Header.Get("X-InferCrane-Context-Passport"))
 	preferredBinding, preferredTarget := "", ""
@@ -230,13 +235,15 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 	route, releaseRoute, ok := g.Routes.AcquirePreferredForTenant(principal.TenantID, alias, preferredBinding, preferredTarget)
 	if !ok {
 		if g.HostedModels != nil {
+			productID := g.hostedProductID(publicAlias)
+			payload["model"] = productID
 			g.HostedModels.ServeHTTP(w, r, modelapirouting.ProxyRequest{
-				TenantID: principal.TenantID, ProductID: alias, Operation: operation, Resource: resource,
+				TenantID: principal.TenantID, ProductID: productID, PublicModelID: publicAlias, Operation: operation, Resource: resource,
 				RequestID: requestID, TraceParent: traceParent, Payload: payload,
 			})
 			return
 		}
-		openAIError(w, "Unknown model alias: "+alias, http.StatusNotFound, "invalid_request_error")
+		openAIError(w, "Unknown model alias: "+publicAlias, http.StatusNotFound, "invalid_request_error")
 		return
 	}
 	defer releaseRoute()
@@ -450,6 +457,13 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 	if g.Logger != nil {
 		g.Logger.Info("inference request", "request_id", requestID, "traceparent", traceParent, "tenant_id", principal.TenantID, "deployment_id", route.DeploymentID, "status", resp.StatusCode, "duration_ms", float64(time.Since(started).Microseconds())/1000)
 	}
+}
+
+func (g *Gateway) hostedProductID(publicAlias string) string {
+	if productID := g.OpenRouterModelAliases[publicAlias]; productID != "" {
+		return productID
+	}
+	return publicAlias
 }
 
 func (g *Gateway) releaseManagedBilling(ctx context.Context, tenant string, authorization domain.ManagedUsageAuthorization, reason string) {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/kernelplanner"
+	"github.com/infercrane/infercrane/internal/kernelresearch"
 )
 
 type profilerFunc func(context.Context, ProfileIntent) (ProfileEvidence, error)
@@ -163,6 +164,56 @@ func TestEngineGeneratesBuildsAndQualifiesProfileBoundKernel(t *testing.T) {
 	}
 	if !generated || result.State != "qualified" || len(result.Experiments) != 1 || result.Experiments[0].Generation == nil {
 		t.Fatalf("result=%+v generated=%v", result, generated)
+	}
+}
+
+func TestEngineAcceptsModelNeutralIterativeKernelResearchWinner(t *testing.T) {
+	request := fixtureRequest(ModalityText)
+	request.Sources = nil
+	request.Policy.AllowGeneratedKernels = true
+	request.Policy.KernelResearch = kernelresearch.Policy{
+		Enabled: true, MaxIterations: 4, MaxConsecutiveRejections: 2,
+		MaxDurationSeconds: 3600, MaxCostUSD: .50, MinRelativeImprovement: 1.01,
+		TargetKernelSpeedup: 1.20, MaxRooflineUtilization: .95,
+	}
+	bestRevision := strings.Repeat("d", 40)
+	engine := Engine{
+		Profiler: fixtureProfiler(.10),
+		Generator: generatorFunc(func(_ context.Context, input GenerationRequest) (GenerationEvidence, error) {
+			if input.Research == nil || input.Research.Identity.ModelRevision != request.Model.Revision || input.Research.Policy.HotspotFraction != .20 {
+				t.Fatalf("research intent=%+v", input.Research)
+			}
+			now := time.Now().UTC()
+			receipt, err := kernelresearch.Start(*input.Research, now)
+			if err != nil {
+				return GenerationEvidence{}, err
+			}
+			receipt, _, err = kernelresearch.Observe(receipt, kernelresearch.Attempt{
+				Iteration: 1, SourceRevision: bestRevision, Backend: "triton",
+				ArtifactDigest:   digestOf("a"),
+				Correctness:      kernelresearch.Correctness{Smoke: true, ShapeSweep: true, NumericalStability: true, Determinism: true, EdgeCases: true, Sanitizer: true},
+				BaselineMedianUS: 100, CandidateMedianUS: 80, RooflineUtilization: .75,
+				CostUSD: .02, CompletedAt: now.Add(time.Minute),
+			})
+			if err != nil {
+				return GenerationEvidence{}, err
+			}
+			return GenerationEvidence{
+				InputDigest: input.InputDigest, CandidateID: input.Candidate.ID,
+				Generator: "kernel-agent", GeneratorVersion: digestOf("c"),
+				ProfileArtifactDigest: input.Profile.ArtifactDigest,
+				Source:                SourcePin{ImplementationID: "generated-" + input.Candidate.ID, Revision: bestRevision, License: "Apache-2.0", Artifacts: []Artifact{{Kind: "source-bundle", URI: "https://worker.example/v1/artifacts/source", SHA256: digestOf("e"), Size: 1024}}},
+				GeneratedAt:           now.Add(time.Minute), CostUSD: .02, Research: &receipt,
+			}, nil
+		}),
+		Builder: fixtureBuilder(.20), Qualifier: fixtureQualifier(nil),
+	}
+	result, err := engine.Run(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.State != "qualified" || result.Experiments[0].Generation == nil || result.Experiments[0].Generation.Research == nil || result.Experiments[0].Source.Revision != bestRevision {
+		t.Fatalf("result=%+v", result)
 	}
 }
 

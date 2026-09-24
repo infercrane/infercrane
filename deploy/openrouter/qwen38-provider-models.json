@@ -1,7 +1,7 @@
 {
   "data": [
     {
-      "schema_version": "2.4",
+      "schema_version": "2.5",
       "id": "qwen/qwen3.8-27b",
       "name": "Qwen: Qwen3.8 27B",
       "hugging_face_id": "Qwen/Qwen3.8-27B-FP8",
@@ -113,6 +113,17 @@
       "discount_to_user": 0.19,
       "openrouter": {
         "slug": "qwen/qwen3.8-27b"
+      },
+      "datacenters": [
+        {
+          "country_code": "US",
+          "region": "us-east"
+        }
+      ],
+      "deployment_region": "US",
+      "compliance": {
+        "zdr": true,
+        "hipaa": false
       }
     }
   ]

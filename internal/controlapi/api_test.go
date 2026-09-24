@@ -3448,6 +3448,26 @@ func TestServiceAccountCannotRequestScopeAboveRole(t *testing.T) {
 	}
 }
 
+func TestBootstrapCanCreateCustomerServicePrincipalWithoutTenantImpersonation(t *testing.T) {
+	store := &fakeStore{}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/principals", strings.NewReader(`{"tenant_id":"openrouter-canary","name":"openrouter","role":"viewer","scopes":["read"]}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret"}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"tenant_id":"openrouter-canary"`) || !strings.Contains(response.Body.String(), `"credential":"ic_token"`) {
+		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+
+	store.principal = domain.Principal{ID: "tenant-admin", TenantID: "tenant-a", Name: "admin", Role: "admin", Scopes: []string{"manage_tenant"}}
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/principals", strings.NewReader(`{"tenant_id":"tenant-b","name":"cross-tenant","role":"viewer","scopes":["read"]}`))
+	request.Header.Set("Authorization", "Bearer scoped")
+	response = httptest.NewRecorder()
+	(API{Store: store, Authenticator: store}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("cross-tenant response=%d %s", response.Code, response.Body.String())
+	}
+}
+
 func TestSecretAPIAcceptsReferencesButNeverRawValues(t *testing.T) {
 	store := &fakeStore{}
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/secrets", strings.NewReader(`{"name":"openrouter","resolver":"env","reference":"OPENROUTER_API_KEY"}`))

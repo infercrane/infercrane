@@ -1949,7 +1949,7 @@ func openStore(t *testing.T, ctx context.Context) *Store {
 	// only application table outside that ownership tree. The global tenant is
 	// migration seed data required by legacy API compatibility paths, so
 	// recreate only that root after the cascade.
-	if _, err := s.db.ExecContext(ctx, `TRUNCATE control_plane_instances,tenants CASCADE; INSERT INTO tenants(id,name,created_at) VALUES('global','global',NOW())`); err != nil {
+	if _, err := s.db.ExecContext(ctx, `TRUNCATE marketplace_request_receipts,control_plane_instances,tenants CASCADE; INSERT INTO tenants(id,name,created_at) VALUES('global','global',NOW())`); err != nil {
 		t.Fatalf("reset test database: %v", err)
 	}
 	t.Cleanup(func() {

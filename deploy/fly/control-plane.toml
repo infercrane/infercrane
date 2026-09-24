@@ -27,6 +27,8 @@ kill_timeout = 35
   INFERCRANE_GPU_PRICE_SYNC_SECONDS = "75"
   INFERCRANE_DATABASE_MAX_OPEN = "12"
   INFERCRANE_DATABASE_MAX_IDLE = "4"
+  INFERCRANE_OPENROUTER_PROVIDER_CATALOG_FILE = "/etc/infercrane/openrouter-provider-models.json"
+  INFERCRANE_OPENROUTER_MODEL_ALIASES_JSON = '{"qwen/qwen3.8-27b":"qwen3.8-27b"}'
 
 [http_service]
   internal_port = 8080
