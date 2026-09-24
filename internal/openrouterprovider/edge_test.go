@@ -3,6 +3,7 @@ package openrouterprovider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -126,6 +127,32 @@ func TestEdgeAuthenticatesRewritesAndStreams(t *testing.T) {
 	receipt := receipts.last(t)
 	if receipt.PromptTokens != 11 || receipt.CompletionTokens != 7 || receipt.TotalTokens != 18 || receipt.FinishReason != "stop" || receipt.Outcome != "completed" || !receipt.Stream {
 		t.Fatalf("unexpected request receipt: %+v", receipt)
+	}
+}
+
+func TestEdgeLivenessDoesNotCollapseWithSharedUpstream(t *testing.T) {
+	edge := &Edge{
+		Catalog: testCatalog(), PublicModel: "qwen/qwen3.8-27b", UpstreamModel: "upstream",
+		APIKey: "secret", UpstreamURL: "http://127.0.0.1:30000", MaxInFlight: 1,
+		Client: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return nil, errors.New("transient upstream failure")
+		})},
+	}
+	handler, err := edge.Handler()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	liveness := httptest.NewRecorder()
+	handler.ServeHTTP(liveness, httptest.NewRequest(http.MethodGet, "/health", nil))
+	if liveness.Code != http.StatusOK {
+		t.Fatalf("gateway liveness collapsed with the shared upstream: code=%d body=%q", liveness.Code, liveness.Body.String())
+	}
+
+	readiness := httptest.NewRecorder()
+	handler.ServeHTTP(readiness, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if readiness.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected upstream-aware readiness failure, got code=%d body=%q", readiness.Code, readiness.Body.String())
 	}
 }
 

@@ -9,6 +9,13 @@ kill_timeout = 35
   dockerfile = "../../Dockerfile"
   build-target = "openrouter-edge"
 
+# Keep the previous gateway fleet serving until every replacement passes its
+# service health check. The provider edge is stateless, so blue/green avoids
+# exposing OpenRouter to the rolling replacement window.
+[deploy]
+  strategy = "bluegreen"
+  wait_timeout = "10m"
+
 [env]
   INFERCRANE_OPENROUTER_LISTEN = ":8080"
   INFERCRANE_OPENROUTER_PROVIDER_CATALOG_FILE = "/etc/infercrane/provider-models.json"
@@ -22,7 +29,7 @@ kill_timeout = 35
   force_https = true
   auto_stop_machines = "off"
   auto_start_machines = false
-  min_machines_running = 1
+  min_machines_running = 2
   processes = ["app"]
 
   [http_service.concurrency]
@@ -34,7 +41,11 @@ kill_timeout = 35
     grace_period = "10s"
     interval = "15s"
     method = "GET"
-    path = "/readyz"
+    # Route based on gateway liveness, not the shared GPU dependency. If the
+    # Modal endpoint has a transient health-probe failure, the edge must stay
+    # reachable and return a structured upstream error rather than making all
+    # gateway replicas disappear from Fly's routing pool simultaneously.
+    path = "/health"
     timeout = "5s"
 
 [[vm]]

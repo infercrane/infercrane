@@ -88,12 +88,16 @@ func (e *Edge) Handler() (http.Handler, error) {
 	}
 	e.channelAdmission = newChannelAdmissionController(e.ChannelPolicies)
 	if e.Client == nil {
-		e.Client = &http.Client{Transport: &http.Transport{
-			MaxIdleConns:          e.MaxInFlight * 2,
-			MaxIdleConnsPerHost:   e.MaxInFlight * 2,
-			IdleConnTimeout:       90 * time.Second,
-			ResponseHeaderTimeout: 5 * time.Minute,
-		}}
+		// Clone the standard transport instead of constructing a sparse one.
+		// This preserves the production dial, TLS-handshake, expect-continue,
+		// HTTP/2, and keepalive defaults while applying provider-specific pool
+		// sizing. A sparse transport silently loses several of those safeguards.
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.MaxIdleConns = e.MaxInFlight * 2
+		transport.MaxIdleConnsPerHost = e.MaxInFlight * 2
+		transport.IdleConnTimeout = 90 * time.Second
+		transport.ResponseHeaderTimeout = 5 * time.Minute
+		e.Client = &http.Client{Transport: transport}
 	}
 	if e.Logger == nil {
 		e.Logger = slog.Default()
