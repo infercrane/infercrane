@@ -18,6 +18,8 @@ import (
 type fakeModelAPIProductStore struct {
 	products       []modelapiproduct.PublicProjection
 	accessByTenant map[string]store.ModelAPIProductAccess
+	publication    modelapiproduct.OperatorPublication
+	entitlement    *modelapiproduct.ProductEntitlement
 	err            error
 	accessTenants  []string
 }
@@ -52,6 +54,37 @@ func (f *fakeModelAPIProductStore) ModelAPIProductAccess(_ context.Context, tena
 		}
 	}
 	return store.ModelAPIProductAccess{}, store.ErrNotFound
+}
+
+func (f *fakeModelAPIProductStore) ModelAPIOperatorPublication(_ context.Context, operator, productID string) (modelapiproduct.OperatorPublication, error) {
+	if f.err != nil {
+		return modelapiproduct.OperatorPublication{}, f.err
+	}
+	if f.publication.OperatorWorkspaceID != operator || f.publication.ProductID != productID {
+		return modelapiproduct.OperatorPublication{}, store.ErrNotFound
+	}
+	return f.publication, nil
+}
+
+func (f *fakeModelAPIProductStore) ModelAPIProductEntitlement(_ context.Context, tenant, productID string) (modelapiproduct.ProductEntitlement, error) {
+	if f.err != nil {
+		return modelapiproduct.ProductEntitlement{}, f.err
+	}
+	if f.entitlement == nil || f.entitlement.CustomerWorkspaceID != tenant || f.entitlement.ProductID != productID {
+		return modelapiproduct.ProductEntitlement{}, store.ErrNotFound
+	}
+	return *f.entitlement, nil
+}
+
+func (f *fakeModelAPIProductStore) SaveModelAPIProductEntitlement(_ context.Context, tenant string, entitlement modelapiproduct.ProductEntitlement) (modelapiproduct.ProductEntitlement, error) {
+	if f.err != nil {
+		return modelapiproduct.ProductEntitlement{}, f.err
+	}
+	if entitlement.CustomerWorkspaceID != tenant {
+		return modelapiproduct.ProductEntitlement{}, errors.New("wrong tenant")
+	}
+	f.entitlement = &entitlement
+	return entitlement, nil
 }
 
 func TestDurableModelAPICatalogPreservesPublicContractAndRedactsInternals(t *testing.T) {
@@ -219,6 +252,65 @@ func TestDurableModelAPIAccessDoesNotCrossTenants(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"authorized":false`) || len(durable.accessTenants) != 1 || durable.accessTenants[0] != "tenant-b" {
 		t.Fatalf("tenant isolation status=%d tenants=%v body=%s", response.Code, durable.accessTenants, response.Body.String())
+	}
+}
+
+func TestActivateModelAPIProductCreatesTenantScopedCurrentEntitlement(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	product := callableModelAPIProduct(t, now)
+	evidenceUntil := now.Add(24 * time.Hour)
+	durable := &fakeModelAPIProductStore{
+		products: []modelapiproduct.PublicProjection{product},
+		publication: modelapiproduct.OperatorPublication{
+			SchemaVersion: modelapiproduct.OperatorProjectionSchemaVersion, ProductID: product.ID,
+			OperatorWorkspaceID: "operator-private", ServingPlanID: "serving-private", SupplyPlanID: "supply-private",
+			Qualification: modelapiproduct.RouteQualification{State: modelapiproduct.QualificationQualified, EvidenceID: "evidence-private", EvidenceUntil: &evidenceUntil},
+			RetailRate:    product.RetailRate, UpdatedAt: now,
+		},
+	}
+	principalStore := &fakeStore{principal: domain.Principal{ID: "operator", TenantID: "customer-a", Name: "operator", Role: string(authz.Operator), Scopes: []string{"read", "deploy"}}}
+	handler := (API{Store: principalStore, Authenticator: principalStore, ModelAPIProducts: durable, ModelAPIOperatorTenantID: "operator-private"}).Handler()
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/model-api-catalog/glm-5.2/activate", nil)
+	request.Header.Set("Authorization", "Bearer tenant-token")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || durable.entitlement == nil {
+		t.Fatalf("activation status=%d entitlement=%#v body=%s", response.Code, durable.entitlement, response.Body.String())
+	}
+	if durable.entitlement.CustomerWorkspaceID != "customer-a" || durable.entitlement.OperatorWorkspaceID != "operator-private" || durable.entitlement.RetailRateVersion != product.RetailRate.Version || durable.entitlement.State != modelapiproduct.EntitlementActive {
+		t.Fatalf("unexpected entitlement: %#v", durable.entitlement)
+	}
+	if durable.entitlement.ValidUntil != nil {
+		t.Fatalf("self-service entitlement should persist across safe route renewals: %#v", durable.entitlement.ValidUntil)
+	}
+	body := response.Body.String()
+	for _, expected := range []string{`"authorized":true`, `"product_id":"glm-5.2"`, `"retail_rate_version":1`} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("activation response missing %q: %s", expected, body)
+		}
+	}
+	for _, private := range []string{"operator_workspace_id", "customer_workspace_id", "serving_plan_id", "retail_rate_id"} {
+		if strings.Contains(body, private) {
+			t.Fatalf("activation response leaked %q: %s", private, body)
+		}
+	}
+}
+
+func TestActivateModelAPIProductRejectsUnavailableRoute(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	product := callableModelAPIProduct(t, now.Add(-48*time.Hour))
+	product.Callable = true
+	durable := &fakeModelAPIProductStore{products: []modelapiproduct.PublicProjection{product}}
+	principalStore := &fakeStore{principal: domain.Principal{ID: "operator", TenantID: "customer-a", Name: "operator", Role: string(authz.Operator), Scopes: []string{"read", "deploy"}}}
+	handler := (API{Store: principalStore, Authenticator: principalStore, ModelAPIProducts: durable, ModelAPIOperatorTenantID: "operator-private"}).Handler()
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/model-api-catalog/glm-5.2/activate", nil)
+	request.Header.Set("Authorization", "Bearer tenant-token")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusConflict || durable.entitlement != nil || !strings.Contains(response.Body.String(), `"code":"model_unavailable"`) {
+		t.Fatalf("unavailable activation status=%d entitlement=%#v body=%s", response.Code, durable.entitlement, response.Body.String())
 	}
 }
 

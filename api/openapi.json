@@ -11051,6 +11051,53 @@
         ]
       }
     },
+    "/api/v1/model-api-catalog/{id}/activate": {
+      "post": {
+        "operationId": "activateModelAPICatalogEntry",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Activate the current qualified Model API route for the authenticated workspace",
+        "tags": [
+          "Model APIs"
+        ]
+      }
+    },
     "/api/v1/model-api-usage": {
       "get": {
         "operationId": "getHostedModelAPIUsage",

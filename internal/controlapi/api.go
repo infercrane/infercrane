@@ -301,6 +301,15 @@ type modelAPIProductStore interface {
 	ModelAPIProductAccess(context.Context, string, string, time.Time) (store.ModelAPIProductAccess, error)
 }
 
+// modelAPIActivationStore is the private mutation boundary behind customer
+// self-service activation. Public product projections intentionally omit the
+// operator and serving-plan identities required to construct an entitlement.
+type modelAPIActivationStore interface {
+	ModelAPIOperatorPublication(context.Context, string, string) (modelapiproduct.OperatorPublication, error)
+	ModelAPIProductEntitlement(context.Context, string, string) (modelapiproduct.ProductEntitlement, error)
+	SaveModelAPIProductEntitlement(context.Context, string, modelapiproduct.ProductEntitlement) (modelapiproduct.ProductEntitlement, error)
+}
+
 type API struct {
 	Store         Store
 	APIKey        string
@@ -439,6 +448,7 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/planning/intents", a.auth(authz.Read, a.planIntent))
 	mux.HandleFunc("GET /api/v1/model-api-catalog", a.auth(authz.Read, a.modelAPIModels))
 	mux.HandleFunc("GET /api/v1/model-api-catalog/{id}", a.auth(authz.Read, a.modelAPIModel))
+	mux.HandleFunc("POST /api/v1/model-api-catalog/{id}/activate", a.auth(authz.Deploy, a.activateModelAPIProduct))
 	mux.HandleFunc("GET /api/v1/model-api-usage", a.auth(authz.Read, a.hostedModelAPIUsage))
 	mux.HandleFunc("POST /api/v1/admin/model-api/products", a.auth(authz.ManageModelAPI, a.publishModelAPIProduct))
 	mux.HandleFunc("POST /api/v1/admin/model-api/rates", a.auth(authz.ManageModelAPI, a.publishModelAPIRetailRate))

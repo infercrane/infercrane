@@ -238,6 +238,61 @@ func TestModelAPICatalogRepositoryPersistsRedactsAndFailsClosed(t *testing.T) {
 		t.Fatalf("other customer access=%+v err=%v", otherAccess, err)
 	}
 
+	// A new immutable card with unchanged or lower prices must not interrupt an
+	// indefinite self-service grant. A price increase must remain fail-closed
+	// until the customer explicitly accepts it.
+	lowerRate, err := modelapiproduct.NewRetailRate(modelapiproduct.RetailRateDraft{
+		ID: product.ID + "-rate-lower-" + suffix, ProductID: product.ID, Version: version + 1,
+		InputMicrousdPerMillion: 90_000, OutputMicrousdPerMillion: 390_000,
+		PublishedAt: now.Add(-time.Minute), ValidFrom: now.Add(-time.Minute), ValidUntil: now.Add(2 * time.Hour),
+		PublicProvenance: "InferCrane integration-test lower retail rate",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lowerRate, err = s.PublishModelAPIRetailRate(ctx, lowerRate); err != nil {
+		t.Fatal(err)
+	}
+	publication.RetailRate = &lowerRate
+	publication.Qualification.EvidenceID = "private-evidence-lower-" + suffix
+	if publication, err = s.SaveModelAPIOperatorPublication(ctx, operatorTenant, publication); err != nil {
+		t.Fatal(err)
+	}
+	rolled, err := s.ModelAPIProductEntitlement(ctx, customerTenant, product.ID)
+	if err != nil || rolled.RetailRateVersion != lowerRate.Version || rolled.RetailRateID != lowerRate.ID {
+		t.Fatalf("lower-rate entitlement did not roll forward: entitlement=%+v err=%v", rolled, err)
+	}
+	rolledAccess, err := s.ModelAPIProductAccess(ctx, customerTenant, product.ID, now)
+	if err != nil || !rolledAccess.Authorized {
+		t.Fatalf("lower-rate access was interrupted: access=%+v err=%v", rolledAccess, err)
+	}
+
+	higherRate, err := modelapiproduct.NewRetailRate(modelapiproduct.RetailRateDraft{
+		ID: product.ID + "-rate-higher-" + suffix, ProductID: product.ID, Version: version + 2,
+		InputMicrousdPerMillion: 90_000, OutputMicrousdPerMillion: 390_001,
+		PublishedAt: now.Add(-time.Minute), ValidFrom: now.Add(-time.Minute), ValidUntil: now.Add(2 * time.Hour),
+		PublicProvenance: "InferCrane integration-test higher retail rate",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if higherRate, err = s.PublishModelAPIRetailRate(ctx, higherRate); err != nil {
+		t.Fatal(err)
+	}
+	publication.RetailRate = &higherRate
+	publication.Qualification.EvidenceID = "private-evidence-higher-" + suffix
+	if publication, err = s.SaveModelAPIOperatorPublication(ctx, operatorTenant, publication); err != nil {
+		t.Fatal(err)
+	}
+	pinned, err := s.ModelAPIProductEntitlement(ctx, customerTenant, product.ID)
+	if err != nil || pinned.RetailRateVersion != lowerRate.Version || pinned.RetailRateID != lowerRate.ID {
+		t.Fatalf("higher-rate publication changed customer consent: entitlement=%+v err=%v", pinned, err)
+	}
+	pinnedAccess, err := s.ModelAPIProductAccess(ctx, customerTenant, product.ID, now)
+	if err != nil || pinnedAccess.Authorized {
+		t.Fatalf("higher-rate publication should require re-activation: access=%+v err=%v", pinnedAccess, err)
+	}
+
 	// Stale evidence can exist in storage during an incident, but public and
 	// customer reads must immediately stop authorizing traffic.
 	if _, err = s.ExecContext(ctx, `UPDATE model_api_operator_publications SET qualification_valid_until=? WHERE product_id=? AND operator_tenant_id=?`, now.Add(-time.Second), product.ID, operatorTenant); err != nil {
@@ -250,5 +305,25 @@ func TestModelAPICatalogRepositoryPersistsRedactsAndFailsClosed(t *testing.T) {
 	staleAccess, err := s.ModelAPIProductAccess(ctx, customerTenant, product.ID, now)
 	if err != nil || staleAccess.Authorized {
 		t.Fatalf("stale customer access=%+v err=%v", staleAccess, err)
+	}
+}
+
+func TestModelAPIRateDoesNotIncrease(t *testing.T) {
+	pointer := func(value int64) *int64 { return &value }
+	cached := int64(25_000)
+	base := modelapiproduct.RetailRate{Currency: "USD", InputMicrousdPerMillion: 100_000, CachedInputMicrousdPerMillion: &cached, OutputMicrousdPerMillion: 400_000}
+	for name, candidate := range map[string]modelapiproduct.RetailRate{
+		"same":               base,
+		"lower":              {Currency: "USD", InputMicrousdPerMillion: 90_000, CachedInputMicrousdPerMillion: pointer(20_000), OutputMicrousdPerMillion: 350_000},
+		"higher input":       {Currency: "USD", InputMicrousdPerMillion: 100_001, CachedInputMicrousdPerMillion: &cached, OutputMicrousdPerMillion: 400_000},
+		"higher output":      {Currency: "USD", InputMicrousdPerMillion: 100_000, CachedInputMicrousdPerMillion: &cached, OutputMicrousdPerMillion: 400_001},
+		"higher cache":       {Currency: "USD", InputMicrousdPerMillion: 100_000, CachedInputMicrousdPerMillion: pointer(25_001), OutputMicrousdPerMillion: 400_000},
+		"missing cache tier": {Currency: "USD", InputMicrousdPerMillion: 100_000, OutputMicrousdPerMillion: 400_000},
+		"currency change":    {Currency: "EUR", InputMicrousdPerMillion: 90_000, CachedInputMicrousdPerMillion: pointer(20_000), OutputMicrousdPerMillion: 350_000},
+	} {
+		want := name == "same" || name == "lower"
+		if got := modelAPIRateDoesNotIncrease(base, candidate); got != want {
+			t.Fatalf("%s: got %t want %t", name, got, want)
+		}
 	}
 }

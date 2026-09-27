@@ -67,6 +67,10 @@ class ControlAPI:
         request_path = f"/model-api-catalog/{quote(id, safe='')}"
         return cast(dict[str, Any], self._transport.request("GET", request_path))
 
+    def activate_model_a_p_i_catalog_entry(self, id: str) -> dict[str, Any]:
+        request_path = f"/model-api-catalog/{quote(id, safe='')}/activate"
+        return cast(dict[str, Any], self._transport.request("POST", request_path))
+
     def get_hosted_model_a_p_i_usage(self) -> dict[str, Any]:
         request_path = "/model-api-usage"
         return cast(dict[str, Any], self._transport.request("GET", request_path))
