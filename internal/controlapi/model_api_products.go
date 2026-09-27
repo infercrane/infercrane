@@ -1,6 +1,8 @@
 package controlapi
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"net/http"
 	"sort"
@@ -11,6 +13,8 @@ import (
 	"github.com/infercrane/infercrane/internal/modelapiproduct"
 	"github.com/infercrane/infercrane/internal/store"
 )
+
+const selfServiceModelAPIMaxRequestMicrousd int64 = 2_000_000
 
 func (a API) durableModelAPIModels(w http.ResponseWriter, r *http.Request, offset, limit int) {
 	now := time.Now().UTC()
@@ -71,6 +75,86 @@ func (a API) durableModelAPIModel(w http.ResponseWriter, r *http.Request) {
 		"access":         modelAPIProductAccessResponse(access, now),
 		"catalog_source": "durable_product_catalog",
 	})
+}
+
+func (a API) activateModelAPIProduct(w http.ResponseWriter, r *http.Request) {
+	if a.ModelAPIProducts == nil || a.ModelAPIOperatorTenantID == "" {
+		writeError(w, http.StatusServiceUnavailable, "model_api_activation_unavailable", "Model API activation is not configured")
+		return
+	}
+	activation, ok := a.ModelAPIProducts.(modelAPIActivationStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "Model API activation persistence is unavailable")
+		return
+	}
+
+	now := time.Now().UTC()
+	product, err := a.ModelAPIProducts.PublicModelAPIProduct(r.Context(), r.PathValue("id"), now)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "Model API catalog entry was not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "model_api_catalog_unavailable", "Model API catalog entry could not be read")
+		return
+	}
+	if !modelAPIProductCallableAt(product, now) {
+		writeError(w, http.StatusConflict, "model_unavailable", "This model does not currently have a qualified callable route")
+		return
+	}
+	publication, err := activation.ModelAPIOperatorPublication(r.Context(), a.ModelAPIOperatorTenantID, product.ID)
+	if err != nil {
+		writeError(w, http.StatusConflict, "model_unavailable", "This model does not currently have an activatable route")
+		return
+	}
+	if publication.RetailRate == nil || !publication.Qualification.CurrentAt(now) || !publication.RetailRate.CurrentAt(now) {
+		writeError(w, http.StatusConflict, "model_unavailable", "This model's qualification or rate is no longer current")
+		return
+	}
+
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	if actor.TenantID == a.ModelAPIOperatorTenantID {
+		writeError(w, http.StatusConflict, "operator_workspace", "The platform operator workspace cannot activate customer Model API access")
+		return
+	}
+	id := modelAPIEntitlementID(actor.TenantID, product.ID)
+	createdAt := now
+	if existing, existingErr := activation.ModelAPIProductEntitlement(r.Context(), actor.TenantID, product.ID); existingErr == nil {
+		id, createdAt = existing.ID, existing.CreatedAt.UTC()
+	} else if !errors.Is(existingErr, store.ErrNotFound) {
+		writeError(w, http.StatusInternalServerError, "model_api_access_unavailable", "Existing Model API access could not be verified")
+		return
+	}
+	maxRequest := selfServiceModelAPIMaxRequestMicrousd
+	entitlement := modelapiproduct.ProductEntitlement{
+		SchemaVersion: modelapiproduct.EntitlementSchemaVersion,
+		ID:            id, CustomerWorkspaceID: actor.TenantID, ProductID: product.ID,
+		OperatorWorkspaceID: a.ModelAPIOperatorTenantID, ServingPlanID: publication.ServingPlanID,
+		RetailRateID: publication.RetailRate.ID, RetailRateVersion: publication.RetailRate.Version,
+		State: modelapiproduct.EntitlementActive, Limits: modelapiproduct.CustomerLimits{MaxRequestMicrousd: &maxRequest},
+		ValidFrom: now.Add(-time.Minute), CreatedAt: createdAt, UpdatedAt: now,
+	}
+	stored, err := activation.SaveModelAPIProductEntitlement(r.Context(), actor.TenantID, entitlement)
+	if errors.Is(err, store.ErrConflict) {
+		writeError(w, http.StatusConflict, "model_activation_conflict", "Model access changed while activation was in progress; refresh and retry")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "model_activation_failed", "Model access could not be activated")
+		return
+	}
+	projection, err := stored.CustomerProjection()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "model_api_access_unavailable", "Activated Model API access could not be projected")
+		return
+	}
+	a.auditModelAPIMutation(r, actor, "model_api.entitlement.activate", "model_api_product_entitlement", stored.ID)
+	writeJSON(w, http.StatusOK, map[string]any{"access": map[string]any{"authorized": true, "entitlement": projection}})
+}
+
+func modelAPIEntitlementID(tenant, product string) string {
+	digest := sha256.Sum256([]byte(tenant + "\x00" + product))
+	return "entitlement-" + hex.EncodeToString(digest[:16])
 }
 
 func filterModelAPIProducts(products []modelapiproduct.PublicProjection, r *http.Request, now time.Time) []modelapiproduct.PublicProjection {

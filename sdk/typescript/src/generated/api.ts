@@ -73,6 +73,11 @@ export class ControlApi {
     return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
+  activateModelAPICatalogEntry(id: string): Promise<Record<string, JsonValue>> {
+    const requestPath = `/model-api-catalog/${encodeURIComponent(id)}/activate`;
+    return this.transport.request('POST', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
   getHostedModelAPIUsage(): Promise<Record<string, JsonValue>> {
     const requestPath = '/model-api-usage';
     return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;

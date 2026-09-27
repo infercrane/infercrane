@@ -41,6 +41,7 @@ var Routes = []Route{
 	{"POST", "/planning/intents", "planIntent", "Planning", "Compile bounded user intent into an editable reviewed configuration", "IntentPlanRequest", "IntentPlanEnvelope", 200, false},
 	{"GET", "/model-api-catalog", "listModelAPICatalog", "Model APIs", "Browse supplier-neutral managed Model API identities", "", "ObjectList", 200, false},
 	{"GET", "/model-api-catalog/{id}", "getModelAPICatalogEntry", "Model APIs", "Inspect one managed Model API identity without supplier disclosure", "", "Object", 200, false},
+	{"POST", "/model-api-catalog/{id}/activate", "activateModelAPICatalogEntry", "Model APIs", "Activate the current qualified Model API route for the authenticated workspace", "", "Object", 200, false},
 	{"GET", "/model-api-usage", "getHostedModelAPIUsage", "Model APIs", "Read tenant-scoped hosted Model API settlement evidence", "", "HostedModelAPIUsage", 200, false},
 	{"POST", "/admin/model-api/products", "publishModelAPIProduct", "Model API administration", "Publish an immutable shared Model API product contract", "Object", "Object", 201, false},
 	{"POST", "/admin/model-api/rates", "publishModelAPIRetailRate", "Model API administration", "Publish an immutable customer-visible Model API rate", "Object", "Object", 201, false},

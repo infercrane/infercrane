@@ -186,13 +186,22 @@ func (s *Store) SaveModelAPIOperatorPublication(ctx context.Context, operatorTen
 			return modelapiproduct.OperatorPublication{}, fmt.Errorf("%w: publication retail rate does not match the immutable stored contract", ErrConflict)
 		}
 	}
-	var existingOperator sql.NullString
-	err = tx.QueryRowContext(ctx, `SELECT operator_tenant_id FROM model_api_operator_publications WHERE product_id=? FOR UPDATE`, publication.ProductID).Scan(&existingOperator)
+	var existingOperator, existingRateID sql.NullString
+	err = tx.QueryRowContext(ctx, `SELECT operator_tenant_id,active_retail_rate_card_id FROM model_api_operator_publications WHERE product_id=? FOR UPDATE`, publication.ProductID).Scan(&existingOperator, &existingRateID)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return modelapiproduct.OperatorPublication{}, err
 	}
 	if existingOperator.Valid && existingOperator.String != operatorTenant {
 		return modelapiproduct.OperatorPublication{}, fmt.Errorf("%w: product publication belongs to another operator", ErrConflict)
+	}
+	var priorRate modelapiproduct.RetailRate
+	rollForwardIndefiniteEntitlements := false
+	if existingRateID.Valid && publication.RetailRate != nil {
+		priorRate, err = scanModelAPIRetailRate(tx.QueryRowContext(ctx, modelAPIRateSelect+` WHERE id=? AND product_id=?`, existingRateID.String, publication.ProductID))
+		if err != nil {
+			return modelapiproduct.OperatorPublication{}, err
+		}
+		rollForwardIndefiniteEntitlements = modelAPIRateDoesNotIncrease(priorRate, *publication.RetailRate)
 	}
 	stamp := publication.UpdatedAt
 	result, err := tx.ExecContext(ctx, `INSERT INTO model_api_operator_publications(product_id,operator_tenant_id,serving_plan_id,supply_plan_id,qualification_state,qualification_evidence_id,qualification_valid_until,active_retail_rate_card_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(product_id) DO UPDATE SET serving_plan_id=EXCLUDED.serving_plan_id,supply_plan_id=EXCLUDED.supply_plan_id,qualification_state=EXCLUDED.qualification_state,qualification_evidence_id=EXCLUDED.qualification_evidence_id,qualification_valid_until=EXCLUDED.qualification_valid_until,active_retail_rate_card_id=EXCLUDED.active_retail_rate_card_id,updated_at=EXCLUDED.updated_at WHERE model_api_operator_publications.operator_tenant_id=EXCLUDED.operator_tenant_id`,
@@ -206,6 +215,18 @@ func (s *Store) SaveModelAPIOperatorPublication(ctx context.Context, operatorTen
 		return modelapiproduct.OperatorPublication{}, affectedErr
 	} else if affected == 0 {
 		return modelapiproduct.OperatorPublication{}, fmt.Errorf("%w: product publication belongs to another operator", ErrConflict)
+	}
+	// Self-service access is a durable customer choice, while route evidence and
+	// immutable rate cards are intentionally short-lived. Preserve that choice
+	// across a qualified route renewal only when every customer-visible price is
+	// unchanged or lower. Any increase leaves the old grant pinned and therefore
+	// fail-closed until the customer explicitly accepts the new rate.
+	if rollForwardIndefiniteEntitlements {
+		if _, err = tx.ExecContext(ctx, `UPDATE model_api_product_entitlements SET serving_plan_id=?,retail_rate_card_id=?,retail_rate_version=?,updated_at=? WHERE product_id=? AND operator_tenant_id=? AND state=? AND valid_until IS NULL AND retail_rate_card_id=? AND retail_rate_version=?`,
+			publication.ServingPlanID, publication.RetailRate.ID, publication.RetailRate.Version, stamp,
+			publication.ProductID, operatorTenant, modelapiproduct.EntitlementActive, priorRate.ID, priorRate.Version); err != nil {
+			return modelapiproduct.OperatorPublication{}, err
+		}
 	}
 	if err = tx.Commit(); err != nil {
 		return modelapiproduct.OperatorPublication{}, err
@@ -484,6 +505,16 @@ func modelAPIOperatorPublicationFromRow(ctx context.Context, query modelAPICatal
 
 func modelAPIRetailRateByVersion(ctx context.Context, query modelAPICatalogQueryer, productID string, version int) (modelapiproduct.RetailRate, error) {
 	return scanModelAPIRetailRate(query.QueryRowContext(ctx, modelAPIRateSelect+` WHERE product_id=? AND version=?`, productID, version))
+}
+
+func modelAPIRateDoesNotIncrease(prior, next modelapiproduct.RetailRate) bool {
+	if prior.Currency != next.Currency || next.InputMicrousdPerMillion > prior.InputMicrousdPerMillion || next.OutputMicrousdPerMillion > prior.OutputMicrousdPerMillion {
+		return false
+	}
+	if prior.CachedInputMicrousdPerMillion == nil || next.CachedInputMicrousdPerMillion == nil {
+		return prior.CachedInputMicrousdPerMillion == nil && next.CachedInputMicrousdPerMillion == nil
+	}
+	return *next.CachedInputMicrousdPerMillion <= *prior.CachedInputMicrousdPerMillion
 }
 
 func encodeModelAPIProductJSON(product modelapiproduct.Product) (string, string, string, string, error) {
