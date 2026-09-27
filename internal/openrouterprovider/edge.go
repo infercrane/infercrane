@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -15,12 +16,15 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
 const maxProviderRequestBytes = 16 << 20
 
 const defaultStreamKeepAliveInterval = 10 * time.Second
+
+var requestIDFallback atomic.Uint64
 
 // Edge is the deliberately small OpenRouter-facing data plane. It keeps the
 // public model identity, provider credential, and admission boundary out of
@@ -726,11 +730,15 @@ func (e *Edge) recordReceipt(receipt RequestReceipt) {
 }
 
 func randomRequestID() string {
-	value := make([]byte, 12)
+	value := make([]byte, 16)
 	if _, err := rand.Read(value); err != nil {
-		return fmt.Sprintf("req-%d", time.Now().UnixNano())
+		binary.BigEndian.PutUint64(value[:8], uint64(time.Now().UnixNano()))
+		binary.BigEndian.PutUint64(value[8:], requestIDFallback.Add(1))
 	}
-	return "req-" + hex.EncodeToString(value)
+	value[6] = (value[6] & 0x0f) | 0x40
+	value[8] = (value[8] & 0x3f) | 0x80
+	encoded := hex.EncodeToString(value)
+	return encoded[:8] + "-" + encoded[8:12] + "-" + encoded[12:16] + "-" + encoded[16:20] + "-" + encoded[20:]
 }
 
 func writeProviderError(w http.ResponseWriter, status int, message, kind string) {

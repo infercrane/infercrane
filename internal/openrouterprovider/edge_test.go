@@ -2,6 +2,7 @@ package openrouterprovider
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -210,6 +211,56 @@ func TestHuggingFaceModelsRequestIdentityAndBilling(t *testing.T) {
 	handler.ServeHTTP(forbidden, openRouterBilling)
 	if forbidden.Code != http.StatusForbidden {
 		t.Fatalf("expected OpenRouter billing lookup to fail closed, got %d", forbidden.Code)
+	}
+}
+
+func TestHuggingFaceStreamingIdentityUsageAndBilling(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\n")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":7,\"total_tokens\":18}}\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer upstream.Close()
+	receipts := &memoryReceiptRecorder{}
+	catalog := validCatalog()
+	edge := &Edge{
+		Catalog: &catalog, PublicModel: "qwen/qwen3.8-27b", UpstreamModel: "upstream", UpstreamURL: upstream.URL, MaxInFlight: 4,
+		Credentials: []ChannelCredential{{Channel: ChannelHuggingFace, APIKey: "huggingface-secret"}},
+		ChannelPolicies: map[string]ChannelPolicy{
+			ChannelHuggingFace: {InputPricePerMillionUSD: 0.10, OutputPricePerMillionUSD: 2.20, BillingLookupEnabled: true},
+		},
+		ReceiptRecorder: receipts,
+	}
+	handler, err := edge.Handler()
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"qwen/qwen3.8-27b","messages":[],"stream":true,"stream_options":{"include_usage":true}}`))
+	request.Header.Set("Authorization", "Bearer huggingface-secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	requestID := response.Header().Get("Inference-Id")
+	if response.Code != http.StatusOK || requestID == "" || response.Header().Get("X-Request-ID") != requestID || !strings.Contains(response.Body.String(), "[DONE]") {
+		t.Fatalf("unexpected streaming response code=%d inference_id=%q request_id=%q body=%q", response.Code, requestID, response.Header().Get("X-Request-ID"), response.Body.String())
+	}
+	compactRequestID := strings.ReplaceAll(requestID, "-", "")
+	if len(requestID) != 36 || len(compactRequestID) != 32 || requestID[14] != '4' || (requestID[19] != '8' && requestID[19] != '9' && requestID[19] != 'a' && requestID[19] != 'b') {
+		t.Fatalf("Inference-Id is not a UUIDv4: %q", requestID)
+	}
+	if _, err := hex.DecodeString(compactRequestID); err != nil {
+		t.Fatalf("Inference-Id is not hexadecimal: %q", requestID)
+	}
+	receipt := receipts.last(t)
+	if receipt.Channel != ChannelHuggingFace || !receipt.Stream || receipt.PromptTokens != 11 || receipt.CompletionTokens != 7 || receipt.TotalTokens != 18 || receipt.CostNanoUSD != 16_500 {
+		t.Fatalf("unexpected streaming receipt: %+v", receipt)
+	}
+	billingRequest := httptest.NewRequest(http.MethodPost, "/v1/billing/requests", strings.NewReader(`{"requestIds":["`+requestID+`","`+requestID+`"]}`))
+	billingRequest.Header.Set("Authorization", "Bearer huggingface-secret")
+	billing := httptest.NewRecorder()
+	handler.ServeHTTP(billing, billingRequest)
+	if billing.Code != http.StatusOK || strings.Count(billing.Body.String(), `"requestId"`) != 1 || !strings.Contains(billing.Body.String(), `"costNanoUsd":16500`) {
+		t.Fatalf("unexpected idempotent streaming billing response code=%d body=%s", billing.Code, billing.Body.String())
 	}
 }
 
