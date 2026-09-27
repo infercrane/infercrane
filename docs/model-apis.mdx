@@ -83,6 +83,94 @@ Install the official Python client with `python -m pip install openai`. For Type
 with `npm install openai`.
 </Note>
 
+## Use InferCrane in coding agents
+
+The same key and endpoint work in coding agents that accept an OpenAI-compatible provider. Keep the
+key in an environment variable instead of committing it to a project configuration file.
+
+<Tabs>
+  <Tab title="OpenCode">
+    Add the provider to `opencode.json`, then run `/models` and select
+    `infercrane/qwen3.8-27b`.
+
+    ```json
+    {
+      "$schema": "https://opencode.ai/config.json",
+      "provider": {
+        "infercrane": {
+          "npm": "@ai-sdk/openai-compatible",
+          "name": "InferCrane",
+          "options": {
+            "apiKey": "{env:INFERCRANE_API_KEY}",
+            "baseURL": "https://api.infercrane.com/v1"
+          },
+          "models": {
+            "qwen3.8-27b": {
+              "name": "Qwen3.8 27B",
+              "reasoning": true,
+              "limit": {
+                "context": 32768,
+                "output": 2048
+              }
+            }
+          }
+        }
+      }
+    }
+    ```
+  </Tab>
+
+  <Tab title="Kilo Code">
+    Add this to `kilo.jsonc`, or enter the same values under **Providers → Custom provider**.
+    Select `infercrane/qwen3.8-27b` after saving.
+
+    ```json
+    {
+      "$schema": "https://app.kilo.ai/config.json",
+      "model": "infercrane/qwen3.8-27b",
+      "provider": {
+        "infercrane": {
+          "name": "InferCrane",
+          "options": {
+            "apiKey": "{env:INFERCRANE_API_KEY}",
+            "baseURL": "https://api.infercrane.com/v1"
+          },
+          "models": {
+            "qwen3.8-27b": {
+              "name": "Qwen3.8 27B",
+              "tool_call": true,
+              "reasoning": true,
+              "limit": {
+                "context": 32768,
+                "output": 2048
+              }
+            }
+          }
+        }
+      }
+    }
+    ```
+  </Tab>
+
+  <Tab title="Cline">
+    In Cline settings, choose **OpenAI Compatible** and enter:
+
+    | Setting | Value |
+    | --- | --- |
+    | Base URL | `https://api.infercrane.com/v1` |
+    | API key | Your InferCrane API key |
+    | Model ID | `qwen3.8-27b` |
+    | Context window | `32768` |
+    | Maximum output | `2048` |
+
+    Use **Verify** before starting a task. InferCrane will also appear as a named provider after its
+    upstream Cline catalog contribution is released.
+  </Tab>
+</Tabs>
+
+The OpenCode and Kilo catalogs consume [models.dev](https://models.dev/). Once the InferCrane entry
+is released there, new clients can discover these values without maintaining the custom block.
+
 ## Discover available models
 
 Availability and prices can change as capacity and qualification evidence change. Read the live
