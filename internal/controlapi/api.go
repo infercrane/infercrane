@@ -1337,13 +1337,24 @@ func (a API) createOptimizationCampaign(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusUnprocessableEntity, "invalid_optimization_proposal", "candidate deployment could not be encoded")
 			return
 		}
-		predicted := []byte(`{}`)
+		predictedFields := map[string]any{}
 		if candidate.ModeledEvidence != nil {
-			predicted, marshalErr = json.Marshal(candidate.ModeledEvidence)
-			if marshalErr != nil {
+			modeled, modeledErr := json.Marshal(candidate.ModeledEvidence)
+			if modeledErr != nil || json.Unmarshal(modeled, &predictedFields) != nil {
 				writeError(w, http.StatusUnprocessableEntity, "invalid_optimization_proposal", "modeled evidence could not be encoded")
 				return
 			}
+		}
+		if candidate.ArtifactSeed != nil {
+			predictedFields["candidate_kind"] = "publisher_optimized_checkpoint"
+			predictedFields["technique"] = "modelopt_quantization"
+			predictedFields["artifact_seed"] = candidate.ArtifactSeed
+			predictedFields["artifact_evidence_boundary"] = "publisher provenance only; performance and quality remain unmeasured"
+		}
+		predicted, marshalErr := json.Marshal(predictedFields)
+		if marshalErr != nil {
+			writeError(w, http.StatusUnprocessableEntity, "invalid_optimization_proposal", "candidate planning evidence could not be encoded")
+			return
 		}
 		candidates = append(candidates, domain.OptimizationCandidateRun{ProposalCandidateID: candidate.ID, Rank: candidate.Rank, EvidenceState: string(candidate.EvidenceState), DeploymentSpecJSON: string(deployment), PredictedEvidenceJSON: string(predicted), ActualEvidenceJSON: `{}`})
 	}

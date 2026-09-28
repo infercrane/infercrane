@@ -20,6 +20,7 @@ import (
 
 	"github.com/infercrane/infercrane/internal/curatedrecipe"
 	"github.com/infercrane/infercrane/internal/integration"
+	"github.com/infercrane/infercrane/internal/modeloptcatalog"
 	"github.com/infercrane/infercrane/internal/optimizationcapability"
 	"github.com/infercrane/infercrane/internal/performanceprofile"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
@@ -29,7 +30,7 @@ import (
 
 const (
 	SchemaVersion    = "infercrane.optimizer.proposal/v1"
-	AlgorithmVersion = "catalog-candidate-planner-v1"
+	AlgorithmVersion = "catalog-candidate-planner-v2"
 
 	WorkloadSourceReviewedDefault  = "reviewed_default"
 	WorkloadSourcePublicPrior      = "public_prior"
@@ -153,6 +154,29 @@ type ModeledEvidence struct {
 	Warnings                    []string `json:"warnings,omitempty"`
 }
 
+// ArtifactSeed preserves the immutable publisher provenance of an optimized
+// checkpoint considered by the planner. It is not measured evidence and does
+// not become qualified merely because the publisher marks it ready to deploy.
+type ArtifactSeed struct {
+	CatalogID                string   `json:"catalog_id"`
+	Publisher                string   `json:"publisher"`
+	Tool                     string   `json:"tool"`
+	ToolVersion              string   `json:"tool_version"`
+	Algorithm                string   `json:"algorithm"`
+	Format                   string   `json:"format"`
+	BaseRepository           string   `json:"base_repository"`
+	BaseRevision             string   `json:"base_revision,omitempty"`
+	LineageState             string   `json:"lineage_state"`
+	OutputRepository         string   `json:"output_repository"`
+	OutputRevision           string   `json:"output_revision"`
+	ManifestDigest           string   `json:"manifest_digest"`
+	ModelCardDigest          string   `json:"model_card_digest"`
+	LicenseSPDX              string   `json:"license_spdx"`
+	LicenseDigest            string   `json:"license_digest,omitempty"`
+	AcceleratorArchitectures []string `json:"accelerator_architectures"`
+	SourceURL                string   `json:"source_url"`
+}
+
 type Candidate struct {
 	ID                    string           `json:"id"`
 	Rank                  int              `json:"rank"`
@@ -168,6 +192,7 @@ type Candidate struct {
 	RequiredEvidence      []string         `json:"required_evidence"`
 	Limitations           []string         `json:"limitations"`
 	ModeledEvidence       *ModeledEvidence `json:"modeled_evidence,omitempty"`
+	ArtifactSeed          *ArtifactSeed    `json:"artifact_seed,omitempty"`
 	Deployment            DeploymentDraft  `json:"deployment"`
 }
 
@@ -233,6 +258,14 @@ func ValidateProposal(proposal Proposal) error {
 		if candidate.EvidenceState == EvidenceModeled && candidate.ModeledEvidence == nil {
 			return errors.New("modeled candidate requires modeled evidence provenance")
 		}
+		if candidate.ArtifactSeed != nil {
+			if err := validateArtifactSeed(*candidate.ArtifactSeed); err != nil {
+				return err
+			}
+			if candidate.Deployment.Model.ID != candidate.ArtifactSeed.OutputRepository || candidate.Deployment.Model.Revision != candidate.ArtifactSeed.OutputRevision || candidate.EvidenceState != EvidenceUnmeasured {
+				return errors.New("publisher artifact candidate must deploy the exact unmeasured output identity")
+			}
+		}
 		if _, duplicate := seenIDs[candidate.ID]; duplicate {
 			return errors.New("proposal candidate IDs must be unique")
 		}
@@ -252,10 +285,11 @@ func ValidateProposal(proposal Proposal) error {
 type CatalogSource struct {
 	Recipes      []curatedrecipe.Entry
 	Integrations integration.Snapshot
+	ModelOpt     modeloptcatalog.Catalog
 }
 
 func NewCatalogSource(recipes []curatedrecipe.Entry, integrations integration.Snapshot) CatalogSource {
-	return CatalogSource{Recipes: append([]curatedrecipe.Entry(nil), recipes...), Integrations: integrations}
+	return CatalogSource{Recipes: append([]curatedrecipe.Entry(nil), recipes...), Integrations: integrations, ModelOpt: modeloptcatalog.MustDefault()}
 }
 
 func (s CatalogSource) Propose(_ context.Context, request Request) (Proposal, error) {
@@ -304,6 +338,10 @@ func (s CatalogSource) Propose(_ context.Context, request Request) (Proposal, er
 			proposal.Candidates = append(proposal.Candidates, candidate)
 		}
 	}
+	proposal.Candidates, err = s.expandModelOptCandidates(proposal.Candidates, request)
+	if err != nil {
+		return Proposal{}, err
+	}
 	sort.Slice(proposal.Candidates, func(i, j int) bool {
 		a, b := proposal.Candidates[i], proposal.Candidates[j]
 		if configurationProfileRank(a.ConfigurationProfile, preferredProfile) != configurationProfileRank(b.ConfigurationProfile, preferredProfile) {
@@ -311,6 +349,9 @@ func (s CatalogSource) Propose(_ context.Context, request Request) (Proposal, er
 		}
 		if qualificationRank(a.CompatibilityState) != qualificationRank(b.CompatibilityState) {
 			return qualificationRank(a.CompatibilityState) < qualificationRank(b.CompatibilityState)
+		}
+		if artifactRank(a) != artifactRank(b) {
+			return artifactRank(a) < artifactRank(b)
 		}
 		return a.ID < b.ID
 	})
@@ -329,6 +370,9 @@ func (s CatalogSource) Propose(_ context.Context, request Request) (Proposal, er
 }
 
 func configurationProfileRank(name, preferred string) int {
+	if index := strings.Index(name, "-modelopt-"); index > 0 {
+		name = name[:index]
+	}
 	if name == preferred || strings.HasSuffix(name, "-"+preferred) {
 		return 0
 	}
@@ -336,6 +380,13 @@ func configurationProfileRank(name, preferred string) int {
 		return 1
 	}
 	return 2
+}
+
+func artifactRank(candidate Candidate) int {
+	if candidate.ArtifactSeed == nil {
+		return 0
+	}
+	return 1
 }
 
 func normalizeRequest(request Request) Request {
@@ -522,9 +573,17 @@ func (s CatalogSource) proposeGeneric(proposal Proposal) (Proposal, error) {
 		candidate := buildGenericCandidate(model, revision, compatible, version, request)
 		proposal.Candidates = append(proposal.Candidates, candidate)
 	}
+	var err error
+	proposal.Candidates, err = s.expandModelOptCandidates(proposal.Candidates, request)
+	if err != nil {
+		return Proposal{}, err
+	}
 	sort.Slice(proposal.Candidates, func(i, j int) bool {
 		if qualificationRank(proposal.Candidates[i].CompatibilityState) != qualificationRank(proposal.Candidates[j].CompatibilityState) {
 			return qualificationRank(proposal.Candidates[i].CompatibilityState) < qualificationRank(proposal.Candidates[j].CompatibilityState)
+		}
+		if artifactRank(proposal.Candidates[i]) != artifactRank(proposal.Candidates[j]) {
+			return artifactRank(proposal.Candidates[i]) < artifactRank(proposal.Candidates[j])
 		}
 		return proposal.Candidates[i].ID < proposal.Candidates[j].ID
 	})
@@ -558,6 +617,162 @@ func attachStartingPoint(proposal *Proposal) {
 		firstStep = "replace the public prior with representative customer replay"
 	}
 	proposal.PostDeployWorkflow = []string{firstStep, "assess serving-stage bottlenecks", "profile the exact runtime and target GPU", "search existing implementations before custom code", "qualify candidates with workload, quality, cost, and Release Guard evidence"}
+}
+
+func (s CatalogSource) expandModelOptCandidates(baselines []Candidate, request Request) ([]Candidate, error) {
+	if len(s.ModelOpt.Seeds) == 0 || len(baselines) == 0 {
+		if len(s.ModelOpt.Seeds) == 0 {
+			return baselines, nil
+		}
+	}
+	out := append([]Candidate(nil), baselines...)
+	seen := map[string]struct{}{}
+	for _, candidate := range out {
+		seen[candidate.ID] = struct{}{}
+	}
+	for _, baseline := range baselines {
+		matches := s.ModelOpt.Match(baseline.Deployment.Model.ID, baseline.Deployment.Model.Revision, baseline.Deployment.Runtime.Engine, request.GPU)
+		for _, seed := range matches {
+			derived, err := modelOptCandidate(baseline, seed, request)
+			if err != nil {
+				return nil, err
+			}
+			if _, duplicate := seen[derived.ID]; !duplicate {
+				out = append(out, derived)
+				seen[derived.ID] = struct{}{}
+			}
+		}
+	}
+	model, revision := request.ModelIdentity, request.ModelRevision
+	if embeddedModel, embeddedRevision, found := splitPinnedModel(model); found {
+		model = embeddedModel
+		if revision == "" {
+			revision = embeddedRevision
+		}
+	}
+	if entry, found := findRecipe(s.Recipes, model); found {
+		model, revision = entry.Model, entry.Revision
+	}
+	for _, compatible := range matchingCompatibility(s.Integrations.Compatibility, request) {
+		if compatible.Runtime != "vllm" && compatible.Runtime != "sglang" {
+			continue
+		}
+		matches := s.ModelOpt.Match(model, revision, compatible.Runtime, request.GPU)
+		if len(matches) == 0 {
+			continue
+		}
+		version := runtimeVersion(s.Integrations.Runtimes, compatible.Runtime)
+		if version == "" {
+			continue
+		}
+		baseline := buildGenericCandidate(model, revision, compatible, version, request)
+		if _, duplicate := seen[baseline.ID]; !duplicate {
+			out = append(out, baseline)
+			seen[baseline.ID] = struct{}{}
+		}
+		for _, seed := range matches {
+			derived, err := modelOptCandidate(baseline, seed, request)
+			if err != nil {
+				return nil, err
+			}
+			if _, duplicate := seen[derived.ID]; !duplicate {
+				out = append(out, derived)
+				seen[derived.ID] = struct{}{}
+			}
+		}
+	}
+	return out, nil
+}
+
+func modelOptCandidate(baseline Candidate, seed modeloptcatalog.Seed, request Request) (Candidate, error) {
+	encoded, err := json.Marshal(baseline)
+	if err != nil {
+		return Candidate{}, err
+	}
+	var candidate Candidate
+	if err = json.Unmarshal(encoded, &candidate); err != nil {
+		return Candidate{}, err
+	}
+	artifact := ArtifactSeed{
+		CatalogID: seed.ID, Publisher: seed.Publisher, Tool: seed.Tool,
+		ToolVersion: seed.ToolVersion, Algorithm: seed.Algorithm, Format: seed.Format,
+		BaseRepository: seed.BaseRepository, BaseRevision: seed.BaseRevision,
+		LineageState: seed.LineageState, OutputRepository: seed.OutputRepository,
+		OutputRevision: seed.OutputRevision, ManifestDigest: seed.ManifestDigest,
+		ModelCardDigest: seed.ModelCardDigest, LicenseSPDX: seed.LicenseSPDX,
+		LicenseDigest:            seed.LicenseDigest,
+		AcceleratorArchitectures: append([]string(nil), seed.AcceleratorArchitectures...),
+		SourceURL:                seed.SourceURL,
+	}
+	candidate.ID = ""
+	candidate.Rank = 0
+	candidate.Status = "proposed-unmeasured"
+	candidate.EvidenceState = EvidenceUnmeasured
+	candidate.ModeledEvidence = nil
+	candidate.ArtifactSeed = &artifact
+	candidate.ConfigurationProfile += "-modelopt-" + strings.ToLower(seed.Algorithm)
+	candidate.Source = SourceInfo{
+		Name: "nvidia-modelopt-checkpoint-catalog", Version: seed.OutputRevision,
+		EvidenceClass: "publisher-provided-unmeasured", UpstreamProject: "NVIDIA/Model-Optimizer",
+	}
+	candidate.Deployment.Name = safeName(candidate.Deployment.Name + "-" + seed.Algorithm)
+	candidate.Deployment.Model.ID = seed.OutputRepository
+	candidate.Deployment.Model.Revision = seed.OutputRevision
+	candidate.Features = append(candidate.Features,
+		Feature{Name: "optimized_checkpoint", State: "publisher-provided", Source: seed.ManifestDigest},
+		Feature{Name: "quantization", State: seed.Algorithm, Source: seed.Tool + "@" + seed.ToolVersion},
+		Feature{Name: "artifact_lineage", State: seed.LineageState, Source: seed.SourceURL},
+	)
+	candidate.RequiredEvidence = append(candidate.RequiredEvidence,
+		"artifact manifest verification before download",
+		"runtime load and exact served-model identity for the pinned checkpoint",
+		"paired semantic quality comparison against the exact source checkpoint",
+		"workload latency, throughput, memory, and cost comparison against the unmodified baseline",
+		"license review for the model and every builder/runtime dependency",
+	)
+	candidate.Limitations = append(candidate.Limitations, seed.Limitations...)
+	candidate.Limitations = append(candidate.Limitations,
+		"Publisher benchmark or model-card results are discovery evidence only and cannot satisfy InferCrane qualification gates.",
+		"This checkpoint is restricted to the publisher-declared accelerator architecture and must not be scheduled on Hopper.",
+	)
+	identity, err := json.Marshal(struct {
+		Source     SourceInfo      `json:"source"`
+		Deployment DeploymentDraft `json:"deployment"`
+		Profile    string          `json:"profile"`
+		Artifact   ArtifactSeed    `json:"artifact"`
+		Workload   string          `json:"workload"`
+	}{candidate.Source, candidate.Deployment, candidate.ConfigurationProfile, artifact, request.WorkloadProfile})
+	if err != nil {
+		return Candidate{}, err
+	}
+	sum := sha256.Sum256(identity)
+	candidate.ID = hex.EncodeToString(sum[:])
+	return candidate, nil
+}
+
+func validateArtifactSeed(seed ArtifactSeed) error {
+	if seed.CatalogID == "" || seed.Publisher == "" || seed.Tool != "modelopt" || seed.ToolVersion == "" || seed.Algorithm == "" || seed.BaseRepository == "" || seed.OutputRepository == "" || seed.LicenseSPDX == "" || len(seed.AcceleratorArchitectures) == 0 || !strings.HasPrefix(seed.SourceURL, "https://huggingface.co/") {
+		return errors.New("publisher artifact candidate has incomplete provenance")
+	}
+	if seed.LineageState != "exact" && seed.LineageState != "publisher_declared" {
+		return errors.New("publisher artifact candidate has an unsupported lineage state")
+	}
+	if seed.LineageState == "exact" && !immutableModelRevision(seed.BaseRevision) {
+		return errors.New("publisher artifact exact lineage requires an immutable base revision")
+	}
+	if !immutableModelRevision(seed.OutputRevision) || !sha256Digest(seed.ManifestDigest) || !sha256Digest(seed.ModelCardDigest) || seed.LicenseDigest != "" && !sha256Digest(seed.LicenseDigest) {
+		return errors.New("publisher artifact candidate requires immutable output and manifest identity")
+	}
+	return nil
+}
+
+func sha256Digest(value string) bool {
+	value = strings.TrimPrefix(value, "sha256:")
+	if len(value) != sha256.Size*2 {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
 }
 
 func applyWorkloadBoundary(proposal *Proposal) {
