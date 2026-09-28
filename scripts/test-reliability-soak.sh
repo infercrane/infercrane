@@ -24,7 +24,13 @@ echo "==> shuffled race soak ($count repetitions)"
 
 if [[ -n "${INFERCRANE_TEST_DATABASE_URL:-}" ]]; then
   echo "==> PostgreSQL fencing/contention soak ($count repetitions)"
-  (cd "$root" && go test -race -shuffle=on -count="$count" ./internal/store)
+  # The full gate already checks every historical migration prefix once. That
+  # deterministic O(migrations^2) compatibility matrix and the broad store
+  # suite must not be multiplied by the soak count. Repeat the operations whose
+  # correctness specifically depends on locking, fencing, leases, or atomic
+  # idempotency; every other store test still runs once in the normal gate.
+  store_soak_pattern='^(TestAsyncInferenceIsIdempotentFencedCancellableAndExpirable|TestHostedIdentityBootstrapIsConcurrentAndIdempotent|TestManagedFundingIntentGrantsOneConcurrentCreationLease|TestManagedPaymentWebhookIsAtomicAndSessionIdempotent|TestManagedDeploymentReservationIsAtomicIdempotentAndSettledAfterCleanup|TestManagedWalletAuthorizesAndSettlesExactlyOnce|TestConcurrentStartupSerializesMigrations|TestOptimizationCampaignIsBoundedDurableFencedAndCleansRejectedCandidate|TestSubmitCloudDeploymentIsAtomicAndIdempotent|TestRequestQuotaReservationsAreDistributedAndWindowed|TestOperationQueueLeasesAndRecoversExpiredWork|TestEnqueuedOperationIsImmediatelyClaimableByDatabaseClock|TestConcurrentOperationClaimsAreExactlyOnce|TestStaleLeaseCannotCheckpointOrFinish|TestCancellationPersistedBeforeCompletionCannotBeOverwrittenBySuccess|TestDeploymentLifecycleMutationsAreSerialized|TestScaleToQueuesExactlyOneDurableOperation|TestReplicaIntentAndProviderIdentityAreIdempotent)$'
+  (cd "$root" && go test -short -race -shuffle=on -count="$count" -run "$store_soak_pattern" ./internal/store)
 else
   echo ":: PostgreSQL soak skipped (INFERCRANE_TEST_DATABASE_URL is unset)"
 fi

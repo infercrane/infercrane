@@ -118,6 +118,9 @@ func embeddedMigrations(t *testing.T) []struct {
 }
 
 func TestEveryHistoricalMigrationPrefixUpgradesToCurrent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("exhaustive migration-prefix compatibility is covered by the normal test gate")
+	}
 	migrations := embeddedMigrations(t)
 	for prefix := 0; prefix <= len(migrations); prefix++ {
 		t.Run(fmt.Sprintf("prefix-%02d", prefix), func(t *testing.T) {
