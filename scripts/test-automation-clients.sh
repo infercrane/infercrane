@@ -36,7 +36,10 @@ grep -Fq "version = \"$release_version\"" "$root/examples/terraform/main.tf"
 grep -Fq 'version: 0.22.1' "$root/examples/infercrane.yaml"
 grep -Fq "RELEASE_CANDIDATE_TAG ?= \$(shell jq -r '.candidate_tag' .release/version.json)" "$root/Makefile"
 grep -Fq 'GORELEASER_CURRENT_TAG=$(RELEASE_CANDIDATE_TAG)' "$root/Makefile"
-test -f "$root/docs/release-notes-v$release_version.md"
+# Until the stable tag exists, the published installable artifact is the
+# candidate release. Require notes for that artifact instead of silently
+# forcing the documentation to advertise an unreleased stable version.
+test -f "$root/docs/release-notes-$release_candidate.md"
 
 go run ./tools/openapi-codegen -check
 PYTHONPATH="$root/sdk/python/src" python3 -m unittest discover -s "$root/sdk/python/tests"
