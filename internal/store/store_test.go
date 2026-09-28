@@ -880,15 +880,19 @@ func TestApplyDeploymentConvergesTargetMembership(t *testing.T) {
 	}
 }
 
-func TestTargetConflict(t *testing.T) {
+func TestTargetsMayShareAProviderURLWhenTheirIdentitiesDiffer(t *testing.T) {
 	ctx := context.Background()
 	s := openStore(t, ctx)
-	if _, err := s.AddTarget(ctx, domain.Target{Name: "a", URL: "http://worker", Runtime: "vllm"}); err != nil {
+	first, err := s.AddTarget(ctx, domain.Target{Name: "a", URL: "http://worker", Runtime: "vllm", UpstreamModel: "provider/model-a"})
+	if err != nil {
 		t.Fatalf("add target: %v", err)
 	}
-	_, err := s.AddTarget(ctx, domain.Target{Name: "b", URL: "http://worker/", Runtime: "vllm"})
-	if !errors.Is(err, ErrConflict) {
-		t.Fatalf("error = %v, want ErrConflict", err)
+	second, err := s.AddTarget(ctx, domain.Target{Name: "b", URL: "http://worker/", Runtime: "vllm", UpstreamModel: "provider/model-b"})
+	if err != nil {
+		t.Fatalf("add second model at shared provider URL: %v", err)
+	}
+	if first.ID == second.ID || second.URL != first.URL {
+		t.Fatalf("targets = (%#v, %#v), want distinct identities at one normalized URL", first, second)
 	}
 }
 
