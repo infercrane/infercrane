@@ -31,6 +31,8 @@ type RunPodPods struct {
 	Client                        *http.Client
 }
 
+const runPodPodsUserAgent = "InferCrane-RunPod-Pods/1.0"
+
 type runPodNetworkVolume struct {
 	ID           string `json:"id"`
 	Name         string `json:"name"`
@@ -320,7 +322,12 @@ func (r RunPodPods) do(ctx context.Context, method, path string, body, output an
 	if err != nil {
 		return fmt.Errorf("create RunPod Pod request: %w", err)
 	}
-	request.Header.Set("Authorization", "Bearer "+r.APIKey)
+	request.Header.Set("Authorization", "Bearer "+strings.TrimSpace(r.APIKey))
+	// RunPod's edge may reject generic Go HTTP clients even when the exact
+	// bearer credential is valid. Identify this integration explicitly so the
+	// control-plane lifecycle and an operator's direct request take the same
+	// authenticated path through their edge.
+	request.Header.Set("User-Agent", runPodPodsUserAgent)
 	if body != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}
