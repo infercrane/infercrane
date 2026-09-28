@@ -103,6 +103,33 @@ func TestExecutionHandlerMeasuresEveryCandidateBeforeRanking(t *testing.T) {
 	}
 }
 
+func TestExecutionHandlerResumesPastRankedCandidateBeforeConvergingLaterPermanentFailure(t *testing.T) {
+	now := time.Now().UTC()
+	repository, driver, coordinator := approvedCoordinatorFixture(now, 2)
+	repository.campaign.Candidates[0].State = CandidateRanked
+	repository.campaign.Candidates[0].EvidenceState = "measured"
+	repository.campaign.Candidates[0].BenchmarkID = "benchmark-a"
+	repository.campaign.Candidates[0].QualityEvidenceID = "quality-a"
+	repository.campaign.Candidates[1].State = CandidateProvisioning
+	repository.campaign.State = CampaignRanked
+	driver.provisionErr = operations.Permanent("unsupported_tuple", errors.New("runtime tuple is not qualified"))
+	driver.rankDecisions = map[string]string{"candidate-a": RankSelect}
+
+	request, _ := json.Marshal(ExecuteRequest{TenantID: "tenant", CampaignID: "campaign", Candidates: []string{"candidate-a", "candidate-b"}})
+	result, err := Handlers(coordinator)[ExecuteKind](context.Background(), domain.Operation{RequestJSON: string(request)})
+	assertWaitingForHuman(t, result, err)
+
+	if candidate := repository.campaign.Candidates[0]; candidate.State != CandidateGuardPassed {
+		t.Fatalf("already-ranked candidate did not resume at phase two: %+v", candidate)
+	}
+	if candidate := repository.campaign.Candidates[1]; candidate.State != CandidateCleaned || candidate.FailureCode != "unsupported_tuple" {
+		t.Fatalf("later permanent failure did not converge through cleanup: %+v", candidate)
+	}
+	if driver.provisionCalls != 1 || driver.rankCalls != 1 || driver.cleanupCalls != 1 {
+		t.Fatalf("resume crossed a phase boundary incorrectly: %+v", driver)
+	}
+}
+
 func assertWaitingForHuman(t *testing.T, result string, err error) {
 	t.Helper()
 	var failure operations.Failure
