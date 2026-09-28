@@ -4224,10 +4224,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	if cfg.KubernetesEnabled() {
 		benchmarkBackends["kubernetes"] = controlapi.BackendMetadata{APIKey: cfg.APIKey, APIKeyEnv: "INFERCRANE_WORKER_API_KEY"}
 	}
-	manualPrices := map[pricing.Request]pricing.Estimate{}
-	for _, row := range cfg.OptimizationPrices {
-		manualPrices[pricing.Request{Cloud: row.Cloud, Region: provideridentity.PriceRegion(row.Cloud, row.Region), GPU: provideridentity.GPUTypeID(row.Cloud, row.GPU), GPUCount: row.GPUCount, Replicas: row.Replicas}] = optimizationPriceEstimate(row)
-	}
+	manualPrices := manualOptimizationPrices(cfg.OptimizationPrices)
 	priceCatalog := pricing.NewDynamicCatalog(manualPrices)
 	if cfg.GPUPriceSyncInterval > 0 {
 		// Dynamic marketplace prices must come from the provider itself. Static
@@ -4691,6 +4688,17 @@ func baseBenchmarkBackends(cfg config.Config) map[string]controlapi.BackendMetad
 		// like AWS, GCP, Kubernetes, and SkyPilot elastic backends.
 		"runpod-pods": {APIKey: cfg.APIKey, APIKeyEnv: "INFERCRANE_WORKER_API_KEY"},
 	}
+}
+
+func manualOptimizationPrices(rows []config.OptimizationPrice) map[pricing.Request]pricing.Estimate {
+	prices := make(map[pricing.Request]pricing.Estimate, len(rows))
+	for _, row := range rows {
+		prices[pricing.Request{
+			Cloud: row.Cloud, Region: provideridentity.PriceRegion(row.Cloud, row.Region),
+			GPU: provideridentity.GPUTypeID(row.Cloud, row.GPU), GPUCount: row.GPUCount, Replicas: row.Replicas,
+		}] = optimizationPriceEstimate(row)
+	}
+	return prices
 }
 
 func controlHTTPClient(cfg config.Config, timeout time.Duration) (*http.Client, error) {
