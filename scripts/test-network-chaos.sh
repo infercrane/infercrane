@@ -26,13 +26,14 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 wait_http() {
-  local url=$1 expected=$2 limit=${3:-60} code
-  for ((attempt=1; attempt<=limit; attempt++)); do
+  local url=$1 expected=$2 timeout=${3:-60} code=000
+  local deadline=$((SECONDS + timeout))
+  while ((SECONDS < deadline)); do
     code=$(curl -sS --max-time 3 -o /dev/null -w '%{http_code}' "$url" 2>/dev/null || true)
     [[ "$code" == "$expected" ]] && return 0
     sleep 1
   done
-  echo "timed out waiting for $url to return HTTP $expected" >&2
+  echo "timed out after ${timeout}s waiting for $url to return HTTP $expected (last HTTP $code)" >&2
   return 1
 }
 
@@ -71,7 +72,13 @@ wait_inference
 curl -fsS -X POST -H 'Content-Type: application/json' \
   -d '{"name":"postgres","listen":"0.0.0.0:15432","upstream":"postgres:5432","enabled":false}' \
   "$proxy_api/proxies/postgres" >/dev/null
-wait_http "$base_url/readyz" 503 15
+# Production readiness intentionally tolerates a previously healthy database
+# for 30 seconds so a short control-plane interruption does not churn traffic.
+# Prove both sides of that contract: the instance stays ready initially, then
+# fails closed after the bounded stale window.
+sleep 5
+wait_http "$base_url/readyz" 200 1
+wait_http "$base_url/readyz" 503 45
 inference
 
 curl -fsS -X POST -H 'Content-Type: application/json' \
