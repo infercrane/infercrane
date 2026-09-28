@@ -254,7 +254,7 @@ func (s *Store) AddTargetForTenant(ctx context.Context, tenant string, target do
 	target.URL = NormalizeURL(target.URL)
 	var existing domain.Target
 	var created, updated string
-	err := s.QueryRowContext(ctx, `SELECT id,name,url,provider,runtime,COALESCE(upstream_model_name,''),health,COALESCE(provider_resource_id,''),COALESCE(provider_details_json::text,''),created_at,updated_at FROM targets WHERE tenant_id=? AND (name=? OR url=?)`, tenant, target.Name, target.URL).Scan(&existing.ID, &existing.Name, &existing.URL, &existing.Provider, &existing.Runtime, &existing.UpstreamModel, &existing.Health, &existing.ProviderResourceID, &existing.ProviderDetails, &created, &updated)
+	err := s.QueryRowContext(ctx, `SELECT id,name,url,provider,runtime,COALESCE(upstream_model_name,''),health,COALESCE(provider_resource_id,''),COALESCE(provider_details_json::text,''),created_at,updated_at FROM targets WHERE tenant_id=? AND name=?`, tenant, target.Name).Scan(&existing.ID, &existing.Name, &existing.URL, &existing.Provider, &existing.Runtime, &existing.UpstreamModel, &existing.Health, &existing.ProviderResourceID, &existing.ProviderDetails, &created, &updated)
 	if err == nil {
 		existing.CreatedAt, existing.UpdatedAt = parseTime(created), parseTime(updated)
 		// Empty optional metadata means "unspecified" on an idempotent retry. An
@@ -266,7 +266,7 @@ func (s *Store) AddTargetForTenant(ctx context.Context, tenant string, target do
 		if existing.Name == target.Name && existing.URL == target.URL && existing.Runtime == target.Runtime && existing.Provider == target.Provider && upstreamCompatible {
 			return existing, nil
 		}
-		return domain.Target{}, fmt.Errorf("%w: target name or URL already registered", ErrConflict)
+		return domain.Target{}, fmt.Errorf("%w: target name already registered", ErrConflict)
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return domain.Target{}, err
@@ -281,7 +281,7 @@ func (s *Store) AddTargetForTenant(ctx context.Context, tenant string, target do
 	target.CreatedAt, target.UpdatedAt = parseTime(stamp), parseTime(stamp)
 	_, err = s.ExecContext(ctx, `INSERT INTO targets(id,name,url,provider,runtime,upstream_model_name,health,provider_resource_id,provider_details_json,tenant_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?::jsonb,?,?,?)`, target.ID, target.Name, target.URL, target.Provider, target.Runtime, null(target.UpstreamModel), target.Health, null(target.ProviderResourceID), nullJSON(target.ProviderDetails), tenant, stamp, stamp)
 	if isUniqueViolation(err) {
-		return domain.Target{}, fmt.Errorf("%w: target name or URL already registered", ErrConflict)
+		return domain.Target{}, fmt.Errorf("%w: target name already registered", ErrConflict)
 	}
 	return target, err
 }
