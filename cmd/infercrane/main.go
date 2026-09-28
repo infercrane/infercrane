@@ -4216,10 +4216,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	if cfg.KubernetesEnabled() {
 		benchmarkBackends["kubernetes"] = controlapi.BackendMetadata{APIKey: cfg.APIKey, APIKeyEnv: "INFERCRANE_WORKER_API_KEY"}
 	}
-	manualPrices := map[pricing.Request]pricing.Estimate{}
-	for _, row := range cfg.OptimizationPrices {
-		manualPrices[pricing.Request{Cloud: row.Cloud, Region: provideridentity.PriceRegion(row.Cloud, row.Region), GPU: provideridentity.GPUTypeID(row.Cloud, row.GPU), GPUCount: row.GPUCount, Replicas: row.Replicas}] = pricing.Estimate{Currency: row.Currency, Source: row.Source, Hourly: row.HourlyUSD, CostScope: pricing.CostScopeUnknown, Authority: pricing.PriceAuthorityUnknown, ObservedAt: row.ObservedAt, StaleAfter: row.ValidUntil.Sub(row.ObservedAt)}
-	}
+	manualPrices := manualOptimizationPrices(cfg.OptimizationPrices)
 	priceCatalog := pricing.NewDynamicCatalog(manualPrices)
 	if cfg.GPUPriceSyncInterval > 0 {
 		// Dynamic marketplace prices must come from the provider itself. Static
@@ -4621,6 +4618,24 @@ func baseBenchmarkBackends(cfg config.Config) map[string]controlapi.BackendMetad
 		// like AWS, GCP, Kubernetes, and SkyPilot elastic backends.
 		"runpod-pods": {APIKey: cfg.APIKey, APIKeyEnv: "INFERCRANE_WORKER_API_KEY"},
 	}
+}
+
+func manualOptimizationPrices(rows []config.OptimizationPrice) map[pricing.Request]pricing.Estimate {
+	prices := make(map[pricing.Request]pricing.Estimate, len(rows))
+	for _, row := range rows {
+		prices[pricing.Request{
+			Cloud: row.Cloud, Region: provideridentity.PriceRegion(row.Cloud, row.Region),
+			GPU: provideridentity.GPUTypeID(row.Cloud, row.GPU), GPUCount: row.GPUCount, Replicas: row.Replicas,
+		}] = pricing.Estimate{
+			Currency: row.Currency, Source: row.Source, Hourly: row.HourlyUSD,
+			// INFERCRANE_OPTIMIZATION_PRICES_JSON is the operator's explicit,
+			// exact-tuple spend authority. It is deliberately stronger than a
+			// marketplace observation and is bounded by ValidUntil.
+			CostScope: pricing.CostScopeInstanceTotal, Authority: pricing.PriceAuthorityAccountContract,
+			ObservedAt: row.ObservedAt, StaleAfter: row.ValidUntil.Sub(row.ObservedAt), GuaranteedUntil: row.ValidUntil,
+		}
+	}
+	return prices
 }
 
 func controlHTTPClient(cfg config.Config, timeout time.Duration) (*http.Client, error) {

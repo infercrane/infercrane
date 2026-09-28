@@ -83,6 +83,23 @@ func TestBaseBenchmarkBackendsCanMeasureNativeRunPodPods(t *testing.T) {
 	}
 }
 
+func TestManualOptimizationPricesRemainExactSpendAuthority(t *testing.T) {
+	observed := time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC)
+	validUntil := observed.Add(2 * time.Hour)
+	prices := manualOptimizationPrices([]config.OptimizationPrice{{
+		Cloud: "runpod", GPU: "A40", GPUCount: 1, Replicas: 1,
+		HourlyUSD: 0.49, Currency: "USD", Source: "operator-contract/runpod-a40",
+		ObservedAt: observed, ValidUntil: validUntil,
+	}})
+	estimate, ok := prices[pricing.Request{Cloud: "runpod", Region: "global", GPU: "NVIDIA A40", GPUCount: 1, Replicas: 1}]
+	if !ok {
+		t.Fatalf("exact provider-normalized price missing: %+v", prices)
+	}
+	if estimate.CostScope != pricing.CostScopeInstanceTotal || estimate.Authority != pricing.PriceAuthorityAccountContract || estimate.GuaranteedUntil != validUntil || !estimate.DeploymentComparable() {
+		t.Fatalf("manual optimization price is not usable exact spend authority: %+v", estimate)
+	}
+}
+
 func TestContextPassportRefreshBackoffIsBounded(t *testing.T) {
 	base := 10 * time.Second
 	wants := []time.Duration{base, 2 * base, 4 * base, time.Minute, time.Minute}
