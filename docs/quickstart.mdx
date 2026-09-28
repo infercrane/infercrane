@@ -46,8 +46,8 @@ isolated stack, exercises the workflow, and tears that stack down; you do not ne
 
 ## Prerequisites
 
-- Git
-- Docker with Compose v2
+- Git, Python 3, cURL, and jq
+- Docker with Compose v2 and a reachable engine
 - Port `18000` available
 
 <Steps>
@@ -55,7 +55,7 @@ isolated stack, exercises the workflow, and tears that stack down; you do not ne
     Clone the public repository and enter the checkout:
 
     ```bash
-    gh repo clone infercrane/infercrane
+    git clone https://github.com/infercrane/infercrane.git
     cd infercrane
     ```
   </Step>

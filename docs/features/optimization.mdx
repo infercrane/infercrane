@@ -295,6 +295,19 @@ When model precision or model artifacts differ, attach signed semantic evaluatio
 promotion. When cost is part of the objective, attach sourced, dated cost evidence. Only an exact
 model, runtime, accelerator, provider, and canonical workload result supports a measured recipe.
 
+## Seed candidates from NVIDIA Model Optimizer
+
+InferCrane can discover reviewed NVIDIA Model Optimizer checkpoints as provenance-bound candidate
+seeds. Each seed pins the publisher repository, immutable revision, artifact identity, algorithm,
+precision, and source URL before it enters the search space. The console shows that provenance and
+the remaining qualification gates.
+
+These checkpoints are **unmeasured candidates**, not InferCrane performance claims. InferCrane does
+not claim that it transformed the publisher artifact or that the artifact is faster on a target
+GPU. Exact runtime and accelerator compatibility, correctness, semantic quality, workload
+performance, and cost evidence remain mandatory before Release Guard can accept a candidate. A
+publisher checkpoint that fails any gate is retained as negative evidence rather than promoted.
+
 ## What the first planner knows
 
 The first source composes:

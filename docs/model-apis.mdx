@@ -10,6 +10,12 @@ InferCrane Model APIs expose qualified open weight models through the OpenAI cha
 contract. Your application keeps one client while InferCrane operates the serving configuration,
 capacity, and release path behind it.
 
+<Info>
+  The catalog is availability-authoritative. It lists a model only when an operator has installed a
+  current supplier, price, protocol, and capacity contract. If no qualified offer is available, use
+  BYOC or connect an existing endpoint; InferCrane does not route to an undisclosed fallback.
+</Info>
+
 <Card title="Create an API key" icon="key" href="https://console.infercrane.com/model-apis">
   Sign in to the InferCrane console, choose a model, and create a scoped API key.
 </Card>

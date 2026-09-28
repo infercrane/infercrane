@@ -8,8 +8,9 @@ by the CLI, SDKs, Terraform provider, and terminal workspace. It is not a second
 reads PostgreSQL or provider credentials directly.
 
 <Info>
-  The hosted console is currently deny-by-default private preview. The initial public product is
-  CLI- and API-first. Local self-hosted use does not require an InferCrane Cloud or Clerk account.
+  The hosted console is a company-operated service over the public InferCrane control contracts.
+  The Apache-2.0 core remains CLI-, API-, Terraform-, and terminal-first and does not require an
+  InferCrane account.
 </Info>
 
 ## What the console covers
@@ -79,27 +80,12 @@ runtime adapter reports them. GPU utilization, memory, temperature, power, and X
 when a qualified collector posts a fresh revision-bound snapshot. The UI displays why evidence is
 absent or stale rather than rendering an unknown value as zero.
 
-## Local self-hosted console
+## Self-hosted interface boundary
 
-From an `infercrane-web` checkout, configure the local adapter:
-
-```bash
-export INFERCRANE_CONSOLE_AUTH_MODE=local
-export INFERCRANE_CONSOLE_ORIGIN=http://127.0.0.1:3200
-export INFERCRANE_CONTROL_API_URL=http://127.0.0.1:18000
-export INFERCRANE_LOCAL_SESSION_SECRET="$(openssl rand -base64 48)"
-npm install
-npm run dev:console
-```
-
-Open `http://127.0.0.1:3200` and exchange an existing InferCrane API credential. The BFF validates
-the credential with the control plane and seals it into an eight-hour, encrypted, HttpOnly,
-SameSite=Strict session. Browser JavaScript does not receive the raw token after exchange.
-
-<Warning>
-  Use a unique session secret and HTTPS in production. Do not place the bootstrap credential in a
-  shared browser session; create a scoped service account instead.
-</Warning>
+The public repository ships the control API, OpenAI-compatible gateway, CLI, Python and TypeScript
+SDKs, Terraform provider, and terminal workspace. Those surfaces are sufficient to self-operate
+InferCrane and do not depend on the hosted console. The browser console source is maintained as a
+separate company-operated service and is not part of the Apache-2.0 repository.
 
 ## Hosted identity and workspace provisioning
 
@@ -116,7 +102,7 @@ export INFERCRANE_HOSTED_AUTH_ISSUER="https://YOUR-CLERK-DOMAIN"
 export INFERCRANE_HOSTED_AUTH_AUDIENCE="infercrane-control-api"
 export INFERCRANE_HOSTED_AUTH_JWT_KEY="-----BEGIN PUBLIC KEY-----...-----END PUBLIC KEY-----"
 # Alternative: INFERCRANE_HOSTED_AUTH_JWT_KEY_FILE=/run/secrets/clerk-jwt-public.pem
-export INFERCRANE_HOSTED_AUTH_AUTHORIZED_PARTIES="https://app.infercrane.ai"
+export INFERCRANE_HOSTED_AUTH_AUTHORIZED_PARTIES="https://console.infercrane.com"
 # Public signup only; defaults to false for fail-closed private installations.
 export INFERCRANE_HOSTED_AUTH_AUTO_PROVISION="true"
 ```
@@ -156,8 +142,8 @@ infercrane explain DEPLOYMENT --output json
 infercrane inspect DEPLOYMENT --output json
 ```
 
-The public Dashboard link intentionally leads to a Coming Soon page until hosted access is ready for
-general users.
+The public Console link opens the hosted product. If an organization is not entitled to a hosted
+capability, the console shows that boundary explicitly instead of fabricating an available offer.
 
 The web workspace's `npm run test:e2e:empty-control-plane` journey starts with a new PostgreSQL
 volume and verifies this first-run flow through the real control API. It is the regression boundary

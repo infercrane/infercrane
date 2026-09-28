@@ -13006,7 +13006,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "List tenant-owned private computers without provider identities or customer content",
+        "summary": "List tenant-owned sandboxes without provider identities or customer content",
         "tags": [
           "Sandboxes"
         ]
@@ -13062,7 +13062,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Create a durable private computer from an approved immutable environment",
+        "summary": "Create a durable sandbox from an approved immutable environment",
         "tags": [
           "Sandboxes"
         ]
@@ -13365,7 +13365,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Delete a private computer and durably clean up its workspace",
+        "summary": "Delete a sandbox and durably clean up its workspace",
         "tags": [
           "Sandboxes"
         ]
@@ -13410,7 +13410,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Inspect one tenant-owned private computer",
+        "summary": "Inspect one tenant-owned sandbox",
         "tags": [
           "Sandboxes"
         ]
@@ -13683,7 +13683,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Put a private computer to sleep while retaining its workspace",
+        "summary": "Put a sandbox to sleep while retaining its workspace",
         "tags": [
           "Sandboxes"
         ]
@@ -13853,7 +13853,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Wake a private computer with its durable workspace attached",
+        "summary": "Wake a sandbox with its durable workspace attached",
         "tags": [
           "Sandboxes"
         ]

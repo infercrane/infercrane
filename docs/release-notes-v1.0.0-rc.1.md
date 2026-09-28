@@ -13,7 +13,8 @@ for deploying new model serving or adopting inference that a team already runs.
 
 ```bash
 brew install infercrane/tap/infercrane
-python -m pip install 'infercrane==1.0.0rc1'
+python -m pip install \
+  'https://github.com/infercrane/infercrane/releases/download/v1.0.0-rc.1/infercrane-1.0.0rc1-py3-none-any.whl'
 npm install '@infercrane/sdk@1.0.0-rc.1'
 ```
 

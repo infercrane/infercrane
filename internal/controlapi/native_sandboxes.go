@@ -123,7 +123,7 @@ func (a API) sandbox(w http.ResponseWriter, r *http.Request) {
 
 func (a API) createSandbox(w http.ResponseWriter, r *http.Request) {
 	if a.SandboxProvider == nil {
-		writeError(w, http.StatusNotImplemented, "sandbox_provider_unavailable", "native private computers are not configured")
+		writeError(w, http.StatusNotImplemented, "sandbox_provider_unavailable", "native sandboxes are not configured")
 		return
 	}
 	store, ok := a.sandboxStore(w)
@@ -282,7 +282,7 @@ func (a API) deleteSandbox(w http.ResponseWriter, r *http.Request) {
 
 func (a API) mutateSandboxLifecycle(w http.ResponseWriter, r *http.Request, action string) {
 	if a.SandboxProvider == nil {
-		writeError(w, http.StatusNotImplemented, "sandbox_provider_unavailable", "native private computers are not configured")
+		writeError(w, http.StatusNotImplemented, "sandbox_provider_unavailable", "native sandboxes are not configured")
 		return
 	}
 	store, row, ok := a.ownedSandbox(w, r)
@@ -455,7 +455,7 @@ func (a API) sandboxUsage(w http.ResponseWriter, r *http.Request) {
 func (a API) writeSandboxProviderError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, sandboxprovider.ErrForbidden):
-		writeError(w, http.StatusForbidden, "sandbox_tenant_not_enabled", "private computers are not enabled for this tenant")
+		writeError(w, http.StatusForbidden, "sandbox_tenant_not_enabled", "sandboxes are not enabled for this tenant")
 	case errors.Is(err, sandboxprovider.ErrNotFound):
 		writeError(w, http.StatusNotFound, "sandbox_not_found", "computer was not found")
 	case errors.Is(err, sandboxprovider.ErrConflict):
@@ -463,9 +463,9 @@ func (a API) writeSandboxProviderError(w http.ResponseWriter, err error) {
 	case errors.Is(err, sandboxprovider.ErrInvalid):
 		writeError(w, http.StatusBadRequest, "invalid_sandbox_request", err.Error())
 	case errors.Is(err, sandboxprovider.ErrUnavailable):
-		writeError(w, http.StatusServiceUnavailable, "sandbox_provider_unavailable", "private computer infrastructure is not ready")
+		writeError(w, http.StatusServiceUnavailable, "sandbox_provider_unavailable", "sandbox infrastructure is not ready")
 	default:
-		writeError(w, http.StatusBadGateway, "sandbox_provider_failed", "private computer infrastructure did not confirm the request")
+		writeError(w, http.StatusBadGateway, "sandbox_provider_failed", "sandbox infrastructure did not confirm the request")
 	}
 }
 
@@ -744,7 +744,7 @@ func (a API) proxySandboxPreview(w http.ResponseWriter, r *http.Request) {
 
 func (a API) actionableSandbox(w http.ResponseWriter, r *http.Request) (sandboxProductStore, domain.NativeSandbox, bool) {
 	if a.SandboxProvider == nil {
-		writeError(w, http.StatusNotImplemented, "sandbox_provider_unavailable", "native private computers are not configured")
+		writeError(w, http.StatusNotImplemented, "sandbox_provider_unavailable", "native sandboxes are not configured")
 		return nil, domain.NativeSandbox{}, false
 	}
 	store, row, ok := a.ownedSandbox(w, r)

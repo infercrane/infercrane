@@ -1,0 +1,60 @@
+---
+title: Benchmark evidence
+description: Inspect InferCrane performance claims with their exact model, runtime, hardware, workload, receipts, and limits.
+sidebarTitle: Benchmark evidence
+---
+
+# Claims with receipts
+
+InferCrane binds every benchmark to an exact model, runtime, accelerator, workload, and date. A
+measured win is not generalized to another provider, GPU, context length, concurrency level, or
+production network path.
+
+## Qwen3.8-27B on one H200
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-09-23 |
+| Model | `Qwen/Qwen3.8-27B-FP8@017b9c7af6b5689d5dd426a76e0bc077eb5ca20a` |
+| Runtime | SGLang 0.5.20 |
+| Accelerator | 1× NVIDIA H200 |
+| Workload | 4,096 input tokens, 512 output tokens, concurrency 12 |
+| Selected recipe | FP8 weights and KV cache, bounded CUDA graphs, native NEXTN/MTP |
+
+| Measurement | Control | Selected | Change |
+| --- | ---: | ---: | ---: |
+| Aggregate output throughput | 810.4 tok/s | 1,393.6 tok/s | 1.72× |
+| Per-request p50 output speed | 76.1 tok/s | 141.0 tok/s | 1.85× |
+| p50 TTFT | 1,591 ms | 739 ms | 53.6% lower |
+| p95 inter-token latency | 14.02 ms | 8.67 ms | 38.1% lower |
+| Successful requests | 24/24 | 24/24 | equal |
+
+The paired run used the same model, image, workload, hardware, and output checks. Deterministic
+outputs matched. Streaming and buffered usage, finish reasons, structured output, forced tools,
+malformed-request handling, and prompt-token accounting passed.
+
+- [Read the decision record](/testing/qwen38-openrouter-launch-decision-2026-09-23)
+- [Inspect the machine-readable receipt](https://github.com/infercrane/infercrane/blob/main/docs/testing/evidence/qwen38-public-decode-saturation-modal-2026-09-23T044530Z.json)
+- [Inspect raw measurements](https://github.com/infercrane/infercrane/blob/main/docs/testing/evidence/qwen38-public-decode-saturation-modal-2026-09-23T044530Z-raw.json)
+
+<Warning>
+  This is a controlled Modal H200 qualification, not an OpenRouter leaderboard or public-Internet
+  result. The launch context boundary stayed at 32K because the near-262K run missed its
+  pre-registered p95 TTFT limit. Hardware and workload changes require new evidence.
+</Warning>
+
+## Rejections are part of the result
+
+The campaign preserved candidates that sounded attractive but lost under the target workload:
+
+- FlashInfer GDN paths preserved correctness but regressed throughput and cold readiness.
+- DFlash2 won some lower-concurrency screening lanes but did not replace native MTP at the selected
+  saturation boundary.
+- The near-262K context run completed correctly but missed its latency SLO.
+
+InferCrane distinguishes modeled proposals, screening measurements, qualification evidence, and
+public repeated evidence. Only comparable measurements can be ranked. Missing identity, quality,
+cost, or workload evidence produces `WAIT` or `REJECT`; it is never converted into a release win.
+
+Read [benchmarking](/features/benchmarking), [optimization](/features/optimization), and
+[compatibility and qualification](/compatibility) for the evidence rules.

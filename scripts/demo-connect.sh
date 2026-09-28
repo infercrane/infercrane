@@ -7,6 +7,24 @@ case "$mode" in
   adoption|full) ;;
   *) echo "usage: $0 [adoption|full]" >&2; exit 2 ;;
 esac
+
+for command_name in docker python3 curl jq; do
+  if ! command -v "$command_name" >/dev/null 2>&1; then
+    echo "InferCrane demo prerequisite missing: $command_name" >&2
+    echo "Install it, then rerun 'make demo'. See https://docs.infercrane.com/quickstart." >&2
+    exit 1
+  fi
+done
+if ! docker compose version >/dev/null 2>&1; then
+  echo "InferCrane demo requires Docker Compose v2 ('docker compose')." >&2
+  exit 1
+fi
+if ! docker info >/dev/null 2>&1; then
+  echo "Docker is installed, but its engine is not reachable." >&2
+  echo "Start Docker Desktop or your Docker service, wait until it is ready, then rerun 'make demo'." >&2
+  exit 1
+fi
+
 project=${INFERCRANE_DEMO_PROJECT:-infercrane-connect-demo-$$}
 port=${INFERCRANE_DEMO_PORT:-}
 if [ -z "$port" ]; then

@@ -30,13 +30,12 @@
 <p align="center">
   <img alt="InferCrane plans a model deployment and persists its durable operation" src="docs/images/product/github-product-demo.gif" width="960">
   <br>
-  <sub>Model APIs · BYOC deployments · workload optimization · private agent computers</sub>
+  <sub>Model APIs · BYOC deployments · workload optimization · agent sandboxes</sub>
 </p>
 
-InferCrane is the open-source execution system for open-weight models. It gives applications one
-stable API while models, runtimes, hardware, providers, and serving configurations evolve behind
-it. Start with an API, deploy into infrastructure you control, or bring an existing endpoint. Then
-measure the real workload and promote only changes that improve it.
+InferCrane is the open-source, evidence-gated release system for open-weight inference. Deploy or
+adopt vLLM and SGLang, measure serving changes against your workload, and promote only proven
+winners behind one stable API.
 
 ```text
 Applications and agents
@@ -44,10 +43,10 @@ Applications and agents
           ▼
 One OpenAI-compatible InferCrane endpoint
           │
-          ├── use a qualified Model API
+          ├── activate a qualified Model API when capacity is published
           ├── deploy open weights into your cloud or Kubernetes
           ├── optimize an existing workload
-          └── run agent tasks in a persistent private computer
+          └── run agent tasks in a persistent sandbox
           │
           ▼
 vLLM · SGLang · custom OCI
@@ -58,10 +57,10 @@ AWS · GCP · Kubernetes · RunPod · existing infrastructure
 
 | What you need | Start here | What InferCrane does |
 |---|---|---|
-| Call an open model now | [Model APIs](https://console.infercrane.com/model-apis) | Published pricing, prepaid limits, usage evidence, and one OpenAI-compatible API. |
+| Use managed capacity | [Model APIs](https://console.infercrane.com/model-apis) | Shows only currently qualified offers; an empty catalog never creates a false availability promise. |
 | Deploy open weights | [Deploy a model](https://console.infercrane.com/build?mode=deploy) | Resolve the model, workload, runtime, accelerator, provider, scaling policy, and cost boundary before creating compute. |
 | Improve a workload | [Optimize](https://console.infercrane.com/optimization) | Profile traffic, search bounded candidates, measure on exact hardware, and keep only qualified wins. |
-| Give an agent a computer | [Private computers](https://console.infercrane.com/sandboxes) | Persistent workspace, streaming commands, files, private previews, sleep/resume, and scoped model access. |
+| Isolate an agent | [Sandboxes](https://console.infercrane.com/sandboxes) | Persistent workspace, streaming commands, files, private previews, sleep/resume, and scoped model access. |
 | Keep existing inference | [Connect an endpoint](https://console.infercrane.com/onboarding/connect) | Adopt a compatible endpoint without transferring infrastructure ownership. |
 
 Nothing billable starts from a recommendation. Deployment and optimization stop at a review
@@ -69,22 +68,30 @@ boundary; provider mutation or benchmark spend requires explicit approval.
 
 ### Measured optimization, not a preset
 
-For `Qwen/Qwen3.8-27B-FP8` on one H200, the selected configuration improved a paired concurrency-12
-workload from **810.4 to 1,393.6 aggregate output tokens/s**, increased median per-request output
-speed from **76.1 to 141.0 tokens/s**, and reduced median TTFT from **1,591 ms to 739 ms**. InferCrane
-also rejected candidates that failed quality, latency, cost, or reproducibility gates.
+For `Qwen/Qwen3.8-27B-FP8` on one H200, InferCrane selected this measured winner:
+
+| Exact workload | Control | Winner | Change |
+|---|---:|---:|---:|
+| Aggregate output throughput, concurrency 12 | 810.4 tok/s | 1,393.6 tok/s | **1.72×** |
+| Median per-request output speed | 76.1 tok/s | 141.0 tok/s | **+85%** |
+| Median TTFT | 1,591 ms | 739 ms | **−54%** |
+
+InferCrane also retained candidates that failed quality, latency, cost, or reproducibility gates
+instead of turning an attractive microbenchmark into a release claim.
 
 Those numbers belong only to the recorded 4K-input/512-output workload and exact pinned hardware
 and runtime tuple. See the [decision record](docs/testing/qwen38-openrouter-launch-decision-2026-09-23.md)
-and [raw evidence](docs/testing/evidence/qwen38-public-decode-saturation-modal-2026-09-23T044530Z.json).
+and [raw evidence](docs/testing/evidence/qwen38-public-decode-saturation-modal-2026-09-23T044530Z.json),
+or browse the compact [benchmark index](BENCHMARKS.md).
 
 ## Install
 
-Install the `v1.0.0-rc.1` public beta CLI with Homebrew or use the matching SDK prerelease:
+Install the `v1.0.0-rc.1` public beta CLI with Homebrew or use a matching release artifact:
 
 ```bash
 brew install infercrane/tap/infercrane
-python -m pip install 'infercrane==1.0.0rc1'
+python -m pip install \
+  'https://github.com/infercrane/infercrane/releases/download/v1.0.0-rc.1/infercrane-1.0.0rc1-py3-none-any.whl'
 npm install '@infercrane/sdk@1.0.0-rc.1'
 ```
 
@@ -102,6 +109,9 @@ The proof connects an OpenAI-compatible worker, sends and inspects a request, cr
 candidate, records a deterministic Release Guard rejection, verifies that production traffic did
 not move, and removes its disposable stack.
 
+`main` contains work scheduled for the next prerelease. The hosted documentation follows `main`;
+use the release notes and assets together when you need a versioned installation.
+
 ## Why InferCrane
 
 Starting a model server can be one command. Operating it while models, runtimes, accelerators,
@@ -109,8 +119,8 @@ providers, scaling policies, and revisions change is the longer-lived problem.
 
 - **Start where you are:** deploy vLLM, SGLang, or a custom OCI workload—or adopt a compatible
   endpoint you already operate—across AWS, GCP, Kubernetes, and RunPod.
-- **Use the product before operating a fleet:** activate a qualified Model API, create a scoped key,
-  and call the same OpenAI-compatible contract used by dedicated deployments.
+- **Use qualified managed capacity when available:** offers appear only after their supplier,
+  pricing, protocol, and capacity boundaries are installed; otherwise the catalog fails closed.
 - **Keep the application stable:** route infrastructure and revision changes behind one
   OpenAI-compatible endpoint instead of teaching every application about the serving topology.
 - **Give agents an isolated workspace:** run commands, move files, inspect a private preview, and
@@ -311,10 +321,10 @@ Read the [architecture](https://docs.infercrane.com/architecture/system),
 |---|---|
 | CLI and control API | Primary deployment, operation, evidence, and administration interfaces. |
 | OpenAI-compatible gateway | Capability-gated Chat, Completions, Embeddings, Responses, and online batch paths. The pinned vLLM profile currently qualifies Chat plus model-compatible Completions and Embeddings; unsupported capabilities fail before upstream transmission. |
-| Python and TypeScript SDKs | Public beta packages: `infercrane==1.0.0rc1` and `@infercrane/sdk@1.0.0-rc.1`. Generated from the checked OpenAPI contract. |
+| Python and TypeScript SDKs | Public beta release artifacts: the Python wheel attached to `v1.0.0-rc.1` and `@infercrane/sdk@1.0.0-rc.1`. Generated from the checked OpenAPI contract. |
 | Terraform provider | Logical deployment lifecycle with guarded updates and import. Release binaries and source are public; Registry publication is pending. |
 | Terminal workspace | Fleet attention, evidence inspection, and state-valid guarded actions. |
-| Browser console | Hosted product for Model APIs, BYOC planning, optimization campaigns, usage, access, and workspace-scoped private computers. |
+| Browser console | Company-operated service for Model APIs, BYOC planning, optimization campaigns, usage, access, and workspace-scoped sandboxes. Its source is not part of the Apache-2.0 core. |
 | Read-only MCP server | Closed-world operational inspection without deployment, scaling, promotion, deletion, budget, or secret tools. |
 
 ## Qualification status
