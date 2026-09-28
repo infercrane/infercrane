@@ -6,12 +6,12 @@
 </p>
 
 <p align="center">
-  <strong>One endpoint for the complete inference lifecycle.</strong>
+  <strong>Open models. Better execution.</strong>
 </p>
 
 <p align="center">
-  Deploy or adopt self-hosted models, then route, observe, scale, optimize, release, and recover<br>
-  them across your infrastructure without changing the application's OpenAI-compatible contract.
+  Write your application once. Run it on qualified open-weight Model APIs, your own cloud,<br>
+  or a measured serving configuration—without changing its OpenAI-compatible contract.
 </p>
 
 <p align="center">
@@ -21,16 +21,62 @@
 </p>
 
 <p align="center">
-  <a href="#the-release-loop">See the release loop</a>
-  · <a href="#install">Install the public beta</a>
-  · <a href="https://docs.infercrane.com/quickstart">Read the quickstart</a>
+  <a href="https://console.infercrane.com"><strong>Open the console</strong></a>
+  · <a href="#choose-how-to-start">Choose how to start</a>
+  · <a href="#install">Install the CLI</a>
+  · <a href="https://docs.infercrane.com/quickstart">Documentation</a>
 </p>
 
 <p align="center">
   <img alt="InferCrane plans a model deployment and persists its durable operation" src="docs/images/product/github-product-demo.gif" width="960">
   <br>
-  <sub>Plan before spend · survive disconnects · explain latency · guard every release</sub>
+  <sub>Model APIs · BYOC deployments · workload optimization · private agent computers</sub>
 </p>
+
+InferCrane is the open-source execution system for open-weight models. It gives applications one
+stable API while models, runtimes, hardware, providers, and serving configurations evolve behind
+it. Start with an API, deploy into infrastructure you control, or bring an existing endpoint. Then
+measure the real workload and promote only changes that improve it.
+
+```text
+Applications and agents
+          │
+          ▼
+One OpenAI-compatible InferCrane endpoint
+          │
+          ├── use a qualified Model API
+          ├── deploy open weights into your cloud or Kubernetes
+          ├── optimize an existing workload
+          └── run agent tasks in a persistent private computer
+          │
+          ▼
+vLLM · SGLang · custom OCI
+AWS · GCP · Kubernetes · RunPod · existing infrastructure
+```
+
+## Choose how to start
+
+| What you need | Start here | What InferCrane does |
+|---|---|---|
+| Call an open model now | [Model APIs](https://console.infercrane.com/model-apis) | Published pricing, prepaid limits, usage evidence, and one OpenAI-compatible API. |
+| Deploy open weights | [Deploy a model](https://console.infercrane.com/build?mode=deploy) | Resolve the model, workload, runtime, accelerator, provider, scaling policy, and cost boundary before creating compute. |
+| Improve a workload | [Optimize](https://console.infercrane.com/optimization) | Profile traffic, search bounded candidates, measure on exact hardware, and keep only qualified wins. |
+| Give an agent a computer | [Private computers](https://console.infercrane.com/sandboxes) | Persistent workspace, streaming commands, files, private previews, sleep/resume, and scoped model access. |
+| Keep existing inference | [Connect an endpoint](https://console.infercrane.com/onboarding/connect) | Adopt a compatible endpoint without transferring infrastructure ownership. |
+
+Nothing billable starts from a recommendation. Deployment and optimization stop at a review
+boundary; provider mutation or benchmark spend requires explicit approval.
+
+### Measured optimization, not a preset
+
+For `Qwen/Qwen3.8-27B-FP8` on one H200, the selected configuration improved a paired concurrency-12
+workload from **810.4 to 1,393.6 aggregate output tokens/s**, increased median per-request output
+speed from **76.1 to 141.0 tokens/s**, and reduced median TTFT from **1,591 ms to 739 ms**. InferCrane
+also rejected candidates that failed quality, latency, cost, or reproducibility gates.
+
+Those numbers belong only to the recorded 4K-input/512-output workload and exact pinned hardware
+and runtime tuple. See the [decision record](docs/testing/qwen38-openrouter-launch-decision-2026-09-23.md)
+and [raw evidence](docs/testing/evidence/qwen38-public-decode-saturation-modal-2026-09-23T044530Z.json).
 
 ## Install
 
@@ -63,8 +109,12 @@ providers, scaling policies, and revisions change is the longer-lived problem.
 
 - **Start where you are:** deploy vLLM, SGLang, or a custom OCI workload—or adopt a compatible
   endpoint you already operate—across AWS, GCP, Kubernetes, and RunPod.
+- **Use the product before operating a fleet:** activate a qualified Model API, create a scoped key,
+  and call the same OpenAI-compatible contract used by dedicated deployments.
 - **Keep the application stable:** route infrastructure and revision changes behind one
   OpenAI-compatible endpoint instead of teaching every application about the serving topology.
+- **Give agents an isolated workspace:** run commands, move files, inspect a private preview, and
+  sleep or resume the computer without exposing a long-lived model credential to the guest.
 - **Make long operations durable:** persist intent before provider mutation, survive CLI and worker
   disconnects, and reattach to the same operation rather than guessing what completed.
 - **Prove changes before traffic moves:** evaluate isolated candidates with benchmark, replay,
@@ -264,7 +314,7 @@ Read the [architecture](https://docs.infercrane.com/architecture/system),
 | Python and TypeScript SDKs | Public beta packages: `infercrane==1.0.0rc1` and `@infercrane/sdk@1.0.0-rc.1`. Generated from the checked OpenAPI contract. |
 | Terraform provider | Logical deployment lifecycle with guarded updates and import. Release binaries and source are public; Registry publication is pending. |
 | Terminal workspace | Fleet attention, evidence inspection, and state-valid guarded actions. |
-| Browser console | Separate deny-by-default private-preview application using the same control API. |
+| Browser console | Hosted product for Model APIs, BYOC planning, optimization campaigns, usage, access, and workspace-scoped private computers. |
 | Read-only MCP server | Closed-world operational inspection without deployment, scaling, promotion, deletion, budget, or secret tools. |
 
 ## Qualification status
