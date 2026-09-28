@@ -4551,7 +4551,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		handlers[kind] = handler
 	}
 	control := controlAPI.Handler()
-	operationWorker := operations.Worker{Repository: s, Handlers: handlers, Owner: cfg.InstanceID, Lease: 30 * time.Second, PollInterval: time.Second, BaseBackoff: 2 * time.Second, MaxBackoff: time.Minute, Telemetry: operationTelemetry}
+	operationWorker := operations.Worker{Repository: s, Handlers: handlers, Owner: cfg.InstanceID, Lease: 30 * time.Second, PollInterval: time.Second, BaseBackoff: 2 * time.Second, MaxBackoff: time.Minute, Telemetry: operationTelemetry, Logger: logger}
 	go func() {
 		if err := operationWorker.Run(ctx); err != nil && ctx.Err() == nil {
 			logger.Error("operation worker stopped", "error", err)
