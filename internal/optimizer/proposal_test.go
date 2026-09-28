@@ -136,6 +136,46 @@ func TestCatalogProposalCreatesConservativeGenericOpenWeightBaseline(t *testing.
 	}
 }
 
+func TestCatalogProposalAddsModelOptCheckpointOnlyInsideExactHardwareBoundary(t *testing.T) {
+	revision := strings.Repeat("a", 40)
+	request := Request{
+		ModelIdentity: "Qwen/Qwen3.8-27B", ModelRevision: revision,
+		Provider: "runpod-pods", GPU: "B200", Runtimes: []string{"vllm"},
+		Objective: "throughput", MaxCandidates: 4,
+	}
+	proposal, err := catalogSource(t).Propose(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var optimized *Candidate
+	for index := range proposal.Candidates {
+		if proposal.Candidates[index].ArtifactSeed != nil {
+			optimized = &proposal.Candidates[index]
+			break
+		}
+	}
+	if optimized == nil {
+		t.Fatalf("ModelOpt candidate missing: %+v", proposal)
+	}
+	if optimized.EvidenceState != EvidenceUnmeasured || optimized.Source.EvidenceClass != "publisher-provided-unmeasured" || optimized.Deployment.Model.ID != "nvidia/Qwen3.8-27B-NVFP4" || optimized.Deployment.Model.Revision != "482ca0f3832238542f8f5295dde86b5f22711d80" || optimized.ArtifactSeed.ManifestDigest == "" {
+		t.Fatalf("ModelOpt candidate crossed provenance boundary: %+v", optimized)
+	}
+	if err = ValidateProposal(proposal); err != nil {
+		t.Fatalf("ModelOpt proposal failed validation: %v", err)
+	}
+
+	request.GPU = "H200"
+	hopper, err := catalogSource(t).Propose(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, candidate := range hopper.Candidates {
+		if candidate.ArtifactSeed != nil {
+			t.Fatalf("Blackwell-only checkpoint leaked into Hopper proposal: %+v", candidate)
+		}
+	}
+}
+
 func TestCatalogProposalAcceptsPinnedIdentityAndRejectsMutableRevision(t *testing.T) {
 	revision := strings.Repeat("b", 64)
 	proposal, err := catalogSource(t).Propose(context.Background(), Request{ModelIdentity: "acme/novel-model@" + revision, Provider: "aws", Region: "eu-central-1", GPU: "H100", Objective: "interactive"})

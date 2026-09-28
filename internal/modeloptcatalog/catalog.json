@@ -1,0 +1,89 @@
+{
+  "schema_version": "infercrane.modelopt.checkpoint-catalog/v1",
+  "reviewed_at": "2026-09-28",
+  "source": "https://huggingface.co/collections/nvidia/inference-optimized-checkpoints-with-model-optimizer",
+  "seeds": [
+    {
+      "id": "nvidia-qwen38-27b-nvfp4-482ca0f3",
+      "publisher": "NVIDIA",
+      "base_repository": "Qwen/Qwen3.8-27B",
+      "lineage_state": "publisher_declared",
+      "output_repository": "nvidia/Qwen3.8-27B-NVFP4",
+      "output_revision": "482ca0f3832238542f8f5295dde86b5f22711d80",
+      "manifest_digest": "sha256:e93c3a5d3c94cf8b78c132a9b681e7039ccf374d8edcd9940768b7f2bbd67ca5",
+      "model_card_digest": "sha256:2dc5368ce2dda4393818fc3c6e587d588ec7b7f599b1f3a326d97dc271e3866d",
+      "license_spdx": "Apache-2.0",
+      "license_digest": "sha256:bbedc3fda3305820b977265f01b8619d87570a6739de3a5582c3464840f1e57a",
+      "tool": "modelopt",
+      "tool_version": "0.48.0",
+      "algorithm": "mixed-nvfp4-fp8",
+      "format": "safetensors",
+      "file_count": 19,
+      "size_bytes": 21945291730,
+      "runtimes": ["sglang", "vllm"],
+      "accelerator_architectures": ["blackwell"],
+      "input_modalities": ["text", "image", "video"],
+      "context_window_tokens": 262144,
+      "source_url": "https://huggingface.co/nvidia/Qwen3.8-27B-NVFP4",
+      "limitations": [
+        "NVIDIA declares the base repository but does not publish an exact base revision in the model metadata.",
+        "The checkpoint is a publisher-provided seed and has no InferCrane workload, quality, cost, or release qualification."
+      ]
+    },
+    {
+      "id": "nvidia-deepseek-v41-flash-nvfp4-3431dde3",
+      "publisher": "NVIDIA",
+      "base_repository": "deepseek-ai/DeepSeek-V4.1-Flash",
+      "base_revision": "dba1be0a40aa45a94ad051997016db3960a90277",
+      "lineage_state": "exact",
+      "output_repository": "nvidia/DeepSeek-V4.1-Flash-NVFP4",
+      "output_revision": "3431dde3247c13b5957f682b1e3c6fcae2566079",
+      "manifest_digest": "sha256:92ad1f5e012c65375e24539374699f6529f7ed3543bd7188cfb7e77a3770108b",
+      "model_card_digest": "sha256:30d9b3fd0dba0e4cbc88f7edd1bded503c3ed0a01456807640ad0fcb5438af7c",
+      "license_spdx": "MIT",
+      "license_digest": "sha256:f2c6c602815669d292889e5be8c802f2ed950653b77999b1584e8e6aed25d040",
+      "tool": "modelopt",
+      "tool_version": "0.47.0rc0",
+      "algorithm": "nvfp4",
+      "format": "safetensors",
+      "file_count": 45,
+      "size_bytes": 80474032942,
+      "runtimes": ["sglang", "vllm"],
+      "accelerator_architectures": ["blackwell"],
+      "input_modalities": ["text", "image"],
+      "context_window_tokens": 1000000,
+      "source_url": "https://huggingface.co/nvidia/DeepSeek-V4.1-Flash-NVFP4",
+      "limitations": [
+        "The model card reports runtime smoke validation on GB300; every different Blackwell topology remains unqualified.",
+        "The checkpoint is a publisher-provided seed and has no InferCrane workload, quality, cost, or release qualification."
+      ]
+    },
+    {
+      "id": "nvidia-glm53-flash-nvfp4-09b04e5e",
+      "publisher": "NVIDIA",
+      "base_repository": "zai-org/GLM-5.3-Flash",
+      "lineage_state": "publisher_declared",
+      "output_repository": "nvidia/GLM-5.3-Flash-NVFP4",
+      "output_revision": "09b04e5e74bca08ca8549fc736d4cdd8624bfde3",
+      "manifest_digest": "sha256:f2e19725fe224735c4ef5511451928c2d9617bf1010d019b651a86997cd5a7d9",
+      "model_card_digest": "sha256:b592c5b0a0dc5e3c94f62b743ee6ae7a4205bb4d7c94ccefc211b5a56ca48f17",
+      "license_spdx": "MIT",
+      "tool": "modelopt",
+      "tool_version": "0.47.0",
+      "algorithm": "nvfp4",
+      "format": "safetensors",
+      "file_count": 44,
+      "size_bytes": 204476278041,
+      "runtimes": ["sglang", "vllm"],
+      "accelerator_architectures": ["blackwell"],
+      "input_modalities": ["text", "image", "video"],
+      "context_window_tokens": 1000000,
+      "source_url": "https://huggingface.co/nvidia/GLM-5.3-Flash-NVFP4",
+      "limitations": [
+        "NVIDIA declares the base repository but does not publish an exact base revision in the model metadata.",
+        "The model repository declares MIT in its model card but does not contain a separate LICENSE file at the pinned revision.",
+        "The checkpoint is a publisher-provided seed and has no InferCrane workload, quality, cost, or release qualification."
+      ]
+    }
+  ]
+}
