@@ -378,3 +378,19 @@ func TestCompositeDriverRefusesUnreplayableBindingBeforeProviderMutation(t *test
 		t.Fatalf("a transient replay lookup failure reached provider mutation: submits=%d", store.cloudSubmits)
 	}
 }
+
+func TestChildCompleteKeepsThePermanentChildFailureCode(t *testing.T) {
+	var failure operations.Failure
+	err := childComplete(domain.Operation{Status: "failed", ErrorCode: " unsupported_tuple ", Message: "engine rejected the tuple"}, "candidate deployment")
+	if !errors.As(err, &failure) || failure.Retryable || failure.Code != "unsupported_tuple" {
+		t.Fatalf("permanent child failure lost its code: %#v", err)
+	}
+	err = childComplete(domain.Operation{Status: "failed"}, "candidate deployment")
+	if !errors.As(err, &failure) || failure.Retryable || failure.Code != "optimization_child_failed" {
+		t.Fatalf("a child failure without a code did not use the generic code: %#v", err)
+	}
+	err = childComplete(domain.Operation{Status: "failed", ErrorCode: "unsupported_tuple", Retryable: true}, "candidate deployment")
+	if !errors.As(err, &failure) || !failure.Retryable || failure.Code != "optimization_child_retryable" {
+		t.Fatalf("a retryable child failure became permanent: %#v", err)
+	}
+}
