@@ -80,7 +80,7 @@ artifact location, telemetry destination, backup location, and external-fallback
 [security boundary](/security).
 
 <Warning>
-The private preview has narrow real-AWS evidence for the exact model, runtime, accelerator, region,
+Published qualification has narrow real-AWS evidence for the exact model, runtime, accelerator, region,
 image, and workload tuples recorded in [AWS real-infrastructure evidence](/testing/aws-real-evidence).
 That evidence does not qualify a different AWS tuple, GCP, RunPod, real-GPU Kubernetes, or any data-
 residency guarantee. For an unqualified or residency-constrained path, stop after `plan`, or connect

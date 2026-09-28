@@ -46,8 +46,8 @@ isolated stack, exercises the workflow, and tears that stack down; you do not ne
 
 ## Prerequisites
 
-- Git
-- Docker with Compose v2
+- Git, Python 3, cURL, and jq
+- Docker with Compose v2 and a reachable engine
 - Port `18000` available
 
 <Steps>
@@ -55,7 +55,7 @@ isolated stack, exercises the workflow, and tears that stack down; you do not ne
     Clone the public repository and enter the checkout:
 
     ```bash
-    gh repo clone infercrane/infercrane
+    git clone https://github.com/infercrane/infercrane.git
     cd infercrane
     ```
   </Step>
@@ -180,8 +180,9 @@ isolated stack, exercises the workflow, and tears that stack down; you do not ne
     ```
 
     The terminal workspace reads the same durable control API and can be closed without cancelling
-    operations. The separately released browser console is currently in private preview; see
-    [Operations console](/features/dashboard) for the local self-hosted boundary.
+    operations. InferCrane also operates the browser console at
+    [console.infercrane.com](https://console.infercrane.com); see
+    [Operations console](/features/dashboard) for its source and deployment boundary.
   </Step>
 
   <Step title="Stop the stack">

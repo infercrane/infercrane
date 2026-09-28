@@ -18,6 +18,7 @@ private GitHub security advisory.
 
 ## Commercial support
 
-Hosted, enterprise, and contractual support are not generally available during private preview.
-Join the preview at [infercrane.com](https://infercrane.com/#private-preview) if you want to discuss
-a design-partner deployment. Public documentation must not represent preview assistance as an SLA.
+Community support is available through GitHub Discussions and Issues. Hosted-console access does
+not include an SLA. For a design-partner deployment or contractual support conversation, contact
+[hello@infercrane.com](mailto:hello@infercrane.com). Public documentation must not represent an
+informal design-partner engagement as an SLA.

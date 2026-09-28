@@ -64,7 +64,7 @@
         "header": "Company",
         "items": [
           { "label": "Website", "href": "https://infercrane.com" },
-          { "label": "Join waitlist", "href": "https://infercrane.com/#private-preview" },
+          { "label": "Open console", "href": "https://console.infercrane.com" },
           { "label": "Security", "href": "/security" }
         ]
       },
@@ -103,7 +103,7 @@
           {
             "group": "Start here",
             "boost": 2,
-            "pages": ["index", "quickstart", "model-apis", "release-notes-v1.0.0-rc.1", "release-notes-v1.0.0", "why-infercrane", "compare", "editions", "concepts", "architecture/system", "architecture/control-plane-hosting", "architecture/managed-model-apis", "architecture/managed-deployments", "architecture/invariants", "architecture/data-flows"]
+            "pages": ["index", "quickstart", "model-apis", "benchmarks", "release-notes-v1.0.0-rc.1", "why-infercrane", "compare", "editions", "concepts", "architecture/system", "architecture/control-plane-hosting", "architecture/managed-model-apis", "architecture/managed-deployments", "architecture/invariants", "architecture/data-flows"]
           },
           {
             "group": "Deploy and connect",

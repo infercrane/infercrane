@@ -15,7 +15,7 @@ import {infercrane} from '@infercrane/ai-sdk-provider';
 import {streamText} from 'ai';
 
 const result = streamText({
-  model: infercrane('qwen/qwen3.8-27b'),
+  model: infercrane('qwen3.8-27b'),
   prompt: 'Summarize why speculative decoding can improve inference.',
 });
 
@@ -40,7 +40,7 @@ import {generateText, tool} from 'ai';
 import {z} from 'zod';
 
 const result = await generateText({
-  model: infercrane('qwen/qwen3.8-27b'),
+  model: infercrane('qwen3.8-27b'),
   prompt: 'What is the weather in Berlin?',
   tools: {
     weather: tool({
@@ -61,7 +61,7 @@ import {createInferCrane} from '@infercrane/ai-sdk-provider';
 
 const infercrane = createInferCrane({
   apiKey: process.env.INFERCRANE_API_KEY,
-  baseURL: 'https://provider.infercrane.com/v1',
+  baseURL: 'https://api.infercrane.com/v1',
 });
 ```
 
@@ -73,7 +73,7 @@ Qwen3.8 accepts `none`, `low`, `medium`, or `xhigh` through AI SDK provider opti
 
 ```ts
 const result = await generateText({
-  model: infercrane('qwen/qwen3.8-27b'),
+  model: infercrane('qwen3.8-27b'),
   prompt: 'Review this rollout plan.',
   providerOptions: {
     infercrane: {reasoningEffort: 'low'},

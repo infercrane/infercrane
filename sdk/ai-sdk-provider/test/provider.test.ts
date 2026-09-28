@@ -9,7 +9,7 @@ const completion = {
   id: 'chatcmpl_test',
   object: 'chat.completion',
   created: 1_790_000_000,
-  model: 'qwen/qwen3.8-27b',
+  model: 'qwen3.8-27b',
   choices: [
     {
       index: 0,
@@ -38,7 +38,7 @@ describe('createInferCrane', () => {
     });
 
     const result = await generateText({
-      model: provider('qwen/qwen3.8-27b'),
+      model: provider('qwen3.8-27b'),
       prompt: 'Describe InferCrane.',
     });
 
@@ -50,7 +50,7 @@ describe('createInferCrane', () => {
     expect(headers.get('authorization')).toBe('Bearer test-secret');
 
     const body = JSON.parse(String(requestInit?.body));
-    expect(body.model).toBe('qwen/qwen3.8-27b');
+    expect(body.model).toBe('qwen3.8-27b');
     expect(body.messages).toEqual([
       {role: 'user', content: 'Describe InferCrane.'},
     ]);
@@ -69,7 +69,7 @@ describe('createInferCrane', () => {
     });
 
     await generateText({
-      model: provider('qwen/qwen3.8-27b'),
+      model: provider('qwen3.8-27b'),
       prompt: 'hello',
     });
 
@@ -93,7 +93,7 @@ describe('createInferCrane', () => {
     });
 
     await generateText({
-      model: provider('qwen/qwen3.8-27b'),
+      model: provider('qwen3.8-27b'),
       prompt: 'hello',
     });
 
@@ -113,7 +113,7 @@ describe('createInferCrane', () => {
     });
 
     await generateText({
-      model: provider('qwen/qwen3.8-27b'),
+      model: provider('qwen3.8-27b'),
       prompt: 'Think briefly.',
       providerOptions: {
         infercrane: {reasoningEffort: 'low'},
@@ -129,7 +129,7 @@ describe('createInferCrane', () => {
         id: 'chatcmpl_stream',
         object: 'chat.completion.chunk',
         created: 1_790_000_000,
-        model: 'qwen/qwen3.8-27b',
+        model: 'qwen3.8-27b',
         choices: [
           {index: 0, delta: {role: 'assistant', content: 'Fast '}, finish_reason: null},
         ],
@@ -138,7 +138,7 @@ describe('createInferCrane', () => {
         id: 'chatcmpl_stream',
         object: 'chat.completion.chunk',
         created: 1_790_000_000,
-        model: 'qwen/qwen3.8-27b',
+        model: 'qwen3.8-27b',
         choices: [
           {index: 0, delta: {content: 'and qualified.'}, finish_reason: null},
         ],
@@ -147,7 +147,7 @@ describe('createInferCrane', () => {
         id: 'chatcmpl_stream',
         object: 'chat.completion.chunk',
         created: 1_790_000_000,
-        model: 'qwen/qwen3.8-27b',
+        model: 'qwen3.8-27b',
         choices: [{index: 0, delta: {}, finish_reason: 'stop'}],
         usage: {prompt_tokens: 6, completion_tokens: 3, total_tokens: 9},
       },
@@ -163,7 +163,7 @@ describe('createInferCrane', () => {
     });
 
     const result = streamText({
-      model: provider('qwen/qwen3.8-27b'),
+      model: provider('qwen3.8-27b'),
       prompt: 'Describe InferCrane.',
     });
     let text = '';

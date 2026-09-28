@@ -4,10 +4,10 @@ import {
 } from '@ai-sdk/openai-compatible';
 import type {FetchFunction} from '@ai-sdk/provider-utils';
 
-export const INFERCRANE_DEFAULT_BASE_URL = 'https://provider.infercrane.com/v1';
+export const INFERCRANE_DEFAULT_BASE_URL = 'https://api.infercrane.com/v1';
 
 export type InferCraneChatModelId =
-  | 'qwen/qwen3.8-27b'
+  | 'qwen3.8-27b'
   | (string & {});
 
 export type InferCraneProvider = OpenAICompatibleProvider<

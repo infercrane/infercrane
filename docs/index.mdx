@@ -6,10 +6,10 @@ mode: wide
 ---
 
 <div className="ic-hero not-prose">
-  <div className="ic-kicker"><span className="ic-status-dot"></span> Open-source production inference</div>
+  <div className="ic-kicker"><span className="ic-status-dot"></span> Open-source inference release system</div>
   <div className="ic-actions">
     <a className="ic-button ic-button-primary" href="/quickstart">Start the local tour <span aria-hidden="true">→</span></a>
-    <a className="ic-button ic-button-secondary" href="https://infercrane.com/#private-preview">Join private preview <span aria-hidden="true">↗</span></a>
+    <a className="ic-button ic-button-secondary" href="https://console.infercrane.com">Open the console <span aria-hidden="true">↗</span></a>
   </div>
   <div className="ic-proof">
     <span>Any compatible model</span>
@@ -19,12 +19,10 @@ mode: wide
   </div>
 </div>
 
-```bash Deploy a model
-infercrane deploy moonshotai/Kimi-K3 \
-  --name agent-production
-
-# Safe to close: the operation is persisted by the control plane.
-infercrane status agent-production --watch
+```bash Prove the release loop locally
+git clone https://github.com/infercrane/infercrane.git
+cd infercrane
+make demo
 ```
 
 InferCrane turns a compatible model or immutable OCI workload into one OpenAI-compatible logical endpoint.
@@ -44,16 +42,32 @@ running inference? Connect it in observe-only mode without migrating or transfer
 ## Choose your starting point
 
 <CardGroup cols={2}>
+  <Card title="Call a qualified Model API" icon="bolt" href="/model-apis">
+    Use the OpenAI-compatible contract when the catalog publishes a qualified managed offer.
+  </Card>
   <Card title="Deploy a model" icon="server" href="/showcase/build-inference">
-    Bring a Hugging Face model or explicit serving plan. One durable operation owns the lifecycle.
+    Plan, review, and deploy a Hugging Face model or explicit serving plan into infrastructure you control.
   </Card>
   <Card title="Connect existing inference" icon="plug" href="/showcase/connect-existing">
     Discover vLLM, SGLang, LiteLLM, or another OpenAI-compatible endpoint before transferring ownership.
+  </Card>
+  <Card title="Optimize a workload" icon="gauge" href="/features/optimization">
+    Search bounded candidates, compare exact workload evidence, and promote only a qualified winner.
+  </Card>
+  <Card title="Run an agent sandbox" icon="terminal" href="/integrations/brezel-sandboxes">
+    Give an agent a persistent workspace with commands, files, previews, sleep, resume, and scoped model access.
   </Card>
   <Card title="Prove the loop locally" icon="flask" href="/quickstart">
     Run the complete GPU-free control and request path in under five minutes.
   </Card>
 </CardGroup>
+
+## Measured evidence
+
+On the recorded `Qwen/Qwen3.8-27B-FP8`, one-H200, 4K-input/512-output, concurrency-12 workload,
+the selected configuration moved aggregate output throughput from 810.4 to 1,393.6 tokens/s and
+median TTFT from 1,591 ms to 739 ms. That is exact-tuple evidence, not a universal model or provider
+claim. Read the [benchmark index](/benchmarks) and the linked raw receipt before reusing the result.
 
 ## The production operating loop
 

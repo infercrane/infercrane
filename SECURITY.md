@@ -6,9 +6,10 @@ and choose **Report a vulnerability** to open a private GitHub security advisory
 affected version, impact, reproduction, and any suggested mitigation. Do not include live
 credentials or customer prompt/output content.
 
-The latest stable release receives security fixes. The main branch and release candidates are not
-themselves release support commitments. Maintainers will acknowledge a private report within five
-business days and coordinate disclosure after a fix is available.
+Until `v1.0.0` is published, the latest `v1.0.0-rc.*` public beta receives security fixes. After the
+stable release, the latest stable version becomes the supported line. The main branch is not itself
+a release support commitment. Maintainers will acknowledge a private report within five business
+days and coordinate disclosure after a fix is available.
 
 Security-sensitive changes require explicit review of authentication, secret handling, external
 process arguments, request/header forwarding, database permissions, migration behavior, container

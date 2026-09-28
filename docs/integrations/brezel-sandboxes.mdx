@@ -1,12 +1,12 @@
 ---
-title: InferCrane private computers
-description: Give agents a persistent private computer while InferCrane owns access, audit, and usage.
-sidebarTitle: Private computers
+title: InferCrane sandboxes
+description: Give agents a persistent sandbox while InferCrane owns access, audit, and usage.
+sidebarTitle: Sandboxes
 ---
 
-# Private computers backed by Brezel
+# Sandboxes backed by Brezel
 
-Customers see an InferCrane **private computer**: a durable workspace that runs
+Customers see an InferCrane **sandbox**: a durable workspace that runs
 commands safely, sleeps when idle, exposes short-lived previews, and can call an
 approved InferCrane model endpoint. Brezel is the execution backend, not a
 customer identity or browser dependency.
@@ -43,7 +43,7 @@ dedicated owner-only service token and configure the stable mappings:
 ```bash
 export INFERCRANE_BREZEL_SANDBOX_URL="https://sandbox.infercrane.com"
 export INFERCRANE_BREZEL_SANDBOX_TOKEN_FILE="/run/secrets/brezel-sandbox-token"
-export INFERCRANE_BREZEL_SANDBOX_PROJECT_ID="infercrane-private-computers"
+export INFERCRANE_BREZEL_SANDBOX_PROJECT_ID="infercrane-sandboxes"
 export INFERCRANE_BREZEL_SANDBOX_TENANT_ID="tenant-enterprise-a"
 export INFERCRANE_BREZEL_SANDBOX_DEFAULT_TEMPLATE="coding-agent"
 export INFERCRANE_BREZEL_SANDBOX_TEMPLATES_JSON='{
@@ -59,7 +59,7 @@ The token file must be a non-empty regular file readable only by its owner.
 Production origins require HTTPS; loopback HTTP is accepted for local
 development. None of these values may use a `NEXT_PUBLIC_` prefix.
 
-For a model-enabled computer, Brezel injects only a short-lived connector
+For a model-enabled sandbox, Brezel injects only a short-lived connector
 session:
 
 ```text
@@ -94,14 +94,14 @@ DELETE /api/v1/sandboxes/{id}
 ```
 
 Create records InferCrane metadata first, creates a durable Brezel workspace,
-attaches it at `/workspace`, then creates the computer from an approved
+attaches it at `/workspace`, then creates the sandbox from an approved
 environment. Partial failure is compensated and remains visibly `failed` or
 `cleanup_pending`; uncertainty is never rewritten as running.
 
 ```bash
 curl -sS https://control.example.com/api/v1/sandboxes \
   -H "Authorization: Bearer $INFERCRANE_API_KEY" \
-  -H "Idempotency-Key: computer-$(uuidgen)" \
+  -H "Idempotency-Key: sandbox-$(uuidgen)" \
   -H "Content-Type: application/json" \
   -d '{
     "display_name":"Evaluation run",
@@ -151,12 +151,11 @@ resume, persistence check, delete, and cleanup confirmation.
 
 The bounded Scaleway production tuple was qualified on 2026-09-21:
 
-- Host: `brezel-benchmark` at `51.159.203.254`
+- Host: one dedicated Ubuntu 24.04 x86-64 KVM node
 - Public edge: `https://sandbox.infercrane.com` with active DNS and TLS
-- Dedicated project: `infercrane-private-computers`
-- Approved environments: `envr_964f832968870a80ca50570b` and
-  `envr_82e4e61dd60afc96f4aff2a4`
-- Model connector: `connr_7cd6a14266f1d50ccc90c299`
+- Dedicated project: one tenant-scoped Brezel project
+- Approved environments: immutable, operator-installed environment revisions
+- Model connector: one immutable, policy-scoped connector revision
 
 The production workflow passed creation, streamed commands, file persistence,
 preview brokering, sanitized receipts, pause/resume, model connector access,

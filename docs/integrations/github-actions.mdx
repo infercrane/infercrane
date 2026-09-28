@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: infercrane/infercrane/actions/infercrane@v1.0.0
+      - uses: infercrane/infercrane/actions/infercrane@v1.0.0-rc.1
         with:
           mode: plan
           spec: deploy/qwen.yaml
@@ -46,7 +46,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - id: apply
-        uses: infercrane/infercrane/actions/infercrane@v1.0.0
+        uses: infercrane/infercrane/actions/infercrane@v1.0.0-rc.1
         with:
           mode: apply
           confirm-apply: "true"
@@ -68,7 +68,7 @@ stable application alias as the `endpoint` action output:
 ## Exact release check
 
 ```yaml
-- uses: infercrane/infercrane/actions/infercrane@v1.0.0
+- uses: infercrane/infercrane/actions/infercrane@v1.0.0-rc.1
   with:
     mode: release-check
     deployment: qwen-prod

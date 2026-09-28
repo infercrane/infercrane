@@ -49,6 +49,9 @@
     "@ai-sdk/openai-compatible": "^3.0.55",
     "@ai-sdk/provider-utils": "^5.0.47"
   },
+  "overrides": {
+    "esbuild": "0.28.2"
+  },
   "devDependencies": {
     "@types/node": "^24.10.1",
     "ai": "^7.0.113",
