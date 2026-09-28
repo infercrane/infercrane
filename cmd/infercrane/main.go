@@ -4203,9 +4203,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	if err != nil {
 		return err
 	}
-	benchmarkBackends := map[string]controlapi.BackendMetadata{
-		"runpod-serverless": {APIKey: cfg.RunPodAPIKey, APIKeyEnv: "RUNPOD_API_KEY", Serverless: true},
-	}
+	benchmarkBackends := baseBenchmarkBackends(cfg)
 	for _, manifest := range configuredSkyPilotProviders {
 		benchmarkBackends[skyPilotAdapter(manifest.Cloud)] = controlapi.BackendMetadata{APIKey: cfg.APIKey, APIKeyEnv: "INFERCRANE_WORKER_API_KEY"}
 	}
@@ -4612,6 +4610,17 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		return nil
 	}
 	return err
+}
+
+func baseBenchmarkBackends(cfg config.Config) map[string]controlapi.BackendMetadata {
+	return map[string]controlapi.BackendMetadata{
+		"runpod-serverless": {APIKey: cfg.RunPodAPIKey, APIKeyEnv: "RUNPOD_API_KEY", Serverless: true},
+		// Native RunPod Pods expose the InferCrane worker API directly. The
+		// provider credential is only used to create and destroy the pod; direct
+		// revision benchmarks must authenticate with the worker credential just
+		// like AWS, GCP, Kubernetes, and SkyPilot elastic backends.
+		"runpod-pods": {APIKey: cfg.APIKey, APIKeyEnv: "INFERCRANE_WORKER_API_KEY"},
+	}
 }
 
 func controlHTTPClient(cfg config.Config, timeout time.Duration) (*http.Client, error) {

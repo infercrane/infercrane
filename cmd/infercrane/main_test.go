@@ -68,6 +68,21 @@ func TestBindRuntimeBackendsIncludesDiscoveredRuntimeProfiles(t *testing.T) {
 	}
 }
 
+func TestBaseBenchmarkBackendsCanMeasureNativeRunPodPods(t *testing.T) {
+	backends := baseBenchmarkBackends(config.Config{APIKey: "worker-key", RunPodAPIKey: "provider-key"})
+	native, ok := backends["runpod-pods"]
+	if !ok {
+		t.Fatal("native RunPod Pods backend is absent from direct benchmark composition")
+	}
+	if native.APIKey != "worker-key" || native.APIKeyEnv != "INFERCRANE_WORKER_API_KEY" || native.Serverless {
+		t.Fatalf("native RunPod benchmark metadata=%+v", native)
+	}
+	serverless := backends["runpod-serverless"]
+	if serverless.APIKey != "provider-key" || serverless.APIKeyEnv != "RUNPOD_API_KEY" || !serverless.Serverless {
+		t.Fatalf("RunPod Serverless benchmark metadata=%+v", serverless)
+	}
+}
+
 func TestContextPassportRefreshBackoffIsBounded(t *testing.T) {
 	base := 10 * time.Second
 	wants := []time.Duration{base, 2 * base, 4 * base, time.Minute, time.Minute}
