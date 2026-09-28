@@ -4,9 +4,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/optimizer"
 )
 
 type RankingStore interface {
@@ -29,7 +31,11 @@ func (r PersistedRanker) Rank(ctx context.Context, candidate domain.Optimization
 	if err != nil {
 		return RankingResult{}, err
 	}
-	benchmarks, err := r.Store.BenchmarksForModel(ctx, candidate.TenantID, campaign.ModelIdentity, 500)
+	var proposal optimizer.Proposal
+	if err = json.Unmarshal([]byte(campaign.ProposalJSON), &proposal); err != nil {
+		return RankingResult{}, err
+	}
+	benchmarks, err := r.Store.BenchmarksForModel(ctx, candidate.TenantID, benchmarkModelIdentity(campaign, proposal), 500)
 	if err != nil {
 		return RankingResult{}, err
 	}

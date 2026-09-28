@@ -1,7 +1,9 @@
 package optimizationcampaign
 
 import (
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -95,6 +97,32 @@ func TestRankMeasuredCampaignRejectsMismatchedBenchmarkIdentity(t *testing.T) {
 	benchmarks[0].RevisionID = "another-revision"
 	if _, err := RankMeasuredCampaign(campaign, benchmarks); err == nil {
 		t.Fatal("mismatched benchmark identity was accepted")
+	}
+}
+
+func TestRankMeasuredCampaignAdoptsPinnedEvidenceForLegacySeparateRevision(t *testing.T) {
+	campaign, benchmarks := rankingFixture(t, "interactive", nil)
+	var proposal optimizer.Proposal
+	if err := json.Unmarshal([]byte(campaign.ProposalJSON), &proposal); err != nil {
+		t.Fatal(err)
+	}
+	revision := strings.Repeat("c", 40)
+	proposal.Input.ModelRevision = revision
+	input, _ := json.Marshal(proposal.Input)
+	digest := sha256.Sum256(input)
+	proposal.InputDigest = fmt.Sprintf("%x", digest)
+	encoded, _ := json.Marshal(proposal)
+	campaign.InputDigest = proposal.InputDigest
+	campaign.ProposalJSON = string(encoded)
+	for index := range benchmarks {
+		benchmarks[index].ModelIdentity = campaign.ModelIdentity + "@" + revision
+	}
+	result, err := RankMeasuredCampaign(campaign, benchmarks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Decisions["candidate-b"] != RankSelect {
+		t.Fatalf("legacy pinned evidence was not ranked: %+v", result.Decisions)
 	}
 }
 

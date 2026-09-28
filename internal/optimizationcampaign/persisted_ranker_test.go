@@ -2,16 +2,22 @@ package optimizationcampaign
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/optimizer"
 )
 
 type rankingStoreFixture struct {
-	campaign   domain.OptimizationCampaign
-	benchmarks []domain.BenchmarkResult
-	recorded   map[string]domain.LabEvaluation
+	campaign       domain.OptimizationCampaign
+	benchmarks     []domain.BenchmarkResult
+	recorded       map[string]domain.LabEvaluation
+	benchmarkModel string
 }
 
 func (f *rankingStoreFixture) OptimizationCampaign(_ context.Context, tenant, id string) (domain.OptimizationCampaign, error) {
@@ -22,10 +28,39 @@ func (f *rankingStoreFixture) OptimizationCampaign(_ context.Context, tenant, id
 }
 
 func (f *rankingStoreFixture) BenchmarksForModel(_ context.Context, tenant, model string, _ int) ([]domain.BenchmarkResult, error) {
-	if f.campaign.TenantID != tenant || f.campaign.ModelIdentity != model {
+	expected := f.benchmarkModel
+	if expected == "" {
+		expected = f.campaign.ModelIdentity
+	}
+	if f.campaign.TenantID != tenant || expected != model {
 		return nil, domain.ErrNotFound
 	}
 	return append([]domain.BenchmarkResult(nil), f.benchmarks...), nil
+}
+
+func TestPersistedRankerQueriesCanonicalIdentityForLegacyCampaign(t *testing.T) {
+	campaign, benchmarks := rankingFixture(t, "interactive", nil)
+	var proposal optimizer.Proposal
+	if err := json.Unmarshal([]byte(campaign.ProposalJSON), &proposal); err != nil {
+		t.Fatal(err)
+	}
+	revision := strings.Repeat("d", 40)
+	proposal.Input.ModelRevision = revision
+	inputJSON, _ := json.Marshal(proposal.Input)
+	digest := sha256.Sum256(inputJSON)
+	proposal.InputDigest = fmt.Sprintf("%x", digest)
+	encoded, _ := json.Marshal(proposal)
+	campaign.InputDigest = proposal.InputDigest
+	campaign.ProposalJSON = string(encoded)
+	pinned := campaign.ModelIdentity + "@" + revision
+	for index := range benchmarks {
+		benchmarks[index].ModelIdentity = pinned
+	}
+	store := &rankingStoreFixture{campaign: campaign, benchmarks: benchmarks, benchmarkModel: pinned}
+	result, err := (PersistedRanker{Store: store}).Rank(t.Context(), campaign.Candidates[1])
+	if err != nil || result.Decision != RankSelect {
+		t.Fatalf("legacy campaign did not query pinned evidence identity: result=%+v err=%v", result, err)
+	}
 }
 
 func (f *rankingStoreFixture) RecordLabEvaluation(_ context.Context, tenant string, value domain.LabEvaluation) (domain.LabEvaluation, error) {

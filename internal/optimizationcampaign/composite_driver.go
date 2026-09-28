@@ -399,7 +399,11 @@ func childComplete(operation domain.Operation, label string) error {
 		if operation.Retryable {
 			return operations.Retryable("optimization_child_retryable", errors.New(message))
 		}
-		return operations.Permanent("optimization_child_failed", errors.New(message))
+		code := strings.TrimSpace(operation.ErrorCode)
+		if code == "" {
+			code = "optimization_child_failed"
+		}
+		return operations.Permanent(code, errors.New(message))
 	default:
 		return operations.Retryable("optimization_child_pending", fmt.Errorf("%s is %s", label, operation.Status))
 	}

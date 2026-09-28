@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/lab"
@@ -40,6 +41,7 @@ func RankMeasuredCampaign(campaign domain.OptimizationCampaign, benchmarks []dom
 	if campaign.ModelIdentity != proposal.Input.ModelIdentity || campaign.Objective != proposal.Input.Objective || campaign.InputDigest != proposal.InputDigest {
 		return MeasuredRanking{}, errors.New("campaign identity does not match its immutable proposal")
 	}
+	modelIdentity := benchmarkModelIdentity(campaign, proposal)
 
 	byBenchmark := make(map[string]domain.BenchmarkResult, len(benchmarks))
 	for _, row := range benchmarks {
@@ -69,7 +71,7 @@ func RankMeasuredCampaign(campaign domain.OptimizationCampaign, benchmarks []dom
 		if !ok {
 			return MeasuredRanking{}, fmt.Errorf("candidate %s benchmark evidence is unavailable", candidate.ID)
 		}
-		if row.RevisionID != candidate.RevisionID || row.ModelIdentity != campaign.ModelIdentity {
+		if row.RevisionID != candidate.RevisionID || row.ModelIdentity != modelIdentity {
 			return MeasuredRanking{}, fmt.Errorf("candidate %s benchmark identity does not match campaign and revision", candidate.ID)
 		}
 		selectedEvidence = append(selectedEvidence, row)
@@ -80,7 +82,7 @@ func RankMeasuredCampaign(campaign domain.OptimizationCampaign, benchmarks []dom
 	}
 
 	evaluation, err := lab.Evaluate(lab.Input{
-		ModelIdentity:   campaign.ModelIdentity,
+		ModelIdentity:   modelIdentity,
 		Objective:       proposal.Input.Objective,
 		WorkloadProfile: proposal.Input.WorkloadProfile,
 		MaxTTFTP95MS:    proposal.Input.MaxTTFTP95MS,
@@ -152,4 +154,15 @@ func RankMeasuredCampaign(campaign domain.OptimizationCampaign, benchmarks []dom
 		}
 	}
 	return MeasuredRanking{Evaluation: evaluation, Decisions: decisions, Reasons: reasons}, nil
+}
+
+// benchmarkModelIdentity keeps campaigns created before canonical pinned
+// identities were introduced compatible with exact artifact evidence. New
+// campaigns already store repository@commit in both fields.
+func benchmarkModelIdentity(campaign domain.OptimizationCampaign, proposal optimizer.Proposal) string {
+	identity := strings.TrimSpace(campaign.ModelIdentity)
+	if strings.Contains(identity, "@") || proposal.Input.ModelRevision == "" {
+		return identity
+	}
+	return identity + "@" + strings.ToLower(strings.TrimSpace(proposal.Input.ModelRevision))
 }
