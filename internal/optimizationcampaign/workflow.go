@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -199,6 +200,7 @@ func Handlers(coordinator Coordinator) map[string]operations.Handler {
 					if err != nil {
 						return "", executionFailure(err)
 					}
+					logCandidateStep(operation, "measurement", result)
 					if result.WaitingForHuman || result.To == CandidateRanked || result.To == CandidateCleaned {
 						break
 					}
@@ -221,6 +223,7 @@ func Handlers(coordinator Coordinator) map[string]operations.Handler {
 					if err != nil {
 						return "", executionFailure(err)
 					}
+					logCandidateStep(operation, "ranking", result)
 					if result.WaitingForHuman {
 						waiting = append(waiting, candidateID)
 						break
@@ -256,6 +259,19 @@ func Handlers(coordinator Coordinator) map[string]operations.Handler {
 		ExecuteKind + ".cancel": cleanupHandler(coordinator),
 		CleanupKind:             cleanupHandler(coordinator),
 	}
+}
+
+func logCandidateStep(operation domain.Operation, phase string, result StepResult) {
+	slog.Info("optimization campaign candidate step",
+		"operation_id", operation.ID,
+		"campaign_id", result.CampaignID,
+		"candidate_id", result.CandidateID,
+		"phase", phase,
+		"from", result.From,
+		"to", result.To,
+		"progressed", result.Progressed,
+		"waiting_for_human", result.WaitingForHuman,
+	)
 }
 
 func cleanupHandler(coordinator Coordinator) operations.Handler {
