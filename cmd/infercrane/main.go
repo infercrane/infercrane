@@ -4392,7 +4392,11 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		publishErr := publisher.PublishOnce(publishCtx)
 		publishCancel()
 		if publishErr != nil {
-			return fmt.Errorf("load hosted Model API route snapshot: %w", publishErr)
+			// Supplier qualification is a fail-closed boundary for Model API
+			// traffic, not a reason to take the control plane, billing, and
+			// sandbox products offline. The empty directory rejects model
+			// requests while the publisher keeps retrying in the background.
+			logger.Error("hosted Model API routes unavailable at startup; serving control plane without callable model routes", "error", publishErr)
 		}
 		go publisher.Run(ctx)
 		hostedModels = &modelapirouting.Runtime{
