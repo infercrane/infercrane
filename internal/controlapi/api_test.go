@@ -838,6 +838,38 @@ func TestModelCatalogIsAuthenticatedSearchableAndTruthful(t *testing.T) {
 	}
 }
 
+func TestHuggingFaceCatalogIncludesReviewedAndUnmeasuredPublisherCandidates(t *testing.T) {
+	handler := (API{Store: &fakeStore{}, APIKey: "secret"}).Handler()
+
+	unauthorized := httptest.NewRecorder()
+	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/api/v1/catalog/hugging-face/models", nil))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized status=%d body=%s", unauthorized.Code, unauthorized.Body.String())
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/catalog/hugging-face/models", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("catalog status=%d body=%s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	for _, expected := range []string{
+		`"state":"reviewed_snapshot"`,
+		`"repository":"Qwen/Qwen3-8B"`,
+		`"reviewed":true`,
+		`"repository":"deepseek-ai/DeepSeek-V4.1-Flash"`,
+		`"output_repository":"nvidia/DeepSeek-V4.1-Flash-NVFP4"`,
+		`"evidence_state":"unmeasured"`,
+		`"screening_base_revision":"dba1be0a40aa45a94ad051997016db3960a90277"`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("catalog missing %s: %s", expected, body)
+		}
+	}
+}
+
 func TestModelAPICatalogPaginatesAndNeverExposesSupplierRouting(t *testing.T) {
 	price := int64(125000)
 	catalog := modelapicatalog.Catalog{SchemaVersion: modelapicatalog.SchemaVersion, Models: []modelapicatalog.Model{{
