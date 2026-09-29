@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -192,6 +193,13 @@ func Handlers(coordinator Coordinator) map[string]operations.Handler {
 			// peers have produced comparable evidence.
 			for candidateIndex, candidateID := range request.Candidates {
 				for boundary := 0; boundary < 8; boundary++ {
+					reached, err := candidateReachedMeasuredBarrier(ctx, coordinator.Repository, request.TenantID, request.CampaignID, candidateID)
+					if err != nil {
+						return "", executionFailure(err)
+					}
+					if reached {
+						break
+					}
 					if err := checkpointCandidate(ctx, coordinator, operation, request, candidateID, candidateIndex); err != nil {
 						return "", operations.Retryable("optimization_checkpoint_failed", err)
 					}
@@ -199,6 +207,7 @@ func Handlers(coordinator Coordinator) map[string]operations.Handler {
 					if err != nil {
 						return "", executionFailure(err)
 					}
+					logCandidateStep(operation, "measurement", result)
 					if result.WaitingForHuman || result.To == CandidateRanked || result.To == CandidateCleaned {
 						break
 					}
@@ -221,6 +230,7 @@ func Handlers(coordinator Coordinator) map[string]operations.Handler {
 					if err != nil {
 						return "", executionFailure(err)
 					}
+					logCandidateStep(operation, "ranking", result)
 					if result.WaitingForHuman {
 						waiting = append(waiting, candidateID)
 						break
@@ -256,6 +266,36 @@ func Handlers(coordinator Coordinator) map[string]operations.Handler {
 		ExecuteKind + ".cancel": cleanupHandler(coordinator),
 		CleanupKind:             cleanupHandler(coordinator),
 	}
+}
+
+func candidateReachedMeasuredBarrier(ctx context.Context, repository Repository, tenant, campaignID, candidateID string) (bool, error) {
+	campaign, err := repository.OptimizationCampaign(ctx, tenant, campaignID)
+	if err != nil {
+		return false, err
+	}
+	candidate, found := candidateByID(campaign.Candidates, candidateID)
+	if !found {
+		return false, domain.ErrNotFound
+	}
+	switch candidate.State {
+	case CandidateRanked, CandidateQualified, CandidateGuarding, CandidateGuardPassed, CandidatePromoted, CandidateObserved, CandidateCleaned:
+		return true, nil
+	default:
+		return false, nil
+	}
+}
+
+func logCandidateStep(operation domain.Operation, phase string, result StepResult) {
+	slog.Info("optimization campaign candidate step",
+		"operation_id", operation.ID,
+		"campaign_id", result.CampaignID,
+		"candidate_id", result.CandidateID,
+		"phase", phase,
+		"from", result.From,
+		"to", result.To,
+		"progressed", result.Progressed,
+		"waiting_for_human", result.WaitingForHuman,
+	)
 }
 
 func cleanupHandler(coordinator Coordinator) operations.Handler {

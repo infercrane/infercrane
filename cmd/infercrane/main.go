@@ -4204,9 +4204,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	if err != nil {
 		return err
 	}
-	benchmarkBackends := map[string]controlapi.BackendMetadata{
-		"runpod-serverless": {APIKey: cfg.RunPodAPIKey, APIKeyEnv: "RUNPOD_API_KEY", Serverless: true},
-	}
+	benchmarkBackends := baseBenchmarkBackends(cfg)
 	for _, manifest := range configuredSkyPilotProviders {
 		benchmarkBackends[skyPilotAdapter(manifest.Cloud)] = controlapi.BackendMetadata{APIKey: cfg.APIKey, APIKeyEnv: "INFERCRANE_WORKER_API_KEY"}
 	}
@@ -4219,10 +4217,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	if cfg.KubernetesEnabled() {
 		benchmarkBackends["kubernetes"] = controlapi.BackendMetadata{APIKey: cfg.APIKey, APIKeyEnv: "INFERCRANE_WORKER_API_KEY"}
 	}
-	manualPrices := map[pricing.Request]pricing.Estimate{}
-	for _, row := range cfg.OptimizationPrices {
-		manualPrices[pricing.Request{Cloud: row.Cloud, Region: provideridentity.PriceRegion(row.Cloud, row.Region), GPU: provideridentity.GPUTypeID(row.Cloud, row.GPU), GPUCount: row.GPUCount, Replicas: row.Replicas}] = pricing.Estimate{Currency: row.Currency, Source: row.Source, Hourly: row.HourlyUSD, CostScope: pricing.CostScopeUnknown, Authority: pricing.PriceAuthorityUnknown, ObservedAt: row.ObservedAt, StaleAfter: row.ValidUntil.Sub(row.ObservedAt)}
-	}
+	manualPrices := manualOptimizationPrices(cfg.OptimizationPrices)
 	priceCatalog := pricing.NewDynamicCatalog(manualPrices)
 	if cfg.GPUPriceSyncInterval > 0 {
 		// Dynamic marketplace prices must come from the provider itself. Static
@@ -4561,7 +4556,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		handlers[kind] = handler
 	}
 	control := controlAPI.Handler()
-	operationWorker := operations.Worker{Repository: s, Handlers: handlers, Owner: cfg.InstanceID, Lease: 30 * time.Second, PollInterval: time.Second, BaseBackoff: 2 * time.Second, MaxBackoff: time.Minute, Telemetry: operationTelemetry}
+	operationWorker := operations.Worker{Repository: s, Handlers: handlers, Owner: cfg.InstanceID, Lease: 30 * time.Second, PollInterval: time.Second, BaseBackoff: 2 * time.Second, MaxBackoff: time.Minute, Telemetry: operationTelemetry, Logger: logger}
 	go func() {
 		if err := operationWorker.Run(ctx); err != nil && ctx.Err() == nil {
 			logger.Error("operation worker stopped", "error", err)
@@ -4620,6 +4615,35 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		return nil
 	}
 	return err
+}
+
+func baseBenchmarkBackends(cfg config.Config) map[string]controlapi.BackendMetadata {
+	return map[string]controlapi.BackendMetadata{
+		"runpod-serverless": {APIKey: cfg.RunPodAPIKey, APIKeyEnv: "RUNPOD_API_KEY", Serverless: true},
+		// Native RunPod Pods expose the InferCrane worker API directly. The
+		// provider credential is only used to create and destroy the pod; direct
+		// revision benchmarks must authenticate with the worker credential just
+		// like AWS, GCP, Kubernetes, and SkyPilot elastic backends.
+		"runpod-pods": {APIKey: cfg.APIKey, APIKeyEnv: "INFERCRANE_WORKER_API_KEY"},
+	}
+}
+
+func manualOptimizationPrices(rows []config.OptimizationPrice) map[pricing.Request]pricing.Estimate {
+	prices := make(map[pricing.Request]pricing.Estimate, len(rows))
+	for _, row := range rows {
+		prices[pricing.Request{
+			Cloud: row.Cloud, Region: provideridentity.PriceRegion(row.Cloud, row.Region),
+			GPU: provideridentity.GPUTypeID(row.Cloud, row.GPU), GPUCount: row.GPUCount, Replicas: row.Replicas,
+		}] = pricing.Estimate{
+			Currency: row.Currency, Source: row.Source, Hourly: row.HourlyUSD,
+			// INFERCRANE_OPTIMIZATION_PRICES_JSON is the operator's explicit,
+			// exact-tuple spend authority. It is deliberately stronger than a
+			// marketplace observation and is bounded by ValidUntil.
+			CostScope: pricing.CostScopeInstanceTotal, Authority: pricing.PriceAuthorityAccountContract,
+			ObservedAt: row.ObservedAt, StaleAfter: row.ValidUntil.Sub(row.ObservedAt), GuaranteedUntil: row.ValidUntil,
+		}
+	}
+	return prices
 }
 
 func controlHTTPClient(cfg config.Config, timeout time.Duration) (*http.Client, error) {
