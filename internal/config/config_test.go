@@ -181,6 +181,32 @@ func TestBrezelSandboxRequiresDedicatedTenantAndApprovedTemplates(t *testing.T) 
 	}
 }
 
+func TestManagedSandboxesRequireQualifiedBrezelAndProfitableExactPricing(t *testing.T) {
+	t.Setenv("INFERCRANE_API_KEY", "test-key")
+	t.Setenv("INFERCRANE_MANAGED_SANDBOXES_ENABLED", "true")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "complete Brezel sandbox configuration") {
+		t.Fatalf("managed sandbox without qualified provider accepted: %v", err)
+	}
+	t.Setenv("INFERCRANE_BREZEL_SANDBOX_URL", "https://sandbox.example.test")
+	t.Setenv("INFERCRANE_BREZEL_SANDBOX_TOKEN_FILE", filepath.Join(t.TempDir(), "brezel.token"))
+	t.Setenv("INFERCRANE_BREZEL_SANDBOX_PROJECT_ID", "managed-sandboxes")
+	t.Setenv("INFERCRANE_BREZEL_SANDBOX_TENANT_ID", "managed-beta-tenant")
+	t.Setenv("INFERCRANE_BREZEL_SANDBOX_TEMPLATES_JSON", `{"python-agent":"envr_aaaaaaaaaaaaaaaaaaaaaaaa"}`)
+	t.Setenv("INFERCRANE_BREZEL_SANDBOX_DEFAULT_TEMPLATE", "python-agent")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "supplier hourly cost") {
+		t.Fatalf("managed sandbox without exact supplier cost accepted: %v", err)
+	}
+	t.Setenv("INFERCRANE_MANAGED_SANDBOX_SUPPLIER_HOURLY_MICROUSD", "180000")
+	cfg, err := Load()
+	if err != nil || !cfg.ManagedSandbox.Enabled || cfg.ManagedSandboxPolicy().ActiveHourlyMicrousd != 300_000 || cfg.ManagedSandboxPolicy().MaxActive != 1 {
+		t.Fatalf("managed sandbox config=%+v err=%v", cfg.ManagedSandboxPolicy(), err)
+	}
+	t.Setenv("INFERCRANE_MANAGED_SANDBOX_ACTIVE_HOURLY_MICROUSD", "150000")
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "supplier hourly cost") {
+		t.Fatalf("unprofitable managed sandbox price accepted: %v", err)
+	}
+}
+
 func TestAcceleratorLabRequiresCompletePrivateExecutionBoundary(t *testing.T) {
 	t.Setenv("INFERCRANE_API_KEY", "test-key")
 	t.Setenv("INFERCRANE_ACCELERATOR_WORKER_URL", "http://127.0.0.1:8091")

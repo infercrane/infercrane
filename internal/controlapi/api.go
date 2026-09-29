@@ -351,6 +351,7 @@ type API struct {
 	ModelAPICatalog  modelapicatalog.Catalog
 	ModelAPIProducts modelAPIProductStore
 	SandboxProvider  sandboxprovider.Provider
+	SandboxBilling   managedbilling.SandboxPolicy
 	// SandboxProjectID is a server-only backend reference persisted for
 	// reconciliation. It is never included in customer responses.
 	SandboxProjectID string

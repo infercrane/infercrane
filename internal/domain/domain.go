@@ -121,6 +121,7 @@ type NativeSandbox struct {
 	BrezelWorkspaceID, BrezelSandboxID               string
 	Status, FailureCode, IdempotencyKey, InputDigest string
 	CreatedAt, UpdatedAt, LastActiveAt               time.Time
+	BillingStateSince                                time.Time
 	DeletedAt                                        *time.Time
 }
 
