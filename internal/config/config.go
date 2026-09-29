@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/infercrane/infercrane/internal/managedbilling"
 	"github.com/infercrane/infercrane/internal/pricing"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
 )
@@ -34,6 +35,7 @@ type Config struct {
 	StripePriceIDs                                                                                                        map[int64]string
 	StripeLivemode                                                                                                        bool
 	ManagedDeploymentsEnabled                                                                                             bool
+	ManagedSandbox                                                                                                        managedbilling.SandboxPolicy
 	RunPodAPIKey, RunPodServerlessTemplateID, RunPodRESTURL, RunPodArtifactCachePolicy, RunPodHFTokenSecret               string
 	SkyPilotAPI                                                                                                           string
 	SkyPilotProviders                                                                                                     []SkyPilotProvider
@@ -393,6 +395,53 @@ func load(requireAPIKey bool) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	managedSandboxesEnabled, err := envBool("INFERCRANE_MANAGED_SANDBOXES_ENABLED", false)
+	if err != nil {
+		return Config{}, err
+	}
+	managedSandboxSupplierHourlyMicrousd, err := envInt("INFERCRANE_MANAGED_SANDBOX_SUPPLIER_HOURLY_MICROUSD", 0)
+	if err != nil {
+		return Config{}, err
+	}
+	managedSandboxActiveHourlyMicrousd, err := envInt("INFERCRANE_MANAGED_SANDBOX_ACTIVE_HOURLY_MICROUSD", 300_000)
+	if err != nil {
+		return Config{}, err
+	}
+	managedSandboxWorkspaceMicrousdPerGiBMonth, err := envInt("INFERCRANE_MANAGED_SANDBOX_WORKSPACE_MICROUSD_PER_GIB_MONTH", 0)
+	if err != nil {
+		return Config{}, err
+	}
+	managedSandboxVCPU, err := envInt("INFERCRANE_MANAGED_SANDBOX_VCPU", 4)
+	if err != nil {
+		return Config{}, err
+	}
+	managedSandboxMemoryMiB, err := envInt("INFERCRANE_MANAGED_SANDBOX_MEMORY_MIB", 8192)
+	if err != nil {
+		return Config{}, err
+	}
+	managedSandboxIncludedWorkspaceGiB, err := envInt("INFERCRANE_MANAGED_SANDBOX_INCLUDED_WORKSPACE_GIB", 40)
+	if err != nil {
+		return Config{}, err
+	}
+	managedSandboxMaxActive, err := envInt("INFERCRANE_MANAGED_SANDBOX_MAX_ACTIVE", 1)
+	if err != nil {
+		return Config{}, err
+	}
+	managedSandboxMaxRetained, err := envInt("INFERCRANE_MANAGED_SANDBOX_MAX_RETAINED", 10)
+	if err != nil {
+		return Config{}, err
+	}
+	managedSandboxPolicy := managedbilling.SandboxPolicy{
+		Enabled:                             managedSandboxesEnabled,
+		SupplierHourlyMicrousd:              int64(managedSandboxSupplierHourlyMicrousd),
+		ActiveHourlyMicrousd:                int64(managedSandboxActiveHourlyMicrousd),
+		WorkspaceStorageMicrousdPerGiBMonth: int64(managedSandboxWorkspaceMicrousdPerGiBMonth),
+		VCPU:                                managedSandboxVCPU,
+		MemoryMiB:                           managedSandboxMemoryMiB,
+		IncludedWorkspaceGiB:                managedSandboxIncludedWorkspaceGiB,
+		MaxActive:                           managedSandboxMaxActive,
+		MaxRetained:                         managedSandboxMaxRetained,
+	}
 	hostedAuthAutoProvision, err := envBool("INFERCRANE_HOSTED_AUTH_AUTO_PROVISION", false)
 	if err != nil {
 		return Config{}, err
@@ -424,6 +473,7 @@ func load(requireAPIKey bool) (Config, error) {
 		StripePriceIDs:                      stripePriceIDs,
 		StripeLivemode:                      stripeLivemode,
 		ManagedDeploymentsEnabled:           managedDeploymentsEnabled,
+		ManagedSandbox:                      managedSandboxPolicy,
 		ModelAPICatalogFile:                 env("INFERCRANE_MODEL_API_CATALOG_FILE", ""),
 		ModelAPIOperatorTenantID:            env("INFERCRANE_MODEL_API_OPERATOR_TENANT_ID", ""),
 		OpenRouterProviderCatalogFile:       env("INFERCRANE_OPENROUTER_PROVIDER_CATALOG_FILE", ""),
@@ -557,6 +607,14 @@ func load(requireAPIKey bool) (Config, error) {
 	if err := validateBrezelSandbox(config); err != nil {
 		return Config{}, err
 	}
+	if config.ManagedSandbox.Enabled {
+		if !config.BrezelSandboxEnabled() {
+			return Config{}, errors.New("INFERCRANE_MANAGED_SANDBOXES_ENABLED requires complete Brezel sandbox configuration")
+		}
+		if err := config.ManagedSandboxPolicy().Validate(); err != nil {
+			return Config{}, err
+		}
+	}
 	if err := validateAcceleratorLab(config); err != nil {
 		return Config{}, err
 	}
@@ -595,6 +653,10 @@ func load(requireAPIKey bool) (Config, error) {
 
 func (c Config) BrezelSandboxEnabled() bool {
 	return c.BrezelSandboxURL != "" && c.BrezelSandboxTokenFile != "" && c.BrezelSandboxProjectID != "" && c.BrezelSandboxTenantID != "" && len(c.BrezelSandboxTemplates) > 0
+}
+
+func (c Config) ManagedSandboxPolicy() managedbilling.SandboxPolicy {
+	return c.ManagedSandbox
 }
 
 // AcceleratorLabEnabled means the control plane has both halves of the

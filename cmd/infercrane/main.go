@@ -51,6 +51,7 @@ import (
 	"github.com/infercrane/infercrane/internal/gateway"
 	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/managedbilling"
+	"github.com/infercrane/infercrane/internal/managedsandbox"
 	"github.com/infercrane/infercrane/internal/modelapicatalog"
 	"github.com/infercrane/infercrane/internal/modelapirouting"
 	"github.com/infercrane/infercrane/internal/openrouterprovider"
@@ -4404,7 +4405,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 			Circuit:     modelapirouting.NewCircuitBreaker(3, 30*time.Second),
 		}
 	}
-	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, DiscoveryClient: nil, Secrets: secrets.Environment{}, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool, OptimizationCosts: optimizationCosts, AcceleratorLabEnabled: acceleratorEngine != nil, AcceleratorLabCatalog: acceleratorCatalog, ModelAPICatalog: modelAPICatalog, ModelAPIProducts: s, SandboxProvider: nativeSandboxProvider, SandboxProjectID: cfg.BrezelSandboxProjectID, SandboxPreviews: controlapi.NewSandboxPreviewBroker(), SandboxDefaultTemplate: cfg.BrezelSandboxDefaultTemplate, SandboxModelConnectors: cfg.BrezelSandboxModelConnectors, ModelAPIOperatorTenantID: cfg.ModelAPIOperatorTenantID, ComputeProviders: computeProviders, GPUPriceCatalog: priceCatalog, LaunchProbers: launchProbers, DefaultProviderAdapters: defaultProviderAdapters, ManagedDeployments: managedbilling.DeploymentPolicy{Enabled: cfg.ManagedDeploymentsEnabled, Provider: "runpod"}}
+	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, DiscoveryClient: nil, Secrets: secrets.Environment{}, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool, OptimizationCosts: optimizationCosts, AcceleratorLabEnabled: acceleratorEngine != nil, AcceleratorLabCatalog: acceleratorCatalog, ModelAPICatalog: modelAPICatalog, ModelAPIProducts: s, SandboxProvider: nativeSandboxProvider, SandboxBilling: cfg.ManagedSandboxPolicy(), SandboxProjectID: cfg.BrezelSandboxProjectID, SandboxPreviews: controlapi.NewSandboxPreviewBroker(), SandboxDefaultTemplate: cfg.BrezelSandboxDefaultTemplate, SandboxModelConnectors: cfg.BrezelSandboxModelConnectors, ModelAPIOperatorTenantID: cfg.ModelAPIOperatorTenantID, ComputeProviders: computeProviders, GPUPriceCatalog: priceCatalog, LaunchProbers: launchProbers, DefaultProviderAdapters: defaultProviderAdapters, ManagedDeployments: managedbilling.DeploymentPolicy{Enabled: cfg.ManagedDeploymentsEnabled, Provider: "runpod"}}
 	if cfg.StripeEnabled() {
 		stripeBilling, stripeErr := managedbilling.NewStripe(cfg.StripeSecretKey, cfg.StripeWebhookSecret, cfg.StripeBillingReturnURL, cfg.StripePriceIDs, cfg.StripeLivemode)
 		if stripeErr != nil {
@@ -4564,6 +4565,9 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	}()
 	if controlAPI.ManagedDeployments.Enabled {
 		go runManagedDeploymentExpiry(ctx, s, time.Minute, logger)
+	}
+	if controlAPI.SandboxBilling.Enabled && nativeSandboxProvider != nil {
+		go runManagedSandboxReconciliation(ctx, managedsandbox.Reconciler{Store: s, Provider: nativeSandboxProvider, Limit: 100}, time.Minute, logger)
 	}
 	if asyncService != nil {
 		go func() {
@@ -4816,6 +4820,24 @@ func runManagedDeploymentExpiry(ctx context.Context, s *store.Store, interval ti
 			}
 		} else {
 			queueManagedDeploymentCleanup(ctx, s, rows, "managed-expiry:", logger)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func runManagedSandboxReconciliation(ctx context.Context, reconciler managedsandbox.Reconciler, interval time.Duration, logger *slog.Logger) {
+	if interval <= 0 {
+		interval = time.Minute
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		if err := reconciler.Once(ctx); err != nil && ctx.Err() == nil {
+			logger.Error("managed sandbox reconciliation failed", "error", err)
 		}
 		select {
 		case <-ctx.Done():

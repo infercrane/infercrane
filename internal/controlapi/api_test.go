@@ -42,30 +42,35 @@ import (
 )
 
 type fakeStore struct {
-	operation       domain.Operation
-	cancelled       bool
-	err             error
-	created         bool
-	principal       domain.Principal
-	targets         []domain.Target
-	resolved        domain.ResolvedDeployment
-	revisions       []domain.DeploymentRevision
-	artifact        domain.ModelArtifact
-	benchmarks      []domain.BenchmarkResult
-	replicas        []domain.Replica
-	activeOperation domain.Operation
-	sloPolicy       domain.SLOPolicy
-	recommendations []domain.InferenceRecommendation
-	capacity        domain.CapacityEvidence
-	consoleIdentity domain.ConsoleIdentity
-	operations      []domain.Operation
-	principals      []domain.Principal
-	consoleMembers  []domain.ConsoleIdentity
-	sandboxRefs     []domain.SandboxReference
-	nativeSandboxes []domain.NativeSandbox
-	sandboxUsage    []domain.SandboxUsageEvent
-	trainingRows    []domain.TrainingArtifactHandoff
-	operationSteps  []domain.OperationStep
+	operation                  domain.Operation
+	cancelled                  bool
+	err                        error
+	created                    bool
+	principal                  domain.Principal
+	targets                    []domain.Target
+	resolved                   domain.ResolvedDeployment
+	revisions                  []domain.DeploymentRevision
+	artifact                   domain.ModelArtifact
+	benchmarks                 []domain.BenchmarkResult
+	replicas                   []domain.Replica
+	activeOperation            domain.Operation
+	sloPolicy                  domain.SLOPolicy
+	recommendations            []domain.InferenceRecommendation
+	capacity                   domain.CapacityEvidence
+	consoleIdentity            domain.ConsoleIdentity
+	operations                 []domain.Operation
+	principals                 []domain.Principal
+	consoleMembers             []domain.ConsoleIdentity
+	sandboxRefs                []domain.SandboxReference
+	nativeSandboxes            []domain.NativeSandbox
+	sandboxUsage               []domain.SandboxUsageEvent
+	sandboxReservation         domain.ManagedSpendReservation
+	sandboxBillingErr          error
+	sandboxActivated           bool
+	sandboxReleased            bool
+	sandboxSettledMilliseconds int64
+	trainingRows               []domain.TrainingArtifactHandoff
+	operationSteps             []domain.OperationStep
 }
 
 type fakeOptimizationCosts struct{}
@@ -2407,7 +2412,7 @@ func (f *fakeStore) CreateNativeSandbox(_ context.Context, row domain.NativeSand
 	}
 	row.ID = "computer-1"
 	stamp := time.Now().UTC()
-	row.CreatedAt, row.UpdatedAt, row.LastActiveAt = stamp, stamp, stamp
+	row.CreatedAt, row.UpdatedAt, row.LastActiveAt, row.BillingStateSince = stamp, stamp, stamp, stamp
 	f.nativeSandboxes = append([]domain.NativeSandbox{row}, f.nativeSandboxes...)
 	return row, true, f.err
 }
@@ -2438,7 +2443,11 @@ func (f *fakeStore) SetNativeSandboxProviderRefs(_ context.Context, tenant, id, 
 			if sandboxID != "" {
 				row.BrezelSandboxID = sandboxID
 			}
-			row.Status, row.FailureCode, row.UpdatedAt, row.LastActiveAt = status, failure, time.Now().UTC(), time.Now().UTC()
+			stamp := time.Now().UTC()
+			if row.Status != status {
+				row.BillingStateSince = stamp
+			}
+			row.Status, row.FailureCode, row.UpdatedAt, row.LastActiveAt = status, failure, stamp, stamp
 			return *row, f.err
 		}
 	}
@@ -2456,6 +2465,32 @@ func (f *fakeStore) SetNativeSandboxStatus(_ context.Context, tenant, id, status
 		}
 	}
 	return row, err
+}
+func (f *fakeStore) RecordNativeSandboxTransition(ctx context.Context, tenant, id, status, failure, operationID, eventType string, occurredAt time.Time) (domain.NativeSandbox, error) {
+	row, err := f.NativeSandbox(ctx, tenant, id)
+	if err != nil {
+		return row, err
+	}
+	if row.Status != status {
+		startedAt := row.BillingStateSince
+		if startedAt.IsZero() {
+			startedAt = row.LastActiveAt
+		}
+		elapsed := occurredAt.Sub(startedAt).Milliseconds()
+		if elapsed < 0 {
+			elapsed = 0
+		}
+		event := domain.SandboxUsageEvent{EventID: operationID + eventType, TenantID: tenant, SandboxID: id, ProviderOperationID: operationID, EventType: eventType, OccurredAt: occurredAt, TemplateID: row.TemplateID, RuntimeClass: "firecracker-cpu", MetadataVersion: 1}
+		if row.Status == "running" || row.Status == "pausing" || row.Status == "resuming" {
+			event.RunningMilliseconds = elapsed
+		} else if row.Status == "standby" {
+			event.StandbyMilliseconds = elapsed
+		}
+		if _, err = f.AppendSandboxUsageEvent(ctx, event); err != nil {
+			return row, err
+		}
+	}
+	return f.SetNativeSandboxStatus(ctx, tenant, id, status, failure)
 }
 func (f *fakeStore) AppendSandboxUsageEvent(_ context.Context, event domain.SandboxUsageEvent) (bool, error) {
 	for _, row := range f.sandboxUsage {
@@ -2487,6 +2522,38 @@ func (f *fakeStore) SandboxUsageSummary(_ context.Context, tenant string) (domai
 		summary.PreviewRequests += event.PreviewRequests
 	}
 	return summary, f.err
+}
+func (f *fakeStore) ReserveManagedSandboxSpend(_ context.Context, tenant, sandboxID string, reservation domain.ManagedSpendReservation) (domain.ManagedSpendReservation, bool, error) {
+	if f.sandboxBillingErr != nil {
+		return domain.ManagedSpendReservation{}, false, f.sandboxBillingErr
+	}
+	if f.sandboxReservation.ID != "" {
+		return f.sandboxReservation, false, nil
+	}
+	reservation.ID, reservation.TenantID = "sandbox-reservation-1", tenant
+	f.sandboxReservation = reservation
+	return reservation, true, nil
+}
+func (f *fakeStore) ActivateManagedSandboxSpend(_ context.Context, _, _ string, _ time.Time) error {
+	f.sandboxActivated = true
+	return f.sandboxBillingErr
+}
+func (f *fakeStore) ReleaseManagedSandboxSpend(_ context.Context, _, _, _ string) error {
+	f.sandboxReleased = true
+	return f.sandboxBillingErr
+}
+func (f *fakeStore) SettleManagedSandboxSpend(_ context.Context, _, _ string, runningMilliseconds int64, _ string) error {
+	f.sandboxSettledMilliseconds = runningMilliseconds
+	return f.sandboxBillingErr
+}
+func (f *fakeStore) SandboxRunningMilliseconds(_ context.Context, tenant, sandboxID string) (int64, error) {
+	var milliseconds int64
+	for _, event := range f.sandboxUsage {
+		if event.TenantID == tenant && event.SandboxID == sandboxID {
+			milliseconds += event.RunningMilliseconds
+		}
+	}
+	return milliseconds, f.sandboxBillingErr
 }
 func (f *fakeStore) AttachTrainingArtifactHandoff(_ context.Context, tenant, _ string, row domain.TrainingArtifactHandoff, artifact domain.ModelArtifact) (domain.TrainingArtifactHandoff, domain.ModelArtifact, error) {
 	row.ID, row.TenantID, row.DeploymentID, row.ModelArtifactID = "handoff", tenant, "deployment", "artifact"
@@ -3660,6 +3727,72 @@ func TestNativeSandboxLifecycleUsesProviderWithoutChangingReferenceRoutes(t *tes
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"assurance":"private-tenant-preview"`) {
 		t.Fatalf("capabilities response=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestManagedSandboxCreateAuthorizesMaximumHoldBeforeProviderEffects(t *testing.T) {
+	store, provider := &fakeStore{}, &fakeSandboxProvider{}
+	policy := managedbilling.SandboxPolicy{Enabled: true, SupplierHourlyMicrousd: 180_000, ActiveHourlyMicrousd: 300_000}
+	handler := (API{Store: store, APIKey: "secret", SandboxProvider: provider, SandboxBilling: policy}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/sandboxes", strings.NewReader(`{"template_id":"python-agent","ttl_seconds":900,"network_mode":"offline"}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Idempotency-Key", "paid-sandbox-create")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted || !store.sandboxActivated || store.sandboxReservation.ReservedMicrousd != 75_000 || provider.workspaceCreates != 1 || provider.sandboxCreates != 1 || !strings.Contains(response.Body.String(), `"billing_status":"reserved"`) || !strings.Contains(response.Body.String(), `"maximum_hold_microusd":75000`) {
+		t.Fatalf("response=%d %s reservation=%+v activated=%t provider=%+v", response.Code, response.Body.String(), store.sandboxReservation, store.sandboxActivated, provider)
+	}
+}
+
+func TestManagedSandboxCreateRequiresCreditBeforeProviderEffects(t *testing.T) {
+	store, provider := &fakeStore{sandboxBillingErr: domain.ErrInsufficientCredits}, &fakeSandboxProvider{}
+	policy := managedbilling.SandboxPolicy{Enabled: true, SupplierHourlyMicrousd: 180_000, ActiveHourlyMicrousd: 300_000}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/sandboxes", strings.NewReader(`{"template_id":"python-agent","ttl_seconds":900,"network_mode":"offline"}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Idempotency-Key", "unfunded-sandbox-create")
+	response := httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret", SandboxProvider: provider, SandboxBilling: policy}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusPaymentRequired || provider.workspaceCreates != 0 || provider.sandboxCreates != 0 || len(store.nativeSandboxes) != 1 || store.nativeSandboxes[0].FailureCode != "payment_required" {
+		t.Fatalf("response=%d %s provider=%+v rows=%+v", response.Code, response.Body.String(), provider, store.nativeSandboxes)
+	}
+}
+
+func TestManagedSandboxProviderFailureReleasesAuthorizedHold(t *testing.T) {
+	store, provider := &fakeStore{}, &fakeSandboxProvider{createErr: sandboxprovider.ErrUnavailable}
+	policy := managedbilling.SandboxPolicy{Enabled: true, SupplierHourlyMicrousd: 180_000, ActiveHourlyMicrousd: 300_000}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/sandboxes", strings.NewReader(`{"template_id":"python-agent","ttl_seconds":900,"network_mode":"offline"}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Idempotency-Key", "failed-paid-sandbox")
+	response := httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret", SandboxProvider: provider, SandboxBilling: policy}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusServiceUnavailable || !store.sandboxReleased || provider.workspaceDeletes != 1 {
+		t.Fatalf("response=%d %s released=%t provider=%+v", response.Code, response.Body.String(), store.sandboxReleased, provider)
+	}
+}
+
+func TestManagedSandboxDeleteSettlesRecordedActiveRuntime(t *testing.T) {
+	stamp := time.Now().UTC()
+	store := &fakeStore{nativeSandboxes: []domain.NativeSandbox{{ID: "computer-1", TenantID: "global", DisplayName: "Paid", Purpose: "coding_agent", SourceType: "empty_workspace", TemplateID: "base", BrezelWorkspaceID: "workspace-1", BrezelSandboxID: "sandbox-1", Status: "running", CreatedAt: stamp.Add(-2 * time.Minute), UpdatedAt: stamp, LastActiveAt: stamp, BillingStateSince: stamp.Add(-2 * time.Minute)}}}
+	provider := &fakeSandboxProvider{}
+	policy := managedbilling.SandboxPolicy{Enabled: true, SupplierHourlyMicrousd: 180_000, ActiveHourlyMicrousd: 300_000}
+	request := httptest.NewRequest(http.MethodDelete, "/api/v1/sandboxes/computer-1", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Idempotency-Key", "delete-paid-sandbox")
+	response := httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret", SandboxProvider: provider, SandboxBilling: policy}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted || store.sandboxSettledMilliseconds < int64((119*time.Second)/time.Millisecond) || !strings.Contains(response.Body.String(), `"billing_status":"settled"`) {
+		t.Fatalf("response=%d %s settled_ms=%d usage=%+v", response.Code, response.Body.String(), store.sandboxSettledMilliseconds, store.sandboxUsage)
+	}
+}
+
+func TestSandboxCapabilitiesExposeExactManagedOffer(t *testing.T) {
+	policy := managedbilling.SandboxPolicy{Enabled: true, SupplierHourlyMicrousd: 180_000, ActiveHourlyMicrousd: 300_000, MaxActive: 1, MaxRetained: 10}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/sandboxes/capabilities", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	(API{Store: &fakeStore{}, APIKey: "secret", SandboxProvider: &fakeSandboxProvider{}, SandboxBilling: policy}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"billing_mode":"prepaid_usage"`) || !strings.Contains(response.Body.String(), `"active_compute_microusd_per_hour":300000`) || !strings.Contains(response.Body.String(), `"standby_compute_microusd_per_hour":0`) || !strings.Contains(response.Body.String(), `"max_active":1`) {
+		t.Fatalf("response=%d %s", response.Code, response.Body.String())
 	}
 }
 

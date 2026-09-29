@@ -12914,7 +12914,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Proxy a tenant-scoped short-lived private-computer preview",
+        "summary": "Proxy a tenant-scoped short-lived sandbox preview",
         "tags": [
           "Sandboxes"
         ]
@@ -12970,7 +12970,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Inspect a tenant-scoped short-lived private-computer preview",
+        "summary": "Inspect a tenant-scoped short-lived sandbox preview",
         "tags": [
           "Sandboxes"
         ]
@@ -13308,7 +13308,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Read content-free private-computer usage; this is not an invoice",
+        "summary": "Read content-free sandbox usage and prepaid metering state",
         "tags": [
           "Sandboxes"
         ]
@@ -13514,7 +13514,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "List content-free private-computer activity",
+        "summary": "List content-free sandbox activity",
         "tags": [
           "Sandboxes"
         ]

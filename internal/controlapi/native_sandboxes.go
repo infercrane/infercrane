@@ -23,8 +23,17 @@ type sandboxProductStore interface {
 	NativeSandboxes(context.Context, string, bool) ([]domain.NativeSandbox, error)
 	SetNativeSandboxProviderRefs(context.Context, string, string, string, string, string, string) (domain.NativeSandbox, error)
 	SetNativeSandboxStatus(context.Context, string, string, string, string) (domain.NativeSandbox, error)
+	RecordNativeSandboxTransition(context.Context, string, string, string, string, string, string, time.Time) (domain.NativeSandbox, error)
 	AppendSandboxUsageEvent(context.Context, domain.SandboxUsageEvent) (bool, error)
 	SandboxUsageSummary(context.Context, string) (domain.SandboxUsageSummary, error)
+}
+
+type sandboxBillingStore interface {
+	ReserveManagedSandboxSpend(context.Context, string, string, domain.ManagedSpendReservation) (domain.ManagedSpendReservation, bool, error)
+	ActivateManagedSandboxSpend(context.Context, string, string, time.Time) error
+	ReleaseManagedSandboxSpend(context.Context, string, string, string) error
+	SettleManagedSandboxSpend(context.Context, string, string, int64, string) error
+	SandboxRunningMilliseconds(context.Context, string, string) (int64, error)
 }
 
 type createNativeSandboxRequest struct {
@@ -51,23 +60,52 @@ func (a API) sandboxStore(w http.ResponseWriter) (sandboxProductStore, bool) {
 func (a API) sandboxCapabilities(w http.ResponseWriter, r *http.Request) {
 	actor := r.Context().Value(identityKey{}).(domain.Principal)
 	if a.SandboxProvider == nil {
-		writeJSON(w, http.StatusOK, sandboxprovider.Capabilities{
+		capabilities := sandboxprovider.Capabilities{
 			Provider: "brezel", Product: "InferCrane Sandboxes", State: "not_configured",
 			Assurance: "private-tenant-preview", Templates: []sandboxprovider.Template{},
 			Qualification:     "unavailable",
 			QualificationNote: "A private sandbox endpoint and approved environments are not configured.",
-		})
+		}
+		capabilities.CommercialOffer = a.sandboxCommercialOffer("capacity_limited", time.Now().UTC())
+		writeJSON(w, http.StatusOK, capabilities)
 		return
 	}
 	capabilities, err := a.SandboxProvider.Capabilities(r.Context(), actor.TenantID)
 	if err != nil {
+		if errors.Is(err, sandboxprovider.ErrForbidden) {
+			writeJSON(w, http.StatusOK, sandboxprovider.Capabilities{
+				Provider: "infercrane", Product: "InferCrane Sandboxes", State: "not_configured",
+				Assurance: "managed-capacity-pending", Qualification: "unavailable",
+				QualificationNote: "This workspace is not admitted to managed sandbox capacity yet.",
+				Templates:         []sandboxprovider.Template{}, CommercialOffer: a.sandboxCommercialOffer("capacity_limited", time.Now().UTC()),
+			})
+			return
+		}
 		a.writeSandboxProviderError(w, err)
 		return
 	}
 	// Brezel is an implementation detail. Keep the stable product identity in
 	// the customer contract while retaining evidence about supported features.
 	capabilities.Provider = "infercrane"
+	capabilities.CommercialOffer = a.sandboxCommercialOffer("available", time.Now().UTC())
 	writeJSON(w, http.StatusOK, capabilities)
+}
+
+func (a API) sandboxCommercialOffer(state string, observedAt time.Time) *sandboxprovider.CommercialOffer {
+	policy := a.SandboxBilling.Normalize()
+	if !policy.Enabled || policy.Validate() != nil {
+		return nil
+	}
+	return &sandboxprovider.CommercialOffer{
+		State: state, Currency: "USD", BillingMode: "prepaid_usage",
+		ActiveComputeMicrousdPerHour:        policy.ActiveHourlyMicrousd,
+		StandbyComputeMicrousdPerHour:       0,
+		WorkspaceStorageMicrousdPerGiBMonth: policy.WorkspaceStorageMicrousdPerGiBMonth,
+		IncludedWorkspaceGiB:                policy.IncludedWorkspaceGiB,
+		Size:                                sandboxprovider.OfferSize{VCPU: policy.VCPU, MemoryMiB: policy.MemoryMiB},
+		Quota:                               sandboxprovider.OfferQuota{MaxActive: policy.MaxActive, MaxRetained: policy.MaxRetained},
+		ObservedAt:                          observedAt.UTC(), ValidUntil: observedAt.UTC().Add(time.Hour),
+	}
 }
 
 func (a API) sandboxes(w http.ResponseWriter, r *http.Request) {
@@ -94,7 +132,7 @@ func (a API) sandboxes(w http.ResponseWriter, r *http.Request) {
 	for _, row := range rows {
 		data = append(data, nativeSandboxResponse(row, nil))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": data, "product": "private_computers"})
+	writeJSON(w, http.StatusOK, map[string]any{"data": data, "product": "sandboxes"})
 }
 
 func (a API) sandbox(w http.ResponseWriter, r *http.Request) {
@@ -110,11 +148,20 @@ func (a API) sandbox(w http.ResponseWriter, r *http.Request) {
 			status := customerSandboxStatus(value.State)
 			failureCode := providerFailureCode(value.Failure)
 			if status != row.Status || failureCode != row.FailureCode {
-				row, _ = store.SetNativeSandboxStatus(r.Context(), row.TenantID, row.ID, status, failureCode)
+				if status != row.Status {
+					transitionAt := sandboxTransitionAt(value.UpdatedAt, row, time.Now().UTC())
+					row, err = store.RecordNativeSandboxTransition(context.WithoutCancel(r.Context()), row.TenantID, row.ID, status, failureCode, "observe:"+transitionAt.Format(time.RFC3339Nano), "sandbox.lifecycle."+status, transitionAt)
+					if err != nil {
+						writeError(w, http.StatusServiceUnavailable, "sandbox_metering_pending", "sandbox state was observed but its usage transition could not be recorded yet")
+						return
+					}
+				} else {
+					row, _ = store.SetNativeSandboxStatus(r.Context(), row.TenantID, row.ID, status, failureCode)
+				}
 			}
 		} else {
 			// A failed provider observation is uncertainty, never evidence that a
-			// previously running computer is still running.
+			// previously running sandbox is still running.
 			row, _ = store.SetNativeSandboxStatus(r.Context(), row.TenantID, row.ID, "unknown", "provider_observation_failed")
 		}
 	}
@@ -135,6 +182,10 @@ func (a API) createSandbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	normalizeNativeSandboxRequest(&request, a.SandboxDefaultTemplate)
+	if request.TTLSeconds < 30 || request.TTLSeconds > 30*24*60*60 || request.StandbyAfterSeconds < 0 || request.StandbyAfterSeconds > 0 && request.StandbyAfterSeconds >= request.TTLSeconds {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_sandbox_request", "lifetime must be between 30 seconds and 30 days, and standby must occur before expiry")
+		return
+	}
 	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
 	if key == "" || len(key) > 96 {
 		writeError(w, http.StatusBadRequest, "invalid_sandbox_request", "Idempotency-Key is required and must not exceed 96 characters")
@@ -174,7 +225,7 @@ func (a API) createSandbox(w http.ResponseWriter, r *http.Request) {
 		Status: "creating_workspace", IdempotencyKey: key, InputDigest: digest,
 	})
 	if errors.Is(err, domain.ErrConflict) {
-		writeError(w, http.StatusConflict, "sandbox_conflict", "the idempotency key was already used for a different computer")
+		writeError(w, http.StatusConflict, "sandbox_conflict", "the idempotency key was already used for a different sandbox")
 		return
 	}
 	if err != nil {
@@ -185,10 +236,42 @@ func (a API) createSandbox(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusAccepted, nativeSandboxResponse(row, nil))
 		return
 	}
+	var billing sandboxBillingStore
+	var billingReservation domain.ManagedSpendReservation
+	if a.SandboxBilling.Enabled {
+		var billingOK bool
+		billing, billingOK = a.Store.(sandboxBillingStore)
+		if !billingOK {
+			writeError(w, http.StatusNotImplemented, "sandbox_billing_unavailable", "managed sandbox billing storage is not configured")
+			return
+		}
+		reservation, reservationErr := a.SandboxBilling.Reservation(time.Duration(request.TTLSeconds)*time.Second, row.ID)
+		if reservationErr == nil {
+			billingReservation, _, reservationErr = billing.ReserveManagedSandboxSpend(r.Context(), actor.TenantID, row.ID, reservation)
+		}
+		if errors.Is(reservationErr, domain.ErrInsufficientCredits) {
+			_, _ = store.SetNativeSandboxStatus(context.WithoutCancel(r.Context()), actor.TenantID, row.ID, "failed", "payment_required")
+			writeError(w, http.StatusPaymentRequired, "insufficient_prepaid_credit", "add enough prepaid credit for the selected maximum lifetime before creating the sandbox")
+			return
+		}
+		if errors.Is(reservationErr, domain.ErrConflict) {
+			_, _ = store.SetNativeSandboxStatus(context.WithoutCancel(r.Context()), actor.TenantID, row.ID, "failed", "capacity_limit")
+			writeError(w, http.StatusConflict, "sandbox_capacity_exceeded", "managed sandbox capacity is currently full for this workspace")
+			return
+		}
+		if reservationErr != nil {
+			_, _ = store.SetNativeSandboxStatus(context.WithoutCancel(r.Context()), actor.TenantID, row.ID, "failed", "billing_authorization_failed")
+			writeError(w, http.StatusConflict, "sandbox_billing_conflict", "sandbox billing authorization could not be recorded")
+			return
+		}
+	}
 	if row.BrezelWorkspaceID == "" {
 		workspace, workspaceErr := a.SandboxProvider.CreateWorkspace(r.Context(), actor.TenantID, key+".workspace", row.ID)
 		if workspaceErr != nil || workspace.Resource.ID == "" {
 			_, _ = store.SetNativeSandboxStatus(context.WithoutCancel(r.Context()), actor.TenantID, row.ID, "failed", "workspace_create_failed")
+			if billing != nil {
+				_ = billing.ReleaseManagedSandboxSpend(context.WithoutCancel(r.Context()), actor.TenantID, row.ID, "workspace creation failed before compute activation")
+			}
 			a.writeSandboxProviderError(w, workspaceErrOrInvalid(workspaceErr))
 			return
 		}
@@ -199,6 +282,9 @@ func (a API) createSandbox(w http.ResponseWriter, r *http.Request) {
 				status = "cleanup_pending"
 			}
 			_, _ = store.SetNativeSandboxStatus(context.WithoutCancel(r.Context()), actor.TenantID, row.ID, status, "workspace_tracking_failed")
+			if billing != nil && status != "cleanup_pending" {
+				_ = billing.ReleaseManagedSandboxSpend(context.WithoutCancel(r.Context()), actor.TenantID, row.ID, "workspace cleanup confirmed after tracking failure")
+			}
 			writeError(w, http.StatusInternalServerError, "sandbox_tracking_failed", "workspace creation could not be recorded")
 			return
 		}
@@ -213,6 +299,9 @@ func (a API) createSandbox(w http.ResponseWriter, r *http.Request) {
 			cleanupStatus = "cleanup_pending"
 		}
 		_, _ = store.SetNativeSandboxStatus(context.WithoutCancel(r.Context()), actor.TenantID, row.ID, cleanupStatus, "sandbox_create_failed")
+		if billing != nil && cleanupStatus != "cleanup_pending" {
+			_ = billing.ReleaseManagedSandboxSpend(context.WithoutCancel(r.Context()), actor.TenantID, row.ID, "sandbox creation failed and workspace cleanup completed")
+		}
 		a.writeSandboxProviderError(w, workspaceErrOrInvalid(err))
 		return
 	}
@@ -226,18 +315,46 @@ func (a API) createSandbox(w http.ResponseWriter, r *http.Request) {
 			status = "cleanup_pending"
 		}
 		_, _ = store.SetNativeSandboxStatus(context.WithoutCancel(r.Context()), actor.TenantID, row.ID, status, "sandbox_tracking_failed")
-		writeError(w, http.StatusInternalServerError, "sandbox_tracking_failed", "computer creation could not be recorded")
+		if billing != nil && status != "cleanup_pending" {
+			_ = billing.ReleaseManagedSandboxSpend(context.WithoutCancel(r.Context()), actor.TenantID, row.ID, "orphan sandbox cleanup confirmed after tracking failure")
+		}
+		writeError(w, http.StatusInternalServerError, "sandbox_tracking_failed", "sandbox creation could not be recorded")
 		return
 	}
+	if billing != nil {
+		if err = billing.ActivateManagedSandboxSpend(context.WithoutCancel(r.Context()), actor.TenantID, row.ID, time.Now().UTC()); err != nil {
+			cleanupPending := false
+			if _, cleanupErr := a.SandboxProvider.Delete(context.WithoutCancel(r.Context()), actor.TenantID, row.BrezelSandboxID, key+".billing-activation"); cleanupErr != nil && !errors.Is(cleanupErr, sandboxprovider.ErrNotFound) {
+				cleanupPending = true
+			}
+			if _, cleanupErr := a.SandboxProvider.DeleteWorkspace(context.WithoutCancel(r.Context()), actor.TenantID, row.BrezelWorkspaceID, key+".billing-workspace"); cleanupErr != nil && !errors.Is(cleanupErr, sandboxprovider.ErrNotFound) {
+				cleanupPending = true
+			}
+			status := "failed"
+			if cleanupPending {
+				status = "cleanup_pending"
+			} else {
+				_ = billing.ReleaseManagedSandboxSpend(context.WithoutCancel(r.Context()), actor.TenantID, row.ID, "provider cleanup confirmed after billing activation failure")
+			}
+			_, _ = store.SetNativeSandboxStatus(context.WithoutCancel(r.Context()), actor.TenantID, row.ID, status, "billing_activation_failed")
+			writeError(w, http.StatusInternalServerError, "sandbox_billing_activation_failed", "sandbox billing activation could not be recorded; provider cleanup has been requested")
+			return
+		}
+	}
 	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "sandbox.create", ResourceType: "sandbox", ResourceName: row.ID, Outcome: "accepted"})
-	a.appendSandboxUsage(context.WithoutCancel(r.Context()), store, row, mutation.Operation.ID, "computer.created", domain.SandboxUsageEvent{})
-	writeJSON(w, http.StatusAccepted, nativeSandboxResponse(row, &mutation.Resource))
+	_ = a.appendSandboxUsage(context.WithoutCancel(r.Context()), store, row, mutation.Operation.ID, "sandbox.created", domain.SandboxUsageEvent{})
+	response := nativeSandboxResponse(row, &mutation.Resource)
+	if billing != nil {
+		response["billing_status"] = "reserved"
+		response["maximum_hold_microusd"] = billingReservation.ReservedMicrousd
+	}
+	writeJSON(w, http.StatusAccepted, response)
 }
 
 func normalizeNativeSandboxRequest(request *createNativeSandboxRequest, defaultTemplate string) {
 	request.DisplayName = strings.TrimSpace(request.DisplayName)
 	if request.DisplayName == "" {
-		request.DisplayName = "New computer"
+		request.DisplayName = "New sandbox"
 	}
 	request.Purpose = strings.TrimSpace(request.Purpose)
 	if request.Purpose == "" {
@@ -300,11 +417,11 @@ func (a API) mutateSandboxLifecycle(w http.ResponseWriter, r *http.Request, acti
 			writeJSON(w, http.StatusAccepted, nativeSandboxResponse(row, nil))
 			return
 		}
-		writeError(w, http.StatusConflict, "sandbox_deleted", "deleted computers cannot be changed")
+		writeError(w, http.StatusConflict, "sandbox_deleted", "deleted sandboxes cannot be changed")
 		return
 	}
 	if row.BrezelSandboxID == "" {
-		writeError(w, http.StatusConflict, "sandbox_incomplete", "this computer has not finished provisioning")
+		writeError(w, http.StatusConflict, "sandbox_incomplete", "this sandbox has not finished provisioning")
 		return
 	}
 	var mutation sandboxprovider.Mutation
@@ -336,15 +453,26 @@ func (a API) mutateSandboxLifecycle(w http.ResponseWriter, r *http.Request, acti
 			status = "cleanup_pending"
 		}
 	}
-	usage := sandboxLifecycleUsage(row, time.Now().UTC())
-	row, err = store.SetNativeSandboxStatus(r.Context(), actor.TenantID, row.ID, status, providerFailureCode(mutation.Resource.Failure))
+	row, err = store.RecordNativeSandboxTransition(context.WithoutCancel(r.Context()), actor.TenantID, row.ID, status, providerFailureCode(mutation.Resource.Failure), mutation.Operation.ID, "sandbox."+action, time.Now().UTC())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "sandbox_tracking_failed", "computer state could not be recorded")
+		writeError(w, http.StatusInternalServerError, "sandbox_tracking_failed", "sandbox state could not be recorded")
 		return
 	}
 	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "sandbox." + action, ResourceType: "sandbox", ResourceName: row.ID, Outcome: "accepted"})
-	a.appendSandboxUsage(context.WithoutCancel(r.Context()), store, row, mutation.Operation.ID, "computer."+action, usage)
-	writeJSON(w, http.StatusAccepted, nativeSandboxResponse(row, &mutation.Resource))
+	response := nativeSandboxResponse(row, &mutation.Resource)
+	if action == "delete" && status == "deleted" && a.SandboxBilling.Enabled {
+		response["billing_status"] = "pending_reconciliation"
+		if billing, billingOK := a.Store.(sandboxBillingStore); billingOK {
+			runningMilliseconds, usageErr := billing.SandboxRunningMilliseconds(r.Context(), actor.TenantID, row.ID)
+			if usageErr == nil {
+				usageErr = billing.SettleManagedSandboxSpend(context.WithoutCancel(r.Context()), actor.TenantID, row.ID, runningMilliseconds, "metered active sandbox runtime; unused maximum-lifetime hold released after provider cleanup")
+			}
+			if usageErr == nil {
+				response["billing_status"] = "settled"
+			}
+		}
+	}
+	writeJSON(w, http.StatusAccepted, response)
 }
 
 func (a API) ownedSandbox(w http.ResponseWriter, r *http.Request) (sandboxProductStore, domain.NativeSandbox, bool) {
@@ -355,11 +483,11 @@ func (a API) ownedSandbox(w http.ResponseWriter, r *http.Request) (sandboxProduc
 	actor := r.Context().Value(identityKey{}).(domain.Principal)
 	row, err := store.NativeSandbox(r.Context(), actor.TenantID, r.PathValue("id"))
 	if errors.Is(err, domain.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "sandbox_not_found", "computer was not found")
+		writeError(w, http.StatusNotFound, "sandbox_not_found", "sandbox was not found")
 		return nil, row, false
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal", "computer could not be read")
+		writeError(w, http.StatusInternalServerError, "internal", "sandbox could not be read")
 		return nil, row, false
 	}
 	return store, row, true
@@ -385,7 +513,7 @@ func nativeSandboxResponse(row domain.NativeSandbox, observed *sandboxprovider.S
 		result["expires_at"] = observed.ExpiresAt
 		result["lifecycle"] = observed.Lifecycle
 		result["network_policy"] = "offline"
-		result["evidence"] = map[string]any{"environment_revision": observed.EnvironmentRevision, "assurance": "private-computer"}
+		result["evidence"] = map[string]any{"environment_revision": observed.EnvironmentRevision, "assurance": "private-sandbox"}
 	}
 	return result
 }
@@ -413,29 +541,29 @@ func workspaceErrOrInvalid(err error) error {
 	return fmt.Errorf("%w: provider returned no resource identity", sandboxprovider.ErrUpstream)
 }
 
-func (a API) appendSandboxUsage(ctx context.Context, store sandboxProductStore, row domain.NativeSandbox, providerOperationID, eventType string, counters domain.SandboxUsageEvent) {
+func (a API) appendSandboxUsage(ctx context.Context, store sandboxProductStore, row domain.NativeSandbox, providerOperationID, eventType string, counters domain.SandboxUsageEvent) error {
 	digest := sha256.Sum256([]byte(row.TenantID + "\x00" + row.ID + "\x00" + providerOperationID + "\x00" + eventType))
 	counters.EventID = hex.EncodeToString(digest[:])
 	counters.TenantID, counters.SandboxID = row.TenantID, row.ID
 	counters.ProviderOperationID, counters.EventType = providerOperationID, eventType
 	counters.OccurredAt, counters.TemplateID = time.Now().UTC(), row.TemplateID
 	counters.RuntimeClass, counters.MetadataVersion = "firecracker-cpu", 1
-	_, _ = store.AppendSandboxUsageEvent(ctx, counters)
+	_, err := store.AppendSandboxUsageEvent(ctx, counters)
+	return err
 }
 
-func sandboxLifecycleUsage(row domain.NativeSandbox, endedAt time.Time) domain.SandboxUsageEvent {
-	elapsed := endedAt.Sub(row.LastActiveAt).Milliseconds()
-	if elapsed < 0 {
-		elapsed = 0
+func sandboxTransitionAt(providerUpdatedAt time.Time, row domain.NativeSandbox, observedAt time.Time) time.Time {
+	if providerUpdatedAt.IsZero() || providerUpdatedAt.After(observedAt) {
+		return observedAt
 	}
-	switch row.Status {
-	case "running", "pausing", "resuming":
-		return domain.SandboxUsageEvent{RunningMilliseconds: elapsed}
-	case "standby":
-		return domain.SandboxUsageEvent{StandbyMilliseconds: elapsed}
-	default:
-		return domain.SandboxUsageEvent{}
+	startedAt := row.BillingStateSince
+	if startedAt.IsZero() {
+		startedAt = row.LastActiveAt
 	}
+	if providerUpdatedAt.Before(startedAt) {
+		return startedAt
+	}
+	return providerUpdatedAt.UTC()
 }
 
 func (a API) sandboxUsage(w http.ResponseWriter, r *http.Request) {
@@ -449,7 +577,11 @@ func (a API) sandboxUsage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "sandbox usage could not be read")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"usage": summary, "billing_status": "not_an_invoice", "content_recorded": false})
+	billingStatus := "not_an_invoice"
+	if a.SandboxBilling.Enabled {
+		billingStatus = "metered_prepaid"
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"usage": summary, "billing_status": billingStatus, "content_recorded": false})
 }
 
 func (a API) writeSandboxProviderError(w http.ResponseWriter, err error) {
@@ -457,7 +589,7 @@ func (a API) writeSandboxProviderError(w http.ResponseWriter, err error) {
 	case errors.Is(err, sandboxprovider.ErrForbidden):
 		writeError(w, http.StatusForbidden, "sandbox_tenant_not_enabled", "sandboxes are not enabled for this tenant")
 	case errors.Is(err, sandboxprovider.ErrNotFound):
-		writeError(w, http.StatusNotFound, "sandbox_not_found", "computer was not found")
+		writeError(w, http.StatusNotFound, "sandbox_not_found", "sandbox was not found")
 	case errors.Is(err, sandboxprovider.ErrConflict):
 		writeError(w, http.StatusConflict, "sandbox_conflict", err.Error())
 	case errors.Is(err, sandboxprovider.ErrInvalid):
@@ -504,13 +636,13 @@ func (a API) runSandboxCommand(w http.ResponseWriter, r *http.Request) {
 	}
 	for name, value := range request.Env {
 		if name != "INFERCRANE_API_KEY" || value != "brezel://infercrane/model-session" || row.ModelEndpoint == "" {
-			writeError(w, http.StatusUnprocessableEntity, "secret_policy", "only the InferCrane model-session placeholder may be passed to a computer")
+			writeError(w, http.StatusUnprocessableEntity, "secret_policy", "only the InferCrane model-session placeholder may be passed to a sandbox")
 			return
 		}
 	}
 	started := time.Now().UTC()
 	requestID := sandboxEventIdentity(row, "command.request", strconv.FormatInt(started.UnixNano(), 10))
-	a.appendSandboxUsage(context.WithoutCancel(r.Context()), store, row, requestID, "command.started", domain.SandboxUsageEvent{})
+	_ = a.appendSandboxUsage(context.WithoutCancel(r.Context()), store, row, requestID, "command.started", domain.SandboxUsageEvent{})
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -557,7 +689,7 @@ func (a API) runSandboxCommand(w http.ResponseWriter, r *http.Request) {
 	} else if *terminal.ExitCode != 0 {
 		exitClass = "nonzero"
 	}
-	a.appendSandboxUsage(context.WithoutCancel(r.Context()), store, row, operationID, eventType, domain.SandboxUsageEvent{CommandDurationMilliseconds: duration, CommandExitClass: exitClass})
+	_ = a.appendSandboxUsage(context.WithoutCancel(r.Context()), store, row, operationID, eventType, domain.SandboxUsageEvent{CommandDurationMilliseconds: duration, CommandExitClass: exitClass})
 	_, _ = store.SetNativeSandboxStatus(context.WithoutCancel(r.Context()), row.TenantID, row.ID, row.Status, row.FailureCode)
 }
 
@@ -586,7 +718,7 @@ func (a API) writeSandboxFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	operationID := sandboxEventIdentity(row, "file.write", key)
-	a.appendSandboxUsage(context.WithoutCancel(r.Context()), store, row, operationID, "file.ingress", domain.SandboxUsageEvent{FileIngressBytes: info.Size})
+	_ = a.appendSandboxUsage(context.WithoutCancel(r.Context()), store, row, operationID, "file.ingress", domain.SandboxUsageEvent{FileIngressBytes: info.Size})
 	_, _ = store.SetNativeSandboxStatus(context.WithoutCancel(r.Context()), row.TenantID, row.ID, row.Status, row.FailureCode)
 	writeJSON(w, http.StatusOK, map[string]any{"size": info.Size, "sha256": info.SHA256})
 }
@@ -621,7 +753,7 @@ func (a API) readSandboxFile(w http.ResponseWriter, r *http.Request) {
 	written, copyErr := io.Copy(w, download.Body)
 	if copyErr == nil {
 		operationID := sandboxEventIdentity(row, "file.read", strconv.FormatInt(time.Now().UnixNano(), 10))
-		a.appendSandboxUsage(context.WithoutCancel(r.Context()), store, row, operationID, "file.egress", domain.SandboxUsageEvent{FileEgressBytes: written})
+		_ = a.appendSandboxUsage(context.WithoutCancel(r.Context()), store, row, operationID, "file.egress", domain.SandboxUsageEvent{FileEgressBytes: written})
 		_, _ = store.SetNativeSandboxStatus(context.WithoutCancel(r.Context()), row.TenantID, row.ID, row.Status, row.FailureCode)
 	}
 }
@@ -710,11 +842,11 @@ func (a API) proxySandboxPreview(w http.ResponseWriter, r *http.Request) {
 	sandboxID := r.PathValue("sandbox")
 	row, err := store.NativeSandbox(r.Context(), actor.TenantID, sandboxID)
 	if errors.Is(err, domain.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "sandbox_not_found", "computer was not found")
+		writeError(w, http.StatusNotFound, "sandbox_not_found", "sandbox was not found")
 		return
 	}
 	if err != nil || row.Status != "running" || row.DeletedAt != nil {
-		writeError(w, http.StatusConflict, "sandbox_not_running", "preview requires a running computer")
+		writeError(w, http.StatusConflict, "sandbox_not_running", "preview requires a running sandbox")
 		return
 	}
 	lease, ok := a.SandboxPreviews.resolve(r.PathValue("token"), actor.TenantID, row.ID)
@@ -738,7 +870,7 @@ func (a API) proxySandboxPreview(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(response.StatusCode)
 	_, _ = io.Copy(w, response.Body)
 	operationID := sandboxEventIdentity(row, "preview.request", strconv.FormatInt(time.Now().UnixNano(), 10))
-	a.appendSandboxUsage(context.WithoutCancel(r.Context()), store, row, operationID, "preview.request", domain.SandboxUsageEvent{PreviewRequests: 1})
+	_ = a.appendSandboxUsage(context.WithoutCancel(r.Context()), store, row, operationID, "preview.request", domain.SandboxUsageEvent{PreviewRequests: 1})
 	_, _ = store.SetNativeSandboxStatus(context.WithoutCancel(r.Context()), row.TenantID, row.ID, row.Status, row.FailureCode)
 }
 
@@ -752,7 +884,7 @@ func (a API) actionableSandbox(w http.ResponseWriter, r *http.Request) (sandboxP
 		return nil, row, false
 	}
 	if row.DeletedAt != nil || row.Status != "running" || row.BrezelSandboxID == "" {
-		writeError(w, http.StatusConflict, "sandbox_not_running", "this computer cannot execute work in its current state")
+		writeError(w, http.StatusConflict, "sandbox_not_running", "this sandbox cannot execute work in its current state")
 		return nil, row, false
 	}
 	return store, row, true

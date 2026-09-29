@@ -2,11 +2,14 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
 )
@@ -31,7 +34,7 @@ func (s *Store) CreateNativeSandbox(ctx context.Context, row domain.NativeSandbo
 		}
 	}
 	stamp := now()
-	result, err := s.ExecContext(ctx, `INSERT INTO native_sandboxes(id,tenant_id,created_by,display_name,purpose,source_type,source_reference,template_id,model_endpoint,brezel_project_id,brezel_workspace_id,brezel_sandbox_id,status,failure_code,idempotency_key,input_digest,created_at,updated_at,last_active_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'',?,?,?, ?, ?) ON CONFLICT(tenant_id,idempotency_key) DO NOTHING`, row.ID, row.TenantID, row.CreatedBy, row.DisplayName, row.Purpose, row.SourceType, row.SourceReference, row.TemplateID, row.ModelEndpoint, row.BrezelProjectID, row.BrezelWorkspaceID, row.BrezelSandboxID, row.Status, row.IdempotencyKey, row.InputDigest, stamp, stamp, stamp)
+	result, err := s.ExecContext(ctx, `INSERT INTO native_sandboxes(id,tenant_id,created_by,display_name,purpose,source_type,source_reference,template_id,model_endpoint,brezel_project_id,brezel_workspace_id,brezel_sandbox_id,status,failure_code,idempotency_key,input_digest,created_at,updated_at,last_active_at,billing_state_since) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'',?,?,?, ?, ?, ?) ON CONFLICT(tenant_id,idempotency_key) DO NOTHING`, row.ID, row.TenantID, row.CreatedBy, row.DisplayName, row.Purpose, row.SourceType, row.SourceReference, row.TemplateID, row.ModelEndpoint, row.BrezelProjectID, row.BrezelWorkspaceID, row.BrezelSandboxID, row.Status, row.IdempotencyKey, row.InputDigest, stamp, stamp, stamp, stamp)
 	if err != nil {
 		return row, false, err
 	}
@@ -97,16 +100,16 @@ func (s *Store) NativeSandboxByIdempotencyKey(ctx context.Context, tenant, key s
 
 func (s *Store) nativeSandbox(ctx context.Context, predicate string, values ...any) (domain.NativeSandbox, error) {
 	var row domain.NativeSandbox
-	var created, updated, active string
+	var created, updated, active, billingStateSince string
 	var deleted sql.NullString
-	err := s.QueryRowContext(ctx, `SELECT id,tenant_id,created_by,display_name,purpose,source_type,source_reference,template_id,model_endpoint,brezel_project_id,brezel_workspace_id,brezel_sandbox_id,status,failure_code,idempotency_key,input_digest,created_at,updated_at,last_active_at,deleted_at FROM native_sandboxes WHERE `+predicate, values...).Scan(&row.ID, &row.TenantID, &row.CreatedBy, &row.DisplayName, &row.Purpose, &row.SourceType, &row.SourceReference, &row.TemplateID, &row.ModelEndpoint, &row.BrezelProjectID, &row.BrezelWorkspaceID, &row.BrezelSandboxID, &row.Status, &row.FailureCode, &row.IdempotencyKey, &row.InputDigest, &created, &updated, &active, &deleted)
+	err := s.QueryRowContext(ctx, `SELECT id,tenant_id,created_by,display_name,purpose,source_type,source_reference,template_id,model_endpoint,brezel_project_id,brezel_workspace_id,brezel_sandbox_id,status,failure_code,idempotency_key,input_digest,created_at,updated_at,last_active_at,billing_state_since,deleted_at FROM native_sandboxes WHERE `+predicate, values...).Scan(&row.ID, &row.TenantID, &row.CreatedBy, &row.DisplayName, &row.Purpose, &row.SourceType, &row.SourceReference, &row.TemplateID, &row.ModelEndpoint, &row.BrezelProjectID, &row.BrezelWorkspaceID, &row.BrezelSandboxID, &row.Status, &row.FailureCode, &row.IdempotencyKey, &row.InputDigest, &created, &updated, &active, &billingStateSince, &deleted)
 	if errors.Is(err, sql.ErrNoRows) {
 		return row, domain.ErrNotFound
 	}
 	if err != nil {
 		return row, err
 	}
-	row.CreatedAt, row.UpdatedAt, row.LastActiveAt = parseTime(created), parseTime(updated), parseTime(active)
+	row.CreatedAt, row.UpdatedAt, row.LastActiveAt, row.BillingStateSince = parseTime(created), parseTime(updated), parseTime(active), parseTime(billingStateSince)
 	if deleted.Valid {
 		stamp := parseTime(deleted.String)
 		row.DeletedAt = &stamp
@@ -153,7 +156,8 @@ func (s *Store) SetNativeSandboxProviderRefs(ctx context.Context, tenant, id, wo
 	if !nativeSandboxStatuses[status] {
 		return domain.NativeSandbox{}, errors.New("unsupported sandbox state")
 	}
-	result, err := s.ExecContext(ctx, `UPDATE native_sandboxes SET brezel_workspace_id=CASE WHEN ?='' THEN brezel_workspace_id ELSE ? END,brezel_sandbox_id=CASE WHEN ?='' THEN brezel_sandbox_id ELSE ? END,status=?,failure_code=?,updated_at=?,last_active_at=? WHERE tenant_id=? AND id=? AND deleted_at IS NULL`, workspaceID, workspaceID, sandboxID, sandboxID, status, failureCode, now(), now(), tenant, id)
+	stamp := now()
+	result, err := s.ExecContext(ctx, `UPDATE native_sandboxes SET brezel_workspace_id=CASE WHEN ?='' THEN brezel_workspace_id ELSE ? END,brezel_sandbox_id=CASE WHEN ?='' THEN brezel_sandbox_id ELSE ? END,billing_state_since=CASE WHEN status<>? THEN ? ELSE billing_state_since END,status=?,failure_code=?,updated_at=?,last_active_at=? WHERE tenant_id=? AND id=? AND deleted_at IS NULL`, workspaceID, workspaceID, sandboxID, sandboxID, status, stamp, status, failureCode, stamp, stamp, tenant, id)
 	if err != nil {
 		return domain.NativeSandbox{}, err
 	}
@@ -171,12 +175,73 @@ func (s *Store) SetNativeSandboxStatus(ctx context.Context, tenant, id, status, 
 	if status == "deleted" {
 		deleted = now()
 	}
-	result, err := s.ExecContext(ctx, `UPDATE native_sandboxes SET status=?,failure_code=?,updated_at=?,last_active_at=?,deleted_at=COALESCE(?,deleted_at) WHERE tenant_id=? AND id=?`, status, failureCode, now(), now(), deleted, tenant, id)
+	stamp := now()
+	result, err := s.ExecContext(ctx, `UPDATE native_sandboxes SET billing_state_since=CASE WHEN status<>? THEN ? ELSE billing_state_since END,status=?,failure_code=?,updated_at=?,last_active_at=?,deleted_at=COALESCE(?,deleted_at) WHERE tenant_id=? AND id=?`, status, stamp, status, failureCode, stamp, stamp, deleted, tenant, id)
 	if err != nil {
 		return domain.NativeSandbox{}, err
 	}
 	if count, _ := result.RowsAffected(); count == 0 {
 		return domain.NativeSandbox{}, domain.ErrNotFound
+	}
+	return s.NativeSandbox(ctx, tenant, id)
+}
+
+// RecordNativeSandboxTransition serializes the billable lifecycle clock, its
+// content-free usage event, and the customer-visible state. Concurrent API and
+// background reconciliation attempts therefore cannot meter the same interval
+// twice even when provider deletion is retried.
+func (s *Store) RecordNativeSandboxTransition(ctx context.Context, tenant, id, status, failureCode, providerOperationID, eventType string, occurredAt time.Time) (domain.NativeSandbox, error) {
+	if tenant == "" || id == "" || !nativeSandboxStatuses[status] || eventType == "" || occurredAt.IsZero() || occurredAt.After(time.Now().UTC().Add(time.Minute)) {
+		return domain.NativeSandbox{}, errors.New("complete sandbox lifecycle transition is required")
+	}
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return domain.NativeSandbox{}, err
+	}
+	defer tx.Rollback()
+	var currentStatus, templateID string
+	var billingStateSince, lastActiveAt time.Time
+	err = tx.QueryRowContext(ctx, `SELECT status,template_id,billing_state_since,last_active_at FROM native_sandboxes WHERE tenant_id=? AND id=? FOR UPDATE`, tenant, id).Scan(&currentStatus, &templateID, &billingStateSince, &lastActiveAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.NativeSandbox{}, domain.ErrNotFound
+	}
+	if err != nil {
+		return domain.NativeSandbox{}, err
+	}
+	if currentStatus == "deleted" && status != "deleted" {
+		return domain.NativeSandbox{}, fmt.Errorf("%w: deleted sandbox lifecycle cannot be reopened", ErrConflict)
+	}
+	if occurredAt.Before(billingStateSince) {
+		occurredAt = billingStateSince
+	}
+	if currentStatus != status {
+		elapsed := occurredAt.Sub(billingStateSince).Milliseconds()
+		if elapsed < 0 {
+			elapsed = 0
+		}
+		var runningMilliseconds, standbyMilliseconds int64
+		switch currentStatus {
+		case "running", "pausing", "resuming":
+			runningMilliseconds = elapsed
+		case "standby":
+			standbyMilliseconds = elapsed
+		}
+		digest := sha256.Sum256([]byte(tenant + "\x00" + id + "\x00" + providerOperationID + "\x00" + eventType + "\x00" + occurredAt.UTC().Format(time.RFC3339Nano)))
+		eventID := hex.EncodeToString(digest[:])
+		if _, err = tx.ExecContext(ctx, `INSERT INTO sandbox_usage_events(event_id,tenant_id,sandbox_id,provider_operation_id,event_type,occurred_at,template_id,runtime_class,running_milliseconds,standby_milliseconds,metadata_version) VALUES(?,?,?,?,?,?,?,?,?,?,1) ON CONFLICT DO NOTHING`, eventID, tenant, id, providerOperationID, eventType, occurredAt.UTC(), templateID, "firecracker-cpu", runningMilliseconds, standbyMilliseconds); err != nil {
+			return domain.NativeSandbox{}, err
+		}
+	}
+	stamp := now()
+	deleted := any(nil)
+	if status == "deleted" {
+		deleted = stamp
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE native_sandboxes SET billing_state_since=CASE WHEN status<>? THEN ? ELSE billing_state_since END,status=?,failure_code=?,updated_at=?,last_active_at=?,deleted_at=COALESCE(?,deleted_at) WHERE tenant_id=? AND id=?`, status, occurredAt.UTC(), status, failureCode, stamp, stamp, deleted, tenant, id); err != nil {
+		return domain.NativeSandbox{}, err
+	}
+	if err = tx.Commit(); err != nil {
+		return domain.NativeSandbox{}, err
 	}
 	return s.NativeSandbox(ctx, tenant, id)
 }
@@ -208,4 +273,13 @@ func (s *Store) SandboxUsageSummary(ctx context.Context, tenant string) (domain.
 	var summary domain.SandboxUsageSummary
 	err := s.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM native_sandboxes WHERE tenant_id=? AND deleted_at IS NULL AND status NOT IN ('deleted','expired','failed')),COALESCE(SUM(running_milliseconds),0),COALESCE(SUM(standby_milliseconds),0),COALESCE(SUM(CASE WHEN event_type='command.completed' THEN 1 ELSE 0 END),0),COALESCE(SUM(file_ingress_bytes),0),COALESCE(SUM(file_egress_bytes),0),COALESCE(SUM(preview_requests),0) FROM sandbox_usage_events WHERE tenant_id=?`, tenant, tenant).Scan(&summary.ActiveComputers, &summary.RunningMilliseconds, &summary.StandbyMilliseconds, &summary.CommandsExecuted, &summary.FileIngressBytes, &summary.FileEgressBytes, &summary.PreviewRequests)
 	return summary, err
+}
+
+func (s *Store) SandboxRunningMilliseconds(ctx context.Context, tenant, sandboxID string) (int64, error) {
+	if tenant == "" || sandboxID == "" {
+		return 0, errors.New("tenant and sandbox identity are required")
+	}
+	var milliseconds int64
+	err := s.QueryRowContext(ctx, `SELECT COALESCE(SUM(running_milliseconds),0) FROM sandbox_usage_events WHERE tenant_id=? AND sandbox_id=?`, tenant, sandboxID).Scan(&milliseconds)
+	return milliseconds, err
 }

@@ -40,16 +40,41 @@ type Features struct {
 	GPU                  bool `json:"gpu"`
 }
 
+type CommercialOffer struct {
+	State                               string     `json:"state"`
+	Currency                            string     `json:"currency"`
+	BillingMode                         string     `json:"billing_mode"`
+	ActiveComputeMicrousdPerHour        int64      `json:"active_compute_microusd_per_hour"`
+	StandbyComputeMicrousdPerHour       int64      `json:"standby_compute_microusd_per_hour"`
+	WorkspaceStorageMicrousdPerGiBMonth int64      `json:"workspace_storage_microusd_per_gib_month"`
+	IncludedWorkspaceGiB                int        `json:"included_workspace_gib"`
+	Size                                OfferSize  `json:"size"`
+	Quota                               OfferQuota `json:"quota"`
+	ObservedAt                          time.Time  `json:"observed_at"`
+	ValidUntil                          time.Time  `json:"valid_until"`
+}
+
+type OfferSize struct {
+	VCPU      int `json:"vcpu"`
+	MemoryMiB int `json:"memory_mib"`
+}
+
+type OfferQuota struct {
+	MaxActive   int `json:"max_active"`
+	MaxRetained int `json:"max_retained"`
+}
+
 type Capabilities struct {
-	Provider          string     `json:"provider"`
-	Product           string     `json:"product"`
-	State             string     `json:"state"`
-	Assurance         string     `json:"assurance"`
-	Runtime           string     `json:"runtime"`
-	Qualification     string     `json:"qualification"`
-	QualificationNote string     `json:"qualification_note,omitempty"`
-	Templates         []Template `json:"templates"`
-	Features          Features   `json:"features"`
+	Provider          string           `json:"provider"`
+	Product           string           `json:"product"`
+	State             string           `json:"state"`
+	Assurance         string           `json:"assurance"`
+	Runtime           string           `json:"runtime"`
+	Qualification     string           `json:"qualification"`
+	QualificationNote string           `json:"qualification_note,omitempty"`
+	Templates         []Template       `json:"templates"`
+	Features          Features         `json:"features"`
+	CommercialOffer   *CommercialOffer `json:"commercial_offer,omitempty"`
 }
 
 type Lifecycle struct {
