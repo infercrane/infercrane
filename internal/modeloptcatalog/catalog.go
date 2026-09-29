@@ -23,6 +23,8 @@ type Seed struct {
 	Publisher                string   `json:"publisher"`
 	BaseRepository           string   `json:"base_repository"`
 	BaseRevision             string   `json:"base_revision,omitempty"`
+	ScreeningBaseRevision    string   `json:"screening_base_revision,omitempty"`
+	ScreeningRevisionSource  string   `json:"screening_revision_source,omitempty"`
 	LineageState             string   `json:"lineage_state"`
 	OutputRepository         string   `json:"output_repository"`
 	OutputRevision           string   `json:"output_revision"`
@@ -96,6 +98,15 @@ func ValidateSeed(seed Seed) error {
 	}
 	if seed.LineageState == "exact" && !immutableRevision(seed.BaseRevision) {
 		return errors.New("exact lineage requires an immutable base revision")
+	}
+	if seed.ScreeningBaseRevision != "" && !immutableRevision(seed.ScreeningBaseRevision) {
+		return errors.New("screening base revision must be immutable")
+	}
+	if seed.ScreeningBaseRevision != "" && !strings.HasPrefix(seed.ScreeningRevisionSource, "https://") {
+		return errors.New("screening revision requires an HTTPS provenance source")
+	}
+	if seed.ScreeningBaseRevision == "" && seed.ScreeningRevisionSource != "" {
+		return errors.New("screening revision source requires a screening base revision")
 	}
 	if !immutableRevision(seed.OutputRevision) || !digest(seed.ManifestDigest) || !digest(seed.ModelCardDigest) || seed.LicenseDigest != "" && !digest(seed.LicenseDigest) {
 		return errors.New("output revision and publisher manifests must be immutable")

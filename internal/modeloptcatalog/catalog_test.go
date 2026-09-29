@@ -10,6 +10,11 @@ func TestEmbeddedCatalogIsImmutableAndHardwareBound(t *testing.T) {
 	if len(catalog.Seeds) != 3 {
 		t.Fatalf("seeds=%d", len(catalog.Seeds))
 	}
+	for _, seed := range catalog.Seeds {
+		if seed.ScreeningBaseRevision == "" || seed.ScreeningRevisionSource == "" {
+			t.Fatalf("seed %q has no immutable screening baseline", seed.ID)
+		}
+	}
 	if got := catalog.Match("Qwen/Qwen3.8-27B", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "vllm", "H200"); len(got) != 0 {
 		t.Fatalf("Blackwell checkpoint leaked into Hopper: %+v", got)
 	}
