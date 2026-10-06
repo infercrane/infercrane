@@ -15,6 +15,7 @@ import (
 
 type Repository interface {
 	ManagedSandboxesForReconciliation(context.Context, int) ([]domain.ManagedSpendReservation, error)
+	CleanupPendingSandboxesForReconciliation(context.Context, int) ([]domain.NativeSandbox, error)
 	NativeSandbox(context.Context, string, string) (domain.NativeSandbox, error)
 	RecordNativeSandboxTransition(context.Context, string, string, string, string, string, string, time.Time) (domain.NativeSandbox, error)
 	SandboxRunningMilliseconds(context.Context, string, string) (int64, error)
@@ -41,6 +42,24 @@ func (r Reconciler) Once(ctx context.Context) error {
 	for _, reservation := range rows {
 		if err = r.reconcile(ctx, reservation); err != nil {
 			failures = append(failures, fmt.Errorf("sandbox %s/%s: %w", reservation.TenantID, reservation.ResourceName, err))
+		}
+	}
+	orphans, orphanErr := r.Store.CleanupPendingSandboxesForReconciliation(ctx, r.Limit)
+	if orphanErr != nil {
+		failures = append(failures, fmt.Errorf("list unreserved cleanup-pending sandboxes: %w", orphanErr))
+	} else {
+		observedAt := time.Now().UTC()
+		if r.Now != nil {
+			observedAt = r.Now().UTC()
+		}
+		for _, row := range orphans {
+			if err = r.cleanup(ctx, row, "unreserved:"+row.ID); err != nil {
+				failures = append(failures, fmt.Errorf("sandbox %s/%s: %w", row.TenantID, row.ID, err))
+				continue
+			}
+			if _, err = r.recordTransition(ctx, row, "deleted", "", observedAt, "unreserved-cleanup"); err != nil {
+				failures = append(failures, fmt.Errorf("sandbox %s/%s: record confirmed cleanup: %w", row.TenantID, row.ID, err))
+			}
 		}
 	}
 	return errors.Join(failures...)

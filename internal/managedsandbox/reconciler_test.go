@@ -14,13 +14,20 @@ import (
 type memoryRepository struct {
 	reservation domain.ManagedSpendReservation
 	row         domain.NativeSandbox
+	cleanup     []domain.NativeSandbox
 	events      []domain.SandboxUsageEvent
 	released    bool
 	settledMS   int64
 }
 
 func (m *memoryRepository) ManagedSandboxesForReconciliation(context.Context, int) ([]domain.ManagedSpendReservation, error) {
+	if m.reservation.ID == "" {
+		return nil, nil
+	}
 	return []domain.ManagedSpendReservation{m.reservation}, nil
+}
+func (m *memoryRepository) CleanupPendingSandboxesForReconciliation(context.Context, int) ([]domain.NativeSandbox, error) {
+	return m.cleanup, nil
 }
 func (m *memoryRepository) NativeSandbox(context.Context, string, string) (domain.NativeSandbox, error) {
 	return m.row, nil
@@ -148,5 +155,18 @@ func TestReconcilerReleasesUnactivatedHoldOnlyAfterCleanup(t *testing.T) {
 	}
 	if !provider.deletedWorkspace || !repository.released || repository.settledMS != 0 {
 		t.Fatalf("workspace_deleted=%t released=%t settled=%d", provider.deletedWorkspace, repository.released, repository.settledMS)
+	}
+}
+
+func TestReconcilerCleansUnreservedCleanupPendingSandbox(t *testing.T) {
+	now := time.Date(2026, 10, 6, 18, 0, 0, 0, time.UTC)
+	row := domain.NativeSandbox{ID: "sandbox-orphan", TenantID: "tenant", TemplateID: "base", BrezelWorkspaceID: "workspace-orphan", Status: "cleanup_pending", BillingStateSince: now.Add(-time.Hour)}
+	repository := &memoryRepository{cleanup: []domain.NativeSandbox{row}, row: row}
+	provider := &memoryProvider{}
+	if err := (Reconciler{Store: repository, Provider: provider, Now: func() time.Time { return now }}).Once(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !provider.deletedWorkspace || repository.row.Status != "deleted" || repository.released || repository.settledMS != 0 {
+		t.Fatalf("workspace_deleted=%t row=%+v released=%t settled=%d", provider.deletedWorkspace, repository.row, repository.released, repository.settledMS)
 	}
 }

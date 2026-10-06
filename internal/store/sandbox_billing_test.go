@@ -80,6 +80,31 @@ func TestSameJSONDocumentIgnoresJSONBFormatting(t *testing.T) {
 	}
 }
 
+func TestCleanupPendingSandboxesForReconciliationFindsUnreservedRows(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	suffix := strings.ReplaceAll(time.Now().UTC().Format("150405.000000000"), ".", "-")
+	tenant := "sandbox-cleanup-" + suffix
+	if err := s.CreateTenant(ctx, tenant, "Sandbox Cleanup "+suffix); err != nil {
+		t.Fatal(err)
+	}
+	row, _, err := s.CreateNativeSandbox(ctx, domain.NativeSandbox{
+		TenantID: tenant, CreatedBy: "tester", DisplayName: "Orphaned cleanup", Purpose: "blank_computer",
+		SourceType: "empty_workspace", TemplateID: "base", Status: "cleanup_pending",
+		IdempotencyKey: "sandbox-cleanup-" + suffix, InputDigest: strings.Repeat("d", 64),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, err := s.CleanupPendingSandboxesForReconciliation(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].ID != row.ID || items[0].Status != "cleanup_pending" {
+		t.Fatalf("cleanup candidates=%+v", items)
+	}
+}
+
 func TestManagedSandboxReservationRequiresCreditAndExistingSandbox(t *testing.T) {
 	ctx := context.Background()
 	s := openStore(t, ctx)
