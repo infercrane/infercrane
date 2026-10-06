@@ -27,7 +27,11 @@ func (a API) managedWallet(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "managed wallet could not be read")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": wallet, "funding_mode": "prepaid", "funding_available": a.BillingCheckout != nil, "funding_provider": configuredManagedFundingProvider(a.BillingCheckout), "checkout_amounts_microusd": managedbilling.CheckoutAmounts()})
+	amounts := managedbilling.CheckoutAmounts()
+	if configured, ok := a.BillingCheckout.(managedbilling.CheckoutAmountProvider); ok {
+		amounts = configured.CheckoutAmounts()
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": wallet, "funding_mode": "prepaid", "funding_available": a.BillingCheckout != nil, "funding_provider": configuredManagedFundingProvider(a.BillingCheckout), "checkout_amounts_microusd": amounts})
 }
 
 func (a API) createManagedCheckoutSession(w http.ResponseWriter, r *http.Request) {

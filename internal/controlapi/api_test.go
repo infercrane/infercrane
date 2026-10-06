@@ -69,6 +69,9 @@ type fakeStore struct {
 	sandboxActivated           bool
 	sandboxReleased            bool
 	sandboxSettledMilliseconds int64
+	sandboxFleetActive         int
+	sandboxFleetRetained       int
+	sandboxFleetErr            error
 	trainingRows               []domain.TrainingArtifactHandoff
 	operationSteps             []domain.OperationStep
 }
@@ -2555,6 +2558,10 @@ func (f *fakeStore) SandboxUsageSummary(_ context.Context, tenant string) (domai
 	}
 	return summary, f.err
 }
+
+func (f *fakeStore) ManagedSandboxFleetUsage(context.Context) (int, int, error) {
+	return f.sandboxFleetActive, f.sandboxFleetRetained, f.sandboxFleetErr
+}
 func (f *fakeStore) ReserveManagedSandboxSpend(_ context.Context, tenant, sandboxID string, reservation domain.ManagedSpendReservation) (domain.ManagedSpendReservation, bool, error) {
 	if f.sandboxBillingErr != nil {
 		return domain.ManagedSpendReservation{}, false, f.sandboxBillingErr
@@ -3824,6 +3831,18 @@ func TestSandboxCapabilitiesExposeExactManagedOffer(t *testing.T) {
 	response := httptest.NewRecorder()
 	(API{Store: &fakeStore{}, APIKey: "secret", SandboxProvider: &fakeSandboxProvider{}, SandboxBilling: policy}).Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"billing_mode":"prepaid_usage"`) || !strings.Contains(response.Body.String(), `"active_compute_microusd_per_hour":300000`) || !strings.Contains(response.Body.String(), `"standby_compute_microusd_per_hour":0`) || !strings.Contains(response.Body.String(), `"max_active":1`) {
+		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestSandboxCapabilitiesExposeFullManagedFleet(t *testing.T) {
+	policy := managedbilling.SandboxPolicy{Enabled: true, SupplierHourlyMicrousd: 180_000, ActiveHourlyMicrousd: 300_000, MaxActive: 1, MaxRetained: 10, GlobalMaxActive: 1, GlobalMaxRetained: 10}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/sandboxes/capabilities", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	store := &fakeStore{sandboxFleetActive: 1, sandboxFleetRetained: 1}
+	(API{Store: store, APIKey: "secret", SandboxProvider: &fakeSandboxProvider{}, SandboxBilling: policy}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"state":"capacity_limited"`) || !strings.Contains(response.Body.String(), "currently full") {
 		t.Fatalf("response=%d %s", response.Code, response.Body.String())
 	}
 }

@@ -174,7 +174,11 @@ jobs:
         with:
           go-package: ./...
       - run: npm ci --prefix docs --no-audit --no-fund
-      - run: npm audit --prefix docs --audit-level=moderate
+      # Mint is a local documentation build tool and is never shipped in an
+      # InferCrane runtime. Audit the production dependency surface here; PR
+      # dependency review and the runtime-image scan cover introduced and
+      # deployed dependencies separately.
+      - run: npm audit --prefix docs --omit=dev --audit-level=moderate
 
   dead-code:
     runs-on: ubuntu-latest

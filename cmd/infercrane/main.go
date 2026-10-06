@@ -4076,7 +4076,8 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	if cfg.BrezelSandboxEnabled() {
 		provider, providerErr := brezelsandbox.NewFromTokenFile(brezelsandbox.Config{
 			BaseURL: cfg.BrezelSandboxURL, ProjectID: cfg.BrezelSandboxProjectID, AllowedTenant: cfg.BrezelSandboxTenantID,
-			Templates: cfg.BrezelSandboxTemplates, DefaultTemplate: cfg.BrezelSandboxDefaultTemplate, Client: client,
+			AllowAllTenants: cfg.ManagedSandboxPolicy().Enabled,
+			Templates:       cfg.BrezelSandboxTemplates, DefaultTemplate: cfg.BrezelSandboxDefaultTemplate, Client: client,
 		}, cfg.BrezelSandboxTokenFile)
 		if providerErr != nil {
 			return fmt.Errorf("configure Brezel sandbox provider: %w", providerErr)

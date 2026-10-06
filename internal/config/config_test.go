@@ -33,14 +33,20 @@ func TestStripePrepaidFundingRequiresCompleteFixedSandboxConfiguration(t *testin
 
 	t.Setenv("INFERCRANE_STRIPE_WEBHOOK_SECRET", "whsec_fixture")
 	t.Setenv("INFERCRANE_BILLING_RETURN_URL", "http://localhost:3200/settings/billing")
-	t.Setenv("INFERCRANE_STRIPE_PRICE_IDS_JSON", `{"25":"price_25","50":"price_50","100":"price_100","250":"price_250","500":"price_500"}`)
+	t.Setenv("INFERCRANE_STRIPE_PRICE_IDS_JSON", `{"10":"price_10","25":"price_25","50":"price_50","100":"price_100","250":"price_250","500":"price_500"}`)
 	cfg, err := Load()
 	if err != nil || !cfg.StripeEnabled() || cfg.StripeLivemode || cfg.StripePriceIDs[25_000_000] != "price_25" {
 		t.Fatalf("cfg=%#v err=%v", cfg, err)
 	}
 
-	t.Setenv("INFERCRANE_STRIPE_PRICE_IDS_JSON", `{"25":"price_25","50":"price_50","100":"price_100","250":"price_250","999":"price_999"}`)
-	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "25, 50, 100, 250, and 500") {
+	t.Setenv("INFERCRANE_STRIPE_PRICE_IDS_JSON", `{"25":"price_25"}`)
+	cfg, err = Load()
+	if err != nil || cfg.StripePriceIDs[25_000_000] != "price_25" {
+		t.Fatalf("rolling Stripe price subset rejected: cfg=%#v err=%v", cfg, err)
+	}
+
+	t.Setenv("INFERCRANE_STRIPE_PRICE_IDS_JSON", `{"10":"price_10","25":"price_25","50":"price_50","100":"price_100","250":"price_250","999":"price_999"}`)
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "advertised USD checkout amounts") {
 		t.Fatalf("unexpected Stripe amount accepted: %v", err)
 	}
 }
@@ -50,7 +56,7 @@ func TestStripeModeMustMatchSecretKey(t *testing.T) {
 	t.Setenv("INFERCRANE_STRIPE_SECRET_KEY", "sk_test_fixture")
 	t.Setenv("INFERCRANE_STRIPE_WEBHOOK_SECRET", "whsec_fixture")
 	t.Setenv("INFERCRANE_BILLING_RETURN_URL", "https://console.infercrane.com/settings/billing")
-	t.Setenv("INFERCRANE_STRIPE_PRICE_IDS_JSON", `{"25":"price_25","50":"price_50","100":"price_100","250":"price_250","500":"price_500"}`)
+	t.Setenv("INFERCRANE_STRIPE_PRICE_IDS_JSON", `{"10":"price_10","25":"price_25","50":"price_50","100":"price_100","250":"price_250","500":"price_500"}`)
 	t.Setenv("INFERCRANE_STRIPE_LIVEMODE", "true")
 	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "live-mode") {
 		t.Fatalf("test key accepted for live mode: %v", err)

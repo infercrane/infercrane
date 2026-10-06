@@ -43,6 +43,23 @@ func TestStripeCheckoutUsesConfiguredFixedPrice(t *testing.T) {
 	}
 }
 
+func TestStripeAdvertisesOnlyConfiguredCheckoutAmounts(t *testing.T) {
+	provider, err := NewStripe(
+		"sk_test_fixture",
+		"whsec_fixture",
+		"https://console.infercrane.com/settings/billing",
+		map[int64]string{25_000_000: "price_25", 10_000_000: "price_10"},
+		false,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	amounts := provider.CheckoutAmounts()
+	if len(amounts) != 2 || amounts[0] != 10_000_000 || amounts[1] != 25_000_000 {
+		t.Fatalf("configured checkout amounts=%v", amounts)
+	}
+}
+
 func TestStripeWebhookVerificationIsPaidIdempotencyInput(t *testing.T) {
 	secret := "whsec_fixture"
 	provider := Stripe{WebhookSecret: secret, ExpectedLivemode: false}

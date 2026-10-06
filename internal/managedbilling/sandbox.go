@@ -15,6 +15,8 @@ const (
 	DefaultManagedSandboxWorkspaceGiB         = 40
 	DefaultManagedSandboxMaxActive            = 1
 	DefaultManagedSandboxMaxRetained          = 10
+	DefaultManagedSandboxGlobalMaxActive      = 1
+	DefaultManagedSandboxGlobalMaxRetained    = 10
 )
 
 // SandboxPolicy is the server-owned commercial contract for qualified Brezel
@@ -27,6 +29,7 @@ type SandboxPolicy struct {
 	WorkspaceStorageMicrousdPerGiBMonth   int64
 	VCPU, MemoryMiB, IncludedWorkspaceGiB int
 	MaxActive, MaxRetained                int
+	GlobalMaxActive, GlobalMaxRetained    int
 }
 
 func (p SandboxPolicy) Normalize() SandboxPolicy {
@@ -48,6 +51,12 @@ func (p SandboxPolicy) Normalize() SandboxPolicy {
 	if p.MaxRetained == 0 {
 		p.MaxRetained = DefaultManagedSandboxMaxRetained
 	}
+	if p.GlobalMaxActive == 0 {
+		p.GlobalMaxActive = DefaultManagedSandboxGlobalMaxActive
+	}
+	if p.GlobalMaxRetained == 0 {
+		p.GlobalMaxRetained = DefaultManagedSandboxGlobalMaxRetained
+	}
 	return p
 }
 
@@ -67,6 +76,9 @@ func (p SandboxPolicy) Validate() error {
 	}
 	if p.MaxActive < 1 || p.MaxActive > 10_000 || p.MaxRetained < p.MaxActive || p.MaxRetained > 100_000 {
 		return errors.New("managed sandbox quota is invalid")
+	}
+	if p.GlobalMaxActive < p.MaxActive || p.GlobalMaxActive > 10_000 || p.GlobalMaxRetained < p.GlobalMaxActive || p.GlobalMaxRetained > 100_000 {
+		return errors.New("managed sandbox global quota is invalid")
 	}
 	return nil
 }
@@ -94,6 +106,8 @@ func (p SandboxPolicy) Reservation(runtime time.Duration, resourceName string) (
 		"included_workspace_gib":                   p.IncludedWorkspaceGiB,
 		"max_active":                               p.MaxActive,
 		"max_retained":                             p.MaxRetained,
+		"global_max_active":                        p.GlobalMaxActive,
+		"global_max_retained":                      p.GlobalMaxRetained,
 	})
 	if err != nil {
 		return domain.ManagedSpendReservation{}, err

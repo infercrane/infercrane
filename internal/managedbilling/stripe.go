@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -39,13 +40,27 @@ func NewStripe(secretKey, webhookSecret, returnURL string, priceIDs map[int64]st
 	if _, err := validatedReturnURL(returnURL); err != nil {
 		return nil, err
 	}
-	for _, amount := range checkoutAmounts {
-		if strings.TrimSpace(priceIDs[amount]) == "" {
-			return nil, fmt.Errorf("Stripe price ID for %d micro-USD is required", amount)
+	if len(priceIDs) == 0 {
+		return nil, errors.New("at least one Stripe price ID is required")
+	}
+	for amount, priceID := range priceIDs {
+		if !ValidateCheckoutAmount(amount) || strings.TrimSpace(priceID) == "" {
+			return nil, fmt.Errorf("Stripe price ID for %d micro-USD is invalid", amount)
 		}
 	}
 	client := stripe.NewClient(secretKey)
 	return &Stripe{Checkout: client.V1CheckoutSessions, WebhookSecret: webhookSecret, ReturnURL: returnURL, PriceIDs: clonePriceIDs(priceIDs), ExpectedLivemode: expectedLivemode}, nil
+}
+
+func (s Stripe) CheckoutAmounts() []int64 {
+	amounts := make([]int64, 0, len(s.PriceIDs))
+	for amount, priceID := range s.PriceIDs {
+		if ValidateCheckoutAmount(amount) && strings.TrimSpace(priceID) != "" {
+			amounts = append(amounts, amount)
+		}
+	}
+	sort.Slice(amounts, func(i, j int) bool { return amounts[i] < amounts[j] })
+	return amounts
 }
 
 func (s Stripe) CreateCheckoutSession(ctx context.Context, tenant, fundingIntentID string, amountMicrousd int64) (domain.ManagedCheckoutSession, error) {
