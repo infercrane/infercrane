@@ -431,6 +431,14 @@ func load(requireAPIKey bool) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	managedSandboxGlobalMaxActive, err := envInt("INFERCRANE_MANAGED_SANDBOX_GLOBAL_MAX_ACTIVE", 1)
+	if err != nil {
+		return Config{}, err
+	}
+	managedSandboxGlobalMaxRetained, err := envInt("INFERCRANE_MANAGED_SANDBOX_GLOBAL_MAX_RETAINED", 10)
+	if err != nil {
+		return Config{}, err
+	}
 	managedSandboxPolicy := managedbilling.SandboxPolicy{
 		Enabled:                             managedSandboxesEnabled,
 		SupplierHourlyMicrousd:              int64(managedSandboxSupplierHourlyMicrousd),
@@ -441,6 +449,8 @@ func load(requireAPIKey bool) (Config, error) {
 		IncludedWorkspaceGiB:                managedSandboxIncludedWorkspaceGiB,
 		MaxActive:                           managedSandboxMaxActive,
 		MaxRetained:                         managedSandboxMaxRetained,
+		GlobalMaxActive:                     managedSandboxGlobalMaxActive,
+		GlobalMaxRetained:                   managedSandboxGlobalMaxRetained,
 	}
 	hostedAuthAutoProvision, err := envBool("INFERCRANE_HOSTED_AUTH_AUTO_PROVISION", false)
 	if err != nil {
@@ -906,8 +916,8 @@ func validateStripe(config Config) error {
 	if !configured {
 		return nil
 	}
-	if config.StripeSecretKey == "" || config.StripeWebhookSecret == "" || config.StripeBillingReturnURL == "" || len(config.StripePriceIDs) != 5 {
-		return errors.New("Stripe prepaid funding configuration is partial; secret key, webhook secret, return URL, and all five fixed Price IDs are required")
+	if config.StripeSecretKey == "" || config.StripeWebhookSecret == "" || config.StripeBillingReturnURL == "" || len(config.StripePriceIDs) == 0 {
+		return errors.New("Stripe prepaid funding configuration is partial; secret key, webhook secret, return URL, and at least one fixed Price ID are required")
 	}
 	if config.StripeLivemode && !strings.HasPrefix(config.StripeSecretKey, "sk_live_") {
 		return errors.New("INFERCRANE_STRIPE_LIVEMODE=true requires a Stripe live-mode secret key")
@@ -1248,13 +1258,16 @@ func envStripePriceIDs(key string) (map[int64]string, error) {
 	if err != nil || len(encoded) == 0 {
 		return nil, err
 	}
-	allowed := map[int64]struct{}{25: {}, 50: {}, 100: {}, 250: {}, 500: {}}
+	allowed := make(map[int64]struct{}, len(managedbilling.CheckoutAmounts()))
+	for _, amount := range managedbilling.CheckoutAmounts() {
+		allowed[amount/1_000_000] = struct{}{}
+	}
 	prices := make(map[int64]string, len(encoded))
 	for dollarAmount, priceID := range encoded {
 		amount, parseErr := strconv.ParseInt(dollarAmount, 10, 64)
 		_, supported := allowed[amount]
 		if parseErr != nil || !supported || !strings.HasPrefix(priceID, "price_") || strings.TrimSpace(priceID) != priceID || len(priceID) < len("price_")+1 {
-			return nil, fmt.Errorf("%s must map only 25, 50, 100, 250, and 500 USD to Stripe price_ IDs", key)
+			return nil, fmt.Errorf("%s must map only advertised USD checkout amounts to Stripe price_ IDs", key)
 		}
 		prices[amount*1_000_000] = priceID
 	}

@@ -12,6 +12,14 @@ import (
 	"github.com/infercrane/infercrane/internal/managedbilling"
 )
 
+// ManagedSandboxFleetUsage reports capacity-consuming and retained sandboxes
+// across all customer tenants. It contains no tenant-owned payload data.
+func (s *Store) ManagedSandboxFleetUsage(ctx context.Context) (int, int, error) {
+	var active, retained int
+	err := s.QueryRowContext(ctx, `SELECT COUNT(*) FILTER(WHERE status IN ('creating_workspace','creating','running','pausing','resuming','deleting','unknown','cleanup_pending')),COUNT(*) FILTER(WHERE status NOT IN ('deleted','expired','failed')) FROM native_sandboxes WHERE deleted_at IS NULL`).Scan(&active, &retained)
+	return active, retained, err
+}
+
 // ReserveManagedSandboxSpend places the maximum-lifetime hold before any
 // provider resource is created. A replay returns the original hold without
 // reserving the wallet twice.
@@ -20,10 +28,12 @@ func (s *Store) ReserveManagedSandboxSpend(ctx context.Context, tenant, sandboxI
 		return domain.ManagedSpendReservation{}, false, errors.New("managed sandbox reservation is invalid")
 	}
 	var pricing struct {
-		MaxActive   int `json:"max_active"`
-		MaxRetained int `json:"max_retained"`
+		MaxActive         int `json:"max_active"`
+		MaxRetained       int `json:"max_retained"`
+		GlobalMaxActive   int `json:"global_max_active"`
+		GlobalMaxRetained int `json:"global_max_retained"`
 	}
-	if err := json.Unmarshal([]byte(reservation.PricingJSON), &pricing); err != nil || pricing.MaxActive < 1 || pricing.MaxRetained < pricing.MaxActive {
+	if err := json.Unmarshal([]byte(reservation.PricingJSON), &pricing); err != nil || pricing.MaxActive < 1 || pricing.MaxRetained < pricing.MaxActive || pricing.GlobalMaxActive < pricing.MaxActive || pricing.GlobalMaxRetained < pricing.GlobalMaxActive {
 		return domain.ManagedSpendReservation{}, false, errors.New("managed sandbox reservation quota is invalid")
 	}
 	tx, err := s.beginTx(ctx)
@@ -31,6 +41,11 @@ func (s *Store) ReserveManagedSandboxSpend(ctx context.Context, tenant, sandboxI
 		return domain.ManagedSpendReservation{}, false, err
 	}
 	defer tx.Rollback()
+	// Every tenant has its own wallet row, so wallet locking alone cannot make a
+	// shared host quota atomic. Serialize only this short admission section.
+	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(?)`, managedPaymentLockID("sandbox-capacity", "global")); err != nil {
+		return domain.ManagedSpendReservation{}, false, err
+	}
 	existing, err := managedSpendReservationByResourceTx(ctx, tx, tenant, "sandbox", sandboxID, true)
 	if err == nil {
 		if existing.State == "released" {
@@ -65,6 +80,14 @@ func (s *Store) ReserveManagedSandboxSpend(ctx context.Context, tenant, sandboxI
 	}
 	if active > pricing.MaxActive || retained > pricing.MaxRetained {
 		return domain.ManagedSpendReservation{}, false, fmt.Errorf("%w: managed sandbox capacity is %d active and %d retained", ErrConflict, pricing.MaxActive, pricing.MaxRetained)
+	}
+	var globalActive, globalRetained int
+	err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FILTER(WHERE status IN ('creating_workspace','creating','running','pausing','resuming','deleting','unknown','cleanup_pending')),COUNT(*) FILTER(WHERE status NOT IN ('deleted','expired','failed')) FROM native_sandboxes WHERE deleted_at IS NULL`).Scan(&globalActive, &globalRetained)
+	if err != nil {
+		return domain.ManagedSpendReservation{}, false, err
+	}
+	if globalActive > pricing.GlobalMaxActive || globalRetained > pricing.GlobalMaxRetained {
+		return domain.ManagedSpendReservation{}, false, fmt.Errorf("%w: managed sandbox fleet is currently full", ErrConflict)
 	}
 	reservation.ID, err = newID()
 	if err != nil {

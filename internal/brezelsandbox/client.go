@@ -1,5 +1,6 @@
-// Package brezelsandbox adapts the Brezel private-tenant API to InferCrane's
-// stable customer sandbox contract.
+// Package brezelsandbox adapts the Brezel API to InferCrane's stable customer
+// sandbox contract. InferCrane owns customer tenancy; Brezel remains a private
+// execution provider behind that boundary.
 package brezelsandbox
 
 import (
@@ -39,6 +40,7 @@ type Config struct {
 	Token           string
 	ProjectID       string
 	AllowedTenant   string
+	AllowAllTenants bool
 	Templates       map[string]string
 	DefaultTemplate string
 	Client          *http.Client
@@ -49,6 +51,7 @@ type Client struct {
 	token           string
 	projectID       string
 	allowedTenant   string
+	allowAllTenants bool
 	templates       map[string]string
 	defaultTemplate string
 	httpClient      *http.Client
@@ -118,7 +121,7 @@ func New(config Config) (*Client, error) {
 	if base.Scheme != "https" && !(base.Scheme == "http" && loopbackHost(base.Hostname())) {
 		return nil, fmt.Errorf("%w: Brezel URL must use HTTPS except on loopback", sandboxprovider.ErrInvalid)
 	}
-	if strings.TrimSpace(config.Token) == "" || !safeID.MatchString(strings.TrimSpace(config.ProjectID)) || !safeID.MatchString(strings.TrimSpace(config.AllowedTenant)) {
+	if strings.TrimSpace(config.Token) == "" || !safeID.MatchString(strings.TrimSpace(config.ProjectID)) || (!config.AllowAllTenants && !safeID.MatchString(strings.TrimSpace(config.AllowedTenant))) {
 		return nil, fmt.Errorf("%w: token, project ID, and allowed tenant are required", sandboxprovider.ErrInvalid)
 	}
 	if len(config.Templates) == 0 {
@@ -150,7 +153,7 @@ func New(config Config) (*Client, error) {
 	safeClient := *client
 	safeClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	base.Path = strings.TrimRight(base.Path, "/")
-	return &Client{baseURL: base, token: strings.TrimSpace(config.Token), projectID: strings.TrimSpace(config.ProjectID), allowedTenant: strings.TrimSpace(config.AllowedTenant), templates: templates, defaultTemplate: defaultTemplate, httpClient: &safeClient}, nil
+	return &Client{baseURL: base, token: strings.TrimSpace(config.Token), projectID: strings.TrimSpace(config.ProjectID), allowedTenant: strings.TrimSpace(config.AllowedTenant), allowAllTenants: config.AllowAllTenants, templates: templates, defaultTemplate: defaultTemplate, httpClient: &safeClient}, nil
 }
 
 func NewFromTokenFile(config Config, tokenFile string) (*Client, error) {
@@ -195,8 +198,12 @@ func (c *Client) Capabilities(ctx context.Context, tenantID string) (sandboxprov
 		templates = append(templates, sandboxprovider.Template{ID: id, Label: label(id), EnvironmentRevision: revision})
 	}
 	sort.Slice(templates, func(i, j int) bool { return templates[i].ID < templates[j].ID })
+	assurance := "private-tenant-preview"
+	if c.allowAllTenants {
+		assurance = "managed-shared-capacity"
+	}
 	return sandboxprovider.Capabilities{
-		Provider: "brezel", Product: "InferCrane Sandboxes", State: "ready", Assurance: "private-tenant-preview",
+		Provider: "brezel", Product: "InferCrane Sandboxes", State: "ready", Assurance: assurance,
 		Runtime: payload.Runtime, Qualification: payload.Qualification, QualificationNote: payload.Note, Templates: templates,
 		Features: sandboxprovider.Features{
 			HostileCodeIsolation: payload.Implemented.HostileCodeIsolation,
@@ -655,7 +662,7 @@ func (c *Client) Receipt(ctx context.Context, tenantID, id string) (sandboxprovi
 }
 
 func (c *Client) authorizeTenant(tenantID string) error {
-	if tenantID != c.allowedTenant {
+	if !safeID.MatchString(strings.TrimSpace(tenantID)) || (!c.allowAllTenants && tenantID != c.allowedTenant) {
 		return sandboxprovider.ErrForbidden
 	}
 	return nil

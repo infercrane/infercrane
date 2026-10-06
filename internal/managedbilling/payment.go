@@ -11,6 +11,7 @@ import (
 const MicrousdPerUSCent int64 = 10_000
 
 var checkoutAmounts = [...]int64{
+	10_000_000,
 	25_000_000,
 	50_000_000,
 	100_000_000,
@@ -21,6 +22,14 @@ var checkoutAmounts = [...]int64{
 type CheckoutProvider interface {
 	CreateCheckoutSession(context.Context, string, string, int64) (domain.ManagedCheckoutSession, error)
 	ParseWebhook([]byte, string) (domain.ManagedPaymentEvent, error)
+}
+
+// CheckoutAmountProvider lets a checkout backend advertise only the fixed
+// products configured for the current deployment. Keeping this optional makes
+// rolling price additions safe: the new binary can deploy before the matching
+// provider product is enabled.
+type CheckoutAmountProvider interface {
+	CheckoutAmounts() []int64
 }
 
 // FundingIntentID is stable for one tenant and caller-supplied idempotency

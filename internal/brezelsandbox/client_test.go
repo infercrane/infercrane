@@ -76,6 +76,31 @@ func TestClientRejectsUnapprovedScopeBeforeCallingBrezel(t *testing.T) {
 	}
 }
 
+func TestManagedClientAcceptsAnyValidInferCraneTenant(t *testing.T) {
+	revision := "envr_" + strings.Repeat("b", 24)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"runtime": "microvm", "qualification": "qualified",
+			"implemented": map[string]bool{"hostile_code_isolation": true},
+		})
+	}))
+	defer server.Close()
+	client, err := New(Config{BaseURL: server.URL, Token: "token", ProjectID: "project-a", AllowAllTenants: true, Templates: map[string]string{"base": revision}, DefaultTemplate: "base", Client: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	capabilities, err := client.Capabilities(context.Background(), "customer-workspace-2")
+	if err != nil {
+		t.Fatalf("managed customer tenant was rejected: %v", err)
+	}
+	if capabilities.Assurance != "managed-shared-capacity" {
+		t.Fatalf("managed assurance = %q", capabilities.Assurance)
+	}
+	if _, err = client.Capabilities(context.Background(), "../invalid"); !errors.Is(err, sandboxprovider.ErrForbidden) {
+		t.Fatalf("invalid tenant error = %v", err)
+	}
+}
+
 func TestCapabilitiesDoNotClaimPTYOrGPU(t *testing.T) {
 	revision := "envr_" + strings.Repeat("c", 24)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

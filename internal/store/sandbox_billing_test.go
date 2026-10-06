@@ -148,6 +148,43 @@ func TestManagedSandboxReservationEnforcesServerOwnedCapacity(t *testing.T) {
 	}
 }
 
+func TestManagedSandboxReservationEnforcesGlobalFleetCapacity(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	suffix := strings.ReplaceAll(time.Now().UTC().Format("150405.000000000"), ".", "-")
+	policy := managedbilling.SandboxPolicy{
+		Enabled: true, SupplierHourlyMicrousd: 180_000, ActiveHourlyMicrousd: 300_000,
+		MaxActive: 1, MaxRetained: 10, GlobalMaxActive: 1, GlobalMaxRetained: 10,
+	}
+	for index, tenant := range []string{"sandbox-fleet-a-" + suffix, "sandbox-fleet-b-" + suffix} {
+		if err := s.CreateTenant(ctx, tenant, fmt.Sprintf("Sandbox Fleet %d %s", index, suffix)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.CreditManagedWallet(ctx, tenant, "sandbox-fleet-credit-"+tenant, "test credit", 25_000_000); err != nil {
+			t.Fatal(err)
+		}
+		row, _, err := s.CreateNativeSandbox(ctx, domain.NativeSandbox{
+			TenantID: tenant, CreatedBy: "tester", DisplayName: "Fleet", Purpose: "coding_agent",
+			SourceType: "empty_workspace", TemplateID: "base", Status: "creating_workspace",
+			IdempotencyKey: fmt.Sprintf("fleet-%s-%d", suffix, index), InputDigest: strings.Repeat(fmt.Sprintf("%x", index+3), 64),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		reservation, err := policy.Reservation(time.Hour, row.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _, err = s.ReserveManagedSandboxSpend(ctx, tenant, row.ID, reservation)
+		if index == 0 && err != nil {
+			t.Fatalf("first fleet reservation: %v", err)
+		}
+		if index == 1 && (!errors.Is(err, ErrConflict) || !strings.Contains(err.Error(), "fleet is currently full")) {
+			t.Fatalf("second fleet reservation error=%v", err)
+		}
+	}
+}
+
 func TestNativeSandboxLifecycleTransitionMetersExactlyOnce(t *testing.T) {
 	ctx := context.Background()
 	s := openStore(t, ctx)

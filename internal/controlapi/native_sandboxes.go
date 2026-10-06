@@ -36,6 +36,10 @@ type sandboxBillingStore interface {
 	SandboxRunningMilliseconds(context.Context, string, string) (int64, error)
 }
 
+type sandboxCapacityStore interface {
+	ManagedSandboxFleetUsage(context.Context) (int, int, error)
+}
+
 type createNativeSandboxRequest struct {
 	DisplayName         string `json:"display_name"`
 	Purpose             string `json:"purpose"`
@@ -87,7 +91,20 @@ func (a API) sandboxCapabilities(w http.ResponseWriter, r *http.Request) {
 	// Brezel is an implementation detail. Keep the stable product identity in
 	// the customer contract while retaining evidence about supported features.
 	capabilities.Provider = "infercrane"
-	capabilities.CommercialOffer = a.sandboxCommercialOffer("available", time.Now().UTC())
+	offerState := "available"
+	if capacity, ok := a.Store.(sandboxCapacityStore); ok {
+		active, retained, capacityErr := capacity.ManagedSandboxFleetUsage(r.Context())
+		policy := a.SandboxBilling.Normalize()
+		if capacityErr != nil {
+			a.writeSandboxProviderError(w, capacityErr)
+			return
+		}
+		if active >= policy.GlobalMaxActive || retained >= policy.GlobalMaxRetained {
+			offerState = "capacity_limited"
+			capabilities.QualificationNote = "Managed sandbox capacity is currently full."
+		}
+	}
+	capabilities.CommercialOffer = a.sandboxCommercialOffer(offerState, time.Now().UTC())
 	writeJSON(w, http.StatusOK, capabilities)
 }
 

@@ -1,6 +1,7 @@
 package managedbilling
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -13,6 +14,9 @@ func TestSandboxPolicyBuildsMaximumLifetimeHold(t *testing.T) {
 	}
 	if reservation.ResourceType != "sandbox" || reservation.ResourceName != "sandbox-a" || reservation.ReservedMicrousd != 450_000 || reservation.GrossMarginBPS != 4_000 || reservation.RuntimeLimitSeconds != 5_400 {
 		t.Fatalf("reservation=%+v", reservation)
+	}
+	if !strings.Contains(reservation.PricingJSON, `"global_max_active":1`) || !strings.Contains(reservation.PricingJSON, `"global_max_retained":10`) {
+		t.Fatalf("reservation missing fleet quota: %s", reservation.PricingJSON)
 	}
 }
 
