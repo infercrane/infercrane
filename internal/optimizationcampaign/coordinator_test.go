@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/operations"
 )
 
 type coordinatorRepository struct {
@@ -267,6 +268,29 @@ func TestCoordinatorLeavesRetryableDriverFailureAtAdoptableState(t *testing.T) {
 	}
 	if driver.provisionCalls != 2 || repository.campaign.Candidates[0].State != CandidateReady {
 		t.Fatalf("idempotent retry did not adopt progress: calls=%d state=%s", driver.provisionCalls, repository.campaign.Candidates[0].State)
+	}
+}
+
+func TestCoordinatorPersistsPermanentDriverFailureForCleanup(t *testing.T) {
+	now := time.Now().UTC()
+	repository, driver, coordinator := approvedCoordinatorFixture(now, 1)
+	if _, err := coordinator.Step(context.Background(), "tenant", "campaign", "candidate-a"); err != nil {
+		t.Fatal(err)
+	}
+	driver.provisionErr = operations.Permanent("unsupported_runtime", errors.New("runtime is not qualified"))
+	result, err := coordinator.Step(context.Background(), "tenant", "campaign", "candidate-a")
+	if err != nil || result.To != CandidateFailed {
+		t.Fatalf("permanent provider failure was not persisted: result=%+v err=%v", result, err)
+	}
+	if candidate := repository.campaign.Candidates[0]; candidate.FailureCode != "unsupported_runtime" || candidate.State != CandidateFailed {
+		t.Fatalf("permanent failure lost negative evidence: %+v", candidate)
+	}
+	driver.provisionErr = nil
+	if _, err = coordinator.Step(context.Background(), "tenant", "campaign", "candidate-a"); err != nil {
+		t.Fatal(err)
+	}
+	if repository.campaign.Candidates[0].State != CandidateCleaned || driver.cleanupCalls != 1 {
+		t.Fatalf("failed candidate was not cleaned: candidate=%+v cleanup=%d", repository.campaign.Candidates[0], driver.cleanupCalls)
 	}
 }
 

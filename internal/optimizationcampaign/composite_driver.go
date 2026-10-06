@@ -25,6 +25,8 @@ type CompositeStore interface {
 	SubmitCloudDeployment(context.Context, domain.Deployment, domain.Operation) (domain.Deployment, domain.Operation, bool, error)
 	SubmitDeploymentDelete(context.Context, string, string, string, domain.Operation) (domain.Operation, bool, error)
 	EnqueueOperation(context.Context, domain.Operation) (domain.Operation, bool, error)
+	ActiveOperationForResource(context.Context, string, string, string) (domain.Operation, error)
+	RequestOperationCancel(context.Context, string) error
 	ResolveForTenant(context.Context, string, string) (domain.ResolvedDeployment, error)
 	BenchmarksForDeployment(context.Context, string, string, int) ([]domain.BenchmarkResult, error)
 	QualityEvidenceForDeployment(context.Context, string, string, int) ([]domain.QualityEvidence, error)
@@ -191,14 +193,14 @@ func guardResult(evaluation domain.ReleaseGuardEvaluation) (GuardResult, error) 
 }
 
 func (d CompositeDriver) Cleanup(ctx context.Context, candidateID string, candidate domain.OptimizationCandidateRun) error {
-	campaign, _, err := d.inputs(ctx, candidateID, candidate)
+	campaign, draft, err := d.inputs(ctx, candidateID, candidate)
 	if err != nil {
 		return err
 	}
-	if candidate.DeploymentName == "" {
-		return nil
-	}
 	if campaign.Intent == IntentEvolveEndpoint {
+		if candidate.DeploymentName == "" {
+			return nil
+		}
 		request, _ := json.Marshal(workflows.RolloutRequest{Name: campaign.TargetDeployment, CandidateID: candidate.RevisionID, Reason: "optimization campaign cleanup", TenantID: candidate.TenantID, Actor: "optimization-campaign"})
 		operation, _, enqueueErr := d.Store.EnqueueOperation(ctx, domain.Operation{TenantID: candidate.TenantID, Kind: workflows.RolloutRejectKind, ResourceType: "deployment", ResourceName: campaign.TargetDeployment, IdempotencyKey: childKey(candidate.ID, "cleanup"), RequestJSON: string(request), MaxAttempts: 120})
 		if enqueueErr != nil {
@@ -206,19 +208,38 @@ func (d CompositeDriver) Cleanup(ctx context.Context, candidateID string, candid
 		}
 		return childComplete(operation, "candidate cleanup")
 	}
-	resolved, resolveErr := d.Store.ResolveForTenant(ctx, candidate.TenantID, candidate.DeploymentName)
+	// SubmitCloudDeployment persists the child deployment and operation in one
+	// transaction, but the candidate does not record DeploymentName until that
+	// child is ready. Cancellation can therefore race between those two durable
+	// writes. Derive the same bounded name used by provisioning so cleanup can
+	// always find and fence an in-flight child instead of leaking paid compute.
+	deploymentName := candidate.DeploymentName
+	if deploymentName == "" {
+		deploymentName = candidateDeploymentName(draft.Name, candidate.ID)
+	}
+	resolved, resolveErr := d.Store.ResolveForTenant(ctx, candidate.TenantID, deploymentName)
 	if errors.Is(resolveErr, domain.ErrNotFound) {
 		return nil
 	}
 	if resolveErr != nil {
 		return resolveErr
 	}
-	request, _ := json.Marshal(workflows.DeleteRequest{DeploymentID: resolved.Deployment.ID, Name: candidate.DeploymentName, Actor: "optimization-campaign", TenantID: candidate.TenantID})
+	if active, activeErr := d.Store.ActiveOperationForResource(ctx, candidate.TenantID, "deployment", deploymentName); activeErr == nil {
+		if active.Kind != workflows.DeleteKind && active.Kind != workflows.ServerlessDeleteKind {
+			if cancelErr := d.Store.RequestOperationCancel(ctx, active.ID); cancelErr != nil && !errors.Is(cancelErr, domain.ErrNotFound) {
+				return operations.Retryable("optimization_cleanup_child_cancel_failed", cancelErr)
+			}
+			return operations.Retryable("optimization_cleanup_child_pending", fmt.Errorf("waiting for in-flight deployment operation %s to cancel", active.ID))
+		}
+	} else if !errors.Is(activeErr, domain.ErrNotFound) {
+		return operations.Retryable("optimization_cleanup_child_lookup_failed", activeErr)
+	}
+	request, _ := json.Marshal(workflows.DeleteRequest{DeploymentID: resolved.Deployment.ID, Name: deploymentName, Actor: "optimization-campaign", TenantID: candidate.TenantID})
 	kind := workflows.DeleteKind
 	if draft, draftErr := candidateDraft(candidate); draftErr == nil && draft.Compute.Mode == "serverless" {
 		kind = workflows.ServerlessDeleteKind
 	}
-	operation, _, submitErr := d.Store.SubmitDeploymentDelete(ctx, candidate.TenantID, candidate.DeploymentName, resolved.Deployment.ID, domain.Operation{TenantID: candidate.TenantID, Kind: kind, IdempotencyKey: childKey(candidate.ID, "cleanup"), RequestJSON: string(request), MaxAttempts: 120})
+	operation, _, submitErr := d.Store.SubmitDeploymentDelete(ctx, candidate.TenantID, deploymentName, resolved.Deployment.ID, domain.Operation{TenantID: candidate.TenantID, Kind: kind, IdempotencyKey: childKey(candidate.ID, "cleanup"), RequestJSON: string(request), MaxAttempts: 120})
 	if errors.Is(submitErr, domain.ErrConflict) && resolved.Deployment.DesiredState == "deleted" {
 		return nil
 	}
@@ -378,7 +399,11 @@ func childComplete(operation domain.Operation, label string) error {
 		if operation.Retryable {
 			return operations.Retryable("optimization_child_retryable", errors.New(message))
 		}
-		return operations.Permanent("optimization_child_failed", errors.New(message))
+		code := strings.TrimSpace(operation.ErrorCode)
+		if code == "" {
+			code = "optimization_child_failed"
+		}
+		return operations.Permanent(code, errors.New(message))
 	default:
 		return operations.Retryable("optimization_child_pending", fmt.Errorf("%s is %s", label, operation.Status))
 	}

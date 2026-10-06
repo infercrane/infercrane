@@ -20,6 +20,9 @@ func TestRunPodPodsLifecycleIsReplaySafeAndPreservesImmutableWorkload(t *testing
 		if r.Header.Get("Authorization") != "Bearer provider-secret" {
 			t.Fatal("provider authorization header missing")
 		}
+		if r.Header.Get("User-Agent") != runPodPodsUserAgent {
+			t.Fatalf("unexpected RunPod user agent: %q", r.Header.Get("User-Agent"))
+		}
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/pods":
 			_ = json.NewEncoder(w).Encode(pods)

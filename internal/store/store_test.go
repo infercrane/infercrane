@@ -997,6 +997,42 @@ func TestOperationQueueLeasesAndRecoversExpiredWork(t *testing.T) {
 	}
 }
 
+func TestOperationSuccessClearsRetryFailureMetadata(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	queued, _, err := s.EnqueueOperation(ctx, domain.Operation{Kind: "apply", ResourceType: "deployment", ResourceName: "retry-success", MaxAttempts: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.ClaimOperation(ctx, "worker-a", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.StartClaimedOperation(ctx, first.ID, "worker-a", first.LeaseGeneration); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.FailClaimedOperation(ctx, first.ID, "worker-a", first.LeaseGeneration, "provider_busy", "provider busy", true, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.ClaimOperation(ctx, "worker-b", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.StartClaimedOperation(ctx, second.ID, "worker-b", second.LeaseGeneration); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.CompleteClaimedOperation(ctx, second.ID, "worker-b", second.LeaseGeneration, `{"ok":true}`); err != nil {
+		t.Fatal(err)
+	}
+	completed, err := s.Operation(ctx, queued.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completed.Status != "succeeded" || completed.ErrorCode != "" || completed.Retryable || completed.NextAttemptAt != nil {
+		t.Fatalf("terminal success retained retry metadata: %#v", completed)
+	}
+}
+
 func TestEnqueuedOperationIsImmediatelyClaimableByDatabaseClock(t *testing.T) {
 	ctx := context.Background()
 	s := openStore(t, ctx)

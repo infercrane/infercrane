@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/operations"
 )
 
 var (
@@ -131,6 +132,9 @@ func (c Coordinator) Step(ctx context.Context, tenant, campaignID, candidateID s
 	case CandidateProvisioning:
 		provisioned, provisionErr := c.Driver.Provision(ctx, candidate.ID, candidate, budget)
 		if provisionErr != nil {
+			if code, permanent := permanentDriverFailure(provisionErr); permanent {
+				return c.transition(ctx, campaign, candidate, CandidateFailed, domain.OptimizationCandidateRun{FailureCode: code})
+			}
 			return result, fmt.Errorf("provision candidate: %w", provisionErr)
 		}
 		updates := domain.OptimizationCandidateRun{DeploymentName: provisioned.DeploymentName, RevisionID: provisioned.RevisionID, OptimizedArtifactID: provisioned.OptimizedArtifactID}
@@ -140,6 +144,9 @@ func (c Coordinator) Step(ctx context.Context, tenant, campaignID, candidateID s
 	case CandidateMeasuring:
 		measured, measureErr := c.Driver.Measure(ctx, candidate.ID, candidate, budget)
 		if measureErr != nil {
+			if code, permanent := permanentDriverFailure(measureErr); permanent {
+				return c.transition(ctx, campaign, candidate, CandidateFailed, domain.OptimizationCandidateRun{FailureCode: code})
+			}
 			return result, fmt.Errorf("measure candidate: %w", measureErr)
 		}
 		updates := domain.OptimizationCandidateRun{BenchmarkID: measured.BenchmarkID, ActualEvidenceJSON: measured.ActualEvidenceJSON}
@@ -147,6 +154,9 @@ func (c Coordinator) Step(ctx context.Context, tenant, campaignID, candidateID s
 	case CandidateValidating:
 		validated, validateErr := c.Driver.Validate(ctx, candidate.ID, candidate)
 		if validateErr != nil {
+			if code, permanent := permanentDriverFailure(validateErr); permanent {
+				return c.transition(ctx, campaign, candidate, CandidateFailed, domain.OptimizationCandidateRun{FailureCode: code})
+			}
 			return result, fmt.Errorf("validate candidate: %w", validateErr)
 		}
 		updates := domain.OptimizationCandidateRun{BenchmarkID: candidate.BenchmarkID, QualityEvidenceID: validated.QualityEvidenceID, FailureCode: validated.FailureCode}
@@ -160,6 +170,9 @@ func (c Coordinator) Step(ctx context.Context, tenant, campaignID, candidateID s
 	case CandidateRanked:
 		ranked, rankErr := c.Driver.Rank(ctx, candidate.ID, candidate)
 		if rankErr != nil {
+			if code, permanent := permanentDriverFailure(rankErr); permanent {
+				return c.transition(ctx, campaign, candidate, CandidateFailed, domain.OptimizationCandidateRun{FailureCode: code})
+			}
 			return result, fmt.Errorf("rank measured candidate: %w", rankErr)
 		}
 		updates := domain.OptimizationCandidateRun{LabEvaluationID: ranked.LabEvaluationID, FailureCode: ranked.FailureCode}
@@ -193,6 +206,9 @@ func (c Coordinator) Step(ctx context.Context, tenant, campaignID, candidateID s
 	case CandidateGuarding:
 		guarded, guardErr := c.Driver.Guard(ctx, candidate.ID, candidate)
 		if guardErr != nil {
+			if code, permanent := permanentDriverFailure(guardErr); permanent {
+				return c.transition(ctx, campaign, candidate, CandidateFailed, domain.OptimizationCandidateRun{FailureCode: code})
+			}
 			return result, fmt.Errorf("evaluate Release Guard: %w", guardErr)
 		}
 		updates := domain.OptimizationCandidateRun{ReleaseGuardEvaluationID: guarded.EvaluationID}
@@ -219,6 +235,18 @@ func (c Coordinator) Step(ctx context.Context, tenant, campaignID, candidateID s
 	default:
 		return result, fmt.Errorf("candidate state %q requires an explicit operator action or is not executable", candidate.State)
 	}
+}
+
+func permanentDriverFailure(err error) (string, bool) {
+	var failure operations.Failure
+	if !errors.As(err, &failure) || failure.Retryable {
+		return "", false
+	}
+	code := strings.TrimSpace(failure.Code)
+	if code == "" {
+		code = "optimization_candidate_failed"
+	}
+	return code, true
 }
 
 // CancelCandidate fences an active candidate before cleaning any resources it

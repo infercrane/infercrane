@@ -68,6 +68,38 @@ func TestBindRuntimeBackendsIncludesDiscoveredRuntimeProfiles(t *testing.T) {
 	}
 }
 
+func TestBaseBenchmarkBackendsCanMeasureNativeRunPodPods(t *testing.T) {
+	backends := baseBenchmarkBackends(config.Config{APIKey: "worker-key", RunPodAPIKey: "provider-key"})
+	native, ok := backends["runpod-pods"]
+	if !ok {
+		t.Fatal("native RunPod Pods backend is absent from direct benchmark composition")
+	}
+	if native.APIKey != "worker-key" || native.APIKeyEnv != "INFERCRANE_WORKER_API_KEY" || native.Serverless {
+		t.Fatalf("native RunPod benchmark metadata=%+v", native)
+	}
+	serverless := backends["runpod-serverless"]
+	if serverless.APIKey != "provider-key" || serverless.APIKeyEnv != "RUNPOD_API_KEY" || !serverless.Serverless {
+		t.Fatalf("RunPod Serverless benchmark metadata=%+v", serverless)
+	}
+}
+
+func TestManualOptimizationPricesRemainExactSpendAuthority(t *testing.T) {
+	observed := time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC)
+	validUntil := observed.Add(2 * time.Hour)
+	prices := manualOptimizationPrices([]config.OptimizationPrice{{
+		Cloud: "runpod", GPU: "A40", GPUCount: 1, Replicas: 1,
+		HourlyUSD: 0.49, Currency: "USD", Source: "operator-contract/runpod-a40",
+		ObservedAt: observed, ValidUntil: validUntil,
+	}})
+	estimate, ok := prices[pricing.Request{Cloud: "runpod", Region: "global", GPU: "NVIDIA A40", GPUCount: 1, Replicas: 1}]
+	if !ok {
+		t.Fatalf("exact provider-normalized price missing: %+v", prices)
+	}
+	if estimate.CostScope != pricing.CostScopeInstanceTotal || estimate.Authority != pricing.PriceAuthorityAccountContract || estimate.GuaranteedUntil != validUntil || !estimate.DeploymentComparable() {
+		t.Fatalf("manual optimization price is not usable exact spend authority: %+v", estimate)
+	}
+}
+
 func TestContextPassportRefreshBackoffIsBounded(t *testing.T) {
 	base := 10 * time.Second
 	wants := []time.Duration{base, 2 * base, 4 * base, time.Minute, time.Minute}
