@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
@@ -134,16 +135,25 @@ func (r Reconciler) reconcile(ctx context.Context, reservation domain.ManagedSpe
 
 func (r Reconciler) cleanup(ctx context.Context, row domain.NativeSandbox, reservationID string) error {
 	if row.BrezelSandboxID != "" {
-		if _, err := r.Provider.Delete(ctx, row.TenantID, row.BrezelSandboxID, "managed-reconcile:"+reservationID+":sandbox"); err != nil && !errors.Is(err, sandboxprovider.ErrNotFound) {
+		if _, err := r.Provider.Delete(ctx, row.TenantID, row.BrezelSandboxID, "managed-reconcile:"+reservationID+":sandbox"); !cleanupConfirmed(err) {
 			return err
 		}
 	}
 	if row.BrezelWorkspaceID != "" {
-		if _, err := r.Provider.DeleteWorkspace(ctx, row.TenantID, row.BrezelWorkspaceID, "managed-reconcile:"+reservationID+":workspace"); err != nil && !errors.Is(err, sandboxprovider.ErrNotFound) {
+		if _, err := r.Provider.DeleteWorkspace(ctx, row.TenantID, row.BrezelWorkspaceID, "managed-reconcile:"+reservationID+":workspace"); !cleanupConfirmed(err) {
 			return err
 		}
 	}
 	return nil
+}
+
+// Brezel returns a conflict when a deletion retry reaches an already terminal
+// resource. That response confirms the cleanup goal just as strongly as a 404.
+// Other conflicts, including active mutations or attached workspaces, remain
+// failures and are retried without releasing capacity or wallet holds.
+func cleanupConfirmed(err error) bool {
+	return err == nil || errors.Is(err, sandboxprovider.ErrNotFound) ||
+		(errors.Is(err, sandboxprovider.ErrConflict) && strings.Contains(err.Error(), "already terminal"))
 }
 
 func (r Reconciler) recordTransition(ctx context.Context, row domain.NativeSandbox, status, failure string, occurredAt time.Time, source string) (domain.NativeSandbox, error) {

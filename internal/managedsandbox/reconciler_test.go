@@ -3,6 +3,7 @@ package managedsandbox
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"testing"
 	"time"
@@ -68,9 +69,11 @@ func (m *memoryRepository) SettleManagedSandboxSpend(_ context.Context, _, _ str
 }
 
 type memoryProvider struct {
-	sandbox          sandboxprovider.Sandbox
-	deletedSandbox   bool
-	deletedWorkspace bool
+	sandbox            sandboxprovider.Sandbox
+	deletedSandbox     bool
+	deletedWorkspace   bool
+	deleteSandboxErr   error
+	deleteWorkspaceErr error
 }
 
 func (m *memoryProvider) Capabilities(context.Context, string) (sandboxprovider.Capabilities, error) {
@@ -84,7 +87,7 @@ func (m *memoryProvider) CreateWorkspace(context.Context, string, string, string
 }
 func (m *memoryProvider) DeleteWorkspace(context.Context, string, string, string) (sandboxprovider.WorkspaceMutation, error) {
 	m.deletedWorkspace = true
-	return sandboxprovider.WorkspaceMutation{}, nil
+	return sandboxprovider.WorkspaceMutation{}, m.deleteWorkspaceErr
 }
 func (m *memoryProvider) Get(context.Context, string, string) (sandboxprovider.Sandbox, error) {
 	return m.sandbox, nil
@@ -100,7 +103,7 @@ func (m *memoryProvider) Resume(context.Context, string, string, string) (sandbo
 }
 func (m *memoryProvider) Delete(context.Context, string, string, string) (sandboxprovider.Mutation, error) {
 	m.deletedSandbox = true
-	return sandboxprovider.Mutation{}, nil
+	return sandboxprovider.Mutation{}, m.deleteSandboxErr
 }
 func (m *memoryProvider) RunCommand(context.Context, string, string, sandboxprovider.CommandRequest, func(sandboxprovider.CommandEvent) error) (string, error) {
 	return "", nil
@@ -168,5 +171,34 @@ func TestReconcilerCleansUnreservedCleanupPendingSandbox(t *testing.T) {
 	}
 	if !provider.deletedWorkspace || repository.row.Status != "deleted" || repository.released || repository.settledMS != 0 {
 		t.Fatalf("workspace_deleted=%t row=%+v released=%t settled=%d", provider.deletedWorkspace, repository.row, repository.released, repository.settledMS)
+	}
+}
+
+func TestReconcilerAcceptsAlreadyTerminalCleanupRetry(t *testing.T) {
+	now := time.Date(2026, 10, 6, 21, 0, 0, 0, time.UTC)
+	row := domain.NativeSandbox{ID: "sandbox-orphan", TenantID: "tenant", TemplateID: "base", BrezelSandboxID: "sandbox-terminal", BrezelWorkspaceID: "workspace-terminal", Status: "cleanup_pending", BillingStateSince: now.Add(-time.Hour)}
+	repository := &memoryRepository{cleanup: []domain.NativeSandbox{row}, row: row}
+	provider := &memoryProvider{
+		deleteSandboxErr:   fmt.Errorf("%w: sandbox is already terminal", sandboxprovider.ErrConflict),
+		deleteWorkspaceErr: fmt.Errorf("%w: workspace is already terminal", sandboxprovider.ErrConflict),
+	}
+	if err := (Reconciler{Store: repository, Provider: provider, Now: func() time.Time { return now }}).Once(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if repository.row.Status != "deleted" {
+		t.Fatalf("row status = %q", repository.row.Status)
+	}
+}
+
+func TestReconcilerRetriesNonTerminalCleanupConflict(t *testing.T) {
+	now := time.Date(2026, 10, 6, 21, 0, 0, 0, time.UTC)
+	row := domain.NativeSandbox{ID: "sandbox-orphan", TenantID: "tenant", TemplateID: "base", BrezelWorkspaceID: "workspace-active", Status: "cleanup_pending", BillingStateSince: now.Add(-time.Hour)}
+	repository := &memoryRepository{cleanup: []domain.NativeSandbox{row}, row: row}
+	provider := &memoryProvider{deleteWorkspaceErr: fmt.Errorf("%w: workspace has an active backend mutation", sandboxprovider.ErrConflict)}
+	if err := (Reconciler{Store: repository, Provider: provider, Now: func() time.Time { return now }}).Once(context.Background()); err == nil {
+		t.Fatal("expected active cleanup conflict")
+	}
+	if repository.row.Status != "cleanup_pending" {
+		t.Fatalf("row status = %q", repository.row.Status)
 	}
 }
