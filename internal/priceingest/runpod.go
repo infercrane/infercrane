@@ -45,12 +45,17 @@ func (f RunPodFeed) Refresh(ctx context.Context, catalog *pricing.DynamicCatalog
 	if strings.TrimSpace(f.APIKey) != "" && (parsedEndpoint.Scheme != "https" || !strings.EqualFold(parsedEndpoint.Hostname(), "api.runpod.io")) {
 		return errors.New("refusing to send RunPod credentials to an untrusted endpoint")
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	// RunPod's GraphQL API authenticates with the api_key query parameter.
+	// Add it only after validating the destination so tenant credentials can
+	// never be forwarded to a caller-controlled host.
+	if strings.TrimSpace(f.APIKey) != "" {
+		query := parsedEndpoint.Query()
+		query.Set("api_key", f.APIKey)
+		parsedEndpoint.RawQuery = query.Encode()
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, parsedEndpoint.String(), bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("prepare RunPod price request: %w", err)
-	}
-	if strings.TrimSpace(f.APIKey) != "" {
-		request.Header.Set("Authorization", "Bearer "+f.APIKey)
 	}
 	request.Header.Set("Content-Type", "application/json")
 	client := f.Client

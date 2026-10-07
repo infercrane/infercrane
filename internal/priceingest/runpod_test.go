@@ -77,8 +77,8 @@ func TestRunPodFeedRevalidatesCredentialAgainstTrustedProviderEndpoint(t *testin
 	requests := 0
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		requests++
-		if request.URL.String() != defaultRunPodGraphQLURL || request.Header.Get("Authorization") != "Bearer tenant-secret" {
-			t.Fatalf("unexpected provider request: url=%s authorization=%q", request.URL, request.Header.Get("Authorization"))
+		if request.URL.Scheme != "https" || request.URL.Host != "api.runpod.io" || request.URL.Path != "/graphql" || request.URL.Query().Get("api_key") != "tenant-secret" || request.Header.Get("Authorization") != "" {
+			t.Fatalf("unexpected provider request destination or authentication")
 		}
 		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(bytes.NewBufferString(`{"data":{"gpuTypes":[{"id":"NVIDIA L40S","lowestPrice":{"uninterruptablePrice":0.74}}]}}`))}, nil
 	})}
