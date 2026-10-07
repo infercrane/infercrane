@@ -4362,6 +4362,25 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 			},
 		}
 	}
+	if optimizationCosts != nil && computeConnectionService != nil {
+		managedOptimizationCosts := optimizationCosts
+		optimizationCosts = optimizationcampaign.ConnectionPricingAuthority{
+			Managed:     managedOptimizationCosts,
+			Connections: computeConnectionService,
+			Providers: map[string]func(string) optimizationcampaign.CostAuthority{
+				"runpod": func(credential string) optimizationcampaign.CostAuthority {
+					catalog := pricing.NewDynamicCatalog(nil)
+					feed := priceingest.RunPodFeed{APIKey: credential, ValidFor: 2 * time.Minute}
+					return optimizationcampaign.RefreshingPricingAuthority{
+						Refresh: func(refreshCtx context.Context) error {
+							return feed.Refresh(refreshCtx, catalog)
+						},
+						Delegate: optimizationcampaign.PricingAuthority{Provider: catalog},
+					}
+				},
+			},
+		}
+	}
 	artifactCacheAdapters := map[string]artifactcache.Adapter{}
 	modelAPICatalog, catalogErr := modelapicatalog.Load(cfg.ModelAPICatalogFile)
 	if catalogErr != nil {

@@ -45,7 +45,11 @@ type CostQuote struct {
 }
 
 type CostAuthority interface {
-	Quote(context.Context, optimizer.DeploymentDraft, time.Time) (CostQuote, error)
+	// Quote authorizes the exact execution tuple for one tenant. Tenant is an
+	// explicit part of the authority boundary because a BYOC draft must resolve
+	// and revalidate that tenant's selected compute connection; it must never
+	// inherit a process-global provider credential.
+	Quote(context.Context, string, optimizer.DeploymentDraft, time.Time) (CostQuote, error)
 }
 
 type CandidateBenchmark interface {
@@ -74,7 +78,7 @@ func (d CompositeDriver) Provision(ctx context.Context, candidateID string, cand
 	if err != nil {
 		return ProvisionResult{}, err
 	}
-	if err = d.authorizeCost(ctx, draft, budget); err != nil {
+	if err = d.authorizeCost(ctx, candidate.TenantID, draft, budget); err != nil {
 		return ProvisionResult{}, err
 	}
 	if campaign.Intent == IntentEvolveEndpoint {
@@ -304,20 +308,23 @@ func (d CompositeDriver) inputs(ctx context.Context, candidateID string, candida
 	return campaign, draft, nil
 }
 
-func (d CompositeDriver) authorizeCost(ctx context.Context, draft optimizer.DeploymentDraft, budget Budget) error {
-	return AuthorizeCost(ctx, d.Costs, draft, budget, d.now())
+func (d CompositeDriver) authorizeCost(ctx context.Context, tenant string, draft optimizer.DeploymentDraft, budget Budget) error {
+	return AuthorizeCost(ctx, d.Costs, tenant, draft, budget, d.now())
 }
 
 // AuthorizeCost proves that one candidate's exact maximum execution tuple is
 // covered by both a fresh sourced price and the operator's bounded approval.
 // The API calls this before approval; the durable driver repeats it immediately
 // before every provider mutation so a stale preflight cannot become authority.
-func AuthorizeCost(ctx context.Context, costs CostAuthority, draft optimizer.DeploymentDraft, budget Budget, now time.Time) error {
+func AuthorizeCost(ctx context.Context, costs CostAuthority, tenant string, draft optimizer.DeploymentDraft, budget Budget, now time.Time) error {
 	if costs == nil {
 		return operations.Permanent("optimization_cost_authority_unavailable", errors.New("fresh sourced execution pricing is required before provider mutation"))
 	}
+	if strings.TrimSpace(tenant) == "" {
+		return operations.Permanent("optimization_cost_authority_invalid", errors.New("tenant identity is required for execution pricing"))
+	}
 	now = now.UTC()
-	quote, err := costs.Quote(ctx, draft, budget.ExpiresAt)
+	quote, err := costs.Quote(ctx, tenant, draft, budget.ExpiresAt)
 	if err != nil {
 		return operations.Permanent("optimization_cost_quote_unavailable", err)
 	}

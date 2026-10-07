@@ -1536,7 +1536,7 @@ func (a API) approveOptimizationCampaign(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusConflict, "compute_connection_required", computeErr.Error())
 			return
 		}
-		if costErr := optimizationcampaign.AuthorizeCost(r.Context(), a.OptimizationCosts, draft, optimizationcampaign.Budget{MaxCostUSD: perCandidateBudget, ExpiresAt: expiresAt}, time.Now().UTC()); costErr != nil {
+		if costErr := optimizationcampaign.AuthorizeCost(r.Context(), a.OptimizationCosts, actor.TenantID, draft, optimizationcampaign.Budget{MaxCostUSD: perCandidateBudget, ExpiresAt: expiresAt}, time.Now().UTC()); costErr != nil {
 			writeError(w, http.StatusUnprocessableEntity, "optimization_cost_authority_rejected", costErr.Error())
 			return
 		}

@@ -1,6 +1,7 @@
 package priceingest
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net/http"
@@ -11,6 +12,12 @@ import (
 
 	"github.com/infercrane/infercrane/internal/pricing"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
 
 func TestRunPodFeedUsesExactSecureCloudProviderPrice(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -63,6 +70,34 @@ func TestRunPodFeedNeverSendsCredentialToCustomEndpoint(t *testing.T) {
 	err := (RunPodFeed{APIKey: "secret", BaseURL: server.URL, Client: server.Client()}).Refresh(context.Background(), pricing.NewDynamicCatalog(nil))
 	if err == nil || !strings.Contains(err.Error(), "untrusted endpoint") || strings.Contains(err.Error(), "secret") {
 		t.Fatalf("unsafe credential-host result: %v", err)
+	}
+}
+
+func TestRunPodFeedRevalidatesCredentialAgainstTrustedProviderEndpoint(t *testing.T) {
+	requests := 0
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		requests++
+		if request.URL.String() != defaultRunPodGraphQLURL || request.Header.Get("Authorization") != "Bearer tenant-secret" {
+			t.Fatalf("unexpected provider request: url=%s authorization=%q", request.URL, request.Header.Get("Authorization"))
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(bytes.NewBufferString(`{"data":{"gpuTypes":[{"id":"NVIDIA L40S","lowestPrice":{"uninterruptablePrice":0.74}}]}}`))}, nil
+	})}
+	catalog := pricing.NewDynamicCatalog(nil)
+	if err := (RunPodFeed{APIKey: "tenant-secret", Client: client}).Refresh(t.Context(), catalog); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 1 {
+		t.Fatalf("expected one credential revalidation request, got %d", requests)
+	}
+}
+
+func TestRunPodFeedRejectsInvalidCredentialWithoutLeakingIt(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusForbidden, Header: make(http.Header), Body: io.NopCloser(bytes.NewBufferString(`forbidden tenant-secret`))}, nil
+	})}
+	err := (RunPodFeed{APIKey: "tenant-secret", Client: client}).Refresh(t.Context(), pricing.NewDynamicCatalog(nil))
+	if err == nil || !strings.Contains(err.Error(), "HTTP 403") || strings.Contains(err.Error(), "tenant-secret") {
+		t.Fatalf("invalid credential result was not safe: %v", err)
 	}
 }
 
