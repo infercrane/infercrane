@@ -67,6 +67,7 @@ type Request struct {
 	ModelRevision         string   `json:"model_revision,omitempty"`
 	Provider              string   `json:"provider"`
 	ComputeConnectionID   string   `json:"compute_connection_id,omitempty"`
+	ProviderAdapter       string   `json:"provider_adapter,omitempty"`
 	Region                string   `json:"region"`
 	GPU                   string   `json:"gpu"`
 	GPUCount              int      `json:"gpu_count,omitempty"`
@@ -257,6 +258,13 @@ func ValidateProposal(proposal Proposal) error {
 		if candidate.Deployment.ComputeConnectionID != request.ComputeConnectionID {
 			return errors.New("proposal candidate compute connection does not match the requested boundary")
 		}
+		providerMatches := candidate.Deployment.Provider.Cloud == request.Provider || candidate.Deployment.Provider.Adapter == request.Provider
+		if !providerMatches {
+			return errors.New("proposal candidate provider does not match the requested boundary")
+		}
+		if request.ProviderAdapter != "" && candidate.Deployment.Provider.Adapter != request.ProviderAdapter {
+			return errors.New("proposal candidate provider adapter does not match the requested compute connection")
+		}
 		if candidate.EvidenceState != EvidenceUnmeasured && candidate.EvidenceState != EvidenceModeled {
 			return errors.New("new proposal candidates must be unmeasured or modeled")
 		}
@@ -403,6 +411,7 @@ func normalizeRequest(request Request) Request {
 	}
 	request.Provider = strings.ToLower(strings.TrimSpace(request.Provider))
 	request.ComputeConnectionID = strings.TrimSpace(request.ComputeConnectionID)
+	request.ProviderAdapter = strings.ToLower(strings.TrimSpace(request.ProviderAdapter))
 	request.Region = strings.TrimSpace(request.Region)
 	request.GPU = strings.TrimSpace(request.GPU)
 	request.Objective = strings.ToLower(strings.TrimSpace(request.Objective))
@@ -501,6 +510,12 @@ func validateRequest(request Request) error {
 	}
 	if len(request.ComputeConnectionID) > 255 {
 		return errors.New("compute connection ID must be at most 255 characters")
+	}
+	if len(request.ProviderAdapter) > 255 {
+		return errors.New("provider adapter must be at most 255 characters")
+	}
+	if request.ProviderAdapter != "" && request.ComputeConnectionID == "" {
+		return errors.New("provider adapter requires a compute connection boundary")
 	}
 	if request.TargetConcurrency != nil && (*request.TargetConcurrency <= 0 || math.IsNaN(*request.TargetConcurrency) || math.IsInf(*request.TargetConcurrency, 0)) {
 		return errors.New("target concurrency must be a finite positive value")
@@ -859,6 +874,9 @@ func matchingCompatibility(entries []integration.RuntimeCompatibility, request R
 	var out []integration.RuntimeCompatibility
 	for _, entry := range entries {
 		if request.Provider != entry.Cloud && request.Provider != entry.Adapter || !allowedRuntime(entry.Runtime) {
+			continue
+		}
+		if request.ProviderAdapter != "" && request.ProviderAdapter != entry.Adapter {
 			continue
 		}
 		if entry.State != integration.QualificationLocal && entry.State != integration.QualificationReal && !(request.IncludeSimulated && entry.State == integration.QualificationSimulated) {

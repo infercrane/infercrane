@@ -4232,6 +4232,11 @@
       "OptimizationProposalRequest": {
         "additionalProperties": false,
         "properties": {
+          "compute_connection_id": {
+            "description": "Verified tenant compute connection used to derive and immutably bind the executable provider adapter.",
+            "maxLength": 255,
+            "type": "string"
+          },
           "gpu": {
             "maxLength": 128,
             "minLength": 1,
