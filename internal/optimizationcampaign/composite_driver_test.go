@@ -11,6 +11,7 @@ import (
 	"github.com/infercrane/infercrane/internal/operations"
 	"github.com/infercrane/infercrane/internal/optimizer"
 	"github.com/infercrane/infercrane/internal/performanceprofile"
+	"github.com/infercrane/infercrane/internal/pricing"
 )
 
 type compositeStoreFixture struct {
@@ -135,6 +136,14 @@ func TestAuthorizeCostRejectsMateriallyFutureDatedQuote(t *testing.T) {
 	var failure operations.Failure
 	if !errors.As(err, &failure) || failure.Code != "optimization_cost_quote_invalid" {
 		t.Fatalf("materially future quote was accepted: %v", err)
+	}
+}
+
+func TestAuthorizeCostRetriesTransientMissingProviderOffer(t *testing.T) {
+	err := AuthorizeCost(t.Context(), &recordingCostAuthority{err: pricing.ErrUnavailable}, "tenant-1", optimizer.DeploymentDraft{}, Budget{MaxCostUSD: 3, ExpiresAt: time.Now().Add(time.Hour)}, time.Now())
+	var failure operations.Failure
+	if !errors.As(err, &failure) || !failure.Retryable || failure.Code != "optimization_cost_quote_unavailable" {
+		t.Fatalf("transient missing offer was not retryable: %#v", err)
 	}
 }
 

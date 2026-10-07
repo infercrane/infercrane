@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/operations"
 )
 
 type coordinatorRepository struct {
@@ -267,6 +268,28 @@ func TestCoordinatorLeavesRetryableDriverFailureAtAdoptableState(t *testing.T) {
 	}
 	if driver.provisionCalls != 2 || repository.campaign.Candidates[0].State != CandidateReady {
 		t.Fatalf("idempotent retry did not adopt progress: calls=%d state=%s", driver.provisionCalls, repository.campaign.Candidates[0].State)
+	}
+}
+
+func TestCoordinatorPersistsPermanentDriverFailureBeforeCleanup(t *testing.T) {
+	now := time.Now().UTC()
+	repository, driver, coordinator := approvedCoordinatorFixture(now, 1)
+	if _, err := coordinator.Step(t.Context(), "tenant", "campaign", "candidate-a"); err != nil {
+		t.Fatal(err)
+	}
+	driver.provisionErr = operations.Permanent("unsupported_tuple", errors.New("runtime tuple is not qualified"))
+	result, err := coordinator.Step(t.Context(), "tenant", "campaign", "candidate-a")
+	if err != nil || !result.Progressed || result.To != CandidateFailed {
+		t.Fatalf("permanent failure was not persisted: result=%+v err=%v", result, err)
+	}
+	if candidate := repository.campaign.Candidates[0]; candidate.State != CandidateFailed || candidate.FailureCode != "unsupported_tuple" {
+		t.Fatalf("candidate failure evidence=%+v", candidate)
+	}
+	if _, err = coordinator.Step(t.Context(), "tenant", "campaign", "candidate-a"); err != nil {
+		t.Fatal(err)
+	}
+	if candidate := repository.campaign.Candidates[0]; candidate.State != CandidateCleaned || candidate.FailureCode != "unsupported_tuple" || driver.cleanupCalls != 1 {
+		t.Fatalf("permanent failure did not converge through cleanup: candidate=%+v cleanup=%d", candidate, driver.cleanupCalls)
 	}
 }
 

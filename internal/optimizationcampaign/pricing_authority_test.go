@@ -164,6 +164,26 @@ func TestConnectionPricingAuthorityFailsClosedForWrongTenantOrRejectedCredential
 	}
 }
 
+func TestConnectionPricingAuthorityExplainsUnavailableProviderOfferWithoutBlamingCredential(t *testing.T) {
+	now := time.Now().UTC()
+	resolver := &connectionResolverFixture{
+		item:       domain.ComputeConnection{ID: "connection-1", TenantID: "tenant-1", Provider: "runpod", Status: "verified"},
+		credential: "tenant-secret",
+	}
+	authority := ConnectionPricingAuthority{
+		Connections: resolver,
+		Providers: map[string]func(string) CostAuthority{"runpod": func(string) CostAuthority {
+			return &recordingCostAuthority{err: pricing.ErrUnavailable}
+		}},
+	}
+	draft := optimizer.DeploymentDraft{ComputeConnectionID: "connection-1"}
+	draft.Provider.Cloud, draft.Resources.GPU = "runpod", "L40S"
+	_, err := authority.Quote(t.Context(), "tenant-1", draft, now.Add(time.Minute))
+	if !errors.Is(err, pricing.ErrUnavailable) || !strings.Contains(err.Error(), "no provider offer for L40S") || strings.Contains(err.Error(), "reconnect") {
+		t.Fatalf("unavailable offer remediation=%v", err)
+	}
+}
+
 func TestConnectionPricingAuthorityKeepsManagedPathWithoutConnection(t *testing.T) {
 	managed := &recordingCostAuthority{quote: CostQuote{HourlyUSD: 3.72}}
 	authority := ConnectionPricingAuthority{Managed: managed}

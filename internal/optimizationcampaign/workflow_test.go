@@ -158,17 +158,16 @@ func TestExplicitCleanupOperationCleansCampaignAfterExecutionFinished(t *testing
 	}
 }
 
-func TestExecutionHandlerPreservesPermanentDriverFailure(t *testing.T) {
+func TestExecutionHandlerPersistsAndCleansPermanentDriverFailure(t *testing.T) {
 	now := time.Now().UTC()
 	repository, driver, coordinator := approvedCoordinatorFixture(now, 1)
 	repository.campaign.Candidates[0].State = CandidateProvisioning
 	repository.campaign.State = CampaignRunning
 	driver.provisionErr = operations.Permanent("unsupported_tuple", errors.New("runtime tuple is not qualified"))
 	request, _ := json.Marshal(ExecuteRequest{TenantID: "tenant", CampaignID: "campaign", Candidates: []string{"candidate-a"}})
-	_, err := Handlers(coordinator)[ExecuteKind](context.Background(), domain.Operation{RequestJSON: string(request)})
-	var failure operations.Failure
-	if !errors.As(err, &failure) || failure.Retryable || failure.Code != "unsupported_tuple" {
-		t.Fatalf("permanent driver failure was converted into retries: %#v", err)
+	result, err := Handlers(coordinator)[ExecuteKind](context.Background(), domain.Operation{RequestJSON: string(request)})
+	if err != nil || repository.campaign.Candidates[0].State != CandidateCleaned || repository.campaign.Candidates[0].FailureCode != "unsupported_tuple" || driver.cleanupCalls != 1 || !strings.Contains(result, `"promotion":"not_performed"`) {
+		t.Fatalf("permanent driver failure did not converge: result=%s err=%v candidate=%+v cleanup=%d", result, err, repository.campaign.Candidates[0], driver.cleanupCalls)
 	}
 }
 
