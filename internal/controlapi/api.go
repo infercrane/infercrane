@@ -5105,7 +5105,7 @@ func (a API) createCloudDeployment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	managedPolicy := a.ManagedDeployments.Normalize()
-	if managedPolicy.Enabled && request.Cloud == managedPolicy.Provider && request.BillingMode != "customer_wallet" {
+	if managedPolicy.Enabled && request.Cloud == managedPolicy.Provider && request.BillingMode != "customer_wallet" && request.ComputeConnectionID == "" {
 		writeError(w, http.StatusUnprocessableEntity, "managed_billing_required", "InferCrane-managed compute requires prepaid credit")
 		return
 	}

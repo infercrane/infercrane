@@ -1154,6 +1154,7 @@ func TestTenantDeploymentUsesOnlyItsVerifiedComputeConnection(t *testing.T) {
 		Authenticator:           store,
 		ComputeConnections:      connections,
 		DefaultProviderAdapters: map[string]string{"runpod": "skypilot-runpod"},
+		ManagedDeployments:      managedbilling.DeploymentPolicy{Enabled: true, Provider: "runpod"},
 	}).Handler()
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments", strings.NewReader(`{"name":"qwen","model":"Qwen/Qwen3-8B","cloud":"runpod","compute_connection_id":"connection-1","gpu":"L40S","min_replicas":1,"max_replicas":1}`))
 	request.Header.Set("Authorization", "Bearer tenant-session")
