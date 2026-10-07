@@ -43,9 +43,18 @@ func (a PricingAuthority) Quote(ctx context.Context, draft optimizer.DeploymentD
 	if a.Now != nil {
 		now = a.Now().UTC()
 	}
-	guaranteedUntil := estimate.GuaranteedUntil.UTC()
-	if estimate.Currency != "USD" || estimate.Source == "" || estimate.Hourly <= 0 || estimate.ObservedAt.After(now) || estimate.Stale(now) || !estimate.DeploymentComparable() || guaranteedUntil.IsZero() || guaranteedUntil.Before(requiredUntil) {
-		return CostQuote{}, fmt.Errorf("exact provider price must be fresh, locked USD evidence guaranteed through %s", requiredUntil.UTC().Format(time.RFC3339))
+	if estimate.Currency != "USD" || estimate.Source == "" || estimate.Hourly <= 0 || estimate.ObservedAt.After(now) || estimate.Stale(now) || !estimate.DeploymentComparable() {
+		return CostQuote{}, fmt.Errorf("exact provider price must be fresh deployment-comparable USD evidence for %s", requiredUntil.UTC().Format(time.RFC3339))
 	}
-	return CostQuote{HourlyUSD: estimate.Hourly, Source: estimate.Source, ObservedAt: estimate.ObservedAt.UTC(), ValidUntil: guaranteedUntil}, nil
+	validUntil := estimate.ObservedAt.UTC().Add(estimate.StaleAfter)
+	locked := !estimate.GuaranteedUntil.IsZero() && !estimate.GuaranteedUntil.Before(requiredUntil)
+	if locked {
+		validUntil = estimate.GuaranteedUntil.UTC()
+	} else if estimate.Authority != pricing.PriceAuthorityProviderAPI {
+		return CostQuote{}, fmt.Errorf("account price is not guaranteed through %s", requiredUntil.UTC().Format(time.RFC3339))
+	}
+	if !validUntil.After(now) {
+		return CostQuote{}, errors.New("exact provider price expired before execution authorization")
+	}
+	return CostQuote{HourlyUSD: estimate.Hourly, Source: estimate.Source, ObservedAt: estimate.ObservedAt.UTC(), ValidUntil: validUntil, Locked: locked}, nil
 }

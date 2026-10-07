@@ -38,6 +38,10 @@ type CostQuote struct {
 	HourlyUSD, HardMaximumCostUSD float64
 	Source                        string
 	ObservedAt, ValidUntil        time.Time
+	// Locked distinguishes a contractual rate from a fresh provider-native
+	// pay-as-you-go observation. Unlocked quotes are revalidated immediately
+	// before mutation and the approval deadline bounds their runtime.
+	Locked bool
 }
 
 type CostAuthority interface {
@@ -64,6 +68,8 @@ type CompositeDriver struct {
 }
 
 func (d CompositeDriver) Provision(ctx context.Context, candidateID string, candidate domain.OptimizationCandidateRun, budget Budget) (ProvisionResult, error) {
+	ctx, cancel := d.budgetContext(ctx, budget)
+	defer cancel()
 	campaign, draft, err := d.inputs(ctx, candidateID, candidate)
 	if err != nil {
 		return ProvisionResult{}, err
@@ -78,6 +84,8 @@ func (d CompositeDriver) Provision(ctx context.Context, candidateID string, cand
 }
 
 func (d CompositeDriver) Measure(ctx context.Context, candidateID string, candidate domain.OptimizationCandidateRun, budget Budget) (MeasurementResult, error) {
+	ctx, cancel := d.budgetContext(ctx, budget)
+	defer cancel()
 	campaign, _, err := d.inputs(ctx, candidateID, candidate)
 	if err != nil {
 		return MeasurementResult{}, err
@@ -313,7 +321,7 @@ func AuthorizeCost(ctx context.Context, costs CostAuthority, draft optimizer.Dep
 	if err != nil {
 		return operations.Permanent("optimization_cost_quote_unavailable", err)
 	}
-	if quote.Source == "" || quote.ObservedAt.IsZero() || quote.ObservedAt.After(now) || quote.ValidUntil.Before(budget.ExpiresAt) || quote.HourlyUSD <= 0 || math.IsNaN(quote.HourlyUSD) || math.IsInf(quote.HourlyUSD, 0) {
+	if quote.Source == "" || quote.ObservedAt.IsZero() || quote.ObservedAt.After(now) || quote.ValidUntil.Before(now) || quote.HourlyUSD <= 0 || math.IsNaN(quote.HourlyUSD) || math.IsInf(quote.HourlyUSD, 0) {
 		return operations.Permanent("optimization_cost_quote_invalid", errors.New("execution cost quote must be fresh, sourced, finite, and positive"))
 	}
 	projected := quote.HourlyUSD * budget.ExpiresAt.Sub(now).Hours()
@@ -324,6 +332,18 @@ func AuthorizeCost(ctx context.Context, costs CostAuthority, draft optimizer.Dep
 		return operations.Permanent("optimization_cost_cap_exceeded", fmt.Errorf("maximum authorized candidate spend $%.2f is below sourced worst-case $%.2f", budget.MaxCostUSD, projected))
 	}
 	return nil
+}
+
+func (d CompositeDriver) budgetContext(ctx context.Context, budget Budget) (context.Context, context.CancelFunc) {
+	if budget.ExpiresAt.IsZero() {
+		return context.WithCancel(ctx)
+	}
+	remaining := budget.ExpiresAt.Sub(d.now())
+	if remaining <= 0 {
+		deadline := time.Now()
+		return context.WithDeadline(ctx, deadline)
+	}
+	return context.WithDeadline(ctx, time.Now().Add(remaining))
 }
 
 func (d CompositeDriver) adoptBenchmark(ctx context.Context, candidate domain.OptimizationCandidateRun, profile performanceprofile.Profile) (domain.BenchmarkResult, bool, error) {

@@ -103,7 +103,7 @@ func (e BenchmarkExecutor) Run(ctx context.Context, campaign domain.Optimization
 	}
 	workload, _ := json.Marshal(map[string]any{"endpoint_type": "chat", "streaming": profile.Streaming, "request_count": profile.Requests, "concurrency": profile.Concurrency, "random_seed": 17, "input_tokens": profile.InputTokens, "output_tokens": profile.OutputTokens, "profile": profile.Name, "profile_version": performanceprofile.Version, "ttft_slo_ms": campaignTTFTSLO(campaign), "tpot_slo_ms": campaignTPOTSLO(campaign), "server_token_count": true, "revision_selector": revision.ID, "direct_revision_validation": true})
 	runtimeConfig, _ := json.Marshal(map[string]any{"args": draft.Runtime.Args})
-	costMetadata, _ := json.Marshal(map[string]any{"available": true, "hourly": quote.HourlyUSD, "currency": "USD", "billing_unit": "hour", "source": quote.Source, "evidence_class": "provider_reported", "observed_at": quote.ObservedAt, "valid_until": quote.ValidUntil, "revision_id": revision.ID})
+	costMetadata, _ := json.Marshal(map[string]any{"available": true, "hourly": quote.HourlyUSD, "currency": "USD", "billing_unit": "hour", "source": quote.Source, "evidence_class": "provider_reported", "observed_at": quote.ObservedAt, "valid_until": quote.ValidUntil, "rate_locked": quote.Locked, "revision_id": revision.ID})
 	gpuCount := draft.Resources.GPUCount
 	if gpuCount == 0 {
 		gpuCount = 1
