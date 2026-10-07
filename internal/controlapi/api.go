@@ -918,6 +918,32 @@ func (a API) proposeOptimization(w http.ResponseWriter, r *http.Request) {
 	if !decodeMutationBody(w, r, &request) {
 		return
 	}
+	if strings.TrimSpace(request.ProviderAdapter) != "" {
+		writeError(w, http.StatusBadRequest, "invalid_optimization_request", "provider_adapter is derived from the selected tenant compute connection")
+		return
+	}
+	request.ComputeConnectionID = strings.TrimSpace(request.ComputeConnectionID)
+	if request.ComputeConnectionID != "" {
+		if a.ComputeConnections == nil {
+			writeError(w, http.StatusConflict, "compute_connection_required", "optimization proposals require configured compute connection storage")
+			return
+		}
+		actor := r.Context().Value(identityKey{}).(domain.Principal)
+		connection, connectionErr := a.ComputeConnections.Get(r.Context(), actor.TenantID, request.ComputeConnectionID)
+		if errors.Is(connectionErr, domain.ErrNotFound) {
+			writeError(w, http.StatusUnprocessableEntity, "compute_connection_not_found", "compute connection was not found in the active tenant")
+			return
+		}
+		if connectionErr != nil {
+			writeError(w, http.StatusInternalServerError, "internal", "compute connection could not be validated")
+			return
+		}
+		if connection.Status != "verified" || connection.Provider != strings.ToLower(strings.TrimSpace(request.Provider)) || strings.TrimSpace(connection.Adapter) == "" {
+			writeError(w, http.StatusUnprocessableEntity, "compute_connection_mismatch", "compute connection is not verified for the selected provider")
+			return
+		}
+		request.ProviderAdapter = connection.Adapter
+	}
 	proposal, err := optimizer.NewCatalogSource(curatedrecipe.All(), a.Integrations).Propose(r.Context(), request)
 	if err != nil {
 		writeError(w, http.StatusUnprocessableEntity, "invalid_optimization_request", err.Error())
@@ -1329,6 +1355,26 @@ func (a API) createOptimizationCampaign(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusUnprocessableEntity, "invalid_optimization_proposal", err.Error())
 		return
 	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	if request.Proposal.Input.ComputeConnectionID != "" && actor.ID != "bootstrap" {
+		if a.ComputeConnections == nil {
+			writeError(w, http.StatusConflict, "compute_connection_required", "optimization campaign storage cannot validate the selected compute connection")
+			return
+		}
+		connection, connectionErr := a.ComputeConnections.Get(r.Context(), actor.TenantID, request.Proposal.Input.ComputeConnectionID)
+		if errors.Is(connectionErr, domain.ErrNotFound) {
+			writeError(w, http.StatusUnprocessableEntity, "compute_connection_not_found", "compute connection was not found in the active tenant")
+			return
+		}
+		if connectionErr != nil {
+			writeError(w, http.StatusInternalServerError, "internal", "compute connection could not be validated")
+			return
+		}
+		if connection.Status != "verified" || connection.Provider != request.Proposal.Input.Provider || connection.Adapter != request.Proposal.Input.ProviderAdapter {
+			writeError(w, http.StatusUnprocessableEntity, "compute_connection_mismatch", "optimization proposal is not bound to the active tenant compute connection")
+			return
+		}
+	}
 	if request.Intent == "" {
 		request.Intent = optimizationcampaign.IntentNewEndpoint
 	}
@@ -1346,7 +1392,6 @@ func (a API) createOptimizationCampaign(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusRequestEntityTooLarge, "proposal_too_large", "optimization proposal exceeds the one MiB storage boundary")
 		return
 	}
-	actor := r.Context().Value(identityKey{}).(domain.Principal)
 	campaign := domain.OptimizationCampaign{TenantID: actor.TenantID, IdempotencyKey: key, InputDigest: request.Proposal.InputDigest, ModelIdentity: request.Proposal.Input.ModelIdentity, Objective: request.Proposal.Input.Objective, Source: request.Proposal.AlgorithmVersion, Intent: request.Intent, TargetDeployment: request.TargetDeployment, ProposalJSON: string(proposalJSON)}
 	candidates := make([]domain.OptimizationCandidateRun, 0, len(request.Proposal.Candidates))
 	for _, candidate := range request.Proposal.Candidates {

@@ -1637,6 +1637,93 @@ func TestOptimizationCampaignRequiresImmutableProposalAndExplicitBoundedApproval
 	}
 }
 
+func TestOptimizationProposalDerivesExecutableAdapterFromTenantConnection(t *testing.T) {
+	registry, err := integration.V1Catalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := &fakeStore{principal: domain.Principal{
+		ID: "operator-1", TenantID: "tenant-1", Name: "operator", Role: "operator",
+		Scopes: []string{"read", "deploy"},
+	}}
+	connections := &fakeComputeConnections{item: domain.ComputeConnection{
+		ID: "connection-1", TenantID: "tenant-1", Provider: "runpod", Adapter: "runpod-pods", Status: "verified",
+	}}
+	handler := (API{Store: base, Authenticator: base, ComputeConnections: connections, Integrations: registry.Snapshot()}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/optimization/proposals", strings.NewReader(`{"model_identity":"qwen3-8b","provider":"runpod","compute_connection_id":"connection-1","gpu":"L40S","objective":"interactive","max_candidates":3}`))
+	request.Header.Set("Authorization", "Bearer tenant-session")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("proposal status=%d body=%s", response.Code, response.Body.String())
+	}
+	var envelope struct {
+		Proposal optimizer.Proposal `json:"proposal"`
+	}
+	if err = json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Proposal.Input.ComputeConnectionID != "connection-1" || envelope.Proposal.Input.ProviderAdapter != "runpod-pods" || len(envelope.Proposal.Candidates) == 0 {
+		t.Fatalf("proposal lost tenant compute boundary: %+v", envelope.Proposal.Input)
+	}
+	for _, candidate := range envelope.Proposal.Candidates {
+		if candidate.Deployment.ComputeConnectionID != "connection-1" || candidate.Deployment.Provider.Cloud != "runpod" || candidate.Deployment.Provider.Adapter != "runpod-pods" {
+			t.Fatalf("candidate is not executable by selected connection: %+v", candidate.Deployment)
+		}
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/optimization/proposals", strings.NewReader(`{"model_identity":"qwen3-8b","provider":"aws","compute_connection_id":"connection-1","gpu":"L40S","objective":"interactive","max_candidates":1}`))
+	request.Header.Set("Authorization", "Bearer tenant-session")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), `"code":"compute_connection_mismatch"`) {
+		t.Fatalf("provider mismatch status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/optimization/proposals", strings.NewReader(`{"model_identity":"qwen3-8b","provider":"runpod","compute_connection_id":"connection-1","provider_adapter":"skypilot","gpu":"L40S","objective":"interactive","max_candidates":1}`))
+	request.Header.Set("Authorization", "Bearer tenant-session")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"invalid_optimization_request"`) {
+		t.Fatalf("client-controlled adapter status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestOptimizationCampaignRejectsStaleComputeConnectionBinding(t *testing.T) {
+	registry, err := integration.V1Catalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal, err := optimizer.NewCatalogSource(curatedrecipe.All(), registry.Snapshot()).Propose(context.Background(), optimizer.Request{
+		ModelIdentity: "qwen3-8b", Provider: "runpod", ComputeConnectionID: "connection-1", ProviderAdapter: "runpod-pods",
+		GPU: "L40S", Objective: "interactive", MaxCandidates: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(map[string]any{"proposal": proposal})
+	base := &fakeStore{principal: domain.Principal{
+		ID: "operator-1", TenantID: "tenant-1", Name: "operator", Role: "operator",
+		Scopes: []string{"read", "deploy"},
+	}}
+	store := &fakeOptimizationCampaignStore{fakeStore: base}
+	connections := &fakeComputeConnections{item: domain.ComputeConnection{
+		ID: "connection-1", TenantID: "tenant-1", Provider: "runpod", Adapter: "skypilot", Status: "verified",
+	}}
+	handler := (API{Store: store, Authenticator: base, ComputeConnections: connections, Integrations: registry.Snapshot()}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/optimization/campaigns", strings.NewReader(string(body)))
+	request.Header.Set("Authorization", "Bearer tenant-session")
+	request.Header.Set("Idempotency-Key", "stale-connection-campaign")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), `"code":"compute_connection_mismatch"`) {
+		t.Fatalf("stale binding status=%d body=%s", response.Code, response.Body.String())
+	}
+	if store.campaign.ID != "" || len(store.campaign.Candidates) != 0 {
+		t.Fatalf("stale binding created durable campaign: %+v", store.campaign)
+	}
+}
+
 func TestOptimizationApprovalRejectsProcessGlobalProviderAccountCompute(t *testing.T) {
 	base := &fakeStore{principal: domain.Principal{
 		ID: "operator-1", TenantID: "tenant-1", Name: "operator", Role: "operator",

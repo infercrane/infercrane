@@ -277,7 +277,7 @@ func TestValidateProposalRejectsTamperingAndQualifiedClaims(t *testing.T) {
 func TestProposalBindsTenantComputeConnectionToEveryCandidate(t *testing.T) {
 	proposal, err := catalogSource(t).Propose(context.Background(), Request{
 		ModelIdentity: "qwen3-8b", Provider: "runpod", ComputeConnectionID: "connection-1",
-		GPU: "L40S", Objective: "interactive", MaxCandidates: 3,
+		ProviderAdapter: "runpod-pods", GPU: "L40S", Objective: "interactive", MaxCandidates: 3,
 	})
 	if err != nil || len(proposal.Candidates) == 0 {
 		t.Fatalf("proposal=%+v err=%v", proposal, err)
@@ -286,6 +286,9 @@ func TestProposalBindsTenantComputeConnectionToEveryCandidate(t *testing.T) {
 		if candidate.Deployment.ComputeConnectionID != "connection-1" {
 			t.Fatalf("candidate lost tenant compute identity: %+v", candidate.Deployment)
 		}
+		if candidate.Deployment.Provider.Cloud != "runpod" || candidate.Deployment.Provider.Adapter != "runpod-pods" {
+			t.Fatalf("candidate escaped tenant provider adapter: %+v", candidate.Deployment.Provider)
+		}
 	}
 	if err = ValidateProposal(proposal); err != nil {
 		t.Fatalf("valid tenant-bound proposal rejected: %v", err)
@@ -293,6 +296,24 @@ func TestProposalBindsTenantComputeConnectionToEveryCandidate(t *testing.T) {
 	proposal.Candidates[0].Deployment.ComputeConnectionID = "connection-2"
 	if err = ValidateProposal(proposal); err == nil || !strings.Contains(err.Error(), "compute connection") {
 		t.Fatalf("candidate escaped requested compute boundary: %v", err)
+	}
+
+	proposal, err = catalogSource(t).Propose(context.Background(), Request{
+		ModelIdentity: "qwen3-8b", Provider: "runpod", ComputeConnectionID: "connection-1",
+		ProviderAdapter: "runpod-pods", GPU: "L40S", Objective: "interactive", MaxCandidates: 3,
+	})
+	if err != nil || len(proposal.Candidates) == 0 {
+		t.Fatalf("proposal=%+v err=%v", proposal, err)
+	}
+	proposal.Candidates[0].Deployment.Provider.Adapter = "skypilot"
+	if err = ValidateProposal(proposal); err == nil || !strings.Contains(err.Error(), "provider adapter") {
+		t.Fatalf("candidate escaped requested provider adapter boundary: %v", err)
+	}
+	if _, err = catalogSource(t).Propose(context.Background(), Request{
+		ModelIdentity: "qwen3-8b", Provider: "runpod", ProviderAdapter: "runpod-pods",
+		GPU: "L40S", Objective: "interactive", MaxCandidates: 1,
+	}); err == nil || !strings.Contains(err.Error(), "compute connection") {
+		t.Fatalf("unbound provider adapter was accepted: %v", err)
 	}
 }
 
