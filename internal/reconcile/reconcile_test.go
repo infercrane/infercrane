@@ -137,15 +137,17 @@ func testRuntimeBackends(t *testing.T, inspector integration.RuntimeInspector) i
 }
 
 type fakeRouter struct {
-	startErr error
-	started  string
-	stopped  []string
-	running  []string
-	routes   *routes.Directory
+	startErr  error
+	started   string
+	startSpec router.Spec
+	stopped   []string
+	running   []string
+	routes    *routes.Directory
 }
 
 func (f *fakeRouter) Start(_ context.Context, spec router.Spec) (string, error) {
 	f.started = spec.ProcessID
+	f.startSpec = spec
 	if f.startErr != nil {
 		return "", f.startErr
 	}
@@ -286,6 +288,9 @@ func TestElasticRouteAuthenticatesToInternalRouter(t *testing.T) {
 	if published.UpstreamAPIKey != "internal-router-secret" {
 		t.Fatalf("internal router credential=%q", published.UpstreamAPIKey)
 	}
+	if backend.startSpec.WorkerAPIKey != "internal-router-secret" {
+		t.Fatalf("router worker credential=%q", backend.startSpec.WorkerAPIKey)
+	}
 
 	// Prove restart recovery also republishes the credential when the router
 	// generation already exists but the in-memory route directory is empty.
@@ -297,6 +302,43 @@ func TestElasticRouteAuthenticatesToInternalRouter(t *testing.T) {
 	published, ok = directory.Get("prod")
 	if !ok || published.UpstreamAPIKey != "internal-router-secret" {
 		t.Fatalf("recovered route=%#v published=%t", published, ok)
+	}
+}
+
+func TestTenantComputeRouterUsesDerivedWorkerCredential(t *testing.T) {
+	store, directory := reconcilerFixture()
+	store.deployment.TenantID = "tenant-1"
+	store.deployment.ComputeConnectionID = "connection-1"
+	store.target.ProviderDetails = `{"worker_credential_version":"tenant-hmac-v1"}`
+	backend := &fakeRouter{routes: directory}
+	inspector := &credentialRuntime{}
+	reconciler := Reconciler{
+		Store:        store,
+		Routes:       directory,
+		Router:       backend,
+		RouterAPIKey: "control-plane-secret",
+		WorkerCredential: func(tenant, deploymentID, version string) string {
+			if tenant != "tenant-1" || deploymentID != "deployment" || version != "tenant-hmac-v1" {
+				t.Fatalf("unexpected derivation input: %q %q %q", tenant, deploymentID, version)
+			}
+			return "tenant-worker-secret"
+		},
+		Runtimes:        testRuntimeBackends(t, inspector),
+		RouterStartPort: 18080,
+		InstanceID:      "instance",
+	}
+	if err := reconciler.Once(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if inspector.credential != "tenant-worker-secret" {
+		t.Fatalf("health probe credential=%q", inspector.credential)
+	}
+	if backend.startSpec.WorkerAPIKey != "tenant-worker-secret" {
+		t.Fatalf("router worker credential=%q", backend.startSpec.WorkerAPIKey)
+	}
+	published, ok := directory.GetForTenant("tenant-1", "prod")
+	if !ok || published.UpstreamAPIKey != "tenant-worker-secret" {
+		t.Fatalf("published=%t route=%#v", ok, published)
 	}
 }
 

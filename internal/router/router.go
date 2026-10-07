@@ -25,6 +25,10 @@ type Spec struct {
 	Workers                        []string
 	Strategy, Host                 string
 	Port                           int
+	// WorkerAPIKey authenticates the router to the selected worker set. It is
+	// deployment-scoped for BYOC replicas and must not be replaced by the
+	// control-plane API key.
+	WorkerAPIKey string
 }
 type Backend interface {
 	Start(context.Context, Spec) (string, error)
@@ -57,7 +61,14 @@ func (v *VLLM) Command(binary string, s Spec) []string {
 	if metricsPort > 65535 {
 		metricsPort = s.Port - 10000
 	}
-	return append(args, "--api-key", v.APIKey, "--retry-max-retries", "1", "--prometheus-port", strconv.Itoa(metricsPort))
+	workerAPIKey := s.WorkerAPIKey
+	if workerAPIKey == "" {
+		workerAPIKey = v.APIKey
+	}
+	// vLLM Router checks new workers every 30 seconds by default, while the
+	// control plane has a bounded startup deadline. A one-second check keeps the
+	// router honest without turning a healthy worker into a repeated timeout.
+	return append(args, "--api-key", workerAPIKey, "--worker-startup-check-interval", "1", "--retry-max-retries", "1", "--prometheus-port", strconv.Itoa(metricsPort))
 }
 func (v *VLLM) Start(ctx context.Context, s Spec) (string, error) {
 	processID := s.ProcessID
@@ -111,8 +122,12 @@ func (v *VLLM) Start(ctx context.Context, s Spec) (string, error) {
 			payload, _ := json.Marshal(map[string]any{"model": s.Model, "messages": []map[string]string{{"role": "user", "content": "ready"}}, "max_tokens": 1})
 			req, _ := http.NewRequestWithContext(ctx, http.MethodPost, endpoint+"/v1/chat/completions", bytes.NewReader(payload))
 			req.Header.Set("Content-Type", "application/json")
-			if v.APIKey != "" {
-				req.Header.Set("Authorization", "Bearer "+v.APIKey)
+			workerAPIKey := s.WorkerAPIKey
+			if workerAPIKey == "" {
+				workerAPIKey = v.APIKey
+			}
+			if workerAPIKey != "" {
+				req.Header.Set("Authorization", "Bearer "+workerAPIKey)
 			}
 			resp, e := client.Do(req)
 			if e == nil {
