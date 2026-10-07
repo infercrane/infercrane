@@ -106,6 +106,8 @@ func GPUTypeID(provider, gpu string) string {
 		return "NVIDIA A40"
 	case "A100-80GB", "A100 80GB", "NVIDIA A100-SXM4-80GB":
 		return "NVIDIA A100-SXM4-80GB"
+	case "A100-40GB", "A100 40GB", "NVIDIA A100-SXM4-40GB":
+		return "NVIDIA A100-SXM4-40GB"
 	case "A100 PCIE", "A100 80GB PCIE", "NVIDIA A100 80GB PCIE":
 		return "NVIDIA A100 80GB PCIe"
 	default:

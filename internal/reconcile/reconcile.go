@@ -195,7 +195,7 @@ func (r *Reconciler) Once(ctx context.Context) error {
 				case <-ctx.Done():
 					return
 				}
-				ok, models := runtimeBackend.Inspector.Inspect(ctx, target.URL)
+				ok, models := inspectRuntimeTarget(ctx, runtimeBackend.Inspector, d, target, r.RouterAPIKey, r.WorkerCredential)
 				inspections[i] = inspection{target: target, ok: ok, models: models}
 			}()
 		}
@@ -619,6 +619,26 @@ func routeWorkerAPIKey(deployment domain.Deployment, targets []domain.Target, fa
 		return ""
 	}
 	return derive(deployment.TenantID, deployment.ID, version)
+}
+
+type credentialRuntimeInspector interface {
+	InspectWithCredential(context.Context, string, string) (bool, map[string]struct{})
+}
+
+func inspectRuntimeTarget(ctx context.Context, inspector integration.RuntimeInspector, deployment domain.Deployment, target domain.Target, fallback string, derive func(string, string, string) string) (bool, map[string]struct{}) {
+	credential := routeWorkerAPIKey(deployment, []domain.Target{target}, fallback, derive)
+	if credential != "" {
+		if credentialed, ok := inspector.(credentialRuntimeInspector); ok {
+			return credentialed.InspectWithCredential(ctx, target.URL, credential)
+		}
+	}
+	// A tenant compute target is always protected by its deployment-scoped
+	// worker credential. Never downgrade its health probe to an unauthenticated
+	// request when credential evidence or inspector support is missing.
+	if deployment.ComputeConnectionID != "" {
+		return false, nil
+	}
+	return inspector.Inspect(ctx, target.URL)
 }
 
 func (r *Reconciler) protocolCapabilities(runtime string) runtimecontract.ProtocolCapabilities {

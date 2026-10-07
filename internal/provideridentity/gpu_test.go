@@ -8,6 +8,7 @@ func TestRunPodAliasesResolveToExactProviderSKU(t *testing.T) {
 		"H100 PCIe":   "NVIDIA H100 PCIe",
 		"H100 NVL":    "NVIDIA H100 NVL",
 		"A100 80GB":   "NVIDIA A100-SXM4-80GB",
+		"A100-40GB":   "NVIDIA A100-SXM4-40GB",
 		"A100 PCIe":   "NVIDIA A100 80GB PCIe",
 		"L40S":        "NVIDIA L40S",
 		"unknown-sku": "unknown-sku",

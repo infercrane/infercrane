@@ -751,6 +751,7 @@ func TestEnsureCloudReplicaPreservesProviderAuthorizationQuotaAndCapacity(t *tes
 		retryable           bool
 	}{
 		{"authorization", "provider_authorization_failed", "provider_failed", provision.ErrProviderAuthorization, false},
+		{"invalid configuration", "provider_configuration_invalid", "provider_failed", provision.ErrInvalidReplicaSpec, false},
 		{"quota", "provider_capacity_constrained", "capacity_unavailable", provision.ErrProviderQuota, true},
 		{"capacity", "provider_capacity_unavailable", "capacity_unavailable", provision.ErrProviderCapacity, true},
 	}

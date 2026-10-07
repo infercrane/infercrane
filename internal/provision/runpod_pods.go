@@ -353,6 +353,12 @@ func (r RunPodPods) do(ctx context.Context, method, path string, body, output an
 		switch response.StatusCode {
 		case http.StatusUnauthorized, http.StatusForbidden:
 			return fmt.Errorf("%w: RunPod Pod API returned HTTP %d: %s", ErrProviderAuthorization, response.StatusCode, message)
+		case http.StatusBadRequest, http.StatusUnprocessableEntity:
+			// RunPod uses these responses for request-schema and immutable
+			// launch-tuple errors. Retrying the same durable intent cannot heal
+			// either condition and can keep a customer operation alive for its
+			// entire retry budget without ever creating capacity.
+			return fmt.Errorf("%w: RunPod Pod API returned HTTP %d: %s", ErrInvalidReplicaSpec, response.StatusCode, message)
 		case http.StatusConflict, http.StatusTooManyRequests:
 			return fmt.Errorf("%w: RunPod Pod API returned HTTP %d: %s", ErrProviderCapacity, response.StatusCode, message)
 		default:
