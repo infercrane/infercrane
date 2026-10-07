@@ -109,6 +109,35 @@ func TestCompositeDriverRequiresCostAuthorityBeforeAnyMutation(t *testing.T) {
 	}
 }
 
+func TestAuthorizeCostAcceptsQuoteObservedDuringLiveRefresh(t *testing.T) {
+	now := time.Now().UTC()
+	costs := costAuthorityFixture{quote: CostQuote{
+		HourlyUSD:  2.18,
+		Source:     "provider-native-live-price",
+		ObservedAt: now.Add(5 * time.Second),
+		ValidUntil: now.Add(2 * time.Minute),
+	}}
+	err := AuthorizeCost(t.Context(), costs, "tenant-1", optimizer.DeploymentDraft{}, Budget{MaxCostUSD: 2.20, ExpiresAt: now.Add(time.Hour)}, now)
+	if err != nil {
+		t.Fatalf("fresh quote observed after request start was rejected: %v", err)
+	}
+}
+
+func TestAuthorizeCostRejectsMateriallyFutureDatedQuote(t *testing.T) {
+	now := time.Now().UTC()
+	costs := costAuthorityFixture{quote: CostQuote{
+		HourlyUSD:  2.18,
+		Source:     "future-price",
+		ObservedAt: now.Add(maximumCostQuoteObservationDelay + time.Second),
+		ValidUntil: now.Add(2 * time.Hour),
+	}}
+	err := AuthorizeCost(t.Context(), costs, "tenant-1", optimizer.DeploymentDraft{}, Budget{MaxCostUSD: 3, ExpiresAt: now.Add(time.Hour)}, now)
+	var failure operations.Failure
+	if !errors.As(err, &failure) || failure.Code != "optimization_cost_quote_invalid" {
+		t.Fatalf("materially future quote was accepted: %v", err)
+	}
+}
+
 func TestCompositeDriverAdoptsNewEndpointChildAfterLostResponse(t *testing.T) {
 	now := time.Now().UTC()
 	store, candidate := compositeFixture(t, IntentNewEndpoint, now)

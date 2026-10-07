@@ -52,6 +52,12 @@ type CostAuthority interface {
 	Quote(context.Context, string, optimizer.DeploymentDraft, time.Time) (CostQuote, error)
 }
 
+// A live provider quote is observed after authorization starts because its
+// timestamp is recorded only after the network refresh returns. Bound that
+// expected ordering gap while still rejecting materially future-dated
+// evidence from a broken or untrusted authority.
+const maximumCostQuoteObservationDelay = time.Minute
+
 type CandidateBenchmark interface {
 	Run(context.Context, domain.OptimizationCampaign, domain.OptimizationCandidateRun, performanceprofile.Profile) (domain.BenchmarkResult, error)
 }
@@ -328,7 +334,7 @@ func AuthorizeCost(ctx context.Context, costs CostAuthority, tenant string, draf
 	if err != nil {
 		return operations.Permanent("optimization_cost_quote_unavailable", err)
 	}
-	if quote.Source == "" || quote.ObservedAt.IsZero() || quote.ObservedAt.After(now) || quote.ValidUntil.Before(now) || quote.HourlyUSD <= 0 || math.IsNaN(quote.HourlyUSD) || math.IsInf(quote.HourlyUSD, 0) {
+	if quote.Source == "" || quote.ObservedAt.IsZero() || quote.ObservedAt.After(now.Add(maximumCostQuoteObservationDelay)) || quote.ValidUntil.Before(now) || quote.HourlyUSD <= 0 || math.IsNaN(quote.HourlyUSD) || math.IsInf(quote.HourlyUSD, 0) {
 		return operations.Permanent("optimization_cost_quote_invalid", errors.New("execution cost quote must be fresh, sourced, finite, and positive"))
 	}
 	projected := quote.HourlyUSD * budget.ExpiresAt.Sub(now).Hours()
