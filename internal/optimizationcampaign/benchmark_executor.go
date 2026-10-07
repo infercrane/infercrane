@@ -97,7 +97,7 @@ func (e BenchmarkExecutor) Run(ctx context.Context, campaign domain.Optimization
 	if err != nil {
 		return domain.BenchmarkResult{}, err
 	}
-	quote, err := e.Costs.Quote(ctx, draft, ended)
+	quote, err := e.Costs.Quote(ctx, candidate.TenantID, draft, ended)
 	if err != nil {
 		return domain.BenchmarkResult{}, fmt.Errorf("bind sourced candidate cost: %w", err)
 	}

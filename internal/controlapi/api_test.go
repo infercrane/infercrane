@@ -80,6 +80,12 @@ type fakeStore struct {
 
 type fakeOptimizationCosts struct{}
 
+type optimizationCostFunc func(context.Context, string, optimizer.DeploymentDraft, time.Time) (optimizationcampaign.CostQuote, error)
+
+func (f optimizationCostFunc) Quote(ctx context.Context, tenant string, draft optimizer.DeploymentDraft, requiredUntil time.Time) (optimizationcampaign.CostQuote, error) {
+	return f(ctx, tenant, draft, requiredUntil)
+}
+
 type fakeLaunchProber struct {
 	evidence provision.LaunchProbeEvidence
 	err      error
@@ -221,7 +227,7 @@ func (f launchProbeFunc) ProbeLaunch(ctx context.Context, request provision.Laun
 	return f(ctx, request)
 }
 
-func (fakeOptimizationCosts) Quote(_ context.Context, _ optimizer.DeploymentDraft, requiredUntil time.Time) (optimizationcampaign.CostQuote, error) {
+func (fakeOptimizationCosts) Quote(_ context.Context, _ string, _ optimizer.DeploymentDraft, requiredUntil time.Time) (optimizationcampaign.CostQuote, error) {
 	return optimizationcampaign.CostQuote{HourlyUSD: 2, Source: "test-price-list", ObservedAt: requiredUntil.Add(-time.Hour), ValidUntil: requiredUntil.Add(time.Hour)}, nil
 }
 
@@ -241,9 +247,10 @@ type fakeProviderEndpointStore struct {
 }
 
 type fakeComputeConnections struct {
-	item       domain.ComputeConnection
-	credential string
-	err        error
+	item                                      domain.ComputeConnection
+	credential                                string
+	err                                       error
+	resolveTenant, resolveID, resolveProvider string
 }
 
 func (f *fakeComputeConnections) Create(_ context.Context, tenant string, request computeconnection.CreateRequest) (domain.ComputeConnection, error) {
@@ -264,6 +271,7 @@ func (f *fakeComputeConnections) Get(_ context.Context, tenant, id string) (doma
 	return f.item, nil
 }
 func (f *fakeComputeConnections) Resolve(ctx context.Context, tenant, id, provider string) (domain.ComputeConnection, string, error) {
+	f.resolveTenant, f.resolveID, f.resolveProvider = tenant, id, provider
 	item, err := f.Get(ctx, tenant, id)
 	if err != nil {
 		return domain.ComputeConnection{}, "", err
@@ -1686,17 +1694,83 @@ func TestOptimizationApprovalAcceptsVerifiedTenantComputeConnection(t *testing.T
 	}
 	connections := &fakeComputeConnections{item: domain.ComputeConnection{
 		ID: "connection-1", TenantID: "tenant-1", Provider: "runpod", Adapter: "runpod-pods", Status: "verified",
-	}}
+	}, credential: "tenant-key"}
+	providerQuoteCalls := 0
+	costs := optimizationcampaign.ConnectionPricingAuthority{
+		Connections: connections,
+		Providers: map[string]func(string) optimizationcampaign.CostAuthority{
+			"runpod": func(credential string) optimizationcampaign.CostAuthority {
+				if credential != "tenant-key" {
+					t.Fatalf("wrong credential reached pricing factory")
+				}
+				return optimizationCostFunc(func(_ context.Context, tenant string, quoted optimizer.DeploymentDraft, requiredUntil time.Time) (optimizationcampaign.CostQuote, error) {
+					providerQuoteCalls++
+					if tenant != "tenant-1" || quoted.ComputeConnectionID != "connection-1" {
+						t.Fatalf("quote lost tenant connection identity: tenant=%q draft=%+v", tenant, quoted)
+					}
+					return optimizationcampaign.CostQuote{HourlyUSD: 2, Source: "runpod-live", ObservedAt: requiredUntil.Add(-time.Hour), ValidUntil: requiredUntil.Add(time.Hour)}, nil
+				})
+			},
+		},
+	}
 	handler := (API{
-		Store: store, Authenticator: base, OptimizationCosts: fakeOptimizationCosts{},
+		Store: store, Authenticator: base, OptimizationCosts: costs,
 		ComputeConnections: connections,
 	}).Handler()
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/optimization/campaigns/campaign-1/approve", strings.NewReader(`{"max_cost_usd":20,"expires_in_seconds":3600}`))
 	request.Header.Set("Authorization", "Bearer tenant-session")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusAccepted || store.campaign.State != optimizationcampaign.CampaignApproved || store.operation.Kind != optimizationcampaign.ExecuteKind {
+	if response.Code != http.StatusAccepted || store.campaign.State != optimizationcampaign.CampaignApproved || store.operation.Kind != optimizationcampaign.ExecuteKind || providerQuoteCalls != 1 {
 		t.Fatalf("tenant-bound optimization was rejected: status=%d body=%s", response.Code, response.Body.String())
+	}
+	if connections.resolveTenant != "tenant-1" || connections.resolveID != "connection-1" || connections.resolveProvider != "runpod" {
+		t.Fatalf("approval resolved wrong compute connection: %+v", connections)
+	}
+}
+
+func TestOptimizationApprovalRejectsExpiredTenantCredentialBeforeMutation(t *testing.T) {
+	base := &fakeStore{principal: domain.Principal{
+		ID: "operator-1", TenantID: "tenant-1", Name: "operator", Role: "operator",
+		Scopes: []string{"read", "deploy"},
+	}}
+	var draft optimizer.DeploymentDraft
+	draft.Provider.Cloud, draft.Provider.Adapter = "runpod", "runpod-pods"
+	draft.ComputeConnectionID = "connection-1"
+	draftJSON, err := json.Marshal(draft)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &fakeOptimizationCampaignStore{
+		fakeStore: base,
+		campaign: domain.OptimizationCampaign{
+			ID: "campaign-1", TenantID: "tenant-1", State: optimizationcampaign.CampaignAwaitingApproval,
+			Candidates: []domain.OptimizationCandidateRun{{ID: "candidate-1", DeploymentSpecJSON: string(draftJSON)}},
+		},
+	}
+	connections := &fakeComputeConnections{item: domain.ComputeConnection{
+		ID: "connection-1", TenantID: "tenant-1", Provider: "runpod", Adapter: "runpod-pods", Status: "verified",
+	}, credential: "expired-key"}
+	costs := optimizationcampaign.ConnectionPricingAuthority{
+		Connections: connections,
+		Providers: map[string]func(string) optimizationcampaign.CostAuthority{
+			"runpod": func(string) optimizationcampaign.CostAuthority {
+				return optimizationCostFunc(func(context.Context, string, optimizer.DeploymentDraft, time.Time) (optimizationcampaign.CostQuote, error) {
+					return optimizationcampaign.CostQuote{}, errors.New("provider rejected credential")
+				})
+			},
+		},
+	}
+	handler := (API{Store: store, Authenticator: base, OptimizationCosts: costs, ComputeConnections: connections}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/optimization/campaigns/campaign-1/approve", strings.NewReader(`{"max_cost_usd":20,"expires_in_seconds":3600}`))
+	request.Header.Set("Authorization", "Bearer tenant-session")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), `"code":"optimization_cost_authority_rejected"`) || !strings.Contains(response.Body.String(), "reconnect") {
+		t.Fatalf("expired credential status=%d body=%s", response.Code, response.Body.String())
+	}
+	if store.campaign.State != optimizationcampaign.CampaignAwaitingApproval || store.operation.Kind != "" {
+		t.Fatalf("expired credential changed durable state: campaign=%s operation=%+v", store.campaign.State, store.operation)
 	}
 }
 

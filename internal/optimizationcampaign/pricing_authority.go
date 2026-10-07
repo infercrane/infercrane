@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/optimizer"
 	"github.com/infercrane/infercrane/internal/pricing"
 	"github.com/infercrane/infercrane/internal/provideridentity"
@@ -20,7 +22,7 @@ type PricingAuthority struct {
 	Now      func() time.Time
 }
 
-func (a PricingAuthority) Quote(ctx context.Context, draft optimizer.DeploymentDraft, requiredUntil time.Time) (CostQuote, error) {
+func (a PricingAuthority) Quote(ctx context.Context, _ string, draft optimizer.DeploymentDraft, requiredUntil time.Time) (CostQuote, error) {
 	if a.Provider == nil {
 		return CostQuote{}, errors.New("provider pricing is not configured")
 	}
@@ -57,4 +59,70 @@ func (a PricingAuthority) Quote(ctx context.Context, draft optimizer.DeploymentD
 		return CostQuote{}, errors.New("exact provider price expired before execution authorization")
 	}
 	return CostQuote{HourlyUSD: estimate.Hourly, Source: estimate.Source, ObservedAt: estimate.ObservedAt.UTC(), ValidUntil: validUntil, Locked: locked}, nil
+}
+
+// ComputeConnectionResolver decrypts one tenant-owned provider credential only
+// at the network boundary. Implementations must not log or persist the returned
+// credential outside their existing encrypted connection store.
+type ComputeConnectionResolver interface {
+	Resolve(context.Context, string, string, string) (domain.ComputeConnection, string, error)
+}
+
+// ConnectionPricingAuthority prevents a BYOC campaign from inheriting an
+// operator-global account. A draft with a compute connection must resolve that
+// exact tenant-owned credential and obtain a fresh provider-native quote. It
+// never falls back to Managed when connection validation or pricing fails.
+type ConnectionPricingAuthority struct {
+	Managed     CostAuthority
+	Connections ComputeConnectionResolver
+	Providers   map[string]func(string) CostAuthority
+}
+
+func (a ConnectionPricingAuthority) Quote(ctx context.Context, tenant string, draft optimizer.DeploymentDraft, requiredUntil time.Time) (CostQuote, error) {
+	connectionID := strings.TrimSpace(draft.ComputeConnectionID)
+	if connectionID == "" {
+		if a.Managed == nil {
+			return CostQuote{}, errors.New("managed execution pricing is not configured")
+		}
+		return a.Managed.Quote(ctx, tenant, draft, requiredUntil)
+	}
+	provider := strings.ToLower(strings.TrimSpace(draft.Provider.Cloud))
+	if strings.TrimSpace(tenant) == "" || provider == "" || a.Connections == nil {
+		return CostQuote{}, errors.New("selected compute connection cannot be resolved for execution pricing")
+	}
+	_, credential, err := a.Connections.Resolve(ctx, tenant, connectionID, provider)
+	if err != nil || strings.TrimSpace(credential) == "" {
+		return CostQuote{}, errors.New("selected compute connection is unavailable; reconnect it before approving spend")
+	}
+	factory := a.Providers[provider]
+	if factory == nil {
+		return CostQuote{}, fmt.Errorf("selected %s compute connection does not support live execution pricing", provider)
+	}
+	authority := factory(credential)
+	if authority == nil {
+		return CostQuote{}, fmt.Errorf("selected %s compute connection pricing is not configured", provider)
+	}
+	quote, err := authority.Quote(ctx, tenant, draft, requiredUntil)
+	if err != nil {
+		return CostQuote{}, fmt.Errorf("selected %s compute connection could not provide a current price; reconnect it or choose another connection", provider)
+	}
+	return quote, nil
+}
+
+// RefreshingPricingAuthority refreshes a private, request-scoped catalog
+// before every quote. It is used for tenant credentials so an approval proves
+// the credential and current account-visible price immediately before spend.
+type RefreshingPricingAuthority struct {
+	Refresh  func(context.Context) error
+	Delegate CostAuthority
+}
+
+func (a RefreshingPricingAuthority) Quote(ctx context.Context, tenant string, draft optimizer.DeploymentDraft, requiredUntil time.Time) (CostQuote, error) {
+	if a.Refresh == nil || a.Delegate == nil {
+		return CostQuote{}, errors.New("provider-native pricing refresh is not configured")
+	}
+	if err := a.Refresh(ctx); err != nil {
+		return CostQuote{}, errors.New("provider-native pricing refresh failed")
+	}
+	return a.Delegate.Quote(ctx, tenant, draft, requiredUntil)
 }

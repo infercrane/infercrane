@@ -84,7 +84,7 @@ func (f *compositeStoreFixture) EvaluateReleaseGuard(context.Context, string, st
 
 type costAuthorityFixture struct{ quote CostQuote }
 
-func (f costAuthorityFixture) Quote(context.Context, optimizer.DeploymentDraft, time.Time) (CostQuote, error) {
+func (f costAuthorityFixture) Quote(context.Context, string, optimizer.DeploymentDraft, time.Time) (CostQuote, error) {
 	return f.quote, nil
 }
 
