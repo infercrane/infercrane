@@ -69,3 +69,43 @@ func TestDynamicCatalogReplacesOneProviderGPUShard(t *testing.T) {
 		t.Fatalf("empty shard did not remove only H100: %#v", snapshot)
 	}
 }
+
+func TestDynamicCatalogDoesNotLetStaleManualEvidenceShadowProviderQuote(t *testing.T) {
+	now := time.Now().UTC()
+	request := Request{Cloud: "runpod", Region: "global", GPU: "NVIDIA L40S", GPUCount: 1, Replicas: 1}
+	catalog := NewDynamicCatalog(map[Request]Estimate{request: {
+		Currency: "USD", Hourly: .75, Source: "operator-snapshot",
+		ObservedAt: now.Add(-2 * time.Hour), StaleAfter: time.Hour,
+	}})
+	catalog.ReplaceProvider("runpod", map[Request]Estimate{request: {
+		Currency: "USD", Hourly: 1.09, CostScope: CostScopeInstanceTotal,
+		Authority: PriceAuthorityProviderAPI, Source: "https://api.runpod.io/graphql",
+		ObservedAt: now, StaleAfter: time.Minute,
+	}})
+
+	estimate, err := catalog.Estimate(t.Context(), request)
+	if err != nil || estimate.Hourly != 1.09 || estimate.Authority != PriceAuthorityProviderAPI {
+		t.Fatalf("stale manual evidence shadowed provider quote: %#v err=%v", estimate, err)
+	}
+}
+
+func TestDynamicCatalogKeepsFreshAuthoritativeManualOverride(t *testing.T) {
+	now := time.Now().UTC()
+	request := Request{Cloud: "runpod", Region: "global", GPU: "NVIDIA L40S", GPUCount: 1, Replicas: 1}
+	manual := Estimate{
+		Currency: "USD", Hourly: .88, CostScope: CostScopeInstanceTotal,
+		Authority: PriceAuthorityAccountContract, Source: "account-contract",
+		ObservedAt: now, StaleAfter: time.Hour,
+	}
+	catalog := NewDynamicCatalog(map[Request]Estimate{request: manual})
+	catalog.ReplaceProvider("runpod", map[Request]Estimate{request: {
+		Currency: "USD", Hourly: 1.09, CostScope: CostScopeInstanceTotal,
+		Authority: PriceAuthorityProviderAPI, Source: "https://api.runpod.io/graphql",
+		ObservedAt: now, StaleAfter: time.Minute,
+	}})
+
+	estimate, err := catalog.Estimate(t.Context(), request)
+	if err != nil || estimate.Hourly != manual.Hourly || estimate.Authority != PriceAuthorityAccountContract {
+		t.Fatalf("fresh account contract did not remain authoritative: %#v err=%v", estimate, err)
+	}
+}

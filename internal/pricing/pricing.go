@@ -126,14 +126,23 @@ func (c *DynamicCatalog) Estimate(_ context.Context, request Request) (Estimate,
 	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	if estimate, ok := c.manual[request]; ok {
-		return estimate, nil
+	manual, hasManual := c.manual[request]
+	feed, hasFeed := c.feed[request]
+	// Operator observations are useful overrides only while they remain current
+	// and carry at least the same deployment authority as the provider feed.
+	// A forgotten JSON snapshot must never shadow a fresh provider-native quote
+	// and silently disable a launch or optimization campaign.
+	now := time.Now().UTC()
+	if hasManual && !manual.Stale(now) && (manual.DeploymentComparable() || !hasFeed) {
+		return manual, nil
 	}
-	estimate, ok := c.feed[request]
-	if !ok {
-		return Estimate{}, ErrUnavailable
+	if hasFeed {
+		return feed, nil
 	}
-	return estimate, nil
+	if hasManual {
+		return manual, nil
+	}
+	return Estimate{}, ErrUnavailable
 }
 
 func (c *DynamicCatalog) ReplaceProvider(provider string, prices map[Request]Estimate) {

@@ -1491,7 +1491,7 @@ func (a API) optimizationCampaigns(w http.ResponseWriter, r *http.Request) {
 
 func (a API) approveOptimizationCampaign(w http.ResponseWriter, r *http.Request) {
 	if a.OptimizationCosts == nil {
-		writeError(w, http.StatusServiceUnavailable, "optimization_execution_unavailable", "optimization execution requires AIPerf and fresh exact provider pricing; planning remains available")
+		writeError(w, http.StatusServiceUnavailable, "optimization_execution_unavailable", "optimization execution requires the AIPerf worker; planning remains available")
 		return
 	}
 	store, ok := a.Store.(optimizationCampaignStore)

@@ -4215,6 +4215,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	}
 	benchmarkBackends := map[string]controlapi.BackendMetadata{
 		"runpod-serverless": {APIKey: cfg.RunPodAPIKey, APIKeyEnv: "RUNPOD_API_KEY", Serverless: true},
+		"runpod-pods":       {APIKey: cfg.APIKey, APIKeyEnv: "INFERCRANE_WORKER_API_KEY"},
 	}
 	for _, manifest := range configuredSkyPilotProviders {
 		benchmarkBackends[skyPilotAdapter(manifest.Cloud)] = controlapi.BackendMetadata{APIKey: cfg.APIKey, APIKeyEnv: "INFERCRANE_WORKER_API_KEY"}
@@ -4334,16 +4335,11 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		}()
 	}
 	_, aiperfErr := exec.LookPath(cfg.AIPerfBinary)
-	optimizationExecutionEnabled := false
-	for _, estimate := range priceCatalog.Snapshot() {
-		if !estimate.GuaranteedUntil.IsZero() && estimate.GuaranteedUntil.After(time.Now().UTC()) {
-			optimizationExecutionEnabled = aiperfErr == nil
-			break
-		}
-	}
 	var optimizationCosts optimizationcampaign.CostAuthority
-	if optimizationExecutionEnabled {
+	if aiperfErr == nil {
 		optimizationCosts = optimizationcampaign.PricingAuthority{Provider: priceCatalog}
+	} else {
+		logger.Warn("optimization execution disabled because AIPerf is unavailable", "binary", cfg.AIPerfBinary)
 	}
 	var asyncService *asyncinference.Service
 	if cfg.AsyncEncryptionKey != "" {
