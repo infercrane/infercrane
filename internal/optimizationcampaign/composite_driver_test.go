@@ -185,6 +185,21 @@ func TestCompositeDriverNeverGuardsNewEndpointAndPreservesGuardDecision(t *testi
 	}
 }
 
+func TestCandidateProvisioningPreservesTenantComputeConnection(t *testing.T) {
+	draft := optimizer.DeploymentDraft{Name: "qwen", ComputeConnectionID: "connection-1"}
+	draft.Model.ID = "Qwen/Qwen3-8B"
+	draft.Provider.Cloud, draft.Provider.Adapter = "runpod", "runpod-pods"
+	draft.Compute.Mode, draft.Runtime.Engine = "elastic", "vllm"
+	draft.Resources.GPU, draft.Resources.GPUCount = "L40S", 1
+	draft.Scaling.MinReplicas, draft.Scaling.MaxReplicas = 1, 1
+
+	request := draftCloudRequest(draft)
+	spec := draftRevisionSpec(draft)
+	if request.ComputeConnectionID != "connection-1" || spec.ComputeConnectionID != "connection-1" {
+		t.Fatalf("tenant compute identity was lost: request=%+v spec=%+v", request, spec)
+	}
+}
+
 func compositeFixture(t *testing.T, intent string, now time.Time) (*compositeStoreFixture, domain.OptimizationCandidateRun) {
 	t.Helper()
 	draft := optimizer.DeploymentDraft{APIVersion: "infercrane.dev/v1", Kind: "Deployment", Name: "qwen-interactive"}

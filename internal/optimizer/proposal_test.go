@@ -274,6 +274,28 @@ func TestValidateProposalRejectsTamperingAndQualifiedClaims(t *testing.T) {
 	}
 }
 
+func TestProposalBindsTenantComputeConnectionToEveryCandidate(t *testing.T) {
+	proposal, err := catalogSource(t).Propose(context.Background(), Request{
+		ModelIdentity: "qwen3-8b", Provider: "runpod", ComputeConnectionID: "connection-1",
+		GPU: "L40S", Objective: "interactive", MaxCandidates: 3,
+	})
+	if err != nil || len(proposal.Candidates) == 0 {
+		t.Fatalf("proposal=%+v err=%v", proposal, err)
+	}
+	for _, candidate := range proposal.Candidates {
+		if candidate.Deployment.ComputeConnectionID != "connection-1" {
+			t.Fatalf("candidate lost tenant compute identity: %+v", candidate.Deployment)
+		}
+	}
+	if err = ValidateProposal(proposal); err != nil {
+		t.Fatalf("valid tenant-bound proposal rejected: %v", err)
+	}
+	proposal.Candidates[0].Deployment.ComputeConnectionID = "connection-2"
+	if err = ValidateProposal(proposal); err == nil || !strings.Contains(err.Error(), "compute connection") {
+		t.Fatalf("candidate escaped requested compute boundary: %v", err)
+	}
+}
+
 func TestCatalogProposalCarriesFullMeasuredSLOBoundary(t *testing.T) {
 	errorRate, goodput := 0.01, 4.0
 	proposal, err := catalogSource(t).Propose(context.Background(), Request{ModelIdentity: "qwen3-8b", Provider: "aws", Region: "eu-central-1", GPU: "L40S", Objective: "interactive", MaxErrorRate: &errorRate, MinGoodput: &goodput})

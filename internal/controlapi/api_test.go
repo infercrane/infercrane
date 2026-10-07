@@ -1665,6 +1665,41 @@ func TestOptimizationApprovalRejectsProcessGlobalProviderAccountCompute(t *testi
 	}
 }
 
+func TestOptimizationApprovalAcceptsVerifiedTenantComputeConnection(t *testing.T) {
+	base := &fakeStore{principal: domain.Principal{
+		ID: "operator-1", TenantID: "tenant-1", Name: "operator", Role: "operator",
+		Scopes: []string{"read", "deploy"},
+	}}
+	var draft optimizer.DeploymentDraft
+	draft.Provider.Cloud, draft.Provider.Adapter = "runpod", "runpod-pods"
+	draft.ComputeConnectionID = "connection-1"
+	draftJSON, err := json.Marshal(draft)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &fakeOptimizationCampaignStore{
+		fakeStore: base,
+		campaign: domain.OptimizationCampaign{
+			ID: "campaign-1", TenantID: "tenant-1", State: optimizationcampaign.CampaignAwaitingApproval,
+			Candidates: []domain.OptimizationCandidateRun{{ID: "candidate-1", DeploymentSpecJSON: string(draftJSON)}},
+		},
+	}
+	connections := &fakeComputeConnections{item: domain.ComputeConnection{
+		ID: "connection-1", TenantID: "tenant-1", Provider: "runpod", Adapter: "runpod-pods", Status: "verified",
+	}}
+	handler := (API{
+		Store: store, Authenticator: base, OptimizationCosts: fakeOptimizationCosts{},
+		ComputeConnections: connections,
+	}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/optimization/campaigns/campaign-1/approve", strings.NewReader(`{"max_cost_usd":20,"expires_in_seconds":3600}`))
+	request.Header.Set("Authorization", "Bearer tenant-session")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted || store.campaign.State != optimizationcampaign.CampaignApproved || store.operation.Kind != optimizationcampaign.ExecuteKind {
+		t.Fatalf("tenant-bound optimization was rejected: status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestPublicWorkloadProfilesFeedOptimizationWithoutPromotionClaims(t *testing.T) {
 	registry, err := integration.V1Catalog()
 	if err != nil {
