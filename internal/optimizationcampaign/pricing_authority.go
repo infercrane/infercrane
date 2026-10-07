@@ -104,6 +104,13 @@ func (a ConnectionPricingAuthority) Quote(ctx context.Context, tenant string, dr
 	}
 	quote, err := authority.Quote(ctx, tenant, draft, requiredUntil)
 	if err != nil {
+		if errors.Is(err, pricing.ErrUnavailable) {
+			gpu := strings.TrimSpace(draft.Resources.GPU)
+			if gpu == "" {
+				gpu = "requested accelerator"
+			}
+			return CostQuote{}, fmt.Errorf("selected %s compute currently has no provider offer for %s; retry when capacity returns or choose another accelerator: %w", provider, gpu, pricing.ErrUnavailable)
+		}
 		return CostQuote{}, fmt.Errorf("selected %s compute connection could not provide a current price; reconnect it or choose another connection", provider)
 	}
 	return quote, nil

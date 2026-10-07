@@ -13,6 +13,7 @@ import (
 	"github.com/infercrane/infercrane/internal/operations"
 	"github.com/infercrane/infercrane/internal/optimizer"
 	"github.com/infercrane/infercrane/internal/performanceprofile"
+	"github.com/infercrane/infercrane/internal/pricing"
 	"github.com/infercrane/infercrane/internal/workflows"
 )
 
@@ -332,6 +333,9 @@ func AuthorizeCost(ctx context.Context, costs CostAuthority, tenant string, draf
 	now = now.UTC()
 	quote, err := costs.Quote(ctx, tenant, draft, budget.ExpiresAt)
 	if err != nil {
+		if errors.Is(err, pricing.ErrUnavailable) {
+			return operations.Retryable("optimization_cost_quote_unavailable", err)
+		}
 		return operations.Permanent("optimization_cost_quote_unavailable", err)
 	}
 	if quote.Source == "" || quote.ObservedAt.IsZero() || quote.ObservedAt.After(now.Add(maximumCostQuoteObservationDelay)) || quote.ValidUntil.Before(now) || quote.HourlyUSD <= 0 || math.IsNaN(quote.HourlyUSD) || math.IsInf(quote.HourlyUSD, 0) {
