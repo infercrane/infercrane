@@ -39,6 +39,9 @@ func TestRunPodFeedUsesExactSecureCloudProviderPrice(t *testing.T) {
 	if err != nil || l40s.Hourly != 0.74 || l40s.ObservedAt != now {
 		t.Fatalf("unexpected live L40S offer: %#v err=%v", l40s, err)
 	}
+	if !l40s.ScalesLinearlyByReplica {
+		t.Fatal("reviewed per-pod RunPod price was not marked replica-scalable")
+	}
 	h100, err := catalog.Estimate(context.Background(), pricing.Request{Cloud: "runpod", Region: "global", GPU: "NVIDIA H100", GPUCount: 1, Replicas: 1})
 	if err != nil || h100.Hourly != 1.99 {
 		t.Fatalf("unexpected H100 offer: %#v err=%v", h100, err)
@@ -88,6 +91,33 @@ func TestRunPodFeedRevalidatesCredentialAgainstTrustedProviderEndpoint(t *testin
 	}
 	if requests != 1 {
 		t.Fatalf("expected one credential revalidation request, got %d", requests)
+	}
+}
+
+func TestRunPodFeedFallsBackToBearerOnlyAfterOfficialHostRejectsQueryAuthentication(t *testing.T) {
+	requests := 0
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		requests++
+		if request.URL.Scheme != "https" || request.URL.Host != "api.runpod.io" || request.URL.Path != "/graphql" {
+			t.Fatalf("unexpected provider destination: %s", request.URL)
+		}
+		if requests == 1 {
+			if request.URL.Query().Get("api_key") != "tenant-secret" || request.Header.Get("Authorization") != "" {
+				t.Fatal("first request did not use documented query authentication")
+			}
+			return &http.Response{StatusCode: http.StatusForbidden, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("forbidden tenant-secret"))}, nil
+		}
+		if request.URL.Query().Get("api_key") != "" || request.Header.Get("Authorization") != "Bearer tenant-secret" {
+			t.Fatal("fallback request did not use isolated Bearer authentication")
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"data":{"gpuTypes":[{"id":"NVIDIA L40S","lowestPrice":{"uninterruptablePrice":1.09}}]}}`))}, nil
+	})}
+	catalog := pricing.NewDynamicCatalog(nil)
+	if err := (RunPodFeed{APIKey: "tenant-secret", Client: client}).Refresh(t.Context(), catalog); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 2 {
+		t.Fatalf("expected query auth plus one Bearer retry, got %d requests", requests)
 	}
 }
 

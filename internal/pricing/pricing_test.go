@@ -21,6 +21,37 @@ func TestCatalogAndStaleness(t *testing.T) {
 	}
 }
 
+func TestReplicaScalingProviderRequiresExplicitLinearRate(t *testing.T) {
+	request := Request{Cloud: "runpod", Region: "global", GPU: "NVIDIA L40S", GPUCount: 1, Replicas: 2}
+	oneReplica := request
+	oneReplica.Replicas = 1
+	base := Estimate{Currency: "USD", Source: "runpod", Hourly: 1.09, CostScope: CostScopeInstanceTotal, Authority: PriceAuthorityProviderAPI}
+	provider := ReplicaScalingProvider{Delegate: Catalog{Prices: map[Request]Estimate{oneReplica: base}}}
+	if _, err := provider.Estimate(t.Context(), request); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("unreviewed one-replica price authorized scale-out: %v", err)
+	}
+	base.ScalesLinearlyByReplica = true
+	provider = ReplicaScalingProvider{Delegate: Catalog{Prices: map[Request]Estimate{oneReplica: base}}}
+	estimate, err := provider.Estimate(t.Context(), request)
+	if err != nil || estimate.Hourly != 2.18 || estimate.Source != base.Source || estimate.Authority != base.Authority {
+		t.Fatalf("replica total=%+v err=%v", estimate, err)
+	}
+}
+
+func TestReplicaScalingProviderPrefersExactQuote(t *testing.T) {
+	request := Request{Cloud: "runpod", Region: "global", GPU: "NVIDIA L40S", GPUCount: 1, Replicas: 2}
+	oneReplica := request
+	oneReplica.Replicas = 1
+	provider := ReplicaScalingProvider{Delegate: Catalog{Prices: map[Request]Estimate{
+		oneReplica: {Hourly: 1.09, ScalesLinearlyByReplica: true},
+		request:    {Hourly: 2.50, Source: "exact-two-replica-quote"},
+	}}}
+	estimate, err := provider.Estimate(t.Context(), request)
+	if err != nil || estimate.Hourly != 2.50 || estimate.Source != "exact-two-replica-quote" {
+		t.Fatalf("exact quote was not preferred: %+v err=%v", estimate, err)
+	}
+}
+
 func TestComparableTotalRejectsPartialBillingComponents(t *testing.T) {
 	if (Estimate{}).ComparableTotal() || !(Estimate{CostScope: CostScopeInstanceTotal}).ComparableTotal() {
 		t.Fatal("only explicitly scoped complete totals may be comparable")

@@ -55,8 +55,13 @@ type Estimate struct {
 	Hourly           float64
 	CostScope        CostScope
 	Authority        PriceAuthority
-	ObservedAt       time.Time
-	StaleAfter       time.Duration
+	// ScalesLinearlyByReplica is true only when Hourly is the complete rate for
+	// one independently billed replica and the reviewed provider contract bills
+	// identical replicas at the same rate. Marketplace capacity remains a
+	// separate launch-time check; this flag is never inferred from price alone.
+	ScalesLinearlyByReplica bool
+	ObservedAt              time.Time
+	StaleAfter              time.Duration
 	// GuaranteedUntil is set only when the provider/operator actually locks or
 	// guarantees the quoted rate. Fresh marketplace observations leave it zero:
 	// they may rank plans, but cannot authorize future spend.
@@ -94,6 +99,33 @@ func (e Estimate) Stale(now time.Time) bool {
 
 type Provider interface {
 	Estimate(context.Context, Request) (Estimate, error)
+}
+
+// ReplicaScalingProvider preserves exact quotes and derives a multi-replica
+// total only from an explicitly reviewed one-replica rate. It exists at the
+// spend-authority boundary rather than in Catalog so discovery and ranking
+// callers continue to receive only the exact rows they requested.
+type ReplicaScalingProvider struct{ Delegate Provider }
+
+func (p ReplicaScalingProvider) Estimate(ctx context.Context, request Request) (Estimate, error) {
+	if p.Delegate == nil {
+		return Estimate{}, ErrUnavailable
+	}
+	estimate, err := p.Delegate.Estimate(ctx, request)
+	if err == nil || !errors.Is(err, ErrUnavailable) || request.Replicas <= 1 {
+		return estimate, err
+	}
+	oneReplica := request
+	oneReplica.Replicas = 1
+	estimate, err = p.Delegate.Estimate(ctx, oneReplica)
+	if err != nil {
+		return Estimate{}, err
+	}
+	if !estimate.ScalesLinearlyByReplica || estimate.Hourly <= 0 {
+		return Estimate{}, ErrUnavailable
+	}
+	estimate.Hourly *= float64(request.Replicas)
+	return estimate, nil
 }
 
 type Catalog struct{ Prices map[Request]Estimate }

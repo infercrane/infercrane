@@ -87,6 +87,25 @@ func TestPricingAuthorityResolvesRunPodAliasAndMarksLiveMarketPriceUnlocked(t *t
 	}
 }
 
+func TestPricingAuthorityAuthorizesExactMaximumFromReviewedPerReplicaRate(t *testing.T) {
+	now := time.Now().UTC()
+	draft := optimizer.DeploymentDraft{}
+	draft.Provider.Cloud, draft.Provider.Region, draft.Resources.GPU = "runpod", "global", "L40S"
+	draft.Resources.GPUCount, draft.Scaling.MaxReplicas = 1, 2
+	oneReplica := pricing.Request{Cloud: "runpod", Region: "global", GPU: "NVIDIA L40S", GPUCount: 1, Replicas: 1}
+	market := pricing.Estimate{
+		Currency: "USD", Source: "https://api.runpod.io/graphql", Hourly: 1.09,
+		CostScope: pricing.CostScopeInstanceTotal, Authority: pricing.PriceAuthorityProviderAPI,
+		ScalesLinearlyByReplica: true, ObservedAt: now, StaleAfter: 2 * time.Minute,
+	}
+	provider := pricing.ReplicaScalingProvider{Delegate: pricing.Catalog{Prices: map[pricing.Request]pricing.Estimate{oneReplica: market}}}
+	authority := PricingAuthority{Provider: provider, Now: func() time.Time { return now }}
+	quote, err := authority.Quote(t.Context(), "tenant-1", draft, now.Add(time.Minute))
+	if err != nil || quote.HourlyUSD != 2.18 || quote.Source != market.Source || quote.Locked {
+		t.Fatalf("maximum replica quote=%+v err=%v", quote, err)
+	}
+}
+
 func TestConnectionPricingAuthorityUsesExactTenantCredentialWithoutManagedFallback(t *testing.T) {
 	now := time.Now().UTC()
 	managed := &recordingCostAuthority{quote: CostQuote{HourlyUSD: 99}}
