@@ -45,31 +45,31 @@ func (f RunPodFeed) Refresh(ctx context.Context, catalog *pricing.DynamicCatalog
 	if strings.TrimSpace(f.APIKey) != "" && (parsedEndpoint.Scheme != "https" || !strings.EqualFold(parsedEndpoint.Hostname(), "api.runpod.io")) {
 		return errors.New("refusing to send RunPod credentials to an untrusted endpoint")
 	}
-	// RunPod's GraphQL API authenticates with the api_key query parameter.
-	// Add it only after validating the destination so tenant credentials can
-	// never be forwarded to a caller-controlled host.
-	if strings.TrimSpace(f.APIKey) != "" {
-		query := parsedEndpoint.Query()
-		query.Set("api_key", f.APIKey)
-		parsedEndpoint.RawQuery = query.Encode()
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, parsedEndpoint.String(), bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("prepare RunPod price request: %w", err)
-	}
-	request.Header.Set("Content-Type", "application/json")
 	client := f.Client
 	if client == nil {
 		client = &http.Client{Timeout: 15 * time.Second}
 	}
-	response, err := client.Do(request)
+	response, err := f.request(ctx, client, parsedEndpoint, body, false)
 	if err != nil {
 		return errors.New("RunPod price request failed")
 	}
-	defer response.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(response.Body, 2<<20))
+	data, err := readRunPodResponse(response)
 	if err != nil {
 		return fmt.Errorf("read RunPod prices: %w", err)
+	}
+	// RunPod documents query-parameter authentication, while some existing API
+	// keys are accepted only as Bearer credentials. Retry only an authentication
+	// rejection, only for the already-validated official host, and never include
+	// the credential or provider response body in an error.
+	if strings.TrimSpace(f.APIKey) != "" && (response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden) {
+		response, err = f.request(ctx, client, parsedEndpoint, body, true)
+		if err != nil {
+			return errors.New("RunPod price request failed")
+		}
+		data, err = readRunPodResponse(response)
+		if err != nil {
+			return fmt.Errorf("read RunPod prices: %w", err)
+		}
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return fmt.Errorf("RunPod prices returned HTTP %d", response.StatusCode)
@@ -110,10 +110,11 @@ func (f RunPodFeed) Refresh(ctx context.Context, catalog *pricing.DynamicCatalog
 		}
 		prices[pricing.Request{Cloud: "runpod", Region: "global", GPU: providerID, GPUCount: 1, Replicas: 1}] = pricing.Estimate{
 			Currency: "USD", Hourly: gpu.LowestPrice.UninterruptablePrice,
-			CostScope:  pricing.CostScopeInstanceTotal,
-			Authority:  pricing.PriceAuthorityProviderAPI,
-			Source:     "https://api.runpod.io/graphql#gpuTypes.lowestPrice.secureCloud",
-			ObservedAt: now, StaleAfter: validFor,
+			CostScope:               pricing.CostScopeInstanceTotal,
+			Authority:               pricing.PriceAuthorityProviderAPI,
+			ScalesLinearlyByReplica: true,
+			Source:                  "https://api.runpod.io/graphql#gpuTypes.lowestPrice.secureCloud",
+			ObservedAt:              now, StaleAfter: validFor,
 		}
 	}
 	if len(prices) == 0 {
@@ -121,6 +122,33 @@ func (f RunPodFeed) Refresh(ctx context.Context, catalog *pricing.DynamicCatalog
 	}
 	catalog.ReplaceProvider("runpod", prices)
 	return nil
+}
+
+func (f RunPodFeed) request(ctx context.Context, client *http.Client, endpoint *url.URL, body []byte, bearer bool) (*http.Response, error) {
+	requestURL := *endpoint
+	query := requestURL.Query()
+	query.Del("api_key")
+	if strings.TrimSpace(f.APIKey) != "" && !bearer {
+		query.Set("api_key", f.APIKey)
+	}
+	requestURL.RawQuery = query.Encode()
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, requestURL.String(), bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("prepare RunPod price request: %w", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	if strings.TrimSpace(f.APIKey) != "" && bearer {
+		request.Header.Set("Authorization", "Bearer "+f.APIKey)
+	}
+	return client.Do(request)
+}
+
+func readRunPodResponse(response *http.Response) ([]byte, error) {
+	if response == nil || response.Body == nil {
+		return nil, errors.New("RunPod price response is empty")
+	}
+	defer response.Body.Close()
+	return io.ReadAll(io.LimitReader(response.Body, 2<<20))
 }
 
 func RunProviderFeed(ctx context.Context, refresh func(context.Context) error, interval time.Duration, report func(error)) {

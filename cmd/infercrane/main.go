@@ -4337,7 +4337,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	_, aiperfErr := exec.LookPath(cfg.AIPerfBinary)
 	var optimizationCosts optimizationcampaign.CostAuthority
 	if aiperfErr == nil {
-		optimizationCosts = optimizationcampaign.PricingAuthority{Provider: priceCatalog}
+		optimizationCosts = optimizationcampaign.PricingAuthority{Provider: pricing.ReplicaScalingProvider{Delegate: priceCatalog}}
 	} else {
 		logger.Warn("optimization execution disabled because AIPerf is unavailable", "binary", cfg.AIPerfBinary)
 	}
@@ -4375,7 +4375,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 						Refresh: func(refreshCtx context.Context) error {
 							return feed.Refresh(refreshCtx, catalog)
 						},
-						Delegate: optimizationcampaign.PricingAuthority{Provider: catalog},
+						Delegate: optimizationcampaign.PricingAuthority{Provider: pricing.ReplicaScalingProvider{Delegate: catalog}},
 					}
 				},
 			},
