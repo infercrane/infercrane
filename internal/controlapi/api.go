@@ -372,6 +372,10 @@ type API struct {
 		Snapshot() map[pricing.Request]pricing.Estimate
 	}
 	LaunchProbers map[string]provision.LaunchProber
+	// CredentialLaunchProbers build read-only provider probes from a
+	// tenant-owned credential resolved only for the duration of the request.
+	// The credential is never persisted in capacity evidence.
+	CredentialLaunchProbers map[string]func(string) provision.LaunchProber
 	// DefaultProviderAdapters contains only credential-gated, dynamically
 	// registered provider adapters. It lets the simple API omit an advanced
 	// adapter field without widening the static provider qualification matrix.
@@ -383,6 +387,7 @@ type API struct {
 	ComputeConnections interface {
 		Create(context.Context, string, computeconnection.CreateRequest) (domain.ComputeConnection, error)
 		Get(context.Context, string, string) (domain.ComputeConnection, error)
+		Resolve(context.Context, string, string, string) (domain.ComputeConnection, string, error)
 		List(context.Context, string) ([]domain.ComputeConnection, error)
 		Delete(context.Context, string, string) error
 	}
@@ -5335,6 +5340,7 @@ func (a API) probeCapacity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	request.Provider = strings.ToLower(strings.TrimSpace(request.Provider))
+	request.ComputeConnectionID = strings.TrimSpace(request.ComputeConnectionID)
 	request.Region, request.GPU = strings.TrimSpace(request.Region), strings.TrimSpace(request.GPU)
 	if request.GPUCount == 0 {
 		request.GPUCount = 1
@@ -5353,9 +5359,39 @@ func (a API) probeCapacity(w http.ResponseWriter, r *http.Request) {
 		Limitations: []string{"catalog price does not prove current stock", "capacity probes do not reserve resources"},
 	}
 	providerReady := false
+	var prober provision.LaunchProber
+	if request.ComputeConnectionID != "" {
+		if a.ComputeConnections == nil {
+			writeError(w, http.StatusServiceUnavailable, "capability_unavailable", "tenant compute credential storage is not configured")
+			return
+		}
+		principal := r.Context().Value(identityKey{}).(domain.Principal)
+		_, credential, err := a.ComputeConnections.Resolve(r.Context(), principal.TenantID, request.ComputeConnectionID, request.Provider)
+		if errors.Is(err, domain.ErrNotFound) {
+			writeError(w, http.StatusUnprocessableEntity, "compute_connection_not_found", "compute connection was not found in the active tenant")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusUnprocessableEntity, "compute_connection_mismatch", "compute connection is not verified for the selected provider")
+			return
+		}
+		factory := a.CredentialLaunchProbers[request.Provider]
+		if factory == nil {
+			writeError(w, http.StatusUnprocessableEntity, "capacity_probe_unavailable", "the selected compute connection does not support a read-only capacity probe")
+			return
+		}
+		prober = factory(credential)
+		if prober == nil {
+			writeError(w, http.StatusInternalServerError, "capacity_probe_unavailable", "the selected compute connection probe is not configured")
+			return
+		}
+		providerReady = true
+	}
 	for _, provider := range a.ComputeProviders {
 		if strings.EqualFold(provider.ID, request.Provider) {
-			providerReady = provider.State == "ready"
+			if request.ComputeConnectionID == "" {
+				providerReady = provider.State == "ready"
+			}
 			if !providerReady && provider.Reason != "" {
 				evidence.Message = provider.Reason
 			}
@@ -5365,7 +5401,10 @@ func (a API) probeCapacity(w http.ResponseWriter, r *http.Request) {
 	if providerReady {
 		evidence.ConnectionState = "configured"
 		evidence.Message = "Provider is configured, but no read-only stock or quota probe is registered"
-		if prober := a.LaunchProbers[request.Provider]; prober != nil {
+		if prober == nil {
+			prober = a.LaunchProbers[request.Provider]
+		}
+		if prober != nil {
 			probed, err := prober.ProbeLaunch(r.Context(), request)
 			if err == nil {
 				evidence = probed

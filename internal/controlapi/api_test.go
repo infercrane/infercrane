@@ -215,6 +215,12 @@ func (p fakeLaunchProber) ProbeLaunch(context.Context, provision.LaunchProbeRequ
 	return p.evidence, p.err
 }
 
+type launchProbeFunc func(context.Context, provision.LaunchProbeRequest) (provision.LaunchProbeEvidence, error)
+
+func (f launchProbeFunc) ProbeLaunch(ctx context.Context, request provision.LaunchProbeRequest) (provision.LaunchProbeEvidence, error) {
+	return f(ctx, request)
+}
+
 func (fakeOptimizationCosts) Quote(_ context.Context, _ optimizer.DeploymentDraft, requiredUntil time.Time) (optimizationcampaign.CostQuote, error) {
 	return optimizationcampaign.CostQuote{HourlyUSD: 2, Source: "test-price-list", ObservedAt: requiredUntil.Add(-time.Hour), ValidUntil: requiredUntil.Add(time.Hour)}, nil
 }
@@ -256,6 +262,16 @@ func (f *fakeComputeConnections) Get(_ context.Context, tenant, id string) (doma
 		return domain.ComputeConnection{}, domain.ErrNotFound
 	}
 	return f.item, nil
+}
+func (f *fakeComputeConnections) Resolve(ctx context.Context, tenant, id, provider string) (domain.ComputeConnection, string, error) {
+	item, err := f.Get(ctx, tenant, id)
+	if err != nil {
+		return domain.ComputeConnection{}, "", err
+	}
+	if item.Provider != provider || item.Status != "verified" {
+		return domain.ComputeConnection{}, "", errors.New("compute connection mismatch")
+	}
+	return item, f.credential, nil
 }
 func (f *fakeComputeConnections) List(context.Context, string) ([]domain.ComputeConnection, error) {
 	if f.item.ID == "" {
@@ -1340,6 +1356,44 @@ func TestCapacityProbeKeepsCatalogQuoteSeparateFromLaunchEvidence(t *testing.T) 
 		if response.Code != http.StatusOK || !strings.Contains(body, expected) {
 			t.Fatalf("capacity probe status=%d missing=%q body=%s", response.Code, expected, body)
 		}
+	}
+}
+
+func TestCapacityProbeUsesOnlySelectedTenantComputeCredential(t *testing.T) {
+	now := time.Now().UTC()
+	connections := &fakeComputeConnections{
+		item: domain.ComputeConnection{
+			ID: "connection-1", TenantID: "global", Name: "primary", Provider: "runpod", Adapter: "runpod-pods", Status: "verified",
+		},
+		credential: "tenant-runpod-secret",
+	}
+	var receivedCredential string
+	handler := (API{
+		Store:              &fakeStore{},
+		APIKey:             "secret",
+		ComputeConnections: connections,
+		ComputeProviders:   []ComputeProvider{{ID: "runpod", Label: "RunPod", State: "ready"}},
+		LaunchProbers: map[string]provision.LaunchProber{
+			"runpod": launchProbeFunc(func(context.Context, provision.LaunchProbeRequest) (provision.LaunchProbeEvidence, error) {
+				t.Fatal("tenant probe fell back to the process-global provider credential")
+				return provision.LaunchProbeEvidence{}, nil
+			}),
+		},
+		CredentialLaunchProbers: map[string]func(string) provision.LaunchProber{
+			"runpod": func(credential string) provision.LaunchProber {
+				receivedCredential = credential
+				return fakeLaunchProber{evidence: provision.LaunchProbeEvidence{
+					Provider: "runpod", GPU: "H100", GPUCount: 1, ConnectionState: "configured", AvailabilityState: "available", QuotaState: "unknown", Deployability: "unknown", Source: "runpod.stock", ObservedAt: now, ExpiresAt: now.Add(30 * time.Second), Message: "stock observed",
+				}}
+			},
+		},
+	}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/capacity/probes", strings.NewReader(`{"provider":"runpod","compute_connection_id":"connection-1","gpu":"H100"}`))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || receivedCredential != "tenant-runpod-secret" || !strings.Contains(response.Body.String(), `"compute_connection_id":"connection-1"`) || !strings.Contains(response.Body.String(), `"availability_state":"available"`) || strings.Contains(response.Body.String(), receivedCredential) {
+		t.Fatalf("tenant credential probe status=%d credential=%q body=%s", response.Code, receivedCredential, response.Body.String())
 	}
 }
 

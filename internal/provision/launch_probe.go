@@ -8,10 +8,11 @@ import (
 // LaunchProbeRequest describes a provider-neutral, read-only placement
 // preflight. It must never reserve or create capacity.
 type LaunchProbeRequest struct {
-	Provider string `json:"provider"`
-	Region   string `json:"region,omitempty"`
-	GPU      string `json:"gpu"`
-	GPUCount int    `json:"gpu_count"`
+	Provider            string `json:"provider"`
+	ComputeConnectionID string `json:"compute_connection_id,omitempty"`
+	Region              string `json:"region,omitempty"`
+	GPU                 string `json:"gpu"`
+	GPUCount            int    `json:"gpu_count"`
 }
 
 // LaunchProbeEvidence deliberately separates facts that provider APIs often

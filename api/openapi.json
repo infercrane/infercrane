@@ -2770,6 +2770,10 @@
       "LaunchProbeRequest": {
         "additionalProperties": false,
         "properties": {
+          "compute_connection_id": {
+            "description": "Verified tenant-owned compute connection used for this read-only probe.",
+            "type": "string"
+          },
           "gpu": {
             "maxLength": 128,
             "minLength": 1,

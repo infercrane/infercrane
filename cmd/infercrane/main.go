@@ -4379,6 +4379,11 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	launchProbers := map[string]provision.LaunchProber{
 		"runpod": provision.RunPodAvailability{APIKey: cfg.RunPodAPIKey},
 	}
+	credentialLaunchProbers := map[string]func(string) provision.LaunchProber{
+		"runpod": func(credential string) provision.LaunchProber {
+			return provision.RunPodAvailability{APIKey: credential}
+		},
+	}
 	if cfg.GCPEnabled() {
 		launchProbers["gcp"] = gcpProvider
 	}
@@ -4444,7 +4449,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		Store: s, Resolver: modelAPIUsageResolvers, Logger: logger, Telemetry: modelAPIUsageTelemetry,
 		Limit: 100, InFlightGrace: 10 * time.Minute,
 	}, 30*time.Second, logger)
-	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, DiscoveryClient: nil, Secrets: secrets.Environment{}, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool, OptimizationCosts: optimizationCosts, AcceleratorLabEnabled: acceleratorEngine != nil, AcceleratorLabCatalog: acceleratorCatalog, ModelAPICatalog: modelAPICatalog, ModelAPIProducts: s, SandboxProvider: nativeSandboxProvider, SandboxBilling: cfg.ManagedSandboxPolicy(), SandboxProjectID: cfg.BrezelSandboxProjectID, SandboxPreviews: controlapi.NewSandboxPreviewBroker(), SandboxDefaultTemplate: cfg.BrezelSandboxDefaultTemplate, SandboxModelConnectors: cfg.BrezelSandboxModelConnectors, ModelAPIOperatorTenantID: cfg.ModelAPIOperatorTenantID, ComputeProviders: computeProviders, ComputeConnections: computeConnectionService, GPUPriceCatalog: priceCatalog, LaunchProbers: launchProbers, DefaultProviderAdapters: defaultProviderAdapters, ManagedDeployments: managedbilling.DeploymentPolicy{Enabled: cfg.ManagedDeploymentsEnabled, Provider: "runpod"}}
+	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, DiscoveryClient: nil, Secrets: secrets.Environment{}, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool, OptimizationCosts: optimizationCosts, AcceleratorLabEnabled: acceleratorEngine != nil, AcceleratorLabCatalog: acceleratorCatalog, ModelAPICatalog: modelAPICatalog, ModelAPIProducts: s, SandboxProvider: nativeSandboxProvider, SandboxBilling: cfg.ManagedSandboxPolicy(), SandboxProjectID: cfg.BrezelSandboxProjectID, SandboxPreviews: controlapi.NewSandboxPreviewBroker(), SandboxDefaultTemplate: cfg.BrezelSandboxDefaultTemplate, SandboxModelConnectors: cfg.BrezelSandboxModelConnectors, ModelAPIOperatorTenantID: cfg.ModelAPIOperatorTenantID, ComputeProviders: computeProviders, ComputeConnections: computeConnectionService, GPUPriceCatalog: priceCatalog, LaunchProbers: launchProbers, CredentialLaunchProbers: credentialLaunchProbers, DefaultProviderAdapters: defaultProviderAdapters, ManagedDeployments: managedbilling.DeploymentPolicy{Enabled: cfg.ManagedDeploymentsEnabled, Provider: "runpod"}}
 	if cfg.StripeEnabled() {
 		stripeBilling, stripeErr := managedbilling.NewStripe(cfg.StripeSecretKey, cfg.StripeWebhookSecret, cfg.StripeBillingReturnURL, cfg.StripePriceIDs, cfg.StripeLivemode)
 		if stripeErr != nil {
