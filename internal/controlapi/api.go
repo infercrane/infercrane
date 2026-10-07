@@ -1532,8 +1532,8 @@ func (a API) approveOptimizationCampaign(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusUnprocessableEntity, "optimization_candidate_invalid", "campaign candidate deployment specification is invalid")
 			return
 		}
-		if actor.ID != "bootstrap" && !a.computeProviderSupports(draft.Provider.Cloud, "customer_wallet") {
-			writeError(w, http.StatusConflict, "compute_connection_required", "optimization execution requires InferCrane-managed compute or a verified tenant compute connection")
+		if computeErr := a.validateOptimizationCompute(r.Context(), actor, draft); computeErr != nil {
+			writeError(w, http.StatusConflict, "compute_connection_required", computeErr.Error())
 			return
 		}
 		if costErr := optimizationcampaign.AuthorizeCost(r.Context(), a.OptimizationCosts, draft, optimizationcampaign.Budget{MaxCostUSD: perCandidateBudget, ExpiresAt: expiresAt}, time.Now().UTC()); costErr != nil {
@@ -5310,6 +5310,29 @@ func (a API) computeProviderSupports(providerID, billingMode string) bool {
 		}
 	}
 	return false
+}
+
+func (a API) validateOptimizationCompute(ctx context.Context, actor domain.Principal, draft optimizer.DeploymentDraft) error {
+	if actor.ID == "bootstrap" {
+		return nil
+	}
+	if draft.ComputeConnectionID == "" {
+		if a.computeProviderSupports(draft.Provider.Cloud, "customer_wallet") {
+			return nil
+		}
+		return errors.New("optimization execution requires InferCrane-managed compute or a verified tenant compute connection")
+	}
+	if a.ComputeConnections == nil {
+		return errors.New("optimization compute connection storage is unavailable")
+	}
+	connection, err := a.ComputeConnections.Get(ctx, actor.TenantID, draft.ComputeConnectionID)
+	if err != nil {
+		return errors.New("optimization compute connection is unavailable")
+	}
+	if connection.Status != "verified" || connection.Provider != draft.Provider.Cloud || connection.Adapter != draft.Provider.Adapter {
+		return errors.New("optimization compute connection does not match the candidate provider")
+	}
+	return nil
 }
 
 type catalogLaunchQuote struct {

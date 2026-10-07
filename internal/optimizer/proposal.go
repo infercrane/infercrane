@@ -66,6 +66,7 @@ type Request struct {
 	ModelIdentity         string   `json:"model_identity"`
 	ModelRevision         string   `json:"model_revision,omitempty"`
 	Provider              string   `json:"provider"`
+	ComputeConnectionID   string   `json:"compute_connection_id,omitempty"`
 	Region                string   `json:"region"`
 	GPU                   string   `json:"gpu"`
 	GPUCount              int      `json:"gpu_count,omitempty"`
@@ -99,10 +100,11 @@ type Feature struct {
 }
 
 type DeploymentDraft struct {
-	APIVersion string `json:"api_version" yaml:"apiVersion"`
-	Kind       string `json:"kind" yaml:"kind"`
-	Name       string `json:"name" yaml:"name"`
-	Model      struct {
+	APIVersion          string `json:"api_version" yaml:"apiVersion"`
+	Kind                string `json:"kind" yaml:"kind"`
+	Name                string `json:"name" yaml:"name"`
+	ComputeConnectionID string `json:"compute_connection_id,omitempty" yaml:"computeConnectionID,omitempty"`
+	Model               struct {
 		ID       string `json:"id" yaml:"id"`
 		Revision string `json:"revision" yaml:"revision"`
 	} `json:"model" yaml:"model"`
@@ -252,6 +254,9 @@ func ValidateProposal(proposal Proposal) error {
 		if len(candidate.ID) != 64 || candidate.Rank < 1 || candidate.Rank > len(proposal.Candidates) || candidate.Objective != request.Objective || candidate.BenchmarkProfile != request.WorkloadProfile || candidate.Deployment.APIVersion != "infercrane.dev/v1" || candidate.Deployment.Kind != "Deployment" || candidate.Deployment.Name == "" || candidate.Deployment.Model.ID == "" || candidate.Deployment.Model.Revision == "" || candidate.Deployment.Runtime.Engine == "" || candidate.Deployment.Runtime.Version == "" || candidate.Deployment.Resources.GPU != request.GPU || candidate.Deployment.Resources.GPUCount < 1 || candidate.Deployment.Resources.GPUCount > 1024 {
 			return errors.New("proposal contains an incomplete or mismatched candidate")
 		}
+		if candidate.Deployment.ComputeConnectionID != request.ComputeConnectionID {
+			return errors.New("proposal candidate compute connection does not match the requested boundary")
+		}
 		if candidate.EvidenceState != EvidenceUnmeasured && candidate.EvidenceState != EvidenceModeled {
 			return errors.New("new proposal candidates must be unmeasured or modeled")
 		}
@@ -397,6 +402,7 @@ func normalizeRequest(request Request) Request {
 		request.ModelRevision = revision
 	}
 	request.Provider = strings.ToLower(strings.TrimSpace(request.Provider))
+	request.ComputeConnectionID = strings.TrimSpace(request.ComputeConnectionID)
 	request.Region = strings.TrimSpace(request.Region)
 	request.GPU = strings.TrimSpace(request.GPU)
 	request.Objective = strings.ToLower(strings.TrimSpace(request.Objective))
@@ -492,6 +498,9 @@ func validateRequest(request Request) error {
 	}
 	if len(request.WorkloadFingerprint) > 256 {
 		return errors.New("workload fingerprint must be at most 256 characters")
+	}
+	if len(request.ComputeConnectionID) > 255 {
+		return errors.New("compute connection ID must be at most 255 characters")
 	}
 	if request.TargetConcurrency != nil && (*request.TargetConcurrency <= 0 || math.IsNaN(*request.TargetConcurrency) || math.IsInf(*request.TargetConcurrency, 0)) {
 		return errors.New("target concurrency must be a finite positive value")
@@ -795,6 +804,7 @@ func requireCustomerReplay(request Request, required, limitations []string) ([]s
 func buildGenericCandidate(model, revision string, compatible integration.RuntimeCompatibility, runtimeVersion string, request Request) Candidate {
 	draft := DeploymentDraft{APIVersion: "infercrane.dev/v1", Kind: "Deployment"}
 	draft.Name = safeName(model + "-" + compatible.Runtime + "-baseline-" + compatible.Adapter)
+	draft.ComputeConnectionID = request.ComputeConnectionID
 	draft.Model.ID, draft.Model.Revision = model, revision
 	draft.Runtime.Engine, draft.Runtime.Version = compatible.Runtime, runtimeVersion
 	draft.Runtime.Args = []string{}
@@ -882,6 +892,7 @@ func matchingProfiles(entries []curatedrecipe.ServingProfile, request Request) [
 func buildCandidate(entry curatedrecipe.Entry, profile curatedrecipe.ServingProfile, compatible integration.RuntimeCompatibility, runtimeVersion string, request Request, preferredProfile string) (Candidate, error) {
 	draft := DeploymentDraft{APIVersion: "infercrane.dev/v1", Kind: "Deployment"}
 	draft.Name = safeName(entry.Name + "-" + profile.Name + "-" + compatible.Cloud)
+	draft.ComputeConnectionID = request.ComputeConnectionID
 	draft.Model.ID, draft.Model.Revision = entry.Model, entry.Revision
 	draft.Runtime.Engine, draft.Runtime.Version = profile.Runtime, runtimeVersion
 	draft.Runtime.Workload = profile.Workload
