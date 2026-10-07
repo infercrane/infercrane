@@ -4571,7 +4571,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	if controlAPI.ManagedDeployments.Enabled {
 		go runManagedDeploymentExpiry(ctx, s, time.Minute, logger)
 	}
-	if controlAPI.SandboxBilling.Enabled && nativeSandboxProvider != nil {
+	if nativeSandboxProvider != nil {
 		go runManagedSandboxReconciliation(ctx, managedsandbox.Reconciler{Store: s, Provider: nativeSandboxProvider, Limit: 100}, time.Minute, logger)
 	}
 	if asyncService != nil {

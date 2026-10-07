@@ -60,6 +60,46 @@ func (s *Store) CleanupPendingSandboxesForReconciliation(ctx context.Context, li
 	return items, nil
 }
 
+// UnreservedNativeSandboxesForReconciliation keeps lifecycle observation and
+// expiry cleanup active even when prepaid sandbox billing is disabled. Rows
+// with an open spend reservation are owned by ManagedSandboxesForReconciliation;
+// cleanup-pending rows are owned by the retry queue above.
+func (s *Store) UnreservedNativeSandboxesForReconciliation(ctx context.Context, limit int) ([]domain.NativeSandbox, error) {
+	if limit < 1 || limit > 500 {
+		limit = 100
+	}
+	rows, err := s.QueryContext(ctx, `SELECT tenant_id,id FROM native_sandboxes n WHERE n.deleted_at IS NULL AND n.brezel_sandbox_id<>'' AND n.status NOT IN ('deleted','cleanup_pending') AND NOT EXISTS(SELECT 1 FROM managed_spend_reservations r WHERE r.tenant_id=n.tenant_id AND r.resource_type='sandbox' AND r.resource_name=n.id AND r.state IN ('reserved','pending_reconciliation')) ORDER BY n.updated_at,n.id LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	type sandboxKey struct{ tenant, id string }
+	keys := make([]sandboxKey, 0)
+	for rows.Next() {
+		var key sandboxKey
+		if err = rows.Scan(&key.tenant, &key.id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		keys = append(keys, key)
+	}
+	if err = rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	if err = rows.Close(); err != nil {
+		return nil, err
+	}
+	items := make([]domain.NativeSandbox, 0, len(keys))
+	for _, key := range keys {
+		row, lookupErr := s.NativeSandbox(ctx, key.tenant, key.id)
+		if lookupErr != nil {
+			return nil, lookupErr
+		}
+		items = append(items, row)
+	}
+	return items, nil
+}
+
 // ReserveManagedSandboxSpend places the maximum-lifetime hold before any
 // provider resource is created. A replay returns the original hold without
 // reserving the wallet twice.

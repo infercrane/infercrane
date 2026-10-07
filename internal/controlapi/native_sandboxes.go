@@ -91,7 +91,17 @@ func (a API) sandboxCapabilities(w http.ResponseWriter, r *http.Request) {
 	// Brezel is an implementation detail. Keep the stable product identity in
 	// the customer contract while retaining evidence about supported features.
 	capabilities.Provider = "infercrane"
+	ready, readinessNote := managedSandboxCapabilitiesReady(capabilities)
 	offerState := "available"
+	if !ready {
+		capabilities.State = "unavailable"
+		offerState = "capacity_limited"
+		if capabilities.QualificationNote == "" {
+			capabilities.QualificationNote = readinessNote
+		} else if readinessNote != "" {
+			capabilities.QualificationNote += " " + readinessNote
+		}
+	}
 	if capacity, ok := a.Store.(sandboxCapacityStore); ok {
 		active, retained, capacityErr := capacity.ManagedSandboxFleetUsage(r.Context())
 		policy := a.SandboxBilling.Normalize()
@@ -147,7 +157,12 @@ func (a API) sandboxes(w http.ResponseWriter, r *http.Request) {
 	}
 	data := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
-		data = append(data, nativeSandboxResponse(row, nil))
+		row, observed, reconcileErr := a.reconcileNativeSandbox(r.Context(), store, row)
+		if reconcileErr != nil {
+			writeError(w, http.StatusServiceUnavailable, "sandbox_reconciliation_pending", "sandbox lifecycle truth could not be recorded yet")
+			return
+		}
+		data = append(data, nativeSandboxResponse(row, observed))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": data, "product": "sandboxes"})
 }
@@ -157,32 +172,77 @@ func (a API) sandbox(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var observed *sandboxprovider.Sandbox
-	if a.SandboxProvider != nil && row.BrezelSandboxID != "" && row.DeletedAt == nil {
-		value, err := a.SandboxProvider.Get(r.Context(), row.TenantID, row.BrezelSandboxID)
-		if err == nil {
-			observed = &value
-			status := customerSandboxStatus(value.State)
-			failureCode := providerFailureCode(value.Failure)
-			if status != row.Status || failureCode != row.FailureCode {
-				if status != row.Status {
-					transitionAt := sandboxTransitionAt(value.UpdatedAt, row, time.Now().UTC())
-					row, err = store.RecordNativeSandboxTransition(context.WithoutCancel(r.Context()), row.TenantID, row.ID, status, failureCode, "observe:"+transitionAt.Format(time.RFC3339Nano), "sandbox.lifecycle."+status, transitionAt)
-					if err != nil {
-						writeError(w, http.StatusServiceUnavailable, "sandbox_metering_pending", "sandbox state was observed but its usage transition could not be recorded yet")
-						return
-					}
-				} else {
-					row, _ = store.SetNativeSandboxStatus(r.Context(), row.TenantID, row.ID, status, failureCode)
-				}
-			}
-		} else {
-			// A failed provider observation is uncertainty, never evidence that a
-			// previously running sandbox is still running.
-			row, _ = store.SetNativeSandboxStatus(r.Context(), row.TenantID, row.ID, "unknown", "provider_observation_failed")
-		}
+	row, observed, err := a.reconcileNativeSandbox(r.Context(), store, row)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "sandbox_reconciliation_pending", "sandbox lifecycle truth could not be recorded yet")
+		return
 	}
 	writeJSON(w, http.StatusOK, nativeSandboxResponse(row, observed))
+}
+
+func managedSandboxCapabilitiesReady(capabilities sandboxprovider.Capabilities) (bool, string) {
+	if capabilities.State != "ready" {
+		return false, "The sandbox provider did not report a ready state."
+	}
+	switch capabilities.Qualification {
+	case "configuration-verified", "qualified", "real-qualified", "sandbox_runtime_conformant":
+	default:
+		return false, "The exact sandbox runtime is not currently qualified."
+	}
+	features := capabilities.Features
+	if !features.HostileCodeIsolation || !features.DenyByDefaultEgress || !features.PauseResume || !features.AutoResume ||
+		!features.CommandStreaming || !features.FileReadWrite || !features.HTTPPreview || !features.DurableWorkspaces {
+		return false, "The sandbox provider is missing a required managed-product capability."
+	}
+	if len(capabilities.Templates) == 0 {
+		return false, "No approved sandbox environment is available."
+	}
+	return true, ""
+}
+
+func (a API) reconcileNativeSandbox(ctx context.Context, store sandboxProductStore, row domain.NativeSandbox) (domain.NativeSandbox, *sandboxprovider.Sandbox, error) {
+	if a.SandboxProvider == nil || row.BrezelSandboxID == "" || row.DeletedAt != nil || row.Status == "deleted" {
+		return row, nil, nil
+	}
+	now := time.Now().UTC()
+	value, observeErr := a.SandboxProvider.Get(ctx, row.TenantID, row.BrezelSandboxID)
+	if observeErr != nil {
+		status, failureCode := "unknown", "provider_observation_failed"
+		if errors.Is(observeErr, sandboxprovider.ErrNotFound) {
+			status, failureCode = "deleted", ""
+			if row.BrezelWorkspaceID != "" {
+				status, failureCode = "cleanup_pending", "provider_absent_workspace_cleanup_pending"
+			}
+		}
+		if row.Status == "cleanup_pending" {
+			return row, nil, nil
+		}
+		if status != row.Status {
+			updated, err := store.RecordNativeSandboxTransition(context.WithoutCancel(ctx), row.TenantID, row.ID, status, failureCode, "observe:"+status+":"+now.Format(time.RFC3339Nano), "sandbox.lifecycle."+status, now)
+			return updated, nil, err
+		}
+		updated, err := store.SetNativeSandboxStatus(context.WithoutCancel(ctx), row.TenantID, row.ID, status, failureCode)
+		return updated, nil, err
+	}
+	observed := &value
+	providerStatus := customerSandboxStatus(value.State)
+	status, failureCode := providerStatus, providerFailureCode(value.Failure)
+	if row.Status == "cleanup_pending" {
+		return row, observed, nil
+	}
+	if row.BrezelWorkspaceID != "" && (providerStatus == "deleted" || providerStatus == "expired" || providerStatus == "failed") {
+		status, failureCode = "cleanup_pending", "provider_"+providerStatus+"_workspace_cleanup_pending"
+	}
+	if status != row.Status {
+		transitionAt := sandboxTransitionAt(value.UpdatedAt, row, now)
+		updated, err := store.RecordNativeSandboxTransition(context.WithoutCancel(ctx), row.TenantID, row.ID, status, failureCode, "observe:"+providerStatus+":"+transitionAt.Format(time.RFC3339Nano), "sandbox.lifecycle."+status, transitionAt)
+		return updated, observed, err
+	}
+	if failureCode != row.FailureCode {
+		updated, err := store.SetNativeSandboxStatus(context.WithoutCancel(ctx), row.TenantID, row.ID, status, failureCode)
+		return updated, observed, err
+	}
+	return row, observed, nil
 }
 
 func (a API) createSandbox(w http.ResponseWriter, r *http.Request) {
@@ -218,6 +278,15 @@ func (a API) createSandbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	capabilities, capabilityErr := a.SandboxProvider.Capabilities(r.Context(), actor.TenantID)
+	if capabilityErr != nil {
+		a.writeSandboxProviderError(w, capabilityErr)
+		return
+	}
+	if ready, _ := managedSandboxCapabilitiesReady(capabilities); !ready {
+		writeError(w, http.StatusServiceUnavailable, "sandbox_provider_unready", "the exact sandbox runtime is not ready for managed customer work")
+		return
+	}
 	connectorRevision := ""
 	if request.ModelEndpoint != "" {
 		endpoints, available := a.endpointResources()
@@ -453,12 +522,12 @@ func (a API) mutateSandboxLifecycle(w http.ResponseWriter, r *http.Request, acti
 	default:
 		err = sandboxprovider.ErrInvalid
 	}
-	if err != nil && !(action == "delete" && errors.Is(err, sandboxprovider.ErrNotFound)) {
+	if err != nil && !(action == "delete" && (errors.Is(err, sandboxprovider.ErrNotFound) || errors.Is(err, sandboxprovider.ErrAlreadyTerminal))) {
 		a.writeSandboxProviderError(w, err)
 		return
 	}
 	status := customerSandboxStatus(mutation.Resource.State)
-	if action == "delete" && errors.Is(err, sandboxprovider.ErrNotFound) {
+	if action == "delete" && (errors.Is(err, sandboxprovider.ErrNotFound) || errors.Is(err, sandboxprovider.ErrAlreadyTerminal)) {
 		// A missing provider resource is the terminal success condition for a
 		// retryable delete. The InferCrane record still drives workspace cleanup
 		// and remains auditable under the stable customer identity.
@@ -527,6 +596,7 @@ func nativeSandboxResponse(row domain.NativeSandbox, observed *sandboxprovider.S
 		"created_at": row.CreatedAt, "updated_at": row.UpdatedAt, "last_active_at": row.LastActiveAt,
 	}
 	if observed != nil {
+		result["provider_status"] = customerSandboxStatus(observed.State)
 		result["expires_at"] = observed.ExpiresAt
 		result["lifecycle"] = observed.Lifecycle
 		result["network_policy"] = "offline"
@@ -602,6 +672,10 @@ func (a API) sandboxUsage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a API) writeSandboxProviderError(w http.ResponseWriter, err error) {
+	if retryAfter, ok := sandboxprovider.RetryAfter(err); ok {
+		seconds := int64((retryAfter + time.Second - 1) / time.Second)
+		w.Header().Set("Retry-After", strconv.FormatInt(seconds, 10))
+	}
 	switch {
 	case errors.Is(err, sandboxprovider.ErrForbidden):
 		writeError(w, http.StatusForbidden, "sandbox_tenant_not_enabled", "sandboxes are not enabled for this tenant")
@@ -613,6 +687,10 @@ func (a API) writeSandboxProviderError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusBadRequest, "invalid_sandbox_request", err.Error())
 	case errors.Is(err, sandboxprovider.ErrUnavailable):
 		writeError(w, http.StatusServiceUnavailable, "sandbox_provider_unavailable", "sandbox infrastructure is not ready")
+	case errors.Is(err, sandboxprovider.ErrQuotaExceeded):
+		writeError(w, http.StatusTooManyRequests, "quota_exceeded", "project sandbox quota is exhausted")
+	case errors.Is(err, sandboxprovider.ErrCapacityExhausted):
+		writeError(w, http.StatusTooManyRequests, "capacity_exhausted", "sandbox runtime capacity is temporarily exhausted")
 	default:
 		writeError(w, http.StatusBadGateway, "sandbox_provider_failed", "sandbox infrastructure did not confirm the request")
 	}
