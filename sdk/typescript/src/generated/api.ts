@@ -128,6 +128,11 @@ export class ControlApi {
     return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
+  recordModelAPIUsageReconciliationEvidence(id: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const requestPath = `/admin/model-api/usage-reservations/${encodeURIComponent(id)}/evidence`;
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
   recordMarketplaceReceipt(body: JsonValue): Promise<Record<string, JsonValue>> {
     const requestPath = '/admin/marketplace/receipts';
     return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;

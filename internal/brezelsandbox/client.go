@@ -183,6 +183,8 @@ func (c *Client) Capabilities(ctx context.Context, tenantID string) (sandboxprov
 		Implemented   struct {
 			HostileCodeIsolation bool `json:"hostile_code_isolation"`
 			DenyByDefaultEgress  bool `json:"deny_by_default_egress"`
+			FullStateStandby     bool `json:"full_state_standby"`
+			AutoResume           bool `json:"auto_resume"`
 			FilesystemCheckpoint bool `json:"filesystem_checkpoint"`
 			CommandStreaming     bool `json:"command_streaming"`
 			FileReadWrite        bool `json:"file_read_write"`
@@ -202,18 +204,40 @@ func (c *Client) Capabilities(ctx context.Context, tenantID string) (sandboxprov
 	if c.allowAllTenants {
 		assurance = "managed-shared-capacity"
 	}
+	features := sandboxprovider.Features{
+		HostileCodeIsolation: payload.Implemented.HostileCodeIsolation,
+		DenyByDefaultEgress:  payload.Implemented.DenyByDefaultEgress,
+		PauseResume:          payload.Implemented.FullStateStandby,
+		AutoResume:           payload.Implemented.AutoResume,
+		FilesystemCheckpoint: payload.Implemented.FilesystemCheckpoint,
+		CommandStreaming:     payload.Implemented.CommandStreaming, FileReadWrite: payload.Implemented.FileReadWrite,
+		HTTPPreview: payload.Implemented.AuthenticatedPorts, DurableWorkspaces: payload.Implemented.DurableWorkspaces,
+		InteractivePTY: false, GPU: false,
+	}
+	state := "ready"
+	if !qualifiedSandboxRuntime(payload.Qualification) || !managedFeaturesReady(features) || len(templates) == 0 {
+		state = "unavailable"
+	}
 	return sandboxprovider.Capabilities{
-		Provider: "brezel", Product: "InferCrane Sandboxes", State: "ready", Assurance: assurance,
+		Provider: "brezel", Product: "InferCrane Sandboxes", State: state, Assurance: assurance,
 		Runtime: payload.Runtime, Qualification: payload.Qualification, QualificationNote: payload.Note, Templates: templates,
-		Features: sandboxprovider.Features{
-			HostileCodeIsolation: payload.Implemented.HostileCodeIsolation,
-			DenyByDefaultEgress:  payload.Implemented.DenyByDefaultEgress,
-			PauseResume:          true, FilesystemCheckpoint: payload.Implemented.FilesystemCheckpoint,
-			CommandStreaming: payload.Implemented.CommandStreaming, FileReadWrite: payload.Implemented.FileReadWrite,
-			HTTPPreview: payload.Implemented.AuthenticatedPorts, DurableWorkspaces: payload.Implemented.DurableWorkspaces,
-			InteractivePTY: false, GPU: false,
-		},
+		Features: features,
 	}, nil
+}
+
+func qualifiedSandboxRuntime(state string) bool {
+	switch strings.TrimSpace(state) {
+	case "configuration-verified", "qualified", "real-qualified", "sandbox_runtime_conformant":
+		return true
+	default:
+		return false
+	}
+}
+
+func managedFeaturesReady(features sandboxprovider.Features) bool {
+	return features.HostileCodeIsolation && features.DenyByDefaultEgress && features.PauseResume &&
+		features.AutoResume && features.CommandStreaming && features.FileReadWrite && features.HTTPPreview &&
+		features.DurableWorkspaces
 }
 
 func (c *Client) List(ctx context.Context, tenantID string, includeTerminal bool) ([]sandboxprovider.Sandbox, error) {
@@ -776,6 +800,7 @@ func providerError(response *http.Response) error {
 	data, _ := io.ReadAll(io.LimitReader(response.Body, 1<<20))
 	var payload struct {
 		Error struct {
+			Code    string `json:"code"`
 			Message string `json:"message"`
 		} `json:"error"`
 	}
@@ -793,9 +818,43 @@ func providerError(response *http.Response) error {
 	case http.StatusNotFound:
 		base = sandboxprovider.ErrNotFound
 	case http.StatusConflict:
-		base = sandboxprovider.ErrConflict
+		if strings.Contains(strings.ToLower(message), "already terminal") {
+			base = sandboxprovider.ErrAlreadyTerminal
+		} else {
+			base = sandboxprovider.ErrConflict
+		}
+	case http.StatusTooManyRequests:
+		switch strings.TrimSpace(payload.Error.Code) {
+		case "quota_exceeded":
+			base = sandboxprovider.ErrQuotaExceeded
+		case "capacity_exhausted":
+			base = sandboxprovider.ErrCapacityExhausted
+		default:
+			base = sandboxprovider.ErrUnavailable
+		}
+	}
+	if response.StatusCode == http.StatusTooManyRequests {
+		return &sandboxprovider.RetryError{Kind: base, Message: message, RetryAfter: parseRetryAfter(response.Header.Get("Retry-After"), time.Now())}
 	}
 	return fmt.Errorf("%w: %s", base, message)
+}
+
+func parseRetryAfter(value string, now time.Time) time.Duration {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.ParseInt(value, 10, 64); err == nil {
+		if seconds > 0 {
+			return time.Duration(seconds) * time.Second
+		}
+		return 0
+	}
+	when, err := http.ParseTime(value)
+	if err != nil || !when.After(now) {
+		return 0
+	}
+	return when.Sub(now)
 }
 
 func label(id string) string {

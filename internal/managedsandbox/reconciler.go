@@ -17,7 +17,9 @@ import (
 type Repository interface {
 	ManagedSandboxesForReconciliation(context.Context, int) ([]domain.ManagedSpendReservation, error)
 	CleanupPendingSandboxesForReconciliation(context.Context, int) ([]domain.NativeSandbox, error)
+	UnreservedNativeSandboxesForReconciliation(context.Context, int) ([]domain.NativeSandbox, error)
 	NativeSandbox(context.Context, string, string) (domain.NativeSandbox, error)
+	SetNativeSandboxProviderRefs(context.Context, string, string, string, string, string, string) (domain.NativeSandbox, error)
 	RecordNativeSandboxTransition(context.Context, string, string, string, string, string, string, time.Time) (domain.NativeSandbox, error)
 	SandboxRunningMilliseconds(context.Context, string, string) (int64, error)
 	ReleaseManagedSandboxSpend(context.Context, string, string, string) error
@@ -54,6 +56,11 @@ func (r Reconciler) Once(ctx context.Context) error {
 			observedAt = r.Now().UTC()
 		}
 		for _, row := range orphans {
+			row, err = r.recoverWorkspaceForCleanup(ctx, row)
+			if err != nil {
+				failures = append(failures, fmt.Errorf("sandbox %s/%s: recover cleanup workspace: %w", row.TenantID, row.ID, err))
+				continue
+			}
 			if err = r.cleanup(ctx, row, "unreserved:"+row.ID); err != nil {
 				failures = append(failures, fmt.Errorf("sandbox %s/%s: %w", row.TenantID, row.ID, err))
 				continue
@@ -63,7 +70,85 @@ func (r Reconciler) Once(ctx context.Context) error {
 			}
 		}
 	}
+	unreserved, unreservedErr := r.Store.UnreservedNativeSandboxesForReconciliation(ctx, r.Limit)
+	if unreservedErr != nil {
+		failures = append(failures, fmt.Errorf("list unreserved sandboxes: %w", unreservedErr))
+	} else {
+		for _, row := range unreserved {
+			if err = r.reconcileUnreserved(ctx, row); err != nil {
+				failures = append(failures, fmt.Errorf("sandbox %s/%s: %w", row.TenantID, row.ID, err))
+			}
+		}
+	}
 	return errors.Join(failures...)
+}
+
+func (r Reconciler) reconcileUnreserved(ctx context.Context, row domain.NativeSandbox) error {
+	now := time.Now().UTC()
+	if r.Now != nil {
+		now = r.Now().UTC()
+	}
+	if row.BrezelSandboxID == "" {
+		if row.Status != "creating_workspace" && row.Status != "creating" {
+			return nil
+		}
+		if now.Before(row.CreatedAt.Add(5 * time.Minute)) {
+			return nil
+		}
+		pending, err := r.recordTransition(ctx, row, "cleanup_pending", "workspace_recovery_cleanup_pending", now, "unreserved-provisioning-timeout")
+		if err != nil {
+			return err
+		}
+		pending, err = r.recoverWorkspaceForCleanup(ctx, pending)
+		if err != nil {
+			return err
+		}
+		if err = r.cleanup(ctx, pending, "unreserved:"+row.ID); err != nil {
+			return err
+		}
+		_, err = r.recordTransition(ctx, pending, "deleted", "", now, "unreserved-provisioning-cleanup")
+		return err
+	}
+	observed, observeErr := r.Provider.Get(ctx, row.TenantID, row.BrezelSandboxID)
+	providerAbsent := errors.Is(observeErr, sandboxprovider.ErrNotFound)
+	if observeErr != nil && !providerAbsent {
+		if row.Status != "unknown" {
+			if _, err := r.recordTransition(ctx, row, "unknown", "provider_observation_failed", now, "unreserved-observation"); err != nil {
+				return errors.Join(observeErr, err)
+			}
+		}
+		return observeErr
+	}
+	providerStatus := "deleted"
+	failure := "provider_absent_cleanup_pending"
+	transitionAt := now
+	terminal := providerAbsent
+	if !providerAbsent {
+		providerStatus = customerStatus(observed.State)
+		failure = failureCode(observed.Failure)
+		transitionAt = boundedTransitionTime(observed.UpdatedAt, row, now)
+		terminal = providerStatus == "deleted" || providerStatus == "expired" || providerStatus == "failed"
+	}
+	if !terminal {
+		if providerStatus != "unknown" && providerStatus != row.Status {
+			_, err := r.recordTransition(ctx, row, providerStatus, failure, transitionAt, "unreserved-observed")
+			return err
+		}
+		return nil
+	}
+	cleanupFailure := "provider_" + providerStatus + "_cleanup_pending"
+	if providerAbsent {
+		cleanupFailure = failure
+	}
+	pending, err := r.recordTransition(ctx, row, "cleanup_pending", cleanupFailure, transitionAt, "unreserved-terminal")
+	if err != nil {
+		return err
+	}
+	if err = r.cleanup(ctx, pending, "unreserved:"+row.ID); err != nil {
+		return err
+	}
+	_, err = r.recordTransition(ctx, pending, "deleted", "", now, "unreserved-cleanup")
+	return err
 }
 
 func (r Reconciler) reconcile(ctx context.Context, reservation domain.ManagedSpendReservation) error {
@@ -83,6 +168,16 @@ func (r Reconciler) reconcile(ctx context.Context, reservation domain.ManagedSpe
 		if !terminal && now.Before(reservation.CreatedAt.Add(5*time.Minute)) {
 			return nil
 		}
+		if row.Status != "cleanup_pending" {
+			row, err = r.recordTransition(ctx, row, "cleanup_pending", "provider_cleanup_pending", now, "unactivated-cleanup")
+			if err != nil {
+				return err
+			}
+		}
+		row, err = r.recoverWorkspaceForCleanup(ctx, row)
+		if err != nil {
+			return err
+		}
 		if err = r.cleanup(ctx, row, reservation.ID); err != nil {
 			return err
 		}
@@ -101,7 +196,9 @@ func (r Reconciler) reconcile(ctx context.Context, reservation domain.ManagedSpe
 	if observeErr == nil {
 		observedStatus := customerStatus(observed.State)
 		terminal = observedStatus == "deleted" || observedStatus == "expired" || observedStatus == "failed"
-		if observedStatus != "unknown" && observedStatus != row.Status {
+		// Once cleanup intent is durable, provider observations must not reopen
+		// the lifecycle or falsely report deletion before owned workspace cleanup.
+		if row.Status != "cleanup_pending" && observedStatus != "unknown" && observedStatus != row.Status {
 			transitionAt := boundedTransitionTime(observed.UpdatedAt, row, now)
 			row, err = r.recordTransition(ctx, row, observedStatus, failureCode(observed.Failure), transitionAt, "observed")
 			if err != nil {
@@ -113,15 +210,21 @@ func (r Reconciler) reconcile(ctx context.Context, reservation domain.ManagedSpe
 	if !terminal && !expired {
 		return nil
 	}
-	if err = r.cleanup(ctx, row, reservation.ID); err != nil {
-		return err
-	}
 	endedAt := now
 	if expired && reservation.ExpiresAt.Before(endedAt) {
 		endedAt = reservation.ExpiresAt
 	}
 	if !row.BillingStateSince.IsZero() && endedAt.Before(row.BillingStateSince) {
 		endedAt = row.BillingStateSince
+	}
+	if row.Status != "cleanup_pending" {
+		row, err = r.recordTransition(ctx, row, "cleanup_pending", "provider_cleanup_pending", endedAt, "terminal-cleanup")
+		if err != nil {
+			return err
+		}
+	}
+	if err = r.cleanup(ctx, row, reservation.ID); err != nil {
+		return err
 	}
 	if _, err = r.recordTransition(ctx, row, "deleted", "", endedAt, "terminal"); err != nil {
 		return err
@@ -131,6 +234,28 @@ func (r Reconciler) reconcile(ctx context.Context, reservation domain.ManagedSpe
 		return err
 	}
 	return r.Store.SettleManagedSandboxSpend(ctx, row.TenantID, row.ID, runningMilliseconds, "metered active sandbox runtime; provider cleanup confirmed by lifecycle reconciler")
+}
+
+// A controller can stop after Brezel commits CreateWorkspace but before the
+// returned ID reaches InferCrane storage. Replaying the original create key
+// retrieves that same workspace. Persisting the recovered ID while the row is
+// cleanup_pending makes every later retry explicit and prevents a second
+// workspace from being created across controller restarts.
+func (r Reconciler) recoverWorkspaceForCleanup(ctx context.Context, row domain.NativeSandbox) (domain.NativeSandbox, error) {
+	if row.BrezelWorkspaceID != "" || row.BrezelSandboxID != "" {
+		return row, nil
+	}
+	if row.IdempotencyKey == "" {
+		return row, fmt.Errorf("%w: cleanup workspace recovery has no idempotency key", sandboxprovider.ErrInvalid)
+	}
+	mutation, err := r.Provider.CreateWorkspace(ctx, row.TenantID, row.IdempotencyKey+".workspace", row.ID)
+	if err != nil {
+		return row, err
+	}
+	if mutation.Resource.ID == "" {
+		return row, fmt.Errorf("%w: workspace recovery returned no resource identity", sandboxprovider.ErrUpstream)
+	}
+	return r.Store.SetNativeSandboxProviderRefs(ctx, row.TenantID, row.ID, mutation.Resource.ID, "", "cleanup_pending", row.FailureCode)
 }
 
 func (r Reconciler) cleanup(ctx context.Context, row domain.NativeSandbox, reservationID string) error {
@@ -153,6 +278,7 @@ func (r Reconciler) cleanup(ctx context.Context, row domain.NativeSandbox, reser
 // failures and are retried without releasing capacity or wallet holds.
 func cleanupConfirmed(err error) bool {
 	return err == nil || errors.Is(err, sandboxprovider.ErrNotFound) ||
+		errors.Is(err, sandboxprovider.ErrAlreadyTerminal) ||
 		(errors.Is(err, sandboxprovider.ErrConflict) && strings.Contains(err.Error(), "already terminal"))
 }
 

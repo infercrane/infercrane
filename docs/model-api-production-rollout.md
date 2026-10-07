@@ -100,6 +100,12 @@ InferCrane already has:
 - tenant-isolated prepaid reservation before supplier transmission;
 - explicit `reserved -> transmitted -> response_started -> settled` fencing;
 - `pending_reconciliation` for ambiguous usage instead of guessed charges;
+- a restart-safe reconciliation worker that rotates pending and stale in-flight
+  reservations, consumes only complete token usage or explicit no-charge
+  evidence, and exports aggregate backlog and oldest-age metrics;
+- an operator-workspace evidence endpoint for irreducibly ambiguous attempts;
+  it records an immutable content-free supplier reference and queues the same
+  reconciler rather than changing customer money in the request handler;
 - initial buffered and SSE usage extraction, stable public model rewriting, and
   an HTTPS-only configured endpoint registry; the strict streaming conformance
   and cached/reasoning-token gates below remain launch blockers;
@@ -318,6 +324,14 @@ Add a durable settlement outbox and sweep every aging state:
 - stale `reserved`: release only after proving transmission never occurred;
 - stale `transmitted` or `response_started`: resolve with supplier evidence;
 - `pending_reconciliation`: bounded retries and age escalation.
+
+The current DeepSeek, RunPod, and Z.ai resolvers consume durable adapter or
+operator-verified evidence. None of those suppliers is yet qualified with a
+live post-request usage lookup API, so an attempt without adapter-confirmed
+no-charge evidence remains reserved until the operator attaches an invoice or
+supplier-ledger reference through
+`POST /api/v1/admin/model-api/usage-reservations/{id}/evidence`. Never use the
+repair endpoint to estimate tokens or infer non-billing from an HTTP status.
 
 Persist gateway usage, supplier usage, cached/reasoning tokens, supplier request
 ID, supplier price revision, actual COGS, invoice reference, evidence digest,

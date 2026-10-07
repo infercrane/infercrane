@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/infercrane/infercrane/internal/managedbilling"
@@ -29,7 +30,7 @@ func (s *Store) ReserveModelAPIUsage(ctx context.Context, request modelapiroutin
 	if existing, found, lookupErr := modelAPIReservationMaybe(ctx, tx, request.TenantID, request.ID); lookupErr != nil {
 		return modelapirouting.Reservation{}, lookupErr
 	} else if found {
-		if existing.ProductID != request.ProductID || existing.EntitlementID != request.EntitlementID || existing.RetailRateDigest != request.RetailRate.ContractDigest ||
+		if existing.RequestID != request.RequestID || existing.ProductID != request.ProductID || existing.EntitlementID != request.EntitlementID || existing.RetailRateDigest != request.RetailRate.ContractDigest ||
 			existing.SupplyPlanID != request.SupplyPlanID || existing.CandidateID != request.CandidateID || existing.OfferID != request.OfferID ||
 			existing.OfferVersion != request.OfferVersion || existing.Supplier != request.Supplier || existing.SupplierModelID != request.SupplierModelID ||
 			existing.TargetBindingID != request.TargetBindingID || existing.TargetBindingDigest != request.TargetBindingDigest {
@@ -113,8 +114,8 @@ func (s *Store) ReserveModelAPIUsage(ctx context.Context, request modelapiroutin
 		return modelapirouting.Reservation{}, err
 	}
 	stamp := request.CreatedAt.UTC()
-	_, err = tx.ExecContext(ctx, `INSERT INTO model_api_usage_reservations(id,customer_tenant_id,product_id,entitlement_id,operator_tenant_id,serving_plan_id,supply_plan_id,candidate_id,offer_id,offer_version,supplier,supplier_model_id,target_binding_id,target_binding_digest,supplier_rate_id,supplier_rate_version,supplier_rate_digest,retail_rate_card_id,retail_rate_version,retail_rate_contract_digest,input_microusd_per_million,output_microusd_per_million,reserved_microusd,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'reserved',?,?)`,
-		request.ID, request.TenantID, request.ProductID, request.EntitlementID, request.OperatorTenantID,
+	_, err = tx.ExecContext(ctx, `INSERT INTO model_api_usage_reservations(id,request_id,customer_tenant_id,product_id,entitlement_id,operator_tenant_id,serving_plan_id,supply_plan_id,candidate_id,offer_id,offer_version,supplier,supplier_model_id,target_binding_id,target_binding_digest,supplier_rate_id,supplier_rate_version,supplier_rate_digest,retail_rate_card_id,retail_rate_version,retail_rate_contract_digest,input_microusd_per_million,output_microusd_per_million,reserved_microusd,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'reserved',?,?)`,
+		request.ID, request.RequestID, request.TenantID, request.ProductID, request.EntitlementID, request.OperatorTenantID,
 		request.ServingPlanID, request.SupplyPlanID, request.CandidateID, request.OfferID, request.OfferVersion,
 		request.Supplier, request.SupplierModelID, nullableModelAPIString(request.TargetBindingID), nullableModelAPIString(request.TargetBindingDigest),
 		supplierRate.ID, supplierRate.Version, supplierRate.Digest, request.RetailRate.ID, request.RetailRate.Version,
@@ -192,7 +193,7 @@ func (s *Store) SettleModelAPIUsage(ctx context.Context, tenant, reservationID s
 	if row.State == "reserved" {
 		return modelapirouting.Reservation{}, fmt.Errorf("%w: unsent hosted usage cannot be settled", ErrConflict)
 	}
-	stamp := time.Now().UTC()
+	stamp := modelAPIUsageMutationTime(row, time.Now())
 	if usage.InputTokens == nil || usage.OutputTokens == nil {
 		_, err = tx.ExecContext(ctx, `UPDATE model_api_usage_reservations SET state='pending_reconciliation',resolution='supplier usage absent; reservation retained',updated_at=? WHERE customer_tenant_id=? AND id=?`, stamp, tenant, reservationID)
 		if err != nil {
@@ -315,7 +316,7 @@ func (s *Store) ReleaseUnsentModelAPIUsage(ctx context.Context, tenant, reservat
 	if row.State != "reserved" || row.TransmittedAt != nil {
 		return fmt.Errorf("%w: transmitted or response-started usage must be reconciled, not released", ErrConflict)
 	}
-	stamp := time.Now().UTC()
+	stamp := modelAPIUsageMutationTime(row, time.Now())
 	if _, err = tx.ExecContext(ctx, `UPDATE managed_wallets SET reserved_microusd=reserved_microusd-?,updated_at=? WHERE tenant_id=?`, row.ReservedMicrousd, stamp, tenant); err != nil {
 		return err
 	}
@@ -351,7 +352,7 @@ func (s *Store) ConfirmNoChargeModelAPIUsage(ctx context.Context, tenant, reserv
 	if row.State != "pending_reconciliation" && row.State != "transmitted" && row.State != "response_started" {
 		return fmt.Errorf("%w: only ambiguous hosted usage can be confirmed uncharged", ErrConflict)
 	}
-	stamp := time.Now().UTC()
+	stamp := modelAPIUsageMutationTime(row, time.Now())
 	if _, err = tx.ExecContext(ctx, `UPDATE managed_wallets SET reserved_microusd=reserved_microusd-?,updated_at=? WHERE tenant_id=?`, row.ReservedMicrousd, stamp, tenant); err != nil {
 		return err
 	}
@@ -384,6 +385,199 @@ func (s *Store) PendingModelAPIUsageReservations(ctx context.Context, limit int)
 	return result, rows.Err()
 }
 
+// modelAPIUsageMutationTime keeps the reservation audit clock monotonic when
+// a supplier timestamp is slightly ahead of the control-plane wall clock.
+// Database rows reject updated_at values earlier than created_at, and an
+// already-transmitted reservation may also carry a later updated_at value.
+func modelAPIUsageMutationTime(row modelapirouting.Reservation, now time.Time) time.Time {
+	stamp := now.UTC()
+	if row.UpdatedAt.After(stamp) {
+		return row.UpdatedAt.UTC()
+	}
+	return stamp
+}
+
+// ReconcileableModelAPIUsageReservations includes every explicitly pending
+// reservation plus in-flight reservations whose owner may have crashed after
+// the durable transmission fence. Fresh in-flight requests are excluded so a
+// background pass cannot race their request-path settlement.
+func (s *Store) ReconcileableModelAPIUsageReservations(ctx context.Context, staleBefore time.Time, limit int) ([]modelapirouting.Reservation, error) {
+	if staleBefore.IsZero() {
+		return nil, errors.New("stale in-flight cutoff is required")
+	}
+	if limit < 1 || limit > 500 {
+		limit = 100
+	}
+	rows, err := s.QueryContext(ctx, modelAPIReservationSelect+` WHERE state='pending_reconciliation' OR (state IN ('transmitted','response_started') AND updated_at<=?) ORDER BY EXISTS(SELECT 1 FROM model_api_usage_reconciliation_evidence e WHERE e.reservation_id=model_api_usage_reservations.id) DESC,COALESCE(reconciliation_last_attempted_at,TIMESTAMPTZ 'epoch'),updated_at,id LIMIT ?`, staleBefore.UTC(), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]modelapirouting.Reservation, 0)
+	for rows.Next() {
+		item, scanErr := scanModelAPIUsageReservation(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
+// RecordModelAPIUsageReconciliationAttempt rotates unresolved rows fairly
+// without changing updated_at, which remains the authoritative backlog-age
+// boundary.
+func (s *Store) RecordModelAPIUsageReconciliationAttempt(ctx context.Context, tenant, reservationID string, at time.Time) error {
+	if tenant == "" || reservationID == "" || at.IsZero() {
+		return errors.New("tenant, reservation, and attempt time are required")
+	}
+	_, err := s.ExecContext(ctx, `UPDATE model_api_usage_reservations SET reconciliation_attempts=reconciliation_attempts+1,reconciliation_last_attempted_at=? WHERE customer_tenant_id=? AND id=? AND state IN ('transmitted','response_started','pending_reconciliation')`, at.UTC(), tenant, reservationID)
+	return err
+}
+
+// ModelAPIUsageReconciliationBacklog returns exact aggregate health evidence
+// without tenant or supplier labels. An empty timestamp means no reservations
+// are waiting for authoritative evidence.
+func (s *Store) ModelAPIUsageReconciliationBacklog(ctx context.Context) (int64, time.Time, error) {
+	var count int64
+	var oldest sql.NullTime
+	if err := s.QueryRowContext(ctx, `SELECT COUNT(*),MIN(updated_at) FROM model_api_usage_reservations WHERE state='pending_reconciliation'`).Scan(&count, &oldest); err != nil {
+		return 0, time.Time{}, err
+	}
+	if !oldest.Valid {
+		return count, time.Time{}, nil
+	}
+	return count, oldest.Time.UTC(), nil
+}
+
+// RecordModelAPIUsageReconciliationEvidence persists evidence emitted by a
+// trusted supplier adapter. Operator-facing repair uses the scoped method
+// below so cross-workspace evidence cannot be attached accidentally.
+func (s *Store) RecordModelAPIUsageReconciliationEvidence(ctx context.Context, evidence modelapirouting.ReconciliationEvidence) (modelapirouting.ReconciliationEvidence, bool, error) {
+	if evidence.RecordedBy == "" {
+		evidence.RecordedBy = "supplier-adapter"
+	}
+	return s.recordModelAPIUsageReconciliationEvidence(ctx, "", evidence)
+}
+
+func (s *Store) RecordOperatorModelAPIUsageReconciliationEvidence(ctx context.Context, operatorTenant, actor string, evidence modelapirouting.ReconciliationEvidence) (modelapirouting.ReconciliationEvidence, bool, error) {
+	evidence.RecordedBy = strings.TrimSpace(actor)
+	if strings.TrimSpace(operatorTenant) == "" || evidence.RecordedBy == "" {
+		return modelapirouting.ReconciliationEvidence{}, false, errors.New("operator tenant and actor are required")
+	}
+	return s.recordModelAPIUsageReconciliationEvidence(ctx, operatorTenant, evidence)
+}
+
+func (s *Store) recordModelAPIUsageReconciliationEvidence(ctx context.Context, operatorTenant string, evidence modelapirouting.ReconciliationEvidence) (modelapirouting.ReconciliationEvidence, bool, error) {
+	evidence.ReservationID = strings.TrimSpace(evidence.ReservationID)
+	evidence.TenantID = strings.TrimSpace(evidence.TenantID)
+	evidence.SupplierRequestID = strings.TrimSpace(evidence.SupplierRequestID)
+	evidence.Reference = strings.TrimSpace(evidence.Reference)
+	evidence.RecordedBy = strings.TrimSpace(evidence.RecordedBy)
+	if evidence.ReservationID == "" || evidence.TenantID == "" || evidence.Reference == "" || evidence.RecordedBy == "" || evidence.ObservedAt.IsZero() {
+		return modelapirouting.ReconciliationEvidence{}, false, errors.New("reservation, customer tenant, evidence reference, actor, and observation time are required")
+	}
+	if len(evidence.SupplierRequestID) > 256 || len(evidence.Reference) > 512 || len(evidence.RecordedBy) > 255 {
+		return modelapirouting.ReconciliationEvidence{}, false, errors.New("supplier request id or evidence reference exceeds its safe bound")
+	}
+	if evidence.Authority != modelapirouting.EvidenceSupplierAdapter && evidence.Authority != modelapirouting.EvidenceOperatorVerified {
+		return modelapirouting.ReconciliationEvidence{}, false, errors.New("unsupported reconciliation evidence authority")
+	}
+	if evidence.Outcome == modelapirouting.ReconciliationUsage {
+		if evidence.InputTokens == nil || evidence.OutputTokens == nil || *evidence.InputTokens < 0 || *evidence.OutputTokens < 0 || evidence.CachedInputTokens != nil && (*evidence.CachedInputTokens < 0 || *evidence.CachedInputTokens > *evidence.InputTokens) {
+			return modelapirouting.ReconciliationEvidence{}, false, errors.New("usage evidence requires complete non-negative token counts")
+		}
+	} else if evidence.Outcome == modelapirouting.ReconciliationNoCharge {
+		if evidence.InputTokens != nil || evidence.CachedInputTokens != nil || evidence.OutputTokens != nil {
+			return modelapirouting.ReconciliationEvidence{}, false, errors.New("no-charge evidence cannot include token counts")
+		}
+	} else {
+		return modelapirouting.ReconciliationEvidence{}, false, errors.New("unsupported reconciliation evidence outcome")
+	}
+
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return modelapirouting.ReconciliationEvidence{}, false, err
+	}
+	defer tx.Rollback()
+	reservation, err := modelAPIReservationForUpdate(ctx, tx, evidence.TenantID, evidence.ReservationID)
+	if err != nil {
+		return modelapirouting.ReconciliationEvidence{}, false, err
+	}
+	if operatorTenant != "" && reservation.OperatorTenantID != operatorTenant {
+		return modelapirouting.ReconciliationEvidence{}, false, ErrNotFound
+	}
+	if existing, found, lookupErr := modelAPIUsageReconciliationEvidenceMaybe(ctx, tx, evidence.TenantID, evidence.ReservationID); lookupErr != nil {
+		return modelapirouting.ReconciliationEvidence{}, false, lookupErr
+	} else if found {
+		if !sameModelAPIUsageReconciliationEvidence(existing, evidence) {
+			return modelapirouting.ReconciliationEvidence{}, false, fmt.Errorf("%w: reconciliation evidence already exists with different authority or values", ErrConflict)
+		}
+		return existing, false, tx.Commit()
+	}
+	if reservation.State != "transmitted" && reservation.State != "response_started" && reservation.State != "pending_reconciliation" {
+		return modelapirouting.ReconciliationEvidence{}, false, fmt.Errorf("%w: only ambiguous transmitted usage accepts reconciliation evidence", ErrConflict)
+	}
+	evidence.Supplier = reservation.Supplier
+	evidence.RecordedAt = time.Now().UTC()
+	var input, cached, output any
+	if evidence.InputTokens != nil {
+		input = *evidence.InputTokens
+	}
+	if evidence.CachedInputTokens != nil {
+		cached = *evidence.CachedInputTokens
+	}
+	if evidence.OutputTokens != nil {
+		output = *evidence.OutputTokens
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO model_api_usage_reconciliation_evidence(reservation_id,customer_tenant_id,supplier,supplier_request_id,outcome,authority,evidence_reference,recorded_by,input_tokens,cached_input_tokens,output_tokens,observed_at,recorded_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, evidence.ReservationID, evidence.TenantID, evidence.Supplier, evidence.SupplierRequestID, evidence.Outcome, evidence.Authority, evidence.Reference, evidence.RecordedBy, input, cached, output, evidence.ObservedAt.UTC(), evidence.RecordedAt)
+	if err != nil {
+		return modelapirouting.ReconciliationEvidence{}, false, err
+	}
+	if err = tx.Commit(); err != nil {
+		return modelapirouting.ReconciliationEvidence{}, false, err
+	}
+	return evidence, true, nil
+}
+
+func (s *Store) ModelAPIUsageReconciliationEvidence(ctx context.Context, tenant, reservationID string) (modelapirouting.ReconciliationEvidence, bool, error) {
+	return modelAPIUsageReconciliationEvidenceMaybe(ctx, s, tenant, reservationID)
+}
+
+func modelAPIUsageReconciliationEvidenceMaybe(ctx context.Context, queryer modelAPIReservationQueryer, tenant, reservationID string) (modelapirouting.ReconciliationEvidence, bool, error) {
+	var out modelapirouting.ReconciliationEvidence
+	var input, cached, output sql.NullInt64
+	err := queryer.QueryRowContext(ctx, `SELECT reservation_id,customer_tenant_id,supplier,supplier_request_id,outcome,authority,evidence_reference,recorded_by,input_tokens,cached_input_tokens,output_tokens,observed_at,recorded_at FROM model_api_usage_reconciliation_evidence WHERE customer_tenant_id=? AND reservation_id=?`, tenant, reservationID).Scan(&out.ReservationID, &out.TenantID, &out.Supplier, &out.SupplierRequestID, &out.Outcome, &out.Authority, &out.Reference, &out.RecordedBy, &input, &cached, &output, &out.ObservedAt, &out.RecordedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return modelapirouting.ReconciliationEvidence{}, false, nil
+	}
+	if err != nil {
+		return modelapirouting.ReconciliationEvidence{}, false, err
+	}
+	if input.Valid {
+		value := int(input.Int64)
+		out.InputTokens = &value
+	}
+	if cached.Valid {
+		value := int(cached.Int64)
+		out.CachedInputTokens = &value
+	}
+	if output.Valid {
+		value := int(output.Int64)
+		out.OutputTokens = &value
+	}
+	out.ObservedAt, out.RecordedAt = out.ObservedAt.UTC(), out.RecordedAt.UTC()
+	return out, true, nil
+}
+
+func sameModelAPIUsageReconciliationEvidence(left, right modelapirouting.ReconciliationEvidence) bool {
+	return left.ReservationID == right.ReservationID && left.TenantID == right.TenantID && left.SupplierRequestID == right.SupplierRequestID && left.Outcome == right.Outcome && left.Authority == right.Authority && left.Reference == right.Reference && left.RecordedBy == right.RecordedBy && left.ObservedAt.Equal(right.ObservedAt.UTC()) && sameOptionalInt(left.InputTokens, right.InputTokens) && sameOptionalInt(left.CachedInputTokens, right.CachedInputTokens) && sameOptionalInt(left.OutputTokens, right.OutputTokens)
+}
+
+func sameOptionalInt(left, right *int) bool {
+	return left == nil && right == nil || left != nil && right != nil && *left == *right
+}
+
 func (s *Store) ModelAPIUsageReservation(ctx context.Context, tenant, reservationID string) (modelapirouting.Reservation, error) {
 	row, found, err := modelAPIReservationMaybe(ctx, s, tenant, reservationID)
 	if err != nil {
@@ -399,7 +593,7 @@ type modelAPIReservationQueryer interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
-const modelAPIReservationSelect = `SELECT id,customer_tenant_id,product_id,entitlement_id,operator_tenant_id,supply_plan_id,candidate_id,offer_id,offer_version,supplier,supplier_model_id,target_binding_id,target_binding_digest,supplier_rate_id,supplier_rate_version,supplier_rate_digest,retail_rate_card_id,retail_rate_version,retail_rate_contract_digest,input_microusd_per_million,output_microusd_per_million,reserved_microusd,COALESCE(actual_microusd,0),input_tokens,cached_input_tokens,output_tokens,state,resolution,transmitted_at,response_started_at,created_at,updated_at FROM model_api_usage_reservations`
+const modelAPIReservationSelect = `SELECT id,request_id,customer_tenant_id,product_id,entitlement_id,operator_tenant_id,supply_plan_id,candidate_id,offer_id,offer_version,supplier,supplier_model_id,target_binding_id,target_binding_digest,supplier_rate_id,supplier_rate_version,supplier_rate_digest,retail_rate_card_id,retail_rate_version,retail_rate_contract_digest,input_microusd_per_million,output_microusd_per_million,reserved_microusd,COALESCE(actual_microusd,0),input_tokens,cached_input_tokens,output_tokens,state,resolution,transmitted_at,response_started_at,created_at,updated_at FROM model_api_usage_reservations`
 
 func modelAPIReservationMaybe(ctx context.Context, queryer modelAPIReservationQueryer, tenant, reservationID string) (modelapirouting.Reservation, bool, error) {
 	row, err := scanModelAPIUsageReservation(queryer.QueryRowContext(ctx, modelAPIReservationSelect+` WHERE customer_tenant_id=? AND id=?`, tenant, reservationID))
@@ -422,7 +616,7 @@ func scanModelAPIUsageReservation(row interface{ Scan(...any) error }) (modelapi
 	var transmitted, responseStarted sql.NullTime
 	var targetBindingID, targetBindingDigest, supplierRateID, supplierRateDigest sql.NullString
 	var supplierRateVersion sql.NullInt64
-	err := row.Scan(&out.ID, &out.TenantID, &out.ProductID, &out.EntitlementID, &out.OperatorTenantID, &out.SupplyPlanID, &out.CandidateID,
+	err := row.Scan(&out.ID, &out.RequestID, &out.TenantID, &out.ProductID, &out.EntitlementID, &out.OperatorTenantID, &out.SupplyPlanID, &out.CandidateID,
 		&out.OfferID, &out.OfferVersion, &out.Supplier, &out.SupplierModelID, &targetBindingID, &targetBindingDigest, &supplierRateID, &supplierRateVersion, &supplierRateDigest,
 		&out.RetailRateID, &out.RetailRateVersion,
 		&out.RetailRateDigest, &out.InputMicrousdPerMillion, &out.OutputMicrousdPerMillion, &out.ReservedMicrousd,
@@ -491,4 +685,9 @@ func (a ModelAPIBillingAdapter) Settle(ctx context.Context, tenant, reservation 
 }
 func (a ModelAPIBillingAdapter) ReleaseUnsent(ctx context.Context, tenant, reservation, reason string) error {
 	return a.Store.ReleaseUnsentModelAPIUsage(ctx, tenant, reservation, reason)
+}
+func (a ModelAPIBillingAdapter) RecordReconciliationEvidence(ctx context.Context, tenant, reservation string, evidence modelapirouting.ReconciliationEvidence) error {
+	evidence.TenantID, evidence.ReservationID = tenant, reservation
+	_, _, err := a.Store.RecordModelAPIUsageReconciliationEvidence(ctx, evidence)
+	return err
 }

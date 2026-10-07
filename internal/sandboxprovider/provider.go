@@ -11,13 +11,47 @@ import (
 )
 
 var (
-	ErrUnavailable = errors.New("sandbox provider is unavailable")
-	ErrForbidden   = errors.New("sandbox provider is not enabled for this tenant")
-	ErrNotFound    = errors.New("sandbox was not found")
-	ErrConflict    = errors.New("sandbox lifecycle conflict")
-	ErrInvalid     = errors.New("invalid sandbox request")
-	ErrUpstream    = errors.New("sandbox provider request failed")
+	ErrUnavailable       = errors.New("sandbox provider is unavailable")
+	ErrForbidden         = errors.New("sandbox provider is not enabled for this tenant")
+	ErrNotFound          = errors.New("sandbox was not found")
+	ErrConflict          = errors.New("sandbox lifecycle conflict")
+	ErrAlreadyTerminal   = errors.New("sandbox resource is already terminal")
+	ErrQuotaExceeded     = errors.New("sandbox project quota exceeded")
+	ErrCapacityExhausted = errors.New("sandbox runtime capacity exhausted")
+	ErrInvalid           = errors.New("invalid sandbox request")
+	ErrUpstream          = errors.New("sandbox provider request failed")
 )
+
+// RetryError preserves provider retry evidence without coupling callers to an
+// HTTP implementation. Kind remains available through errors.Is.
+type RetryError struct {
+	Kind       error
+	Message    string
+	RetryAfter time.Duration
+}
+
+func (e *RetryError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.Kind == nil {
+		return e.Message
+	}
+	if e.Message == "" {
+		return e.Kind.Error()
+	}
+	return e.Kind.Error() + ": " + e.Message
+}
+
+func (e *RetryError) Unwrap() error { return e.Kind }
+
+func RetryAfter(err error) (time.Duration, bool) {
+	var retry *RetryError
+	if !errors.As(err, &retry) || retry.RetryAfter <= 0 {
+		return 0, false
+	}
+	return retry.RetryAfter, true
+}
 
 // Template is a product-approved immutable sandbox environment. The provider
 // revision stays visible as evidence, but customers select the stable ID.
@@ -36,6 +70,7 @@ type Features struct {
 	FileReadWrite        bool `json:"file_read_write"`
 	HTTPPreview          bool `json:"http_preview"`
 	DurableWorkspaces    bool `json:"durable_workspaces"`
+	AutoResume           bool `json:"auto_resume"`
 	InteractivePTY       bool `json:"interactive_pty"`
 	GPU                  bool `json:"gpu"`
 }

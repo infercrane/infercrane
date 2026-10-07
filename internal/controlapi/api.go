@@ -460,6 +460,7 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/admin/model-api/plans", a.auth(authz.ManageModelAPI, a.compileModelAPISupplyPlan))
 	mux.HandleFunc("POST /api/v1/admin/model-api/publications", a.auth(authz.ManageModelAPI, a.publishModelAPIOperatorRoute))
 	mux.HandleFunc("POST /api/v1/admin/model-api/entitlements", a.auth(authz.ManageModelAPI, a.publishModelAPIEntitlement))
+	mux.HandleFunc("POST /api/v1/admin/model-api/usage-reservations/{id}/evidence", a.auth(authz.ManageModelAPI, a.recordModelAPIUsageReconciliationEvidence))
 	mux.HandleFunc("POST /api/v1/admin/marketplace/receipts", a.auth(authz.ManageModelAPI, a.recordMarketplaceReceipt))
 	mux.HandleFunc("POST /api/v1/admin/marketplace/billing/requests", a.auth(authz.ManageModelAPI, a.marketplaceBillingRequests))
 	mux.HandleFunc("GET /api/v1/compute/providers", a.auth(authz.Read, a.computeProviders))

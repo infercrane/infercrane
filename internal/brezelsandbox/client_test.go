@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -105,8 +106,8 @@ func TestCapabilitiesDoNotClaimPTYOrGPU(t *testing.T) {
 	revision := "envr_" + strings.Repeat("c", 24)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"runtime": "microvm", "qualification": "unverified", "qualification_note": "run conformance",
-			"implemented": map[string]bool{"hostile_code_isolation": true, "deny_by_default_egress": true, "filesystem_checkpoint": true, "command_streaming": true, "file_read_write": true, "authenticated_ports": true, "durable_workspaces": true},
+			"runtime": "microvm", "qualification": "qualified",
+			"implemented": map[string]bool{"hostile_code_isolation": true, "deny_by_default_egress": true, "full_state_standby": true, "auto_resume": true, "filesystem_checkpoint": true, "command_streaming": true, "file_read_write": true, "authenticated_ports": true, "durable_workspaces": true},
 		})
 	}))
 	defer server.Close()
@@ -118,8 +119,67 @@ func TestCapabilitiesDoNotClaimPTYOrGPU(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if capabilities.State != "ready" || capabilities.Assurance != "private-tenant-preview" || !capabilities.Features.HTTPPreview || capabilities.Features.InteractivePTY || capabilities.Features.GPU {
+	if capabilities.State != "ready" || capabilities.Assurance != "private-tenant-preview" || !capabilities.Features.HTTPPreview || !capabilities.Features.PauseResume || !capabilities.Features.AutoResume || capabilities.Features.InteractivePTY || capabilities.Features.GPU {
 		t.Fatalf("unsafe capability projection: %#v", capabilities)
+	}
+}
+
+func TestCapabilitiesFailClosedForUnqualifiedOrIncompleteRuntime(t *testing.T) {
+	revision := "envr_" + strings.Repeat("e", 24)
+	for _, test := range []struct {
+		name          string
+		qualification string
+		autoResume    bool
+	}{
+		{name: "unqualified", qualification: "unverified", autoResume: true},
+		{name: "missing capability", qualification: "qualified", autoResume: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"runtime": "microvm", "qualification": test.qualification,
+					"implemented": map[string]bool{"hostile_code_isolation": true, "deny_by_default_egress": true, "full_state_standby": true, "auto_resume": test.autoResume, "command_streaming": true, "file_read_write": true, "authenticated_ports": true, "durable_workspaces": true},
+				})
+			}))
+			defer server.Close()
+			client, err := New(Config{BaseURL: server.URL, Token: "token", ProjectID: "project-a", AllowedTenant: "tenant-a", Templates: map[string]string{"base": revision}, DefaultTemplate: "base", Client: server.Client()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			capabilities, err := client.Capabilities(context.Background(), "tenant-a")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if capabilities.State != "unavailable" {
+				t.Fatalf("capabilities=%#v", capabilities)
+			}
+		})
+	}
+}
+
+func TestProviderErrorPreservesAdmissionKindAndRetryAfter(t *testing.T) {
+	for _, test := range []struct {
+		code       string
+		want       error
+		retryAfter string
+		wantRetry  time.Duration
+	}{
+		{code: "quota_exceeded", want: sandboxprovider.ErrQuotaExceeded, retryAfter: "9", wantRetry: 9 * time.Second},
+		{code: "capacity_exhausted", want: sandboxprovider.ErrCapacityExhausted, retryAfter: "7", wantRetry: 7 * time.Second},
+	} {
+		response := &http.Response{
+			StatusCode: http.StatusTooManyRequests,
+			Header:     http.Header{"Retry-After": []string{test.retryAfter}},
+			Body:       io.NopCloser(strings.NewReader(`{"error":{"code":"` + test.code + `","message":"admission denied"}}`)),
+		}
+		err := providerError(response)
+		if !errors.Is(err, test.want) {
+			t.Fatalf("code=%s error=%v", test.code, err)
+		}
+		retry, ok := sandboxprovider.RetryAfter(err)
+		if retry != test.wantRetry || ok != (test.wantRetry > 0) {
+			t.Fatalf("code=%s retry=%s ok=%t", test.code, retry, ok)
+		}
 	}
 }
 

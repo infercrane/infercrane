@@ -6,7 +6,24 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/modelapirouting"
 )
+
+func TestModelAPIUsageMutationTimeNeverMovesAuditClockBackward(t *testing.T) {
+	now := time.Date(2026, 10, 7, 1, 0, 0, 0, time.FixedZone("local", 2*60*60))
+	future := now.UTC().Add(15 * time.Second)
+	row := modelapirouting.Reservation{UpdatedAt: future}
+
+	if got := modelAPIUsageMutationTime(row, now); !got.Equal(future) || got.Location() != time.UTC {
+		t.Fatalf("future reservation timestamp was not preserved in UTC: %s", got)
+	}
+
+	past := now.Add(-time.Second)
+	row.UpdatedAt = past
+	if got := modelAPIUsageMutationTime(row, now); !got.Equal(now.UTC()) || got.Location() != time.UTC {
+		t.Fatalf("current UTC timestamp was not used: %s", got)
+	}
+}
 
 func TestHostedModelAPIUsageFilterAlwaysScopesTenantAndPublicProduct(t *testing.T) {
 	start, end := time.Now().Add(-time.Hour), time.Now()
