@@ -29,9 +29,20 @@ type ProviderConnection struct {
 	CreatedAt, UpdatedAt                              time.Time
 }
 
+// ComputeConnection is a tenant-owned, verified provider account used for
+// provisioning compute. Credential bytes are write-only at the API boundary
+// and remain encrypted at rest; only the secret-free fields are serialized.
+type ComputeConnection struct {
+	ID, TenantID, Name, Provider, Adapter, Status string
+	CredentialCiphertext, CredentialNonce         []byte `json:"-"`
+	CredentialKeyReference                        string `json:"-"`
+	VerifiedAt                                    time.Time
+	CreatedAt, UpdatedAt                          time.Time
+}
+
 type Deployment struct {
 	ID, TenantID, Name, Model, Runtime, RoutingStrategy string
-	ComputeMode                                         string
+	ComputeMode, ComputeConnectionID                    string
 	ActiveRevisionID, CandidateRevisionID               string
 	DesiredState, ObservedState                         string
 	MinReplicas, MaxReplicas                            int
@@ -60,6 +71,7 @@ type DeploymentRevisionSpec struct {
 	ComputeMode            string                   `json:"compute_mode,omitempty"`
 	Cloud                  string                   `json:"cloud,omitempty"`
 	ProviderAdapter        string                   `json:"provider_adapter,omitempty"`
+	ComputeConnectionID    string                   `json:"compute_connection_id,omitempty"`
 	GPU                    string                   `json:"gpu,omitempty"`
 	GPUCount               int                      `json:"gpu_count,omitempty"`
 	Region                 string                   `json:"region,omitempty"`

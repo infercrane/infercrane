@@ -41,6 +41,7 @@ import (
 	"github.com/infercrane/infercrane/internal/benchmark"
 	"github.com/infercrane/infercrane/internal/brezelexecutor"
 	"github.com/infercrane/infercrane/internal/brezelsandbox"
+	"github.com/infercrane/infercrane/internal/computeconnection"
 	"github.com/infercrane/infercrane/internal/config"
 	"github.com/infercrane/infercrane/internal/contextpassport"
 	"github.com/infercrane/infercrane/internal/controlapi"
@@ -72,12 +73,14 @@ import (
 	runtimeadapter "github.com/infercrane/infercrane/internal/runtime"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
 	"github.com/infercrane/infercrane/internal/sandboxprovider"
+	"github.com/infercrane/infercrane/internal/secretcipher"
 	"github.com/infercrane/infercrane/internal/secrets"
 	"github.com/infercrane/infercrane/internal/servingcontract"
 	"github.com/infercrane/infercrane/internal/spec"
 	"github.com/infercrane/infercrane/internal/store"
 	"github.com/infercrane/infercrane/internal/supplieradapter"
 	"github.com/infercrane/infercrane/internal/support"
+	"github.com/infercrane/infercrane/internal/workercredential"
 	"github.com/infercrane/infercrane/internal/workflows"
 )
 
@@ -4065,7 +4068,12 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		defer cancel()
 		_ = recorder.Close(closeCtx)
 	}()
-	rec := &reconcile.Reconciler{Store: s, Routes: directory, Router: backend, RouterAPIKey: cfg.APIKey, Runtimes: runtimeBackends, Interval: cfg.HealthInterval, RouterStartPort: cfg.RouterStartPort, InstanceID: cfg.InstanceID, Logger: logger, DirectTargets: map[string]reconcile.DirectTargetBackend{"runpod-serverless": {Provider: "runpod", APIKey: cfg.RunPodAPIKey, Status: serverless}}, ExternalFallback: externalCoordinator, QueueSignals: autoscale.VLLMSignals{Targets: s, APIKey: cfg.APIKey}}
+	rec := &reconcile.Reconciler{Store: s, Routes: directory, Router: backend, RouterAPIKey: cfg.APIKey, WorkerCredential: func(tenant, deploymentID, version string) string {
+		if version != workercredential.Version {
+			return ""
+		}
+		return workercredential.Derive(cfg.WorkerCredentialKey, tenant, deploymentID)
+	}, Runtimes: runtimeBackends, Interval: cfg.HealthInterval, RouterStartPort: cfg.RouterStartPort, InstanceID: cfg.InstanceID, Logger: logger, DirectTargets: map[string]reconcile.DirectTargetBackend{"runpod-serverless": {Provider: "runpod", APIKey: cfg.RunPodAPIKey, Status: serverless}}, ExternalFallback: externalCoordinator, QueueSignals: autoscale.VLLMSignals{Targets: s, APIKey: cfg.APIKey}}
 	go purgeRequests(ctx, s, cfg.RequestRetention, logger)
 	go func() {
 		_ = rec.Run(ctx)
@@ -4345,6 +4353,19 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		}
 		asyncService = &asyncinference.Service{Store: s, Cipher: cipher, KeyReference: cfg.AsyncEncryptionKeyReference, GatewayURL: cfg.ControlURL, APIKey: cfg.APIKey, Owner: cfg.InstanceID + ":async", Lease: time.Minute, Secrets: secrets.Environment{}}
 	}
+	var computeConnectionService *computeconnection.Service
+	if cfg.CredentialEncryptionKey != "" {
+		cipher, cipherErr := secretcipher.New(cfg.CredentialEncryptionKey)
+		if cipherErr != nil {
+			return fmt.Errorf("configure compute credential encryption: %w", cipherErr)
+		}
+		computeConnectionService = &computeconnection.Service{
+			Store: s, Cipher: cipher, KeyReference: cfg.CredentialEncryptionKeyReference,
+			Verifiers: map[string]computeconnection.CredentialVerifier{
+				"runpod": provision.RunPodPods{BaseURL: cfg.RunPodRESTURL},
+			},
+		}
+	}
 	artifactCacheAdapters := map[string]artifactcache.Adapter{}
 	modelAPICatalog, catalogErr := modelapicatalog.Load(cfg.ModelAPICatalogFile)
 	if catalogErr != nil {
@@ -4357,6 +4378,11 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	}
 	launchProbers := map[string]provision.LaunchProber{
 		"runpod": provision.RunPodAvailability{APIKey: cfg.RunPodAPIKey},
+	}
+	credentialLaunchProbers := map[string]func(string) provision.LaunchProber{
+		"runpod": func(credential string) provision.LaunchProber {
+			return provision.RunPodAvailability{APIKey: credential}
+		},
 	}
 	if cfg.GCPEnabled() {
 		launchProbers["gcp"] = gcpProvider
@@ -4423,7 +4449,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		Store: s, Resolver: modelAPIUsageResolvers, Logger: logger, Telemetry: modelAPIUsageTelemetry,
 		Limit: 100, InFlightGrace: 10 * time.Minute,
 	}, 30*time.Second, logger)
-	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, DiscoveryClient: nil, Secrets: secrets.Environment{}, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool, OptimizationCosts: optimizationCosts, AcceleratorLabEnabled: acceleratorEngine != nil, AcceleratorLabCatalog: acceleratorCatalog, ModelAPICatalog: modelAPICatalog, ModelAPIProducts: s, SandboxProvider: nativeSandboxProvider, SandboxBilling: cfg.ManagedSandboxPolicy(), SandboxProjectID: cfg.BrezelSandboxProjectID, SandboxPreviews: controlapi.NewSandboxPreviewBroker(), SandboxDefaultTemplate: cfg.BrezelSandboxDefaultTemplate, SandboxModelConnectors: cfg.BrezelSandboxModelConnectors, ModelAPIOperatorTenantID: cfg.ModelAPIOperatorTenantID, ComputeProviders: computeProviders, GPUPriceCatalog: priceCatalog, LaunchProbers: launchProbers, DefaultProviderAdapters: defaultProviderAdapters, ManagedDeployments: managedbilling.DeploymentPolicy{Enabled: cfg.ManagedDeploymentsEnabled, Provider: "runpod"}}
+	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, DiscoveryClient: nil, Secrets: secrets.Environment{}, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool, OptimizationCosts: optimizationCosts, AcceleratorLabEnabled: acceleratorEngine != nil, AcceleratorLabCatalog: acceleratorCatalog, ModelAPICatalog: modelAPICatalog, ModelAPIProducts: s, SandboxProvider: nativeSandboxProvider, SandboxBilling: cfg.ManagedSandboxPolicy(), SandboxProjectID: cfg.BrezelSandboxProjectID, SandboxPreviews: controlapi.NewSandboxPreviewBroker(), SandboxDefaultTemplate: cfg.BrezelSandboxDefaultTemplate, SandboxModelConnectors: cfg.BrezelSandboxModelConnectors, ModelAPIOperatorTenantID: cfg.ModelAPIOperatorTenantID, ComputeProviders: computeProviders, ComputeConnections: computeConnectionService, GPUPriceCatalog: priceCatalog, LaunchProbers: launchProbers, CredentialLaunchProbers: credentialLaunchProbers, DefaultProviderAdapters: defaultProviderAdapters, ManagedDeployments: managedbilling.DeploymentPolicy{Enabled: cfg.ManagedDeploymentsEnabled, Provider: "runpod"}}
 	if cfg.StripeEnabled() {
 		stripeBilling, stripeErr := managedbilling.NewStripe(cfg.StripeSecretKey, cfg.StripeWebhookSecret, cfg.StripeBillingReturnURL, cfg.StripePriceIDs, cfg.StripeLivemode)
 		if stripeErr != nil {
@@ -4477,12 +4503,35 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		return fmt.Errorf("configure native RunPod Pods integration: %w", err)
 	}
 	runPodPods := provision.RunPodPods{APIKey: cfg.RunPodAPIKey, WorkerAPIKey: cfg.APIKey, BaseURL: cfg.RunPodRESTURL, ContainerDiskGiB: cfg.RunPodContainerDiskGiB, ArtifactCachePolicy: cfg.RunPodArtifactCachePolicy, NetworkVolumes: cfg.RunPodNetworkVolumes, HFTokenSecret: cfg.RunPodHFTokenSecret}
+	resolveTenantRunPod := func(ctx context.Context, tenant, connectionID, deploymentID string) (workflows.ReplicaProvider, workflows.CapacityAdvisor, string, error) {
+		if computeConnectionService == nil {
+			return nil, nil, "", errors.New("tenant compute credential storage is not configured")
+		}
+		_, providerKey, resolveErr := computeConnectionService.Resolve(ctx, tenant, connectionID, "runpod")
+		if resolveErr != nil {
+			return nil, nil, "", resolveErr
+		}
+		workerKey := workercredential.Derive(cfg.WorkerCredentialKey, tenant, deploymentID)
+		if workerKey == "" {
+			return nil, nil, "", errors.New("tenant worker credential derivation is not configured")
+		}
+		provider := runPodPods
+		provider.APIKey = providerKey
+		provider.WorkerAPIKey = workerKey
+		provider.WorkerCredentialVersion = workercredential.Version
+		// Operator-owned network volumes and provider secrets are never carried
+		// into a tenant account. BYOC starts from the portable OCI contract.
+		provider.ArtifactCachePolicy = "disabled"
+		provider.NetworkVolumes = nil
+		provider.HFTokenSecret = ""
+		return provider, provision.RunPodAvailability{APIKey: providerKey}, workerKey, nil
+	}
 	artifactCacheAdapters["runpod"] = runPodPods
 	for _, runtimeName := range []string{"vllm", "sglang", "custom-oci"} {
 		// A configured SkyPilot manifest is the default only for the runtimes it
 		// explicitly lists. Native RunPod Pods remains available as an exact
 		// adapter and owns every undeclared runtime.
-		elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: "runpod-pods", Cloud: "runpod", Runtime: runtimeName, Default: !skyPilotRuntime["runpod\x00"+runtimeName], Profile: runPodPodsProfile, Provider: runPodPods, Capacity: capacity})
+		elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: "runpod-pods", Cloud: "runpod", Runtime: runtimeName, Default: !skyPilotRuntime["runpod\x00"+runtimeName], Profile: runPodPodsProfile, Provider: runPodPods, Capacity: capacity, ResolveProvider: resolveTenantRunPod})
 	}
 	if cfg.AWSEnabled() {
 		awsProfile, profileErr := integrationRegistry.Provider("aws-ec2")

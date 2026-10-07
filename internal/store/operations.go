@@ -219,13 +219,13 @@ func (s *Store) Deployments(ctx context.Context) ([]domain.Deployment, error) {
 	return s.DeploymentsForTenant(ctx, "")
 }
 func (s *Store) DeploymentsForTenant(ctx context.Context, tenant string) ([]domain.Deployment, error) {
-	query := `SELECT id,tenant_id,name,model,runtime,routing_strategy,desired_state,observed_state,min_replicas,max_replicas,autoscaling_enabled,COALESCE(active_revision_id,''),COALESCE(candidate_revision_id,''),created_at,updated_at FROM deployments WHERE desired_state!='deleted'`
+	query := `SELECT d.id,d.tenant_id,d.name,d.model,d.runtime,d.routing_strategy,d.desired_state,d.observed_state,d.min_replicas,d.max_replicas,d.autoscaling_enabled,COALESCE(d.active_revision_id,''),COALESCE(d.candidate_revision_id,''),COALESCE(dc.compute_connection_id,''),d.created_at,d.updated_at FROM deployments d LEFT JOIN deployment_compute_connections dc ON dc.tenant_id=d.tenant_id AND dc.deployment_id=d.id WHERE d.desired_state!='deleted'`
 	var args []any
 	if tenant != "" {
-		query += ` AND tenant_id=?`
+		query += ` AND d.tenant_id=?`
 		args = append(args, tenant)
 	}
-	query += ` ORDER BY name`
+	query += ` ORDER BY d.name`
 	rows, err := s.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -235,7 +235,7 @@ func (s *Store) DeploymentsForTenant(ctx context.Context, tenant string) ([]doma
 	for rows.Next() {
 		var d domain.Deployment
 		var created, updated string
-		if err := rows.Scan(&d.ID, &d.TenantID, &d.Name, &d.Model, &d.Runtime, &d.RoutingStrategy, &d.DesiredState, &d.ObservedState, &d.MinReplicas, &d.MaxReplicas, &d.AutoscalingEnabled, &d.ActiveRevisionID, &d.CandidateRevisionID, &created, &updated); err != nil {
+		if err := rows.Scan(&d.ID, &d.TenantID, &d.Name, &d.Model, &d.Runtime, &d.RoutingStrategy, &d.DesiredState, &d.ObservedState, &d.MinReplicas, &d.MaxReplicas, &d.AutoscalingEnabled, &d.ActiveRevisionID, &d.CandidateRevisionID, &d.ComputeConnectionID, &created, &updated); err != nil {
 			return nil, err
 		}
 		d.CreatedAt, d.UpdatedAt = parseTime(created), parseTime(updated)
@@ -250,7 +250,7 @@ func (s *Store) Resolve(ctx context.Context, name string) (domain.ResolvedDeploy
 func (s *Store) ResolveForTenant(ctx context.Context, tenant, name string) (domain.ResolvedDeployment, error) {
 	var out domain.ResolvedDeployment
 	var created, updated string
-	err := s.QueryRowContext(ctx, `SELECT id,tenant_id,name,model,runtime,routing_strategy,desired_state,observed_state,min_replicas,max_replicas,autoscaling_enabled,COALESCE(active_revision_id,''),COALESCE(candidate_revision_id,''),created_at,updated_at FROM deployments WHERE tenant_id=? AND name=? AND desired_state='running'`, tenant, name).Scan(&out.Deployment.ID, &out.Deployment.TenantID, &out.Deployment.Name, &out.Deployment.Model, &out.Deployment.Runtime, &out.Deployment.RoutingStrategy, &out.Deployment.DesiredState, &out.Deployment.ObservedState, &out.Deployment.MinReplicas, &out.Deployment.MaxReplicas, &out.Deployment.AutoscalingEnabled, &out.Deployment.ActiveRevisionID, &out.Deployment.CandidateRevisionID, &created, &updated)
+	err := s.QueryRowContext(ctx, `SELECT d.id,d.tenant_id,d.name,d.model,d.runtime,d.routing_strategy,d.desired_state,d.observed_state,d.min_replicas,d.max_replicas,d.autoscaling_enabled,COALESCE(d.active_revision_id,''),COALESCE(d.candidate_revision_id,''),COALESCE(dc.compute_connection_id,''),d.created_at,d.updated_at FROM deployments d LEFT JOIN deployment_compute_connections dc ON dc.tenant_id=d.tenant_id AND dc.deployment_id=d.id WHERE d.tenant_id=? AND d.name=? AND d.desired_state='running'`, tenant, name).Scan(&out.Deployment.ID, &out.Deployment.TenantID, &out.Deployment.Name, &out.Deployment.Model, &out.Deployment.Runtime, &out.Deployment.RoutingStrategy, &out.Deployment.DesiredState, &out.Deployment.ObservedState, &out.Deployment.MinReplicas, &out.Deployment.MaxReplicas, &out.Deployment.AutoscalingEnabled, &out.Deployment.ActiveRevisionID, &out.Deployment.CandidateRevisionID, &out.Deployment.ComputeConnectionID, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return out, fmt.Errorf("%w: deployment %s", ErrNotFound, name)
 	}
@@ -355,6 +355,12 @@ func (s *Store) DeleteDeploymentForTenant(ctx context.Context, tenant, name stri
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM deployment_targets WHERE deployment_id=?`, id); err != nil {
+		return err
+	}
+	// Provider cleanup has already completed before this final state transition.
+	// Release the tenant credential binding only now so deletion retries can
+	// still authenticate to the customer's provider account.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM deployment_compute_connections WHERE tenant_id=? AND deployment_id=?`, tenant, id); err != nil {
 		return err
 	}
 	if desired == "deleted" && observed == "deleted" {

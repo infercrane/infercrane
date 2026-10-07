@@ -78,6 +78,15 @@ Completion webhooks are signed, HTTPS-only, redirect-free and resolved through a
 transport. Webhook payloads contain results, so their destinations are part of the application data
 boundary. Synchronous inference remains content-free by default.
 
+Tenant compute credentials are a second explicit encrypted boundary. Self-serve BYOC remains
+disabled until the operator injects separate `INFERCRANE_CREDENTIAL_ENCRYPTION_KEY` and
+`INFERCRANE_WORKER_CREDENTIAL_KEY` values. A submitted RunPod key
+is verified before storage, encrypted with AES-256-GCM, and bound through associated data to the
+tenant, provider, and connection name. API responses expose only connection metadata. Provider
+calls decrypt the credential in memory, while worker authentication uses a separate deterministic
+tenant-and-deployment-scoped credential. Operator-owned provider keys, volumes, and provider secret
+references are never copied into customer accounts.
+
 External fallback is disabled by default. Enabling it requires a persisted acknowledgement that
 prompt and output data can leave controlled infrastructure, plus atomic hard request and worst-case
 cost reservations. Selection happens before transmission; InferCrane does not replay a stream or

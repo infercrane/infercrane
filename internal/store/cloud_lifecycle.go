@@ -112,6 +112,16 @@ func (s *Store) submitCloudDeployment(ctx context.Context, deployment domain.Dep
 		}
 		return domain.Deployment{}, domain.Operation{}, emptyReservation, false, err
 	}
+	// The deployment insert trigger creates and activates the initial revision.
+	// Keep the returned object aligned with the durable row so callers can bind
+	// evidence and follow-up operations to the exact revision immediately.
+	deployment.ActiveRevisionID = deployment.ID + "-rev-1"
+	if err = bindComputeConnectionTx(ctx, tx, deployment.TenantID, deployment.ID, deployment.ComputeConnectionID, stamp); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return domain.Deployment{}, domain.Operation{}, emptyReservation, false, fmt.Errorf("%w: verified compute connection was not found", ErrConflict)
+		}
+		return domain.Deployment{}, domain.Operation{}, emptyReservation, false, err
+	}
 	if _, err = tx.ExecContext(ctx, `INSERT INTO scaling_policies(deployment_id,enabled,min_replicas,max_replicas,queue_threshold,low_load_threshold,scale_up_intervals,scale_down_intervals,cooldown_seconds,updated_at) VALUES(?,?,?,?,1,0,2,6,60,?)`, deployment.ID, deployment.AutoscalingEnabled, deployment.MinReplicas, deployment.MaxReplicas, stamp); err != nil {
 		return domain.Deployment{}, domain.Operation{}, emptyReservation, false, err
 	}
@@ -141,7 +151,7 @@ func (s *Store) submitCloudDeployment(ctx context.Context, deployment domain.Dep
 		}
 		return domain.Deployment{}, domain.Operation{}, emptyReservation, false, err
 	}
-	if _, err = tx.ExecContext(ctx, `UPDATE deployment_revisions SET spec_json=spec_json||jsonb_strip_nulls(jsonb_build_object('compute_mode',COALESCE(NULLIF(?::jsonb->>'compute_mode',''),'elastic'),'cloud',NULLIF(?::jsonb->>'cloud',''),'provider_adapter',NULLIF(?::jsonb->>'provider_adapter',''),'gpu',NULLIF(?::jsonb->>'gpu',''),'gpu_count',COALESCE(NULLIF(?::jsonb->>'gpu_count','')::integer,1),'region',NULLIF(?::jsonb->>'region',''),'runtime_version',NULLIF(?::jsonb->>'runtime_version',''),'runtime_args',?::jsonb->'runtime_args','model_revision',NULLIF(?::jsonb->>'model_revision',''),'model_secret_reference_id',NULLIF(?::jsonb->>'model_secret_reference_id',''),'port',NULLIF(?::jsonb->>'port','')::integer,'workload',?::jsonb->'workload','serving',?::jsonb->'serving')) WHERE id=?`, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, deployment.ID+"-rev-1"); err != nil {
+	if _, err = tx.ExecContext(ctx, `UPDATE deployment_revisions SET spec_json=spec_json||jsonb_strip_nulls(jsonb_build_object('compute_mode',COALESCE(NULLIF(?::jsonb->>'compute_mode',''),'elastic'),'cloud',NULLIF(?::jsonb->>'cloud',''),'provider_adapter',NULLIF(?::jsonb->>'provider_adapter',''),'compute_connection_id',NULLIF(?::jsonb->>'compute_connection_id',''),'gpu',NULLIF(?::jsonb->>'gpu',''),'gpu_count',COALESCE(NULLIF(?::jsonb->>'gpu_count','')::integer,1),'region',NULLIF(?::jsonb->>'region',''),'runtime_version',NULLIF(?::jsonb->>'runtime_version',''),'runtime_args',?::jsonb->'runtime_args','model_revision',NULLIF(?::jsonb->>'model_revision',''),'model_secret_reference_id',NULLIF(?::jsonb->>'model_secret_reference_id',''),'port',NULLIF(?::jsonb->>'port','')::integer,'workload',?::jsonb->'workload','serving',?::jsonb->'serving')) WHERE id=?`, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, deployment.ActiveRevisionID); err != nil {
 		return domain.Deployment{}, domain.Operation{}, emptyReservation, false, err
 	}
 	if err = tx.Commit(); err != nil {
@@ -245,7 +255,7 @@ func sameDeploymentSubmission(existing, requested domain.Deployment) bool {
 	if routing == "" {
 		routing = "round-robin"
 	}
-	return existing.TenantID == requested.TenantID && existing.Name == requested.Name && existing.Model == requested.Model && existing.Runtime == runtime && existing.RoutingStrategy == routing && existing.MinReplicas == requested.MinReplicas && existing.MaxReplicas == requested.MaxReplicas && existing.AutoscalingEnabled == requested.AutoscalingEnabled
+	return existing.TenantID == requested.TenantID && existing.Name == requested.Name && existing.Model == requested.Model && existing.Runtime == runtime && existing.RoutingStrategy == routing && existing.ComputeConnectionID == requested.ComputeConnectionID && existing.MinReplicas == requested.MinReplicas && existing.MaxReplicas == requested.MaxReplicas && existing.AutoscalingEnabled == requested.AutoscalingEnabled
 }
 
 func operationByKeyQuery(ctx context.Context, tx *tx, tenant, kind, key string) (domain.Operation, error) {
@@ -266,7 +276,7 @@ func operationByKeyQuery(ctx context.Context, tx *tx, tenant, kind, key string) 
 func deploymentByNameQuery(ctx context.Context, tx *tx, tenant, name string) (domain.Deployment, error) {
 	var out domain.Deployment
 	var created, updated string
-	err := tx.QueryRowContext(ctx, `SELECT id,tenant_id,name,model,runtime,routing_strategy,desired_state,observed_state,min_replicas,max_replicas,autoscaling_enabled,COALESCE(active_revision_id,''),COALESCE(candidate_revision_id,''),created_at,updated_at FROM deployments WHERE tenant_id=? AND name=?`, tenant, name).Scan(&out.ID, &out.TenantID, &out.Name, &out.Model, &out.Runtime, &out.RoutingStrategy, &out.DesiredState, &out.ObservedState, &out.MinReplicas, &out.MaxReplicas, &out.AutoscalingEnabled, &out.ActiveRevisionID, &out.CandidateRevisionID, &created, &updated)
+	err := tx.QueryRowContext(ctx, `SELECT d.id,d.tenant_id,d.name,d.model,d.runtime,d.routing_strategy,d.desired_state,d.observed_state,d.min_replicas,d.max_replicas,d.autoscaling_enabled,COALESCE(d.active_revision_id,''),COALESCE(d.candidate_revision_id,''),COALESCE(dc.compute_connection_id,''),d.created_at,d.updated_at FROM deployments d LEFT JOIN deployment_compute_connections dc ON dc.tenant_id=d.tenant_id AND dc.deployment_id=d.id WHERE d.tenant_id=? AND d.name=?`, tenant, name).Scan(&out.ID, &out.TenantID, &out.Name, &out.Model, &out.Runtime, &out.RoutingStrategy, &out.DesiredState, &out.ObservedState, &out.MinReplicas, &out.MaxReplicas, &out.AutoscalingEnabled, &out.ActiveRevisionID, &out.CandidateRevisionID, &out.ComputeConnectionID, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return out, ErrNotFound
 	}

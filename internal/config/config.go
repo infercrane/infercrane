@@ -23,6 +23,8 @@ type Config struct {
 	DatabaseURL, ControlURL, Host, APIKey, RouterBinary, AIPerfBinary, PassportSigningKeyFile, InstanceID, Environment    string
 	TLSCertFile, TLSKeyFile, TLSClientCAFile, ClientTLSCertFile, ClientTLSKeyFile, ClientTLSCAFile                        string
 	AsyncEncryptionKey, AsyncEncryptionKeyReference                                                                       string
+	CredentialEncryptionKey, CredentialEncryptionKeyReference                                                             string
+	WorkerCredentialKey                                                                                                   string
 	HostedAuthIssuer, HostedAuthAudience, HostedAuthJWTKey, HostedAuthJWTKeyFile                                          string
 	HostedAuthAuthorizedParties                                                                                           []string
 	HostedAuthAutoProvision                                                                                               bool
@@ -471,6 +473,9 @@ func load(requireAPIKey bool) (Config, error) {
 		TLSClientCAFile:                     env("INFERCRANE_TLS_CLIENT_CA_FILE", ""),
 		AsyncEncryptionKey:                  env("INFERCRANE_ASYNC_ENCRYPTION_KEY", ""),
 		AsyncEncryptionKeyReference:         env("INFERCRANE_ASYNC_ENCRYPTION_KEY_REFERENCE", "environment:INFERCRANE_ASYNC_ENCRYPTION_KEY"),
+		CredentialEncryptionKey:             env("INFERCRANE_CREDENTIAL_ENCRYPTION_KEY", ""),
+		CredentialEncryptionKeyReference:    env("INFERCRANE_CREDENTIAL_ENCRYPTION_KEY_REFERENCE", "environment:INFERCRANE_CREDENTIAL_ENCRYPTION_KEY"),
+		WorkerCredentialKey:                 env("INFERCRANE_WORKER_CREDENTIAL_KEY", ""),
 		HostedAuthIssuer:                    env("INFERCRANE_HOSTED_AUTH_ISSUER", ""),
 		HostedAuthAudience:                  env("INFERCRANE_HOSTED_AUTH_AUDIENCE", ""),
 		HostedAuthJWTKey:                    env("INFERCRANE_HOSTED_AUTH_JWT_KEY", ""),
@@ -588,6 +593,15 @@ func load(requireAPIKey bool) (Config, error) {
 	}
 	if config.ManagedDeploymentsEnabled && config.RunPodAPIKey == "" {
 		return Config{}, fmt.Errorf("INFERCRANE_MANAGED_DEPLOYMENTS_ENABLED requires RUNPOD_API_KEY")
+	}
+	if config.CredentialEncryptionKey != "" && len(config.CredentialEncryptionKey) < 32 {
+		return Config{}, fmt.Errorf("INFERCRANE_CREDENTIAL_ENCRYPTION_KEY must contain at least 32 bytes")
+	}
+	if config.WorkerCredentialKey != "" && len(config.WorkerCredentialKey) < 32 {
+		return Config{}, fmt.Errorf("INFERCRANE_WORKER_CREDENTIAL_KEY must contain at least 32 bytes")
+	}
+	if config.CredentialEncryptionKey != "" && config.WorkerCredentialKey == "" {
+		return Config{}, fmt.Errorf("INFERCRANE_CREDENTIAL_ENCRYPTION_KEY requires INFERCRANE_WORKER_CREDENTIAL_KEY")
 	}
 	if config.Environment == "production" {
 		if requireAPIKey && len(config.APIKey) < 32 {

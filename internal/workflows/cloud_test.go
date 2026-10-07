@@ -669,6 +669,11 @@ func (f *fakeReplicaProvider) DeleteReplica(context.Context, provision.ProviderH
 
 type fakeInspector struct{ ready bool }
 
+type credentialRecordingInspector struct {
+	credential string
+	endpoint   string
+}
+
 type fakeCapacityAdvisor struct {
 	availability provision.Availability
 	calls        int
@@ -686,6 +691,47 @@ func (f fakeInspector) Inspect(context.Context, string) (bool, map[string]struct
 		return false, nil
 	}
 	return true, map[string]struct{}{"Qwen/Qwen3-8B": {}}
+}
+
+func (f *credentialRecordingInspector) Inspect(context.Context, string) (bool, map[string]struct{}) {
+	return false, nil
+}
+
+func (f *credentialRecordingInspector) InspectWithCredential(_ context.Context, endpoint, credential string) (bool, map[string]struct{}) {
+	f.endpoint, f.credential = endpoint, credential
+	return true, map[string]struct{}{"Qwen/Qwen3-8B": {}}
+}
+
+func TestTenantComputeConnectionOwnsProviderAndWorkerCredential(t *testing.T) {
+	store := &fakeCloudStore{deployment: domain.Deployment{ID: "deployment-1", TenantID: "tenant-1", Name: "qwen", Model: "Qwen/Qwen3-8B", Runtime: "vllm", MinReplicas: 1, MaxReplicas: 1}}
+	staticProvider := &fakeReplicaProvider{ensureErr: errors.New("static provider must not be used")}
+	tenantProvider := &fakeReplicaProvider{observation: provision.Observation{Exists: true, State: "ready", Endpoint: "http://tenant-gpu:8000", Details: `{"worker_credential_version":"tenant-hmac-v1"}`}}
+	inspector := &credentialRecordingInspector{}
+	resolved := false
+	backend := ReplicaBackend{
+		Name: "runpod-pods", Cloud: "runpod", Runtime: "vllm", Provider: staticProvider,
+		ResolveProvider: func(_ context.Context, tenant, connectionID, deploymentID string) (ReplicaProvider, CapacityAdvisor, string, error) {
+			resolved = true
+			if tenant != "tenant-1" || connectionID != "connection-1" || deploymentID != "deployment-1" {
+				t.Fatalf("unexpected resolver input: %q %q %q", tenant, connectionID, deploymentID)
+			}
+			return tenantProvider, nil, "tenant-worker-key", nil
+		},
+	}
+	request := CloudRequest{TenantID: "tenant-1", DeploymentID: "deployment-1", RevisionID: "revision-1", Name: "qwen", Model: "Qwen/Qwen3-8B", Cloud: "runpod", ProviderAdapter: "runpod-pods", ComputeConnectionID: "connection-1", GPU: "L40S", GPUCount: 1, Runtime: "vllm", Port: 8000}
+	_, endpoint, _, err := ensureCloudReplica(context.Background(), store, backend, inspector, domain.Operation{ID: "operation-1"}, request, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resolved || staticProvider.ensureCalls != 0 || tenantProvider.ensureCalls != 1 {
+		t.Fatalf("resolved=%v static_calls=%d tenant_calls=%d", resolved, staticProvider.ensureCalls, tenantProvider.ensureCalls)
+	}
+	if tenantProvider.lastSpec.TenantID != "tenant-1" || tenantProvider.lastSpec.DeploymentID != "deployment-1" || tenantProvider.lastSpec.ComputeConnectionID != "connection-1" {
+		t.Fatalf("tenant provider spec=%#v", tenantProvider.lastSpec)
+	}
+	if endpoint != "http://tenant-gpu:8000" || inspector.endpoint != endpoint || inspector.credential != "tenant-worker-key" {
+		t.Fatalf("endpoint=%q inspected=%q credential=%q", endpoint, inspector.endpoint, inspector.credential)
+	}
 }
 
 func TestEnsureCloudReplicaClassifiesFailedProviderRequest(t *testing.T) {

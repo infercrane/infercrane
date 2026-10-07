@@ -148,6 +148,21 @@ export class ControlApi {
     return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
+  listComputeConnections(): Promise<Record<string, JsonValue>> {
+    const requestPath = '/compute/connections';
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
+  createComputeConnection(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const requestPath = '/compute/connections';
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  deleteComputeConnection(id: string): Promise<void> {
+    const requestPath = `/compute/connections/${encodeURIComponent(id)}`;
+    return this.transport.request('DELETE', requestPath) as Promise<void>;
+  }
+
   quoteManagedDeployment(body: JsonValue): Promise<Record<string, JsonValue>> {
     const requestPath = '/managed-deployment-quotes';
     return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;

@@ -127,6 +127,18 @@ class ControlAPI:
         request_path = "/compute/providers"
         return cast(ObjectList, self._transport.request("GET", request_path))
 
+    def list_compute_connections(self) -> dict[str, Any]:
+        request_path = "/compute/connections"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
+    def create_compute_connection(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        request_path = "/compute/connections"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
+
+    def delete_compute_connection(self, id: str) -> None:
+        request_path = f"/compute/connections/{quote(id, safe='')}"
+        return cast(None, self._transport.request("DELETE", request_path))
+
     def quote_managed_deployment(self, *, body: dict[str, Any]) -> dict[str, Any]:
         request_path = "/managed-deployment-quotes"
         return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))

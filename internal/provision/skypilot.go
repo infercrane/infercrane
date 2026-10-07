@@ -37,7 +37,7 @@ const defaultVLLMImage = "vllm/vllm-openai@sha256:953d3a06d5e64ab582985cd7401289
 const defaultRunPodVLLMImage = "ghcr.io/infercrane/vllm-runpod@sha256:c9d8303ad7c36e3b25a160c892626be8b0dde8f5954b11095c33d2bca31a9711"
 
 type ReplicaSpec struct {
-	ExternalKey                                                             string
+	TenantID, DeploymentID, ComputeConnectionID, ExternalKey                string
 	Name, Model, ModelRevision, Cloud, GPU, Region, Runtime, RuntimeVersion string
 	GPUCount                                                                int
 	RequestID                                                               string

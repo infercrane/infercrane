@@ -107,6 +107,23 @@ func TestManagedDeploymentsRequireExplicitEnablementAndRunPodCredential(t *testi
 	}
 }
 
+func TestTenantComputeCredentialEncryptionRequiresStrongKey(t *testing.T) {
+	t.Setenv("INFERCRANE_API_KEY", "secret")
+	t.Setenv("INFERCRANE_CREDENTIAL_ENCRYPTION_KEY", "too-short")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "at least 32 bytes") {
+		t.Fatalf("weak credential encryption key accepted: %v", err)
+	}
+	t.Setenv("INFERCRANE_CREDENTIAL_ENCRYPTION_KEY", "01234567890123456789012345678901")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "WORKER_CREDENTIAL_KEY") {
+		t.Fatalf("credential storage without an independent worker key was accepted: %v", err)
+	}
+	t.Setenv("INFERCRANE_WORKER_CREDENTIAL_KEY", "abcdefabcdefabcdefabcdefabcdefab")
+	cfg, err := Load()
+	if err != nil || cfg.CredentialEncryptionKeyReference != "environment:INFERCRANE_CREDENTIAL_ENCRYPTION_KEY" {
+		t.Fatalf("cfg=%#v err=%v", cfg, err)
+	}
+}
+
 func TestGPUPriceSyncIntervalIsBounded(t *testing.T) {
 	t.Setenv("INFERCRANE_API_KEY", "secret")
 	t.Setenv("INFERCRANE_GPU_PRICE_SYNC_SECONDS", "3600")
