@@ -126,13 +126,91 @@ func TestRunPodPodsClassifiesSchemaRejectionAsInvalidSpec(t *testing.T) {
 			_ = json.NewEncoder(w).Encode([]runPodRecord{})
 			return
 		}
-		http.Error(w, `{"error":"request body does not meet schema"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"request body does not meet schema","provider_detail":"sensitive-provider-schema"}`, http.StatusBadRequest)
 	}))
 	defer server.Close()
 	provider := RunPodPods{APIKey: "provider-secret", WorkerAPIKey: "worker-secret", BaseURL: server.URL, Client: server.Client()}
 	_, err := provider.EnsureReplica(context.Background(), ReplicaSpec{ExternalKey: "key", Model: "org/model", Cloud: "runpod", GPU: "unsupported", GPUCount: 1, Workload: testRunPodWorkload()})
-	if err == nil || !errors.Is(err, ErrInvalidReplicaSpec) || errors.Is(err, ErrRequestFailed) {
+	if err == nil || !errors.Is(err, ErrInvalidReplicaSpec) || errors.Is(err, ErrRequestFailed) || strings.Contains(err.Error(), "sensitive-provider-schema") || !strings.Contains(err.Error(), "HTTP 400") {
 		t.Fatalf("schema rejection classification: %v", err)
+	}
+}
+
+func TestRunPodPodsGlobalRegionOmitsPlacementAndAdoptsConcreteDatacenter(t *testing.T) {
+	var pods []runPodRecord
+	createCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/pods":
+			_ = json.NewEncoder(w).Encode(pods)
+		case r.Method == http.MethodPost && r.URL.Path == "/pods":
+			createCalls++
+			var body struct {
+				Name             string
+				ImageName        string
+				GPUCount         int
+				DataCenterIDs    []string
+				DockerEntrypoint []string
+				DockerStartCmd   []string
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if len(body.DataCenterIDs) != 0 {
+				t.Fatalf("global placement leaked as a RunPod datacenter constraint: %#v", body.DataCenterIDs)
+			}
+			pod := runPodRecord{ID: "pod-global", Name: body.Name, DesiredStatus: "RUNNING", ImageName: body.ImageName, GPUCount: body.GPUCount, DockerEntrypoint: body.DockerEntrypoint, DockerStartCmd: body.DockerStartCmd}
+			pod.Machine.GPUTypeID = "NVIDIA L40S"
+			pod.Machine.DataCenterID = "EU-RO-1"
+			pods = []runPodRecord{pod}
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(pod)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	provider := RunPodPods{APIKey: "provider-secret", WorkerAPIKey: "worker-secret", BaseURL: server.URL, Client: server.Client()}
+	spec := ReplicaSpec{ExternalKey: "global", Model: "org/model", ModelRevision: "commit", Cloud: "runpod", Region: "global", GPU: "L40S", GPUCount: 1, Workload: testRunPodWorkload()}
+	first, err := provider.EnsureReplica(context.Background(), spec)
+	if err != nil || first.ResourceID == "" {
+		t.Fatalf("create global placement: handle=%#v err=%v", first, err)
+	}
+	second, err := provider.EnsureReplica(context.Background(), spec)
+	if err != nil || second != first || createCalls != 1 {
+		t.Fatalf("adopt provider-selected datacenter: first=%#v second=%#v creates=%d err=%v", first, second, createCalls, err)
+	}
+}
+
+func TestRunPodPodsConcreteRegionRemainsExact(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_ = json.NewEncoder(w).Encode([]runPodRecord{})
+			return
+		}
+		var body struct {
+			Name             string
+			ImageName        string
+			GPUCount         int
+			DataCenterIDs    []string
+			DockerEntrypoint []string
+			DockerStartCmd   []string
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if len(body.DataCenterIDs) != 1 || body.DataCenterIDs[0] != "EU-RO-1" {
+			t.Fatalf("concrete RunPod placement changed: %#v", body.DataCenterIDs)
+		}
+		_ = json.NewEncoder(w).Encode(runPodRecord{ID: "pod-concrete", Name: body.Name})
+	}))
+	defer server.Close()
+
+	provider := RunPodPods{APIKey: "provider-secret", WorkerAPIKey: "worker-secret", BaseURL: server.URL, Client: server.Client()}
+	_, err := provider.EnsureReplica(context.Background(), ReplicaSpec{ExternalKey: "concrete", Model: "org/model", ModelRevision: "commit", Cloud: "runpod", Region: "EU-RO-1", GPU: "L40S", GPUCount: 1, Workload: testRunPodWorkload()})
+	if err != nil {
+		t.Fatalf("create concrete placement: %v", err)
 	}
 }
 

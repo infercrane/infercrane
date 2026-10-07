@@ -140,8 +140,8 @@ func (r RunPodAvailability) Availability(ctx context.Context, request Availabili
 	case "low":
 		state, message = "constrained", fmt.Sprintf("Provider reports low current secure capacity for %s; placement may be delayed", request.GPU)
 	}
-	if request.Region != "" {
-		message += "; the signal is global and does not guarantee region " + request.Region
+	if dataCenterID := runPodDataCenterConstraint(request.Region); dataCenterID != "" {
+		message += "; the signal is global and does not guarantee region " + dataCenterID
 	}
 	return Availability{State: state, Message: message, Details: safeRunPodDiagnostic(strings.Join(matches, ","), r.APIKey)}, nil
 }
