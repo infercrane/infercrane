@@ -193,7 +193,7 @@ func (s *Store) SettleModelAPIUsage(ctx context.Context, tenant, reservationID s
 	if row.State == "reserved" {
 		return modelapirouting.Reservation{}, fmt.Errorf("%w: unsent hosted usage cannot be settled", ErrConflict)
 	}
-	stamp := time.Now().UTC()
+	stamp := modelAPIUsageMutationTime(row, time.Now())
 	if usage.InputTokens == nil || usage.OutputTokens == nil {
 		_, err = tx.ExecContext(ctx, `UPDATE model_api_usage_reservations SET state='pending_reconciliation',resolution='supplier usage absent; reservation retained',updated_at=? WHERE customer_tenant_id=? AND id=?`, stamp, tenant, reservationID)
 		if err != nil {
@@ -316,7 +316,7 @@ func (s *Store) ReleaseUnsentModelAPIUsage(ctx context.Context, tenant, reservat
 	if row.State != "reserved" || row.TransmittedAt != nil {
 		return fmt.Errorf("%w: transmitted or response-started usage must be reconciled, not released", ErrConflict)
 	}
-	stamp := time.Now().UTC()
+	stamp := modelAPIUsageMutationTime(row, time.Now())
 	if _, err = tx.ExecContext(ctx, `UPDATE managed_wallets SET reserved_microusd=reserved_microusd-?,updated_at=? WHERE tenant_id=?`, row.ReservedMicrousd, stamp, tenant); err != nil {
 		return err
 	}
@@ -352,7 +352,7 @@ func (s *Store) ConfirmNoChargeModelAPIUsage(ctx context.Context, tenant, reserv
 	if row.State != "pending_reconciliation" && row.State != "transmitted" && row.State != "response_started" {
 		return fmt.Errorf("%w: only ambiguous hosted usage can be confirmed uncharged", ErrConflict)
 	}
-	stamp := time.Now().UTC()
+	stamp := modelAPIUsageMutationTime(row, time.Now())
 	if _, err = tx.ExecContext(ctx, `UPDATE managed_wallets SET reserved_microusd=reserved_microusd-?,updated_at=? WHERE tenant_id=?`, row.ReservedMicrousd, stamp, tenant); err != nil {
 		return err
 	}
@@ -383,6 +383,18 @@ func (s *Store) PendingModelAPIUsageReservations(ctx context.Context, limit int)
 		result = append(result, item)
 	}
 	return result, rows.Err()
+}
+
+// modelAPIUsageMutationTime keeps the reservation audit clock monotonic when
+// a supplier timestamp is slightly ahead of the control-plane wall clock.
+// Database rows reject updated_at values earlier than created_at, and an
+// already-transmitted reservation may also carry a later updated_at value.
+func modelAPIUsageMutationTime(row modelapirouting.Reservation, now time.Time) time.Time {
+	stamp := now.UTC()
+	if row.UpdatedAt.After(stamp) {
+		return row.UpdatedAt.UTC()
+	}
+	return stamp
 }
 
 // ReconcileableModelAPIUsageReservations includes every explicitly pending
