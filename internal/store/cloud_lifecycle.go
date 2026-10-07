@@ -112,6 +112,10 @@ func (s *Store) submitCloudDeployment(ctx context.Context, deployment domain.Dep
 		}
 		return domain.Deployment{}, domain.Operation{}, emptyReservation, false, err
 	}
+	// The deployment insert trigger creates and activates the initial revision.
+	// Keep the returned object aligned with the durable row so callers can bind
+	// evidence and follow-up operations to the exact revision immediately.
+	deployment.ActiveRevisionID = deployment.ID + "-rev-1"
 	if err = bindComputeConnectionTx(ctx, tx, deployment.TenantID, deployment.ID, deployment.ComputeConnectionID, stamp); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return domain.Deployment{}, domain.Operation{}, emptyReservation, false, fmt.Errorf("%w: verified compute connection was not found", ErrConflict)
@@ -147,7 +151,7 @@ func (s *Store) submitCloudDeployment(ctx context.Context, deployment domain.Dep
 		}
 		return domain.Deployment{}, domain.Operation{}, emptyReservation, false, err
 	}
-	if _, err = tx.ExecContext(ctx, `UPDATE deployment_revisions SET spec_json=spec_json||jsonb_strip_nulls(jsonb_build_object('compute_mode',COALESCE(NULLIF(?::jsonb->>'compute_mode',''),'elastic'),'cloud',NULLIF(?::jsonb->>'cloud',''),'provider_adapter',NULLIF(?::jsonb->>'provider_adapter',''),'compute_connection_id',NULLIF(?::jsonb->>'compute_connection_id',''),'gpu',NULLIF(?::jsonb->>'gpu',''),'gpu_count',COALESCE(NULLIF(?::jsonb->>'gpu_count','')::integer,1),'region',NULLIF(?::jsonb->>'region',''),'runtime_version',NULLIF(?::jsonb->>'runtime_version',''),'runtime_args',?::jsonb->'runtime_args','model_revision',NULLIF(?::jsonb->>'model_revision',''),'model_secret_reference_id',NULLIF(?::jsonb->>'model_secret_reference_id',''),'port',NULLIF(?::jsonb->>'port','')::integer,'workload',?::jsonb->'workload','serving',?::jsonb->'serving')) WHERE id=?`, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, deployment.ID+"-rev-1"); err != nil {
+	if _, err = tx.ExecContext(ctx, `UPDATE deployment_revisions SET spec_json=spec_json||jsonb_strip_nulls(jsonb_build_object('compute_mode',COALESCE(NULLIF(?::jsonb->>'compute_mode',''),'elastic'),'cloud',NULLIF(?::jsonb->>'cloud',''),'provider_adapter',NULLIF(?::jsonb->>'provider_adapter',''),'compute_connection_id',NULLIF(?::jsonb->>'compute_connection_id',''),'gpu',NULLIF(?::jsonb->>'gpu',''),'gpu_count',COALESCE(NULLIF(?::jsonb->>'gpu_count','')::integer,1),'region',NULLIF(?::jsonb->>'region',''),'runtime_version',NULLIF(?::jsonb->>'runtime_version',''),'runtime_args',?::jsonb->'runtime_args','model_revision',NULLIF(?::jsonb->>'model_revision',''),'model_secret_reference_id',NULLIF(?::jsonb->>'model_secret_reference_id',''),'port',NULLIF(?::jsonb->>'port','')::integer,'workload',?::jsonb->'workload','serving',?::jsonb->'serving')) WHERE id=?`, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, operation.RequestJSON, deployment.ActiveRevisionID); err != nil {
 		return domain.Deployment{}, domain.Operation{}, emptyReservation, false, err
 	}
 	if err = tx.Commit(); err != nil {
