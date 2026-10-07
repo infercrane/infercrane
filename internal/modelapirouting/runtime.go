@@ -94,7 +94,7 @@ func (rt *Runtime) ServeHTTP(w http.ResponseWriter, r *http.Request, request Pro
 		now = rt.now
 	}
 	reservationRequest := ReservationRequest{
-		ID: randomReservationID(), TenantID: request.TenantID, ProductID: request.ProductID,
+		ID: randomReservationID(), RequestID: request.RequestID, TenantID: request.TenantID, ProductID: request.ProductID,
 		EntitlementID: lease.Entitlement.ID, OperatorTenantID: lease.Entitlement.OperatorTenantID,
 		ServingPlanID: lease.Entitlement.ServingPlanID, SupplyPlanID: lease.Publication.SupplyPlanID,
 		RetailRate: lease.Rate, MaxRequestMicrousd: lease.Entitlement.MaxRequestMicrousd,

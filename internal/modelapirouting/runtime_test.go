@@ -34,6 +34,7 @@ type billingFake struct {
 	responseStarted int
 	settlements     []Usage
 	released        int
+	evidence        []ReconciliationEvidence
 }
 
 type hostedCredentialFake struct {
@@ -91,6 +92,35 @@ func (b *billingFake) ReleaseUnsent(context.Context, string, string, string) err
 	defer b.mu.Unlock()
 	b.released++
 	return nil
+}
+
+func (b *billingFake) RecordReconciliationEvidence(_ context.Context, _, _ string, evidence ReconciliationEvidence) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.evidence = append(b.evidence, evidence)
+	return nil
+}
+
+func TestStrictRuntimeRecordsOnlyExplicitSupplierNoChargeEvidence(t *testing.T) {
+	billing := &billingFake{}
+	now := time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC)
+	runtime := &Runtime{Billing: billing, now: func() time.Time { return now }}
+	request := ProxyRequest{TenantID: "tenant", RequestID: "request"}
+	runtime.recordStrictReconciliationEvidence(request, "reservation", "qualified-adapter", &supplieradapter.Error{
+		Code: supplieradapter.ErrorUnavailable, SupplierRequestID: "supplier-request",
+		Billing: supplieradapter.BillingNoChargeConfirmed,
+	})
+	runtime.recordStrictReconciliationEvidence(request, "reservation", "qualified-adapter", &supplieradapter.Error{
+		Code: supplieradapter.ErrorTimeout, SupplierRequestID: "ambiguous",
+		Billing: supplieradapter.BillingAmbiguous,
+	})
+	runtime.recordStrictReconciliationEvidence(request, "reservation", "qualified-adapter", &supplieradapter.Error{
+		Code: supplieradapter.ErrorUnavailable, SupplierRequestID: "response-started",
+		Billing: supplieradapter.BillingNoChargeConfirmed, ResponseStarted: true,
+	})
+	if len(billing.evidence) != 1 || billing.evidence[0].Outcome != ReconciliationNoCharge || billing.evidence[0].Authority != EvidenceSupplierAdapter || billing.evidence[0].RecordedBy != "supplier-adapter:qualified-adapter" || billing.evidence[0].SupplierRequestID != "supplier-request" || !billing.evidence[0].ObservedAt.Equal(now) {
+		t.Fatalf("recorded evidence=%+v", billing.evidence)
+	}
 }
 
 func runtimeFixture(t *testing.T, server *httptest.Server, billing *billingFake) (*Runtime, time.Time) {
@@ -203,6 +233,9 @@ func TestStrictRuntimeResolvesCredentialPerRequestAndRewritesBufferedResponse(t 
 	}
 	if billing.transmitted != 1 || billing.responseStarted != 1 || len(billing.settlements) != 1 || *billing.settlements[0].InputTokens != 19 || *billing.settlements[0].OutputTokens != 5 {
 		t.Fatalf("strict billing=%#v", billing)
+	}
+	if len(billing.requests) != 1 || billing.requests[0].RequestID != "public-request" {
+		t.Fatalf("durable supplier correlation request=%+v", billing.requests)
 	}
 }
 

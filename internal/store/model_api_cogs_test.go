@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/infercrane/infercrane/internal/modelapirouting"
 	"github.com/infercrane/infercrane/internal/modelapisupply"
 	"github.com/infercrane/infercrane/internal/modelapitarget"
+	"github.com/infercrane/infercrane/internal/reconcile"
 	"github.com/infercrane/infercrane/internal/supplieradapter"
 )
 
@@ -200,7 +202,7 @@ func TestModelAPISettlementPersistsPinnedSupplierCOGS(t *testing.T) {
 	}
 
 	reservation, err := s.ReserveModelAPIUsage(ctx, modelapirouting.ReservationRequest{
-		ID: "cogs-reservation-" + suffix, TenantID: customer, ProductID: product.ID,
+		ID: "cogs-reservation-" + suffix, RequestID: "cogs-request-" + suffix, TenantID: customer, ProductID: product.ID,
 		EntitlementID: entitlement.ID, OperatorTenantID: operator, ServingPlanID: servingPlanID,
 		SupplyPlanID: planDraft.ID, CandidateID: plan.Primary.CandidateID, OfferID: offer.ID, OfferVersion: offer.Version,
 		Supplier: offer.Supplier, SupplierModelID: offer.SupplierModelID, TargetBindingID: binding.ID, TargetBindingDigest: binding.ContractDigest,
@@ -214,7 +216,7 @@ func TestModelAPISettlementPersistsPinnedSupplierCOGS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reservation.SupplierRateDigest == "" || reservation.TargetBindingDigest != binding.ContractDigest {
+	if reservation.RequestID != "cogs-request-"+suffix || reservation.SupplierRateDigest == "" || reservation.TargetBindingDigest != binding.ContractDigest {
 		t.Fatalf("reservation did not pin supplier and target contracts: %+v", reservation)
 	}
 	if err = s.MarkModelAPIUsageTransmitted(ctx, customer, reservation.ID, now.Add(time.Second)); err != nil {
@@ -237,5 +239,88 @@ func TestModelAPISettlementPersistsPinnedSupplierCOGS(t *testing.T) {
 	}
 	if _, err = s.ModelAPISupplierCOGS(ctx, customer, reservation.ID); err == nil {
 		t.Fatal("customer tenant read private supplier COGS")
+	}
+
+	walletBefore, err := s.ManagedWallet(ctx, customer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reserveAmbiguous := func(label string) modelapirouting.Reservation {
+		t.Helper()
+		row, reserveErr := s.ReserveModelAPIUsage(ctx, modelapirouting.ReservationRequest{
+			ID: "cogs-reconcile-" + label + "-" + suffix, RequestID: "request-reconcile-" + label + "-" + suffix,
+			TenantID: customer, ProductID: product.ID, EntitlementID: entitlement.ID, OperatorTenantID: operator,
+			ServingPlanID: servingPlanID, SupplyPlanID: planDraft.ID, CandidateID: plan.Primary.CandidateID,
+			OfferID: offer.ID, OfferVersion: offer.Version, Supplier: offer.Supplier, SupplierModelID: offer.SupplierModelID,
+			TargetBindingID: binding.ID, TargetBindingDigest: binding.ContractDigest,
+			RetailRate: modelapirouting.RetailRate{
+				ID: rate.ID, ProductID: rate.ProductID, Version: rate.Version, ContractDigest: rate.ContractDigest,
+				InputMicrousdPerMillion: rate.InputMicrousdPerMillion, OutputMicrousdPerMillion: rate.OutputMicrousdPerMillion,
+				ValidFrom: rate.ValidFrom, ValidUntil: rate.ValidUntil,
+			},
+			MaxRequestMicrousd: maxRequest, CreatedAt: now.Add(10 * time.Second),
+		})
+		if reserveErr != nil {
+			t.Fatal(reserveErr)
+		}
+		if transmitErr := s.MarkModelAPIUsageTransmitted(ctx, customer, row.ID, now.Add(11*time.Second)); transmitErr != nil {
+			t.Fatal(transmitErr)
+		}
+		row, reserveErr = s.SettleModelAPIUsage(ctx, customer, row.ID, modelapirouting.Usage{})
+		if reserveErr != nil || row.State != "pending_reconciliation" {
+			t.Fatalf("ambiguous reservation=%+v err=%v", row, reserveErr)
+		}
+		return row
+	}
+	usageReservation := reserveAmbiguous("usage")
+	noChargeReservation := reserveAmbiguous("no-charge")
+	reconciledInput, reconciledCached, reconciledOutput := 1_000, 200, 500
+	usageEvidence := modelapirouting.ReconciliationEvidence{
+		ReservationID: usageReservation.ID, TenantID: customer, SupplierRequestID: "supplier-usage-" + suffix,
+		Outcome: modelapirouting.ReconciliationUsage, Authority: modelapirouting.EvidenceOperatorVerified,
+		Reference: "invoice://usage/" + suffix, InputTokens: &reconciledInput, CachedInputTokens: &reconciledCached,
+		OutputTokens: &reconciledOutput, ObservedAt: now.Add(12 * time.Second),
+	}
+	if _, created, evidenceErr := s.RecordOperatorModelAPIUsageReconciliationEvidence(ctx, operator, "billing-operator", usageEvidence); evidenceErr != nil || !created {
+		t.Fatalf("record usage evidence created=%t err=%v", created, evidenceErr)
+	}
+	noChargeEvidence := modelapirouting.ReconciliationEvidence{
+		ReservationID: noChargeReservation.ID, TenantID: customer, SupplierRequestID: "supplier-free-" + suffix,
+		Outcome: modelapirouting.ReconciliationNoCharge, Authority: modelapirouting.EvidenceOperatorVerified,
+		Reference: "invoice://no-charge/" + suffix, ObservedAt: now.Add(12 * time.Second),
+	}
+	if _, created, evidenceErr := s.RecordOperatorModelAPIUsageReconciliationEvidence(ctx, operator, "billing-operator", noChargeEvidence); evidenceErr != nil || !created {
+		t.Fatalf("record no-charge evidence created=%t err=%v", created, evidenceErr)
+	}
+
+	// Open a new Store and reconciler to prove the outcome survives process
+	// restart and depends only on durable supplier evidence.
+	restarted, err := Open(ctx, os.Getenv("INFERCRANE_TEST_DATABASE_URL"), Options{MaxOpenConns: 4, MaxIdleConns: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = restarted.Close() })
+	registry, err := reconcile.NewSupplierUsageResolverRegistry(reconcile.StoredSupplierUsageResolver{Supplier: supplieradapter.RunPodSupplier, Source: restarted})
+	if err != nil {
+		t.Fatal(err)
+	}
+	usageReconciler := reconcile.ModelAPIUsageReconciler{Store: restarted, Resolver: registry, Limit: 10}
+	if err = usageReconciler.Once(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err = usageReconciler.Once(ctx); err != nil {
+		t.Fatalf("idempotent replay: %v", err)
+	}
+	reconciledUsage, err := restarted.ModelAPIUsageReservation(ctx, customer, usageReservation.ID)
+	if err != nil || reconciledUsage.State != "settled" || reconciledUsage.InputTokens == nil || *reconciledUsage.InputTokens != reconciledInput {
+		t.Fatalf("reconciled usage=%+v err=%v", reconciledUsage, err)
+	}
+	reconciledNoCharge, err := restarted.ModelAPIUsageReservation(ctx, customer, noChargeReservation.ID)
+	if err != nil || reconciledNoCharge.State != "released" || !strings.Contains(reconciledNoCharge.Resolution, "operator_verified") {
+		t.Fatalf("reconciled no-charge=%+v err=%v", reconciledNoCharge, err)
+	}
+	walletAfter, err := restarted.ManagedWallet(ctx, customer)
+	if err != nil || walletAfter.ReservedMicrousd != 0 || walletAfter.BalanceMicrousd != walletBefore.BalanceMicrousd-reconciledUsage.ActualMicrousd {
+		t.Fatalf("wallet before=%+v after=%+v reconciled usage=%+v err=%v", walletBefore, walletAfter, reconciledUsage, err)
 	}
 }

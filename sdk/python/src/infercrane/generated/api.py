@@ -111,6 +111,10 @@ class ControlAPI:
         request_path = "/admin/model-api/entitlements"
         return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
+    def record_model_a_p_i_usage_reconciliation_evidence(self, id: str, *, body: dict[str, Any]) -> dict[str, Any]:
+        request_path = f"/admin/model-api/usage-reservations/{quote(id, safe='')}/evidence"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
+
     def record_marketplace_receipt(self, *, body: dict[str, Any]) -> dict[str, Any]:
         request_path = "/admin/marketplace/receipts"
         return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))

@@ -3347,6 +3347,149 @@
         ],
         "type": "object"
       },
+      "ModelAPIUsageReconciliationEvidence": {
+        "additionalProperties": false,
+        "properties": {
+          "authority": {
+            "enum": [
+              "supplier_adapter",
+              "operator_verified"
+            ],
+            "type": "string"
+          },
+          "cached_input_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "customer_tenant_id": {
+            "type": "string"
+          },
+          "evidence_reference": {
+            "type": "string"
+          },
+          "input_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "observed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "usage",
+              "no_charge"
+            ],
+            "type": "string"
+          },
+          "output_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "recorded_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "recorded_by": {
+            "type": "string"
+          },
+          "reservation_id": {
+            "type": "string"
+          },
+          "supplier": {
+            "type": "string"
+          },
+          "supplier_request_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reservation_id",
+          "customer_tenant_id",
+          "supplier",
+          "outcome",
+          "authority",
+          "evidence_reference",
+          "recorded_by",
+          "observed_at",
+          "recorded_at"
+        ],
+        "type": "object"
+      },
+      "ModelAPIUsageReconciliationEvidenceEnvelope": {
+        "additionalProperties": false,
+        "properties": {
+          "content_recorded": {
+            "const": false,
+            "type": "boolean"
+          },
+          "created": {
+            "type": "boolean"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ModelAPIUsageReconciliationEvidence"
+          },
+          "reconciliation": {
+            "const": "queued",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data",
+          "created",
+          "reconciliation",
+          "content_recorded"
+        ],
+        "type": "object"
+      },
+      "ModelAPIUsageReconciliationEvidenceRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "cached_input_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "customer_tenant_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "evidence_reference": {
+            "maxLength": 512,
+            "minLength": 1,
+            "type": "string"
+          },
+          "input_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "observed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "usage",
+              "no_charge"
+            ],
+            "type": "string"
+          },
+          "output_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "supplier_request_id": {
+            "maxLength": 256,
+            "type": "string"
+          }
+        },
+        "required": [
+          "customer_tenant_id",
+          "outcome",
+          "evidence_reference",
+          "observed_at"
+        ],
+        "type": "object"
+      },
       "MonitoringBreakdown": {
         "additionalProperties": false,
         "properties": {
@@ -5739,6 +5882,63 @@
           }
         ],
         "summary": "Bind a Model API product to an immutable operator execution target",
+        "tags": [
+          "Model API administration"
+        ]
+      }
+    },
+    "/api/v1/admin/model-api/usage-reservations/{id}/evidence": {
+      "post": {
+        "operationId": "recordModelAPIUsageReconciliationEvidence",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelAPIUsageReconciliationEvidenceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelAPIUsageReconciliationEvidenceEnvelope"
+                }
+              }
+            },
+            "description": "Durable operation accepted"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Record authoritative content-free evidence for one ambiguous supplier attempt",
         "tags": [
           "Model API administration"
         ]

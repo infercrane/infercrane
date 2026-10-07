@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/modelapiproduct"
+	"github.com/infercrane/infercrane/internal/modelapirouting"
 	"github.com/infercrane/infercrane/internal/modelapisupply"
 	"github.com/infercrane/infercrane/internal/modelapitarget"
 	"github.com/infercrane/infercrane/internal/store"
@@ -18,11 +20,13 @@ import (
 
 type fakeModelAPIOperatorStore struct {
 	*fakeStore
-	offer          modelapisupply.Offer
-	targetBinding  modelapitarget.Binding
-	targetOperator string
-	targetPublish  int
-	modelAPIAudit  domain.AuditEvent
+	offer                  modelapisupply.Offer
+	targetBinding          modelapitarget.Binding
+	targetOperator         string
+	targetPublish          int
+	modelAPIAudit          domain.AuditEvent
+	reconciliationOperator string
+	reconciliationEvidence modelapirouting.ReconciliationEvidence
 }
 
 func (f *fakeModelAPIOperatorStore) SaveManagedModelAPIProduct(_ context.Context, value modelapiproduct.Product) (modelapiproduct.Product, error) {
@@ -57,6 +61,13 @@ func (f *fakeModelAPIOperatorStore) Audit(_ context.Context, event domain.AuditE
 	f.modelAPIAudit = event
 	return nil
 }
+func (f *fakeModelAPIOperatorStore) RecordOperatorModelAPIUsageReconciliationEvidence(_ context.Context, operator, actor string, evidence modelapirouting.ReconciliationEvidence) (modelapirouting.ReconciliationEvidence, bool, error) {
+	evidence.RecordedBy = actor
+	f.reconciliationOperator, f.reconciliationEvidence = operator, evidence
+	evidence.Supplier = "deepseek"
+	evidence.RecordedAt = time.Now().UTC()
+	return evidence, true, nil
+}
 
 func TestModelAPIOperatorMutationRequiresConfiguredPlatformWorkspace(t *testing.T) {
 	store := &fakeModelAPIOperatorStore{fakeStore: &fakeStore{}}
@@ -67,6 +78,36 @@ func TestModelAPIOperatorMutationRequiresConfiguredPlatformWorkspace(t *testing.
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusForbidden {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestModelAPIUsageRepairRecordsAuditedEvidenceWithoutDirectMoneyMutation(t *testing.T) {
+	operatorStore := &fakeModelAPIOperatorStore{fakeStore: &fakeStore{}}
+	handler := (API{Store: operatorStore, APIKey: "secret", ModelAPIOperatorTenantID: "global"}).Handler()
+	observed := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
+	body, err := json.Marshal(map[string]any{
+		"customer_tenant_id": "customer-one", "outcome": "no_charge",
+		"supplier_request_id": "supplier-request-1", "evidence_reference": "invoice://supplier/line-7",
+		"observed_at": observed,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/admin/model-api/usage-reservations/reservation-1/evidence", bytes.NewReader(body))
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if operatorStore.reconciliationOperator != "global" || operatorStore.reconciliationEvidence.ReservationID != "reservation-1" || operatorStore.reconciliationEvidence.TenantID != "customer-one" || operatorStore.reconciliationEvidence.Authority != modelapirouting.EvidenceOperatorVerified || operatorStore.reconciliationEvidence.RecordedBy != "bootstrap" {
+		t.Fatalf("operator=%q evidence=%+v", operatorStore.reconciliationOperator, operatorStore.reconciliationEvidence)
+	}
+	if operatorStore.modelAPIAudit.Action != "model_api_usage.reconciliation_evidence" || operatorStore.modelAPIAudit.TenantID != "customer-one" || operatorStore.modelAPIAudit.ResourceName != "reservation-1" {
+		t.Fatalf("audit=%+v", operatorStore.modelAPIAudit)
+	}
+	if !strings.Contains(response.Body.String(), `"reconciliation":"queued"`) || !strings.Contains(response.Body.String(), `"content_recorded":false`) {
+		t.Fatalf("response=%s", response.Body.String())
 	}
 }
 

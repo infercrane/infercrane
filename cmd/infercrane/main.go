@@ -4410,6 +4410,19 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 			Circuit:     modelapirouting.NewCircuitBreaker(3, 30*time.Second),
 		}
 	}
+	modelAPIUsageResolvers, resolverRegistryErr := reconcile.NewSupplierUsageResolverRegistry(
+		reconcile.StoredSupplierUsageResolver{Supplier: supplieradapter.DeepSeekSupplier, Source: s},
+		reconcile.StoredSupplierUsageResolver{Supplier: supplieradapter.RunPodSupplier, Source: s},
+		reconcile.StoredSupplierUsageResolver{Supplier: supplieradapter.ZAISupplier, Source: s},
+	)
+	if resolverRegistryErr != nil {
+		return fmt.Errorf("configure hosted Model API usage reconciliation: %w", resolverRegistryErr)
+	}
+	modelAPIUsageTelemetry := &reconcile.ModelAPIUsageTelemetry{}
+	go runModelAPIUsageReconciliation(ctx, reconcile.ModelAPIUsageReconciler{
+		Store: s, Resolver: modelAPIUsageResolvers, Logger: logger, Telemetry: modelAPIUsageTelemetry,
+		Limit: 100, InFlightGrace: 10 * time.Minute,
+	}, 30*time.Second, logger)
 	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, DiscoveryClient: nil, Secrets: secrets.Environment{}, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool, OptimizationCosts: optimizationCosts, AcceleratorLabEnabled: acceleratorEngine != nil, AcceleratorLabCatalog: acceleratorCatalog, ModelAPICatalog: modelAPICatalog, ModelAPIProducts: s, SandboxProvider: nativeSandboxProvider, SandboxBilling: cfg.ManagedSandboxPolicy(), SandboxProjectID: cfg.BrezelSandboxProjectID, SandboxPreviews: controlapi.NewSandboxPreviewBroker(), SandboxDefaultTemplate: cfg.BrezelSandboxDefaultTemplate, SandboxModelConnectors: cfg.BrezelSandboxModelConnectors, ModelAPIOperatorTenantID: cfg.ModelAPIOperatorTenantID, ComputeProviders: computeProviders, GPUPriceCatalog: priceCatalog, LaunchProbers: launchProbers, DefaultProviderAdapters: defaultProviderAdapters, ManagedDeployments: managedbilling.DeploymentPolicy{Enabled: cfg.ManagedDeploymentsEnabled, Provider: "runpod"}}
 	if cfg.StripeEnabled() {
 		stripeBilling, stripeErr := managedbilling.NewStripe(cfg.StripeSecretKey, cfg.StripeWebhookSecret, cfg.StripeBillingReturnURL, cfg.StripePriceIDs, cfg.StripeLivemode)
@@ -4587,6 +4600,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		operationTelemetry.WritePrometheus(w)
 		recorder.WritePrometheus(w)
 		admissionPool.WritePrometheus(w)
+		modelAPIUsageTelemetry.WritePrometheus(w)
 	}}
 	serverTLS, err := serverTLSConfig(cfg)
 	if err != nil {
@@ -4843,6 +4857,31 @@ func runManagedSandboxReconciliation(ctx context.Context, reconciler managedsand
 	for {
 		if err := reconciler.Once(ctx); err != nil && ctx.Err() == nil {
 			logger.Error("managed sandbox reconciliation failed", "error", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func runModelAPIUsageReconciliation(ctx context.Context, reconciler reconcile.ModelAPIUsageReconciler, interval time.Duration, logger *slog.Logger) {
+	if interval <= 0 || interval > time.Minute {
+		interval = 30 * time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		passTimeout := interval
+		if passTimeout > 20*time.Second {
+			passTimeout = 20 * time.Second
+		}
+		passContext, cancel := context.WithTimeout(ctx, passTimeout)
+		err := reconciler.Once(passContext)
+		cancel()
+		if err != nil && ctx.Err() == nil {
+			logger.Error("hosted Model API usage reconciliation failed", "error", err)
 		}
 		select {
 		case <-ctx.Done():

@@ -9,6 +9,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/infercrane/infercrane/internal/supplieradapter"
@@ -137,6 +138,7 @@ func (rt *Runtime) serveStrictBuffered(w http.ResponseWriter, r *http.Request, r
 			rt.observeCandidate(candidateID, false)
 		}
 		rt.settleStrict(request, reservationID, Usage{StatusCode: status})
+		rt.recordStrictReconciliationEvidence(request, reservationID, adapter.Name(), err)
 		rt.writeStrictError(w, request, reservationID, err)
 		return
 	}
@@ -168,6 +170,7 @@ func (rt *Runtime) serveStrictStream(w http.ResponseWriter, r *http.Request, req
 			rt.observeCandidate(candidateID, false)
 		}
 		rt.settleStrict(request, reservationID, Usage{StatusCode: status})
+		rt.recordStrictReconciliationEvidence(request, reservationID, adapter.Name(), err)
 		rt.writeStrictError(w, request, reservationID, err)
 		return
 	}
@@ -214,8 +217,34 @@ func (rt *Runtime) serveStrictStream(w http.ResponseWriter, r *http.Request, req
 		rt.observeCandidate(candidateID, false)
 	}
 	rt.settleStrict(request, reservationID, usage)
+	if copyErr != nil {
+		rt.recordStrictReconciliationEvidence(request, reservationID, adapter.Name(), copyErr)
+	}
 	if copyErr != nil && rt.Logger != nil {
 		rt.Logger.Error("strict hosted model API stream incomplete", "request_id", request.RequestID, "reservation_id", reservationID, "error", copyErr)
+	}
+}
+
+// recordStrictReconciliationEvidence consumes only an adapter's explicit
+// no-charge classification. Ambiguous errors, missing supplier request IDs,
+// and response-started failures remain reserved for external reconciliation.
+func (rt *Runtime) recordStrictReconciliationEvidence(request ProxyRequest, reservationID, adapterName string, err error) {
+	var supplierErr *supplieradapter.Error
+	if !errors.As(err, &supplierErr) || supplierErr.Billing != supplieradapter.BillingNoChargeConfirmed || supplierErr.ResponseStarted || strings.TrimSpace(supplierErr.SupplierRequestID) == "" {
+		return
+	}
+	evidence := ReconciliationEvidence{
+		SupplierRequestID: supplierErr.SupplierRequestID,
+		Outcome:           ReconciliationNoCharge,
+		Authority:         EvidenceSupplierAdapter,
+		Reference:         "supplier-adapter:" + adapterName + ":" + supplierErr.Code + ":" + supplierErr.SupplierRequestID,
+		RecordedBy:        "supplier-adapter:" + adapterName,
+		ObservedAt:        rt.currentTime(),
+	}
+	evidenceContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if recordErr := rt.Billing.RecordReconciliationEvidence(evidenceContext, request.TenantID, reservationID, evidence); recordErr != nil && rt.Logger != nil {
+		rt.Logger.Error("record strict supplier no-charge evidence", "request_id", request.RequestID, "reservation_id", reservationID, "error", recordErr)
 	}
 }
 
