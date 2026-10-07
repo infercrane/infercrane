@@ -39,6 +39,7 @@ type CloudRequest struct {
 	Runtime                string                   `json:"runtime,omitempty"`
 	Cloud                  string                   `json:"cloud"`
 	ProviderAdapter        string                   `json:"provider_adapter,omitempty"`
+	ComputeConnectionID    string                   `json:"compute_connection_id,omitempty"`
 	ComputeMode            string                   `json:"compute_mode,omitempty"`
 	BillingMode            string                   `json:"billing_mode,omitempty"`
 	ManagedRuntimeSeconds  int                      `json:"managed_runtime_seconds,omitempty"`
@@ -89,6 +90,9 @@ func (r *CloudRequest) Validate() error {
 	}
 	if len(r.ModelSecretReferenceID) > 255 {
 		return errors.New("model secret reference must not exceed 255 characters")
+	}
+	if len(r.ComputeConnectionID) > 255 {
+		return errors.New("compute connection ID must not exceed 255 characters")
 	}
 	if r.GPUCount == 0 {
 		r.GPUCount = 1
@@ -239,6 +243,25 @@ type CapacityOperationStore interface {
 	RecordCapacityOperation(context.Context, domain.CapacityOperation) (domain.CapacityOperation, error)
 }
 
+type deploymentComputeConnectionStore interface {
+	ComputeConnectionForDeployment(context.Context, string, string) (domain.ComputeConnection, error)
+}
+
+func deploymentComputeConnectionID(ctx context.Context, store CloudStore, tenant, deploymentID string) (string, error) {
+	connections, ok := store.(deploymentComputeConnectionStore)
+	if !ok {
+		return "", nil
+	}
+	connection, err := connections.ComputeConnectionForDeployment(ctx, tenant, deploymentID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return connection.ID, nil
+}
+
 // ReplicaBackend binds a provider adapter to durable identity and the runtime
 // it launches. Provider support is registered at composition time rather than
 // selected by conditionals inside lifecycle code.
@@ -248,6 +271,17 @@ type ReplicaBackend struct {
 	Profile              integration.ProviderProfile
 	Provider             ReplicaProvider
 	Capacity             CapacityAdvisor
+	ResolveProvider      func(context.Context, string, string, string) (ReplicaProvider, CapacityAdvisor, string, error)
+}
+
+func (b ReplicaBackend) resolveProvider(ctx context.Context, tenant, connectionID, deploymentID string) (ReplicaProvider, CapacityAdvisor, string, error) {
+	if connectionID == "" {
+		return b.Provider, b.Capacity, "", nil
+	}
+	if b.ResolveProvider == nil {
+		return nil, nil, "", errors.New("replica backend does not support tenant compute connections")
+	}
+	return b.ResolveProvider(ctx, tenant, connectionID, deploymentID)
 }
 
 type ReplicaBackends struct {
@@ -403,6 +437,10 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 			return "", operations.Permanent("deployment_missing", fmt.Errorf("resolve desired deployment: %w", err))
 		}
 		request.DeploymentID = resolved.Deployment.ID
+		if request.ComputeConnectionID != "" && request.ComputeConnectionID != resolved.Deployment.ComputeConnectionID {
+			return "", operations.Permanent("compute_connection_mismatch", errors.New("operation compute connection does not match durable deployment binding"))
+		}
+		request.ComputeConnectionID = resolved.Deployment.ComputeConnectionID
 		if request.Runtime == "" {
 			request.Runtime = resolved.Deployment.Runtime
 			if request.Runtime == "" {
@@ -507,7 +545,10 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 				if backendErr != nil {
 					return "", operations.Permanent("provider_backend_unavailable", backendErr)
 				}
-				provider := replicaBackend.Provider
+				provider, _, _, backendErr := replicaBackend.resolveProvider(ctx, request.TenantID, request.ComputeConnectionID, request.DeploymentID)
+				if backendErr != nil {
+					return "", operations.Permanent("compute_connection_unavailable", backendErr)
+				}
 				handle := provider.Handle(replica.ExternalKey)
 				handle.RequestID, handle.ResourceID = replica.ProviderRequestID, replica.ProviderResourceID
 				if err = provider.DeleteReplica(ctx, handle); err != nil {
@@ -562,6 +603,10 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 				return "", operations.Retryable("active_requests_draining", fmt.Errorf("%d active request(s) still use the deleting deployment", active))
 			}
 		}
+		connectionID, connectionErr := deploymentComputeConnectionID(ctx, store, request.TenantID, request.DeploymentID)
+		if connectionErr != nil {
+			return "", operations.Retryable("compute_connection_lookup_failed", connectionErr)
+		}
 		for _, replica := range replicas {
 			if replica.LifecycleState == "deleted" {
 				continue
@@ -570,7 +615,10 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 			if backendErr != nil {
 				return "", operations.Permanent("provider_backend_unavailable", backendErr)
 			}
-			provider := replicaBackend.Provider
+			provider, _, _, backendErr := replicaBackend.resolveProvider(ctx, request.TenantID, connectionID, request.DeploymentID)
+			if backendErr != nil {
+				return "", operations.Permanent("compute_connection_unavailable", backendErr)
+			}
 			handle := provider.Handle(replica.ExternalKey)
 			if replica.ProviderResourceID != "" {
 				handle.ResourceID = replica.ProviderResourceID
@@ -649,7 +697,7 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 		if err != nil {
 			return "", operations.Permanent("deployment_missing", err)
 		}
-		request := CloudRequest{DeploymentID: resolved.Deployment.ID, Name: rollout.Name, Model: spec.Model, ModelRevision: spec.ModelRevision, ModelSecretReferenceID: spec.ModelSecretReferenceID, RevisionID: revision.ID, Cloud: spec.Cloud, ProviderAdapter: spec.ProviderAdapter, GPU: spec.GPU, GPUCount: spec.GPUCount, Region: spec.Region, Runtime: spec.Runtime, RuntimeVersion: spec.RuntimeVersion, RuntimeArgs: spec.RuntimeArgs, Port: spec.Port, Workload: spec.Workload, Serving: spec.Serving, MinReplicas: spec.MinReplicas, MaxReplicas: spec.MaxReplicas, DesiredReplicas: spec.MinReplicas, TenantID: rollout.TenantID, Actor: rollout.Actor, Candidate: true}
+		request := CloudRequest{DeploymentID: resolved.Deployment.ID, Name: rollout.Name, Model: spec.Model, ModelRevision: spec.ModelRevision, ModelSecretReferenceID: spec.ModelSecretReferenceID, RevisionID: revision.ID, Cloud: spec.Cloud, ProviderAdapter: spec.ProviderAdapter, ComputeConnectionID: spec.ComputeConnectionID, GPU: spec.GPU, GPUCount: spec.GPUCount, Region: spec.Region, Runtime: spec.Runtime, RuntimeVersion: spec.RuntimeVersion, RuntimeArgs: spec.RuntimeArgs, Port: spec.Port, Workload: spec.Workload, Serving: spec.Serving, MinReplicas: spec.MinReplicas, MaxReplicas: spec.MaxReplicas, DesiredReplicas: spec.MinReplicas, TenantID: rollout.TenantID, Actor: rollout.Actor, Candidate: true}
 		request.Runtime = spec.Runtime
 		if request.Runtime == "" {
 			request.Runtime = support.DefaultRuntime
@@ -718,6 +766,10 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 			return "", operations.Retryable("replica_lookup_failed", err)
 		}
 		deleted := 0
+		connectionID, connectionErr := deploymentComputeConnectionID(ctx, store, rollout.TenantID, resolved.Deployment.ID)
+		if connectionErr != nil {
+			return "", operations.Retryable("compute_connection_lookup_failed", connectionErr)
+		}
 		for _, replica := range replicas {
 			if replica.RevisionID != rollout.CandidateID || replica.LifecycleState == "deleted" {
 				continue
@@ -726,7 +778,10 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 			if backendErr != nil {
 				return "", operations.Permanent("provider_backend_unavailable", backendErr)
 			}
-			provider := replicaBackend.Provider
+			provider, _, _, backendErr := replicaBackend.resolveProvider(ctx, rollout.TenantID, connectionID, resolved.Deployment.ID)
+			if backendErr != nil {
+				return "", operations.Permanent("compute_connection_unavailable", backendErr)
+			}
 			handle := provider.Handle(replica.ExternalKey)
 			handle.RequestID, handle.ResourceID = replica.ProviderRequestID, replica.ProviderResourceID
 			if err = provider.DeleteReplica(ctx, handle); err != nil {
@@ -1035,7 +1090,10 @@ func mustJSON(value any) string {
 func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBackend, runtime RuntimeInspector, operation domain.Operation, request CloudRequest, ordinal int) (targetName, endpoint, resourceID string, resultErr error) {
 	started := time.Now().UTC()
 	stageDurationsJSON := "{}"
-	provider := backend.Provider
+	provider, capacity, workerAPIKey, err := backend.resolveProvider(ctx, request.TenantID, request.ComputeConnectionID, request.DeploymentID)
+	if err != nil {
+		return "", "", "", operations.Permanent("compute_connection_unavailable", err)
+	}
 	externalKey := fmt.Sprintf("%s-r%d", request.DeploymentID, ordinal)
 	if request.Candidate {
 		externalKey = fmt.Sprintf("%s-%s-r%d", request.DeploymentID, request.RevisionID, ordinal)
@@ -1093,7 +1151,7 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 	if err = checkpoint(ctx, store, operation, step+".intent", "succeeded", map[string]string{"replica_id": replica.ID, "external_key": externalKey, "resource_id": handle.ResourceID}, 15, "Replica identity persisted"); err != nil {
 		return "", "", "", err
 	}
-	if backend.Capacity != nil {
+	if capacity != nil {
 		// Discover first so replay after a lost create response always adopts the
 		// deterministic resource. Availability is advisory, not a reservation.
 		existing, observeErr := provider.ObserveReplica(ctx, handle, request.Port)
@@ -1101,7 +1159,7 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 			return "", "", "", operations.Retryable("provider_discovery_failed", fmt.Errorf("discover capacity before availability check: %w", observeErr))
 		}
 		if !existing.Exists {
-			availability, availabilityErr := backend.Capacity.Availability(ctx, provision.AvailabilityRequest{Cloud: request.Cloud, GPU: request.GPU, Region: request.Region, Count: request.GPUCount})
+			availability, availabilityErr := capacity.Availability(ctx, provision.AvailabilityRequest{Cloud: request.Cloud, GPU: request.GPU, Region: request.Region, Count: request.GPUCount})
 			if availabilityErr != nil {
 				availability = provision.Availability{State: "unknown", Message: "Provider availability check failed; continuing because stock signals are advisory", Details: availabilityErr.Error()}
 			}
@@ -1118,7 +1176,7 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 			}
 		}
 	}
-	ensured, err := provider.EnsureReplica(ctx, provision.ReplicaSpec{ExternalKey: externalKey, RequestID: replica.ProviderRequestID, Name: fmt.Sprintf("%s-r%d", request.Name, ordinal), Model: request.Model, ModelRevision: request.ImmutableModelRevision, Cloud: request.Cloud, GPU: request.GPU, GPUCount: request.GPUCount, Region: request.Region, Runtime: request.Runtime, RuntimeVersion: request.RuntimeVersion, RuntimeArgs: request.RuntimeArgs, Port: request.Port, Workload: request.Workload, Serving: request.Serving})
+	ensured, err := provider.EnsureReplica(ctx, provision.ReplicaSpec{TenantID: request.TenantID, DeploymentID: request.DeploymentID, ComputeConnectionID: request.ComputeConnectionID, ExternalKey: externalKey, RequestID: replica.ProviderRequestID, Name: fmt.Sprintf("%s-r%d", request.Name, ordinal), Model: request.Model, ModelRevision: request.ImmutableModelRevision, Cloud: request.Cloud, GPU: request.GPU, GPUCount: request.GPUCount, Region: request.Region, Runtime: request.Runtime, RuntimeVersion: request.RuntimeVersion, RuntimeArgs: request.RuntimeArgs, Port: request.Port, Workload: request.Workload, Serving: request.Serving})
 	if err != nil {
 		if errors.Is(err, provision.ErrProviderAuthorization) {
 			return "", "", "", operations.Permanent("provider_authorization_failed", err)
@@ -1169,7 +1227,7 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 		}
 		return "", "", "", operations.Retryable("replica_starting", errors.New("provider is allocating capacity or bootstrapping the worker"))
 	}
-	ready, models := runtime.Inspect(ctx, observation.Endpoint)
+	ready, models := inspectRuntime(ctx, runtime, observation.Endpoint, workerAPIKey)
 	_, present := models[request.Model]
 	if ready && !present {
 		_ = store.ObserveReplica(ctx, replica.ID, "failed", observation.Endpoint, "unhealthy", observation.Details, time.Now())
@@ -1205,6 +1263,19 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 		return "", "", "", classify("activation_failed", err)
 	}
 	return targetName, observation.Endpoint, ensured.ResourceID, nil
+}
+
+type credentialedRuntimeInspector interface {
+	InspectWithCredential(context.Context, string, string) (bool, map[string]struct{})
+}
+
+func inspectRuntime(ctx context.Context, runtime RuntimeInspector, endpoint, credential string) (bool, map[string]struct{}) {
+	if credential != "" {
+		if inspector, ok := runtime.(credentialedRuntimeInspector); ok {
+			return inspector.InspectWithCredential(ctx, endpoint, credential)
+		}
+	}
+	return runtime.Inspect(ctx, endpoint)
 }
 
 func startupStageDurations(details string, started, readyAt time.Time) string {

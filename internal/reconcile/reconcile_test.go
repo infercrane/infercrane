@@ -175,6 +175,42 @@ func TestUnchangedGenerationUsesGenerationProcessIdentity(t *testing.T) {
 	}
 }
 
+func TestRouteWorkerAPIKeyFailsClosedForTenantCompute(t *testing.T) {
+	deployment := domain.Deployment{ID: "deployment", TenantID: "tenant-1", ComputeConnectionID: "connection-1"}
+	deriveCalls := 0
+	derive := func(tenant, deploymentID, version string) string {
+		deriveCalls++
+		if tenant != "tenant-1" || deploymentID != "deployment" || version != "tenant-hmac-v1" {
+			t.Fatalf("unexpected derivation input: %q %q %q", tenant, deploymentID, version)
+		}
+		return "tenant-worker-key"
+	}
+	versioned := domain.Target{ProviderDetails: `{"worker_credential_version":"tenant-hmac-v1"}`}
+	legacy := domain.Target{ProviderDetails: `{}`}
+	malformed := domain.Target{ProviderDetails: `{`}
+
+	if got := routeWorkerAPIKey(deployment, []domain.Target{versioned}, "global-key", derive); got != "tenant-worker-key" || deriveCalls != 1 {
+		t.Fatalf("tenant credential=%q derive_calls=%d", got, deriveCalls)
+	}
+	for name, targets := range map[string][]domain.Target{
+		"missing":               {legacy},
+		"malformed":             {malformed},
+		"mixed legacy first":    {legacy, versioned},
+		"mixed versioned first": {versioned, legacy},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := routeWorkerAPIKey(deployment, targets, "global-key", derive); got != "" {
+				t.Fatalf("BYOC route fell back to %q", got)
+			}
+		})
+	}
+
+	deployment.ComputeConnectionID = ""
+	if got := routeWorkerAPIKey(deployment, []domain.Target{legacy}, "global-key", derive); got != "global-key" {
+		t.Fatalf("legacy managed route key=%q", got)
+	}
+}
+
 func TestDeletedDesiredDeploymentWithdrawsBeforeProviderInspection(t *testing.T) {
 	store, directory := reconcilerFixture()
 	deployment := store.deployment

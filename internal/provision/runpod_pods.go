@@ -24,11 +24,21 @@ import (
 // response.
 type RunPodPods struct {
 	APIKey, WorkerAPIKey, BaseURL string
+	WorkerCredentialVersion       string
 	ContainerDiskGiB              int
 	ArtifactCachePolicy           string
 	HFTokenSecret                 string
 	NetworkVolumes                map[string]string
 	Client                        *http.Client
+}
+
+func (r RunPodPods) VerifyCredential(ctx context.Context, credential string) error {
+	r.APIKey = strings.TrimSpace(credential)
+	if r.APIKey == "" {
+		return ErrProviderAuthorization
+	}
+	_, err := r.list(ctx)
+	return err
 }
 
 type runPodNetworkVolume struct {
@@ -209,7 +219,8 @@ func (r RunPodPods) ObserveReplica(ctx context.Context, handle ProviderHandle, p
 		"machine_id": pod.MachineID, "last_started_at": pod.LastStartedAt,
 		"last_status_change": pod.LastStatusChange, "container_disk_gib": pod.ContainerDiskGiB,
 		"cost_per_hour": rawNumber(pod.CostPerHour), "adjusted_cost_per_hour": rawNumber(pod.AdjustedCost),
-		"network_volume": runPodVolumeEvidence(pod.NetworkVolume),
+		"network_volume":            runPodVolumeEvidence(pod.NetworkVolume),
+		"worker_credential_version": r.WorkerCredentialVersion,
 	})
 	switch strings.ToUpper(pod.DesiredStatus) {
 	case "EXITED", "TERMINATED":

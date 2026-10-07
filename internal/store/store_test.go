@@ -835,6 +835,45 @@ func TestSubmitDeploymentDeleteWithdrawsDesiredStateAndQueuesCleanup(t *testing.
 	}
 }
 
+func TestTenantComputeConnectionBindsUntilProviderCleanupCompletes(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	connection, err := s.CreateComputeConnection(ctx, "global", domain.ComputeConnection{
+		Name: "primary", Provider: "runpod", Adapter: "runpod-pods", Status: "verified",
+		CredentialCiphertext: []byte("encrypted-provider-token"), CredentialNonce: []byte("twelve-bytes!"),
+		CredentialKeyReference: "test-key-v1", VerifiedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := "byoc-" + time.Now().UTC().Format("150405.000000000")
+	requestJSON := `{"name":"` + name + `","model":"Qwen/Qwen3-8B","cloud":"runpod","provider_adapter":"runpod-pods","compute_connection_id":"` + connection.ID + `","gpu":"L40S"}`
+	deployment, _, created, err := s.SubmitCloudDeployment(ctx,
+		domain.Deployment{TenantID: "global", Name: name, Model: "Qwen/Qwen3-8B", Runtime: "vllm", ComputeConnectionID: connection.ID, MinReplicas: 1, MaxReplicas: 1},
+		domain.Operation{Kind: "deployment.converge", IdempotencyKey: "create-" + name, RequestJSON: requestJSON},
+	)
+	if err != nil || !created || deployment.ComputeConnectionID != connection.ID {
+		t.Fatalf("deployment=%#v created=%v err=%v", deployment, created, err)
+	}
+	resolved, err := s.ResolveForTenant(ctx, "global", name)
+	if err != nil || resolved.Deployment.ComputeConnectionID != connection.ID {
+		t.Fatalf("resolved=%#v err=%v", resolved.Deployment, err)
+	}
+	var revisionConnection string
+	if err = s.QueryRowContext(ctx, `SELECT COALESCE(spec_json->>'compute_connection_id','') FROM deployment_revisions WHERE id=?`, deployment.ActiveRevisionID).Scan(&revisionConnection); err != nil || revisionConnection != connection.ID {
+		t.Fatalf("revision connection=%q err=%v", revisionConnection, err)
+	}
+	if err = s.DeleteComputeConnectionForTenant(ctx, "global", connection.ID); !errors.Is(err, ErrConflict) {
+		t.Fatalf("attached connection deletion error=%v", err)
+	}
+	if err = s.DeleteDeploymentForTenant(ctx, "global", name); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.DeleteComputeConnectionForTenant(ctx, "global", connection.ID); err != nil {
+		t.Fatalf("connection remained pinned after provider cleanup: %v", err)
+	}
+}
+
 func TestCreateDeploymentRejectsIncompatibleTargets(t *testing.T) {
 	ctx := context.Background()
 	s := openStore(t, ctx)

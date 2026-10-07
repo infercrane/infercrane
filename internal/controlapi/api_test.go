@@ -19,6 +19,7 @@ import (
 	"github.com/infercrane/infercrane/internal/asyncinference"
 	"github.com/infercrane/infercrane/internal/authz"
 	"github.com/infercrane/infercrane/internal/benchmark"
+	"github.com/infercrane/infercrane/internal/computeconnection"
 	"github.com/infercrane/infercrane/internal/contextpassport"
 	"github.com/infercrane/infercrane/internal/curatedrecipe"
 	"github.com/infercrane/infercrane/internal/doctor"
@@ -43,6 +44,7 @@ import (
 
 type fakeStore struct {
 	operation                  domain.Operation
+	deployment                 domain.Deployment
 	cancelled                  bool
 	err                        error
 	created                    bool
@@ -230,6 +232,46 @@ type fakeEndpointStore struct {
 type fakeProviderEndpointStore struct {
 	*fakeEndpointStore
 	connections []domain.ProviderConnection
+}
+
+type fakeComputeConnections struct {
+	item       domain.ComputeConnection
+	credential string
+	err        error
+}
+
+func (f *fakeComputeConnections) Create(_ context.Context, tenant string, request computeconnection.CreateRequest) (domain.ComputeConnection, error) {
+	f.credential = request.Credential
+	if f.err != nil {
+		return domain.ComputeConnection{}, f.err
+	}
+	f.item = domain.ComputeConnection{ID: "compute-connection-1", TenantID: tenant, Name: request.Name, Provider: request.Provider, Adapter: "runpod-pods", Status: "verified", VerifiedAt: time.Now().UTC()}
+	return f.item, nil
+}
+func (f *fakeComputeConnections) Get(_ context.Context, tenant, id string) (domain.ComputeConnection, error) {
+	if f.err != nil {
+		return domain.ComputeConnection{}, f.err
+	}
+	if f.item.TenantID != tenant || f.item.ID != id {
+		return domain.ComputeConnection{}, domain.ErrNotFound
+	}
+	return f.item, nil
+}
+func (f *fakeComputeConnections) List(context.Context, string) ([]domain.ComputeConnection, error) {
+	if f.item.ID == "" {
+		return nil, f.err
+	}
+	return []domain.ComputeConnection{f.item}, f.err
+}
+func (f *fakeComputeConnections) Delete(_ context.Context, tenant, id string) error {
+	if f.err != nil {
+		return f.err
+	}
+	if f.item.TenantID != tenant || f.item.ID != id {
+		return domain.ErrNotFound
+	}
+	f.item = domain.ComputeConnection{}
+	return nil
 }
 
 type fakeManagedBillingStore struct {
@@ -1080,6 +1122,64 @@ func TestTenantCannotUseProcessGlobalProviderAccountCompute(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), `"code":"compute_connection_required"`) {
 		t.Fatalf("tenant inherited process-global provider credentials: status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestTenantDeploymentUsesOnlyItsVerifiedComputeConnection(t *testing.T) {
+	store := &fakeStore{created: true, principal: domain.Principal{
+		ID: "admin-1", TenantID: "tenant-1", Name: "admin", Role: "admin",
+		Scopes: []string{"read", "deploy"},
+	}}
+	connections := &fakeComputeConnections{item: domain.ComputeConnection{
+		ID: "connection-1", TenantID: "tenant-1", Name: "primary", Provider: "runpod", Adapter: "runpod-pods", Status: "verified",
+	}}
+	handler := (API{
+		Store:                   store,
+		Authenticator:           store,
+		ComputeConnections:      connections,
+		DefaultProviderAdapters: map[string]string{"runpod": "skypilot-runpod"},
+	}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments", strings.NewReader(`{"name":"qwen","model":"Qwen/Qwen3-8B","cloud":"runpod","compute_connection_id":"connection-1","gpu":"L40S","min_replicas":1,"max_replicas":1}`))
+	request.Header.Set("Authorization", "Bearer tenant-session")
+	request.Header.Set("Idempotency-Key", "tenant-owned-provider")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted || !strings.Contains(store.operation.RequestJSON, `"compute_connection_id":"connection-1"`) || !strings.Contains(store.operation.RequestJSON, `"provider_adapter":"runpod-pods"`) || store.deployment.ComputeConnectionID != "connection-1" {
+		t.Fatalf("tenant connection was not durably bound: status=%d body=%s deployment=%#v operation=%s", response.Code, response.Body.String(), store.deployment, store.operation.RequestJSON)
+	}
+
+	connections.item.TenantID = "tenant-2"
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/deployments", strings.NewReader(`{"name":"other","model":"Qwen/Qwen3-8B","cloud":"runpod","compute_connection_id":"connection-1","gpu":"L40S"}`))
+	request.Header.Set("Authorization", "Bearer tenant-session")
+	request.Header.Set("Idempotency-Key", "cross-tenant-provider")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), `"code":"compute_connection_not_found"`) {
+		t.Fatalf("cross-tenant compute connection was not rejected: status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestComputeConnectionAPIIsWriteOnlyAndTenantScoped(t *testing.T) {
+	store := &fakeStore{principal: domain.Principal{
+		ID: "admin-1", TenantID: "tenant-1", Name: "admin", Role: "admin",
+		Scopes: []string{"read", "manage_secrets"},
+	}}
+	connections := &fakeComputeConnections{}
+	handler := (API{Store: store, Authenticator: store, ComputeConnections: connections}).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/compute/connections", strings.NewReader(`{"name":"primary","provider":"runpod","credential":"runpod-secret-token"}`))
+	request.Header.Set("Authorization", "Bearer tenant-session")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || connections.credential != "runpod-secret-token" || strings.Contains(response.Body.String(), "runpod-secret-token") || strings.Contains(response.Body.String(), "ciphertext") || !strings.Contains(response.Body.String(), `"status":"verified"`) {
+		t.Fatalf("write-only connection response=%d %s credential=%q", response.Code, response.Body.String(), connections.credential)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/compute/connections", nil)
+	request.Header.Set("Authorization", "Bearer tenant-session")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), "runpod-secret-token") || !strings.Contains(response.Body.String(), `"id":"compute-connection-1"`) {
+		t.Fatalf("connection listing leaked or omitted metadata: status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 
@@ -2343,6 +2443,7 @@ func (f *fakeStore) SubmitCloudDeployment(_ context.Context, deployment domain.D
 	operation.ID, operation.Status = "queued", "pending"
 	operation.ResourceType, operation.ResourceName = "deployment", deployment.Name
 	f.operation = operation
+	f.deployment = deployment
 	return deployment, operation, f.created, f.err
 }
 func (f *fakeStore) SubmitDeploymentDelete(_ context.Context, _, name, _ string, operation domain.Operation) (domain.Operation, bool, error) {

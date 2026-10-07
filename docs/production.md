@@ -61,6 +61,14 @@ key is the platform's supply credential, not a tenant BYOC credential. Leave the
 false until current price ingestion, Stripe funding, auto-stop, provider deletion, and settlement
 are all operational.
 
+To enable customer-owned RunPod Pods, inject separate random
+`INFERCRANE_CREDENTIAL_ENCRYPTION_KEY` and `INFERCRANE_WORKER_CREDENTIAL_KEY` values of at least 32
+bytes each. The first encrypts tenant provider credentials at rest; the second derives
+tenant-and-deployment-scoped worker credentials. Neither is a RunPod credential. Back them up and
+rotate them through an explicit credential migration and controlled worker replacement. Keep the
+operator `RUNPOD_API_KEY` separate. Customer deployments never receive the control plane's global
+API key.
+
 The Fly Machine hostname is the default replica identity. Do not set `INFERCRANE_INSTANCE_ID` to
 one shared value: two live replicas with the same identity would violate lease ownership and route
 generation isolation. Set the variable only when the host supplies a different stable, unique

@@ -27,6 +27,7 @@ import (
 	"github.com/infercrane/infercrane/internal/authz"
 	"github.com/infercrane/infercrane/internal/benchmark"
 	"github.com/infercrane/infercrane/internal/burstguard"
+	"github.com/infercrane/infercrane/internal/computeconnection"
 	"github.com/infercrane/infercrane/internal/contextpassport"
 	"github.com/infercrane/infercrane/internal/continualoptimizer"
 	"github.com/infercrane/infercrane/internal/curatedrecipe"
@@ -379,6 +380,12 @@ type API struct {
 	// InferCrane Cloud. Browser input can select the mode, never the margin or
 	// provider account.
 	ManagedDeployments managedbilling.DeploymentPolicy
+	ComputeConnections interface {
+		Create(context.Context, string, computeconnection.CreateRequest) (domain.ComputeConnection, error)
+		Get(context.Context, string, string) (domain.ComputeConnection, error)
+		List(context.Context, string) ([]domain.ComputeConnection, error)
+		Delete(context.Context, string, string) error
+	}
 }
 
 // ComputeProvider is the customer-facing execution readiness for one cloud.
@@ -464,6 +471,9 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/admin/marketplace/receipts", a.auth(authz.ManageModelAPI, a.recordMarketplaceReceipt))
 	mux.HandleFunc("POST /api/v1/admin/marketplace/billing/requests", a.auth(authz.ManageModelAPI, a.marketplaceBillingRequests))
 	mux.HandleFunc("GET /api/v1/compute/providers", a.auth(authz.Read, a.computeProviders))
+	mux.HandleFunc("GET /api/v1/compute/connections", a.auth(authz.Read, a.computeConnections))
+	mux.HandleFunc("POST /api/v1/compute/connections", a.auth(authz.ManageSecrets, a.createComputeConnection))
+	mux.HandleFunc("DELETE /api/v1/compute/connections/{id}", a.auth(authz.ManageSecrets, a.deleteComputeConnection))
 	mux.HandleFunc("GET /api/v1/catalog/gpu-prices", a.auth(authz.Read, a.gpuPrices))
 	mux.HandleFunc("POST /api/v1/capacity/probes", a.auth(authz.Read, a.probeCapacity))
 	mux.HandleFunc("POST /api/v1/managed-deployment-quotes", a.auth(authz.Read, a.managedDeploymentQuote))
@@ -5051,7 +5061,38 @@ func (a API) createCloudDeployment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid: "+err.Error())
 		return
 	}
-	if request.ProviderAdapter == "" {
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		writeError(w, http.StatusBadRequest, "invalid_request", "request body must contain one JSON object")
+		return
+	}
+	principal := r.Context().Value(identityKey{}).(domain.Principal)
+	if request.BillingMode == "" {
+		request.BillingMode = "provider_account"
+	}
+	if request.BillingMode == "provider_account" && principal.ID != "bootstrap" {
+		if request.ComputeConnectionID == "" || a.ComputeConnections == nil {
+			writeError(w, http.StatusConflict, "compute_connection_required", "provider-account deployments require a verified tenant compute connection")
+			return
+		}
+		connection, connectionErr := a.ComputeConnections.Get(r.Context(), principal.TenantID, request.ComputeConnectionID)
+		if errors.Is(connectionErr, domain.ErrNotFound) {
+			writeError(w, http.StatusUnprocessableEntity, "compute_connection_not_found", "compute connection was not found in the active tenant")
+			return
+		}
+		if connectionErr != nil {
+			writeError(w, http.StatusInternalServerError, "internal", "compute connection could not be validated")
+			return
+		}
+		if connection.Status != "verified" || connection.Provider != request.Cloud {
+			writeError(w, http.StatusUnprocessableEntity, "compute_connection_mismatch", "compute connection is not verified for the selected provider")
+			return
+		}
+		if request.ProviderAdapter != "" && request.ProviderAdapter != connection.Adapter {
+			writeError(w, http.StatusUnprocessableEntity, "compute_connection_mismatch", "provider adapter does not match the selected compute connection")
+			return
+		}
+		request.ProviderAdapter = connection.Adapter
+	} else if request.ProviderAdapter == "" {
 		request.ProviderAdapter = a.DefaultProviderAdapters[request.Cloud]
 	}
 	if err := request.Validate(); err != nil {
@@ -5063,18 +5104,11 @@ func (a API) createCloudDeployment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, "managed_billing_required", "InferCrane-managed compute requires prepaid credit")
 		return
 	}
-	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body must contain one JSON object")
-		return
-	}
-	principal := r.Context().Value(identityKey{}).(domain.Principal)
-	if request.BillingMode == "provider_account" && principal.ID != "bootstrap" {
-		writeError(w, http.StatusConflict, "compute_connection_required", "provider-account deployments require a verified tenant compute connection")
-		return
-	}
-	if !a.computeProviderSupports(request.Cloud, request.BillingMode) && (principal.ID != "bootstrap" || len(a.ComputeProviders) > 0) {
-		writeError(w, http.StatusConflict, "compute_connection_required", "this control plane has no ready compute connection for "+request.Cloud)
-		return
+	if request.BillingMode != "provider_account" || principal.ID == "bootstrap" {
+		if !a.computeProviderSupports(request.Cloud, request.BillingMode) && (principal.ID != "bootstrap" || len(a.ComputeProviders) > 0) {
+			writeError(w, http.StatusConflict, "compute_connection_required", "this control plane has no ready compute connection for "+request.Cloud)
+			return
+		}
 	}
 	if request.ModelSecretReferenceID != "" {
 		references, secretErr := a.Store.SecretReferencesForTenant(r.Context(), principal.TenantID)
@@ -5112,7 +5146,7 @@ func (a API) createCloudDeployment(w http.ResponseWriter, r *http.Request) {
 	}
 	encoded, _ := json.Marshal(request)
 	autoscalingEnabled := request.ComputeMode != "serverless" && maxReplicas > minReplicas
-	deploymentInput := domain.Deployment{TenantID: principal.TenantID, Name: request.Name, Model: request.Model, Runtime: request.Runtime, MinReplicas: minReplicas, MaxReplicas: maxReplicas, AutoscalingEnabled: autoscalingEnabled}
+	deploymentInput := domain.Deployment{TenantID: principal.TenantID, Name: request.Name, Model: request.Model, Runtime: request.Runtime, ComputeConnectionID: request.ComputeConnectionID, MinReplicas: minReplicas, MaxReplicas: maxReplicas, AutoscalingEnabled: autoscalingEnabled}
 	operationInput := domain.Operation{TenantID: principal.TenantID, Kind: operationKind, IdempotencyKey: key, RequestJSON: string(encoded)}
 	var deployment domain.Deployment
 	var operation domain.Operation
@@ -5167,6 +5201,85 @@ func (a API) computeProviders(w http.ResponseWriter, _ *http.Request) {
 	}
 	sort.SliceStable(providers, func(i, j int) bool { return providers[i].Label < providers[j].Label })
 	writeJSON(w, http.StatusOK, map[string]any{"data": providers})
+}
+
+func computeConnectionResponse(item domain.ComputeConnection) map[string]any {
+	return map[string]any{
+		"id": item.ID, "name": item.Name, "provider": item.Provider, "adapter": item.Adapter,
+		"status": item.Status, "verified_at": item.VerifiedAt, "created_at": item.CreatedAt, "updated_at": item.UpdatedAt,
+	}
+}
+
+func (a API) computeConnections(w http.ResponseWriter, r *http.Request) {
+	if a.ComputeConnections == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"data": []any{}})
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	items, err := a.ComputeConnections.List(r.Context(), actor.TenantID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "compute connections could not be listed")
+		return
+	}
+	data := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		data = append(data, computeConnectionResponse(item))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": data})
+}
+
+func (a API) createComputeConnection(w http.ResponseWriter, r *http.Request) {
+	if a.ComputeConnections == nil {
+		writeError(w, http.StatusServiceUnavailable, "capability_unavailable", "tenant compute credential storage is not configured")
+		return
+	}
+	var request computeconnection.CreateRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "request body must contain exactly one JSON object")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	item, err := a.ComputeConnections.Create(r.Context(), actor.TenantID, request)
+	if errors.Is(err, domain.ErrConflict) {
+		writeError(w, http.StatusConflict, "conflict", err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "verification_failed", err.Error())
+		return
+	}
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "compute_connection.create", ResourceType: "compute_connection", ResourceName: item.ID, Outcome: "succeeded"})
+	writeJSON(w, http.StatusCreated, map[string]any{"connection": computeConnectionResponse(item)})
+}
+
+func (a API) deleteComputeConnection(w http.ResponseWriter, r *http.Request) {
+	if a.ComputeConnections == nil {
+		writeError(w, http.StatusNotFound, "not_found", "compute connection was not found")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	id := r.PathValue("id")
+	err := a.ComputeConnections.Delete(r.Context(), actor.TenantID, id)
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "compute connection was not found")
+		return
+	}
+	if errors.Is(err, domain.ErrConflict) {
+		writeError(w, http.StatusConflict, "connection_in_use", "delete the attached deployment before removing this compute connection")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "compute connection could not be deleted")
+		return
+	}
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "compute_connection.delete", ResourceType: "compute_connection", ResourceName: id, Outcome: "succeeded"})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a API) computeProviderBillingModes(provider ComputeProvider) []string {
@@ -6423,7 +6536,7 @@ func (a API) deleteProviderConnection(w http.ResponseWriter, r *http.Request) {
 }
 
 func deploymentResponse(row domain.Deployment) map[string]any {
-	return map[string]any{"id": row.ID, "tenant_id": row.TenantID, "name": row.Name, "model": row.Model, "runtime": row.Runtime, "routing_strategy": row.RoutingStrategy, "desired_state": row.DesiredState, "observed_state": row.ObservedState, "min_replicas": row.MinReplicas, "max_replicas": row.MaxReplicas, "autoscaling_enabled": row.AutoscalingEnabled, "active_revision_id": row.ActiveRevisionID, "candidate_revision_id": row.CandidateRevisionID, "created_at": row.CreatedAt, "updated_at": row.UpdatedAt}
+	return map[string]any{"id": row.ID, "tenant_id": row.TenantID, "name": row.Name, "model": row.Model, "runtime": row.Runtime, "routing_strategy": row.RoutingStrategy, "compute_mode": row.ComputeMode, "compute_connection_id": row.ComputeConnectionID, "desired_state": row.DesiredState, "observed_state": row.ObservedState, "min_replicas": row.MinReplicas, "max_replicas": row.MaxReplicas, "autoscaling_enabled": row.AutoscalingEnabled, "active_revision_id": row.ActiveRevisionID, "candidate_revision_id": row.CandidateRevisionID, "created_at": row.CreatedAt, "updated_at": row.UpdatedAt}
 }
 func targetResponse(row domain.Target) map[string]any {
 	return map[string]any{"id": row.ID, "name": row.Name, "url": row.URL, "provider": row.Provider, "runtime": row.Runtime, "upstream_model": row.UpstreamModel, "health": row.Health, "provider_resource_id": row.ProviderResourceID, "created_at": row.CreatedAt, "updated_at": row.UpdatedAt}

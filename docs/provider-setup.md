@@ -147,10 +147,17 @@ the actual launch or a provider-specific read-only probe supplies evidence.
 
 ## RunPod
 
-Set a scoped `RUNPOD_API_KEY` on the control plane. Native RunPod Pods are the default elastic
-worker path and do not depend on a third-party catalog. Declare a SkyPilot provider manifest only
-when intentionally using its long-tail execution path. Run `infercrane doctor --cloud` before
-provisioning.
+Native RunPod Pods are the qualified self-serve BYOC path. Set
+`INFERCRANE_CREDENTIAL_ENCRYPTION_KEY` and `INFERCRANE_WORKER_CREDENTIAL_KEY` to separate random
+values of at least 32 bytes on the control plane, then create a tenant connection through
+`POST /api/v1/compute/connections` or the dashboard. InferCrane verifies
+the key against RunPod before storing AES-256-GCM ciphertext bound to the tenant and connection
+identity. The plaintext key is write-only and is decrypted only for that tenant's provider call.
+
+`RUNPOD_API_KEY` is different: it is the operator-owned supply credential used only for managed
+InferCrane Cloud capacity. A tenant BYOC deployment never inherits it. Native RunPod Pods do not
+depend on a third-party catalog. Declare a SkyPilot provider manifest only when intentionally using
+its operator-managed long-tail execution path. Run `infercrane doctor --cloud` before provisioning.
 
 For Serverless, create a RunPod vLLM template with `MODEL_NAME`, immutable `MODEL_REVISION`, and `RAW_OPENAI_OUTPUT=1`, then set `INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID`. `infercrane doctor --serverless` reads and validates the template without creating an endpoint.
 

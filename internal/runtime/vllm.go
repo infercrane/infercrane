@@ -21,6 +21,10 @@ type VLLM = OpenAI
 var defaultClient = &http.Client{Transport: &http.Transport{MaxIdleConns: 256, MaxIdleConnsPerHost: 32, IdleConnTimeout: 90 * time.Second}}
 
 func (v OpenAI) Inspect(ctx context.Context, baseURL string) (bool, map[string]struct{}) {
+	return v.InspectWithCredential(ctx, baseURL, v.APIKey)
+}
+
+func (v OpenAI) InspectWithCredential(ctx context.Context, baseURL, credential string) (bool, map[string]struct{}) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	client := v.Client
@@ -38,8 +42,8 @@ func (v OpenAI) Inspect(ctx context.Context, baseURL string) (bool, map[string]s
 		if err != nil {
 			return nil, err
 		}
-		if v.APIKey != "" {
-			req.Header.Set("Authorization", "Bearer "+v.APIKey)
+		if credential != "" {
+			req.Header.Set("Authorization", "Bearer "+credential)
 		}
 		return client.Do(req)
 	}

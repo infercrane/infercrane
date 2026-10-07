@@ -581,6 +581,114 @@
         ],
         "type": "object"
       },
+      "ComputeConnection": {
+        "additionalProperties": false,
+        "properties": {
+          "adapter": {
+            "enum": [
+              "runpod-pods"
+            ],
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "provider": {
+            "enum": [
+              "runpod"
+            ],
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "verified",
+              "revoked"
+            ],
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "verified_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "provider",
+          "adapter",
+          "status",
+          "verified_at",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "ComputeConnectionCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "credential": {
+            "description": "Write-only provider API key. The plaintext value is never returned.",
+            "maxLength": 4096,
+            "minLength": 16,
+            "type": "string",
+            "writeOnly": true
+          },
+          "name": {
+            "description": "Human-readable connection name. It is normalized to lowercase and may contain letters, numbers, dots, underscores, and hyphens.",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "provider": {
+            "const": "runpod",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "provider",
+          "credential"
+        ],
+        "type": "object"
+      },
+      "ComputeConnectionEnvelope": {
+        "additionalProperties": false,
+        "properties": {
+          "connection": {
+            "$ref": "#/components/schemas/ComputeConnection"
+          }
+        },
+        "required": [
+          "connection"
+        ],
+        "type": "object"
+      },
+      "ComputeConnectionList": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ComputeConnection"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "ConsoleIdentityProvisioning": {
         "additionalProperties": false,
         "properties": {
@@ -760,6 +868,12 @@
           "candidate_revision_id": {
             "type": "string"
           },
+          "compute_connection_id": {
+            "type": "string"
+          },
+          "compute_mode": {
+            "type": "string"
+          },
           "endpoint_names": {
             "items": {
               "type": "string"
@@ -807,6 +921,10 @@
             "type": "string"
           },
           "cloud": {
+            "type": "string"
+          },
+          "compute_connection_id": {
+            "description": "Verified tenant-owned compute connection required for provider-account deployments.",
             "type": "string"
           },
           "compute_mode": {
@@ -6978,6 +7096,126 @@
         "summary": "Inspect one reviewed model and its serving profiles",
         "tags": [
           "Model catalog"
+        ]
+      }
+    },
+    "/api/v1/compute/connections": {
+      "get": {
+        "operationId": "listComputeConnections",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComputeConnectionList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List verified tenant-owned compute connections without returning credentials",
+        "tags": [
+          "Compute"
+        ]
+      },
+      "post": {
+        "operationId": "createComputeConnection",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ComputeConnectionCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComputeConnectionEnvelope"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Verify and store a write-only tenant compute credential",
+        "tags": [
+          "Compute"
+        ]
+      }
+    },
+    "/api/v1/compute/connections/{id}": {
+      "delete": {
+        "operationId": "deleteComputeConnection",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Delete an unused tenant compute connection",
+        "tags": [
+          "Compute"
         ]
       }
     },
