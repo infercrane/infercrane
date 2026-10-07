@@ -19,6 +19,7 @@ type Repository interface {
 	CleanupPendingSandboxesForReconciliation(context.Context, int) ([]domain.NativeSandbox, error)
 	UnreservedNativeSandboxesForReconciliation(context.Context, int) ([]domain.NativeSandbox, error)
 	NativeSandbox(context.Context, string, string) (domain.NativeSandbox, error)
+	SetNativeSandboxProviderRefs(context.Context, string, string, string, string, string, string) (domain.NativeSandbox, error)
 	RecordNativeSandboxTransition(context.Context, string, string, string, string, string, string, time.Time) (domain.NativeSandbox, error)
 	SandboxRunningMilliseconds(context.Context, string, string) (int64, error)
 	ReleaseManagedSandboxSpend(context.Context, string, string, string) error
@@ -55,6 +56,11 @@ func (r Reconciler) Once(ctx context.Context) error {
 			observedAt = r.Now().UTC()
 		}
 		for _, row := range orphans {
+			row, err = r.recoverWorkspaceForCleanup(ctx, row)
+			if err != nil {
+				failures = append(failures, fmt.Errorf("sandbox %s/%s: recover cleanup workspace: %w", row.TenantID, row.ID, err))
+				continue
+			}
 			if err = r.cleanup(ctx, row, "unreserved:"+row.ID); err != nil {
 				failures = append(failures, fmt.Errorf("sandbox %s/%s: %w", row.TenantID, row.ID, err))
 				continue
@@ -81,6 +87,27 @@ func (r Reconciler) reconcileUnreserved(ctx context.Context, row domain.NativeSa
 	now := time.Now().UTC()
 	if r.Now != nil {
 		now = r.Now().UTC()
+	}
+	if row.BrezelSandboxID == "" {
+		if row.Status != "creating_workspace" && row.Status != "creating" {
+			return nil
+		}
+		if now.Before(row.CreatedAt.Add(5 * time.Minute)) {
+			return nil
+		}
+		pending, err := r.recordTransition(ctx, row, "cleanup_pending", "workspace_recovery_cleanup_pending", now, "unreserved-provisioning-timeout")
+		if err != nil {
+			return err
+		}
+		pending, err = r.recoverWorkspaceForCleanup(ctx, pending)
+		if err != nil {
+			return err
+		}
+		if err = r.cleanup(ctx, pending, "unreserved:"+row.ID); err != nil {
+			return err
+		}
+		_, err = r.recordTransition(ctx, pending, "deleted", "", now, "unreserved-provisioning-cleanup")
+		return err
 	}
 	observed, observeErr := r.Provider.Get(ctx, row.TenantID, row.BrezelSandboxID)
 	providerAbsent := errors.Is(observeErr, sandboxprovider.ErrNotFound)
@@ -147,6 +174,10 @@ func (r Reconciler) reconcile(ctx context.Context, reservation domain.ManagedSpe
 				return err
 			}
 		}
+		row, err = r.recoverWorkspaceForCleanup(ctx, row)
+		if err != nil {
+			return err
+		}
 		if err = r.cleanup(ctx, row, reservation.ID); err != nil {
 			return err
 		}
@@ -203,6 +234,28 @@ func (r Reconciler) reconcile(ctx context.Context, reservation domain.ManagedSpe
 		return err
 	}
 	return r.Store.SettleManagedSandboxSpend(ctx, row.TenantID, row.ID, runningMilliseconds, "metered active sandbox runtime; provider cleanup confirmed by lifecycle reconciler")
+}
+
+// A controller can stop after Brezel commits CreateWorkspace but before the
+// returned ID reaches InferCrane storage. Replaying the original create key
+// retrieves that same workspace. Persisting the recovered ID while the row is
+// cleanup_pending makes every later retry explicit and prevents a second
+// workspace from being created across controller restarts.
+func (r Reconciler) recoverWorkspaceForCleanup(ctx context.Context, row domain.NativeSandbox) (domain.NativeSandbox, error) {
+	if row.BrezelWorkspaceID != "" || row.BrezelSandboxID != "" {
+		return row, nil
+	}
+	if row.IdempotencyKey == "" {
+		return row, fmt.Errorf("%w: cleanup workspace recovery has no idempotency key", sandboxprovider.ErrInvalid)
+	}
+	mutation, err := r.Provider.CreateWorkspace(ctx, row.TenantID, row.IdempotencyKey+".workspace", row.ID)
+	if err != nil {
+		return row, err
+	}
+	if mutation.Resource.ID == "" {
+		return row, fmt.Errorf("%w: workspace recovery returned no resource identity", sandboxprovider.ErrUpstream)
+	}
+	return r.Store.SetNativeSandboxProviderRefs(ctx, row.TenantID, row.ID, mutation.Resource.ID, "", "cleanup_pending", row.FailureCode)
 }
 
 func (r Reconciler) cleanup(ctx context.Context, row domain.NativeSandbox, reservationID string) error {

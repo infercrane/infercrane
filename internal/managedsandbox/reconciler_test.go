@@ -21,6 +21,8 @@ type memoryRepository struct {
 	released    bool
 	settled     bool
 	settledMS   int64
+	setRefsErr  error
+	setRefsCall int
 }
 
 func (m *memoryRepository) ManagedSandboxesForReconciliation(context.Context, int) ([]domain.ManagedSpendReservation, error) {
@@ -30,10 +32,10 @@ func (m *memoryRepository) ManagedSandboxesForReconciliation(context.Context, in
 	return []domain.ManagedSpendReservation{m.reservation}, nil
 }
 func (m *memoryRepository) CleanupPendingSandboxesForReconciliation(context.Context, int) ([]domain.NativeSandbox, error) {
-	if m.row.Status != "cleanup_pending" || m.reservation.ID != "" {
+	if m.row.Status != "cleanup_pending" || m.reservation.ID != "" || len(m.cleanup) == 0 {
 		return nil, nil
 	}
-	return m.cleanup, nil
+	return []domain.NativeSandbox{m.row}, nil
 }
 func (m *memoryRepository) UnreservedNativeSandboxesForReconciliation(context.Context, int) ([]domain.NativeSandbox, error) {
 	if m.row.Status == "cleanup_pending" || m.row.Status == "deleted" {
@@ -42,6 +44,15 @@ func (m *memoryRepository) UnreservedNativeSandboxesForReconciliation(context.Co
 	return m.unreserved, nil
 }
 func (m *memoryRepository) NativeSandbox(context.Context, string, string) (domain.NativeSandbox, error) {
+	return m.row, nil
+}
+func (m *memoryRepository) SetNativeSandboxProviderRefs(_ context.Context, _, _ string, workspaceID, sandboxID, status, failure string) (domain.NativeSandbox, error) {
+	m.setRefsCall++
+	if m.setRefsErr != nil {
+		return m.row, m.setRefsErr
+	}
+	m.row.BrezelWorkspaceID, m.row.BrezelSandboxID = workspaceID, sandboxID
+	m.row.Status, m.row.FailureCode = status, failure
 	return m.row, nil
 }
 func (m *memoryRepository) RecordNativeSandboxTransition(_ context.Context, _, _, status, failure, operationID, eventType string, occurredAt time.Time) (domain.NativeSandbox, error) {
@@ -89,6 +100,9 @@ type memoryProvider struct {
 	getErr               error
 	deleteSandboxCalls   int
 	deleteWorkspaceCalls int
+	workspace            sandboxprovider.Workspace
+	createWorkspaceErr   error
+	createWorkspaceKeys  []string
 }
 
 func (m *memoryProvider) Capabilities(context.Context, string) (sandboxprovider.Capabilities, error) {
@@ -97,8 +111,9 @@ func (m *memoryProvider) Capabilities(context.Context, string) (sandboxprovider.
 func (m *memoryProvider) List(context.Context, string, bool) ([]sandboxprovider.Sandbox, error) {
 	return nil, nil
 }
-func (m *memoryProvider) CreateWorkspace(context.Context, string, string, string) (sandboxprovider.WorkspaceMutation, error) {
-	return sandboxprovider.WorkspaceMutation{}, nil
+func (m *memoryProvider) CreateWorkspace(_ context.Context, _, key, _ string) (sandboxprovider.WorkspaceMutation, error) {
+	m.createWorkspaceKeys = append(m.createWorkspaceKeys, key)
+	return sandboxprovider.WorkspaceMutation{Resource: m.workspace}, m.createWorkspaceErr
 }
 func (m *memoryProvider) DeleteWorkspace(context.Context, string, string, string) (sandboxprovider.WorkspaceMutation, error) {
 	m.deletedWorkspace = true
@@ -193,6 +208,40 @@ func TestReconcilerRetainsBilledCleanupIntentUntilOwnedWorkspaceIsDeleted(t *tes
 	}
 	if repository.row.Status != "deleted" || provider.deleteWorkspaceCalls != 2 {
 		t.Fatalf("after recovery row=%+v workspace_delete_calls=%d", repository.row, provider.deleteWorkspaceCalls)
+	}
+}
+
+func TestReconcilerRecoversUnpersistedWorkspaceBeforeReleasingHold(t *testing.T) {
+	now := time.Date(2026, 10, 7, 13, 0, 0, 0, time.UTC)
+	repository := &memoryRepository{
+		reservation: domain.ManagedSpendReservation{ID: "reservation-orphan", TenantID: "tenant", ResourceName: "sandbox-orphan", ExpiresAt: now.Add(time.Hour), CreatedAt: now.Add(-10 * time.Minute)},
+		row: domain.NativeSandbox{
+			ID: "sandbox-orphan", TenantID: "tenant", TemplateID: "base", Status: "creating_workspace",
+			IdempotencyKey: "customer-create-key", CreatedAt: now.Add(-10 * time.Minute), BillingStateSince: now.Add(-10 * time.Minute),
+		},
+	}
+	provider := &memoryProvider{
+		workspace:          sandboxprovider.Workspace{ID: "workspace-recovered", State: "ready"},
+		deleteWorkspaceErr: fmt.Errorf("%w: injected delete failure", sandboxprovider.ErrUpstream),
+	}
+	first := Reconciler{Store: repository, Provider: provider, Now: func() time.Time { return now }}
+	if err := first.Once(context.Background()); err == nil {
+		t.Fatal("expected recovered workspace cleanup failure")
+	}
+	if repository.row.Status != "cleanup_pending" || repository.row.BrezelWorkspaceID != "workspace-recovered" || repository.released {
+		t.Fatalf("after recovery row=%+v released=%t", repository.row, repository.released)
+	}
+	if len(provider.createWorkspaceKeys) != 1 || provider.createWorkspaceKeys[0] != "customer-create-key.workspace" {
+		t.Fatalf("workspace recovery keys=%v", provider.createWorkspaceKeys)
+	}
+
+	provider.deleteWorkspaceErr = nil
+	second := Reconciler{Store: repository, Provider: provider, Now: func() time.Time { return now.Add(time.Minute) }}
+	if err := second.Once(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if repository.row.Status != "deleted" || !repository.released || len(provider.createWorkspaceKeys) != 1 || provider.deleteWorkspaceCalls != 2 {
+		t.Fatalf("after retry row=%+v released=%t recovery_calls=%d delete_calls=%d", repository.row, repository.released, len(provider.createWorkspaceKeys), provider.deleteWorkspaceCalls)
 	}
 }
 
@@ -306,5 +355,64 @@ func TestReconcilerRetainsCleanupIntentAcrossRestartAndRepeatedFailure(t *testin
 	}
 	if repository.row.Status != "deleted" || provider.deleteWorkspaceCalls != 3 {
 		t.Fatalf("after recovery row=%+v workspace_delete_calls=%d", repository.row, provider.deleteWorkspaceCalls)
+	}
+}
+
+func TestReconcilerReplaysWorkspaceRecoveryKeyAfterPersistenceFailure(t *testing.T) {
+	now := time.Date(2026, 10, 7, 14, 0, 0, 0, time.UTC)
+	row := domain.NativeSandbox{
+		ID: "sandbox-unpersisted", TenantID: "tenant", TemplateID: "base", Status: "creating_workspace",
+		IdempotencyKey: "workspace-crash-key", CreatedAt: now.Add(-10 * time.Minute), BillingStateSince: now.Add(-10 * time.Minute),
+	}
+	repository := &memoryRepository{
+		row: row, unreserved: []domain.NativeSandbox{row}, cleanup: []domain.NativeSandbox{row},
+		setRefsErr: fmt.Errorf("injected persistence failure"),
+	}
+	provider := &memoryProvider{workspace: sandboxprovider.Workspace{ID: "workspace-stable", State: "ready"}}
+	first := Reconciler{Store: repository, Provider: provider, Now: func() time.Time { return now }}
+	if err := first.Once(context.Background()); err == nil {
+		t.Fatal("expected recovered workspace persistence failure")
+	}
+	if repository.row.Status != "cleanup_pending" || repository.row.BrezelWorkspaceID != "" || provider.deleteWorkspaceCalls != 0 {
+		t.Fatalf("after persistence failure row=%+v delete_calls=%d", repository.row, provider.deleteWorkspaceCalls)
+	}
+
+	// A restarted controller replays exactly the original provider key, so the
+	// provider returns the same workspace instead of allocating another one.
+	repository.setRefsErr = nil
+	provider.deleteWorkspaceErr = fmt.Errorf("%w: injected cleanup retry", sandboxprovider.ErrUpstream)
+	second := Reconciler{Store: repository, Provider: provider, Now: func() time.Time { return now.Add(time.Minute) }}
+	if err := second.Once(context.Background()); err == nil {
+		t.Fatal("expected cleanup retry failure")
+	}
+	if repository.row.BrezelWorkspaceID != "workspace-stable" || repository.row.Status != "cleanup_pending" || provider.deleteWorkspaceCalls != 1 {
+		t.Fatalf("after restart row=%+v delete_calls=%d", repository.row, provider.deleteWorkspaceCalls)
+	}
+	if len(provider.createWorkspaceKeys) != 2 || provider.createWorkspaceKeys[0] != "workspace-crash-key.workspace" || provider.createWorkspaceKeys[1] != provider.createWorkspaceKeys[0] {
+		t.Fatalf("workspace recovery keys=%v", provider.createWorkspaceKeys)
+	}
+
+	provider.deleteWorkspaceErr = nil
+	if err := second.Once(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if repository.row.Status != "deleted" || provider.deleteWorkspaceCalls != 2 || len(provider.createWorkspaceKeys) != 2 {
+		t.Fatalf("after cleanup row=%+v recovery_calls=%d delete_calls=%d", repository.row, len(provider.createWorkspaceKeys), provider.deleteWorkspaceCalls)
+	}
+}
+
+func TestReconcilerLeavesRecentProvisioningAttemptAlone(t *testing.T) {
+	now := time.Date(2026, 10, 7, 15, 0, 0, 0, time.UTC)
+	row := domain.NativeSandbox{
+		ID: "sandbox-inflight", TenantID: "tenant", TemplateID: "base", Status: "creating_workspace",
+		IdempotencyKey: "workspace-inflight-key", CreatedAt: now.Add(-time.Minute), BillingStateSince: now.Add(-time.Minute),
+	}
+	repository := &memoryRepository{row: row, unreserved: []domain.NativeSandbox{row}}
+	provider := &memoryProvider{workspace: sandboxprovider.Workspace{ID: "workspace-must-not-be-recovered", State: "ready"}}
+	if err := (Reconciler{Store: repository, Provider: provider, Now: func() time.Time { return now }}).Once(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if repository.row.Status != "creating_workspace" || len(provider.createWorkspaceKeys) != 0 || provider.deleteWorkspaceCalls != 0 {
+		t.Fatalf("row=%+v recovery_keys=%v delete_calls=%d", repository.row, provider.createWorkspaceKeys, provider.deleteWorkspaceCalls)
 	}
 }

@@ -113,7 +113,7 @@ func TestUnreservedNativeSandboxesForReconciliationFindsLifecycleRows(t *testing
 	if err := s.CreateTenant(ctx, tenant, "Sandbox Reconciliation "+suffix); err != nil {
 		t.Fatal(err)
 	}
-	row, _, err := s.CreateNativeSandbox(ctx, domain.NativeSandbox{
+	lifecycleRow, _, err := s.CreateNativeSandbox(ctx, domain.NativeSandbox{
 		TenantID: tenant, CreatedBy: "tester", DisplayName: "Unreserved lifecycle", Purpose: "blank_computer",
 		SourceType: "empty_workspace", TemplateID: "base", Status: "running", BrezelSandboxID: "provider-" + suffix,
 		IdempotencyKey: "sandbox-unreserved-" + suffix, InputDigest: strings.Repeat("e", 64),
@@ -121,11 +121,23 @@ func TestUnreservedNativeSandboxesForReconciliationFindsLifecycleRows(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	items, err := s.UnreservedNativeSandboxesForReconciliation(ctx, 10)
+	provisioningRow, _, err := s.CreateNativeSandbox(ctx, domain.NativeSandbox{
+		TenantID: tenant, CreatedBy: "tester", DisplayName: "Interrupted workspace", Purpose: "blank_computer",
+		SourceType: "empty_workspace", TemplateID: "base", Status: "creating_workspace",
+		IdempotencyKey: "sandbox-workspace-orphan-" + suffix, InputDigest: strings.Repeat("f", 64),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 1 || items[0].ID != row.ID || items[0].BrezelSandboxID == "" {
+	items, err := s.UnreservedNativeSandboxesForReconciliation(ctx, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := map[string]domain.NativeSandbox{}
+	for _, item := range items {
+		found[item.ID] = item
+	}
+	if found[lifecycleRow.ID].BrezelSandboxID == "" || found[provisioningRow.ID].Status != "creating_workspace" {
 		t.Fatalf("unreserved candidates=%+v", items)
 	}
 }
