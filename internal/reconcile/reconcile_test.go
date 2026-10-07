@@ -109,6 +109,21 @@ func (healthyRuntime) Inspect(context.Context, string) (bool, map[string]struct{
 	return true, map[string]struct{}{"model": {}}
 }
 
+type credentialRuntime struct {
+	credential          string
+	unauthenticatedCall bool
+}
+
+func (r *credentialRuntime) Inspect(context.Context, string) (bool, map[string]struct{}) {
+	r.unauthenticatedCall = true
+	return false, nil
+}
+
+func (r *credentialRuntime) InspectWithCredential(_ context.Context, _ string, credential string) (bool, map[string]struct{}) {
+	r.credential = credential
+	return true, map[string]struct{}{"model": {}}
+}
+
 func testRuntimeBackends(t *testing.T, inspector integration.RuntimeInspector) integration.RuntimeBackends {
 	t.Helper()
 	backends, err := integration.NewRuntimeBackends(integration.RuntimeBackend{
@@ -208,6 +223,30 @@ func TestRouteWorkerAPIKeyFailsClosedForTenantCompute(t *testing.T) {
 	deployment.ComputeConnectionID = ""
 	if got := routeWorkerAPIKey(deployment, []domain.Target{legacy}, "global-key", derive); got != "global-key" {
 		t.Fatalf("legacy managed route key=%q", got)
+	}
+}
+
+func TestTenantComputeHealthProbeUsesDerivedWorkerCredential(t *testing.T) {
+	deployment := domain.Deployment{ID: "deployment", TenantID: "tenant-1", ComputeConnectionID: "connection-1"}
+	target := domain.Target{URL: "https://worker.example", ProviderDetails: `{"worker_credential_version":"tenant-hmac-v1"}`}
+	inspector := &credentialRuntime{}
+	ok, models := inspectRuntimeTarget(context.Background(), inspector, deployment, target, "global-key", func(tenant, deploymentID, version string) string {
+		if tenant != "tenant-1" || deploymentID != "deployment" || version != "tenant-hmac-v1" {
+			t.Fatalf("unexpected derivation input: %q %q %q", tenant, deploymentID, version)
+		}
+		return "tenant-worker-key"
+	})
+	if !ok || inspector.credential != "tenant-worker-key" || inspector.unauthenticatedCall || len(models) != 1 {
+		t.Fatalf("ok=%t credential=%q unauthenticated=%t models=%v", ok, inspector.credential, inspector.unauthenticatedCall, models)
+	}
+}
+
+func TestTenantComputeHealthProbeFailsClosedWithoutCredentialEvidence(t *testing.T) {
+	deployment := domain.Deployment{ID: "deployment", TenantID: "tenant-1", ComputeConnectionID: "connection-1"}
+	inspector := &credentialRuntime{}
+	ok, _ := inspectRuntimeTarget(context.Background(), inspector, deployment, domain.Target{URL: "https://worker.example"}, "global-key", nil)
+	if ok || inspector.credential != "" || inspector.unauthenticatedCall {
+		t.Fatalf("ok=%t credential=%q unauthenticated=%t", ok, inspector.credential, inspector.unauthenticatedCall)
 	}
 }
 

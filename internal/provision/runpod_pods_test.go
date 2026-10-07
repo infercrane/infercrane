@@ -3,6 +3,7 @@ package provision
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -116,6 +117,22 @@ func TestRunPodPodsRejectsConflictingAdoptionAndRedactsErrors(t *testing.T) {
 	_, err := provider.EnsureReplica(context.Background(), ReplicaSpec{ExternalKey: "key", Model: "org/model", Cloud: "runpod", GPU: "H200", GPUCount: 4, Workload: testRunPodWorkload()})
 	if err == nil || !strings.Contains(err.Error(), "immutable workload intent") || strings.Contains(err.Error(), "provider-secret") {
 		t.Fatalf("unsafe conflict error: %v", err)
+	}
+}
+
+func TestRunPodPodsClassifiesSchemaRejectionAsInvalidSpec(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_ = json.NewEncoder(w).Encode([]runPodRecord{})
+			return
+		}
+		http.Error(w, `{"error":"request body does not meet schema"}`, http.StatusBadRequest)
+	}))
+	defer server.Close()
+	provider := RunPodPods{APIKey: "provider-secret", WorkerAPIKey: "worker-secret", BaseURL: server.URL, Client: server.Client()}
+	_, err := provider.EnsureReplica(context.Background(), ReplicaSpec{ExternalKey: "key", Model: "org/model", Cloud: "runpod", GPU: "unsupported", GPUCount: 1, Workload: testRunPodWorkload()})
+	if err == nil || !errors.Is(err, ErrInvalidReplicaSpec) || errors.Is(err, ErrRequestFailed) {
+		t.Fatalf("schema rejection classification: %v", err)
 	}
 }
 
