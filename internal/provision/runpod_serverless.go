@@ -118,8 +118,8 @@ func (r RunPodServerless) EnsureEndpoint(ctx context.Context, spec ServerlessEnd
 		"idleTimeout": 5, "scalerType": "QUEUE_DELAY", "scalerValue": 4,
 		"flashboot": true,
 	}
-	if spec.Region != "" {
-		body["dataCenterIds"] = []string{spec.Region}
+	if dataCenterID := runPodDataCenterConstraint(spec.Region); dataCenterID != "" {
+		body["dataCenterIds"] = []string{dataCenterID}
 	}
 	var endpoint ServerlessEndpoint
 	if err = r.do(ctx, http.MethodPost, "/endpoints", body, &endpoint); err != nil {
@@ -255,7 +255,7 @@ type providerHTTPError struct {
 }
 
 func (e *providerHTTPError) Error() string {
-	return fmt.Sprintf("RunPod API returned HTTP %d: %s", e.Status, e.Body)
+	return fmt.Sprintf("RunPod API request failed (HTTP %d)", e.Status)
 }
 
 func (r RunPodServerless) do(ctx context.Context, method, path string, body, output any) error {

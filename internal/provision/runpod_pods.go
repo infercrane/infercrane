@@ -152,7 +152,7 @@ func (r RunPodPods) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provid
 		"ports": []string{strconv.Itoa(spec.Workload.Port) + "/http"},
 		"env":   environment,
 	}
-	dataCenterID := strings.TrimSpace(spec.Region)
+	dataCenterID := runPodDataCenterConstraint(spec.Region)
 	if volume.ID != "" {
 		body["networkVolumeId"] = volume.ID
 		body["volumeMountPath"] = "/workspace"
@@ -352,20 +352,20 @@ func (r RunPodPods) do(ctx context.Context, method, path string, body, output an
 		message := safeRunPodDiagnostic(string(payload), r.APIKey)
 		switch response.StatusCode {
 		case http.StatusUnauthorized, http.StatusForbidden:
-			return fmt.Errorf("%w: RunPod Pod API returned HTTP %d: %s", ErrProviderAuthorization, response.StatusCode, message)
+			return fmt.Errorf("%w: RunPod rejected the provider credential (HTTP %d)", ErrProviderAuthorization, response.StatusCode)
 		case http.StatusBadRequest, http.StatusUnprocessableEntity:
 			// RunPod uses these responses for request-schema and immutable
 			// launch-tuple errors. Retrying the same durable intent cannot heal
 			// either condition and can keep a customer operation alive for its
 			// entire retry budget without ever creating capacity.
-			return fmt.Errorf("%w: RunPod Pod API returned HTTP %d: %s", ErrInvalidReplicaSpec, response.StatusCode, message)
+			return fmt.Errorf("%w: RunPod rejected the Pod specification (HTTP %d)", ErrInvalidReplicaSpec, response.StatusCode)
 		case http.StatusConflict, http.StatusTooManyRequests:
-			return fmt.Errorf("%w: RunPod Pod API returned HTTP %d: %s", ErrProviderCapacity, response.StatusCode, message)
+			return fmt.Errorf("%w: RunPod could not allocate the requested Pod (HTTP %d)", ErrProviderCapacity, response.StatusCode)
 		default:
 			if strings.Contains(strings.ToLower(message), "capacity") || strings.Contains(strings.ToLower(message), "stock") {
-				return fmt.Errorf("%w: RunPod Pod API returned HTTP %d: %s", ErrProviderCapacity, response.StatusCode, message)
+				return fmt.Errorf("%w: RunPod could not allocate the requested Pod (HTTP %d)", ErrProviderCapacity, response.StatusCode)
 			}
-			return fmt.Errorf("%w: RunPod Pod API returned HTTP %d: %s", ErrRequestFailed, response.StatusCode, message)
+			return fmt.Errorf("%w: RunPod Pod API request failed (HTTP %d)", ErrRequestFailed, response.StatusCode)
 		}
 	}
 	if output != nil && len(bytes.TrimSpace(payload)) > 0 {
@@ -408,7 +408,8 @@ func validateRunPodIntent(pod runPodRecord, spec ReplicaSpec, command []string, 
 	if actualDataCenterID == "" && pod.NetworkVolume != nil {
 		actualDataCenterID = pod.NetworkVolume.DataCenterID
 	}
-	regionMismatch := spec.Region != "" && actualDataCenterID != "" && actualDataCenterID != spec.Region
+	requestedDataCenterID := runPodDataCenterConstraint(spec.Region)
+	regionMismatch := requestedDataCenterID != "" && actualDataCenterID != "" && actualDataCenterID != requestedDataCenterID
 	if image != spec.Workload.Image || pod.GPUCount != spec.GPUCount || (actualGPU != "" && actualGPU != RunPodGPUTypeID(spec.GPU)) || credentialMismatch || secretMismatch || actualVolumeID != volumeID || regionMismatch || !equalStrings(pod.DockerEntrypoint, command[:1]) || !equalStrings(pod.DockerStartCmd, command[1:]) {
 		return fmt.Errorf("%w: existing RunPod Pod does not match immutable workload intent", ErrInvalidReplicaSpec)
 	}
@@ -460,8 +461,9 @@ func (r RunPodPods) verifyNetworkVolume(ctx context.Context, identity, volumeID,
 		if volume.Name != expectedName || volume.Size < 1 || volume.DataCenterID == "" {
 			return runPodNetworkVolume{}, fmt.Errorf("%w: RunPod network volume %s must be named %q, have positive size, and declare a data center", ErrInvalidReplicaSpec, volumeID, expectedName)
 		}
-		if region != "" && region != volume.DataCenterID {
-			return runPodNetworkVolume{}, fmt.Errorf("%w: RunPod network volume %s is in %s, not requested region %s", ErrInvalidReplicaSpec, volumeID, volume.DataCenterID, region)
+		requestedDataCenterID := runPodDataCenterConstraint(region)
+		if requestedDataCenterID != "" && requestedDataCenterID != volume.DataCenterID {
+			return runPodNetworkVolume{}, fmt.Errorf("%w: RunPod network volume %s is in %s, not requested region %s", ErrInvalidReplicaSpec, volumeID, volume.DataCenterID, requestedDataCenterID)
 		}
 		return volume, nil
 	}

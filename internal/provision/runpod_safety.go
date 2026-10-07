@@ -21,3 +21,15 @@ func safeRunPodDiagnostic(message, apiKey string) string {
 	}
 	return message
 }
+
+// runPodDataCenterConstraint translates InferCrane's logical placement into
+// RunPod's concrete datacenter constraint. "global" means the provider may
+// choose any available datacenter; sending it as a literal dataCenterIds value
+// is rejected by RunPod's REST schema.
+func runPodDataCenterConstraint(region string) string {
+	region = strings.TrimSpace(region)
+	if strings.EqualFold(region, "global") {
+		return ""
+	}
+	return region
+}

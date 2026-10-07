@@ -29,7 +29,7 @@ func TestRunPodServerlessEnsureIsReplaySafeAndScaleToZeroNative(t *testing.T) {
 			creates++
 			var request map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&request)
-			if request["workersMin"] != float64(0) || request["workersMax"] != float64(4) || request["templateId"] != "template-qwen" || request["minCudaVersion"] != "13.0" {
+			if request["workersMin"] != float64(0) || request["workersMax"] != float64(4) || request["templateId"] != "template-qwen" || request["minCudaVersion"] != "13.0" || request["dataCenterIds"] != nil {
 				t.Fatalf("request=%#v", request)
 			}
 			endpoint := ServerlessEndpoint{ID: "endpoint-1", Name: request["name"].(string), TemplateID: "template-qwen", GPUTypeIDs: []string{"NVIDIA L40S"}, WorkersMin: 0, WorkersMax: 4}
@@ -42,7 +42,7 @@ func TestRunPodServerlessEnsureIsReplaySafeAndScaleToZeroNative(t *testing.T) {
 	defer server.Close()
 
 	provider := RunPodServerless{APIKey: "secret", BaseURL: server.URL, TemplateID: "template-qwen", Client: server.Client()}
-	spec := ServerlessEndpointSpec{ExternalKey: "deployment-1-rev-1", Model: "Qwen/Qwen3-8B", ModelRevision: "0123456789abcdef", GPU: "L40S", WorkersMax: 4}
+	spec := ServerlessEndpointSpec{ExternalKey: "deployment-1-rev-1", Model: "Qwen/Qwen3-8B", ModelRevision: "0123456789abcdef", GPU: "L40S", Region: "global", WorkersMax: 4}
 	first, err := provider.EnsureEndpoint(context.Background(), spec)
 	if err != nil || first.ID != "endpoint-1" || first.WorkersMin != 0 {
 		t.Fatalf("first=%+v err=%v", first, err)
@@ -105,7 +105,7 @@ func TestRunPodServerlessRedactsAndBoundsProviderErrorBody(t *testing.T) {
 	}))
 	defer server.Close()
 	err := (RunPodServerless{APIKey: "secret", BaseURL: server.URL, Client: server.Client()}).DeleteEndpoint(context.Background(), "endpoint")
-	if err == nil || strings.Contains(err.Error(), "secret") || len(err.Error()) > 5000 {
+	if err == nil || strings.Contains(err.Error(), "secret") || strings.Contains(err.Error(), "diagnostic") || err.Error() != "RunPod API request failed (HTTP 502)" {
 		t.Fatalf("unsafe provider error length=%d err=%v", len(err.Error()), err)
 	}
 }
