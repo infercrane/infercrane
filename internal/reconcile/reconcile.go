@@ -320,7 +320,8 @@ func (r *Reconciler) Once(ctx context.Context) error {
 			}
 			sort.Strings(workers)
 			candidateID := routerProcessID(d.ID, next)
-			endpoint, e := r.Router.Start(ctx, router.Spec{DeploymentID: d.ID, ProcessID: candidateID, Model: d.Model, Workers: workers, Strategy: d.RoutingStrategy, Host: "127.0.0.1", Port: routerGenerationPort(r.RouterStartPort, d.ID, next)})
+			workerAPIKey := routeWorkerAPIKey(d, healthy, r.RouterAPIKey, r.WorkerCredential)
+			endpoint, e := r.Router.Start(ctx, router.Spec{DeploymentID: d.ID, ProcessID: candidateID, Model: d.Model, Workers: workers, Strategy: d.RoutingStrategy, Host: "127.0.0.1", Port: routerGenerationPort(r.RouterStartPort, d.ID, next), WorkerAPIKey: workerAPIKey})
 			if e != nil {
 				_ = r.Store.Event(ctx, d.ID, "", "router_failed", e.Error(), "")
 				_ = r.Store.SetDeploymentState(ctx, d.ID, "degraded")

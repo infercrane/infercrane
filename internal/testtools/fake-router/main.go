@@ -20,6 +20,7 @@ func main() {
 	flag.Var(&workers, "worker-urls", "workers")
 	flag.String("policy", "round_robin", "policy")
 	flag.String("api-key", "", "key")
+	flag.Int("worker-startup-check-interval", 1, "worker startup check interval")
 	flag.String("retry-max-retries", "1", "retries")
 	// Match the production router's process contract. The fake does not expose
 	// Prometheus metrics, but accepting the isolated metrics port lets lifecycle
