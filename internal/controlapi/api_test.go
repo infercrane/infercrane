@@ -97,6 +97,7 @@ type fakeSandboxProvider struct {
 	tenant               string
 	workspaceCreates     int
 	sandboxCreates       int
+	sandboxDeletes       int
 	workspaceDeletes     int
 	commandCalls         int
 	fileData             []byte
@@ -168,6 +169,7 @@ func (f *fakeSandboxProvider) Resume(_ context.Context, tenant, id, key string) 
 	return sandboxprovider.Mutation{Resource: sandboxprovider.Sandbox{ID: id, Provider: "brezel", State: "running"}}, nil
 }
 func (f *fakeSandboxProvider) Delete(_ context.Context, tenant, id, key string) (sandboxprovider.Mutation, error) {
+	f.sandboxDeletes++
 	f.tenant, f.key = tenant, key
 	if f.deleteErr != nil {
 		return sandboxprovider.Mutation{}, f.deleteErr
@@ -4165,6 +4167,45 @@ func TestManagedSandboxCreateRequiresCreditBeforeProviderEffects(t *testing.T) {
 	(API{Store: store, APIKey: "secret", SandboxProvider: provider, SandboxBilling: policy}).Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusPaymentRequired || provider.workspaceCreates != 0 || provider.sandboxCreates != 0 || len(store.nativeSandboxes) != 1 || store.nativeSandboxes[0].FailureCode != "payment_required" {
 		t.Fatalf("response=%d %s provider=%+v rows=%+v", response.Code, response.Body.String(), provider, store.nativeSandboxes)
+	}
+}
+
+func TestFailedUnprovisionedSandboxCanBeDeletedWithoutProviderEffects(t *testing.T) {
+	stamp := time.Now().UTC()
+	store := &fakeStore{nativeSandboxes: []domain.NativeSandbox{{
+		ID: "computer-1", TenantID: "global", DisplayName: "Unfunded", Purpose: "blank_computer",
+		SourceType: "empty_workspace", TemplateID: "base", Status: "failed", FailureCode: "payment_required",
+		CreatedAt: stamp, UpdatedAt: stamp, LastActiveAt: stamp, BillingStateSince: stamp,
+	}}}
+	provider := &fakeSandboxProvider{}
+	policy := managedbilling.SandboxPolicy{Enabled: true, SupplierHourlyMicrousd: 180_000, ActiveHourlyMicrousd: 300_000}
+	request := httptest.NewRequest(http.MethodDelete, "/api/v1/sandboxes/computer-1", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Idempotency-Key", "delete-unprovisioned-sandbox")
+	response := httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret", SandboxProvider: provider, SandboxBilling: policy}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted || store.nativeSandboxes[0].Status != "deleted" || store.nativeSandboxes[0].DeletedAt == nil || !store.sandboxReleased || provider.sandboxDeletes != 0 || provider.workspaceDeletes != 0 || !strings.Contains(response.Body.String(), `"billing_status":"released"`) {
+		t.Fatalf("response=%d %s row=%+v released=%t provider=%+v", response.Code, response.Body.String(), store.nativeSandboxes[0], store.sandboxReleased, provider)
+	}
+}
+
+func TestUnprovisionedSandboxDeleteKeepsWorkspaceCleanupRetryable(t *testing.T) {
+	stamp := time.Now().UTC()
+	store := &fakeStore{nativeSandboxes: []domain.NativeSandbox{{
+		ID: "computer-1", TenantID: "global", DisplayName: "Partial", Purpose: "blank_computer",
+		SourceType: "empty_workspace", TemplateID: "base", BrezelWorkspaceID: "workspace-1",
+		Status: "failed", FailureCode: "sandbox_create_failed", CreatedAt: stamp, UpdatedAt: stamp,
+		LastActiveAt: stamp, BillingStateSince: stamp,
+	}}}
+	provider := &fakeSandboxProvider{deleteWorkspaceError: sandboxprovider.ErrUpstream}
+	policy := managedbilling.SandboxPolicy{Enabled: true, SupplierHourlyMicrousd: 180_000, ActiveHourlyMicrousd: 300_000}
+	request := httptest.NewRequest(http.MethodDelete, "/api/v1/sandboxes/computer-1", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Idempotency-Key", "delete-partial-sandbox")
+	response := httptest.NewRecorder()
+	(API{Store: store, APIKey: "secret", SandboxProvider: provider, SandboxBilling: policy}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted || store.nativeSandboxes[0].Status != "cleanup_pending" || store.nativeSandboxes[0].DeletedAt != nil || store.sandboxReleased || provider.sandboxDeletes != 0 || provider.workspaceDeletes != 1 || !strings.Contains(response.Body.String(), `"billing_status":"pending_reconciliation"`) {
+		t.Fatalf("response=%d %s row=%+v released=%t provider=%+v", response.Code, response.Body.String(), store.nativeSandboxes[0], store.sandboxReleased, provider)
 	}
 }
 
