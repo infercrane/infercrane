@@ -507,6 +507,10 @@ func (a API) mutateSandboxLifecycle(w http.ResponseWriter, r *http.Request, acti
 		return
 	}
 	if row.BrezelSandboxID == "" {
+		if action == "delete" {
+			a.deleteUnprovisionedSandbox(w, r, store, row, actor, key)
+			return
+		}
 		writeError(w, http.StatusConflict, "sandbox_incomplete", "this sandbox has not finished provisioning")
 		return
 	}
@@ -555,6 +559,50 @@ func (a API) mutateSandboxLifecycle(w http.ResponseWriter, r *http.Request, acti
 			}
 			if usageErr == nil {
 				response["billing_status"] = "settled"
+			}
+		}
+	}
+	writeJSON(w, http.StatusAccepted, response)
+}
+
+// deleteUnprovisionedSandbox removes a customer-visible record whose provider
+// sandbox was never created. Creation writes the durable identity before
+// billing and provider effects so failures remain auditable; that record must
+// still be deletable when credit authorization or provisioning fails.
+func (a API) deleteUnprovisionedSandbox(w http.ResponseWriter, r *http.Request, store sandboxProductStore, row domain.NativeSandbox, actor domain.Principal, key string) {
+	status := "deleted"
+	failure := ""
+	if row.BrezelWorkspaceID != "" {
+		if _, err := a.SandboxProvider.DeleteWorkspace(r.Context(), actor.TenantID, row.BrezelWorkspaceID, key+".workspace"); err != nil && !errors.Is(err, sandboxprovider.ErrNotFound) {
+			status = "cleanup_pending"
+			failure = "workspace_cleanup_pending"
+		}
+	}
+
+	updated, err := store.RecordNativeSandboxTransition(
+		context.WithoutCancel(r.Context()),
+		actor.TenantID,
+		row.ID,
+		status,
+		failure,
+		key+".provider-not-created",
+		"sandbox.delete",
+		time.Now().UTC(),
+	)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "sandbox_tracking_failed", "sandbox state could not be recorded")
+		return
+	}
+
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "sandbox.delete", ResourceType: "sandbox", ResourceName: row.ID, Outcome: "accepted"})
+	response := nativeSandboxResponse(updated, nil)
+	if a.SandboxBilling.Enabled {
+		response["billing_status"] = "pending_reconciliation"
+		if status == "deleted" {
+			if billing, ok := a.Store.(sandboxBillingStore); ok {
+				if releaseErr := billing.ReleaseManagedSandboxSpend(context.WithoutCancel(r.Context()), actor.TenantID, row.ID, "unprovisioned sandbox deletion confirmed before compute activation"); releaseErr == nil {
+					response["billing_status"] = "released"
+				}
 			}
 		}
 	}
