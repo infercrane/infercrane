@@ -1,0 +1,190 @@
+{
+  "data": [
+    {
+      "schema_version": "2.5",
+      "id": "infercrane/commerce-1",
+      "name": "InferCrane: Commerce-1",
+      "hugging_face_id": "infercrane/Commerce-1",
+      "created": 1791331200,
+      "quantization": "bf16",
+      "tokenizer": "Qwen",
+      "description": "InferCrane's first-party 27B decision model for agentic commerce. It scores supplied actions directly and returns typed answers with per-option probabilities and zero generated tokens. Staged for a directly operated EU deployment; not yet accepting OpenRouter traffic.",
+      "input_modalities": [
+        {
+          "type": "text",
+          "supported_inputs": {
+            "max_context_length": {
+              "value": 65536,
+              "unit": "token"
+            }
+          }
+        }
+      ],
+      "output_modalities": [
+        {
+          "type": "text",
+          "streaming": true,
+          "supported_parameters": {
+            "response_format": {
+              "type": "boolean"
+            },
+            "structured_outputs": {
+              "type": "boolean"
+            }
+          }
+        }
+      ],
+      "is_ready": false,
+      "is_free": false,
+      "openrouter": {
+        "slug": "infercrane/commerce-1"
+      }
+    },
+    {
+      "schema_version": "2.5",
+      "id": "qwen/qwen3.8-27b",
+      "name": "Qwen: Qwen3.8 27B",
+      "hugging_face_id": "Qwen/Qwen3.8-27B-FP8",
+      "created": 1786665600,
+      "quantization": "fp8",
+      "tokenizer": "Qwen",
+      "description": "Qwen3.8 27B capacity planned for direct operation by InferCrane in the EU. Staged and not yet accepting OpenRouter traffic.",
+      "input_modalities": [
+        {
+          "type": "text",
+          "supported_inputs": {
+            "max_context_length": {
+              "value": 32768,
+              "unit": "token"
+            }
+          }
+        }
+      ],
+      "output_modalities": [
+        {
+          "type": "text",
+          "max_length": {
+            "value": 2048,
+            "unit": "token"
+          },
+          "streaming": true,
+          "supported_parameters": {
+            "temperature": {
+              "type": "range",
+              "min": 0,
+              "max": 2
+            },
+            "max_tokens": {
+              "type": "integer",
+              "min": 1,
+              "max": 2048,
+              "unit": "token"
+            },
+            "tools": {
+              "type": "boolean"
+            },
+            "structured_outputs": {
+              "type": "boolean"
+            },
+            "reasoning": {
+              "type": "boolean"
+            }
+          }
+        }
+      ],
+      "is_ready": false,
+      "is_free": false,
+      "openrouter": {
+        "slug": "qwen/qwen3.8-27b"
+      }
+    },
+    {
+      "schema_version": "2.5",
+      "id": "z-ai/glm-5.3",
+      "name": "Z.ai: GLM 5.3",
+      "hugging_face_id": "zai-org/GLM-5.3",
+      "created": 1787011200,
+      "quantization": "fp8",
+      "tokenizer": "GLM",
+      "description": "GLM 5.3 capacity planned for direct operation by InferCrane in the EU. Staged and not yet accepting OpenRouter traffic.",
+      "input_modalities": [
+        {
+          "type": "text"
+        }
+      ],
+      "output_modalities": [
+        {
+          "type": "text",
+          "streaming": true,
+          "supported_parameters": {
+            "max_tokens": {
+              "type": "integer",
+              "min": 1
+            },
+            "tools": {
+              "type": "boolean"
+            },
+            "structured_outputs": {
+              "type": "boolean"
+            },
+            "reasoning": {
+              "type": "boolean"
+            }
+          }
+        }
+      ],
+      "is_ready": false,
+      "is_free": false,
+      "openrouter": {
+        "slug": "z-ai/glm-5.3"
+      }
+    },
+    {
+      "schema_version": "2.5",
+      "id": "z-ai/glm-5.3-flash",
+      "name": "Z.ai: GLM 5.3 Flash",
+      "hugging_face_id": "zai-org/GLM-5.3-Flash",
+      "created": 1787011200,
+      "quantization": "fp8",
+      "tokenizer": "GLM",
+      "description": "GLM 5.3 Flash capacity planned for direct operation by InferCrane in the EU. Staged and not yet accepting OpenRouter traffic.",
+      "input_modalities": [
+        {
+          "type": "text"
+        },
+        {
+          "type": "image"
+        },
+        {
+          "type": "video"
+        }
+      ],
+      "output_modalities": [
+        {
+          "type": "text",
+          "streaming": true,
+          "supported_parameters": {
+            "max_tokens": {
+              "type": "integer",
+              "min": 1
+            },
+            "tools": {
+              "type": "boolean"
+            },
+            "structured_outputs": {
+              "type": "boolean"
+            },
+            "reasoning": {
+              "type": "boolean"
+            }
+          }
+        }
+      ],
+      "is_ready": false,
+      "is_free": false,
+      "openrouter": {
+        "slug": "z-ai/glm-5.3-flash"
+      }
+    }
+  ]
+}

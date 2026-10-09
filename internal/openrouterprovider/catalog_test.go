@@ -31,6 +31,9 @@ func TestCatalogValidationAndHandler(t *testing.T) {
 	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"schema_version":"2.5"`) {
 		t.Fatalf("unexpected response: %d %s", recorder.Code, recorder.Body.String())
 	}
+	if cacheControl := recorder.Header().Get("Cache-Control"); !strings.HasPrefix(cacheControl, "public") {
+		t.Fatalf("provider discovery catalog must be publicly cacheable, got %q", cacheControl)
+	}
 }
 
 func TestCatalogRejectsFloatOrNegativePrices(t *testing.T) {
@@ -109,6 +112,32 @@ func TestStagedQwenCatalogMatchesLaunchBoundary(t *testing.T) {
 	}
 	if model.Compliance == nil || !model.Compliance.ZDR || model.Compliance.HIPAA {
 		t.Fatalf("unexpected staged compliance declaration: %+v", model.Compliance)
+	}
+}
+
+func TestProviderCatalogStagesDeclaredModelLineup(t *testing.T) {
+	catalog, err := Load(filepath.Join("..", "..", "deploy", "openrouter", "provider-models.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{
+		"infercrane/commerce-1": false,
+		"qwen/qwen3.8-27b":      false,
+		"z-ai/glm-5.3":          false,
+		"z-ai/glm-5.3-flash":    false,
+	}
+	for _, model := range catalog.Data {
+		ready, expected := want[model.ID]
+		if !expected {
+			t.Fatalf("unexpected model %q in provider catalog", model.ID)
+		}
+		if model.IsReady != ready {
+			t.Fatalf("model %q readiness=%v, want %v", model.ID, model.IsReady, ready)
+		}
+		delete(want, model.ID)
+	}
+	if len(want) != 0 {
+		t.Fatalf("provider catalog is missing models: %+v", want)
 	}
 }
 

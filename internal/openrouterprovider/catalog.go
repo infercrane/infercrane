@@ -242,7 +242,7 @@ func validateCapacity(model string, capacities []Capacity) error {
 
 func (c Catalog) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "private, max-age=30")
+	w.Header().Set("Cache-Control", "public, max-age=60, stale-while-revalidate=300")
 	_ = json.NewEncoder(w).Encode(c)
 }
 

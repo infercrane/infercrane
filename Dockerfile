@@ -23,7 +23,7 @@ RUN --mount=type=cache,target=/go/pkg/mod ./scripts/generate-go-license-bundle.s
 FROM scratch AS openrouter-edge
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=builder /out/infercrane-openrouter-edge /infercrane-openrouter-edge
-COPY deploy/openrouter/qwen38-provider-models.json /etc/infercrane/provider-models.json
+COPY deploy/openrouter/provider-models.json /etc/infercrane/provider-models.json
 USER 65532:65532
 EXPOSE 8080
 ENTRYPOINT ["/infercrane-openrouter-edge"]
@@ -82,7 +82,7 @@ COPY --from=builder /out/infercrane-model-api-production-release /usr/local/bin/
 COPY --from=builder /out/infercrane-model-api-mvp-release /usr/local/bin/infercrane-model-api-mvp-release
 COPY --from=builder /out/infercrane-model-api-renewer /usr/local/bin/infercrane-model-api-renewer
 COPY scripts/entrypoint.sh /usr/local/bin/infercrane-entrypoint
-COPY deploy/openrouter/qwen38-provider-models.json /etc/infercrane/openrouter-provider-models.json
+COPY deploy/openrouter/provider-models.json /etc/infercrane/openrouter-provider-models.json
 COPY LICENSE NOTICE THIRD_PARTY_NOTICES.md packaging/container/THIRD_PARTY_COMPONENTS.md /usr/share/licenses/infercrane/
 COPY packaging/container/licenses /usr/share/licenses/infercrane/runtime-components
 COPY --from=builder /out/licenses/go /usr/share/licenses/infercrane/go

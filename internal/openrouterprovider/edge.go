@@ -105,15 +105,27 @@ func (e *Edge) Handler() (http.Handler, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", e.health)
 	mux.HandleFunc("GET /readyz", e.ready)
-	mux.HandleFunc("GET /models", e.marketplaceAuth(e.models))
-	mux.HandleFunc("GET /v1/models", e.marketplaceAuth(e.models))
-	mux.HandleFunc("GET /openrouter/v1/models", e.marketplaceAuth(e.Catalog.ServeHTTP))
+	// OpenRouter must be able to discover the provider catalog before it has a
+	// provider credential. Requests that do carry a marketplace credential keep
+	// their channel-specific response shape. Inference and billing remain
+	// authenticated below.
+	mux.HandleFunc("GET /models", e.publicModels)
+	mux.HandleFunc("GET /v1/models", e.publicModels)
+	mux.HandleFunc("GET /openrouter/v1/models", e.Catalog.ServeHTTP)
 	mux.HandleFunc("POST /v1/chat/completions", e.marketplaceAuth(e.completions))
 	mux.HandleFunc("POST /v1/billing/requests", e.marketplaceAuth(e.billingRequests))
 	if e.MetricsKey != "" {
 		mux.HandleFunc("GET /metrics", e.metricsAuth(e.metrics))
 	}
 	return mux, nil
+}
+
+func (e *Edge) publicModels(w http.ResponseWriter, r *http.Request) {
+	if strings.TrimSpace(r.Header.Get("Authorization")) == "" {
+		e.Catalog.ServeHTTP(w, r)
+		return
+	}
+	e.marketplaceAuth(e.models)(w, r)
 }
 
 func samePrice(left, right float64) bool {

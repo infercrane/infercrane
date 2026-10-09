@@ -105,10 +105,15 @@ func TestEdgeAuthenticatesRewritesAndStreams(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	publicModels := httptest.NewRecorder()
+	handler.ServeHTTP(publicModels, httptest.NewRequest(http.MethodGet, "/models", nil))
+	if publicModels.Code != http.StatusOK || !strings.Contains(publicModels.Body.String(), "qwen/qwen3.8-27b") || !strings.HasPrefix(publicModels.Header().Get("Cache-Control"), "public") {
+		t.Fatalf("unexpected public models response code=%d cache=%q body=%q", publicModels.Code, publicModels.Header().Get("Cache-Control"), publicModels.Body.String())
+	}
 	unauthorized := httptest.NewRecorder()
-	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/models", nil))
+	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"qwen/qwen3.8-27b","messages":[]}`)))
 	if unauthorized.Code != http.StatusUnauthorized {
-		t.Fatalf("expected unauthorized, got %d", unauthorized.Code)
+		t.Fatalf("expected inference to remain unauthorized, got %d", unauthorized.Code)
 	}
 	modelsRequest := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	modelsRequest.Header.Set("Authorization", "Bearer provider-secret")
