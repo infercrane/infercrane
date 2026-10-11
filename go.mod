@@ -3,14 +3,14 @@ module github.com/infercrane/infercrane
 go 1.26.6
 
 require (
-	charm.land/bubbletea/v2 v2.0.8
+	charm.land/bubbletea/v2 v2.0.10
 	charm.land/lipgloss/v2 v2.0.6
 	github.com/clerk/clerk-sdk-go/v2 v2.7.0
 	github.com/go-jose/go-jose/v3 v3.0.5
-	github.com/jackc/pgx/v5 v5.10.0
-	github.com/modelcontextprotocol/go-sdk v1.7.0
+	github.com/jackc/pgx/v5 v5.11.0
+	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/spf13/cobra v1.10.2
-	github.com/stripe/stripe-go/v86 v86.3.0
+	github.com/stripe/stripe-go/v86 v86.4.2
 	gopkg.in/yaml.v3 v3.0.1
 )
 
