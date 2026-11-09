@@ -280,6 +280,64 @@ workloads, or incomplete metrics produce `inconclusive`; explicit SLO or cost vi
 active-versus-candidate Release Guard and wait for human promotion. The persisted campaign links
 benchmark, quality, Lab, and, where a real baseline exists, Release Guard evidence separately.
 
+## Generate a custom kernel
+
+A custom kernel is a last resort, never a default. Monitoring can suggest which phase to profile
+(`profile_phase` on the optimization readiness response), but only an exact target-GPU profile and
+the Amdahl gate can open the kernel path, and existing implementations are tried first.
+
+Start a run from a complete Accelerator Lab request, which carries its own spend cap and 24-hour
+expiry:
+
+```bash
+infercrane optimize kernel-run --file request.json
+```
+
+When no approved source exists and the request allows generation, the worker runs
+`infercrane-kernel-adapter`:
+
+1. Optional literature search finds recent public research for the measured operator.
+2. A language model with no tools returns one source file for a human-reviewed operator contract.
+3. A static screen rejects obvious non-kernels before any GPU time is spent.
+4. The draft runs in a no-network container against a hidden test suite and the runtime's own kernel.
+5. `kernelresearch` keeps it only if every stage passes and it is materially faster.
+6. An implausibly large speedup must repeat on fresh inputs before it can be kept.
+
+The hidden suite checks shape sweeps, value distributions that defeat hardcoded bypasses, dirty
+memory, determinism, and bitwise batch invariance. A retained kernel still has to pass the Brezel
+source build, target-GPU qualification, full serving replay, and explicit human promotion. A search
+that keeps nothing is recorded as `kernel_research_no_winner`, with every attempt preserved.
+
+The adapter profiles and qualifies on one GPU host with Docker and AIPerf:
+
+- **Profile** captures a torch trace of the requested phase, then maps GPU kernels to reviewed
+  operator families. Kernels it cannot classify stay in the denominator and never become hotspots.
+- **Qualify** re-runs the hidden suite on the built bytes, then replays your workload as control,
+  candidate, control on the same GPU. More than 5% control drift invalidates the run. Deterministic
+  prompts must match the control byte for byte.
+
+Serving containers run offline on an internal Docker network, with a read-only model cache and no
+credentials. Only the model download step has internet access. A candidate arm must prove the
+generated kernel was called, because otherwise the result would measure the unmodified runtime.
+
+Set `max_candidates` to at least 2. The planner ranks by device time, and the largest hotspot is
+usually GEMM, which has no reviewed pack yet and is reported as a failed generation.
+
+| Adapter setting | Purpose |
+|---|---|
+| `INFERCRANE_KERNEL_MODEL_URL`, `INFERCRANE_KERNEL_MODEL`, `INFERCRANE_KERNEL_MODEL_TOKEN_FILE` | Any OpenAI-compatible endpoint, including one inside the customer boundary |
+| `INFERCRANE_KERNEL_MODEL_INPUT_USD_PER_M`, `INFERCRANE_KERNEL_MODEL_OUTPUT_USD_PER_M`, `INFERCRANE_KERNEL_GPU_HOURLY_USD` | Prices used to enforce the spend ceiling |
+| `INFERCRANE_KERNEL_PACK_DIR`, `INFERCRANE_KERNEL_EVALUATOR`, `INFERCRANE_KERNEL_EVAL_IMAGE`, `INFERCRANE_KERNEL_EVALUATOR_TIMEOUT` | Reviewed operator packs and the isolated launcher |
+| `INFERCRANE_KERNEL_LITERATURE` | `off` by default, `arxiv`, or an absolute path to a curated reference file |
+| `INFERCRANE_KERNEL_RUNTIMES_FILE`, `INFERCRANE_KERNEL_MODEL_CACHE`, `INFERCRANE_KERNEL_WORK_DIR`, `INFERCRANE_KERNEL_AIPERF` | Reviewed runtime launch data and host paths for profiling and qualification |
+| `INFERCRANE_KERNEL_REPLAY_DIR`, `INFERCRANE_KERNEL_REPLAY_DATASET_TYPE` | Local files named by content digest for the workload replay and quality suite |
+| `INFERCRANE_KERNEL_HF_TOKEN_FILE` | Optional Hub token, used only by the model download step |
+| `INFERCRANE_ACCELERATOR_WORKER_URL`, `INFERCRANE_ACCELERATOR_WORKER_TOKEN_FILE` | Artifact store for retained source |
+
+Research abstracts are shown to the model as untrusted reference data and recorded as provenance.
+They are never performance evidence. The first reviewed pack covers residual-add + RMSNorm in
+Triton; other operators fail closed until a pack exists.
+
 ## Plan an optimized artifact
 
 Builders run outside InferCrane. The common path produces a strict immutable plan:

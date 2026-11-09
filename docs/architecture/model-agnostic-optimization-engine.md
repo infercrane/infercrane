@@ -413,6 +413,7 @@ complete. The current implementation boundary is:
 | Brezel-isolated optimization build jobs and receipts | Implemented and locally qualified | Fixed baked runner, deny-by-default egress, verified input/output artifacts, cleanup and signed receipt; the optimization environment revision must actually contain that runner |
 | TensorRT-LLM, multi-node collectives, expert placement and disaggregated MoE qualification | Executable worker contract | NVIDIA workers may declare these independently; undeclared topology fails before spend, and no real tuple is claimed without evidence |
 | Nsight Systems/Compute, rocprof, XProf and Neuron Explorer capture | Executable worker contract | Capabilities are loaded from the configured worker at startup; built-in schemas are never presented as deployed capacity |
+| Generated kernels with recent-research intake | Implemented; not yet run on a GPU or against a live model | `cmd/infercrane-kernel-adapter`, `internal/kernelgen`, and `internal/kernelliterature` write drafts for reviewed operator packs and keep them only through `kernelresearch`; the first pack is residual-RMSNorm in Triton |
 | Iterative authored-kernel research and KernelBench-style evaluation | Implemented model-neutral state machine and orchestration gates | Profile-bound AutoKernel-style keep/reject loop, five correctness stages, plateau/roofline/time/iteration/cost limits, isolated build, exact-target and serving replay; generator and hardware-worker implementations still need deployment qualification |
 | AMD ROCm, TPU and Trainium compiler/runtime paths | Planner, registry and worker contracts implemented | AITER/CK/Triton-ROCm/HIP, Pallas/XLA, and NKI/Neuron candidates exist; no real-hardware product claim until the corresponding worker passes |
 | Image, video and voice optimization lanes | Typed workload and qualification contracts implemented | Each run requires media shapes, immutable replay, modality quality suite and a worker-declared lane; measured suites remain tuple-specific real-infrastructure work |
@@ -503,9 +504,10 @@ concepts have been absorbed as typed Go policy:
 
 The old Python `CandidateGenerator` was only an interface and the PoC registry
 kept generator adapters blocked until targeted NCU evidence existed. InferCrane
-now has the full typed generation-to-evaluation orchestration, but the actual
-generator model/service and vendor workers must still declare and prove their
-installed capabilities. This is deliberate separation, not duplicate product
+now has the full typed generation-to-evaluation orchestration, and
+`cmd/infercrane-kernel-adapter` plus `internal/kernelgen` supply a generator.
+Each deployment must still declare and prove its model endpoint, evaluator
+image, and vendor workers. This is deliberate separation, not duplicate product
 logic.
 
 ## Kernel registry and search order
@@ -573,9 +575,15 @@ the InferCrane API server.
 - **InferCrane control plane:** workload identity, registry metadata, policy,
   plans, approvals, budget leases, evidence, Release Guard, and audit.
 - **Brezel worker:** isolated source checkout, license/provenance inspection,
-  agent planning, CPU-side compilation and semantic tests, artifact signing,
+  source screening, CPU-side compilation and semantic tests, artifact signing,
   and lifecycle receipts. Network access is deny-by-default and source commits
-  are explicit allowlisted inputs.
+  are explicit allowlisted inputs. The baked entrypoint is
+  `tools/kernel-lab/brezel-runner/run-optimization-job`; it never executes the
+  source it inspects.
+- **Kernel adapter:** runs on the accelerator worker and calls the configured
+  model endpoint. The model has no tools and returns source text only. Drafts
+  execute solely through the isolated evaluator, a no-network container with no
+  credentials, and `kernelresearch` alone decides keep or reject.
 - **GPU worker:** exact-SM build when required, correctness, sanitizers, Nsight,
   microbenchmarks, AIPerf replay, quality tests, and teardown under the campaign
   lease.

@@ -48,3 +48,18 @@ infercrane optimize kernel-plan \
 
 Replace fixture evidence with an exact Nsight Systems/Compute or PyTorch
 profiler capture and add `--require-measured` for a paid GPU campaign.
+
+## Generated kernels
+
+`packs/<operator-family>/` holds the human-reviewed contract (`pack.json`) and
+the hidden evaluator (`evaluate.py`) used by `infercrane-kernel-adapter`. The
+evaluator reports only which stage failed, so its test inputs never reach the
+model. `run-isolated-evaluation.sh` is the reference no-network launcher, and
+`brezel-runner/` is the fixed source-screening entrypoint for Brezel.
+`target-runtimes.json` holds reviewed launch data for profiling and
+qualification. A pack's `integration/` directory routes a serving runtime to the
+kernel, and its `test_integration.py` runs without a GPU.
+
+Add a pack for an operator only after writing its contract and hidden suite by
+hand. Do not let a model write either one. See
+[Generate a custom kernel](../../docs/features/optimization.mdx).

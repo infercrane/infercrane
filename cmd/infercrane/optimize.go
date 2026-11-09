@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -18,6 +21,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/infercrane/infercrane/internal/acceleratorlab"
 	"github.com/infercrane/infercrane/internal/config"
 	"github.com/infercrane/infercrane/internal/curatedrecipe"
 	"github.com/infercrane/infercrane/internal/domain"
@@ -32,6 +36,9 @@ import (
 func optimizeCommand(ctx context.Context, args []string) error {
 	if len(args) > 0 && args[0] == "kernel-plan" {
 		return optimizeKernelPlanCommand(args[1:])
+	}
+	if len(args) > 0 && args[0] == "kernel-run" {
+		return optimizeKernelRunCommand(ctx, args[1:])
 	}
 	if len(args) > 0 && args[0] == "workload-profile" {
 		return optimizeWorkloadProfileCommand(args[1:])
@@ -624,6 +631,53 @@ func fetchPublicModelConfig(ctx context.Context, model, revision string) ([]byte
 		return nil, errors.New("model config exceeds the size limit")
 	}
 	return body, nil
+}
+
+// optimizeKernelRunCommand queues one profile-gated Accelerator Lab run. The
+// request carries its own spend cap and expiry, and the run never promotes.
+func optimizeKernelRunCommand(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("optimize kernel-run", flag.ContinueOnError)
+	file := fs.String("file", "", "Accelerator Lab request JSON")
+	output := fs.String("output", "human", "human or json")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*file) == "" || fs.NArg() != 0 {
+		return errors.New("usage: infercrane optimize kernel-run --file REQUEST.json")
+	}
+	if err := validateOutput(*output); err != nil {
+		return err
+	}
+	body, err := os.ReadFile(*file)
+	if err != nil {
+		return fmt.Errorf("read kernel run request: %w", err)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	var request acceleratorlab.Request
+	if err = decoder.Decode(&request); err != nil {
+		return fmt.Errorf("decode kernel run request: %w", err)
+	}
+	cfg, err := config.LoadClient()
+	if err != nil {
+		return err
+	}
+	var response struct {
+		Operation struct {
+			ID string `json:"id"`
+		} `json:"operation"`
+		InputDigest string `json:"input_digest"`
+	}
+	sum := sha256.Sum256(body)
+	if err = controlJSON(ctx, cfg, http.MethodPost, "/api/v1/optimization/accelerator-lab/runs", "kernel-run-"+hex.EncodeToString(sum[:12]), request, &response); err != nil {
+		return err
+	}
+	if *output == "json" {
+		return printJSON(response)
+	}
+	fmt.Printf("Kernel run queued · operation %s\nInput evidence %s\n", response.Operation.ID, shortID(response.InputDigest))
+	fmt.Printf("Next: infercrane operation watch %s\n", response.Operation.ID)
+	return nil
 }
 
 func optimizeDoctorCommand(ctx context.Context, args []string) error {

@@ -40,6 +40,10 @@ func TestAssessmentDiagnosesServingStageWithoutClaimingKernel(t *testing.T) {
 			if assessment.PrimaryBottleneck != test.expected || assessment.KernelGate.Eligible || assessment.ContentRecorded {
 				t.Fatalf("assessment=%+v", assessment)
 			}
+			wantPhase := map[string]string{"prefill": "prefill", "decode": "decode"}[test.name]
+			if assessment.ProfilePhase != wantPhase {
+				t.Fatalf("phase=%q want %q", assessment.ProfilePhase, wantPhase)
+			}
 		})
 	}
 }
