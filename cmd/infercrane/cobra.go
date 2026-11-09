@@ -108,6 +108,9 @@ var commandExamples = map[string]string{
 	"optimize": `  # One command: use pinned AIConfigurator when available, otherwise safe reviewed candidates
   infercrane optimize propose Qwen/Qwen3-8B --provider aws --region eu-central-1 --gpu L40S --objective interactive
 
+  # Search runtime recipes for any pinned model; detection reads its config.json
+  infercrane optimize propose acme/model --model-revision COMMIT --provider runpod-pods --gpu H200 --objective throughput --search recipes --allow-model-metadata-network
+
   # Check the optional estimator toolchain without provisioning a GPU
   infercrane optimize doctor
 
@@ -474,6 +477,8 @@ func addHelpFlags(command *cobra.Command, name string) {
 		intFlag("limit", 20, "maximum campaigns to list")
 		boolFlag("include-simulated", "include simulated compatibility")
 		boolFlag("allow-model-metadata-network", "allow public model metadata lookup")
+		stringFlag("search", "", "add bounded experiments; supported value: recipes")
+		stringFlag("model-config", "", "pinned model config.json used to detect recipe search preconditions")
 	case "passport":
 		stringFlag("revision", "", "revision ID; defaults to active")
 		stringFlag("file", "", "write the issued passport JSON to a file")
@@ -565,7 +570,7 @@ func completionFor(command string) func(*cobra.Command, []string, string) ([]str
 		"recipes":     {"--limit", "--output"},
 		"models":      {"--output"},
 		"lab":         {"--objective", "--profile", "--max-ttft-p95-ms", "--workload-digest", "--output"},
-		"optimize":    {"--provider", "--region", "--gpu", "--runtimes", "--objective", "--profile", "--source", "--target-concurrency", "--workload-fingerprint", "--aiconfigurator-python", "--allow-model-metadata-network", "--max-ttft-p95-ms", "--max-tpot-p95-ms", "--max-error-rate", "--min-goodput", "--min-output-tokens-second", "--max-hourly-cost", "--include-simulated", "--max-candidates", "--write-dir", "--file", "--idempotency-key", "--target-deployment", "--limit", "--max-cost-usd", "--expires-in", "--candidate", "--output"},
+		"optimize":    {"--provider", "--region", "--gpu", "--runtimes", "--objective", "--profile", "--source", "--target-concurrency", "--workload-fingerprint", "--aiconfigurator-python", "--allow-model-metadata-network", "--search", "--model-config", "--max-ttft-p95-ms", "--max-tpot-p95-ms", "--max-error-rate", "--min-goodput", "--min-output-tokens-second", "--max-hourly-cost", "--include-simulated", "--max-candidates", "--write-dir", "--file", "--idempotency-key", "--target-deployment", "--limit", "--max-cost-usd", "--expires-in", "--candidate", "--output"},
 		"passport":    {"--revision", "--file", "--output"},
 		"recommend":   {"--history", "--output"},
 		"slo":         {"--ttft-p95", "--latency-p95", "--error-rate", "--output-tokens-second", "--hourly-cost", "--output"},

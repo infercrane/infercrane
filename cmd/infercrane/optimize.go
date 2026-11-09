@@ -6,11 +6,13 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -69,7 +71,9 @@ func optimizeCommand(ctx context.Context, args []string) error {
 	workloadFingerprint := fs.String("workload-fingerprint", "", "content-free observed workload fingerprint")
 	sourceName := fs.String("source", "auto", "candidate source: auto, catalog, or aiconfigurator")
 	python := fs.String("aiconfigurator-python", "python3", "Python executable containing aiconfigurator 0.11.0")
-	allowMetadataNetwork := fs.Bool("allow-model-metadata-network", false, "allow the isolated estimator to fetch public model metadata")
+	allowMetadataNetwork := fs.Bool("allow-model-metadata-network", false, "allow fetching public model metadata for the estimator or recipe search")
+	search := fs.String("search", "", "add bounded experiments; supported value: recipes")
+	modelConfig := fs.String("model-config", "", "pinned model config.json used to detect recipe search preconditions")
 	writeDir := fs.String("write-dir", "", "write candidate DeploymentSpecs into a new or empty directory")
 	idempotencyKey := fs.String("idempotency-key", "", "stable safe-retry key for campaign creation")
 	targetDeployment := fs.String("target-deployment", "", "existing deployment to evolve; omit when qualifying a new endpoint")
@@ -111,6 +115,9 @@ func optimizeCommand(ctx context.Context, args []string) error {
 		return fmt.Errorf("load integration inventory: %w", err)
 	}
 	catalog := optimizer.NewCatalogSource(curatedrecipe.All(), registry.Snapshot())
+	if err = applyRecipeSearch(ctx, &request, catalog, *search, *modelConfig, *allowMetadataNetwork); err != nil {
+		return err
+	}
 	proposal, err := optimizationProposal(ctx, request, catalog, *sourceName, *python, *allowMetadataNetwork)
 	if err != nil {
 		return err
@@ -523,7 +530,10 @@ func optimizationProposal(ctx context.Context, request optimizer.Request, catalo
 	if sourceName != "auto" && sourceName != "catalog" && sourceName != "aiconfigurator" {
 		return optimizer.Proposal{}, errors.New("source must be auto, catalog, or aiconfigurator")
 	}
-	if sourceName == "catalog" {
+	if request.Search != "" && sourceName == "aiconfigurator" {
+		return optimizer.Proposal{}, errors.New("recipe search uses the catalog source and cannot be combined with --source aiconfigurator")
+	}
+	if sourceName == "catalog" || request.Search != "" {
 		return catalog.Propose(ctx, request)
 	}
 	estimator := optimizer.AIConfiguratorSource{Catalog: catalog, Runner: optimizer.PythonEstimatorRunner{Python: python, AllowNetwork: allowNetwork}}
@@ -540,6 +550,80 @@ func optimizationProposal(ctx context.Context, request optimizer.Request, catalo
 	}
 	proposal.Warnings = append(proposal.Warnings, "AIConfigurator was unavailable; generated conservative catalog candidates instead (run `infercrane optimize doctor` for setup guidance)")
 	return proposal, nil
+}
+
+var (
+	modelConfigBaseURL   = "https://huggingface.co"
+	publicModelRepoID    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$`)
+	immutableModelCommit = regexp.MustCompile(`^[a-f0-9]{40,64}$`)
+)
+
+const maxFetchedModelConfigBytes = 4 << 20
+
+// applyRecipeSearch records what the pinned model config declares. The network
+// is used only when the operator explicitly allowed metadata lookup.
+func applyRecipeSearch(ctx context.Context, request *optimizer.Request, catalog optimizer.CatalogSource, search, configPath string, allowNetwork bool) error {
+	request.Search = strings.ToLower(strings.TrimSpace(search))
+	if request.Search == "" {
+		if strings.TrimSpace(configPath) != "" {
+			return errors.New("--model-config requires --search recipes")
+		}
+		return nil
+	}
+	var raw []byte
+	var err error
+	switch {
+	case strings.TrimSpace(configPath) != "":
+		if raw, err = os.ReadFile(configPath); err != nil {
+			return fmt.Errorf("read model config: %w", err)
+		}
+	case allowNetwork:
+		model, revision, resolved := catalog.ResolveModel(request.ModelIdentity, strings.ToLower(strings.TrimSpace(request.ModelRevision)))
+		if !resolved {
+			return nil
+		}
+		if raw, err = fetchPublicModelConfig(ctx, model, revision); err != nil {
+			return err
+		}
+	default:
+		return nil
+	}
+	evidence, err := optimizer.InspectModelConfig(raw)
+	if err != nil {
+		return err
+	}
+	request.ModelConfigDigest, request.ModelFeatures = evidence.Digest, evidence.Features
+	return nil
+}
+
+func fetchPublicModelConfig(ctx context.Context, model, revision string) ([]byte, error) {
+	if !publicModelRepoID.MatchString(model) || !immutableModelCommit.MatchString(revision) {
+		return nil, errors.New("model metadata lookup requires an owner/name repository and an immutable commit")
+	}
+	owner, name, _ := strings.Cut(model, "/")
+	address := modelConfigBaseURL + "/" + url.PathEscape(owner) + "/" + url.PathEscape(name) + "/raw/" + revision + "/config.json"
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create model config request: %w", err)
+	}
+	request.Header.Set("User-Agent", "infercrane-cli")
+	client := http.Client{Timeout: 30 * time.Second}
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("fetch model config: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("fetch model config: unexpected status %d", response.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxFetchedModelConfigBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read model config: %w", err)
+	}
+	if len(body) > maxFetchedModelConfigBytes {
+		return nil, errors.New("model config exceeds the size limit")
+	}
+	return body, nil
 }
 
 func optimizeDoctorCommand(ctx context.Context, args []string) error {

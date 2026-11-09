@@ -404,6 +404,7 @@ complete. The current implementation boundary is:
 |---|---|---|
 | Workload identity, replay, SLO/goodput, cost caps, immutable evidence and guarded promotion | Implemented | Control-plane workflow and qualification policy |
 | vLLM and SGLang recipe candidates, cache/precision/scheduler/topology fields | Implemented for bounded candidates | Every exact tuple still needs compatibility and measured qualification |
+| Opt-in runtime recipe search for any pinned model | Implemented for SGLang 0.5.20 on H100, H200, and B200 through pinned-image RunPod Pods | `internal/optimizer/recipe_search.go` gates arms on the pinned `config.json` and workload shape, keeps an untuned control on the same image, and leaves every arm unmeasured; the capability registry's exact-model rule is unchanged |
 | AIPerf load generation and persisted benchmark evidence | Implemented | Requires an installed runner and a reachable exact serving tuple |
 | Profiler-hotspot and Amdahl kernel opportunity planning | Implemented and locally qualified | Accelerator worker `POST /v1/profiles` captures vendor-native evidence; a real worker/toolchain is required for measured claims |
 | Existing-first kernel search across runtime, FlashInfer, CUTLASS/CuTe, Triton and CUDA sources | Implemented as reviewed registry policy | Matches are unmeasured source candidates, never automatic performance claims |

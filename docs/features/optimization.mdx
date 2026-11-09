@@ -98,12 +98,50 @@ infercrane optimize propose acme/novel-open-model \
   --objective throughput
 ```
 
-For an uncataloged model InferCrane creates only an empty-argument vLLM or SGLang baseline. It does
+By default, an uncataloged model gets only an empty-argument vLLM or SGLang baseline. It does
 not infer architecture support, memory fit, tokenizer behavior, licensing, quantization, speculative
 decoding, or kernel compatibility. Those gaps are listed as required evidence. The optional
 AIConfigurator adapter may reduce this generic candidate space, but its output remains modeled and
 unqualified. A mutable branch such as `main` is rejected; the revision must be a 40–64 character
 hexadecimal commit.
+
+### Search runtime recipes for a pinned model
+
+Add `--search recipes` to generate bounded experiments on a pinned runtime image. InferCrane reads
+the model's pinned `config.json` to detect preconditions, so the search does not depend on the model
+name:
+
+```bash
+infercrane optimize propose acme/novel-open-model \
+  --model-revision 0123456789abcdef0123456789abcdef01234567 \
+  --provider runpod-pods --gpu H200 \
+  --objective throughput \
+  --search recipes --allow-model-metadata-network
+```
+
+Pass `--model-config config.json` instead to stay offline. Without either, speculative arms are
+skipped and the proposal says why. API clients send `search`, `model_features`, and
+`model_config_digest` on `POST /api/v1/optimization/proposals`.
+
+Each proposal starts with an untuned control on the same image, so every arm has a like-for-like
+comparison even under a small `--max-candidates`. Arms then isolate one mechanism or combine two:
+
+| Mechanism | Generated when |
+|---|---|
+| Speculative decoding (NEXTN) | The pinned config declares a native prediction head |
+| Bounded CUDA graph capture | Always, on a supported accelerator |
+| Chunked prefill | The workload's input tokens reach the arm's chunk size |
+| FP8 KV cache | Always; requires semantic quality evidence |
+
+The first search space covers SGLang 0.5.20 on H100, H200, and B200 through RunPod Pods. Anywhere
+else the proposal keeps its existing candidates and explains why no experiments were generated.
+
+<Warning>
+  Arm order is exploration priority, not predicted performance. Each arm's flags ran on this image
+  with another model, which proves only that the flags exist. Every arm is `proposed-unmeasured`
+  until a campaign measures it against the control; a wrong or missing config feature costs at most
+  one failed experiment inside the approved spend limit.
+</Warning>
 
 The command refuses to overwrite a non-empty candidate directory. Use `--output json` to archive the
 input digest, source, compatibility evidence, required evidence, and limitations with the specs.
