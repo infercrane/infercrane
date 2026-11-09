@@ -367,6 +367,13 @@ These schema floors prevent evidence relabeling; a workload policy may require l
 do not retroactively promote the existing 12-request Qwen measurements, which remain screening
 evidence.
 
+A lane may also record `input_tokens`, `output_tokens`, and a typed `economics` projection. These
+fields are validated context from the producer: they never affect qualification or scoring, and
+`economics` is not sourced cost evidence. Unknown fields are still rejected.
+
+Qwen3.8-27B-FP8 has a provisional H200 catalog profile copied from the paired Modal screening recipe.
+Proposing it returns a `proposed-unmeasured` candidate; each target still needs its own evidence.
+
 Every campaign pins one model, hardware tuple, and workload digest. Every candidate adds an
 immutable serving-recipe digest and every required concurrency lane. Each
 lane records aggregate output throughput, request throughput, SLO goodput in requests/second, and

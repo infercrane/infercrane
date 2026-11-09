@@ -109,6 +109,26 @@ func TestCatalogProposalCarriesGeneralImmutableMultiGPUProfile(t *testing.T) {
 	}
 }
 
+func TestQwen38H200ProposalUsesReviewedProfileWithoutMeasuredClaim(t *testing.T) {
+	request := Request{ModelIdentity: "qwen3.8-27b-fp8", Provider: "runpod-pods", GPU: "H200", Objective: "throughput"}
+	proposal, err := catalogSource(t).Propose(context.Background(), request)
+	if err != nil || len(proposal.Candidates) != 1 || len(proposal.Missing) != 0 {
+		t.Fatalf("proposal=%+v err=%v", proposal, err)
+	}
+	candidate := proposal.Candidates[0]
+	if candidate.ConfigurationProfile != "sglang-h200-nextn-k4-provisional" || candidate.EvidenceState != "unmeasured" || candidate.Status != "proposed-unmeasured" || candidate.Deployment.Resources.GPU != "H200" {
+		t.Fatalf("H200 candidate crossed its evidence boundary: %+v", candidate)
+	}
+	if err = ValidateProposal(proposal); err != nil {
+		t.Fatalf("H200 proposal failed validation: %v", err)
+	}
+	request.GPU = "L40S"
+	wrongGPU, err := catalogSource(t).Propose(context.Background(), request)
+	if err != nil || len(wrongGPU.Candidates) != 0 || !reflect.DeepEqual(wrongGPU.Missing, []string{"reviewed_runtime_profile"}) {
+		t.Fatalf("unreviewed GPU did not fail closed: %+v err=%v", wrongGPU, err)
+	}
+}
+
 func TestCatalogProposalFailsClosedForUnknownOrUnqualifiedBoundary(t *testing.T) {
 	unknown, err := catalogSource(t).Propose(context.Background(), Request{ModelIdentity: "unknown/model", Provider: "gcp", Region: "europe-west4", GPU: "nvidia-l4", Objective: "latency"})
 	if err != nil || !reflect.DeepEqual(unknown.Missing, []string{"immutable_model_revision"}) || len(unknown.Candidates) != 0 {
