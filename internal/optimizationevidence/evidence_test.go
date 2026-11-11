@@ -154,3 +154,51 @@ func containsReason(reasons []string, wanted string) bool {
 	}
 	return false
 }
+
+const qwen38PairedH200Receipt = "../../docs/testing/evidence/qwen38-public-decode-saturation-modal-2026-09-23T044530Z.json"
+
+func TestHarnessReceiptDecodesAndKeepsScreeningBoundary(t *testing.T) {
+	body, err := os.ReadFile(qwen38PairedH200Receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	campaign, err := Decode(body)
+	if err != nil {
+		t.Fatalf("harness receipt was rejected: %v", err)
+	}
+	lane := campaign.Candidates[0].Lanes[0]
+	if lane.InputTokens == 0 || lane.OutputTokens == 0 || lane.Economics == nil || lane.Economics.TargetUtilization == 0 {
+		t.Fatalf("harness context was dropped: %+v", lane)
+	}
+	result, err := Evaluate(campaign)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.WinnerID != "sglang-0520-nextn-k4-bounded-graphs" || result.SelectionPolicy.EvidenceLevel != LevelScreening {
+		t.Fatalf("receipt changed evidence outcome: %+v", result)
+	}
+}
+
+func TestLaneContextStaysStrict(t *testing.T) {
+	body, err := os.ReadFile(qwen38PairedH200Receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unknown := strings.Replace(string(body), `"target_utilization"`, `"unreviewed_field": 1, "target_utilization"`, 1)
+	if _, err = Decode([]byte(unknown)); err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("unknown economics field was accepted: %v", err)
+	}
+	campaign, err := Decode(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	campaign.Candidates[0].Lanes[0].Economics.ProjectedGrossMargin = math.Inf(-1)
+	if err = campaign.Validate(); err == nil || !strings.Contains(err.Error(), "projected_gross_margin") {
+		t.Fatalf("non-finite margin was accepted: %v", err)
+	}
+	campaign.Candidates[0].Lanes[0].Economics = nil
+	campaign.Candidates[0].Lanes[0].InputTokens = -1
+	if err = campaign.Validate(); err == nil || !strings.Contains(err.Error(), "tokens") {
+		t.Fatalf("negative tokens were accepted: %v", err)
+	}
+}

@@ -85,6 +85,9 @@ type Request struct {
 	WorkloadFingerprint   string   `json:"workload_fingerprint,omitempty"`
 	TargetConcurrency     *float64 `json:"target_concurrency,omitempty"`
 	MaxCandidates         int      `json:"max_candidates"`
+	Search                string   `json:"search,omitempty"`
+	ModelFeatures         []string `json:"model_features,omitempty"`
+	ModelConfigDigest     string   `json:"model_config_digest,omitempty"`
 }
 
 type SourceInfo struct {
@@ -317,6 +320,16 @@ func (s CatalogSource) Propose(_ context.Context, request Request) (Proposal, er
 	sum := sha256.Sum256(input)
 	proposal := Proposal{SchemaVersion: SchemaVersion, AlgorithmVersion: AlgorithmVersion, Input: request, InputDigest: hex.EncodeToString(sum[:]), Mutation: "none", SelectionBoundary: "configuration candidates only; benchmark, quality, cost, and Release Guard evidence are required before qualification"}
 	applyWorkloadBoundary(&proposal)
+	proposal, err = s.proposeReviewed(proposal)
+	if err != nil || request.Search != SearchRecipes {
+		return proposal, err
+	}
+	return s.expandRecipeSearch(proposal)
+}
+
+func (s CatalogSource) proposeReviewed(proposal Proposal) (Proposal, error) {
+	var err error
+	request := proposal.Input
 	entry, ok := findRecipe(s.Recipes, request.ModelIdentity)
 	if ok && request.ModelRevision != "" && request.ModelRevision != entry.Revision {
 		ok = false
@@ -414,6 +427,9 @@ func normalizeRequest(request Request) Request {
 	request.ProviderAdapter = strings.ToLower(strings.TrimSpace(request.ProviderAdapter))
 	request.Region = strings.TrimSpace(request.Region)
 	request.GPU = strings.TrimSpace(request.GPU)
+	request.Search = strings.ToLower(strings.TrimSpace(request.Search))
+	request.ModelConfigDigest = strings.ToLower(strings.TrimSpace(request.ModelConfigDigest))
+	request.ModelFeatures = normalizedFeatures(request.ModelFeatures)
 	request.Objective = strings.ToLower(strings.TrimSpace(request.Objective))
 	if request.Objective == "" {
 		request.Objective = "interactive"
@@ -464,6 +480,9 @@ func normalizeRequest(request Request) Request {
 func validateRequest(request Request) error {
 	if request.ModelIdentity == "" || request.Provider == "" || request.GPU == "" {
 		return errors.New("model identity, provider, and GPU are required")
+	}
+	if err := validateSearch(request); err != nil {
+		return err
 	}
 	if _, ok := objectives[request.Objective]; !ok {
 		return errors.New("objective must be interactive, latency, throughput, or cost-efficiency")

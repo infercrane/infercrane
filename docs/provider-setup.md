@@ -154,6 +154,11 @@ values of at least 32 bytes on the control plane, then create a tenant connectio
 the key against RunPod before storing AES-256-GCM ciphertext bound to the tenant and connection
 identity. The plaintext key is write-only and is decrypted only for that tenant's provider call.
 
+Without `INFERCRANE_CREDENTIAL_ENCRYPTION_KEY` (unset in `compose.yaml`), tenant compute
+connections are disabled: `GET /api/v1/compute/connections` returns an empty list, `POST` returns
+`503 capability_unavailable`, and requests that name a `compute_connection_id` fail with an explicit
+error before any provider call.
+
 `RUNPOD_API_KEY` is different: it is the operator-owned supply credential used only for managed
 InferCrane Cloud capacity. A tenant BYOC deployment never inherits it. Native RunPod Pods do not
 depend on a third-party catalog. Declare a SkyPilot provider manifest only when intentionally using

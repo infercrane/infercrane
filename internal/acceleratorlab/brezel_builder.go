@@ -89,6 +89,9 @@ func (builder BrezelBuilder) Build(ctx context.Context, request BuildRequest) (B
 }
 
 func sourceBackend(request BuildRequest) string {
+	if request.Source.Backend != "" {
+		return request.Source.Backend
+	}
 	for _, implementation := range request.Experiment.ExistingImplementations {
 		if implementation.ImplementationID == request.Source.ImplementationID {
 			return implementation.Backend

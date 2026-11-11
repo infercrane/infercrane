@@ -44,6 +44,7 @@ type Assessment struct {
 	Endpoint          string     `json:"endpoint"`
 	State             string     `json:"state"`
 	PrimaryBottleneck string     `json:"primary_bottleneck"`
+	ProfilePhase      string     `json:"profile_phase,omitempty"`
 	Confidence        string     `json:"confidence"`
 	Signals           []Signal   `json:"signals"`
 	NextAction        string     `json:"next_action"`
@@ -95,14 +96,14 @@ func Assess(snapshot domain.EndpointMonitoringSnapshot, policy Policy) Assessmen
 		return result
 	}
 	if meaningfulShare(snapshot.Summary.P95TTFTMS, latency, policy.TTFTShare, 50) {
-		result.PrimaryBottleneck = "prefill-and-first-token"
+		result.PrimaryBottleneck, result.ProfilePhase = "prefill-and-first-token", "prefill"
 		result.NextAction = "capture prefill/decode timing and prefix-reuse evidence, then compare cache, chunked-prefill, runtime, and attention candidates"
 		result.CandidateFamilies = []string{"prefix cache", "chunked prefill", "attention backend", "prefill scheduling"}
 		result.RequiredEvidence = []string{"input-length distribution", "prefix reuse", "prefill GPU trace", "AIPerf TTFT lanes"}
 		return result
 	}
 	if meaningfulShare(snapshot.Summary.P95GenerationMS, latency, policy.GenerationShare, 50) {
-		result.PrimaryBottleneck = "decode-and-generation"
+		result.PrimaryBottleneck, result.ProfilePhase = "decode-and-generation", "decode"
 		result.NextAction = "capture decode throughput, KV-cache, and GPU operator profiles, then compare decoding, cache, quantization, and runtime candidates"
 		result.CandidateFamilies = []string{"KV cache", "speculative decoding", "quantization", "decode attention", "sampling"}
 		result.RequiredEvidence = []string{"output-length distribution", "decode tokens/second", "KV-cache pressure", "target-GPU operator profile"}

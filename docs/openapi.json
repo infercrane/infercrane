@@ -4171,6 +4171,117 @@
         ],
         "type": "object"
       },
+      "OptimizationCampaign": {
+        "additionalProperties": false,
+        "properties": {
+          "approval_expires_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "approved_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "approved_by": {
+            "type": "string"
+          },
+          "approved_max_cost_usd": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "cancel_requested": {
+            "type": "boolean"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/OptimizationCampaignCandidate"
+            },
+            "type": "array"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "failure_code": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "input_digest": {
+            "type": "string"
+          },
+          "intent": {
+            "enum": [
+              "new_endpoint",
+              "evolve_endpoint"
+            ],
+            "type": "string"
+          },
+          "max_candidates": {
+            "type": "integer"
+          },
+          "model_identity": {
+            "type": "string"
+          },
+          "objective": {
+            "type": "string"
+          },
+          "proof_boundary": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "target_deployment": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "warnings": {
+            "description": "Warnings recorded on the immutable proposal, such as skipped experiments or unmeasured arms. Empty when the proposal recorded none; absent when the stored proposal cannot be read. Warnings are not performance evidence.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "input_digest",
+          "model_identity",
+          "objective",
+          "source",
+          "intent",
+          "target_deployment",
+          "state",
+          "max_candidates",
+          "approved_max_cost_usd",
+          "approval_expires_at",
+          "approved_by",
+          "approved_at",
+          "cancel_requested",
+          "failure_code",
+          "created_at",
+          "updated_at",
+          "candidates",
+          "proof_boundary"
+        ],
+        "type": "object"
+      },
       "OptimizationCampaignActivation": {
         "additionalProperties": false,
         "properties": {
@@ -4204,6 +4315,93 @@
         ],
         "type": "object"
       },
+      "OptimizationCampaignCandidate": {
+        "additionalProperties": false,
+        "properties": {
+          "actual_evidence": {
+            "type": "object"
+          },
+          "benchmark_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "deployment_name": {
+            "type": "string"
+          },
+          "deployment_spec": {
+            "type": "object"
+          },
+          "evidence_state": {
+            "type": "string"
+          },
+          "failure_code": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "lab_evaluation_id": {
+            "type": "string"
+          },
+          "optimized_artifact_id": {
+            "type": "string"
+          },
+          "predicted_evidence": {
+            "type": "object"
+          },
+          "proposal_candidate_id": {
+            "type": "string"
+          },
+          "quality_evidence_id": {
+            "type": "string"
+          },
+          "rank": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "release_guard_evaluation_id": {
+            "type": "string"
+          },
+          "revision_id": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "target_endpoint": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "proposal_candidate_id",
+          "rank",
+          "state",
+          "evidence_state",
+          "target_endpoint",
+          "deployment_spec",
+          "predicted_evidence",
+          "actual_evidence",
+          "deployment_name",
+          "revision_id",
+          "benchmark_id",
+          "quality_evidence_id",
+          "lab_evaluation_id",
+          "release_guard_evaluation_id",
+          "optimized_artifact_id",
+          "failure_code",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
       "OptimizationCampaignCreate": {
         "additionalProperties": false,
         "properties": {
@@ -4226,6 +4424,18 @@
         },
         "required": [
           "proposal"
+        ],
+        "type": "object"
+      },
+      "OptimizationCampaignEnvelope": {
+        "additionalProperties": false,
+        "properties": {
+          "campaign": {
+            "$ref": "#/components/schemas/OptimizationCampaign"
+          }
+        },
+        "required": [
+          "campaign"
         ],
         "type": "object"
       },
@@ -4283,6 +4493,23 @@
             "minimum": 0,
             "type": "number"
           },
+          "model_config_digest": {
+            "description": "Digest of the pinned model configuration that declared model_features.",
+            "pattern": "^sha256:[a-fA-F0-9]{64}$",
+            "type": "string"
+          },
+          "model_features": {
+            "description": "Capabilities declared by the pinned model configuration. They gate experiments and are never performance evidence.",
+            "items": {
+              "enum": [
+                "native_mtp"
+              ],
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array",
+            "uniqueItems": true
+          },
           "model_identity": {
             "maxLength": 256,
             "minLength": 1,
@@ -4320,6 +4547,13 @@
             "maxItems": 16,
             "type": "array",
             "uniqueItems": true
+          },
+          "search": {
+            "description": "Adds bounded, unmeasured runtime-recipe experiments ahead of the reviewed candidates.",
+            "enum": [
+              "recipes"
+            ],
+            "type": "string"
           },
           "target_concurrency": {
             "exclusiveMinimum": 0,
@@ -12037,7 +12271,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Object"
+                  "$ref": "#/components/schemas/OptimizationCampaignEnvelope"
                 }
               }
             },

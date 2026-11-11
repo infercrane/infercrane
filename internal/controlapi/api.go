@@ -1722,7 +1722,27 @@ func optimizationCampaignResponse(campaign domain.OptimizationCampaign) map[stri
 	if campaign.Intent == optimizationcampaign.IntentEvolveEndpoint {
 		proofBoundary = "modeled evidence cannot qualify; measured benchmark, quality, cost, and Release Guard evidence are required before human promotion"
 	}
-	return map[string]any{"id": campaign.ID, "input_digest": campaign.InputDigest, "model_identity": campaign.ModelIdentity, "objective": campaign.Objective, "source": campaign.Source, "intent": campaign.Intent, "target_deployment": campaign.TargetDeployment, "state": campaign.State, "max_candidates": campaign.MaxCandidates, "approved_max_cost_usd": campaign.ApprovedMaxCostUSD, "approval_expires_at": campaign.ApprovalExpiresAt, "approved_by": campaign.ApprovedBy, "approved_at": campaign.ApprovedAt, "cancel_requested": campaign.CancelRequested, "failure_code": campaign.FailureCode, "created_at": campaign.CreatedAt, "updated_at": campaign.UpdatedAt, "candidates": candidates, "proof_boundary": proofBoundary}
+	response := map[string]any{"id": campaign.ID, "input_digest": campaign.InputDigest, "model_identity": campaign.ModelIdentity, "objective": campaign.Objective, "source": campaign.Source, "intent": campaign.Intent, "target_deployment": campaign.TargetDeployment, "state": campaign.State, "max_candidates": campaign.MaxCandidates, "approved_max_cost_usd": campaign.ApprovedMaxCostUSD, "approval_expires_at": campaign.ApprovalExpiresAt, "approved_by": campaign.ApprovedBy, "approved_at": campaign.ApprovedAt, "cancel_requested": campaign.CancelRequested, "failure_code": campaign.FailureCode, "created_at": campaign.CreatedAt, "updated_at": campaign.UpdatedAt, "candidates": candidates, "proof_boundary": proofBoundary}
+	if warnings, ok := optimizationProposalWarnings(campaign.ProposalJSON); ok {
+		response["warnings"] = warnings
+	}
+	return response
+}
+
+// optimizationProposalWarnings reads the warnings recorded on a campaign's
+// immutable proposal. It reports false when the stored proposal cannot be
+// decoded, so the response omits warnings rather than claiming there were none.
+func optimizationProposalWarnings(proposalJSON string) ([]string, bool) {
+	var proposal struct {
+		Warnings []string `json:"warnings"`
+	}
+	if json.Unmarshal([]byte(proposalJSON), &proposal) != nil {
+		return nil, false
+	}
+	if proposal.Warnings == nil {
+		return []string{}, true
+	}
+	return proposal.Warnings, true
 }
 
 func (a API) createOptimizedArtifact(w http.ResponseWriter, r *http.Request) {

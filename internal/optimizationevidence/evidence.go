@@ -121,6 +121,51 @@ type LaneEvidence struct {
 	SLOQualifiedOutputTokensSecond       float64 `json:"slo_qualified_output_tokens_per_second"`
 	GPUSecondsPerSuccessfulRequest       float64 `json:"gpu_seconds_per_successful_request"`
 	CostPerMillionSuccessfulOutputTokens float64 `json:"cost_per_1m_successful_output_tokens_usd"`
+	// InputTokens, OutputTokens, and Economics are producer-recorded context.
+	// They are validated but never used for qualification or scoring.
+	InputTokens  int64          `json:"input_tokens,omitempty"`
+	OutputTokens int64          `json:"output_tokens,omitempty"`
+	Economics    *LaneEconomics `json:"economics,omitempty"`
+}
+
+// LaneEconomics is a producer's price projection for one measured lane. It
+// depends on the producer's price assumptions and is not sourced cost evidence.
+type LaneEconomics struct {
+	BreakEvenUtilization                         float64 `json:"break_even_utilization"`
+	CanReachTargetMarginAtFullUtilization        bool    `json:"can_reach_target_margin_at_full_utilization"`
+	InputOutputTokenRatio                        float64 `json:"input_output_token_ratio"`
+	InputPriceUSDPerMillion                      float64 `json:"input_price_usd_per_million"`
+	MeasuredGPUCostPerMillionOutputEquivalentUSD float64 `json:"measured_gpu_cost_per_million_output_equivalent_usd"`
+	MeasuredGPUCostUSD                           float64 `json:"measured_gpu_cost_usd"`
+	MeasuredOutputTokensPerSecond                float64 `json:"measured_output_tokens_per_second"`
+	MeasuredRevenueUSD                           float64 `json:"measured_revenue_usd"`
+	NonGPURevenueFraction                        float64 `json:"non_gpu_revenue_fraction"`
+	OutputPriceUSDPerMillion                     float64 `json:"output_price_usd_per_million"`
+	PassesTargetMarginAtTargetUtilization        bool    `json:"passes_target_margin_at_target_utilization"`
+	ProjectedGrossMargin                         float64 `json:"projected_gross_margin"`
+	RequiredOutputTokensPerSecondForTargetMargin float64 `json:"required_output_tokens_per_second_for_target_margin"`
+	TargetGrossMargin                            float64 `json:"target_gross_margin"`
+	TargetMarginUtilization                      float64 `json:"target_margin_utilization"`
+	TargetUtilization                            float64 `json:"target_utilization"`
+}
+
+func (e LaneEconomics) validate() error {
+	if math.IsNaN(e.ProjectedGrossMargin) || math.IsInf(e.ProjectedGrossMargin, 0) {
+		return errors.New("economics projected_gross_margin must be finite")
+	}
+	for name, value := range map[string]float64{
+		"break_even_utilization": e.BreakEvenUtilization, "input_output_token_ratio": e.InputOutputTokenRatio,
+		"input_price_usd_per_million": e.InputPriceUSDPerMillion, "measured_gpu_cost_per_million_output_equivalent_usd": e.MeasuredGPUCostPerMillionOutputEquivalentUSD,
+		"measured_gpu_cost_usd": e.MeasuredGPUCostUSD, "measured_output_tokens_per_second": e.MeasuredOutputTokensPerSecond,
+		"measured_revenue_usd": e.MeasuredRevenueUSD, "non_gpu_revenue_fraction": e.NonGPURevenueFraction,
+		"output_price_usd_per_million": e.OutputPriceUSDPerMillion, "required_output_tokens_per_second_for_target_margin": e.RequiredOutputTokensPerSecondForTargetMargin,
+		"target_gross_margin": e.TargetGrossMargin, "target_margin_utilization": e.TargetMarginUtilization, "target_utilization": e.TargetUtilization,
+	} {
+		if !finiteNonnegative(value) {
+			return fmt.Errorf("economics %s must be finite and nonnegative", name)
+		}
+	}
+	return nil
 }
 
 type Evaluation struct {
@@ -338,6 +383,12 @@ func (l LaneEvidence) validate() error {
 	}
 	if !fraction(l.SLOAttainment) {
 		return errors.New("SLO attainment must be between zero and one")
+	}
+	if l.InputTokens < 0 || l.OutputTokens < 0 {
+		return errors.New("input and output tokens must be nonnegative")
+	}
+	if l.Economics != nil {
+		return l.Economics.validate()
 	}
 	return nil
 }
