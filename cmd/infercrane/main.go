@@ -41,7 +41,6 @@ import (
 	"github.com/infercrane/infercrane/internal/benchmark"
 	"github.com/infercrane/infercrane/internal/brezelexecutor"
 	"github.com/infercrane/infercrane/internal/brezelsandbox"
-	"github.com/infercrane/infercrane/internal/computeconnection"
 	"github.com/infercrane/infercrane/internal/config"
 	"github.com/infercrane/infercrane/internal/contextpassport"
 	"github.com/infercrane/infercrane/internal/controlapi"
@@ -73,7 +72,6 @@ import (
 	runtimeadapter "github.com/infercrane/infercrane/internal/runtime"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
 	"github.com/infercrane/infercrane/internal/sandboxprovider"
-	"github.com/infercrane/infercrane/internal/secretcipher"
 	"github.com/infercrane/infercrane/internal/secrets"
 	"github.com/infercrane/infercrane/internal/servingcontract"
 	"github.com/infercrane/infercrane/internal/spec"
@@ -4349,18 +4347,9 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		}
 		asyncService = &asyncinference.Service{Store: s, Cipher: cipher, KeyReference: cfg.AsyncEncryptionKeyReference, GatewayURL: cfg.ControlURL, APIKey: cfg.APIKey, Owner: cfg.InstanceID + ":async", Lease: time.Minute, Secrets: secrets.Environment{}}
 	}
-	var computeConnectionService *computeconnection.Service
-	if cfg.CredentialEncryptionKey != "" {
-		cipher, cipherErr := secretcipher.New(cfg.CredentialEncryptionKey)
-		if cipherErr != nil {
-			return fmt.Errorf("configure compute credential encryption: %w", cipherErr)
-		}
-		computeConnectionService = &computeconnection.Service{
-			Store: s, Cipher: cipher, KeyReference: cfg.CredentialEncryptionKeyReference,
-			Verifiers: map[string]computeconnection.CredentialVerifier{
-				"runpod": provision.RunPodPods{BaseURL: cfg.RunPodRESTURL},
-			},
-		}
+	computeConnectionService, err := newComputeConnectionService(cfg, s)
+	if err != nil {
+		return err
 	}
 	if optimizationCosts != nil && computeConnectionService != nil {
 		managedOptimizationCosts := optimizationCosts
@@ -4464,7 +4453,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		Store: s, Resolver: modelAPIUsageResolvers, Logger: logger, Telemetry: modelAPIUsageTelemetry,
 		Limit: 100, InFlightGrace: 10 * time.Minute,
 	}, 30*time.Second, logger)
-	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, DiscoveryClient: nil, Secrets: secrets.Environment{}, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool, OptimizationCosts: optimizationCosts, AcceleratorLabEnabled: acceleratorEngine != nil, AcceleratorLabCatalog: acceleratorCatalog, ModelAPICatalog: modelAPICatalog, ModelAPIProducts: s, SandboxProvider: nativeSandboxProvider, SandboxBilling: cfg.ManagedSandboxPolicy(), SandboxProjectID: cfg.BrezelSandboxProjectID, SandboxPreviews: controlapi.NewSandboxPreviewBroker(), SandboxDefaultTemplate: cfg.BrezelSandboxDefaultTemplate, SandboxModelConnectors: cfg.BrezelSandboxModelConnectors, ModelAPIOperatorTenantID: cfg.ModelAPIOperatorTenantID, ComputeProviders: computeProviders, ComputeConnections: computeConnectionService, GPUPriceCatalog: priceCatalog, LaunchProbers: launchProbers, CredentialLaunchProbers: credentialLaunchProbers, DefaultProviderAdapters: defaultProviderAdapters, ManagedDeployments: managedbilling.DeploymentPolicy{Enabled: cfg.ManagedDeploymentsEnabled, Provider: "runpod"}}
+	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, DiscoveryClient: nil, Secrets: secrets.Environment{}, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool, OptimizationCosts: optimizationCosts, AcceleratorLabEnabled: acceleratorEngine != nil, AcceleratorLabCatalog: acceleratorCatalog, ModelAPICatalog: modelAPICatalog, ModelAPIProducts: s, SandboxProvider: nativeSandboxProvider, SandboxBilling: cfg.ManagedSandboxPolicy(), SandboxProjectID: cfg.BrezelSandboxProjectID, SandboxPreviews: controlapi.NewSandboxPreviewBroker(), SandboxDefaultTemplate: cfg.BrezelSandboxDefaultTemplate, SandboxModelConnectors: cfg.BrezelSandboxModelConnectors, ModelAPIOperatorTenantID: cfg.ModelAPIOperatorTenantID, ComputeProviders: computeProviders, GPUPriceCatalog: priceCatalog, LaunchProbers: launchProbers, CredentialLaunchProbers: credentialLaunchProbers, DefaultProviderAdapters: defaultProviderAdapters, ManagedDeployments: managedbilling.DeploymentPolicy{Enabled: cfg.ManagedDeploymentsEnabled, Provider: "runpod"}}
 	if cfg.StripeEnabled() {
 		stripeBilling, stripeErr := managedbilling.NewStripe(cfg.StripeSecretKey, cfg.StripeWebhookSecret, cfg.StripeBillingReturnURL, cfg.StripePriceIDs, cfg.StripeLivemode)
 		if stripeErr != nil {
@@ -4472,12 +4461,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		}
 		controlAPI.BillingCheckout = stripeBilling
 	}
-	// Assign the optional service only when it exists. A nil *Service stored in
-	// an interface is non-nil and would otherwise turn the intended capability
-	// error into a panic when async encryption is not configured.
-	if asyncService != nil {
-		controlAPI.AsyncInference = asyncService
-	}
+	bindOptionalControlServices(&controlAPI, asyncService, computeConnectionService)
 	operationTelemetry := &operations.Telemetry{}
 	handlers := workflows.DeploymentHandlers(s)
 	if acceleratorEngine != nil {
