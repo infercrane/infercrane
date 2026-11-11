@@ -186,6 +186,15 @@ The authenticated console exposes the same boundaries under **Optimize**:
 Cancellation is durable too: it persists the decision and links to the cleanup operation. The
 console never treats a proposed endpoint name as published until activation completes.
 
+A campaign keeps the warnings its proposal recorded, such as skipped speculative-decoding arms or
+the reminder that every recipe arm is unmeasured. Campaign responses, including
+`GET /api/v1/optimization/campaigns/{id}`, return them as `warnings` so the campaign page shows the
+same boundary as the review step. An empty list means the proposal recorded none; the field is absent
+only when the stored proposal cannot be read. `infercrane optimize inspect`, `results`, `approve`,
+`activate`, and `cancel` print a **Proposal warnings** block after the campaign header when there
+is at least one warning, and `--output json` keeps the field exactly as returned. Warnings explain
+what was skipped or left unproven. They are not performance evidence.
+
 Use `propose` for a completely offline preview. Use `create` to persist the same immutable proposal
 without provisioning anything:
 
