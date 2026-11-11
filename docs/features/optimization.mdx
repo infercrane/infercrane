@@ -401,18 +401,108 @@ When model precision or model artifacts differ, attach signed semantic evaluatio
 promotion. When cost is part of the objective, attach sourced, dated cost evidence. Only an exact
 model, runtime, accelerator, provider, and canonical workload result supports a measured recipe.
 
-## Seed candidates from NVIDIA Model Optimizer
+## Seed candidates from publisher checkpoints
 
-InferCrane can discover reviewed NVIDIA Model Optimizer checkpoints as provenance-bound candidate
-seeds. Each seed pins the publisher repository, immutable revision, artifact identity, algorithm,
-precision, and source URL before it enters the search space. The console shows that provenance and
-the remaining qualification gates.
+Hardware and model vendors publish quantized checkpoints and speculative-decoding heads for new
+open-weight models, often within days of the base release. InferCrane keeps a reviewed catalog of
+these builds, so a campaign can try quantization without building the artifact first. The catalog
+covers these Hugging Face organizations:
 
-These checkpoints are **unmeasured candidates**, not InferCrane performance claims. InferCrane does
-not claim that it transformed the publisher artifact or that the artifact is faster on a target
-GPU. Exact runtime and accelerator compatibility, correctness, semantic quality, workload
-performance, and cost evidence remain mandatory before Release Guard can accept a candidate. A
-publisher checkpoint that fails any gate is retained as negative evidence rather than promoted.
+| Publisher | Builds in the catalog | Hardware the builds target | Can seed a candidate today |
+|---|---|---|---|
+| NVIDIA (`nvidia`) | Model Optimizer NVFP4, FP8, and mixed-precision checkpoints; EAGLE-3, DFlash, and DSpark speculators | NVIDIA Hopper and Blackwell | Approved formats, on a matching GPU |
+| Red Hat AI (`RedHatAI`) | LLM Compressor FP8, NVFP4, MXFP4, INT4, and W8A8 checkpoints; speculators for vLLM | NVIDIA | Not yet; the publisher is pending review |
+| AMD (`amd`) | Quark MXFP4, PTPC-FP8, and INT4 checkpoints; LLM Compressor builds; DFlash speculators | AMD Instinct (CDNA 3 and CDNA 4) | No; InferCrane cannot run AMD hardware yet |
+| Intel (`Intel`) and OpenVINO (`OpenVINO`) | AutoRound checkpoints and OpenVINO INT4, INT8, and NF4 exports | Intel CPU, GPU, and NPU | No; InferCrane cannot run Intel hardware yet |
+| Google (`google`) | Gemma quantization-aware-training checkpoints | NVIDIA through vLLM | Not yet; the publisher is pending review |
+
+Every entry is an **unmeasured candidate**, not an InferCrane performance claim. InferCrane does not
+claim that it transformed the publisher artifact or that the artifact is faster on a target GPU.
+Exact runtime and accelerator compatibility, correctness, semantic quality, workload performance,
+and cost evidence remain mandatory before Release Guard can accept a candidate. A publisher
+checkpoint that fails any gate is retained as negative evidence rather than promoted.
+
+### What each entry records
+
+Each entry pins the publisher repository by commit SHA and records:
+
+- the manifest digest (every file's path, size, and content identity), model card digest, and
+  license digest at that commit;
+- the quantization tool, tool version, and scheme, or for a speculator its method and target
+  models;
+- the base model it was built from. When the model card states the exact base commit, the lineage
+  is `exact` and only a campaign on that base revision can use the build. Otherwise the publisher
+  declares only the base repository, and the catalog records the base head it observed;
+- the target hardware vendor and architectures, and whether InferCrane can run them;
+- engine requirements stated in the model card;
+- accuracy or speed tables from the model card, copied as `publisher_priors` with
+  `evidence_state: unmeasured`. They are discovery context only. Publishers use different
+  benchmarks and settings, and their numbers cannot satisfy any InferCrane qualification gate.
+
+### When an entry becomes a candidate
+
+A catalog entry seeds a proposal candidate only when every condition holds:
+
+- A reviewer approved the publisher and the exact format in
+  `internal/checkpointcatalog/policy.json`.
+- It is a quantized checkpoint. Speculators are catalogued with their target models, but
+  speculative-decoding candidates need acceptance-rate and output-parity gates first.
+- It targets NVIDIA hardware that InferCrane runs, and the requested GPU is one of the declared
+  architectures. An NVFP4 checkpoint never matches a Hopper GPU.
+- Its license resolves to an approved SPDX identifier. A tag such as `other` stays unresolved until
+  a reviewer records the terms.
+- The pinned engine version meets every requirement in the model card. A card that needs an
+  unmerged engine pull request keeps the build off that engine until a reviewer records the release
+  that contains the change.
+- For `exact` lineage, the campaign pins the stated base revision.
+
+The catalog records the blockers for every other entry. `GET /api/v1/catalog/hugging-face/models`
+lists each base model's publisher builds under `publisher_builds`, including AMD and Intel builds
+marked `unsupported_hardware`, but proposes none of them.
+
+### Refresh the catalog
+
+Network access happens only in an explicit sync step. The optimizer and the control API read the
+reviewed catalog compiled into the binary. Proposals never contact Hugging Face, and the inference
+request path never reads the catalog.
+
+1. Record a snapshot of the public Hugging Face API. The fetch lists each publisher's organization
+   newest first back to a reviewed start date, using organization listings because curated
+   collections lag. It also re-observes every pinned repository. It refuses to run without
+   `--network`.
+
+   ```bash
+   go run ./tools/checkpoint-catalog-sync fetch --network --out .infercrane/checkpoint-catalog/snapshot
+   ```
+
+2. Plan offline. The plan reads only the snapshot, the review policy, and the committed catalog,
+   and writes a proposed catalog and `catalog-diff.md`. The same inputs always produce the same
+   output.
+
+   ```bash
+   go run ./tools/checkpoint-catalog-sync plan --snapshot .infercrane/checkpoint-catalog/snapshot
+   ```
+
+3. Review the diff. It lists the entries waiting for review, new candidates, added builds, new
+   revisions, removals, and skipped repositories with reasons. To approve a publisher or format,
+   edit the policy and plan the same snapshot again.
+
+4. Install and commit the reviewed catalog:
+
+   ```bash
+   go run ./tools/checkpoint-catalog-sync plan --snapshot .infercrane/checkpoint-catalog/snapshot \
+     --write --reviewed-at 2026-11-11
+   ```
+
+Review rules:
+
+- A new publisher or a new format always needs a human decision in the policy.
+- A new revision of an approved publisher and format is re-reviewed automatically: the planner
+  re-runs every gate and keeps the earlier decision unless the kind, base model, format, hardware
+  vendor, or license changed. Then the revision waits for review.
+- When a newer revision is blocked, for example by an unreleased engine change, the previously
+  pinned revision stays a candidate until the newer one passes.
+- A repository that disappears upstream is removed from the catalog.
 
 ## What the first planner knows
 

@@ -1410,7 +1410,7 @@ func (a API) createOptimizationCampaign(w http.ResponseWriter, r *http.Request) 
 		}
 		if candidate.ArtifactSeed != nil {
 			predictedFields["candidate_kind"] = "publisher_optimized_checkpoint"
-			predictedFields["technique"] = "modelopt_quantization"
+			predictedFields["technique"] = strings.ReplaceAll(candidate.ArtifactSeed.Tool, "-", "_") + "_quantization"
 			predictedFields["artifact_seed"] = candidate.ArtifactSeed
 			predictedFields["artifact_evidence_boundary"] = "publisher provenance only; performance and quality remain unmeasured"
 		}

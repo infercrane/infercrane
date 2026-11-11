@@ -1,0 +1,29 @@
+[
+ {
+  "id": "amd/Old-Quark-MXFP4",
+  "sha": "b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8",
+  "createdAt": "2026-06-01T09:00:00.000Z",
+  "lastModified": "2026-06-02T09:00:00.000Z",
+  "private": false,
+  "disabled": false,
+  "gated": false,
+  "library_name": null,
+  "pipeline_tag": "text-generation",
+  "tags": [],
+  "cardData": {
+   "license": "apache-2.0",
+   "base_model": [
+    "acme/old"
+   ]
+  },
+  "config": {
+   "architectures": [
+    "X"
+   ],
+   "model_type": "x",
+   "quantization_config": {
+    "quant_method": "quark"
+   }
+  }
+ }
+]

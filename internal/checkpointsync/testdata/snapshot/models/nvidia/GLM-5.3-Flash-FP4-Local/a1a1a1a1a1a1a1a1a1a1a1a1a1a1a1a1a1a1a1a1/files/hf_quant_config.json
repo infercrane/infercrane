@@ -1,0 +1,17 @@
+{
+ "producer": {
+  "name": "modelopt",
+  "version": "0.47.0"
+ },
+ "quantization": {
+  "quant_algo": "MIXED_PRECISION",
+  "quantized_layers": {
+   "layers.0.mlp": {
+    "quant_algo": "NVFP4"
+   },
+   "layers.0.attn": {
+    "quant_algo": "FP8"
+   }
+  }
+ }
+}
