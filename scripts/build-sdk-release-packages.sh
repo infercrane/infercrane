@@ -26,6 +26,9 @@ esac
 
 temporary=$(mktemp -d)
 trap 'rm -rf "$temporary"' EXIT HUP INT TERM
+# macOS returns /var/folders/..., and /var links to /private/var. npm --prefix
+# treats a symlinked package path as a link and rejects the lock file.
+temporary=$(CDPATH= cd -- "$temporary" && pwd -P)
 mkdir -p "$output"
 output=$(CDPATH= cd -- "$output" && pwd)
 
