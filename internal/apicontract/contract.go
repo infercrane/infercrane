@@ -129,7 +129,7 @@ var Routes = []Route{
 	{"POST", "/optimization/accelerator-lab/runs", "runAcceleratorLab", "Inference optimization", "Queue a budget-bounded profile, isolated build, and exact-target qualification operation", "Object", "OperationEnvelope", 202, true},
 	{"GET", "/optimization/campaigns", "listOptimizationCampaigns", "Inference optimization", "List durable evidence-gated optimization campaigns", "", "ObjectList", 200, false},
 	{"POST", "/optimization/campaigns", "createOptimizationCampaign", "Inference optimization", "Persist a bounded immutable proposal without mutating provider infrastructure", "OptimizationCampaignCreate", "Object", 201, true},
-	{"GET", "/optimization/campaigns/{id}", "getOptimizationCampaign", "Inference optimization", "Inspect predicted and measured campaign evidence", "", "Object", 200, false},
+	{"GET", "/optimization/campaigns/{id}", "getOptimizationCampaign", "Inference optimization", "Inspect predicted and measured campaign evidence", "", "OptimizationCampaignEnvelope", 200, false},
 	{"POST", "/optimization/campaigns/{id}/approve", "approveOptimizationCampaign", "Inference optimization", "Validate bounded cost authority and queue durable optimization execution", "OptimizationCampaignApproval", "Object", 202, false},
 	{"POST", "/optimization/campaigns/{id}/activate", "activateOptimizationCampaign", "Inference optimization", "Queue explicit activation or guarded promotion for a qualified candidate", "OptimizationCampaignActivation", "Object", 202, false},
 	{"POST", "/optimization/campaigns/{id}/cancel", "cancelOptimizationCampaign", "Inference optimization", "Cancel future campaign work and require cleanup", "Object", "Object", 202, false},
@@ -481,6 +481,9 @@ func schemas() map[string]any {
 		"OptimizationCampaignCreate":     map[string]any{"type": "object", "additionalProperties": false, "required": []string{"proposal"}, "properties": map[string]any{"proposal": map[string]any{"type": "object", "description": "A complete infercrane.optimizer.proposal/v1 document whose normalized digest is revalidated by the server."}, "intent": map[string]any{"type": "string", "enum": []string{"new_endpoint", "evolve_endpoint"}, "default": "new_endpoint"}, "target_deployment": map[string]any{"type": "string", "description": "Required only for evolve_endpoint campaigns; names the stable deployment whose candidate revision will be compared."}}},
 		"OptimizationCampaignApproval":   map[string]any{"type": "object", "additionalProperties": false, "required": []string{"max_cost_usd", "expires_in_seconds"}, "properties": map[string]any{"max_cost_usd": map[string]any{"type": "number", "exclusiveMinimum": 0, "maximum": 1000000}, "expires_in_seconds": map[string]any{"type": "integer", "minimum": 60, "maximum": 86400}}},
 		"OptimizationCampaignActivation": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"candidate_id"}, "properties": map[string]any{"candidate_id": map[string]any{"type": "string", "minLength": 1}}},
+		"OptimizationCampaign":           optimizationCampaignSchema(),
+		"OptimizationCampaignCandidate":  optimizationCampaignCandidateSchema(),
+		"OptimizationCampaignEnvelope":   map[string]any{"type": "object", "additionalProperties": false, "required": []string{"campaign"}, "properties": map[string]any{"campaign": ref("OptimizationCampaign")}},
 		"KernelOpportunityRequest": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"schema_version", "model", "runtime", "hardware", "workload", "profile", "policy"}, "properties": map[string]any{
 			"schema_version": map[string]any{"type": "string", "const": "infercrane.kernel-opportunity-request/v1"},
 			"model":          map[string]any{"type": "object", "additionalProperties": false, "required": []string{"repository", "revision"}, "properties": map[string]any{"repository": map[string]any{"type": "string", "minLength": 1}, "revision": map[string]any{"type": "string", "pattern": "^[a-fA-F0-9]{40,64}$"}}},
@@ -675,6 +678,29 @@ func intentPlanEnvelopeSchema() map[string]any {
 		"plan": ref("IntentPlan"), "deployment_draft": ref("DeploymentCreate"), "provider_mutation": map[string]any{"type": "boolean", "const": false},
 		"capacity_reserved": map[string]any{"type": "boolean", "const": false}, "performance_claims": map[string]any{"type": "boolean", "const": false},
 		"selection_boundary": map[string]any{"type": "string"},
+	}}
+}
+
+func optimizationCampaignSchema() map[string]any {
+	text, timestamp := map[string]any{"type": "string"}, map[string]any{"type": "string", "format": "date-time"}
+	nullableTimestamp := map[string]any{"type": []string{"string", "null"}, "format": "date-time"}
+	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"id", "input_digest", "model_identity", "objective", "source", "intent", "target_deployment", "state", "max_candidates", "approved_max_cost_usd", "approval_expires_at", "approved_by", "approved_at", "cancel_requested", "failure_code", "created_at", "updated_at", "candidates", "proof_boundary"}, "properties": map[string]any{
+		"id": text, "input_digest": text, "model_identity": text, "objective": text, "source": text,
+		"intent": map[string]any{"type": "string", "enum": []string{"new_endpoint", "evolve_endpoint"}}, "target_deployment": text, "state": text,
+		"max_candidates": map[string]any{"type": "integer"}, "approved_max_cost_usd": nullableNumberSchema(), "approval_expires_at": nullableTimestamp,
+		"approved_by": text, "approved_at": nullableTimestamp, "cancel_requested": map[string]any{"type": "boolean"}, "failure_code": text,
+		"created_at": timestamp, "updated_at": timestamp, "candidates": map[string]any{"type": "array", "items": ref("OptimizationCampaignCandidate")}, "proof_boundary": text,
+		"warnings": map[string]any{"type": "array", "items": text, "description": "Warnings recorded on the immutable proposal, such as skipped experiments or unmeasured arms. Empty when the proposal recorded none; absent when the stored proposal cannot be read. Warnings are not performance evidence."},
+	}}
+}
+
+func optimizationCampaignCandidateSchema() map[string]any {
+	text, timestamp, object := map[string]any{"type": "string"}, map[string]any{"type": "string", "format": "date-time"}, map[string]any{"type": "object"}
+	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"id", "proposal_candidate_id", "rank", "state", "evidence_state", "target_endpoint", "deployment_spec", "predicted_evidence", "actual_evidence", "deployment_name", "revision_id", "benchmark_id", "quality_evidence_id", "lab_evaluation_id", "release_guard_evaluation_id", "optimized_artifact_id", "failure_code", "created_at", "updated_at"}, "properties": map[string]any{
+		"id": text, "proposal_candidate_id": text, "rank": map[string]any{"type": "integer", "minimum": 1}, "state": text, "evidence_state": text, "target_endpoint": text,
+		"deployment_spec": object, "predicted_evidence": object, "actual_evidence": object,
+		"deployment_name": text, "revision_id": text, "benchmark_id": text, "quality_evidence_id": text, "lab_evaluation_id": text, "release_guard_evaluation_id": text, "optimized_artifact_id": text, "failure_code": text,
+		"created_at": timestamp, "updated_at": timestamp,
 	}}
 }
 
