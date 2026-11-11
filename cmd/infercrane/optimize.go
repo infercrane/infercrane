@@ -395,7 +395,11 @@ type optimizationCampaignView struct {
 	State              string     `json:"state"`
 	ApprovedMaxCostUSD *float64   `json:"approved_max_cost_usd"`
 	ApprovalExpiresAt  *time.Time `json:"approval_expires_at"`
-	Candidates         []struct {
+	// Warnings is nil when the response omits the field, which the control API
+	// does when the stored proposal cannot be read. A pointer keeps that
+	// unknown state distinct from an empty list in --output json.
+	Warnings   *[]string `json:"warnings,omitempty"`
+	Candidates []struct {
 		ID                  string `json:"id"`
 		ProposalCandidateID string `json:"proposal_candidate_id"`
 		State               string `json:"state"`
@@ -508,6 +512,12 @@ func optimizeCampaignCommand(ctx context.Context, args []string) error {
 	}
 	if response.CleanupOperation != nil {
 		fmt.Printf("Cleanup    %s · %s\n", response.CleanupOperation.ID, response.CleanupOperation.Status)
+	}
+	if view.Warnings != nil && len(*view.Warnings) > 0 {
+		fmt.Println("\nProposal warnings")
+		for _, warning := range *view.Warnings {
+			fmt.Printf("  - %s\n", warning)
+		}
 	}
 	if len(view.Candidates) > 0 {
 		fmt.Println("\nCANDIDATES")
