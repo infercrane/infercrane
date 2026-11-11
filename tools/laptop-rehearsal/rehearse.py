@@ -16,6 +16,7 @@ import hashlib
 import json
 import platform
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -48,6 +49,9 @@ def request_json(url: str, body: dict | None = None, timeout: float = 120) -> di
 class Server:
     def __init__(self, model: str, port: int, parallel: int, extra: list[str], log: Path):
         self.base = f"http://127.0.0.1:{port}"
+        with socket.socket() as probe:  # A leftover server would be measured instead of this arm.
+            if probe.connect_ex(("127.0.0.1", port)) == 0:
+                raise SystemExit(f"port {port} is already in use; stop the process on it or pass --port")
         self.log = log.open("w")
         command = [shutil.which("llama-server") or "llama-server", "-hf", model, "--host", "127.0.0.1", "--port", str(port), "--ctx-size", "8192", "--parallel", str(parallel), "--jinja", *extra]
         self.process = subprocess.Popen(command, stdout=self.log, stderr=subprocess.STDOUT)
@@ -96,8 +100,22 @@ def measure_lane(server: Server, args: argparse.Namespace, concurrency: int, dir
         "--synthetic-input-tokens-mean", str(args.input_tokens), "--synthetic-input-tokens-stddev", "0",
         "--output-tokens-mean", str(args.output_tokens), "--output-tokens-stddev", "0", "--random-seed", "17",
         "--ui", "none", "--artifact-dir", str(directory),
+        # llama-server has no /metrics endpoint by default and a laptop has no
+        # DCGM or NVML. AIPerf's collectors for both then miss heartbeats and
+        # turn a complete run into exit status 1.
+        "--no-server-metrics", "--no-gpu-telemetry",
     ]
-    subprocess.run(command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    output = directory.parent / f"{directory.name}-aiperf.txt"
+    for attempt in (1, 2):
+        shutil.rmtree(directory, ignore_errors=True)
+        with output.open("w") as log:
+            completed = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT)
+        if completed.returncode == 0:
+            break
+        print(f"   AIPerf exited {completed.returncode} on attempt {attempt}; output: {output}", flush=True)
+    else:
+        tail = "\n".join(output.read_text(errors="replace").splitlines()[-15:])
+        raise SystemExit(f"AIPerf failed twice for {directory.name}. Last output lines:\n{tail}\nFull output: {output}")
     summary = json.loads((directory / "profile_export_aiperf.json").read_text())
     records = [json.loads(line) for line in (directory / "profile_export.jsonl").read_text().splitlines() if line.strip()]
     succeeded = [record for record in records if not record.get("error") and "time_to_first_token" in record.get("metrics", {})]
