@@ -329,6 +329,12 @@ Serving containers run offline on an internal Docker network, with a read-only m
 credentials. Only the model download step has internet access. A candidate arm must prove the
 generated kernel was called, because otherwise the result would measure the unmodified runtime.
 
+Each operator pack names the exact runtime versions its serving integration was reviewed against,
+and the adapter refuses any other version before it spends on generation or GPU time. The
+residual-RMSNorm pack supports vLLM 0.22.1 only. It plugs into vLLM IR, which vLLM has deprecated,
+and vLLM 0.34.0 removes the setting it uses, so a vLLM 0.34 or later pin needs a new
+CustomOp-based integration first.
+
 Set `max_candidates` to at least 2. The planner ranks by device time, and the largest hotspot is
 usually GEMM, which has no reviewed pack yet and is reported as a failed generation.
 
@@ -361,8 +367,11 @@ infercrane artifact optimize plan BASE_ARTIFACT_ID \
   --license-spdx Apache-2.0
 ```
 
-Available plan presets cover FP8, AWQ, GPTQ, NVIDIA-specific NVFP4, EAGLE-3, MTP, DFlash, and
-TensorRT engine builds. A preset is not a compatibility or speed claim. Every plan requires an exact
+Available plan presets cover FP8, AWQ, GPTQ, NVIDIA-specific NVFP4, EAGLE-3, MTP, and DFlash. There
+is no TensorRT engine preset: TensorRT-LLM removed its engine backend and `trtllm-build`, and its
+PyTorch backend loads checkpoints such as the FP8 and NVFP4 outputs directly. An engine built by an
+earlier TensorRT-LLM release can still be recorded with `--plan-file`. A preset is not a
+compatibility or speed claim. Every plan requires an exact
 tool version, digest-pinned builder, hardware constraints, immutable output attestation, exact
 candidate binding, and passing semantic quality evidence before qualification. Advanced users can
 provide the complete JSON plan with `--plan-file`.
@@ -442,14 +451,14 @@ InferCrane will reuse upstream execution and optimization work behind replaceabl
 | Upstream | InferCrane boundary | Current status |
 |---|---|---|
 | vLLM | Runtime execution, continuous batching, attention, prefix caching, and qualified engine flags | Active runtime; reviewed starting profiles are locally qualified |
-| SGLang | Alternative runtime and prefix-aware execution | Runtime contract exists; the Qwen3-0.6B/SGLang 0.5.10.post1/H100 tuple is negative compatibility evidence, not a qualified recipe |
+| SGLang | Alternative runtime and prefix-aware execution | The pinned 0.5.12 runtime passed real AWS L40S lifecycle checks with Qwen3-8B and five-request AIPerf samples; that is not performance qualification. Qwen3-0.6B on SGLang 0.5.10.post1 on H100 is separate negative compatibility evidence. SGLang 0.5.20 candidates for any pinned model stay unmeasured until a campaign measures them |
 | AIConfigurator | GPU-free modeled candidate reduction | Active optional adapter pinned to `0.11.0` plus `plotext 5.3.2`; Linux x86_64 real-package contract verified |
 | AISimulate | GPU-free simulation and recommendation source | Not integrated; adoption requires a stable package, schema, support, parity, and rollback contract |
 | LLM Compressor / ModelOpt | Produce immutable quantized artifacts | Replaceable external-builder plans and provenance are local-qualified; transformation and GPU compatibility remain external qualification |
 | vLLM Speculators | Model-specific EAGLE, MTP, DFlash, and related speculative candidates | Replaceable artifact plans and exact verifier provenance are local-qualified; acceptance rate and output correctness require real measurement |
 | LMCache | KV reuse and offload for qualified repeated-prefix workloads | Registered cache composition and exact capability boundary; executable lifecycle remains fail-closed |
 | Dynamo / NIXL | KV-aware routing and prefill/decode serving graph | Experimental Kubernetes adapter; real GPU/NIXL evidence required |
-| TensorRT-LLM | Narrow optimized runtime for supported model/GPU tuples | Immutable engine-build provenance exists; runtime execution remains unsupported until an exact tuple is qualified |
+| TensorRT-LLM | Narrow optimized runtime for supported model/GPU tuples | Upstream removed the engine backend; engine provenance remains only for engines built by an earlier release. Runtime execution remains unsupported until an exact tuple is qualified |
 | llm-d / AIBrix | Kubernetes routing, scheduling, and heterogeneous fleet patterns | Registered single-owner composition boundaries; no executable lifecycle support claim |
 
 The durable rule is: **the optimizer proposes; InferCrane proves**. Candidate sources, builders, and

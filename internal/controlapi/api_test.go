@@ -776,7 +776,7 @@ func TestAcceleratorLabAPIExposesTruthfulCapabilitiesAndQueuesTenantBoundRun(t *
 	capabilities.Header.Set("Authorization", "Bearer secret")
 	capabilityResponse := httptest.NewRecorder()
 	handler.ServeHTTP(capabilityResponse, capabilities)
-	if capabilityResponse.Code != http.StatusOK || !strings.Contains(capabilityResponse.Body.String(), `"profiler":"nsight-systems+nsight-compute"`) || !strings.Contains(capabilityResponse.Body.String(), `"vendor":"amd"`) || !strings.Contains(capabilityResponse.Body.String(), `"vendor":"google"`) || !strings.Contains(capabilityResponse.Body.String(), `"vendor":"aws"`) || !strings.Contains(capabilityResponse.Body.String(), "not performance or capacity claims") {
+	if capabilityResponse.Code != http.StatusOK || !strings.Contains(capabilityResponse.Body.String(), `"profiler":"torch-profiler"`) || !strings.Contains(capabilityResponse.Body.String(), `"vendor":"amd"`) || !strings.Contains(capabilityResponse.Body.String(), `"vendor":"google"`) || !strings.Contains(capabilityResponse.Body.String(), `"vendor":"aws"`) || !strings.Contains(capabilityResponse.Body.String(), "not performance or capacity claims") {
 		t.Fatalf("status=%d body=%s", capabilityResponse.Code, capabilityResponse.Body.String())
 	}
 

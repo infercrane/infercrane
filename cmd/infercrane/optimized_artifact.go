@@ -128,11 +128,11 @@ func optimizedArtifactCommand(ctx context.Context, cfg config.Config, args []str
 
 func optimizedArtifactPlanCommand(ctx context.Context, cfg config.Config, args []string) error {
 	if len(args) < 1 {
-		return errors.New("usage: infercrane artifact optimize plan BASE_ARTIFACT --preset fp8|awq|gptq|nvfp4|eagle3|mtp|dflash|tensorrt --tool-version VERSION --builder-image-digest sha256:... --license-spdx SPDX")
+		return errors.New("usage: infercrane artifact optimize plan BASE_ARTIFACT --preset fp8|awq|gptq|nvfp4|eagle3|mtp|dflash --tool-version VERSION --builder-image-digest sha256:... --license-spdx SPDX")
 	}
 	baseArtifactID := args[0]
 	fs := flag.NewFlagSet("artifact optimize plan", flag.ContinueOnError)
-	preset := fs.String("preset", "", "fp8, awq, gptq, nvfp4, eagle3, mtp, dflash, or tensorrt")
+	preset := fs.String("preset", "", "fp8, awq, gptq, nvfp4, eagle3, mtp, or dflash")
 	planFile := fs.String("plan-file", "", "advanced complete optimized-artifact plan JSON")
 	toolVersion := fs.String("tool-version", "", "exact external builder version")
 	builderDigest := fs.String("builder-image-digest", "", "builder OCI sha256 digest")
@@ -210,11 +210,8 @@ func optimizedArtifactPreset(base, preset, toolVersion, builderDigest, calibrati
 		method := strings.ToLower(strings.TrimSpace(preset))
 		plan.Kind, plan.Format, plan.Tool, plan.Algorithm = optimizedartifact.KindSpeculator, "safetensors", "vllm-speculators", method
 		plan.Configuration, plan.HardwareConstraints = json.RawMessage(`{"method":"`+method+`"}`), json.RawMessage(`{"runtime":"vllm","exact_verifier_required":true}`)
-	case "tensorrt":
-		plan.Kind, plan.Format, plan.Tool, plan.Algorithm = optimizedartifact.KindTensorRTEngine, "tensorrt-engine", "tensorrt-llm", "engine-build"
-		plan.Configuration, plan.HardwareConstraints = json.RawMessage(`{"strongly_typed":true}`), json.RawMessage(`{"vendor":"nvidia","exact_gpu_required":true}`)
 	default:
-		return optimizedartifact.Plan{}, errors.New("preset must be fp8, awq, gptq, nvfp4, eagle3, mtp, dflash, or tensorrt")
+		return optimizedartifact.Plan{}, errors.New("preset must be fp8, awq, gptq, nvfp4, eagle3, mtp, or dflash")
 	}
 	return plan, nil
 }

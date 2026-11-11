@@ -346,8 +346,8 @@ func (t Target) Qualify(ctx context.Context, request acceleratorlab.Qualificatio
 }
 
 func (t Target) packIntegration(pack kernelgen.Pack, spec RuntimeSpec) (string, error) {
-	if pack.Integration == "" || !containsString(pack.Runtimes, spec.Name) {
-		return "", fmt.Errorf("pack %s has no reviewed integration for runtime %s", pack.Family, spec.Name)
+	if err := pack.SupportsRuntime(spec.Name, spec.Version); err != nil {
+		return "", err
 	}
 	path := filepath.Join(t.PackDir, filepath.Clean("/"+string(pack.Family)), filepath.Clean("/"+pack.Integration))
 	info, err := os.Stat(path)
@@ -355,15 +355,6 @@ func (t Target) packIntegration(pack kernelgen.Pack, spec RuntimeSpec) (string, 
 		return "", fmt.Errorf("pack %s integration directory is missing", pack.Family)
 	}
 	return path, nil
-}
-
-func containsString(values []string, wanted string) bool {
-	for _, value := range values {
-		if value == wanted {
-			return true
-		}
-	}
-	return false
 }
 
 type hiddenOutcome struct {
