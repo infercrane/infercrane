@@ -218,8 +218,22 @@ func newGenerator(env func(string) string) (kernelgen.Generator, error) {
 			InputUSDPerMillion: inputPrice, OutputUSDPerMillion: outputPrice, MaxOutputTokens: defaultMaxOutputTokens,
 		},
 		Evaluator: evaluator,
+		Screener:  cpuScreener(env),
 		Publisher: publisher, Literature: literature, MaxAttemptCostUSD: attemptCost,
 	}, nil
+}
+
+// cpuScreener is optional. When set, drafts must pass the CPU correctness
+// suite before the GPU evaluator runs.
+func cpuScreener(env func(string) string) kernelgen.Evaluator {
+	launcher := strings.TrimSpace(env("INFERCRANE_KERNEL_CPU_SCREEN"))
+	if launcher == "" {
+		return nil
+	}
+	return kernelgen.CommandEvaluator{
+		Executable: launcher, Unpriced: true, Timeout: 20 * time.Minute,
+		Environment: []string{"PATH=" + env("PATH"), "HOME=" + env("HOME"), "INFERCRANE_KERNEL_PACK_DIR=" + env("INFERCRANE_KERNEL_PACK_DIR"), "INFERCRANE_KERNEL_CPU_SCREEN_IMAGE=" + env("INFERCRANE_KERNEL_CPU_SCREEN_IMAGE")},
+	}
 }
 
 // literatureSource defaults to off so that no external query leaves a customer

@@ -24,6 +24,16 @@ SHAPES = ((1, 1024), (8, 1024), (32, 768), (128, 1024), (512, 4096), (3, 64))
 VERIFICATION_SHAPES = ((5, 1536), (17, 2048), (64, 512), (257, 1024))
 SANITIZER_CHILD_FLAG = "--sanitizer-child"
 EPSILON = 1e-6
+# INFERCRANE_EVAL_DEVICE=cpu with TRITON_INTERPRET=1 runs the same checks on a
+# laptop. It proves correctness only: the sanitizer and timing need a GPU and
+# are reported as not run, never as passed.
+DEVICE = os.environ.get("INFERCRANE_EVAL_DEVICE", "cuda")
+CPU_MODE = DEVICE == "cpu"
+if CPU_MODE:  # Triton's interpreter is slow, so the CPU suites are smaller.
+    SHAPES = ((1, 64), (3, 64), (5, 96), (8, 256), (32, 128))
+    VERIFICATION_SHAPES = ((2, 512), (7, 192), (17, 256))
+HIDDEN = 256 if CPU_MODE else 1024
+ROWS = 8 if CPU_MODE else 32
 
 
 class StageFailure(Exception):
@@ -48,10 +58,10 @@ def reference(torch, x, residual, weight, epsilon):
 
 
 def inputs(torch, rows, hidden, seed, kind="normal"):
-    generator = torch.Generator(device="cuda").manual_seed(seed)
+    generator = torch.Generator(device=DEVICE).manual_seed(seed)
 
     def draw(shape):
-        return torch.randn(shape, device="cuda", dtype=torch.float32, generator=generator)
+        return torch.randn(shape, device=DEVICE, dtype=torch.float32, generator=generator)
 
     x, residual, weight = draw((rows, hidden)), draw((rows, hidden)), draw((hidden,))
     if kind == "large":
@@ -59,7 +69,7 @@ def inputs(torch, rows, hidden, seed, kind="normal"):
     elif kind == "small":
         x, residual = x * 1e-3, residual * 1e-3
     elif kind == "sparse":
-        mask = torch.rand((rows, hidden), device="cuda", generator=generator) > 0.9
+        mask = torch.rand((rows, hidden), device=DEVICE, generator=generator) > 0.9
         x, residual = x * mask, residual * mask
     return x.bfloat16(), residual.bfloat16(), weight.bfloat16()
 
@@ -81,14 +91,15 @@ def check(torch, kernel, x, residual, weight, stage):
 
 def dirty_memory(torch):
     """Leave recognizable garbage so reading uninitialized output is caught."""
-    for size in (1 << 16, 1 << 20, 1 << 24):
-        block = torch.full((size,), 7.25, device="cuda", dtype=torch.float32)
+    for size in (1 << 12, 1 << 16, 1 << 20) if CPU_MODE else (1 << 16, 1 << 20, 1 << 24):
+        block = torch.full((size,), 7.25, device=DEVICE, dtype=torch.float32)
         del block
-    torch.cuda.synchronize()
+    if not CPU_MODE:
+        torch.cuda.synchronize()
 
 
 def check_determinism(torch, kernel, seed):
-    x, residual, weight = inputs(torch, 32, 1024, seed)
+    x, residual, weight = inputs(torch, ROWS, HIDDEN, seed)
     dirty_memory(torch)
     first, first_residual = kernel(x, residual, weight, EPSILON)
     dirty_memory(torch)
@@ -96,8 +107,8 @@ def check_determinism(torch, kernel, seed):
     if not (torch.equal(first, second) and torch.equal(first_residual, second_residual)):
         raise StageFailure("determinism")
     # A row's bits must not depend on the rows batched with it.
-    other_x, other_residual, _ = inputs(torch, 32, 1024, seed + 1)
-    for index in (0, 7, 31):
+    other_x, other_residual, _ = inputs(torch, ROWS, HIDDEN, seed + 1)
+    for index in (0, ROWS // 4, ROWS - 1):
         alone, _ = kernel(x[index:index + 1], residual[index:index + 1], weight, EPSILON)
         if not torch.equal(alone[0], first[index]):
             raise StageFailure("determinism")
@@ -109,8 +120,8 @@ def check_determinism(torch, kernel, seed):
 
 
 def check_edge_cases(torch, kernel):
-    zero = torch.zeros((4, 1024), device="cuda", dtype=torch.bfloat16)
-    weight = torch.ones((1024,), device="cuda", dtype=torch.bfloat16)
+    zero = torch.zeros((4, HIDDEN), device=DEVICE, dtype=torch.bfloat16)
+    weight = torch.ones((HIDDEN,), device=DEVICE, dtype=torch.bfloat16)
     check(torch, kernel, zero, zero.clone(), weight, "edge_cases")
     check(torch, kernel, zero + 1, zero - 1, weight, "edge_cases")
     check(torch, kernel, zero + 1, zero.clone(), weight * 0, "edge_cases")
@@ -170,7 +181,7 @@ def main() -> int:
     try:
         kernel = load_candidate(request["source"])
         stage = "smoke"
-        x, residual, weight = inputs(torch, 1, 1024, seed)
+        x, residual, weight = inputs(torch, 1, HIDDEN, seed)
         check(torch, kernel, x, residual, weight, stage)
         stages[stage] = True
 
@@ -182,7 +193,7 @@ def main() -> int:
 
         stage = "numerical_stability"
         for kind in ("large", "small", "sparse"):
-            x, residual, weight = inputs(torch, 32, 1024, seed + 3, kind)
+            x, residual, weight = inputs(torch, ROWS, HIDDEN, seed + 3, kind)
             check(torch, kernel, x, residual, weight, stage)
         stages[stage] = True
 
@@ -194,16 +205,17 @@ def main() -> int:
         check_edge_cases(torch, kernel)
         stages[stage] = True
 
-        stage = "sanitizer"
-        stages[stage] = run_sanitizer(request_bytes)
-        if not stages[stage]:
-            result["failed_stage"] = stage
+        if not CPU_MODE:
+            stage = "sanitizer"
+            stages[stage] = run_sanitizer(request_bytes)
+            if not stages[stage]:
+                result["failed_stage"] = stage
 
-        stage = "timing"
-        x, residual, weight = inputs(torch, 128, 1024, seed)
-        baseline = load_baseline(torch)
-        result["baseline_median_us"] = median_microseconds(triton, lambda: baseline(x, residual, weight))
-        result["candidate_median_us"] = median_microseconds(triton, lambda: kernel(x, residual, weight, EPSILON))
+            stage = "timing"
+            x, residual, weight = inputs(torch, 128, 1024, seed)
+            baseline = load_baseline(torch)
+            result["baseline_median_us"] = median_microseconds(triton, lambda: baseline(x, residual, weight))
+            result["candidate_median_us"] = median_microseconds(triton, lambda: kernel(x, residual, weight, EPSILON))
     except StageFailure:
         result["failed_stage"] = stage
     except Exception:  # Generated code may fail in any way; report only the stage.

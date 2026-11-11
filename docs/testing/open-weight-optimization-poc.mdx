@@ -24,6 +24,29 @@ content-free workload shape
              └─ baseline first; mechanisms become candidates, never assumptions
 ```
 
+## Stage 0: rehearse on a laptop
+
+Two checks run on a laptop with Docker and no datacenter GPU. Neither produces GPU performance
+evidence.
+
+Check a generated kernel for correctness on CPU. The hidden suite runs in a no-network Linux
+container with Triton's interpreter, and the sanitizer and timing stages are reported as not run:
+
+```bash
+tools/kernel-lab/screen-kernel.sh residual-rmsnorm path/to/kernel.py
+```
+
+Rehearse a full comparison with a real small model. The script serves Qwen3-0.6B with llama.cpp,
+measures control, candidate, control with AIPerf, checks output parity, and runs the real evidence
+evaluator on the result:
+
+```bash
+python3.12 tools/laptop-rehearsal/rehearse.py
+```
+
+It needs `llama-server` and `aiperf` on `PATH`. Control drift above 10% means the laptop was too busy
+for a fair comparison.
+
 ## Stage 1: local and free
 
 Run the contract and evidence tests without allocating a GPU:

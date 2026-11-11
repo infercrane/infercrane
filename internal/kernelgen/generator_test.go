@@ -466,3 +466,54 @@ func TestLoadPackStaysInsideItsDirectory(t *testing.T) {
 		}
 	}
 }
+
+func TestCPUScreenRejectsWrongDraftsBeforeGPUSpend(t *testing.T) {
+	wrong, right := kernelDraft("wrong"), kernelDraft("right")
+	author := &scriptedAuthor{drafts: []string{wrong, right}}
+	screener := &scriptedEvaluator{respond: func(request EvaluationRequest) (EvaluationResult, error) {
+		result := EvaluationResult{Correctness: allStagesPassed}
+		result.Correctness.Sanitizer = false // A CPU screen cannot run it.
+		if request.Source == wrong {
+			result.Correctness.Determinism, result.FailedStage = false, "determinism"
+		}
+		return result, nil
+	}}
+	gpu := &scriptedEvaluator{respond: func(EvaluationRequest) (EvaluationResult, error) { return timed(100, 80), nil }}
+	generator := newGenerator(t, author, gpu, &memoryPublisher{})
+	generator.Screener = screener
+	evidence, err := generator.Generate(context.Background(), generationRequest(t, defaultPolicy()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(screener.calls) != 2 || len(gpu.calls) != 1 || gpu.calls[0].Source != right {
+		t.Fatalf("screen calls=%d gpu calls=%d", len(screener.calls), len(gpu.calls))
+	}
+	if evidence.Research.BestSourceRevision != sourceRevision(right) {
+		t.Fatalf("receipt=%+v", evidence.Research)
+	}
+	_, user := BuildPrompt(author.requests[1])
+	if !strings.Contains(user, "cpu-screen: determinism") {
+		t.Fatalf("screen feedback missing:\n%s", user)
+	}
+}
+
+func TestCPUScreenOutageIsAnInfrastructureError(t *testing.T) {
+	generator := newGenerator(t, &scriptedAuthor{drafts: []string{kernelDraft("a")}}, &scriptedEvaluator{respond: func(EvaluationRequest) (EvaluationResult, error) { return timed(100, 80), nil }}, &memoryPublisher{})
+	generator.Screener = &scriptedEvaluator{respond: func(EvaluationRequest) (EvaluationResult, error) {
+		return EvaluationResult{}, errors.New("docker unavailable")
+	}}
+	if _, err := generator.Generate(context.Background(), generationRequest(t, defaultPolicy())); err == nil {
+		t.Fatal("screen outage was treated as a finished search")
+	}
+}
+
+func TestUnpricedEvaluatorNeedsNoHourlyRate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "screen")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\ncat >/dev/null\nprintf '{\"correctness\":{\"smoke\":true},\"baseline_median_us\":0,\"candidate_median_us\":0,\"roofline_utilization\":0,\"cost_usd\":0}'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	result, err := CommandEvaluator{Executable: path, Unpriced: true}.Evaluate(context.Background(), EvaluationRequest{})
+	if err != nil || result.CostUSD != 0 || !result.Correctness.Smoke {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}
