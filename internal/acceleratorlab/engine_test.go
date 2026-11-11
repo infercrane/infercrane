@@ -217,6 +217,83 @@ func TestEngineAcceptsModelNeutralIterativeKernelResearchWinner(t *testing.T) {
 	}
 }
 
+func noWinnerFixture(t *testing.T, mutate func(*kernelresearch.Receipt, *GenerationEvidence)) (Request, Engine) {
+	t.Helper()
+	request := fixtureRequest(ModalityText)
+	request.Sources = nil
+	request.Policy.AllowGeneratedKernels = true
+	request.Policy.KernelResearch = kernelresearch.Policy{Enabled: true, MaxIterations: 4, MaxConsecutiveRejections: 2, MaxDurationSeconds: 3600, MaxCostUSD: .50, MinRelativeImprovement: 1.01, TargetKernelSpeedup: 1.20, MaxRooflineUtilization: .95}
+	engine := Engine{
+		Profiler: fixtureProfiler(0),
+		Generator: generatorFunc(func(_ context.Context, input GenerationRequest) (GenerationEvidence, error) {
+			now := time.Now().UTC()
+			receipt, err := kernelresearch.Start(*input.Research, now)
+			if err != nil {
+				return GenerationEvidence{}, err
+			}
+			if receipt, _, err = kernelresearch.Observe(receipt, kernelresearch.Attempt{
+				Iteration: 1, SourceRevision: strings.Repeat("d", 40), Backend: "triton", ArtifactDigest: digestOf("a"),
+				Correctness:      kernelresearch.Correctness{Smoke: true, ShapeSweep: true, NumericalStability: true, Determinism: true, EdgeCases: true, Sanitizer: true},
+				BaselineMedianUS: 100, CandidateMedianUS: 130, RooflineUtilization: .5, CostUSD: .10, CompletedAt: now.Add(time.Minute),
+			}); err != nil {
+				return GenerationEvidence{}, err
+			}
+			if receipt, err = kernelresearch.Complete(receipt, now.Add(2*time.Minute)); err != nil {
+				return GenerationEvidence{}, err
+			}
+			evidence := GenerationEvidence{InputDigest: input.InputDigest, CandidateID: input.Candidate.ID, Generator: "kernelgen", GeneratorVersion: "1", ProfileArtifactDigest: input.Profile.ArtifactDigest, GeneratedAt: now, CostUSD: .10, Research: &receipt}
+			if mutate != nil {
+				mutate(&receipt, &evidence)
+			}
+			return evidence, nil
+		}),
+		Builder: builderFunc(func(context.Context, BuildRequest) (BuildEvidence, error) {
+			t.Fatal("no-winner search must not build")
+			return BuildEvidence{}, nil
+		}),
+		Qualifier: fixtureQualifier(nil),
+	}
+	return request, engine
+}
+
+func TestEngineKeepsNoWinnerResearchAsNegativeEvidence(t *testing.T) {
+	request, engine := noWinnerFixture(t, nil)
+	result, err := engine.Run(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	experiment := result.Experiments[0]
+	if experiment.State != "rejected" || experiment.FailureCode != "kernel_research_no_winner" || experiment.Generation == nil || experiment.Generation.Research == nil || result.CostUSD != .10 {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestEngineRejectsTamperedNoWinnerResearch(t *testing.T) {
+	for name, mutate := range map[string]func(*kernelresearch.Receipt, *GenerationEvidence){
+		"receipt digest": func(receipt *kernelresearch.Receipt, _ *GenerationEvidence) { receipt.ReceiptDigest = digestOf("0") },
+		"profile": func(_ *kernelresearch.Receipt, evidence *GenerationEvidence) {
+			evidence.ProfileArtifactDigest = digestOf("f")
+		},
+		"cost": func(_ *kernelresearch.Receipt, evidence *GenerationEvidence) { evidence.CostUSD = -1 },
+	} {
+		request, engine := noWinnerFixture(t, mutate)
+		result, err := engine.Run(context.Background(), request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.Experiments[0].FailureCode != "generation_evidence_invalid" {
+			t.Fatalf("%s: %+v", name, result.Experiments[0])
+		}
+	}
+}
+
+func TestGeneratedSourceBackendIsNotInferredFromCompilerOrder(t *testing.T) {
+	request := BuildRequest{Source: SourcePin{Backend: "cuda-cpp"}, Experiment: kernelplanner.Candidate{CompilerChoices: []string{"triton"}}}
+	if got := sourceBackend(request); got != "cuda-cpp" {
+		t.Fatalf("backend=%s", got)
+	}
+}
+
 func TestEngineRejectsGeneratedSourceNotBoundToProfile(t *testing.T) {
 	request := fixtureRequest(ModalityText)
 	request.Sources = nil

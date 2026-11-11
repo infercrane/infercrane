@@ -1,0 +1,30 @@
+{
+  "schema_version": "infercrane.kernel-pack/v1",
+  "family": "residual-rmsnorm",
+  "backend": "triton",
+  "license": "Apache-2.0",
+  "filename": "kernel.py",
+  "contract": "Write a Python module using PyTorch and Triton that defines fused_residual_rmsnorm(x, residual, weight, epsilon) -> (output, residual_out).\nInputs: x and residual are BF16 tensors shaped (rows, hidden_size) on one CUDA device; weight is a BF16 tensor shaped (hidden_size,); epsilon is a positive float.\nResult: residual_out = x + residual. output = residual_out * rsqrt(mean(residual_out * residual_out, dim=-1, keepdim=True) + epsilon) * weight, computed in FP32 and returned as BF16.\nBoth results are new tensors with the input device and dtype. Inputs must not be modified.\nEach row must be computed independently, so a row's bits do not depend on which other rows share the batch.\nThe GPU work must be done by your own Triton program (@triton.jit). Importing torch is allowed only for tensor allocation and device handling.",
+  "required_substrings": ["@triton.jit", "def fused_residual_rmsnorm"],
+  "forbidden_substrings": [
+    "torch.nn",
+    "torch.mean",
+    "torch.sum",
+    "torch.sqrt",
+    "torch.rsqrt",
+    "torch.linalg",
+    ".mean(",
+    ".norm(",
+    "subprocess",
+    "socket",
+    "os.system",
+    "eval(",
+    "exec(",
+    "__import__",
+    "importlib"
+  ],
+  "max_plausible_speedup": 3,
+  "integration": "integration",
+  "runtimes": ["vllm"],
+  "candidate_args": ["--kernel-config.ir_op_priority.fused_add_rms_norm=infercrane,vllm_c,native"]
+}

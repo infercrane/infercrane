@@ -90,6 +90,7 @@ type SourcePin struct {
 	ImplementationID string     `json:"implementation_id"`
 	Revision         string     `json:"revision"`
 	License          string     `json:"license"`
+	Backend          string     `json:"backend,omitempty"`
 	Artifacts        []Artifact `json:"artifacts,omitempty"`
 }
 
@@ -188,6 +189,17 @@ type GenerationEvidence struct {
 	GeneratedAt           time.Time               `json:"generated_at"`
 	CostUSD               float64                 `json:"cost_usd"`
 	Research              *kernelresearch.Receipt `json:"research,omitempty"`
+	Literature            []LiteratureReference   `json:"literature,omitempty"`
+}
+
+// LiteratureReference records public research shown to a generator. It is
+// provenance only and never counts as qualification or performance evidence.
+type LiteratureReference struct {
+	Source    string `json:"source"`
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	URL       string `json:"url"`
+	Published string `json:"published,omitempty"`
 }
 
 type QualificationRequest struct {
@@ -376,6 +388,23 @@ func (e Engine) Run(ctx context.Context, request Request) (Result, error) {
 				experiment.State, experiment.FailureCode = "inconclusive", "kernel_generation_failed"
 				experiment.Reasons = []string{generationErr.Error()}
 				result.Experiments = append(result.Experiments, experiment)
+				continue
+			}
+			if searchedWithoutWinner(generated) {
+				if generationErr = validateNoWinner(digest, candidate, profile, researchIntent, generated); generationErr != nil {
+					experiment.State, experiment.FailureCode = "rejected", "generation_evidence_invalid"
+					experiment.Reasons = []string{generationErr.Error()}
+					result.Experiments = append(result.Experiments, experiment)
+					continue
+				}
+				experiment.Generation = &generated
+				experiment.State, experiment.FailureCode = "rejected", "kernel_research_no_winner"
+				experiment.Reasons = []string{"kernel research finished as " + generated.Research.State + " without a correct, materially faster kernel"}
+				result.CostUSD += generated.CostUSD
+				result.Experiments = append(result.Experiments, experiment)
+				if err = withinBudget(request.Policy.MaxCostUSD, result.CostUSD); err != nil {
+					return result, err
+				}
 				continue
 			}
 			if generationErr = validateGeneration(digest, candidate, profile, researchIntent, generated); generationErr != nil {
@@ -622,6 +651,28 @@ func validateBuild(inputDigest string, build BuildEvidence) error {
 		if !validArtifact(artifact) {
 			return errors.New("build artifact is not immutable and retrievable")
 		}
+	}
+	return nil
+}
+
+func searchedWithoutWinner(generated GenerationEvidence) bool {
+	return generated.Research != nil && generated.Research.BestSourceRevision == "" && generated.Source.Revision == ""
+}
+
+// validateNoWinner lets a finished search that kept nothing be recorded as
+// negative evidence, but only when its receipt is bound to this exact request.
+func validateNoWinner(inputDigest string, candidate kernelplanner.Candidate, profile ProfileEvidence, researchIntent *kernelresearch.Intent, generated GenerationEvidence) error {
+	if generated.InputDigest != inputDigest || generated.CandidateID != candidate.ID || generated.Generator == "" || generated.GeneratorVersion == "" || generated.GeneratedAt.IsZero() || generated.ProfileArtifactDigest != profile.ArtifactDigest {
+		return errors.New("kernel research result is not bound to the request, candidate, and measured profile")
+	}
+	if researchIntent == nil {
+		return errors.New("kernel research result has no authorized intent")
+	}
+	if invalidCost(generated.CostUSD) {
+		return errors.New("kernel research result reports an invalid cost")
+	}
+	if err := kernelresearch.ValidateReceipt(*researchIntent, *generated.Research); err != nil {
+		return fmt.Errorf("kernel research receipt: %w", err)
 	}
 	return nil
 }

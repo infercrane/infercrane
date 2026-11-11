@@ -70,9 +70,36 @@ func TestFrontierProfilesUseTheGeneralImmutableWorkloadContract(t *testing.T) {
 	}
 }
 
+func TestQwen38H200ProfileMatchesScreenedRecipeWithoutProviderClaim(t *testing.T) {
+	entry, ok := Get("qwen3.8-27b-fp8")
+	if !ok || len(entry.Profiles) != 2 {
+		t.Fatalf("pinned Qwen profiles missing: %+v", entry)
+	}
+	profile := entry.Profiles[1]
+	wantImage := "lmsysorg/sglang@sha256:06e4f2ed21afde4ff513cda65070124e727ba23ccaeff7712b8c40e1097d611f"
+	if profile.Runtime != "custom-oci" || profile.RuntimeVersion != "0.5.20" || profile.GPUHint != "H200" || strings.Join(profile.CompatibleGPUs, ",") != "H200" || profile.Workload.Image != wantImage {
+		t.Fatalf("Qwen H200 tuple drifted: %+v", profile)
+	}
+	command := strings.Join(profile.Workload.Command, " ")
+	for _, value := range []string{"--kv-cache-dtype fp8_e4m3", "--speculative-algorithm NEXTN", "--speculative-num-draft-tokens 4", "--cuda-graph-bs-decode 1 2 4 8 12 16 24 32 33", "--cuda-graph-bs-prefill 256 512 1024 2048 4096 8192", "${MODEL_REVISION}"} {
+		if !strings.Contains(command, value) {
+			t.Fatalf("Qwen H200 command omitted %q: %s", value, command)
+		}
+	}
+	limitations := strings.Join(profile.Limitations, " ")
+	for _, disclosure := range []string{"screening evidence", "Modal H200", "RunPod", "not recipe-v1", "no public-grade performance claim"} {
+		if !strings.Contains(limitations, disclosure) {
+			t.Fatalf("Qwen H200 recipe omitted evidence boundary %q: %s", disclosure, limitations)
+		}
+	}
+	if err := profile.Workload.Validate(); err != nil {
+		t.Fatalf("Qwen H200 workload is invalid: %v", err)
+	}
+}
+
 func TestQwen38QualifiedCandidateIsExposedWithoutCrossProviderClaim(t *testing.T) {
 	entry, ok := Get("qwen3.8-27b-fp8")
-	if !ok || entry.Model != "Qwen/Qwen3.8-27B-FP8" || entry.Revision != "017b9c7af6b5689d5dd426a76e0bc077eb5ca20a" || len(entry.Profiles) != 1 {
+	if !ok || entry.Model != "Qwen/Qwen3.8-27B-FP8" || entry.Revision != "017b9c7af6b5689d5dd426a76e0bc077eb5ca20a" || len(entry.Profiles) != 2 {
 		t.Fatalf("pinned Qwen candidate missing: %+v", entry)
 	}
 	profile := entry.Profiles[0]

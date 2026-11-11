@@ -4283,6 +4283,23 @@
             "minimum": 0,
             "type": "number"
           },
+          "model_config_digest": {
+            "description": "Digest of the pinned model configuration that declared model_features.",
+            "pattern": "^sha256:[a-fA-F0-9]{64}$",
+            "type": "string"
+          },
+          "model_features": {
+            "description": "Capabilities declared by the pinned model configuration. They gate experiments and are never performance evidence.",
+            "items": {
+              "enum": [
+                "native_mtp"
+              ],
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array",
+            "uniqueItems": true
+          },
           "model_identity": {
             "maxLength": 256,
             "minLength": 1,
@@ -4320,6 +4337,13 @@
             "maxItems": 16,
             "type": "array",
             "uniqueItems": true
+          },
+          "search": {
+            "description": "Adds bounded, unmeasured runtime-recipe experiments ahead of the reviewed candidates.",
+            "enum": [
+              "recipes"
+            ],
+            "type": "string"
           },
           "target_concurrency": {
             "exclusiveMinimum": 0,

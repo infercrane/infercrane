@@ -1,0 +1,42 @@
+{
+  "schema_version": "infercrane.kernel-target-runtimes/v1",
+  "runtimes": [
+    {
+      "name": "sglang",
+      "version": "0.5.20",
+      "repository": "lmsysorg/sglang",
+      "python": "/opt/sglang/bin/python",
+      "launcher": [
+        "/opt/sglang/bin/python", "-m", "sglang.launch_server",
+        "--model-path", "${MODEL}",
+        "--revision", "${MODEL_REVISION}",
+        "--served-model-name", "${MODEL}",
+        "--host", "0.0.0.0",
+        "--port", "${PORT}",
+        "--enable-metrics"
+      ],
+      "port": 30000,
+      "profiler_env": "SGLANG_TORCH_PROFILER_DIR",
+      "profile_request": {"output_dir": "/profiles", "activities": ["CPU", "GPU"], "with_stack": false, "record_shapes": true, "profile_by_stage": false}
+    },
+    {
+      "name": "vllm",
+      "version": "0.22.1",
+      "repository": "vllm/vllm-openai",
+      "python": "python3",
+      "launcher": [
+        "vllm", "serve", "${MODEL}",
+        "--revision", "${MODEL_REVISION}",
+        "--host", "0.0.0.0",
+        "--port", "${PORT}"
+      ],
+      "port": 8000,
+      "profiler_args": [
+        "--profiler-config.profiler=torch",
+        "--profiler-config.torch_profiler_dir=${PROFILE_DIR}",
+        "--profiler-config.torch_profiler_with_stack=false"
+      ],
+      "profile_request": {}
+    }
+  ]
+}

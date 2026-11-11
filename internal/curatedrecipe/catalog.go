@@ -204,6 +204,57 @@ func materializedHuggingFaceVLLMCommand(command []string, localDir string) []str
 	return append([]string{"python3", "-c", bootstrap}, command[5:]...)
 }
 
+func qwen38H200ProvisionalProfile() ServingProfile {
+	return ServingProfile{
+		Name:                "sglang-h200-nextn-k4-provisional",
+		DisplayName:         "SGLang H200 NEXTN k4 provisional",
+		Description:         "Launch configuration from the paired Modal H200 screening receipt, exposed as a starting candidate rather than a provider performance claim.",
+		Runtime:             "custom-oci",
+		RuntimeVersion:      "0.5.20",
+		ComputeMode:         "elastic",
+		GPUHint:             "H200",
+		CompatibleGPUs:      []string{"H200"},
+		GPUCount:            1,
+		CloudHint:           "runpod",
+		ProviderAdapterHint: "runpod-pods",
+		MinReplicas:         1,
+		MaxReplicas:         1,
+		RuntimeArgs:         []string{},
+		EvidenceClass:       configurationEvidence,
+		QualificationScope:  configurationScope,
+		Limitations: []string{
+			"The source receipt is screening evidence from one Modal H200 and does not qualify a RunPod Pods deployment or any other provider tuple.",
+			"The near-262K context run missed its p95 TTFT limit; only the workload shapes in the source receipt were measured.",
+			"This entry is not recipe-v1 and contains no public-grade performance claim; every target requires its own benchmark, quality, and cost evidence.",
+		},
+		Workload: runtimecontract.Workload{
+			Image: "lmsysorg/sglang@sha256:06e4f2ed21afde4ff513cda65070124e727ba23ccaeff7712b8c40e1097d611f",
+			Command: []string{
+				"/opt/sglang/bin/python", "-m", "sglang.launch_server",
+				"--model-path", "${MODEL}",
+				"--host", "0.0.0.0",
+				"--port", "${PORT}",
+				"--served-model-name", "${MODEL}",
+				"--revision", "${MODEL_REVISION}",
+				"--tp-size", "1",
+				"--context-length", "262144",
+				"--mem-fraction-static", "0.90",
+				"--kv-cache-dtype", "fp8_e4m3",
+				"--enable-metrics",
+				"--reasoning-parser", "qwen3",
+				"--tool-call-parser", "qwen3_coder",
+				"--speculative-algorithm", "NEXTN",
+				"--speculative-num-steps", "3",
+				"--speculative-eagle-topk", "1",
+				"--speculative-num-draft-tokens", "4",
+				"--cuda-graph-bs-decode", "1", "2", "4", "8", "12", "16", "24", "32", "33",
+				"--cuda-graph-bs-prefill", "256", "512", "1024", "2048", "4096", "8192",
+			},
+			Protocol: runtimecontract.OpenAIProtocol, Port: 30000, ReadinessPath: "/health", ModelsPath: "/v1/models", MetricsPath: "/metrics", Cancellation: "http-disconnect", Drain: "connection", ShutdownGraceSeconds: 120,
+		},
+	}
+}
+
 func qwen38BlackwellTP4Profile() ServingProfile {
 	return ServingProfile{
 		Name:                "custom-oci-blackwell-tep4",
@@ -296,6 +347,8 @@ func init() {
 	// turns the model cache contract into a reusable exact-model artifact.
 	for entryIndex := range catalog {
 		switch catalog[entryIndex].Name {
+		case "qwen3.8-27b-fp8":
+			catalog[entryIndex].Profiles = append(catalog[entryIndex].Profiles, qwen38H200ProvisionalProfile())
 		case "qwen3.8-flash-next":
 			catalog[entryIndex].Profiles = append(catalog[entryIndex].Profiles, qwen38BlackwellTP2Profile(), qwen38BlackwellTP4Profile())
 		case "glm-5.3-flash":

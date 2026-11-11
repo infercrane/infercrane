@@ -4,7 +4,7 @@ Every result here is bound to an exact model, runtime, accelerator, workload, an
 win is not generalized to another provider, GPU, context length, concurrency level, or production
 network path.
 
-## Qwen3.8-27B — paired H200 serving qualification
+## Qwen3.8-27B — paired H200 serving screen
 
 | Field | Value |
 |---|---|
@@ -13,8 +13,9 @@ network path.
 | Runtime | SGLang 0.5.20 |
 | Accelerator | 1× NVIDIA H200 |
 | Workload | 4,096 input tokens, 512 output tokens, concurrency 12 |
-| Control | Same model, image, workload, hardware, and output checks without the selected serving recipe |
-| Selected | FP8 weights and KV cache, bounded CUDA graphs, native NEXTN/MTP |
+| Evidence level | Screening: one run, 24 requests at concurrency 12 |
+| Control | Same model, image, workload, hardware, output checks, FP8 weights, and FP8 KV cache |
+| Selected | Control plus bounded CUDA graphs and native NEXTN/MTP |
 
 | Measurement | Control | Selected | Change |
 |---|---:|---:|---:|
@@ -33,7 +34,8 @@ forced tools, malformed-request handling, and prompt-token accounting passed.
 
 ### Important limits and rejected candidates
 
-- The result is a controlled Modal H200 qualification, not an OpenRouter or public-Internet result.
+- The result is a controlled Modal H200 screen, not an OpenRouter or public-Internet result.
+- The throughput gain depends on load: 2.07× at concurrency 4, 1.74× at 8, 1.72× at 12, and 1.48× at 16.
 - The launch context boundary stayed at 32K because the near-262K run missed its pre-registered
   p95 TTFT limit even though all requests completed correctly.
 - FlashInfer GDN candidates preserved correctness but lost throughput and cold-start time on this

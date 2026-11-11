@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+"""Fixed Brezel entrypoint for kernel source screening.
+
+Baked into the optimization environment at /opt/infercrane/bin. It runs with
+no network and never executes the source it inspects: it verifies content
+hashes, screens the file, and compiles it to bytecode to catch syntax errors.
+GPU correctness and performance are proven later on the target accelerator.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import shutil
+import sys
+from pathlib import Path
+
+RESULT_SCHEMA = "infercrane.brezel-optimization-result/v1"
+JOB_SCHEMA = "infercrane.brezel-optimization-job/v1"
+MAX_SOURCE_BYTES = 1 << 20
+SUPPORTED_BACKENDS = {"triton"}
+OUTPUT_KIND = "kernel-bundle"
+
+
+def sha256_hex(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def run(manifest_path: Path, result_path: Path) -> int:
+    manifest_bytes = manifest_path.read_bytes()
+    job = json.loads(manifest_bytes)
+    checks = []
+    artifacts = []
+    output_directory = result_path.parent / "artifacts"
+    input_directory = manifest_path.parent / "artifacts"
+
+    def passed(name: str) -> None:
+        checks.append({"name": name, "status": "passed"})
+
+    def failed(name: str, detail: str) -> None:
+        checks.append({"name": name, "status": "failed", "detail": detail})
+
+    try:
+        if job.get("schema_version") != JOB_SCHEMA:
+            raise ValueError("job-schema")
+        passed("job-schema")
+        candidate = job["candidate"]
+        if candidate.get("backend") not in SUPPORTED_BACKENDS:
+            raise ValueError("backend")
+        passed("backend")
+        if not candidate.get("license"):
+            raise ValueError("license")
+        passed("license")
+        inputs = job.get("inputs") or []
+        if not inputs:
+            raise ValueError("source-integrity")
+        output_directory.mkdir(parents=True, exist_ok=True)
+        for item in inputs:
+            name = Path(item["name"]).name
+            if name != item["name"]:
+                raise ValueError("source-integrity")
+            data = (input_directory / name).read_bytes()
+            if sha256_hex(data) != item["sha256"].removeprefix("sha256:").lower():
+                raise ValueError("source-integrity")
+            if not data or len(data) > MAX_SOURCE_BYTES:
+                raise ValueError("source-screen")
+            compile(data.decode("utf-8"), name, "exec", dont_inherit=True)
+            target = output_directory / name
+            shutil.copyfile(input_directory / name, target)
+            artifacts.append({"kind": OUTPUT_KIND, "path": str(target), "sha256": sha256_hex(data), "size": len(data)})
+        passed("source-integrity")
+        passed("source-screen")
+        passed("syntax")
+        status = "passed"
+    except (KeyError, OSError, SyntaxError, UnicodeDecodeError, ValueError, TypeError) as error:
+        name = str(error) if isinstance(error, ValueError) and str(error) else "source-screen"
+        failed(name, type(error).__name__)
+        status = "rejected"
+        artifacts = []
+
+    result = {
+        "schema_version": RESULT_SCHEMA,
+        "job_id": job.get("id", ""),
+        "input_digest": sha256_hex(manifest_bytes),
+        "status": status,
+        "checks": checks,
+        "artifacts": artifacts,
+        "limitations": ["Source screening does not prove GPU correctness or performance."],
+    }
+    result_path.parent.mkdir(parents=True, exist_ok=True)
+    result_path.write_text(json.dumps(result), encoding="utf-8")
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--manifest", type=Path, required=True)
+    parser.add_argument("--result", type=Path, required=True)
+    arguments = parser.parse_args()
+    return run(arguments.manifest, arguments.result)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -87,7 +87,34 @@
         "slo_goodput_requests_per_second": {"type": "number", "minimum": 0},
         "slo_qualified_output_tokens_per_second": {"type": "number", "minimum": 0},
         "gpu_seconds_per_successful_request": {"type": "number", "minimum": 0},
-        "cost_per_1m_successful_output_tokens_usd": {"type": "number", "minimum": 0}
+        "cost_per_1m_successful_output_tokens_usd": {"type": "number", "minimum": 0},
+        "input_tokens": {"type": "integer", "minimum": 0},
+        "output_tokens": {"type": "integer", "minimum": 0},
+        "economics": {"$ref": "#/$defs/lane_economics"}
+      }
+    },
+    "lane_economics": {
+      "type": "object",
+      "description": "Producer price projection for one lane. It is context only, is never scored, and is not sourced cost evidence.",
+      "additionalProperties": false,
+      "required": ["break_even_utilization", "can_reach_target_margin_at_full_utilization", "input_output_token_ratio", "input_price_usd_per_million", "measured_gpu_cost_per_million_output_equivalent_usd", "measured_gpu_cost_usd", "measured_output_tokens_per_second", "measured_revenue_usd", "non_gpu_revenue_fraction", "output_price_usd_per_million", "passes_target_margin_at_target_utilization", "projected_gross_margin", "required_output_tokens_per_second_for_target_margin", "target_gross_margin", "target_margin_utilization", "target_utilization"],
+      "properties": {
+        "break_even_utilization": {"type": "number", "minimum": 0},
+        "can_reach_target_margin_at_full_utilization": {"type": "boolean"},
+        "input_output_token_ratio": {"type": "number", "minimum": 0},
+        "input_price_usd_per_million": {"type": "number", "minimum": 0},
+        "measured_gpu_cost_per_million_output_equivalent_usd": {"type": "number", "minimum": 0},
+        "measured_gpu_cost_usd": {"type": "number", "minimum": 0},
+        "measured_output_tokens_per_second": {"type": "number", "minimum": 0},
+        "measured_revenue_usd": {"type": "number", "minimum": 0},
+        "non_gpu_revenue_fraction": {"type": "number", "minimum": 0},
+        "output_price_usd_per_million": {"type": "number", "minimum": 0},
+        "passes_target_margin_at_target_utilization": {"type": "boolean"},
+        "projected_gross_margin": {"type": "number"},
+        "required_output_tokens_per_second_for_target_margin": {"type": "number", "minimum": 0},
+        "target_gross_margin": {"type": "number", "minimum": 0},
+        "target_margin_utilization": {"type": "number", "minimum": 0},
+        "target_utilization": {"type": "number", "minimum": 0}
       }
     },
     "candidate": {
