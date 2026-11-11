@@ -222,7 +222,9 @@ func (t Target) verifyAccelerator(ctx context.Context, hardware kernelplanner.Ha
 }
 
 func (t Target) snapshotPath(model kernelplanner.ModelIdentity) string {
-	return filepath.Join(t.ModelCache, "hub", "models--"+strings.ReplaceAll(model.Repository, "/", "--"), "snapshots", model.Revision)
+	// Rooting the request-derived part keeps the path inside the model cache.
+	relative := filepath.Join("hub", "models--"+strings.ReplaceAll(model.Repository, "/", "--"), "snapshots", model.Revision)
+	return filepath.Join(t.ModelCache, filepath.Clean("/"+relative))
 }
 
 // materialize downloads the pinned model with the trusted runtime image. It is

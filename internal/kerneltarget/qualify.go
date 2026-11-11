@@ -46,7 +46,8 @@ func (t Target) contentAddressedFile(identity string) (string, error) {
 		return "", fmt.Errorf("%q is not a content-addressed identity", identity)
 	}
 	digest := identity[index+len("@sha256:"):]
-	path := filepath.Join(t.ReplayDir, digest)
+	// Rooting the digest keeps the path inside the replay directory.
+	path := filepath.Join(t.ReplayDir, filepath.Clean("/"+digest))
 	actual, err := hashFile(path)
 	if err != nil {
 		return "", fmt.Errorf("read %s: %w", identity, err)
@@ -348,7 +349,7 @@ func (t Target) packIntegration(pack kernelgen.Pack, spec RuntimeSpec) (string, 
 	if pack.Integration == "" || !containsString(pack.Runtimes, spec.Name) {
 		return "", fmt.Errorf("pack %s has no reviewed integration for runtime %s", pack.Family, spec.Name)
 	}
-	path := filepath.Join(t.PackDir, string(pack.Family), pack.Integration)
+	path := filepath.Join(t.PackDir, filepath.Clean("/"+string(pack.Family)), filepath.Clean("/"+pack.Integration))
 	info, err := os.Stat(path)
 	if err != nil || !info.IsDir() {
 		return "", fmt.Errorf("pack %s integration directory is missing", pack.Family)

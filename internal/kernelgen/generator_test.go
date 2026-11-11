@@ -458,3 +458,11 @@ func TestRepositoryPackLoadsAndScreens(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadPackStaysInsideItsDirectory(t *testing.T) {
+	for _, family := range []kernelplanner.OperatorFamily{"../../etc", "/etc/passwd", "a/../../b"} {
+		if _, err := LoadPack(t.TempDir(), family); err == nil {
+			t.Fatalf("family %q escaped the pack directory", family)
+		}
+	}
+}

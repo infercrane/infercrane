@@ -53,7 +53,9 @@ func LoadPack(directory string, family kernelplanner.OperatorFamily) (Pack, erro
 	if !safeFamily.MatchString(string(family)) {
 		return Pack{}, fmt.Errorf("invalid operator family %q", family)
 	}
-	path := filepath.Join(directory, string(family), "pack.json")
+	// Rooting the name before joining keeps the path inside directory even if
+	// the pattern above is ever loosened.
+	path := filepath.Join(directory, filepath.Clean("/"+string(family)), "pack.json")
 	body, err := os.ReadFile(path)
 	if err != nil {
 		return Pack{}, fmt.Errorf("no reviewed kernel pack for %s: %w", family, err)
