@@ -322,8 +322,8 @@ created, including when the control is measured again inside another candidate's
 measurement is retried. The base is kept as `measured.invocation_base`. The candidate's stored metrics
 are the mean of its three runs, with Student-t 95% intervals in `confidence_95`.
 
-**Control.** The control is the proposal's starting point: the untuned control arm for recipe search,
-otherwise the highest-ranked compatible candidate. It is measured first. While its deployment is
+**Control.** The control is the proposal's starting point: the untuned control arm when the proposal
+includes one, otherwise the highest-ranked compatible candidate. It is measured first. While its deployment is
 serving, every other candidate is measured interleaved with it, as control, candidate, control,
 candidate, control, candidate, control. The control and candidate share a time window, not a GPU, so
 differences between their nodes are not removed. Control runs that fail, or whose output throughput
