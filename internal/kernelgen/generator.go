@@ -35,8 +35,11 @@ type Generator struct {
 	PackDirectory string
 	Author        Author
 	Evaluator     Evaluator
-	Publisher     Publisher
-	Literature    kernelliterature.Searcher
+	// Screener optionally checks correctness on CPU first, so a wrong draft
+	// is rejected before it spends GPU time.
+	Screener   Evaluator
+	Publisher  Publisher
+	Literature kernelliterature.Searcher
 	// MaxAttemptCostUSD is the worst-case spend of one more attempt. The loop
 	// stops before it could cross the authorized ceiling.
 	MaxAttemptCostUSD float64
@@ -183,6 +186,21 @@ func (r *generation) reject(stage, reason string) {
 
 func (r *generation) evaluate(ctx context.Context, source, revision string) error {
 	input := r.evaluationRequest(source, revision, false)
+	if r.generator.Screener != nil {
+		screen, err := r.generator.Screener.Evaluate(ctx, input)
+		if err != nil {
+			return err
+		}
+		r.charge(screen.CostUSD)
+		if !correctOnCPU(screen.Correctness) {
+			stage := screen.FailedStage
+			if stage == "" {
+				stage = "correctness"
+			}
+			r.reject("cpu-screen", stage)
+			return nil
+		}
+	}
 	result, err := r.generator.Evaluator.Evaluate(ctx, input)
 	if err != nil {
 		return err
@@ -244,6 +262,12 @@ func (r *generation) verifyPlausibility(ctx context.Context, input EvaluationReq
 	}
 	result.Correctness.Determinism = false
 	result.FailedStage = "independent verification of an implausible speedup failed"
+}
+
+// correctOnCPU ignores the sanitizer, which needs a GPU; the GPU evaluator
+// still requires it before anything is kept.
+func correctOnCPU(correctness kernelresearch.Correctness) bool {
+	return correctness.Smoke && correctness.ShapeSweep && correctness.NumericalStability && correctness.Determinism && correctness.EdgeCases
 }
 
 func (r *generation) draftRequest() DraftRequest {

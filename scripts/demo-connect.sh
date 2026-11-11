@@ -108,7 +108,16 @@ echo '$ infercrane doctor coder-demo'
 run_cli doctor "$endpoint"
 
 if [ "$mode" = full ]; then
-  active_before=$(run_cli status qwen-prod --output json | jq -r '.deployment.active_revision_id')
+  # The stack deploys qwen-prod in the background after it becomes ready, so
+  # wait for it rather than racing it on a slow or busy machine.
+  attempt=0
+  active_before=
+  while [ "$attempt" -lt 120 ]; do
+    active_before=$(run_cli status qwen-prod --output json 2>/dev/null | jq -r '.deployment.active_revision_id' 2>/dev/null || true)
+    [ -n "$active_before" ] && [ "$active_before" != null ] && break
+    attempt=$((attempt + 1))
+    sleep 1
+  done
   test -n "$active_before" && test "$active_before" != null || {
     echo "fixture deployment has no active revision" >&2
     exit 1

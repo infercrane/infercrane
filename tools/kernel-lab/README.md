@@ -60,6 +60,13 @@ model. `run-isolated-evaluation.sh` is the reference no-network launcher, and
 qualification. A pack's `integration/` directory routes a serving runtime to the
 kernel, and its `test_integration.py` runs without a GPU.
 
+Check a kernel on a laptop without a GPU with
+`screen-kernel.sh FAMILY KERNEL.py`. It runs the pack's evaluator on CPU with
+Triton's interpreter in the `cpu-screen/` image, and `packs/*/testdata/` holds a
+correct kernel and two wrong ones to confirm the suite catches mistakes. Set
+`INFERCRANE_KERNEL_CPU_SCREEN` to `run-cpu-screen.sh` so the adapter rejects
+wrong drafts before any GPU time is spent.
+
 Add a pack for an operator only after writing its contract and hidden suite by
 hand. Do not let a model write either one. See
 [Generate a custom kernel](../../docs/features/optimization.mdx).

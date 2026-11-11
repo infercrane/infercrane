@@ -63,6 +63,8 @@ type CommandEvaluator struct {
 	Timeout     time.Duration
 	// GPUHourlyUSD converts wall time into attempt cost.
 	GPUHourlyUSD float64
+	// Unpriced marks a local CPU screen whose wall time costs nothing.
+	Unpriced bool
 }
 
 func (e CommandEvaluator) Evaluate(ctx context.Context, request EvaluationRequest) (EvaluationResult, error) {
@@ -72,7 +74,7 @@ func (e CommandEvaluator) Evaluate(ctx context.Context, request EvaluationReques
 	if info, err := os.Stat(e.Executable); err != nil || !info.Mode().IsRegular() || info.Mode()&0o111 == 0 {
 		return EvaluationResult{}, errors.New("kernel evaluator must be an executable regular file")
 	}
-	if e.GPUHourlyUSD <= 0 || math.IsNaN(e.GPUHourlyUSD) || math.IsInf(e.GPUHourlyUSD, 0) {
+	if !e.Unpriced && (e.GPUHourlyUSD <= 0 || math.IsNaN(e.GPUHourlyUSD) || math.IsInf(e.GPUHourlyUSD, 0)) {
 		return EvaluationResult{}, errors.New("kernel evaluator requires a positive GPU hourly cost")
 	}
 	payload, err := json.Marshal(request)
@@ -100,7 +102,10 @@ func (e CommandEvaluator) Evaluate(ctx context.Context, request EvaluationReques
 	if err = decoder.Decode(&result); err != nil {
 		return EvaluationResult{}, fmt.Errorf("decode kernel evaluation: %w", err)
 	}
-	result.CostUSD = time.Since(started).Hours() * e.GPUHourlyUSD
+	result.CostUSD = 0
+	if !e.Unpriced {
+		result.CostUSD = time.Since(started).Hours() * e.GPUHourlyUSD
+	}
 	return result, nil
 }
 
