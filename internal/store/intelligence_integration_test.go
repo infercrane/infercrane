@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/replay"
 )
 
 func TestReplayCacheCapacityFinOpsAndAutopilotPersistence(t *testing.T) {
@@ -59,6 +60,18 @@ func TestReplayCacheCapacityFinOpsAndAutopilotPersistence(t *testing.T) {
 	}
 	if _, err = s.ReplayTraces(ctx, "other", name, 10); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("cross tenant replay list err=%v", err)
+	}
+	byDigest, err := s.ReplayTraceByDigest(ctx, "global", trace.ShapeDigest)
+	if err != nil || byDigest.ID != trace.ID {
+		t.Fatalf("replay by digest=%#v err=%v", byDigest, err)
+	}
+	// PostgreSQL returns jsonb as normalized text. The campaign replay path
+	// must still verify the stored shape against its digest.
+	if rendered, renderErr := replay.NewAIPerfTrace(byDigest); renderErr != nil || rendered.Requests() != 1 {
+		t.Fatalf("stored replay did not verify for AIPerf: rendered=%+v err=%v", rendered.Properties, renderErr)
+	}
+	if _, err = s.ReplayTraceByDigest(ctx, "other", trace.ShapeDigest); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("cross tenant replay digest err=%v", err)
 	}
 	now := time.Now().UTC()
 	observation, err := s.RecordArtifactCacheObservation(ctx, "global", domain.ArtifactCacheObservation{ModelArtifactID: artifact.ID, Provider: fixtureProvider, Location: "zone/cache", State: "present", Source: "fixture-api", EvidenceJSON: `{"present":true}`, ObservedAt: now, ExpiresAt: now.Add(time.Minute)})

@@ -51,6 +51,9 @@ func (r PersistedRanker) Rank(ctx context.Context, candidate domain.Optimization
 	switch decision {
 	case RankSupersede:
 		failureCode = "measured_candidate_superseded"
+		if override := ranking.FailureCodes[candidate.ID]; override != "" {
+			failureCode = override
+		}
 	case RankReject:
 		failureCode = "measured_candidate_outside_constraints"
 	case RankInconclusive:

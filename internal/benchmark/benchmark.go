@@ -34,6 +34,11 @@ type Config struct {
 	// retain the safe historical default (streaming enabled).
 	Streaming                          *bool
 	TTFTSLOMS, TPOTSLOMS, LatencySLOMS float64
+	// ServerMetrics lets AIPerf scrape the endpoint's Prometheus /metrics
+	// during the run. Callers enable it only when the runtime contract declares
+	// that path. GPU telemetry stays off because it needs a DCGM exporter that
+	// InferCrane does not provision for benchmarks.
+	ServerMetrics bool
 }
 
 type ConfidenceInterval struct {
@@ -57,6 +62,26 @@ type Result struct {
 	TPOTP50MS, TPOTP95MS        *float64
 	LatencyP50MS, LatencyP95MS  *float64
 	Confidence                  map[string]ConfidenceInterval
+	// ServerMetrics is nil unless Config.ServerMetrics was set.
+	ServerMetrics *ServerMetrics
+}
+
+// ServerMetrics is a bounded summary of AIPerf's server-metrics export: the
+// runtime's own gauges and counters for KV-cache use, prefix-cache hits,
+// preemption, queueing, and speculative acceptance. Collected is false, with a
+// reason, when no export was written or its shape was not recognized; missing
+// runtime evidence stays unknown rather than zero.
+type ServerMetrics struct {
+	Collected bool                           `json:"collected"`
+	Reason    string                         `json:"reason,omitempty"`
+	Metrics   map[string]ServerMetricSummary `json:"metrics,omitempty"`
+}
+
+type ServerMetricSummary struct {
+	Type   string             `json:"type,omitempty"`
+	Unit   string             `json:"unit,omitempty"`
+	Series int                `json:"series"`
+	Stats  map[string]float64 `json:"stats"`
 }
 
 type commandRunner interface {
@@ -160,7 +185,10 @@ func run(ctx context.Context, cfg Config, commands commandRunner) (Result, error
 	if cfg.ArrivalPattern != "" {
 		args = append(args, "--arrival-pattern", cfg.ArrivalPattern, "--request-rate", strconv.FormatFloat(cfg.RequestRate, 'f', -1, 64))
 	}
-	args = append(args, "--ui", "none", "--export-level", "records", "--artifact-dir", dir, "--profile-export-prefix", prefix, "--no-auto-plot", "--no-gpu-telemetry", "--no-server-metrics")
+	args = append(args, "--ui", "none", "--export-level", "records", "--artifact-dir", dir, "--profile-export-prefix", prefix, "--no-auto-plot", "--no-gpu-telemetry")
+	if !cfg.ServerMetrics {
+		args = append(args, "--no-server-metrics")
+	}
 	if cfg.Tokenizer != "" {
 		args = append(args, "--tokenizer", cfg.Tokenizer)
 	}
@@ -198,6 +226,9 @@ func run(ctx context.Context, cfg Config, commands commandRunner) (Result, error
 	}
 	result.ProfileRuns = len(records)
 	result.Confidence = profileConfidence(records, cfg)
+	if cfg.ServerMetrics {
+		result.ServerMetrics = readServerMetrics(dir)
+	}
 	result.Tool, result.ToolVersion, result.Command = "aiperf", version, command
 	return result, nil
 }
@@ -478,6 +509,20 @@ func profileConfidence(paths []string, cfg Config) map[string]ConfidenceInterval
 		return nil
 	}
 	return confidence
+}
+
+// Confidence95 returns the Student-t 95% interval for 2 to 10 independent
+// samples. It reports false outside that range rather than inventing a bound.
+func Confidence95(samples []float64) (ConfidenceInterval, bool) {
+	if len(samples) < 2 || len(samples) > 10 {
+		return ConfidenceInterval{}, false
+	}
+	for _, value := range samples {
+		if math.IsNaN(value) || math.IsInf(value, 0) {
+			return ConfidenceInterval{}, false
+		}
+	}
+	return confidence95(samples), true
 }
 
 func confidence95(samples []float64) ConfidenceInterval {

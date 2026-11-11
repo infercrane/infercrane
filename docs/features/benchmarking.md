@@ -149,6 +149,16 @@ Lab emits `RECOMMENDED` only when candidates share one exact workload digest and
 metric - and sourced hourly cost for cost efficiency - is present. Unlike workload shapes remain
 `UNRANKED`.
 
+The workload digest covers the load that was sent, including the run count and warmup. Results that
+are stored beside the load are excluded: the `confidence_95` intervals from repeated runs and an
+optimization campaign's `measured` control comparison. Two repeated benchmarks of the same load
+therefore compare with each other. Lab versions before `inference-lab-v4` hashed those intervals,
+which gave every multi-run benchmark a workload of its own and kept it out of every ranking.
+
+Optimization campaigns use a stricter method than a single `infercrane benchmark` command: warmup,
+three runs per arm, the campaign control interleaved with each candidate, and a noise floor before
+a gain counts. See [how a campaign measures candidates](/features/optimization#how-a-campaign-measures-candidates).
+
 Maintainers can qualify one pinned AWS model family at a time without rerunning unrelated runtime
 paths:
 

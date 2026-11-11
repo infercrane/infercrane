@@ -24,6 +24,11 @@ infercrane replay coder-production \
 Execution is an AIPerf approximation, not a reproduction of prompt semantics or exact arrival timing.
 The distinction is preserved in output and evidence.
 
+An [optimization campaign](/features/optimization#how-a-campaign-measures-candidates) bound to a
+trace digest goes further. It renders each request's input and output token counts as an AIPerf
+`mooncake_trace`, and it keeps requests that share system messages, or continue a session, sharing
+their leading prompt blocks. Prompt content is still synthetic and arrival timing is still not replayed.
+
 ## Capacity intelligence
 
 ```bash
