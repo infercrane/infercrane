@@ -13,6 +13,7 @@ node slot), not a market price. Nothing here spends money.
 ```bash
 make poc-local-up     # cluster, registry, model image, control plane (first run: several minutes)
 make poc-local-run    # baseline, traffic, capture, campaign, quality, ranking, activation
+make poc-local-resume # keep watching the same campaign after the watcher or laptop stopped
 make poc-monitor      # live engine view of every serving pod
 make poc-local-down   # delete everything and check nothing is left
 ```
@@ -21,7 +22,12 @@ make poc-local-down   # delete everything and check nothing is left
 Chrome) opens the four recording windows: run log, engine monitor, pods, and the dashboard
 pointed at the local control plane.
 
-Requirements: Docker, kubectl, Go, curl, Python 3.9+. Pinned inputs: kind node image, llama.cpp
+Campaigns are approved for 24 hours. A CPU campaign runs every candidate in turns and can take
+hours, and an approval that expires mid-run stops the campaign.
+
+Requirements: Docker, kubectl, Go, curl, Python 3.9+. With 7.7 GB of Docker memory, the first run
+had model servers killed for running out of memory and the control plane lost its database for
+hours; give Docker more memory than that. The working minimum is not measured yet. Pinned inputs: kind node image, llama.cpp
 server image, Qwen3-0.6B revision and its Q8_0 GGUF (checked by sha256), Postgres and registry
 images. State, the API key, and outputs live in `.infercrane/poc/` (git-ignored).
 
