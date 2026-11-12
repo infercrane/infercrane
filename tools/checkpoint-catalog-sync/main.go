@@ -132,7 +132,7 @@ func plan(args []string, stdout io.Writer) error {
 		return err
 	}
 	if *out == "" {
-		*out = filepath.Join(*snapshotDir, "plan")
+		*out = filepath.Join(*snapshotDir, checkpointsync.PlanDir)
 	}
 	if err = os.MkdirAll(*out, 0o755); err != nil {
 		return err

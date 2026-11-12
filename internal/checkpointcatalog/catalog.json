@@ -4,7 +4,7 @@
   "snapshot": {
     "source": "https://huggingface.co/api/models",
     "fetched_at": "2026-11-12T03:52:00Z",
-    "digest": "sha256:e221d155bd1fb5adf508b631bf0a2a3e8e7558002b71a147a37784b550b78dbd",
+    "digest": "sha256:9fc27bc94c4437e741ea7a26d14c40b16d34a71b0af66cdb6c374f000e3dda2e",
     "policy_digest": "sha256:1ea6af223870045d78ce7ae41bf7ad9aab4560b2aeefa30d6786583a79e073bc"
   },
   "publishers": [

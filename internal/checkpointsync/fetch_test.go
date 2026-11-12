@@ -290,3 +290,30 @@ func TestFetchStopsWhenAReviewedCollectionIsMissing(t *testing.T) {
 		t.Fatalf("a missing reviewed collection did not stop the fetch: %v", err)
 	}
 }
+
+func TestSnapshotDigestIgnoresPlanOutput(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.CopyFS(dir, os.DirFS(filepath.Join("testdata", "snapshot"))); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := OpenSnapshot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := snapshot.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = writeFile(dir, filepath.Join(PlanDir, "catalog.json"), []byte("{}\n")); err != nil {
+		t.Fatal(err)
+	}
+	if after, _ := snapshot.Digest(); after != before {
+		t.Fatal("writing plan output changed the snapshot digest")
+	}
+	if err = writeFile(dir, filepath.Join("listings", "nvidia", "page-0002.json"), []byte("[]\n")); err != nil {
+		t.Fatal(err)
+	}
+	if after, _ := snapshot.Digest(); after == before {
+		t.Fatal("a recorded upstream file did not change the snapshot digest")
+	}
+}

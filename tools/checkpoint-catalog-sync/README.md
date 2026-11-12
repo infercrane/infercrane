@@ -46,7 +46,9 @@ keep a known-good revision while a newer head is reviewed.
 go run ./tools/checkpoint-catalog-sync plan --snapshot .infercrane/checkpoint-catalog/snapshot
 ```
 
-Plan writes `catalog.json` and `catalog-diff.md` to `<snapshot>/plan`. The
+Plan writes `catalog.json` and `catalog-diff.md` to `<snapshot>/plan`, which
+the snapshot digest ignores, so planning a snapshot again never changes the
+digest the catalog records. The
 diff lists the entries that need review, the candidates, added builds with the
 reason the selection rule picked each one, new revisions, changed and removed
 entries, and the repositories that were skipped with the reason for each.

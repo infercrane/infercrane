@@ -20,6 +20,10 @@ import (
 
 const SnapshotSchemaVersion = "infercrane.checkpoint-snapshot/v1"
 
+// PlanDir is the default plan output folder inside a snapshot. The snapshot
+// digest skips it, so planning a snapshot never changes its identity.
+const PlanDir = "plan"
+
 // Manifest is written last by Fetch, so a snapshot without it is incomplete.
 type Manifest struct {
 	SchemaVersion string               `json:"schema_version"`
@@ -174,12 +178,20 @@ func (snapshot *Snapshot) Files(repository, revision string) fileReader {
 }
 
 // Digest hashes every recorded file by path and content, so a catalog can name
-// exactly which observation produced it.
+// exactly which observation produced it. Plan output under PlanDir is not
+// part of the observation.
 func (snapshot *Snapshot) Digest() (string, error) {
 	var paths []string
+	planOutput := filepath.Join(snapshot.Dir, PlanDir)
 	err := filepath.WalkDir(snapshot.Dir, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil || entry.IsDir() {
+		if walkErr != nil {
 			return walkErr
+		}
+		if entry.IsDir() {
+			if path == planOutput {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 		relative, relErr := filepath.Rel(snapshot.Dir, path)
 		if relErr != nil {
