@@ -49,11 +49,14 @@ func optimizeCommand(ctx context.Context, args []string) error {
 	if len(args) > 0 && args[0] == "doctor" {
 		return optimizeDoctorCommand(ctx, args[1:])
 	}
+	if len(args) > 0 && args[0] == "watch" {
+		return optimizeWatchCommand(ctx, args[1:])
+	}
 	if len(args) > 0 && (args[0] == "list" || args[0] == "inspect" || args[0] == "results" || args[0] == "approve" || args[0] == "activate" || args[0] == "cancel") {
 		return optimizeCampaignCommand(ctx, args)
 	}
 	if len(args) < 2 || (args[0] != "propose" && args[0] != "create") {
-		return errors.New("usage: infercrane optimize propose|create MODEL --provider CLOUD_OR_ADAPTER --gpu GPU [flags] | infercrane optimize workload-profile --file PROFILE.json | infercrane optimize kernel-plan --file PROFILE.json | infercrane optimize evidence evaluate|inspect-fastpath|golden --file FILE | infercrane optimize list|inspect|results|approve|activate|cancel | infercrane optimize doctor")
+		return errors.New("usage: infercrane optimize propose|create MODEL --provider CLOUD_OR_ADAPTER --gpu GPU [flags] | infercrane optimize workload-profile --file PROFILE.json | infercrane optimize kernel-plan --file PROFILE.json | infercrane optimize evidence evaluate|inspect-fastpath|golden --file FILE | infercrane optimize list|inspect|results|watch|approve|activate|cancel | infercrane optimize doctor")
 	}
 	action := args[0]
 	model := args[1]
