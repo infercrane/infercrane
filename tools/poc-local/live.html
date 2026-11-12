@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>InferCrane live optimization</title>
+<style>
+:root{--bg:#0e0f11;--card:#17191c;--line:#2a2d31;--text:#ecebe6;--muted:#9c9a92;--teal:#1D9E75;--teal2:#5DCAA5;--gray:#888780;--amber:#EF9F27;--red:#E24B4A;--purple:#7F77DD}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Inter","Segoe UI",sans-serif}
+header{display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between;align-items:center;padding:14px 20px;border-bottom:1px solid var(--line)}
+h1{font-size:18px;font-weight:500;margin:0;white-space:nowrap}
+.badges{display:flex;flex-wrap:wrap;gap:6px}.badges span{font-size:12px;padding:3px 10px;border:1px solid var(--line);border-radius:8px;color:var(--muted);white-space:nowrap}
+.badges .warn{color:var(--amber);border-color:#5a4116}
+main{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:12px 20px 20px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;min-width:0}
+.wide{grid-column:1 / -1}
+.k{font-size:12px;color:var(--muted);margin:0 0 8px;text-transform:none}
+.steps{display:flex;flex-direction:column;gap:6px}
+.step{display:grid;grid-template-columns:minmax(150px,240px) 1fr minmax(110px,200px);gap:10px;align-items:center}
+.pills{display:flex;gap:4px}
+.pill{flex:1;height:8px;border-radius:4px;background:var(--line)}
+.pill.on{background:var(--teal)}.pill.bad{background:var(--red)}.pill.cur{background:var(--amber)}
+.state{font-size:12px;color:var(--muted);text-align:right}
+.row{display:flex;justify-content:space-between;font-size:13px;margin:4px 0}
+.bar{height:10px;border-radius:5px;background:var(--line);overflow:hidden;display:flex}
+.bar i{display:block;height:100%}
+.big{font-size:26px;font-weight:500}
+table{width:100%;border-collapse:collapse;font-size:13px}
+td,th{padding:6px 8px;border-bottom:1px solid var(--line);text-align:right;font-weight:400}
+th{color:var(--muted)}td:first-child,th:first-child{text-align:left}
+.good{color:var(--teal2)}.worse{color:var(--red)}.same{color:var(--muted)}
+.note{font-size:12px;color:var(--muted);margin-top:6px}
+canvas{max-height:200px}
+</style>
+</head>
+<body>
+<header>
+<h1>InferCrane · live optimization</h1>
+<div class="badges"><span>Qwen3-0.6B · llama.cpp</span><span>traffic: Mooncake (Kimi) production trace, inputs scaled 1/32</span><span class="warn">laptop CPU run · simulated accelerator label</span></div>
+</header>
+<main>
+<section class="card wide"><p class="k">Campaign: each setup is measured in turns against the current setup, then quality-checked and ranked</p><div class="steps" id="steps"><div class="note">waiting for the campaign…</div></div></section>
+<section class="card"><p class="k">Live output tokens per second, per serving pod</p><canvas id="tps"></canvas></section>
+<section class="card"><p class="k">Live requests: running and waiting, per serving pod</p><div id="requests"></div></section>
+<section class="card"><p class="k">Where time goes (bottleneck), per serving pod</p><div id="bottleneck"></div><div class="note"><span style="color:var(--purple)">■</span> reading prompts (prefill) <span style="color:var(--teal)">■</span> generating tokens (decode) · KV cache use below</div></section>
+<section class="card"><p class="k" id="hwtitle">Hardware</p><div id="hardware"></div></section>
+<section class="card wide"><p class="k">Results against the current setup (measured on the replayed traffic)</p><div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);gap:14px"><canvas id="results"></canvas><div id="table"></div></div></section>
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+const STAGES=["proposed","provisioning","ready","measuring","validating","ranked","qualified"];
+const COLORS=["#888780","#1D9E75","#7F77DD","#EF9F27","#D4537E","#378ADD"];
+Chart.defaults.color="#9c9a92";Chart.defaults.borderColor="#2a2d31";Chart.defaults.font.size=12;
+const tps=new Chart(document.getElementById("tps"),{type:"line",data:{datasets:[]},options:{animation:false,parsing:false,scales:{x:{type:"linear",ticks:{display:false}},y:{beginAtZero:true,title:{display:true,text:"tok/s"}}},plugins:{legend:{labels:{boxWidth:10}}},elements:{point:{radius:0}}}});
+const res=new Chart(document.getElementById("results"),{type:"bar",data:{labels:[],datasets:[{label:"output tok/s",data:[],backgroundColor:[]}]},options:{animation:{duration:400},plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,title:{display:true,text:"output tok/s"}}}}});
+const fmt=(v,d=0)=>v==null||isNaN(v)?"–":Number(v).toLocaleString(undefined,{maximumFractionDigits:d,minimumFractionDigits:d});
+function podLabel(name,view){const m=(view.labels||{});for(const k in m){if(name.startsWith(k))return m[k]}return name.replace(/^infercrane-/,"").slice(0,10)}
+async function tick(){
+ let v;try{v=await (await fetch("/state",{cache:"no-store"})).json()}catch(e){return}
+ const pods=Object.entries(v.pods||{});
+ tps.data.datasets=pods.map(([n,p],i)=>({label:podLabel(n,v),borderColor:COLORS[i%COLORS.length],borderWidth:2,data:(p.series||[]).map(s=>({x:s.t,y:s.output_tokens||0}))}));tps.update();
+ document.getElementById("requests").innerHTML=pods.map(([n,p])=>{const s=(p.series||[]).slice(-1)[0]||{};return `<div class="row"><span>${podLabel(n,v)} <span class="note">${s.engine||p.phase||""}</span></span><span><span class="big">${fmt(s.running)}</span> running · <span class="${(s.waiting||0)>0?'worse':''}">${fmt(s.waiting)} waiting</span></span></div>`}).join("")||'<div class="note">no serving pods yet</div>';
+ document.getElementById("bottleneck").innerHTML=pods.map(([n,p])=>{const s=(p.series||[]).slice(-1)[0]||{};const pf=s.prefill||0,dc=s.decode||0,t=pf+dc;const kv=s.kv_usage==null?null:(s.kv_usage<=1?s.kv_usage*100:s.kv_usage);
+  const verdict=t<0.05?"idle":(pf/t>0.6?"prompt-bound (prefill)":(dc/t>0.6?"generation-bound (decode)":"mixed"))+((s.waiting||0)>0?" · queueing":"");
+  return `<div class="row"><span>${podLabel(n,v)}</span><span class="note">${verdict}</span></div><div class="bar"><i style="width:${t?pf/t*100:0}%;background:#7F77DD"></i><i style="width:${t?dc/t*100:0}%;background:#1D9E75"></i></div><div class="row"><span class="note">KV cache</span><span class="note">${kv==null?"not reported":fmt(kv,0)+"%"}</span></div>`}).join("")||'<div class="note">no serving pods yet</div>';
+ const n=v.node||{};document.getElementById("hwtitle").textContent="Hardware: "+(n.kind||"node");
+ document.getElementById("hardware").innerHTML=n.cpus?`<div class="row"><span>CPU, ${n.cpus} cores</span><span class="big">${fmt(n.cpu_percent/n.cpus,0)}%</span></div><div class="bar"><i style="width:${Math.min(100,n.cpu_percent/n.cpus)}%;background:#EF9F27"></i></div><div class="row" style="margin-top:10px"><span>Memory</span><span>${n.memory||""}</span></div><div class="bar"><i style="width:${n.memory_percent||0}%;background:#378ADD"></i></div><div class="note">No GPU on this laptop: these are CPU numbers. On a GPU cluster this panel shows GPU, tensor-core and memory-bandwidth activity.</div>`:'<div class="note">waiting for node stats…</div>';
+ const c=v.campaign;if(c){document.getElementById("steps").innerHTML=(c.candidates||[]).map(x=>{const i=STAGES.indexOf(x.state);const bad=["rejected","failed","inconclusive","cancelled"].includes(x.state);return `<div class="step"><span>${x.label||x.id.slice(0,8)}</span><div class="pills">${STAGES.map((s,j)=>`<div class="pill ${bad&&j>=Math.max(i,0)?'bad':(j<i?'on':(j===i?'cur':''))}"></div>`).join("")}</div><span class="state">${x.state}${x.failure_code?' · '+x.failure_code.replace(/_/g,' '):''}</span></div>`}).join("")+`<div class="note">campaign ${c.state}</div>`}
+ const r=v.results||[];res.data.labels=r.map(x=>x.label);res.data.datasets[0].data=r.map(x=>x.output_tps||0);res.data.datasets[0].backgroundColor=r.map((x,i)=>i===0?"#888780":"#1D9E75");res.update();
+ document.getElementById("table").innerHTML=r.length?`<table><tr><th>setup</th><th>tok/s</th><th>p95 first token</th><th>p95 latency</th><th>vs current</th></tr>${r.map((x,i)=>{const m=x.measured||{};const cmp=(m.comparison||{});const d=cmp.output_token_throughput||cmp.ttft_p95_ms;let vs=i===0?'<span class="same">current setup</span>':'<span class="same">measuring…</span>';if(d){const cls=d.decision==="improved"?"good":(d.decision==="regressed"?"worse":"same");vs=`<span class="${cls}">${d.decision.replace(/_/g," ")} (${fmt(d.delta*100,1)}%, noise ±${fmt(d.noise_floor*100,1)}%)</span>`}return `<tr><td>${x.label}</td><td>${fmt(x.output_tps,1)}</td><td>${fmt(x.ttft_p95_ms)} ms</td><td>${fmt(x.latency_p95_ms)} ms</td><td>${vs}</td></tr>`}).join("")}</table>`:'<div class="note">results appear as each setup finishes measuring</div>';
+}
+setInterval(tick,2000);tick();
+</script>
+</body>
+</html>

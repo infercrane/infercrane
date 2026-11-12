@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>InferCrane optimization progress</title>
+<style>
+body{margin:0;background:#fff;color:#1c1c1c;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif}
+.wrap{padding:22px 28px}
+h1{font-size:20px;font-weight:500;margin:0 0 2px;text-align:center}
+.sub{font-size:13px;color:#666;text-align:center;margin-bottom:10px}
+.chart{position:relative;height:56vh;min-height:360px;border:1px solid #ddd;border-radius:4px;padding:10px}
+table{width:100%;border-collapse:collapse;margin-top:14px;font-size:13px}
+th,td{padding:7px 8px;border-bottom:1px solid #eee;text-align:left}
+th{color:#666;font-weight:500}
+.kept{color:#2e9a63;font-weight:500}.disc{color:#888}.bad{color:#c8463f}.plan{color:#666}
+.foot{font-size:12px;color:#888;margin-top:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1 id="title">Optimization progress</h1>
+<div class="sub" id="sub">Qwen3-0.6B · Mooncake (Kimi) production traffic, replayed · each dot is one measurement run</div>
+<div class="chart"><canvas id="c"></canvas></div>
+<table id="t"></table>
+<div class="foot">Cost per 1M output tokens at a stated laptop rate ($0.25/h). Laptop CPU run: it proves the method, not GPU speed. A setup is kept only if it beats the current best by more than the measurement noise and keeps its answers correct.</div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+const labelPlugin={id:"labels",afterDatasetsDraw(chart){const ds=chart.data.datasets[1];if(!ds)return;const {ctx}=chart;const meta=chart.getDatasetMeta(1);ctx.save();ctx.font="12px -apple-system,Helvetica,Arial";ctx.fillStyle="#2e9a63";meta.data.forEach((pt,i)=>{const t=ds.data[i]&&ds.data[i].label;if(!t)return;ctx.save();ctx.translate(pt.x+8,pt.y-8);ctx.rotate(-Math.PI/9);ctx.fillText(t,0,0);ctx.restore()});ctx.restore()}};
+const chart=new Chart(document.getElementById("c"),{type:"scatter",data:{datasets:[
+ {label:"Discarded",data:[],pointRadius:4,backgroundColor:"#d0d0d0",borderColor:"#d0d0d0"},
+ {label:"Kept",data:[],pointRadius:7,backgroundColor:"#5fbf8f",borderColor:"#2e7d55",borderWidth:1.2},
+ {label:"Running best",data:[],type:"line",stepped:"before",borderColor:"#5fbf8f",borderWidth:2.5,pointRadius:0,fill:false}]},
+ options:{animation:{duration:500},maintainAspectRatio:false,plugins:{legend:{position:"top",align:"end",labels:{boxWidth:12,color:"#333"}},tooltip:{callbacks:{label:(c)=>`${c.raw.setup||c.raw.label||""}: $${c.raw.y.toFixed(3)} per 1M tokens`}}},
+ scales:{x:{title:{display:true,text:"Measurement run #",color:"#333"},grid:{color:"#eee"},ticks:{color:"#555"}},y:{title:{display:true,text:"Cost per 1M output tokens (lower is better)",color:"#333"},grid:{color:"#eee"},ticks:{color:"#555",callback:v=>"$"+v.toFixed(2)}}}},plugins:[labelPlugin]});
+function word(s){return({"current":"current setup","improved":"kept: better than the current best","regressed":"discarded: worse","no_measurable_difference":"discarded: no real difference"})[s]||""}
+async function tick(){let d;try{d=await (await fetch("/progress-data",{cache:"no-store"})).json()}catch(e){return}
+ const pts=d.points||[],setups=d.setups||[];
+ const keptSetups=setups.filter(s=>s.kept);
+ chart.data.datasets[0].data=pts.map(p=>({x:p.x,y:p.y,setup:p.setup}));
+ const lastX={};pts.forEach(p=>{lastX[p.setup]=p.x});
+ chart.data.datasets[1].data=keptSetups.filter(s=>lastX[s.label]).map(s=>({x:lastX[s.label],y:s.mean_cost,label:s.label,setup:s.label}));
+ const line=[];setups.forEach(s=>{if(s.best_after!=null&&lastX[s.label])line.push({x:lastX[s.label],y:s.best_after})});if(line.length&&pts.length)line.push({x:pts[pts.length-1].x,y:line[line.length-1].y});
+ chart.data.datasets[2].data=line;chart.update();
+ const improvements=keptSetups.length?keptSetups.length-1:0;
+ document.getElementById("title").textContent=`Optimization progress: ${pts.length} measurement runs, ${improvements} kept improvement${improvements===1?"":"s"}`;
+ const rows=setups.length?setups:(d.plan||[]).map(p=>({label:p.label,state:"planned"}));
+ document.getElementById("t").innerHTML=`<tr><th>Setup</th><th>Status</th><th>Cost per 1M tokens</th><th>Outcome</th></tr>`+rows.map(s=>{const o=word(s.decision);const cls=s.kept?"kept":(s.decision==="regressed"?"bad":(s.state==="planned"?"plan":"disc"));return `<tr><td>${s.label}</td><td>${(s.state||"").replace(/_/g," ")}${s.failure_code?" · "+s.failure_code.replace(/_/g," "):""}</td><td>${s.mean_cost!=null?"$"+s.mean_cost.toFixed(3):"–"}</td><td class="${cls}">${o||(s.state==="planned"?"planned":"measuring…")}</td></tr>`}).join("")}
+setInterval(tick,3000);tick();
+</script>
+</body>
+</html>

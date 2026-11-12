@@ -1,0 +1,9 @@
+# Local PoC cluster. containerd reads registry hosts from certs.d so the node can
+# pull digest-pinned images from the local registry container (kind's documented
+# local-registry setup).
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+containerdConfigPatches:
+  - |-
+    [plugins."io.containerd.grpc.v1.cri".registry]
+      config_path = "/etc/containerd/certs.d"

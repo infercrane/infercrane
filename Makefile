@@ -2,7 +2,7 @@ GORELEASER_VERSION := v2.12.7
 GORELEASER ?= go run github.com/goreleaser/goreleaser/v2@$(GORELEASER_VERSION)
 RELEASE_CANDIDATE_TAG ?= $(shell jq -r '.candidate_tag' .release/version.json)
 
-.PHONY: build generate-api generate-api-check hygiene-check license-check test-automation test-automation-full npm-bootstrap-artifact docs-dev docs-check demo demo-connect demo-record test test-container test-stack test-failure test-ha test-backup-restore test-store test-production-config test-provider-contracts test-optimizer-golden test-simulated-clouds test-network-chaos test-kubernetes-manifests test-kubernetes-kind test-kubernetes-kwok test-kubernetes-versions test-fuzz test-reliability-soak test-acceptance-safety test-benchmark-matrix test-benchmark-concurrency-sweep test-aiconfigurator-upstream test-release-tag test-product test-product-qualification test-user-lifecycle acceptance-product verify audit deadcode release-check release-tag-check release-tag-candidate release-tag-stable snapshot candidate-artifacts release-artifacts acceptance-local acceptance-preflight acceptance-cleanup qualify-local qualify-product qualify-product-nightly qualify-product-status qualify-rc qualify-v1 qualify-contracts qualify-aws-performance build-aws-artifact-cache qualify-aws-artifact-cache cleanup-aws-artifact-cache delete-aws-artifact-cache plan-runpod-artifact-cache build-runpod-artifact-cache status-runpod-artifact-cache cleanup-runpod-artifact-cache delete-runpod-artifact-cache test-runpod-artifact-cache dev-check dev-check-full dev-up dev-down
+.PHONY: build generate-api generate-api-check hygiene-check license-check test-automation test-automation-full npm-bootstrap-artifact docs-dev docs-check demo demo-connect demo-record test test-container test-stack test-failure test-ha test-backup-restore test-store test-production-config test-provider-contracts test-optimizer-golden test-simulated-clouds test-network-chaos test-kubernetes-manifests test-kubernetes-kind test-kubernetes-kwok test-kubernetes-versions test-fuzz test-reliability-soak test-acceptance-safety test-benchmark-matrix test-benchmark-concurrency-sweep test-aiconfigurator-upstream test-release-tag test-product test-product-qualification test-user-lifecycle acceptance-product verify audit deadcode release-check release-tag-check release-tag-candidate release-tag-stable snapshot candidate-artifacts release-artifacts acceptance-local acceptance-preflight acceptance-cleanup qualify-local qualify-product qualify-product-nightly qualify-product-status qualify-rc qualify-v1 qualify-contracts qualify-aws-performance build-aws-artifact-cache qualify-aws-artifact-cache cleanup-aws-artifact-cache delete-aws-artifact-cache plan-runpod-artifact-cache build-runpod-artifact-cache status-runpod-artifact-cache cleanup-runpod-artifact-cache delete-runpod-artifact-cache test-runpod-artifact-cache dev-check dev-check-full dev-up dev-down poc-local poc-local-up poc-local-run poc-local-resume poc-local-down poc-monitor
 
 build:
 	go build ./cmd/infercrane
@@ -250,3 +250,23 @@ dev-up:
 
 dev-down:
 	docker compose down
+
+# Local end-to-end optimization PoC on a kind cluster (CPU only, no spend).
+# See tools/poc-local/README.md.
+poc-local:
+	python3 tools/poc-local/poc.py all
+
+poc-local-up:
+	python3 tools/poc-local/poc.py up
+
+poc-local-run:
+	python3 tools/poc-local/poc.py run
+
+poc-local-resume:
+	python3 tools/poc-local/poc.py resume
+
+poc-local-down:
+	python3 tools/poc-local/poc.py down
+
+poc-monitor:
+	python3 tools/poc-monitor/monitor.py --context kind-infercrane-poc --namespace infercrane-system --simulated-resource infercrane.dev/simulated-accelerator
