@@ -166,7 +166,8 @@ infercrane optimize propose Qwen/Qwen3-8B \
   --max-hourly-cost 3
 ```
 
-Advanced users can bind the search to an observed content-free Replay digest, choose runtimes,
+Advanced users can bind the search to an observed content-free Replay digest, which campaigns then
+replay as their load, choose runtimes,
 control the workload profile and concurrency, require the estimator, and inspect the complete JSON
 provenance. Provider credentials are not passed to the estimator. Model metadata network access is
 off by default and requires `--allow-model-metadata-network`.
@@ -238,9 +239,9 @@ completed activation remains a successful no-op.
 
 Approval first verifies every candidate against a fresh sourced price for its exact cloud, region,
 GPU, and maximum replica count. It then records a bounded authority window and queues one durable
-execution operation. The worker composes the existing deployment/rollout lifecycle, sends the
-versioned AIPerf workload directly to the exact candidate revision, adopts revision-bound signed
-quality evidence, ranks persisted results, evaluates Release Guard for evolution campaigns, and
+execution operation. The worker composes the existing deployment/rollout lifecycle, measures each
+exact candidate revision directly with AIPerf against the campaign control, adopts revision-bound
+signed quality evidence, ranks persisted results, evaluates Release Guard for evolution campaigns, and
 cleans rejected candidates. It never promotes automatically.
 
 The execution capability is fail-closed. The control plane must find AIPerf and must have an exact
@@ -289,6 +290,72 @@ workloads, or incomplete metrics produce `inconclusive`; explicit SLO or cost vi
 active-versus-candidate Release Guard and wait for human promotion. The persisted campaign links
 benchmark, quality, Lab, and, where a real baseline exists, Release Guard evidence separately.
 
+### How a campaign measures candidates
+
+A single benchmark run misjudges the changes optimization cares about most. Prefix caching has no
+effect without shared prefixes, a small gain can be run-to-run noise, and a candidate measured an hour
+after another can win on drift alone. Campaigns therefore measure every candidate the same way.
+
+**Load.** A campaign bound to a customer Replay digest (`workload_source: customer_observed`) replays
+that trace. InferCrane verifies the stored trace against its digest, then renders each generation
+request's input and output token counts as an AIPerf `mooncake_trace`. Requests that share system
+messages share a leading 512-token prompt block, and a later session turn at least as long as the
+previous one reuses that prompt's whole blocks, so prefix and session structure survive. One pass over
+the trace, capped at its first 2,000 generation requests in arrival order, is one run. If the bound
+trace is missing, malformed, or does not match its digest, every candidate fails with
+`optimization_replay_unavailable` or `optimization_replay_invalid` before any provider mutation,
+instead of silently measuring synthetic load. Campaigns without a bound trace send their versioned
+synthetic profile.
+
+The rendering records what it preserved and what it did not in the workload's `replay` identity.
+Prompt content is synthetic because Replay never stores it, so MoE expert routing and speculative
+acceptance on customer content remain unknown. Arrival timing is not replayed: load is closed-loop at
+the profile concurrency. Replay records which requests share system messages but not how long those
+messages are, so one shared block is assumed. Tool pauses, parent-session links, and reuse of earlier
+assistant output are not modeled.
+
+**Runs.** Each server receives warmup requests (twice the concurrency, between 16 and 256) before
+measurement, and each arm runs three independent AIPerf invocations. Every invocation gets its own
+seed and, for a replay, its own prompt-block namespace, drawn from a random base for each
+measurement. A server is therefore not answered from prefix-cache entries that an earlier run
+created, including when the control is measured again inside another candidate's measurement or a
+measurement is retried. The base is kept as `measured.invocation_base`. The candidate's stored metrics
+are the mean of its three runs, with Student-t 95% intervals in `confidence_95`.
+
+**Control.** The control is the proposal's starting point: the untuned control arm when the proposal
+includes one, otherwise the highest-ranked compatible candidate. It is measured first. While its deployment is
+serving, every other candidate is measured interleaved with it, as control, candidate, control,
+candidate, control, candidate, control. The control and candidate share a time window, not a GPU, so
+differences between their nodes are not removed. Control runs that fail, or whose output throughput
+differs by more than 5% between adjacent runs, make that comparison invalid; the candidate's own
+measurement is kept, and its result against the control is unknown. A failure to look the control up
+is retried rather than recorded as a measurement without one.
+
+**Noise floor.** For each metric the noise floor is the larger of the control-to-control spread and
+the candidate's 95% interval half-width, both relative to their means. A candidate whose change is
+inside it shows no measurable difference. The workload's `measured.comparison` records the control
+mean, spread, candidate mean, delta, floor, and decision for throughput, latency, and goodput.
+
+**Ranking.** Inference Lab still orders the exact-workload candidates that meet the constraints. The
+campaign selects the best of them that measurably beats the control on the objective metric. If none
+does, the control is kept. A candidate inside the noise floor, or never shown to beat the control, is
+superseded with `measured_no_measurable_difference`. If the control itself does not meet the
+constraints, Lab's choice stands and no gain over the control is claimed. Cost efficiency compares output
+throughput per sourced hourly cost. A candidate that could not be measured beside a serving control is
+compared through both arms' 95% intervals, which is weaker evidence because the arms ran at
+different times; overlapping intervals are no measurable difference. The persisted Lab evaluation
+records each candidate's control decision, its basis, and the final selection.
+
+**Runtime metrics.** When a candidate's runtime contract declares a `/metrics` path, AIPerf scrapes it
+during each run, and InferCrane keeps a bounded summary of cache use, prefix-cache hits, preemption,
+queueing, and speculative acceptance. Runtimes without a declared path record no runtime metrics, and
+GPU telemetry is `not_collected`.
+
+This method sends nine AIPerf invocations per non-control candidate instead of one, so measurement
+takes several times longer. The approval window must cover it. Campaign ranking does not use the
+[multi-lane Pareto evaluator](#multi-lane-optimization-evidence): that evaluator needs TTFT and ITL
+limits and several concurrency lanes, and a campaign measures one lane and may declare no SLO.
+
 ## Generate a custom kernel
 
 A custom kernel is a last resort, never a default. Monitoring can suggest which phase to profile
@@ -329,6 +396,12 @@ Serving containers run offline on an internal Docker network, with a read-only m
 credentials. Only the model download step has internet access. A candidate arm must prove the
 generated kernel was called, because otherwise the result would measure the unmodified runtime.
 
+Each operator pack names the exact runtime versions its serving integration was reviewed against,
+and the adapter refuses any other version before it spends on generation or GPU time. The
+residual-RMSNorm pack supports vLLM 0.22.1 only. It plugs into vLLM IR, which vLLM has deprecated,
+and vLLM 0.34.0 removes the setting it uses, so a vLLM 0.34 or later pin needs a new
+CustomOp-based integration first.
+
 Set `max_candidates` to at least 2. The planner ranks by device time, and the largest hotspot is
 usually GEMM, which has no reviewed pack yet and is reported as a failed generation.
 
@@ -361,8 +434,11 @@ infercrane artifact optimize plan BASE_ARTIFACT_ID \
   --license-spdx Apache-2.0
 ```
 
-Available plan presets cover FP8, AWQ, GPTQ, NVIDIA-specific NVFP4, EAGLE-3, MTP, DFlash, and
-TensorRT engine builds. A preset is not a compatibility or speed claim. Every plan requires an exact
+Available plan presets cover FP8, AWQ, GPTQ, NVIDIA-specific NVFP4, EAGLE-3, MTP, and DFlash. There
+is no TensorRT engine preset: TensorRT-LLM removed its engine backend and `trtllm-build`, and its
+PyTorch backend loads checkpoints such as the FP8 and NVFP4 outputs directly. An engine built by an
+earlier TensorRT-LLM release can still be recorded with `--plan-file`. A preset is not a
+compatibility or speed claim. Every plan requires an exact
 tool version, digest-pinned builder, hardware constraints, immutable output attestation, exact
 candidate binding, and passing semantic quality evidence before qualification. Advanced users can
 provide the complete JSON plan with `--plan-file`.
@@ -532,14 +608,14 @@ InferCrane will reuse upstream execution and optimization work behind replaceabl
 | Upstream | InferCrane boundary | Current status |
 |---|---|---|
 | vLLM | Runtime execution, continuous batching, attention, prefix caching, and qualified engine flags | Active runtime; reviewed starting profiles are locally qualified |
-| SGLang | Alternative runtime and prefix-aware execution | Runtime contract exists; the Qwen3-0.6B/SGLang 0.5.10.post1/H100 tuple is negative compatibility evidence, not a qualified recipe |
+| SGLang | Alternative runtime and prefix-aware execution | The pinned 0.5.12 runtime passed real AWS L40S lifecycle checks with Qwen3-8B and five-request AIPerf samples; that is not performance qualification. Qwen3-0.6B on SGLang 0.5.10.post1 on H100 is separate negative compatibility evidence. SGLang 0.5.20 candidates for any pinned model stay unmeasured until a campaign measures them |
 | AIConfigurator | GPU-free modeled candidate reduction | Active optional adapter pinned to `0.11.0` plus `plotext 5.3.2`; Linux x86_64 real-package contract verified |
 | AISimulate | GPU-free simulation and recommendation source | Not integrated; adoption requires a stable package, schema, support, parity, and rollback contract |
 | LLM Compressor / ModelOpt | Produce immutable quantized artifacts | Replaceable external-builder plans and provenance are local-qualified; transformation and GPU compatibility remain external qualification |
 | vLLM Speculators | Model-specific EAGLE, MTP, DFlash, and related speculative candidates | Replaceable artifact plans and exact verifier provenance are local-qualified; acceptance rate and output correctness require real measurement |
 | LMCache | KV reuse and offload for qualified repeated-prefix workloads | Registered cache composition and exact capability boundary; executable lifecycle remains fail-closed |
 | Dynamo / NIXL | KV-aware routing and prefill/decode serving graph | Experimental Kubernetes adapter; real GPU/NIXL evidence required |
-| TensorRT-LLM | Narrow optimized runtime for supported model/GPU tuples | Immutable engine-build provenance exists; runtime execution remains unsupported until an exact tuple is qualified |
+| TensorRT-LLM | Narrow optimized runtime for supported model/GPU tuples | Upstream removed the engine backend; engine provenance remains only for engines built by an earlier release. Runtime execution remains unsupported until an exact tuple is qualified |
 | llm-d / AIBrix | Kubernetes routing, scheduling, and heterogeneous fleet patterns | Registered single-owner composition boundaries; no executable lifecycle support claim |
 
 The durable rule is: **the optimizer proposes; InferCrane proves**. Candidate sources, builders, and

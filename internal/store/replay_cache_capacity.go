@@ -73,6 +73,23 @@ func (s *Store) ReplayTrace(ctx context.Context, tenant, id string) (domain.Repl
 	return row, nil
 }
 
+// ReplayTraceByDigest resolves the content-free trace a customer-observed
+// workload fingerprint names. Identical captures share one digest, so the most
+// recent row is as good as any; the lookup never crosses tenants.
+func (s *Store) ReplayTraceByDigest(ctx context.Context, tenant, shapeDigest string) (domain.ReplayTrace, error) {
+	var row domain.ReplayTrace
+	var start, end, created string
+	err := s.QueryRowContext(ctx, `SELECT id,tenant_id,deployment_id,deployment_name,COALESCE(revision_id,''),schema_version,window_start,window_end,request_count,shape_json::text,summary_json::text,shape_digest,created_at FROM replay_traces WHERE tenant_id=? AND shape_digest=? ORDER BY created_at DESC, id LIMIT 1`, tenant, shapeDigest).Scan(&row.ID, &row.TenantID, &row.DeploymentID, &row.DeploymentName, &row.RevisionID, &row.SchemaVersion, &start, &end, &row.RequestCount, &row.ShapeJSON, &row.SummaryJSON, &row.ShapeDigest, &created)
+	if errors.Is(err, sql.ErrNoRows) {
+		return row, domain.ErrNotFound
+	}
+	if err != nil {
+		return row, err
+	}
+	row.WindowStart, row.WindowEnd, row.CreatedAt = parseTime(start), parseTime(end), parseTime(created)
+	return row, nil
+}
+
 func (s *Store) ReplayTraces(ctx context.Context, tenant, deploymentName string, limit int) ([]domain.ReplayTrace, error) {
 	if limit < 1 || limit > 100 {
 		limit = 20

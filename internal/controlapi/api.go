@@ -1299,9 +1299,13 @@ func continualOptimizationCampaignMemory(ctx context.Context, base Store, tenant
 }
 
 func continualOptimizationPolicyResponse(row domain.ContinualOptimizationPolicyRecord) map[string]any {
-	policy := json.RawMessage(row.PolicyJSON)
-	if !json.Valid(policy) {
-		policy = json.RawMessage(`{}`)
+	// Decoding returns only settings the loop reads. Policies stored before
+	// canary judgment moved wholly to Release Guard keep canary fields that the
+	// strict policy update would refuse, so they are not echoed back.
+	var policy any = json.RawMessage(`{}`)
+	var decoded continualoptimizer.Policy
+	if json.Unmarshal([]byte(row.PolicyJSON), &decoded) == nil {
+		policy = decoded
 	}
 	return map[string]any{"deployment": row.DeploymentName, "generation": row.Generation, "policy": policy, "created_at": row.CreatedAt, "updated_at": row.UpdatedAt}
 }

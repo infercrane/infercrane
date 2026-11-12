@@ -53,14 +53,31 @@ func TestRegistryHasExistingFirstCompilerPathsForEveryAcceleratorVendor(t *testi
 	}{
 		{"nvidia", "sm90", "vllm", "runtime-vllm"},
 		{"amd", "gfx942", "vllm", "runtime-vllm-rocm"},
-		{"google", "tpu-v6e", "vllm", "runtime-vllm-tpu"},
-		{"aws", "trn2", "vllm", "runtime-vllm-neuron"},
+		{"google", "tpu-v7x", "vllm-torchtpu", "runtime-vllm-torchtpu"},
+		{"google", "tpu-v7x", "vllm-jax", "runtime-vllm-jax"},
+		{"aws", "trn2", "vllm-neuron", "runtime-vllm-neuron"},
 	}
 	registry := DefaultRegistry()
 	for _, test := range tests {
 		matches, err := registry.Search(SearchRequest{Family: AttentionDecode, Runtime: test.runtime, HardwareVendor: test.vendor, ComputeCapability: test.accelerator, DTypes: []string{"bf16"}, Phase: PhaseDecode})
 		if err != nil || len(matches) < 2 || matches[0].ImplementationID != test.first {
 			t.Fatalf("vendor=%s matches=%+v err=%v", test.vendor, matches, err)
+		}
+	}
+}
+
+func TestRegistryDoesNotOfferABaselineForAnAmbiguousTPUOrNeuronRuntime(t *testing.T) {
+	// Plain "vllm" does not say which TPU or Neuron plugin serves the model.
+	registry := DefaultRegistry()
+	for _, vendor := range []string{"google", "aws"} {
+		matches, err := registry.Search(SearchRequest{Family: AttentionDecode, Runtime: "vllm", HardwareVendor: vendor, DTypes: []string{"bf16"}, Phase: PhaseDecode})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, match := range matches {
+			if match.Kind == "runtime-bundled" {
+				t.Fatalf("%s matched a runtime baseline for plain vllm: %+v", vendor, match)
+			}
 		}
 	}
 }

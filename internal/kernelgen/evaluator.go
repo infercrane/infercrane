@@ -43,12 +43,14 @@ type EvaluationRequest struct {
 }
 
 type EvaluationResult struct {
-	Correctness         kernelresearch.Correctness `json:"correctness"`
-	FailedStage         string                     `json:"failed_stage,omitempty"`
-	BaselineMedianUS    float64                    `json:"baseline_median_us"`
-	CandidateMedianUS   float64                    `json:"candidate_median_us"`
-	RooflineUtilization float64                    `json:"roofline_utilization"`
-	CostUSD             float64                    `json:"cost_usd"`
+	Correctness       kernelresearch.Correctness `json:"correctness"`
+	FailedStage       string                     `json:"failed_stage,omitempty"`
+	BaselineMedianUS  float64                    `json:"baseline_median_us"`
+	CandidateMedianUS float64                    `json:"candidate_median_us"`
+	// RooflineUtilization is the measured fraction of the operator's roofline
+	// in [0,1]. 0 means it was not measured, so it never stops a search.
+	RooflineUtilization float64 `json:"roofline_utilization"`
+	CostUSD             float64 `json:"cost_usd"`
 }
 
 type Evaluator interface {

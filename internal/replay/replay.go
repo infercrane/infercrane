@@ -2,8 +2,6 @@
 package replay
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"sort"
 	"time"
@@ -99,10 +97,5 @@ func Build(deploymentID, deploymentName, revisionID string, windowStart, windowE
 	if err != nil {
 		return domain.ReplayTrace{}, err
 	}
-	envelope, _ := json.Marshal(struct {
-		Shape   json.RawMessage `json:"shape"`
-		Summary json.RawMessage `json:"summary"`
-	}{shapeJSON, summaryJSON})
-	digest := sha256.Sum256(envelope)
-	return domain.ReplayTrace{DeploymentID: deploymentID, DeploymentName: deploymentName, RevisionID: revisionID, SchemaVersion: "infercrane.replay/v1", WindowStart: windowStart, WindowEnd: windowEnd, RequestCount: len(rows), ShapeJSON: string(shapeJSON), SummaryJSON: string(summaryJSON), ShapeDigest: hex.EncodeToString(digest[:])}, nil
+	return domain.ReplayTrace{DeploymentID: deploymentID, DeploymentName: deploymentName, RevisionID: revisionID, SchemaVersion: replaySchemaVersion, WindowStart: windowStart, WindowEnd: windowEnd, RequestCount: len(rows), ShapeJSON: string(shapeJSON), SummaryJSON: string(summaryJSON), ShapeDigest: digestEnvelope(shapeJSON, summaryJSON)}, nil
 }
