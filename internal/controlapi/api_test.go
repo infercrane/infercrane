@@ -36,7 +36,9 @@ import (
 	"github.com/infercrane/infercrane/internal/pricing"
 	"github.com/infercrane/infercrane/internal/provision"
 	"github.com/infercrane/infercrane/internal/qualityevidence"
+	"github.com/infercrane/infercrane/internal/releaseguard"
 	"github.com/infercrane/infercrane/internal/sandboxprovider"
+	"github.com/infercrane/infercrane/internal/store"
 	"github.com/infercrane/infercrane/internal/support"
 	"github.com/infercrane/infercrane/internal/trainingartifact"
 	"github.com/infercrane/infercrane/internal/workloadprofile"
@@ -627,7 +629,10 @@ type fakeIntelligenceStore struct {
 
 type fakeQualityEvidenceStore struct {
 	*fakeStore
-	evidence []domain.QualityEvidence
+	evidence      []domain.QualityEvidence
+	verdictState  string
+	verdictReport *releaseguard.QualityReport
+	verdictErr    error
 }
 
 type fakeMonitoringStore struct {
@@ -776,7 +781,7 @@ func TestAcceleratorLabAPIExposesTruthfulCapabilitiesAndQueuesTenantBoundRun(t *
 	capabilities.Header.Set("Authorization", "Bearer secret")
 	capabilityResponse := httptest.NewRecorder()
 	handler.ServeHTTP(capabilityResponse, capabilities)
-	if capabilityResponse.Code != http.StatusOK || !strings.Contains(capabilityResponse.Body.String(), `"profiler":"nsight-systems+nsight-compute"`) || !strings.Contains(capabilityResponse.Body.String(), `"vendor":"amd"`) || !strings.Contains(capabilityResponse.Body.String(), `"vendor":"google"`) || !strings.Contains(capabilityResponse.Body.String(), `"vendor":"aws"`) || !strings.Contains(capabilityResponse.Body.String(), "not performance or capacity claims") {
+	if capabilityResponse.Code != http.StatusOK || !strings.Contains(capabilityResponse.Body.String(), `"profiler":"torch-profiler"`) || !strings.Contains(capabilityResponse.Body.String(), `"vendor":"amd"`) || !strings.Contains(capabilityResponse.Body.String(), `"vendor":"google"`) || !strings.Contains(capabilityResponse.Body.String(), `"vendor":"aws"`) || !strings.Contains(capabilityResponse.Body.String(), "not performance or capacity claims") {
 		t.Fatalf("status=%d body=%s", capabilityResponse.Code, capabilityResponse.Body.String())
 	}
 
@@ -1957,6 +1962,13 @@ func (f *fakeQualityEvidenceStore) QualityEvidenceForDeployment(context.Context,
 	return f.evidence, nil
 }
 
+func (f *fakeQualityEvidenceStore) QualityVerdicts(context.Context, string, string) (string, *releaseguard.QualityReport, error) {
+	if f.verdictState == "" && f.verdictErr == nil {
+		return store.QualityVerdictsNotGated, nil, nil
+	}
+	return f.verdictState, f.verdictReport, f.verdictErr
+}
+
 func (f *fakeIntelligenceStore) CaptureReplayTrace(context.Context, string, string, time.Duration, int) (domain.ReplayTrace, error) {
 	return f.trace, nil
 }
@@ -2241,6 +2253,61 @@ func TestQualityEvidenceAPIRequiresValidRevisionBoundSignedAggregate(t *testing.
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusUnprocessableEntity || len(store.evidence) != 1 {
 		t.Fatalf("mismatched deployment status=%d evidence=%+v body=%s", response.Code, store.evidence, response.Body.String())
+	}
+}
+
+func TestQualityEvidenceAPIReportsPerEvalVerdicts(t *testing.T) {
+	base := &fakeStore{resolved: domain.ResolvedDeployment{Deployment: domain.Deployment{ID: "deployment-1", Name: "prod", ActiveRevisionID: "rev-1", CandidateRevisionID: "rev-2"}}}
+	watch, limit := 1.0, 3.0
+	policy := domain.ReleaseGuardPolicy{Enabled: true, RequireQualityEvidence: true, MaxQualityRegressionPercent: &limit, QualityWatchRegressionPercent: &watch}
+	reference := domain.QualityEvalSide{EvidenceID: "q-active", Score: .90, Passed: true, SampleCount: 200}
+	report := releaseguard.CompareQuality(policy, []domain.QualityEvalEvidence{
+		{Suite: "support-answers", SuiteVersion: "git:abc123", Evaluator: "offline", EvaluatorVersion: "1.0.0", Candidate: domain.QualityEvalSide{EvidenceID: "q-candidate", Score: .885, Passed: true, SampleCount: 200}, Reference: &reference},
+	})
+	report.Reference, report.Candidate = releaseguard.QualitySubject{RevisionID: "rev-1", Model: "model-v1"}, releaseguard.QualitySubject{RevisionID: "rev-2", Model: "model-v2"}
+	quality := &fakeQualityEvidenceStore{fakeStore: base, verdictState: store.QualityVerdictsCompared, verdictReport: &report}
+	handler := (API{Store: quality, APIKey: "secret"}).Handler()
+	get := func() (int, map[string]any) {
+		request := httptest.NewRequest(http.MethodGet, "/api/v1/deployments/prod/quality-evidence", nil)
+		request.Header.Set("Authorization", "Bearer secret")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		var body map[string]any
+		_ = json.Unmarshal(response.Body.Bytes(), &body)
+		return response.Code, body
+	}
+	status, body := get()
+	verdicts, _ := body["verdicts"].(map[string]any)
+	if status != http.StatusOK || verdicts["state"] != "compared" || verdicts["verdict"] != "WATCH" || verdicts["decision_authority"] != "persisted_release_guard_policy" || body["content_recorded"] != false {
+		t.Fatalf("status=%d body=%v", status, body)
+	}
+	if candidate, _ := verdicts["candidate"].(map[string]any); candidate["model"] != "model-v2" || candidate["revision_id"] != "rev-2" {
+		t.Fatalf("candidate subject=%v", verdicts["candidate"])
+	}
+	evals, _ := verdicts["evals"].([]any)
+	if len(evals) != 1 {
+		t.Fatalf("evals=%v", verdicts["evals"])
+	}
+	eval := evals[0].(map[string]any)
+	if eval["verdict"] != "WATCH" || eval["code"] != "quality_watch" || eval["reference_score"] != .90 || eval["candidate_score"] != .885 || eval["delta"] == nil || eval["regression_percent"] == nil || eval["follow_up"] == "" {
+		t.Fatalf("eval=%v", eval)
+	}
+
+	for _, test := range []struct {
+		state string
+		err   error
+		want  string
+	}{{store.QualityVerdictsNotGated, nil, "not_gated"}, {store.QualityVerdictsNoCandidate, nil, "no_candidate"}, {"", domain.ErrNotFound, "unavailable"}} {
+		quality.verdictState, quality.verdictReport, quality.verdictErr = test.state, nil, test.err
+		status, body = get()
+		verdicts, _ = body["verdicts"].(map[string]any)
+		if status != http.StatusOK || verdicts["state"] != test.want || verdicts["verdict"] != nil || verdicts["evals"] != nil {
+			t.Fatalf("state %q status=%d body=%v", test.want, status, body)
+		}
+	}
+	quality.verdictState, quality.verdictErr = "", errors.New("database unavailable")
+	if status, _ = get(); status != http.StatusInternalServerError {
+		t.Fatalf("verdict failure status=%d", status)
 	}
 }
 

@@ -4615,8 +4615,8 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	for name, backend := range benchmarkBackends {
 		candidateBackends[name] = optimizationcampaign.BenchmarkBackend{APIKey: backend.APIKey, APIKeyEnv: backend.APIKeyEnv}
 	}
-	candidateBenchmark := optimizationcampaign.BenchmarkExecutor{Store: s, Runner: benchmark.Runner{}, Costs: optimizationCosts, Backends: candidateBackends, AIPerfBinary: cfg.AIPerfBinary}
-	driver := optimizationcampaign.CompositeDriver{Store: s, Costs: optimizationCosts, Benchmark: candidateBenchmark, Ranker: optimizationcampaign.PersistedRanker{Store: s}}
+	candidateBenchmark := optimizationcampaign.BenchmarkExecutor{Store: s, Runner: benchmark.Runner{}, Costs: optimizationCosts, Replays: s, Backends: candidateBackends, AIPerfBinary: cfg.AIPerfBinary}
+	driver := optimizationcampaign.CompositeDriver{Store: s, Costs: optimizationCosts, Benchmark: candidateBenchmark, Ranker: optimizationcampaign.PersistedRanker{Store: s}, Replays: s}
 	for kind, handler := range optimizationcampaign.Handlers(optimizationcampaign.Coordinator{Repository: s, Driver: driver}) {
 		handlers[kind] = handler
 	}

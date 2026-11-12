@@ -10,6 +10,7 @@ import (
 
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/operations"
+	"github.com/infercrane/infercrane/internal/optimizer"
 	"github.com/infercrane/infercrane/internal/workflows"
 )
 
@@ -100,6 +101,27 @@ func TestExecutionHandlerMeasuresEveryCandidateBeforeRanking(t *testing.T) {
 	}
 	if driver.measureCalls != 2 || driver.validateCalls != 2 || driver.rankCalls != 2 || driver.guardCalls != 1 {
 		t.Fatalf("ranking crossed the phase barrier incorrectly: %+v", driver)
+	}
+}
+
+func TestExecutionHandlerMeasuresTheControlFirst(t *testing.T) {
+	now := time.Now().UTC()
+	repository, driver, coordinator := approvedCoordinatorFixture(now, 3)
+	repository.campaign.Intent = IntentNewEndpoint
+	for index := range repository.campaign.Candidates {
+		repository.campaign.Candidates[index].ProposalCandidateID = "proposal-" + string(rune('a'+index))
+	}
+	proposal, _ := json.Marshal(optimizer.Proposal{StartingPoint: &optimizer.StartingPoint{CandidateID: "proposal-c"}})
+	repository.campaign.ProposalJSON = string(proposal)
+	driver.rankDecisions = map[string]string{"candidate-a": RankSupersede, "candidate-b": RankSupersede, "candidate-c": RankSelect}
+	request, _ := json.Marshal(ExecuteRequest{TenantID: "tenant", CampaignID: "campaign", Candidates: []string{"candidate-a", "candidate-b", "candidate-c"}})
+	result, err := Handlers(coordinator)[ExecuteKind](context.Background(), domain.Operation{RequestJSON: string(request)})
+	assertWaitingForHuman(t, result, err)
+	if strings.Join(driver.measured, ",") != "candidate-c,candidate-a,candidate-b" {
+		t.Fatalf("the control was not measured first: %v", driver.measured)
+	}
+	if got := controlFirst(repository.campaign, []string{"candidate-b", "candidate-a"}); strings.Join(got, ",") != "candidate-b,candidate-a" {
+		t.Fatalf("a candidate set without its control was reordered: %v", got)
 	}
 }
 

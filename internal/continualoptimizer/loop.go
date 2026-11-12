@@ -24,27 +24,22 @@ const (
 	SourcePublicPrior      = "public_prior"
 	SourceCustomerObserved = "customer_observed"
 
-	ActionWaitForEvidence    = "wait_for_evidence"
-	ActionScreenPublicPrior  = "screen_public_prior"
-	ActionStartExperiment    = "start_experiment"
-	ActionObserveExperiment  = "observe_experiment"
-	ActionObserveCanary      = "observe_canary"
-	ActionRollbackCanary     = "rollback_canary"
-	ActionRecommendPromotion = "recommend_promotion"
-	ActionRetainCurrent      = "retain_current"
+	ActionWaitForEvidence   = "wait_for_evidence"
+	ActionScreenPublicPrior = "screen_public_prior"
+	ActionStartExperiment   = "start_experiment"
+	ActionObserveExperiment = "observe_experiment"
+	ActionRetainCurrent     = "retain_current"
 )
 
 // Policy is durable authority for one optimization loop. Defaults are
-// deliberately conservative: public data can screen candidates, customer
-// traffic is required for qualification, and production promotion remains an
-// explicit operator decision.
+// deliberately conservative: public data can screen candidates and customer
+// traffic is required for qualification. The loop never judges or promotes a
+// canary; Release Guard owns that decision.
 type Policy struct {
 	Enabled                       bool    `json:"enabled"`
 	MinimumObservedRequests       int     `json:"minimum_observed_requests"`
-	MinimumCanaryRequests         int     `json:"minimum_canary_requests"`
 	DriftThreshold                float64 `json:"drift_threshold"`
 	MinimumExpectedGain           float64 `json:"minimum_expected_gain"`
-	MinimumMeasuredGain           float64 `json:"minimum_measured_gain"`
 	MinimumContributionMargin     float64 `json:"minimum_contribution_margin"`
 	MinimumAvailability           float64 `json:"minimum_availability"`
 	MaximumErrorRate              float64 `json:"maximum_error_rate"`
@@ -54,20 +49,18 @@ type Policy struct {
 	CooldownSeconds               int     `json:"cooldown_seconds"`
 	RejectionMemorySeconds        int     `json:"rejection_memory_seconds"`
 	RequireCustomerReplay         bool    `json:"require_customer_replay"`
-	RequireManualPromotion        bool    `json:"require_manual_promotion"`
 	AllowAutomaticExperimentation bool    `json:"allow_automatic_experimentation"`
 }
 
 func DefaultPolicy() Policy {
 	return Policy{
-		Enabled: true, MinimumObservedRequests: 500, MinimumCanaryRequests: 1000,
-		DriftThreshold: .25, MinimumExpectedGain: .03, MinimumMeasuredGain: .03,
+		Enabled: true, MinimumObservedRequests: 500,
+		DriftThreshold: .25, MinimumExpectedGain: .03,
 		MinimumContributionMargin: .20, MinimumAvailability: .999,
 		MaximumErrorRate: .01, MaximumExperimentCostUSD: 100,
 		MaximumCandidatesPerCampaign: 4, MaximumConcurrentCampaigns: 1,
 		CooldownSeconds: 6 * 60 * 60, RejectionMemorySeconds: 30 * 24 * 60 * 60,
-		RequireCustomerReplay: true, RequireManualPromotion: true,
-		AllowAutomaticExperimentation: true,
+		RequireCustomerReplay: true, AllowAutomaticExperimentation: true,
 	}
 }
 
@@ -136,16 +129,15 @@ type Active struct {
 }
 
 type Input struct {
-	Now              time.Time        `json:"now"`
-	Policy           Policy           `json:"policy"`
-	Baseline         *Workload        `json:"baseline,omitempty"`
-	Current          Workload         `json:"current"`
-	ActiveService    ServiceEvidence  `json:"active_service"`
-	CanaryService    *ServiceEvidence `json:"canary_service,omitempty"`
-	Hypotheses       []Hypothesis     `json:"hypotheses,omitempty"`
-	History          []Outcome        `json:"history,omitempty"`
-	ActiveCampaigns  []Active         `json:"active_campaigns,omitempty"`
-	LastExperimentAt *time.Time       `json:"last_experiment_at,omitempty"`
+	Now              time.Time       `json:"now"`
+	Policy           Policy          `json:"policy"`
+	Baseline         *Workload       `json:"baseline,omitempty"`
+	Current          Workload        `json:"current"`
+	ActiveService    ServiceEvidence `json:"active_service"`
+	Hypotheses       []Hypothesis    `json:"hypotheses,omitempty"`
+	History          []Outcome       `json:"history,omitempty"`
+	ActiveCampaigns  []Active        `json:"active_campaigns,omitempty"`
+	LastExperimentAt *time.Time      `json:"last_experiment_at,omitempty"`
 }
 
 type RankedHypothesis struct {
@@ -164,7 +156,6 @@ type Decision struct {
 	Selected            []RankedHypothesis `json:"selected,omitempty"`
 	WorkloadAuthority   string             `json:"workload_authority"`
 	PromotionEligible   bool               `json:"promotion_eligible"`
-	AutomaticPromotion  bool               `json:"automatic_promotion"`
 	MaximumCostUSD      float64            `json:"maximum_cost_usd,omitempty"`
 	BaselineReplacement bool               `json:"baseline_replacement"`
 	EvaluatedAt         time.Time          `json:"evaluated_at"`
@@ -184,16 +175,13 @@ func Evaluate(input Input) (Decision, error) {
 	decision := Decision{
 		SchemaVersion: SchemaVersion, AlgorithmVersion: AlgorithmVersion,
 		InputDigest: hex.EncodeToString(sum[:]), WorkloadAuthority: input.Current.Source,
-		EvaluatedAt: input.Now, AutomaticPromotion: false,
+		EvaluatedAt: input.Now,
 	}
 
 	if !input.Policy.Enabled {
 		decision.Action = ActionRetainCurrent
 		decision.Reasons = []string{"continual optimization is disabled by policy"}
 		return seal(decision), nil
-	}
-	if input.CanaryService != nil {
-		return seal(evaluateCanary(input, decision)), nil
 	}
 	if len(input.ActiveCampaigns) > 0 {
 		decision.Action = ActionObserveExperiment
@@ -258,35 +246,6 @@ func Evaluate(input Input) (Decision, error) {
 	decision.Action = ActionStartExperiment
 	decision.MaximumCostUSD = selectedBudget(decision.Selected, input.Policy.MaximumExperimentCostUSD)
 	return seal(decision), nil
-}
-
-func evaluateCanary(input Input, decision Decision) Decision {
-	canary := *input.CanaryService
-	decision.WorkloadAuthority = input.Current.Source
-	decision.PromotionEligible = input.Current.Source == SourceCustomerObserved && input.Current.RequestCount >= input.Policy.MinimumObservedRequests
-	regressions := canaryRegressions(input.ActiveService, canary, input.Policy)
-	if len(regressions) > 0 {
-		decision.Action = ActionRollbackCanary
-		decision.Reasons = regressions
-		decision.PromotionEligible = false
-		return decision
-	}
-	if canary.RequestCount < input.Policy.MinimumCanaryRequests {
-		decision.Action = ActionObserveCanary
-		decision.Reasons = []string{fmt.Sprintf("canary has %d requests; policy requires %d", canary.RequestCount, input.Policy.MinimumCanaryRequests)}
-		return decision
-	}
-	gain := economicUtility(canary) - economicUtility(input.ActiveService)
-	if gain < input.Policy.MinimumMeasuredGain {
-		decision.Action = ActionRollbackCanary
-		decision.Reasons = []string{fmt.Sprintf("canary utility gain %.3f is below required %.3f", gain, input.Policy.MinimumMeasuredGain)}
-		decision.PromotionEligible = false
-		return decision
-	}
-	decision.Action = ActionRecommendPromotion
-	decision.Reasons = []string{fmt.Sprintf("canary clears correctness, SLO, availability, margin, and %.3f measured utility gain", gain)}
-	decision.AutomaticPromotion = decision.PromotionEligible && !input.Policy.RequireManualPromotion
-	return decision
 }
 
 func rank(input Input, requireMaterial bool) []RankedHypothesis {
@@ -376,20 +335,6 @@ func serviceViolations(service ServiceEvidence, policy Policy) []string {
 	return reasons
 }
 
-func canaryRegressions(active, canary ServiceEvidence, policy Policy) []string {
-	reasons := serviceViolations(canary, policy)
-	if active.TTFTP95MS > 0 && canary.TTFTP95MS > active.TTFTP95MS*1.10 {
-		reasons = append(reasons, "canary p95 TTFT regressed by more than 10%")
-	}
-	if active.TPOTP95MS > 0 && canary.TPOTP95MS > active.TPOTP95MS*1.10 {
-		reasons = append(reasons, "canary p95 TPOT regressed by more than 10%")
-	}
-	if canary.ErrorRate > active.ErrorRate+.0025 {
-		reasons = append(reasons, "canary error rate regressed by more than 0.25 percentage points")
-	}
-	return reasons
-}
-
 // WorkloadDrift is a bounded distance over workload-shape dimensions. Log
 // ratios keep a 2x change equally important at small and large token counts.
 func WorkloadDrift(baseline, current Workload) float64 {
@@ -415,22 +360,6 @@ func WorkloadDrift(baseline, current Workload) float64 {
 		return 0
 	}
 	return math.Min(1, total/weights)
-}
-
-func economicUtility(service ServiceEvidence) float64 {
-	throughput := service.QualifiedOutputTokensPerSecond
-	if throughput == 0 {
-		throughput = service.OutputTokensPerSecond
-	}
-	costEfficiency := 0.0
-	if service.CostPerMillionOutputUSD > 0 {
-		costEfficiency = 1 / service.CostPerMillionOutputUSD
-	}
-	availability := service.Availability
-	if availability == 0 {
-		availability = 1
-	}
-	return math.Log1p(throughput)*.35 + math.Log1p(costEfficiency)*.20 + service.ProductiveUtilization*.15 + service.ContributionMargin*.20 + availability*.10
 }
 
 func logDistance(left, right float64) float64 {
@@ -501,11 +430,6 @@ func validate(input Input) error {
 	if err := validateServiceEvidence(input.ActiveService); err != nil {
 		return fmt.Errorf("active service evidence: %w", err)
 	}
-	if input.CanaryService != nil {
-		if err := validateServiceEvidence(*input.CanaryService); err != nil {
-			return fmt.Errorf("canary service evidence: %w", err)
-		}
-	}
 	if len(input.ActiveCampaigns) > policy.MaximumConcurrentCampaigns {
 		return errors.New("active campaigns exceed policy authority")
 	}
@@ -546,7 +470,7 @@ func validateServiceEvidence(evidence ServiceEvidence) error {
 // authority. It intentionally does not inject defaults: callers must persist
 // the exact policy an operator reviewed.
 func ValidatePolicy(policy Policy) error {
-	if policy.MinimumObservedRequests < 1 || policy.MinimumCanaryRequests < 1 || policy.DriftThreshold <= 0 || policy.DriftThreshold > 1 || policy.MinimumExpectedGain <= 0 || policy.MinimumExpectedGain > 1 || policy.MinimumMeasuredGain <= 0 || policy.MinimumMeasuredGain > 1 || policy.MinimumContributionMargin < -1 || policy.MinimumContributionMargin >= 1 || policy.MinimumAvailability <= 0 || policy.MinimumAvailability > 1 || policy.MaximumErrorRate < 0 || policy.MaximumErrorRate >= 1 || policy.MaximumExperimentCostUSD <= 0 || policy.MaximumCandidatesPerCampaign < 1 || policy.MaximumCandidatesPerCampaign > 100 || policy.MaximumConcurrentCampaigns < 1 || policy.CooldownSeconds < 0 || policy.RejectionMemorySeconds <= 0 || policy.RejectionMemorySeconds > 365*24*60*60 {
+	if policy.MinimumObservedRequests < 1 || policy.DriftThreshold <= 0 || policy.DriftThreshold > 1 || policy.MinimumExpectedGain <= 0 || policy.MinimumExpectedGain > 1 || policy.MinimumContributionMargin < -1 || policy.MinimumContributionMargin >= 1 || policy.MinimumAvailability <= 0 || policy.MinimumAvailability > 1 || policy.MaximumErrorRate < 0 || policy.MaximumErrorRate >= 1 || policy.MaximumExperimentCostUSD <= 0 || policy.MaximumCandidatesPerCampaign < 1 || policy.MaximumCandidatesPerCampaign > 100 || policy.MaximumConcurrentCampaigns < 1 || policy.CooldownSeconds < 0 || policy.RejectionMemorySeconds <= 0 || policy.RejectionMemorySeconds > 365*24*60*60 {
 		return errors.New("continual optimizer policy is outside safe bounds")
 	}
 	return nil

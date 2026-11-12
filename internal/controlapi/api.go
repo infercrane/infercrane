@@ -54,6 +54,7 @@ import (
 	"github.com/infercrane/infercrane/internal/provision"
 	"github.com/infercrane/infercrane/internal/qualityevidence"
 	"github.com/infercrane/infercrane/internal/recipe"
+	"github.com/infercrane/infercrane/internal/releaseguard"
 	"github.com/infercrane/infercrane/internal/sandboxprovider"
 	"github.com/infercrane/infercrane/internal/secrets"
 	"github.com/infercrane/infercrane/internal/store"
@@ -261,6 +262,7 @@ type recipeLabStore interface {
 type qualityEvidenceStore interface {
 	RecordQualityEvidence(context.Context, string, string, domain.QualityEvidence) (domain.QualityEvidence, bool, error)
 	QualityEvidenceForDeployment(context.Context, string, string, int) ([]domain.QualityEvidence, error)
+	QualityVerdicts(context.Context, string, string) (string, *releaseguard.QualityReport, error)
 }
 type consoleIdentityStore interface {
 	ProvisionConsoleIdentity(context.Context, string, domain.ConsoleIdentityProvisioning) (domain.ConsoleIdentity, error)
@@ -706,7 +708,37 @@ func (a API) qualityEvidence(w http.ResponseWriter, r *http.Request) {
 	for _, item := range items {
 		data = append(data, qualityEvidenceResponse(item))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": data, "content_recorded": false})
+	verdicts, err := qualityVerdictsResponse(r.Context(), store, actor.TenantID, r.PathValue("name"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "quality verdicts could not be computed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": data, "verdicts": verdicts, "content_recorded": false})
+}
+
+// qualityVerdictView is the per-eval and per-model verdict table for the
+// current candidate. The stored Release Guard evaluation stays the decision of
+// record; this view applies the same persisted policy to the same evidence.
+type qualityVerdictView struct {
+	State             string `json:"state"`
+	DecisionAuthority string `json:"decision_authority"`
+	*releaseguard.QualityReport
+}
+
+func qualityVerdictsResponse(ctx context.Context, store qualityEvidenceStore, tenant, name string) (qualityVerdictView, error) {
+	view := qualityVerdictView{DecisionAuthority: "persisted_release_guard_policy"}
+	state, report, err := store.QualityVerdicts(ctx, tenant, name)
+	if errors.Is(err, domain.ErrNotFound) {
+		// No running deployment or policy to compare against: say so instead
+		// of reporting a verdict.
+		view.State = "unavailable"
+		return view, nil
+	}
+	if err != nil {
+		return view, err
+	}
+	view.State, view.QualityReport = state, report
+	return view, nil
 }
 
 func qualityEvidenceResponse(item domain.QualityEvidence) map[string]any {
@@ -1299,9 +1331,13 @@ func continualOptimizationCampaignMemory(ctx context.Context, base Store, tenant
 }
 
 func continualOptimizationPolicyResponse(row domain.ContinualOptimizationPolicyRecord) map[string]any {
-	policy := json.RawMessage(row.PolicyJSON)
-	if !json.Valid(policy) {
-		policy = json.RawMessage(`{}`)
+	// Decoding returns only settings the loop reads. Policies stored before
+	// canary judgment moved wholly to Release Guard keep canary fields that the
+	// strict policy update would refuse, so they are not echoed back.
+	var policy any = json.RawMessage(`{}`)
+	var decoded continualoptimizer.Policy
+	if json.Unmarshal([]byte(row.PolicyJSON), &decoded) == nil {
+		policy = decoded
 	}
 	return map[string]any{"deployment": row.DeploymentName, "generation": row.Generation, "policy": policy, "created_at": row.CreatedAt, "updated_at": row.UpdatedAt}
 }

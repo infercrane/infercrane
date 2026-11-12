@@ -18,7 +18,7 @@ func TestRequestDerivedPathsStayInsideTheirDirectories(t *testing.T) {
 	if _, err := target.contentAddressedFile("replay@sha256:../../etc/passwd"); err == nil {
 		t.Fatal("non-digest identity accepted")
 	}
-	if path, err := target.packIntegration(kernelgen.Pack{Family: "../../x", Integration: "../../../etc", Runtimes: []string{"vllm"}}, RuntimeSpec{Name: "vllm"}); err == nil || strings.HasPrefix(path, "/etc") {
+	if path, err := target.packIntegration(kernelgen.Pack{Family: "../../x", Integration: "../../../etc", Runtimes: []string{"vllm"}, RuntimeVersions: map[string][]string{"vllm": {"0.22.1"}}}, RuntimeSpec{Name: "vllm", Version: "0.22.1"}); err == nil || strings.HasPrefix(path, "/etc") {
 		t.Fatalf("integration path escaped the pack directory: %q err=%v", path, err)
 	}
 	if got := filepath.Join(target.PackDir, filepath.Clean("/"+"../../x")); !strings.HasPrefix(got, "/packs/") {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -191,10 +192,17 @@ func TestCompositeDriverAdoptsExactBenchmarkAndQualityEvidence(t *testing.T) {
 	now := time.Now().UTC()
 	store, candidate := compositeFixture(t, IntentNewEndpoint, now)
 	candidate.DeploymentName, candidate.RevisionID = "candidate", "revision-1"
-	workload, _ := json.Marshal(map[string]any{"profile": "interactive", "profile_version": performanceprofile.Version})
-	store.benchmarks = []domain.BenchmarkResult{{ID: "benchmark-1", RevisionID: candidate.RevisionID, WorkloadJSON: string(workload), CostMetadataJSON: `{"available":true}`, RequestCount: 20, CreatedAt: now.Add(time.Second)}}
+	// A single-run row from an earlier campaign method is never adopted.
+	legacy, _ := json.Marshal(map[string]any{"profile": "interactive", "profile_version": performanceprofile.Version})
+	store.benchmarks = []domain.BenchmarkResult{{ID: "benchmark-legacy", RevisionID: candidate.RevisionID, WorkloadJSON: string(legacy), CostMetadataJSON: `{"available":true}`, RequestCount: 20, CreatedAt: now.Add(time.Second)}}
 	benchmark := &benchmarkFixture{row: domain.BenchmarkResult{ID: "unexpected"}}
 	driver := CompositeDriver{Store: store, Benchmark: benchmark, Costs: freshCost(now), Now: func() time.Time { return now }}
+	if _, err := driver.Measure(t.Context(), candidate.ID, candidate, Budget{MaxCostUSD: 5, ExpiresAt: now.Add(time.Hour)}); err == nil || benchmark.calls != 1 {
+		t.Fatalf("legacy single-run evidence was adopted: err=%v calls=%d", err, benchmark.calls)
+	}
+	benchmark.calls = 0
+	workload, _ := json.Marshal(map[string]any{"profile": "interactive", "profile_version": performanceprofile.Version, "measurement_method": MeasurementMethod})
+	store.benchmarks = []domain.BenchmarkResult{{ID: "benchmark-1", RevisionID: candidate.RevisionID, WorkloadJSON: string(workload), CostMetadataJSON: `{"available":true}`, RequestCount: 20, CreatedAt: now.Add(time.Second)}}
 	measured, err := driver.Measure(t.Context(), candidate.ID, candidate, Budget{MaxCostUSD: 5, ExpiresAt: now.Add(time.Hour)})
 	if err != nil || measured.BenchmarkID != "benchmark-1" || benchmark.calls != 0 {
 		t.Fatalf("exact persisted benchmark was not adopted: %+v err=%v calls=%d", measured, err, benchmark.calls)
@@ -268,5 +276,30 @@ func assertRetryableCode(t *testing.T, err error, code string) {
 	var failure operations.Failure
 	if !errors.As(err, &failure) || !failure.Retryable || failure.Code != code {
 		t.Fatalf("error=%v, want retryable %s", err, code)
+	}
+}
+
+func TestCompositeDriverRefusesUnreplayableBindingBeforeProviderMutation(t *testing.T) {
+	now := time.Now().UTC()
+	store, candidate := compositeFixture(t, IntentNewEndpoint, now)
+	var proposal optimizer.Proposal
+	if err := json.Unmarshal([]byte(store.campaign.ProposalJSON), &proposal); err != nil {
+		t.Fatal(err)
+	}
+	proposal.Input.WorkloadSource, proposal.Input.WorkloadFingerprint = optimizer.WorkloadSourceCustomerObserved, "sha256:"+strings.Repeat("e", 64)
+	encoded, _ := json.Marshal(proposal)
+	store.campaign.ProposalJSON = string(encoded)
+	budget := Budget{MaxCostUSD: 5, ExpiresAt: now.Add(time.Hour)}
+	driver := CompositeDriver{Store: store, Costs: freshCost(now), Replays: replaySourceFixture{err: domain.ErrNotFound}, Now: func() time.Time { return now }}
+	_, err := driver.Provision(t.Context(), candidate.ID, candidate, budget)
+	var failure operations.Failure
+	if !errors.As(err, &failure) || failure.Retryable || failure.Code != "optimization_replay_unavailable" || store.cloudSubmits != 0 {
+		t.Fatalf("an unreplayable campaign reached provider mutation: err=%v submits=%d", err, store.cloudSubmits)
+	}
+	driver.Replays = replaySourceFixture{err: errors.New("database unavailable")}
+	_, err = driver.Provision(t.Context(), candidate.ID, candidate, budget)
+	assertRetryableCode(t, err, "optimization_replay_lookup_failed")
+	if store.cloudSubmits != 0 {
+		t.Fatalf("a transient replay lookup failure reached provider mutation: submits=%d", store.cloudSubmits)
 	}
 }

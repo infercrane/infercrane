@@ -163,6 +163,32 @@ func TestGenerateRecordsANoWinnerSearchAsEvidence(t *testing.T) {
 	}
 }
 
+func TestEvaluatorRooflineStopsTheSearchOnlyWhenMeasured(t *testing.T) {
+	// The evaluator reports the DRAM roofline fraction it measured; 0 is unknown.
+	for _, test := range []struct {
+		roofline float64
+		state    string
+		attempts int
+	}{{roofline: .96, state: "roofline_reached", attempts: 1}, {roofline: 0, state: "plateau", attempts: 4}} {
+		author := &scriptedAuthor{drafts: []string{kernelDraft("a"), kernelDraft("b"), kernelDraft("c"), kernelDraft("d")}}
+		evaluator := &scriptedEvaluator{respond: func(request EvaluationRequest) (EvaluationResult, error) {
+			if request.Source != kernelDraft("a") {
+				return timed(100, 95), nil
+			}
+			result := timed(100, 90)
+			result.RooflineUtilization = test.roofline
+			return result, nil
+		}}
+		evidence, err := newGenerator(t, author, evaluator, &memoryPublisher{}).Generate(context.Background(), generationRequest(t, defaultPolicy()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if evidence.Research.State != test.state || len(evidence.Research.Observations) != test.attempts {
+			t.Fatalf("roofline %.2f: state=%s attempts=%d", test.roofline, evidence.Research.State, len(evidence.Research.Observations))
+		}
+	}
+}
+
 func TestStaticScreenAndDuplicatesSpendNoGPUTime(t *testing.T) {
 	duplicate := kernelDraft("same")
 	author := &scriptedAuthor{drafts: []string{"print('no kernel')", kernelDraft("torch.mean(x)"), duplicate, duplicate}, cost: .02}
@@ -456,6 +482,55 @@ func TestRepositoryPackLoadsAndScreens(t *testing.T) {
 		if pack.Screen(draft) == nil {
 			t.Fatalf("draft passed screen: %q", draft)
 		}
+	}
+}
+
+func TestRepositoryPackRefusesRuntimesItsIntegrationWasNotReviewedFor(t *testing.T) {
+	pack, err := LoadPack("../../tools/kernel-lab/packs", kernelplanner.ResidualRMSNorm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = pack.SupportsRuntime("vllm", "0.22.1"); err != nil {
+		t.Fatalf("reviewed runtime refused: %v", err)
+	}
+	// vLLM 0.34.0 removes the IR op-priority setting the integration uses.
+	for _, runtime := range [][2]string{{"vllm", "0.34.0"}, {"vllm", "0.32.0"}, {"vllm", ""}, {"sglang", "0.5.20"}} {
+		if err = pack.SupportsRuntime(runtime[0], runtime[1]); err == nil {
+			t.Fatalf("%s %s accepted", runtime[0], runtime[1])
+		}
+	}
+	if err = pack.SupportsRuntime("vllm", "0.34.0"); !strings.Contains(err.Error(), "CustomOp") || !strings.Contains(err.Error(), "0.22.1") {
+		t.Fatalf("refusal does not say what a newer pin needs: %v", err)
+	}
+}
+
+func TestPackIntegrationMustDeclareReviewedRuntimeVersions(t *testing.T) {
+	base := Pack{SchemaVersion: PackSchemaV1, Family: kernelplanner.ResidualRMSNorm, Backend: "triton", License: "Apache-2.0", Filename: "kernel.py", Contract: "contract", Integration: "integration", Runtimes: []string{"vllm"}}
+	if _, err := base.normalized(); err == nil {
+		t.Fatal("integration without reviewed runtime versions accepted")
+	}
+	stray := base
+	stray.RuntimeVersions = map[string][]string{"vllm": {"0.22.1"}, "sglang": {"0.5.20"}}
+	if _, err := stray.normalized(); err == nil {
+		t.Fatal("versions for an undeclared runtime accepted")
+	}
+	reviewed := base
+	reviewed.RuntimeVersions = map[string][]string{"vllm": {"0.22.1"}}
+	if _, err := reviewed.normalized(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGenerateRefusesAnUnreviewedRuntimeBeforeSpend(t *testing.T) {
+	author, evaluator := &scriptedAuthor{drafts: []string{kernelDraft("a")}}, &scriptedEvaluator{}
+	generator := Generator{PackDirectory: "../../tools/kernel-lab/packs", Author: author, Evaluator: evaluator, Publisher: &memoryPublisher{}}
+	request := generationRequest(t, defaultPolicy())
+	request.Runtime.Version = "0.34.0"
+	if _, err := generator.Generate(context.Background(), request); err == nil || !strings.Contains(err.Error(), "0.34.0") {
+		t.Fatalf("unreviewed runtime accepted: %v", err)
+	}
+	if len(author.requests) != 0 || len(evaluator.calls) != 0 {
+		t.Fatalf("refusal spent: drafts=%d evaluations=%d", len(author.requests), len(evaluator.calls))
 	}
 }
 

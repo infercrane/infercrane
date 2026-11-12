@@ -1,6 +1,6 @@
 ---
 title: Semantic quality evidence
-description: Bind signed, aggregate task-quality evidence to exact revisions and enforce deterministic rollout thresholds.
+description: Bind signed, aggregate task-quality evidence to exact revisions and gate rollouts with PASS, WATCH, and BLOCK verdicts per eval.
 ---
 
 # Healthy infrastructure is not enough
@@ -121,6 +121,11 @@ Missing or incomparable required evidence leaves the decision waiting. A failed 
 the minimum, or regression beyond policy rejects the candidate. The evaluator cannot activate a
 revision; promotion remains a separate, authorized control-plane decision.
 
+Release Guard checks every eval the candidate has evidence for, not only the newest one. An eval is
+one suite scored by one evaluator. For each eval, InferCrane takes the candidate's newest evidence
+and compares it with the active revision's newest evidence from the same suite version and
+evaluator version.
+
 `threshold` remains the default comparison mode. In `bootstrap` mode InferCrane performs 10,000
 deterministic paired resamples. A confidence interval wholly below the allowed regression passes;
 one wholly beyond it rejects; an overlapping interval or too few pairs waits. The persisted decision
@@ -130,3 +135,109 @@ reproducible.
 The three-score example demonstrates the contract, not a recommended production sample size.
 Choose and review a representative minimum for the evaluator and risk class; insufficient pairs
 must remain waiting.
+
+## PASS, WATCH, and BLOCK per eval
+
+A small drop is not always a reason to stop a rollout, but it should not pass silently either. Add a
+watch band below the regression limit, and every eval gets one of four verdicts:
+
+| Verdict | When | Release Guard |
+|---|---|---|
+| `PASS` | The drop is at or below the watch threshold, or at or below the regression limit when no watch band is set. | No change. |
+| `WATCH` | The drop is above the watch threshold and at or below the regression limit. | Stays `ACCEPT`, adds a `quality_watch` reason, and records a follow-up. |
+| `BLOCK` | The suite failed, the score is below the minimum, or the drop is above the regression limit. | `REJECT`, as before. |
+| `UNKNOWN` | No comparable evidence from the active revision, or bootstrap evidence is unpaired, inconclusive, or short of samples. | `WAIT`. Missing evidence never passes. |
+
+The drop is relative to the active revision's score: `(active - candidate) / active × 100`. In
+`bootstrap` mode, the interval decides `BLOCK` and `UNKNOWN` as described above. Once the interval
+clears the limit, the observed paired drop decides between `WATCH` and `PASS`.
+
+The model verdict is the most severe eval verdict, in the order `BLOCK`, `UNKNOWN`, `WATCH`,
+`PASS`. A candidate with no evidence at all is `UNKNOWN`.
+
+### Set the watch band
+
+`quality_watch_regression_percent` sits beside `max_quality_regression_percent` in the persisted
+policy. It needs a regression limit and cannot exceed it. The example below keeps the 3% limit from
+the policy above and opens a watch band from 1% to 3%:
+
+```bash
+curl -fsS "$INFERCRANE_URL/api/v1/deployments/qwen-prod/release-guard/policy" \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY" |
+  jq '.quality_watch_regression_percent = 1' |
+  curl -fsS -X PUT "$INFERCRANE_URL/api/v1/deployments/qwen-prod/release-guard/policy" \
+    -H "Authorization: Bearer $INFERCRANE_API_KEY" \
+    -H "Content-Type: application/json" \
+    --data-binary @-
+```
+
+`infercrane rollout policy set` has no flag for the watch band yet. It keeps the stored value when
+you change other settings. Lowering `--max-quality-regression` below the watch threshold is
+rejected. Remove the band first by setting the field to `null`.
+
+### Read the verdicts
+
+`GET /api/v1/deployments/{name}/quality-evidence` returns the evidence list and a `verdicts`
+object for the current candidate. It applies the persisted policy to the stored evidence and records
+nothing:
+
+```json
+{
+  "verdicts": {
+    "state": "compared",
+    "decision_authority": "persisted_release_guard_policy",
+    "verdict": "WATCH",
+    "comparison_mode": "threshold",
+    "watch_regression_percent": 1,
+    "max_regression_percent": 3,
+    "reference": { "revision_id": "ACTIVE_REVISION_ID", "model": "ACTIVE_MODEL" },
+    "candidate": { "revision_id": "CANDIDATE_REVISION_ID", "model": "CANDIDATE_MODEL" },
+    "evals": [
+      {
+        "suite": "support-answers",
+        "suite_version": "git:8a91d7c",
+        "evaluator": "customer-eval-ci",
+        "evaluator_version": "1.4.0",
+        "verdict": "WATCH",
+        "code": "quality_watch",
+        "reference_score": 0.93,
+        "candidate_score": 0.915,
+        "delta": -0.015,
+        "regression_percent": 1.61,
+        "limit": 1,
+        "follow_up": "Re-run support-answers@git:8a91d7c with customer-eval-ci@1.4.0 on this revision after promotion and review the drop before promoting a candidate built on it"
+      }
+    ]
+  }
+}
+```
+
+The example is abbreviated: real responses also carry `data`, `content_recorded`, evidence IDs, and
+a message per eval, and numbers are not rounded. `delta` is the candidate score minus the active
+score, so a drop is negative. `model` is the resolved immutable model identity, or the model the
+revision requested when no identity was resolved, and empty when neither is recorded.
+
+Without a `compared` state there is no verdict. The other states are `no_candidate`, `not_gated`
+(the policy does not gate on quality, or Release Guard is disabled), and `unavailable` (no running
+deployment or policy).
+
+The stored Release Guard evaluation stays the decision of record. Each evaluation persists the same
+report under `metrics.quality`. Its reasons name the eval (`suite@suite_version`) for every `BLOCK`
+or `UNKNOWN` eval, and for every `WATCH` eval when the decision is `ACCEPT`.
+
+### Follow up on WATCH
+
+When the decision is `ACCEPT` and at least one eval is `WATCH`, the evaluation starts its reasons
+with one `quality_watch` reason per watched eval. `infercrane rollout inspect` prints each one with
+its follow-up. Release Guard also writes a `release_guard.quality_watch` audit event with outcome
+`follow_up_required`. That event lists the watched evals, their scores and drops, and the
+follow-up, so it stays visible after promotion. Listing audit events needs tenant-admin access:
+
+```bash
+curl -fsS "$INFERCRANE_URL/api/v1/audit-events?limit=100" \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY" |
+  jq '.data[] | select(.action == "release_guard.quality_watch")'
+```
+
+A `WATCH` does not lower any other gate. If another check rejects or waits, that decision stands and
+no follow-up is recorded.

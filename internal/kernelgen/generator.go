@@ -76,6 +76,13 @@ func (g Generator) Generate(ctx context.Context, request acceleratorlab.Generati
 	if err != nil {
 		return acceleratorlab.GenerationEvidence{}, err
 	}
+	// A kernel the pack cannot load into this runtime could never qualify, so
+	// refuse it before any authoring or GPU evaluation is paid for.
+	if pack.Integration != "" {
+		if err = pack.SupportsRuntime(request.Runtime.Name, request.Runtime.Version); err != nil {
+			return acceleratorlab.GenerationEvidence{}, err
+		}
+	}
 	run := &generation{generator: g, request: request, pack: pack, seen: map[string]struct{}{}}
 	run.shapes, run.dtypes = hotspotDetail(request)
 	if run.receipt, err = kernelresearch.Start(*request.Research, g.now()); err != nil {

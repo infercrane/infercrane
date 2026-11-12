@@ -187,9 +187,15 @@ func Handlers(coordinator Coordinator) map[string]operations.Handler {
 				return "", operations.Permanent("invalid_request", err)
 			}
 			waiting := make([]string, 0, len(request.Candidates))
+			if campaign, err := coordinator.Repository.OptimizationCampaign(ctx, request.TenantID, request.CampaignID); err == nil {
+				request.Candidates = controlFirst(campaign, request.Candidates)
+			} else {
+				return "", executionFailure(err)
+			}
 			// Phase one advances every candidate only to the measured ranking
 			// barrier. This prevents the first proposal from winning before its
-			// peers have produced comparable evidence.
+			// peers have produced comparable evidence. The control goes first so
+			// it is serving while every other candidate is measured against it.
 			for candidateIndex, candidateID := range request.Candidates {
 				for boundary := 0; boundary < 8; boundary++ {
 					if err := checkpointCandidate(ctx, coordinator, operation, request, candidateID, candidateIndex); err != nil {
@@ -256,6 +262,28 @@ func Handlers(coordinator Coordinator) map[string]operations.Handler {
 		ExecuteKind + ".cancel": cleanupHandler(coordinator),
 		CleanupKind:             cleanupHandler(coordinator),
 	}
+}
+
+// controlFirst moves the campaign control to the front and keeps every other
+// candidate in its submitted order. Order affects measurement scheduling only;
+// ranking is computed over the complete measured set.
+func controlFirst(campaign domain.OptimizationCampaign, candidates []string) []string {
+	control, found := campaignControl(campaign)
+	if !found {
+		return candidates
+	}
+	ordered := make([]string, 0, len(candidates))
+	for _, candidateID := range candidates {
+		if candidateID == control.ID {
+			ordered = append(ordered, candidateID)
+		}
+	}
+	for _, candidateID := range candidates {
+		if candidateID != control.ID {
+			ordered = append(ordered, candidateID)
+		}
+	}
+	return ordered
 }
 
 func cleanupHandler(coordinator Coordinator) operations.Handler {
