@@ -196,10 +196,17 @@ func Handlers(coordinator Coordinator) map[string]operations.Handler {
 			// barrier. This prevents the first proposal from winning before its
 			// peers have produced comparable evidence. The control goes first so
 			// it is serving while every other candidate is measured against it.
+			// A candidate already at the barrier is skipped: stepping it would
+			// rank it while a later peer is still provisioning, and that retry
+			// would stop every later attempt before the peer can progress.
 			for candidateIndex, candidateID := range request.Candidates {
 				for boundary := 0; boundary < 8; boundary++ {
-					if err := checkpointCandidate(ctx, coordinator, operation, request, candidateID, candidateIndex); err != nil {
+					state, err := checkpointCandidate(ctx, coordinator, operation, request, candidateID, candidateIndex)
+					if err != nil {
 						return "", operations.Retryable("optimization_checkpoint_failed", err)
+					}
+					if atMeasuredRankingBarrier(state) && !terminalWithoutCleanup(state) {
+						break
 					}
 					result, err := coordinator.Step(ctx, request.TenantID, request.CampaignID, candidateID)
 					if err != nil {
@@ -220,7 +227,7 @@ func Handlers(coordinator Coordinator) map[string]operations.Handler {
 			// candidates, and evaluates Release Guard only for the winner.
 			for candidateIndex, candidateID := range request.Candidates {
 				for boundary := 0; boundary < 3; boundary++ {
-					if err := checkpointCandidate(ctx, coordinator, operation, request, candidateID, candidateIndex); err != nil {
+					if _, err := checkpointCandidate(ctx, coordinator, operation, request, candidateID, candidateIndex); err != nil {
 						return "", operations.Retryable("optimization_checkpoint_failed", err)
 					}
 					result, err := coordinator.Step(ctx, request.TenantID, request.CampaignID, candidateID)
@@ -319,17 +326,19 @@ func cleanupHandler(coordinator Coordinator) operations.Handler {
 	}
 }
 
-func checkpointCandidate(ctx context.Context, coordinator Coordinator, operation domain.Operation, request ExecuteRequest, candidateID string, candidateIndex int) error {
+// checkpointCandidate records progress and returns the candidate's persisted
+// state.
+func checkpointCandidate(ctx context.Context, coordinator Coordinator, operation domain.Operation, request ExecuteRequest, candidateID string, candidateIndex int) (string, error) {
 	campaign, err := coordinator.Repository.OptimizationCampaign(ctx, request.TenantID, request.CampaignID)
 	if err != nil {
-		return err
+		return "", err
 	}
 	candidate, found := candidateByID(campaign.Candidates, candidateID)
 	if !found {
-		return domain.ErrNotFound
+		return "", domain.ErrNotFound
 	}
 	checkpoint := checkpointForCandidate(candidate, candidateIndex, len(request.Candidates))
-	return checkpointOperation(ctx, coordinator.Repository, operation, checkpoint, map[string]any{
+	return candidate.State, checkpointOperation(ctx, coordinator.Repository, operation, checkpoint, map[string]any{
 		"campaign_id":  request.CampaignID,
 		"candidate_id": candidateID,
 		"candidate":    candidateIndex + 1,

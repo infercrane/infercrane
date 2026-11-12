@@ -125,6 +125,118 @@ func TestExecutionHandlerMeasuresTheControlFirst(t *testing.T) {
 	}
 }
 
+// barrierStore is the coordinator repository plus the evidence the production
+// ranker reads, so the workflow ranks through the real measured barrier.
+type barrierStore struct {
+	*coordinatorRepository
+	benchmarks []domain.BenchmarkResult
+}
+
+func (s *barrierStore) BenchmarksForModel(_ context.Context, _ string, model string, _ int) ([]domain.BenchmarkResult, error) {
+	var rows []domain.BenchmarkResult
+	for _, row := range s.benchmarks {
+		if row.ModelIdentity == model {
+			rows = append(rows, row)
+		}
+	}
+	return rows, nil
+}
+
+func (s *barrierStore) RecordLabEvaluation(_ context.Context, tenant string, value domain.LabEvaluation) (domain.LabEvaluation, error) {
+	value.TenantID = tenant
+	return value, nil
+}
+
+// barrierDriver returns the fixture's exact evidence identities, keeps one
+// candidate's deployment converge running for a single attempt, and ranks
+// with PersistedRanker.
+type barrierDriver struct {
+	coordinatorDriver
+	ranker     PersistedRanker
+	converging map[string]bool
+}
+
+func (d *barrierDriver) Provision(_ context.Context, candidateID string, _ domain.OptimizationCandidateRun, _ Budget) (ProvisionResult, error) {
+	d.provisionCalls++
+	if d.converging[candidateID] {
+		d.converging[candidateID] = false
+		return ProvisionResult{}, operations.Retryable("optimization_child_pending", errors.New("new endpoint provisioning is running"))
+	}
+	suffix := strings.TrimPrefix(candidateID, "candidate-")
+	return ProvisionResult{DeploymentName: "deployment-" + suffix, RevisionID: "revision-" + suffix}, nil
+}
+
+func (d *barrierDriver) Measure(_ context.Context, candidateID string, _ domain.OptimizationCandidateRun, _ Budget) (MeasurementResult, error) {
+	d.measureCalls++
+	d.measured = append(d.measured, candidateID)
+	return MeasurementResult{BenchmarkID: "benchmark-" + strings.TrimPrefix(candidateID, "candidate-")}, nil
+}
+
+func (d *barrierDriver) Validate(_ context.Context, candidateID string, _ domain.OptimizationCandidateRun) (ValidationResult, error) {
+	d.validateCalls++
+	return ValidationResult{QualityEvidenceID: "quality-" + strings.TrimPrefix(candidateID, "candidate-"), Passed: true}, nil
+}
+
+func (d *barrierDriver) Rank(ctx context.Context, _ string, candidate domain.OptimizationCandidateRun) (RankingResult, error) {
+	d.rankCalls++
+	return d.ranker.Rank(ctx, candidate)
+}
+
+// The control is ranked in the same attempt that starts the next candidate's
+// deployment. When that deployment converges, the next attempt must record it
+// and measure the remaining candidates instead of retrying the control's
+// ranking against a peer that is still provisioning. Once every candidate is
+// measured, a new-endpoint winner that is already qualified must not block
+// ranking its peers.
+func TestExecutionHandlerAdoptsLaterProvisioningAfterTheControlIsRanked(t *testing.T) {
+	now := time.Now().UTC()
+	noDifference := MetricComparison{ControlMean: 220, CandidateMean: 216, Delta: -4.0 / 220, NoiseFloor: 0.05, Decision: DecisionNoMeasurableDifference}
+	campaign, benchmarks := threeCandidateFixture(t, 216, 218, noDifference, noDifference)
+	cost, expiry := 30.0, now.Add(time.Hour)
+	campaign.Intent, campaign.State, campaign.ApprovedMaxCostUSD, campaign.ApprovalExpiresAt, campaign.MaxCandidates = IntentNewEndpoint, CampaignApproved, &cost, &expiry, 3
+	for index := range campaign.Candidates {
+		candidate := &campaign.Candidates[index]
+		candidate.State, candidate.RevisionID, candidate.BenchmarkID, candidate.QualityEvidenceID = CandidateProposed, "", "", ""
+	}
+	store := &barrierStore{coordinatorRepository: &coordinatorRepository{campaign: campaign}, benchmarks: benchmarks}
+	driver := &barrierDriver{ranker: PersistedRanker{Store: store}, converging: map[string]bool{"candidate-b": true}}
+	handler := Handlers(Coordinator{Repository: store, Driver: driver, Now: func() time.Time { return now }})[ExecuteKind]
+	request, _ := json.Marshal(ExecuteRequest{TenantID: "tenant", CampaignID: "campaign", Candidates: []string{"candidate-a", "candidate-b", "candidate-c"}})
+	operation := domain.Operation{RequestJSON: string(request)}
+	states := func() string {
+		values := make([]string, 0, len(store.campaign.Candidates))
+		for _, candidate := range store.campaign.Candidates {
+			values = append(values, candidate.State)
+		}
+		return strings.Join(values, ",")
+	}
+
+	_, err := handler(t.Context(), operation)
+	var failure operations.Failure
+	if !errors.As(err, &failure) || !failure.Retryable || failure.Code != "optimization_child_pending" || states() != "ranked,provisioning,proposed" || driver.rankCalls != 0 {
+		t.Fatalf("first attempt err=%v states=%s ranks=%d, want control ranked and candidate-b provisioning", err, states(), driver.rankCalls)
+	}
+
+	result, err := handler(t.Context(), operation)
+	assertWaitingForHuman(t, result, err)
+	if states() != "qualified,cleaned,cleaned" {
+		t.Fatalf("campaign did not converge after candidate-b's deployment converged: states=%s", states())
+	}
+	adopted := store.campaign.Candidates[1]
+	if adopted.DeploymentName != "deployment-b" || adopted.RevisionID != "revision-b" || adopted.BenchmarkID != "benchmark-b" || adopted.LabEvaluationID == "" || adopted.FailureCode != FailureNoMeasurableDifference {
+		t.Fatalf("candidate-b lost its converged deployment or measured ranking: %+v", adopted)
+	}
+	if strings.Join(driver.measured, ",") != "candidate-a,candidate-b,candidate-c" || driver.provisionCalls != 4 || driver.rankCalls != 3 || driver.cleanupCalls != 2 || driver.guardCalls != 0 {
+		t.Fatalf("unexpected driver work: measured=%v provision=%d rank=%d cleanup=%d guard=%d", driver.measured, driver.provisionCalls, driver.rankCalls, driver.cleanupCalls, driver.guardCalls)
+	}
+
+	result, err = handler(t.Context(), operation)
+	assertWaitingForHuman(t, result, err)
+	if states() != "qualified,cleaned,cleaned" || driver.rankCalls != 3 {
+		t.Fatalf("a retry while waiting for activation re-ranked or moved candidates: states=%s ranks=%d", states(), driver.rankCalls)
+	}
+}
+
 func assertWaitingForHuman(t *testing.T, result string, err error) {
 	t.Helper()
 	var failure operations.Failure

@@ -316,9 +316,13 @@ activation or promotion does not happen before authority expires, InferCrane mar
 failed and cleans its resources rather than allowing an unbounded GPU bill.
 
 Execution uses a measured-evidence barrier: all viable candidates reach AIPerf measurement and
-revision-bound quality validation before ranking begins. Inference Lab then compares only the exact
-same workload shape and the exact deployed model artifact (`repository@revision`), even when the
-campaign was created from a catalog name. Candidates that serve different artifacts cannot share
+revision-bound quality validation before ranking begins. Candidates are provisioned and measured
+one at a time, control first. A candidate that reaches the barrier waits there while the next one
+is provisioned, so a deployment that converges between execution attempts is recorded on the next
+attempt. A winner stays in the ranking after it becomes `qualified` (or `guarding` for an
+evolution), so ranking the candidates after it reproduces the same evaluation. Inference Lab then
+compares only the exact same workload shape and the exact deployed model artifact
+(`repository@revision`), even when the campaign was created from a catalog name. Candidates that serve different artifacts cannot share
 one ranking and fail closed. Proposal order cannot choose the winner. Missing sourced cost, mismatched
 workloads, or incomplete metrics produce `inconclusive`; explicit SLO or cost violations produce
 `rejected`. For evolution campaigns, the selected candidate still has to pass
