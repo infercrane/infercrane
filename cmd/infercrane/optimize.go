@@ -53,7 +53,7 @@ func optimizeCommand(ctx context.Context, args []string) error {
 		return optimizeCampaignCommand(ctx, args)
 	}
 	if len(args) < 2 || (args[0] != "propose" && args[0] != "create") {
-		return errors.New("usage: infercrane optimize propose|create MODEL --provider CLOUD_OR_ADAPTER --gpu GPU [flags] | infercrane optimize workload-profile --file PROFILE.json | infercrane optimize kernel-plan --file PROFILE.json | infercrane optimize evidence evaluate|inspect-fastpath --file FILE | infercrane optimize list|inspect|results|approve|activate|cancel | infercrane optimize doctor")
+		return errors.New("usage: infercrane optimize propose|create MODEL --provider CLOUD_OR_ADAPTER --gpu GPU [flags] | infercrane optimize workload-profile --file PROFILE.json | infercrane optimize kernel-plan --file PROFILE.json | infercrane optimize evidence evaluate|inspect-fastpath|golden --file FILE | infercrane optimize list|inspect|results|approve|activate|cancel | infercrane optimize doctor")
 	}
 	action := args[0]
 	model := args[1]
@@ -330,12 +330,12 @@ func optimizeKernelPlanCommand(args []string) error {
 }
 
 func optimizeEvidenceCommand(args []string) error {
-	if len(args) < 1 || (args[0] != "evaluate" && args[0] != "inspect-fastpath") {
-		return errors.New("usage: infercrane optimize evidence evaluate|inspect-fastpath --file FILE [--output human|json]")
+	if len(args) < 1 || (args[0] != "evaluate" && args[0] != "inspect-fastpath" && args[0] != "golden") {
+		return errors.New("usage: infercrane optimize evidence evaluate|inspect-fastpath|golden --file FILE [--output human|json]")
 	}
 	action := args[0]
 	fs := flag.NewFlagSet("optimize evidence "+action, flag.ContinueOnError)
-	filePath := fs.String("file", "", "immutable optimization evidence JSON")
+	filePath := fs.String("file", "", "immutable optimization evidence JSON, or a golden suite manifest for golden")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
@@ -345,6 +345,9 @@ func optimizeEvidenceCommand(args []string) error {
 	}
 	if err := validateOutput(*output); err != nil {
 		return err
+	}
+	if action == "golden" {
+		return optimizeEvidenceGolden(*filePath, *output)
 	}
 	body, err := os.ReadFile(*filePath)
 	if err != nil {
@@ -375,7 +378,11 @@ func optimizeEvidenceCommand(args []string) error {
 		return printJSON(evaluation)
 	}
 	fmt.Printf("Optimization evidence · %s\n", evaluation.ModelIdentity)
-	fmt.Printf("Workload    %s\nPolicy      %s@%d\nEvidence    %s\nWinner      %s\n\n", evaluation.WorkloadDigest, evaluation.SelectionPolicy.ID, evaluation.SelectionPolicy.Version, evaluation.InputDigest, emptyAs(evaluation.WinnerID, "none"))
+	fmt.Printf("Workload    %s\nPolicy      %s@%d\nEvidence    %s\nWinner      %s\n", evaluation.WorkloadDigest, evaluation.SelectionPolicy.ID, evaluation.SelectionPolicy.Version, evaluation.InputDigest, emptyAs(evaluation.WinnerID, "none"))
+	if decision := evaluation.BaselineDecision; decision != nil {
+		fmt.Printf("Baseline    %s · %s · noise floor %.1f%%\nDecision    %s\n", decision.BaselineCandidateID, decision.Outcome, decision.NoiseFloor*100, decision.Reason)
+	}
+	fmt.Println()
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(w, "CHOICE\tCANDIDATE\tRUNTIME\tQUALIFIED\tSCORE\tPARETO\tREASON")
 	for _, candidate := range evaluation.Candidates {
@@ -390,6 +397,77 @@ func optimizeEvidenceCommand(args []string) error {
 		fmt.Fprintf(w, "%s\t%s\t%s\t%t\t%s\t%t\t%s\n", choice, candidate.CandidateID, candidate.RuntimeID, candidate.Qualified, score, candidate.Pareto, strings.Join(candidate.RejectionReasons, "; "))
 	}
 	return w.Flush()
+}
+
+// optimizeEvidenceGolden runs the evaluator over a fixed set of recorded
+// decisions and fails on any wrong decision or false win.
+func optimizeEvidenceGolden(path, output string) error {
+	report, err := optimizationevidence.RunGoldenSuite(path)
+	if err != nil {
+		return err
+	}
+	if output == "json" {
+		if err = printJSON(report); err != nil {
+			return err
+		}
+	} else if err = printGoldenReport(report); err != nil {
+		return err
+	}
+	if !report.Passed {
+		return fmt.Errorf("optimizer golden suite failed: %d of %d decisions correct, false wins: %d", report.CorrectDecisions, report.Tasks, report.FalseWins)
+	}
+	return nil
+}
+
+func printGoldenReport(report optimizationevidence.GoldenReport) error {
+	percent := func(value *float64) string {
+		if value == nil {
+			return "unknown"
+		}
+		return fmt.Sprintf("%+.1f%%", *value*100)
+	}
+	hours := func(value *float64) string {
+		if value == nil {
+			return "unknown"
+		}
+		return strconv.FormatFloat(*value, 'f', 4, 64)
+	}
+	winRate := "unknown"
+	if report.WinRate != nil {
+		winRate = fmt.Sprintf("%.0f%%", *report.WinRate*100)
+	}
+	fmt.Printf("Optimizer golden suite · %s + %s\n", report.EvaluatorAlgorithm, report.BaselineAlgorithm)
+	fmt.Printf("Decisions   %d of %d correct\n", report.CorrectDecisions, report.Tasks)
+	fmt.Printf("Win rate    %s (%d of %d expected promotions)\n", winRate, report.CorrectPromotions, report.ExpectedPromotions)
+	fmt.Printf("False wins  %d\n", report.FalseWins)
+	fmt.Printf("Median gain %s over the baseline on the declared objective (%d promotions; %d with unknown gain)\n", percent(report.MedianGainOverBaseline), report.PromotionsWithKnownGain, report.PromotionsWithUnknownGain)
+	fmt.Printf("GPU-hours   %s measured per answer (%d answers with unknown GPU time)\n\n", hours(report.GPUHoursPerAnswer), report.AnswersWithUnknownGPUTime)
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "RESULT\tTASK\tEXPECTED\tDECIDED\tGAIN\tGPU-HOURS")
+	for _, result := range report.Results {
+		status := "ok"
+		switch {
+		case result.FalseWin:
+			status = "FALSE WIN"
+		case !result.Correct:
+			status = "WRONG"
+		}
+		expected := strings.TrimSpace(result.ExpectedDecision + " " + result.ExpectedCandidateID)
+		decided := result.Decision
+		if result.Decision == optimizationevidence.DecisionPromote {
+			decided += " " + result.CandidateID
+		}
+		gain := "-"
+		if result.Decision == optimizationevidence.DecisionPromote {
+			gain = percent(result.RelativeGain)
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", status, result.TaskID, expected, decided, gain, hours(result.MeasuredGPUHours))
+	}
+	if err := w.Flush(); err != nil {
+		return err
+	}
+	fmt.Println("\nGolden tasks replay recorded evidence. They measure the evaluator's decisions, not new performance.")
+	return nil
 }
 
 type optimizationCampaignView struct {

@@ -60,8 +60,11 @@
         "lane_aggregation": {"const": "arithmetic_mean"},
         "evidence_level": {"enum": ["screening", "qualification", "public"]},
         "qualification_before_scoring": {"const": true},
-        "cost_tie_breaker": {"type": "boolean"}
-      }
+        "cost_tie_breaker": {"type": "boolean"},
+        "baseline_candidate_id": {"type": "string", "minLength": 1, "description": "Candidate that is the current setup. Another candidate is selected only if it beats this one by more than the noise floor."},
+        "minimum_relative_gain": {"type": "number", "minimum": 0.05, "exclusiveMaximum": 1, "description": "Raises the noise floor above the 5% default. It cannot lower it."}
+      },
+      "dependentRequired": {"minimum_relative_gain": ["baseline_candidate_id"]}
     },
     "quality_gate": {
       "type": "object",
