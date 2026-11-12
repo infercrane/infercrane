@@ -1,0 +1,8 @@
+Time (%),Total Time (ns),Instances,Avg (ns),Med (ns),Min (ns),Max (ns),StdDev (ns),Name
+33.3,7000000000,120000,58333.3,57000.0,31000,190000,8700.2,"void flash_fwd_splitkv_kernel<Flash_fwd_kernel_traits<128, 64, 128, 4, false, false, cutlass::bfloat16_t, Flash_kernel_traits<128, 64, 128, 4, cutlass::bfloat16_t>>, false, false, false, false, true, false, false, false>(Flash_fwd_params)"
+28.6,6000000000,240000,25000.0,24100.0,9800,88000,4100.7,sm90_xmma_gemm_bf16bf16_bf16f32_f32_tn_n_tilesize128x128x64_warpgroupsize1x1x1_execute_segment_k_off_kernel__5x_cublas
+19.0,4000000000,60000,66666.7,52000.0,12000,2400000,91000.3,"ncclDevKernel_AllReduce_Sum_bf16_RING_LL(ncclDevComm *, unsigned long, ncclWork *)"
+7.1,1500000000,240000,6250.0,6100.0,4200,19000,800.1,"void vllm::rms_norm_kernel<c10::BFloat16, 8, 2>(c10::BFloat16 *, const c10::BFloat16 *, const c10::BFloat16 *, float, int, int)"
+4.8,1000000000,20000,50000.0,48000.0,20000,410000,30000.5,"void vllm::cross_device_reduce_1stage<__nv_bfloat16, 2>(vllm::RankData *, vllm::RankSignals, vllm::Signal *, __nv_bfloat16 *, int, int)"
+4.8,1000000000,120000,8333.3,8200.0,6100,15000,700.0,triton_poi_fused_mul_silu_0
+2.4,500000000,60000,8333.3,8000.0,3000,40000,1200.0,"void at::native::elementwise_kernel<128, 2, at::native::gpu_kernel_impl_nocast<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 12)]::operator ()() const::[lambda(c10::BFloat16) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)"
