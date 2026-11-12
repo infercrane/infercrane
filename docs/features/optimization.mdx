@@ -219,6 +219,53 @@ tokens when the price is sourced), how each setup compared with the current one 
 measurement noise floor, and the decision with the exact `activate` command when a setup qualifies.
 It only reads the control API; `--once` prints one plain snapshot for scripts and logs.
 
+### Read the outcome of a campaign
+
+When a campaign finishes, `infercrane optimize report CAMPAIGN_ID` shows what it changed. It compares
+your current setup, the campaign control, with the winning setup on:
+
+| Outcome | How it is computed |
+|---|---|
+| Cost per 1M output tokens | Sourced hourly price, divided by the quoted maximum replica count, over measured output tokens per second |
+| p95 time to first token | Measured |
+| Output tokens/s per user | 1000 divided by the measured p95 time per output token |
+| Output tokens/s per GPU | Measured output throughput of one replica divided by its GPU count |
+| Requests/s | Measured |
+| Answer quality | PASS, WATCH, BLOCK, or UNKNOWN, with the score change between the two setups |
+| Monthly cost at your traffic | Cost per output token times your replayed output-token volume, scaled to a 730-hour month |
+
+When the winner was measured in turns with your current setup, both values come from that same
+window, and each change is checked against that window's noise floor: the report says `better`,
+`worse`, or `no real difference`. When it was not, the report shows each setup's own measurement and
+leaves the decision `unknown`. Cost and per-GPU throughput are rescaled by price and GPU count the same
+way the campaign ranking rescales them. The answer-quality verdict comes from the Release Guard
+evaluation when one exists. Otherwise it is the campaign's own gate, which requires the winner's signed
+eval to pass and has no WATCH band. The monthly projection assumes servers stay busy, so idle capacity
+is not included. It is only made for a campaign that replayed your traffic, and only when every
+replayed request recorded its output tokens.
+
+Anything missing or not comparable is `unknown`: never zero and never estimated. The report lists
+those fields under `unknown` and says why for each. If any setup ran on a simulated accelerator or a
+CPU, such as the laptop proof of concept, the report sets `simulated_accelerator` and every output
+shows the fixed banner **CPU run: proves the pipeline, not GPU speed**. Per-GPU throughput is then
+labelled per simulated accelerator.
+
+```bash
+infercrane optimize report CAMPAIGN_ID                       # plain text
+infercrane optimize report CAMPAIGN_ID --output json         # the API report, unchanged
+infercrane optimize report CAMPAIGN_ID --html result.html    # one self-contained page to share
+```
+
+The HTML page has no scripts or external resources. It shows outcome cards first, then how the
+setups were measured and every setup's result. Next come the engine's cache, queue, and preemption
+signals when the runtime reported any, and an appendix. The appendix has the winning setup (engine,
+version, args, hardware, price) and the evidence digests: campaign input, proposal, benchmarks, signed
+quality evidence, ranking, Release Guard evaluation, replayed traffic, and the report itself. Automation
+clients read the same report from `GET /api/v1/optimization/campaigns/{id}/report`, which requires read
+access and only returns campaigns of the caller's organization. The report reads evidence rows
+referenced by the campaign from the newest 100 per candidate deployment; an older row leaves its
+field `unknown`.
+
 That default creates a `new_endpoint` campaign. To optimize a candidate revision for an endpoint
 that already serves production, bind the campaign to its stable deployment identity:
 

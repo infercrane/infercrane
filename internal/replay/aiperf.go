@@ -256,3 +256,35 @@ func generationOperation(operation string) bool {
 		return false
 	}
 }
+
+// OutputVolume is the generation output-token volume a stored trace observed
+// during its capture window. Missing counts generation requests without a
+// recorded output-token count; a caller must not treat a total with missing
+// requests as the window's volume.
+type OutputVolume struct {
+	GenerationRequests int   `json:"generation_requests"`
+	OutputTokens       int64 `json:"output_tokens"`
+	Missing            int   `json:"missing"`
+}
+
+// TraceOutputVolume sums the output tokens of every generation request in a
+// stored trace. It reads the content-free shape only and estimates nothing.
+func TraceOutputVolume(trace domain.ReplayTrace) (OutputVolume, error) {
+	var shapes []shape
+	if err := json.Unmarshal([]byte(trace.ShapeJSON), &shapes); err != nil {
+		return OutputVolume{}, fmt.Errorf("decode replay trace shape: %w", err)
+	}
+	var volume OutputVolume
+	for _, row := range shapes {
+		if !generationOperation(row.Operation) {
+			continue
+		}
+		volume.GenerationRequests++
+		if row.OutputTokens == nil || *row.OutputTokens < 0 {
+			volume.Missing++
+			continue
+		}
+		volume.OutputTokens += int64(*row.OutputTokens)
+	}
+	return volume, nil
+}

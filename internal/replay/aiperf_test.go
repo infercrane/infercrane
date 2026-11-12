@@ -195,3 +195,17 @@ func TestAIPerfTraceReplaysOnlyTheLeadingBoundedWindow(t *testing.T) {
 		t.Fatalf("bounded window=%d properties=%+v", rendered.Requests(), rendered.Properties)
 	}
 }
+
+func TestTraceOutputVolumeCountsGenerationOutputOnly(t *testing.T) {
+	trace := domain.ReplayTrace{ShapeJSON: `[{"operation":"chat","output_tokens":40},{"operation":"embeddings"},{"operation":"responses","output_tokens":60},{"operation":"completions"}]`}
+	volume, err := TraceOutputVolume(trace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if volume.GenerationRequests != 3 || volume.OutputTokens != 100 || volume.Missing != 1 {
+		t.Fatalf("volume = %+v", volume)
+	}
+	if _, err = TraceOutputVolume(domain.ReplayTrace{ShapeJSON: "{"}); err == nil {
+		t.Fatal("a malformed shape was read as an empty trace")
+	}
+}
