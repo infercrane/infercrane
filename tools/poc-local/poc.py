@@ -823,8 +823,8 @@ def run_poc(trace: str, requests_total: int) -> None:
     campaign = campaign_create(doc)
     save({"campaign": campaign})
     approval_cap = round(NOMINAL_HOURLY_USD * 6 * len(chosen) * 1.2, 2)
-    cli("optimize", "approve", campaign, "--max-cost-usd", str(approval_cap), "--expires-in", "6h")
-    log("approve", f"spend approved up to ${approval_cap} (stated laptop rate ${NOMINAL_HOURLY_USD}/h), valid 6 h")
+    cli("optimize", "approve", campaign, "--max-cost-usd", str(approval_cap), "--expires-in", "24h")
+    log("approve", f"spend approved up to ${approval_cap} (stated laptop rate ${NOMINAL_HOURLY_USD}/h), valid 24 h")
     finish(campaign, labels)
 
 
