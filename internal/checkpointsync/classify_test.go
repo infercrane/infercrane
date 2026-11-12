@@ -103,3 +103,46 @@ func TestCardParsingFindsExactLineageEngineGatesAndPriors(t *testing.T) {
 		t.Fatalf("prior tables = %+v", priors)
 	}
 }
+
+func TestCardLinksRequireTheExactHost(t *testing.T) {
+	revision := strings.Repeat("c", 40)
+	for _, card := range []string{
+		"Built from https://huggingface.co.evil.example/acme/base/tree/" + revision + ".",
+		"Built from https://evil.example/?u=https://huggingface.co/acme/base/tree/" + revision + ".",
+		"Built from https://huggingface.co@evil.example/acme/base/tree/" + revision + ".",
+		"Built from https://evilhuggingface.co/acme/base/tree/" + revision + ".",
+		"Built from https://huggingface.co:8443/acme/base/tree/" + revision + ".",
+		"Built from ftp://huggingface.co/acme/base/tree/" + revision + ".",
+		"Built from https://huggingface.co/acme/other/tree/" + revision + ".",
+	} {
+		if got := declaredBaseRevision([]byte(card), "acme/base"); got != "" {
+			t.Errorf("lookalike link was accepted as base lineage: %q -> %q", card, got)
+		}
+	}
+	for _, card := range []string{
+		"Built from https://huggingface.co/acme/base/tree/" + revision + ".",
+		"Built from [the base](https://huggingface.co/Acme/Base/commit/" + revision + ")",
+		"Built from http://huggingface.co/acme/base/resolve/" + revision + "/config.json",
+	} {
+		if got := declaredBaseRevision([]byte(card), "acme/base"); got != revision {
+			t.Errorf("legitimate link was rejected: %q -> %q", card, got)
+		}
+	}
+	for _, card := range []string{
+		"Needs https://github.com.evil.example/vllm-project/vllm/pull/1",
+		"Needs https://evil.example/?u=https://github.com/vllm-project/vllm/pull/2",
+		"Needs https://github.com@evil.example/vllm-project/vllm/pull/3",
+		"Needs https://notgithub.com/vllm-project/vllm/pull/4",
+		"Needs https://github.com/evil/vllm/pull/5",
+		"Needs https://github.com/vllm-project/vllm/issues/6",
+		"Needs https://github.com/vllm-project/vllm/pull/abc",
+	} {
+		if got := engineRequirements([]byte(card), checkpointcatalog.Policy{}); len(got) != 0 {
+			t.Errorf("lookalike link became an engine requirement: %q -> %+v", card, got)
+		}
+	}
+	legitimate := engineRequirements([]byte("Needs [vllm-project/vllm#61530](https://github.com/vllm-project/vllm/pull/61530/files) and https://github.com/sgl-project/sglang/pull/47935."), checkpointcatalog.Policy{})
+	if len(legitimate) != 2 || legitimate[0].PullRequest != "sgl-project/sglang#47935" || legitimate[0].Engine != "sglang" || legitimate[1].PullRequest != "vllm-project/vllm#61530" || legitimate[1].Engine != "vllm" {
+		t.Fatalf("legitimate engine pull requests were not parsed: %+v", legitimate)
+	}
+}

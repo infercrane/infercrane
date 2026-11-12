@@ -2,8 +2,10 @@ package checkpointsync
 
 import (
 	"fmt"
+	"net/url"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -18,25 +20,29 @@ const (
 )
 
 var (
-	sourceRevision    = regexp.MustCompile(`(?i)(?:source|base(?:[ -]model)?)\s+(?:model\s+)?revision[^0-9a-f\n]{0,40}([0-9a-f]{40})\b`)
-	enginePullRequest = regexp.MustCompile(`https?://github\.com/(vllm-project/vllm|sgl-project/sglang)/pull/(\d+)`)
-	engineMinimum     = regexp.MustCompile(`(?i)\b(vllm|sglang)\s*(?:>=|≥|>|==)\s*v?(\d+\.\d+(?:\.\d+)?(?:\.?post\d+)?)`)
-	engineOrLater     = regexp.MustCompile(`(?i)\b(vllm|sglang)\s+v?(\d+\.\d+(?:\.\d+)?)\s*(?:\+|or (?:later|newer|above)|and (?:later|newer|above))`)
-	markdownLink      = regexp.MustCompile(`\[([^\]]*)\]\([^)]*\)`)
-	htmlTag           = regexp.MustCompile(`<[^>]+>`)
-	tableSeparator    = regexp.MustCompile(`^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$`)
-	htmlTable         = regexp.MustCompile(`(?is)<table[^>]*>(.*?)</table>`)
-	htmlRow           = regexp.MustCompile(`(?is)<tr[^>]*>(.*?)</tr>`)
-	htmlCell          = regexp.MustCompile(`(?is)<t[hd][^>]*>(.*?)</t[hd]>`)
-	priorKeywords     = []string{"accuracy", "benchmark", "gsm8k", "mmlu", "gpqa", "aime", "humaneval", "ifeval", "ifbench", "math", "recovery", "bf16", "baseline", "acceptance", "throughput", "latency", "tokens/s", "tok/s", "score", "livecodebench", "eval"}
+	sourceRevision = regexp.MustCompile(`(?i)(?:source|base(?:[ -]model)?)\s+(?:model\s+)?revision[^0-9a-f\n]{0,40}([0-9a-f]{40})\b`)
+	// cardLink finds absolute link candidates in card text. Hosts and paths
+	// are checked only after net/url parses each candidate.
+	cardLink       = regexp.MustCompile("https?://[^\\s<>()\\[\\]\"'`]+")
+	engineMinimum  = regexp.MustCompile(`(?i)\b(vllm|sglang)\s*(?:>=|≥|>|==)\s*v?(\d+\.\d+(?:\.\d+)?(?:\.?post\d+)?)`)
+	engineOrLater  = regexp.MustCompile(`(?i)\b(vllm|sglang)\s+v?(\d+\.\d+(?:\.\d+)?)\s*(?:\+|or (?:later|newer|above)|and (?:later|newer|above))`)
+	markdownLink   = regexp.MustCompile(`\[([^\]]*)\]\([^)]*\)`)
+	htmlTag        = regexp.MustCompile(`<[^>]+>`)
+	tableSeparator = regexp.MustCompile(`^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$`)
+	htmlTable      = regexp.MustCompile(`(?is)<table[^>]*>(.*?)</table>`)
+	htmlRow        = regexp.MustCompile(`(?is)<tr[^>]*>(.*?)</tr>`)
+	htmlCell       = regexp.MustCompile(`(?is)<t[hd][^>]*>(.*?)</t[hd]>`)
+	priorKeywords  = []string{"accuracy", "benchmark", "gsm8k", "mmlu", "gpqa", "aime", "humaneval", "ifeval", "ifbench", "math", "recovery", "bf16", "baseline", "acceptance", "throughput", "latency", "tokens/s", "tok/s", "score", "livecodebench", "eval"}
 )
 
 // declaredBaseRevision returns the exact base commit when the card states it.
 func declaredBaseRevision(readme []byte, base string) string {
 	text := string(readme)
-	link := regexp.MustCompile(`(?i)https?://huggingface\.co/` + regexp.QuoteMeta(base) + `/(?:commit|tree|blob|resolve)/([0-9a-f]{40})\b`)
-	if match := link.FindStringSubmatch(text); match != nil {
-		return strings.ToLower(match[1])
+	for _, link := range cardLinks(text, "huggingface.co") {
+		parts := strings.Split(strings.Trim(link.Path, "/"), "/")
+		if len(parts) >= 4 && strings.EqualFold(parts[0]+"/"+parts[1], base) && (parts[2] == "commit" || parts[2] == "tree" || parts[2] == "blob" || parts[2] == "resolve") && fullRevision(parts[3]) {
+			return strings.ToLower(parts[3])
+		}
 	}
 	if match := sourceRevision.FindStringSubmatch(text); match != nil {
 		return strings.ToLower(match[1])
@@ -59,12 +65,17 @@ func engineRequirements(readme []byte, policy checkpointcatalog.Policy) []checkp
 		}
 	}
 	pulls := map[string]string{}
-	for _, match := range enginePullRequest.FindAllStringSubmatch(text, -1) {
-		engine := "vllm"
-		if strings.HasPrefix(match[1], "sgl-project") {
-			engine = "sglang"
+	for _, link := range cardLinks(text, "github.com") {
+		parts := strings.Split(strings.Trim(link.Path, "/"), "/")
+		if len(parts) < 4 || parts[2] != "pull" {
+			continue
 		}
-		pulls[match[1]+"#"+match[2]] = engine
+		number, err := strconv.ParseUint(parts[3], 10, 32)
+		engine, known := enginePullRepositories[parts[0]+"/"+parts[1]]
+		if err != nil || number == 0 || !known {
+			continue
+		}
+		pulls[parts[0]+"/"+parts[1]+"#"+strconv.FormatUint(number, 10)] = engine
 	}
 	var out []checkpointcatalog.EngineRequirement
 	for pull, engine := range pulls {
@@ -81,6 +92,36 @@ func engineRequirements(readme []byte, policy checkpointcatalog.Policy) []checkp
 	}
 	sortRequirements(out)
 	return out
+}
+
+var enginePullRepositories = map[string]string{"vllm-project/vllm": "vllm", "sgl-project/sglang": "sglang"}
+
+// cardLinks returns the links in card text whose parsed scheme is HTTP(S) and
+// whose host is exactly the given host. A lookalike host, a host followed by
+// a port or user info, or a trusted URL embedded in another URL's query never
+// matches.
+func cardLinks(text, host string) []*url.URL {
+	var out []*url.URL
+	for _, candidate := range cardLink.FindAllString(text, -1) {
+		link, err := url.Parse(strings.TrimRight(candidate, ".,;:!?*"))
+		if err != nil || link.Scheme != "https" && link.Scheme != "http" || link.User != nil || !strings.EqualFold(link.Host, host) {
+			continue
+		}
+		out = append(out, link)
+	}
+	return out
+}
+
+func fullRevision(value string) bool {
+	if len(value) != 40 {
+		return false
+	}
+	for _, r := range value {
+		if !strings.ContainsRune("0123456789abcdefABCDEF", r) {
+			return false
+		}
+	}
+	return true
 }
 
 func sortRequirements(requirements []checkpointcatalog.EngineRequirement) {
