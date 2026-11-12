@@ -4761,6 +4761,189 @@
         ],
         "type": "object"
       },
+      "QualityEvalVerdict": {
+        "additionalProperties": false,
+        "properties": {
+          "bootstrap": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "candidate_evidence_id": {
+            "type": "string"
+          },
+          "candidate_passed": {
+            "type": "boolean"
+          },
+          "candidate_score": {
+            "type": "number"
+          },
+          "code": {
+            "type": "string"
+          },
+          "delta": {
+            "description": "Candidate score minus reference score; negative is a drop.",
+            "type": "number"
+          },
+          "evaluator": {
+            "type": "string"
+          },
+          "evaluator_version": {
+            "type": "string"
+          },
+          "follow_up": {
+            "description": "Operator action recorded for a WATCH verdict.",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Persisted threshold that decided a WATCH or BLOCK verdict.",
+            "type": "number"
+          },
+          "message": {
+            "type": "string"
+          },
+          "reference_evidence_id": {
+            "type": "string"
+          },
+          "reference_score": {
+            "type": "number"
+          },
+          "regression_percent": {
+            "description": "Drop relative to the reference score.",
+            "type": "number"
+          },
+          "suite": {
+            "type": "string"
+          },
+          "suite_version": {
+            "type": "string"
+          },
+          "verdict": {
+            "enum": [
+              "PASS",
+              "WATCH",
+              "BLOCK",
+              "UNKNOWN"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "suite",
+          "suite_version",
+          "evaluator",
+          "evaluator_version",
+          "verdict",
+          "code",
+          "message",
+          "candidate_evidence_id",
+          "candidate_score",
+          "candidate_passed"
+        ],
+        "type": "object"
+      },
+      "QualityEvidenceList": {
+        "additionalProperties": false,
+        "properties": {
+          "content_recorded": {
+            "const": false,
+            "type": "boolean"
+          },
+          "data": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "verdicts": {
+            "$ref": "#/components/schemas/QualityVerdicts"
+          }
+        },
+        "required": [
+          "data",
+          "verdicts",
+          "content_recorded"
+        ],
+        "type": "object"
+      },
+      "QualitySubject": {
+        "additionalProperties": false,
+        "properties": {
+          "model": {
+            "description": "Resolved immutable model identity, else the model the revision requested; empty when neither is recorded.",
+            "type": "string"
+          },
+          "revision_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "revision_id",
+          "model"
+        ],
+        "type": "object"
+      },
+      "QualityVerdicts": {
+        "additionalProperties": false,
+        "description": "Verdicts for the current candidate against the active revision under persisted Release Guard policy. Only state compared carries verdict, comparison_mode, reference, candidate, and evals. The stored Release Guard evaluation remains the decision of record.",
+        "properties": {
+          "candidate": {
+            "$ref": "#/components/schemas/QualitySubject"
+          },
+          "comparison_mode": {
+            "enum": [
+              "threshold",
+              "bootstrap"
+            ],
+            "type": "string"
+          },
+          "decision_authority": {
+            "type": "string"
+          },
+          "evals": {
+            "items": {
+              "$ref": "#/components/schemas/QualityEvalVerdict"
+            },
+            "type": "array"
+          },
+          "max_regression_percent": {
+            "type": "number"
+          },
+          "minimum_score": {
+            "type": "number"
+          },
+          "reference": {
+            "$ref": "#/components/schemas/QualitySubject"
+          },
+          "state": {
+            "enum": [
+              "compared",
+              "no_candidate",
+              "not_gated",
+              "unavailable"
+            ],
+            "type": "string"
+          },
+          "verdict": {
+            "description": "Per-model verdict: the most severe eval verdict. UNKNOWN when evidence is missing or not comparable.",
+            "enum": [
+              "PASS",
+              "WATCH",
+              "BLOCK",
+              "UNKNOWN"
+            ],
+            "type": "string"
+          },
+          "watch_regression_percent": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "state",
+          "decision_authority"
+        ],
+        "type": "object"
+      },
       "RecipeCaptureRequest": {
         "additionalProperties": false,
         "properties": {
@@ -4968,6 +5151,12 @@
           "minimum_requests": {
             "minimum": 1,
             "type": "integer"
+          },
+          "quality_watch_regression_percent": {
+            "description": "Per-eval drop above which a candidate is WATCH: promotable, with a recorded follow-up. Requires max_quality_regression_percent and must not exceed it.",
+            "maximum": 100,
+            "minimum": 0,
+            "type": "number"
           },
           "require_compatibility_evidence": {
             "type": "boolean"
@@ -8877,7 +9066,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ObjectList"
+                  "$ref": "#/components/schemas/QualityEvidenceList"
                 }
               }
             },
@@ -8899,7 +9088,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "List revision-bound semantic quality evidence without prompt or output content",
+        "summary": "List revision-bound semantic quality evidence and per-eval PASS, WATCH, or BLOCK verdicts without prompt or output content",
         "tags": [
           "Release evidence"
         ]
