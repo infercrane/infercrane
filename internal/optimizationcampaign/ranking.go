@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/lab"
@@ -50,6 +51,10 @@ func RankMeasuredCampaign(campaign domain.OptimizationCampaign, benchmarks []dom
 	if campaign.ModelIdentity != proposal.Input.ModelIdentity || campaign.Objective != proposal.Input.Objective || campaign.InputDigest != proposal.InputDigest {
 		return MeasuredRanking{}, errors.New("campaign identity does not match its immutable proposal")
 	}
+	artifactIdentity, err := measuredArtifactIdentity(proposal)
+	if err != nil {
+		return MeasuredRanking{}, err
+	}
 
 	byBenchmark := make(map[string]domain.BenchmarkResult, len(benchmarks))
 	for _, row := range benchmarks {
@@ -79,7 +84,7 @@ func RankMeasuredCampaign(campaign domain.OptimizationCampaign, benchmarks []dom
 		if !ok {
 			return MeasuredRanking{}, fmt.Errorf("candidate %s benchmark evidence is unavailable", candidate.ID)
 		}
-		if row.RevisionID != candidate.RevisionID || row.ModelIdentity != campaign.ModelIdentity {
+		if row.RevisionID != candidate.RevisionID || row.ModelIdentity != artifactIdentity {
 			return MeasuredRanking{}, fmt.Errorf("candidate %s benchmark identity does not match campaign and revision", candidate.ID)
 		}
 		selectedEvidence = append(selectedEvidence, row)
@@ -90,7 +95,7 @@ func RankMeasuredCampaign(campaign domain.OptimizationCampaign, benchmarks []dom
 	}
 
 	evaluation, err := lab.Evaluate(lab.Input{
-		ModelIdentity:   campaign.ModelIdentity,
+		ModelIdentity:   artifactIdentity,
 		Objective:       proposal.Input.Objective,
 		WorkloadProfile: proposal.Input.WorkloadProfile,
 		MaxTTFTP95MS:    proposal.Input.MaxTTFTP95MS,
@@ -173,4 +178,29 @@ func RankMeasuredCampaign(campaign domain.OptimizationCampaign, benchmarks []dom
 		return MeasuredRanking{}, err
 	}
 	return MeasuredRanking{Evaluation: annotated, Decisions: decisions, Reasons: reasons, FailureCodes: gate.codes}, nil
+}
+
+// measuredArtifactIdentity is the identity benchmarks record for the deployed
+// artifact: the exact repository and immutable revision every candidate
+// serves. The campaign's requested model may be a catalog alias or omit the
+// revision, so it cannot be compared with measured rows directly. Campaigns
+// whose candidates serve different artifacts are not rankable by one Lab
+// evaluation and fail closed.
+func measuredArtifactIdentity(proposal optimizer.Proposal) (string, error) {
+	identity := ""
+	for _, candidate := range proposal.Candidates {
+		model, revision := strings.TrimSpace(candidate.Deployment.Model.ID), strings.TrimSpace(candidate.Deployment.Model.Revision)
+		if model == "" || revision == "" {
+			return "", fmt.Errorf("proposal candidate %s lacks an exact model artifact", candidate.ID)
+		}
+		next := model + "@" + revision
+		if identity != "" && next != identity {
+			return "", errors.New("campaign candidates serve different model artifacts; one measured ranking cannot compare them")
+		}
+		identity = next
+	}
+	if identity == "" {
+		return "", errors.New("campaign proposal has no candidates")
+	}
+	return identity, nil
 }
