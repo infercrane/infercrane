@@ -75,37 +75,35 @@ func TestEvaluateWaitsWhenRequiredCostIsUnavailable(t *testing.T) {
 func TestEvaluateRequiresComparableSignedSemanticQuality(t *testing.T) {
 	minimum, maxRegression := .8, 5.0
 	policy := domain.ReleaseGuardPolicy{Enabled: true, MinimumRequests: 1, RequireQualityEvidence: true, MinimumQualityScore: &minimum, MaxQualityRegressionPercent: &maxRegression}
-	ttft, activeScore, candidateScore := 100.0, .90, .84
-	passed, comparable := true, true
-	base := domain.RevisionMetrics{ReadyReplicas: 1, Requests: 1, P95TTFTMS: &ttft, QualityScore: &activeScore, QualityPassed: &passed, QualityComparable: &comparable}
-	candidate := domain.RevisionMetrics{ReadyReplicas: 1, Requests: 1, P95TTFTMS: &ttft}
+	ttft := 100.0
+	metrics := domain.RevisionMetrics{ReadyReplicas: 1, Requests: 1, P95TTFTMS: &ttft}
+	eval := qualityEval("support-answers", .90, .84)
 
-	result := Evaluate(Input{Policy: policy, Active: base, Candidate: candidate})
-	if result.Decision != "WAIT" || result.Reasons[0].Code != "quality_evidence_unavailable" {
+	result := Evaluate(Input{Policy: policy, Active: metrics, Candidate: metrics})
+	if result.Decision != "WAIT" || result.Reasons[0].Code != "quality_evidence_unavailable" || result.Quality == nil || result.Quality.Verdict != QualityUnknown {
 		t.Fatalf("missing evidence result=%+v", result)
 	}
 
-	candidate.QualityScore, candidate.QualityPassed, candidate.QualityComparable = &candidateScore, &passed, &comparable
-	result = Evaluate(Input{Policy: policy, Active: base, Candidate: candidate})
+	result = Evaluate(Input{Policy: policy, Active: metrics, Candidate: metrics, QualityEvals: []domain.QualityEvalEvidence{eval}})
 	if result.Decision != "REJECT" || result.Reasons[0].Code != "quality_score_regression" {
 		t.Fatalf("regression result=%+v", result)
 	}
 
-	candidateScore = .86
-	result = Evaluate(Input{Policy: policy, Active: base, Candidate: candidate})
-	if result.Decision != "ACCEPT" {
+	eval.Candidate.Score = .86
+	result = Evaluate(Input{Policy: policy, Active: metrics, Candidate: metrics, QualityEvals: []domain.QualityEvalEvidence{eval}})
+	if result.Decision != "ACCEPT" || result.Reasons[0].Code != "within_policy" {
 		t.Fatalf("within policy result=%+v", result)
 	}
 
-	comparable = false
-	result = Evaluate(Input{Policy: policy, Active: base, Candidate: candidate})
+	incomparable := eval
+	incomparable.Reference = nil
+	result = Evaluate(Input{Policy: policy, Active: metrics, Candidate: metrics, QualityEvals: []domain.QualityEvalEvidence{incomparable}})
 	if result.Decision != "WAIT" || result.Reasons[0].Code != "quality_evidence_not_comparable" {
 		t.Fatalf("incomparable result=%+v", result)
 	}
 
-	comparable = true
-	passed = false
-	result = Evaluate(Input{Policy: policy, Active: base, Candidate: candidate})
+	eval.Candidate.Passed = false
+	result = Evaluate(Input{Policy: policy, Active: metrics, Candidate: metrics, QualityEvals: []domain.QualityEvalEvidence{eval}})
 	if result.Decision != "REJECT" || result.Reasons[0].Code != "quality_evaluation_failed" {
 		t.Fatalf("failed suite result=%+v", result)
 	}
@@ -123,18 +121,15 @@ func TestEvaluateMinimumQualityThresholdFailsClosedWithoutEvidence(t *testing.T)
 
 func TestEvaluateBootstrapQualityPersistsStatisticalDecisionEvidence(t *testing.T) {
 	limit, ttft := 5.0, 100.0
-	activeScore, candidateScore, passed, comparable := .9, .7, true, true
-	activeScores := []float64{.90, .88, .92, .86, .91, .89, .93, .87, .90, .92}
-	candidateScores := []float64{.70, .68, .72, .66, .71, .69, .73, .67, .70, .72}
 	policy := domain.ReleaseGuardPolicy{Enabled: true, MinimumRequests: 1, RequireQualityEvidence: true, MaxQualityRegressionPercent: &limit, QualityComparisonMode: "bootstrap", QualityBootstrapAlpha: .05, QualityBootstrapMinSamples: 10, QualityBootstrapSeed: 42}
-	active := domain.RevisionMetrics{ReadyReplicas: 1, Requests: 1, P95TTFTMS: &ttft, QualityScore: &activeScore, QualityPassed: &passed, QualityComparable: &comparable, QualityPairingDigest: "sha256:pair", QualityScores: activeScores}
-	candidate := domain.RevisionMetrics{ReadyReplicas: 1, Requests: 1, P95TTFTMS: &ttft, QualityScore: &candidateScore, QualityPassed: &passed, QualityComparable: &comparable, QualityPairingDigest: "sha256:pair", QualityScores: candidateScores}
-	result := Evaluate(Input{Policy: policy, Active: active, Candidate: candidate})
+	metrics := domain.RevisionMetrics{ReadyReplicas: 1, Requests: 1, P95TTFTMS: &ttft}
+	eval := pairedEval([]float64{.90, .88, .92, .86, .91, .89, .93, .87, .90, .92}, []float64{.70, .68, .72, .66, .71, .69, .73, .67, .70, .72})
+	result := Evaluate(Input{Policy: policy, Active: metrics, Candidate: metrics, QualityEvals: []domain.QualityEvalEvidence{eval}})
 	if result.Decision != "REJECT" || len(result.Reasons) != 1 || result.Reasons[0].Code != "quality_bootstrap_regression" || result.Reasons[0].Bootstrap == nil || result.Reasons[0].Bootstrap.Seed != 42 || result.Reasons[0].Bootstrap.ActiveSamples != 10 || result.Reasons[0].Bootstrap.IntervalLowerPercent == nil {
 		t.Fatalf("result=%+v", result)
 	}
-	candidate.QualityScores = candidate.QualityScores[:9]
-	result = Evaluate(Input{Policy: policy, Active: active, Candidate: candidate})
+	eval.Candidate.Scores = eval.Candidate.Scores[:9]
+	result = Evaluate(Input{Policy: policy, Active: metrics, Candidate: metrics, QualityEvals: []domain.QualityEvalEvidence{eval}})
 	if result.Decision != "WAIT" || result.Reasons[len(result.Reasons)-1].Code != "quality_bootstrap_insufficient" || result.Reasons[len(result.Reasons)-1].Bootstrap == nil {
 		t.Fatalf("insufficient result=%+v", result)
 	}

@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any, Protocol, cast
 from urllib.parse import quote
 
-from .models import DeploymentList, DeploymentOperationEnvelope, DeploymentView, IntentPlanEnvelope, ObjectList, OperationData, OperationEnvelope
+from .models import DeploymentList, DeploymentOperationEnvelope, DeploymentView, IntentPlanEnvelope, ObjectList, OperationData, OperationEnvelope, QualityEvidenceList
 
 
 class Transport(Protocol):
@@ -327,9 +327,9 @@ class ControlAPI:
         request_path = f"/deployments/{quote(name, safe='')}/quality-evidence"
         return cast(dict[str, Any], self._transport.request("POST", request_path, body=body, idempotency_key=idempotency_key))
 
-    def list_quality_evidence(self, name: str) -> ObjectList:
+    def list_quality_evidence(self, name: str) -> QualityEvidenceList:
         request_path = f"/deployments/{quote(name, safe='')}/quality-evidence"
-        return cast(ObjectList, self._transport.request("GET", request_path))
+        return cast(QualityEvidenceList, self._transport.request("GET", request_path))
 
     def run_benchmark(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
         request_path = f"/deployments/{quote(name, safe='')}/benchmarks"

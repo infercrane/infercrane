@@ -759,6 +759,11 @@ type ReleaseGuardPolicy struct {
 	QualityBootstrapAlpha          float64  `json:"quality_bootstrap_alpha"`
 	QualityBootstrapMinSamples     int      `json:"quality_bootstrap_min_samples"`
 	QualityBootstrapSeed           int64    `json:"quality_bootstrap_seed"`
+	// QualityWatchRegressionPercent opens a watch band below
+	// MaxQualityRegressionPercent. An eval whose drop versus the reference
+	// revision is above this value but within the maximum is WATCH: the
+	// candidate stays promotable and Release Guard records a follow-up.
+	QualityWatchRegressionPercent *float64 `json:"quality_watch_regression_percent,omitempty"`
 }
 
 type RevisionMetrics struct {
@@ -782,6 +787,30 @@ type RevisionMetrics struct {
 	QualitySampleCount    int       `json:"quality_sample_count,omitempty"`
 	QualityPairingDigest  string    `json:"quality_pairing_digest,omitempty"`
 	QualityScores         []float64 `json:"quality_scores,omitempty"`
+}
+
+// QualityEvalEvidence pairs the newest signed candidate evidence for one
+// evaluation (suite and evaluator) with the reference revision's newest
+// evidence from the same suite and evaluator versions. Reference is nil when
+// no comparable reference evidence exists; that eval then stays unknown.
+type QualityEvalEvidence struct {
+	Suite            string
+	SuiteVersion     string
+	Evaluator        string
+	EvaluatorVersion string
+	Candidate        QualityEvalSide
+	Reference        *QualityEvalSide
+}
+
+// QualityEvalSide is one revision's aggregate result for an eval. Scores is
+// the optional paired distribution used by bootstrap comparison.
+type QualityEvalSide struct {
+	EvidenceID    string
+	Score         float64
+	Passed        bool
+	SampleCount   int
+	PairingDigest string
+	Scores        []float64
 }
 
 // QualityEvidence is signed, revision-bound output from a customer-selected

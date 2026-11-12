@@ -135,3 +135,37 @@ func TestIntentPlanningHasTypedEnvelopeAndDeploymentDraft(t *testing.T) {
 		t.Fatalf("deployment draft schema must reject unknown CloudRequest fields: %#v", deployment)
 	}
 }
+
+func TestQualityEvidenceListHasTypedPerEvalVerdicts(t *testing.T) {
+	doc, err := Document()
+	if err != nil {
+		t.Fatal(err)
+	}
+	operation := doc["paths"].(map[string]any)["/api/v1/deployments/{name}/quality-evidence"].(map[string]any)["get"].(map[string]any)
+	schema := operation["responses"].(map[string]any)["200"].(map[string]any)["content"].(map[string]any)["application/json"].(map[string]any)["schema"].(map[string]any)
+	if schema["$ref"] != "#/components/schemas/QualityEvidenceList" {
+		t.Fatalf("quality evidence response remains generic: %#v", schema)
+	}
+	schemas := doc["components"].(map[string]any)["schemas"].(map[string]any)
+	list := schemas["QualityEvidenceList"].(map[string]any)["properties"].(map[string]any)
+	if list["verdicts"].(map[string]any)["$ref"] != "#/components/schemas/QualityVerdicts" {
+		t.Fatalf("verdicts ref=%#v", list["verdicts"])
+	}
+	verdicts := schemas["QualityVerdicts"].(map[string]any)["properties"].(map[string]any)
+	if verdicts["evals"].(map[string]any)["items"].(map[string]any)["$ref"] != "#/components/schemas/QualityEvalVerdict" || verdicts["candidate"].(map[string]any)["$ref"] != "#/components/schemas/QualitySubject" {
+		t.Fatalf("verdict refs=%#v", verdicts)
+	}
+	eval := schemas["QualityEvalVerdict"].(map[string]any)["properties"].(map[string]any)
+	if enum := eval["verdict"].(map[string]any)["enum"].([]string); len(enum) != 4 || enum[0] != "PASS" || enum[1] != "WATCH" || enum[2] != "BLOCK" || enum[3] != "UNKNOWN" {
+		t.Fatalf("verdict enum=%#v", enum)
+	}
+	for _, field := range []string{"delta", "regression_percent", "reference_score", "candidate_score", "follow_up"} {
+		if eval[field] == nil {
+			t.Fatalf("eval verdict lacks %q", field)
+		}
+	}
+	policy := schemas["ReleaseGuardPolicy"].(map[string]any)["properties"].(map[string]any)
+	if policy["quality_watch_regression_percent"] == nil {
+		t.Fatal("Release Guard policy lacks the quality watch band")
+	}
+}
