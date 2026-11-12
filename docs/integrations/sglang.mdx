@@ -36,10 +36,17 @@ routing:
 ```
 
 The built-in profile declares the immutable image and argv, so normal users do not repeat them.
-The full 0.5.12 image passed real AWS L40S readiness and model identity, buffered and streaming
-OpenAI transport, AIPerf qualification, immutable model-revision launch, and durable shutdown.
-Local conformance also covers client cancellation, connection draining, the metrics endpoint, and
-immutable launch intent.
+
+| Evidence | Scope | What it shows |
+|---|---|---|
+| Local conformance | Hermetic runtime contract | Client cancellation, connection draining, the metrics endpoint, and immutable launch intent |
+| Real AWS lifecycle checks, two passing runs on 2026-08-23 | The pinned full 0.5.12 image serving `Qwen/Qwen3-8B` on one L40S in `eu-central-1` | Readiness and model identity, buffered and streaming OpenAI transport, immutable model-revision launch, a five-request AIPerf sample, and durable shutdown ([evidence](/testing/aws-real-evidence)) |
+
+The AWS checks cover one exact tuple. Five requests are a smoke sample, not performance
+qualification, and the runs are recorded in the evidence page rather than retained as catalog
+evidence, so the integration catalog keeps real-GPU qualification for SGLang deferred. Every other
+model, accelerator, provider, and workload remains unqualified. The negative SGLang result in the
+optimization docs is a different version (0.5.10.post1) on a different tuple.
 
 A smaller official `runtime` image was considered and then rejected by real AWS qualification
 because its published dependency set could not start the SGLang server. Tool calling, structured

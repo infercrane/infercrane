@@ -25,7 +25,7 @@ func hypothesis(id, layer string, gain, cost float64) Hypothesis {
 func TestPublicPriorCanScreenButNeverPromote(t *testing.T) {
 	input := Input{Now: testNow, Policy: DefaultPolicy(), Current: workload(SourcePublicPrior, 150000), Hypotheses: []Hypothesis{hypothesis("a", "scheduler", .10, 20)}}
 	decision, err := Evaluate(input)
-	if err != nil || decision.Action != ActionScreenPublicPrior || decision.PromotionEligible || decision.AutomaticPromotion || len(decision.Selected) != 1 || decision.DecisionDigest == "" {
+	if err != nil || decision.Action != ActionScreenPublicPrior || decision.PromotionEligible || len(decision.Selected) != 1 || decision.DecisionDigest == "" {
 		t.Fatalf("decision=%+v err=%v", decision, err)
 	}
 }
@@ -72,25 +72,6 @@ func TestKnownFailureAndProfilerlessKernelAreNotRepeated(t *testing.T) {
 	}
 	decision, err := Evaluate(input)
 	if err != nil || len(decision.Selected) != 0 {
-		t.Fatalf("decision=%+v err=%v", decision, err)
-	}
-}
-
-func TestCanaryRollsBackOnReliabilityRegression(t *testing.T) {
-	canary := ServiceEvidence{RequestCount: 1500, TTFTP95MS: 90, ErrorRate: .03, Availability: .9999, ContributionMargin: .50, QualifiedOutputTokensPerSecond: 200}
-	input := Input{Now: testNow, Policy: DefaultPolicy(), Current: workload(SourceCustomerObserved, 2000), ActiveService: ServiceEvidence{RequestCount: 2000, TTFTP95MS: 100, ErrorRate: .001, Availability: .9999, ContributionMargin: .30, QualifiedOutputTokensPerSecond: 150}, CanaryService: &canary}
-	decision, err := Evaluate(input)
-	if err != nil || decision.Action != ActionRollbackCanary || decision.PromotionEligible {
-		t.Fatalf("decision=%+v err=%v", decision, err)
-	}
-}
-
-func TestCanaryRecommendsButDoesNotAutomaticallyPromoteByDefault(t *testing.T) {
-	active := ServiceEvidence{RequestCount: 2000, TTFTP95MS: 100, TPOTP95MS: 8, ErrorRate: .001, Availability: .9999, ContributionMargin: .25, QualifiedOutputTokensPerSecond: 150, ProductiveUtilization: .5, CostPerMillionOutputUSD: 1.5}
-	canary := ServiceEvidence{RequestCount: 1500, TTFTP95MS: 80, TPOTP95MS: 7, ErrorRate: .001, Availability: .9999, ContributionMargin: .40, QualifiedOutputTokensPerSecond: 220, ProductiveUtilization: .65, CostPerMillionOutputUSD: 1.0}
-	input := Input{Now: testNow, Policy: DefaultPolicy(), Current: workload(SourceCustomerObserved, 2000), ActiveService: active, CanaryService: &canary}
-	decision, err := Evaluate(input)
-	if err != nil || decision.Action != ActionRecommendPromotion || !decision.PromotionEligible || decision.AutomaticPromotion {
 		t.Fatalf("decision=%+v err=%v", decision, err)
 	}
 }

@@ -54,11 +54,24 @@ profiler capture and add `--require-measured` for a paid GPU campaign.
 `packs/<operator-family>/` holds the human-reviewed contract (`pack.json`) and
 the hidden evaluator (`evaluate.py`) used by `infercrane-kernel-adapter`. The
 evaluator reports only which stage failed, so its test inputs never reach the
-model. `run-isolated-evaluation.sh` is the reference no-network launcher, and
-`brezel-runner/` is the fixed source-screening entrypoint for Brezel.
+model. On a GPU it also reports roofline utilization: the time the operator's
+minimum DRAM traffic would take at peak bandwidth, divided by the measured time.
+It reports 0 when that is unknown. `run-isolated-evaluation.sh` is the reference
+no-network launcher, and `brezel-runner/` is the fixed source-screening
+entrypoint for Brezel.
 `target-runtimes.json` holds reviewed launch data for profiling and
 qualification. A pack's `integration/` directory routes a serving runtime to the
-kernel, and its `test_integration.py` runs without a GPU.
+kernel, and its `test_integration.py` runs without a GPU. The Go test suite runs
+each pack's `test_*.py` files.
+
+An integration declares the exact runtime versions it was reviewed against in
+`runtime_versions`. The adapter refuses any other version before generation or
+GPU spend, and the integration refuses it again when the server starts. The
+residual-RMSNorm integration registers a vLLM IR provider and supports vLLM
+0.22.1 only. vLLM IR is deprecated and vLLM 0.34.0 removes its op-priority
+setting, so this pack needs a CustomOp-based integration, reviewed and qualified,
+before any vLLM 0.34 or later pin. Versions between 0.22.1 and 0.34.0 stay
+unsupported until someone reviews and tests them.
 
 Check a kernel on a laptop without a GPU with
 `screen-kernel.sh FAMILY KERNEL.py`. It runs the pack's evaluator on CPU with

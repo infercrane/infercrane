@@ -196,7 +196,7 @@ func PortableCatalog() (*Registry, error) {
 	sglang := RuntimeProfile{
 		Runtime: "sglang", ContractVersion: RuntimeContractV1, AdapterVersion: "builtin-v1", EngineVersion: support.SGLangRuntimeVersion, Protocol: "openai", Capabilities: common,
 		DefaultWorkload: support.SGLangWorkload(),
-		Qualification:   []Qualification{{State: QualificationSimulated, Environment: "hermetic-runtime-contract", Evidence: "go:test/internal/conformance#TestPortableRuntimeConformance"}, {State: QualificationDeferred, Environment: "real-sglang-gpu", Reason: "real GPU evidence remains bound to exact model, accelerator, provider, and workload tuples"}},
+		Qualification:   []Qualification{{State: QualificationSimulated, Environment: "hermetic-runtime-contract", Evidence: "go:test/internal/conformance#TestPortableRuntimeConformance"}, {State: QualificationDeferred, Environment: "real-sglang-gpu", Reason: "the pinned 0.5.12 image passed recorded AWS lifecycle checks (Qwen3-8B on one L40S with five-request AIPerf samples, docs/testing/aws-real-evidence.md); those runs are not retained catalog evidence or performance qualification, and every other model, accelerator, provider, and workload tuple is unqualified"}},
 	}
 	custom := RuntimeProfile{Runtime: "custom-oci", ContractVersion: RuntimeContractV1, AdapterVersion: "declarative-v1", Protocol: "openai", Capabilities: common, Qualification: []Qualification{{State: QualificationSimulated, Environment: "hermetic-runtime-contract", Evidence: "go:test/internal/conformance#TestPortableRuntimeConformance"}, {State: QualificationDeferred, Environment: "real-custom-oci-gpu", Reason: "real GPU evidence remains bound to exact image, model, accelerator, provider, and workload tuples"}}}
 	for _, profile := range []RuntimeProfile{sglang, custom} {
@@ -348,7 +348,7 @@ func V1Catalog() (*Registry, error) {
 				{Name: "engine_artifact_provenance", State: CapabilitySupported, Evidence: "go:test/internal/store#TestOptimizedArtifactRequiresExactBuilderCandidateRevisionAndQualityEvidence"},
 				{Name: "runtime_execution", State: CapabilityUnsupported, Detail: "no TensorRT-LLM runtime adapter is locally or GPU qualified yet"},
 			},
-			Qualification: []Qualification{{State: QualificationLocal, Environment: "immutable-plan-and-attestation", Evidence: "go:test/internal/store#TestOptimizedArtifactRequiresExactBuilderCandidateRevisionAndQualityEvidence"}, {State: QualificationDeferred, Environment: "real-tensorrt-llm-gpu", Reason: "engine build and execution are model, GPU architecture, CUDA, and TensorRT version specific"}},
+			Qualification: []Qualification{{State: QualificationLocal, Environment: "immutable-plan-and-attestation", Evidence: "go:test/internal/store#TestOptimizedArtifactRequiresExactBuilderCandidateRevisionAndQualityEvidence"}, {State: QualificationDeferred, Environment: "real-tensorrt-llm-gpu", Reason: "current TensorRT-LLM releases removed the engine backend and load checkpoints through PyTorch; engine provenance covers only engines built by an earlier pinned release, and build and execution remain model, GPU architecture, CUDA, and TensorRT version specific"}},
 		},
 		{
 			Adapter: "lmcache", Kind: CompositionCache, ContractVersion: CompositionV1,

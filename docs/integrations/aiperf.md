@@ -22,6 +22,12 @@ InferCrane pins AIPerf `0.12.0`, requests record-only exports, and can drive con
 gamma arrival timing. Independent runs produce 95% confidence intervals in persisted workload
 evidence; they are not flattened into a single unexplained number.
 
+AIPerf's server-metrics scrape and GPU telemetry are off for ordinary benchmarks. Optimization
+campaigns turn the server-metrics scrape on for a candidate whose runtime contract declares a
+`/metrics` path and keep a bounded summary of its cache, preemption, queue, and speculative-acceptance
+metrics. GPU telemetry stays off because benchmarks have no DCGM exporter; it is recorded as
+`not_collected`.
+
 <Card title="Benchmarking" icon="gauge" href="/features/benchmarking">
   Understand measurements, persisted reproduction metadata, and evidence limits.
 </Card>
