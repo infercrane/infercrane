@@ -40,7 +40,7 @@ test "$license_count" -ge 35 || {
 }
 test -f "$output/gopkg.in/yaml.v3/NOTICE"
 test -f "$output/github.com/spf13/cobra/LICENSE.txt"
-test -f "$output/github.com/go-jose/go-jose/v3/LICENSE"
+test -f "$output/github.com/go-jose/go-jose/v4/LICENSE"
 test -f "$output/github.com/modelcontextprotocol/go-sdk/LICENSE"
 if awk -F, '$3 == "Unknown" { found=1 } END { exit found ? 0 : 1 }' "$output/manifest.csv"; then
   echo "generated Go license manifest contains an unknown license" >&2

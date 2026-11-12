@@ -740,3 +740,30 @@ func TestLoadClientReadsLegacySingleContextConfiguration(t *testing.T) {
 		t.Fatalf("loaded=%#v err=%v", loaded, err)
 	}
 }
+
+func TestOptimizationPricesAcceptOwnedClusterRateCardOnlyForKubernetes(t *testing.T) {
+	window := `"observed_at":"2026-11-12T10:00:00Z","valid_until":"2026-12-12T10:00:00Z"`
+	t.Setenv("INFERCRANE_OPTIMIZATION_PRICES_JSON", `[{"cloud":"kubernetes","gpu":"LOCAL-CPU","replicas":1,"hourly_usd":0.5,"currency":"USD","source":"operator-rate-card/poc-2026-11","authority":"account_contract","cost_scope":"instance_total",`+window+`}]`)
+	prices, err := envOptimizationPrices("INFERCRANE_OPTIMIZATION_PRICES_JSON")
+	if err != nil || len(prices) != 1 || prices[0].Authority != "account_contract" || prices[0].CostScope != "instance_total" {
+		t.Fatalf("owned-cluster rate card was not accepted: prices=%+v err=%v", prices, err)
+	}
+	rejected := map[string]string{
+		"rate card for a cloud with a provider price API": `[{"cloud":"aws","region":"eu-central-1","gpu":"L40S","replicas":1,"hourly_usd":2.1,"currency":"USD","source":"contract","authority":"account_contract","cost_scope":"instance_total",` + window + `}]`,
+		"rate card without a complete instance price":     `[{"cloud":"kubernetes","gpu":"LOCAL-CPU","replicas":1,"hourly_usd":0.5,"currency":"USD","source":"contract","authority":"account_contract",` + window + `}]`,
+		"provider authority declared by hand":             `[{"cloud":"kubernetes","gpu":"LOCAL-CPU","replicas":1,"hourly_usd":0.5,"currency":"USD","source":"contract","authority":"provider_api","cost_scope":"instance_total",` + window + `}]`,
+		"invoice authority declared by hand":              `[{"cloud":"kubernetes","gpu":"LOCAL-CPU","replicas":1,"hourly_usd":0.5,"currency":"USD","source":"contract","authority":"measured_invoice","cost_scope":"instance_total",` + window + `}]`,
+		"unknown cost scope":                              `[{"cloud":"kubernetes","gpu":"LOCAL-CPU","replicas":1,"hourly_usd":0.5,"currency":"USD","source":"contract","cost_scope":"accelerator_plus",` + window + `}]`,
+	}
+	for name, raw := range rejected {
+		t.Setenv("INFERCRANE_OPTIMIZATION_PRICES_JSON", raw)
+		if _, err := envOptimizationPrices("INFERCRANE_OPTIMIZATION_PRICES_JSON"); err == nil {
+			t.Fatalf("%s was accepted", name)
+		}
+	}
+	t.Setenv("INFERCRANE_OPTIMIZATION_PRICES_JSON", `[{"cloud":"aws","region":"eu-central-1","gpu":"L40S","replicas":1,"hourly_usd":2.1,"currency":"USD","source":"aws-price-list/2026-08-24",`+window+`}]`)
+	prices, err = envOptimizationPrices("INFERCRANE_OPTIMIZATION_PRICES_JSON")
+	if err != nil || prices[0].Authority != "unknown" || prices[0].CostScope != "unknown" {
+		t.Fatalf("plain manual price did not stay advisory: prices=%+v err=%v", prices, err)
+	}
+}

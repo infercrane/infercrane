@@ -212,6 +212,13 @@ infercrane optimize activate CAMPAIGN_ID --candidate CANDIDATE_ID
 infercrane operation watch ACTIVATION_OPERATION_ID
 ```
 
+To follow a campaign live, run `infercrane optimize watch CAMPAIGN_ID`. It shows, in plain words,
+where each setup is (starting a server, measuring against your current setup, checking answer
+quality), what was measured (throughput, p95 time to first token, p95 latency, and cost per million
+tokens when the price is sourced), how each setup compared with the current one including the
+measurement noise floor, and the decision with the exact `activate` command when a setup qualifies.
+It only reads the control API; `--once` prints one plain snapshot for scripts and logs.
+
 That default creates a `new_endpoint` campaign. To optimize a candidate revision for an endpoint
 that already serves production, bind the campaign to its stable deployment identity:
 
@@ -268,6 +275,32 @@ source window, absent AIPerf binary, or approval below the worst-case execution 
 before provider mutation. Operators must refresh price evidence rather than treating this static
 example as current pricing.
 
+A row like the one above is advisory: it can rank plans, but it cannot authorize spend, because a
+hand-entered price is not a provider quote. Execution needs a fresh quote from a reviewed provider
+price collector, or, for capacity you own or contract, an explicit rate card on a `kubernetes` row:
+
+```bash
+export INFERCRANE_OPTIMIZATION_PRICES_JSON='[
+  {
+    "cloud":"kubernetes",
+    "gpu":"H100",
+    "replicas":1,
+    "hourly_usd":2.40,
+    "currency":"USD",
+    "source":"operator-rate-card/2026-11",
+    "authority":"account_contract",
+    "cost_scope":"instance_total",
+    "observed_at":"2026-11-12T00:00:00Z",
+    "valid_until":"2026-12-12T00:00:00Z"
+  }
+]'
+```
+
+`authority: account_contract` declares that you guarantee this complete hourly rate until
+`valid_until`; it must cover the whole approval window. It is accepted only for `cloud: kubernetes`
+with `cost_scope: instance_total`. `provider_api` and `measured_invoice` authority come only from
+reviewed collectors and are rejected in this variable.
+
 Automation clients can request the same non-mutating candidate set with
 `POST /api/v1/optimization/proposals`. This endpoint performs no provider mutation and makes no
 performance claim. Pass the returned immutable proposal to
@@ -284,7 +317,9 @@ failed and cleans its resources rather than allowing an unbounded GPU bill.
 
 Execution uses a measured-evidence barrier: all viable candidates reach AIPerf measurement and
 revision-bound quality validation before ranking begins. Inference Lab then compares only the exact
-same workload shape. Proposal order cannot choose the winner. Missing sourced cost, mismatched
+same workload shape and the exact deployed model artifact (`repository@revision`), even when the
+campaign was created from a catalog name. Candidates that serve different artifacts cannot share
+one ranking and fail closed. Proposal order cannot choose the winner. Missing sourced cost, mismatched
 workloads, or incomplete metrics produce `inconclusive`; explicit SLO or cost violations produce
 `rejected`. For evolution campaigns, the selected candidate still has to pass
 active-versus-candidate Release Guard and wait for human promotion. The persisted campaign links
