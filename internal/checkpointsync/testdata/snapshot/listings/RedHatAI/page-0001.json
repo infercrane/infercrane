@@ -1,0 +1,52 @@
+[
+ {
+  "id": "RedHatAI/Qwen3.8-27B-NVFP4",
+  "sha": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+  "createdAt": "2026-09-18T09:00:00.000Z",
+  "lastModified": "2026-11-09T09:00:00.000Z",
+  "private": false,
+  "disabled": false,
+  "gated": false,
+  "library_name": "transformers",
+  "pipeline_tag": "image-text-to-text",
+  "tags": [],
+  "cardData": {
+   "license": "apache-2.0",
+   "base_model": "Qwen/Qwen3.8-27B"
+  },
+  "config": {
+   "architectures": [
+    "X"
+   ],
+   "model_type": "x",
+   "quantization_config": {
+    "quant_method": "compressed-tensors",
+    "format": "mixed-precision"
+   }
+  }
+ },
+ {
+  "id": "RedHatAI/GLM-5.3-Flash",
+  "sha": "a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7",
+  "createdAt": "2026-09-11T09:00:00.000Z",
+  "lastModified": "2026-11-09T09:00:00.000Z",
+  "private": false,
+  "disabled": false,
+  "gated": false,
+  "library_name": "transformers",
+  "pipeline_tag": "text-generation",
+  "tags": [],
+  "cardData": {
+   "license": "mit"
+  },
+  "config": {
+   "architectures": [
+    "X"
+   ],
+   "model_type": "x",
+   "quantization_config": {
+    "quant_method": "fp8"
+   }
+  }
+ }
+]

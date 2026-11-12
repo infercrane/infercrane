@@ -5,8 +5,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/infercrane/infercrane/internal/checkpointcatalog"
 	"github.com/infercrane/infercrane/internal/curatedrecipe"
-	"github.com/infercrane/infercrane/internal/modeloptcatalog"
 )
 
 // huggingFaceCatalogModels returns a deliberately small, reviewed discovery
@@ -33,40 +33,64 @@ func (a API) huggingFaceCatalogModels(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	for _, seed := range modeloptcatalog.MustDefault().Seeds {
-		key := strings.ToLower(seed.BaseRepository)
+	checkpoints := checkpointcatalog.MustDefault()
+	candidates := checkpoints.Candidates()
+	sort.SliceStable(candidates, func(i, j int) bool {
+		a, b := candidates[i], candidates[j]
+		if a.RevisionState != b.RevisionState {
+			return a.RevisionState == checkpointcatalog.RevisionCurrent
+		}
+		if a.CreatedAt != b.CreatedAt {
+			return a.CreatedAt > b.CreatedAt
+		}
+		return a.Repository < b.Repository
+	})
+	for _, candidate := range candidates {
+		key := strings.ToLower(candidate.Base.Repository)
 		entry, found := entries[key]
 		if !found {
 			entry = map[string]any{
-				"repository":  seed.BaseRepository,
-				"current":     seed.ScreeningBaseRevision != "",
+				"repository":  candidate.Base.Repository,
+				"current":     candidate.Base.ScreeningRevision != "",
 				"access":      "public",
-				"license":     seed.LicenseSPDX,
+				"license":     candidate.License.SPDX,
 				"reviewed":    false,
 				"source_kind": "publisher-base",
 			}
 			entries[key] = entry
 		}
-		if revision := seed.ScreeningBaseRevision; revision != "" {
+		if _, primary := entry["optimization"]; primary {
+			continue
+		}
+		if revision := candidate.Base.ScreeningRevision; revision != "" {
 			entry["revision"] = revision
 		}
 		entry["optimization"] = map[string]any{
-			"catalog_id":                seed.ID,
-			"publisher":                 seed.Publisher,
-			"tool":                      seed.Tool,
-			"tool_version":              seed.ToolVersion,
-			"algorithm":                 seed.Algorithm,
-			"output_repository":         seed.OutputRepository,
-			"output_revision":           seed.OutputRevision,
-			"screening_base_revision":   seed.ScreeningBaseRevision,
-			"screening_revision_source": seed.ScreeningRevisionSource,
-			"lineage_state":             seed.LineageState,
-			"accelerator_architectures": seed.AcceleratorArchitectures,
-			"runtimes":                  seed.Runtimes,
-			"source_url":                seed.SourceURL,
+			"catalog_id":                candidate.ID,
+			"publisher":                 checkpoints.PublisherName(candidate.Publisher),
+			"tool":                      candidate.Quantization.Tool,
+			"tool_version":              candidate.Quantization.ToolVersion,
+			"algorithm":                 candidate.Quantization.Scheme,
+			"output_repository":         candidate.Repository,
+			"output_revision":           candidate.Revision,
+			"screening_base_revision":   candidate.Base.ScreeningRevision,
+			"screening_revision_source": candidate.Base.ScreeningRevisionSource,
+			"lineage_state":             candidate.Base.Lineage,
+			"hardware_vendor":           candidate.Hardware.Vendor,
+			"accelerator_architectures": candidate.Hardware.Architectures,
+			"runtimes":                  candidate.Runtimes,
+			"source_url":                candidate.SourceURL,
 			"evidence_state":            "unmeasured",
 			"qualification_boundary":    "publisher artifact available; exact workload, quality, cost, and release evidence are still required",
 		}
+	}
+	for _, build := range checkpoints.Entries {
+		entry, found := entries[strings.ToLower(build.Base.Repository)]
+		if !found {
+			continue
+		}
+		builds, _ := entry["publisher_builds"].([]map[string]any)
+		entry["publisher_builds"] = append(builds, publisherBuild(build, checkpoints.PublisherName(build.Publisher)))
 	}
 
 	models := make([]map[string]any, 0, len(entries))
@@ -82,9 +106,43 @@ func (a API) huggingFaceCatalogModels(w http.ResponseWriter, r *http.Request) {
 		"limitations": []string{
 			"This is a reviewed discovery snapshot, not live Hugging Face popularity data.",
 			"Publisher-optimized checkpoints remain unmeasured until an exact InferCrane campaign qualifies them.",
+			"Publisher builds for hardware InferCrane cannot run yet are listed as unsupported_hardware and never become candidates.",
 		},
 		"models": models,
 	})
+}
+
+// publisherBuild summarizes one catalog entry, including the gates that keep
+// it from becoming a proposal candidate.
+func publisherBuild(entry checkpointcatalog.Entry, publisher string) map[string]any {
+	build := map[string]any{
+		"catalog_id":                entry.ID,
+		"publisher":                 publisher,
+		"kind":                      entry.Kind,
+		"repository":                entry.Repository,
+		"revision":                  entry.Revision,
+		"revision_state":            entry.RevisionState,
+		"hardware_vendor":           entry.Hardware.Vendor,
+		"accelerator_architectures": entry.Hardware.Architectures,
+		"product_support":           entry.Hardware.ProductSupport,
+		"runtimes":                  entry.Runtimes,
+		"review_state":              entry.Review.State,
+		"eligibility":               entry.Eligibility.State,
+		"blockers":                  append([]string{}, entry.Eligibility.Blockers...),
+		"license":                   entry.License.Tag,
+		"license_state":             entry.License.State,
+		"lineage_state":             entry.Base.Lineage,
+		"publisher_prior_tables":    len(entry.PublisherPriors),
+		"source_url":                entry.SourceURL,
+		"evidence_state":            "unmeasured",
+	}
+	if entry.Quantization != nil {
+		build["tool"], build["format"] = entry.Quantization.Tool, entry.Quantization.Scheme
+	}
+	if entry.Speculator != nil {
+		build["format"], build["speculator_targets"] = entry.Speculator.Method, entry.Speculator.Targets
+	}
+	return build
 }
 
 func accessLabel(gated bool) string {

@@ -421,6 +421,7 @@ complete. The current implementation boundary is:
 | Workload identity, replay, SLO/goodput, cost caps, immutable evidence and guarded promotion | Implemented | Control-plane workflow and qualification policy |
 | vLLM and SGLang recipe candidates, cache/precision/scheduler/topology fields | Implemented for bounded candidates | Every exact tuple still needs compatibility and measured qualification |
 | Opt-in runtime recipe search for any pinned model | Implemented for SGLang 0.5.20 on H100, H200, and B200 through pinned-image RunPod Pods | `internal/optimizer/recipe_search.go` gates arms on the pinned `config.json` and workload shape, keeps an untuned control on the same image, and leaves every arm unmeasured; the capability registry's exact-model rule is unchanged |
+| Vendor-published checkpoints and speculators (NVIDIA, Red Hat AI, AMD, Intel/OpenVINO, Google) | Implemented as a reviewed, committed catalog with an explicit, offline-by-default sync | `internal/checkpointcatalog` is compiled into the binary; `tools/checkpoint-catalog-sync` records Hugging Face snapshots and plans a deterministic, reviewable diff. Only approved, licensed quantized checkpoints for NVIDIA architectures InferCrane runs seed candidates; every entry stays unmeasured, and AMD and Intel builds are marked `unsupported_hardware` |
 | AIPerf load generation and persisted benchmark evidence | Implemented | Requires an installed runner and a reachable exact serving tuple |
 | Campaign measurement: bound Replay replay, warmup, three runs per arm interleaved with the campaign control, and a noise-floor ranking gate | Implemented and hermetically qualified | Control and candidate share a time window, not a GPU; prompt content, arrival timing, and shared-prefix length are not replayed; no real-GPU campaign has run this method yet |
 | Profiler-hotspot and Amdahl kernel opportunity planning | Implemented and locally qualified | Accelerator worker `POST /v1/profiles` captures vendor-native evidence; a real worker/toolchain is required for measured claims |
@@ -580,9 +581,14 @@ The rank-one proposal candidate is exposed as `starting_point`. It is selected
 from compatibility and declared objective fit, not an unmeasured speed claim.
 After deployment, `GET /api/v1/endpoints/{name}/optimization-readiness` turns
 fresh request aggregates into a conservative stage diagnosis such as queueing,
-prefill/first-token, or decode/generation pressure. Request telemetry never
-opens the kernel gate: exact target-GPU profiling and the Amdahl policy remain
-mandatory.
+prefill/first-token, or decode/generation pressure. When a fresh serving-engine
+scrape or DCGM profiling import exists, the same assessment applies explicit
+KV-pressure, preemption, prefix-reuse, speculative-acceptance, and GPU memory,
+compute, host, and interconnect rules and returns the technique families worth
+measuring for the diagnosed bottleneck
+([thresholds](/features/telemetry#diagnose-a-bottleneck-from-engine-signals)).
+No request, engine, or DCGM telemetry opens the kernel gate: exact target-GPU
+profiling and the Amdahl policy remain mandatory.
 
 ## Process boundary
 
@@ -603,7 +609,11 @@ the InferCrane API server.
   credentials, and `kernelresearch` alone decides keep or reject.
 - **GPU worker:** exact-SM build when required, correctness, sanitizers,
   PyTorch profiler traces, microbenchmarks, AIPerf replay, quality tests, and
-  teardown under the campaign lease.
+  teardown under the campaign lease. An opt-in `timeline` operation wraps the
+  serving process in Nsight Systems for one bounded CUDA-profiler range. It
+  returns only a summary of GPU idle time, launch overhead, communication
+  share, and the top kernels, and it refuses a runtime without a reviewed
+  configuration or without `nsys` in its image.
 
 The deterministic planner and registry belong in this repository because they
 are product policy. Brezel remains a separately deployed execution service;

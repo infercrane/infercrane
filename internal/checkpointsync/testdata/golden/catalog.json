@@ -1,0 +1,557 @@
+{
+  "schema_version": "infercrane.checkpoint-catalog/v2",
+  "reviewed_at": "2026-11-11",
+  "snapshot": {
+    "source": "https://huggingface.co/api/models",
+    "fetched_at": "2026-11-11T12:00:00Z",
+    "digest": "sha256:1f7bc009bceb7ed8fc17f23eb1c2ed1017261dcfed99937a799c06345ad19b9b",
+    "policy_digest": "sha256:2bd0abcf7b2cd5b504595f00a6207d8b3968d6613c3fcb2132636f66f1c00704"
+  },
+  "publishers": [
+    {
+      "organization": "RedHatAI",
+      "name": "Red Hat AI",
+      "hardware_vendor": "nvidia",
+      "review_state": "pending"
+    },
+    {
+      "organization": "amd",
+      "name": "AMD",
+      "hardware_vendor": "amd",
+      "review_state": "approved"
+    },
+    {
+      "organization": "nvidia",
+      "name": "NVIDIA",
+      "hardware_vendor": "nvidia",
+      "review_state": "approved"
+    }
+  ],
+  "entries": [
+    {
+      "id": "amd-glm-53-flash-quark-mxfp4-d4d4d4d4",
+      "kind": "quantized_checkpoint",
+      "publisher": "amd",
+      "repository": "amd/GLM-5.3-Flash-Quark-MXFP4",
+      "revision": "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+      "revision_state": "current",
+      "created_at": "2026-10-25T09:00:00.000Z",
+      "last_modified": "2026-11-07T09:00:00.000Z",
+      "base": {
+        "repository": "zai-org/GLM-5.3-Flash",
+        "lineage": "publisher_declared",
+        "screening_revision": "3f1971b7b5f7a528c9c4ef6212c8785298a8c24a",
+        "screening_revision_source": "https://huggingface.co/api/models/zai-org/GLM-5.3-Flash"
+      },
+      "quantization": {
+        "tool": "quark",
+        "tool_version": "0.13",
+        "method": "quark",
+        "scheme": "mxfp4"
+      },
+      "hardware": {
+        "vendor": "amd",
+        "architectures": ["cdna4"],
+        "product_support": "unsupported_hardware"
+      },
+      "runtimes": ["sglang", "vllm"],
+      "engine_requirements": [
+        {
+          "engine": "sglang",
+          "state": "requires_unreleased_change",
+          "pull_request": "sgl-project/sglang#36607"
+        }
+      ],
+      "license": {
+        "tag": "mit",
+        "spdx": "MIT",
+        "state": "approved"
+      },
+      "artifact": {
+        "format": "safetensors",
+        "manifest_digest": "sha256:ba515c434f3f0a9ffb95421a43e6a0c033549a9126ca373d83108ccafa5e4da1",
+        "model_card_digest": "sha256:17b9354c26d189cdca8927cd9207d956fec3192a462b36a40ad4d7c92bf758e2",
+        "file_count": 3,
+        "size_bytes": 1000203
+      },
+      "publisher_priors": [
+        {
+          "source": "model card table 1 at revision d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+          "evidence_state": "unmeasured",
+          "columns": ["Benchmark", "Measured hardware", "Accuracy"],
+          "rows": [
+            ["GSM8K", "4x AMD Instinct MI350X", "97.19%"]
+          ]
+        }
+      ],
+      "review": {
+        "state": "approved"
+      },
+      "eligibility": {
+        "state": "catalog_only",
+        "blockers": ["targets amd hardware the product cannot run yet", "tool quark cannot seed product candidates yet"]
+      },
+      "source_url": "https://huggingface.co/amd/GLM-5.3-Flash-Quark-MXFP4",
+      "limitations": [
+        "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
+        "Targets amd hardware, which InferCrane cannot run yet.",
+        "sglang needs sgl-project/sglang#36607, which is not in a reviewed release.",
+        "No license file at the pinned revision; the license comes from the model card metadata."
+      ]
+    },
+    {
+      "id": "nvidia-deepseek-v41-flash-1017-nvfp4-3ae9c0d3",
+      "kind": "quantized_checkpoint",
+      "publisher": "nvidia",
+      "repository": "nvidia/DeepSeek-V4.1-Flash-1017-NVFP4",
+      "revision": "3ae9c0d3fbbea5370bd06e679d22044db15883f1",
+      "revision_state": "current",
+      "created_at": "2026-10-30T17:37:02.000Z",
+      "last_modified": "2026-11-04T22:10:26.000Z",
+      "base": {
+        "repository": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+        "declared_revision": "1bae0e1088993b9b82de08f59de5be5a34e42170",
+        "lineage": "exact",
+        "screening_revision": "1bae0e1088993b9b82de08f59de5be5a34e42170",
+        "screening_revision_source": "https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash-1017/commit/1bae0e1088993b9b82de08f59de5be5a34e42170"
+      },
+      "quantization": {
+        "tool": "modelopt",
+        "tool_version": "0.48.0rc0",
+        "method": "fp8",
+        "scheme": "nvfp4"
+      },
+      "hardware": {
+        "vendor": "nvidia",
+        "architectures": ["blackwell"],
+        "product_support": "runnable"
+      },
+      "runtimes": ["sglang", "vllm"],
+      "engine_requirements": [
+        {
+          "engine": "sglang",
+          "state": "requires_unreleased_change",
+          "pull_request": "sgl-project/sglang#47935"
+        },
+        {
+          "engine": "vllm",
+          "state": "requires_unreleased_change",
+          "pull_request": "vllm-project/vllm#61530"
+        }
+      ],
+      "license": {
+        "tag": "mit",
+        "spdx": "MIT",
+        "state": "approved"
+      },
+      "artifact": {
+        "format": "safetensors",
+        "manifest_digest": "sha256:fad11f675e651091421cbdc2725723d487f35e0814be322511d053dfa205f902",
+        "model_card_digest": "sha256:7e68b0f84c0d6ec3e485d1cc1fd9c610b8d431ed809163ab5f3f64eebe057b1e",
+        "file_count": 3,
+        "size_bytes": 1000203
+      },
+      "publisher_priors": [
+        {
+          "source": "model card table 1 at revision 3ae9c0d3fbbea5370bd06e679d22044db15883f1",
+          "evidence_state": "unmeasured",
+          "columns": ["Benchmark", "FP8", "NVFP4"],
+          "rows": [
+            ["GSM8K", "96.1", "95.8"]
+          ]
+        }
+      ],
+      "review": {
+        "state": "approved"
+      },
+      "eligibility": {
+        "state": "catalog_only",
+        "blockers": ["every reviewed runtime needs an unreleased or blocked engine change"]
+      },
+      "source_url": "https://huggingface.co/nvidia/DeepSeek-V4.1-Flash-1017-NVFP4",
+      "limitations": [
+        "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
+        "The model card states the exact base revision.",
+        "sglang needs sgl-project/sglang#47935, which is not in a reviewed release.",
+        "vllm needs vllm-project/vllm#61530, which is not in a reviewed release.",
+        "No license file at the pinned revision; the license comes from the model card metadata."
+      ]
+    },
+    {
+      "id": "nvidia-deepseek-v41-flash-nvfp4-c48dca01",
+      "kind": "quantized_checkpoint",
+      "publisher": "nvidia",
+      "repository": "nvidia/DeepSeek-V4.1-Flash-NVFP4",
+      "revision": "c48dca0146b56d64c8116dbb6fcace8b7cc835f8",
+      "revision_state": "current",
+      "created_at": "2026-09-16T10:00:00.000Z",
+      "last_modified": "2026-10-14T16:40:46.000Z",
+      "base": {
+        "repository": "deepseek-ai/DeepSeek-V4.1-Flash",
+        "declared_revision": "dba1be0a40aa45a94ad051997016db3960a90277",
+        "lineage": "exact",
+        "screening_revision": "dba1be0a40aa45a94ad051997016db3960a90277",
+        "screening_revision_source": "https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash/commit/dba1be0a40aa45a94ad051997016db3960a90277"
+      },
+      "quantization": {
+        "tool": "modelopt",
+        "tool_version": "0.47.0rc0",
+        "method": "fp8",
+        "scheme": "nvfp4"
+      },
+      "hardware": {
+        "vendor": "nvidia",
+        "architectures": ["blackwell"],
+        "product_support": "runnable"
+      },
+      "runtimes": ["sglang", "vllm"],
+      "engine_requirements": [
+        {
+          "engine": "sglang",
+          "state": "blocked_by_review",
+          "note": "The model card supports SGLang only for the previous revision 3431dde."
+        },
+        {
+          "engine": "vllm",
+          "state": "requires_unreleased_change",
+          "pull_request": "vllm-project/vllm#61530"
+        }
+      ],
+      "license": {
+        "tag": "mit",
+        "spdx": "MIT",
+        "state": "approved",
+        "digest": "sha256:b7880bae6a4c332e20f96247a32a0ba2a10e84e5080e092d5cc849ffbd0c9d62"
+      },
+      "artifact": {
+        "format": "safetensors",
+        "manifest_digest": "sha256:21d076e84560e32be452d6564ec33594dcffc9d10951f49fea134a390756d99e",
+        "model_card_digest": "sha256:ffda9783ca820c3ae99bb64daa8a1e9507f42ff93938d757fec419860c36ebd2",
+        "file_count": 5,
+        "size_bytes": 1000410
+      },
+      "review": {
+        "state": "approved"
+      },
+      "eligibility": {
+        "state": "catalog_only",
+        "blockers": ["every reviewed runtime needs an unreleased or blocked engine change"]
+      },
+      "source_url": "https://huggingface.co/nvidia/DeepSeek-V4.1-Flash-NVFP4",
+      "limitations": [
+        "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
+        "The model card states the exact base revision.",
+        "sglang is blocked by review: The model card supports SGLang only for the previous revision 3431dde.",
+        "vllm needs vllm-project/vllm#61530, which is not in a reviewed release."
+      ]
+    },
+    {
+      "id": "nvidia-deepseek-v41-flash-nvfp4-3431dde3",
+      "kind": "quantized_checkpoint",
+      "publisher": "nvidia",
+      "repository": "nvidia/DeepSeek-V4.1-Flash-NVFP4",
+      "revision": "3431dde3247c13b5957f682b1e3c6fcae2566079",
+      "revision_state": "superseded",
+      "superseded_by": "c48dca0146b56d64c8116dbb6fcace8b7cc835f8",
+      "created_at": "2026-09-16T10:00:00.000Z",
+      "last_modified": "2026-09-20T08:00:00.000Z",
+      "base": {
+        "repository": "deepseek-ai/DeepSeek-V4.1-Flash",
+        "declared_revision": "dba1be0a40aa45a94ad051997016db3960a90277",
+        "lineage": "exact",
+        "screening_revision": "dba1be0a40aa45a94ad051997016db3960a90277",
+        "screening_revision_source": "https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash/commit/dba1be0a40aa45a94ad051997016db3960a90277"
+      },
+      "quantization": {
+        "tool": "modelopt",
+        "tool_version": "0.47.0rc0",
+        "method": "fp8",
+        "scheme": "nvfp4"
+      },
+      "hardware": {
+        "vendor": "nvidia",
+        "architectures": ["blackwell"],
+        "product_support": "runnable"
+      },
+      "runtimes": ["sglang", "vllm"],
+      "license": {
+        "tag": "mit",
+        "spdx": "MIT",
+        "state": "approved",
+        "digest": "sha256:b7880bae6a4c332e20f96247a32a0ba2a10e84e5080e092d5cc849ffbd0c9d62"
+      },
+      "artifact": {
+        "format": "safetensors",
+        "manifest_digest": "sha256:21d076e84560e32be452d6564ec33594dcffc9d10951f49fea134a390756d99e",
+        "model_card_digest": "sha256:1ac839a2229fdd1713f7e454761c3c6e176cf1154a864f404b0c081dd3dc3589",
+        "file_count": 5,
+        "size_bytes": 1000410
+      },
+      "review": {
+        "state": "approved"
+      },
+      "eligibility": {
+        "state": "candidate"
+      },
+      "source_url": "https://huggingface.co/nvidia/DeepSeek-V4.1-Flash-NVFP4",
+      "limitations": [
+        "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
+        "The model card states the exact base revision.",
+        "A newer revision (c48dca0146b5) exists but is not a candidate; this pinned revision stays until it is."
+      ]
+    },
+    {
+      "id": "nvidia-glm-53-flash-fp4-local-a1a1a1a1",
+      "kind": "quantized_checkpoint",
+      "publisher": "nvidia",
+      "repository": "nvidia/GLM-5.3-Flash-FP4-Local",
+      "revision": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "revision_state": "current",
+      "created_at": "2026-10-08T09:00:00.000Z",
+      "last_modified": "2026-10-16T09:00:00.000Z",
+      "base": {
+        "repository": "zai-org/GLM-5.3-Flash",
+        "lineage": "publisher_declared",
+        "screening_revision": "3f1971b7b5f7a528c9c4ef6212c8785298a8c24a",
+        "screening_revision_source": "https://huggingface.co/api/models/zai-org/GLM-5.3-Flash"
+      },
+      "quantization": {
+        "tool": "modelopt",
+        "tool_version": "0.47.0",
+        "method": "modelopt",
+        "scheme": "mixed-nvfp4-fp8"
+      },
+      "hardware": {
+        "vendor": "nvidia",
+        "architectures": ["blackwell"],
+        "product_support": "runnable"
+      },
+      "runtimes": ["sglang", "vllm"],
+      "license": {
+        "tag": "other",
+        "state": "unresolved"
+      },
+      "artifact": {
+        "format": "safetensors",
+        "manifest_digest": "sha256:ebe58e5816984cc2b8ed6ca77946d086fca6fd7a9ff6dffa137819634a2c5102",
+        "model_card_digest": "sha256:df56579d57417ad32a94312d3a76d159d03b7b90dd7d7a13b2404f7ef56bdcd9",
+        "file_count": 4,
+        "size_bytes": 1000306
+      },
+      "review": {
+        "state": "approved"
+      },
+      "eligibility": {
+        "state": "catalog_only",
+        "blockers": ["license \"other\" is unresolved"]
+      },
+      "source_url": "https://huggingface.co/nvidia/GLM-5.3-Flash-FP4-Local",
+      "limitations": [
+        "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
+        "License \"other\" must be resolved before a customer trial.",
+        "No license file at the pinned revision; the license comes from the model card metadata."
+      ]
+    },
+    {
+      "id": "nvidia-qwen38-27b-dspark-b2b2b2b2",
+      "kind": "speculator",
+      "publisher": "nvidia",
+      "repository": "nvidia/Qwen3.8-27B-DSpark",
+      "revision": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "revision_state": "current",
+      "created_at": "2026-10-20T09:00:00.000Z",
+      "last_modified": "2026-10-21T09:00:00.000Z",
+      "base": {
+        "repository": "Qwen/Qwen3.8-27B",
+        "lineage": "publisher_declared",
+        "screening_revision": "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0",
+        "screening_revision_source": "https://huggingface.co/api/models/Qwen/Qwen3.8-27B"
+      },
+      "speculator": {
+        "method": "dspark",
+        "targets": ["Qwen/Qwen3.8-27B"]
+      },
+      "hardware": {
+        "vendor": "nvidia",
+        "architectures": ["hopper", "blackwell"],
+        "product_support": "runnable"
+      },
+      "runtimes": ["sglang", "vllm"],
+      "license": {
+        "tag": "apache-2.0",
+        "spdx": "Apache-2.0",
+        "state": "approved"
+      },
+      "artifact": {
+        "format": "safetensors",
+        "manifest_digest": "sha256:22792c3dc95e515ef5066e4d564b7fdd05ec4285895fb25d00633b6b6ecfceda",
+        "model_card_digest": "sha256:c14c1f232722ab9e7ce6a174fe226c44ef58676184d43cbaee03bff45cac6a28",
+        "file_count": 3,
+        "size_bytes": 303
+      },
+      "publisher_priors": [
+        {
+          "source": "model card table 1 at revision b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+          "evidence_state": "unmeasured",
+          "columns": ["Position", "Acceptance"],
+          "rows": [
+            ["1", "0.91"],
+            ["2", "0.80"]
+          ]
+        }
+      ],
+      "review": {
+        "state": "approved"
+      },
+      "eligibility": {
+        "state": "catalog_only",
+        "blockers": ["speculator: speculative-decoding candidates need acceptance and output-parity gates first"]
+      },
+      "source_url": "https://huggingface.co/nvidia/Qwen3.8-27B-DSpark",
+      "limitations": [
+        "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
+        "No license file at the pinned revision; the license comes from the model card metadata."
+      ]
+    },
+    {
+      "id": "nvidia-qwen38-27b-nvfp4-482ca0f3",
+      "kind": "quantized_checkpoint",
+      "publisher": "nvidia",
+      "repository": "nvidia/Qwen3.8-27B-NVFP4",
+      "revision": "482ca0f3832238542f8f5295dde86b5f22711d80",
+      "revision_state": "current",
+      "created_at": "2026-09-04T21:43:04.000Z",
+      "last_modified": "2026-09-17T17:16:07.000Z",
+      "base": {
+        "repository": "Qwen/Qwen3.8-27B",
+        "lineage": "publisher_declared",
+        "screening_revision": "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0",
+        "screening_revision_source": "https://huggingface.co/api/models/Qwen/Qwen3.8-27B"
+      },
+      "quantization": {
+        "tool": "modelopt",
+        "tool_version": "0.48.0",
+        "method": "modelopt",
+        "scheme": "mixed-nvfp4-fp8"
+      },
+      "hardware": {
+        "vendor": "nvidia",
+        "architectures": ["blackwell"],
+        "product_support": "runnable"
+      },
+      "runtimes": ["sglang", "vllm"],
+      "license": {
+        "tag": "apache-2.0",
+        "spdx": "Apache-2.0",
+        "state": "approved",
+        "digest": "sha256:da0a45ba8ade58d6156fe561dbaa8ea664725ab65ec9c9dfc0812b1a1c815b1d"
+      },
+      "artifact": {
+        "format": "safetensors",
+        "manifest_digest": "sha256:8c1241b4d7c214004d1b86c1953def09130d24886a0d8496bfb0b4c2a7c67450",
+        "model_card_digest": "sha256:7f4296e399b70a0a8fa4464327c6140600f158891c3b837b052b4afffe8eeff9",
+        "file_count": 6,
+        "size_bytes": 2000415
+      },
+      "publisher_priors": [
+        {
+          "source": "model card table 1 at revision 482ca0f3832238542f8f5295dde86b5f22711d80",
+          "evidence_state": "unmeasured",
+          "columns": ["Benchmark", "BF16", "NVFP4"],
+          "rows": [
+            ["GPQA Diamond", "88.92", "88.01"],
+            ["IFBench", "80.07", "78.93"]
+          ]
+        }
+      ],
+      "review": {
+        "state": "approved"
+      },
+      "eligibility": {
+        "state": "candidate"
+      },
+      "source_url": "https://huggingface.co/nvidia/Qwen3.8-27B-NVFP4",
+      "limitations": [
+        "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot."
+      ]
+    },
+    {
+      "id": "redhatai-qwen38-27b-nvfp4-c3c3c3c3",
+      "kind": "quantized_checkpoint",
+      "publisher": "RedHatAI",
+      "repository": "RedHatAI/Qwen3.8-27B-NVFP4",
+      "revision": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+      "revision_state": "current",
+      "created_at": "2026-09-18T09:00:00.000Z",
+      "last_modified": "2026-11-09T09:00:00.000Z",
+      "base": {
+        "repository": "Qwen/Qwen3.8-27B",
+        "lineage": "publisher_declared",
+        "screening_revision": "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0",
+        "screening_revision_source": "https://huggingface.co/api/models/Qwen/Qwen3.8-27B"
+      },
+      "quantization": {
+        "tool": "llm-compressor",
+        "tool_version": "0.12.3",
+        "method": "compressed-tensors",
+        "scheme": "mixed-nvfp4-fp8"
+      },
+      "hardware": {
+        "vendor": "nvidia",
+        "architectures": [],
+        "product_support": "unknown"
+      },
+      "runtimes": [],
+      "engine_requirements": [
+        {
+          "engine": "vllm",
+          "state": "minimum_version",
+          "minimum_version": "0.28.1"
+        }
+      ],
+      "license": {
+        "tag": "apache-2.0",
+        "spdx": "Apache-2.0",
+        "state": "approved"
+      },
+      "artifact": {
+        "format": "safetensors",
+        "manifest_digest": "sha256:ba515c434f3f0a9ffb95421a43e6a0c033549a9126ca373d83108ccafa5e4da1",
+        "model_card_digest": "sha256:c2dcbaae38efded416b389bf6037676a9f140f7112e5a0f36bbfdc43a92ea622",
+        "file_count": 3,
+        "size_bytes": 1000203
+      },
+      "publisher_priors": [
+        {
+          "source": "model card table 1 at revision c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+          "evidence_state": "unmeasured",
+          "columns": ["Benchmark", "Qwen/Qwen3.8-27B", "RedHatAI NVFP4", "Recovery"],
+          "rows": [
+            ["GSM8K Platinum", "97.10", "96.72", "99.6%"]
+          ]
+        }
+      ],
+      "review": {
+        "state": "pending",
+        "reasons": [
+          "new publisher RedHatAI requires review",
+          "new format quantized_checkpoint llm-compressor/mixed-nvfp4-fp8 for RedHatAI requires review"
+        ]
+      },
+      "eligibility": {
+        "state": "catalog_only",
+        "blockers": ["review pending", "target hardware is not reviewed", "no reviewed runtime"]
+      },
+      "source_url": "https://huggingface.co/RedHatAI/Qwen3.8-27B-NVFP4",
+      "limitations": [
+        "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
+        "No license file at the pinned revision; the license comes from the model card metadata."
+      ]
+    }
+  ]
+}

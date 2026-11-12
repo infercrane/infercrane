@@ -1,0 +1,11 @@
+{
+ "id": "Qwen/Qwen3.8-27B",
+ "sha": "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0",
+ "lastModified": "2026-09-01T00:00:00.000Z",
+ "private": false,
+ "disabled": false,
+ "gated": false,
+ "cardData": {
+  "license": "apache-2.0"
+ }
+}

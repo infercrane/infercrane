@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/enginetelemetry"
 	"github.com/infercrane/infercrane/internal/external"
 	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/overflow"
@@ -620,6 +621,56 @@ func routeWorkerAPIKey(deployment domain.Deployment, targets []domain.Target, fa
 		return ""
 	}
 	return derive(deployment.TenantID, deployment.ID, version)
+}
+
+// EngineMetricTargets lists healthy self-hosted replicas of running
+// deployments together with the credential their route already presents.
+// External and direct provider targets are excluded: their URLs are provider
+// APIs rather than engine servers. A tenant compute replica without a derivable
+// worker credential is skipped, matching the health-probe rule that never
+// downgrades it to an unauthenticated request.
+func (r *Reconciler) EngineMetricTargets(ctx context.Context) ([]enginetelemetry.Target, error) {
+	deployments, err := r.Store.Deployments(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var targets []enginetelemetry.Target
+	var failures []error
+	for _, d := range deployments {
+		if d.DesiredState != "running" || (d.ObservedState != "healthy" && d.ObservedState != "degraded") {
+			continue
+		}
+		resolved, err := r.Store.ResolveForTenant(ctx, d.TenantID, d.Name)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			failures = append(failures, fmt.Errorf("resolve deployment %s/%s: %w", d.TenantID, d.Name, err))
+			continue
+		}
+		for _, target := range resolved.Targets {
+			if target.Health != "healthy" {
+				continue
+			}
+			if r.ExternalFallback != nil && r.ExternalFallback.Owns(target.Provider) {
+				continue
+			}
+			if _, direct := r.DirectTargets[target.Provider]; direct {
+				continue
+			}
+			credential := routeWorkerAPIKey(d, []domain.Target{target}, r.RouterAPIKey, r.WorkerCredential)
+			if credential == "" && d.ComputeConnectionID != "" {
+				continue
+			}
+			targets = append(targets, enginetelemetry.Target{
+				TenantID: d.TenantID, DeploymentID: d.ID, RevisionID: d.ActiveRevisionID,
+				TargetID: target.ID, URL: target.URL, Credential: credential,
+			})
+		}
+	}
+	// One unresolvable deployment must not hide the others' telemetry; the
+	// caller receives both the usable targets and the joined failures.
+	return targets, errors.Join(failures...)
 }
 
 type credentialRuntimeInspector interface {

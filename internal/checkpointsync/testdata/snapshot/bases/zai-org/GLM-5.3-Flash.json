@@ -1,0 +1,11 @@
+{
+ "id": "zai-org/GLM-5.3-Flash",
+ "sha": "3f1971b7b5f7a528c9c4ef6212c8785298a8c24a",
+ "lastModified": "2026-09-01T00:00:00.000Z",
+ "private": false,
+ "disabled": false,
+ "gated": false,
+ "cardData": {
+  "license": "mit"
+ }
+}

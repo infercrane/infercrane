@@ -1,0 +1,9 @@
+{
+ "quantization_config": {
+  "quant_method": "fp8",
+  "weight_block_size": [
+   128,
+   128
+  ]
+ }
+}

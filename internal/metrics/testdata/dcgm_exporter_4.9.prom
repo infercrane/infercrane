@@ -1,0 +1,56 @@
+# HELP DCGM_FI_DEV_GPU_TEMP_CELSIUS GPU temperature (in C).
+# TYPE DCGM_FI_DEV_GPU_TEMP_CELSIUS gauge
+DCGM_FI_DEV_GPU_TEMP_CELSIUS{gpu="0",UUID="GPU-0d2f7a8e",pci_bus_id="00000000:18:00.0",device="nvidia0",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",namespace="serving",pod="coder-0"} 64
+DCGM_FI_DEV_GPU_TEMP_CELSIUS{gpu="1",UUID="GPU-71c9b3d4",pci_bus_id="00000000:2A:00.0",device="nvidia1",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",namespace="serving",pod="coder-0"} 67
+DCGM_FI_DEV_GPU_TEMP_CELSIUS{gpu="2",UUID="GPU-a83e11f0",pci_bus_id="00000000:3A:00.0",device="nvidia2",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",namespace="serving",pod="other-0"} 40
+# HELP DCGM_FI_DEV_BOARD_POWER_WATTS Power draw (in W).
+# TYPE DCGM_FI_DEV_BOARD_POWER_WATTS gauge
+DCGM_FI_DEV_BOARD_POWER_WATTS{gpu="0",UUID="GPU-0d2f7a8e",pci_bus_id="00000000:18:00.0",device="nvidia0",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",namespace="serving",pod="coder-0"} 512.25
+DCGM_FI_DEV_BOARD_POWER_WATTS{gpu="1",UUID="GPU-71c9b3d4",pci_bus_id="00000000:2A:00.0",device="nvidia1",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",namespace="serving",pod="coder-0"} 498.75
+# HELP DCGM_FI_DEV_GPU_UTIL_RATIO GPU utilization as a ratio.
+# TYPE DCGM_FI_DEV_GPU_UTIL_RATIO gauge
+DCGM_FI_DEV_GPU_UTIL_RATIO{gpu="0",UUID="GPU-0d2f7a8e",pci_bus_id="00000000:18:00.0",device="nvidia0",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",namespace="serving",pod="coder-0"} 1
+DCGM_FI_DEV_GPU_UTIL_RATIO{gpu="1",UUID="GPU-71c9b3d4",pci_bus_id="00000000:2A:00.0",device="nvidia1",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",namespace="serving",pod="coder-0"} 0.98
+# HELP DCGM_FI_DEV_FB_USED_BYTES Used framebuffer memory in bytes.
+# TYPE DCGM_FI_DEV_FB_USED_BYTES gauge
+DCGM_FI_DEV_FB_USED_BYTES{gpu="0",UUID="GPU-0d2f7a8e",pci_bus_id="00000000:18:00.0",device="nvidia0",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",namespace="serving",pod="coder-0"} 76235669504
+DCGM_FI_DEV_FB_USED_BYTES{gpu="1",UUID="GPU-71c9b3d4",pci_bus_id="00000000:2A:00.0",device="nvidia1",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",namespace="serving",pod="coder-0"} 76235669504
+# HELP DCGM_FI_PROF_GR_ENGINE_UTIL_RATIO Ratio of time the graphics engine is active.
+# TYPE DCGM_FI_PROF_GR_ENGINE_UTIL_RATIO gauge
+DCGM_FI_PROF_GR_ENGINE_UTIL_RATIO{gpu="0",UUID="GPU-0d2f7a8e",pci_bus_id="00000000:18:00.0",device="nvidia0",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",namespace="serving",pod="coder-0"} 0.97
+DCGM_FI_PROF_GR_ENGINE_UTIL_RATIO{gpu="1",UUID="GPU-71c9b3d4",pci_bus_id="00000000:2A:00.0",device="nvidia1",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",namespace="serving",pod="coder-0"} 0.95
+# HELP DCGM_FI_PROF_SM_UTIL_RATIO The ratio of cycles an SM has at least 1 warp assigned.
+# TYPE DCGM_FI_PROF_SM_UTIL_RATIO gauge
+DCGM_FI_PROF_SM_UTIL_RATIO{gpu="0",UUID="GPU-0d2f7a8e",pci_bus_id="00000000:18:00.0",device="nvidia0",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",namespace="serving",pod="coder-0"} 0.91
+DCGM_FI_PROF_SM_UTIL_RATIO{gpu="1",UUID="GPU-71c9b3d4",pci_bus_id="00000000:2A:00.0",device="nvidia1",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",namespace="serving",pod="coder-0"} 0.89
+# HELP DCGM_FI_PROF_SM_OCCUPANCY_RATIO The ratio of number of warps resident on an SM.
+# TYPE DCGM_FI_PROF_SM_OCCUPANCY_RATIO gauge
+DCGM_FI_PROF_SM_OCCUPANCY_RATIO{gpu="0",UUID="GPU-0d2f7a8e",pci_bus_id="00000000:18:00.0",device="nvidia0",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",namespace="serving",pod="coder-0"} 0.22
+DCGM_FI_PROF_SM_OCCUPANCY_RATIO{gpu="1",UUID="GPU-71c9b3d4",pci_bus_id="00000000:2A:00.0",device="nvidia1",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",namespace="serving",pod="coder-0"} 0.18
+# HELP DCGM_FI_PROF_TENSOR_UTIL_RATIO Ratio of cycles the tensor (HMMA) pipe is active.
+# TYPE DCGM_FI_PROF_TENSOR_UTIL_RATIO gauge
+DCGM_FI_PROF_TENSOR_UTIL_RATIO{gpu="0",UUID="GPU-0d2f7a8e",pci_bus_id="00000000:18:00.0",device="nvidia0",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",namespace="serving",pod="coder-0"} 0.12
+DCGM_FI_PROF_TENSOR_UTIL_RATIO{gpu="1",UUID="GPU-71c9b3d4",pci_bus_id="00000000:2A:00.0",device="nvidia1",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",namespace="serving",pod="coder-0"} 0.14
+# HELP DCGM_FI_PROF_DRAM_UTIL_RATIO Ratio of cycles the device memory interface is active sending or receiving data.
+# TYPE DCGM_FI_PROF_DRAM_UTIL_RATIO gauge
+DCGM_FI_PROF_DRAM_UTIL_RATIO{gpu="0",UUID="GPU-0d2f7a8e",pci_bus_id="00000000:18:00.0",device="nvidia0",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",namespace="serving",pod="coder-0"} 0.71
+DCGM_FI_PROF_DRAM_UTIL_RATIO{gpu="1",UUID="GPU-71c9b3d4",pci_bus_id="00000000:2A:00.0",device="nvidia1",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",namespace="serving",pod="coder-0"} 0.69
+# HELP DCGM_FI_PROF_PCIE_TX_BYTES The rate of data transmitted over the PCIe bus - including both protocol headers and data payloads - in bytes per second.
+# TYPE DCGM_FI_PROF_PCIE_TX_BYTES gauge
+DCGM_FI_PROF_PCIE_TX_BYTES{gpu="0",UUID="GPU-0d2f7a8e",pci_bus_id="00000000:18:00.0",device="nvidia0",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",namespace="serving",pod="coder-0"} 1200000000
+DCGM_FI_PROF_PCIE_TX_BYTES{gpu="1",UUID="GPU-71c9b3d4",pci_bus_id="00000000:2A:00.0",device="nvidia1",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",namespace="serving",pod="coder-0"} 900000000
+# HELP DCGM_FI_PROF_PCIE_RX_BYTES The rate of data received over the PCIe bus - including both protocol headers and data payloads - in bytes per second.
+# TYPE DCGM_FI_PROF_PCIE_RX_BYTES gauge
+DCGM_FI_PROF_PCIE_RX_BYTES{gpu="0",UUID="GPU-0d2f7a8e",pci_bus_id="00000000:18:00.0",device="nvidia0",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",namespace="serving",pod="coder-0"} 3200000000
+DCGM_FI_PROF_PCIE_RX_BYTES{gpu="1",UUID="GPU-71c9b3d4",pci_bus_id="00000000:2A:00.0",device="nvidia1",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",namespace="serving",pod="coder-0"} 2800000000
+# HELP DCGM_FI_PROF_NVLINK_TX_BYTES The rate of data transmitted over NVLink in bytes per second.
+# TYPE DCGM_FI_PROF_NVLINK_TX_BYTES gauge
+DCGM_FI_PROF_NVLINK_TX_BYTES{gpu="0",UUID="GPU-0d2f7a8e",pci_bus_id="00000000:18:00.0",device="nvidia0",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",namespace="serving",pod="coder-0"} 315000000000
+DCGM_FI_PROF_NVLINK_TX_BYTES{gpu="1",UUID="GPU-71c9b3d4",pci_bus_id="00000000:2A:00.0",device="nvidia1",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",namespace="serving",pod="coder-0"} 300000000000
+# HELP DCGM_FI_PROF_NVLINK_RX_BYTES The rate of data received over NVLink in bytes per second.
+# TYPE DCGM_FI_PROF_NVLINK_RX_BYTES gauge
+DCGM_FI_PROF_NVLINK_RX_BYTES{gpu="0",UUID="GPU-0d2f7a8e",pci_bus_id="00000000:18:00.0",device="nvidia0",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",namespace="serving",pod="coder-0"} 299000000000
+DCGM_FI_PROF_NVLINK_RX_BYTES{gpu="1",UUID="GPU-71c9b3d4",pci_bus_id="00000000:2A:00.0",device="nvidia1",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",namespace="serving",pod="coder-0"} 312000000000
+# HELP DCGM_FI_DEV_XID_ERROR Value of the last XID error encountered.
+# TYPE DCGM_FI_DEV_XID_ERROR gauge
+DCGM_FI_DEV_XID_ERROR{gpu="0",UUID="GPU-0d2f7a8e",pci_bus_id="00000000:18:00.0",device="nvidia0",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",namespace="serving",pod="coder-0"} 0
