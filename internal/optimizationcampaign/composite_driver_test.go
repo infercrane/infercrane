@@ -231,6 +231,45 @@ func TestCompositeDriverNeverGuardsNewEndpointAndPreservesGuardDecision(t *testi
 	}
 }
 
+func TestGuardResultMapsPersistedReleaseGuardDecisions(t *testing.T) {
+	for _, test := range []struct {
+		decision string
+		want     string
+		waiting  bool
+	}{
+		{decision: "ACCEPT", want: "PASS"},
+		{decision: " accept ", want: "PASS"},
+		{decision: "REJECT", want: "REJECT"},
+		{decision: "INCONCLUSIVE", want: "INCONCLUSIVE"},
+		{decision: "WAIT", waiting: true},
+		{decision: "NEW_UPSTREAM_ENUM", want: "INCONCLUSIVE"},
+		{decision: "", want: "INCONCLUSIVE"},
+	} {
+		result, err := guardResult(domain.ReleaseGuardEvaluation{ID: "guard-1", Decision: test.decision})
+		if test.waiting {
+			if err == nil {
+				t.Fatalf("decision %q must keep the candidate waiting for fresh evidence", test.decision)
+			}
+			continue
+		}
+		if err != nil || result.Decision != test.want || result.EvaluationID != "guard-1" {
+			t.Fatalf("decision %q mapped to %+v err=%v, want %s", test.decision, result, err, test.want)
+		}
+	}
+}
+
+func TestCompositeDriverPassesCandidateWhenReleaseGuardAccepts(t *testing.T) {
+	now := time.Now().UTC()
+	store, candidate := compositeFixture(t, IntentEvolveEndpoint, now)
+	store.campaign.TargetDeployment = "production"
+	candidate.DeploymentName, candidate.RevisionID = "production", "revision-1"
+	store.guard = domain.ReleaseGuardEvaluation{ID: "guard-accept", CandidateRevisionID: candidate.RevisionID, Decision: "ACCEPT", CreatedAt: now.Add(time.Second)}
+	result, err := CompositeDriver{Store: store}.Guard(t.Context(), candidate.ID, candidate)
+	if err != nil || result.EvaluationID != "guard-accept" || result.Decision != "PASS" {
+		t.Fatalf("an accepting Release Guard evaluation did not pass the candidate: %+v err=%v", result, err)
+	}
+}
+
 func TestCandidateProvisioningPreservesTenantComputeConnection(t *testing.T) {
 	draft := optimizer.DeploymentDraft{Name: "qwen", ComputeConnectionID: "connection-1"}
 	draft.Model.ID = "Qwen/Qwen3-8B"

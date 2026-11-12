@@ -4229,7 +4229,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	}
 	manualPrices := map[pricing.Request]pricing.Estimate{}
 	for _, row := range cfg.OptimizationPrices {
-		manualPrices[pricing.Request{Cloud: row.Cloud, Region: provideridentity.PriceRegion(row.Cloud, row.Region), GPU: provideridentity.GPUTypeID(row.Cloud, row.GPU), GPUCount: row.GPUCount, Replicas: row.Replicas}] = pricing.Estimate{Currency: row.Currency, Source: row.Source, Hourly: row.HourlyUSD, CostScope: pricing.CostScopeUnknown, Authority: pricing.PriceAuthorityUnknown, ObservedAt: row.ObservedAt, StaleAfter: row.ValidUntil.Sub(row.ObservedAt)}
+		manualPrices[pricing.Request{Cloud: row.Cloud, Region: provideridentity.PriceRegion(row.Cloud, row.Region), GPU: provideridentity.GPUTypeID(row.Cloud, row.GPU), GPUCount: row.GPUCount, Replicas: row.Replicas}] = optimizationPriceEstimate(row)
 	}
 	priceCatalog := pricing.NewDynamicCatalog(manualPrices)
 	if cfg.GPUPriceSyncInterval > 0 {
@@ -4990,4 +4990,19 @@ func purgeRequests(ctx context.Context, s *store.Store, retention time.Duration,
 		case <-ticker.C:
 		}
 	}
+}
+
+// optimizationPriceEstimate converts one operator price row. Rows stay advisory
+// (unknown authority and scope) unless config accepted an owned-cluster rate
+// card, whose validity window is then the guaranteed rate window.
+func optimizationPriceEstimate(row config.OptimizationPrice) pricing.Estimate {
+	estimate := pricing.Estimate{Currency: row.Currency, Source: row.Source, Hourly: row.HourlyUSD, CostScope: pricing.CostScopeUnknown, Authority: pricing.PriceAuthorityUnknown, ObservedAt: row.ObservedAt, StaleAfter: row.ValidUntil.Sub(row.ObservedAt)}
+	if row.CostScope != "" {
+		estimate.CostScope = row.CostScope
+	}
+	if row.Authority == pricing.PriceAuthorityAccountContract && row.CostScope == pricing.CostScopeInstanceTotal {
+		estimate.Authority = pricing.PriceAuthorityAccountContract
+		estimate.GuaranteedUntil = row.ValidUntil
+	}
+	return estimate
 }

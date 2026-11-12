@@ -211,6 +211,11 @@ func (d CompositeDriver) Guard(ctx context.Context, candidateID string, candidat
 
 func guardResult(evaluation domain.ReleaseGuardEvaluation) (GuardResult, error) {
 	decision := strings.ToUpper(strings.TrimSpace(evaluation.Decision))
+	// Release Guard persists ACCEPT, REJECT, or WAIT (releaseguard.Result). ACCEPT is
+	// the campaign's PASS; reading it as unknown left every guarded campaign inconclusive.
+	if decision == "ACCEPT" {
+		decision = "PASS"
+	}
 	if decision == "WAIT" {
 		return GuardResult{}, operations.Retryable("optimization_release_guard_waiting", errors.New("Release Guard requires more fresh comparable evidence"))
 	}
