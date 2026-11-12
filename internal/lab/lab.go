@@ -11,7 +11,7 @@ import (
 	"github.com/infercrane/infercrane/internal/domain"
 )
 
-const AlgorithmVersion = "inference-lab-v3"
+const AlgorithmVersion = "inference-lab-v4"
 
 const (
 	ObjectiveLatency        = "latency"
@@ -260,18 +260,33 @@ func profileJSON(value string) string {
 	return workload.Profile
 }
 
+// nonWorkloadKeys are the workload-evidence keys that never describe the load
+// that was sent. "confidence_95" holds per-run Student-t intervals and
+// "measured" holds campaign control, noise-floor, and server-metric results.
+// Keeping either in the digest gave every repeated benchmark a unique identity,
+// which excluded the most rigorous evidence from ranking.
+var nonWorkloadKeys = []string{"revision_selector", "direct_revision_validation", "confidence_95", "measured"}
+
+// WorkloadDigest returns the comparability identity Lab uses for one stored
+// workload document. Callers that pre-check comparability must use it rather
+// than hashing the raw document.
+func WorkloadDigest(value string) string { return digestJSON(value) }
+
 func digestJSON(value string) string {
 	var raw any
 	if json.Unmarshal([]byte(value), &raw) != nil {
 		return ""
 	}
-	// Target selection is execution provenance, not workload shape. Active and
-	// candidate runs remain comparable when every actual load input matches.
-	// Preserve all other present and future fields so a new workload dimension
-	// cannot silently create a false comparison.
+	// Target selection is execution provenance, not workload shape, and the
+	// measured outputs that benchmark writers keep beside the load inputs are
+	// results, not inputs. Active and candidate runs remain comparable when
+	// every actual load input matches. Preserve all other present and future
+	// fields so a new workload dimension cannot silently create a false
+	// comparison.
 	if object, ok := raw.(map[string]any); ok {
-		delete(object, "revision_selector")
-		delete(object, "direct_revision_validation")
+		for _, key := range nonWorkloadKeys {
+			delete(object, key)
+		}
 	}
 	canonical, _ := json.Marshal(raw)
 	sum := sha256.Sum256(canonical)
