@@ -13,14 +13,18 @@ import (
 )
 
 type benchmarkStoreFixture struct {
-	resolved  domain.ResolvedDeployment
-	revisions []domain.DeploymentRevision
-	replicas  []domain.Replica
-	artifact  domain.ModelArtifact
-	recorded  domain.BenchmarkResult
+	resolved   domain.ResolvedDeployment
+	revisions  []domain.DeploymentRevision
+	replicas   []domain.Replica
+	artifact   domain.ModelArtifact
+	recorded   domain.BenchmarkResult
+	resolveErr map[string]error
 }
 
-func (f *benchmarkStoreFixture) ResolveForTenant(context.Context, string, string) (domain.ResolvedDeployment, error) {
+func (f *benchmarkStoreFixture) ResolveForTenant(_ context.Context, _ string, name string) (domain.ResolvedDeployment, error) {
+	if err := f.resolveErr[name]; err != nil {
+		return domain.ResolvedDeployment{}, err
+	}
 	return f.resolved, nil
 }
 func (f *benchmarkStoreFixture) Revisions(context.Context, string, string) ([]domain.DeploymentRevision, error) {

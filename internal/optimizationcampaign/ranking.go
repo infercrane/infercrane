@@ -17,13 +17,23 @@ const (
 	RankInconclusive = "INCONCLUSIVE"
 )
 
+// RankingAlgorithmVersion is appended to the Lab algorithm version on every
+// persisted campaign ranking. It names the control and noise-floor gate.
+const RankingAlgorithmVersion = "campaign-control-noise-floor-v1"
+
+// FailureNoMeasurableDifference marks a candidate whose objective result is
+// inside the measurement noise of the campaign control. It is reported as no
+// measurable difference, never as a win.
+const FailureNoMeasurableDifference = "measured_no_measurable_difference"
+
 // MeasuredRanking is a deterministic, side-effect-free ranking result. The
 // caller persists Evaluation before allowing the coordinator to cross the
-// ranking boundary.
+// ranking boundary. FailureCodes overrides the default code for a decision.
 type MeasuredRanking struct {
-	Evaluation domain.LabEvaluation
-	Decisions  map[string]string
-	Reasons    map[string]string
+	Evaluation   domain.LabEvaluation
+	Decisions    map[string]string
+	Reasons      map[string]string
+	FailureCodes map[string]string
 }
 
 // RankMeasuredCampaign composes the existing exact-workload Inference Lab
@@ -126,6 +136,11 @@ func RankMeasuredCampaign(campaign domain.OptimizationCampaign, benchmarks []dom
 			reasons[candidateID] = row.ConstraintReasons[0]
 		}
 	}
+	gate := applyControlGate(campaign, proposal.Input.Objective, rows, evidenceToCandidate, byBenchmark, selectedCandidate)
+	selectedCandidate = gate.selected
+	for candidateID, reason := range gate.reasons {
+		reasons[candidateID] = reason
+	}
 	for _, candidate := range campaign.Candidates {
 		if (candidate.State == CandidateRejected || candidate.State == CandidateInconclusive || candidate.State == CandidateCleaned) && candidate.LabEvaluationID == "" {
 			continue
@@ -133,7 +148,9 @@ func RankMeasuredCampaign(campaign domain.OptimizationCampaign, benchmarks []dom
 		switch {
 		case selectedCandidate != "" && candidate.ID == selectedCandidate:
 			decisions[candidate.ID] = RankSelect
-			reasons[candidate.ID] = "best measured exact-workload candidate satisfying the requested objective and constraints"
+			if gate.reasons[candidate.ID] == "" {
+				reasons[candidate.ID] = "best measured exact-workload candidate satisfying the requested objective and constraints"
+			}
 		case selectedCandidate != "":
 			decisions[candidate.ID] = RankSupersede
 			if reasons[candidate.ID] == "" {
@@ -151,5 +168,9 @@ func RankMeasuredCampaign(campaign domain.OptimizationCampaign, benchmarks []dom
 			}
 		}
 	}
-	return MeasuredRanking{Evaluation: evaluation, Decisions: decisions, Reasons: reasons}, nil
+	annotated, err := annotateEvaluation(evaluation, rows, evidenceToCandidate, gate, decisions, reasons)
+	if err != nil {
+		return MeasuredRanking{}, err
+	}
+	return MeasuredRanking{Evaluation: annotated, Decisions: decisions, Reasons: reasons, FailureCodes: gate.codes}, nil
 }
