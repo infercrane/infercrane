@@ -4735,7 +4735,7 @@ func (a API) recipes(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	rows, err := store.ModelRecipes(r.Context(), principal.TenantID, r.URL.Query().Get("query"), limit)
 	if err != nil {
-		writeError(w, 500, "internal", "recipe search failed")
+		writeError(w, 500, "internal", "could not list recipes")
 		return
 	}
 	data := make([]map[string]any, 0, len(rows))

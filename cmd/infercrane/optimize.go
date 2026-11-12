@@ -81,9 +81,9 @@ func optimizeCommand(ctx context.Context, args []string) error {
 	workloadFingerprint := fs.String("workload-fingerprint", "", "content-free observed workload fingerprint")
 	sourceName := fs.String("source", "auto", "candidate source: auto, catalog, or aiconfigurator")
 	python := fs.String("aiconfigurator-python", "python3", "Python executable containing aiconfigurator 0.11.0")
-	allowMetadataNetwork := fs.Bool("allow-model-metadata-network", false, "allow fetching public model metadata for the estimator or recipe search")
-	search := fs.String("search", "", "add bounded experiments; supported value: recipes")
-	modelConfig := fs.String("model-config", "", "pinned model config.json used to detect recipe search preconditions")
+	allowMetadataNetwork := fs.Bool("allow-model-metadata-network", false, "allow reading public model metadata from Hugging Face for estimates and --search recipes")
+	search := fs.String("search", "", "find the best setup for your model by adding setups to measure; supported value: recipes")
+	modelConfig := fs.String("model-config", "", "local copy of the pinned config.json, so --search recipes works offline")
 	writeDir := fs.String("write-dir", "", "write candidate DeploymentSpecs into a new or empty directory")
 	idempotencyKey := fs.String("idempotency-key", "", "stable safe-retry key for campaign creation")
 	targetDeployment := fs.String("target-deployment", "", "existing deployment to evolve; omit when qualifying a new endpoint")
@@ -629,7 +629,7 @@ func optimizationProposal(ctx context.Context, request optimizer.Request, catalo
 		return optimizer.Proposal{}, errors.New("source must be auto, catalog, or aiconfigurator")
 	}
 	if request.Search != "" && sourceName == "aiconfigurator" {
-		return optimizer.Proposal{}, errors.New("recipe search uses the catalog source and cannot be combined with --source aiconfigurator")
+		return optimizer.Proposal{}, errors.New("--search recipes cannot be combined with --source aiconfigurator; use --source auto or catalog")
 	}
 	if sourceName == "catalog" || request.Search != "" {
 		return catalog.Propose(ctx, request)

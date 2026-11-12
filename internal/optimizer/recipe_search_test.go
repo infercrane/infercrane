@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -152,7 +153,7 @@ func TestRecipeSearchSkipsSpeculationWithoutDeclaredModelFeature(t *testing.T) {
 			t.Fatalf("speculative arm generated without evidence: %v", arm)
 		}
 	}
-	if !strings.Contains(strings.Join(proposal.Warnings, " "), "Speculative-decoding arms were skipped") {
+	if !strings.Contains(strings.Join(proposal.Warnings, " "), "Speculative-decoding setups were skipped") {
 		t.Fatalf("skip was not explained: %v", proposal.Warnings)
 	}
 }
@@ -181,7 +182,7 @@ func TestRecipeSearchFailsClosedOutsideItsReviewedBoundary(t *testing.T) {
 	request := recipeRequest()
 	request.GPU = "L40S"
 	unsupported, err := catalogSource(t).Propose(context.Background(), request)
-	if err != nil || len(armIDs(unsupported.Candidates)) != 0 || !strings.Contains(strings.Join(unsupported.Warnings, " "), "no reviewed") {
+	if err != nil || len(armIDs(unsupported.Candidates)) != 0 || !strings.Contains(strings.Join(unsupported.Warnings, " "), "No reviewed") {
 		t.Fatalf("unsupported GPU: %+v err=%v", unsupported, err)
 	}
 	request = recipeRequest()
@@ -357,6 +358,38 @@ func TestEveryArmNamesAnExercisedReceiptCandidate(t *testing.T) {
 		for _, arm := range template.arms {
 			if _, ok := exercised[arm.exercisedBy]; !ok {
 				t.Fatalf("arm %s names an unrecorded candidate %s", arm.id, arm.exercisedBy)
+			}
+		}
+	}
+}
+
+// Proposal text reaches customers through the CLI, the API, and the dashboard,
+// so it describes setups and outcomes, never the internal method names.
+func TestRecipeSearchCustomerTextOmitsInternalMethodNames(t *testing.T) {
+	unsupported := recipeRequest()
+	unsupported.GPU = "L40S"
+	unqualified := recipeRequest()
+	unqualified.Provider, unqualified.Region = "aws", "eu-central-1"
+	excluded := recipeRequest()
+	excluded.Runtimes = []string{"vllm"}
+	unpinned := recipeRequest()
+	unpinned.ModelRevision = ""
+	undeclared := recipeRequest()
+	undeclared.ModelFeatures, undeclared.ModelConfigDigest = nil, ""
+	internal := regexp.MustCompile(`(?i)recipe search|search control|\barms?\b`)
+	for name, request := range map[string]Request{"measured": recipeRequest(), "unsupported": unsupported, "unqualified": unqualified, "excluded": excluded, "unpinned": unpinned, "undeclared": undeclared} {
+		proposal, err := catalogSource(t).Propose(context.Background(), request)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		text := append([]string{}, proposal.Warnings...)
+		for _, candidate := range proposal.Candidates {
+			text = append(text, candidate.RequiredEvidence...)
+			text = append(text, candidate.Limitations...)
+		}
+		for _, line := range text {
+			if internal.MatchString(line) {
+				t.Errorf("%s proposal shows internal method wording: %q", name, line)
 			}
 		}
 	}
