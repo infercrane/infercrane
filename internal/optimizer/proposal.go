@@ -15,12 +15,13 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 
+	"github.com/infercrane/infercrane/internal/checkpointcatalog"
 	"github.com/infercrane/infercrane/internal/curatedrecipe"
 	"github.com/infercrane/infercrane/internal/integration"
-	"github.com/infercrane/infercrane/internal/modeloptcatalog"
 	"github.com/infercrane/infercrane/internal/optimizationcapability"
 	"github.com/infercrane/infercrane/internal/performanceprofile"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
@@ -301,11 +302,13 @@ func ValidateProposal(proposal Proposal) error {
 type CatalogSource struct {
 	Recipes      []curatedrecipe.Entry
 	Integrations integration.Snapshot
-	ModelOpt     modeloptcatalog.Catalog
+	// Checkpoints is the reviewed, committed publisher checkpoint catalog. It
+	// is read from the binary; proposals never fetch upstream data.
+	Checkpoints checkpointcatalog.Catalog
 }
 
 func NewCatalogSource(recipes []curatedrecipe.Entry, integrations integration.Snapshot) CatalogSource {
-	return CatalogSource{Recipes: append([]curatedrecipe.Entry(nil), recipes...), Integrations: integrations, ModelOpt: modeloptcatalog.MustDefault()}
+	return CatalogSource{Recipes: append([]curatedrecipe.Entry(nil), recipes...), Integrations: integrations, Checkpoints: checkpointcatalog.MustDefault()}
 }
 
 func (s CatalogSource) Propose(_ context.Context, request Request) (Proposal, error) {
@@ -364,7 +367,7 @@ func (s CatalogSource) proposeReviewed(proposal Proposal) (Proposal, error) {
 			proposal.Candidates = append(proposal.Candidates, candidate)
 		}
 	}
-	proposal.Candidates, err = s.expandModelOptCandidates(proposal.Candidates, request)
+	proposal.Candidates, err = s.expandCheckpointCandidates(proposal.Candidates, request)
 	if err != nil {
 		return Proposal{}, err
 	}
@@ -396,8 +399,10 @@ func (s CatalogSource) proposeReviewed(proposal Proposal) (Proposal, error) {
 }
 
 func configurationProfileRank(name, preferred string) int {
-	if index := strings.Index(name, "-modelopt-"); index > 0 {
-		name = name[:index]
+	for _, tool := range checkpointcatalog.QuantizationTools() {
+		if index := strings.Index(name, "-"+tool+"-"); index > 0 {
+			name = name[:index]
+		}
 	}
 	if name == preferred || strings.HasSuffix(name, "-"+preferred) {
 		return 0
@@ -617,7 +622,7 @@ func (s CatalogSource) proposeGeneric(proposal Proposal) (Proposal, error) {
 		proposal.Candidates = append(proposal.Candidates, candidate)
 	}
 	var err error
-	proposal.Candidates, err = s.expandModelOptCandidates(proposal.Candidates, request)
+	proposal.Candidates, err = s.expandCheckpointCandidates(proposal.Candidates, request)
 	if err != nil {
 		return Proposal{}, err
 	}
@@ -662,11 +667,9 @@ func attachStartingPoint(proposal *Proposal) {
 	proposal.PostDeployWorkflow = []string{firstStep, "assess serving-stage bottlenecks", "profile the exact runtime and target GPU", "search existing implementations before custom code", "qualify candidates with workload, quality, cost, and Release Guard evidence"}
 }
 
-func (s CatalogSource) expandModelOptCandidates(baselines []Candidate, request Request) ([]Candidate, error) {
-	if len(s.ModelOpt.Seeds) == 0 || len(baselines) == 0 {
-		if len(s.ModelOpt.Seeds) == 0 {
-			return baselines, nil
-		}
+func (s CatalogSource) expandCheckpointCandidates(baselines []Candidate, request Request) ([]Candidate, error) {
+	if len(s.Checkpoints.Candidates()) == 0 {
+		return baselines, nil
 	}
 	out := append([]Candidate(nil), baselines...)
 	seen := map[string]struct{}{}
@@ -674,9 +677,9 @@ func (s CatalogSource) expandModelOptCandidates(baselines []Candidate, request R
 		seen[candidate.ID] = struct{}{}
 	}
 	for _, baseline := range baselines {
-		matches := s.ModelOpt.Match(baseline.Deployment.Model.ID, baseline.Deployment.Model.Revision, baseline.Deployment.Runtime.Engine, request.GPU)
-		for _, seed := range matches {
-			derived, err := modelOptCandidate(baseline, seed, request)
+		matches := s.Checkpoints.Match(baseline.Deployment.Model.ID, baseline.Deployment.Model.Revision, baseline.Deployment.Runtime.Engine, baseline.Deployment.Runtime.Version, request.GPU)
+		for _, entry := range matches {
+			derived, err := checkpointCandidate(baseline, entry, s.Checkpoints.PublisherName(entry.Publisher), request)
 			if err != nil {
 				return nil, err
 			}
@@ -700,12 +703,12 @@ func (s CatalogSource) expandModelOptCandidates(baselines []Candidate, request R
 		if compatible.Runtime != "vllm" && compatible.Runtime != "sglang" {
 			continue
 		}
-		matches := s.ModelOpt.Match(model, revision, compatible.Runtime, request.GPU)
-		if len(matches) == 0 {
-			continue
-		}
 		version := runtimeVersion(s.Integrations.Runtimes, compatible.Runtime)
 		if version == "" {
+			continue
+		}
+		matches := s.Checkpoints.Match(model, revision, compatible.Runtime, version, request.GPU)
+		if len(matches) == 0 {
 			continue
 		}
 		baseline := buildGenericCandidate(model, revision, compatible, version, request)
@@ -713,8 +716,8 @@ func (s CatalogSource) expandModelOptCandidates(baselines []Candidate, request R
 			out = append(out, baseline)
 			seen[baseline.ID] = struct{}{}
 		}
-		for _, seed := range matches {
-			derived, err := modelOptCandidate(baseline, seed, request)
+		for _, entry := range matches {
+			derived, err := checkpointCandidate(baseline, entry, s.Checkpoints.PublisherName(entry.Publisher), request)
 			if err != nil {
 				return nil, err
 			}
@@ -727,7 +730,9 @@ func (s CatalogSource) expandModelOptCandidates(baselines []Candidate, request R
 	return out, nil
 }
 
-func modelOptCandidate(baseline Candidate, seed modeloptcatalog.Seed, request Request) (Candidate, error) {
+var checkpointUpstreams = map[string]string{"modelopt": "NVIDIA/Model-Optimizer", "llm-compressor": "vllm-project/llm-compressor"}
+
+func checkpointCandidate(baseline Candidate, entry checkpointcatalog.Entry, publisher string, request Request) (Candidate, error) {
 	encoded, err := json.Marshal(baseline)
 	if err != nil {
 		return Candidate{}, err
@@ -736,16 +741,20 @@ func modelOptCandidate(baseline Candidate, seed modeloptcatalog.Seed, request Re
 	if err = json.Unmarshal(encoded, &candidate); err != nil {
 		return Candidate{}, err
 	}
+	quantization := entry.Quantization
+	if quantization == nil {
+		return Candidate{}, fmt.Errorf("checkpoint %s is not a quantized checkpoint", entry.ID)
+	}
 	artifact := ArtifactSeed{
-		CatalogID: seed.ID, Publisher: seed.Publisher, Tool: seed.Tool,
-		ToolVersion: seed.ToolVersion, Algorithm: seed.Algorithm, Format: seed.Format,
-		BaseRepository: seed.BaseRepository, BaseRevision: seed.BaseRevision,
-		LineageState: seed.LineageState, OutputRepository: seed.OutputRepository,
-		OutputRevision: seed.OutputRevision, ManifestDigest: seed.ManifestDigest,
-		ModelCardDigest: seed.ModelCardDigest, LicenseSPDX: seed.LicenseSPDX,
-		LicenseDigest:            seed.LicenseDigest,
-		AcceleratorArchitectures: append([]string(nil), seed.AcceleratorArchitectures...),
-		SourceURL:                seed.SourceURL,
+		CatalogID: entry.ID, Publisher: publisher, Tool: quantization.Tool,
+		ToolVersion: quantization.ToolVersion, Algorithm: quantization.Scheme, Format: entry.Artifact.Format,
+		BaseRepository: entry.Base.Repository, BaseRevision: entry.Base.DeclaredRevision,
+		LineageState: entry.Base.Lineage, OutputRepository: entry.Repository,
+		OutputRevision: entry.Revision, ManifestDigest: entry.Artifact.ManifestDigest,
+		ModelCardDigest: entry.Artifact.ModelCardDigest, LicenseSPDX: entry.License.SPDX,
+		LicenseDigest:            entry.License.Digest,
+		AcceleratorArchitectures: append([]string(nil), entry.Hardware.Architectures...),
+		SourceURL:                entry.SourceURL,
 	}
 	candidate.ID = ""
 	candidate.Rank = 0
@@ -753,18 +762,18 @@ func modelOptCandidate(baseline Candidate, seed modeloptcatalog.Seed, request Re
 	candidate.EvidenceState = EvidenceUnmeasured
 	candidate.ModeledEvidence = nil
 	candidate.ArtifactSeed = &artifact
-	candidate.ConfigurationProfile += "-modelopt-" + strings.ToLower(seed.Algorithm)
+	candidate.ConfigurationProfile += "-" + quantization.Tool + "-" + strings.ToLower(quantization.Scheme)
 	candidate.Source = SourceInfo{
-		Name: "nvidia-modelopt-checkpoint-catalog", Version: seed.OutputRevision,
-		EvidenceClass: "publisher-provided-unmeasured", UpstreamProject: "NVIDIA/Model-Optimizer",
+		Name: "publisher-checkpoint-catalog", Version: entry.Revision,
+		EvidenceClass: "publisher-provided-unmeasured", UpstreamProject: checkpointUpstreams[quantization.Tool],
 	}
-	candidate.Deployment.Name = safeName(candidate.Deployment.Name + "-" + seed.Algorithm)
-	candidate.Deployment.Model.ID = seed.OutputRepository
-	candidate.Deployment.Model.Revision = seed.OutputRevision
+	candidate.Deployment.Name = safeName(candidate.Deployment.Name + "-" + quantization.Scheme)
+	candidate.Deployment.Model.ID = entry.Repository
+	candidate.Deployment.Model.Revision = entry.Revision
 	candidate.Features = append(candidate.Features,
-		Feature{Name: "optimized_checkpoint", State: "publisher-provided", Source: seed.ManifestDigest},
-		Feature{Name: "quantization", State: seed.Algorithm, Source: seed.Tool + "@" + seed.ToolVersion},
-		Feature{Name: "artifact_lineage", State: seed.LineageState, Source: seed.SourceURL},
+		Feature{Name: "optimized_checkpoint", State: "publisher-provided", Source: entry.Artifact.ManifestDigest},
+		Feature{Name: "quantization", State: quantization.Scheme, Source: quantization.Tool + "@" + quantization.ToolVersion},
+		Feature{Name: "artifact_lineage", State: entry.Base.Lineage, Source: entry.SourceURL},
 	)
 	candidate.RequiredEvidence = append(candidate.RequiredEvidence,
 		"artifact manifest verification before download",
@@ -773,10 +782,10 @@ func modelOptCandidate(baseline Candidate, seed modeloptcatalog.Seed, request Re
 		"workload latency, throughput, memory, and cost comparison against the unmodified baseline",
 		"license review for the model and every builder/runtime dependency",
 	)
-	candidate.Limitations = append(candidate.Limitations, seed.Limitations...)
+	candidate.Limitations = append(candidate.Limitations, entry.Limitations...)
 	candidate.Limitations = append(candidate.Limitations,
 		"Publisher benchmark or model-card results are discovery evidence only and cannot satisfy InferCrane qualification gates.",
-		"This checkpoint is restricted to the publisher-declared accelerator architecture and must not be scheduled on Hopper.",
+		fmt.Sprintf("This checkpoint is restricted to the publisher-declared accelerator architectures (%s).", strings.Join(entry.Hardware.Architectures, ", ")),
 	)
 	identity, err := json.Marshal(struct {
 		Source     SourceInfo      `json:"source"`
@@ -794,7 +803,7 @@ func modelOptCandidate(baseline Candidate, seed modeloptcatalog.Seed, request Re
 }
 
 func validateArtifactSeed(seed ArtifactSeed) error {
-	if seed.CatalogID == "" || seed.Publisher == "" || seed.Tool != "modelopt" || seed.ToolVersion == "" || seed.Algorithm == "" || seed.BaseRepository == "" || seed.OutputRepository == "" || seed.LicenseSPDX == "" || len(seed.AcceleratorArchitectures) == 0 || !strings.HasPrefix(seed.SourceURL, "https://huggingface.co/") {
+	if seed.CatalogID == "" || seed.Publisher == "" || !slices.Contains(checkpointcatalog.QuantizationTools(), seed.Tool) || seed.ToolVersion == "" || seed.Algorithm == "" || seed.BaseRepository == "" || seed.OutputRepository == "" || seed.LicenseSPDX == "" || len(seed.AcceleratorArchitectures) == 0 || !strings.HasPrefix(seed.SourceURL, "https://huggingface.co/") {
 		return errors.New("publisher artifact candidate has incomplete provenance")
 	}
 	if seed.LineageState != "exact" && seed.LineageState != "publisher_declared" {

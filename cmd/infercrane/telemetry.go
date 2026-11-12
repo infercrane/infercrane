@@ -32,6 +32,8 @@ func telemetryCommand(ctx context.Context, cfg config.Config, args []string) err
 	source := fs.String("source", "dcgm_exporter", "evidence source")
 	utilizationUnit := fs.String("utilization-unit", "percent", "percent or ratio")
 	ttl := fs.Duration("ttl", 2*time.Minute, "evidence freshness TTL")
+	nvlinkPeak := fs.Float64("nvlink-peak-gbps", 0, "declared per-GPU, per-direction NVLink peak in GB/s")
+	pciePeak := fs.Float64("pcie-peak-gbps", 0, "declared per-GPU, per-direction PCIe peak in GB/s")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args[3:]); err != nil {
 		return err
@@ -46,12 +48,15 @@ func telemetryCommand(ctx context.Context, cfg config.Config, args []string) err
 	if err != nil {
 		return err
 	}
+	if *nvlinkPeak < 0 || *pciePeak < 0 {
+		return errors.New("--nvlink-peak-gbps and --pcie-peak-gbps must not be negative")
+	}
 	payload, err := readCollectorPayload(ctx, *collectorURL, *file)
 	if err != nil {
 		return err
 	}
 	observedAt := time.Now().UTC()
-	rows, err := metrics.ParseDCGM(string(payload), metrics.DCGMOptions{Selector: selector, ReplicaID: *replicaID, Source: *source, UtilizationUnit: *utilizationUnit, ObservedAt: observedAt, TTL: *ttl})
+	rows, err := metrics.ParseDCGM(string(payload), metrics.DCGMOptions{Selector: selector, ReplicaID: *replicaID, Source: *source, UtilizationUnit: *utilizationUnit, ObservedAt: observedAt, TTL: *ttl, NVLinkPeakBytesPerSecond: *nvlinkPeak * 1e9, PCIePeakBytesPerSecond: *pciePeak * 1e9})
 	if err != nil {
 		return err
 	}

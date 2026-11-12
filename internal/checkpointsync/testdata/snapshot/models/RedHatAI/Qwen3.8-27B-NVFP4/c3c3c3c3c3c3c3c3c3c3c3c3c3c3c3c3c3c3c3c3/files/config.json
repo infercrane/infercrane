@@ -1,0 +1,24 @@
+{
+ "quantization_config": {
+  "quant_method": "compressed-tensors",
+  "format": "mixed-precision",
+  "version": "0.12.3",
+  "config_groups": {
+   "group_0": {
+    "format": "float-quantized",
+    "weights": {
+     "num_bits": 8,
+     "type": "float"
+    }
+   },
+   "group_1": {
+    "format": "nvfp4-pack-quantized",
+    "weights": {
+     "num_bits": 4,
+     "type": "float",
+     "group_size": 16
+    }
+   }
+  }
+ }
+}

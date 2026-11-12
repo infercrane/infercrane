@@ -156,7 +156,7 @@ func TestCatalogProposalCreatesConservativeGenericOpenWeightBaseline(t *testing.
 	}
 }
 
-func TestCatalogProposalAddsModelOptCheckpointOnlyInsideExactHardwareBoundary(t *testing.T) {
+func TestCatalogProposalAddsPublisherCheckpointOnlyInsideExactHardwareBoundary(t *testing.T) {
 	revision := strings.Repeat("a", 40)
 	request := Request{
 		ModelIdentity: "Qwen/Qwen3.8-27B", ModelRevision: revision,
@@ -175,13 +175,16 @@ func TestCatalogProposalAddsModelOptCheckpointOnlyInsideExactHardwareBoundary(t 
 		}
 	}
 	if optimized == nil {
-		t.Fatalf("ModelOpt candidate missing: %+v", proposal)
+		t.Fatalf("publisher checkpoint candidate missing: %+v", proposal)
 	}
-	if optimized.EvidenceState != EvidenceUnmeasured || optimized.Source.EvidenceClass != "publisher-provided-unmeasured" || optimized.Deployment.Model.ID != "nvidia/Qwen3.8-27B-NVFP4" || optimized.Deployment.Model.Revision != "482ca0f3832238542f8f5295dde86b5f22711d80" || optimized.ArtifactSeed.ManifestDigest == "" {
-		t.Fatalf("ModelOpt candidate crossed provenance boundary: %+v", optimized)
+	if optimized.EvidenceState != EvidenceUnmeasured || optimized.Source.EvidenceClass != "publisher-provided-unmeasured" || optimized.Source.Name != "publisher-checkpoint-catalog" || optimized.Deployment.Model.ID != "nvidia/Qwen3.8-27B-NVFP4" || optimized.Deployment.Model.Revision != "482ca0f3832238542f8f5295dde86b5f22711d80" || optimized.ArtifactSeed.ManifestDigest == "" || optimized.ArtifactSeed.Tool != "modelopt" || optimized.ArtifactSeed.Publisher != "NVIDIA" {
+		t.Fatalf("publisher checkpoint candidate crossed provenance boundary: %+v", optimized)
+	}
+	if !strings.HasSuffix(optimized.ConfigurationProfile, "-modelopt-mixed-nvfp4-fp8") {
+		t.Fatalf("checkpoint profile lost its tool and scheme: %q", optimized.ConfigurationProfile)
 	}
 	if err = ValidateProposal(proposal); err != nil {
-		t.Fatalf("ModelOpt proposal failed validation: %v", err)
+		t.Fatalf("publisher checkpoint proposal failed validation: %v", err)
 	}
 
 	request.GPU = "H200"
@@ -192,6 +195,41 @@ func TestCatalogProposalAddsModelOptCheckpointOnlyInsideExactHardwareBoundary(t 
 	for _, candidate := range hopper.Candidates {
 		if candidate.ArtifactSeed != nil {
 			t.Fatalf("Blackwell-only checkpoint leaked into Hopper proposal: %+v", candidate)
+		}
+	}
+}
+
+func TestCatalogProposalKeepsExactLineageAndEngineGates(t *testing.T) {
+	request := Request{
+		ModelIdentity: "deepseek-ai/DeepSeek-V4.1-Flash", ModelRevision: "dba1be0a40aa45a94ad051997016db3960a90277",
+		Provider: "runpod-pods", GPU: "B200", Runtimes: []string{"vllm"}, Objective: "throughput", MaxCandidates: 8,
+	}
+	proposal, err := catalogSource(t).Propose(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var revisions []string
+	for _, candidate := range proposal.Candidates {
+		if candidate.ArtifactSeed != nil {
+			revisions = append(revisions, candidate.ArtifactSeed.OutputRevision)
+			if candidate.ArtifactSeed.LineageState != "exact" || candidate.ArtifactSeed.BaseRevision != request.ModelRevision {
+				t.Fatalf("exact lineage was not carried into the candidate: %+v", candidate.ArtifactSeed)
+			}
+		}
+	}
+	// The newer head needs an unmerged vLLM change, so only the pinned
+	// revision that loads on the reviewed engine may be proposed.
+	if len(revisions) != 1 || revisions[0] != "3431dde3247c13b5957f682b1e3c6fcae2566079" {
+		t.Fatalf("engine-gated or wrong revisions were proposed: %v", revisions)
+	}
+	request.ModelRevision = strings.Repeat("a", 40)
+	other, err := catalogSource(t).Propose(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, candidate := range other.Candidates {
+		if candidate.ArtifactSeed != nil {
+			t.Fatalf("exact-lineage checkpoint accepted a different base revision: %+v", candidate.ArtifactSeed)
 		}
 	}
 }

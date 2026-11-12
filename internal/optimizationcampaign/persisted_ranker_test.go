@@ -22,10 +22,19 @@ func (f *rankingStoreFixture) OptimizationCampaign(_ context.Context, tenant, id
 }
 
 func (f *rankingStoreFixture) BenchmarksForModel(_ context.Context, tenant, model string, _ int) ([]domain.BenchmarkResult, error) {
-	if f.campaign.TenantID != tenant || f.campaign.ModelIdentity != model {
+	if f.campaign.TenantID != tenant {
 		return nil, domain.ErrNotFound
 	}
-	return append([]domain.BenchmarkResult(nil), f.benchmarks...), nil
+	var rows []domain.BenchmarkResult
+	for _, row := range f.benchmarks {
+		if row.ModelIdentity == model {
+			rows = append(rows, row)
+		}
+	}
+	if len(rows) == 0 {
+		return nil, domain.ErrNotFound
+	}
+	return rows, nil
 }
 
 func (f *rankingStoreFixture) RecordLabEvaluation(_ context.Context, tenant string, value domain.LabEvaluation) (domain.LabEvaluation, error) {

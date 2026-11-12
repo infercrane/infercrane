@@ -959,9 +959,39 @@ func TestHuggingFaceCatalogIncludesReviewedAndUnmeasuredPublisherCandidates(t *t
 		`"output_repository":"nvidia/DeepSeek-V4.1-Flash-NVFP4"`,
 		`"evidence_state":"unmeasured"`,
 		`"screening_base_revision":"dba1be0a40aa45a94ad051997016db3960a90277"`,
+		`"output_revision":"3431dde3247c13b5957f682b1e3c6fcae2566079"`,
+		`"publisher_builds":[`,
+		`"repository":"amd/DeepSeek-V4.1-Flash-Quark-PTPC-FP8"`,
+		`"product_support":"unsupported_hardware"`,
+		`"revision":"c48dca0146b56d64c8116dbb6fcace8b7cc835f8"`,
 	} {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("catalog missing %s: %s", expected, body)
+		}
+	}
+	var snapshot struct {
+		Models []struct {
+			Optimization *struct {
+				OutputRepository string `json:"output_repository"`
+				HardwareVendor   string `json:"hardware_vendor"`
+			} `json:"optimization"`
+			PublisherBuilds []struct {
+				HardwareVendor string `json:"hardware_vendor"`
+				Eligibility    string `json:"eligibility"`
+			} `json:"publisher_builds"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	for _, model := range snapshot.Models {
+		if model.Optimization != nil && model.Optimization.HardwareVendor != "nvidia" {
+			t.Fatalf("non-NVIDIA build was offered as the optimization: %+v", model.Optimization)
+		}
+		for _, build := range model.PublisherBuilds {
+			if build.HardwareVendor != "nvidia" && build.Eligibility == "candidate" {
+				t.Fatalf("non-NVIDIA build is a candidate: %+v", build)
+			}
 		}
 	}
 }
