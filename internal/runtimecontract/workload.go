@@ -11,7 +11,10 @@ import (
 
 const OpenAIProtocol = "openai"
 
-var digestPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._/-]*(?::[a-zA-Z0-9._-]+)?@sha256:[a-f0-9]{64}$`)
+// digestPattern accepts an optional registry host with a port (private
+// registries such as registry.internal:5000/team/server), then the repository,
+// an optional tag, and a required sha256 digest.
+var digestPattern = regexp.MustCompile(`^(?:[a-zA-Z0-9][a-zA-Z0-9.-]*:[0-9]{1,5}/)?[a-zA-Z0-9][a-zA-Z0-9._/-]*(?::[a-zA-Z0-9._-]+)?@sha256:[a-f0-9]{64}$`)
 
 // Workload is persisted in an immutable deployment revision. Command is argv,
 // never a shell fragment. Providers may translate it to their native launch
