@@ -608,7 +608,11 @@ the InferCrane API server.
   credentials, and `kernelresearch` alone decides keep or reject.
 - **GPU worker:** exact-SM build when required, correctness, sanitizers,
   PyTorch profiler traces, microbenchmarks, AIPerf replay, quality tests, and
-  teardown under the campaign lease.
+  teardown under the campaign lease. An opt-in `timeline` operation wraps the
+  serving process in Nsight Systems for one bounded CUDA-profiler range. It
+  returns only a summary of GPU idle time, launch overhead, communication
+  share, and the top kernels, and it refuses a runtime without a reviewed
+  configuration or without `nsys` in its image.
 
 The deterministic planner and registry belong in this repository because they
 are product policy. Brezel remains a separately deployed execution service;

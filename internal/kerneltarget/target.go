@@ -53,6 +53,8 @@ type RuntimeSpec struct {
 	ProfilerEnv    string          `json:"profiler_env,omitempty"`
 	ProfilerArgs   []string        `json:"profiler_args,omitempty"`
 	ProfileRequest json.RawMessage `json:"profile_request,omitempty"`
+	// Timeline opts this runtime into short Nsight Systems captures.
+	Timeline *TimelineSpec `json:"timeline,omitempty"`
 }
 
 // LoadRuntimes reads and validates the reviewed runtime catalog.
@@ -83,6 +85,9 @@ func LoadRuntimes(path string) ([]RuntimeSpec, error) {
 	for _, spec := range catalog.Runtimes {
 		if spec.Name == "" || spec.Version == "" || spec.Repository == "" || spec.Python == "" || len(spec.Launcher) == 0 || spec.Port < 1 || spec.Port > 65535 || spec.ProfilerEnv == "" && len(spec.ProfilerArgs) == 0 {
 			return nil, fmt.Errorf("runtime catalog entry %q is incomplete", spec.Name)
+		}
+		if err = validateTimeline(spec.Timeline); err != nil {
+			return nil, fmt.Errorf("runtime catalog entry %q: %w", spec.Name, err)
 		}
 	}
 	return catalog.Runtimes, nil
@@ -152,6 +157,19 @@ type Target struct {
 	ReadyTimeout time.Duration
 	PollInterval time.Duration
 	Now          func() time.Time
+	// TimelineWindow, TimelineWarmup, and ReportTimeout bound an Nsight
+	// Systems capture. Zero selects the defaults (20 s, 5 s, 10 min); a
+	// negative warmup disables it.
+	TimelineWindow time.Duration
+	TimelineWarmup time.Duration
+	ReportTimeout  time.Duration
+}
+
+func (t Target) poll() time.Duration {
+	if t.PollInterval <= 0 {
+		return readyPollInterval
+	}
+	return t.PollInterval
 }
 
 func (t Target) now() time.Time {
@@ -283,6 +301,9 @@ type serverRequest struct {
 	Name       string
 	ProfileDir string
 	Kernel     *kernelMount
+	// Timeline wraps the launcher in nsys and replaces the torch-profiler
+	// settings with the runtime's CUDA-profiler settings.
+	Timeline *TimelineSpec
 }
 
 type server struct {
@@ -294,17 +315,26 @@ type server struct {
 func (t Target) start(ctx context.Context, request serverRequest) (*server, error) {
 	// A crashed earlier run must not hold the GPU or the container name.
 	_, _ = t.docker(ctx, "rm", "--force", request.Name)
+	entrypoint := request.Spec.Launcher[0]
+	if request.Timeline != nil {
+		entrypoint = request.Timeline.NSys
+	}
 	args := []string{
 		"run", "--detach", "--name", request.Name, "--gpus", "all", "--network", internalNetwork,
 		"--read-only", "--tmpfs", "/tmp:rw,nosuid,size=8g", "--shm-size", "16g", "--cap-drop", "ALL",
-		"--security-opt", "no-new-privileges", "--pids-limit", "4096", "--entrypoint", request.Spec.Launcher[0],
+		"--security-opt", "no-new-privileges", "--pids-limit", "4096", "--entrypoint", entrypoint,
 		"--env", "HF_HOME=" + containerModelCache, "--env", "HF_HUB_OFFLINE=1", "--env", "TRANSFORMERS_OFFLINE=1",
 		"--env", "HOME=/tmp", "--env", "TMPDIR=/tmp", "--env", "TRITON_CACHE_DIR=/tmp/triton",
 		"--volume", t.ModelCache + ":" + containerModelCache + ":ro",
 		"--volume", request.ProfileDir + ":" + containerProfileDir,
 	}
-	if request.Spec.ProfilerEnv != "" {
+	if request.Spec.ProfilerEnv != "" && request.Timeline == nil {
 		args = append(args, "--env", request.Spec.ProfilerEnv+"="+containerProfileDir)
+	}
+	if request.Timeline != nil {
+		for _, entry := range request.Timeline.Env {
+			args = append(args, "--env", entry)
+		}
 	}
 	if request.Kernel != nil {
 		args = append(args,
@@ -319,6 +349,9 @@ func (t Target) start(ctx context.Context, request serverRequest) (*server, erro
 	args = append(args, request.Image)
 	replacer := strings.NewReplacer("${MODEL_REVISION}", request.Model.Revision, "${MODEL}", request.Model.Repository, "${PORT}", strconv.Itoa(request.Spec.Port), "${PROFILE_DIR}", containerProfileDir)
 	launch := append(append([]string(nil), request.Spec.Launcher[1:]...), request.Spec.ProfilerArgs...)
+	if request.Timeline != nil {
+		launch = append(append(append(nsysProfileArgs(), "--"), request.Spec.Launcher...), request.Timeline.ProfilerArgs...)
+	}
 	if request.Kernel != nil {
 		launch = append(launch, request.Kernel.Args...)
 	}

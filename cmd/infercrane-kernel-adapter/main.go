@@ -41,7 +41,7 @@ func main() {
 
 func run(ctx context.Context, args []string, env func(string) string, stdin io.Reader, stdout io.Writer) error {
 	if len(args) != 1 {
-		return errors.New("usage: infercrane-kernel-adapter profile|generate|qualify")
+		return errors.New("usage: infercrane-kernel-adapter profile|timeline|generate|qualify")
 	}
 	body, err := io.ReadAll(io.LimitReader(stdin, maxRequestBytes+1))
 	if err != nil {
@@ -65,6 +65,20 @@ func run(ctx context.Context, args []string, env func(string) string, stdin io.R
 		evidence, profileErr := target.Capture(ctx, intent)
 		if profileErr != nil {
 			return profileErr
+		}
+		return json.NewEncoder(stdout).Encode(evidence)
+	case "timeline":
+		var intent acceleratorlab.ProfileIntent
+		if err = decodeStrict(body, &intent); err != nil {
+			return fmt.Errorf("decode timeline request: %w", err)
+		}
+		target, targetErr := newTarget(env)
+		if targetErr != nil {
+			return targetErr
+		}
+		evidence, timelineErr := target.CaptureTimeline(ctx, intent)
+		if timelineErr != nil {
+			return timelineErr
 		}
 		return json.NewEncoder(stdout).Encode(evidence)
 	case "qualify":
@@ -139,8 +153,13 @@ func newTarget(env func(string) string) (kerneltarget.Target, error) {
 	if err != nil {
 		return kerneltarget.Target{}, err
 	}
+	window, err := timelineWindow(env)
+	if err != nil {
+		return kerneltarget.Target{}, err
+	}
 	return kerneltarget.Target{
-		Runtimes: runtimes, ModelCache: env("INFERCRANE_KERNEL_MODEL_CACHE"), WorkDir: env("INFERCRANE_KERNEL_WORK_DIR"),
+		TimelineWindow: window,
+		Runtimes:       runtimes, ModelCache: env("INFERCRANE_KERNEL_MODEL_CACHE"), WorkDir: env("INFERCRANE_KERNEL_WORK_DIR"),
 		PackDir: env("INFERCRANE_KERNEL_PACK_DIR"), ReplayDir: env("INFERCRANE_KERNEL_REPLAY_DIR"), ReplayType: env("INFERCRANE_KERNEL_REPLAY_DATASET_TYPE"),
 		AIPerf: env("INFERCRANE_KERNEL_AIPERF"), HasHFToken: hfToken != "", GPUHourlyUSD: gpuHourly,
 		Commands: kerneltarget.ExecCommander{Environment: environment}, Load: benchmark.Runner{}, Evaluator: evaluator, Artifacts: artifacts,
@@ -268,6 +287,21 @@ func readToken(path string) (string, error) {
 		return "", fmt.Errorf("read model token file: %w", err)
 	}
 	return strings.TrimSpace(string(body)), nil
+}
+
+// timelineWindow reads the optional Nsight Systems capture length. Unset
+// keeps the 20-second default.
+func timelineWindow(env func(string) string) (time.Duration, error) {
+	raw := strings.TrimSpace(env("INFERCRANE_KERNEL_TIMELINE_SECONDS"))
+	if raw == "" {
+		return 0, nil
+	}
+	seconds, err := strconv.Atoi(raw)
+	window := time.Duration(seconds) * time.Second
+	if err != nil || window < kerneltarget.MinTimelineWindow || window > kerneltarget.MaxTimelineWindow {
+		return 0, fmt.Errorf("INFERCRANE_KERNEL_TIMELINE_SECONDS must be a whole number of seconds from %d to %d", int(kerneltarget.MinTimelineWindow.Seconds()), int(kerneltarget.MaxTimelineWindow.Seconds()))
+	}
+	return window, nil
 }
 
 func positiveNumber(env func(string) string, name string) (float64, error) {

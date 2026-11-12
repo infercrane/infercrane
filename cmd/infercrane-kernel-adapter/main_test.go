@@ -20,7 +20,7 @@ func TestRunRejectsUnknownOperationsAndIncompleteTargets(t *testing.T) {
 			t.Fatalf("args %v accepted", args)
 		}
 	}
-	for _, operation := range []string{"profile", "qualify"} {
+	for _, operation := range []string{"profile", "timeline", "qualify"} {
 		if err := run(context.Background(), []string{operation}, env, strings.NewReader(`{"surprise":1}`), &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "decode") {
 			t.Fatalf("%s accepted an unknown field: %v", operation, err)
 		}
@@ -104,5 +104,21 @@ func TestProfileWiringReachesTheHardwareCheck(t *testing.T) {
 	}
 	if err = run(context.Background(), []string{"profile"}, broken, strings.NewReader(request), &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "INFERCRANE_KERNEL_WORK_DIR") {
 		t.Fatalf("relative work directory accepted: %v", err)
+	}
+	// The reviewed catalog has no Nsight Systems configuration, so a timeline
+	// request fails closed before any GPU or container work.
+	if err = run(context.Background(), []string{"timeline"}, wrapped, strings.NewReader(request), &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "opt-in") {
+		t.Fatalf("timeline without a reviewed configuration: %v", err)
+	}
+	for _, seconds := range []string{"2", "600", "twenty", "1.5"} {
+		window := func(name string) string {
+			if name == "INFERCRANE_KERNEL_TIMELINE_SECONDS" {
+				return seconds
+			}
+			return wrapped(name)
+		}
+		if err = run(context.Background(), []string{"timeline"}, window, strings.NewReader(request), &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "INFERCRANE_KERNEL_TIMELINE_SECONDS") {
+			t.Fatalf("timeline window %q accepted: %v", seconds, err)
+		}
 	}
 }
