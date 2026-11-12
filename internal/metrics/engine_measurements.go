@@ -37,15 +37,16 @@ const (
 	AggregateWeighted = "sample_weighted_mean"
 )
 
-// EngineMeasurement describes one normalized engine measurement.
-type EngineMeasurement struct {
+// MeasurementSpec describes one normalized measurement and how monitoring
+// combines it across replicas.
+type MeasurementSpec struct {
 	Name, Unit, Aggregation string
 }
 
 // EngineMeasurementCatalog is the complete, ordered set of engine-derived
 // measurements. Monitoring reports every entry, and storage validates units
 // against it.
-var EngineMeasurementCatalog = []EngineMeasurement{
+var EngineMeasurementCatalog = []MeasurementSpec{
 	{MeasurementRequestsRunning, "count", AggregateSum},
 	{MeasurementRequestsWaiting, "count", AggregateSum},
 	{MeasurementKVCacheUsage, "percent", AggregateMax},

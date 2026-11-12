@@ -55,6 +55,19 @@ type Policy struct {
 	// MinimumEngineSamples is the smallest token or draft denominator an
 	// engine ratio needs before a rule may use it.
 	MinimumEngineSamples int `json:"minimum_engine_samples"`
+
+	// GPU profiling thresholds, in percent of cycles (DCGM DCP fields).
+	// DRAMActiveHigh with TensorActiveLow marks memory-bandwidth-bound work.
+	DRAMActiveHigh  float64 `json:"dram_active_high"`
+	TensorActiveLow float64 `json:"tensor_active_low"`
+	// TensorActiveHigh marks tensor-core (compute) bound work.
+	TensorActiveHigh float64 `json:"tensor_active_high"`
+	// SMActiveLow, while requests wait, marks a host or scheduler bound
+	// server that does not keep the GPU fed.
+	SMActiveLow float64 `json:"sm_active_low"`
+	// LinkSaturation is the share of the declared per-direction NVLink or
+	// PCIe peak that marks a multi-GPU replica as interconnect bound.
+	LinkSaturation float64 `json:"link_saturation"`
 }
 
 type Signal struct {
@@ -111,6 +124,10 @@ const (
 	RuleLowConcurrency     = "decode.low_concurrency"
 	RulePrefixReuse        = "prefix.low_reuse"
 	RuleSpeculativeAccept  = "speculative.low_acceptance"
+	RuleMemoryBandwidth    = "gpu.memory_bandwidth_bound"
+	RuleComputeBound       = "gpu.compute_bound"
+	RuleHostBound          = "gpu.host_bound"
+	RuleInterconnectBound  = "gpu.interconnect_bound"
 	signalSharedPrefix     = "shared_prefix_request_ratio"
 	signalPreemptionRate   = "runtime_preemptions_per_completed_request"
 	signalRunningPerWorker = "runtime_requests_running_per_replica"
@@ -121,6 +138,7 @@ func DefaultPolicy() Policy {
 		MinimumRequests: 20, MaxErrorRate: .02, QueueShare: .20, TTFTShare: .40, GenerationShare: .50,
 		KVCacheUsagePercent: 90, PreemptionRate: .01, LongInputTokens: 2048, LowConcurrency: 4,
 		SharedPrefixRatio: .5, PrefixHitRateFloor: .25, SpecAcceptanceFloor: .5, MinimumEngineSamples: 100,
+		DRAMActiveHigh: 60, TensorActiveLow: 30, TensorActiveHigh: 50, SMActiveLow: 50, LinkSaturation: 70,
 	}
 }
 
@@ -154,17 +172,35 @@ func Assess(snapshot domain.EndpointMonitoringSnapshot, policy Policy) Assessmen
 		result.RequiredEvidence = []string{"error taxonomy", "runtime logs", "provider health", "passing correctness workload"}
 		return result
 	}
-	if engine.available() {
+	switch {
+	case engine.available() && engine.gpuProfiled():
+		result.Confidence = "stage-engine-and-gpu-level"
+	case engine.available():
 		result.Confidence = "stage-and-engine-level"
+	case engine.gpuProfiled():
+		result.Confidence = "stage-and-gpu-level"
 	}
 
 	queuePressure := admissionPressure(snapshot.Admission) || meaningfulShare(snapshot.Summary.P95QueueMS, latency, policy.QueueShare, 25)
 	engineQueue := engine.value(metrics.MeasurementQueueTimeP95)
 	engineQueuePressure := meaningfulShare(engineQueue, latency, policy.QueueShare, 25)
+	engineWaiting := engine.value(metrics.MeasurementRequestsWaiting)
+	waiting := queuePressure || engineQueuePressure || engineWaiting != nil && *engineWaiting > 0
 	kv := kvPressure(engine, policy, queuePressure || engineQueuePressure)
 	prefix := prefixReuse(snapshot, engine, policy)
 	speculative := speculativeAcceptance(engine, policy)
-	secondary := append(append([]Finding{}, prefix...), speculative...)
+	gpu := gpuBottlenecks(engine, policy, waiting)
+	// GPU findings that do not explain the diagnosed stage are listed ahead
+	// of the workload findings, interconnect first.
+	secondaryFor := func(primary ...string) []Finding {
+		var out []Finding
+		for _, rule := range []string{RuleInterconnectBound, RuleMemoryBandwidth, RuleComputeBound, RuleHostBound} {
+			if finding, ok := gpu[rule]; ok && !containsRule(primary, rule) {
+				out = append(out, finding)
+			}
+		}
+		return append(append(out, prefix...), speculative...)
+	}
 	var missingEvidence []string
 	if needsPrefixHitRate(snapshot, engine, policy) {
 		missingEvidence = append(missingEvidence, "engine prefix-cache hit rate")
@@ -174,7 +210,14 @@ func Assess(snapshot domain.EndpointMonitoringSnapshot, policy Policy) Assessmen
 		result.PrimaryBottleneck = "kv-cache-pressure"
 		result.NextAction = "replay the workload against FP8 KV-cache and KV offload candidates and compare preemptions, queue time, and quality before adding replicas"
 		result.RequiredEvidence = []string{"KV-cache usage and preemptions on the replayed workload", "output-length distribution", "quality evaluation for reduced-precision KV", "SLO-qualified goodput", "sourced cost"}
-		result.finish(kv, secondary, []string{"replica scaling"}, missingEvidence)
+		result.finish(kv, secondaryFor(), []string{"replica scaling"}, missingEvidence)
+		return result
+	}
+	if host, ok := gpu[RuleHostBound]; ok {
+		result.PrimaryBottleneck = "host-and-scheduler"
+		result.NextAction = "capture a short Nsight Systems timeline of the serving process and attribute scheduling, tokenization, and kernel-launch time before adding GPUs"
+		result.RequiredEvidence = []string{"serving-process CPU/GPU timeline", "kernel-launch overhead", "API server and tokenizer CPU time", "SLO-qualified goodput"}
+		result.finish([]Finding{host}, secondaryFor(RuleHostBound), []string{"continuous batching", "batch-token budget", "admission policy"}, missingEvidence)
 		return result
 	}
 	if queuePressure || engineQueuePressure {
@@ -189,7 +232,7 @@ func Assess(snapshot domain.EndpointMonitoringSnapshot, policy Policy) Assessmen
 				Explanation:       "requests wait inside the engine scheduler for a material share of gateway p95 latency",
 			})
 		}
-		result.finish(primary, secondary, []string{"continuous batching", "batch-token budget", "admission policy", "replica scaling"}, missingEvidence)
+		result.finish(primary, secondaryFor(), []string{"continuous batching", "batch-token budget", "admission policy", "replica scaling"}, missingEvidence)
 		return result
 	}
 	ttft := snapshot.Summary.P95TTFTMS
@@ -208,9 +251,18 @@ func Assess(snapshot domain.EndpointMonitoringSnapshot, policy Policy) Assessmen
 				Explanation:       "long inputs dominate first-token time; the per-step batched-token budget decides how prefill interleaves with decode",
 			})
 		}
+		if compute, ok := gpu[RuleComputeBound]; ok {
+			primary = append(primary, compute)
+		}
 		// Shared prefixes reduce prefill work directly, so they lead here.
 		primary = append(primary, prefix...)
-		result.finish(primary, speculative, []string{"prefix cache", "chunked prefill", "attention backend", "prefill scheduling"}, missingEvidence)
+		var others []Finding
+		for _, finding := range secondaryFor(RuleComputeBound) {
+			if finding.Rule != RulePrefixReuse {
+				others = append(others, finding)
+			}
+		}
+		result.finish(primary, others, []string{"prefix cache", "chunked prefill", "attention backend", "prefill scheduling"}, missingEvidence)
 		return result
 	}
 	if meaningfulShare(snapshot.Summary.P95GenerationMS, latency, policy.GenerationShare, 50) {
@@ -232,14 +284,72 @@ func Assess(snapshot domain.EndpointMonitoringSnapshot, policy Policy) Assessmen
 		} else if !ok {
 			result.RequiredEvidence = append(result.RequiredEvidence, "engine running requests per replica")
 		}
-		result.finish(primary, secondary, []string{"KV cache", "speculative decoding", "quantization", "decode attention", "sampling"}, missingEvidence)
+		if memory, ok := gpu[RuleMemoryBandwidth]; ok {
+			primary = append(primary, memory)
+		}
+		result.finish(primary, secondaryFor(RuleMemoryBandwidth), []string{"KV cache", "speculative decoding", "quantization", "decode attention", "sampling"}, missingEvidence)
 		return result
 	}
 	result.PrimaryBottleneck = "unattributed-serving-time"
 	result.NextAction = "run a bounded AIPerf replay with Nsight Systems or runtime profiling to attribute CPU, transfer, prefill, decode, and communication time"
 	result.RequiredEvidence = []string{"AIPerf replay", "CPU/GPU timeline", "prefill/decode split", "cost per successful output"}
-	result.finish(nil, secondary, []string{"runtime", "scheduling", "cache", "precision", "hardware"}, missingEvidence)
+	result.finish(nil, secondaryFor(), []string{"runtime", "scheduling", "cache", "precision", "hardware"}, missingEvidence)
 	return result
+}
+
+// gpuBottlenecks applies the DCGM profiling rules. Each needs its own
+// fields: a missing field never satisfies a rule, and plain GPU utilization
+// (the share of time any kernel ran) is never used.
+func gpuBottlenecks(evidence engineSignals, policy Policy, waiting bool) map[string]Finding {
+	out := map[string]Finding{}
+	dram, tensor := evidence.value(metrics.MeasurementGPUDRAMActive), evidence.value(metrics.MeasurementGPUTensorActive)
+	if dram != nil && tensor != nil && *dram >= policy.DRAMActiveHigh && *tensor <= policy.TensorActiveLow {
+		out[RuleMemoryBandwidth] = Finding{
+			Rule: RuleMemoryBandwidth, Signal: metrics.MeasurementGPUDRAMActive, Observed: *dram, Comparison: ">=", Threshold: policy.DRAMActiveHigh, Unit: "percent",
+			TechniqueFamilies: []string{"weight quantization", "FP8 KV cache", "speculative decoding"},
+			Explanation:       "device memory is busy while tensor cores mostly idle, so moving fewer bytes per token (smaller weights or KV, fewer target-model steps) is the lever",
+		}
+	}
+	if tensor != nil && *tensor >= policy.TensorActiveHigh {
+		out[RuleComputeBound] = Finding{
+			Rule: RuleComputeBound, Signal: metrics.MeasurementGPUTensorActive, Observed: *tensor, Comparison: ">=", Threshold: policy.TensorActiveHigh, Unit: "percent",
+			TechniqueFamilies: []string{"FP8 compute", "prefix cache", "attention backend"},
+			Explanation:       "tensor cores are busy most cycles, so faster math or skipping recomputation is the lever rather than memory traffic",
+		}
+	}
+	if smActive := evidence.value(metrics.MeasurementGPUSMActive); smActive != nil && *smActive < policy.SMActiveLow && waiting {
+		out[RuleHostBound] = Finding{
+			Rule: RuleHostBound, Signal: metrics.MeasurementGPUSMActive, Observed: *smActive, Comparison: "<", Threshold: policy.SMActiveLow, Unit: "percent",
+			TechniqueFamilies: []string{"CUDA graphs", "asynchronous scheduling", "API server workers"},
+			Explanation:       "requests wait while most SMs have no resident warp, so the host side (scheduling, tokenization, kernel launch) is not keeping the GPU fed",
+		}
+	}
+	devices := evidence.value(metrics.MeasurementGPUDevices)
+	if devices != nil && *devices >= 2 {
+		signal, saturation := "", 0.0
+		for _, name := range []string{metrics.MeasurementGPUNVLinkSaturation, metrics.MeasurementGPUPCIeSaturation} {
+			if value := evidence.value(name); value != nil && *value > saturation {
+				signal, saturation = name, *value
+			}
+		}
+		if signal != "" && saturation >= policy.LinkSaturation {
+			out[RuleInterconnectBound] = Finding{
+				Rule: RuleInterconnectBound, Signal: signal, Observed: saturation, Comparison: ">=", Threshold: policy.LinkSaturation, Unit: "percent",
+				TechniqueFamilies: []string{"parallelism layout", "communication overlap", "fewer GPUs per replica"},
+				Explanation:       "a multi-GPU replica moves data across its links near the declared peak, so collective communication limits throughput",
+			}
+		}
+	}
+	return out
+}
+
+func containsRule(rules []string, rule string) bool {
+	for _, candidate := range rules {
+		if candidate == rule {
+			return true
+		}
+	}
+	return false
 }
 
 // finish orders candidate families: families from findings about the primary
@@ -342,9 +452,17 @@ func normalizePolicy(policy Policy) Policy {
 	fraction(&policy.SharedPrefixRatio, defaults.SharedPrefixRatio)
 	fraction(&policy.PrefixHitRateFloor, defaults.PrefixHitRateFloor)
 	fraction(&policy.SpecAcceptanceFloor, defaults.SpecAcceptanceFloor)
-	if !(policy.KVCacheUsagePercent > 0 && policy.KVCacheUsagePercent <= 100) {
-		policy.KVCacheUsagePercent = defaults.KVCacheUsagePercent
+	percent := func(value *float64, fallback float64) {
+		if !(*value > 0 && *value <= 100) {
+			*value = fallback
+		}
 	}
+	percent(&policy.DRAMActiveHigh, defaults.DRAMActiveHigh)
+	percent(&policy.TensorActiveLow, defaults.TensorActiveLow)
+	percent(&policy.TensorActiveHigh, defaults.TensorActiveHigh)
+	percent(&policy.SMActiveLow, defaults.SMActiveLow)
+	percent(&policy.LinkSaturation, defaults.LinkSaturation)
+	percent(&policy.KVCacheUsagePercent, defaults.KVCacheUsagePercent)
 	if !(policy.LongInputTokens > 0) || math.IsInf(policy.LongInputTokens, 0) {
 		policy.LongInputTokens = defaults.LongInputTokens
 	}
@@ -357,8 +475,8 @@ func normalizePolicy(policy Policy) Policy {
 	return policy
 }
 
-// engineSignals holds the fresh engine measurements from the monitoring
-// snapshot. Anything not available there is absent here.
+// engineSignals holds the fresh engine and hardware collector measurements
+// from the monitoring snapshot. Anything not available there is absent here.
 type engineSignals map[string]domain.MeasurementEvidence
 
 func engineEvidence(snapshot domain.EndpointMonitoringSnapshot) engineSignals {
@@ -367,16 +485,35 @@ func engineEvidence(snapshot domain.EndpointMonitoringSnapshot) engineSignals {
 		if measurement.Availability != "available" || measurement.Value == nil {
 			continue
 		}
-		for _, item := range metrics.EngineMeasurementCatalog {
-			if item.Name == measurement.Name {
-				out[measurement.Name] = measurement
+		for _, catalog := range [][]metrics.MeasurementSpec{metrics.EngineMeasurementCatalog, metrics.HardwareMeasurementCatalog} {
+			for _, item := range catalog {
+				if item.Name == measurement.Name {
+					out[measurement.Name] = measurement
+				}
 			}
 		}
 	}
 	return out
 }
 
-func (e engineSignals) available() bool { return len(e) > 0 }
+func (e engineSignals) available() bool {
+	for _, item := range metrics.EngineMeasurementCatalog {
+		if _, ok := e[item.Name]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// gpuProfiled reports whether any profiling field the GPU rules use is fresh.
+func (e engineSignals) gpuProfiled() bool {
+	for _, name := range []string{metrics.MeasurementGPUSMActive, metrics.MeasurementGPUTensorActive, metrics.MeasurementGPUDRAMActive, metrics.MeasurementGPUNVLinkSaturation, metrics.MeasurementGPUPCIeSaturation} {
+		if _, ok := e[name]; ok {
+			return true
+		}
+	}
+	return false
+}
 
 func (e engineSignals) value(name string) *float64 {
 	if measurement, ok := e[name]; ok {
@@ -463,6 +600,12 @@ func monitoringSignals(snapshot domain.EndpointMonitoringSnapshot, engine engine
 		{metrics.MeasurementTPOTP95, "ms", "Engine-measured time per output token for completed requests.", engine.value(metrics.MeasurementTPOTP95)},
 		{metrics.MeasurementPrefixCacheHitRate, "ratio", "Share of input tokens served from the engine prefix cache.", engine.value(metrics.MeasurementPrefixCacheHitRate)},
 		{metrics.MeasurementSpecDecodeAccept, "ratio", "Share of speculative draft tokens the target model accepted.", engine.value(metrics.MeasurementSpecDecodeAccept)},
+		{metrics.MeasurementGPUUtilization, "percent", "Share of time any kernel ran. It does not show saturation and is never used as a bottleneck signal.", engine.value(metrics.MeasurementGPUUtilization)},
+		{metrics.MeasurementGPUSMActive, "percent", "Cycles with at least one resident warp; low while requests wait means the host is not keeping the GPU fed.", engine.value(metrics.MeasurementGPUSMActive)},
+		{metrics.MeasurementGPUTensorActive, "percent", "Cycles the tensor pipe is active; high means compute-bound math.", engine.value(metrics.MeasurementGPUTensorActive)},
+		{metrics.MeasurementGPUDRAMActive, "percent", "Cycles device memory moves data; high with low tensor activity means memory-bandwidth-bound work.", engine.value(metrics.MeasurementGPUDRAMActive)},
+		{metrics.MeasurementGPUNVLinkSaturation, "percent", "NVLink throughput as a share of the declared per-direction peak.", engine.value(metrics.MeasurementGPUNVLinkSaturation)},
+		{metrics.MeasurementGPUPCIeSaturation, "percent", "PCIe throughput as a share of the declared per-direction peak.", engine.value(metrics.MeasurementGPUPCIeSaturation)},
 	}
 	signals := make([]Signal, 0, len(values))
 	for _, item := range values {

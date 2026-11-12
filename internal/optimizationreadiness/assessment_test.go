@@ -292,7 +292,7 @@ func TestPolicyDefaultsAreExplicit(t *testing.T) {
 	if got := normalizePolicy(Policy{}); got != DefaultPolicy() {
 		t.Fatalf("zero policy=%+v", got)
 	}
-	invalid := Policy{KVCacheUsagePercent: 150, PreemptionRate: 2, SharedPrefixRatio: -1, PrefixHitRateFloor: 1, SpecAcceptanceFloor: 3, LowConcurrency: -2, LongInputTokens: -1, MinimumEngineSamples: -5}
+	invalid := Policy{KVCacheUsagePercent: 150, PreemptionRate: 2, SharedPrefixRatio: -1, PrefixHitRateFloor: 1, SpecAcceptanceFloor: 3, LowConcurrency: -2, LongInputTokens: -1, MinimumEngineSamples: -5, DRAMActiveHigh: 150, TensorActiveLow: -3, TensorActiveHigh: 101, SMActiveLow: -1, LinkSaturation: 400}
 	if got := normalizePolicy(invalid); got != DefaultPolicy() {
 		t.Fatalf("invalid thresholds were kept: %+v", got)
 	}
@@ -312,4 +312,76 @@ func containsString(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestGPUBottleneckRules(t *testing.T) {
+	withStage := func(stage string, values map[string]engineValue) Assessment {
+		snapshot := withEngine(fixtureSnapshot(), values)
+		value := 600.0
+		switch stage {
+		case "decode":
+			snapshot.Summary.P95GenerationMS = &value
+		case "prefill":
+			snapshot.Summary.P95TTFTMS = &value
+		}
+		return Assess(snapshot, Policy{})
+	}
+	t.Run("memory bandwidth bound decode", func(t *testing.T) {
+		assessment := withStage("decode", map[string]engineValue{metrics.MeasurementGPUDRAMActive: {value: 72, samples: 2}, metrics.MeasurementGPUTensorActive: {value: 12, samples: 2}, metrics.MeasurementRequestsRunning: {value: 64, samples: 1}})
+		if assessment.PrimaryBottleneck != "decode-and-generation" || assessment.Confidence != "stage-engine-and-gpu-level" || len(assessment.Findings) != 1 || assessment.Findings[0].Rule != RuleMemoryBandwidth {
+			t.Fatalf("assessment=%+v", assessment)
+		}
+		leadingFamilies(t, assessment, "weight quantization", "FP8 KV cache", "speculative decoding", "KV cache")
+	})
+	t.Run("compute bound prefill", func(t *testing.T) {
+		assessment := withStage("prefill", map[string]engineValue{metrics.MeasurementGPUTensorActive: {value: 64, samples: 8}})
+		if assessment.PrimaryBottleneck != "prefill-and-first-token" || assessment.Confidence != "stage-and-gpu-level" || findingRules(assessment)[0] != RuleComputeBound {
+			t.Fatalf("assessment=%+v", assessment)
+		}
+		leadingFamilies(t, assessment, "FP8 compute", "prefix cache", "attention backend", "chunked prefill")
+	})
+	t.Run("host bound while requests wait", func(t *testing.T) {
+		assessment := withStage("", map[string]engineValue{metrics.MeasurementGPUSMActive: {value: 31, samples: 2}, metrics.MeasurementRequestsWaiting: {value: 12}})
+		if assessment.PrimaryBottleneck != "host-and-scheduler" || len(assessment.Findings) != 1 || assessment.Findings[0].Rule != RuleHostBound || assessment.KernelGate.Eligible {
+			t.Fatalf("assessment=%+v", assessment)
+		}
+		leadingFamilies(t, assessment, "CUDA graphs", "asynchronous scheduling", "API server workers", "continuous batching")
+	})
+	t.Run("interconnect bound multi-GPU replica", func(t *testing.T) {
+		assessment := withStage("decode", map[string]engineValue{metrics.MeasurementGPUNVLinkSaturation: {value: 82, samples: 8}, metrics.MeasurementGPUDevices: {value: 8, samples: 8}, metrics.MeasurementRequestsRunning: {value: 64}})
+		if len(assessment.Findings) != 1 || assessment.Findings[0].Rule != RuleInterconnectBound || assessment.Findings[0].Signal != metrics.MeasurementGPUNVLinkSaturation {
+			t.Fatalf("assessment=%+v", assessment)
+		}
+		leadingFamilies(t, assessment, "parallelism layout", "communication overlap", "fewer GPUs per replica", "KV cache")
+	})
+	t.Run("KV pressure stays primary and lists GPU findings after it", func(t *testing.T) {
+		assessment := withStage("decode", map[string]engineValue{
+			metrics.MeasurementPreemptions: {value: 9}, metrics.MeasurementRequestsCompleted: {value: 100},
+			metrics.MeasurementGPUDRAMActive: {value: 75}, metrics.MeasurementGPUTensorActive: {value: 10},
+		})
+		if assessment.PrimaryBottleneck != "kv-cache-pressure" || strings.Join(findingRules(assessment), ",") != RuleKVPreemption+","+RuleMemoryBandwidth {
+			t.Fatalf("rules=%v", findingRules(assessment))
+		}
+	})
+	for name, values := range map[string]map[string]engineValue{
+		"DRAM high but tensor unknown":        {metrics.MeasurementGPUDRAMActive: {value: 80}},
+		"DRAM high with busy tensor cores":    {metrics.MeasurementGPUDRAMActive: {value: 80}, metrics.MeasurementGPUTensorActive: {value: 45}},
+		"idle SMs without waiting requests":   {metrics.MeasurementGPUSMActive: {value: 10}, metrics.MeasurementRequestsWaiting: {value: 0}},
+		"saturated link on one GPU":           {metrics.MeasurementGPUPCIeSaturation: {value: 95}, metrics.MeasurementGPUDevices: {value: 1}},
+		"saturated link with unknown GPUs":    {metrics.MeasurementGPUNVLinkSaturation: {value: 95}},
+		"busy GPU utilization alone":          {metrics.MeasurementGPUUtilization: {value: 100}},
+		"link below the saturation threshold": {metrics.MeasurementGPUNVLinkSaturation: {value: 50}, metrics.MeasurementGPUDevices: {value: 4}},
+	} {
+		t.Run("no finding: "+name, func(t *testing.T) {
+			assessment := withStage("decode", values)
+			for _, rule := range findingRules(assessment) {
+				if strings.HasPrefix(rule, "gpu.") {
+					t.Fatalf("fired %s", rule)
+				}
+			}
+			if name == "busy GPU utilization alone" && assessment.Confidence != "stage-level" {
+				t.Fatalf("GPU utilization raised confidence: %s", assessment.Confidence)
+			}
+		})
+	}
 }

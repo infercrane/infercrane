@@ -218,7 +218,9 @@ func addHelpFlags(command *cobra.Command, name string) {
 		stringFlag("selector", "", "comma-separated exact Prometheus label selectors")
 		stringFlag("replica", "", "InferCrane replica identity represented by this snapshot")
 		stringFlag("source", "dcgm_exporter", "bounded evidence source identity")
-		stringFlag("utilization-unit", "percent", "DCGM_FI_DEV_GPU_UTIL input unit: percent or ratio")
+		stringFlag("utilization-unit", "percent", "legacy DCGM_FI_DEV_GPU_UTIL input unit: percent or ratio")
+		stringFlag("nvlink-peak-gbps", "0", "declared per-GPU, per-direction NVLink peak in GB/s; enables NVLink saturation")
+		stringFlag("pcie-peak-gbps", "0", "declared per-GPU, per-direction PCIe peak in GB/s; enables PCIe saturation")
 		stringFlag("ttl", "2m", "maximum time this snapshot may be presented as fresh")
 	case "workload":
 		stringFlag("model", "", "Hugging Face model identity")

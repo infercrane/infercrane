@@ -34,7 +34,7 @@ DCGM_FI_DEV_FB_USED{deployment="coder",gpu="0"} 1024`)
 				Name string `json:"name"`
 			} `json:"measurements"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Source != "dcgm_exporter" || body.ReplicaID != "replica-1" || len(body.Measurements) != 2 {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Source != "dcgm_exporter" || body.ReplicaID != "replica-1" || len(body.Measurements) != 3 {
 			t.Fatalf("body=%+v err=%v", body, err)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -56,11 +56,50 @@ func TestTelemetryCollectDCGMRejectsUnsafeInputsBeforeControlPlane(t *testing.T)
 		"credentials": {"collect", "dcgm", "prod", "--url", "http://user:secret@example.test/metrics", "--ttl", time.Minute.String()},
 		"selector":    {"collect", "dcgm", "prod", "--selector", "deployment", "--ttl", time.Minute.String()},
 		"unit":        {"collect", "dcgm", "prod", "--utilization-unit", "guess", "--file", "missing"},
+		"peak":        {"collect", "dcgm", "prod", "--nvlink-peak-gbps", "-1", "--file", "missing"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := telemetryCommand(context.Background(), cfg, args); err == nil {
 				t.Fatal("unsafe telemetry command was accepted")
 			}
 		})
+	}
+}
+
+func TestTelemetryCollectDCGMDeclaresLinkPeaks(t *testing.T) {
+	exporter := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `DCGM_FI_PROF_NVLINK_TX_BYTES{gpu="0",modelName="NVIDIA H100 80GB HBM3"} 360000000000
+DCGM_FI_PROF_NVLINK_RX_BYTES{gpu="0",modelName="NVIDIA H100 80GB HBM3"} 90000000000
+DCGM_FI_PROF_NVLINK_TX_BYTES{gpu="1",modelName="NVIDIA H100 80GB HBM3"} 120000000000`)
+	}))
+	defer exporter.Close()
+	var saturation, devices float64
+	control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Measurements []struct {
+				Name  string  `json:"name"`
+				Value float64 `json:"value"`
+			} `json:"measurements"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		for _, measurement := range body.Measurements {
+			switch measurement.Name {
+			case "gpu_nvlink_saturation":
+				saturation = measurement.Value
+			case "gpu_devices":
+				devices = measurement.Value
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"data":[],"content_recorded":false}`)
+	}))
+	defer control.Close()
+	_, err := captureStdout(t, func() error {
+		return telemetryCommand(context.Background(), config.Config{ControlURL: control.URL, APIKey: "secret"}, []string{"collect", "dcgm", "coder-production", "--url", exporter.URL + "/metrics", "--nvlink-peak-gbps", "450"})
+	})
+	if err != nil || saturation != 80 || devices != 2 {
+		t.Fatalf("saturation=%v devices=%v err=%v", saturation, devices, err)
 	}
 }

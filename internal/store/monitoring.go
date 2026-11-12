@@ -38,7 +38,7 @@ func (s *Store) EndpointMonitoring(ctx context.Context, tenant, name string, win
 		Evidence: domain.MonitoringEvidence{
 			Source: "infercrane_gateway_request_records", SemanticConventionSchema: monitoringSchema,
 			Available:    []string{"request_rate", "error_rate", "gateway_request_latency", "gateway_time_to_first_response", "fallback", "retry"},
-			Unavailable:  append([]string{"reported_input_token_usage", "reported_output_token_usage", "gpu_utilization", "gpu_memory"}, engineMeasurementNames()...),
+			Unavailable:  append(append([]string{"reported_input_token_usage", "reported_output_token_usage"}, hardwareMeasurementNames()...), engineMeasurementNames()...),
 			Measurements: []domain.MeasurementEvidence{},
 		},
 	}
@@ -152,16 +152,10 @@ func populateMeasurementEvidence(out *domain.EndpointMonitoringSnapshot) {
 	add("generation_p95", "milliseconds", out.Summary.P95GenerationMS, out.Summary.Requests)
 	add("input_token_throughput", "tokens_per_second", out.Summary.InputTokensPerSecond, out.Summary.InputTokenSamples)
 	add("output_token_throughput", "tokens_per_second", out.Summary.OutputTokensPerSecond, out.Summary.OutputTokenSamples)
-	for _, unavailable := range []struct{ name, unit, reason string }{
-		{"gpu_utilization", "percent", "no qualified hardware telemetry collector is connected"},
-		{"gpu_memory", "bytes", "no qualified hardware telemetry collector is connected"},
-		{"gpu_temperature", "celsius", "no qualified hardware telemetry collector is connected"},
-		{"gpu_power", "watts", "no qualified hardware telemetry collector is connected"},
-		{"gpu_xid_errors", "count", "no qualified hardware telemetry collector is connected"},
-	} {
+	for _, measurement := range metrics.HardwareMeasurementCatalog {
 		out.Evidence.Measurements = append(out.Evidence.Measurements, domain.MeasurementEvidence{
-			Name: unavailable.name, Unit: unavailable.unit, Availability: "unsupported",
-			EvidenceClass: "measured", Source: "runtime_adapter", Reason: unavailable.reason,
+			Name: measurement.Name, Unit: measurement.Unit, Availability: "unsupported",
+			EvidenceClass: "measured", Source: "runtime_adapter", Reason: hardwareNotConnectedReason,
 		})
 	}
 	// Engine measurements start explicitly unobserved; a fresh engine scrape
@@ -175,9 +169,28 @@ func populateMeasurementEvidence(out *domain.EndpointMonitoringSnapshot) {
 }
 
 const (
-	engineNotConnectedReason = "no serving-engine metrics scrape has reported for the active revision"
-	engineNotReportedReason  = "the connected serving engine did not report this signal in its latest window"
+	engineNotConnectedReason   = "no serving-engine metrics scrape has reported for the active revision"
+	engineNotReportedReason    = "the connected serving engine did not report this signal in its latest window"
+	hardwareNotConnectedReason = "no qualified hardware telemetry collector is connected"
+	hardwareNotReportedReason  = "the connected hardware collector did not report this field; DCGM profiling fields and link peaks must be enabled explicitly"
 )
+
+func hardwareMeasurementNames() []string {
+	names := make([]string, 0, len(metrics.HardwareMeasurementCatalog))
+	for _, measurement := range metrics.HardwareMeasurementCatalog {
+		names = append(names, measurement.Name)
+	}
+	return names
+}
+
+func isHardwareMeasurement(name string) bool {
+	for _, measurement := range metrics.HardwareMeasurementCatalog {
+		if measurement.Name == name {
+			return true
+		}
+	}
+	return false
+}
 
 func isEngineMeasurement(name string) bool {
 	for _, measurement := range metrics.EngineMeasurementCatalog {
@@ -243,13 +256,11 @@ type operationalMeasurementAggregate struct {
 // additive quantities sum, ratios weight by their sample denominator, and
 // pressure or latency keeps the worst replica.
 func measurementAggregation(name string) string {
-	switch name {
-	case "gpu_memory", "gpu_power", "gpu_xid_errors":
-		return metrics.AggregateSum
-	}
-	for _, measurement := range metrics.EngineMeasurementCatalog {
-		if measurement.Name == name {
-			return measurement.Aggregation
+	for _, catalog := range [][]metrics.MeasurementSpec{metrics.HardwareMeasurementCatalog, metrics.EngineMeasurementCatalog} {
+		for _, measurement := range catalog {
+			if measurement.Name == name {
+				return measurement.Aggregation
+			}
 		}
 	}
 	return metrics.AggregateMax
@@ -324,22 +335,31 @@ func (s *Store) monitoringOperationalMeasurements(ctx context.Context, tenant, e
 	if err = rows.Err(); err != nil {
 		return err
 	}
-	engineConnected := false
-	for _, name := range engineMeasurementNames() {
-		if aggregate, ok := aggregates[name]; ok && aggregate.fresh {
-			engineConnected = true
-			break
+	connected := func(names []string) bool {
+		for _, name := range names {
+			if aggregate, ok := aggregates[name]; ok && aggregate.fresh {
+				return true
+			}
 		}
+		return false
 	}
-	for _, name := range append([]string{"gpu_utilization", "gpu_memory", "gpu_temperature", "gpu_power", "gpu_xid_errors"}, engineMeasurementNames()...) {
+	engineConnected, hardwareConnected := connected(engineMeasurementNames()), connected(hardwareMeasurementNames())
+	for _, name := range append(hardwareMeasurementNames(), engineMeasurementNames()...) {
 		aggregate, ok := aggregates[name]
 		if !ok {
-			if engineConnected && isEngineMeasurement(name) {
-				// The collector reaches this engine, but the engine does not
-				// export this signal (or had no traffic for it in the window).
+			// The collector is connected but does not export this signal (or
+			// had no traffic for it in the window): unobserved, not zero.
+			reason := ""
+			switch {
+			case engineConnected && isEngineMeasurement(name):
+				reason = engineNotReportedReason
+			case hardwareConnected && isHardwareMeasurement(name):
+				reason = hardwareNotReportedReason
+			}
+			if reason != "" {
 				for index := range out.Evidence.Measurements {
 					if out.Evidence.Measurements[index].Name == name {
-						out.Evidence.Measurements[index].Reason = engineNotReportedReason
+						out.Evidence.Measurements[index].Availability, out.Evidence.Measurements[index].Reason = "not_observed", reason
 					}
 				}
 			}

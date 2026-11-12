@@ -23,9 +23,11 @@ var measurementReplicaIdentifier = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._:
 // monitoring or diagnosis interprets, so an import cannot report the same
 // name in an incompatible unit.
 var canonicalMeasurementUnits = func() map[string]string {
-	units := map[string]string{"gpu_utilization": "percent", "gpu_memory": "bytes", "gpu_temperature": "celsius", "gpu_power": "watts", "gpu_xid_errors": "count"}
-	for _, measurement := range metrics.EngineMeasurementCatalog {
-		units[measurement.Name] = measurement.Unit
+	units := map[string]string{}
+	for _, catalog := range [][]metrics.MeasurementSpec{metrics.HardwareMeasurementCatalog, metrics.EngineMeasurementCatalog} {
+		for _, measurement := range catalog {
+			units[measurement.Name] = measurement.Unit
+		}
 	}
 	return units
 }()
