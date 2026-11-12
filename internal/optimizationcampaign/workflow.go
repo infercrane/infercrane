@@ -199,13 +199,6 @@ func Handlers(coordinator Coordinator) map[string]operations.Handler {
 			// it is serving while every other candidate is measured against it.
 			for candidateIndex, candidateID := range request.Candidates {
 				for boundary := 0; boundary < 8; boundary++ {
-					reached, err := candidateReachedMeasuredBarrier(ctx, coordinator.Repository, request.TenantID, request.CampaignID, candidateID)
-					if err != nil {
-						return "", executionFailure(err)
-					}
-					if reached {
-						break
-					}
 					if err := checkpointCandidate(ctx, coordinator, operation, request, candidateID, candidateIndex); err != nil {
 						return "", operations.Retryable("optimization_checkpoint_failed", err)
 					}
@@ -294,23 +287,6 @@ func controlFirst(campaign domain.OptimizationCampaign, candidates []string) []s
 		}
 	}
 	return ordered
-}
-
-func candidateReachedMeasuredBarrier(ctx context.Context, repository Repository, tenant, campaignID, candidateID string) (bool, error) {
-	campaign, err := repository.OptimizationCampaign(ctx, tenant, campaignID)
-	if err != nil {
-		return false, err
-	}
-	candidate, found := candidateByID(campaign.Candidates, candidateID)
-	if !found {
-		return false, domain.ErrNotFound
-	}
-	switch candidate.State {
-	case CandidateRanked, CandidateQualified, CandidateGuarding, CandidateGuardPassed, CandidatePromoted, CandidateObserved, CandidateCleaned:
-		return true, nil
-	default:
-		return false, nil
-	}
 }
 
 func logCandidateStep(operation domain.Operation, phase string, result StepResult) {
