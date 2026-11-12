@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/releaseguard"
 )
 
 func (s *Store) RecordQualityEvidence(ctx context.Context, tenant, deploymentName string, evidence domain.QualityEvidence) (domain.QualityEvidence, bool, error) {
@@ -103,44 +104,142 @@ func scanQualityEvidence(row rowScanner) (domain.QualityEvidence, error) {
 	return item, err
 }
 
-func applyQualityEvidence(active, candidate *domain.RevisionMetrics, rows []domain.QualityEvidence, activeRevisionID, candidateRevisionID string) {
-	var candidateEvidence *domain.QualityEvidence
-	for index := range rows {
-		if rows[index].RevisionID == candidateRevisionID {
-			candidateEvidence = &rows[index]
-			break
-		}
-	}
-	if candidateEvidence == nil {
-		return
-	}
+// qualityEvals pairs the newest candidate evidence for every eval (suite and
+// evaluator) with the newest reference evidence from the same suite and
+// evaluator versions. Rows arrive newest first, so evals are ordered by the
+// candidate's newest evidence. An eval without comparable reference evidence
+// keeps a nil Reference and stays unknown.
+func qualityEvals(rows []domain.QualityEvidence, referenceRevisionID, candidateRevisionID string) []domain.QualityEvalEvidence {
+	type evalKey struct{ suite, evaluator string }
+	seen := map[evalKey]bool{}
+	evals := make([]domain.QualityEvalEvidence, 0)
 	for index := range rows {
 		row := &rows[index]
-		if row.RevisionID == activeRevisionID && row.Suite == candidateEvidence.Suite && row.SuiteVersion == candidateEvidence.SuiteVersion && row.Evaluator == candidateEvidence.Evaluator && row.EvaluatorVersion == candidateEvidence.EvaluatorVersion {
-			comparable := true
-			active.QualityScore, active.QualityPassed, active.QualityComparable = &row.Score, &row.Passed, &comparable
-			active.QualityEvidenceID, active.QualitySuite = row.ID, row.Suite+"@"+row.SuiteVersion
-			candidate.QualityScore, candidate.QualityPassed, candidate.QualityComparable = &candidateEvidence.Score, &candidateEvidence.Passed, &comparable
-			candidate.QualityEvidenceID, candidate.QualitySuite = candidateEvidence.ID, candidateEvidence.Suite+"@"+candidateEvidence.SuiteVersion
-			applyQualityDistribution(active, row)
-			applyQualityDistribution(candidate, candidateEvidence)
-			return
+		key := evalKey{row.Suite, row.Evaluator}
+		if candidateRevisionID == "" || row.RevisionID != candidateRevisionID || seen[key] {
+			continue
 		}
+		seen[key] = true
+		eval := domain.QualityEvalEvidence{Suite: row.Suite, SuiteVersion: row.SuiteVersion, Evaluator: row.Evaluator, EvaluatorVersion: row.EvaluatorVersion, Candidate: qualityEvalSide(row)}
+		for referenceIndex := range rows {
+			reference := &rows[referenceIndex]
+			if referenceRevisionID != "" && reference.RevisionID == referenceRevisionID && reference.Suite == row.Suite && reference.SuiteVersion == row.SuiteVersion && reference.Evaluator == row.Evaluator && reference.EvaluatorVersion == row.EvaluatorVersion {
+				side := qualityEvalSide(reference)
+				eval.Reference = &side
+				break
+			}
+		}
+		evals = append(evals, eval)
 	}
-	comparable := false
-	candidate.QualityScore, candidate.QualityPassed, candidate.QualityComparable = &candidateEvidence.Score, &candidateEvidence.Passed, &comparable
-	candidate.QualityEvidenceID, candidate.QualitySuite = candidateEvidence.ID, candidateEvidence.Suite+"@"+candidateEvidence.SuiteVersion
-	applyQualityDistribution(candidate, candidateEvidence)
+	return evals
 }
 
-func applyQualityDistribution(metrics *domain.RevisionMetrics, evidence *domain.QualityEvidence) {
-	metrics.QualitySampleCount = evidence.SampleCount
+func qualityEvalSide(row *domain.QualityEvidence) domain.QualityEvalSide {
+	side := domain.QualityEvalSide{EvidenceID: row.ID, Score: row.Score, Passed: row.Passed, SampleCount: row.SampleCount}
 	var distribution struct {
 		PairingDigest string    `json:"pairing_digest"`
 		Scores        []float64 `json:"scores"`
 	}
-	if json.Unmarshal([]byte(evidence.DistributionJSON), &distribution) == nil && distribution.PairingDigest != "" && len(distribution.Scores) == evidence.SampleCount {
-		metrics.QualityPairingDigest = distribution.PairingDigest
-		metrics.QualityScores = distribution.Scores
+	if json.Unmarshal([]byte(row.DistributionJSON), &distribution) == nil && distribution.PairingDigest != "" && len(distribution.Scores) == row.SampleCount {
+		side.PairingDigest, side.Scores = distribution.PairingDigest, distribution.Scores
 	}
+	return side
+}
+
+// applyQualityEvidence copies the newest candidate eval into the summary
+// fields that rollout inspect and stored evaluations display. Release Guard
+// gates on every eval, never on this summary.
+func applyQualityEvidence(active, candidate *domain.RevisionMetrics, evals []domain.QualityEvalEvidence) {
+	if len(evals) == 0 {
+		return
+	}
+	newest := evals[0]
+	comparable := newest.Reference != nil
+	setQualitySummary(candidate, newest, newest.Candidate, comparable)
+	if newest.Reference != nil {
+		setQualitySummary(active, newest, *newest.Reference, comparable)
+	}
+}
+
+func setQualitySummary(metrics *domain.RevisionMetrics, eval domain.QualityEvalEvidence, side domain.QualityEvalSide, comparable bool) {
+	score, passed := side.Score, side.Passed
+	metrics.QualityScore, metrics.QualityPassed, metrics.QualityComparable = &score, &passed, &comparable
+	metrics.QualityEvidenceID, metrics.QualitySuite, metrics.QualitySampleCount = side.EvidenceID, eval.Suite+"@"+eval.SuiteVersion, side.SampleCount
+	metrics.QualityPairingDigest, metrics.QualityScores = side.PairingDigest, side.Scores
+}
+
+// Quality verdict view states for the quality evidence API.
+const (
+	QualityVerdictsCompared    = "compared"
+	QualityVerdictsNoCandidate = "no_candidate"
+	QualityVerdictsNotGated    = "not_gated"
+)
+
+// QualityVerdicts classifies the current candidate's evals against the active
+// revision under the persisted Release Guard policy, using the same function
+// Release Guard uses. It reads persisted state only and records nothing; the
+// decision of record stays the stored Release Guard evaluation.
+func (s *Store) QualityVerdicts(ctx context.Context, tenant, deploymentName string) (string, *releaseguard.QualityReport, error) {
+	if tenant == "" {
+		tenant = "global"
+	}
+	resolved, err := s.ResolveForTenant(ctx, tenant, deploymentName)
+	if err != nil {
+		return "", nil, err
+	}
+	policy, err := s.ReleaseGuardPolicy(ctx, tenant, deploymentName)
+	if err != nil {
+		return "", nil, err
+	}
+	if !releaseguard.QualityGated(policy) {
+		return QualityVerdictsNotGated, nil, nil
+	}
+	if resolved.Deployment.CandidateRevisionID == "" {
+		return QualityVerdictsNoCandidate, nil, nil
+	}
+	rows, err := s.QualityEvidenceForDeployment(ctx, tenant, deploymentName, 100)
+	if err != nil {
+		return "", nil, err
+	}
+	report := releaseguard.CompareQuality(policy, qualityEvals(rows, resolved.Deployment.ActiveRevisionID, resolved.Deployment.CandidateRevisionID))
+	if err = s.describeQualitySubjects(ctx, &report, resolved.Deployment.ActiveRevisionID, resolved.Deployment.CandidateRevisionID); err != nil {
+		return "", nil, err
+	}
+	return QualityVerdictsCompared, &report, nil
+}
+
+// describeQualitySubjects names the reference and candidate revisions and the
+// model each one serves, so verdicts read per model.
+func (s *Store) describeQualitySubjects(ctx context.Context, report *releaseguard.QualityReport, referenceRevisionID, candidateRevisionID string) error {
+	for _, subject := range []struct {
+		target     *releaseguard.QualitySubject
+		revisionID string
+	}{{&report.Reference, referenceRevisionID}, {&report.Candidate, candidateRevisionID}} {
+		model, err := s.revisionModel(ctx, subject.revisionID)
+		if err != nil {
+			return err
+		}
+		subject.target.RevisionID, subject.target.Model = subject.revisionID, model
+	}
+	return nil
+}
+
+// revisionModel prefers the resolved immutable model identity and falls back
+// to the model the revision spec requested. It returns "" when neither exists.
+func (s *Store) revisionModel(ctx context.Context, revisionID string) (string, error) {
+	if revisionID == "" {
+		return "", nil
+	}
+	var identity, requested string
+	err := s.QueryRowContext(ctx, `SELECT COALESCE(a.model_identity,''),COALESCE(r.spec_json->>'model','') FROM deployment_revisions r LEFT JOIN model_artifacts a ON a.id=r.model_artifact_id WHERE r.id=?`, revisionID).Scan(&identity, &requested)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if identity != "" {
+		return identity, nil
+	}
+	return requested, nil
 }

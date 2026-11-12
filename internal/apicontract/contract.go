@@ -106,7 +106,7 @@ var Routes = []Route{
 	{"POST", "/deployments/{name}/cost-evidence", "recordCostEvidence", "FinOps", "Attach bounded currency-explicit cost evidence to the active revision", "CostEvidenceIngest", "ObjectList", 201, false},
 	{"GET", "/deployments/{name}/events", "listDeploymentEvents", "Deployments", "List deployment events", "", "ObjectList", 200, false},
 	{"POST", "/deployments/{name}/quality-evidence", "attachQualityEvidence", "Release evidence", "Attach signed aggregate semantic quality evidence to an immutable revision", "SignedEvidenceEnvelope", "Object", 201, true},
-	{"GET", "/deployments/{name}/quality-evidence", "listQualityEvidence", "Release evidence", "List revision-bound semantic quality evidence without prompt or output content", "", "ObjectList", 200, false},
+	{"GET", "/deployments/{name}/quality-evidence", "listQualityEvidence", "Release evidence", "List revision-bound semantic quality evidence and per-eval PASS, WATCH, or BLOCK verdicts without prompt or output content", "", "QualityEvidenceList", 200, false},
 	{"POST", "/deployments/{name}/benchmarks", "runBenchmark", "Benchmarks", "Run and persist an AIPerf benchmark", "BenchmarkRequest", "Object", 201, false},
 	{"GET", "/deployments/{name}/benchmarks", "listBenchmarks", "Benchmarks", "List benchmark history", "", "ObjectList", 200, false},
 	{"POST", "/deployments/{name}/recipes", "captureRecipe", "Recipes", "Capture an immutable evidence-backed recipe", "RecipeCaptureRequest", "Object", 201, false},
@@ -464,7 +464,7 @@ func schemas() map[string]any {
 		"EndpointBindingCreate":          map[string]any{"type": "object", "additionalProperties": false, "required": []string{"name", "kind", "ownership_mode"}, "properties": map[string]any{"name": map[string]any{"type": "string"}, "kind": map[string]any{"type": "string", "enum": []string{"deployment", "external"}}, "ownership_mode": map[string]any{"type": "string", "enum": []string{"observe-only", "traffic-managed", "lifecycle-managed"}}, "deployment": map[string]any{"type": "string"}, "target": map[string]any{"type": "string"}, "provider_connection": map[string]any{"type": "string"}, "config": stringMap}},
 		"ServingPlanCreate":              map[string]any{"type": "object", "additionalProperties": false, "required": []string{"routing_policy", "bindings"}, "properties": map[string]any{"routing_policy": map[string]any{"type": "string", "enum": []string{"manual", "primary-fallback", "weighted"}}, "bindings": map[string]any{"type": "array", "minItems": 1, "maxItems": 32, "items": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"name", "priority", "weight"}, "properties": map[string]any{"name": map[string]any{"type": "string"}, "priority": map[string]any{"type": "integer", "minimum": 0}, "weight": map[string]any{"type": "integer", "minimum": 1, "maximum": 10000}}}}}},
 		"EndpointReleaseGuardPolicy":     map[string]any{"type": "object", "additionalProperties": false, "required": []string{"enabled", "minimum_requests", "max_ttft_regression_percent", "max_latency_regression_percent", "max_error_rate_increase", "max_output_throughput_drop_percent", "require_compatibility_evidence"}, "properties": map[string]any{"enabled": map[string]any{"type": "boolean"}, "minimum_requests": map[string]any{"type": "integer", "minimum": 1, "maximum": 100000}, "max_ttft_regression_percent": map[string]any{"type": "number", "minimum": 0}, "max_latency_regression_percent": map[string]any{"type": "number", "minimum": 0}, "max_error_rate_increase": map[string]any{"type": "number", "minimum": 0, "maximum": 1}, "max_output_throughput_drop_percent": map[string]any{"type": "number", "minimum": 0}, "require_compatibility_evidence": map[string]any{"type": "boolean"}}},
-		"ReleaseGuardPolicy":             map[string]any{"type": "object", "additionalProperties": false, "required": []string{"enabled", "minimum_requests", "require_compatibility_evidence", "require_synthetic_evidence", "require_quality_evidence"}, "properties": map[string]any{"enabled": map[string]any{"type": "boolean"}, "minimum_requests": map[string]any{"type": "integer", "minimum": 1}, "max_ttft_regression_percent": map[string]any{"type": "number", "minimum": 0}, "max_latency_regression_percent": map[string]any{"type": "number", "minimum": 0}, "max_error_rate_increase": map[string]any{"type": "number", "minimum": 0, "maximum": 1}, "max_output_throughput_drop_percent": map[string]any{"type": "number", "minimum": 0}, "require_compatibility_evidence": map[string]any{"type": "boolean"}, "require_synthetic_evidence": map[string]any{"type": "boolean"}, "max_cost_regression_percent": map[string]any{"type": "number", "minimum": 0}, "auto_rollback_enabled": map[string]any{"type": "boolean"}, "auto_rollback_window_seconds": map[string]any{"type": "integer", "minimum": 0}, "validation_max_requests": map[string]any{"type": "integer", "minimum": 1}, "validation_max_concurrency": map[string]any{"type": "integer", "minimum": 1}, "require_quality_evidence": map[string]any{"type": "boolean"}, "minimum_quality_score": map[string]any{"type": "number", "minimum": 0, "maximum": 1}, "max_quality_regression_percent": map[string]any{"type": "number", "minimum": 0, "maximum": 100}}},
+		"ReleaseGuardPolicy":             map[string]any{"type": "object", "additionalProperties": false, "required": []string{"enabled", "minimum_requests", "require_compatibility_evidence", "require_synthetic_evidence", "require_quality_evidence"}, "properties": map[string]any{"enabled": map[string]any{"type": "boolean"}, "minimum_requests": map[string]any{"type": "integer", "minimum": 1}, "max_ttft_regression_percent": map[string]any{"type": "number", "minimum": 0}, "max_latency_regression_percent": map[string]any{"type": "number", "minimum": 0}, "max_error_rate_increase": map[string]any{"type": "number", "minimum": 0, "maximum": 1}, "max_output_throughput_drop_percent": map[string]any{"type": "number", "minimum": 0}, "require_compatibility_evidence": map[string]any{"type": "boolean"}, "require_synthetic_evidence": map[string]any{"type": "boolean"}, "max_cost_regression_percent": map[string]any{"type": "number", "minimum": 0}, "auto_rollback_enabled": map[string]any{"type": "boolean"}, "auto_rollback_window_seconds": map[string]any{"type": "integer", "minimum": 0}, "validation_max_requests": map[string]any{"type": "integer", "minimum": 1}, "validation_max_concurrency": map[string]any{"type": "integer", "minimum": 1}, "require_quality_evidence": map[string]any{"type": "boolean"}, "minimum_quality_score": map[string]any{"type": "number", "minimum": 0, "maximum": 1}, "max_quality_regression_percent": map[string]any{"type": "number", "minimum": 0, "maximum": 100}, "quality_watch_regression_percent": map[string]any{"type": "number", "minimum": 0, "maximum": 100, "description": "Per-eval drop above which a candidate is WATCH: promotable, with a recorded follow-up. Requires max_quality_regression_percent and must not exceed it."}}},
 		"EndpointGuardEvaluationRequest": map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{"window_seconds": map[string]any{"type": "integer", "minimum": 1, "maximum": 2592000}}},
 		"SignedEvidenceEnvelope":         map[string]any{"type": "object", "additionalProperties": false, "required": []string{"payload", "digest", "signature", "public_key", "algorithm", "key_id"}, "properties": map[string]any{"payload": map[string]any{"type": "string", "description": "Canonical aggregate evidence JSON. Prompt and output content are not accepted by the v1 schema."}, "digest": map[string]any{"type": "string"}, "signature": map[string]any{"type": "string"}, "public_key": map[string]any{"type": "string"}, "algorithm": map[string]any{"type": "string", "enum": []string{"Ed25519-SHA256"}}, "key_id": map[string]any{"type": "string"}}},
 		"BenchmarkRequest": map[string]any{"type": "object", "required": []string{"requests", "concurrency"}, "properties": map[string]any{
@@ -482,6 +482,10 @@ func schemas() map[string]any {
 		"OptimizationCampaignApproval":   map[string]any{"type": "object", "additionalProperties": false, "required": []string{"max_cost_usd", "expires_in_seconds"}, "properties": map[string]any{"max_cost_usd": map[string]any{"type": "number", "exclusiveMinimum": 0, "maximum": 1000000}, "expires_in_seconds": map[string]any{"type": "integer", "minimum": 60, "maximum": 86400}}},
 		"OptimizationCampaignActivation": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"candidate_id"}, "properties": map[string]any{"candidate_id": map[string]any{"type": "string", "minLength": 1}}},
 		"OptimizationCampaign":           optimizationCampaignSchema(),
+		"QualityEvidenceList":            qualityEvidenceListSchema(),
+		"QualityVerdicts":                qualityVerdictsSchema(),
+		"QualityEvalVerdict":             qualityEvalVerdictSchema(),
+		"QualitySubject":                 map[string]any{"type": "object", "additionalProperties": false, "required": []string{"revision_id", "model"}, "properties": map[string]any{"revision_id": map[string]any{"type": "string"}, "model": map[string]any{"type": "string", "description": "Resolved immutable model identity, else the model the revision requested; empty when neither is recorded."}}},
 		"OptimizationCampaignCandidate":  optimizationCampaignCandidateSchema(),
 		"OptimizationCampaignEnvelope":   map[string]any{"type": "object", "additionalProperties": false, "required": []string{"campaign"}, "properties": map[string]any{"campaign": ref("OptimizationCampaign")}},
 		"KernelOpportunityRequest": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"schema_version", "model", "runtime", "hardware", "workload", "profile", "policy"}, "properties": map[string]any{
@@ -701,6 +705,47 @@ func optimizationCampaignCandidateSchema() map[string]any {
 		"deployment_spec": object, "predicted_evidence": object, "actual_evidence": object,
 		"deployment_name": text, "revision_id": text, "benchmark_id": text, "quality_evidence_id": text, "lab_evaluation_id": text, "release_guard_evaluation_id": text, "optimized_artifact_id": text, "failure_code": text,
 		"created_at": timestamp, "updated_at": timestamp,
+	}}
+}
+
+func qualityEvidenceListSchema() map[string]any {
+	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"data", "verdicts", "content_recorded"}, "properties": map[string]any{
+		"data":             map[string]any{"type": "array", "items": map[string]any{"type": "object", "additionalProperties": true}},
+		"verdicts":         ref("QualityVerdicts"),
+		"content_recorded": map[string]any{"type": "boolean", "const": false},
+	}}
+}
+
+func qualityVerdictsSchema() map[string]any {
+	verdicts := []string{"PASS", "WATCH", "BLOCK", "UNKNOWN"}
+	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"state", "decision_authority"}, "description": "Verdicts for the current candidate against the active revision under persisted Release Guard policy. Only state compared carries verdict, comparison_mode, reference, candidate, and evals. The stored Release Guard evaluation remains the decision of record.", "properties": map[string]any{
+		"state":                    map[string]any{"type": "string", "enum": []string{"compared", "no_candidate", "not_gated", "unavailable"}},
+		"decision_authority":       map[string]any{"type": "string"},
+		"verdict":                  map[string]any{"type": "string", "enum": verdicts, "description": "Per-model verdict: the most severe eval verdict. UNKNOWN when evidence is missing or not comparable."},
+		"comparison_mode":          map[string]any{"type": "string", "enum": []string{"threshold", "bootstrap"}},
+		"minimum_score":            map[string]any{"type": "number"},
+		"watch_regression_percent": map[string]any{"type": "number"},
+		"max_regression_percent":   map[string]any{"type": "number"},
+		"reference":                ref("QualitySubject"),
+		"candidate":                ref("QualitySubject"),
+		"evals":                    map[string]any{"type": "array", "items": ref("QualityEvalVerdict")},
+	}}
+}
+
+func qualityEvalVerdictSchema() map[string]any {
+	text, number := map[string]any{"type": "string"}, map[string]any{"type": "number"}
+	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"suite", "suite_version", "evaluator", "evaluator_version", "verdict", "code", "message", "candidate_evidence_id", "candidate_score", "candidate_passed"}, "properties": map[string]any{
+		"suite": text, "suite_version": text, "evaluator": text, "evaluator_version": text,
+		"verdict":               map[string]any{"type": "string", "enum": []string{"PASS", "WATCH", "BLOCK", "UNKNOWN"}},
+		"code":                  text,
+		"message":               text,
+		"candidate_evidence_id": text, "candidate_score": number, "candidate_passed": map[string]any{"type": "boolean"},
+		"reference_evidence_id": text, "reference_score": number,
+		"delta":              map[string]any{"type": "number", "description": "Candidate score minus reference score; negative is a drop."},
+		"regression_percent": map[string]any{"type": "number", "description": "Drop relative to the reference score."},
+		"limit":              map[string]any{"type": "number", "description": "Persisted threshold that decided a WATCH or BLOCK verdict."},
+		"bootstrap":          map[string]any{"type": "object", "additionalProperties": true},
+		"follow_up":          map[string]any{"type": "string", "description": "Operator action recorded for a WATCH verdict."},
 	}}
 }
 

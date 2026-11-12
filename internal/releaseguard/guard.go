@@ -11,6 +11,9 @@ type Input struct {
 	Policy    domain.ReleaseGuardPolicy `json:"policy"`
 	Active    domain.RevisionMetrics    `json:"active"`
 	Candidate domain.RevisionMetrics    `json:"candidate"`
+	// QualityEvals holds one entry per candidate eval. Release Guard gates
+	// semantic quality on these, never on the summary fields in the metrics.
+	QualityEvals []domain.QualityEvalEvidence `json:"-"`
 }
 
 type Reason struct {
@@ -21,11 +24,18 @@ type Reason struct {
 	Limit     *float64             `json:"limit,omitempty"`
 	Message   string               `json:"message"`
 	Bootstrap *BootstrapComparison `json:"bootstrap,omitempty"`
+	// Eval names the suite a quality reason came from.
+	Eval string `json:"eval,omitempty"`
+	// FollowUp is the operator action a WATCH verdict records.
+	FollowUp string `json:"follow_up,omitempty"`
 }
 
 type Result struct {
 	Decision string   `json:"decision"`
 	Reasons  []Reason `json:"reasons"`
+	// Quality is the per-eval and per-model verdict report. It is nil when the
+	// policy does not gate on semantic quality.
+	Quality *QualityReport `json:"quality,omitempty"`
 }
 
 func Evaluate(input Input) Result {
@@ -64,79 +74,41 @@ func Evaluate(input Input) Result {
 			waiting = append(waiting, Reason{Code: "cost_evidence_unavailable", Metric: "sourced_hourly_cost", Message: "Cost policy requires sourced cost evidence for both revisions"})
 		}
 	}
-	qualityComparable := input.Candidate.QualityComparable != nil && *input.Candidate.QualityComparable && input.Active.QualityScore != nil
-	if input.Policy.RequireQualityEvidence {
-		if input.Candidate.QualityScore == nil || input.Candidate.QualityPassed == nil {
-			waiting = append(waiting, Reason{Code: "quality_evidence_unavailable", Metric: "quality_score", Message: "Policy requires signed revision-bound semantic evaluation evidence"})
-		} else if !*input.Candidate.QualityPassed {
-			rejected = append(rejected, Reason{Code: "quality_evaluation_failed", Metric: "quality_score", Candidate: input.Candidate.QualityScore, Message: "Candidate failed its external semantic evaluation suite"})
+	var watched []Reason
+	var quality *QualityReport
+	if QualityGated(input.Policy) {
+		report := CompareQuality(input.Policy, input.QualityEvals)
+		quality = &report
+		if len(input.QualityEvals) == 0 {
+			waiting = append(waiting, Reason{Code: "quality_evidence_unavailable", Metric: "quality_score", Message: "Quality policy requires signed revision-bound semantic evaluation evidence"})
 		}
-		if !qualityComparable {
-			waiting = append(waiting, Reason{Code: "quality_evidence_not_comparable", Metric: "quality_score", Message: "Active and candidate require the same versioned evaluation suite and evaluator"})
-		}
-	}
-	if input.Policy.MinimumQualityScore != nil {
-		if input.Candidate.QualityScore == nil {
-			if !input.Policy.RequireQualityEvidence {
-				waiting = append(waiting, Reason{Code: "quality_evidence_unavailable", Metric: "quality_score", Message: "Minimum semantic quality policy requires signed revision-bound evidence"})
+		for _, eval := range report.Evals {
+			switch eval.Verdict {
+			case QualityBlock:
+				rejected = append(rejected, qualityReason(eval))
+			case QualityUnknown:
+				waiting = append(waiting, qualityReason(eval))
+			case QualityWatch:
+				watched = append(watched, qualityReason(eval))
 			}
-		} else if *input.Candidate.QualityScore < *input.Policy.MinimumQualityScore {
-			rejected = append(rejected, comparisonReason("quality_score_below_minimum", "quality_score", value(input.Active.QualityScore), value(input.Candidate.QualityScore), *input.Policy.MinimumQualityScore, "Candidate semantic quality score is below policy"))
-		}
-	}
-	mode := input.Policy.QualityComparisonMode
-	if mode == "" {
-		mode = "threshold"
-	}
-	if mode == "bootstrap" {
-		if !qualityComparable || input.Policy.MaxQualityRegressionPercent == nil || input.Active.QualityPairingDigest == "" || input.Active.QualityPairingDigest != input.Candidate.QualityPairingDigest {
-			waiting = append(waiting, Reason{Code: "quality_bootstrap_evidence_unavailable", Metric: "quality_distribution", Message: "Bootstrap quality policy requires comparable paired distributions, a shared pairing digest, and a regression limit"})
-		} else {
-			comparison, err := PairedBootstrap(input.Active.QualityScores, input.Candidate.QualityScores, input.Policy.QualityBootstrapAlpha, input.Policy.QualityBootstrapMinSamples, input.Policy.QualityBootstrapSeed, *input.Policy.MaxQualityRegressionPercent)
-			if err != nil {
-				waiting = append(waiting, Reason{Code: "quality_bootstrap_invalid", Metric: "quality_distribution", Message: err.Error(), Bootstrap: &comparison})
-			} else {
-				reason := Reason{Metric: "quality_distribution", Bootstrap: &comparison}
-				switch comparison.Status {
-				case "reject":
-					reason.Code, reason.Message = "quality_bootstrap_regression", "Paired-bootstrap confidence interval exceeds the persisted quality-regression limit"
-					rejected = append(rejected, reason)
-				case "accept":
-					// The successful comparison remains in the persisted metrics and
-					// final within-policy decision; it is not a failure reason.
-				case "inconclusive":
-					reason.Code, reason.Message = "quality_bootstrap_inconclusive", "Paired-bootstrap confidence interval overlaps the persisted quality-regression limit"
-					waiting = append(waiting, reason)
-				default:
-					reason.Code, reason.Message = "quality_bootstrap_insufficient", fmt.Sprintf("Bootstrap quality policy needs at least %d paired samples; active=%d candidate=%d", input.Policy.QualityBootstrapMinSamples, len(input.Active.QualityScores), len(input.Candidate.QualityScores))
-					waiting = append(waiting, reason)
-				}
-			}
-		}
-	} else if input.Policy.MaxQualityRegressionPercent != nil {
-		if !qualityComparable {
-			if !input.Policy.RequireQualityEvidence {
-				waiting = append(waiting, Reason{Code: "quality_evidence_not_comparable", Metric: "quality_score", Message: "Quality regression policy requires the same versioned evaluation suite and evaluator"})
-			}
-		} else if regression, ok := percentDrop(input.Active.QualityScore, input.Candidate.QualityScore); ok && regression > *input.Policy.MaxQualityRegressionPercent {
-			rejected = append(rejected, comparisonReason("quality_score_regression", "quality_score", value(input.Active.QualityScore), value(input.Candidate.QualityScore), *input.Policy.MaxQualityRegressionPercent, fmt.Sprintf("Candidate semantic quality regression %.1f%% exceeds policy", regression)))
-		} else if input.Candidate.QualityScore == nil {
-			waiting = append(waiting, Reason{Code: "quality_score_unavailable", Metric: "quality_score", Message: "Quality regression policy requires comparable scores for both revisions"})
 		}
 	}
 	if len(rejected) > 0 {
-		return Result{Decision: "REJECT", Reasons: rejected}
+		return Result{Decision: "REJECT", Reasons: rejected, Quality: quality}
 	}
 	if len(waiting) > 0 {
-		return Result{Decision: "WAIT", Reasons: waiting}
+		return Result{Decision: "WAIT", Reasons: waiting, Quality: quality}
 	}
 	if input.Active.Requests < input.Policy.MinimumRequests || input.Candidate.Requests < input.Policy.MinimumRequests {
-		return Result{Decision: "WAIT", Reasons: []Reason{{Code: "insufficient_requests", Metric: "requests", Message: fmt.Sprintf("Need at least %d requests for both revisions; active=%d candidate=%d", input.Policy.MinimumRequests, input.Active.Requests, input.Candidate.Requests)}}}
+		return Result{Decision: "WAIT", Reasons: []Reason{{Code: "insufficient_requests", Metric: "requests", Message: fmt.Sprintf("Need at least %d requests for both revisions; active=%d candidate=%d", input.Policy.MinimumRequests, input.Active.Requests, input.Candidate.Requests)}}, Quality: quality}
 	}
 	if input.Active.P95TTFTMS == nil || input.Candidate.P95TTFTMS == nil {
-		return Result{Decision: "WAIT", Reasons: []Reason{{Code: "ttft_unavailable", Metric: "p95_ttft_ms", Message: "TTFT evidence is unavailable for one or both revisions"}}}
+		return Result{Decision: "WAIT", Reasons: []Reason{{Code: "ttft_unavailable", Metric: "p95_ttft_ms", Message: "TTFT evidence is unavailable for one or both revisions"}}, Quality: quality}
 	}
-	return Result{Decision: "ACCEPT", Reasons: []Reason{{Code: "within_policy", Message: "Candidate measurements are within persisted Release Guard policy"}}}
+	// WATCH evals keep the decision ACCEPT. Their reasons come first so the
+	// follow-up is the first thing an operator reads.
+	reasons := append(watched, Reason{Code: "within_policy", Message: "Candidate measurements are within persisted Release Guard policy"})
+	return Result{Decision: "ACCEPT", Reasons: reasons, Quality: quality}
 }
 
 func comparisonReason(code, metric string, active, candidate, limit float64, message string) Reason {
