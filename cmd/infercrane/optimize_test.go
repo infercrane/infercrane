@@ -125,6 +125,60 @@ func TestOptimizeEvidenceEvaluatesQualificationBeforeScoring(t *testing.T) {
 	}
 }
 
+func TestOptimizeEvidenceGoldenReportsSuiteMetrics(t *testing.T) {
+	manifest := filepath.Join("..", "..", "internal", "optimizationevidence", "testdata", "golden", "manifest.json")
+	output, err := captureStdout(t, func() error {
+		return optimizeCommand(context.Background(), []string{"evidence", "golden", "--file", manifest, "--output", "json"})
+	})
+	if err != nil {
+		t.Fatalf("golden suite failed: %v\n%s", err, output)
+	}
+	var report struct {
+		Passed                 bool     `json:"passed"`
+		Tasks                  int      `json:"tasks"`
+		FalseWins              int      `json:"false_wins"`
+		WinRate                *float64 `json:"win_rate"`
+		MedianGainOverBaseline *float64 `json:"median_gain_over_baseline"`
+		GPUHoursPerAnswer      *float64 `json:"gpu_hours_per_answer"`
+	}
+	if err = json.Unmarshal([]byte(output), &report); err != nil {
+		t.Fatalf("decode report: %v\n%s", err, output)
+	}
+	if !report.Passed || report.Tasks == 0 || report.FalseWins != 0 || report.WinRate == nil || report.MedianGainOverBaseline == nil || report.GPUHoursPerAnswer == nil {
+		t.Fatalf("report=%+v", report)
+	}
+	human, err := captureStdout(t, func() error {
+		return optimizeCommand(context.Background(), []string{"evidence", "golden", "--file", manifest})
+	})
+	if err != nil || !strings.Contains(human, "False wins  0") || !strings.Contains(human, "h200-decode-saturation-lead-inside-noise") || strings.Contains(human, "FALSE WIN") {
+		t.Fatalf("output=%q err=%v", human, err)
+	}
+}
+
+func TestOptimizeEvidenceGoldenFailsOnFalseWin(t *testing.T) {
+	evidence, err := filepath.Abs(filepath.Join("..", "..", "docs", "testing", "evidence", "qwen38-public-decode-saturation-modal-2026-09-23T111756Z.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := filepath.Join(t.TempDir(), "manifest.json")
+	body, err := json.Marshal(map[string]any{"schema_version": "infercrane.dev/optimizer-golden-suite/v1", "tasks": []map[string]any{{
+		"id": "control-must-stay", "evidence": evidence, "baseline_candidate_id": "sglang-0520-control", "expected_decision": "keep_baseline",
+		"categories": []string{"clear_win"}, "why": "deliberately wrong expectation",
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(manifest, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	output, err := captureStdout(t, func() error {
+		return optimizeCommand(context.Background(), []string{"evidence", "golden", "--file", manifest})
+	})
+	if err == nil || !strings.Contains(err.Error(), "false wins: 1") || !strings.Contains(output, "FALSE WIN") {
+		t.Fatalf("a false win did not fail the command: output=%q err=%v", output, err)
+	}
+}
+
 func TestOptimizeEvidenceInspectsFastPathWithoutTrustPromotion(t *testing.T) {
 	fixture := filepath.Join("..", "..", "internal", "optimizationevidence", "testdata", "qwen38-fastpath-qualified.json")
 	output, err := captureStdout(t, func() error {

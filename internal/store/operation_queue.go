@@ -120,7 +120,7 @@ func (s *Store) CompleteClaimedOperation(ctx context.Context, id, owner string, 
 	if resultJSON == "" {
 		resultJSON = "{}"
 	}
-	result, err := s.ExecContext(ctx, `UPDATE operations SET status='succeeded',progress=100,result_json=?::jsonb,message='completed',lease_owner=NULL,lease_expires_at=NULL,updated_at=?,completed_at=? WHERE id=? AND status='running' AND lease_owner=? AND lease_generation=? AND lease_expires_at>NOW()`, resultJSON, now(), now(), id, owner, generation)
+	result, err := s.ExecContext(ctx, `UPDATE operations SET status='succeeded',progress=100,result_json=?::jsonb,message='completed',error_code=NULL,retryable=FALSE,waiting_reason=NULL,next_attempt_at=NULL,cancel_requested=FALSE,lease_owner=NULL,lease_expires_at=NULL,updated_at=?,completed_at=? WHERE id=? AND status='running' AND lease_owner=? AND lease_generation=? AND lease_expires_at>NOW()`, resultJSON, now(), now(), id, owner, generation)
 	if err != nil {
 		return err
 	}
@@ -154,7 +154,7 @@ func (s *Store) FailClaimedOperation(ctx context.Context, id, owner string, gene
 }
 
 func (s *Store) CancelClaimedOperation(ctx context.Context, id, owner string, generation int64, message string) error {
-	result, err := s.ExecContext(ctx, `UPDATE operations SET status='cancelled',message=?,lease_owner=NULL,lease_expires_at=NULL,updated_at=?,completed_at=? WHERE id=? AND status IN ('running','cancelling') AND lease_owner=? AND lease_generation=? AND lease_expires_at>NOW()`, message, now(), now(), id, owner, generation)
+	result, err := s.ExecContext(ctx, `UPDATE operations SET status='cancelled',message=?,error_code=NULL,retryable=FALSE,waiting_reason=NULL,next_attempt_at=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=?,completed_at=? WHERE id=? AND status IN ('running','cancelling') AND lease_owner=? AND lease_generation=? AND lease_expires_at>NOW()`, message, now(), now(), id, owner, generation)
 	if err != nil {
 		return err
 	}

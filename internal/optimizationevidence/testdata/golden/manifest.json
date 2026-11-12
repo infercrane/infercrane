@@ -1,0 +1,81 @@
+{
+  "schema_version": "infercrane.dev/optimizer-golden-suite/v1",
+  "tasks": [
+    {
+      "id": "h200-decode-saturation-nextn-clear-win",
+      "evidence": "../../../../docs/testing/evidence/qwen38-public-decode-saturation-modal-2026-09-23T044530Z.json",
+      "baseline_candidate_id": "sglang-0520-control",
+      "expected_decision": "promote",
+      "expected_candidate_id": "sglang-0520-nextn-k4-bounded-graphs",
+      "categories": ["clear_win"],
+      "why": "Both candidates pass every quality gate and meet the SLO on all four lanes. NEXTN k4 lowers COGS per 1M successful output tokens on every lane (1.80 vs 3.74, 1.18 vs 2.04, 0.90 vs 1.56, 0.83 vs 1.24 USD), 44.9% on the lane mean. That is about nine times the noise floor."
+    },
+    {
+      "id": "h200-decode-saturation-control-vs-three-nextn-variants",
+      "evidence": "../../../../docs/testing/evidence/qwen38-public-decode-saturation-modal-2026-09-23T111756Z.json",
+      "baseline_candidate_id": "sglang-0520-control",
+      "expected_decision": "promote",
+      "expected_candidate_id": "sglang-0520-nextn-k4-bounded-graphs",
+      "categories": ["clear_win"],
+      "why": "All four candidates qualify. Lane-mean COGS is 2.132 USD for the control, 1.200 for nextn-k4-bounded-graphs, 1.223 for the linear-flashinfer variant, and 1.411 for the flashinfer-prefill variant. nextn-k4-bounded-graphs has the lowest COGS on every lane and beats the control by 43.7%."
+    },
+    {
+      "id": "h200-decode-saturation-lead-inside-noise",
+      "evidence": "../../../../docs/testing/evidence/qwen38-public-decode-saturation-modal-2026-09-23T111756Z.json",
+      "baseline_candidate_id": "sglang-0520-nextn-k4-graphs-linear-flashinfer",
+      "expected_decision": "keep_baseline",
+      "categories": ["inside_noise"],
+      "why": "The current setup is the linear-flashinfer variant. nextn-k4-bounded-graphs is ahead on every lane, but only by 1.9% on the lane-mean COGS objective (1.200 vs 1.223 USD). The unchanged nextn-k4-bounded-graphs recipe spanned 4.9% in lane-mean COGS across six H200 screening receipts, so a 1.9% lead from one screening run each cannot be told apart from re-measurement noise. Changing the customer's setup for it would be a false win."
+    },
+    {
+      "id": "h100-slo-breakers-keep-sglang",
+      "evidence": "../qwen38-modal-screening.json",
+      "baseline_candidate_id": "sglang-control",
+      "expected_decision": "keep_baseline",
+      "categories": ["slo_gate", "recorded_h100"],
+      "why": "vllm-mtp2-fp8kv has the highest raw lane-mean SLO-qualified throughput (255.6 vs 240.5 tok/s) but misses the SLO at c8 (92% attainment, p95 TTFT 5,084 ms against a 3,000 ms limit). vllm-mtp2 misses c8 (42% attainment) and vllm-control misses c4 (67% attainment, p95 TTFT 4,592 ms). No challenger qualifies, so the qualified SGLang baseline stays."
+    },
+    {
+      "id": "h100-vllm-baseline-fails-slo",
+      "evidence": "../qwen38-modal-screening.json",
+      "baseline_candidate_id": "vllm-control",
+      "expected_decision": "promote",
+      "expected_candidate_id": "sglang-control",
+      "must_not_win": ["vllm-mtp2", "vllm-mtp2-fp8kv"],
+      "categories": ["baseline_fails_slo", "recorded_h100"],
+      "why": "The current vLLM setup misses the SLO at c4 (67% attainment, p95 TTFT 4,592 ms against 3,000 ms). sglang-control is the only candidate that meets the SLO on all three lanes, so it replaces the baseline. Both MTP candidates break the SLO at c8 and must not win. The gain is unknown because the baseline has no qualified score, and the suite must not invent one."
+    },
+    {
+      "id": "h200-decode-saturation-quality-gates-reject-all",
+      "evidence": "../../../../docs/testing/evidence/qwen38-public-decode-saturation-modal-2026-09-23T063227Z.json",
+      "baseline_candidate_id": "sglang-0520-control",
+      "expected_decision": "reject_all",
+      "categories": ["quality_gate"],
+      "why": "Every candidate fails a required quality gate: all three miss unknown_model_rejected, and both speculative candidates also fail runtime_parity. dflash2-k8 has the lowest COGS in the file (1.126 vs 2.137 USD for the control), so ranking before qualifying would promote a candidate that failed runtime parity."
+    },
+    {
+      "id": "h200-interactive-latency-slo-reject-all",
+      "evidence": "../../../../docs/testing/evidence/qwen38-public-interactive-modal-2026-09-23T020633Z.json",
+      "baseline_candidate_id": "sglang-0520-control",
+      "expected_decision": "reject_all",
+      "categories": ["slo_gate"],
+      "why": "The interactive policy limits p95 TTFT to 800 ms and p95 ITL to 12 ms with 99% attainment. All six candidates miss it at c4 and c8, including the control. sglang-0520-nextn-k4 roughly halves lane-mean COGS (3.91 vs 7.48 USD) but reaches only 75% and 50% attainment at c4 and c8. A cheaper setup that breaks the latency SLO is not a win."
+    },
+    {
+      "id": "h200-long-prefill-slo-reject-all",
+      "evidence": "../../../../docs/testing/evidence/qwen38-public-long-prefill-modal-2026-09-23T024448Z.json",
+      "baseline_candidate_id": "sglang-0520-control",
+      "expected_decision": "reject_all",
+      "categories": ["slo_gate"],
+      "why": "The policy limits p95 TTFT to 3,000 ms. At c4 every candidate takes more than 9,000 ms and reaches at most 17% attainment, so nothing qualifies even though the NEXTN candidates lower lane-mean COGS by about 27%."
+    },
+    {
+      "id": "laptop-flash-attn-q8-kv-loses",
+      "evidence": "laptop-rehearsal-qwen3-0.6b-m1pro-2026-11-12.json",
+      "baseline_candidate_id": "control",
+      "expected_decision": "keep_baseline",
+      "categories": ["laptop_rehearsal"],
+      "why": "Recorded with tools/laptop-rehearsal/rehearse.py --requests 24 on an Apple M1 Pro (llama.cpp 0.9.0 build 12110, AIPerf 0.13.0, Qwen3-0.6B Q8_0), measured as control, candidate, control. The two control runs drifted 1.7%. The tuned candidate (flash attention with a q8_0 KV cache) produced 70.0 vs 76.8 tok/s at c1 and 227.3 vs 283.2 tok/s at c4, below both control runs on every lane, a 17.4% loss on the objective. Output parity matched, so this is a performance loss, not a quality failure."
+    }
+  ]
+}

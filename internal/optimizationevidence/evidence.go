@@ -22,6 +22,23 @@ const (
 	EvaluationSchema = "infercrane.dev/optimization-evaluation/v1"
 	AlgorithmVersion = "qualified-pareto-v1"
 	MaxDocumentBytes = 4 << 20
+
+	// BaselineAlgorithmVersion names the rule that compares candidates with a
+	// declared baseline. It is reported only when the policy names a baseline.
+	BaselineAlgorithmVersion = "baseline-noise-floor-v1"
+	// DefaultMinimumRelativeGain is the smallest relative improvement over the
+	// baseline, on the selection objective, that counts as a win. It sits just
+	// above the largest spread recorded for one unchanged recipe: 4.9% in mean
+	// COGS across six H200 screening receipts. A policy may raise it, never
+	// lower it.
+	DefaultMinimumRelativeGain = 0.05
+)
+
+// Baseline decision outcomes.
+const (
+	DecisionPromote      = "promote"
+	DecisionKeepBaseline = "keep_baseline"
+	DecisionRejectAll    = "reject_all"
 )
 
 type EvidenceLevel string
@@ -63,6 +80,24 @@ type SelectionPolicy struct {
 	EvidenceLevel              EvidenceLevel `json:"evidence_level"`
 	QualificationBeforeScoring bool          `json:"qualification_before_scoring"`
 	CostTieBreaker             bool          `json:"cost_tie_breaker"`
+	// BaselineCandidateID optionally names the candidate that is the current
+	// setup. When it is set, another candidate is selected only if it beats the
+	// baseline by more than the noise floor; otherwise the baseline is kept.
+	BaselineCandidateID string `json:"baseline_candidate_id,omitempty"`
+	// MinimumRelativeGain optionally raises the noise floor above
+	// DefaultMinimumRelativeGain. Zero means the default.
+	MinimumRelativeGain float64 `json:"minimum_relative_gain,omitempty"`
+}
+
+// NoiseFloor is the relative gain over the baseline that a challenger must
+// exceed to be promoted.
+func (p SelectionPolicy) NoiseFloor() float64 {
+	return math.Max(p.MinimumRelativeGain, DefaultMinimumRelativeGain)
+}
+
+// Minimizes reports whether a lower score is better for the policy objective.
+func (p SelectionPolicy) Minimizes() bool {
+	return p.Objective == ObjectiveMinimumCOGS || p.Objective == ObjectiveMinimumLatency
 }
 
 const (
@@ -169,16 +204,38 @@ func (e LaneEconomics) validate() error {
 }
 
 type Evaluation struct {
-	SchemaVersion      string            `json:"schema_version"`
-	AlgorithmVersion   string            `json:"algorithm_version"`
-	InputDigest        string            `json:"input_digest"`
-	ModelIdentity      string            `json:"model_identity"`
-	HardwareIdentity   string            `json:"hardware_identity"`
-	WorkloadDigest     string            `json:"workload_digest"`
-	SelectionPolicy    SelectionPolicy   `json:"selection_policy"`
+	SchemaVersion    string          `json:"schema_version"`
+	AlgorithmVersion string          `json:"algorithm_version"`
+	InputDigest      string          `json:"input_digest"`
+	ModelIdentity    string          `json:"model_identity"`
+	HardwareIdentity string          `json:"hardware_identity"`
+	WorkloadDigest   string          `json:"workload_digest"`
+	SelectionPolicy  SelectionPolicy `json:"selection_policy"`
+	// WinnerID is the candidate to serve. With a declared baseline it is the
+	// promoted candidate, the kept baseline, or empty when nothing qualified.
 	WinnerID           string            `json:"winner_id,omitempty"`
 	ParetoCandidateIDs []string          `json:"pareto_candidate_ids"`
 	Candidates         []CandidateResult `json:"candidates"`
+	// BaselineDecision is present only when the policy names a baseline.
+	BaselineDecision *BaselineDecision `json:"baseline_decision,omitempty"`
+}
+
+// BaselineDecision records whether any candidate beat the declared baseline by
+// more than the noise floor on the selection objective.
+type BaselineDecision struct {
+	AlgorithmVersion    string  `json:"algorithm_version"`
+	BaselineCandidateID string  `json:"baseline_candidate_id"`
+	BaselineQualified   bool    `json:"baseline_qualified"`
+	NoiseFloor          float64 `json:"noise_floor"`
+	Outcome             string  `json:"outcome"`
+	// CandidateID is the promoted candidate or the kept baseline.
+	CandidateID string `json:"candidate_id,omitempty"`
+	// ChallengerID is the best qualified candidate other than the baseline.
+	ChallengerID string `json:"challenger_id,omitempty"`
+	// RelativeGain is the challenger's gain over the baseline, positive when
+	// better. It is absent when the baseline has no positive score.
+	RelativeGain *float64 `json:"relative_gain,omitempty"`
+	Reason       string   `json:"reason"`
 }
 
 type CandidateResult struct {
@@ -198,6 +255,8 @@ type CandidateResult struct {
 	WorstITLP95MS                            *float64      `json:"worst_itl_p95_ms,omitempty"`
 	Pareto                                   bool          `json:"pareto"`
 	Selected                                 bool          `json:"selected"`
+	Baseline                                 bool          `json:"baseline,omitempty"`
+	RelativeGainOverBaseline                 *float64      `json:"relative_gain_over_baseline,omitempty"`
 }
 
 func Decode(body []byte) (Campaign, error) {
@@ -259,6 +318,11 @@ func (c Campaign) Validate() error {
 		}
 		seenCandidates[candidate.ID] = struct{}{}
 	}
+	if baseline := c.Selection.BaselineCandidateID; baseline != "" {
+		if _, exists := seenCandidates[baseline]; !exists {
+			return fmt.Errorf("selection policy: baseline candidate %q is not a campaign candidate", baseline)
+		}
+	}
 	return nil
 }
 
@@ -316,6 +380,19 @@ func (p SelectionPolicy) validate() error {
 	}
 	if p.EvidenceLevel != LevelScreening && p.EvidenceLevel != LevelQualification && p.EvidenceLevel != LevelPublic {
 		return errors.New("evidence level must be screening, qualification, or public")
+	}
+	if p.BaselineCandidateID != "" && strings.TrimSpace(p.BaselineCandidateID) != p.BaselineCandidateID {
+		return errors.New("baseline candidate id cannot have surrounding whitespace")
+	}
+	if p.MinimumRelativeGain != 0 {
+		if p.BaselineCandidateID == "" {
+			return errors.New("minimum relative gain requires a baseline candidate")
+		}
+		// A producer may demand a larger win, but cannot shrink the floor
+		// that keeps measurement noise from being promoted.
+		if math.IsNaN(p.MinimumRelativeGain) || p.MinimumRelativeGain < DefaultMinimumRelativeGain || p.MinimumRelativeGain >= 1 {
+			return fmt.Errorf("minimum relative gain must be at least %.2f and below 1", DefaultMinimumRelativeGain)
+		}
 	}
 	switch p.Objective {
 	case ObjectiveQualifiedOutputThroughput, ObjectiveSLOGoodput, ObjectiveQualifiedOutputPerDollar, ObjectiveMinimumCOGS, ObjectiveMinimumLatency:
@@ -413,14 +490,13 @@ func Evaluate(campaign Campaign) (Evaluation, error) {
 		}
 	}
 	sort.Strings(evaluation.ParetoCandidateIDs)
-	winner := -1
-	for index := range evaluation.Candidates {
-		if !evaluation.Candidates[index].Qualified || evaluation.Candidates[index].Score == nil {
-			continue
-		}
-		if winner == -1 || better(campaign.Selection, evaluation.Candidates[index], evaluation.Candidates[winner]) {
-			winner = index
-		}
+	var winner int
+	if campaign.Selection.BaselineCandidateID == "" {
+		winner = bestQualified(campaign.Selection, evaluation.Candidates, -1)
+	} else {
+		var decision BaselineDecision
+		decision, winner = decideAgainstBaseline(campaign.Selection, evaluation.Candidates)
+		evaluation.BaselineDecision = &decision
 	}
 	if winner >= 0 {
 		evaluation.Candidates[winner].Selected = true
@@ -530,13 +606,94 @@ func qualifyAndScore(campaign Campaign, candidate Candidate) CandidateResult {
 	return result
 }
 
+// bestQualified returns the index of the best scored candidate, skipping
+// the index in except, or -1 when none qualified.
+func bestQualified(policy SelectionPolicy, results []CandidateResult, except int) int {
+	best := -1
+	for index := range results {
+		if index == except || !results[index].Qualified || results[index].Score == nil {
+			continue
+		}
+		if best == -1 || better(policy, results[index], results[best]) {
+			best = index
+		}
+	}
+	return best
+}
+
+// decideAgainstBaseline keeps the declared baseline unless the best other
+// qualified candidate beats it by more than the noise floor. A baseline that
+// fails qualification cannot be kept, so any qualified challenger replaces it
+// with an unknown gain. It returns the decision and the index to serve.
+func decideAgainstBaseline(policy SelectionPolicy, results []CandidateResult) (BaselineDecision, int) {
+	baseline := -1
+	for index := range results {
+		if results[index].CandidateID == policy.BaselineCandidateID {
+			baseline = index
+			results[index].Baseline = true
+		}
+	}
+	decision := BaselineDecision{AlgorithmVersion: BaselineAlgorithmVersion, BaselineCandidateID: policy.BaselineCandidateID, NoiseFloor: policy.NoiseFloor()}
+	base := results[baseline]
+	decision.BaselineQualified = base.Qualified && base.Score != nil
+	challenger := bestQualified(policy, results, baseline)
+	if challenger >= 0 {
+		decision.ChallengerID = results[challenger].CandidateID
+	}
+	comparable := decision.BaselineQualified && *base.Score > 0
+	if comparable {
+		for index := range results {
+			if index != baseline && results[index].Qualified && results[index].Score != nil {
+				gain := relativeGain(policy, *results[index].Score, *base.Score)
+				results[index].RelativeGainOverBaseline = &gain
+			}
+		}
+	}
+	objective := policy.Objective
+	switch {
+	case !decision.BaselineQualified && challenger < 0:
+		decision.Outcome = DecisionRejectAll
+		decision.Reason = "neither the baseline nor any other candidate qualified"
+		return decision, -1
+	case !decision.BaselineQualified:
+		decision.Outcome, decision.CandidateID = DecisionPromote, decision.ChallengerID
+		decision.Reason = fmt.Sprintf("the baseline did not qualify (%s); %s qualified, so its gain over the baseline is unknown", strings.Join(base.RejectionReasons, "; "), decision.ChallengerID)
+		return decision, challenger
+	case challenger < 0:
+		decision.Outcome, decision.CandidateID = DecisionKeepBaseline, base.CandidateID
+		decision.Reason = "no other candidate qualified"
+		return decision, baseline
+	case !comparable:
+		decision.Outcome, decision.CandidateID = DecisionKeepBaseline, base.CandidateID
+		decision.Reason = fmt.Sprintf("the baseline scored zero on %s, so a relative gain is undefined", objective)
+		return decision, baseline
+	}
+	gain := *results[challenger].RelativeGainOverBaseline
+	decision.RelativeGain = &gain
+	if gain > decision.NoiseFloor {
+		decision.Outcome, decision.CandidateID = DecisionPromote, decision.ChallengerID
+		decision.Reason = fmt.Sprintf("%s beat the baseline by %.1f%% on %s, above the %.1f%% noise floor", decision.ChallengerID, gain*100, objective, decision.NoiseFloor*100)
+		return decision, challenger
+	}
+	decision.Outcome, decision.CandidateID = DecisionKeepBaseline, base.CandidateID
+	decision.Reason = fmt.Sprintf("the best challenger %s changed %s by %+.1f%%, which does not exceed the %.1f%% noise floor", decision.ChallengerID, objective, gain*100, decision.NoiseFloor*100)
+	return decision, baseline
+}
+
+// relativeGain is positive when the candidate is better than the baseline.
+func relativeGain(policy SelectionPolicy, candidate, baseline float64) float64 {
+	if policy.Minimizes() {
+		return (baseline - candidate) / baseline
+	}
+	return (candidate - baseline) / baseline
+}
+
 func better(policy SelectionPolicy, candidate, incumbent CandidateResult) bool {
 	if candidate.Score == nil || incumbent.Score == nil {
 		return candidate.Score != nil
 	}
-	minimize := policy.Objective == ObjectiveMinimumCOGS || policy.Objective == ObjectiveMinimumLatency
 	if *candidate.Score != *incumbent.Score {
-		if minimize {
+		if policy.Minimizes() {
 			return *candidate.Score < *incumbent.Score
 		}
 		return *candidate.Score > *incumbent.Score

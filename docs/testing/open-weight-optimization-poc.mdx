@@ -57,6 +57,13 @@ GOCACHE=/tmp/infercrane-go-cache GOTMPDIR=/tmp \
   ./internal/optimizationevidence ./internal/optimizationcampaign
 ```
 
+Replay recorded decisions through the evaluator with the
+[optimizer golden suite](/testing/optimizer-golden-suite). It fails on any false win:
+
+```bash
+make test-optimizer-golden
+```
+
 Propose an uncataloged model using its immutable upstream commit:
 
 ```bash

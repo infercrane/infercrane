@@ -288,6 +288,77 @@ func TestOptimizationCampaignIntentSeparatesNewEndpointQualificationFromEvolutio
 	}
 }
 
+// A measurement can outlive its approval, for example when serving pods or
+// the control plane stall. The coordinator then fails the candidate so its
+// resources are cleaned. The store must accept that failure after expiry;
+// otherwise every retry ends in a fence conflict and the paid deployment
+// stays allocated.
+func TestOptimizationCampaignExpiredApprovalFailsAndCleansMeasuringCandidate(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	suffix := time.Now().UTC().Format("150405.000000000")
+	model := "Qwen/Qwen3-8B"
+	target, err := s.AddTarget(ctx, domain.Target{Name: "campaign-expiry-target-" + suffix, URL: "http://campaign-expiry-" + suffix, Provider: "existing", Runtime: "vllm", UpstreamModel: model})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deployment, err := s.ApplyDeployment(ctx, domain.Deployment{Name: "campaign-expiry-" + suffix, Model: model}, []string{target.Name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := s.ResolveForTenant(ctx, "global", deployment.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	campaign, _, err := s.CreateOptimizationCampaign(ctx, domain.OptimizationCampaign{TenantID: "global", IdempotencyKey: "campaign-expiry-" + suffix, InputDigest: strings.Repeat("e", 64), ModelIdentity: model, Objective: "interactive", Source: "fixture", Intent: optimizationcampaign.IntentNewEndpoint, ProposalJSON: `{"schema_version":"infercrane.optimizer.proposal/v1"}`}, []domain.OptimizationCandidateRun{{ProposalCandidateID: strings.Repeat("f", 64), Rank: 1, EvidenceState: "unmeasured", DeploymentSpecJSON: `{"name":"candidate"}`, PredictedEvidenceJSON: `{}`, ActualEvidenceJSON: `{}`}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	campaign, err = s.ApproveOptimizationCampaign(ctx, "global", campaign.ID, "operator", 1, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidateID, state := campaign.Candidates[0].ID, optimizationcampaign.CandidateProposed
+	for _, step := range []struct {
+		to      string
+		updates domain.OptimizationCandidateRun
+	}{
+		{optimizationcampaign.CandidateProvisioning, domain.OptimizationCandidateRun{}},
+		{optimizationcampaign.CandidateReady, domain.OptimizationCandidateRun{DeploymentName: deployment.Name, RevisionID: resolved.Deployment.ActiveRevisionID}},
+		{optimizationcampaign.CandidateMeasuring, domain.OptimizationCandidateRun{}},
+	} {
+		if _, err = s.TransitionOptimizationCandidate(ctx, "global", campaign.ID, candidateID, state, step.to, step.updates); err != nil {
+			t.Fatalf("transition %s -> %s: %v", state, step.to, err)
+		}
+		state = step.to
+	}
+	if _, err = s.ExecContext(ctx, `UPDATE optimization_campaigns SET approval_expires_at=NOW()-INTERVAL '1 second' WHERE tenant_id=? AND id=?`, "global", campaign.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.TransitionOptimizationCandidate(ctx, "global", campaign.ID, candidateID, optimizationcampaign.CandidateMeasuring, optimizationcampaign.CandidateValidating, domain.OptimizationCandidateRun{BenchmarkID: "benchmark-after-expiry"}); !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("expired approval still recorded measured progress: %v", err)
+	}
+
+	request, _ := json.Marshal(optimizationcampaign.ExecuteRequest{TenantID: "global", CampaignID: campaign.ID, Candidates: []string{candidateID}})
+	op, _, err := s.EnqueueOperation(ctx, domain.Operation{TenantID: "global", Kind: optimizationcampaign.ExecuteKind, ResourceType: "optimization_campaign", ResourceName: campaign.ID, IdempotencyKey: "execute:" + campaign.ID, RequestJSON: string(request), MaxAttempts: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	driver := storeCampaignDriver{deployment: deployment.Name, revision: resolved.Deployment.ActiveRevisionID}
+	worker := operations.Worker{Repository: s, Handlers: optimizationcampaign.Handlers(optimizationcampaign.Coordinator{Repository: s, Driver: driver}), Owner: "campaign-expiry-worker", Lease: 3 * time.Second, BaseBackoff: time.Hour, MaxBackoff: time.Hour, Jitter: func(delay time.Duration) time.Duration { return delay }}
+	if worked, workerErr := worker.Once(ctx); workerErr != nil || !worked {
+		t.Fatalf("worker worked=%t err=%v", worked, workerErr)
+	}
+	op, err = s.Operation(ctx, op.ID)
+	if err != nil || op.Status != "succeeded" {
+		t.Fatalf("expired campaign did not converge: status=%s error_code=%s message=%q err=%v", op.Status, op.ErrorCode, op.Message, err)
+	}
+	loaded, err := s.OptimizationCampaign(ctx, "global", campaign.ID)
+	if err != nil || loaded.State != optimizationcampaign.CampaignCleaned || loaded.Candidates[0].State != optimizationcampaign.CandidateCleaned || loaded.Candidates[0].FailureCode != "approval_expired" || loaded.Candidates[0].BenchmarkID != "" {
+		t.Fatalf("expired candidate was not failed and cleaned: campaign=%+v err=%v", loaded, err)
+	}
+}
+
 func TestOptimizationCampaignDurableOperationRunsAndCleansThroughPostgres(t *testing.T) {
 	ctx := context.Background()
 	s := openStore(t, ctx)
@@ -1033,6 +1104,42 @@ func TestOperationQueueLeasesAndRecoversExpiredWork(t *testing.T) {
 	}
 	if err = s.CompleteClaimedOperation(ctx, recovered.ID, "worker-b", recovered.LeaseGeneration, `{"ok":true}`); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestOperationSuccessClearsRetryFailureMetadata(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	queued, _, err := s.EnqueueOperation(ctx, domain.Operation{Kind: "apply", ResourceType: "deployment", ResourceName: "retry-success", MaxAttempts: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.ClaimOperation(ctx, "worker-a", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.StartClaimedOperation(ctx, first.ID, "worker-a", first.LeaseGeneration); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.FailClaimedOperation(ctx, first.ID, "worker-a", first.LeaseGeneration, "provider_busy", "provider busy", true, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.ClaimOperation(ctx, "worker-b", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.StartClaimedOperation(ctx, second.ID, "worker-b", second.LeaseGeneration); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.CompleteClaimedOperation(ctx, second.ID, "worker-b", second.LeaseGeneration, `{"ok":true}`); err != nil {
+		t.Fatal(err)
+	}
+	completed, err := s.Operation(ctx, queued.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completed.Status != "succeeded" || completed.ErrorCode != "" || completed.Retryable || completed.NextAttemptAt != nil {
+		t.Fatalf("terminal success retained retry metadata: %#v", completed)
 	}
 }
 

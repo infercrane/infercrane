@@ -1,0 +1,182 @@
+---
+title: "Optimizer golden suite"
+description: "A fixed set of recorded decisions that every change to the optimization evaluator must keep getting right."
+---
+
+# Optimizer golden suite
+
+The golden suite is a fixed evaluation of InferCrane's optimizer. Each task replays recorded
+evidence, names the customer's current setup as the baseline, and states the decision a careful
+reviewer would make from the raw numbers. A change to qualification, scoring, or the baseline rule
+that turns a known loss into a promotion fails the suite.
+
+The suite replays files. It starts no servers and allocates no GPUs, so it costs nothing to run.
+
+## Run it
+
+```bash title="Run the golden suite"
+make test-optimizer-golden
+```
+
+The target runs the race-enabled Go tests and then prints the report:
+
+```bash
+infercrane optimize evidence golden \
+  --file internal/optimizationevidence/testdata/golden/manifest.json
+```
+
+Add `--output json` for the full report, including each task's evaluator reason. The command exits
+non-zero on any wrong decision or false win. `TestOptimizerGoldenSuite` runs the same tasks as part of
+`go test`, so `make dev-check` fails on the same regressions.
+
+## Current result
+
+| Metric | Value |
+| --- | --- |
+| Tasks | 9, all decided correctly |
+| Win rate | 100% (3 of 3 expected promotions) |
+| False wins | 0 |
+| Median gain over the baseline | 44.3% (2 promotions with a known gain, 1 unknown) |
+| Measured GPU-hours per answer | 0.090 |
+
+These numbers describe the evaluator on this task set, not a performance claim. The 44.3% comes from
+two H200 screening receipts in which NEXTN speculative decoding lowered cost per 1M successful output
+tokens against an SGLang control on one decode-saturation workload. Screening evidence uses 12 to 32
+requests per lane and one run.
+
+## What the metrics mean
+
+Every task ends in one of three decisions:
+
+- `promote`: a candidate replaces the baseline.
+- `keep_baseline`: the current setup stays.
+- `reject_all`: nothing qualified, including the baseline, so no setup can be recommended.
+
+| Metric | Definition |
+| --- | --- |
+| Win rate | Correct promotions divided by tasks that expect a promotion. A promotion is correct only when it names the expected candidate. |
+| False win | The evaluator promoted a candidate in a task that expects `keep_baseline` or `reject_all`, or promoted a candidate in the task's `must_not_win` list. One false win fails the suite. |
+| Missed win | A task expects a promotion and the evaluator kept the baseline or rejected everything. It is a wrong decision, so it also fails the suite. |
+| Median gain over the baseline | The median relative improvement of the promoted candidate over the baseline, on the objective the evidence declares. Positive means better: more throughput, or lower cost or latency. |
+| Measured GPU-hours per answer | GPU time inside the measured windows of every lane of every candidate in a task's evidence (`gpu_seconds_per_successful_request` × `successful_requests`), averaged over tasks. |
+
+A gain is known only when the baseline qualified. When the baseline fails its own SLO, the promoted
+candidate has no comparable baseline score, so the gain is reported as unknown and left out of the
+median instead of being estimated.
+
+Measured GPU-hours leave out provisioning, model loading, and warmup, so they are a lower bound on
+what an answer cost. Two tasks that share an evidence file each count it in full. The laptop task
+counts the laptop's GPU time. A lane with no successful requests or no recorded GPU seconds makes its
+task's GPU time unknown; the report counts those tasks and leaves them out of the average.
+
+## The baseline rule
+
+The evaluator accepts two optional fields in `selection_policy`:
+
+```json title="Declare the current setup"
+{
+  "selection_policy": {
+    "id": "serverless-primary-slo-output-throughput",
+    "version": 2,
+    "objective": "maximum_slo_qualified_output_throughput",
+    "lane_aggregation": "arithmetic_mean",
+    "evidence_level": "screening",
+    "qualification_before_scoring": true,
+    "cost_tie_breaker": true,
+    "baseline_candidate_id": "sglang-control",
+    "minimum_relative_gain": 0.08
+  }
+}
+```
+
+Evidence without `baseline_candidate_id` is evaluated exactly as before: the best qualified score is
+selected, and the input digest does not change. With a baseline, qualification still runs first, and
+then:
+
+1. If the baseline qualified, the best other qualified candidate is promoted only when its relative
+   gain on the objective is larger than the noise floor. Otherwise the baseline is kept.
+2. If the baseline failed qualification, the best qualified candidate replaces it, with an unknown
+   gain.
+3. If nothing qualified, the decision is `reject_all` and `winner_id` is empty.
+4. If the baseline scored zero, the relative gain is undefined and the baseline is kept.
+
+The default noise floor is 5%. The unchanged `sglang-0520-nextn-k4-bounded-graphs` recipe spanned
+4.9% in lane-mean cost across six H200 screening receipts, so a smaller lead cannot be told apart from
+re-measurement noise. `minimum_relative_gain` can raise the floor, for example when a campaign measured
+larger drift between its control runs. It cannot lower it: lowering the floor is a code change that
+must keep this suite passing. Treat 5% as a minimum; one speculative-decoding recipe varied by 30%
+between two receipts, both of which failed quality gates.
+
+The result adds a `baseline_decision` object with the outcome, the kept or promoted `candidate_id`,
+the best `challenger_id`, its `relative_gain`, the `noise_floor`, a reason, and the rule's
+`algorithm_version` (`baseline-noise-floor-v1`). Each candidate also reports `baseline` and
+`relative_gain_over_baseline`. `winner_id` is the candidate to serve: the promoted candidate, the kept
+baseline, or nothing.
+
+## Tasks
+
+| Task | Baseline | Expected | Why |
+| --- | --- | --- | --- |
+| `h200-decode-saturation-nextn-clear-win` | SGLang control | promote NEXTN k4 | Lower cost on all four lanes, 44.9% on the mean. |
+| `h200-decode-saturation-control-vs-three-nextn-variants` | SGLang control | promote NEXTN k4 | Lowest cost of four qualified candidates, 43.7% below the control. |
+| `h200-decode-saturation-lead-inside-noise` | linear-flashinfer variant | keep baseline | NEXTN k4 leads by 1.9%, inside the 4.9% re-measurement spread. |
+| `h100-slo-breakers-keep-sglang` | SGLang control | keep baseline | The highest raw throughput misses the SLO at c8. |
+| `h100-vllm-baseline-fails-slo` | vLLM control | promote SGLang control | The current setup misses the SLO at c4; the gain is unknown. |
+| `h200-decode-saturation-quality-gates-reject-all` | SGLang control | reject all | Every candidate fails a required quality gate, including the cheapest. |
+| `h200-interactive-latency-slo-reject-all` | SGLang control | reject all | A candidate that halves cost misses the 800 ms TTFT SLO. |
+| `h200-long-prefill-slo-reject-all` | SGLang control | reject all | Every candidate takes over 9 s to the first token at c4. |
+| `laptop-flash-attn-q8-kv-loses` | llama.cpp defaults | keep baseline | The tuned candidate is 17.4% slower on a quiet laptop run. |
+
+The manifest at `internal/optimizationevidence/testdata/golden/manifest.json` holds the full reason for
+each task. The H200 receipts live in [`evidence/`](./evidence/). The H100 task uses the Qwen3.8-27B-FP8
+screening evidence in `internal/optimizationevidence/testdata/qwen38-modal-screening.json`.
+
+The [Qwen3-0.6B H100 PoC](/testing/modal-qwen3-0.6b-h100-poc) is not a task. Its summary has no
+request counts, quality gates, or GPU time, so expressing it as optimization evidence would mean
+inventing those values.
+
+## Add a task
+
+<Steps>
+  <Step title="Start from recorded evidence">
+    Use an `infercrane.dev/optimization-evidence/v1` file from a real run. Recorded receipts live in
+    `docs/testing/evidence/`. Put new laptop or fixture evidence in
+    `internal/optimizationevidence/testdata/golden/`. Never edit measured values or build evidence to
+    fit a case; boundary cases such as a gain of exactly 5% belong in unit tests.
+  </Step>
+  <Step title="Decide before you run the evaluator">
+    Check every candidate's quality gates and every lane against the SLO. Then compute the objective
+    for each lane and its mean, and compare the best challenger with the baseline against the noise
+    floor. Write the decision and the numbers behind it down first, so the evaluator's output cannot
+    shape the expectation.
+  </Step>
+  <Step title="Add the task to the manifest">
+    Each task needs `id`, `evidence` (relative to the manifest), `baseline_candidate_id`,
+    `expected_decision`, `categories`, and `why`. A `promote` task also needs `expected_candidate_id`
+    and may list `must_not_win` candidates, such as one that breaks the SLO. Categories are
+    `clear_win`, `inside_noise`, `slo_gate`, `quality_gate`, `baseline_fails_slo`,
+    `laptop_rehearsal`, and `recorded_h100`. The test fails if any category except
+    `baseline_fails_slo` loses its last task.
+  </Step>
+  <Step title="Run the suite">
+    Run `make test-optimizer-golden`. If the evaluator disagrees with a new task, do not change the
+    expectation to match. Find out which one is wrong. A pull request that changes an existing
+    expectation must explain the new reasoning in that task's `why`.
+  </Step>
+</Steps>
+
+To record a new laptop task, run the rehearsal on a quiet machine:
+
+```bash
+python3.12 tools/laptop-rehearsal/rehearse.py --requests 24 --output-dir /tmp/rehearsal
+```
+
+Keep a run only when the drift between its two control runs is below 10%. The checked-in run drifted
+1.7%. An earlier attempt on a busy machine drifted 30% and was discarded.
+
+## Limits
+
+- The tasks replay screening evidence, mostly from one model and one workload family on H200.
+- The win rate rests on three expected promotions. Add tasks before reading much into it.
+- The suite checks decisions on recorded evidence. It does not check that a new campaign measures
+  correctly; the campaign's own control runs and noise-floor checks do that.

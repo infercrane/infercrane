@@ -1,0 +1,20 @@
+{
+ "quantization_config": {
+  "quant_method": "quark",
+  "version": "0.13",
+  "global_quant_config": {
+   "weight": {
+    "dtype": "fp4",
+    "qscheme": "per_group",
+    "group_size": 32,
+    "scale_format": "e8m0"
+   },
+   "input_tensors": {
+    "dtype": "fp4",
+    "is_dynamic": true,
+    "qscheme": "per_group",
+    "group_size": 32
+   }
+  }
+ }
+}

@@ -1,0 +1,190 @@
+[
+ {
+  "id": "nvidia/DeepSeek-V4.1-Flash-1017-NVFP4",
+  "sha": "3ae9c0d3fbbea5370bd06e679d22044db15883f1",
+  "createdAt": "2026-10-30T17:37:02.000Z",
+  "lastModified": "2026-11-04T22:10:26.000Z",
+  "private": false,
+  "disabled": false,
+  "gated": false,
+  "library_name": "Model Optimizer",
+  "pipeline_tag": "text-generation",
+  "tags": [
+   "modelopt"
+  ],
+  "cardData": {
+   "license": "mit",
+   "base_model": [
+    "deepseek-ai/DeepSeek-V4.1-Flash-1017"
+   ]
+  },
+  "config": {
+   "architectures": [
+    "X"
+   ],
+   "model_type": "x",
+   "quantization_config": {
+    "quant_method": "fp8"
+   }
+  }
+ },
+ {
+  "id": "nvidia/Qwen3.8-27B-DSpark",
+  "sha": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+  "createdAt": "2026-10-20T09:00:00.000Z",
+  "lastModified": "2026-10-21T09:00:00.000Z",
+  "private": false,
+  "disabled": false,
+  "gated": false,
+  "library_name": "Model Optimizer",
+  "pipeline_tag": null,
+  "tags": [],
+  "cardData": {
+   "license": "apache-2.0",
+   "base_model": [
+    "Qwen/Qwen3.8-27B"
+   ]
+  },
+  "config": {
+   "architectures": [
+    "DSparkDraftModel"
+   ],
+   "model_type": "x"
+  }
+ },
+ {
+  "id": "nvidia/GLM-5.3-Flash-FP4-Local",
+  "sha": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+  "createdAt": "2026-10-08T09:00:00.000Z",
+  "lastModified": "2026-10-16T09:00:00.000Z",
+  "private": false,
+  "disabled": false,
+  "gated": false,
+  "library_name": "Model Optimizer",
+  "pipeline_tag": "image-text-to-text",
+  "tags": [
+   "modelopt"
+  ],
+  "cardData": {
+   "license": "other",
+   "base_model": [
+    "zai-org/GLM-5.3-Flash"
+   ]
+  },
+  "config": {
+   "architectures": [
+    "X"
+   ],
+   "model_type": "x",
+   "quantization_config": {
+    "quant_method": "modelopt"
+   }
+  }
+ },
+ {
+  "id": "nvidia/DeepSeek-V4.1-Flash-NVFP4",
+  "sha": "c48dca0146b56d64c8116dbb6fcace8b7cc835f8",
+  "createdAt": "2026-09-16T10:00:00.000Z",
+  "lastModified": "2026-10-14T16:40:46.000Z",
+  "private": false,
+  "disabled": false,
+  "gated": false,
+  "library_name": "Model Optimizer",
+  "pipeline_tag": "text-generation",
+  "tags": [
+   "modelopt"
+  ],
+  "cardData": {
+   "license": "mit",
+   "base_model": [
+    "deepseek-ai/DeepSeek-V4.1-Flash"
+   ]
+  },
+  "config": {
+   "architectures": [
+    "X"
+   ],
+   "model_type": "x",
+   "quantization_config": {
+    "quant_method": "fp8"
+   }
+  }
+ },
+ {
+  "id": "nvidia/Cosmos3-Nano-FP8",
+  "sha": "e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5",
+  "createdAt": "2026-09-14T09:00:00.000Z",
+  "lastModified": "2026-11-10T09:00:00.000Z",
+  "private": false,
+  "disabled": false,
+  "gated": false,
+  "library_name": "cosmos",
+  "pipeline_tag": null,
+  "tags": [],
+  "cardData": {
+   "license": "other"
+  },
+  "config": {
+   "architectures": [
+    "X"
+   ],
+   "model_type": "x"
+  }
+ },
+ {
+  "id": "nvidia/Qwen3.8-27B-NVFP4",
+  "sha": "482ca0f3832238542f8f5295dde86b5f22711d80",
+  "createdAt": "2026-09-04T21:43:04.000Z",
+  "lastModified": "2026-09-17T17:16:07.000Z",
+  "private": false,
+  "disabled": false,
+  "gated": false,
+  "library_name": "Model Optimizer",
+  "pipeline_tag": "image-text-to-text",
+  "tags": [
+   "modelopt"
+  ],
+  "cardData": {
+   "license": "apache-2.0",
+   "base_model": [
+    "Qwen/Qwen3.8-27B"
+   ]
+  },
+  "config": {
+   "architectures": [
+    "X"
+   ],
+   "model_type": "x",
+   "quantization_config": {
+    "quant_method": "modelopt"
+   }
+  }
+ },
+ {
+  "id": "nvidia/Old-Model-NVFP4",
+  "sha": "f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6",
+  "createdAt": "2026-07-01T09:00:00.000Z",
+  "lastModified": "2026-07-02T09:00:00.000Z",
+  "private": false,
+  "disabled": false,
+  "gated": false,
+  "library_name": "Model Optimizer",
+  "pipeline_tag": "text-generation",
+  "tags": [],
+  "cardData": {
+   "license": "apache-2.0",
+   "base_model": [
+    "acme/old"
+   ]
+  },
+  "config": {
+   "architectures": [
+    "X"
+   ],
+   "model_type": "x",
+   "quantization_config": {
+    "quant_method": "modelopt"
+   }
+  }
+ }
+]
