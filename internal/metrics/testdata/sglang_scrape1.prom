@@ -1,0 +1,137 @@
+# HELP sglang:num_running_reqs The number of running requests.
+# TYPE sglang:num_running_reqs gauge
+sglang:num_running_reqs{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",tp_rank="0"} 4.0
+sglang:num_running_reqs{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="1",tp_rank="0"} 3.0
+sglang:num_running_reqs{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="2",tp_rank="0"} 1.0
+sglang:num_running_reqs{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",tp_rank="1"} 4.0
+sglang:num_running_reqs{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="1",tp_rank="1"} 3.0
+sglang:num_running_reqs{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="2",tp_rank="1"} 1.0
+# HELP sglang:num_queue_reqs The number of requests in the waiting queue.
+# TYPE sglang:num_queue_reqs gauge
+sglang:num_queue_reqs{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",tp_rank="0"} 7.0
+sglang:num_queue_reqs{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="1",tp_rank="0"} 5.0
+sglang:num_queue_reqs{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="2",tp_rank="0"} 2.0
+sglang:num_queue_reqs{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",tp_rank="1"} 7.0
+sglang:num_queue_reqs{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="1",tp_rank="1"} 5.0
+sglang:num_queue_reqs{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="2",tp_rank="1"} 2.0
+# HELP sglang:token_usage The token usage.
+# TYPE sglang:token_usage gauge
+sglang:token_usage{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",tp_rank="0"} 0.88
+sglang:token_usage{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",tp_rank="1"} 0.88
+# HELP sglang:cache_hit_rate The prefix cache hit rate.
+# TYPE sglang:cache_hit_rate gauge
+sglang:cache_hit_rate{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",tp_rank="0"} 0.31
+sglang:cache_hit_rate{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",tp_rank="1"} 0.31
+# HELP sglang:spec_num_draft_tokens Active speculative_num_draft_tokens.
+# TYPE sglang:spec_num_draft_tokens gauge
+sglang:spec_num_draft_tokens{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",tp_rank="0"} 4.0
+sglang:spec_num_draft_tokens{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",tp_rank="1"} 4.0
+# HELP sglang:spec_accept_rate Accepted drafts / proposed drafts.
+# TYPE sglang:spec_accept_rate gauge
+sglang:spec_accept_rate{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",tp_rank="0"} 0.72
+sglang:spec_accept_rate{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",tp_rank="1"} 0.72
+# HELP sglang:gen_throughput The generation throughput (token/s).
+# TYPE sglang:gen_throughput gauge
+sglang:gen_throughput{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",tp_rank="0"} 812.5
+sglang:gen_throughput{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",tp_rank="1"} 812.5
+# HELP sglang:prompt_tokens_total Number of prefill tokens processed.
+# TYPE sglang:prompt_tokens_total counter
+sglang:prompt_tokens_total{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority="",is_streaming="true"} 40000.0
+sglang:prompt_tokens_total{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority="",is_streaming="false"} 2000.0
+# HELP sglang:generation_tokens_total Number of generation tokens processed.
+# TYPE sglang:generation_tokens_total counter
+sglang:generation_tokens_total{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority="",is_streaming="true"} 9000.0
+# HELP sglang:cached_tokens_total Number of cached prompt tokens.
+# TYPE sglang:cached_tokens_total counter
+sglang:cached_tokens_total{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority="",cache_source="device"} 18000.0
+sglang:cached_tokens_total{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority="",cache_source="host"} 3000.0
+# HELP sglang:num_retracted_requests_total Total number of retracted requests.
+# TYPE sglang:num_retracted_requests_total counter
+sglang:num_retracted_requests_total{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",tp_rank="0"} 3.0
+sglang:num_retracted_requests_total{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",tp_rank="1"} 3.0
+# HELP sglang:queue_time_seconds Histogram of queueing time in seconds.
+# TYPE sglang:queue_time_seconds histogram
+sglang:queue_time_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",tp_rank="0",le="0.1"} 80.0
+sglang:queue_time_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",tp_rank="0",le="0.25"} 100.0
+sglang:queue_time_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",tp_rank="0",le="0.5"} 105.0
+sglang:queue_time_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",tp_rank="0",le="1.0"} 108.0
+sglang:queue_time_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",tp_rank="0",le="2.5"} 110.0
+sglang:queue_time_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",tp_rank="0",le="5.0"} 110.0
+sglang:queue_time_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",tp_rank="0",le="+Inf"} 110.0
+sglang:queue_time_seconds_count{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",tp_rank="0"} 110.0
+sglang:queue_time_seconds_sum{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",tp_rank="0"} 16.0
+# HELP sglang:queue_time_seconds Histogram of queueing time in seconds.
+# TYPE sglang:queue_time_seconds histogram
+sglang:queue_time_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",tp_rank="1",le="0.1"} 80.0
+sglang:queue_time_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",tp_rank="1",le="0.25"} 100.0
+sglang:queue_time_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",tp_rank="1",le="0.5"} 105.0
+sglang:queue_time_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",tp_rank="1",le="1.0"} 108.0
+sglang:queue_time_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",tp_rank="1",le="2.5"} 110.0
+sglang:queue_time_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",tp_rank="1",le="5.0"} 110.0
+sglang:queue_time_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",tp_rank="1",le="+Inf"} 110.0
+sglang:queue_time_seconds_count{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",tp_rank="1"} 110.0
+sglang:queue_time_seconds_sum{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",tp_rank="1"} 16.0
+# HELP sglang:per_stage_req_latency_seconds The latency of each stage of requests.
+# TYPE sglang:per_stage_req_latency_seconds histogram
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",stage="prefill_forward",tp_rank="0",le="0.1"} 5.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",stage="prefill_forward",tp_rank="0",le="0.25"} 60.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",stage="prefill_forward",tp_rank="0",le="0.5"} 100.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",stage="prefill_forward",tp_rank="0",le="1.0"} 110.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",stage="prefill_forward",tp_rank="0",le="2.5"} 110.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",stage="prefill_forward",tp_rank="0",le="5.0"} 110.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",stage="prefill_forward",tp_rank="0",le="+Inf"} 110.0
+sglang:per_stage_req_latency_seconds_count{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",stage="prefill_forward",tp_rank="0"} 110.0
+sglang:per_stage_req_latency_seconds_sum{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",stage="prefill_forward",tp_rank="0"} 26.5
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",stage="request_process",tp_rank="0",le="0.1"} 0.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",stage="request_process",tp_rank="0",le="0.25"} 0.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",stage="request_process",tp_rank="0",le="0.5"} 0.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",stage="request_process",tp_rank="0",le="1.0"} 10.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",stage="request_process",tp_rank="0",le="2.5"} 60.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",stage="request_process",tp_rank="0",le="5.0"} 110.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",stage="request_process",tp_rank="0",le="+Inf"} 110.0
+sglang:per_stage_req_latency_seconds_count{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",stage="request_process",tp_rank="0"} 110.0
+sglang:per_stage_req_latency_seconds_sum{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",moe_ep_rank="0",pp_rank="0",priority="",stage="request_process",tp_rank="0"} 309.0
+# HELP sglang:time_to_first_token_seconds Histogram of time to first token in seconds.
+# TYPE sglang:time_to_first_token_seconds histogram
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority="",is_streaming="true",le="0.1"} 10.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority="",is_streaming="true",le="0.25"} 50.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority="",is_streaming="true",le="0.5"} 90.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority="",is_streaming="true",le="1.0"} 100.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority="",is_streaming="true",le="2.5"} 110.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority="",is_streaming="true",le="5.0"} 110.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority="",is_streaming="true",le="+Inf"} 110.0
+sglang:time_to_first_token_seconds_count{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority="",is_streaming="true"} 110.0
+sglang:time_to_first_token_seconds_sum{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority="",is_streaming="true"} 41.0
+# HELP sglang:inter_token_latency_seconds Histogram of inter-token latency in seconds.
+# TYPE sglang:inter_token_latency_seconds histogram
+sglang:inter_token_latency_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority="",le="0.01"} 100.0
+sglang:inter_token_latency_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority="",le="0.02"} 600.0
+sglang:inter_token_latency_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority="",le="0.04"} 900.0
+sglang:inter_token_latency_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority="",le="0.06"} 1050.0
+sglang:inter_token_latency_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority="",le="0.1"} 1090.0
+sglang:inter_token_latency_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority="",le="0.2"} 1100.0
+sglang:inter_token_latency_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority="",le="+Inf"} 1100.0
+sglang:inter_token_latency_seconds_count{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority=""} 1100.0
+sglang:inter_token_latency_seconds_sum{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority=""} 26.0
+# HELP sglang:request_time_per_output_token_seconds Histogram of time per output token in seconds.
+# TYPE sglang:request_time_per_output_token_seconds histogram
+sglang:request_time_per_output_token_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority="",is_streaming="true",le="0.01"} 10.0
+sglang:request_time_per_output_token_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority="",is_streaming="true",le="0.02"} 20.0
+sglang:request_time_per_output_token_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority="",is_streaming="true",le="0.04"} 80.0
+sglang:request_time_per_output_token_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority="",is_streaming="true",le="0.06"} 105.0
+sglang:request_time_per_output_token_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority="",is_streaming="true",le="0.1"} 110.0
+sglang:request_time_per_output_token_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority="",is_streaming="true",le="0.2"} 110.0
+sglang:request_time_per_output_token_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority="",is_streaming="true",le="+Inf"} 110.0
+sglang:request_time_per_output_token_seconds_count{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority="",is_streaming="true"} 110.0
+sglang:request_time_per_output_token_seconds_sum{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority="",is_streaming="true"} 4.1
+# HELP sglang:e2e_request_latency_seconds Histogram of End-to-end request latency in seconds
+# TYPE sglang:e2e_request_latency_seconds histogram
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority="",is_streaming="true",le="0.1"} 0.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority="",is_streaming="true",le="0.25"} 0.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority="",is_streaming="true",le="0.5"} 0.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority="",is_streaming="true",le="1.0"} 10.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority="",is_streaming="true",le="2.5"} 70.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority="",is_streaming="true",le="5.0"} 110.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority="",is_streaming="true",le="+Inf"} 110.0
+sglang:e2e_request_latency_seconds_count{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority="",is_streaming="true"} 110.0
+sglang:e2e_request_latency_seconds_sum{engine_type="unified",model_name="meta-llama/Llama-3.1-8B-Instruct",priority="",is_streaming="true"} 309.0
