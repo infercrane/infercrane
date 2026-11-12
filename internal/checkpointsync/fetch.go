@@ -28,7 +28,7 @@ const (
 )
 
 var (
-	listingFields = []string{"sha", "createdAt", "lastModified", "private", "disabled", "gated", "library_name", "pipeline_tag", "tags", "cardData", "config"}
+	listingFields = []string{"sha", "createdAt", "lastModified", "downloads", "private", "disabled", "gated", "library_name", "pipeline_tag", "tags", "cardData", "config"}
 	baseFields    = []string{"sha", "lastModified", "private", "disabled", "gated", "cardData"}
 	nextLink      = regexp.MustCompile(`<([^>]+)>\s*;\s*rel="next"`)
 	rateLimit     = regexp.MustCompile(`r=(\d+)\s*;\s*t=(\d+)`)
@@ -84,25 +84,97 @@ func (f *Fetcher) Fetch(ctx context.Context, dir string) (Manifest, error) {
 		return Manifest{}, err
 	}
 	manifest := Manifest{SchemaVersion: SnapshotSchemaVersion, Source: strings.TrimRight(f.Endpoint, "/"), FetchedAt: f.Now().UTC().Format(time.RFC3339), PolicyDigest: f.PolicyDigest}
-	heads := map[string]string{}
+	// Collections are read first so that a listing item a reviewed
+	// collection also lists gets the collection member screen.
+	collections := make([][]string, len(f.Policy.Selection.Collections))
+	listed := map[string]struct{}{}
+	for index, collection := range f.Policy.Selection.Collections {
+		members, collectErr := f.collection(ctx, dir, collection.Slug)
+		if collectErr != nil {
+			return Manifest{}, collectErr
+		}
+		manifest.Collections = append(manifest.Collections, ManifestCollection{Slug: collection.Slug, Members: len(members)})
+		collections[index] = members
+		for _, member := range members {
+			listed[member] = struct{}{}
+		}
+	}
+	// considered holds every listing item the selection rule picked, kept or
+	// screened out, so a collection does not fetch it a second time.
+	heads, considered := map[string]string{}, map[string]struct{}{}
 	publishers := append([]checkpointcatalog.PublisherPolicy(nil), f.Policy.Publishers...)
 	sort.Slice(publishers, func(i, j int) bool { return publishers[i].Organization < publishers[j].Organization })
 	for _, publisher := range publishers {
-		items, pages, listErr := f.list(ctx, dir, publisher)
+		window := ManifestPublisher{Organization: publisher.Organization, CreatedAfter: publisher.CreatedAfter, CollectionOnly: publisher.CollectionOnly}
+		if publisher.CollectionOnly {
+			manifest.Publishers = append(manifest.Publishers, window)
+			continue
+		}
+		newest, pages, listErr := f.list(ctx, dir, publisher.Organization, "createdAt", listingPath, func(item ModelInfo) bool {
+			_, selected := ManifestPublisher{CreatedAfter: publisher.CreatedAfter}.selects(item)
+			return selected
+		})
 		if listErr != nil {
 			return Manifest{}, listErr
 		}
-		manifest.Publishers = append(manifest.Publishers, ManifestPublisher{Organization: publisher.Organization, CreatedAfter: publisher.CreatedAfter, Pages: pages})
+		window.Pages = pages
+		var popular []ModelInfo
+		if minimum := f.Policy.Selection.MinDownloads; minimum > 0 {
+			window.MinDownloads = minimum
+			popular, window.DownloadPages, listErr = f.list(ctx, dir, publisher.Organization, "downloads", downloadListingPath, func(item ModelInfo) bool {
+				return item.Downloads >= minimum
+			})
+			if listErr != nil {
+				return Manifest{}, listErr
+			}
+		}
+		manifest.Publishers = append(manifest.Publishers, window)
 		kept := 0
-		for _, item := range items {
-			if inWindow(item, publisher) && screen(item) == "" {
+		for _, item := range append(newest, popular...) {
+			if _, seen := considered[item.ID]; seen {
+				continue
+			}
+			if _, selected := window.selects(item); !selected {
+				continue
+			}
+			considered[item.ID] = struct{}{}
+			if selectionScreen(item, listed) == "" {
 				if _, excluded := f.Policy.Excluded(item.ID, ""); !excluded {
 					heads[item.ID] = item.SHA
 					kept++
 				}
 			}
 		}
-		fmt.Fprintf(f.Log, "%s: %d listed, %d kept for detail\n", publisher.Organization, len(items), kept)
+		fmt.Fprintf(f.Log, "%s: %d listed newest first, %d listed by downloads, %d kept for detail\n", publisher.Organization, len(newest), len(popular), kept)
+	}
+	recordedHeads := map[string]struct{}{}
+	for index, collection := range f.Policy.Selection.Collections {
+		members := collections[index]
+		kept := 0
+		for _, member := range members {
+			if _, listed := considered[member]; listed {
+				continue
+			}
+			if _, known := f.Policy.Publisher(strings.SplitN(member, "/", 2)[0]); !known {
+				continue
+			}
+			if _, excluded := f.Policy.Excluded(member, ""); excluded {
+				continue
+			}
+			if _, recorded := recordedHeads[member]; recorded {
+				continue
+			}
+			head, found, headErr := f.record(ctx, dir, headPath(member), f.modelURL(member, listingFields))
+			if headErr != nil {
+				return Manifest{}, headErr
+			}
+			recordedHeads[member] = struct{}{}
+			if found && screenMember(head) == "" {
+				heads[member] = head.SHA
+				kept++
+			}
+		}
+		fmt.Fprintf(f.Log, "collection %s: %d models, %d more kept for detail\n", collection.Slug, len(members), kept)
 	}
 	targets := map[pin]struct{}{}
 	for repository, revision := range heads {
@@ -114,6 +186,10 @@ func (f *Fetcher) Fetch(ctx context.Context, dir string) (Manifest, error) {
 		if _, listed := heads[pinned.repository]; listed {
 			continue
 		}
+		if _, recorded := recordedHeads[pinned.repository]; recorded {
+			continue
+		}
+		recordedHeads[pinned.repository] = struct{}{}
 		head, found, headErr := f.record(ctx, dir, headPath(pinned.repository), f.modelURL(pinned.repository, listingFields))
 		if headErr != nil {
 			return Manifest{}, headErr
@@ -208,15 +284,12 @@ func (f *Fetcher) pins() ([]pin, error) {
 	return out, nil
 }
 
-func inWindow(info ModelInfo, publisher checkpointcatalog.PublisherPolicy) bool {
-	return len(info.CreatedAt) >= 10 && info.CreatedAt[:10] >= publisher.CreatedAfter
-}
-
-// list pages through one organization, newest first, until it passes the
-// publisher's created_after boundary. Org listings are used instead of
-// collections because collections lag the organization.
-func (f *Fetcher) list(ctx context.Context, dir string, publisher checkpointcatalog.PublisherPolicy) ([]ModelInfo, int, error) {
-	query := url.Values{"author": {publisher.Organization}, "sort": {"createdAt"}, "direction": {"-1"}, "limit": {"100"}, "expand": listingFields}
+// list pages through one organization in the given order until keep rejects
+// the last item on a page. Newest-first pages stop at the publisher's
+// created_after date; most-downloaded-first pages stop below the download
+// threshold.
+func (f *Fetcher) list(ctx context.Context, dir, organization, order string, path func(string, int) string, keep func(ModelInfo) bool) ([]ModelInfo, int, error) {
+	query := url.Values{"author": {organization}, "sort": {order}, "direction": {"-1"}, "limit": {"100"}, "expand": listingFields}
 	next := strings.TrimRight(f.Endpoint, "/") + "/api/models?" + query.Encode()
 	var items []ModelInfo
 	pages := 0
@@ -226,18 +299,18 @@ func (f *Fetcher) list(ctx context.Context, dir string, publisher checkpointcata
 			return nil, 0, err
 		}
 		if status != http.StatusOK {
-			return nil, 0, fmt.Errorf("list %s: upstream status %d", publisher.Organization, status)
+			return nil, 0, fmt.Errorf("list %s: upstream status %d", organization, status)
 		}
 		var page []ModelInfo
 		if err = json.Unmarshal(raw, &page); err != nil {
-			return nil, 0, fmt.Errorf("decode %s listing: %w", publisher.Organization, err)
+			return nil, 0, fmt.Errorf("decode %s listing: %w", organization, err)
 		}
 		pages++
-		if err = writeFile(dir, listingPath(publisher.Organization, pages), raw); err != nil {
+		if err = writeFile(dir, path(organization, pages), raw); err != nil {
 			return nil, 0, err
 		}
 		items = append(items, page...)
-		if len(page) == 0 || !inWindow(page[len(page)-1], publisher) {
+		if len(page) == 0 || !keep(page[len(page)-1]) {
 			break
 		}
 		next = ""
@@ -245,12 +318,33 @@ func (f *Fetcher) list(ctx context.Context, dir string, publisher checkpointcata
 			link, parseErr := url.Parse(match[1])
 			base, _ := url.Parse(f.Endpoint)
 			if parseErr != nil || link.Host != base.Host || link.Scheme != base.Scheme {
-				return nil, 0, fmt.Errorf("list %s: refusing pagination link outside %s", publisher.Organization, f.Endpoint)
+				return nil, 0, fmt.Errorf("list %s: refusing pagination link outside %s", organization, f.Endpoint)
 			}
 			next = link.String()
 		}
 	}
 	return items, pages, nil
+}
+
+// collection records one reviewed collection and returns its model members.
+// Collections seed builds that organization listings miss: older builds the
+// curator still recommends, and builds other organizations publish.
+func (f *Fetcher) collection(ctx context.Context, dir, slug string) ([]string, error) {
+	raw, _, status, err := f.request(ctx, strings.TrimRight(f.Endpoint, "/")+"/api/collections/"+slug, maxRecordBytes)
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("collection %s: upstream status %d; review the policy before syncing", slug, status)
+	}
+	members, err := collectionMembers(raw)
+	if err != nil {
+		return nil, fmt.Errorf("collection %s: %w", slug, err)
+	}
+	if err = writeFile(dir, collectionPath(slug), raw); err != nil {
+		return nil, err
+	}
+	return members, nil
 }
 
 func (f *Fetcher) modelURL(repository string, fields []string) string {

@@ -8,6 +8,13 @@
   "runnable_hardware": [
     {"vendor": "nvidia", "architectures": ["blackwell", "hopper"]}
   ],
+  "selection": {
+    "note": "Track a listed build created on or after its publisher's created_after date or with at least min_downloads downloads in 30 days, and every build a reviewed collection lists.",
+    "min_downloads": 10000,
+    "collections": [
+      {"slug": "nvidia/test-modelopt-checkpoints-0123456789abcdef", "curator": "nvidia", "note": "Fixture collection of ModelOpt builds."}
+    ]
+  },
   "publishers": [
     {
       "organization": "nvidia",
@@ -18,6 +25,7 @@
       "formats": [
         {"kind": "quantized_checkpoint", "tool": "modelopt", "scheme": "nvfp4", "review_state": "approved", "hardware": {"vendor": "nvidia", "architectures": ["blackwell"]}, "runtimes": ["sglang", "vllm"]},
         {"kind": "quantized_checkpoint", "tool": "modelopt", "scheme": "mixed-nvfp4-fp8", "review_state": "approved", "hardware": {"vendor": "nvidia", "architectures": ["blackwell"]}, "runtimes": ["sglang", "vllm"]},
+        {"kind": "quantized_checkpoint", "tool": "modelopt", "scheme": "fp8", "review_state": "approved", "hardware": {"vendor": "nvidia", "architectures": ["hopper", "blackwell"]}, "runtimes": ["sglang", "vllm"]},
         {"kind": "speculator", "scheme": "dspark", "review_state": "approved", "hardware": {"vendor": "nvidia", "architectures": ["hopper", "blackwell"]}, "runtimes": ["sglang", "vllm"]}
       ]
     },
@@ -29,6 +37,16 @@
       "created_after": "2026-08-01",
       "formats": [
         {"kind": "quantized_checkpoint", "tool": "llm-compressor", "scheme": "nvfp4", "review_state": "approved", "hardware": {"vendor": "nvidia", "architectures": ["blackwell"]}, "runtimes": ["vllm"]}
+      ]
+    },
+    {
+      "organization": "stepfun-ai",
+      "name": "StepFun",
+      "hardware_vendor": "nvidia",
+      "review_state": "pending",
+      "collection_only": true,
+      "formats": [
+        {"kind": "quantized_checkpoint", "tool": "modelopt", "scheme": "nvfp4", "review_state": "approved", "hardware": {"vendor": "nvidia", "architectures": ["blackwell"]}, "runtimes": ["sglang", "vllm"]}
       ]
     },
     {

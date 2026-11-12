@@ -13,6 +13,7 @@ type ModelInfo struct {
 	SHA          string      `json:"sha"`
 	CreatedAt    string      `json:"createdAt"`
 	LastModified string      `json:"lastModified"`
+	Downloads    int64       `json:"downloads"`
 	Private      bool        `json:"private"`
 	Disabled     bool        `json:"disabled"`
 	Gated        any         `json:"gated"`

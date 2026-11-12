@@ -1,0 +1,44 @@
+{
+ "slug": "nvidia/test-modelopt-checkpoints-0123456789abcdef",
+ "title": "Test ModelOpt checkpoints",
+ "lastUpdated": "2026-11-10T00:00:00.000Z",
+ "items": [
+  {
+   "type": "model",
+   "id": "nvidia/Qwen3.8-27B-NVFP4",
+   "downloads": 120000
+  },
+  {
+   "type": "model",
+   "id": "nvidia/Old-Listed-NVFP4",
+   "downloads": 800
+  },
+  {
+   "type": "model",
+   "id": "stepfun-ai/Step-Test-NVFP4",
+   "downloads": 50000
+  },
+  {
+   "type": "model",
+   "id": "black-forest-labs/FLUX.3-Test-NVFP4",
+   "downloads": 70000
+  },
+  {
+   "type": "model",
+   "id": "nvidia/Cosmos3-Nano-FP8"
+  },
+  {
+   "type": "model",
+   "id": "nvidia/Hidden-Signal-8B-FP8",
+   "downloads": 15000
+  },
+  {
+   "type": "dataset",
+   "id": "nvidia/Test-Dataset"
+  },
+  {
+   "type": "model",
+   "id": "../escape"
+  }
+ ]
+}

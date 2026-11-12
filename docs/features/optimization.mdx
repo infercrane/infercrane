@@ -526,6 +526,29 @@ covers these Hugging Face organizations:
 | AMD (`amd`) | Quark MXFP4, PTPC-FP8, and INT4 checkpoints; LLM Compressor builds; DFlash speculators | AMD Instinct (CDNA 3 and CDNA 4) | No; InferCrane cannot run AMD hardware yet |
 | Intel (`Intel`) and OpenVINO (`OpenVINO`) | AutoRound checkpoints and OpenVINO INT4, INT8, and NF4 exports | Intel CPU, GPU, and NPU | No; InferCrane cannot run Intel hardware yet |
 | Google (`google`) | Gemma quantization-aware-training checkpoints | NVIDIA through vLLM | Not yet; the publisher is pending review |
+| StepFun (`stepfun-ai`), Thinking Machines Lab (`thinkingmachines`), and LG AI Research (`LGAI-EXAONE`) | Model Optimizer builds of their own models that NVIDIA's Model Optimizer collection lists | NVIDIA Hopper and Blackwell | Not yet; each publisher is pending review |
+
+### Which builds the catalog tracks
+
+The reviewed policy, `internal/checkpointcatalog/policy.json`, records a selection rule. The sync
+tracks a build when any of these holds:
+
+- It is in a publisher's organization and was created on or after that publisher's
+  `created_after` date.
+- It is in a publisher's organization, and Hugging Face reports at least `min_downloads`
+  downloads for it in the last 30 days. This keeps heavily used older builds, such as an FP8
+  build that runs on Hopper, in view after newer releases arrive.
+- A reviewed collection lists it, and its organization is a publisher in the policy. The policy
+  seeds NVIDIA's Inference Optimized Checkpoints (with Model Optimizer) collection, which keeps
+  older builds NVIDIA still recommends and lists Model Optimizer builds that other organizations
+  publish. A publisher marked `collection_only` is never listed as a whole organization; only
+  its builds in a reviewed collection are tracked. Many older Model Optimizer builds record their
+  quantization only in `hf_quant_config.json`, so for a collection member the planner reads that
+  signal from the files at the pinned revision instead of from the listing.
+
+Selection decides only which builds the catalog observes. It never approves a publisher or a
+format, and it never relaxes the license, engine, hardware, or lineage gates. A build that the
+rule selects once stays pinned until it disappears upstream, even if its downloads fall.
 
 Every entry is an **unmeasured candidate**, not an InferCrane performance claim. InferCrane does not
 claim that it transformed the publisher artifact or that the artifact is faster on a target GPU.
@@ -578,9 +601,12 @@ reviewed catalog compiled into the binary. Proposals never contact Hugging Face,
 request path never reads the catalog.
 
 1. Record a snapshot of the public Hugging Face API. The fetch lists each publisher's organization
-   newest first back to a reviewed start date, using organization listings because curated
-   collections lag. It also re-observes every pinned repository. It refuses to run without
-   `--network`.
+   twice: newest first back to the publisher's `created_after` date, and most downloaded first
+   down to the download threshold. It then reads each reviewed collection and records the head of
+   every member that no listing selected, and it re-observes every pinned repository. A reviewed
+   collection that no longer exists stops the fetch until the policy is reviewed. The snapshot
+   records the selection windows it was fetched with, so a later policy edit does not change what
+   a recorded snapshot selects. The fetch refuses to run without `--network`.
 
    ```bash
    go run ./tools/checkpoint-catalog-sync fetch --network --out .infercrane/checkpoint-catalog/snapshot
@@ -594,8 +620,8 @@ request path never reads the catalog.
    go run ./tools/checkpoint-catalog-sync plan --snapshot .infercrane/checkpoint-catalog/snapshot
    ```
 
-3. Review the diff. It lists the entries waiting for review, new candidates, added builds, new
-   revisions, removals, and skipped repositories with reasons. To approve a publisher or format,
+3. Review the diff. It lists the entries waiting for review, new candidates, added builds with
+   the selection reason for each, new revisions, removals, and skipped repositories with reasons. To approve a publisher or format,
    edit the policy and plan the same snapshot again.
 
 4. Install and commit the reviewed catalog:
@@ -607,7 +633,8 @@ request path never reads the catalog.
 
 Review rules:
 
-- A new publisher or a new format always needs a human decision in the policy.
+- A new publisher or a new format always needs a human decision in the policy. A build that a
+  reviewed collection lists from an organization outside the policy is reported as skipped.
 - A new revision of an approved publisher and format is re-reviewed automatically: the planner
   re-runs every gate and keeps the earlier decision unless the kind, base model, format, hardware
   vendor, or license changed. Then the revision waits for review.

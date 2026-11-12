@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 )
@@ -20,6 +21,7 @@ type Policy struct {
 	ReviewedAt         string              `json:"reviewed_at"`
 	ApprovedLicenses   []LicenseRule       `json:"approved_licenses"`
 	RunnableHardware   []HardwareTarget    `json:"runnable_hardware"`
+	Selection          Selection           `json:"selection"`
 	Publishers         []PublisherPolicy   `json:"publishers"`
 	LicenseResolutions []LicenseResolution `json:"license_resolutions,omitempty"`
 	EngineResolutions  []EngineResolution  `json:"engine_resolutions,omitempty"`
@@ -36,12 +38,37 @@ type HardwareTarget struct {
 	Architectures []string `json:"architectures"`
 }
 
+// Selection is the reviewed rule that decides which upstream builds the sync
+// tracks. A build in a publisher's organization listing is tracked when it was
+// created on or after the publisher's created_after date, or when Hugging Face
+// reports at least MinDownloads downloads for it in the last 30 days. A build
+// that a reviewed collection lists is tracked whatever its age or downloads,
+// as long as its organization is a publisher in the policy. Once tracked, a
+// build stays pinned until it disappears upstream.
+type Selection struct {
+	Note         string             `json:"note"`
+	MinDownloads int64              `json:"min_downloads"`
+	Collections  []CollectionPolicy `json:"collections,omitempty"`
+}
+
+// CollectionPolicy is a reviewed Hugging Face collection whose model
+// members seed the sync in addition to organization listings.
+type CollectionPolicy struct {
+	Slug    string `json:"slug"`
+	Curator string `json:"curator"`
+	Note    string `json:"note"`
+}
+
+// PublisherPolicy is the reviewed decision about one organization. A
+// collection-only publisher is never listed as an organization: only the
+// members that reviewed collections list are tracked.
 type PublisherPolicy struct {
 	Organization   string         `json:"organization"`
 	Name           string         `json:"name"`
 	HardwareVendor string         `json:"hardware_vendor"`
 	ReviewState    string         `json:"review_state"`
-	CreatedAfter   string         `json:"created_after"`
+	CreatedAfter   string         `json:"created_after,omitempty"`
+	CollectionOnly bool           `json:"collection_only,omitempty"`
 	Formats        []FormatPolicy `json:"formats"`
 }
 
@@ -111,10 +138,19 @@ func ValidatePolicy(policy Policy) error {
 			return errors.New("approved licenses require a tag and an SPDX identifier")
 		}
 	}
+	if err := validateSelection(policy); err != nil {
+		return err
+	}
 	seen := map[string]struct{}{}
 	for _, publisher := range policy.Publishers {
-		if publisher.Organization == "" || publisher.Name == "" || publisher.HardwareVendor == "" || !datePattern.MatchString(publisher.CreatedAfter) || publisher.ReviewState != ReviewApproved && publisher.ReviewState != ReviewPending {
+		if publisher.Organization == "" || publisher.Name == "" || publisher.HardwareVendor == "" || publisher.ReviewState != ReviewApproved && publisher.ReviewState != ReviewPending {
 			return fmt.Errorf("publisher policy %q is incomplete", publisher.Organization)
+		}
+		switch {
+		case publisher.CollectionOnly && (publisher.CreatedAfter != "" || len(policy.Selection.Collections) == 0):
+			return fmt.Errorf("collection-only publisher %q needs a reviewed collection and no created_after date", publisher.Organization)
+		case !publisher.CollectionOnly && !datePattern.MatchString(publisher.CreatedAfter):
+			return fmt.Errorf("publisher policy %q needs a created_after date", publisher.Organization)
 		}
 		if _, duplicate := seen[strings.ToLower(publisher.Organization)]; duplicate {
 			return fmt.Errorf("duplicate publisher policy %q", publisher.Organization)
@@ -146,6 +182,29 @@ func ValidatePolicy(policy Policy) error {
 		if exclusion.Repository == "" || exclusion.Reason == "" || exclusion.Revision != "" && !ImmutableRevision(exclusion.Revision) || len(exclusion.Engines) > 0 && exclusion.Revision == "" {
 			return errors.New("exclusions require a repository and reason; engine blocks require an immutable revision")
 		}
+	}
+	return nil
+}
+
+var collectionSlug = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,95}/[A-Za-z0-9][A-Za-z0-9._-]{0,199}$`)
+
+func validateSelection(policy Policy) error {
+	selection := policy.Selection
+	if strings.TrimSpace(selection.Note) == "" || selection.MinDownloads < 0 {
+		return errors.New("the selection rule requires a note and a download threshold of zero or more")
+	}
+	slugs := map[string]struct{}{}
+	for _, collection := range selection.Collections {
+		if !collectionSlug.MatchString(collection.Slug) || strings.Contains(collection.Slug, "..") || collection.Note == "" {
+			return fmt.Errorf("collection %q requires a valid slug and a note", collection.Slug)
+		}
+		if _, known := policy.Publisher(collection.Curator); !known {
+			return fmt.Errorf("collection %q must be curated by a publisher in the policy", collection.Slug)
+		}
+		if _, duplicate := slugs[strings.ToLower(collection.Slug)]; duplicate {
+			return fmt.Errorf("duplicate collection %q", collection.Slug)
+		}
+		slugs[strings.ToLower(collection.Slug)] = struct{}{}
 	}
 	return nil
 }

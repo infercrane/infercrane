@@ -146,3 +146,52 @@ func TestCardLinksRequireTheExactHost(t *testing.T) {
 		t.Fatalf("legitimate engine pull requests were not parsed: %+v", legitimate)
 	}
 }
+
+func TestCollectionMembersDeferTheQuantizationSignalToRevisionFiles(t *testing.T) {
+	member := ModelInfo{
+		ID: "nvidia/Plain-Listing-FP8", SHA: strings.Repeat("ab", 20), LibraryName: "transformers", PipelineTag: "text-generation",
+		CardData: CardData{BaseModel: stringList{"nvidia/Plain-Listing"}, License: stringList{"apache-2.0"}},
+		Siblings: []Sibling{{Name: "config.json"}, {Name: "model.safetensors"}},
+	}
+	if screen(member) != skipNoSignal || screenMember(member) != "" {
+		t.Fatalf("listing screen %q, collection screen %q", screen(member), screenMember(member))
+	}
+	noFiles := func(string) ([]byte, bool) { return nil, false }
+	if _, reason := classify(member, noFiles); reason != skipNoSignal {
+		t.Fatalf("a collection member without any quantization signal in its files was classified: %q", reason)
+	}
+	for _, document := range []string{
+		`{"producer":{"name":"modelopt","version":"0.37.0"},"quantization":{"quant_algo":"FP8"}}`,
+		`{"quantization":{"quant_algo":"FP8","kv_cache_quant_algo":"none"}}`,
+	} {
+		withHFQuant := func(name string) ([]byte, bool) {
+			if name == "hf_quant_config.json" {
+				return []byte(document), true
+			}
+			return nil, false
+		}
+		class, reason := classify(member, withHFQuant)
+		if reason != "" || class.Tool != "modelopt" || class.Scheme != "fp8" {
+			t.Fatalf("hf_quant_config.json %s did not identify the ModelOpt build: %+v %q", document, class, reason)
+		}
+	}
+	if isModelOpt(member, []byte(`{"producer":{"name":"other-tool"},"quantization":{"quant_algo":"FP8"}}`)) {
+		t.Fatal("an hf_quant_config.json from another producer was treated as ModelOpt")
+	}
+	member.CardData.BaseModel = nil
+	if screenMember(member) != skipNoBase {
+		t.Fatal("a collection member without a declared base model passed the lineage screen")
+	}
+}
+
+func TestVisionLanguageModelNamedEagleIsNotASpeculator(t *testing.T) {
+	model := ModelInfo{ID: "nvidia/Eagle2.5-8B", Config: ModelConfig{Architectures: []string{"Eagle2_5_VLForConditionalGeneration"}}}
+	if isSpeculator(model) {
+		t.Fatal("a vision-language model was classified as an EAGLE speculator")
+	}
+	for _, architecture := range []string{"LlamaForCausalLMEagle3", "DFlash2DraftModel", "Qwen3DSparkModel"} {
+		if !isSpeculator(ModelInfo{ID: "nvidia/Draft", Config: ModelConfig{Architectures: []string{architecture}}}) {
+			t.Fatalf("speculator architecture %s is no longer recognized", architecture)
+		}
+	}
+}

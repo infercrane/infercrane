@@ -1,0 +1,30 @@
+{
+ "id": "nvidia/Old-Listed-NVFP4",
+ "sha": "f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7",
+ "createdAt": "2026-02-01T09:00:00.000Z",
+ "lastModified": "2026-02-01T09:00:00.000Z",
+ "downloads": 800,
+ "private": false,
+ "disabled": false,
+ "gated": false,
+ "library_name": "Model Optimizer",
+ "pipeline_tag": "text-generation",
+ "tags": [
+  "modelopt"
+ ],
+ "cardData": {
+  "license": "mit",
+  "base_model": [
+   "zai-org/GLM-5.3-Flash"
+  ]
+ },
+ "config": {
+  "architectures": [
+   "X"
+  ],
+  "model_type": "x",
+  "quantization_config": {
+   "quant_method": "modelopt"
+  }
+ }
+}

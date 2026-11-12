@@ -10,10 +10,13 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/infercrane/infercrane/internal/checkpointcatalog"
 )
 
 var recordedStatus = regexp.MustCompile(`^\{"status":(\d+)\}\n$`)
@@ -58,15 +61,21 @@ func recordedUpstream(t *testing.T, root string, throttleFirst bool) (*httptest.
 		path := strings.TrimPrefix(r.URL.Path, "/")
 		switch {
 		case path == "api/models":
-			organization := r.URL.Query().Get("author")
+			organization, order := r.URL.Query().Get("author"), r.URL.Query().Get("sort")
+			pagePath := listingPath
+			if order == "downloads" {
+				pagePath = downloadListingPath
+			}
 			page := 1
 			if r.URL.Query().Get("cursor") == "2" {
 				page = 2
 			}
-			if _, err := os.Stat(filepath.Join(root, listingPath(organization, page+1))); err == nil {
-				w.Header().Set("Link", "<"+server.URL+"/api/models?author="+organization+"&cursor=2>; rel=\"next\"")
+			if _, err := os.Stat(filepath.Join(root, pagePath(organization, page+1))); err == nil {
+				w.Header().Set("Link", "<"+server.URL+"/api/models?author="+organization+"&sort="+order+"&cursor=2>; rel=\"next\"")
 			}
-			serveFile(w, listingPath(organization, page))
+			serveFile(w, pagePath(organization, page))
+		case strings.HasPrefix(path, "api/collections/"):
+			serveFile(w, collectionPath(strings.TrimPrefix(path, "api/collections/")))
 		case strings.HasPrefix(path, "api/models/") && strings.Contains(path, "/revision/"):
 			repository, revision, _ := strings.Cut(strings.TrimPrefix(path, "api/models/"), "/revision/")
 			serveFile(w, infoPath(repository, revision))
@@ -170,6 +179,10 @@ func TestFetchRecordsTheSnapshotThePlanReads(t *testing.T) {
 
 func TestFetchRefusesForeignPaginationAndExistingSnapshots(t *testing.T) {
 	foreign := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/collections/") {
+			_, _ = w.Write([]byte(`{"items":[]}`))
+			return
+		}
 		w.Header().Set("Link", `<https://example.invalid/api/models?cursor=2>; rel="next"`)
 		_, _ = w.Write([]byte(`[{"id":"nvidia/A","sha":"` + strings.Repeat("a", 40) + `","createdAt":"2026-10-01T00:00:00.000Z"}]`))
 	}))
@@ -208,5 +221,72 @@ func TestPlanRefusesIncompleteSnapshots(t *testing.T) {
 	policy, digest := fixturePolicy(t)
 	if _, err = Plan(snapshot, policy, digest, fixturePrevious(t), "2026-11-11"); err == nil || !strings.Contains(err.Error(), "incomplete") {
 		t.Fatalf("plan accepted a snapshot without recorded revisions: %v", err)
+	}
+}
+
+func TestFetchSeedsReviewedCollectionsAndListsByDownloads(t *testing.T) {
+	root := filepath.Join("testdata", "snapshot")
+	server, requests := recordedUpstream(t, root, false)
+	policy, digest := fixturePolicy(t)
+	fetcher := Fetcher{Endpoint: server.URL, Policy: policy, PolicyDigest: digest, Previous: fixturePrevious(t), Sleep: func(time.Duration) {}}
+	manifest, err := fetcher.Fetch(context.Background(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.Collections) != 1 || manifest.Collections[0].Members != 6 {
+		t.Fatalf("collection members were not recorded: %+v", manifest.Collections)
+	}
+	counts := map[string]int{}
+	for _, request := range *requests {
+		switch {
+		case strings.HasPrefix(request, "/api/collections/nvidia/test-modelopt-checkpoints-0123456789abcdef"):
+			counts["collection"]++
+		case strings.Contains(request, "sort=downloads"):
+			counts["downloads"]++
+		case strings.HasPrefix(request, "/api/models/nvidia/Hidden-Signal-8B-FP8?"):
+			t.Fatalf("a listed collection member was fetched again as a head record: %s", request)
+		case strings.Contains(request, "author=stepfun-ai"):
+			t.Fatalf("a collection-only publisher was listed as an organization: %s", request)
+		case strings.Contains(request, "black-forest-labs") || strings.Contains(request, "Test-Dataset") || strings.Contains(request, "escape"):
+			t.Fatalf("fetch followed a collection item outside the policy: %s", request)
+		case strings.HasPrefix(request, "/api/models/nvidia/Old-Listed-NVFP4?"), strings.HasPrefix(request, "/api/models/stepfun-ai/Step-Test-NVFP4?"):
+			counts["member head"]++
+		}
+	}
+	if counts["collection"] != 1 || counts["downloads"] != 3 || counts["member head"] != 2 {
+		t.Fatalf("unexpected seed requests: %+v", counts)
+	}
+
+	policy.Selection.MinDownloads = 0
+	policy.Selection.Collections = nil
+	policy.Publishers = slices.DeleteFunc(policy.Publishers, func(publisher checkpointcatalog.PublisherPolicy) bool { return publisher.CollectionOnly })
+	*requests = nil
+	manifest, err = (&Fetcher{Endpoint: server.URL, Policy: policy, Sleep: func(time.Duration) {}}).Fetch(context.Background(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, request := range *requests {
+		if strings.Contains(request, "sort=downloads") || strings.Contains(request, "/api/collections/") {
+			t.Fatalf("a disabled selection rule still sent %s", request)
+		}
+	}
+	if len(manifest.Collections) != 0 || manifest.Publishers[0].MinDownloads != 0 {
+		t.Fatalf("manifest records rules the policy did not set: %+v", manifest)
+	}
+}
+
+func TestFetchStopsWhenAReviewedCollectionIsMissing(t *testing.T) {
+	missing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/collections/") {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte("[]"))
+	}))
+	t.Cleanup(missing.Close)
+	policy, digest := fixturePolicy(t)
+	fetcher := Fetcher{Endpoint: missing.URL, Policy: policy, PolicyDigest: digest, Sleep: func(time.Duration) {}}
+	if _, err := fetcher.Fetch(context.Background(), t.TempDir()); err == nil || !strings.Contains(err.Error(), "review the policy") {
+		t.Fatalf("a missing reviewed collection did not stop the fetch: %v", err)
 	}
 }

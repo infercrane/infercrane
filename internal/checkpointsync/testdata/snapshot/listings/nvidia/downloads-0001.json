@@ -1,0 +1,138 @@
+[
+ {
+  "id": "nvidia/Nemotron-Old-30B-FP8",
+  "sha": "e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7",
+  "createdAt": "2026-03-10T09:00:00.000Z",
+  "lastModified": "2026-03-10T09:00:00.000Z",
+  "downloads": 250000,
+  "private": false,
+  "disabled": false,
+  "gated": false,
+  "library_name": "Model Optimizer",
+  "pipeline_tag": "text-generation",
+  "tags": [
+   "modelopt"
+  ],
+  "cardData": {
+   "license": "apache-2.0",
+   "base_model": [
+    "nvidia/Nemotron-Old-30B-BF16"
+   ]
+  },
+  "config": {
+   "architectures": [
+    "X"
+   ],
+   "model_type": "x",
+   "quantization_config": {
+    "quant_method": "modelopt"
+   }
+  }
+ },
+ {
+  "id": "nvidia/Qwen3.8-27B-NVFP4",
+  "sha": "482ca0f3832238542f8f5295dde86b5f22711d80",
+  "createdAt": "2026-09-04T21:43:04.000Z",
+  "lastModified": "2026-09-17T17:16:07.000Z",
+  "private": false,
+  "disabled": false,
+  "gated": false,
+  "library_name": "Model Optimizer",
+  "pipeline_tag": "image-text-to-text",
+  "tags": [
+   "modelopt"
+  ],
+  "cardData": {
+   "license": "apache-2.0",
+   "base_model": [
+    "Qwen/Qwen3.8-27B"
+   ]
+  },
+  "config": {
+   "architectures": [
+    "X"
+   ],
+   "model_type": "x",
+   "quantization_config": {
+    "quant_method": "modelopt"
+   }
+  },
+  "downloads": 120000
+ },
+ {
+  "id": "nvidia/bigvgan-test-22khz",
+  "sha": "e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9",
+  "createdAt": "2024-07-15T09:00:00.000Z",
+  "lastModified": "2024-07-15T09:00:00.000Z",
+  "downloads": 90000,
+  "private": false,
+  "disabled": false,
+  "gated": false,
+  "library_name": "pytorch",
+  "pipeline_tag": "audio-to-audio",
+  "tags": [],
+  "cardData": {
+   "license": "mit",
+   "base_model": []
+  },
+  "config": {
+   "architectures": [
+    "X"
+   ],
+   "model_type": "x"
+  }
+ },
+ {
+  "id": "nvidia/Hidden-Signal-8B-FP8",
+  "sha": "b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9",
+  "createdAt": "2025-12-06T09:00:00.000Z",
+  "lastModified": "2025-12-06T09:00:00.000Z",
+  "downloads": 15000,
+  "private": false,
+  "disabled": false,
+  "gated": false,
+  "library_name": "transformers",
+  "pipeline_tag": "text-generation",
+  "tags": [],
+  "cardData": {
+   "license": "apache-2.0",
+   "base_model": [
+    "nvidia/Nemotron-Old-30B-BF16"
+   ]
+  },
+  "config": {
+   "architectures": [
+    "X"
+   ],
+   "model_type": "x"
+  }
+ },
+ {
+  "id": "nvidia/Old-Model-NVFP4",
+  "sha": "f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6",
+  "createdAt": "2026-07-01T09:00:00.000Z",
+  "lastModified": "2026-07-02T09:00:00.000Z",
+  "private": false,
+  "disabled": false,
+  "gated": false,
+  "library_name": "Model Optimizer",
+  "pipeline_tag": "text-generation",
+  "tags": [],
+  "cardData": {
+   "license": "apache-2.0",
+   "base_model": [
+    "acme/old"
+   ]
+  },
+  "config": {
+   "architectures": [
+    "X"
+   ],
+   "model_type": "x",
+   "quantization_config": {
+    "quant_method": "modelopt"
+   }
+  },
+  "downloads": 900
+ }
+]

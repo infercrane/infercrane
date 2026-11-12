@@ -127,6 +127,7 @@ func RenderDiff(result Result) []byte {
 	fmt.Fprintf(&out, "- Snapshot fetched: %s\n- Snapshot digest: `%s`\n- Policy digest: `%s`\n", diff.FetchedAt, diff.SnapshotDigest, diff.PolicyDigest)
 	fmt.Fprintf(&out, "- Entries: %d (%d candidates, %d pending review)\n", len(catalog.Entries), candidates, pending)
 	fmt.Fprintf(&out, "- Changes: %d added, %d revised, %d changed, %d removed, %d unchanged\n", len(diff.Added), len(diff.Revised), len(diff.Changed), len(diff.Removed), diff.Unchanged)
+	fmt.Fprintf(&out, "- Selection: %s\n", selectionLabel(result.Manifest))
 	for _, note := range diff.Notes {
 		fmt.Fprintf(&out, "- Note: %s\n", note)
 	}
@@ -153,9 +154,13 @@ func RenderDiff(result Result) []byte {
 	out.WriteString("\n## Added\n\n")
 	rows = rows[:0]
 	for _, entry := range diff.Added {
-		rows = append(rows, []string{entryLabel(entry), entry.Base.Repository, formatLabel(entry), hardwareLabel(entry), eligibilityLabel(entry)})
+		selectedBy, found := diff.Selected[entry.Repository]
+		if !found {
+			selectedBy = "pinned"
+		}
+		rows = append(rows, []string{entryLabel(entry), entry.Base.Repository, formatLabel(entry), hardwareLabel(entry), selectedBy, eligibilityLabel(entry)})
 	}
-	table(&out, []string{"Entry", "Base", "Format", "Hardware", "Eligibility"}, rows)
+	table(&out, []string{"Entry", "Base", "Format", "Hardware", "Selected by", "Eligibility"}, rows)
 
 	out.WriteString("\n## New revisions\n\nA new revision of a reviewed publisher and format passes an automated re-review unless its kind, base, format, hardware vendor, or license changed.\n\n")
 	rows = rows[:0]
@@ -185,7 +190,7 @@ func RenderDiff(result Result) []byte {
 	}
 	table(&out, []string{"Entry", "Reason"}, rows)
 
-	out.WriteString("\n## Skipped repositories\n\nRepositories in a publisher's listing window that did not become entries.\n")
+	out.WriteString("\n## Skipped repositories\n\nRepositories the selection rule picked that did not become entries.\n")
 	reasons := make([]string, 0, len(diff.Skipped))
 	for reason := range diff.Skipped {
 		reasons = append(reasons, reason)
@@ -198,6 +203,26 @@ func RenderDiff(result Result) []byte {
 		fmt.Fprintf(&out, "\n### %s (%d)\n\n%s\n", reason, len(diff.Skipped[reason]), strings.Join(diff.Skipped[reason], ", "))
 	}
 	return out.Bytes()
+}
+
+// selectionLabel summarizes the selection rule the snapshot was fetched with.
+func selectionLabel(manifest Manifest) string {
+	var windows []string
+	for _, publisher := range manifest.Publishers {
+		switch {
+		case publisher.CollectionOnly:
+			windows = append(windows, publisher.Organization+" collections only")
+		case publisher.MinDownloads > 0:
+			windows = append(windows, fmt.Sprintf("%s since %s or %d+ downloads", publisher.Organization, publisher.CreatedAfter, publisher.MinDownloads))
+		default:
+			windows = append(windows, publisher.Organization+" since "+publisher.CreatedAfter)
+		}
+	}
+	label := strings.Join(windows, "; ")
+	for _, collection := range manifest.Collections {
+		label += fmt.Sprintf("; collection `%s` (%d models)", collection.Slug, collection.Members)
+	}
+	return label
 }
 
 func table(out *bytes.Buffer, header []string, rows [][]string) {
