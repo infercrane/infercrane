@@ -76,17 +76,22 @@ optimizer.
 
 | Layer | Candidate families | Eligibility signal | Required proof |
 |---|---|---|---|
-| Runtime | vLLM/SGLang/TensorRT-LLM, eager/compiled execution, CUDA graphs | exact model and runtime support | API parity and paired workload |
+| Runtime | vLLM, SGLang, TensorRT-LLM PyTorch backend (its engine backend was removed), runtime version, eager/compiled execution, CUDA graphs | exact model and runtime support | API parity and paired workload |
 | Scheduling | continuous batching, batch-token budget, chunked prefill, admission, queue policy | arrival/token distributions and SLO | tail latency and goodput |
 | Cache | paged KV, prefix/Radix cache, KV offload/reuse, cache-aware routing | context length, reuse and memory pressure | hit rate, quality and p95 latency |
-| Precision | BF16/FP16, FP8, NVFP4/MXFP4, INT8/INT4, AWQ/GPTQ/SmoothQuant | accelerator support and calibration policy | task quality, memory and throughput |
-| Decoding | n-gram, draft model, MTP, EAGLE/DFlash, structured decoding | acceptance rate and exact verifier compatibility | identical/approved output policy and latency |
+| Precision | BF16/FP16, FP8, NVFP4/MXFP4 and INT8 weights and activations, INT4 AWQ/GPTQ weights, FP8 and NVFP4 KV cache | accelerator and runtime support, calibration policy | task quality, memory and throughput |
+| Decoding | draft model, native MTP/NEXTN, EAGLE-3, P-EAGLE, DFlash, DSpark, suffix decoding, n-gram where the runtime still supports it, structured decoding | acceptance rate at the served concurrency and exact verifier compatibility | identical/approved output policy and latency |
 | Attention | FlashAttention, FlashInfer, paged/ragged attention, MLA/GQA, sparse attention | phase, head layout, context and batch | numerical parity, memory and phase metrics |
-| Parallelism | tensor, pipeline, data, expert, context parallelism | model size, interconnect and workload | scaling efficiency and communication profile |
+| Parallelism | tensor, pipeline, data, expert, prefill and decode context parallelism | model size, interconnect and workload | scaling efficiency and communication profile |
 | Topology | aggregated or disaggregated prefill/decode, KV transport, cache-aware routing | phase imbalance and fleet size | end-to-end capacity under SLO |
 | Artifact | pruning, distillation, sparsity, adapter merge, model replacement | customer-approved quality boundary | full task evaluation and provenance |
 | Hardware | GPU family, count, MIG/profile, CPU/accelerator placement | memory fit, availability, price and data policy | sourced cost and repeated measurements |
 | Kernel | vendor kernel choice, fusion, specialized GEMM/GEMV, attention, MoE, sampling | profiler hotspot and Amdahl headroom | local parity, exact-GPU benchmark and AIPerf |
+
+This table is the design space, not current coverage.
+[Implementation coverage](#implementation-coverage) shows what campaigns can
+vary today; every other family needs its own compatibility and measurement work
+before it becomes a candidate.
 
 No candidate family is universally beneficial. For example, prefix caching has
 no value without reusable prefixes; speculative decoding loses when acceptance
@@ -137,9 +142,15 @@ public Agentic Systems workload prior
 customer traffic → content-free replay → drift + SLO + economics
       ▲                                      │
       │                                      ▼
-      └──── observe promoted recipe ← Release Guard canary
-                                             │
-                            reject / rollback / recommend promote
+      │                 decision record: wait, screen, start
+      │                 experiment, observe, or retain current
+      │                                      │
+      │                                      ▼
+      │                      approved optimization campaign
+      │                                      │
+      │                                      ▼
+      └── promoted recipe ← Release Guard canary (judged and rolled back
+                                               by Release Guard only)
 ```
 
 The public dataset supplies day-zero token shapes and screening lanes. Its
@@ -160,9 +171,11 @@ An exact failed fingerprint is suppressed for the configured rejection-memory
 window. Kernel hypotheses are ineligible without measured profiler evidence.
 The loop uses a hard candidate count, spend ceiling, cooldown, and active-
 campaign limit so noisy traffic cannot create an experiment storm. It may
-create experiment intent automatically under standing policy, but production
-promotion remains manual by default. Release Guard can still roll back a bad
-canary automatically.
+create experiment intent automatically under standing policy. It never judges
+or promotes a canary: promotion is a human-approved Release Guard rollout, and
+Release Guard alone compares the canary with the active revision and can roll
+it back automatically. Once a recipe is promoted, the loop sees it as the
+active service on its next evaluation.
 
 The commercial objective is therefore not raw throughput:
 
@@ -273,7 +286,7 @@ reference parity
   → interpreter/simulator + memory safety
   → compile for exact SM
   → target-GPU randomized correctness
-  → CUDA-event microbenchmark + Nsight roofline
+  → CUDA-event microbenchmark + DRAM roofline fraction
   → runtime integration
   → paired AIPerf + quality + cost
 ```
@@ -354,8 +367,11 @@ machine. Its intent binds the search to the exact input, hotspot candidate,
 profile artifact, model revision, runtime image, hardware, and workload. Its
 receipt records every keep/reject decision, all five correctness stages,
 baseline and candidate timing, roofline utilization, cost, plateau state, and
-the immutable winning source revision. The receipt is content-addressed and
-tampering fails validation.
+the immutable winning source revision. The residual-RMSNorm evaluator computes
+roofline utilization as the time the operator's minimum DRAM traffic would take
+at the GPU's peak bandwidth, divided by the measured time. It reports 0, which
+never stops a search, when the bandwidth is unknown or the timing was not
+DRAM-bound. The receipt is content-addressed and tampering fails validation.
 
 `internal/acceleratorlab` passes that intent through its opt-in generator
 contract. A worker may iterate in Triton, CUDA C++, CuTe, Pallas, NKI, HIP, or
@@ -406,16 +422,17 @@ complete. The current implementation boundary is:
 | vLLM and SGLang recipe candidates, cache/precision/scheduler/topology fields | Implemented for bounded candidates | Every exact tuple still needs compatibility and measured qualification |
 | Opt-in runtime recipe search for any pinned model | Implemented for SGLang 0.5.20 on H100, H200, and B200 through pinned-image RunPod Pods | `internal/optimizer/recipe_search.go` gates arms on the pinned `config.json` and workload shape, keeps an untuned control on the same image, and leaves every arm unmeasured; the capability registry's exact-model rule is unchanged |
 | AIPerf load generation and persisted benchmark evidence | Implemented | Requires an installed runner and a reachable exact serving tuple |
+| Campaign measurement: bound Replay replay, warmup, three runs per arm interleaved with the campaign control, and a noise-floor ranking gate | Implemented and hermetically qualified | Control and candidate share a time window, not a GPU; prompt content, arrival timing, and shared-prefix length are not replayed; no real-GPU campaign has run this method yet |
 | Profiler-hotspot and Amdahl kernel opportunity planning | Implemented and locally qualified | Accelerator worker `POST /v1/profiles` captures vendor-native evidence; a real worker/toolchain is required for measured claims |
 | Existing-first kernel search across runtime, FlashInfer, CUTLASS/CuTe, Triton and CUDA sources | Implemented as reviewed registry policy | Matches are unmeasured source candidates, never automatic performance claims |
 | Triton and handwritten CUDA correctness/microbenchmark PoCs | Implemented as operator experiments | Manual GPU qualification tools; not yet an automatic campaign executor |
 | Profiler → generated/reviewed source → Brezel build → target qualification | Implemented and locally qualified | Durable operation, progressive cost, immutable artifacts, worker-declared capabilities, and no implicit promotion; deployed runner/worker still require real-infrastructure qualification |
 | Brezel-isolated optimization build jobs and receipts | Implemented and locally qualified | Fixed baked runner, deny-by-default egress, verified input/output artifacts, cleanup and signed receipt; the optimization environment revision must actually contain that runner |
 | TensorRT-LLM, multi-node collectives, expert placement and disaggregated MoE qualification | Executable worker contract | NVIDIA workers may declare these independently; undeclared topology fails before spend, and no real tuple is claimed without evidence |
-| Nsight Systems/Compute, rocprof, XProf and Neuron Explorer capture | Executable worker contract | Capabilities are loaded from the configured worker at startup; built-in schemas are never presented as deployed capacity |
+| PyTorch profiler, rocprof, XProf and Neuron Explorer capture | Executable worker contract | The shipped NVIDIA adapter captures PyTorch profiler traces; the others are declared schemas only. Capabilities are loaded from the configured worker at startup; built-in schemas are never presented as deployed capacity |
 | Generated kernels with recent-research intake | Implemented; not yet run on a GPU or against a live model | `cmd/infercrane-kernel-adapter`, `internal/kernelgen`, and `internal/kernelliterature` write drafts for reviewed operator packs and keep them only through `kernelresearch`; the first pack is residual-RMSNorm in Triton |
 | Iterative authored-kernel research and KernelBench-style evaluation | Implemented model-neutral state machine and orchestration gates | Profile-bound AutoKernel-style keep/reject loop, five correctness stages, plateau/roofline/time/iteration/cost limits, isolated build, exact-target and serving replay; generator and hardware-worker implementations still need deployment qualification |
-| AMD ROCm, TPU and Trainium compiler/runtime paths | Planner, registry and worker contracts implemented | AITER/CK/Triton-ROCm/HIP, Pallas/XLA, and NKI/Neuron candidates exist; no real-hardware product claim until the corresponding worker passes |
+| AMD ROCm, TPU and Trainium compiler/runtime paths | Planner, registry and worker contracts implemented | AITER/CK/Triton-ROCm/HIP, Pallas/XLA, and NKI/Neuron candidates exist. TPU rows name the vLLM TorchTPU and vLLM JAX plugins and the Trainium row names the vLLM Neuron plugin, which replaces NxD Inference; no real-hardware product claim until the corresponding worker passes |
 | Image, video and voice optimization lanes | Typed workload and qualification contracts implemented | Each run requires media shapes, immutable replay, modality quality suite and a worker-declared lane; measured suites remain tuple-specific real-infrastructure work |
 
 For the MVP, the defensible product is the locally qualified control plane plus
@@ -498,7 +515,7 @@ concepts have been absorbed as typed Go policy:
 | Release/evidence manifest import without trust upgrade | `internal/optimizationevidence/fastpath.go` |
 | Hotspot normalization, Amdahl stop gate and existing-first kernel plan | `internal/kernelplanner` |
 | Budget, durable campaign stages, ranking and explicit promotion | `internal/optimizationcampaign` and `internal/acceleratorlab` |
-| Nsight/profile request and exact target evidence boundary | `internal/acceleratorlab` worker client |
+| Profile request and exact target evidence boundary | `internal/acceleratorlab` worker client |
 | Isolated source build and lifecycle receipt | `internal/brezelexecutor` |
 | vLLM/AIPerf/quality evidence and Release Guard | existing benchmark, quality-evidence and release-guard packages |
 
@@ -589,9 +606,9 @@ the InferCrane API server.
   model endpoint. The model has no tools and returns source text only. Drafts
   execute solely through the isolated evaluator, a no-network container with no
   credentials, and `kernelresearch` alone decides keep or reject.
-- **GPU worker:** exact-SM build when required, correctness, sanitizers, Nsight,
-  microbenchmarks, AIPerf replay, quality tests, and teardown under the campaign
-  lease.
+- **GPU worker:** exact-SM build when required, correctness, sanitizers,
+  PyTorch profiler traces, microbenchmarks, AIPerf replay, quality tests, and
+  teardown under the campaign lease.
 
 The deterministic planner and registry belong in this repository because they
 are product policy. Brezel remains a separately deployed execution service;

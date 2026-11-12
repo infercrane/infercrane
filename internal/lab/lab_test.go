@@ -141,3 +141,31 @@ func TestEvaluateSelectsOnlyMeasuredCandidateSatisfyingAllConstraints(t *testing
 		t.Fatalf("selected=%d candidates=%#v", selected, candidates)
 	}
 }
+
+// Repeated benchmarks record their measured Student-t intervals and campaign
+// control results beside the load inputs. Those are outputs: two runs of the
+// same load must share one workload digest, or the most rigorous evidence can
+// never be ranked.
+func TestEvaluateRanksRepeatedRunsWhoseMeasuredOutputsDiffer(t *testing.T) {
+	first := `{"profile":"interactive","profile_version":"benchmark-profile-v1","concurrency":1,"request_count":100,"profile_runs":3,"confidence_95":{"ttft_p95_ms":{"samples":3,"mean":180,"lower_95":170,"upper_95":190}},"measured":{"control":{"available":true,"drift":0.01}}}`
+	second := `{"profile":"interactive","profile_version":"benchmark-profile-v1","concurrency":1,"request_count":100,"profile_runs":3,"confidence_95":{"ttft_p95_ms":{"samples":3,"mean":150,"lower_95":146,"upper_95":154}},"measured":{"control":{"available":false}}}`
+	changedRuns := `{"profile":"interactive","profile_version":"benchmark-profile-v1","concurrency":1,"request_count":100,"profile_runs":5,"confidence_95":{"ttft_p95_ms":{"samples":5,"mean":140,"lower_95":138,"upper_95":142}}}`
+	rows := []domain.BenchmarkResult{
+		{ID: "first", ModelIdentity: "model@commit", RequestCount: 300, TTFTP95MS: number(180), WorkloadJSON: first, CostMetadataJSON: `{}`},
+		{ID: "second", ModelIdentity: "model@commit", RequestCount: 300, TTFTP95MS: number(150), WorkloadJSON: second, CostMetadataJSON: `{}`},
+	}
+	if WorkloadDigest(first) != WorkloadDigest(second) {
+		t.Fatal("measured outputs changed the workload digest")
+	}
+	result, err := Evaluate(Input{ModelIdentity: "model@commit", Objective: ObjectiveLatency}, rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var candidates []Candidate
+	if err = json.Unmarshal([]byte(result.ResultsJSON), &candidates); err != nil || len(candidates) != 2 || !candidates[0].Comparable || candidates[0].EvidenceID != "second" || !candidates[0].Selected {
+		t.Fatalf("repeated runs were not ranked: candidates=%#v err=%v", candidates, err)
+	}
+	if WorkloadDigest(changedRuns) == WorkloadDigest(first) {
+		t.Fatal("a different run count must remain a different workload")
+	}
+}

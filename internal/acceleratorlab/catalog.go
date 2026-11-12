@@ -30,13 +30,19 @@ type CapabilityCatalog struct {
 	Capabilities []Capability `json:"capabilities"`
 }
 
+// DefaultCapabilityCatalog is the built-in schema shown when no worker is
+// configured. Runtime names identify the exact serving plugin: on Google TPU,
+// vLLM TorchTPU serves PyTorch models and vLLM JAX (formerly tpu-inference)
+// serves JAX models; on AWS, the vLLM Neuron plugin replaces the NxD Inference
+// library, which AWS put in maintenance mode. These are metadata, not support.
 func DefaultCapabilityCatalog() CapabilityCatalog {
 	modalities := []Modality{ModalityText, ModalityImage, ModalityVideo, ModalityAudio}
 	return CapabilityCatalog{Version: CapabilityCatalogVersion, Capabilities: []Capability{
-		{Vendor: "nvidia", Profiler: "nsight-systems+nsight-compute", RuntimeAllowlist: []string{"vllm", "sglang", "tensorrt-llm"}, Modalities: modalities, MultiNode: true, DisaggregatedServing: true, ExpertParallel: true, GeneratedKernels: true, AdapterState: "worker-contract-ready", Qualification: "exact target required"},
+		// The shipped NVIDIA adapter captures PyTorch profiler traces (internal/kerneltarget).
+		{Vendor: "nvidia", Profiler: "torch-profiler", RuntimeAllowlist: []string{"vllm", "sglang", "tensorrt-llm"}, Modalities: modalities, MultiNode: true, DisaggregatedServing: true, ExpertParallel: true, GeneratedKernels: true, AdapterState: "worker-contract-ready", Qualification: "exact target required"},
 		{Vendor: "amd", Profiler: "rocprofv3+rocprofiler-compute", RuntimeAllowlist: []string{"vllm", "sglang"}, Modalities: modalities, MultiNode: true, DisaggregatedServing: true, ExpertParallel: true, GeneratedKernels: true, AdapterState: "worker-contract-ready", Qualification: "exact target required"},
-		{Vendor: "google", Profiler: "xprof", RuntimeAllowlist: []string{"vllm", "jax"}, Modalities: modalities, MultiNode: true, DisaggregatedServing: false, ExpertParallel: true, GeneratedKernels: true, AdapterState: "worker-contract-ready", Qualification: "exact target required"},
-		{Vendor: "aws", Profiler: "neuron-explorer", RuntimeAllowlist: []string{"vllm", "neuronx-distributed-inference"}, Modalities: modalities, MultiNode: true, DisaggregatedServing: false, ExpertParallel: true, GeneratedKernels: true, AdapterState: "worker-contract-ready", Qualification: "exact target required"},
+		{Vendor: "google", Profiler: "xprof", RuntimeAllowlist: []string{"vllm-torchtpu", "vllm-jax"}, Modalities: modalities, MultiNode: true, DisaggregatedServing: false, ExpertParallel: true, GeneratedKernels: true, AdapterState: "worker-contract-ready", Qualification: "exact target required"},
+		{Vendor: "aws", Profiler: "neuron-explorer", RuntimeAllowlist: []string{"vllm-neuron"}, Modalities: modalities, MultiNode: true, DisaggregatedServing: false, ExpertParallel: true, GeneratedKernels: true, AdapterState: "worker-contract-ready", Qualification: "exact target required"},
 	}}
 }
 

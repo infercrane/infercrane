@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -12,6 +14,7 @@ import unittest
 from pathlib import Path
 
 INTEGRATION = Path(__file__).with_name("integration")
+PACK = Path(__file__).with_name("pack.json")
 STUB_TORCH = """
 class Tensor:
     def __init__(self, shape=(1, 4), dtype="bf16"):
@@ -67,12 +70,12 @@ SERVER = textwrap.dedent(
 
 
 class IntegrationTest(unittest.TestCase):
-    def run_server(self, kernel: str = KERNEL, call: bool = True) -> tuple[subprocess.CompletedProcess, Path]:
+    def run_server(self, kernel: str = KERNEL, call: bool = True, version: str | None = "0.22.1") -> tuple[subprocess.CompletedProcess, Path]:
         root = Path(tempfile.mkdtemp())
         stubs = root / "stubs"
         (stubs / "vllm" / "ir").mkdir(parents=True)
         (stubs / "torch.py").write_text(STUB_TORCH)
-        (stubs / "vllm" / "__init__.py").write_text("")
+        (stubs / "vllm" / "__init__.py").write_text("" if version is None else f"__version__ = {version!r}\n")
         (stubs / "vllm" / "ir" / "__init__.py").write_text(STUB_IR)
         (root / "kernel.py").write_text(kernel)
         state = root / "state"
@@ -102,6 +105,33 @@ class IntegrationTest(unittest.TestCase):
         completed, _ = self.run_server(kernel="raise ValueError('broken')\n")
         self.assertEqual(completed.returncode, 97)
         self.assertEqual(completed.stdout, "")
+        self.assertIn("ValueError", completed.stderr)
+        self.assertNotIn("broken", completed.stderr)
+
+    def test_local_build_label_keeps_the_reviewed_release(self) -> None:
+        completed, state = self.run_server(version="0.22.1+cu129")
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertTrue((state / "invoked").exists())
+
+    def test_unreviewed_vllm_stops_before_loading_the_kernel(self) -> None:
+        # The kernel would print if it were loaded; it must not be.
+        kernel = "print('kernel loaded')\n" + KERNEL
+        for version, shown in (("0.34.0", "vLLM 0.34.0"), ("0.22.2", "vLLM 0.22.2"), (None, "unknown version")):
+            with self.subTest(version=version):
+                completed, state = self.run_server(kernel=kernel, version=version)
+                self.assertEqual(completed.returncode, 97)
+                self.assertEqual(completed.stdout, "")
+                self.assertIn(shown, completed.stderr)
+                self.assertIn("CustomOp", completed.stderr)
+                self.assertFalse((state / "invoked").exists())
+
+    def test_pack_declares_the_versions_the_integration_enforces(self) -> None:
+        spec = importlib.util.spec_from_file_location("pack_sitecustomize", INTEGRATION / "sitecustomize.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        pack = json.loads(PACK.read_text(encoding="utf-8"))
+        self.assertEqual(tuple(pack["runtime_versions"]["vllm"]), module.SUPPORTED_VLLM_VERSIONS)
+        self.assertIsNone(module.runtime_problem("0.22.1"))
 
 
 if __name__ == "__main__":

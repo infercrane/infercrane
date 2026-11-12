@@ -352,3 +352,30 @@ func TestSkyPilotProviderProfileDoesNotClaimGenericCapacityPreflight(t *testing.
 		}
 	}
 }
+
+func TestSGLangQualificationCitesItsOnlyRecordedRealRun(t *testing.T) {
+	registry, err := PortableCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile, err := registry.Runtime("sglang")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Five-request AWS lifecycle runs are documented evidence, not retained
+	// catalog evidence, so real-GPU qualification stays deferred and cites it.
+	const evidence = "docs/testing/aws-real-evidence.md"
+	cited := false
+	for _, qualification := range profile.Qualification {
+		if qualification.State == QualificationReal {
+			t.Fatalf("SGLang catalog claims real qualification: %+v", qualification)
+		}
+		if qualification.State == QualificationDeferred && strings.Contains(qualification.Reason, evidence) && strings.Contains(qualification.Reason, "0.5.12") {
+			cited = true
+		}
+	}
+	body, err := os.ReadFile(filepath.Join("..", "..", evidence))
+	if !cited || err != nil || !strings.Contains(string(body), "SGLang 0.5.12 | 5/5") {
+		t.Fatalf("SGLang qualification does not match the recorded run: cited=%v err=%v", cited, err)
+	}
+}

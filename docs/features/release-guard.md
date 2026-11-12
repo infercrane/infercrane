@@ -64,7 +64,9 @@ active/candidate evidence for the exact environment.
 
 An evaluation returns one of three decisions:
 
-- `ACCEPT`: enough evidence exists and every measured regression is within policy.
+- `ACCEPT`: enough evidence exists and every measured regression is within policy. An accepted
+  candidate may still carry `quality_watch` reasons when a semantic quality eval dropped inside the
+  watch band. Those reasons record a follow-up; they do not block promotion.
 - `REJECT`: readiness failed, proven compatibility mismatches, or a measured regression exceeds
   policy.
 - `WAIT`: the candidate is ready but there is not enough trustworthy evidence yet.
@@ -92,6 +94,21 @@ run a task-specific customer-owned evaluation and attach its
 [signed aggregate evidence](/features/semantic-quality). Release Guard can require comparable
 suite/evaluator versions, a minimum score, and a bounded regression. InferCrane still does not select
 an LLM judge, retain evaluation prompts or outputs, or let an evaluator promote a revision.
+
+Release Guard gives every eval a verdict against the active revision:
+
+- `BLOCK` rejects the candidate. The suite failed, the score is below the minimum, or the drop is
+  beyond `max_quality_regression_percent`.
+- `WATCH` keeps the decision `ACCEPT`. The drop is above `quality_watch_regression_percent` and
+  within the regression limit. The evaluation adds a `quality_watch` reason with a follow-up, and
+  Release Guard writes a `release_guard.quality_watch` audit event.
+- `PASS` changes nothing.
+- `UNKNOWN` waits. There is no comparable active evidence, or the bootstrap result is inconclusive.
+
+The stored decisions stay `ACCEPT`, `REJECT`, and `WAIT`. Each evaluation also persists the per-eval
+and per-model verdicts under `metrics.quality`. See
+[PASS, WATCH, and BLOCK per eval](/features/semantic-quality#pass-watch-and-block-per-eval) for the
+policy field, the API view, and the follow-up.
 
 Because a candidate is deliberately absent from the logical route, operators gather bounded
 candidate evidence explicitly with AIPerf rather than duplicating production requests:

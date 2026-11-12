@@ -597,6 +597,11 @@ func TestQualifyRefusesUnverifiableInputsBeforeUsingTheGPU(t *testing.T) {
 			f.target.Runtimes[0].Name = "sglang"
 			r.Runtime.Name = "sglang"
 		},
+		// vLLM 0.34.0 removes the IR op-priority setting the pack relies on.
+		"pack runtime version": func(f *fixture, r *acceleratorlab.QualificationRequest) {
+			f.target.Runtimes[0].Version = "0.34.0"
+			r.Runtime.Version = "0.34.0"
+		},
 	}
 	for name, mutate := range cases {
 		f := newFixture(t)
