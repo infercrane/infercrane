@@ -3,6 +3,8 @@ title: CLI reference
 description: Commands for configuring, deploying, observing, updating, and deleting InferCrane deployments.
 ---
 
+import SafeRetry from "/snippets/safe-retry.mdx";
+
 # CLI reference
 
 The public CLI uses Cobra for grouped help, typo suggestions, aliases, and shell completion. It talks to the authenticated control-plane API and never opens PostgreSQL directly. Run `infercrane help` for the current command tree and `infercrane version` for the build version.
@@ -19,7 +21,7 @@ The public CLI uses Cobra for grouped help, typo suggestions, aliases, and shell
 - `infercrane --context NAME COMMAND` selects a context for one invocation.
 - `infercrane --no-color COMMAND` and the standard `NO_COLOR` environment variable disable ANSI styling. Redirected output and JSON are never decorated.
 
-<Snippet file="_snippets/safe-retry.mdx" />
+<SafeRetry />
 
 ## Configure and diagnose
 

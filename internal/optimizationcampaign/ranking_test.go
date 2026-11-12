@@ -39,6 +39,9 @@ func rankingFixture(t *testing.T, objective string, maxCost *float64) (domain.Op
 	for index, candidate := range proposal.Candidates[:2] {
 		campaign.Candidates = append(campaign.Candidates, domain.OptimizationCandidateRun{ID: "candidate-" + string(rune('a'+index)), TenantID: campaign.TenantID, CampaignID: campaign.ID, ProposalCandidateID: candidate.ID, State: CandidateRanked, RevisionID: "revision-" + string(rune('a'+index)), BenchmarkID: "benchmark-" + string(rune('a'+index)), QualityEvidenceID: "quality-" + string(rune('a'+index))})
 	}
+	// Benchmarks record the deployed artifact (repository@immutable revision),
+	// not the catalog alias the operator typed when creating the campaign.
+	artifactIdentity := proposal.Candidates[0].Deployment.Model.ID + "@" + proposal.Candidates[0].Deployment.Model.Revision
 	ttftA, ttftB, throughputA, throughputB := 220.0, 140.0, 60.0, 80.0
 	costA, costB := 2.0, 3.0
 	workload := `{"profile":"interactive","request_count":100,"random_seed":17}`
@@ -50,8 +53,8 @@ func rankingFixture(t *testing.T, objective string, maxCost *float64) (domain.Op
 		"output_token_throughput": {HigherIsBetter: true, ControlMean: 60, CandidateMean: 80, Delta: 20.0 / 60, NoiseFloor: 0.03, Decision: DecisionImproved},
 	}}, nil)
 	benchmarks := []domain.BenchmarkResult{
-		{ID: "benchmark-a", RevisionID: "revision-a", ModelIdentity: campaign.ModelIdentity, Provider: "aws", Region: "eu-central-1", GPU: "L40S", Runtime: "vllm", ComputeMode: "elastic", RequestCount: 100, TTFTP95MS: &ttftA, OutputTokenThroughput: &throughputA, WorkloadJSON: controlWorkload, CostMetadataJSON: costJSON(costA)},
-		{ID: "benchmark-b", RevisionID: "revision-b", ModelIdentity: campaign.ModelIdentity, Provider: "aws", Region: "eu-central-1", GPU: "L40S", Runtime: "vllm", ComputeMode: "elastic", RequestCount: 100, TTFTP95MS: &ttftB, OutputTokenThroughput: &throughputB, WorkloadJSON: candidateWorkload, CostMetadataJSON: costJSON(costB)},
+		{ID: "benchmark-a", RevisionID: "revision-a", ModelIdentity: artifactIdentity, Provider: "aws", Region: "eu-central-1", GPU: "L40S", Runtime: "vllm", ComputeMode: "elastic", RequestCount: 100, TTFTP95MS: &ttftA, OutputTokenThroughput: &throughputA, WorkloadJSON: controlWorkload, CostMetadataJSON: costJSON(costA)},
+		{ID: "benchmark-b", RevisionID: "revision-b", ModelIdentity: artifactIdentity, Provider: "aws", Region: "eu-central-1", GPU: "L40S", Runtime: "vllm", ComputeMode: "elastic", RequestCount: 100, TTFTP95MS: &ttftB, OutputTokenThroughput: &throughputB, WorkloadJSON: candidateWorkload, CostMetadataJSON: costJSON(costB)},
 	}
 	return campaign, benchmarks
 }
@@ -390,5 +393,33 @@ func TestRankMeasuredCampaignKeepsConstraintReasonsWhenNothingIsSelected(t *test
 	}
 	if result.Decisions["candidate-b"] != RankReject || result.FailureCodes["candidate-b"] != "" || !strings.Contains(result.Reasons["candidate-b"], "hourly cost") {
 		t.Fatalf("the noise gate masked a constraint rejection: decisions=%v codes=%v reasons=%v", result.Decisions, result.FailureCodes, result.Reasons)
+	}
+}
+
+func TestRankMeasuredCampaignMatchesDeployedArtifactNotTypedAlias(t *testing.T) {
+	campaign, benchmarks := rankingFixture(t, "interactive", nil)
+	if campaign.ModelIdentity != "qwen3-8b" || !strings.Contains(benchmarks[0].ModelIdentity, "@") {
+		t.Fatalf("fixture no longer exercises an alias campaign: campaign=%q benchmark=%q", campaign.ModelIdentity, benchmarks[0].ModelIdentity)
+	}
+	if _, err := RankMeasuredCampaign(campaign, benchmarks); err != nil {
+		t.Fatalf("benchmarks for the deployed artifact did not rank an alias campaign: %v", err)
+	}
+	for index := range benchmarks {
+		benchmarks[index].ModelIdentity = campaign.ModelIdentity
+	}
+	if _, err := RankMeasuredCampaign(campaign, benchmarks); err == nil {
+		t.Fatal("benchmarks that do not name the deployed artifact were ranked")
+	}
+}
+
+func TestRankMeasuredCampaignRejectsMixedModelArtifacts(t *testing.T) {
+	campaign, _ := rankingFixture(t, "interactive", nil)
+	var proposal optimizer.Proposal
+	if err := json.Unmarshal([]byte(campaign.ProposalJSON), &proposal); err != nil {
+		t.Fatal(err)
+	}
+	proposal.Candidates[1].Deployment.Model.Revision = strings.Repeat("c", 40)
+	if _, err := measuredArtifactIdentity(proposal); err == nil {
+		t.Fatal("candidates serving different artifacts produced one measured identity")
 	}
 }
