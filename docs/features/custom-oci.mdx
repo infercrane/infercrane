@@ -52,7 +52,8 @@ custom image does not imply arbitrary artifact protocols.
 
 ## Runtime contract
 
-The image must be pinned by `@sha256`. The supported protocol and probe paths are deliberately
+The image must be pinned by `@sha256`; a private registry with a port, such as
+`registry.internal:5000/team/runtime@sha256:...`, is accepted. The supported protocol and probe paths are deliberately
 narrow: OpenAI-compatible HTTP, `/health`, `/v1/models`, and `/metrics`. Client disconnect must
 cancel upstream HTTP work, and InferCrane withdraws the router generation and drains active
 connections before provider deletion.
