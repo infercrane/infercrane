@@ -15,8 +15,10 @@ type TargetSource interface {
 	AutoscalingTargetURLs(context.Context, string) ([]string, error)
 }
 
-// VLLMSignals reads provider-runtime gauges without recording prompt or output
-// content. A missing queue gauge is an error, not an invented zero.
+// VLLMSignals reads serving-engine running/waiting gauges without recording
+// prompt or output content. Despite the historical name it accepts every
+// engine metrics.ParseEngine supports (vLLM, SGLang, and llama.cpp server). A
+// missing queue gauge is an error, not an invented zero.
 type VLLMSignals struct {
 	Targets TargetSource
 	Client  *http.Client
@@ -48,14 +50,17 @@ func (s VLLMSignals) Signals(ctx context.Context, deploymentID string) (Signals,
 		if err != nil {
 			return Signals{}, fmt.Errorf("scrape %s: %w", baseURL, err)
 		}
-		body, readErr := io.ReadAll(io.LimitReader(response.Body, 2<<20))
+		body, readErr := io.ReadAll(io.LimitReader(response.Body, metrics.MaxEnginePayloadBytes+1))
 		response.Body.Close()
 		if readErr != nil || response.StatusCode != http.StatusOK {
 			return Signals{}, fmt.Errorf("scrape %s returned %s", baseURL, response.Status)
 		}
-		parsed := metrics.Parse(string(body))
+		parsed, parseErr := metrics.ParseEngine(string(body))
+		if parseErr != nil {
+			return Signals{}, fmt.Errorf("scrape %s: %w", baseURL, parseErr)
+		}
 		if parsed.RequestsWaiting == nil || parsed.RequestsRunning == nil {
-			return Signals{}, fmt.Errorf("scrape %s omitted vLLM running/waiting gauges", baseURL)
+			return Signals{}, fmt.Errorf("scrape %s omitted %s running/waiting gauges", baseURL, parsed.Engine)
 		}
 		out.Waiting += *parsed.RequestsWaiting
 		out.Running += *parsed.RequestsRunning

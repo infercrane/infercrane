@@ -43,8 +43,9 @@ infercrane logs support-production --follow
 infercrane explain scaling support-production
 ```
 
-Persisted vLLM running/waiting signals, consecutive-interval thresholds, and cooldowns produce an
-auditable scale-up, scale-down, or no-op decision. `explain scaling` returns the selected action,
+Persisted serving-engine running/waiting signals (vLLM, SGLang, or llama.cpp server; see
+[Serving-engine metrics](/features/telemetry#serving-engine-metrics)), consecutive-interval
+thresholds, and cooldowns produce an auditable scale-up, scale-down, or no-op decision. `explain scaling` returns the selected action,
 old and new desired capacity, the signal snapshot, reason, and evaluation timestamp. Missing or
 stale metrics produce a persisted no-op instead of a guessed decision.
 
@@ -151,8 +152,9 @@ qualified.
 ## Qualify scale-up, streaming drain, and scale-down
 
 Use an isolated staging deployment with `min=1`, a reviewed `max`, and a runtime that exposes the
-required vLLM running/waiting metrics. This is a paid real-infrastructure qualification, not a local
-fixture claim.
+required running/waiting metrics (vLLM, SGLang started with `--enable-metrics`, or llama.cpp server
+started with `--metrics`). This is a paid real-infrastructure qualification, not a local fixture
+claim.
 
 1. Record the exact plan, baseline inventory, and one-ready-replica state:
 

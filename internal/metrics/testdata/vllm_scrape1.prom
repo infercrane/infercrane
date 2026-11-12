@@ -1,0 +1,136 @@
+# HELP vllm:num_requests_running Number of requests in model execution batches.
+# TYPE vllm:num_requests_running gauge
+vllm:num_requests_running{engine="0",model_name="Qwen/Qwen3-8B"} 6.0
+# HELP vllm:num_requests_waiting Number of requests waiting to be processed.
+# TYPE vllm:num_requests_waiting gauge
+vllm:num_requests_waiting{engine="0",model_name="Qwen/Qwen3-8B"} 2.0
+# HELP vllm:kv_cache_usage_perc KV-cache usage. 1 means 100 percent usage.
+# TYPE vllm:kv_cache_usage_perc gauge
+vllm:kv_cache_usage_perc{engine="0",model_name="Qwen/Qwen3-8B"} 0.93
+# HELP vllm:num_preemptions_total Cumulative number of preemption from the engine.
+# TYPE vllm:num_preemptions_total counter
+vllm:num_preemptions_total{engine="0",model_name="Qwen/Qwen3-8B"} 7.0
+# HELP vllm:num_preemptions_created Cumulative number of preemption from the engine.
+# TYPE vllm:num_preemptions_created gauge
+vllm:num_preemptions_created{engine="0",model_name="Qwen/Qwen3-8B"} 1.7629e+09
+# HELP vllm:prompt_tokens_total Number of prefill tokens processed.
+# TYPE vllm:prompt_tokens_total counter
+vllm:prompt_tokens_total{engine="0",model_name="Qwen/Qwen3-8B"} 30000.0
+# HELP vllm:prompt_tokens_created Number of prefill tokens processed.
+# TYPE vllm:prompt_tokens_created gauge
+vllm:prompt_tokens_created{engine="0",model_name="Qwen/Qwen3-8B"} 1.7629e+09
+# HELP vllm:generation_tokens_total Number of generation tokens processed.
+# TYPE vllm:generation_tokens_total counter
+vllm:generation_tokens_total{engine="0",model_name="Qwen/Qwen3-8B"} 9000.0
+# HELP vllm:generation_tokens_created Number of generation tokens processed.
+# TYPE vllm:generation_tokens_created gauge
+vllm:generation_tokens_created{engine="0",model_name="Qwen/Qwen3-8B"} 1.7629e+09
+# HELP vllm:prefix_cache_queries_total Prefix cache queries, in terms of number of queried tokens.
+# TYPE vllm:prefix_cache_queries_total counter
+vllm:prefix_cache_queries_total{engine="0",model_name="Qwen/Qwen3-8B"} 28000.0
+# HELP vllm:prefix_cache_queries_created Prefix cache queries, in terms of number of queried tokens.
+# TYPE vllm:prefix_cache_queries_created gauge
+vllm:prefix_cache_queries_created{engine="0",model_name="Qwen/Qwen3-8B"} 1.7629e+09
+# HELP vllm:prefix_cache_hits_total Prefix cache hits, in terms of number of cached tokens.
+# TYPE vllm:prefix_cache_hits_total counter
+vllm:prefix_cache_hits_total{engine="0",model_name="Qwen/Qwen3-8B"} 4000.0
+# HELP vllm:prefix_cache_hits_created Prefix cache hits, in terms of number of cached tokens.
+# TYPE vllm:prefix_cache_hits_created gauge
+vllm:prefix_cache_hits_created{engine="0",model_name="Qwen/Qwen3-8B"} 1.7629e+09
+# HELP vllm:spec_decode_num_draft_tokens_total Number of draft tokens.
+# TYPE vllm:spec_decode_num_draft_tokens_total counter
+vllm:spec_decode_num_draft_tokens_total{engine="0",model_name="Qwen/Qwen3-8B"} 3000.0
+# HELP vllm:spec_decode_num_draft_tokens_created Number of draft tokens.
+# TYPE vllm:spec_decode_num_draft_tokens_created gauge
+vllm:spec_decode_num_draft_tokens_created{engine="0",model_name="Qwen/Qwen3-8B"} 1.7629e+09
+# HELP vllm:spec_decode_num_accepted_tokens_total Number of accepted tokens.
+# TYPE vllm:spec_decode_num_accepted_tokens_total counter
+vllm:spec_decode_num_accepted_tokens_total{engine="0",model_name="Qwen/Qwen3-8B"} 1400.0
+# HELP vllm:spec_decode_num_accepted_tokens_created Number of accepted tokens.
+# TYPE vllm:spec_decode_num_accepted_tokens_created gauge
+vllm:spec_decode_num_accepted_tokens_created{engine="0",model_name="Qwen/Qwen3-8B"} 1.7629e+09
+# HELP vllm:request_queue_time_seconds Histogram of time spent in WAITING phase for request.
+# TYPE vllm:request_queue_time_seconds histogram
+vllm:request_queue_time_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="0.3"} 60.0
+vllm:request_queue_time_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="0.5"} 85.0
+vllm:request_queue_time_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="0.8"} 98.0
+vllm:request_queue_time_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="1.0"} 110.0
+vllm:request_queue_time_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="2.5"} 116.0
+vllm:request_queue_time_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="5.0"} 120.0
+vllm:request_queue_time_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="+Inf"} 120.0
+vllm:request_queue_time_seconds_count{engine="0",model_name="Qwen/Qwen3-8B"} 120.0
+vllm:request_queue_time_seconds_sum{engine="0",model_name="Qwen/Qwen3-8B"} 80.5
+# HELP vllm:request_prefill_time_seconds Histogram of time spent in PREFILL phase for request.
+# TYPE vllm:request_prefill_time_seconds histogram
+vllm:request_prefill_time_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="0.01"} 60.0
+vllm:request_prefill_time_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="0.025"} 100.0
+vllm:request_prefill_time_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="0.05"} 125.0
+vllm:request_prefill_time_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="0.075"} 133.0
+vllm:request_prefill_time_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="0.1"} 138.0
+vllm:request_prefill_time_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="0.15"} 140.0
+vllm:request_prefill_time_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="0.2"} 140.0
+vllm:request_prefill_time_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="+Inf"} 140.0
+vllm:request_prefill_time_seconds_count{engine="0",model_name="Qwen/Qwen3-8B"} 140.0
+vllm:request_prefill_time_seconds_sum{engine="0",model_name="Qwen/Qwen3-8B"} 4.6
+# HELP vllm:request_decode_time_seconds Histogram of time spent in DECODE phase for request.
+# TYPE vllm:request_decode_time_seconds histogram
+vllm:request_decode_time_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="0.3"} 15.0
+vllm:request_decode_time_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="0.5"} 45.0
+vllm:request_decode_time_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="0.8"} 105.0
+vllm:request_decode_time_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="1.0"} 135.0
+vllm:request_decode_time_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="2.5"} 150.0
+vllm:request_decode_time_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="5.0"} 150.0
+vllm:request_decode_time_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="+Inf"} 150.0
+vllm:request_decode_time_seconds_count{engine="0",model_name="Qwen/Qwen3-8B"} 150.0
+vllm:request_decode_time_seconds_sum{engine="0",model_name="Qwen/Qwen3-8B"} 180.0
+# HELP vllm:time_to_first_token_seconds Histogram of time to first token in seconds.
+# TYPE vllm:time_to_first_token_seconds histogram
+vllm:time_to_first_token_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="0.04"} 30.0
+vllm:time_to_first_token_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="0.1"} 68.0
+vllm:time_to_first_token_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="0.25"} 93.0
+vllm:time_to_first_token_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="0.5"} 106.0
+vllm:time_to_first_token_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="1.0"} 118.0
+vllm:time_to_first_token_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="2.5"} 130.0
+vllm:time_to_first_token_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="+Inf"} 130.0
+vllm:time_to_first_token_seconds_count{engine="0",model_name="Qwen/Qwen3-8B"} 130.0
+vllm:time_to_first_token_seconds_sum{engine="0",model_name="Qwen/Qwen3-8B"} 49.0
+# HELP vllm:inter_token_latency_seconds Histogram of inter-token latency in seconds.
+# TYPE vllm:inter_token_latency_seconds histogram
+vllm:inter_token_latency_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="0.01"} 600.0
+vllm:inter_token_latency_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="0.025"} 2300.0
+vllm:inter_token_latency_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="0.05"} 4600.0
+vllm:inter_token_latency_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="0.075"} 5300.0
+vllm:inter_token_latency_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="0.1"} 5550.0
+vllm:inter_token_latency_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="0.15"} 5680.0
+vllm:inter_token_latency_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="0.2"} 5800.0
+vllm:inter_token_latency_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="0.3"} 5800.0
+vllm:inter_token_latency_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="+Inf"} 5800.0
+vllm:inter_token_latency_seconds_count{engine="0",model_name="Qwen/Qwen3-8B"} 5800.0
+vllm:inter_token_latency_seconds_sum{engine="0",model_name="Qwen/Qwen3-8B"} 340.0
+# HELP vllm:request_time_per_output_token_seconds Histogram of time_per_output_token_seconds per request.
+# TYPE vllm:request_time_per_output_token_seconds histogram
+vllm:request_time_per_output_token_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="0.01"} 15.0
+vllm:request_time_per_output_token_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="0.025"} 65.0
+vllm:request_time_per_output_token_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="0.05"} 105.0
+vllm:request_time_per_output_token_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="0.075"} 120.0
+vllm:request_time_per_output_token_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="0.1"} 125.0
+vllm:request_time_per_output_token_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="0.15"} 130.0
+vllm:request_time_per_output_token_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="0.2"} 130.0
+vllm:request_time_per_output_token_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="0.3"} 130.0
+vllm:request_time_per_output_token_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="+Inf"} 130.0
+vllm:request_time_per_output_token_seconds_count{engine="0",model_name="Qwen/Qwen3-8B"} 130.0
+vllm:request_time_per_output_token_seconds_sum{engine="0",model_name="Qwen/Qwen3-8B"} 5.5
+# HELP vllm:e2e_request_latency_seconds Histogram of e2e request latency in seconds.
+# TYPE vllm:e2e_request_latency_seconds histogram
+vllm:e2e_request_latency_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="0.3"} 0.0
+vllm:e2e_request_latency_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="0.5"} 12.0
+vllm:e2e_request_latency_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="0.8"} 50.0
+vllm:e2e_request_latency_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="1.0"} 100.0
+vllm:e2e_request_latency_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="2.5"} 115.0
+vllm:e2e_request_latency_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="5.0"} 130.0
+vllm:e2e_request_latency_seconds_bucket{engine="0",model_name="Qwen/Qwen3-8B",le="+Inf"} 130.0
+vllm:e2e_request_latency_seconds_count{engine="0",model_name="Qwen/Qwen3-8B"} 130.0
+vllm:e2e_request_latency_seconds_sum{engine="0",model_name="Qwen/Qwen3-8B"} 325.0
+# HELP python_gc_objects_collected_total Objects collected during gc
+# TYPE python_gc_objects_collected_total counter
+python_gc_objects_collected_total{generation="0"} 1234.0

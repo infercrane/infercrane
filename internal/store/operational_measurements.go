@@ -12,11 +12,25 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/metrics"
 )
 
 var measurementIdentifier = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 var measurementSourceIdentifier = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._:/@+-]{0,127}$`)
 var measurementReplicaIdentifier = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._:/@+-]{0,254}$`)
+
+// canonicalMeasurementUnits pins the unit of every measurement that
+// monitoring or diagnosis interprets, so an import cannot report the same
+// name in an incompatible unit.
+var canonicalMeasurementUnits = func() map[string]string {
+	units := map[string]string{}
+	for _, catalog := range [][]metrics.MeasurementSpec{metrics.HardwareMeasurementCatalog, metrics.EngineMeasurementCatalog} {
+		for _, measurement := range catalog {
+			units[measurement.Name] = measurement.Unit
+		}
+	}
+	return units
+}()
 
 // RecordOperationalMeasurements records one bounded collector snapshot. The
 // immutable active revision is resolved in the same transaction, preventing a
@@ -95,12 +109,16 @@ func validateOperationalMeasurement(row domain.OperationalMeasurement, now time.
 	if row.EvidenceClass != "measured" && row.EvidenceClass != "provider_reported" {
 		return errors.New("measurement evidence_class must be measured or provider_reported")
 	}
-	canonicalUnits := map[string]string{"gpu_utilization": "percent", "gpu_memory": "bytes", "gpu_temperature": "celsius", "gpu_power": "watts", "gpu_xid_errors": "count"}
-	if unit, known := canonicalUnits[row.Name]; known && row.Unit != unit {
+	if unit, known := canonicalMeasurementUnits[row.Name]; known && row.Unit != unit {
 		return fmt.Errorf("measurement %s requires canonical unit %s", row.Name, unit)
 	}
 	if math.IsNaN(row.Value) || math.IsInf(row.Value, 0) || row.SampleCount < 1 {
 		return errors.New("measurement value must be finite and sample_count must be positive")
+	}
+	if unit, canonical := canonicalMeasurementUnits[row.Name]; canonical && unit != "celsius" {
+		if row.Value < 0 || unit == "ratio" && row.Value > 1 || unit == "percent" && row.Value > 100 {
+			return fmt.Errorf("measurement %s is outside its %s range", row.Name, unit)
+		}
 	}
 	if row.ObservedAt.IsZero() || row.ObservedAt.After(now.Add(time.Minute)) || !row.ValidUntil.After(row.ObservedAt) || row.ValidUntil.Sub(row.ObservedAt) > 24*time.Hour {
 		return errors.New("measurement requires a current observation and a validity window no longer than 24 hours")
