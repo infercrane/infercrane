@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/infercrane/infercrane/internal/kernelplanner"
@@ -42,6 +43,12 @@ type Pack struct {
 	// Integration is a directory that routes a serving runtime to the kernel.
 	Integration string   `json:"integration,omitempty"`
 	Runtimes    []string `json:"runtimes,omitempty"`
+	// RuntimeVersions lists, per runtime, the exact versions whose extension
+	// API the integration was reviewed against. Runtimes change or remove these
+	// hooks between releases, so any other version is refused before spend.
+	RuntimeVersions map[string][]string `json:"runtime_versions,omitempty"`
+	// RuntimeVersionNote tells the operator what a newer pin needs.
+	RuntimeVersionNote string `json:"runtime_version_note,omitempty"`
 	// CandidateArgs select the kernel at launch. Control arms never receive them.
 	CandidateArgs []string `json:"candidate_args,omitempty"`
 }
@@ -79,6 +86,18 @@ func (p Pack) normalized() (Pack, error) {
 	if p.SchemaVersion != PackSchemaV1 || p.Backend == "" || p.License == "" || p.Filename == "" || filepath.Base(p.Filename) != p.Filename || strings.TrimSpace(p.Contract) == "" {
 		return Pack{}, errors.New("kernel pack requires the v1 schema, backend, license, plain filename, and contract")
 	}
+	if p.Integration != "" {
+		for _, runtime := range p.Runtimes {
+			if len(p.RuntimeVersions[runtime]) == 0 {
+				return Pack{}, fmt.Errorf("kernel pack integration declares no reviewed %s versions", runtime)
+			}
+		}
+	}
+	for runtime := range p.RuntimeVersions {
+		if !slices.Contains(p.Runtimes, runtime) {
+			return Pack{}, fmt.Errorf("kernel pack lists versions for undeclared runtime %s", runtime)
+		}
+	}
 	if p.MaxSourceBytes <= 0 {
 		p.MaxSourceBytes = defaultSourceBytes
 	}
@@ -86,6 +105,22 @@ func (p Pack) normalized() (Pack, error) {
 		p.MaxPlausibleSpeedup = defaultPlausibleGain
 	}
 	return p, nil
+}
+
+// SupportsRuntime refuses a runtime the integration was not reviewed for, so a
+// pin the integration cannot load fails before any generation or GPU spend.
+func (p Pack) SupportsRuntime(name, version string) error {
+	if p.Integration == "" || !slices.Contains(p.Runtimes, name) {
+		return fmt.Errorf("pack %s has no reviewed integration for runtime %s", p.Family, name)
+	}
+	if supported := p.RuntimeVersions[name]; !slices.Contains(supported, version) {
+		message := fmt.Sprintf("pack %s integration is reviewed for %s %s, not %s", p.Family, name, strings.Join(supported, ", "), version)
+		if p.RuntimeVersionNote != "" {
+			message += ": " + p.RuntimeVersionNote
+		}
+		return errors.New(message)
+	}
+	return nil
 }
 
 // Screen is a cheap filter that saves GPU spend on drafts which obviously

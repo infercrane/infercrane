@@ -154,6 +154,33 @@ def median_microseconds(triton, function):
     return triton.testing.do_bench(function) * 1000
 
 
+def minimum_bytes(rows, hidden, element_bytes):
+    """Bytes every correct kernel must move: read x, residual and weight, then
+    write output and residual_out."""
+    return (4 * rows * hidden + hidden) * element_bytes
+
+
+def roofline_utilization(bytes_moved, median_us, peak_gbps):
+    """Fraction of the DRAM roofline reached: the fastest possible time for
+    these bytes at peak bandwidth, divided by the measured time.
+
+    The operator is memory-bound, so this is its roofline. 0.0 means unknown.
+    A value above 1 cannot come from DRAM (the data was cache-resident), so it
+    is reported as unknown rather than clamped into a false stop."""
+    if not (bytes_moved > 0 and median_us > 0 and peak_gbps > 0):
+        return 0.0
+    utilization = (bytes_moved / (peak_gbps * 1e3)) / median_us
+    return utilization if utilization <= 1.0 else 0.0
+
+
+def peak_dram_gbps(triton):
+    """Peak DRAM bandwidth from the driver's memory clock and bus width, or 0.0."""
+    try:
+        return float(triton.testing.get_dram_gbps())
+    except Exception:  # Older Triton or an unknown device: leave it unknown.
+        return 0.0
+
+
 def sanitizer_child(source: str) -> None:
     import torch
 
@@ -212,10 +239,14 @@ def main() -> int:
                 result["failed_stage"] = stage
 
             stage = "timing"
-            x, residual, weight = inputs(torch, 128, 1024, seed)
+            rows, hidden = 128, 1024
+            x, residual, weight = inputs(torch, rows, hidden, seed)
             baseline = load_baseline(torch)
             result["baseline_median_us"] = median_microseconds(triton, lambda: baseline(x, residual, weight))
             result["candidate_median_us"] = median_microseconds(triton, lambda: kernel(x, residual, weight, EPSILON))
+            result["roofline_utilization"] = roofline_utilization(
+                minimum_bytes(rows, hidden, x.element_size()), result["candidate_median_us"], peak_dram_gbps(triton)
+            )
     except StageFailure:
         result["failed_stage"] = stage
     except Exception:  # Generated code may fail in any way; report only the stage.

@@ -8,7 +8,7 @@ import (
 )
 
 func TestOptimizedArtifactPresetsRemainExternalPinnedAndQualityGated(t *testing.T) {
-	for _, preset := range []string{"fp8", "awq", "gptq", "nvfp4", "eagle3", "mtp", "dflash", "tensorrt"} {
+	for _, preset := range []string{"fp8", "awq", "gptq", "nvfp4", "eagle3", "mtp", "dflash"} {
 		t.Run(preset, func(t *testing.T) {
 			plan, err := optimizedArtifactPreset("base-artifact", preset, "1.2.3", "sha256:"+strings.Repeat("a", 64), "", "Apache-2.0")
 			if err != nil {
@@ -22,8 +22,12 @@ func TestOptimizedArtifactPresetsRemainExternalPinnedAndQualityGated(t *testing.
 }
 
 func TestOptimizedArtifactPresetRejectsUnknownOrMutableBuilder(t *testing.T) {
-	if _, err := optimizedArtifactPreset("base", "future", "1", "sha256:"+strings.Repeat("a", 64), "", "Apache-2.0"); err == nil {
-		t.Fatal("unknown preset accepted")
+	for _, preset := range []string{"future", "tensorrt"} {
+		// TensorRT-LLM removed its engine backend, so no current builder produces
+		// the engine the old tensorrt preset planned.
+		if _, err := optimizedArtifactPreset("base", preset, "1", "sha256:"+strings.Repeat("a", 64), "", "Apache-2.0"); err == nil {
+			t.Fatalf("preset %q accepted", preset)
+		}
 	}
 	plan, err := optimizedArtifactPreset("base", "fp8", "1", "builder:latest", "", "Apache-2.0")
 	if err != nil {
