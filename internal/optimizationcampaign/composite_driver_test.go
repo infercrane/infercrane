@@ -13,18 +13,21 @@ import (
 	"github.com/infercrane/infercrane/internal/optimizer"
 	"github.com/infercrane/infercrane/internal/performanceprofile"
 	"github.com/infercrane/infercrane/internal/pricing"
+	"github.com/infercrane/infercrane/internal/workflows"
 )
 
 type compositeStoreFixture struct {
-	campaign       domain.OptimizationCampaign
-	operations     map[string]domain.Operation
-	resolved       domain.ResolvedDeployment
-	benchmarks     []domain.BenchmarkResult
-	quality        []domain.QualityEvidence
-	guard          domain.ReleaseGuardEvaluation
-	cloudSubmits   int
-	rolloutSubmits int
-	deleteSubmits  int
+	campaign        domain.OptimizationCampaign
+	operations      map[string]domain.Operation
+	resolved        domain.ResolvedDeployment
+	benchmarks      []domain.BenchmarkResult
+	quality         []domain.QualityEvidence
+	guard           domain.ReleaseGuardEvaluation
+	cloudSubmits    int
+	rolloutSubmits  int
+	deleteSubmits   int
+	activeOperation *domain.Operation
+	cancelledOps    []string
 }
 
 func (f *compositeStoreFixture) OptimizationCampaign(_ context.Context, tenant, id string) (domain.OptimizationCampaign, error) {
@@ -47,6 +50,16 @@ func (f *compositeStoreFixture) SubmitDeploymentDelete(_ context.Context, _, _, 
 func (f *compositeStoreFixture) EnqueueOperation(_ context.Context, operation domain.Operation) (domain.Operation, bool, error) {
 	f.rolloutSubmits++
 	return f.operation(operation), f.rolloutSubmits == 1, nil
+}
+func (f *compositeStoreFixture) ActiveOperationForResource(context.Context, string, string, string) (domain.Operation, error) {
+	if f.activeOperation == nil {
+		return domain.Operation{}, domain.ErrNotFound
+	}
+	return *f.activeOperation, nil
+}
+func (f *compositeStoreFixture) RequestOperationCancel(_ context.Context, id string) error {
+	f.cancelledOps = append(f.cancelledOps, id)
+	return nil
 }
 func (f *compositeStoreFixture) operation(operation domain.Operation) domain.Operation {
 	if f.operations == nil {
@@ -285,6 +298,29 @@ func TestCandidateProvisioningPreservesTenantComputeConnection(t *testing.T) {
 	}
 }
 
+func TestCompositeDriverCleanupFencesProvisioningChildBeforeCandidateNamePersists(t *testing.T) {
+	now := time.Now().UTC()
+	store, candidate := compositeFixture(t, IntentNewEndpoint, now)
+	deploymentName := candidateDeploymentName("qwen-interactive", candidate.ID)
+	store.resolved = domain.ResolvedDeployment{Deployment: domain.Deployment{ID: "deployment-1", Name: deploymentName}}
+	active := domain.Operation{ID: "converge-1", Kind: workflows.ConvergeKind, Status: "waiting"}
+	store.activeOperation = &active
+	driver := CompositeDriver{Store: store}
+
+	err := driver.Cleanup(t.Context(), candidate.ID, candidate)
+	assertRetryableCode(t, err, "optimization_cleanup_child_pending")
+	if len(store.cancelledOps) != 1 || store.cancelledOps[0] != active.ID || store.deleteSubmits != 0 {
+		t.Fatalf("in-flight child was not fenced before deletion: cancelled=%v deletes=%d", store.cancelledOps, store.deleteSubmits)
+	}
+
+	store.activeOperation = nil
+	err = driver.Cleanup(t.Context(), candidate.ID, candidate)
+	assertRetryableCode(t, err, "optimization_child_pending")
+	if store.deleteSubmits != 1 {
+		t.Fatalf("cleanup deletion was not submitted after the child stopped: deletes=%d", store.deleteSubmits)
+	}
+}
+
 func compositeFixture(t *testing.T, intent string, now time.Time) (*compositeStoreFixture, domain.OptimizationCandidateRun) {
 	t.Helper()
 	draft := optimizer.DeploymentDraft{APIVersion: "infercrane.dev/v1", Kind: "Deployment", Name: "qwen-interactive"}
@@ -340,5 +376,21 @@ func TestCompositeDriverRefusesUnreplayableBindingBeforeProviderMutation(t *test
 	assertRetryableCode(t, err, "optimization_replay_lookup_failed")
 	if store.cloudSubmits != 0 {
 		t.Fatalf("a transient replay lookup failure reached provider mutation: submits=%d", store.cloudSubmits)
+	}
+}
+
+func TestChildCompleteKeepsThePermanentChildFailureCode(t *testing.T) {
+	var failure operations.Failure
+	err := childComplete(domain.Operation{Status: "failed", ErrorCode: " unsupported_tuple ", Message: "engine rejected the tuple"}, "candidate deployment")
+	if !errors.As(err, &failure) || failure.Retryable || failure.Code != "unsupported_tuple" {
+		t.Fatalf("permanent child failure lost its code: %#v", err)
+	}
+	err = childComplete(domain.Operation{Status: "failed"}, "candidate deployment")
+	if !errors.As(err, &failure) || failure.Retryable || failure.Code != "optimization_child_failed" {
+		t.Fatalf("a child failure without a code did not use the generic code: %#v", err)
+	}
+	err = childComplete(domain.Operation{Status: "failed", ErrorCode: "unsupported_tuple", Retryable: true}, "candidate deployment")
+	if !errors.As(err, &failure) || !failure.Retryable || failure.Code != "optimization_child_retryable" {
+		t.Fatalf("a retryable child failure became permanent: %#v", err)
 	}
 }
