@@ -19,15 +19,23 @@ The flow has two steps:
 go run ./tools/checkpoint-catalog-sync fetch --network --out .infercrane/checkpoint-catalog/snapshot
 ```
 
-For each publisher in `internal/checkpointcatalog/policy.json`, fetch lists the
-organization newest first back to the publisher's `created_after` date. It
-uses organization listings, not collections, because collections lag the
-organization. It then re-observes every repository pinned in the committed
-catalog. For each kept revision it records the revision record with file
-blobs, the model card, `config.json`, `hf_quant_config.json`, and the license
-file. It also records the head of every base model. The tool sends a generic
-user agent and no credentials, honors the API rate-limit headers, and refuses
-pagination links to any other host.
+The policy's `selection` rule decides which builds the fetch observes. For each
+publisher in `internal/checkpointcatalog/policy.json`, fetch lists the
+organization twice: newest first back to the publisher's `created_after` date,
+and most downloaded first down to `selection.min_downloads` downloads in the
+last 30 days. It then reads every collection in `selection.collections` and
+records the head of each member that no listing selected, when the member's
+organization is a publisher in the policy. A publisher with `collection_only`
+is never listed as an organization. A reviewed collection that returns an error
+stops the fetch. Fetch then re-observes every repository pinned in the
+committed catalog.
+
+For each kept revision it records the revision record with file blobs, the
+model card, `config.json`, `hf_quant_config.json`, and the license file. It
+also records the head of every base model. The snapshot manifest records the
+windows, threshold, and collections it was fetched with. The tool sends a
+generic user agent and no credentials, honors the API rate-limit headers, and
+refuses pagination links to any other host.
 
 Add `--pin repository@revision` to observe an extra revision, for example to
 keep a known-good revision while a newer head is reviewed.
@@ -38,17 +46,19 @@ keep a known-good revision while a newer head is reviewed.
 go run ./tools/checkpoint-catalog-sync plan --snapshot .infercrane/checkpoint-catalog/snapshot
 ```
 
-Plan writes `catalog.json` and `catalog-diff.md` to `<snapshot>/plan`. The
-diff lists the entries that need review, the candidates, added builds, new
-revisions, changed and removed entries, and the repositories that were skipped
-with the reason for each.
+Plan writes `catalog.json` and `catalog-diff.md` to `<snapshot>/plan`, which
+the snapshot digest ignores, so planning a snapshot again never changes the
+digest the catalog records. The
+diff lists the entries that need review, the candidates, added builds with the
+reason the selection rule picked each one, new revisions, changed and removed
+entries, and the repositories that were skipped with the reason for each.
 
 To approve a new publisher or format, resolve a license, or record the engine
 release that contains a required pull request, edit the policy and plan the
 same snapshot again. When the diff is right, install it:
 
 ```bash
-go run ./tools/checkpoint-catalog-sync plan --snapshot .infercrane/checkpoint-catalog/snapshot --write --reviewed-at 2026-11-11
+go run ./tools/checkpoint-catalog-sync plan --snapshot .infercrane/checkpoint-catalog/snapshot --write --reviewed-at 2026-11-12
 ```
 
 Commit the catalog together with any policy change.
@@ -59,7 +69,9 @@ catalog was not regenerated after a policy edit.
 
 - Format comes from `quantization_config` (ModelOpt, compressed-tensors, Quark,
   AutoRound) or `hf_quant_config.json`, and from card metadata for OpenVINO
-  exports and speculators.
+  exports and speculators. Listing items need a quantization signal in the
+  listing data to be fetched in detail. A collection member is fetched without
+  one, and the planner then requires the signal in the files at the revision.
 - Each build links to its declared base model. A card that states the exact
   source commit makes the lineage `exact`; otherwise the screening revision is
   the base head in the snapshot.
@@ -71,6 +83,9 @@ catalog was not regenerated after a policy edit.
   automatically. It waits for a human only if its kind, base model, format,
   hardware vendor, or license changed. If the new revision is blocked, the
   previously pinned revision stays a candidate until the new one passes.
+- Selection only decides what is observed. A build from a collection or above
+  the download threshold passes the same review, license, engine, hardware,
+  and lineage gates as any other.
 - Only approved, licensed quantized checkpoints for NVIDIA architectures that
   InferCrane runs can become proposal candidates. AMD and Intel builds are
   recorded as `unsupported_hardware`.

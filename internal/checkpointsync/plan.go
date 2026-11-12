@@ -14,13 +14,17 @@ import (
 const (
 	limitationUnmeasured = "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build."
 	speculatorBlocker    = "speculator: speculative-decoding candidates need acceptance and output-parity gates first"
+
+	skipUnknownPublisher = "listed in a reviewed collection, but its organization is not a publisher in the policy"
+	skipNotRecorded      = "listed in a reviewed collection, but not recorded in this snapshot; fetch again"
 )
 
 // Result is a proposed catalog and the reviewable difference from the
 // committed one.
 type Result struct {
-	Catalog checkpointcatalog.Catalog
-	Diff    Diff
+	Catalog  checkpointcatalog.Catalog
+	Diff     Diff
+	Manifest Manifest
 }
 
 type Diff struct {
@@ -34,6 +38,10 @@ type Diff struct {
 	Removed        []Removal
 	Unchanged      int
 	Skipped        map[string][]string
+	// Selected says why the sync tracks each repository it observed through
+	// a listing or a collection. Repositories tracked only because the
+	// catalog already pins them have no entry.
+	Selected map[string]string
 }
 
 type Revision struct {
@@ -57,6 +65,7 @@ type planner struct {
 	policy   checkpointcatalog.Policy
 	previous checkpointcatalog.Catalog
 	skipped  map[string][]string
+	selected map[string]string
 	removed  []Removal
 }
 
@@ -67,10 +76,10 @@ func Plan(snapshot *Snapshot, policy checkpointcatalog.Policy, policyDigest stri
 	if err != nil {
 		return Result{}, err
 	}
-	p := &planner{snapshot: snapshot, policy: policy, previous: previous, skipped: map[string][]string{}}
-	diff := Diff{FetchedAt: snapshot.Manifest.FetchedAt, SnapshotDigest: digest, PolicyDigest: policyDigest, Skipped: p.skipped}
+	p := &planner{snapshot: snapshot, policy: policy, previous: previous, skipped: map[string][]string{}, selected: map[string]string{}}
+	diff := Diff{FetchedAt: snapshot.Manifest.FetchedAt, SnapshotDigest: digest, PolicyDigest: policyDigest, Skipped: p.skipped, Selected: p.selected}
 	if snapshot.Manifest.PolicyDigest != policyDigest {
-		diff.Notes = append(diff.Notes, "The policy changed after this snapshot was fetched; listing windows come from the snapshot.")
+		diff.Notes = append(diff.Notes, "The policy changed after this snapshot was fetched; listing windows, download thresholds, and collections come from the snapshot.")
 	}
 	heads, unavailable, err := p.heads(&diff)
 	if err != nil {
@@ -124,13 +133,28 @@ func Plan(snapshot *Snapshot, policy checkpointcatalog.Policy, policyDigest stri
 		sort.Strings(diff.Skipped[reason])
 		diff.Skipped[reason] = slices.Compact(diff.Skipped[reason])
 	}
-	return Result{Catalog: catalog, Diff: diff}, nil
+	return Result{Catalog: catalog, Diff: diff, Manifest: snapshot.Manifest}, nil
 }
 
 // heads returns the newest observed record for every repository the plan
-// tracks, and the repositories the upstream reported as unavailable.
+// tracks, and the repositories the upstream reported as unavailable. It
+// applies the selection rule exactly as the fetch did: listing items first,
+// then collection members that no listing selected.
 func (p *planner) heads(diff *Diff) (map[string]ModelInfo, map[string]int, error) {
 	heads, unavailable := map[string]ModelInfo{}, map[string]int{}
+	considered := map[string]struct{}{}
+	collections := make([][]string, len(p.snapshot.Manifest.Collections))
+	listed := map[string]struct{}{}
+	for index, collection := range p.snapshot.Manifest.Collections {
+		members, err := p.snapshot.CollectionMembers(collection.Slug)
+		if err != nil {
+			return nil, nil, err
+		}
+		collections[index] = members
+		for _, member := range members {
+			listed[member] = struct{}{}
+		}
+	}
 	fetched := map[string]ManifestPublisher{}
 	for _, publisher := range p.snapshot.Manifest.Publishers {
 		fetched[strings.ToLower(publisher.Organization)] = publisher
@@ -141,15 +165,24 @@ func (p *planner) heads(diff *Diff) (map[string]ModelInfo, map[string]int, error
 			diff.Notes = append(diff.Notes, fmt.Sprintf("Publisher %s was not fetched in this snapshot; it gains no new entries.", publisher.Organization))
 			continue
 		}
-		items, err := p.snapshot.Listing(window.Organization)
+		newest, err := p.snapshot.Listing(window.Organization)
 		if err != nil {
 			return nil, nil, err
 		}
-		for _, item := range items {
-			if !inWindow(item, checkpointcatalog.PublisherPolicy{CreatedAfter: window.CreatedAfter}) {
+		popular, err := p.snapshot.DownloadListing(window.Organization)
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, item := range append(newest, popular...) {
+			if _, seen := considered[item.ID]; seen {
 				continue
 			}
-			reason := screen(item)
+			why, selected := window.selects(item)
+			if !selected {
+				continue
+			}
+			considered[item.ID] = struct{}{}
+			reason := selectionScreen(item, listed)
 			if excluded, found := p.policy.Excluded(item.ID, ""); found && reason == "" {
 				reason = "excluded by policy: " + excluded
 			}
@@ -158,6 +191,41 @@ func (p *planner) heads(diff *Diff) (map[string]ModelInfo, map[string]int, error
 				continue
 			}
 			heads[item.ID] = item
+			p.selected[item.ID] = why
+		}
+	}
+	for index, collection := range p.snapshot.Manifest.Collections {
+		why := "listed in collection " + collection.Slug
+		for _, member := range collections[index] {
+			if _, tracked := heads[member]; tracked {
+				p.selected[member] += "; " + why
+				continue
+			}
+			if _, screened := considered[member]; screened {
+				continue
+			}
+			if _, known := p.policy.Publisher(strings.SplitN(member, "/", 2)[0]); !known {
+				p.skipped[skipUnknownPublisher] = append(p.skipped[skipUnknownPublisher], member)
+				continue
+			}
+			if excluded, found := p.policy.Excluded(member, ""); found {
+				p.skipped["excluded by policy: "+excluded] = append(p.skipped["excluded by policy: "+excluded], member)
+				continue
+			}
+			head, found, err := p.snapshot.Head(member)
+			if err != nil {
+				return nil, nil, err
+			}
+			if !found {
+				p.skipped[skipNotRecorded] = append(p.skipped[skipNotRecorded], member)
+				continue
+			}
+			if reason := screenMember(head); reason != "" {
+				p.skipped[reason] = append(p.skipped[reason], member)
+				continue
+			}
+			heads[member] = head
+			p.selected[member] = why
 		}
 	}
 	tracked := map[string]struct{}{}

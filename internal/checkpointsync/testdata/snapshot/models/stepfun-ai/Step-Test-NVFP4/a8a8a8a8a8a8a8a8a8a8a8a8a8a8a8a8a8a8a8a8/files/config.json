@@ -1,0 +1,6 @@
+{
+ "quantization_config": {
+  "quant_method": "modelopt",
+  "quant_algo": "NVFP4"
+ }
+}

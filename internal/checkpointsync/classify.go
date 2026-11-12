@@ -56,6 +56,18 @@ type classification struct {
 // screen decides from listing data alone whether a repository deserves a
 // detail fetch. It returns a skip reason, or "" to keep the repository.
 func screen(info ModelInfo) string {
+	return screenWith(info, true)
+}
+
+// screenMember screens a model that a reviewed collection lists. The
+// collection stands in for the quantization signal that listing data often
+// lacks for builds that keep it only in hf_quant_config.json; classify still
+// requires the signal in the files recorded at the revision.
+func screenMember(info ModelInfo) string {
+	return screenWith(info, false)
+}
+
+func screenWith(info ModelInfo, requireSignal bool) string {
 	if !ValidRepository(info.ID) || !checkpointcatalog.ImmutableRevision(info.SHA) {
 		return skipInvalidID
 	}
@@ -72,7 +84,7 @@ func screen(info ModelInfo) string {
 	if slices.Contains(nonLLMLibrary, library) {
 		return skipNotLLMLibrary
 	}
-	if !isSpeculator(info) && !isOpenVINO(info) && quantMethod(info.Config.QuantizationConfig) == "" && !isModelOpt(info, nil) {
+	if requireSignal && !quantizationSignal(info, info.Config.QuantizationConfig, nil) {
 		return skipNoSignal
 	}
 	if isOpenVINO(info) && openVINOScheme(info.name()) == "" {
@@ -88,14 +100,25 @@ func screen(info ModelInfo) string {
 	return ""
 }
 
+// selectionScreen screens a listing item, using the collection member screen
+// when a reviewed collection also lists it.
+func selectionScreen(item ModelInfo, collectionMembers map[string]struct{}) string {
+	if _, member := collectionMembers[item.ID]; member {
+		return screenMember(item)
+	}
+	return screen(item)
+}
+
+// quantizationSignal reports whether a record or its files identify a
+// quantized checkpoint, a speculator, or an OpenVINO export.
+func quantizationSignal(info ModelInfo, config map[string]any, hfQuant []byte) bool {
+	return isSpeculator(info) || isOpenVINO(info) || quantMethod(config) != "" || isModelOpt(info, hfQuant)
+}
+
 // classify refines the screen with the files recorded at the pinned revision.
 func classify(info ModelInfo, files fileReader) (classification, string) {
-	if reason := screen(info); reason != "" {
+	if reason := screenWith(info, false); reason != "" {
 		return classification{}, reason
-	}
-	format := artifactFormat(info)
-	if format == "" {
-		return classification{}, skipUnknownArtifact
 	}
 	config := info.Config.QuantizationConfig
 	if raw, found := files("config.json"); found {
@@ -106,11 +129,18 @@ func classify(info ModelInfo, files fileReader) (classification, string) {
 			config = full.QuantizationConfig
 		}
 	}
+	hfQuant, hasHFQuant := files("hf_quant_config.json")
+	if !quantizationSignal(info, config, hfQuant) {
+		return classification{}, skipNoSignal
+	}
+	format := artifactFormat(info)
+	if format == "" {
+		return classification{}, skipUnknownArtifact
+	}
 	if isSpeculator(info) {
 		return classification{Kind: checkpointcatalog.KindSpeculator, Speculator: speculatorMethod(info), Bases: baseModels(info), Format: format}, ""
 	}
 	out := classification{Kind: checkpointcatalog.KindQuantized, Format: format, Method: quantMethod(config), ToolVersion: "unknown", Bases: baseModels(info)}
-	hfQuant, hasHFQuant := files("hf_quant_config.json")
 	readme, _ := files("README.md")
 	switch {
 	case isOpenVINO(info):
@@ -156,6 +186,11 @@ func isSpeculator(info ModelInfo) bool {
 	}
 	for _, architecture := range info.Config.Architectures {
 		lower := strings.ToLower(architecture)
+		// A conditional-generation class is a complete multimodal model, such
+		// as NVIDIA's Eagle2 vision-language family, never a draft head.
+		if strings.HasSuffix(lower, "forconditionalgeneration") {
+			continue
+		}
 		for _, marker := range speculatorArchitecture {
 			if strings.Contains(lower, marker) {
 				return true
@@ -193,12 +228,23 @@ func isModelOpt(info ModelInfo, hfQuant []byte) bool {
 	if strings.Contains(strings.ToLower(info.LibraryName), "model optimizer") || info.hasTag("modelopt") || strings.HasPrefix(quantMethod(info.Config.QuantizationConfig), "modelopt") {
 		return true
 	}
-	var producer struct {
-		Producer struct {
+	// hf_quant_config.json is the Model Optimizer export format. Some exports
+	// omit the producer block; any other named producer is not ModelOpt.
+	var document struct {
+		Producer *struct {
 			Name string `json:"name"`
 		} `json:"producer"`
+		Quantization struct {
+			Algorithm string `json:"quant_algo"`
+		} `json:"quantization"`
 	}
-	return len(hfQuant) > 0 && json.Unmarshal(hfQuant, &producer) == nil && strings.EqualFold(producer.Producer.Name, "modelopt")
+	if len(hfQuant) == 0 || json.Unmarshal(hfQuant, &document) != nil {
+		return false
+	}
+	if document.Producer != nil {
+		return strings.EqualFold(document.Producer.Name, "modelopt")
+	}
+	return document.Quantization.Algorithm != ""
 }
 
 var modelOptCardVersion = regexp.MustCompile(`(?i)modelopt\W{0,6}v?(\d+\.\d+\.\d+(?:rc\d+|\.?dev\d+|\.post\d+)?)`)

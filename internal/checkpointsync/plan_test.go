@@ -155,7 +155,7 @@ func TestPlanAppliesReviewHardwareLicenseAndEngineGates(t *testing.T) {
 	if len(result.Diff.Removed) != 1 || result.Diff.Removed[0].Entry.Revision != removedGLMRevision || !strings.Contains(result.Diff.Removed[0].Reason, "404") {
 		t.Fatalf("missing upstream repository was not reported as removed: %+v", result.Diff.Removed)
 	}
-	if len(result.Diff.Revised) != 1 || result.Diff.Unchanged != 1 || len(result.Diff.Added) != 5 {
+	if len(result.Diff.Revised) != 1 || result.Diff.Unchanged != 1 || len(result.Diff.Added) != 9 {
 		t.Fatalf("unexpected diff shape: revised=%d unchanged=%d added=%d", len(result.Diff.Revised), result.Diff.Unchanged, len(result.Diff.Added))
 	}
 	if !slices.Contains(result.Diff.Skipped[skipNotLLMLibrary], "nvidia/Cosmos3-Nano-FP8") || !slices.Contains(result.Diff.Skipped[skipNoBase], "RedHatAI/GLM-5.3-Flash") {
@@ -204,4 +204,71 @@ func TestApprovingPublisherAndFormatPromotesEntryOnSameSnapshot(t *testing.T) {
 		}
 	}
 	t.Fatal("Red Hat entry missing from plan")
+}
+
+func TestPlanSelectsOlderBuildsByDownloadsOrReviewedCollection(t *testing.T) {
+	policy, digest := fixturePolicy(t)
+	result := fixturePlan(t, policy, digest, fixturePrevious(t))
+	entries := map[string]checkpointcatalog.Entry{}
+	for _, entry := range result.Catalog.Entries {
+		entries[entry.Repository] = entry
+	}
+	popular, found := entries["nvidia/Nemotron-Old-30B-FP8"]
+	if !found || popular.Eligibility.State != checkpointcatalog.EligibilityCandidate || popular.Quantization.Scheme != "fp8" || !slices.Equal(popular.Hardware.Architectures, []string{"hopper", "blackwell"}) {
+		t.Fatalf("an older FP8 build above the download threshold did not become a Hopper candidate: %+v", popular)
+	}
+	if why := result.Diff.Selected["nvidia/Nemotron-Old-30B-FP8"]; !strings.Contains(why, "250000 downloads") {
+		t.Fatalf("download selection is not explained: %q", why)
+	}
+	listed, found := entries["nvidia/Old-Listed-NVFP4"]
+	if !found || listed.Eligibility.State != checkpointcatalog.EligibilityCandidate || !strings.HasPrefix(result.Diff.Selected["nvidia/Old-Listed-NVFP4"], "listed in collection ") {
+		t.Fatalf("an older build that only the reviewed collection lists was not tracked: %+v %q", listed, result.Diff.Selected["nvidia/Old-Listed-NVFP4"])
+	}
+	if why := result.Diff.Selected["nvidia/Qwen3.8-27B-NVFP4"]; !strings.HasPrefix(why, "created 2026-09-04") || !strings.Contains(why, "; listed in collection ") {
+		t.Fatalf("a listed build in the collection does not name both reasons: %q", why)
+	}
+	partner, found := entries["stepfun-ai/Step-Test-NVFP4"]
+	if !found || partner.Publisher != "stepfun-ai" || partner.Review.State != checkpointcatalog.ReviewPending || partner.Eligibility.State == checkpointcatalog.EligibilityCandidate || !slices.Contains(partner.Review.Reasons, "new publisher stepfun-ai requires review") {
+		t.Fatalf("a collection build from another organization skipped publisher review: %+v", partner)
+	}
+	hidden, found := entries["nvidia/Hidden-Signal-8B-FP8"]
+	if !found || hidden.Quantization.Tool != "modelopt" || hidden.Quantization.Scheme != "fp8" || hidden.Quantization.ToolVersion != "0.37.0" || hidden.Eligibility.State != checkpointcatalog.EligibilityCandidate {
+		t.Fatalf("a collection build whose ModelOpt signal is only in hf_quant_config.json was not classified from its files: %+v", hidden)
+	}
+	if why := result.Diff.Selected["nvidia/Hidden-Signal-8B-FP8"]; !strings.HasPrefix(why, "15000 downloads") || !strings.Contains(why, "; listed in collection ") {
+		t.Fatalf("a listing item without a listing signal was not kept for its collection membership: %q", why)
+	}
+	if _, found = entries["nvidia/Old-Model-NVFP4"]; found {
+		t.Fatal("an old build below the download threshold and outside the collection entered the catalog")
+	}
+	if !slices.Contains(result.Diff.Skipped[skipUnknownPublisher], "black-forest-labs/FLUX.3-Test-NVFP4") || !slices.Contains(result.Diff.Skipped[skipNotTextModel], "nvidia/bigvgan-test-22khz") {
+		t.Fatalf("collection and download selections that were not catalogued are not reported: %+v", result.Diff.Skipped)
+	}
+}
+
+func TestPlanAppliesTheSelectionWindowsTheSnapshotRecorded(t *testing.T) {
+	policy, digest := fixturePolicy(t)
+	snapshot, err := OpenSnapshot(filepath.Join("testdata", "snapshot"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := range snapshot.Manifest.Publishers {
+		if snapshot.Manifest.Publishers[index].Organization == "nvidia" {
+			snapshot.Manifest.Publishers[index].MinDownloads = 500000
+		}
+	}
+	snapshot.Manifest.Collections = nil
+	result, err := Plan(snapshot, policy, digest, fixturePrevious(t), "2026-11-11")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range result.Catalog.Entries {
+		switch entry.Repository {
+		case "nvidia/Nemotron-Old-30B-FP8", "nvidia/Old-Listed-NVFP4", "nvidia/Hidden-Signal-8B-FP8", "stepfun-ai/Step-Test-NVFP4":
+			t.Fatalf("%s was tracked without the threshold or collection the snapshot recorded", entry.Repository)
+		}
+	}
+	if !slices.ContainsFunc(result.Catalog.Entries, func(entry checkpointcatalog.Entry) bool { return entry.Repository == "nvidia/Qwen3.8-27B-NVFP4" }) {
+		t.Fatal("the created_after window stopped applying when the other rules were off")
+	}
 }

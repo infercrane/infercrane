@@ -4,8 +4,8 @@
   "snapshot": {
     "source": "https://huggingface.co/api/models",
     "fetched_at": "2026-11-11T12:00:00Z",
-    "digest": "sha256:1f7bc009bceb7ed8fc17f23eb1c2ed1017261dcfed99937a799c06345ad19b9b",
-    "policy_digest": "sha256:2bd0abcf7b2cd5b504595f00a6207d8b3968d6613c3fcb2132636f66f1c00704"
+    "digest": "sha256:3360aeda5c4ed09f9509f0eb2eaabfaf62c6d3ee7e3a8c84a46d51af0d253e39",
+    "policy_digest": "sha256:04a9159f339bbc2d79b7e902fd5c11ee23a7b59d149d67e21b00802a9cae1094"
   },
   "publishers": [
     {
@@ -25,6 +25,12 @@
       "name": "NVIDIA",
       "hardware_vendor": "nvidia",
       "review_state": "approved"
+    },
+    {
+      "organization": "stepfun-ai",
+      "name": "StepFun",
+      "hardware_vendor": "nvidia",
+      "review_state": "pending"
     }
   ],
   "entries": [
@@ -355,6 +361,162 @@
       ]
     },
     {
+      "id": "nvidia-hidden-signal-8b-fp8-b9b9b9b9",
+      "kind": "quantized_checkpoint",
+      "publisher": "nvidia",
+      "repository": "nvidia/Hidden-Signal-8B-FP8",
+      "revision": "b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9",
+      "revision_state": "current",
+      "created_at": "2025-12-06T09:00:00.000Z",
+      "last_modified": "2025-12-06T09:00:00.000Z",
+      "base": {
+        "repository": "nvidia/Nemotron-Old-30B-BF16",
+        "lineage": "publisher_declared",
+        "screening_revision": "e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8",
+        "screening_revision_source": "https://huggingface.co/api/models/nvidia/Nemotron-Old-30B-BF16"
+      },
+      "quantization": {
+        "tool": "modelopt",
+        "tool_version": "0.37.0",
+        "method": "",
+        "scheme": "fp8"
+      },
+      "hardware": {
+        "vendor": "nvidia",
+        "architectures": ["hopper", "blackwell"],
+        "product_support": "runnable"
+      },
+      "runtimes": ["sglang", "vllm"],
+      "license": {
+        "tag": "apache-2.0",
+        "spdx": "Apache-2.0",
+        "state": "approved",
+        "digest": "sha256:da0a45ba8ade58d6156fe561dbaa8ea664725ab65ec9c9dfc0812b1a1c815b1d"
+      },
+      "artifact": {
+        "format": "safetensors",
+        "manifest_digest": "sha256:1a721deda417f54a4f3993c9d423fd0099ba8adc33753139896888759e893440",
+        "model_card_digest": "sha256:effdb60ccd8509e8d8f659b8c588b9622566e3f1040636961bb7b3a6d3e274d8",
+        "file_count": 6,
+        "size_bytes": 3000510
+      },
+      "review": {
+        "state": "approved"
+      },
+      "eligibility": {
+        "state": "candidate"
+      },
+      "source_url": "https://huggingface.co/nvidia/Hidden-Signal-8B-FP8",
+      "limitations": [
+        "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot."
+      ]
+    },
+    {
+      "id": "nvidia-nemotron-old-30b-fp8-e7e7e7e7",
+      "kind": "quantized_checkpoint",
+      "publisher": "nvidia",
+      "repository": "nvidia/Nemotron-Old-30B-FP8",
+      "revision": "e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7",
+      "revision_state": "current",
+      "created_at": "2026-03-10T09:00:00.000Z",
+      "last_modified": "2026-03-10T09:00:00.000Z",
+      "base": {
+        "repository": "nvidia/Nemotron-Old-30B-BF16",
+        "lineage": "publisher_declared",
+        "screening_revision": "e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8e8",
+        "screening_revision_source": "https://huggingface.co/api/models/nvidia/Nemotron-Old-30B-BF16"
+      },
+      "quantization": {
+        "tool": "modelopt",
+        "tool_version": "0.40.0",
+        "method": "modelopt",
+        "scheme": "fp8"
+      },
+      "hardware": {
+        "vendor": "nvidia",
+        "architectures": ["hopper", "blackwell"],
+        "product_support": "runnable"
+      },
+      "runtimes": ["sglang", "vllm"],
+      "license": {
+        "tag": "apache-2.0",
+        "spdx": "Apache-2.0",
+        "state": "approved",
+        "digest": "sha256:da0a45ba8ade58d6156fe561dbaa8ea664725ab65ec9c9dfc0812b1a1c815b1d"
+      },
+      "artifact": {
+        "format": "safetensors",
+        "manifest_digest": "sha256:0f35c8bd837b7f8308e86237d17b236d5474b20a95b58b7b17a8ecefefe7061b",
+        "model_card_digest": "sha256:12bcb5b094ca73bb91e77300041cad2455a18ae11cdcd82f919862bbf9c36c8f",
+        "file_count": 6,
+        "size_bytes": 2000510
+      },
+      "review": {
+        "state": "approved"
+      },
+      "eligibility": {
+        "state": "candidate"
+      },
+      "source_url": "https://huggingface.co/nvidia/Nemotron-Old-30B-FP8",
+      "limitations": [
+        "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot."
+      ]
+    },
+    {
+      "id": "nvidia-old-listed-nvfp4-f7f7f7f7",
+      "kind": "quantized_checkpoint",
+      "publisher": "nvidia",
+      "repository": "nvidia/Old-Listed-NVFP4",
+      "revision": "f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7",
+      "revision_state": "current",
+      "created_at": "2026-02-01T09:00:00.000Z",
+      "last_modified": "2026-02-01T09:00:00.000Z",
+      "base": {
+        "repository": "zai-org/GLM-5.3-Flash",
+        "lineage": "publisher_declared",
+        "screening_revision": "3f1971b7b5f7a528c9c4ef6212c8785298a8c24a",
+        "screening_revision_source": "https://huggingface.co/api/models/zai-org/GLM-5.3-Flash"
+      },
+      "quantization": {
+        "tool": "modelopt",
+        "tool_version": "0.41.0",
+        "method": "modelopt",
+        "scheme": "nvfp4"
+      },
+      "hardware": {
+        "vendor": "nvidia",
+        "architectures": ["blackwell"],
+        "product_support": "runnable"
+      },
+      "runtimes": ["sglang", "vllm"],
+      "license": {
+        "tag": "mit",
+        "spdx": "MIT",
+        "state": "approved",
+        "digest": "sha256:267f7a2e19dfa9df99af774520985a0e521925293ea5b7e767ab06969d06bf91"
+      },
+      "artifact": {
+        "format": "safetensors",
+        "manifest_digest": "sha256:67890f2f65bb479af546327706acfeea8dd4347c4b6394ca7522a2946f54393a",
+        "model_card_digest": "sha256:3da3657676ff044726c5f6b94040f24ca84e3ef34381aebcf82b1e80cef8c823",
+        "file_count": 6,
+        "size_bytes": 2000510
+      },
+      "review": {
+        "state": "approved"
+      },
+      "eligibility": {
+        "state": "candidate"
+      },
+      "source_url": "https://huggingface.co/nvidia/Old-Listed-NVFP4",
+      "limitations": [
+        "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot."
+      ]
+    },
+    {
       "id": "nvidia-qwen38-27b-dspark-b2b2b2b2",
       "kind": "speculator",
       "publisher": "nvidia",
@@ -551,6 +713,60 @@
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
         "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
         "No license file at the pinned revision; the license comes from the model card metadata."
+      ]
+    },
+    {
+      "id": "stepfunai-step-test-nvfp4-a8a8a8a8",
+      "kind": "quantized_checkpoint",
+      "publisher": "stepfun-ai",
+      "repository": "stepfun-ai/Step-Test-NVFP4",
+      "revision": "a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8",
+      "revision_state": "current",
+      "created_at": "2026-10-01T09:00:00.000Z",
+      "last_modified": "2026-10-01T09:00:00.000Z",
+      "base": {
+        "repository": "stepfun-ai/Step-Test",
+        "lineage": "publisher_declared",
+        "screening_revision": "a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9",
+        "screening_revision_source": "https://huggingface.co/api/models/stepfun-ai/Step-Test"
+      },
+      "quantization": {
+        "tool": "modelopt",
+        "tool_version": "0.47.0",
+        "method": "modelopt",
+        "scheme": "nvfp4"
+      },
+      "hardware": {
+        "vendor": "nvidia",
+        "architectures": ["blackwell"],
+        "product_support": "runnable"
+      },
+      "runtimes": ["sglang", "vllm"],
+      "license": {
+        "tag": "apache-2.0",
+        "spdx": "Apache-2.0",
+        "state": "approved",
+        "digest": "sha256:da0a45ba8ade58d6156fe561dbaa8ea664725ab65ec9c9dfc0812b1a1c815b1d"
+      },
+      "artifact": {
+        "format": "safetensors",
+        "manifest_digest": "sha256:a1fe625dab8f06ca47c91cbe6944c27ebe9fab5dc5e5f84a844434ade297311e",
+        "model_card_digest": "sha256:7746129d0f072226be866187dc5e35138a89597432c3d9993d100a957cf5a977",
+        "file_count": 6,
+        "size_bytes": 2000510
+      },
+      "review": {
+        "state": "pending",
+        "reasons": ["new publisher stepfun-ai requires review"]
+      },
+      "eligibility": {
+        "state": "catalog_only",
+        "blockers": ["review pending"]
+      },
+      "source_url": "https://huggingface.co/stepfun-ai/Step-Test-NVFP4",
+      "limitations": [
+        "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot."
       ]
     }
   ]

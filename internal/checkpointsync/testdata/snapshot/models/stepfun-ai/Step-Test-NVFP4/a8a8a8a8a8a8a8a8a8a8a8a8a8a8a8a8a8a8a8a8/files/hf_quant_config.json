@@ -1,0 +1,9 @@
+{
+ "producer": {
+  "name": "modelopt",
+  "version": "0.47.0"
+ },
+ "quantization": {
+  "quant_algo": "NVFP4"
+ }
+}

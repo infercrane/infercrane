@@ -1,0 +1,66 @@
+{
+ "id": "nvidia/Old-Listed-NVFP4",
+ "sha": "f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7",
+ "createdAt": "2026-02-01T09:00:00.000Z",
+ "lastModified": "2026-02-01T09:00:00.000Z",
+ "downloads": 800,
+ "private": false,
+ "disabled": false,
+ "gated": false,
+ "library_name": "Model Optimizer",
+ "pipeline_tag": "text-generation",
+ "tags": [
+  "modelopt"
+ ],
+ "cardData": {
+  "license": "mit",
+  "base_model": [
+   "zai-org/GLM-5.3-Flash"
+  ]
+ },
+ "config": {
+  "architectures": [
+   "X"
+  ],
+  "model_type": "x",
+  "quantization_config": {
+   "quant_method": "modelopt"
+  }
+ },
+ "siblings": [
+  {
+   "rfilename": ".gitattributes",
+   "blobId": "f700000000000000000000000000000000000000",
+   "size": 100
+  },
+  {
+   "rfilename": "LICENSE",
+   "blobId": "f700000000000000000000000000000000000001",
+   "size": 101
+  },
+  {
+   "rfilename": "README.md",
+   "blobId": "f700000000000000000000000000000000000002",
+   "size": 102
+  },
+  {
+   "rfilename": "config.json",
+   "blobId": "f700000000000000000000000000000000000003",
+   "size": 103
+  },
+  {
+   "rfilename": "hf_quant_config.json",
+   "blobId": "f700000000000000000000000000000000000004",
+   "size": 104
+  },
+  {
+   "rfilename": "model.safetensors",
+   "blobId": "f700000000000000000000000000000000000063",
+   "size": 2000000,
+   "lfs": {
+    "sha256": "f700000000000000000000000000000000000000000000000000000000000000",
+    "size": 2000000
+   }
+  }
+ ]
+}

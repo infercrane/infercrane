@@ -2,22 +2,39 @@
   "schema_version": "infercrane.checkpoint-snapshot/v1",
   "source": "https://huggingface.co",
   "fetched_at": "2026-11-11T12:00:00Z",
-  "policy_digest": "sha256:2bd0abcf7b2cd5b504595f00a6207d8b3968d6613c3fcb2132636f66f1c00704",
+  "policy_digest": "sha256:04a9159f339bbc2d79b7e902fd5c11ee23a7b59d149d67e21b00802a9cae1094",
   "publishers": [
     {
       "organization": "RedHatAI",
       "created_after": "2026-08-01",
-      "pages": 1
+      "min_downloads": 10000,
+      "pages": 1,
+      "download_pages": 1
     },
     {
       "organization": "amd",
       "created_after": "2026-08-01",
-      "pages": 2
+      "min_downloads": 10000,
+      "pages": 2,
+      "download_pages": 1
     },
     {
       "organization": "nvidia",
       "created_after": "2026-08-01",
-      "pages": 1
+      "min_downloads": 10000,
+      "pages": 1,
+      "download_pages": 1
+    },
+    {
+      "organization": "stepfun-ai",
+      "collection_only": true,
+      "pages": 0
+    }
+  ],
+  "collections": [
+    {
+      "slug": "nvidia/test-modelopt-checkpoints-0123456789abcdef",
+      "members": 6
     }
   ],
   "pins": [

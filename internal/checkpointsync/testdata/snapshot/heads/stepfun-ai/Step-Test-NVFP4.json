@@ -1,0 +1,30 @@
+{
+ "id": "stepfun-ai/Step-Test-NVFP4",
+ "sha": "a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8",
+ "createdAt": "2026-10-01T09:00:00.000Z",
+ "lastModified": "2026-10-01T09:00:00.000Z",
+ "downloads": 50000,
+ "private": false,
+ "disabled": false,
+ "gated": false,
+ "library_name": "Model Optimizer",
+ "pipeline_tag": "text-generation",
+ "tags": [
+  "modelopt"
+ ],
+ "cardData": {
+  "license": "apache-2.0",
+  "base_model": [
+   "stepfun-ai/Step-Test"
+  ]
+ },
+ "config": {
+  "architectures": [
+   "X"
+  ],
+  "model_type": "x",
+  "quantization_config": {
+   "quant_method": "modelopt"
+  }
+ }
+}

@@ -1,6 +1,6 @@
 {
   "schema_version": "infercrane.checkpoint-catalog-policy/v1",
-  "reviewed_at": "2026-11-11",
+  "reviewed_at": "2026-11-12",
   "approved_licenses": [
     {"tag": "apache-2.0", "spdx": "Apache-2.0"},
     {"tag": "mit", "spdx": "MIT"},
@@ -9,6 +9,17 @@
   "runnable_hardware": [
     {"vendor": "nvidia", "architectures": ["blackwell", "hopper"]}
   ],
+  "selection": {
+    "note": "Track a build from a publisher's organization listing when it was created on or after the publisher's created_after date, or when Hugging Face reports at least min_downloads downloads for it in the last 30 days. Also track every model a reviewed collection lists, whatever its age or downloads, when its organization is a publisher here. A tracked build stays pinned until it disappears upstream. Selection only decides what is observed: the review, license, engine, hardware, and lineage gates decide eligibility.",
+    "min_downloads": 10000,
+    "collections": [
+      {
+        "slug": "nvidia/inference-optimized-checkpoints-with-model-optimizer-66aa84f7966b3150262481a4",
+        "curator": "nvidia",
+        "note": "NVIDIA's Inference Optimized Checkpoints (with Model Optimizer) collection. It keeps older ModelOpt builds NVIDIA still recommends and lists ModelOpt builds that other organizations publish."
+      }
+    ]
+  },
   "publishers": [
     {
       "organization": "nvidia",
@@ -89,6 +100,42 @@
         {"kind": "quantized_checkpoint", "tool": "openvino", "scheme": "int4", "review_state": "approved", "hardware": {"vendor": "intel", "architectures": ["cpu", "gpu", "npu"]}, "runtimes": ["openvino"]},
         {"kind": "quantized_checkpoint", "tool": "openvino", "scheme": "int8", "review_state": "approved", "hardware": {"vendor": "intel", "architectures": ["cpu", "gpu", "npu"]}, "runtimes": ["openvino"]},
         {"kind": "quantized_checkpoint", "tool": "openvino", "scheme": "nf4", "review_state": "approved", "hardware": {"vendor": "intel", "architectures": ["cpu", "gpu", "npu"]}, "runtimes": ["openvino"]}
+      ]
+    },
+    {
+      "organization": "stepfun-ai",
+      "name": "StepFun",
+      "hardware_vendor": "nvidia",
+      "review_state": "pending",
+      "collection_only": true,
+      "formats": [
+        {"kind": "quantized_checkpoint", "tool": "modelopt", "scheme": "nvfp4", "review_state": "approved", "hardware": {"vendor": "nvidia", "architectures": ["blackwell"]}, "runtimes": ["sglang", "vllm"]},
+        {"kind": "quantized_checkpoint", "tool": "modelopt", "scheme": "mixed-nvfp4-fp8", "review_state": "approved", "hardware": {"vendor": "nvidia", "architectures": ["blackwell"]}, "runtimes": ["sglang", "vllm"]},
+        {"kind": "quantized_checkpoint", "tool": "modelopt", "scheme": "fp8", "review_state": "approved", "hardware": {"vendor": "nvidia", "architectures": ["hopper", "blackwell"]}, "runtimes": ["sglang", "vllm"]}
+      ]
+    },
+    {
+      "organization": "thinkingmachines",
+      "name": "Thinking Machines Lab",
+      "hardware_vendor": "nvidia",
+      "review_state": "pending",
+      "collection_only": true,
+      "formats": [
+        {"kind": "quantized_checkpoint", "tool": "modelopt", "scheme": "nvfp4", "review_state": "approved", "hardware": {"vendor": "nvidia", "architectures": ["blackwell"]}, "runtimes": ["sglang", "vllm"]},
+        {"kind": "quantized_checkpoint", "tool": "modelopt", "scheme": "mixed-nvfp4-fp8", "review_state": "approved", "hardware": {"vendor": "nvidia", "architectures": ["blackwell"]}, "runtimes": ["sglang", "vllm"]},
+        {"kind": "quantized_checkpoint", "tool": "modelopt", "scheme": "fp8", "review_state": "approved", "hardware": {"vendor": "nvidia", "architectures": ["hopper", "blackwell"]}, "runtimes": ["sglang", "vllm"]}
+      ]
+    },
+    {
+      "organization": "LGAI-EXAONE",
+      "name": "LG AI Research",
+      "hardware_vendor": "nvidia",
+      "review_state": "pending",
+      "collection_only": true,
+      "formats": [
+        {"kind": "quantized_checkpoint", "tool": "modelopt", "scheme": "nvfp4", "review_state": "approved", "hardware": {"vendor": "nvidia", "architectures": ["blackwell"]}, "runtimes": ["sglang", "vllm"]},
+        {"kind": "quantized_checkpoint", "tool": "modelopt", "scheme": "mixed-nvfp4-fp8", "review_state": "approved", "hardware": {"vendor": "nvidia", "architectures": ["blackwell"]}, "runtimes": ["sglang", "vllm"]},
+        {"kind": "quantized_checkpoint", "tool": "modelopt", "scheme": "fp8", "review_state": "approved", "hardware": {"vendor": "nvidia", "architectures": ["hopper", "blackwell"]}, "runtimes": ["sglang", "vllm"]}
       ]
     },
     {

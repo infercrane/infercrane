@@ -1,0 +1,66 @@
+{
+ "id": "nvidia/Nemotron-Old-30B-FP8",
+ "sha": "e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7",
+ "createdAt": "2026-03-10T09:00:00.000Z",
+ "lastModified": "2026-03-10T09:00:00.000Z",
+ "downloads": 250000,
+ "private": false,
+ "disabled": false,
+ "gated": false,
+ "library_name": "Model Optimizer",
+ "pipeline_tag": "text-generation",
+ "tags": [
+  "modelopt"
+ ],
+ "cardData": {
+  "license": "apache-2.0",
+  "base_model": [
+   "nvidia/Nemotron-Old-30B-BF16"
+  ]
+ },
+ "config": {
+  "architectures": [
+   "X"
+  ],
+  "model_type": "x",
+  "quantization_config": {
+   "quant_method": "modelopt"
+  }
+ },
+ "siblings": [
+  {
+   "rfilename": ".gitattributes",
+   "blobId": "e700000000000000000000000000000000000000",
+   "size": 100
+  },
+  {
+   "rfilename": "LICENSE",
+   "blobId": "e700000000000000000000000000000000000001",
+   "size": 101
+  },
+  {
+   "rfilename": "README.md",
+   "blobId": "e700000000000000000000000000000000000002",
+   "size": 102
+  },
+  {
+   "rfilename": "config.json",
+   "blobId": "e700000000000000000000000000000000000003",
+   "size": 103
+  },
+  {
+   "rfilename": "hf_quant_config.json",
+   "blobId": "e700000000000000000000000000000000000004",
+   "size": 104
+  },
+  {
+   "rfilename": "model.safetensors",
+   "blobId": "e700000000000000000000000000000000000063",
+   "size": 2000000,
+   "lfs": {
+    "sha256": "e700000000000000000000000000000000000000000000000000000000000000",
+    "size": 2000000
+   }
+  }
+ ]
+}

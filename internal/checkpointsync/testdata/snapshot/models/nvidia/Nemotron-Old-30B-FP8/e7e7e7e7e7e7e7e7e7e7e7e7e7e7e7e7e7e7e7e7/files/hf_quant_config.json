@@ -1,0 +1,9 @@
+{
+ "producer": {
+  "name": "modelopt",
+  "version": "0.40.0"
+ },
+ "quantization": {
+  "quant_algo": "FP8"
+ }
+}
