@@ -157,6 +157,40 @@ func TestFrontierProfilesMaterializePinnedSnapshotBeforeVLLM(t *testing.T) {
 	}
 }
 
+func TestDevBuildProfilesNeedRequalificationOnACurrentVLLMRelease(t *testing.T) {
+	// vLLM 0.27.0, 0.28.0, and later releases shipped after these day-zero
+	// builds. Images stay pinned until measured; the profiles say so.
+	for name, release := range map[string]string{"qwen3.8-flash-next": "0.28.0", "glm-5.3-flash": "0.27.0"} {
+		entry, ok := Get(name)
+		if !ok || len(entry.Profiles) == 0 {
+			t.Fatalf("missing %s", name)
+		}
+		for _, profile := range entry.Profiles {
+			limitations := strings.Join(profile.Limitations, " ")
+			if profile.QualificationScope != requalificationScope || !strings.HasPrefix(profile.Limitations[0], "The pinned image is a vLLM development build that preceded vLLM "+release+".") || !strings.Contains(limitations, "unknown") {
+				t.Fatalf("%s/%s does not require re-qualification: %+v", name, profile.Name, profile)
+			}
+			if strings.Contains(limitations, "Blackwell-only profile") || strings.Contains(limitations, "when upstream publishes replacement bytes") {
+				t.Fatalf("%s/%s keeps stale limitation text: %s", name, profile.Name, limitations)
+			}
+		}
+	}
+	glm, _ := Get("glm-5.3-flash")
+	if hopper := strings.Join(glm.Profiles[0].Limitations, " "); glm.Profiles[0].GPUHint != "H200" || !strings.Contains(hopper, "no longer Blackwell-only") {
+		t.Fatalf("GLM Hopper KV limitation is stale: %s", hopper)
+	}
+	for _, entry := range All() {
+		if _, devBuild := devBuildPrecedes[entry.Name]; devBuild {
+			continue
+		}
+		for _, profile := range entry.Profiles {
+			if profile.QualificationScope == requalificationScope {
+				t.Fatalf("%s/%s is not a development build: %+v", entry.Name, profile.Name, profile)
+			}
+		}
+	}
+}
+
 func TestFrontierBlackwellProfilesRemainExplicitCandidates(t *testing.T) {
 	tests := []struct {
 		entry, profile, requiredArg string

@@ -327,9 +327,11 @@ infercrane artifact optimize qualify OPTIMIZED_ARTIFACT_ID \
   --candidate-run CANDIDATE_RUN_ID --quality-evidence QUALITY_EVIDENCE_ID
 ```
 
-Presets are `fp8`, `awq`, `gptq`, `nvfp4`, `eagle3`, `mtp`, `dflash`, and `tensorrt`. Builders are
-never executed inside the InferCrane API process, and no optimized artifact qualifies without exact
-candidate, revision, digest, and semantic-quality evidence.
+Presets are `fp8`, `awq`, `gptq`, `nvfp4`, `eagle3`, `mtp`, and `dflash`. There is no TensorRT engine
+preset: TensorRT-LLM removed its engine backend, and its PyTorch backend loads checkpoints directly.
+An engine built by an earlier TensorRT-LLM release can still be recorded with `--plan-file`. Builders
+are never executed inside the InferCrane API process, and no optimized artifact qualifies without
+exact candidate, revision, digest, and semantic-quality evidence.
 
 ### `workload`
 
