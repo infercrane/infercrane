@@ -563,9 +563,13 @@ The rank-one proposal candidate is exposed as `starting_point`. It is selected
 from compatibility and declared objective fit, not an unmeasured speed claim.
 After deployment, `GET /api/v1/endpoints/{name}/optimization-readiness` turns
 fresh request aggregates into a conservative stage diagnosis such as queueing,
-prefill/first-token, or decode/generation pressure. Request telemetry never
-opens the kernel gate: exact target-GPU profiling and the Amdahl policy remain
-mandatory.
+prefill/first-token, or decode/generation pressure. When a fresh serving-engine
+scrape exists, the same assessment applies explicit KV-pressure, preemption,
+prefix-reuse, and speculative-acceptance rules and returns the technique
+families worth measuring for the diagnosed bottleneck
+([thresholds](/features/telemetry#diagnose-a-bottleneck-from-engine-signals)).
+Neither request nor engine telemetry opens the kernel gate: exact target-GPU
+profiling and the Amdahl policy remain mandatory.
 
 ## Process boundary
 

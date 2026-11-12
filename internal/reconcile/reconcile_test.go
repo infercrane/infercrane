@@ -584,3 +584,74 @@ func TestServerlessRouteDoesNotWarmWorkersOrStartRouter(t *testing.T) {
 		t.Fatalf("published=%#v runtime_calls=%d router_started=%q", published, runtime.calls, backend.started)
 	}
 }
+
+type engineTargetStore struct {
+	*fakeStore
+	deployments []domain.Deployment
+	targets     map[string][]domain.Target
+	failed      string
+}
+
+func (s *engineTargetStore) Deployments(context.Context) ([]domain.Deployment, error) {
+	return s.deployments, nil
+}
+
+func (s *engineTargetStore) ResolveForTenant(_ context.Context, _, name string) (domain.ResolvedDeployment, error) {
+	if name == s.failed {
+		return domain.ResolvedDeployment{}, errors.New("injected lookup failure")
+	}
+	for _, deployment := range s.deployments {
+		if deployment.Name == name {
+			return domain.ResolvedDeployment{Deployment: deployment, Targets: s.targets[name]}, nil
+		}
+	}
+	return domain.ResolvedDeployment{}, domain.ErrNotFound
+}
+
+func TestEngineMetricTargetsUseRouteCredentialsAndSkipProviderAPIs(t *testing.T) {
+	running := func(id, connection string) domain.Deployment {
+		return domain.Deployment{ID: id, TenantID: "tenant-1", Name: id, ActiveRevisionID: id + "-revision", ComputeConnectionID: connection, DesiredState: "running", ObservedState: "healthy"}
+	}
+	stopped := running("stopped", "")
+	stopped.DesiredState = "stopped"
+	broken := running("broken", "")
+	store := &engineTargetStore{
+		fakeStore:   &fakeStore{},
+		deployments: []domain.Deployment{running("managed", ""), running("byoc", "connection-1"), stopped, broken},
+		failed:      "broken",
+		targets: map[string][]domain.Target{
+			"managed": {
+				{ID: "managed-1", URL: "http://10.0.0.1:8000", Provider: "existing", Health: "healthy"},
+				{ID: "managed-down", URL: "http://10.0.0.2:8000", Provider: "existing", Health: "unhealthy"},
+				{ID: "serverless", URL: "https://api.runpod.ai/v2/endpoint/openai", Provider: "runpod-serverless", Health: "healthy"},
+				{ID: "external", URL: "https://openrouter.ai/api", Provider: "openrouter", Health: "healthy"},
+			},
+			"byoc": {
+				{ID: "byoc-versioned", URL: "https://worker-1.customer.example", Provider: "aws", Health: "healthy", ProviderDetails: `{"worker_credential_version":"tenant-hmac-v1"}`},
+				{ID: "byoc-legacy", URL: "https://worker-2.customer.example", Provider: "aws", Health: "healthy", ProviderDetails: `{}`},
+			},
+			"stopped": {{ID: "stopped-1", URL: "http://10.0.0.9:8000", Provider: "existing", Health: "healthy"}},
+		},
+	}
+	reconciler := Reconciler{
+		Store: store, RouterAPIKey: "global-key", ExternalFallback: &fixtureExternalFallback{},
+		DirectTargets: map[string]DirectTargetBackend{"runpod-serverless": {Provider: "runpod", APIKey: "provider-key"}},
+		WorkerCredential: func(tenant, deploymentID, version string) string {
+			return "icw_" + tenant + "_" + deploymentID + "_" + version
+		},
+	}
+	targets, err := reconciler.EngineMetricTargets(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "broken") {
+		t.Fatalf("resolution failure was hidden: %v", err)
+	}
+	if len(targets) != 2 {
+		t.Fatalf("targets=%d", len(targets))
+	}
+	managed, byoc := targets[0], targets[1]
+	if managed.TargetID != "managed-1" || managed.Credential != "global-key" || managed.RevisionID != "managed-revision" || managed.TenantID != "tenant-1" || managed.DeploymentID != "managed" {
+		t.Fatalf("managed target=%+v", managed.TargetID)
+	}
+	if byoc.TargetID != "byoc-versioned" || byoc.Credential != "icw_tenant-1_byoc_tenant-hmac-v1" {
+		t.Fatalf("tenant compute target=%s", byoc.TargetID)
+	}
+}

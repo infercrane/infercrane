@@ -47,6 +47,7 @@ import (
 	"github.com/infercrane/infercrane/internal/curatedrecipe"
 	"github.com/infercrane/infercrane/internal/doctor"
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/enginetelemetry"
 	"github.com/infercrane/infercrane/internal/external"
 	"github.com/infercrane/infercrane/internal/gateway"
 	"github.com/infercrane/infercrane/internal/integration"
@@ -4644,6 +4645,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	}
 	autoscaler := autoscale.Controller{Repository: s, Signals: autoscale.VLLMSignals{Targets: s, Client: client, APIKey: cfg.APIKey}, Fleet: s}
 	go runAutoscaler(ctx, autoscaler, cfg.HealthInterval, logger)
+	go (&enginetelemetry.Collector{Targets: rec, Recorder: s, Client: client, Logger: logger}).Run(ctx)
 	gatewayTelemetry := &gateway.Telemetry{Extra: func(w io.Writer) {
 		operationTelemetry.WritePrometheus(w)
 		recorder.WritePrometheus(w)
