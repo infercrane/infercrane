@@ -269,13 +269,6 @@ type ScalingDecision struct {
 	CreatedAt                                     time.Time
 }
 
-type Metrics struct {
-	RequestsRunning, RequestsWaiting, KVCacheUsage *float64
-	PrefixCacheQueries, PrefixCacheHits            *float64
-	PromptTokensTotal, GenerationTokensTotal       *float64
-	Raw                                            string
-}
-
 type RequestStats struct {
 	RequestsPerSecond     float64  `json:"requests_per_second"`
 	InputTokensPerSecond  float64  `json:"input_tokens_per_second"`

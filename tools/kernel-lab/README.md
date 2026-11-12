@@ -80,6 +80,55 @@ correct kernel and two wrong ones to confirm the suite catches mistakes. Set
 `INFERCRANE_KERNEL_CPU_SCREEN` to `run-cpu-screen.sh` so the adapter rejects
 wrong drafts before any GPU time is spent.
 
+## Serving timeline (opt-in)
+
+`infercrane-kernel-adapter timeline` records a short Nsight Systems timeline of
+the serving process under load. It reads the same profile request JSON as
+`profile`, and it is off unless the runtime's catalog entry has a reviewed
+`timeline` block and its image ships the `nsys` CLI:
+
+```json
+"timeline": {
+  "nsys": "/opt/nvidia/nsight-systems/bin/nsys",
+  "profiler_args": ["--profiler-config.profiler=cuda"],
+  "env": ["VLLM_WORKER_MULTIPROC_METHOD=spawn"]
+}
+```
+
+For SGLang, leave `profiler_args` out and set
+`"profile_request": {"activities": ["CUDA_PROFILER"]}`. The reviewed catalog has
+no `timeline` block yet. The published `vllm/vllm-openai` image does not include
+nsys, and whether `lmsysorg/sglang` runtime tags do is unconfirmed. Use a derived
+image with a pinned digest. The adapter checks `nsys --version` inside the image
+before starting a server and fails with that reason when the tool is missing.
+
+The server runs under
+`nsys profile --trace=cuda,nvtx --sample=none --cpuctxsw=none --capture-range=cudaProfilerApi --capture-range-end=stop-shutdown`
+in the same hardened container as `profile`. CPU sampling stays off, so the
+capture needs no extra Linux capability. AIPerf drives load, a 5-second warmup
+passes, and then `/start_profile` and `/stop_profile` open and close the CUDA
+profiler range. The window is 20 seconds by default and can be set from 5 to 120
+seconds with `INFERCRANE_KERNEL_TIMELINE_SECONDS`. `nsys stats` then runs in the
+same image with no network and writes `cuda_gpu_kern_sum`, `cuda_api_sum`, and
+`cuda_gpu_mem_time_sum` CSVs. The adapter returns an
+`infercrane.serving-timeline/v1` summary:
+
+- the capture window and the summed kernel and memory-operation time
+- `gpu_idle_fraction`: 1 − (kernel + memory time) / (window × GPUs). Overlapping
+  streams count twice, so this is a lower bound.
+- `kernel_launch_overhead_share`: time in kernel and graph launch calls / (window
+  × GPUs). This assumes one launching worker per GPU.
+- `communication_kernel_share`: the share of kernel time in NCCL and runtime
+  all-reduce kernels, which includes time waiting for peers.
+- the ten busiest kernels, with names truncated to 200 characters
+
+A report that nsys does not export leaves its fields `null`. The `.nsys-rep`
+digest is returned as `artifact_digest`, and the file stays on the GPU host.
+The tests use the CSV fixtures in `internal/kerneltarget/testdata/nsys`. No
+capture has run on a GPU yet, and multi-GPU behavior is unverified: the first
+worker's `cudaProfilerStop` ends the session. Nothing in a campaign calls
+`timeline` yet.
+
 Add a pack for an operator only after writing its contract and hidden suite by
 hand. Do not let a model write either one. See
 [Generate a custom kernel](../../docs/features/optimization.mdx).

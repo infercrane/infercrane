@@ -1,0 +1,50 @@
+{
+ "id": "nvidia/DeepSeek-V4.1-Flash-1017-NVFP4",
+ "sha": "3ae9c0d3fbbea5370bd06e679d22044db15883f1",
+ "createdAt": "2026-10-30T17:37:02.000Z",
+ "lastModified": "2026-11-04T22:10:26.000Z",
+ "private": false,
+ "disabled": false,
+ "gated": false,
+ "library_name": "Model Optimizer",
+ "pipeline_tag": "text-generation",
+ "tags": [
+  "modelopt"
+ ],
+ "cardData": {
+  "license": "mit",
+  "base_model": [
+   "deepseek-ai/DeepSeek-V4.1-Flash-1017"
+  ]
+ },
+ "config": {
+  "architectures": [
+   "X"
+  ],
+  "model_type": "x",
+  "quantization_config": {
+   "quant_method": "fp8"
+  }
+ },
+ "siblings": [
+  {
+   "rfilename": "README.md",
+   "blobId": "0000000000000000000000000000000000000001",
+   "size": 100
+  },
+  {
+   "rfilename": "hf_quant_config.json",
+   "blobId": "0000000000000000000000000000000000000002",
+   "size": 101
+  },
+  {
+   "rfilename": "model.safetensors",
+   "blobId": "0000000000000000000000000000000000000003",
+   "size": 1000002,
+   "lfs": {
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000009",
+    "size": 1000002
+   }
+  }
+ ]
+}

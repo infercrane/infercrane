@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/metrics"
 )
 
 const monitoringSchema = "https://opentelemetry.io/schemas/gen-ai/1.42.0"
@@ -37,11 +38,14 @@ func (s *Store) EndpointMonitoring(ctx context.Context, tenant, name string, win
 		Evidence: domain.MonitoringEvidence{
 			Source: "infercrane_gateway_request_records", SemanticConventionSchema: monitoringSchema,
 			Available:    []string{"request_rate", "error_rate", "gateway_request_latency", "gateway_time_to_first_response", "fallback", "retry"},
-			Unavailable:  []string{"reported_input_token_usage", "reported_output_token_usage", "runtime_internal_itl", "runtime_internal_tpot", "gpu_utilization", "gpu_memory", "runtime_kv_cache_timeseries"},
+			Unavailable:  append(append([]string{"reported_input_token_usage", "reported_output_token_usage"}, hardwareMeasurementNames()...), engineMeasurementNames()...),
 			Measurements: []domain.MeasurementEvidence{},
 		},
 	}
 	if err = s.monitoringSummary(ctx, tenant, resolved.Endpoint.ID, start, end, window, &out); err != nil {
+		return domain.EndpointMonitoringSnapshot{}, err
+	}
+	if err = s.monitoringSharedPrefix(ctx, tenant, resolved.Endpoint.ID, start, end, &out); err != nil {
 		return domain.EndpointMonitoringSnapshot{}, err
 	}
 	if err = s.monitoringOperationalMeasurements(ctx, tenant, resolved.Endpoint.ID, start, end, &out); err != nil {
@@ -148,30 +152,118 @@ func populateMeasurementEvidence(out *domain.EndpointMonitoringSnapshot) {
 	add("generation_p95", "milliseconds", out.Summary.P95GenerationMS, out.Summary.Requests)
 	add("input_token_throughput", "tokens_per_second", out.Summary.InputTokensPerSecond, out.Summary.InputTokenSamples)
 	add("output_token_throughput", "tokens_per_second", out.Summary.OutputTokensPerSecond, out.Summary.OutputTokenSamples)
-	for _, unavailable := range []struct{ name, unit, reason string }{
-		{"runtime_internal_itl", "milliseconds", "the connected runtime has not supplied qualified ITL telemetry"},
-		{"runtime_internal_tpot", "milliseconds", "the connected runtime has not supplied qualified TPOT telemetry"},
-		{"gpu_utilization", "percent", "no qualified hardware telemetry collector is connected"},
-		{"gpu_memory", "bytes", "no qualified hardware telemetry collector is connected"},
-		{"gpu_temperature", "celsius", "no qualified hardware telemetry collector is connected"},
-		{"gpu_power", "watts", "no qualified hardware telemetry collector is connected"},
-		{"gpu_xid_errors", "count", "no qualified hardware telemetry collector is connected"},
-		{"runtime_kv_cache_timeseries", "ratio", "the connected runtime has not supplied qualified KV-cache telemetry"},
-	} {
+	for _, measurement := range metrics.HardwareMeasurementCatalog {
 		out.Evidence.Measurements = append(out.Evidence.Measurements, domain.MeasurementEvidence{
-			Name: unavailable.name, Unit: unavailable.unit, Availability: "unsupported",
-			EvidenceClass: "measured", Source: "runtime_adapter", Reason: unavailable.reason,
+			Name: measurement.Name, Unit: measurement.Unit, Availability: "unsupported",
+			EvidenceClass: "measured", Source: "runtime_adapter", Reason: hardwareNotConnectedReason,
+		})
+	}
+	// Engine measurements start explicitly unobserved; a fresh engine scrape
+	// for the active revision replaces them. Absence never becomes zero.
+	for _, measurement := range metrics.EngineMeasurementCatalog {
+		out.Evidence.Measurements = append(out.Evidence.Measurements, domain.MeasurementEvidence{
+			Name: measurement.Name, Unit: measurement.Unit, Availability: "not_observed",
+			EvidenceClass: "measured", Source: "engine_metrics", Reason: engineNotConnectedReason,
 		})
 	}
 }
 
+const (
+	engineNotConnectedReason   = "no serving-engine metrics scrape has reported for the active revision"
+	engineNotReportedReason    = "the connected serving engine did not report this signal in its latest window"
+	hardwareNotConnectedReason = "no qualified hardware telemetry collector is connected"
+	hardwareNotReportedReason  = "the connected hardware collector did not report this field; DCGM profiling fields and link peaks must be enabled explicitly"
+)
+
+func hardwareMeasurementNames() []string {
+	names := make([]string, 0, len(metrics.HardwareMeasurementCatalog))
+	for _, measurement := range metrics.HardwareMeasurementCatalog {
+		names = append(names, measurement.Name)
+	}
+	return names
+}
+
+func isHardwareMeasurement(name string) bool {
+	for _, measurement := range metrics.HardwareMeasurementCatalog {
+		if measurement.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func isEngineMeasurement(name string) bool {
+	for _, measurement := range metrics.EngineMeasurementCatalog {
+		if measurement.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func engineMeasurementNames() []string {
+	names := make([]string, 0, len(metrics.EngineMeasurementCatalog))
+	for _, measurement := range metrics.EngineMeasurementCatalog {
+		names = append(names, measurement.Name)
+	}
+	return names
+}
+
+// monitoringSharedPrefix reports how many requests repeat another request's
+// leading system messages, using only content-free HMAC digests. Requests
+// whose prefix shape is unknown (non-chat gateway operations, or imported
+// observations without a digest) are excluded from the denominator rather
+// than counted as unique.
+func (s *Store) monitoringSharedPrefix(ctx context.Context, tenant, endpointID string, start, end time.Time, out *domain.EndpointMonitoringSnapshot) error {
+	var known, repeated int
+	err := s.QueryRowContext(ctx, `SELECT COALESCE(SUM(c),0),COALESCE(SUM(c) FILTER(WHERE shared_prefix_hash IS NOT NULL AND c>1),0) FROM (SELECT shared_prefix_hash,COUNT(*) AS c FROM request_records WHERE tenant_id=? AND endpoint_id=? AND started_at>=? AND started_at<=? AND ((COALESCE(compute_mode,'')<>'imported' AND operation_name='chat') OR shared_prefix_hash IS NOT NULL) GROUP BY shared_prefix_hash) grouped`, tenant, endpointID, start, end).Scan(&known, &repeated)
+	if err != nil {
+		return err
+	}
+	measurement := domain.MeasurementEvidence{Name: "shared_prefix_request_ratio", Unit: "ratio", EvidenceClass: "measured", Source: out.Evidence.Source, SampleCount: known}
+	switch {
+	case known == 0:
+		measurement.Availability = "not_observed"
+		measurement.Reason = "no request with a known prompt-prefix shape was recorded in the selected window"
+	case !out.Evidence.Fresh:
+		measurement.Availability = "stale"
+		measurement.Reason = "the latest request sample is older than the monitoring freshness window"
+		measurement.ObservedAt = out.Evidence.LatestRequestAt
+	default:
+		measurement.Availability = "available"
+		measurement.Value = floatPointer(float64(repeated) / float64(known))
+		measurement.ObservedAt = out.Evidence.LatestRequestAt
+	}
+	if measurement.Availability == "available" {
+		out.Evidence.Available = append(out.Evidence.Available, measurement.Name)
+	} else {
+		out.Evidence.Unavailable = append(out.Evidence.Unavailable, measurement.Name)
+	}
+	out.Evidence.Measurements = append(out.Evidence.Measurements, measurement)
+	return nil
+}
+
 type operationalMeasurementAggregate struct {
 	name, unit, evidenceClass string
-	value                     float64
+	value, weighted           float64
 	sampleCount               int
 	observedAt, freshUntil    time.Time
 	sources                   map[string]struct{}
 	fresh                     bool
+}
+
+// measurementAggregation says how one measurement combines across replicas:
+// additive quantities sum, ratios weight by their sample denominator, and
+// pressure or latency keeps the worst replica.
+func measurementAggregation(name string) string {
+	for _, catalog := range [][]metrics.MeasurementSpec{metrics.HardwareMeasurementCatalog, metrics.EngineMeasurementCatalog} {
+		for _, measurement := range catalog {
+			if measurement.Name == name {
+				return measurement.Aggregation
+			}
+		}
+	}
+	return metrics.AggregateMax
 }
 
 func (s *Store) monitoringOperationalMeasurements(ctx context.Context, tenant, endpointID string, start, end time.Time, out *domain.EndpointMonitoringSnapshot) error {
@@ -208,6 +300,7 @@ func (s *Store) monitoringOperationalMeasurements(ctx context.Context, tenant, e
 		}
 		if !aggregate.fresh {
 			aggregate.value = value
+			aggregate.weighted = 0
 			aggregate.unit = unit
 			aggregate.evidenceClass = evidenceClass
 			aggregate.observedAt = observedAt.UTC()
@@ -216,9 +309,10 @@ func (s *Store) monitoringOperationalMeasurements(ctx context.Context, tenant, e
 			aggregate.sources = map[string]struct{}{}
 			aggregate.fresh = true
 		} else {
-			switch name {
-			case "gpu_memory", "gpu_power", "gpu_xid_errors":
+			switch measurementAggregation(name) {
+			case metrics.AggregateSum:
 				aggregate.value += value
+			case metrics.AggregateWeighted:
 			default:
 				if value > aggregate.value {
 					aggregate.value = value
@@ -236,14 +330,43 @@ func (s *Store) monitoringOperationalMeasurements(ctx context.Context, tenant, e
 			aggregate.evidenceClass = "provider_reported"
 		}
 		aggregate.sampleCount += sampleCount
+		aggregate.weighted += value * float64(sampleCount)
 	}
 	if err = rows.Err(); err != nil {
 		return err
 	}
-	for _, name := range []string{"gpu_utilization", "gpu_memory", "gpu_temperature", "gpu_power", "gpu_xid_errors"} {
+	connected := func(names []string) bool {
+		for _, name := range names {
+			if aggregate, ok := aggregates[name]; ok && aggregate.fresh {
+				return true
+			}
+		}
+		return false
+	}
+	engineConnected, hardwareConnected := connected(engineMeasurementNames()), connected(hardwareMeasurementNames())
+	for _, name := range append(hardwareMeasurementNames(), engineMeasurementNames()...) {
 		aggregate, ok := aggregates[name]
 		if !ok {
+			// The collector is connected but does not export this signal (or
+			// had no traffic for it in the window): unobserved, not zero.
+			reason := ""
+			switch {
+			case engineConnected && isEngineMeasurement(name):
+				reason = engineNotReportedReason
+			case hardwareConnected && isHardwareMeasurement(name):
+				reason = hardwareNotReportedReason
+			}
+			if reason != "" {
+				for index := range out.Evidence.Measurements {
+					if out.Evidence.Measurements[index].Name == name {
+						out.Evidence.Measurements[index].Availability, out.Evidence.Measurements[index].Reason = "not_observed", reason
+					}
+				}
+			}
 			continue
+		}
+		if aggregate.fresh && measurementAggregation(name) == metrics.AggregateWeighted && aggregate.sampleCount > 0 {
+			aggregate.value = aggregate.weighted / float64(aggregate.sampleCount)
 		}
 		sources := make([]string, 0, len(aggregate.sources))
 		for source := range aggregate.sources {

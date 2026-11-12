@@ -54,6 +54,10 @@ type fakeHost struct {
 	profiled    int
 	memory      map[string]string
 	server      *httptest.Server
+	// Nsight Systems fakes.
+	nsysMissing   bool
+	stopFails     bool
+	profileBodies []string
 }
 
 func newFakeHost(t *testing.T, cache string) *fakeHost {
@@ -69,13 +73,23 @@ func newFakeHost(t *testing.T, cache string) *fakeHost {
 		}
 		w.WriteHeader(http.StatusOK)
 	})
-	mux.HandleFunc("POST /start_profile", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	mux.HandleFunc("POST /start_profile", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		host.mu.Lock()
+		host.profileBodies = append(host.profileBodies, string(body))
+		host.mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	})
 	mux.HandleFunc("POST /stop_profile", func(w http.ResponseWriter, _ *http.Request) {
 		host.mu.Lock()
 		defer host.mu.Unlock()
 		host.profiled++
 		if !host.noTrace {
 			host.writeTrace()
+		}
+		if host.stopFails {
+			w.WriteHeader(http.StatusBadGateway)
+			return
 		}
 		w.WriteHeader(http.StatusOK)
 	})
@@ -130,6 +144,12 @@ func (h *fakeHost) writeTrace() {
 			volume = strings.TrimSuffix(h.currentArgs[index+1], ":/profiles")
 		}
 	}
+	if strings.Contains(strings.Join(h.currentArgs, " "), "--capture-range=cudaProfilerApi") {
+		if err := os.WriteFile(filepath.Join(volume, "timeline.nsys-rep"), []byte("nsys report"), 0o600); err != nil {
+			h.t.Error(err)
+		}
+		return
+	}
 	trace := map[string]any{"traceEvents": []map[string]any{
 		{"ph": "X", "cat": "kernel", "name": "fused_add_rms_norm_kernel", "dur": 200.0},
 		{"ph": "X", "cat": "kernel", "name": "cublas_gemm", "dur": 700.0},
@@ -176,6 +196,9 @@ func (h *fakeHost) Run(_ context.Context, name string, args ...string) ([]byte, 
 		return nil, nil
 	case "run":
 		joined := strings.Join(args, " ")
+		if strings.HasSuffix(flagValue(args, "--entrypoint", ""), "/nsys") && flagValue(args, "--name", "") == "" {
+			return h.runNsys(args)
+		}
 		if strings.Contains(joined, "snapshot_download") {
 			path := filepath.Join(h.cache, "hub", "models--acme--novel", "snapshots", strings.Repeat("a", 40))
 			if err := os.MkdirAll(path, 0o755); err != nil {

@@ -69,6 +69,11 @@ type OptimizationPrice struct {
 	GPUCount, Replicas                   int
 	HourlyUSD                            float64
 	ObservedAt, ValidUntil               time.Time
+	// Authority is unknown unless the operator declares an owned-cluster rate
+	// card. Only cloud "kubernetes" may declare account_contract, because no
+	// provider pricing API exists for capacity the operator owns or contracts.
+	Authority pricing.PriceAuthority
+	CostScope pricing.CostScope
 }
 
 // SkyPilotProvider is a declarative execution manifest. It contains only
@@ -1339,6 +1344,8 @@ func envOptimizationPrices(key string) ([]OptimizationPrice, error) {
 		HourlyUSD                            float64 `json:"hourly_usd"`
 		ObservedAt                           string  `json:"observed_at"`
 		ValidUntil                           string  `json:"valid_until"`
+		Authority                            string  `json:"authority"`
+		CostScope                            string  `json:"cost_scope"`
 	}
 	var encoded []encodedPrice
 	decoder := json.NewDecoder(strings.NewReader(raw))
@@ -1366,8 +1373,37 @@ func envOptimizationPrices(key string) ([]OptimizationPrice, error) {
 		if strings.TrimSpace(row.Cloud) == "" || strings.TrimSpace(row.GPU) == "" || strings.TrimSpace(row.Source) == "" || pricing.RepositorySnapshotSource(row.Source) || row.Currency != "USD" || row.GPUCount < 1 || row.GPUCount > 1024 || row.Replicas < 1 || row.Replicas > 100 || row.HourlyUSD <= 0 || math.IsNaN(row.HourlyUSD) || math.IsInf(row.HourlyUSD, 0) || observedErr != nil || validErr != nil || !validUntil.After(observedAt) || duplicate {
 			return nil, fmt.Errorf("%s[%d] must contain a unique cloud/region/GPU/gpu_count/replicas tuple, positive finite USD rate, source, and increasing RFC3339 evidence window", key, index)
 		}
+		authority, scope, rateCardErr := optimizationPriceAuthority(row.Cloud, row.Authority, row.CostScope)
+		if rateCardErr != nil {
+			return nil, fmt.Errorf("%s[%d]: %w", key, index, rateCardErr)
+		}
 		seen[identity] = struct{}{}
-		prices = append(prices, OptimizationPrice{Cloud: row.Cloud, Region: row.Region, GPU: row.GPU, GPUCount: row.GPUCount, Replicas: row.Replicas, HourlyUSD: row.HourlyUSD, Currency: row.Currency, Source: row.Source, ObservedAt: observedAt.UTC(), ValidUntil: validUntil.UTC()})
+		prices = append(prices, OptimizationPrice{Cloud: row.Cloud, Region: row.Region, GPU: row.GPU, GPUCount: row.GPUCount, Replicas: row.Replicas, HourlyUSD: row.HourlyUSD, Currency: row.Currency, Source: row.Source, ObservedAt: observedAt.UTC(), ValidUntil: validUntil.UTC(), Authority: authority, CostScope: scope})
 	}
 	return prices, nil
+}
+
+// optimizationPriceAuthority keeps manual prices advisory unless the operator
+// declares a complete rate card for capacity it owns or contracts. Provider
+// and invoice authority can only come from reviewed collectors, never env.
+func optimizationPriceAuthority(cloud, authority, scope string) (pricing.PriceAuthority, pricing.CostScope, error) {
+	resolvedScope := pricing.CostScopeUnknown
+	switch strings.TrimSpace(scope) {
+	case "", string(pricing.CostScopeUnknown):
+	case string(pricing.CostScopeInstanceTotal):
+		resolvedScope = pricing.CostScopeInstanceTotal
+	default:
+		return "", "", fmt.Errorf("cost_scope must be unknown or instance_total")
+	}
+	switch strings.TrimSpace(authority) {
+	case "", string(pricing.PriceAuthorityUnknown):
+		return pricing.PriceAuthorityUnknown, resolvedScope, nil
+	case string(pricing.PriceAuthorityAccountContract):
+		if strings.TrimSpace(cloud) != "kubernetes" || resolvedScope != pricing.CostScopeInstanceTotal {
+			return "", "", fmt.Errorf("an account_contract rate card is only accepted for cloud kubernetes with cost_scope instance_total")
+		}
+		return pricing.PriceAuthorityAccountContract, resolvedScope, nil
+	default:
+		return "", "", fmt.Errorf("authority must be unknown or account_contract; provider_api and measured_invoice come only from reviewed collectors")
+	}
 }

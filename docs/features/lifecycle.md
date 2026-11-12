@@ -3,9 +3,11 @@ title: Deployment lifecycle
 description: How durable operations survive disconnects, retries, restarts, updates, and deletion.
 ---
 
+import SafeRetry from "/snippets/safe-retry.mdx";
+
 # Deployment lifecycle
 
-<Snippet file="_snippets/safe-retry.mdx" />
+<SafeRetry />
 
 Create and apply requests are validated and persisted before external provisioning begins. A leased worker resumes incomplete steps after a control-plane restart. Each replica intent has one deterministic provider identity, so replay adopts the same resource rather than submitting another.
 

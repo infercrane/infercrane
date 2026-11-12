@@ -1,0 +1,47 @@
+{
+ "id": "RedHatAI/Qwen3.8-27B-NVFP4",
+ "sha": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+ "createdAt": "2026-09-18T09:00:00.000Z",
+ "lastModified": "2026-11-09T09:00:00.000Z",
+ "private": false,
+ "disabled": false,
+ "gated": false,
+ "library_name": "transformers",
+ "pipeline_tag": "image-text-to-text",
+ "tags": [],
+ "cardData": {
+  "license": "apache-2.0",
+  "base_model": "Qwen/Qwen3.8-27B"
+ },
+ "config": {
+  "architectures": [
+   "X"
+  ],
+  "model_type": "x",
+  "quantization_config": {
+   "quant_method": "compressed-tensors",
+   "format": "mixed-precision"
+  }
+ },
+ "siblings": [
+  {
+   "rfilename": "README.md",
+   "blobId": "0000000000000000000000000000000000000001",
+   "size": 100
+  },
+  {
+   "rfilename": "config.json",
+   "blobId": "0000000000000000000000000000000000000002",
+   "size": 101
+  },
+  {
+   "rfilename": "model.safetensors",
+   "blobId": "0000000000000000000000000000000000000003",
+   "size": 1000002,
+   "lfs": {
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000009",
+    "size": 1000002
+   }
+  }
+ ]
+}

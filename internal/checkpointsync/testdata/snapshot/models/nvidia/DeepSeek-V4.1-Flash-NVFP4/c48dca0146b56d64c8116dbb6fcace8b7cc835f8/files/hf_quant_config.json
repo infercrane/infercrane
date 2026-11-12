@@ -1,0 +1,10 @@
+{
+ "producer": {
+  "name": "modelopt",
+  "version": "dsv4-nvfp4-experts"
+ },
+ "quantization": {
+  "quant_algo": "NVFP4",
+  "group_size": 16
+ }
+}

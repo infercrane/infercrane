@@ -1,0 +1,53 @@
+{
+  "schema_version": "infercrane.checkpoint-catalog-policy/v1",
+  "reviewed_at": "2026-11-11",
+  "approved_licenses": [
+    {"tag": "apache-2.0", "spdx": "Apache-2.0"},
+    {"tag": "mit", "spdx": "MIT"}
+  ],
+  "runnable_hardware": [
+    {"vendor": "nvidia", "architectures": ["blackwell", "hopper"]}
+  ],
+  "publishers": [
+    {
+      "organization": "nvidia",
+      "name": "NVIDIA",
+      "hardware_vendor": "nvidia",
+      "review_state": "approved",
+      "created_after": "2026-08-01",
+      "formats": [
+        {"kind": "quantized_checkpoint", "tool": "modelopt", "scheme": "nvfp4", "review_state": "approved", "hardware": {"vendor": "nvidia", "architectures": ["blackwell"]}, "runtimes": ["sglang", "vllm"]},
+        {"kind": "quantized_checkpoint", "tool": "modelopt", "scheme": "mixed-nvfp4-fp8", "review_state": "approved", "hardware": {"vendor": "nvidia", "architectures": ["blackwell"]}, "runtimes": ["sglang", "vllm"]},
+        {"kind": "speculator", "scheme": "dspark", "review_state": "approved", "hardware": {"vendor": "nvidia", "architectures": ["hopper", "blackwell"]}, "runtimes": ["sglang", "vllm"]}
+      ]
+    },
+    {
+      "organization": "RedHatAI",
+      "name": "Red Hat AI",
+      "hardware_vendor": "nvidia",
+      "review_state": "pending",
+      "created_after": "2026-08-01",
+      "formats": [
+        {"kind": "quantized_checkpoint", "tool": "llm-compressor", "scheme": "nvfp4", "review_state": "approved", "hardware": {"vendor": "nvidia", "architectures": ["blackwell"]}, "runtimes": ["vllm"]}
+      ]
+    },
+    {
+      "organization": "amd",
+      "name": "AMD",
+      "hardware_vendor": "amd",
+      "review_state": "approved",
+      "created_after": "2026-08-01",
+      "formats": [
+        {"kind": "quantized_checkpoint", "tool": "quark", "scheme": "mxfp4", "review_state": "approved", "hardware": {"vendor": "amd", "architectures": ["cdna4"]}, "runtimes": ["sglang", "vllm"]}
+      ]
+    }
+  ],
+  "exclusions": [
+    {
+      "repository": "nvidia/DeepSeek-V4.1-Flash-NVFP4",
+      "revision": "c48dca0146b56d64c8116dbb6fcace8b7cc835f8",
+      "engines": ["sglang"],
+      "reason": "The model card supports SGLang only for the previous revision 3431dde."
+    }
+  ]
+}

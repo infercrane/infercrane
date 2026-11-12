@@ -1,0 +1,28 @@
+{
+  "schema_version": "infercrane.checkpoint-snapshot/v1",
+  "source": "https://huggingface.co",
+  "fetched_at": "2026-11-11T12:00:00Z",
+  "policy_digest": "sha256:2bd0abcf7b2cd5b504595f00a6207d8b3968d6613c3fcb2132636f66f1c00704",
+  "publishers": [
+    {
+      "organization": "RedHatAI",
+      "created_after": "2026-08-01",
+      "pages": 1
+    },
+    {
+      "organization": "amd",
+      "created_after": "2026-08-01",
+      "pages": 2
+    },
+    {
+      "organization": "nvidia",
+      "created_after": "2026-08-01",
+      "pages": 1
+    }
+  ],
+  "pins": [
+    "nvidia/DeepSeek-V4.1-Flash-NVFP4@3431dde3247c13b5957f682b1e3c6fcae2566079",
+    "nvidia/GLM-5.3-Flash-NVFP4@09b04e5e74bca08ca8549fc736d4cdd8624bfde3",
+    "nvidia/Qwen3.8-27B-NVFP4@482ca0f3832238542f8f5295dde86b5f22711d80"
+  ]
+}

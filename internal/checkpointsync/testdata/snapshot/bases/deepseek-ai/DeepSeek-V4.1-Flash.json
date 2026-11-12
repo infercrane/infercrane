@@ -1,0 +1,11 @@
+{
+ "id": "deepseek-ai/DeepSeek-V4.1-Flash",
+ "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+ "lastModified": "2026-09-01T00:00:00.000Z",
+ "private": false,
+ "disabled": false,
+ "gated": false,
+ "cardData": {
+  "license": "mit"
+ }
+}

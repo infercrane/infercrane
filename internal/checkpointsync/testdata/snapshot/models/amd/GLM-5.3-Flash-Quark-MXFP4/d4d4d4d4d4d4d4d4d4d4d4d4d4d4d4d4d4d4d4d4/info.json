@@ -1,0 +1,48 @@
+{
+ "id": "amd/GLM-5.3-Flash-Quark-MXFP4",
+ "sha": "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+ "createdAt": "2026-10-25T09:00:00.000Z",
+ "lastModified": "2026-11-07T09:00:00.000Z",
+ "private": false,
+ "disabled": false,
+ "gated": false,
+ "library_name": "transformers",
+ "pipeline_tag": "text-generation",
+ "tags": [],
+ "cardData": {
+  "license": "mit",
+  "base_model": [
+   "zai-org/GLM-5.3-Flash"
+  ]
+ },
+ "config": {
+  "architectures": [
+   "X"
+  ],
+  "model_type": "x",
+  "quantization_config": {
+   "quant_method": "quark"
+  }
+ },
+ "siblings": [
+  {
+   "rfilename": "README.md",
+   "blobId": "0000000000000000000000000000000000000001",
+   "size": 100
+  },
+  {
+   "rfilename": "config.json",
+   "blobId": "0000000000000000000000000000000000000002",
+   "size": 101
+  },
+  {
+   "rfilename": "model.safetensors",
+   "blobId": "0000000000000000000000000000000000000003",
+   "size": 1000002,
+   "lfs": {
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000009",
+    "size": 1000002
+   }
+  }
+ ]
+}
