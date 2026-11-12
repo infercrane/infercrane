@@ -95,6 +95,11 @@ class DeploymentView(DeploymentViewRequired, total=False):
 class ObjectList(TypedDict):
     data: list[dict[str, Any]]
 
+class QualityEvidenceList(TypedDict):
+    data: list[dict[str, Any]]
+    verdicts: dict[str, Any]
+    content_recorded: bool
+
 class IntentPlanOptionRequired(TypedDict):
     value: str
     label: str

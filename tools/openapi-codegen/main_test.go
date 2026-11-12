@@ -48,4 +48,10 @@ func TestResponseTypeMappings(t *testing.T) {
 	if got := typeScriptResponseType("IntentPlanEnvelope"); got != "IntentPlanEnvelope" {
 		t.Fatalf("TypeScript intent-plan response type = %q", got)
 	}
+	if got := typeScriptResponseType("QualityEvidenceList"); got != "QualityEvidenceList" {
+		t.Fatalf("TypeScript quality evidence response type = %q", got)
+	}
+	if got := pythonResponseType("QualityEvidenceList"); got != "QualityEvidenceList" {
+		t.Fatalf("Python quality evidence response type = %q", got)
+	}
 }
