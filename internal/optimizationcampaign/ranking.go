@@ -67,7 +67,7 @@ func RankMeasuredCampaign(campaign domain.OptimizationCampaign, benchmarks []dom
 	decisions := make(map[string]string, len(campaign.Candidates))
 	reasons := make(map[string]string, len(campaign.Candidates))
 	for _, candidate := range campaign.Candidates {
-		if candidate.State != CandidateRanked && candidate.State != CandidateGuarding && candidate.State != CandidateGuardPassed && candidate.State != CandidateRejected && candidate.State != CandidateInconclusive && candidate.State != CandidateCleaned {
+		if !atMeasuredRankingBarrier(candidate.State) {
 			return MeasuredRanking{}, fmt.Errorf("candidate %s has not reached the measured ranking barrier", candidate.ID)
 		}
 		// A candidate rejected by quality before ranking has no Lab identity and
@@ -178,6 +178,20 @@ func RankMeasuredCampaign(campaign domain.OptimizationCampaign, benchmarks []dom
 		return MeasuredRanking{}, err
 	}
 	return MeasuredRanking{Evaluation: annotated, Decisions: decisions, Reasons: reasons, FailureCodes: gate.codes}, nil
+}
+
+// atMeasuredRankingBarrier reports whether a candidate's measured evidence is
+// final for ranking. A winner ranked before its peers has already moved on:
+// to qualified and then promoted for a new endpoint, or to guarding for an
+// evolution. It stays at the barrier, so ranking a later peer replays the same
+// evaluation instead of waiting forever.
+func atMeasuredRankingBarrier(state string) bool {
+	switch state {
+	case CandidateRanked, CandidateQualified, CandidateGuarding, CandidateGuardPassed, CandidatePromoted, CandidateObserved, CandidateRejected, CandidateInconclusive, CandidateCleaned:
+		return true
+	default:
+		return false
+	}
 }
 
 // measuredArtifactIdentity is the identity benchmarks record for the deployed
