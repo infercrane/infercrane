@@ -93,6 +93,7 @@ type coordinatorDriver struct {
 	rankDecisions                                                                    map[string]string
 	provisionErr                                                                     error
 	guardCandidate                                                                   domain.OptimizationCandidateRun
+	measured                                                                         []string
 }
 
 func (d *coordinatorDriver) Provision(_ context.Context, _ string, _ domain.OptimizationCandidateRun, budget Budget) (ProvisionResult, error) {
@@ -104,8 +105,9 @@ func (d *coordinatorDriver) Provision(_ context.Context, _ string, _ domain.Opti
 	return ProvisionResult{DeploymentName: "candidate-deployment", RevisionID: "rev-candidate"}, nil
 }
 
-func (d *coordinatorDriver) Measure(_ context.Context, _ string, _ domain.OptimizationCandidateRun, budget Budget) (MeasurementResult, error) {
+func (d *coordinatorDriver) Measure(_ context.Context, candidateID string, _ domain.OptimizationCandidateRun, budget Budget) (MeasurementResult, error) {
 	d.measureCalls++
+	d.measured = append(d.measured, candidateID)
 	d.lastBudget = budget
 	return MeasurementResult{BenchmarkID: "benchmark-1", ActualEvidenceJSON: `{"ttft_p95_ms":180}`}, nil
 }

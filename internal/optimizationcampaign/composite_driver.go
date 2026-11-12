@@ -75,7 +75,11 @@ type CompositeDriver struct {
 	Costs     CostAuthority
 	Benchmark CandidateBenchmark
 	Ranker    CandidateRanker
-	Now       func() time.Time
+	// Replays resolves a customer-observed campaign's bound trace. Provision
+	// checks it before any provider mutation, so a campaign that cannot
+	// replay its trace fails before it spends.
+	Replays ReplayTraceSource
+	Now     func() time.Time
 }
 
 func (d CompositeDriver) Provision(ctx context.Context, candidateID string, candidate domain.OptimizationCandidateRun, budget Budget) (ProvisionResult, error) {
@@ -84,6 +88,13 @@ func (d CompositeDriver) Provision(ctx context.Context, candidateID string, cand
 	campaign, draft, err := d.inputs(ctx, candidateID, candidate)
 	if err != nil {
 		return ProvisionResult{}, err
+	}
+	if _, err = resolveBoundReplay(ctx, d.Replays, candidate.TenantID, campaignRequest(campaign)); err != nil {
+		var failure operations.Failure
+		if errors.As(err, &failure) {
+			return ProvisionResult{}, failure
+		}
+		return ProvisionResult{}, operations.Retryable("optimization_replay_lookup_failed", err)
 	}
 	if err = d.authorizeCost(ctx, candidate.TenantID, draft, budget); err != nil {
 		return ProvisionResult{}, err
@@ -372,11 +383,14 @@ func (d CompositeDriver) adoptBenchmark(ctx context.Context, candidate domain.Op
 		if row.RevisionID != candidate.RevisionID || row.CreatedAt.Before(candidate.UpdatedAt) {
 			continue
 		}
+		// Only evidence produced by the current campaign method is adopted. A
+		// single-run row from an older control plane must be measured again.
 		var workload struct {
-			Profile        string `json:"profile"`
-			ProfileVersion string `json:"profile_version"`
+			Profile           string `json:"profile"`
+			ProfileVersion    string `json:"profile_version"`
+			MeasurementMethod string `json:"measurement_method"`
 		}
-		if json.Unmarshal([]byte(row.WorkloadJSON), &workload) == nil && workload.Profile == profile.Name && workload.ProfileVersion == performanceprofile.Version {
+		if json.Unmarshal([]byte(row.WorkloadJSON), &workload) == nil && workload.Profile == profile.Name && workload.ProfileVersion == performanceprofile.Version && workload.MeasurementMethod == MeasurementMethod {
 			return row, true, nil
 		}
 	}
