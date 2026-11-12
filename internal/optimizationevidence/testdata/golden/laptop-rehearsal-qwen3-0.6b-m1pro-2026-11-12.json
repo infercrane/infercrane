@@ -1,0 +1,149 @@
+{
+  "schema_version": "infercrane.dev/optimization-evidence/v1",
+  "model_identity": "Qwen/Qwen3-0.6B-GGUF:Q8_0",
+  "hardware_identity": "laptop:Darwin-arm64:llama.cpp",
+  "workload_id": "laptop-rehearsal-synthetic",
+  "workload_digest": "sha256:41ff21d802257d88ab53bc1bb8ba43ffb03bf35b1f0468fd6555bea9d686ad0b",
+  "required_concurrency_lanes": [
+    1,
+    4
+  ],
+  "slo": {
+    "scope": "each_concurrency_lane",
+    "max_ttft_ms": 5000.0,
+    "max_itl_ms": 100.0,
+    "min_successful_fraction": 0.99,
+    "max_error_rate": 0.01,
+    "max_prompt_token_mismatch_rate": 0.0,
+    "required_quality_gates": [
+      "api_models",
+      "runtime_parity"
+    ],
+    "minimum_requests_per_lane": 12,
+    "minimum_independent_runs": 1,
+    "minimum_measurement_seconds_per_lane": 0
+  },
+  "selection_policy": {
+    "id": "laptop-rehearsal-throughput",
+    "version": 1,
+    "objective": "maximum_slo_qualified_output_throughput",
+    "lane_aggregation": "arithmetic_mean",
+    "evidence_level": "screening",
+    "qualification_before_scoring": true,
+    "cost_tie_breaker": false
+  },
+  "candidates": [
+    {
+      "id": "control",
+      "runtime_id": "llama.cpp",
+      "origin": "infercrane_generated",
+      "evidence_level": "screening",
+      "evidence_state": "reproduced",
+      "recipe_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "workload_digest": "sha256:41ff21d802257d88ab53bc1bb8ba43ffb03bf35b1f0468fd6555bea9d686ad0b",
+      "quality_passed": true,
+      "quality_gates": [
+        {
+          "name": "api_models",
+          "passed": true
+        },
+        {
+          "name": "runtime_parity",
+          "passed": true
+        }
+      ],
+      "error_rate": 0.0,
+      "prompt_token_mismatch_rate": 0.0,
+      "lanes": [
+        {
+          "concurrency": 1,
+          "requests": 24,
+          "successful_requests": 24,
+          "independent_runs": 1,
+          "measurement_seconds": 19.360935168,
+          "slo_attainment": 1.0,
+          "ttft_p95_ms": 181.70988929999996,
+          "itl_p95_ms": 10.914882933606558,
+          "aggregate_output_tokens_per_second": 76.79041473847157,
+          "request_throughput_requests_per_second": 1.2393879984689424,
+          "slo_goodput_requests_per_second": 1.2393879984689424,
+          "slo_qualified_output_tokens_per_second": 76.79041473847157,
+          "gpu_seconds_per_successful_request": 0.806705632,
+          "cost_per_1m_successful_output_tokens_usd": 0.0
+        },
+        {
+          "concurrency": 4,
+          "requests": 24,
+          "successful_requests": 24,
+          "independent_runs": 1,
+          "measurement_seconds": 5.250198528,
+          "slo_attainment": 1.0,
+          "ttft_p95_ms": 79.10358925,
+          "itl_p95_ms": 13.909462805737704,
+          "aggregate_output_tokens_per_second": 283.24944987170016,
+          "request_throughput_requests_per_second": 4.56853951405968,
+          "slo_goodput_requests_per_second": 4.56853951405968,
+          "slo_qualified_output_tokens_per_second": 283.24944987170016,
+          "gpu_seconds_per_successful_request": 0.218758272,
+          "cost_per_1m_successful_output_tokens_usd": 0.0
+        }
+      ]
+    },
+    {
+      "id": "candidate",
+      "runtime_id": "llama.cpp",
+      "origin": "infercrane_generated",
+      "evidence_level": "screening",
+      "evidence_state": "reproduced",
+      "recipe_digest": "sha256:432272d58db4bfbebff1faed333615cde263635c43cdb4a3d79696922bb67168",
+      "workload_digest": "sha256:41ff21d802257d88ab53bc1bb8ba43ffb03bf35b1f0468fd6555bea9d686ad0b",
+      "quality_passed": true,
+      "quality_gates": [
+        {
+          "name": "api_models",
+          "passed": true
+        },
+        {
+          "name": "runtime_parity",
+          "passed": true
+        }
+      ],
+      "error_rate": 0.0,
+      "prompt_token_mismatch_rate": 0.0,
+      "lanes": [
+        {
+          "concurrency": 1,
+          "requests": 24,
+          "successful_requests": 24,
+          "independent_runs": 1,
+          "measurement_seconds": 21.213097472,
+          "slo_attainment": 1.0,
+          "ttft_p95_ms": 160.658233,
+          "itl_p95_ms": 12.072716515762712,
+          "aggregate_output_tokens_per_second": 69.99546561360806,
+          "request_throughput_requests_per_second": 1.1312398483007364,
+          "slo_goodput_requests_per_second": 1.1312398483007364,
+          "slo_qualified_output_tokens_per_second": 69.99546561360806,
+          "gpu_seconds_per_successful_request": 0.8838790613333334,
+          "cost_per_1m_successful_output_tokens_usd": 0.0
+        },
+        {
+          "concurrency": 4,
+          "requests": 24,
+          "successful_requests": 24,
+          "independent_runs": 1,
+          "measurement_seconds": 6.543131904,
+          "slo_attainment": 1.0,
+          "ttft_p95_ms": 67.67625625,
+          "itl_p95_ms": 18.741326184426228,
+          "aggregate_output_tokens_per_second": 227.3278301054462,
+          "request_throughput_requests_per_second": 3.6665779049265512,
+          "slo_goodput_requests_per_second": 3.6665779049265512,
+          "slo_qualified_output_tokens_per_second": 227.3278301054462,
+          "gpu_seconds_per_successful_request": 0.272630496,
+          "cost_per_1m_successful_output_tokens_usd": 0.0
+        }
+      ]
+    }
+  ]
+}
