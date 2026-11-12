@@ -59,6 +59,12 @@ export interface ObjectList {
   data: Array<Record<string, JsonValue>>;
 }
 
+export interface QualityEvidenceList {
+  data: Array<Record<string, JsonValue>>;
+  verdicts: Record<string, JsonValue>;
+  content_recorded: false;
+}
+
 export interface IntentPlanOption {
   value: string;
   label: string;

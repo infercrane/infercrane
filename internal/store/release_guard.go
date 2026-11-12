@@ -17,7 +17,7 @@ func (s *Store) ReleaseGuardPolicy(ctx context.Context, tenant, deploymentName s
 		tenant = "global"
 	}
 	var policy domain.ReleaseGuardPolicy
-	err := s.QueryRowContext(ctx, `SELECT p.deployment_id,p.enabled,p.minimum_requests,p.max_ttft_regression_percent,p.max_latency_regression_percent,p.max_error_rate_increase,p.max_output_throughput_drop_percent,p.require_compatibility_evidence,p.require_synthetic_evidence,p.max_cost_regression_percent,p.auto_rollback_enabled,p.auto_rollback_window_seconds,p.validation_max_requests,p.validation_max_concurrency,p.require_quality_evidence,p.minimum_quality_score,p.max_quality_regression_percent,p.quality_comparison_mode,p.quality_bootstrap_alpha,p.quality_bootstrap_min_samples,p.quality_bootstrap_seed FROM release_guard_policies p JOIN deployments d ON d.id=p.deployment_id WHERE d.tenant_id=? AND d.name=? AND d.desired_state!='deleted'`, tenant, deploymentName).Scan(&policy.DeploymentID, &policy.Enabled, &policy.MinimumRequests, &policy.MaxTTFTRegressionPercent, &policy.MaxLatencyRegressionPercent, &policy.MaxErrorRateIncrease, &policy.MaxOutputThroughputDropPercent, &policy.RequireCompatibilityEvidence, &policy.RequireSyntheticEvidence, &policy.MaxCostRegressionPercent, &policy.AutoRollbackEnabled, &policy.AutoRollbackWindowSeconds, &policy.ValidationMaxRequests, &policy.ValidationMaxConcurrency, &policy.RequireQualityEvidence, &policy.MinimumQualityScore, &policy.MaxQualityRegressionPercent, &policy.QualityComparisonMode, &policy.QualityBootstrapAlpha, &policy.QualityBootstrapMinSamples, &policy.QualityBootstrapSeed)
+	err := s.QueryRowContext(ctx, `SELECT p.deployment_id,p.enabled,p.minimum_requests,p.max_ttft_regression_percent,p.max_latency_regression_percent,p.max_error_rate_increase,p.max_output_throughput_drop_percent,p.require_compatibility_evidence,p.require_synthetic_evidence,p.max_cost_regression_percent,p.auto_rollback_enabled,p.auto_rollback_window_seconds,p.validation_max_requests,p.validation_max_concurrency,p.require_quality_evidence,p.minimum_quality_score,p.max_quality_regression_percent,p.quality_comparison_mode,p.quality_bootstrap_alpha,p.quality_bootstrap_min_samples,p.quality_bootstrap_seed,p.quality_watch_regression_percent FROM release_guard_policies p JOIN deployments d ON d.id=p.deployment_id WHERE d.tenant_id=? AND d.name=? AND d.desired_state!='deleted'`, tenant, deploymentName).Scan(&policy.DeploymentID, &policy.Enabled, &policy.MinimumRequests, &policy.MaxTTFTRegressionPercent, &policy.MaxLatencyRegressionPercent, &policy.MaxErrorRateIncrease, &policy.MaxOutputThroughputDropPercent, &policy.RequireCompatibilityEvidence, &policy.RequireSyntheticEvidence, &policy.MaxCostRegressionPercent, &policy.AutoRollbackEnabled, &policy.AutoRollbackWindowSeconds, &policy.ValidationMaxRequests, &policy.ValidationMaxConcurrency, &policy.RequireQualityEvidence, &policy.MinimumQualityScore, &policy.MaxQualityRegressionPercent, &policy.QualityComparisonMode, &policy.QualityBootstrapAlpha, &policy.QualityBootstrapMinSamples, &policy.QualityBootstrapSeed, &policy.QualityWatchRegressionPercent)
 	if errors.Is(err, sql.ErrNoRows) {
 		return policy, ErrNotFound
 	}
@@ -47,14 +47,16 @@ func (s *Store) SetReleaseGuardPolicy(ctx context.Context, tenant, deploymentNam
 		policy.QualityBootstrapSeed = 20260827
 	}
 	bootstrapInvalid := policy.QualityComparisonMode == "bootstrap" && (!policy.RequireQualityEvidence || policy.MaxQualityRegressionPercent == nil)
-	if policy.MinimumRequests < 1 || policy.MaxTTFTRegressionPercent < 0 || policy.MaxLatencyRegressionPercent < 0 || policy.MaxErrorRateIncrease < 0 || policy.MaxErrorRateIncrease > 1 || policy.MaxOutputThroughputDropPercent < 0 || policy.AutoRollbackWindowSeconds < 30 || policy.AutoRollbackWindowSeconds > 3600 || policy.ValidationMaxRequests < 1 || policy.ValidationMaxRequests > 10000 || policy.ValidationMaxConcurrency < 1 || policy.ValidationMaxConcurrency > 128 || (policy.MaxCostRegressionPercent != nil && *policy.MaxCostRegressionPercent < 0) || (policy.MinimumQualityScore != nil && (*policy.MinimumQualityScore < 0 || *policy.MinimumQualityScore > 1)) || (policy.MaxQualityRegressionPercent != nil && (*policy.MaxQualityRegressionPercent < 0 || *policy.MaxQualityRegressionPercent > 100)) || (policy.QualityComparisonMode != "threshold" && policy.QualityComparisonMode != "bootstrap") || policy.QualityBootstrapAlpha <= 0 || policy.QualityBootstrapAlpha >= .5 || policy.QualityBootstrapMinSamples < 2 || policy.QualityBootstrapMinSamples > 100000 || bootstrapInvalid {
+	// A watch band only makes sense below a blocking regression limit.
+	watchInvalid := policy.QualityWatchRegressionPercent != nil && (policy.MaxQualityRegressionPercent == nil || *policy.QualityWatchRegressionPercent < 0 || *policy.QualityWatchRegressionPercent > *policy.MaxQualityRegressionPercent)
+	if policy.MinimumRequests < 1 || policy.MaxTTFTRegressionPercent < 0 || policy.MaxLatencyRegressionPercent < 0 || policy.MaxErrorRateIncrease < 0 || policy.MaxErrorRateIncrease > 1 || policy.MaxOutputThroughputDropPercent < 0 || policy.AutoRollbackWindowSeconds < 30 || policy.AutoRollbackWindowSeconds > 3600 || policy.ValidationMaxRequests < 1 || policy.ValidationMaxRequests > 10000 || policy.ValidationMaxConcurrency < 1 || policy.ValidationMaxConcurrency > 128 || (policy.MaxCostRegressionPercent != nil && *policy.MaxCostRegressionPercent < 0) || (policy.MinimumQualityScore != nil && (*policy.MinimumQualityScore < 0 || *policy.MinimumQualityScore > 1)) || (policy.MaxQualityRegressionPercent != nil && (*policy.MaxQualityRegressionPercent < 0 || *policy.MaxQualityRegressionPercent > 100)) || (policy.QualityComparisonMode != "threshold" && policy.QualityComparisonMode != "bootstrap") || policy.QualityBootstrapAlpha <= 0 || policy.QualityBootstrapAlpha >= .5 || policy.QualityBootstrapMinSamples < 2 || policy.QualityBootstrapMinSamples > 100000 || bootstrapInvalid || watchInvalid {
 		return domain.ReleaseGuardPolicy{}, errors.New("invalid Release Guard policy")
 	}
 	current, err := s.ReleaseGuardPolicy(ctx, tenant, deploymentName)
 	if err != nil {
 		return domain.ReleaseGuardPolicy{}, err
 	}
-	_, err = s.ExecContext(ctx, `UPDATE release_guard_policies SET enabled=?,minimum_requests=?,max_ttft_regression_percent=?,max_latency_regression_percent=?,max_error_rate_increase=?,max_output_throughput_drop_percent=?,require_compatibility_evidence=?,require_synthetic_evidence=?,max_cost_regression_percent=?,auto_rollback_enabled=?,auto_rollback_window_seconds=?,validation_max_requests=?,validation_max_concurrency=?,require_quality_evidence=?,minimum_quality_score=?,max_quality_regression_percent=?,quality_comparison_mode=?,quality_bootstrap_alpha=?,quality_bootstrap_min_samples=?,quality_bootstrap_seed=?,updated_at=? WHERE deployment_id=?`, policy.Enabled, policy.MinimumRequests, policy.MaxTTFTRegressionPercent, policy.MaxLatencyRegressionPercent, policy.MaxErrorRateIncrease, policy.MaxOutputThroughputDropPercent, policy.RequireCompatibilityEvidence, policy.RequireSyntheticEvidence, policy.MaxCostRegressionPercent, policy.AutoRollbackEnabled, policy.AutoRollbackWindowSeconds, policy.ValidationMaxRequests, policy.ValidationMaxConcurrency, policy.RequireQualityEvidence, policy.MinimumQualityScore, policy.MaxQualityRegressionPercent, policy.QualityComparisonMode, policy.QualityBootstrapAlpha, policy.QualityBootstrapMinSamples, policy.QualityBootstrapSeed, now(), current.DeploymentID)
+	_, err = s.ExecContext(ctx, `UPDATE release_guard_policies SET enabled=?,minimum_requests=?,max_ttft_regression_percent=?,max_latency_regression_percent=?,max_error_rate_increase=?,max_output_throughput_drop_percent=?,require_compatibility_evidence=?,require_synthetic_evidence=?,max_cost_regression_percent=?,auto_rollback_enabled=?,auto_rollback_window_seconds=?,validation_max_requests=?,validation_max_concurrency=?,require_quality_evidence=?,minimum_quality_score=?,max_quality_regression_percent=?,quality_comparison_mode=?,quality_bootstrap_alpha=?,quality_bootstrap_min_samples=?,quality_bootstrap_seed=?,quality_watch_regression_percent=?,updated_at=? WHERE deployment_id=?`, policy.Enabled, policy.MinimumRequests, policy.MaxTTFTRegressionPercent, policy.MaxLatencyRegressionPercent, policy.MaxErrorRateIncrease, policy.MaxOutputThroughputDropPercent, policy.RequireCompatibilityEvidence, policy.RequireSyntheticEvidence, policy.MaxCostRegressionPercent, policy.AutoRollbackEnabled, policy.AutoRollbackWindowSeconds, policy.ValidationMaxRequests, policy.ValidationMaxConcurrency, policy.RequireQualityEvidence, policy.MinimumQualityScore, policy.MaxQualityRegressionPercent, policy.QualityComparisonMode, policy.QualityBootstrapAlpha, policy.QualityBootstrapMinSamples, policy.QualityBootstrapSeed, policy.QualityWatchRegressionPercent, now(), current.DeploymentID)
 	if err != nil {
 		return domain.ReleaseGuardPolicy{}, err
 	}
@@ -215,18 +217,80 @@ func (s *Store) EvaluateReleaseGuard(ctx context.Context, tenant, deploymentName
 	if qualityErr != nil {
 		return domain.ReleaseGuardEvaluation{}, qualityErr
 	}
-	applyQualityEvidence(&active, &candidate, qualityRows, resolved.Deployment.ActiveRevisionID, resolved.Deployment.CandidateRevisionID)
-	result := releaseguard.Evaluate(releaseguard.Input{Policy: policy, Active: active, Candidate: candidate})
+	evals := qualityEvals(qualityRows, resolved.Deployment.ActiveRevisionID, resolved.Deployment.CandidateRevisionID)
+	applyQualityEvidence(&active, &candidate, evals)
+	result := releaseguard.Evaluate(releaseguard.Input{Policy: policy, Active: active, Candidate: candidate, QualityEvals: evals})
+	if result.Quality != nil {
+		if err = s.describeQualitySubjects(ctx, result.Quality, resolved.Deployment.ActiveRevisionID, resolved.Deployment.CandidateRevisionID); err != nil {
+			return domain.ReleaseGuardEvaluation{}, err
+		}
+	}
 	reasons, _ := json.Marshal(result.Reasons)
-	metrics, _ := json.Marshal(map[string]domain.RevisionMetrics{"active": active, "candidate": candidate})
+	metrics, _ := json.Marshal(guardMetricsRecord{Active: active, Candidate: candidate, Quality: result.Quality})
 	policyJSON, _ := json.Marshal(policy)
 	id, err := newID()
 	if err != nil {
 		return domain.ReleaseGuardEvaluation{}, err
 	}
 	evaluation := domain.ReleaseGuardEvaluation{ID: id, DeploymentID: resolved.Deployment.ID, ActiveRevisionID: resolved.Deployment.ActiveRevisionID, CandidateRevisionID: resolved.Deployment.CandidateRevisionID, Decision: result.Decision, ReasonCodesJSON: string(reasons), MetricsJSON: string(metrics), PolicyJSON: string(policyJSON), CreatedAt: time.Now().UTC()}
-	_, err = s.ExecContext(ctx, `INSERT INTO release_guard_evaluations(id,deployment_id,active_revision_id,candidate_revision_id,decision,reason_codes_json,metrics_json,policy_json,created_at) VALUES(?,?,?,?,?,?::jsonb,?::jsonb,?::jsonb,?)`, evaluation.ID, evaluation.DeploymentID, evaluation.ActiveRevisionID, evaluation.CandidateRevisionID, evaluation.Decision, evaluation.ReasonCodesJSON, evaluation.MetricsJSON, evaluation.PolicyJSON, evaluation.CreatedAt.Format(time.RFC3339Nano))
-	return evaluation, err
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return domain.ReleaseGuardEvaluation{}, err
+	}
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, `INSERT INTO release_guard_evaluations(id,deployment_id,active_revision_id,candidate_revision_id,decision,reason_codes_json,metrics_json,policy_json,created_at) VALUES(?,?,?,?,?,?::jsonb,?::jsonb,?::jsonb,?)`, evaluation.ID, evaluation.DeploymentID, evaluation.ActiveRevisionID, evaluation.CandidateRevisionID, evaluation.Decision, evaluation.ReasonCodesJSON, evaluation.MetricsJSON, evaluation.PolicyJSON, evaluation.CreatedAt.Format(time.RFC3339Nano)); err != nil {
+		return evaluation, err
+	}
+	if followUp, ok := qualityWatchFollowUp(evaluation, result); ok {
+		auditID, idErr := newID()
+		if idErr != nil {
+			return evaluation, idErr
+		}
+		if _, err = tx.ExecContext(ctx, `INSERT INTO audit_events(id,tenant_id,actor,action,resource_type,resource_name,outcome,request_id,payload_json,created_at) VALUES(?,?,?,?,?,?,?,NULL,?::jsonb,?)`, auditID, resolved.Deployment.TenantID, "release-guard", "release_guard.quality_watch", "deployment", deploymentName, "follow_up_required", followUp, evaluation.CreatedAt.Format(time.RFC3339Nano)); err != nil {
+			return evaluation, err
+		}
+	}
+	return evaluation, tx.Commit()
+}
+
+// guardMetricsRecord is the persisted metrics_json shape of a Release Guard
+// evaluation. Quality is present only when policy gates on semantic quality.
+type guardMetricsRecord struct {
+	Active    domain.RevisionMetrics      `json:"active"`
+	Candidate domain.RevisionMetrics      `json:"candidate"`
+	Quality   *releaseguard.QualityReport `json:"quality,omitempty"`
+}
+
+// qualityWatchFollowUp returns the audit payload for an accepted candidate
+// with WATCH evals. The audit event is the durable follow-up an operator can
+// list after the candidate is promoted.
+func qualityWatchFollowUp(evaluation domain.ReleaseGuardEvaluation, result releaseguard.Result) (string, bool) {
+	if evaluation.Decision != "ACCEPT" || result.Quality == nil || result.Quality.Verdict != releaseguard.QualityWatch {
+		return "", false
+	}
+	type watchedEval struct {
+		Eval              string   `json:"eval"`
+		Evaluator         string   `json:"evaluator"`
+		ReferenceScore    *float64 `json:"reference_score,omitempty"`
+		CandidateScore    float64  `json:"candidate_score"`
+		Delta             *float64 `json:"delta,omitempty"`
+		RegressionPercent *float64 `json:"regression_percent,omitempty"`
+		FollowUp          string   `json:"follow_up"`
+	}
+	payload := struct {
+		EvaluationID        string        `json:"evaluation_id"`
+		ReferenceRevisionID string        `json:"reference_revision_id"`
+		CandidateRevisionID string        `json:"candidate_revision_id"`
+		CandidateModel      string        `json:"candidate_model"`
+		Evals               []watchedEval `json:"evals"`
+	}{EvaluationID: evaluation.ID, ReferenceRevisionID: evaluation.ActiveRevisionID, CandidateRevisionID: evaluation.CandidateRevisionID, CandidateModel: result.Quality.Candidate.Model}
+	for _, eval := range result.Quality.Evals {
+		if eval.Verdict == releaseguard.QualityWatch {
+			payload.Evals = append(payload.Evals, watchedEval{Eval: eval.Suite + "@" + eval.SuiteVersion, Evaluator: eval.Evaluator + "@" + eval.EvaluatorVersion, ReferenceScore: eval.ReferenceScore, CandidateScore: eval.CandidateScore, Delta: eval.Delta, RegressionPercent: eval.RegressionPercent, FollowUp: eval.FollowUp})
+		}
+	}
+	encoded, _ := json.Marshal(payload)
+	return string(encoded), true
 }
 
 func (s *Store) ReleaseGuardEvaluations(ctx context.Context, tenant, deploymentName string, limit int) ([]domain.ReleaseGuardEvaluation, error) {
