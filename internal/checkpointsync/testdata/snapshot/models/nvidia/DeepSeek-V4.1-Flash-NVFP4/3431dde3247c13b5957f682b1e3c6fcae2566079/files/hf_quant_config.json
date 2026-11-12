@@ -1,0 +1,10 @@
+{
+ "producer": {
+  "name": "modelopt",
+  "version": "0.47.0rc0"
+ },
+ "quantization": {
+  "quant_algo": "NVFP4",
+  "group_size": 16
+ }
+}

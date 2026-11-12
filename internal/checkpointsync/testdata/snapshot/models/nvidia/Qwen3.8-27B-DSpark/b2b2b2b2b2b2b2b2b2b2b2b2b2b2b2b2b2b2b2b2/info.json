@@ -1,0 +1,41 @@
+{
+ "id": "nvidia/Qwen3.8-27B-DSpark",
+ "sha": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+ "createdAt": "2026-10-20T09:00:00.000Z",
+ "lastModified": "2026-10-21T09:00:00.000Z",
+ "private": false,
+ "disabled": false,
+ "gated": false,
+ "library_name": "Model Optimizer",
+ "pipeline_tag": null,
+ "tags": [],
+ "cardData": {
+  "license": "apache-2.0",
+  "base_model": [
+   "Qwen/Qwen3.8-27B"
+  ]
+ },
+ "config": {
+  "architectures": [
+   "DSparkDraftModel"
+  ],
+  "model_type": "x"
+ },
+ "siblings": [
+  {
+   "rfilename": "README.md",
+   "blobId": "0000000000000000000000000000000000000001",
+   "size": 100
+  },
+  {
+   "rfilename": "config.json",
+   "blobId": "0000000000000000000000000000000000000002",
+   "size": 101
+  },
+  {
+   "rfilename": "model.safetensors",
+   "blobId": "0000000000000000000000000000000000000003",
+   "size": 102
+  }
+ ]
+}

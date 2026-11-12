@@ -1,0 +1,29 @@
+{
+ "quantization_config": {
+  "quant_method": "modelopt",
+  "config_groups": {
+   "group_0": {
+    "weights": {
+     "num_bits": 8,
+     "type": "float"
+    },
+    "input_activations": {
+     "num_bits": 8,
+     "type": "float"
+    }
+   },
+   "group_1": {
+    "weights": {
+     "num_bits": 4,
+     "type": "float",
+     "group_size": 16
+    },
+    "input_activations": {
+     "num_bits": 4,
+     "type": "float",
+     "group_size": 16
+    }
+   }
+  }
+ }
+}
